@@ -10,13 +10,10 @@ limits, alignment and day separation. The objective keeps after-school use and b
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
-from .spec import WEEKDAYS
+from .spec import WEEKDAYS, family as _family
 
 W_PREF, W_SLACK = 60, 40
 
-def _family(s):
-    s = re.sub(r"\s*\(.*?\)", "", str(s)); s = re.sub(r"\b(G[123]|Std|Fdn|Standard|Foundation)\b", "", s).strip()
-    return re.sub(r"^(Higher |Combined |Lower Secondary )", "", s)
 
 class Problem:
     def __init__(self, spec):
@@ -117,7 +114,8 @@ class Problem:
                 prof[c].append(use)
         return prof
 
-def solve(spec, time_limit=300, workers=8, log=print, skip=()):
+def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None):
+    """stop: optional threading.Event; setting it ends the search early and keeps the best timetable so far"""
     P = Problem(spec); NP, ND = P.NP, P.ND
     m = cp_model.CpModel(); rules = spec.get("rules", [])
     notes = list(P.warn)
@@ -349,7 +347,16 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=()):
     class CB(cp_model.CpSolverSolutionCallback):
         def __init__(self): super().__init__()
         def on_solution_callback(self): log(f"  {time.time() - t0:5.0f}s  cost {self.ObjectiveValue():.0f}")
+    watcher = None
+    if stop is not None:
+        import threading
+        done = threading.Event()
+        def watch():
+            while not done.wait(0.5):
+                if stop.is_set(): s.stop_search(); return
+        watcher = threading.Thread(target=watch, daemon=True); watcher.start()
     st = s.Solve(m, CB())
+    if watcher is not None: done.set()
     status = s.StatusName(st)
     log(f"status {status} in {time.time() - t0:.0f}s")
     if st not in (cp_model.OPTIMAL, cp_model.FEASIBLE):

@@ -63,3 +63,10 @@ def lesson_split(periods, length):
     short = (-p) % L
     if short * (L - 1) > p: short = 0
     return (p - short * (L - 1)) // L, short, L
+
+
+def family(s):
+    """subject family without level tags or brackets: 'Higher Chinese G3' -> 'Chinese'"""
+    import re
+    s = re.sub(r"\s*\(.*?\)", "", str(s)); s = re.sub(r"\b(G[123]|Std|Fdn|Standard|Foundation)\b", "", s).strip()
+    return re.sub(r"^(Higher |Combined |Lower Secondary )", "", s)

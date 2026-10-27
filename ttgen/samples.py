@@ -46,6 +46,71 @@ class Staffing:
             out.append(dict(name=x["name"], short=x["short"], dept=x["dept"], allowance=self.allow, provisional="No", can_teach=ct[:8]))
         return out
 
+SFIRST = ["Aiden", "Alicia", "Amirul", "Anya", "Arjun", "Bella", "Brandon", "Caleb", "Chloe", "Daniel", "Dhruv", "Elijah", "Emma", "Ethan", "Faris",
+          "Gabriel", "Hannah", "Haziq", "Isaac", "Isabelle", "Jayden", "Jia Hui", "Jun Jie", "Kai", "Kayla", "Lucas", "Lydia", "Marcus", "Megan",
+          "Natalie", "Nathan", "Nur Aisyah", "Nurul", "Owen", "Rachel", "Rayan", "Rui En", "Ryan", "Sarah", "Sean", "Shermaine", "Siti", "Sophia",
+          "Tanisha", "Timothy", "Valerie", "Vikram", "Wei Jie", "Xin Yi", "Yi Xuan", "Yu Xuan", "Zara", "Zhi Hao", "Zoe", "Adam", "Aaliyah",
+          "Jun Wei", "Kavin", "Li Ting", "Matthew"]
+SLAST = ["Tan", "Lim", "Lee", "Ng", "Ong", "Wong", "Goh", "Chua", "Chan", "Koh", "Teo", "Ang", "Yeo", "Tay", "Ho", "Low", "Toh", "Sim", "Chong",
+         "Chia", "Rahman", "Ismail", "Hassan", "Abdullah", "Kumar", "Nair", "Pillai", "Singh", "Fernandez", "De Souza"]
+
+def _student_names():
+    import random
+    combos = [f"{a} {b}" for a in SFIRST for b in SLAST]; random.Random(2027).shuffle(combos)
+    yield from combos
+
+def _add_students(spec):
+    """fictional students, each placed in one group of every block of their level, matching the group sizes on 6 Lessons:
+    students in a lower level tag (G1, G2, Foundation) take that tag's groups where the block has them"""
+    from .reader import derive
+    from .spec import family as _family
+    derive(spec)
+    sc = spec["school"]; order = [t for t, _ in sc["tags"]]; names = _student_names(); out = []
+    for lv in sc["levels"]:
+        cls = [c for c in spec["classes"] if c["level"] == lv]
+        if not cls: continue
+        roster = {c["class"]: [dict(id=f"{c['class']}-{i:02d}", name=next(names), level=lv, groups=[], **{"class": c["class"]}) for i in range(1, int(c["size"]) + 1)] for c in cls}
+        by_class = [s for c in cls for s in roster[c["class"]]]
+        spread = [s for k in range(max(len(v) for v in roster.values())) for c in cls for s in roster[c["class"]][k:k + 1]]
+        blocks = collections.OrderedDict()
+        for x in spec["lessons"]:
+            if x.get("block") and x["level"] == lv and x.get("code"): blocks.setdefault(x["block"], []).append(x)
+        track, top, lower = {}, None, []
+        tagged = [rs for rs in blocks.values() if len({r["tag"] for r in rs} - {"-"}) >= 2]
+        if tagged:
+            rs = max(tagged, key=lambda rs: (len({r["tag"] for r in rs}), -len({_family(r["subject"]) for r in rs})))
+            cnt = collections.Counter()
+            for r in rs: cnt[r["tag"]] += int(r.get("students") or 0)
+            top = min(cnt, key=lambda t: order.index(t) if t in order else 99)
+            lower = sorted((t for t in cnt if t != top), key=cnt.get)
+            it = iter(spread)
+            for t in lower:
+                for _ in range(cnt[t]):
+                    s = next(it, None)
+                    if s: track[id(s)] = t
+            for s in spread: track.setdefault(id(s), top)
+        for name, rs in blocks.items():
+            rem = {id(r): int(r.get("students") or 0) for r in rs}; done = set()
+            def fill(r, pool):
+                for s in pool:
+                    if rem[id(r)] <= 0: break
+                    if id(s) in done: continue
+                    s["groups"].append(r["code"]); done.add(id(s)); rem[id(r)] -= 1
+            low_rows = [r for r in rs if r["tag"] in lower]
+            for r in low_rows: fill(r, [s for s in by_class if track.get(id(s)) == r["tag"]])
+            low_fam = {_family(r["subject"]) for r in low_rows}; low_ids = {id(r) for r in low_rows}
+            rest = sorted((r for r in rs if id(r) not in low_ids), key=lambda r: _family(r["subject"]) in low_fam)
+            for r in rest:
+                pool = [s for s in by_class if id(s) not in done]
+                if low_rows: pool.sort(key=lambda s: track.get(id(s)) == top)
+                fill(r, pool)
+            for s in by_class:
+                if id(s) not in done:
+                    r = next((r for r in rs if r["tag"] == track.get(id(s))), rs[-1]); s["groups"].append(r["code"]); done.add(id(s))
+        out += by_class
+    spec["students"] = out
+    return spec
+
 def _split(n, k):
     return [n // k + (1 if i < n % k else 0) for i in range(k)]
 
@@ -177,7 +242,7 @@ def secondary():
     combos = [dict(level="Sec 3", code="S1", subjects=["Combined Science (Phy/Chem) G3", "Additional Mathematics G3", "Computing G3"], places=30),
               dict(level="Sec 3", code="S2", subjects=["Combined Science (Chem/Bio) G3", "Principles of Accounts G3", "Food and Nutrition G3"], places=30),
               dict(level="Sec 3", code="S3", subjects=["Combined Science (Phy/Chem) G2", "Literature in English G3", "Design & Technology G3"], places=30)]
-    return _build(sc, ds, venues, classes, S, plan, rules, allowance=64, combinations=combos)
+    return _add_students(_build(sc, ds, venues, classes, S, plan, rules, allowance=64, combinations=combos))
 
 # ----------------------------------------------------------------- primary
 def primary():
@@ -234,4 +299,4 @@ def primary():
                 dict(scope="Teacher", target=part, rule="Not available", week="Both", day="Wed", **{"from": 0, "to": 13}, strength="Must", note="part-time: not in on Wednesdays"),
                 dict(scope="Department", target="MT", rule="Keep free together", week="Both", day="Thu", **{"from": 11, "to": 12}, strength="Prefer", note="MT department meeting"),
                 dict(scope="Level", target="P1", subject="Physical Education", rule="Not in periods", week="Both", day="All", **{"from": 9, "to": 10}, strength="Prefer", note="no PE in the last hour for P1")]
-    return _build(sc, ds, venues, classes, S, plan, rules, allowance=36)
+    return _add_students(_build(sc, ds, venues, classes, S, plan, rules, allowance=36))
