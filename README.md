@@ -65,5 +65,9 @@ No database or environment variables are needed. Each person's progress is kept 
 cd skill/school-timetable-generator/scripts
 pip install -r requirements.txt
 python -m ttgen check  My_School_Timetable_Setup.xlsx
-python -m ttgen solve  My_School_Timetable_Setup.xlsx --out My_School_Timetable.xlsx --time 300
+python -m ttgen solve  My_School_Timetable_Setup.xlsx --out My_School_Timetable.xlsx --time 300 --export Output
 ```
+
+`--export Output` also writes one Excel workbook with every class, teacher, room and student timetable, a searchable
+offline HTML timetable finder, and PDFs (printable books plus a zip of single pages). To export a timetable you
+already have: `python -m ttgen export My_School_Timetable_Setup.xlsx My_School_Timetable.xlsx --out Output`.

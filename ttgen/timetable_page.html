@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root{--bg:#F4F6F8;--panel:#FFFFFF;--ink:#1B2330;--sub:#4A5566;--muted:#7A8494;--line:#E1E5EA;--soft:#EEF1F4;--accent:#26364A;--link:#1F63B0;
+  --brk:#ECEFF3;--none:#F7F8FA;--slot:#FFF9EA;--ok:#2E7D32;--bad:#B3261E;--shadow:0 1px 2px rgba(20,30,45,.06),0 4px 14px rgba(20,30,45,.05);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1318;--panel:#171C23;--ink:#E7EBF0;--sub:#B4BDC9;--muted:#8792A2;--line:#2A313B;--soft:#1F252D;
+  --accent:#D3DEEC;--link:#86B6F2;--brk:#20262E;--none:#1A1F26;--slot:#272214;--ok:#7BC47F;--bad:#F2918A;--shadow:none;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0F1318;--panel:#171C23;--ink:#E7EBF0;--sub:#B4BDC9;--muted:#8792A2;--line:#2A313B;--soft:#1F252D;
+  --accent:#D3DEEC;--link:#86B6F2;--brk:#20262E;--none:#1A1F26;--slot:#272214;--ok:#7BC47F;--bad:#F2918A;--shadow:none;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+a{color:var(--link);text-decoration:none;cursor:pointer}a:hover{text-decoration:underline}
+button,select,input{font:inherit;color:inherit}
+header.top{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.brand{min-width:0}.brand .school{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.brand .ttlabel{color:var(--muted);font-size:12px}
+.search{position:relative;flex:1;max-width:620px;margin-left:auto}
+.search input{width:100%;padding:9px 40px 9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--bg)}
+.search input:focus{outline:2px solid color-mix(in srgb,var(--link) 45%,transparent);border-color:transparent;background:var(--panel)}
+.search kbd{position:absolute;right:10px;top:8px;font:11px ui-monospace,monospace;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+.results{position:absolute;left:0;right:0;top:calc(100% + 6px);background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);max-height:60vh;overflow:auto;display:none}
+.results.on{display:block}.results .r{display:flex;gap:10px;align-items:baseline;padding:7px 12px;cursor:pointer}.results .r.sel,.results .r:hover{background:var(--soft)}
+.results .r small{color:var(--muted);margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.status{font-size:12px;padding:5px 10px;border-radius:99px;white-space:nowrap}.status.ok{background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}
+.status.bad{background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
+.iconbtn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 8px;cursor:pointer;line-height:0;color:var(--sub)}
+nav.tabs{display:flex;gap:4px;padding:8px 20px 0;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
+nav.tabs button{border:0;background:none;padding:9px 12px 10px;border-bottom:2px solid transparent;color:var(--sub);cursor:pointer;white-space:nowrap;font-weight:500}
+nav.tabs button.on{color:var(--ink);border-bottom-color:var(--accent)}nav.tabs button .n{color:var(--muted);font-size:12px;margin-left:4px}
+main{display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px;padding:16px 20px 40px}main.wide{grid-template-columns:minmax(0,1fr)}main.wide .browse{display:none}
+.browse{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;align-self:start;position:sticky;top:122px;max-height:calc(100vh - 140px);display:flex;flex-direction:column}
+.browse input{width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);margin-bottom:8px}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}.chip{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 9px;font-size:12px;cursor:pointer;color:var(--sub)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+.list{overflow:auto;flex:1;margin:0 -4px}.list .grp{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:8px 8px 3px}
+.list a{display:flex;justify-content:space-between;gap:8px;padding:5px 8px;border-radius:7px;color:var(--ink)}.list a:hover{background:var(--soft);text-decoration:none}
+.list a.on{background:color-mix(in srgb,var(--link) 14%,transparent);font-weight:600}.list a small{color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;box-shadow:var(--shadow)}
+.vhead{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;margin-bottom:14px}
+.kicker{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--accent);color:var(--panel);padding:2px 7px;border-radius:4px;margin-right:8px;vertical-align:4px}
+.vhead h1{font-size:24px;margin:0;line-height:1.2}.vhead .sub{color:var(--sub);font-size:13px;margin-top:3px}
+.stats{display:flex;gap:22px;margin-left:auto}.stats div{text-align:right}.stats b{display:block;font-size:18px;line-height:1.1}.stats span{font-size:11px;color:var(--muted)}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}.tools button,.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 11px;cursor:pointer;font-size:13px}
+.tools button:hover,.btn:hover{background:var(--soft)}
+a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:none}a.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+.applinks{display:flex;gap:6px;flex-wrap:wrap}.applinks .btn{font-size:12.5px;padding:5px 9px}
+.gridwrap{overflow-x:auto;padding-bottom:4px}
+.tt{min-width:calc(var(--np)*var(--cw) + 64px)}
+.tt .head{display:grid;grid-template-columns:64px 1fr}.tt .ph{display:grid;grid-template-columns:repeat(var(--np),1fr)}
+.tt .ph div{text-align:center;font-size:10px;color:var(--muted);line-height:1.2;padding-bottom:5px}.tt .ph b{display:block;color:var(--ink);font-size:11.5px}
+.tt .row{display:grid;grid-template-columns:64px 1fr;border-top:1px solid var(--line)}.tt .row.wk{border-top:2px solid color-mix(in srgb,var(--muted) 60%,transparent)}
+.tt .row:last-child{border-bottom:1px solid var(--line)}
+.tt .dl{display:flex;flex-direction:column;justify-content:center;padding-left:4px;font-weight:700;font-size:13px}.tt .dl small{font-weight:600;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.tt .track{position:relative;height:var(--rh);background-image:linear-gradient(to right,var(--line) 1px,transparent 1px);background-size:calc(100% / var(--np)) 100%}
+.tt .bk{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--muted);background:var(--brk)}
+.tt .bk.none{background:var(--none)}.tt .bk.slot{background:var(--slot)}.tt .bk span{overflow:hidden;white-space:nowrap;text-overflow:clip;max-width:100%}.tt .bk.v span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:9.5px}
+.cell{position:absolute;padding:3px 5px 3px 7px;border-radius:5px;overflow:hidden;cursor:pointer;background:var(--t);border:1px solid color-mix(in srgb,var(--a) 70%,transparent);
+  box-shadow:inset 3px 0 0 var(--a);font-size:11px;line-height:1.25;color:var(--sub);display:flex;flex-direction:column;justify-content:center;margin:1px}
+.cell b{color:var(--ink);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span.m{color:var(--muted)}
+.cell.ext{border-style:dashed}.cell.ext:after{content:"after school";font-size:9.5px;font-weight:700;color:#8A5300}
+.cell:hover{filter:brightness(.97);z-index:2;outline:2px solid color-mix(in srgb,var(--a) 50%,transparent)}
+.cell.dim{opacity:.22}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .cell{background:color-mix(in srgb,var(--a) 26%,var(--panel))}}
+:root[data-theme="dark"] .cell{background:color-mix(in srgb,var(--a) 26%,var(--panel))}
+.legend{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:6px 22px;font-size:12.5px;color:var(--sub)}
+.legend h3{grid-column:1/-1;font-size:13px;margin:0 0 2px;color:var(--ink)}.legend div{display:flex;gap:8px;align-items:baseline}
+.sw{flex:none;width:10px;height:10px;border-radius:3px;background:var(--t);border:1px solid var(--a);transform:translateY(1px)}
+.legend b{color:var(--ink);white-space:nowrap}
+.note{color:var(--muted);font-size:12px;margin-top:12px}
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:12px}.filters label{display:flex;flex-direction:column;font-size:11px;color:var(--muted);gap:3px}
+.filters select,.filters input[type=search],.filters input[type=text]{padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--panel);min-width:110px;max-width:220px}
+.filters .chk{flex-direction:row;align-items:center;gap:6px;font-size:13px;color:var(--sub);padding-bottom:6px}
+table.lt{width:100%;border-collapse:collapse;font-size:12.5px}table.lt th{position:sticky;top:0;background:var(--panel);text-align:left;font-weight:600;color:var(--sub);border-bottom:1px solid var(--line);padding:7px 8px;cursor:pointer;white-space:nowrap;user-select:none}
+table.lt td{border-bottom:1px solid var(--line);padding:6px 8px;vertical-align:top}table.lt tr:hover td{background:var(--soft)}
+table.lt .sw{display:inline-block;margin-right:6px}.count{color:var(--muted);font-size:13px;margin:0 0 8px}
+.tablebox{max-height:70vh;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}.cols h4{margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.pill{display:inline-block;padding:3px 8px;margin:0 5px 5px 0;border-radius:99px;background:var(--soft);font-size:12.5px}
+.pill small{color:var(--muted)}
+.builder{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px 16px;margin:10px 0 16px}.builder label{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:4px}
+.builder select{padding:7px 8px;border:1px solid var(--line);border-radius:7px;background:var(--panel)}
+dialog{border:1px solid var(--line);border-radius:12px;padding:0;max-width:640px;width:calc(100% - 32px);background:var(--panel);color:var(--ink);box-shadow:0 10px 40px rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(15,20,30,.35)}dialog .dh{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:start}
+dialog .db{padding:10px 18px 16px;max-height:60vh;overflow:auto}dialog .db table{width:100%;border-collapse:collapse;font-size:13px}dialog .db td{padding:6px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.empty{color:var(--muted);padding:30px 0;text-align:center}
+.checks li{margin:4px 0}.okline{color:var(--ok);font-weight:600}.badline{color:var(--bad)}
+@media (max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:12px 16px 30px}header.top{gap:10px}.brand{flex:1 1 0}.status{font-size:11px;padding:4px 8px}.browse{position:static;max-height:300px}header.top{flex-wrap:wrap;padding:10px 16px}.search{order:3;max-width:none;flex-basis:100%}
+  nav.tabs{padding:4px 16px 0}.stats{margin-left:0}.card{padding:14px}}
+@media print{@page{size:A4 landscape;margin:9mm}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
+  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.sw,.kicker{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .legend{grid-template-columns:repeat(3,1fr);font-size:10px}.vhead h1{font-size:20px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><div class="school" id="school"></div><div class="ttlabel" id="ttl"></div></div>
+  <div class="search"><input id="q" type="search" placeholder="Search a class, teacher, room, student, subject or group" autocomplete="off" aria-label="Search"><kbd>/</kbd><div id="results" class="results" role="listbox"></div></div>
+  <span id="status" class="status"></span>
+  <button class="iconbtn" id="theme" title="Switch light or dark" aria-label="Switch light or dark"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></svg></button>
+</header>
+<nav class="tabs" id="tabs"></nav>
+<main id="main">
+  <section class="browse" id="browse"><input id="fq" type="search" placeholder="Filter this list" aria-label="Filter list"><div class="chips" id="chips"></div><div class="list" id="list"></div></section>
+  <section id="view"></section>
+</main>
+<dialog id="dlg"><div class="dh"><div id="dlgT"></div><button class="btn" onclick="dlg.close()">Close</button></div><div class="db" id="dlgB"></div></dialog>
+<script>const DATA = /*__DATA__*/null;</script>
+<script>
+"use strict";
+const D = DATA, $ = (s, el = document) => el.querySelector(s);
+const APP = D.app || null, MODE = APP ? APP.mode : "full";
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const NP = D.NP, DAYS = D.days, ND = DAYS.length, WEEKS = D.school.weeks || 1, PER_WEEK = Math.max(1, Math.floor(ND / WEEKS));
+const ENTIRE = "Entire Class", BREAK = { F: "Assembly", R: "Recess", U: "Lunch" };
+const L = D.lessons.map(r => ({ id: r[0], d: r[1], p: r[2], n: r[3], level: r[4], block: r[5], classes: r[6], subject: r[7], group: r[8], teachers: r[9], room: r[10], ext: !!r[11] }));
+const CLS = D.classes.map(r => ({ name: r[0], level: r[1], size: r[2], home: r[3] }));
+const TCH = D.teachers.map(r => ({ name: r[0], short: r[1], dept: r[2], allowance: r[3] }));
+const ROOMS = D.rooms.map(r => ({ name: r[0], kind: r[1], cap: r[2] }));
+const STU = D.students.map(r => ({ id: String(r[0]), name: r[1], cls: r[2], groups: r[3] }));
+const cIx = new Map(CLS.map(c => [c.name, c])), tIx = new Map(TCH.map(t => [t.name, t])), rIx = new Map(ROOMS.map(r => [r.name, r])), sIx = new Map(STU.map(s => [s.id, s]));
+const uniq = a => [...new Set(a)];
+const short = s => (D.subjects[s] || [s])[0];
+const colorOf = s => (D.subjects[s] || [s, 0])[1];
+const pal = i => D.palette[i % D.palette.length];
+const untag = s => short(s).replace(/\s+(G[123]|Std|Fdn)$/, "");
+const tshort = ts => ts.map(t => (tIx.get(t) || {}).short || t).join(", ");
+const busyTeachers = new Set(L.flatMap(x => x.teachers)), busyRooms = new Set(L.map(x => x.room).filter(Boolean)), busyClasses = new Set(L.flatMap(x => x.classes));
+const time = p => D.times[Math.max(0, Math.min(NP - 1, p))];
+const when = x => `${DAYS[x.d]} ${time(x.p)[0]}–${time(x.p + x.n - 1)[1]}`;
+function weekDay(n) { const p = String(n).split(" "); return p.length > 1 ? [p[0], p[p.length - 1]] : ["", p[0]]; }
+function compact(cs) {
+  cs = [...cs].sort((a, b) => a.length - b.length || a.localeCompare(b));
+  if (cs.length <= 2) return cs.join(", ");
+  const m = cs.map(c => c.match(/^(.*?)([A-Z])$/));
+  if (m.every(Boolean) && uniq(m.map(x => x[1])).length === 1) { const o = m.map(x => x[2].charCodeAt(0)); if (o.every((v, i) => v === o[0] + i)) return `${cs[0]}–${cs[cs.length - 1]}`; }
+  return cs.join(", ");
+}
+function blockLabel(b, lv) { b = String(b || ""); return lv && b.toLowerCase().startsWith(String(lv).toLowerCase() + " ") ? b.slice(String(lv).length + 1) : b; }
+function common(v) { const c = new Map(); v.filter(Boolean).forEach(x => c.set(x, (c.get(x) || 0) + 1)); return [...c].sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]).join(", "); }
+function byId(rows) { const m = new Map(); rows.forEach(x => { if (!m.has(x.id)) m.set(x.id, []); m.get(x.id).push(x); }); return m; }
+const lessonRows = new Map(); L.forEach(x => { if (!lessonRows.has(x.id)) lessonRows.set(x.id, []); lessonRows.get(x.id).push(x); });
+function codesFor(levels) {
+  levels = uniq(levels).filter(lv => D.grid[lv]); if (!levels.length) return null;
+  const out = [];
+  for (let d = 0; d < ND; d++) { let row = ""; for (let p = 0; p < NP; p++) { const cs = uniq(levels.map(lv => D.grid[lv][d][p])); row += cs.length === 1 ? cs[0] : (cs.some(c => "LA".includes(c)) ? "L" : (cs.includes("R") ? "R" : cs.sort()[0])); } out.push(row); }
+  return out;
+}
+
+// ------------------------------------------------------------------ views
+function cellOf(xs, title, lines) { const x0 = xs[0]; return { d: x0.d, p: x0.p, n: x0.n, title, lines: lines.filter(Boolean), color: colorOf(x0.subject), ext: xs.some(x => x.ext), id: x0.id }; }
+function classView(c) {
+  const info = cIx.get(c), rows = L.filter(x => x.classes.includes(c)), bg = {};
+  rows.forEach(x => { if (x.block) (bg[x.block] = bg[x.block] || new Set()).add(x.group); });
+  const cells = [], used = new Set(), ent = new Map();
+  for (const [, xs] of byId(rows)) {
+    const x0 = xs[0]; for (let q = x0.p; q < x0.p + x0.n; q++) used.add(x0.d * NP + q);
+    if (xs.length === 1 && x0.group === ENTIRE) cells.push(cellOf(xs, short(x0.subject), [tshort(x0.teachers), x0.room]));
+    else if (x0.block) {
+      const gs = new Set(xs.map(x => x.group));
+      if (gs.size < bg[x0.block].size) { const subs = uniq(xs.map(x => short(x.subject))); cells.push(cellOf(xs, subs.length <= 2 ? subs.join(" · ") + " only" : `${blockLabel(x0.block, info.level)}: ${gs.size} of ${bg[x0.block].size} groups`, [[...gs].sort().join(", ")])); }
+      else { const subs = uniq(xs.map(x => untag(x.subject))); const sum = subs.length > 1 ? subs.join(" · ") : uniq(xs.map(x => short(x.subject).replace(subs[0], "").trim() || subs[0])).join(" · ");
+        cells.push(cellOf(xs, blockLabel(x0.block, info.level) || sum, [sum, xs.length + " groups"])); }
+    } else cells.push(cellOf(xs, short(x0.subject), [x0.group, tshort(x0.teachers), x0.room]));
+    for (const x of xs) { const k = x.group === ENTIRE ? "|" + x.subject : x.block + "|" + x.group; let e = ent.get(k); if (!e) ent.set(k, e = { x, periods: 0, rooms: [] }); e.periods += x.n; e.rooms.push(x.room); }
+  }
+  const legend = [], blocks = new Map();
+  for (const [k, e] of ent) { if (k.startsWith("|")) legend.push({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"} · ${e.periods} periods` });
+    else { const b = e.x.block || e.x.group; if (!blocks.has(b)) blocks.set(b, []); blocks.get(b).push(e); } }
+  for (const [b, es] of blocks) legend.push({ color: colorOf(es[0].x.subject), label: blockLabel(b, info.level), text: `${Math.max(...es.map(e => e.periods))} periods · ` + es.map(e => `${short(e.x.subject)} ${e.x.group} (${tshort(e.x.teachers)}, ${common(e.rooms) || "-"})`).join("; ") });
+  return { kind: "class", key: c, kicker: "Class", title: `Class ${c}`, sub: `${info.level} · ${info.size || "-"} students · home room ${info.home || "-"}`,
+    stats: [[info.level, "level"], [info.size || "-", "students"], [info.home || "-", "home room"], [used.size, "periods a cycle"]], codes: codesFor([info.level]), cells, legend, lt: "Subjects, teachers and rooms", rows };
+}
+function teacherView(t) {
+  const info = tIx.get(t) || { name: t, short: t, dept: "" }, rows = L.filter(x => x.teachers.includes(t)), cells = [], per = {}, ent = new Map(); let total = 0;
+  for (const [, xs] of byId(rows)) {
+    const x0 = xs[0], who = uniq(xs.map(x => x.group !== ENTIRE ? x.group : x.classes.join(", "))).join(", "), cls = uniq(xs.flatMap(x => x.classes));
+    cells.push(cellOf(xs, uniq(xs.map(x => short(x.subject))).join(" + "), [x0.group === ENTIRE ? who : `${who} (${compact(cls)})`, uniq(xs.map(x => x.room).filter(Boolean)).join(", ")]));
+    total += x0.n; per[x0.d] = (per[x0.d] || 0) + x0.n;
+    for (const x of xs) { const k = x.subject + "|" + (x.group !== ENTIRE ? x.group : x.classes.join(", ")); let e = ent.get(k); if (!e) ent.set(k, e = { x, periods: 0, rooms: [] }); e.periods += x.n; e.rooms.push(x.room); }
+  }
+  const legend = [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? `${e.x.group} (${compact(e.x.classes)})` : e.x.classes.join(", ")} · ${e.periods} periods · ${common(e.rooms) || "-"}` }));
+  const days = Object.values(per);
+  return { kind: "teacher", key: t, kicker: "Teacher", title: t, sub: [info.dept && `Department ${info.dept}`, info.short && info.short !== t && `short name ${info.short}`].filter(Boolean).join(" · "),
+    stats: [[total, "periods a cycle"], [info.allowance || "-", "allowance"], [days.length ? Math.max(...days) : 0, "most in a day"], [days.length, "days teaching"]], codes: codesFor(rows.map(x => x.level)), cells, legend, lt: "Teaching", rows };
+}
+function roomView(r) {
+  const info = rIx.get(r) || { name: r, kind: "", cap: 1 }, rows = L.filter(x => x.room === r), cells = [], used = new Set(), ent = new Map();
+  for (const [, xs] of byId(rows)) {
+    const x0 = xs[0]; for (let q = x0.p; q < x0.p + x0.n; q++) used.add(x0.d * NP + q);
+    cells.push(cellOf(xs, uniq(xs.map(x => short(x.subject))).join(" + "), [uniq(xs.map(x => x.group !== ENTIRE ? x.group : x.classes.join(", "))).join(", "), tshort(uniq(xs.flatMap(x => x.teachers)))]));
+    for (const x of xs) { const k = x.subject + "|" + (x.group !== ENTIRE ? x.group : x.classes.join(", ")); let e = ent.get(k); if (!e) ent.set(k, e = { x, periods: 0 }); e.periods += x.n; }
+  }
+  const codes = codesFor(rows.map(x => x.level)), open = codes ? codes.join("").split("").filter(c => c === "L").length : ND * NP;
+  return { kind: "room", key: r, kicker: "Room", title: r, sub: `${info.kind || ""}${info.cap > 1 ? ` · ${info.cap} groups at once` : ""}`,
+    stats: [[info.kind || "-", "kind"], [used.size, "periods used"], [Math.round(100 * used.size / Math.max(1, open)) + "%", "of lesson time"]], codes, cells,
+    legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? e.x.group : e.x.classes.join(", ")} · ${tshort(e.x.teachers)} · ${e.periods} periods` })), lt: "Used by", rows };
+}
+function personalView(cls, groups, head) {
+  const gs = new Set(groups), rows = L.filter(x => (x.group === ENTIRE && x.classes.includes(cls)) || (x.group !== ENTIRE && gs.has(x.group))), cells = [], used = new Set(), ent = new Map();
+  for (const [, xs] of byId(rows)) {
+    const x0 = xs[0]; for (let q = x0.p; q < x0.p + x0.n; q++) used.add(x0.d * NP + q);
+    cells.push(cellOf(xs, uniq(xs.map(x => short(x.subject))).join(" + "), [tshort(x0.teachers), x0.room]));
+    for (const x of xs) { let e = ent.get(x.subject); if (!e) ent.set(x.subject, e = { x, periods: 0, rooms: [] }); e.periods += x.n; e.rooms.push(x.room); }
+  }
+  const lv = (cIx.get(cls) || {}).level;
+  return Object.assign({ kind: "student", codes: codesFor([lv]), cells, lt: "Subjects, teachers and rooms", rows,
+    stats: [[cls, "class"], [lv || "-", "level"], [groups.length, "groups"], [used.size, "periods a cycle"]],
+    legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.group !== ENTIRE ? e.x.group : "with the class"} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"} · ${e.periods} periods` })) }, head);
+}
+const studentView = id => { const s = sIx.get(id); return personalView(s.cls, s.groups, { key: id, kicker: "Student", title: s.name, sub: `${s.id} · Class ${s.cls} · ${(cIx.get(s.cls) || {}).level || ""}` }); };
+
+// ------------------------------------------------------------------ grid
+function lanes(cells) {
+  const out = new Map();
+  for (let d = 0; d < ND; d++) {
+    const cs = cells.filter(c => c.d === d).sort((a, b) => a.p - b.p || b.n - a.n); let cl = [], end = -1;
+    const flush = () => { const ln = []; cl.forEach(c => { let i = ln.findIndex(e => e <= c.p); if (i < 0) { ln.push(0); i = ln.length - 1; } ln[i] = c.p + c.n; out.set(c, [i, 0]); }); cl.forEach(c => out.get(c)[1] = ln.length); };
+    for (const c of cs) { if (cl.length && c.p >= end) { flush(); cl = []; end = -1; } cl.push(c); end = Math.max(end, c.p + c.n); }
+    if (cl.length) flush();
+  }
+  return out;
+}
+function gridHTML(v) {
+  const ln = lanes(v.cells), cw = NP > 18 ? 34 : 58, rh = NP > 18 ? 58 : 66;
+  const most = Array(ND).fill(1); for (const [c, [, n]] of ln) most[c.d] = Math.max(most[c.d], n);
+  let h = `<div class="gridwrap"><div class="tt" style="--np:${NP};--cw:${cw}px;--rh:${rh}px"><div class="head"><div></div><div class="ph">${D.times.map((t, p) => `<div>${p}<b>${esc(t[0])}</b></div>`).join("")}</div></div>`;
+  for (let d = 0; d < ND; d++) {
+    const [wk, dn] = weekDay(DAYS[d]); let inner = "";
+    const codes = v.codes ? v.codes[d] : null;
+    if (codes) for (let p = 0; p < NP;) { const ch = codes[p]; let q = p; while (q + 1 < NP && codes[q + 1] === ch) q++;
+      if (BREAK[ch] || ch === "." || ch === "A") inner += `<div class="bk ${ch === "." ? "none" : ch === "A" ? "slot" : ""}${q === p && NP > 18 ? " v" : ""}" style="left:${p / NP * 100}%;width:${(q - p + 1) / NP * 100}%"><span>${esc(BREAK[ch] || "")}</span></div>`; p = q + 1; }
+    for (const c of v.cells.filter(c => c.d === d)) {
+      const [i, n] = ln.get(c) || [0, 1], [t, a] = c.ext ? D.ext : pal(c.color);
+      inner += `<div class="cell${c.ext ? " ext" : ""}" data-id="${c.id}" tabindex="0" style="left:calc(${c.p / NP * 100}% + 0px);width:calc(${c.n / NP * 100}% - 2px);top:${i / n * 100}%;height:calc(${100 / n}% - 2px);--t:#${t};--a:#${a}" title="${esc([c.title, ...c.lines, when(c)].join("\n"))}"><b>${esc(c.title)}</b>${c.lines.map((l, j) => `<span class="${j ? "m" : ""}">${esc(l)}</span>`).join("")}</div>`;
+    }
+    h += `<div class="row${WEEKS > 1 && d % PER_WEEK === 0 && d ? " wk" : ""}"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track"${most[d] > 1 ? ` style="height:calc(var(--rh) * 1.7)"` : ""}>${inner}</div></div>`;
+  }
+  return h + "</div></div>";
+}
+function viewHTML(v, extra = "") {
+  const stats = v.stats.map(([a, b]) => `<div><b>${esc(a)}</b><span>${esc(b)}</span></div>`).join("");
+  const leg = v.legend.map(e => { const [t, a] = pal(e.color); return `<div><i class="sw" style="--t:#${t};--a:#${a}"></i><span><b>${esc(e.label)}</b> ${esc(e.text)}</span></div>`; }).join("");
+  return `<div class="card"><div class="vhead"><div><h1><span class="kicker">${esc(v.kicker)}</span>${esc(v.title)}</h1><div class="sub">${esc(v.sub || "")}</div></div><div class="stats">${stats}</div></div>
+    <div class="tools">${pdfLink(v)}<button data-act="print">Print</button><button data-act="csv">Download CSV</button>${MODE === "personal" ? "" : `<button data-act="link">Copy link</button>`}${extra}</div>
+    ${v.cells.length ? gridHTML(v) : `<div class="empty">No lessons.</div>`}
+    <div class="legend"><h3>${esc(v.lt)}</h3>${leg}</div>
+    <div class="note">Times are period start times. Grey columns are breaks; pale yellow is an after-school slot, used only when needed. Click a lesson for every group, teacher and room in it.</div></div>`;
+}
+
+function pdfLink(v) {
+  if (!APP || !APP.pdf) return "";
+  const enc = encodeURIComponent; let href;
+  if (MODE === "personal") href = "/pdf/me";
+  else if (v.key === "custom") href = `/pdf/custom?cls=${enc(v.cls)}&groups=${(v.groups || []).map(enc).join(",")}`;
+  else href = `/pdf/${{ class: "classes", teacher: "teachers", room: "rooms", student: "students" }[v.kind]}/${enc(v.key)}`;
+  return `<a class="btn primary" href="${href}" download>Download PDF</a>`;
+}
+
+// ------------------------------------------------------------------ state, tabs, lists
+const APP_TABS = APP && APP.tabs ? APP.tabs : null;
+const TABS_ALL = [["classes", "Classes", CLS.filter(c => busyClasses.has(c.name)).length], ["teachers", "Teachers", busyTeachers.size], ["rooms", "Rooms", busyRooms.size],
+  ["students", MODE === "student" ? "Build my timetable" : "Students", MODE === "student" ? "" : STU.length], ["lessons", "Lessons", lessonRows.size], ["free", "Who's free", ""], ["checks", "Checks", ""]];
+const TABS = TABS_ALL.filter(t => !APP_TABS || APP_TABS.includes(t[0]));
+const S = { tab: "classes", key: null, chip: {}, fq: "", current: null, lf: {}, sort: ["day", 1], showAll: false };
+function listItems(tab) {
+  if (tab === "classes") return CLS.filter(c => busyClasses.has(c.name)).map(c => ({ key: c.name, label: c.name, small: c.home, group: c.level }));
+  if (tab === "teachers") return TCH.filter(t => busyTeachers.has(t.name)).sort((a, b) => String(a.dept || "~").localeCompare(String(b.dept || "~")) || a.name.localeCompare(b.name)).map(t => ({ key: t.name, label: t.name, small: t.short !== t.name ? t.short : "", group: t.dept || "Other" }));
+  if (tab === "rooms") return ROOMS.filter(r => busyRooms.has(r.name)).map((r, i) => [r, i]).sort((a, b) => String(a[0].kind).localeCompare(String(b[0].kind)) || a[1] - b[1]).map(([r]) => r).map(r => ({ key: r.name, label: r.name, small: "", group: r.kind || "Other" }));
+  if (tab === "students") return STU.map(s => ({ key: s.id, label: s.name, small: s.id, group: s.cls }));
+  return [];
+}
+function renderTabs() { $("#tabs").innerHTML = TABS.map(([k, n, c]) => `<button class="${S.tab === k ? "on" : ""}" data-tab="${k}">${n}${c !== "" ? `<span class="n">${c}</span>` : ""}</button>`).join(""); }
+function renderList() {
+  const items = listItems(S.tab), groups = uniq(items.map(i => i.group)), chip = S.chip[S.tab] || "";
+  const groupsShown = S.tab === "students" ? uniq(groups.map(g => (cIx.get(g) || {}).level || g)) : groups;
+  $("#chips").innerHTML = groupsShown.length > 1 && groupsShown.length < 40 ? [`<button class="chip ${chip ? "" : "on"}" data-chip="">All</button>`, ...groupsShown.map(g => `<button class="chip ${chip === g ? "on" : ""}" data-chip="${esc(g)}">${esc(g)}</button>`)].join("") : "";
+  const q = S.fq.trim().toLowerCase();
+  const shown = items.filter(i => (!chip || i.group === chip || (S.tab === "students" && (cIx.get(i.group) || {}).level === chip)) && (!q || (i.label + " " + i.small + " " + i.group).toLowerCase().includes(q)));
+  let h = "", last = null;
+  if (S.tab === "students") h += `<a data-build="1" class="${S.key === "__build" ? "on" : ""}"><span>${MODE === "student" ? "Build my timetable" : "Build a timetable from groups"}</span></a>`;
+  for (const i of shown) { if (i.group !== last) { h += `<div class="grp">${esc(i.group)}</div>`; last = i.group; } h += `<a data-key="${esc(i.key)}" class="${i.key === S.key ? "on" : ""}"><span>${esc(i.label)}</span><small>${esc(i.small)}</small></a>`; }
+  $("#list").innerHTML = h || `<div class="empty">Nothing matches.</div>`;
+}
+function setHash(h) { if (location.hash !== h) history.replaceState(null, "", h); }
+function show(tab, key, opts = {}) {
+  if (MODE === "personal") return showPersonal();
+  if (!TABS.some(t => t[0] === tab)) { tab = TABS[0][0]; key = null; }
+  S.tab = tab; S.key = key; renderTabs(); const wide = ["lessons", "free", "checks"].includes(tab); $("#main").classList.toggle("wide", wide);
+  if (!wide) renderList();
+  if (tab === "lessons") { if (opts.filters) { S.lf = opts.filters; S.showAll = false; } return renderLessons(); }
+  if (tab === "free") return renderFree();
+  if (tab === "checks") return renderChecks();
+  if (tab === "students" && (key === "__build" || !STU.length)) return renderBuilder(opts.build);
+  if (tab === "students" && !sIx.has(key)) key = null;
+  if (!key) { const first = listItems(tab)[0]; if (!first) { $("#view").innerHTML = `<div class="card empty">Nothing here yet.</div>`; return; } return show(tab, first.key); }
+  const v = tab === "classes" ? classView(key) : tab === "teachers" ? teacherView(key) : tab === "rooms" ? roomView(key) : studentView(key);
+  S.current = v; $("#view").innerHTML = viewHTML(v); setHash(`#${tab}/${encodeURIComponent(key)}`);
+  const a = $(`#list a[data-key="${CSS.escape(key)}"]`); if (a) a.scrollIntoView({ block: "nearest" });
+}
+
+// ------------------------------------------------------------------ student builder
+function renderBuilder(pre) {
+  S.key = "__build"; renderList();
+  const cls = (pre && pre.cls) || S.bcls || (CLS.find(c => busyClasses.has(c.name)) || {}).name; S.bcls = cls;
+  const opts = new Map();
+  L.filter(x => x.group !== ENTIRE && x.classes.includes(cls)).forEach(x => { const k = x.block || x.group; if (!opts.has(k)) opts.set(k, new Map()); opts.get(k).set(x.group, x); });
+  const chosen = (pre && pre.groups) || S.bgroups || [];
+  const sel = [...opts].map(([k, gs]) => { const cur = [...gs.keys()].find(g => chosen.includes(g)) || [...gs.keys()][0];
+    return `<label>${esc(blockLabel(k, (cIx.get(cls) || {}).level))}<select data-b="${esc(k)}">${[...gs].map(([g, x]) => `<option value="${esc(g)}" ${g === cur ? "selected" : ""}>${esc(g)} · ${esc(x.subject)} · ${esc(tshort(x.teachers))}</option>`).join("")}</select></label>`; }).join("");
+  $("#view").innerHTML = `<div class="card"><h1 style="margin:0 0 4px;font-size:20px">${MODE === "student" ? "Build my timetable" : "Build a student timetable"}</h1><div class="sub" style="color:var(--sub)">${MODE === "student" ? "Pick your class, then the group you are in for each block (your subject teacher or form teacher can tell you)." : STU.length ? "Or pick a student from the list." : "This timetable has no student list, so pick the class and the group the student is in for each block."}</div>
+    <div class="builder"><label>Class<select id="bcls">${CLS.filter(c => busyClasses.has(c.name)).map(c => `<option ${c.name === cls ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>${sel}</div><div id="bview"></div></div>`;
+  const update = () => { const groups = [...document.querySelectorAll("#view select[data-b]")].map(s => s.value); S.bgroups = groups;
+    const v = personalView(cls, groups, { key: "custom", cls, groups, kicker: "Student", title: `Class ${cls}`, sub: `Groups ${groups.join(", ") || "-"}` }); S.current = v;
+    $("#bview").innerHTML = viewHTML(v).replace('<div class="card">', '<div>'); setHash(`#build/${encodeURIComponent(cls)}/${groups.map(encodeURIComponent).join(",")}`); };
+  $("#bcls").onchange = e => { S.bcls = e.target.value; S.bgroups = []; renderBuilder(); };
+  document.querySelectorAll("#view select[data-b]").forEach(s => s.onchange = update); update();
+}
+
+// ------------------------------------------------------------------ lessons table
+const LCOLS = [["day", "Day"], ["time", "Time"], ["n", "Periods"], ["level", "Level"], ["classes", "Classes"], ["subject", "Subject"], ["group", "Group"], ["teachers", "Teachers"], ["room", "Room"]];
+function lessonMatches(x, f) {
+  if (f.week && weekDay(DAYS[x.d])[0] !== f.week) return false;
+  if (f.day && weekDay(DAYS[x.d])[1] !== f.day) return false;
+  const a = f.from === undefined || f.from === "" ? 0 : +f.from, b = f.to === undefined || f.to === "" ? NP - 1 : +f.to;
+  if (x.p + x.n - 1 < a || x.p > b) return false;
+  if (f.level && x.level !== f.level) return false; if (f.subject && x.subject !== f.subject) return false; if (f.teacher && !x.teachers.includes(f.teacher)) return false;
+  if (f.room && x.room !== f.room) return false; if (f.cls && !x.classes.includes(f.cls)) return false; if (f.block && x.block !== f.block) return false;
+  if (f.group && x.group !== f.group) return false; if (f.ext && !x.ext) return false;
+  if (f.q) { const s = [DAYS[x.d], x.level, x.block, x.classes.join(" "), x.subject, short(x.subject), x.group, x.teachers.join(" "), tshort(x.teachers), x.room].join(" ").toLowerCase(); if (!f.q.toLowerCase().split(/\s+/).every(w => s.includes(w))) return false; }
+  return true;
+}
+function opt(list, cur, all = "All") { return `<option value="">${all}</option>` + list.map(([v, t]) => `<option value="${esc(v)}" ${String(cur ?? "") === String(v) ? "selected" : ""}>${esc(t)}</option>`).join(""); }
+function renderLessons() {
+  const f = S.lf, weeks = uniq(DAYS.map(d => weekDay(d)[0]).filter(Boolean)), dnames = uniq(DAYS.map(d => weekDay(d)[1]));
+  const subjects = uniq(L.map(x => x.subject)).sort(), blocks = uniq(L.map(x => x.block).filter(Boolean)).sort();
+  const per = D.times.map((t, p) => [p, `${p} · ${t[0]}`]);
+  $("#view").innerHTML = `<div class="card"><div class="filters">
+    <label>Search<input type="search" data-f="q" value="${esc(f.q || "")}" placeholder="any word"></label>
+    ${weeks.length ? `<label>Week<select data-f="week">${opt(weeks.map(w => [w, w]), f.week, "Both")}</select></label>` : ""}
+    <label>Day<select data-f="day">${opt(dnames.map(d => [d, d]), f.day)}</select></label>
+    <label>From<select data-f="from">${opt(per, f.from, "Start")}</select></label><label>To<select data-f="to">${opt(per, f.to, "End")}</select></label>
+    <label>Level<select data-f="level">${opt(D.levels.filter(lv => L.some(x => x.level === lv)).map(l => [l, l]), f.level)}</select></label>
+    <label>Class<select data-f="cls">${opt(CLS.filter(c => busyClasses.has(c.name)).map(c => [c.name, c.name]), f.cls)}</select></label>
+    <label>Subject<select data-f="subject">${opt(subjects.map(s => [s, s]), f.subject)}</select></label>
+    <label>Teacher<select data-f="teacher">${opt([...busyTeachers].sort().map(t => [t, t]), f.teacher)}</select></label>
+    <label>Room<select data-f="room">${opt([...busyRooms].sort().map(r => [r, r]), f.room)}</select></label>
+    ${blocks.length ? `<label>Block<select data-f="block">${opt(blocks.map(b => [b, b]), f.block)}</select></label>` : ""}
+    ${f.group ? `<label>Group<select data-f="group">${opt([[f.group, f.group]], f.group)}</select></label>` : ""}
+    <label class="chk"><input type="checkbox" data-f="ext" ${f.ext ? "checked" : ""}> After school only</label>
+    <button class="btn" data-act="clear">Clear</button><button class="btn" data-act="lcsv">Download CSV</button></div><div id="ltab"></div></div>`;
+  drawLessonTable();
+  const hs = Object.entries(f).filter(([, v]) => v !== "" && v !== undefined && v !== false).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&"); setHash("#lessons" + (hs ? "?" + hs : ""));
+}
+function filteredLessons() {
+  const rows = L.filter(x => lessonMatches(x, S.lf)); const [k, dir] = S.sort;
+  const key = { day: x => x.d * 100 + x.p, time: x => x.p * 1000 + x.d, n: x => x.n, level: x => x.level, classes: x => x.classes.join(","), subject: x => x.subject, group: x => x.group, teachers: x => x.teachers.join(","), room: x => x.room }[k];
+  return rows.sort((a, b) => { const A = key(a), B = key(b); return (A < B ? -1 : A > B ? 1 : (a.d * 100 + a.p) - (b.d * 100 + b.p)) * dir; });
+}
+function drawLessonTable() {
+  const rows = filteredLessons(), lim = S.showAll ? rows.length : Math.min(rows.length, 400), lc = new Set(rows.map(x => x.id)).size;
+  const link = (t, k, v) => `<a data-go="${t}" data-key="${esc(k)}">${esc(v)}</a>`;
+  $("#ltab").innerHTML = `<p class="count">${rows.length} group lessons (${lc} lesson times)${rows.length > lim ? ` · showing ${lim} <button class="btn" data-act="all">Show all</button>` : ""}</p>
+    <div class="tablebox"><table class="lt"><thead><tr>${LCOLS.map(([k, t]) => `<th data-sort="${k}">${t}${S.sort[0] === k ? (S.sort[1] > 0 ? " ▴" : " ▾") : ""}</th>`).join("")}</tr></thead><tbody>
+    ${rows.slice(0, lim).map(x => { const [t, a] = x.ext ? D.ext : pal(colorOf(x.subject)); return `<tr><td>${esc(DAYS[x.d])}</td><td>${esc(time(x.p)[0])}–${esc(time(x.p + x.n - 1)[1])}${x.ext ? " <small style='color:#8A5300'>after school</small>" : ""}</td><td>${x.n}</td><td>${esc(x.level)}</td>
+      <td>${x.classes.map(c => link("classes", c, c)).join(", ")}</td><td><i class="sw" style="--t:#${t};--a:#${a}"></i>${esc(x.subject)}</td><td>${esc(x.group)}${x.block ? `<br><small style="color:var(--muted)">${esc(x.block)}</small>` : ""}</td>
+      <td>${x.teachers.map(tt => link("teachers", tt, tt)).join(", ")}</td><td>${x.room ? link("rooms", x.room, x.room) : ""}</td></tr>`; }).join("")}</tbody></table></div>`;
+}
+
+// ------------------------------------------------------------------ who's free
+function renderFree() {
+  const f = S.ff || (S.ff = { d: 0, from: 1, to: Math.min(NP - 1, 3) }), per = D.times.map((t, p) => [p, `${p} · ${t[0]}`]);
+  const tb = new Set(), rb = new Set(), cb = new Set(), load = {};
+  const seenTL = new Set();
+  L.forEach(x => { if (x.d !== +f.d) return; x.teachers.forEach(t => { const k = t + "|" + x.id; if (!seenTL.has(k)) { seenTL.add(k); load[t] = (load[t] || 0) + x.n; } });
+    if (x.p <= +f.to && x.p + x.n - 1 >= +f.from) { x.teachers.forEach(t => tb.add(t)); if (x.room) rb.add(x.room); x.classes.forEach(c => cb.add(c)); } });
+  const freeT = TCH.filter(t => busyTeachers.has(t.name) && !tb.has(t.name)), freeR = ROOMS.filter(r => !rb.has(r.name) && r.name !== "TBC");
+  const grp = (arr, g) => { const m = new Map(); arr.forEach(x => { const k = g(x) || "Other"; if (!m.has(k)) m.set(k, []); m.get(k).push(x); }); return [...m].sort((a, b) => a[0].localeCompare(b[0])); };
+  const inSchool = CLS.filter(c => busyClasses.has(c.name)).filter(c => { const g = D.grid[c.level]; if (!g) return false; for (let p = +f.from; p <= +f.to; p++) if (g[+f.d][p] === "L") return true; return false; });
+  $("#view").innerHTML = `<div class="card"><h1 style="margin:0 0 10px;font-size:20px">Who's free</h1><div class="filters">
+    <label>Day<select data-ff="d">${DAYS.map((d, i) => `<option value="${i}" ${+f.d === i ? "selected" : ""}>${esc(d)}</option>`).join("")}</select></label>
+    <label>From<select data-ff="from">${per.map(([v, t]) => `<option value="${v}" ${+f.from === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
+    <label>To<select data-ff="to">${per.map(([v, t]) => `<option value="${v}" ${+f.to === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label></div>
+    <p class="count">${esc(DAYS[f.d])}, ${esc(time(+f.from)[0])}–${esc(time(+f.to)[1])}: ${freeT.length} teachers and ${freeR.length} rooms free. Teachers show how many periods they teach that day.</p>
+    <h3 style="font-size:14px;margin:14px 0 8px">Teachers free</h3><div class="cols">${grp(freeT, t => t.dept).map(([g, ts]) => `<div><h4>${esc(g)}</h4>${ts.map(t => `<span class="pill"><a data-go="teachers" data-key="${esc(t.name)}">${esc(t.name)}</a> <small>${load[t.name] || 0}</small></span>`).join("")}</div>`).join("") || "<div class='empty'>None</div>"}</div>
+    <h3 style="font-size:14px;margin:18px 0 8px">Rooms free</h3><div class="cols">${grp(freeR, r => r.kind).map(([g, rs]) => `<div><h4>${esc(g)}</h4>${rs.map(r => `<span class="pill"><a data-go="rooms" data-key="${esc(r.name)}">${esc(r.name)}</a></span>`).join("")}</div>`).join("") || "<div class='empty'>None</div>"}</div>
+    <h3 style="font-size:14px;margin:18px 0 8px">Classes with no lesson then</h3><div>${inSchool.filter(c => !cb.has(c.name)).map(c => `<span class="pill"><a data-go="classes" data-key="${esc(c.name)}">${esc(c.name)}</a></span>`).join("") || "<span class='count'>Every class in school then has a lesson.</span>"}</div></div>`;
+  setHash("#free");
+}
+function renderChecks() {
+  const c = D.checks;
+  $("#view").innerHTML = `<div class="card checks"><h1 style="margin:0 0 10px;font-size:20px">Checks</h1>
+    ${c.ok ? `<p class="okline">All checks passed: no teacher, room, class or student is double-booked, every subject has its planned periods and nothing sits in a break.</p>` : `<ul>${c.problems.map(p => `<li class="badline">${esc(p)}</li>`).join("")}</ul>`}
+    <h3 style="font-size:14px">After-school lessons</h3>${c.after.length ? `<ul>${c.after.map(a => `<li>${esc(a)}</li>`).join("")}</ul>` : "<p>None.</p>"}
+    ${c.notes.length ? `<h3 style="font-size:14px">Notes</h3><ul>${c.notes.map(a => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}
+    <p class="note">${esc(D.school.name)} · ${esc(D.school.timetable)} · generated ${esc(D.generated)}. ${CLS.length} classes, ${busyTeachers.size} teachers, ${busyRooms.size} rooms, ${STU.length} students, ${lessonRows.size} lesson times.</p></div>`;
+  setHash("#checks");
+}
+
+// ------------------------------------------------------------------ lesson details, search, events
+function lessonDialog(id) {
+  const xs = lessonRows.get(id); if (!xs) return; const x0 = xs[0];
+  $("#dlgT").innerHTML = `<b style="font-size:16px">${esc(x0.block || short(x0.subject))}</b><div style="color:var(--sub);font-size:13px">${esc(when(x0))} · ${x0.n} periods${x0.ext ? " · after school" : ""}</div>`;
+  $("#dlgB").innerHTML = `<table>${xs.map(x => `<tr><td><b>${esc(x.subject)}</b><br><small style="color:var(--muted)">${esc(x.group)}</small></td><td>${x.classes.map(c => `<a data-go="classes" data-key="${esc(c)}">${esc(c)}</a>`).join(", ")}</td>
+    <td>${x.teachers.map(t => `<a data-go="teachers" data-key="${esc(t)}">${esc(t)}</a>`).join("<br>")}</td><td>${x.room ? `<a data-go="rooms" data-key="${esc(x.room)}">${esc(x.room)}</a>` : "-"}</td>
+    <td>${x.group !== ENTIRE ? `<a data-go="lessons" data-group="${esc(x.group)}">all lessons</a>` : ""}</td></tr>`).join("")}</table>`;
+  $("#dlg").showModal();
+}
+const INDEX = [
+  ...CLS.filter(c => busyClasses.has(c.name)).map(c => ({ t: "classes", k: c.name, label: c.name, s: `${c.name} ${c.level}`, type: "Class" })),
+  ...TCH.filter(t => busyTeachers.has(t.name)).map(t => ({ t: "teachers", k: t.name, label: t.name, s: `${t.name} ${t.short} ${t.dept}`, type: "Teacher" })),
+  ...ROOMS.filter(r => busyRooms.has(r.name)).map(r => ({ t: "rooms", k: r.name, label: r.name, s: `${r.name} ${r.kind}`, type: "Room" })),
+  ...STU.map(s => ({ t: "students", k: s.id, label: `${s.name} (${s.id})`, s: `${s.name} ${s.id} ${s.cls}`, type: "Student" })),
+  ...uniq(L.map(x => x.subject)).map(s => ({ t: "lessons", f: { subject: s }, label: s, s: `${s} ${short(s)}`, type: "Subject" })),
+  ...uniq(L.filter(x => x.group !== ENTIRE).map(x => x.group)).map(g => ({ t: "lessons", f: { group: g }, label: g, s: g, type: "Group" })),
+  ...uniq(L.map(x => x.block).filter(Boolean)).map(b => ({ t: "lessons", f: { block: b }, label: b, s: b, type: "Block" }))];
+const INDEX_OK = INDEX.filter(e => TABS.some(t => t[0] === e.t));
+let hits = [], hi = 0;
+function search(q) {
+  q = q.trim().toLowerCase(); const box = $("#results"); if (!q) { box.classList.remove("on"); return; }
+  const words = q.split(/\s+/);
+  hits = INDEX_OK.map(e => { const s = e.s.toLowerCase(), l = e.label.toLowerCase(); if (!words.every(w => s.includes(w))) return null; return [l === q ? 0 : l.startsWith(q) ? 1 : s.split(/\s+/).some(w => w.startsWith(words[0])) ? 2 : 3, e]; })
+    .filter(Boolean).sort((a, b) => a[0] - b[0] || a[1].label.localeCompare(b[1].label)).slice(0, 14).map(x => x[1]); hi = 0;
+  box.innerHTML = hits.length ? hits.map((e, i) => `<div class="r ${i === hi ? "sel" : ""}" data-i="${i}"><span>${esc(e.label)}</span><small>${e.type}</small></div>`).join("") : `<div class="r"><span style="color:var(--muted)">No matches</span></div>`;
+  box.classList.add("on");
+}
+function pick(e) { $("#results").classList.remove("on"); $("#q").value = ""; if (e.f) show("lessons", null, { filters: e.f }); else show(e.t, e.k); }
+function csvDownload(rows, name) {
+  const head = ["Day", "Start", "End", "Periods", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school"];
+  const q = v => /[",\n]/.test(v = String(v ?? "")) ? `"${v.replace(/"/g, '""')}"` : v;
+  const body = rows.map(x => [DAYS[x.d], time(x.p)[0], time(x.p + x.n - 1)[1], x.n, x.level, x.block, x.classes.join(", "), x.subject, x.group, x.teachers.join(", "), x.room, x.ext ? "yes" : ""].map(q).join(","));
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + [head.join(","), ...body].join("\r\n")], { type: "text/csv" })); a.download = name.replace(/[\\/:*?"<>|]+/g, "-") + ".csv"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-tab],[data-key],[data-chip],[data-act],[data-go],[data-build],.cell,[data-sort],.results .r[data-i]"); if (!t) { if (!e.target.closest(".search")) $("#results").classList.remove("on"); return; }
+  if (t.matches(".results .r")) return pick(hits[+t.dataset.i]);
+  if (t.dataset.tab) return show(t.dataset.tab, null);
+  if (t.dataset.go) { if ($("#dlg").open) $("#dlg").close(); return t.dataset.go === "lessons" ? show("lessons", null, { filters: { group: t.dataset.group } }) : show(t.dataset.go, t.dataset.key); }
+  if (t.dataset.build) return show("students", "__build");
+  if (t.dataset.chip !== undefined) { S.chip[S.tab] = t.dataset.chip; return renderList(); }
+  if (t.dataset.key && t.closest("#list")) return show(S.tab, t.dataset.key);
+  if (t.classList.contains("cell")) return lessonDialog(+t.dataset.id);
+  if (t.dataset.sort) { S.sort = [t.dataset.sort, S.sort[0] === t.dataset.sort ? -S.sort[1] : 1]; return drawLessonTable(); }
+  const act = t.dataset.act;
+  if (act === "print") window.print();
+  if (act === "csv" && S.current) csvDownload(S.current.rows.slice().sort((a, b) => a.d - b.d || a.p - b.p), `${D.school.name} ${S.current.title}`);
+  if (act === "link") { navigator.clipboard && navigator.clipboard.writeText(location.href).then(() => { t.textContent = "Link copied"; setTimeout(() => t.textContent = "Copy link", 1500); }); }
+  if (act === "clear") { S.lf = {}; renderLessons(); }
+  if (act === "lcsv") csvDownload(filteredLessons(), `${D.school.name} lessons`);
+  if (act === "all") { S.showAll = true; drawLessonTable(); }
+});
+document.addEventListener("keydown", e => { const c = e.target.closest && e.target.closest(".cell"); if (c && e.key === "Enter") lessonDialog(+c.dataset.id); });
+document.addEventListener("input", e => {
+  const t = e.target;
+  if (t.id === "q") return search(t.value);
+  if (t.id === "fq") { S.fq = t.value; return renderList(); }
+  if (t.dataset.f) { S.lf[t.dataset.f] = t.type === "checkbox" ? t.checked : t.value; S.showAll = false; if (t.dataset.f === "q") { drawLessonTable(); const hs = Object.entries(S.lf).filter(([, v]) => v !== "" && v !== false && v !== undefined).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&"); setHash("#lessons" + (hs ? "?" + hs : "")); } else renderLessons(); }
+  if (t.dataset.ff) { S.ff[t.dataset.ff] = +t.value; if (S.ff.to < S.ff.from) S.ff.to = S.ff.from; renderFree(); }
+});
+$("#q").addEventListener("keydown", e => {
+  const box = $("#results"); if (!box.classList.contains("on") || !hits.length) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); hi = (hi + (e.key === "ArrowDown" ? 1 : hits.length - 1)) % hits.length; box.querySelectorAll(".r").forEach((r, i) => r.classList.toggle("sel", i === hi)); }
+  if (e.key === "Enter") { e.preventDefault(); pick(hits[hi]); }
+  if (e.key === "Escape") box.classList.remove("on");
+});
+document.addEventListener("keydown", e => { if (e.key === "/" && !["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) { e.preventDefault(); $("#q").focus(); } });
+$("#theme").onclick = () => { const r = document.documentElement, cur = r.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); r.dataset.theme = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("tt-theme", r.dataset.theme); } catch (_) {} };
+try { const th = localStorage.getItem("tt-theme"); if (th) document.documentElement.dataset.theme = th; } catch (_) {}
+function showPersonal() {
+  $("#tabs").style.display = "none"; $("#main").classList.add("wide"); $(".search").style.visibility = "hidden";
+  const s = STU[0]; if (!s) { $("#view").innerHTML = `<div class="card empty">Your timetable is not available.</div>`; return; }
+  const v = studentView(s.id); S.current = v; $("#view").innerHTML = viewHTML(v);
+}
+function route() {
+  if (MODE === "personal") return showPersonal();
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h.startsWith("lessons")) { const f = {}; (location.hash.split("?")[1] || "").split("&").filter(Boolean).forEach(kv => { const [k, v] = kv.split("="); f[k] = k === "ext" ? true : decodeURIComponent(v || ""); }); return show("lessons", null, { filters: f }); }
+  if (h === "free" || h === "checks") return show(h, null);
+  if (h.startsWith("build/")) { const [, c, g] = location.hash.slice(1).split("/"); return show("students", "__build", { build: { cls: decodeURIComponent(c || ""), groups: (g || "").split(",").map(decodeURIComponent) } }); }
+  const i = h.indexOf("/"); if (i > 0) { const t = h.slice(0, i), k = h.slice(i + 1); const ok = { classes: cIx, teachers: tIx, rooms: rIx, students: sIx }[t]; if (ok && ok.has(k)) return show(t, k); }
+  show(TABS[0][0], null);
+}
+$("#school").textContent = D.school.name; $("#ttl").textContent = `${D.school.timetable} · generated ${D.generated}`;
+if (APP) {
+  const box = document.createElement("div"); box.className = "applinks";
+  box.innerHTML = (APP.files || []).map(([t, h]) => `<a class="btn" href="${esc(h)}">${esc(t)}</a>`).join("") + (APP.home ? `<a class="btn" href="${esc(APP.home)}">${esc(APP.homeLabel || "Back")}</a>` : "") + (APP.logout ? `<a class="btn" href="${esc(APP.logout)}">Sign out</a>` : "");
+  $("#theme").before(box);
+  if (APP.placeholder) $("#q").placeholder = APP.placeholder;
+}
+const st = $("#status"); st.className = "status " + (D.checks.ok ? "ok" : "bad"); st.textContent = D.checks.ok ? "All checks passed" : `${D.checks.problems.length} problems`; st.style.cursor = "pointer"; st.onclick = () => show("checks", null);
+if (!TABS.some(t => t[0] === "checks")) st.style.display = "none";
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>

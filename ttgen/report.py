@@ -12,6 +12,9 @@ WRAP = Alignment(wrap_text=True, vertical="center", horizontal="center")
 BOX = Border(*(Side(style="thin", color="B7B7B7"),) * 4)
 PAL = ["DCE9F7", "FCE4CC", "D9F0DA", "F8D7DA", "F3EBC9", "E4DDF4", "D4EFEF", "EADCF0", "E9E1D6", "DDE3F0", "EDEDED", "F6E3C6"]
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
+# the Lessons sheet is the hand-over format: one row per group per lesson; rows that meet together share a Lesson ID
+LESSON_HEADERS = ["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group",
+                  "Teachers", "Room", "After school"]
 
 def short_subject(s):
     s = re.sub(r"English Language", "EL", s); s = re.sub(r"Mathematics", "Math", s); s = re.sub(r"Physical Education", "PE", s)
@@ -148,133 +151,20 @@ def _runs_set(s, NP):
     if cur: out.append(cur)
     return out
 
-def write_timetable(res, path):
-    P = res["problem"]; sc = P.spec["school"]; NP, ND = P.NP, P.ND
-    if res["lessons"]: assign_rooms(res)
-    probs, stats, post = check(res) if res["lessons"] else (["No timetable."], {}, [])
-    L = res["lessons"]; wb = openpyxl.Workbook(); wb.remove(wb.active)
-    fam_col = {}
-    def colour(subj):
-        k = re.sub(r"\s*\(.*|\s+G[123]$", "", subj); fam_col.setdefault(k, PAL[len(fam_col) % len(PAL)]); return fam_col[k]
-    short = {t["name"]: (t.get("short") or t["name"]) for t in P.spec["teachers"]}
-    # read me
-    ws = wb.create_sheet("Read me")
-    lines = [(f"{sc['name']} · {sc['timetable']} timetable", "t"),
-             (f"{len(P.spec['classes'])} classes, {len(P.spec['teachers'])} teachers, {stats.get('lessons', 0)} lessons placed. Solver status: {res['status']}.", ""),
-             ("Checks", "h")]
-    lines += [("No problems found: no teacher, room or class is double-booked; every lesson has its planned periods; nothing sits in a break.", "")] if not probs else [(p, "") for p in probs[:40]]
-    if stats.get("side_by_side"): lines.append((f"{stats['side_by_side']} class-periods have two bands running side by side for different students (e.g. extra periods for one level).", ""))
-    ext = [x for x in L if x["ext"]]
-    lines.append(("After-school lessons", "h"))
-    lines += [("None.", "")] if not ext else [(f"{x['unit']['name']}: {P.days[x['start'] // NP]} {clock(sc, x['start'] % NP)}-{clock(sc, x['start'] % NP + x['ln'])}", "") for x in ext]
-    if post: lines += [("Rules checked after solving", "h")] + [(p, "") for p in post]
-    if res.get("notes"): lines += [("Notes", "h")] + [(n, "") for n in res["notes"]]
-    lines += [("How to read", "h"), ("Classes, Teachers and Rooms sheets show one grid per class, teacher or room: days down the side, periods across (clock times in the header). "
-               "Banded lessons show the subjects running; hover a cell to see every group, teacher and room. 'only' means just those groups have a lesson. Yellow = after-school slot.", "")]
-    for i, (t, k) in enumerate(lines, start=1):
-        c = ws.cell(i, 1, t); c.alignment = Alignment(wrap_text=True, vertical="top")
-        c.font = Font(name="Arial", size=14, bold=True, color=NAVY) if k == "t" else Font(name="Arial", size=11, bold=True, color=NAVY) if k == "h" else Font(name="Arial", size=10)
-    ws.column_dimensions["A"].width = 130
-    def grid(ws, keys, cells_of, level_of, title_of):
-        ws.column_dimensions["A"].width = 11
-        for p in range(NP): ws.column_dimensions[CL(p + 2)].width = 6.2
-        r0 = 1
-        for k in keys:
-            ws.cell(r0, 1, title_of(k)).font = F(bold=True, size=11)
-            ws.cell(r0 + 1, 1, "Day").font = F(bold=True, color="FFFFFF"); ws.cell(r0 + 1, 1).fill = HDR
-            for p in range(NP):
-                c = ws.cell(r0 + 1, p + 2, f"{p}\n{clock(sc, p)}"); c.font = F(bold=True, color="FFFFFF", size=7); c.fill = HDR; c.alignment = WRAP
-            ws.row_dimensions[r0 + 1].height = 24
-            cells = cells_of(k); lv = level_of(k)
-            for d in range(ND):
-                rr = r0 + 2 + d; ws.row_dimensions[rr].height = 36; ws.cell(rr, 1, P.days[d]).font = F(bold=True)
-                p = 0
-                while p < NP:
-                    pos = d * NP + p
-                    if pos in cells:
-                        text, com, fill = cells[pos]; q = p
-                        while q + 1 < NP and cells.get(pos + q + 1 - p, (None,))[0] == text and q - p < 5: q += 1
-                        c = ws.cell(rr, p + 2, text); c.font = F(); c.alignment = WRAP; c.border = BOX
-                        if fill: c.fill = PatternFill("solid", fgColor=fill)
-                        if com: c.comment = Comment(com, "Timetable"); c.comment.width = 320; c.comment.height = 140
-                        if q > p: ws.merge_cells(start_row=rr, start_column=p + 2, end_row=rr, end_column=q + 2)
-                        p = q + 1; continue
-                    if lv:
-                        ch = P.grid[lv][d][p]
-                        if ch in BREAK: c = ws.cell(rr, p + 2, BREAK[ch]); c.fill = BRK; c.font = F(size=7, color="595959"); c.alignment = WRAP
-                    p += 1
-            r0 += ND + 3
-        ws.freeze_panes = "B1"; ws.page_setup.orientation = "landscape"; ws.page_setup.fitToWidth = 1; ws.page_setup.fitToHeight = 0
-        ws.sheet_properties.pageSetUpPr.fitToPage = True
-    def class_cells(c):
-        by = collections.defaultdict(list)
-        for x in L:
-            if c in x["unit"]["classes"]:
-                for q in x["pos"]: by[q].append(x)
-        cells = {}
-        for q, xs in by.items():
-            texts, coms = [], []
-            for x in xs:
-                if x["unit"]["kind"] == "class":
-                    r = x["part"][0]; texts.append(f"{short_subject(r['subject'])}\n{', '.join(short.get(t, t) for t in r['teachers'])} {x['rooms'].get(id(r), '')}")
-                else:
-                    subs = list(dict.fromkeys(short_subject(re.sub(r'\s+G[123]$', '', r['subject'])) for r in x["part"]))
-                    lab = " / ".join(subs[:3]) + (f" +{len(subs) - 3}" if len(subs) > 3 else "")
-                    if len(x["part"]) < len(x["unit"]["rows"]): lab += " only"
-                    texts.append(lab if len(xs) > 1 else lab + f"\n{len(x['part'])} groups")
-                    coms += [f"{r['code']}: {r['subject']} - {', '.join(r['teachers'])} - {x['rooms'].get(id(r), '')}" for r in x["part"]]
-            fill = EXTF if any(x["ext"] for x in xs) else colour(xs[0]["part"][0]["subject"])
-            cells[q] = ("\n+ ".join(texts), "\n".join(coms) or None, fill)
-        return cells
-    ws = wb.create_sheet("Classes")
-    grid(ws, [c["class"] for c in P.spec["classes"]], class_cells, lambda c: P.level_of[c],
-         lambda c: f"Class {c} ({P.level_of[c]}, {P.cls[c].get('size') or ''} students, home room {P.cls[c].get('home_room') or '-'})")
-    tl = collections.defaultdict(list)
-    for x in L:
-        for r in x["part"]:
-            for t in r["teachers"]: tl[t].append((x, r))
-    def teacher_cells(t):
-        cells = {}
-        for x, r in tl[t]:
-            who = r["code"] if r["code"] != "Entire Class" else x["unit"]["classes"][0]
-            for q in x["pos"]:
-                cells[q] = (f"{short_subject(r['subject'])} {who}\n{x['rooms'].get(id(r), '')}", f"{r['subject']} | {who} | classes {', '.join(r['classes'])}", EXTF if x["ext"] else colour(r["subject"]))
-        return cells
-    ws = wb.create_sheet("Teachers")
-    tper = {t: sum(x["ln"] for x, _ in v) for t, v in tl.items()}
-    grid(ws, sorted(tl, key=str.lower), teacher_cells, lambda t: None, lambda t: f"{t} ({tper[t]} periods a cycle)")
-    rl = collections.defaultdict(list)
-    for x in L:
-        for r in x["part"]: rl[x["rooms"].get(id(r), "TBC")].append((x, r))
-    def room_cells(rm):
-        cells = {}
-        for x, r in rl[rm]:
-            who = r["code"] if r["code"] != "Entire Class" else x["unit"]["classes"][0]
-            for q in x["pos"]:
-                prev = cells.get(q); txt = f"{short_subject(r['subject'])} {who}"
-                cells[q] = ((prev[0] + " + " + txt) if prev else txt, None, colour(r["subject"]))
-        return cells
-    ws = wb.create_sheet("Rooms")
-    grid(ws, [v["room"] for v in P.spec["venues"] if v["room"] in rl] + (["TBC"] if "TBC" in rl else []), room_cells, lambda r: None, lambda r: f"Room {r}")
-    ws = wb.create_sheet("Lessons")
-    hdr = ["Day", "Start period", "Starts", "End period", "Periods", "Level", "Classes", "Subject", "Group", "Teachers", "Room", "After school"]
-    ws.append(hdr)
-    for x in sorted(L, key=lambda x: (x["start"], x["unit"]["level"])):
-        for r in x["part"]:
-            p = x["start"] % NP
-            ws.append([P.days[x["start"] // NP], p, clock(sc, p), p + x["ln"] - 1, x["ln"], r["level"], ", ".join(x["unit"]["classes"] if x["unit"]["kind"] == "class" else r["classes"]),
-                       r["subject"], r["code"], ", ".join(r["teachers"]), x["rooms"].get(id(r), ""), "yes" if x["ext"] else ""])
-    for c in ws[1]: c.font = Font(name="Arial", bold=True, color="FFFFFF", size=10); c.fill = HDR
-    for col, w in zip("ABCDEFGHIJKL", (11, 7, 8, 7, 7, 7, 22, 34, 10, 34, 14, 8)): ws.column_dimensions[col].width = w
-    ws.freeze_panes = "A2"; ws.auto_filter.ref = ws.dimensions
-    ws = wb.create_sheet("Teacher load")
-    ws.append(["Teacher", "Department", "Allowance", "Periods timetabled", "Most periods in a day", "Days teaching", "Longest run (periods)", "After-school periods"])
-    for t in P.spec["teachers"]:
-        n = t["name"]; perday = collections.Counter(); pos = set(); ex = 0
-        for x, r in tl.get(n, []):
-            perday[x["start"] // NP] += x["ln"]; pos |= set(x["pos"]); ex += x["ln"] if x["ext"] else 0
-        ws.append([n, t.get("dept"), t.get("allowance"), tper.get(n, 0), max(perday.values()) if perday else 0, len(perday), _longest_run(pos, NP), ex])
-    for c in ws[1]: c.font = Font(name="Arial", bold=True, color="FFFFFF", size=10); c.fill = HDR
-    for col, w in zip("ABCDEFGH", (30, 11, 10, 12, 12, 10, 12, 12)): ws.column_dimensions[col].width = w
-    wb.save(path)
-    return probs, stats, post
+def write_timetable(res, path, return_model=False):
+    """assign rooms, check, and write the combined workbook (export.write_excel: Read me, Classes, Teachers, Rooms,
+    Students, Lessons, Teacher load). Returns (problems, stats, post-solve rule checks[, model])."""
+    from .export import model_from_result, write_excel
+    if not res["lessons"]:
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Read me"
+        ws["A1"] = f"No timetable found. Solver status: {res['status']}."
+        for i, n in enumerate(res.get("notes", []), start=3): ws.cell(i, 1, n)
+        wb.save(path); out = (["No timetable found."], {}, [])
+        return out + (None,) if return_model else out
+    assign_rooms(res)
+    probs, stats, post = check(res)
+    m = model_from_result(res); m["notes"] = post + m["notes"]
+    extra = [p for p in probs if "blocked time" in p]
+    if extra: m["checks"]["problems"] += extra; m["checks"]["ok"] = False
+    write_excel(m, path)
+    return (probs, stats, post, m) if return_model else (probs, stats, post)
