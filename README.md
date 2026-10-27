@@ -1,73 +1,93 @@
-# Timetable Setup
+# School timetable app
 
-A small web app that helps a school fill the **timetable setup workbook** step by step (rooms → classes → subjects →
-teachers → blocks → lessons → rules), checks it as you go, and lets you download:
+One deployment per school. The timetable committee fills the setup step by step, presses **Generate**, talks
+through any conflicts with the AI timetabler in a chat, and **publishes**. Teachers and students then open the
+published timetable with their access code and download PDFs.
 
-- your filled setup workbook (`.xlsx`, keeps drop-downs and formulas so it can still be edited in Excel);
-- the **school-timetable-generator** skill (`SKILL.md` + solver scripts + sample templates) for an AI agent;
-- sample and blank templates for Singapore secondary and primary schools (fictional data).
+| Code (Railway variable) | Who | What they see |
+|---|---|---|
+| `COMMITTEE_CODE` | timetable committee | the setup editor, Generate with the chat, preview, publish, every download, the personal student codes |
+| `TEACHER_CODE` | teachers | every class, teacher, room and student timetable, the lesson search, Who's free, PDFs |
+| `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
+| personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 
-An AI agent with the skill (for example Claude with code execution) turns the workbook into a clash-free timetable:
-a grid for every class, teacher and room.
+Personal codes are made from each student's ID on the Students sheet and `SECRET_KEY`, so they stay the same when
+the timetable is republished. The committee downloads them as a list (CSV) or as slips to print, one page per class.
+Students not on the Students sheet use the general student code and Build my timetable.
+
+## How generating works
+
+The AI does not place lessons itself; the solver does (OR-Tools, the same one the skill uses). The AI works as the
+timetabler, with `skill/school-timetable-generator/SKILL.md` as its instructions and these tools:
+check the setup and do the capacity sums, show parts of the setup, solve, diagnose (find which rule blocks a
+timetable), ask the committee, change the setup (only what the committee chose), and finish. It cannot run code,
+see anything outside the setup, or publish. The chat shows each step; a question appears with buttons, and the
+committee can type at any time.
+
+The AI works on a copy of the setup. **Keep the AI's changes in my setup** copies its changes back; **Publish** makes
+the PDFs, the Excel workbook and the timetable pages and swaps them in for teachers and students (about a minute).
+Without an AI set up, **Generate without AI** checks and solves, and the committee reads the results.
+
+## Deploy on Railway
+
+1. Put this folder in a GitHub repository (it has a `Dockerfile` and `railway.json`).
+2. Railway: **New Project → Deploy from GitHub repo** → pick the repository.
+3. **Add a volume** to the service, mounted at `/data`. The saved setup, generation runs and the published timetable
+   live there; without a volume they are lost on every deploy (the committee page warns you).
+4. **Variables** (service → Variables):
+
+   | Variable | Value |
+   |---|---|
+   | `SECRET_KEY` | a long random string. Keep it: changing it signs everyone out and changes every personal student code |
+   | `COMMITTEE_CODE`, `TEACHER_CODE`, `STUDENT_CODE` | at least 6 letters or digits each, all different (case, spaces and dashes are ignored) |
+   | `AI_PROVIDER` | `anthropic`, `openai` or `openrouter` |
+   | `AI_API_KEY` | the provider's API key (stays on the server) |
+   | `AI_MODEL` | the model name exactly as the provider lists it. Anthropic defaults to `claude-sonnet-5-5` |
+   | `SCHOOL_NAME` | optional: shown on the sign-in page before anything is published |
+   | `SOLVE_SECONDS` | optional: time for one solve, default 300 (`SOLVE_MAX_SECONDS` 1800 caps what the AI may ask for) |
+   | `SOLVE_WORKERS` | optional: solver threads, default 8 |
+   | `AI_BASE_URL` | optional: another OpenAI-compatible endpoint |
+
+5. **Settings → Networking → Generate Domain**, open it and sign in with the committee code.
+
+The solver uses all the CPU it is given, so more vCPU gives better timetables in the same time. About 1 GB of
+memory is enough for a 1,500-student school.
+
+**Try it without a key:** `AI_PROVIDER=mock` runs a scripted stand-in for the AI (it checks, solves, asks one
+question and finishes), so you can test the whole flow before adding a real key. Test once with your real key
+after deploying.
 
 ## Run locally
 
 ```bash
 pip install -r requirements.txt
-python app.py            # http://localhost:8000
-# or: gunicorn app:app --bind 0.0.0.0:8000
+export SECRET_KEY=dev COMMITTEE_CODE=COMMIT1 TEACHER_CODE=TEACH1 STUDENT_CODE=STUDY1 AI_PROVIDER=mock
+python app.py            # http://localhost:8000  (or: gunicorn app:app --workers 1 --threads 8 --timeout 600)
 ```
-
-## Deploy on Railway
-
-**From GitHub (recommended)**
-1. Put this folder in a GitHub repository (it already has `Dockerfile` and `railway.json`).
-2. In Railway: **New Project → Deploy from GitHub repo** → pick the repository. Railway builds the Dockerfile.
-3. In the service: **Settings → Networking → Generate Domain**. Health check: `/healthz`.
-
-**With the Railway CLI**
-```bash
-npm i -g @railway/cli
-railway login
-railway init        # create a project
-railway up          # build and deploy this folder
-railway domain      # get a public URL
-```
-
-**As a Railway template (one-click deploy for others)**
-1. Deploy the service from GitHub as above and check it works.
-2. In the project canvas: **Settings → Generate Template from Project** (or Workspace → **Templates → New Template** and add
-   this GitHub repo as the service source).
-3. Name it (e.g. *School Timetable Setup*), add a description, and **Create / Publish**. No variables or volumes are needed.
-4. Railway gives you a template URL `https://railway.com/deploy/<code>`. Add the button below with that code:
-
-```markdown
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/<code>)
-```
-
-No database or environment variables are needed. Each person's progress is kept in their own browser
-(and can be saved/loaded as a `.json` file from the top bar).
+Keep one gunicorn worker (with threads): a generation run lives in the web process.
 
 ## What's inside
 
 | Path | What |
 |---|---|
-| `app.py` | Flask app: pages, `/api/*` (sample, blank, build, import), `/download/*` |
-| `static/` | the step-by-step editor (plain HTML/CSS/JS, no build step) |
-| `ttgen/` | Python package that writes and reads the workbook (and solves it, used by the skill) |
-| `skill/school-timetable-generator/` | the skill: `SKILL.md`, `scripts/ttgen` (same package), `scripts/requirements.txt` |
+| `app.py` | routes: sign-in, the committee's editor and generate/chat/publish API, the timetable pages, PDFs, downloads |
+| `access.py` | access codes, personal codes, wrong-code limit (10 per 10 minutes per address) |
+| `runs.py` | generation runs in a background thread with the event log the chat shows |
+| `timetabler.py` | the timetabler's tools (check, show, solve, diagnose, ask, change, finish) and the no-AI flow |
+| `ai.py` | Anthropic / OpenAI / OpenRouter tool-calling loop; SKILL.md is the system prompt |
+| `store.py` | saved setup, runs and the published timetable on the volume |
+| `static/` | the committee's step-by-step editor and the sign-in page style |
+| `ttgen/` | the Python package: template, reader, solver, checks and the Excel/PDF/HTML outputs |
+| `skill/school-timetable-generator/` | the skill (`SKILL.md` + `scripts/ttgen`) for any AI agent outside the app |
 
 `ttgen/` and `skill/school-timetable-generator/scripts/ttgen/` are the same package; change both together.
 
-## Generate a timetable yourself (without an agent)
+## Command line (without the app)
 
 ```bash
 cd skill/school-timetable-generator/scripts
 pip install -r requirements.txt
 python -m ttgen check  My_School_Timetable_Setup.xlsx
-python -m ttgen solve  My_School_Timetable_Setup.xlsx --out My_School_Timetable.xlsx --time 300 --export Output
+python -m ttgen solve  My_School_Timetable_Setup.xlsx --out My_School_Timetable.xlsx --time 300 --export My_School_Outputs
+python -m ttgen export My_School_Timetable_Setup.xlsx My_School_Timetable.xlsx --out My_School_Outputs
 ```
-
-`--export Output` also writes one Excel workbook with every class, teacher, room and student timetable, a searchable
-offline HTML timetable finder, and PDFs (printable books plus a zip of single pages). To export a timetable you
-already have: `python -m ttgen export My_School_Timetable_Setup.xlsx My_School_Timetable.xlsx --out Output`.

@@ -1,0 +1,42 @@
+:root{--bg:#eef3f8;--panel:#fff;--glass:rgba(255,255,255,.84);--ink:#1b2330;--muted:#5d6678;--line:rgba(27,35,48,.10);--accent:#2563eb;--bad:#b3261e;--warn:#7a4b00;
+  --shade:rgba(30,50,90,.12);--veil:linear-gradient(rgba(255,255,255,0),rgba(255,255,255,0))}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1318;--panel:#171c23;--glass:rgba(23,28,35,.86);--ink:#e7ebf0;--muted:#9aa4b2;--line:rgba(255,255,255,.10);--accent:#5b8def;--bad:#f2918a;--warn:#f0c674;
+  --shade:rgba(0,0,0,.35);--veil:linear-gradient(rgba(12,16,22,.80),rgba(12,16,22,.80))}}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+body{min-height:100vh;background:var(--veil),url(/static/login-bg.jpg) center bottom/cover no-repeat fixed,var(--bg)}
+.muted{color:var(--muted)}.small{font-size:13px}a{color:var(--accent)}
+.err{color:var(--bad)}.warn{color:var(--warn);font-size:13px}
+
+/* front page: three choices across */
+.front{max-width:1000px;margin:0 auto;padding:13vh 24px 56px}
+.hero{text-align:center;margin-bottom:34px}
+.hero h1{font-size:34px;line-height:1.2;margin:0;letter-spacing:-.01em}
+.hero p{margin:6px 0 0;color:var(--muted);font-size:17px}
+.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.choice{display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;padding:28px 22px 22px;border:1px solid var(--line);border-radius:20px;
+  background:var(--glass);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:0 12px 32px var(--shade);color:var(--ink);text-decoration:none;
+  transition:transform .18s,box-shadow .18s,border-color .18s}
+.choice:hover,.choice:focus-visible{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 18px 40px var(--shade)}
+.choice img{flex:none;width:112px;height:112px;border-radius:24px}
+.choice .txt{display:flex;flex-direction:column;gap:6px}
+.choice b{font-size:18px;line-height:1.3}
+.choice .go{margin-top:auto;padding-top:4px;font-weight:600;font-size:14px;color:var(--accent)}
+.notes{max-width:640px;margin:22px auto 0;padding:12px 18px;border-radius:14px;background:var(--glass);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.notes p{margin:4px 0}
+
+/* code page and the other small pages */
+.login{max-width:420px;margin:14vh auto 40px;background:var(--glass);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid var(--line);
+  border-radius:20px;padding:28px 26px;box-shadow:0 12px 32px var(--shade)}
+.login h1{font-size:22px;margin:0}
+.picked{display:flex;align-items:center;gap:14px}.picked img{flex:none;border-radius:14px}.picked h1,.picked p{margin:0}.back{text-decoration:none}
+form{display:flex;flex-direction:column;gap:8px;margin:18px 0 8px}label{font-size:13px;color:var(--muted)}
+input{font:inherit;font-size:20px;letter-spacing:.12em;text-transform:uppercase;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink)}
+button{font:inherit;font-weight:600;padding:11px;border:0;border-radius:10px;background:var(--accent);color:#fff;cursor:pointer}
+
+@media (max-width:760px){
+  .front{padding:7vh 16px 40px}.hero{margin-bottom:22px}.hero h1{font-size:26px}
+  .choices{grid-template-columns:1fr;gap:12px}
+  .choice{flex-direction:row;text-align:left;align-items:center;gap:14px;padding:14px 16px;border-radius:16px}
+  .choice img{width:64px;height:64px;border-radius:14px}.choice b{font-size:16px}.choice .go{display:none}
+  .login{margin:7vh 16px;padding:22px 18px}
+}

@@ -3,18 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Timetable Setup</title>
+<title>Timetable committee</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="logo">▦</span><div><div class="title">Timetable Setup</div><div class="sub">Fill your school's timetable template step by step, then hand it to an AI agent with the timetable skill.</div></div></div>
+  <div class="brand"><span class="logo">▦</span><div><div class="title">Timetable committee</div><div class="sub">Committee: fill the setup step by step, generate, then publish to teachers and students.</div></div></div>
   <div class="top-actions">
     <span id="kindBadge" class="badge"></span>
     <button class="ghost" id="saveJson" title="Save your progress as a file">Save progress</button>
     <label class="ghost filebtn" title="Load a progress file">Load progress<input type="file" id="loadJson" accept=".json" hidden></label>
+    <a class="ghost filebtn" href="/timetable" target="_blank">Published timetable</a>
+    <a class="ghost filebtn" href="/logout">Sign out</a>
   </div>
 </header>
 <div class="layout">
@@ -24,6 +26,6 @@
 </div>
 <div id="pop" class="pop" hidden></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>
