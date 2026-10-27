@@ -6,13 +6,15 @@ chosen from the teaching periods of the unit's level (Day structure 'L', or 'A' 
 Students: for every class, each kind of student (from the Students sheet, or one per level tag) must not have two
 lessons at once; whole-class lessons never overlap a banded lesson that lists the class. Teachers never overlap.
 Room kinds are cumulative resources. Rules from '7 Rules' add or remove start positions, fixed busy times, per-day
-limits, alignment and day separation. The objective keeps after-school use and broken 'Prefer' rules low."""
+limits, alignment and day separation. The objective keeps after-school use and broken 'Prefer' rules low.
+Given a previous timetable, the search starts from it and each lesson that moves costs W_MOVE, so a tweak moves as few
+lessons as it can (cheaper than bending a Prefer rule or pushing a lesson after school)."""
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
 from .spec import WEEKDAYS, family as _family
 
-W_PREF, W_SLACK = 60, 40
+W_PREF, W_SLACK, W_MOVE = 60, 40, 10
 
 
 class Problem:
@@ -36,16 +38,18 @@ class Problem:
         for r in self.rows:
             if r.get("block"): byblock.setdefault(r["block"], []).append(r)
         binfo = {b["block"]: b for b in self.spec["blocks"]}
+        seen = collections.Counter()   # key: the same unit across solves, even after rows are added or removed
         for name, rs in byblock.items():
             cl = list(dict.fromkeys((binfo.get(name, {}).get("classes") or []) + [c for r in rs for c in r["classes"]]))
-            U.append(dict(id=f"B:{name}", kind="block", name=name, level=binfo.get(name, {}).get("level") or rs[0]["level"], classes=cl, rows=rs))
+            U.append(dict(id=f"B:{name}", key=f"B:{name}", kind="block", name=name, level=binfo.get(name, {}).get("level") or rs[0]["level"], classes=cl, rows=rs))
         for r in self.rows:
             if r.get("block"): continue
             if r.get("code_override"):
-                U.append(dict(id=f"G:{r['code']}", kind="group", name=r["code"], level=r["level"], classes=list(r["classes"]), rows=[r]))
+                U.append(dict(id=f"G:{r['code']}", key=f"G:{r['code']}", kind="group", name=r["code"], level=r["level"], classes=list(r["classes"]), rows=[r]))
             else:
                 for c in r["classes"]:
-                    U.append(dict(id=f"C:{c}:{r['subject']}:{len(U)}", kind="class", name=f"{c} {r['subject']}", level=r["level"], classes=[c], rows=[r]))
+                    k = f"C:{c}:{r['subject']}"; seen[k] += 1
+                    U.append(dict(id=f"C:{c}:{r['subject']}:{len(U)}", key=f"{k}#{seen[k]}", kind="class", name=f"{c} {r['subject']}", level=r["level"], classes=[c], rows=[r]))
         for u in U:
             cnt = collections.Counter()
             for r in u["rows"]:
@@ -114,8 +118,9 @@ class Problem:
                 prof[c].append(use)
         return prof
 
-def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None):
-    """stop: optional threading.Event; setting it ends the search early and keeps the best timetable so far"""
+def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previous=None):
+    """stop: optional threading.Event; setting it ends the search early and keeps the best timetable so far.
+    previous: {lesson key: start} from an earlier solve (each returned lesson has its 'key'); lessons stay there unless they must move"""
     P = Problem(spec); NP, ND = P.NP, P.ND
     m = cp_model.CpModel(); rules = spec.get("rules", [])
     notes = list(P.warn)
@@ -188,7 +193,8 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None):
             T = sorted({t for x in part for t in x["teachers"]})
             kinds = collections.Counter((x["room_kind"] or "classroom") for x in part)
             ext = {q for q in vals if any(P.grid[u["level"]][q // NP][q % NP + k] == "A" for k in range(ln))}
-            blocks.append(dict(u=u, ln=ln, i=i, part=part, st=st, iv=iv, day=dy, cost=cv, T=T, kinds=kinds, ext=ext))
+            blocks.append(dict(u=u, ln=ln, i=i, part=part, st=st, iv=iv, day=dy, cost=cv, T=T, kinds=kinds, ext=ext,
+                               key=f"{u['key']}|{ln}|{i}", vals=set(vals)))
     log(f"{len(P.units)} units, {len(blocks)} lessons, {len(P.days)} days x {NP} periods")
     # quick capacity checks (a full day of one lesson length cannot always be packed; these catch the obvious)
     tload = collections.Counter(); tlv = collections.defaultdict(set)
@@ -341,29 +347,96 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None):
                 for b in by_unit[u["id"]]:
                     v = m.NewBoolVar(""); m.Add(b["st"] == pos).OnlyEnforceIf(v); m.Add(b["st"] != pos).OnlyEnforceIf(v.Not()); lits.append(v)
                 if lits: m.AddBoolOr(lits)
+    # start from the previous timetable: a lesson whose old start is still allowed stays there unless moving it pays
+    if previous:
+        for b in blocks:
+            prev = previous.get(b["key"])
+            if prev not in b["vals"]: continue
+            b["mv"] = mv = m.NewBoolVar(""); m.Add(b["st"] == prev).OnlyEnforceIf(mv.Not()); extra_cost.append(mv * W_MOVE)
+        log(f"starting from the previous timetable: {sum(1 for b in blocks if 'mv' in b)} of {len(blocks)} lessons can stay where they were")
     m.Minimize(sum(b["cost"] for b in blocks) + sum(extra_cost))
     s = cp_model.CpSolver(); s.parameters.max_time_in_seconds = float(time_limit); s.parameters.num_workers = int(workers)
-    t0 = time.time()
+    t0 = time.time(); near = None
+    if previous:
+        near = _near(m, blocks, previous, busy_t, time_limit * 0.5, int(workers), log, stop)
+        if near:   # a complete, valid starting timetable: the search only has to improve it
+            m.Proto().solution_hint.vars.extend(range(len(near))); m.Proto().solution_hint.values.extend(near)
+        else:      # none found in time: prefer the old starts while searching
+            for b in blocks:
+                if "mv" in b: m.AddHint(b["st"], previous[b["key"]]); m.AddHint(b["mv"], 0)
+        s.parameters.max_time_in_seconds = max(10.0, time_limit - (time.time() - t0))
     class CB(cp_model.CpSolverSolutionCallback):
         def __init__(self): super().__init__()
         def on_solution_callback(self): log(f"  {time.time() - t0:5.0f}s  cost {self.ObjectiveValue():.0f}")
-    watcher = None
-    if stop is not None:
-        import threading
-        done = threading.Event()
-        def watch():
-            while not done.wait(0.5):
-                if stop.is_set(): s.stop_search(); return
-        watcher = threading.Thread(target=watch, daemon=True); watcher.start()
-    st = s.Solve(m, CB())
-    if watcher is not None: done.set()
+    st = _solve(s, m, stop, CB())
     status = s.StatusName(st)
     log(f"status {status} in {time.time() - t0:.0f}s")
-    if st not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return dict(status=status, problem=P, lessons=[], notes=notes + ["No timetable found: see the notes, relax a Must rule, or give more time."])
-    out = [dict(unit=b["u"], ln=b["ln"], i=b["i"], part=b["part"], start=s.Value(b["st"]), ext=s.Value(b["st"]) in b["ext"]) for b in blocks]
+    if st in (cp_model.OPTIMAL, cp_model.FEASIBLE): val, obj = s.Value, s.ObjectiveValue()
+    elif near: val, obj, status = (lambda v: near[v.Index()]), None, "FEASIBLE"   # the nearby timetable is still valid
+    else: return dict(status=status, problem=P, lessons=[], notes=notes + ["No timetable found: see the notes, relax a Must rule, or give more time."])
+    out = [dict(unit=b["u"], ln=b["ln"], i=b["i"], part=b["part"], start=val(b["st"]), ext=val(b["st"]) in b["ext"], key=b["key"]) for b in blocks]
     unsupported = [f"'{r['rule']}' is checked after solving, not enforced." for r in rules if r.get("rule") in ("Max periods in a row", "At least one recess a day")]
-    return dict(status=status, problem=P, lessons=out, notes=notes + sorted(set(unsupported)), objective=s.ObjectiveValue())
+    return dict(status=status, problem=P, lessons=out, notes=notes + sorted(set(unsupported)), objective=obj)
+
+def _near(m, blocks, previous, busy_t, budget, workers, log, stop):
+    """a valid timetable close to the previous one, found fast. The lessons that must move (their old time is no longer
+    allowed, or a teacher is now busy then) are freed with every lesson that shares a teacher or class with them, so
+    they can swap; all other lessons are fixed where they were. If that has no answer the circle widens once.
+    Returns the value of every model variable, or None."""
+    t_end = time.time() + budget
+    must = {id(b) for b in blocks if "mv" not in b or any(q in busy_t.get(t, ()) for t in b["T"] for q in range(previous[b["key"]], previous[b["key"]] + b["ln"]))}
+    if not must:   # nothing is pushed out directly: the old timetable may still work, or the solver names a lesson in the way
+        sol, must = _fixed(m, blocks, set(), previous, 1, min(10.0, budget / 4), stop, core=True)
+        if sol: log("the previous timetable still works as it is"); return sol
+        if not must: return None
+    free = set(must)
+    for wide in (1, 2):
+        T = {t for b in blocks if id(b) in free for t in b["T"]}; C = {c for b in blocks if id(b) in free for c in b["u"]["classes"]}
+        free |= {id(b) for b in blocks if T & set(b["T"]) or C & set(b["u"]["classes"])}
+        left = t_end - time.time()
+        if left < 1 or (stop is not None and stop.is_set()): return None
+        sol, _ = _fixed(m, blocks, free, previous, workers, left * 0.8 if wide == 1 else left, stop)
+        if sol:
+            log(f"found a timetable near the previous one: {len(must)} lessons had to move, {len(free)} were free to move")
+            return sol
+    return None
+
+def _fixed(m, blocks, free, previous, workers, secs, stop, core=False):
+    """solve a copy of the model with every lesson outside `free` kept where it was: first any valid placement of the
+    free lessons (fast), then the best one from there. -> (solution or None, lessons in the way: with core=True the
+    'keep' choices are assumptions, and an infeasible answer names some of them)"""
+    t_end = time.time() + secs
+    m2 = m.Clone(); fix = [b for b in blocks if "mv" in b and id(b) not in free]
+    if core: m2.AddAssumptions([m2.GetBoolVarFromProtoIndex(b["mv"].Index()).Not() for b in fix])
+    else:
+        for b in fix: m2.Add(m2.GetIntVarFromProtoIndex(b["st"].Index()) == previous[b["key"]])
+    best = None if core else m2.Clone()   # keeps the objective for the second pass
+    m2.ClearObjective()
+    s2 = cp_model.CpSolver(); s2.parameters.num_workers = workers; s2.parameters.max_time_in_seconds = secs / 2
+    s2.parameters.stop_after_first_solution = True
+    st = _solve(s2, m2, stop)
+    if st not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        if not (core and st == cp_model.INFEASIBLE): return None, set()
+        lit = {-b["mv"].Index() - 1: id(b) for b in fix}   # the index of 'stays where it was' (mv negated)
+        return None, {lit[k] for k in s2.SufficientAssumptionsForInfeasibility() if k in lit}
+    sol = list(s2.ResponseProto().solution)
+    if best is None: return sol, set()
+    best.Proto().solution_hint.vars.extend(range(len(sol))); best.Proto().solution_hint.values.extend(sol)
+    s3 = cp_model.CpSolver(); s3.parameters.num_workers = workers; s3.parameters.max_time_in_seconds = max(0.5, t_end - time.time())
+    st = _solve(s3, best, stop)
+    return (list(s3.ResponseProto().solution) if st in (cp_model.OPTIMAL, cp_model.FEASIBLE) else sol), set()
+
+def _solve(s, model, stop, cb=None):
+    """s.Solve(model), ended early (keeping the best found so far) when the `stop` event is set"""
+    if stop is None: return s.Solve(model, cb)
+    import threading
+    done = threading.Event()
+    def watch():
+        while not done.wait(0.5):
+            if stop.is_set(): s.stop_search(); return
+    threading.Thread(target=watch, daemon=True).start()
+    try: return s.Solve(model, cb)
+    finally: done.set()
 
 def _runs(sorted_pos, NP):
     out, cur = [], []

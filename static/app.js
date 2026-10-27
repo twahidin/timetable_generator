@@ -6,7 +6,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const KEY = "ttsetup.v1";
 const S = { kind: null, spec: null, meta: null, step: 0, brush: "L" };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
-  ["teachers", "4 Teachers"], ["blocks", "5 Blocks"], ["lessons", "6 Lessons"], ["rules", "7 Rules"], ["download", "Download"]];
+  ["teachers", "4 Teachers"], ["blocks", "5 Blocks"], ["lessons", "6 Lessons"], ["rules", "7 Rules"], ["generate", "Generate & publish"], ["download", "Files"]];
 
 /* ---------------- storage, server */
 function save() { try { localStorage.setItem(KEY, JSON.stringify({ kind: S.kind, spec: S.spec, step: S.step })); } catch (e) { } }
@@ -14,7 +14,7 @@ function saved() { try { const x = JSON.parse(localStorage.getItem(KEY) || "null
 async function getJSON(u) { const r = await fetch(u); if (!r.ok) throw new Error(await r.text()); return r.json(); }
 async function begin(kind, what) {
   S.kind = kind; S.meta = await getJSON(`/api/meta/${kind}`);
-  S.spec = await getJSON(`/api/${what}/${kind}`); S.step = 1; ensureDays(); save(); render();
+  S.spec = await getJSON(`/api/${what}/${kind}`); S.step = 1; ensureDays(); save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
   toast(what === "sample" ? "Sample school loaded: edit it or use it to see how the template works." : "Blank template started.");
 }
 async function adopt(spec, msg) {
@@ -130,6 +130,7 @@ function render() {
   const id = STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
   main.innerHTML = (VIEWS[id] || (() => ""))();
   renderIssues(); window.scrollTo(0, y);
+  if (id === "generate") { paintGen(); poll(); }
 }
 function count(id) { if (!S.spec) return ""; const m = { venues: "venues", classes: "classes", subjects: "subjects", teachers: "teachers", blocks: "blocks", lessons: "lessons", rules: "rules" }[id]; return m ? S.spec[m].length : ""; }
 function renderIssues() {
@@ -140,6 +141,14 @@ function renderIssues() {
     : '<div class="okmsg">Nothing to fix. The template is consistent.</div>'}</div>`;
 }
 
+
+function exportCard() {
+  return `<div class="card" id="printouts"><h2>Printouts from a finished timetable</h2><p class="muted">Already have the timetable workbook the agent made? Upload it with its setup workbook to get every timetable as PDFs (one page per class, teacher, room and student), one Excel file with them all, and a searchable HTML page.</p>
+    <div class="row" style="margin-top:10px"><label class="filebtn">Setup workbook (.xlsx)<input type="file" id="exSetup" accept=".xlsx" hidden></label><span class="muted" id="exSetupName">none chosen</span></div>
+    <div class="row" style="margin-top:8px"><label class="filebtn">Timetable workbook (.xlsx)<input type="file" id="exTT" accept=".xlsx" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
+    <div class="row" style="margin-top:10px"><label><input type="checkbox" id="exSingle" checked> Also a separate PDF for every class, teacher, room and student</label></div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="exGo">Make printouts (.zip)</button><span class="muted" id="exMsg"></span></div></div>`;
+}
 const VIEWS = {
   start() {
     const sv = saved();
@@ -151,10 +160,11 @@ const VIEWS = {
         <button data-begin="primary|blank"><b>Primary school · blank</b><span class="muted">Typical subjects and day shape for P1–P6; you add the rest.</span></button>
       </div>
       <div class="row" style="margin-top:14px">
-        ${sv ? `<button class="primary" id="resume">Continue where you left off (${esc(sv.spec.school.name)})</button>` : ""}
+        ${G.server && G.server.spec ? `<button class="primary" id="serverSetup">Open the school's saved setup (${esc(G.server.spec.school.name)}, saved ${esc(G.server.saved_at)})</button>` : ""}
+        ${sv ? `<button class="${G.server && G.server.spec ? "" : "primary"}" id="resume">Continue in this browser (${esc(sv.spec.school.name)})</button>` : ""}
         <label class="filebtn">Open a setup workbook (.xlsx)<input type="file" id="importX" accept=".xlsx" hidden></label>
       </div></div>
-      <div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a block, a lesson with no periods).</li><li>On <b>Download</b>, get your setup workbook (.xlsx) and the timetable skill.</li><li>Give both to an AI agent that can run code (for example Claude with the skill added) and ask it to generate the timetable. It returns a workbook with a grid for every class, teacher and room.</li></ol></div>`;
+      <div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a block, a lesson with no periods).</li><li>On <b>Generate &amp; publish</b>, make the timetable here: the AI timetabler checks, solves and asks you about conflicts in a chat. Publish when happy; teachers and students then sign in with their codes.</li><li>Or, on <b>Files</b>, download the setup workbook and the timetable skill to use with any AI agent.</li></ol></div>${exportCard()}`;
   },
   school() {
     const s = sc(); const NP = Number(s.periods_per_day); const days = dayNames();
@@ -237,9 +247,18 @@ const VIEWS = {
       </table></div><div class="row" style="margin-top:10px"><button data-add="rules">+ Add rule</button></div></div>
       <div class="card"><h2>Rule types</h2><div class="tablewrap" style="max-height:none"><table><tr><th>Rule</th><th>Applies to</th><th>What it means</th><th>Example</th></tr>${RT.map(t => `<tr><td><b>${esc(t.rule)}</b></td><td>${esc(t.scopes)}</td><td>${esc(t.meaning)}</td><td class="muted">${esc(t.example)}</td></tr>`).join("")}</table></div></div>`;
   },
+  generate() {
+    const st = G.st || {};
+    return `<div class="card"><h1>Generate & publish</h1><p class="lead">Generate makes the timetable from this setup (it is saved to the server first). With the AI timetabler, it checks the setup, runs the solver and asks you in the chat about anything that does not fit; without AI, it checks and solves, and you read the results. Nothing is visible to teachers or students until you publish.</p>
+      <div class="row"><button class="primary" id="genAI">Generate with the AI timetabler</button><button id="genPlain">Generate without AI</button><button class="danger" id="genStop" hidden>Stop</button></div>
+      <p class="muted small">${st.ai ? (st.ai.ok ? `AI: ${esc(st.ai.provider)} · ${esc(st.ai.model)}` : `AI not set up: ${esc(st.ai.why)} Add AI_PROVIDER, AI_API_KEY and AI_MODEL in Railway.`) : ""}${st.solve_seconds ? ` · each solve runs up to ${Math.round(st.solve_seconds / 60)} min` : ""}</p></div>
+      <div class="gen"><div class="card chat"><h2>Timetabler</h2><div id="chatlog" class="chatlog"></div><div id="progress" class="progress"></div>
+        <form id="chatform" class="chatform" onsubmit="event.preventDefault(); sendChat(document.getElementById('chatin').value)"><input id="chatin" autocomplete="off"><button class="primary" id="chatsend">Send</button></form></div>
+        <div class="side"><div class="card" id="resultCard"></div><div class="card" id="pubCard"></div></div></div>`;
+  },
   download() {
     const { out } = issues(); const n = Object.entries(out).filter(([k]) => k !== "global").reduce((a, [, v]) => a + Object.keys(v).length, 0);
-    return `<div class="card"><h1>Download</h1><p class="lead">Your setup workbook keeps the drop-downs and formulas, so it can still be edited in Excel. Give it, with the timetable skill, to an AI agent that can run code.</p>
+    return `<div class="card"><h1>Files</h1><p class="lead">Your setup workbook keeps the drop-downs and formulas, so it can still be edited in Excel. To generate here, use <b>Generate &amp; publish</b>; to generate elsewhere, give the workbook and the timetable skill to an AI agent that can run code.</p>
       <div><span class="stat"><b>${S.spec.classes.length}</b> classes</span><span class="stat"><b>${S.spec.teachers.length}</b> teachers</span><span class="stat"><b>${S.spec.blocks.length}</b> blocks</span><span class="stat"><b>${S.spec.lessons.length}</b> lesson rows</span><span class="stat"><b>${S.spec.rules.length}</b> rules</span></div>
       ${n ? `<p class="issue" style="margin-top:12px">${n} rows still have something to fix (see the right-hand panel). You can download anyway; the agent will report them.</p>` : '<p class="okmsg" style="margin-top:12px">Everything checks out.</p>'}</div>
       <div class="dl">
@@ -250,8 +269,8 @@ const VIEWS = {
       <div class="card" style="margin-top:16px"><h2>Generate the timetable with an AI agent</h2><ol class="howto">
         <li>In Claude (or another agent that can run Python), add the skill: upload the .zip as a skill, or attach SKILL.md to the conversation.</li>
         <li>Upload your setup workbook and ask: <i>"Generate our timetable from this setup. Report anything that does not fit."</i></li>
-        <li>The agent checks the inputs, solves (a few minutes for a typical school), and returns a workbook with a grid for every class, teacher and room, plus what (if anything) had to go after school.</li>
-        <li>Change the setup here or in Excel and ask again: the agent re-solves from the new file.</li></ol></div>`;
+        <li>The agent checks the inputs, solves (a few minutes for a typical school), and returns the timetables: one Excel workbook with every class, teacher, room and student, PDFs (one page each) to print or send, and a searchable HTML page, plus what (if anything) had to go after school.</li>
+        <li>Change the setup here or in Excel and ask again: the agent re-solves from the new file.</li></ol></div>${exportCard()}`;
   },
 };
 
@@ -272,6 +291,13 @@ document.addEventListener("click", async e => {
   if (b.dataset.pop) { openPop(b); return; }
   if (b.classList.contains("issue") && b.dataset.go) { S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
+  if (b.id === "serverSetup") { await adopt(G.server.spec, "Opened the school's saved setup."); return; }
+  if (b.id === "genAI" || b.id === "genPlain") { generate(b.id === "genAI"); return; }
+  if (b.id === "genStop") { await post("/api/stop"); poll(); return; }
+  if (b.id === "publish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away.")) return; const j = await post("/api/publish"); if (j) { toast("Publishing… about a minute."); poll(); } return; }
+  if (b.id === "keepChanges") { const j = await post("/api/keep-changes"); if (j && j.spec) { S.spec = j.spec; save(); toast("The AI's changes are now in your setup."); poll(); } return; }
+  if (b.dataset.answer !== undefined) { sendChat(b.dataset.answer); return; }
+  if (b.id === "exGo") { makePrintouts(); return; }
   if (b.id === "saveJson") { const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${(S.spec && sc().name) || "timetable"}_setup.json`); return; }
 });
 let painting = false;
@@ -297,7 +323,7 @@ document.addEventListener("change", async e => {
   const t = path.match(/^spec\.lessons\.(\d+)\.teachers\.(\d+)$/); if (t) S.spec.lessons[t[1]].teachers = (S.spec.lessons[t[1]].teachers || []).map(x => x || null);
   if (/^spec\.school\.(weeks|periods_per_day)$/.test(path)) ensureDays();
   if (/\.(room|class|subject|name|block)$/.test(path)) renameRefs(e.target, path, v);
-  save(); render();
+  save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
 });
 function renameRefs() { /* references are by name; renaming leaves old names flagged as "(not on list)" for the user to fix */ }
 
@@ -308,7 +334,7 @@ function addRow(k) {
     subjects: { subject: "", code: "", tag: "-", dept: (sc().departments || [])[0], periods: {} }, teachers: { name: "", short: "", dept: (sc().departments || [])[0], allowance: sc().type === "primary" ? 36 : 64, provisional: "No", can_teach: [] },
     blocks: { block: "", level: lv, classes: [] }, lessons: { level: lv, subject: null, block: null, classes: [], teachers: [], students: null },
     rules: { scope: "Teacher", target: null, rule: "Not available", week: "Both", day: "All", strength: "Must" } }[k];
-  S.spec[k].push(JSON.parse(JSON.stringify(blank))); save(); render();
+  S.spec[k].push(JSON.parse(JSON.stringify(blank))); save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
   const rows = document.querySelectorAll(`tr[id^="${k}-"]`); const last = rows[rows.length - 1]; if (last) { last.scrollIntoView({ block: "center" }); const f = last.querySelector("input,select"); if (f) f.focus(); }
 }
 function helper(k) {
@@ -352,10 +378,115 @@ function commitPop() {
   const pop = $("#pop"); if (pop.hidden) return; const path = pop.dataset.path;
   if (pop.dataset.what === "classes") setPath(path, [...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value));
   else setPath(path, readCt().filter(c => c.subject));
-  pop.hidden = true; save(); render();
+  pop.hidden = true; save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
+}
+
+/* ---------------- generate, chat, publish */
+const G = { server: null, st: null, after: 0, events: [], timer: null };
+async function post(url, body) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.href = "/login"; return null; }
+  if (!r.ok) { toast(j.error || "Something went wrong."); return null; }
+  return j;
+}
+async function generate(withAI) {
+  if (!S.spec) { toast("Open or start a setup first."); return; }
+  G.events = []; G.after = 0;
+  const j = await post("/api/generate", { spec: S.spec, ai: withAI });
+  if (j) { toast(withAI ? "The AI timetabler has started." : "Generating…"); poll(); }
+}
+async function sendChat(text) {
+  text = (text || "").trim(); if (!text) return;
+  const j = await post("/api/message", { text }); if (j) { const i = $("#chatin"); if (i) i.value = ""; poll(); }
+}
+async function poll() {
+  clearTimeout(G.timer);
+  if (G.inflight) { G.timer = setTimeout(poll, 500); return; }
+  G.inflight = true;
+  try {
+    const r = await fetch(`/api/status?after=${G.after}`);
+    if (r.status === 401) { location.href = "/login"; return; }
+    const st = await r.json(); G.st = st;
+    if (st.run) {
+      if (G.runId !== st.run.id) { G.runId = st.run.id; G.events = []; if (G.after) { G.after = 0; G.inflight = false; return poll(); } }
+      G.events.push(...st.run.events); if (st.run.events.length) G.after = st.run.events[st.run.events.length - 1].n;
+    }
+    if (STEPS[S.step][0] === "generate") paintGen();
+  } catch (e) { }
+  G.inflight = false;
+  const busy = G.st && G.st.run && G.st.run.busy;
+  G.timer = setTimeout(poll, STEPS[S.step][0] === "generate" ? (busy ? 1500 : 5000) : 15000);
+}
+const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
+function eventHTML(e, last) {
+  const items = e.items && e.items.length ? `<ul>${e.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : "";
+  switch (e.type) {
+    case "assistant": return `<div class="msg ai">${md(e.text)}</div>`;
+    case "user": return `<div class="msg me">${md(e.text)}</div>`;
+    case "summary": return `<div class="msg ai sum"><b>Summary</b><br>${md(e.text)}</div>`;
+    case "question": {
+      const open = G.st && G.st.run && G.st.run.waiting && e.n === last;
+      return `<div class="msg ai q">${md(e.text)}${open ? `<div class="opts">${(e.options || []).map(o => `<button class="small" data-answer="${esc(o)}">${esc(o)}</button>`).join("")}</div><div class="muted small">Pick one or type your own answer below.</div>` : ""}</div>`;
+    }
+    case "change": return `<div class="ev change"><b>Setup changed:</b> ${esc(e.text)}${items}</div>`;
+    case "timetable": return `<div class="ev tt ${e.data && e.data.ok ? "good" : "warn"}"><b>Timetable ${e.data ? "#" + e.data.n : ""}</b> · ${esc(e.text)} <a href="/preview" target="_blank">Preview</a></div>`;
+    case "nosolution": return `<div class="ev bad"><b>${esc(e.text)}</b>${items}</div>`;
+    case "error": return `<div class="ev bad">${esc(e.text)}</div>`;
+    case "published": return `<div class="ev good"><b>${esc(e.text)}</b></div>`;
+    case "check": return `<div class="ev">${esc(e.text)}${items ? `<details><summary>Details</summary>${items}</details>` : ""}</div>`;
+    case "moved": return `<div class="ev">${esc(e.text)}${items ? `<details><summary>Which lessons moved</summary>${items}</details>` : ""}</div>`;
+    default: return `<div class="ev">${esc(e.text || "")}</div>`;
+  }
+}
+function paintGen() {
+  const st = G.st; if (!st || !$("#chatlog")) return;
+  const run = st.run, busy = run && run.busy, aiok = st.ai && st.ai.ok;
+  const lastQ = [...G.events].reverse().find(e => e.type === "question");
+  const log = $("#chatlog"), atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.innerHTML = G.events.length ? G.events.map(e => eventHTML(e, lastQ && lastQ.n)).join("") : `<div class="muted">Nothing generated yet. Press a Generate button above.</div>`;
+  if (atBottom) log.scrollTop = log.scrollHeight;
+  $("#progress").textContent = run && run.waiting ? "Waiting for your answer." : run && run.progress ? run.progress : (busy ? "Working…" : "");
+  $("#genAI").disabled = !aiok || busy; $("#genPlain").disabled = busy; $("#genStop").hidden = !busy;
+  const chatOn = run && run.ai; $("#chatin").disabled = !chatOn; $("#chatsend").disabled = !chatOn;
+  $("#chatin").placeholder = chatOn ? (run.waiting ? "Type your answer…" : "Ask or tell the timetabler something…") : "The chat works when you generate with the AI timetabler.";
+  const s = run && run.solved;
+  $("#resultCard").innerHTML = `<h2>Latest timetable</h2>` + (s ? `<p class="${s.ok ? "okmsg" : "issue"}">${s.ok ? "All checks passed" : `${s.problems.length} problems`} · ${s.lessons} lessons · ${s.after.length ? `${s.after.length} after school` : "nothing after school"}</p>
+      ${s.after.length ? `<details><summary>After-school lessons</summary><ul>${s.after.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
+      ${s.problems.length ? `<details open><summary>Problems</summary><ul>${s.problems.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
+      ${s.notes.length ? `<details><summary>Notes</summary><ul>${s.notes.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
+      <p class="muted small">Made ${esc(s.at)}${run.changes ? ` · the AI changed the setup ${run.changes} time${run.changes > 1 ? "s" : ""}` : ""}.</p>
+      <div class="row"><a href="/preview" target="_blank"><button>Preview</button></a><button class="primary" id="publish" ${busy ? "disabled" : ""}>Publish</button>
+      ${run.changes ? `<button id="keepChanges" ${busy ? "disabled" : ""}>Keep the AI's changes in my setup</button>` : ""}</div>`
+    : `<p class="muted">No timetable yet.</p>`);
+  const p = st.published, f = p ? p.files || {} : {};
+  $("#pubCard").innerHTML = `<h2>Published</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
+      <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
+      <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>
+      ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
+      <h3>Personal student codes</h3>${p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students (Students sheet) to give each one a personal code.</p>`}`
+    : `<p class="muted">Nothing published yet. Teachers and students see a "not published yet" page.</p>`) +
+    `<h3>Access codes</h3><ul class="codes">${[["committee", "Committee"], ["teacher", "Teachers"], ["student", "Students"]].map(([k, t]) => `<li>${t}: ${st.codes && st.codes[k] ? "set" : "<b>not set</b>"}</li>`).join("")}</ul>
+    ${(st.code_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")}${st.volume ? "" : `<p class="issue">No Railway volume: the published timetable will be lost on the next deploy. Add a volume (see README).</p>`}`;
 }
 
 /* ---------------- downloads */
+document.addEventListener("change", e => {
+  if (e.target.id === "exSetup" || e.target.id === "exTT") { const f = e.target.files[0]; $("#" + e.target.id + "Name").textContent = f ? f.name : "none chosen"; }
+});
+async function makePrintouts() {
+  const a = $("#exSetup").files[0], b = $("#exTT").files[0], msg = $("#exMsg");
+  if (!a || !b) { toast("Choose the setup workbook and the timetable workbook."); return; }
+  const fd = new FormData(); fd.append("setup", a); fd.append("timetable", b); fd.append("single", $("#exSingle").checked ? "1" : "0");
+  const go = $("#exGo"); go.disabled = true; msg.textContent = "Making printouts… a school with 600 students takes about a minute.";
+  try {
+    const r = await fetch("/api/export", { method: "POST", body: fd });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); msg.textContent = ""; toast(j.error || "Could not make the printouts."); return; }
+    const name = (r.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)"?/);
+    dl(await r.blob(), name ? name[1] : "Timetables.zip"); msg.textContent = r.headers.get("X-Checks") || "Done.";
+  } catch (err) { msg.textContent = ""; toast("Could not make the printouts: " + err.message); }
+  finally { go.disabled = false; }
+}
 function dl(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
 async function buildXlsx() {
   toast("Building your workbook…");
@@ -364,4 +495,4 @@ async function buildXlsx() {
   dl(await r.blob(), `${(sc().name || "School").replace(/[^\w -]/g, "").trim().replace(/ /g, "_")}_Timetable_Setup.xlsx`);
 }
 
-render();
+(async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
