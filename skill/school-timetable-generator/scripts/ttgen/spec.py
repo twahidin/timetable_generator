@@ -54,8 +54,21 @@ def end_by(school):
         a, b = (idx(span.group(1)), idx(span.group(2))) if span else (None, None)
         days = WEEKDAYS[a:b + 1] if a is not None and b is not None else [WEEKDAYS[i] for i in (idx(w) for w in re.findall(r"[a-z]+", txt)) if i is not None]
         h, m = (str(v).replace(".", ":").split(":") + ["0"])[:2]
-        out.append((set(days), int(h) * 60 + int(m[:2] or 0)))
+        if h.strip().isdigit() and (m[:2] or "0").isdigit(): out.append((set(days), int(h) * 60 + int(m[:2] or 0)))   # not a time: ignored (the editor flags it)
     return out
+
+def periods_by_day(school, days):
+    """{day name: periods of the day lessons may use} for the days a 'Lessons end by' row trims: a lesson must end by the time"""
+    h, m = map(int, str(school["start_time"]).split(":")[:2]); NP = int(school["periods_per_day"]); out = {}
+    for weekdays, cut in end_by(school):
+        keep = max(0, min(NP, (cut - h * 60 - m) // int(school["period_minutes"])))
+        for d in days:
+            if str(d).split()[-1][:3] in weekdays: out[d] = min(out.get(d, NP), keep)
+    return out
+
+def trim_day(row, keep):
+    """a Day structure row with the periods from `keep` on turned into no school"""
+    return row if keep is None else row[:keep] + "." * (len(row) - keep)
 
 def no_free_periods(school):
     """the 'Students have no free periods' row on Settings: 'Yes', 'Prefer', 'No' or None"""

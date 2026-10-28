@@ -12,7 +12,7 @@ lessons as it can (cheaper than bending a Prefer rule or pushing a lesson after 
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
-from .spec import WEEKDAYS, family as _family, end_by as _end_by
+from .spec import WEEKDAYS, family as _family, periods_by_day, trim_day
 
 W_PREF, W_SLACK, W_MOVE = 60, 40, 10
 
@@ -26,11 +26,8 @@ class Problem:
         if lv0 is None: raise ValueError("Day structure is empty.")
         self.days = list(ds[lv0].keys()); self.ND = len(self.days)
         self.grid = {lv: [(ds.get(lv, {}).get(d) or "." * self.NP).ljust(self.NP, ".")[:self.NP] for d in self.days] for lv in self.levels}
-        h, m = map(int, str(sc["start_time"]).split(":")[:2])
-        for days, cut in _end_by(sc):   # Settings 'Lessons end by (...)': periods that end after the time are no school on those days
-            keep = max(0, min(self.NP, (cut - h * 60 - m) // int(sc["period_minutes"])))
-            for lv in self.levels:
-                self.grid[lv] = [row[:keep] + "." * (self.NP - keep) if d.split()[-1][:3] in days else row for d, row in zip(self.days, self.grid[lv])]
+        self.keep = periods_by_day(sc, self.days)   # Settings 'Lessons end by (...)': later periods are no school on those days
+        self.grid = {lv: [trim_day(row, self.keep.get(d)) for d, row in zip(self.days, rows)] for lv, rows in self.grid.items()}
         self.cls = {c["class"]: c for c in spec["classes"]}
         self.level_of = {c["class"]: c["level"] for c in spec["classes"]}
         self.rows = [x for x in spec["lessons"] if x.get("periods") and x.get("classes")]

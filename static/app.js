@@ -134,8 +134,13 @@ function canTeach(t, subject, level) {
   return (tt.can_teach || []).some(c => c.subject === subject && (!c.levels || c.levels === "All" || c.levels === level || c.levels === bands()[level]));
 }
 function issues() {
-  const out = { lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
+  const out = { school: {}, lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
   const add = (k, i, m) => (out[k][i] = out[k][i] || []).push(m);
+  (sc().extra_settings || []).forEach((x, i) => {   // 'Lessons end by (...)' rows on Settings
+    if (!String(x[0]).toLowerCase().startsWith("lessons end by")) return;
+    if (!/^\d{1,2}:\d{2}$/.test(String(x[1] || ""))) { add("school", i, `${x[0]}: give a time such as 12:40.`); return; }
+    if (Math.floor((mins(x[1]) - mins(sc().start_time)) / Number(sc().period_minutes || 20)) <= 0) add("school", i, `${x[0]}: ${x[1]} is before the first period ends, so no lesson fits on those days.`);
+  });
   const info = lessonInfo(); const codes = {};
   info.forEach((x, i) => { if (x.code && x.code !== "Entire Class") codes[x.code] = (codes[x.code] || 0) + 1; });
   S.spec.lessons.forEach((x, i) => {
@@ -279,7 +284,10 @@ const VIEWS = {
       <div class="grid2">${SET().map(x => `<label class="f">${esc(x.label)} ${x.number
         ? `<input data-set="${x.key}" type="number" min="1" value="${esc(settingValue(x.key))}" placeholder="no limit">`
         : `<select data-set="${x.key}">${["Yes", "No"].map(v => opt(v, settingValue(x.key))).join("")}</select>`}</label>`).join("")}
-      ${(s.extra_settings || []).map((x, i) => `<label class="f">${esc(x[0])} ${inp(`spec.school.extra_settings.${i}.1`, x[1])}${x[2] ? `<span class="muted small">${esc(x[2])}</span>` : ""}</label>`).join("")}</div></div>
+      ${(s.extra_settings || []).map((x, i) => { const k = `spec.school.extra_settings.${i}.1`, lab = String(x[0]).toLowerCase();
+        const field = lab.startsWith("lessons end by") ? inp(k, x[1], "time")   // trims the day: no lesson runs past this time on those days
+          : lab.startsWith("students have no free periods") ? `<select data-k="${k}">${["Yes", "Prefer", "No"].map(v => opt(v, x[1])).join("")}</select>` : inp(k, x[1]);
+        return `<label class="f" id="school-${i}">${esc(x[0])} ${field}${x[2] ? `<span class="muted small">${esc(x[2])}</span>` : ""}</label>`; }).join("")}</div></div>
       <div class="card"><h2>Day structure</h2><div class="legend">Brush: ${["L", "R", "U", "F", "A", ""].map(c => `<button class="small ${S.brush === c ? "primary" : ""}" data-brush="${c}"><i class="c-${c}" style="width:12px;height:12px;display:inline-block;border-radius:3px;vertical-align:-2px"></i> ${{ L: "Lesson", R: "Recess", U: "Lunch", F: "Flag / assembly", A: "After-school slot", "": "No school" }[c]}</button>`).join("")}</div>
       <p class="muted" style="margin:4px 0 10px">Click or drag across cells to paint them with the brush.</p>
       <div class="tablewrap"><table class="dsgrid">${head}${lvRows}</table></div></div>`;

@@ -15,6 +15,7 @@ from openpyxl.worksheet.pagebreak import Break
 from openpyxl.worksheet.merge import MergedCellRange
 from .reader import read_template, derive
 from .report import LESSON_HEADERS, short_subject, clock
+from .spec import periods_by_day, trim_day
 
 ENTIRE = "Entire Class"
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
@@ -62,7 +63,8 @@ def _week_day(name):
 def _model(spec, days, lessons, notes=(), status=None):
     sc = spec["school"]; NP = int(sc["periods_per_day"]); ND = len(days); ds = spec["day_structure"]
     levels = [str(x) for x in sc["levels"]]
-    grid = {lv: [(ds.get(lv, {}).get(d) or "." * NP).ljust(NP, ".")[:NP] for d in days] for lv in levels}
+    keep = periods_by_day(sc, days)   # Settings 'Lessons end by (...)': later periods are no school on those days
+    grid = {lv: [trim_day((ds.get(lv, {}).get(d) or "." * NP).ljust(NP, ".")[:NP], keep.get(d)) for d in days] for lv in levels}
     times = [[clock(sc, p), clock(sc, p + 1)] for p in range(NP)]
     classes = [dict(name=str(c["class"]), level=str(c.get("level") or ""), size=c.get("size") or "", home=c.get("home_room") or "") for c in spec["classes"]]
     seen = {c["name"] for c in classes}
@@ -107,7 +109,7 @@ def _model(spec, days, lessons, notes=(), status=None):
         else: planned[("G", x["code"])] = int(x["periods"])
     m = dict(school=dict(name=sc.get("name") or "School", timetable=sc.get("timetable") or "Timetable", weeks=int(sc.get("weeks") or 1),
                          period_minutes=int(sc["period_minutes"]), start_time=str(sc["start_time"]), kind=sc.get("kind") or ""),
-             days=list(days), NP=NP, ND=ND, times=times, grid=grid, levels=levels, classes=classes, teachers=teachers, rooms=rooms,
+             days=list(days), NP=NP, ND=ND, times=times, grid=grid, keep=keep, levels=levels, classes=classes, teachers=teachers, rooms=rooms,
              subjects=subjects, lessons=lessons, students=students, room_cap=cap, planned=planned, notes=list(notes or []), status=status,
              generated=datetime.date.today().strftime("%d %b %Y"))
     m["class_ix"] = {c["name"]: c for c in classes}; m["teacher_ix"] = {t["name"]: t for t in teachers}; m["room_ix"] = {r["name"]: r for r in rooms}
@@ -215,6 +217,9 @@ def check_model(m):
     probs += [f"Class clash: {c} on {w}." for c, d, w in spans(ccl)][:30]
     for x in L:
         lv = x["level"] if x["level"] in m["grid"] else m["class_ix"].get((x["classes"] or [""])[0], {}).get("level")
+        k = m.get("keep", {}).get(m["days"][x["d"]])
+        if k is not None and x["p"] + x["n"] > k:   # Settings 'Lessons end by': runs past the time for its day
+            probs.append(f"{x['subject']} {x['group']} ends after {m['times'][min(k, m['NP'] - 1)][0]} on {where(x['d'], x['p'])} (Settings: Lessons end by)."); continue
         if lv in m["grid"] and any(m["grid"][lv][x["d"]][q] not in "LA" for q in range(x["p"], min(m["NP"], x["p"] + x["n"]))):
             probs.append(f"{x['subject']} {x['group']} sits in a break or outside the day on {where(x['d'], x['p'])}.")
     placed = collections.Counter(); seen = set()

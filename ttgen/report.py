@@ -92,7 +92,9 @@ def check(res):
             if any(x["unit"]["kind"] == "class" for x in xs): probs.append(f"Class clash: {c} at {P.days[q // NP]} period {q % NP}.")
             else: side += 1
     for x in L:
-        lv = x["unit"]["level"]
+        lv = x["unit"]["level"]; d = P.days[x["pos"][0] // NP]; keep = P.keep.get(d)
+        if keep is not None and x["pos"][-1] % NP >= keep:   # Settings 'Lessons end by': the lesson runs past the time for its day
+            probs.append(f"{x['unit']['name']} ends after {clock(P.spec['school'], keep)} on {d} (Settings: Lessons end by)."); continue
         for q in x["pos"]:
             if P.grid[lv][q // NP][q % NP] not in "LA": probs.append(f"{x['unit']['name']} sits in a break at {P.days[q // NP]} period {q % NP}.")
     for r in P.spec.get("rules", []):
