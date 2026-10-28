@@ -87,6 +87,15 @@ dialog::backdrop{background:rgba(15,20,30,.35)}dialog .dh{padding:14px 18px;bord
 dialog .db{padding:10px 18px 16px;max-height:60vh;overflow:auto}dialog .db table{width:100%;border-collapse:collapse;font-size:13px}dialog .db td{padding:6px 6px;border-bottom:1px solid var(--line);vertical-align:top}
 .empty{color:var(--muted);padding:30px 0;text-align:center}
 .checks li{margin:4px 0}.okline{color:var(--ok);font-weight:600}.badline{color:var(--bad)}
+/* served by the app: the sign-in page's sky behind frosted panels (a saved copy of this page stays plain) */
+html.inapp{--veil:rgba(255,255,255,.18);--glass:color-mix(in srgb,var(--panel) 84%,transparent);background:linear-gradient(var(--veil),var(--veil)),url(/static/login-bg.jpg) center bottom/cover no-repeat fixed,var(--bg)}
+@media (prefers-color-scheme:dark){html.inapp:not([data-theme="light"]){--veil:rgba(12,16,22,.84)}}
+html.inapp[data-theme="dark"]{--veil:rgba(12,16,22,.84)}
+html.inapp body{background:transparent;min-height:100vh}
+html.inapp header.top,html.inapp nav.tabs{background:color-mix(in srgb,var(--panel) 72%,transparent);-webkit-backdrop-filter:blur(16px) saturate(1.2);backdrop-filter:blur(16px) saturate(1.2)}
+html.inapp .card,html.inapp .browse{background:var(--glass);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-color:color-mix(in srgb,var(--panel) 55%,transparent);border-radius:16px}
+html.inapp:not([data-theme="dark"]) .card,html.inapp:not([data-theme="dark"]) .browse{box-shadow:0 1px 2px rgba(30,50,90,.06),0 10px 30px rgba(30,50,90,.10)}
+@media print{html.inapp{background:#fff}html.inapp .card{background:none;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none}}
 @media (max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:12px 16px 30px}header.top{gap:10px}.brand{flex:1 1 0}.status{font-size:11px;padding:4px 8px}.browse{position:static;max-height:300px}header.top{flex-wrap:wrap;padding:10px 16px}.search{order:3;max-width:none;flex-basis:100%}
   nav.tabs{padding:4px 16px 0}.stats{margin-left:0}.card{padding:14px}}
 @media print{@page{size:A4 landscape;margin:9mm}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
@@ -112,6 +121,7 @@ dialog .db{padding:10px 18px 16px;max-height:60vh;overflow:auto}dialog .db table
 "use strict";
 const D = DATA, $ = (s, el = document) => el.querySelector(s);
 const APP = D.app || null, MODE = APP ? APP.mode : "full";
+if (APP) document.documentElement.classList.add("inapp");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const NP = D.NP, DAYS = D.days, ND = DAYS.length, WEEKS = D.school.weeks || 1, PER_WEEK = Math.max(1, Math.floor(ND / WEEKS));
 const ENTIRE = "Entire Class", BREAK = { F: "Assembly", R: "Recess", U: "Lunch" };

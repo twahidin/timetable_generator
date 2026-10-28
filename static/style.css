@@ -39,6 +39,9 @@ th{position:sticky;top:0;background:#f0f3f8;color:var(--muted);font-weight:600;f
 td{padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td input,td select{width:100%}
 td.num input{width:70px}
+/* rules: each drop-down is as wide as its longest choice, so names are never cut off (the table scrolls sideways) */
+table.ruletable td select{width:auto;min-width:100%}
+table.ruletable td.note input{min-width:220px}
 td.calc{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12.5px}
 tr.bad td{background:var(--warn-bg)}
 .chips{display:flex;gap:4px;flex-wrap:wrap;cursor:pointer;min-height:28px;align-items:center;border:1px dashed #cdd5e1;border-radius:6px;padding:3px 6px;background:var(--input)}
@@ -109,3 +112,32 @@ details summary{cursor:pointer;font-size:12.5px;color:var(--muted)}
 details ul{margin:4px 0 6px 18px;padding:0;font-size:12.5px}
 @media (max-width:1100px){.gen{grid-template-columns:1fr}}
 button:disabled{opacity:.45;cursor:not-allowed;filter:none}
+
+/* ---- look: the sign-in page's sky behind frosted-glass panels ---- */
+:root{--glass:rgba(255,255,255,.80);--glass-line:rgba(255,255,255,.75);--shadow:0 1px 2px rgba(30,50,90,.06),0 10px 30px rgba(30,50,90,.10);--chip:#e9effa}
+body{background:linear-gradient(rgba(255,255,255,.18),rgba(255,255,255,.18)),url(/static/login-bg.jpg) center bottom/cover no-repeat fixed,var(--bg);min-height:100vh}
+.top{background:rgba(255,255,255,.70);-webkit-backdrop-filter:blur(16px) saturate(1.2);backdrop-filter:blur(16px) saturate(1.2);border-bottom:1px solid rgba(255,255,255,.65);box-shadow:0 4px 18px rgba(30,50,90,.08)}
+.logo{display:grid;place-items:center;flex:none;width:38px;height:38px;border-radius:11px;font-size:20px;color:#fff;background:linear-gradient(135deg,#3b7bf6,#1f4e78);box-shadow:0 4px 12px rgba(37,99,235,.28)}
+.top .ghost,.top .filebtn{background:rgba(255,255,255,.55);border-color:rgba(30,50,90,.12)}
+.top .ghost:hover,.top .filebtn:hover{background:#fff}
+.badge{background:rgba(37,99,235,.10);color:#1d4ed8}
+.card{background:var(--glass);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid var(--glass-line);border-radius:16px;box-shadow:var(--shadow)}
+h1{font-size:21px;letter-spacing:-.01em}
+.steps{background:var(--glass);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid var(--glass-line);border-radius:16px;padding:8px;box-shadow:var(--shadow)}
+.steps button{padding:8px 11px;border-radius:10px;transition:background .15s,color .15s}
+.steps button:hover:not(:disabled){background:rgba(37,99,235,.07);color:var(--ink)}
+.steps button.on{background:#fff;color:#1d4ed8;box-shadow:inset 3px 0 0 var(--accent),0 1px 3px rgba(30,50,90,.10)}
+.steps button.on .n{color:#1d4ed8}
+button,.filebtn{border-radius:10px;transition:background .15s,border-color .15s,box-shadow .15s,transform .15s}
+button:hover:not(:disabled){border-color:#b9c4d6;box-shadow:0 1px 3px rgba(30,50,90,.10)}
+button.primary{background:linear-gradient(180deg,#3b7bf6,#2563eb);border-color:#2563eb;box-shadow:0 1px 2px rgba(37,99,235,.30),0 4px 12px rgba(37,99,235,.20)}
+button.primary:hover:not(:disabled){filter:none;transform:translateY(-1px);box-shadow:0 2px 4px rgba(37,99,235,.30),0 8px 18px rgba(37,99,235,.25)}
+.choice button{background:rgba(255,255,255,.75)}
+.choice button:hover:not(:disabled){background:#fff;transform:translateY(-2px);box-shadow:0 10px 24px rgba(30,50,90,.12)}
+.tablewrap{background:var(--panel);border-radius:12px}
+th{background:#f3f6fb}
+.helper{background:rgba(248,250,252,.85)}
+.chatform input{border-radius:10px}
+.toast{border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+@media (max-width:1100px){.steps{padding:6px}}
+@media (max-width:640px){.top{position:static;flex-wrap:wrap}.top-actions{gap:6px}.top .ghost,.top .filebtn{padding:6px 10px;font-size:13px}}
