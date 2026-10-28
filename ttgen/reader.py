@@ -207,6 +207,7 @@ def derive(spec):
         else: code = f"{str(x['level'])[-1]}{s.get('code') or '??'}{letter.get(s.get('tag'), '')}{seq[(x['level'], x['subject'])]}"
         x.update(code=code, periods=int(p or 0), full=full, short=short, length=L, room_kind=s.get("room_kind") or ("classroom" if x.get("block") or x.get("code_override") else None),
                  tag=s.get("tag") or "-", dept=s.get("dept"))
+        if x.get("pattern") and sum(int(v) for v in x["pattern"]) != x["periods"]: x.pop("pattern")   # lengths set by hand no longer add up: back to the usual split
         if not p: problems.append(f"Lesson row {i + 6}: {x['subject']} has no periods for {x['level']}.")
         if not x["classes"]: problems.append(f"Lesson row {i + 6}: no class.")
         if not x["teachers"]: problems.append(f"Lesson row {i + 6}: no teacher ({x['subject']} {', '.join(x['classes'])}).")

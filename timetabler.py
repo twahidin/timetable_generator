@@ -1,6 +1,7 @@
 """The timetabler's tools. The AI (or the plain 'generate without AI' flow) calls these; they do the real work with
 the ttgen solver, so the AI never places lessons itself and never runs code. Each returns a short text result."""
 import collections, copy, json, os, re, time
+import adjust
 from ttgen.reader import derive
 from ttgen.spec import RULE_TYPES, SCOPES
 from ttgen.template import write_template
@@ -252,12 +253,13 @@ def t_solve(run, args):
     previous = _previous(run, args)
     run.emit("tool", text=f"Solving (up to {span}){', starting from the latest timetable so lessons stay where they are unless a change moves them' if previous else ''}. "
                           "The best timetable so far is kept if you stop early.")
-    spec = copy.deepcopy(run.spec); t0 = time.time()
+    spec = copy.deepcopy(run.spec); t0 = time.time(); as_solved = json.loads(json.dumps(spec))   # the setup this timetable is made from (Adjust rebuilds it)
+    pins = adjust.pins(run)   # lessons placed by hand stay where the committee put them
     def log(line):
         if "cost" in line:
             run.progress = f"Solving: {int(time.time() - t0)} s, best timetable so far has cost {line.split('cost')[-1].strip()} (lower is better)."
     if run.stop.is_set(): return "Stopped before solving."
-    res = solve(spec, time_limit=secs, workers=WORKERS, log=log, stop=run.stop, previous=previous)
+    res = solve(spec, time_limit=secs, workers=WORKERS, log=log, stop=run.stop, previous=previous, pins=pins)
     run.progress = ""; run.solves += 1; n = run.solves
     setup_path = os.path.join(run.dir, f"solve{n}_setup.xlsx"); write_template(spec, setup_path)
     if not res["lessons"]:
@@ -273,8 +275,9 @@ def t_solve(run, args):
     tt_path = os.path.join(run.dir, f"solve{n}_timetable.xlsx")
     _, _, _, m = write_timetable(res, tt_path, return_model=True)
     pl_path = os.path.join(run.dir, f"solve{n}_placements.json"); write_json(pl_path, {L["key"]: L["start"] for L in res["lessons"]})
-    s = _summary(res["status"], m); s.update(n=n, at=now(), setup=setup_path, timetable=tt_path, placements=pl_path, seconds=int(time.time() - t0))
-    run.solved = s; run.save()
+    spec_path = os.path.join(run.dir, f"solve{n}_spec.json"); write_json(spec_path, as_solved)
+    s = _summary(res["status"], m); s.update(n=n, at=now(), setup=setup_path, timetable=tt_path, placements=pl_path, spec=spec_path, seconds=int(time.time() - t0))
+    run.solved = s; adjust.carry_pins(run, pins, res); run.save()
     run.emit("timetable", text=("All checks passed." if s["ok"] else f"{len(s['problems'])} problems found.") +
              (f" {len(s['after'])} lessons are after school." if s["after"] else " Nothing is after school."), data={k: v for k, v in s.items() if k not in ("setup", "timetable", "placements")})
     out = [f"Timetable found ({res['status']}) in {s['seconds']} s: {s['lessons']} lessons placed."]

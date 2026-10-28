@@ -55,8 +55,10 @@ class Problem:
         for u in U:
             cnt = collections.Counter()
             for r in u["rows"]:
-                rc = collections.Counter({r["length"]: r["full"]}); 
-                if r["short"]: rc[r["length"] - 1] += r["short"]
+                if r.get("pattern"): rc = collections.Counter(int(v) for v in r["pattern"])   # lesson lengths set by hand (Adjust: shorter / longer)
+                else:
+                    rc = collections.Counter({r["length"]: r["full"]})
+                    if r["short"]: rc[r["length"] - 1] += r["short"]
                 for ln, n in rc.items(): cnt[ln] = max(cnt[ln], n)
                 r["_counts"] = rc
             u["lessons"] = [(ln, i) for ln in sorted(cnt, reverse=True) for i in range(cnt[ln])]
@@ -121,52 +123,52 @@ class Problem:
                 prof[c].append(use)
         return prof
 
-def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previous=None):
-    """stop: optional threading.Event; setting it ends the search early and keeps the best timetable so far.
-    previous: {lesson key: start} from an earlier solve (each returned lesson has its 'key'); lessons stay there unless they must move"""
-    P = Problem(spec); NP, ND = P.NP, P.ND
-    m = cp_model.CpModel(); rules = spec.get("rules", [])
-    notes = list(P.warn)
+def units_for(P, r):
+    """the units (blocks, groups, class lessons) a rule row applies to"""
+    sc, tg, sj = r.get("scope"), str(r.get("target") or ""), r.get("subject")
+    def sub_ok(u): return not sj or any(x["subject"] == sj for x in u["rows"])
+    if sc == "Subject": return [u for u in P.units if any(x["subject"] == tg for x in u["rows"])]
+    if sc == "Block": return [u for u in P.units if u["kind"] == "block" and u["name"] == tg]
+    if sc == "Group": return [u for u in P.units if any(x.get("code") == tg for x in u["rows"])]
+    if sc == "Class": return [u for u in P.units if tg in u["classes"] and sub_ok(u)]
+    if sc == "Level": return [u for u in P.units if (u["level"] == tg or any(P.level_of.get(c) == tg for c in u["classes"])) and sub_ok(u)]
+    if sc == "School": return [u for u in P.units if sub_ok(u)]
+    return []
+
+def lesson_domains(P, rules, notes):
+    """every lesson of the cycle with the starts it may take (Day structure, end times and the per-lesson rules: Not
+    available / Not in periods for a class, level, block or subject, Only in periods, Finish by, Fixed at on every
+    day) and the cost of each start. The solver's lesson variables come from this; so do the checks on moves made by hand."""
+    NP = P.NP
     def has(rule, scope=None):
         return [r for r in rules if r.get("rule") == rule and (scope is None or r.get("scope") == scope)]
     forbid = collections.defaultdict(set); pen = collections.defaultdict(collections.Counter)
-    def units_for(r):
-        sc, tg, sj = r.get("scope"), str(r.get("target") or ""), r.get("subject")
-        def sub_ok(u): return not sj or any(x["subject"] == sj for x in u["rows"])
-        if sc == "Subject": return [u for u in P.units if any(x["subject"] == tg for x in u["rows"])]
-        if sc == "Block": return [u for u in P.units if u["kind"] == "block" and u["name"] == tg]
-        if sc == "Group": return [u for u in P.units if any(x.get("code") == tg for x in u["rows"])]
-        if sc == "Class": return [u for u in P.units if tg in u["classes"] and sub_ok(u)]
-        if sc == "Level": return [u for u in P.units if (u["level"] == tg or any(P.level_of.get(c) == tg for c in u["classes"])) and sub_ok(u)]
-        if sc == "School": return [u for u in P.units if sub_ok(u)]
-        return []
     # position filters from rules
     for r in rules:
         nm, must = r.get("rule"), str(r.get("strength") or "Must") == "Must"
         if nm in ("Not available", "Not in periods") and r.get("scope") in ("Class", "Level", "Block", "Subject"):
             S, _ = P.rule_positions(r)
-            for u in units_for(r):
+            for u in units_for(P, r):
                 if must: forbid[u["id"]] |= S
                 else:
                     for p in S: pen[u["id"]][p] += 1
         if nm == "Keep free together" and r.get("scope") == "Level":
             S, _ = P.rule_positions(r)
-            for u in units_for(r):
+            for u in units_for(P, r):
                 if must: forbid[u["id"]] |= S
                 else:
                     for p in S: pen[u["id"]][p] += 1
     only = collections.defaultdict(list); finish = collections.defaultdict(list); fixed_all = collections.defaultdict(list)
     for r in has("Only in periods"):
         S, days = P.rule_positions(r)
-        for u in units_for(r): only[u["id"]].append((S, str(r.get("strength") or "Must") == "Must"))
+        for u in units_for(P, r): only[u["id"]].append((S, str(r.get("strength") or "Must") == "Must"))
     for r in has("Finish by"):
         _, days = P.rule_positions(r); to = int(r.get("to") if r.get("to") not in (None, "") else NP - 1)
-        for u in units_for(r): finish[u["id"]].append((set(days), to, str(r.get("strength") or "Must") == "Must"))
+        for u in units_for(P, r): finish[u["id"]].append((set(days), to, str(r.get("strength") or "Must") == "Must"))
     for r in has("Fixed at"):
         if str(r.get("day") or "All") == "All" and r.get("from") not in (None, ""):
-            for u in units_for(r): fixed_all[u["id"]].append(int(r["from"]))
-    # ---------------------------------------------------------------- lesson variables
-    blocks = []
+            for u in units_for(P, r): fixed_all[u["id"]].append(int(r["from"]))
+    out = []
     nstud = lambda rs: max(1, sum(int(x.get("students") or 0) for x in rs) or 30)
     for u in P.units:
         for ln, i in u["lessons"]:
@@ -190,15 +192,38 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
                 vals.append(pos); cost[pos] = c
             if not vals:
                 notes.append(f"No allowed time for {u['name']} ({ln}-period lesson): check Day structure and rules."); vals, cost = [0], {0: 0}
-            st = m.NewIntVarFromDomain(cp_model.Domain.FromValues(vals), f"s{len(blocks)}")
-            iv = m.NewFixedSizeIntervalVar(st, ln, f"i{len(blocks)}")
-            dy = m.NewIntVar(0, ND - 1, f"d{len(blocks)}"); m.AddDivisionEquality(dy, st, NP)
-            cv = m.NewIntVar(0, max(cost.values()), f"c{len(blocks)}"); m.AddElement(st, [cost.get(q, 0) for q in range(ND * NP)], cv)
-            T = sorted({t for x in part for t in x["teachers"]})
-            kinds = collections.Counter((x["room_kind"] or "classroom") for x in part)
-            ext = {q for q in vals if any(P.grid[u["level"]][q // NP][q % NP + k] == "A" for k in range(ln))}
-            blocks.append(dict(u=u, ln=ln, i=i, part=part, st=st, iv=iv, day=dy, cost=cv, T=T, kinds=kinds, ext=ext,
-                               key=f"{u['key']}|{ln}|{i}", vals=set(vals)))
+            out.append(dict(u=u, ln=ln, i=i, part=part, vals=vals, cost=cost, key=f"{u['key']}|{ln}|{i}"))
+    return out
+
+
+def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previous=None, pins=None):
+    """stop: optional threading.Event; setting it ends the search early and keeps the best timetable so far.
+    previous: {lesson key: start} from an earlier solve (each returned lesson has its 'key'); lessons stay there unless they must move.
+    pins: {lesson key: start} for lessons placed by hand: they stay there (unless that time is no longer allowed)"""
+    P = Problem(spec); NP, ND = P.NP, P.ND
+    m = cp_model.CpModel(); rules = spec.get("rules", [])
+    notes = list(P.warn)
+    def has(rule, scope=None):
+        return [r for r in rules if r.get("rule") == rule and (scope is None or r.get("scope") == scope)]
+    blocks = []
+    # ---------------------------------------------------------------- lesson variables
+    for D in lesson_domains(P, rules, notes):
+        u, ln, i, part, vals, cost = D["u"], D["ln"], D["i"], D["part"], D["vals"], D["cost"]
+        st = m.NewIntVarFromDomain(cp_model.Domain.FromValues(vals), f"s{len(blocks)}")
+        iv = m.NewFixedSizeIntervalVar(st, ln, f"i{len(blocks)}")
+        dy = m.NewIntVar(0, ND - 1, f"d{len(blocks)}"); m.AddDivisionEquality(dy, st, NP)
+        cv = m.NewIntVar(0, max(cost.values()), f"c{len(blocks)}"); m.AddElement(st, [cost.get(q, 0) for q in range(ND * NP)], cv)
+        T = sorted({t for x in part for t in x["teachers"]})
+        kinds = collections.Counter((x["room_kind"] or "classroom") for x in part)
+        ext = {q for q in vals if any(P.grid[u["level"]][q // NP][q % NP + k] == "A" for k in range(ln))}
+        blocks.append(dict(u=u, ln=ln, i=i, part=part, st=st, iv=iv, day=dy, cost=cv, T=T, kinds=kinds, ext=ext,
+                           key=D["key"], vals=set(vals)))
+    # lessons the committee placed by hand stay where they put them
+    pins = pins or {}
+    for b in blocks:
+        if b["key"] in pins:
+            if pins[b["key"]] in b["vals"]: m.Add(b["st"] == pins[b["key"]])
+            else: notes.append(f"{b['u']['name']}: the time it was moved to by hand is no longer allowed, so it may move.")
     log(f"{len(P.units)} units, {len(blocks)} lessons, {len(P.days)} days x {NP} periods")
     # quick capacity checks (a full day of one lesson length cannot always be packed; these catch the obvious)
     tload = collections.Counter(); tlv = collections.defaultdict(set)
@@ -344,10 +369,10 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
                 for b in Bb: m.Add(a["day"] != b["day"])
     # fixed at a given day
     for r in has("Fixed at"):
-        if not units_for(r): notes.append(f"Fixed at: no lesson matches {r.get('target')} {r.get('subject') or ''}; skipped.".replace(" ;", ";"))
+        if not units_for(P, r): notes.append(f"Fixed at: no lesson matches {r.get('target')} {r.get('subject') or ''}; skipped.".replace(" ;", ";"))
         if str(r.get("day") or "All") == "All" or r.get("from") in (None, ""): continue
         _, days = P.rule_positions(r)
-        for u in units_for(r):
+        for u in units_for(P, r):
             for d in days:
                 pos = d * NP + int(r["from"]); lits = []
                 for b in by_unit[u["id"]]:

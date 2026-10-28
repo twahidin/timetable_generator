@@ -88,7 +88,7 @@ def anthropic_body(cfg, system, history, tools):
             msgs.append(dict(role="assistant", content=blocks or [dict(type="text", text="...")]))
         elif h["role"] == "tool": add("user", dict(type="tool_result", tool_use_id=h["id"], content=h["result"]))
     return dict(model=cfg["model"], max_tokens=MAX_TOKENS, system=[dict(type="text", text=system, cache_control=dict(type="ephemeral"))], messages=msgs,
-                tools=[dict(name=t["name"], description=t["description"], input_schema=t["schema"]) for t in tools])
+                **({"tools": [dict(name=t["name"], description=t["description"], input_schema=t["schema"]) for t in tools]} if tools else {}))
 
 def call_anthropic(cfg, system, history, tools):
     body = anthropic_body(cfg, system, history, tools)
@@ -118,7 +118,7 @@ def openai_body(cfg, system, history, tools):
             if h.get("calls"): m["tool_calls"] = [dict(id=c["id"], type="function", function=dict(name=c["name"], arguments=json.dumps(c["args"] or {}))) for c in h["calls"]]
             msgs.append(m)
         elif h["role"] == "tool": msgs.append(dict(role="tool", tool_call_id=h["id"], content=h["result"]))
-    return dict(model=cfg["model"], messages=msgs, tools=[dict(type="function", function=dict(name=t["name"], description=t["description"], parameters=t["schema"])) for t in tools])
+    return dict(model=cfg["model"], messages=msgs, **({"tools": [dict(type="function", function=dict(name=t["name"], description=t["description"], parameters=t["schema"])) for t in tools]} if tools else {}))
 
 def call_openai(cfg, system, history, tools):
     headers = {"Authorization": f"Bearer {cfg['key']}", "Content-Type": "application/json"}
@@ -165,6 +165,27 @@ def call_mock(run, history):
     if name == "change_setup": return "Solving again with the change.", [dict(id=cid(), name="solve", args=dict(seconds=secs))]
     if name == "finish": return "", []
     return "", [dict(id=cid(), name="finish", args=dict(summary="Done."))]
+
+ADVISE = """You help a school timetable committee adjust a finished timetable by hand before it is published. They want to
+move one lesson and the move clashes. Suggest 2-4 ways out, best first, as a short numbered list. Each option says
+exactly what to change and where: a swap or another time (from the free times and swaps given), moving the clashing
+lesson, merging the group with another group of the same subject and level (only if one teacher and one room can take
+the combined size), splitting a large group, or giving the lesson or the clashing one to another teacher. Changes to
+groups and teachers are made on step 6 (Lessons) of the setup and need a new solve; say so. Use names and clock times.
+Do not invent lessons, teachers or rooms that are not in the message. 120 words at most."""
+
+def advise(question):
+    """one question to the AI, without tools: ways out of a clashing move on the Adjust page"""
+    cfg = config()
+    if not cfg["ok"]: raise RuntimeError(f"the AI is not set up ({cfg['why']})")
+    if cfg["provider"] == "mock":
+        return ("(Test assistant) 1. Pick one of the free times listed, or a clean swap. 2. Let the solver make room: it keeps this lesson "
+                "there and moves the few lessons in the way. 3. If the clash is a teacher, give one of the two lessons to another teacher "
+                "on step 6, or merge it with a small group of the same subject, then solve again.")
+    history = [dict(role="user", text=question)]
+    call = call_anthropic if cfg["provider"] == "anthropic" else call_openai
+    text, _ = call(cfg, ADVISE, history, [])
+    return text
 
 def call_model(cfg, run, system, history):
     if cfg["provider"] == "mock": return call_mock(run, history)

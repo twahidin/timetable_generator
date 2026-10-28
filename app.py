@@ -12,7 +12,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, defaults
-import access, store, runs, ai, timetabler
+import access, store, runs, ai, timetabler, adjust
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -324,6 +324,7 @@ def keep_changes():
 def _publish_job(r):
     s = r.solved
     r.emit("status", text="Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute)...")
+    adjust.flush(r)   # changes made by hand on the Adjust page go into the timetable workbook first
     m = store.publish(s["setup"], s["timetable"], run_id=r.id, log=lambda t: None)
     r.emit("published", text=f"Published. Teachers and students now see this timetable. {len(m['students'])} students have personal codes.")
 
@@ -336,6 +337,94 @@ def publish():
     runs._thread(r, _publish_job)
     return {"ok": True}
 
+# ------------------------------------------------------------------------------------------- adjusting by hand
+def _adj_run():
+    r = runs.current()
+    if not r or not r.solved: raise ValueError("Generate a timetable first.")
+    return r
+
+def _adj(fn):
+    """the Adjust routes: the latest timetable must exist, and not while a solve is changing it"""
+    @wraps(fn)
+    def inner(*a, **k):
+        try: r = _adj_run()
+        except ValueError as e: return {"error": str(e)}, 400
+        if request.method == "POST" and r.busy: return {"error": "Wait for the current work to finish (or stop it) first."}, 409
+        body = request.get_json(force=True, silent=True) or {}
+        try: return fn(r, body)
+        except (KeyError, ValueError, TypeError) as e: return {"error": f"That lesson or time is not in the latest timetable ({e})."}, 400
+    return inner
+
+@app.get("/api/adjust")
+@need("committee")
+@_adj
+def adjust_state(r, body):
+    return jsonify(adjust.state(r))
+
+@app.post("/api/adjust/check")
+@need("committee")
+@_adj
+def adjust_check(r, body):
+    """a move to `start`, or (with dir -1 / 1) to the nearest allowed time earlier or later"""
+    key = str(body["key"])
+    if body.get("dir"):
+        start = adjust.board(r).step(key, int(body["dir"]))
+        if start is None: return {"error": "There is no earlier lesson time for it." if int(body["dir"]) < 0 else "There is no later lesson time for it."}, 400
+    else: start = int(body["start"])
+    return jsonify(adjust.proposal(r, key, start))
+
+@app.post("/api/adjust/move")
+@need("committee")
+@_adj
+def adjust_move(r, body):
+    """moves {key: start}: one lesson, or two for a swap; applied even when they clash (the committee chose to)"""
+    moves = {str(k): int(v) for k, v in (body.get("moves") or {}).items()}
+    if not moves: return {"error": "Nothing to move."}, 400
+    b = adjust.board(r)
+    for k in moves: b.L[k]   # unknown lessons raise KeyError
+    label = body.get("label") or "; ".join(f"Moved {b.name(k)} to {b.when(s, b.L[k]['ln'])}" for k, s in moves.items())
+    adjust.apply(r, moves, str(label)[:300])
+    return jsonify(adjust.state(r))
+
+@app.post("/api/adjust/undo")
+@need("committee")
+@_adj
+def adjust_undo(r, body):
+    adjust.undo(r, back=not body.get("redo")); return jsonify(adjust.state(r))
+
+@app.post("/api/adjust/resize")
+@need("committee")
+@_adj
+def adjust_resize(r, body):
+    """one lesson a period shorter (delta -1) or longer (+1), where it is"""
+    try: msg = adjust.resize(r, str(body["key"]), -1 if int(body.get("delta") or -1) < 0 else 1)
+    except ValueError as e: return {"error": str(e)}, 400
+    return jsonify(dict(adjust.state(r), message=msg))
+
+@app.post("/api/adjust/unpin")
+@need("committee")
+@_adj
+def adjust_unpin(r, body):
+    adjust.unpin(r, str(body["key"])); return jsonify(adjust.state(r))
+
+@app.post("/api/adjust/make-room")
+@need("committee")
+@_adj
+def adjust_make_room(r, body):
+    key, start = str(body["key"]), int(body["start"])
+    adjust.board(r).L[key]
+    secs = max(30, min(timetabler.SOLVE_MAX, int(body.get("seconds") or 120)))
+    r.stop.clear(); runs._thread(r, lambda run: adjust.make_room(run, key, start, secs, timetabler.WORKERS))
+    return {"ok": True}
+
+@app.post("/api/adjust/ask")
+@need("committee")
+@_adj
+def adjust_ask(r, body):
+    q = adjust.ai_question(r, str(body["key"]), int(body["start"]))
+    try: return {"text": ai.advise(q)}
+    except Exception as e: return {"error": f"The AI could not answer: {e}"}, 502
+
 @app.get("/preview")
 @need("committee")
 def preview():
@@ -343,7 +432,8 @@ def preview():
     from ttgen.export import model_from_files, render_html
     r = runs.current()
     if not r or not r.solved: return page("Preview", "<main class='login'><p>Nothing generated yet.</p><p><a href='/'>Back</a></p></main>")
-    key = ("preview", r.id, r.solved["n"])
+    adjust.flush(r)
+    key = ("preview", r.id, r.solved["n"], r.solved.get("edited", 0), len(adjust.edits(r)["redo"]))
     if _cache.get("pv_key") != key:
         _cache["pv"] = render_html(model_from_files(r.solved["setup"], r.solved["timetable"]), "full",
                                    app=dict(mode="committee", pdf=False, home="/", homeLabel="Back to the app", logout="/logout"),
