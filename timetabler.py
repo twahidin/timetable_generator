@@ -1,13 +1,13 @@
 """The timetabler's tools. The AI (or the plain 'generate without AI' flow) calls these; they do the real work with
 the ttgen solver, so the AI never places lessons itself and never runs code. Each returns a short text result."""
-import collections, copy, json, os, time
+import collections, copy, json, os, re, time
 from ttgen.reader import derive
 from ttgen.spec import RULE_TYPES, SCOPES
 from ttgen.template import write_template
 from store import now, write_json
 
 SOLVE_SECONDS = int(os.environ.get("SOLVE_SECONDS") or 300)
-SOLVE_MAX = int(os.environ.get("SOLVE_MAX_SECONDS") or 1800)
+SOLVE_MAX = int(os.environ.get("SOLVE_MAX_SECONDS") or 8 * 3600)   # the longest the committee (or the AI) may ask a solve to run
 WORKERS = int(os.environ.get("SOLVE_WORKERS") or 8)
 RULE_NAMES = [r[0] for r in RULE_TYPES]
 
@@ -23,8 +23,8 @@ TOOLS = [
          schema=dict(type="object", properties=dict(
              filter=dict(type="string", description="a class (exact, e.g. 1A), level, teacher, room, subject, group code or block name"),
              day=dict(type="string", description="a day as on Day structure, e.g. Mon or Odd Mon")), required=[])),
-    dict(name="solve", description="Run the timetable solver on the current setup. Takes up to `seconds` (default from the app). Returns whether a timetable was found, the checks, the after-school lessons and, when it started from the previous timetable, which lessons moved.",
-         schema=dict(type="object", properties=dict(seconds=dict(type="integer", description="time limit, 60-1800"),
+    dict(name="solve", description="Run the timetable solver on the current setup. Takes up to `seconds` (default: the time the committee chose on the Generate page). Returns whether a timetable was found, the checks, the after-school lessons and, when it started from the previous timetable, which lessons moved.",
+         schema=dict(type="object", properties=dict(seconds=dict(type="integer", description=f"time limit, 60-{SOLVE_MAX}; leave it out to use the committee's choice"),
              keep_previous=dict(type="boolean", description="start from the latest timetable and keep lessons where they are unless a change makes them move (default true once a timetable exists); false only when the committee wants a fresh timetable")), required=[])),
     dict(name="diagnose", description="When no timetable is found: test-solve with the Must rules removed and added back one at a time to find which rule (or the data itself) blocks the timetable. Takes a few minutes.",
          schema=dict(type="object", properties={}, required=[])),
@@ -77,24 +77,66 @@ def row_text(section, i, x):
 
 
 # ------------------------------------------------------------------------------------------- capacity sums
-def capacity(spec):
-    from ttgen.solver import Problem
-    P = Problem(spec); out = []
+WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+
+def _packs(runs, need):
+    """can lessons of these lengths ({length: count}) all go in these stretches of lesson periods? (a lesson cannot
+    run across a recess or lunch, so each stretch holds whole lessons only)"""
+    lens = sorted(need, reverse=True); states = {tuple(need[n] for n in lens)}
+    def fill(k, left, st, nxt):
+        if k == len(lens): nxt.add(st); return
+        for a in range(min(st[k], left // lens[k]) + 1): fill(k + 1, left - a * lens[k], st[:k] + (st[k] - a,) + st[k + 1:], nxt)
+    for n in sorted(runs, reverse=True):
+        nxt = set()
+        for st in states: fill(0, n, st, nxt)
+        states = nxt
+        if any(not any(s) for s in states): return True
+    return False
+
+def _class_fit(P):
+    """each class against its level's day: what its busiest students need, and whether their lessons fit between the
+    breaks. [dict(cls, level, kind, text)] for classes that are over, do not fit, have no slack, or are almost full"""
     Lcount = {lv: sum(row.count("L") for row in rows) for lv, rows in P.grid.items()}
     Acount = {lv: sum(row.count("A") for row in rows) for lv, rows in P.grid.items()}
-    units = {u["id"]: u for u in P.units}
-    whole = collections.Counter()
+    runs = {lv: [len(m) for row in rows for m in re.findall(r"L+", row)] for lv, rows in P.grid.items()}
+    whole = collections.defaultdict(collections.Counter)
     for u in P.units:
         if u["kind"] == "class":
-            whole[u["classes"][0]] += sum(ln for ln, _ in u["lessons"])
-    prof = P.students_profiles()
+            for ln, _ in u["lessons"]: whole[u["classes"][0]][ln] += 1
+    prof = P.students_profiles(); out = []
     for c, lv in P.level_of.items():
         if lv not in Lcount: continue
-        need = whole[c] + max([sum(ln * n for uid, cnt in p.items() for ln, n in cnt.items()) for p in prof.get(c, [])] or [0])
-        if need > Lcount[lv]:
-            out.append(f"Class {c} needs {need} periods but {lv} has {Lcount[lv]} lesson periods a cycle (+{Acount[lv]} after-school): at least {need - Lcount[lv]} periods must go after school.")
-        elif need > 0.97 * Lcount[lv]:
-            out.append(f"Class {c} is almost full: {need} of {Lcount[lv]} lesson periods.")
+        sets = set()   # each kind of student in the class: {length: lessons}, whole-class lessons included
+        for p in prof.get(c) or [{}]:
+            cnt = whole[c].copy()
+            for cc in p.values(): cnt.update(cc)
+            sets.add(tuple(sorted((ln, n) for ln, n in cnt.items() if n)))
+        have = Lcount[lv]; need = max((sum(ln * n for ln, n in s) for s in sets), default=0)
+        row = dict(cls=c, level=lv, need=need, have=have)
+        if need > have:
+            out.append(dict(row, kind="over", text=f"Class {c} needs {need} periods but {lv} has {have} lesson periods a cycle (+{Acount[lv]} after-school): at least {need - have} periods must go after school.")); continue
+        if not need: continue
+        top = max(ln for s in sets for ln, _ in s); most = sum(n // top for n in runs[lv])   # the most top-length lessons the day holds
+        desc = lambda s: " and ".join(f"{n} {WORDS.get(ln, ln)}-period" for ln, n in sorted(s, reverse=True)) + " lessons"
+        near = [s for s in sets if sum(ln * n for ln, n in s) >= have - 2 * top]
+        bad = next((s for s in near if not _packs(runs[lv], dict(s))), None)
+        full = next((s for s in near if dict(s).get(top, 0) >= most or sum(ln * n for ln, n in s) == have), None)
+        if bad:
+            out.append(dict(row, kind="nofit", text=f"Class {c}: its busiest students' {desc(bad)} do not fit in the {lv} day. A lesson cannot run across a recess or lunch, "
+                                                   f"and the stretches between breaks hold at most {most} {WORDS.get(top, top)}-period lessons a cycle."))
+        elif full:
+            n = dict(full).get(top, 0)
+            out.append(dict(row, kind="tight", text=f"Class {c}: its busiest students need {n} {WORDS.get(top, top)}-period lessons ({sum(ln * k for ln, k in full)} of {have} periods), "
+                            + (f"and the {lv} day holds exactly {most} between breaks, so every one of those slots must be used" if n >= most else "so every lesson period of the cycle must be used")
+                            + ": a single teacher, room or student clash makes the timetable impossible."))
+        elif need > 0.97 * have:
+            out.append(dict(row, kind="almost", text=f"Class {c} is almost full: {need} of {have} lesson periods."))
+    return out
+
+def capacity(spec, P=None, fit=None):
+    from ttgen.solver import Problem
+    P = P or Problem(spec); out = [x["text"] for x in (_class_fit(P) if fit is None else fit)]
+    Lcount = {lv: sum(row.count("L") for row in rows) for lv, rows in P.grid.items()}
     load, lvls = collections.Counter(), collections.defaultdict(set)
     for u in P.units:
         for r in u["rows"]:
@@ -117,6 +159,38 @@ def capacity(spec):
         for k, n in need.items():
             if n > kinds.get(k, 0): out.append(f"Block {u['name']} needs {n} '{k}' rooms at once; Venues has {kinds.get(k, 0)}.")
     return out
+
+def span_text(secs):
+    return f"{secs} s" if secs < 60 else f"{secs // 60} min" + (f" {secs % 60} s" if secs % 60 else "")
+
+def advice(spec, status, secs, notes=()):
+    """when no timetable is found: why (capacity lines and solver notes) and what the committee can change.
+    Returns (reasons, fixes); each fix is dict(text, go) where go is the editor step that makes the change."""
+    from ttgen.solver import Problem
+    derive(spec); P = Problem(spec); every = _class_fit(P)
+    fit = [x for x in every if x["kind"] in ("over", "nofit", "tight")]
+    cap = capacity(spec, P, every)
+    reasons = cap + [n for n in notes if n not in cap and not n.startswith("No timetable found")]
+    fixes = []
+    if fit:
+        names = ", ".join(x["cls"] for x in fit)
+        fixes.append(dict(go="lessons", text=f"Give {names} some room: take a lesson (a few periods) off their busiest students, with Periods override on step 6 or fewer periods for the subject on step 3."))
+        fixes.append(dict(go="school", text="Or make the day longer: a later 'Lessons end by' time or more L periods in the Day structure (School & day), or allow after-school slots."))
+    if any(c.split(" teaches ")[0] in {t["name"] for t in spec["teachers"]} for c in cap if " teaches " in c):
+        fixes.append(dict(go="lessons", text="Move some groups from the busiest teachers named above to other teachers on step 6."))
+    if any(c.startswith("Block ") and " rooms at once" in c for c in cap):
+        fixes.append(dict(go="venues", text="Add rooms of the kinds named above on step 1, or split the block on step 5."))
+    if any("matches nothing" in n or "no lesson matches" in n for n in notes):
+        fixes.append(dict(go="rules", text="Remove or correct the fixed lessons that match no lesson (step 7)."))
+    if any(str(r.get("strength") or "Must") == "Must" for r in spec.get("rules", [])):
+        fixes.append(dict(go="rules", text="Turn off any rule the school can do without (step 7, and the rules on School & day), then generate again. "
+                                           "With the AI timetabler, ask it to diagnose: it tests the rules one at a time and names any that block the timetable."))
+    if status == "INFEASIBLE" and not fit:
+        fixes.insert(0, dict(go="rules", text="The solver proved that no timetable exists with this setup: a rule or the data contradicts itself. Start with the rules and the lines above."))
+    if status != "INFEASIBLE":
+        fixes.append(dict(go="generate", text=f"Nothing was found in {span_text(secs)}, which does not prove that no timetable exists. If nothing above needs changing, "
+                                              "give the solver longer: pick a longer 'Solve for up to' time on Generate & publish and generate again."))
+    return reasons, fixes
 
 
 # ------------------------------------------------------------------------------------------- the tools
@@ -173,7 +247,7 @@ def _when(P, start, ln):
 def t_solve(run, args):
     from ttgen.solver import solve
     from ttgen.report import write_timetable
-    secs = max(20, min(SOLVE_MAX, int(args.get("seconds") or SOLVE_SECONDS)))
+    secs = max(20, min(SOLVE_MAX, int(args.get("seconds") or run.seconds or SOLVE_SECONDS)))
     span = f"{secs} s" if secs < 60 else f"{secs // 60} min" + (f" {secs % 60} s" if secs % 60 else "")
     previous = _previous(run, args)
     run.emit("tool", text=f"Solving (up to {span}){', starting from the latest timetable so lessons stay where they are unless a change moves them' if previous else ''}. "
@@ -188,9 +262,13 @@ def t_solve(run, args):
     setup_path = os.path.join(run.dir, f"solve{n}_setup.xlsx"); write_template(spec, setup_path)
     if not res["lessons"]:
         notes = res.get("notes", [])[:12]
-        run.emit("nosolution", text=f"No timetable found ({res['status']}).", items=notes)
+        try: reasons, fixes = advice(spec, res["status"], secs, notes)
+        except Exception as e: reasons, fixes = notes + [f"Could not work out why ({e})."], []
+        run.emit("nosolution", text=("No timetable is possible with this setup." if res["status"] == "INFEASIBLE" else f"No timetable found in {span}."),
+                 items=reasons[:15], data=dict(status=res["status"], fixes=fixes))
         run.save()
-        return f"No timetable found. Solver status {res['status']} after {int(time.time() - t0)} s.\nNotes:\n" + "\n".join(f"- {x}" for x in notes) + \
+        return f"No timetable found. Solver status {res['status']} after {int(time.time() - t0)} s.\nWhy:\n" + "\n".join(f"- {x}" for x in reasons[:15]) + \
+               "\nSuggested fixes (shown to the committee):\n" + "\n".join(f"- {f['text']}" for f in fixes) + \
                ("\nINFEASIBLE means a hard contradiction: call diagnose." if res["status"] == "INFEASIBLE" else "\nUNKNOWN means not found in time: try a longer solve before changing anything.")
     tt_path = os.path.join(run.dir, f"solve{n}_timetable.xlsx")
     _, _, _, m = write_timetable(res, tt_path, return_model=True)
@@ -349,4 +427,4 @@ def plain_flow(run):
                  (f"{len(s['after'])} lessons fall in after-school slots." if s["after"] else "Nothing is after school.") +
                  " Preview it, then publish when the committee is happy. With an AI set up in Railway, the chat can work through conflicts with you.")
     elif not run.stop.is_set():
-        run.emit("summary", text="No timetable was found. Look at the notes above, relax a Must rule or give the solver more time (SOLVE_SECONDS), then generate again.")
+        run.emit("summary", text="No timetable was found. See why and how to fix it above: give a tight class some room, turn off a rule, or let the solver run longer, then generate again.")

@@ -15,7 +15,7 @@ SKILL = os.path.join(HERE, "skill", "school-timetable-generator", "SKILL.md")
 DEFAULT_MODEL = {"anthropic": "claude-opus-5-5"}
 DEFAULT_BASE = {"anthropic": "https://api.anthropic.com", "openai": "https://api.openai.com/v1", "openrouter": "https://openrouter.ai/api/v1"}
 KEY_VARS = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
-MAX_STEPS = 40
+MAX_STEPS = 120   # model calls in one go: a long run with many solves and questions still finishes
 MAX_TOKENS = 16000   # the model's thinking counts toward this as well as its reply
 # models that take fallbacks "default" on Anthropic's own API: if a safety filter declines, Anthropic re-runs the request on a fallback model
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
@@ -50,7 +50,7 @@ How you work here:
 - Questions about the timetable itself (who teaches 2B on Monday, when is the lab free): answer with show_timetable, without solving.
 - Talk like a helpful colleague: short messages (2-5 sentences), names and clock times rather than row numbers or period numbers, one question at a time with 2-4 concrete options.
 - The committee may type messages at any time; treat them as their instructions.
-- A solve takes minutes (default {timetabler.SOLVE_SECONDS} s). Do not solve more often than needed.
+- A solve takes minutes: the committee chose up to {timetabler.span_text(run.seconds or timetabler.SOLVE_SECONDS)} each, so leave `seconds` out unless you have a reason. Do not solve more often than needed.
 
 The skill (your reference for the template, the rules and what usually goes wrong):
 <skill>
@@ -198,7 +198,7 @@ def run_agent(run, user_text=None):
                 result = "Stopped by the committee."
             else:
                 result = timetabler.call_tool(run, c["name"], c["args"])
-            run.history.append(dict(role="tool", id=c["id"], name=c["name"], result=result[:12000])); run.save()
+            run.history.append(dict(role="tool", id=c["id"], name=c["name"], result=result[:30000])); run.save()
         if run.stop.is_set(): return
         extra = run.drain_inbox()
         if extra: run.history.append(dict(role="user", text="\n".join(extra)))

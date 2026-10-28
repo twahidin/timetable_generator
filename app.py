@@ -12,7 +12,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, defaults
-import access, store, runs, ai
+import access, store, runs, ai, timetabler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -197,15 +197,15 @@ def read_table():
 @app.get("/api/setup")
 @need("committee")
 def get_setup():
-    spec, at = store.load_setup()
-    return jsonify(spec=spec, saved_at=at)
+    return jsonify(store.setup_record())
 
 @app.put("/api/setup")
 @need("committee")
 def put_setup():
+    """Save progress: the setup every committee member opens after signing in"""
     spec = request.get_json(force=True, silent=True)
     if not spec or "school" not in spec: return {"error": "No setup data sent."}, 400
-    store.save_setup(spec); return {"ok": True, "saved_at": store.now()}
+    return {"ok": True, **store.save_setup(spec)}
 
 @app.post("/api/export")
 @need("committee")
@@ -280,7 +280,7 @@ def status():
     _, at = store.load_setup(); r = runs.current()
     return jsonify(ai=ai.public_config(), codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at,
                    run=r.snapshot(int(request.args.get("after") or 0)) if r else None, published=pub_info(),
-                   solve_seconds=int(os.environ.get("SOLVE_SECONDS") or 300))
+                   solve_seconds=timetabler.SOLVE_SECONDS, solve_max=timetabler.SOLVE_MAX)
 
 @app.post("/api/generate")
 @need("committee")
@@ -293,7 +293,9 @@ def generate():
     use_ai = bool(body.get("ai")) and ai.config()["ok"]
     try: spec = normalise(copy.deepcopy(spec))
     except Exception as e: return {"error": f"The setup could not be read: {e}"}, 400
-    try: r = runs.start(spec, use_ai)
+    try: secs = max(60, min(timetabler.SOLVE_MAX, int(body.get("seconds") or timetabler.SOLVE_SECONDS)))
+    except (TypeError, ValueError): secs = timetabler.SOLVE_SECONDS
+    try: r = runs.start(spec, use_ai, secs)
     except RuntimeError as e: return {"error": str(e)}, 409
     return jsonify(id=r.id, ai=use_ai)
 

@@ -13,8 +13,12 @@
   <div class="brand"><span class="logo">▦</span><div><div class="title">Timetable committee</div><div class="sub">Committee: fill the setup step by step, generate, then publish to teachers and students.</div></div></div>
   <div class="top-actions">
     <span id="kindBadge" class="badge"></span>
-    <button class="ghost" id="saveJson" title="Save your progress as a file">Save progress</button>
-    <label class="ghost filebtn" title="Load a progress file">Load progress<input type="file" id="loadJson" accept=".json" hidden></label>
+    <button class="ghost" id="undo" title="Undo the last change (⌘Z / Ctrl+Z)" disabled>↶ Undo</button>
+    <button class="ghost" id="redo" title="Redo (⇧⌘Z / Ctrl+Y)" disabled>↷ Redo</button>
+    <span id="saveState" class="savestate"></span>
+    <button class="ghost" id="saveServer" title="Save the setup for the school: it opens on any browser after signing in">Save progress</button>
+    <button class="ghost" id="saveJson" title="Download the setup as a progress file">Save to file</button>
+    <label class="ghost filebtn" title="Open a progress file">Load from file<input type="file" id="loadJson" accept=".json" hidden></label>
     <a class="ghost filebtn" href="/timetable" target="_blank">Published timetable</a>
     <a class="ghost filebtn" href="/logout">Sign out</a>
   </div>

@@ -4,23 +4,69 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const KEY = "ttsetup.v1";
-const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" } };
+const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, undo: [], redo: [], last: null, dirty: false, base: 0 };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
   ["teachers", "4 Teachers"], ["blocks", "5 Blocks"], ["lessons", "6 Lessons"], ["rules", "7 Availability & rules"], ["students", "8 Students"], ["generate", "Generate & publish"], ["download", "Files"]];
 
-/* ---------------- storage, server */
-function save() { try { localStorage.setItem(KEY, JSON.stringify({ kind: S.kind, spec: S.spec, step: S.step })); } catch (e) { } }
+/* ---------------- storage, server
+   save() keeps this browser's copy after every change. A change to the setup also goes on the undo list (changes
+   within a second count as one) and stays "unsaved" until Save progress puts it on the server (S.base: the server
+   copy it came from), which is what opens on any browser after signing in. */
+const UNDO_MAX = 20;
+function save(o) {
+  const js = S.spec ? JSON.stringify(S.spec) : null;
+  if (js !== S.last) {
+    if (S.last && js && !(o && o.quiet)) {
+      if (Date.now() - (S.pushed || 0) > 1000) { S.undo.push(S.last); if (S.undo.length > UNDO_MAX) S.undo.shift(); S.redo = []; }
+      S.pushed = Date.now(); S.dirty = true;
+    }
+    S.last = js;
+  }
+  try { localStorage.setItem(KEY, `{"kind":${JSON.stringify(S.kind)},"step":${S.step},"dirty":${!!S.dirty},"base":${Number(S.base) || 0},"spec":${js}}`); } catch (e) { }
+  saveState();
+}
 function saved() { try { const x = JSON.parse(localStorage.getItem(KEY) || "null"); return x && x.spec ? x : null; } catch (e) { return null; } }
+function saveState() {
+  const u = $("#undo"), r = $("#redo"), st = $("#saveState");
+  if (u) { u.disabled = !S.spec || !S.undo.length; r.disabled = !S.spec || !S.redo.length; }
+  if (st) { st.className = "savestate" + (S.dirty ? " warn" : ""); st.textContent = !S.spec ? "" : S.dirty ? "Unsaved changes" : S.base && G.server && G.server.saved_at ? `Saved ${G.server.saved_at}` : ""; }
+}
+function undo(back) {
+  const from = back ? S.undo : S.redo, to = back ? S.redo : S.undo;
+  if (!S.spec || !from.length) return;
+  to.push(S.last); S.last = from.pop(); S.spec = JSON.parse(S.last); S.pushed = 0; S.dirty = true;
+  ensureDays(); save({ quiet: true }); render(); toast(back ? "Undone." : "Redone.");
+}
+async function saveServer() {
+  if (!S.spec) { toast("Open or start a setup first."); return; }
+  try { G.server = await getJSON("/api/setup"); } catch (e) { }
+  const srv = G.server && G.server.spec ? G.server : null;
+  if (srv && srv.ts > (S.base || 0) + 1 && JSON.stringify(srv.spec) !== S.last
+      && !confirm(`A newer setup was saved for the school on ${srv.saved_at} (another browser or committee member). Replace it with this one?`)) return;
+  const r = await fetch("/api/setup", { method: "PUT", headers: { "Content-Type": "application/json" }, body: S.last || JSON.stringify(S.spec) });
+  if (r.status === 401) { location.href = "/login"; return; }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { toast(j.error || "Could not save."); return; }
+  S.base = j.ts; S.dirty = false; G.server = { spec: S.spec, saved_at: j.saved_at, ts: j.ts }; save({ quiet: true });
+  toast(`Saved for the school (${j.saved_at}). It opens here next time anyone on the committee signs in.` +
+    (G.st && G.st.volume === false ? " But this server has no Railway volume, so it is lost on the next deploy." : ""));
+}
+async function synced() {   // the server now has this setup (Generate saves it first)
+  try { G.server = await getJSON("/api/setup"); if (G.server.ts && G.server.spec && JSON.stringify(G.server.spec) === S.last) { S.base = G.server.ts; S.dirty = false; save({ quiet: true }); } } catch (e) { }
+}
 async function getJSON(u) { const r = await fetch(u); if (!r.ok) throw new Error(await r.text()); return r.json(); }
 async function begin(kind, what) {
   S.kind = kind; S.meta = await getJSON(`/api/meta/${kind}`);
-  S.spec = await getJSON(`/api/${what}/${kind}`); S.step = 1; ensureDays(); save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
+  S.spec = await getJSON(`/api/${what}/${kind}`); S.step = 1; S.base = 0; ensureDays(); save(); S.dirty = true; save({ quiet: true }); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
   toast(what === "sample" ? "Sample school loaded: edit it or use it to see how the template works." : "Blank template started.");
 }
-async function adopt(spec, msg) {
-  S.kind = (spec.school && spec.school.type) || "secondary"; S.meta = await getJSON(`/api/meta/${S.kind}`);
+/* open a setup: o.base and o.dirty say whether it is the server copy (base = its ts, not dirty) */
+async function adopt(spec, msg, o = {}) {
+  S.kind = o.kind || (spec.school && spec.school.type) || "secondary"; S.meta = await getJSON(`/api/meta/${S.kind}`);
   S.spec = spec; ["venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "combinations"].forEach(k => S.spec[k] = S.spec[k] || []);
-  S.step = 1; ensureDays(); save(); render(); toast(msg);
+  S.step = o.step || 1; ensureDays(); save();
+  S.base = o.base || 0; S.dirty = "dirty" in o ? o.dirty : true; save({ quiet: true });
+  render(); if (msg) toast(msg);
 }
 function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => t.hidden = true, 3200); }
 
@@ -137,8 +183,8 @@ function issues() {
   const out = { school: {}, lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
   const add = (k, i, m) => (out[k][i] = out[k][i] || []).push(m);
   (sc().extra_settings || []).forEach((x, i) => {   // 'Lessons end by (...)' rows on Settings
-    if (!String(x[0]).toLowerCase().startsWith("lessons end by")) return;
-    if (!/^\d{1,2}:\d{2}$/.test(String(x[1] || ""))) { add("school", i, `${x[0]}: give a time such as 12:40.`); return; }
+    if (!String(x[0]).toLowerCase().startsWith("lessons end by") || x[1] == null || x[1] === "") return;   // blank: no end time on those days
+    if (!/^\d{1,2}:\d{2}$/.test(String(x[1]))) { add("school", i, `${x[0]}: give a time such as 12:40, or clear it for no end time.`); return; }
     if (Math.floor((mins(x[1]) - mins(sc().start_time)) / Number(sc().period_minutes || 20)) <= 0) add("school", i, `${x[0]}: ${x[1]} is before the first period ends, so no lesson fits on those days.`);
   });
   const info = lessonInfo(); const codes = {};
@@ -177,6 +223,8 @@ function issues() {
     if (rt.needs_time && r.from == null && r.to == null) add("rules", i, "Give the period(s).");
     if (r.from != null && r.to != null && r.to !== "" && Number(r.to) < Number(r.from)) add("rules", i, `${r.target || "Rule"}: the end is before the start.`);
     if (r.rule === "Fixed at" && r.subject && !subjectNames().includes(r.subject)) add("rules", i, `Fixed lesson: ${r.subject} is not on step 3.`);
+    else if (r.rule === "Fixed at" && r.scope === "Class" && r.target && !S.spec.lessons.some(x => (x.classes || []).includes(r.target) && (!r.subject || x.subject === r.subject)))
+      add("rules", i, `Fixed lesson: ${r.target} has no ${r.subject || "lesson"} on step 6, so this does nothing. Remove it (✕) or pick another.`);
     if (rt.needs_number && !r.number) add("rules", i, "Give the Number.");
     if (["Same time across classes", "Not on the same day as"].includes(r.rule) && !r.subject) add("rules", i, "Pick the Subject.");
   });
@@ -225,8 +273,22 @@ function render() {
   $("#kindBadge").textContent = S.spec ? `${sc().type === "primary" ? "Primary" : "Secondary"} · ${sc().name}` : "No school yet";
   const id = STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
   main.innerHTML = (VIEWS[id] || (() => ""))();
-  renderIssues(); window.scrollTo(0, y);
+  renderIssues(); paintBanner(); saveState(); window.scrollTo(0, y);
   if (id === "generate") { paintGen(); poll(); }
+}
+/* the alert when the last generate found no timetable: on every step until a timetable is made or it is hidden */
+function paintBanner() {
+  const m = $("#main"); if (!m) return;
+  let el = $("#alertBanner"); const a = G.alert, key = a ? `${G.runId}:${a.n}` : "";
+  if (!a || !S.spec || G.dismissed === key || STEPS[S.step][0] === "generate") { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement("div"); el.id = "alertBanner"; m.prepend(el); }
+  el.className = "banner";
+  el.innerHTML = `<b>${esc(a.text)}</b> <span>See why, and what to change.</span><button class="small primary" data-step="${STEPS.findIndex(s => s[0] === "generate")}">How to fix it</button><button class="small ghost" data-dismiss="${esc(key)}" title="Hide this until the next generate">✕</button>`;
+}
+function fixesHTML(e) {   // the suggested fixes sent with a 'nosolution' event, each with a button to its step
+  const f = (e.data && e.data.fixes) || []; if (!f.length) return "";
+  const at = id => STEPS.findIndex(s => s[0] === id);
+  return `<div class="fixes"><b>How to fix it</b><ol>${f.map(x => `<li>${esc(x.text)}${x.go && x.go !== "generate" && at(x.go) > 0 ? ` <button class="small" data-step="${at(x.go)}">Open ${esc(STEPS[at(x.go)][1].replace(/^\d+ /, ""))}</button>` : ""}</li>`).join("")}</ol></div>`;
 }
 function count(id) { if (!S.spec) return ""; const m = { venues: "venues", classes: "classes", subjects: "subjects", teachers: "teachers", blocks: "blocks", lessons: "lessons", rules: "rules", students: "students" }[id]; return m ? S.spec[m].length : ""; }
 function renderIssues() {
@@ -285,7 +347,7 @@ const VIEWS = {
         ? `<input data-set="${x.key}" type="number" min="1" value="${esc(settingValue(x.key))}" placeholder="no limit">`
         : `<select data-set="${x.key}">${["Yes", "No"].map(v => opt(v, settingValue(x.key))).join("")}</select>`}</label>`).join("")}
       ${(s.extra_settings || []).map((x, i) => { const k = `spec.school.extra_settings.${i}.1`, lab = String(x[0]).toLowerCase();
-        const field = lab.startsWith("lessons end by") ? inp(k, x[1], "time")   // trims the day: no lesson runs past this time on those days
+        const field = lab.startsWith("lessons end by") ? `<span class="row" style="gap:6px;flex-wrap:nowrap">${inp(k, x[1], "time")}${x[1] ? `<button class="small" data-clear="${k}" title="Remove this end time: lessons may then use every L period of those days">✕</button>` : `<span class="muted small">no end time</span>`}</span>`   // trims the day: no lesson runs past this time on those days
           : lab.startsWith("students have no free periods") ? `<select data-k="${k}">${["Yes", "Prefer", "No"].map(v => opt(v, x[1])).join("")}</select>` : inp(k, x[1]);
         return `<label class="f" id="school-${i}">${esc(x[0])} ${field}${x[2] ? `<span class="muted small">${esc(x[2])}</span>` : ""}</label>`; }).join("")}</div></div>
       <div class="card"><h2>Day structure</h2><div class="legend">Brush: ${["L", "R", "U", "F", "A", ""].map(c => `<button class="small ${S.brush === c ? "primary" : ""}" data-brush="${c}"><i class="c-${c}" style="width:12px;height:12px;display:inline-block;border-radius:3px;vertical-align:-2px"></i> ${{ L: "Lesson", R: "Recess", U: "Lunch", F: "Flag / assembly", A: "After-school slot", "": "No school" }[c]}</button>`).join("")}</div>
@@ -402,10 +464,14 @@ const VIEWS = {
   },
   generate() {
     const st = G.st || {}, off = st.ai && !st.ai.ok;
-    const facts = [st.ai && st.ai.ok ? `AI: ${esc(st.ai.provider)} · ${esc(st.ai.model)}` : "", st.solve_seconds ? `each solve runs up to ${Math.round(st.solve_seconds / 60)} min` : ""].filter(Boolean);
+    const facts = [st.ai && st.ai.ok ? `AI: ${esc(st.ai.provider)} · ${esc(st.ai.model)}` : ""].filter(Boolean);
+    const secs = solveSecs(), mins = [5, 20, 60, 120, 240, 480].filter(m => m * 60 <= (st.solve_max || 28800));
+    if (!mins.includes(secs / 60)) mins.push(secs / 60), mins.sort((a, b) => a - b);
+    const long = `<label class="row" style="gap:6px" title="A tight timetable can take a long time to find. The best timetable so far is kept if you press Stop.">Solve for up to
+      <select id="solveSecs">${mins.map(m => opt(m * 60, secs, m < 60 ? `${m} min` : `${m / 60} hour${m > 60 ? "s" : ""}`)).join("")}</select></label>`;
     return `<div class="card"><h1>Generate & publish</h1><p class="lead">Generate makes the timetable from this setup (it is saved to the server first). With the AI timetabler, it checks the setup, runs the solver and asks you in the chat about anything that does not fit; without AI, it checks and solves, and you read the results. Nothing is visible to teachers or students until you publish.</p>
       ${off ? `<div class="notice"><b>The AI timetabler is off.</b> ${/AI_API_KEY/.test(st.ai.why) ? "No AI API key has been added yet." : esc(st.ai.why)} You can still use <b>Generate without AI</b>: it checks the setup and runs the solver, then you read the results and change the setup yourself. The chat, where the AI explains problems and makes tweaks for you, needs the key: whoever runs the app adds it in Railway (service → Variables → <code>AI_API_KEY</code>, with <code>AI_PROVIDER</code>).</div>` : ""}
-      <div class="row"><button class="${off ? "" : "primary"}" id="genAI"${off ? ` title="Needs an AI API key. Generate without AI still works."` : ""}>Generate with the AI timetabler</button><button class="${off ? "primary" : ""}" id="genPlain">Generate without AI</button><button class="danger" id="genStop" hidden>Stop</button></div>
+      <div class="row"><button class="${off ? "" : "primary"}" id="genAI"${off ? ` title="Needs an AI API key. Generate without AI still works."` : ""}>Generate with the AI timetabler</button><button class="${off ? "primary" : ""}" id="genPlain">Generate without AI</button><button class="danger" id="genStop" hidden>Stop</button>${long}</div>
       <p class="muted small">${facts.join(" · ")}</p></div>
       <div class="gen"><div class="card chat"><h2>Timetabler</h2><div id="chatlog" class="chatlog"></div><div id="progress" class="progress"></div>
         <form id="chatform" class="chatform" onsubmit="event.preventDefault(); sendChat(document.getElementById('chatin').value)"><input id="chatin" autocomplete="off"><button class="primary" id="chatsend">Send</button></form></div>
@@ -435,8 +501,12 @@ document.addEventListener("click", async e => {
   if (!pop.hidden && !pop.contains(e.target)) commitPop();
   const b = e.target.closest("button, [data-pop], .issue, td.c"); if (!b) return;
   if (b.dataset.step) { S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
+  if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
+  if (b.id === "saveServer") { saveServer(); return; }
+  if (b.dataset.dismiss) { G.dismissed = b.dataset.dismiss; paintBanner(); return; }
+  if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
-  if (b.id === "resume") { const sv = saved(); S.kind = sv.kind; S.meta = await getJSON(`/api/meta/${sv.kind}`); S.spec = sv.spec; S.step = sv.step || 1; ensureDays(); render(); return; }
+  if (b.id === "resume") { const sv = saved(); await adopt(sv.spec, "", { kind: sv.kind, step: sv.step, base: sv.base, dirty: sv.dirty !== false }); return; }
   if (b.dataset.add) { addRow(b.dataset.add); return; }
   if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); save(); render(); return; }
   if (b.dataset.helper) { helper(b.dataset.helper); return; }
@@ -450,14 +520,20 @@ document.addEventListener("click", async e => {
     if (s) S.stu = classNames().includes(s.class) ? { cls: s.class, q: "" } : { cls: "", q: stuKey(s) };
     S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
-  if (b.id === "serverSetup") { await adopt(G.server.spec, "Opened the school's saved setup."); return; }
+  if (b.id === "serverSetup") { await adopt(G.server.spec, "Opened the school's saved setup.", { base: G.server.ts, dirty: false }); return; }
   if (b.id === "genAI" || b.id === "genPlain") { generate(b.id === "genAI"); return; }
   if (b.id === "genStop") { await post("/api/stop"); poll(); return; }
   if (b.id === "publish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away.")) return; const j = await post("/api/publish"); if (j) { toast("Publishing… about a minute."); poll(); } return; }
-  if (b.id === "keepChanges") { const j = await post("/api/keep-changes"); if (j && j.spec) { S.spec = j.spec; save(); toast("The AI's changes are now in your setup."); poll(); } return; }
+  if (b.id === "keepChanges") { const j = await post("/api/keep-changes"); if (j && j.spec) { S.spec = j.spec; save(); await synced(); toast("The AI's changes are now in your setup."); poll(); } return; }
   if (b.dataset.answer !== undefined) { sendChat(b.dataset.answer); return; }
   if (b.id === "exGo") { makePrintouts(); return; }
-  if (b.id === "saveJson") { const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${(S.spec && sc().name) || "timetable"}_setup.json`); return; }
+  if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
+});
+document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / Ctrl+Y redo; inside a text box the browser's own undo applies
+  if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+  const k = e.key.toLowerCase(); if (k !== "z" && k !== "y") return;
+  if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  e.preventDefault(); undo(k === "z" && !e.shiftKey);
 });
 let painting = false;
 document.addEventListener("mousedown", e => { const c = e.target.closest("td.c"); if (!c) return; painting = true; paint(c); e.preventDefault(); });
@@ -469,8 +545,9 @@ function paint(c) {
 }
 document.addEventListener("change", async e => {
   const el = e.target;
-  if (el.id === "importX") { const f = el.files[0]; if (!f) return; const fd = new FormData(); fd.append("file", f); const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json(); if (!r.ok) { toast(j.error || "Could not read that file."); return; } await adopt(j, "Workbook opened."); return; }
-  if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; try { await adopt(JSON.parse(await f.text()), "Progress loaded."); } catch (err) { toast("That file is not a progress file."); } return; }
+  if (el.id === "importX") { const f = el.files[0]; if (!f) return; const fd = new FormData(); fd.append("file", f); const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json(); if (!r.ok) { toast(j.error || "Could not read that file."); return; } await adopt(j, "Workbook opened. Press Save progress to keep it for the school."); return; }
+  if (el.id === "solveSecs") { try { localStorage.setItem("ttsolve", el.value); } catch (err) { } toast(`Each solve may now run up to ${$("#solveSecs").selectedOptions[0].textContent}. Stop keeps the best timetable so far.`); return; }
+  if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; el.value = ""; try { await adopt(JSON.parse(await f.text()), "Progress loaded from the file. Press Save progress to keep it for the school."); } catch (err) { toast("That file is not a progress file."); } return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
   if (el.id === "stuFile") { stuFile(el); return; }
   if (el.id === "stuCls" || el.id === "stuQ") { S.stu[el.id === "stuCls" ? "cls" : "q"] = el.value; render(); return; }
@@ -660,11 +737,15 @@ async function post(url, body) {
   if (!r.ok) { toast(j.error || "Something went wrong."); return null; }
   return j;
 }
+function solveSecs() {   // this browser's choice of how long each solve may run (Generate page), else the server's default
+  let v = 0; try { v = Number(localStorage.getItem("ttsolve")) || 0; } catch (e) { }
+  return v || (G.st && G.st.solve_seconds) || 1200;
+}
 async function generate(withAI) {
   if (!S.spec) { toast("Open or start a setup first."); return; }
-  G.events = []; G.after = 0;
-  const j = await post("/api/generate", { spec: S.spec, ai: withAI });
-  if (j) { toast(withAI ? "The AI timetabler has started." : "Generating…"); poll(); }
+  G.events = []; G.after = 0; G.alert = null;
+  const j = await post("/api/generate", { spec: S.spec, ai: withAI, seconds: solveSecs() });
+  if (j) { toast(withAI ? "The AI timetabler has started." : "Generating…"); synced(); poll(); }
 }
 async function sendChat(text) {
   text = (text || "").trim(); if (!text) return;
@@ -680,7 +761,14 @@ async function poll() {
     const st = await r.json(); G.st = st;
     if (st.run) {
       if (G.runId !== st.run.id) { G.runId = st.run.id; G.events = []; if (G.after) { G.after = 0; G.inflight = false; return poll(); } }
+      const fresh = G.after > 0;   // not the first load of this run's events
       G.events.push(...st.run.events); if (st.run.events.length) G.after = st.run.events[st.run.events.length - 1].n;
+      const out = [...st.run.events].reverse().find(e => e.type === "nosolution" || e.type === "timetable");
+      if (out) {   // the latest solve's outcome: a 'nosolution' raises the alert until a timetable is made
+        G.alert = out.type === "nosolution" ? out : null;
+        if (G.alert && fresh) toast(`${G.alert.text} See why and how to fix it on Generate & publish.`);
+        paintBanner();
+      }
     }
     if (STEPS[S.step][0] === "generate") paintGen();
   } catch (e) { }
@@ -701,7 +789,7 @@ function eventHTML(e, last) {
     }
     case "change": return `<div class="ev change"><b>Setup changed:</b> ${esc(e.text)}${items}</div>`;
     case "timetable": return `<div class="ev tt ${e.data && e.data.ok ? "good" : "warn"}"><b>Timetable ${e.data ? "#" + e.data.n : ""}</b> · ${esc(e.text)} <a href="/preview" target="_blank">Preview</a></div>`;
-    case "nosolution": return `<div class="ev bad"><b>${esc(e.text)}</b>${items}</div>`;
+    case "nosolution": return `<div class="ev bad"><b>${esc(e.text)}</b>${items ? `<div class="small" style="margin-top:6px"><b>Why</b></div>${items}` : ""}${fixesHTML(e)}</div>`;
     case "error": return `<div class="ev bad">${esc(e.text)}</div>`;
     case "published": return `<div class="ev good"><b>${esc(e.text)}</b></div>`;
     case "check": return `<div class="ev">${esc(e.text)}${items ? `<details><summary>Details</summary>${items}</details>` : ""}</div>`;
@@ -720,8 +808,8 @@ function paintGen() {
   $("#genAI").disabled = !aiok || busy; $("#genPlain").disabled = busy; $("#genStop").hidden = !busy;
   const chatOn = run && run.ai; $("#chatin").disabled = !chatOn; $("#chatsend").disabled = !chatOn;
   $("#chatin").placeholder = chatOn ? (run.waiting ? "Type your answer…" : "Ask or tell the timetabler something…") : "The chat works when you generate with the AI timetabler.";
-  const s = run && run.solved;
-  $("#resultCard").innerHTML = `<h2>Latest timetable</h2>` + (s ? `<p class="${s.ok ? "okmsg" : "issue"}">${s.ok ? "All checks passed" : `${s.problems.length} problems`} · ${s.lessons} lessons · ${s.after.length ? `${s.after.length} after school` : "nothing after school"}</p>
+  const s = run && run.solved, a = G.alert;
+  $("#resultCard").innerHTML = `<h2>Latest timetable</h2>` + (a ? `<div class="alertbox"><b>${esc(a.text)}</b>${fixesHTML(a)}${a.items && a.items.length ? `<details><summary>Why</summary><ul>${a.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul></details>` : ""}</div>` : "") + (s ?`<p class="${s.ok ? "okmsg" : "issue"}">${s.ok ? "All checks passed" : `${s.problems.length} problems`} · ${s.lessons} lessons · ${s.after.length ? `${s.after.length} after school` : "nothing after school"}</p>
       ${s.after.length ? `<details><summary>After-school lessons</summary><ul>${s.after.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
       ${s.problems.length ? `<details open><summary>Problems</summary><ul>${s.problems.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
       ${s.notes.length ? `<details><summary>Notes</summary><ul>${s.notes.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
@@ -765,4 +853,20 @@ async function buildXlsx() {
   dl(await r.blob(), `${(sc().name || "School").replace(/[^\w -]/g, "").trim().replace(/ /g, "_")}_Timetable_Setup.xlsx`);
 }
 
-(async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
+/* on opening the page: this browser's unsaved work if it has any, else the setup saved for the school, else this
+   browser's last copy; with none of these, the Start page */
+(async () => {
+  try { G.server = await getJSON("/api/setup"); } catch (e) { }
+  const local = saved(), srv = G.server && G.server.spec ? G.server : null;
+  const unsaved = local && (local.dirty || (local.dirty === undefined && (!srv || JSON.stringify(local.spec) !== JSON.stringify(srv.spec))));
+  try {
+    if (local && (unsaved || !srv)) {
+      await adopt(local.spec, "", { kind: local.kind, step: local.step, base: local.base, dirty: !!unsaved });
+      if (srv && srv.ts > (local.base || 0) + 1) toast(`This browser has changes that are not saved for the school. A newer setup was saved on ${srv.saved_at}: open it from Start if you want that one instead.`);
+    } else if (srv) {
+      const same = local && local.spec.school && srv.spec.school && local.spec.school.name === srv.spec.school.name;
+      await adopt(srv.spec, `Opened the school's saved setup (saved ${srv.saved_at}).`, { step: same ? local.step : 1, base: srv.ts, dirty: false });
+    }
+  } catch (e) { }
+  render(); poll();
+})();

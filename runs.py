@@ -14,6 +14,7 @@ class Run:
         self.lock = threading.RLock(); self.answers = queue.Queue(); self.stop = threading.Event()
         self.state, self.busy, self.finished, self.waiting = "starting", False, False, None
         self.progress, self.solved, self.solves, self.started, self.error = "", None, 0, now(), None
+        self.seconds = None   # each solve may run this long (the committee's choice on the Generate page)
 
     # ---- log
     def emit(self, type_, **kw):
@@ -95,13 +96,13 @@ def _thread(run, target, *args):
             run.save()
     t = threading.Thread(target=body, daemon=True); t.start()
 
-def start(spec, use_ai):
+def start(spec, use_ai, seconds=None):
     global _current
     import ai
     with _lock:
         if _current is not None and _current.busy: raise RuntimeError("A run is still going. Stop it first.")
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
-        run = Run(rid, use_ai, spec); _current = run
+        run = Run(rid, use_ai, spec); run.seconds = seconds; _current = run
     from ttgen.reader import derive
     derive(run.spec); run.save()
     run.emit("status", text=f"Started {'with the AI timetabler' if use_ai else 'without AI'} from the setup saved at {now()}.")
