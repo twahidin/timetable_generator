@@ -3,7 +3,7 @@
 Set in Railway variables:
   AI_PROVIDER  anthropic | openai | openrouter      (mock = scripted stand-in for testing)
   AI_API_KEY   the provider's key (ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY also work)
-  AI_MODEL     model name exactly as the provider lists it (Anthropic defaults to claude-sonnet-5-5)
+  AI_MODEL     model name exactly as the provider lists it (Anthropic defaults to claude-opus-5-5)
   AI_BASE_URL  optional, for an OpenAI-compatible endpoint other than the default
 The key stays on the server; the browser never sees it."""
 import json, os, re, time
@@ -12,10 +12,13 @@ import timetabler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.join(HERE, "skill", "school-timetable-generator", "SKILL.md")
-DEFAULT_MODEL = {"anthropic": "claude-sonnet-5-5"}
+DEFAULT_MODEL = {"anthropic": "claude-opus-5-5"}
 DEFAULT_BASE = {"anthropic": "https://api.anthropic.com", "openai": "https://api.openai.com/v1", "openrouter": "https://openrouter.ai/api/v1"}
 KEY_VARS = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
 MAX_STEPS = 40
+MAX_TOKENS = 16000   # the model's thinking counts toward this as well as its reply
+# models that take fallbacks "default" on Anthropic's own API: if a safety filter declines, Anthropic re-runs the request on a fallback model
+FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 
 def config():
     p = (os.environ.get("AI_PROVIDER") or "").strip().lower()
@@ -59,7 +62,7 @@ The skill (your reference for the template, the rules and what usually goes wron
 def _post(url, headers, body, tries=4):
     for k in range(tries):
         try:
-            r = requests.post(url, headers=headers, json=body, timeout=180)
+            r = requests.post(url, headers=headers, json=body, timeout=600)
         except requests.RequestException as e:
             if k == tries - 1: raise RuntimeError(f"could not reach the AI service ({e})")
             time.sleep(3 * (k + 1)); continue
@@ -70,6 +73,7 @@ def _post(url, headers, body, tries=4):
             except ValueError: msg = r.text[:300]
             raise RuntimeError(f"the AI service said {r.status_code}: {msg}")
         return r.json()
+    raise RuntimeError("could not reach the AI service")
 
 def anthropic_body(cfg, system, history, tools):
     msgs = []
@@ -83,13 +87,25 @@ def anthropic_body(cfg, system, history, tools):
                      [dict(type="tool_use", id=c["id"], name=c["name"], input=c["args"] or {}) for c in h.get("calls", [])]
             msgs.append(dict(role="assistant", content=blocks or [dict(type="text", text="...")]))
         elif h["role"] == "tool": add("user", dict(type="tool_result", tool_use_id=h["id"], content=h["result"]))
-    return dict(model=cfg["model"], max_tokens=2048, system=[dict(type="text", text=system, cache_control=dict(type="ephemeral"))], messages=msgs,
+    return dict(model=cfg["model"], max_tokens=MAX_TOKENS, system=[dict(type="text", text=system, cache_control=dict(type="ephemeral"))], messages=msgs,
                 tools=[dict(name=t["name"], description=t["description"], input_schema=t["schema"]) for t in tools])
 
 def call_anthropic(cfg, system, history, tools):
     body = anthropic_body(cfg, system, history, tools)
-    r = _post(cfg["base"] + "/v1/messages", {"x-api-key": cfg["key"], "anthropic-version": "2023-06-01", "content-type": "application/json"}, body)
-    text = "\n".join(b.get("text", "") for b in r.get("content", []) if b.get("type") == "text").strip()
+    url, headers = cfg["base"] + "/v1/messages", {"x-api-key": cfg["key"], "anthropic-version": "2023-06-01", "content-type": "application/json"}
+    if cfg["model"] in FALLBACK_MODELS and cfg["base"] == DEFAULT_BASE["anthropic"]:
+        try: r = _post(url, {**headers, "anthropic-beta": "server-side-fallback-2026-07-01"}, {**body, "fallbacks": "default"})
+        except RuntimeError as e:
+            if "said 400" not in str(e) or "fallback" not in str(e).lower(): raise
+            r = _post(url, headers, body)   # this account or model does not take fallbacks: ask without them
+    else:
+        r = _post(url, headers, body)
+    # a cut-off or declined reply can hold a half-written tool call, so none of its tools run
+    if r.get("stop_reason") == "max_tokens": raise RuntimeError(f"its reply was cut off at the {MAX_TOKENS:,}-token limit before it finished")
+    if r.get("stop_reason") == "refusal":
+        cat = (r.get("stop_details") or {}).get("category")
+        raise RuntimeError("the AI service's safety filter declined this request" + (f" ({cat})" if cat else ""))
+    text ="\n".join(b.get("text", "") for b in r.get("content", []) if b.get("type") == "text").strip()
     calls = [dict(id=b["id"], name=b["name"], args=b.get("input") or {}) for b in r.get("content", []) if b.get("type") == "tool_use"]
     return text, calls
 
@@ -108,7 +124,10 @@ def call_openai(cfg, system, history, tools):
     headers = {"Authorization": f"Bearer {cfg['key']}", "Content-Type": "application/json"}
     if cfg["provider"] == "openrouter": headers.update({"X-Title": "School timetable app"})
     r = _post(cfg["base"] + "/chat/completions", headers, openai_body(cfg, system, history, tools))
-    msg = (r.get("choices") or [{}])[0].get("message") or {}
+    choice = (r.get("choices") or [{}])[0]
+    if choice.get("finish_reason") == "length": raise RuntimeError("its reply was cut off at the model's length limit before it finished")
+    if choice.get("finish_reason") == "content_filter": raise RuntimeError("the AI service's content filter stopped the reply")
+    msg = choice.get("message") or {}
     calls = []
     for c in msg.get("tool_calls") or []:
         try: args = json.loads(c["function"].get("arguments") or "{}")

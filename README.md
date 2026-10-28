@@ -41,8 +41,8 @@ Without an AI set up, **Generate without AI** checks and solves, and the committ
    | `SECRET_KEY` | a long random string. Keep it: changing it signs everyone out and changes every personal student code |
    | `COMMITTEE_CODE`, `TEACHER_CODE`, `STUDENT_CODE` | at least 6 letters or digits each, all different (case, spaces and dashes are ignored) |
    | `AI_PROVIDER` | `anthropic`, `openai` or `openrouter` |
-   | `AI_API_KEY` | the provider's API key (stays on the server) |
-   | `AI_MODEL` | the model name exactly as the provider lists it. Anthropic defaults to `claude-sonnet-5-5` |
+   | `AI_API_KEY` | **fill in:** the provider's API key (stays on the server). Left blank, the AI chat stays off and the committee can still generate without AI |
+   | `AI_MODEL` | the model name exactly as the provider lists it. Anthropic defaults to `claude-opus-5-5` |
    | `SCHOOL_NAME` | optional: shown on the sign-in page before anything is published |
    | `SOLVE_SECONDS` | optional: time for one solve, default 300 (`SOLVE_MAX_SECONDS` 1800 caps what the AI may ask for) |
    | `SOLVE_WORKERS` | optional: solver threads, default 8 |
