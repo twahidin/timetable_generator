@@ -4,9 +4,9 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const KEY = "ttsetup.v1";
-const S = { kind: null, spec: null, meta: null, step: 0, brush: "L" };
+const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" } };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
-  ["teachers", "4 Teachers"], ["blocks", "5 Blocks"], ["lessons", "6 Lessons"], ["rules", "7 Rules"], ["generate", "Generate & publish"], ["download", "Files"]];
+  ["teachers", "4 Teachers"], ["blocks", "5 Blocks"], ["lessons", "6 Lessons"], ["rules", "7 Rules"], ["students", "8 Students"], ["generate", "Generate & publish"], ["download", "Files"]];
 
 /* ---------------- storage, server */
 function save() { try { localStorage.setItem(KEY, JSON.stringify({ kind: S.kind, spec: S.spec, step: S.step })); } catch (e) { } }
@@ -72,7 +72,7 @@ function canTeach(t, subject, level) {
   return (tt.can_teach || []).some(c => c.subject === subject && (!c.levels || c.levels === "All" || c.levels === level || c.levels === bands()[level]));
 }
 function issues() {
-  const out = { lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, global: [] };
+  const out = { lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
   const add = (k, i, m) => (out[k][i] = out[k][i] || []).push(m);
   const info = lessonInfo(); const codes = {};
   info.forEach((x, i) => { if (x.code && x.code !== "Entire Class") codes[x.code] = (codes[x.code] || 0) + 1; });
@@ -107,8 +107,30 @@ function issues() {
     if (rt.needs_number && !r.number) add("rules", i, "Give the Number.");
     if (["Same time across classes", "Not on the same day as"].includes(r.rule) && !r.subject) add("rules", i, "Pick the Subject.");
   });
+  // students: each one's groups must exist, be for their class, and take at most one group of a block (a block runs at one time)
+  const gc = {}; S.spec.lessons.forEach((x, i) => { if (info[i].code && info[i].code !== "Entire Class") gc[info[i].code] = x; });
+  const ids = {}, per = {}; S.spec.students.forEach((s, i) => { const k = stuKey(s); if (k) ids[k] = (ids[k] || 0) + 1; if (s.class) (per[s.class] = per[s.class] || []).push(i); });
+  S.spec.students.forEach((s, i) => {
+    const who = stuKey(s) || `Row ${i + 1}`;
+    if (!stuKey(s)) add("students", i, `Row ${i + 1}: no student ID or name.`);
+    else if (ids[who] > 1) add("students", i, `${who}: this ID is on the list twice (personal codes are made from the ID).`);
+    if (!s.class) add("students", i, `${who}: no class.`); else if (!classNames().includes(s.class)) add("students", i, `${who}: class ${s.class} is not on step 2.`);
+    const inBlock = {};
+    for (const g of s.groups || []) {
+      const x = gc[g]; if (!x) { add("students", i, `${who}: group ${g} is not on step 6.`); continue; }
+      if (s.class && !(x.classes || []).includes(s.class)) add("students", i, `${who}: group ${g} is not for class ${s.class}.`);
+      if (x.block) (inBlock[x.block] = inBlock[x.block] || []).push(g);
+    }
+    for (const [b, gs] of Object.entries(inBlock)) if (gs.length > 1) add("students", i, `${who}: ${gs.join(" and ")} are both in ${b}, so they clash.`);
+  });
+  S.spec.classes.forEach(c => {
+    const l = per[c.class], size = Number(c.size) || 0; if (!l || !size) return;
+    if (l.length < size) add("students", l[0], `${c.class}: ${l.length} of ${size} students listed. Once a class has a list, only the students on it are checked for clashes.`);
+    if (l.length > size) add("students", l[0], `${c.class}: ${l.length} students listed but the class has ${size} on step 2.`);
+  });
   return { out, load, info };
 }
+const stuKey = s => String(s.id || s.name || "").trim();
 function targetOptions(scope) {
   return { School: ["Whole school"], Level: levels(), Class: classNames(), Teacher: teacherNames(), Department: sc().departments || [], Subject: subjectNames(), Block: blockNames(), Room: rooms() }[scope] || [];
 }
@@ -132,10 +154,10 @@ function render() {
   renderIssues(); window.scrollTo(0, y);
   if (id === "generate") { paintGen(); poll(); }
 }
-function count(id) { if (!S.spec) return ""; const m = { venues: "venues", classes: "classes", subjects: "subjects", teachers: "teachers", blocks: "blocks", lessons: "lessons", rules: "rules" }[id]; return m ? S.spec[m].length : ""; }
+function count(id) { if (!S.spec) return ""; const m = { venues: "venues", classes: "classes", subjects: "subjects", teachers: "teachers", blocks: "blocks", lessons: "lessons", rules: "rules", students: "students" }[id]; return m ? S.spec[m].length : ""; }
 function renderIssues() {
   const el = $("#issues"); if (!S.spec) { el.innerHTML = ""; return; }
-  const { out } = issues(); const steps = { venues: 2, classes: 3, subjects: 4, teachers: 5, blocks: 6, lessons: 7, rules: 8 };
+  const { out } = issues(); const steps = Object.fromEntries(STEPS.map(([id], i) => [id, i]));
   const items = []; for (const [k, rows] of Object.entries(out)) if (k !== "global") for (const [i, ms] of Object.entries(rows)) for (const m of ms) items.push([k, i, m]);
   el.innerHTML = `<div class="card"><h2>Things to fix</h2>${items.length ? items.slice(0, 80).map(([k, i, m]) => `<div class="issue" data-go="${steps[k]}" data-row="${k}-${i}">${esc(m)}</div>`).join("") + (items.length > 80 ? `<div class="muted">…and ${items.length - 80} more</div>` : "")
     : '<div class="okmsg">Nothing to fix. The template is consistent.</div>'}</div>`;
@@ -152,7 +174,7 @@ function exportCard() {
 const VIEWS = {
   start() {
     const sv = saved();
-    return `<div class="card"><h1>Build your school's timetable setup</h1><p class="lead">This tool fills the timetable setup workbook step by step: rooms, classes, subjects, teachers, blocks of groups, lessons and rules. Every list you make becomes the drop-down for the next step, so nothing is typed twice. At the end you download the workbook and the timetable skill, and an AI agent generates the timetable from them.</p>
+    return `<div class="card"><h1>Build your school's timetable setup</h1><p class="lead">This tool fills the timetable setup workbook step by step: rooms, classes, subjects, teachers, blocks of groups, lessons, rules and students. Every list you make becomes the drop-down for the next step, so nothing is typed twice. At the end you download the workbook and the timetable skill, and an AI agent generates the timetable from them.</p>
       <div class="choice">
         <button data-begin="secondary|sample"><b>Secondary school · sample</b><span class="muted">A fictional 16-class secondary school with G1/G2/G3 banding, option blocks and rules. Good for seeing how everything fits.</span></button>
         <button data-begin="primary|sample"><b>Primary school · sample</b><span class="muted">A fictional 18-class primary school, weekly timetable, Standard/Foundation banding at P5–P6.</span></button>
@@ -247,6 +269,25 @@ const VIEWS = {
       </table></div><div class="row" style="margin-top:10px"><button data-add="rules">+ Add rule</button></div></div>
       <div class="card"><h2>Rule types</h2><div class="tablewrap" style="max-height:none"><table><tr><th>Rule</th><th>Applies to</th><th>What it means</th><th>Example</th></tr>${RT.map(t => `<tr><td><b>${esc(t.rule)}</b></td><td>${esc(t.scopes)}</td><td>${esc(t.meaning)}</td><td class="muted">${esc(t.example)}</td></tr>`).join("")}</table></div></div>`;
   },
+  students() {
+    const { out } = issues(); const L = S.spec.students, f = S.stu, q = f.q.trim().toLowerCase(), MAX = 200;
+    const per = {}; L.forEach(s => per[s.class] = (per[s.class] || 0) + 1);
+    const rows = L.map((s, i) => [s, i]).filter(([s]) => (!f.cls || s.class === f.cls) && (!q || `${s.id || ""} ${s.name || ""}`.toLowerCase().includes(q)));
+    const clsOpts = [opt("", f.cls, `All classes (${L.length})`), ...S.spec.classes.map(c => opt(c.class, f.cls, `${c.class} · ${per[c.class] || 0} of ${c.size || "?"}`)),
+      ...[...new Set(L.map(s => s.class || ""))].filter(c => !classNames().includes(c)).map(c => opt(c, f.cls, c ? `${c} (not on step 2) · ${per[c]}` : `No class · ${L.filter(s => !s.class).length}`))].join("");
+    return `<div class="card"><h1>Step 8 · Students <span class="muted" style="font-weight:400;font-size:15px">(optional)</span></h1><p class="lead">List each student with their class and the codes of the groups they are in (from step 6). The solver then makes sure no student has two lessons at once, and every student gets their own timetable and a personal sign-in code. Without a list, the students of a class are assumed to be in the same level tag (all G3, all Foundation) in every block, so students on mixed combinations are not checked.</p>
+      <div class="helper"><b>Paste or upload the student list</b>
+        <p class="muted small" style="margin:4px 0 8px">Copy the rows from Excel or a CSV file, with a header row: <b>Student ID</b>, <b>Name</b>, <b>Class</b> and <b>Groups</b> (codes in one cell separated by commas, or one code per column). Without a header, the columns are read as ID, name, class, then groups. Whole-class subjects need no codes: a student has those with their class. Use an ID that stays the same (an admission number, say): personal codes are made from it.</p>
+        <textarea id="stuPaste" rows="5" spellcheck="false" placeholder="Student ID&#9;Name&#9;Class&#9;Groups&#10;S001&#9;Tan Wei Ming&#9;1A&#9;1ELP1, 1MAP1, 1SCP1"></textarea>
+        <div class="row" style="margin-top:8px"><label class="filebtn">Choose a file (.xlsx or .csv)<input type="file" id="stuFile" accept=".xlsx,.csv,.tsv,.txt" hidden></label><button class="primary" data-stu="replace">Replace the list</button><button data-stu="add">Add to the list</button><span class="muted small" id="stuMsg"></span></div></div></div>
+      <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">The list</h2>
+        <div class="row"><select id="stuCls">${clsOpts}</select><input id="stuQ" type="search" placeholder="Search ID or name" title="Type, then press Enter" value="${esc(f.q)}" style="width:190px"><span class="muted small">${rows.length === L.length ? `${L.length} students` : `${rows.length} of ${L.length}`}</span>${L.length ? `<button class="small danger" data-stu="clear">Remove all</button>` : ""}</div></div>
+      ${L.length ? `<div class="tablewrap" style="margin-top:10px"><table><tr><th>Student ID</th><th>Name</th><th>Class</th><th>Level</th><th>Groups (click to pick)</th><th>Note</th><th></th></tr>
+      ${rows.slice(0, MAX).map(([s, i]) => `<tr id="students-${i}" class="${out.students[i] ? "bad" : ""}" title="${esc((out.students[i] || []).join(" "))}"><td>${inp(`spec.students.${i}.id`, s.id, "text", 'style="width:110px"')}</td><td style="min-width:190px">${inp(`spec.students.${i}.name`, s.name)}</td><td style="min-width:88px">${sel(`spec.students.${i}.class`, s.class, classNames())}</td><td class="calc">${esc(clsLevel(s.class) || s.level || "")}</td><td style="min-width:260px">${chips(`spec.students.${i}.groups`, s.groups, "groups", `data-cls="${esc(s.class || "")}"`)}</td><td>${inp(`spec.students.${i}.note`, s.note)}</td><td>${delBtn("students", i)}</td></tr>`).join("")}
+      </table></div>${rows.length > MAX ? `<p class="muted small">Showing the first ${MAX}. Pick a class or search to see the rest.</p>` : ""}`
+        : `<p class="muted" style="margin-top:10px">No students yet. Paste or upload a list above, or add students one by one.</p>`}
+      <div class="row" style="margin-top:10px"><button data-add="students">+ Add student</button></div></div>`;
+  },
   generate() {
     const st = G.st || {}, off = st.ai && !st.ai.ok;
     const facts = [st.ai && st.ai.ok ? `AI: ${esc(st.ai.provider)} · ${esc(st.ai.model)}` : "", st.solve_seconds ? `each solve runs up to ${Math.round(st.solve_seconds / 60)} min` : ""].filter(Boolean);
@@ -261,7 +302,7 @@ const VIEWS = {
   download() {
     const { out } = issues(); const n = Object.entries(out).filter(([k]) => k !== "global").reduce((a, [, v]) => a + Object.keys(v).length, 0);
     return `<div class="card"><h1>Files</h1><p class="lead">Your setup workbook keeps the drop-downs and formulas, so it can still be edited in Excel. To generate here, use <b>Generate &amp; publish</b>; to generate elsewhere, give the workbook and the timetable skill to an AI agent that can run code.</p>
-      <div><span class="stat"><b>${S.spec.classes.length}</b> classes</span><span class="stat"><b>${S.spec.teachers.length}</b> teachers</span><span class="stat"><b>${S.spec.blocks.length}</b> blocks</span><span class="stat"><b>${S.spec.lessons.length}</b> lesson rows</span><span class="stat"><b>${S.spec.rules.length}</b> rules</span></div>
+      <div><span class="stat"><b>${S.spec.classes.length}</b> classes</span><span class="stat"><b>${S.spec.teachers.length}</b> teachers</span><span class="stat"><b>${S.spec.blocks.length}</b> blocks</span><span class="stat"><b>${S.spec.lessons.length}</b> lesson rows</span><span class="stat"><b>${S.spec.rules.length}</b> rules</span><span class="stat"><b>${S.spec.students.length}</b> students</span></div>
       ${n ? `<p class="issue" style="margin-top:12px">${n} rows still have something to fix (see the right-hand panel). You can download anyway; the agent will report them.</p>` : '<p class="okmsg" style="margin-top:12px">Everything checks out.</p>'}</div>
       <div class="dl">
         <div class="card"><h2>1 · Your setup workbook</h2><p class="muted">Everything you entered, as the .xlsx template.</p><button class="primary" id="build">Download setup workbook (.xlsx)</button></div>
@@ -291,7 +332,11 @@ document.addEventListener("click", async e => {
   if (b.dataset.copyday) { const lv = b.dataset.copyday; const ds = S.spec.day_structure[lv]; const f = ds[dayNames()[0]]; dayNames().forEach(d => ds[d] = f); save(); render(); return; }
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
   if (b.dataset.pop) { openPop(b); return; }
-  if (b.classList.contains("issue") && b.dataset.go) { S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
+  if (b.dataset.stu) { stuApply(b.dataset.stu); return; }
+  if (b.classList.contains("issue") && b.dataset.go) {
+    const s = /^students-/.test(b.dataset.row) && S.spec.students[Number(b.dataset.row.slice(9))];
+    if (s) S.stu = classNames().includes(s.class) ? { cls: s.class, q: "" } : { cls: "", q: stuKey(s) };
+    S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "serverSetup") { await adopt(G.server.spec, "Opened the school's saved setup."); return; }
   if (b.id === "genAI" || b.id === "genPlain") { generate(b.id === "genAI"); return; }
@@ -315,6 +360,8 @@ document.addEventListener("change", async e => {
   if (el.id === "importX") { const f = el.files[0]; if (!f) return; const fd = new FormData(); fd.append("file", f); const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json(); if (!r.ok) { toast(j.error || "Could not read that file."); return; } await adopt(j, "Workbook opened."); return; }
   if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; try { await adopt(JSON.parse(await f.text()), "Progress loaded."); } catch (err) { toast("That file is not a progress file."); } return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
+  if (el.id === "stuFile") { stuFile(el); return; }
+  if (el.id === "stuCls" || el.id === "stuQ") { S.stu[el.id === "stuCls" ? "cls" : "q"] = el.value; render(); return; }
   const path = el.dataset.k; if (!path) return;
   let v = el.value; if (el.type === "number") v = v === "" ? null : Number(v); if (v === "") v = null;
   if (/\.(from|to)$/.test(path) && v !== null) v = Number(v);
@@ -323,6 +370,7 @@ document.addEventListener("change", async e => {
   const m = path.match(/^spec\.lessons\.(\d+)\.block$/);
   if (m && v) { const b = S.spec.blocks.find(x => x.block === v); if (b) { S.spec.lessons[m[1]].classes = [...(b.classes || [])]; S.spec.lessons[m[1]].level = b.level || S.spec.lessons[m[1]].level; } }
   const t = path.match(/^spec\.lessons\.(\d+)\.teachers\.(\d+)$/); if (t) S.spec.lessons[t[1]].teachers = (S.spec.lessons[t[1]].teachers || []).map(x => x || null);
+  const sm = path.match(/^spec\.students\.(\d+)\.class$/); if (sm) S.spec.students[sm[1]].level = clsLevel(v) || null;
   if (/^spec\.school\.(weeks|periods_per_day)$/.test(path)) ensureDays();
   if (/\.(room|class|subject|name|block)$/.test(path)) renameRefs(e.target, path, v);
   save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
@@ -335,7 +383,9 @@ function addRow(k) {
   const blank = { venues: { room: "", kind: "classroom", capacity: 40 }, classes: { class: "", level: lv, size: 38, home_room: null },
     subjects: { subject: "", code: "", tag: "-", dept: (sc().departments || [])[0], periods: {} }, teachers: { name: "", short: "", dept: (sc().departments || [])[0], allowance: sc().type === "primary" ? 36 : 64, provisional: "No", can_teach: [] },
     blocks: { block: "", level: lv, classes: [] }, lessons: { level: lv, subject: null, block: null, classes: [], teachers: [], students: null },
-    rules: { scope: "Teacher", target: null, rule: "Not available", week: "Both", day: "All", strength: "Must" } }[k];
+    rules: { scope: "Teacher", target: null, rule: "Not available", week: "Both", day: "All", strength: "Must" },
+    students: { id: "", name: "", level: clsLevel(S.stu.cls) || null, class: S.stu.cls || null, groups: [] } }[k];
+  if (k === "students") S.stu.q = "";
   S.spec[k].push(JSON.parse(JSON.stringify(blank))); save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
   const rows = document.querySelectorAll(`tr[id^="${k}-"]`); const last = rows[rows.length - 1]; if (last) { last.scrollIntoView({ block: "center" }); const f = last.querySelector("input,select"); if (f) f.focus(); }
 }
@@ -351,6 +401,86 @@ function helper(k) {
   save(); render(); toast("Added.");
 }
 
+/* ---------------- student list: paste, upload, replace or add */
+function splitRow(line, d) {
+  const out = []; let cur = "", q = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (q) { if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+    else if (ch === '"' && !cur.trim()) { q = true; cur = ""; } else if (ch === d) { out.push(cur.trim()); cur = ""; } else cur += ch;
+  }
+  out.push(cur.trim()); return out;
+}
+function readStudents(text) {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n").filter(l => l.trim());
+  const d = lines.some(l => l.includes("\t")) ? "\t" : lines.some(l => l.includes(";")) && !lines.some(l => l.includes(",")) ? ";" : ",";
+  const rows = lines.map(l => splitRow(l, d));
+  const cls = Object.fromEntries(classNames().map(c => [c.toLowerCase(), c])), canon = v => cls[String(v || "").trim().toLowerCase()] || String(v || "").trim();
+  const codes = Object.fromEntries(lessonInfo().map(x => x.code).filter(c => c && c !== "Entire Class").map(c => [c.toLowerCase(), c]));
+  // a header row (within the first 20) names the columns; otherwise the class column is the one whose cells are class names
+  let h = rows.slice(0, 20).findIndex(r => r.some(c => /^(form\s*)?class$/i.test(c)) && r.some(c => /\bid\b|name|group/i.test(c)));
+  const col = { id: -1, name: -1, cls: -1, level: -1, combo: -1, note: -1, groups: [] };
+  if (h >= 0) {
+    rows[h].forEach((c, j) => {
+      if (/^(form\s*)?class$/i.test(c)) col.cls = j; else if (/\bid\b|admission|index|register/i.test(c) && col.id < 0) col.id = j;
+      else if (/name/i.test(c) && col.name < 0) col.name = j; else if (/^level$/i.test(c)) col.level = j; else if (/combination/i.test(c)) col.combo = j;
+      else if (/^notes?$/i.test(c)) col.note = j; else if (/group|code|subject/i.test(c)) col.groups.push(j);
+    });
+    if (col.groups.length && col.groups[col.groups.length - 1] === rows[h].length - 1) for (let j = rows[h].length; j < Math.max(...rows.map(r => r.length)); j++) col.groups.push(j);
+  } else {
+    const width = Math.max(...rows.map(r => r.length));
+    for (let j = 0; j < width && col.cls < 0; j++) if (rows.filter(r => cls[String(r[j] || "").toLowerCase()]).length >= rows.length / 2) col.cls = j;
+    if (col.cls < 0) return { error: "Could not find the Class column. Add a header row (Student ID, Name, Class, Groups) or check the class names match step 2." };
+    if (col.cls >= 2) { col.id = col.cls - 2; col.name = col.cls - 1; } else if (col.cls === 1) col.name = 0;
+    for (let j = col.cls + 1; j < width; j++) col.groups.push(j);
+  }
+  const get = (r, j) => (j >= 0 ? String(r[j] ?? "").trim() : "");
+  const students = rows.slice(h + 1).map(r => {
+    const c = canon(get(r, col.cls)), id = get(r, col.id), name = get(r, col.name);
+    if (!c && !id && !name) return null;
+    const groups = [...new Set(col.groups.flatMap(j => get(r, j).split(/[,;\s]+/)).filter(Boolean).map(g => codes[g.toLowerCase()] || g))];
+    const s = { id: id || null, name: name || null, level: clsLevel(c) || get(r, col.level) || null, class: c || null, groups };
+    if (get(r, col.combo)) s.combination = get(r, col.combo); if (get(r, col.note)) s.note = get(r, col.note);
+    return s;
+  }).filter(Boolean);
+  return students.length ? { students } : { error: "No students found in what you pasted." };
+}
+function fillIds() {
+  // a student without an ID gets one from their class (1A-01, 1A-02, ...), skipping IDs already used
+  const used = new Set(S.spec.students.map(s => String(s.id || "")).filter(Boolean)), n = {};
+  for (const s of S.spec.students) {
+    if (s.id) continue; const c = s.class || "S"; let id;
+    do { n[c] = (n[c] || 0) + 1; id = `${c}-${String(n[c]).padStart(2, "0")}`; } while (used.has(id));
+    s.id = id; used.add(id);
+  }
+}
+function stuApply(mode) {
+  const L = S.spec.students;
+  if (mode === "clear") { if (!confirm(`Remove all ${L.length} students from the list?`)) return; S.spec.students = []; S.stu = { cls: "", q: "" }; save(); render(); toast("Student list cleared."); return; }
+  const text = $("#stuPaste").value; if (!text.trim()) { toast("Paste the rows, or choose a file, first."); return; }
+  const r = readStudents(text); if (r.error) { toast(r.error); return; }
+  let updated = 0;
+  if (mode === "replace") { if (L.length && !confirm(`Replace the ${L.length} students on the list with these ${r.students.length}?`)) return; S.spec.students = r.students; }
+  else {
+    const at = new Map(L.map((s, i) => [stuKey(s), i]));
+    for (const s of r.students) { const k = stuKey(s); if (k && at.has(k)) { L[at.get(k)] = s; updated++; } else L.push(s); }
+  }
+  fillIds(); S.stu = { cls: "", q: "" }; save(); render();
+  const nc = new Set(r.students.map(s => s.class)).size;
+  toast(`Read ${r.students.length} students in ${nc} class${nc === 1 ? "" : "es"}${updated ? ` (${updated} already on the list were updated)` : ""}.`);
+}
+async function stuFile(el) {
+  const f = el.files[0]; el.value = ""; if (!f) return;
+  let text;
+  if (/\.xlsx$/i.test(f.name)) {
+    const fd = new FormData(); fd.append("file", f);
+    const r = await fetch("/api/read-table", { method: "POST", body: fd }); const j = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(j.error || "Could not read that file."); return; }
+    text = j.rows.map(row => row.join("\t")).join("\n");
+  } else text = await f.text();
+  $("#stuPaste").value = text; $("#stuMsg").textContent = `${f.name} is in the box above. Check it, then press Replace or Add.`;
+}
+
 /* ---------------- pop-ups: class picker, can-teach editor */
 function openPop(anchor) {
   const pop = $("#pop"); const path = anchor.dataset.path; const r = anchor.getBoundingClientRect();
@@ -360,6 +490,21 @@ function openPop(anchor) {
     pop.innerHTML = `<h3>Classes</h3><div class="opts">${mine.map(c => `<label><input type="checkbox" value="${esc(c.class)}" ${cur.includes(c.class) ? "checked" : ""}>${esc(c.class)}</label>`).join("") || '<span class="muted">No classes at this level yet (step 2).</span>'}</div>
       ${other.length ? `<details><summary class="muted">Other levels</summary><div class="opts">${other.map(c => `<label><input type="checkbox" value="${esc(c.class)}" ${cur.includes(c.class) ? "checked" : ""}>${esc(c.class)}</label>`).join("")}</div></details>` : ""}
       <div class="row"><button class="small" data-popall="1">All</button><button class="small" data-popnone="1">None</button><button class="small primary" data-popdone="1">Done</button></div>`;
+  } else if (anchor.dataset.pop === "groups") {
+    // one choice per block (its groups run at the same time), ticks for groups outside a block
+    const cur = getPath(path) || [], c = anchor.dataset.cls, info = lessonInfo(), blocks = new Map(), other = [];
+    S.spec.lessons.forEach((x, i) => {
+      const code = info[i].code; if (!code || code === "Entire Class" || !(x.classes || []).includes(c)) return;
+      if (x.block) { if (!blocks.has(x.block)) blocks.set(x.block, []); blocks.get(x.block).push([code, x.subject]); } else other.push([code, x.subject]);
+    });
+    const known = new Set([...[...blocks.values()].flat(), ...other].map(([g]) => g)), lost = cur.filter(g => !known.has(g));
+    const lab = (type, name, g, s, on) => `<label title="${esc(s || "")}"><input type="${type}" name="${name}" value="${esc(g)}" ${on ? "checked" : ""}><span>${esc(g)}${s ? ` <span class="muted">${esc(s)}</span>` : ""}</span></label>`;
+    pop.innerHTML = `<h3>Groups${c ? ` for ${esc(c)}` : ""}</h3>` + (!c ? `<p class="muted">Pick the student's class first.</p>` : "")
+      + [...blocks].map(([b, gs], k) => `<div class="gblock"><div class="muted small">${esc(b)}</div><div class="opts wide">${lab("radio", `gb${k}`, "", "none", !gs.some(([g]) => cur.includes(g)))}${gs.map(([g, s]) => lab("radio", `gb${k}`, g, s, cur.includes(g))).join("")}</div></div>`).join("")
+      + (other.length ? `<div class="gblock"><div class="muted small">Groups outside a block</div><div class="opts wide">${other.map(([g, s]) => lab("checkbox", "", g, s, cur.includes(g))).join("")}</div></div>` : "")
+      + (lost.length ? `<div class="gblock"><div class="muted small">Not on step 6 for ${esc(c || "this class")} (untick to remove)</div><div class="opts wide">${lost.map(g => lab("checkbox", "", g, "", true)).join("")}</div></div>` : "")
+      + (c && !blocks.size && !other.length ? `<p class="muted">No groups on step 6 include ${esc(c)} yet.</p>` : "")
+      + `<div class="row"><button class="small primary" data-popdone="1">Done</button></div>`;
   } else {
     const cur = getPath(path) || [];
     pop.innerHTML = `<h3>Can teach</h3><div id="ctRows">${cur.map((c, i) => ctRow(c, i)).join("")}</div><div class="row" style="margin-top:8px"><button class="small" data-ctadd="1">+ Subject</button><button class="small primary" data-popdone="1">Done</button></div>`;
@@ -379,6 +524,7 @@ function readCt() { return [...document.querySelectorAll("#ctRows [data-ct]")].m
 function commitPop() {
   const pop = $("#pop"); if (pop.hidden) return; const path = pop.dataset.path;
   if (pop.dataset.what === "classes") setPath(path, [...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value));
+  else if (pop.dataset.what === "groups") setPath(path, [...pop.querySelectorAll("input:checked")].map(x => x.value).filter(Boolean));
   else setPath(path, readCt().filter(c => c.subject));
   pop.hidden = true; save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
 }
@@ -466,7 +612,7 @@ function paintGen() {
       <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
       <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>
       ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
-      <h3>Personal student codes</h3>${p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students (Students sheet) to give each one a personal code.</p>`}`
+      <h3>Personal student codes</h3>${p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on step 8 to give each one a personal code.</p>`}`
     : `<p class="muted">Nothing published yet. Teachers and students see a "not published yet" page.</p>`) +
     `<h3>Access codes</h3><ul class="codes">${[["committee", "Committee"], ["teacher", "Teachers"], ["student", "Students"]].map(([k, t]) => `<li>${t}: ${st.codes && st.codes[k] ? "set" : "<b>not set</b>"}</li>`).join("")}</ul>
     ${(st.code_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")}${st.volume ? "" : `<p class="issue">No Railway volume: the published timetable will be lost on the next deploy. Add a volume (see README).</p>`}`;

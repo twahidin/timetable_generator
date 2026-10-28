@@ -141,3 +141,9 @@ th{background:#f3f6fb}
 .toast{border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
 @media (max-width:1100px){.steps{padding:6px}}
 @media (max-width:640px){.top{position:static;flex-wrap:wrap}.top-actions{gap:6px}.top .ghost,.top .filebtn{padding:6px 10px;font-size:13px}}
+/* students step: paste box and the group picker (one row of choices per block) */
+#stuPaste{width:100%;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--input);resize:vertical}
+.pop .gblock{border-top:1px solid var(--line);padding-top:6px;margin-top:6px}
+.pop .opts.wide{grid-template-columns:repeat(auto-fill,minmax(230px,1fr));margin:4px 0}
+.pop .opts.wide label{align-items:flex-start}
+.pop .opts.wide label .muted{font-size:12px}
