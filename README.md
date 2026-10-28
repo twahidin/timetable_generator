@@ -47,13 +47,16 @@ Without an AI set up, **Generate without AI** checks and solves, and the committ
    | `AI_API_KEY` | **fill in:** the provider's API key (stays on the server). Left blank, the AI chat stays off and the committee can still generate without AI |
    | `AI_MODEL` | the model name exactly as the provider lists it. Anthropic defaults to `claude-opus-5-5` |
    | `SCHOOL_NAME` | optional: shown on the sign-in page before anything is published |
-   | `SOLVE_SECONDS` | optional: time for one solve, default 300 (`SOLVE_MAX_SECONDS` 1800 caps what the AI may ask for) |
+   | `SOLVE_SECONDS` | optional: the default time for one solve, 300 s. The committee can pick a longer **Solve for up to** time on Generate & publish, up to `SOLVE_MAX_SECONDS` (default 8 hours) |
    | `SOLVE_WORKERS` | optional: solver threads, default 8 |
    | `AI_BASE_URL` | optional: another OpenAI-compatible endpoint |
 
 5. **Settings → Networking → Generate Domain**, open it and sign in with the committee code.
 
-The solver uses all the CPU it is given, so more vCPU gives better timetables in the same time. About 1 GB of
+The solver uses all the CPU it is given, so more vCPU gives better timetables in the same time. A tight timetable can
+take a long time to find: pick a longer **Solve for up to** time, and press Stop to keep the best one found so far.
+When no timetable is found, the committee page shows why (classes with no room to spare, teacher loads, rooms,
+rules) and what to change, with a button to each step. About 1 GB of
 memory is enough for a 1,500-student school.
 
 **Try it without a key:** `AI_PROVIDER=mock` runs a scripted stand-in for the AI (it checks, solves, asks one
@@ -68,6 +71,11 @@ export SECRET_KEY=dev COMMITTEE_CODE=COMMIT1 TEACHER_CODE=TEACH1 STUDENT_CODE=ST
 python app.py            # http://localhost:8000  (or: gunicorn app:app --workers 1 --threads 8 --timeout 600)
 ```
 Keep one gunicorn worker (with threads): a generation run lives in the web process.
+
+**Saving the setup:** **Save progress** saves it for the school (on the volume), and it opens by itself after signing
+in, on any browser. Every change is also kept in the browser until then (the header says "Unsaved changes"), and
+**Undo** / **Redo** (⌘Z / ⇧⌘Z) step back through changes. **Save to file** and **Load from file** keep copies as
+files. If someone else saved a newer setup in the meantime, Save progress asks before replacing it.
 
 ## What's inside
 

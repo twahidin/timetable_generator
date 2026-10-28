@@ -35,11 +35,18 @@ def read_json(path, default=None):
     except (OSError, ValueError): return default
 
 def save_setup(spec):
-    write_json(os.path.join(DATA, "setup.json"), dict(saved_at=now(), spec=spec))
+    """the committee's setup, shared: it opens on any browser after signing in. ts tells the editor which copy is newer"""
+    x = dict(saved_at=now(), ts=datetime.datetime.now().timestamp(), spec=spec)
+    write_json(os.path.join(DATA, "setup.json"), x)
+    return dict(saved_at=x["saved_at"], ts=x["ts"])
 
 def load_setup():
     x = read_json(os.path.join(DATA, "setup.json"))
     return (x["spec"], x.get("saved_at")) if x else (None, None)
+
+def setup_record():
+    x = read_json(os.path.join(DATA, "setup.json")) or {}
+    return dict(spec=x.get("spec"), saved_at=x.get("saved_at"), ts=x.get("ts") or 0)
 
 _cache = dict(stamp=None, value=None)
 

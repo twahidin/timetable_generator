@@ -147,3 +147,16 @@ th{background:#f3f6fb}
 .pop .opts.wide{grid-template-columns:repeat(auto-fill,minmax(230px,1fr));margin:4px 0}
 .pop .opts.wide label{align-items:flex-start}
 .pop .opts.wide label .muted{font-size:12px}
+
+/* no-timetable alert (banner on every step, box on Generate), the fix list, and the save state next to Save progress */
+.banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--warn-bg);color:var(--warn);border:1px solid rgba(180,35,24,.25);border-radius:10px;padding:10px 14px;margin:0 0 14px}
+.banner span{color:var(--ink)}
+.alertbox{background:var(--warn-bg);color:var(--warn);border:1px solid rgba(180,35,24,.25);border-radius:10px;padding:10px 12px;margin:0 0 12px}
+.alertbox details{margin-top:6px;color:var(--ink);font-size:12.5px}
+.alertbox ul{margin:4px 0 0 18px;padding:0}
+.fixes{margin-top:8px;color:var(--ink);font-size:12.5px}
+.fixes ol{margin:4px 0 0 18px;padding:0}
+.fixes li{margin:3px 0;line-height:1.45}
+.fixes li button{margin-left:4px}
+.savestate{font-size:12px;color:var(--muted);white-space:nowrap}
+.savestate.warn{color:var(--warn)}
