@@ -248,10 +248,12 @@ const VIEWS = {
       <div class="card"><h2>Rule types</h2><div class="tablewrap" style="max-height:none"><table><tr><th>Rule</th><th>Applies to</th><th>What it means</th><th>Example</th></tr>${RT.map(t => `<tr><td><b>${esc(t.rule)}</b></td><td>${esc(t.scopes)}</td><td>${esc(t.meaning)}</td><td class="muted">${esc(t.example)}</td></tr>`).join("")}</table></div></div>`;
   },
   generate() {
-    const st = G.st || {};
+    const st = G.st || {}, off = st.ai && !st.ai.ok;
+    const facts = [st.ai && st.ai.ok ? `AI: ${esc(st.ai.provider)} · ${esc(st.ai.model)}` : "", st.solve_seconds ? `each solve runs up to ${Math.round(st.solve_seconds / 60)} min` : ""].filter(Boolean);
     return `<div class="card"><h1>Generate & publish</h1><p class="lead">Generate makes the timetable from this setup (it is saved to the server first). With the AI timetabler, it checks the setup, runs the solver and asks you in the chat about anything that does not fit; without AI, it checks and solves, and you read the results. Nothing is visible to teachers or students until you publish.</p>
-      <div class="row"><button class="primary" id="genAI">Generate with the AI timetabler</button><button id="genPlain">Generate without AI</button><button class="danger" id="genStop" hidden>Stop</button></div>
-      <p class="muted small">${st.ai ? (st.ai.ok ? `AI: ${esc(st.ai.provider)} · ${esc(st.ai.model)}` : `AI not set up: ${esc(st.ai.why)} Add AI_PROVIDER, AI_API_KEY and AI_MODEL in Railway.`) : ""}${st.solve_seconds ? ` · each solve runs up to ${Math.round(st.solve_seconds / 60)} min` : ""}</p></div>
+      ${off ? `<div class="notice"><b>The AI timetabler is off.</b> ${/AI_API_KEY/.test(st.ai.why) ? "No AI API key has been added yet." : esc(st.ai.why)} You can still use <b>Generate without AI</b>: it checks the setup and runs the solver, then you read the results and change the setup yourself. The chat, where the AI explains problems and makes tweaks for you, needs the key: whoever runs the app adds it in Railway (service → Variables → <code>AI_API_KEY</code>, with <code>AI_PROVIDER</code>).</div>` : ""}
+      <div class="row"><button class="${off ? "" : "primary"}" id="genAI"${off ? ` title="Needs an AI API key. Generate without AI still works."` : ""}>Generate with the AI timetabler</button><button class="${off ? "primary" : ""}" id="genPlain">Generate without AI</button><button class="danger" id="genStop" hidden>Stop</button></div>
+      <p class="muted small">${facts.join(" · ")}</p></div>
       <div class="gen"><div class="card chat"><h2>Timetabler</h2><div id="chatlog" class="chatlog"></div><div id="progress" class="progress"></div>
         <form id="chatform" class="chatform" onsubmit="event.preventDefault(); sendChat(document.getElementById('chatin').value)"><input id="chatin" autocomplete="off"><button class="primary" id="chatsend">Send</button></form></div>
         <div class="side"><div class="card" id="resultCard"></div><div class="card" id="pubCard"></div></div></div>`;
