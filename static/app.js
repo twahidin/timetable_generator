@@ -6,7 +6,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const KEY = "ttsetup.v1";
 const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, undo: [], redo: [], last: null, dirty: false, base: 0 };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
-  ["teachers", "4 Teachers"], ["blocks", "5 Blocks"], ["lessons", "6 Lessons"], ["rules", "7 Availability & rules"], ["students", "8 Students"], ["generate", "Generate & publish"], ["download", "Files"]];
+  ["teachers", "4 Teachers"], ["blocks", "5 Blocks"], ["lessons", "6 Lessons"], ["rules", "7 Availability & rules"], ["students", "8 Students"], ["generate", "Generate & publish"], ["adjust", "Adjust timetable"], ["download", "Files"]];
 
 /* ---------------- storage, server
    save() keeps this browser's copy after every change. A change to the setup also goes on the undo list (changes
@@ -165,7 +165,8 @@ function lessonInfo() {
   const seq = {}; const letter = Object.fromEntries((sc().tags || []).map(([a, b]) => [a, b]));
   return S.spec.lessons.map(x => {
     const s = subj(x.subject) || {}; const p = Number(x.periods_override) || Number((s.periods || {})[x.level]) || 0;
-    const L = Number(s.lesson_length) || Number(sc().lesson_length) || 1; const [full, short] = split(p, L);
+    const L = Number(s.lesson_length) || Number(sc().lesson_length) || 1;
+    const pat = (x.pattern || []).map(Number), [full, short] = pat.length && pat.reduce((a, b) => a + b, 0) === p ? [pat.filter(v => v === L).length, pat.filter(v => v === L - 1).length] : split(p, L);   // pattern: lengths set on the Adjust page
     let code = "";
     if (x.subject) {
       const k = `${x.level}|${x.subject}`; if (x.block) seq[k] = (seq[k] || 0) + 1;
@@ -272,6 +273,8 @@ function render() {
   nav.innerHTML = STEPS.map(([id, label], i) => `<button data-step="${i}" class="${i === S.step ? "on" : ""}" ${!S.spec && i > 0 ? "disabled" : ""}><span>${label}</span><span class="n">${count(id)}</span></button>`).join("");
   $("#kindBadge").textContent = S.spec ? `${sc().type === "primary" ? "Primary" : "Secondary"} · ${sc().name}` : "No school yet";
   const id = STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
+  if (id === "adjust" && G.shown !== "adjust") { G.adj.data = null; G.adj.prop = null; G.adj.cut = null; }   // the timetable may have changed since
+  G.shown = id;
   main.innerHTML = (VIEWS[id] || (() => ""))();
   renderIssues(); paintBanner(); saveState(); window.scrollTo(0, y);
   if (id === "generate") { paintGen(); poll(); }
@@ -477,6 +480,29 @@ const VIEWS = {
         <form id="chatform" class="chatform" onsubmit="event.preventDefault(); sendChat(document.getElementById('chatin').value)"><input id="chatin" autocomplete="off"><button class="primary" id="chatsend">Send</button></form></div>
         <div class="side"><div class="card" id="resultCard"></div><div class="card" id="pubCard"></div></div></div>`;
   },
+  adjust() {
+    const A = G.adj, gen = STEPS.findIndex(s => s[0] === "generate");
+    const head = `<h1>Adjust the timetable</h1><p class="lead">Teachers' changes before publishing. Pick a class, teacher or room, click a lesson, then move it <b>earlier</b> or <b>later</b>, or <b>cut</b> it and click where it should go. A move that clashes shows why and the ways out: a free time, a swap, letting the solver make room, or asking the AI. Lessons you move are pinned (📌): later solves keep them there.</p>`;
+    if (!A.data) { if (!A.loading) loadAdjust(); return `<div class="card">${head}<p class="muted">${esc(A.error || "Loading the latest timetable…")}</p>${A.error ? `<button data-step="${gen}">Go to Generate & publish</button>` : ""}</div>`; }
+    const D = A.data, busy = G.st && G.st.run && G.st.run.busy, sm = D.summary;
+    const lists = { class: D.classes, teacher: D.teachers, room: D.rooms };
+    if (!lists[A.kind].includes(A.who)) A.who = lists[A.kind][0] || "";
+    const sel = A.sel && D.lessons.find(l => l.key === A.sel), cut = A.cut && D.lessons.find(l => l.key === A.cut);
+    const status = `<p class="${sm.ok ? "okmsg" : "issue"}" style="margin:0">${sm.ok ? "All checks pass" : `${sm.problems.length} problem${sm.problems.length === 1 ? "" : "s"}`} · ${sm.lessons} lessons${sm.after.length ? ` · ${sm.after.length} after school` : ""}${D.moves ? ` · ${D.moves} change${D.moves === 1 ? "" : "s"} by hand` : ""}</p>`;
+    const bar = `<div class="row" style="justify-content:space-between;margin-top:10px">${status}<div class="row">
+        <button data-adj="undo" ${D.can_undo && !busy ? "" : "disabled"} title="${esc(D.last ? "Undo: " + D.last : "")}">↶ Undo move</button><button data-adj="redo" ${D.can_redo && !busy ? "" : "disabled"}>↷ Redo</button>
+        ${G.st && G.st.run && G.st.run.changes ? `<button id="keepChanges" ${busy ? "disabled" : ""} title="Lessons made shorter or longer change the plan: this puts them in your setup too">Keep these changes in my setup</button>` : ""}
+        <a href="/preview" target="_blank"><button>Preview</button></a><button class="primary" id="publish" ${busy ? "disabled" : ""}>Publish</button></div></div>
+      ${sm.problems.length ? `<details style="margin-top:6px"><summary class="small">The problems</summary><ul class="small">${sm.problems.map(p => `<li>${esc(p)}</li>`).join("")}</ul></details>` : ""}`;
+    const pick = `<div class="row" style="margin-top:12px"><label class="row" style="gap:6px">Show <select id="adjKind">${["class", "teacher", "room"].map(k => opt(k, A.kind, k[0].toUpperCase() + k.slice(1))).join("")}</select></label>
+      <select id="adjWho">${lists[A.kind].map(x => opt(x, A.who)).join("")}</select>
+      ${busy ? `<span class="muted small">${esc((G.st.run.progress) || "Working…")} Changes wait until it finishes.</span>` : ""}</div>`;
+    const act = cut ? `<div class="adjbar"><b>✂ ${esc(cut.name)}</b> <span class="muted">${esc(adjWhen(cut.start, cut.ln))}</span> · click where it should go (you can switch class, teacher or room first) <button class="small" data-adj="cancel">Cancel</button></div>`
+      : sel ? `<div class="adjbar"><b>${esc(sel.name)}</b> <span class="muted">${esc(adjWhen(sel.start, sel.ln))} · ${esc(sel.teachers.join(", ") || "no teacher")} · ${esc([...new Set(sel.rows.map(r => r.room).filter(Boolean))].join(", ") || "no room")}</span>${sel.pinned ? " 📌" : ""}
+          <button class="small" data-adj="earlier" ${busy ? "disabled" : ""}>◀ Earlier</button><button class="small" data-adj="later" ${busy ? "disabled" : ""}>Later ▶</button><button class="small" data-adj="cut" ${busy ? "disabled" : ""}>✂ Cut</button><button class="small" data-adj="shorter" ${busy || sel.ln < 2 ? "disabled" : ""} title="One period shorter, where it is: its group then has one period fewer a cycle">− 1 period</button><button class="small" data-adj="longer" ${busy ? "disabled" : ""} title="One period longer, where it is (the next period must be free): its group then has one period more a cycle">+ 1 period</button>${sel.pinned ? `<button class="small" data-adj="unpin" ${busy ? "disabled" : ""} title="Let later solves move it again">Unpin</button>` : ""}<button class="small ghost" data-adj="cancel">✕</button></div>`
+      : `<p class="muted small" style="margin:8px 0 0">Click a lesson to move it. Keys: ← → move it, Esc lets go.</p>`;
+    return `<div class="card">${head}${bar}${pick}${act}${adjPanel()}<div class="tablewrap" style="margin-top:10px;max-height:none"><table class="adjgrid">${adjGrid(D, A)}</table></div></div>`;
+  },
   download() {
     const { out } = issues(); const n = Object.entries(out).filter(([k]) => k !== "global").reduce((a, [, v]) => a + Object.keys(v).length, 0);
     return `<div class="card"><h1>Files</h1><p class="lead">Your setup workbook keeps the drop-downs and formulas, so it can still be edited in Excel. To generate here, use <b>Generate &amp; publish</b>; to generate elsewhere, give the workbook and the timetable skill to an AI agent that can run code.</p>
@@ -499,9 +525,20 @@ const VIEWS = {
 document.addEventListener("click", async e => {
   const pop = $("#pop");
   if (!pop.hidden && !pop.contains(e.target)) commitPop();
-  const b = e.target.closest("button, [data-pop], .issue, td.c"); if (!b) return;
+  const b = e.target.closest("button, [data-pop], .issue, td.c, td.as"); if (!b) return;
   if (b.dataset.step) { S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
+  if (b.dataset.adj) { adjAction(b.dataset.adj); return; }
+  if (b.dataset.adjgo) { const P = G.adj.prop; if (P) adjMove({ [P.key]: Number(b.dataset.adjgo) }); return; }
+  if (b.dataset.adjswap) {
+    const P = G.adj.prop, L = G.adj.data.lessons, o = L.find(l => l.key === b.dataset.adjswap), me = P && L.find(l => l.key === P.key);
+    if (o && me) adjMove({ [me.key]: o.start, [o.key]: me.start }, `Swapped ${me.name} and ${o.name}`); return; }
+  if (b.dataset.lesson) {   // a lesson: select it, or (with one cut) paste the cut lesson at its time
+    const A = G.adj, k = b.dataset.lesson;
+    if (A.cut && A.cut !== k) adjCheck(A.cut, { start: A.data.lessons.find(l => l.key === k).start });
+    else { if (!A.cut) A.sel = A.sel === k ? null : k; A.prop = null; A.ai = ""; render(); }
+    return; }
+  if (b.classList.contains("as")) { if (G.adj.cut) adjCheck(G.adj.cut, { start: Number(b.dataset.start) }); return; }
   if (b.id === "saveServer") { saveServer(); return; }
   if (b.dataset.dismiss) { G.dismissed = b.dataset.dismiss; paintBanner(); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
@@ -524,7 +561,7 @@ document.addEventListener("click", async e => {
   if (b.id === "genAI" || b.id === "genPlain") { generate(b.id === "genAI"); return; }
   if (b.id === "genStop") { await post("/api/stop"); poll(); return; }
   if (b.id === "publish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away.")) return; const j = await post("/api/publish"); if (j) { toast("Publishing… about a minute."); poll(); } return; }
-  if (b.id === "keepChanges") { const j = await post("/api/keep-changes"); if (j && j.spec) { S.spec = j.spec; save(); await synced(); toast("The AI's changes are now in your setup."); poll(); } return; }
+  if (b.id === "keepChanges") { const j = await post("/api/keep-changes"); if (j && j.spec) { S.spec = j.spec; save(); await synced(); toast("The changes are now in your setup."); poll(); } return; }
   if (b.dataset.answer !== undefined) { sendChat(b.dataset.answer); return; }
   if (b.id === "exGo") { makePrintouts(); return; }
   if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
@@ -534,6 +571,12 @@ document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / C
   const k = e.key.toLowerCase(); if (k !== "z" && k !== "y") return;
   if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
   e.preventDefault(); undo(k === "z" && !e.shiftKey);
+});
+document.addEventListener("keydown", e => {   // Adjust page: ← → move the selected lesson, Esc lets go
+  if (STEPS[S.step][0] !== "adjust" || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target.closest && e.target.closest("input, textarea, select")) return;
+  if (e.key === "Escape") { adjAction("cancel"); return; }
+  if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && G.adj.sel && !G.adj.cut) { e.preventDefault(); adjAction(e.key === "ArrowLeft" ? "earlier" : "later"); }
 });
 let painting = false;
 document.addEventListener("mousedown", e => { const c = e.target.closest("td.c"); if (!c) return; painting = true; paint(c); e.preventDefault(); });
@@ -546,6 +589,8 @@ function paint(c) {
 document.addEventListener("change", async e => {
   const el = e.target;
   if (el.id === "importX") { const f = el.files[0]; if (!f) return; const fd = new FormData(); fd.append("file", f); const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json(); if (!r.ok) { toast(j.error || "Could not read that file."); return; } await adopt(j, "Workbook opened. Press Save progress to keep it for the school."); return; }
+  if (el.id === "adjKind") { G.adj.kind = el.value; G.adj.who = ""; render(); return; }
+  if (el.id === "adjWho") { G.adj.who = el.value; render(); return; }
   if (el.id === "solveSecs") { try { localStorage.setItem("ttsolve", el.value); } catch (err) { } toast(`Each solve may now run up to ${$("#solveSecs").selectedOptions[0].textContent}. Stop keeps the best timetable so far.`); return; }
   if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; el.value = ""; try { await adopt(JSON.parse(await f.text()), "Progress loaded from the file. Press Save progress to keep it for the school."); } catch (err) { toast("That file is not a progress file."); } return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
@@ -729,7 +774,8 @@ function commitPop() {
 }
 
 /* ---------------- generate, chat, publish */
-const G = { server: null, st: null, after: 0, events: [], timer: null };
+const G = { server: null, st: null, after: 0, events: [], timer: null,
+  adj: { kind: "class", who: "", data: null, sel: null, cut: null, prop: null, ai: "" } };   // adj: the Adjust page
 async function post(url, body) {
   const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   const j = await r.json().catch(() => ({}));
@@ -771,10 +817,14 @@ async function poll() {
       }
     }
     if (STEPS[S.step][0] === "generate") paintGen();
+    const nowBusy = !!(st.run && st.run.busy);
+    if (STEPS[S.step][0] === "adjust" && (G.wasBusy || G.adj.waiting) && !nowBusy) { G.adj.waiting = false; loadAdjust(); }
+    else if (STEPS[S.step][0] === "adjust" && nowBusy && G.adj.data) render();
+    G.wasBusy = nowBusy;
   } catch (e) { }
   G.inflight = false;
   const busy = G.st && G.st.run && G.st.run.busy;
-  G.timer = setTimeout(poll, STEPS[S.step][0] === "generate" ? (busy ? 1500 : 5000) : 15000);
+  G.timer = setTimeout(poll, ["generate", "adjust"].includes(STEPS[S.step][0]) ? (busy ? 1500 : 5000) : 15000);
 }
 const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 function eventHTML(e, last) {
@@ -813,9 +863,9 @@ function paintGen() {
       ${s.after.length ? `<details><summary>After-school lessons</summary><ul>${s.after.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
       ${s.problems.length ? `<details open><summary>Problems</summary><ul>${s.problems.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
       ${s.notes.length ? `<details><summary>Notes</summary><ul>${s.notes.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
-      <p class="muted small">Made ${esc(s.at)}${run.changes ? ` · the AI changed the setup ${run.changes} time${run.changes > 1 ? "s" : ""}` : ""}.</p>
+      <p class="muted small">Made ${esc(s.at)}${run.changes ? ` · the setup was changed ${run.changes} time${run.changes > 1 ? "s" : ""} (by the AI or on Adjust)` : ""}.</p>
       <div class="row"><a href="/preview" target="_blank"><button>Preview</button></a><button class="primary" id="publish" ${busy ? "disabled" : ""}>Publish</button>
-      ${run.changes ? `<button id="keepChanges" ${busy ? "disabled" : ""}>Keep the AI's changes in my setup</button>` : ""}</div>`
+      ${run.changes ? `<button id="keepChanges" ${busy ? "disabled" : ""}>Keep these changes in my setup</button>` : ""}</div>`
     : `<p class="muted">No timetable yet.</p>`);
   const p = st.published, f = p ? p.files || {} : {};
   $("#pubCard").innerHTML = `<h2>Published</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
@@ -851,6 +901,94 @@ async function buildXlsx() {
   const r = await fetch("/api/build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(S.spec) });
   if (!r.ok) { const j = await r.json().catch(() => ({})); toast(j.error || "Could not build the workbook."); return; }
   dl(await r.blob(), `${(sc().name || "School").replace(/[^\w -]/g, "").trim().replace(/ /g, "_")}_Timetable_Setup.xlsx`);
+}
+
+/* ---------------- Adjust timetable: move lessons by hand before publishing */
+const adjWhen = (start, ln) => { const D = G.adj.data, d = Math.floor(start / D.NP), p = start % D.NP; return `${D.days[d]} ${D.clock[p]}–${D.clock[p + ln]}`; };
+async function loadAdjust() {
+  const A = G.adj; A.loading = true;
+  try { const r = await fetch("/api/adjust"); const j = await r.json(); if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) { A.data = null; A.error = j.error || "Could not load the timetable."; } else { A.data = j; A.error = ""; } }
+  catch (e) { A.error = "Could not load the timetable."; }
+  A.loading = false; if (STEPS[S.step][0] === "adjust") render();
+}
+function adjShows(l, A) {   // is this lesson in the class, teacher or room being shown?
+  return A.kind === "class" ? l.classes.includes(A.who) : A.kind === "teacher" ? l.teachers.includes(A.who) : l.rows.some(r => r.room === A.who);
+}
+function adjChip(l, A) {
+  const rows = A.kind === "teacher" ? l.rows.filter(r => r.teachers.includes(A.who)) : A.kind === "room" ? l.rows.filter(r => r.room === A.who) : l.rows;
+  const one = rows[0] || l.rows[0] || {};
+  const title = l.kind === "block" && A.kind === "class" ? l.name.replace(/ block$/, "") : A.kind === "class" ? (l.kind === "class" ? one.subject : `${one.subject} ${one.code}`) : `${l.kind === "class" ? l.name : `${one.subject} ${one.code}`}`;
+  const sub = A.kind === "class" ? (l.kind === "block" ? `${l.rows.length} group${l.rows.length === 1 ? "" : "s"}` : `${(one.teachers || []).join(", ")}${one.room ? " · " + one.room : ""}`)
+    : A.kind === "teacher" ? `${l.kind === "class" ? "" : l.classes.join(" ") + " · "}${one.room || ""}` : `${(one.teachers || []).join(", ")}${l.kind === "class" ? "" : " · " + l.classes.join(" ")}`;
+  const tip = `${l.name} · ${adjWhen(l.start, l.ln)}\n` + l.rows.map(r => `${r.subject} ${r.code} · ${r.teachers.join(", ")} · ${r.room || "no room"}${r.students ? ` · ${r.students} students` : ""}`).join("\n");
+  return `<button class="adjl${A.sel === l.key ? " sel" : ""}${A.cut === l.key ? " cut" : ""}" data-lesson="${esc(l.key)}" title="${esc(tip)}"><b>${l.pinned ? "📌 " : ""}${esc(title)}</b><span>${esc(sub)}</span></button>`;
+}
+function adjGrid(D, A) {
+  const mine = D.lessons.filter(l => adjShows(l, A)), NP = D.NP;
+  const lvs = A.kind === "class" ? [D.level_of[A.who]] : [...new Set(mine.map(l => l.level))];
+  const grid = D.grid[lvs[0]] || Object.values(D.grid)[0];   // breaks shaded from the (first) level shown
+  let html = `<tr><th></th>${Array.from({ length: NP }, (_, p) => `<th class="t">${esc(D.clock[p])}</th>`).join("")}</tr>`;
+  D.days.forEach((day, d) => {
+    const ls = mine.filter(l => Math.floor(l.start / NP) === d).sort((a, b) => a.start - b.start);
+    const groups = [];   // lessons that overlap share one cell
+    for (const l of ls) { const g = groups[groups.length - 1]; if (g && l.start < g.end) { g.ls.push(l); g.end = Math.max(g.end, l.start + l.ln); } else groups.push({ start: l.start, end: l.start + l.ln, ls: [l] }); }
+    let row = `<tr><th style="text-align:left">${esc(day)}</th>`, p = 0;
+    for (const g of groups) {
+      const gp = g.start % NP;
+      for (; p < gp; p++) row += `<td class="as c-${(grid[d] || "")[p] === "." ? "" : (grid[d] || "")[p] || ""}" data-start="${d * NP + p}"></td>`;
+      row += `<td class="al${g.ls.length > 1 ? " many" : ""}" colspan="${g.end - g.start}">${g.ls.map(l => adjChip(l, A)).join("")}</td>`; p = gp + (g.end - g.start);
+    }
+    for (; p < NP; p++) row += `<td class="as c-${(grid[d] || "")[p] === "." ? "" : (grid[d] || "")[p] || ""}" data-start="${d * NP + p}"></td>`;
+    html += row + "</tr>";
+  });
+  return html;
+}
+function adjPanel() {   // a move that clashes: why, and the ways out
+  const P = G.adj.prop; if (!P) return "";
+  const aiOn = G.st && G.st.ai && G.st.ai.ok;
+  return `<div class="alertbox" style="margin-top:10px"><b>Moving ${esc(P.name)} to ${esc(P.to)} clashes:</b><ul>${P.conflicts.map(c => `<li>${esc(c.text)}</li>`).join("")}</ul>
+    <div class="fixes"><b>Ways out</b>
+      ${P.free.length ? `<div style="margin-top:4px">Free times for it: ${P.free.map(f => `<button class="small" data-adjgo="${f.start}">${esc(f.label)}</button>`).join(" ")}</div>` : `<div class="muted" style="margin-top:4px">No free time without a clash.</div>`}
+      ${P.swaps.length ? `<div style="margin-top:4px">${P.swaps.map(s => `<button class="small" data-adjswap="${esc(s.key)}">${esc(s.label)}</button>`).join(" ")}</div>` : ""}
+      <div class="row" style="margin-top:8px">${P.allowed ? `<button class="small primary" data-adj="room" title="Keeps it at ${esc(P.to)} and moves as few other lessons as it can">Let the solver make room</button>` : ""}
+        ${aiOn ? `<button class="small" data-adj="ask">Ask the AI for other ways</button>` : ""}
+        ${P.allowed ? `<button class="small" data-adj="anyway" title="Keeps the clash: it shows as a problem until you fix it">Place it anyway</button>` : ""}<button class="small ghost" data-adj="nomove">Cancel</button></div>
+      ${G.adj.ai ? `<div class="aisays">${md(G.adj.ai)}</div>` : ""}</div></div>`;
+}
+async function adjPost(url, body) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  if (r.status === 401) { location.href = "/login"; return null; }
+  const j = await r.json().catch(() => ({})); if (!r.ok) { toast(j.error || "Something went wrong."); return null; }
+  return j;
+}
+async function adjCheck(key, where) {   // where: {start} or {dir: -1 | 1}
+  const A = G.adj; A.ai = "";
+  const p = await adjPost("/api/adjust/check", { key, ...where }); if (!p) return;
+  if (p.ok) { await adjMove({ [key]: p.start }); return; }
+  A.prop = p; A.cut = null; A.sel = key; render();
+}
+async function adjMove(moves, label) {
+  const A = G.adj, j = await adjPost("/api/adjust/move", { moves, label }); if (!j) return;
+  A.data = j; A.prop = null; A.cut = null; A.ai = ""; render(); toast(j.last ? `${j.last}.` : "Moved.");
+}
+async function adjAction(what) {
+  const A = G.adj, key = A.sel;
+  if (what === "cancel") { A.sel = A.cut = null; A.prop = null; render(); return; }
+  if (what === "nomove") { A.prop = null; A.ai = ""; render(); return; }
+  if (what === "undo" || what === "redo") { const j = await adjPost("/api/adjust/undo", { redo: what === "redo" }); if (j) { A.data = j; A.prop = null; render(); toast(what === "undo" ? "Move undone." : "Move redone."); } return; }
+  if (!key) return;
+  if (what === "earlier" || what === "later") { await adjCheck(key, { dir: what === "earlier" ? -1 : 1 }); return; }
+  if (what === "cut") { A.cut = key; A.prop = null; render(); toast("Now click where it should go."); return; }
+  if (what === "shorter" || what === "longer") {   // a new latest timetable: keys change, so find the lesson again by name and time
+    const was = A.data.lessons.find(l => l.key === key), j = await adjPost("/api/adjust/resize", { key, delta: what === "shorter" ? -1 : 1 }); if (!j) return;
+    A.data = j; A.prop = null; const now = j.lessons.find(l => l.name === was.name && l.start === was.start); A.sel = now ? now.key : null; render(); toast(j.message); return; }
+  if (what === "unpin") { const j = await adjPost("/api/adjust/unpin", { key }); if (j) { A.data = j; render(); } return; }
+  const P = A.prop; if (!P) return;
+  if (what === "anyway") { await adjMove({ [P.key]: P.start }, `Placed ${P.name} at ${P.to} with a clash`); return; }
+  if (what === "room") { const j = await adjPost("/api/adjust/make-room", { key: P.key, start: P.start, seconds: Math.max(120, Math.min(solveSecs(), 600)) });   // 2 to 10 minutes
+    if (j) { A.prop = null; A.waiting = true; toast("The solver is making room. This page updates when it is done."); render(); poll(); } return; }
+  if (what === "ask") { A.ai = "Asking the AI…"; render(); const j = await adjPost("/api/adjust/ask", { key: P.key, start: P.start }); A.ai = j ? j.text : ""; render(); return; }
 }
 
 /* on opening the page: this browser's unsaved work if it has any, else the setup saved for the school, else this

@@ -77,6 +77,16 @@ in, on any browser. Every change is also kept in the browser until then (the hea
 **Undo** / **Redo** (⌘Z / ⇧⌘Z) step back through changes. **Save to file** and **Load from file** keep copies as
 files. If someone else saved a newer setup in the meantime, Save progress asks before replacing it.
 
+**Adjusting by hand before publishing:** the **Adjust timetable** step shows the latest timetable for any class,
+teacher or room. Click a lesson, then move it earlier or later (← →), or cut it and click where it should go; make it
+a period shorter or longer where it is. Each move is checked against the same rules as the solver (teachers, classes,
+students, rooms, teacher availability and the rules on step 7). A move that clashes lists why and the ways out: free
+times for that lesson, clean swaps, **Let the solver make room** (it keeps the lesson there and moves as few other
+lessons as it can), **Ask the AI** (merging or splitting a group, another teacher), or placing it anyway. Moved lessons
+are pinned, so later solves keep them; **Undo move** steps back. A shorter or longer lesson changes the plan (that
+group gets a period fewer or more a cycle): **Keep these changes in my setup** puts it in the setup too. The exact
+lesson lengths are kept in the app; in the setup workbook only the new number of periods is kept.
+
 ## What's inside
 
 | Path | What |
@@ -85,6 +95,7 @@ files. If someone else saved a newer setup in the meantime, Save progress asks b
 | `access.py` | access codes, personal codes, wrong-code limit (10 per 10 minutes per address) |
 | `runs.py` | generation runs in a background thread with the event log the chat shows |
 | `timetabler.py` | the timetabler's tools (check, show, solve, diagnose, ask, change, finish) and the no-AI flow |
+| `adjust.py` | changing the latest timetable by hand: move, swap, shorten, check against the solver's rules, make room |
 | `ai.py` | Anthropic / OpenAI / OpenRouter tool-calling loop; SKILL.md is the system prompt |
 | `store.py` | saved setup, runs and the published timetable on the volume |
 | `static/` | the committee's step-by-step editor and the sign-in page style |
