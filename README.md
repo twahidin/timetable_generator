@@ -11,9 +11,12 @@ published timetable with their access code and download PDFs.
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 
-Personal codes are made from each student's ID on the Students sheet and `SECRET_KEY`, so they stay the same when
-the timetable is republished. The committee downloads them as a list (CSV) or as slips to print, one page per class.
-Students not on the Students sheet use the general student code and Build my timetable.
+The student list goes in on step 8 of the setup (**Students**): paste it from Excel or a CSV, or upload an .xlsx or
+.csv, with each student's ID, name, class and group codes; the committee can then edit each student's groups there.
+It is optional, but with it the solver makes sure no student has two lessons at once, and every student gets a
+personal code. Personal codes are made from each student's ID and `SECRET_KEY`, so they stay the same when the
+timetable is republished. The committee downloads them as a list (CSV) or as slips to print, one page per class.
+Students not on the list use the general student code and Build my timetable.
 
 ## How generating works
 

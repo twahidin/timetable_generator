@@ -174,6 +174,25 @@ def import_xlsx():
     finally: os.unlink(path)
     return jsonify(spec)
 
+@app.post("/api/read-table")
+@need("committee")
+def read_table():
+    """the rows of a spreadsheet uploaded on the Students step: its Students sheet if it has one, else its first sheet"""
+    import openpyxl
+    f = request.files.get("file")
+    if not f: return {"error": "No file."}, 400
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        f.save(tmp.name); path = tmp.name
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        ws = wb["Students"] if "Students" in wb.sheetnames else wb.worksheets[0]
+        cell = lambda v: "" if v is None else str(int(v)) if isinstance(v, float) and v.is_integer() else str(v).strip()
+        rows = [[cell(v) for v in r] for r in ws.iter_rows(max_row=5000, values_only=True)]
+        wb.close()
+    except Exception as e: return {"error": f"Could not read that file ({e})."}, 400
+    finally: os.unlink(path)
+    return {"rows": [r for r in rows if any(r)]}
+
 @app.get("/api/setup")
 @need("committee")
 def get_setup():
