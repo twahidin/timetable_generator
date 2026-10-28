@@ -50,8 +50,11 @@ def read_template(path):
     if col("Levels"): sc["levels"] = [str(x) for x in col("Levels")]
     if col("Departments"): sc["departments"] = [str(x) for x in col("Departments")]
     if col("Room kinds"): sc["room_kinds"] = [str(x) for x in col("Room kinds")]
-    tags, letters = col("Level tags"), [ls.cell(r, heads["Tag letter"]).value for r in range(4, 4 + len(col("Level tags")))] if "Tag letter" in heads else []
-    if tags: sc["tags"] = [[str(a), str(b or "")] for a, b in zip(tags, letters + [""] * len(tags))]
+    tags = col("Level tags") or col("G-levels")
+    if tags:   # each tag's letter in group codes: the Tag letter column, else the usual one (G1 K, G2 A, G3 P; Std S, Fdn F, Higher H)
+        known_letter = {a: b for a, b in sc["tags"]}
+        letters = [ls.cell(r, heads["Tag letter"]).value for r in range(4, 4 + len(tags))] if "Tag letter" in heads else [None] * len(tags)
+        sc["tags"] = [[str(a), str(b if b is not None else known_letter.get(str(a), ""))] for a, b in zip(tags, letters)]
     if col("Level") and col("Band"): sc["bands"] = dict(zip([str(x) for x in col("Level")], [str(x) for x in col("Band")]))
     # day structure
     ds = wb["Day structure"]; NP = sc["periods_per_day"]; day_structure = {}
@@ -67,7 +70,7 @@ def read_template(path):
     sh, su = _table(wb["3 Subjects"])
     lvcols = [h for h in sh if h in sc["levels"]]
     lenh = next((h for h in sh if h.startswith("Lesson length")), None); kindh = next((h for h in sh if h.startswith("Room kind")), None)
-    subjects = [dict(subject=str(x["Subject"]), code=x.get("Code"), tag=x.get("Level tag") or "-", dept=x.get("Department"), room_kind=x.get(kindh),
+    subjects = [dict(subject=str(x["Subject"]), code=x.get("Code"), tag=x.get("Level tag") or x.get("G-level") or "-", dept=x.get("Department"), room_kind=x.get(kindh),
                      lesson_length=x.get(lenh), periods={lv: x.get(lv) for lv in lvcols if x.get(lv)}, note=x.get("Note")) for x in su if x.get("Subject")]
     _, te = _table(wb["4 Teachers"])
     teachers = []
