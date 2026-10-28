@@ -123,6 +123,10 @@ class Problem:
                 prof[c].append(use)
         return prof
 
+def state_key(u):
+    """a unit's name in a timetable state (staged solve): its block, its group code, or its class and subject"""
+    return ("B", u["name"]) if u["kind"] == "block" else ("G", u["name"]) if u["kind"] == "group" else ("C", u["classes"][0], u["rows"][0]["subject"])
+
 def units_for(P, r):
     """the units (blocks, groups, class lessons) a rule row applies to"""
     sc, tg, sj = r.get("scope"), str(r.get("target") or ""), r.get("subject")
@@ -196,10 +200,13 @@ def lesson_domains(P, rules, notes):
     return out
 
 
-def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previous=None, pins=None):
+def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previous=None, pins=None, fix=None, hint=None, params=None):
     """stop: optional threading.Event; setting it ends the search early and keeps the best timetable so far.
     previous: {lesson key: start} from an earlier solve (each returned lesson has its 'key'); lessons stay there unless they must move.
-    pins: {lesson key: start} for lessons placed by hand: they stay there (unless that time is no longer allowed)"""
+    pins: {lesson key: start} for lessons placed by hand: they stay there (unless that time is no longer allowed).
+    fix / hint (the staged solve): {state_key: {(length, group codes): [day * 1000 + period]}}; the k-th lesson of a unit with
+    that length and those groups takes the k-th start. fix keeps it there; hint only starts the search there.
+    params: extra CP-SAT parameters"""
     P = Problem(spec); NP, ND = P.NP, P.ND
     m = cp_model.CpModel(); rules = spec.get("rules", [])
     notes = list(P.warn)
@@ -218,6 +225,18 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
         ext = {q for q in vals if any(P.grid[u["level"]][q // NP][q % NP + k] == "A" for k in range(ln))}
         blocks.append(dict(u=u, ln=ln, i=i, part=part, st=st, iv=iv, day=dy, cost=cv, T=T, kinds=kinds, ext=ext,
                            key=D["key"], vals=set(vals)))
+    if fix or hint:
+        seen = collections.Counter(); kept = 0
+        for b in blocks:
+            pk = (b["ln"], frozenset(str(x["code"]) for x in b["part"])); k = seen[(b["u"]["id"], pk)]; seen[(b["u"]["id"], pk)] += 1
+            for st_, keep in ((hint, False), (fix, True)):
+                xs = sorted(((st_ or {}).get(state_key(b["u"]), {})).get(pk, []))
+                if k >= len(xs): continue
+                q = (xs[k] // 1000) * NP + xs[k] % 1000
+                if q not in b["vals"]: continue
+                if keep: m.Add(b["st"] == q); kept += 1
+                else: m.AddHint(b["st"], q)
+        if fix: log(f"{kept} lessons kept where they were")
     # lessons the committee placed by hand stay where they put them
     pins = pins or {}
     for b in blocks:
@@ -387,6 +406,7 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
         log(f"starting from the previous timetable: {sum(1 for b in blocks if 'mv' in b)} of {len(blocks)} lessons can stay where they were")
     m.Minimize(sum(b["cost"] for b in blocks) + sum(extra_cost))
     s = cp_model.CpSolver(); s.parameters.max_time_in_seconds = float(time_limit); s.parameters.num_workers = int(workers)
+    for k_, v_ in (params or {}).items(): setattr(s.parameters, k_, v_)
     t0 = time.time(); near = None
     if previous:
         near = _near(m, blocks, previous, busy_t, time_limit * 0.5, int(workers), log, stop)

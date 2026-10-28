@@ -51,6 +51,22 @@ def periods_between(sc, a, b):
 
 def _yes(v): return str(v or "").strip().lower() in ("yes", "y", "true", "1")
 
+ROOM_NOTE = re.compile(r"((?:[A-Z][\w&/-]*(?: [A-Z][\w&/-]*)*)(?:(?:, | and )[A-Z][\w&/-]*(?: [A-Z][\w&/-]*)*)*) takes? (\d+) classes")
+
+def _room_rules_from_notes(rows, venues, rules):
+    """a note on a Settings row such as 'Field and Hall take 2 classes each' (or 'Hall takes 3 classes'): those rooms hold
+    that many classes at once, as an 'At most N at once' rule for the room (unless the workbook already has one)"""
+    names = {v["room"] for v in venues}; have = {(r.get("scope"), r.get("target")) for r in rules if r.get("rule") == "At most N at once"}
+    out = []
+    for k, v, note in rows:
+        for m in ROOM_NOTE.finditer(str(note or "")):
+            for room in re.split(r", | and ", m.group(1)):
+                if room in names and ("Room", room) not in have:
+                    have.add(("Room", room))
+                    out.append(dict(scope="Room", target=room, rule="At most N at once", number=int(m.group(2)), strength="Must", week="Both", day="All",
+                                    note=f"From the Settings note on '{k}': {note}"))
+    return out
+
 def read_template(path):
     wb = openpyxl.load_workbook(path, data_only=False)
     st = wb["Settings"]
@@ -172,6 +188,7 @@ def read_template(path):
             if x.get("Role"): roles.append(dict(role=str(x["Role"]), what=x.get("What it is"), allowance=x.get("Guide allowance"), group=x.get("Group")))
         spread = next((rs.cell(r, 3).value for r in range(1, 8) if str(rs.cell(r, 1).value or "").startswith("Even spread")), None)
         if isinstance(spread, (int, float)): sc["role_spread"] = int(spread)
+    rules += _room_rules_from_notes(rows, venues, rules)
     # sheets the app does not use (e.g. a year's notes) are carried through as text
     extra = []
     for ws in wb.worksheets:
