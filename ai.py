@@ -147,6 +147,8 @@ def call_mock(run, history):
     name, res = last["name"], last["result"]
     if name == "check_setup": return "The setup is consistent. Solving now.", [dict(id=cid(), name="solve", args=dict(seconds=secs))]
     if name == "solve":
+        if res.startswith("No timetable found"):
+            return "", [dict(id=cid(), name="finish", args=dict(summary="No timetable was found. Read the capacity warnings and notes above: they say what does not fit."))]
         if not any(h["name"] == "ask_committee" for h in tools_done):
             n = res.count("\n- ") if "After-school lessons:\n" in res else 0
             return ("A timetable is ready." + (" Some lessons fall in after-school slots." if "After-school lessons: none" not in res else "")), [dict(

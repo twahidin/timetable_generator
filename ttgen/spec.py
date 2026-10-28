@@ -8,25 +8,100 @@ A *spec* is a plain dict (JSON friendly) holding everything the template holds:
 """
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"]
 CODES = {"F": "Flag / assembly", "L": "Lessons", "R": "Recess", "U": "Lunch", "A": "After-school slot", ".": "No school"}
-SCOPES = ["School", "Level", "Class", "Teacher", "Department", "Subject", "Block", "Room"]
+SCOPES = ["School", "Level", "Class", "Teacher", "Department", "Subject", "Block", "Group", "Room"]
 
 # rule name, scopes it applies to, needs from/to periods, needs number, meaning, example
 RULE_TYPES = [
     ("Not available", "Teacher, Class, Room, Level, Block", "Y", "N", "No lessons in these periods (part-time days, meetings, room bookings).", "Teacher · Ms Tan · All days · 18 to 19"),
     ("Keep free together", "Department, Level", "Y", "N", "Every teacher in the department (or every class in the level) is free at the same time.", "Department · EL · Wed · 20 to 22"),
-    ("Fixed at", "Class, Block, Subject", "Y", "N", "The lesson starts at the From period on that Day (Day All: every lesson of it starts at From). Use Subject to say which lesson of a class.", "Class · 3A · Character Education · Mon · 1"),
+    ("Fixed at", "Class, Block, Group, Subject", "Y", "N", "The lesson starts at the From period on that Day (Day All: every lesson of it starts at From). Use Subject to say which lesson of a class; Group is a group code from 6 Lessons.", "Class · 3A · Character Education · Mon · 1"),
     ("Not in periods", "Subject, Level, Class, Block", "Y", "N", "Not placed in these periods. Use Subject to narrow a level or class rule.", "Level · Sec 1 · Physical Education · All · 20 to 22"),
     ("Only in periods", "Subject, Level, Class, Block", "Y", "N", "Only placed in these periods.", "Subject · Mathematics G3 · All · 1 to 17"),
     ("Finish by", "Level, Class", "Y", "N", "No lessons after the To period on that day.", "Class · 4A · Fri · to 14"),
     ("Max periods a day", "Teacher, Class, Level, School", "N", "Y", "At most Number periods of lessons in a day (School = every teacher).", "School · Whole school · 15"),
     ("Max periods in a row", "Teacher, School", "N", "Y", "At most Number periods without a break (checked after solving).", "School · Whole school · 9"),
     ("At least one recess a day", "Teacher, School", "N", "N", "The teacher is free in at least one recess each day (checked after solving).", "School · Whole school"),
-    ("At most N at once", "Room, Subject", "N", "Y", "At most Number lessons at the same time (rooms that hold two classes, PE).", "Room · Field · 2"),
+    ("At most N at once", "Room, Subject, Department", "N", "Y", "At most Number lessons at the same time (rooms that hold two classes; Department PE = PE classes at once).", "Department · PE · 6"),
     ("Same time across classes", "Level", "N", "N", "Every class of the level has the Subject at the same time (level talks, CCE).", "Level · Sec 3 · Character Education"),
     ("Not on the same day as", "Subject", "N", "N", "Applies to and Subject are never on the same day for a class.", "Subject · Physical Education · Design & Technology"),
     ("Once a day per group", "School, Subject", "N", "N", "A group meets at most once a day for a subject.", "School · Whole school"),
     ("Avoid after-school slots", "School, Level, Class", "N", "N", "Use the 'A' periods in Day structure only when a class cannot fit otherwise.", "School · Whole school"),
 ]
+
+# rule rows on the Settings sheet: the row's label, a key, whether its value is a number (else Yes/No), and the rule it
+# stands for (after_school is a school setting instead: No means the 'A' periods are never used)
+_SCHOOL = dict(scope="School", target="Whole school", week="Both", day="All", strength="Must")
+SETTING_RULES: list[dict] = [
+    dict(key="once_a_day", label="Same subject at most once a day (per group)", number=False, rule=dict(_SCHOOL, rule="Once a day per group")),
+    dict(key="after_school", label="After-school slot allowed when a class cannot fit", number=False, rule=None),
+    dict(key="pe_at_once", label="Most PE classes at the same time", number=True, rule=dict(_SCHOOL, scope="Department", target="PE", rule="At most N at once")),
+    dict(key="max_day", label="Most teaching periods a teacher has in a day", number=True, rule=dict(_SCHOOL, rule="Max periods a day")),
+    dict(key="recess", label="Every teacher gets at least one recess a day", number=False, rule=dict(_SCHOOL, rule="At least one recess a day")),
+]
+
+def end_by(school):
+    """'Lessons end by (Monday to Thursday)' rows on Settings -> [(weekdays, minutes after midnight)]: no lesson runs
+    past that time on those days (the Day structure holds the longest possible day; these trim it)"""
+    import re
+    full = ["monday", "tuesday", "wednesday", "thursday", "friday"]
+    idx = lambda w: next((i for i, d in enumerate(full) if d[:3] == w[:3].lower()), None)
+    out = []
+    for row in school.get("extra_settings") or []:
+        label, v = str(row[0] or ""), row[1] if len(row) > 1 else None
+        if not label.lower().startswith("lessons end by") or v in (None, ""): continue
+        found = re.search(r"\((.*?)\)", label); txt = (found.group(1) if found else "monday to friday").lower()
+        span = re.match(r"\s*(\w+)\s+to\s+(\w+)", txt)
+        a, b = (idx(span.group(1)), idx(span.group(2))) if span else (None, None)
+        days = WEEKDAYS[a:b + 1] if a is not None and b is not None else [WEEKDAYS[i] for i in (idx(w) for w in re.findall(r"[a-z]+", txt)) if i is not None]
+        h, m = (str(v).replace(".", ":").split(":") + ["0"])[:2]
+        if h.strip().isdigit() and (m[:2] or "0").isdigit(): out.append((set(days), int(h) * 60 + int(m[:2] or 0)))   # not a time: ignored (the editor flags it)
+    return out
+
+def periods_by_day(school, days):
+    """{day name: periods of the day lessons may use} for the days a 'Lessons end by' row trims: a lesson must end by the time"""
+    h, m = map(int, str(school["start_time"]).split(":")[:2]); NP = int(school["periods_per_day"]); out = {}
+    for weekdays, cut in end_by(school):
+        keep = max(0, min(NP, (cut - h * 60 - m) // int(school["period_minutes"])))
+        for d in days:
+            if str(d).split()[-1][:3] in weekdays: out[d] = min(out.get(d, NP), keep)
+    return out
+
+def trim_day(row, keep):
+    """a Day structure row with the periods from `keep` on turned into no school"""
+    return row if keep is None else row[:keep] + "." * (len(row) - keep)
+
+def no_free_periods(school):
+    """the 'Students have no free periods' row on Settings: 'Yes', 'Prefer', 'No' or None"""
+    row = next((r for r in school.get("extra_settings") or [] if str(r[0] or "").lower().startswith("students have no free periods")), None)
+    return str(row[1]).strip().capitalize() if row and len(row) > 1 and row[1] not in (None, "") else None
+
+def split_rules(spec) -> dict:
+    """where each rule lives in the workbook: a rule row on Settings ({key: value}), Teacher availability (Must 'Not
+    available' for a teacher), Fixed lessons (Must 'Fixed at' for a class or group), or More rules (everything else)"""
+    settings, availability, fixed, more = {}, [], [], []
+    for r in spec.get("rules", []):
+        must = str(r.get("strength") or "Must") == "Must"
+        key = next((s["key"] for s in SETTING_RULES if s["rule"] and r.get("rule") == s["rule"]["rule"] and r.get("scope") == s["rule"]["scope"]
+                    and (r.get("scope") != "Department" or r.get("target") == s["rule"]["target"])), None)
+        if key and must and key not in settings:
+            settings[key] = r.get("number") if next(s for s in SETTING_RULES if s["key"] == key)["number"] else "Yes"
+        elif r.get("rule") == "Not available" and r.get("scope") == "Teacher" and must and r.get("from") not in (None, ""): availability.append(r)
+        elif r.get("rule") == "Fixed at" and r.get("scope") in ("Class", "Group") and must and r.get("from") not in (None, ""): fixed.append(r)
+        else: more.append(r)
+    return dict(settings=settings, availability=availability, fixed=fixed, more=more)
+
+# the usual Singapore school roles and the periods a cycle each usually carries (2-week cycle; the Roles sheet can change them)
+ROLES = [("HOD", "Head of Department", 67, "Management"), ("SH", "Subject Head", 88, "Management"), ("LT", "Lead Teacher", 67, "Teacher leader"),
+         ("ST", "Senior Teacher", 86, "Teacher leader"), ("EO", "Education Officer (teacher)", 104, "Teacher"), ("BT", "Beginning Teacher", 86, "Teacher"),
+         ("FAJT", "Flexible Adjunct Teacher (part-time)", 75, "Part-time"), ("UT", "Untrained Teacher: should not teach alone", 104, "Teacher (needs support)"),
+         ("New hire", "Post to be filled", 86, "Teacher"), ("Relief", "Relief teacher", 86, "Teacher")]
+
+def order_days(names):
+    """day names in calendar order (Odd week before Even, Monday to Friday), whatever order they arrive in"""
+    def key(d):
+        w = str(d).split()
+        return (1 if w[0] == "Even" else 0, next((i for i, x in enumerate(WEEKDAYS) if w[-1][:3].lower() == x.lower()), 9))
+    return sorted(names, key=key)
 
 def day_names(weeks):
     return [f"{w} {d}" for w in ("Odd", "Even") for d in WEEKDAYS] if int(weeks) == 2 else list(WEEKDAYS)

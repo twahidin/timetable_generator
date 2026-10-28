@@ -12,7 +12,7 @@ lessons as it can (cheaper than bending a Prefer rule or pushing a lesson after 
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
-from .spec import WEEKDAYS, family as _family
+from .spec import WEEKDAYS, family as _family, periods_by_day, trim_day
 
 W_PREF, W_SLACK, W_MOVE = 60, 40, 10
 
@@ -26,6 +26,8 @@ class Problem:
         if lv0 is None: raise ValueError("Day structure is empty.")
         self.days = list(ds[lv0].keys()); self.ND = len(self.days)
         self.grid = {lv: [(ds.get(lv, {}).get(d) or "." * self.NP).ljust(self.NP, ".")[:self.NP] for d in self.days] for lv in self.levels}
+        self.keep = periods_by_day(sc, self.days)   # Settings 'Lessons end by (...)': later periods are no school on those days
+        self.grid = {lv: [trim_day(row, self.keep.get(d)) for d, row in zip(self.days, rows)] for lv, rows in self.grid.items()}
         self.cls = {c["class"]: c for c in spec["classes"]}
         self.level_of = {c["class"]: c["level"] for c in spec["classes"]}
         self.rows = [x for x in spec["lessons"] if x.get("periods") and x.get("classes")]
@@ -62,11 +64,12 @@ class Problem:
         self.units = U
 
     def starts(self, level, ln):
+        ok = "LA" if self.spec["school"].get("after_school", True) else "L"   # Settings: after-school slot allowed (No: never use 'A')
         out = []
         for d, row in enumerate(self.grid[level]):
             for p in range(self.NP - ln + 1):
                 seg = row[p:p + ln]
-                if all(ch in "LA" for ch in seg): out.append((d * self.NP + p, seg.count("A")))
+                if all(ch in ok for ch in seg): out.append((d * self.NP + p, seg.count("A")))
         return out
 
     # ---------------------------------------------------------------- rule helpers
@@ -132,6 +135,7 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
         def sub_ok(u): return not sj or any(x["subject"] == sj for x in u["rows"])
         if sc == "Subject": return [u for u in P.units if any(x["subject"] == tg for x in u["rows"])]
         if sc == "Block": return [u for u in P.units if u["kind"] == "block" and u["name"] == tg]
+        if sc == "Group": return [u for u in P.units if any(x.get("code") == tg for x in u["rows"])]
         if sc == "Class": return [u for u in P.units if tg in u["classes"] and sub_ok(u)]
         if sc == "Level": return [u for u in P.units if (u["level"] == tg or any(P.level_of.get(c) == tg for c in u["classes"])) and sub_ok(u)]
         if sc == "School": return [u for u in P.units if sub_ok(u)]
@@ -299,9 +303,10 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
         ivs = [iv for iv, _ in lst] + [m.NewIntervalVar(run[0], len(run), run[0] + len(run), "") for run, _ in room_busy[k]]
         dem = [n for _, n in lst] + [c for _, c in room_busy[k]]
         if "rooms" not in skip: m.AddCumulative(ivs, dem, cap)
-    # at most N at once (subject)
-    for r in has("At most N at once", "Subject"):
-        lst = [(b["iv"], sum(1 for x in b["part"] if x["subject"] == r["target"])) for b in blocks]
+    # at most N at once (subject, or every subject of a department: e.g. PE classes at once)
+    for r in has("At most N at once", "Subject") + has("At most N at once", "Department"):
+        field = "subject" if r["scope"] == "Subject" else "dept"
+        lst = [(b["iv"], sum(1 for x in b["part"] if x.get(field) == r["target"])) for b in blocks]
         lst = [(iv, n) for iv, n in lst if n]
         if lst and r.get("number"): m.AddCumulative([a for a, _ in lst], [n for _, n in lst], int(r["number"]))
     # max periods a day
@@ -339,6 +344,7 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
                 for b in Bb: m.Add(a["day"] != b["day"])
     # fixed at a given day
     for r in has("Fixed at"):
+        if not units_for(r): notes.append(f"Fixed at: no lesson matches {r.get('target')} {r.get('subject') or ''}; skipped.".replace(" ;", ";"))
         if str(r.get("day") or "All") == "All" or r.get("from") in (None, ""): continue
         _, days = P.rule_positions(r)
         for u in units_for(r):

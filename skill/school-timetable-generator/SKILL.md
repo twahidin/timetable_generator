@@ -17,8 +17,10 @@ subject-based banding) schools, and for any school that fills the same template.
 
 ## What you need
 
-- The filled setup workbook (`.xlsx`). Its sheets, in order: `Settings`, `Period times`, `Day structure`,
-  `1 Venues`, `2 Classes`, `3 Subjects`, `4 Teachers`, `5 Blocks`, `6 Lessons`, `7 Rules`, `Rule types`, `Students`, `Lists`.
+- The filled setup workbook (`.xlsx`). Its sheets, in order: `README`, `Settings`, `Period times`, `Day structure`,
+  `1 Venues`, `2 Classes`, `3 Subjects`, `4 Teachers`, `Roles`, `5 Blocks`, `6 Lessons`, `Teacher availability`,
+  `Fixed lessons`, `More rules`, `Rule types`, `Students`, `Combinations`, `Lists` (the current setup layout, from template v9 on; a school's
+  own notes sheet may follow `README`). Workbooks in the older layout (a `7 Rules` sheet) read too.
   Blank or sample templates come with this skill (`templates/`) or from the setup web app.
 - Python 3.10+ with `pip install ortools openpyxl reportlab` (reportlab is only for the PDFs).
 - The scripts: if `scripts/ttgen/` is next to this file, use them (run from the `scripts` folder, or put it on
@@ -27,9 +29,9 @@ subject-based banding) schools, and for any school that fills the same template.
 ## Workflow
 
 1. **Check the input first.** `python -m ttgen check SETUP.xlsx`. Fix or report every problem before solving:
-   subjects with no periods for a level, rows with no class or teacher, unknown subjects. Also open `6 Lessons` and
-   `7 Rules`: text in a **Check** column is a problem the person must fix (teacher not set to teach the subject,
-   teacher twice in a block, repeated code).
+   subjects with no periods for a level, rows with no class or teacher, unknown subjects. Also open `6 Lessons`,
+   `More rules` and `4 Teachers`: text in a **Check** or **Load check** column is a problem the person must fix
+   (teacher not set to teach the subject, teacher twice in a block, repeated code, over allowance).
 2. **Do the capacity sums** (cheap, catches most impossible inputs):
    - each class: periods it needs (whole-class subjects + the longest group in each block it belongs to) against the
      `L` periods in its level's Day structure, remembering that lessons have fixed lengths and cannot cross a break;
@@ -84,16 +86,20 @@ Classes and Teachers are comma-separated; After school is `yes` or blank.
 
 | Sheet | One row per | Key columns |
 |---|---|---|
-| Settings | setting | School type (primary/secondary), Weeks in cycle (1 or 2), Period length (minutes), Period 0 starts at, Periods in a day, Standard lesson length (periods) |
-| Day structure | level and day | one cell per period: `F` flag/assembly, `L` lesson, `R` recess, `U` lunch, `A` after-school slot (used only if needed), blank = no school |
-| 1 Venues | room | Room, Kind (classroom, lab, pe venue, ...), Capacity |
+| Settings | setting | School, Timetable, (School type: primary only), Cycle (1 week, or 2 weeks Odd/Even), Period length (minutes), Period 0 starts at, Periods in a day, Lesson length (periods); then the school-wide rule rows: Same subject at most once a day (per group) Yes/No, After-school slot allowed when a class cannot fit Yes/No (No: the `A` periods are never used), Most PE classes at the same time (number), Most teaching periods a teacher has in a day (number), Every teacher gets at least one recess a day Yes/No; any other rows are notes |
+| Day structure | level and day | one cell per period: `F` flag/assembly, `L` lesson, `R` recess, `U` lunch, `A` after-school slot (used only if needed), blank = no school. Day names as the school writes them (e.g. `Odd Tues`) |
+| 1 Venues | room | Room, Kind (classroom, lab, pe venue, ...), Capacity, Block (building), Floor / level |
 | 2 Classes | form class | Class, Level, Students, Home room |
-| 3 Subjects | subject | Subject, Code, Level tag (G1/G2/G3, Std/Fdn/Higher, or -), Department, Room kind (blank = home room), Lesson length (blank = standard), then periods per cycle for each level |
-| 4 Teachers | teacher | Teacher, Short, Department, Allowance, up to 8 pairs of Can teach / at (All, a level or a band such as Sec 1-2) |
-| 5 Blocks | block | Block name, Level, Class 1-12: classes whose students are split into groups that all have lessons at the same time |
-| 6 Lessons | group, or class for a whole-class subject | Level, Subject, Block (empty = whole class), Class 1-12, Teacher 1-3, Students, optional Periods / Code overrides; formulas show Group code, Periods, Full and Short lessons, Room kind, Check |
-| 7 Rules | constraint | Applies to (kind), Applies to, Subject (optional), Rule, Week, Day, From/To period, Number, Must/Prefer |
-| Students | student (optional) | Student ID, Name, Level, Class, Groups (codes from 6 Lessons, comma separated) |
+| 3 Subjects | subject | Subject, Code, G-level (G1/G2/G3 or -; `Level tag` with Std/Fdn/Higher for primary), Department, Room kind (blank = home room), optional Lesson length, then periods per cycle for each level |
+| 4 Teachers | teacher | Teacher, Short, Department, Allowance, Provisional, up to 8 pairs of Can teach / at (All, a level or a band such as Sec 1-2), Note, Role (from `Roles`), Other duties (periods); formulas show Periods given, Spare, Total load, Role guide, % of allowance, Load check |
+| Roles | role | Role, What it is, Guide allowance, Group (Management, Teacher, ...); above the table, the teacher (EO) and management average loads and the even-spread margin |
+| 5 Blocks | block | Block name, Level, Class 1-9 (more if needed): classes whose students are split into groups that all have lessons at the same time |
+| 6 Lessons | group, or class for a whole-class subject | Level, Subject, Block (empty = whole class), Class 1-9, Teacher 1-3, Students, optional Periods / Code overrides; formulas show Group code, Periods, Doubles and Triples (or the lesson lengths in use), Room kind, Teacher periods, Check |
+| Teacher availability | block-out | Teacher, Week, Day (All or Mon-Fri), From, To (clock times; every period they overlap is blocked), Reason |
+| Fixed lessons | lesson at a set time (optional) | Level, Class(es) or group (a class, or a group code from 6 Lessons), Subject, Week, Day, Start period, Note |
+| More rules | any other constraint | Applies to (kind), Applies to, Subject (optional), Rule, Week, Day, From/To period, Number, Must/Prefer |
+| Students | student (recommended) | Student ID, Name, Level, Class, Combination, Choice 1-3, Merit, Groups (codes from 6 Lessons, comma separated), Source |
+| Combinations | subject combination | Level, Code, Name, Subject 1-3, Places |
 
 **How periods become lessons.** With lesson length L (3 for 20-minute secondary periods = 1 hour; 2 for 30-minute
 primary periods), a subject with P periods gets as many L-period lessons as possible plus one or two
@@ -103,10 +109,16 @@ primary periods), a subject with P periods gets as many L-period lessons as poss
 **Group codes** = level digit + subject code + level-tag letter + running number (1ELP1, 5MAS2). A code typed in
 "Code (only to keep an old one)" wins. Rows without a block are whole-class lessons ("Entire Class").
 
-**Rules** (all on `7 Rules`; `Rule types` repeats this list):
+**Rules** come from four places, all Must unless `More rules` says Prefer: the rule rows on `Settings` (once a day
+per group, at most N PE classes at once, a teacher's daily cap, a recess a day; and `Lessons end by (Monday to Thursday)` style rows,
+which trim the Day structure so no lesson runs past that time on those days; `Students have no free periods` is
+counted after solving, not enforced), `Teacher availability` (Not
+available for a teacher, clock times turned into the periods they overlap), `Fixed lessons` (Fixed at, for a class
+with a subject or for a group code) and `More rules`. Rule types (`Rule types` repeats this list):
 Not available · Keep free together · Fixed at · Not in periods · Only in periods · Finish by · Max periods a day ·
-Max periods in a row* · At least one recess a day* · At most N at once · Same time across classes ·
-Not on the same day as · Once a day per group · Avoid after-school slots. (* checked after solving, not enforced.)
+Max periods in a row* · At least one recess a day* · At most N at once (a room, a subject, or a department such as PE) ·
+Same time across classes · Not on the same day as · Once a day per group · Avoid after-school slots.
+(* checked after solving, not enforced.) A rule row whose note starts with "example" is an example to replace.
 
 ## Building it without the scripts
 
