@@ -6,7 +6,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const KEY = "ttsetup.v1";
 const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" } };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
-  ["teachers", "4 Teachers"], ["blocks", "5 Blocks"], ["lessons", "6 Lessons"], ["rules", "7 Rules"], ["students", "8 Students"], ["generate", "Generate & publish"], ["download", "Files"]];
+  ["teachers", "4 Teachers"], ["blocks", "5 Blocks"], ["lessons", "6 Lessons"], ["rules", "7 Availability & rules"], ["students", "8 Students"], ["generate", "Generate & publish"], ["download", "Files"]];
 
 /* ---------------- storage, server */
 function save() { try { localStorage.setItem(KEY, JSON.stringify({ kind: S.kind, spec: S.spec, step: S.step })); } catch (e) { } }
@@ -19,7 +19,7 @@ async function begin(kind, what) {
 }
 async function adopt(spec, msg) {
   S.kind = (spec.school && spec.school.type) || "secondary"; S.meta = await getJSON(`/api/meta/${S.kind}`);
-  S.spec = spec; ["venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students"].forEach(k => S.spec[k] = S.spec[k] || []);
+  S.spec = spec; ["venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "combinations"].forEach(k => S.spec[k] = S.spec[k] || []);
   S.step = 1; ensureDays(); save(); render(); toast(msg);
 }
 function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => t.hidden = true, 3200); }
@@ -28,7 +28,69 @@ function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; 
 const sc = () => S.spec.school;
 const levels = () => sc().levels || [];
 const bands = () => sc().bands || {};
-const dayNames = () => Number(sc().weeks) === 2 ? ["Odd", "Even"].flatMap(w => ["Mon", "Tue", "Wed", "Thu", "Fri"].map(d => `${w} ${d}`)) : ["Mon", "Tue", "Wed", "Thu", "Fri"];
+const dayNames = () => {   // the workbook's own day names (e.g. "Odd Tues") when they fit the cycle
+  const def = Number(sc().weeks) === 2 ? ["Odd", "Even"].flatMap(w => ["Mon", "Tue", "Wed", "Thu", "Fri"].map(d => `${w} ${d}`)) : ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  const wd = ["mon", "tue", "wed", "thu", "fri"], key = d => { const w = d.split(" "); return (w[0] === "Even" ? 10 : 0) + wd.indexOf(w[w.length - 1].slice(0, 3).toLowerCase()); };
+  const have = Object.keys(Object.values(S.spec.day_structure || {})[0] || {}).sort((a, b) => key(a) - key(b));   // calendar order, as JSON may sort keys
+  return have.length === def.length ? have : def;
+};
+const roles = () => S.spec.roles && S.spec.roles.length ? S.spec.roles : (S.meta.roles || []);
+const groupCodes = () => lessonInfo().map(x => x.code).filter(c => c && c !== "Entire Class");
+const tagLabel = () => sc().type === "primary" ? "Level tag" : "G-level";
+const hhmm = p => { const [h, m] = String(sc().start_time || "07:30").split(":").map(Number); const t = h * 60 + m + p * Number(sc().period_minutes || 20); return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
+const mins = t => { const [h, m] = String(t || "0:0").split(":").map(Number); return h * 60 + (m || 0); };
+function periodsBetween(a, b) {   // clock times -> the periods a block-out overlaps (as the reader does)
+  const st = mins(sc().start_time), pl = Number(sc().period_minutes || 20), NP = Number(sc().periods_per_day);
+  return [Math.max(0, Math.floor((mins(a) - st) / pl)), Math.min(NP - 1, Math.ceil((mins(b) - st) / pl) - 1)];
+}
+function ruleTimes(r) {   // a block-out's clock times: as typed while they still give its periods, else the times of its periods
+  const a = Number(r.from) || 0, b = r.to == null || r.to === "" ? a : Number(r.to);
+  if (r.times && r.times.length === 2) { const [x, y] = periodsBetween(r.times[0], r.times[1]); if (x === a && y === b) return r.times; }
+  return [hhmm(a), hhmm(b + 1)];
+}
+
+/* ---------------- rule rows on Settings, Teacher availability, Fixed lessons, More rules (as ttgen.spec.split_rules) */
+function loadChecks(load) {   // the 4 Teachers 'Load check' column: load against the allowance, the role's guide and the teacher average
+  const tot = t => (load[t.name] || 0) + (Number(t.other_duties) || 0), role = r => roles().find(x => x.role === r) || {};
+  const eo = S.spec.teachers.filter(t => t.role === "EO" && tot(t) > 0).map(tot), avg = eo.length ? eo.reduce((a, b) => a + b, 0) / eo.length : 0;
+  const spread = Number(sc().role_spread ?? 15);
+  return S.spec.teachers.map(t => {
+    const m = [], T = tot(t), A = Number(t.allowance) || 0, g = Number(role(t.role).allowance) || 0;
+    if (!t.role) m.push("No role.");
+    if (g > 0 && A > 0 && A !== g) m.push(`Allowance differs from the ${t.role} guide (${g}).`);
+    if (A > 0 && T > A) m.push("Over allowance.");
+    if (role(t.role).group === "Management" && avg > 0 && T >= avg) m.push(`Management teaching as much as the average teacher (${Math.round(avg)}).`);
+    if (t.role === "EO" && T > 0 && avg > 0 && avg - T >= spread) m.push(`Below the teacher average by ${Math.round(avg - T)} periods.`);
+    if (t.role === "EO" && avg > 0 && T - avg >= spread) m.push(`Above the teacher average by ${Math.round(T - avg)} periods.`);
+    if (t.role && A > 0 && T === 0) m.push("No lessons yet.");
+    return m.join(" ");
+  });
+}
+const SET = () => S.meta.setting_rules || [];
+const ruleIs = (r, s) => s.rule && r.rule === s.rule.rule && r.scope === s.rule.scope && (r.scope !== "Department" || r.target === s.rule.target);
+function placeRules() {
+  const out = { settings: {}, availability: [], fixed: [], more: [] };
+  S.spec.rules.forEach((r, i) => {
+    const must = (r.strength || "Must") === "Must", s = SET().find(s => ruleIs(r, s)), has = r.from != null && r.from !== "";
+    if (s && must && !(s.key in out.settings)) out.settings[s.key] = i;
+    else if (r.rule === "Not available" && r.scope === "Teacher" && must && has) out.availability.push(i);
+    else if (r.rule === "Fixed at" && ["Class", "Group"].includes(r.scope) && must && has) out.fixed.push(i);
+    else out.more.push(i);
+  });
+  return out;
+}
+function settingValue(key) {
+  if (key === "after_school") return sc().after_school === false ? "No" : "Yes";
+  const s = SET().find(x => x.key === key), i = placeRules().settings[key];
+  return i == null ? (s.number ? "" : "No") : (s.number ? S.spec.rules[i].number : "Yes");
+}
+function setSetting(key, v) {
+  if (key === "after_school") { sc().after_school = v !== "No"; return; }
+  const s = SET().find(x => x.key === key), i = placeRules().settings[key], on = s.number ? v !== "" && v != null : v === "Yes";
+  if (!on) { if (i != null) S.spec.rules.splice(i, 1); return; }
+  if (i != null) { if (s.number) S.spec.rules[i].number = Number(v); return; }
+  S.spec.rules.push({ ...s.rule, ...(s.number ? { number: Number(v) } : {}) });
+}
 const rooms = () => S.spec.venues.map(v => v.room).filter(Boolean);
 const classNames = () => S.spec.classes.map(c => c.class).filter(Boolean);
 const subjectNames = () => S.spec.subjects.map(s => s.subject).filter(Boolean);
@@ -89,7 +151,11 @@ function issues() {
     if (codes[info[i].code] > 1) add("lessons", i, "Code used twice.");
   });
   const load = {}; S.spec.lessons.forEach((x, i) => (x.teachers || []).filter(Boolean).forEach(t => load[t] = (load[t] || 0) + info[i].tp));
-  S.spec.teachers.forEach((t, i) => { if (t.allowance && (load[t.name] || 0) > Number(t.allowance)) add("teachers", i, `${t.name}: ${load[t.name]} periods given, allowance ${t.allowance}.`); if (!t.name) add("teachers", i, "Name missing."); });
+  S.spec.teachers.forEach((t, i) => {
+    const tot = (load[t.name] || 0) + (Number(t.other_duties) || 0);
+    if (t.allowance && tot > Number(t.allowance)) add("teachers", i, `${t.name}: load ${tot} (${load[t.name] || 0} lessons${t.other_duties ? ` + ${t.other_duties} other duties` : ""}), allowance ${t.allowance}.`);
+    if (!t.name) add("teachers", i, "Name missing.");
+  });
   S.spec.classes.forEach((c, i) => { if (c.home_room && !rooms().includes(c.home_room)) add("classes", i, `${c.class}: home room ${c.home_room} is not on Venues.`); });
   S.spec.blocks.forEach((b, i) => {
     const gs = S.spec.lessons.map((x, j) => [x, j]).filter(([x]) => x.block === b.block);
@@ -104,6 +170,8 @@ function issues() {
     if (!r.target || !targetOptions(r.scope).includes(r.target)) add("rules", i, `Pick the ${String(r.scope || "").toLowerCase()} from the list.`);
     if (!rt.scopes.includes(r.scope)) add("rules", i, `${r.rule} does not apply to a ${String(r.scope).toLowerCase()}.`);
     if (rt.needs_time && r.from == null && r.to == null) add("rules", i, "Give the period(s).");
+    if (r.from != null && r.to != null && r.to !== "" && Number(r.to) < Number(r.from)) add("rules", i, `${r.target || "Rule"}: the end is before the start.`);
+    if (r.rule === "Fixed at" && r.subject && !subjectNames().includes(r.subject)) add("rules", i, `Fixed lesson: ${r.subject} is not on step 3.`);
     if (rt.needs_number && !r.number) add("rules", i, "Give the Number.");
     if (["Same time across classes", "Not on the same day as"].includes(r.rule) && !r.subject) add("rules", i, "Pick the Subject.");
   });
@@ -132,7 +200,8 @@ function issues() {
 }
 const stuKey = s => String(s.id || s.name || "").trim();
 function targetOptions(scope) {
-  return { School: ["Whole school"], Level: levels(), Class: classNames(), Teacher: teacherNames(), Department: sc().departments || [], Subject: subjectNames(), Block: blockNames(), Room: rooms() }[scope] || [];
+  return { School: ["Whole school"], Level: levels(), Class: classNames(), Teacher: teacherNames(), Department: sc().departments || [], Subject: subjectNames(), Block: blockNames(),
+    Group: groupCodes(), Room: rooms() }[scope] || [];
 }
 
 /* ---------------- small builders */
@@ -197,15 +266,20 @@ const VIEWS = {
       <div class="grid2">
         <label class="f">School name ${inp("spec.school.name", s.name)}</label>
         <label class="f">Timetable ${inp("spec.school.timetable", s.timetable)}</label>
-        <label class="f">Weeks in cycle ${sel("spec.school.weeks", s.weeks, [1, 2], false)}</label>
+        <label class="f">Cycle <select data-k="spec.school.weeks">${opt(1, s.weeks, "1 week")}${opt(2, s.weeks, "2 weeks (Odd, Even)")}</select></label>
         <label class="f">Period length (minutes) ${inp("spec.school.period_minutes", s.period_minutes, "number", 'min="5" max="90"')}</label>
         <label class="f">Period 0 starts at ${inp("spec.school.start_time", s.start_time, "time")}</label>
         <label class="f">Periods in a day ${inp("spec.school.periods_per_day", s.periods_per_day, "number", 'min="4" max="40"')}</label>
-        <label class="f">Standard lesson length (periods) ${inp("spec.school.lesson_length", s.lesson_length, "number", 'min="1" max="6"')}</label>
+        <label class="f">Lesson length (periods) ${inp("spec.school.lesson_length", s.lesson_length, "number", 'min="1" max="6"')}</label>
         <label class="f">Levels (comma separated) <input data-list="levels" value="${esc(levels().join(", "))}"></label>
         <label class="f">Departments <input data-list="departments" value="${esc((s.departments || []).join(", "))}"></label>
         <label class="f">Room kinds <input data-list="room_kinds" value="${esc((s.room_kinds || []).join(", "))}"></label>
       </div></div>
+      <div class="card"><h2>Rules on the Settings sheet</h2><p class="muted">School-wide rules. Teacher block-outs, fixed lessons and any other rule are on step 7.</p>
+      <div class="grid2">${SET().map(x => `<label class="f">${esc(x.label)} ${x.number
+        ? `<input data-set="${x.key}" type="number" min="1" value="${esc(settingValue(x.key))}" placeholder="no limit">`
+        : `<select data-set="${x.key}">${["Yes", "No"].map(v => opt(v, settingValue(x.key))).join("")}</select>`}</label>`).join("")}
+      ${(s.extra_settings || []).map((x, i) => `<label class="f">${esc(x[0])} ${inp(`spec.school.extra_settings.${i}.1`, x[1])}${x[2] ? `<span class="muted small">${esc(x[2])}</span>` : ""}</label>`).join("")}</div></div>
       <div class="card"><h2>Day structure</h2><div class="legend">Brush: ${["L", "R", "U", "F", "A", ""].map(c => `<button class="small ${S.brush === c ? "primary" : ""}" data-brush="${c}"><i class="c-${c}" style="width:12px;height:12px;display:inline-block;border-radius:3px;vertical-align:-2px"></i> ${{ L: "Lesson", R: "Recess", U: "Lunch", F: "Flag / assembly", A: "After-school slot", "": "No school" }[c]}</button>`).join("")}</div>
       <p class="muted" style="margin:4px 0 10px">Click or drag across cells to paint them with the brush.</p>
       <div class="tablewrap"><table class="dsgrid">${head}${lvRows}</table></div></div>`;
@@ -214,7 +288,7 @@ const VIEWS = {
     const { out } = issues();
     return `<div class="card"><h1>Step 1 · Venues</h1><p class="lead">Every room. Its kind decides which subjects may use it (you set a subject's room kind on step 3). A room that holds two classes at once (a field, a hall) gets an "At most N at once" rule on step 7.</p>
       <div class="helper row"><b>Add rooms</b> prefix ${`<input id="hvPre" value="B1-" style="width:70px">`} from <input id="hvFrom" type="number" value="1" style="width:60px"> to <input id="hvTo" type="number" value="8" style="width:60px"> kind ${sel("_hv", "classroom", sc().room_kinds || [], false, 'id="hvKind" data-k=""')} <button data-helper="venues">Add</button></div>
-      <div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Building</th><th>Floor</th><th>Home room of</th><th>Note</th><th></th></tr>
+      <div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Block</th><th>Floor / level</th><th>Home room of</th><th>Note</th><th></th></tr>
       ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${out.venues[i] ? "bad" : ""}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td>${delBtn("venues", i)}</td></tr>`).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div></div>`;
   },
@@ -228,8 +302,8 @@ const VIEWS = {
   },
   subjects() {
     const { out } = issues(); const tags = (sc().tags || []).map(t => t[0]);
-    return `<div class="card"><h1>Step 3 · Subjects</h1><p class="lead">Periods per ${Number(sc().weeks) === 2 ? "fortnight" : "week"} for each level that takes the subject (blank = not offered). Lessons are ${sc().lesson_length} periods long unless the subject says otherwise; leftovers become one or two shorter lessons. The code names the groups (1ELP1…). Level tag is the level of study used for banding.</p>
-      <div class="tablewrap"><table><tr><th>Subject</th><th>Code</th><th>Level tag</th><th>Department</th><th>Room kind</th><th>Lesson length</th>${levels().map(l => `<th>${esc(l)}</th>`).join("")}<th>Rows</th><th></th></tr>
+    return `<div class="card"><h1>Step 3 · Subjects</h1><p class="lead">Periods per ${Number(sc().weeks) === 2 ? "fortnight" : "week"} for each level that takes the subject (blank = not offered). Lessons are ${sc().lesson_length} periods long unless the subject says otherwise; leftovers become one or two shorter lessons. The code names the groups (1ELP1…). ${tagLabel()} is the level of study used for banding.</p>
+      <div class="tablewrap"><table><tr><th>Subject</th><th>Code</th><th>${tagLabel()}</th><th>Department</th><th>Room kind</th><th>Lesson length</th>${levels().map(l => `<th>${esc(l)}</th>`).join("")}<th>Rows</th><th></th></tr>
       ${S.spec.subjects.map((s, i) => `<tr id="subjects-${i}" class="${out.subjects[i] ? "bad" : ""}"><td style="min-width:220px">${inp(`spec.subjects.${i}.subject`, s.subject)}</td><td class="num">${inp(`spec.subjects.${i}.code`, s.code, "text", 'style="width:54px"')}</td><td>${sel(`spec.subjects.${i}.tag`, s.tag, tags, false)}</td><td>${sel(`spec.subjects.${i}.dept`, s.dept, sc().departments || [])}</td><td>${sel(`spec.subjects.${i}.room_kind`, s.room_kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.subjects.${i}.lesson_length`, s.lesson_length, "number", 'style="width:56px"')}</td>${levels().map(l => `<td class="num">${inp(`spec.subjects.${i}.periods.${l}`, (s.periods || {})[l], "number", 'style="width:56px"')}</td>`).join("")}<td class="calc">${S.spec.lessons.filter(x => x.subject === s.subject).length}</td><td>${delBtn("subjects", i)}</td></tr>`).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="subjects">+ Add subject</button></div></div>`;
   },
@@ -237,9 +311,22 @@ const VIEWS = {
     const { out, load } = issues();
     return `<div class="card"><h1>Step 4 · Teachers</h1><p class="lead">Each teacher with the subjects and levels they can teach (click the subjects cell). Lessons on step 6 are checked against this, and the teacher drop-down there lists the teachers who can teach the subject first.</p>
       <div class="helper"><b>Add teachers</b> (one name per line) <div class="row" style="margin-top:6px"><textarea id="htNames" rows="3" style="width:280px;border:1px solid var(--line);border-radius:6px;padding:6px"></textarea> department ${sel("_ht", (sc().departments || [])[0], sc().departments || [], false, 'id="htDept" data-k=""')} allowance <input id="htAllow" type="number" value="${sc().type === "primary" ? 36 : 64}" style="width:70px"> <button data-helper="teachers">Add</button></div></div>
-      <div class="tablewrap"><table><tr><th>Teacher</th><th>Short</th><th>Department</th><th>Allowance</th><th>Can teach</th><th>Given</th><th>Spare</th><th>Provisional</th><th></th></tr>
-      ${S.spec.teachers.map((t, i) => { const g = load[t.name] || 0; const sp = t.allowance ? Number(t.allowance) - g : ""; return `<tr id="teachers-${i}" class="${out.teachers[i] ? "bad" : ""}"><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join("")}
-      </table></div><div class="row" style="margin-top:10px"><button data-add="teachers">+ Add teacher</button></div></div>`;
+      <div class="tablewrap"><table><tr><th>Teacher</th><th>Short</th><th>Department</th><th>Allowance</th><th>Can teach</th><th>Given</th><th>Spare</th><th>Role</th><th>Other duties</th><th>Total load</th><th>Load check</th><th>Provisional</th><th></th></tr>
+      ${(() => { const lc = loadChecks(load); return S.spec.teachers.map((t, i) => { const g = load[t.name] || 0; const sp = t.allowance ? Number(t.allowance) - g : ""; const tot = g + (Number(t.other_duties) || 0);
+        return `<tr id="teachers-${i}" class="${out.teachers[i] ? "bad" : ""}"><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join(""); })()}
+      </table></div><div class="row" style="margin-top:10px"><button data-add="teachers">+ Add teacher</button></div></div>
+      ${VIEWS.roles(load)}`;
+  },
+  roles(load) {   // the Roles sheet: guide allowance per role and the load of the teachers in it
+    if (!S.spec.roles || !S.spec.roles.length) S.spec.roles = JSON.parse(JSON.stringify(S.meta.roles || []));
+    const tot = t => (load[t.name] || 0) + (Number(t.other_duties) || 0), avg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : "";
+    const eo = avg(S.spec.teachers.filter(t => t.role === "EO" && tot(t) > 0).map(tot)), mgmt = avg(S.spec.teachers.filter(t => ["HOD", "SH"].includes(t.role) && tot(t) > 0).map(tot));
+    return `<div class="card"><h2>Roles</h2><p class="muted">Management (HOD, SH) should teach fewer periods than teachers; teachers (EO) should be spread evenly. Teachers (EO) average load <b>${eo || "–"}</b> · management (HOD, SH) <b>${mgmt || "–"}</b>.
+      Flag a teacher <input data-k="spec.school.role_spread" type="number" value="${esc(sc().role_spread ?? 15)}" style="width:56px"> periods or more from the teacher average.</p>
+      <div class="tablewrap"><table><tr><th>Role</th><th>What it is</th><th>Guide allowance</th><th>Group</th><th>Teachers</th><th>Average load</th><th></th></tr>
+      ${S.spec.roles.map((r, i) => { const ts = S.spec.teachers.filter(t => t.role === r.role);
+        return `<tr><td>${inp(`spec.roles.${i}.role`, r.role, "text", 'style="width:80px"')}</td><td style="min-width:240px">${inp(`spec.roles.${i}.what`, r.what)}</td><td class="num">${inp(`spec.roles.${i}.allowance`, r.allowance, "number", 'style="width:64px"')}</td><td>${inp(`spec.roles.${i}.group`, r.group)}</td><td class="calc">${ts.length}</td><td class="calc">${avg(ts.map(tot))}</td><td>${delBtn("roles", i)}</td></tr>`; }).join("")}
+      </table></div><div class="row" style="margin-top:10px"><button data-add="roles">+ Add role</button></div></div>`;
   },
   blocks() {
     const { out } = issues(); const info = lessonInfo();
@@ -263,14 +350,31 @@ const VIEWS = {
   rules() {
     const { out } = issues(); const RT = S.meta.rule_types || []; const NP = Number(sc().periods_per_day); const P = Array.from({ length: NP }, (_, p) => p);
     const psel = (path, cur) => `<select data-k="${path}">${opt("", cur ?? "", "")}${P.map(p => opt(p, cur, `${p} (${clock(p)})`)).join("")}</select>`;
-    return `<div class="card"><h1>Step 7 · Rules</h1><p class="lead">Constraints on when things can happen. First pick what the rule applies to; the next drop-down lists only those. <b>Must</b> is never broken; <b>Prefer</b> is kept where possible.</p>
-      <div class="tablewrap"><table class="ruletable"><tr><th>Applies to</th><th>Which</th><th>Subject (optional)</th><th>Rule</th><th>Week</th><th>Day</th><th>From</th><th>To</th><th>Number</th><th>Must / Prefer</th><th>Note</th><th></th></tr>
-      ${S.spec.rules.map((r, i) => `<tr id="rules-${i}" class="${out.rules[i] ? "bad" : ""}" title="${esc((out.rules[i] || []).join(" "))}"><td>${sel(`spec.rules.${i}.scope`, r.scope, S.meta.scopes)}</td><td style="min-width:150px">${sel(`spec.rules.${i}.target`, r.target, targetOptions(r.scope))}</td><td style="min-width:150px">${sel(`spec.rules.${i}.subject`, r.subject, subjectNames())}</td><td style="min-width:180px">${sel(`spec.rules.${i}.rule`, r.rule, RT.filter(t => !r.scope || t.scopes.includes(r.scope)).map(t => t.rule))}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", Number(sc().weeks) === 2 ? ["Both", "Odd", "Even"] : ["Both"], false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", ["All", "Mon", "Tue", "Wed", "Thu", "Fri"], false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td>${psel(`spec.rules.${i}.to`, r.to)}</td><td class="num">${inp(`spec.rules.${i}.number`, r.number, "number", 'style="width:56px"')}</td><td>${sel(`spec.rules.${i}.strength`, r.strength || "Must", ["Must", "Prefer"], false)}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>`).join("")}
-      </table></div><div class="row" style="margin-top:10px"><button data-add="rules">+ Add rule</button></div></div>
+    const weeks = Number(sc().weeks) === 2 ? ["Both", "Odd", "Even"] : ["Both"], days = ["All", "Mon", "Tue", "Wed", "Thu", "Fri"];
+    const where = placeRules(), bad = i => out.rules[i] ? "bad" : "", tip = i => esc((out.rules[i] || []).join(" "));
+    const avail = where.availability.map(i => { const r = S.spec.rules[i], [a, b] = ruleTimes(r);
+      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td style="min-width:180px">${sel(`spec.rules.${i}.target`, r.target, teacherNames())}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td>
+        <td><input data-time="${i}|0" type="time" value="${esc(a)}"></td><td><input data-time="${i}|1" type="time" value="${esc(b)}"></td><td class="calc">${r.from === r.to || r.to == null ? `period ${r.from}` : `periods ${r.from}–${r.to}`}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>`; }).join("");
+    const codes = groupCodes();
+    const fixed = where.fixed.map(i => { const r = S.spec.rules[i], lv = r.level || clsLevel(r.target);
+      const who = [...classNames().filter(c => !lv || clsLevel(c) === lv), ...codes.filter(c => !lv || String(lv).slice(-1) === c[0])];
+      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td>${sel(`spec.rules.${i}.level`, lv, levels())}</td><td style="min-width:110px">${sel(`spec.rules.${i}.target`, r.target, who)}</td><td style="min-width:180px">${sel(`spec.rules.${i}.subject`, r.subject, subjectNames())}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>`; }).join("");
+    const more = where.more.map(i => { const r = S.spec.rules[i];
+      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td>${sel(`spec.rules.${i}.scope`, r.scope, S.meta.scopes)}</td><td style="min-width:150px">${sel(`spec.rules.${i}.target`, r.target, targetOptions(r.scope))}</td><td style="min-width:150px">${sel(`spec.rules.${i}.subject`, r.subject, subjectNames())}</td><td style="min-width:180px">${sel(`spec.rules.${i}.rule`, r.rule, RT.filter(t => !r.scope || t.scopes.includes(r.scope)).map(t => t.rule))}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td>${psel(`spec.rules.${i}.to`, r.to)}</td><td class="num">${inp(`spec.rules.${i}.number`, r.number, "number", 'style="width:56px"')}</td><td>${sel(`spec.rules.${i}.strength`, r.strength || "Must", ["Must", "Prefer"], false)}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>`; }).join("");
+    return `<div class="card"><h1>Step 7 · Teacher availability</h1><p class="lead">Times a teacher cannot teach (part-time days, a centre or programme after school). Times are clock times; every period they overlap is blocked. School-wide rules are on <b>School &amp; day</b>.</p>
+      <div class="tablewrap"><table class="ruletable"><tr><th>Teacher</th><th>Week</th><th>Day</th><th>From</th><th>To</th><th>Blocks</th><th>Reason</th><th></th></tr>${avail}</table></div>
+      <div class="row" style="margin-top:10px"><button data-add="avail">+ Add block-out</button></div></div>
+      <div class="card"><h2>Fixed lessons</h2><p class="muted">Lessons that must start at a set time (optional): a class with a subject, or a group code from step 6. Leave empty to let the timetable place everything.</p>
+      <div class="tablewrap"><table class="ruletable"><tr><th>Level</th><th>Class or group</th><th>Subject</th><th>Week</th><th>Day</th><th>Start period</th><th>Note</th><th></th></tr>${fixed}</table></div>
+      <div class="row" style="margin-top:10px"><button data-add="fixed">+ Add fixed lesson</button></div></div>
+      <div class="card"><h2>More rules</h2><p class="muted">Any other constraint: rooms, levels, subjects, Prefer rules and so on. First pick what the rule applies to; the next drop-down lists only those. <b>Must</b> is never broken; <b>Prefer</b> is kept where possible.</p>
+      <div class="tablewrap"><table class="ruletable"><tr><th>Applies to</th><th>Which</th><th>Subject (optional)</th><th>Rule</th><th>Week</th><th>Day</th><th>From</th><th>To</th><th>Number</th><th>Must / Prefer</th><th>Note</th><th></th></tr>${more}</table></div>
+      <div class="row" style="margin-top:10px"><button data-add="rules">+ Add rule</button></div></div>
       <div class="card"><h2>Rule types</h2><div class="tablewrap" style="max-height:none"><table><tr><th>Rule</th><th>Applies to</th><th>What it means</th><th>Example</th></tr>${RT.map(t => `<tr><td><b>${esc(t.rule)}</b></td><td>${esc(t.scopes)}</td><td>${esc(t.meaning)}</td><td class="muted">${esc(t.example)}</td></tr>`).join("")}</table></div></div>`;
   },
   students() {
     const { out } = issues(); const L = S.spec.students, f = S.stu, q = f.q.trim().toLowerCase(), MAX = 200;
+    const combos = (S.spec.combinations || []).map(c => c.code).filter(Boolean);
     const per = {}; L.forEach(s => per[s.class] = (per[s.class] || 0) + 1);
     const rows = L.map((s, i) => [s, i]).filter(([s]) => (!f.cls || s.class === f.cls) && (!q || `${s.id || ""} ${s.name || ""}`.toLowerCase().includes(q)));
     const clsOpts = [opt("", f.cls, `All classes (${L.length})`), ...S.spec.classes.map(c => opt(c.class, f.cls, `${c.class} · ${per[c.class] || 0} of ${c.size || "?"}`)),
@@ -282,8 +386,8 @@ const VIEWS = {
         <div class="row" style="margin-top:8px"><label class="filebtn">Choose a file (.xlsx or .csv)<input type="file" id="stuFile" accept=".xlsx,.csv,.tsv,.txt" hidden></label><button class="primary" data-stu="replace">Replace the list</button><button data-stu="add">Add to the list</button><span class="muted small" id="stuMsg"></span></div></div></div>
       <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">The list</h2>
         <div class="row"><select id="stuCls">${clsOpts}</select><input id="stuQ" type="search" placeholder="Search ID or name" title="Type, then press Enter" value="${esc(f.q)}" style="width:190px"><span class="muted small">${rows.length === L.length ? `${L.length} students` : `${rows.length} of ${L.length}`}</span>${L.length ? `<button class="small danger" data-stu="clear">Remove all</button>` : ""}</div></div>
-      ${L.length ? `<div class="tablewrap" style="margin-top:10px"><table><tr><th>Student ID</th><th>Name</th><th>Class</th><th>Level</th><th>Groups (click to pick)</th><th>Note</th><th></th></tr>
-      ${rows.slice(0, MAX).map(([s, i]) => `<tr id="students-${i}" class="${out.students[i] ? "bad" : ""}" title="${esc((out.students[i] || []).join(" "))}"><td>${inp(`spec.students.${i}.id`, s.id, "text", 'style="width:110px"')}</td><td style="min-width:190px">${inp(`spec.students.${i}.name`, s.name)}</td><td style="min-width:88px">${sel(`spec.students.${i}.class`, s.class, classNames())}</td><td class="calc">${esc(clsLevel(s.class) || s.level || "")}</td><td style="min-width:260px">${chips(`spec.students.${i}.groups`, s.groups, "groups", `data-cls="${esc(s.class || "")}"`)}</td><td>${inp(`spec.students.${i}.note`, s.note)}</td><td>${delBtn("students", i)}</td></tr>`).join("")}
+      ${L.length ? `<div class="tablewrap" style="margin-top:10px"><table><tr><th>Student ID</th><th>Name</th><th>Class</th><th>Level</th>${combos.length ? "<th>Combination</th>" : ""}<th>Groups (click to pick)</th><th>Note</th><th></th></tr>
+      ${rows.slice(0, MAX).map(([s, i]) => `<tr id="students-${i}" class="${out.students[i] ? "bad" : ""}" title="${esc((out.students[i] || []).join(" "))}"><td>${inp(`spec.students.${i}.id`, s.id, "text", 'style="width:110px"')}</td><td style="min-width:190px">${inp(`spec.students.${i}.name`, s.name)}</td><td style="min-width:88px">${sel(`spec.students.${i}.class`, s.class, classNames())}</td><td class="calc">${esc(clsLevel(s.class) || s.level || "")}</td>${combos.length ? `<td>${sel(`spec.students.${i}.combination`, s.combination, combos)}</td>` : ""}<td style="min-width:260px">${chips(`spec.students.${i}.groups`, s.groups, "groups", `data-cls="${esc(s.class || "")}"`)}</td><td>${inp(`spec.students.${i}.note`, s.note)}</td><td>${delBtn("students", i)}</td></tr>`).join("")}
       </table></div>${rows.length > MAX ? `<p class="muted small">Showing the first ${MAX}. Pick a class or search to see the rest.</p>` : ""}`
         : `<p class="muted" style="margin-top:10px">No students yet. Paste or upload a list above, or add students one by one.</p>`}
       <div class="row" style="margin-top:10px"><button data-add="students">+ Add student</button></div></div>`;
@@ -362,6 +466,10 @@ document.addEventListener("change", async e => {
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
   if (el.id === "stuFile") { stuFile(el); return; }
   if (el.id === "stuCls" || el.id === "stuQ") { S.stu[el.id === "stuCls" ? "cls" : "q"] = el.value; render(); return; }
+  if (el.dataset.set) { setSetting(el.dataset.set, el.value); save(); render(); return; }
+  if (el.dataset.time) {   // a block-out's clock time: keep the times and block every period they overlap
+    const [i, k] = el.dataset.time.split("|").map(Number), r = S.spec.rules[i];
+    r.times = [...ruleTimes(r)]; r.times[k] = el.value; [r.from, r.to] = periodsBetween(r.times[0], r.times[1]); save(); render(); return; }
   const path = el.dataset.k; if (!path) return;
   let v = el.value; if (el.type === "number") v = v === "" ? null : Number(v); if (v === "") v = null;
   if (/\.(from|to)$/.test(path) && v !== null) v = Number(v);
@@ -371,6 +479,8 @@ document.addEventListener("change", async e => {
   if (m && v) { const b = S.spec.blocks.find(x => x.block === v); if (b) { S.spec.lessons[m[1]].classes = [...(b.classes || [])]; S.spec.lessons[m[1]].level = b.level || S.spec.lessons[m[1]].level; } }
   const t = path.match(/^spec\.lessons\.(\d+)\.teachers\.(\d+)$/); if (t) S.spec.lessons[t[1]].teachers = (S.spec.lessons[t[1]].teachers || []).map(x => x || null);
   const sm = path.match(/^spec\.students\.(\d+)\.class$/); if (sm) S.spec.students[sm[1]].level = clsLevel(v) || null;
+  const fx = path.match(/^spec\.rules\.(\d+)\.target$/);   // a fixed lesson names a class or a group code
+  if (fx) { const r = S.spec.rules[fx[1]]; if (r.rule === "Fixed at" && ["Class", "Group"].includes(r.scope)) r.scope = classNames().includes(v) ? "Class" : "Group"; }
   if (/^spec\.school\.(weeks|periods_per_day)$/.test(path)) ensureDays();
   if (/\.(room|class|subject|name|block)$/.test(path)) renameRefs(e.target, path, v);
   save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
@@ -383,11 +493,15 @@ function addRow(k) {
   const blank = { venues: { room: "", kind: "classroom", capacity: 40 }, classes: { class: "", level: lv, size: 38, home_room: null },
     subjects: { subject: "", code: "", tag: "-", dept: (sc().departments || [])[0], periods: {} }, teachers: { name: "", short: "", dept: (sc().departments || [])[0], allowance: sc().type === "primary" ? 36 : 64, provisional: "No", can_teach: [] },
     blocks: { block: "", level: lv, classes: [] }, lessons: { level: lv, subject: null, block: null, classes: [], teachers: [], students: null },
-    rules: { scope: "Teacher", target: null, rule: "Not available", week: "Both", day: "All", strength: "Must" },
+    rules: { scope: "Level", target: null, rule: "Not in periods", week: "Both", day: "All", strength: "Must" },
+    avail: { scope: "Teacher", target: null, rule: "Not available", week: "Both", day: "All", from: 0, to: 0, strength: "Must", times: [hhmm(0), hhmm(1)] },
+    fixed: { scope: "Class", target: null, subject: null, rule: "Fixed at", level: lv, week: "Both", day: "Mon", from: 0, strength: "Must" },
+    roles: { role: "", what: "", allowance: null, group: "" },
     students: { id: "", name: "", level: clsLevel(S.stu.cls) || null, class: S.stu.cls || null, groups: [] } }[k];
   if (k === "students") S.stu.q = "";
-  S.spec[k].push(JSON.parse(JSON.stringify(blank))); save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
-  const rows = document.querySelectorAll(`tr[id^="${k}-"]`); const last = rows[rows.length - 1]; if (last) { last.scrollIntoView({ block: "center" }); const f = last.querySelector("input,select"); if (f) f.focus(); }
+  const into = { avail: "rules", fixed: "rules" }[k] || k; S.spec[into] = S.spec[into] || [];
+  S.spec[into].push(JSON.parse(JSON.stringify(blank))); save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
+  const last = document.getElementById(`${into}-${S.spec[into].length - 1}`); if (last) { last.scrollIntoView({ block: "center" }); const f = last.querySelector("input,select"); if (f) f.focus(); }
 }
 function helper(k) {
   if (k === "venues") { const pre = $("#hvPre").value, a = Number($("#hvFrom").value), b = Number($("#hvTo").value), kind = $("#hvKind").value; for (let i = a; i <= b; i++) S.spec.venues.push({ room: `${pre}${String(i).padStart(2, "0")}`, kind, capacity: 40 }); }

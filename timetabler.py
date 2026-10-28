@@ -41,9 +41,9 @@ TOOLS = [
 ]
 
 FIELDS = dict(
-    rules=["scope", "target", "subject", "rule", "week", "day", "from", "to", "number", "strength", "note"],
+    rules=["scope", "target", "subject", "rule", "level", "week", "day", "from", "to", "number", "strength", "note"],
     lessons=["level", "subject", "block", "classes", "teachers", "students", "periods_override", "code_override", "note"],
-    teachers=["name", "short", "dept", "allowance", "can_teach", "note"],
+    teachers=["name", "short", "dept", "allowance", "role", "other_duties", "can_teach", "note"],
     classes=["class", "level", "size", "home_room", "note"],
     venues=["room", "kind", "capacity", "note"],
     subjects=["subject", "code", "tag", "dept", "room_kind", "lesson_length", "periods", "note"],
@@ -69,7 +69,8 @@ def row_text(section, i, x):
                 f"teachers {', '.join(x.get('teachers') or []) or 'NONE'} | code {x.get('code', '')} | periods {x.get('periods', '')}")
     if section == "teachers":
         ct = "; ".join(f"{c.get('subject')}@{c.get('levels')}" for c in x.get("can_teach") or [])
-        return f"[{i}] {x.get('name')} ({x.get('short')}) dept {x.get('dept')} allowance {x.get('allowance')} | can teach {ct}"
+        od = f" other duties {x['other_duties']}" if x.get("other_duties") else ""
+        return f"[{i}] {x.get('name')} ({x.get('short')}) dept {x.get('dept')} role {x.get('role') or '-'} allowance {x.get('allowance')}{od} | can teach {ct}"
     if section == "subjects":
         return f"[{i}] {x.get('subject')} code {x.get('code')} tag {x.get('tag')} dept {x.get('dept')} room {x.get('room_kind') or 'home'} length {x.get('lesson_length') or 'standard'} periods {x.get('periods')}"
     return f"[{i}] " + ", ".join(f"{k} {v}" for k, v in x.items() if v not in (None, "", []) and not k.startswith("_"))
@@ -100,12 +101,14 @@ def capacity(spec):
             for t in r["teachers"]:
                 load[t] += r["periods"]; lvls[t].add(u["level"])
     allow = {t["name"]: t.get("allowance") for t in spec["teachers"]}
+    other = {t["name"]: int(t.get("other_duties") or 0) for t in spec["teachers"]}
     for t, n in sorted(load.items(), key=lambda x: -x[1]):
         a = allow.get(t)
         try: a = int(a)
         except (TypeError, ValueError): a = None
         avail = max(Lcount.get(lv, 0) for lv in lvls[t]) if lvls[t] else 0
-        if a and n > a: out.append(f"{t} teaches {n} periods, over their allowance of {a}.")
+        if a and n + other.get(t, 0) > a:
+            out.append(f"{t} teaches {n} periods" + (f" plus {other[t]} periods of other duties" if other.get(t) else "") + f", over their allowance of {a}.")
         if avail and n > 0.85 * avail: out.append(f"{t} teaches {n} of the {avail} lesson periods their levels have: very hard to fit.")
     kinds = collections.Counter(v.get("kind") or "classroom" for v in spec["venues"])
     for u in P.units:

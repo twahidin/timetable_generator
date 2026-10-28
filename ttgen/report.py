@@ -4,6 +4,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter as CL
 from openpyxl.comments import Comment
+from .spec import no_free_periods
 
 NAVY = "1F4E78"
 F = lambda **k: Font(name="Arial", size=k.pop("size", 8), **k)
@@ -135,6 +136,20 @@ def check(res):
                     groups = _runs_set(rec, NP)
                     if tpos[t] & {q for q in range(d * NP, d * NP + NP)} and groups and all(g & tpos[t] for g in groups): bad.append(f"{t} ({P.days[d]})")
             post.append("At least one recess a day: " + (f"missed on {len(bad)} teacher-days: {', '.join(bad[:6])}" if bad else "kept by everyone."))
+    nf = no_free_periods(P.spec["school"])
+    if nf in ("Yes", "Prefer") and P.spec.get("students"):   # Settings 'Students have no free periods': counted here, not enforced
+        free = []
+        for s in P.spec["students"]:
+            lv = P.level_of.get(s.get("class"))
+            if lv not in P.grid: continue
+            pos = set(ecp.get(s["class"], ())) | {q for g in s.get("groups") or [] for q in code_l.get(g, ())}
+            n = 0
+            for d in range(P.ND):
+                qs = [q for q in pos if q // NP == d]
+                if qs: n += sum(1 for q in range(min(qs), max(qs) + 1) if q not in pos and P.grid[lv][d][q % NP] == "L")
+            free.append(n)
+        if free: post.append(f"Students have no free periods ({nf}): counted, not enforced by this solver. Free periods a cycle: {sum(free) / len(free):.1f} on average, "
+                             f"{max(free)} at most; {sum(1 for f in free if f == 0)} of {len(free)} students have none.")
     stats = dict(lessons=len(L), after_school=sum(1 for x in L if x["ext"]), side_by_side=side, students_checked=len(P.spec.get("students", [])))
     return probs, stats, post
 
