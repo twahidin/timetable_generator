@@ -56,7 +56,14 @@ Without an AI set up, **Generate without AI** checks and solves, and the committ
 The solver uses all the CPU it is given, so more vCPU gives better timetables in the same time. A tight timetable can
 take a long time to find: pick a longer **Solve for up to** time, and press Stop to keep the best one found so far.
 When no timetable is found, the committee page shows why (classes with no room to spare, teacher loads, rooms,
-rules) and what to change, with a button to each step. About 1 GB of
+rules) and what to change, with a button to each step. When the setup rules out every timetable (a room kind that
+cannot hold its lessons, a class with more periods than its days), it says so straight away instead of solving.
+
+A school with 30 or more classes (`STAGED_FROM_CLASSES`) gets its first timetable level by level, hardest level first,
+then clashes between levels are cleared and the whole school is checked together (`ttgen/staged.py`, the skill's
+`--staged` solve): one whole-school search can find nothing for hours on a big, tight school. Later solves start from
+the latest timetable. A room holds one class at a time unless step 7 has a "Room · At most N at once" rule; a note on
+a Settings row such as "Field and Hall take 2 classes each" is read as those rules. About 1 GB of
 memory is enough for a 1,500-student school.
 
 **Try it without a key:** `AI_PROVIDER=mock` runs a scripted stand-in for the AI (it checks, solves, asks one

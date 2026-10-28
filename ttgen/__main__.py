@@ -1,6 +1,6 @@
 """python -m ttgen sample secondary|primary --out FILE
    python -m ttgen check SETUP.xlsx
-   python -m ttgen solve SETUP.xlsx --out TIMETABLE.xlsx [--time 300] [--workers 8] [--export DIR]
+   python -m ttgen solve SETUP.xlsx --out TIMETABLE.xlsx [--time 300] [--workers 8] [--staged] [--export DIR]
    python -m ttgen export SETUP.xlsx TIMETABLE.xlsx --out DIR [--no-pdf] [--no-individual] [--no-html] [--no-excel]"""
 import argparse, os, shutil, sys
 from .reader import read_template, derive
@@ -18,7 +18,8 @@ def main(argv=None):
     s = sub.add_parser("sample"); s.add_argument("kind", choices=["secondary", "primary"]); s.add_argument("--out", required=True)
     c = sub.add_parser("check"); c.add_argument("setup")
     v = sub.add_parser("solve"); v.add_argument("setup"); v.add_argument("--out", required=True); v.add_argument("--time", type=float, default=300)
-    v.add_argument("--workers", type=int, default=8); v.add_argument("--export", help="also write PDFs and the HTML finder into this folder")
+    v.add_argument("--workers", type=int, default=8); v.add_argument("--staged", action="store_true", help="build level by level (big, tight schools); --time is per step")
+    v.add_argument("--export", help="also write PDFs and the HTML finder into this folder")
     e = sub.add_parser("export"); e.add_argument("setup"); e.add_argument("timetable"); e.add_argument("--out", required=True)
     for flag in ("pdf", "individual", "html", "excel"): e.add_argument(f"--no-{flag}", action="store_true")
     a = ap.parse_args(argv)
@@ -46,7 +47,10 @@ def main(argv=None):
         return 0
     from .solver import solve
     from .report import write_timetable
-    res = solve(spec, time_limit=a.time, workers=a.workers)
+    if a.staged:
+        from .staged import solve_staged
+        res = solve_staged(spec, time_per_step=a.time, workers=a.workers)
+    else: res = solve(spec, time_limit=a.time, workers=a.workers)
     probs, stats, post, m = write_timetable(res, a.out, return_model=True)
     print("wrote", a.out, stats)
     for p in (probs or ["Checks passed: no clashes, every lesson placed with its planned periods."]): print(" -", p)

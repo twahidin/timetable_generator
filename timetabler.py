@@ -8,7 +8,8 @@ from ttgen.template import write_template
 from store import now, write_json
 
 SOLVE_SECONDS = int(os.environ.get("SOLVE_SECONDS") or 300)
-SOLVE_MAX = int(os.environ.get("SOLVE_MAX_SECONDS") or 8 * 3600)   # the longest the committee (or the AI) may ask a solve to run
+SOLVE_MAX = int(os.environ.get("SOLVE_MAX_SECONDS") or 8 * 3600)
+STAGED_CLASSES = int(os.environ.get("STAGED_FROM_CLASSES") or 30)   # fresh solves of a school this size go level by level (ttgen.staged)   # the longest the committee (or the AI) may ask a solve to run
 WORKERS = int(os.environ.get("SOLVE_WORKERS") or 8)
 RULE_NAMES = [r[0] for r in RULE_TYPES]
 
@@ -26,6 +27,7 @@ TOOLS = [
              day=dict(type="string", description="a day as on Day structure, e.g. Mon or Odd Mon")), required=[])),
     dict(name="solve", description="Run the timetable solver on the current setup. Takes up to `seconds` (default: the time the committee chose on the Generate page). Returns whether a timetable was found, the checks, the after-school lessons and, when it started from the previous timetable, which lessons moved.",
          schema=dict(type="object", properties=dict(seconds=dict(type="integer", description=f"time limit, 60-{SOLVE_MAX}; leave it out to use the committee's choice"),
+             staged=dict(type="boolean", description=f"build a fresh timetable level by level (hardest level first, then clear clashes between levels): faster for big, tight schools; default true for {STAGED_CLASSES}+ classes when there is no earlier timetable"),
              keep_previous=dict(type="boolean", description="start from the latest timetable and keep lessons where they are unless a change makes them move (default true once a timetable exists); false only when the committee wants a fresh timetable")), required=[])),
     dict(name="diagnose", description="When no timetable is found: test-solve with the Must rules removed and added back one at a time to find which rule (or the data itself) blocks the timetable. Takes a few minutes.",
          schema=dict(type="object", properties={}, required=[])),
@@ -134,9 +136,48 @@ def _class_fit(P):
             out.append(dict(row, kind="almost", text=f"Class {c} is almost full: {need} of {have} lesson periods."))
     return out
 
+def _room_fit(P):
+    """per room kind: the class-periods of lessons that need it against what its rooms hold in the lesson periods (a room
+    holds one class at a time unless a Must 'At most N at once' rule says more). [dict(kind, rooms, need, have, kind_, text)]"""
+    sc = P.spec["school"]; use = "LA" if sc.get("after_school", True) else "L"
+    cap = {v["room"]: 1 for v in P.spec["venues"]}
+    for r in P.spec.get("rules", []):
+        if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and r.get("target") in cap and r.get("number") and str(r.get("strength") or "Must") == "Must":
+            cap[r["target"]] = int(r["number"])
+    rooms = collections.defaultdict(list)
+    for v in P.spec["venues"]: rooms[v.get("kind") or "classroom"].append(v["room"])
+    need = collections.Counter(); lvls = collections.defaultdict(set)
+    for u in P.units:
+        for ln, i in u["lessons"]:
+            for k, n in collections.Counter((x["room_kind"] or "classroom") for x in u["rows"] if x["_counts"].get(ln, 0) > i).items():
+                need[k] += ln * n; lvls[k].add(u["level"])
+    out = []
+    for k, n in need.items():
+        c = sum(cap[x] for x in rooms.get(k, []))
+        if not c: continue   # no room of this kind: the solver notes it and gives those lessons a room marked TBC
+        slots = len({d * P.NP + p for lv in lvls[k] for d, row in enumerate(P.grid.get(lv, [])) for p, ch in enumerate(row) if ch in use})
+        have = c * slots; names = ", ".join(f"{x}" + (f" ({cap[x]} classes)" if cap[x] > 1 else "") for x in rooms[k])
+        row = dict(kind=k, rooms=rooms[k], need=n, have=have)
+        if n > have:
+            out.append(dict(row, kind_="impossible", text=f"Lessons that need a '{k}' room add up to {n} class-periods a cycle, but the '{k}' rooms ({names}) hold at most {have} "
+                                                          f"({c} class{'es' if c != 1 else ''} at a time × {slots} lesson periods): no timetable is possible. A room holds one class at a time "
+                                                          f"unless step 7 has a 'Room · At most N at once' rule for it."))
+        elif n > 0.9 * have:
+            out.append(dict(row, kind_="tight", text=f"Lessons that need a '{k}' room fill {n} of the {have} class-periods its rooms ({names}) hold: very hard to fit."))
+    return out
+
+def impossible(spec):
+    """what rules out every timetable before solving: a room kind that cannot hold its lessons, or a class with more
+    periods than its lesson and after-school periods"""
+    from ttgen.solver import Problem
+    derive(spec); P = Problem(spec); out = [x["text"] for x in _room_fit(P) if x["kind_"] == "impossible"]
+    A = {lv: sum(row.count("A") for row in rows) for lv, rows in P.grid.items()} if P.spec["school"].get("after_school", True) else {}
+    out += [x["text"] for x in _class_fit(P) if x["kind"] == "over" and x["need"] > x["have"] + A.get(x["level"], 0)]
+    return out
+
 def capacity(spec, P=None, fit=None):
     from ttgen.solver import Problem
-    P = P or Problem(spec); out = [x["text"] for x in (_class_fit(P) if fit is None else fit)]
+    P = P or Problem(spec); out = [x["text"] for x in (_class_fit(P) if fit is None else fit)] + [x["text"] for x in _room_fit(P)]
     Lcount = {lv: sum(row.count("L") for row in rows) for lv, rows in P.grid.items()}
     load, lvls = collections.Counter(), collections.defaultdict(set)
     for u in P.units:
@@ -181,12 +222,17 @@ def advice(spec, status, secs, notes=()):
         fixes.append(dict(go="lessons", text="Move some groups from the busiest teachers named above to other teachers on step 6."))
     if any(c.startswith("Block ") and " rooms at once" in c for c in cap):
         fixes.append(dict(go="venues", text="Add rooms of the kinds named above on step 1, or split the block on step 5."))
+    for x in _room_fit(P):
+        if x["kind_"] != "impossible": continue
+        fixes.insert(0, dict(go="rules", text=f"Let the '{x['kind']}' rooms ({', '.join(x['rooms'])}) take more classes at once: on step 7 add a rule 'Room · {x['rooms'][0]} · At most N at once' "
+                                              f"for each of them (a Settings note such as '{' and '.join(x['rooms'][:2])} take 2 classes each' does the same). "
+                                              f"Or add '{x['kind']}' rooms on step 1, or give some subjects another room kind on step 3."))
     if any("matches nothing" in n or "no lesson matches" in n for n in notes):
         fixes.append(dict(go="rules", text="Remove or correct the fixed lessons that match no lesson (step 7)."))
     if any(str(r.get("strength") or "Must") == "Must" for r in spec.get("rules", [])):
         fixes.append(dict(go="rules", text="Turn off any rule the school can do without (step 7, and the rules on School & day), then generate again. "
                                            "With the AI timetabler, ask it to diagnose: it tests the rules one at a time and names any that block the timetable."))
-    if status == "INFEASIBLE" and not fit:
+    if status == "INFEASIBLE" and not fit and not any(x["kind_"] == "impossible" for x in _room_fit(P)):
         fixes.insert(0, dict(go="rules", text="The solver proved that no timetable exists with this setup: a rule or the data contradicts itself. Start with the rules and the lines above."))
     if status != "INFEASIBLE":
         fixes.append(dict(go="generate", text=f"Nothing was found in {span_text(secs)}, which does not prove that no timetable exists. If nothing above needs changing, "
@@ -251,15 +297,38 @@ def t_solve(run, args):
     secs = max(20, min(SOLVE_MAX, int(args.get("seconds") or run.seconds or SOLVE_SECONDS)))
     span = f"{secs} s" if secs < 60 else f"{secs // 60} min" + (f" {secs % 60} s" if secs % 60 else "")
     previous = _previous(run, args)
-    run.emit("tool", text=f"Solving (up to {span}){', starting from the latest timetable so lessons stay where they are unless a change moves them' if previous else ''}. "
-                          "The best timetable so far is kept if you stop early.")
     spec = copy.deepcopy(run.spec); t0 = time.time(); as_solved = json.loads(json.dumps(spec))   # the setup this timetable is made from (Adjust rebuilds it)
     pins = adjust.pins(run)   # lessons placed by hand stay where the committee put them
+    # a big school's first timetable is built level by level (one whole-school model can find nothing for hours);
+    # re-solves start from the latest timetable instead, so lessons stay where they are
+    staged = args.get("staged")
+    staged = (not previous and not pins and len(spec["classes"]) >= STAGED_CLASSES) if staged is None else bool(staged) and not previous and not pins
+    run.emit("tool", text=(f"Solving level by level, hardest level first (up to {span} in all): a school with {len(spec['classes'])} classes solves faster that way. " if staged else
+                           f"Solving (up to {span}){', starting from the latest timetable so lessons stay where they are unless a change moves them' if previous else ''}. ")
+                          + "The best timetable so far is kept if you stop early.")
     def log(line):
         if "cost" in line:
             run.progress = f"Solving: {int(time.time() - t0)} s, best timetable so far has cost {line.split('cost')[-1].strip()} (lower is better)."
     if run.stop.is_set(): return "Stopped before solving."
-    res = solve(spec, time_limit=secs, workers=WORKERS, log=log, stop=run.stop, previous=previous, pins=pins)
+    blockers = impossible(copy.deepcopy(spec))   # no timetable can exist: say why now instead of searching for hours
+    if blockers:
+        reasons, fixes = advice(copy.deepcopy(spec), "INFEASIBLE", secs)
+        run.emit("nosolution", text="No timetable is possible with this setup, so the solver did not run.", items=reasons[:15], data=dict(status="INFEASIBLE", fixes=fixes))
+        run.save()
+        return "No timetable is possible with this setup, so the solver did not run:\n" + "\n".join(f"- {x}" for x in blockers) + \
+               "\nSuggested fixes (shown to the committee):\n" + "\n".join(f"- {f['text']}" for f in fixes)
+    if staged:
+        from ttgen.staged import solve_staged
+        def slog(*a):
+            line = " ".join(str(x) for x in a).strip()
+            if line: run.progress = f"Solving level by level, {int(time.time() - t0)} s: {line}"
+        res = solve_staged(copy.deepcopy(spec), time_per_step=max(60, min(300, secs // 6)), workers=WORKERS, log=slog, stop=run.stop, deadline=t0 + secs)
+        left = int(secs - (time.time() - t0))
+        if not res["lessons"] and not run.stop.is_set() and left > 120:
+            run.emit("tool", text=f"Level by level found no timetable ({'; '.join(res.get('notes', []))[:200]}). Trying the whole school at once for the {span_text(left)} left.")
+            res = solve(spec, time_limit=left, workers=WORKERS, log=log, stop=run.stop)
+    else:
+        res = solve(spec, time_limit=secs, workers=WORKERS, log=log, stop=run.stop, previous=previous, pins=pins)
     run.progress = ""; run.solves += 1; n = run.solves
     setup_path = os.path.join(run.dir, f"solve{n}_setup.xlsx"); write_template(spec, setup_path)
     if not res["lessons"]:

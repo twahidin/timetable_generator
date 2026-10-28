@@ -49,7 +49,16 @@ subject-based banding) schools, and for any school that fills the same template.
 5. **If no timetable is found** (INFEASIBLE, or UNKNOWN after the time limit):
    - INFEASIBLE in seconds means a hard contradiction. Find it by solving with the rules removed, then adding
      them back one at a time; and by checking teacher loads, room counts and Must rules against part-time teachers.
-   - UNKNOWN means not found in time: give it more time before changing anything.
+   - UNKNOWN means not found in time: give it more time before changing anything. If it is still UNKNOWN after
+     20-30 minutes, solve each level on its own (a copy with only that level's classes): when every level solves in
+     seconds, the levels only clash through shared teachers and rooms and the single search is stalling. Use
+     `--staged` (below) instead of waiting longer.
+   - **Staged solve** for 30+ classes with tight days: `python -m ttgen solve SETUP.xlsx --out TIMETABLE.xlsx
+     --staged --time 180 --workers 8` (`--time` is per step). It builds level by level, hardest first, keeping
+     earlier levels fixed; a level that does not fit is placed with clashes against other levels allowed but
+     penalised; then only the classes in the remaining clashes are re-solved until there are none; then the whole
+     school is checked with every lesson kept. The committee app does this by itself for a first timetable of a
+     school with 30+ classes.
    - Tell the person exactly what blocks the timetable and the smallest change that fixes it (for example "the four
      Sec 3 CCE classes share one teacher, so 'same time across classes' cannot hold"). Never drop a Must rule or
      change their data silently; propose the change and let them decide.
@@ -100,6 +109,10 @@ Classes and Teachers are comma-separated; After school is `yes` or blank.
 | More rules | any other constraint | Applies to (kind), Applies to, Subject (optional), Rule, Week, Day, From/To period, Number, Must/Prefer |
 | Students | student (recommended) | Student ID, Name, Level, Class, Combination, Choice 1-3, Merit, Groups (codes from 6 Lessons, comma separated), Source |
 | Combinations | subject combination | Level, Code, Name, Subject 1-3, Places |
+
+A room holds one class at a time. A room that takes several classes at once (a field, a hall) needs an "At most N
+at once" rule for the Room; a note on a Settings row such as "Field and Hall take 2 classes each" is read as those
+rules too.
 
 **How periods become lessons.** With lesson length L (3 for 20-minute secondary periods = 1 hour; 2 for 30-minute
 primary periods), a subject with P periods gets as many L-period lessons as possible plus one or two
