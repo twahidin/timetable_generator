@@ -39,6 +39,13 @@ TOOLS = [
                  action=dict(type="string", enum=["set", "add", "delete"]), section=dict(type="string"), index=dict(type="integer"), field=dict(type="string"),
                  value={}, row=dict(type="object"), level=dict(type="string"), day=dict(type="string")), required=["action", "section"])),
              reason=dict(type="string", description="what the committee agreed to")), required=["changes", "reason"])),
+    dict(name="try_change", description="A what-if: make a change on a copy of the setup, solve from the latest timetable, and show the committee a comparison (checks, after-school lessons, lessons moved, teachers' free periods between lessons, gaps in classes' days) with Keep and Drop buttons. Kept: it becomes the setup and the latest timetable. Dropped: everything stays as it was. Use it when the committee wants to see what a change would do before agreeing to it, or to compare options; the changes are given as for change_setup.",
+         schema=dict(type="object", properties=dict(
+             changes=dict(type="array", items=dict(type="object", properties=dict(
+                 action=dict(type="string", enum=["set", "add", "delete"]), section=dict(type="string"), index=dict(type="integer"), field=dict(type="string"),
+                 value={}, row=dict(type="object"), level=dict(type="string"), day=dict(type="string")), required=["action", "section"])),
+             reason=dict(type="string", description="the change in a few plain words, shown on the comparison, e.g. 'Mr Tan free on Wednesday afternoons'"),
+             seconds=dict(type="integer", description="time limit for the solve; leave it out to use the committee's choice")), required=["changes", "reason"])),
     dict(name="finish", description="End this round of work with a short summary for the committee (what was made, what is after school and why, anything to look at). The committee then reviews and publishes.",
          schema=dict(type="object", properties=dict(summary=dict(type="string")), required=["summary"])),
 ]
@@ -462,16 +469,17 @@ def _coerce(v):
         if t.lstrip("-").isdigit(): return int(t)
     return v
 
-def t_change_setup(run, args):
-    changes = args.get("changes") or []; spec = run.spec; done, errors = [], []
-    for ch in changes:
+def apply_changes(spec, changes):
+    """carry out change_setup's changes on this spec: (what was done, what could not be done)"""
+    done, errors = [], []
+    for ch in changes or []:
         act, sec = ch.get("action"), ch.get("section")
         try:
             if sec == "day_structure":
                 lv, day, val = ch.get("level"), ch.get("day"), str(ch.get("value") or "")
                 NP = int(spec["school"]["periods_per_day"])
                 if lv not in spec["day_structure"] or day not in spec["day_structure"][lv]: raise ValueError(f"no Day structure row {lv} / {day}")
-                if len(val) != NP or any(c not in "FLRUA." for c in val): raise ValueError(f"value must be {NP} codes from F L R U A .")
+                if len(val) != NP or any(c not in "FLRWUA." for c in val): raise ValueError(f"value must be {NP} codes from F L R W U A .")
                 old = spec["day_structure"][lv][day]; spec["day_structure"][lv][day] = val
                 done.append(f"Day structure {lv} {day}: {old} -> {val}"); continue
             if sec not in FIELDS: raise ValueError(f"unknown section {sec}")
@@ -498,10 +506,75 @@ def t_change_setup(run, args):
             else: raise ValueError(f"unknown action {act}")
         except Exception as e:
             errors.append(f"{ch}: {e}")
+    if done: derive(spec)
+    return done, errors
+
+def t_change_setup(run, args):
+    done, errors = apply_changes(run.spec, args.get("changes"))
     if done:
-        derive(spec); run.changes += [dict(at=now(), text=d, reason=args.get("reason", "")) for d in done]; run.save()
+        run.changes += [dict(at=now(), text=d, reason=args.get("reason", "")) for d in done]; run.save()
         run.emit("change", text=str(args.get("reason") or "Setup changed"), items=done)
     return ("Done:\n" + "\n".join(f"- {d}" for d in done) if done else "Nothing changed.") + ("\nNot done:\n" + "\n".join(f"- {e}" for e in errors) if errors else "")
+
+def _measures(s):
+    """what the committee compares between two timetables (a solve summary with its files): problems, after-school lessons,
+    teachers' free periods between lessons in a day (lesson time of a level they teach that day) and gaps in a class's
+    day (its own lesson time, so breaks are not gaps)"""
+    from ttgen.export import model_from_files, check_model
+    m = model_from_files(s["setup"], s["timetable"])
+    taught, busy, lv_of = collections.defaultdict(set), collections.defaultdict(set), collections.defaultdict(set)
+    for x in m["lessons"]:
+        for q in range(x["p"], x["p"] + x["n"]):
+            for t in x["teachers"]: taught[(t, x["d"])].add(q); lv_of[(t, x["d"])].add(x["level"])
+            for c in x["classes"]: busy[(c, x["d"])].add(q)
+    def lesson_time(row, q): return len(row) > q and row[q] in "LW"
+    def class_row(c, d):
+        if c in (m.get("cgrid") or {}): return m["cgrid"][c][d]
+        lv = (m["class_ix"].get(c) or {}).get("level"); return m["grid"][lv][d] if lv in m["grid"] else ""
+    def gaps(occ, ok):
+        return sum(1 for (k, d), qs in occ.items() for q in range(min(qs), max(qs) + 1) if q not in qs and ok(k, d, q))
+    return dict(problems=len(check_model(m)["problems"]), after=len(s.get("after") or []),
+                tgaps=gaps(taught, lambda t, d, q: any(lesson_time(m["grid"][lv][d], q) for lv in lv_of[(t, d)] if lv in m["grid"])),
+                cgaps=gaps(busy, lambda c, d, q: lesson_time(class_row(c, d), q)))
+
+def t_try_change(run, args):
+    """a what-if: the change on a copy of the setup, solved from the latest timetable, compared with it; the committee
+    keeps it (it becomes the setup and the latest timetable) or drops it (everything goes back as it was)"""
+    if not run.solved: return "There is no timetable to compare with yet: solve first, then try changes."
+    old_spec, old = run.spec, run.solved
+    trial = copy.deepcopy(old_spec); done, errors = apply_changes(trial, args.get("changes"))
+    not_done = ("\nNot done:\n" + "\n".join(f"- {e}" for e in errors)) if errors else ""
+    if not done: return "Nothing to try." + not_done
+    what = str(args.get("reason") or "a change").strip()
+    run.emit("whatif", text=f"Trying: {what}", items=done)
+    run.spec = trial
+    out = t_solve(run, dict(seconds=args.get("seconds"), keep_previous=True))
+    if run.solved is old:   # no timetable with the change: nothing to keep
+        run.spec = old_spec; run.save()
+        run.emit("whatif", text=f"Dropped the what-if ({what}): no timetable with it, so timetable #{old['n']} and the setup stay as they were.")
+        return out + "\nThe what-if found no timetable, so nothing changed: the setup and timetable are as before." + not_done
+    new = run.solved
+    a, b = _measures(old), _measures(new)
+    try:
+        p0, p1 = json.load(open(old["placements"], encoding="utf-8")), json.load(open(new["placements"], encoding="utf-8"))
+        moved = sum(1 for k, v in p1.items() if not k.startswith("~") and k in p0 and p0[k] != v)
+    except (OSError, ValueError): moved = None
+    rows = [["Checks", "pass" if old["ok"] else f"{a['problems']} problems", "pass" if new["ok"] else f"{b['problems']} problems"],
+            ["Lessons after school", a["after"], b["after"]],
+            ["Lessons moved", "", moved if moved is not None else "?"],
+            ["Teachers' free periods between lessons", a["tgaps"], b["tgaps"]],
+            ["Gaps in classes' days", a["cgaps"], b["cgaps"]]]
+    run.emit("compare", text=what, data=dict(before=old["n"], after=new["n"], rows=rows))
+    ans = run.ask(f"Keep this change ({what})? Preview shows the what-if timetable #{new['n']} until you choose.", ["Keep it", "Drop it"])
+    table = "\n".join(f"- {r[0]}: {r[1]} now, {r[2]} with the change" if r[1] != "" else f"- {r[0]}: {r[2]}" for r in rows)
+    if ans is not None and str(ans).strip().lower().startswith("keep"):
+        run.changes += [dict(at=now(), text=d, reason=f"What-if kept: {what}") for d in done]; run.save()
+        run.emit("change", text=f"Kept the what-if: {what}", items=done)
+        return f"{out}\nCompared with timetable #{old['n']}:\n{table}\nThe committee kept it: timetable #{new['n']} and the changed setup are now the latest." + not_done
+    run.spec, run.solved = old_spec, old; run.save()
+    run.emit("whatif", text=f"Dropped the what-if ({what}): back to timetable #{old['n']} and the setup as it was.")
+    said = "The committee stopped this run." if ans is None else f"The committee answered: {ans}"
+    return f"{out}\nCompared with timetable #{old['n']}:\n{table}\n{said}. The what-if was dropped: timetable #{old['n']} and the setup are as before." + not_done
 
 def t_finish(run, args):
     run.emit("summary", text=str(args.get("summary") or "Finished."))
@@ -509,7 +582,7 @@ def t_finish(run, args):
     return "Finished. The committee can now review and publish, or ask for more changes."
 
 IMPL = dict(check_setup=t_check_setup, show_setup=t_show_setup, show_timetable=t_show_timetable, solve=t_solve, diagnose=t_diagnose,
-            ask_committee=t_ask_committee, change_setup=t_change_setup, finish=t_finish)
+            ask_committee=t_ask_committee, change_setup=t_change_setup, try_change=t_try_change, finish=t_finish)
 
 def call_tool(run, name, args):
     f = IMPL.get(name)

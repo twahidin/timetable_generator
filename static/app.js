@@ -919,6 +919,11 @@ function eventHTML(e, last) {
     case "published": return `<div class="ev good"><b>${esc(e.text)}</b></div>`;
     case "check": return `<div class="ev">${esc(e.text)}${items ? `<details><summary>Details</summary>${items}</details>` : ""}</div>`;
     case "moved": return `<div class="ev">${esc(e.text)}${items ? `<details><summary>Which lessons moved</summary>${items}</details>` : ""}</div>`;
+    case "whatif": return `<div class="ev whatif"><b>What-if:</b> ${esc(e.text)}${items}</div>`;
+    case "compare": {   // a what-if against the latest timetable: the committee keeps or drops it (the question below)
+      const d = e.data || {}, tone = r => typeof r[1] === "number" && typeof r[2] === "number" && r[1] !== r[2] ? (r[2] < r[1] ? "good" : "bad") : "";
+      return `<div class="ev compare"><b>What-if: ${esc(e.text)}</b><table><tr><th></th><th>Now (#${esc(d.before)})</th><th>With the change (#${esc(d.after)})</th></tr>${(d.rows || []).map((r, i) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td class="${tone(r)}">${esc(r[2])}</td></tr>`).join("")}</table><a href="/preview" target="_blank">Preview the what-if</a></div>`;
+    }
     default: return `<div class="ev">${esc(e.text || "")}</div>`;
   }
 }
