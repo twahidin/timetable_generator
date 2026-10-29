@@ -53,6 +53,8 @@ TOOLS = [
              swap_with=dict(type="object", description="a lesson as show_timetable lists it", properties=dict(day=dict(type="string", description="e.g. Odd Mon"), time=dict(type="string", description="its start time, e.g. 8.10"), who=dict(type="string", description="a class, group code or band name"), subject=dict(type="string")), required=["day", "time"]),
              make_room=dict(type="boolean", description="when the move clashes: let the solver move other lessons to make room"),
              reason=dict(type="string")), required=["lesson"])),
+    dict(name="allocate_teachers", description="Choose a teacher for every lesson row left without one (Teacher 1 empty): someone set to teach that subject at that level, never two groups of one band, keeping every teacher within their allowance and the load spread. Rows that name a teacher are never changed. The committee sees who gets what and the loads, and says Use them or No. Use it when check_setup reports rows with no teacher, or when the committee asks.",
+         schema=dict(type="object", properties={}, required=[])),
     dict(name="finish", description="End this round of work with a short summary for the committee (what was made, what is after school and why, anything to look at). The committee then reviews and publishes.",
          schema=dict(type="object", properties=dict(summary=dict(type="string")), required=["summary"])),
 ]
@@ -655,13 +657,33 @@ def t_move_lessons(run, args):
     said = "The committee stopped this run." if ans is None else f"The committee answered: {ans}"
     return f"{said}. Put back: {label}; the timetable is as before."
 
+def t_allocate_teachers(run, args):
+    """a teacher for every lesson row left without one (ttgen.allocate); the committee sees who gets what and the loads,
+    and says Use them or No"""
+    from ttgen.allocate import allocate
+    r = allocate(copy.deepcopy(run.spec), workers=WORKERS)
+    why = [f"Row {i}: {w}" for i, w in r["unfilled"]]
+    if not r["assign"]: return "No rows to fill." if not why else "Nothing could be filled:\n" + "\n".join(f"- {w}" for w in why)
+    rows = run.spec["lessons"]
+    lines = [f"{row_text('lessons', i, rows[i])[:110]} -> {t}" for i, t in sorted(r["assign"].items())]
+    loads = [f"{t}: {a} -> {b}" + (f" of {al}" if al else "") + (" (over allowance)" if al and b > al else "") for t, (a, b, al) in r["loads"].items()]
+    run.emit("allocation", text=f"Teachers for {len(lines)} rows left blank" + (f"; {len(why)} cannot be filled" if why else ""), items=lines[:60], data=dict(loads=loads, unfilled=why))
+    ans = run.ask(f"Use these teachers for the {len(lines)} rows left blank? Their loads would be: " + "; ".join(loads[:8]) + ("; ..." if len(loads) > 8 else "") + ".", ["Use them", "No"])
+    if ans is None or not str(ans).strip().lower().startswith("use"):
+        return ("The committee stopped this run." if ans is None else f"The committee answered: {ans}") + " The teachers were not filled in."
+    done, errors = apply_changes(run.spec, [dict(action="set", section="lessons", index=i, field="teachers", value=[t]) for i, t in r["assign"].items()])
+    run.changes += [dict(at=now(), text=d, reason="Teachers for rows left blank") for d in done]; run.save()
+    run.emit("change", text=f"Filled in teachers for {len(done)} rows", items=lines[:60])
+    return f"Filled {len(done)} rows:\n" + "\n".join(f"- {x}" for x in lines[:40]) + "\nLoads:\n" + "\n".join(f"- {x}" for x in loads) + \
+           ("\nNot filled:\n" + "\n".join(f"- {w}" for w in why) if why else "") + ("\nErrors:\n" + "\n".join(errors) if errors else "")
+
 def t_finish(run, args):
     run.emit("summary", text=str(args.get("summary") or "Finished."))
     run.finished = True
     return "Finished. The committee can now review and publish, or ask for more changes."
 
 IMPL = dict(check_setup=t_check_setup, show_setup=t_show_setup, show_timetable=t_show_timetable, solve=t_solve, diagnose=t_diagnose,
-            ask_committee=t_ask_committee, change_setup=t_change_setup, try_change=t_try_change, move_lessons=t_move_lessons, finish=t_finish)
+            ask_committee=t_ask_committee, change_setup=t_change_setup, try_change=t_try_change, move_lessons=t_move_lessons, allocate_teachers=t_allocate_teachers, finish=t_finish)
 
 def call_tool(run, name, args):
     f = IMPL.get(name)

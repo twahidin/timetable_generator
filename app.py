@@ -163,6 +163,19 @@ def build():
     name = "".join(ch for ch in (spec["school"].get("name") or "School") if ch.isalnum() or ch in " -_").strip().replace(" ", "_") or "School"
     return send_file(buf, as_attachment=True, download_name=f"{name}_Timetable_Setup.xlsx", mimetype=XLSX)
 
+@app.post("/api/allocate")
+@need("committee")
+def allocate_teachers():
+    """a teacher for every lesson row without one (ttgen.allocate): {assign: {row: teacher}, unfilled, loads}"""
+    from ttgen.allocate import allocate
+    spec = request.get_json(force=True, silent=True)
+    if not spec or "school" not in spec: return {"error": "No setup data sent."}, 400
+    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students"): spec.setdefault(k, [])
+    try: r = allocate(copy.deepcopy(spec), workers=timetabler.WORKERS)
+    except Exception as e: return {"error": f"Could not allocate teachers: {e}"}, 400
+    return jsonify(assign={str(i): t for i, t in r["assign"].items()}, unfilled=[dict(row=i, why=w) for i, w in r["unfilled"]],
+                   loads=[dict(teacher=t, before=a, after=b, allowance=al) for t, (a, b, al) in r["loads"].items()])
+
 @app.post("/api/import")
 @need("committee")
 def import_xlsx():
