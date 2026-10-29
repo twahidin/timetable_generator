@@ -46,6 +46,7 @@ Without an AI set up, **Generate without AI** checks and solves, and the committ
    | `AI_PROVIDER` | `anthropic`, `openai` or `openrouter` |
    | `AI_API_KEY` | **fill in:** the provider's API key (stays on the server). Left blank, the AI chat stays off and the committee can still generate without AI |
    | `AI_MODEL` | the model name exactly as the provider lists it. Anthropic defaults to `claude-opus-5-5` |
+   | `AI_EFFORT` | optional, Anthropic only: how hard the model thinks on each turn, `low`, `medium`, `high`, `xhigh` (extra high, the default) or `max`. Higher thinks longer and costs more; `none` leaves it to the model |
    | `SCHOOL_NAME` | optional: shown on the sign-in page before anything is published |
    | `SOLVE_SECONDS` | optional: the default time for one solve, 300 s. The committee can pick a longer **Solve for up to** time on Generate & publish, up to `SOLVE_MAX_SECONDS` (default 8 hours) |
    | `SOLVE_WORKERS` | optional: solver threads, default 8 |
