@@ -354,9 +354,14 @@ function render() {
   nav.innerHTML = STEPS.map(([id, label], i) => `<button data-step="${i}" class="${i === S.step ? "on" : ""}" ${!S.spec && i > 0 ? "disabled" : ""}><span>${label}</span><span class="n">${count(id)}</span></button>`).join("");
   $("#kindBadge").textContent = S.spec ? `${sc().type === "primary" ? "Primary" : "Secondary"} · ${sc().name}` : "No school yet";
   const id = STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
+  // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
+  const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap")].map(t => [t.scrollTop, t.scrollLeft]) : [];
+  const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && (f.id ? `#${CSS.escape(f.id)}` : f.dataset.k ? `[data-k="${CSS.escape(f.dataset.k)}"]` : "");
   if (id === "adjust" && G.shown !== "adjust") { G.adj.data = null; G.adj.prop = null; G.adj.cut = null; }   // the timetable may have changed since
   G.shown = id;
   main.innerHTML = (VIEWS[id] || (() => ""))();
+  main.querySelectorAll(".tablewrap").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
+  if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); paintBanner(); saveState(); window.scrollTo(0, y);
   if (id === "generate") { paintGen(); poll(); }
 }
@@ -742,8 +747,9 @@ function addRow(k) {
     students: { id: "", name: "", level: clsLevel(S.stu.cls) || null, class: S.stu.cls || null, groups: [] } }[k];
   if (k === "students") S.stu.q = "";
   const into = { avail: "rules", fixed: "rules" }[k] || k; S.spec[into] = S.spec[into] || [];
-  S.spec[into].push(JSON.parse(JSON.stringify(blank))); save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
-  const last = document.getElementById(`${into}-${S.spec[into].length - 1}`); if (last) { last.scrollIntoView({ block: "center" }); const f = last.querySelector("input,select"); if (f) f.focus(); }
+  S.spec[into].push(JSON.parse(JSON.stringify(blank))); save();
+  const show = () => { const last = document.getElementById(`${into}-${S.spec[into].length - 1}`); if (last) { last.scrollIntoView({ block: "center" }); const f = last.querySelector("input,select"); if (f) f.focus({ preventScroll: true }); } };
+  render(); show(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); show(); poll(); })();
 }
 const blankRows = () => S.spec.lessons.filter(x => x.subject && !(x.teachers || []).some(Boolean)).length;
 async function allocateTeachers() {   // a teacher for every row left blank (ttgen.allocate), as one change Undo takes back
