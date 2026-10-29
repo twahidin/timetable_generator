@@ -49,6 +49,8 @@ blocked for the lesson and counted the full periods.
 **Deploying by hand.** On the same step, filter the teaching groups by level, subject or teacher, tick rows (shift-click
 for a run), pick a teacher and **Make Teacher 1**, **Add as co-teacher** or **Take off** for all of them at once. The bar shows
 the teacher's load now and with those groups; groups they are not set to teach, or two groups of one band, are flagged.
+On step 4 (Teachers), filter by department or subject, tick teachers and give them a subject they can teach (at all
+levels, one level or a band of levels), take a subject off them, or set their department, role or allowance together.
 
 The AI works on a copy of the setup. **Keep the AI's changes in my setup** copies its changes back; **Publish** makes
 the PDFs, the Excel workbook and the timetable pages and swaps them in for teachers and students (about a minute).

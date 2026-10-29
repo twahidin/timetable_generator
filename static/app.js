@@ -4,7 +4,7 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const KEY = "ttsetup.v1";
-const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, tg: { lv: "", subj: "", t: "" }, pick: { lessons: new Set(), students: new Set(), shown: {}, last: {}, t: "", g: "", c: "" }, undo: [], redo: [], last: null, dirty: false, base: 0 };
+const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, tg: { lv: "", subj: "", t: "" }, tf: { dept: "", subj: "", q: "" }, pick: { lessons: new Set(), students: new Set(), teachers: new Set(), shown: {}, last: {}, t: "", g: "", c: "", s: "", v: "All", d: "", r: "", a: "" }, undo: [], redo: [], last: null, dirty: false, base: 0 };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
   ["teachers", "4 Teachers"], ["lessons", "5 TG & deployment"], ["rules", "6 Availability & rules"], ["students", "7 Students"], ["generate", "Generate & publish"], ["adjust", "Adjust timetable"], ["download", "Files"]];
 
@@ -462,12 +462,20 @@ const VIEWS = {
       </table></div><div class="row" style="margin-top:10px"><button data-add="subjects">+ Add subject</button></div></div>`;
   },
   teachers() {
-    const { out, load } = issues();
-    return `<div class="card"><h1>Step 4 · Teachers</h1><p class="lead">Each teacher with the subjects and levels they can teach (click the subjects cell). Lessons on step 5 are checked against this, and the teacher drop-down there lists the teachers who can teach the subject first.</p>
+    const { out, load } = issues(), f = S.tf, P = S.pick, q = f.q.trim().toLowerCase();
+    const rows = S.spec.teachers.map((t, i) => [t, i]).filter(([t]) => (!f.dept || t.dept === f.dept) && (!f.subj || (t.can_teach || []).some(c => c.subject === f.subj))
+      && (!q || `${t.name || ""} ${t.short || ""}`.toLowerCase().includes(q)));
+    P.shown.teachers = rows.map(([, i]) => i); const all = rows.length && rows.every(([, i]) => P.teachers.has(i));
+    return `<div class="card"><h1>Step 4 · Teachers</h1><p class="lead">Each teacher with the subjects and levels they can teach (click the subjects cell). Lessons on step 5 are checked against this, and the teacher drop-down there lists the teachers who can teach the subject first. Tick teachers (shift-click for a run) to give them a subject, department, role or allowance together.</p>
       <div class="helper"><b>Add teachers</b> (one name per line) <div class="row" style="margin-top:6px"><textarea id="htNames" rows="3" style="width:280px;border:1px solid var(--line);border-radius:6px;padding:6px"></textarea> department ${sel("_ht", (sc().departments || [])[0], sc().departments || [], false, 'id="htDept" data-k=""')} allowance <input id="htAllow" type="number" value="${sc().type === "primary" ? 36 : 64}" style="width:70px"> <button data-helper="teachers">Add</button></div></div>
-      <div class="tablewrap"><table><tr><th>Teacher</th><th>Short</th><th>Department</th><th>Allowance</th><th>Can teach</th><th>Given</th><th>Spare</th><th>Role</th><th>Other duties</th><th>Total load</th><th>Load check</th><th>Provisional</th><th></th></tr>
-      ${(() => { const lc = loadChecks(load); return S.spec.teachers.map((t, i) => { const g = load[t.name] || 0; const sp = t.allowance ? Number(t.allowance) - g : ""; const tot = g + (Number(t.other_duties) || 0);
-        return `<tr id="teachers-${i}" class="${out.teachers[i] ? "bad" : ""}"><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join(""); })()}
+      <div class="row" style="margin:12px 0 8px"><b>Show</b> <select id="tfDept">${opt("", f.dept, "All departments")}${(sc().departments || []).map(d => opt(d, f.dept)).join("")}</select>
+        <select id="tfSubj">${opt("", f.subj, "Any subject")}${subjectNames().map(n => opt(n, f.subj, `Can teach ${n}`)).join("")}</select>
+        <input id="tfQ" type="search" placeholder="Search name" title="Type, then press Enter" value="${esc(f.q)}" style="width:160px">
+        <span class="muted small">${rows.length === S.spec.teachers.length ? `${rows.length} teachers` : `${rows.length} of ${S.spec.teachers.length} teachers`}</span></div>
+      ${teacherBar()}
+      <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="teachers" title="Tick every teacher shown (${rows.length})" ${all ? "checked" : ""}></th><th>Teacher</th><th>Short</th><th>Department</th><th>Allowance</th><th>Can teach</th><th>Given</th><th>Spare</th><th>Role</th><th>Other duties</th><th>Total load</th><th>Load check</th><th>Provisional</th><th></th></tr>
+      ${(() => { const lc = loadChecks(load); return rows.map(([t, i]) => { const g = load[t.name] || 0; const sp = t.allowance ? Number(t.allowance) - g : ""; const tot = g + (Number(t.other_duties) || 0);
+        return `<tr id="teachers-${i}" class="${out.teachers[i] ? "bad" : ""}${P.teachers.has(i) ? " picked" : ""}"><td><input type="checkbox" data-pick="teachers.${i}" ${P.teachers.has(i) ? "checked" : ""}></td><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join(""); })()}
       </table></div><div class="row" style="margin-top:10px"><button data-add="teachers">+ Add teacher</button></div></div>
       ${VIEWS.roles(load)}`;
   },
@@ -652,6 +660,7 @@ document.addEventListener("click", async e => {
     const s = /^students-/.test(b.dataset.row) && S.spec.students[Number(b.dataset.row.slice(9))];
     if (s) S.stu = classNames().includes(s.class) ? { cls: s.class, q: "" } : { cls: "", q: stuKey(s) };
     if (/^lessons-/.test(b.dataset.row)) S.tg = { lv: "", subj: "", t: "" };
+    if (/^teachers-/.test(b.dataset.row)) S.tf = { dept: "", subj: "", q: "" };
     S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "serverSetup") { await adopt(G.server.spec, "Opened the school's saved setup.", { base: G.server.ts, dirty: false }); return; }
@@ -696,7 +705,8 @@ document.addEventListener("change", async e => {
   if (el.id === "stuFile") { stuFile(el); return; }
   if (el.id === "stuCls" || el.id === "stuQ") { S.stu[el.id === "stuCls" ? "cls" : "q"] = el.value; render(); return; }
   if (["tgLv", "tgSubj", "tgT"].includes(el.id)) { S.tg[{ tgLv: "lv", tgSubj: "subj", tgT: "t" }[el.id]] = el.value; render(); return; }
-  if (["pickT", "pickG", "pickC"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
+  if (["pickT", "pickG", "pickC", "pickS", "pickV", "pickD", "pickR", "pickA"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
+  if (["tfDept", "tfSubj", "tfQ"].includes(el.id)) { S.tf[{ tfDept: "dept", tfSubj: "subj", tfQ: "q" }[el.id]] = el.value; render(); return; }
   if (el.dataset.pick || el.dataset.pickall) return;
   if (el.dataset.set) { setSetting(el.dataset.set, el.value); save(); render(); return; }
   if (el.dataset.time) {   // a block-out's clock time: keep the times and block every period they overlap
@@ -760,7 +770,7 @@ function helper(k) {
 }
 
 /* ---------------- ticked rows: deploy a teacher to many teaching groups, or put many students in a group or class */
-function unpick() { S.pick.lessons.clear(); S.pick.students.clear(); S.pick.last = {}; }
+function unpick() { S.pick.lessons.clear(); S.pick.students.clear(); S.pick.teachers.clear(); S.pick.last = {}; }
 function pick(el, shift) {   // a tick box on a teaching-group or student row; shift-click ticks the run from the last one ticked
   const P = S.pick;
   if (el.dataset.pickall) { const k = el.dataset.pickall; (P.shown[k] || []).forEach(i => el.checked ? P[k].add(i) : P[k].delete(i)); render(); return; }
@@ -784,6 +794,42 @@ function tgBar(load, info) {
     <button data-bulk="t1" ${off} title="Replaces Teacher 1 on every ticked row">Make Teacher 1</button><button data-bulk="t2" ${off} title="Adds them as Teacher 2 or 3 (co-teaching), or Teacher 1 on a row with none">Add as co-teacher</button><button data-bulk="tx" ${off}>Take off</button>
     ${line ? `<span class="small ${over ? "over" : "muted"}">${esc(line)}</span>` : ""}<button class="small ghost" data-bulk="tnone">Clear ticks</button></div>`;
 }
+function teacherBar() {
+  const P = S.pick, ix = [...P.teachers].filter(i => S.spec.teachers[i]); if (!ix.length) return "";
+  const s = P.s, has = ix.filter(i => (S.spec.teachers[i].can_teach || []).some(c => c.subject === s)).length;
+  return `<div class="bulk"><div class="row"><b>${ix.length} ticked</b> can teach <select id="pickS">${opt("", s, "pick a subject…")}${subjectNames().map(n => opt(n, s)).join("")}</select> at <select id="pickV">${scopes().map(v => opt(v, P.v)).join("")}</select>
+    <button data-bulk="tc-add" ${s ? "" : "disabled"}>Add</button><button data-bulk="tc-rm" ${s && has ? "" : "disabled"} title="Takes the subject off them at every level">Remove subject</button>${s ? `<span class="muted small">${has} of ${ix.length} can teach it now</span>` : ""}</div>
+    <div class="row" style="margin-top:6px">department <select id="pickD">${opt("", P.d, "")}${(sc().departments || []).map(d => opt(d, P.d)).join("")}</select><button data-bulk="tc-dept" ${P.d ? "" : "disabled"}>Set</button>
+    <span class="muted">·</span> role <select id="pickR">${opt("", P.r, "")}${roles().map(r => opt(r.role, P.r)).join("")}</select><button data-bulk="tc-role" ${P.r ? "" : "disabled"}>Set</button>
+    <span class="muted">·</span> allowance <input id="pickA" type="number" value="${esc(P.a)}" style="width:64px"><button data-bulk="tc-allow" ${P.a !== "" ? "" : "disabled"}>Set</button>
+    <button class="small ghost" data-bulk="tc-none">Clear ticks</button></div></div>`;
+}
+function bulkTeachers(k) {   // step 4: one change for every ticked teacher
+  const P = S.pick, T = S.spec.teachers, ix = [...P.teachers].filter(i => T[i]), n = ix.length, s1 = n === 1 ? "" : "s";
+  if (k === "tc-none") { P.teachers.clear(); render(); return; }
+  if (!n) return;
+  let msg = "";
+  if (k === "tc-add") {
+    if (!P.s) return; let added = 0;
+    for (const i of ix) {
+      const ct = T[i].can_teach = T[i].can_teach || [];
+      if (ct.some(c => c.subject === P.s && [P.v, "All"].includes(c.levels || "All"))) continue;
+      if (P.v === "All") T[i].can_teach = ct.filter(c => c.subject !== P.s);   // all levels takes the place of narrower ones
+      T[i].can_teach.push({ subject: P.s, levels: P.v }); added++;
+    }
+    msg = `${P.s} at ${P.v === "All" ? "every level" : P.v} added to ${added} teacher${added === 1 ? "" : "s"}` + (added < n ? ` (${n - added} could already teach it)` : "");
+  }
+  if (k === "tc-rm") {
+    if (!P.s) return; const who = ix.map(i => T[i].name);
+    ix.forEach(i => T[i].can_teach = (T[i].can_teach || []).filter(c => c.subject !== P.s));
+    const stuck = S.spec.lessons.filter(x => x.subject === P.s && (x.teachers || []).some(t => who.includes(t))).length;
+    msg = `${P.s} taken off ${n} teacher${s1}` + (stuck ? `; ${stuck} teaching group${stuck === 1 ? " still names" : "s still name"} one of them for it, flagged in Things to fix` : "");
+  }
+  if (k === "tc-dept") { if (!P.d) return; ix.forEach(i => T[i].dept = P.d); msg = `${n} teacher${s1} now in ${P.d}`; }
+  if (k === "tc-role") { if (!P.r) return; ix.forEach(i => T[i].role = P.r); msg = `${n} teacher${s1} now ${P.r}`; }
+  if (k === "tc-allow") { const a = Number(P.a); if (P.a === "" || !(a >= 0)) return; ix.forEach(i => T[i].allowance = a); msg = `Allowance ${a} for ${n} teacher${s1}`; }
+  save(); render(); toast(`${msg}. Undo takes it back.`);
+}
 function stuBar() {
   const P = S.pick, L = S.spec.students, ix = [...P.students].filter(i => L[i]); if (!ix.length) return "";
   const info = lessonInfo(), lvs = new Set(ix.map(i => clsLevel(L[i].class) || L[i].level));
@@ -798,6 +844,7 @@ function stuBar() {
 }
 function bulk(k) {   // one change for every ticked row, so one Undo takes it all back
   const P = S.pick, s1 = n => n === 1 ? "" : "s";
+  if (k.startsWith("tc-")) { bulkTeachers(k); return; }
   if (k === "tnone" || k === "snone") { P[k === "tnone" ? "lessons" : "students"].clear(); render(); return; }
   if (k[0] === "t") {
     const t = P.t, ix = [...P.lessons].filter(i => S.spec.lessons[i]); if (!t || !ix.length) return;
