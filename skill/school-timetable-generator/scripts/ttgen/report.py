@@ -31,36 +31,63 @@ def clock(sc, p):
     return f"{(t // 60 - 1) % 12 + 1}.{t % 60:02d}"
 
 def assign_rooms(res):
-    P = res["problem"]; NP = P.NP
-    rooms = collections.defaultdict(list); cap = {}
-    for v in P.spec["venues"]: rooms[v.get("kind") or "classroom"].append(v["room"]); cap[v["room"]] = 1
-    for r in P.spec.get("rules", []):
-        if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and r.get("target") in cap and r.get("number"): cap[r["target"]] = int(r["number"])
+    """hand out rooms after solving. Each group gets a room it may use (Problem.allowed: its kind for that week, kept for it or
+    for anyone, seating it) that is free for the whole lesson: a whole-class lesson its home room; otherwise the room the group
+    had before, a home room of its class, a room kept for it, then the smallest that seats it. Bigger groups choose first.
+    None free: TBC (the checks report it)"""
+    P = res["problem"]; NP = P.NP; cap = P.room_cap
     occ = collections.defaultdict(collections.Counter)
     for r in P.spec.get("rules", []):
-        if r.get("rule") == "Not available" and r.get("scope") == "Room" and r.get("target") in cap:
+        if r.get("rule") == "Not available" and r.get("scope") == "Room" and r.get("target") in cap and str(r.get("strength") or "Must") == "Must":
             S, _ = P.rule_positions(r)
             for q in S: occ[r["target"]][q] = 99
     home = {c["class"]: c.get("home_room") for c in P.spec["classes"]}
     def free(x, pos): return all(occ[x][q] < cap.get(x, 1) for q in pos)
+    week = lambda L: "Odd" if P.odd_day[L["start"] // NP] else "Even"
     lessons = res["lessons"]
     for L in lessons: L["rooms"] = {}; L["pos"] = list(range(L["start"], L["start"] + L["ln"]))
-    for L in lessons:
-        if L["unit"]["kind"] == "class" and not L["part"][0]["room_kind"]:
-            h = home.get(L["unit"]["classes"][0])
-            if h: L["rooms"][id(L["part"][0])] = h; [occ[h].update({q: 1}) for q in L["pos"]]
+    for L in lessons:   # whole-class lessons in their home room
+        u = L["unit"]
+        if u["kind"] != "class": continue
+        r = L["part"][0]; kind, E, n, ov = P.allowed(r, u, week(L)); h = home.get(u["classes"][0])
+        if kind == "classroom" and h in E and free(h, L["pos"]):
+            L["rooms"][id(r)] = h
+            for q in L["pos"]: occ[h][q] += 1
     used = {}
-    for L in sorted(lessons, key=lambda L: (L["start"], -L["ln"])):
-        for r in L["part"]:
+    biggest = lambda L: max((P.allowed(r, L["unit"], week(L))[2] or 0 for r in L["part"]), default=0)
+    for L in sorted(lessons, key=lambda L: (L["start"], -biggest(L), -L["ln"])):
+        w = week(L)
+        for r in sorted(L["part"], key=lambda r: -(P.allowed(r, L["unit"], w)[2] or 0)):
             if id(r) in L["rooms"]: continue
-            k = r["room_kind"] or "classroom"; key = (r["code"], tuple(r["classes"]), r["subject"])
-            pref = ([used[key]] if key in used else []) + ([home.get(c) for c in L["unit"]["classes"]] if k == "classroom" else []) + rooms.get(k, [])
-            if k == "classroom": pref += rooms.get("classroom", [])
-            x = next((x for x in pref if x and x in cap and x in rooms.get(k, []) + ([h for h in home.values()] if k == "classroom" else []) and free(x, L["pos"])), None)
+            kind, E, n, ov = P.allowed(r, L["unit"], w); key = (r["code"], tuple(r["classes"]), r["subject"], kind)
+            homes = {home.get(c) for c in L["unit"]["classes"]} if kind == "classroom" else set()
+            free_ = [x for x in E if free(x, L["pos"])]
+            x = min(free_, key=lambda x: (x != used.get(key), x not in homes, not P.only_for.get(x), P.seats.get(x) or 10 ** 6, x), default=None)
             L["rooms"][id(r)] = x or "TBC"
             if x:
                 for q in L["pos"]: occ[x][q] += 1
                 used.setdefault(key, x)
+
+def _seat_checks(res):
+    """rooms too small for their group, rooms used against their purpose, and groups bigger than every room they may use"""
+    P = res["problem"]; NP = P.NP; small = collections.defaultdict(int); wrong = collections.defaultdict(int); over = {}
+    for L in res["lessons"]:
+        w = "Odd" if P.odd_day[L["start"] // NP] else "Even"
+        for r in L["part"]:
+            room = L["rooms"].get(id(r))
+            if not room or room == "TBC": continue
+            kind, E, n, ov = P.allowed(r, L["unit"], w)
+            name = f"{r['subject']} {r['code'] if r['code'] != 'Entire Class' else L['unit']['classes'][0]}"
+            if ov: over[name] = (n, kind, max((P.seats.get(x) or 0) for x in E), room)
+            elif n and P.seats.get(room) and P.seats[room] < n: small[(name, n, room, P.seats[room])] += 1
+            if not P.for_ok(room, r): wrong[(name, room, ", ".join(sorted(P.only_for[room])))] += 1
+    probs = [f"Room too small: {nm} ({n} students) in {room} ({seats} seats), {k} lesson{'s' if k > 1 else ''}." for (nm, n, room, seats), k in sorted(small.items())]
+    probs += [f"{room} is kept for {f}, but {nm} uses it ({k} lesson{'s' if k > 1 else ''})." for (nm, room, f), k in sorted(wrong.items())]
+    by = collections.defaultdict(list)
+    for nm, (n, kind, mx, room) in sorted(over.items()): by[(kind, mx)].append(f"{nm} ({n})")
+    notes = [f"Bigger than every {kind} they may use (the largest seats {mx}), so given the biggest free one: {', '.join(v[:12])}{f' and {len(v) - 12} more' if len(v) > 12 else ''}. "
+             f"Correct the seats on Venues, or split these groups." for (kind, mx), v in sorted(by.items())]
+    return probs, notes
 
 def check(res):
     """independent checks on the result; returns (problems, stats)"""
@@ -82,6 +109,9 @@ def check(res):
         if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and r.get("target") in cap and r.get("number"): cap[r["target"]] = int(r["number"])
     rb = collections.Counter((room, q) for x in L for room in x["rooms"].values() for q in x["pos"])
     probs += [f"Room over capacity: {room} at {P.days[q // NP]} period {q % NP}." for (room, q), n in rb.items() if room != "TBC" and n > cap.get(room, 1)]
+    tbc = sum(1 for x in L for room in x["rooms"].values() if room == "TBC")
+    if tbc: probs.append(f"{tbc} lesson-groups have no free room (marked TBC).")
+    seat_probs, seat_notes = _seat_checks(res); probs += seat_probs
     occ = collections.defaultdict(list)
     for x in L:
         for c in x["unit"]["classes"]:
@@ -152,6 +182,7 @@ def check(res):
             free.append(n)
         if free: post.append(f"Students have no free periods ({nf}): counted, not enforced by this solver. Free periods a cycle: {sum(free) / len(free):.1f} on average, "
                              f"{max(free)} at most; {sum(1 for f in free if f == 0)} of {len(free)} students have none.")
+    post += seat_notes
     stats = dict(lessons=len(L), after_school=sum(1 for x in L if x["ext"]), side_by_side=side, students_checked=len(P.spec.get("students", [])))
     return probs, stats, post
 

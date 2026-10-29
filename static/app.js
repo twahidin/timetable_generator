@@ -144,6 +144,19 @@ const teacherNames = () => S.spec.teachers.map(t => t.name).filter(Boolean);
 const blockNames = () => S.spec.blocks.map(b => b.block).filter(Boolean);
 const scopes = () => ["All", ...levels(), ...[...new Set(Object.values(bands()))]];
 const subj = n => S.spec.subjects.find(s => s.subject === n);
+/* rooms: what a room is kept for (Venues 'For'), and the rooms a lesson row's group may use (as the server's Problem.allowed) */
+const special = x => { const k = (subj(x.subject) || {}).room_kind; return !!k && k !== "classroom"; };   // a lab, studio, ... (not a classroom)
+const forNames = () => [...new Set([...subjectNames(), ...(sc().departments || []), ...levels()])];
+function groupSize(x, cls, code) {   // the Students sheet count for its code, else the row's Students, else (whole class) the class size
+  const n = code && code !== "Entire Class" ? S.spec.students.filter(s => (s.groups || []).includes(code)).length : 0;
+  if (n) return n;
+  if (code === "Entire Class" || !x.block && !x.code_override) { const c = S.spec.classes.find(c => c.class === cls); return Number(c && c.size) || null; }
+  return Number(x.students) || null;
+}
+function roomsFor(x, kind) {   // rooms of this kind the row may use: kept for its subject, department or level, or for anyone
+  const s = subj(x.subject) || {};
+  return S.spec.venues.filter(v => (v.kind || "classroom") === kind && (!(v.only_for || []).length || v.only_for.some(f => [x.subject, s.dept, x.level].includes(f))));
+}
 const clsLevel = c => (S.spec.classes.find(x => x.class === c) || {}).level;
 function clock(p) {
   const [h, m] = String(sc().start_time || "07:30").split(":").map(Number); const t = h * 60 + m + p * Number(sc().period_minutes || 20);
@@ -229,6 +242,21 @@ function issues() {
     if (rt.needs_number && !r.number) add("rules", i, "Give the Number.");
     if (["Same time across classes", "Not on the same day as"].includes(r.rule) && !r.subject) add("rules", i, "Pick the Subject.");
   });
+  // rooms: 'For' names a subject, department or level; each group fits some room it may use; a home room seats its class
+  const forOk = new Set(forNames());
+  S.spec.venues.forEach((v, i) => { const bad = (v.only_for || []).filter(n => !forOk.has(n)); if (bad.length) add("venues", i, `${v.room}: For ${bad.join(", ")}: not a subject, department or level.`); });
+  S.spec.lessons.forEach((x, i) => {
+    if (!x.subject) return;
+    const s = subj(x.subject) || {}, kind = s.room_kind || "classroom";
+    if (x.room_weeks && !special(x)) add("lessons", i, "Special room weeks only applies to a subject with a special room kind, such as a lab (step 3).");
+    const rooms = roomsFor(x, kind);
+    if (!rooms.length) { if (s.room_kind && S.spec.venues.some(v => (v.kind || "classroom") === kind)) add("lessons", i, `Every ${kind} on Venues is kept for other subjects, departments or levels.`); return; }
+    const most = Math.max(...rooms.map(v => Number(v.capacity) || 0)); if (!most) return;
+    const sizes = !x.block && !x.code_override ? (x.classes || []).map(c => [c, groupSize(x, c, "Entire Class")]) : [[info[i].code, groupSize(x, null, info[i].code)]];
+    const big = sizes.filter(([, n]) => n && n > most);
+    if (big.length) add("lessons", i, `${big.map(([w, n]) => `${w}: ${n} students`).join(", ")}, but the largest ${kind} it may use seats ${most} (Venues). Correct the seats, or split the group.`);
+  });
+  S.spec.classes.forEach((c, i) => { const v = S.spec.venues.find(v => v.room === c.home_room); if (v && Number(v.capacity) && Number(c.size) > Number(v.capacity)) add("classes", i, `${c.class} has ${c.size} students but its home room ${v.room} seats ${v.capacity}.`); });
   // students: each one's groups must exist, be for their class, and take at most one group of a block (a block runs at one time)
   const gc = {}; S.spec.lessons.forEach((x, i) => { if (info[i].code && info[i].code !== "Entire Class") gc[info[i].code] = x; });
   const ids = {}, per = {}; S.spec.students.forEach((s, i) => { const k = stuKey(s); if (k) ids[k] = (ids[k] || 0) + 1; if (s.class) (per[s.class] = per[s.class] || []).push(i); });
@@ -359,11 +387,11 @@ const VIEWS = {
   },
   venues() {
     const { out } = issues();
-    return `<div class="card"><h1>Step 1 · Venues</h1><p class="lead">Every room. Its kind decides which subjects may use it (you set a subject's room kind on step 3). A room that holds two classes at once (a field, a hall) gets an "At most N at once" rule on step 7.</p>
+    return `<div class="card"><h1>Step 1 · Venues</h1><p class="lead">Every room. Its kind decides which subjects may use it (you set a subject's room kind on step 3). <b>Capacity</b> is seats: a group only goes in a room that seats it. <b>For</b> keeps a room for some subjects, departments or levels (for example "Chemistry G3, Sec 3"); blank = anyone. A room that holds two classes at once (a field, a hall) gets an "At most N at once" rule on step 7.</p>
       <div class="helper row"><b>Add rooms</b> prefix ${`<input id="hvPre" value="B1-" style="width:70px">`} from <input id="hvFrom" type="number" value="1" style="width:60px"> to <input id="hvTo" type="number" value="8" style="width:60px"> kind ${sel("_hv", "classroom", sc().room_kinds || [], false, 'id="hvKind" data-k=""')} <button data-helper="venues">Add</button></div>
-      <div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Block</th><th>Floor / level</th><th>Home room of</th><th>Note</th><th></th></tr>
-      ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${out.venues[i] ? "bad" : ""}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td>${delBtn("venues", i)}</td></tr>`).join("")}
-      </table></div><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div></div>`;
+      <div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Block</th><th>Floor / level</th><th>Home room of</th><th>For</th><th>Note</th><th></th></tr>
+      ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${out.venues[i] ? "bad" : ""}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.only_for" list="forNames" value="${esc((v.only_for || []).join(", "))}" placeholder="anyone"></td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td>${delBtn("venues", i)}</td></tr>`).join("")}
+      </table></div><datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div></div>`;
   },
   classes() {
     const { out } = issues();
@@ -416,8 +444,8 @@ const VIEWS = {
     return `<div class="card"><h1>Step 6 · Lessons</h1><p class="lead">One row per group, or per class for a whole-class subject. Pick level, subject and block (empty = whole class); choosing a block fills its classes. Group code, periods and lesson pattern fill in by themselves.</p>
       <div class="helper row"><b>Add groups to a block</b> ${sel("_hb", "", blockNames(), true, 'id="hbBlock" data-k=""')} subject ${sel("_hbs", "", subjectNames(), true, 'id="hbSubj" data-k=""')} groups <input id="hbN" type="number" value="1" style="width:56px"> students each <input id="hbSt" type="number" style="width:64px"> <button data-helper="groups">Add</button></div>
       <div class="helper row"><b>Add a whole-class subject</b> level ${sel("_hw", levels()[0], levels(), false, 'id="hwLevel" data-k=""')} subject ${sel("_hws", "", subjectNames(), true, 'id="hwSubj" data-k=""')} <button data-helper="whole">Add one row per class</button></div>
-      <div class="tablewrap"><table><tr><th>Level</th><th>Subject</th><th>Block</th><th>Classes</th><th>Teacher 1</th><th>Teacher 2</th><th>Students</th><th>Periods override</th><th>Keep code</th><th>Code</th><th>Periods</th><th>Lessons</th><th></th></tr>
-      ${S.spec.lessons.map((x, i) => `<tr id="lessons-${i}" class="${out.lessons[i] ? "bad" : ""}" title="${esc((out.lessons[i] || []).join(" "))}"><td class="lv">${sel(`spec.lessons.${i}.level`, x.level, levels())}</td><td style="min-width:200px">${sel(`spec.lessons.${i}.subject`, x.subject, subjectNames().filter(n => (subj(n).periods || {})[x.level] || n === x.subject))}</td><td style="min-width:160px">${sel(`spec.lessons.${i}.block`, x.block, S.spec.blocks.filter(b => !x.level || b.level === x.level).map(b => b.block))}</td><td style="min-width:120px">${chips(`spec.lessons.${i}.classes`, x.classes, "classes", `data-level="${esc(x.level || "")}"`)}</td><td style="min-width:150px">${tsel(i, 0, x)}</td><td style="min-width:120px">${tsel(i, 1, x)}</td><td class="num">${inp(`spec.lessons.${i}.students`, x.students, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.periods_override`, x.periods_override, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.code_override`, x.code_override, "text", 'style="width:70px"')}</td><td class="calc">${esc(info[i].code)}</td><td class="calc">${info[i].p || ""}</td><td class="calc">${info[i].p ? `${info[i].full}×${info[i].L}${info[i].short ? ` + ${info[i].short}×${info[i].L - 1}` : ""}` : ""}</td><td>${delBtn("lessons", i)}</td></tr>`).join("")}
+      <div class="tablewrap"><table><tr><th>Level</th><th>Subject</th><th>Block</th><th>Classes</th><th>Teacher 1</th><th>Teacher 2</th><th>Students</th><th>Periods override</th><th>Keep code</th>${Number(sc().weeks) === 2 ? '<th title="Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other">Special room weeks</th>' : ""}<th>Code</th><th>Periods</th><th>Lessons</th><th></th></tr>
+      ${S.spec.lessons.map((x, i) => `<tr id="lessons-${i}" class="${out.lessons[i] ? "bad" : ""}" title="${esc((out.lessons[i] || []).join(" "))}"><td class="lv">${sel(`spec.lessons.${i}.level`, x.level, levels())}</td><td style="min-width:200px">${sel(`spec.lessons.${i}.subject`, x.subject, subjectNames().filter(n => (subj(n).periods || {})[x.level] || n === x.subject))}</td><td style="min-width:160px">${sel(`spec.lessons.${i}.block`, x.block, S.spec.blocks.filter(b => !x.level || b.level === x.level).map(b => b.block))}</td><td style="min-width:120px">${chips(`spec.lessons.${i}.classes`, x.classes, "classes", `data-level="${esc(x.level || "")}"`)}</td><td style="min-width:150px">${tsel(i, 0, x)}</td><td style="min-width:120px">${tsel(i, 1, x)}</td><td class="num">${inp(`spec.lessons.${i}.students`, x.students, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.periods_override`, x.periods_override, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.code_override`, x.code_override, "text", 'style="width:70px"')}</td>${Number(sc().weeks) === 2 ? `<td><select data-k="spec.lessons.${i}.room_weeks" ${special(x) ? "" : "disabled title=\"Only for a subject with a special room kind, such as a lab (step 3)\""}>${opt("", x.room_weeks || "", "every week")}${opt("Odd", x.room_weeks, "Odd only")}${opt("Even", x.room_weeks, "Even only")}</select></td>` : ""}<td class="calc">${esc(info[i].code)}</td><td class="calc">${info[i].p || ""}</td><td class="calc">${info[i].p ? `${info[i].full}×${info[i].L}${info[i].short ? ` + ${info[i].short}×${info[i].L - 1}` : ""}` : ""}</td><td>${delBtn("lessons", i)}</td></tr>`).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="lessons">+ Add lesson row</button></div></div>`;
   },
   rules() {
@@ -593,6 +621,7 @@ document.addEventListener("change", async e => {
   if (el.id === "adjWho") { G.adj.who = el.value; render(); return; }
   if (el.id === "solveSecs") { try { localStorage.setItem("ttsolve", el.value); } catch (err) { } toast(`Each solve may now run up to ${$("#solveSecs").selectedOptions[0].textContent}. Stop keeps the best timetable so far.`); return; }
   if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; el.value = ""; try { await adopt(JSON.parse(await f.text()), "Progress loaded from the file. Press Save progress to keep it for the school."); } catch (err) { toast("That file is not a progress file."); } return; }
+  if (el.dataset.names) { setPath(el.dataset.names, el.value.split(",").map(t => t.trim()).filter(Boolean)); save(); render(); return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
   if (el.id === "stuFile") { stuFile(el); return; }
   if (el.id === "stuCls" || el.id === "stuQ") { S.stu[el.id === "stuCls" ? "cls" : "q"] = el.value; render(); return; }

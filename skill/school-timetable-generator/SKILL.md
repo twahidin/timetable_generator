@@ -112,7 +112,11 @@ Classes and Teachers are comma-separated; After school is `yes` or blank.
 
 A room holds one class at a time. A room that takes several classes at once (a field, a hall) needs an "At most N
 at once" rule for the Room; a note on a Settings row such as "Field and Hall take 2 classes each" is read as those
-rules too.
+rules too. Capacity is seats: a group only goes in a room that seats it (group size: the Students sheet count for its
+code, else the row's Students, else the class size). Venues "For" (optional) keeps a room for some subjects,
+departments or levels. 6 Lessons "Special room weeks" (Odd / Even) gives the group its special room on that week only
+and a classroom on the other. The solver adds, for every set of rooms some group is limited to, a cumulative limit
+over the groups limited to it; rooms are then handed out smallest-that-fits.
 
 **How periods become lessons.** With lesson length L (3 for 20-minute secondary periods = 1 hour; 2 for 30-minute
 primary periods), a subject with P periods gets as many L-period lessons as possible plus one or two
