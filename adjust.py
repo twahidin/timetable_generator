@@ -312,17 +312,19 @@ def apply(run, moves, label, pin=None, recess=None):
         _save(run, b, e)
     run.emit("adjusted", text=label)
 
-def undo(run, back=True):
+def undo(run, back=True, forget=False):
+    """undo (or redo) the last change; forget: a change the committee turned down, not kept for redo"""
     with _lock:
         b = board(run); e = edits(run)
         src, dst = (e["history"], e["redo"]) if back else (e["redo"], e["history"])
         if not src: return None
-        h = src.pop(); dst.append(h)
+        h = src.pop()
+        if not forget: dst.append(h)
         for k, s in (h["before"] if back else h["after"]).items(): b.L[k]["start"] = s
         e["pins"] = dict(h["pins_before"] if back else h["pins_after"])
         if "recess_before" in h: b.set_recess(h["recess_before"] if back else h["recess_after"])
         b.index(); _save(run, b, e)
-    run.emit("adjusted", text=("Undone: " if back else "Redone: ") + h["label"])
+    run.emit("adjusted", text=("Put back: " if forget else "Undone: " if back else "Redone: ") + h["label"])
     return h
 
 def unpin(run, key):

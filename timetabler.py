@@ -46,6 +46,13 @@ TOOLS = [
                  value={}, row=dict(type="object"), level=dict(type="string"), day=dict(type="string")), required=["action", "section"])),
              reason=dict(type="string", description="the change in a few plain words, shown on the comparison, e.g. 'Mr Tan free on Wednesday afternoons'"),
              seconds=dict(type="integer", description="time limit for the solve; leave it out to use the committee's choice")), required=["changes", "reason"])),
+    dict(name="move_lessons", description="Move a lesson to another time, or swap two lessons, on the latest timetable (as the committee does on the Adjust page), when they ask for a small change by hand ('move 3A Maths off Friday afternoon', 'swap 2B's English and Science on Tuesday'). Find the lesson with show_timetable first. A clean move goes on the timetable and the committee clicks Apply or No (No puts it back). A move that clashes changes nothing: you get the clashes and clean alternatives (free times, swaps) to offer; with make_room true the solver keeps the lesson at that time and moves as few other lessons as it can, and the committee then sees which moved before Apply or No. For lasting wishes (a teacher never free on Wednesdays), change the setup instead.",
+         schema=dict(type="object", properties=dict(
+             lesson=dict(type="object", description="a lesson as show_timetable lists it", properties=dict(day=dict(type="string", description="e.g. Odd Mon"), time=dict(type="string", description="its start time, e.g. 8.10"), who=dict(type="string", description="a class, group code or band name"), subject=dict(type="string")), required=["day", "time"]),
+             to=dict(type="object", properties=dict(day=dict(type="string"), time=dict(type="string")), required=["day", "time"], description="where to move it (leave out for a swap)"),
+             swap_with=dict(type="object", description="a lesson as show_timetable lists it", properties=dict(day=dict(type="string", description="e.g. Odd Mon"), time=dict(type="string", description="its start time, e.g. 8.10"), who=dict(type="string", description="a class, group code or band name"), subject=dict(type="string")), required=["day", "time"]),
+             make_room=dict(type="boolean", description="when the move clashes: let the solver move other lessons to make room"),
+             reason=dict(type="string")), required=["lesson"])),
     dict(name="finish", description="End this round of work with a short summary for the committee (what was made, what is after school and why, anything to look at). The committee then reviews and publishes.",
          schema=dict(type="object", properties=dict(summary=dict(type="string")), required=["summary"])),
 ]
@@ -576,13 +583,85 @@ def t_try_change(run, args):
     said = "The committee stopped this run." if ans is None else f"The committee answered: {ans}"
     return f"{out}\nCompared with timetable #{old['n']}:\n{table}\n{said}. The what-if was dropped: timetable #{old['n']} and the setup are as before." + not_done
 
+def _time_of(b, day, time):
+    """(day index, period) for a day as on Day structure ('Odd Mon', or 'Mon' when only one day matches) and a clock
+    time as show_timetable prints it ('8.10', '8:10') or a period number; or an error text"""
+    from ttgen.report import clock
+    norm = lambda x: " ".join(str(x or "").lower().replace("tues", "tue").replace("thurs", "thu").split())
+    days = [i for i, d in enumerate(b.P.days) if norm(d) == norm(day)] or [i for i, d in enumerate(b.P.days) if norm(d).endswith(norm(day))]
+    if len(days) != 1: return f"'{day}' is {'not a day' if not days else 'more than one day'}: use a day as show_timetable shows it ({', '.join(b.P.days[:6])}, ...)."
+    t = str(time or "").strip().replace(":", ".").lstrip("0")
+    ps = [p for p in range(b.NP) if clock(b.sc, p) == t] or ([int(t)] if t.isdigit() and int(t) < b.NP else [])
+    if not ps: return f"No period starts at {time} (times as show_timetable shows them, e.g. {clock(b.sc, 1)})."
+    return days[0], ps[0]
+
+def _find_lesson(b, x):
+    """the Adjust key of the lesson described by {day, time, who (class, group code or band), subject}; or an error text"""
+    x = x or {}; at = _time_of(b, x.get("day"), x.get("time"))
+    if isinstance(at, str): return at
+    q = at[0] * b.NP + at[1]; who, subj = str(x.get("who") or "").strip().lower(), str(x.get("subject") or "").strip().lower()
+    def fits(L):
+        u = L["unit"]; names = {c.lower() for c in u["classes"]} | {u["name"].lower()} | {str(r["code"]).lower() for r in L["part"]}
+        return (not who or who in names) and (not subj or any(subj in str(r["subject"]).lower() for r in L["part"]))
+    hits = [k for k, L in b.L.items() if L["start"] == q and fits(L)]
+    if len(hits) == 1: return hits[0]
+    near = [k for k, L in b.L.items() if fits(L) and L["start"] // b.NP == at[0]] if not hits else hits
+    listing = "; ".join(f"{b.name(k)} {b.when(b.L[k]['start'], b.L[k]['ln'])}" for k in sorted(near, key=lambda k: b.L[k]["start"])[:12])
+    return (f"Several lessons match ({listing}): say the class or group and the subject." if hits else
+            f"No lesson of {x.get('who') or '?'} {x.get('subject') or ''} starts {b.P.days[at[0]]} {x.get('time')}." + (f" That day: {listing}." if listing else ""))
+
+def t_move_lessons(run, args):
+    """move a lesson, or swap two, on the latest timetable as the committee does on the Adjust page; the committee
+    sees it on the timetable and clicks Apply or No (No puts everything back)"""
+    if not run.solved: return "There is no timetable yet: solve first."
+    adjust.flush(run); b = adjust.board(run)
+    k = _find_lesson(b, args.get("lesson"))
+    if k not in b.L: return f"Lesson not found: {k}"
+    L = b.L[k]; nm = b.name(k)
+    if args.get("swap_with"):
+        k2 = _find_lesson(b, args.get("swap_with"))
+        if k2 not in b.L: return f"Lesson to swap with not found: {k2}"
+        if k2 in b.twins(k): return f"Those are two lessons of the same group ({nm}), so swapping them changes nothing. Nothing changed."
+        moves = {k: b.L[k2]["start"], k2: L["start"]}; target = b.L[k2]["start"]
+        label = f"Swapped {nm} ({b.when(L['start'], L['ln'])}) with {b.name(k2)} ({b.when(b.L[k2]['start'], b.L[k2]['ln'])})"
+    else:
+        at = _time_of(b, (args.get("to") or {}).get("day"), (args.get("to") or {}).get("time"))
+        if isinstance(at, str): return f"Where to: {at}"
+        target = at[0] * b.NP + at[1]; moves = {k: target}
+        if target == L["start"]: return f"{nm} is already at {b.when(target, L['ln'])}."
+        label = f"Moved {nm} from {b.when(L['start'], L['ln'])} to {b.when(target, L['ln'])}"
+    for x, s in moves.items():
+        if s not in b.dom[x]["vals"]: return f"Not possible, nothing changed: {b.why_not(x, s)}"
+    con = b.conflicts(moves)
+    n0 = len(adjust.edits(run)["history"])
+    if con and not (args.get("make_room") and not args.get("swap_with")):
+        p = adjust.proposal(run, k, target) if not args.get("swap_with") else dict(swaps=[], free=[])
+        alt = [s["label"] for s in p["swaps"]] + [f"Move to {f['label']}" for f in p["free"][:6]]
+        return (f"{label.replace('Moved', 'Moving').replace('Swapped', 'Swapping')} clashes, so nothing changed:\n" + "\n".join(f"- {c['text']}" for c in con) +
+                ("\nClean alternatives:\n" + "\n".join(f"- {a}" for a in alt) if alt else "\nNo clean swap or free time nearby.") +
+                ("" if args.get("swap_with") else "\nOffer these with ask_committee, or call again with make_room true to let the solver move as few other lessons as it can."))
+    if con:   # make room: the solver keeps it there and moves as few others as it can
+        adjust.make_room(run, k, target, max(60, min(SOLVE_MAX, int(run.seconds or SOLVE_SECONDS))), WORKERS)
+        if len(adjust.edits(run)["history"]) == n0: return f"The solver could not make room for {nm} at {b.when(target, L['ln'])}; nothing changed."
+        label = adjust.edits(run)["history"][-1]["label"]
+    else:
+        adjust.apply(run, moves, label)
+    s = run.solved
+    status = "All checks pass." if s.get("ok") else f"Checks: {'; '.join(s.get('problems', [])[:4])}"
+    ans = run.ask(f"{label}. {status} It is on the timetable now (Preview, or Adjust timetable): apply it?", ["Apply", "No, put it back"])
+    if ans is not None and str(ans).strip().lower().startswith("apply"):
+        return f"{label}. The committee applied it (Undo on the Adjust page takes it back). {status}"
+    adjust.undo(run, forget=True)
+    said = "The committee stopped this run." if ans is None else f"The committee answered: {ans}"
+    return f"{said}. Put back: {label}; the timetable is as before."
+
 def t_finish(run, args):
     run.emit("summary", text=str(args.get("summary") or "Finished."))
     run.finished = True
     return "Finished. The committee can now review and publish, or ask for more changes."
 
 IMPL = dict(check_setup=t_check_setup, show_setup=t_show_setup, show_timetable=t_show_timetable, solve=t_solve, diagnose=t_diagnose,
-            ask_committee=t_ask_committee, change_setup=t_change_setup, try_change=t_try_change, finish=t_finish)
+            ask_committee=t_ask_committee, change_setup=t_change_setup, try_change=t_try_change, move_lessons=t_move_lessons, finish=t_finish)
 
 def call_tool(run, name, args):
     f = IMPL.get(name)

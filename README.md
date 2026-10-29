@@ -32,6 +32,11 @@ the latest timetable and shows a comparison (checks, lessons after school, lesso
 lessons, gaps in classes' days) with **Keep it** and **Drop it**. Preview shows the what-if timetable until you choose.
 Kept, it becomes the setup and the latest timetable; dropped, everything is as it was.
 
+**Hand moves by chat.** Ask "swap 2B's English and Science on Tuesday" and the AI moves the lessons on the finished
+timetable, as you would on **Adjust timetable**, then asks **Apply** or **No, put it back**. A move that clashes changes
+nothing: the AI says why and offers clean alternatives, or lets the solver make room by moving as few other lessons as
+it can. Applied moves are on the Adjust page's Undo list.
+
 The AI works on a copy of the setup. **Keep the AI's changes in my setup** copies its changes back; **Publish** makes
 the PDFs, the Excel workbook and the timetable pages and swaps them in for teachers and students (about a minute).
 Without an AI set up, **Generate without AI** checks and solves, and the committee reads the results.
