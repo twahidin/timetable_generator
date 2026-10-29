@@ -14,7 +14,7 @@ lessons as it can (cheaper than bending a Prefer rule or pushing a lesson after 
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
-from .spec import WEEKDAYS, family as _family, floating_recess, periods_by_day, resolve_row, trim_day, windows as _windows
+from .spec import PE_KIND, WEEKDAYS, family as _family, floating_recess, periods_by_day, resolve_row, trim_day, windows as _windows
 
 W_PREF, W_SLACK, W_MOVE = 60, 40, 10
 RECESS_KEY = "~recess"   # in a placements file: {class: [[start, length]]}, each class's floating recess
@@ -280,6 +280,18 @@ def lesson_domains(P, rules, notes):
     return out
 
 
+def rain_rooms(P, lessons):
+    """[(lesson, class, home room)] for each class at PE in these lessons (a part in a PE_KIND room) whose home room is on
+    Venues, when Settings says PE goes to the home room in rain. Works on solver blocks and on solved lessons alike"""
+    if not P.spec["school"].get("pe_rain_home"): return []
+    out = []
+    for L in lessons:
+        if not any((r.get("room_kind") or "") == PE_KIND for r in L["part"]): continue
+        for c in L["u" if "u" in L else "unit"]["classes"]:
+            h = (P.cls.get(c) or {}).get("home_room")
+            if h and h in P.room_kind: out.append((L, c, h))
+    return out
+
 def recess_vars(m, P):
     """floating recess: in each recess window (Day structure 'W') the recess goes where the solver puts it, for the whole level
     or for each class (Settings 'Floating recess goes by'); the rest of the window is lesson time. Returns the recesses
@@ -524,6 +536,8 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
         for (kind, E, week), n in per.items():
             iv = b["iv"] if week is None else m.NewOptionalFixedSizeIntervalVar(b["st"], b["ln"], in_odd(b) if week == "Odd" else in_odd(b).Not(), "")
             need[kind].append((iv, E, n, b))
+    for b, c, h in rain_rooms(P, blocks):   # Settings 'In rain, PE goes to the class's home room': it stays free during PE
+        need[P.room_kind[h]].append((b["iv"], frozenset([h]), 1, b))
     for kind, lst in need.items():
         every = frozenset(x for x, k in P.room_kind.items() if k == kind)
         if not every: notes.append(f"No room of kind '{kind}' on Venues: room limits for it are not checked."); continue

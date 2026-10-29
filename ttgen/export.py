@@ -138,9 +138,16 @@ def model_from_result(res):
                             block=x["unit"]["name"] if x["unit"]["kind"] == "block" else "",
                             classes=[str(c) for c in (x["unit"]["classes"] if x["unit"]["kind"] == "class" else r["classes"])],
                             subject=str(r["subject"]), group=str(r["code"]), teachers=[str(t) for t in r["teachers"]],
-                            room=str(x.get("rooms", {}).get(id(r), "") or ""), ext=bool(x["ext"])))
+                            room=str(x.get("rooms", {}).get(id(r), "") or ""), ext=bool(x["ext"]), rain=_rain(x, r)))
     recess = {c: [[q // NP, q % NP, n] for q, n in spans] for c, spans in (res.get("recess") or {}).items()}
     return _model(P.spec, P.days, out, notes=res.get("notes", []), status=res.get("status"), recess=recess)
+
+def _rain(x, r):
+    """the rain room(s) of this row's classes during PE (report.assign_rooms), 'TBC' when one could not be kept free"""
+    rain = x.get("rain") or {}
+    cls = x["unit"]["classes"] if x["unit"]["kind"] == "class" else r["classes"]
+    got = [rain[c] for c in cls if c in rain]
+    return "TBC" if any(h is None for h in got) else ", ".join(dict.fromkeys(got))
 
 def _split_list(v):
     return [s.strip() for s in str(v or "").split(",") if s.strip()]
@@ -173,7 +180,8 @@ def model_from_files(setup_path, timetable_path):
         if lid is None: lid = ids.setdefault((dix[day.lower()], p, n, block or f"{group}|{g(row, 'Classes')}"), len(ids) + 1)
         out.append(dict(id=int(lid), d=dix[day.lower()], p=p, n=n, level=str(g(row, "Level") or ""), block=block,
                         classes=_split_list(g(row, "Classes")), subject=subject, group=group, teachers=_split_list(g(row, "Teachers")),
-                        room=str(g(row, "Room") or ""), ext=str(g(row, "After school") or "").strip().lower() in ("yes", "y", "true", "1", "x")))
+                        room=str(g(row, "Room") or ""), ext=str(g(row, "After school") or "").strip().lower() in ("yes", "y", "true", "1", "x"),
+                        rain=str(g(row, "Rain room") or "")))
     notes, status = [], None
     if "Read me" in wb.sheetnames:
         sect = None
@@ -219,6 +227,9 @@ def check_model(m):
         if x["room"] and x["room"] != "TBC":
             for q in range(x["p"], x["p"] + x["n"]): rb[(x["room"], x["d"], q)] += 1
     probs += [f"Room over capacity: {r} on {w} (holds {m['room_cap'].get(r, 1)} at once)." for r, d, w in spans({k for k, n in rb.items() if n > m["room_cap"].get(k[0], 1)})][:30]
+    rain = {(h, x["d"], q) for x in L for h in _split_list(x.get("rain")) if h != "TBC" for q in range(x["p"], x["p"] + x["n"])}   # home rooms kept for PE in rain
+    probs += [f"Rain room in use: {r} on {w} is the home room of a class at PE, but a lesson is in it." for r, d, w in spans({k for k in rain if rb[k]})][:30]
+    probs += [f"No rain room: {', '.join(x['classes'])} {x['subject']} on {m['days'][x['d']]} period {x['p']} (the home room is in use)." for x in L if x.get("rain") == "TBC"][:30]
     occ = collections.defaultdict(lambda: collections.defaultdict(set)); whole = collections.defaultdict(set)
     for x in L:
         for c in x["classes"]:
@@ -308,6 +319,10 @@ def _tshort(m, names):
 def _color(m, subject):
     return m["subjects"].get(subject, {}).get("color", 0)
 
+def _room_line(x):
+    """a lesson's room as a timetable cell shows it, with the rain room of a PE lesson: 'Field (rain B2-3)'"""
+    return f"{x['room']} (rain {x['rain']})" if x.get("rain") else x["room"]
+
 def class_view(m, c):
     info = m["class_ix"][c]; rows = [x for x in m["lessons"] if c in x["classes"]]
     bgroups = collections.defaultdict(set)
@@ -317,7 +332,7 @@ def class_view(m, c):
     for lid, xs in _by_id(rows).items():
         x0 = xs[0]; used |= {(x0["d"], q) for q in range(x0["p"], x0["p"] + x0["n"])}
         if len(xs) == 1 and x0["group"] == ENTIRE:
-            title, lines = abbrev(x0["subject"]), [_tshort(m, x0["teachers"]), x0["room"]]
+            title, lines = abbrev(x0["subject"]), [_tshort(m, x0["teachers"]), _room_line(x0)]
         elif x0["block"]:
             groups = {x["group"] for x in xs}
             if groups < bgroups[x0["block"]]:
@@ -329,7 +344,7 @@ def class_view(m, c):
                 summary = " · ".join(subs) if len(subs) > 1 else " · ".join(dict.fromkeys(abbrev(x["subject"]).replace(subs[0], "").strip() or subs[0] for x in xs))
                 title, lines = block_label(x0["block"], info["level"]) or summary, [summary, f"{len(xs)} groups"]
         else:
-            title, lines = abbrev(x0["subject"]), [x0["group"], _tshort(m, x0["teachers"]), x0["room"]]
+            title, lines = abbrev(x0["subject"]), [x0["group"], _tshort(m, x0["teachers"]), _room_line(x0)]
         cells.append(dict(d=x0["d"], p=x0["p"], n=x0["n"], title=title, lines=[l for l in lines if l], color=_color(m, x0["subject"]),
                           ext=any(x["ext"] for x in xs), id=lid))
     legend = []; per = collections.Counter(); ent = collections.OrderedDict()
@@ -362,7 +377,7 @@ def teacher_view(m, t):
     for lid, xs in _by_id(rows).items():
         x0 = xs[0]; who = ", ".join(dict.fromkeys(x["group"] if x["group"] != ENTIRE else ", ".join(x["classes"]) for x in xs))
         cls = sorted({c for x in xs for c in x["classes"]})
-        lines = [who if x0["group"] == ENTIRE else f"{who} ({compact_classes(cls)})", ", ".join(dict.fromkeys(x["room"] for x in xs if x["room"]))]
+        lines = [who if x0["group"] == ENTIRE else f"{who} ({compact_classes(cls)})", ", ".join(dict.fromkeys(_room_line(x) for x in xs if x["room"]))]
         cells.append(dict(d=x0["d"], p=x0["p"], n=x0["n"], title=" + ".join(dict.fromkeys(abbrev(x["subject"]) for x in xs)), lines=[l for l in lines if l],
                           color=_color(m, x0["subject"]), ext=any(x["ext"] for x in xs), id=lid))
         total += x0["n"]; per_day[x0["d"]] += x0["n"]; ext += x0["n"] if x0["ext"] else 0
@@ -409,7 +424,7 @@ def student_view(m, s):
     for lid, xs in _by_id(rows).items():
         x0 = xs[0]; used |= {(x0["d"], q) for q in range(x0["p"], x0["p"] + x0["n"])}
         cells.append(dict(d=x0["d"], p=x0["p"], n=x0["n"], title=" + ".join(dict.fromkeys(abbrev(x["subject"]) for x in xs)),
-                          lines=[_tshort(m, x0["teachers"]), x0["room"]], color=_color(m, x0["subject"]), ext=any(x["ext"] for x in xs), id=lid))
+                          lines=[_tshort(m, x0["teachers"]), _room_line(x0)], color=_color(m, x0["subject"]), ext=any(x["ext"] for x in xs), id=lid))
         for x in xs:
             e = ent.setdefault(x["subject"], dict(x=x, periods=0, rooms=[])); e["periods"] += x["n"]; e["rooms"].append(x["room"])
     legend = [dict(color=_color(m, s_), label=abbrev(s_), text=f"{s_} · {e['x']['group'] if e['x']['group'] != ENTIRE else 'with the class'} · "
@@ -795,9 +810,9 @@ def write_excel(m, path, log=print):
     ws = wb.create_sheet("Lessons"); ws.append(LESSON_HEADERS)
     for x in sorted(m["lessons"], key=lambda x: (x["id"], x["group"])):
         ws.append([x["id"], m["days"][x["d"]], x["p"], x["p"] + x["n"] - 1, x["n"], m["times"][x["p"]][0], m["times"][min(NP - 1, x["p"] + x["n"] - 1)][1],
-                   x["level"], x["block"], ", ".join(x["classes"]), x["subject"], x["group"], ", ".join(x["teachers"]), x["room"], "yes" if x["ext"] else ""])
+                   x["level"], x["block"], ", ".join(x["classes"]), x["subject"], x["group"], ", ".join(x["teachers"]), x["room"], "yes" if x["ext"] else "", x.get("rain") or ""])
     for c in ws[1]: c.font = Font(name="Calibri", bold=True, color="FFFFFF", size=10); c.fill = hdrfill
-    for col, w in zip("ABCDEFGHIJKLMNO", (8, 11, 7, 7, 7, 7, 7, 7, 24, 22, 34, 12, 34, 14, 8)): ws.column_dimensions[col].width = w
+    for col, w in zip("ABCDEFGHIJKLMNOP", (8, 11, 7, 7, 7, 7, 7, 7, 24, 22, 34, 12, 34, 14, 8, 12)): ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"; ws.auto_filter.ref = ws.dimensions
     if m["recess"]:   # each class's floating recess (the recess windows on Day structure)
         ws = wb.create_sheet("Recess"); ws.append(["Class", "Level", "Day", "Start period", "End period", "Periods", "Starts", "Ends"])
@@ -831,7 +846,7 @@ def html_data(m, view="full", student_id=None, app=None):
              teachers=[[t["name"], t["short"], t["dept"], t["allowance"]] for t in m["teachers"]],
              rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1)] for r in m["rooms"]],
              subjects={k: [v["short"], v["color"]] for k, v in m["subjects"].items()}, palette=pal, ext=list(EXT),
-             lessons=[[x["id"], x["d"], x["p"], x["n"], x["level"], x["block"], x["classes"], x["subject"], x["group"], x["teachers"], x["room"], int(x["ext"])]
+             lessons=[[x["id"], x["d"], x["p"], x["n"], x["level"], x["block"], x["classes"], x["subject"], x["group"], x["teachers"], x["room"], int(x["ext"])] + ([x["rain"]] if x.get("rain") else [])
                       for x in m["lessons"]],
              students=[[s["id"], s["name"], s["cls"], s["groups"]] for s in m["students"]],
              checks=dict(ok=m["checks"]["ok"], problems=m["checks"]["problems"], after=m["checks"]["after_school"], notes=m["notes"]), app=app)

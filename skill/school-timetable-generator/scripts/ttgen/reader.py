@@ -101,6 +101,7 @@ def read_template(path):
             if k not in known: sc["extra_settings"].append([k, v.strftime("%H:%M") if isinstance(v, datetime.time) else v, note])
             continue
         if what["key"] == "after_school": sc["after_school"] = _yes(v) if v not in (None, "") else True
+        elif what["key"] == "pe_rain_home": sc["pe_rain_home"] = _yes(v)
         elif what["number"] and v not in (None, ""): rules.append(dict(what["rule"], number=int(float(str(v)))))
         elif not what["number"] and _yes(v): rules.append(dict(what["rule"]))
     # lists

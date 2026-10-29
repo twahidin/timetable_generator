@@ -130,10 +130,12 @@ def write_template(spec, path, extra_rows=120):
             ("Lesson length (periods)", L_std, f"A subject's leftover periods become one or two lessons of {L_std - 1} period{'s' if L_std != 2 else ''}.")]
     rs = rules["settings"]
     vals = dict(once_a_day="Yes" if "once_a_day" in rs else "No", after_school="Yes" if sc.get("after_school", True) else "No",
-                pe_at_once=rs.get("pe_at_once"), max_day=rs.get("max_day"), recess="Yes" if "recess" in rs else "No")
+                pe_at_once=rs.get("pe_at_once"), max_day=rs.get("max_day"), recess="Yes" if "recess" in rs else "No",
+                pe_rain_home="Yes" if sc.get("pe_rain_home") else "No")
     notes = dict(once_a_day="Yes / No", after_school="Yes: the 'A' periods on Day structure are used only when a class cannot fit. No: never.",
                  pe_at_once="Leave empty for no limit (e.g. the field and hall take 2 classes each).", max_day="Leave empty for no limit. 15 (5 hours) is a common cap.",
-                 recess="Yes: every teacher is free for a recess each day (a whole recess, or the recess length inside a recess window). The solver keeps it.")
+                 recess="Yes: every teacher is free for a recess each day (a whole recess, or the recess length inside a recess window). The solver keeps it.",
+                 pe_rain_home="Yes: while a class has PE (a 'pe venue' lesson) nothing else uses its home room, so the class can go there when it rains. The timetables show it as the rain room.")
     rows += [(s["label"], vals[s["key"]], notes[s["key"]]) for s in SETTING_RULES]
     clock_txt = lambda v: _t(v) if isinstance(v, str) and len(v) <= 5 and v.count(":") == 1 and v.replace(":", "").isdigit() else v   # '15:20' back to a time
     more_rows = list(sc.get("extra_settings", []))
