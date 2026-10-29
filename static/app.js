@@ -266,6 +266,10 @@ function issues() {
       if (x.block && S.spec.lessons.filter(y => y.block === x.block && (y.teachers || []).includes(t)).length > 1) add("lessons", i, `${t} twice in this band.`);
     }
     if (x.block && !blockNames().includes(x.block)) add("lessons", i, "Band not on the Bands list (top of step 5).");
+    if (!x.block && !x.code_override && Number(x.students) > 0) {   // fewer students than its classes, yet no band or code: it is taken as the whole class
+      const size = (x.classes || []).reduce((a, c) => a + (Number((S.spec.classes.find(y => y.class === c) || {}).size) || 0), 0);
+      if (size && Number(x.students) < size) add("lessons", i, `${x.subject}: ${x.students} of the ${size} students in ${(x.classes || []).join(", ")}, but with no band or code it is a lesson for the whole class. Pick its band, or enter Students again to give it a group code.`);
+    }
     if (codes[info[i].code] > 1) add("lessons", i, "Code used twice.");
   });
   const load = {}; S.spec.lessons.forEach((x, i) => (x.teachers || []).filter(Boolean).forEach(t => load[t] = (load[t] || 0) + info[i].tp));
@@ -725,6 +729,7 @@ document.addEventListener("change", async e => {
   const m = path.match(/^spec\.lessons\.(\d+)\.block$/);
   if (m && v) { const b = S.spec.blocks.find(x => x.block === v); if (b) { S.spec.lessons[m[1]].classes = [...(b.classes || [])]; S.spec.lessons[m[1]].level = b.level || S.spec.lessons[m[1]].level; } }
   const t = path.match(/^spec\.lessons\.(\d+)\.teachers\.(\d+)$/); if (t) S.spec.lessons[t[1]].teachers = (S.spec.lessons[t[1]].teachers || []).map(x => x || null);
+  const gm = path.match(/^spec\.lessons\.(\d+)\.(students|block|subject|level)$/); if (gm) groupCode(Number(gm[1]));
   const sm = path.match(/^spec\.students\.(\d+)\.class$/); if (sm) S.spec.students[sm[1]].level = clsLevel(v) || null;
   const fx = path.match(/^spec\.rules\.(\d+)\.target$/);   // a fixed lesson names a class or a group code
   if (fx) { const r = S.spec.rules[fx[1]]; if (r.rule === "Fixed at" && ["Class", "Group"].includes(r.scope)) r.scope = classNames().includes(v) ? "Class" : "Group"; }
@@ -750,6 +755,19 @@ function addRow(k) {
   S.spec[into].push(JSON.parse(JSON.stringify(blank))); save();
   const show = () => { const last = document.getElementById(`${into}-${S.spec[into].length - 1}`); if (last) { last.scrollIntoView({ block: "center" }); const f = last.querySelector("input,select"); if (f) f.focus({ preventScroll: true }); } };
   render(); show(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); show(); poll(); })();
+}
+/* a teaching group with no band and fewer students than its classes (a pull-out group, say 9 of 1A2) is a group of its
+   own, not the whole class: it gets a code in Keep code, made like a band group's (level digit, subject code, level
+   letter, then the first unused number), so the solver, the workbook and the student list all see it as a group */
+function groupCode(i) {
+  const x = S.spec.lessons[i]; if (!x || x.block || x.code_override || !x.subject) return;
+  const n = Number(x.students), size = (x.classes || []).reduce((a, c) => a + (Number((S.spec.classes.find(y => y.class === c) || {}).size) || 0), 0);
+  if (!(n > 0) || !size || n >= size) return;
+  const s = subj(x.subject) || {}, letter = Object.fromEntries((sc().tags || []).map(([a, b]) => [a, b]));
+  const pre = `${String(x.level).slice(-1)}${s.code || "??"}${letter[s.tag] || ""}`, used = new Set(lessonInfo().map(f => f.code));
+  let k = 1; while (used.has(`${pre}${k}`)) k++;
+  x.code_override = `${pre}${k}`;
+  toast(`${x.subject} for ${n} of the ${size} students in ${(x.classes || []).join(", ")} is a group of its own, so it gets code ${x.code_override} (Keep code). If the rest of the class has this subject at the same time, put it in their band instead.`);
 }
 const blankRows = () => S.spec.lessons.filter(x => x.subject && !(x.teachers || []).some(Boolean)).length;
 async function allocateTeachers() {   // a teacher for every row left blank (ttgen.allocate), as one change Undo takes back
@@ -1014,6 +1032,7 @@ function commitPop() {
   const pop = $("#pop"); if (pop.hidden) return; const path = pop.dataset.path;
   if (pop.dataset.what === "classes") setPath(path, [...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value));
   else if (pop.dataset.what === "groups") setPath(path, [...pop.querySelectorAll("input:checked")].map(x => x.value).filter(Boolean));
+  const lc = pop.dataset.what === "classes" && path.match(/^spec\.lessons\.(\d+)\.classes$/); if (lc) groupCode(Number(lc[1]));
   else setPath(path, readCt().filter(c => c.subject));
   pop.hidden = true; save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
 }
