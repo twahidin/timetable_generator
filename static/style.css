@@ -100,6 +100,12 @@ a.filebtn{color:var(--ink);text-decoration:none}
 .ev.tt.warn{background:#fff7e6;color:#7a4b00}
 .ev.bad{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:8px 10px}
 .ev details{margin-top:4px}
+.ev.whatif{background:#eef4ff;color:#1d3f7a;border-radius:8px;padding:8px 10px}
+.ev.compare{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--ink)}
+.ev.compare table{border-collapse:collapse;margin:6px 0;font-size:12.5px}
+.ev.compare th,.ev.compare td{padding:3px 10px;text-align:left;border-bottom:1px solid var(--line)}
+.ev.compare td.good{color:var(--ok);font-weight:600}
+.ev.compare td.bad{color:var(--warn);font-weight:600}
 .progress{font-size:12.5px;color:var(--navy);min-height:18px;padding:4px 2px}
 .chatform{display:flex;gap:8px;margin-top:6px}
 .chatform input{flex:1;padding:9px 10px;background:#fff}

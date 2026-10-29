@@ -23,9 +23,14 @@ Students not on the list use the general student code and Build my timetable.
 The AI does not place lessons itself; the solver does (OR-Tools, the same one the skill uses). The AI works as the
 timetabler, with `skill/school-timetable-generator/SKILL.md` as its instructions and these tools:
 check the setup and do the capacity sums, show parts of the setup, solve, diagnose (find which rule blocks a
-timetable), ask the committee, change the setup (only what the committee chose), and finish. It cannot run code,
-see anything outside the setup, or publish. The chat shows each step; a question appears with buttons, and the
-committee can type at any time.
+timetable), ask the committee, change the setup (only what the committee chose), try a change (a what-if), and finish.
+It cannot run code, see anything outside the setup, or publish. The chat shows each step; a question appears with
+buttons, and the committee can type at any time.
+
+**What-ifs.** Ask "what if Mr Tan had Wednesday afternoons free?" and the AI tries the change on a copy: it solves from
+the latest timetable and shows a comparison (checks, lessons after school, lessons moved, teachers' free periods between
+lessons, gaps in classes' days) with **Keep it** and **Drop it**. Preview shows the what-if timetable until you choose.
+Kept, it becomes the setup and the latest timetable; dropped, everything is as it was.
 
 The AI works on a copy of the setup. **Keep the AI's changes in my setup** copies its changes back; **Publish** makes
 the PDFs, the Excel workbook and the timetable pages and swaps them in for teachers and students (about a minute).
