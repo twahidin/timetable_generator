@@ -495,7 +495,7 @@ const VIEWS = {
   },
   generate() {
     const st = G.st || {}, off = st.ai && !st.ai.ok;
-    const facts = [st.ai && st.ai.ok ? `AI: ${esc(st.ai.provider)} · ${esc(st.ai.model)}` : ""].filter(Boolean);
+    const facts = [st.ai && st.ai.ok ? `AI: ${esc(st.ai.provider)} · ${esc(st.ai.model)}${st.ai.effort ? ` · effort ${esc({ xhigh: "extra high" }[st.ai.effort] || st.ai.effort)}` : ""}` : ""].filter(Boolean);
     const secs = solveSecs(), mins = [5, 20, 60, 120, 240, 480].filter(m => m * 60 <= (st.solve_max || 28800));
     if (!mins.includes(secs / 60)) mins.push(secs / 60), mins.sort((a, b) => a - b);
     const long = `<label class="row" style="gap:6px" title="A tight timetable can take a long time to find. The best timetable so far is kept if you press Stop.">Solve for up to

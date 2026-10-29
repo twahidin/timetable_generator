@@ -5,8 +5,10 @@ Set in Railway variables:
   AI_API_KEY   the provider's key (ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY also work)
   AI_MODEL     model name exactly as the provider lists it (Anthropic defaults to claude-opus-5-5)
   AI_BASE_URL  optional, for an OpenAI-compatible endpoint other than the default
+  AI_EFFORT    Anthropic only: how hard the model thinks, low | medium | high | xhigh | max (default xhigh; none = the model's own)
 The key stays on the server; the browser never sees it."""
 import json, os, re, time
+import anthropic
 import requests
 import timetabler
 
@@ -16,7 +18,8 @@ DEFAULT_MODEL = {"anthropic": "claude-opus-5-5"}
 DEFAULT_BASE = {"anthropic": "https://api.anthropic.com", "openai": "https://api.openai.com/v1", "openrouter": "https://openrouter.ai/api/v1"}
 KEY_VARS = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
 MAX_STEPS = 120   # model calls in one go: a long run with many solves and questions still finishes
-MAX_TOKENS = 16000   # the model's thinking counts toward this as well as its reply
+MAX_TOKENS = 64000   # thinking counts toward this as well as the reply; replies are streamed, so a long one neither times out nor is cut short
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # models that take fallbacks "default" on Anthropic's own API: if a safety filter declines, Anthropic re-runs the request on a fallback model
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 
@@ -25,14 +28,16 @@ def config():
     key = os.environ.get("AI_API_KEY") or os.environ.get(KEY_VARS.get(p, "-"), "")
     model = os.environ.get("AI_MODEL") or DEFAULT_MODEL.get(p, "")
     base = (os.environ.get("AI_BASE_URL") or DEFAULT_BASE.get(p, "")).rstrip("/")
+    effort = (os.environ.get("AI_EFFORT") or "xhigh").strip().lower()
+    effort = None if effort in ("none", "off", "default") or p != "anthropic" else effort if effort in EFFORTS else "xhigh"
     ok = p == "mock" or (p in DEFAULT_BASE and bool(key) and bool(model))
     why = "" if ok else ("AI_PROVIDER is not set." if not p else f"AI_PROVIDER '{p}' is not one of anthropic, openai, openrouter." if p not in DEFAULT_BASE
                          else "AI_API_KEY is not set." if not key else "AI_MODEL is not set.")
-    return dict(provider=p, key=key, model=model or ("mock" if p == "mock" else ""), base=base, ok=ok, why=why)
+    return dict(provider=p, key=key, model=model or ("mock" if p == "mock" else ""), base=base, ok=ok, why=why, effort=effort)
 
 def public_config():
     c = config()
-    return dict(ok=c["ok"], provider=c["provider"], model=c["model"], why=c["why"])
+    return dict(ok=c["ok"], provider=c["provider"], model=c["model"], why=c["why"], effort=c["effort"])
 
 def system_prompt(run):
     try: skill = open(SKILL, encoding="utf-8").read()
@@ -82,6 +87,7 @@ def anthropic_body(cfg, system, history, tools):
         else: msgs.append(dict(role=role, content=[block]))
     for h in history:
         if h["role"] == "user": add("user", dict(type="text", text=h["text"]))
+        elif h.get("blocks") and h.get("model") == cfg["model"]: msgs.append(dict(role="assistant", content=h["blocks"]))   # the reply as it came, thinking included
         elif h["role"] == "assistant":
             blocks = ([dict(type="text", text=h["text"])] if h.get("text") else []) + \
                      [dict(type="tool_use", id=c["id"], name=c["name"], input=c["args"] or {}) for c in h.get("calls", [])]
@@ -90,24 +96,41 @@ def anthropic_body(cfg, system, history, tools):
     return dict(model=cfg["model"], max_tokens=MAX_TOKENS, system=[dict(type="text", text=system, cache_control=dict(type="ephemeral"))], messages=msgs,
                 **({"tools": [dict(name=t["name"], description=t["description"], input_schema=t["schema"]) for t in tools]} if tools else {}))
 
+_clients = {}
+
+def _client(cfg):
+    k = (cfg["key"], cfg["base"])
+    if k not in _clients: _clients[k] = anthropic.Anthropic(api_key=cfg["key"], base_url=cfg["base"], max_retries=4)
+    return _clients[k]
+
+KEEP = ("thinking", "redacted_thinking", "text", "tool_use")   # the blocks of a reply that go back on the next request
+
 def call_anthropic(cfg, system, history, tools):
+    """one model turn, streamed. Returns (text, tool calls, the reply's content blocks): the blocks go back unchanged on
+    the next request, so the model keeps its reasoning across tool calls. Tool inputs are buffered by the API (no eager
+    input streaming): they are small, and buffered inputs arrive validated."""
     body = anthropic_body(cfg, system, history, tools)
-    url, headers = cfg["base"] + "/v1/messages", {"x-api-key": cfg["key"], "anthropic-version": "2023-06-01", "content-type": "application/json"}
-    if cfg["model"] in FALLBACK_MODELS and cfg["base"] == DEFAULT_BASE["anthropic"]:
-        try: r = _post(url, {**headers, "anthropic-beta": "server-side-fallback-2026-07-01"}, {**body, "fallbacks": "default"})
-        except RuntimeError as e:
-            if "said 400" not in str(e) or "fallback" not in str(e).lower(): raise
-            r = _post(url, headers, body)   # this account or model does not take fallbacks: ask without them
-    else:
-        r = _post(url, headers, body)
+    if cfg.get("effort"): body["output_config"] = dict(effort=cfg["effort"])
+    client = _client(cfg)
+    def ask(**extra):
+        with client.beta.messages.stream(**body, **extra) as stream: return stream.get_final_message()
+    try:
+        if cfg["model"] in FALLBACK_MODELS and cfg["base"] == DEFAULT_BASE["anthropic"]:
+            try: msg = ask(betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+            except anthropic.BadRequestError as e:
+                if "fallback" not in str(e).lower(): raise
+                msg = ask()   # this account or model does not take fallbacks: ask without them
+        else: msg = ask()
+    except anthropic.APIConnectionError as e: raise RuntimeError(f"could not reach the AI service ({e})")
+    except anthropic.APIStatusError as e: raise RuntimeError(f"the AI service said {e.status_code}: {e.message}")
     # a cut-off or declined reply can hold a half-written tool call, so none of its tools run
-    if r.get("stop_reason") == "max_tokens": raise RuntimeError(f"its reply was cut off at the {MAX_TOKENS:,}-token limit before it finished")
-    if r.get("stop_reason") == "refusal":
-        cat = (r.get("stop_details") or {}).get("category")
+    if msg.stop_reason == "max_tokens": raise RuntimeError(f"its reply was cut off at the {MAX_TOKENS:,}-token limit before it finished")
+    if msg.stop_reason == "refusal":
+        cat = getattr(msg.stop_details, "category", None) if msg.stop_details else None
         raise RuntimeError("the AI service's safety filter declined this request" + (f" ({cat})" if cat else ""))
-    text ="\n".join(b.get("text", "") for b in r.get("content", []) if b.get("type") == "text").strip()
-    calls = [dict(id=b["id"], name=b["name"], args=b.get("input") or {}) for b in r.get("content", []) if b.get("type") == "tool_use"]
-    return text, calls
+    text = "\n".join(b.text for b in msg.content if b.type == "text").strip()
+    calls = [dict(id=b.id, name=b.name, args=b.input or {}) for b in msg.content if b.type == "tool_use"]
+    return text, calls, [b.model_dump(mode="json", exclude_none=True) for b in msg.content if b.type in KEEP and not (b.type == "text" and not b.text)]
 
 def openai_body(cfg, system, history, tools):
     msgs = [dict(role="system", content=system)]
@@ -184,13 +207,14 @@ def advise(question):
                 "on step 6, or merge it with a small group of the same subject, then solve again.")
     history = [dict(role="user", text=question)]
     call = call_anthropic if cfg["provider"] == "anthropic" else call_openai
-    text, _ = call(cfg, ADVISE, history, [])
+    text = call(cfg, ADVISE, history, [])[0]
     return text
 
 def call_model(cfg, run, system, history):
-    if cfg["provider"] == "mock": return call_mock(run, history)
+    """(text, tool calls, content blocks to send back next time, or None)"""
+    if cfg["provider"] == "mock": return call_mock(run, history) + (None,)
     if cfg["provider"] == "anthropic": return call_anthropic(cfg, system, history, timetabler.TOOLS)
-    return call_openai(cfg, system, history, timetabler.TOOLS)
+    return call_openai(cfg, system, history, timetabler.TOOLS) + (None,)
 
 
 # --------------------------------------------------------------------------------------------- the loop
@@ -207,11 +231,11 @@ def run_agent(run, user_text=None):
     for _ in range(MAX_STEPS):
         if run.stop.is_set(): return
         run.progress = "The AI is thinking..."
-        try: text, calls = call_model(cfg, run, system, run.history)
+        try: text, calls, blocks = call_model(cfg, run, system, run.history)
         except Exception as e:
             run.progress = ""; run.emit("error", text=f"The AI could not answer: {e}. Type a message to try again, or generate without AI."); run.save(); return
         run.progress = ""
-        run.history.append(dict(role="assistant", text=text, calls=calls)); run.save()
+        run.history.append(dict(role="assistant", text=text, calls=calls, **({"blocks": blocks, "model": cfg["model"]} if blocks else {}))); run.save()
         if text: run.emit("assistant", text=text)
         if not calls: return
         for c in calls:
