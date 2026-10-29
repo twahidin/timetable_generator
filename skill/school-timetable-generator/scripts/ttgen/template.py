@@ -10,7 +10,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.formatting.rule import FormulaRule, CellIsRule
 from openpyxl.workbook.defined_name import DefinedName
-from .spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, day_names, order_days, scopes_for, split_rules
+from .spec import RULE_TYPES, SCOPES, CODES, RECESS_ROWS, SETTING_RULES, ROLES, day_names, order_days, scopes_for, split_rules
 
 NAVY, SLATE = "1F4E78", "5B6B7F"
 HF = Font(name="Arial", bold=True, color="FFFFFF", size=10)
@@ -133,10 +133,14 @@ def write_template(spec, path, extra_rows=120):
                 pe_at_once=rs.get("pe_at_once"), max_day=rs.get("max_day"), recess="Yes" if "recess" in rs else "No")
     notes = dict(once_a_day="Yes / No", after_school="Yes: the 'A' periods on Day structure are used only when a class cannot fit. No: never.",
                  pe_at_once="Leave empty for no limit (e.g. the field and hall take 2 classes each).", max_day="Leave empty for no limit. 15 (5 hours) is a common cap.",
-                 recess="Yes / No (checked after solving)")
+                 recess="Yes: every teacher is free for a recess each day (a whole recess, or the recess length inside a recess window). The solver keeps it.")
     rows += [(s["label"], vals[s["key"]], notes[s["key"]]) for s in SETTING_RULES]
     clock_txt = lambda v: _t(v) if isinstance(v, str) and len(v) <= 5 and v.count(":") == 1 and v.replace(":", "").isdigit() else v   # '15:20' back to a time
-    rows += [(x[0], clock_txt(x[1] if len(x) > 1 else None), x[2] if len(x) > 2 else "") for x in sc.get("extra_settings", [])]
+    more_rows = list(sc.get("extra_settings", []))
+    if any("W" in str(row) for d in spec.get("day_structure", {}).values() for row in d.values()):   # recess windows: their Settings rows
+        have = [str(x[0]).strip().lower() for x in more_rows]
+        more_rows += [[k, v, n] for k, v, n in RECESS_ROWS if not any(h.startswith(k.lower()) for h in have)]
+    rows += [(x[0], clock_txt(x[1] if len(x) > 1 else None), x[2] if len(x) > 2 else "") for x in more_rows]
     at = {}
     for i, (k, v, n) in enumerate(rows, start=5):
         at[k] = i
@@ -147,6 +151,7 @@ def write_template(spec, path, extra_rows=120):
     B.dv(st, yn, '"Yes,No"', "Yes or No.")
     for k, r in at.items():
         if str(k).lower().startswith("students have no free periods"): B.dv(st, f"B{r}", '"Yes,Prefer,No"', "Yes, Prefer or No.")
+        if str(k).lower().startswith("floating recess goes by"): B.dv(st, f"B{r}", '"Level,Class"', "Level or Class.")
     st.column_dimensions["A"].width = 50; st.column_dimensions["B"].width = 28; st.column_dimensions["C"].width = 70
     SLEN, SSTART, SLL = f"Settings!$B${at['Period length (minutes)']}", f"Settings!$B${at['Period 0 starts at']}", f"Settings!$B${at['Lesson length (periods)']}"
     pt = wb.create_sheet("Period times")
@@ -179,8 +184,8 @@ def write_template(spec, path, extra_rows=120):
                 c = ds.cell(rr, 3 + p, v); c.font = INF; c.alignment = Alignment(horizontal="center"); c.border = BOX
             rr += 1
     rng = f"C6:{CL(2 + NP)}{rr - 1}"
-    B.dv(ds, rng, '"F,L,R,U,A"', "Use F, L, R, U, A or leave blank.")
-    for code, col in (("F", "C9C9C9"), ("L", "CFE0F3"), ("R", "F6C28B"), ("U", "A9D8B0"), ("A", "FFE699")):
+    B.dv(ds, rng, '"F,L,R,W,U,A"', "Use F, L, R, W, U, A or leave blank.")
+    for code, col in (("F", "C9C9C9"), ("L", "CFE0F3"), ("R", "F6C28B"), ("W", "FBE2C8"), ("U", "A9D8B0"), ("A", "FFE699")):
         ds.conditional_formatting.add(rng, CellIsRule(operator="equal", formula=[f'"{code}"'], fill=PatternFill("solid", fgColor=col)))
     ds.column_dimensions["A"].width = 8; ds.column_dimensions["B"].width = 11
     for p in range(NP): ds.column_dimensions[CL(3 + p)].width = 4.6

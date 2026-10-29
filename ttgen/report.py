@@ -34,7 +34,8 @@ def assign_rooms(res):
     """hand out rooms after solving. Each group gets a room it may use (Problem.allowed: its kind for that week, kept for it or
     for anyone, seating it) that is free for the whole lesson: a whole-class lesson its home room; otherwise the room the group
     had before, a home room of its class, a room kept for it, then the smallest that seats it. Bigger groups choose first.
-    None free: TBC (the checks report it)"""
+    None free: the groups in one of its rooms move to other rooms they may use, if that makes way; else TBC (the checks
+    report it)"""
     P = res["problem"]; NP = P.NP; cap = P.room_cap
     occ = collections.defaultdict(collections.Counter)
     for r in P.spec.get("rules", []):
@@ -67,6 +68,32 @@ def assign_rooms(res):
             if x:
                 for q in L["pos"]: occ[x][q] += 1
                 used.setdefault(key, x)
+    # a group left without a room (the rooms it may use were handed to groups that could have gone elsewhere): the groups
+    # in one of its rooms move to other free rooms they may use, making way
+    smallest = lambda x: (P.seats.get(x) or 10 ** 6, x)
+    for L in lessons:
+        for r in L["part"]:
+            if L["rooms"].get(id(r)) != "TBC": continue
+            for x in sorted(P.allowed(r, L["unit"], week(L))[1], key=smallest):
+                inway = [(M, s) for M in lessons if M is not L and set(M["pos"]) & set(L["pos"]) for s in M["part"] if M["rooms"].get(id(s)) == x]
+                if not inway: continue
+                for M, s in inway:
+                    for q in M["pos"]: occ[x][q] -= 1
+                moves = []
+                for M, s in inway:
+                    y = next((y for y in sorted(P.allowed(s, M["unit"], week(M))[1], key=smallest) if y != x and free(y, M["pos"])), None)
+                    if y is None: break
+                    moves.append((M, s, y))
+                    for q in M["pos"]: occ[y][q] += 1
+                if len(moves) == len(inway) and free(x, L["pos"]):
+                    for M, s, y in moves: M["rooms"][id(s)] = y
+                    L["rooms"][id(r)] = x
+                    for q in L["pos"]: occ[x][q] += 1
+                    break
+                for M, s, y in moves:   # no way through this room: put everything back
+                    for q in M["pos"]: occ[y][q] -= 1
+                for M, s in inway:
+                    for q in M["pos"]: occ[x][q] += 1
 
 def _seat_checks(res):
     """rooms too small for their group, rooms used against their purpose, and groups bigger than every room they may use"""
@@ -117,6 +144,7 @@ def check(res):
         for c in x["unit"]["classes"]:
             for q in x["pos"]: occ[(c, q)].append(x)
     side = 0
+    rows = {c: P.class_rows(c, res.get("recess")) for c in P.cls if any(P.windows.get(P.level_of[c], []))}   # each class's day, its floating recess placed
     for (c, q), xs in occ.items():
         if len(xs) > 1:
             if any(x["unit"]["kind"] == "class" for x in xs): probs.append(f"Class clash: {c} at {P.days[q // NP]} period {q % NP}.")
@@ -126,7 +154,10 @@ def check(res):
         if keep is not None and x["pos"][-1] % NP >= keep:   # Settings 'Lessons end by': the lesson runs past the time for its day
             probs.append(f"{x['unit']['name']} ends after {clock(P.spec['school'], keep)} on {d} (Settings: Lessons end by)."); continue
         for q in x["pos"]:
-            if P.grid[lv][q // NP][q % NP] not in "LA": probs.append(f"{x['unit']['name']} sits in a break at {P.days[q // NP]} period {q % NP}.")
+            if P.grid[lv][q // NP][q % NP] not in "LAW": probs.append(f"{x['unit']['name']} sits in a break at {P.days[q // NP]} period {q % NP}.")
+        for c in x["unit"]["classes"]:
+            q = next((q for q in x["pos"] if rows[c][q // NP][q % NP] == "R" and P.grid[P.level_of[c]][q // NP][q % NP] == "W"), None) if c in rows else None
+            if q is not None: probs.append(f"{x['unit']['name']} sits in {c}'s recess at {P.days[q // NP]} period {q % NP}.")
     for r in P.spec.get("rules", []):
         if r.get("rule") == "Not available" and r.get("scope") == "Teacher" and str(r.get("strength") or "Must") == "Must":
             S, _ = P.rule_positions(r)
@@ -157,28 +188,34 @@ def check(res):
             N = int(r["number"]); who = [r["target"]] if r["scope"] == "Teacher" else list(tpos)
             bad = [t for t in who if _longest_run(tpos[t], NP) > N]
             post.append(f"Max periods in a row ({N}): " + (f"{len(bad)} teachers go over: {', '.join(bad[:8])}" if bad else "kept by everyone."))
-        if r.get("rule") == "At least one recess a day":
+        if r.get("rule") == "At least one recess a day":   # free for a whole recess (R), or the recess length inside a recess window (W)
             who = [r["target"]] if r["scope"] == "Teacher" else list(tpos)
             bad = []
             for t in who:
                 for d in range(P.ND):
-                    rec = set()
-                    for lv in P.levels:
-                        rec |= {d * NP + p for p, ch in enumerate(P.grid[lv][d]) if ch == "R"}
-                    groups = _runs_set(rec, NP)
-                    if tpos[t] & {q for q in range(d * NP, d * NP + NP)} and groups and all(g & tpos[t] for g in groups): bad.append(f"{t} ({P.days[d]})")
+                    opts = P.break_options(d); q0 = d * NP
+                    if tpos[t] & set(range(q0, q0 + NP)) and opts and not any(not set(range(q0 + s, q0 + s + n)) & tpos[t] for a, b, n in opts for s in range(a, b + 1)):
+                        bad.append(f"{t} ({P.days[d]})")
             post.append("At least one recess a day: " + (f"missed on {len(bad)} teacher-days: {', '.join(bad[:6])}" if bad else "kept by everyone."))
+    if P.recess_cap:   # Settings 'Most classes at recess at once' (canteen space)
+        at = collections.Counter()
+        for c in P.cls:
+            for d, row in enumerate(P.class_rows(c, res.get("recess"))):
+                at.update(d * NP + p for p, ch in enumerate(row) if ch == "R")
+        over = sorted(q for q, n in at.items() if n > P.recess_cap)
+        if over: probs.append(f"More than {P.recess_cap} classes at recess at once on {P.days[over[0] // NP]} period {over[0] % NP}" + (f" and {len(over) - 1} other periods." if len(over) > 1 else "."))
     nf = no_free_periods(P.spec["school"])
     if nf in ("Yes", "Prefer") and P.spec.get("students"):   # Settings 'Students have no free periods': counted here, not enforced
-        free = []
+        free = []; crow = {}
         for s in P.spec["students"]:
             lv = P.level_of.get(s.get("class"))
             if lv not in P.grid: continue
-            pos = set(ecp.get(s["class"], ())) | {q for g in s.get("groups") or [] for q in code_l.get(g, ())}
+            g = crow.get(s["class"]) or crow.setdefault(s["class"], P.class_rows(s["class"], res.get("recess")))
+            pos = set(ecp.get(s["class"], ())) | {q for g_ in s.get("groups") or [] for q in code_l.get(g_, ())}
             n = 0
             for d in range(P.ND):
                 qs = [q for q in pos if q // NP == d]
-                if qs: n += sum(1 for q in range(min(qs), max(qs) + 1) if q not in pos and P.grid[lv][d][q % NP] == "L")
+                if qs: n += sum(1 for q in range(min(qs), max(qs) + 1) if q not in pos and g[d][q % NP] == "L")
             free.append(n)
         if free: post.append(f"Students have no free periods ({nf}): counted, not enforced by this solver. Free periods a cycle: {sum(free) / len(free):.1f} on average, "
                              f"{max(free)} at most; {sum(1 for f in free if f == 0)} of {len(free)} students have none.")
@@ -191,13 +228,6 @@ def _longest_run(pos, NP):
     for q in sorted(pos):
         cur = cur + 1 if prev is not None and q == prev + 1 and q // NP == prev // NP else 1; best = max(best, cur); prev = q
     return best
-def _runs_set(s, NP):
-    out, cur = [], set(); prev = None
-    for q in sorted(s):
-        if prev is not None and (q != prev + 1): out.append(cur); cur = set()
-        cur.add(q); prev = q
-    if cur: out.append(cur)
-    return out
 
 def write_timetable(res, path, return_model=False):
     """assign rooms, check, and write the combined workbook (export.write_excel: Read me, Classes, Teachers, Rooms,

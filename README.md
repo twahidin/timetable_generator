@@ -75,6 +75,17 @@ and a group keeps its room where it can). The checks flag a room too small, a ro
 with no free room, and groups bigger than every room they may use (fix the seats or split the group). About 1 GB of
 memory is enough for a 1,500-student school.
 
+**Floating recess:** paint **W** (recess window) periods on Day structure where the recess may go, for example
+periods 5-10 instead of a fixed recess at 7-8. The solver places the recess inside each window and uses the rest of
+the window for lessons. Settings: **Floating recess goes by** Level (the whole level goes together, its time may
+differ by day) or Class (each class on its own); **Floating recess length (periods)**; **Most classes at recess at
+once** (canteen space; fixed R recess counts too; blank = no limit). Make each window the recess plus whole lessons
+(2 + 3 + 3 periods with 3-period lessons), so the lessons still fit wherever the recess goes: on a full school, a
+recess that leaves an odd period beside it costs a lesson, and a tight canteen limit can then leave no timetable. With "Every teacher gets at least one recess a day"
+on, every teacher is free for a whole R recess, or the recess length inside a W window, each day. The class timetables,
+PDFs and pages show each class's own recess; the timetable workbook lists them on a Recess sheet. On Adjust, a lesson
+cannot move into its class's recess; "Make room" may move the recess.
+
 **Try it without a key:** `AI_PROVIDER=mock` runs a scripted stand-in for the AI (it checks, solves, asks one
 question and finishes), so you can test the whole flow before adding a real key. Test once with your real key
 after deploying.

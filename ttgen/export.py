@@ -15,7 +15,7 @@ from openpyxl.worksheet.pagebreak import Break
 from openpyxl.worksheet.merge import MergedCellRange
 from .reader import read_template, derive
 from .report import LESSON_HEADERS, short_subject, clock
-from .spec import periods_by_day, trim_day
+from .spec import periods_by_day, resolve_row, trim_day
 
 ENTIRE = "Entire Class"
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
@@ -60,11 +60,20 @@ def _week_day(name):
 
 
 # ----------------------------------------------------------------------------------------------- the model
-def _model(spec, days, lessons, notes=(), status=None):
+def _model(spec, days, lessons, notes=(), status=None, recess=None):
+    """recess: {class: [[day, period, length]]}, each class's floating recess (in the recess windows, W on Day structure)"""
     sc = spec["school"]; NP = int(sc["periods_per_day"]); ND = len(days); ds = spec["day_structure"]
     levels = [str(x) for x in sc["levels"]]
     keep = periods_by_day(sc, days)   # Settings 'Lessons end by (...)': later periods are no school on those days
-    grid = {lv: [trim_day((ds.get(lv, {}).get(d) or "." * NP).ljust(NP, ".")[:NP], keep.get(d)) for d in days] for lv in levels}
+    raw = {lv: [trim_day((ds.get(lv, {}).get(d) or "." * NP).ljust(NP, ".")[:NP], keep.get(d)) for d in days] for lv in levels}
+    grid = {lv: [row.replace("W", "L") for row in rows] for lv, rows in raw.items()}   # a level's day: its recess windows are lesson time
+    cgrid = {}   # a class's day where it has recess windows: its own recess placed
+    for c in spec["classes"]:
+        lv = str(c.get("level") or "")
+        if any("W" in row for row in raw.get(lv, [])):
+            spans = collections.defaultdict(list)
+            for d, p, n in (recess or {}).get(str(c["class"]), []): spans[d].append((p, n))
+            cgrid[str(c["class"])] = [resolve_row(row, spans[d]) for d, row in enumerate(raw[lv])]
     times = [[clock(sc, p), clock(sc, p + 1)] for p in range(NP)]
     classes = [dict(name=str(c["class"]), level=str(c.get("level") or ""), size=c.get("size") or "", home=c.get("home_room") or "") for c in spec["classes"]]
     seen = {c["name"] for c in classes}
@@ -109,7 +118,8 @@ def _model(spec, days, lessons, notes=(), status=None):
         else: planned[("G", x["code"])] = int(x["periods"])
     m = dict(school=dict(name=sc.get("name") or "School", timetable=sc.get("timetable") or "Timetable", weeks=int(sc.get("weeks") or 1),
                          period_minutes=int(sc["period_minutes"]), start_time=str(sc["start_time"]), kind=sc.get("kind") or ""),
-             days=list(days), NP=NP, ND=ND, times=times, grid=grid, keep=keep, levels=levels, classes=classes, teachers=teachers, rooms=rooms,
+             days=list(days), NP=NP, ND=ND, times=times, grid=grid, cgrid=cgrid, recess={c: [list(x) for x in v] for c, v in (recess or {}).items()},
+             keep=keep, levels=levels, classes=classes, teachers=teachers, rooms=rooms,
              subjects=subjects, lessons=lessons, students=students, room_cap=cap, planned=planned, notes=list(notes or []), status=status,
              generated=datetime.date.today().strftime("%d %b %Y"))
     m["class_ix"] = {c["name"]: c for c in classes}; m["teacher_ix"] = {t["name"]: t for t in teachers}; m["room_ix"] = {r["name"]: r for r in rooms}
@@ -129,7 +139,8 @@ def model_from_result(res):
                             classes=[str(c) for c in (x["unit"]["classes"] if x["unit"]["kind"] == "class" else r["classes"])],
                             subject=str(r["subject"]), group=str(r["code"]), teachers=[str(t) for t in r["teachers"]],
                             room=str(x.get("rooms", {}).get(id(r), "") or ""), ext=bool(x["ext"])))
-    return _model(P.spec, P.days, out, notes=res.get("notes", []), status=res.get("status"))
+    recess = {c: [[q // NP, q % NP, n] for q, n in spans] for c, spans in (res.get("recess") or {}).items()}
+    return _model(P.spec, P.days, out, notes=res.get("notes", []), status=res.get("status"), recess=recess)
 
 def _split_list(v):
     return [s.strip() for s in str(v or "").split(",") if s.strip()]
@@ -173,7 +184,13 @@ def model_from_files(setup_path, timetable_path):
             if "Solver status:" in v: status = v.split("Solver status:")[-1].strip(" .")
             if sect in ("Notes", "Rules checked after solving"): notes.append(v)
     if bad: notes.append(f"{len(bad)} rows on the Lessons sheet were skipped (unknown day or no start period): rows {', '.join(map(str, bad[:10]))}.")
-    return _model(spec, days, out, notes=notes, status=status)
+    recess = collections.defaultdict(list)   # the Recess sheet: each class's floating recess
+    if "Recess" in wb.sheetnames:
+        rows = wb["Recess"].iter_rows(values_only=True); h = {str(v).strip().lower(): i for i, v in enumerate(next(rows, ())) if v is not None}
+        for row in rows:
+            c, day, p, n = (row[h[k]] if k in h and h[k] < len(row) else None for k in ("class", "day", "start period", "periods"))
+            if c not in (None, "") and str(day or "").lower() in dix and p is not None: recess[str(c)].append([dix[str(day).lower()], int(p), int(n or 1)])
+    return _model(spec, days, out, notes=notes, status=status, recess=recess)
 
 
 # ----------------------------------------------------------------------------------------------- independent checks
@@ -222,6 +239,8 @@ def check_model(m):
             probs.append(f"{x['subject']} {x['group']} ends after {m['times'][min(k, m['NP'] - 1)][0]} on {where(x['d'], x['p'])} (Settings: Lessons end by)."); continue
         if lv in m["grid"] and any(m["grid"][lv][x["d"]][q] not in "LA" for q in range(x["p"], min(m["NP"], x["p"] + x["n"]))):
             probs.append(f"{x['subject']} {x['group']} sits in a break or outside the day on {where(x['d'], x['p'])}.")
+        elif any(m["cgrid"][c][x["d"]][q] == "R" for c in x["classes"] if c in m["cgrid"] for q in range(x["p"], min(m["NP"], x["p"] + x["n"]))):
+            probs.append(f"{x['subject']} {x['group']} sits in a class's recess on {where(x['d'], x['p'])}.")
     placed = collections.Counter(); seen = set()
     for x in L:
         if x["group"] == ENTIRE:
@@ -334,7 +353,7 @@ def class_view(m, c):
     nper = len(used)
     stats = [(info["level"], "level"), (str(info["size"] or "-"), "students"), (info["home"] or "-", "home room"), (str(nper), "periods a cycle")]
     sub = f"{info['level']} · {info['size']} students · home room {info['home'] or '-'}"
-    return dict(kind="classes", key=c, kicker="Class", title=f"Class {c}", subtitle=sub, stats=stats, codes=_codes_for(m, [info["level"]]),
+    return dict(kind="classes", key=c, kicker="Class", title=f"Class {c}", subtitle=sub, stats=stats, codes=m["cgrid"].get(c) or _codes_for(m, [info["level"]]),
                 cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=info["level"])
 
 def teacher_view(m, t):
@@ -399,7 +418,7 @@ def student_view(m, s):
     lv = m["class_ix"].get(s["cls"], {}).get("level") or s["level"]
     stats = [(s["cls"], "class"), (lv, "level"), (str(len(s["groups"])), "groups"), (str(len(used)), "periods a cycle")]
     return dict(kind="students", key=s["id"], kicker="Student", title=s["name"], subtitle=f"{s['id']} · Class {s['cls']} · {lv}",
-                stats=stats, codes=_codes_for(m, [lv]), cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=s["cls"])
+                stats=stats, codes=m["cgrid"].get(s["cls"]) or _codes_for(m, [lv]), cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=s["cls"])
 
 def all_views(m, kind):
     if kind == "classes":
@@ -780,6 +799,14 @@ def write_excel(m, path, log=print):
     for c in ws[1]: c.font = Font(name="Calibri", bold=True, color="FFFFFF", size=10); c.fill = hdrfill
     for col, w in zip("ABCDEFGHIJKLMNO", (8, 11, 7, 7, 7, 7, 7, 7, 24, 22, 34, 12, 34, 14, 8)): ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"; ws.auto_filter.ref = ws.dimensions
+    if m["recess"]:   # each class's floating recess (the recess windows on Day structure)
+        ws = wb.create_sheet("Recess"); ws.append(["Class", "Level", "Day", "Start period", "End period", "Periods", "Starts", "Ends"])
+        for c, spans in sorted(m["recess"].items()):
+            for d, p, n in sorted(spans):
+                ws.append([c, m["class_ix"].get(c, {}).get("level", ""), m["days"][d], p, p + n - 1, n, m["times"][p][0], m["times"][min(NP - 1, p + n - 1)][1]])
+        for c in ws[1]: c.font = Font(name="Calibri", bold=True, color="FFFFFF", size=10); c.fill = hdrfill
+        for col, w in zip("ABCDEFGH", (10, 8, 11, 10, 10, 8, 8, 8)): ws.column_dimensions[col].width = w
+        ws.freeze_panes = "A2"; ws.auto_filter.ref = ws.dimensions
     ws = wb.create_sheet("Teacher load")
     ws.append(["Teacher", "Short", "Department", "Allowance", "Periods timetabled", "Most periods in a day", "Days teaching", "After-school periods"])
     for t in sorted(m["teachers"], key=lambda t: (str(t["dept"]), t["name"])):
@@ -799,7 +826,7 @@ def html_data(m, view="full", student_id=None, app=None):
     """data for the finder page. view: full (committee/teacher: everything), student (class timetables and the
     builder, no student list), personal (one student's own lessons only). Filtering happens here, on the server."""
     pal = [[t, a] for t, a in PALETTE]
-    d = dict(school=m["school"], generated=m["generated"], days=m["days"], NP=m["NP"], times=m["times"], grid=m["grid"], levels=m["levels"],
+    d = dict(school=m["school"], generated=m["generated"], days=m["days"], NP=m["NP"], times=m["times"], grid=m["grid"], cgrid=m["cgrid"], levels=m["levels"],
              classes=[[c["name"], c["level"], c["size"], c["home"]] for c in m["classes"]],
              teachers=[[t["name"], t["short"], t["dept"], t["allowance"]] for t in m["teachers"]],
              rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1)] for r in m["rooms"]],
@@ -818,6 +845,7 @@ def html_data(m, view="full", student_id=None, app=None):
         s = next(x for x in m["students"] if x["id"] == student_id); gs = set(s["groups"])
         d["lessons"] = [x for x in d["lessons"] if (x[8] == ENTIRE and s["cls"] in x[6]) or (x[8] != ENTIRE and x[8] in gs)]
         d["classes"] = [c for c in d["classes"] if c[0] == s["cls"]]
+        d["cgrid"] = {k: v for k, v in d["cgrid"].items() if k == s["cls"]}
         names = {t for x in d["lessons"] for t in x[9]}
         d["teachers"] = [t for t in d["teachers"] if t[0] in names]
         d["students"] = [[s["id"], s["name"], s["cls"], s["groups"]]]
