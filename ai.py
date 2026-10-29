@@ -197,7 +197,7 @@ move one lesson and the move clashes. Suggest 2-4 ways out, best first, as a sho
 exactly what to change and where: a swap or another time (from the free times and swaps given), moving the clashing
 lesson, merging the group with another group of the same subject and level (only if one teacher and one room can take
 the combined size), splitting a large group, or giving the lesson or the clashing one to another teacher. Changes to
-groups and teachers are made on step 6 (Lessons) of the setup and need a new solve; say so. Use names and clock times.
+groups and teachers are made on step 5 (Teaching groups & deployment) of the setup and need a new solve; say so. Use names and clock times.
 Do not invent lessons, teachers or rooms that are not in the message. 120 words at most."""
 
 def advise(question):
@@ -207,7 +207,7 @@ def advise(question):
     if cfg["provider"] == "mock":
         return ("(Test assistant) 1. Pick one of the free times listed, or a clean swap. 2. Let the solver make room: it keeps this lesson "
                 "there and moves the few lessons in the way. 3. If the clash is a teacher, give one of the two lessons to another teacher "
-                "on step 6, or merge it with a small group of the same subject, then solve again.")
+                "on step 5, or merge it with a small group of the same subject, then solve again.")
     history = [dict(role="user", text=question)]
     call = call_anthropic if cfg["provider"] == "anthropic" else call_openai
     text = call(cfg, ADVISE, history, [])[0]

@@ -11,8 +11,11 @@ published timetable with their access code and download PDFs.
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 
-The student list goes in on step 8 of the setup (**Students**): paste it from Excel or a CSV, or upload an .xlsx or
+The student list goes in on step 7 of the setup (**Students**): paste it from Excel or a CSV, or upload an .xlsx or
 .csv, with each student's ID, name, class and group codes; the committee can then edit each student's groups there.
+To fill groups in the app, tick students (shift-click for a run, or the top box for everyone shown) and **Add to group**,
+**Remove from group** or **Move to class** for all of them at once; a group in a band replaces the student's other group
+in that band.
 It is optional, but with it the solver makes sure no student has two lessons at once, and every student gets a
 personal code. Personal codes are made from each student's ID and `SECRET_KEY`, so they stay the same when the
 timetable is republished. The committee downloads them as a list (CSV) or as slips to print, one page per class.
@@ -37,11 +40,15 @@ timetable, as you would on **Adjust timetable**, then asks **Apply** or **No, pu
 nothing: the AI says why and offers clean alternatives, or lets the solver make room by moving as few other lessons as
 it can. Applied moves are on the Adjust page's Undo list.
 
-**Teachers for rows left blank.** On step 6 (Lessons), **Fill blank teachers** gives every row with no teacher one who is
+**Teachers for rows left blank.** On step 5 (Teaching groups & deployment), **Fill blank teachers** gives every row with no teacher one who is
 set to teach that subject at that level (step 4), never two groups of one band, keeping each teacher within their
 allowance and the load spread. Rows that name a teacher are never changed; Undo takes it back. The AI can do the same in
 the chat (it shows who gets what and the loads, and asks first). Co-teaching: a row may name up to three teachers, each
 blocked for the lesson and counted the full periods.
+
+**Deploying by hand.** On the same step, filter the teaching groups by level, subject or teacher, tick rows (shift-click
+for a run), pick a teacher and **Make Teacher 1**, **Add as co-teacher** or **Take off** for all of them at once. The bar shows
+the teacher's load now and with those groups; groups they are not set to teach, or two groups of one band, are flagged.
 
 The AI works on a copy of the setup. **Keep the AI's changes in my setup** copies its changes back; **Publish** makes
 the PDFs, the Excel workbook and the timetable pages and swaps them in for teachers and students (about a minute).
@@ -79,7 +86,7 @@ cannot hold its lessons, a class with more periods than its days), it says so st
 A school with 30 or more classes (`STAGED_FROM_CLASSES`) gets its first timetable level by level, hardest level first,
 then clashes between levels are cleared and the whole school is checked together (`ttgen/staged.py`, the skill's
 `--staged` solve): one whole-school search can find nothing for hours on a big, tight school. Later solves start from
-the latest timetable. A room holds one class at a time unless step 7 has a "Room · At most N at once" rule; a note on
+the latest timetable. A room holds one class at a time unless step 6 has a "Room · At most N at once" rule; a note on
 a Settings row such as "Field and Hall take 2 classes each" is read as those rules.
 
 **Rooms:** a group only goes in a room of its subject's kind that seats it (Venues **Capacity** = seats; the group size
@@ -123,7 +130,7 @@ files. If someone else saved a newer setup in the meantime, Save progress asks b
 **Adjusting by hand before publishing:** the **Adjust timetable** step shows the latest timetable for any class,
 teacher or room. Click a lesson, then move it earlier or later (← →), or cut it and click where it should go; make it
 a period shorter or longer where it is. Each move is checked against the same rules as the solver (teachers, classes,
-students, rooms, teacher availability and the rules on step 7). A move that clashes lists why and the ways out: free
+students, rooms, teacher availability and the rules on step 6). A move that clashes lists why and the ways out: free
 times for that lesson, clean swaps, **Let the solver make room** (it keeps the lesson there and moves as few other
 lessons as it can), **Ask the AI** (merging or splitting a group, another teacher), or placing it anyway. Moved lessons
 are pinned, so later solves keep them; **Undo move** steps back. A shorter or longer lesson changes the plan (that

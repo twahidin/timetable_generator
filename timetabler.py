@@ -181,7 +181,7 @@ def _room_fit(P):
             if n > have:
                 out.append(dict(row, kind_="impossible", text=f"Lessons that need {which} add up to {n} class-periods a cycle, but those rooms ({names}) hold at most {have} "
                                                               f"({c} class{'es' if c != 1 else ''} at a time × {slots} lesson periods): no timetable is possible. A room holds one class at a time "
-                                                              f"unless step 7 has a 'Room · At most N at once' rule for it."))
+                                                              f"unless step 6 has a 'Room · At most N at once' rule for it."))
             elif F == every and n > 0.9 * have:
                 out.append(dict(row, kind_="tight", text=f"Lessons that need a {kind} room fill {n} of the {have} class-periods its rooms ({names}) hold: very hard to fit."))
     return out
@@ -261,15 +261,15 @@ def advice(spec, status, secs, notes=()):
     fixes = []
     if fit:
         names = ", ".join(x["cls"] for x in fit)
-        fixes.append(dict(go="lessons", text=f"Give {names} some room: take a lesson (a few periods) off their busiest students, with Periods override on step 6 or fewer periods for the subject on step 3."))
+        fixes.append(dict(go="lessons", text=f"Give {names} some room: take a lesson (a few periods) off their busiest students, with Periods override on step 5 or fewer periods for the subject on step 3."))
         fixes.append(dict(go="school", text="Or make the day longer: a later 'Lessons end by' time or more L periods in the Day structure (School & day), or allow after-school slots."))
     if any(c.split(" teaches ")[0] in {t["name"] for t in spec["teachers"]} for c in cap if " teaches " in c):
-        fixes.append(dict(go="lessons", text="Move some groups from the busiest teachers named above to other teachers on step 6."))
+        fixes.append(dict(go="lessons", text="Move some groups from the busiest teachers named above to other teachers on step 5."))
     if any(c.startswith("Band ") and " rooms at once" in c for c in cap):
         fixes.append(dict(go="venues", text="Add rooms of the kinds named above on step 1, or split the band on step 5."))
     for x in _room_fit(P):
         if x["kind_"] != "impossible": continue
-        fixes.insert(0, dict(go="rules", text=f"Let the '{x['kind']}' rooms ({', '.join(x['rooms'])}) take more classes at once: on step 7 add a rule 'Room · {x['rooms'][0]} · At most N at once' "
+        fixes.insert(0, dict(go="rules", text=f"Let the '{x['kind']}' rooms ({', '.join(x['rooms'])}) take more classes at once: on step 6 add a rule 'Room · {x['rooms'][0]} · At most N at once' "
                                               f"for each of them (a Settings note such as '{' and '.join(x['rooms'][:2])} take 2 classes each' does the same). "
                                               f"Or add '{x['kind']}' rooms on step 1, or give some subjects another room kind on step 3."))
     if P.recess_cap and any(ws for rows in P.windows.values() for ws in rows):
@@ -277,9 +277,9 @@ def advice(spec, status, secs, notes=()):
                                             "fit around it, so a tight limit can leave some classes no place. Raise Most classes at recess at once, widen the recess windows (W), "
                                             "or set Floating recess goes by to Level (School & day)."))
     if any("matches nothing" in n or "no lesson matches" in n for n in notes):
-        fixes.append(dict(go="rules", text="Remove or correct the fixed lessons that match no lesson (step 7)."))
+        fixes.append(dict(go="rules", text="Remove or correct the fixed lessons that match no lesson (step 6)."))
     if any(str(r.get("strength") or "Must") == "Must" for r in spec.get("rules", [])):
-        fixes.append(dict(go="rules", text="Turn off any rule the school can do without (step 7, and the rules on School & day), then generate again. "
+        fixes.append(dict(go="rules", text="Turn off any rule the school can do without (step 6, and the rules on School & day), then generate again. "
                                            "With the AI timetabler, ask it to diagnose: it tests the rules one at a time and names any that block the timetable."))
     if status == "INFEASIBLE" and not fit and not any(x["kind_"] == "impossible" for x in _room_fit(P)):
         fixes.insert(0, dict(go="rules", text="The solver proved that no timetable exists with this setup: a rule or the data contradicts itself. Start with the rules and the lines above."))
