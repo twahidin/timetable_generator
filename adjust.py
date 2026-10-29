@@ -172,7 +172,7 @@ class Board:
                     for dd in days:
                         pos = dd * NP + int(r["from"])
                         if not any(start(b) == pos for b in self.by_unit[u["id"]]):
-                            add(f"A rule fixes {u['name']} at {self.when(pos, L['ln'])} (Fixed lessons, step 7).")
+                            add(f"A rule fixes {u['name']} at {self.when(pos, L['ln'])} (Fixed lessons, step 6).")
         return out
 
     def twins(self, k):
@@ -419,7 +419,7 @@ def resize(run, key, delta):
         # length and the same rows are interchangeable and numbered in time order (as the solver does)
         P2 = Problem(copy.deepcopy(spec2)); place = {}
         sig = lambda unit, rows: tuple(sorted((r["subject"], r.get("code"), tuple(sorted(set(r["classes"]) & set(unit["classes"])))) for r in rows))
-        refuse = ValueError(f"{nm} cannot change length on its own: its groups would then share a lesson they do not share now. Change the periods on step 6 instead.")
+        refuse = ValueError(f"{nm} cannot change length on its own: its groups would then share a lesson they do not share now. Change the periods on step 5 instead.")
         for u2 in P2.units:
             if u2["key"] != u["key"]:
                 for n, i in u2["lessons"]:

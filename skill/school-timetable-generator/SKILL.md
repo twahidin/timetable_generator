@@ -21,7 +21,7 @@ subject-based banding) schools, and for any school that fills the same template.
   `1 Venues`, `2 Classes`, `3 Subjects`, `4 Teachers`, `Roles`, `5 Blocks`, `6 Lessons`, `Teacher availability`,
   `Fixed lessons`, `More rules`, `Rule types`, `Students`, `Combinations`, `Lists` (the current setup layout, from template v9 on; a school's
   own notes sheet may follow `README`). Workbooks in the older layout (a `7 Rules` sheet) read too.
-  The setup web app and the timetable pages call a block a **band** (step 5 Bands); the workbook keeps `5 Blocks` and
+  The setup web app and the timetable pages call a block a **band** (a card on step 5, Teaching groups & deployment); the workbook keeps `5 Blocks` and
   the `Block` columns. When talking to the committee, say band.
   Blank or sample templates come with this skill (`templates/`) or from the setup web app.
 - Python 3.10+ with `pip install ortools openpyxl reportlab` (reportlab is only for the PDFs).

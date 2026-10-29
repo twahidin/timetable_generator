@@ -70,6 +70,11 @@ tr.bad td{background:var(--warn-bg)}
 .dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
 .dl .card{margin:0}
 ol.howto li{margin:6px 0;line-height:1.5}
+details.bands{margin-top:14px}details.bands summary{cursor:pointer;list-style-position:outside;margin-left:18px}details.bands summary h2{display:inline;margin:0}
+.bulk{position:sticky;top:76px;gap:8px;z-index:3;background:#eef5ff;border:1px solid #bcd3f5;border-radius:10px;padding:8px 12px;margin:8px 0;box-shadow:0 2px 8px rgba(30,50,90,.08)}
+.bulk .over{color:#b45309;font-weight:600}
+.bulk select{max-width:280px}
+tr.picked td{background:#f2f7ff}
 .helper{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0}
 .stat{display:inline-block;margin-right:16px;color:var(--muted)}.stat b{color:var(--ink);font-size:16px}
 @media (max-width:1100px){.layout{grid-template-columns:1fr}.steps{position:static;flex-direction:row;overflow:auto}.issues{position:static;max-height:none}}
