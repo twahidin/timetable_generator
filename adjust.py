@@ -6,7 +6,7 @@ there and moves as few other lessons as it can), or asking the AI (merge or spli
 Moves change the run's latest timetable (its placements file); the timetable workbook is rewritten before Preview and
 Publish. Lessons moved by hand are pinned: later solves in the run keep them where they were put."""
 import collections, copy, math, os, threading
-from ttgen.solver import Problem, lesson_domains, units_for
+from ttgen.solver import Problem, RECESS_KEY, lesson_domains, units_for
 from ttgen.report import assign_rooms, check, clock
 from store import now, read_json, write_json
 
@@ -15,7 +15,8 @@ _boards = {}   # (run id, solve number) -> Board
 
 
 class Board:
-    """the latest timetable, rebuilt from the setup it was solved from and its placements {lesson key: start}"""
+    """the latest timetable, rebuilt from the setup it was solved from and its placements {lesson key: start} (and
+    RECESS_KEY: {class: [[start, length]]}, each class's floating recess)"""
     def __init__(self, spec, placements):
         self.spec = spec
         self.P = P = Problem(copy.deepcopy(spec)); self.NP = NP = P.NP; self.sc = P.spec["school"]
@@ -23,6 +24,7 @@ class Board:
         self.once = any(r.get("rule") == "Once a day per group" for r in self.rules)
         self.dom = {d["key"]: d for d in lesson_domains(P, P.spec.get("rules", []), [])}
         self.L = {k: dict(unit=d["u"], ln=d["ln"], i=d["i"], part=d["part"], start=placements[k], key=k) for k, d in self.dom.items() if k in placements}
+        self.set_recess(placements.get(RECESS_KEY) or {})
         self.tset = {k: {t for r in L["part"] for t in r["teachers"]} for k, L in self.L.items()}
         self.by_unit = collections.defaultdict(list)
         for k, L in self.L.items(): self.by_unit[L["unit"]["id"]].append(k)
@@ -59,6 +61,9 @@ class Board:
                 S, _ = P.rule_positions(r); self.room_off[r["target"]] |= S
         self.index()
 
+    def set_recess(self, recess):
+        self.recess = {c: [list(x) for x in v] for c, v in recess.items()}
+
     def needs(self, k, start):
         """the rooms each row of lesson k may use if it starts at `start`: [(kind, allowed rooms, group name)]"""
         L = self.L[k]; P = self.P; week = "Odd" if P.odd_day[start // self.NP] else "Even"; out = []
@@ -80,7 +85,7 @@ class Board:
         u = self.L[k]["unit"]
         if u["kind"] == "class": return u["name"]
         if u["kind"] == "group": r = u["rows"][0]; return f"{r['subject']} {r['code']} ({', '.join(u['classes'])})"
-        return f"{u['name']} block"
+        return f"{u['name']} band"
 
     # ---- checks
     def why_not(self, k, s):
@@ -103,6 +108,9 @@ class Board:
         for k in moves:
             L = self.L[k]; u = L["unit"]; s = start(k); d = s // NP; nm = self.name(k)
             if s not in self.dom[k]["vals"]: add(self.why_not(k, s))
+            for c in u["classes"]:   # a class's floating recess
+                hit = next(((st, n) for st, n in self.recess.get(c, ()) if any(st <= q < st + n for q in cover(k))), None)
+                if hit: add(f"{c} has recess then ({self.when(*hit)}).")
             others = {b for q in cover(k) for b in at(q)} - {k}
             for b in sorted(others, key=lambda b: start(b)):
                 B = self.L[b]; ub = B["unit"]; when = self.when(start(b), B["ln"])
@@ -216,10 +224,10 @@ class Board:
     def res(self):
         NP, P = self.NP, self.P
         ls = [dict(L, ext=any(P.grid[L["unit"]["level"]][L["start"] // NP][L["start"] % NP + q] == "A" for q in range(L["ln"]))) for L in self.L.values()]
-        return dict(status="FEASIBLE", problem=P, lessons=ls, notes=[])
+        return dict(status="FEASIBLE", problem=P, lessons=ls, recess=self.recess, notes=[])
 
     def placements(self):
-        return {k: L["start"] for k, L in self.L.items()}
+        return dict({k: L["start"] for k, L in self.L.items()}, **{RECESS_KEY: self.recess})
 
 
 # ------------------------------------------------------------------------------------------- per run
@@ -262,7 +270,8 @@ def state(run):
         lessons.append(dict(key=L["key"], start=L["start"], ln=L["ln"], name=b.name(L["key"]), kind=L["unit"]["kind"], level=L["unit"]["level"],
                             classes=L["unit"]["classes"], teachers=sorted(b.tset[L["key"]]), rows=rows, pinned=L["key"] in e["pins"]))
     s = run.solved
-    return dict(n=s["n"], days=P.days, NP=NP, clock=[clock(b.sc, p) for p in range(NP + 1)], grid={lv: rows for lv, rows in P.grid.items()},
+    return dict(n=s["n"], days=P.days, NP=NP, clock=[clock(b.sc, p) for p in range(NP + 1)], grid={lv: [x.replace("W", "L") for x in rows] for lv, rows in P.grid.items()},
+                cgrid={c: P.class_rows(c, b.recess) for c in b.recess},
                 classes=sorted(P.level_of), teachers=sorted({t for ts in b.tset.values() for t in ts}), rooms=sorted({v["room"] for v in P.spec["venues"]}),
                 level_of=P.level_of, lessons=lessons, moves=len(e["history"]), can_undo=bool(e["history"]), can_redo=bool(e["redo"]),
                 last=e["history"][-1]["label"] if e["history"] else "", busy=run.busy,
@@ -279,20 +288,24 @@ def proposal(run, key, start):
                 swaps=[dict(key=x, start=b.L[x]["start"], label=f"Swap with {b.name(x)} ({b.when(b.L[x]['start'], b.L[x]['ln'])})") for x in sw],
                 free=[dict(start=s, label=b.when(s, L["ln"])) for s in free])
 
-def apply(run, moves, label, pin=None):
+def apply(run, moves, label, pin=None, recess=None):
     """move lessons ({key: start}), keep the change for undo, pin the lessons the committee placed (`pin`: keys of
-    `moves`, default all of them), and update the checks"""
+    `moves`, default all of them), and update the checks. recess: each class's floating recess after the change (a solve
+    may move it)"""
     with _lock:
         b = board(run); e = edits(run)
         full = b.ordered(moves)
         if not full: return
+        moved_recess = recess is not None and recess != b.recess
         pins_before = dict(e["pins"]); pins = b.rekey(e["pins"], full)
         for k in (moves if pin is None else pin):   # pin whichever twin now sits at the time asked for
             pins.update({x: moves[k] for x in b.twins(k) if full.get(x, b.L[x]["start"]) == moves[k]})
         before = {k: b.L[k]["start"] for k in full}
         for k, s in full.items(): b.L[k]["start"] = s
         b.index(); e["pins"] = pins
-        e["history"].append(dict(label=label, before=before, after=full, pins_before=pins_before, pins_after=dict(pins), at=now())); e["redo"] = []
+        h = dict(label=label, before=before, after=full, pins_before=pins_before, pins_after=dict(pins), at=now())
+        if moved_recess: h.update(recess_before=b.recess, recess_after=recess); b.set_recess(recess)
+        e["history"].append(h); e["redo"] = []
         _save(run, b, e)
     run.emit("adjusted", text=label)
 
@@ -304,6 +317,7 @@ def undo(run, back=True):
         h = src.pop(); dst.append(h)
         for k, s in (h["before"] if back else h["after"]).items(): b.L[k]["start"] = s
         e["pins"] = dict(h["pins_before"] if back else h["pins_after"])
+        if "recess_before" in h: b.set_recess(h["recess_before"] if back else h["recess_after"])
         b.index(); _save(run, b, e)
     run.emit("adjusted", text=("Undone: " if back else "Redone: ") + h["label"])
     return h
@@ -364,7 +378,8 @@ def make_room(run, key, start, seconds, workers=8):
     changes = {k: s for k, s in new.items() if current.get(k) != s}
     mine = [x for x in b.twins(key) if new.get(x) == start]
     others = [k for k in changes if k not in mine and k not in full]
-    apply(run, changes, f"Moved {nm} to {when}; the solver moved {len(others)} other lesson{'s' if len(others) != 1 else ''} to make room", pin=[x for x in mine if x in changes])
+    apply(run, changes, f"Moved {nm} to {when}; the solver moved {len(others)} other lesson{'s' if len(others) != 1 else ''} to make room", pin=[x for x in mine if x in changes],
+          recess=res.get("recess"))
     run.emit("moved", text=f"Made room for {nm} at {when}: {len(others)} other lessons moved.",
              items=[f"{b.name(k)}: {b.when(current[k], b.L[k]['ln'])} -> {b.when(changes[k], b.L[k]['ln'])}" for k in others][:40])
 
@@ -415,6 +430,7 @@ def resize(run, key, delta):
             if {s_: len(v) for s_, v in got.items()} != {s_: len(v) for s_, v in need.items()}: raise refuse
             for s_, keys in need.items(): place.update(zip(keys, sorted(got[s_])))
         if len(place) != len(b.L): raise refuse
+        place[RECESS_KEY] = b.recess
         b2 = Board(spec2, place)
         key2 = next(k for k, x in b2.L.items() if x["unit"]["key"] == u["key"] and x["ln"] == ln and x["start"] == L["start"])
         con = b2.conflicts({key2: L["start"]})

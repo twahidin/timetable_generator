@@ -99,9 +99,9 @@ def _packs(runs, need):
 def _class_fit(P):
     """each class against its level's day: what its busiest students need, and whether their lessons fit between the
     breaks. [dict(cls, level, kind, text)] for classes that are over, do not fit, have no slack, or are almost full"""
-    Lcount = {lv: sum(row.count("L") for row in rows) for lv, rows in P.grid.items()}
+    Lcount = {lv: P.lesson_periods(lv) for lv in P.grid}   # recess windows (W) count less their recess
     Acount = {lv: sum(row.count("A") for row in rows) for lv, rows in P.grid.items()}
-    runs = {lv: [len(m) for row in rows for m in re.findall(r"L+", row)] for lv, rows in P.grid.items()}
+    runs = {lv: P.stretches(lv) for lv in P.grid}
     whole = collections.defaultdict(collections.Counter)
     for u in P.units:
         if u["kind"] == "class":
@@ -141,7 +141,7 @@ def _room_fit(P):
     class-periods of those groups against what the rooms hold in the lesson periods (a room holds one class at a time
     unless a Must 'At most N at once' rule says more; a special room used on alternate weeks counts half its periods).
     [dict(kind, rooms, need, have, kind_, text)]"""
-    use = "LA" if P.spec["school"].get("after_school", True) else "L"
+    use = "LAW" if P.spec["school"].get("after_school", True) else "LW"
     fam = collections.defaultdict(set); dem = []
     for u in P.units:
         for ln, i in u["lessons"]:
@@ -171,18 +171,43 @@ def _room_fit(P):
     return out
 
 def impossible(spec):
-    """what rules out every timetable before solving: a room kind that cannot hold its lessons, or a class with more
-    periods than its lesson and after-school periods"""
+    """what rules out every timetable before solving: a room kind that cannot hold its lessons, a class with more
+    periods than its lesson and after-school periods, or a floating recess that cannot work"""
     from ttgen.solver import Problem
     derive(spec); P = Problem(spec); out = [x["text"] for x in _room_fit(P) if x["kind_"] == "impossible"]
     A = {lv: sum(row.count("A") for row in rows) for lv, rows in P.grid.items()} if P.spec["school"].get("after_school", True) else {}
     out += [x["text"] for x in _class_fit(P) if x["kind"] == "over" and x["need"] > x["have"] + A.get(x["level"], 0)]
+    return out + _recess_blockers(P)
+
+def _recess_blockers(P):
+    """floating recess that cannot work: more classes at recess at once than Settings allows (fixed recess, or a whole level
+    going together), or a recess window shorter than the recess"""
+    out, cap = [], P.recess_cap
+    if cap:
+        at = collections.Counter()
+        for c in P.cls:
+            for d, row in enumerate(P.grid.get(P.level_of[c], [])): at.update(d * P.NP + p for p, ch in enumerate(row) if ch == "R")
+        q = next((q for q, n in sorted(at.items()) if n > cap), None)
+        if q is not None:
+            out.append(f"{at[q]} classes have their fixed recess (R) on {P.days[q // P.NP]} period {q % P.NP}, more than the {cap} Settings allows at once "
+                       "(Most classes at recess at once): raise it, or turn some of that recess into a recess window (W).")
+        if P.recess_by == "Level":
+            for lv in P.grid:
+                n = sum(1 for c in P.cls if P.level_of[c] == lv)
+                if n > cap and any(P.windows.get(lv, [])):
+                    out.append(f"{lv} has {n} classes and its floating recess goes by level, so {n} classes are at recess at once: more than the {cap} Settings allows. "
+                               "Set Floating recess goes by to Class, or raise Most classes at recess at once.")
+    short = sorted({(lv, P.days[d], a, b) for lv, rows in P.windows.items() for d, ws in enumerate(rows) for a, b in ws if b - a + 1 < P.RL})
+    if short:
+        lv, day, a, b = short[0]
+        out.append(f"The recess window on {lv} {day} (periods {a}-{b}) is shorter than the {P.RL}-period recess" + (f", and {len(short) - 1} more" if len(short) > 1 else "")
+                   + ": widen the W periods on Day structure, or shorten Floating recess length on Settings.")
     return out
 
 def capacity(spec, P=None, fit=None):
     from ttgen.solver import Problem
     P = P or Problem(spec); out = [x["text"] for x in (_class_fit(P) if fit is None else fit)] + [x["text"] for x in _room_fit(P)]
-    Lcount = {lv: sum(row.count("L") for row in rows) for lv, rows in P.grid.items()}
+    Lcount = {lv: P.lesson_periods(lv) for lv in P.grid}
     load, lvls = collections.Counter(), collections.defaultdict(set)
     for u in P.units:
         for r in u["rows"]:
@@ -203,7 +228,7 @@ def capacity(spec, P=None, fit=None):
         if u["kind"] != "block": continue
         need = collections.Counter(r["room_kind"] for r in u["rows"] if r.get("room_kind") and r["room_kind"] != "classroom")
         for k, n in need.items():
-            if n > kinds.get(k, 0): out.append(f"Block {u['name']} needs {n} '{k}' rooms at once; Venues has {kinds.get(k, 0)}.")
+            if n > kinds.get(k, 0): out.append(f"Band {u['name']} needs {n} '{k}' rooms at once; Venues has {kinds.get(k, 0)}.")
     return out
 
 def span_text(secs):
@@ -224,13 +249,17 @@ def advice(spec, status, secs, notes=()):
         fixes.append(dict(go="school", text="Or make the day longer: a later 'Lessons end by' time or more L periods in the Day structure (School & day), or allow after-school slots."))
     if any(c.split(" teaches ")[0] in {t["name"] for t in spec["teachers"]} for c in cap if " teaches " in c):
         fixes.append(dict(go="lessons", text="Move some groups from the busiest teachers named above to other teachers on step 6."))
-    if any(c.startswith("Block ") and " rooms at once" in c for c in cap):
-        fixes.append(dict(go="venues", text="Add rooms of the kinds named above on step 1, or split the block on step 5."))
+    if any(c.startswith("Band ") and " rooms at once" in c for c in cap):
+        fixes.append(dict(go="venues", text="Add rooms of the kinds named above on step 1, or split the band on step 5."))
     for x in _room_fit(P):
         if x["kind_"] != "impossible": continue
         fixes.insert(0, dict(go="rules", text=f"Let the '{x['kind']}' rooms ({', '.join(x['rooms'])}) take more classes at once: on step 7 add a rule 'Room · {x['rooms'][0]} · At most N at once' "
                                               f"for each of them (a Settings note such as '{' and '.join(x['rooms'][:2])} take 2 classes each' does the same). "
                                               f"Or add '{x['kind']}' rooms on step 1, or give some subjects another room kind on step 3."))
+    if P.recess_cap and any(ws for rows in P.windows.values() for ws in rows):
+        fixes.append(dict(go="school", text=f"Floating recess: at most {P.recess_cap} classes may be at recess at once. Where a class's recess goes also decides how its lessons "
+                                            "fit around it, so a tight limit can leave some classes no place. Raise Most classes at recess at once, widen the recess windows (W), "
+                                            "or set Floating recess goes by to Level (School & day)."))
     if any("matches nothing" in n or "no lesson matches" in n for n in notes):
         fixes.append(dict(go="rules", text="Remove or correct the fixed lessons that match no lesson (step 7)."))
     if any(str(r.get("strength") or "Must") == "Must" for r in spec.get("rules", [])):
@@ -251,7 +280,7 @@ def t_check_setup(run, args):
     probs = derive(spec)
     try: cap = capacity(spec)
     except Exception as e: cap = [f"Capacity sums failed: {e}"]
-    counts = f"{len(spec['classes'])} classes, {len(spec['teachers'])} teachers, {len(spec['lessons'])} lesson rows, {len(spec['blocks'])} blocks, {len(spec.get('rules', []))} rules, {len(spec.get('students', []))} students."
+    counts = f"{len(spec['classes'])} classes, {len(spec['teachers'])} teachers, {len(spec['lessons'])} lesson rows, {len(spec['blocks'])} bands, {len(spec.get('rules', []))} rules, {len(spec.get('students', []))} students."
     lines = [counts, "Input problems:" if probs else "Input problems: none."] + [f"- {p}" for p in probs[:40]]
     lines += ["Capacity:" if cap else "Capacity: nothing looks too tight."] + [f"- {c}" for c in cap[:40]]
     lines += ["Rules:"] + [f"- {rule_text(i, r)}" for i, r in enumerate(spec.get("rules", []))]
@@ -268,7 +297,7 @@ def t_show_setup(run, args):
             for d, codes in days.items():
                 line = f"{lv} | {d} | {codes}"
                 if not flt or flt in line.lower(): out.append(line)
-        return "Codes per period (index 0 first): F assembly, L lesson, R recess, U lunch, A after-school, . none\n" + "\n".join(out[:80])
+        return "Codes per period (index 0 first): F assembly, L lesson, R recess, W recess window (lesson time with the floating recess somewhere in it), U lunch, A after-school, . none\n" + "\n".join(out[:80])
     rows = spec.get(sec)
     if rows is None: return f"Unknown section {sec}."
     lines = [row_text(sec, i, x) for i, x in enumerate(rows)]
@@ -296,7 +325,7 @@ def _when(P, start, ln):
     return f"{P.days[d]} {clock(sc, p)}-{clock(sc, p + ln)}"
 
 def t_solve(run, args):
-    from ttgen.solver import solve
+    from ttgen.solver import solve, RECESS_KEY
     from ttgen.report import write_timetable
     secs = max(20, min(SOLVE_MAX, int(args.get("seconds") or run.seconds or SOLVE_SECONDS)))
     span = f"{secs} s" if secs < 60 else f"{secs // 60} min" + (f" {secs % 60} s" if secs % 60 else "")
@@ -347,7 +376,7 @@ def t_solve(run, args):
                ("\nINFEASIBLE means a hard contradiction: call diagnose." if res["status"] == "INFEASIBLE" else "\nUNKNOWN means not found in time: try a longer solve before changing anything.")
     tt_path = os.path.join(run.dir, f"solve{n}_timetable.xlsx")
     _, _, _, m = write_timetable(res, tt_path, return_model=True)
-    pl_path = os.path.join(run.dir, f"solve{n}_placements.json"); write_json(pl_path, {L["key"]: L["start"] for L in res["lessons"]})
+    pl_path = os.path.join(run.dir, f"solve{n}_placements.json"); write_json(pl_path, dict({L["key"]: L["start"] for L in res["lessons"]}, **{RECESS_KEY: res.get("recess") or {}}))
     spec_path = os.path.join(run.dir, f"solve{n}_spec.json"); write_json(spec_path, as_solved)
     s = _summary(res["status"], m); s.update(n=n, at=now(), setup=setup_path, timetable=tt_path, placements=pl_path, spec=spec_path, seconds=int(time.time() - t0))
     run.solved = s; adjust.carry_pins(run, pins, res); run.save()

@@ -16,7 +16,7 @@ solve_staged returns the same result as solver.solve, so report.write_timetable 
 `stop` (the committee's Stop button) and `deadline` (time.time() by which to give up) end it early.
 """
 import collections, copy, re, threading, time
-from .solver import solve, Problem, state_key
+from .solver import solve, plan_recess, Problem, state_key
 
 NOFREE = "No free periods for students"
 
@@ -45,7 +45,13 @@ class _Run:
         self.levels = [lv for lv in self.P.levels if any(u["level"] == lv for u in self.P.units)]
         self.unit_level = {_key(u): u["level"] for u in self.P.units}
         self.unit_classes = {_key(u): set(u["classes"]) for u in self.P.units}
+        for c, lv in self.P.level_of.items():   # a class's floating recess goes with its class
+            self.unit_level[("R", c)] = lv; self.unit_classes[("R", c)] = {c}
         self.state = {}
+        self.plan = {}   # with a canteen limit: a recess for every class that keeps it, the space kept for levels not yet placed
+        if self.P.recess_cap:
+            for c, v in (plan_recess(self.P, workers=workers) or {}).items():
+                self.plan[("R", c)] = {"recess": [(q // self.NP) * 1000 + q % self.NP for q, _ in v]}
 
     # ---------------------------------------------------------------- helpers
     def halted(self):
@@ -53,7 +59,7 @@ class _Run:
 
     def tightness(self, lv):
         """largest share of the level's lesson periods that one kind of student needs"""
-        P = self.P; slots = sum(row.count("L") for row in P.grid.get(lv, []))
+        P = self.P; slots = P.lesson_periods(lv)
         if not slots: return 0
         prof = P.students_profiles(); worst = 0
         for c in self.level_classes[lv]:
@@ -67,6 +73,8 @@ class _Run:
         for x in res["lessons"]:
             u = x["unit"]; pk = (x["ln"], frozenset(str(r["code"]) for r in x["part"])); d, p = divmod(x["start"], self.NP)
             out[_key(u)][pk].append(d * 1000 + p)
+        for c, spans in (res.get("recess") or {}).items():
+            out[("R", c)]["recess"] = [(q // self.NP) * 1000 + q % self.NP for q, _ in spans]
         return out
 
     def placed(self, levels):
@@ -94,7 +102,19 @@ class _Run:
                 for u in us: where[u["level"]] |= set(u["classes"])
         return n, where
 
-    def _solve(self, sp, fix=None, hint=None, patience=40, stop_at=None):
+    def _solve(self, sp, fix=None, hint=None, patience=40, stop_at=None, tries=4):
+        """solve one step. CP-SAT's time to a first timetable here is heavy-tailed (the same level can take 10 s or several
+        minutes, depending on the random start), so a step without one after its share of the time restarts with a new
+        seed, up to `tries` times within time_per_step"""
+        t_end = time.time() + self.T; r = None
+        for k in range(max(1, tries)):
+            left = t_end - time.time()
+            if left < 10 or self.halted(): break
+            r = self._solve_once(sp, fix, hint, patience, stop_at, min(left, max(30, self.T / tries)) if k < tries - 1 else left, seed=k)
+            if r["lessons"] or r["status"] == "INFEASIBLE": return r
+        return r or dict(status="UNKNOWN", lessons=[], problem=self.P, notes=[])
+
+    def _solve_once(self, sp, fix, hint, patience, stop_at, limit, seed=0):
         stop = threading.Event(); last = [None]
         def log(*a):
             msg = str(a[0]) if a else ""
@@ -107,15 +127,39 @@ class _Run:
                 if (last[0] is not None and time.time() - last[0] > patience) or self.halted(): stop.set()
                 time.sleep(1)
         threading.Thread(target=watch, daemon=True).start()
-        r = solve(sp, time_limit=self.T, workers=self.workers, log=log, fix=fix, hint=hint, stop=stop,
-                  params={"hint_conflict_limit": 100000} if hint else None)
+        params = dict({"hint_conflict_limit": 100000} if hint else {}, **({"random_seed": seed} if seed else {}))
+        r = solve(sp, time_limit=limit, workers=self.workers, log=log, fix=fix, hint=hint, stop=stop, params=params or None)
         stop.set()
         return r
+
+    def recess_of(self, levels):
+        """{period: classes at recess} for the classes of these levels: their fixed (R) and floating recess so far (the planned
+        one for a class not placed yet)"""
+        P = self.P; out = collections.Counter()
+        for o in levels:
+            for c in self.level_classes[o]:
+                placed = self.state.get(("R", c)) or self.plan.get(("R", c)) or {}
+                for d, row in enumerate(P.grid.get(o, [])):
+                    out.update(d * self.NP + p for p, ch in enumerate(row) if ch == "R")
+                    for a, b in P.windows[o][d]:
+                        for x in placed.get("recess", []):
+                            if x // 1000 == d and a <= x % 1000 <= b: out.update(range(d * self.NP + x % 1000, d * self.NP + x % 1000 + P.recess_n(a, b)))
+        return out
+
+    def plan_of(self, lv):
+        """the planned recess of this level's classes. A level is first placed with its recess there (a free recess under a
+        canteen limit makes the search much slower); clearing clashes may move it later"""
+        return {k: v for k, v in self.plan.items() if k[1] in self.level_classes[lv]}
 
     def level_spec(self, lv, soft_teachers=True):
         """spec for one level, with the other levels' lessons as busy times (teachers penalised, rooms kept free)"""
         sp = _restrict(self.base, self.level_classes[lv])
         others = [o for o in self.levels if o != lv]
+        sp["_recess_busy"] = dict(self.recess_of(others))   # canteen space the other levels' recess already takes
+        taken = collections.defaultdict(list)                  # a teacher's lessons in the other levels (their recess break avoids them)
+        for u, ln, part, q in self.placed(others):
+            for t in {t for x in part for t in x["teachers"]}: taken[t].append([q, ln])
+        sp["_teacher_taken"] = dict(taken)
         for u, ln, part, q in self.placed(others):
             d, p = divmod(q, self.NP); name = self.P.days[d].split(); wk, dy = (name[0], name[-1]) if len(name) > 1 else ("Both", name[-1])
             span = {"from": p, "to": p + ln - 1}
@@ -147,7 +191,8 @@ class _Run:
         for lv in order:
             if self.halted(): return False
             sp = _restrict(self.base, set().union(*(self.level_classes[x] for x in done + [lv])))
-            t0 = time.time(); r = self._solve(sp, fix=self.state or None, patience=20)
+            sp["_recess_busy"] = dict(self.recess_of([o for o in self.levels if o not in done + [lv]]))   # the planned recess of the rest
+            t0 = time.time(); r = self._solve(sp, fix={**self.state, **self.plan_of(lv)} or None, patience=20)
             if r["lessons"]:
                 self.state = self.to_state(r); done.append(lv)
                 self.log(f"  {lv}: placed around {', '.join(done[:-1]) or 'nothing'} ({time.time() - t0:.0f}s)")
@@ -155,8 +200,12 @@ class _Run:
                 left.append(lv); self.log(f"  {lv}: does not fit around the levels already placed ({r['status']}); placing it with clashes allowed")
         for lv in left:
             if self.halted(): return False
-            r = self._solve(self.level_spec(lv), hint=None, stop_at=0)
-            if not r["lessons"]: return False
+            r = self._solve(self.level_spec(lv), fix=self.plan_of(lv) or None, hint=None, stop_at=0)
+            if not r["lessons"] and self.plan_of(lv):   # its planned recess times may not suit it: let it pick, in the canteen space left
+                self.log(f"  {lv}: not placed with its recess at the planned times ({r['status']}); trying with its recess free")
+                r = self._solve(self.level_spec(lv), hint=None, stop_at=0)
+            if not r["lessons"]:
+                self.log(f"  {lv}: not placed even with clashes allowed ({r['status']})"); return False
             self.state.update(self.to_state(r))
         return True
 
@@ -187,7 +236,7 @@ class _Run:
             better = False
             for h in hoods:
                 fix = {k: v for k, v in self.state.items() if not (self.unit_classes.get(k, set()) & h)}
-                r = self._solve(self.spec, fix=fix, hint=dict(self.state))
+                r = self._solve(self.spec, fix=fix, hint=dict(self.state), tries=1)   # improving: one long run
                 o = r.get("objective")
                 if r["lessons"] and o is not None and o < best:
                     self.state = self.to_state(r); best = o; res = r; better = True
@@ -202,7 +251,8 @@ def solve_staged(spec, time_per_step=180, workers=8, log=print, order=None, roun
     log("staged solve, levels in this order: " + ", ".join(order))
     if not run.build(order):
         if run.halted(): return dict(status="STOPPED" if stop and stop.is_set() else "UNKNOWN", problem=run.P, lessons=[], notes=["Staged solve: out of time before every level was placed."])
-        return dict(status="NOT FOUND", problem=run.P, lessons=[], notes=["Staged solve: a level could not be placed even with clashes allowed."])
+        return dict(status="NOT FOUND", problem=run.P, lessons=[], notes=["Staged solve: a level could not be placed even with clashes allowed."
+                    + (f" The levels placed first may have taken the canteen space (at most {run.P.recess_cap} classes at recess at once)." if run.P.recess_cap else "")])
     if not run.clear(rounds):
         if run.halted(): return dict(status="STOPPED" if stop and stop.is_set() else "UNKNOWN", problem=run.P, lessons=[], notes=["Staged solve: out of time while clearing clashes between levels."])
         n, where = run.clashes()

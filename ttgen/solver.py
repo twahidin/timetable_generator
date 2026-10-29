@@ -6,15 +6,18 @@ chosen from the teaching periods of the unit's level (Day structure 'L', or 'A' 
 Students: for every class, each kind of student (from the Students sheet, or one per level tag) must not have two
 lessons at once; whole-class lessons never overlap a banded lesson that lists the class. Teachers never overlap.
 Room kinds are cumulative resources. Rules from '7 Rules' add or remove start positions, fixed busy times, per-day
-limits, alignment and day separation. The objective keeps after-school use and broken 'Prefer' rules low.
+limits, alignment and day separation. A recess window (Day structure 'W') holds a floating recess: an interval the solver
+places for each level or each class (Settings), which that class's lessons may not overlap. The objective keeps
+after-school use and broken 'Prefer' rules low.
 Given a previous timetable, the search starts from it and each lesson that moves costs W_MOVE, so a tweak moves as few
 lessons as it can (cheaper than bending a Prefer rule or pushing a lesson after school)."""
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
-from .spec import WEEKDAYS, family as _family, periods_by_day, trim_day
+from .spec import WEEKDAYS, family as _family, floating_recess, periods_by_day, resolve_row, trim_day, windows as _windows
 
 W_PREF, W_SLACK, W_MOVE = 60, 40, 10
+RECESS_KEY = "~recess"   # in a placements file: {class: [[start, length]]}, each class's floating recess
 
 
 class Problem:
@@ -32,6 +35,8 @@ class Problem:
         self.level_of = {c["class"]: c["level"] for c in spec["classes"]}
         self.rows = [x for x in spec["lessons"] if x.get("periods") and x.get("classes")]
         self.tdept = {t["name"]: t.get("dept") for t in spec["teachers"]}
+        fr = floating_recess(sc); self.RL, self.recess_by, self.recess_cap = fr["length"], fr["by"], fr["at_once"]
+        self.windows = {lv: [_windows(row) for row in rows] for lv, rows in self.grid.items()}   # per day: [(first, last)] of each W run
         self._units()
         self._rooms()
 
@@ -109,8 +114,39 @@ class Problem:
             if u["level"] not in self.grid: u["level"] = self.level_of.get(u["classes"][0], self.levels[0])
         self.units = U
 
+    # ---------------------------------------------------------------- recess
+    def recess_n(self, a, b):
+        """periods of the floating recess in the window a..b (the whole window when it is shorter than the recess)"""
+        return min(self.RL, b - a + 1)
+
+    def lesson_periods(self, lv):
+        """lesson periods a cycle for a class of this level: L, and W less the recess in each window"""
+        return sum(row.count("L") + row.count("W") for row in self.grid.get(lv, [])) - sum(self.recess_n(a, b) for ws in self.windows.get(lv, []) for a, b in ws)
+
+    def stretches(self, lv):
+        """lengths of the stretches between breaks, the floating recess at the edge of its window (the most it can hold)"""
+        import re
+        return [len(m.group()) - sum(self.recess_n(a, b) for a, b in _windows(m.group())) for row in self.grid.get(lv, []) for m in re.finditer(r"[LW]+", row)]
+
+    def class_rows(self, c, recess):
+        """a class's Day structure rows with its floating recess (recess {class: [[start, length]]}) as R, the rest of each window as L"""
+        spans = collections.defaultdict(list)
+        for q, n in (recess or {}).get(c, []): spans[q // self.NP].append((q % self.NP, n))
+        return [resolve_row(row, spans[d]) for d, row in enumerate(self.grid.get(self.level_of.get(c), []))]
+
+    def break_options(self, d):
+        """recess time on day d, for a teacher's break: [(first start, last start, length)]: each fixed recess (R) of a level
+        with classes, whole; and the recess length anywhere inside each recess window (W)"""
+        import re
+        out = set()
+        for lv in {self.level_of[c] for c in self.cls}:
+            row = self.grid.get(lv, [""] * self.ND)[d]
+            out |= {(m.start(), m.start(), len(m.group())) for m in re.finditer(r"R+", row)}
+            out |= {(a, b - self.recess_n(a, b) + 1, self.recess_n(a, b)) for a, b in _windows(row)}
+        return sorted(out)
+
     def starts(self, level, ln):
-        ok = "LA" if self.spec["school"].get("after_school", True) else "L"   # Settings: after-school slot allowed (No: never use 'A')
+        ok = "LAW" if self.spec["school"].get("after_school", True) else "LW"   # Settings: after-school slot allowed (No: never use 'A'); W: a recess window
         out = []
         for d, row in enumerate(self.grid[level]):
             for p in range(self.NP - ln + 1):
@@ -244,12 +280,74 @@ def lesson_domains(P, rules, notes):
     return out
 
 
+def recess_vars(m, P):
+    """floating recess: in each recess window (Day structure 'W') the recess goes where the solver puts it, for the whole level
+    or for each class (Settings 'Floating recess goes by'); the rest of the window is lesson time. Returns the recesses
+    [dict(classes, n, lo, hi, st, iv)] and {class: [its recesses in day order]}"""
+    NP = P.NP; recs, rec_of = [], collections.defaultdict(list)
+    for lv in P.levels:
+        cl = [c for c in P.cls if P.level_of[c] == lv]
+        for d, wins in enumerate(P.windows.get(lv, [])):
+            for a, b in wins:
+                n = P.recess_n(a, b); lo, hi = d * NP + a, d * NP + b - n + 1
+                for who in ([cl] if P.recess_by == "Level" else [[c] for c in cl]):
+                    if not who: continue
+                    st = m.NewIntVar(lo, hi, f"r{len(recs)}"); R = dict(classes=who, n=n, lo=lo, hi=hi, st=st, iv=m.NewFixedSizeIntervalVar(st, n, ""))
+                    recs.append(R)
+                    for c in who: rec_of[c].append(R)
+    return recs, rec_of
+
+def canteen(m, P, recs, busy, cap):
+    """canteen space: Settings 'Most classes at recess at once' over the fixed (R) and floating recess. busy: {period: classes}
+    already at recess outside this model (the staged solve: the other levels). cap: a number or an IntVar"""
+    fixed = collections.Counter({int(q): n for q, n in (busy or {}).items()})
+    for c in P.cls:
+        for d, row in enumerate(P.grid.get(P.level_of[c], [])):
+            for p, ch in enumerate(row):
+                if ch == "R": fixed[d * P.NP + p] += 1
+    ivs = [R["iv"] for R in recs] + [m.NewIntervalVar(q, 1, q + 1, "") for q in fixed]
+    dem = [len(R["classes"]) for R in recs] + list(fixed.values())
+    if ivs: m.AddCumulative(ivs, dem, cap)
+
+def plan_recess(P, busy=None, time_limit=20, workers=8):
+    """a floating recess for every class that keeps the canteen limit: classes that share a band (or a group) at recess
+    together unless the limit splits them, each as near the middle of its window as it allows: {class: [[start, length]]},
+    or None when the limit cannot be kept. A band's lessons need the same free periods in all its classes, so a split
+    recess leaves them little room. The staged solve places each level with its recess here, so a level placed early
+    cannot take the canteen space of the rest"""
+    m = cp_model.CpModel(); recs, rec_of = recess_vars(m, P)
+    if not recs or not P.recess_cap: return {}
+    canteen(m, P, recs, busy, P.recess_cap)
+    cost = []
+    for R in recs:
+        v = m.NewIntVar(0, R["hi"] - R["lo"], ""); mid = (R["lo"] + R["hi"]) // 2
+        m.Add(v >= R["st"] - mid); m.Add(v >= mid - R["st"]); cost.append(v)
+    root = {c: c for c in P.cls}   # classes joined by a band or group
+    def find(c):
+        while root[c] != c: c = root[c]
+        return c
+    for u in P.units:
+        if u["kind"] != "class":
+            for c in u["classes"][1:]:
+                if c in root and u["classes"][0] in root: root[find(c)] = find(u["classes"][0])
+    split = 1 + max(R["hi"] - R["lo"] for R in recs)   # one class apart from its band costs more than any move
+    for c, Rs in rec_of.items():
+        for R, A in zip(Rs, rec_of.get(find(c), [])):
+            if R is A or (R["lo"], R["hi"]) != (A["lo"], A["hi"]): continue
+            apart = m.NewBoolVar(""); m.Add(R["st"] == A["st"]).OnlyEnforceIf(apart.Not()); cost.append(split * apart)
+    m.Minimize(sum(cost))
+    s = cp_model.CpSolver(); s.parameters.max_time_in_seconds = time_limit; s.parameters.num_workers = workers
+    if s.Solve(m) not in (cp_model.OPTIMAL, cp_model.FEASIBLE): return None
+    return {c: [[int(s.Value(R["st"])), R["n"]] for R in Rs] for c, Rs in rec_of.items()}
+
+
 def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previous=None, pins=None, fix=None, hint=None, params=None):
     """stop: optional threading.Event; setting it ends the search early and keeps the best timetable so far.
     previous: {lesson key: start} from an earlier solve (each returned lesson has its 'key'); lessons stay there unless they must move.
     pins: {lesson key: start} for lessons placed by hand: they stay there (unless that time is no longer allowed).
     fix / hint (the staged solve): {state_key: {(length, group codes): [day * 1000 + period]}}; the k-th lesson of a unit with
-    that length and those groups takes the k-th start. fix keeps it there; hint only starts the search there.
+    that length and those groups takes the k-th start. fix keeps it there; hint only starts the search there. A class's
+    floating recess is {("R", class): {"recess": [day * 1000 + period]}}, one start per recess window in day order.
     params: extra CP-SAT parameters"""
     P = Problem(spec); NP, ND = P.NP, P.ND
     m = cp_model.CpModel(); rules = spec.get("rules", [])
@@ -269,6 +367,22 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
         ext = {q for q in vals if any(P.grid[u["level"]][q // NP][q % NP + k] == "A" for k in range(ln))}
         blocks.append(dict(u=u, ln=ln, i=i, part=part, st=st, iv=iv, day=dy, cost=cv, T=T, kinds=kinds, ext=ext,
                            key=D["key"], vals=set(vals)))
+    recs, rec_of = recess_vars(m, P)
+    if P.recess_cap and recs and not fix and not hint and not previous:   # canteen limit: start from a recess plan that keeps it
+        for c, v in (plan_recess(P, spec.get("_recess_busy"), workers=workers) or {}).items():
+            for R, (q, _) in zip(rec_of[c], v):
+                if R["classes"][0] == c: m.AddHint(R["st"], q)
+    def rec_starts(state):
+        """[(recess, start)] for the recesses a state ({("R", class): {"recess": [day * 1000 + period]}}) places"""
+        out = []
+        for c, Rs in rec_of.items():
+            xs = sorted((state or {}).get(("R", c), {}).get("recess", []))
+            for k, R in enumerate(Rs):
+                q = (xs[k] // 1000) * NP + xs[k] % 1000 if k < len(xs) else None
+                if R["classes"][0] == c and q is not None and R["lo"] <= q <= R["hi"]: out.append((R, q))   # a level's recess: from its first class
+        return out
+    for R, q in rec_starts(fix): m.Add(R["st"] == q)
+    for R, q in rec_starts(hint): m.AddHint(R["st"], q)
     if fix or hint:
         seen = collections.Counter(); kept = 0
         for b in blocks:
@@ -293,7 +407,7 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
     for b in blocks:
         for t in b["T"]: tload[t] += b["ln"]; tlv[t].add(b["u"]["level"])
     for t, n in tload.items():
-        slots = len({d * NP + p for lv in tlv[t] for d in range(ND) for p, ch in enumerate(P.grid[lv][d]) if ch == "L"})
+        slots = len({d * NP + p for lv in tlv[t] for d in range(ND) for p, ch in enumerate(P.grid[lv][d]) if ch in "LW"})
         if n > slots * 0.9: notes.append(f"{t} teaches {n} periods but their levels have only {slots} lesson periods a cycle: likely too tight.")
     by_unit = collections.defaultdict(list)
     for b in blocks: by_unit[b["u"]["id"]].append(b)
@@ -334,16 +448,16 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
     for c, plist in prof.items():
         if "students" in skip: break
         for use in plist:
-            ivs = [b["iv"] for b in ec[c]]
+            ivs = [b["iv"] for b in ec[c]] + [R["iv"] for R in rec_of.get(c, ())]
             for uid, cnt in use.items():
                 ivs += [b["iv"] for b in by_unit[uid] if cnt.get(b["ln"], 0) > b["i"]]
             m.AddNoOverlap(ivs)
     for c in P.cls:
         if "classes" in skip: break
         for u in P.units:
-            if u["kind"] != "class" and c in u["classes"] and ec[c]:
-                m.AddNoOverlap([b["iv"] for b in ec[c]] + [b["iv"] for b in by_unit[u["id"]]])
-        if not prof.get(c): m.AddNoOverlap([b["iv"] for b in ec[c]])
+            if u["kind"] != "class" and c in u["classes"] and (ec[c] or rec_of.get(c)):
+                m.AddNoOverlap([b["iv"] for b in ec[c]] + [R["iv"] for R in rec_of.get(c, ())] + [b["iv"] for b in by_unit[u["id"]]])
+        if not prof.get(c): m.AddNoOverlap([b["iv"] for b in ec[c]] + [R["iv"] for R in rec_of.get(c, ())])
     # teachers (+ not available / keep free together)
     by_t = collections.defaultdict(list)
     for b in blocks:
@@ -366,6 +480,28 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
                 tbl = [W_PREF * sum(soft_t[t].get(q + k, 0) for k in range(b["ln"])) for q in range(ND * NP)]
                 if max(tbl) > 0:
                     v = m.NewIntVar(0, max(tbl), ""); m.AddElement(b["st"], tbl, v); extra_cost.append(v)
+    # 'At least one recess a day' (Must): each teacher has a break as long as a recess, in recess time, every day: a whole fixed
+    # recess (R) or the recess length inside a recess window (W), of any level. Times the teacher is blocked out do not stop it
+    taken = (spec.get("_teacher_taken") or {})   # the staged solve: the teacher's lessons in the other levels
+    tr = [r for r in has("At least one recess a day") if str(r.get("strength") or "Must") == "Must"]
+    if tr and "teachers" not in skip:
+        who = set(by_t) if any(r.get("scope") != "Teacher" for r in tr) else {r.get("target") for r in tr} & set(by_t)
+        opts = [P.break_options(d) for d in range(ND)]
+        for t in sorted(who):
+            brk = []
+            for d in range(ND):
+                if not opts[d]: continue
+                lits = []
+                for a, b, n in opts[d]:
+                    pres = m.NewBoolVar(""); st = m.NewIntVar(d * NP + a, d * NP + b, ""); lits.append(pres)
+                    brk.append(m.NewOptionalFixedSizeIntervalVar(st, n, pres, ""))
+                m.AddBoolOr(lits)
+            if not brk: continue
+            m.AddNoOverlap([b["iv"] for b in by_t[t]] + brk)
+            if taken.get(t):   # those lessons may still clash with each other (the staged solve clears that later): their periods, joined
+                m.AddNoOverlap(brk + [m.NewIntervalVar(run[0], len(run), run[0] + len(run), "") for run in _runs(sorted({q + k for q, n in taken[t] for k in range(n)}), NP)])
+    # canteen space: Settings 'Most classes at recess at once' over the fixed (R) and floating recess
+    if P.recess_cap and "recess" not in skip: canteen(m, P, recs, spec.get("_recess_busy"), P.recess_cap)
     # rooms. Each group may use only some rooms (its kind, rooms kept for it or for anyone, rooms that seat it: Problem.allowed).
     # For every set of rooms some group is limited to, the groups limited to it fit in it at every period (Hall's condition per
     # set, exact when the sets nest, as seat sizes do), so the rooms can always be handed out afterwards. A group with its
@@ -469,6 +605,9 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
         else:      # none found in time: prefer the old starts while searching
             for b in blocks:
                 if "mv" in b: m.AddHint(b["st"], previous[b["key"]]); m.AddHint(b["mv"], 0)
+            old = previous.get(RECESS_KEY) or {}
+            for R, q in rec_starts({("R", c): {"recess": [(q // NP) * 1000 + q % NP for q, _ in v]} for c, v in old.items()} if not hint else None):
+                m.AddHint(R["st"], q)
         s.parameters.max_time_in_seconds = max(10.0, time_limit - (time.time() - t0))
     class CB(cp_model.CpSolverSolutionCallback):
         def __init__(self): super().__init__()
@@ -478,10 +617,12 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
     log(f"status {status} in {time.time() - t0:.0f}s")
     if st in (cp_model.OPTIMAL, cp_model.FEASIBLE): val, obj = s.Value, s.ObjectiveValue()
     elif near: val, obj, status = (lambda v: near[v.Index()]), None, "FEASIBLE"   # the nearby timetable is still valid
-    else: return dict(status=status, problem=P, lessons=[], notes=notes + ["No timetable found: see the notes, relax a Must rule, or give more time."])
+    else: return dict(status=status, problem=P, lessons=[], recess={}, notes=notes + ["No timetable found: see the notes, relax a Must rule, or give more time."])
     out = [dict(unit=b["u"], ln=b["ln"], i=b["i"], part=b["part"], start=val(b["st"]), ext=val(b["st"]) in b["ext"], key=b["key"]) for b in blocks]
-    unsupported = [f"'{r['rule']}' is checked after solving, not enforced." for r in rules if r.get("rule") in ("Max periods in a row", "At least one recess a day")]
-    return dict(status=status, problem=P, lessons=out, notes=notes + sorted(set(unsupported)), objective=obj)
+    recess = {c: [[int(val(R["st"])), R["n"]] for R in Rs] for c, Rs in rec_of.items()}
+    unsupported = [f"'{r['rule']}' is checked after solving, not enforced." for r in rules if r.get("rule") == "Max periods in a row"
+                   or (r.get("rule") == "At least one recess a day" and str(r.get("strength") or "Must") != "Must")]
+    return dict(status=status, problem=P, lessons=out, recess=recess, notes=notes + sorted(set(unsupported)), objective=obj)
 
 def _near(m, blocks, previous, busy_t, budget, workers, log, stop):
     """a valid timetable close to the previous one, found fast. The lessons that must move (their old time is no longer

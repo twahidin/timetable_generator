@@ -181,7 +181,7 @@ function classView(c) {
     else { const b = e.x.block || e.x.group; if (!blocks.has(b)) blocks.set(b, []); blocks.get(b).push(e); } }
   for (const [b, es] of blocks) legend.push({ color: colorOf(es[0].x.subject), label: blockLabel(b, info.level), text: `${Math.max(...es.map(e => e.periods))} periods · ` + es.map(e => `${short(e.x.subject)} ${e.x.group} (${tshort(e.x.teachers)}, ${common(e.rooms) || "-"})`).join("; ") });
   return { kind: "class", key: c, kicker: "Class", title: `Class ${c}`, sub: `${info.level} · ${info.size || "-"} students · home room ${info.home || "-"}`,
-    stats: [[info.level, "level"], [info.size || "-", "students"], [info.home || "-", "home room"], [used.size, "periods a cycle"]], codes: codesFor([info.level]), cells, legend, lt: "Subjects, teachers and rooms", rows };
+    stats: [[info.level, "level"], [info.size || "-", "students"], [info.home || "-", "home room"], [used.size, "periods a cycle"]], codes: (D.cgrid || {})[c] || codesFor([info.level]), cells, legend, lt: "Subjects, teachers and rooms", rows };
 }
 function teacherView(t) {
   const info = tIx.get(t) || { name: t, short: t, dept: "" }, rows = L.filter(x => x.teachers.includes(t)), cells = [], per = {}, ent = new Map(); let total = 0;
@@ -216,7 +216,7 @@ function personalView(cls, groups, head) {
     for (const x of xs) { let e = ent.get(x.subject); if (!e) ent.set(x.subject, e = { x, periods: 0, rooms: [] }); e.periods += x.n; e.rooms.push(x.room); }
   }
   const lv = (cIx.get(cls) || {}).level;
-  return Object.assign({ kind: "student", codes: codesFor([lv]), cells, lt: "Subjects, teachers and rooms", rows,
+  return Object.assign({ kind: "student", codes: (D.cgrid || {})[cls] || codesFor([lv]), cells, lt: "Subjects, teachers and rooms", rows,
     stats: [[cls, "class"], [lv || "-", "level"], [groups.length, "groups"], [used.size, "periods a cycle"]],
     legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.group !== ENTIRE ? e.x.group : "with the class"} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"} · ${e.periods} periods` })) }, head);
 }
@@ -357,7 +357,7 @@ function renderLessons() {
     <label>Subject<select data-f="subject">${opt(subjects.map(s => [s, s]), f.subject)}</select></label>
     <label>Teacher<select data-f="teacher">${opt([...busyTeachers].sort().map(t => [t, t]), f.teacher)}</select></label>
     <label>Room<select data-f="room">${opt([...busyRooms].sort().map(r => [r, r]), f.room)}</select></label>
-    ${blocks.length ? `<label>Block<select data-f="block">${opt(blocks.map(b => [b, b]), f.block)}</select></label>` : ""}
+    ${blocks.length ? `<label>Band<select data-f="block">${opt(blocks.map(b => [b, b]), f.block)}</select></label>` : ""}
     ${f.group ? `<label>Group<select data-f="group">${opt([[f.group, f.group]], f.group)}</select></label>` : ""}
     <label class="chk"><input type="checkbox" data-f="ext" ${f.ext ? "checked" : ""}> After school only</label>
     <button class="btn" data-act="clear">Clear</button><button class="btn" data-act="lcsv">Download CSV</button></div><div id="ltab"></div></div>`;
@@ -425,7 +425,7 @@ const INDEX = [
   ...STU.map(s => ({ t: "students", k: s.id, label: `${s.name} (${s.id})`, s: `${s.name} ${s.id} ${s.cls}`, type: "Student" })),
   ...uniq(L.map(x => x.subject)).map(s => ({ t: "lessons", f: { subject: s }, label: s, s: `${s} ${short(s)}`, type: "Subject" })),
   ...uniq(L.filter(x => x.group !== ENTIRE).map(x => x.group)).map(g => ({ t: "lessons", f: { group: g }, label: g, s: g, type: "Group" })),
-  ...uniq(L.map(x => x.block).filter(Boolean)).map(b => ({ t: "lessons", f: { block: b }, label: b, s: b, type: "Block" }))];
+  ...uniq(L.map(x => x.block).filter(Boolean)).map(b => ({ t: "lessons", f: { block: b }, label: b, s: b, type: "Band" }))];
 const INDEX_OK = INDEX.filter(e => TABS.some(t => t[0] === e.t));
 let hits = [], hi = 0;
 function search(q) {
@@ -438,7 +438,7 @@ function search(q) {
 }
 function pick(e) { $("#results").classList.remove("on"); $("#q").value = ""; if (e.f) show("lessons", null, { filters: e.f }); else show(e.t, e.k); }
 function csvDownload(rows, name) {
-  const head = ["Day", "Start", "End", "Periods", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school"];
+  const head = ["Day", "Start", "End", "Periods", "Level", "Band", "Classes", "Subject", "Group", "Teachers", "Room", "After school"];
   const q = v => /[",\n]/.test(v = String(v ?? "")) ? `"${v.replace(/"/g, '""')}"` : v;
   const body = rows.map(x => [DAYS[x.d], time(x.p)[0], time(x.p + x.n - 1)[1], x.n, x.level, x.block, x.classes.join(", "), x.subject, x.group, x.teachers.join(", "), x.room, x.ext ? "yes" : ""].map(q).join(","));
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + [head.join(","), ...body].join("\r\n")], { type: "text/csv" })); a.download = name.replace(/[\\/:*?"<>|]+/g, "-") + ".csv"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);

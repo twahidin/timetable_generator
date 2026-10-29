@@ -3,11 +3,12 @@
 A *spec* is a plain dict (JSON friendly) holding everything the template holds:
   school        settings (type, name, cycle, period length, start time, levels, tags ...)
   day_structure {level: {day name: code string}}  codes: F flag/assembly, L lesson, R recess,
-                U lunch, A after-school slot (used only if needed), '.' no school
+                W recess window (the solver puts the recess in it; the rest is lesson time), U lunch,
+                A after-school slot (used only if needed), '.' no school
   venues, classes, subjects, teachers, blocks, lessons, rules, students, combinations (lists of dicts)
 """
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"]
-CODES = {"F": "Flag / assembly", "L": "Lessons", "R": "Recess", "U": "Lunch", "A": "After-school slot", ".": "No school"}
+CODES = {"F": "Flag / assembly", "L": "Lessons", "R": "Recess", "W": "Recess window (the solver puts the recess in it)", "U": "Lunch", "A": "After-school slot", ".": "No school"}
 SCOPES = ["School", "Level", "Class", "Teacher", "Department", "Subject", "Block", "Group", "Room"]
 
 # rule name, scopes it applies to, needs from/to periods, needs number, meaning, example
@@ -20,7 +21,7 @@ RULE_TYPES = [
     ("Finish by", "Level, Class", "Y", "N", "No lessons after the To period on that day.", "Class · 4A · Fri · to 14"),
     ("Max periods a day", "Teacher, Class, Level, School", "N", "Y", "At most Number periods of lessons in a day (School = every teacher).", "School · Whole school · 15"),
     ("Max periods in a row", "Teacher, School", "N", "Y", "At most Number periods without a break (checked after solving).", "School · Whole school · 9"),
-    ("At least one recess a day", "Teacher, School", "N", "N", "The teacher is free in at least one recess each day (checked after solving).", "School · Whole school"),
+    ("At least one recess a day", "Teacher, School", "N", "N", "The teacher is free for a recess each day: a whole recess (R), or the recess length inside a recess window (W), of any level.", "School · Whole school"),
     ("At most N at once", "Room, Subject, Department", "N", "Y", "At most Number lessons at the same time (rooms that hold two classes; Department PE = PE classes at once).", "Department · PE · 6"),
     ("Same time across classes", "Level", "N", "N", "Every class of the level has the Subject at the same time (level talks, CCE).", "Level · Sec 3 · Character Education"),
     ("Not on the same day as", "Subject", "N", "N", "Applies to and Subject are never on the same day for a class.", "Subject · Physical Education · Design & Technology"),
@@ -69,6 +70,35 @@ def periods_by_day(school, days):
 def trim_day(row, keep):
     """a Day structure row with the periods from `keep` on turned into no school"""
     return row if keep is None else row[:keep] + "." * (len(row) - keep)
+
+# Settings rows for floating recess (the W periods on Day structure): label, default, note
+RECESS_ROWS = [("Floating recess goes by", "Level", "Level: each level has its recess together. Class: each class has its own recess time. For the W (recess window) periods on Day structure."),
+               ("Floating recess length (periods)", 2, "How long the recess is inside each recess window."),
+               ("Most classes at recess at once", None, "Leave empty for no limit (canteen space). Counts fixed (R) and floating recess.")]
+
+def floating_recess(school):
+    """the floating recess rows on Settings: dict(by='Level' or 'Class', length=periods, at_once=classes or None)"""
+    def val(label):
+        row = next((r for r in school.get("extra_settings") or [] if str(r[0] or "").strip().lower().startswith(label.lower())), None)
+        return row[1] if row and len(row) > 1 and row[1] not in (None, "") else None
+    def num(v):
+        try: return int(float(str(v)))
+        except (TypeError, ValueError): return None
+    by = str(val("Floating recess goes by") or "Level").strip().capitalize()
+    return dict(by="Class" if by.startswith("Cl") else "Level", length=max(1, num(val("Floating recess length")) or 2),
+                at_once=num(val("Most classes at recess at once")) or None)
+
+def windows(row):
+    """the recess windows of a Day structure row: [(first period, last period)] of each run of W"""
+    import re
+    return [(m.start(), m.end() - 1) for m in re.finditer(r"W+", row)]
+
+def resolve_row(row, spans):
+    """a Day structure row as one class has it: its recess (spans [(period, length)]) as R, the rest of each window as L"""
+    out = list(row.replace("W", "L"))
+    for p, n in spans:
+        for q in range(p, min(len(out), p + n)): out[q] = "R"
+    return "".join(out)
 
 def no_free_periods(school):
     """the 'Students have no free periods' row on Settings: 'Yes', 'Prefer', 'No' or None"""

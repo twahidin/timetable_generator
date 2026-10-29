@@ -21,6 +21,8 @@ subject-based banding) schools, and for any school that fills the same template.
   `1 Venues`, `2 Classes`, `3 Subjects`, `4 Teachers`, `Roles`, `5 Blocks`, `6 Lessons`, `Teacher availability`,
   `Fixed lessons`, `More rules`, `Rule types`, `Students`, `Combinations`, `Lists` (the current setup layout, from template v9 on; a school's
   own notes sheet may follow `README`). Workbooks in the older layout (a `7 Rules` sheet) read too.
+  The setup web app and the timetable pages call a block a **band** (step 5 Bands); the workbook keeps `5 Blocks` and
+  the `Block` columns. When talking to the committee, say band.
   Blank or sample templates come with this skill (`templates/`) or from the setup web app.
 - Python 3.10+ with `pip install ortools openpyxl reportlab` (reportlab is only for the PDFs).
 - The scripts: if `scripts/ttgen/` is next to this file, use them (run from the `scripts` folder, or put it on
@@ -96,7 +98,7 @@ Classes and Teachers are comma-separated; After school is `yes` or blank.
 | Sheet | One row per | Key columns |
 |---|---|---|
 | Settings | setting | School, Timetable, (School type: primary only), Cycle (1 week, or 2 weeks Odd/Even), Period length (minutes), Period 0 starts at, Periods in a day, Lesson length (periods); then the school-wide rule rows: Same subject at most once a day (per group) Yes/No, After-school slot allowed when a class cannot fit Yes/No (No: the `A` periods are never used), Most PE classes at the same time (number), Most teaching periods a teacher has in a day (number), Every teacher gets at least one recess a day Yes/No; any other rows are notes |
-| Day structure | level and day | one cell per period: `F` flag/assembly, `L` lesson, `R` recess, `U` lunch, `A` after-school slot (used only if needed), blank = no school. Day names as the school writes them (e.g. `Odd Tues`) |
+| Day structure | level and day | one cell per period: `F` flag/assembly, `L` lesson, `R` recess, `W` recess window (the solver puts the recess somewhere in it; the rest is lesson time), `U` lunch, `A` after-school slot (used only if needed), blank = no school. Day names as the school writes them (e.g. `Odd Tues`) |
 | 1 Venues | room | Room, Kind (classroom, lab, pe venue, ...), Capacity, Block (building), Floor / level |
 | 2 Classes | form class | Class, Level, Students, Home room |
 | 3 Subjects | subject | Subject, Code, G-level (G1/G2/G3 or -; `Level tag` with Std/Fdn/Higher for primary), Department, Room kind (blank = home room), optional Lesson length, then periods per cycle for each level |
@@ -129,11 +131,13 @@ primary periods), a subject with P periods gets as many L-period lessons as poss
 **Rules** come from four places, all Must unless `More rules` says Prefer: the rule rows on `Settings` (once a day
 per group, at most N PE classes at once, a teacher's daily cap, a recess a day; and `Lessons end by (Monday to Thursday)` style rows,
 which trim the Day structure so no lesson runs past that time on those days; `Students have no free periods` is
-counted after solving, not enforced), `Teacher availability` (Not
+counted after solving, not enforced; with `W` recess windows on Day structure, `Floating recess goes by` (Level: a level
+has its recess together; Class: each class has its own), `Floating recess length (periods)` and `Most classes at recess at
+once` (canteen space, fixed and floating recess counted)), `Teacher availability` (Not
 available for a teacher, clock times turned into the periods they overlap), `Fixed lessons` (Fixed at, for a class
 with a subject or for a group code) and `More rules`. Rule types (`Rule types` repeats this list):
 Not available · Keep free together · Fixed at · Not in periods · Only in periods · Finish by · Max periods a day ·
-Max periods in a row* · At least one recess a day* · At most N at once (a room, a subject, or a department such as PE) ·
+Max periods in a row* · At least one recess a day (a whole `R` recess, or the recess length inside a `W` window, of any level) · At most N at once (a room, a subject, or a department such as PE) ·
 Same time across classes · Not on the same day as · Once a day per group · Avoid after-school slots.
 (* checked after solving, not enforced.) A rule row whose note starts with "example" is an example to replace.
 
@@ -142,8 +146,11 @@ Same time across classes · Not on the same day as · Once a day per group · Av
 Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on cached formula values.
 
 1. **Grid.** Positions are `day * periods_per_day + period`. A lesson of length n may start at p on a day if the
-   level's codes at p..p+n-1 are all `L` or `A` (contiguous, no break inside). Starting positions that touch `A`
-   carry a cost.
+   level's codes at p..p+n-1 are all `L`, `W` or `A` (contiguous, no break inside). Starting positions that touch `A`
+   carry a cost. Each run of `W` (a recess window) holds a floating recess: an interval of the recess length that may
+   start anywhere in the window, one per level per window (Level) or one per class (Class). It joins every NoOverlap of
+   its classes (step 4), so their lessons go round it; `Most classes at recess at once` is an AddCumulative over the
+   floating recess intervals (demand = classes) and the fixed `R` periods (demand = classes of the level).
 2. **Units.** Each block (rows sharing a Block name) is one unit; each row with a code but no block is a unit;
    each whole-class row gives one unit per listed class. A unit needs, for every lesson length, as many lessons as
    its longest row; a row takes part in the first k lessons of a length where k is its own count (so a group with
