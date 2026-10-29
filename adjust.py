@@ -46,13 +46,26 @@ class Board:
                 who = [r["target"]] if r["scope"] == "Teacher" else [t for t, d in P.tdept.items() if d == r["target"]]
                 for t in who:
                     for q in S: self.busy[t][q] = r.get("note") or r["rule"].lower()
-        rooms = collections.Counter(); cap = {v["room"]: 1 for v in P.spec["venues"]}
+        # rooms as the solver sees them (Problem.allowed): for every set of rooms some group is limited to, the groups
+        # limited to it must fit in it at every period; rooms not available at a time count as full
+        self.fam = collections.defaultdict(set)
+        for L in self.L.values():
+            for r in L["part"]:
+                for week in (("Odd", "Even") if P.week_limited(r) else (None,)): kind, E, _, _ = P.allowed(r, L["unit"], week); self.fam[kind].add(E)
+        for kind in list(self.fam): self.fam[kind].add(frozenset(x for x, k in P.room_kind.items() if k == kind))
+        self.room_off = collections.defaultdict(set)
         for r in self.rules:
-            if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and r.get("target") in cap and r.get("number"): cap[r["target"]] = int(r["number"])
-        for v in P.spec["venues"]: rooms[v.get("kind") or "classroom"] += cap[v["room"]]
-        self.kind_cap = rooms
-        self.kinds = {k: collections.Counter((x["room_kind"] or "classroom") for x in L["part"]) for k, L in self.L.items()}
+            if r.get("rule") == "Not available" and r.get("scope") == "Room" and r.get("target") in P.room_kind:
+                S, _ = P.rule_positions(r); self.room_off[r["target"]] |= S
         self.index()
+
+    def needs(self, k, start):
+        """the rooms each row of lesson k may use if it starts at `start`: [(kind, allowed rooms, group name)]"""
+        L = self.L[k]; P = self.P; week = "Odd" if P.odd_day[start // self.NP] else "Even"; out = []
+        for r in L["part"]:
+            kind, E, n, _ = P.allowed(r, L["unit"], week if P.week_limited(r) else None)
+            out.append((kind, E, f"{r['subject']} {r['code'] if r['code'] != 'Entire Class' else L['unit']['classes'][0]}" + (f" ({n} students)" if n else "")))
+        return out
 
     def index(self):
         self.at = collections.defaultdict(set)
@@ -102,10 +115,14 @@ class Board:
             for t in sorted(self.tset[k]):
                 why = next((self.busy[t][q] for q in cover(k) if q in self.busy.get(t, {})), None)
                 if why: add(f"{t} is not available then ({why}).")
-            for kind, n in self.kinds[k].items():
-                capk = self.kind_cap.get(kind, 0)
-                if capk and any(sum(min(self.kinds[b].get(kind, 0), capk) for b in at(q)) > capk for q in cover(k)):
-                    add(f"No free {kind} then: all {capk} are in use.")
+            for kind, E, who in self.needs(k, s):
+                every = max(self.fam[kind], key=len)
+                for F in sorted((F for F in self.fam[kind] if E <= F), key=len):
+                    capF = sum(P.room_cap[x] for x in F)
+                    def used(q): return sum(1 for b in at(q) for kb, Eb, _ in self.needs(b, start(b)) if kb == kind and Eb <= F) + \
+                                         sum(P.room_cap[x] for x in F if q in self.room_off.get(x, ()))
+                    if capF and any(used(q) > capF for q in cover(k)):
+                        add(f"No free {kind} then: all {capF} {'' if F == every else 'that can take ' + who + ' '}are in use."); break
             # a group's lessons spread over the cycle: at most one a day under 'Once a day per group', and never bunched
             # when it has more lessons than days (as the solver does)
             ks = self.by_unit[u["id"]]; on_day = sum(1 for b in ks if start(b) // NP == d)

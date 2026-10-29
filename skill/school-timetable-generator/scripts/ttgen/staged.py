@@ -45,8 +45,6 @@ class _Run:
         self.levels = [lv for lv in self.P.levels if any(u["level"] == lv for u in self.P.units)]
         self.unit_level = {_key(u): u["level"] for u in self.P.units}
         self.unit_classes = {_key(u): set(u["classes"]) for u in self.P.units}
-        self.rooms_of = collections.defaultdict(list)
-        for v in spec["venues"]: self.rooms_of[v.get("kind") or "classroom"].append(v["room"])
         self.state = {}
 
     # ---------------------------------------------------------------- helpers
@@ -123,9 +121,10 @@ class _Run:
             span = {"from": p, "to": p + ln - 1}
             for t in {t for x in part for t in x["teachers"]}:
                 sp["rules"].append(dict(scope="Teacher", target=t, rule="Not available", strength="Prefer" if soft_teachers else "Must", week=wk, day=dy, **span))
-            for kind, n in collections.Counter((x["room_kind"] or "classroom") for x in part).items():
-                if self.rooms_of.get(kind):
-                    for _ in range(n): sp["rules"].append(dict(scope="Room", target=self.rooms_of[kind][0], rule="Not available", strength="Must", week=wk, day=dy, **span))
+            week = "Odd" if self.P.odd_day[d] else "Even"
+            for x in part:   # each group keeps a room it may use busy: the smallest that seats it, so bigger rooms stay free for bigger groups
+                _, E, _, _ = self.P.allowed(x, u, week if self.P.week_limited(x) else None)
+                if E: sp["rules"].append(dict(scope="Room", target=min(E, key=lambda r: (self.P.seats.get(r) or 0, r)), rule="Not available", strength="Must", week=wk, day=dy, **span))
         return sp
 
     def resolve_part(self, lv, free_classes):

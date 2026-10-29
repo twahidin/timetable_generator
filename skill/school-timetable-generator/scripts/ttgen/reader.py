@@ -51,6 +51,15 @@ def periods_between(sc, a, b):
 
 def _yes(v): return str(v or "").strip().lower() in ("yes", "y", "true", "1")
 
+def _names(v):
+    """a cell listing names ('Chemistry G3, SC, Sec 3') -> ['Chemistry G3', 'SC', 'Sec 3']"""
+    return [s.strip() for s in re.split(r"[,;\n]", str(v or "")) if s.strip()]
+
+def _week(v):
+    """'Special room weeks' on a lesson row: Odd or Even (the special room on that week only, a classroom on the other)"""
+    v = str(v or "").strip().lower()
+    return "Odd" if v.startswith("odd") else "Even" if v.startswith("even") else None
+
 ROOM_NOTE = re.compile(r"((?:[A-Z][\w&/-]*(?: [A-Z][\w&/-]*)*)(?:(?:, | and )[A-Z][\w&/-]*(?: [A-Z][\w&/-]*)*)*) takes? (\d+) classes")
 
 def _room_rules_from_notes(rows, venues, rules):
@@ -121,7 +130,7 @@ def read_template(path):
         day_structure.setdefault(str(lv), {})[str(d)] = codes
     _, ven = _table(wb["1 Venues"], "Room")
     venues = [dict(room=str(x["Room"]), kind=x.get("Kind"), capacity=x.get("Capacity"), building=x.get("Building") or x.get("Block"), floor=x.get("Floor") or x.get("Floor / level"),
-                   note=x.get("Note")) for x in ven if x.get("Room")]
+                   note=x.get("Note"), only_for=_names(next((v for h, v in x.items() if h.startswith("For")), None))) for x in ven if x.get("Room")]
     _, cl = _table(wb["2 Classes"], "Class")
     classes = [{"class": str(x["Class"]), "level": x.get("Level"), "size": x.get("Students") or 0, "home_room": x.get("Home room"), "note": x.get("Note")} for x in cl if x.get("Class")]
     sh, su = _table(wb["3 Subjects"], "Subject")
@@ -142,7 +151,8 @@ def read_template(path):
     bh = next((h for h in lh if h.startswith("Block")), "Block")
     lessons = [dict(level=x.get("Level"), subject=x.get("Subject"), block=x.get(bh), classes=[str(c) for c in _first_col(x, "Class", 12)],
                     teachers=[str(t) for t in _first_col(x, "Teacher", 3)], students=x.get("Students"),
-                    periods_override=x.get("Periods (only if different)"), code_override=x.get("Code (only to keep an old one)"), note=x.get("Note"))
+                    periods_override=x.get("Periods (only if different)"), code_override=x.get("Code (only to keep an old one)"), note=x.get("Note"),
+                    room_weeks=_week(x.get("Special room weeks")))
                for x in le if x.get("Subject")]
     for name in ("7 Rules", "More rules"):
         if name not in wb.sheetnames: continue

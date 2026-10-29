@@ -204,13 +204,15 @@ def write_template(spec, path, extra_rows=120):
     band_of = lambda lv: f'IFERROR(INDEX(Lists!$I$4:$I$60,MATCH({lv},Lists!$H$4:$H$60,0)),"")'
 
     # ---------------- 1 Venues
-    VIN = {1, 2, 3, 4, 5, 7}
-    vw = B.sheet(V, "Step 1 · Venues: every room", ["One row per room. Kind decides which subjects may use it (see Subjects).", "Blue on yellow = type or pick. Grey = worked out for you."],
-                 [("Room", 16), ("Kind", 16), ("Capacity", 10), ("Block", 12), ("Floor / level", 9), ("Used by lessons", 12), ("Note", 34)], VIN)
+    VIN = {1, 2, 3, 4, 5, 7, 8}
+    vw = B.sheet(V, "Step 1 · Venues: every room", ["One row per room. Kind decides which subjects may use it (see Subjects). Capacity is seats: a group only goes in a room that seats it.",
+                  "For (optional): the subjects, departments or levels the room is kept for, separated by commas; blank = anyone. Blue on yellow = type or pick. Grey = worked out for you."],
+                 [("Room", 16), ("Kind", 16), ("Capacity", 10), ("Block", 12), ("Floor / level", 9), ("Used by lessons", 12), ("Note", 34), ("For (subjects, departments or levels)", 30)], VIN)
     for i, x in enumerate(spec["venues"]):
         for j, k in enumerate(["room", "kind", "capacity", "building", "floor", None, "note"], start=1):
             if k: vw.cell(R0 + i, j, x.get(k))
-    B.paint(vw, LAST(nV), VIN, 7)
+        if x.get("only_for"): vw.cell(R0 + i, 8, ", ".join(x["only_for"]))
+    B.paint(vw, LAST(nV), VIN, 8)
     for r in range(R0, LAST(nV) + 1): vw.cell(r, 6, f"=IF(A{r}=\"\",\"\",COUNTIF('{C}'!$D${R0}:$D${R0 + 999},A{r}))")
     B.dv(vw, f"B{R0}:B{LAST(nV)}", "=KindList", "Pick a room kind (add kinds on the Lists sheet).")
     B.name("RoomList", B.dyn(V, "A"))
@@ -253,7 +255,7 @@ def write_template(spec, path, extra_rows=120):
     short_h, full_h = (LENGTH_NAME.get(L_std - 1, "Short lessons"), LENGTH_NAME.get(L_std, "Full lessons")) if not own_len else ("Short lessons", "Full lessons")
     names = ["Level", "Subject", "Block"] + [f"Class {i}" for i in range(1, NCLS + 1)] + [f"Teacher {i}" for i in range(1, NTCH + 1)] + \
             ["Students", "Periods (only if different)", "Code (only to keep an old one)", "Group code", "Periods"] + (["Lesson length"] if own_len else []) + \
-            [short_h, full_h, "Room kind", "Teacher periods", "Check", "Note"]
+            [short_h, full_h, "Room kind", "Teacher periods", "Check", "Note", "Special room weeks"]
     COL = {n: CL(j) for j, n in enumerate(names, start=1)}
     LQ = f"'{L}'"; TC = [COL[f"Teacher {k}"] for k in range(1, NTCH + 1)]; TPC = COL["Teacher periods"]
 
@@ -363,10 +365,10 @@ def write_template(spec, path, extra_rows=120):
 
     # ---------------- 6 Lessons
     widths = {"Level": 8, "Subject": 32, "Block": 32, "Students": 9, "Periods (only if different)": 11, "Code (only to keep an old one)": 11, "Group code": 11,
-              "Periods": 8, "Lesson length": 8, short_h: 8, full_h: 8, "Room kind": 13, "Teacher periods": 9, "Check": 40, "Note": 28}
+              "Periods": 8, "Lesson length": 8, short_h: 8, full_h: 8, "Room kind": 13, "Teacher periods": 9, "Check": 40, "Note": 28, "Special room weeks": 11}
     lcols = [(n, widths.get(n, 7 if n.startswith("Class") else 20)) for n in names]
     lcols[2] = ("Block (empty = whole class)", 32)
-    LIN = set(range(1, 4 + NCLS + NTCH + 3)) | {len(names)}
+    LIN = set(range(1, 4 + NCLS + NTCH + 3)) | {len(names) - 1, len(names)}
     lw = B.sheet(L, "Step 6 · Lessons: one row per group (or per class for whole-class subjects)",
                  ["Pick level, subject and block; pick the class(es) and teacher(s). Leave Block empty for a whole-class lesson.",
                   f"Group code, periods, {short_h.lower()}/{full_h.lower()} and room kind fill in from Steps 3-5. Check flags a teacher not set to teach the subject, a teacher twice in a block, missing periods or a repeated code."], lcols, LIN)
@@ -376,7 +378,8 @@ def write_template(spec, path, extra_rows=120):
         for k, c in enumerate(x["classes"][:NCLS]): lw.cell(rr, 4 + k, c)
         for k, t in enumerate((x.get("teachers") or [])[:NTCH]): lw.cell(rr, 4 + NCLS + k, t)
         c0 = 4 + NCLS + NTCH
-        lw.cell(rr, c0, x.get("students")); lw.cell(rr, c0 + 1, x.get("periods_override")); lw.cell(rr, c0 + 2, x.get("code_override")); lw.cell(rr, len(names), x.get("note"))
+        lw.cell(rr, c0, x.get("students")); lw.cell(rr, c0 + 1, x.get("periods_override")); lw.cell(rr, c0 + 2, x.get("code_override")); lw.cell(rr, len(names) - 1, x.get("note"))
+        if x.get("room_weeks"): lw.cell(rr, len(names), x["room_weeks"])
     nLast = LAST(nL) + 100
     B.paint(lw, nLast, LIN, len(names))
     c_ = COL; CF1, CFN = c_["Class 1"], c_[f"Class {NCLS}"]
@@ -411,6 +414,7 @@ def write_template(spec, path, extra_rows=120):
     lw.conditional_formatting.add(f"{ck}{R0}:{ck}{nLast}", FormulaRule(formula=[f"LEN({ck}{R0})>0"], fill=RED))
     B.dv(lw, f"A{R0}:A{nLast}", "=LevelList", "Pick a level."); B.dv(lw, f"B{R0}:B{nLast}", "=SubjectList", "Pick a subject from Step 3.")
     B.dv(lw, f"C{R0}:C{nLast}", "=BlockList", "Pick a block from Step 5, or leave empty for a whole-class lesson.")
+    if int(sc["weeks"]) == 2: B.dv(lw, f"{CL(len(names))}{R0}:{CL(len(names))}{nLast}", '"Odd,Even"', "Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other. Blank = every week.")
     B.dv(lw, f"{CF1}{R0}:{CFN}{nLast}", "=ClassList", "Pick a class from Step 2."); B.dv(lw, f"{TC[0]}{R0}:{TC[-1]}{nLast}", "=TeacherList", "Pick a teacher from Step 4.")
     lw.auto_filter.ref = f"A{HR}:{CL(len(names))}{R0 + max(nL, 1) - 1}"
     week_src = '"Odd,Even,Both"' if int(sc["weeks"]) == 2 else '"Both"'; day_src = '"All,Mon,Tue,Wed,Thu,Fri"'

@@ -33,6 +33,50 @@ class Problem:
         self.rows = [x for x in spec["lessons"] if x.get("periods") and x.get("classes")]
         self.tdept = {t["name"]: t.get("dept") for t in spec["teachers"]}
         self._units()
+        self._rooms()
+
+    # ---------------------------------------------------------------- rooms: kind, purpose, seats, weeks
+    def _rooms(self):
+        sp = self.spec; num = lambda v: int(v) if isinstance(v, (int, float)) and v > 0 else None
+        self.room_kind = {v["room"]: v.get("kind") or "classroom" for v in sp["venues"]}
+        self.seats = {v["room"]: num(v.get("capacity")) for v in sp["venues"]}
+        self.only_for = {v["room"]: set(v.get("only_for") or []) for v in sp["venues"]}
+        self.room_cap = {v["room"]: 1 for v in sp["venues"]}   # classes at once
+        for r in sp.get("rules", []):
+            if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and r.get("target") in self.room_cap and r.get("number") \
+                    and str(r.get("strength") or "Must") == "Must": self.room_cap[r["target"]] = int(r["number"])
+        self.two_weeks = any(d.startswith("Even") for d in self.days)
+        self.odd_day = [not d.startswith("Even") for d in self.days]
+        code_n = collections.Counter(g for s in sp.get("students", []) for g in s.get("groups") or [])
+        self._group_size = lambda r: code_n.get(r["code"]) or (int(r["students"]) if isinstance(r.get("students"), (int, float)) and r["students"] > 0 else None)
+        self._allowed = {}
+
+    def size(self, r, unit):
+        """students in this row's group: a whole-class lesson's class size, else the Students sheet count for its code, else
+        the row's Students number (None when unknown: no seat limit)"""
+        if r["code"] == "Entire Class" and unit["kind"] == "class":
+            n = self.cls.get(unit["classes"][0], {}).get("size"); return int(n) if isinstance(n, (int, float)) and n > 0 else None
+        return self._group_size(r)
+
+    def for_ok(self, room, r):
+        f = self.only_for.get(room)
+        return not f or bool({r["subject"], r.get("dept"), r["level"]} & f)
+
+    def allowed(self, r, unit, week=None):
+        """(room kind, rooms this row's group may use, size, oversize) in that week ('Odd' / 'Even' / None for any): rooms of its
+        kind kept for it or for anyone, that seat it; when none seats it, every such room (oversize, flagged by the checks)"""
+        kind = r["room_kind"] or "classroom"
+        if r.get("room_weeks") and self.two_weeks and week and week != r["room_weeks"]: kind = "classroom"   # its other week: a classroom
+        key = (id(r), unit["classes"][0] if unit["kind"] == "class" else "", kind)
+        if key not in self._allowed:
+            n = self.size(r, unit)
+            ok = [x for x, k in self.room_kind.items() if k == kind and self.for_ok(x, r)]
+            fit = [x for x in ok if n is None or self.seats[x] is None or self.seats[x] >= n]
+            self._allowed[key] = (kind, frozenset(fit or ok), n, bool(ok) and not fit)
+        return self._allowed[key]
+
+    def week_limited(self, r):
+        return bool(r.get("room_weeks") and self.two_weeks)
 
     # ---------------------------------------------------------------- units and lessons
     def _units(self):
@@ -322,31 +366,41 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
                 tbl = [W_PREF * sum(soft_t[t].get(q + k, 0) for k in range(b["ln"])) for q in range(ND * NP)]
                 if max(tbl) > 0:
                     v = m.NewIntVar(0, max(tbl), ""); m.AddElement(b["st"], tbl, v); extra_cost.append(v)
-    # rooms by kind
-    rooms = collections.defaultdict(list)
-    for v in P.spec["venues"]: rooms[(v.get("kind") or "classroom")].append(v["room"])
-    room_cap = {v["room"]: 1 for v in P.spec["venues"]}
-    for r in has("At most N at once", "Room"):
-        if r["target"] in room_cap and r.get("number"): room_cap[r["target"]] = int(r["number"])
-    room_busy = collections.defaultdict(list)
+    # rooms. Each group may use only some rooms (its kind, rooms kept for it or for anyone, rooms that seat it: Problem.allowed).
+    # For every set of rooms some group is limited to, the groups limited to it fit in it at every period (Hall's condition per
+    # set, exact when the sets nest, as seat sizes do), so the rooms can always be handed out afterwards. A group with its
+    # special room on one week only needs a classroom on the other week.
+    busy = collections.defaultdict(list)   # room -> runs of periods it is not available
     for r in has("Not available", "Room"):
-        S, _ = P.rule_positions(r)
-        kind = next((v.get("kind") or "classroom" for v in P.spec["venues"] if v["room"] == r["target"]), None)
-        if kind:
-            for run in _runs(sorted(S), NP): room_busy[kind].append((run, room_cap.get(r["target"], 1)))
-    kind_l = collections.defaultdict(list)
+        if r.get("target") in P.room_kind and str(r.get("strength") or "Must") == "Must":
+            S, _ = P.rule_positions(r); busy[r["target"]] += _runs(sorted(S), NP)
+    odd = {}
+    def in_odd(b):   # true when the lesson falls in an Odd week
+        if id(b) not in odd:
+            v = m.NewBoolVar(""); m.AddElement(b["day"], [1 if o else 0 for o in P.odd_day], v); odd[id(b)] = v
+        return odd[id(b)]
+    need = collections.defaultdict(list)   # kind -> [(interval, allowed rooms, groups, block)]
     for b in blocks:
-        for k, n in b["kinds"].items(): kind_l[k].append((b["iv"], n))
-    for k, lst in kind_l.items():
-        cap = sum(room_cap[x] for x in rooms.get(k, []))
-        if cap == 0: notes.append(f"No room of kind '{k}' on Venues: room limits for it are not checked."); continue
-        too_big = sorted({b["u"]["name"] for b in blocks if b["kinds"].get(k, 0) > cap})
-        if too_big:
-            notes.append(f"{', '.join(too_big)} need more '{k}' rooms at once than the {cap} on Venues; the extra groups are given a room marked TBC.")
-            lst = [(iv, min(n, cap)) for iv, n in lst]
-        ivs = [iv for iv, _ in lst] + [m.NewIntervalVar(run[0], len(run), run[0] + len(run), "") for run, _ in room_busy[k]]
-        dem = [n for _, n in lst] + [c for _, c in room_busy[k]]
-        if "rooms" not in skip: m.AddCumulative(ivs, dem, cap)
+        per = collections.Counter()
+        for r in b["part"]:
+            for week in (("Odd", "Even") if P.week_limited(r) else (None,)):
+                kind, E, _, _ = P.allowed(r, b["u"], week); per[(kind, E, week)] += 1
+        for (kind, E, week), n in per.items():
+            iv = b["iv"] if week is None else m.NewOptionalFixedSizeIntervalVar(b["st"], b["ln"], in_odd(b) if week == "Odd" else in_odd(b).Not(), "")
+            need[kind].append((iv, E, n, b))
+    for kind, lst in need.items():
+        every = frozenset(x for x, k in P.room_kind.items() if k == kind)
+        if not every: notes.append(f"No room of kind '{kind}' on Venues: room limits for it are not checked."); continue
+        for F in {E for _, E, _, _ in lst} | {every}:
+            cap = sum(P.room_cap[x] for x in F); sub = [(iv, n, b) for iv, E, n, b in lst if E <= F]
+            if not sub or not cap: continue
+            if F == every:
+                too_big = sorted({b["u"]["name"] for _, n, b in sub if n > cap})
+                if too_big: notes.append(f"{', '.join(too_big)} need more '{kind}' rooms at once than the {cap} on Venues; the extra groups are given a room marked TBC.")
+            runs = [(run, P.room_cap[x]) for x in F for run in busy.get(x, [])]
+            ivs = [iv for iv, _, _ in sub] + [m.NewIntervalVar(run[0], len(run), run[0] + len(run), "") for run, _ in runs]
+            dem = [min(n, cap) for _, n, _ in sub] + [c for _, c in runs]
+            if "rooms" not in skip: m.AddCumulative(ivs, dem, cap)
     # at most N at once (subject, or every subject of a department: e.g. PE classes at once)
     for r in has("At most N at once", "Subject") + has("At most N at once", "Department"):
         field = "subject" if r["scope"] == "Subject" else "dept"

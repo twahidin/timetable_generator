@@ -63,7 +63,15 @@ A school with 30 or more classes (`STAGED_FROM_CLASSES`) gets its first timetabl
 then clashes between levels are cleared and the whole school is checked together (`ttgen/staged.py`, the skill's
 `--staged` solve): one whole-school search can find nothing for hours on a big, tight school. Later solves start from
 the latest timetable. A room holds one class at a time unless step 7 has a "Room · At most N at once" rule; a note on
-a Settings row such as "Field and Hall take 2 classes each" is read as those rules. About 1 GB of
+a Settings row such as "Field and Hall take 2 classes each" is read as those rules.
+
+**Rooms:** a group only goes in a room of its subject's kind that seats it (Venues **Capacity** = seats; the group size
+is the Students sheet count for its code, the row's Students, or the class size). A room's **For** column keeps it for
+some subjects, departments or levels (blank = anyone). A lesson row's **Special room weeks** (Odd or Even) gives the
+group its lab or studio on that week only and a classroom on the other. The solver keeps enough suitable rooms free at
+every period; afterwards each group gets the smallest free room that seats it (whole-class lessons their home room,
+and a group keeps its room where it can). The checks flag a room too small, a room used against its purpose, a lesson
+with no free room, and groups bigger than every room they may use (fix the seats or split the group). About 1 GB of
 memory is enough for a 1,500-student school.
 
 **Try it without a key:** `AI_PROVIDER=mock` runs a scripted stand-in for the AI (it checks, solves, asks one
