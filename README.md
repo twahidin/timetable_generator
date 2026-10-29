@@ -37,6 +37,12 @@ timetable, as you would on **Adjust timetable**, then asks **Apply** or **No, pu
 nothing: the AI says why and offers clean alternatives, or lets the solver make room by moving as few other lessons as
 it can. Applied moves are on the Adjust page's Undo list.
 
+**Teachers for rows left blank.** On step 6 (Lessons), **Fill blank teachers** gives every row with no teacher one who is
+set to teach that subject at that level (step 4), never two groups of one band, keeping each teacher within their
+allowance and the load spread. Rows that name a teacher are never changed; Undo takes it back. The AI can do the same in
+the chat (it shows who gets what and the loads, and asks first). Co-teaching: a row may name up to three teachers, each
+blocked for the lesson and counted the full periods.
+
 The AI works on a copy of the setup. **Keep the AI's changes in my setup** copies its changes back; **Publish** makes
 the PDFs, the Excel workbook and the timetable pages and swaps them in for teachers and students (about a minute).
 Without an AI set up, **Generate without AI** checks and solves, and the committee reads the results.
