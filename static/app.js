@@ -127,11 +127,13 @@ function placeRules() {
 }
 function settingValue(key) {
   if (key === "after_school") return sc().after_school === false ? "No" : "Yes";
+  if (key === "pe_rain_home") return sc().pe_rain_home ? "Yes" : "No";
   const s = SET().find(x => x.key === key), i = placeRules().settings[key];
   return i == null ? (s.number ? "" : "No") : (s.number ? S.spec.rules[i].number : "Yes");
 }
 function setSetting(key, v) {
   if (key === "after_school") { sc().after_school = v !== "No"; return; }
+  if (key === "pe_rain_home") { sc().pe_rain_home = v === "Yes"; return; }
   const s = SET().find(x => x.key === key), i = placeRules().settings[key], on = s.number ? v !== "" && v != null : v === "Yes";
   if (!on) { if (i != null) S.spec.rules.splice(i, 1); return; }
   if (i != null) { if (s.number) S.spec.rules[i].number = Number(v); return; }

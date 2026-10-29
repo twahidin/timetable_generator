@@ -5,6 +5,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter as CL
 from openpyxl.comments import Comment
 from .spec import no_free_periods
+from .solver import rain_rooms
 
 NAVY = "1F4E78"
 F = lambda **k: Font(name="Arial", size=k.pop("size", 8), **k)
@@ -15,7 +16,7 @@ PAL = ["DCE9F7", "FCE4CC", "D9F0DA", "F8D7DA", "F3EBC9", "E4DDF4", "D4EFEF", "EA
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
 # the Lessons sheet is the hand-over format: one row per group per lesson; rows that meet together share a Lesson ID
 LESSON_HEADERS = ["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group",
-                  "Teachers", "Room", "After school"]
+                  "Teachers", "Room", "After school", "Rain room"]
 
 def short_subject(s):
     s = re.sub(r"English Language", "EL", s); s = re.sub(r"Mathematics", "Math", s); s = re.sub(r"Physical Education", "PE", s)
@@ -46,7 +47,11 @@ def assign_rooms(res):
     def free(x, pos): return all(occ[x][q] < cap.get(x, 1) for q in pos)
     week = lambda L: "Odd" if P.odd_day[L["start"] // NP] else "Even"
     lessons = res["lessons"]
-    for L in lessons: L["rooms"] = {}; L["pos"] = list(range(L["start"], L["start"] + L["ln"]))
+    for L in lessons: L["rooms"] = {}; L["rain"] = {}; L["pos"] = list(range(L["start"], L["start"] + L["ln"]))
+    for L, c, h in rain_rooms(P, lessons):   # PE: the class's home room is kept for rain (None: taken, the checks say so)
+        L["rain"][c] = h if free(h, L["pos"]) else None
+        if L["rain"][c]:
+            for q in L["pos"]: occ[h][q] += cap.get(h, 1)
     for L in lessons:   # whole-class lessons in their home room
         u = L["unit"]
         if u["kind"] != "class": continue
@@ -138,6 +143,8 @@ def check(res):
     probs += [f"Room over capacity: {room} at {P.days[q // NP]} period {q % NP}." for (room, q), n in rb.items() if room != "TBC" and n > cap.get(room, 1)]
     tbc = sum(1 for x in L for room in x["rooms"].values() if room == "TBC")
     if tbc: probs.append(f"{tbc} lesson-groups have no free room (marked TBC).")
+    norain = sorted({f"{c} {P.days[x['start'] // NP]} period {x['start'] % NP}" for x in L for c, h in (x.get("rain") or {}).items() if h is None})
+    if norain: probs.append(f"No rain room for PE (the class's home room is in use): {', '.join(norain[:6])}{f' and {len(norain) - 6} more' if len(norain) > 6 else ''}.")
     seat_probs, seat_notes = _seat_checks(res); probs += seat_probs
     occ = collections.defaultdict(list)
     for x in L:

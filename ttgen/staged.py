@@ -16,7 +16,7 @@ solve_staged returns the same result as solver.solve, so report.write_timetable 
 `stop` (the committee's Stop button) and `deadline` (time.time() by which to give up) end it early.
 """
 import collections, copy, re, threading, time
-from .solver import solve, plan_recess, Problem, state_key
+from .solver import solve, plan_recess, rain_rooms, Problem, state_key
 
 NOFREE = "No free periods for students"
 
@@ -169,6 +169,8 @@ class _Run:
             for x in part:   # each group keeps a room it may use busy: the smallest that seats it, so bigger rooms stay free for bigger groups
                 _, E, _, _ = self.P.allowed(x, u, week if self.P.week_limited(x) else None)
                 if E: sp["rules"].append(dict(scope="Room", target=min(E, key=lambda r: (self.P.seats.get(r) or 0, r)), rule="Not available", strength="Must", week=wk, day=dy, **span))
+            for _, c, h in rain_rooms(self.P, [dict(part=part, unit=u)]):   # the other level's PE keeps its class's home room free
+                sp["rules"].append(dict(scope="Room", target=h, rule="Not available", strength="Must", week=wk, day=dy, **span))
         return sp
 
     def resolve_part(self, lv, free_classes):
@@ -224,6 +226,16 @@ class _Run:
             if not improved: return False
         return self.clashes()[0] == 0
 
+    def repair(self):
+        """last try when clearing level by level leaves a few clashes: one whole-school solve that starts from the joined
+        timetable (CP-SAT repairs a nearly valid timetable far faster than it builds one)"""
+        if self.halted(): return False
+        n, _ = self.clashes(); left = (self.deadline - time.time()) if self.deadline else 2 * self.T
+        self.log(f"  {n} clash periods left: repairing the whole school from the joined timetable")
+        r = self._solve_once(self.base, None, dict(self.state), 30, None, max(60, min(2 * self.T, left)))
+        if not r["lessons"]: self.log(f"  repair found no timetable ({r['status']})"); return False
+        self.state = self.to_state(r); return self.clashes()[0] == 0
+
     def improve(self, rounds, chunk=4):
         res = solve(self.spec, time_limit=self.T, workers=self.workers, log=lambda *a: None, fix=self.state)
         best = res.get("objective")
@@ -253,7 +265,7 @@ def solve_staged(spec, time_per_step=180, workers=8, log=print, order=None, roun
         if run.halted(): return dict(status="STOPPED" if stop and stop.is_set() else "UNKNOWN", problem=run.P, lessons=[], notes=["Staged solve: out of time before every level was placed."])
         return dict(status="NOT FOUND", problem=run.P, lessons=[], notes=["Staged solve: a level could not be placed even with clashes allowed."
                     + (f" The levels placed first may have taken the canteen space (at most {run.P.recess_cap} classes at recess at once)." if run.P.recess_cap else "")])
-    if not run.clear(rounds):
+    if not run.clear(rounds) and not run.repair():
         if run.halted(): return dict(status="STOPPED" if stop and stop.is_set() else "UNKNOWN", problem=run.P, lessons=[], notes=["Staged solve: out of time while clearing clashes between levels."])
         n, where = run.clashes()
         return dict(status="NOT FOUND", problem=run.P, lessons=[], notes=[f"Staged solve: {n} teacher clash periods left between levels "

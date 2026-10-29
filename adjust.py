@@ -6,7 +6,7 @@ there and moves as few other lessons as it can), or asking the AI (merge or spli
 Moves change the run's latest timetable (its placements file); the timetable workbook is rewritten before Preview and
 Publish. Lessons moved by hand are pinned: later solves in the run keep them where they were put."""
 import collections, copy, math, os, threading
-from ttgen.solver import Problem, RECESS_KEY, lesson_domains, units_for
+from ttgen.solver import Problem, RECESS_KEY, lesson_domains, rain_rooms, units_for
 from ttgen.report import assign_rooms, check, clock
 from store import now, read_json, write_json
 
@@ -54,6 +54,7 @@ class Board:
         for L in self.L.values():
             for r in L["part"]:
                 for week in (("Odd", "Even") if P.week_limited(r) else (None,)): kind, E, _, _ = P.allowed(r, L["unit"], week); self.fam[kind].add(E)
+        for _, c, h in rain_rooms(P, self.L.values()): self.fam[P.room_kind[h]].add(frozenset([h]))
         for kind in list(self.fam): self.fam[kind].add(frozenset(x for x, k in P.room_kind.items() if k == kind))
         self.room_off = collections.defaultdict(set)
         for r in self.rules:
@@ -70,6 +71,8 @@ class Board:
         for r in L["part"]:
             kind, E, n, _ = P.allowed(r, L["unit"], week if P.week_limited(r) else None)
             out.append((kind, E, f"{r['subject']} {r['code'] if r['code'] != 'Entire Class' else L['unit']['classes'][0]}" + (f" ({n} students)" if n else "")))
+        for _, c, h in rain_rooms(P, [L]):   # PE: the class's home room stays free as its rain room
+            out.append((P.room_kind[h], frozenset([h]), f"{c}'s rain room {h}"))
         return out
 
     def index(self):
@@ -130,7 +133,7 @@ class Board:
                     def used(q): return sum(1 for b in at(q) for kb, Eb, _ in self.needs(b, start(b)) if kb == kind and Eb <= F) + \
                                          sum(P.room_cap[x] for x in F if q in self.room_off.get(x, ()))
                     if capF and any(used(q) > capF for q in cover(k)):
-                        add(f"No free {kind} then: all {capF} {'' if F == every else 'that can take ' + who + ' '}are in use."); break
+                        add(f"{who} is in use then." if " rain room " in who else f"No free {kind} then: all {capF} {'' if F == every else 'that can take ' + who + ' '}are in use."); break
             # a group's lessons spread over the cycle: at most one a day under 'Once a day per group', and never bunched
             # when it has more lessons than days (as the solver does)
             ks = self.by_unit[u["id"]]; on_day = sum(1 for b in ks if start(b) // NP == d)

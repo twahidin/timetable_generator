@@ -30,7 +30,8 @@ RULE_TYPES = [
 ]
 
 # rule rows on the Settings sheet: the row's label, a key, whether its value is a number (else Yes/No), and the rule it
-# stands for (after_school is a school setting instead: No means the 'A' periods are never used)
+# stands for (after_school and pe_rain_home are school settings instead: No means the 'A' periods are never used; Yes keeps
+# each class's home room free during its PE, as the rain room)
 _SCHOOL = dict(scope="School", target="Whole school", week="Both", day="All", strength="Must")
 SETTING_RULES: list[dict] = [
     dict(key="once_a_day", label="Same subject at most once a day (per group)", number=False, rule=dict(_SCHOOL, rule="Once a day per group")),
@@ -38,7 +39,10 @@ SETTING_RULES: list[dict] = [
     dict(key="pe_at_once", label="Most PE classes at the same time", number=True, rule=dict(_SCHOOL, scope="Department", target="PE", rule="At most N at once")),
     dict(key="max_day", label="Most teaching periods a teacher has in a day", number=True, rule=dict(_SCHOOL, rule="Max periods a day")),
     dict(key="recess", label="Every teacher gets at least one recess a day", number=False, rule=dict(_SCHOOL, rule="At least one recess a day")),
+    dict(key="pe_rain_home", label="In rain, PE goes to the class's home room", number=False, rule=None),
 ]
+PE_KIND = "pe venue"   # the room kind of PE lessons (field, hall, courts): with pe_rain_home their class's home room stays free
+
 
 def end_by(school):
     """'Lessons end by (Monday to Thursday)' rows on Settings -> [(weekdays, minutes after midnight)]: no lesson runs

@@ -89,7 +89,7 @@ The export re-checks everything independently (teacher, room, class and student 
 periods planned, nothing in a break), so it doubles as a checker.
 
 Hand-over format, one row per group per lesson (rows that meet at the same time in a block share a Lesson ID):
-`Lesson ID, Day, Start period, End period, Periods, Starts, Ends, Level, Block, Classes, Subject, Group, Teachers, Room, After school`.
+`Lesson ID, Day, Start period, End period, Periods, Starts, Ends, Level, Block, Classes, Subject, Group, Teachers, Room, After school, Rain room`.
 Day is exactly as on `Day structure` (e.g. `Odd Mon`); Group is the group code from `6 Lessons` or `Entire Class`;
 Classes and Teachers are comma-separated; After school is `yes` or blank.
 
@@ -97,7 +97,7 @@ Classes and Teachers are comma-separated; After school is `yes` or blank.
 
 | Sheet | One row per | Key columns |
 |---|---|---|
-| Settings | setting | School, Timetable, (School type: primary only), Cycle (1 week, or 2 weeks Odd/Even), Period length (minutes), Period 0 starts at, Periods in a day, Lesson length (periods); then the school-wide rule rows: Same subject at most once a day (per group) Yes/No, After-school slot allowed when a class cannot fit Yes/No (No: the `A` periods are never used), Most PE classes at the same time (number), Most teaching periods a teacher has in a day (number), Every teacher gets at least one recess a day Yes/No; any other rows are notes |
+| Settings | setting | School, Timetable, (School type: primary only), Cycle (1 week, or 2 weeks Odd/Even), Period length (minutes), Period 0 starts at, Periods in a day, Lesson length (periods); then the school-wide rule rows: Same subject at most once a day (per group) Yes/No, After-school slot allowed when a class cannot fit Yes/No (No: the `A` periods are never used), Most PE classes at the same time (number), Most teaching periods a teacher has in a day (number), Every teacher gets at least one recess a day Yes/No, In rain, PE goes to the class's home room Yes/No (Yes: while a class has a lesson in a `pe venue`, its home room stays free and is its rain room); any other rows are notes |
 | Day structure | level and day | one cell per period: `F` flag/assembly, `L` lesson, `R` recess, `W` recess window (the solver puts the recess somewhere in it; the rest is lesson time), `U` lunch, `A` after-school slot (used only if needed), blank = no school. Day names as the school writes them (e.g. `Odd Tues`) |
 | 1 Venues | room | Room, Kind (classroom, lab, pe venue, ...), Capacity, Block (building), Floor / level |
 | 2 Classes | form class | Class, Level, Students, Home room |
@@ -165,7 +165,8 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
    "Keep free together" (department).
 6. **Rooms.** Per room kind, AddCumulative with capacity = number of rooms of that kind (a room's "At most N at
    once" rule counts it N times); demand = groups of that kind in the lesson; rows with no kind use classrooms.
-   Room "Not available" adds fixed demand.
+   Room "Not available" adds fixed demand. With "In rain, PE goes to the class's home room", each lesson in a `pe venue`
+   also needs its class's home room (a one-room demand), so the home room is free whenever the class is at PE.
 7. **Rules.** Remove start positions for Must "Not in / Only in periods", "Finish by", "Not available" (class,
    level, block), "Fixed at" with Day All; add a cost for Prefer versions. "Fixed at" on a day: BoolOr(start == pos).
    "Max periods a day": per day, sum of lesson length x [day == d] <= N (Prefer: plus a costed slack).
@@ -175,7 +176,7 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
 8. **Objective.** Minimise after-school periods (weighted by students affected) plus Prefer costs. Break symmetry by
    ordering identical lessons of a unit. Time limit 300 s, 8 workers.
 9. **Rooms and checks.** Assign rooms greedily by start time (home room for whole-class lessons; a group keeps the
-   same room where possible). Write the `Lessons` sheet in the hand-over format, then check independently: periods
+   same room where possible; a PE class's home room is reserved first as its rain room, the `Rain room` column). Write the `Lessons` sheet in the hand-over format, then check independently: periods
    placed = planned for every row, no teacher or room double-booked, no whole-class lesson overlapping anything else
    of its class, no student (Students sheet) with two lessons at once, nothing in a break.
 10. **Outputs.** Build each timetable as a list of lesson boxes (day, start, length, title, two short lines, colour by
