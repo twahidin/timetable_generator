@@ -16,6 +16,10 @@ The student list goes in on step 7 of the setup (**Students**): paste it from Ex
 To fill groups in the app, tick students (shift-click for a run, or the top box for everyone shown) and **Add to group**,
 **Remove from group** or **Move to class** for all of them at once; a group in a band replaces the student's other group
 in that band.
+Things to fix lists students who are in none of the groups of a band over their class (so they would miss that
+subject), one note per band. Having the subject in another band counts; a Note with "Exempt" and the subject ("Exempt
+from MTL") excuses them; untick **Everyone takes one** on a band that is an option (it starts unticked for a band named
+Option or Elective).
 It is optional, but with it the solver makes sure no student has two lessons at once, and every student gets a
 personal code. Personal codes are made from each student's ID and `SECRET_KEY`, so they stay the same when the
 timetable is republished. The committee downloads them as a list (CSV) or as slips to print, one page per class.
