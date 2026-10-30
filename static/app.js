@@ -284,6 +284,8 @@ function issues() {
     if (!gs.length) add("blocks", i, `${b.block}: no groups yet (add them under Teaching groups).`);
     const inG = gs.reduce((a, [x]) => a + (Number(x.students) || 0), 0), inC = (b.classes || []).reduce((a, c) => a + (Number((S.spec.classes.find(y => y.class === c) || {}).size) || 0), 0);
     if (gs.length && inG > inC) add("blocks", i, `${b.block}: ${inG} students in groups but ${inC} in its classes.`);
+    else if (everyone(b) && gs.length && inC && inG < inC && gs.every(([x]) => Number(x.students) > 0) && !S.spec.students.some(s => (b.classes || []).includes(s.class)))   // with a student list, each student is checked instead
+      add("blocks", i, `${b.block}: its groups are planned for ${inG} students but its classes have ${inC}, so ${inC - inG} ${inC - inG === 1 ? "is" : "are"} in none of them.`);
   });
   S.spec.subjects.forEach((s, i) => { if (!Object.values(s.periods || {}).some(Number)) add("subjects", i, `${s.subject || "Subject"}: no periods for any level.`); });
   S.spec.rules.forEach((r, i) => {
@@ -330,6 +332,30 @@ function issues() {
     }
     for (const [b, gs] of Object.entries(inBlock)) if (gs.length > 1) add("students", i, `${who}: ${gs.join(" and ")} are both in ${b}, so they clash.`);
   });
+  // every listed student is in one group of each band over their class (the class splits into its groups, so a student in
+  // none of them misses that subject), unless their Note says they are exempt from it ("Exempt: Mother Tongue", "exempt MTL")
+  const bandCls = {}, bandWords = {}, bandFam = {}, words = t => String(t || "").toLowerCase().match(/[a-z]{2,}/g) || [];
+  const ALIAS = { mt: ["mother", "tongue"], mtl: ["mother", "tongue"], el: ["english"], hum: ["humanities"], sci: ["science"], math: ["mathematics"], maths: ["mathematics"] };
+  S.spec.lessons.forEach(x => {
+    if (!x.block) return; const b = x.block;
+    const bb = S.spec.blocks.find(y => y.block === b) || { block: b }; if (!everyone(bb)) return;
+    if (!bandCls[b]) { bandCls[b] = new Set(bb.classes || []); bandWords[b] = new Set(words(b).filter(w => w.length > 2 && w !== "sec")); bandFam[b] = new Set(); }
+    (x.classes || []).forEach(c => bandCls[b].add(c)); words(x.subject).filter(w => w.length > 2).forEach(w => bandWords[b].add(w)); bandFam[b].add(family(x.subject));
+  });
+  const exempt = (note, b) => /exempt/i.test(note || "") && words(note).some(w => bandWords[b].has(w) || (ALIAS[w] || []).some(a => bandWords[b].has(a)));
+  const missing = {}, none = {};
+  S.spec.students.forEach((s, i) => {
+    if (!s.class || !classNames().includes(s.class)) return;
+    if (!(s.groups || []).length) { (none[s.class] = none[s.class] || []).push(i); return; }
+    const has = new Set(s.groups.map(g => (gc[g] || {}).block).filter(Boolean)), fams = new Set(s.groups.map(g => family((gc[g] || {}).subject)));
+    for (const [b, cs] of Object.entries(bandCls))   // in another band for the same subject (3I8's G1 English, say) counts
+      if (cs.has(s.class) && !has.has(b) && ![...bandFam[b]].some(f => fams.has(f)) && !exempt(s.note, b)) (missing[b] = missing[b] || []).push(i);
+  });
+  const names = l => l.slice(0, 6).map(i => `${stuKey(S.spec.students[i]) || `Row ${i + 1}`} (${S.spec.students[i].class})`).join(", ") + (l.length > 6 ? ` and ${l.length - 6} more` : "");
+  for (const [b, l] of Object.entries(missing))
+    add("students", l[0], `${b}: ${l.length} student${l.length === 1 ? " is" : "s are"} in none of its groups, so ${l.length === 1 ? "has" : "have"} none of its lessons: ${names(l)}. Add their group, write "Exempt" and the subject in their Note, or untick Everyone takes one for the band if it is an option.`);
+  for (const [c, l] of Object.entries(none))
+    add("students", l[0], `${c}: ${l.length} student${l.length === 1 ? " has" : "s have"} no groups yet, so only the class's whole-class lessons: ${names(l)}.`);
   S.spec.classes.forEach(c => {
     const l = per[c.class], size = Number(c.size) || 0; if (!l || !size) return;
     if (l.length < size) add("students", l[0], `${c.class}: ${l.length} of ${size} students listed. Once a class has a list, only the students on it are checked for clashes.`);
@@ -525,9 +551,9 @@ const VIEWS = {
   _bands(out, info) {
     const open = S.bandsOpen ?? (!S.spec.blocks.length || Object.keys(out.blocks).length > 0);   // until the committee opens or closes it
     return `<details class="bands" ${open ? "open" : ""}><summary><h2>Bands <span class="muted" style="font-weight:400;font-size:14px">${S.spec.blocks.length} band${S.spec.blocks.length === 1 ? "" : "s"}${Object.keys(out.blocks).length ? ` · ${Object.keys(out.blocks).length} to fix` : ""}</span></h2></summary><p class="muted">A band takes the students of its classes and splits them into groups that all have lessons at the same time (for example, Sec 1 English for 1A–1D split by G3, G2 and G1). Name the band and pick its classes; then add its groups under Teaching groups.</p>
-      <div class="tablewrap"><table><tr><th>Band</th><th>Level</th><th>Classes</th><th>Groups (from Teaching groups)</th><th>Students in groups / classes</th><th>Note</th><th></th></tr>
+      <div class="tablewrap"><table><tr><th>Band</th><th>Level</th><th>Classes</th><th>Groups (from Teaching groups)</th><th>Students in groups / classes</th><th title="Every student in its classes takes one of its groups (English, Mother Tongue...). Untick for an option or elective band some students are not in.">Everyone takes one</th><th>Note</th><th></th></tr>
       ${S.spec.blocks.map((b, i) => { const gs = S.spec.lessons.map((x, j) => [x, j]).filter(([x]) => x.block === b.block); const inG = gs.reduce((a, [x]) => a + (Number(x.students) || 0), 0), inC = (b.classes || []).reduce((a, c) => a + (Number((S.spec.classes.find(y => y.class === c) || {}).size) || 0), 0);
-        return `<tr id="blocks-${i}" class="${out.blocks[i] ? "bad" : ""}"><td style="min-width:200px">${inp(`spec.blocks.${i}.block`, b.block)}</td><td>${sel(`spec.blocks.${i}.level`, b.level, levels())}</td><td style="min-width:180px">${chips(`spec.blocks.${i}.classes`, b.classes, "classes", `data-level="${esc(b.level || "")}"`)}</td><td class="calc" style="white-space:normal">${esc(gs.map(([x, j]) => info[j].code).join(", "))}</td><td class="calc">${inG} / ${inC}</td><td>${inp(`spec.blocks.${i}.note`, b.note)}</td><td>${delBtn("blocks", i)}</td></tr>`; }).join("")}
+        return `<tr id="blocks-${i}" class="${out.blocks[i] ? "bad" : ""}"><td style="min-width:200px">${inp(`spec.blocks.${i}.block`, b.block)}</td><td>${sel(`spec.blocks.${i}.level`, b.level, levels())}</td><td style="min-width:180px">${chips(`spec.blocks.${i}.classes`, b.classes, "classes", `data-level="${esc(b.level || "")}"`)}</td><td class="calc" style="white-space:normal">${esc(gs.map(([x, j]) => info[j].code).join(", "))}</td><td class="calc">${inG} / ${inC}</td><td style="text-align:center"><input type="checkbox" data-k="spec.blocks.${i}.everyone" ${everyone(b) ? "checked" : ""}></td><td>${inp(`spec.blocks.${i}.note`, b.note)}</td><td>${delBtn("blocks", i)}</td></tr>`; }).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="blocks">+ Add band</button></div></details>`;
   },
   rules() {
@@ -722,6 +748,7 @@ document.addEventListener("change", async e => {
     const [i, k] = el.dataset.time.split("|").map(Number), r = S.spec.rules[i];
     r.times = [...ruleTimes(r)]; r.times[k] = el.value; [r.from, r.to] = periodsBetween(r.times[0], r.times[1]); save(); render(); return; }
   const path = el.dataset.k; if (!path) return;
+  if (el.type === "checkbox") { setPath(path, el.checked); save(); render(); return; }
   let v = el.value; if (el.type === "number") v = v === "" ? null : Number(v); if (v === "") v = null;
   if (/\.(from|to)$/.test(path) && v !== null) v = Number(v);
   if (/^spec\.school\.(weeks|periods_per_day|period_minutes|lesson_length)$/.test(path)) v = Number(v);
@@ -769,6 +796,10 @@ function groupCode(i) {
   x.code_override = `${pre}${k}`;
   toast(`${x.subject} for ${n} of the ${size} students in ${(x.classes || []).join(", ")} is a group of its own, so it gets code ${x.code_override} (Keep code). If the rest of the class has this subject at the same time, put it in their band instead.`);
 }
+/* a band whose classes all split into its groups (English, Mother Tongue, Maths by level): every student takes one of
+   them. Option and elective bands are for some of the students only. The committee can tick or untick it (Bands). */
+const everyone = b => b.everyone ?? !/option|elective/i.test(b.block || "");
+const family = n => String(n || "").replace(/\s+(G[1-3]|NA|NT|Express|Foundation)$/i, "").replace(/\s*\([^)]*\)/g, "").trim().toLowerCase();   // Science (Bio) G2 and Science G1: both Science
 const blankRows = () => S.spec.lessons.filter(x => x.subject && !(x.teachers || []).some(Boolean)).length;
 async function allocateTeachers() {   // a teacher for every row left blank (ttgen.allocate), as one change Undo takes back
   toast("Choosing teachers…");
