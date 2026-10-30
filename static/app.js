@@ -282,6 +282,7 @@ function issues() {
   S.spec.blocks.forEach((b, i) => {
     const gs = S.spec.lessons.map((x, j) => [x, j]).filter(([x]) => x.block === b.block);
     if (!gs.length) add("blocks", i, `${b.block}: no groups yet (add them under Teaching groups).`);
+    if (!(b.classes || []).length) add("blocks", i, `${b.block}: no classes. Pick the classes its groups take students from.`);
     const inG = gs.reduce((a, [x]) => a + (Number(x.students) || 0), 0), inC = (b.classes || []).reduce((a, c) => a + (Number((S.spec.classes.find(y => y.class === c) || {}).size) || 0), 0);
     if (gs.length && inG > inC) add("blocks", i, `${b.block}: ${inG} students in groups but ${inC} in its classes.`);
     else if (everyone(b) && gs.length && inC && inG < inC && gs.every(([x]) => Number(x.students) > 0) && !S.spec.students.some(s => (b.classes || []).includes(s.class)))   // with a student list, each student is checked instead
@@ -334,26 +335,24 @@ function issues() {
   });
   // every listed student is in one group of each band over their class (the class splits into its groups, so a student in
   // none of them misses that subject), unless their Note says they are exempt from it ("Exempt: Mother Tongue", "exempt MTL")
-  const bandCls = {}, bandWords = {}, bandFam = {}, words = t => String(t || "").toLowerCase().match(/[a-z]{2,}/g) || [];
-  const ALIAS = { mt: ["mother", "tongue"], mtl: ["mother", "tongue"], el: ["english"], hum: ["humanities"], sci: ["science"], math: ["mathematics"], maths: ["mathematics"] };
+  const bandCls = {}, bandFam = {};
   S.spec.lessons.forEach(x => {
     if (!x.block) return; const b = x.block;
     const bb = S.spec.blocks.find(y => y.block === b) || { block: b }; if (!everyone(bb)) return;
-    if (!bandCls[b]) { bandCls[b] = new Set(bb.classes || []); bandWords[b] = new Set(words(b).filter(w => w.length > 2 && w !== "sec")); bandFam[b] = new Set(); }
-    (x.classes || []).forEach(c => bandCls[b].add(c)); words(x.subject).filter(w => w.length > 2).forEach(w => bandWords[b].add(w)); bandFam[b].add(family(x.subject));
+    if (!bandCls[b]) { bandCls[b] = new Set(bb.classes || []); bandFam[b] = new Set(); }
+    (x.classes || []).forEach(c => bandCls[b].add(c)); bandFam[b].add(family(x.subject));
   });
-  const exempt = (note, b) => /exempt/i.test(note || "") && words(note).some(w => bandWords[b].has(w) || (ALIAS[w] || []).some(a => bandWords[b].has(a)));
   const missing = {}, none = {};
   S.spec.students.forEach((s, i) => {
     if (!s.class || !classNames().includes(s.class)) return;
     if (!(s.groups || []).length) { (none[s.class] = none[s.class] || []).push(i); return; }
     const has = new Set(s.groups.map(g => (gc[g] || {}).block).filter(Boolean)), fams = new Set(s.groups.map(g => family((gc[g] || {}).subject)));
     for (const [b, cs] of Object.entries(bandCls))   // in another band for the same subject (3I8's G1 English, say) counts
-      if (cs.has(s.class) && !has.has(b) && ![...bandFam[b]].some(f => fams.has(f)) && !exempt(s.note, b)) (missing[b] = missing[b] || []).push(i);
+      if (cs.has(s.class) && !has.has(b) && ![...bandFam[b]].some(f => fams.has(f)) && !exemptFrom(s.note, b)) (missing[b] = missing[b] || []).push(i);
   });
   const names = l => l.slice(0, 6).map(i => `${stuKey(S.spec.students[i]) || `Row ${i + 1}`} (${S.spec.students[i].class})`).join(", ") + (l.length > 6 ? ` and ${l.length - 6} more` : "");
   for (const [b, l] of Object.entries(missing))
-    add("students", l[0], `${b}: ${l.length} student${l.length === 1 ? " is" : "s are"} in none of its groups, so ${l.length === 1 ? "has" : "have"} none of its lessons: ${names(l)}. Add their group, write "Exempt" and the subject in their Note, or untick Everyone takes one for the band if it is an option.`);
+    add("students", l[0], `${b}: ${l.length} student${l.length === 1 ? " is" : "s are"} in none of its groups, so ${l.length === 1 ? "has" : "have"} none of its lessons: ${names(l)}. Pick their group, or "exempt" for a student not taking it (in their groups, on step 7), or untick Everyone takes one for the band if it is an option.`);
   for (const [c, l] of Object.entries(none))
     add("students", l[0], `${c}: ${l.length} student${l.length === 1 ? " has" : "s have"} no groups yet, so only the class's whole-class lessons: ${names(l)}.`);
   S.spec.classes.forEach(c => {
@@ -800,6 +799,25 @@ function groupCode(i) {
    them. Option and elective bands are for some of the students only. The committee can tick or untick it (Bands). */
 const everyone = b => b.everyone ?? !/option|elective/i.test(b.block || "");
 const family = n => String(n || "").replace(/\s+(G[1-3]|NA|NT|Express|Foundation)$/i, "").replace(/\s*\([^)]*\)/g, "").trim().toLowerCase();   // Science (Bio) G2 and Science G1: both Science
+/* a student's Note excuses them from a band: "Exempt: Sec 1 Mother Tongue 1A1-1A9" (what the exempt choice in the groups
+   picker writes), or free text naming the subject, such as "Exempt from MTL" or "exempt: Mother Tongue" */
+const EXEMPT = "!exempt:", ALIAS = { mt: ["mother", "tongue"], mtl: ["mother", "tongue"], el: ["english"], hum: ["humanities"], sci: ["science"], math: ["mathematics"], maths: ["mathematics"] };
+const noteWords = t => String(t || "").toLowerCase().match(/[a-z]{2,}/g) || [];
+function exemptFrom(note, b) {
+  if (!/exempt/i.test(note || "")) return false;
+  const bands = blockNames(); let bw = null;
+  return String(note).split(";").some(p => {
+    if (!/exempt/i.test(p)) return false;
+    const m = p.match(/^\s*exempt:\s*(.+?)\s*$/i); if (m && bands.includes(m[1])) return m[1] === b;
+    bw = bw || new Set([...noteWords(b), ...S.spec.lessons.filter(x => x.block === b).flatMap(x => noteWords(x.subject))].filter(w => w.length > 2 && !["sec", "language", "and"].includes(w)));
+    return noteWords(p).some(w => bw.has(w) || (ALIAS[w] || []).some(a => bw.has(a)));
+  });
+}
+function setExempt(st, shown, picked) {   // the groups picker: "Exempt: band" in the Note for each band picked as exempt
+  const keep = String(st.note || "").split(";").map(p => p.trim()).filter(Boolean).filter(p => { const m = p.match(/^exempt:\s*(.+)$/i); return !(m && shown.includes(m[1].trim())); });
+  const add = picked.filter(b => !exemptFrom(keep.join("; "), b)).map(b => `Exempt: ${b}`);   // free text already covering it stays as it is
+  st.note = [...keep, ...add].join("; ") || null;
+}
 const blankRows = () => S.spec.lessons.filter(x => x.subject && !(x.teachers || []).some(Boolean)).length;
 async function allocateTeachers() {   // a teacher for every row left blank (ttgen.allocate), as one change Undo takes back
   toast("Choosing teachers…");
@@ -1030,7 +1048,7 @@ function openPop(anchor) {
       <div class="row"><button class="small" data-popall="1">All</button><button class="small" data-popnone="1">None</button><button class="small primary" data-popdone="1">Done</button></div>`;
   } else if (anchor.dataset.pop === "groups") {
     // one choice per block (its groups run at the same time), ticks for groups outside a block
-    const cur = getPath(path) || [], c = anchor.dataset.cls, info = lessonInfo(), blocks = new Map(), other = [];
+    const cur = getPath(path) || [], c = anchor.dataset.cls, info = lessonInfo(), blocks = new Map(), other = [], note = (getPath(path.replace(/\.groups$/, "")) || {}).note;
     S.spec.lessons.forEach((x, i) => {
       const code = info[i].code; if (!code || code === "Entire Class" || !(x.classes || []).includes(c)) return;
       if (x.block) { if (!blocks.has(x.block)) blocks.set(x.block, []); blocks.get(x.block).push([code, x.subject]); } else other.push([code, x.subject]);
@@ -1038,7 +1056,8 @@ function openPop(anchor) {
     const known = new Set([...[...blocks.values()].flat(), ...other].map(([g]) => g)), lost = cur.filter(g => !known.has(g));
     const lab = (type, name, g, s, on) => `<label title="${esc(s || "")}"><input type="${type}" name="${name}" value="${esc(g)}" ${on ? "checked" : ""}><span>${esc(g)}${s ? ` <span class="muted">${esc(s)}</span>` : ""}</span></label>`;
     pop.innerHTML = `<h3>Groups${c ? ` for ${esc(c)}` : ""}</h3>` + (!c ? `<p class="muted">Pick the student's class first.</p>` : "")
-      + [...blocks].map(([b, gs], k) => `<div class="gblock"><div class="muted small">${esc(b)}</div><div class="opts wide">${lab("radio", `gb${k}`, "", "none", !gs.some(([g]) => cur.includes(g)))}${gs.map(([g, s]) => lab("radio", `gb${k}`, g, s, cur.includes(g))).join("")}</div></div>`).join("")
+      + [...blocks].map(([b, gs], k) => { const inIt = gs.some(([g]) => cur.includes(g)), ex = !inIt && exemptFrom(note, b);
+        return `<div class="gblock" data-band="${esc(b)}"><div class="muted small">${esc(b)}</div><div class="opts wide">${lab("radio", `gb${k}`, "", "none", !inIt && !ex)}<label title="Not taking this subject: no lesson in this band. Written into the Note."><input type="radio" name="gb${k}" value="${esc(EXEMPT + b)}" ${ex ? "checked" : ""}><span>exempt</span></label>${gs.map(([g, s]) => lab("radio", `gb${k}`, g, s, cur.includes(g))).join("")}</div></div>`; }).join("")
       + (other.length ? `<div class="gblock"><div class="muted small">Groups outside a band</div><div class="opts wide">${other.map(([g, s]) => lab("checkbox", "", g, s, cur.includes(g))).join("")}</div></div>` : "")
       + (lost.length ? `<div class="gblock"><div class="muted small">Not on step 5 for ${esc(c || "this class")} (untick to remove)</div><div class="opts wide">${lost.map(g => lab("checkbox", "", g, "", true)).join("")}</div></div>` : "")
       + (c && !blocks.size && !other.length ? `<p class="muted">No groups on step 5 include ${esc(c)} yet.</p>` : "")
@@ -1062,9 +1081,13 @@ function readCt() { return [...document.querySelectorAll("#ctRows [data-ct]")].m
 function commitPop() {
   const pop = $("#pop"); if (pop.hidden) return; const path = pop.dataset.path;
   if (pop.dataset.what === "classes") setPath(path, [...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value));
-  else if (pop.dataset.what === "groups") setPath(path, [...pop.querySelectorAll("input:checked")].map(x => x.value).filter(Boolean));
-  const lc = pop.dataset.what === "classes" && path.match(/^spec\.lessons\.(\d+)\.classes$/); if (lc) groupCode(Number(lc[1]));
+  else if (pop.dataset.what === "groups") {
+    const vals = [...pop.querySelectorAll("input:checked")].map(x => x.value).filter(Boolean), st = getPath(path.replace(/\.groups$/, ""));
+    setPath(path, vals.filter(v => !v.startsWith(EXEMPT)));
+    if (st) setExempt(st, [...pop.querySelectorAll("[data-band]")].map(x => x.dataset.band), vals.filter(v => v.startsWith(EXEMPT)).map(v => v.slice(EXEMPT.length)));
+  }
   else setPath(path, readCt().filter(c => c.subject));
+  const lc = pop.dataset.what === "classes" && path.match(/^spec\.lessons\.(\d+)\.classes$/); if (lc) groupCode(Number(lc[1]));
   pop.hidden = true; save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
 }
 
