@@ -282,7 +282,7 @@ function issues() {
   S.spec.blocks.forEach((b, i) => {
     const gs = S.spec.lessons.map((x, j) => [x, j]).filter(([x]) => x.block === b.block);
     if (!gs.length) add("blocks", i, `${b.block}: no groups yet (add them under Teaching groups).`);
-    if (!(b.classes || []).length) add("blocks", i, `${b.block}: no classes. Pick the classes its groups take students from.`);
+    if (!(b.classes || []).length) add("blocks", i, `${b.block}: no classes. Pick the classes its groups take students from, or use Restore from an earlier copy on step 7.`);
     const inG = gs.reduce((a, [x]) => a + (Number(x.students) || 0), 0), inC = (b.classes || []).reduce((a, c) => a + (Number((S.spec.classes.find(y => y.class === c) || {}).size) || 0), 0);
     if (gs.length && inG > inC) add("blocks", i, `${b.block}: ${inG} students in groups but ${inC} in its classes.`);
     else if (everyone(b) && gs.length && inC && inG < inC && gs.every(([x]) => Number(x.students) > 0) && !S.spec.students.some(s => (b.classes || []).includes(s.class)))   // with a student list, each student is checked instead
@@ -589,6 +589,7 @@ const VIEWS = {
     const clsOpts = [opt("", f.cls, `All classes (${L.length})`), ...S.spec.classes.map(c => opt(c.class, f.cls, `${c.class} · ${per[c.class] || 0} of ${c.size || "?"}`)),
       ...[...new Set(L.map(s => s.class || ""))].filter(c => !classNames().includes(c)).map(c => opt(c, f.cls, c ? `${c} (not on step 2) · ${per[c]}` : `No class · ${L.filter(s => !s.class).length}`))].join("");
     return `<div class="card"><h1>Step 7 · Students <span class="muted" style="font-weight:400;font-size:15px">(optional)</span></h1><p class="lead">List each student with their class and the codes of the groups they are in (from step 5). The solver then makes sure no student has two lessons at once, and every student gets their own timetable and a personal sign-in code. Without a list, the students of a class are assumed to be in the same level tag (all G3, all Foundation) in every band, so students on mixed combinations are not checked. To fill groups here, tick students (shift-click for a run, or the box at the top for everyone shown) and add them to a group or move them to a class together.</p>
+      ${restoreHelper()}
       <div class="helper"><b>Paste or upload the student list</b>
         <p class="muted small" style="margin:4px 0 8px">Copy the rows from Excel or a CSV file, with a header row: <b>Student ID</b>, <b>Name</b>, <b>Class</b> and <b>Groups</b> (codes in one cell separated by commas, or one code per column). Without a header, the columns are read as ID, name, class, then groups. Whole-class subjects need no codes: a student has those with their class. Use an ID that stays the same (an admission number, say): personal codes are made from it.</p>
         <textarea id="stuPaste" rows="5" spellcheck="false" placeholder="Student ID&#9;Name&#9;Class&#9;Groups&#10;S001&#9;Tan Wei Ming&#9;1A&#9;1ELP1, 1MAP1, 1SCP1"></textarea>
@@ -689,6 +690,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
   if (b.dataset.pop) { openPop(b); return; }
   if (b.dataset.stu) { stuApply(b.dataset.stu); return; }
+  if (b.dataset.past) { pastAction(b.dataset.past); return; }
   if (b.dataset.bulk) { bulk(b.dataset.bulk); return; }
   if (b.classList.contains("issue") && b.dataset.go) {
     const s = /^students-/.test(b.dataset.row) && S.spec.students[Number(b.dataset.row.slice(9))];
@@ -737,6 +739,7 @@ document.addEventListener("change", async e => {
   if (el.dataset.names) { setPath(el.dataset.names, el.value.split(",").map(t => t.trim()).filter(Boolean)); save(); render(); return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
   if (el.id === "stuFile") { stuFile(el); return; }
+  if (el.id === "pastPick") { S.pastPick = el.value; return; }
   if (el.id === "stuCls" || el.id === "stuQ") { S.stu[el.id === "stuCls" ? "cls" : "q"] = el.value; render(); return; }
   if (["tgLv", "tgSubj", "tgT"].includes(el.id)) { S.tg[{ tgLv: "lv", tgSubj: "subj", tgT: "t" }[el.id]] = el.value; render(); return; }
   if (["pickT", "pickG", "pickC", "pickS", "pickV", "pickD", "pickR", "pickA"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
@@ -955,6 +958,36 @@ function bulk(k) {   // one change for every ticked row, so one Undo takes it al
   save(); render();
   toast(k === "srm" ? `Took ${n} student${s1(n)} out of ${g}. Undo takes it back.` : `Added ${n} student${s1(n)} to ${g}` + (swapped ? `; ${swapped} left their other group in ${x.block}` : "")
     + (notFor ? `; ${notFor} are in a class ${g} is not for (see Things to fix)` : "") + ". Undo takes it back.");
+}
+
+/* ---------------- restore: students with no groups and bands with no classes, from an earlier copy of the setup (each
+   Save progress keeps the copy it replaces; each Generate run keeps its own). Only what is empty now is filled. */
+function lostCounts() {
+  const banded = new Set(S.spec.blocks.flatMap(b => b.classes || [])); S.spec.lessons.forEach(x => { if (x.block) (x.classes || []).forEach(c => banded.add(c)); });
+  return { stu: S.spec.students.filter(s => !(s.groups || []).length && banded.has(s.class)).length, bands: S.spec.blocks.filter(b => b.block && !(b.classes || []).length).length };
+}
+function restoreHelper() {
+  const n = lostCounts(); if (!n.stu && !n.bands) return "";
+  const what = [n.stu ? `${n.stu} student${n.stu === 1 ? " has" : "s have"} no groups` : "", n.bands ? `${n.bands} band${n.bands === 1 ? " has" : "s have"} no classes` : ""].filter(Boolean).join(" and ");
+  return `<div class="helper"><b>Restore from an earlier copy</b> <span class="muted">${what}.</span>
+    ${S.past ? `<select id="pastPick">${S.past.map((p, k) => opt(k, S.pastPick, `${p.what} · ${p.when} · ${Object.keys(p.groups).length} students with groups`)).join("")}</select> <button data-past="restore">Restore</button>`
+      : `<button data-past="load">Find earlier copies</button>`}
+    <p class="muted small" style="margin:6px 0 0">Fills only students with no groups now (matched by Student ID) and bands with no classes now, from a copy the server kept: each Save progress keeps the one it replaces, and each Generate keeps its own. Nothing else changes; Undo takes it back.</p></div>`;
+}
+async function pastAction(k) {
+  if (k === "load") {
+    let j; try { j = await getJSON("/api/past-setups"); } catch (e) { toast("Could not load the earlier copies."); return; }
+    if (!j.copies.length) { toast("The server has no earlier copies yet."); return; }
+    S.past = j.copies; S.pastPick = "0"; render(); return;
+  }
+  const p = (S.past || [])[Number(S.pastPick || 0)]; if (!p) return;
+  const stu = S.spec.students.filter(s => !(s.groups || []).length && (p.groups[stuKey(s)] || []).length);
+  const bands = S.spec.blocks.filter(b => b.block && !(b.classes || []).length && (p.classes[b.block] || []).length);
+  if (!stu.length && !bands.length) { toast(`The copy of ${p.when} has nothing for them either. Try an older one.`); return; }
+  const what = [stu.length ? `groups for ${stu.length} student${stu.length === 1 ? "" : "s"}` : "", bands.length ? `classes for ${bands.length} band${bands.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
+  if (!confirm(`Restore ${what} from the ${p.what.toLowerCase()} copy of ${p.when}? Nothing else changes.`)) return;
+  stu.forEach(s => s.groups = [...p.groups[stuKey(s)]]); bands.forEach(b => b.classes = [...p.classes[b.block]]);
+  save(); render(); toast(`Restored ${what}. Undo takes it back.`);
 }
 
 /* ---------------- student list: paste, upload, replace or add */

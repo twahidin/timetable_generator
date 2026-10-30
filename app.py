@@ -220,6 +220,16 @@ def put_setup():
     if not spec or "school" not in spec: return {"error": "No setup data sent."}, 400
     return {"ok": True, **store.save_setup(spec)}
 
+@app.get("/api/past-setups")
+@need("committee")
+def past_setups():
+    """earlier copies to restore emptied student groups and band classes from: who has groups and which bands have
+    classes in each (the editor fills only what is empty now)"""
+    return {"copies": [dict(id=x["id"], what=x["what"], when=x["when"],
+                            groups={str(s.get("id") or s.get("name") or "").strip(): s["groups"] for s in x["spec"].get("students") or [] if s.get("groups")},
+                            classes={b["block"]: b["classes"] for b in x["spec"].get("blocks") or [] if b.get("block") and b.get("classes")})
+                       for x in store.past_setups()[:12]]}
+
 @app.post("/api/export")
 @need("committee")
 def export_printouts():

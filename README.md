@@ -20,6 +20,10 @@ Things to fix lists students who are in none of the groups of a band over their 
 subject), one note per band. Having the subject in another band counts; a Note with "Exempt" and the subject ("Exempt
 from MTL") excuses them; untick **Everyone takes one** on a band that is an option (it starts unticked for a band named
 Option or Elective).
+
+**Restoring.** Each **Save progress** keeps the copy it replaces on the server (the last 20, in `setup_history/`), and each
+Generate run keeps its own. When students have no groups or bands no classes, step 7 shows **Restore from an earlier
+copy**: pick a copy and it fills only those students (by Student ID) and bands; nothing else changes and Undo takes it back.
 It is optional, but with it the solver makes sure no student has two lessons at once, and every student gets a
 personal code. Personal codes are made from each student's ID and `SECRET_KEY`, so they stay the same when the
 timetable is republished. The committee downloads them as a list (CSV) or as slips to print, one page per class.

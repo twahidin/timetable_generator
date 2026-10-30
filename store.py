@@ -14,7 +14,9 @@ def _data_dir():
 DATA = _data_dir()
 PUB = os.path.join(DATA, "published")
 RUNS = os.path.join(DATA, "runs")
+HIST = os.path.join(DATA, "setup_history")   # earlier saves of the setup, to restore from
 os.makedirs(RUNS, exist_ok=True)
+KEEP_SAVES = 20
 _lock = threading.Lock()
 
 def now():
@@ -36,9 +38,26 @@ def read_json(path, default=None):
 
 def save_setup(spec):
     """the committee's setup, shared: it opens on any browser after signing in. ts tells the editor which copy is newer"""
+    old = read_json(os.path.join(DATA, "setup.json"))
+    if old and old.get("spec") and old["spec"] != spec:   # keep the copy it replaces (the last KEEP_SAVES of them)
+        os.makedirs(HIST, exist_ok=True)
+        write_json(os.path.join(HIST, f"{int(old.get('ts') or 0)}.json"), old)
+        for f in sorted(os.listdir(HIST))[:-KEEP_SAVES]: os.remove(os.path.join(HIST, f))
     x = dict(saved_at=now(), ts=datetime.datetime.now().timestamp(), spec=spec)
     write_json(os.path.join(DATA, "setup.json"), x)
     return dict(saved_at=x["saved_at"], ts=x["ts"])
+
+def past_setups():
+    """earlier copies of the setup, newest first: the saves kept in HIST and each Generate run's own copy"""
+    out = []
+    for f in os.listdir(HIST) if os.path.isdir(HIST) else []:
+        x = read_json(os.path.join(HIST, f)) or {}
+        if x.get("spec"): out.append(dict(id=f"save-{f[:-5]}", what="Saved", when=x.get("saved_at"), ts=x.get("ts") or 0, spec=x["spec"]))
+    for d in os.listdir(RUNS):
+        w, st = os.path.join(RUNS, d, "work.json"), read_json(os.path.join(RUNS, d, "state.json")) or {}
+        spec = read_json(w) if os.path.exists(w) else None
+        if spec and spec.get("school"): out.append(dict(id=f"run-{d}", what="Generate", when=st.get("started"), ts=os.path.getmtime(w), spec=spec))
+    return sorted(out, key=lambda x: -x["ts"])
 
 def load_setup():
     x = read_json(os.path.join(DATA, "setup.json"))
