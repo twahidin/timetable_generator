@@ -54,6 +54,11 @@ allowance and the load spread. Rows that name a teacher are never changed; Undo 
 the chat (it shows who gets what and the loads, and asks first). Co-teaching: a row may name up to three teachers, each
 blocked for the lesson and counted the full periods.
 
+**How a group's periods split into lessons.** The Lessons column on step 5 shows the usual split in grey (20 periods with a
+3-period lesson: 6×3 + 1×2). Type your own, such as `5x3 + 2x2` or `4x3 + 4x2`, on one row or on all ticked rows, or clear it to
+go back. It must add up to the row's periods, and a band's groups should share a pattern; Things to fix flags both. The
+workbook carries it in the Lesson pattern column on the Lessons sheet.
+
 **Deploying by hand.** On the same step, filter the teaching groups by level, subject or teacher, tick rows (shift-click
 for a run), pick a teacher and **Make Teacher 1**, **Add as co-teacher** or **Take off** for all of them at once. The bar shows
 the teacher's load now and with those groups; groups they are not set to teach, or two groups of one band, are flagged.

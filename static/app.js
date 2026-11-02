@@ -4,7 +4,7 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const KEY = "ttsetup.v1";
-const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, tg: { lv: "", subj: "", t: "" }, tf: { dept: "", subj: "", q: "" }, pick: { lessons: new Set(), students: new Set(), teachers: new Set(), shown: {}, last: {}, t: "", g: "", c: "", s: "", v: "All", d: "", r: "", a: "" }, undo: [], redo: [], last: null, dirty: false, base: 0 };
+const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, tg: { lv: "", subj: "", t: "" }, tf: { dept: "", subj: "", q: "" }, pick: { lessons: new Set(), students: new Set(), teachers: new Set(), shown: {}, last: {}, t: "", g: "", c: "", s: "", v: "All", d: "", r: "", a: "", p: "" }, undo: [], redo: [], last: null, dirty: false, base: 0 };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
   ["teachers", "4 Teachers"], ["lessons", "5 TG & deployment"], ["rules", "6 Availability & rules"], ["students", "7 Students"], ["generate", "Generate & publish"], ["adjust", "Adjust timetable"], ["download", "Files"]];
 
@@ -208,19 +208,29 @@ function recessSetting(label) {   // [row index, value] of a floating recess row
 
 /* ---------------- derived values (same logic as the workbook formulas) */
 function split(p, L) { p = Number(p) || 0; L = Number(L) || 1; if (p <= 0) return [0, 0]; if (L <= 1) return [p, 0]; let s = ((-p % L) + L) % L; if (s * (L - 1) > p) s = 0; return [(p - s * (L - 1)) / L, s]; }
+const patText = p => { const n = {}; p.forEach(v => n[v] = (n[v] || 0) + 1); return Object.keys(n).map(Number).sort((a, b) => b - a).map(v => `${n[v]}×${v}`).join(" + "); };
+function parsePattern(t) {   // "5x3 + 2x2" or "3, 3, 2": the lesson lengths, longest first; null when it cannot be read (ttgen.reader.parse_pattern)
+  const out = [];
+  for (const part of String(t).trim().replace(/\s*[xX×*]\s*/g, "x").split(/[+,;\s]+/).filter(Boolean)) {
+    const m = part.match(/^(?:(\d+)x)?(\d+)$/); if (!m || Number(m[2]) < 1 || (m[1] && Number(m[1]) < 1)) return null;
+    for (let i = 0; i < Number(m[1] || 1); i++) out.push(Number(m[2]));
+  }
+  return out.length ? out.sort((a, b) => b - a) : null;
+}
 function lessonInfo() {
   const seq = {}; const letter = Object.fromEntries((sc().tags || []).map(([a, b]) => [a, b]));
   return S.spec.lessons.map(x => {
     const s = subj(x.subject) || {}; const p = Number(x.periods_override) || Number((s.periods || {})[x.level]) || 0;
     const L = Number(s.lesson_length) || Number(sc().lesson_length) || 1;
-    const pat = (x.pattern || []).map(Number), [full, short] = pat.length && pat.reduce((a, b) => a + b, 0) === p ? [pat.filter(v => v === L).length, pat.filter(v => v === L - 1).length] : split(p, L);   // pattern: lengths set on the Adjust page
+    const [full, short] = split(p, L), auto = p ? patText([...Array(full).fill(L), ...Array(short).fill(L - 1)]) : "", pat = (x.pattern || []).map(Number);   // pattern: lengths typed on this step or set on the Adjust page
+    const lens = pat.length && pat.reduce((a, b) => a + b, 0) === p ? pat : [...Array(full).fill(L), ...Array(short).fill(L - 1)];
     let code = "";
     if (x.subject) {
       const k = `${x.level}|${x.subject}`; if (x.block) seq[k] = (seq[k] || 0) + 1;
       code = x.code_override ? String(x.code_override) : !x.block ? "Entire Class" : `${String(x.level).slice(-1)}${s.code || "??"}${letter[s.tag] || ""}${seq[k]}`;
     }
     const tp = p * (x.block ? 1 : Math.max(1, (x.classes || []).length));
-    return { p, L, full, short, code, tp, kind: s.room_kind || (x.block || x.code_override ? "classroom" : "home room") };
+    return { p, L, full, short, auto, lens, code, tp, kind: s.room_kind || (x.block || x.code_override ? "classroom" : "home room") };
   });
 }
 function teachingGroups(subject) {   // groups or classes taught this subject on step 5: a banded row is one group, a whole-class row one per class
@@ -266,6 +276,18 @@ function issues() {
       if (x.block && S.spec.lessons.filter(y => y.block === x.block && (y.teachers || []).includes(t)).length > 1) add("lessons", i, `${t} twice in this band.`);
     }
     if (x.block && !blockNames().includes(x.block)) add("lessons", i, "Band not on the Bands list (top of step 5).");
+    if (x.pattern_text) add("lessons", i, `Could not read the lesson pattern "${x.pattern_text}". Write it like 5x3 + 2x2, or clear it.`);
+    if ((x.pattern || []).length) {
+      const t = x.pattern.reduce((a, v) => a + Number(v), 0), most = Math.max(...x.pattern.map(Number));
+      if (t !== info[i].p) add("lessons", i, `${info[i].code}: lessons ${patText(x.pattern.map(Number))} add up to ${t} periods, but this row has ${info[i].p}. Until they match, the usual ${info[i].auto} is used.`);
+      else if (most > Number(sc().periods_per_day)) add("lessons", i, `${info[i].code}: a ${most}-period lesson is longer than the ${sc().periods_per_day}-period day.`);
+      else if (x.block) {   // a band's groups share its lessons, so a length the others do not have adds a slot for the whole band
+        const tally = l => { const n = {}; l.forEach(v => n[v] = (n[v] || 0) + 1); return n; }, others = {};
+        S.spec.lessons.forEach((y, j) => { if (j !== i && y.block === x.block) Object.entries(tally(info[j].lens)).forEach(([v, c]) => others[v] = Math.max(others[v] || 0, c)); });
+        if (Object.keys(others).length && Object.entries(tally(info[i].lens)).some(([v, c]) => c > (others[v] || 0)))
+          add("lessons", i, `${info[i].code}: ${patText(info[i].lens)} has lessons the other groups in ${x.block} do not, so the band takes extra slots and those groups' students have nothing on then. Give the band's groups the same pattern.`);
+      }
+    }
     if (!x.block && !x.code_override && Number(x.students) > 0) {   // fewer students than its classes, yet no band or code: it is taken as the whole class
       const size = (x.classes || []).reduce((a, c) => a + (Number((S.spec.classes.find(y => y.class === c) || {}).size) || 0), 0);
       if (size && Number(x.students) < size) add("lessons", i, `${x.subject}: ${x.students} of the ${size} students in ${(x.classes || []).join(", ")}, but with no band or code it is a lesson for the whole class. Pick its band, or enter Students again to give it a group code.`);
@@ -534,7 +556,7 @@ const VIEWS = {
     const all = rows.length && rows.every(([, i]) => P.lessons.has(i));
     return `<div class="card"><h1>Step 5 · Teaching groups & deployment</h1><p class="lead">Every teaching group (TG) and the teachers deployed to it. A whole-class subject is one group per class; a band splits its classes into groups that all have lessons at the same time. Set up the bands first, then add the groups and deploy teachers below.</p>
       ${VIEWS._bands(out, info)}</div>
-      <div class="card"><h2>Teaching groups</h2><p class="muted">One row per group, or per class for a whole-class subject. Pick level, subject and band (empty = whole class); choosing a band fills its classes. Group code, periods and lesson pattern fill in by themselves. Tick rows (shift-click for a run) to deploy a teacher to all of them at once.</p>
+      <div class="card"><h2>Teaching groups</h2><p class="muted">One row per group, or per class for a whole-class subject. Pick level, subject and band (empty = whole class); choosing a band fills its classes. Group code and periods fill in by themselves. Lessons shows how the periods split, in grey; type your own, such as 5x3 + 2x2 (five 3-period lessons and two 2-period ones), or clear it to go back. Tick rows (shift-click for a run) to deploy a teacher or set Lessons on all of them at once.</p>
       <div class="helper row"><b>Add groups to a band</b> ${sel("_hb", "", blockNames(), true, 'id="hbBlock" data-k=""')} subject ${sel("_hbs", "", subjectNames(), true, 'id="hbSubj" data-k=""')} groups <input id="hbN" type="number" value="1" style="width:56px"> students each <input id="hbSt" type="number" style="width:64px"> <button data-helper="groups">Add</button></div>
       <div class="helper row"><b>Teachers for rows left blank</b> <span class="muted">${blankRows()} row${blankRows() === 1 ? "" : "s"} without a teacher</span> <button data-helper="allocate" ${blankRows() ? "" : "disabled"} title="Each row with Teacher 1 empty gets a teacher who can teach it, keeping everyone within their allowance and the load spread. Rows with a teacher are not changed. Undo takes it back.">Fill blank teachers</button>${S.alloc ? `<span class="muted small">${esc(S.alloc)}</span>` : ""}</div>
       <div class="helper row"><b>Add a whole-class subject</b> level ${sel("_hw", levels()[0], levels(), false, 'id="hwLevel" data-k=""')} subject ${sel("_hws", "", subjectNames(), true, 'id="hwSubj" data-k=""')} <button data-helper="whole">Add one row per class</button></div>
@@ -543,8 +565,8 @@ const VIEWS = {
         <select id="tgT">${opt("", f.t, "Any teacher")}${opt("-", f.t, "No teacher yet")}${T.map(t => opt(t, f.t)).join("")}</select>
         <span class="muted small">${rows.length === S.spec.lessons.length ? `${rows.length} rows` : `${rows.length} of ${S.spec.lessons.length} rows`}</span></div>
       ${tgBar(load, info)}
-      <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="lessons" title="Tick every row shown (${rows.length})" ${all ? "checked" : ""}></th><th>Level</th><th>Subject</th><th>Band</th><th>Classes</th><th>Teacher 1</th><th>Teacher 2</th><th title="A third teacher in the room (co-teaching)">Teacher 3</th><th>Students</th><th>Periods override</th><th>Keep code</th>${Number(sc().weeks) === 2 ? '<th title="Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other">Special room weeks</th>' : ""}<th>Code</th><th>Periods</th><th>Lessons</th><th></th></tr>
-      ${rows.map(([x, i]) => `<tr id="lessons-${i}" class="${out.lessons[i] ? "bad" : ""}${P.lessons.has(i) ? " picked" : ""}" title="${esc((out.lessons[i] || []).join(" "))}"><td><input type="checkbox" data-pick="lessons.${i}" ${P.lessons.has(i) ? "checked" : ""}></td><td class="lv">${sel(`spec.lessons.${i}.level`, x.level, levels())}</td><td style="min-width:200px">${sel(`spec.lessons.${i}.subject`, x.subject, subjectNames().filter(n => (subj(n).periods || {})[x.level] || n === x.subject))}</td><td style="min-width:160px">${sel(`spec.lessons.${i}.block`, x.block, S.spec.blocks.filter(b => !x.level || b.level === x.level).map(b => b.block))}</td><td style="min-width:120px">${chips(`spec.lessons.${i}.classes`, x.classes, "classes", `data-level="${esc(x.level || "")}"`)}</td><td style="min-width:150px">${tsel(i, 0, x)}</td><td style="min-width:120px">${tsel(i, 1, x)}</td><td style="min-width:120px">${tsel(i, 2, x)}</td><td class="num">${inp(`spec.lessons.${i}.students`, x.students, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.periods_override`, x.periods_override, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.code_override`, x.code_override, "text", 'style="width:70px"')}</td>${Number(sc().weeks) === 2 ? `<td><select data-k="spec.lessons.${i}.room_weeks" ${special(x) ? "" : "disabled title=\"Only for a subject with a special room kind, such as a lab (step 3)\""}>${opt("", x.room_weeks || "", "every week")}${opt("Odd", x.room_weeks, "Odd only")}${opt("Even", x.room_weeks, "Even only")}</select></td>` : ""}<td class="calc">${esc(info[i].code)}</td><td class="calc">${info[i].p || ""}</td><td class="calc">${info[i].p ? `${info[i].full}×${info[i].L}${info[i].short ? ` + ${info[i].short}×${info[i].L - 1}` : ""}` : ""}</td><td>${delBtn("lessons", i)}</td></tr>`).join("")}
+      <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="lessons" title="Tick every row shown (${rows.length})" ${all ? "checked" : ""}></th><th>Level</th><th>Subject</th><th>Band</th><th>Classes</th><th>Teacher 1</th><th>Teacher 2</th><th title="A third teacher in the room (co-teaching)">Teacher 3</th><th>Students</th><th>Periods override</th><th>Keep code</th>${Number(sc().weeks) === 2 ? '<th title="Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other">Special room weeks</th>' : ""}<th>Code</th><th>Periods</th><th title="Type your own split, such as 5x3 + 2x2. Empty = the usual split shown in grey.">Lessons</th><th></th></tr>
+      ${rows.map(([x, i]) => `<tr id="lessons-${i}" class="${out.lessons[i] ? "bad" : ""}${P.lessons.has(i) ? " picked" : ""}" title="${esc((out.lessons[i] || []).join(" "))}"><td><input type="checkbox" data-pick="lessons.${i}" ${P.lessons.has(i) ? "checked" : ""}></td><td class="lv">${sel(`spec.lessons.${i}.level`, x.level, levels())}</td><td style="min-width:200px">${sel(`spec.lessons.${i}.subject`, x.subject, subjectNames().filter(n => (subj(n).periods || {})[x.level] || n === x.subject))}</td><td style="min-width:160px">${sel(`spec.lessons.${i}.block`, x.block, S.spec.blocks.filter(b => !x.level || b.level === x.level).map(b => b.block))}</td><td style="min-width:120px">${chips(`spec.lessons.${i}.classes`, x.classes, "classes", `data-level="${esc(x.level || "")}"`)}</td><td style="min-width:150px">${tsel(i, 0, x)}</td><td style="min-width:120px">${tsel(i, 1, x)}</td><td style="min-width:120px">${tsel(i, 2, x)}</td><td class="num">${inp(`spec.lessons.${i}.students`, x.students, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.periods_override`, x.periods_override, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.code_override`, x.code_override, "text", 'style="width:70px"')}</td>${Number(sc().weeks) === 2 ? `<td><select data-k="spec.lessons.${i}.room_weeks" ${special(x) ? "" : "disabled title=\"Only for a subject with a special room kind, such as a lab (step 3)\""}>${opt("", x.room_weeks || "", "every week")}${opt("Odd", x.room_weeks, "Odd only")}${opt("Even", x.room_weeks, "Even only")}</select></td>` : ""}<td class="calc">${esc(info[i].code)}</td><td class="calc">${info[i].p || ""}</td><td><input id="pat-${i}" data-pat="${i}" value="${esc((x.pattern || []).length ? patText(x.pattern.map(Number)) : x.pattern_text || "")}" placeholder="${esc(info[i].auto)}" title="How the periods split into lessons: 5x3 + 2x2 is five 3-period lessons and two 2-period ones. Empty = the usual split shown in grey." style="width:112px"></td><td>${delBtn("lessons", i)}</td></tr>`).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="lessons">+ Add teaching group</button></div></div>`;
   },
   _bands(out, info) {
@@ -742,9 +764,11 @@ document.addEventListener("change", async e => {
   if (el.id === "pastPick") { S.pastPick = el.value; return; }
   if (el.id === "stuCls" || el.id === "stuQ") { S.stu[el.id === "stuCls" ? "cls" : "q"] = el.value; render(); return; }
   if (["tgLv", "tgSubj", "tgT"].includes(el.id)) { S.tg[{ tgLv: "lv", tgSubj: "subj", tgT: "t" }[el.id]] = el.value; render(); return; }
-  if (["pickT", "pickG", "pickC", "pickS", "pickV", "pickD", "pickR", "pickA"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
+  if (["pickA", "pickP"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; return; }   // typed boxes: no redraw, or it would swallow the click on the button next to them
+  if (["pickT", "pickG", "pickC", "pickS", "pickV", "pickD", "pickR"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
   if (["tfDept", "tfSubj", "tfQ"].includes(el.id)) { S.tf[{ tfDept: "dept", tfSubj: "subj", tfQ: "q" }[el.id]] = el.value; render(); return; }
   if (el.dataset.pick || el.dataset.pickall) return;
+  if (el.dataset.pat !== undefined) { if (setPattern(S.spec.lessons[Number(el.dataset.pat)], el.value)) { save(); render(); } else { const x = S.spec.lessons[Number(el.dataset.pat)]; el.value = (x.pattern || []).length ? patText(x.pattern.map(Number)) : ""; el.focus(); } return; }
   if (el.dataset.set) { setSetting(el.dataset.set, el.value); save(); render(); return; }
   if (el.dataset.time) {   // a block-out's clock time: keep the times and block every period they overlap
     const [i, k] = el.dataset.time.split("|").map(Number), r = S.spec.rules[i];
@@ -821,6 +845,11 @@ function setExempt(st, shown, picked) {   // the groups picker: "Exempt: band" i
   const add = picked.filter(b => !exemptFrom(keep.join("; "), b)).map(b => `Exempt: ${b}`);   // free text already covering it stays as it is
   st.note = [...keep, ...add].join("; ") || null;
 }
+function setPattern(x, typed) {   // false (with a message) when it cannot be read; empty goes back to the usual split
+  if (!String(typed).trim()) { delete x.pattern; delete x.pattern_text; return true; }
+  const p = parsePattern(typed); if (!p) { toast(`Could not read "${typed}". Write lessons like 5x3 + 2x2: how many, x, how many periods each.`); return false; }
+  x.pattern = p; delete x.pattern_text; return true;
+}
 const blankRows = () => S.spec.lessons.filter(x => x.subject && !(x.teachers || []).some(Boolean)).length;
 async function allocateTeachers() {   // a teacher for every row left blank (ttgen.allocate), as one change Undo takes back
   toast("Choosing teachers…");
@@ -868,7 +897,8 @@ function tgBar(load, info) {
   const off = t ? "" : "disabled";
   return `<div class="bulk row"><b>${ix.length} ticked</b> teacher <select id="pickT">${opt("", P.t, "pick…")}<optgroup label="Can teach all of them">${yes.map(n => opt(n, P.t)).join("")}</optgroup><optgroup label="Others">${no.map(n => opt(n, P.t)).join("")}</optgroup></select>
     <button data-bulk="t1" ${off} title="Replaces Teacher 1 on every ticked row">Make Teacher 1</button><button data-bulk="t2" ${off} title="Adds them as Teacher 2 or 3 (co-teaching), or Teacher 1 on a row with none">Add as co-teacher</button><button data-bulk="tx" ${off}>Take off</button>
-    ${line ? `<span class="small ${over ? "over" : "muted"}">${esc(line)}</span>` : ""}<button class="small ghost" data-bulk="tnone">Clear ticks</button></div>`;
+    ${line ? `<span class="small ${over ? "over" : "muted"}">${esc(line)}</span>` : ""}
+    <span class="muted">·</span> lessons <input id="pickP" value="${esc(P.p)}" placeholder="5x3 + 2x2" title="Leave empty to go back to the usual split" style="width:104px"><button data-bulk="pat">Set lessons</button><button class="small ghost" data-bulk="tnone">Clear ticks</button></div>`;
 }
 function teacherBar() {
   const P = S.pick, ix = [...P.teachers].filter(i => S.spec.teachers[i]); if (!ix.length) return "";
@@ -877,7 +907,7 @@ function teacherBar() {
     <button data-bulk="tc-add" ${s ? "" : "disabled"}>Add</button><button data-bulk="tc-rm" ${s && has ? "" : "disabled"} title="Takes the subject off them at every level">Remove subject</button>${s ? `<span class="muted small">${has} of ${ix.length} can teach it now</span>` : ""}</div>
     <div class="row" style="margin-top:6px">department <select id="pickD">${opt("", P.d, "")}${(sc().departments || []).map(d => opt(d, P.d)).join("")}</select><button data-bulk="tc-dept" ${P.d ? "" : "disabled"}>Set</button>
     <span class="muted">·</span> role <select id="pickR">${opt("", P.r, "")}${roles().map(r => opt(r.role, P.r)).join("")}</select><button data-bulk="tc-role" ${P.r ? "" : "disabled"}>Set</button>
-    <span class="muted">·</span> allowance <input id="pickA" type="number" value="${esc(P.a)}" style="width:64px"><button data-bulk="tc-allow" ${P.a !== "" ? "" : "disabled"}>Set</button>
+    <span class="muted">·</span> allowance <input id="pickA" type="number" value="${esc(P.a)}" style="width:64px"><button data-bulk="tc-allow">Set</button>
     <button class="small ghost" data-bulk="tc-none">Clear ticks</button></div></div>`;
 }
 function bulkTeachers(k) {   // step 4: one change for every ticked teacher
@@ -903,7 +933,7 @@ function bulkTeachers(k) {   // step 4: one change for every ticked teacher
   }
   if (k === "tc-dept") { if (!P.d) return; ix.forEach(i => T[i].dept = P.d); msg = `${n} teacher${s1} now in ${P.d}`; }
   if (k === "tc-role") { if (!P.r) return; ix.forEach(i => T[i].role = P.r); msg = `${n} teacher${s1} now ${P.r}`; }
-  if (k === "tc-allow") { const a = Number(P.a); if (P.a === "" || !(a >= 0)) return; ix.forEach(i => T[i].allowance = a); msg = `Allowance ${a} for ${n} teacher${s1}`; }
+  if (k === "tc-allow") { const a = Number(P.a); if (P.a === "" || !(a >= 0)) { toast("Type the allowance first."); return; } ix.forEach(i => T[i].allowance = a); msg = `Allowance ${a} for ${n} teacher${s1}`; }
   save(); render(); toast(`${msg}. Undo takes it back.`);
 }
 function stuBar() {
@@ -921,6 +951,13 @@ function stuBar() {
 function bulk(k) {   // one change for every ticked row, so one Undo takes it all back
   const P = S.pick, s1 = n => n === 1 ? "" : "s";
   if (k.startsWith("tc-")) { bulkTeachers(k); return; }
+  if (k === "pat") {
+    const ix = [...P.lessons].filter(i => S.spec.lessons[i]); if (!ix.length) return;
+    const typed = ($("#pickP") || {}).value ?? P.p; P.p = typed;
+    if (!ix.every(i => setPattern(S.spec.lessons[i], typed))) return;
+    save(); render(); const info = lessonInfo(), off = ix.filter(i => typed.trim() && parsePattern(typed).reduce((a, v) => a + v, 0) !== info[i].p).length;
+    toast((typed.trim() ? `Set ${patText(parsePattern(typed))} on ${ix.length} group${s1(ix.length)}` : `${ix.length} group${s1(ix.length)} back to the usual split`) + (off ? `; ${off} ${off === 1 ? "has" : "have"} a different number of periods and ${off === 1 ? "is" : "are"} flagged in Things to fix` : "") + ". Undo takes it back."); return;
+  }
   if (k === "tnone" || k === "snone") { P[k === "tnone" ? "lessons" : "students"].clear(); render(); return; }
   if (k[0] === "t") {
     const t = P.t, ix = [...P.lessons].filter(i => S.spec.lessons[i]); if (!t || !ix.length) return;
