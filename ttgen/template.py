@@ -261,7 +261,7 @@ def write_template(spec, path, extra_rows=120):
     # ---------------- 6 Lessons columns (needed by Teachers and Blocks)
     short_h, full_h = (LENGTH_NAME.get(L_std - 1, "Short lessons"), LENGTH_NAME.get(L_std, "Full lessons")) if not own_len else ("Short lessons", "Full lessons")
     names = ["Level", "Subject", "Block"] + [f"Class {i}" for i in range(1, NCLS + 1)] + [f"Teacher {i}" for i in range(1, NTCH + 1)] + \
-            ["Students", "Periods (only if different)", "Code (only to keep an old one)", "Group code", "Periods"] + (["Lesson length"] if own_len else []) + \
+            ["Students", "Periods (only if different)", "Code (only to keep an old one)", "Lesson pattern (only if different)", "Group code", "Periods"] + (["Lesson length"] if own_len else []) + \
             [short_h, full_h, "Room kind", "Teacher periods", "Check", "Note", "Special room weeks"]
     COL = {n: CL(j) for j, n in enumerate(names, start=1)}
     LQ = f"'{L}'"; TC = [COL[f"Teacher {k}"] for k in range(1, NTCH + 1)]; TPC = COL["Teacher periods"]
@@ -371,21 +371,22 @@ def write_template(spec, path, extra_rows=120):
     B.name("BlockList", B.dyn(BL, "A"))
 
     # ---------------- 6 Lessons
-    widths = {"Level": 8, "Subject": 32, "Block": 32, "Students": 9, "Periods (only if different)": 11, "Code (only to keep an old one)": 11, "Group code": 11,
+    widths = {"Level": 8, "Subject": 32, "Block": 32, "Students": 9, "Periods (only if different)": 11, "Code (only to keep an old one)": 11, "Lesson pattern (only if different)": 14, "Group code": 11,
               "Periods": 8, "Lesson length": 8, short_h: 8, full_h: 8, "Room kind": 13, "Teacher periods": 9, "Check": 40, "Note": 28, "Special room weeks": 11}
     lcols = [(n, widths.get(n, 7 if n.startswith("Class") else 20)) for n in names]
     lcols[2] = ("Block (empty = whole class)", 32)
-    LIN = set(range(1, 4 + NCLS + NTCH + 3)) | {len(names) - 1, len(names)}
+    LIN = set(range(1, 4 + NCLS + NTCH + 4)) | {len(names) - 1, len(names)}
     lw = B.sheet(L, "Step 6 · Lessons: one row per group (or per class for whole-class subjects)",
                  ["Pick level, subject and block; pick the class(es) and teacher(s). Leave Block empty for a whole-class lesson.",
-                  f"Group code, periods, {short_h.lower()}/{full_h.lower()} and room kind fill in from Steps 3-5. Check flags a teacher not set to teach the subject, a teacher twice in a block, missing periods or a repeated code."], lcols, LIN)
+                  f"Group code, periods, {short_h.lower()}/{full_h.lower()} and room kind fill in from Steps 3-5. To split a group's periods your own way, write the lessons in Lesson pattern, such as 5x3 + 2x2 (five 3-period lessons and two 2-period ones). Check flags a teacher not set to teach the subject, a teacher twice in a block, missing periods or a repeated code."], lcols, LIN)
+    from .reader import pattern_text
     for i, x in enumerate(spec["lessons"]):
         rr = R0 + i
         lw.cell(rr, 1, x["level"]); lw.cell(rr, 2, x["subject"]); lw.cell(rr, 3, x.get("block") or None)
         for k, c in enumerate(x["classes"][:NCLS]): lw.cell(rr, 4 + k, c)
         for k, t in enumerate((x.get("teachers") or [])[:NTCH]): lw.cell(rr, 4 + NCLS + k, t)
         c0 = 4 + NCLS + NTCH
-        lw.cell(rr, c0, x.get("students")); lw.cell(rr, c0 + 1, x.get("periods_override")); lw.cell(rr, c0 + 2, x.get("code_override")); lw.cell(rr, len(names) - 1, x.get("note"))
+        lw.cell(rr, c0, x.get("students")); lw.cell(rr, c0 + 1, x.get("periods_override")); lw.cell(rr, c0 + 2, x.get("code_override")); lw.cell(rr, c0 + 3, pattern_text(x["pattern"]) if x.get("pattern") else x.get("pattern_text")); lw.cell(rr, len(names) - 1, x.get("note"))
         if x.get("room_weeks"): lw.cell(rr, len(names), x["room_weeks"])
     nLast = LAST(nL) + 100
     B.paint(lw, nLast, LIN, len(names))
@@ -403,8 +404,9 @@ def write_template(spec, path, extra_rows=120):
             LN = f"{c_['Lesson length']}{r}"
             lw[LN] = f'=IF({B_}="","",IFERROR(IF({idx("F", r)}="",{SLL},{idx("F", r)}),{SLL}))'
         else: LN = SLL
-        lw[SH] = f'=IF(N({P_})=0,"",IF({LN}<=1,0,IF(MOD(-{P_},{LN})*({LN}-1)>{P_},0,MOD(-{P_},{LN}))))'
-        lw[FU] = f'=IF(N({P_})=0,"",({P_}-{SH}*({LN}-1))/{LN})'
+        PT = f"{c_['Lesson pattern (only if different)']}{r}"   # a typed pattern takes the place of the usual split
+        lw[SH] = f'=IF(OR(N({P_})=0,{PT}<>""),"",IF({LN}<=1,0,IF(MOD(-{P_},{LN})*({LN}-1)>{P_},0,MOD(-{P_},{LN}))))'
+        lw[FU] = f'=IF(OR(N({P_})=0,{PT}<>""),"",({P_}-{SH}*({LN}-1))/{LN})'
         lw[RK] = f'=IF({B_}="","",IFERROR(IF({idx("E", r)}="","home room",{idx("E", r)}),""))'
         lw[TP] = f'=IF(N({P_})=0,0,{P_}*IF({C_}="",MAX(1,COUNTA({CF1}{r}:{CFN}{r})),1))'
         def can(tc):

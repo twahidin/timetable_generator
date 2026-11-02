@@ -3,7 +3,7 @@ in Python so a file never opened in Excel still reads correctly.
 
 Reads the current layout (Teacher availability, Fixed lessons and rule rows on Settings, as in setup template v9 and later
 template) and the older one (a 7 Rules sheet). Everything that constrains the timetable becomes a rule on spec['rules']."""
-import datetime, re
+import collections, datetime, re
 import openpyxl
 from .spec import defaults, lesson_split, SETTING_RULES
 
@@ -153,7 +153,7 @@ def read_template(path):
     lessons = [dict(level=x.get("Level"), subject=x.get("Subject"), block=x.get(bh), classes=[str(c) for c in _first_col(x, "Class", 12)],
                     teachers=[str(t) for t in _first_col(x, "Teacher", 3)], students=x.get("Students"),
                     periods_override=x.get("Periods (only if different)"), code_override=x.get("Code (only to keep an old one)"), note=x.get("Note"),
-                    room_weeks=_week(x.get("Special room weeks")))
+                    room_weeks=_week(x.get("Special room weeks")), **_pattern_cell(x.get("Lesson pattern (only if different)")))
                for x in le if x.get("Subject")]
     for name in ("7 Rules", "More rules"):
         if name not in wb.sheetnames: continue
@@ -216,6 +216,24 @@ KNOWN_SHEETS = {"README", "Settings", "Period times", "Day structure", "1 Venues
 def _clock(t):
     m = _minutes(t); return f"{m // 60:02d}:{m % 60:02d}"
 
+def parse_pattern(t):
+    """lesson lengths from what the committee typed, longest first: '5x3 + 2x2' or '3, 3, 2'; None when it cannot be read"""
+    t = re.sub(r"\s*[xX×*]\s*", "x", str(int(t) if isinstance(t, float) and t.is_integer() else t).strip()); out = []
+    for part in filter(None, re.split(r"[+,;\s]+", t)):
+        m = re.fullmatch(r"(?:(\d+)x)?(\d+)", part)
+        if not m or int(m[2]) < 1 or int(m[1] or 1) < 1: return None
+        out += [int(m[2])] * int(m[1] or 1)
+    return sorted(out, reverse=True) or None
+
+def pattern_text(p):
+    """[3, 3, 2] -> '2x3 + 1x2'"""
+    return " + ".join(f"{n}x{ln}" for ln, n in sorted(collections.Counter(int(v) for v in p).items(), reverse=True))
+
+def _pattern_cell(v):
+    if v in (None, ""): return {}
+    p = parse_pattern(v)
+    return dict(pattern=p) if p else dict(pattern_text=str(v))
+
 def derive(spec):
     """add code, periods, lesson pattern, room kind to every lesson (same logic as the workbook formulas); returns problems found"""
     sc = spec["school"]; subj = {s["subject"]: s for s in spec["subjects"]}; letter = {a: b for a, b in sc["tags"]}
@@ -235,7 +253,10 @@ def derive(spec):
         else: code = f"{str(x['level'])[-1]}{s.get('code') or '??'}{letter.get(s.get('tag'), '')}{seq[(x['level'], x['subject'])]}"
         x.update(code=code, periods=int(p or 0), full=full, short=short, length=L, room_kind=s.get("room_kind") or ("classroom" if x.get("block") or x.get("code_override") else None),
                  tag=s.get("tag") or "-", dept=s.get("dept"))
-        if x.get("pattern") and sum(int(v) for v in x["pattern"]) != x["periods"]: x.pop("pattern")   # lengths set by hand no longer add up: back to the usual split
+        if x.get("pattern") and sum(int(v) for v in x["pattern"]) != x["periods"]:   # lengths set by hand no longer add up: back to the usual split
+            problems.append(f"Lesson row {i + 6}: {x['subject']} ({code}): lesson pattern {pattern_text(x['pattern'])} adds up to {sum(int(v) for v in x['pattern'])} periods, not {x['periods']}, so the usual split is used.")
+            x.pop("pattern")
+        if x.get("pattern_text"): problems.append(f"Lesson row {i + 6}: {x['subject']} ({code}): could not read the lesson pattern '{x['pattern_text']}' (write it like 5x3 + 2x2), so the usual split is used.")
         if not p: problems.append(f"Lesson row {i + 6}: {x['subject']} has no periods for {x['level']}.")
         if not x["classes"]: problems.append(f"Lesson row {i + 6}: no class.")
         if not x["teachers"]: problems.append(f"Lesson row {i + 6}: no teacher ({x['subject']} {', '.join(x['classes'])}).")

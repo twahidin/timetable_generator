@@ -127,6 +127,8 @@ primary periods), a subject with P periods gets as many L-period lessons as poss
 
 **Group codes** = level digit + subject code + level-tag letter + running number (1ELP1, 5MAS2). A code typed in
 "Code (only to keep an old one)" wins. Rows without a block are whole-class lessons ("Entire Class").
+"Lesson pattern (only if different)" replaces the usual split of a row's periods, such as `5x3 + 2x2`; it must add up to the
+row's periods (otherwise the usual split is used and a problem is reported).
 
 **Rules** come from four places, all Must unless `More rules` says Prefer: the rule rows on `Settings` (once a day
 per group, at most N PE classes at once, a teacher's daily cap, a recess a day; and `Lessons end by (Monday to Thursday)` style rows,
