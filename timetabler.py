@@ -1,6 +1,6 @@
 """The timetabler's tools. The AI (or the plain 'generate without AI' flow) calls these; they do the real work with
 the ttgen solver, so the AI never places lessons itself and never runs code. Each returns a short text result."""
-import collections, copy, json, os, re, time
+import collections, copy, json, os, re, threading, time
 import adjust
 from ttgen.reader import derive
 from ttgen.spec import RULE_TYPES, SCOPES
@@ -355,9 +355,15 @@ def t_solve(run, args):
     run.emit("tool", text=(f"Solving level by level, hardest level first (up to {span} in all): a school with {len(spec['classes'])} classes solves faster that way. " if staged else
                            f"Solving (up to {span}){', starting from the latest timetable so lessons stay where they are unless a change moves them' if previous else ''}. ")
                           + "The best timetable so far is kept if you stop early.")
+    # the status line: what is running, then its latest news. Its clock ticks every few seconds on its own,
+    # so a search with nothing new to say for minutes still shows it is working
+    shown = dict(head="Solving level by level" if staged else "Solving", news="no timetable yet.")
+    def show(head=None, news=None):
+        if head: shown["head"] = head
+        if news: shown["news"] = news
+        run.progress = f"{shown['head']}, {span_text(int(time.time() - t0))}: {shown['news']}"
     def log(line):
-        if "cost" in line:
-            run.progress = f"Solving: {int(time.time() - t0)} s, best timetable so far has cost {line.split('cost')[-1].strip()} (lower is better)."
+        if "cost" in line: show(news=f"best timetable so far has cost {line.split('cost')[-1].strip()} (lower is better).")
     if run.stop.is_set(): return "Stopped before solving."
     blockers = impossible(copy.deepcopy(spec))   # no timetable can exist: say why now instead of searching for hours
     if blockers:
@@ -366,18 +372,26 @@ def t_solve(run, args):
         run.save()
         return "No timetable is possible with this setup, so the solver did not run:\n" + "\n".join(f"- {x}" for x in blockers) + \
                "\nSuggested fixes (shown to the committee):\n" + "\n".join(f"- {f['text']}" for f in fixes)
-    if staged:
-        from ttgen.staged import solve_staged
-        def slog(*a):
-            line = " ".join(str(x) for x in a).strip()
-            if line: run.progress = f"Solving level by level, {int(time.time() - t0)} s: {line}"
-        res = solve_staged(copy.deepcopy(spec), time_per_step=max(60, min(300, secs // 6)), workers=WORKERS, log=slog, stop=run.stop, deadline=t0 + secs)
-        left = int(secs - (time.time() - t0))
-        if not res["lessons"] and not run.stop.is_set() and left > 120:
-            run.emit("tool", text=f"Level by level found no timetable ({'; '.join(res.get('notes', []))[:200]}). Trying the whole school at once for the {span_text(left)} left.")
-            res = solve(spec, time_limit=left, workers=WORKERS, log=log, stop=run.stop)
-    else:
-        res = solve(spec, time_limit=secs, workers=WORKERS, log=log, stop=run.stop, previous=previous, pins=pins)
+    ticking = threading.Event()
+    def tick():
+        while not ticking.wait(5): show()
+    clock = threading.Thread(target=tick, daemon=True); show(); clock.start()
+    try:
+        if staged:
+            from ttgen.staged import solve_staged
+            def slog(*a):
+                line = " ".join(str(x) for x in a).strip()
+                if line: show(news=line)
+            res = solve_staged(copy.deepcopy(spec), time_per_step=max(60, min(300, secs // 6)), workers=WORKERS, log=slog, stop=run.stop, deadline=t0 + secs)
+            left = int(secs - (time.time() - t0))
+            if not res["lessons"] and not run.stop.is_set() and left > 120:
+                run.emit("tool", text=f"Level by level found no timetable ({'; '.join(res.get('notes', []))[:200]}). Trying the whole school at once for the {span_text(left)} left.")
+                show("Solving the whole school at once", f"no timetable yet (up to {span_text(left)} for this try).")
+                res = solve(spec, time_limit=left, workers=WORKERS, log=log, stop=run.stop)
+        else:
+            res = solve(spec, time_limit=secs, workers=WORKERS, log=log, stop=run.stop, previous=previous, pins=pins)
+    finally:
+        ticking.set(); clock.join()
     run.progress = ""; run.solves += 1; n = run.solves
     setup_path = os.path.join(run.dir, f"solve{n}_setup.xlsx"); write_template(spec, setup_path)
     if not res["lessons"]:
