@@ -48,6 +48,17 @@ timetable, as you would on **Adjust timetable**, then asks **Apply** or **No, pu
 nothing: the AI says why and offers clean alternatives, or lets the solver make room by moving as few other lessons as
 it can. Applied moves are on the Adjust page's Undo list.
 
+**What a timetable compromises.** An overloaded teacher still gets every lesson: allowance is not a limit the solver
+keeps, and Prefer rules bend when they must. So before solving, the chat warns about any teacher over their allowance,
+and a teacher whose lessons cannot fit in the times they can teach stops the solve with the reason and a fix. After every
+solve, and after every hand move on Adjust, the Latest timetable card lists what was compromised:
+- teachers over their allowance (periods timetabled plus other duties);
+- each Prefer rule not kept, such as Max periods a day, Not available or Finish by;
+- Max periods in a row, which is checked but never enforced.
+
+The Excel workbook has the same list on a **Compromises** sheet, and its Teacher load sheet shows other duties and a red
+"Over allowance by" column.
+
 **Teachers for rows left blank.** On step 5 (Teaching groups & deployment), **Fill blank teachers** gives every row with no teacher one who is
 set to teach that subject at that level (step 4), never two groups of one band, keeping each teacher within their
 allowance and the load spread. Rows that name a teacher are never changed; Undo takes it back. The AI can do the same in

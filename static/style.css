@@ -105,6 +105,8 @@ a.filebtn{color:var(--ink);text-decoration:none}
 .ev.tt.good,.ev.good{background:var(--ok-bg);color:var(--ok);border-radius:8px;padding:8px 10px}
 .ev.tt.warn{background:#fff7e6;color:#7a4b00}
 .ev.bad{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:8px 10px}
+.ev.caution,.compbox{background:#fff7e6;color:#7a4b00;border-radius:8px;padding:8px 10px}
+.compbox{margin:8px 0}.compbox ul{margin:4px 0 4px 18px;padding:0}.compbox details{margin-top:4px}
 .ev details{margin-top:4px}
 .ev.whatif{background:#eef4ff;color:#1d3f7a;border-radius:8px;padding:8px 10px}
 .ev.compare{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--ink)}

@@ -7,7 +7,7 @@ Moves change the run's latest timetable (its placements file); the timetable wor
 Publish. Lessons moved by hand are pinned: later solves in the run keep them where they were put."""
 import collections, copy, math, os, threading
 from ttgen.solver import Problem, RECESS_KEY, lesson_domains, rain_rooms, units_for
-from ttgen.report import assign_rooms, check, clock
+from ttgen.report import assign_rooms, check, clock, compromise_brief, compromises
 from store import now, read_json, write_json
 
 _lock = threading.RLock()
@@ -278,7 +278,8 @@ def state(run):
                 classes=sorted(P.level_of), teachers=sorted({t for ts in b.tset.values() for t in ts}), rooms=sorted({v["room"] for v in P.spec["venues"]}),
                 level_of=P.level_of, lessons=lessons, moves=len(e["history"]), can_undo=bool(e["history"]), can_redo=bool(e["redo"]),
                 last=e["history"][-1]["label"] if e["history"] else "", busy=run.busy,
-                summary=dict(ok=s.get("ok"), problems=s.get("problems", []), after=s.get("after", []), lessons=s.get("lessons"), stale=bool(s.get("stale"))))
+                summary=dict(ok=s.get("ok"), problems=s.get("problems", []), after=s.get("after", []), lessons=s.get("lessons"), stale=bool(s.get("stale")),
+                             compromises=s.get("compromises", []), compromised=s.get("compromised")))
 
 def proposal(run, key, start):
     """a move the committee asks for: what it clashes with and the ways out"""
@@ -339,7 +340,7 @@ def _save(run, b, e):
     res = b.res(); assign_rooms(res); probs, stats, post = check(res)
     s = run.solved
     s.update(ok=not probs, problems=probs[:12], lessons=stats["lessons"], edited=len(e["history"]), stale=True,
-             after=[f"{b.name(L['key'])}: {b.when(L['start'], L['ln'])}" for L in res["lessons"] if L["ext"]])
+             after=[f"{b.name(L['key'])}: {b.when(L['start'], L['ln'])}" for L in res["lessons"] if L["ext"]], **compromise_brief(compromises(res)))
     run.save()
 
 def flush(run):

@@ -652,7 +652,8 @@ const VIEWS = {
         <button data-adj="undo" ${D.can_undo && !busy ? "" : "disabled"} title="${esc(D.last ? "Undo: " + D.last : "")}">↶ Undo move</button><button data-adj="redo" ${D.can_redo && !busy ? "" : "disabled"}>↷ Redo</button>
         ${G.st && G.st.run && G.st.run.changes ? `<button id="keepChanges" ${busy ? "disabled" : ""} title="Lessons made shorter or longer change the plan: this puts them in your setup too">Keep these changes in my setup</button>` : ""}
         <a href="/preview" target="_blank"><button>Preview</button></a><button class="primary" id="publish" ${busy ? "disabled" : ""}>Publish</button></div></div>
-      ${sm.problems.length ? `<details style="margin-top:6px"><summary class="small">The problems</summary><ul class="small">${sm.problems.map(p => `<li>${esc(p)}</li>`).join("")}</ul></details>` : ""}`;
+      ${sm.problems.length ? `<details style="margin-top:6px"><summary class="small">The problems</summary><ul class="small">${sm.problems.map(p => `<li>${esc(p)}</li>`).join("")}</ul></details>` : ""}
+      ${compromisesHTML(sm, true)}`;
     const pick = `<div class="row" style="margin-top:12px"><label class="row" style="gap:6px">Show <select id="adjKind">${["class", "teacher", "room"].map(k => opt(k, A.kind, k[0].toUpperCase() + k.slice(1))).join("")}</select></label>
       <select id="adjWho">${lists[A.kind].map(x => opt(x, A.who)).join("")}</select>
       ${busy ? `<span class="muted small">${esc((G.st.run.progress) || "Working…")} Changes wait until it finishes.</span>` : ""}</div>`;
@@ -731,6 +732,10 @@ document.addEventListener("click", async e => {
   if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
 });
 document.addEventListener("toggle", e => { if (e.target.classList && e.target.classList.contains("bands")) S.bandsOpen = e.target.open; }, true);
+// lists the page repaints every few seconds (the Latest timetable card) stay open or shut as the committee left them
+const KEPT = {};
+document.addEventListener("toggle", e => { const k = e.target.dataset && e.target.dataset.keep; if (k) KEPT[k] = e.target.open; }, true);
+const keepOpen = (k, dflt) => (KEPT[k] ?? dflt) ? "open" : "";
 document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / Ctrl+Y redo; inside a text box the browser's own undo applies
   if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
   const k = e.key.toLowerCase(); if (k !== "z" && k !== "y") return;
@@ -1229,6 +1234,7 @@ function eventHTML(e, last) {
     case "timetable": return `<div class="ev tt ${e.data && e.data.ok ? "good" : "warn"}"><b>Timetable ${e.data ? "#" + e.data.n : ""}</b> · ${esc(e.text)} <a href="/preview" target="_blank">Preview</a></div>`;
     case "nosolution": return `<div class="ev bad"><b>${esc(e.text)}</b>${items ? `<div class="small" style="margin-top:6px"><b>Why</b></div>${items}` : ""}${fixesHTML(e)}</div>`;
     case "error": return `<div class="ev bad">${esc(e.text)}</div>`;
+    case "warn": return `<div class="ev caution"><b>${esc(e.text)}</b>${items ? `<details open><summary>Who</summary>${items}</details>` : ""}</div>`;
     case "published": return `<div class="ev good"><b>${esc(e.text)}</b></div>`;
     case "check": return `<div class="ev">${esc(e.text)}${items ? `<details><summary>Details</summary>${items}</details>` : ""}</div>`;
     case "moved": return `<div class="ev">${esc(e.text)}${items ? `<details><summary>Which lessons moved</summary>${items}</details>` : ""}</div>`;
@@ -1240,6 +1246,17 @@ function eventHTML(e, last) {
     }
     default: return `<div class="ev">${esc(e.text || "")}</div>`;
   }
+}
+/* what a timetable gives up (report.compromises): teachers over their allowance, Prefer rules not kept, Max periods in
+   a row. A warning box with the count of each kind; the list (the first 80) opens under it, grouped by kind */
+function compromisesHTML(s, small) {
+  const c = (s && s.compromised) || [];   // [[kind, how many]]: over allowance first, then the rules in order
+  if (!c.length) return s && s.compromised ? `<p class="okmsg${small ? " small" : ""}" style="margin:6px 0 0">Nothing compromised: every teacher is within their allowance and every Prefer rule is kept.</p>` : "";
+  const total = c.reduce((a, [, n]) => a + n, 0), shown = s.compromises || [];
+  const groups = c.map(([k, n]) => { const xs = shown.filter(x => x.kind === k);
+    return `<li><b>${esc(k)}</b> (${n})<ul>${xs.map(x => `<li>${esc(x.text)}</li>`).join("")}${xs.length < n ? `<li class="muted">…and ${n - xs.length} more: see the Compromises sheet in the Excel file.</li>` : ""}</ul></li>`; }).join("");
+  return `<div class="compbox${small ? " small" : ""}"><b>${total} compromise${total === 1 ? "" : "s"}:</b> ${c.map(([k, n]) => `${esc(k)} ${n}`).join(" · ")}
+    <details data-keep="${small ? "adjcomp" : "comp"}" ${keepOpen(small ? "adjcomp" : "comp", false)}><summary>What was compromised</summary><ul>${groups}</ul></details></div>`;
 }
 function paintGen() {
   const st = G.st; if (!st || !$("#chatlog")) return;
@@ -1254,9 +1271,10 @@ function paintGen() {
   $("#chatin").placeholder = chatOn ? (run.waiting ? "Type your answer…" : "Ask or tell the timetabler something…") : "The chat works when you generate with the AI timetabler.";
   const s = run && run.solved, a = G.alert;
   $("#resultCard").innerHTML = `<h2>Latest timetable</h2>` + (a ? `<div class="alertbox"><b>${esc(a.text)}</b>${fixesHTML(a)}${a.items && a.items.length ? `<details><summary>Why</summary><ul>${a.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul></details>` : ""}</div>` : "") + (s ?`<p class="${s.ok ? "okmsg" : "issue"}">${s.ok ? "All checks passed" : `${s.problems.length} problems`} · ${s.lessons} lessons · ${s.after.length ? `${s.after.length} after school` : "nothing after school"}</p>
-      ${s.after.length ? `<details><summary>After-school lessons</summary><ul>${s.after.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
-      ${s.problems.length ? `<details open><summary>Problems</summary><ul>${s.problems.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
-      ${s.notes.length ? `<details><summary>Notes</summary><ul>${s.notes.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
+      ${s.after.length ? `<details data-keep="after" ${keepOpen("after", false)}><summary>After-school lessons</summary><ul>${s.after.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
+      ${s.problems.length ? `<details data-keep="problems" ${keepOpen("problems", true)}><summary>Problems</summary><ul>${s.problems.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
+      ${compromisesHTML(s)}
+      ${s.notes.length ? `<details data-keep="notes" ${keepOpen("notes", false)}><summary>Notes</summary><ul>${s.notes.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
       <p class="muted small">Made ${esc(s.at)}${run.changes ? ` · the setup was changed ${run.changes} time${run.changes > 1 ? "s" : ""} (by the AI or on Adjust)` : ""}.</p>
       <div class="row"><a href="/preview" target="_blank"><button>Preview</button></a><button class="primary" id="publish" ${busy ? "disabled" : ""}>Publish</button>
       ${run.changes ? `<button id="keepChanges" ${busy ? "disabled" : ""}>Keep these changes in my setup</button>` : ""}</div>`

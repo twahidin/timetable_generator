@@ -65,7 +65,8 @@ subject-based banding) schools, and for any school that fills the same template.
      Sec 3 CCE classes share one teacher, so 'same time across classes' cannot hold"). Never drop a Must rule or
      change their data silently; propose the change and let them decide.
 6. **Deliver** (see **Outputs**) with a short summary: whether every check passed, which lessons (if any) fell into
-   after-school slots and why, which Prefer rules were bent, and any notes. Give the person the Excel workbook, the
+   after-school slots and why, what was compromised (teachers over their allowance, Prefer rules bent, Max periods in a
+   row: the solve result lists them), and any notes. Give the person the Excel workbook, the
    HTML page, the four PDF books, and the zip of single PDFs; do not paste timetables into the chat.
 
 ## Outputs
