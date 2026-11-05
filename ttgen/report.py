@@ -192,17 +192,10 @@ def check(res):
         for t in {t for r in x["part"] for t in r["teachers"]}: tpos[t] |= set(x["pos"])
     for r in P.spec.get("rules", []):
         if r.get("rule") == "Max periods in a row" and r.get("number"):
-            N = int(r["number"]); who = [r["target"]] if r["scope"] == "Teacher" else list(tpos)
-            bad = [t for t in who if _longest_run(tpos[t], NP) > N]
-            post.append(f"Max periods in a row ({N}): " + (f"{len(bad)} teachers go over: {', '.join(bad[:8])}" if bad else "kept by everyone."))
-        if r.get("rule") == "At least one recess a day":   # free for a whole recess (R), or the recess length inside a recess window (W)
-            who = [r["target"]] if r["scope"] == "Teacher" else list(tpos)
-            bad = []
-            for t in who:
-                for d in range(P.ND):
-                    opts = P.break_options(d); q0 = d * NP
-                    if tpos[t] & set(range(q0, q0 + NP)) and opts and not any(not set(range(q0 + s, q0 + s + n)) & tpos[t] for a, b, n in opts for s in range(a, b + 1)):
-                        bad.append(f"{t} ({P.days[d]})")
+            bad = [t for t, _ in _row_over(P, tpos, r)]
+            post.append(f"Max periods in a row ({int(r['number'])}): " + (f"{len(bad)} teachers go over: {', '.join(bad[:8])}" if bad else "kept by everyone."))
+        if r.get("rule") == "At least one recess a day":
+            bad = [f"{t} ({P.days[d]})" for t, d in _recess_missed(P, tpos, r)]
             post.append("At least one recess a day: " + (f"missed on {len(bad)} teacher-days: {', '.join(bad[:6])}" if bad else "kept by everyone."))
     if P.recess_cap:   # Settings 'Most classes at recess at once' (canteen space)
         at = collections.Counter()
@@ -230,6 +223,91 @@ def check(res):
     stats = dict(lessons=len(L), after_school=sum(1 for x in L if x["ext"]), side_by_side=side, students_checked=len(P.spec.get("students", [])))
     return probs, stats, post
 
+def _row_over(P, tpos, r):
+    """teachers over a 'Max periods in a row' rule: [(teacher, their longest run)]"""
+    who = [r["target"]] if r["scope"] == "Teacher" else list(tpos)
+    return [(t, n) for t in who for n in [_longest_run(tpos[t], P.NP)] if n > int(r["number"])]
+
+def _recess_missed(P, tpos, r):
+    """teacher-days an 'At least one recess a day' rule misses: [(teacher, day)]. A recess is free time for a whole
+    fixed recess (R), or the recess length inside a recess window (W)"""
+    NP, bad = P.NP, []
+    for t in ([r["target"]] if r["scope"] == "Teacher" else list(tpos)):
+        for d in range(P.ND):
+            opts = P.break_options(d); q0 = d * NP
+            if tpos[t] & set(range(q0, q0 + NP)) and opts and not any(not set(range(q0 + s, q0 + s + n)) & tpos[t] for a, b, n in opts for s in range(a, b + 1)):
+                bad.append((t, d))
+    return bad
+
+def compromises(res):
+    """what the timetable gives up that check() does not call a problem: teachers over their allowance, each Prefer rule
+    it breaks (the solver pays a cost for these and says nothing), and Max periods in a row (never enforced).
+    Returns [dict(kind, text)], in the order of the rules."""
+    from .solver import units_for
+    P = res["problem"]; NP = P.NP; L = res["lessons"]; sc = P.spec["school"]; rules = P.spec.get("rules", []); out = []
+    at = lambda q: f"{P.days[q // NP]} {clock(sc, q % NP)}"
+    add = lambda kind, text: out.append(dict(kind=kind, text=text))
+    tl = collections.defaultdict(list)
+    for x in L:
+        for t in {t for r in x["part"] for t in r["teachers"]}: tl[t].append(x)
+    tpos = collections.defaultdict(set, {t: {q for x in xs for q in x["pos"]} for t, xs in tl.items()})
+    for t in P.spec["teachers"]:
+        try: a, o = int(t.get("allowance")), int(t.get("other_duties") or 0)
+        except (TypeError, ValueError): continue
+        n = sum(x["ln"] for x in tl.get(t["name"], ()))
+        if a and n + o > a:
+            add("Over allowance", f"{t['name']}: {n} periods timetabled" + (f" plus {o} of other duties" if o else "") + f", allowance {a} ({n + o - a} over).")
+    for r in rules:
+        nm, scope, tg = r.get("rule"), r.get("scope"), str(r.get("target") or "")
+        if nm == "Max periods in a row" and r.get("number"):   # checked after solving at either strength
+            for t, n in _row_over(P, tpos, r): add(nm, f"{t}: {n} periods in a row (at most {r['number']} wanted).")
+        if str(r.get("strength") or "Must") == "Must": continue
+        if nm == "Max periods a day" and r.get("number"):
+            N = int(r["number"])
+            if scope in ("Teacher", "School"): groups = {tg: tl.get(tg, [])} if scope == "Teacher" else tl
+            elif scope == "Class": groups = {tg: [x for x in L if tg in x["unit"]["classes"]]}
+            else: groups = {c: [x for x in L if c in x["unit"]["classes"]] for c, lv in P.level_of.items() if lv == tg}
+            for who, xs in groups.items():
+                per = collections.Counter()
+                for x in xs: per[x["start"] // NP] += x["ln"]
+                for d, n in sorted(per.items()):
+                    if n > N: add(nm, f"{who}: {n} periods on {P.days[d]} (at most {N} wanted).")
+        elif nm in ("Not available", "Keep free together") and scope in ("Teacher", "Department"):
+            S, _ = P.rule_positions(r)
+            for t in [tg] if scope == "Teacher" else [t for t, d in P.tdept.items() if d == tg]:
+                hit = sorted(tpos[t] & S)
+                if hit: add(nm, f"{t} teaches at {at(hit[0])}" + (f" and {len(hit) - 1} more periods" if len(hit) > 1 else "") +
+                               (", a time marked not available." if nm == "Not available" else f", a time {tg} keeps free together."))
+        elif nm in ("Not available", "Not in periods", "Only in periods", "Finish by", "Keep free together") and scope != "Room":
+            S, days = P.rule_positions(r); ids = {u["id"] for u in units_for(P, r)}
+            to = int(r.get("to") if r.get("to") not in (None, "") else NP - 1)
+            for x in L:
+                if x["unit"]["id"] not in ids: continue
+                d, p = divmod(x["start"], NP)
+                if nm == "Only in periods" and not set(x["pos"]) <= S: add(nm, f"{x['unit']['name']} at {at(x['start'])}, outside the periods it should be in ({scope} {tg}).")
+                elif nm == "Finish by" and d in days and p + x["ln"] - 1 > to: add(nm, f"{x['unit']['name']} ends at {clock(sc, p + x['ln'])} on {P.days[d]} (finish by {clock(sc, to + 1)} wanted).")
+                elif nm in ("Not available", "Not in periods", "Keep free together") and set(x["pos"]) & S: add(nm, f"{x['unit']['name']} at {at(x['start'])}, a time marked {nm.lower()} ({scope} {tg}).")
+        elif nm == "Not available" and scope == "Room":
+            S, _ = P.rule_positions(r)
+            hit = sorted({q for x in L if tg in x["rooms"].values() for q in x["pos"]} & S)
+            if hit: add(nm, f"{tg} is used at {at(hit[0])}" + (f" and {len(hit) - 1} more periods" if len(hit) > 1 else "") + ", a time marked not available.")
+        elif nm == "At least one recess a day":
+            for t, d in _recess_missed(P, tpos, r): add(nm, f"{t}: no recess on {P.days[d]}.")
+    once = [r for r in rules if r.get("rule") == "Once a day per group"]
+    if once and all(str(r.get("strength") or "Must") != "Must" for r in once):   # as the solver: one Prefer rule spreads every group
+        by_u = collections.defaultdict(list)
+        for x in L: by_u[x["unit"]["id"]].append(x)
+        for xs in by_u.values():
+            if 1 < len(xs) <= P.ND:
+                for d, n in sorted(collections.Counter(x["start"] // NP for x in xs).items()):
+                    if n > 1: add("Once a day per group", f"{xs[0]['unit']['name']}: {n} lessons on {P.days[d]}.")
+    return out
+
+def compromise_brief(items, n=80):
+    """for the app's summary: the first n compromises and [kind, how many] for each kind, in order (a list: JSON objects
+    lose their order on the way to the page)"""
+    return dict(compromises=items[:n], compromised=[list(kv) for kv in collections.Counter(x["kind"] for x in items).items()])
+
 def _longest_run(pos, NP):
     best = cur = 0; prev = None
     for q in sorted(pos):
@@ -248,7 +326,7 @@ def write_timetable(res, path, return_model=False):
         return out + (None,) if return_model else out
     assign_rooms(res)
     probs, stats, post = check(res)
-    m = model_from_result(res); m["notes"] = post + m["notes"]
+    m = model_from_result(res); m["notes"] = post + m["notes"]; m["compromises"] = compromises(res)
     extra = [p for p in probs if "blocked time" in p]
     if extra: m["checks"]["problems"] += extra; m["checks"]["ok"] = False
     write_excel(m, path)

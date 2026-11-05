@@ -188,12 +188,32 @@ def _room_fit(P):
 
 def impossible(spec):
     """what rules out every timetable before solving: a room kind that cannot hold its lessons, a class with more
-    periods than its lesson and after-school periods, or a floating recess that cannot work"""
+    periods than its lesson and after-school periods, a teacher with more lessons than times they can teach, or a
+    floating recess that cannot work"""
     from ttgen.solver import Problem
     derive(spec); P = Problem(spec); out = [x["text"] for x in _room_fit(P) if x["kind_"] == "impossible"]
     A = {lv: sum(row.count("A") for row in rows) for lv, rows in P.grid.items()} if P.spec["school"].get("after_school", True) else {}
     out += [x["text"] for x in _class_fit(P) if x["kind"] == "over" and x["need"] > x["have"] + A.get(x["level"], 0)]
-    return out + _recess_blockers(P)
+    return out + _teacher_fit(P) + _recess_blockers(P)
+
+def _teacher_fit(P):
+    """teachers with more periods of lessons than the cycle has times they can teach them: their levels' lesson (and
+    after-school) periods, less the times a Must rule blocks them out. No timetable can fit them."""
+    busy = collections.defaultdict(set)
+    for r in P.spec.get("rules", []):
+        if str(r.get("strength") or "Must") == "Must" and (r.get("rule"), r.get("scope")) in (("Not available", "Teacher"), ("Keep free together", "Department")):
+            S, _ = P.rule_positions(r)
+            for t in [r["target"]] if r["scope"] == "Teacher" else [t for t, d in P.tdept.items() if d == r["target"]]: busy[t] |= S
+    need, lvls = collections.Counter(), collections.defaultdict(set)
+    for u in P.units:
+        for ln, i in u["lessons"]:
+            for t in {t for x in u["rows"] if x["_counts"].get(ln, 0) > i for t in x["teachers"]}: need[t] += ln; lvls[t].add(u["level"])
+    out = []
+    for t, n in sorted(need.items()):
+        k = len({q for lv in lvls[t] for q, _ in P.starts(lv, 1)} - busy[t])
+        if n > k: out.append(f"{t} teaches {n} periods but can teach in only {k} periods of the cycle (their levels' lesson times, less the times a Must rule blocks them out): "
+                             f"no timetable can fit them. Move at least {n - k} periods to other teachers on step 5.")
+    return out
 
 def _recess_blockers(P):
     """floating recess that cannot work: more classes at recess at once than Settings allows (fixed recess, or a whole level
@@ -222,7 +242,7 @@ def _recess_blockers(P):
 
 def capacity(spec, P=None, fit=None):
     from ttgen.solver import Problem
-    P = P or Problem(spec); out = [x["text"] for x in (_class_fit(P) if fit is None else fit)] + [x["text"] for x in _room_fit(P)]
+    P = P or Problem(spec); out = [x["text"] for x in (_class_fit(P) if fit is None else fit)] + [x["text"] for x in _room_fit(P)] + _teacher_fit(P)
     Lcount = {lv: P.lesson_periods(lv) for lv in P.grid}
     load, lvls = collections.Counter(), collections.defaultdict(set)
     for u in P.units:
@@ -321,10 +341,15 @@ def t_show_setup(run, args):
     more = f"\n... {len(lines) - 60} more; use a narrower filter." if len(lines) > 60 else ""
     return ("\n".join(lines[:60]) or "No rows match.") + more
 
+def _compromised(s):
+    c = s.get("compromised") or []
+    return ("Compromised: " + ", ".join(f"{k} ({n})" for k, n in c) + ".") if c else "Nothing compromised."
+
 def _summary(res_status, m):
+    from ttgen.report import compromise_brief
     ch = m["checks"]
     return dict(status=res_status, ok=ch["ok"], problems=ch["problems"][:12], after=ch["after_school"], notes=m["notes"][:12],
-                lessons=ch["lessons"], side=ch["side_by_side"])
+                lessons=ch["lessons"], side=ch["side_by_side"], **compromise_brief(m.get("compromises", [])))
 
 def _previous(run, args):
     """the latest timetable's placements {lesson key: start}, unless the AI asked for a fresh timetable"""
@@ -366,6 +391,10 @@ def t_solve(run, args):
         run.save()
         return "No timetable is possible with this setup, so the solver did not run:\n" + "\n".join(f"- {x}" for x in blockers) + \
                "\nSuggested fixes (shown to the committee):\n" + "\n".join(f"- {f['text']}" for f in fixes)
+    over = [c for c in capacity(copy.deepcopy(spec)) if "over their allowance" in c]
+    if over:
+        run.emit("warn", text=f"{len(over)} teacher{'s are' if len(over) > 1 else ' is'} over their allowance. The solver still gives them every lesson planned; "
+                              "the timetable's Compromises list will name them.", items=over[:30])
     if staged:
         from ttgen.staged import solve_staged
         def slog(*a):
@@ -397,10 +426,13 @@ def t_solve(run, args):
     s = _summary(res["status"], m); s.update(n=n, at=now(), setup=setup_path, timetable=tt_path, placements=pl_path, spec=spec_path, seconds=int(time.time() - t0))
     run.solved = s; adjust.carry_pins(run, pins, res); run.save()
     run.emit("timetable", text=("All checks passed." if s["ok"] else f"{len(s['problems'])} problems found.") +
-             (f" {len(s['after'])} lessons are after school." if s["after"] else " Nothing is after school."), data={k: v for k, v in s.items() if k not in ("setup", "timetable", "placements")})
+             (f" {len(s['after'])} lessons are after school." if s["after"] else " Nothing is after school.") + " " + _compromised(s), data={k: v for k, v in s.items() if k not in ("setup", "timetable", "placements")})
     out = [f"Timetable found ({res['status']}) in {s['seconds']} s: {s['lessons']} lessons placed."]
     out.append("All checks passed." if s["ok"] else "Problems:\n" + "\n".join(f"- {p}" for p in s["problems"]))
     out.append("After-school lessons:\n" + "\n".join(f"- {a}" for a in s["after"]) if s["after"] else "After-school lessons: none.")
+    comp = m.get("compromises", [])
+    out.append(f"Compromises (teachers over their allowance, Prefer rules not kept, Max periods in a row), {len(comp)} in all:\n" + "\n".join(f"- {x['kind']}: {x['text']}" for x in comp[:40])
+               + (f"\n- ...and {len(comp) - 40} more" if len(comp) > 40 else "") if comp else "Compromises: none. Every teacher is within their allowance and every Prefer rule is kept.")
     if previous:
         P, Ls = res["problem"], sorted(res["lessons"], key=lambda L: L["start"])
         moved = [f"{L['unit']['name']}: {_when(P, previous[L['key']], L['ln'])} -> {_when(P, L['start'], L['ln'])}"

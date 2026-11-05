@@ -80,11 +80,11 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
     for L in lessons:
         for c in L["classes"]:
             if c not in seen: seen.add(c); classes.append(dict(name=c, level=L["level"], size="", home=""))
-    teachers = [dict(name=str(t["name"]), short=str(t.get("short") or t["name"]), dept=t.get("dept") or "", allowance=t.get("allowance") or "") for t in spec["teachers"]]
+    teachers = [dict(name=str(t["name"]), short=str(t.get("short") or t["name"]), dept=t.get("dept") or "", allowance=t.get("allowance") or "", other=t.get("other_duties") or "") for t in spec["teachers"]]
     seen = {t["name"] for t in teachers}
     for L in lessons:
         for t in L["teachers"]:
-            if t not in seen: seen.add(t); teachers.append(dict(name=t, short=t, dept="", allowance=""))
+            if t not in seen: seen.add(t); teachers.append(dict(name=t, short=t, dept="", allowance="", other=""))
     rooms = [dict(name=str(v["room"]), kind=v.get("kind") or "classroom", capacity=v.get("capacity") or "") for v in spec["venues"]]
     seen = {r["name"] for r in rooms}
     for L in lessons:
@@ -188,7 +188,7 @@ def model_from_files(setup_path, timetable_path):
         for (v,) in wb["Read me"].iter_rows(min_col=1, max_col=1, values_only=True):
             if v is None: continue
             v = str(v)
-            if v in ("Checks", "After-school lessons", "Rules checked after solving", "Notes", "How to read", "Contents"): sect = v; continue
+            if v in ("Checks", "After-school lessons", "Compromises", "Rules checked after solving", "Notes", "How to read", "Contents"): sect = v; continue
             if "Solver status:" in v: status = v.split("Solver status:")[-1].strip(" .")
             if sect in ("Notes", "Rules checked after solving"): notes.append(v)
     if bad: notes.append(f"{len(bad)} rows on the Lessons sheet were skipped (unknown day or no start period): rows {', '.join(map(str, bad[:10]))}.")
@@ -712,11 +712,16 @@ def write_excel(m, path, log=print):
         if ch["ok"] else [(p, "bad") for p in ch["problems"][:60]]
     if ch["side_by_side"]: lines.append((f"{ch['side_by_side']} class-periods have two banded lessons side by side for different students (for example extra periods for one group).", ""))
     lines += [("After-school lessons", "h")] + ([(a, "") for a in ch["after_school"]] or [("None.", "")])
+    comp = m.get("compromises") or []
+    lines += [("Compromises", "h")] + ([(f"{len(comp)} things this timetable gives up: teachers over their allowance, Prefer rules it does not keep, and Max periods in a row. "
+                                         "The Compromises sheet lists each one.", "bad")] + [(f"{k}: {n}", "") for k, n in collections.Counter(x["kind"] for x in comp).items()]
+                                        if comp else [("None: every teacher is within their allowance and every Prefer rule is kept.", "ok")])
     if m["notes"]: lines += [("Notes", "h")] + [(n, "") for n in m["notes"]]
     lines += [("How to read", "h"),
               ("Classes, Teachers, Rooms and Students sheets: one timetable each, days down the side and periods across (start times in the header). Each prints on its own landscape page.", ""),
               ("Banded lessons on a class timetable show the block and its subjects; the lines under the grid list every group, teacher and room. Hover a banded cell for details.", ""),
-              ("Lessons sheet: one row per group per lesson (filter it like any table). Teacher load: periods per teacher. Contents: a link to every timetable.", "")]
+              ("Lessons sheet: one row per group per lesson (filter it like any table). Teacher load: periods per teacher, red where over their allowance. "
+               "Compromises: what the timetable gives up. Contents: a link to every timetable.", "")]
     for i, (t, k) in enumerate(lines, start=1):
         c = rm.cell(i, 1, t); c.alignment = Alignment(wrap_text=True, vertical="top")
         c.font = Font(name="Calibri", size=16, bold=True, color=NAVY) if k == "t" else Font(name="Calibri", size=12, bold=True, color=NAVY) if k == "h" else \
@@ -823,14 +828,27 @@ def write_excel(m, path, log=print):
         for col, w in zip("ABCDEFGH", (10, 8, 11, 10, 10, 8, 8, 8)): ws.column_dimensions[col].width = w
         ws.freeze_panes = "A2"; ws.auto_filter.ref = ws.dimensions
     ws = wb.create_sheet("Teacher load")
-    ws.append(["Teacher", "Short", "Department", "Allowance", "Periods timetabled", "Most periods in a day", "Days teaching", "After-school periods"])
+    ws.append(["Teacher", "Short", "Department", "Allowance", "Periods timetabled", "Most periods in a day", "Days teaching", "After-school periods", "Other duties", "Over allowance by"])
+    red = PatternFill("solid", fgColor="FDE2E1")
     for t in sorted(m["teachers"], key=lambda t: (str(t["dept"]), t["name"])):
         per_day = collections.Counter(); ex = 0
         for lid, xs in _by_id([x for x in m["lessons"] if t["name"] in x["teachers"]]).items():
             per_day[xs[0]["d"]] += xs[0]["n"]; ex += xs[0]["n"] if xs[0]["ext"] else 0
-        ws.append([t["name"], t["short"], t["dept"], t["allowance"], sum(per_day.values()), max(per_day.values()) if per_day else 0, len(per_day), ex])
+        try: over = sum(per_day.values()) + int(t.get("other") or 0) - int(t["allowance"])
+        except (TypeError, ValueError): over = ""
+        ws.append([t["name"], t["short"], t["dept"], t["allowance"], sum(per_day.values()), max(per_day.values()) if per_day else 0, len(per_day), ex, t.get("other") or "",
+                   over if over != "" and over > 0 else ""])
+        if over != "" and over > 0:
+            for c in ws[ws.max_row]: c.fill = red
     for c in ws[1]: c.font = Font(name="Calibri", bold=True, color="FFFFFF", size=10); c.fill = hdrfill; c.alignment = Alignment(wrap_text=True)
-    for col, w in zip("ABCDEFGH", (28, 14, 12, 10, 12, 12, 10, 12)): ws.column_dimensions[col].width = w
+    for col, w in zip("ABCDEFGHIJ", (28, 14, 12, 10, 12, 12, 10, 12, 10, 12)): ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"; ws.auto_filter.ref = ws.dimensions
+    ws = wb.create_sheet("Compromises")   # what the timetable gives up (report.compromises)
+    ws.append(["What", "Detail"])
+    for x in m.get("compromises") or []: ws.append([x["kind"], x["text"]])
+    if ws.max_row == 1: ws.append(["None", "Every teacher is within their allowance and every Prefer rule is kept."])
+    for c in ws[1]: c.font = Font(name="Calibri", bold=True, color="FFFFFF", size=10); c.fill = hdrfill
+    ws.column_dimensions["A"].width = 26; ws.column_dimensions["B"].width = 110
     ws.freeze_panes = "A2"; ws.auto_filter.ref = ws.dimensions
     wb.save(path)
     return path
