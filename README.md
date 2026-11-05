@@ -26,8 +26,8 @@ Generate run keeps its own. When students have no groups or bands no classes, st
 copy**: pick a copy and it fills only those students (by Student ID) and bands; nothing else changes and Undo takes it back.
 It is optional, but with it the solver makes sure no student has two lessons at once, and every student gets a
 personal code. Personal codes are made from each student's ID and `SECRET_KEY`, so they stay the same when the
-timetable is republished. The committee downloads them as a list (CSV) or as slips to print, one page per class.
-Students not on the list use the general student code and Build my timetable.
+timetable is republished; without `SECRET_KEY` they are off. The committee downloads them as a list (CSV) or as slips
+to print, one page per class. Students not on the list use the general student code and Build my timetable.
 
 ## How generating works
 

@@ -306,7 +306,7 @@ def pub_info():
     if not pub: return None
     m = pub["meta"]
     return dict(at=m["published_at"], ok=m["ok"], after=len(m.get("after_school", [])), students=m.get("students", 0), classes=m.get("classes", 0),
-                files=m.get("files", {}), problems=m.get("problems", []))
+                files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on())
 
 @app.get("/api/status")
 @need("committee")
@@ -361,7 +361,8 @@ def _publish_job(r):
     r.emit("status", text="Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute)...")
     adjust.flush(r)   # changes made by hand on the Adjust page go into the timetable workbook first
     m = store.publish(s["setup"], s["timetable"], run_id=r.id, log=lambda t: None)
-    r.emit("published", text=f"Published. Teachers and students now see this timetable. {len(m['students'])} students have personal codes.")
+    codes = f"{len(m['students'])} students have personal codes." if access.personal_codes_on() else "Personal student codes are off until SECRET_KEY is set."
+    r.emit("published", text=f"Published. Teachers and students now see this timetable. {codes}")
 
 @app.post("/api/publish")
 @need("committee")
@@ -476,11 +477,14 @@ def preview():
         _cache["pv_key"] = key
     return Response(_cache["pv"], mimetype="text/html")
 
+NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
+
 @app.get("/api/codes.csv")
 @need("committee")
 def codes_csv():
     pub = store.published()
     if not pub: abort(404)
+    if not access.personal_codes_on(): return NO_PERSONAL, 409
     return Response(store.codes_csv(pub["model"]), mimetype="text/csv", headers={"Content-Disposition": 'attachment; filename="personal timetable codes.csv"'})
 
 @app.get("/api/code-slips.pdf")
@@ -489,6 +493,7 @@ def code_slips():
     from ttgen.export import code_slips_pdf
     pub = store.published()
     if not pub: abort(404)
+    if not access.personal_codes_on(): return NO_PERSONAL, 409
     buf = io.BytesIO()
     code_slips_pdf(pub["model"], {s["id"]: access.personal_code(s["id"]) for s in pub["model"]["students"]}, request.host_url.rstrip("/"), buf)
     buf.seek(0)
