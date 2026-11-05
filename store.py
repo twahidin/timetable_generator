@@ -2,7 +2,7 @@
 (a Railway volume, so they survive redeploys)."""
 import csv, datetime, io, json, os, pickle, shutil, threading
 from ttgen.export import model_from_files, export_all
-from access import personal_code, norm
+from access import personal_code, personal_codes_on, norm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -82,7 +82,7 @@ def published():
         if _cache["stamp"] != stamp:
             with open(os.path.join(PUB, "model.pkl"), "rb") as f: model = pickle.load(f)
             meta = read_json(meta_path, {})
-            codes = {norm(personal_code(s["id"])): s["id"] for s in model["students"]}
+            codes = {norm(personal_code(s["id"])): s["id"] for s in model["students"]} if personal_codes_on() else {}
             _cache.update(stamp=stamp, value=dict(meta=meta, model=model, codes=codes, views={}))
         return _cache["value"]
 
