@@ -20,6 +20,9 @@ KEY_VARS = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "openr
 MAX_STEPS = 120   # model calls in one go: a long run with many solves and questions still finishes
 MAX_TOKENS = 64000   # thinking counts toward this as well as the reply; replies are streamed, so a long one neither times out nor is cut short
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# the prompt cache lasts an hour, not the default 5 minutes: a solve or the committee's answer often takes 5-30 minutes,
+# and the turn after it would otherwise pay again for the whole conversation
+CACHE = dict(type="ephemeral", ttl="1h")
 # models that take fallbacks "default" on Anthropic's own API: if a safety filter declines, Anthropic re-runs the request on a fallback model
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 
@@ -96,7 +99,8 @@ def anthropic_body(cfg, system, history, tools):
                      [dict(type="tool_use", id=c["id"], name=c["name"], input=c["args"] or {}) for c in h.get("calls", [])]
             msgs.append(dict(role="assistant", content=blocks or [dict(type="text", text="...")]))
         elif h["role"] == "tool": add("user", dict(type="tool_result", tool_use_id=h["id"], content=h["result"]))
-    return dict(model=cfg["model"], max_tokens=MAX_TOKENS, system=[dict(type="text", text=system, cache_control=dict(type="ephemeral"))], messages=msgs,
+    # two cache points: the system prompt (the skill, the same every turn) and, placed by the API, the end of the conversation so far
+    return dict(model=cfg["model"], max_tokens=MAX_TOKENS, cache_control=CACHE, system=[dict(type="text", text=system, cache_control=CACHE)], messages=msgs,
                 **({"tools": [dict(name=t["name"], description=t["description"], input_schema=t["schema"]) for t in tools]} if tools else {}))
 
 _clients = {}
