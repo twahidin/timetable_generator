@@ -12,6 +12,7 @@ SOLVE_MAX = int(os.environ.get("SOLVE_MAX_SECONDS") or 8 * 3600)
 STAGED_CLASSES = int(os.environ.get("STAGED_FROM_CLASSES") or 30)   # fresh solves of a school this size go level by level (ttgen.staged)   # the longest the committee (or the AI) may ask a solve to run
 WORKERS = int(os.environ.get("SOLVE_WORKERS") or 8)
 RULE_NAMES = [r[0] for r in RULE_TYPES]
+SHOW_SECTIONS = ["rules", "lessons", "teachers", "classes", "subjects", "blocks", "venues", "day_structure", "settings"]   # never students: the AI gets counts of them only
 
 # ------------------------------------------------------------------------------------------- tool definitions
 TOOLS = [
@@ -19,7 +20,7 @@ TOOLS = [
          schema=dict(type="object", properties={}, required=[])),
     dict(name="show_setup", description="Show rows of the setup so you can understand a conflict. Rows come with their index, used by change_setup.",
          schema=dict(type="object", properties=dict(
-             section=dict(type="string", enum=["rules", "lessons", "teachers", "classes", "subjects", "blocks", "venues", "day_structure", "settings"]),
+             section=dict(type="string", enum=SHOW_SECTIONS),
              filter=dict(type="string", description="only rows containing this text, e.g. a teacher, class, subject or rule name")), required=["section"])),
     dict(name="show_timetable", description="Show the latest timetable: when and where lessons are, with teachers and rooms. Use it before changing anything for a tweak, and to answer questions about the timetable. Filter by a class, teacher, room, subject, group code or block, and/or a day.",
          schema=dict(type="object", properties=dict(
@@ -325,6 +326,7 @@ def t_check_setup(run, args):
 
 def t_show_setup(run, args):
     sec = args.get("section"); flt = str(args.get("filter") or "").lower(); spec = run.spec
+    if sec not in SHOW_SECTIONS: return f"Unknown section {sec}; use one of {', '.join(SHOW_SECTIONS)}."
     if sec == "settings":
         return "\n".join(f"{k}: {v}" for k, v in spec["school"].items())
     if sec == "day_structure":

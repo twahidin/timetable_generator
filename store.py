@@ -22,9 +22,13 @@ _lock = threading.Lock()
 def now():
     return datetime.datetime.now().astimezone().strftime("%d %b %Y, %H:%M")
 
+def on_railway():
+    """Railway documents RAILWAY_ENVIRONMENT_NAME and _ID; RAILWAY_ENVIRONMENT is the older name"""
+    return any(os.environ.get(k) for k in ("RAILWAY_ENVIRONMENT_NAME", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_ENVIRONMENT"))
+
 def on_volume():
     """False when running on Railway without a volume (everything is lost on the next deploy)"""
-    return not (os.environ.get("RAILWAY_ENVIRONMENT") and not (os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or os.environ.get("DATA_DIR")))
+    return not (on_railway() and not (os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or os.environ.get("DATA_DIR")))
 
 def write_json(path, obj):
     tmp = path + ".tmp"

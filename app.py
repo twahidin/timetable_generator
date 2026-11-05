@@ -4,7 +4,7 @@ Committee (COMMITTEE_CODE): fill the setup step by step, generate the timetable 
 up in Railway, or without), talk through conflicts in the chat, publish, and download everything.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable."""
-import copy, io, json, os, shutil, tempfile, zipfile
+import copy, io, json, os, shutil, sys, tempfile, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -20,7 +20,7 @@ app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
 app.config.update(MAX_CONTENT_LENGTH=40 * 1024 * 1024, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
-                  SESSION_COOKIE_SECURE=bool(os.environ.get("RAILWAY_ENVIRONMENT")), PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 120)
+                  SESSION_COOKIE_SECURE=store.on_railway(), PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 120)
 limiter = access.Limiter()
 _cache = {}
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -42,6 +42,19 @@ def need(*roles):
 def esc(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
+def setup_problems():
+    """what this deployment is missing (Railway variables, a volume): on the sign-in page and in the logs at startup"""
+    _, probs = access.configured()
+    if not store.on_volume(): probs.append("No Railway volume: the setup and the published timetable are lost on the next deploy. Add a volume mounted at /data.")
+    return probs
+
+def startup_log():
+    c = ai.config()
+    who = "mock (a scripted stand-in: nothing is sent out)." if c["provider"] == "mock" else f"{c['provider']} {c['model']}." if c["ok"] else \
+          f"off ({c['why']} Generate without AI still works.)"
+    print(f"Timetable app: data in {store.DATA}; AI timetabler {who}", file=sys.stderr, flush=True)
+    for p in setup_problems(): print(f"WARNING: {p}", file=sys.stderr, flush=True)
+
 def page(title, body):
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)}</title>
 <link rel="stylesheet" href="/static/login.css"></head><body>{body}</body></html>"""
@@ -61,8 +74,7 @@ CHOICE_OF = {r: k for k, c in CHOICES.items() for r in c["roles"]}
 @app.get("/login")
 def login_page(msg="", choice=None, fix=None):
     pub = store.published(); school = (pub["meta"]["school"] if pub else None) or os.environ.get("SCHOOL_NAME") or "School timetable"
-    _, probs = access.configured()
-    warn = "".join(f"<p class='warn'>{esc(p)}</p>" for p in probs)
+    warn = "".join(f"<p class='warn'>{esc(p)}</p>" for p in setup_problems())
     link = f' <a href="/login?as={fix}">Open {esc(CHOICES[fix]["title"])}</a>' if fix else ""
     err = f"<p class='err'>{esc(msg)}{link}</p>" if msg else ""
     choice = choice or request.args.get("as")
@@ -571,6 +583,8 @@ def files(what, kind=None):
     if what in ("excel", "zip", "html") and f.get(what):
         return send_file(os.path.join(store.PUB, f[what]), as_attachment=True, download_name=f[what])
     abort(404)
+
+startup_log()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)

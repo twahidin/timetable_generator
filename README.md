@@ -35,7 +35,8 @@ The AI does not place lessons itself; the solver does (OR-Tools, the same one th
 timetabler, with `skill/school-timetable-generator/SKILL.md` as its instructions and these tools:
 check the setup and do the capacity sums, show parts of the setup, solve, diagnose (find which rule blocks a
 timetable), ask the committee, change the setup (only what the committee chose), try a change (a what-if), and finish.
-It cannot run code, see anything outside the setup, or publish. The chat shows each step; a question appears with
+It cannot run code, see anything outside the setup, or publish. It never gets the Students sheet, only counts of
+students ([What the AI sees](docs/DEPLOY.md#what-the-ai-sees)). The chat shows each step; a question appears with
 buttons, and the committee can type at any time.
 
 **What-ifs.** Ask "what if Mr Tan had Wednesday afternoons free?" and the AI tries the change on a copy: it solves from
@@ -82,26 +83,19 @@ Without an AI set up, **Generate without AI** checks and solves, and the committ
 
 ## Deploy on Railway
 
-1. Put this folder in a GitHub repository (it has a `Dockerfile` and `railway.json`).
-2. Railway: **New Project → Deploy from GitHub repo** → pick the repository.
-3. **Add a volume** to the service, mounted at `/data`. The saved setup, generation runs and the published timetable
-   live there; without a volume they are lost on every deploy (the committee page warns you).
-4. **Variables** (service → Variables):
+Each school runs its own copy: one Railway service with its own volume, access codes and (if it wants the AI) its own
+AI key. **[docs/DEPLOY.md](docs/DEPLOY.md)** walks through it: every variable with a safe default, CPU and memory for
+the solver, running without AI, the first sign-in and loading the setup, and [what the AI sees](docs/DEPLOY.md#what-the-ai-sees).
+In short:
 
-   | Variable | Value |
-   |---|---|
-   | `SECRET_KEY` | a long random string. Keep it: changing it signs everyone out and changes every personal student code |
-   | `COMMITTEE_CODE`, `TEACHER_CODE`, `STUDENT_CODE` | at least 6 letters or digits each, all different (case, spaces and dashes are ignored) |
-   | `AI_PROVIDER` | `anthropic`, `openai` or `openrouter` |
-   | `AI_API_KEY` | **fill in:** the provider's API key (stays on the server). Left blank, the AI chat stays off and the committee can still generate without AI |
-   | `AI_MODEL` | the model name exactly as the provider lists it. Anthropic defaults to `claude-opus-5-5` |
-   | `AI_EFFORT` | optional, Anthropic only: how hard the model thinks on each turn, `low`, `medium`, `high`, `xhigh` (extra high, the default) or `max`. Higher thinks longer and costs more; `none` leaves it to the model |
-   | `SCHOOL_NAME` | optional: shown on the sign-in page before anything is published |
-   | `SOLVE_SECONDS` | optional: the default time for one solve, 300 s. The committee can pick a longer **Solve for up to** time on Generate & publish, up to `SOLVE_MAX_SECONDS` (default 8 hours) |
-   | `SOLVE_WORKERS` | optional: solver threads, default 8 |
-   | `AI_BASE_URL` | optional: another OpenAI-compatible endpoint |
-
-5. **Settings → Networking → Generate Domain**, open it and sign in with the committee code.
+1. Fork this repository. Railway: **New Project → GitHub repo** → pick it (it has a `Dockerfile` and `railway.json`).
+2. **Attach a volume** to the service, mounted at `/data`. The saved setup, generation runs and the published timetable
+   live there; without a volume they are lost on every deploy.
+3. **Variables:** `SECRET_KEY` (a long random string; keep it), `COMMITTEE_CODE`, `TEACHER_CODE` and `STUDENT_CODE` (at
+   least 6 letters or digits each, all different). For the AI timetabler, also `AI_PROVIDER` and `AI_API_KEY`; without
+   them the committee generates without AI. `.env.example` lists them all.
+4. **Settings → Networking → Generate Domain**, open it and sign in with the committee code. The sign-in page and the
+   deploy logs list anything still missing (a code, `SECRET_KEY` or the volume).
 
 The solver uses all the CPU it is given, so more vCPU gives better timetables in the same time. A tight timetable can
 take a long time to find: pick a longer **Solve for up to** time, and press Stop to keep the best one found so far.
