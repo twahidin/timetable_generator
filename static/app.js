@@ -185,6 +185,64 @@ const RECESS_ROWS = [["Floating recess goes by", "Level", "Level: each level has
   ["Floating recess length (periods)", 2, "How long the recess is inside each recess window."],
   ["Most classes at recess at once", null, "Leave empty for no limit (canteen space). Counts fixed (R) and floating recess."]];
 function hasWindows() { return Object.values(S.spec.day_structure || {}).some(days => Object.values(days).some(r => String(r).includes("W"))); }
+const ampm = t => { const h = Math.floor(t / 60); return `${(h + 11) % 12 + 1}.${String(t % 60).padStart(2, "0")}${h % 24 < 12 ? "am" : "pm"}`; };
+const listing = (a, n = 4) => a.slice(0, n).join(", ") + (a.length > n ? ` and ${a.length - n} more` : "");
+function endRows() {   // 'Lessons end by (...)' rows -> [{label, days: Mon..Fri, cut: minutes}] (as ttgen.spec.end_rows)
+  const full = ["monday", "tuesday", "wednesday", "thursday", "friday"], WD = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  const idx = w => full.findIndex(d => d.slice(0, 3) === w.slice(0, 3).toLowerCase());
+  return (sc().extra_settings || []).filter(x => String(x[0] || "").toLowerCase().startsWith("lessons end by") && /^\d{1,2}[:.]\d{2}$/.test(String(x[1] ?? "").trim())).map(x => {
+    const m = String(x[0]).match(/\((.*?)\)/), txt = (m ? m[1] : "monday to friday").toLowerCase(), sp = txt.match(/^\s*(\w+)\s+to\s+(\w+)/);
+    const a = sp ? idx(sp[1]) : -1, b = sp ? idx(sp[2]) : -1;
+    const days = a >= 0 && b >= 0 ? WD.slice(a, b + 1) : (txt.match(/[a-z]+/g) || []).map(idx).filter(k => k >= 0).map(k => WD[k]);
+    return { label: String(x[0]), days: new Set(days), cut: mins(String(x[1]).trim().replace(".", ":")) };
+  });
+}
+function structureWarnings() {   // where the Day structure and the rules say different things (as ttgen.spec.structure_vs_rules): the rules win where stricter
+  const s = sc(), ds = S.spec.day_structure || {}, NP = Number(s.periods_per_day), pl = Number(s.period_minutes || 20), st = mins(s.start_time);
+  const lvls = levels().filter(lv => ds[lv] && Object.keys(ds[lv]).length), days = dayNames(), lesson = s.after_school !== false ? "LWA" : "LW";
+  const row = (lv, d) => String((ds[lv] || {})[d] || "").padEnd(NP, ".").slice(0, NP);
+  const last = r => { for (let p = r.length - 1; p >= 0; p--) if (lesson.includes(r[p])) return p; return -1; };
+  const at = p => ampm(st + p * pl), every = l => l.length === lvls.length && l.length > 1 ? "every level" : l.join(", "), wd = d => d.split(" ").pop().slice(0, 3);
+  const out = [], endAt = {}, keepBy = {};
+  for (const e of endRows()) {
+    const keep = Math.max(0, Math.min(NP, Math.floor((e.cut - st) / pl))), covered = days.filter(d => e.days.has(wd(d)));
+    if (!covered.length) { out.push(`${e.label} matches no day of the Day structure, so it changes nothing.`); continue; }
+    covered.forEach(d => { endAt[d] = `${e.label} (${ampm(e.cut)})`; keepBy[d] = Math.min(keepBy[d] ?? NP, keep); });
+    const over = {}, ends = [];
+    for (const d of covered) for (const lv of lvls) { const p = last(row(lv, d)); if (p < 0) continue; ends.push(p); if (p >= keep) (over[d] = over[d] || []).push([lv, p]); }
+    const od = Object.keys(over);
+    if (od.length) {
+      const parts = od.map(d => `${d} (${every(over[d].map(x => x[0]))}, until ${at(Math.max(...over[d].map(x => x[1])) + 1)})`);
+      out.push(`${e.label} is ${ampm(e.cut)}, but the Day structure has lessons after it on ${listing(parts)}. The time wins, so those periods stay empty: `
+        + `end the Day structure at ${ampm(e.cut)} on those days, or set the time to ${at(Math.max(...od.flatMap(d => over[d].map(x => x[1]))) + 1)}.`);
+    } else if (ends.length && Math.max(...ends) + 1 < keep) out.push(`${e.label} is ${ampm(e.cut)}, but the Day structure has no lesson after ${at(Math.max(...ends) + 1)} on those days, so the time changes nothing: the Day structure decides.`);
+  }
+  if (s.after_school === false) {
+    const withA = days.filter(d => lvls.some(lv => row(lv, d).includes("A")));
+    if (withA.length) out.push(`After-school slot allowed when a class cannot fit is No, but the Day structure has after-school slots (A) on ${listing(withA)}: they are never used.`);
+  }
+  if (S.spec.rules.some(r => r.rule === "At least one recess a day" && r.scope === "School")) {
+    const bare = days.filter(d => lvls.some(lv => last(row(lv, d)) >= 0) && !lvls.some(lv => /[RW]/.test(row(lv, d))));
+    if (bare.length) out.push(`Every teacher gets at least one recess a day, but on ${listing(bare)} no level has a recess (R or W) in the Day structure, so a teacher who teaches that day cannot have one.`);
+  }
+  const lvOf = Object.fromEntries(S.spec.classes.map(c => [c.class, c.level])), info = lessonInfo();
+  S.spec.lessons.forEach((x, i) => { if (info[i].code && info[i].code !== "Entire Class") lvOf[info[i].code] = x.level; });
+  for (const r of S.spec.rules) {   // a fixed lesson that starts outside lesson time can never be met
+    if (r.rule !== "Fixed at" || r.from == null || r.from === "") continue;
+    const p = Number(r.from), lv = r.level || lvOf[r.target], wk = String(r.week || "Both"), dy = String(r.day || "All");
+    if (!ds[lv]) continue;
+    for (const d of days) {
+      if ((["Odd", "Even"].includes(wk) && !d.startsWith(wk)) || (dy !== "All" && wd(d) !== dy.slice(0, 3))) continue;
+      const ch = p >= 0 && p < NP ? row(lv, d)[p] : ".";
+      let why;
+      if (!lesson.includes(ch)) why = `is ${String((S.meta.codes || {})[ch] || "not a lesson period").toLowerCase()} (${ch}) in the ${lv} Day structure`;
+      else if (p >= (keepBy[d] ?? NP)) why = `is after ${endAt[d] || "the end time on Settings"}`;
+      else continue;
+      out.push(`Fixed lesson ${[r.target, r.subject].filter(Boolean).join(" ")} on ${d} at period ${p} (${at(p)}): that period ${why}, so it can never be met.`); break;
+    }
+  }
+  return out;
+}
 function ensureRecessRows() {
   if (!hasWindows()) return false;
   const ex = sc().extra_settings = sc().extra_settings || []; let added = false;
@@ -264,6 +322,7 @@ function issues() {
     const worst = Object.entries(at).sort((a, b) => b[1] - a[1])[0];
     if (Number(cap) && worst && worst[1] > Number(cap)) add("school", ci, `${worst[1]} classes have their fixed recess (R) together on ${worst[0].split("|")[0]} period ${worst[0].split("|")[1]}, more than the ${cap} allowed at once.`);
   }
+  structureWarnings().forEach((m, k) => add("school", `ds${k}`, m));   // the Day structure and the rules saying different things
   const info = lessonInfo(); const codes = {};
   info.forEach((x, i) => { if (x.code && x.code !== "Entire Class") codes[x.code] = (codes[x.code] || 0) + 1; });
   S.spec.lessons.forEach((x, i) => {
@@ -488,7 +547,7 @@ const VIEWS = {
         ? `<input data-set="${x.key}" type="number" min="1" value="${esc(settingValue(x.key))}" placeholder="no limit">`
         : `<select data-set="${x.key}">${["Yes", "No"].map(v => opt(v, settingValue(x.key))).join("")}</select>`}</label>`).join("")}
       ${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? "" : settingRow(x, i)).join("")}</div></div>
-      <div class="card"><h2>Day structure</h2><div class="legend">Brush: ${["L", "R", "W", "U", "F", "A", ""].map(c => `<button class="small ${S.brush === c ? "primary" : ""}" data-brush="${c}"><i class="c-${c}" style="width:12px;height:12px;display:inline-block;border-radius:3px;vertical-align:-2px"></i> ${{ L: "Lesson", R: "Recess", W: "Recess window", U: "Lunch", F: "Flag / assembly", A: "After-school slot", "": "No school" }[c]}</button>`).join("")}</div>
+      <div class="card"><h2>Day structure</h2>${(w => w.length ? `<div class="notice"><b>The Day structure and the rules on Settings disagree.</b> The rules win where they are stricter, so make them say the same:<ul>${w.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "")(structureWarnings())}<div class="legend">Brush: ${["L", "R", "W", "U", "F", "A", ""].map(c => `<button class="small ${S.brush === c ? "primary" : ""}" data-brush="${c}"><i class="c-${c}" style="width:12px;height:12px;display:inline-block;border-radius:3px;vertical-align:-2px"></i> ${{ L: "Lesson", R: "Recess", W: "Recess window", U: "Lunch", F: "Flag / assembly", A: "After-school slot", "": "No school" }[c]}</button>`).join("")}</div>
       <p class="muted" style="margin:4px 0 10px">Click or drag across cells to paint them with the brush.</p>
       <div class="tablewrap"><table class="dsgrid">${head}${lvRows}</table></div>
       ${hasWindows() ? `<h3 style="margin:14px 0 4px">Floating recess</h3><p class="muted" style="margin:0 0 8px">For the W periods: the solver puts a recess of this length in each recess window. Make a window the recess plus whole lessons (for example 2 + 3 + 3 periods with 3-period lessons), so the lessons still fit wherever the recess goes.</p>

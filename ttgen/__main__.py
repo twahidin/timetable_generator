@@ -44,6 +44,8 @@ def main(argv=None):
               f"{len(spec.get('rules', []))} rules, {len(spec.get('students', []))} students")
         print(f"{len(P.units)} units to place over {P.ND} days x {P.NP} periods")
         for p in probs or ["No input problems found."]: print(" -", p)
+        from .spec import structure_vs_rules
+        for p in structure_vs_rules(spec): print(" ! Day structure and rules disagree:", p)
         return 0
     from .solver import solve
     from .report import write_timetable

@@ -3,7 +3,7 @@ the ttgen solver, so the AI never places lessons itself and never runs code. Eac
 import collections, copy, json, os, re, threading, time
 import adjust
 from ttgen.reader import derive
-from ttgen.spec import RULE_TYPES, SCOPES
+from ttgen.spec import RULE_TYPES, SCOPES, structure_vs_rules
 from ttgen.template import write_template
 from store import now, write_json
 
@@ -320,8 +320,11 @@ def t_check_setup(run, args):
     counts = f"{len(spec['classes'])} classes, {len(spec['teachers'])} teachers, {len(spec['lessons'])} lesson rows, {len(spec['blocks'])} bands, {len(spec.get('rules', []))} rules, {len(spec.get('students', []))} students."
     lines = [counts, "Input problems:" if probs else "Input problems: none."] + [f"- {p}" for p in probs[:40]]
     lines += ["Capacity:" if cap else "Capacity: nothing looks too tight."] + [f"- {c}" for c in cap[:40]]
+    clash = structure_vs_rules(spec)   # the Day structure and the rules on Settings / Fixed lessons saying different things
+    lines += ["Day structure and rules disagree (tell the committee; the rules win where stricter):" if clash else "Day structure and rules agree."] + [f"- {c}" for c in clash]
     lines += ["Rules:"] + [f"- {rule_text(i, r)}" for i, r in enumerate(spec.get("rules", []))]
-    run.emit("check", text=f"{len(probs)} input problems, {len(cap)} capacity warnings.", items=(probs + cap)[:30])
+    run.emit("check", text=f"{len(probs)} input problems, {len(cap)} capacity warnings" + (f", {len(clash)} place{'s' if len(clash) > 1 else ''} where the Day structure and the rules disagree." if clash else "."),
+             items=(clash + probs + cap)[:30])
     return "\n".join(lines)
 
 def t_show_setup(run, args):
