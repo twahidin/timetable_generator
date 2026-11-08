@@ -11,7 +11,7 @@ published timetable with their access code and download PDFs.
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 
-The student list goes in on step 7 of the setup (**Students**): paste it from Excel or a CSV, or upload an .xlsx or
+The student list goes in on the **Students** step, after the timetable is made (it is not needed to generate): paste it from Excel or a CSV, or upload an .xlsx or
 .csv, with each student's ID, name, class and group codes; the committee can then edit each student's groups there.
 To fill groups in the app, tick students (shift-click for a run, or the top box for everyone shown) and **Add to group**,
 **Remove from group** or **Move to class** for all of them at once; a group in a band replaces the student's other group
@@ -22,12 +22,12 @@ from MTL") excuses them; untick **Everyone takes one** on a band that is an opti
 Option or Elective).
 
 **Restoring.** Each **Save progress** keeps the copy it replaces on the server (the last 20, in `setup_history/`), and each
-Generate run keeps its own. When students have no groups or bands no classes, step 7 shows **Restore from an earlier
+Generate run keeps its own. When students have no groups or bands no classes, the Students step shows **Restore from an earlier
 copy**: pick a copy and it fills only those students (by Student ID) and bands; nothing else changes and Undo takes it back.
 It is optional, but with it the solver makes sure no student has two lessons at once, and every student gets a
 personal code. Personal codes are made from each student's ID and `SECRET_KEY`, so they stay the same when the
-timetable is republished. The committee downloads them as a list (CSV) or as slips to print, one page per class.
-Students not on the list use the general student code and Build my timetable.
+timetable is republished; without `SECRET_KEY` they are off. The committee downloads them as a list (CSV) or as slips
+to print, one page per class. Students not on the list use the general student code and Build my timetable.
 
 ## How generating works
 
@@ -38,6 +38,19 @@ timetable), ask the committee, change the setup (only what the committee chose),
 It cannot run code, see anything outside the setup, or publish. It never gets the Students sheet, only counts of
 students ([What the AI sees](docs/DEPLOY.md#what-the-ai-sees)). The chat shows each step; a question appears with
 buttons, and the committee can type at any time.
+
+**Critical problems and warnings.** Every check before solving is one of two kinds. *Critical*: no timetable can be made
+until it is fixed (a teacher on two groups of one band, a lesson longer than any stretch of the day, more lessons than
+a class, room kind or teacher has time for, a recess that cannot work); the solver does not start, and the setup's
+**Things to fix** panel shows these in red. *Warnings*: a timetable can still be made, but a person should look (a room
+that seats too few, a band needing more special rooms than Venues has, a teacher over their allowance, a lesson row
+left out, a very full class); these are amber, the solver goes ahead, and the AI lists them when it finishes. The
+student list is checked on its own step, after the timetable is made.
+
+**Timetable database.** Publishing (and every export, in the app or with `python -m ttgen export`) also writes the
+timetable as a SQLite database: every lesson with its day, times, classes, teachers and room, plus the classes,
+teachers, rooms and the setup itself, for importing into other systems. **Printouts** on the Files step reads one back:
+upload it alone (it holds its setup) or with a setup workbook, and get every output again.
 
 **What-ifs.** Ask "what if Mr Tan had Wednesday afternoons free?" and the AI tries the change on a copy: it solves from
 the latest timetable and shows a comparison (checks, lessons after school, lessons moved, teachers' free periods between

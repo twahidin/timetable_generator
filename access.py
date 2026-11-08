@@ -12,6 +12,10 @@ def norm(code):
 def secret():
     return (os.environ.get("SECRET_KEY") or "").encode()
 
+def personal_codes_on():
+    """personal codes need SECRET_KEY: made with an empty key, anyone who knows a Student ID could work out the code"""
+    return bool(os.environ.get("SECRET_KEY"))
+
 def personal_code(student_id):
     d = hmac.new(secret(), ("timetable-personal:" + str(student_id)).encode(), hashlib.sha256).digest()
     n = int.from_bytes(d[:8], "big"); out = ""
@@ -22,7 +26,7 @@ def configured():
     """which general codes are set, and problems to show the committee"""
     have = {role: bool(norm(os.environ.get(var))) for role, var in ROLES}
     probs = [f"{var} is not set in Railway variables." for role, var in ROLES if not have[role]]
-    if not os.environ.get("SECRET_KEY"): probs.append("SECRET_KEY is not set: sign-ins and personal student codes need it.")
+    if not os.environ.get("SECRET_KEY"): probs.append("SECRET_KEY is not set: sign-ins end at every restart, and personal student codes are off until it is set.")
     vals = [norm(os.environ.get(var)) for _, var in ROLES if norm(os.environ.get(var))]
     if len(vals) != len(set(vals)): probs.append("Two of the general codes are the same; make them different.")
     short = [var for _, var in ROLES if 0 < len(norm(os.environ.get(var))) < 6]

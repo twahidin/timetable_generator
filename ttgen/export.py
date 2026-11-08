@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter as CL
 from openpyxl.comments import Comment
 from openpyxl.worksheet.pagebreak import Break
 from openpyxl.worksheet.merge import MergedCellRange
+from .database import is_db, read_db, write_db
 from .reader import read_template, derive
 from .report import LESSON_HEADERS, short_subject, clock
 from .spec import periods_by_day, resolve_row, trim_day
@@ -122,6 +123,7 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
              keep=keep, levels=levels, classes=classes, teachers=teachers, rooms=rooms,
              subjects=subjects, lessons=lessons, students=students, room_cap=cap, planned=planned, notes=list(notes or []), status=status,
              generated=datetime.date.today().strftime("%d %b %Y"))
+    m["setup"] = spec   # kept in the timetable database, so that file alone rebuilds every output
     m["class_ix"] = {c["name"]: c for c in classes}; m["teacher_ix"] = {t["name"]: t for t in teachers}; m["room_ix"] = {r["name"]: r for r in rooms}
     m["checks"] = check_model(m)
     return m
@@ -153,14 +155,22 @@ def _split_list(v):
     return [s.strip() for s in str(v or "").split(",") if s.strip()]
 
 def model_from_files(setup_path, timetable_path):
-    spec = read_template(setup_path); derive(spec)
+    """the export model from a setup workbook and a timetable: a workbook with a Lessons sheet (hand-over format), or a
+    SQLite database (ttgen.database). A database written by write_db keeps the setup, so setup_path may then be None."""
+    db = read_db(timetable_path) if is_db(timetable_path) else None
+    if setup_path: spec = read_template(setup_path)
+    elif db and db[5]: spec = db[5]
+    else: raise ValueError("Send the setup workbook too: this timetable file does not hold the setup.")
+    derive(spec)
     sc = spec["school"]; NP = int(sc["periods_per_day"]); ds = spec["day_structure"]
     lv0 = next((lv for lv in sc["levels"] if lv in ds), None)
     if lv0 is None: raise ValueError("The setup workbook's Day structure is empty.")
     days = list(ds[lv0].keys()); dix = {d.lower(): i for i, d in enumerate(days)}
-    wb = openpyxl.load_workbook(timetable_path, data_only=True)
-    if "Lessons" not in wb.sheetnames: raise ValueError("The timetable workbook has no Lessons sheet.")
-    rows = wb["Lessons"].iter_rows(values_only=True)
+    if db: wb = None; rows = iter([db[0]] + db[1])
+    else:
+        wb = openpyxl.load_workbook(timetable_path, data_only=True)
+        if "Lessons" not in wb.sheetnames: raise ValueError("The timetable workbook has no Lessons sheet.")
+        rows = wb["Lessons"].iter_rows(values_only=True)
     hdr = [str(h).strip() if h is not None else "" for h in next(rows)]
     ix = {h.lower(): i for i, h in enumerate(hdr)}
     def g(row, *names):
@@ -182,8 +192,8 @@ def model_from_files(setup_path, timetable_path):
                         classes=_split_list(g(row, "Classes")), subject=subject, group=group, teachers=_split_list(g(row, "Teachers")),
                         room=str(g(row, "Room") or ""), ext=str(g(row, "After school") or "").strip().lower() in ("yes", "y", "true", "1", "x"),
                         rain=str(g(row, "Rain room") or "")))
-    notes, status = [], None
-    if "Read me" in wb.sheetnames:
+    notes, status = (list(db[2]), db[3]) if db else ([], None)
+    if wb and "Read me" in wb.sheetnames:
         sect = None
         for (v,) in wb["Read me"].iter_rows(min_col=1, max_col=1, values_only=True):
             if v is None: continue
@@ -193,7 +203,10 @@ def model_from_files(setup_path, timetable_path):
             if sect in ("Notes", "Rules checked after solving"): notes.append(v)
     if bad: notes.append(f"{len(bad)} rows on the Lessons sheet were skipped (unknown day or no start period): rows {', '.join(map(str, bad[:10]))}.")
     recess = collections.defaultdict(list)   # the Recess sheet: each class's floating recess
-    if "Recess" in wb.sheetnames:
+    for c, v in (db[4] if db else {}).items():
+        for day, p, n in v:
+            if str(day).lower() in dix: recess[c].append([dix[str(day).lower()], int(p), int(n)])
+    if wb and "Recess" in wb.sheetnames:
         rows = wb["Recess"].iter_rows(values_only=True); h = {str(v).strip().lower(): i for i, v in enumerate(next(rows, ())) if v is not None}
         for row in rows:
             c, day, p, n = (row[h[k]] if k in h and h[k] < len(row) else None for k in ("class", "day", "start period", "periods"))
@@ -944,9 +957,10 @@ def code_slips_pdf(m, codes, url, out):
 
 
 # ----------------------------------------------------------------------------------------------- everything at once
-def export_all(m, outdir, pdf=True, individual=True, zip_individual=True, html=True, excel=True, log=print):
+def export_all(m, outdir, pdf=True, individual=True, zip_individual=True, html=True, excel=True, db=True, log=print):
     os.makedirs(outdir, exist_ok=True); out = {}
     base = safe_name(f"{m['school']['name']} {m['school']['timetable']}")
+    if db: out["db"] = write_db(m, os.path.join(outdir, f"{base} - timetable data.sqlite"))
     if excel: out["excel"] = write_excel(m, os.path.join(outdir, f"{base} - all timetables.xlsx"), log=log)
     if html: out["html"] = write_html(m, os.path.join(outdir, f"{base} - timetable finder.html"))
     if pdf:

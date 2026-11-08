@@ -63,7 +63,7 @@ manager's generator.
 
 | Variable | Needed? | What it does | Safe default |
 |---|---|---|---|
-| `SECRET_KEY` | **yes** | Signs the sign-in cookies, and makes each student's personal code from their Student ID. Keep it once set: changing it signs everyone out and changes every personal code. | none: set a long random string. Without it, sign-ins end at every restart, and personal codes are made with an empty key, so anyone who knows a Student ID could work out that student's code. |
+| `SECRET_KEY` | **yes** | Signs the sign-in cookies, and makes each student's personal code from their Student ID. Keep it once set: changing it signs everyone out and changes every personal code. | none: set a long random string. Without it, sign-ins end at every restart and personal codes are off: made without a key, anyone who knows a Student ID could work out that student's code. |
 | `COMMITTEE_CODE` | **yes** | The timetable committee's code: setup editor, Generate, chat, preview, publish, downloads, personal codes. | none. At least 6 letters or digits. |
 | `TEACHER_CODE` | **yes** | Teachers' code: every class, teacher, room and student timetable, Who's free, PDFs. | none. At least 6 letters or digits. |
 | `STUDENT_CODE` | **yes** | Students' code: class timetables and **Build my timetable**. | none. At least 6 letters or digits. |
@@ -139,7 +139,8 @@ question and finishes, and sends nothing out. Test once with the real key afterw
    - Blank and sample workbooks to fill in Excel are on **Files → Templates to share**.
 5. The panel on the right lists anything that does not add up. Press **Save progress** to keep the setup on the server,
    where it opens by itself for the committee on any browser.
-6. Add students on step 7 (optional; with them, no student gets two lessons at once and each gets a personal code).
+6. Once the timetable is out, add students class by class on the Students step (optional; with them, no student gets two lessons at once and, with `SECRET_KEY` set, each
+   gets a personal code).
 7. On **Generate & publish**, generate, look at the preview, and **Publish**. Then give teachers the teacher code and
    students the student code. Once published, **Personal student codes** has the slips to print, one page per class,
    and the list as a CSV.

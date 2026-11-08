@@ -245,16 +245,21 @@ def past_setups():
 @app.post("/api/export")
 @need("committee")
 def export_printouts():
-    """setup + timetable workbooks -> zip with the combined Excel, the HTML finder and the PDFs"""
+    """setup workbook + timetable (a workbook with a Lessons sheet, or a timetable database) -> zip with the combined
+    Excel, the HTML finder, the PDFs and the database. A database this app made holds its setup, so it can come alone."""
     from ttgen.export import model_from_files, export_all, safe_name
+    from ttgen.database import is_db
     a, b = request.files.get("setup"), request.files.get("timetable")
-    if not a or not b: return {"error": "Send the setup workbook and the timetable workbook."}, 400
+    if not b: return {"error": "Send the timetable: a workbook with a Lessons sheet, or a timetable database (.sqlite)."}, 400
     work = tempfile.mkdtemp(prefix="tt-")
     try:
-        sp, tp = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx"); a.save(sp); b.save(tp)
+        tp = os.path.join(work, "timetable" + (".sqlite" if str(b.filename or "").lower().endswith((".sqlite", ".sqlite3", ".db")) else ".xlsx")); b.save(tp)
+        sp = None
+        if a: sp = os.path.join(work, "setup.xlsx"); a.save(sp)
+        elif not is_db(tp): return {"error": "Send the setup workbook too (only a timetable database from this app can come alone)."}, 400
         try: m = model_from_files(sp, tp)
-        except Exception as e: return {"error": f"Could not read the workbooks: {e}"}, 400
-        if not m["lessons"]: return {"error": "The timetable workbook's Lessons sheet has no lessons."}, 400
+        except Exception as e: return {"error": f"Could not read the files: {e}"}, 400
+        if not m["lessons"]: return {"error": "The timetable has no lessons."}, 400
         base = safe_name(f"{m['school']['name']} {m['school']['timetable']}")
         out = os.path.join(work, "out", base)
         export_all(m, out, individual=request.form.get("single", "1") == "1", zip_individual=False, log=lambda *x: None)
@@ -306,7 +311,7 @@ def pub_info():
     if not pub: return None
     m = pub["meta"]
     return dict(at=m["published_at"], ok=m["ok"], after=len(m.get("after_school", [])), students=m.get("students", 0), classes=m.get("classes", 0),
-                files=m.get("files", {}), problems=m.get("problems", []))
+                files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on())
 
 @app.get("/api/status")
 @need("committee")
@@ -361,7 +366,8 @@ def _publish_job(r):
     r.emit("status", text="Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute)...")
     adjust.flush(r)   # changes made by hand on the Adjust page go into the timetable workbook first
     m = store.publish(s["setup"], s["timetable"], run_id=r.id, log=lambda t: None)
-    r.emit("published", text=f"Published. Teachers and students now see this timetable. {len(m['students'])} students have personal codes.")
+    codes = f"{len(m['students'])} students have personal codes." if access.personal_codes_on() else "Personal student codes are off until SECRET_KEY is set."
+    r.emit("published", text=f"Published. Teachers and students now see this timetable. {codes}")
 
 @app.post("/api/publish")
 @need("committee")
@@ -476,11 +482,14 @@ def preview():
         _cache["pv_key"] = key
     return Response(_cache["pv"], mimetype="text/html")
 
+NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
+
 @app.get("/api/codes.csv")
 @need("committee")
 def codes_csv():
     pub = store.published()
     if not pub: abort(404)
+    if not access.personal_codes_on(): return NO_PERSONAL, 409
     return Response(store.codes_csv(pub["model"]), mimetype="text/csv", headers={"Content-Disposition": 'attachment; filename="personal timetable codes.csv"'})
 
 @app.get("/api/code-slips.pdf")
@@ -489,6 +498,7 @@ def code_slips():
     from ttgen.export import code_slips_pdf
     pub = store.published()
     if not pub: abort(404)
+    if not access.personal_codes_on(): return NO_PERSONAL, 409
     buf = io.BytesIO()
     code_slips_pdf(pub["model"], {s["id"]: access.personal_code(s["id"]) for s in pub["model"]["students"]}, request.host_url.rstrip("/"), buf)
     buf.seek(0)
@@ -580,7 +590,7 @@ def files(what, kind=None):
         if kind not in allowed or kind not in f.get("books", {}): abort(404)
         return send_file(os.path.join(store.PUB, f["books"][kind]), as_attachment=True, download_name=os.path.basename(f["books"][kind]))
     if r != "committee": abort(403)
-    if what in ("excel", "zip", "html") and f.get(what):
+    if what in ("excel", "zip", "html", "db") and f.get(what):
         return send_file(os.path.join(store.PUB, f[what]), as_attachment=True, download_name=f[what])
     abort(404)
 
