@@ -195,4 +195,5 @@ th{background:#f3f6fb}
 .issue.soft{background:#fff7e6;color:#7a4b00}
 tr.caution td{background:#fff7e6}
 h3.sev{font-size:13px;margin:12px 0 2px;color:#7a4b00}
-h3.sev.crit{color:var(--warn)}
+h3.sev.crit,summary.sev.crit{color:var(--warn)}
+summary.sev.crit{font-weight:600}

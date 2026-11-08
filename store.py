@@ -18,6 +18,7 @@ HIST = os.path.join(DATA, "setup_history")   # earlier saves of the setup, to re
 os.makedirs(RUNS, exist_ok=True)
 KEEP_SAVES = 20
 _lock = threading.Lock()
+_publishing = threading.Lock()   # one publish at a time: each writes the same folder before swapping it in
 
 def now():
     return datetime.datetime.now().astimezone().strftime("%d %b %Y, %H:%M")
@@ -86,30 +87,34 @@ def published():
             _cache.update(stamp=stamp, value=dict(meta=meta, model=model, codes=codes, views={}))
         return _cache["value"]
 
-def publish(setup_xlsx, timetable_xlsx, run_id=None, log=print):
-    """export everything into a fresh folder, then swap it in so viewers never see a half-written timetable"""
-    tmp, old = PUB + ".new", PUB + ".old"
-    shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp)
-    m = model_from_files(setup_xlsx, timetable_xlsx)
-    log("Making the Excel workbook, the timetable finder, the PDFs and the timetable database...")
-    out = export_all(m, tmp, log=lambda *a: None)
-    shutil.copy(setup_xlsx, os.path.join(tmp, "setup.xlsx")); shutil.copy(timetable_xlsx, os.path.join(tmp, "timetable.xlsx"))
-    shutil.rmtree(os.path.join(tmp, "PDF", "Classes"), ignore_errors=True)   # single PDFs are in the zip and made on demand
-    for k in ("Teachers", "Rooms", "Students"): shutil.rmtree(os.path.join(tmp, "PDF", k), ignore_errors=True)
-    with open(os.path.join(tmp, "model.pkl"), "wb") as f: pickle.dump(m, f)
-    files = dict(excel=os.path.basename(out["excel"]), html=os.path.basename(out["html"]), zip=os.path.basename(out["pdf_zip"]), db=os.path.basename(out["db"]),
-                 books={os.path.basename(p).split(" - ")[0].lower(): os.path.relpath(p, tmp) for p in out["pdf_books"]})
-    ch = m["checks"]
-    write_json(os.path.join(tmp, "meta.json"), dict(published_at=now(), run=run_id, school=m["school"]["name"], timetable=m["school"]["timetable"],
-                                                     ok=ch["ok"], problems=ch["problems"][:20], after_school=ch["after_school"],
-                                                     classes=len(m["classes"]), students=len(m["students"]), lessons=ch["lessons"], files=files))
-    with _lock:
-        shutil.rmtree(old, ignore_errors=True)
-        if os.path.exists(PUB): os.replace(PUB, old)
-        os.replace(tmp, PUB)
-        shutil.rmtree(old, ignore_errors=True)
-        _cache.update(stamp=None, value=None)
-    return m
+def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print):
+    """export everything into a fresh folder, then swap it in so viewers never see a half-written timetable. The
+    timetable is a workbook with a Lessons sheet or a timetable database; setup_xlsx may be None for a database this app
+    or the skill made (it holds its setup). source names a timetable made outside the app (the file it came from)."""
+    with _publishing:
+        tmp, old = PUB + ".new", PUB + ".old"
+        shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp)
+        m = model_from_files(setup_xlsx, timetable_path)
+        log("Making the Excel workbook, the timetable finder, the PDFs and the timetable database...")
+        out = export_all(m, tmp, log=lambda *a: None)
+        if setup_xlsx: shutil.copy(setup_xlsx, os.path.join(tmp, "setup.xlsx"))
+        shutil.copy(timetable_path, os.path.join(tmp, "timetable" + os.path.splitext(timetable_path)[1]))
+        shutil.rmtree(os.path.join(tmp, "PDF", "Classes"), ignore_errors=True)   # single PDFs are in the zip and made on demand
+        for k in ("Teachers", "Rooms", "Students"): shutil.rmtree(os.path.join(tmp, "PDF", k), ignore_errors=True)
+        with open(os.path.join(tmp, "model.pkl"), "wb") as f: pickle.dump(m, f)
+        files = dict(excel=os.path.basename(out["excel"]), html=os.path.basename(out["html"]), zip=os.path.basename(out["pdf_zip"]), db=os.path.basename(out["db"]),
+                     books={os.path.basename(p).split(" - ")[0].lower(): os.path.relpath(p, tmp) for p in out["pdf_books"]})
+        ch = m["checks"]
+        write_json(os.path.join(tmp, "meta.json"), dict(published_at=now(), run=run_id, source=source, school=m["school"]["name"], timetable=m["school"]["timetable"],
+                                                         ok=ch["ok"], problems=ch["problems"][:20], after_school=ch["after_school"],
+                                                         classes=len(m["classes"]), students=len(m["students"]), lessons=ch["lessons"], files=files))
+        with _lock:
+            shutil.rmtree(old, ignore_errors=True)
+            if os.path.exists(PUB): os.replace(PUB, old)
+            os.replace(tmp, PUB)
+            shutil.rmtree(old, ignore_errors=True)
+            _cache.update(stamp=None, value=None)
+        return m
 
 def codes_csv(model):
     buf = io.StringIO(); w = csv.writer(buf)
