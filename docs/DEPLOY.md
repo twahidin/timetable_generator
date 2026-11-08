@@ -139,7 +139,7 @@ question and finishes, and sends nothing out. Test once with the real key afterw
    - Blank and sample workbooks to fill in Excel are on **Files → Templates to share**.
 5. The panel on the right lists anything that does not add up. Press **Save progress** to keep the setup on the server,
    where it opens by itself for the committee on any browser.
-6. Add students on step 7 (optional; with them, no student gets two lessons at once and, with `SECRET_KEY` set, each
+6. Once the timetable is out, add students class by class on the Students step (optional; with them, no student gets two lessons at once and, with `SECRET_KEY` set, each
    gets a personal code).
 7. On **Generate & publish**, generate, look at the preview, and **Publish**. Then give teachers the teacher code and
    students the student code. Once published, **Personal student codes** has the slips to print, one page per class,

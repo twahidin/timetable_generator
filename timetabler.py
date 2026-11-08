@@ -188,14 +188,75 @@ def _room_fit(P):
     return out
 
 def impossible(spec):
-    """what rules out every timetable before solving: a room kind that cannot hold its lessons, a class with more
-    periods than its lesson and after-school periods, a teacher with more lessons than times they can teach, or a
-    floating recess that cannot work"""
+    """what rules out every timetable before solving: the critical findings (see findings)"""
+    return [f["text"] for f in findings(spec) if f["level"] == CRITICAL]
+
+
+# ------------------------------------------------------------------------------- critical problems and warnings
+# Every problem found before solving is one of two kinds:
+#   critical: no timetable can be made until it is fixed, so solve refuses to start;
+#   warning:  a timetable can still be made, but a person should look (a room that seats too few, a teacher over their
+#             allowance, a lesson row left out, a class so full that it may not fit).
+# Students are not checked here: the list goes in after the timetable is made, class by class.
+CRITICAL, WARNING = "critical", "warning"
+# input problems from ttgen.reader.derive that stop every timetable; the rest are warnings (the row is left out or the usual split is used)
+_CRITICAL_INPUT = ()
+
+def _input_level(msg):
+    return CRITICAL if any(re.search(p, msg) for p in _CRITICAL_INPUT) else WARNING
+
+def _band_teacher_clashes(spec):
+    """a teacher on two groups of one band: the band's groups meet at the same time, so no timetable exists"""
+    seen, out = collections.defaultdict(list), []
+    for i, x in enumerate(spec["lessons"]):
+        if x.get("block"):
+            for t in {t for t in x.get("teachers") or [] if t}: seen[(x["block"], t)].append(i + 6)
+    for (b, t), rows in sorted(seen.items()):
+        if len(rows) > 1:
+            out.append(f"{t} teaches {len(rows)} groups of {b} (lesson rows {', '.join(map(str, rows))}), but a band's groups meet at the same time: "
+                       "give all but one of them another teacher on step 5.")
+    return out
+
+def _no_place(P):
+    """lessons longer than every stretch of lesson periods in their level's day: they can go nowhere"""
+    bad = collections.defaultdict(list)
+    for u in P.units:
+        for ln in sorted({ln for ln, _ in u["lessons"]}):
+            if not P.starts(u["level"], ln): bad[(u["level"], ln)].append(u["name"])
+    return [f"{len(v)} {'lessons' if len(v) != 1 else 'lesson'} of {ln} periods ({', '.join(v[:5])}{f' and {len(v) - 5} more' if len(v) > 5 else ''}) cannot fit anywhere in the {lv} day: "
+            f"no stretch between breaks is that long. Shorten the lesson (lesson length on step 3, or the row's lesson pattern on step 5), or change the Day structure."
+            for (lv, ln), v in sorted(bad.items())]
+
+def findings(spec, P=None):
+    """every problem found before solving, worst first: [dict(level=critical|warning, area, text)]"""
     from ttgen.solver import Problem
-    derive(spec); P = Problem(spec); out = [x["text"] for x in _room_fit(P) if x["kind_"] == "impossible"]
+    probs = derive(spec); P = P or Problem(spec); out = []
+    add = lambda level, area, text: out.append(dict(level=level, area=area, text=text))
+    for p in probs: add(_input_level(p), "lessons", p)
+    for t in _band_teacher_clashes(spec): add(CRITICAL, "lessons", t)
     A = {lv: sum(row.count("A") for row in rows) for lv, rows in P.grid.items()} if P.spec["school"].get("after_school", True) else {}
-    out += [x["text"] for x in _class_fit(P) if x["kind"] == "over" and x["need"] > x["have"] + A.get(x["level"], 0)]
-    return out + _teacher_fit(P) + _recess_blockers(P)
+    for x in _class_fit(P):
+        lv = x["level"]
+        if x["kind"] == "over": level = CRITICAL if x["need"] > x["have"] + A.get(lv, 0) else WARNING   # within the after-school slots: it solves, with lessons after school
+        elif x["kind"] == "nofit": level = WARNING if A.get(lv) or any(P.windows.get(lv, [])) else CRITICAL   # lessons cannot pack between the breaks
+        else: level = WARNING   # tight or almost full: it may still fit
+        add(level, "classes", x["text"])
+    for x in _room_fit(P): add(CRITICAL if x["kind_"] == "impossible" else WARNING, "venues", x["text"])
+    for t in _no_place(P): add(CRITICAL, "lessons", t)
+    for t in _teacher_fit(P): add(CRITICAL, "teachers", t)
+    for t in _recess_blockers(P): add(CRITICAL, "school", t)
+    for area, t in _loads_and_rooms(spec, P): add(WARNING, area, t)
+    out.sort(key=lambda f: f["level"] != CRITICAL)   # stable: critical first, each kind in the order found
+    return out
+
+def findings_text(F, limit=40):
+    """the findings for the AI, critical and warnings apart"""
+    crit = [f["text"] for f in F if f["level"] == CRITICAL]; warn = [f["text"] for f in F if f["level"] != CRITICAL]
+    lines = (["CRITICAL (no timetable can be made until these are fixed; solve refuses to start):"] + [f"- {t}" for t in crit[:limit]] if crit
+             else ["Critical: none, so a timetable can be made."])
+    lines += (["WARNINGS (a timetable can still be made; a person should look at these, so tell the committee):"] + [f"- {t}" for t in warn[:limit]] if warn
+              else ["Warnings: none."])
+    return lines
 
 def _teacher_fit(P):
     """teachers with more periods of lessons than the cycle has times they can teach them: their levels' lesson (and
@@ -244,6 +305,12 @@ def _recess_blockers(P):
 def capacity(spec, P=None, fit=None):
     from ttgen.solver import Problem
     P = P or Problem(spec); out = [x["text"] for x in (_class_fit(P) if fit is None else fit)] + [x["text"] for x in _room_fit(P)] + _teacher_fit(P)
+    return out + [t for _, t in _loads_and_rooms(spec, P)]
+
+def _loads_and_rooms(spec, P):
+    """[(area, text)]: teachers over their allowance or near-full, bands needing more special rooms at once than Venues has
+    (the extra groups get a room marked TBC). None of these stops a timetable; each needs a person to decide."""
+    out = []
     Lcount = {lv: P.lesson_periods(lv) for lv in P.grid}
     load, lvls = collections.Counter(), collections.defaultdict(set)
     for u in P.units:
@@ -258,14 +325,26 @@ def capacity(spec, P=None, fit=None):
         except (TypeError, ValueError): a = None
         avail = max(Lcount.get(lv, 0) for lv in lvls[t]) if lvls[t] else 0
         if a and n + other.get(t, 0) > a:
-            out.append(f"{t} teaches {n} periods" + (f" plus {other[t]} periods of other duties" if other.get(t) else "") + f", over their allowance of {a}.")
-        if avail and n > 0.85 * avail: out.append(f"{t} teaches {n} of the {avail} lesson periods their levels have: very hard to fit.")
+            out.append(("teachers", f"{t} teaches {n} periods" + (f" plus {other[t]} periods of other duties" if other.get(t) else "") + f", over their allowance of {a}."))
+        if avail and n > 0.85 * avail: out.append(("teachers", f"{t} teaches {n} of the {avail} lesson periods their levels have: very hard to fit."))
     kinds = collections.Counter(v.get("kind") or "classroom" for v in spec["venues"])
     for u in P.units:
         if u["kind"] != "block": continue
         need = collections.Counter(r["room_kind"] for r in u["rows"] if r.get("room_kind") and r["room_kind"] != "classroom")
         for k, n in need.items():
-            if n > kinds.get(k, 0): out.append(f"Band {u['name']} needs {n} '{k}' rooms at once; Venues has {kinds.get(k, 0)}.")
+            if n > kinds.get(k, 0): out.append(("venues", f"Band {u['name']} needs {n} '{k}' rooms at once; Venues has {kinds.get(k, 0)}: "
+                                                          "the extra groups get a room marked TBC, for the committee to find."))
+    # groups bigger than every room they may use: the solver still gives them one of those rooms (oversize), so a person must decide
+    big = collections.defaultdict(list)
+    for u in P.units:
+        for r in u["rows"]:
+            kind, rooms, n, oversize = P.allowed(r, u)
+            if oversize: big[(kind, max((P.seats[x] or 0) for x in rooms))].append(f"{r['code'] if r['code'] != 'Entire Class' else u['classes'][0]} ({n})")
+    for (kind, most), who in sorted(big.items()):
+        who = list(dict.fromkeys(who))
+        head = (f"{who[0]} has more students than the largest {kind} it may use seats ({most})" if len(who) == 1 else
+                f"{len(who)} groups have more students than the largest {kind} they may use seats ({most}): {', '.join(who[:8])}{f' and {len(who) - 8} more' if len(who) > 8 else ''}")
+        out.append(("venues", head + ". The timetable still gives " + ("it one of those rooms" if len(who) == 1 else "them those rooms") + "; correct the seats on step 1, or split the group."))
     return out
 
 def span_text(secs):
@@ -277,7 +356,9 @@ def advice(spec, status, secs, notes=()):
     from ttgen.solver import Problem
     derive(spec); P = Problem(spec); every = _class_fit(P)
     fit = [x for x in every if x["kind"] in ("over", "nofit", "tight")]
-    cap = capacity(spec, P, every)
+    # what can stop a timetable: the class, room and teacher sums. Warnings that never stop one (over allowance, rooms that
+    # seat too few, TBC rooms) are left out of 'why', so the committee is not sent to fix the wrong thing.
+    cap = [x["text"] for x in every] + [x["text"] for x in _room_fit(P)] + _no_place(P) + _teacher_fit(P) + [t for _, t in _loads_and_rooms(spec, P) if "very hard to fit" in t]
     reasons = cap + [n for n in notes if n not in cap and not n.startswith("No timetable found")]
     fixes = []
     if fit:
@@ -314,14 +395,17 @@ def advice(spec, status, secs, notes=()):
 def t_check_setup(run, args):
     run.emit("tool", text="Checking the setup and doing the capacity sums...")
     spec = run.spec
-    probs = derive(spec)
-    try: cap = capacity(spec)
-    except Exception as e: cap = [f"Capacity sums failed: {e}"]
-    counts = f"{len(spec['classes'])} classes, {len(spec['teachers'])} teachers, {len(spec['lessons'])} lesson rows, {len(spec['blocks'])} bands, {len(spec.get('rules', []))} rules, {len(spec.get('students', []))} students."
-    lines = [counts, "Input problems:" if probs else "Input problems: none."] + [f"- {p}" for p in probs[:40]]
-    lines += ["Capacity:" if cap else "Capacity: nothing looks too tight."] + [f"- {c}" for c in cap[:40]]
+    try: F = findings(spec)
+    except Exception as e: F = [dict(level=WARNING, area="school", text=f"The capacity sums failed: {e}")]
+    crit = [f for f in F if f["level"] == CRITICAL]; warn = [f for f in F if f["level"] != CRITICAL]
+    counts = f"{len(spec['classes'])} classes, {len(spec['teachers'])} teachers, {len(spec['lessons'])} lesson rows, {len(spec['blocks'])} bands, {len(spec.get('rules', []))} rules."
+    lines = [counts, "Students are not checked: the school adds them class by class after the timetable is made."] + findings_text(F)
     lines += ["Rules:"] + [f"- {rule_text(i, r)}" for i, r in enumerate(spec.get("rules", []))]
-    run.emit("check", text=f"{len(probs)} input problems, {len(cap)} capacity warnings.", items=(probs + cap)[:30])
+    head = (f"{len(crit)} critical problem{'s' if len(crit) != 1 else ''}: no timetable can be made until {'they are' if len(crit) != 1 else 'it is'} fixed."
+            if crit else "Nothing critical: a timetable can be made.")
+    if warn: head += f" {len(warn)} warning{'s' if len(warn) != 1 else ''} for a person to check."
+    run.emit("check", text=head, items=[dict(level=f["level"], area=f["area"], text=f["text"]) for f in crit[:40] + warn[:60]],
+             data=dict(critical=len(crit), warnings=len(warn)))
     return "\n".join(lines)
 
 def t_show_setup(run, args):
@@ -395,9 +479,10 @@ def t_solve(run, args):
     blockers = impossible(copy.deepcopy(spec))   # no timetable can exist: say why now instead of searching for hours
     if blockers:
         reasons, fixes = advice(copy.deepcopy(spec), "INFEASIBLE", secs)
-        run.emit("nosolution", text="No timetable is possible with this setup, so the solver did not run.", items=reasons[:15], data=dict(status="INFEASIBLE", fixes=fixes))
+        run.emit("nosolution", text=f"{len(blockers)} critical problem{'s' if len(blockers) != 1 else ''}: no timetable is possible with this setup, so the solver did not run.",
+                 items=(blockers + [r for r in reasons if r not in blockers])[:15], data=dict(status="INFEASIBLE", fixes=fixes, critical=blockers[:15]))
         run.save()
-        return "No timetable is possible with this setup, so the solver did not run:\n" + "\n".join(f"- {x}" for x in blockers) + \
+        return "Critical problems: no timetable is possible with this setup, so the solver did not run:\n" + "\n".join(f"- {x}" for x in blockers) + \
                "\nSuggested fixes (shown to the committee):\n" + "\n".join(f"- {f['text']}" for f in fixes)
     over = [c for c in capacity(copy.deepcopy(spec)) if "over their allowance" in c]
     if over:

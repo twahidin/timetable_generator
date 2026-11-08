@@ -191,3 +191,8 @@ th{background:#f3f6fb}
 .adjgrid td.many .adjl{margin-bottom:2px}
 .adjbar{margin-top:10px;padding:8px 10px;border-radius:8px;background:var(--chip);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .aisays{margin-top:8px;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:8px;color:var(--ink);line-height:1.5}
+/* critical problems (no timetable until fixed) in red; warnings (a timetable can still be made, a person should look) in amber */
+.issue.soft{background:#fff7e6;color:#7a4b00}
+tr.caution td{background:#fff7e6}
+h3.sev{font-size:13px;margin:12px 0 2px;color:#7a4b00}
+h3.sev.crit{color:var(--warn)}
