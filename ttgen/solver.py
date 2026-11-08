@@ -14,7 +14,7 @@ lessons as it can (cheaper than bending a Prefer rule or pushing a lesson after 
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
-from .spec import PE_KIND, WEEKDAYS, family as _family, floating_recess, periods_by_day, resolve_row, trim_day, windows as _windows
+from .spec import PE_KIND, WEEKDAYS, family as _family, floating_recess, periods_by_day, resolve_row, structure_vs_rules, trim_day, windows as _windows
 
 W_PREF, W_SLACK, W_MOVE = 60, 40, 10
 RECESS_KEY = "~recess"   # in a placements file: {class: [[start, length]]}, each class's floating recess
@@ -363,7 +363,7 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
     params: extra CP-SAT parameters"""
     P = Problem(spec); NP, ND = P.NP, P.ND
     m = cp_model.CpModel(); rules = spec.get("rules", [])
-    notes = list(P.warn)
+    notes = list(P.warn) + structure_vs_rules(spec)   # where the Day structure and the rules disagree
     def has(rule, scope=None):
         return [r for r in rules if r.get("rule") == rule and (scope is None or r.get("scope") == scope)]
     blocks = []

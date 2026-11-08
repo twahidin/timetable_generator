@@ -44,9 +44,8 @@ SETTING_RULES: list[dict] = [
 PE_KIND = "pe venue"   # the room kind of PE lessons (field, hall, courts): with pe_rain_home their class's home room stays free
 
 
-def end_by(school):
-    """'Lessons end by (Monday to Thursday)' rows on Settings -> [(weekdays, minutes after midnight)]: no lesson runs
-    past that time on those days (the Day structure holds the longest possible day; these trim it)"""
+def end_rows(school):
+    """'Lessons end by (Monday to Thursday)' rows on Settings -> [(label, weekdays, minutes after midnight)]"""
     import re
     full = ["monday", "tuesday", "wednesday", "thursday", "friday"]
     idx = lambda w: next((i for i, d in enumerate(full) if d[:3] == w[:3].lower()), None)
@@ -59,8 +58,13 @@ def end_by(school):
         a, b = (idx(span.group(1)), idx(span.group(2))) if span else (None, None)
         days = WEEKDAYS[a:b + 1] if a is not None and b is not None else [WEEKDAYS[i] for i in (idx(w) for w in re.findall(r"[a-z]+", txt)) if i is not None]
         h, m = (str(v).replace(".", ":").split(":") + ["0"])[:2]
-        if h.strip().isdigit() and (m[:2] or "0").isdigit(): out.append((set(days), int(h) * 60 + int(m[:2] or 0)))   # not a time: ignored (the editor flags it)
+        if h.strip().isdigit() and (m[:2] or "0").isdigit(): out.append((label, set(days), int(h) * 60 + int(m[:2] or 0)))   # not a time: ignored (the editor flags it)
     return out
+
+def end_by(school):
+    """'Lessons end by (...)' rows -> [(weekdays, minutes after midnight)]: no lesson runs past that time on those days
+    (the Day structure holds the longest possible day; these trim it)"""
+    return [(days, cut) for _, days, cut in end_rows(school)]
 
 def periods_by_day(school, days):
     """{day name: periods of the day lessons may use} for the days a 'Lessons end by' row trims: a lesson must end by the time"""
@@ -74,6 +78,74 @@ def periods_by_day(school, days):
 def trim_day(row, keep):
     """a Day structure row with the periods from `keep` on turned into no school"""
     return row if keep is None else row[:keep] + "." * (len(row) - keep)
+
+def ampm(minutes):
+    """minutes after midnight -> '12.40pm'"""
+    h, m = divmod(int(minutes), 60)
+    return f"{(h - 1) % 12 + 1}.{m:02d}{'am' if h % 24 < 12 else 'pm'}"
+
+def _listing(items, n=4):
+    items = list(items)
+    return ", ".join(items[:n]) + (f" and {len(items) - n} more" if len(items) > n else "")
+
+def structure_vs_rules(spec):
+    """places where the Day structure and the rules (rule rows on Settings, Fixed lessons) say different things, as
+    warnings. The rules win where they are stricter, so a solver that reads only the Day structure would differ."""
+    sc = spec["school"]; ds = spec.get("day_structure") or {}; NP = int(sc["periods_per_day"]); pl = int(sc["period_minutes"])
+    h, m = map(int, str(sc["start_time"]).split(":")[:2]); st = h * 60 + m
+    levels = [lv for lv in sc.get("levels", []) if ds.get(lv)] or list(ds)
+    days = list(next((d for d in ds.values() if d), {}))
+    after = sc.get("after_school", True) is not False
+    lesson = "LWA" if after else "LW"   # periods a lesson may use (W: a recess window, lesson time but for the recess)
+    row = lambda lv, d: (ds.get(lv, {}).get(d) or "").ljust(NP, ".")[:NP]
+    last = lambda r: max((p for p, ch in enumerate(r) if ch in lesson), default=-1)
+    at = lambda p: ampm(st + p * pl)
+    every = lambda lvs: "every level" if len(lvs) == len(levels) > 1 else ", ".join(lvs)
+    out, end_at = [], {}   # end_at: day -> 'Lessons end by (Friday) (12.40pm)', for the fixed lessons below
+    for label, weekdays, cut in end_rows(sc):
+        keep = max(0, min(NP, (cut - st) // pl))
+        covered = [d for d in days if str(d).split()[-1][:3] in weekdays]
+        if not covered:
+            out.append(f"{label} matches no day of the Day structure, so it changes nothing."); continue
+        end_at.update({d: f"{label} ({ampm(cut)})" for d in covered})
+        over, ends = {}, []
+        for d in covered:
+            for lv in levels:
+                p = last(row(lv, d))
+                if p < 0: continue
+                ends.append(p)
+                if p >= keep: over.setdefault(d, []).append((lv, p))
+        if over:
+            parts = [f"{d} ({every([lv for lv, _ in v])}, until {at(max(p for _, p in v) + 1)})" for d, v in over.items()]
+            latest = at(max(p for v in over.values() for _, p in v) + 1)
+            out.append(f"{label} is {ampm(cut)}, but the Day structure has lessons after it on {_listing(parts)}. The time wins, so those periods stay empty: "
+                       f"end the Day structure at {ampm(cut)} on those days, or set the time to {latest}.")
+        elif ends and max(ends) + 1 < keep:
+            out.append(f"{label} is {ampm(cut)}, but the Day structure has no lesson after {at(max(ends) + 1)} on those days, so the time changes nothing: the Day structure decides.")
+    if not after:
+        withA = [d for d in days if any("A" in row(lv, d) for lv in levels)]
+        if withA: out.append(f"After-school slot allowed when a class cannot fit is No, but the Day structure has after-school slots (A) on {_listing(withA)}: they are never used.")
+    if any(r.get("rule") == "At least one recess a day" and r.get("scope") == "School" for r in spec.get("rules", [])):
+        bare = [d for d in days if any(last(row(lv, d)) >= 0 for lv in levels) and not any(set("RW") & set(row(lv, d)) for lv in levels)]
+        if bare: out.append(f"Every teacher gets at least one recess a day, but on {_listing(bare)} no level has a recess (R or W) in the Day structure, "
+                            "so a teacher who teaches that day cannot have one.")
+    keep_by = periods_by_day(sc, days)
+    level_of = {c["class"]: c.get("level") for c in spec.get("classes", [])}
+    level_of.update({str(x["code"]): x.get("level") for x in spec.get("lessons", []) if x.get("code") and x["code"] != "Entire Class"})
+    for r in spec.get("rules", []):
+        if r.get("rule") != "Fixed at" or r.get("from") in (None, ""): continue
+        p, lv = int(r["from"]), r.get("level") or level_of.get(str(r.get("target")))
+        if lv not in ds: continue
+        wk, dy = str(r.get("week") or "Both"), str(r.get("day") or "All")
+        for d in days:
+            if (wk in ("Odd", "Even") and not str(d).startswith(wk)) or (dy != "All" and str(d).split()[-1][:3] != dy[:3]): continue
+            ch = row(lv, d)[p] if 0 <= p < NP else "."
+            if ch not in lesson: why = f"is {CODES.get(ch, 'not a lesson period').lower()} ({ch}) in the {lv} Day structure"
+            elif p >= keep_by.get(d, NP): why = f"is after {end_at.get(d, 'the end time on Settings')}"
+            else: continue
+            what = " ".join(str(x) for x in (r.get("target"), r.get("subject")) if x)
+            out.append(f"Fixed lesson {what} on {d} at period {p} ({at(p)}): that period {why}, so it can never be met."); break
+    return out
 
 # Settings rows for floating recess (the W periods on Day structure): label, default, note
 RECESS_ROWS = [("Floating recess goes by", "Level", "Level: each level has its recess together. Class: each class has its own recess time. For the W (recess window) periods on Day structure."),

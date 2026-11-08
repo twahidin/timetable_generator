@@ -3,7 +3,7 @@ the ttgen solver, so the AI never places lessons itself and never runs code. Eac
 import collections, copy, json, os, re, threading, time
 import adjust
 from ttgen.reader import derive
-from ttgen.spec import RULE_TYPES, SCOPES
+from ttgen.spec import RULE_TYPES, SCOPES, structure_vs_rules
 from ttgen.template import write_template
 from store import now, write_json
 
@@ -246,6 +246,8 @@ def findings(spec, P=None):
     for t in _teacher_fit(P): add(CRITICAL, "teachers", t)
     for t in _recess_blockers(P): add(CRITICAL, "school", t)
     for area, t in _loads_and_rooms(spec, P): add(WARNING, area, t)
+    for t in structure_vs_rules(spec):   # the Day structure and the rules saying different things: a fixed lesson outside lesson time can never be met
+        add(*((CRITICAL, "rules") if t.startswith("Fixed lesson") else (WARNING, "school")), t)
     out.sort(key=lambda f: f["level"] != CRITICAL)   # stable: critical first, each kind in the order found
     return out
 
