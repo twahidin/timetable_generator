@@ -512,11 +512,13 @@ function renderIssues() {
 
 
 function exportCard() {
-  return `<div class="card" id="printouts"><h2>Printouts from a finished timetable</h2><p class="muted">Already have the timetable the agent made? Upload it with its setup workbook to get every timetable as PDFs (one page per class, teacher, room and student), one Excel file with them all, a searchable HTML page and a timetable database (.sqlite) for other systems. The timetable can be a workbook with a Lessons sheet or a timetable database; a database made by this app or the skill holds its setup, so it can come on its own.</p>
+  return `<div class="card" id="printouts"><h2>A timetable made outside the app</h2><p class="muted">Made the timetable with the skill and an AI agent, or with another program? Upload it with its setup workbook. The timetable can be a workbook with a Lessons sheet or a timetable database (.sqlite); a database made by this app or the skill holds its setup, so it can come on its own.</p>
+    <p class="muted"><b>Make printouts</b> gives you every timetable as PDFs (one page per class, teacher, room and student), one Excel file with them all, a searchable HTML page and the database, to keep or share. <b>Check, then publish</b> checks it against its setup and shows what it found; if you are happy, publish it and teachers and students see it, as after Publish on Generate &amp; publish.</p>
     <div class="row" style="margin-top:10px"><label class="filebtn">Setup workbook (.xlsx)<input type="file" id="exSetup" accept=".xlsx" hidden></label><span class="muted" id="exSetupName">none chosen</span></div>
     <div class="row" style="margin-top:8px"><label class="filebtn">Timetable (.xlsx or .sqlite)<input type="file" id="exTT" accept=".xlsx,.sqlite,.sqlite3,.db" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
     <div class="row" style="margin-top:10px"><label><input type="checkbox" id="exSingle" checked> Also a separate PDF for every class, teacher, room and student</label></div>
-    <div class="row" style="margin-top:12px"><button class="primary" id="exGo">Make printouts (.zip)</button><span class="muted" id="exMsg"></span></div></div>`;
+    <div class="row" style="margin-top:12px"><button class="primary" id="exGo">Make printouts (.zip)</button><button id="imCheck">Check, then publish</button><span class="muted" id="exMsg"></span></div>
+    <div id="imResult"></div></div>`;
 }
 const VIEWS = {
   start() {
@@ -801,6 +803,8 @@ document.addEventListener("click", async e => {
   if (b.id === "keepChanges") { const j = await post("/api/keep-changes"); if (j && j.spec) { S.spec = j.spec; save(); await synced(); toast("The changes are now in your setup."); poll(); } return; }
   if (b.dataset.answer !== undefined) { sendChat(b.dataset.answer); return; }
   if (b.id === "exGo") { makePrintouts(); return; }
+  if (b.id === "imCheck") { importTimetable(false); return; }
+  if (b.id === "imPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; importTimetable(true); return; }
   if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
 });
 document.addEventListener("toggle", e => { if (e.target.classList && e.target.classList.contains("bands")) S.bandsOpen = e.target.open; }, true);
@@ -1357,25 +1361,31 @@ function paintGen() {
       ${run.changes ? `<button id="keepChanges" ${busy ? "disabled" : ""}>Keep these changes in my setup</button>` : ""}</div>`
     : `<p class="muted">No timetable yet.</p>`);
   const p = st.published, f = p ? p.files || {} : {};
-  $("#pubCard").innerHTML = `<h2>Published</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
+  $("#pubCard").innerHTML = `<h2>Published</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)}${p.source ? ` from ${esc(p.source)} (made outside the app)` : ""} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
       <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
       <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>${f.db ? `<a href="/files/db" title="Every lesson, class, teacher and room as a SQLite database, for other systems to import. It also holds the setup, so Printouts (on Files) can rebuild everything from it.">Timetable database (.sqlite), for other systems</a>` : ""}
       ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
       <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
     : `<p class="muted">Nothing published yet. Teachers and students see a "not published yet" page.</p>`) +
+    `<p class="muted small">Made the timetable outside the app? Publish it from <b>Files</b>, under "A timetable made outside the app".</p>` +
     `<h3>Access codes</h3><ul class="codes">${[["committee", "Committee"], ["teacher", "Teachers"], ["student", "Students"]].map(([k, t]) => `<li>${t}: ${st.codes && st.codes[k] ? "set" : "<b>not set</b>"}</li>`).join("")}</ul>
     ${(st.code_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")}${st.volume ? "" : `<p class="issue">No Railway volume: the published timetable will be lost on the next deploy. Add a volume (see README).</p>`}`;
 }
 
 /* ---------------- downloads */
 document.addEventListener("change", e => {
-  if (e.target.id === "exSetup" || e.target.id === "exTT") { const f = e.target.files[0]; $("#" + e.target.id + "Name").textContent = f ? f.name : "none chosen"; }
+  if (e.target.id === "exSetup" || e.target.id === "exTT") { const f = e.target.files[0]; $("#" + e.target.id + "Name").textContent = f ? f.name : "none chosen"; $("#imResult").innerHTML = ""; }
 });
-async function makePrintouts() {
-  const a = $("#exSetup").files[0], b = $("#exTT").files[0], msg = $("#exMsg");
+/* the chosen setup workbook and timetable as form data, or null (with a message) when something is missing */
+function timetableForm() {
+  const a = $("#exSetup").files[0], b = $("#exTT").files[0];
   const isDb = b && /\.(sqlite3?|db)$/i.test(b.name);
-  if (!b || (!a && !isDb)) { toast(b ? "Choose the setup workbook too (a timetable database from this app can come alone)." : "Choose the timetable: a workbook or a timetable database."); return; }
-  const fd = new FormData(); if (a) fd.append("setup", a); fd.append("timetable", b); fd.append("single", $("#exSingle").checked ? "1" : "0");
+  if (!b || (!a && !isDb)) { toast(b ? "Choose the setup workbook too (a timetable database from this app can come alone)." : "Choose the timetable: a workbook or a timetable database."); return null; }
+  const fd = new FormData(); if (a) fd.append("setup", a); fd.append("timetable", b); return fd;
+}
+async function makePrintouts() {
+  const msg = $("#exMsg"), fd = timetableForm(); if (!fd) return;
+  fd.append("single", $("#exSingle").checked ? "1" : "0");
   const go = $("#exGo"); go.disabled = true; msg.textContent = "Making printouts… a school with 600 students takes about a minute.";
   try {
     const r = await fetch("/api/export", { method: "POST", body: fd });
@@ -1384,6 +1394,36 @@ async function makePrintouts() {
     dl(await r.blob(), name ? name[1] : "Timetables.zip"); msg.textContent = r.headers.get("X-Checks") || "Done.";
   } catch (err) { msg.textContent = ""; toast("Could not make the printouts: " + err.message); }
   finally { go.disabled = false; }
+}
+/* a timetable made outside the app: check it against its setup, then (publish) make it the published timetable */
+async function importTimetable(publish) {
+  const fd = timetableForm(); if (!fd) return;
+  fd.append("publish", publish ? "1" : "0");
+  const box = $("#imResult"), btns = ["#imCheck", "#imPublish", "#exGo"].map(q => $(q)).filter(Boolean);
+  btns.forEach(x => x.disabled = true);
+  box.innerHTML = `<p class="muted" style="margin-top:10px">${publish ? "Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute for a school with 600 students)…" : "Checking the timetable against its setup…"}</p>`;
+  try {
+    const r = await fetch("/api/import-timetable", { method: "POST", body: fd }), j = await r.json().catch(() => ({}));
+    if (!r.ok) { box.innerHTML = ""; toast(j.error || (publish ? "Could not publish the timetable." : "Could not check the timetable.")); return; }
+    box.innerHTML = importHTML(j);
+    if (j.published) { toast("Published. Teachers and students now see this timetable."); poll(); }
+  } catch (err) { box.innerHTML = ""; toast("Could not reach the server: " + err.message); }
+  finally { btns.forEach(x => x.disabled = false); }
+}
+function importHTML(j) {
+  const list = (xs, more) => `<ul>${xs.map(x => `<li>${esc(x)}</li>`).join("")}${more ? `<li>…and ${more} more</li>` : ""}</ul>`;
+  const head = `<h3 style="margin-top:14px">${esc(j.school)} · ${esc(j.timetable)}</h3><p class="muted small">${j.lessons} lessons · ${j.classes} classes · ${j.teachers} teachers · ${j.students} students</p>`;
+  if (j.published) return head + `<div class="okmsg">Published. Teachers and students now see this timetable.</div>
+    <div class="row" style="margin-top:8px"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
+    <p class="muted small">Its downloads and the personal student codes are on Generate &amp; publish.${G.st && G.st.run && G.st.run.solved ? " The latest timetable there and on Adjust is still the one made in the app: pressing Publish there puts that one back." : ""}</p>`;
+  const pub = G.st && G.st.published;
+  return head + (j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.school)}</b>, but the setup saved in the app is for <b>${esc(j.other_school)}</b>. Check it is the right file.</p>` : "")
+    + (j.ok ? `<div class="okmsg">All checks passed: no teacher, class, room or student is double-booked, every lesson is in lesson time, and every subject has the periods the setup plans.</div>`
+            : `<details open><summary class="sev crit">${j.problems.length + j.more} problem${j.problems.length + j.more === 1 ? "" : "s"} found</summary>${list(j.problems, j.more)}</details>`)
+    + (j.after.length ? `<details><summary>${j.after.length} lesson${j.after.length === 1 ? " is" : "s are"} after school</summary>${list(j.after)}</details>` : "")
+    + (j.notes.length ? `<details><summary>Notes</summary>${list(j.notes)}</details>` : "")
+    + `<p class="muted small" style="margin-top:8px">${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}${j.ok ? "" : " You can still publish it; the problems stay listed in its Read me sheet."}</p>
+    <div class="row"><button class="primary" id="imPublish">Publish this timetable</button></div>`;
 }
 function dl(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
 async function buildXlsx() {

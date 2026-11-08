@@ -49,8 +49,17 @@ student list is checked on its own step, after the timetable is made.
 
 **Timetable database.** Publishing (and every export, in the app or with `python -m ttgen export`) also writes the
 timetable as a SQLite database: every lesson with its day, times, classes, teachers and room, plus the classes,
-teachers, rooms and the setup itself, for importing into other systems. **Printouts** on the Files step reads one back:
+teachers, rooms and the setup itself, for importing into other systems. **Make printouts** on the Files step reads one back:
 upload it alone (it holds its setup) or with a setup workbook, and get every output again.
+
+**A timetable made outside the app.** A timetable made with the skill and an AI agent (or another program) can be
+published from the Files step (also on Start), under **A timetable made outside the app**: upload its timetable
+database, or its timetable workbook (a Lessons sheet) with the setup workbook, and press **Check, then publish**. The
+app checks it against its setup (teacher, class, room and student clashes, lessons outside lesson time, periods placed
+against periods planned) and lists what it found, with a warning when it is for another school than the saved setup;
+**Publish this timetable** then makes it what teachers and students see, with every download and the personal student
+codes, as Publish on Generate does. It is not loaded into Generate or Adjust: those keep the app's own latest timetable,
+and publishing that one again puts it back.
 
 **What-ifs.** Ask "what if Mr Tan had Wednesday afternoons free?" and the AI tries the change on a copy: it solves from
 the latest timetable and shows a comparison (checks, lessons after school, lessons moved, teachers' free periods between

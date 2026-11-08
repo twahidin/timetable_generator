@@ -242,24 +242,32 @@ def past_setups():
                             classes={b["block"]: b["classes"] for b in x["spec"].get("blocks") or [] if b.get("block") and b.get("classes")})
                        for x in store.past_setups()[:12]]}
 
+def _uploaded_timetable(work):
+    """the setup workbook and timetable sent with the request, saved in work and read: (setup path or None, timetable
+    path, export model). A database this app or the skill made holds its setup, so it can come alone."""
+    from ttgen.export import model_from_files
+    from ttgen.database import is_db
+    a, b = request.files.get("setup"), request.files.get("timetable")
+    if not b: raise ValueError("Send the timetable: a workbook with a Lessons sheet, or a timetable database (.sqlite).")
+    tp = os.path.join(work, "timetable" + (".sqlite" if str(b.filename or "").lower().endswith((".sqlite", ".sqlite3", ".db")) else ".xlsx")); b.save(tp)
+    sp = None
+    if a: sp = os.path.join(work, "setup.xlsx"); a.save(sp)
+    elif not is_db(tp): raise ValueError("Send the setup workbook too (only a timetable database from this app can come alone).")
+    try: m = model_from_files(sp, tp)
+    except Exception as e: raise ValueError(f"Could not read the files: {e}")
+    if not m["lessons"]: raise ValueError("The timetable has no lessons.")
+    return sp, tp, m
+
 @app.post("/api/export")
 @need("committee")
 def export_printouts():
     """setup workbook + timetable (a workbook with a Lessons sheet, or a timetable database) -> zip with the combined
     Excel, the HTML finder, the PDFs and the database. A database this app made holds its setup, so it can come alone."""
-    from ttgen.export import model_from_files, export_all, safe_name
-    from ttgen.database import is_db
-    a, b = request.files.get("setup"), request.files.get("timetable")
-    if not b: return {"error": "Send the timetable: a workbook with a Lessons sheet, or a timetable database (.sqlite)."}, 400
+    from ttgen.export import export_all, safe_name
     work = tempfile.mkdtemp(prefix="tt-")
     try:
-        tp = os.path.join(work, "timetable" + (".sqlite" if str(b.filename or "").lower().endswith((".sqlite", ".sqlite3", ".db")) else ".xlsx")); b.save(tp)
-        sp = None
-        if a: sp = os.path.join(work, "setup.xlsx"); a.save(sp)
-        elif not is_db(tp): return {"error": "Send the setup workbook too (only a timetable database from this app can come alone)."}, 400
-        try: m = model_from_files(sp, tp)
-        except Exception as e: return {"error": f"Could not read the files: {e}"}, 400
-        if not m["lessons"]: return {"error": "The timetable has no lessons."}, 400
+        try: _, _, m = _uploaded_timetable(work)
+        except ValueError as e: return {"error": str(e)}, 400
         base = safe_name(f"{m['school']['name']} {m['school']['timetable']}")
         out = os.path.join(work, "out", base)
         export_all(m, out, individual=request.form.get("single", "1") == "1", zip_individual=False, log=lambda *x: None)
@@ -271,6 +279,30 @@ def export_printouts():
         resp = send_file(buf, as_attachment=True, download_name=f"{base} - timetables.zip", mimetype="application/zip")
         resp.headers["X-Checks"] = "All checks passed." if ch["ok"] else f"{len(ch['problems'])} problems found: see the Read me sheet or the Checks tab."
         return resp
+    finally: shutil.rmtree(work, ignore_errors=True)
+
+@app.post("/api/import-timetable")
+@need("committee")
+def import_timetable():
+    """a timetable made outside the app (the skill with an AI agent, or another program), sent like Printouts: checked
+    against its setup and summed up. With publish=1 it then becomes the published timetable, as Publish on Generate
+    does; the latest timetable on Generate & publish and Adjust stays the app's own."""
+    go = request.form.get("publish") == "1"; r = runs.current()
+    if go and r and r.busy: return {"error": "Wait for the work on Generate & publish to finish (or stop it) before publishing."}, 409
+    work = tempfile.mkdtemp(prefix="tt-")
+    try:
+        try: sp, tp, m = _uploaded_timetable(work)
+        except ValueError as e: return {"error": str(e)}, 400
+        ch, (saved, _) = m["checks"], store.load_setup()
+        ours = str(((saved or {}).get("school") or {}).get("name") or "").strip()
+        out = dict(school=m["school"]["name"], timetable=m["school"]["timetable"], ok=ch["ok"], problems=ch["problems"][:30],
+                   more=max(0, len(ch["problems"]) - 30), after=ch["after_school"][:30], lessons=ch["lessons"], classes=len(m["classes"]),
+                   teachers=len(m["teachers"]), students=len(m["students"]), notes=m["notes"][:12], published=False,
+                   other_school=ours if ours and ours.lower() != str(m["school"]["name"]).strip().lower() else "")
+        if not go: return jsonify(out)
+        name = os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file"
+        store.publish(sp, tp, source=name, log=lambda *x: None)
+        return jsonify(dict(out, published=True))
     finally: shutil.rmtree(work, ignore_errors=True)
 
 @app.get("/download/template/<kind>")
@@ -311,7 +343,7 @@ def pub_info():
     if not pub: return None
     m = pub["meta"]
     return dict(at=m["published_at"], ok=m["ok"], after=len(m.get("after_school", [])), students=m.get("students", 0), classes=m.get("classes", 0),
-                files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on())
+                files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on(), source=m.get("source"))
 
 @app.get("/api/status")
 @need("committee")

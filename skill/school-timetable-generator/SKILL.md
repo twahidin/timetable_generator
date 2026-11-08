@@ -68,6 +68,8 @@ subject-based banding) schools, and for any school that fills the same template.
    after-school slots and why, what was compromised (teachers over their allowance, Prefer rules bent, Max periods in a
    row: the solve result lists them), and any notes. Give the person the Excel workbook, the
    HTML page, the four PDF books, the zip of single PDFs and the timetable database (.sqlite) for other systems; do not paste timetables into the chat.
+   If the school runs the timetable app, tell them they can publish it there: on Files, **A timetable made outside the
+   app**, upload the .sqlite (or the timetable workbook with the setup workbook) and press **Check, then publish**.
 
 ## Outputs
 
