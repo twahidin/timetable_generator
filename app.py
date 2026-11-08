@@ -245,16 +245,21 @@ def past_setups():
 @app.post("/api/export")
 @need("committee")
 def export_printouts():
-    """setup + timetable workbooks -> zip with the combined Excel, the HTML finder and the PDFs"""
+    """setup workbook + timetable (a workbook with a Lessons sheet, or a timetable database) -> zip with the combined
+    Excel, the HTML finder, the PDFs and the database. A database this app made holds its setup, so it can come alone."""
     from ttgen.export import model_from_files, export_all, safe_name
+    from ttgen.database import is_db
     a, b = request.files.get("setup"), request.files.get("timetable")
-    if not a or not b: return {"error": "Send the setup workbook and the timetable workbook."}, 400
+    if not b: return {"error": "Send the timetable: a workbook with a Lessons sheet, or a timetable database (.sqlite)."}, 400
     work = tempfile.mkdtemp(prefix="tt-")
     try:
-        sp, tp = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx"); a.save(sp); b.save(tp)
+        tp = os.path.join(work, "timetable" + (".sqlite" if str(b.filename or "").lower().endswith((".sqlite", ".sqlite3", ".db")) else ".xlsx")); b.save(tp)
+        sp = None
+        if a: sp = os.path.join(work, "setup.xlsx"); a.save(sp)
+        elif not is_db(tp): return {"error": "Send the setup workbook too (only a timetable database from this app can come alone)."}, 400
         try: m = model_from_files(sp, tp)
-        except Exception as e: return {"error": f"Could not read the workbooks: {e}"}, 400
-        if not m["lessons"]: return {"error": "The timetable workbook's Lessons sheet has no lessons."}, 400
+        except Exception as e: return {"error": f"Could not read the files: {e}"}, 400
+        if not m["lessons"]: return {"error": "The timetable has no lessons."}, 400
         base = safe_name(f"{m['school']['name']} {m['school']['timetable']}")
         out = os.path.join(work, "out", base)
         export_all(m, out, individual=request.form.get("single", "1") == "1", zip_individual=False, log=lambda *x: None)
@@ -585,7 +590,7 @@ def files(what, kind=None):
         if kind not in allowed or kind not in f.get("books", {}): abort(404)
         return send_file(os.path.join(store.PUB, f["books"][kind]), as_attachment=True, download_name=os.path.basename(f["books"][kind]))
     if r != "committee": abort(403)
-    if what in ("excel", "zip", "html") and f.get(what):
+    if what in ("excel", "zip", "html", "db") and f.get(what):
         return send_file(os.path.join(store.PUB, f[what]), as_attachment=True, download_name=f[what])
     abort(404)
 

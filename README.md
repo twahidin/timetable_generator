@@ -47,6 +47,11 @@ that seats too few, a band needing more special rooms than Venues has, a teacher
 left out, a very full class); these are amber, the solver goes ahead, and the AI lists them when it finishes. The
 student list is checked on its own step, after the timetable is made.
 
+**Timetable database.** Publishing (and every export, in the app or with `python -m ttgen export`) also writes the
+timetable as a SQLite database: every lesson with its day, times, classes, teachers and room, plus the classes,
+teachers, rooms and the setup itself, for importing into other systems. **Printouts** on the Files step reads one back:
+upload it alone (it holds its setup) or with a setup workbook, and get every output again.
+
 **What-ifs.** Ask "what if Mr Tan had Wednesday afternoons free?" and the AI tries the change on a copy: it solves from
 the latest timetable and shows a comparison (checks, lessons after school, lessons moved, teachers' free periods between
 lessons, gaps in classes' days) with **Keep it** and **Drop it**. Preview shows the what-if timetable until you choose.

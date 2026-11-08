@@ -91,13 +91,13 @@ def publish(setup_xlsx, timetable_xlsx, run_id=None, log=print):
     tmp, old = PUB + ".new", PUB + ".old"
     shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp)
     m = model_from_files(setup_xlsx, timetable_xlsx)
-    log("Making the Excel workbook, the timetable finder and the PDFs...")
+    log("Making the Excel workbook, the timetable finder, the PDFs and the timetable database...")
     out = export_all(m, tmp, log=lambda *a: None)
     shutil.copy(setup_xlsx, os.path.join(tmp, "setup.xlsx")); shutil.copy(timetable_xlsx, os.path.join(tmp, "timetable.xlsx"))
     shutil.rmtree(os.path.join(tmp, "PDF", "Classes"), ignore_errors=True)   # single PDFs are in the zip and made on demand
     for k in ("Teachers", "Rooms", "Students"): shutil.rmtree(os.path.join(tmp, "PDF", k), ignore_errors=True)
     with open(os.path.join(tmp, "model.pkl"), "wb") as f: pickle.dump(m, f)
-    files = dict(excel=os.path.basename(out["excel"]), html=os.path.basename(out["html"]), zip=os.path.basename(out["pdf_zip"]),
+    files = dict(excel=os.path.basename(out["excel"]), html=os.path.basename(out["html"]), zip=os.path.basename(out["pdf_zip"]), db=os.path.basename(out["db"]),
                  books={os.path.basename(p).split(" - ")[0].lower(): os.path.relpath(p, tmp) for p in out["pdf_books"]})
     ch = m["checks"]
     write_json(os.path.join(tmp, "meta.json"), dict(published_at=now(), run=run_id, school=m["school"]["name"], timetable=m["school"]["timetable"],

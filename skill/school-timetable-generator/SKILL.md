@@ -67,7 +67,7 @@ subject-based banding) schools, and for any school that fills the same template.
 6. **Deliver** (see **Outputs**) with a short summary: whether every check passed, which lessons (if any) fell into
    after-school slots and why, what was compromised (teachers over their allowance, Prefer rules bent, Max periods in a
    row: the solve result lists them), and any notes. Give the person the Excel workbook, the
-   HTML page, the four PDF books, and the zip of single PDFs; do not paste timetables into the chat.
+   HTML page, the four PDF books, the zip of single PDFs and the timetable database (.sqlite) for other systems; do not paste timetables into the chat.
 
 ## Outputs
 
@@ -79,13 +79,18 @@ subject-based banding) schools, and for any school that fills the same template.
 | `<School> <Timetable> - timetable finder.html` | one offline page: search box, browse by class/teacher/room/student, **Lessons** tab with filters and CSV download, **Who's free** (teachers, rooms and classes free at a chosen time, handy for relief), **Build a timetable** (a student picks their class and groups), **Checks**, print, light/dark | everyone: share by email or the school drive |
 | `PDF/Classes - all.pdf`, `Teachers - all.pdf`, `Rooms - all.pdf`, `Students - all.pdf` | one landscape A4 page each, bookmarked by level, department, room kind or class | printing |
 | `<School> <Timetable> - individual PDFs.zip` | the same pages as single files: `Classes/1A.pdf`, `Teachers/<name>.pdf`, `Rooms/<room>.pdf`, `Students/<class>/<id> <name>.pdf` | sending each person their own |
+| `<School> <Timetable> - timetable data.sqlite` | the timetable as a SQLite database: tables `lessons` (one row per group per lesson: day, week, start/end period and clock time, level, band, subject, group code, room, classes, teachers), `lesson_classes`, `lesson_teachers`, `classes`, `teachers`, `rooms`, `subjects`, `days`, `periods`, `day_structure`, `students` and `student_groups` (when the setup has a student list), `recess`, `meta` (school, solver status, notes and the whole setup as JSON); views `class_timetable`, `teacher_timetable`, `room_timetable` | importing into another system (a school MIS, a booking or relief tool, Power BI, Excel's Power Query); rebuilding every output later from one file |
 
 Student timetables need the `Students` sheet (each student's class and group codes). Without it the Students
 outputs are skipped and the HTML page's **Build a timetable** lets a student pick their groups instead; say so.
-Options: `--no-individual` (books only, faster), `--no-pdf`, `--no-html`, `--no-excel`.
+Options: `--no-individual` (books only, faster), `--no-pdf`, `--no-html`, `--no-excel`, `--no-db`.
 
 **A timetable made some other way** (by hand, or by your own solver) exports the same way: write a workbook with a
 `Lessons` sheet in the hand-over format below and run `python -m ttgen export SETUP.xlsx THAT.xlsx --out FOLDER`.
+A timetable database works in place of the workbook: `python -m ttgen export SETUP.xlsx THAT.sqlite --out FOLDER`, or
+`python -m ttgen export - THAT.sqlite --out FOLDER` for one written by this exporter (it keeps the setup). A database from
+another tool needs a `lessons` table with `day` (as on Day structure), `start_period`, `periods` (or `end_period`),
+`subject` and `classes` (comma-separated), and ideally `group_code`, `block`, `level`, `teachers` and `room`.
 The export re-checks everything independently (teacher, room, class and student clashes, periods placed against
 periods planned, nothing in a break), so it doubles as a checker.
 

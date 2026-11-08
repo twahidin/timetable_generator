@@ -452,9 +452,9 @@ function renderIssues() {
 
 
 function exportCard() {
-  return `<div class="card" id="printouts"><h2>Printouts from a finished timetable</h2><p class="muted">Already have the timetable workbook the agent made? Upload it with its setup workbook to get every timetable as PDFs (one page per class, teacher, room and student), one Excel file with them all, and a searchable HTML page.</p>
+  return `<div class="card" id="printouts"><h2>Printouts from a finished timetable</h2><p class="muted">Already have the timetable the agent made? Upload it with its setup workbook to get every timetable as PDFs (one page per class, teacher, room and student), one Excel file with them all, a searchable HTML page and a timetable database (.sqlite) for other systems. The timetable can be a workbook with a Lessons sheet or a timetable database; a database made by this app or the skill holds its setup, so it can come on its own.</p>
     <div class="row" style="margin-top:10px"><label class="filebtn">Setup workbook (.xlsx)<input type="file" id="exSetup" accept=".xlsx" hidden></label><span class="muted" id="exSetupName">none chosen</span></div>
-    <div class="row" style="margin-top:8px"><label class="filebtn">Timetable workbook (.xlsx)<input type="file" id="exTT" accept=".xlsx" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
+    <div class="row" style="margin-top:8px"><label class="filebtn">Timetable (.xlsx or .sqlite)<input type="file" id="exTT" accept=".xlsx,.sqlite,.sqlite3,.db" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
     <div class="row" style="margin-top:10px"><label><input type="checkbox" id="exSingle" checked> Also a separate PDF for every class, teacher, room and student</label></div>
     <div class="row" style="margin-top:12px"><button class="primary" id="exGo">Make printouts (.zip)</button><span class="muted" id="exMsg"></span></div></div>`;
 }
@@ -1299,7 +1299,7 @@ function paintGen() {
   const p = st.published, f = p ? p.files || {} : {};
   $("#pubCard").innerHTML = `<h2>Published</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
       <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
-      <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>
+      <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>${f.db ? `<a href="/files/db" title="Every lesson, class, teacher and room as a SQLite database, for other systems to import. It also holds the setup, so Printouts (on Files) can rebuild everything from it.">Timetable database (.sqlite), for other systems</a>` : ""}
       ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
       <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
     : `<p class="muted">Nothing published yet. Teachers and students see a "not published yet" page.</p>`) +
@@ -1313,8 +1313,9 @@ document.addEventListener("change", e => {
 });
 async function makePrintouts() {
   const a = $("#exSetup").files[0], b = $("#exTT").files[0], msg = $("#exMsg");
-  if (!a || !b) { toast("Choose the setup workbook and the timetable workbook."); return; }
-  const fd = new FormData(); fd.append("setup", a); fd.append("timetable", b); fd.append("single", $("#exSingle").checked ? "1" : "0");
+  const isDb = b && /\.(sqlite3?|db)$/i.test(b.name);
+  if (!b || (!a && !isDb)) { toast(b ? "Choose the setup workbook too (a timetable database from this app can come alone)." : "Choose the timetable: a workbook or a timetable database."); return; }
+  const fd = new FormData(); if (a) fd.append("setup", a); fd.append("timetable", b); fd.append("single", $("#exSingle").checked ? "1" : "0");
   const go = $("#exGo"); go.disabled = true; msg.textContent = "Making printouts… a school with 600 students takes about a minute.";
   try {
     const r = await fetch("/api/export", { method: "POST", body: fd });
