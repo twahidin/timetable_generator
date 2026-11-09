@@ -102,7 +102,8 @@ var People = (function () {
 
   var FIELDS = ["name", "short", "dept", "role", "allowance", "other_duties", "note"];
   var HEADERS = {
-    name: ["name", "teacher", "teacher name", "full name"],
+    name: ["name", "teacher", "teacher name", "full name", "staff name", "name of teacher",
+      "teacher s name", "teachers name", "staff"],
     short: ["short", "short name", "initials", "abbreviation"],
     dept: ["department", "dept"],
     role: ["role", "appointment"],
@@ -136,12 +137,14 @@ var People = (function () {
   }
 
   function readTeachers(text) {
-    var rows = String(text == null ? "" : text).split(/\r?\n/).map(function (line) {
-      return (line.indexOf("\t") >= 0 ? line.split("\t") : splitCsv(line)).map(function (c) { return c.trim(); });
-    }).filter(function (cells) { return cells.some(function (c) { return c !== ""; }); });
+    var rows = [];   // non-empty rows, each remembering its line number in the paste
+    String(text == null ? "" : text).split(/\r?\n/).forEach(function (line, li) {
+      var cells = (line.indexOf("\t") >= 0 ? line.split("\t") : splitCsv(line)).map(function (c) { return c.trim(); });
+      if (cells.some(function (c) { return c !== ""; })) { cells.line = li + 1; rows.push(cells); }
+    });
     if (!rows.length) return { error: "No teachers found in that list. It needs a column of names." };
 
-    var map = null, start = 0;   // map: field -> column index
+    var map = null, start = 0, skipped = [], otherHeader = false;   // map: field -> column index
     for (var r = 0; r < Math.min(10, rows.length) && !map; r++) {
       var found = {}, hasName = false;
       rows[r].forEach(function (cell, ci) {
@@ -149,18 +152,22 @@ var People = (function () {
         if (f && !(f in found)) { found[f] = ci; if (f === "name") hasName = true; }
       });
       if (hasName) { map = found; start = r + 1; }
+      else if (Object.keys(found).length) otherHeader = true;
     }
+    if (!map && otherHeader) return { error: "Could not find the column of names. Head it Name or Teacher." };
     if (!map) {
       var width = rows[0].length;
       while (width > 1 && rows[0][width - 1] === "") width--;
       map = {};
       FIELDS.slice(0, width).forEach(function (f, i) { map[f] = i; });
+      if (width > 1) skipped.push("No header row was found, so the columns were read in this order: " +
+        "Name, Short name, Department, Role, Allowance, Other duties, Note.");
     }
     var columns = FIELDS.filter(function (f) { return f in map; });
-    var teachers = [], skipped = [], seen = {};
+    var teachers = [], seen = Object.create(null);
     rows.slice(start).forEach(function (cells) {
       var name = (cells[map.name] || "").trim();
-      if (!name) return;
+      if (!name) { skipped.push("A row with no name was left out (row " + cells.line + ")."); return; }
       var k = key(name);
       if (seen[k]) { skipped.push(name + " is in the list twice: the second row was left out."); return; }
       seen[k] = true;
@@ -182,10 +189,10 @@ var People = (function () {
   // ---- Matching a list to the teachers already in the setup ----
 
   function planTeachers(existing, incoming, roles, departments) {
-    var byKey = {};
+    var byKey = Object.create(null);
     existing.forEach(function (t, i) { var k = key(t.name); if (!(k in byKey)) byKey[k] = i; });
     var plan = { add: [], update: [], missing: [], unknownRoles: [], unknownDepts: [] };
-    var inFile = {}, roleNames = (roles || []).map(function (r) { return r.role; });
+    var inFile = Object.create(null), roleNames = (roles || []).map(function (r) { return r.role; });
     function note(list, v) { if (v && list.indexOf(v) < 0) list.push(v); }
 
     incoming.forEach(function (row) {
@@ -205,7 +212,7 @@ var People = (function () {
       }
       var t = {};
       FIELDS.forEach(function (f) { if (f in row) t[f] = row[f]; });
-      if (!t.short) t.short = String(t.name).trim().split(/\s+/)[0];
+      if (!t.short) t.short = String(t.name).trim().split(/\s+/)[0].replace(/[,;:.]+$/, "");
       if (t.allowance === undefined) {
         var guide = (roles || []).filter(function (r) { return r.role === t.role; })[0];
         if (guide && typeof guide.allowance === "number") t.allowance = guide.allowance;

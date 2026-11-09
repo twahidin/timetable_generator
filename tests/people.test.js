@@ -77,4 +77,32 @@ t("roles and departments the setup does not have are listed once each", () => {
   const p = People.planTeachers(EX, [{ name: "A B", role: "LT", dept: "HU" }, { name: "C D", role: "LT", dept: "MA" }], ROLES, DEPTS);
   assert.deepStrictEqual(p.unknownRoles, ["LT"]); assert.deepStrictEqual(p.unknownDepts, ["HU"]);
 });
+t("a header in the school's own words is read, not taken as a teacher", () => {
+  const r = People.readTeachers("Staff Name\tDept\nArjun Nair\tSC");
+  assert.deepStrictEqual(r.teachers, [{ name: "Arjun Nair", dept: "SC" }]); assert.deepStrictEqual(r.skipped, []);
+  assert.deepStrictEqual(People.readTeachers("Staff\tName of teacher\tRole\nX Y\tZ\tST").teachers, [{ name: "X Y", role: "ST" }]);
+  assert.deepStrictEqual(People.readTeachers("Teacher's name\nArjun Nair").teachers, [{ name: "Arjun Nair" }]);
+});
+t("a header with no name column is refused, not guessed", () => {
+  assert.strictEqual(People.readTeachers("Person\tDept\tRole\nArjun Nair\tSC\tST").error, "Could not find the column of names. Head it Name or Teacher.");
+});
+t("a headerless paste with several columns says how it was read; one column says nothing", () => {
+  const r = People.readTeachers("Arjun Nair\tArjun\nPriya Menon\tPriya");
+  assert.deepStrictEqual(r.teachers[0], { name: "Arjun Nair", short: "Arjun" });
+  assert.deepStrictEqual(r.skipped, ["No header row was found, so the columns were read in this order: Name, Short name, Department, Role, Allowance, Other duties, Note."]);
+  assert.deepStrictEqual(People.readTeachers("Arjun Nair\nPriya Menon\n").skipped, []);
+});
+t("a row with data but no name is said; an empty row is silent", () => {
+  const r = People.readTeachers("Name\tRole\nArjun Nair\tST\n\n\tEO\n");
+  assert.strictEqual(r.teachers.length, 1); assert.deepStrictEqual(r.skipped, ["A row with no name was left out (row 4)."]);
+});
+t("names like Constructor and __proto__ are ordinary names", () => {
+  const r = People.readTeachers("Constructor\n__proto__\nTan Wei Ming\n");
+  assert.deepStrictEqual(r.teachers.map(x => x.name), ["Constructor", "__proto__", "Tan Wei Ming"]);
+  const p = People.planTeachers([{ name: "Constructor", role: "EO" }, { name: "__proto__" }], [{ name: "constructor", role: "ST" }, { name: "__proto__" }], ROLES, DEPTS);
+  assert.deepStrictEqual(p.add, []); assert.deepStrictEqual(p.update, [{ i: 0, changes: { role: "ST" } }]); assert.deepStrictEqual(p.missing, []);
+});
+t("the default short name drops trailing punctuation", () => {
+  assert.strictEqual(People.planTeachers([], [{ name: "Nair, Arjun" }], ROLES, DEPTS).add[0].short, "Nair");
+});
 console.log(`${n} cases passed`);
