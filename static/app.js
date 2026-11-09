@@ -956,13 +956,16 @@ const VIEWS = {
       ${VIEWS.roles(load)}`;
   },
   roles(load) {   // the Roles sheet: guide allowance per role and the load of the teachers in it
-    if (!S.spec.roles || !S.spec.roles.length) S.spec.roles = JSON.parse(JSON.stringify(S.meta.roles || []));
+    // the defaults are written into the setup only where the person may change roles (the committee, or a practice copy);
+    // a head's page only shows them, so rendering never makes a change the server would refuse
+    let RL = S.spec.roles;
+    if (!RL || !RL.length) { RL = JSON.parse(JSON.stringify(S.meta.roles || [])); if (committee() || S.practice) S.spec.roles = RL; }
     const tot = t => (load[t.name] || 0) + (Number(t.other_duties) || 0), avg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : "";
     const eo = avg(S.spec.teachers.filter(t => t.role === "EO" && tot(t) > 0).map(tot)), mgmt = avg(S.spec.teachers.filter(t => ["HOD", "SH"].includes(t.role) && tot(t) > 0).map(tot));
     return `<div class="card"><h2>Roles</h2><p class="muted">Management (HOD, SH) should teach fewer periods than teachers; teachers (EO) should be spread evenly. Teachers (EO) average load <b>${eo || "–"}</b> · management (HOD, SH) <b>${mgmt || "–"}</b>.
       Flag a teacher <input data-k="spec.school.role_spread" type="number" value="${esc(sc().role_spread ?? 15)}" style="width:56px"> periods or more from the teacher average.</p>
       <div class="tablewrap"><table><tr><th>Role</th><th>What it is</th><th>Guide allowance</th><th>Group</th><th>Teachers</th><th>Average load</th><th></th></tr>
-      ${S.spec.roles.map((r, i) => { const ts = S.spec.teachers.filter(t => t.role === r.role);
+      ${RL.map((r, i) => { const ts = S.spec.teachers.filter(t => t.role === r.role);
         return `<tr><td>${inp(`spec.roles.${i}.role`, r.role, "text", 'style="width:80px"')}</td><td style="min-width:240px">${inp(`spec.roles.${i}.what`, r.what)}</td><td class="num">${inp(`spec.roles.${i}.allowance`, r.allowance, "number", 'style="width:64px"')}</td><td>${inp(`spec.roles.${i}.group`, r.group)}</td><td class="calc">${ts.length}</td><td class="calc">${avg(ts.map(tot))}</td><td>${delBtn("roles", i)}</td></tr>`; }).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="roles">+ Add role</button></div></div>`;
   },
