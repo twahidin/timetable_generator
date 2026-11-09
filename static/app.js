@@ -6,7 +6,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const KEY = "ttsetup.v1";
 const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, tg: { lv: "", subj: "", t: "" }, tf: { dept: "", subj: "", q: "" }, pick: { lessons: new Set(), students: new Set(), teachers: new Set(), shown: {}, last: {}, t: "", g: "", c: "", s: "", v: "All", d: "", r: "", a: "", p: "" }, undo: [], redo: [], last: null, dirty: false, base: 0 };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
-  ["teachers", "4 Teachers"], ["lessons", "5 TG & deployment"], ["rules", "6 Availability & rules"], ["generate", "Generate & publish"], ["adjust", "Adjust timetable"], ["students", "Students (after generating)"], ["download", "Files"]];
+  ["teachers", "4 Teachers"], ["lessons", "5 TG & deployment"], ["rules", "6 Configuration & constraints"], ["download", "7 Download"], ["publish", "8 Publish"], ["students", "Students"]];
 
 /* ---------------- storage, server
    save() keeps this browser's copy after every change. A change to the setup also goes on the undo list (changes
@@ -28,8 +28,9 @@ function save(o) {
 function saved() {   // the step is kept by name ("at"); a copy saved before Bands joined the teaching-groups step has only the old number
   try {
     const x = JSON.parse(localStorage.getItem(KEY) || "null"); if (!x || !x.spec) return null;
-    const at = x.at || ["start", "school", "venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "generate", "adjust", "download"][x.step];
-    if (at && stepAt(at) >= 0) x.step = stepAt(at); return x;
+    let at = x.at || ["start", "school", "venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "generate", "adjust", "download"][x.step];
+    at = { generate: "publish", adjust: "publish" }[at] || at;   // steps that no longer exist: their work ends on Publish now
+    x.step = at && stepAt(at) >= 0 ? stepAt(at) : 0; return x;
   } catch (e) { return null; }
 }
 function saveState() {
@@ -56,9 +57,6 @@ async function saveServer() {
   S.base = j.ts; S.dirty = false; G.server = { spec: S.spec, saved_at: j.saved_at, ts: j.ts }; save({ quiet: true });
   toast(`Saved for the school (${j.saved_at}). It opens here next time anyone on the committee signs in.` +
     (G.st && G.st.volume === false ? " But this server has no Railway volume, so it is lost on the next deploy." : ""));
-}
-async function synced() {   // the server now has this setup (Generate saves it first)
-  try { G.server = await getJSON("/api/setup"); if (G.server.ts && G.server.spec && JSON.stringify(G.server.spec) === S.last) { S.base = G.server.ts; S.dirty = false; save({ quiet: true }); } } catch (e) { }
 }
 async function getJSON(u) { const r = await fetch(u); if (!r.ok) throw new Error(await r.text()); return r.json(); }
 async function begin(kind, what) {
@@ -575,27 +573,12 @@ function render() {
   // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
   const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap")].map(t => [t.scrollTop, t.scrollLeft]) : [];
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && (f.id ? `#${CSS.escape(f.id)}` : f.dataset.k ? `[data-k="${CSS.escape(f.dataset.k)}"]` : "");
-  if (id === "adjust" && G.shown !== "adjust") { G.adj.data = null; G.adj.prop = null; G.adj.cut = null; }   // the timetable may have changed since
   G.shown = id;
   main.innerHTML = (VIEWS[id] || (() => ""))();
   main.querySelectorAll(".tablewrap").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
-  renderIssues(); paintBanner(); saveState(); window.scrollTo(0, y);
-  if (id === "generate") { paintGen(); poll(); }
-}
-/* the alert when the last generate found no timetable: on every step until a timetable is made or it is hidden */
-function paintBanner() {
-  const m = $("#main"); if (!m) return;
-  let el = $("#alertBanner"); const a = G.alert, key = a ? `${G.runId}:${a.n}` : "";
-  if (!a || !S.spec || G.dismissed === key || STEPS[S.step][0] === "generate") { if (el) el.remove(); return; }
-  if (!el) { el = document.createElement("div"); el.id = "alertBanner"; m.prepend(el); }
-  el.className = "banner";
-  el.innerHTML = `<b>${esc(a.text)}</b> <span>See why, and what to change.</span><button class="small primary" data-step="${STEPS.findIndex(s => s[0] === "generate")}">How to fix it</button><button class="small ghost" data-dismiss="${esc(key)}" title="Hide this until the next generate">✕</button>`;
-}
-function fixesHTML(e) {   // the suggested fixes sent with a 'nosolution' event, each with a button to its step
-  const f = (e.data && e.data.fixes) || []; if (!f.length) return "";
-  const at = stepAt;
-  return `<div class="fixes"><b>How to fix it</b><ol>${f.map(x => `<li>${esc(x.text)}${x.go && x.go !== "generate" && at(x.go) > 0 ? ` <button class="small" data-step="${at(x.go)}">Open ${esc(STEPS[at(x.go)][1].replace(/^\d+ /, ""))}</button>` : ""}</li>`).join("")}</ol></div>`;
+  renderIssues(); saveState(); window.scrollTo(0, y);
+  if (typeof paintPublished === "function") paintPublished();
 }
 const stepAt = id => STEPS.findIndex(s => s[0] === (id === "blocks" ? "lessons" : id));   // bands are a card on the teaching-groups step
 function count(id) { if (!S.spec) return ""; const m = { venues: "venues", classes: "classes", subjects: "subjects", teachers: "teachers", blocks: "blocks", lessons: "lessons", rules: "rules", students: "students" }[id]; return m ? S.spec[m].length : ""; }
@@ -638,7 +621,7 @@ const VIEWS = {
         ${sv ? `<button class="${G.server && G.server.spec ? "" : "primary"}" id="resume">Continue in this browser (${esc(sv.spec.school.name)})</button>` : ""}
         <label class="filebtn">Open a setup workbook (.xlsx)<input type="file" id="importX" accept=".xlsx" hidden></label>
       </div></div>
-      <div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a band, a lesson with no periods).</li><li>On <b>Generate &amp; publish</b>, make the timetable here: the AI timetabler checks, solves and asks you about conflicts in a chat. Publish when happy; teachers and students then sign in with their codes.</li><li>Or, on <b>Files</b>, download the setup workbook and the timetable skill to use with any AI agent.</li></ol></div>${exportCard()}`;
+      <div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a band, a lesson with no periods).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
   },
   school() {
     const s = sc(); const NP = Number(s.periods_per_day); const days = dayNames();
@@ -733,7 +716,6 @@ const VIEWS = {
       ${VIEWS._bands(out, info, crit)}</div>
       <div class="card"><h2>Teaching groups</h2><p class="muted">One row per group, or per class for a whole-class subject. Pick level, subject and band (empty = whole class); choosing a band fills its classes. Group code and periods fill in by themselves. Lessons shows how the periods split, in grey; type your own, such as 5x3 + 2x2 (five 3-period lessons and two 2-period ones), or clear it to go back. Tick rows (shift-click for a run) to deploy a teacher or set Lessons on all of them at once.</p>
       <div class="helper row"><b>Add groups to a band</b> ${sel("_hb", "", blockNames(), true, 'id="hbBlock" data-k=""')} subject ${sel("_hbs", "", subjectNames(), true, 'id="hbSubj" data-k=""')} groups <input id="hbN" type="number" value="1" style="width:56px"> students each <input id="hbSt" type="number" style="width:64px"> <button data-helper="groups">Add</button></div>
-      <div class="helper row"><b>Teachers for rows left blank</b> <span class="muted">${blankRows()} row${blankRows() === 1 ? "" : "s"} without a teacher</span> <button data-helper="allocate" ${blankRows() ? "" : "disabled"} title="Each row with Teacher 1 empty gets a teacher who can teach it, keeping everyone within their allowance and the load spread. Rows with a teacher are not changed. Undo takes it back.">Fill blank teachers</button>${S.alloc ? `<span class="muted small">${esc(S.alloc)}</span>` : ""}</div>
       <div class="helper row"><b>Add a whole-class subject</b> level ${sel("_hw", levels()[0], levels(), false, 'id="hwLevel" data-k=""')} subject ${sel("_hws", "", subjectNames(), true, 'id="hwSubj" data-k=""')} <button data-helper="whole">Add one row per class</button></div>
       <div class="row" style="margin:12px 0 8px"><b>Show</b> <select id="tgLv">${opt("", f.lv, "All levels")}${levels().map(l => opt(l, f.lv)).join("")}</select>
         <select id="tgSubj">${opt("", f.subj, "All subjects")}${subjectNames().map(n => opt(n, f.subj)).join("")}</select>
@@ -789,7 +771,7 @@ const VIEWS = {
     const P = S.pick; P.shown.students = rows.map(([, i]) => i); const all = rows.length && rows.every(([, i]) => P.students.has(i));
     const clsOpts = [opt("", f.cls, `All classes (${L.length})`), ...S.spec.classes.map(c => opt(c.class, f.cls, `${c.class} · ${per[c.class] || 0} of ${c.size || "?"}`)),
       ...[...new Set(L.map(s => s.class || ""))].filter(c => !classNames().includes(c)).map(c => opt(c, f.cls, c ? `${c} (not on step 2) · ${per[c]}` : `No class · ${L.filter(s => !s.class).length}`))].join("");
-    return `<div class="card"><h1>Students <span class="muted" style="font-weight:400;font-size:15px">(after the timetable is made)</span></h1><p class="muted small">Add students class by class once the timetable is out; they are not needed to generate it. Then generate again only if you want the solver to check each student's combination for clashes.</p><p class="lead">List each student with their class and the codes of the groups they are in (from step 5). The solver then makes sure no student has two lessons at once, and every student gets their own timetable and a personal sign-in code. Without a list, the students of a class are assumed to be in the same level tag (all G3, all Foundation) in every band, so students on mixed combinations are not checked. To fill groups here, tick students (shift-click for a run, or the box at the top for everyone shown) and add them to a group or move them to a class together.</p>
+    return `<div class="card"><h1>Students <span class="muted" style="font-weight:400;font-size:15px">(after the timetable is made)</span></h1><p class="muted small">Add students class by class once the timetable is out; they are not needed to make it. Have it made again with the list only if you want each student's combination checked for clashes.</p><p class="lead">List each student with their class and the codes of the groups they are in (from step 5). The solver then makes sure no student has two lessons at once, and every student gets their own timetable and a personal sign-in code. Without a list, the students of a class are assumed to be in the same level tag (all G3, all Foundation) in every band, so students on mixed combinations are not checked. To fill groups here, tick students (shift-click for a run, or the box at the top for everyone shown) and add them to a group or move them to a class together.</p>
       ${restoreHelper()}
       <div class="helper"><b>Paste or upload the student list</b>
         <p class="muted small" style="margin:4px 0 8px">Copy the rows from Excel or a CSV file, with a header row: <b>Student ID</b>, <b>Name</b>, <b>Class</b> and <b>Groups</b> (codes in one cell separated by commas, or one code per column). Without a header, the columns are read as ID, name, class, then groups. Whole-class subjects need no codes: a student has those with their class. Use an ID that stays the same (an admission number, say): personal codes are made from it.</p>
@@ -802,45 +784,6 @@ const VIEWS = {
       </table></div>${rows.length > MAX ? `<p class="muted small">Showing the first ${MAX}. Pick a class or search to see the rest.</p>` : ""}`
         : `<p class="muted" style="margin-top:10px">No students yet. Paste or upload a list above, or add students one by one.</p>`}
       <div class="row" style="margin-top:10px"><button data-add="students">+ Add student</button></div></div>`;
-  },
-  generate() {
-    const st = G.st || {}, off = st.ai && !st.ai.ok;
-    const facts = [st.ai && st.ai.ok ? `AI: ${esc(st.ai.provider)} · ${esc(st.ai.model)}${st.ai.effort ? ` · effort ${esc({ xhigh: "extra high" }[st.ai.effort] || st.ai.effort)}` : ""}` : ""].filter(Boolean);
-    const secs = solveSecs(), mins = [5, 20, 60, 120, 240, 480].filter(m => m * 60 <= (st.solve_max || 28800));
-    if (!mins.includes(secs / 60)) mins.push(secs / 60), mins.sort((a, b) => a - b);
-    const long = `<label class="row" style="gap:6px" title="A tight timetable can take a long time to find. The best timetable so far is kept if you press Stop.">Solve for up to
-      <select id="solveSecs">${mins.map(m => opt(m * 60, secs, m < 60 ? `${m} min` : `${m / 60} hour${m > 60 ? "s" : ""}`)).join("")}</select></label>`;
-    return `<div class="card"><h1>Generate & publish</h1><p class="lead">Generate makes the timetable from this setup (it is saved to the server first). With the AI timetabler, it checks the setup, runs the solver and asks you in the chat about anything that does not fit; without AI, it checks and solves, and you read the results. Nothing is visible to teachers or students until you publish.</p>
-      ${off ? `<div class="notice"><b>The AI timetabler is off.</b> ${/AI_API_KEY/.test(st.ai.why) ? "No AI API key has been added yet." : esc(st.ai.why)} You can still use <b>Generate without AI</b>: it checks the setup and runs the solver, then you read the results and change the setup yourself. The chat, where the AI explains problems and makes tweaks for you, needs the key: whoever runs the app adds it in Railway (service → Variables → <code>AI_API_KEY</code>, with <code>AI_PROVIDER</code>).</div>` : ""}
-      <div class="row"><button class="${off ? "" : "primary"}" id="genAI"${off ? ` title="Needs an AI API key. Generate without AI still works."` : ""}>Generate with the AI timetabler</button><button class="${off ? "primary" : ""}" id="genPlain">Generate without AI</button><button class="danger" id="genStop" hidden>Stop</button>${long}</div>
-      <p class="muted small">${facts.join(" · ")}</p></div>
-      <div class="gen"><div class="card chat"><h2>Timetabler</h2><div id="chatlog" class="chatlog"></div><div id="progress" class="progress"></div>
-        <form id="chatform" class="chatform" onsubmit="event.preventDefault(); sendChat(document.getElementById('chatin').value)"><input id="chatin" autocomplete="off"><button class="primary" id="chatsend">Send</button></form></div>
-        <div class="side"><div class="card" id="resultCard"></div><div class="card" id="pubCard"></div></div></div>`;
-  },
-  adjust() {
-    const A = G.adj, gen = STEPS.findIndex(s => s[0] === "generate");
-    const head = `<h1>Adjust the timetable</h1><p class="lead">Teachers' changes before publishing. Pick a class, teacher or room, click a lesson, then move it <b>earlier</b> or <b>later</b>, or <b>cut</b> it and click where it should go. A move that clashes shows why and the ways out: a free time, a swap, letting the solver make room, or asking the AI. Lessons you move are pinned (📌): later solves keep them there.</p>`;
-    if (!A.data) { if (!A.loading) loadAdjust(); return `<div class="card">${head}<p class="muted">${esc(A.error || "Loading the latest timetable…")}</p>${A.error ? `<button data-step="${gen}">Go to Generate & publish</button>` : ""}</div>`; }
-    const D = A.data, busy = G.st && G.st.run && G.st.run.busy, sm = D.summary;
-    const lists = { class: D.classes, teacher: D.teachers, room: D.rooms };
-    if (!lists[A.kind].includes(A.who)) A.who = lists[A.kind][0] || "";
-    const sel = A.sel && D.lessons.find(l => l.key === A.sel), cut = A.cut && D.lessons.find(l => l.key === A.cut);
-    const status = `<p class="${sm.ok ? "okmsg" : "issue"}" style="margin:0">${sm.ok ? "All checks pass" : `${sm.problems.length} problem${sm.problems.length === 1 ? "" : "s"}`} · ${sm.lessons} lessons${sm.after.length ? ` · ${sm.after.length} after school` : ""}${D.moves ? ` · ${D.moves} change${D.moves === 1 ? "" : "s"} by hand` : ""}</p>`;
-    const bar = `<div class="row" style="justify-content:space-between;margin-top:10px">${status}<div class="row">
-        <button data-adj="undo" ${D.can_undo && !busy ? "" : "disabled"} title="${esc(D.last ? "Undo: " + D.last : "")}">↶ Undo move</button><button data-adj="redo" ${D.can_redo && !busy ? "" : "disabled"}>↷ Redo</button>
-        ${G.st && G.st.run && G.st.run.changes ? `<button id="keepChanges" ${busy ? "disabled" : ""} title="Lessons made shorter or longer change the plan: this puts them in your setup too">Keep these changes in my setup</button>` : ""}
-        <a href="/preview" target="_blank"><button>Preview</button></a><button class="primary" id="publish" ${busy ? "disabled" : ""}>Publish</button></div></div>
-      ${sm.problems.length ? `<details style="margin-top:6px"><summary class="small">The problems</summary><ul class="small">${sm.problems.map(p => `<li>${esc(p)}</li>`).join("")}</ul></details>` : ""}
-      ${compromisesHTML(sm, true)}`;
-    const pick = `<div class="row" style="margin-top:12px"><label class="row" style="gap:6px">Show <select id="adjKind">${["class", "teacher", "room"].map(k => opt(k, A.kind, k[0].toUpperCase() + k.slice(1))).join("")}</select></label>
-      <select id="adjWho">${lists[A.kind].map(x => opt(x, A.who)).join("")}</select>
-      ${busy ? `<span class="muted small">${esc((G.st.run.progress) || "Working…")} Changes wait until it finishes.</span>` : ""}</div>`;
-    const act = cut ? `<div class="adjbar"><b>✂ ${esc(cut.name)}</b> <span class="muted">${esc(adjWhen(cut.start, cut.ln))}</span> · click where it should go (you can switch class, teacher or room first) <button class="small" data-adj="cancel">Cancel</button></div>`
-      : sel ? `<div class="adjbar"><b>${esc(sel.name)}</b> <span class="muted">${esc(adjWhen(sel.start, sel.ln))} · ${esc(sel.teachers.join(", ") || "no teacher")} · ${esc([...new Set(sel.rows.map(r => r.room).filter(Boolean))].join(", ") || "no room")}</span>${sel.pinned ? " 📌" : ""}
-          <button class="small" data-adj="earlier" ${busy ? "disabled" : ""}>◀ Earlier</button><button class="small" data-adj="later" ${busy ? "disabled" : ""}>Later ▶</button><button class="small" data-adj="cut" ${busy ? "disabled" : ""}>✂ Cut</button><button class="small" data-adj="shorter" ${busy || sel.ln < 2 ? "disabled" : ""} title="One period shorter, where it is: its group then has one period fewer a cycle">− 1 period</button><button class="small" data-adj="longer" ${busy ? "disabled" : ""} title="One period longer, where it is (the next period must be free): its group then has one period more a cycle">+ 1 period</button>${sel.pinned ? `<button class="small" data-adj="unpin" ${busy ? "disabled" : ""} title="Let later solves move it again">Unpin</button>` : ""}<button class="small ghost" data-adj="cancel">✕</button></div>`
-      : `<p class="muted small" style="margin:8px 0 0">Click a lesson to move it. Keys: ← → move it, Esc lets go.</p>`;
-    return `<div class="card">${head}${bar}${pick}${act}${adjPanel()}<div class="tablewrap" style="margin-top:10px;max-height:none"><table class="adjgrid">${adjGrid(D, A)}</table></div></div>`;
   },
   download() {
     const { out, crit } = issues(); let n = 0, nc = 0;
@@ -860,6 +803,9 @@ const VIEWS = {
         <li>The agent checks the inputs, solves (a few minutes for a typical school), and returns the timetables: one Excel workbook with every class, teacher, room and student, PDFs (one page each) to print or send, and a searchable HTML page, plus what (if anything) had to go after school.</li>
         <li>Change the setup here or in Excel and ask again: the agent re-solves from the new file.</li></ol></div>${exportCard()}`;
   },
+  publish() {
+    return `<div class="card"><h1>Step 8 · Publish</h1></div>`;
+  },
 };
 
 /* ---------------- events */
@@ -867,22 +813,10 @@ document.addEventListener("click", async e => {
   const pop = $("#pop");
   if (!pop.hidden && !pop.contains(e.target)) commitPop();
   if (e.target.dataset && (e.target.dataset.pick || e.target.dataset.pickall)) { pick(e.target, e.shiftKey); return; }
-  const b = e.target.closest("button, [data-pop], .issue, td.c, td.as"); if (!b) return;
+  const b = e.target.closest("button, [data-pop], .issue, td.c"); if (!b) return;
   if (b.dataset.step) { S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
-  if (b.dataset.adj) { adjAction(b.dataset.adj); return; }
-  if (b.dataset.adjgo) { const P = G.adj.prop; if (P) adjMove({ [P.key]: Number(b.dataset.adjgo) }); return; }
-  if (b.dataset.adjswap) {
-    const P = G.adj.prop, L = G.adj.data.lessons, o = L.find(l => l.key === b.dataset.adjswap), me = P && L.find(l => l.key === P.key);
-    if (o && me) adjMove({ [me.key]: o.start, [o.key]: me.start }, `Swapped ${me.name} and ${o.name}`); return; }
-  if (b.dataset.lesson) {   // a lesson: select it, or (with one cut) paste the cut lesson at its time
-    const A = G.adj, k = b.dataset.lesson;
-    if (A.cut && A.cut !== k) adjCheck(A.cut, { start: A.data.lessons.find(l => l.key === k).start });
-    else { if (!A.cut) A.sel = A.sel === k ? null : k; A.prop = null; A.ai = ""; render(); }
-    return; }
-  if (b.classList.contains("as")) { if (G.adj.cut) adjCheck(G.adj.cut, { start: Number(b.dataset.start) }); return; }
   if (b.id === "saveServer") { saveServer(); return; }
-  if (b.dataset.dismiss) { G.dismissed = b.dataset.dismiss; paintBanner(); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
   if (b.id === "resume") { const sv = saved(); await adopt(sv.spec, "", { kind: sv.kind, step: sv.step, base: sv.base, dirty: sv.dirty !== false }); return; }
@@ -904,32 +838,17 @@ document.addEventListener("click", async e => {
     S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "serverSetup") { await adopt(G.server.spec, "Opened the school's saved setup.", { base: G.server.ts, dirty: false }); return; }
-  if (b.id === "genAI" || b.id === "genPlain") { generate(b.id === "genAI"); return; }
-  if (b.id === "genStop") { await post("/api/stop"); poll(); return; }
-  if (b.id === "publish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away.")) return; const j = await post("/api/publish"); if (j) { toast("Publishing… about a minute."); poll(); } return; }
-  if (b.id === "keepChanges") { const j = await post("/api/keep-changes"); if (j && j.spec) { S.spec = j.spec; save(); await synced(); toast("The changes are now in your setup."); poll(); } return; }
-  if (b.dataset.answer !== undefined) { sendChat(b.dataset.answer); return; }
   if (b.id === "exGo") { makePrintouts(); return; }
   if (b.id === "imCheck") { importTimetable(false); return; }
   if (b.id === "imPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; importTimetable(true); return; }
   if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
 });
 document.addEventListener("toggle", e => { if (e.target.classList && e.target.classList.contains("bands")) S.bandsOpen = e.target.open; }, true);
-// lists the page repaints every few seconds (the Latest timetable card) stay open or shut as the committee left them
-const KEPT = {};
-document.addEventListener("toggle", e => { const k = e.target.dataset && e.target.dataset.keep; if (k) KEPT[k] = e.target.open; }, true);
-const keepOpen = (k, dflt) => (KEPT[k] ?? dflt) ? "open" : "";
 document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / Ctrl+Y redo; inside a text box the browser's own undo applies
   if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
   const k = e.key.toLowerCase(); if (k !== "z" && k !== "y") return;
   if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
   e.preventDefault(); undo(k === "z" && !e.shiftKey);
-});
-document.addEventListener("keydown", e => {   // Adjust page: ← → move the selected lesson, Esc lets go
-  if (STEPS[S.step][0] !== "adjust" || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.target.closest && e.target.closest("input, textarea, select")) return;
-  if (e.key === "Escape") { adjAction("cancel"); return; }
-  if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && G.adj.sel && !G.adj.cut) { e.preventDefault(); adjAction(e.key === "ArrowLeft" ? "earlier" : "later"); }
 });
 let painting = false;
 document.addEventListener("mousedown", e => { const c = e.target.closest("td.c"); if (!c) return; painting = true; paint(c); e.preventDefault(); });
@@ -945,9 +864,6 @@ document.addEventListener("change", async e => {
     const nr = new Set(ruleProblems(lessonInfo()).map(x => x[0])).size;   // rules written in a way the timetable cannot use: say so now, not after generating
     if (nr) toast(`Workbook opened. ${nr} rule${nr === 1 ? "" : "s"} on step 6 cannot be used as written (skipped or matching nothing): see Things to fix. Press Save progress to keep it.`);
     return; }
-  if (el.id === "adjKind") { G.adj.kind = el.value; G.adj.who = ""; render(); return; }
-  if (el.id === "adjWho") { G.adj.who = el.value; render(); return; }
-  if (el.id === "solveSecs") { try { localStorage.setItem("ttsolve", el.value); } catch (err) { } toast(`Each solve may now run up to ${$("#solveSecs").selectedOptions[0].textContent}. Stop keeps the best timetable so far.`); return; }
   if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; el.value = ""; try { await adopt(JSON.parse(await f.text()), "Progress loaded from the file. Press Save progress to keep it for the school."); } catch (err) { toast("That file is not a progress file."); } return; }
   if (el.dataset.names) { setPath(el.dataset.names, el.value.split(",").map(t => t.trim()).filter(Boolean)); save(); render(); return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
@@ -1060,19 +976,7 @@ function setPattern(x, typed) {   // false (with a message) when it cannot be re
   const p = parsePattern(typed); if (!p) { toast(`Could not read "${typed}". Write lessons like 5x3 + 2x2: how many, x, how many periods each.`); return false; }
   x.pattern = p; delete x.pattern_text; return true;
 }
-const blankRows = () => S.spec.lessons.filter(x => x.subject && !(x.teachers || []).some(Boolean)).length;
-async function allocateTeachers() {   // a teacher for every row left blank (ttgen.allocate), as one change Undo takes back
-  toast("Choosing teachers…");
-  const r = await post("/api/allocate", S.spec); if (!r) return;
-  const n = Object.keys(r.assign).length;
-  for (const [i, t] of Object.entries(r.assign)) S.spec.lessons[Number(i)].teachers = [t];
-  const tight = r.loads.filter(l => l.allowance && l.after > l.allowance).map(l => `${l.teacher} ${l.after}/${l.allowance}`);
-  S.alloc = `Filled ${n} row${n === 1 ? "" : "s"}` + (r.unfilled.length ? `; ${r.unfilled.length} left blank (${r.unfilled.slice(0, 3).map(u => u.why).join("; ")})` : "") +
-    (tight.length ? `; over allowance: ${tight.join(", ")}` : n ? "; everyone within their allowance" : "") + ". Undo takes it back.";
-  save(); render(); toast(S.alloc);
-}
 function helper(k) {
-  if (k === "allocate") { allocateTeachers(); return; }
   if (k === "venues") { const pre = $("#hvPre").value, a = Number($("#hvFrom").value), b = Number($("#hvTo").value), kind = $("#hvKind").value; for (let i = a; i <= b; i++) S.spec.venues.push({ room: `${pre}${String(i).padStart(2, "0")}`, kind, capacity: 40 }); }
   if (k === "classes") {
     const lv = $("#hcLevel").value, size = Number($("#hcSize").value) || 38; const used = new Set(S.spec.classes.map(c => c.home_room)); const free = S.spec.venues.filter(v => (v.kind || "classroom") === "classroom" && !used.has(v.room)).map(v => v.room);
@@ -1208,7 +1112,7 @@ function bulk(k) {   // one change for every ticked row, so one Undo takes it al
 }
 
 /* ---------------- restore: students with no groups and bands with no classes, from an earlier copy of the setup (each
-   Save progress keeps the copy it replaces; each Generate run keeps its own). Only what is empty now is filled. */
+   Save progress keeps the copy it replaces). Only what is empty now is filled. */
 function lostCounts() {
   const banded = new Set(S.spec.blocks.flatMap(b => b.classes || [])); S.spec.lessons.forEach(x => { if (x.block) (x.classes || []).forEach(c => banded.add(c)); });
   return { stu: S.spec.students.filter(s => !(s.groups || []).length && banded.has(s.class)).length, bands: S.spec.blocks.filter(b => b.block && !(b.classes || []).length).length };
@@ -1219,7 +1123,7 @@ function restoreHelper() {
   return `<div class="helper"><b>Restore from an earlier copy</b> <span class="muted">${what}.</span>
     ${S.past ? `<select id="pastPick">${S.past.map((p, k) => opt(k, S.pastPick, `${p.what} · ${p.when} · ${Object.keys(p.groups).length} students with groups`)).join("")}</select> <button data-past="restore">Restore</button>`
       : `<button data-past="load">Find earlier copies</button>`}
-    <p class="muted small" style="margin:6px 0 0">Fills only students with no groups now (matched by Student ID) and bands with no classes now, from a copy the server kept: each Save progress keeps the one it replaces, and each Generate keeps its own. Nothing else changes; Undo takes it back.</p></div>`;
+    <p class="muted small" style="margin:6px 0 0">Fills only students with no groups now (matched by Student ID) and bands with no classes now, from a copy the server kept: each Save progress keeps the one it replaces. Nothing else changes; Undo takes it back.</p></div>`;
 }
 async function pastAction(k) {
   if (k === "load") {
@@ -1388,9 +1292,8 @@ function commitPop() {
   pop.hidden = true; save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
 }
 
-/* ---------------- generate, chat, publish */
-const G = { server: null, st: null, after: 0, events: [], timer: null,
-  adj: { kind: "class", who: "", data: null, sel: null, cut: null, prop: null, ai: "" } };   // adj: the Adjust page
+/* ---------------- the server: what is published, access codes, the volume */
+const G = { server: null, st: null, timer: null, inflight: false };
 async function post(url, body) {
   const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   const j = await r.json().catch(() => ({}));
@@ -1398,124 +1301,18 @@ async function post(url, body) {
   if (!r.ok) { toast(j.error || "Something went wrong."); return null; }
   return j;
 }
-function solveSecs() {   // this browser's choice of how long each solve may run (Generate page), else the server's default
-  let v = 0; try { v = Number(localStorage.getItem("ttsolve")) || 0; } catch (e) { }
-  return v || (G.st && G.st.solve_seconds) || 1200;
-}
-async function generate(withAI) {
-  if (!S.spec) { toast("Open or start a setup first."); return; }
-  G.events = []; G.after = 0; G.alert = null;
-  const j = await post("/api/generate", { spec: S.spec, ai: withAI, seconds: solveSecs() });
-  if (j) { toast(withAI ? "The AI timetabler has started." : "Generating…"); synced(); poll(); }
-}
-async function sendChat(text) {
-  text = (text || "").trim(); if (!text) return;
-  const j = await post("/api/message", { text }); if (j) { const i = $("#chatin"); if (i) i.value = ""; poll(); }
-}
-async function poll() {
+async function poll() {   // every few seconds: the published timetable and the deployment's state (G.st)
   clearTimeout(G.timer);
   if (G.inflight) { G.timer = setTimeout(poll, 500); return; }
   G.inflight = true;
   try {
-    const r = await fetch(`/api/status?after=${G.after}`);
+    const r = await fetch("/api/status");
     if (r.status === 401) { location.href = "/login"; return; }
-    const st = await r.json(); G.st = st;
-    if (st.run) {
-      if (G.runId !== st.run.id) { G.runId = st.run.id; G.events = []; if (G.after) { G.after = 0; G.inflight = false; return poll(); } }
-      const fresh = G.after > 0;   // not the first load of this run's events
-      G.events.push(...st.run.events); if (st.run.events.length) G.after = st.run.events[st.run.events.length - 1].n;
-      const out = [...st.run.events].reverse().find(e => e.type === "nosolution" || e.type === "timetable");
-      if (out) {   // the latest solve's outcome: a 'nosolution' raises the alert until a timetable is made
-        G.alert = out.type === "nosolution" ? out : null;
-        if (G.alert && fresh) toast(`${G.alert.text} See why and how to fix it on Generate & publish.`);
-        paintBanner();
-      }
-    }
-    if (STEPS[S.step][0] === "generate") paintGen();
-    const nowBusy = !!(st.run && st.run.busy);
-    if (STEPS[S.step][0] === "adjust" && (G.wasBusy || G.adj.waiting) && !nowBusy) { G.adj.waiting = false; loadAdjust(); }
-    else if (STEPS[S.step][0] === "adjust" && nowBusy && G.adj.data) render();
-    G.wasBusy = nowBusy;
+    G.st = await r.json();
+    if (typeof paintPublished === "function") paintPublished();
   } catch (e) { }
   G.inflight = false;
-  const busy = G.st && G.st.run && G.st.run.busy;
-  G.timer = setTimeout(poll, ["generate", "adjust"].includes(STEPS[S.step][0]) ? (busy ? 1500 : 5000) : 15000);
-}
-const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
-function eventHTML(e, last) {
-  const items = e.items && e.items.length ? `<ul>${e.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : "";
-  switch (e.type) {
-    case "assistant": return `<div class="msg ai">${md(e.text)}</div>`;
-    case "user": return `<div class="msg me">${md(e.text)}</div>`;
-    case "summary": return `<div class="msg ai sum"><b>Summary</b><br>${md(e.text)}</div>`;
-    case "question": {
-      const open = G.st && G.st.run && G.st.run.waiting && e.n === last;
-      return `<div class="msg ai q">${md(e.text)}${open ? `<div class="opts">${(e.options || []).map(o => `<button class="small" data-answer="${esc(o)}">${esc(o)}</button>`).join("")}</div><div class="muted small">Pick one or type your own answer below.</div>` : ""}</div>`;
-    }
-    case "change": return `<div class="ev change"><b>Setup changed:</b> ${esc(e.text)}${items}</div>`;
-    case "timetable": return `<div class="ev tt ${e.data && e.data.ok ? "good" : "warn"}"><b>Timetable ${e.data ? "#" + e.data.n : ""}</b> · ${esc(e.text)} <a href="/preview" target="_blank">Preview</a></div>`;
-    case "nosolution": return `<div class="ev bad"><b>${esc(e.text)}</b>${items ? `<div class="small" style="margin-top:6px"><b>Why</b></div>${items}` : ""}${fixesHTML(e)}</div>`;
-    case "error": return `<div class="ev bad">${esc(e.text)}</div>`;
-    case "warn": return `<div class="ev caution"><b>${esc(e.text)}</b>${items ? `<details open><summary>Who</summary>${items}</details>` : ""}</div>`;
-    case "published": return `<div class="ev good"><b>${esc(e.text)}</b></div>`;
-    case "check": {
-      const its = e.items || [], lv = x => (x && x.level) || "warning", tx = x => typeof x === "string" ? x : x.text;
-      if (!its.length || typeof its[0] === "string") return `<div class="ev">${esc(e.text)}${items ? `<details><summary>Details</summary>${items}</details>` : ""}</div>`;
-      const hard = its.filter(x => lv(x) === "critical"), soft = its.filter(x => lv(x) !== "critical"), ul = l => `<ul>${l.map(x => `<li>${esc(tx(x))}</li>`).join("")}</ul>`;
-      return `<div class="ev ${hard.length ? "bad" : soft.length ? "caution" : ""}"><b>${esc(e.text)}</b>${hard.length ? `<details open><summary>Critical · ${hard.length}</summary>${ul(hard)}</details>` : ""}${soft.length ? `<details${hard.length ? "" : " open"}><summary>Warnings · ${soft.length}</summary>${ul(soft)}</details>` : ""}</div>`;
-    }
-    case "moved": return `<div class="ev">${esc(e.text)}${items ? `<details><summary>Which lessons moved</summary>${items}</details>` : ""}</div>`;
-    case "allocation": return `<div class="ev whatif"><b>${esc(e.text)}</b>${items ? `<details><summary>Who gets which row</summary>${items}</details>` : ""}${e.data && e.data.loads ? `<details><summary>Teacher loads</summary><ul>${e.data.loads.map(l => `<li>${esc(l)}</li>`).join("")}</ul></details>` : ""}${e.data && e.data.unfilled && e.data.unfilled.length ? `<details open><summary>Cannot be filled</summary><ul>${e.data.unfilled.map(l => `<li>${esc(l)}</li>`).join("")}</ul></details>` : ""}</div>`;
-    case "whatif": return `<div class="ev whatif"><b>What-if:</b> ${esc(e.text)}${items}</div>`;
-    case "compare": {   // a what-if against the latest timetable: the committee keeps or drops it (the question below)
-      const d = e.data || {}, tone = r => typeof r[1] === "number" && typeof r[2] === "number" && r[1] !== r[2] ? (r[2] < r[1] ? "good" : "bad") : "";
-      return `<div class="ev compare"><b>What-if: ${esc(e.text)}</b><table><tr><th></th><th>Now (#${esc(d.before)})</th><th>With the change (#${esc(d.after)})</th></tr>${(d.rows || []).map((r, i) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td class="${tone(r)}">${esc(r[2])}</td></tr>`).join("")}</table><a href="/preview" target="_blank">Preview the what-if</a></div>`;
-    }
-    default: return `<div class="ev">${esc(e.text || "")}</div>`;
-  }
-}
-/* what a timetable gives up (report.compromises): teachers over their allowance, Prefer rules not kept, Max periods in
-   a row. A warning box with the count of each kind; the list (the first 80) opens under it, grouped by kind */
-function compromisesHTML(s, small) {
-  const c = (s && s.compromised) || [];   // [[kind, how many]]: over allowance first, then the rules in order
-  if (!c.length) return s && s.compromised ? `<p class="okmsg${small ? " small" : ""}" style="margin:6px 0 0">Nothing compromised: every teacher is within their allowance and every Prefer rule is kept.</p>` : "";
-  const total = c.reduce((a, [, n]) => a + n, 0), shown = s.compromises || [];
-  const groups = c.map(([k, n]) => { const xs = shown.filter(x => x.kind === k);
-    return `<li><b>${esc(k)}</b> (${n})<ul>${xs.map(x => `<li>${esc(x.text)}</li>`).join("")}${xs.length < n ? `<li class="muted">…and ${n - xs.length} more: see the Compromises sheet in the Excel file.</li>` : ""}</ul></li>`; }).join("");
-  return `<div class="compbox${small ? " small" : ""}"><b>${total} compromise${total === 1 ? "" : "s"}:</b> ${c.map(([k, n]) => `${esc(k)} ${n}`).join(" · ")}
-    <details data-keep="${small ? "adjcomp" : "comp"}" ${keepOpen(small ? "adjcomp" : "comp", false)}><summary>What was compromised</summary><ul>${groups}</ul></details></div>`;
-}
-function paintGen() {
-  const st = G.st; if (!st || !$("#chatlog")) return;
-  const run = st.run, busy = run && run.busy, aiok = st.ai && st.ai.ok;
-  const lastQ = [...G.events].reverse().find(e => e.type === "question");
-  const log = $("#chatlog"), atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
-  log.innerHTML = G.events.length ? G.events.map(e => eventHTML(e, lastQ && lastQ.n)).join("") : `<div class="muted">Nothing generated yet. Press a Generate button above.</div>`;
-  if (atBottom) log.scrollTop = log.scrollHeight;
-  $("#progress").textContent = run && run.waiting ? "Waiting for your answer." : run && run.progress ? run.progress : (busy ? "Working…" : "");
-  $("#genAI").disabled = !aiok || busy; $("#genPlain").disabled = busy; $("#genStop").hidden = !busy;
-  const chatOn = run && run.ai; $("#chatin").disabled = !chatOn; $("#chatsend").disabled = !chatOn;
-  $("#chatin").placeholder = chatOn ? (run.waiting ? "Type your answer…" : "Ask or tell the timetabler something…") : "The chat works when you generate with the AI timetabler.";
-  const s = run && run.solved, a = G.alert;
-  $("#resultCard").innerHTML = `<h2>Latest timetable</h2>` + (a ? `<div class="alertbox"><b>${esc(a.text)}</b>${fixesHTML(a)}${a.items && a.items.length ? `<details><summary>Why</summary><ul>${a.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul></details>` : ""}</div>` : "") + (s ?`<p class="${s.ok ? "okmsg" : "issue"}">${s.ok ? "All checks passed" : `${s.problems.length} problems`} · ${s.lessons} lessons · ${s.after.length ? `${s.after.length} after school` : "nothing after school"}</p>
-      ${s.after.length ? `<details data-keep="after" ${keepOpen("after", false)}><summary>After-school lessons</summary><ul>${s.after.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
-      ${s.problems.length ? `<details data-keep="problems" ${keepOpen("problems", true)}><summary>Problems</summary><ul>${s.problems.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
-      ${compromisesHTML(s)}
-      ${s.notes.length ? `<details data-keep="notes" ${keepOpen("notes", false)}><summary>Notes</summary><ul>${s.notes.map(a => `<li>${esc(a)}</li>`).join("")}</ul></details>` : ""}
-      <p class="muted small">Made ${esc(s.at)}${run.changes ? ` · the setup was changed ${run.changes} time${run.changes > 1 ? "s" : ""} (by the AI or on Adjust)` : ""}.</p>
-      <div class="row"><a href="/preview" target="_blank"><button>Preview</button></a><button class="primary" id="publish" ${busy ? "disabled" : ""}>Publish</button>
-      ${run.changes ? `<button id="keepChanges" ${busy ? "disabled" : ""}>Keep these changes in my setup</button>` : ""}</div>`
-    : `<p class="muted">No timetable yet.</p>`);
-  const p = st.published, f = p ? p.files || {} : {};
-  $("#pubCard").innerHTML = `<h2>Published</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)}${p.source ? ` from ${esc(p.source)} (made outside the app)` : ""} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
-      <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
-      <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>${f.db ? `<a href="/files/db" title="Every lesson, class, teacher and room as a SQLite database, for other systems to import. It also holds the setup, so Printouts (on Files) can rebuild everything from it.">Timetable database (.sqlite), for other systems</a>` : ""}
-      ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
-      <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
-    : `<p class="muted">Nothing published yet. Teachers and students see a "not published yet" page.</p>`) +
-    `<p class="muted small">Made the timetable outside the app? Publish it from <b>Files</b>, under "A timetable made outside the app".</p>` +
-    `<h3>Access codes</h3><ul class="codes">${[["committee", "Committee"], ["teacher", "Teachers"], ["student", "Students"]].map(([k, t]) => `<li>${t}: ${st.codes && st.codes[k] ? "set" : "<b>not set</b>"}</li>`).join("")}</ul>
-    ${(st.code_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")}${st.volume ? "" : `<p class="issue">No Railway volume: the published timetable will be lost on the next deploy. Add a volume (see README).</p>`}`;
+  G.timer = setTimeout(poll, 5000);
 }
 
 /* ---------------- downloads */
@@ -1561,7 +1358,7 @@ function importHTML(j) {
   const head = `<h3 style="margin-top:14px">${esc(j.school)} · ${esc(j.timetable)}</h3><p class="muted small">${j.lessons} lessons · ${j.classes} classes · ${j.teachers} teachers · ${j.students} students</p>`;
   if (j.published) return head + `<div class="okmsg">Published. Teachers and students now see this timetable.</div>
     <div class="row" style="margin-top:8px"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
-    <p class="muted small">Its downloads and the personal student codes are on Generate &amp; publish.${G.st && G.st.run && G.st.run.solved ? " The latest timetable there and on Adjust is still the one made in the app: pressing Publish there puts that one back." : ""}</p>`;
+    <p class="muted small">Its downloads and the personal student codes are below.</p>`;
   const pub = G.st && G.st.published;
   return head + (j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.school)}</b>, but the setup saved in the app is for <b>${esc(j.other_school)}</b>. Check it is the right file.</p>` : "")
     + (j.ok ? `<div class="okmsg">All checks passed: no teacher, class, room or student is double-booked, every lesson is in lesson time, and every subject has the periods the setup plans.</div>`
@@ -1579,96 +1376,6 @@ async function buildXlsx() {
   dl(await r.blob(), `${(sc().name || "School").replace(/[^\w -]/g, "").trim().replace(/ /g, "_")}_Timetable_Setup.xlsx`);
 }
 
-/* ---------------- Adjust timetable: move lessons by hand before publishing */
-const adjWhen = (start, ln) => { const D = G.adj.data, d = Math.floor(start / D.NP), p = start % D.NP; return `${D.days[d]} ${D.clock[p]}–${D.clock[p + ln]}`; };
-async function loadAdjust() {
-  const A = G.adj; A.loading = true;
-  try { const r = await fetch("/api/adjust"); const j = await r.json(); if (r.status === 401) { location.href = "/login"; return; }
-    if (!r.ok) { A.data = null; A.error = j.error || "Could not load the timetable."; } else { A.data = j; A.error = ""; } }
-  catch (e) { A.error = "Could not load the timetable."; }
-  A.loading = false; if (STEPS[S.step][0] === "adjust") render();
-}
-function adjShows(l, A) {   // is this lesson in the class, teacher or room being shown?
-  return A.kind === "class" ? l.classes.includes(A.who) : A.kind === "teacher" ? l.teachers.includes(A.who) : l.rows.some(r => r.room === A.who);
-}
-function adjChip(l, A) {
-  const rows = A.kind === "teacher" ? l.rows.filter(r => r.teachers.includes(A.who)) : A.kind === "room" ? l.rows.filter(r => r.room === A.who) : l.rows;
-  const one = rows[0] || l.rows[0] || {};
-  const title = l.kind === "block" && A.kind === "class" ? l.name.replace(/ band$/, "") : A.kind === "class" ? (l.kind === "class" ? one.subject : `${one.subject} ${one.code}`) : `${l.kind === "class" ? l.name : `${one.subject} ${one.code}`}`;
-  const sub = A.kind === "class" ? (l.kind === "block" ? `${l.rows.length} group${l.rows.length === 1 ? "" : "s"}` : `${(one.teachers || []).join(", ")}${one.room ? " · " + one.room : ""}`)
-    : A.kind === "teacher" ? `${l.kind === "class" ? "" : l.classes.join(" ") + " · "}${one.room || ""}` : `${(one.teachers || []).join(", ")}${l.kind === "class" ? "" : " · " + l.classes.join(" ")}`;
-  const tip = `${l.name} · ${adjWhen(l.start, l.ln)}\n` + l.rows.map(r => `${r.subject} ${r.code} · ${r.teachers.join(", ")} · ${r.room || "no room"}${r.students ? ` · ${r.students} students` : ""}`).join("\n");
-  return `<button class="adjl${A.sel === l.key ? " sel" : ""}${A.cut === l.key ? " cut" : ""}" data-lesson="${esc(l.key)}" title="${esc(tip)}"><b>${l.pinned ? "📌 " : ""}${esc(title)}</b><span>${esc(sub)}</span></button>`;
-}
-function adjGrid(D, A) {
-  const mine = D.lessons.filter(l => adjShows(l, A)), NP = D.NP;
-  const lvs = A.kind === "class" ? [D.level_of[A.who]] : [...new Set(mine.map(l => l.level))];
-  const grid = (A.kind === "class" && (D.cgrid || {})[A.who]) || D.grid[lvs[0]] || Object.values(D.grid)[0];   // breaks shaded from the class's own day, else the (first) level shown
-  let html = `<tr><th></th>${Array.from({ length: NP }, (_, p) => `<th class="t">${esc(D.clock[p])}</th>`).join("")}</tr>`;
-  D.days.forEach((day, d) => {
-    const ls = mine.filter(l => Math.floor(l.start / NP) === d).sort((a, b) => a.start - b.start);
-    const groups = [];   // lessons that overlap share one cell
-    for (const l of ls) { const g = groups[groups.length - 1]; if (g && l.start < g.end) { g.ls.push(l); g.end = Math.max(g.end, l.start + l.ln); } else groups.push({ start: l.start, end: l.start + l.ln, ls: [l] }); }
-    let row = `<tr><th style="text-align:left">${esc(day)}</th>`, p = 0;
-    for (const g of groups) {
-      const gp = g.start % NP;
-      for (; p < gp; p++) row += `<td class="as c-${(grid[d] || "")[p] === "." ? "" : (grid[d] || "")[p] || ""}" data-start="${d * NP + p}"></td>`;
-      row += `<td class="al${g.ls.length > 1 ? " many" : ""}" colspan="${g.end - g.start}">${g.ls.map(l => adjChip(l, A)).join("")}</td>`; p = gp + (g.end - g.start);
-    }
-    for (; p < NP; p++) row += `<td class="as c-${(grid[d] || "")[p] === "." ? "" : (grid[d] || "")[p] || ""}" data-start="${d * NP + p}"></td>`;
-    html += row + "</tr>";
-  });
-  return html;
-}
-function adjPanel() {   // a move that clashes: why, and the ways out
-  const P = G.adj.prop; if (!P) return "";
-  const aiOn = G.st && G.st.ai && G.st.ai.ok;
-  return `<div class="alertbox" style="margin-top:10px"><b>Moving ${esc(P.name)} to ${esc(P.to)} clashes:</b><ul>${P.conflicts.map(c => `<li>${esc(c.text)}</li>`).join("")}</ul>
-    <div class="fixes"><b>Ways out</b>
-      ${P.free.length ? `<div style="margin-top:4px">Free times for it: ${P.free.map(f => `<button class="small" data-adjgo="${f.start}">${esc(f.label)}</button>`).join(" ")}</div>` : `<div class="muted" style="margin-top:4px">No free time without a clash.</div>`}
-      ${P.swaps.length ? `<div style="margin-top:4px">${P.swaps.map(s => `<button class="small" data-adjswap="${esc(s.key)}">${esc(s.label)}</button>`).join(" ")}</div>` : ""}
-      <div class="row" style="margin-top:8px">${P.allowed ? `<button class="small primary" data-adj="room" title="Keeps it at ${esc(P.to)} and moves as few other lessons as it can">Let the solver make room</button>` : ""}
-        ${aiOn ? `<button class="small" data-adj="ask">Ask the AI for other ways</button>` : ""}
-        ${P.allowed ? `<button class="small" data-adj="anyway" title="Keeps the clash: it shows as a problem until you fix it">Place it anyway</button>` : ""}<button class="small ghost" data-adj="nomove">Cancel</button></div>
-      ${G.adj.ai ? `<div class="aisays">${md(G.adj.ai)}</div>` : ""}</div></div>`;
-}
-async function adjPost(url, body) {
-  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
-  if (r.status === 401) { location.href = "/login"; return null; }
-  const j = await r.json().catch(() => ({})); if (!r.ok) { toast(j.error || "Something went wrong."); return null; }
-  return j;
-}
-async function adjCheck(key, where) {   // where: {start} or {dir: -1 | 1}
-  const A = G.adj; A.ai = "";
-  const p = await adjPost("/api/adjust/check", { key, ...where }); if (!p) return;
-  if (p.ok) { await adjMove({ [key]: p.start }); return; }
-  A.prop = p; A.cut = null; A.sel = key; render();
-}
-async function adjMove(moves, label) {
-  const A = G.adj, j = await adjPost("/api/adjust/move", { moves, label }); if (!j) return;
-  A.data = j; A.prop = null; A.cut = null; A.ai = ""; render(); toast(j.last ? `${j.last}.` : "Moved.");
-}
-async function adjAction(what) {
-  const A = G.adj, key = A.sel;
-  if (what === "cancel") { A.sel = A.cut = null; A.prop = null; render(); return; }
-  if (what === "nomove") { A.prop = null; A.ai = ""; render(); return; }
-  if (what === "undo" || what === "redo") { const j = await adjPost("/api/adjust/undo", { redo: what === "redo" }); if (j) { A.data = j; A.prop = null; render(); toast(what === "undo" ? "Move undone." : "Move redone."); } return; }
-  if (!key) return;
-  if (what === "earlier" || what === "later") { await adjCheck(key, { dir: what === "earlier" ? -1 : 1 }); return; }
-  if (what === "cut") { A.cut = key; A.prop = null; render(); toast("Now click where it should go."); return; }
-  if (what === "shorter" || what === "longer") {   // a new latest timetable: keys change, so find the lesson again by name and time
-    const was = A.data.lessons.find(l => l.key === key), j = await adjPost("/api/adjust/resize", { key, delta: what === "shorter" ? -1 : 1 }); if (!j) return;
-    A.data = j; A.prop = null; const now = j.lessons.find(l => l.name === was.name && l.start === was.start); A.sel = now ? now.key : null; render(); toast(j.message); return; }
-  if (what === "unpin") { const j = await adjPost("/api/adjust/unpin", { key }); if (j) { A.data = j; render(); } return; }
-  const P = A.prop; if (!P) return;
-  if (what === "anyway") { await adjMove({ [P.key]: P.start }, `Placed ${P.name} at ${P.to} with a clash`); return; }
-  if (what === "room") { const j = await adjPost("/api/adjust/make-room", { key: P.key, start: P.start, seconds: Math.max(120, Math.min(solveSecs(), 600)) });   // 2 to 10 minutes
-    if (j) { A.prop = null; A.waiting = true; toast("The solver is making room. This page updates when it is done."); render(); poll(); } return; }
-  if (what === "ask") { A.ai = "Asking the AI…"; render(); const j = await adjPost("/api/adjust/ask", { key: P.key, start: P.start }); A.ai = j ? j.text : ""; render(); return; }
-}
-
-/* on opening the page: this browser's unsaved work if it has any, else the setup saved for the school, else this
-   browser's last copy; with none of these, the Start page */
 (async () => {
   try { G.server = await getJSON("/api/setup"); } catch (e) { }
   const local = saved(), srv = G.server && G.server.spec ? G.server : null;
