@@ -105,11 +105,11 @@ asks first, saying how many lessons on step 5 name them.
 Removing a teacher takes them off the lessons they were on: those lessons lose that teacher, and a shared lesson keeps
 its other teacher. Availability rules on step 6 that name them stay, and step 6 flags them.
 
-**Teacher avatars.** Each teacher in the table has a small face. It is worked out from the teacher's name, so the same
-name has the same face wherever it is shown, and it is drawn in the browser from fixed parts: no picture is uploaded or
-stored, and nothing is sent to an outside service. **New look** (click the face) gives the teacher another one by adding
-one to a number kept on the teacher's row. The committee can do this for any teacher; a head of department only for a
-provisional teacher. The number is part of the saved setup only, so the workbook does not carry it and a setup opened
+**Teacher avatars.** Each teacher has a small face, on the table here and on the map on step 5. It is worked out from
+the teacher's name, so the same name has the same face wherever it is shown, and it is drawn in the browser from fixed
+parts: no picture is uploaded or stored, and nothing is sent to an outside service. **New look**, on the teacher's
+profile on step 5 (click any avatar on the map), gives the teacher another one by adding one to a number kept on the
+teacher's row. The committee can do this for any teacher; a head of department only for a provisional teacher. The number is part of the saved setup only, so the workbook does not carry it and a setup opened
 from a workbook starts with the faces the names give.
 
 ## Deploy on Railway

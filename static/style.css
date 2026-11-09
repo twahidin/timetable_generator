@@ -195,3 +195,5 @@ button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .lane{border-left:3px solid var(--navy);padding-left:8px;margin-bottom:12px}
 .map.dragging .gcard,.map.dragging .basket{outline:1px dashed #cdd5e1}
 .cards .small.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.profile h4{margin:12px 0 4px;font-size:13px}
+.profile select{width:auto}

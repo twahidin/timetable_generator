@@ -981,7 +981,7 @@ const VIEWS = {
       ${teacherBar()}
       <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="teachers" title="Tick every teacher shown (${rows.length})" ${all ? "checked" : ""}></th><th></th><th>Teacher</th><th>Short</th><th>Department</th><th>Allowance</th><th>Can teach</th><th>Given</th><th>Spare</th><th>Role</th><th>Other duties</th><th>Total load</th><th>Load check</th><th>Provisional</th><th></th></tr>
       ${(() => { const lc = loadChecks(load); return rows.map(([t, i]) => { const g = load[t.name] || 0; const sp = t.allowance ? Number(t.allowance) - g : ""; const tot = g + (Number(t.other_duties) || 0);
-        return `<tr id="teachers-${i}" class="${rowCls(out, crit, "teachers", i)}${P.teachers.has(i) ? " picked" : ""}"><td><input type="checkbox" data-pick="teachers.${i}" ${P.teachers.has(i) ? "checked" : ""}></td><td class="avcell"><button class="avatar" data-avatar="${i}" title="New look" aria-label="New look for ${esc(t.name || "this teacher")}">${avatarOf(t, 32)}</button></td><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}${committee() && t.provisional === "Yes" ? ` <span class="headmark" title="A department head added this teacher. Set Provisional to No to confirm them.">added by a head</span>` : ""}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join(""); })()}
+        return `<tr id="teachers-${i}" class="${rowCls(out, crit, "teachers", i)}${P.teachers.has(i) ? " picked" : ""}"><td><input type="checkbox" data-pick="teachers.${i}" ${P.teachers.has(i) ? "checked" : ""}></td><td class="avcell" title="New look is on the teacher's profile, step 5">${avatarOf(t, 32)}</td><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}${committee() && t.provisional === "Yes" ? ` <span class="headmark" title="A department head added this teacher. Set Provisional to No to confirm them.">added by a head</span>` : ""}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join(""); })()}
       </table></div><div class="row" style="margin-top:10px"><button data-add="teachers">+ Add teacher</button></div></div>`;
   },
   roles(load) {   // the Roles sheet: guide allowance per role and the load of the teachers in it
@@ -1028,6 +1028,8 @@ const VIEWS = {
     Sync.ensureIds(S.spec);
     const dept = mapDept(), D = sc().departments || [], T = S.spec.teachers, ro = DeptMap.roster(S.spec, dept, M.extra);
     tickedIdx();
+    if (M.profile && !DeptMap.prune([M.profile], S.spec).length) M.profile = null;
+    const prof = M.profile ? T.findIndex(t => t && t._id === M.profile) : -1;
     const nTick = ro.filter(i => M.ticked.has(T[i]._id)).length, some = nTick > 0 && nTick < ro.length;
     return `<div class="map"><section class="roster card">
       <div class="row"><select id="mDept" title="Department">${D.map(d => opt(d, dept)).join("")}</select><span class="muted small">${ro.length} teacher${ro.length === 1 ? "" : "s"}${nTick ? ` · ${nTick} ticked` : ""}</span></div>
@@ -1035,7 +1037,7 @@ const VIEWS = {
       <input id="mQ" type="search" placeholder="Find, or add a teacher from another department" value="${esc(M.q)}" style="width:100%">
       <div id="rbody">${rosterList(dept)}</div>
       <div class="row" style="margin-top:10px">${M.adding ? "" : `<button data-mnew>+ New teacher</button>`}</div>${M.adding ? newTeacherForm(dept) : ""}
-    </section>${basketsView(dept)}${cardsView(dept)}</div>`;
+    </section>${basketsView(dept)}${prof >= 0 ? profileView(T[prof], prof) : cardsView(dept)}</div>`;
   },
   _bands(out, info, crit) {
     const open = S.bandsOpen ?? (!S.spec.blocks.length || Object.keys(out.blocks).length > 0);   // until the committee opens or closes it
@@ -1161,6 +1163,9 @@ document.addEventListener("click", async e => {
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
   for (const k of ["mview", "mall", "mnone", "munplaced", "madd", "mnew", "mnewcancel", "mnewgo"]) if (b.dataset[k] !== undefined) { mapAction(k, b.dataset[k]); return; }
   if (b.dataset.mtab) { M.tab = b.dataset.mtab; render(); return; }
+  if (b.dataset.mprofile) { M.profile = b.dataset.mprofile; render(); return; }
+  if (b.dataset.mclose !== undefined) { M.profile = null; render(); return; }
+  if (b.dataset.mpx) { basketRemove([[S.spec.teachers.findIndex(t => t && t._id === M.profile), b.dataset.mpx]]); return; }
   if (b.dataset.mx) { const [li, cls, ...nm] = b.dataset.mx.split("|"); cardRemove(`${li}|${cls}`, nm.join("|")); return; }
   if (b.dataset.mbx) { const [id, ...sub] = b.dataset.mbx.split("|"); basketRemove([[S.spec.teachers.findIndex(t => t && t._id === id), sub.join("|")]]); return; }
   if (b.dataset.mbasket !== undefined) { basketAdd(b.dataset.mbasket, tickedIdx()); return; }
@@ -1422,6 +1427,20 @@ function cardsView(dept) {   // the right-hand column: where the department's su
   const body = cards.length ? cards.map(c => c.kind === "band" ? band(c) : card(c)).join("") : `<p class="muted small">No ${what} for ${esc(dept)}${M.level ? ` at ${esc(M.level)}` : ""} yet. Add them in the table view.</p>`;
   return `<section class="cards card"><div class="row" style="justify-content:space-between"><div class="row" style="gap:4px">${tabs}</div><select id="mLevel">${opt("", M.level, "All levels")}${levels().map(l => opt(l, M.level)).join("")}</select></div>
     <div class="clist keep" style="margin-top:8px">${body}</div></section>`;
+}
+function profileView(t, i) {   // a teacher's profile, in place of the cards while open
+  const info = lessonInfo(), ld = DeptMap.loads(S.spec, info)[t.name] || {}, key = c => c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`;
+  const teaches = [], seen = new Set();
+  [...new Set(S.spec.subjects.map(x => x.dept))].forEach(d => ["classes", "groups"].forEach(tab => DeptMap.cards(S.spec, info, d, tab, "").forEach(c => { if (c.teachers.includes(t.name) && !seen.has(key(c))) { seen.add(key(c)); teaches.push(c); } })));
+  const mayLook = !isHead() || S.practice || provisionalRow(t);   // the server lets a head change only a provisional teacher's row
+  const canRows = (t.can_teach || []).map((c, k) => `<div class="row" style="gap:6px;margin-bottom:4px"><span style="flex:1">${esc(c.subject)}</span>${sel(`spec.teachers.${i}.can_teach.${k}.levels`, c.levels || "All", scopes(), false, 'style="width:auto"')}<button class="small danger" data-mpx="${esc(c.subject)}" title="Take ${esc(c.subject)} off">✕</button></div>`).join("") || `<p class="muted small">No subject yet: tick them and click a basket.</p>`;
+  const tRows = teaches.map(c => `<div class="row" style="gap:6px;margin-bottom:4px"><span style="flex:1">${esc(c.title)} · ${esc(c.subject)} · ${c.periods || "?"} periods</span><button class="small danger" data-mx="${esc(key(c))}|${esc(t.name)}" title="Take ${esc(t.name)} off ${esc(c.title)}">✕</button></div>`).join("") || `<p class="muted small">Not deployed yet.</p>`;
+  return `<section class="cards card profile"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Profile</h3><button class="small ghost" data-mclose>✕ Close</button></div>
+    <div class="row" style="align-items:flex-start;margin-top:8px;flex-wrap:nowrap"><div style="text-align:center">${avatarOf(t, 64)}${mayLook ? `<div><button class="small" data-avatar="${i}" title="Another face for this teacher">New look</button></div>` : ""}</div>
+    <div style="min-width:0"><div style="font-weight:600">${esc(t.name || "")}</div><div class="muted small">${esc(t.short || "")}${t.role ? ` · ${esc(t.role)}` : ""}${t.dept ? ` · ${esc(t.dept)}` : ""}${provisionalRow(t) ? ` <span class="tag">provisional</span>` : ""}</div>
+    <div class="small ${ld.over ? "overtxt" : ""}" style="margin-top:4px">${ld.lessons || 0} periods deployed${ld.duties ? ` + ${ld.duties} other duties` : ""}${ld.allowance ? ` = ${ld.total} of ${ld.allowance}` : ""}</div></div></div>
+    <h4>Can teach</h4>${canRows}<h4>Teaches</h4><div class="keep" style="max-height:40vh;overflow:auto">${tRows}</div>
+    <p class="muted small" style="margin:10px 0 0">${isHead() && !S.practice ? "Details are changed by the committee on step 4; a provisional teacher's by you there." : "Details are changed on step 4."}</p></section>`;
 }
 function cardAt(key) {   // "li|cls" (a class card) or "li|" (a group card)
   const [li, cls] = String(key).split("|"), i = Number(li), x = S.spec.lessons[i]; if (!x) return null;
