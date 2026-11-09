@@ -155,3 +155,6 @@ __pycache__/
 
 # app data (saved setup, runs, published timetable)
 data/
+
+# plan workspaces (ledgers, briefs): scratch, never committed
+.superpowers/
