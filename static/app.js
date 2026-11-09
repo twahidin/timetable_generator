@@ -19,8 +19,8 @@ const SYNC = { v: 0, base: null, client: "", state: "saved", others: 0, timer: n
   held: null,      // others' changes waiting for a redraw: {spec, from} (from: S.spec when they arrived)
   kept: false,     // this tab has written changes not yet sent to this browser's storage
   moved: false };  // an old-format copy in this browser has been moved aside
-try { SYNC.client = sessionStorage.getItem("ttsetup.client") || ""; } catch (e) { }
-if (!SYNC.client) { SYNC.client = Sync.newId(); try { sessionStorage.setItem("ttsetup.client", SYNC.client); } catch (e) { } }
+SYNC.client = Sync.newId();   // new on every load: a duplicated tab must not share it, or neither would see the other's changes
+const REPLACED = "The committee replaced the school's setup.";
 const DROPPED = "The committee replaced the school's setup, so the changes you had not sent were dropped.";
 function save(o) {
   if (S.spec) Sync.ensureIds(S.spec);
@@ -122,7 +122,7 @@ async function syncNow() {
     if (r.status === 401) { location.href = "/login"; return; }
     if (r.status >= 500) throw new Error(`server ${r.status}`);
     const j = await r.json().catch(() => ({}));
-    if (r.status === 403) {   // a change this person may not make: nothing was applied, so start again from the server's copy
+    if (r.status === 403) {   // fallback (the server now skips what a head may not make): nothing was applied, so start again from the server's copy
       toast(j.error || "That change is not allowed.");
       const srv = await fetchSetup(); if (!srv) return;
       if (srv.spec) { await openServer(srv); SYNC.base = Sync.clone(S.spec); keepLocal(); render(); }
@@ -130,13 +130,20 @@ async function syncNow() {
       if (!(G.st && G.st.role === "committee") || !await putSetup(sent, "Saved from a browser", S.step)) throw new Error("no setup");
       render();
     } else if (!r.ok) throw new Error(j.error || `status ${r.status}`);
-    else if (j.reset) { await catchUp(j, sent, ops); wait = 0; }
+    else if (j.reset) { await catchUp(j, sent, ops, r.ok && ops.length > 0); wait = 0; }
     else {
       const theirs = (j.patches || []).flatMap(p => p.ops || []);
-      const nb = Sync.rebase(SYNC.base, sent, working(), theirs, ops);
+      // operations the server would not make for this person (a head) are left out of what it applied: they drop out of
+      // the working copy too, as they are in neither the new base nor the edits made since the send
+      const no = new Set((j.refused || []).map(x => x.i)), ours = ops.filter((_, i) => !no.has(i));
+      const nb = Sync.rebase(SYNC.base, sent, working(), theirs, ours);
       SYNC.base = nb.base; SYNC.v = j.v;
-      if (theirs.length) takeSpec(nb.spec);
+      if (theirs.length || no.size) takeSpec(nb.spec);
       if (theirs.length || ops.length) keepLocal();   // the base moved: what is kept as not sent must move with it
+      if (no.size) {
+        const why = [...new Set(j.refused.map(x => x.why))].join(" ");
+        toast(`${no.size} change${no.size === 1 ? "" : "s"} could not be made: ${why}`);
+      }
     }
     if ("others" in j) SYNC.others = j.others;
     SYNC.state = Sync.diff(SYNC.base, working()).length ? "saving" : "saved";
@@ -146,18 +153,26 @@ async function syncNow() {
   clearTimeout(SYNC.timer); SYNC.timer = setTimeout(syncNow, SYNC.again && SYNC.state !== "offline" ? 0 : wait);
 }
 /* the server's log no longer reaches back to SYNC.v: take its copy. Replaced by the committee: what was not sent is
-   dropped; otherwise it goes on top of the new copy and is sent again. */
-async function catchUp(j, sent, ops) {
+   dropped; otherwise it goes on top of the new copy and is sent again. accepted: the reset came back from a send the
+   server applied, so only the edits made since that send are still to go on top (applying the sent operations again
+   could undo someone's newer change to the same field); after a fetch with nothing sent, everything since the old
+   base is still to go. */
+async function catchUp(j, sent, ops, accepted) {
+  const old = SYNC.base;
   const srv = await fetchSetup(); if (!srv) return;
   if (!srv.spec) throw new Error("no setup");
   await useKind(srv.spec);
-  SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
   if (j.replaced) {
+    const dropped = ops.length > 0 || Sync.diff(sent, working()).length > 0;   // sent, or edited while the request was out
+    SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
     S.undo = []; S.redo = []; SYNC.held = null;
-    takeSpec(Sync.clone(srv.spec));
-    if (ops.length) toast(DROPPED);
+    const spec = Sync.clone(srv.spec); defaultRoles(spec);
+    takeSpec(spec);
+    toast(dropped ? DROPPED : REPLACED);
   } else {
-    const spec = Sync.clone(srv.spec); Sync.apply(spec, ops); Sync.apply(spec, Sync.diff(sent, working()));
+    const unsent = accepted ? Sync.diff(sent, working()) : Sync.diff(old, working());
+    SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
+    const spec = Sync.clone(srv.spec); Sync.apply(spec, unsent);
     takeSpec(spec);
   }
   keepLocal();
@@ -168,7 +183,13 @@ function headsTeachers() {
   if (!(G.st && G.st.role === "head")) return;
   Sync.ensureIds(S.spec);
   const had = new Set((SYNC.base.teachers || []).map(t => t && t._id));
-  (S.spec.teachers || []).forEach(t => { if (t && !had.has(t._id)) t.provisional = "Yes"; });
+  const fix = (S.spec.teachers || []).filter(t => t && !had.has(t._id) && t.provisional !== "Yes");
+  if (!fix.length) return;
+  // a change made outside save(): S.snap (and S.last, when it was up to date) take it too, so it is never an Undo entry
+  const rest = S.last === JSON.stringify(S.spec);
+  const also = [S.snap, S.from].filter(Boolean).flatMap(x => x.teachers || []).filter(t => t && fix.some(f => f._id === t._id));
+  fix.concat(also).forEach(t => { t.provisional = "Yes"; });
+  if (rest) S.last = JSON.stringify(S.spec);
 }
 async function getJSON(u) { const r = await fetch(u); if (!r.ok) throw new Error(await r.text()); return r.json(); }
 async function fetchSetup() {   // {spec, v, saved_at}; null when signed out (the page goes to sign in)
@@ -181,11 +202,22 @@ async function useKind(spec) {
   const k = (spec.school && spec.school.type) || S.kind || "secondary";
   if (k !== S.kind || !S.meta) { S.meta = await getJSON(`/api/meta/${k}`); S.kind = k; }
 }
+/* a setup with no roles gets the usual ones (S.meta.roles), written once when it is opened, never while drawing a step.
+   Only where roles may be changed: the committee, or a practice copy (a head sees the usual ones listed, nothing written).
+   The ids are fixed, so two committee members opening it at once add them once (an add with an id already there is
+   skipped). True if any were added. */
+function defaultRoles(spec) {
+  if (!(committee() || S.practice) || !spec) return false;
+  if (!Array.isArray(spec.roles)) spec.roles = [];
+  if (spec.roles.length || !(S.meta && (S.meta.roles || []).length)) return false;
+  spec.roles = S.meta.roles.map((r, i) => Object.assign(Sync.clone(r), { _id: "roledef" + String(i).padStart(3, "0") }));
+  return true;
+}
 /* open the server's copy here: it is the base, the undo list starts empty */
 async function openServer(srv, step) {
   await useKind(srv.spec);
   unpick(); SYNC.held = null; SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
-  S.spec = Sync.clone(srv.spec); LIST_KEYS.forEach(k => S.spec[k] = S.spec[k] || []);
+  S.spec = Sync.clone(srv.spec); LIST_KEYS.forEach(k => S.spec[k] = S.spec[k] || []); defaultRoles(S.spec);
   if (step != null) S.step = step;
   ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
 }
@@ -280,7 +312,7 @@ async function practice(kind) {
     await holdSync(async () => {
       await useKind(spec);   // may fail: nothing has changed yet, the school's setup stays open
       S.practice = true; SYNC.held = null; unpick();
-      Sync.ensureIds(spec); LIST_KEYS.forEach(k => spec[k] = spec[k] || []); S.spec = spec;
+      Sync.ensureIds(spec); LIST_KEYS.forEach(k => spec[k] = spec[k] || []); defaultRoles(spec); S.spec = spec;
       S.step = 1; ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
     });
   } catch (e) {
@@ -956,10 +988,9 @@ const VIEWS = {
       ${VIEWS.roles(load)}`;
   },
   roles(load) {   // the Roles sheet: guide allowance per role and the load of the teachers in it
-    // the defaults are written into the setup only where the person may change roles (the committee, or a practice copy);
-    // a head's page only shows them, so rendering never makes a change the server would refuse
-    let RL = S.spec.roles;
-    if (!RL || !RL.length) { RL = JSON.parse(JSON.stringify(S.meta.roles || [])); if (committee() || S.practice) S.spec.roles = RL; }
+    // drawing never writes to the setup: the usual roles are written when the setup is opened (defaultRoles), and a
+    // head, who may not change roles, sees them listed (read-only) when the setup has none
+    const RL = S.spec.roles && S.spec.roles.length ? S.spec.roles : isHead() && !S.practice ? S.meta.roles || [] : [];
     const tot = t => (load[t.name] || 0) + (Number(t.other_duties) || 0), avg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : "";
     const eo = avg(S.spec.teachers.filter(t => t.role === "EO" && tot(t) > 0).map(tot)), mgmt = avg(S.spec.teachers.filter(t => ["HOD", "SH"].includes(t.role) && tot(t) > 0).map(tot));
     return `<div class="card"><h2>Roles</h2><p class="muted">Management (HOD, SH) should teach fewer periods than teachers; teachers (EO) should be spread evenly. Teachers (EO) average load <b>${eo || "–"}</b> · management (HOD, SH) <b>${mgmt || "–"}</b>.
@@ -1646,7 +1677,7 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
       ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
       <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
     : `<p class="muted">Nothing published yet. Teachers and students see a "not published yet" page.</p>`) +
-    `<h3>Access codes</h3><ul class="codes">${[["committee", "Committee"], ["teacher", "Teachers"], ["student", "Students"]].map(([k, t]) => `<li>${t}: ${st.codes && st.codes[k] ? "set" : "<b>not set</b>"}</li>`).join("")}</ul>
+    `<h3>Access codes</h3><ul class="codes">${[["committee", "Committee"], ["teacher", "Teachers"], ["student", "Students"]].map(([k, t]) => `<li>${t}: ${st.codes && st.codes[k] ? "set" : "<b>not set</b>"}</li>`).join("")}<li>Department heads: ${st.codes && st.codes.head ? "set" : "not set (no heads' sign-in)"}</li></ul>
     ${(st.code_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")}${st.volume ? "" : `<p class="issue">No Railway volume: the published timetable will be lost on the next deploy. Add a volume (see README).</p>`}`;
 }
 
@@ -1730,6 +1761,7 @@ async function openPage() {
         if (j.reset && j.replaced) { pending = null; SYNC.kept = true; toast(DROPPED); }
       }
       await openServer(srv, local ? local.step : 1);
+      // pending was kept here and never accepted by the server (keepLocal drops what it accepts), so it goes on top
       if (pending) { Sync.apply(S.spec, pending); save({ quiet: true }); }
     }
   } catch (e) {
