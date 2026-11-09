@@ -263,7 +263,7 @@ function settingRow(x, i) {   // one row of Settings below the rule rows, as a f
     : lab.startsWith("floating recess goes by") ? `<select data-k="${k}">${opt("Level", x[1], "Level: each level together")}${opt("Class", x[1], "Class: each class on its own")}</select>`
     : lab.startsWith("floating recess length") ? inp(k, x[1], "number", 'min="1" max="12"')
     : lab.startsWith("most classes at recess at once") ? inp(k, x[1], "number", 'min="1" placeholder="no limit"') : inp(k, x[1]);
-  return `<label class="f" id="school-${i}">${esc(x[0])} ${field}${x[2] ? `<span class="muted small">${esc(x[2])}</span>` : ""}</label>`;
+  return `<label class="f" id="${isRecessRow(x) ? "school" : "config"}-${i}">${esc(x[0])} ${field}${x[2] ? `<span class="muted small">${esc(x[2])}</span>` : ""}</label>`;
 }
 function recessSetting(label) {   // [row index, value] of a floating recess row on Settings
   const ex = sc().extra_settings || [], i = ex.findIndex(x => String(x[0]).toLowerCase().startsWith(label.toLowerCase()));
@@ -305,13 +305,13 @@ function canTeach(t, subject, level) {
   return (tt.can_teach || []).some(c => c.subject === subject && (!c.levels || c.levels === "All" || c.levels === level || c.levels === bands()[level]));
 }
 function issues() {
-  const out = { school: {}, lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
+  const out = { school: {}, config: {}, lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
   // hard: no timetable can be made until it is fixed (critical). The rest are warnings: a timetable can still be made, but a person should look.
   const crit = new Set(), add = (k, i, m, hard) => { (out[k][i] = out[k][i] || []).push(m); if (hard) crit.add(`${k}|${i}|${m}`); };
   (sc().extra_settings || []).forEach((x, i) => {   // 'Lessons end by (...)' rows on Settings
     if (!String(x[0]).toLowerCase().startsWith("lessons end by") || x[1] == null || x[1] === "") return;   // blank: no end time on those days
-    if (!/^\d{1,2}:\d{2}$/.test(String(x[1]))) { add("school", i, `${x[0]}: give a time such as 12:40, or clear it for no end time.`, true); return; }
-    if (Math.floor((mins(x[1]) - mins(sc().start_time)) / Number(sc().period_minutes || 20)) <= 0) add("school", i, `${x[0]}: ${x[1]} is before the first period ends, so no lesson fits on those days.`, true);
+    if (!/^\d{1,2}:\d{2}$/.test(String(x[1]))) { add("config", i, `${x[0]}: give a time such as 12:40, or clear it for no end time.`, true); return; }
+    if (Math.floor((mins(x[1]) - mins(sc().start_time)) / Number(sc().period_minutes || 20)) <= 0) add("config", i, `${x[0]}: ${x[1]} is before the first period ends, so no lesson fits on those days.`, true);
   });
   if (hasWindows()) {   // floating recess: windows long enough, and the canteen limit not ruled out from the start
     const [li, len] = recessSetting("Floating recess length"), [ci, cap] = recessSetting("Most classes at recess at once"), [bi, by] = recessSetting("Floating recess goes by");
@@ -580,7 +580,7 @@ function render() {
   renderIssues(); saveState(); window.scrollTo(0, y);
   if (typeof paintPublished === "function") paintPublished();
 }
-const stepAt = id => STEPS.findIndex(s => s[0] === (id === "blocks" ? "lessons" : id));   // bands are a card on the teaching-groups step
+const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings open step 6
 function count(id) { if (!S.spec) return ""; const m = { venues: "venues", classes: "classes", subjects: "subjects", teachers: "teachers", blocks: "blocks", lessons: "lessons", rules: "rules", students: "students" }[id]; return m ? S.spec[m].length : ""; }
 function renderIssues() {
   const el = $("#issues"); if (!S.spec) { el.innerHTML = ""; return; }
@@ -641,12 +641,7 @@ const VIEWS = {
         <label class="f">Departments <input data-list="departments" value="${esc((s.departments || []).join(", "))}"></label>
         <label class="f">Room kinds <input data-list="room_kinds" value="${esc((s.room_kinds || []).join(", "))}"></label>
       </div></div>
-      <div class="card"><h2>Rules on the Settings sheet</h2><p class="muted">School-wide rules. Teacher block-outs, fixed lessons and any other rule are on step 6.</p>
-      <div class="grid2">${SET().map(x => `<label class="f">${esc(x.label)} ${x.number
-        ? `<input data-set="${x.key}" type="number" min="1" value="${esc(settingValue(x.key))}" placeholder="no limit">`
-        : `<select data-set="${x.key}">${["Yes", "No"].map(v => opt(v, settingValue(x.key))).join("")}</select>`}</label>`).join("")}
-      ${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? "" : settingRow(x, i)).join("")}</div></div>
-      <div class="card"><h2>Day structure</h2>${(w => w.length ? `<div class="notice"><b>The Day structure and the rules on Settings disagree.</b> The rules win where they are stricter, so make them say the same:<ul>${w.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "")(structureWarnings())}<div class="legend">Brush: ${["L", "R", "W", "U", "F", "A", ""].map(c => `<button class="small ${S.brush === c ? "primary" : ""}" data-brush="${c}"><i class="c-${c}" style="width:12px;height:12px;display:inline-block;border-radius:3px;vertical-align:-2px"></i> ${{ L: "Lesson", R: "Recess", W: "Recess window", U: "Lunch", F: "Flag / assembly", A: "After-school slot", "": "No school" }[c]}</button>`).join("")}</div>
+      <div class="card"><h2>Day structure</h2>${(w => w.length ? `<div class="notice"><b>The Day structure and the settings on step 6 disagree.</b> The rules win where they are stricter, so make them say the same:<ul>${w.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "")(structureWarnings())}<div class="legend">Brush: ${["L", "R", "W", "U", "F", "A", ""].map(c => `<button class="small ${S.brush === c ? "primary" : ""}" data-brush="${c}"><i class="c-${c}" style="width:12px;height:12px;display:inline-block;border-radius:3px;vertical-align:-2px"></i> ${{ L: "Lesson", R: "Recess", W: "Recess window", U: "Lunch", F: "Flag / assembly", A: "After-school slot", "": "No school" }[c]}</button>`).join("")}</div>
       <p class="muted" style="margin:4px 0 10px">Click or drag across cells to paint them with the brush.</p>
       <div class="tablewrap"><table class="dsgrid">${head}${lvRows}</table></div>
       ${hasWindows() ? `<h3 style="margin:14px 0 4px">Floating recess</h3><p class="muted" style="margin:0 0 8px">For the W periods: the solver puts a recess of this length in each recess window. Make a window the recess plus whole lessons (for example 2 + 3 + 3 periods with 3-period lessons), so the lessons still fit wherever the recess goes.</p>
@@ -751,7 +746,14 @@ const VIEWS = {
       const subjCell = r.rule === "Only these subjects" ? chips(`spec.rules.${i}.subject`, namesList(r.subject), "subjects") : sel(`spec.rules.${i}.subject`, r.subject, subjectNames());
       const venueCell = r.rule === "Only in venues" ? chips(`spec.rules.${i}.venues`, namesList(r.venues), "rooms") : '<span class="muted small">–</span>';
       return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td><select data-k="spec.rules.${i}.scope">${opt("", r.scope, "")}${S.meta.scopes.map(v => opt(v, r.scope, v === "Block" ? "Band" : v)).join("")}</select></td><td style="min-width:150px">${sel(`spec.rules.${i}.target`, r.target, targetOptions(r.scope))}</td><td style="min-width:180px">${subjCell}</td><td style="min-width:180px">${sel(`spec.rules.${i}.rule`, r.rule, RT.filter(t => !r.scope || scopesOf(t).includes(r.scope)).map(t => t.rule))}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td>${psel(`spec.rules.${i}.to`, r.to)}</td><td class="num">${inp(`spec.rules.${i}.number`, r.number, "number", 'style="width:56px"')}</td><td style="min-width:120px">${venueCell}</td><td>${sel(`spec.rules.${i}.strength`, r.strength || "Must", ["Must", "Prefer"], false)}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 13)}`; }).join("");
-    return `<div class="card"><h1>Step 6 · Teacher availability</h1><p class="lead">Times a teacher cannot teach (part-time days, a centre or programme after school). Times are clock times; every period they overlap is blocked. School-wide rules are on <b>School &amp; day</b>.</p>
+    const s = sc();
+    return `<div class="card"><h1>Step 6 · Configuration and constraints</h1><p class="lead">The school-wide settings first, then the constraints: times a teacher cannot teach, lessons fixed at a set time, and any other rule.</p>
+      <h2>Configuration</h2><p class="muted">School-wide settings. They apply to every class and teacher.</p>
+      <div class="grid2">${SET().map(x => `<label class="f">${esc(x.label)} ${x.number
+        ? `<input data-set="${x.key}" type="number" min="1" value="${esc(settingValue(x.key))}" placeholder="no limit">`
+        : `<select data-set="${x.key}">${["Yes", "No"].map(v => opt(v, settingValue(x.key))).join("")}</select>`}</label>`).join("")}
+      ${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? "" : settingRow(x, i)).join("")}</div></div>
+      <div class="card"><h2>Teacher availability</h2><p class="muted">Times a teacher cannot teach (part-time days, a centre or programme after school). Times are clock times; every period they overlap is blocked.</p>
       <div class="tablewrap"><table class="ruletable"><tr><th>Teacher</th><th>Week</th><th>Day</th><th>From</th><th>To</th><th>Blocks</th><th>Reason</th><th></th></tr>${avail}</table></div>
       <div class="row" style="margin-top:10px"><button data-add="avail">+ Add block-out</button></div></div>
       <div class="card"><h2>Fixed lessons</h2><p class="muted">Lessons that must start at a set time (optional): a class with a subject, a group code from step 5, or <b>${EVERY}</b>: that subject for every class of the level at once (Level <b>All</b>: the whole school), such as CCE. Leave empty to let the timetable place everything.</p>
