@@ -53,6 +53,48 @@ def test_check_lists_a_class_with_more_periods_than_its_days():
 def test_check_refuses_an_empty_setup():
     assert c.post("/api/check", json={}).status_code == 400
 
+def _changes(client, since, ops=None, who=None):
+    who = who or c
+    r = who.post("/api/setup/changes", json={"since": since, "client": client, "ops": ops}) if ops is not None else who.get(f"/api/setup/changes?since={since}&client={client}")
+    return r.status_code, r.get_json()
+
+def test_two_people_change_different_rows():
+    c.put("/api/setup", json=c.get("/api/sample/secondary").get_json())
+    rec = c.get("/api/setup").get_json(); v0 = rec["v"]; a, b = rec["spec"]["classes"][0], rec["spec"]["classes"][1]
+    assert a["_id"] and b["_id"] and a["_id"] != b["_id"]
+    _, ja = _changes("A", v0, [["set", "classes", a["_id"], "size", 41]])
+    _, jb = _changes("B", v0, [["set", "classes", b["_id"], "size", 42]])
+    assert ja["v"] == v0 + 1 and jb["v"] == v0 + 2
+    assert jb["patches"] == [{"v": v0 + 1, "ops": [["set", "classes", a["_id"], "size", 41]]}]    # B catches up on A in the same call
+    now = c.get("/api/setup").get_json()["spec"]["classes"]
+    assert (now[0]["size"], now[1]["size"]) == (41, 42)
+    _, ga = _changes("A", ja["v"]); assert [p["v"] for p in ga["patches"]] == [v0 + 2] and ga["others"] >= 1
+
+def test_both_can_teach_additions_are_kept():
+    rec = c.get("/api/setup").get_json(); t = rec["spec"]["teachers"][0]; v = rec["v"]
+    for who, subj in (("A", "Zzz One"), ("B", "Zzz Two")):
+        _changes(who, v, [["merge", "teachers", t["_id"], "can_teach", [{"levels": "All", "subject": subj}], []]])
+    got = [x["subject"] for x in c.get("/api/setup").get_json()["spec"]["teachers"][0]["can_teach"]]
+    assert "Zzz One" in got and "Zzz Two" in got
+
+def test_a_replaced_setup_resets_everyone():
+    v = c.get("/api/setup").get_json()["v"]
+    c.put("/api/setup", json={"spec": c.get("/api/sample/primary").get_json(), "why": "Opened a workbook"})
+    code, j = _changes("A", v); assert j == {"v": j["v"], "reset": True, "replaced": True, "others": j["others"]}
+    assert c.get("/api/setup/copies").get_json()[0]["what"] == "Before: Opened a workbook"
+
+def test_a_restart_resets_without_losing_the_setup():
+    v = c.get("/api/setup").get_json()["v"]; _changes("A", v, [["school", "timetable", "Term 9"]])
+    store._log.clear(); store._setup.clear()            # what a restart does to the process
+    rec = c.get("/api/setup").get_json(); assert rec["v"] == v + 1 and rec["spec"]["school"]["timetable"] == "Term 9"
+    _, j = _changes("A", v); assert j["reset"] is True and j["replaced"] is False
+
+def test_ids_do_not_reach_the_workbook():
+    import io, openpyxl
+    r = c.post("/api/build", json=c.get("/api/setup").get_json()["spec"])
+    wb = openpyxl.load_workbook(io.BytesIO(r.data), read_only=True)
+    assert not any("_id" in str(cell) for ws in wb.worksheets for row in ws.iter_rows(max_row=8, values_only=True) for cell in row if cell)
+
 def test_publish_uploaded_timetable():   # slow: solves the primary sample
     work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx")
     env = dict(os.environ, PYTHONPATH=ROOT)

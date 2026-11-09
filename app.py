@@ -219,15 +219,54 @@ def read_table():
 @app.get("/api/setup")
 @need("committee")
 def get_setup():
-    return jsonify(store.setup_record())
+    r = store.setup_record()
+    return jsonify(spec=r["spec"], v=r["v"], saved_at=r["saved_at"])
 
 @app.put("/api/setup")
 @need("committee")
 def put_setup():
-    """Save progress: the setup every committee member opens after signing in"""
-    spec = request.get_json(force=True, silent=True)
-    if not spec or "school" not in spec: return {"error": "No setup data sent."}, 400
-    return {"ok": True, **store.save_setup(spec)}
+    """Save the whole setup (body {spec, why}; a bare spec is accepted too): everyone who has it open fetches it again"""
+    body = request.get_json(force=True, silent=True)
+    body = body if isinstance(body, dict) else {}
+    spec, why = (body, "Saved") if "school" in body else (body.get("spec"), str(body.get("why") or "Saved")[:80])
+    if not isinstance(spec, dict) or "school" not in spec: return {"error": "No setup data sent."}, 400
+    return store.replace_setup(spec, why)
+
+def _changes_reply(since, client, upto=None):
+    return {**store.changes_since(since, client, upto), "others": store.seen(client)}
+
+def _int(x):
+    try: return int(x)
+    except (TypeError, ValueError): return 0
+
+@app.get("/api/setup/changes")
+@need("committee")
+def get_setup_changes():
+    return _changes_reply(_int(request.args.get("since")), str(request.args.get("client") or "")[:40])
+
+@app.post("/api/setup/changes")
+@need("committee")
+def post_setup_changes():
+    """a change as operations; the answer carries what others changed meanwhile, so the caller catches up in the same call"""
+    body = request.get_json(force=True, silent=True)
+    body = body if isinstance(body, dict) else {}
+    client, ops = str(body.get("client") or "")[:40], body.get("ops")
+    if not isinstance(ops, list): return {"error": "No changes sent."}, 400
+    try: v = store.apply_changes(ops, client)
+    except LookupError: return {"error": "There is no saved setup to change yet."}, 409
+    return _changes_reply(_int(body.get("since")), client, v)
+
+@app.get("/api/setup/copies")
+@need("committee")
+def get_setup_copies():
+    return jsonify(store.copies())
+
+@app.post("/api/setup/restore")
+@need("committee")
+def restore_setup():
+    body = request.get_json(force=True, silent=True)
+    try: return store.restore(str((body or {}).get("id") or ""))
+    except KeyError: return {"error": "That copy is not there any more."}, 404
 
 @app.get("/api/past-setups")
 @need("committee")

@@ -1,7 +1,8 @@
 """Where things live: the committee's saved setup, its earlier copies and the published timetable, all under DATA_DIR
 (a Railway volume, so they survive redeploys)."""
-import csv, datetime, io, json, os, pickle, shutil, threading
+import collections, copy, csv, datetime, io, json, os, pickle, shutil, threading, time
 from ttgen.export import model_from_files, export_all
+import sync
 from access import personal_code, personal_codes_on, norm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -16,7 +17,7 @@ PUB = os.path.join(DATA, "published")
 RUNS = os.path.join(DATA, "runs")
 HIST = os.path.join(DATA, "setup_history")   # earlier saves of the setup, to restore from
 os.makedirs(RUNS, exist_ok=True)
-KEEP_SAVES = 20
+KEEP_SAVES = 48
 _lock = threading.Lock()
 _publishing = threading.Lock()   # one publish at a time: each writes the same folder before swapping it in
 
@@ -41,37 +42,138 @@ def read_json(path, default=None):
         with open(path, encoding="utf-8") as f: return json.load(f)
     except (OSError, ValueError): return default
 
-def save_setup(spec):
-    """the committee's setup, shared: it opens on any browser after signing in. ts tells the editor which copy is newer"""
-    old = read_json(os.path.join(DATA, "setup.json"))
-    if old and old.get("spec") and old["spec"] != spec:   # keep the copy it replaces (the last KEEP_SAVES of them)
+# ------------------------------------------------------------------------------------------------ the shared setup
+# One setup, one version number, one change log, all in this process (one gunicorn worker) and guarded by _setup_lock.
+# setup.json holds saved_at, ts, v, replaced_v and the spec; the log is lost on a restart, which makes every browser
+# fetch the setup again.
+_setup_lock = threading.RLock()
+_setup = {}                                   # the cached record; empty = not loaded (or no setup yet)
+_log = collections.deque(maxlen=400)          # dict(v, client, ops), contiguous versions ending at _setup["v"]
+_present = {}                                 # client -> when it was last seen
+_last_point = [0.0]                           # when the newest restore point was taken
+POINT_EVERY = 600                             # seconds between restore points while people work
+BIG_DELETE = 20                               # rows deleted in one change that earn a restore point
+SETUP_FILE = os.path.join(DATA, "setup.json")
+
+def _write_setup():
+    write_json(SETUP_FILE, {k: _setup[k] for k in ("saved_at", "ts", "v", "replaced_v", "spec")})
+
+def _stamp():
+    _setup.update(saved_at=now(), ts=datetime.datetime.now().timestamp())
+
+def _load():
+    """the cached record, read from disk the first time. Rows saved before versions get an _id and a first version."""
+    if _setup: return _setup
+    x = read_json(SETUP_FILE)
+    if not x or not x.get("spec"): return _setup
+    _setup.update(spec=x["spec"], saved_at=x.get("saved_at"), ts=x.get("ts") or 0, v=x.get("v") or 0, replaced_v=x.get("replaced_v") or 0)
+    if not _setup["v"] or sync.ensure_ids(_setup["spec"]):
+        _setup["v"] += 1
+        _write_setup()
+    _log.clear()
+    return _setup
+
+def _points():
+    return sorted((f for f in os.listdir(HIST) if f.endswith(".json")), key=lambda f: int(f[:-5]) if f[:-5].isdigit() else 0) if os.path.isdir(HIST) else []
+
+def restore_point(why):
+    """keep a copy of the setup as it is now, to go back to (the last KEEP_SAVES of them)"""
+    with _setup_lock:
+        cur = _load()
+        if not cur: return
         os.makedirs(HIST, exist_ok=True)
-        write_json(os.path.join(HIST, f"{int(old.get('ts') or 0)}.json"), old)
-        for f in sorted(os.listdir(HIST))[:-KEEP_SAVES]: os.remove(os.path.join(HIST, f))
-    x = dict(saved_at=now(), ts=datetime.datetime.now().timestamp(), spec=spec)
-    write_json(os.path.join(DATA, "setup.json"), x)
-    return dict(saved_at=x["saved_at"], ts=x["ts"])
+        t = datetime.datetime.now().timestamp(); name = int(t * 1000)
+        while os.path.exists(os.path.join(HIST, f"{name}.json")): name += 1
+        write_json(os.path.join(HIST, f"{name}.json"), dict(what=why, saved_at=now(), ts=t, v=cur["v"], spec=cur["spec"]))
+        _last_point[0] = t
+        for f in _points()[:-KEEP_SAVES]: os.remove(os.path.join(HIST, f))
+
+def _copy(rec):
+    return dict(spec=copy.deepcopy(rec.get("spec")), saved_at=rec.get("saved_at"), ts=rec.get("ts") or 0, v=rec.get("v") or 0)
+
+def setup_record():
+    with _setup_lock: return _copy(_load())
+
+def load_setup():
+    r = setup_record()
+    return (r["spec"], r["saved_at"]) if r["spec"] else (None, None)
+
+def replace_setup(spec, why):
+    """the whole setup replaced (a save of everything, an imported workbook, a restore): everyone fetches it again"""
+    with _setup_lock:
+        if _load(): restore_point("Before: " + why)
+        sync.ensure_ids(spec)
+        _setup.update(spec=spec, v=_setup.get("v", 0) + 1)
+        _setup["replaced_v"] = _setup["v"]
+        _stamp(); _log.clear(); _write_setup()
+        return dict(v=_setup["v"], saved_at=_setup["saved_at"])
+
+def save_setup(spec):
+    return replace_setup(spec, "Saved")
+
+def _risky(ops):
+    dels = [o for o in ops if isinstance(o, list) and o and o[0] == "del"]
+    return len(dels) > BIG_DELETE or any(len(o) > 1 and o[1] == "teachers" for o in dels)
+
+def apply_changes(ops, client):
+    """apply a change to the current setup; returns the new version"""
+    with _setup_lock:
+        cur = _load()
+        if not cur: raise LookupError("no setup")
+        if not ops: return cur["v"]
+        if datetime.datetime.now().timestamp() - _last_point[0] > POINT_EVERY or _risky(ops): restore_point("While working")
+        sync.apply(cur["spec"], ops)
+        cur["v"] += 1
+        _stamp(); _write_setup()
+        _log.append(dict(v=cur["v"], client=client, ops=ops))
+        return cur["v"]
+
+def changes_since(since, client, upto=None):
+    """what other clients changed after version since; a reset when the log no longer reaches back that far.
+    upto stops at a version (the caller's own change), so nothing after it is skipped later."""
+    with _setup_lock:
+        cur = _load(); v = cur.get("v", 0) if upto is None else upto
+        if since >= v and since <= cur.get("v", 0): return dict(v=v, patches=[])
+        if since > cur.get("v", 0) or not _log or _log[0]["v"] > since + 1:
+            return dict(v=v, reset=True, replaced=cur.get("replaced_v", 0) > since)
+        return dict(v=v, patches=[dict(v=e["v"], ops=e["ops"]) for e in _log if since < e["v"] <= v and e["client"] != client])
+
+def copies():
+    """the restore points, newest first (the copies themselves stay on disk)"""
+    with _setup_lock:
+        out = []
+        for f in reversed(_points()):
+            x = read_json(os.path.join(HIST, f)) or {}
+            if x.get("spec"): out.append(dict(id=f"save-{f[:-5]}", what=x.get("what") or "Saved", when=x.get("saved_at")))
+        return out
+
+def restore(copy_id):
+    with _setup_lock:
+        f = os.path.join(HIST, copy_id[5:] + ".json") if copy_id.startswith("save-") and copy_id[5:].isdigit() else None
+        x = read_json(f) if f else None
+        if not x or not x.get("spec"): raise KeyError(copy_id)
+        return replace_setup(x["spec"], "Restored " + (x.get("saved_at") or "an earlier copy"))
+
+def seen(client):
+    """note this client as here now; how many others were seen in the last 20 seconds"""
+    with _setup_lock:
+        t = time.time()
+        for k in [k for k, w in _present.items() if t - w > 20]: del _present[k]
+        _present[client] = t
+        return len(_present) - 1
 
 def past_setups():
-    """earlier copies of the setup, newest first: the saves kept in HIST, and the copies an earlier version of the app
-    kept with each Generate run (RUNS is no longer written)"""
+    """earlier copies of the setup, newest first: the restore points kept in HIST, and the copies an earlier version of
+    the app kept with each Generate run (RUNS is no longer written)"""
     out = []
-    for f in os.listdir(HIST) if os.path.isdir(HIST) else []:
+    for f in _points():
         x = read_json(os.path.join(HIST, f)) or {}
-        if x.get("spec"): out.append(dict(id=f"save-{f[:-5]}", what="Saved", when=x.get("saved_at"), ts=x.get("ts") or 0, spec=x["spec"]))
+        if x.get("spec"): out.append(dict(id=f"save-{f[:-5]}", what=x.get("what") or "Saved", when=x.get("saved_at"), ts=x.get("ts") or 0, spec=x["spec"]))
     for d in os.listdir(RUNS):
         w, st = os.path.join(RUNS, d, "work.json"), read_json(os.path.join(RUNS, d, "state.json")) or {}
         spec = read_json(w) if os.path.exists(w) else None
         if spec and spec.get("school"): out.append(dict(id=f"run-{d}", what="Generate", when=st.get("started"), ts=os.path.getmtime(w), spec=spec))
     return sorted(out, key=lambda x: -x["ts"])
-
-def load_setup():
-    x = read_json(os.path.join(DATA, "setup.json"))
-    return (x["spec"], x.get("saved_at")) if x else (None, None)
-
-def setup_record():
-    x = read_json(os.path.join(DATA, "setup.json")) or {}
-    return dict(spec=x.get("spec"), saved_at=x.get("saved_at"), ts=x.get("ts") or 0)
 
 _cache = dict(stamp=None, value=None)
 
