@@ -12,7 +12,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, defaults
-import access, store
+import access, checks, store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -175,6 +175,27 @@ def import_xlsx():
     except Exception as e: return {"error": f"That does not look like a setup workbook from this app ({e})."}, 400
     finally: os.unlink(path)
     return jsonify(spec)
+
+def normalise(spec):
+    """the editor's JSON -> the exact spec an agent would read from the workbook (codes, periods and lesson lengths worked out)"""
+    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students"): spec.setdefault(k, [])
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp: path = tmp.name
+    try:
+        write_template(spec, path); return read_template(path)
+    finally: os.unlink(path)
+
+@app.post("/api/check")
+@need("committee")
+def check_setup():
+    """Will it fit? The sums on the setup as it is in the editor, before it goes to an outside agent: class periods
+    against the day, lessons against the stretches between breaks, special rooms, teachers' time, rules that cannot be
+    used. Returns every finding, critical first"""
+    spec = request.get_json(force=True, silent=True)
+    if not spec or "school" not in spec: return {"error": "No setup data sent."}, 400
+    try: found = checks.findings(normalise(copy.deepcopy(spec)))
+    except Exception as e: return {"error": f"The setup could not be checked: {e}"}, 400
+    crit = sum(1 for f in found if f["level"] == checks.CRITICAL)
+    return jsonify(findings=found, critical=crit, warnings=len(found) - crit)
 
 @app.post("/api/read-table")
 @need("committee")

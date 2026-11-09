@@ -36,6 +36,23 @@ def test_setup_round_trip():
     assert c.put("/api/setup", json=spec).status_code == 200
     assert c.get("/api/setup").get_json()["spec"]["school"]["name"] == spec["school"]["name"]
 
+def _check(spec): return c.post("/api/check", json=spec)
+
+def test_check_passes_the_sample():
+    r = _check(c.get("/api/sample/secondary").get_json()); j = r.get_json()
+    assert r.status_code == 200 and j["critical"] == 0, j
+    assert j["warnings"] == sum(1 for f in j["findings"] if f["level"] == "warning")
+
+def test_check_lists_a_class_with_more_periods_than_its_days():
+    spec = c.get("/api/sample/secondary").get_json()
+    subject = next(x for x in spec["subjects"] if (x.get("periods") or {}).get("Sec 1")); subject["periods"]["Sec 1"] = 200
+    j = _check(spec).get_json()
+    assert j["critical"] >= 1 and j["findings"][0]["level"] == "critical", j["findings"][:2]
+    assert any("lesson periods a cycle" in f["text"] and f["area"] == "classes" for f in j["findings"]), [f["text"][:80] for f in j["findings"][:5]]
+
+def test_check_refuses_an_empty_setup():
+    assert c.post("/api/check", json={}).status_code == 400
+
 def test_publish_uploaded_timetable():   # slow: solves the primary sample
     work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx")
     env = dict(os.environ, PYTHONPATH=ROOT)

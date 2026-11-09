@@ -579,6 +579,7 @@ function render() {
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
   paintPublished();
+  if (id === "download") fitCheck();
 }
 const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings open step 6
 function count(id) { if (!S.spec) return ""; const m = { venues: "venues", classes: "classes", subjects: "subjects", teachers: "teachers", blocks: "blocks", lessons: "lessons", rules: "rules", students: "students" }[id]; return m ? S.spec[m].length : ""; }
@@ -794,6 +795,7 @@ const VIEWS = {
       <div><span class="stat"><b>${S.spec.classes.length}</b> classes</span><span class="stat"><b>${S.spec.teachers.length}</b> teachers</span><span class="stat"><b>${S.spec.blocks.length}</b> bands</span><span class="stat"><b>${S.spec.lessons.length}</b> lesson rows</span><span class="stat"><b>${S.spec.rules.length}</b> rules</span><span class="stat"><b>${S.spec.students.length}</b> students</span></div>
       ${nc ? `<p class="issue crit" style="margin-top:12px">${nc} row${nc === 1 ? " has" : "s have"} a critical problem: no timetable can be made until ${nc === 1 ? "it is" : "they are"} fixed (see the right-hand panel).${n > nc ? ` ${n - nc} more ${n - nc === 1 ? "has" : "have"} only warnings.` : ""}</p>`
         : n ? `<p class="issue soft" style="margin-top:12px">Nothing critical. ${n} row${n === 1 ? " has" : "s have"} warnings for a person to check (see the right-hand panel); a timetable can still be made.</p>` : '<p class="okmsg" style="margin-top:12px">Everything checks out.</p>'}</div>
+      <div class="card" id="fitCard" style="margin-top:16px"></div>
       <div class="dl">
         <div class="card"><h2>1 · Configuration workbook</h2><p class="muted">Everything you entered, as the .xlsx template.</p><button class="primary" id="build">Download workbook (.xlsx)</button></div>
         <div class="card"><h2>2 · The timetable skill</h2><p class="muted">Use the zip when the chatbot can run code: its scripts make a timetable file this app can publish as it is. SKILL.md alone is for a chatbot that cannot run code.</p><div class="row"><a href="/download/skill.zip"><button class="primary">Skill (.zip)</button></a><a href="/download/SKILL.md"><button>SKILL.md only</button></a></div></div>
@@ -841,6 +843,7 @@ document.addEventListener("click", async e => {
     if (/^teachers-/.test(b.dataset.row)) S.tf = { dept: "", subj: "", q: "" };
     S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
+  if (b.id === "fitAgain") { fitCheck(true); return; }
   if (b.id === "serverSetup") { await adopt(G.server.spec, "Opened the school's saved setup.", { base: G.server.ts, dirty: false }); return; }
   if (b.id === "exGo") { makePrintouts(); return; }
   if (b.id === "imCheck") { importTimetable(false); return; }
@@ -1317,6 +1320,38 @@ async function poll() {   // every few seconds: the published timetable and the 
   } catch (e) { }
   G.inflight = false;
   G.timer = setTimeout(poll, 5000);
+}
+/* Will it fit? The server's sums on the setup as it is now (checks.findings): each class's periods against its lesson
+   time, lessons against the stretches between breaks, special rooms, teachers' time, floating recess and the rules.
+   Run when the Download step opens and again whenever the setup has changed since. */
+const FIT = { key: null, busy: false, res: null, err: "" };
+async function fitCheck(force) {
+  if (!S.spec) return;
+  if (!force && FIT.key === S.last && (FIT.busy || FIT.res || FIT.err)) { paintFit(); return; }
+  const key = S.last; Object.assign(FIT, { key, busy: true, res: null, err: "" }); paintFit();
+  try {
+    const r = await fetch("/api/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: key });
+    if (r.status === 401) { location.href = "/login"; return; }
+    const j = await r.json().catch(() => ({}));
+    if (FIT.key !== key) return;   // the setup changed while this was running: a newer check is on its way
+    if (r.ok) FIT.res = j; else FIT.err = j.error || "The check could not run.";
+  } catch (e) { if (FIT.key === key) FIT.err = "Could not reach the server: " + e.message; }
+  if (FIT.key === key) { FIT.busy = false; paintFit(); }
+}
+function paintFit() {
+  const el = $("#fitCard"); if (!el) return;
+  const head = `<h2>Will it fit?</h2><p class="muted">The sums on this setup before it goes to the AI agent: each class's periods against its lesson time, lessons against the stretches between breaks, special rooms, teachers' time and the rules.</p>`;
+  if (FIT.busy) { el.innerHTML = head + `<p class="muted">Checking…</p>`; return; }
+  if (FIT.err) { el.innerHTML = head + `<p class="issue">${esc(FIT.err)}</p><button id="fitAgain">Check again</button>`; return; }
+  const j = FIT.res; if (!j) { el.innerHTML = head; return; }
+  const item = f => { const at = stepAt(f.area); return `<li>${esc(f.text)}${at > 0 ? ` <button class="small" data-step="${at}">Open ${esc(STEPS[at][1].replace(/^\d+ /, ""))}</button>` : ""}</li>`; };
+  const hard = j.findings.filter(f => f.level === "critical"), soft = j.findings.filter(f => f.level !== "critical");
+  el.innerHTML = head + (hard.length
+      ? `<p class="issue crit">${hard.length} thing${hard.length === 1 ? "" : "s"} will not fit: no timetable can be made until ${hard.length === 1 ? "it is" : "they are"} fixed.</p>
+         <details open><summary class="sev crit">Critical · ${hard.length}</summary><ul class="fitlist">${hard.map(item).join("")}</ul></details>`
+      : `<p class="okmsg">Nothing critical: by these sums a timetable can be made from this setup.</p>`)
+    + (soft.length ? `<details ${hard.length ? "" : "open"}><summary class="sev">Warnings · ${soft.length}</summary><p class="muted small">A timetable can still be made; a person should look at these.</p><ul class="fitlist">${soft.map(item).join("")}</ul></details>` : "")
+    + `<div class="row" style="margin-top:10px"><button id="fitAgain">Check again</button><span class="muted small">Checked against the setup as it is on this page now.</span></div>`;
 }
 function paintPublished() {   // the Publish step's lower card: what teachers and students see now, the downloads and the codes
   const el = $("#pubNow"), st = G.st; if (!el || !st) return;

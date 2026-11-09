@@ -42,11 +42,16 @@ to print, one page per class. Students not on the list use the general student c
    timetable can be made until it is fixed (a teacher on two groups of one band, a fixed lesson outside lesson time,
    fixed lessons that put one teacher in two places). *Warnings* (amber): a timetable can still be made, but a person
    should look (a teacher over their allowance, a room that seats too few, a rule that matches no lesson).
-2. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
+2. **Will it fit?** Step 7 opens with the sums on the setup as it stands, before anything goes to an agent: each
+   class's periods against the lesson periods of its days, lessons against the stretches between breaks (a 3-period
+   lesson cannot run across recess), a lesson longer than any stretch, special rooms against the lessons that need
+   them, each teacher's lessons against the times they can teach, and floating recess that cannot work. Critical
+   first, each with a button to the step that fixes it; it runs again whenever the setup changes (`checks.py`).
+3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
-3. **Make the timetable outside**: give the agent both, and ask it to generate the timetable and report anything that
+4. **Make the timetable outside**: give the agent both, and ask it to generate the timetable and report anything that
    does not fit. It hands back a timetable database (`.sqlite`) or a timetable workbook (a Lessons sheet).
-4. **Publish** (step 8): upload that file (a workbook comes with its setup workbook; a database made by the skill holds
+5. **Publish** (step 8): upload that file (a workbook comes with its setup workbook; a database made by the skill holds
    its setup) and press **Check, then publish**. The app checks it against its setup (teacher, class, room and student
    clashes, lessons outside lesson time, periods placed against periods planned) and lists what it found, with a
    warning when it is for another school than the saved setup. **Publish this timetable** then makes it what teachers
@@ -153,6 +158,7 @@ copies as files. If someone else saved a newer setup in the meantime, Save progr
 |---|---|
 | `app.py` | routes: sign-in, the committee's editor, the downloads, check and publish, the timetable pages, PDFs |
 | `access.py` | access codes, personal codes, wrong-code limit (10 per 10 minutes per address) |
+| `checks.py` | will it fit: the sums on a setup before it is downloaded (class periods, breaks, rooms, teachers' time) |
 | `store.py` | saved setup, its earlier copies and the published timetable on the volume |
 | `tests/smoke.py` | server checks, run with plain Python (no test runner) |
 | `static/` | the committee's step-by-step editor and the sign-in page style |

@@ -144,3 +144,5 @@ tr.caution td{background:#fff7e6}
 h3.sev{font-size:13px;margin:12px 0 2px;color:#7a4b00}
 h3.sev.crit,summary.sev.crit{color:var(--warn)}
 summary.sev.crit{font-weight:600}
+summary.sev{cursor:pointer;margin:8px 0 4px;color:#7a4b00;font-weight:600}
+.fitlist{margin:4px 0 8px 18px;padding:0;font-size:13px}.fitlist li{margin:5px 0;line-height:1.45}.fitlist li button{margin-left:4px}

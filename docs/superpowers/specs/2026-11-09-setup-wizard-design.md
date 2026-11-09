@@ -197,6 +197,10 @@ verification on that list.
   not an older installed copy; what to produce; in which format; and to fill in the rule report (below).
 - Before downloading, the page shows "Things to fix" (critical first), so the committee does not hand over a setup
   with rules that cannot be used or teachers in two places.
+- **Will it fit?** The step opens with the capacity sums that used to run at Generate (`checks.py`): each class's
+  periods against its lesson periods, lessons against the stretches between breaks, special rooms, teachers' time,
+  floating recess. Critical first, each linking to its step; run again whenever the setup changes. *(Added during
+  stage 1 at the committee's request: removing Generate would otherwise have removed these checks.)*
 - Save to file and Load from file (in the page header today). Restoring an earlier copy of the whole setup is one of
   the whole-setup actions under "One shared setup".
 
