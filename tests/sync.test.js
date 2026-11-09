@@ -122,4 +122,16 @@ passed++;
 }
 passed++;
 
+// a list section that is null or not a list: add starts it as a list, del / set / merge skip (same as sync.py)
+[null, "x", { a: 1 }].forEach((bad) => {
+  let spec = { roles: bad };
+  assert.strictEqual(Sync.apply(spec, [["add", "roles", { _id: "r1", role: "EO" }, ""]]), 0);
+  assert.deepStrictEqual(spec, { roles: [{ _id: "r1", role: "EO" }] });
+  spec = { roles: bad };
+  assert.strictEqual(Sync.apply(spec, [["del", "roles", "r1"], ["set", "roles", "r1", "role", "X"],
+    ["merge", "roles", "r1", "x", [1], []]]), 3);
+  assert.deepStrictEqual(spec, { roles: bad });
+});
+passed++;
+
 console.log(passed + " cases passed");

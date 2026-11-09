@@ -121,9 +121,12 @@ class Refused(Exception):
 class Replaced(Exception):
     """the whole setup was replaced after the version the change was made on: it is not applied"""
 
-def apply_changes(ops, client, check=None, since=None):
-    """apply a change to the current setup; returns the new version.
+def apply_changes(ops, client, check=None, since=None, filter=None):
+    """apply a change to the current setup; returns (the new version, refused).
     check(spec, ops) runs on the setup held under the lock: a sentence back raises Refused and nothing is applied.
+    filter(spec, ops) -> (allowed, refused) also runs under the lock: only the allowed operations are applied (one
+    version, one log entry holding just them; none when nothing is allowed) and refused, [(index in ops, sentence)], is
+    handed back for the caller to report.
     since: the version the change was made on; when the setup was replaced after it, Replaced is raised and nothing
     is applied (the change belongs to a setup that is gone)"""
     with _setup_lock:
@@ -133,13 +136,15 @@ def apply_changes(ops, client, check=None, since=None):
         if check:
             why = check(cur["spec"], ops)
             if why: raise Refused(why)
-        if not ops: return cur["v"]
+        refused = []
+        if filter: ops, refused = filter(cur["spec"], ops)
+        if not ops: return cur["v"], refused
         if datetime.datetime.now().timestamp() - _last_point[0] > POINT_EVERY or _risky(ops): restore_point("While working")
         sync.apply(cur["spec"], ops)
         cur["v"] += 1
         _stamp(); _write_setup()
         _log.append(dict(v=cur["v"], client=client, ops=ops))
-        return cur["v"]
+        return cur["v"], refused
 
 def changes_since(since, client, upto=None):
     """what other clients changed after version since; a reset when the log no longer reaches back that far.

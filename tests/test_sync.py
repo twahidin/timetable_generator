@@ -123,4 +123,30 @@ for bad in ([["set", "classes", "c1", "size", 9]], [["school", "name", "X"]], [[
 assert "classes" in sync.head_may(spec, [["set", "classes", "c1", "size", 9]])
 passed += 1
 
+# a head's batch is split: what they may make is applied, the rest is refused with a reason (index in the batch)
+spec = {"teachers": [{"_id": "t1", "provisional": "No"}], "classes": [{"_id": "c1"}]}
+batch = [["set", "lessons", "l1", "students", 12], ["set", "classes", "c1", "size", 9],
+         ["add", "teachers", {"_id": "t9", "name": "N"}, ""], ["set", "teachers", "t9", "short", "NN"],
+         ["set", "teachers", "t1", "name", "X"]]
+ok, refused = sync.head_split(spec, batch)
+assert ok == [batch[0], batch[2], batch[3]], ok
+assert [i for i, _ in refused] == [1, 4], refused
+assert refused[0][1] == sync.head_may(spec, [batch[1]]) and "classes" in refused[0][1]
+assert "provisional" in refused[1][1] and all(w.endswith(".") for _, w in refused)
+assert sync.head_split(spec, []) == ([], [])
+assert sync.head_may(spec, batch) == refused[0][1]
+assert sync.head_split(spec, ["x", [["set"]]])[1][0] == (0, "Department heads cannot send that change.")
+passed += 1
+
+# a list section that is null or not a list: add starts it as a list, del / set / merge skip (same as sync.js)
+for bad in (None, "x", {"a": 1}):
+    spec = {"roles": bad}
+    assert sync.apply(spec, [["add", "roles", {"_id": "r1", "role": "EO"}, ""]]) == 0, bad
+    assert spec == {"roles": [{"_id": "r1", "role": "EO"}]}, spec
+    spec = {"roles": bad}
+    assert sync.apply(spec, [["del", "roles", "r1"], ["set", "roles", "r1", "role", "X"],
+                             ["merge", "roles", "r1", "x", [1], []]]) == 3, bad
+    assert spec == {"roles": bad}
+passed += 1
+
 print(f"{passed} cases passed")

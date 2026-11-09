@@ -161,7 +161,9 @@ def _apply_one(spec, op):
         _, section, row, after = op
         if not isinstance(row, dict) or not row.get("_id") or _find(spec, section, row["_id"]):
             return False
-        rows = spec.setdefault(section, [])
+        if not isinstance(spec.get(section), list):
+            spec[section] = []
+        rows = spec[section]
         pos = len(rows)
         if after == "":
             pos = 0
@@ -221,30 +223,47 @@ _STR_ARGS = {"set": (1, 2, 3), "merge": (1, 2, 3), "add": (1,), "del": (1, 2),
              "school": (1,), "day": (1, 2), "top": (1,)}
 
 
+def _head_why(spec, op):
+    """None if a head of department may make the one operation `op` on `spec`, else a sentence saying why not."""
+    if not isinstance(op, list) or not op or not isinstance(op[0], str):
+        return "Department heads cannot send that change."
+    name = op[0]
+    if name in ("school", "day", "top"):
+        return "Department heads cannot change the school details, the day structure or other settings."
+    section = op[1] if len(op) > 1 else None
+    if section in ("lessons", "blocks"):
+        return None
+    if section != "teachers":
+        return f"Department heads cannot change {section if isinstance(section, str) else 'that'}."
+    if name == "merge" and len(op) > 3 and op[3] == "can_teach":
+        return None
+    if name == "add" and len(op) > 2 and isinstance(op[2], dict):
+        return None
+    if name in ("set", "del") and len(op) > 2 and (name == "del" or len(op) > 3 and op[3] != "provisional"):
+        row = _find(spec, "teachers", op[2])
+        # a missing row is skipped by apply; a teacher added earlier in the same batch is not in `spec` yet and is
+        # forced provisional, so edits to it are fine
+        if row is None or row.get("provisional") == "Yes":
+            return None
+        return "Department heads can change a teacher's details only while the teacher is provisional."
+    return "Department heads can only change who a teacher can teach, add a teacher, or edit a provisional teacher."
+
+
+def head_split(spec, ops):
+    """(allowed, refused): the operations in `ops` a head of department may make on `spec`, in order, and the others as
+    (index in ops, sentence). Heads may change lessons and blocks, who a teacher can teach, add a teacher, and the
+    details of a teacher who is still provisional (or added earlier in the same batch)."""
+    allowed, refused = [], []
+    for i, op in enumerate(ops):
+        why = _head_why(spec, op)
+        if why:
+            refused.append((i, why))
+        else:
+            allowed.append(op)
+    return allowed, refused
+
+
 def head_may(spec, ops):
-    """None if a head of department may make every operation in `ops` on `spec`, else a sentence naming the first they may not.
-    Heads may change lessons and blocks, who a teacher can teach, add a teacher, and the details of a teacher who is still provisional."""
-    for op in ops:
-        if not isinstance(op, list) or not op or not isinstance(op[0], str):
-            return "Department heads cannot send that change."
-        name = op[0]
-        if name in ("school", "day", "top"):
-            return "Department heads cannot change the school details, the day structure or other settings."
-        section = op[1] if len(op) > 1 else None
-        if section in ("lessons", "blocks"):
-            continue
-        if section != "teachers":
-            return f"Department heads cannot change {section if isinstance(section, str) else 'that'}."
-        if name == "merge" and len(op) > 3 and op[3] == "can_teach":
-            continue
-        if name == "add" and len(op) > 2 and isinstance(op[2], dict):
-            continue
-        if name in ("set", "del") and len(op) > 2 and op[2:3] and (name == "del" or len(op) > 3 and op[3] != "provisional"):
-            row = _find(spec, "teachers", op[2])
-            if row is not None and row.get("provisional") == "Yes":
-                continue
-            if row is None:
-                continue        # a missing row is skipped by apply; a teacher added in the same batch is forced provisional, so edits to it are fine
-            return "Department heads can change a teacher's details only while the teacher is provisional."
-        return "Department heads can only change who a teacher can teach, add a teacher, or edit a provisional teacher."
-    return None
+    """None if a head of department may make every operation in `ops` on `spec`, else a sentence naming the first they may not."""
+    refused = head_split(spec, ops)[1]
+    return refused[0][1] if refused else None

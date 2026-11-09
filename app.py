@@ -254,17 +254,21 @@ def post_setup_changes():
     body = body if isinstance(body, dict) else {}
     client, ops = str(body.get("client") or "")[:40], body.get("ops")
     if not isinstance(ops, list): return {"error": "No changes sent."}, 400
-    check = None
+    split = None
     if role() == "head":
-        check = sync.head_may       # judged on the setup as it is under the store's lock, when the change is applied
+        # judged one operation at a time on the setup as it is under the store's lock, when the change is applied: what a
+        # head may not make is skipped and named in the answer, the rest of their work is applied
+        split = sync.head_split
         for op in ops:      # a teacher added by a head is provisional until the committee confirms
             if isinstance(op, list) and len(op) == 4 and op[0] == "add" and op[1] == "teachers" and isinstance(op[2], dict): op[2]["provisional"] = "Yes"
     since = _int(body.get("since"))
-    try: v = store.apply_changes(ops, client, check, since)
+    try: v, refused = store.apply_changes(ops, client, since=since, filter=split)
     except store.Replaced: return _changes_reply(since, client)
     except store.Refused as e: return {"error": str(e)}, 403
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
-    return _changes_reply(since, client, v)
+    reply = _changes_reply(since, client, v)
+    if refused: reply["refused"] = [dict(i=i, why=why) for i, why in refused]
+    return reply
 
 @app.get("/api/setup/copies")
 @need("committee")
