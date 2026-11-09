@@ -16,7 +16,7 @@
     <button class="ghost" id="undo" title="Undo the last change (⌘Z / Ctrl+Z)" disabled>↶ Undo</button>
     <button class="ghost" id="redo" title="Redo (⇧⌘Z / Ctrl+Y)" disabled>↷ Redo</button>
     <span id="saveState" class="savestate"></span>
-    <button class="ghost" id="saveServer" title="Save the setup for the school: it opens on any browser after signing in">Save progress</button>
+    <span id="others" class="badge" hidden></span>
     <a class="ghost filebtn" href="/timetable" target="_blank">Published timetable</a>
     <a class="ghost filebtn" href="/logout">Sign out</a>
   </div>
@@ -28,6 +28,7 @@
 </div>
 <div id="pop" class="pop" hidden></div>
 <div id="toast" class="toast" hidden></div>
+<script src="/static/sync.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

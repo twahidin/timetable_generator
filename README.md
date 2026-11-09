@@ -9,6 +9,7 @@ code and download PDFs. The app does not generate timetables itself.
 |---|---|---|
 | `COMMITTEE_CODE` | timetable committee | the setup editor, the downloads, Publish, the personal student codes |
 | `TEACHER_CODE` | teachers | every class, teacher, room and student timetable, the lesson search, Who's free, PDFs |
+| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; groups, bands, who can teach what, and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 
@@ -28,9 +29,10 @@ subject), one note per band. Having the subject in another band counts; a Note w
 from MTL") excuses them; untick **Everyone takes one** on a band that is an option (it starts unticked for a band named
 Option or Elective).
 
-**Restoring.** Each **Save progress** keeps the copy it replaces on the server (the last 20, in `setup_history/`). When
+**Restoring.** The server keeps restore points of the setup in `setup_history/` (see Saving the setup below). When
 students have no groups or bands no classes, the Students step shows **Restore from an earlier copy**: pick a copy and it
-fills only those students (by Student ID) and bands; nothing else changes and Undo takes it back.
+fills only those students (by Student ID) and bands; nothing else changes and Undo takes it back. To go back to an
+earlier copy of the whole setup, use **Restore an earlier copy** on step 7, Download.
 The student list is optional, but with it the checks make sure no student has two lessons at once, and every student
 gets a personal code. Personal codes are made from each student's ID and `SECRET_KEY`, so they stay the same when the
 timetable is republished; without `SECRET_KEY` they are off. The committee downloads them as a list (CSV) or as slips
@@ -141,26 +143,37 @@ A big, tight school (30 or more classes) is best solved level by level, hardest 
 
 ```bash
 pip install -r requirements.txt
-export SECRET_KEY=dev COMMITTEE_CODE=COMMIT1 TEACHER_CODE=TEACH1 STUDENT_CODE=STUDY1
+export SECRET_KEY=dev COMMITTEE_CODE=COMMIT1 TEACHER_CODE=TEACH1 STUDENT_CODE=STUDY1 HEADS_CODE=HEADS1   # HEADS_CODE is optional
 python app.py            # http://localhost:8000  (or: gunicorn app:app --workers 1 --threads 8 --timeout 600)
-.venv/bin/python tests/smoke.py          # server checks; add --full for the slow publish check
+.venv/bin/python tests/smoke.py          # server checks; add --full for the slow publish check (SMOKE_NO_HEADS=1: without a heads' code)
+.venv/bin/python tests/test_sync.py      # the setup changes, in Python
+node tests/sync.test.js                  # the same changes, in the browser's JavaScript
 ```
 Keep one gunicorn worker (with threads): publishing swaps files in under a lock held in the web process.
 
-**Saving the setup:** **Save progress** saves it for the school (on the volume), and it opens by itself after signing
-in, on any browser. Every change is also kept in the browser until then (the header says "Unsaved changes"), and
-**Undo** / **Redo** (⌘Z / ⇧⌘Z) step back through changes. **Save to file** and **Load from file**, on step 7, keep
-copies as files. If someone else saved a newer setup in the meantime, Save progress asks before replacing it.
+**Saving the setup.** There is no Save button: every change is saved for the school by itself, on the volume, and the
+setup opens by itself after signing in, on any browser. Several people can work in it at once. Changes to different
+things all stay; if two people change the same field, the later one wins and the other sees it within a few seconds.
+The header shows **Saved**, **Saving** or **Offline**, and how many others are in the setup. **Undo** / **Redo**
+(⌘Z / ⇧⌘Z) take back only your own changes. Changes made while the server cannot be reached are kept in the browser
+and sent when it can. While people work the server keeps a restore point about every 10 minutes (the last 48), and one
+before every whole-setup action; **Restore an earlier copy** on step 7, Download, brings one back. The sample schools
+open as a practice copy: nothing in it is saved for the school. Starting blank, opening a setup workbook, loading from
+a file and restoring an earlier copy replace the setup for everyone: they are for the committee only, they ask first,
+and an earlier copy is kept. **Save to file** and **Load from file**, on step 7, keep copies as files.
 
 ## What's inside
 
 | Path | What |
 |---|---|
 | `app.py` | routes: sign-in, the committee's editor, the downloads, check and publish, the timetable pages, PDFs |
-| `access.py` | access codes, personal codes, wrong-code limit (10 per 10 minutes per address) |
+| `access.py` | access codes (committee, heads, teachers, students), personal codes, wrong-code limit (10 per 10 minutes per address) |
 | `checks.py` | will it fit: the sums on a setup before it is downloaded (class periods, breaks, rooms, teachers' time) |
-| `store.py` | saved setup, its earlier copies and the published timetable on the volume |
+| `store.py` | the shared setup (version, change log, restore points) and the published timetable on the volume |
+| `sync.py` | setup changes as small operations: apply, merge, and what a head may change |
+| `static/sync.js` | the same operations in the browser; Node can run it for the tests |
 | `tests/smoke.py` | server checks, run with plain Python (no test runner) |
+| `tests/test_sync.py`, `tests/sync.test.js` | the setup changes, checked in Python and in JavaScript against the same cases |
 | `static/` | the committee's step-by-step editor and the sign-in page style |
 | `ttgen/` | the Python package: template, reader, solver, checks and the Excel/PDF/HTML outputs |
 | `skill/school-timetable-generator/` | the skill (`SKILL.md` + `scripts/ttgen`) for any AI agent outside the app |

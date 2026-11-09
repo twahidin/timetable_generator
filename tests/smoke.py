@@ -2,15 +2,19 @@
 import os, secrets, subprocess, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
-CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE")}
+CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
+if os.environ.get("SMOKE_NO_HEADS"): del CODES["HEADS_CODE"]      # SMOKE_NO_HEADS=1 runs the script without the optional heads' code
+os.environ.pop("HEADS_CODE", None)
 # variables an existing deployment may still have: they must be ignored
 os.environ.update(DATA_DIR=DATA, SECRET_KEY=secrets.token_hex(16), AI_PROVIDER="anthropic", AI_API_KEY="", SOLVE_SECONDS="60", **CODES)
 os.makedirs(os.path.join(DATA, "runs", "old1"))
 sys.path.insert(0, ROOT)
-import app as A, store
+import app as A, store, sync
 
 c = A.app.test_client()
 assert c.post("/login", data={"as": "committee", "code": CODES["COMMITTEE_CODE"]}).status_code == 302
+h = A.app.test_client() if "HEADS_CODE" in CODES else None
+if h: assert h.post("/login", data={"as": "heads", "code": CODES["HEADS_CODE"]}).status_code == 302
 
 def test_removed_modules():
     for m in ("runs", "timetabler", "ai", "adjust"):
@@ -25,8 +29,8 @@ def test_removed_routes():
 
 def test_status_shape():
     j = c.get("/api/status").get_json()
-    assert set(j) == {"codes", "code_problems", "volume", "setup_saved_at", "published"}, sorted(j)
-    assert j["published"] is None
+    assert set(j) == {"role", "codes", "code_problems", "volume", "setup_saved_at", "published"}, sorted(j)
+    assert j["published"] is None and j["role"] == "committee"
 
 def test_old_runs_folder_is_harmless():
     assert c.get("/api/past-setups").status_code == 200
@@ -53,6 +57,135 @@ def test_check_lists_a_class_with_more_periods_than_its_days():
 def test_check_refuses_an_empty_setup():
     assert c.post("/api/check", json={}).status_code == 400
 
+def _changes(client, since, ops=None, who=None):
+    who = who or c
+    r = who.post("/api/setup/changes", json={"since": since, "client": client, "ops": ops}) if ops is not None else who.get(f"/api/setup/changes?since={since}&client={client}")
+    return r.status_code, r.get_json()
+
+def test_two_people_change_different_rows():
+    c.put("/api/setup", json=c.get("/api/sample/secondary").get_json())
+    rec = c.get("/api/setup").get_json(); v0 = rec["v"]; a, b = rec["spec"]["classes"][0], rec["spec"]["classes"][1]
+    assert a["_id"] and b["_id"] and a["_id"] != b["_id"]
+    _, ja = _changes("A", v0, [["set", "classes", a["_id"], "size", 41]])
+    _, jb = _changes("B", v0, [["set", "classes", b["_id"], "size", 42]])
+    assert ja["v"] == v0 + 1 and jb["v"] == v0 + 2
+    assert jb["patches"] == [{"v": v0 + 1, "ops": [["set", "classes", a["_id"], "size", 41]]}]    # B catches up on A in the same call
+    now = c.get("/api/setup").get_json()["spec"]["classes"]
+    assert (now[0]["size"], now[1]["size"]) == (41, 42)
+    _, ga = _changes("A", ja["v"]); assert [p["v"] for p in ga["patches"]] == [v0 + 2] and ga["others"] >= 1
+
+def test_both_can_teach_additions_are_kept():
+    rec = c.get("/api/setup").get_json(); t = rec["spec"]["teachers"][0]; v = rec["v"]
+    for who, subj in (("A", "Zzz One"), ("B", "Zzz Two")):
+        _changes(who, v, [["merge", "teachers", t["_id"], "can_teach", [{"levels": "All", "subject": subj}], []]])
+    got = [x["subject"] for x in c.get("/api/setup").get_json()["spec"]["teachers"][0]["can_teach"]]
+    assert "Zzz One" in got and "Zzz Two" in got
+
+def test_a_replaced_setup_resets_everyone():
+    v = c.get("/api/setup").get_json()["v"]
+    c.put("/api/setup", json={"spec": c.get("/api/sample/primary").get_json(), "why": "Opened a workbook"})
+    code, j = _changes("A", v); assert j == {"v": j["v"], "reset": True, "replaced": True, "others": j["others"]}
+    assert c.get("/api/setup/copies").get_json()[0]["what"] == "Before: Opened a workbook"
+
+def test_a_change_sent_from_before_a_replacement_is_not_applied():
+    v = c.get("/api/setup").get_json()["v"]
+    c.put("/api/setup", json={"spec": c.get("/api/sample/primary").get_json(), "why": "Opened a workbook"})
+    after = c.get("/api/setup").get_json()["v"]
+    code, j = _changes("A", v, [["school", "timetable", "Should not land"]])
+    assert code == 200 and j["reset"] is True and j["replaced"] is True
+    rec = c.get("/api/setup").get_json(); assert rec["v"] == after and rec["spec"]["school"].get("timetable") != "Should not land"
+
+def test_a_restart_resets_without_losing_the_setup():
+    v = c.get("/api/setup").get_json()["v"]; _changes("A", v, [["school", "timetable", "Term 9"]])
+    store._log.clear(); store._setup.clear()            # what a restart does to the process
+    rec = c.get("/api/setup").get_json(); assert rec["v"] == v + 1 and rec["spec"]["school"]["timetable"] == "Term 9"
+    _, j = _changes("A", v); assert j["reset"] is True and j["replaced"] is False
+
+def test_ids_do_not_reach_the_workbook():
+    import io, openpyxl
+    r = c.post("/api/build", json=c.get("/api/setup").get_json()["spec"])
+    wb = openpyxl.load_workbook(io.BytesIO(r.data), read_only=True)
+    assert not any("_id" in str(cell) for ws in wb.worksheets for row in ws.iter_rows(max_row=8, values_only=True) for cell in row if cell)
+
+def test_the_heads_choice_shows_only_when_the_code_is_set():
+    assert (b"Department heads" in c.get("/login").data) == bool(h)
+    if not h: assert b"Department heads" not in c.get("/login?as=heads").data
+
+def test_a_head_can_change_groups_but_not_classes():
+    rec = c.get("/api/setup").get_json(); v = rec["v"]; sp = rec["spec"]
+    assert h.get("/").status_code == 200 and h.get("/api/setup").status_code == 200
+    code, _ = _changes("H", v, [["set", "lessons", sp["lessons"][0]["_id"], "students", 12]], who=h); assert code == 200
+    code, j = _changes("H", v, [["set", "classes", sp["classes"][0]["_id"], "size", 99]], who=h)
+    assert code == 200 and [x["i"] for x in j["refused"]] == [0] and "classes" in j["refused"][0]["why"].lower(), j
+    assert c.get("/api/setup").get_json()["spec"]["classes"][0]["size"] != 99
+
+def test_a_heads_refused_change_is_skipped_and_the_rest_applied():
+    rec = c.get("/api/setup").get_json(); v = rec["v"]; lid = rec["spec"]["lessons"][0]["_id"]; name = rec["spec"]["school"]["name"]
+    code, j = _changes("H", v, [["set", "lessons", lid, "students", 7], ["school", "name", "X"]], who=h)
+    assert code == 200 and j["v"] == v + 1, (code, j)
+    assert j["refused"] == [{"i": 1, "why": sync.head_may(rec["spec"], [["school", "name", "X"]])}], j
+    r = c.get("/api/setup").get_json(); assert r["v"] == v + 1 and r["spec"]["lessons"][0].get("students") == 7 and r["spec"]["school"]["name"] == name
+    assert store._log[-1]["ops"] == [["set", "lessons", lid, "students", 7]]          # the log holds only what was applied
+
+def test_a_heads_batch_that_is_all_refused_changes_nothing():
+    rec = c.get("/api/setup").get_json(); v = rec["v"]; cid = rec["spec"]["classes"][0]["_id"]; size = rec["spec"]["classes"][0].get("size")
+    code, j = _changes("H", v, [["set", "classes", cid, "size", 77], ["school", "name", "X"]], who=h)
+    assert code == 200 and j["v"] == v and [x["i"] for x in j["refused"]] == [0, 1], (code, j)
+    r = c.get("/api/setup").get_json(); assert r["v"] == v and r["spec"]["classes"][0].get("size") == size and r["spec"]["school"]["name"] != "X"
+
+def test_the_committees_reply_has_nothing_refused():
+    rec = c.get("/api/setup").get_json(); v = rec["v"]
+    code, j = _changes("C", v, [["school", "timetable", "Term 2"]]); assert code == 200 and not j.get("refused") and j["v"] == v + 1
+
+def test_a_teacher_added_by_a_head_is_provisional():
+    v = c.get("/api/setup").get_json()["v"]
+    _changes("H", v, [["add", "teachers", {"_id": "newhire001", "name": "New Science teacher 1", "provisional": "No"}, ""]], who=h)
+    t = next(x for x in c.get("/api/setup").get_json()["spec"]["teachers"] if x["_id"] == "newhire001"); assert t["provisional"] == "Yes"
+
+def test_a_head_can_edit_only_provisional_teachers():
+    v = c.get("/api/setup").get_json()["v"]
+    _changes("H", v, [["add", "teachers", {"_id": "newhire002", "name": "Own hire"}, ""]], who=h)
+    rec = c.get("/api/setup").get_json(); v = rec["v"]
+    firm = next(x for x in rec["spec"]["teachers"] if x.get("provisional") != "Yes")
+    code, j = _changes("H", v, [["set", "teachers", firm["_id"], "name", "Zed"]], who=h); assert code == 200 and len(j["refused"]) == 1
+    code, j = _changes("H", v, [["set", "teachers", "newhire002", "provisional", "No"]], who=h); assert code == 200 and len(j["refused"]) == 1
+    code, j = _changes("H", v, [["set", "teachers", "newhire002", "name", "Renamed"]], who=h); assert code == 200 and not j.get("refused")
+    code, j = _changes("H", v, [["merge", "teachers", firm["_id"], "can_teach", [{"levels": "All", "subject": "Qqq"}], []]], who=h); assert code == 200 and not j.get("refused")
+    ts = {x["_id"]: x for x in c.get("/api/setup").get_json()["spec"]["teachers"]}
+    assert ts[firm["_id"]]["name"] != "Zed" and ts["newhire002"]["provisional"] == "Yes" and ts["newhire002"]["name"] == "Renamed"
+
+def test_a_head_can_add_and_fill_in_a_teacher_in_one_request():
+    v = c.get("/api/setup").get_json()["v"]
+    code, _ = _changes("H", v, [["add", "teachers", {"_id": "newhire003", "name": "Batch hire"}, ""], ["set", "teachers", "newhire003", "short", "BH"]], who=h); assert code == 200
+    t = next(x for x in c.get("/api/setup").get_json()["spec"]["teachers"] if x["_id"] == "newhire003"); assert t["provisional"] == "Yes" and t["short"] == "BH"
+
+def test_the_head_check_runs_on_the_setup_held_under_the_lock():
+    rec = c.get("/api/setup").get_json(); v = rec["v"]; spec = rec["spec"]
+    firm = next(x for x in spec["teachers"] if x.get("provisional") != "Yes")
+    stale = [["set", "teachers", "newhire003", "name", "Late"]]
+    assert sync.head_may(spec, stale) is None                      # judged on a copy taken earlier, the teacher is still provisional
+    c.post("/api/setup/changes", json={"since": v, "client": "C", "ops": [["set", "teachers", "newhire003", "provisional", "No"]]})   # the committee confirms the teacher meanwhile
+    v2 = c.get("/api/setup").get_json()["v"]
+    v3, refused = store.apply_changes(stale, "H", filter=sync.head_split)
+    assert v3 == v2 and [i for i, _ in refused] == [0] and "provisional" in refused[0][1]
+    now = c.get("/api/setup").get_json()
+    assert now["v"] == v2 and next(x for x in now["spec"]["teachers"] if x["_id"] == "newhire003")["name"] == "Batch hire"
+
+def test_a_head_cannot_download_or_publish_or_replace():
+    for method, url in (("POST", "/api/build"), ("PUT", "/api/setup"), ("POST", "/api/import-timetable"), ("GET", "/api/codes.csv"), ("POST", "/api/check"), ("GET", "/api/setup/copies"), ("POST", "/api/setup/restore")):
+        assert h.open(url, method=method, json={}).status_code == 401, url
+    s = h.get("/api/status").get_json(); assert s["role"] == "head" and "codes" not in s and "code_problems" not in s
+
+def test_heads_code_is_optional_but_checked():
+    import access
+    keep = os.environ.get("HEADS_CODE")
+    try:
+        os.environ["HEADS_CODE"] = "abc"; assert any("HEADS_CODE" in p and "6 letters" in p for p in access.configured()[1])
+        os.environ["HEADS_CODE"] = CODES["TEACHER_CODE"]; assert any("same" in p for p in access.configured()[1])
+        os.environ.pop("HEADS_CODE", None); assert not any("HEADS_CODE" in p for p in access.configured()[1])
+    finally:
+        if keep: os.environ["HEADS_CODE"] = keep
+
 def test_publish_uploaded_timetable():   # slow: solves the primary sample
     work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx")
     env = dict(os.environ, PYTHONPATH=ROOT)
@@ -66,7 +199,11 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
     assert t.get("/timetable").status_code == 200
 
+NEED_HEADS = {"test_a_head_can_change_groups_but_not_classes", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
+              "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace"}
+
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_") and (k != "test_publish_uploaded_timetable" or "--full" in sys.argv)]
+    tests = [v for k, v in list(globals().items()) if k.startswith("test_") and (k != "test_publish_uploaded_timetable" or "--full" in sys.argv)
+             and (h or k not in NEED_HEADS)]
     for t in tests: t(); print("ok", t.__name__)
     print(f"{len(tests)} checks passed")

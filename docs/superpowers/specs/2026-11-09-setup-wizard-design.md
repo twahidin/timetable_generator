@@ -184,6 +184,43 @@ sentence in a new "In words" column (older workbooks without the column still re
 Prefer, and in the hand-back say for each typed rule how it was met or why it could not be. Project 2 builds its
 verification on that list.
 
+**First and second choices.** *(Added 9 November at the committee's request. The committee asked for a way to say
+"fixed recess as first choice, floating recess through the day as second"; everything below it is the designer's
+call until they have read it.)*
+
+Today each thing has one answer, and the only softness is Prefer. A **choice** gives one item a first choice and a
+second choice the outside agent may fall back to when no timetable fits the first.
+
+- **What can carry a second choice:**
+  - *A Configuration setting*: a second value (first: no after-school slots; second: allow them).
+  - *A standard rule or a typed rule*: one of three fallbacks, picked from a short list: **make it Prefer** (keep it
+    where possible), **use this instead** (a second row of the same rule with other values, such as another time for
+    a fixed lesson, or more subjects on an HBL day), or **drop it**.
+  - *A level's recess*: first choice the recess painted on the Day structure (fixed); second choice **floating**
+    within a window given as two clock times, with the same length. This is a row on step 6, so the Day structure is
+    painted once, for the first choice; nothing is painted twice.
+- **Order.** Step 6 shows every item that has a second choice in one list, "If it does not fit, give way in this
+  order", which the committee drags into order. The agent gives way one item at a time, from the top, and stops as
+  soon as a timetable fits.
+- **Fall back, or compare.** On the Download step the committee picks one: **Fall back only when needed** (the
+  default: one timetable, made with as many first choices as possible) or **Make one timetable for each** (first
+  choices, then with each fallback in turn, for the committee to compare; more solving time). *(Designer's call on
+  the default.)*
+- **Will it fit?** runs on the first choices. When they fail the sums, it tries the fallbacks in the committee's
+  order and says how far down the list the sums start to pass, so the committee knows before downloading whether the
+  first choices can work at all.
+- **Hand-over.** The workbook gets a **Choices** sheet: order, the item (in the words the page shows), first choice,
+  second choice. The skill's scripts read it and apply the fallbacks in order, so every agent does it the same way
+  (`python -m ttgen solve` tries the first choices, then gives way down the list); `SKILL.md` and the starter prompt
+  tell an agent that builds its own solver to do the same and never to give way on anything not on the list.
+- **What comes back.** The rule report gains a **Choices used** part: for each item on the list, whether the first
+  or the second choice was used, as data. The app shows it on Publish ("Recess for Sec 2: second choice, floating
+  9.20 to 11.20"), and checks the returned timetable against the configuration *with those fallbacks applied*, so a
+  timetable that used a permitted second choice is not reported as breaking the rule it gave way on. A fallback that
+  is not on the list, or used out of order while an earlier one was not tried, is reported as a problem.
+- **Not in this:** more than two choices per item (the sheet's format allows a third later); choices for who teaches
+  what or for room allocation; the app deciding between versions (the committee does).
+
 ### Step 7: Download
 
 - **Configuration workbook (.xlsx)**: as "Build workbook" today, with the typed rules and a **configuration id** on
@@ -212,7 +249,8 @@ verification on that list.
   agent's own design. (The school's last outside timetable came back as a custom database that needed the setup
   workbook beside it and showed 47 differences; the instructions should stop that at the source.)
 - **The agent does not change the configuration.** It may turn a typed rule into whatever its solver needs, but the
-  setup inside the returned database is the one downloaded, with the same configuration id.
+  setup inside the returned database is the one downloaded, with the same configuration id. Giving way to a second
+  choice on the Choices sheet is not a change to the configuration: it is reported as a choice used.
 - **A rule report comes back as data, not as chat.** One line per typed rule: its number, Must or Prefer, the
   sentence, **Met / Partly / Not met**, and a sentence saying how or why. It is a `Rule report` sheet in the Lessons
   workbook; `ttgen export` carries it into the database as a table. Both copies of `ttgen` change for this. In this
@@ -306,7 +344,8 @@ Each is a pull request the committee can try on its own.
 3. **Teachers**: roles first, upload, avatars.
 4. **Department map**: roster with ticks, baskets, cards, profile.
 5. **Groups and bands**: creation with automatic names, the bands page.
-6. **Constraints**: the tabs, typed rules, workbook and SKILL.md changes, starter prompt.
+6. **Constraints**: the tabs, typed rules, first and second choices, workbook and SKILL.md changes, starter
+   prompt. (Large enough to plan as two pull requests: constraints and typed rules first, then choices.)
 
 ## Left to the builder
 

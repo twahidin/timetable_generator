@@ -3,7 +3,7 @@ student on the Students sheet also gets a personal code made from their Student 
 the same until SECRET_KEY changes. Codes are compared ignoring case, spaces and dashes."""
 import collections, hashlib, hmac, os, threading, time
 
-ROLES = (("committee", "COMMITTEE_CODE"), ("teacher", "TEACHER_CODE"), ("student", "STUDENT_CODE"))
+ROLES = (("committee", "COMMITTEE_CODE"), ("teacher", "TEACHER_CODE"), ("student", "STUDENT_CODE"), ("head", "HEADS_CODE"))
 ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"          # no 0/O, 1/I/L: easy to read off a slip
 
 def norm(code):
@@ -25,7 +25,7 @@ def personal_code(student_id):
 def configured():
     """which general codes are set, and problems to show the committee"""
     have = {role: bool(norm(os.environ.get(var))) for role, var in ROLES}
-    probs = [f"{var} is not set in Railway variables." for role, var in ROLES if not have[role]]
+    probs = [f"{var} is not set in Railway variables." for role, var in ROLES if not have[role] and role != "head"]   # HEADS_CODE is optional
     if not os.environ.get("SECRET_KEY"): probs.append("SECRET_KEY is not set: sign-ins end at every restart, and personal student codes are off until it is set.")
     vals = [norm(os.environ.get(var)) for _, var in ROLES if norm(os.environ.get(var))]
     if len(vals) != len(set(vals)): probs.append("Two of the general codes are the same; make them different.")

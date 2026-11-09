@@ -4,73 +4,357 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const KEY = "ttsetup.v1";
-const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, tg: { lv: "", subj: "", t: "" }, tf: { dept: "", subj: "", q: "" }, pick: { lessons: new Set(), students: new Set(), teachers: new Set(), shown: {}, last: {}, t: "", g: "", c: "", s: "", v: "All", d: "", r: "", a: "", p: "" }, undo: [], redo: [], last: null, dirty: false, base: 0 };
+const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, tg: { lv: "", subj: "", t: "" }, tf: { dept: "", subj: "", q: "" }, pick: { lessons: new Set(), students: new Set(), teachers: new Set(), shown: {}, last: {}, t: "", g: "", c: "", s: "", v: "All", d: "", r: "", a: "", p: "" }, undo: [], redo: [], last: null };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
   ["teachers", "4 Teachers"], ["lessons", "5 TG & deployment"], ["rules", "6 Configuration & constraints"], ["download", "7 Download"], ["publish", "8 Publish"], ["students", "Students"]];
 
 /* ---------------- storage, server
-   save() keeps this browser's copy after every change. A change to the setup also goes on the undo list (changes
-   within a second count as one) and stays "unsaved" until Save progress puts it on the server (S.base: the server
-   copy it came from), which is what opens on any browser after signing in. */
+   The setup lives on the server. SYNC.base is the copy the server last confirmed (at version SYNC.v); S.spec is the
+   copy being edited. save() runs after every change: the change goes on the undo list (changes within a second count
+   as one), what has not been sent yet is kept in this browser (as changes, not the whole setup) and syncNow() is
+   asked to send it. syncNow() sends what changed since SYNC.base as small operations and takes in what other people
+   changed meanwhile; with nothing to send it still asks every few seconds, which is how their changes arrive. */
 const UNDO_MAX = 20;
+const SYNC = { v: 0, base: null, client: "", state: "saved", others: 0, timer: null, busy: false, again: false,
+  held: null,      // others' changes waiting for a redraw: {spec, from} (from: S.spec when they arrived)
+  kept: false,     // this tab has written changes not yet sent to this browser's storage
+  moved: false };  // an old-format copy in this browser has been moved aside
+SYNC.client = Sync.newId();   // new on every load: a duplicated tab must not share it, or neither would see the other's changes
+const REPLACED = "The committee replaced the school's setup.";
+const DROPPED = "The committee replaced the school's setup, so the changes you had not sent were dropped.";
 function save(o) {
+  if (S.spec) Sync.ensureIds(S.spec);
   const js = S.spec ? JSON.stringify(S.spec) : null;
   if (js !== S.last) {
-    if (S.last && js && !(o && o.quiet)) {
-      if (Date.now() - (S.pushed || 0) > 1000) { S.undo.push(S.last); if (S.undo.length > UNDO_MAX) S.undo.shift(); S.redo = []; }
-      S.pushed = Date.now(); S.dirty = true;
-    }
+    if (S.snap && js && !(o && o.quiet)) {   // an entry holds the operations that take back (and bring again) this change
+      const merge = Date.now() - (S.pushed || 0) <= 1000 && S.undo.length && S.from;
+      const before = merge ? S.from : S.snap;
+      const e = { undo: Sync.diff(S.spec, before), redo: Sync.diff(before, S.spec) };
+      if (merge) S.undo[S.undo.length - 1] = e; else { S.undo.push(e); if (S.undo.length > UNDO_MAX) S.undo.shift(); S.from = before; }
+      S.redo = []; S.pushed = Date.now();
+    } else S.pushed = 0;   // other people's changes and quiet saves never join an entry
     S.last = js;
   }
-  try { localStorage.setItem(KEY, `{"kind":${JSON.stringify(S.kind)},"step":${S.step},"at":${JSON.stringify((STEPS[S.step] || [])[0] || "")},"dirty":${!!S.dirty},"base":${Number(S.base) || 0},"spec":${js}}`); } catch (e) { }
+  S.snap = S.spec ? Sync.clone(S.spec) : null;
+  keepLocal();
+  if (!(o && o.remote) && !S.practice) scheduleSync();
   saveState();
 }
-function saved() {   // the step is kept by name ("at"); a copy saved before Bands joined the teaching-groups step has only the old number
+/* this browser's copy: {sync: 1, step, at, kind, v, pending}, pending = what this tab has not sent. A tab with nothing
+   to send leaves another tab's unsent changes alone. A copy in the format before this one is moved aside, untouched. */
+function keepLocal() {
+  if (!S.spec || !SYNC.base || S.practice) return;   // a practice copy is never kept
   try {
-    const x = JSON.parse(localStorage.getItem(KEY) || "null"); if (!x || !x.spec) return null;
-    let at = x.at || ["start", "school", "venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "generate", "adjust", "download"][x.step];
-    at = { generate: "publish", adjust: "publish" }[at] || at;   // steps that no longer exist: their work ends on Publish now
-    x.step = at && stepAt(at) >= 0 ? stepAt(at) : 0; return x;
+    if (!SYNC.moved) {
+      const old = localStorage.getItem(KEY); let x = null; try { x = JSON.parse(old || "null"); } catch (e) { }
+      if (x && x.spec && !x.sync) localStorage.setItem(KEY + ".old", old);
+      SYNC.moved = true;
+    }
+    const pending = Sync.diff(SYNC.base, working());
+    if (!pending.length && !SYNC.kept) { const cur = saved(); if (cur && cur.pending && cur.pending.length) return; }
+    localStorage.setItem(KEY, JSON.stringify({ sync: 1, step: S.step, at: (STEPS[S.step] || [])[0] || "", kind: S.kind, v: SYNC.v, pending }));
+    SYNC.kept = pending.length > 0;
+  } catch (e) { }
+}
+function saved() {   // this browser's copy in the current format; the step is kept by name ("at")
+  try {
+    const x = JSON.parse(localStorage.getItem(KEY) || "null"); if (!x || !x.sync) return null;
+    const at = { generate: "publish", adjust: "publish" }[x.at] || x.at;   // steps that no longer exist: their work ends on Publish now
+    x.step = at && stepAt(at) >= 0 ? stepAt(at) : 1; return x;
   } catch (e) { return null; }
 }
 function saveState() {
-  const u = $("#undo"), r = $("#redo"), st = $("#saveState");
+  const u = $("#undo"), r = $("#redo"), st = $("#saveState"), ot = $("#others");
   if (u) { u.disabled = !S.spec || !S.undo.length; r.disabled = !S.spec || !S.redo.length; }
-  if (st) { st.className = "savestate" + (S.dirty ? " warn" : ""); st.textContent = !S.spec ? "" : S.dirty ? "Unsaved changes" : S.base && G.server && G.server.saved_at ? `Saved ${G.server.saved_at}` : ""; }
+  if (st) { st.className = "savestate" + (SYNC.state === "offline" && !S.practice ? " warn" : ""); st.textContent = !S.spec ? "" : S.practice ? "Practice copy" : { saved: "Saved", saving: "Saving…", offline: "Offline: your changes are kept in this browser and will be sent" }[SYNC.state]; }
+  const here = SYNC.others === 1 ? "1 other here" : `${SYNC.others} others here`;
+  if (ot) { ot.hidden = !S.spec || S.practice || !SYNC.others; ot.textContent = here; }
+  const so = $("#startOthers"); if (so) so.textContent = SYNC.others ? here : "Nobody else is here now";
 }
-function undo(back) {
+function undo(back) {   // takes back (or brings again) the last change made here; other people's changes stay
   const from = back ? S.undo : S.redo, to = back ? S.redo : S.undo;
   if (!S.spec || !from.length) return;
-  to.push(S.last); S.last = from.pop(); S.spec = JSON.parse(S.last); S.pushed = 0; S.dirty = true; unpick();
+  const e = from.pop(); to.push(e);
+  Sync.apply(S.spec, back ? e.undo : e.redo); S.pushed = 0; unpick();
   ensureDays(); save({ quiet: true }); render(); toast(back ? "Undone." : "Redone.");
 }
-async function saveServer() {
-  if (!S.spec) { toast("Open or start a setup first."); return; }
-  try { G.server = await getJSON("/api/setup"); } catch (e) { }
-  const srv = G.server && G.server.spec ? G.server : null;
-  if (srv && srv.ts > (S.base || 0) + 1 && JSON.stringify(srv.spec) !== S.last
-      && !confirm(`A newer setup was saved for the school on ${srv.saved_at} (another browser or committee member). Replace it with this one?`)) return;
-  const r = await fetch("/api/setup", { method: "PUT", headers: { "Content-Type": "application/json" }, body: S.last || JSON.stringify(S.spec) });
-  if (r.status === 401) { location.href = "/login"; return; }
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) { toast(j.error || "Could not save."); return; }
-  S.base = j.ts; S.dirty = false; G.server = { spec: S.spec, saved_at: j.saved_at, ts: j.ts }; save({ quiet: true });
-  toast(`Saved for the school (${j.saved_at}). It opens here next time anyone on the committee signs in.` +
-    (G.st && G.st.volume === false ? " But this server has no Railway volume, so it is lost on the next deploy." : ""));
+/* the setup as edited: S.spec, or, while others' changes wait for a redraw, those changes with what S.spec gained since */
+function working() {
+  Sync.ensureIds(S.spec);
+  if (!SYNC.held) return Sync.clone(S.spec);
+  const w = Sync.clone(SYNC.held.spec); Sync.apply(w, Sync.diff(SYNC.held.from, S.spec)); return w;
+}
+/* a redraw would take something from under the person: an open pop-up, the day grid being painted, or a box in the step
+   with typing not yet committed */
+function canRedraw() {
+  if (!$("#pop").hidden || painting) return false;
+  const a = document.activeElement;
+  const typing = a && $("#main").contains(a) && ((a.tagName === "INPUT" && ["text", "number", "time", "search"].includes(a.type)) || a.tagName === "TEXTAREA");
+  return !(typing && a.value !== a.defaultValue);
+}
+const LIST_KEYS = ["venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "combinations"];
+function takeSpec(spec) {   // a newer copy with others' changes in it: redraw now, or once the person is done with the box or pop-up
+  if (!canRedraw()) { SYNC.held = { spec, from: Sync.clone(S.spec) }; return; }
+  const rows = s => ["lessons", "students", "teachers"].map(k => (s[k] || []).map(r => r._id).join()).join("|");
+  if (rows(spec) !== rows(S.spec)) unpick();   // ticks are by row number
+  LIST_KEYS.forEach(k => spec[k] = spec[k] || []);
+  S.spec = spec; SYNC.held = null; save({ quiet: true, remote: true }); render();
+}
+function tryHeld() { if (!SYNC.held || !S.spec || !canRedraw()) return false; takeSpec(working()); return true; }
+function scheduleSync() {   // after a change: send it shortly (changes in quick succession go together)
+  if (!S.spec || !SYNC.base) return;
+  if (SYNC.state === "offline") return;   // the retry every 5 seconds sends it
+  if (Sync.diff(SYNC.base, working()).length) SYNC.state = "saving";
+  clearTimeout(SYNC.timer); SYNC.timer = setTimeout(syncNow, 600);
+}
+async function syncNow() {
+  clearTimeout(SYNC.timer);
+  if (!S.spec || !SYNC.base || S.practice) return;
+  if (SYNC.busy) { SYNC.again = true; return; }
+  SYNC.busy = true; SYNC.again = false;
+  let wait = 4000;
+  try {
+    headsTeachers();
+    const sent = working(), ops = Sync.diff(SYNC.base, sent);
+    const r = ops.length
+      ? await fetch("/api/setup/changes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ since: SYNC.v, client: SYNC.client, ops }) })
+      : await fetch(`/api/setup/changes?since=${SYNC.v}&client=${encodeURIComponent(SYNC.client)}`);
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (r.status >= 500) throw new Error(`server ${r.status}`);
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 403) {   // fallback (the server now skips what a head may not make): nothing was applied, so start again from the server's copy
+      toast(j.error || "That change is not allowed.");
+      const srv = await fetchSetup(); if (!srv) return;
+      if (srv.spec) { await openServer(srv); SYNC.base = Sync.clone(S.spec); keepLocal(); render(); }
+    } else if (r.status === 409) {   // the server has no setup: a committee member's copy goes up whole
+      if (!(G.st && G.st.role === "committee") || !await putSetup(sent, "Saved from a browser", S.step)) throw new Error("no setup");
+      render();
+    } else if (!r.ok) throw new Error(j.error || `status ${r.status}`);
+    else if (j.reset) { await catchUp(j, sent, ops, r.ok && ops.length > 0); wait = 0; }
+    else {
+      const theirs = (j.patches || []).flatMap(p => p.ops || []);
+      // operations the server would not make for this person (a head) are left out of what it applied: they drop out of
+      // the working copy too, as they are in neither the new base nor the edits made since the send
+      const no = new Set((j.refused || []).map(x => x.i)), ours = ops.filter((_, i) => !no.has(i));
+      const nb = Sync.rebase(SYNC.base, sent, working(), theirs, ours);
+      SYNC.base = nb.base; SYNC.v = j.v;
+      if (theirs.length || no.size) takeSpec(nb.spec);
+      if (theirs.length || ops.length) keepLocal();   // the base moved: what is kept as not sent must move with it
+      if (no.size) {
+        const why = [...new Set(j.refused.map(x => x.why))].join(" ");
+        toast(`${no.size} change${no.size === 1 ? "" : "s"} could not be made: ${why}`);
+      }
+    }
+    if ("others" in j) SYNC.others = j.others;
+    SYNC.state = Sync.diff(SYNC.base, working()).length ? "saving" : "saved";
+    if (SYNC.state === "saving") wait = Math.min(wait, 600);
+  } catch (e) { SYNC.state = "offline"; wait = 5000; }
+  SYNC.busy = false; saveState(); tryHeld();
+  clearTimeout(SYNC.timer); SYNC.timer = setTimeout(syncNow, SYNC.again && SYNC.state !== "offline" ? 0 : wait);
+}
+/* the server's log no longer reaches back to SYNC.v: take its copy. Replaced by the committee: what was not sent is
+   dropped; otherwise it goes on top of the new copy and is sent again. accepted: the reset came back from a send the
+   server applied, so only the edits made since that send are still to go on top (applying the sent operations again
+   could undo someone's newer change to the same field); after a fetch with nothing sent, everything since the old
+   base is still to go. */
+async function catchUp(j, sent, ops, accepted) {
+  const old = SYNC.base;
+  const srv = await fetchSetup(); if (!srv) return;
+  if (!srv.spec) throw new Error("no setup");
+  await useKind(srv.spec);
+  if (j.replaced) {
+    const dropped = ops.length > 0 || Sync.diff(sent, working()).length > 0;   // sent, or edited while the request was out
+    SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
+    S.undo = []; S.redo = []; SYNC.held = null;
+    const spec = Sync.clone(srv.spec); defaultRoles(spec);
+    takeSpec(spec);
+    toast(dropped ? DROPPED : REPLACED);
+  } else {
+    const unsent = accepted ? Sync.diff(sent, working()) : Sync.diff(old, working());
+    SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
+    const spec = Sync.clone(srv.spec); Sync.apply(spec, unsent);
+    takeSpec(spec);
+  }
+  keepLocal();
+}
+/* a teacher a head adds is provisional (the server makes it so): the same here before the change is taken, so this
+   copy, the change sent and the base all agree with the server */
+function headsTeachers() {
+  if (!(G.st && G.st.role === "head")) return;
+  Sync.ensureIds(S.spec);
+  const had = new Set((SYNC.base.teachers || []).map(t => t && t._id));
+  const fix = (S.spec.teachers || []).filter(t => t && !had.has(t._id) && t.provisional !== "Yes");
+  if (!fix.length) return;
+  // a change made outside save(): S.snap (and S.last, when it was up to date) take it too, so it is never an Undo entry
+  const rest = S.last === JSON.stringify(S.spec);
+  const also = [S.snap, S.from].filter(Boolean).flatMap(x => x.teachers || []).filter(t => t && fix.some(f => f._id === t._id));
+  fix.concat(also).forEach(t => { t.provisional = "Yes"; });
+  if (rest) S.last = JSON.stringify(S.spec);
 }
 async function getJSON(u) { const r = await fetch(u); if (!r.ok) throw new Error(await r.text()); return r.json(); }
-async function begin(kind, what) {
-  S.kind = kind; S.meta = await getJSON(`/api/meta/${kind}`);
-  S.spec = await getJSON(`/api/${what}/${kind}`); S.step = 1; S.base = 0; ensureDays(); save(); S.dirty = true; save({ quiet: true }); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
-  toast(what === "sample" ? "Sample school loaded: edit it or use it to see how the template works." : "Blank template started.");
+async function fetchSetup() {   // {spec, v, saved_at}; null when signed out (the page goes to sign in)
+  const r = await fetch("/api/setup");
+  if (r.status === 401) { location.href = "/login"; return null; }
+  if (!r.ok) throw new Error(`status ${r.status}`);
+  return r.json();
 }
-/* open a setup: o.base and o.dirty say whether it is the server copy (base = its ts, not dirty) */
-async function adopt(spec, msg, o = {}) {
-  S.kind = o.kind || (spec.school && spec.school.type) || "secondary"; S.meta = await getJSON(`/api/meta/${S.kind}`);
-  unpick(); S.spec = spec; ["venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "combinations"].forEach(k => S.spec[k] = S.spec[k] || []);
-  S.step = o.step || 1; ensureDays(); save();
-  S.base = o.base || 0; S.dirty = "dirty" in o ? o.dirty : true; save({ quiet: true });
-  render(); if (msg) toast(msg);
+async function useKind(spec) {
+  const k = (spec.school && spec.school.type) || S.kind || "secondary";
+  if (k !== S.kind || !S.meta) { S.meta = await getJSON(`/api/meta/${k}`); S.kind = k; }
+}
+/* a setup with no roles gets the usual ones (S.meta.roles), written once when it is opened, never while drawing a step.
+   Only where roles may be changed: the committee, or a practice copy (a head sees the usual ones listed, nothing written).
+   The ids are fixed, so two committee members opening it at once add them once (an add with an id already there is
+   skipped). True if any were added. */
+function defaultRoles(spec) {
+  if (!(committee() || S.practice) || !spec) return false;
+  if (!Array.isArray(spec.roles)) spec.roles = [];
+  if (spec.roles.length || !(S.meta && (S.meta.roles || []).length)) return false;
+  spec.roles = S.meta.roles.map((r, i) => Object.assign(Sync.clone(r), { _id: "roledef" + String(i).padStart(3, "0") }));
+  return true;
+}
+/* open the server's copy here: it is the base, the undo list starts empty */
+async function openServer(srv, step) {
+  await useKind(srv.spec);
+  unpick(); SYNC.held = null; SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
+  S.spec = Sync.clone(srv.spec); LIST_KEYS.forEach(k => S.spec[k] = S.spec[k] || []); defaultRoles(S.spec);
+  if (step != null) S.step = step;
+  ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
+}
+/* a whole setup (a blank template, a workbook, a progress file, an earlier copy) goes on the server for the school, then
+   the server's copy opens here */
+async function putSetup(spec, why, step = 1) {
+  const r = await fetch("/api/setup", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ spec, why }) });
+  if (r.status === 401) { location.href = "/login"; return false; }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { toast(j.error || "Could not save the setup for the school."); return false; }
+  const srv = await fetchSetup(); if (!srv || !srv.spec) return false;
+  await openServer(srv, step); return true;
+}
+const committee = () => !!(G.st && G.st.role === "committee");
+/* what a department head sees. The server decides what a head may change; the page mirrors it: Download, Publish and
+   Students are not shown, every step but 4 and 5 is read-only, and on 4 only a provisional teacher's row and the
+   Can teach cells can be changed. A practice copy is the head's own: nothing is read-only there (the hidden steps stay hidden). */
+const isHead = () => !!(G.st && G.st.role === "head");
+const HEAD_HIDDEN = ["download", "publish", "students"];
+const stepShown = i => !(isHead() && STEPS[i] && HEAD_HIDDEN.includes(STEPS[i][0]));
+const locked = id => isHead() && !S.practice && !["start", "_old", "teachers", "lessons"].includes(id);   // true: nothing on this step can be changed
+const provisionalRow = t => !!t && t.provisional === "Yes";
+function headLocks(main, id) {
+  const off = (el, why) => { el.disabled = true; if (why && !el.title) el.title = why; };
+  const all = () => [...main.querySelectorAll("input, select, textarea, button")];
+  if (locked(id)) {
+    all().forEach(el => off(el));
+    main.querySelectorAll("[data-pop]").forEach(el => el.classList.add("ro"));
+    main.insertAdjacentHTML("afterbegin", `<div class="notice readonly">Only the committee can change this step.</div>`);
+    return;
+  }
+  if (!isHead() || S.practice || id !== "teachers") return;
+  const why = "Only the committee can change this. A teacher the committee has not confirmed yet can be changed.";
+  const bar = ["tc-dept", "tc-role", "tc-allow"];
+  all().forEach(el => {
+    const tr = el.closest("tr[id^='teachers-']");
+    if (tr) {   // a row: the tick box always; the rest only while the teacher is provisional (and never the Provisional field)
+      const own = provisionalRow(S.spec.teachers[Number(tr.id.slice(9))]) && !/\.provisional$/.test(el.dataset.k || "");
+      if (!el.dataset.pick && !own) off(el, why);
+      return;
+    }
+    if (el.closest(".bulk")) { if (bar.includes(el.dataset.bulk) || ["pickD", "pickR", "pickA"].includes(el.id)) off(el, why); return; }
+    if (el.closest(".card") === main.querySelector(".card")) return;   // the teachers card: add, show, tick all
+    off(el, why);   // the Roles card
+  });
+}
+/* runs fn with this tab's sync stopped: a send already on its way finishes first, none starts meanwhile */
+async function holdSync(fn) {
+  while (SYNC.busy) await new Promise(r => setTimeout(r, 50));
+  SYNC.busy = true; clearTimeout(SYNC.timer);
+  try { return await fn(); } finally { SYNC.busy = false; }
+}
+/* the question before the school's whole setup is replaced (none when the school has no setup yet) */
+function mayReplace() {
+  if (!SYNC.base) return true;
+  const n = SYNC.others;
+  return confirm("This replaces the school's setup for everyone." + (n ? ` ${n} other${n === 1 ? " is" : "s are"} working in it now.` : "") + " An earlier copy is kept. Replace it?");
+}
+/* committee only: the setup becomes the school's, for everyone; a practice copy is left */
+async function replaceSetup(spec, why) {
+  if (!committee()) { toast("Only the committee can replace the school's setup."); return false; }
+  if (!mayReplace()) return false;
+  let ok = false;
+  try {
+    ok = await holdSync(async () => {
+      const was = S.practice; let opened = false; S.practice = false;
+      try { opened = await putSetup(spec, why); return opened; }
+      finally { if (!opened) S.practice = was; }   // the server's copy did not open here: a practice copy stays one
+    });
+  } catch (e) { toast("Could not reach the server: " + e.message); }
+  S.copies = null; render(); syncNow(); return ok;
+}
+async function restoreCopy(id) {
+  if (!committee() || !mayReplace()) return;
+  let ok = false;
+  try { ok = await holdSync(async () => {
+    const r = await fetch("/api/setup/restore", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+    if (r.status === 401) { location.href = "/login"; return false; }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(j.error || "Could not restore that copy."); return false; }
+    const srv = await fetchSetup(); if (!srv || !srv.spec) return false;
+    await openServer(srv, S.step); return true;
+  }); } catch (e) { toast("Could not reach the server: " + e.message); }
+  S.copies = null; render(); syncNow();
+  if (ok) toast("The earlier copy is back as the school's setup.");
+}
+/* a practice copy: a sample school to try things on. Nothing in it reaches the server or this browser's storage; the
+   school's setup (SYNC.base, and what was not sent, kept in this browser) waits for Back to the school's setup. */
+async function practice(kind) {
+  try {
+    const spec = await getJSON(`/api/sample/${kind}`);
+    await holdSync(async () => {
+      await useKind(spec);   // may fail: nothing has changed yet, the school's setup stays open
+      S.practice = true; SYNC.held = null; unpick();
+      Sync.ensureIds(spec); LIST_KEYS.forEach(k => spec[k] = spec[k] || []); defaultRoles(spec); S.spec = spec;
+      S.step = 1; ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
+    });
+  } catch (e) {
+    toast("Could not open the practice copy: " + e.message);
+    if (!S.practice) syncNow();   // holdSync stopped the school's sync: start it again
+    return;
+  }
+  render(); toast("Practice copy of the sample school opened: change anything, nothing is saved for the school.");
+}
+function leavePractice() {
+  S.practice = false; S.spec = null; S.step = 0; S.undo = []; S.redo = []; S.last = null; S.snap = null; SYNC.base = null; unpick();
+  openPage();
+}
+async function begin(kind, what) {
+  if (what === "sample") { await practice(kind); return; }
+  const spec = await getJSON(`/api/${what}/${kind}`);
+  if (await replaceSetup(spec, "Started blank")) toast("Blank template started and saved for the school.");
+}
+async function adopt(spec, msg, why) {   // a workbook or a progress file opened: it becomes the school's setup
+  if (!await replaceSetup(spec, why)) return false;
+  if (msg) toast(msg); return true;
+}
+/* the rollout question: a copy of the setup this browser kept before the setup lived on the server, with changes that
+   never reached it. One in the old place is moved aside first; one with nothing unsaved is removed without asking. */
+const OLD = KEY + ".old";
+function oldChanges() {
+  try {
+    const cur = localStorage.getItem(KEY); let x = null; try { x = JSON.parse(cur || "null"); } catch (e) { }
+    if (x && x.spec && !x.sync) { localStorage.setItem(OLD, cur); localStorage.removeItem(KEY); }
+    let o = null; try { o = JSON.parse(localStorage.getItem(OLD) || "null"); } catch (e) { }
+    if (o && o.spec && o.spec.school && !o.sync && o.dirty) return o;
+    localStorage.removeItem(OLD);
+  } catch (e) { }
+  return null;
+}
+async function oldChoice(k) {
+  const o = S.asking; if (!o) return;
+  if (k === "file") dl(new Blob([JSON.stringify(o.spec, null, 1)], { type: "application/json" }), `${o.spec.school.name || "timetable"}_setup.json`);
+  if (k === "use" && !await replaceSetup(Sync.clone(o.spec), "Unsaved changes from a browser")) return;   // not replaced: the question stays
+  try { localStorage.removeItem(OLD); } catch (e) { }
+  S.asking = null; render();
+  toast({ file: "Saved to a file. They are no longer kept in this browser.", use: "They are the school's setup now.", discard: "Discarded." }[k]);
 }
 function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => t.hidden = true, 3200); }
 
@@ -567,14 +851,16 @@ function setPath(p, v) { const ks = p.split("."); const last = ks.pop(); const o
 /* ---------------- render */
 function render() {
   const nav = $("#steps");
-  nav.innerHTML = STEPS.map(([id, label], i) => `<button data-step="${i}" class="${i === S.step ? "on" : ""}" ${!S.spec && i > 0 ? "disabled" : ""}><span>${label}</span><span class="n">${count(id)}</span></button>`).join("");
+  if (!stepShown(S.step)) S.step = Math.min(1, STEPS.length - 1);   // a head never lands on a hidden step
+  nav.innerHTML = STEPS.map(([id, label], i) => !stepShown(i) ? "" : `<button data-step="${i}" class="${i === S.step ? "on" : ""}" ${!S.spec && i > 0 ? "disabled" : ""}><span>${label}</span><span class="n">${count(id)}</span></button>`).join("");
   $("#kindBadge").textContent = S.spec ? `${sc().type === "primary" ? "Primary" : "Secondary"} · ${sc().name}` : "No school yet";
-  const id = STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
+  const id = S.asking ? "_old" : STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
   // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
   const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap")].map(t => [t.scrollTop, t.scrollLeft]) : [];
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && (f.id ? `#${CSS.escape(f.id)}` : f.dataset.k ? `[data-k="${CSS.escape(f.dataset.k)}"]` : "");
   G.shown = id;
-  main.innerHTML = (VIEWS[id] || (() => ""))();
+  main.innerHTML = (S.practice && !S.asking ? `<div class="practice"><span>Practice copy: nothing here is saved for the school.</span><button id="practiceBack">Back to the school's setup</button></div>` : "") + (VIEWS[id] || (() => ""))();
+  headLocks(main, id);
   main.querySelectorAll(".tablewrap").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
@@ -609,20 +895,32 @@ function exportCard() {
 }
 const VIEWS = {
   start() {
-    const sv = saved();
-    return `<div class="card"><h1>Build your school's timetable setup</h1><p class="lead">This tool fills the timetable setup workbook step by step: rooms, classes, subjects, teachers, bands of groups, lessons, rules and students. Every list you make becomes the drop-down for the next step, so nothing is typed twice. At the end you download the workbook and the timetable skill, and an AI agent generates the timetable from them.</p>
-      <div class="choice">
-        <button data-begin="secondary|sample"><b>Secondary school · sample</b><span class="muted">A fictional 16-class secondary school with G1/G2/G3 banding, option bands and rules. Good for seeing how everything fits.</span></button>
-        <button data-begin="primary|sample"><b>Primary school · sample</b><span class="muted">A fictional 18-class primary school, weekly timetable, Standard/Foundation banding at P5–P6.</span></button>
-        <button data-begin="secondary|blank"><b>Secondary school · blank</b><span class="muted">Typical subjects and a day shape filled in; you add rooms, classes, teachers and lessons.</span></button>
-        <button data-begin="primary|blank"><b>Primary school · blank</b><span class="muted">Typical subjects and day shape for P1–P6; you add the rest.</span></button>
-      </div>
-      <div class="row" style="margin-top:14px">
-        ${G.server && G.server.spec ? `<button class="primary" id="serverSetup">Open the school's saved setup (${esc(G.server.spec.school.name)}, saved ${esc(G.server.saved_at)})</button>` : ""}
-        ${sv ? `<button class="${G.server && G.server.spec ? "" : "primary"}" id="resume">Continue in this browser (${esc(sv.spec.school.name)})</button>` : ""}
-        <label class="filebtn">Open a setup workbook (.xlsx)<input type="file" id="importX" accept=".xlsx" hidden></label>
-      </div></div>
-      <div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a band, a lesson with no periods).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
+    const how = `<div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a band, a lesson with no periods).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
+    const samples = `<button data-begin="secondary|sample"><b>Secondary school · sample</b><span class="muted">A fictional 16-class secondary school with G1/G2/G3 banding, option bands and rules. Opens as a practice copy: nothing is saved for the school.</span></button>
+        <button data-begin="primary|sample"><b>Primary school · sample</b><span class="muted">A fictional 18-class primary school, weekly timetable, Standard/Foundation banding at P5–P6. Opens as a practice copy: nothing is saved for the school.</span></button>`;
+    const blanks = `<button data-begin="secondary|blank"><b>Secondary school · blank</b><span class="muted">Typical subjects and a day shape filled in; you add rooms, classes, teachers and lessons.</span></button>
+        <button data-begin="primary|blank"><b>Primary school · blank</b><span class="muted">Typical subjects and day shape for P1–P6; you add the rest.</span></button>`;
+    const workbook = `<div class="row" style="margin-top:14px"><label class="filebtn">Open a setup workbook (.xlsx)<input type="file" id="importX" accept=".xlsx" hidden></label></div>`;
+    if (S.practice) return `<div class="card"><h1>Practice copy</h1><p class="lead">A sample school to try the steps on. Change anything: nothing here is saved for the school, and nobody else sees it. The school's setup is as you left it.</p>
+      <div class="choice">${samples}</div></div>${how}`;
+    if (!S.spec) return committee()
+      ? `<div class="card"><h1>Build your school's timetable setup</h1><p class="lead">This tool fills the timetable setup workbook step by step: rooms, classes, subjects, teachers, bands of groups, lessons, rules and students. Every list you make becomes the drop-down for the next step, so nothing is typed twice. At the end you download the workbook and the timetable skill, and an AI agent generates the timetable from them.</p>
+      <p class="muted">The school has no setup yet. Start one blank or open a workbook: it is saved for the school, and everyone on the committee and the department heads work in it together.</p>
+      <div class="choice">${blanks}${samples}</div>${workbook}</div>${how}`
+      : `<div class="card"><h1>The school's timetable setup</h1><p class="lead">The committee has not started the setup yet.</p>
+      <h2>Try things out</h2><p class="muted">A sample school as a practice copy: nothing in it is saved for the school.</p><div class="choice">${samples}</div></div>${how}`;
+    const s = sc();
+    return `<div class="card"><h1>The school's timetable setup</h1><p class="lead">Everyone works in this one setup together: each change is saved for the school as it is made.</p>
+      <div><span class="stat">School <b>${esc(s.name || "no name yet")}</b></span><span class="stat">Timetable <b>${esc(s.timetable || "no name yet")}</b></span><span class="stat" id="startOthers">${SYNC.others ? (SYNC.others === 1 ? "1 other here" : `${SYNC.others} others here`) : "Nobody else is here now"}</span></div>
+      <div class="row" style="margin-top:12px"><button class="primary" data-step="1">Open School & day</button></div></div>
+      ${committee() ? `<div class="card"><h2>Replace the whole setup</h2><p class="muted">Each of these replaces the school's setup for everyone; an earlier copy is kept, and <b>7 Download</b> can restore it. Loading a progress file is on 7 Download too.</p>
+      <div class="choice">${blanks}</div>${workbook}</div>` : ""}
+      <div class="card"><h2>Try things out</h2><p class="muted">A sample school as a practice copy: nothing in it is saved for the school.</p><div class="choice">${samples}</div></div>${how}`;
+  },
+  _old() {   // the rollout question, before anything else
+    return `<div class="card"><h1>Changes from before</h1><p class="lead">This browser has changes from before that were never saved for the school.</p>
+      <p class="muted">They are from ${esc((S.asking.spec.school || {}).name || "a setup")}. Save them to a file to keep them${committee() ? ", use them as the school's setup (the school's setup now is kept as an earlier copy)" : ""}, or discard them.</p>
+      <div class="row" style="margin-top:12px"><button class="primary" data-old="file">Save them to a file</button>${committee() ? `<button data-old="use">Use them</button>` : ""}<button data-old="discard">Discard them</button></div></div>`;
   },
   school() {
     const s = sc(); const NP = Number(s.periods_per_day); const days = dayNames();
@@ -685,18 +983,20 @@ const VIEWS = {
       ${teacherBar()}
       <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="teachers" title="Tick every teacher shown (${rows.length})" ${all ? "checked" : ""}></th><th>Teacher</th><th>Short</th><th>Department</th><th>Allowance</th><th>Can teach</th><th>Given</th><th>Spare</th><th>Role</th><th>Other duties</th><th>Total load</th><th>Load check</th><th>Provisional</th><th></th></tr>
       ${(() => { const lc = loadChecks(load); return rows.map(([t, i]) => { const g = load[t.name] || 0; const sp = t.allowance ? Number(t.allowance) - g : ""; const tot = g + (Number(t.other_duties) || 0);
-        return `<tr id="teachers-${i}" class="${rowCls(out, crit, "teachers", i)}${P.teachers.has(i) ? " picked" : ""}"><td><input type="checkbox" data-pick="teachers.${i}" ${P.teachers.has(i) ? "checked" : ""}></td><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join(""); })()}
+        return `<tr id="teachers-${i}" class="${rowCls(out, crit, "teachers", i)}${P.teachers.has(i) ? " picked" : ""}"><td><input type="checkbox" data-pick="teachers.${i}" ${P.teachers.has(i) ? "checked" : ""}></td><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}${committee() && t.provisional === "Yes" ? ` <span class="headmark" title="A department head added this teacher. Set Provisional to No to confirm them.">added by a head</span>` : ""}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join(""); })()}
       </table></div><div class="row" style="margin-top:10px"><button data-add="teachers">+ Add teacher</button></div></div>
       ${VIEWS.roles(load)}`;
   },
   roles(load) {   // the Roles sheet: guide allowance per role and the load of the teachers in it
-    if (!S.spec.roles || !S.spec.roles.length) S.spec.roles = JSON.parse(JSON.stringify(S.meta.roles || []));
+    // drawing never writes to the setup: the usual roles are written when the setup is opened (defaultRoles), and a
+    // head, who may not change roles, sees them listed (read-only) when the setup has none
+    const RL = S.spec.roles && S.spec.roles.length ? S.spec.roles : isHead() && !S.practice ? S.meta.roles || [] : [];
     const tot = t => (load[t.name] || 0) + (Number(t.other_duties) || 0), avg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : "";
     const eo = avg(S.spec.teachers.filter(t => t.role === "EO" && tot(t) > 0).map(tot)), mgmt = avg(S.spec.teachers.filter(t => ["HOD", "SH"].includes(t.role) && tot(t) > 0).map(tot));
     return `<div class="card"><h2>Roles</h2><p class="muted">Management (HOD, SH) should teach fewer periods than teachers; teachers (EO) should be spread evenly. Teachers (EO) average load <b>${eo || "–"}</b> · management (HOD, SH) <b>${mgmt || "–"}</b>.
       Flag a teacher <input data-k="spec.school.role_spread" type="number" value="${esc(sc().role_spread ?? 15)}" style="width:56px"> periods or more from the teacher average.</p>
       <div class="tablewrap"><table><tr><th>Role</th><th>What it is</th><th>Guide allowance</th><th>Group</th><th>Teachers</th><th>Average load</th><th></th></tr>
-      ${S.spec.roles.map((r, i) => { const ts = S.spec.teachers.filter(t => t.role === r.role);
+      ${RL.map((r, i) => { const ts = S.spec.teachers.filter(t => t.role === r.role);
         return `<tr><td>${inp(`spec.roles.${i}.role`, r.role, "text", 'style="width:80px"')}</td><td style="min-width:240px">${inp(`spec.roles.${i}.what`, r.what)}</td><td class="num">${inp(`spec.roles.${i}.allowance`, r.allowance, "number", 'style="width:64px"')}</td><td>${inp(`spec.roles.${i}.group`, r.group)}</td><td class="calc">${ts.length}</td><td class="calc">${avg(ts.map(tot))}</td><td>${delBtn("roles", i)}</td></tr>`; }).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="roles">+ Add role</button></div></div>`;
   },
@@ -799,7 +1099,7 @@ const VIEWS = {
       <div class="dl">
         <div class="card"><h2>1 · Configuration workbook</h2><p class="muted">Everything you entered, as the .xlsx template.</p><button class="primary" id="build">Download workbook (.xlsx)</button></div>
         <div class="card"><h2>2 · The timetable skill</h2><p class="muted">Use the zip when the chatbot can run code: its scripts make a timetable file this app can publish as it is. SKILL.md alone is for a chatbot that cannot run code.</p><div class="row"><a href="/download/skill.zip"><button class="primary">Skill (.zip)</button></a><a href="/download/SKILL.md"><button>SKILL.md only</button></a></div></div>
-        <div class="card"><h2>Keep a copy</h2><p class="muted">The setup as a progress file, to keep or to open on another computer.</p><div class="row"><button id="saveJson" title="Download the setup as a progress file">Save to file</button><label class="filebtn" title="Open a progress file">Load from file<input type="file" id="loadJson" accept=".json" hidden></label></div></div>
+        <div class="card"><h2>Keep a copy</h2><p class="muted">The setup as a progress file, to keep or to open on another computer.</p><div class="row"><button id="saveJson" title="Download the setup as a progress file">Save to file</button>${committee() && !S.practice ? `<label class="filebtn" title="Open a progress file: it replaces the school's setup for everyone">Load from file<input type="file" id="loadJson" accept=".json" hidden></label>` : ""}</div>${committee() && !S.practice ? copiesList() : ""}</div>
       </div>
       <div class="card" style="margin-top:16px"><h2>How to make the timetable</h2><ol class="howto">
         <li>In Claude (or another agent that can run Python), add the skill: upload the .zip as a skill, or attach SKILL.md to the conversation.</li>
@@ -809,10 +1109,18 @@ const VIEWS = {
       <div class="card" style="margin-top:16px"><h2>Templates to share</h2><p class="muted">Ready-made workbooks for others to fill in Excel.</p><div class="row"><a href="/download/template/secondary"><button>Sample secondary</button></a><a href="/download/template/primary"><button>Sample primary</button></a><a href="/download/blank/secondary"><button>Blank secondary</button></a><a href="/download/blank/primary"><button>Blank primary</button></a></div></div>`;
   },
   publish() {
+    if (S.practice) return `<div class="card"><h1>Step 8 · Publish</h1><p class="lead">Publishing is off in a practice copy.</p></div>`;
     return `<div class="card"><h1>Step 8 · Publish</h1><p class="lead">Bring back the timetable the AI agent made, check it, then publish it. Nothing is visible to teachers or students until you publish.</p></div>
       ${exportCard()}<div class="card" id="pubNow" style="margin-top:16px"></div>`;
   },
 };
+
+function copiesList() {   // the earlier copies of the school's setup the server keeps (a replacement keeps one)
+  if (!S.copies) return `<div class="row" style="margin-top:10px"><button id="copiesLoad">Restore an earlier copy</button></div>`;
+  if (!S.copies.length) return `<p class="muted small" style="margin-top:10px">The server has no earlier copies yet.</p>`;
+  return `<h3 style="margin-top:12px">Restore an earlier copy</h3><p class="muted small">It replaces the school's setup for everyone; the setup as it is now is kept as a copy too.</p>
+    <div class="tablewrap" style="max-height:260px"><table><tr><th>When</th><th>What</th><th></th></tr>${S.copies.map(c => `<tr><td>${esc(c.when)}</td><td>${esc(c.what)}</td><td><button class="small" data-restore="${esc(c.id)}">Restore</button></td></tr>`).join("")}</table></div>`;
+}
 
 /* ---------------- events */
 document.addEventListener("click", async e => {
@@ -820,19 +1128,21 @@ document.addEventListener("click", async e => {
   if (!pop.hidden && !pop.contains(e.target)) commitPop();
   if (e.target.dataset && (e.target.dataset.pick || e.target.dataset.pickall)) { pick(e.target, e.shiftKey); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c"); if (!b) return;
-  if (b.dataset.step) { S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
+  if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
-  if (b.id === "saveServer") { saveServer(); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
+  if (b.id === "practiceBack") { leavePractice(); return; }
+  if (b.dataset.old) { oldChoice(b.dataset.old); return; }
+  if (b.id === "copiesLoad") { try { S.copies = await getJSON("/api/setup/copies"); } catch (err) { toast("Could not load the earlier copies."); return; } render(); return; }
+  if (b.dataset.restore) { restoreCopy(b.dataset.restore); return; }
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
-  if (b.id === "resume") { const sv = saved(); await adopt(sv.spec, "", { kind: sv.kind, step: sv.step, base: sv.base, dirty: sv.dirty !== false }); return; }
   if (b.dataset.add) { addRow(b.dataset.add); return; }
   if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); unpick(); save(); render(); return; }
   if (b.dataset.helper) { helper(b.dataset.helper); return; }
   if (b.dataset.brush !== undefined) { S.brush = b.dataset.brush; render(); return; }
   if (b.dataset.copyday) { const lv = b.dataset.copyday; const ds = S.spec.day_structure[lv]; const f = ds[dayNames()[0]]; dayNames().forEach(d => ds[d] = f); save(); render(); return; }
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
-  if (b.dataset.pop) { openPop(b); return; }
+  if (b.dataset.pop) { if (!b.classList.contains("ro")) openPop(b); return; }
   if (b.dataset.stu) { stuApply(b.dataset.stu); return; }
   if (b.dataset.past) { pastAction(b.dataset.past); return; }
   if (b.dataset.bulk) { bulk(b.dataset.bulk); return; }
@@ -841,10 +1151,10 @@ document.addEventListener("click", async e => {
     if (s) S.stu = classNames().includes(s.class) ? { cls: s.class, q: "" } : { cls: "", q: stuKey(s) };
     if (/^lessons-/.test(b.dataset.row)) S.tg = { lv: "", subj: "", t: "" };
     if (/^teachers-/.test(b.dataset.row)) S.tf = { dept: "", subj: "", q: "" };
+    if (!stepShown(Number(b.dataset.go))) return;
     S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "fitAgain") { fitCheck(true); return; }
-  if (b.id === "serverSetup") { await adopt(G.server.spec, "Opened the school's saved setup.", { base: G.server.ts, dirty: false }); return; }
   if (b.id === "exGo") { makePrintouts(); return; }
   if (b.id === "imCheck") { importTimetable(false); return; }
   if (b.id === "imPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; importTimetable(true); return; }
@@ -858,7 +1168,7 @@ document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / C
   e.preventDefault(); undo(k === "z" && !e.shiftKey);
 });
 let painting = false;
-document.addEventListener("mousedown", e => { const c = e.target.closest("td.c"); if (!c) return; painting = true; paint(c); e.preventDefault(); });
+document.addEventListener("mousedown", e => { const c = e.target.closest("td.c"); if (!c || locked(G.shown)) return; painting = true; paint(c); e.preventDefault(); });
 document.addEventListener("mouseover", e => { if (!painting) return; const c = e.target.closest("td.c"); if (c) paint(c); });
 document.addEventListener("mouseup", () => { if (painting) { painting = false; const added = ensureRecessRows(); save(); if (added) render(); else renderIssues(); } });
 function paint(c) {
@@ -867,11 +1177,15 @@ function paint(c) {
 }
 document.addEventListener("change", async e => {
   const el = e.target;
-  if (el.id === "importX") { const f = el.files[0]; if (!f) return; const fd = new FormData(); fd.append("file", f); const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json(); if (!r.ok) { toast(j.error || "Could not read that file."); return; } await adopt(j, "Workbook opened. Press Save progress to keep it for the school.");
+  if (el.id === "importX") { const f = el.files[0]; if (!f) return; el.value = ""; const fd = new FormData(); fd.append("file", f);
+    try { const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json().catch(() => ({})); if (!r.ok) { toast(j.error || "Could not read that file."); return; } if (!await adopt(j, "Workbook opened and saved for the school.", "Opened a workbook")) return; }
+    catch (err) { toast("Could not reach the server: " + err.message); return; }
     const nr = new Set(ruleProblems(lessonInfo()).map(x => x[0])).size;   // rules written in a way the timetable cannot use: say so now, not after generating
-    if (nr) toast(`Workbook opened. ${nr} rule${nr === 1 ? "" : "s"} on step 6 cannot be used as written (skipped or matching nothing): see Things to fix. Press Save progress to keep it.`);
+    if (nr) toast(`Workbook opened. ${nr} rule${nr === 1 ? "" : "s"} on step 6 cannot be used as written (skipped or matching nothing): see Things to fix. It is saved for the school.`);
     return; }
-  if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; el.value = ""; try { await adopt(JSON.parse(await f.text()), "Progress loaded from the file. Press Save progress to keep it for the school."); } catch (err) { toast("That file is not a progress file."); } return; }
+  if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; el.value = ""; let spec = null; try { spec = JSON.parse(await f.text()); } catch (err) { }
+    if (!spec || !spec.school) { toast("That file is not a progress file."); return; }
+    try { await adopt(spec, "Progress loaded from the file and saved for the school.", "Loaded from a file"); } catch (err) { toast("Could not reach the server: " + err.message); } return; }
   if (el.dataset.names) { setPath(el.dataset.names, el.value.split(",").map(t => t.trim()).filter(Boolean)); save(); render(); return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
   if (el.id === "stuFile") { stuFile(el); return; }
@@ -906,7 +1220,7 @@ document.addEventListener("change", async e => {
   if (fx) { const r = S.spec.rules[fx[1]]; if (r.rule === "Fixed at" && ["Class", "Group"].includes(r.scope)) r.scope = classNames().includes(v) ? "Class" : "Group"; }
   if (/^spec\.school\.(weeks|periods_per_day)$/.test(path)) ensureDays();
   if (/\.(room|class|subject|name|block)$/.test(path)) renameRefs(e.target, path, v);
-  save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
+  save(); render(); poll();
 });
 function renameRefs() { /* references are by name; renaming leaves old names flagged as "(not on list)" for the user to fix */ }
 
@@ -923,7 +1237,7 @@ function setFixedWho(r, lv, who) {   // Fixed lessons: Every class is the level 
 function addRow(k) {
   const lv = levels()[0];
   const blank = { venues: { room: "", kind: "classroom", capacity: 40 }, classes: { class: "", level: lv, size: 38, home_room: null },
-    subjects: { subject: "", code: "", tag: "-", dept: (sc().departments || [])[0], periods: {} }, teachers: { name: "", short: "", dept: (sc().departments || [])[0], allowance: sc().type === "primary" ? 36 : 64, provisional: "No", can_teach: [] },
+    subjects: { subject: "", code: "", tag: "-", dept: (sc().departments || [])[0], periods: {} }, teachers: { name: "", short: "", dept: (sc().departments || [])[0], allowance: sc().type === "primary" ? 36 : 64, provisional: isHead() && !S.practice ? "Yes" : "No", can_teach: [] },
     blocks: { block: "", level: lv, classes: [] }, lessons: { level: lv, subject: null, block: null, classes: [], teachers: [], students: null },
     rules: { scope: "Level", target: null, rule: "Not in periods", week: "Both", day: "All", strength: "Must" },
     avail: { scope: "Teacher", target: null, rule: "Not available", week: "Both", day: "All", from: 0, to: 0, strength: "Must", times: [hhmm(0), hhmm(1)] },
@@ -940,7 +1254,7 @@ function addRow(k) {
   const into = { avail: "rules", fixed: "rules", fixedall: "rules", hbl: "rules", venuerule: "rules" }[k] || k; S.spec[into] = S.spec[into] || [];
   S.spec[into].push(JSON.parse(JSON.stringify(blank))); save();
   const show = () => { const last = document.getElementById(`${into}-${S.spec[into].length - 1}`); if (last) { last.scrollIntoView({ block: "center" }); const f = last.querySelector("input,select"); if (f) f.focus({ preventScroll: true }); } };
-  render(); show(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); show(); poll(); })();
+  render(); show(); poll();
 }
 /* a teaching group with no band and fewer students than its classes (a pull-out group, say 9 of 1A2) is a group of its
    own, not the whole class: it gets a code in Keep code, made like a band group's (level digit, subject code, level
@@ -989,7 +1303,7 @@ function helper(k) {
     const lv = $("#hcLevel").value, size = Number($("#hcSize").value) || 38; const used = new Set(S.spec.classes.map(c => c.home_room)); const free = S.spec.venues.filter(v => (v.kind || "classroom") === "classroom" && !used.has(v.room)).map(v => v.room);
     $("#hcNames").value.split(",").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.classes.push({ class: `${String(lv).slice(-1)}${n}`, level: lv, size, home_room: free.shift() || null }));
   }
-  if (k === "teachers") { const dept = $("#htDept").value, allow = Number($("#htAllow").value) || null; $("#htNames").value.split("\n").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.teachers.push({ name: n, short: n.split(" ")[0], dept, allowance: allow, provisional: "No", can_teach: [] })); }
+  if (k === "teachers") { const dept = $("#htDept").value, allow = Number($("#htAllow").value) || null; $("#htNames").value.split("\n").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.teachers.push({ name: n, short: n.split(" ")[0], dept, allowance: allow, provisional: isHead() && !S.practice ? "Yes" : "No", can_teach: [] })); }
   if (k === "groups") { const b = S.spec.blocks.find(x => x.block === $("#hbBlock").value), s = $("#hbSubj").value, n = Number($("#hbN").value) || 1, st = Number($("#hbSt").value) || null; if (!b || !s) { toast("Pick a band and a subject."); return; } for (let i = 0; i < n; i++) S.spec.lessons.push({ level: b.level, subject: s, block: b.block, classes: [...(b.classes || [])], teachers: [], students: st }); }
   if (k === "whole") { const lv = $("#hwLevel").value, s = $("#hwSubj").value; if (!s) { toast("Pick a subject."); return; } S.spec.classes.filter(c => c.level === lv).forEach(c => S.spec.lessons.push({ level: lv, subject: s, block: null, classes: [c.class], teachers: [], students: c.size })); }
   save(); render(); toast("Added.");
@@ -1035,6 +1349,7 @@ function bulkTeachers(k) {   // step 4: one change for every ticked teacher
   const P = S.pick, T = S.spec.teachers, ix = [...P.teachers].filter(i => T[i]), n = ix.length, s1 = n === 1 ? "" : "s";
   if (k === "tc-none") { P.teachers.clear(); render(); return; }
   if (!n) return;
+  if (isHead() && !S.practice && ["tc-dept", "tc-role", "tc-allow"].includes(k)) return;   // a head sets only who can teach what
   let msg = "";
   if (k === "tc-add") {
     if (!P.s) return; let added = 0;
@@ -1119,7 +1434,7 @@ function bulk(k) {   // one change for every ticked row, so one Undo takes it al
 }
 
 /* ---------------- restore: students with no groups and bands with no classes, from an earlier copy of the setup (each
-   Save progress keeps the copy it replaces). Only what is empty now is filled. */
+   restore point the server keeps). Only what is empty now is filled. */
 function lostCounts() {
   const banded = new Set(S.spec.blocks.flatMap(b => b.classes || [])); S.spec.lessons.forEach(x => { if (x.block) (x.classes || []).forEach(c => banded.add(c)); });
   return { stu: S.spec.students.filter(s => !(s.groups || []).length && banded.has(s.class)).length, bands: S.spec.blocks.filter(b => b.block && !(b.classes || []).length).length };
@@ -1130,7 +1445,7 @@ function restoreHelper() {
   return `<div class="helper"><b>Restore from an earlier copy</b> <span class="muted">${what}.</span>
     ${S.past ? `<select id="pastPick">${S.past.map((p, k) => opt(k, S.pastPick, `${p.what} · ${p.when} · ${Object.keys(p.groups).length} students with groups`)).join("")}</select> <button data-past="restore">Restore</button>`
       : `<button data-past="load">Find earlier copies</button>`}
-    <p class="muted small" style="margin:6px 0 0">Fills only students with no groups now (matched by Student ID) and bands with no classes now, from a copy the server kept: each Save progress keeps the one it replaces. Nothing else changes; Undo takes it back.</p></div>`;
+    <p class="muted small" style="margin:6px 0 0">Fills only students with no groups now (matched by Student ID) and bands with no classes now, from a copy the server kept. Nothing else changes; Undo takes it back.</p></div>`;
 }
 async function pastAction(k) {
   if (k === "load") {
@@ -1296,11 +1611,11 @@ function commitPop() {
   }
   else setPath(path, readCt().filter(c => c.subject));
   const lc = pop.dataset.what === "classes" && path.match(/^spec\.lessons\.(\d+)\.classes$/); if (lc) groupCode(Number(lc[1]));
-  pop.hidden = true; save(); (async () => { try { G.server = await getJSON("/api/setup"); } catch (e) { } render(); poll(); })();
+  pop.hidden = true; save(); if (!tryHeld()) render(); poll();
 }
 
 /* ---------------- the server: what is published, access codes, the volume */
-const G = { server: null, st: null, timer: null, inflight: false };
+const G = { st: null, timer: null, inflight: false };
 async function post(url, body) {
   const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   const j = await r.json().catch(() => ({}));
@@ -1362,7 +1677,7 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
       ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
       <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
     : `<p class="muted">Nothing published yet. Teachers and students see a "not published yet" page.</p>`) +
-    `<h3>Access codes</h3><ul class="codes">${[["committee", "Committee"], ["teacher", "Teachers"], ["student", "Students"]].map(([k, t]) => `<li>${t}: ${st.codes && st.codes[k] ? "set" : "<b>not set</b>"}</li>`).join("")}</ul>
+    `<h3>Access codes</h3><ul class="codes">${[["committee", "Committee"], ["teacher", "Teachers"], ["student", "Students"]].map(([k, t]) => `<li>${t}: ${st.codes && st.codes[k] ? "set" : "<b>not set</b>"}</li>`).join("")}<li>Department heads: ${st.codes && st.codes.head ? "set" : "not set (no heads' sign-in)"}</li></ul>
     ${(st.code_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")}${st.volume ? "" : `<p class="issue">No Railway volume: the published timetable will be lost on the next deploy. Add a volume (see README).</p>`}`;
 }
 
@@ -1427,18 +1742,35 @@ async function buildXlsx() {
   dl(await r.blob(), `${(sc().name || "School").replace(/[^\w -]/g, "").trim().replace(/ /g, "_")}_Timetable_Setup.xlsx`);
 }
 
-(async () => {
-  try { G.server = await getJSON("/api/setup"); } catch (e) { }
-  const local = saved(), srv = G.server && G.server.spec ? G.server : null;
-  const unsaved = local && (local.dirty || (local.dirty === undefined && (!srv || JSON.stringify(local.spec) !== JSON.stringify(srv.spec))));
+/* others' changes kept aside while a box or pop-up was in use: shown once the person commits or leaves it */
+document.addEventListener("change", () => setTimeout(tryHeld, 0));
+document.addEventListener("focusout", () => setTimeout(tryHeld, 0));
+/* on load: the server's copy, with what this browser had not sent yet on top (unless the committee has replaced the
+   setup since); while the server cannot be reached, those changes stay kept here and the page tries again */
+async function openPage() {
+  let srv = null;
+  await poll();   // the status first: it says whether this is the committee or a head
   try {
-    if (local && (unsaved || !srv)) {
-      await adopt(local.spec, "", { kind: local.kind, step: local.step, base: local.base, dirty: !!unsaved });
-      if (srv && srv.ts > (local.base || 0) + 1) toast(`This browser has changes that are not saved for the school. A newer setup was saved on ${srv.saved_at}: open it from Start if you want that one instead.`);
-    } else if (srv) {
-      const same = local && local.spec.school && srv.spec.school && local.spec.school.name === srv.spec.school.name;
-      await adopt(srv.spec, `Opened the school's saved setup (saved ${srv.saved_at}).`, { step: same ? local.step : 1, base: srv.ts, dirty: false });
+    srv = await fetchSetup(); if (!srv) return;
+    if (srv.spec) {
+      const local = saved(); let pending = local && Array.isArray(local.pending) && local.pending.length ? local.pending : null;
+      if (pending && local.v !== srv.v) {
+        const r = await fetch(`/api/setup/changes?since=${Number(local.v) || 0}&client=${encodeURIComponent(SYNC.client)}`);
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        const j = await r.json();
+        if (j.reset && j.replaced) { pending = null; SYNC.kept = true; toast(DROPPED); }
+      }
+      await openServer(srv, local ? local.step : 1);
+      // pending was kept here and never accepted by the server (keepLocal drops what it accepts), so it goes on top
+      if (pending) { Sync.apply(S.spec, pending); save({ quiet: true }); }
     }
-  } catch (e) { }
-  render(); poll();
-})();
+  } catch (e) {
+    if (!S.spec) {
+      $("#main").innerHTML = `<div class="card"><h1>Cannot reach the server</h1><p class="lead">The changes this browser had not sent yet are kept here and will be sent when the server answers. The page tries again every 5 seconds.</p></div>`;
+      setTimeout(openPage, 5000); return;
+    }
+  }
+  if (!S.asking) S.asking = oldChanges();
+  render(); if (S.spec) syncNow();
+}
+openPage();
