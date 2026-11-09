@@ -158,7 +158,7 @@ summary.sev{cursor:pointer;margin:8px 0 4px;color:#7a4b00;font-weight:600}
 .tlgone p{margin:0 0 6px}
 .avcell { width: 40px; padding: 2px 4px; }
 button.avatar { padding: 0; border: 0; background: none; border-radius: 50%; line-height: 0; cursor: pointer; }
-button.avatar:disabled { cursor: default; }
+button.avatar svg { pointer-events: none; }
 button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .avstrip { gap: 4px; margin-bottom: 6px; align-items: center; }
 .avstrip svg { display: block; }

@@ -105,4 +105,25 @@ t("names like Constructor and __proto__ are ordinary names", () => {
 t("the default short name drops trailing punctuation", () => {
   assert.strictEqual(People.planTeachers([], [{ name: "Nair, Arjun" }], ROLES, DEPTS).add[0].short, "Nair");
 });
+t("names that look like one person are alike; the same key, an empty name and other people are not", () => {
+  for (const [a, b] of [["Tan Wei-Ming", "Tan Wei Ming"], ["O'Brien Lee", "OBrien Lee"], ["Wei Ming Tan", "Tan Wei Ming"],
+    ["Tan Wei Ming", "Tan Wei Ming Alex"], ["Tan Wei Meng", "Tan Wei Ming"], ["Arjun Nair", "Arjun Naiir"]])
+    { assert.ok(People.alike(a, b), `${a} / ${b}`); assert.ok(People.alike(b, a), `${b} / ${a}`); }
+  for (const [a, b] of [["Tan Wei Ming", "TAN wei  ming"], ["", "Tan Wei Ming"], ["Tan Wei Ming", "   "], ["Tan Wei Ming", "Lim Wei Ming"],
+    ["Tan", "Tan Wei Ming"], ["Lim Al", "Lim Ali"], ["Arjun Nair", "Priya Menon"], ["--", ".."]])
+    assert.ok(!People.alike(a, b), `${a} / ${b}`);
+});
+t("the plan counts what the updates change, field by field", () => {
+  const p = People.planTeachers(EX, [{ name: "Tan Wei Ming", allowance: 80, role: "EO" }, { name: "Lim Hui Min", allowance: 60, short: "LHM" }], ROLES, DEPTS);
+  assert.deepStrictEqual(p.fields, { allowance: 2, short: 1 });
+  assert.deepStrictEqual(People.planTeachers(EX, [{ name: "Tan Wei Ming" }], ROLES, DEPTS).fields, {});
+});
+t("a new name that looks like a teacher not in the list is paired with them, once, first in table order", () => {
+  const p = People.planTeachers(EX, [{ name: "Tan Wei-Ming" }, { name: "Lim Hui Min" }, { name: "Arjun Nair" }], ROLES, DEPTS);
+  assert.deepStrictEqual(p.add.map(x => x.name), ["Tan Wei-Ming", "Arjun Nair"]); assert.deepStrictEqual(p.missing, [0]);
+  assert.deepStrictEqual(p.alike, [{ add: "Tan Wei-Ming", missing: "Tan Wei Ming" }]);
+  const two = People.planTeachers([{ name: "Tan Wei Meng" }, { name: "Tan Wei Ming" }], [{ name: "Tan Wei-Ming" }], ROLES, DEPTS);
+  assert.deepStrictEqual(two.alike, [{ add: "Tan Wei-Ming", missing: "Tan Wei Meng" }]);
+  assert.deepStrictEqual(People.planTeachers(EX, [{ name: "Tan Wei Ming" }, { name: "Lim Hui Min" }], ROLES, DEPTS).alike, []);
+});
 console.log(`${n} cases passed`);

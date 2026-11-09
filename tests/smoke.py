@@ -95,6 +95,26 @@ def test_a_change_sent_from_before_a_replacement_is_not_applied():
     assert code == 200 and j["reset"] is True and j["replaced"] is True
     rec = c.get("/api/setup").get_json(); assert rec["v"] == after and rec["spec"]["school"].get("timetable") != "Should not land"
 
+def _points_after(ops):
+    """1 when applying ops takes a restore point (given one taken just now), else 0"""
+    import datetime
+    newest = lambda: (store._points() or [None])[-1]
+    store._last_point[0] = datetime.datetime.now().timestamp(); before = newest()
+    store.apply_changes(ops, "C"); return int(newest() != before)
+
+def test_a_teacher_delete_takes_a_restore_point():
+    t = c.get("/api/setup").get_json()["spec"]["teachers"][-1]
+    assert _points_after([["del", "teachers", t["_id"]]]) == 1
+
+def test_a_teacher_upload_of_ten_takes_a_restore_point_and_nine_does_not():
+    adds = lambda tag, n: [["add", "teachers", {"_id": f"up{tag}{i}", "name": f"Upload Teacher {tag}{i}"}, ""] for i in range(n)]
+    assert _points_after(adds("a", 10)) == 1
+    assert _points_after(adds("b", 9)) == 0
+    sets = [["set", "teachers", f"upa{i}", "allowance", 50] for i in range(9)] + [["merge", "teachers", "upa0", "can_teach", [{"levels": "All", "subject": "Qqq"}], []]]
+    assert _points_after(sets) == 1
+    lessons = c.get("/api/setup").get_json()["spec"]["lessons"][:10]
+    assert _points_after([["set", "lessons", x["_id"], "students", 5] for x in lessons]) == 0
+
 def test_a_restart_resets_without_losing_the_setup():
     v = c.get("/api/setup").get_json()["v"]; _changes("A", v, [["school", "timetable", "Term 9"]])
     store._log.clear(); store._setup.clear()            # what a restart does to the process
@@ -195,6 +215,15 @@ def test_read_table_picks_the_teachers_sheet():
     r = post(c, {"sheet": "teachers"}); assert r.status_code == 200 and ["Made Up Teacher", "MUT", "Science"] in r.get_json()["rows"], r.get_json()
     r = post(c, {}); assert r.status_code == 200 and r.get_json()["rows"] == [["Read me first"]], r.get_json()
     if h: assert post(h, {"sheet": "teachers"}).status_code == 401
+
+def test_read_table_reads_no_more_than_60_columns():
+    import io, openpyxl
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Teachers"
+    ws.append(["Teacher", "Short"]); ws.append(["Made Up Teacher", "MUT"]); ws.cell(row=1, column=300, value="far right")
+    buf = io.BytesIO(); wb.save(buf)
+    r = c.post("/api/read-table", data={"file": (io.BytesIO(buf.getvalue()), "list.xlsx"), "sheet": "teachers"}, content_type="multipart/form-data")
+    rows = r.get_json()["rows"]; assert r.status_code == 200 and max(len(x) for x in rows) <= 60, max(len(x) for x in rows)
+    assert ["Made Up Teacher", "MUT"] == rows[1][:2] and not any(rows[1][2:])
 
 def test_publish_uploaded_timetable():   # slow: solves the primary sample
     work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx")

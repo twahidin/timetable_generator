@@ -215,8 +215,10 @@ def read_table():
             ws = next((w for w in wb.worksheets if "teacher" in w.title.lower()), wb.worksheets[0])
         else: ws = wb["Students"] if "Students" in wb.sheetnames else wb.worksheets[0]
         cell = lambda v: "" if v is None else str(int(v)) if isinstance(v, float) and v.is_integer() else str(v).strip()
-        rows = [[cell(v) for v in r] for r in ws.iter_rows(max_row=5000, values_only=True)]
+        rows = [[cell(v) for v in r] for r in ws.iter_rows(max_row=5000, max_col=60, values_only=True)]
         wb.close()
+        width = max((max((i + 1 for i, v in enumerate(r) if v), default=0) for r in rows), default=0)
+        rows = [r[:width] for r in rows]   # max_col pads every row to 60: keep only the columns that hold something
     except Exception as e: return {"error": f"Could not read that file ({e})."}, 400
     finally: os.unlink(path)
     return {"rows": [r for r in rows if any(r)]}

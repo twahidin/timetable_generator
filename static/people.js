@@ -188,6 +188,37 @@ var People = (function () {
 
   // ---- Matching a list to the teachers already in the setup ----
 
+  function distance(a, b) {   // edit distance (insert, delete, change one character)
+    var prev = [], cur, i, j;
+    for (j = 0; j <= b.length; j++) prev.push(j);
+    for (i = 1; i <= a.length; i++) {
+      cur = [i];
+      for (j = 1; j <= b.length; j++)
+        cur.push(Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1)));
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+
+  // Two names that are not the same key but look like one person: spelt with other punctuation, in another
+  // order, with a word more, or a letter or two apart.
+  function alike(a, b) {
+    var ka = key(a), kb = key(b);
+    if (!ka || !kb || ka === kb) return false;
+    var sa = ka.replace(/[^a-z0-9]+/g, ""), sb = kb.replace(/[^a-z0-9]+/g, "");
+    if (!sa || !sb) return false;
+    if (sa === sb) return true;
+    var wa = ka.split(" "), wb = kb.split(" ");
+    if (wa.slice().sort().join(" ") === wb.slice().sort().join(" ")) return true;
+    var short = wa.length <= wb.length ? wa : wb, long = short === wa ? wb : wa;
+    if (short.length >= 2 && short.every(function (w) { return long.indexOf(w) >= 0; })) return true;
+    if (sa.length >= 6 && sb.length >= 6 && Math.abs(sa.length - sb.length) <= 2) {
+      var d = distance(sa, sb);
+      if (d >= 1 && d <= 2) return true;
+    }
+    return false;
+  }
+
   function planTeachers(existing, incoming, roles, departments) {
     var byKey = Object.create(null);
     existing.forEach(function (t, i) { var k = key(t.name); if (!(k in byKey)) byKey[k] = i; });
@@ -222,11 +253,22 @@ var People = (function () {
       plan.add.push(t);
     });
     existing.forEach(function (t, i) { if (!inFile[key(t.name)]) plan.missing.push(i); });
+    plan.fields = {};
+    plan.update.forEach(function (u) {
+      Object.keys(u.changes).forEach(function (f) { plan.fields[f] = (plan.fields[f] || 0) + 1; });
+    });
+    plan.alike = [];
+    plan.add.forEach(function (t) {
+      for (var j = 0; j < plan.missing.length; j++) {
+        var other = existing[plan.missing[j]].name;
+        if (alike(t.name, other)) { plan.alike.push({ add: t.name, missing: other }); return; }
+      }
+    });
     return plan;
   }
 
   return { key: key, hash: hash, AVATAR: AVATAR, AVATAR_COMBOS: AVATAR_COMBOS,
     avatarParts: avatarParts, avatar: avatar, FIELDS: FIELDS,
-    readTeachers: readTeachers, planTeachers: planTeachers };
+    alike: alike, readTeachers: readTeachers, planTeachers: planTeachers };
 })();
 if (typeof module !== "undefined") module.exports = People;

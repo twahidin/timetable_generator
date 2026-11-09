@@ -1556,12 +1556,16 @@ const teachersSig = () => JSON.stringify(S.spec.teachers);
 const mayUpload = () => committee() || S.practice;
 function tlClear() { TL.read = null; TL.err = ""; TL.msg = ""; }
 const tlPlan = () => People.planTeachers(S.spec.teachers, TL.read.teachers, roles(), sc().departments || []);
+const TL_STALE = "The teachers changed since the list was read. Press Read the list again.";
+const TL_NO_EXCEL = "Reading an Excel file needs the committee's code. Paste the list or choose a .csv file.";
+const TL_LABEL = { short: "short name", dept: "department", role: "role", allowance: "allowance", other_duties: "other duties", note: "note" };
 function uploadCard() {
   if (TL.read && TL.sig !== teachersSig()) tlClear();
+  const xl = committee();   // an Excel file is read by the server, which reads it for the committee only
   return `<div class="card" id="teacherUpload"><h2>2 · Upload the teacher list</h2>
-    <p class="muted">Columns: Name, Short name, Department, Role, Allowance, Other duties, Note. Only Name is needed; a column you leave out is not changed.</p>
+    <p class="muted">Columns: Name, Short name, Department, Role, Allowance, Other duties, Note. Only Name is needed; a column you leave out is not changed.${xl ? "" : " Paste the list or choose a .csv file."}</p>
     <textarea id="tlPaste" rows="5" spellcheck="false" placeholder="Name&#9;Short name&#9;Department&#9;Role">${esc(TL.text)}</textarea>
-    <div class="row" style="margin-top:8px"><label class="filebtn">Choose a file (.xlsx or .csv)<input type="file" id="tlFile" accept=".xlsx,.csv" hidden></label><button class="primary" data-tl="read">Read the list</button></div>
+    <div class="row" style="margin-top:8px"><label class="filebtn">Choose a file (${xl ? ".xlsx or .csv" : ".csv"})<input type="file" id="tlFile" accept="${xl ? ".xlsx,.csv" : ".csv"}" hidden></label><button class="primary" data-tl="read">Read the list</button></div>
     <div id="tlPreview">${tlPreview()}</div></div>`;
 }
 function tlPreview() {
@@ -1569,8 +1573,14 @@ function tlPreview() {
   if (!TL.read) return "";
   const p = tlPlan(), n = p.add.length, m = p.update.length, same = TL.read.teachers.length - n - m;
   const gone = p.missing.map(i => S.spec.teachers[i].name || "(no name)"), g = gone.length;
+  const changes = Object.entries(p.fields).sort((a, b) => b[1] - a[1]).map(([f, k]) => `${TL_LABEL[f] || f} ${k}`).join(" · ");
+  const pairs = p.alike.slice(0, 12).map(x => `<div class="notice">${esc(`${x.add} in the list looks like ${x.missing} on the setup. If they are one person, make the two names match and read the list again. Otherwise Apply adds a second teacher.`)}</div>`).join("")
+    + (p.alike.length > 12 ? `<p class="muted small">and ${p.alike.length - 12} more</p>` : "");
   return `<div class="tlbox">${TL.msg ? `<div class="okmsg">${esc(TL.msg)}</div>` : ""}
     <p class="tlsum"><b>${n} new · ${m} to update · ${same} unchanged</b></p>
+    ${n ? `<p class="muted small">New: ${esc(listing(p.add.map(t => t.name), 12))}</p>` : ""}
+    ${m ? `<p class="muted small">Changes: ${esc(changes)}</p>` : ""}
+    ${pairs}
     ${TL.read.skipped.length ? `<ul class="tlnotes">${TL.read.skipped.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
     ${p.unknownRoles.length ? `<div class="row">Not in the roles table: ${esc(p.unknownRoles.join(", "))} <button data-tl="roles">Add these roles</button></div>` : ""}
     ${p.unknownDepts.length ? `<div class="row">Not in the school's departments: ${esc(p.unknownDepts.join(", "))} <button data-tl="depts">Add these departments</button></div>` : ""}
@@ -1587,7 +1597,7 @@ function tlRead() {
 function tlAction(k) {
   if (!mayUpload()) return;
   if (k === "read") { tlRead(); return; }
-  if (!TL.read || TL.sig !== teachersSig()) { tlClear(); render(); return; }
+  if (!TL.read || TL.sig !== teachersSig()) { const stale = !!TL.read; tlClear(); if (stale) TL.err = TL_STALE; render(); return; }
   const p = tlPlan(), T = S.spec.teachers;
   TL.msg = "";
   if (k === "roles") {
@@ -1604,9 +1614,15 @@ function tlAction(k) {
   }
   if (k === "remove") {
     const n = p.missing.length; if (!n) return;
-    if (!confirm(n === 1 ? "Remove 1 teacher who is not in this list? Their lessons on step 5 will have no teacher. Undo takes it back."
-      : `Remove ${n} teachers who are not in this list? Their lessons on step 5 will have no teacher. Undo takes it back.`)) return;
     const gone = new Set(p.missing.map(i => T[i].name).filter(Boolean));
+    const hit = S.spec.lessons.filter(x => (x.teachers || []).some(t => gone.has(t))).length;
+    const like = new Set(p.alike.map(a => a.missing).filter(x => gone.has(x))).size;
+    const warn = !like ? "" : n === 1 ? "This teacher looks like a name in the list. "
+      : like === 1 ? "One of these teachers looks like a name in the list. " : `${like} of these teachers look like names in the list. `;
+    const who = n === 1 ? "1 teacher who is" : `${n} teachers who are`;
+    const lessons = !hit ? "No lesson on step 5 names them."
+      : `${hit === 1 ? "1 lesson" : `${hit} lessons`} on step 5 name${hit === 1 ? "s" : ""} them, and lose${hit === 1 ? "s" : ""} them (a shared lesson keeps its other teacher).`;
+    if (!confirm(`${warn}Remove ${who} not in this list? ${lessons} Undo takes it back.`)) return;
     [...p.missing].sort((a, b) => b - a).forEach(i => T.splice(i, 1));
     S.spec.lessons.forEach(x => { if ((x.teachers || []).some(t => gone.has(t))) x.teachers = x.teachers.filter(t => t && !gone.has(t)); });
     unpick(); save(); TL.msg = `Removed ${n} teacher${n === 1 ? "" : "s"}. Undo takes it back.`; toast(TL.msg);
@@ -1618,6 +1634,7 @@ async function tlFile(el) {   // an .xlsx goes through the server (its teachers 
   const f = el.files[0]; el.value = ""; if (!f) return;
   let text;
   if (/\.xlsx$/i.test(f.name)) {
+    if (!committee()) { tlClear(); TL.err = TL_NO_EXCEL; render(); return; }   // the server reads an Excel file for the committee only
     const fd = new FormData(); fd.append("file", f); fd.append("sheet", "teachers");
     const r = await fetch("/api/read-table", { method: "POST", body: fd }); const j = await r.json().catch(() => ({}));
     if (!r.ok) { toast(j.error || "Could not read that file."); return; }
