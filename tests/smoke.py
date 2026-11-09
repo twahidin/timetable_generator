@@ -186,6 +186,16 @@ def test_heads_code_is_optional_but_checked():
     finally:
         if keep: os.environ["HEADS_CODE"] = keep
 
+def test_read_table_picks_the_teachers_sheet():
+    import io, openpyxl
+    wb = openpyxl.Workbook(); notes = wb.active; notes.title = "Notes"; notes.append(["Read me first"])
+    ws = wb.create_sheet("4 Teachers"); ws.append(["Teachers of a made-up school"]); ws.append(["Teacher", "Short", "Department"]); ws.append(["Made Up Teacher", "MUT", "Science"])
+    buf = io.BytesIO(); wb.save(buf); data = buf.getvalue()
+    post = lambda who, form: who.post("/api/read-table", data={"file": (io.BytesIO(data), "list.xlsx"), **form}, content_type="multipart/form-data")
+    r = post(c, {"sheet": "teachers"}); assert r.status_code == 200 and ["Made Up Teacher", "MUT", "Science"] in r.get_json()["rows"], r.get_json()
+    r = post(c, {}); assert r.status_code == 200 and r.get_json()["rows"] == [["Read me first"]], r.get_json()
+    if h: assert post(h, {"sheet": "teachers"}).status_code == 401
+
 def test_publish_uploaded_timetable():   # slow: solves the primary sample
     work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx")
     env = dict(os.environ, PYTHONPATH=ROOT)

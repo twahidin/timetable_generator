@@ -260,8 +260,8 @@ function headLocks(main, id) {
       return;
     }
     if (el.closest(".bulk")) { if (bar.includes(el.dataset.bulk) || ["pickD", "pickR", "pickA"].includes(el.id)) off(el, why); return; }
-    if (el.closest(".card") === main.querySelector(".card")) return;   // the teachers card: add, show, tick all
-    off(el, why);   // the Roles card
+    if (el.closest("#teacherList")) return;   // the teachers card: add, show, tick all
+    off(el, why);   // the Roles card (the upload card is not drawn for a head)
   });
 }
 /* runs fn with this tab's sync stopped: a send already on its way finishes first, none starts meanwhile */
@@ -974,8 +974,9 @@ const VIEWS = {
     const rows = S.spec.teachers.map((t, i) => [t, i]).filter(([t]) => (!f.dept || t.dept === f.dept) && (!f.subj || (t.can_teach || []).some(c => c.subject === f.subj))
       && (!q || `${t.name || ""} ${t.short || ""}`.toLowerCase().includes(q)));
     P.shown.teachers = rows.map(([, i]) => i); const all = rows.length && rows.every(([, i]) => P.teachers.has(i));
-    return `<div class="card"><h1>Step 4 · Teachers</h1><p class="lead">Each teacher with the subjects and levels they can teach (click the subjects cell). Lessons on step 5 are checked against this, and the teacher drop-down there lists the teachers who can teach the subject first. Tick teachers (shift-click for a run) to give them a subject, department, role or allowance together.</p>
-      <div class="helper"><b>Add teachers</b> (one name per line) <div class="row" style="margin-top:6px"><textarea id="htNames" rows="3" style="width:280px;border:1px solid var(--line);border-radius:6px;padding:6px"></textarea> department ${sel("_ht", (sc().departments || [])[0], sc().departments || [], false, 'id="htDept" data-k=""')} allowance <input id="htAllow" type="number" value="${sc().type === "primary" ? 36 : 64}" style="width:70px"> <button data-helper="teachers">Add</button></div></div>
+    return `<div class="card"><h1>Step 4 · Teachers</h1><p class="lead">Each teacher with the subjects and levels they can teach (click the subjects cell). Lessons on step 5 are checked against this, and the teacher drop-down there lists the teachers who can teach the subject first. Tick teachers (shift-click for a run) to give them a subject, department, role or allowance together.</p></div>
+      ${VIEWS.roles(load)}${mayUpload() ? uploadCard() : ""}
+      <div class="card" id="teacherList"><div class="helper" style="margin-top:0"><b>Add teachers</b> (one name per line) <div class="row" style="margin-top:6px"><textarea id="htNames" rows="3" style="width:280px;border:1px solid var(--line);border-radius:6px;padding:6px"></textarea> department ${sel("_ht", (sc().departments || [])[0], sc().departments || [], false, 'id="htDept" data-k=""')} allowance <input id="htAllow" type="number" value="${sc().type === "primary" ? 36 : 64}" style="width:70px"> <button data-helper="teachers">Add</button></div></div>
       <div class="row" style="margin:12px 0 8px"><b>Show</b> <select id="tfDept">${opt("", f.dept, "All departments")}${(sc().departments || []).map(d => opt(d, f.dept)).join("")}</select>
         <select id="tfSubj">${opt("", f.subj, "Any subject")}${subjectNames().map(n => opt(n, f.subj, `Can teach ${n}`)).join("")}</select>
         <input id="tfQ" type="search" placeholder="Search name" title="Type, then press Enter" value="${esc(f.q)}" style="width:160px">
@@ -984,8 +985,7 @@ const VIEWS = {
       <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="teachers" title="Tick every teacher shown (${rows.length})" ${all ? "checked" : ""}></th><th>Teacher</th><th>Short</th><th>Department</th><th>Allowance</th><th>Can teach</th><th>Given</th><th>Spare</th><th>Role</th><th>Other duties</th><th>Total load</th><th>Load check</th><th>Provisional</th><th></th></tr>
       ${(() => { const lc = loadChecks(load); return rows.map(([t, i]) => { const g = load[t.name] || 0; const sp = t.allowance ? Number(t.allowance) - g : ""; const tot = g + (Number(t.other_duties) || 0);
         return `<tr id="teachers-${i}" class="${rowCls(out, crit, "teachers", i)}${P.teachers.has(i) ? " picked" : ""}"><td><input type="checkbox" data-pick="teachers.${i}" ${P.teachers.has(i) ? "checked" : ""}></td><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}${committee() && t.provisional === "Yes" ? ` <span class="headmark" title="A department head added this teacher. Set Provisional to No to confirm them.">added by a head</span>` : ""}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join(""); })()}
-      </table></div><div class="row" style="margin-top:10px"><button data-add="teachers">+ Add teacher</button></div></div>
-      ${VIEWS.roles(load)}`;
+      </table></div><div class="row" style="margin-top:10px"><button data-add="teachers">+ Add teacher</button></div></div>`;
   },
   roles(load) {   // the Roles sheet: guide allowance per role and the load of the teachers in it
     // drawing never writes to the setup: the usual roles are written when the setup is opened (defaultRoles), and a
@@ -993,7 +993,7 @@ const VIEWS = {
     const RL = S.spec.roles && S.spec.roles.length ? S.spec.roles : isHead() && !S.practice ? S.meta.roles || [] : [];
     const tot = t => (load[t.name] || 0) + (Number(t.other_duties) || 0), avg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : "";
     const eo = avg(S.spec.teachers.filter(t => t.role === "EO" && tot(t) > 0).map(tot)), mgmt = avg(S.spec.teachers.filter(t => ["HOD", "SH"].includes(t.role) && tot(t) > 0).map(tot));
-    return `<div class="card"><h2>Roles</h2><p class="muted">Management (HOD, SH) should teach fewer periods than teachers; teachers (EO) should be spread evenly. Teachers (EO) average load <b>${eo || "–"}</b> · management (HOD, SH) <b>${mgmt || "–"}</b>.
+    return `<div class="card"><h2>1 · Roles</h2><p>Fill this first: the teacher list is checked against these roles.</p><p class="muted">Management (HOD, SH) should teach fewer periods than teachers; teachers (EO) should be spread evenly. Teachers (EO) average load <b>${eo || "–"}</b> · management (HOD, SH) <b>${mgmt || "–"}</b>.
       Flag a teacher <input data-k="spec.school.role_spread" type="number" value="${esc(sc().role_spread ?? 15)}" style="width:56px"> periods or more from the teacher average.</p>
       <div class="tablewrap"><table><tr><th>Role</th><th>What it is</th><th>Guide allowance</th><th>Group</th><th>Teachers</th><th>Average load</th><th></th></tr>
       ${RL.map((r, i) => { const ts = S.spec.teachers.filter(t => t.role === r.role);
@@ -1144,6 +1144,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
   if (b.dataset.pop) { if (!b.classList.contains("ro")) openPop(b); return; }
   if (b.dataset.stu) { stuApply(b.dataset.stu); return; }
+  if (b.dataset.tl) { tlAction(b.dataset.tl); return; }
   if (b.dataset.past) { pastAction(b.dataset.past); return; }
   if (b.dataset.bulk) { bulk(b.dataset.bulk); return; }
   if (b.classList.contains("issue") && b.dataset.go) {
@@ -1189,6 +1190,7 @@ document.addEventListener("change", async e => {
   if (el.dataset.names) { setPath(el.dataset.names, el.value.split(",").map(t => t.trim()).filter(Boolean)); save(); render(); return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
   if (el.id === "stuFile") { stuFile(el); return; }
+  if (el.id === "tlFile") { tlFile(el); return; }
   if (el.id === "pastPick") { S.pastPick = el.value; return; }
   if (el.id === "stuCls" || el.id === "stuQ") { S.stu[el.id === "stuCls" ? "cls" : "q"] = el.value; render(); return; }
   if (["tgLv", "tgSubj", "tgT"].includes(el.id)) { S.tg[{ tgLv: "lv", tgSubj: "subj", tgT: "t" }[el.id]] = el.value; render(); return; }
@@ -1542,6 +1544,89 @@ async function stuFile(el) {
   } else text = await f.text();
   $("#stuPaste").value = text; $("#stuMsg").textContent = `${f.name} is in the box above. Check it, then press Replace or Add.`;
 }
+
+/* ---------------- step 4: uploading the teacher list. Read the list changes nothing: it shows what Apply would do. The
+   preview lives here (TL), never in the setup, and is dropped when the paste box changes or the teachers change some
+   other way (another person, Undo, an edit in the table). Committee only, or anyone in a practice copy. */
+const TL = { text: "", read: null, sig: "", err: "", msg: "" };
+const teachersSig = () => JSON.stringify(S.spec.teachers);
+const mayUpload = () => committee() || S.practice;
+function tlClear() { TL.read = null; TL.err = ""; TL.msg = ""; }
+const tlPlan = () => People.planTeachers(S.spec.teachers, TL.read.teachers, roles(), sc().departments || []);
+function uploadCard() {
+  if (TL.read && TL.sig !== teachersSig()) tlClear();
+  return `<div class="card" id="teacherUpload"><h2>2 · Upload the teacher list</h2>
+    <p class="muted">Columns: Name, Short name, Department, Role, Allowance, Other duties, Note. Only Name is needed; a column you leave out is not changed.</p>
+    <textarea id="tlPaste" rows="5" spellcheck="false" placeholder="Name&#9;Short name&#9;Department&#9;Role">${esc(TL.text)}</textarea>
+    <div class="row" style="margin-top:8px"><label class="filebtn">Choose a file (.xlsx or .csv)<input type="file" id="tlFile" accept=".xlsx,.csv" hidden></label><button class="primary" data-tl="read">Read the list</button></div>
+    <div id="tlPreview">${tlPreview()}</div></div>`;
+}
+function tlPreview() {
+  if (TL.err) return `<div class="notice tlbox">${esc(TL.err)}</div>`;
+  if (!TL.read) return "";
+  const p = tlPlan(), n = p.add.length, m = p.update.length, same = TL.read.teachers.length - n - m;
+  const gone = p.missing.map(i => S.spec.teachers[i].name || "(no name)"), g = gone.length;
+  return `<div class="tlbox">${TL.msg ? `<div class="okmsg">${esc(TL.msg)}</div>` : ""}
+    <p class="tlsum"><b>${n} new · ${m} to update · ${same} unchanged</b></p>
+    ${TL.read.skipped.length ? `<ul class="tlnotes">${TL.read.skipped.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+    ${p.unknownRoles.length ? `<div class="row">Not in the roles table: ${esc(p.unknownRoles.join(", "))} <button data-tl="roles">Add these roles</button></div>` : ""}
+    ${p.unknownDepts.length ? `<div class="row">Not in the school's departments: ${esc(p.unknownDepts.join(", "))} <button data-tl="depts">Add these departments</button></div>` : ""}
+    <div class="row" style="margin-top:8px"><button class="primary" data-tl="apply" ${n || m ? "" : "disabled"}>Apply</button></div>
+    ${g ? `<div class="tlgone"><p>${g === 1 ? "1 teacher is" : `${g} teachers are`} not in this list.</p><p class="muted small">${esc(listing(gone, 12))}</p>
+      <button class="danger" data-tl="remove">${g === 1 ? "Remove this teacher" : `Remove these ${g} teachers`}</button></div>` : ""}</div>`;
+}
+function tlRead() {
+  tlClear();
+  if (!TL.text.trim()) TL.err = "Paste the list, or choose a file, first.";
+  else { const r = People.readTeachers(TL.text); if (r.error) TL.err = r.error; else { TL.read = r; TL.sig = teachersSig(); } }
+  render();
+}
+function tlAction(k) {
+  if (!mayUpload()) return;
+  if (k === "read") { tlRead(); return; }
+  if (!TL.read || TL.sig !== teachersSig()) { tlClear(); render(); return; }
+  const p = tlPlan(), T = S.spec.teachers;
+  TL.msg = "";
+  if (k === "roles") {
+    if (!Array.isArray(S.spec.roles)) S.spec.roles = [];
+    p.unknownRoles.forEach(role => S.spec.roles.push({ role, what: "", allowance: null, group: "" }));
+    save(); toast(`Added ${p.unknownRoles.join(", ")} to the roles. Undo takes it back.`);
+  }
+  if (k === "depts") { sc().departments = [...(sc().departments || []), ...p.unknownDepts]; save(); toast(`Added ${p.unknownDepts.join(", ")} to the departments. Undo takes it back.`); }
+  if (k === "apply") {
+    if (!p.add.length && !p.update.length) return;
+    p.update.forEach(u => Object.assign(T[u.i], u.changes));   // the same row object: its _id and Can teach stay
+    p.add.forEach(t => T.push(t));
+    save(); TL.msg = `Added ${p.add.length}, updated ${p.update.length}. Undo takes it back.`; toast(TL.msg);
+  }
+  if (k === "remove") {
+    const n = p.missing.length; if (!n) return;
+    if (!confirm(n === 1 ? "Remove 1 teacher who is not in this list? Their lessons on step 5 will have no teacher. Undo takes it back."
+      : `Remove ${n} teachers who are not in this list? Their lessons on step 5 will have no teacher. Undo takes it back.`)) return;
+    const gone = new Set(p.missing.map(i => T[i].name).filter(Boolean));
+    [...p.missing].sort((a, b) => b - a).forEach(i => T.splice(i, 1));
+    S.spec.lessons.forEach(x => { if ((x.teachers || []).some(t => gone.has(t))) x.teachers = x.teachers.filter(t => t && !gone.has(t)); });
+    unpick(); save(); TL.msg = `Removed ${n} teacher${n === 1 ? "" : "s"}. Undo takes it back.`; toast(TL.msg);
+  }
+  TL.sig = teachersSig();   // what this card just did is not a change "by other means": the preview stays, worked out again
+  render();
+}
+async function tlFile(el) {   // an .xlsx goes through the server (its teachers sheet), a .csv is read here; either way it is read at once
+  const f = el.files[0]; el.value = ""; if (!f) return;
+  let text;
+  if (/\.xlsx$/i.test(f.name)) {
+    const fd = new FormData(); fd.append("file", f); fd.append("sheet", "teachers");
+    const r = await fetch("/api/read-table", { method: "POST", body: fd }); const j = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(j.error || "Could not read that file."); return; }
+    text = j.rows.map(row => row.join("\t")).join("\n");
+  } else text = await f.text();
+  TL.text = text; tlRead();
+}
+document.addEventListener("input", e => {
+  if (e.target.id !== "tlPaste") return;
+  TL.text = e.target.value;
+  if (TL.read || TL.err || TL.msg) { tlClear(); const pv = $("#tlPreview"); if (pv) pv.innerHTML = ""; }
+});
 
 /* ---------------- pop-ups: class picker, can-teach editor */
 function openPop(anchor) {
