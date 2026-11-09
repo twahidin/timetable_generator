@@ -1,10 +1,10 @@
 """School timetable app (one school per deployment).
 
-Committee (COMMITTEE_CODE): fill the setup step by step, generate the timetable (with the AI timetabler if one is set
-up in Railway, or without), talk through conflicts in the chat, publish, and download everything.
+Committee (COMMITTEE_CODE): fill the setup step by step, download it with the timetable skill for an outside AI agent
+to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable."""
-import copy, io, json, os, shutil, sys, tempfile, zipfile
+import copy, io, os, shutil, sys, tempfile, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -12,7 +12,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, defaults
-import access, store, runs, ai, timetabler, adjust
+import access, store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -49,10 +49,7 @@ def setup_problems():
     return probs
 
 def startup_log():
-    c = ai.config()
-    who = "mock (a scripted stand-in: nothing is sent out)." if c["provider"] == "mock" else f"{c['provider']} {c['model']}." if c["ok"] else \
-          f"off ({c['why']} Generate without AI still works.)"
-    print(f"Timetable app: data in {store.DATA}; AI timetabler {who}", file=sys.stderr, flush=True)
+    print(f"Timetable app: data in {store.DATA}", file=sys.stderr, flush=True)
     for p in setup_problems(): print(f"WARNING: {p}", file=sys.stderr, flush=True)
 
 def page(title, body):
@@ -140,14 +137,6 @@ def blank(kind):
 def xlsx_bytes(spec):
     buf = io.BytesIO(); write_template(spec, buf); buf.seek(0); return buf
 
-def normalise(spec):
-    """the editor's JSON -> the exact spec the solver would read from the workbook"""
-    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students"): spec.setdefault(k, [])
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp: path = tmp.name
-    try:
-        write_template(spec, path); return read_template(path)
-    finally: os.unlink(path)
-
 @app.get("/api/meta/<kind>")
 @need("committee")
 def meta(kind):
@@ -174,19 +163,6 @@ def build():
     except Exception as e: return {"error": f"Could not build the workbook: {e}"}, 400
     name = "".join(ch for ch in (spec["school"].get("name") or "School") if ch.isalnum() or ch in " -_").strip().replace(" ", "_") or "School"
     return send_file(buf, as_attachment=True, download_name=f"{name}_Timetable_Setup.xlsx", mimetype=XLSX)
-
-@app.post("/api/allocate")
-@need("committee")
-def allocate_teachers():
-    """a teacher for every lesson row without one (ttgen.allocate): {assign: {row: teacher}, unfilled, loads}"""
-    from ttgen.allocate import allocate
-    spec = request.get_json(force=True, silent=True)
-    if not spec or "school" not in spec: return {"error": "No setup data sent."}, 400
-    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students"): spec.setdefault(k, [])
-    try: r = allocate(copy.deepcopy(spec), workers=timetabler.WORKERS)
-    except Exception as e: return {"error": f"Could not allocate teachers: {e}"}, 400
-    return jsonify(assign={str(i): t for i, t in r["assign"].items()}, unfilled=[dict(row=i, why=w) for i, w in r["unfilled"]],
-                   loads=[dict(teacher=t, before=a, after=b, allowance=al) for t, (a, b, al) in r["loads"].items()])
 
 @app.post("/api/import")
 @need("committee")
@@ -287,8 +263,7 @@ def import_timetable():
     """a timetable made outside the app (the skill with an AI agent, or another program), sent like Printouts: checked
     against its setup and summed up. With publish=1 it then becomes the published timetable, as Publish on Generate
     does; the latest timetable on Generate & publish and Adjust stays the app's own."""
-    go = request.form.get("publish") == "1"; r = runs.current()
-    if go and r and r.busy: return {"error": "Wait for the work on Generate & publish to finish (or stop it) before publishing."}, 409
+    go = request.form.get("publish") == "1"
     work = tempfile.mkdtemp(prefix="tt-")
     try:
         try: sp, tp, m = _uploaded_timetable(work)
@@ -337,7 +312,7 @@ def dl_skill_zip():
         _cache["zip"] = buf.getvalue()
     return send_file(io.BytesIO(_cache["zip"]), as_attachment=True, download_name="school-timetable-generator.zip", mimetype="application/zip")
 
-# ------------------------------------------------------------------------------------------------ committee: generate, chat, publish
+# ------------------------------------------------------------------------------------------------ committee: what is published
 def pub_info():
     pub = store.published()
     if not pub: return None
@@ -349,170 +324,8 @@ def pub_info():
 @need("committee")
 def status():
     have, probs = access.configured()
-    _, at = store.load_setup(); r = runs.current()
-    return jsonify(ai=ai.public_config(), codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at,
-                   run=r.snapshot(int(request.args.get("after") or 0)) if r else None, published=pub_info(),
-                   solve_seconds=timetabler.SOLVE_SECONDS, solve_max=timetabler.SOLVE_MAX)
-
-@app.post("/api/generate")
-@need("committee")
-def generate():
-    body = request.get_json(force=True, silent=True) or {}
-    spec = body.get("spec")
-    if spec: store.save_setup(spec)
-    else: spec, _ = store.load_setup()
-    if not spec: return {"error": "Fill and save a setup first."}, 400
-    use_ai = bool(body.get("ai")) and ai.config()["ok"]
-    try: spec = normalise(copy.deepcopy(spec))
-    except Exception as e: return {"error": f"The setup could not be read: {e}"}, 400
-    try: secs = max(60, min(timetabler.SOLVE_MAX, int(body.get("seconds") or timetabler.SOLVE_SECONDS)))
-    except (TypeError, ValueError): secs = timetabler.SOLVE_SECONDS
-    try: r = runs.start(spec, use_ai, secs)
-    except RuntimeError as e: return {"error": str(e)}, 409
-    return jsonify(id=r.id, ai=use_ai)
-
-@app.post("/api/message")
-@need("committee")
-def message():
-    text = ((request.get_json(force=True, silent=True) or {}).get("text") or "").strip()
-    if not text: return {"error": "Empty message."}, 400
-    try: runs.message(text[:4000])
-    except RuntimeError as e: return {"error": str(e)}, 409
-    return {"ok": True}
-
-@app.post("/api/stop")
-@need("committee")
-def stop():
-    runs.stop(); return {"ok": True}
-
-@app.post("/api/keep-changes")
-@need("committee")
-def keep_changes():
-    r = runs.current()
-    if not r or not r.changes: return {"error": "There are no changes to keep."}, 400
-    store.save_setup(r.spec); r.emit("status", text="The committee kept these changes: the saved setup now includes them.")
-    return jsonify(spec=r.spec)
-
-def _publish_job(r):
-    s = r.solved
-    r.emit("status", text="Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute)...")
-    adjust.flush(r)   # changes made by hand on the Adjust page go into the timetable workbook first
-    m = store.publish(s["setup"], s["timetable"], run_id=r.id, log=lambda t: None)
-    codes = f"{len(m['students'])} students have personal codes." if access.personal_codes_on() else "Personal student codes are off until SECRET_KEY is set."
-    r.emit("published", text=f"Published. Teachers and students now see this timetable. {codes}")
-
-@app.post("/api/publish")
-@need("committee")
-def publish():
-    r = runs.current()
-    if not r or not r.solved: return {"error": "Generate a timetable first."}, 400
-    if r.busy: return {"error": "Wait for the current work to finish (or stop it) before publishing."}, 409
-    runs._thread(r, _publish_job)
-    return {"ok": True}
-
-# ------------------------------------------------------------------------------------------- adjusting by hand
-def _adj_run():
-    r = runs.current()
-    if not r or not r.solved: raise ValueError("Generate a timetable first.")
-    return r
-
-def _adj(fn):
-    """the Adjust routes: the latest timetable must exist, and not while a solve is changing it"""
-    @wraps(fn)
-    def inner(*a, **k):
-        try: r = _adj_run()
-        except ValueError as e: return {"error": str(e)}, 400
-        if request.method == "POST" and r.busy: return {"error": "Wait for the current work to finish (or stop it) first."}, 409
-        body = request.get_json(force=True, silent=True) or {}
-        try: return fn(r, body)
-        except (KeyError, ValueError, TypeError) as e: return {"error": f"That lesson or time is not in the latest timetable ({e})."}, 400
-    return inner
-
-@app.get("/api/adjust")
-@need("committee")
-@_adj
-def adjust_state(r, body):
-    return jsonify(adjust.state(r))
-
-@app.post("/api/adjust/check")
-@need("committee")
-@_adj
-def adjust_check(r, body):
-    """a move to `start`, or (with dir -1 / 1) to the nearest allowed time earlier or later"""
-    key = str(body["key"])
-    if body.get("dir"):
-        start = adjust.board(r).step(key, int(body["dir"]))
-        if start is None: return {"error": "There is no earlier lesson time for it." if int(body["dir"]) < 0 else "There is no later lesson time for it."}, 400
-    else: start = int(body["start"])
-    return jsonify(adjust.proposal(r, key, start))
-
-@app.post("/api/adjust/move")
-@need("committee")
-@_adj
-def adjust_move(r, body):
-    """moves {key: start}: one lesson, or two for a swap; applied even when they clash (the committee chose to)"""
-    moves = {str(k): int(v) for k, v in (body.get("moves") or {}).items()}
-    if not moves: return {"error": "Nothing to move."}, 400
-    b = adjust.board(r)
-    for k in moves: b.L[k]   # unknown lessons raise KeyError
-    label = body.get("label") or "; ".join(f"Moved {b.name(k)} to {b.when(s, b.L[k]['ln'])}" for k, s in moves.items())
-    adjust.apply(r, moves, str(label)[:300])
-    return jsonify(adjust.state(r))
-
-@app.post("/api/adjust/undo")
-@need("committee")
-@_adj
-def adjust_undo(r, body):
-    adjust.undo(r, back=not body.get("redo")); return jsonify(adjust.state(r))
-
-@app.post("/api/adjust/resize")
-@need("committee")
-@_adj
-def adjust_resize(r, body):
-    """one lesson a period shorter (delta -1) or longer (+1), where it is"""
-    try: msg = adjust.resize(r, str(body["key"]), -1 if int(body.get("delta") or -1) < 0 else 1)
-    except ValueError as e: return {"error": str(e)}, 400
-    return jsonify(dict(adjust.state(r), message=msg))
-
-@app.post("/api/adjust/unpin")
-@need("committee")
-@_adj
-def adjust_unpin(r, body):
-    adjust.unpin(r, str(body["key"])); return jsonify(adjust.state(r))
-
-@app.post("/api/adjust/make-room")
-@need("committee")
-@_adj
-def adjust_make_room(r, body):
-    key, start = str(body["key"]), int(body["start"])
-    adjust.board(r).L[key]
-    secs = max(30, min(timetabler.SOLVE_MAX, int(body.get("seconds") or 120)))
-    r.stop.clear(); runs._thread(r, lambda run: adjust.make_room(run, key, start, secs, timetabler.WORKERS))
-    return {"ok": True}
-
-@app.post("/api/adjust/ask")
-@need("committee")
-@_adj
-def adjust_ask(r, body):
-    q = adjust.ai_question(r, str(body["key"]), int(body["start"]))
-    try: return {"text": ai.advise(q)}
-    except Exception as e: return {"error": f"The AI could not answer: {e}"}, 502
-
-@app.get("/preview")
-@need("committee")
-def preview():
-    """the latest generated (not yet published) timetable, committee view"""
-    from ttgen.export import model_from_files, render_html
-    r = runs.current()
-    if not r or not r.solved: return page("Preview", "<main class='login'><p>Nothing generated yet.</p><p><a href='/'>Back</a></p></main>")
-    adjust.flush(r)
-    key = ("preview", r.id, r.solved["n"], r.solved.get("edited", 0), len(adjust.edits(r)["redo"]))
-    if _cache.get("pv_key") != key:
-        _cache["pv"] = render_html(model_from_files(r.solved["setup"], r.solved["timetable"]), "full",
-                                   app=dict(mode="committee", pdf=False, home="/", homeLabel="Back to the app", logout="/logout"),
-                                   title="Preview (not published)")
-        _cache["pv_key"] = key
-    return Response(_cache["pv"], mimetype="text/html")
+    _, at = store.load_setup()
+    return jsonify(codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info())
 
 NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
 
