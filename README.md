@@ -17,7 +17,8 @@ code and download PDFs. The app does not generate timetables itself.
 6 Configuration & constraints (the school-wide settings, teacher block-outs, fixed lessons and every other rule) ·
 7 Download · 8 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
 step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Fixed lessons and More
-rules sheets.
+rules sheets. Step 4 starts with the **Roles** (fill them first: the teacher list is checked against them), then the
+teacher list, then the teachers table.
 
 The student list goes in on the **Students** step, after the timetable is made (it is not needed to make one): paste it from Excel or a CSV, or upload an .xlsx or
 .csv, with each student's ID, name, class and group codes; the committee can then edit each student's groups there.
@@ -81,6 +82,35 @@ the teacher's load now and with those groups; groups they are not set to teach, 
 On step 4 (Teachers), filter by department or subject, tick teachers and give them a subject they can teach (at all
 levels, one level or a band of levels), take a subject off them, or set their department, role or allowance together.
 A row may name up to three teachers (co-teaching), each blocked for the lesson and counted the full periods.
+
+**The teacher list.** On step 4 the committee can upload the school's teacher list. In a practice copy (the sample
+school, to try things on) a head of department can too; on the school's own setup a head cannot. Paste
+it, or choose a .csv file or, with the committee's code, an .xlsx file: for an Excel file the sheet is the first one
+whose name contains "teacher", else the first sheet. The columns are Name, Short name, Department, Role, Allowance,
+Other duties and Note, with the usual spellings of each heading (Teacher, Dept, Initials, Remarks and so on) read too.
+Only Name is needed, and with no heading row the columns are read in that order. A column you leave out is not
+changed: a list of names and roles leaves everyone's allowance as it is. A new teacher with no short name gets the
+first word of the name. One with no allowance gets the guide allowance of their role when the row names a role on the
+Roles table that has a guide; otherwise the allowance is left blank.
+**Read the list** changes nothing: it shows "N new · M to update · K unchanged", names the new teachers, says what the
+updates change (for example "Changes: allowance 80 · short name 12"), notes a row with no name or a name that is in the
+list twice (that row is left out), and says if it cannot find a name column. A new name that looks like a teacher who
+is not in the list ("Tan Wei-Ming" and "Tan Wei Ming") gets a warning: if they are one person, make the two names
+match and read the list again, or Apply adds a second teacher. A role or department that is not yet on the setup is
+listed, with **Add these roles** or **Add these departments**. **Apply** adds and updates in one step (one Undo takes
+it back); an updated teacher keeps their lessons and what they can teach. Before a list that makes 10 or more
+changes to the teachers, the server keeps a restore point (**Restore an earlier copy**, on step 7, brings it back).
+Teachers who are not in the list are never removed by Apply: they are listed as "not in this list", and **Remove**
+asks first, saying how many lessons on step 5 name them.
+Removing a teacher takes them off the lessons they were on: those lessons lose that teacher, and a shared lesson keeps
+its other teacher. Availability rules on step 6 that name them stay, and step 6 flags them.
+
+**Teacher avatars.** Each teacher in the table has a small face. It is worked out from the teacher's name, so the same
+name has the same face wherever it is shown, and it is drawn in the browser from fixed parts: no picture is uploaded or
+stored, and nothing is sent to an outside service. **New look** (click the face) gives the teacher another one by adding
+one to a number kept on the teacher's row. The committee can do this for any teacher; a head of department only for a
+provisional teacher. The number is part of the saved setup only, so the workbook does not carry it and a setup opened
+from a workbook starts with the faces the names give.
 
 ## Deploy on Railway
 
@@ -148,6 +178,7 @@ python app.py            # http://localhost:8000  (or: gunicorn app:app --worker
 .venv/bin/python tests/smoke.py          # server checks; add --full for the slow publish check (SMOKE_NO_HEADS=1: without a heads' code)
 .venv/bin/python tests/test_sync.py      # the setup changes, in Python
 node tests/sync.test.js                  # the same changes, in the browser's JavaScript
+node tests/people.test.js                # reading a teacher list and the avatars
 ```
 Keep one gunicorn worker (with threads): publishing swaps files in under a lock held in the web process.
 
@@ -174,6 +205,8 @@ and an earlier copy is kept. **Save to file** and **Load from file**, on step 7,
 | `static/sync.js` | the same operations in the browser; Node can run it for the tests |
 | `tests/smoke.py` | server checks, run with plain Python (no test runner) |
 | `tests/test_sync.py`, `tests/sync.test.js` | the setup changes, checked in Python and in JavaScript against the same cases |
+| `static/people.js` | reading a teacher list, matching it to the teachers already there, and drawing the avatars; Node can run it for the tests |
+| `tests/people.test.js` | those checks, run with Node |
 | `static/` | the committee's step-by-step editor and the sign-in page style |
 | `ttgen/` | the Python package: template, reader, solver, checks and the Excel/PDF/HTML outputs |
 | `skill/school-timetable-generator/` | the skill (`SKILL.md` + `scripts/ttgen`) for any AI agent outside the app |

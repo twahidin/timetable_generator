@@ -53,6 +53,7 @@ _present = {}                                 # client -> when it was last seen
 _last_point = [0.0]                           # when the newest restore point was taken
 POINT_EVERY = 600                             # seconds between restore points while people work
 BIG_DELETE = 20                               # rows deleted in one change that earn a restore point
+BIG_TEACHERS = 10                             # teacher adds and edits in one change (an uploaded list) that earn one
 SETUP_FILE = os.path.join(DATA, "setup.json")
 
 def _write_setup():
@@ -113,7 +114,8 @@ def save_setup(spec):
 
 def _risky(ops):
     dels = [o for o in ops if isinstance(o, list) and o and o[0] == "del"]
-    return len(dels) > BIG_DELETE or any(len(o) > 1 and o[1] == "teachers" for o in dels)
+    edits = [o for o in ops if isinstance(o, list) and len(o) > 1 and o[0] in ("add", "set", "merge") and o[1] == "teachers"]
+    return len(dels) > BIG_DELETE or any(len(o) > 1 and o[1] == "teachers" for o in dels) or len(edits) >= BIG_TEACHERS
 
 class Refused(Exception):
     """a change the caller's check turned down; the message is a sentence for the person"""

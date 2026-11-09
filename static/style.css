@@ -127,7 +127,7 @@ th{background:#f3f6fb}
 @media (max-width:1100px){.steps{padding:6px}}
 @media (max-width:640px){.top{position:static;flex-wrap:wrap}.top-actions{gap:6px}.top .ghost,.top .filebtn{padding:6px 10px;font-size:13px}}
 /* students step: paste box and the group picker (one row of choices per block) */
-#stuPaste{width:100%;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--input);resize:vertical}
+#stuPaste,#tlPaste{width:100%;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--input);resize:vertical}
 .pop .gblock{border-top:1px solid var(--line);padding-top:6px;margin-top:6px}
 .pop .opts.wide{grid-template-columns:repeat(auto-fill,minmax(230px,1fr));margin:4px 0}
 .pop .opts.wide label{align-items:flex-start}
@@ -151,3 +151,14 @@ summary.sev{cursor:pointer;margin:8px 0 4px;color:#7a4b00;font-weight:600}
 .notice.readonly{max-width:none}
 #main :disabled{cursor:not-allowed}
 .chips.ro{cursor:default;opacity:.7}
+.tlbox{margin-top:12px}
+.tlsum{margin:0 0 6px}
+.tlnotes{margin:4px 0 8px;padding-left:20px;font-size:13px;color:var(--muted)}
+.tlgone{margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}
+.tlgone p{margin:0 0 6px}
+.avcell { width: 40px; padding: 2px 4px; }
+button.avatar { padding: 0; border: 0; background: none; border-radius: 50%; line-height: 0; cursor: pointer; }
+button.avatar svg { pointer-events: none; }
+button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
+.avstrip { gap: 4px; margin-bottom: 6px; align-items: center; }
+.avstrip svg { display: block; }

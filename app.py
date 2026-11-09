@@ -202,7 +202,8 @@ def check_setup():
 @app.post("/api/read-table")
 @need("committee")
 def read_table():
-    """the rows of a spreadsheet uploaded on the Students step: its Students sheet if it has one, else its first sheet"""
+    """the rows of an uploaded spreadsheet. On the Students step: its Students sheet if it has one, else its first sheet.
+    With the form field sheet=teachers (step 4): the first sheet whose name contains "teacher", else its first sheet"""
     import openpyxl
     f = request.files.get("file")
     if not f: return {"error": "No file."}, 400
@@ -210,10 +211,14 @@ def read_table():
         f.save(tmp.name); path = tmp.name
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        ws = wb["Students"] if "Students" in wb.sheetnames else wb.worksheets[0]
+        if request.form.get("sheet") == "teachers":
+            ws = next((w for w in wb.worksheets if "teacher" in w.title.lower()), wb.worksheets[0])
+        else: ws = wb["Students"] if "Students" in wb.sheetnames else wb.worksheets[0]
         cell = lambda v: "" if v is None else str(int(v)) if isinstance(v, float) and v.is_integer() else str(v).strip()
-        rows = [[cell(v) for v in r] for r in ws.iter_rows(max_row=5000, values_only=True)]
+        rows = [[cell(v) for v in r] for r in ws.iter_rows(max_row=5000, max_col=60, values_only=True)]
         wb.close()
+        width = max((max((i + 1 for i, v in enumerate(r) if v), default=0) for r in rows), default=0)
+        rows = [r[:width] for r in rows]   # max_col pads every row to 60: keep only the columns that hold something
     except Exception as e: return {"error": f"Could not read that file ({e})."}, 400
     finally: os.unlink(path)
     return {"rows": [r for r in rows if any(r)]}
