@@ -1446,21 +1446,20 @@ function cardAt(key) {   // "li|cls" (a class card) or "li|" (a group card)
   const [li, cls] = String(key).split("|"), i = Number(li), x = S.spec.lessons[i]; if (!x) return null;
   return cls ? { kind: "class", li: i, cls, title: cls } : { kind: "group", li: i, title: (lessonInfo()[i] || {}).code };
 }
-function placeOn(card, idxs) {   // deploy teachers (ticked, or dropped) onto a card
+function placeOn(card, idxs) {   // deploy teachers (ticked, or dropped) onto a card: ask first, then write once
   if (!card) return;
   if (!idxs.length) { toast("Tick teachers first, then click a card."); return; }
-  const x = S.spec.lessons[card.li];
-  let r = DeptMap.deploy(S.spec, card, idxs, {}), placed = r.placed.slice(), already = r.already.slice();
-  const nb = r.refused.filter(f => f.why.endsWith("basket."));
-  if (nb.length && confirm(`${listing(nb.map(f => f.name))} ${nb.length === 1 ? "is" : "are"} not in the ${x.subject} basket. Add ${nb.length === 1 ? "them" : "them all"} to the basket and place them?`)) {
-    const r2 = DeptMap.deploy(S.spec, card, idxs, { addToBasket: true }); placed = placed.concat(r2.placed); r = r2;
-  }
-  const over = r.refused.filter(f => !f.why.endsWith("basket."));
-  if (placed.length) { save(); render(); }
-  const where = `${card.title} ${x.subject}`;
-  if (placed.length) toast(`Placed ${listing(placed)} on ${where}.${already.length ? ` ${listing(already)} ${already.length === 1 ? "was" : "were"} already on it.` : ""}${r.split ? " That class is now a row of its own in the table." : ""}`);
-  else if (over.length) toast(over[0].why);
-  else if (already.length) toast(`${listing(already)} ${already.length === 1 ? "is" : "are"} already on ${where}.`);
+  const x = S.spec.lessons[card.li], nb = DeptMap.needBasket(S.spec, card, idxs);
+  const add = nb.length > 0 && confirm(`${listing(nb)} ${nb.length === 1 ? "is" : "are"} not in the ${x.subject} basket. Add ${nb.length === 1 ? "them" : "them all"} to the basket and place them?`);
+  const r = DeptMap.deploy(S.spec, card, idxs, { addToBasket: add });
+  if (r.placed.length) { save(); render(); }
+  const where = `${card.title} ${x.subject}`, over = r.refused.filter(f => !f.why.endsWith("basket.")), left = r.refused.filter(f => f.why.endsWith("basket."));
+  const parts = [];
+  if (r.placed.length) parts.push(`Placed ${listing(r.placed)} on ${where}.${r.split ? " That class is now a row of its own in the table." : ""}`);
+  if (r.already.length) parts.push(`${listing(r.already)} ${r.already.length === 1 ? "was" : "were"} already on ${r.placed.length ? "it" : where}.`);
+  if (over.length) parts.push(over[0].why);
+  else if (left.length) parts.push(`${listing(left.map(f => f.name))} not placed.`);
+  if (parts.length) toast(parts.join(" "));
 }
 function basketAdd(subject, idxs) {
   if (!idxs.length) { toast("Tick teachers first, then click a subject."); return; }

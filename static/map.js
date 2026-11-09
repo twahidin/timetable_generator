@@ -148,6 +148,15 @@ var DeptMap = (function () {
     return out;
   }
 
+  /* who, of these teachers, is not in the card's subject's basket (and not on the card already): asked about before any deploy */
+  function needBasket(spec, card, idxs) {
+    var T = rows(spec, "teachers"), x = rows(spec, "lessons")[card.li], out = [];
+    if (!x) return out;
+    var on = names(x);
+    (idxs || []).forEach(function (i) { var t = T[i]; if (t && t.name && on.indexOf(t.name) < 0 && !hasSubject(t, x.subject)) out.push(t.name); });
+    return out;
+  }
+
   function undeploy(spec, card, name) {
     var x = rows(spec, "lessons")[card.li];
     if (!x || names(x).indexOf(name) < 0) return false;
@@ -195,7 +204,7 @@ var DeptMap = (function () {
   return {
     loads: loads, deptSubjects: deptSubjects, roster: roster, unplaced: unplaced, search: search,
     baskets: baskets, staffRoom: unplaced, cards: cards, prune: prune, subjectOf: subjectOf,
-    MAX: MAX, canTeach: canTeach, deploy: deploy, undeploy: undeploy, addToBasket: addToBasket, removeFromBasket: removeFromBasket, newTeacher: newTeacher
+    MAX: MAX, canTeach: canTeach, needBasket: needBasket, deploy: deploy, undeploy: undeploy, addToBasket: addToBasket, removeFromBasket: removeFromBasket, newTeacher: newTeacher
   };
 })();
 if (typeof module !== "undefined") module.exports = DeptMap;

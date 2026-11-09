@@ -100,4 +100,21 @@ t("a new teacher: defaults, a head's is provisional, no second teacher with the 
   assert.deepStrictEqual(DeptMap.newTeacher(s, { name: " ", dept: "MA" }, s.roles, false), { error: "Give the teacher a name." });
   assert.strictEqual(s.teachers.length, 5);
 });
+t("needBasket names who must join the basket first, and one deploy then places them all on the split class", () => {
+  const s = fixture(); const card = { kind: "class", li: 0, cls: "1B" };
+  assert.deepStrictEqual(DeptMap.needBasket(s, card, [2, 1, 0]), ["Priya Menon"]);   // Wei Lin is in the basket, Arjun is on the row already
+  const r = DeptMap.deploy(s, card, [2, 1], { addToBasket: true });
+  assert.deepStrictEqual([r.placed, r.split, r.refused], [["Wei Lin Tan", "Priya Menon"], true, []]);
+  assert.deepStrictEqual([s.lessons[0].classes, s.lessons[0].teachers], [["1A"], ["Arjun Nair"]]);   // the untouched class keeps its teachers
+  assert.deepStrictEqual([s.lessons[4].classes, s.lessons[4].teachers], [["1B"], ["Arjun Nair", "Wei Lin Tan", "Priya Menon"]]);
+  assert.strictEqual(s.lessons.length, 5);
+});
+t("a mixed drop that would go past three takes none, even with the basket question answered yes", () => {
+  const s = fixture(); s.teachers[1].can_teach = []; s.teachers[3].can_teach = [];
+  const r = DeptMap.deploy(s, { kind: "group", li: 2, title: "2MA2" }, [0, 1, 3], { addToBasket: true });   // Arjun is on it; Priya and Hafiz need the basket
+  assert.deepStrictEqual([r.placed, r.already, r.refused.length], [[], ["Arjun Nair"], 2]);   // refused for the count, before anyone joined the basket
+  const r2 = DeptMap.deploy(s, { kind: "group", li: 2, title: "2MA2" }, [1, 3], { addToBasket: true });
+  assert.deepStrictEqual(r2.placed, []); assert.strictEqual(r2.refused[0].why, "2MA2 would have 4 teachers; three is the most.");
+  assert.deepStrictEqual([s.teachers[1].can_teach, s.teachers[3].can_teach, s.lessons[2].teachers], [[], [], ["Arjun Nair", "Wei Lin Tan"]]);
+});
 console.log(`${n} cases passed`);

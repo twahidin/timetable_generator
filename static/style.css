@@ -188,7 +188,8 @@ button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .avs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;min-height:28px}
 .avx{position:relative;display:inline-block;line-height:0}
 .avx .x{position:absolute;top:-6px;right:-8px;font-size:10px;line-height:1;padding:1px 4px;border-radius:999px;color:var(--warn);background:var(--panel);display:none}
-.avx:hover .x{display:block}
+.avx:hover .x,.avx:focus-within .x{display:block}
+@media (hover:none){.avx .x{display:block}}
 .gcard{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px;cursor:pointer;background:var(--panel)}
 .gcard:hover{border-color:#c5ccd8}
 .gcard .plus{display:inline-flex;width:28px;height:28px;border:1px dashed #cdd5e1;border-radius:50%;align-items:center;justify-content:center;color:var(--muted)}
