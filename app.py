@@ -12,7 +12,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, defaults
-import access, checks, store
+import access, checks, store, sync
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -56,10 +56,12 @@ def page(title, body):
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)}</title>
 <link rel="stylesheet" href="/static/login.css"></head><body>{body}</body></html>"""
 
-# the three choices on the front page; each one accepts only its own kind of code
+# the choices on the front page; each one accepts only its own kind of code
 CHOICES = {
     "committee": dict(title="Build and publish the timetable", blurb="Timetable committee: build the setup, download it, publish the timetable.",
                       label="Committee code", hint="Use the code given to the timetable committee.", roles=("committee",)),
+    "heads": dict(title="Department heads", blurb="Heads of department: who can teach what, teaching groups and bands.",
+                  label="Heads' code", hint="Use the code given to heads of department.", roles=("head",)),
     "teacher": dict(title="Teacher's timetable", blurb="Every class, teacher and room timetable, Who's free and PDFs.",
                     label="Teacher code", hint="Use the teacher code the school gave you.", roles=("teacher",)),
     "student": dict(title="Student timetable", blurb="Your class timetable, or your own with a personal code.",
@@ -75,10 +77,10 @@ def login_page(msg="", choice=None, fix=None):
     link = f' <a href="/login?as={fix}">Open {esc(CHOICES[fix]["title"])}</a>' if fix else ""
     err = f"<p class='err'>{esc(msg)}{link}</p>" if msg else ""
     choice = choice or request.args.get("as")
-    c = CHOICES.get(choice or "")
+    c = CHOICES.get(choice or "") if choice != "heads" or os.environ.get("HEADS_CODE") else None
     if not c:
         cards = "".join(f"""<a class="choice" href="/login?as={k}"><img src="/static/choice-{k}.png" alt="" width="112" height="112">
-<span class="txt"><b>{esc(v["title"])}</b><span class="muted small">{esc(v["blurb"])}</span></span><span class="go">Enter code &rarr;</span></a>""" for k, v in CHOICES.items())
+<span class="txt"><b>{esc(v["title"])}</b><span class="muted small">{esc(v["blurb"])}</span></span><span class="go">Enter code &rarr;</span></a>""" for k, v in CHOICES.items() if k != "heads" or os.environ.get("HEADS_CODE"))
         return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school)}</h1><p>Timetable</p></header>
 <nav class="choices">{cards}</nav>{f'<div class="notes">{err}{warn}</div>' if err or warn else ""}</main>""")
     return page(c["title"], f"""<main class="login"><p class="small"><a class="back" href="/login">&larr; Other choices</a></p>
@@ -102,7 +104,7 @@ def login():
         return login_page(f"That code is not for {CHOICES[choice]['title']}.", choice, fix=CHOICE_OF[r]), 403
     session.clear(); session.permanent = True; session["role"] = r
     if sid is not None: session["sid"] = sid
-    return redirect({"committee": "/", "personal": "/me"}.get(r, "/timetable"))
+    return redirect({"committee": "/", "head": "/", "personal": "/me"}.get(r, "/timetable"))
 
 @app.get("/logout")
 def logout():
@@ -114,7 +116,7 @@ def health(): return {"ok": True}
 # ------------------------------------------------------------------------------------------------ committee: setup editor
 @app.get("/")
 def index():
-    if role() == "committee": return app.send_static_file("index.html")
+    if role() in ("committee", "head"): return app.send_static_file("index.html")
     if role() == "personal": return redirect("/me")
     if role() in ("teacher", "student"): return redirect("/timetable")
     return redirect("/login")
@@ -138,7 +140,7 @@ def xlsx_bytes(spec):
     buf = io.BytesIO(); write_template(spec, buf); buf.seek(0); return buf
 
 @app.get("/api/meta/<kind>")
-@need("committee")
+@need("committee", "head")
 def meta(kind):
     sc = defaults(kind_ok(kind))
     return jsonify(rule_types=[dict(rule=a, scopes=b, needs_time=c == "Y", needs_number=d == "Y", meaning=e, example=f) for a, b, c, d, e, f in RULE_TYPES],
@@ -146,7 +148,7 @@ def meta(kind):
                    roles=[dict(role=a, what=b, allowance=c, group=d) for a, b, c, d in ROLES])
 
 @app.get("/api/sample/<kind>")
-@need("committee")
+@need("committee", "head")
 def api_sample(kind): return jsonify(sample(kind_ok(kind)))
 
 @app.get("/api/blank/<kind>")
@@ -217,7 +219,7 @@ def read_table():
     return {"rows": [r for r in rows if any(r)]}
 
 @app.get("/api/setup")
-@need("committee")
+@need("committee", "head")
 def get_setup():
     r = store.setup_record()
     return jsonify(spec=r["spec"], v=r["v"], saved_at=r["saved_at"])
@@ -240,18 +242,23 @@ def _int(x):
     except (TypeError, ValueError): return 0
 
 @app.get("/api/setup/changes")
-@need("committee")
+@need("committee", "head")
 def get_setup_changes():
     return _changes_reply(_int(request.args.get("since")), str(request.args.get("client") or "")[:40])
 
 @app.post("/api/setup/changes")
-@need("committee")
+@need("committee", "head")
 def post_setup_changes():
     """a change as operations; the answer carries what others changed meanwhile, so the caller catches up in the same call"""
     body = request.get_json(force=True, silent=True)
     body = body if isinstance(body, dict) else {}
     client, ops = str(body.get("client") or "")[:40], body.get("ops")
     if not isinstance(ops, list): return {"error": "No changes sent."}, 400
+    if role() == "head":
+        why = sync.head_may(store.setup_record()["spec"], ops)
+        if why: return {"error": why}, 403
+        for op in ops:      # a teacher added by a head is provisional until the committee confirms
+            if op[0] == "add" and op[1] == "teachers": op[2]["provisional"] = "Yes"
     try: v = store.apply_changes(ops, client)
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
     return _changes_reply(_int(body.get("since")), client, v)
@@ -380,11 +387,12 @@ def pub_info():
                 files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on(), source=m.get("source"))
 
 @app.get("/api/status")
-@need("committee")
+@need("committee", "head")
 def status():
     have, probs = access.configured()
     _, at = store.load_setup()
-    return jsonify(codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info())
+    if role() == "head": return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info())
+    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info())
 
 NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
 
@@ -417,13 +425,13 @@ def files_for(r):
     return []
 
 @app.get("/timetable")
-@need("committee", "teacher", "student")
+@need("committee", "head", "teacher", "student")
 def timetable():
     from ttgen.export import render_html
     pub = store.published()
     if not pub:
         return page("Timetable", "<main class='login'><h1>Not published yet</h1><p class='muted'>The timetable committee has not published the timetable yet. Please check again later.</p><p><a href='/logout'>Sign out</a></p></main>")
-    r = role(); key = ("view", r)
+    r = "teacher" if role() == "head" else role(); key = ("view", r)  # a head sees what a teacher sees
     if key not in pub["views"]:
         view = "student" if r == "student" else "full"
         app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r),
@@ -455,7 +463,7 @@ def pdf_me():
     return _pdf(student_view(pub["model"], s), f"{s['name']} timetable")
 
 @app.get("/pdf/custom")
-@need("committee", "teacher", "student")
+@need("committee", "head", "teacher", "student")
 def pdf_custom():
     from ttgen.export import custom_view, group_options
     pub = store.published()
@@ -467,7 +475,7 @@ def pdf_custom():
     return _pdf(custom_view(m, cls, groups), f"Class {cls} my timetable")
 
 @app.get("/pdf/<kind>/<path:key>")
-@need("committee", "teacher", "student")
+@need("committee", "head", "teacher", "student")
 def pdf_one(kind, key):
     from ttgen.export import class_view, teacher_view, room_view, student_view
     pub = store.published()
@@ -484,11 +492,11 @@ def pdf_one(kind, key):
 
 @app.get("/files/<what>")
 @app.get("/files/<what>/<kind>")
-@need("committee", "teacher")
+@need("committee", "head", "teacher")
 def files(what, kind=None):
     pub = store.published()
     if not pub: abort(404)
-    f = pub["meta"].get("files", {}); r = role()
+    f = pub["meta"].get("files", {}); r = "teacher" if role() == "head" else role()
     if what == "book":
         allowed = {"committee": ("classes", "teachers", "rooms", "students"), "teacher": ("classes", "teachers", "rooms")}[r]
         if kind not in allowed or kind not in f.get("books", {}): abort(404)

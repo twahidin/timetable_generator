@@ -108,4 +108,19 @@ spec = {"school": "oops"}
 assert sync.apply(spec, [["school", "name", None]]) == 0 and spec["school"] == {}
 passed += 1
 
+# what a head of department may change
+spec = {"teachers": [{"_id": "t1", "provisional": "No"}, {"_id": "t2", "provisional": "Yes"}, {"_id": "t3"}], "classes": [{"_id": "c1"}]}
+for ok in ([["set", "lessons", "l1", "students", 12]], [["add", "blocks", {"_id": "b9"}, ""]], [["del", "lessons", "l1"]],
+           [["merge", "teachers", "t1", "can_teach", [], []]], [["add", "teachers", {"_id": "t9", "provisional": "No"}, ""]],
+           [["set", "teachers", "t2", "name", "X"]], [["del", "teachers", "t2"]], []):
+    assert sync.head_may(spec, ok) is None, ok
+for bad in ([["set", "classes", "c1", "size", 9]], [["school", "name", "X"]], [["day", "Sec 1", "Mon", "FL"]], [["top", "k", 1]],
+            [["set", "teachers", "t1", "name", "X"]], [["set", "teachers", "t3", "name", "X"]], [["del", "teachers", "t1"]],
+            [["set", "teachers", "t2", "provisional", "No"]], [["add", "classes", {"_id": "c2"}, ""]],
+            [["set", "lessons", "l1", "students", 1], ["set", "classes", "c1", "size", 9]], ["x"], [[]], [["set"]]):
+    why = sync.head_may(spec, bad)
+    assert isinstance(why, str) and why.endswith("."), bad
+assert "classes" in sync.head_may(spec, [["set", "classes", "c1", "size", 9]])
+passed += 1
+
 print(f"{passed} cases passed")

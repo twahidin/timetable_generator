@@ -2,7 +2,9 @@
 import os, secrets, subprocess, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
-CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE")}
+CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
+if os.environ.get("SMOKE_NO_HEADS"): del CODES["HEADS_CODE"]      # SMOKE_NO_HEADS=1 runs the script without the optional heads' code
+os.environ.pop("HEADS_CODE", None)
 # variables an existing deployment may still have: they must be ignored
 os.environ.update(DATA_DIR=DATA, SECRET_KEY=secrets.token_hex(16), AI_PROVIDER="anthropic", AI_API_KEY="", SOLVE_SECONDS="60", **CODES)
 os.makedirs(os.path.join(DATA, "runs", "old1"))
@@ -11,6 +13,8 @@ import app as A, store
 
 c = A.app.test_client()
 assert c.post("/login", data={"as": "committee", "code": CODES["COMMITTEE_CODE"]}).status_code == 302
+h = A.app.test_client() if "HEADS_CODE" in CODES else None
+if h: assert h.post("/login", data={"as": "heads", "code": CODES["HEADS_CODE"]}).status_code == 302
 
 def test_removed_modules():
     for m in ("runs", "timetabler", "ai", "adjust"):
@@ -25,8 +29,8 @@ def test_removed_routes():
 
 def test_status_shape():
     j = c.get("/api/status").get_json()
-    assert set(j) == {"codes", "code_problems", "volume", "setup_saved_at", "published"}, sorted(j)
-    assert j["published"] is None
+    assert set(j) == {"role", "codes", "code_problems", "volume", "setup_saved_at", "published"}, sorted(j)
+    assert j["published"] is None and j["role"] == "committee"
 
 def test_old_runs_folder_is_harmless():
     assert c.get("/api/past-setups").status_code == 200
@@ -95,6 +99,50 @@ def test_ids_do_not_reach_the_workbook():
     wb = openpyxl.load_workbook(io.BytesIO(r.data), read_only=True)
     assert not any("_id" in str(cell) for ws in wb.worksheets for row in ws.iter_rows(max_row=8, values_only=True) for cell in row if cell)
 
+def test_the_heads_choice_shows_only_when_the_code_is_set():
+    assert (b"Department heads" in c.get("/login").data) == bool(h)
+    if not h: assert b"Department heads" not in c.get("/login?as=heads").data
+
+def test_a_head_can_change_groups_but_not_classes():
+    rec = c.get("/api/setup").get_json(); v = rec["v"]; sp = rec["spec"]
+    assert h.get("/").status_code == 200 and h.get("/api/setup").status_code == 200
+    code, _ = _changes("H", v, [["set", "lessons", sp["lessons"][0]["_id"], "students", 12]], who=h); assert code == 200
+    code, j = _changes("H", v, [["set", "classes", sp["classes"][0]["_id"], "size", 99]], who=h); assert code == 403 and "classes" in j["error"].lower()
+    assert c.get("/api/setup").get_json()["spec"]["classes"][0]["size"] != 99
+
+def test_a_refused_batch_applies_nothing():
+    rec = c.get("/api/setup").get_json(); v = rec["v"]; lid = rec["spec"]["lessons"][0]["_id"]
+    code, _ = _changes("H", v, [["set", "lessons", lid, "students", 7], ["school", "name", "X"]], who=h); assert code == 403
+    r = c.get("/api/setup").get_json(); assert r["v"] == v and r["spec"]["lessons"][0].get("students") != 7
+
+def test_a_teacher_added_by_a_head_is_provisional():
+    v = c.get("/api/setup").get_json()["v"]
+    _changes("H", v, [["add", "teachers", {"_id": "newhire001", "name": "New Science teacher 1", "provisional": "No"}, ""]], who=h)
+    t = next(x for x in c.get("/api/setup").get_json()["spec"]["teachers"] if x["_id"] == "newhire001"); assert t["provisional"] == "Yes"
+
+def test_a_head_can_edit_only_provisional_teachers():
+    rec = c.get("/api/setup").get_json(); v = rec["v"]
+    firm = next(x for x in rec["spec"]["teachers"] if x.get("provisional") != "Yes")
+    code, _ = _changes("H", v, [["set", "teachers", firm["_id"], "name", "Zed"]], who=h); assert code == 403
+    code, _ = _changes("H", v, [["set", "teachers", "newhire001", "provisional", "No"]], who=h); assert code == 403
+    code, _ = _changes("H", v, [["set", "teachers", "newhire001", "name", "Renamed"]], who=h); assert code == 200
+    code, _ = _changes("H", v, [["merge", "teachers", firm["_id"], "can_teach", [{"levels": "All", "subject": "Qqq"}], []]], who=h); assert code == 200
+
+def test_a_head_cannot_download_or_publish_or_replace():
+    for method, url in (("POST", "/api/build"), ("PUT", "/api/setup"), ("POST", "/api/import-timetable"), ("GET", "/api/codes.csv"), ("POST", "/api/check"), ("GET", "/api/setup/copies"), ("POST", "/api/setup/restore")):
+        assert h.open(url, method=method, json={}).status_code == 401, url
+    s = h.get("/api/status").get_json(); assert s["role"] == "head" and "codes" not in s and "code_problems" not in s
+
+def test_heads_code_is_optional_but_checked():
+    import access
+    keep = os.environ.get("HEADS_CODE")
+    try:
+        os.environ["HEADS_CODE"] = "abc"; assert any("HEADS_CODE" in p and "6 letters" in p for p in access.configured()[1])
+        os.environ["HEADS_CODE"] = CODES["TEACHER_CODE"]; assert any("same" in p for p in access.configured()[1])
+        os.environ.pop("HEADS_CODE", None); assert not any("HEADS_CODE" in p for p in access.configured()[1])
+    finally:
+        if keep: os.environ["HEADS_CODE"] = keep
+
 def test_publish_uploaded_timetable():   # slow: solves the primary sample
     work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx")
     env = dict(os.environ, PYTHONPATH=ROOT)
@@ -108,7 +156,11 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
     assert t.get("/timetable").status_code == 200
 
+NEED_HEADS = {"test_a_head_can_change_groups_but_not_classes", "test_a_refused_batch_applies_nothing", "test_a_teacher_added_by_a_head_is_provisional",
+              "test_a_head_can_edit_only_provisional_teachers", "test_a_head_cannot_download_or_publish_or_replace"}
+
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_") and (k != "test_publish_uploaded_timetable" or "--full" in sys.argv)]
+    tests = [v for k, v in list(globals().items()) if k.startswith("test_") and (k != "test_publish_uploaded_timetable" or "--full" in sys.argv)
+             and (h or k not in NEED_HEADS)]
     for t in tests: t(); print("ok", t.__name__)
     print(f"{len(tests)} checks passed")

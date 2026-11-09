@@ -219,3 +219,32 @@ def apply(spec, ops):
 # positions that must be strings, per operation (section / id / field / key names)
 _STR_ARGS = {"set": (1, 2, 3), "merge": (1, 2, 3), "add": (1,), "del": (1, 2),
              "school": (1,), "day": (1, 2), "top": (1,)}
+
+
+def head_may(spec, ops):
+    """None if a head of department may make every operation in `ops` on `spec`, else a sentence naming the first they may not.
+    Heads may change lessons and blocks, who a teacher can teach, add a teacher, and the details of a teacher who is still provisional."""
+    for op in ops:
+        if not isinstance(op, list) or not op or not isinstance(op[0], str):
+            return "Department heads cannot send that change."
+        name = op[0]
+        if name in ("school", "day", "top"):
+            return "Department heads cannot change the school details, the day structure or other settings."
+        section = op[1] if len(op) > 1 else None
+        if section in ("lessons", "blocks"):
+            continue
+        if section != "teachers":
+            return f"Department heads cannot change {section if isinstance(section, str) else 'that'}."
+        if name == "merge" and len(op) > 3 and op[3] == "can_teach":
+            continue
+        if name == "add" and len(op) > 2 and isinstance(op[2], dict):
+            continue
+        if name in ("set", "del") and len(op) > 2 and op[2:3] and (name == "del" or len(op) > 3 and op[3] != "provisional"):
+            row = _find(spec, "teachers", op[2])
+            if row is not None and row.get("provisional") == "Yes":
+                continue
+            if row is None:
+                continue        # a missing row is skipped by apply, so nothing changes
+            return "Department heads can change a teacher's details only while the teacher is provisional."
+        return "Department heads can only change who a teacher can teach, add a teacher, or edit a provisional teacher."
+    return None
