@@ -200,6 +200,38 @@ async function putSetup(spec, why, step = 1) {
   await openServer(srv, step); return true;
 }
 const committee = () => !!(G.st && G.st.role === "committee");
+/* what a department head sees. The server decides what a head may change; the page mirrors it: Download, Publish and
+   Students are not shown, every step but 4 and 5 is read-only, and on 4 only a provisional teacher's row and the
+   Can teach cells can be changed. A practice copy is the head's own: nothing is read-only there (the hidden steps stay hidden). */
+const isHead = () => !!(G.st && G.st.role === "head");
+const HEAD_HIDDEN = ["download", "publish", "students"];
+const stepShown = i => !(isHead() && STEPS[i] && HEAD_HIDDEN.includes(STEPS[i][0]));
+const locked = id => isHead() && !S.practice && !["start", "_old", "teachers", "lessons"].includes(id);   // true: nothing on this step can be changed
+const provisionalRow = t => !!t && t.provisional === "Yes";
+function headLocks(main, id) {
+  const off = (el, why) => { el.disabled = true; if (why && !el.title) el.title = why; };
+  const all = () => [...main.querySelectorAll("input, select, textarea, button")];
+  if (locked(id)) {
+    all().forEach(el => off(el));
+    main.querySelectorAll("[data-pop]").forEach(el => el.classList.add("ro"));
+    main.insertAdjacentHTML("afterbegin", `<div class="notice readonly">Only the committee can change this step.</div>`);
+    return;
+  }
+  if (!isHead() || S.practice || id !== "teachers") return;
+  const why = "Only the committee can change this. A teacher the committee has not confirmed yet can be changed.";
+  const bar = ["tc-dept", "tc-role", "tc-allow"];
+  all().forEach(el => {
+    const tr = el.closest("tr[id^='teachers-']");
+    if (tr) {   // a row: the tick box always; the rest only while the teacher is provisional (and never the Provisional field)
+      const own = provisionalRow(S.spec.teachers[Number(tr.id.slice(9))]) && !/\.provisional$/.test(el.dataset.k || "");
+      if (!el.dataset.pick && !own) off(el, why);
+      return;
+    }
+    if (el.closest(".bulk")) { if (bar.includes(el.dataset.bulk) || ["pickD", "pickR", "pickA"].includes(el.id)) off(el, why); return; }
+    if (el.closest(".card") === main.querySelector(".card")) return;   // the teachers card: add, show, tick all
+    off(el, why);   // the Roles card
+  });
+}
 /* runs fn with this tab's sync stopped: a send already on its way finishes first, none starts meanwhile */
 async function holdSync(fn) {
   while (SYNC.busy) await new Promise(r => setTimeout(r, 50));
@@ -787,7 +819,8 @@ function setPath(p, v) { const ks = p.split("."); const last = ks.pop(); const o
 /* ---------------- render */
 function render() {
   const nav = $("#steps");
-  nav.innerHTML = STEPS.map(([id, label], i) => `<button data-step="${i}" class="${i === S.step ? "on" : ""}" ${!S.spec && i > 0 ? "disabled" : ""}><span>${label}</span><span class="n">${count(id)}</span></button>`).join("");
+  if (!stepShown(S.step)) S.step = Math.min(1, STEPS.length - 1);   // a head never lands on a hidden step
+  nav.innerHTML = STEPS.map(([id, label], i) => !stepShown(i) ? "" : `<button data-step="${i}" class="${i === S.step ? "on" : ""}" ${!S.spec && i > 0 ? "disabled" : ""}><span>${label}</span><span class="n">${count(id)}</span></button>`).join("");
   $("#kindBadge").textContent = S.spec ? `${sc().type === "primary" ? "Primary" : "Secondary"} · ${sc().name}` : "No school yet";
   const id = S.asking ? "_old" : STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
   // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
@@ -795,6 +828,7 @@ function render() {
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && (f.id ? `#${CSS.escape(f.id)}` : f.dataset.k ? `[data-k="${CSS.escape(f.dataset.k)}"]` : "");
   G.shown = id;
   main.innerHTML = (S.practice && !S.asking ? `<div class="practice"><span>Practice copy: nothing here is saved for the school.</span><button id="practiceBack">Back to the school's setup</button></div>` : "") + (VIEWS[id] || (() => ""))();
+  headLocks(main, id);
   main.querySelectorAll(".tablewrap").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
@@ -917,7 +951,7 @@ const VIEWS = {
       ${teacherBar()}
       <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="teachers" title="Tick every teacher shown (${rows.length})" ${all ? "checked" : ""}></th><th>Teacher</th><th>Short</th><th>Department</th><th>Allowance</th><th>Can teach</th><th>Given</th><th>Spare</th><th>Role</th><th>Other duties</th><th>Total load</th><th>Load check</th><th>Provisional</th><th></th></tr>
       ${(() => { const lc = loadChecks(load); return rows.map(([t, i]) => { const g = load[t.name] || 0; const sp = t.allowance ? Number(t.allowance) - g : ""; const tot = g + (Number(t.other_duties) || 0);
-        return `<tr id="teachers-${i}" class="${rowCls(out, crit, "teachers", i)}${P.teachers.has(i) ? " picked" : ""}"><td><input type="checkbox" data-pick="teachers.${i}" ${P.teachers.has(i) ? "checked" : ""}></td><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join(""); })()}
+        return `<tr id="teachers-${i}" class="${rowCls(out, crit, "teachers", i)}${P.teachers.has(i) ? " picked" : ""}"><td><input type="checkbox" data-pick="teachers.${i}" ${P.teachers.has(i) ? "checked" : ""}></td><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, sc().departments || [])}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td style="min-width:260px">${chips(`spec.teachers.${i}.can_teach`, (t.can_teach || []).map(c => `${c.subject} · ${c.levels || "All"}`), "canteach")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}${committee() && t.provisional === "Yes" ? ` <span class="headmark" title="A department head added this teacher. Set Provisional to No to confirm them.">added by a head</span>` : ""}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join(""); })()}
       </table></div><div class="row" style="margin-top:10px"><button data-add="teachers">+ Add teacher</button></div></div>
       ${VIEWS.roles(load)}`;
   },
@@ -1060,7 +1094,7 @@ document.addEventListener("click", async e => {
   if (!pop.hidden && !pop.contains(e.target)) commitPop();
   if (e.target.dataset && (e.target.dataset.pick || e.target.dataset.pickall)) { pick(e.target, e.shiftKey); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c"); if (!b) return;
-  if (b.dataset.step) { S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
+  if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
   if (b.id === "practiceBack") { leavePractice(); return; }
@@ -1074,7 +1108,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.brush !== undefined) { S.brush = b.dataset.brush; render(); return; }
   if (b.dataset.copyday) { const lv = b.dataset.copyday; const ds = S.spec.day_structure[lv]; const f = ds[dayNames()[0]]; dayNames().forEach(d => ds[d] = f); save(); render(); return; }
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
-  if (b.dataset.pop) { openPop(b); return; }
+  if (b.dataset.pop) { if (!b.classList.contains("ro")) openPop(b); return; }
   if (b.dataset.stu) { stuApply(b.dataset.stu); return; }
   if (b.dataset.past) { pastAction(b.dataset.past); return; }
   if (b.dataset.bulk) { bulk(b.dataset.bulk); return; }
@@ -1083,6 +1117,7 @@ document.addEventListener("click", async e => {
     if (s) S.stu = classNames().includes(s.class) ? { cls: s.class, q: "" } : { cls: "", q: stuKey(s) };
     if (/^lessons-/.test(b.dataset.row)) S.tg = { lv: "", subj: "", t: "" };
     if (/^teachers-/.test(b.dataset.row)) S.tf = { dept: "", subj: "", q: "" };
+    if (!stepShown(Number(b.dataset.go))) return;
     S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "fitAgain") { fitCheck(true); return; }
@@ -1099,7 +1134,7 @@ document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / C
   e.preventDefault(); undo(k === "z" && !e.shiftKey);
 });
 let painting = false;
-document.addEventListener("mousedown", e => { const c = e.target.closest("td.c"); if (!c) return; painting = true; paint(c); e.preventDefault(); });
+document.addEventListener("mousedown", e => { const c = e.target.closest("td.c"); if (!c || locked(G.shown)) return; painting = true; paint(c); e.preventDefault(); });
 document.addEventListener("mouseover", e => { if (!painting) return; const c = e.target.closest("td.c"); if (c) paint(c); });
 document.addEventListener("mouseup", () => { if (painting) { painting = false; const added = ensureRecessRows(); save(); if (added) render(); else renderIssues(); } });
 function paint(c) {
@@ -1168,7 +1203,7 @@ function setFixedWho(r, lv, who) {   // Fixed lessons: Every class is the level 
 function addRow(k) {
   const lv = levels()[0];
   const blank = { venues: { room: "", kind: "classroom", capacity: 40 }, classes: { class: "", level: lv, size: 38, home_room: null },
-    subjects: { subject: "", code: "", tag: "-", dept: (sc().departments || [])[0], periods: {} }, teachers: { name: "", short: "", dept: (sc().departments || [])[0], allowance: sc().type === "primary" ? 36 : 64, provisional: "No", can_teach: [] },
+    subjects: { subject: "", code: "", tag: "-", dept: (sc().departments || [])[0], periods: {} }, teachers: { name: "", short: "", dept: (sc().departments || [])[0], allowance: sc().type === "primary" ? 36 : 64, provisional: isHead() && !S.practice ? "Yes" : "No", can_teach: [] },
     blocks: { block: "", level: lv, classes: [] }, lessons: { level: lv, subject: null, block: null, classes: [], teachers: [], students: null },
     rules: { scope: "Level", target: null, rule: "Not in periods", week: "Both", day: "All", strength: "Must" },
     avail: { scope: "Teacher", target: null, rule: "Not available", week: "Both", day: "All", from: 0, to: 0, strength: "Must", times: [hhmm(0), hhmm(1)] },
@@ -1234,7 +1269,7 @@ function helper(k) {
     const lv = $("#hcLevel").value, size = Number($("#hcSize").value) || 38; const used = new Set(S.spec.classes.map(c => c.home_room)); const free = S.spec.venues.filter(v => (v.kind || "classroom") === "classroom" && !used.has(v.room)).map(v => v.room);
     $("#hcNames").value.split(",").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.classes.push({ class: `${String(lv).slice(-1)}${n}`, level: lv, size, home_room: free.shift() || null }));
   }
-  if (k === "teachers") { const dept = $("#htDept").value, allow = Number($("#htAllow").value) || null; $("#htNames").value.split("\n").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.teachers.push({ name: n, short: n.split(" ")[0], dept, allowance: allow, provisional: "No", can_teach: [] })); }
+  if (k === "teachers") { const dept = $("#htDept").value, allow = Number($("#htAllow").value) || null; $("#htNames").value.split("\n").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.teachers.push({ name: n, short: n.split(" ")[0], dept, allowance: allow, provisional: isHead() && !S.practice ? "Yes" : "No", can_teach: [] })); }
   if (k === "groups") { const b = S.spec.blocks.find(x => x.block === $("#hbBlock").value), s = $("#hbSubj").value, n = Number($("#hbN").value) || 1, st = Number($("#hbSt").value) || null; if (!b || !s) { toast("Pick a band and a subject."); return; } for (let i = 0; i < n; i++) S.spec.lessons.push({ level: b.level, subject: s, block: b.block, classes: [...(b.classes || [])], teachers: [], students: st }); }
   if (k === "whole") { const lv = $("#hwLevel").value, s = $("#hwSubj").value; if (!s) { toast("Pick a subject."); return; } S.spec.classes.filter(c => c.level === lv).forEach(c => S.spec.lessons.push({ level: lv, subject: s, block: null, classes: [c.class], teachers: [], students: c.size })); }
   save(); render(); toast("Added.");
@@ -1280,6 +1315,7 @@ function bulkTeachers(k) {   // step 4: one change for every ticked teacher
   const P = S.pick, T = S.spec.teachers, ix = [...P.teachers].filter(i => T[i]), n = ix.length, s1 = n === 1 ? "" : "s";
   if (k === "tc-none") { P.teachers.clear(); render(); return; }
   if (!n) return;
+  if (isHead() && !S.practice && ["tc-dept", "tc-role", "tc-allow"].includes(k)) return;   // a head sets only who can teach what
   let msg = "";
   if (k === "tc-add") {
     if (!P.s) return; let added = 0;
