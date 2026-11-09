@@ -38,4 +38,43 @@ t("the code a new row would get", () => {
   assert.strictEqual(Groups.codeFor(fixture(), "Sec 1", "Art", null), "Entire Class");
   assert.strictEqual(Groups.codeFor(fixture(), "", "Art", "Sec 1 Option A"), "");
 });
+t("a new group: fields, the band's classes by default, and refusals", () => {
+  const s = fixture(); const r = Groups.newGroup(s, { level: "Sec 1", subject: "Mathematics G3", block: "Sec 1 Option A", classes: [], students: "18" });
+  assert.deepStrictEqual(r, { i: 7 }); assert.deepStrictEqual(s.lessons[7], { level: "Sec 1", subject: "Mathematics G3", block: "Sec 1 Option A", classes: ["1A", "1B", "1C"], teachers: [], students: 18 });
+  assert.deepStrictEqual(Groups.newGroup(s, { level: "", subject: "Art" }), { error: "Pick a level and a subject." });
+  assert.deepStrictEqual(Groups.newGroup(s, { level: "Sec 2", subject: "Mathematics G3", block: "Sec 1 Mathematics", classes: ["2A"] }), { error: "Sec 1 Mathematics is a Sec 1 band, not Sec 2." });
+  assert.deepStrictEqual(Groups.newGroup(s, { level: "Sec 1", subject: "Art", block: "Nope", classes: ["1A"] }), { error: "There is no band called Nope." });
+  assert.deepStrictEqual(Groups.newGroup(s, { level: "Sec 1", subject: "Art", block: "", classes: [] }), { error: "Pick the classes." });
+  assert.strictEqual(s.lessons.length, 8);
+});
+t("one row per class, skipping classes that have the subject already", () => {
+  const s = fixture(); assert.strictEqual(Groups.addOnePerClass(s, "Sec 1", "Art", ["1A", "1B", "1C"]), 0);
+  assert.strictEqual(Groups.addOnePerClass(s, "Sec 1", "Music", ["1A", "1B", "1C"]), 3);
+  assert.deepStrictEqual(s.lessons.slice(7).map(x => [x.classes, x.students, x.block]), [[["1A"], 30, null], [["1B"], 32, null], [["1C"], 31, null]]);
+});
+t("a new band: name, duplicates, level and classes", () => {
+  const s = fixture(); assert.deepStrictEqual(Groups.newBand(s, { block: " Sec 1 English ", level: "Sec 1", classes: ["1A", "1B", "1C"], everyone: true }), { i: 2 });
+  assert.deepStrictEqual(s.blocks[2], { block: "Sec 1 English", level: "Sec 1", classes: ["1A", "1B", "1C"], everyone: true });
+  assert.deepStrictEqual(Groups.newBand(s, { block: "sec 1  mathematics", level: "Sec 1", classes: ["1A"] }), { error: "Sec 1 Mathematics exists already." });
+  assert.deepStrictEqual(Groups.newBand(s, { block: "", level: "Sec 1", classes: ["1A"] }), { error: "Give the band a name." });
+  assert.deepStrictEqual(Groups.newBand(s, { block: "Sec 1 Science", level: "", classes: ["1A"] }), { error: "Pick a level." });
+  assert.deepStrictEqual(Groups.newBand(s, { block: "Sec 1 Science", level: "Sec 1", classes: [] }), { error: "Pick the band's classes." });
+  assert.strictEqual(s.blocks.length, 3);
+});
+t("into a band: whole classes become groups, the band's classes widen, other levels are skipped", () => {
+  const s = fixture(); s.lessons.push({ _id: "l8", level: "Sec 2", subject: "Mathematics G3", block: null, classes: ["2A"], teachers: [], students: 30 });
+  const r = Groups.toBand(s, [3, 4, 7], "Sec 1 Mathematics");
+  assert.deepStrictEqual(r, { moved: 2, skipped: 1, widened: ["1C"] });
+  assert.deepStrictEqual([s.lessons[3].block, s.lessons[4].block, s.lessons[7].block], ["Sec 1 Mathematics", "Sec 1 Mathematics", null]);
+  assert.deepStrictEqual(s.blocks[0].classes, ["1A", "1B", "1C"]); assert.deepStrictEqual(s.lessons[3].classes, ["1A", "1B"]);   // the shared row is one group of two classes
+  assert.deepStrictEqual(Groups.codes(s).slice(3, 5), ["1AR1", "1AR2"]);
+});
+t("out of a band, and what moving renumbers", () => {
+  const s = fixture(); assert.strictEqual(Groups.fromBand(s, 3), false);
+  const r = Groups.shift(s, c => Groups.fromBand(c, 0));
+  assert.deepStrictEqual(r, { changes: [["l1", "1MAP1", "Entire Class"], ["l2", "1MAP2", "1MAP1"]], students: 2 });
+  assert.strictEqual(s.lessons[0].block, "Sec 1 Mathematics");   // the real setup is untouched
+  assert.strictEqual(Groups.fromBand(s, 0), true); assert.strictEqual(s.lessons[0].block, null);
+  assert.deepStrictEqual(Groups.shift(s, c => Groups.toBand(c, [4], "Sec 1 Mathematics")), { changes: [["l5", "Entire Class", "1AR1"]], students: 0 });
+});
 console.log(`${n} cases passed`);
