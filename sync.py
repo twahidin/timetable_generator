@@ -35,6 +35,13 @@ def _rows(spec, section):
     return rows if isinstance(rows, list) else []
 
 
+def _dict_at(parent, key):
+    """parent[key] as a dict, replacing anything else (null, text) with {}."""
+    if not isinstance(parent.get(key), dict):
+        parent[key] = {}
+    return parent[key]
+
+
 def _find(spec, section, rid):
     for row in _rows(spec, section):
         if isinstance(row, dict) and row.get("_id") == rid:
@@ -170,21 +177,21 @@ def _apply_one(spec, op):
             return False
         spec[op[1]] = [r for r in spec[op[1]] if r is not row]
     elif name == "school":
-        school = spec.setdefault("school", {})
+        school = _dict_at(spec, "school")
         if op[2] is None:
             school.pop(op[1], None)
         else:
             school[op[1]] = copy.deepcopy(op[2])
     elif name == "day":
         _, level, day, codes = op
-        days = spec.setdefault("day_structure", {})
+        days = _dict_at(spec, "day_structure")
         if codes is None:
-            if level in days:
+            if isinstance(days.get(level), dict):
                 days[level].pop(day, None)
                 if not days[level]:
                     del days[level]
         else:
-            days.setdefault(level, {})[day] = codes
+            _dict_at(days, level)[day] = codes
     else:  # top
         key = op[1]
         if key in _RESERVED_TOP or key.startswith("_"):
@@ -201,7 +208,8 @@ def apply(spec, ops):
     skipped = 0
     for op in ops:
         if (not isinstance(op, list) or not op or not isinstance(op[0], str) or _ARITY.get(op[0]) != len(op)
-                or not all(isinstance(op[i], str) for i in _STR_ARGS[op[0]])):
+                or not all(isinstance(op[i], str) for i in _STR_ARGS[op[0]])
+                or (op[0] == "merge" and not (isinstance(op[4], list) and isinstance(op[5], list)))):
             skipped += 1
         elif not _apply_one(spec, op):
             skipped += 1

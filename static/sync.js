@@ -176,7 +176,7 @@ var Sync = (function () {
       if (!isObj(spec.day_structure)) spec.day_structure = {};
       var days = spec.day_structure;
       if (op[3] === null || op[3] === undefined) {
-        if (days[op[1]]) {
+        if (isObj(days[op[1]])) {
           delete days[op[1]][op[2]];
           if (!Object.keys(days[op[1]]).length) delete days[op[1]];
         }
@@ -197,7 +197,8 @@ var Sync = (function () {
     var skipped = 0;
     ops.forEach(function (op) {
       var ok = Array.isArray(op) && ARITY[op[0]] === op.length &&
-        STR_ARGS[op[0]].every(function (i) { return typeof op[i] === "string"; });
+        STR_ARGS[op[0]].every(function (i) { return typeof op[i] === "string"; }) &&
+        (op[0] !== "merge" || (Array.isArray(op[4]) && Array.isArray(op[5])));
       if (!ok || !applyOne(spec, op)) skipped++;
     });
     return skipped;

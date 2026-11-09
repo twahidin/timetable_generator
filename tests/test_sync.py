@@ -87,4 +87,25 @@ assert [r["_id"] for r in spec["classes"]] == ["c0", "c1", "c9"]
 assert spec["classes"][1] == {"_id": "c1"} and spec["extra_sheets"] == {"a": 1}
 passed += 1
 
+# malformed merge lists are skipped, never half-applied or raised
+for bad in ("x", {"a": 1}, None, 5):
+    for pos in (4, 5):
+        op = ["merge", "teachers", "t1", "can_teach", [], []]
+        op[pos] = bad
+        spec = {"teachers": [{"_id": "t1", "can_teach": [1]}]}
+        assert sync.apply(spec, [op]) == 1, ("merge", bad, pos)
+        assert spec == {"teachers": [{"_id": "t1", "can_teach": [1]}]}
+passed += 1
+
+# non-dict school / day_structure / level are replaced, not raised on
+spec = {"school": None, "day_structure": None}
+assert sync.apply(spec, [["school", "name", "B"], ["day", "Sec 1", "Mon", "FL"]]) == 0
+assert spec == {"school": {"name": "B"}, "day_structure": {"Sec 1": {"Mon": "FL"}}}
+spec = {"day_structure": {"Sec 1": None, "Sec 2": "x"}}
+assert sync.apply(spec, [["day", "Sec 1", "Mon", "FL"], ["day", "Sec 2", "Mon", None]]) == 0
+assert spec["day_structure"]["Sec 1"] == {"Mon": "FL"}
+spec = {"school": "oops"}
+assert sync.apply(spec, [["school", "name", None]]) == 0 and spec["school"] == {}
+passed += 1
+
 print(f"{passed} cases passed")

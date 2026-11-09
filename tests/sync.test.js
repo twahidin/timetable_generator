@@ -98,4 +98,28 @@ passed++;
 }
 passed++;
 
+// malformed merge lists are skipped, never half-applied or thrown on
+[ "x", { a: 1 }, null, 5 ].forEach((bad) => [4, 5].forEach((pos) => {
+  const op = ["merge", "teachers", "t1", "can_teach", [], []];
+  op[pos] = bad;
+  const spec = { teachers: [{ _id: "t1", can_teach: [1] }] };
+  assert.strictEqual(Sync.apply(spec, [op]), 1, "merge " + JSON.stringify(bad));
+  assert.deepStrictEqual(spec, { teachers: [{ _id: "t1", can_teach: [1] }] });
+}));
+passed++;
+
+// non-object school / day_structure / level are replaced, not thrown on
+{
+  let spec = { school: null, day_structure: null };
+  assert.strictEqual(Sync.apply(spec, [["school", "name", "B"], ["day", "Sec 1", "Mon", "FL"]]), 0);
+  assert.deepStrictEqual(spec, { school: { name: "B" }, day_structure: { "Sec 1": { Mon: "FL" } } });
+  spec = { day_structure: { "Sec 1": null, "Sec 2": "x" } };
+  assert.strictEqual(Sync.apply(spec, [["day", "Sec 1", "Mon", "FL"], ["day", "Sec 2", "Mon", null]]), 0);
+  assert.deepStrictEqual(spec.day_structure["Sec 1"], { Mon: "FL" });
+  spec = { school: "oops" };
+  assert.strictEqual(Sync.apply(spec, [["school", "name", null]]), 0);
+  assert.deepStrictEqual(spec.school, {});
+}
+passed++;
+
 console.log(passed + " cases passed");
