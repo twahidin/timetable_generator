@@ -61,7 +61,7 @@ TOOLS = [
 ]
 
 FIELDS = dict(
-    rules=["scope", "target", "subject", "rule", "level", "week", "day", "from", "to", "number", "strength", "note"],
+    rules=["scope", "target", "subject", "rule", "level", "week", "day", "from", "to", "number", "venues", "strength", "note"],
     lessons=["level", "subject", "block", "classes", "teachers", "students", "periods_override", "code_override", "note"],
     teachers=["name", "short", "dept", "allowance", "role", "other_duties", "can_teach", "note"],
     classes=["class", "level", "size", "home_room", "note"],
@@ -80,6 +80,7 @@ def rule_text(i, r):
     if r.get("day") not in (None, "", "All"): when.append(str(r["day"]))
     if r.get("from") not in (None, "") or r.get("to") not in (None, ""): when.append(f"periods {r.get('from', '')}-{r.get('to', '')}")
     if r.get("number") not in (None, ""): when.append(f"number {r['number']}")
+    if r.get("venues"): when.append(f"venues {', '.join(r['venues']) if isinstance(r['venues'], list) else r['venues']}")
     return f"[{i}] {t}" + (f" ({', '.join(when)})" if when else "") + f" [{r.get('strength') or 'Must'}]"
 
 def row_text(section, i, x):
@@ -248,6 +249,10 @@ def findings(spec, P=None):
     for area, t in _loads_and_rooms(spec, P): add(WARNING, area, t)
     for t in structure_vs_rules(spec):   # the Day structure and the rules saying different things: a fixed lesson outside lesson time can never be met
         add(*((CRITICAL, "rules") if t.startswith("Fixed lesson") else (WARNING, "school")), t)
+    from ttgen.solver import fixed_clashes, rule_label, rule_problems
+    for t in fixed_clashes(spec, P): add(CRITICAL, "rules", t)   # e.g. a whole-school CCE slot and a teacher with CCE for two classes
+    for i, t in rule_problems(spec, P):   # a rule row the solver cannot use as written: skipped, or it matches no lesson
+        add(WARNING, "rules", f"Rule {rule_label(spec['rules'][i])}: {t}")
     out.sort(key=lambda f: f["level"] != CRITICAL)   # stable: critical first, each kind in the order found
     return out
 
@@ -380,8 +385,8 @@ def advice(spec, status, secs, notes=()):
         fixes.append(dict(go="school", text=f"Floating recess: at most {P.recess_cap} classes may be at recess at once. Where a class's recess goes also decides how its lessons "
                                             "fit around it, so a tight limit can leave some classes no place. Raise Most classes at recess at once, widen the recess windows (W), "
                                             "or set Floating recess goes by to Level (School & day)."))
-    if any("matches nothing" in n or "no lesson matches" in n for n in notes):
-        fixes.append(dict(go="rules", text="Remove or correct the fixed lessons that match no lesson (step 6)."))
+    if any(n.startswith("Rule not used as written") for n in notes):
+        fixes.append(dict(go="rules", text="Correct or remove the rules that cannot be used as written (step 6 shows what is wrong under each one)."))
     if any(str(r.get("strength") or "Must") == "Must" for r in spec.get("rules", [])):
         fixes.append(dict(go="rules", text="Turn off any rule the school can do without (step 6, and the rules on School & day), then generate again. "
                                            "With the AI timetabler, ask it to diagnose: it tests the rules one at a time and names any that block the timetable."))

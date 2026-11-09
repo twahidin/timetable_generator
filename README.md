@@ -131,6 +131,17 @@ then clashes between levels are cleared and the whole school is checked together
 the latest timetable. A room holds one class at a time unless step 6 has a "Room · At most N at once" rule; a note on
 a Settings row such as "Field and Hall take 2 classes each" is read as those rules.
 
+**Rules (step 6):** besides teacher block-outs, three common school rules have their own one-click rows. **Every
+class at one time** puts a subject at one slot for every class of a level, or of the whole school (Fixed lessons, Class
+"Every class", Level All), such as whole-school CCE: one row per slot. **HBL day** (the rule *Only these subjects*) lets
+only the subjects ticked be taught in those periods; tick a department for all its subjects, or a subject for all its
+G1/G2/G3 groups. **Lessons late in the day only in some rooms** (*Only in venues*) keeps a subject's lessons that run into
+the periods picked to the rooms picked, such as PE after 11.00 only in the hall. Under every rule the solver cannot use
+as written (a rule name it does not know, a level or subject not on the setup, a rule that matches no lesson) step 6
+says what is wrong and what happens to it; opening a workbook says how many there are, and Generate lists them. Fixed
+lessons that put one teacher or one class in two places (a whole-school CCE slot when a teacher takes CCE for two
+classes) stop the timetable before solving, with the teacher named.
+
 **Rooms:** a group only goes in a room of its subject's kind that seats it (Venues **Capacity** = seats; the group size
 is the Students sheet count for its code, the row's Students, or the class size). A room's **For** column keeps it for
 some subjects, departments or levels (blank = anyone). A lesson row's **Special room weeks** (Odd or Even) gives the

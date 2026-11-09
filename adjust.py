@@ -7,6 +7,7 @@ Moves change the run's latest timetable (its placements file); the timetable wor
 Publish. Lessons moved by hand are pinned: later solves in the run keep them where they were put."""
 import collections, copy, math, os, threading
 from ttgen.solver import Problem, RECESS_KEY, lesson_domains, rain_rooms, units_for
+from ttgen.spec import subject_test
 from ttgen.report import assign_rooms, check, clock, compromise_brief, compromises
 from store import now, read_json, write_json
 
@@ -53,7 +54,9 @@ class Board:
         self.fam = collections.defaultdict(set)
         for L in self.L.values():
             for r in L["part"]:
-                for week in (("Odd", "Even") if P.week_limited(r) else (None,)): kind, E, _, _ = P.allowed(r, L["unit"], week); self.fam[kind].add(E)
+                for week in (("Odd", "Even") if P.week_limited(r) else (None,)):
+                    kind, E, _, _ = P.allowed(r, L["unit"], week); self.fam[kind].add(E)
+                    for v in P.venue_rules_for(r, L["unit"]): self.fam[kind].add(E & v["V"])   # 'Only in venues': its rooms at those times
         for _, c, h in rain_rooms(P, self.L.values()): self.fam[P.room_kind[h]].add(frozenset([h]))
         for kind in list(self.fam): self.fam[kind].add(frozenset(x for x, k in P.room_kind.items() if k == kind))
         self.room_off = collections.defaultdict(set)
@@ -69,7 +72,7 @@ class Board:
         """the rooms each row of lesson k may use if it starts at `start`: [(kind, allowed rooms, group name)]"""
         L = self.L[k]; P = self.P; week = "Odd" if P.odd_day[start // self.NP] else "Even"; out = []
         for r in L["part"]:
-            kind, E, n, _ = P.allowed(r, L["unit"], week if P.week_limited(r) else None)
+            kind, E, n, _ = P.allowed_at(r, L["unit"], start, L["ln"], week if P.week_limited(r) else None)
             out.append((kind, E, f"{r['subject']} {r['code'] if r['code'] != 'Entire Class' else L['unit']['classes'][0]}" + (f" ({n} students)" if n else "")))
         for _, c, h in rain_rooms(P, [L]):   # PE: the class's home room stays free as its rain room
             out.append((P.room_kind[h], frozenset([h]), f"{c}'s rain room {h}"))
@@ -95,8 +98,13 @@ class Board:
         L = self.L[k]; u = L["unit"]
         if s not in {p for p, _ in self.P.starts(u["level"], L["ln"])}:
             return f"{self.when(s, L['ln'])} is not lesson time for {u['level']}: it is a break, after the day ends, or the {L['ln']} periods would run across a break."
-        names = sorted({r["rule"] for r in self.P.spec.get("rules", []) if r.get("rule") in ("Not available", "Not in periods", "Only in periods", "Finish by", "Fixed at", "Keep free together")
-                        and u["id"] in {x["id"] for x in units_for(self.P, r)}})
+        def covers(r):
+            if r.get("rule") == "Only these subjects":   # an HBL day: lessons of other subjects are kept out
+                ok = subject_test(r.get("subject"))
+                return u["id"] in {x["id"] for x in units_for(self.P, dict(r, subject=None))} and not all(ok(x["subject"], x.get("dept")) for x in u["rows"])
+            return u["id"] in {x["id"] for x in units_for(self.P, r)}
+        names = sorted({r["rule"] for r in self.P.spec.get("rules", []) if r.get("rule") in ("Not available", "Not in periods", "Only in periods", "Finish by", "Fixed at", "Keep free together", "Only these subjects")
+                        and covers(r)})
         return f"A rule keeps {self.name(k)} out of that time" + (f" ({', '.join(names)})." if names else ".")
 
     def conflicts(self, moves):

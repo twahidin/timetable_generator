@@ -10,7 +10,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.formatting.rule import FormulaRule, CellIsRule
 from openpyxl.workbook.defined_name import DefinedName
-from .spec import RULE_TYPES, SCOPES, CODES, RECESS_ROWS, SETTING_RULES, ROLES, day_names, order_days, scopes_for, split_rules
+from .spec import RULE_TYPES, SCOPES, CODES, EVERY_CLASS, RECESS_ROWS, SETTING_RULES, ROLES, day_names, names_list, order_days, scopes_for, split_rules
 
 NAVY, SLATE = "1F4E78", "5B6B7F"
 HF = Font(name="Arial", bold=True, color="FFFFFF", size=10)
@@ -42,8 +42,9 @@ class Book:
                 c = ws.cell(r, j)
                 if j in inputs: c.font = INF; c.fill = INFILL
                 else: c.font = BF; c.fill = CF
-    def dv(self, ws, rng, src, msg):
-        d = DataValidation(type="list", formula1=src, allow_blank=True, showErrorMessage=True, errorTitle="Pick from the list", error=msg)
+    def dv(self, ws, rng, src, msg, strict=True):
+        d = DataValidation(type="list", formula1=src, allow_blank=True, showErrorMessage=True, errorTitle="Pick from the list", error=msg,
+                           errorStyle="stop" if strict else "warning")
         ws.add_data_validation(d)
         for part in rng.split(): d.add(part)
     def name(self, nm, ref): self.wb.defined_names[nm] = DefinedName(nm, attr_text=ref)
@@ -200,12 +201,12 @@ def write_template(spec, path, extra_rows=120):
              ("Teaches at", scopes_for(sc)), ("Yes/No", ["Yes", "No"]), ("Tag letter", [b for a, b in sc["tags"]]), ("Level", list(sc["bands"])),
              ("Band", list(sc["bands"].values())), ("Rule applies to", SCOPES), ("School", ["Whole school"]),
              ("Week", ["Both", "Odd", "Even"] if int(sc["weeks"]) == 2 else ["Both"]), ("Day", ["All"] + ["Mon", "Tue", "Wed", "Thu", "Fri"]),
-             ("Must/Prefer", ["Must", "Prefer"]), ("Periods", list(range(NP)))]
+             ("Must/Prefer", ["Must", "Prefer"]), ("Periods", list(range(NP))), ("Level or All", ["All"] + levels)]
     for j, (h, vals_) in enumerate(lists, start=1):
         c = ls.cell(3, j, h); c.font = HF; c.fill = PatternFill("solid", fgColor=NAVY); ls.column_dimensions[CL(j)].width = 15
         for i, v in enumerate(vals_, start=4): ls.cell(i, j, v).font = INF; ls.cell(i, j).fill = INFILL
     for nm, col in (("LevelList", "A"), ("DeptList", "B"), ("KindList", "C"), ("GList", "D"), ("ScopeList", "E"), ("YesNoList", "F"),
-                    ("RuleScopeList", "J"), ("SchoolList", "K"), ("WeekList", "L"), ("DayList", "M"), ("StrengthList", "N"), ("PeriodList", "O")):
+                    ("RuleScopeList", "J"), ("SchoolList", "K"), ("WeekList", "L"), ("DayList", "M"), ("StrengthList", "N"), ("PeriodList", "O"), ("LevelAllList", "P")):
         B.name(nm, B.dyn("Lists", col, 4, 1000))
     letter_of = lambda tag: f'IFERROR(INDEX(Lists!$G$4:$G$60,MATCH({tag},Lists!$D$4:$D$60,0)),"")'
     band_of = lambda lv: f'IFERROR(INDEX(Lists!$I$4:$I$60,MATCH({lv},Lists!$H$4:$H$60,0)),"")'
@@ -446,19 +447,22 @@ def write_template(spec, path, extra_rows=120):
     B.dv(aw, f"C5:C{aL}", day_src, "All or a day.")
 
     # ---------------- Fixed lessons
-    fw = B.sheet(FX, "Lessons that must sit at a set time (optional)", ["Leave empty to let the timetable place everything. Start period as numbered on Period times.", ""],
+    fw = B.sheet(FX, "Lessons that must sit at a set time (optional)", ["Leave empty to let the timetable place everything. Start period as numbered on Period times.",
+                 f"Class '{EVERY_CLASS}': that subject for every class of the level (Level All: the whole school), such as CCE at one time for everyone."],
                  [("Level", 8), ("Class(es) or group", 18), ("Subject", 32), ("Week", 8), ("Day", 7), ("Start period", 9), ("Note", 40)], set(range(1, 8)), hr=4)
     lv_of = {c["class"]: c.get("level") for c in spec["classes"]}
     fx = rules["fixed"]
     for i, x in enumerate(fx):
-        for j, v in enumerate([x.get("level") or lv_of.get(x.get("target")), x.get("target"), x.get("subject"), x.get("week") or "Both", x.get("day") or "All",
+        every = x.get("scope") in ("Level", "School")
+        lv = (x.get("target") if x.get("scope") == "Level" else "All") if every else x.get("level") or lv_of.get(x.get("target"))
+        for j, v in enumerate([lv, EVERY_CLASS if every else x.get("target"), x.get("subject"), x.get("week") or "Both", x.get("day") or "All",
                                x.get("from"), x.get("note")], start=1): fw.cell(5 + i, j, v)
     fL = 5 + len(fx) + 40
     B.paint(fw, fL, set(range(1, 8)), 7, first=5)
     for i, x in enumerate(fx):
         if str(x.get("note") or "").startswith("example"):
             for j in range(1, 8): fw.cell(5 + i, j).font = EXF
-    B.dv(fw, f"A5:A{fL}", "=LevelList", "Pick a level."); B.dv(fw, f"C5:C{fL}", "=SubjectList", "Pick a subject from Step 3.")
+    B.dv(fw, f"A5:A{fL}", "=LevelAllList", "Pick a level, or All."); B.dv(fw, f"C5:C{fL}", "=SubjectList", "Pick a subject from Step 3.")
     B.dv(fw, f"D5:D{fL}", week_src, "Odd, Even or Both."); B.dv(fw, f"E5:E{fL}", day_src, "All or a day."); B.dv(fw, f"F5:F{fL}", "=PeriodList", "A period number (see Period times).")
 
     # ---------------- More rules + Rule types (every rule that has no place above)
@@ -470,31 +474,35 @@ def write_template(spec, path, extra_rows=120):
     for col, w in zip("ABCDEF", (26, 30, 10, 10, 60, 44)): rt.column_dimensions[col].width = w
     nRT = len(RULE_TYPES); B.name("RuleList", f"'Rule types'!$A$4:$A${3 + nRT}")
     rcols = [("Applies to (kind)", 12), ("Applies to", 30), ("Subject (optional)", 28), ("Rule", 26), ("Week", 8), ("Day", 7), ("From period", 8), ("To period", 8),
-             ("Number", 8), ("Must / Prefer", 9), ("Note", 40), ("Times", 20), ("Check", 36)]
-    RIN = set(range(1, 12))
+             ("Number", 8), ("Venues", 22), ("Must / Prefer", 9), ("Note", 40), ("Times", 20), ("Check", 36)]
+    RIN = set(range(1, 13))
     more = rules["more"]
     rw = B.sheet(MR, "More rules (optional): any other constraint", [f"For rules that have no place on Settings, {TA} or {FX}: rooms, levels, subjects, Prefer rules and so on. First pick what a rule applies to; the next drop-down then lists only those.",
-                 "Must = never broken; Prefer = kept where possible. See 'Rule types' for every rule and an example.", "Periods are numbered as on Period times (Times shows the clock)."], rcols, RIN)
+                 "Must = never broken; Prefer = kept where possible. See 'Rule types' for every rule and an example. Only these subjects takes several subjects in Subject, "
+                 "and Only in venues the rooms in Venues, separated by commas.", "Periods are numbered as on Period times (Times shows the clock)."], rcols, RIN)
     for i, x in enumerate(more):
-        for j, k in enumerate(["scope", "target", "subject", "rule", "week", "day", "from", "to", "number", "strength", "note"], start=1): rw.cell(R0 + i, j, x.get(k))
+        for j, k in enumerate(["scope", "target", "subject", "rule", "week", "day", "from", "to", "number", "venues", "strength", "note"], start=1):
+            rw.cell(R0 + i, j, ", ".join(names_list(x.get(k))) if k == "venues" else x.get(k))
     rL = R0 + len(more) + 80
-    B.paint(rw, rL, RIN, 13)
+    B.paint(rw, rL, RIN, 14)
     SC = "{" + ",".join(f'"{s}"' for s in SCOPES) + "}"
     LISTS = "SchoolList,LevelList,ClassList,TeacherList,DeptList,SubjectList,BlockList,BlockList,RoomList"   # Group: a code, so any text is accepted
     rtA = f"'Rule types'!$A$4:$A${3 + nRT}"
     for r in range(R0, rL + 1):
-        rw[f"L{r}"] = f'=IF(G{r}="","",TEXT(INDEX({PTB},G{r}+1),"h:mm AM/PM")&" - "&TEXT(INDEX({PTC},IF(H{r}="",G{r},H{r})+1),"h:mm AM/PM"))'
+        rw[f"M{r}"] = f'=IF(G{r}="","",TEXT(INDEX({PTB},G{r}+1),"h:mm AM/PM")&" - "&TEXT(INDEX({PTC},IF(H{r}="",G{r},H{r})+1),"h:mm AM/PM"))'
         nt, nn, scp = (f"INDEX('Rule types'!${c}$4:${c}${3 + nRT},MATCH(D{r},{rtA},0))" for c in ("C", "D", "B"))
-        rw[f"M{r}"] = (f'=IF(A{r}="","",TRIM(IF(AND(A{r}<>"Group",COUNTIF(CHOOSE(MATCH(A{r},{SC},0),{LISTS}),B{r})=0),"Pick the "&LOWER(A{r})&" from the list. ","")'
+        rw[f"N{r}"] = (f'=IF(A{r}="","",TRIM(IF(AND(A{r}<>"Group",COUNTIF(CHOOSE(MATCH(A{r},{SC},0),{LISTS}),B{r})=0),"Pick the "&LOWER(A{r})&" from the list. ","")'
                        f'&IF(D{r}="","Pick a rule. ",IF(ISERROR(FIND(A{r},{scp})),D{r}&" does not apply to a "&LOWER(A{r})&". ","")'
-                       f'&IF(AND(IFERROR({nt},"N")="Y",G{r}="",H{r}=""),"Give the period(s). ","")&IF(AND(IFERROR({nn},"N")="Y",I{r}=""),"Give the Number. ",""))'
-                       f'&IF(AND(OR(D{r}="Same time across classes",D{r}="Not on the same day as"),C{r}=""),"Pick the Subject. ","")))')
-        rw[f"M{r}"].alignment = Alignment(wrap_text=True, vertical="top")
-    rw.conditional_formatting.add(f"M{R0}:M{rL}", FormulaRule(formula=[f"LEN(M{R0})>0"], fill=RED))
+                       f'&IF(AND(IFERROR({nt},"N")="Y",G{r}="",H{r}="",D{r}<>"Only these subjects",D{r}<>"Only in venues"),"Give the period(s). ","")&IF(AND(IFERROR({nn},"N")="Y",I{r}=""),"Give the Number. ",""))'
+                       f'&IF(AND(OR(D{r}="Same time across classes",D{r}="Not on the same day as",D{r}="Only these subjects"),C{r}=""),"Pick the Subject. ","")'
+                       f'&IF(AND(D{r}="Only in venues",J{r}=""),"List the rooms under Venues. ","")))')
+        rw[f"N{r}"].alignment = Alignment(wrap_text=True, vertical="top")
+    rw.conditional_formatting.add(f"N{R0}:N{rL}", FormulaRule(formula=[f"LEN(N{R0})>0"], fill=RED))
     B.dv(rw, f"A{R0}:A{rL}", "=RuleScopeList", "Pick what the rule applies to.")
-    B.dv(rw, f"C{R0}:C{rL}", "=SubjectList", "Pick a subject."); B.dv(rw, f"D{R0}:D{rL}", "=RuleList", "Pick a rule (see Rule types).")
+    B.dv(rw, f"C{R0}:C{rL}", "=SubjectList", "Pick a subject (Only these subjects: several, separated by commas).", strict=False)
+    B.dv(rw, f"D{R0}:D{rL}", "=RuleList", "Pick a rule (see Rule types).")
     B.dv(rw, f"E{R0}:E{rL}", "=WeekList", "Pick a week."); B.dv(rw, f"F{R0}:F{rL}", "=DayList", "All or a day.")
-    B.dv(rw, f"G{R0}:H{rL}", "=PeriodList", "A period number (see Period times)."); B.dv(rw, f"J{R0}:J{rL}", "=StrengthList", "Must or Prefer.")
+    B.dv(rw, f"G{R0}:H{rL}", "=PeriodList", "A period number (see Period times)."); B.dv(rw, f"K{R0}:K{rL}", "=StrengthList", "Must or Prefer.")
 
     # ---------------- Students
     nst = len(spec.get("students", []))

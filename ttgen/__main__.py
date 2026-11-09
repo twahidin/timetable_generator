@@ -47,6 +47,9 @@ def main(argv=None):
         for p in probs or ["No input problems found."]: print(" -", p)
         from .spec import structure_vs_rules
         for p in structure_vs_rules(spec): print(" ! Day structure and rules disagree:", p)
+        from .solver import fixed_clashes, rule_label, rule_problems
+        for p in fixed_clashes(spec, P): print(" ! Fixed lessons clash:", p)
+        for i, p in rule_problems(spec, P): print(f" ! Rule {rule_label(spec['rules'][i])}: {p}")
         return 0
     from .solver import solve
     from .report import write_timetable

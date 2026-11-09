@@ -55,7 +55,7 @@ def assign_rooms(res):
     for L in lessons:   # whole-class lessons in their home room
         u = L["unit"]
         if u["kind"] != "class": continue
-        r = L["part"][0]; kind, E, n, ov = P.allowed(r, u, week(L)); h = home.get(u["classes"][0])
+        r = L["part"][0]; kind, E, n, ov = P.allowed_at(r, u, L["start"], L["ln"], week(L)); h = home.get(u["classes"][0])
         if kind == "classroom" and h in E and free(h, L["pos"]):
             L["rooms"][id(r)] = h
             for q in L["pos"]: occ[h][q] += 1
@@ -65,10 +65,11 @@ def assign_rooms(res):
         w = week(L)
         for r in sorted(L["part"], key=lambda r: -(P.allowed(r, L["unit"], w)[2] or 0)):
             if id(r) in L["rooms"]: continue
-            kind, E, n, ov = P.allowed(r, L["unit"], w); key = (r["code"], tuple(r["classes"]), r["subject"], kind)
+            kind, E, n, ov = P.allowed_at(r, L["unit"], L["start"], L["ln"], w); key = (r["code"], tuple(r["classes"]), r["subject"], kind)
             homes = {home.get(c) for c in L["unit"]["classes"]} if kind == "classroom" else set()
+            pref = P.preferred_at(r, L["unit"], L["start"], L["ln"])   # Prefer 'Only in venues': those rooms first
             free_ = [x for x in E if free(x, L["pos"])]
-            x = min(free_, key=lambda x: (x != used.get(key), x not in homes, not P.only_for.get(x), P.seats.get(x) or 10 ** 6, x), default=None)
+            x = min(free_, key=lambda x: (x not in pref if pref else False, x != used.get(key), x not in homes, not P.only_for.get(x), P.seats.get(x) or 10 ** 6, x), default=None)
             L["rooms"][id(r)] = x or "TBC"
             if x:
                 for q in L["pos"]: occ[x][q] += 1
@@ -79,14 +80,14 @@ def assign_rooms(res):
     for L in lessons:
         for r in L["part"]:
             if L["rooms"].get(id(r)) != "TBC": continue
-            for x in sorted(P.allowed(r, L["unit"], week(L))[1], key=smallest):
+            for x in sorted(P.allowed_at(r, L["unit"], L["start"], L["ln"], week(L))[1], key=smallest):
                 inway = [(M, s) for M in lessons if M is not L and set(M["pos"]) & set(L["pos"]) for s in M["part"] if M["rooms"].get(id(s)) == x]
                 if not inway: continue
                 for M, s in inway:
                     for q in M["pos"]: occ[x][q] -= 1
                 moves = []
                 for M, s in inway:
-                    y = next((y for y in sorted(P.allowed(s, M["unit"], week(M))[1], key=smallest) if y != x and free(y, M["pos"])), None)
+                    y = next((y for y in sorted(P.allowed_at(s, M["unit"], M["start"], M["ln"], week(M))[1], key=smallest) if y != x and free(y, M["pos"])), None)
                     if y is None: break
                     moves.append((M, s, y))
                     for q in M["pos"]: occ[y][q] += 1
