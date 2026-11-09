@@ -20,7 +20,7 @@ If the first deploy starts without a volume or variables, that is fine: the sign
 
 ## 2. Attach a volume
 
-The setup, the saved copies of it and the published timetable are files on the volume. Without
+The setup, its restore points and the published timetable are files on the volume. Without
 one, everything is lost on the next deploy.
 
 1. Add a volume to the service: in the project canvas, right-click the service → **Attach Volume** (or open the command
@@ -31,17 +31,18 @@ Railway then sets `RAILWAY_VOLUME_MOUNT_PATH=/data` and the app keeps everything
 
 | Folder or file | What |
 |---|---|
-| `setup.json` | the committee's saved setup, including the Students sheet |
-| `setup_history/` | the last 20 copies that **Save progress** replaced |
+| `setup.json` | the school's setup, including the Students sheet, as the committee and heads last changed it |
+| `setup_history/` | restore points: one about every 10 minutes while people work (the last 48 are kept), and one before every whole-setup action (starting blank, opening a workbook, loading from a file, restoring a copy) |
 | `runs/` | only on a volume used by an earlier version, which generated in the app. No longer written; safe to leave |
 | `published/` | the published timetable, PDFs, workbooks and the personal codes |
 
-A school's data is small. The CTSS test copy (two runs and 20 saved setups) is about 5 MB before publishing; publishing
+A school's data is small. The CTSS test copy (two runs and 48 restore points) is about 5 MB before publishing; publishing
 adds the PDFs and workbooks (about 30 MB for the 624-student sample school). The smallest volume Railway offers is
 plenty.
 
 A service with a volume runs one replica (Railway does not allow more), which is what the app needs: publishing is
-guarded by a lock in the web process. Because of the volume, each redeploy has a short downtime.
+guarded by a lock in the web process. Because of the volume, each redeploy has a short downtime. After a redeploy, every open browser reloads the setup from the
+server by itself, and changes it had not sent yet are sent again.
 
 ## 3. Set the variables
 
@@ -53,6 +54,7 @@ SECRET_KEY=paste-a-long-random-string-here
 COMMITTEE_CODE=
 TEACHER_CODE=
 STUDENT_CODE=
+HEADS_CODE=
 SCHOOL_NAME=
 ```
 
@@ -65,6 +67,7 @@ manager's generator.
 | `COMMITTEE_CODE` | **yes** | The timetable committee's code: setup editor, downloads, publish, personal codes. | none. At least 6 letters or digits. |
 | `TEACHER_CODE` | **yes** | Teachers' code: every class, teacher, room and student timetable, Who's free, PDFs. | none. At least 6 letters or digits. |
 | `STUDENT_CODE` | **yes** | Students' code: class timetables and **Build my timetable**. | none. At least 6 letters or digits. |
+| `HEADS_CODE` | no | Heads of department's code. With it set, the sign-in page has a fourth choice, **Department heads**. A head sees every step except Download, Publish and Students, and can change teaching groups, bands and who can teach what; they can add a teacher (marked provisional until the committee confirms them) and edit a teacher who is still provisional. The server refuses any other change. | none: leave it out and there is no heads' sign-in. At least 6 letters or digits, different from the other codes. |
 | `SCHOOL_NAME` | no | Shown on the sign-in page until a timetable is published (then the published school name is shown), and used to name a blank setup. | `School timetable` on the sign-in page |
 | `DATA_DIR` | no | Where the data goes, if not the volume. Leave it unset on Railway. | the volume's mount path, else `data/` in the app folder |
 
@@ -89,7 +92,8 @@ about a minute for a 600-student school and uses one vCPU.
 1. In the service: **Settings → Networking → Public Networking → Generate Domain**, then open the domain.
 2. The sign-in page lists anything missing in amber: a code or `SECRET_KEY` not set, codes too short or the same, or no
    volume. Fix those first. The service's deploy logs show the same list at startup.
-3. Choose **Build and publish the timetable** and enter the committee code.
+3. Choose **Build and publish the timetable** and enter the committee code. (Heads of department choose **Department
+   heads** and use their own code, once `HEADS_CODE` is set.)
 4. Load your setup. On **Start**:
    - **Open a setup workbook (.xlsx)** reads a setup workbook into every step. It reads the app's own template and the
      CTSS layout (G-levels, "Class (2027)" on Students, Block and "Floor / level" on Venues, and extra sheets such as Roles,
@@ -97,8 +101,8 @@ about a minute for a 600-student school and uses one vCPU.
    - **Secondary school · blank** starts with typical subjects and a day shape, and you add rooms, classes, teachers and
      lessons. **Secondary school · sample** is a made-up 16-class school, to see how everything fits.
    - Blank and sample workbooks to fill in Excel are on step 7, **Download → Templates to share**.
-5. The panel on the right lists anything that does not add up. Press **Save progress** to keep the setup on the server,
-   where it opens by itself for the committee on any browser.
+5. The panel on the right lists anything that does not add up. Every change is saved on the server by itself, and the
+   setup opens by itself for the committee and the heads on any browser. The header shows Saved, Saving or Offline.
 6. On step 7, **Download**, get the configuration workbook and the timetable skill, and give both to an AI agent that
    can run code. It hands back the timetable file.
 7. On step 8, **Publish**, upload that file, press **Check, then publish** and read what it found, then **Publish this
@@ -110,6 +114,11 @@ about a minute for a 600-student school and uses one vCPU.
 ## What leaves the server
 
 Nothing. The app makes no outbound calls: it has no AI inside and sends no data anywhere.
+
+Who sees what inside the app: a head's browser receives the whole setup, because the editor works on all of it, including
+the student list once students are added, although the Students, Download and Publish steps are hidden from heads and
+the server refuses their changes to anything but groups, bands, who can teach what and new teachers. Give `HEADS_CODE`
+only to people who may see the student list. Teachers and students never receive the setup.
 
 What an outside AI agent sees is what the committee gives it: the configuration workbook from step 7. That workbook
 holds teachers' names, and the **Students** sheet once students have been added. The timetable does not need the
