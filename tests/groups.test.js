@@ -77,4 +77,15 @@ t("out of a band, and what moving renumbers", () => {
   assert.strictEqual(Groups.fromBand(s, 0), true); assert.strictEqual(s.lessons[0].block, null);
   assert.deepStrictEqual(Groups.shift(s, c => Groups.toBand(c, [4], "Sec 1 Mathematics")), { changes: [["l5", "Entire Class", "1AR1"]], students: 0 });
 });
+t("lanes: each band of the level with its groups and anyone on two of them", () => {
+  const s = fixture(); s.lessons[1].teachers = ["Arjun Nair"];
+  const L = Groups.lanes(s, "Sec 1");
+  assert.deepStrictEqual(L.map(l => [l.block, l.groups.map(g => g.code), l.twice]), [["Sec 1 Mathematics", ["1MAP1", "1MAA1"], []], ["Sec 1 Option A", ["1MAP2"], []]]);
+  s.lessons[2].teachers = ["Arjun Nair"]; assert.deepStrictEqual(Groups.lanes(s, "Sec 1")[0].twice, ["Arjun Nair"]);
+  assert.deepStrictEqual(Groups.lanes(s, "Sec 2"), []); assert.strictEqual(Groups.lanes(s, "").length, 2);
+});
+t("the pool: unbanded rows of the level, by subject", () => {
+  assert.deepStrictEqual(Groups.pool(fixture(), "Sec 1", "").map(p => [p.li, p.kind, p.code, p.title]), [[3, "class", "Entire Class", "1A, 1B · Art"], [4, "class", "Entire Class", "1C · Art"], [5, "group", "1MU1", "1C · Music"]]);
+  assert.deepStrictEqual(Groups.pool(fixture(), "Sec 1", "Music").map(p => p.li), [5]); assert.deepStrictEqual(Groups.pool(fixture(), "Sec 2", ""), []);
+});
 console.log(`${n} cases passed`);

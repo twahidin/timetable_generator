@@ -132,7 +132,32 @@ var Groups = (function () {
     return { changes: changes, students: students };
   }
 
-  return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor,
+  /* ---- the bands page */
+  function lanes(spec, level) {
+    var L = rows(spec, "lessons"), C = codes(spec), out = [];
+    rows(spec, "blocks").forEach(function (b, bi) {
+      if (!b || (level && b.level !== level)) return;
+      var groups = [], seen = {}, twice = [];
+      L.forEach(function (x, li) {
+        if (!x || x.block !== b.block) return;
+        groups.push({ li: li, code: C[li], subject: x.subject, classes: (x.classes || []).slice(), students: x.students == null ? null : Number(x.students) || null, teachers: names(x) });
+        names(x).forEach(function (nm) { seen[nm] = (seen[nm] || 0) + 1; if (seen[nm] === 2) twice.push(nm); });
+      });
+      out.push({ bi: bi, block: b.block, level: b.level, classes: (b.classes || []).slice(), everyone: b.everyone == null ? !/option|elective/i.test(b.block || "") : !!b.everyone, groups: groups, twice: twice });
+    });
+    return out;
+  }
+
+  function pool(spec, level, subject) {
+    var C = codes(spec), out = [];
+    rows(spec, "lessons").forEach(function (x, li) {
+      if (!x || x.block || !x.subject || (level && x.level !== level) || (subject && x.subject !== subject)) return;
+      out.push({ li: li, kind: x.code_override ? "group" : "class", code: C[li], title: (x.classes || []).join(", ") + " · " + x.subject, subject: x.subject, classes: (x.classes || []).slice(), students: x.students == null ? null : Number(x.students) || null });
+    });
+    return out;
+  }
+
+  return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, lanes: lanes, pool: pool,
     newGroup: newGroup, addOnePerClass: addOnePerClass, newBand: newBand, toBand: toBand, fromBand: fromBand, shift: shift };
 })();
 if (typeof module !== "undefined") module.exports = Groups;

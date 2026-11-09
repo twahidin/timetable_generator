@@ -1042,7 +1042,8 @@ const VIEWS = {
       <div class="row" style="margin-top:10px">${M.adding ? "" : `<button data-mnew>+ New teacher</button>`}</div>${M.adding ? newTeacherForm(dept) : ""}
     </section>${basketsView(dept)}${prof >= 0 ? profileView(T[prof], prof) : cardsView(dept)}</div>`;
   },
-  groups() {   // step 5's "Groups and bands": a new group, a new band (left); the pool and the band lanes (Task 4)
+  groups() {   // step 5's "Groups and bands": a new group, a new band (left); the pool of unbanded rows and the band lanes
+    Sync.ensureIds(S.spec);
     const gf = gfState(), bf = bfState(), tags = (sc().tags || []).map(t => t[0]).filter(t => t && t !== "-");
     const subjAt = lv => subjectNames().filter(n => ((subj(n) || {}).periods || {})[lv]);
     const gSubjects = subjAt(gf.level).filter(n => !gf.tag || (subj(n) || {}).tag === gf.tag), gBands = S.spec.blocks.filter(b => b.level === gf.level).map(b => b.block);
@@ -1068,7 +1069,7 @@ const VIEWS = {
       <label class="f">Name <input id="bfName" value="${esc(name)}"></label>
       <label class="f"><input type="checkbox" id="bfEveryone" ${everyone ? "checked" : ""}> Everyone takes one <span class="muted small">(untick for an option or elective band)</span></label>
       <div class="row"><button class="primary" data-bfadd>Add band</button></div>
-    </section><section class="gpool card"></section><section class="glanes card"></section></div>`;
+    </section>${poolView()}${lanesView()}</div>`;
   },
   _bands(out, info, crit) {
     const open = S.bandsOpen ?? (!S.spec.blocks.length || Object.keys(out.blocks).length > 0);   // until the committee opens or closes it
@@ -1176,6 +1177,7 @@ document.addEventListener("click", async e => {
   if (!pop.hidden && !pop.contains(e.target)) commitPop();
   if (e.target.dataset && (e.target.dataset.pick || e.target.dataset.pickall)) { pick(e.target, e.shiftKey); return; }
   if (e.target.dataset && e.target.dataset.mtick) { mtick(e.target, e.shiftKey); return; }
+  if (e.target.dataset && e.target.dataset.gtick) { const gp = gpState(); e.target.checked ? gp.ticked.add(e.target.dataset.gtick) : gp.ticked.delete(e.target.dataset.gtick); render(); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c, [data-mcard], [data-mbasket], [data-mstaff]"); if (!b) return;
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
@@ -1194,7 +1196,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
   for (const k of ["mview", "mall", "mnone", "munplaced", "madd", "mnew", "mnewcancel", "mnewgo"]) if (b.dataset[k] !== undefined) { mapAction(k, b.dataset[k]); return; }
   if (b.dataset.mtab) { M.tab = b.dataset.mtab; render(); return; }
-  for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
+  for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject", "gall", "gnone", "gmove", "gout"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
   if (b.dataset.mprofile) { M.profile = b.dataset.mprofile; render(); return; }
   if (b.dataset.mclose !== undefined) { M.profile = null; render(); return; }
   if (b.dataset.mpx) { basketRemove([[S.spec.teachers.findIndex(t => t && t._id === M.profile), b.dataset.mpx]]); return; }
@@ -1258,6 +1260,9 @@ document.addEventListener("change", async e => {
   if (["pickA", "pickP"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; return; }   // typed boxes: no redraw, or it would swallow the click on the button next to them
   if (["pickT", "pickG", "pickC", "pickS", "pickV", "pickD", "pickR"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
   if (el.id === "mLevel") { M.level = el.value; render(); return; }
+  if (el.id === "gpLevel") { const gp = gpState(); gp.level = el.value; gp.subject = ""; gp.ticked.clear(); M.gpTo = ""; render(); return; }
+  if (el.id === "gpSubject") { gpState().subject = el.value; render(); return; }
+  if (el.id === "gpTo") { M.gpTo = el.value; render(); return; }
   if (el.id === "gfLevel") { const gf = gfState(); gf.level = el.value; gf.subject = ""; gf.block = ""; gf.classes = []; render(); return; }
   if (el.id === "gfTag") { const gf = gfState(); gf.tag = el.value; if (gf.subject && el.value && (subj(gf.subject) || {}).tag !== el.value) gf.subject = ""; render(); return; }
   if (el.id === "gfSubject" || el.id === "gfBlock") { gfState()[el.id === "gfSubject" ? "subject" : "block"] = el.value; render(); return; }
@@ -1531,18 +1536,21 @@ function dropIds(e) {   // the teacher indexes a drop carries (ids, as JSON in t
   if (!Array.isArray(ids) || !S.spec) return [];
   return S.spec.teachers.map((t, i) => [t, i]).filter(([t]) => t && ids.includes(t._id)).map(([, i]) => i);
 }
-const dropZone = e => e.target.closest ? e.target.closest("[data-mbasket], [data-mstaff], [data-mcard]") : null;
+const dropZone = e => e.target.closest ? e.target.closest("[data-mbasket], [data-mstaff], [data-mcard], [data-glane]") : null;
 document.addEventListener("dragstart", e => {
-  const el = e.target.closest && e.target.closest("[data-mdrag]"); if (!el) return;
-  const id = el.dataset.mdrag, ids = M.ticked.has(id) ? [...M.ticked] : [id];   // a ticked teacher drags every ticked teacher
-  e.dataTransfer.setData("text/plain", JSON.stringify(ids)); e.dataTransfer.effectAllowed = "copyMove";
-  const m = $(".map"); if (m) m.classList.add("dragging");
+  const el = e.target.closest && e.target.closest("[data-mdrag], [data-gdrag]"); if (!el) return;
+  let payload;
+  if (el.dataset.gdrag !== undefined) { const gp = gpState(), id = el.dataset.gdrag; payload = { rows: gp.ticked.has(id) ? [...gp.ticked] : [id] }; }   // a ticked row drags every ticked row
+  else { const id = el.dataset.mdrag; payload = M.ticked.has(id) ? [...M.ticked] : [id]; }   // a ticked teacher drags every ticked teacher
+  e.dataTransfer.setData("text/plain", JSON.stringify(payload)); e.dataTransfer.effectAllowed = "copyMove";
+  const m = $(".map, .gb"); if (m) m.classList.add("dragging");
 });
-document.addEventListener("dragend", () => { document.querySelectorAll(".map.dragging, .over").forEach(x => x.classList.remove("dragging", "over")); });
+document.addEventListener("dragend", () => { document.querySelectorAll(".dragging, .over").forEach(x => x.classList.remove("dragging", "over")); });
 document.addEventListener("dragover", e => { const z = dropZone(e); if (!z) return; e.preventDefault(); z.classList.add("over"); });
 document.addEventListener("dragleave", e => { const z = dropZone(e); if (z && !(e.relatedTarget && z.contains(e.relatedTarget))) z.classList.remove("over"); });
 document.addEventListener("drop", e => {
   const z = dropZone(e); if (!z) return; e.preventDefault(); z.classList.remove("over");
+  if (z.dataset.glane !== undefined) { const lis = dropRows(e); if (lis.length) moveRows(lis, z.dataset.glane); return; }
   const idxs = dropIds(e); if (!idxs.length) return;
   if (z.dataset.mbasket !== undefined) basketAdd(z.dataset.mbasket, idxs);
   else if (z.dataset.mstaff !== undefined) staffDrop(idxs);
@@ -1552,9 +1560,62 @@ document.addEventListener("drop", e => {
 const classesAt = lv => S.spec.classes.filter(c => c.level === lv).map(c => c.class);
 function gfState() { const lv = levels()[0] || ""; if (!M.gf) M.gf = { level: lv, tag: "", subject: "", block: "", classes: [], students: "" }; if (!levels().includes(M.gf.level)) M.gf.level = lv; return M.gf; }
 function bfState() { const lv = levels()[0] || ""; if (!M.bf) M.bf = { level: lv, subjects: [], classes: classesAt(lv), name: "", everyone: true, touched: false, evTouched: false }; if (!levels().includes(M.bf.level)) M.bf.level = lv; return M.bf; }
+function gpState() { const lv = levels()[0] || ""; if (!M.gp) M.gp = { level: lv, subject: "", ticked: new Set() }; if (!levels().includes(M.gp.level)) M.gp.level = lv; return M.gp; }
+const gpIdx = ids => S.spec.lessons.map((x, i) => [x, i]).filter(([x]) => x && ids.includes(x._id)).map(([, i]) => i);
+function poolView() {   // rows at the level with no band: tick (or drag) them into a band
+  const gp = gpState(), all = Groups.pool(S.spec, gp.level, ""), items = gp.subject ? all.filter(p => p.subject === gp.subject) : all, lanes = Groups.lanes(S.spec, gp.level);
+  gp.ticked = new Set([...gp.ticked].filter(id => S.spec.lessons.some(x => x && x._id === id)));
+  const subjects = [...new Set(all.map(p => p.subject))];
+  const row = p => { const id = S.spec.lessons[p.li]._id, on = gp.ticked.has(id);
+    return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}"><span class="handle" draggable="true" data-gdrag="${esc(id)}" title="Drag into a band">⋮⋮</span><span style="flex:1;min-width:0">${esc(p.title)}</span>${p.kind === "group" ? `<span class="codeline small">${esc(p.code)}</span>` : ""}<span class="muted small" title="Students">${p.students != null ? p.students : ""}</span></div>`; };
+  return `<section class="gpool card"><h3 style="margin:0 0 6px">Not in a band</h3><p class="muted small" style="margin:0 0 8px">Whole-class rows and groups with their own code. Tick rows and move them into a band, or drag them onto one.</p>
+    <div class="row"><select id="gpLevel">${levels().map(l => opt(l, gp.level)).join("")}</select><select id="gpSubject">${opt("", gp.subject, "All subjects")}${subjects.map(n => opt(n, gp.subject)).join("")}</select></div>
+    <div class="row" style="margin:8px 0"><button class="small" data-gall>Select all shown</button><button class="small" data-gnone>Deselect all</button><span class="muted small">${items.length} row${items.length === 1 ? "" : "s"}${gp.ticked.size ? ` · ${gp.ticked.size} ticked` : ""}</span></div>
+    <div class="plist keep">${items.map(row).join("") || `<p class="muted small">Every row at ${esc(gp.level)} is in a band.</p>`}</div>
+    <div class="row" style="margin-top:10px"><span>Move into band</span><select id="gpTo">${opt("", M.gpTo || "", "")}${lanes.map(l => opt(l.block, M.gpTo || "")).join("")}</select><button data-gmove ${gp.ticked.size && lanes.length ? "" : "disabled"}>Move</button></div></section>`;
+}
+function lanesView() {   // the bands of the level as lanes, each with its groups
+  const gp = gpState(), lanes = Groups.lanes(S.spec, gp.level);
+  const av = nm => { const t = S.spec.teachers.find(x => x.name === nm); return t ? `<span title="${esc(nm)}">${avatarOf(t, 24)}</span>` : `<span class="chip">${esc(nm)}</span>`; };
+  const grow = (g, l) => { const own = g.classes.join(",") !== l.classes.join(",");   // a group of fewer classes than its band says which
+    return `<div class="grow"><span class="codeline small">${esc(g.code)}</span><span style="flex:1;min-width:0">${esc(g.subject)}${own ? ` <span class="muted small">${esc(g.classes.join(", "))}</span>` : ""}</span>${g.students != null ? `<span class="muted small" title="Students">${g.students}</span>` : ""}<span class="avs" style="margin:0;min-height:0">${g.teachers.map(av).join("")}</span><button class="small danger" data-gout="${g.li}" title="Out of the band, back to the pool">✕</button></div>`; };
+  const lane = l => `<div class="lane" data-glane="${esc(l.block)}"><div class="row small" style="justify-content:space-between"><b>${esc(l.block)}</b><span class="muted">${esc(l.classes.join(", "))}${l.everyone ? " · everyone takes one" : ""}</span></div><div class="muted small">Its groups have lessons at the same time.</div>
+    ${l.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}${l.groups.map(g => grow(g, l)).join("") || `<div class="muted small">No groups yet: tick rows on the left and move them here, or add groups above.</div>`}</div>`;
+  return `<section class="glanes card"><h3 style="margin:0 0 6px">Bands at ${esc(gp.level)}</h3><div class="llist keep">${lanes.map(lane).join("") || `<p class="muted small">No bands at ${esc(gp.level)} yet. Add one on the left.</p>`}</div></section>`;
+}
+/* a row moving into a band gets a code of its own ("Entire Class" → 1AR1): that is not a renumbering, so it is not listed */
+const renumbered = sh => sh.changes.filter(([, a]) => a !== "Entire Class");
+const describeShift = sh => listing(renumbered(sh).map(([, a, b]) => `${a} → ${b}`), 4);
+function askShift(sh) {   // before a move that renumbers codes a student list names
+  const n = renumbered(sh).length; if (!n || !sh.students) return true;
+  return confirm(`This renumbers ${n} group code${n === 1 ? "" : "s"}: ${describeShift(sh)}. ${sh.students} student${sh.students === 1 ? "'s group list names" : "s' group lists name"} the old codes and will need updating on the Students step. Go on?`);
+}
+const shiftNote = sh => renumbered(sh).length && !sh.students ? ` Codes changed: ${describeShift(sh)}.` : "";
+function moveRows(lis, block) {
+  if (!lis.length) { toast("Tick rows first."); return; }
+  if (!block) { toast("Pick a band."); return; }
+  const sh = Groups.shift(S.spec, c => Groups.toBand(c, lis, block)); if (!askShift(sh)) return;
+  const r = Groups.toBand(S.spec, lis, block);
+  if (!r.moved) { toast(r.skipped ? `Those rows are of another level than ${block}.` : "Nothing moved."); return; }
+  save(); gpState().ticked.clear(); render();
+  toast(`Moved ${r.moved} into ${block}.${r.widened.length ? ` ${block} now also covers ${listing(r.widened)}.` : ""}${r.skipped ? ` ${r.skipped} row${r.skipped === 1 ? "" : "s"} of another level ${r.skipped === 1 ? "was" : "were"} left.` : ""}${shiftNote(sh)}`);
+}
+function rowOut(li) {
+  const x = S.spec.lessons[li]; if (!x || !x.block) return; const block = x.block;
+  const sh = Groups.shift(S.spec, c => Groups.fromBand(c, li)); if (!askShift(sh)) return;
+  Groups.fromBand(S.spec, li); save(); render(); toast(`Out of ${block}.${shiftNote(sh)}`);
+}
+function dropRows(e) {   // the lesson row indexes a drop carries ({rows: ids})
+  let d = null; try { d = JSON.parse(e.dataTransfer.getData("text/plain") || "null"); } catch (err) { }
+  return d && Array.isArray(d.rows) && S.spec ? gpIdx(d.rows) : [];
+}
 function groupsAction(k, v) {
   const gf = gfState(), bf = bfState();
   if (k === "bfsubject") { bf.subjects = bf.subjects.filter(x => x !== v); render(); return; }
+  if (k === "gall") { const gp = gpState(); Groups.pool(S.spec, gp.level, gp.subject).forEach(p => gp.ticked.add(S.spec.lessons[p.li]._id)); render(); return; }
+  if (k === "gnone") { gpState().ticked.clear(); render(); return; }
+  if (k === "gmove") { moveRows(gpIdx([...gpState().ticked]), M.gpTo || ""); return; }
+  if (k === "gout") { rowOut(Number(v)); return; }
   if (k === "gfadd") {
     const r = Groups.newGroup(S.spec, gf); if (r.error) { toast(r.error); return; }
     save(); const x = S.spec.lessons[r.i], code = lessonInfo()[r.i].code;
