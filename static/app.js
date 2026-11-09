@@ -26,12 +26,16 @@ function save(o) {
   if (S.spec) Sync.ensureIds(S.spec);
   const js = S.spec ? JSON.stringify(S.spec) : null;
   if (js !== S.last) {
-    if (S.last && js && !(o && o.quiet)) {
-      if (Date.now() - (S.pushed || 0) > 1000) { S.undo.push(S.last); if (S.undo.length > UNDO_MAX) S.undo.shift(); S.redo = []; }
-      S.pushed = Date.now();
-    }
+    if (S.snap && js && !(o && o.quiet)) {   // an entry holds the operations that take back (and bring again) this change
+      const merge = Date.now() - (S.pushed || 0) <= 1000 && S.undo.length && S.from;
+      const before = merge ? S.from : S.snap;
+      const e = { undo: Sync.diff(S.spec, before), redo: Sync.diff(before, S.spec) };
+      if (merge) S.undo[S.undo.length - 1] = e; else { S.undo.push(e); if (S.undo.length > UNDO_MAX) S.undo.shift(); S.from = before; }
+      S.redo = []; S.pushed = Date.now();
+    } else S.pushed = 0;   // other people's changes and quiet saves never join an entry
     S.last = js;
   }
+  S.snap = S.spec ? Sync.clone(S.spec) : null;
   keepLocal();
   if (!(o && o.remote) && !S.practice) scheduleSync();
   saveState();
@@ -65,10 +69,11 @@ function saveState() {
   if (st) { st.className = "savestate" + (SYNC.state === "offline" ? " warn" : ""); st.textContent = !S.spec ? "" : { saved: "Saved", saving: "Saving…", offline: "Offline: your changes are kept in this browser and will be sent" }[SYNC.state]; }
   if (ot) { ot.hidden = !S.spec || !SYNC.others; ot.textContent = SYNC.others === 1 ? "1 other here" : `${SYNC.others} others here`; }
 }
-function undo(back) {
+function undo(back) {   // takes back (or brings again) the last change made here; other people's changes stay
   const from = back ? S.undo : S.redo, to = back ? S.redo : S.undo;
   if (!S.spec || !from.length) return;
-  to.push(S.last); S.last = from.pop(); S.spec = JSON.parse(S.last); S.pushed = 0; unpick();
+  const e = from.pop(); to.push(e);
+  Sync.apply(S.spec, back ? e.undo : e.redo); S.pushed = 0; unpick();
   ensureDays(); save({ quiet: true }); render(); toast(back ? "Undone." : "Redone.");
 }
 /* the setup as edited: S.spec, or, while others' changes wait for a redraw, those changes with what S.spec gained since */
@@ -180,7 +185,7 @@ async function openServer(srv, step) {
   unpick(); SYNC.held = null; SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
   S.spec = Sync.clone(srv.spec); LIST_KEYS.forEach(k => S.spec[k] = S.spec[k] || []);
   if (step != null) S.step = step;
-  ensureDays(); S.undo = []; S.redo = []; S.last = null; save({ quiet: true });
+  ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
 }
 /* a whole setup (a sample, a blank template, a workbook, a progress file) goes on the server for the school, then the
    server's copy opens here */
