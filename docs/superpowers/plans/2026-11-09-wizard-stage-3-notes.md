@@ -55,4 +55,4 @@ The README:
 
 ## Note
 
-The final reviewer, unasked, ran the school's real v17 workbook's teachers sheet and a real staff export through the reader, read-only and printing counts only. Nothing from them was written or committed. All 92 teachers of the workbook's own sheet read with no notes; the staff export has no heading row the reader knows, so it was read by position and said so.
+The final reviewer, unasked, ran a real setup workbook's teachers sheet and a real staff export through the reader, read-only and printing counts only. Nothing from them was written or committed. Every teacher on the workbook's own sheet read with no notes; the staff export has no heading row the reader knows, so it was read by position and said so.
