@@ -121,12 +121,32 @@ def test_a_teacher_added_by_a_head_is_provisional():
     t = next(x for x in c.get("/api/setup").get_json()["spec"]["teachers"] if x["_id"] == "newhire001"); assert t["provisional"] == "Yes"
 
 def test_a_head_can_edit_only_provisional_teachers():
+    v = c.get("/api/setup").get_json()["v"]
+    _changes("H", v, [["add", "teachers", {"_id": "newhire002", "name": "Own hire"}, ""]], who=h)
     rec = c.get("/api/setup").get_json(); v = rec["v"]
     firm = next(x for x in rec["spec"]["teachers"] if x.get("provisional") != "Yes")
     code, _ = _changes("H", v, [["set", "teachers", firm["_id"], "name", "Zed"]], who=h); assert code == 403
-    code, _ = _changes("H", v, [["set", "teachers", "newhire001", "provisional", "No"]], who=h); assert code == 403
-    code, _ = _changes("H", v, [["set", "teachers", "newhire001", "name", "Renamed"]], who=h); assert code == 200
+    code, _ = _changes("H", v, [["set", "teachers", "newhire002", "provisional", "No"]], who=h); assert code == 403
+    code, _ = _changes("H", v, [["set", "teachers", "newhire002", "name", "Renamed"]], who=h); assert code == 200
     code, _ = _changes("H", v, [["merge", "teachers", firm["_id"], "can_teach", [{"levels": "All", "subject": "Qqq"}], []]], who=h); assert code == 200
+
+def test_a_head_can_add_and_fill_in_a_teacher_in_one_request():
+    v = c.get("/api/setup").get_json()["v"]
+    code, _ = _changes("H", v, [["add", "teachers", {"_id": "newhire003", "name": "Batch hire"}, ""], ["set", "teachers", "newhire003", "short", "BH"]], who=h); assert code == 200
+    t = next(x for x in c.get("/api/setup").get_json()["spec"]["teachers"] if x["_id"] == "newhire003"); assert t["provisional"] == "Yes" and t["short"] == "BH"
+
+def test_the_head_check_runs_on_the_setup_held_under_the_lock():
+    import sync
+    rec = c.get("/api/setup").get_json(); v = rec["v"]; spec = rec["spec"]
+    firm = next(x for x in spec["teachers"] if x.get("provisional") != "Yes")
+    stale = [["set", "teachers", "newhire003", "name", "Late"]]
+    assert sync.head_may(spec, stale) is None                      # judged on a copy taken earlier, the teacher is still provisional
+    c.post("/api/setup/changes", json={"since": v, "client": "C", "ops": [["set", "teachers", "newhire003", "provisional", "No"]]})   # the committee confirms the teacher meanwhile
+    v2 = c.get("/api/setup").get_json()["v"]
+    try: store.apply_changes(stale, "H", sync.head_may); assert False, "applied"
+    except store.Refused as e: assert "provisional" in str(e)
+    now = c.get("/api/setup").get_json()
+    assert now["v"] == v2 and next(x for x in now["spec"]["teachers"] if x["_id"] == "newhire003")["name"] == "Batch hire"
 
 def test_a_head_cannot_download_or_publish_or_replace():
     for method, url in (("POST", "/api/build"), ("PUT", "/api/setup"), ("POST", "/api/import-timetable"), ("GET", "/api/codes.csv"), ("POST", "/api/check"), ("GET", "/api/setup/copies"), ("POST", "/api/setup/restore")):
@@ -157,7 +177,7 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     assert t.get("/timetable").status_code == 200
 
 NEED_HEADS = {"test_a_head_can_change_groups_but_not_classes", "test_a_refused_batch_applies_nothing", "test_a_teacher_added_by_a_head_is_provisional",
-              "test_a_head_can_edit_only_provisional_teachers", "test_a_head_cannot_download_or_publish_or_replace"}
+              "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace"}
 
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and (k != "test_publish_uploaded_timetable" or "--full" in sys.argv)

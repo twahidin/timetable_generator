@@ -115,11 +115,18 @@ def _risky(ops):
     dels = [o for o in ops if isinstance(o, list) and o and o[0] == "del"]
     return len(dels) > BIG_DELETE or any(len(o) > 1 and o[1] == "teachers" for o in dels)
 
-def apply_changes(ops, client):
-    """apply a change to the current setup; returns the new version"""
+class Refused(Exception):
+    """a change the caller's check turned down; the message is a sentence for the person"""
+
+def apply_changes(ops, client, check=None):
+    """apply a change to the current setup; returns the new version.
+    check(spec, ops) runs on the setup held under the lock: a sentence back raises Refused and nothing is applied"""
     with _setup_lock:
         cur = _load()
         if not cur: raise LookupError("no setup")
+        if check:
+            why = check(cur["spec"], ops)
+            if why: raise Refused(why)
         if not ops: return cur["v"]
         if datetime.datetime.now().timestamp() - _last_point[0] > POINT_EVERY or _risky(ops): restore_point("While working")
         sync.apply(cur["spec"], ops)

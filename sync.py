@@ -244,7 +244,7 @@ def head_may(spec, ops):
             if row is not None and row.get("provisional") == "Yes":
                 continue
             if row is None:
-                continue        # a missing row is skipped by apply, so nothing changes
+                continue        # a missing row is skipped by apply; a teacher added in the same batch is forced provisional, so edits to it are fine
             return "Department heads can change a teacher's details only while the teacher is provisional."
         return "Department heads can only change who a teacher can teach, add a teacher, or edit a provisional teacher."
     return None

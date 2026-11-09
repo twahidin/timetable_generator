@@ -254,12 +254,13 @@ def post_setup_changes():
     body = body if isinstance(body, dict) else {}
     client, ops = str(body.get("client") or "")[:40], body.get("ops")
     if not isinstance(ops, list): return {"error": "No changes sent."}, 400
+    check = None
     if role() == "head":
-        why = sync.head_may(store.setup_record()["spec"], ops)
-        if why: return {"error": why}, 403
+        check = sync.head_may       # judged on the setup as it is under the store's lock, when the change is applied
         for op in ops:      # a teacher added by a head is provisional until the committee confirms
-            if op[0] == "add" and op[1] == "teachers": op[2]["provisional"] = "Yes"
-    try: v = store.apply_changes(ops, client)
+            if isinstance(op, list) and len(op) == 4 and op[0] == "add" and op[1] == "teachers" and isinstance(op[2], dict): op[2]["provisional"] = "Yes"
+    try: v = store.apply_changes(ops, client, check)
+    except store.Refused as e: return {"error": str(e)}, 403
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
     return _changes_reply(_int(body.get("since")), client, v)
 
