@@ -31,4 +31,50 @@ t("no name gives a plain disc, not a face", () => {
   for (const x of ["", "   ", null, undefined]) { const s = People.avatar(x); assert.ok(s.startsWith("<svg") && !s.includes("<path")); }
 });
 t("nothing random is used", () => { const r = Math.random; Math.random = () => { throw new Error("random"); }; try { People.avatar("Lim Hui Min", 2); } finally { Math.random = r; } });
+const EX = [{ _id: "t1", name: "Tan Wei Ming", short: "Tan", dept: "MA", role: "EO", allowance: 104, can_teach: [{ subject: "Mathematics", levels: "All" }] },
+            { _id: "t2", name: "Lim Hui Min", short: "Lim", dept: "MA", role: "HOD", allowance: 67, can_teach: [] }];
+const ROLES = [{ role: "EO", allowance: 104 }, { role: "HOD", allowance: 67 }, { role: "ST", allowance: 86 }], DEPTS = ["MA", "SC"];
+
+t("a list with a header, in any column order", () => {
+  const r = People.readTeachers("Department\tTeacher Name\tRole\tAllowance (periods)\nSC\tArjun Nair\tST\t86\nMA\tPriya Menon\tEO\t\n");
+  assert.deepStrictEqual(r.columns.sort(), ["allowance", "dept", "name", "role"]);
+  assert.deepStrictEqual(r.teachers, [{ dept: "SC", name: "Arjun Nair", role: "ST", allowance: 86 }, { dept: "MA", name: "Priya Menon", role: "EO" }]);
+});
+t("title rows above the header and extra columns are ignored", () => {
+  const r = People.readTeachers("Step 4 · Teachers\t\t\n\t\t\nTeacher\tShort\tGiven\tSpare\tDepartment\nArjun Nair\tArjun\t40\t46\tSC\n");
+  assert.deepStrictEqual(r.teachers, [{ name: "Arjun Nair", short: "Arjun", dept: "SC" }]);
+});
+t("names only, one per line, with no header", () => {
+  assert.deepStrictEqual(People.readTeachers("Arjun Nair\nPriya Menon\n").teachers, [{ name: "Arjun Nair" }, { name: "Priya Menon" }]);
+});
+t("comma-separated, with a quoted name that has a comma", () => {
+  assert.deepStrictEqual(People.readTeachers('Name,Role\n"Nair, Arjun",ST\n').teachers, [{ name: "Nair, Arjun", role: "ST" }]);
+});
+t("a name twice in the list: the second row is left out and said", () => {
+  const r = People.readTeachers("Name\tRole\nArjun Nair\tST\narjun  nair\tEO\n");
+  assert.strictEqual(r.teachers.length, 1); assert.strictEqual(r.teachers[0].role, "ST");
+  assert.deepStrictEqual(r.skipped, ["arjun  nair is in the list twice: the second row was left out."]);
+});
+t("an allowance that is not a number is left out and said", () => {
+  const r = People.readTeachers("Name\tAllowance\nArjun Nair\tfull\n");
+  assert.deepStrictEqual(r.teachers, [{ name: "Arjun Nair" }]); assert.strictEqual(r.skipped.length, 1);
+});
+t("nothing that looks like a teacher", () => { assert.ok(People.readTeachers("\n\n").error); });
+t("an existing teacher is matched whatever the capitals and spacing, and only differences change", () => {
+  const p = People.planTeachers(EX, [{ name: "TAN  Wei Ming ", role: "ST" }, { name: "Lim Hui Min", role: "HOD" }], ROLES, DEPTS);
+  assert.deepStrictEqual(p.update, [{ i: 0, changes: { role: "ST" } }]);
+  assert.deepStrictEqual(p.add, []); assert.deepStrictEqual(p.missing, []);
+});
+t("a list without allowance or role blanks nothing", () => {
+  assert.deepStrictEqual(People.planTeachers(EX, [{ name: "Tan Wei Ming" }, { name: "Lim Hui Min" }], ROLES, DEPTS).update, []);
+});
+t("a new teacher takes the role's guide allowance, a short name, and is not provisional", () => {
+  const p = People.planTeachers(EX, [{ name: "Arjun Nair", role: "ST", dept: "SC" }], ROLES, DEPTS);
+  assert.deepStrictEqual(p.add, [{ name: "Arjun Nair", role: "ST", dept: "SC", short: "Arjun", allowance: 86, can_teach: [], provisional: "No" }]);
+  assert.deepStrictEqual(p.missing, [0, 1]);
+});
+t("roles and departments the setup does not have are listed once each", () => {
+  const p = People.planTeachers(EX, [{ name: "A B", role: "LT", dept: "HU" }, { name: "C D", role: "LT", dept: "MA" }], ROLES, DEPTS);
+  assert.deepStrictEqual(p.unknownRoles, ["LT"]); assert.deepStrictEqual(p.unknownDepts, ["HU"]);
+});
 console.log(`${n} cases passed`);

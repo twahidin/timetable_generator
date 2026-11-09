@@ -98,7 +98,128 @@ var People = (function () {
     return s + "</g></svg>";
   }
 
+  // ---- Reading a teacher list ----
+
+  var FIELDS = ["name", "short", "dept", "role", "allowance", "other_duties", "note"];
+  var HEADERS = {
+    name: ["name", "teacher", "teacher name", "full name"],
+    short: ["short", "short name", "initials", "abbreviation"],
+    dept: ["department", "dept"],
+    role: ["role", "appointment"],
+    allowance: ["allowance", "allowance periods", "periods"],
+    other_duties: ["other duties", "duties"],
+    note: ["note", "notes", "remarks"]
+  };
+  var NUMERIC = { allowance: true, other_duties: true };
+
+  function headerField(cell) {
+    var w = String(cell).toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]/g, " ")
+      .replace(/[^a-z0-9]+/g, " ").trim();
+    for (var i = 0; i < FIELDS.length; i++)
+      if (HEADERS[FIELDS[i]].indexOf(w) >= 0) return FIELDS[i];
+    return null;
+  }
+
+  function splitCsv(line) {
+    var cells = [], cur = "", q = false;
+    for (var i = 0; i < line.length; i++) {
+      var c = line.charAt(i);
+      if (q) {
+        if (c === '"') { if (line.charAt(i + 1) === '"') { cur += '"'; i++; } else q = false; }
+        else cur += c;
+      } else if (c === '"' && cur.trim() === "") { q = true; cur = ""; }
+      else if (c === ",") { cells.push(cur); cur = ""; }
+      else cur += c;
+    }
+    cells.push(cur);
+    return cells;
+  }
+
+  function readTeachers(text) {
+    var rows = String(text == null ? "" : text).split(/\r?\n/).map(function (line) {
+      return (line.indexOf("\t") >= 0 ? line.split("\t") : splitCsv(line)).map(function (c) { return c.trim(); });
+    }).filter(function (cells) { return cells.some(function (c) { return c !== ""; }); });
+    if (!rows.length) return { error: "No teachers found in that list. It needs a column of names." };
+
+    var map = null, start = 0;   // map: field -> column index
+    for (var r = 0; r < Math.min(10, rows.length) && !map; r++) {
+      var found = {}, hasName = false;
+      rows[r].forEach(function (cell, ci) {
+        var f = headerField(cell);
+        if (f && !(f in found)) { found[f] = ci; if (f === "name") hasName = true; }
+      });
+      if (hasName) { map = found; start = r + 1; }
+    }
+    if (!map) {
+      var width = rows[0].length;
+      while (width > 1 && rows[0][width - 1] === "") width--;
+      map = {};
+      FIELDS.slice(0, width).forEach(function (f, i) { map[f] = i; });
+    }
+    var columns = FIELDS.filter(function (f) { return f in map; });
+    var teachers = [], skipped = [], seen = {};
+    rows.slice(start).forEach(function (cells) {
+      var name = (cells[map.name] || "").trim();
+      if (!name) return;
+      var k = key(name);
+      if (seen[k]) { skipped.push(name + " is in the list twice: the second row was left out."); return; }
+      seen[k] = true;
+      var t = {};
+      columns.forEach(function (f) {
+        var v = (cells[map[f]] || "").trim();
+        if (v === "") return;
+        if (NUMERIC[f]) {
+          if (/^-?\d+(\.\d+)?$/.test(v)) t[f] = Number(v);
+          else skipped.push(name + ": \"" + v + "\" is not a number, so " + f.replace("_", " ") + " was left out.");
+        } else t[f] = v;
+      });
+      teachers.push(t);
+    });
+    if (!teachers.length) return { error: "No teachers found in that list. It needs a column of names." };
+    return { teachers: teachers, columns: columns, skipped: skipped };
+  }
+
+  // ---- Matching a list to the teachers already in the setup ----
+
+  function planTeachers(existing, incoming, roles, departments) {
+    var byKey = {};
+    existing.forEach(function (t, i) { var k = key(t.name); if (!(k in byKey)) byKey[k] = i; });
+    var plan = { add: [], update: [], missing: [], unknownRoles: [], unknownDepts: [] };
+    var inFile = {}, roleNames = (roles || []).map(function (r) { return r.role; });
+    function note(list, v) { if (v && list.indexOf(v) < 0) list.push(v); }
+
+    incoming.forEach(function (row) {
+      var k = key(row.name);
+      if (!k || inFile[k]) return;
+      inFile[k] = true;
+      if (row.role && roleNames.indexOf(row.role) < 0) note(plan.unknownRoles, row.role);
+      if (row.dept && (departments || []).indexOf(row.dept) < 0) note(plan.unknownDepts, row.dept);
+      if (k in byKey) {
+        var cur = existing[byKey[k]], changes = {}, any = false;
+        FIELDS.forEach(function (f) {
+          if (f === "name" || !(f in row) || row[f] === cur[f]) return;
+          changes[f] = row[f]; any = true;
+        });
+        if (any) plan.update.push({ i: byKey[k], changes: changes });
+        return;
+      }
+      var t = {};
+      FIELDS.forEach(function (f) { if (f in row) t[f] = row[f]; });
+      if (!t.short) t.short = String(t.name).trim().split(/\s+/)[0];
+      if (t.allowance === undefined) {
+        var guide = (roles || []).filter(function (r) { return r.role === t.role; })[0];
+        if (guide && typeof guide.allowance === "number") t.allowance = guide.allowance;
+      }
+      t.can_teach = [];
+      t.provisional = "No";
+      plan.add.push(t);
+    });
+    existing.forEach(function (t, i) { if (!inFile[key(t.name)]) plan.missing.push(i); });
+    return plan;
+  }
+
   return { key: key, hash: hash, AVATAR: AVATAR, AVATAR_COMBOS: AVATAR_COMBOS,
-    avatarParts: avatarParts, avatar: avatar };
+    avatarParts: avatarParts, avatar: avatar, FIELDS: FIELDS,
+    readTeachers: readTeachers, planTeachers: planTeachers };
 })();
 if (typeof module !== "undefined") module.exports = People;
