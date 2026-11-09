@@ -58,7 +58,7 @@ def page(title, body):
 
 # the three choices on the front page; each one accepts only its own kind of code
 CHOICES = {
-    "committee": dict(title="Generate a new timetable", blurb="Timetable committee: fill the setup, generate and publish.",
+    "committee": dict(title="Build and publish the timetable", blurb="Timetable committee: build the setup, download it, publish the timetable.",
                       label="Committee code", hint="Use the code given to the timetable committee.", roles=("committee",)),
     "teacher": dict(title="Teacher's timetable", blurb="Every class, teacher and room timetable, Who's free and PDFs.",
                     label="Teacher code", hint="Use the teacher code the school gave you.", roles=("teacher",)),
@@ -261,8 +261,7 @@ def export_printouts():
 @need("committee")
 def import_timetable():
     """a timetable made outside the app (the skill with an AI agent, or another program), sent like Printouts: checked
-    against its setup and summed up. With publish=1 it then becomes the published timetable, as Publish on Generate
-    does; the latest timetable on Generate & publish and Adjust stays the app's own."""
+    against its setup and summed up. With publish=1 it then becomes the published timetable."""
     go = request.form.get("publish") == "1"
     work = tempfile.mkdtemp(prefix="tt-")
     try:

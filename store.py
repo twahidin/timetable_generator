@@ -1,4 +1,4 @@
-"""Where things live: the committee's saved setup, generation runs and the published timetable, all under DATA_DIR
+"""Where things live: the committee's saved setup, its earlier copies and the published timetable, all under DATA_DIR
 (a Railway volume, so they survive redeploys)."""
 import csv, datetime, io, json, os, pickle, shutil, threading
 from ttgen.export import model_from_files, export_all
@@ -53,7 +53,8 @@ def save_setup(spec):
     return dict(saved_at=x["saved_at"], ts=x["ts"])
 
 def past_setups():
-    """earlier copies of the setup, newest first: the saves kept in HIST and each Generate run's own copy"""
+    """earlier copies of the setup, newest first: the saves kept in HIST, and the copies an earlier version of the app
+    kept with each Generate run (RUNS is no longer written)"""
     out = []
     for f in os.listdir(HIST) if os.path.isdir(HIST) else []:
         x = read_json(os.path.join(HIST, f)) or {}

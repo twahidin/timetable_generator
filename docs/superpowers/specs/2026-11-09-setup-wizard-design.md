@@ -57,26 +57,28 @@ table) are what this redesign replaces as the main way in.
 
 ## The steps
 
-The left-hand step list becomes:
+The left-hand step list becomes the one below. The numbers are today's, so they still match the workbook's sheets
+(1 Venues … 4 Teachers) and the "step N" in every message; School and day stays unnumbered. *(Changed while building
+stage 1: an earlier draft numbered School and day as 1, which would have shifted every message and sheet name.)*
 
 | # | Step | Who mostly | What changes |
 |---|------|-----------|--------------|
 | – | Start | committee | opens the school's setup; whole-setup actions are guarded (see "One shared setup") |
-| 1 | School and day | committee | school details, naming patterns, Day structure. The "Rules on the Settings sheet" card and the other Settings rows (end times, no free periods, floating recess) move to step 7 |
-| 2 | Venues | committee | unchanged |
-| 3 | Classes | committee | unchanged |
-| 4 | Subjects | committee | unchanged |
-| 5 | Teachers | committee (heads read, and may add a new teacher) | roles table first, then upload the teacher list; avatars |
-| 6 | Department map | heads | new: capability, teaching groups, deployment, banding |
-| 7 | Configuration and constraints | committee | replaces "Availability & rules" |
-| 8 | Download | committee | workbook + the skill for the outside agent |
-| 9 | Publish | committee | upload the finished timetable, check, publish (moved from Files) |
+| – | School and day | committee | school details, naming patterns, Day structure. The "Rules on the Settings sheet" card and the other Settings rows (end times, no free periods, floating recess) move to step 6 |
+| 1 | Venues | committee | unchanged |
+| 2 | Classes | committee | unchanged |
+| 3 | Subjects | committee | unchanged |
+| 4 | Teachers | committee (heads read, and may add a new teacher) | roles table first, then upload the teacher list; avatars |
+| 5 | Department map | heads | new: capability, teaching groups, deployment, banding |
+| 6 | Configuration and constraints | committee | replaces "Availability & rules" |
+| 7 | Download | committee | workbook + the skill for the outside agent |
+| 8 | Publish | committee | upload the finished timetable, check, publish (moved from Files) |
 | – | Students | committee | unchanged, until project 3 |
 
 "Generate & publish", "Adjust timetable" and "Files" go; what was useful there (the downloads, Make printouts, the
 published status and codes) moves to Download and Publish, with Save to file and Load from file from the header.
 
-### Step 1: naming patterns
+### School and day: naming patterns
 
 Group codes and band names are not typed by heads; they build themselves.
 
@@ -86,7 +88,7 @@ Group codes and band names are not typed by heads; they build themselves.
   "Option" and a letter ("Sec 3 Option A"). The suggestion is editable. *(Designer's call: the committee said names
   form from Settings; the exact pattern was a guess they accepted.)*
 
-### Step 5: Teachers
+### Step 4: Teachers
 
 1. **Roles table** (exists as a card today): role, what it is, guide allowance, group. Filled first, because the upload
    checks roles against it.
@@ -103,7 +105,7 @@ Group codes and band names are not typed by heads; they build themselves.
    picked from the name's hash, never from guessing anything about the person.
 4. The existing teachers table stays as a "table view" for corrections.
 
-### Step 6: Department map (2D)
+### Step 5: Department map (2D)
 
 The committee chose a 2D clickable mockup shown to them in conversation (it is not in the repository), plus the tick
 boxes from a 3D try. Everything that mockup settled is written out below; where this text is silent, the builder
@@ -161,7 +163,7 @@ mockup and not objected to.)*
 `teachers`, bands are `blocks[]` and `lessons[].block`. The map is a new view over the existing spec, so the workbook
 and `ttgen` reader need no change for it.
 
-### Step 7: Configuration and constraints
+### Step 6: Configuration and constraints
 
 - **Configuration**: the school-wide settings that are on School & day today (once a day per group, after-school slots,
   most PE classes at once, a teacher's daily cap, a recess a day, rain rooms, end times, students' free periods,
@@ -182,7 +184,7 @@ sentence in a new "In words" column (older workbooks without the column still re
 Prefer, and in the hand-back say for each typed rule how it was met or why it could not be. Project 2 builds its
 verification on that list.
 
-### Step 8: Download
+### Step 7: Download
 
 - **Configuration workbook (.xlsx)**: as "Build workbook" today, with the typed rules and a **configuration id** on
   the Settings sheet (the setup's version when it was downloaded), so a returned timetable can be matched to the
@@ -214,7 +216,7 @@ verification on that list.
 - `SKILL.md` gets a version line, and the workbook's README sheet names the version it needs, so an agent working
   from an older installed skill can tell.
 
-### Step 9: Publish
+### Step 8: Publish
 
 The "A timetable made outside the app" card (PR #33) becomes this step: choose the file, **Check, then publish**,
 **Make printouts**, and below it what is published now, the access codes and the personal-code slips (from Generate &
