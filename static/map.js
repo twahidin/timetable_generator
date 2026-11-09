@@ -132,20 +132,19 @@ var DeptMap = (function () {
     (idxs || []).forEach(function (i) {
       var t = T[i]; if (!t || !t.name) return;
       if (on.indexOf(t.name) >= 0) { out.already.push(t.name); return; }
-      if (!hasSubject(t, x.subject)) {
-        if (!opts.addToBasket) { out.refused.push({ name: t.name, why: t.name + " is not in the " + x.subject + " basket." }); return; }
-        t.can_teach = (t.can_teach || []).concat([{ subject: x.subject, levels: "All" }]);
-      }
-      left.push(t.name);
+      if (!hasSubject(t, x.subject) && !opts.addToBasket) { out.refused.push({ name: t.name, why: t.name + " is not in the " + x.subject + " basket." }); return; }
+      left.push(t);
     });
     if (!left.length) return out;
-    if (on.length + left.length > MAX) {
+    if (on.length + left.length > MAX) {   // judged before anyone joins a basket, so a refused drop changes nothing
       var why = title + " would have " + (on.length + left.length) + " teachers; three is the most.";
-      left.forEach(function (nm) { out.refused.push({ name: nm, why: why }); });
+      left.forEach(function (t) { out.refused.push({ name: t.name, why: why }); });
       return out;
     }
+    left.forEach(function (t) { if (!hasSubject(t, x.subject)) t.can_teach = (t.can_teach || []).concat([{ subject: x.subject, levels: "All" }]); });
     var r = rowFor(spec, card); out.split = r.split;
-    r.row.teachers = names(r.row).concat(left); out.placed = left;
+    out.placed = left.map(function (t) { return t.name; });
+    r.row.teachers = names(r.row).concat(out.placed);
     return out;
   }
 

@@ -1035,7 +1035,7 @@ const VIEWS = {
       <input id="mQ" type="search" placeholder="Find, or add a teacher from another department" value="${esc(M.q)}" style="width:100%">
       <div id="rbody">${rosterList(dept)}</div>
       <div class="row" style="margin-top:10px">${M.adding ? "" : `<button data-mnew>+ New teacher</button>`}</div>${M.adding ? newTeacherForm(dept) : ""}
-    </section><section class="baskets card"></section><section class="cards card"></section></div>`;
+    </section>${basketsView(dept)}${cardsView(dept)}</div>`;
   },
   _bands(out, info, crit) {
     const open = S.bandsOpen ?? (!S.spec.blocks.length || Object.keys(out.blocks).length > 0);   // until the committee opens or closes it
@@ -1143,7 +1143,7 @@ document.addEventListener("click", async e => {
   if (!pop.hidden && !pop.contains(e.target)) commitPop();
   if (e.target.dataset && (e.target.dataset.pick || e.target.dataset.pickall)) { pick(e.target, e.shiftKey); return; }
   if (e.target.dataset && e.target.dataset.mtick) { mtick(e.target, e.shiftKey); return; }
-  const b = e.target.closest("button, [data-pop], .issue, td.c"); if (!b) return;
+  const b = e.target.closest("button, [data-pop], .issue, td.c, [data-mcard], [data-mbasket], [data-mstaff]"); if (!b) return;
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
@@ -1160,6 +1160,12 @@ document.addEventListener("click", async e => {
   if (b.dataset.copyday) { const lv = b.dataset.copyday; const ds = S.spec.day_structure[lv]; const f = ds[dayNames()[0]]; dayNames().forEach(d => ds[d] = f); save(); render(); return; }
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
   for (const k of ["mview", "mall", "mnone", "munplaced", "madd", "mnew", "mnewcancel", "mnewgo"]) if (b.dataset[k] !== undefined) { mapAction(k, b.dataset[k]); return; }
+  if (b.dataset.mtab) { M.tab = b.dataset.mtab; render(); return; }
+  if (b.dataset.mx) { const [li, cls, ...nm] = b.dataset.mx.split("|"); cardRemove(`${li}|${cls}`, nm.join("|")); return; }
+  if (b.dataset.mbx) { const [id, ...sub] = b.dataset.mbx.split("|"); basketRemove([[S.spec.teachers.findIndex(t => t && t._id === id), sub.join("|")]]); return; }
+  if (b.dataset.mbasket !== undefined) { basketAdd(b.dataset.mbasket, tickedIdx()); return; }
+  if (b.dataset.mstaff !== undefined) { toast("Drag teachers here to take them out of the baskets, or use the ✕ on a basket."); return; }
+  if (b.dataset.mcard !== undefined) { placeOn(cardAt(b.dataset.mcard), tickedIdx()); return; }
   if (b.dataset.pop) { if (!b.classList.contains("ro")) openPop(b); return; }
   if (b.dataset.stu) { stuApply(b.dataset.stu); return; }
   if (b.dataset.tl) { tlAction(b.dataset.tl); return; }
@@ -1214,6 +1220,7 @@ document.addEventListener("change", async e => {
   if (["tgLv", "tgSubj", "tgT"].includes(el.id)) { S.tg[{ tgLv: "lv", tgSubj: "subj", tgT: "t" }[el.id]] = el.value; render(); return; }
   if (["pickA", "pickP"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; return; }   // typed boxes: no redraw, or it would swallow the click on the button next to them
   if (["pickT", "pickG", "pickC", "pickS", "pickV", "pickD", "pickR"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
+  if (el.id === "mLevel") { M.level = el.value; render(); return; }
   if (el.id === "mDept") { M.dept = el.value; M.extra = []; M.ticked.clear(); M.q = ""; M.adding = false; M.nf = null; render(); return; }
   if (["mnDept", "mnRole"].includes(el.id) && M.nf) { M.nf[el.id === "mnDept" ? "dept" : "role"] = el.value; render(); return; }
   if (["tfDept", "tfSubj", "tfQ"].includes(el.id)) { S.tf[{ tfDept: "dept", tfSubj: "subj", tfQ: "q" }[el.id]] = el.value; render(); return; }
@@ -1389,6 +1396,102 @@ function newTeacherForm(dept) {   // + New teacher: a hire, or a post still to b
     <label class="f">Allowance <input id="mnAllow" type="number" value="${esc(f.allowance)}" placeholder="${esc(guide(f.role))}" title="Empty: the role's guide allowance"></label></div>
     <div class="row" style="margin-top:8px"><button class="primary" data-mnewgo>Add</button><button class="ghost" data-mnewcancel>Cancel</button>${isHead() && !S.practice ? `<span class="muted small">The committee confirms new teachers on step 4.</span>` : ""}</div></div>`;
 }
+/* an avatar that opens the profile and can be dragged, with a ✕ when `x` names the action */
+function avx(t, size, x) {
+  return `<span class="avx"><button class="avatar" data-mprofile="${esc(t._id)}" draggable="true" data-mdrag="${esc(t._id)}" title="${esc(t.name || "")}: profile">${avatarOf(t, size)}</button>${x ? `<button class="x" ${x} title="Take ${esc(t.name || "")} off">✕</button>` : ""}</span>`;
+}
+function basketsView(dept) {   // the middle column: one basket per subject of the department, and the staff room
+  const T = S.spec.teachers, ro = DeptMap.roster(S.spec, dept, M.extra), B = DeptMap.baskets(S.spec, dept), staff = DeptMap.staffRoom(S.spec, ro);
+  const bk = b => `<div class="basket" data-mbasket="${esc(b.subject)}" title="Click to add the ticked teachers, or drop teachers here"><div class="row small" style="justify-content:space-between"><b>${esc(b.subject)}</b><span class="muted">${b.teachers.length}</span></div>
+    <div class="avs">${b.teachers.map(i => avx(T[i], 28, `data-mbx="${esc(T[i]._id)}|${esc(b.subject)}"`)).join("") || `<span class="muted small">No one yet</span>`}</div></div>`;
+  return `<section class="baskets card"><h3 style="margin:0 0 4px">Can teach</h3><p class="muted small" style="margin:0 0 8px">Tick teachers and click a subject, or drag them in. Teachers of other departments show here too.</p>
+    <div class="blist keep">${B.map(bk).join("") || `<p class="muted small">No subjects for ${esc(dept)} on step 3.</p>`}
+    <div class="basket staff" data-mstaff title="Drop teachers here to take them out of this department's baskets"><div class="row small" style="justify-content:space-between"><b>Staff room</b><span class="muted">no subject yet · ${staff.length}</span></div>
+    <div class="avs">${staff.map(i => avx(T[i], 28, "")).join("") || `<span class="muted small">Everyone on the roster has a subject.</span>`}</div></div></div></section>`;
+}
+function cardsView(dept) {   // the right-hand column: where the department's subjects are taught
+  const info = lessonInfo(), cards = DeptMap.cards(S.spec, info, dept, M.tab, M.level);
+  const tabs = [["classes", "Classes"], ["groups", "Teaching groups"], ["bands", "Bands"]].map(([k, l]) => `<button class="small ${M.tab === k ? "on" : ""}" data-mtab="${k}">${l}</button>`).join("");
+  const tcard = (nm, key) => { const t = S.spec.teachers.find(x => x.name === nm); return t ? avx(t, 28, `data-mx="${esc(key)}|${esc(nm)}"`) : `<span class="chip">${esc(nm)} (not on list) <button class="x" data-mx="${esc(key)}|${esc(nm)}" title="Take ${esc(nm)} off">✕</button></span>`; };
+  const card = c => { const key = c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`, room = DeptMap.MAX - c.teachers.length;
+    return `<div class="gcard" data-mcard="${esc(key)}" title="Click to deploy the ticked teachers, or drop teachers here"><div class="row small" style="justify-content:space-between"><b>${esc(c.title)}</b><span class="muted">${esc(c.level)} · ${c.periods || "?"} periods</span></div><div class="small muted">${esc(c.subject)}</div>
+      <div class="avs">${c.teachers.map(nm => tcard(nm, key)).join("")}${room > 0 ? `<span class="plus" title="Room for ${room} more">+</span>` : ""}</div></div>`; };
+  const band = b => `<div class="lane"><div class="row small" style="justify-content:space-between"><b>${esc(b.title)}</b><span class="muted">${esc(b.level)} · ${b.groups.length} group${b.groups.length === 1 ? "" : "s"}</span></div>
+    ${b.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}${b.groups.map(card).join("")}</div>`;
+  const what = { classes: "whole-class lessons", groups: "teaching groups", bands: "bands" }[M.tab];
+  const body = cards.length ? cards.map(c => c.kind === "band" ? band(c) : card(c)).join("") : `<p class="muted small">No ${what} for ${esc(dept)}${M.level ? ` at ${esc(M.level)}` : ""} yet. Add them in the table view.</p>`;
+  return `<section class="cards card"><div class="row" style="justify-content:space-between"><div class="row" style="gap:4px">${tabs}</div><select id="mLevel">${opt("", M.level, "All levels")}${levels().map(l => opt(l, M.level)).join("")}</select></div>
+    <div class="clist keep" style="margin-top:8px">${body}</div></section>`;
+}
+function cardAt(key) {   // "li|cls" (a class card) or "li|" (a group card)
+  const [li, cls] = String(key).split("|"), i = Number(li), x = S.spec.lessons[i]; if (!x) return null;
+  return cls ? { kind: "class", li: i, cls, title: cls } : { kind: "group", li: i, title: (lessonInfo()[i] || {}).code };
+}
+function placeOn(card, idxs) {   // deploy teachers (ticked, or dropped) onto a card
+  if (!card) return;
+  if (!idxs.length) { toast("Tick teachers first, then click a card."); return; }
+  const x = S.spec.lessons[card.li];
+  let r = DeptMap.deploy(S.spec, card, idxs, {}), placed = r.placed.slice(), already = r.already.slice();
+  const nb = r.refused.filter(f => f.why.endsWith("basket."));
+  if (nb.length && confirm(`${listing(nb.map(f => f.name))} ${nb.length === 1 ? "is" : "are"} not in the ${x.subject} basket. Add ${nb.length === 1 ? "them" : "them all"} to the basket and place them?`)) {
+    const r2 = DeptMap.deploy(S.spec, card, idxs, { addToBasket: true }); placed = placed.concat(r2.placed); r = r2;
+  }
+  const over = r.refused.filter(f => !f.why.endsWith("basket."));
+  if (placed.length) { save(); render(); }
+  const where = `${card.title} ${x.subject}`;
+  if (placed.length) toast(`Placed ${listing(placed)} on ${where}.${already.length ? ` ${listing(already)} ${already.length === 1 ? "was" : "were"} already on it.` : ""}${r.split ? " That class is now a row of its own in the table." : ""}`);
+  else if (over.length) toast(over[0].why);
+  else if (already.length) toast(`${listing(already)} ${already.length === 1 ? "is" : "are"} already on ${where}.`);
+}
+function basketAdd(subject, idxs) {
+  if (!idxs.length) { toast("Tick teachers first, then click a subject."); return; }
+  const n = DeptMap.addToBasket(S.spec, idxs, subject);
+  if (!n) { toast(`${idxs.length === 1 ? "They are" : "They are all"} in ${subject} already.`); return; }
+  save(); render(); toast(`${n} added to ${subject}.`);
+}
+const stillTeaches = (name, subject) => S.spec.lessons.filter(x => x.subject === subject && (x.teachers || []).includes(name)).length;
+function basketRemove(pairs) {   // [[teacher index, subject]]: take the subject off the teacher, after one question
+  pairs = pairs.filter(([i]) => S.spec.teachers[i]);
+  if (!pairs.length) return;
+  const who = [...new Set(pairs.map(([i]) => S.spec.teachers[i].name))], subs = [...new Set(pairs.map(([, s]) => s))];
+  const n = pairs.reduce((a, [i, s]) => a + stillTeaches(S.spec.teachers[i].name, s), 0);
+  const q = `Take ${listing(subs)} off ${listing(who)}?${n ? ` ${who.length === 1 ? "They still teach" : "They still teach"} it on ${n} lesson row${n === 1 ? "" : "s"}, which Things to fix will flag.` : ""}`;
+  if (!confirm(q)) return;
+  pairs.forEach(([i, s]) => DeptMap.removeFromBasket(S.spec, i, s));
+  save(); render(); toast("Taken off.");
+}
+function staffDrop(idxs) {   // dropped on the staff room: out of every basket of this department
+  const subs = DeptMap.deptSubjects(S.spec, mapDept()), pairs = [];
+  idxs.forEach(i => (S.spec.teachers[i].can_teach || []).forEach(c => { if (c && subs.includes(c.subject) && !pairs.some(([j, s]) => j === i && s === c.subject)) pairs.push([i, c.subject]); }));
+  if (!pairs.length) { toast("They are in none of these baskets."); return; }
+  basketRemove(pairs);
+}
+function cardRemove(key, name) {
+  const card = cardAt(key); if (!card || !DeptMap.undeploy(S.spec, card, name)) return;
+  save(); render(); toast(`Took ${name} off ${card.title} ${S.spec.lessons[card.li].subject}.`);
+}
+function dropIds(e) {   // the teacher indexes a drop carries (ids, as JSON in text/plain)
+  let ids = []; try { ids = JSON.parse(e.dataTransfer.getData("text/plain") || "[]"); } catch (err) { }
+  if (!Array.isArray(ids) || !S.spec) return [];
+  return S.spec.teachers.map((t, i) => [t, i]).filter(([t]) => t && ids.includes(t._id)).map(([, i]) => i);
+}
+const dropZone = e => e.target.closest ? e.target.closest("[data-mbasket], [data-mstaff], [data-mcard]") : null;
+document.addEventListener("dragstart", e => {
+  const el = e.target.closest && e.target.closest("[data-mdrag]"); if (!el) return;
+  const id = el.dataset.mdrag, ids = M.ticked.has(id) ? [...M.ticked] : [id];   // a ticked teacher drags every ticked teacher
+  e.dataTransfer.setData("text/plain", JSON.stringify(ids)); e.dataTransfer.effectAllowed = "copyMove";
+  const m = $(".map"); if (m) m.classList.add("dragging");
+});
+document.addEventListener("dragend", () => { document.querySelectorAll(".map.dragging, .over").forEach(x => x.classList.remove("dragging", "over")); });
+document.addEventListener("dragover", e => { const z = dropZone(e); if (!z) return; e.preventDefault(); z.classList.add("over"); });
+document.addEventListener("dragleave", e => { const z = dropZone(e); if (z && !(e.relatedTarget && z.contains(e.relatedTarget))) z.classList.remove("over"); });
+document.addEventListener("drop", e => {
+  const z = dropZone(e); if (!z) return; e.preventDefault(); z.classList.remove("over");
+  const idxs = dropIds(e); if (!idxs.length) return;
+  if (z.dataset.mbasket !== undefined) basketAdd(z.dataset.mbasket, idxs);
+  else if (z.dataset.mstaff !== undefined) staffDrop(idxs);
+  else placeOn(cardAt(z.dataset.mcard), idxs);
+});
 function mtick(el, shift) {   // a roster tick box; shift-click ticks the run from the last one ticked, in roster order
   const order = DeptMap.roster(S.spec, mapDept(), M.extra).map(i => S.spec.teachers[i]._id);
   const id = el.dataset.mtick, a = order.indexOf(M.lastTick), b = order.indexOf(id);
