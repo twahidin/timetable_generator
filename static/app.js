@@ -216,36 +216,46 @@ function mayReplace() {
 async function replaceSetup(spec, why) {
   if (!committee()) { toast("Only the committee can replace the school's setup."); return false; }
   if (!mayReplace()) return false;
-  const ok = await holdSync(async () => {
-    const was = S.practice; S.practice = false;
-    if (await putSetup(spec, why)) return true;
-    S.practice = was; return false;
-  });
-  render(); syncNow(); return ok;
+  let ok = false;
+  try {
+    ok = await holdSync(async () => {
+      const was = S.practice; let opened = false; S.practice = false;
+      try { opened = await putSetup(spec, why); return opened; }
+      finally { if (!opened) S.practice = was; }   // the server's copy did not open here: a practice copy stays one
+    });
+  } catch (e) { toast("Could not reach the server: " + e.message); }
+  S.copies = null; render(); syncNow(); return ok;
 }
 async function restoreCopy(id) {
   if (!committee() || !mayReplace()) return;
-  const ok = await holdSync(async () => {
+  let ok = false;
+  try { ok = await holdSync(async () => {
     const r = await fetch("/api/setup/restore", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
     if (r.status === 401) { location.href = "/login"; return false; }
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { toast(j.error || "Could not restore that copy."); return false; }
     const srv = await fetchSetup(); if (!srv || !srv.spec) return false;
     await openServer(srv, S.step); return true;
-  });
+  }); } catch (e) { toast("Could not reach the server: " + e.message); }
   S.copies = null; render(); syncNow();
   if (ok) toast("The earlier copy is back as the school's setup.");
 }
 /* a practice copy: a sample school to try things on. Nothing in it reaches the server or this browser's storage; the
    school's setup (SYNC.base, and what was not sent, kept in this browser) waits for Back to the school's setup. */
 async function practice(kind) {
-  const spec = await getJSON(`/api/sample/${kind}`);
-  await holdSync(async () => {
-    S.practice = true; SYNC.held = null;
-    await useKind(spec); unpick();
-    Sync.ensureIds(spec); LIST_KEYS.forEach(k => spec[k] = spec[k] || []); S.spec = spec;
-    S.step = 1; ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
-  });
+  try {
+    const spec = await getJSON(`/api/sample/${kind}`);
+    await holdSync(async () => {
+      await useKind(spec);   // may fail: nothing has changed yet, the school's setup stays open
+      S.practice = true; SYNC.held = null; unpick();
+      Sync.ensureIds(spec); LIST_KEYS.forEach(k => spec[k] = spec[k] || []); S.spec = spec;
+      S.step = 1; ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
+    });
+  } catch (e) {
+    toast("Could not open the practice copy: " + e.message);
+    if (!S.practice) syncNow();   // holdSync stopped the school's sync: start it again
+    return;
+  }
   render(); toast("Practice copy of the sample school opened: change anything, nothing is saved for the school.");
 }
 function leavePractice() {
@@ -831,14 +841,15 @@ const VIEWS = {
       ? `<div class="card"><h1>Build your school's timetable setup</h1><p class="lead">This tool fills the timetable setup workbook step by step: rooms, classes, subjects, teachers, bands of groups, lessons, rules and students. Every list you make becomes the drop-down for the next step, so nothing is typed twice. At the end you download the workbook and the timetable skill, and an AI agent generates the timetable from them.</p>
       <p class="muted">The school has no setup yet. Start one blank or open a workbook: it is saved for the school, and everyone on the committee and the department heads work in it together.</p>
       <div class="choice">${blanks}${samples}</div>${workbook}</div>${how}`
-      : `<div class="card"><h1>The school's timetable setup</h1><p class="lead">The committee has not started the setup yet.</p></div>`;
+      : `<div class="card"><h1>The school's timetable setup</h1><p class="lead">The committee has not started the setup yet.</p>
+      <h2>Try things out</h2><p class="muted">A sample school as a practice copy: nothing in it is saved for the school.</p><div class="choice">${samples}</div></div>${how}`;
     const s = sc();
     return `<div class="card"><h1>The school's timetable setup</h1><p class="lead">Everyone works in this one setup together: each change is saved for the school as it is made.</p>
       <div><span class="stat">School <b>${esc(s.name || "no name yet")}</b></span><span class="stat">Timetable <b>${esc(s.timetable || "no name yet")}</b></span><span class="stat" id="startOthers">${SYNC.others ? (SYNC.others === 1 ? "1 other here" : `${SYNC.others} others here`) : "Nobody else is here now"}</span></div>
       <div class="row" style="margin-top:12px"><button class="primary" data-step="1">Open School & day</button></div></div>
       ${committee() ? `<div class="card"><h2>Replace the whole setup</h2><p class="muted">Each of these replaces the school's setup for everyone; an earlier copy is kept, and <b>7 Download</b> can restore it. Loading a progress file is on 7 Download too.</p>
-      <div class="choice">${blanks}</div>${workbook}
-      <h2 style="margin-top:16px">Try things out</h2><p class="muted">A sample school as a practice copy: nothing in it is saved for the school.</p><div class="choice">${samples}</div></div>` : ""}${how}`;
+      <div class="choice">${blanks}</div>${workbook}</div>` : ""}
+      <div class="card"><h2>Try things out</h2><p class="muted">A sample school as a practice copy: nothing in it is saved for the school.</p><div class="choice">${samples}</div></div>${how}`;
   },
   _old() {   // the rollout question, before anything else
     return `<div class="card"><h1>Changes from before</h1><p class="lead">This browser has changes from before that were never saved for the school.</p>
@@ -1097,7 +1108,9 @@ function paint(c) {
 }
 document.addEventListener("change", async e => {
   const el = e.target;
-  if (el.id === "importX") { const f = el.files[0]; if (!f) return; const fd = new FormData(); fd.append("file", f); const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json(); if (!r.ok) { toast(j.error || "Could not read that file."); return; } if (!await adopt(j, "Workbook opened and saved for the school.", "Opened a workbook")) { el.value = ""; return; } el.value = "";
+  if (el.id === "importX") { const f = el.files[0]; if (!f) return; el.value = ""; const fd = new FormData(); fd.append("file", f);
+    try { const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json().catch(() => ({})); if (!r.ok) { toast(j.error || "Could not read that file."); return; } if (!await adopt(j, "Workbook opened and saved for the school.", "Opened a workbook")) return; }
+    catch (err) { toast("Could not reach the server: " + err.message); return; }
     const nr = new Set(ruleProblems(lessonInfo()).map(x => x[0])).size;   // rules written in a way the timetable cannot use: say so now, not after generating
     if (nr) toast(`Workbook opened. ${nr} rule${nr === 1 ? "" : "s"} on step 6 cannot be used as written (skipped or matching nothing): see Things to fix. It is saved for the school.`);
     return; }
