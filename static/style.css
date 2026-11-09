@@ -89,36 +89,6 @@ td.lv{min-width:92px}
 @media (max-width:1100px){.steps button{white-space:nowrap}}
 
 a.filebtn{color:var(--ink);text-decoration:none}
-.gen{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px;align-items:start}
-.gen .side .card{margin-bottom:16px}
-.chat{display:flex;flex-direction:column;min-height:520px}
-.chatlog{flex:1;max-height:62vh;min-height:380px;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:4px 2px 8px}
-.msg{max-width:88%;padding:9px 12px;border-radius:12px;line-height:1.45;font-size:13.5px}
-.msg.ai{background:#f1f4f9;align-self:flex-start;border-top-left-radius:4px}
-.msg.me{background:var(--accent);color:#fff;align-self:flex-end;border-top-right-radius:4px}
-.msg.sum{border:1px solid #cfe0f3;background:#eef5fc}
-.msg.q{border:1px solid #f0d58a;background:#fff9e8}
-.msg .opts{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px}
-.msg .opts button{background:#fff}
-.ev{font-size:12.5px;color:var(--muted);padding:2px 4px}
-.ev ul{margin:4px 0 0 18px;padding:0}
-.ev.change{background:#fff7e6;color:#7a4b00;border-radius:8px;padding:8px 10px}
-.ev.tt{border-radius:8px;padding:8px 10px;color:var(--ink)}
-.ev.tt.good,.ev.good{background:var(--ok-bg);color:var(--ok);border-radius:8px;padding:8px 10px}
-.ev.tt.warn{background:#fff7e6;color:#7a4b00}
-.ev.bad{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:8px 10px}
-.ev.caution,.compbox{background:#fff7e6;color:#7a4b00;border-radius:8px;padding:8px 10px}
-.compbox{margin:8px 0}.compbox ul{margin:4px 0 4px 18px;padding:0}.compbox details{margin-top:4px}
-.ev details{margin-top:4px}
-.ev.whatif{background:#eef4ff;color:#1d3f7a;border-radius:8px;padding:8px 10px}
-.ev.compare{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--ink)}
-.ev.compare table{border-collapse:collapse;margin:6px 0;font-size:12.5px}
-.ev.compare th,.ev.compare td{padding:3px 10px;text-align:left;border-bottom:1px solid var(--line)}
-.ev.compare td.good{color:var(--ok);font-weight:600}
-.ev.compare td.bad{color:var(--warn);font-weight:600}
-.progress{font-size:12.5px;color:var(--navy);min-height:18px;padding:4px 2px}
-.chatform{display:flex;gap:8px;margin-top:6px}
-.chatform input{flex:1;padding:9px 10px;background:#fff}
 .small{font-size:12px}
 .links{display:flex;flex-direction:column;gap:6px;margin:6px 0 10px}
 .links a{color:var(--accent)}
@@ -153,7 +123,6 @@ button.primary:hover:not(:disabled){filter:none;transform:translateY(-1px);box-s
 .tablewrap{background:var(--panel);border-radius:12px}
 th{background:#f3f6fb}
 .helper{background:rgba(248,250,252,.85)}
-.chatform input{border-radius:10px}
 .toast{border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
 @media (max-width:1100px){.steps{padding:6px}}
 @media (max-width:640px){.top{position:static;flex-wrap:wrap}.top-actions{gap:6px}.top .ghost,.top .filebtn{padding:6px 10px;font-size:13px}}
@@ -165,37 +134,15 @@ th{background:#f3f6fb}
 .pop .opts.wide label .muted{font-size:12px}
 
 /* no-timetable alert (banner on every step, box on Generate), the fix list, and the save state next to Save progress */
-.banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--warn-bg);color:var(--warn);border:1px solid rgba(180,35,24,.25);border-radius:10px;padding:10px 14px;margin:0 0 14px}
-.banner span{color:var(--ink)}
-.alertbox{background:var(--warn-bg);color:var(--warn);border:1px solid rgba(180,35,24,.25);border-radius:10px;padding:10px 12px;margin:0 0 12px}
-.alertbox details{margin-top:6px;color:var(--ink);font-size:12.5px}
-.alertbox ul{margin:4px 0 0 18px;padding:0}
-.fixes{margin-top:8px;color:var(--ink);font-size:12.5px}
-.fixes ol{margin:4px 0 0 18px;padding:0}
-.fixes li{margin:3px 0;line-height:1.45}
-.fixes li button{margin-left:4px}
 .savestate{font-size:12px;color:var(--muted);white-space:nowrap}
 .savestate.warn{color:var(--warn)}
 
 /* Adjust timetable: the class / teacher / room grid, its lessons, the selected-lesson bar and the AI's answer */
-.adjgrid{border-collapse:collapse;font-size:11px}
-.adjgrid th{padding:2px 4px;font-size:10px;font-weight:500;color:var(--muted);white-space:nowrap}
-.adjgrid th.t{writing-mode:vertical-rl;transform:rotate(180deg);height:40px;min-width:30px}
-.adjgrid td{border:1px solid #fff;padding:1px;vertical-align:top;height:42px}
-.adjgrid td.as{cursor:pointer;opacity:.55;min-width:30px}
-.adjgrid td.as:hover{opacity:1;outline:2px solid var(--accent);outline-offset:-2px}
-.adjgrid td.al{background:#fff;border:1px solid var(--line)}
-.adjl{display:block;width:100%;min-width:56px;text-align:left;border:1px solid #c9d6ef;background:#eef4ff;border-radius:6px;padding:2px 4px;font-size:11px;line-height:1.25;cursor:pointer;color:var(--ink);overflow:hidden}
-.adjl b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.adjl span{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.adjl.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
-.adjl.cut{opacity:.45;border-style:dashed}
-.adjgrid td.many .adjl{margin-bottom:2px}
-.adjbar{margin-top:10px;padding:8px 10px;border-radius:8px;background:var(--chip);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.aisays{margin-top:8px;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:8px;color:var(--ink);line-height:1.5}
 /* critical problems (no timetable until fixed) in red; warnings (a timetable can still be made, a person should look) in amber */
 .issue.soft{background:#fff7e6;color:#7a4b00}
 tr.caution td{background:#fff7e6}
 h3.sev{font-size:13px;margin:12px 0 2px;color:#7a4b00}
 h3.sev.crit,summary.sev.crit{color:var(--warn)}
 summary.sev.crit{font-weight:600}
+summary.sev{cursor:pointer;margin:8px 0 4px;color:#7a4b00;font-weight:600}
+.fitlist{margin:4px 0 8px 18px;padding:0;font-size:13px}.fitlist li{margin:5px 0;line-height:1.45}.fitlist li button{margin-left:4px}
