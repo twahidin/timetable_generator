@@ -578,7 +578,7 @@ function render() {
   main.querySelectorAll(".tablewrap").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
-  if (typeof paintPublished === "function") paintPublished();
+  paintPublished();
 }
 const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings open step 6
 function count(id) { if (!S.spec) return ""; const m = { venues: "venues", classes: "classes", subjects: "subjects", teachers: "teachers", blocks: "blocks", lessons: "lessons", rules: "rules", students: "students" }[id]; return m ? S.spec[m].length : ""; }
@@ -598,8 +598,8 @@ function renderIssues() {
 
 
 function exportCard() {
-  return `<div class="card" id="printouts"><h2>A timetable made outside the app</h2><p class="muted">Made the timetable with the skill and an AI agent, or with another program? Upload it with its setup workbook. The timetable can be a workbook with a Lessons sheet or a timetable database (.sqlite); a database made by this app or the skill holds its setup, so it can come on its own.</p>
-    <p class="muted"><b>Make printouts</b> gives you every timetable as PDFs (one page per class, teacher, room and student), one Excel file with them all, a searchable HTML page and the database, to keep or share. <b>Check, then publish</b> checks it against its setup and shows what it found; if you are happy, publish it and teachers and students see it, as after Publish on Generate &amp; publish.</p>
+  return `<div class="card" id="printouts"><h2>Publish the finished timetable</h2><p class="muted">Upload the timetable the chatbot made, with its setup workbook. The timetable can be a workbook with a Lessons sheet or a timetable database (.sqlite); a database made by this app or the skill holds its setup, so it can come on its own.</p>
+    <p class="muted"><b>Make printouts</b> gives you every timetable as PDFs (one page per class, teacher, room and student), one Excel file with them all, a searchable HTML page and the database, to keep or share. <b>Check, then publish</b> checks it against its setup and shows what it found; if you are happy, publish it and teachers and students see it straight away.</p>
     <div class="row" style="margin-top:10px"><label class="filebtn">Setup workbook (.xlsx)<input type="file" id="exSetup" accept=".xlsx" hidden></label><span class="muted" id="exSetupName">none chosen</span></div>
     <div class="row" style="margin-top:8px"><label class="filebtn">Timetable (.xlsx or .sqlite)<input type="file" id="exTT" accept=".xlsx,.sqlite,.sqlite3,.db" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
     <div class="row" style="margin-top:10px"><label><input type="checkbox" id="exSingle" checked> Also a separate PDF for every class, teacher, room and student</label></div>
@@ -790,23 +790,25 @@ const VIEWS = {
   download() {
     const { out, crit } = issues(); let n = 0, nc = 0;
     for (const [k, rows] of Object.entries(out)) if (k !== "global" && k !== "students") for (const [i, ms] of Object.entries(rows)) { n++; if (ms.some(m => isCrit(crit, k, i, m))) nc++; }
-    return `<div class="card"><h1>Files</h1><p class="lead">Your setup workbook keeps the drop-downs and formulas, so it can still be edited in Excel. To generate here, use <b>Generate &amp; publish</b>; to generate elsewhere, give the workbook and the timetable skill to an AI agent that can run code.</p>
+    return `<div class="card"><h1>Step 7 · Download</h1><p class="lead">Everything an AI agent needs to make the timetable: your setup as a workbook, and the timetable skill. The workbook keeps the drop-downs and formulas, so it can still be edited in Excel.</p>
       <div><span class="stat"><b>${S.spec.classes.length}</b> classes</span><span class="stat"><b>${S.spec.teachers.length}</b> teachers</span><span class="stat"><b>${S.spec.blocks.length}</b> bands</span><span class="stat"><b>${S.spec.lessons.length}</b> lesson rows</span><span class="stat"><b>${S.spec.rules.length}</b> rules</span><span class="stat"><b>${S.spec.students.length}</b> students</span></div>
       ${nc ? `<p class="issue crit" style="margin-top:12px">${nc} row${nc === 1 ? " has" : "s have"} a critical problem: no timetable can be made until ${nc === 1 ? "it is" : "they are"} fixed (see the right-hand panel).${n > nc ? ` ${n - nc} more ${n - nc === 1 ? "has" : "have"} only warnings.` : ""}</p>`
         : n ? `<p class="issue soft" style="margin-top:12px">Nothing critical. ${n} row${n === 1 ? " has" : "s have"} warnings for a person to check (see the right-hand panel); a timetable can still be made.</p>` : '<p class="okmsg" style="margin-top:12px">Everything checks out.</p>'}</div>
       <div class="dl">
-        <div class="card"><h2>1 · Your setup workbook</h2><p class="muted">Everything you entered, as the .xlsx template.</p><button class="primary" id="build">Download setup workbook (.xlsx)</button></div>
-        <div class="card"><h2>2 · The timetable skill</h2><p class="muted">SKILL.md plus the solver scripts and sample templates. SKILL.md alone also works: it tells the agent how to build the solver.</p><div class="row"><a href="/download/skill.zip"><button class="primary">Skill bundle (.zip)</button></a><a href="/download/SKILL.md"><button>SKILL.md only</button></a></div></div>
-        <div class="card"><h2>Templates to share</h2><p class="muted">Ready-made workbooks for others to fill in Excel.</p><div class="row"><a href="/download/template/secondary"><button>Sample secondary</button></a><a href="/download/template/primary"><button>Sample primary</button></a><a href="/download/blank/secondary"><button>Blank secondary</button></a><a href="/download/blank/primary"><button>Blank primary</button></a></div></div>
+        <div class="card"><h2>1 · Configuration workbook</h2><p class="muted">Everything you entered, as the .xlsx template.</p><button class="primary" id="build">Download workbook (.xlsx)</button></div>
+        <div class="card"><h2>2 · The timetable skill</h2><p class="muted">Use the zip when the chatbot can run code: its scripts make a timetable file this app can publish as it is. SKILL.md alone is for a chatbot that cannot run code.</p><div class="row"><a href="/download/skill.zip"><button class="primary">Skill (.zip)</button></a><a href="/download/SKILL.md"><button>SKILL.md only</button></a></div></div>
+        <div class="card"><h2>Keep a copy</h2><p class="muted">The setup as a progress file, to keep or to open on another computer.</p><div class="row"><button id="saveJson" title="Download the setup as a progress file">Save to file</button><label class="filebtn" title="Open a progress file">Load from file<input type="file" id="loadJson" accept=".json" hidden></label></div></div>
       </div>
-      <div class="card" style="margin-top:16px"><h2>Generate the timetable with an AI agent</h2><ol class="howto">
+      <div class="card" style="margin-top:16px"><h2>How to make the timetable</h2><ol class="howto">
         <li>In Claude (or another agent that can run Python), add the skill: upload the .zip as a skill, or attach SKILL.md to the conversation.</li>
         <li>Upload your setup workbook and ask: <i>"Generate our timetable from this setup. Report anything that does not fit."</i></li>
-        <li>The agent checks the inputs, solves (a few minutes for a typical school), and returns the timetables: one Excel workbook with every class, teacher, room and student, PDFs (one page each) to print or send, and a searchable HTML page, plus what (if anything) had to go after school.</li>
-        <li>Change the setup here or in Excel and ask again: the agent re-solves from the new file.</li></ol></div>${exportCard()}`;
+        <li>The agent checks the inputs, solves (a few minutes for a typical school), and hands back the timetable file. Bring that file to step 8, Publish.</li>
+        <li>Change the setup here or in Excel and ask again: the agent re-solves from the new file.</li></ol></div>
+      <div class="card" style="margin-top:16px"><h2>Templates to share</h2><p class="muted">Ready-made workbooks for others to fill in Excel.</p><div class="row"><a href="/download/template/secondary"><button>Sample secondary</button></a><a href="/download/template/primary"><button>Sample primary</button></a><a href="/download/blank/secondary"><button>Blank secondary</button></a><a href="/download/blank/primary"><button>Blank primary</button></a></div></div>`;
   },
   publish() {
-    return `<div class="card"><h1>Step 8 · Publish</h1></div>`;
+    return `<div class="card"><h1>Step 8 · Publish</h1><p class="lead">Bring back the timetable the AI agent made, check it, then publish it. Nothing is visible to teachers or students until you publish.</p></div>
+      ${exportCard()}<div class="card" id="pubNow" style="margin-top:16px"></div>`;
   },
 };
 
@@ -1311,10 +1313,22 @@ async function poll() {   // every few seconds: the published timetable and the 
     const r = await fetch("/api/status");
     if (r.status === 401) { location.href = "/login"; return; }
     G.st = await r.json();
-    if (typeof paintPublished === "function") paintPublished();
+    paintPublished();
   } catch (e) { }
   G.inflight = false;
   G.timer = setTimeout(poll, 5000);
+}
+function paintPublished() {   // the Publish step's lower card: what teachers and students see now, the downloads and the codes
+  const el = $("#pubNow"), st = G.st; if (!el || !st) return;
+  const p = st.published, f = p ? p.files || {} : {};
+  el.innerHTML = `<h2>Published now</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)}${p.source ? ` from ${esc(p.source)}` : ""} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
+      <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
+      <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>${f.db ? `<a href="/files/db" title="Every lesson, class, teacher and room as a SQLite database, for other systems to import. It also holds the setup, so Make printouts can rebuild everything from it.">Timetable database (.sqlite), for other systems</a>` : ""}
+      ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
+      <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
+    : `<p class="muted">Nothing published yet. Teachers and students see a "not published yet" page.</p>`) +
+    `<h3>Access codes</h3><ul class="codes">${[["committee", "Committee"], ["teacher", "Teachers"], ["student", "Students"]].map(([k, t]) => `<li>${t}: ${st.codes && st.codes[k] ? "set" : "<b>not set</b>"}</li>`).join("")}</ul>
+    ${(st.code_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")}${st.volume ? "" : `<p class="issue">No Railway volume: the published timetable will be lost on the next deploy. Add a volume (see README).</p>`}`;
 }
 
 /* ---------------- downloads */
