@@ -115,8 +115,8 @@ Classes and Teachers are comma-separated; After school is `yes` or blank.
 | 5 Blocks | block | Block name, Level, Class 1-9 (more if needed): classes whose students are split into groups that all have lessons at the same time |
 | 6 Lessons | group, or class for a whole-class subject | Level, Subject, Block (empty = whole class), Class 1-9, Teacher 1-3, Students, optional Periods / Code overrides; formulas show Group code, Periods, Doubles and Triples (or the lesson lengths in use), Room kind, Teacher periods, Check |
 | Teacher availability | block-out | Teacher, Week, Day (All or Mon-Fri), From, To (clock times; every period they overlap is blocked), Reason |
-| Fixed lessons | lesson at a set time (optional) | Level, Class(es) or group (a class, or a group code from 6 Lessons), Subject, Week, Day, Start period, Note |
-| More rules | any other constraint | Applies to (kind), Applies to, Subject (optional), Rule, Week, Day, From/To period, Number, Must/Prefer |
+| Fixed lessons | lesson at a set time (optional) | Level (a level, or All), Class(es) or group (a class, a group code from 6 Lessons, or `Every class`: that subject for every class of the level, or of the whole school with Level All, such as whole-school CCE; one row per slot), Subject, Week, Day, Start period, Note |
+| More rules | any other constraint | Applies to (kind), Applies to, Subject (optional; for Only these subjects several, comma separated), Rule, Week, Day, From/To period, Number, Venues (for Only in venues: rooms, comma separated), Must/Prefer |
 | Students | student (recommended) | Student ID, Name, Level, Class, Combination, Choice 1-3, Merit, Groups (codes from 6 Lessons, comma separated), Source |
 | Combinations | subject combination | Level, Code, Name, Subject 1-3, Places |
 
@@ -145,11 +145,21 @@ counted after solving, not enforced; with `W` recess windows on Day structure, `
 has its recess together; Class: each class has its own), `Floating recess length (periods)` and `Most classes at recess at
 once` (canteen space, fixed and floating recess counted)), `Teacher availability` (Not
 available for a teacher, clock times turned into the periods they overlap), `Fixed lessons` (Fixed at, for a class
-with a subject or for a group code) and `More rules`. Rule types (`Rule types` repeats this list):
-Not available · Keep free together · Fixed at · Not in periods · Only in periods · Finish by · Max periods a day ·
+with a subject, a group code, or Every class of a level or the school) and `More rules`. Rule types (`Rule types` repeats this list):
+Not available · Keep free together · Fixed at (a class, band, group or subject; or, with a Subject, every class of a level
+or the school) · Not in periods · Only in periods · Finish by (uses the To period) · Only these subjects (an HBL day: in those
+periods only lessons of the subjects named, separated by commas; a name without its G1/G2/G3 tag covers every tag, a
+department code covers its subjects; blank periods = the whole day) · Only in venues (a lesson that runs into those
+periods uses only the rooms under Venues: PE after 11.00 only in the hall) · Max periods a day ·
 Max periods in a row* · At least one recess a day (a whole `R` recess, or the recess length inside a `W` window, of any level) · At most N at once (a room, a subject, or a department such as PE) ·
 Same time across classes · Not on the same day as · Once a day per group · Avoid after-school slots.
 (* checked after solving, not enforced.) A rule row whose note starts with "example" is an example to replace.
+**Write rules only in this vocabulary**: a rule name from this list, an Applies to the setup has (School · Whole school
+for every level, not Level · All), a real subject in Subject. A rule written any other way (a made-up rule name, a
+description such as "all except English" in Subject) is skipped by the app, which then builds a different timetable from
+yours. If the school has a rule these cannot say, write it in a Note, tell the committee, and say which rule you used
+instead. `python -m ttgen check` lists every rule row that cannot be used as written, and fixed lessons that put one
+teacher or class in two places.
 
 ## Building it without the scripts
 
@@ -175,10 +185,12 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
    "Keep free together" (department).
 6. **Rooms.** Per room kind, AddCumulative with capacity = number of rooms of that kind (a room's "At most N at
    once" rule counts it N times); demand = groups of that kind in the lesson; rows with no kind use classrooms.
-   Room "Not available" adds fixed demand. With "In rain, PE goes to the class's home room", each lesson in a `pe venue`
+   Room "Not available" adds fixed demand. "Only in venues" (Must): where a lesson may start decides which rooms it may
+   use (only the rule's rooms when it runs into the rule's periods), so give it one optional interval per set of rooms,
+   exactly one present, and count it under that set. With "In rain, PE goes to the class's home room", each lesson in a `pe venue`
    also needs its class's home room (a one-room demand), so the home room is free whenever the class is at PE.
 7. **Rules.** Remove start positions for Must "Not in / Only in periods", "Finish by", "Not available" (class,
-   level, block), "Fixed at" with Day All; add a cost for Prefer versions. "Fixed at" on a day: BoolOr(start == pos).
+   level, block), "Only these subjects" (lessons with a subject not named), "Fixed at" with Day All; add a cost for Prefer versions. "Fixed at" on a day: BoolOr(start == pos).
    "Max periods a day": per day, sum of lesson length x [day == d] <= N (Prefer: plus a costed slack).
    "Same time across classes": equal starts for the matching whole-class lessons. "Not on the same day as":
    different days. "Once a day per group": AllDifferent(days) when lessons <= days (Must) or costed (Prefer);

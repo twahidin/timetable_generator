@@ -14,7 +14,8 @@ lessons as it can (cheaper than bending a Prefer rule or pushing a lesson after 
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
-from .spec import PE_KIND, WEEKDAYS, family as _family, floating_recess, periods_by_day, resolve_row, structure_vs_rules, trim_day, windows as _windows
+from .spec import PE_KIND, RULE_TYPES, SCOPES, WEEKDAYS, ampm, family as _family, floating_recess, names_list, periods_by_day, resolve_row, structure_vs_rules, \
+    subject_test, trim_day, windows as _windows
 
 W_PREF, W_SLACK, W_MOVE = 60, 40, 10
 RECESS_KEY = "~recess"   # in a placements file: {class: [[start, length]]}, each class's floating recess
@@ -52,6 +53,16 @@ class Problem:
                     and str(r.get("strength") or "Must") == "Must": self.room_cap[r["target"]] = int(r["number"])
         self.two_weeks = any(d.startswith("Even") for d in self.days)
         self.odd_day = [not d.startswith("Even") for d in self.days]
+        # 'Only in venues': a lesson that runs into the rule's periods uses only the rooms it lists (Must), or those rooms
+        # when one is free (Prefer). Each: the units it covers, which of their rows, the periods and the rooms
+        self.venue_rules = []
+        for r in sp.get("rules", []):
+            if r.get("rule") != "Only in venues": continue
+            V = frozenset(x for x in names_list(r.get("venues")) if x in self.room_kind)
+            if not V: continue
+            sj = r.get("target") if r.get("scope") == "Subject" else r.get("subject")
+            S, _ = self.rule_positions(r)
+            self.venue_rules.append(dict(units={u["id"] for u in units_for(self, r)}, subject=sj, S=S, V=V, must=str(r.get("strength") or "Must") == "Must"))
         code_n = collections.Counter(g for s in sp.get("students", []) for g in s.get("groups") or [])
         self._group_size = lambda r: code_n.get(r["code"]) or (int(r["students"]) if isinstance(r.get("students"), (int, float)) and r["students"] > 0 else None)
         self._allowed = {}
@@ -82,6 +93,21 @@ class Problem:
 
     def week_limited(self, r):
         return bool(r.get("room_weeks") and self.two_weeks)
+
+    def venue_rules_for(self, r, unit, must=True):
+        return [v for v in self.venue_rules if v["must"] == must and unit["id"] in v["units"] and (not v["subject"] or r["subject"] == v["subject"])]
+
+    def allowed_at(self, r, unit, start, ln, week=None):
+        """Problem.allowed for a lesson placed at start..start+ln-1: a Must 'Only in venues' rule whose periods it runs into
+        keeps it to that rule's rooms"""
+        kind, E, n, ov = self.allowed(r, unit, week)
+        for v in self.venue_rules_for(r, unit):
+            if any(q in v["S"] for q in range(start, start + ln)): E = E & v["V"]
+        return kind, E, n, ov
+
+    def preferred_at(self, r, unit, start, ln):
+        """rooms a Prefer 'Only in venues' rule asks for at that time (handed out first when free)"""
+        return frozenset(x for v in self.venue_rules_for(r, unit, must=False) if any(q in v["S"] for q in range(start, start + ln)) for x in v["V"])
 
     # ---------------------------------------------------------------- units and lessons
     def _units(self):
@@ -219,6 +245,10 @@ def units_for(P, r):
     if sc == "School": return [u for u in P.units if sub_ok(u)]
     return []
 
+def fixed_ok(r):
+    """a 'Fixed at' rule for every class of a level or the school must say which subject (else it would fix every lesson)"""
+    return r.get("scope") not in ("Level", "School") or bool(r.get("subject"))
+
 def lesson_domains(P, rules, notes):
     """every lesson of the cycle with the starts it may take (Day structure, end times and the per-lesson rules: Not
     available / Not in periods for a class, level, block or subject, Only in periods, Finish by, Fixed at on every
@@ -236,6 +266,13 @@ def lesson_domains(P, rules, notes):
                 if must: forbid[u["id"]] |= S
                 else:
                     for p in S: pen[u["id"]][p] += 1
+        if nm == "Only these subjects" and r.get("scope") in ("School", "Level", "Class") and names_list(r.get("subject")):
+            ok = subject_test(r.get("subject")); S, _ = P.rule_positions(r)
+            for u in units_for(P, dict(r, subject=None)):
+                if all(ok(x["subject"], x.get("dept")) for x in u["rows"]): continue
+                if must: forbid[u["id"]] |= S
+                else:
+                    for p in S: pen[u["id"]][p] += 1
         if nm == "Keep free together" and r.get("scope") == "Level":
             S, _ = P.rule_positions(r)
             for u in units_for(P, r):
@@ -250,7 +287,7 @@ def lesson_domains(P, rules, notes):
         _, days = P.rule_positions(r); to = int(r.get("to") if r.get("to") not in (None, "") else NP - 1)
         for u in units_for(P, r): finish[u["id"]].append((set(days), to, str(r.get("strength") or "Must") == "Must"))
     for r in has("Fixed at"):
-        if str(r.get("day") or "All") == "All" and r.get("from") not in (None, ""):
+        if str(r.get("day") or "All") == "All" and r.get("from") not in (None, "") and fixed_ok(r):
             for u in units_for(P, r): fixed_all[u["id"]].append(int(r["from"]))
     out = []
     nstud = lambda rs: max(1, sum(int(x.get("students") or 0) for x in rs) or 30)
@@ -364,6 +401,7 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
     P = Problem(spec); NP, ND = P.NP, P.ND
     m = cp_model.CpModel(); rules = spec.get("rules", [])
     notes = list(P.warn) + structure_vs_rules(spec)   # where the Day structure and the rules disagree
+    notes += [f"Rule not used as written ({rule_label(rules[i])}): {t}" for i, t in rule_problems(spec, P)] + fixed_clashes(spec, P)
     def has(rule, scope=None):
         return [r for r in rules if r.get("rule") == rule and (scope is None or r.get("scope") == scope)]
     blocks = []
@@ -532,7 +570,23 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
         per = collections.Counter()
         for r in b["part"]:
             for week in (("Odd", "Even") if P.week_limited(r) else (None,)):
-                kind, E, _, _ = P.allowed(r, b["u"], week); per[(kind, E, week)] += 1
+                kind, E, _, _ = P.allowed(r, b["u"], week)
+                at = collections.defaultdict(list)   # 'Only in venues' (Must): the rooms it may use depend on when it starts
+                if P.venue_rules_for(r, b["u"]):
+                    for q in sorted(b["vals"]): at[P.allowed_at(r, b["u"], q, b["ln"], week)[1]].append(q)
+                    if E and frozenset() in at and len(at) > 1:   # none of the rule's rooms suits it: it may not run into those periods
+                        for q in at.pop(frozenset()): m.Add(b["st"] != q)
+                if len(at) <= 1: per[(kind, next(iter(at)) if at else E, week)] += 1; continue
+                tbl = [0] * (ND * NP); sets = list(at)
+                for gi, F_ in enumerate(sets):
+                    for q in at[F_]: tbl[q] = gi
+                g = m.NewIntVar(0, len(sets) - 1, ""); m.AddElement(b["st"], tbl, g)
+                for gi, F_ in enumerate(sets):   # one optional interval per set of rooms; exactly one is present
+                    on = m.NewBoolVar(""); m.Add(g == gi).OnlyEnforceIf(on); m.Add(g != gi).OnlyEnforceIf(on.Not())
+                    if week is not None:
+                        wk = in_odd(b) if week == "Odd" else in_odd(b).Not(); both = m.NewBoolVar("")
+                        m.AddBoolAnd([on, wk]).OnlyEnforceIf(both); m.AddBoolOr([on.Not(), wk.Not()]).OnlyEnforceIf(both.Not()); on = both
+                    need[kind].append((m.NewOptionalFixedSizeIntervalVar(b["st"], b["ln"], on, ""), F_, 1, b))
         for (kind, E, week), n in per.items():
             iv = b["iv"] if week is None else m.NewOptionalFixedSizeIntervalVar(b["st"], b["ln"], in_odd(b) if week == "Odd" else in_odd(b).Not(), "")
             need[kind].append((iv, E, n, b))
@@ -590,17 +644,25 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
             Bb = [b for b in blocks if c in b["u"]["classes"] and any(x["subject"] == r.get("subject") for x in b["part"])]
             for a in A:
                 for b in Bb: m.Add(a["day"] != b["day"])
-    # fixed at a given day
+    # fixed at a given day: one of the unit's lessons starts at each fixed time. When its lessons are alike (one length, the
+    # same groups) and as many times are fixed as it has lessons, the k-th lesson takes the k-th time (their order is kept
+    # above), which the solver settles at once: a whole-school CCE slot fixes every class's CCE outright
+    fixed_at = collections.defaultdict(set)
     for r in has("Fixed at"):
-        if not units_for(P, r): notes.append(f"Fixed at: no lesson matches {r.get('target')} {r.get('subject') or ''}; skipped.".replace(" ;", ";"))
-        if str(r.get("day") or "All") == "All" or r.get("from") in (None, ""): continue
+        if not fixed_ok(r) or str(r.get("day") or "All") == "All" or r.get("from") in (None, ""): continue
         _, days = P.rule_positions(r)
         for u in units_for(P, r):
-            for d in days:
-                pos = d * NP + int(r["from"]); lits = []
-                for b in by_unit[u["id"]]:
-                    v = m.NewBoolVar(""); m.Add(b["st"] == pos).OnlyEnforceIf(v); m.Add(b["st"] != pos).OnlyEnforceIf(v.Not()); lits.append(v)
-                if lits: m.AddBoolOr(lits)
+            for d in days: fixed_at[u["id"]].add(d * NP + int(r["from"]))
+    for uid, qs in fixed_at.items():
+        bs = by_unit[uid]
+        if len({(b["ln"], tuple(id(x) for x in b["part"])) for b in bs}) == 1 and len(qs) == len(bs):
+            for b, q in zip(bs, sorted(qs)): m.Add(b["st"] == q)
+            continue
+        for pos in sorted(qs):
+            lits = []
+            for b in bs:
+                v = m.NewBoolVar(""); m.Add(b["st"] == pos).OnlyEnforceIf(v); m.Add(b["st"] != pos).OnlyEnforceIf(v.Not()); lits.append(v)
+            if lits: m.AddBoolOr(lits)
     # start from the previous timetable: a lesson whose old start is still allowed stays there unless moving it pays
     if previous:
         for b in blocks:
@@ -637,6 +699,114 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
     unsupported = [f"'{r['rule']}' is checked after solving, not enforced." for r in rules if r.get("rule") == "Max periods in a row"
                    or (r.get("rule") == "At least one recess a day" and str(r.get("strength") or "Must") != "Must")]
     return dict(status=status, problem=P, lessons=out, recess=recess, notes=notes + sorted(set(unsupported)), objective=obj)
+
+def rule_label(r):
+    """a rule row in a few words, as the committee wrote it: 'School · Whole school · Physical Education · Only in venues'"""
+    return " · ".join(str(x) for x in (r.get("scope"), r.get("target"), r.get("subject"), r.get("rule")) if x not in (None, ""))
+
+UNIT_RULES = {"Fixed at", "Not in periods", "Only in periods", "Finish by", "Only these subjects", "Only in venues", "Not available", "Keep free together"}
+
+def rule_problems(spec, P=None):
+    """rule rows the solver cannot use as written: [(index in spec['rules'], what is wrong and what to do)]. A rule it
+    cannot read is skipped and one that matches no lesson does nothing, so the committee is told before generating"""
+    P = P or Problem(spec); sc = spec["school"]
+    types = {t[0]: (set(names_list(t[1])), t[2] == "Y", t[3] == "Y") for t in RULE_TYPES}
+    subjects = {str(s["subject"]) for s in spec.get("subjects", []) if s.get("subject")}
+    sd = [(str(s["subject"]), s.get("dept")) for s in spec.get("subjects", []) if s.get("subject")]
+    depts = {str(d) for d in (sc.get("departments") or [])} | {str(d) for _, d in sd if d} | {str(t.get("dept")) for t in spec.get("teachers", []) if t.get("dept")}
+    codes = {str(x["code"]) for x in P.rows if x.get("code") and x["code"] != "Entire Class"}
+    lists = dict(School={"Whole school"}, Level=set(P.levels), Class=set(P.cls), Teacher={str(t["name"]) for t in spec.get("teachers", [])}, Department=depts,
+                 Subject=subjects, Block={str(b["block"]) for b in spec.get("blocks", [])}, Group=codes, Room=set(P.room_kind))
+    out = []
+    for i, r in enumerate(spec.get("rules", [])):
+        rule, scope, target, subj = r.get("rule"), r.get("scope"), r.get("target"), r.get("subject")
+        say = lambda t: out.append((i, t))
+        if rule not in types:
+            say(f"'{rule}' is not a rule the timetable knows, so this row is skipped. Pick one from the Rule list." if rule else "No rule picked, so this row is skipped."); continue
+        can, needs_time, needs_number = types[rule]
+        if scope not in can:
+            say(f"{rule} cannot apply to {('a ' + str(scope).lower()) if scope else 'nothing'}; it applies to {', '.join(x for x in SCOPES if x in can)}. This row is skipped."); continue
+        if target in (None, ""): say(f"Pick the {str(scope).lower()}: without one this row matches nothing."); continue
+        if str(target) not in lists.get(scope, set()):
+            say(f"{target} is not a{'n' if str(scope)[0] in 'AEIOU' else ''} {str(scope).lower()} on the setup, so this row matches nothing."
+                + (" For every level, apply it to School." if scope == "Level" else "")); continue
+        if rule == "Only these subjects":
+            names = names_list(subj)
+            if not names: say("List the subjects allowed in those periods under Subject, separated by commas. Without them this row does nothing."); continue
+            bad = [n for n in names if not any(subject_test(n)(s_, d_) for s_, d_ in sd)]
+            if bad: say(f"{', '.join(bad)}: not a subject or department on the setup, so {'it matches' if len(bad) == 1 else 'they match'} nothing.")
+        elif subj and str(subj) not in subjects:
+            hint = (" For a day when only some subjects are taught (an HBL day), use the rule Only these subjects and list them."
+                    if "," in str(subj) or "except" in str(subj).lower() else "")
+            say(f"Subject '{subj}' is not on step 3 (Subjects), so this row matches nothing.{hint}"); continue
+        if rule == "Fixed at" and scope in ("Level", "School") and not subj:
+            say("Pick the subject: a fixed lesson for every class needs one (without it this row is skipped)."); continue
+        if rule in ("Same time across classes", "Not on the same day as") and not subj: say("Pick the Subject."); continue
+        if needs_time and rule not in ("Only these subjects", "Only in venues") and r.get("from") in (None, "") and r.get("to") in (None, ""): say("Give the period(s).")
+        if rule == "Finish by" and r.get("to") in (None, ""): say("Finish by uses the To period (the last period lessons may use), and it is blank, so this row changes nothing.")
+        if needs_number and not r.get("number"): say("Give the Number.")
+        if str(r.get("strength") or "Must") not in ("Must", "Prefer"): say(f"Must / Prefer is '{r.get('strength')}': read as Prefer. Pick Must or Prefer.")
+        if rule == "Only in venues":
+            vs = names_list(r.get("venues"))
+            if not vs: say("List the rooms under Venues, separated by commas. Without them this row is skipped."); continue
+            unknown = [v for v in vs if v not in P.room_kind]
+            if unknown: say(f"{', '.join(unknown)}: not on step 1 (Venues).")
+        if rule not in UNIT_RULES or scope in ("Teacher", "Room", "Department"): continue
+        us = units_for(P, dict(r, subject=None) if rule == "Only these subjects" else r)
+        if rule == "Only in venues":
+            sj = target if scope == "Subject" else subj
+            rows_ = [(x, u) for u in us for x in u["rows"] if not sj or x["subject"] == sj]
+            V = {v for v in names_list(r.get("venues")) if v in P.room_kind}
+            if rows_ and V and not any(P.allowed(x, u)[1] & V for x, u in rows_):
+                kinds = sorted({P.allowed(x, u)[0] for x, u in rows_})
+                say(f"None of {', '.join(sorted(V))} is a room these lessons may use (they need a {' or '.join(kinds)} room on step 1), so "
+                    f"{'they cannot run in those periods' if str(r.get('strength') or 'Must') == 'Must' else 'this row changes nothing'}.")
+            us = [u for x, u in rows_]
+        if not us:
+            what = f"{target} {subj}" if subj and scope != "Subject" else str(target)
+            say(f"No lesson on step 5 matches {what}, so this row does nothing.")
+    return out
+
+def fixed_clashes(spec, P=None):
+    """fixed lessons that no timetable can meet: one teacher, or one class, with two lessons fixed to start at the same time
+    (a whole-school CCE slot when a teacher takes CCE for two classes, say), or a lesson fixed at more times than it has
+    lessons. Each is a reason the solver finds nothing"""
+    P = P or Problem(spec); at = collections.defaultdict(set); need = collections.defaultdict(set)   # start -> units fixed there; unit -> its fixed starts
+    for r in spec.get("rules", []):
+        if r.get("rule") != "Fixed at" or not fixed_ok(r) or str(r.get("day") or "All") == "All" or r.get("from") in (None, ""): continue
+        _, days = P.rule_positions(r)
+        for u in units_for(P, r):
+            for d in days: q = d * P.NP + int(r["from"]); at[q].add(u["id"]); need[u["id"]].add(q)
+    byid = {u["id"]: u for u in P.units}; sc = P.spec["school"]
+    h, mm = map(int, str(sc["start_time"]).split(":")[:2])
+    when = lambda q: f"{P.days[q // P.NP]} {ampm(h * 60 + mm + (q % P.NP) * int(sc['period_minutes']))}"
+    T, C = collections.defaultdict(list), collections.defaultdict(list)   # (teacher or class, the lessons) -> the times they are all fixed at
+    for q, ids in sorted(at.items()):
+        if len(ids) < 2: continue
+        tl, cl = collections.defaultdict(list), collections.defaultdict(list)
+        for u in sorted((byid[i] for i in ids), key=lambda u: u["name"]):
+            for t in sorted({t for x in u["rows"] for t in x["teachers"] if t}): tl[t].append(u["name"])
+            for c in u["classes"]: cl[c].append(u["name"])
+        for t, names in tl.items():
+            if len(names) > 1: T[(t, tuple(names))].append(when(q))
+        for c, names in cl.items():
+            if len(names) > 1: C[(c, tuple(names))].append(when(q))
+    out = [f"{t} teaches {_listing(list(names))}, but fixed lessons start {'both' if len(names) == 2 else 'them all'} at {_listing(ws)}: no timetable can do that. "
+           "Give those classes different teachers for it (step 5), or fix them at different times (step 6)." for (t, names), ws in T.items()]
+    out += [f"{c} has {_listing(list(names))} fixed to start at the same time ({_listing(ws)}): no timetable can do that. Fix them at different times (step 6)."
+            for (c, names), ws in C.items()]
+    few = collections.defaultdict(list)   # (its lessons a cycle, the times it is fixed at) -> lessons fixed at more times than they have lessons
+    for uid, qs in need.items():
+        if len(qs) > len(byid[uid]["lessons"]): few[(len(byid[uid]["lessons"]), tuple(sorted(qs)))].append(byid[uid]["name"])
+    for (n, qs), names in few.items():
+        one = len(names) == 1
+        out.append(f"{_listing(sorted(names))} {'has' if one else 'each have'} {n} lesson{'s' if n != 1 else ''} a cycle, but fixed lessons start {'it' if one else 'each'} at "
+                   f"{len(qs)} times ({_listing([when(q) for q in qs])}): no timetable can do that. Fix {'it' if one else 'them'} on fewer days (Week Odd or Even rather than Both), "
+                   "or give more lessons.")
+    return out
+
+def _listing(a, n=4):
+    return ", ".join(a[:n]) + (f" and {len(a) - n} more" if len(a) > n else "")
 
 def _near(m, blocks, previous, busy_t, budget, workers, log, stop):
     """a valid timetable close to the previous one, found fast. The lessons that must move (their old time is no longer

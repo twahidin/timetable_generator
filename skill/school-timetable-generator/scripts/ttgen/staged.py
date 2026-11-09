@@ -167,7 +167,7 @@ class _Run:
                 sp["rules"].append(dict(scope="Teacher", target=t, rule="Not available", strength="Prefer" if soft_teachers else "Must", week=wk, day=dy, **span))
             week = "Odd" if self.P.odd_day[d] else "Even"
             for x in part:   # each group keeps a room it may use busy: the smallest that seats it, so bigger rooms stay free for bigger groups
-                _, E, _, _ = self.P.allowed(x, u, week if self.P.week_limited(x) else None)
+                _, E, _, _ = self.P.allowed_at(x, u, q, ln, week if self.P.week_limited(x) else None)
                 if E: sp["rules"].append(dict(scope="Room", target=min(E, key=lambda r: (self.P.seats.get(r) or 0, r)), rule="Not available", strength="Must", week=wk, day=dy, **span))
             for _, c, h in rain_rooms(self.P, [dict(part=part, unit=u)]):   # the other level's PE keeps its class's home room free
                 sp["rules"].append(dict(scope="Room", target=h, rule="Not available", strength="Must", week=wk, day=dy, **span))

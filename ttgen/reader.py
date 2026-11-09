@@ -5,7 +5,9 @@ Reads the current layout (Teacher availability, Fixed lessons and rule rows on S
 template) and the older one (a 7 Rules sheet). Everything that constrains the timetable becomes a rule on spec['rules']."""
 import collections, datetime, re
 import openpyxl
-from .spec import defaults, lesson_split, SETTING_RULES
+from .spec import defaults, lesson_split, names_list, ALL_LEVELS, EVERY_CLASS, SETTING_RULES
+
+FIXED_COLS = ("Level", "Class(es) or group", "Subject", "Week", "Day", "Start period", "Note")   # Fixed lessons, as the template writes it
 
 R0 = 6
 COMPUTED = ("Periods given", "Spare", "(key", "Lesson rows", "Home room of", "Lessons listed", "Used by", "Group code", "Groups in", "Periods", "Lesson length",
@@ -18,10 +20,21 @@ def _v(x):
         return x or None
     return x
 
-def _table(ws, first):
+def _table(ws, first, cols=None):
     """rows of the table whose header row starts with `first` (searched in rows 1-8), as dicts by header. A header
-    with a bracket, e.g. 'Class (2027)', also answers to its plain name when no column has that name."""
-    hr = next((r for r in range(1, 9) if str(ws.cell(r, 1).value or "").strip() == first), 5)
+    with a bracket, e.g. 'Class (2027)', also answers to its plain name when no column has that name. cols: the
+    template's own headers, for a sheet whose header row was deleted or overwritten (its data is read from the first row
+    after the title lines that fills more than two cells)."""
+    hr = next((r for r in range(1, 9) if str(ws.cell(r, 1).value or "").strip() == first), None)
+    if hr is None and cols:
+        top = next((r for r in range(1, 9) if sum(1 for c in ws[r] if _v(c.value) not in (None, "")) > 2), None)
+        if top is not None:
+            out = []
+            for row in ws.iter_rows(min_row=top, values_only=True):
+                d = {h: _v(v) for h, v in zip(cols, row)}
+                if any(v not in (None, "") for v in d.values()): out.append(d)
+            return list(cols), out
+    hr = hr or 5
     hdr = [(_v(c.value) or "") for c in ws[hr]]
     alias = {h.split(" (")[0]: h for h in hdr if " (" in str(h) and h.split(" (")[0] not in hdr}
     out = []
@@ -160,9 +173,13 @@ def read_template(path):
         _, ru = _table(wb[name], "Applies to (kind)")
         for x in ru:
             if not x.get("Applies to (kind)") or not x.get("Rule"): continue
-            rules.append({"scope": x.get("Applies to (kind)"), "target": x.get("Applies to"), "subject": x.get("Subject (optional)"), "rule": x.get("Rule"),
-                          "week": x.get("Week") or "Both", "day": x.get("Day") or "All", "from": x.get("From period"), "to": x.get("To period"),
-                          "number": x.get("Number"), "strength": x.get("Must / Prefer") or "Must", "note": x.get("Note")})
+            scope, target = x.get("Applies to (kind)"), x.get("Applies to")
+            if scope == "Level" and str(target or "").strip().lower() in ALL_LEVELS: scope, target = "School", "Whole school"   # 'Level · All'
+            r_ = {"scope": scope, "target": target, "subject": x.get("Subject (optional)"), "rule": x.get("Rule"),
+                  "week": x.get("Week") or "Both", "day": x.get("Day") or "All", "from": x.get("From period"), "to": x.get("To period"),
+                  "number": x.get("Number"), "strength": x.get("Must / Prefer") or "Must", "note": x.get("Note")}
+            if names_list(x.get("Venues")): r_["venues"] = names_list(x.get("Venues"))
+            rules.append(r_)
     if "Teacher availability" in wb.sheetnames:   # clock times -> the periods they overlap; the times are kept for writing back
         for x in _table(wb["Teacher availability"], "Teacher")[1]:
             if not x.get("Teacher") or x.get("From") in (None, "") or x.get("To") in (None, ""): continue
@@ -171,12 +188,19 @@ def read_template(path):
                               **{"from": a, "to": b}, strength="Must", note=x.get("Reason"), times=[_clock(x["From"]), _clock(x["To"])]))
     class_names = {c["class"] for c in classes}
     if "Fixed lessons" in wb.sheetnames:
-        for x in _table(wb["Fixed lessons"], "Level")[1]:
-            who, start = x.get("Class(es) or group"), x.get("Start period")
+        for x in _table(wb["Fixed lessons"], "Level", FIXED_COLS)[1]:
+            who, start, lv = x.get("Class(es) or group"), x.get("Start period"), x.get("Level")
             if not who or start in (None, ""): continue
+            try: start = int(start)
+            except (TypeError, ValueError): continue
+            common = dict(subject=x.get("Subject"), rule="Fixed at", week=x.get("Week") or "Both", day=x.get("Day") or "All", **{"from": start, "to": None},
+                          strength="Must", note=x.get("Note"))
+            if str(who).strip().lower() in (EVERY_CLASS.lower(), "all classes", "all", "every class in the level"):   # that lesson of every class
+                if lv in sc["levels"]: rules.append(dict(common, scope="Level", target=lv, level=lv))
+                else: rules.append(dict(common, scope="School", target="Whole school"))
+                continue
             for w in [s.strip() for s in str(who).split(",") if s.strip()]:
-                rules.append(dict(scope="Class" if w in class_names else "Group", target=w, subject=x.get("Subject"), rule="Fixed at", level=x.get("Level"),
-                                  week=x.get("Week") or "Both", day=x.get("Day") or "All", **{"from": int(start), "to": None}, strength="Must", note=x.get("Note")))
+                rules.append(dict(common, scope="Class" if w in class_names else "Group", target=w, level=lv))
     students = []
     if "Students" in wb.sheetnames:
         sh_, sx = _table(wb["Students"], "Student ID")

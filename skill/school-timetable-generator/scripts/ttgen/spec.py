@@ -15,10 +15,12 @@ SCOPES = ["School", "Level", "Class", "Teacher", "Department", "Subject", "Block
 RULE_TYPES = [
     ("Not available", "Teacher, Class, Room, Level, Block", "Y", "N", "No lessons in these periods (part-time days, meetings, room bookings).", "Teacher · Ms Tan · All days · 18 to 19"),
     ("Keep free together", "Department, Level", "Y", "N", "Every teacher in the department (or every class in the level) is free at the same time.", "Department · EL · Wed · 20 to 22"),
-    ("Fixed at", "Class, Block, Group, Subject", "Y", "N", "The lesson starts at the From period on that Day (Day All: every lesson of it starts at From). Use Subject to say which lesson of a class; Group is a group code from 6 Lessons.", "Class · 3A · Character Education · Mon · 1"),
-    ("Not in periods", "Subject, Level, Class, Block", "Y", "N", "Not placed in these periods. Use Subject to narrow a level or class rule.", "Level · Sec 1 · Physical Education · All · 20 to 22"),
-    ("Only in periods", "Subject, Level, Class, Block", "Y", "N", "Only placed in these periods.", "Subject · Mathematics G3 · All · 1 to 17"),
-    ("Finish by", "Level, Class", "Y", "N", "No lessons after the To period on that day.", "Class · 4A · Fri · to 14"),
+    ("Fixed at", "Class, Block, Group, Subject, Level, School", "Y", "N", "The lesson starts at the From period on that Day (Day All: every lesson of it starts at From). Use Subject to say which lesson of a class; Group is a group code from 6 Lessons. Level or School with a Subject: that lesson of every class (whole-school CCE); on Fixed lessons, Class 'Every class'.", "School · Whole school · Character Education 1 · Odd · Fri · 11"),
+    ("Not in periods", "Subject, Level, Class, Block, School", "Y", "N", "Not placed in these periods. Use Subject to narrow a level, class or school rule.", "Level · Sec 1 · Physical Education · All · 20 to 22"),
+    ("Only in periods", "Subject, Level, Class, Block, School", "Y", "N", "Only placed in these periods.", "Subject · Mathematics G3 · All · 1 to 17"),
+    ("Finish by", "Level, Class, School", "Y", "N", "No lessons after the To period on that day.", "Class · 4A · Fri · to 14"),
+    ("Only these subjects", "School, Level, Class", "Y", "N", "In these periods only lessons of the subjects named in Subject, separated by commas, are placed; every other lesson is kept out (a home-based learning day). A name without its G1/G2/G3 tag covers every tag; a department code (MT, SC) covers its subjects. Blank periods: the whole day.", "School · Whole school · English Language, Mathematics, MT, SC · Even · Fri"),
+    ("Only in venues", "Subject, Level, Class, School", "Y", "N", "A lesson that runs into these periods is held only in the rooms listed under Venues, separated by commas (PE late in the day only in a sheltered hall). Use Subject to narrow a level or school rule. Prefer: those rooms when one is free.", "Subject · Physical Education · All · 10 to 25 · Hall, ISH"),
     ("Max periods a day", "Teacher, Class, Level, School", "N", "Y", "At most Number periods of lessons in a day (School = every teacher).", "School · Whole school · 15"),
     ("Max periods in a row", "Teacher, School", "N", "Y", "At most Number periods without a break (checked after solving).", "School · Whole school · 9"),
     ("At least one recess a day", "Teacher, School", "N", "N", "The teacher is free for a recess each day: a whole recess (R), or the recess length inside a recess window (W), of any level.", "School · Whole school"),
@@ -42,6 +44,30 @@ SETTING_RULES: list[dict] = [
     dict(key="pe_rain_home", label="In rain, PE goes to the class's home room", number=False, rule=None),
 ]
 PE_KIND = "pe venue"   # the room kind of PE lessons (field, hall, courts): with pe_rain_home their class's home room stays free
+EVERY_CLASS = "Every class"   # Fixed lessons: that lesson of every class of the level (or of the school, Level All)
+ALL_LEVELS = ("all", "all levels", "every level", "whole school")   # 'Level · All' in a workbook: the whole school
+
+def is_fixed_lesson(r):
+    """a 'Fixed at' rule that belongs on Fixed lessons: a class, a group, or every class of a level or the school (with a
+    subject; one without is flagged and skipped)"""
+    return r.get("scope") in ("Class", "Group", "Level", "School")
+
+def names_list(v):
+    """a cell that names several things (subjects, venues), separated by commas, as a list"""
+    if isinstance(v, (list, tuple)): return [str(x).strip() for x in v if str(x).strip()]
+    return [x.strip() for x in str(v or "").split(",") if x.strip()]
+
+def untag(s):
+    """a subject without its level tag: 'English Language G3' -> 'English Language'"""
+    import re
+    return re.sub(r"\s+(G[123]|Std|Fdn|Standard|Foundation)$", "", str(s or "").strip())
+
+def subject_test(names):
+    """for 'Only these subjects': is a lesson (subject, department) one of these names? A name matches the subject, the
+    subject without its G1/G2/G3 tag, or its department code"""
+    want = {str(n).strip().lower() for n in names_list(names)}
+    return lambda subject, dept=None: bool({str(subject or "").lower(), untag(subject).lower(), str(dept or "").lower()} & want)
+
 
 
 def end_rows(school):
@@ -183,7 +209,8 @@ def no_free_periods(school):
 
 def split_rules(spec) -> dict:
     """where each rule lives in the workbook: a rule row on Settings ({key: value}), Teacher availability (Must 'Not
-    available' for a teacher), Fixed lessons (Must 'Fixed at' for a class or group), or More rules (everything else)"""
+    available' for a teacher), Fixed lessons (Must 'Fixed at' for a class, a group, or every class with a subject), or More
+    rules (everything else)"""
     settings, availability, fixed, more = {}, [], [], []
     for r in spec.get("rules", []):
         must = str(r.get("strength") or "Must") == "Must"
@@ -192,7 +219,7 @@ def split_rules(spec) -> dict:
         if key and must and key not in settings:
             settings[key] = r.get("number") if next(s for s in SETTING_RULES if s["key"] == key)["number"] else "Yes"
         elif r.get("rule") == "Not available" and r.get("scope") == "Teacher" and must and r.get("from") not in (None, ""): availability.append(r)
-        elif r.get("rule") == "Fixed at" and r.get("scope") in ("Class", "Group") and must and r.get("from") not in (None, ""): fixed.append(r)
+        elif r.get("rule") == "Fixed at" and is_fixed_lesson(r) and must and r.get("from") not in (None, ""): fixed.append(r)
         else: more.append(r)
     return dict(settings=settings, availability=availability, fixed=fixed, more=more)
 
