@@ -14,7 +14,9 @@ code and download PDFs. The app does not generate timetables itself.
 
 **The steps.** Start · School & day · 1 Venues · 2 Classes · 3 Subjects · 4 Teachers · 5 TG & deployment ·
 6 Configuration & constraints (the school-wide settings, teacher block-outs, fixed lessons and every other rule) ·
-7 Download · 8 Publish · Students. The numbers match the sheets of the setup workbook.
+7 Download · 8 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
+step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Fixed lessons and More
+rules sheets.
 
 The student list goes in on the **Students** step, after the timetable is made (it is not needed to make one): paste it from Excel or a CSV, or upload an .xlsx or
 .csv, with each student's ID, name, class and group codes; the committee can then edit each student's groups there.
