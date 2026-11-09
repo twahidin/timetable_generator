@@ -41,8 +41,8 @@ adds the PDFs and workbooks (about 30 MB for the 624-student sample school). The
 plenty.
 
 A service with a volume runs one replica (Railway does not allow more), which is what the app needs: publishing is
-guarded by a lock in the web process. Because of the volume, each redeploy has a short downtime. After a redeploy, every open browser reloads the setup from the
-server by itself, and changes it had not sent yet are sent again.
+guarded by a lock in the web process. Because of the volume, each redeploy has a short downtime. After a redeploy, open
+browsers carry on; any that missed changes fetch the setup again, and changes not yet sent are sent.
 
 ## 3. Set the variables
 
@@ -67,7 +67,7 @@ manager's generator.
 | `COMMITTEE_CODE` | **yes** | The timetable committee's code: setup editor, downloads, publish, personal codes. | none. At least 6 letters or digits. |
 | `TEACHER_CODE` | **yes** | Teachers' code: every class, teacher, room and student timetable, Who's free, PDFs. | none. At least 6 letters or digits. |
 | `STUDENT_CODE` | **yes** | Students' code: class timetables and **Build my timetable**. | none. At least 6 letters or digits. |
-| `HEADS_CODE` | no | Heads of department's code. With it set, the sign-in page has a fourth choice, **Department heads**. A head sees every step except Download, Publish and Students, and can change teaching groups, bands and who can teach what; they can add a teacher (marked provisional until the committee confirms them) and edit a teacher who is still provisional. The server refuses any other change. | none: leave it out and there is no heads' sign-in. At least 6 letters or digits, different from the other codes. |
+| `HEADS_CODE` | no | Heads of department's code. With it set, the sign-in page has a fourth choice, **Department heads**. A head sees every step except Download, Publish and Students, and can change teaching groups, bands and who can teach what; they can add a teacher (marked provisional until the committee confirms them) and edit a teacher who is still provisional. The server refuses any other change: a refused change is skipped and reported to the head, and the rest of their work is kept. | none: leave it out and there is no heads' sign-in. At least 6 letters or digits, different from the other codes. |
 | `SCHOOL_NAME` | no | Shown on the sign-in page until a timetable is published (then the published school name is shown), and used to name a blank setup. | `School timetable` on the sign-in page |
 | `DATA_DIR` | no | Where the data goes, if not the volume. Leave it unset on Railway. | the volume's mount path, else `data/` in the app folder |
 

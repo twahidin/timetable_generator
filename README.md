@@ -9,7 +9,7 @@ code and download PDFs. The app does not generate timetables itself.
 |---|---|---|
 | `COMMITTEE_CODE` | timetable committee | the setup editor, the downloads, Publish, the personal student codes |
 | `TEACHER_CODE` | teachers | every class, teacher, room and student timetable, the lesson search, Who's free, PDFs |
-| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; groups, bands, who can teach what, and new teachers (marked provisional until the committee confirms them) to change |
+| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; groups, bands, who can teach what, and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 
