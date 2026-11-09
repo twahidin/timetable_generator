@@ -133,7 +133,7 @@ th{background:#f3f6fb}
 .pop .opts.wide label{align-items:flex-start}
 .pop .opts.wide label .muted{font-size:12px}
 
-/* no-timetable alert (banner on every step, box on Generate), the fix list, and the save state next to Save progress */
+/* no-timetable alert (banner on every step, box on Generate), the fix list, and the save state next to Undo and Redo */
 .savestate{font-size:12px;color:var(--muted);white-space:nowrap}
 .savestate.warn{color:var(--warn)}
 
