@@ -52,4 +52,52 @@ t("groups and bands tabs", () => {
   assert.deepStrictEqual(DeptMap.cards(fixture(), infoOf(fixture()), "EL", "bands", ""), []);
 });
 t("prune keeps only ids that are still teachers", () => { assert.deepStrictEqual(DeptMap.prune(["tb", "gone", "ta"], fixture()), ["tb", "ta"]); });
+t("canTeach honours All, a level and a band of levels", () => {
+  const tc = fixture().teachers[2];
+  assert.ok(DeptMap.canTeach(tc, "Mathematics", "Sec 1", {})); assert.ok(!DeptMap.canTeach(tc, "Mathematics", "Sec 2", {}));
+  assert.ok(DeptMap.canTeach({ can_teach: [{ subject: "Mathematics", levels: "Lower Sec" }] }, "Mathematics", "Sec 2", { "Sec 2": "Lower Sec" }));
+  assert.ok(!DeptMap.canTeach({ can_teach: [] }, "Mathematics", "Sec 1", {}));
+});
+t("deploying to one class of a shared whole-class row splits that class off", () => {
+  const s = fixture(); const r = DeptMap.deploy(s, { kind: "class", li: 0, cls: "1B" }, [2], {});
+  assert.deepStrictEqual(r, { placed: ["Wei Lin Tan"], already: [], refused: [], split: true });
+  assert.deepStrictEqual(s.lessons[0].classes, ["1A"]); assert.deepStrictEqual(s.lessons[0].teachers, ["Arjun Nair"]);
+  const nw = s.lessons[4]; assert.deepStrictEqual([nw.classes, nw.teachers, nw.subject, nw.level, nw.students], [["1B"], ["Arjun Nair", "Wei Lin Tan"], "Mathematics", "Sec 1", 30]);
+  assert.ok(!("_id" in nw) || nw._id !== "l1");
+});
+t("deploying to a group adds, never replaces, and says who was already there", () => {
+  const s = fixture(); const r = DeptMap.deploy(s, { kind: "group", li: 1 }, [0, 2], {});
+  assert.deepStrictEqual(r, { placed: ["Wei Lin Tan"], already: ["Arjun Nair"], refused: [], split: false });
+  assert.deepStrictEqual(s.lessons[1].teachers, ["Arjun Nair", "Wei Lin Tan"]);
+});
+t("a teacher not in the basket is refused, or added to it first when asked", () => {
+  const s = fixture(); const r = DeptMap.deploy(s, { kind: "group", li: 1 }, [1], {});
+  assert.deepStrictEqual(r.refused, [{ name: "Priya Menon", why: "Priya Menon is not in the Mathematics basket." }]);
+  assert.deepStrictEqual(s.lessons[1].teachers, ["Arjun Nair"]);
+  const r2 = DeptMap.deploy(s, { kind: "group", li: 1 }, [1], { addToBasket: true });
+  assert.deepStrictEqual(r2.placed, ["Priya Menon"]); assert.deepStrictEqual(s.teachers[1].can_teach, [{ subject: "Mathematics", levels: "All" }]);
+});
+t("more than three on a card: none is placed and the card says so", () => {
+  const s = fixture(); s.lessons[2].teachers = ["Arjun Nair", "Wei Lin Tan"]; s.teachers[1].can_teach = [{ subject: "Mathematics", levels: "All" }]; s.teachers[3].can_teach = [{ subject: "Mathematics", levels: "All" }];
+  const r = DeptMap.deploy(s, { kind: "group", li: 2, title: "2MA2" }, [1, 3], {});
+  assert.deepStrictEqual(r.placed, []); assert.strictEqual(r.refused.length, 2); assert.strictEqual(r.refused[0].why, "2MA2 would have 4 teachers; three is the most.");
+  assert.deepStrictEqual(s.lessons[2].teachers, ["Arjun Nair", "Wei Lin Tan"]);
+});
+t("undeploy takes a teacher off a card, splitting a shared row first", () => {
+  const s = fixture(); assert.strictEqual(DeptMap.undeploy(s, { kind: "class", li: 0, cls: "1A" }, "Arjun Nair"), true);
+  assert.deepStrictEqual(s.lessons[0].classes, ["1B"]); assert.deepStrictEqual(s.lessons[0].teachers, ["Arjun Nair"]); assert.deepStrictEqual([s.lessons[4].classes, s.lessons[4].teachers], [["1A"], []]);
+  assert.strictEqual(DeptMap.undeploy(s, { kind: "group", li: 1 }, "Nobody"), false);
+});
+t("baskets: adding and removing a subject", () => {
+  const s = fixture(); assert.strictEqual(DeptMap.addToBasket(s, [0, 1, 3], "Mathematics"), 2);
+  assert.deepStrictEqual(DeptMap.removeFromBasket(s, 0, "Mathematics"), { lessons: 3 });
+  assert.deepStrictEqual(s.teachers[0].can_teach, []); assert.deepStrictEqual(s.lessons[0].teachers, ["Arjun Nair"]);
+});
+t("a new teacher: defaults, a head's is provisional, no second teacher with the same name", () => {
+  const s = fixture(); const r = DeptMap.newTeacher(s, { name: "New Mathematics teacher 1", short: "", dept: "MA", role: "EO", allowance: "" }, s.roles, true);
+  assert.deepStrictEqual(r, { i: 4 }); assert.deepStrictEqual(s.teachers[4], { name: "New Mathematics teacher 1", short: "New", dept: "MA", role: "EO", allowance: 20, provisional: "Yes", can_teach: [] });
+  assert.deepStrictEqual(DeptMap.newTeacher(s, { name: "  priya   MENON", dept: "MA", role: "EO" }, s.roles, false), { error: "Priya Menon is already a teacher." });
+  assert.deepStrictEqual(DeptMap.newTeacher(s, { name: " ", dept: "MA" }, s.roles, false), { error: "Give the teacher a name." });
+  assert.strictEqual(s.teachers.length, 5);
+});
 console.log(`${n} cases passed`);

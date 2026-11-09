@@ -101,6 +101,93 @@ var DeptMap = (function () {
     return out2;
   }
 
+  /* ---- what the map writes (the caller saves afterwards) */
+  var MAX = 3;   // teachers on one card (Teacher 1 to 3)
+
+  function canTeach(t, subject, level, bandOf) {
+    return !!t && (t.can_teach || []).some(function (c) {
+      return c && c.subject === subject && (!c.levels || c.levels === "All" || c.levels === level || c.levels === (bandOf || {})[level]);
+    });
+  }
+
+  /* a class card of a row that lists several classes: that class becomes a row of its own (a copy without the _id, which
+     the sync gives it on save); returns the row the change goes on */
+  function rowFor(spec, card) {
+    var L = rows(spec, "lessons"), x = L[card.li];
+    if (!x) return null;
+    if (card.kind !== "class" || (x.classes || []).length <= 1 || (x.classes || []).indexOf(card.cls) < 0) return { row: x, split: false };
+    x.classes = x.classes.filter(function (c) { return c !== card.cls; });
+    var copy = JSON.parse(JSON.stringify(x)); delete copy._id; copy.classes = [card.cls];
+    L.push(copy);
+    return { row: copy, split: true };
+  }
+
+  function deploy(spec, card, idxs, opts) {
+    opts = opts || {};
+    var T = rows(spec, "teachers"), x = rows(spec, "lessons")[card.li];
+    var out = { placed: [], already: [], refused: [], split: false };
+    if (!x) return out;
+    var title = card.title || (card.kind === "class" ? card.cls : "The group");
+    var on = names(x), left = [];
+    (idxs || []).forEach(function (i) {
+      var t = T[i]; if (!t || !t.name) return;
+      if (on.indexOf(t.name) >= 0) { out.already.push(t.name); return; }
+      if (!hasSubject(t, x.subject)) {
+        if (!opts.addToBasket) { out.refused.push({ name: t.name, why: t.name + " is not in the " + x.subject + " basket." }); return; }
+        t.can_teach = (t.can_teach || []).concat([{ subject: x.subject, levels: "All" }]);
+      }
+      left.push(t.name);
+    });
+    if (!left.length) return out;
+    if (on.length + left.length > MAX) {
+      var why = title + " would have " + (on.length + left.length) + " teachers; three is the most.";
+      left.forEach(function (nm) { out.refused.push({ name: nm, why: why }); });
+      return out;
+    }
+    var r = rowFor(spec, card); out.split = r.split;
+    r.row.teachers = names(r.row).concat(left); out.placed = left;
+    return out;
+  }
+
+  function undeploy(spec, card, name) {
+    var x = rows(spec, "lessons")[card.li];
+    if (!x || names(x).indexOf(name) < 0) return false;
+    var r = rowFor(spec, card);
+    r.row.teachers = names(r.row).filter(function (nm) { return nm !== name; });
+    return true;
+  }
+
+  function addToBasket(spec, idxs, subject) {
+    var T = rows(spec, "teachers"), n = 0;
+    (idxs || []).forEach(function (i) {
+      var t = T[i]; if (!t || hasSubject(t, subject)) return;
+      t.can_teach = (t.can_teach || []).concat([{ subject: subject, levels: "All" }]); n++;
+    });
+    return n;
+  }
+
+  /* takes the subject off the teacher; the rows of that subject still naming them are counted, not changed */
+  function removeFromBasket(spec, idx, subject) {
+    var t = rows(spec, "teachers")[idx], n = 0;
+    if (!t) return { lessons: 0 };
+    t.can_teach = (t.can_teach || []).filter(function (c) { return !(c && c.subject === subject); });
+    rows(spec, "lessons").forEach(function (x) { if (x.subject === subject && names(x).indexOf(t.name) >= 0) n++; });
+    return { lessons: n };
+  }
+
+  function newTeacher(spec, fields, roles, provisional) {
+    var f = fields || {}, name = String(f.name || "").trim().replace(/\s+/g, " ");
+    if (!name) return { error: "Give the teacher a name." };
+    var k = P.key(name), T = rows(spec, "teachers");
+    for (var i = 0; i < T.length; i++) if (T[i] && P.key(T[i].name || "") === k) return { error: T[i].name + " is already a teacher." };
+    var role = (roles || []).find(function (r) { return r && r.role === f.role; });
+    var allow = Number(f.allowance) || (role && Number(role.allowance)) || null;
+    if (!Array.isArray(spec.teachers)) spec.teachers = [];
+    spec.teachers.push({ name: name, short: String(f.short || "").trim() || name.split(" ")[0], dept: f.dept || "", role: f.role || "",
+      allowance: allow, provisional: provisional ? "Yes" : "No", can_teach: [] });
+    return { i: spec.teachers.length - 1 };
+  }
+
   function prune(ids, spec) {
     var have = {}; rows(spec, "teachers").forEach(function (t) { if (t && t._id) have[t._id] = true; });
     return (ids || []).filter(function (id) { return have[id]; });
@@ -108,7 +195,8 @@ var DeptMap = (function () {
 
   return {
     loads: loads, deptSubjects: deptSubjects, roster: roster, unplaced: unplaced, search: search,
-    baskets: baskets, staffRoom: unplaced, cards: cards, prune: prune, subjectOf: subjectOf
+    baskets: baskets, staffRoom: unplaced, cards: cards, prune: prune, subjectOf: subjectOf,
+    MAX: MAX, canTeach: canTeach, deploy: deploy, undeploy: undeploy, addToBasket: addToBasket, removeFromBasket: removeFromBasket, newTeacher: newTeacher
   };
 })();
 if (typeof module !== "undefined") module.exports = DeptMap;

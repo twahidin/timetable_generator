@@ -179,6 +179,21 @@ def test_a_head_can_add_and_fill_in_a_teacher_in_one_request():
     code, _ = _changes("H", v, [["add", "teachers", {"_id": "newhire003", "name": "Batch hire"}, ""], ["set", "teachers", "newhire003", "short", "BH"]], who=h); assert code == 200
     t = next(x for x in c.get("/api/setup").get_json()["spec"]["teachers"] if x["_id"] == "newhire003"); assert t["provisional"] == "Yes" and t["short"] == "BH"
 
+def test_a_heads_map_batch_is_applied_whole():
+    # one department-map session: a new teacher, a basket, a class split off a shared whole-class row, and a deployment
+    rec = c.get("/api/setup").get_json(); v = rec["v"]; sp = rec["spec"]
+    row = next(x for x in sp["lessons"] if not x.get("block") and x.get("subject"))
+    ops = [["add", "teachers", {"_id": "maphire001", "name": "New Mathematics teacher 1", "dept": "MA"}, ""],
+           ["merge", "teachers", "maphire001", "can_teach", [{"subject": row["subject"], "levels": "All"}], []],
+           ["set", "lessons", row["_id"], "classes", []],
+           ["add", "lessons", {"_id": "mapsplit001", "level": row["level"], "subject": row["subject"], "block": None, "classes": row["classes"], "teachers": [], "students": row.get("students")}, row["_id"]],
+           ["set", "lessons", "mapsplit001", "teachers", (row.get("teachers") or []) + ["New Mathematics teacher 1"]]]
+    code, j = _changes("H", v, ops, who=h); assert code == 200 and not j.get("refused"), j
+    now = c.get("/api/setup").get_json()["spec"]
+    t = next(x for x in now["teachers"] if x["_id"] == "maphire001"); assert t["provisional"] == "Yes" and t["can_teach"] == [{"subject": row["subject"], "levels": "All"}]
+    L = {x["_id"]: x for x in now["lessons"]}
+    assert L[row["_id"]]["classes"] == [] and L["mapsplit001"]["classes"] == row["classes"] and L["mapsplit001"]["teachers"][-1] == "New Mathematics teacher 1"
+
 def test_the_head_check_runs_on_the_setup_held_under_the_lock():
     rec = c.get("/api/setup").get_json(); v = rec["v"]; spec = rec["spec"]
     firm = next(x for x in spec["teachers"] if x.get("provisional") != "Yes")
@@ -238,7 +253,7 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
     assert t.get("/timetable").status_code == 200
 
-NEED_HEADS = {"test_a_head_can_change_groups_but_not_classes", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
+NEED_HEADS = {"test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
               "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace"}
 
 if __name__ == "__main__":
