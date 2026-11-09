@@ -107,6 +107,7 @@ async function syncNow() {
   SYNC.busy = true; SYNC.again = false;
   let wait = 4000;
   try {
+    headsTeachers();
     const sent = working(), ops = Sync.diff(SYNC.base, sent);
     const r = ops.length
       ? await fetch("/api/setup/changes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ since: SYNC.v, client: SYNC.client, ops }) })
@@ -117,7 +118,7 @@ async function syncNow() {
     if (r.status === 403) {   // a change this person may not make: nothing was applied, so start again from the server's copy
       toast(j.error || "That change is not allowed.");
       const srv = await fetchSetup(); if (!srv) return;
-      if (srv.spec) { await openServer(srv); SYNC.base = Sync.clone(S.spec); render(); }
+      if (srv.spec) { await openServer(srv); SYNC.base = Sync.clone(S.spec); keepLocal(); render(); }
     } else if (r.status === 409) {   // the server has no setup: a committee member's copy goes up whole
       if (!(G.st && G.st.role === "committee") || !await putSetup(sent, "Saved from a browser", S.step)) throw new Error("no setup");
       render();
@@ -127,7 +128,8 @@ async function syncNow() {
       const theirs = (j.patches || []).flatMap(p => p.ops || []);
       const nb = Sync.rebase(SYNC.base, sent, working(), theirs, ops);
       SYNC.base = nb.base; SYNC.v = j.v;
-      if (theirs.length) takeSpec(nb.spec); else if (ops.length) keepLocal();
+      if (theirs.length) takeSpec(nb.spec);
+      if (theirs.length || ops.length) keepLocal();   // the base moved: what is kept as not sent must move with it
     }
     if ("others" in j) SYNC.others = j.others;
     SYNC.state = Sync.diff(SYNC.base, working()).length ? "saving" : "saved";
@@ -151,6 +153,15 @@ async function catchUp(j, sent, ops) {
     const spec = Sync.clone(srv.spec); Sync.apply(spec, ops); Sync.apply(spec, Sync.diff(sent, working()));
     takeSpec(spec);
   }
+  keepLocal();
+}
+/* a teacher a head adds is provisional (the server makes it so): the same here before the change is taken, so this
+   copy, the change sent and the base all agree with the server */
+function headsTeachers() {
+  if (!(G.st && G.st.role === "head")) return;
+  Sync.ensureIds(S.spec);
+  const had = new Set((SYNC.base.teachers || []).map(t => t && t._id));
+  (S.spec.teachers || []).forEach(t => { if (t && !had.has(t._id)) t.provisional = "Yes"; });
 }
 async function getJSON(u) { const r = await fetch(u); if (!r.ok) throw new Error(await r.text()); return r.json(); }
 async function fetchSetup() {   // {spec, v, saved_at}; null when signed out (the page goes to sign in)
@@ -1568,6 +1579,6 @@ async function openPage() {
       setTimeout(openPage, 5000); return;
     }
   }
-  render(); poll(); if (S.spec) syncNow();
+  render(); await poll(); if (S.spec) syncNow();   // the status first: it says whether this is a head
 }
 openPage();

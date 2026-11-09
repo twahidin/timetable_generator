@@ -259,10 +259,12 @@ def post_setup_changes():
         check = sync.head_may       # judged on the setup as it is under the store's lock, when the change is applied
         for op in ops:      # a teacher added by a head is provisional until the committee confirms
             if isinstance(op, list) and len(op) == 4 and op[0] == "add" and op[1] == "teachers" and isinstance(op[2], dict): op[2]["provisional"] = "Yes"
-    try: v = store.apply_changes(ops, client, check)
+    since = _int(body.get("since"))
+    try: v = store.apply_changes(ops, client, check, since)
+    except store.Replaced: return _changes_reply(since, client)
     except store.Refused as e: return {"error": str(e)}, 403
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
-    return _changes_reply(_int(body.get("since")), client, v)
+    return _changes_reply(since, client, v)
 
 @app.get("/api/setup/copies")
 @need("committee")

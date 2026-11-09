@@ -87,6 +87,14 @@ def test_a_replaced_setup_resets_everyone():
     code, j = _changes("A", v); assert j == {"v": j["v"], "reset": True, "replaced": True, "others": j["others"]}
     assert c.get("/api/setup/copies").get_json()[0]["what"] == "Before: Opened a workbook"
 
+def test_a_change_sent_from_before_a_replacement_is_not_applied():
+    v = c.get("/api/setup").get_json()["v"]
+    c.put("/api/setup", json={"spec": c.get("/api/sample/primary").get_json(), "why": "Opened a workbook"})
+    after = c.get("/api/setup").get_json()["v"]
+    code, j = _changes("A", v, [["school", "timetable", "Should not land"]])
+    assert code == 200 and j["reset"] is True and j["replaced"] is True
+    rec = c.get("/api/setup").get_json(); assert rec["v"] == after and rec["spec"]["school"].get("timetable") != "Should not land"
+
 def test_a_restart_resets_without_losing_the_setup():
     v = c.get("/api/setup").get_json()["v"]; _changes("A", v, [["school", "timetable", "Term 9"]])
     store._log.clear(); store._setup.clear()            # what a restart does to the process

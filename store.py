@@ -118,12 +118,18 @@ def _risky(ops):
 class Refused(Exception):
     """a change the caller's check turned down; the message is a sentence for the person"""
 
-def apply_changes(ops, client, check=None):
+class Replaced(Exception):
+    """the whole setup was replaced after the version the change was made on: it is not applied"""
+
+def apply_changes(ops, client, check=None, since=None):
     """apply a change to the current setup; returns the new version.
-    check(spec, ops) runs on the setup held under the lock: a sentence back raises Refused and nothing is applied"""
+    check(spec, ops) runs on the setup held under the lock: a sentence back raises Refused and nothing is applied.
+    since: the version the change was made on; when the setup was replaced after it, Replaced is raised and nothing
+    is applied (the change belongs to a setup that is gone)"""
     with _setup_lock:
         cur = _load()
         if not cur: raise LookupError("no setup")
+        if since is not None and since < cur.get("replaced_v", 0): raise Replaced()
         if check:
             why = check(cur["spec"], ops)
             if why: raise Refused(why)
