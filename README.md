@@ -9,11 +9,11 @@ code and download PDFs. The app does not generate timetables itself.
 |---|---|---|
 | `COMMITTEE_CODE` | timetable committee | the setup editor, the downloads, Publish, the personal student codes |
 | `TEACHER_CODE` | teachers | every class, teacher, room and student timetable, the lesson search, Who's free, PDFs |
-| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; groups, bands, who can teach what, and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
+| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; everything on step 5's department map (who can teach what, who teaches which class, group or band), the table's groups and bands, and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 
-**The steps.** Start · School & day · 1 Venues · 2 Classes · 3 Subjects · 4 Teachers · 5 TG & deployment ·
+**The steps.** Start · School & day · 1 Venues · 2 Classes · 3 Subjects · 4 Teachers · 5 Department map ·
 6 Configuration & constraints (the school-wide settings, teacher block-outs, fixed lessons and every other rule) ·
 7 Download · 8 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
 step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Fixed lessons and More
@@ -71,12 +71,40 @@ keeps, and Prefer rules bend when they must. The Excel workbook lists what was g
 (teachers over their allowance, each Prefer rule not kept, Max periods in a row), and its Teacher load sheet shows other
 duties and a red "Over allowance by" column.
 
-**How a group's periods split into lessons.** The Lessons column on step 5 shows the usual split in grey (20 periods with a
+**The department map (step 5).** The step opens on a map with three columns; **Table** at the top switches to the
+15-column table of the same rows, for bulk edits, bands and new groups (the choice is remembered in the browser).
+On the left, the **roster**: a department switcher (every head sees every department), then its teachers with a tick
+box, avatar, role and a load bar (periods deployed plus other duties against the allowance; red when over). **Select
+all** (it shows a dash when only some are ticked), **Deselect all** and **Not placed yet** (ticks the teachers with no
+subject) sit above the list; shift-click ticks a run. The search box finds a teacher on the roster, and lists matching
+teachers of other departments with **+ Add to roster**, for a teacher who teaches a subject outside their own
+department. **+ New teacher** adds a hire or a post still to be filled: name (or a placeholder such as "New Mathematics
+teacher 1"), short name, department, role and allowance (the role's guide when left empty); a head's new teacher is
+provisional until the committee confirms them on step 4.
+In the middle, **Can teach**: a basket per subject of the department with the avatars of everyone who can teach it, from
+any department, and a **Staff room** for roster teachers with no subject yet. Tick teachers and click a basket, or drag
+them in (dragging a ticked teacher drags every ticked teacher). The ✕ on an avatar in a basket takes the subject off
+them; dropping teachers on the staff room takes them out of every basket of the department. Either asks first, and says
+how many lesson rows still name them for it: those rows are not changed, and Things to fix flags them.
+On the right, **where they teach**: tabs **Classes** (one card per class for a whole-class lesson), **Teaching groups**
+and **Bands** (a lane per band, its groups inside; a teacher on two groups of one band is flagged on the lane), filtered
+to the department's subjects, with a level filter. Each card shows the code, subject, level, periods and up to three
+teachers. Click a card, or drop teachers on it, to deploy the ticked teachers: deploying **adds** (co-teaching), never
+replaces; a card that would go past three says so and takes none; the ✕ on an avatar takes that teacher off. A teacher
+must be in the subject's basket first: dropping one who is not asks whether to add them to the basket and place them. On
+Classes, a whole-class row that lists several classes shows one card per class, and changing one class's teachers moves
+that class to a row of its own in the table (the solver already treats each class's lesson separately). Every click or
+drop is one change: one Undo takes it back.
+Clicking any avatar (not its tick box) opens the teacher's **profile** in place of the cards: avatar with **New look**,
+name, role, department, load against allowance, **Can teach** with the levels (editable there, ✕ to remove a subject)
+and **Teaches** (every class and group they are on, ✕ to take them off). Details are changed on step 4.
+
+**How a group's periods split into lessons.** The Lessons column on step 5's table view shows the usual split in grey (20 periods with a
 3-period lesson: 6×3 + 1×2). Type your own, such as `5x3 + 2x2` or `4x3 + 4x2`, on one row or on all ticked rows, or clear it to
 go back. It must add up to the row's periods, and a band's groups should share a pattern; Things to fix flags both. The
 workbook carries it in the Lesson pattern column on the Lessons sheet.
 
-**Deploying by hand.** On the same step, filter the teaching groups by level, subject or teacher, tick rows (shift-click
+**Deploying in the table view.** On the same view, filter the teaching groups by level, subject or teacher, tick rows (shift-click
 for a run), pick a teacher and **Make Teacher 1**, **Add as co-teacher** or **Take off** for all of them at once. The bar shows
 the teacher's load now and with those groups; groups they are not set to teach, or two groups of one band, are flagged.
 On step 4 (Teachers), filter by department or subject, tick teachers and give them a subject they can teach (at all
