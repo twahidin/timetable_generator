@@ -405,7 +405,7 @@ const ruleIs = (r, s) => s.rule && r.rule === s.rule.rule && r.scope === s.rule.
 /* several names in one cell (Only these subjects, Only in venues), the subject without its tag, and the test for an HBL
    day's subjects (as ttgen.spec.names_list, untag, subject_test) */
 const namesList = v => (Array.isArray(v) ? v : String(v ?? "").split(",")).map(x => String(x).trim()).filter(Boolean);
-const untag = s => String(s || "").trim().replace(/\s+(G[123]|Std|Fdn|Standard|Foundation)$/, "");
+const untag = s => Groups.untag(s);
 const subjectTest = names => { const w = new Set(namesList(names).map(n => n.toLowerCase())); return (s, d) => [String(s || "").toLowerCase(), untag(s).toLowerCase(), String(d || "").toLowerCase()].some(x => x && w.has(x)); };
 const EVERY = "Every class";   // Fixed lessons: that subject for every class of the level (Level All: of the whole school)
 const isFixedLesson = r => ["Class", "Group", "Level", "School"].includes(r.scope);
