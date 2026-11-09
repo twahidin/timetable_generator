@@ -122,7 +122,7 @@ decides.
   **+ New teacher** adds someone the department has just hired, or a post still to be filled: name (or a placeholder
   such as "New Mathematics teacher 1"), short name, department (the one on show), role and allowance (the role's
   guide by default). Heads may do this. The new teacher is marked provisional (the `provisional` field that exists
-  today) until the committee confirms them on step 5, and gets an avatar like everyone else. A head can correct the
+  today) until the committee confirms them on step 4, and gets an avatar like everyone else. A head can correct the
   details of a teacher still marked provisional; confirmed teachers' details are the committee's. *(Designer's call
   on the provisional mark and on who may correct what; the committee asked only that heads can add new teachers.)*
 - **Middle, the baskets.** One basket per subject of the chosen department, showing the avatars of every teacher who
@@ -246,12 +246,12 @@ does everything.
 
 | | Heads | Committee |
 |---|---|---|
-| Step 6: can teach, teaching groups, bands, who teaches what | edit | edit |
-| Adding a new teacher (a new hire), from the map's roster or step 5 | yes | yes |
-| Step 5: changing an existing teacher's details, the upload, removing teachers, the roles table | read | edit |
-| Steps 1 to 4 and 7: school, day, venues, classes, subjects, constraints | read | edit |
-| Step 8: downloads (the workbook holds the student list) | no | yes |
-| Step 9: publish, access codes, personal-code slips | no | yes |
+| Step 5: can teach, teaching groups, bands, who teaches what | edit | edit |
+| Adding a new teacher (a new hire), from the map's roster or step 4 | yes | yes |
+| Step 4: changing an existing teacher's details, the upload, removing teachers, the roles table | read | edit |
+| School and day, steps 1 to 3 and step 6: school, day, venues, classes, subjects, constraints | read | edit |
+| Step 7: downloads (the workbook holds the student list) | no | yes |
+| Step 8: publish, access codes, personal-code slips | no | yes |
 | Whole-setup actions | no | yes |
 | Students step | no | yes |
 
@@ -296,7 +296,7 @@ spec refers to rows by position and by name today; the builder decides whether r
 
 Each is a pull request the committee can try on its own.
 
-1. **Steps and removal**: the new step list, settings moved to step 7, Download and Publish steps, Generate and
+1. **Steps and removal**: the new step list, settings moved to step 6, Download and Publish steps, Generate and
    Adjust removed.
 2. **Working together**: heads' code, changes that save themselves and merge.
 3. **Teachers**: roles first, upload, avatars.
