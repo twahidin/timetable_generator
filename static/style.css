@@ -162,3 +162,22 @@ button.avatar svg { pointer-events: none; }
 button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .avstrip { gap: 4px; margin-bottom: 6px; align-items: center; }
 .avstrip svg { display: block; }
+
+/* step 5: the department map */
+.map{display:grid;grid-template-columns:280px 1fr 320px;gap:12px;align-items:start}
+@media (max-width:900px){.map{grid-template-columns:1fr 1fr}.map .cards{grid-column:1/-1}}
+.map .card{margin-bottom:0;padding:12px 14px}
+.switch button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.rlist{max-height:calc(100vh - 300px);overflow:auto;margin-top:6px}
+.roster .trow{display:flex;gap:8px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--line)}
+.roster .trow.on{background:#eef5ff}
+.roster .tname{flex:1;min-width:0;line-height:1.25}
+.roster .tname > div:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.roster .trow input[type=checkbox]{margin:0;flex:0 0 auto}
+.load{flex:0 0 60px;height:6px;background:var(--chip);border-radius:3px;overflow:hidden}
+.load i{display:block;height:100%;background:var(--accent)}
+.load.over i{background:var(--warn)}
+.overtxt{color:var(--warn);font-weight:600}
+.tag{font-size:11px;background:var(--chip);border-radius:999px;padding:1px 6px;white-space:nowrap}
+.found .trow{display:flex;gap:8px;align-items:center;padding:3px 2px}
+.newt .grid2{grid-template-columns:1fr 1fr}

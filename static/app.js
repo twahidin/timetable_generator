@@ -6,7 +6,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const KEY = "ttsetup.v1";
 const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, tg: { lv: "", subj: "", t: "" }, tf: { dept: "", subj: "", q: "" }, pick: { lessons: new Set(), students: new Set(), teachers: new Set(), shown: {}, last: {}, t: "", g: "", c: "", s: "", v: "All", d: "", r: "", a: "", p: "" }, undo: [], redo: [], last: null };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
-  ["teachers", "4 Teachers"], ["lessons", "5 TG & deployment"], ["rules", "6 Configuration & constraints"], ["download", "7 Download"], ["publish", "8 Publish"], ["students", "Students"]];
+  ["teachers", "4 Teachers"], ["lessons", "5 Department map"], ["rules", "6 Configuration & constraints"], ["download", "7 Download"], ["publish", "8 Publish"], ["students", "Students"]];
 
 /* ---------------- storage, server
    The setup lives on the server. SYNC.base is the copy the server last confirmed (at version SYNC.v); S.spec is the
@@ -584,10 +584,7 @@ function lessonInfo() {
 function teachingGroups(subject) {   // groups or classes taught this subject on step 5: a banded row is one group, a whole-class row one per class
   return S.spec.lessons.filter(x => x.subject === subject).reduce((n, x) => n + (x.block || x.code_override ? 1 : (x.classes || []).length), 0);
 }
-function canTeach(t, subject, level) {
-  const tt = S.spec.teachers.find(x => x.name === t); if (!tt) return false;
-  return (tt.can_teach || []).some(c => c.subject === subject && (!c.levels || c.levels === "All" || c.levels === level || c.levels === bands()[level]));
-}
+function canTeach(t, subject, level) { return DeptMap.canTeach(S.spec.teachers.find(x => x.name === t), subject, level, bands()); }
 function issues() {
   const out = { school: {}, config: {}, lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
   // hard: no timetable can be made until it is fixed (critical). The rest are warnings: a timetable can still be made, but a person should look.
@@ -856,12 +853,12 @@ function render() {
   $("#kindBadge").textContent = S.spec ? `${sc().type === "primary" ? "Primary" : "Secondary"} · ${sc().name}` : "No school yet";
   const id = S.asking ? "_old" : STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
   // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
-  const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap")].map(t => [t.scrollTop, t.scrollLeft]) : [];
+  const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap, .keep")].map(t => [t.scrollTop, t.scrollLeft]) : [];
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && (f.id ? `#${CSS.escape(f.id)}` : f.dataset.k ? `[data-k="${CSS.escape(f.dataset.k)}"]` : "");
   G.shown = id;
   main.innerHTML = (S.practice && !S.asking ? `<div class="practice"><span>Practice copy: nothing here is saved for the school.</span><button id="practiceBack">Back to the school's setup</button></div>` : "") + (VIEWS[id] || (() => ""))();
   headLocks(main, id);
-  main.querySelectorAll(".tablewrap").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
+  main.querySelectorAll(".tablewrap, .keep").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
   paintPublished();
@@ -1000,7 +997,12 @@ const VIEWS = {
         return `<tr><td>${inp(`spec.roles.${i}.role`, r.role, "text", 'style="width:80px"')}</td><td style="min-width:240px">${inp(`spec.roles.${i}.what`, r.what)}</td><td class="num">${inp(`spec.roles.${i}.allowance`, r.allowance, "number", 'style="width:64px"')}</td><td>${inp(`spec.roles.${i}.group`, r.group)}</td><td class="calc">${ts.length}</td><td class="calc">${avg(ts.map(tot))}</td><td>${delBtn("roles", i)}</td></tr>`; }).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="roles">+ Add role</button></div></div>`;
   },
-  lessons() {
+  lessons() {   // step 5: the department map, or the table view of the same rows
+    const sw = v => `<button class="${M.view === v ? "on" : ""}" data-mview="${v}">${v === "map" ? "Map" : "Table"}</button>`;
+    return `<div class="card"><div class="row" style="justify-content:space-between"><div><h1 style="margin:0">Step 5 · Department map</h1><p class="lead" style="margin:6px 0 0">Tick teachers on the left, then click a subject basket to say what they can teach, or a class, group or band card to deploy them. Dragging works too. Click an avatar for the teacher's profile. The table view shows the same rows for bulk edits, bands and new groups.</p></div><div class="row switch">${sw("map")}${sw("table")}</div></div></div>`
+      + (M.view === "map" ? VIEWS.map() : VIEWS.table());
+  },
+  table() {
     const { out, crit, info, load } = issues(); const T = teacherNames(), f = S.tg, P = S.pick;
     const tsel = (i, k, x) => { const path = `spec.lessons.${i}.teachers.${k}`; const cur = (x.teachers || [])[k] || ""; const yes = T.filter(t => canTeach(t, x.subject, x.level)), no = T.filter(t => !yes.includes(t));
       return `<select data-k="${path}">${opt("", cur, "")}<optgroup label="Can teach this">${yes.map(t => opt(t, cur)).join("")}</optgroup><optgroup label="Others">${no.map(t => opt(t, cur)).join("")}</optgroup></select>`; };
@@ -1008,7 +1010,7 @@ const VIEWS = {
       && (!f.t || (f.t === "-" ? !(x.teachers || []).some(Boolean) : (x.teachers || []).includes(f.t))));
     P.shown.lessons = rows.map(([, i]) => i);
     const all = rows.length && rows.every(([, i]) => P.lessons.has(i));
-    return `<div class="card"><h1>Step 5 · Teaching groups & deployment</h1><p class="lead">Every teaching group (TG) and the teachers deployed to it. A whole-class subject is one group per class; a band splits its classes into groups that all have lessons at the same time. Set up the bands first, then add the groups and deploy teachers below.</p>
+    return `<div class="card"><h2>Table view</h2><p class="lead">Every teaching group (TG) and the teachers deployed to it. A whole-class subject is one group per class; a band splits its classes into groups that all have lessons at the same time. Set up the bands first, then add the groups and deploy teachers below.</p>
       ${VIEWS._bands(out, info, crit)}</div>
       <div class="card"><h2>Teaching groups</h2><p class="muted">One row per group, or per class for a whole-class subject. Pick level, subject and band (empty = whole class); choosing a band fills its classes. Group code and periods fill in by themselves. Lessons shows how the periods split, in grey; type your own, such as 5x3 + 2x2 (five 3-period lessons and two 2-period ones), or clear it to go back. Tick rows (shift-click for a run) to deploy a teacher or set Lessons on all of them at once.</p>
       <div class="helper row"><b>Add groups to a band</b> ${sel("_hb", "", blockNames(), true, 'id="hbBlock" data-k=""')} subject ${sel("_hbs", "", subjectNames(), true, 'id="hbSubj" data-k=""')} groups <input id="hbN" type="number" value="1" style="width:56px"> students each <input id="hbSt" type="number" style="width:64px"> <button data-helper="groups">Add</button></div>
@@ -1021,6 +1023,19 @@ const VIEWS = {
       <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="lessons" title="Tick every row shown (${rows.length})" ${all ? "checked" : ""}></th><th>Level</th><th>Subject</th><th>Band</th><th>Classes</th><th>Teacher 1</th><th>Teacher 2</th><th title="A third teacher in the room (co-teaching)">Teacher 3</th><th>Students</th><th>Periods override</th><th>Keep code</th>${Number(sc().weeks) === 2 ? '<th title="Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other">Special room weeks</th>' : ""}<th>Code</th><th>Periods</th><th title="Type your own split, such as 5x3 + 2x2. Empty = the usual split shown in grey.">Lessons</th><th></th></tr>
       ${rows.map(([x, i]) => `<tr id="lessons-${i}" class="${rowCls(out, crit, "lessons", i)}${P.lessons.has(i) ? " picked" : ""}" title="${esc((out.lessons[i] || []).join(" "))}"><td><input type="checkbox" data-pick="lessons.${i}" ${P.lessons.has(i) ? "checked" : ""}></td><td class="lv">${sel(`spec.lessons.${i}.level`, x.level, levels())}</td><td style="min-width:200px">${sel(`spec.lessons.${i}.subject`, x.subject, subjectNames().filter(n => (subj(n).periods || {})[x.level] || n === x.subject))}</td><td style="min-width:160px">${sel(`spec.lessons.${i}.block`, x.block, S.spec.blocks.filter(b => !x.level || b.level === x.level).map(b => b.block))}</td><td style="min-width:120px">${chips(`spec.lessons.${i}.classes`, x.classes, "classes", `data-level="${esc(x.level || "")}"`)}</td><td style="min-width:150px">${tsel(i, 0, x)}</td><td style="min-width:120px">${tsel(i, 1, x)}</td><td style="min-width:120px">${tsel(i, 2, x)}</td><td class="num">${inp(`spec.lessons.${i}.students`, x.students, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.periods_override`, x.periods_override, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.code_override`, x.code_override, "text", 'style="width:70px"')}</td>${Number(sc().weeks) === 2 ? `<td><select data-k="spec.lessons.${i}.room_weeks" ${special(x) ? "" : "disabled title=\"Only for a subject with a special room kind, such as a lab (step 3)\""}>${opt("", x.room_weeks || "", "every week")}${opt("Odd", x.room_weeks, "Odd only")}${opt("Even", x.room_weeks, "Even only")}</select></td>` : ""}<td class="calc">${esc(info[i].code)}</td><td class="calc">${info[i].p || ""}</td><td><input id="pat-${i}" data-pat="${i}" value="${esc((x.pattern || []).length ? patText(x.pattern.map(Number)) : x.pattern_text || "")}" placeholder="${esc(info[i].auto)}" title="How the periods split into lessons: 5x3 + 2x2 is five 3-period lessons and two 2-period ones. Empty = the usual split shown in grey." style="width:112px"></td><td>${delBtn("lessons", i)}</td></tr>`).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="lessons">+ Add teaching group</button></div></div>`;
+  },
+  map() {   // step 5's department map: roster (left), baskets (middle), cards (right)
+    Sync.ensureIds(S.spec);
+    const dept = mapDept(), D = sc().departments || [], T = S.spec.teachers, ro = DeptMap.roster(S.spec, dept, M.extra);
+    tickedIdx();
+    const nTick = ro.filter(i => M.ticked.has(T[i]._id)).length, some = nTick > 0 && nTick < ro.length;
+    return `<div class="map"><section class="roster card">
+      <div class="row"><select id="mDept" title="Department">${D.map(d => opt(d, dept)).join("")}</select><span class="muted small">${ro.length} teacher${ro.length === 1 ? "" : "s"}${nTick ? ` · ${nTick} ticked` : ""}</span></div>
+      <div class="row" style="margin:8px 0"><button class="small" data-mall title="Tick every teacher on the roster">${some ? "Select all –" : "Select all"}</button><button class="small" data-mnone>Deselect all</button><button class="small" data-munplaced title="Tick the teachers with no subject yet">Not placed yet</button></div>
+      <input id="mQ" type="search" placeholder="Find, or add a teacher from another department" value="${esc(M.q)}" style="width:100%">
+      <div id="rbody">${rosterList(dept)}</div>
+      <div class="row" style="margin-top:10px">${M.adding ? "" : `<button data-mnew>+ New teacher</button>`}</div>${M.adding ? newTeacherForm(dept) : ""}
+    </section><section class="baskets card"></section><section class="cards card"></section></div>`;
   },
   _bands(out, info, crit) {
     const open = S.bandsOpen ?? (!S.spec.blocks.length || Object.keys(out.blocks).length > 0);   // until the committee opens or closes it
@@ -1127,6 +1142,7 @@ document.addEventListener("click", async e => {
   const pop = $("#pop");
   if (!pop.hidden && !pop.contains(e.target)) commitPop();
   if (e.target.dataset && (e.target.dataset.pick || e.target.dataset.pickall)) { pick(e.target, e.shiftKey); return; }
+  if (e.target.dataset && e.target.dataset.mtick) { mtick(e.target, e.shiftKey); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c"); if (!b) return;
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
@@ -1143,6 +1159,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.brush !== undefined) { S.brush = b.dataset.brush; render(); return; }
   if (b.dataset.copyday) { const lv = b.dataset.copyday; const ds = S.spec.day_structure[lv]; const f = ds[dayNames()[0]]; dayNames().forEach(d => ds[d] = f); save(); render(); return; }
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
+  for (const k of ["mview", "mall", "mnone", "munplaced", "madd", "mnew", "mnewcancel", "mnewgo"]) if (b.dataset[k] !== undefined) { mapAction(k, b.dataset[k]); return; }
   if (b.dataset.pop) { if (!b.classList.contains("ro")) openPop(b); return; }
   if (b.dataset.stu) { stuApply(b.dataset.stu); return; }
   if (b.dataset.tl) { tlAction(b.dataset.tl); return; }
@@ -1197,6 +1214,8 @@ document.addEventListener("change", async e => {
   if (["tgLv", "tgSubj", "tgT"].includes(el.id)) { S.tg[{ tgLv: "lv", tgSubj: "subj", tgT: "t" }[el.id]] = el.value; render(); return; }
   if (["pickA", "pickP"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; return; }   // typed boxes: no redraw, or it would swallow the click on the button next to them
   if (["pickT", "pickG", "pickC", "pickS", "pickV", "pickD", "pickR"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
+  if (el.id === "mDept") { M.dept = el.value; M.extra = []; M.ticked.clear(); M.q = ""; M.adding = false; M.nf = null; render(); return; }
+  if (["mnDept", "mnRole"].includes(el.id) && M.nf) { M.nf[el.id === "mnDept" ? "dept" : "role"] = el.value; render(); return; }
   if (["tfDept", "tfSubj", "tfQ"].includes(el.id)) { S.tf[{ tfDept: "dept", tfSubj: "subj", tfQ: "q" }[el.id]] = el.value; render(); return; }
   if (el.dataset.pick || el.dataset.pickall) return;
   if (el.dataset.pat !== undefined) { if (setPattern(S.spec.lessons[Number(el.dataset.pat)], el.value)) { save(); render(); } else { const x = S.spec.lessons[Number(el.dataset.pat)]; el.value = (x.pattern || []).length ? patText(x.pattern.map(Number)) : ""; el.focus(); } return; }
@@ -1337,6 +1356,61 @@ function tgBar(load, info) {
     <button data-bulk="t1" ${off} title="Replaces Teacher 1 on every ticked row">Make Teacher 1</button><button data-bulk="t2" ${off} title="Adds them as Teacher 2 or 3 (co-teaching), or Teacher 1 on a row with none">Add as co-teacher</button><button data-bulk="tx" ${off}>Take off</button>
     ${line ? `<span class="small ${over ? "over" : "muted"}">${esc(line)}</span>` : ""}
     <span class="muted">·</span> lessons <input id="pickP" value="${esc(P.p)}" placeholder="5x3 + 2x2" title="Leave empty to go back to the usual split" style="width:104px"><button data-bulk="pat">Set lessons</button><button class="small ghost" data-bulk="tnone">Clear ticks</button></div>`;
+}
+/* ---------------- step 5: the department map. Teachers are held by _id, so another browser's change cannot move a tick */
+const MAPVIEW = "ttsetup.mapview";
+const M = { view: "map", dept: "", tab: "classes", level: "", ticked: new Set(), lastTick: null, extra: [], q: "", profile: null, adding: false, nf: null };
+try { if (localStorage.getItem(MAPVIEW) === "table") M.view = "table"; } catch (e) { }
+function mapDept() { const D = sc().departments || []; if (!D.includes(M.dept)) M.dept = D[0] || ""; return M.dept; }
+function tickedIdx() {   // indexes of the ticked teachers, in setup order, dropping any removed meanwhile
+  M.ticked = new Set(DeptMap.prune([...M.ticked], S.spec));
+  return S.spec.teachers.map((t, i) => [t, i]).filter(([t]) => t && M.ticked.has(t._id)).map(([, i]) => i);
+}
+function rosterList(dept) {   // the roster's rows (filtered by the search box) and the teachers found in other departments
+  const T = S.spec.teachers, L = DeptMap.loads(S.spec, lessonInfo()), ro = DeptMap.roster(S.spec, dept, M.extra), q = People.key(M.q);
+  const shown = ro.filter(i => !q || People.key(T[i].name || "").includes(q) || People.key(T[i].short || "").includes(q));
+  const found = DeptMap.search(S.spec, M.q, dept).filter(i => !ro.includes(i));
+  const trow = i => { const t = T[i], ld = L[t.name] || {}, pct = ld.allowance ? Math.min(100, Math.round(100 * ld.total / ld.allowance)) : 0;
+    return `<div class="trow${M.ticked.has(t._id) ? " on" : ""}"><input type="checkbox" data-mtick="${esc(t._id)}" ${M.ticked.has(t._id) ? "checked" : ""} aria-label="Tick ${esc(t.name || "")}">
+      <button class="avatar" data-mprofile="${esc(t._id)}" draggable="true" data-mdrag="${esc(t._id)}" title="${esc(t.name || "")}: profile">${avatarOf(t, 32)}</button>
+      <div class="tname"><div>${esc(t.name || "")}${t.dept !== dept ? ` <span class="tag">${esc(t.dept || "")}</span>` : ""}${provisionalRow(t) ? ` <span class="tag">provisional</span>` : ""}</div>
+      <div class="row small" style="gap:6px;flex-wrap:nowrap"><span class="muted">${esc(t.role || "")}</span>${ld.allowance ? `<div class="load${ld.over ? " over" : ""}" title="${ld.lessons} periods deployed${ld.duties ? ` + ${ld.duties} other duties` : ""}, allowance ${ld.allowance}"><i style="width:${pct}%"></i></div><span class="${ld.over ? "overtxt" : "muted"}">${ld.total} / ${ld.allowance}</span>` : `<span class="muted" title="No allowance yet">${ld.total || 0} periods</span>`}</div></div></div>`; };
+  return `<div class="rlist keep">${shown.map(trow).join("") || `<p class="muted small">No one on this roster matches.</p>`}</div>
+    ${found.length ? `<div class="found"><div class="muted small" style="margin:6px 0 2px">From other departments</div>${found.map(i => `<div class="trow"><span>${avatarOf(T[i], 24)}</span><span class="tname">${esc(T[i].name || "")} <span class="tag">${esc(T[i].dept || "")}</span></span><button class="small" data-madd="${esc(T[i]._id)}">+ Add to roster</button></div>`).join("")}</div>` : ""}`;
+}
+function newTeacherForm(dept) {   // + New teacher: a hire, or a post still to be filled
+  const f = M.nf || (M.nf = { name: "", short: "", dept, role: roles().some(r => r.role === "EO") ? "EO" : (roles()[0] || {}).role || "", allowance: "" });
+  const guide = r => { const x = roles().find(y => y.role === r); return x && x.allowance != null && x.allowance !== "" ? x.allowance : ""; };
+  return `<div class="helper newt"><b>New teacher</b><div class="grid2" style="margin-top:6px">
+    <label class="f">Name <input id="mnName" value="${esc(f.name)}" placeholder="Name, or New Mathematics teacher 1"></label>
+    <label class="f">Short name <input id="mnShort" value="${esc(f.short)}" placeholder="${esc(f.name.trim().split(/\s+/)[0] || "first word of the name")}"></label>
+    <label class="f">Department <select id="mnDept">${(sc().departments || []).map(d => opt(d, f.dept)).join("")}</select></label>
+    <label class="f">Role <select id="mnRole">${opt("", f.role, "")}${roles().map(r => opt(r.role, f.role)).join("")}</select></label>
+    <label class="f">Allowance <input id="mnAllow" type="number" value="${esc(f.allowance)}" placeholder="${esc(guide(f.role))}" title="Empty: the role's guide allowance"></label></div>
+    <div class="row" style="margin-top:8px"><button class="primary" data-mnewgo>Add</button><button class="ghost" data-mnewcancel>Cancel</button>${isHead() && !S.practice ? `<span class="muted small">The committee confirms new teachers on step 4.</span>` : ""}</div></div>`;
+}
+function mtick(el, shift) {   // a roster tick box; shift-click ticks the run from the last one ticked, in roster order
+  const order = DeptMap.roster(S.spec, mapDept(), M.extra).map(i => S.spec.teachers[i]._id);
+  const id = el.dataset.mtick, a = order.indexOf(M.lastTick), b = order.indexOf(id);
+  (shift && a >= 0 && b >= 0 ? order.slice(Math.min(a, b), Math.max(a, b) + 1) : [id]).forEach(x => el.checked ? M.ticked.add(x) : M.ticked.delete(x));
+  M.lastTick = id; render();
+}
+function mapAction(k, v) {   // the roster's buttons
+  const T = S.spec.teachers, ro = DeptMap.roster(S.spec, mapDept(), M.extra);
+  if (k === "mview") { M.view = v === "table" ? "table" : "map"; try { localStorage.setItem(MAPVIEW, M.view); } catch (e) { } render(); return; }
+  if (k === "mall") { ro.forEach(i => M.ticked.add(T[i]._id)); render(); return; }
+  if (k === "mnone") { M.ticked.clear(); render(); return; }
+  if (k === "munplaced") { M.ticked = new Set(DeptMap.unplaced(S.spec, ro).map(i => T[i]._id)); render(); return; }
+  if (k === "madd") { if (!M.extra.includes(v)) M.extra.push(v); M.q = ""; render(); return; }
+  if (k === "mnew") { M.adding = true; M.nf = null; render(); const el = $("#mnName"); if (el) el.focus(); return; }
+  if (k === "mnewcancel") { M.adding = false; M.nf = null; render(); return; }
+  if (k === "mnewgo") {
+    const f = { name: $("#mnName").value, short: $("#mnShort").value, dept: $("#mnDept").value, role: $("#mnRole").value, allowance: $("#mnAllow").value };
+    const r = DeptMap.newTeacher(S.spec, f, roles(), isHead() && !S.practice);
+    if (r.error) { toast(r.error); return; }
+    save(); M.ticked.add(S.spec.teachers[r.i]._id); M.adding = false; M.nf = null; render();
+    toast(isHead() && !S.practice ? "Added. The committee confirms new teachers on step 4." : "Added."); return;
+  }
 }
 /* the one place the page asks for a teacher's avatar (drawn from the name; the seed is the "new look" count) */
 const avatarOf = (t, size) => People.avatar(t.name, t.avatar, size);
@@ -1643,6 +1717,8 @@ async function tlFile(el) {   // an .xlsx goes through the server (its teachers 
   TL.text = text; tlRead();
 }
 document.addEventListener("input", e => {
+  if (e.target.id === "mQ") { M.q = e.target.value; const rb = $("#rbody"); if (rb) rb.innerHTML = rosterList(mapDept()); return; }   // the roster only: a full redraw would take the caret
+  if (["mnName", "mnShort", "mnAllow"].includes(e.target.id) && M.nf) { M.nf[{ mnName: "name", mnShort: "short", mnAllow: "allowance" }[e.target.id]] = e.target.value; return; }
   if (e.target.id !== "tlPaste") return;
   TL.text = e.target.value;
   if (TL.read || TL.err || TL.msg) { tlClear(); const pv = $("#tlPreview"); if (pv) pv.innerHTML = ""; }
