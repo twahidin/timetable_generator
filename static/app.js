@@ -43,7 +43,7 @@ function save(o) {
 /* this browser's copy: {sync: 1, step, at, kind, v, pending}, pending = what this tab has not sent. A tab with nothing
    to send leaves another tab's unsent changes alone. A copy in the format before this one is moved aside, untouched. */
 function keepLocal() {
-  if (!S.spec || !SYNC.base) return;
+  if (!S.spec || !SYNC.base || S.practice) return;   // a practice copy is never kept
   try {
     if (!SYNC.moved) {
       const old = localStorage.getItem(KEY); let x = null; try { x = JSON.parse(old || "null"); } catch (e) { }
@@ -66,8 +66,10 @@ function saved() {   // this browser's copy in the current format; the step is k
 function saveState() {
   const u = $("#undo"), r = $("#redo"), st = $("#saveState"), ot = $("#others");
   if (u) { u.disabled = !S.spec || !S.undo.length; r.disabled = !S.spec || !S.redo.length; }
-  if (st) { st.className = "savestate" + (SYNC.state === "offline" ? " warn" : ""); st.textContent = !S.spec ? "" : { saved: "Saved", saving: "Saving…", offline: "Offline: your changes are kept in this browser and will be sent" }[SYNC.state]; }
-  if (ot) { ot.hidden = !S.spec || !SYNC.others; ot.textContent = SYNC.others === 1 ? "1 other here" : `${SYNC.others} others here`; }
+  if (st) { st.className = "savestate" + (SYNC.state === "offline" && !S.practice ? " warn" : ""); st.textContent = !S.spec ? "" : S.practice ? "Practice copy" : { saved: "Saved", saving: "Saving…", offline: "Offline: your changes are kept in this browser and will be sent" }[SYNC.state]; }
+  const here = SYNC.others === 1 ? "1 other here" : `${SYNC.others} others here`;
+  if (ot) { ot.hidden = !S.spec || S.practice || !SYNC.others; ot.textContent = here; }
+  const so = $("#startOthers"); if (so) so.textContent = SYNC.others ? here : "Nobody else is here now";
 }
 function undo(back) {   // takes back (or brings again) the last change made here; other people's changes stay
   const from = back ? S.undo : S.redo, to = back ? S.redo : S.undo;
@@ -187,8 +189,8 @@ async function openServer(srv, step) {
   if (step != null) S.step = step;
   ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
 }
-/* a whole setup (a sample, a blank template, a workbook, a progress file) goes on the server for the school, then the
-   server's copy opens here */
+/* a whole setup (a blank template, a workbook, a progress file, an earlier copy) goes on the server for the school, then
+   the server's copy opens here */
 async function putSetup(spec, why, step = 1) {
   const r = await fetch("/api/setup", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ spec, why }) });
   if (r.status === 401) { location.href = "/login"; return false; }
@@ -197,15 +199,88 @@ async function putSetup(spec, why, step = 1) {
   const srv = await fetchSetup(); if (!srv || !srv.spec) return false;
   await openServer(srv, step); return true;
 }
+const committee = () => !!(G.st && G.st.role === "committee");
+/* runs fn with this tab's sync stopped: a send already on its way finishes first, none starts meanwhile */
+async function holdSync(fn) {
+  while (SYNC.busy) await new Promise(r => setTimeout(r, 50));
+  SYNC.busy = true; clearTimeout(SYNC.timer);
+  try { return await fn(); } finally { SYNC.busy = false; }
+}
+/* the question before the school's whole setup is replaced (none when the school has no setup yet) */
+function mayReplace() {
+  if (!SYNC.base) return true;
+  const n = SYNC.others;
+  return confirm("This replaces the school's setup for everyone." + (n ? ` ${n} other${n === 1 ? " is" : "s are"} working in it now.` : "") + " An earlier copy is kept. Replace it?");
+}
+/* committee only: the setup becomes the school's, for everyone; a practice copy is left */
+async function replaceSetup(spec, why) {
+  if (!committee()) { toast("Only the committee can replace the school's setup."); return false; }
+  if (!mayReplace()) return false;
+  const ok = await holdSync(async () => {
+    const was = S.practice; S.practice = false;
+    if (await putSetup(spec, why)) return true;
+    S.practice = was; return false;
+  });
+  render(); syncNow(); return ok;
+}
+async function restoreCopy(id) {
+  if (!committee() || !mayReplace()) return;
+  const ok = await holdSync(async () => {
+    const r = await fetch("/api/setup/restore", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+    if (r.status === 401) { location.href = "/login"; return false; }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(j.error || "Could not restore that copy."); return false; }
+    const srv = await fetchSetup(); if (!srv || !srv.spec) return false;
+    await openServer(srv, S.step); return true;
+  });
+  S.copies = null; render(); syncNow();
+  if (ok) toast("The earlier copy is back as the school's setup.");
+}
+/* a practice copy: a sample school to try things on. Nothing in it reaches the server or this browser's storage; the
+   school's setup (SYNC.base, and what was not sent, kept in this browser) waits for Back to the school's setup. */
+async function practice(kind) {
+  const spec = await getJSON(`/api/sample/${kind}`);
+  await holdSync(async () => {
+    S.practice = true; SYNC.held = null;
+    await useKind(spec); unpick();
+    Sync.ensureIds(spec); LIST_KEYS.forEach(k => spec[k] = spec[k] || []); S.spec = spec;
+    S.step = 1; ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
+  });
+  render(); toast("Practice copy of the sample school opened: change anything, nothing is saved for the school.");
+}
+function leavePractice() {
+  S.practice = false; S.spec = null; S.step = 0; S.undo = []; S.redo = []; S.last = null; S.snap = null; SYNC.base = null; unpick();
+  openPage();
+}
 async function begin(kind, what) {
+  if (what === "sample") { await practice(kind); return; }
   const spec = await getJSON(`/api/${what}/${kind}`);
-  if (!await putSetup(spec, what === "sample" ? "Started from the sample school" : "Started a blank setup")) return;
-  render(); syncNow();
-  toast(what === "sample" ? "Sample school loaded and saved for the school: edit it or use it to see how the template works." : "Blank template started and saved for the school.");
+  if (await replaceSetup(spec, "Started blank")) toast("Blank template started and saved for the school.");
 }
 async function adopt(spec, msg, why) {   // a workbook or a progress file opened: it becomes the school's setup
-  if (!await putSetup(spec, why)) return false;
-  render(); syncNow(); if (msg) toast(msg); return true;
+  if (!await replaceSetup(spec, why)) return false;
+  if (msg) toast(msg); return true;
+}
+/* the rollout question: a copy of the setup this browser kept before the setup lived on the server, with changes that
+   never reached it. One in the old place is moved aside first; one with nothing unsaved is removed without asking. */
+const OLD = KEY + ".old";
+function oldChanges() {
+  try {
+    const cur = localStorage.getItem(KEY); let x = null; try { x = JSON.parse(cur || "null"); } catch (e) { }
+    if (x && x.spec && !x.sync) { localStorage.setItem(OLD, cur); localStorage.removeItem(KEY); }
+    let o = null; try { o = JSON.parse(localStorage.getItem(OLD) || "null"); } catch (e) { }
+    if (o && o.spec && o.spec.school && !o.sync && o.dirty) return o;
+    localStorage.removeItem(OLD);
+  } catch (e) { }
+  return null;
+}
+async function oldChoice(k) {
+  const o = S.asking; if (!o) return;
+  if (k === "file") dl(new Blob([JSON.stringify(o.spec, null, 1)], { type: "application/json" }), `${o.spec.school.name || "timetable"}_setup.json`);
+  if (k === "use" && !await replaceSetup(Sync.clone(o.spec), "Unsaved changes from a browser")) return;   // not replaced: the question stays
+  try { localStorage.removeItem(OLD); } catch (e) { }
+  S.asking = null; render();
+  toast({ file: "Saved to a file. They are no longer kept in this browser.", use: "They are the school's setup now.", discard: "Discarded." }[k]);
 }
 function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => t.hidden = true, 3200); }
 
@@ -704,12 +779,12 @@ function render() {
   const nav = $("#steps");
   nav.innerHTML = STEPS.map(([id, label], i) => `<button data-step="${i}" class="${i === S.step ? "on" : ""}" ${!S.spec && i > 0 ? "disabled" : ""}><span>${label}</span><span class="n">${count(id)}</span></button>`).join("");
   $("#kindBadge").textContent = S.spec ? `${sc().type === "primary" ? "Primary" : "Secondary"} · ${sc().name}` : "No school yet";
-  const id = STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
+  const id = S.asking ? "_old" : STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
   // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
   const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap")].map(t => [t.scrollTop, t.scrollLeft]) : [];
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && (f.id ? `#${CSS.escape(f.id)}` : f.dataset.k ? `[data-k="${CSS.escape(f.dataset.k)}"]` : "");
   G.shown = id;
-  main.innerHTML = (VIEWS[id] || (() => ""))();
+  main.innerHTML = (S.practice && !S.asking ? `<div class="practice"><span>Practice copy: nothing here is saved for the school.</span><button id="practiceBack">Back to the school's setup</button></div>` : "") + (VIEWS[id] || (() => ""))();
   main.querySelectorAll(".tablewrap").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
@@ -744,17 +819,31 @@ function exportCard() {
 }
 const VIEWS = {
   start() {
-    return `<div class="card"><h1>Build your school's timetable setup</h1><p class="lead">This tool fills the timetable setup workbook step by step: rooms, classes, subjects, teachers, bands of groups, lessons, rules and students. Every list you make becomes the drop-down for the next step, so nothing is typed twice. At the end you download the workbook and the timetable skill, and an AI agent generates the timetable from them.</p>
-      <div class="choice">
-        <button data-begin="secondary|sample"><b>Secondary school · sample</b><span class="muted">A fictional 16-class secondary school with G1/G2/G3 banding, option bands and rules. Good for seeing how everything fits.</span></button>
-        <button data-begin="primary|sample"><b>Primary school · sample</b><span class="muted">A fictional 18-class primary school, weekly timetable, Standard/Foundation banding at P5–P6.</span></button>
-        <button data-begin="secondary|blank"><b>Secondary school · blank</b><span class="muted">Typical subjects and a day shape filled in; you add rooms, classes, teachers and lessons.</span></button>
-        <button data-begin="primary|blank"><b>Primary school · blank</b><span class="muted">Typical subjects and day shape for P1–P6; you add the rest.</span></button>
-      </div>
-      <div class="row" style="margin-top:14px">
-        <label class="filebtn">Open a setup workbook (.xlsx)<input type="file" id="importX" accept=".xlsx" hidden></label>
-      </div></div>
-      <div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a band, a lesson with no periods).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
+    const how = `<div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a band, a lesson with no periods).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
+    const samples = `<button data-begin="secondary|sample"><b>Secondary school · sample</b><span class="muted">A fictional 16-class secondary school with G1/G2/G3 banding, option bands and rules. Opens as a practice copy: nothing is saved for the school.</span></button>
+        <button data-begin="primary|sample"><b>Primary school · sample</b><span class="muted">A fictional 18-class primary school, weekly timetable, Standard/Foundation banding at P5–P6. Opens as a practice copy: nothing is saved for the school.</span></button>`;
+    const blanks = `<button data-begin="secondary|blank"><b>Secondary school · blank</b><span class="muted">Typical subjects and a day shape filled in; you add rooms, classes, teachers and lessons.</span></button>
+        <button data-begin="primary|blank"><b>Primary school · blank</b><span class="muted">Typical subjects and day shape for P1–P6; you add the rest.</span></button>`;
+    const workbook = `<div class="row" style="margin-top:14px"><label class="filebtn">Open a setup workbook (.xlsx)<input type="file" id="importX" accept=".xlsx" hidden></label></div>`;
+    if (S.practice) return `<div class="card"><h1>Practice copy</h1><p class="lead">A sample school to try the steps on. Change anything: nothing here is saved for the school, and nobody else sees it. The school's setup is as you left it.</p>
+      <div class="choice">${samples}</div></div>${how}`;
+    if (!S.spec) return committee()
+      ? `<div class="card"><h1>Build your school's timetable setup</h1><p class="lead">This tool fills the timetable setup workbook step by step: rooms, classes, subjects, teachers, bands of groups, lessons, rules and students. Every list you make becomes the drop-down for the next step, so nothing is typed twice. At the end you download the workbook and the timetable skill, and an AI agent generates the timetable from them.</p>
+      <p class="muted">The school has no setup yet. Start one blank or open a workbook: it is saved for the school, and everyone on the committee and the department heads work in it together.</p>
+      <div class="choice">${blanks}${samples}</div>${workbook}</div>${how}`
+      : `<div class="card"><h1>The school's timetable setup</h1><p class="lead">The committee has not started the setup yet.</p></div>`;
+    const s = sc();
+    return `<div class="card"><h1>The school's timetable setup</h1><p class="lead">Everyone works in this one setup together: each change is saved for the school as it is made.</p>
+      <div><span class="stat">School <b>${esc(s.name || "no name yet")}</b></span><span class="stat">Timetable <b>${esc(s.timetable || "no name yet")}</b></span><span class="stat" id="startOthers">${SYNC.others ? (SYNC.others === 1 ? "1 other here" : `${SYNC.others} others here`) : "Nobody else is here now"}</span></div>
+      <div class="row" style="margin-top:12px"><button class="primary" data-step="1">Open School & day</button></div></div>
+      ${committee() ? `<div class="card"><h2>Replace the whole setup</h2><p class="muted">Each of these replaces the school's setup for everyone; an earlier copy is kept, and <b>7 Download</b> can restore it. Loading a progress file is on 7 Download too.</p>
+      <div class="choice">${blanks}</div>${workbook}
+      <h2 style="margin-top:16px">Try things out</h2><p class="muted">A sample school as a practice copy: nothing in it is saved for the school.</p><div class="choice">${samples}</div></div>` : ""}${how}`;
+  },
+  _old() {   // the rollout question, before anything else
+    return `<div class="card"><h1>Changes from before</h1><p class="lead">This browser has changes from before that were never saved for the school.</p>
+      <p class="muted">They are from ${esc((S.asking.spec.school || {}).name || "a setup")}. Save them to a file to keep them${committee() ? ", use them as the school's setup (the school's setup now is kept as an earlier copy)" : ""}, or discard them.</p>
+      <div class="row" style="margin-top:12px"><button class="primary" data-old="file">Save them to a file</button>${committee() ? `<button data-old="use">Use them</button>` : ""}<button data-old="discard">Discard them</button></div></div>`;
   },
   school() {
     const s = sc(); const NP = Number(s.periods_per_day); const days = dayNames();
@@ -931,7 +1020,7 @@ const VIEWS = {
       <div class="dl">
         <div class="card"><h2>1 · Configuration workbook</h2><p class="muted">Everything you entered, as the .xlsx template.</p><button class="primary" id="build">Download workbook (.xlsx)</button></div>
         <div class="card"><h2>2 · The timetable skill</h2><p class="muted">Use the zip when the chatbot can run code: its scripts make a timetable file this app can publish as it is. SKILL.md alone is for a chatbot that cannot run code.</p><div class="row"><a href="/download/skill.zip"><button class="primary">Skill (.zip)</button></a><a href="/download/SKILL.md"><button>SKILL.md only</button></a></div></div>
-        <div class="card"><h2>Keep a copy</h2><p class="muted">The setup as a progress file, to keep or to open on another computer.</p><div class="row"><button id="saveJson" title="Download the setup as a progress file">Save to file</button><label class="filebtn" title="Open a progress file">Load from file<input type="file" id="loadJson" accept=".json" hidden></label></div></div>
+        <div class="card"><h2>Keep a copy</h2><p class="muted">The setup as a progress file, to keep or to open on another computer.</p><div class="row"><button id="saveJson" title="Download the setup as a progress file">Save to file</button>${committee() && !S.practice ? `<label class="filebtn" title="Open a progress file: it replaces the school's setup for everyone">Load from file<input type="file" id="loadJson" accept=".json" hidden></label>` : ""}</div>${committee() && !S.practice ? copiesList() : ""}</div>
       </div>
       <div class="card" style="margin-top:16px"><h2>How to make the timetable</h2><ol class="howto">
         <li>In Claude (or another agent that can run Python), add the skill: upload the .zip as a skill, or attach SKILL.md to the conversation.</li>
@@ -941,10 +1030,18 @@ const VIEWS = {
       <div class="card" style="margin-top:16px"><h2>Templates to share</h2><p class="muted">Ready-made workbooks for others to fill in Excel.</p><div class="row"><a href="/download/template/secondary"><button>Sample secondary</button></a><a href="/download/template/primary"><button>Sample primary</button></a><a href="/download/blank/secondary"><button>Blank secondary</button></a><a href="/download/blank/primary"><button>Blank primary</button></a></div></div>`;
   },
   publish() {
+    if (S.practice) return `<div class="card"><h1>Step 8 · Publish</h1><p class="lead">Publishing is off in a practice copy.</p></div>`;
     return `<div class="card"><h1>Step 8 · Publish</h1><p class="lead">Bring back the timetable the AI agent made, check it, then publish it. Nothing is visible to teachers or students until you publish.</p></div>
       ${exportCard()}<div class="card" id="pubNow" style="margin-top:16px"></div>`;
   },
 };
+
+function copiesList() {   // the earlier copies of the school's setup the server keeps (a replacement keeps one)
+  if (!S.copies) return `<div class="row" style="margin-top:10px"><button id="copiesLoad">Restore an earlier copy</button></div>`;
+  if (!S.copies.length) return `<p class="muted small" style="margin-top:10px">The server has no earlier copies yet.</p>`;
+  return `<h3 style="margin-top:12px">Restore an earlier copy</h3><p class="muted small">It replaces the school's setup for everyone; the setup as it is now is kept as a copy too.</p>
+    <div class="tablewrap" style="max-height:260px"><table><tr><th>When</th><th>What</th><th></th></tr>${S.copies.map(c => `<tr><td>${esc(c.when)}</td><td>${esc(c.what)}</td><td><button class="small" data-restore="${esc(c.id)}">Restore</button></td></tr>`).join("")}</table></div>`;
+}
 
 /* ---------------- events */
 document.addEventListener("click", async e => {
@@ -955,6 +1052,10 @@ document.addEventListener("click", async e => {
   if (b.dataset.step) { S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
+  if (b.id === "practiceBack") { leavePractice(); return; }
+  if (b.dataset.old) { oldChoice(b.dataset.old); return; }
+  if (b.id === "copiesLoad") { try { S.copies = await getJSON("/api/setup/copies"); } catch (err) { toast("Could not load the earlier copies."); return; } render(); return; }
+  if (b.dataset.restore) { restoreCopy(b.dataset.restore); return; }
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
   if (b.dataset.add) { addRow(b.dataset.add); return; }
   if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); unpick(); save(); render(); return; }
@@ -996,13 +1097,13 @@ function paint(c) {
 }
 document.addEventListener("change", async e => {
   const el = e.target;
-  if (el.id === "importX") { const f = el.files[0]; if (!f) return; const fd = new FormData(); fd.append("file", f); const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json(); if (!r.ok) { toast(j.error || "Could not read that file."); return; } if (!await adopt(j, "Workbook opened and saved for the school.", "Opened a workbook")) return;
+  if (el.id === "importX") { const f = el.files[0]; if (!f) return; const fd = new FormData(); fd.append("file", f); const r = await fetch("/api/import", { method: "POST", body: fd }); const j = await r.json(); if (!r.ok) { toast(j.error || "Could not read that file."); return; } if (!await adopt(j, "Workbook opened and saved for the school.", "Opened a workbook")) { el.value = ""; return; } el.value = "";
     const nr = new Set(ruleProblems(lessonInfo()).map(x => x[0])).size;   // rules written in a way the timetable cannot use: say so now, not after generating
     if (nr) toast(`Workbook opened. ${nr} rule${nr === 1 ? "" : "s"} on step 6 cannot be used as written (skipped or matching nothing): see Things to fix. It is saved for the school.`);
     return; }
   if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; el.value = ""; let spec = null; try { spec = JSON.parse(await f.text()); } catch (err) { }
     if (!spec || !spec.school) { toast("That file is not a progress file."); return; }
-    try { await adopt(spec, "Progress loaded from the file and saved for the school.", "Loaded a progress file"); } catch (err) { toast("Could not reach the server: " + err.message); } return; }
+    try { await adopt(spec, "Progress loaded from the file and saved for the school.", "Loaded from a file"); } catch (err) { toast("Could not reach the server: " + err.message); } return; }
   if (el.dataset.names) { setPath(el.dataset.names, el.value.split(",").map(t => t.trim()).filter(Boolean)); save(); render(); return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
   if (el.id === "stuFile") { stuFile(el); return; }
@@ -1565,6 +1666,7 @@ document.addEventListener("focusout", () => setTimeout(tryHeld, 0));
    setup since); while the server cannot be reached, those changes stay kept here and the page tries again */
 async function openPage() {
   let srv = null;
+  await poll();   // the status first: it says whether this is the committee or a head
   try {
     srv = await fetchSetup(); if (!srv) return;
     if (srv.spec) {
@@ -1584,6 +1686,7 @@ async function openPage() {
       setTimeout(openPage, 5000); return;
     }
   }
-  render(); await poll(); if (S.spec) syncNow();   // the status first: it says whether this is a head
+  if (!S.asking) S.asking = oldChanges();
+  render(); if (S.spec) syncNow();
 }
 openPage();
