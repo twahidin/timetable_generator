@@ -1,15 +1,16 @@
 """The draft: the timetable the committee uploaded, kept on the server beside the saved setup. It is checked against the
 setup as it is now (ttgen.verify), each difference is decided on (change step 5, leave it, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
-import os, re, shutil, threading
+import json, os, re, shutil, threading
 from ttgen.export import model_from_files
 from ttgen.spec import typed_rules
 from ttgen import choices, verify
-import store, sync
+import store, sync, fixes
 
 DIR = os.path.join(store.DATA, "draft")
 ANSWERS = ("step5", "left", "open")
 _lock = threading.RLock()   # always taken before store's locks, never inside them
+_cache = {}                 # one entry: the model of the draft with its fixes applied, (key, model, fx); one worker, so a dict under _lock
 
 def _p(name): return os.path.join(DIR, name)
 def exists(): return os.path.exists(_p("meta.json"))
@@ -39,7 +40,7 @@ def save(setup_path, timetable_path, source, spec):
                                                               config_id=str(((m["setup"].get("school") or {}).get("config_id")) or "").strip()))
         shutil.rmtree(old, ignore_errors=True)
         if os.path.exists(DIR): os.replace(DIR, old)
-        os.replace(new, DIR); shutil.rmtree(old, ignore_errors=True)
+        os.replace(new, DIR); shutil.rmtree(old, ignore_errors=True); _cache.clear()
         return m
 
 def summary():
@@ -47,15 +48,31 @@ def summary():
     meta = store.read_json(_p("meta.json")) if exists() else None
     return dict(uploaded_at=meta.get("uploaded_at"), source=meta.get("source"), open=meta.get("open")) if meta else None
 
-def _build(m=None, rec=None):
-    """the draft checked against the setup as it is now (or rec, a setup record): the fields of info() before decisions are
-    laid over them. The files are read under the lock (a new upload swaps the folder); the model is built outside it, or given."""
+def model_now(rec=None):
+    """(model, setup record, fx) of the draft with its fixes applied, checked against the setup record (default: as it is now).
+    fx = dict(texts, problems, touched) from fixes.apply. One model is kept, for the same upload, setup version and fixes; it is
+    shared between requests, so nothing may change it."""
     rec = rec or store.setup_record(); spec = rec["spec"]
     if not spec: raise LookupError("no setup")
     with _lock:
-        meta = store.read_json(_p("meta.json"), {})
-        if m is None: args = paths()
-    if m is None: m = model_from_files(*args, spec=spec)
+        meta = store.read_json(_p("meta.json"), {}); fl = meta.get("fixes") or []
+        key = (meta.get("uploaded_at"), rec["v"], json.dumps(fl, sort_keys=True))
+        if _cache.get("key") == key: return _cache["m"], rec, _cache["fx"]
+        args = paths()
+    fx = {}; m = model_from_files(None, args[1], spec=spec, edit=fixes.editor(fl, fx))   # no re-read of the setup workbook: the spec is given
+    if meta.get("config_id"): m["setup"].setdefault("school", {})["config_id"] = meta["config_id"]
+    with _lock: _cache.clear(); _cache.update(key=key, m=m, fx=fx)
+    return m, rec, fx
+
+def _build(m=None, rec=None):
+    """the draft with its fixes applied, checked against the setup as it is now (or rec, a setup record): the fields of info()
+    before decisions are laid over them. m: a model already built (by save, with no fixes yet)."""
+    if m is None: m, rec, fx = model_now(rec)
+    else:
+        rec = rec or store.setup_record(); fx = dict(texts=[], problems=[], touched=set())
+        if not rec["spec"]: raise LookupError("no setup")
+    spec = rec["spec"]
+    with _lock: meta = store.read_json(_p("meta.json"), {})
     ws = verify.warnings(m); ch = m["checks"]
     cid, ver = meta.get("config_id") or "", rec["v"]; got = re.fullmatch(r"v(\d+)", cid)
     state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
@@ -65,7 +82,7 @@ def _build(m=None, rec=None):
                 school=m["school"]["name"], file_school=theirs, timetable=m["school"]["timetable"], lessons=ch["lessons"], classes=len(m["classes"]), teachers=len(m["teachers"]),
                 students=len(m["students"]), after=ch["after_school"][:30], notes=m["notes"][:12], rule_report=m.get("rule_report") or [],
                 choices_used=m.get("choices_used") or [], choices=len(spec.get("choices") or []) - len({i for i, _ in choices.problems(spec)}),
-                typed=len(typed_rules(spec)), warnings=ws["warnings"], not_checked=ws["not_checked"], fixes=meta.get("fixes") or [],
+                typed=len(typed_rules(spec)), warnings=ws["warnings"], not_checked=ws["not_checked"], fixes=[dict(text=f.get("text"), at=f.get("at"), kind=f.get("kind")) for f in meta.get("fixes") or []], fix_problems=fx["problems"],
                 other_school=ours if ours and theirs and ours.lower() != theirs.lower() else "")
 
 def _finish(j, change=None):

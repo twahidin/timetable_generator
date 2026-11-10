@@ -198,10 +198,11 @@ def rule_report_rows(rows):
                         result=_result(g(row, "result")), how=str(g(row, "how") or "").strip()))
     return out
 
-def model_from_files(setup_path, timetable_path, spec=None):
+def model_from_files(setup_path, timetable_path, spec=None, edit=None):
     """the export model from a setup workbook and a timetable: a workbook with a Lessons sheet (hand-over format), or a
     SQLite database (ttgen.database). A database written by write_db keeps the setup, so setup_path may then be None.
-    spec: a setup to check against instead (copied; the file's own setup then only lends its configuration id)."""
+    spec: a setup to check against instead (copied; the file's own setup then only lends its configuration id).
+    edit: edit(lessons, spec, days) -> lessons, called on the lessons read from the file just before the model is made (the app's fixes)."""
     db = read_db(timetable_path) if is_db(timetable_path) else None
     spec_given = spec is not None
     if spec is not None:
@@ -271,6 +272,7 @@ def model_from_files(setup_path, timetable_path, spec=None):
                 if c not in (None, "") and str(day or "").lower() in dix and p is not None: recess[str(c)].append([dix[str(day).lower()], int(p), int(n or 1)])
     finally:
         if wbu is not None: wbu.close()
+    if edit: out = edit(out, spec, days)
     m = _model(spec, days, out, notes=notes, status=status, recess=recess); m["rule_report"] = report
     m["file_school"] = file_school if spec_given else str((setup.get("school") or {}).get("name") or "").strip()
     m["setup"] = setup; m["checked_setup"] = spec; m["choices_used"] = used; m["choice_problems"] = choice_probs   # the database keeps the setup as downloaded
