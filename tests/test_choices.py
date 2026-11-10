@@ -116,4 +116,19 @@ def a_timetable_with_a_floating_recess_passes_when_the_choice_was_used():
         assert "R" in database.read_db(db)[5]["day_structure"]["Sec 2"][day]   # the database keeps the downloaded setup, not the fallback copy
         m2 = export.model_from_files(None, db); assert m2["choices_used"][0]["item"] == "Recess for Sec 2"
 
+@t
+def solve_keeps_the_setup_as_downloaded_in_the_database():
+    import json
+    from ttgen import export, database
+    sp = with_choices(); sp["choices"][0] = dict(kind="rule", rule=i_R1, fallback="Drop", order=1)
+    with tempfile.TemporaryDirectory() as d:
+        setup = os.path.join(d, "setup.xlsx"); template.write_template(sp, setup); read = reader.read_template(setup)
+        tt = os.path.join(d, "t.xlsx"); wb = openpyxl.Workbook(); wb.active.title = "Lessons"
+        wb.active.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"]); wb.save(tt)
+        m = export.model_from_files(setup, tt); applied = choices.apply_all(read, 1); assert len(applied["rules"]) < len(read["rules"])
+        m["setup"] = applied   # what model_from_result gives solve: the copy the solver ran on
+        rows = main.record_choices(m, read, 1, tt); assert rows and m["setup"] is read
+        db = os.path.join(d, "t.sqlite"); database.write_db(m, db)
+        assert database.read_db(db)[5] == json.loads(json.dumps(read, default=str)) and database.read_db(db)[7][0]["used"] == "Second choice"
+
 print(f"{n} checks passed")

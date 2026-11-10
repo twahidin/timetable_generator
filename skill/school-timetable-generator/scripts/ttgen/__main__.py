@@ -13,6 +13,17 @@ def _say_outputs(out):
             for p in v: print("wrote", p)
         else: print("wrote", v, f"({names.get(k, k)})")
 
+def record_choices(m, spec, k, path):
+    """after a solve at k: put the Choices used rows on the model m and on the workbook at path, and keep the setup as downloaded
+    in m (the solver ran on the copy with the first k choices given way on, which must not reach the database)"""
+    from . import choices
+    rows = choices.used_rows(spec, k)
+    if m is not None: m["setup"] = spec
+    if rows:
+        choices.used_sheet(path, rows)
+        if m is not None: m["choices_used"] = rows
+    return rows
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="ttgen")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -77,9 +88,7 @@ def main(argv=None):
     for at, path in todo:
         k, res = at["k"], at["res"]
         probs, stats, post, m = write_timetable(res, path, return_model=True)
-        rows = choices.used_rows(spec, k) if res["lessons"] else []
-        if rows:
-            choices.used_sheet(path, rows); m["choices_used"] = rows
+        rows = record_choices(m, spec, k, path) if res["lessons"] else []
         if cmode == "compare": print(f"--- {'First choices' if k == 0 else f'After choice {k}'} ---")
         print("wrote", path, stats)
         for p in (probs or ["Checks passed: no clashes, every lesson placed with its planned periods."]): print(" -", p)
