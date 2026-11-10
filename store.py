@@ -230,7 +230,8 @@ def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print):
         ch = m["checks"]
         write_json(os.path.join(tmp, "meta.json"), dict(published_at=now(), run=run_id, source=source, school=m["school"]["name"], timetable=m["school"]["timetable"],
                                                          ok=ch["ok"], problems=ch["problems"][:20], after_school=ch["after_school"],
-                                                         classes=len(m["classes"]), students=len(m["students"]), lessons=ch["lessons"], files=files))
+                                                         classes=len(m["classes"]), students=len(m["students"]), lessons=ch["lessons"], files=files,
+                                                         rule_report=m.get("rule_report") or []))
         with _lock:
             shutil.rmtree(old, ignore_errors=True)
             if os.path.exists(PUB): os.replace(PUB, old)

@@ -5,7 +5,7 @@ Reads the current layout (Teacher availability, Fixed lessons and rule rows on S
 template) and the older one (a 7 Rules sheet). Everything that constrains the timetable becomes a rule on spec['rules']."""
 import collections, datetime, re
 import openpyxl
-from .spec import defaults, lesson_split, names_list, ALL_LEVELS, EVERY_CLASS, SETTING_RULES
+from .spec import defaults, lesson_split, names_list, ALL_LEVELS, EVERY_CLASS, SETTING_RULES, TYPED
 
 FIXED_COLS = ("Level", "Class(es) or group", "Subject", "Week", "Day", "Start period", "Note")   # Fixed lessons, as the template writes it
 
@@ -179,6 +179,8 @@ def read_template(path):
                   "week": x.get("Week") or "Both", "day": x.get("Day") or "All", "from": x.get("From period"), "to": x.get("To period"),
                   "number": x.get("Number"), "strength": x.get("Must / Prefer") or "Must", "note": x.get("Note")}
             if names_list(x.get("Venues")): r_["venues"] = names_list(x.get("Venues"))
+            words = x.get("In words")   # the column is missing in older workbooks: a typed rule then reads with no sentence
+            if r_["rule"] == TYPED or words not in (None, ""): r_["text"] = str(words or "").strip()
             rules.append(r_)
     if "Teacher availability" in wb.sheetnames:   # clock times -> the periods they overlap; the times are kept for writing back
         for x in _table(wb["Teacher availability"], "Teacher")[1]:

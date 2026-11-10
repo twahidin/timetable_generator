@@ -58,6 +58,9 @@ def write_db(m, path, spec=None):
                     checks=json.dumps({k: m["checks"].get(k) for k in ("ok", "problems", "lessons") if k in (m.get("checks") or {})}, default=str))
         if spec is not None: meta["setup"] = json.dumps(spec, default=str)
         con.executemany("INSERT INTO meta VALUES (?, ?)", [(k, "" if v is None else str(v)) for k, v in meta.items()])
+        q("CREATE TABLE rule_report (no INTEGER, strength TEXT, applies TEXT, rule TEXT, result TEXT, how TEXT)")   # the agent's answer per typed rule
+        con.executemany("INSERT INTO rule_report VALUES (?, ?, ?, ?, ?, ?)",
+                        [(r.get("no"), r.get("strength") or "", r.get("applies") or "", r.get("rule") or "", r.get("result") or "", r.get("how") or "") for r in (m.get("rule_report") or [])])
 
         q("CREATE TABLE days (id INTEGER PRIMARY KEY, name TEXT UNIQUE, week TEXT, weekday TEXT, day_index INTEGER)")
         con.executemany("INSERT INTO days VALUES (?, ?, ?, ?, ?)", [(i + 1, d, *_split_day(d), i) for i, d in enumerate(days)])
@@ -118,7 +121,7 @@ HANDOVER = ["Lesson ID", "Day", "Start period", "End period", "Periods", "Level"
 
 
 def read_db(path):
-    """(header, rows, notes, status, recess, spec) with rows in the hand-over format. spec is the setup kept in the file
+    """(header, rows, notes, status, recess, spec, rule_report) with rows in the hand-over format. spec is the setup kept in the file
     (None if it has none, such as a database made by another tool); recess is {class: [[day name, period, length]]}."""
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
@@ -145,6 +148,10 @@ def read_db(path):
         recess = {}
         if "recess" in tables:
             for c, d, p, n in con.execute("SELECT class_name, day, start_period, periods FROM recess"): recess.setdefault(str(c), []).append([d, int(p), int(n or 1)])
-        return HANDOVER, rows, notes, meta.get("solver_status") or None, recess, spec
+        report = []
+        if "rule_report" in tables:
+            for r in con.execute("SELECT * FROM rule_report ORDER BY rowid"):
+                report.append(dict(no=get(r, "no"), strength=get(r, "strength", ""), applies=get(r, "applies", ""), rule=get(r, "rule", ""), result=get(r, "result", ""), how=get(r, "how", "")))
+        return HANDOVER, rows, notes, meta.get("solver_status") or None, recess, spec, report
     finally:
         con.close()

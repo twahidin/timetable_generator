@@ -50,6 +50,8 @@ def main(argv=None):
         from .solver import fixed_clashes, rule_label, rule_problems
         for p in fixed_clashes(spec, P): print(" ! Fixed lessons clash:", p)
         for i, p in rule_problems(spec, P): print(f" ! Rule {rule_label(spec['rules'][i])}: {p}")
+        from .spec import typed_rules, typed_label
+        for num, _, r in typed_rules(spec): print(" * For the agent to honour:", typed_label(num, r))
         return 0
     from .solver import solve
     from .report import write_timetable

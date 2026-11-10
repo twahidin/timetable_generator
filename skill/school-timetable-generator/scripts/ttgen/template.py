@@ -10,7 +10,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.formatting.rule import FormulaRule, CellIsRule
 from openpyxl.workbook.defined_name import DefinedName
-from .spec import RULE_TYPES, SCOPES, CODES, EVERY_CLASS, RECESS_ROWS, SETTING_RULES, ROLES, day_names, names_list, order_days, scopes_for, split_rules
+from .spec import RULE_TYPES, SCOPES, CODES, EVERY_CLASS, RECESS_ROWS, SETTING_RULES, ROLES, SKILL_VERSION, day_names, names_list, order_days, scopes_for, split_rules
 
 NAVY, SLATE = "1F4E78", "5B6B7F"
 HF = Font(name="Arial", bold=True, color="FFFFFF", size=10)
@@ -95,6 +95,7 @@ def write_template(spec, path, extra_rows=120):
     rd["A1"] = f"{sc['name']} {sc['timetable']} timetable setup"; rd["A1"].font = TITLE
     rd["A2"] = "Fill the sheets in order. Each step's list becomes the drop-down for the next, so nothing is typed twice and nothing can be misspelt."; rd["A2"].font = BF
     rd["A3"] = "Blue text on yellow = type or pick.  Grey = worked out by formulas.  Red in a Check column = something to fix."; rd["A3"].font = BF
+    rd["A4"] = f"Made for timetable skill version {SKILL_VERSION}: use SKILL.md with that version line."; rd["A4"].font = NOTE
     B.head(rd, 5, ["Step", "Sheet", "What you do"])
     for i, (a, b, c_) in enumerate(steps, start=6):
         rd.cell(i, 1, a).font = Font(name="Arial", bold=True, size=10); rd.cell(i, 2, b).font = Font(name="Arial", bold=True, size=10)
@@ -474,30 +475,30 @@ def write_template(spec, path, extra_rows=120):
     for col, w in zip("ABCDEF", (26, 30, 10, 10, 60, 44)): rt.column_dimensions[col].width = w
     nRT = len(RULE_TYPES); B.name("RuleList", f"'Rule types'!$A$4:$A${3 + nRT}")
     rcols = [("Applies to (kind)", 12), ("Applies to", 30), ("Subject (optional)", 28), ("Rule", 26), ("Week", 8), ("Day", 7), ("From period", 8), ("To period", 8),
-             ("Number", 8), ("Venues", 22), ("Must / Prefer", 9), ("Note", 40), ("Times", 20), ("Check", 36)]
-    RIN = set(range(1, 13))
+             ("Number", 8), ("Venues", 22), ("Must / Prefer", 9), ("Note", 40), ("In words", 44), ("Times", 20), ("Check", 36)]
+    RIN = set(range(1, 14))
     more = rules["more"]
     rw = B.sheet(MR, "More rules (optional): any other constraint", [f"For rules that have no place on Settings, {TA} or {FX}: rooms, levels, subjects, Prefer rules and so on. First pick what a rule applies to; the next drop-down then lists only those.",
                  "Must = never broken; Prefer = kept where possible. See 'Rule types' for every rule and an example. Only these subjects takes several subjects in Subject, "
                  "and Only in venues the rooms in Venues, separated by commas.", "Periods are numbered as on Period times (Times shows the clock)."], rcols, RIN)
     for i, x in enumerate(more):
-        for j, k in enumerate(["scope", "target", "subject", "rule", "week", "day", "from", "to", "number", "venues", "strength", "note"], start=1):
+        for j, k in enumerate(["scope", "target", "subject", "rule", "week", "day", "from", "to", "number", "venues", "strength", "note", "text"], start=1):
             rw.cell(R0 + i, j, ", ".join(names_list(x.get(k))) if k == "venues" else x.get(k))
     rL = R0 + len(more) + 80
-    B.paint(rw, rL, RIN, 14)
+    B.paint(rw, rL, RIN, 15)
     SC = "{" + ",".join(f'"{s}"' for s in SCOPES) + "}"
     LISTS = "SchoolList,LevelList,ClassList,TeacherList,DeptList,SubjectList,BlockList,BlockList,RoomList"   # Group: a code, so any text is accepted
     rtA = f"'Rule types'!$A$4:$A${3 + nRT}"
     for r in range(R0, rL + 1):
-        rw[f"M{r}"] = f'=IF(G{r}="","",TEXT(INDEX({PTB},G{r}+1),"h:mm AM/PM")&" - "&TEXT(INDEX({PTC},IF(H{r}="",G{r},H{r})+1),"h:mm AM/PM"))'
+        rw[f"N{r}"] = f'=IF(G{r}="","",TEXT(INDEX({PTB},G{r}+1),"h:mm AM/PM")&" - "&TEXT(INDEX({PTC},IF(H{r}="",G{r},H{r})+1),"h:mm AM/PM"))'
         nt, nn, scp = (f"INDEX('Rule types'!${c}$4:${c}${3 + nRT},MATCH(D{r},{rtA},0))" for c in ("C", "D", "B"))
-        rw[f"N{r}"] = (f'=IF(A{r}="","",TRIM(IF(AND(A{r}<>"Group",COUNTIF(CHOOSE(MATCH(A{r},{SC},0),{LISTS}),B{r})=0),"Pick the "&LOWER(A{r})&" from the list. ","")'
+        rw[f"O{r}"] = (f'=IF(A{r}="","",TRIM(IF(AND(A{r}<>"Group",COUNTIF(CHOOSE(MATCH(A{r},{SC},0),{LISTS}),B{r})=0),"Pick the "&LOWER(A{r})&" from the list. ","")'
                        f'&IF(D{r}="","Pick a rule. ",IF(ISERROR(FIND(A{r},{scp})),D{r}&" does not apply to a "&LOWER(A{r})&". ","")'
                        f'&IF(AND(IFERROR({nt},"N")="Y",G{r}="",H{r}="",D{r}<>"Only these subjects",D{r}<>"Only in venues"),"Give the period(s). ","")&IF(AND(IFERROR({nn},"N")="Y",I{r}=""),"Give the Number. ",""))'
                        f'&IF(AND(OR(D{r}="Same time across classes",D{r}="Not on the same day as",D{r}="Only these subjects"),C{r}=""),"Pick the Subject. ","")'
-                       f'&IF(AND(D{r}="Only in venues",J{r}=""),"List the rooms under Venues. ","")))')
-        rw[f"N{r}"].alignment = Alignment(wrap_text=True, vertical="top")
-    rw.conditional_formatting.add(f"N{R0}:N{rL}", FormulaRule(formula=[f"LEN(N{R0})>0"], fill=RED))
+                       f'&IF(AND(D{r}="Only in venues",J{r}=""),"List the rooms under Venues. ","")&IF(AND(D{r}="In words",M{r}=""),"Write the rule in words. ","")))')
+        rw[f"O{r}"].alignment = Alignment(wrap_text=True, vertical="top")
+    rw.conditional_formatting.add(f"O{R0}:O{rL}", FormulaRule(formula=[f"LEN(O{R0})>0"], fill=RED))
     B.dv(rw, f"A{R0}:A{rL}", "=RuleScopeList", "Pick what the rule applies to.")
     B.dv(rw, f"C{R0}:C{rL}", "=SubjectList", "Pick a subject (Only these subjects: several, separated by commas).", strict=False)
     B.dv(rw, f"D{R0}:D{rL}", "=RuleList", "Pick a rule (see Rule types).")

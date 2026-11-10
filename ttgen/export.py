@@ -154,6 +154,49 @@ def _rain(x, r):
 def _split_list(v):
     return [s.strip() for s in str(v or "").split(",") if s.strip()]
 
+RESULTS = ("Met", "Partly", "Not met")   # what a rule report may say about each typed rule
+
+def _result(v):
+    """'MET', 'partly met', 'not met', 'yes', 'no', 'unmet'... -> Met / Partly / Not met; anything else -> ''"""
+    s = str(v or "").strip().lower()
+    if not s: return ""
+    if s.startswith("part"): return "Partly"
+    if s in ("not met", "no", "unmet", "not") or s.startswith("not "): return "Not met"
+    if s in ("met", "yes", "y", "done", "kept"): return "Met"
+    return ""
+
+_REPORT_COLS = {   # a header cell answers to a column by one of these tests (lower-cased, trimmed)
+    "no": lambda h: h in ("no", "no.", "#", "t", "number", "no. (t)") or h.startswith("no."),
+    "strength": lambda h: h.startswith(("must", "strength", "prefer")),
+    "applies": lambda h: h.startswith(("applies", "scope", "what it applies")),
+    "rule": lambda h: h == "rule" or h.startswith(("typed rule", "rule (", "in words", "sentence")),
+    "result": lambda h: h.startswith(("result", "met", "status", "outcome")),
+    "how": lambda h: h.startswith(("how", "comment", "note", "why")),
+}
+
+def rule_report_rows(rows):
+    """the rows of a Rule report as [{no, strength, applies, rule, result, how}]. The header is the first of the top rows
+    with a Result (or How) cell, so a title above it is skipped; column names are matched loosely (No./#/T, Must /
+    Prefer or Strength, Applies to, Rule or Typed rule, Result or Met?, How); a number written T1 reads as 1; blank
+    rows are skipped"""
+    rows = list(rows)
+    def cells(row): return [str(h).strip().lower() if h is not None else "" for h in row]
+    hi = next((i for i, row in enumerate(rows[:6]) if any(_REPORT_COLS["result"](h) or _REPORT_COLS["how"](h) for h in cells(row))), None)
+    if hi is None: return []
+    hdr = cells(rows[hi])
+    ix = {k: next((i for i, h in enumerate(hdr) if h and test(h)), None) for k, test in _REPORT_COLS.items()}
+    def g(row, k):
+        i = ix.get(k); return row[i] if i is not None and i < len(row) else None
+    out = []
+    for row in rows[hi + 1:]:
+        if not any(v not in (None, "") for v in row): continue
+        no = g(row, "no")
+        m = re.match(r"^\s*[Tt#]?\s*(\d+)", str(no)) if no not in (None, "") else None
+        no = int(m.group(1)) if m else None
+        out.append(dict(no=no, strength=str(g(row, "strength") or "").strip(), applies=str(g(row, "applies") or "").strip(), rule=str(g(row, "rule") or "").strip(),
+                        result=_result(g(row, "result")), how=str(g(row, "how") or "").strip()))
+    return out
+
 def model_from_files(setup_path, timetable_path):
     """the export model from a setup workbook and a timetable: a workbook with a Lessons sheet (hand-over format), or a
     SQLite database (ttgen.database). A database written by write_db keeps the setup, so setup_path may then be None."""
@@ -193,6 +236,8 @@ def model_from_files(setup_path, timetable_path):
                         room=str(g(row, "Room") or ""), ext=str(g(row, "After school") or "").strip().lower() in ("yes", "y", "true", "1", "x"),
                         rain=str(g(row, "Rain room") or "")))
     notes, status = (list(db[2]), db[3]) if db else ([], None)
+    report = list(db[6]) if db else []
+    if wb and "Rule report" in wb.sheetnames: report = rule_report_rows(wb["Rule report"].iter_rows(values_only=True))
     if wb and "Read me" in wb.sheetnames:
         sect = None
         for (v,) in wb["Read me"].iter_rows(min_col=1, max_col=1, values_only=True):
@@ -211,7 +256,8 @@ def model_from_files(setup_path, timetable_path):
         for row in rows:
             c, day, p, n = (row[h[k]] if k in h and h[k] < len(row) else None for k in ("class", "day", "start period", "periods"))
             if c not in (None, "") and str(day or "").lower() in dix and p is not None: recess[str(c)].append([dix[str(day).lower()], int(p), int(n or 1)])
-    return _model(spec, days, out, notes=notes, status=status, recess=recess)
+    m = _model(spec, days, out, notes=notes, status=status, recess=recess); m["rule_report"] = report
+    return m
 
 
 # ----------------------------------------------------------------------------------------------- independent checks

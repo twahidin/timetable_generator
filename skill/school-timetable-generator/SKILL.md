@@ -5,6 +5,8 @@ description: Generate a clash-free Singapore school timetable from a filled setu
 
 # School timetable generator
 
+Skill version: 2026-11 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill).
+
 Turns a filled **timetable setup workbook** into a timetable with no teacher, room or student in two places at once,
 then delivers it in three forms that always agree with each other:
 
@@ -40,7 +42,8 @@ subject-based banding) schools, and for any school that fills the same template.
    - each teacher: periods taught against allowance, and against the lesson periods of the levels they teach
      (above about 85% is usually impossible to pack);
    - each block: groups needing a special room kind at once against the number of rooms of that kind.
-3. **Solve and export in one go.**
+3. **Solve and export in one go** (when the setup has no rules "In words"; with them, solve first, add the Rule report
+   sheet, then export: see **Typed rules** below).
    `python -m ttgen solve SETUP.xlsx --out TIMETABLE.xlsx --time 300 --workers 8 --export OUTPUT_FOLDER`.
    A 16-18 class school usually has a first complete timetable within a minute or two and keeps improving it
    (fewer after-school lessons, fewer bent Prefer rules) for 5-15 minutes; 30+ classes with heavy banding may need
@@ -66,7 +69,7 @@ subject-based banding) schools, and for any school that fills the same template.
      change their data silently; propose the change and let them decide.
 6. **Deliver** (see **Outputs**) with a short summary: whether every check passed, which lessons (if any) fell into
    after-school slots and why, what was compromised (teachers over their allowance, Prefer rules bent, Max periods in a
-   row: the solve result lists them), and any notes. Give the person the Excel workbook, the
+   row: the solve result lists them), any notes, and the Rule report for every typed rule. Give the person the Excel workbook, the
    HTML page, the four PDF books, the zip of single PDFs and the timetable database (.sqlite) for other systems; do not paste timetables into the chat.
    If the school runs the timetable app, tell them they can publish it there: on step 8, **Publish**, upload the .sqlite (or the timetable workbook with the setup workbook) and press **Check, then publish**.
 
@@ -80,7 +83,7 @@ subject-based banding) schools, and for any school that fills the same template.
 | `<School> <Timetable> - timetable finder.html` | one offline page: search box, browse by class/teacher/room/student, **Lessons** tab with filters and CSV download, **Who's free** (teachers, rooms and classes free at a chosen time, handy for relief), **Build a timetable** (a student picks their class and groups), **Checks**, print, light/dark | everyone: share by email or the school drive |
 | `PDF/Classes - all.pdf`, `Teachers - all.pdf`, `Rooms - all.pdf`, `Students - all.pdf` | one landscape A4 page each, bookmarked by level, department, room kind or class | printing |
 | `<School> <Timetable> - individual PDFs.zip` | the same pages as single files: `Classes/1A.pdf`, `Teachers/<name>.pdf`, `Rooms/<room>.pdf`, `Students/<class>/<id> <name>.pdf` | sending each person their own |
-| `<School> <Timetable> - timetable data.sqlite` | the timetable as a SQLite database: tables `lessons` (one row per group per lesson: day, week, start/end period and clock time, level, band, subject, group code, room, classes, teachers), `lesson_classes`, `lesson_teachers`, `classes`, `teachers`, `rooms`, `subjects`, `days`, `periods`, `day_structure`, `students` and `student_groups` (when the setup has a student list), `recess`, `meta` (school, solver status, notes and the whole setup as JSON); views `class_timetable`, `teacher_timetable`, `room_timetable` | importing into another system (a school MIS, a booking or relief tool, Power BI, Excel's Power Query); rebuilding every output later from one file |
+| `<School> <Timetable> - timetable data.sqlite` | the timetable as a SQLite database: tables `lessons` (one row per group per lesson: day, week, start/end period and clock time, level, band, subject, group code, room, classes, teachers), `lesson_classes`, `lesson_teachers`, `classes`, `teachers`, `rooms`, `subjects`, `days`, `periods`, `day_structure`, `students` and `student_groups` (when the setup has a student list), `recess`, `rule_report` (the agent's answer per typed rule), `meta` (school, solver status, notes and the whole setup as JSON); views `class_timetable`, `teacher_timetable`, `room_timetable` | importing into another system (a school MIS, a booking or relief tool, Power BI, Excel's Power Query); rebuilding every output later from one file |
 
 Student timetables need the `Students` sheet (each student's class and group codes). Without it the Students
 outputs are skipped and the HTML page's **Build a timetable** lets a student pick their groups instead; say so.
@@ -99,6 +102,9 @@ Hand-over format, one row per group per lesson (rows that meet at the same time 
 `Lesson ID, Day, Start period, End period, Periods, Starts, Ends, Level, Block, Classes, Subject, Group, Teachers, Room, After school, Rain room`.
 Day is exactly as on `Day structure` (e.g. `Odd Mon`); Group is the group code from `6 Lessons` or `Entire Class`;
 Classes and Teachers are comma-separated; After school is `yes` or blank.
+When the setup has rules in words (below), the same workbook carries a `Rule report` sheet: `No., Must / Prefer, Applies to, Rule, Result, How`,
+one row per typed rule in the order `python -m ttgen check` lists them; Result is `Met`, `Partly` or `Not met`, How is one sentence.
+`ttgen export` copies it into the database as the `rule_report` table, and the committee app shows it on Publish.
 
 ## The template, sheet by sheet
 
@@ -115,7 +121,7 @@ Classes and Teachers are comma-separated; After school is `yes` or blank.
 | 6 Lessons | group, or class for a whole-class subject | Level, Subject, Block (empty = whole class), Class 1-9, Teacher 1-3, Students, optional Periods / Code overrides; formulas show Group code, Periods, Doubles and Triples (or the lesson lengths in use), Room kind, Teacher periods, Check |
 | Teacher availability | block-out | Teacher, Week, Day (All or Mon-Fri), From, To (clock times; every period they overlap is blocked), Reason |
 | Fixed lessons | lesson at a set time (optional) | Level (a level, or All), Class(es) or group (a class, a group code from 6 Lessons, or `Every class`: that subject for every class of the level, or of the whole school with Level All, such as whole-school CCE; one row per slot), Subject, Week, Day, Start period, Note |
-| More rules | any other constraint | Applies to (kind), Applies to, Subject (optional; for Only these subjects several, comma separated), Rule, Week, Day, From/To period, Number, Venues (for Only in venues: rooms, comma separated), Must/Prefer |
+| More rules | any other constraint | Applies to (kind), Applies to, Subject (optional; for Only these subjects several, comma separated), Rule, Week, Day, From/To period, Number, Venues (for Only in venues: rooms, comma separated), Must/Prefer, In words (the sentence of a rule in words: Rule = In words) |
 | Students | student (recommended) | Student ID, Name, Level, Class, Combination, Choice 1-3, Merit, Groups (codes from 6 Lessons, comma separated), Source |
 | Combinations | subject combination | Level, Code, Name, Subject 1-3, Places |
 
@@ -160,6 +166,23 @@ yours. If the school has a rule these cannot say, write it in a Note, tell the c
 instead. `python -m ttgen check` lists every rule row that cannot be used as written, and fixed lessons that put one
 teacher or class in two places.
 
+### Typed rules (In words)
+
+`More rules` rows whose Rule is **In words** are rules the committee could not say with the list: the sentence is in the
+**In words** column, with Must or Prefer and what it applies to. The scripts do not enforce them; `python -m ttgen check`
+lists each one as "For the agent to honour: T1 · Must · Sec 1 · No PE in the first period". You must:
+
+- honour every **Must** (add the constraint your solver needs for it; if it cannot be met, say so before solving, never drop it silently);
+- try every **Prefer** and keep it where the timetable allows;
+- hand back the **Rule report** (one row per typed rule, numbered as `check` numbers them, with `Met`, `Partly` or `Not met`
+  and one sentence saying how it was met or why it could not be). The report rides on the timetable workbook, and the
+  database is made from that workbook, so the order matters:
+  1. solve: `python -m ttgen solve SETUP.xlsx --out TIMETABLE.xlsx` (without `--export`, or export again after step 2);
+  2. add a sheet named `Rule report` to `TIMETABLE.xlsx` with the columns `No., Must / Prefer, Applies to, Rule, Result, How`;
+  3. `python -m ttgen export SETUP.xlsx TIMETABLE.xlsx --out OUTPUT_FOLDER`: the `.sqlite` it writes carries the report as
+     its `rule_report` table, and that is the file to hand back (with `TIMETABLE.xlsx` beside it).
+  A database written before the sheet was added has no report, and the committee app then says "No rule report came back".
+
 ## Building it without the scripts
 
 Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on cached formula values.
@@ -194,6 +217,7 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
    "Same time across classes": equal starts for the matching whole-class lessons. "Not on the same day as":
    different days. "Once a day per group": AllDifferent(days) when lessons <= days (Must) or costed (Prefer);
    otherwise at most ceil(lessons / days) per day. "At most N at once" (subject): AddCumulative.
+   Rules "In words" are not in the list: honour each Must with constraints you write for it, try each Prefer, and fill the Rule report (above).
 8. **Objective.** Minimise after-school periods (weighted by students affected) plus Prefer costs. Break symmetry by
    ordering identical lessons of a unit. Time limit 300 s, 8 workers.
 9. **Rooms and checks.** Assign rooms greedily by start time (home room for whole-class lessons; a group keeps the
