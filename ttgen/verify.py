@@ -5,7 +5,7 @@ import re
 from collections import Counter
 from .export import ENTIRE
 from .solver import rule_label
-from .spec import floating_recess, names_list, subject_test
+from .spec import floating_recess, names_list, subject_test, typed_rules
 
 KINDS = ("clash", "deployment", "rule", "typed", "choice")
 
@@ -317,3 +317,31 @@ def rules(m, spec):
         if why: skipped.append(f"{rule_label(r)}: {why}"); continue
         out += CHECKERS[rule](m, spec, i, r, rule_days(m["days"], r), rule_periods(r, m["NP"]))
     return out, skipped
+
+
+# ----------------------------------------------------------------------------------------------- typed rules, choices, everything together
+def typed(spec, report):
+    """warnings from the agent's Rule report against the typed (In words) rules on step 6"""
+    out, nums = [], set()
+    rows = {}
+    for row in report or []: rows.setdefault(row.get("no"), row)
+    for n, _, r in typed_rules(spec):
+        nums.add(n); row = rows.get(n); sentence = str(r.get("text") or "").strip().rstrip("."); strength = r.get("strength") or "Must"
+        if row is None:
+            out.append(warning(f"typed:{n}:none", "typed", f"T{n} has no line in the rule report: {sentence}.", strength)); continue
+        res = str(row.get("result") or "").strip()
+        if res in ("Not met", "Partly"):
+            how = str(row.get("how") or "").strip()
+            out.append(warning(f"typed:{n}:{res}", "typed", f"T{n} {res.lower()}: {sentence}." + (f" The agent says: {how}" if how else ""), strength))
+    for row in report or []:
+        if row.get("no") not in nums:
+            out.append(warning(f"typed:{row.get('no')}:unknown", "typed", f"The rule report's line {row.get('no')} ({row.get('rule')}) is not a typed rule on step 6."))
+    return out
+
+def choices_(m):
+    return [warning("choice:" + p, "choice", p) for p in m.get("choice_problems") or []]
+
+def warnings(m, spec=None):
+    """every warning for the timetable m, in KINDS order, and the rules that could not be checked"""
+    spec = spec or m["checked_setup"]; rule_ws, not_checked = rules(m, spec)
+    return dict(warnings=clashes(m) + deployment(m, spec) + rule_ws + typed(spec, m.get("rule_report")) + choices_(m), not_checked=not_checked)

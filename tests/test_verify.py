@@ -303,4 +303,51 @@ def same_time_skips_a_class_without_the_subject():
     assert run(sp, [row], two)[0][0] == []
     (ws, _), _ = run(sp, [row], two + [(0, 3, 1, [c3], "Mathematics", "Entire Class", [t], "")]); assert [w["group"] for w in ws] == [c3]
 
+@t
+def typed_rules_against_the_report():
+    sp = primary(); sp["rules"] = [dict(scope="School", target="Whole school", rule="In words", text="No PE first", strength="Must", week="Both", day="All"),
+                                   dict(scope="School", target="Whole school", rule="In words", text="Art late", strength="Prefer", week="Both", day="All")]
+    rep = [dict(no=2, strength="Prefer", applies="Whole school", rule="Art late", result="Partly", how="Two classes."), dict(no=7, strength="Must", applies="", rule="Ghost", result="Met", how="")]
+    ws = {w["key"]: w for w in verify.typed(sp, rep)}
+    assert set(ws) == {"typed:1:none", "typed:2:Partly", "typed:7:unknown"} and ws["typed:2:Partly"]["strength"] == "Prefer" and "Two classes." in ws["typed:2:Partly"]["text"]
+    assert ws["typed:1:none"]["text"] == "T1 has no line in the rule report: No PE first." and ws["typed:1:none"]["strength"] == "Must"
+    assert ws["typed:2:Partly"]["text"] == "T2 partly: Art late. The agent says: Two classes."
+    assert ws["typed:7:unknown"]["text"] == "The rule report's line 7 (Ghost) is not a typed rule on step 6." and ws["typed:7:unknown"]["strength"] == "Must"
+    assert all(w["kind"] == "typed" and w["group"] == "School" for w in ws.values())
+    rep2 = [dict(no=1, strength="Must", applies="", rule="x", result="Not met", how=""), dict(no=2, strength="Prefer", applies="", rule="y", result="Met", how="")]
+    ws2 = {w["key"]: w for w in verify.typed(sp, rep2)}; assert set(ws2) == {"typed:1:Not met"} and ws2["typed:1:Not met"]["text"] == "T1 not met: No PE first."
+
+@t
+def choices_become_warnings():
+    ws = verify.choices_(dict(choice_problems=["Second choice 1: no such rule."]))
+    assert len(ws) == 1 and ws[0]["kind"] == "choice" and ws[0]["key"] == "choice:Second choice 1: no such rule." and ws[0]["text"] == "Second choice 1: no such rule."
+
+def clash_model():
+    sp = primary(); sp["rules"] = [dict(scope="School", target="Whole school", rule="In words", text="No PE first", strength="Must", week="Both", day="All")]
+    c1, c2 = [x["class"] for x in sp["classes"]][:2]; tch = sp["teachers"][0]["name"]
+    m = model_for(sp, [(0, 0, 1, [c1], "English", "Entire Class", [tch], ""), (0, 0, 1, [c2], "English", "Entire Class", [tch], "")])
+    m["rule_report"] = []; m["choice_problems"] = []; return m
+
+@t
+def warnings_come_in_kind_order():
+    m = clash_model(); r = verify.warnings(m); kinds = [w["kind"] for w in r["warnings"]]
+    assert list(r) == ["warnings", "not_checked"] and r["not_checked"] == []
+    assert sorted(set(kinds), key=verify.KINDS.index) == ["clash", "deployment", "typed"] and kinds == sorted(kinds, key=verify.KINDS.index)
+
+@t
+def check_timetable_prints_and_exits_one_on_a_must():
+    import io, contextlib
+    from ttgen import __main__ as cli
+    with tempfile.TemporaryDirectory() as d:
+        sp = primary(); setup = os.path.join(d, "setup.xlsx"); template.write_template(sp, setup)
+        ds = sp["day_structure"]; lv = sp["school"]["levels"][0]; day = next(iter(ds[lv])); cls = next(c["class"] for c in sp["classes"] if c["level"] == lv)
+        x = next(x for x in sp["lessons"] if cls in x["classes"] and not x.get("block"))
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"
+        ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
+        p0 = ds[lv][day].index("L"); ws.append([1, day, p0, p0, 1, "", "", lv, "", cls, x["subject"], "Entire Class", ", ".join(x["teachers"]), "", "", ""])
+        tt = os.path.join(d, "timetable.xlsx"); wb.save(tt); out = io.StringIO()
+        with contextlib.redirect_stdout(out): code = cli.main(["check-timetable", tt, "--setup", setup])
+        text = out.getvalue(); assert code == 1 and "[deployment]" in text and "warnings (" in text, text
+        assert text.splitlines()[1].startswith(" - [")
+
 print(f"{n} checks passed")
