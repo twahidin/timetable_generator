@@ -203,8 +203,10 @@ def model_from_files(setup_path, timetable_path, spec=None):
     SQLite database (ttgen.database). A database written by write_db keeps the setup, so setup_path may then be None.
     spec: a setup to check against instead (copied; the file's own setup then only lends its configuration id)."""
     db = read_db(timetable_path) if is_db(timetable_path) else None
+    spec_given = spec is not None
     if spec is not None:
         own = read_template(setup_path) if setup_path else (db[5] if db else None)
+        file_school = str((((own or {}).get("school") or {}).get("name")) or "").strip()
         spec = copy.deepcopy(spec); cid = ((own or {}).get("school") or {}).get("config_id")
         if cid: spec.setdefault("school", {})["config_id"] = cid
     elif setup_path: spec = read_template(setup_path)
@@ -267,6 +269,7 @@ def model_from_files(setup_path, timetable_path, spec=None):
             c, day, p, n = (row[h[k]] if k in h and h[k] < len(row) else None for k in ("class", "day", "start period", "periods"))
             if c not in (None, "") and str(day or "").lower() in dix and p is not None: recess[str(c)].append([dix[str(day).lower()], int(p), int(n or 1)])
     m = _model(spec, days, out, notes=notes, status=status, recess=recess); m["rule_report"] = report
+    m["file_school"] = file_school if spec_given else str((setup.get("school") or {}).get("name") or "").strip()
     m["setup"] = setup; m["checked_setup"] = spec; m["choices_used"] = used; m["choice_problems"] = choice_probs   # the database keeps the setup as downloaded
     if choice_probs: m["checks"]["problems"] = list(m["checks"]["problems"]) + choice_probs
     m["checks"]["ok"] = not m["checks"]["problems"]

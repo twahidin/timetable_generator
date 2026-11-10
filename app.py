@@ -360,9 +360,9 @@ def draft_upload():
     try:
         try:
             sp, tp = _save_uploads(work)
-            draft.save(sp, tp, os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file", spec=spec)
+            m = draft.save(sp, tp, os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file", spec)
         except ValueError as e: return {"error": str(e)}, 400
-        return jsonify(draft.info())
+        return jsonify(draft.info(model=m))
     finally: shutil.rmtree(work, ignore_errors=True)
 
 @app.get("/api/draft")

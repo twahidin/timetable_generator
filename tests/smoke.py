@@ -305,6 +305,7 @@ def test_draft_upload_check_decide_publish():
     j2 = c.post("/api/draft/decide", json={"key": k, "answer": "left"}).get_json()
     assert j2["left"] == 1 and j2["open"] == j["open"] and next(w for w in j2["warnings"] if w["key"] == k)["decision"]["answer"] == "left"
     j3 = c.post("/api/draft/decide", json={"key": k, "answer": "step5"}).get_json(); assert k not in _warn_keys(j3), _warn_keys(j3)[:5]
+    assert j3["step5"] == 1 and store.read_json(os.path.join(store.DATA, "draft", "decisions.json"))[k]["answer"] == "step5"
     now = c.get("/api/setup").get_json()["spec"]; assert next(x["teachers"] for x in now["lessons"] if x["_id"] == row["_id"]) == ["Nobody"]
     assert any("Before updating step 5 from the timetable" == x["what"] for x in c.get("/api/setup/copies").get_json())
     kp = next((w["key"] for w in j3["warnings"] if w["key"].endswith(":periods")), None)
@@ -345,6 +346,45 @@ def test_draft_for_another_school_is_said():
     j = c.post("/api/draft", data=_draft_form(theirs, [_lesson_of(spec, row, row["teachers"])]), content_type="multipart/form-data").get_json()
     assert j["other_school"] == spec["school"]["name"], j.get("other_school")
     assert c.post("/api/draft", data=dict(setup=(__import__("io").BytesIO(b"not a workbook"), "s.xlsx"), timetable=(__import__("io").BytesIO(b"x"), "t.xlsx")), content_type="multipart/form-data").status_code == 400
+
+def test_a_decision_made_during_a_build_is_not_lost():
+    import draft
+    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec, skip=("zz",)); rows = [_lesson_of(spec, row, ["Somebody"])]
+    c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data")
+    ws = c.get("/api/draft").get_json()["warnings"]; k = ws[0]["key"]; k2 = ws[1]["key"]
+    orig = draft._build
+    def slow(*a, **kw):
+        j = orig(*a, **kw); store.write_json(os.path.join(draft.DIR, "decisions.json"), {k2: dict(answer="left", at="now")}); return j
+    draft._build = slow
+    try: got = c.get("/api/draft").get_json()
+    finally: draft._build = orig
+    assert store.read_json(os.path.join(draft.DIR, "decisions.json"))[k2]["answer"] == "left" and c.get("/api/draft").get_json()["left"] == 1
+    assert k != k2
+
+def test_the_draft_says_which_school_the_file_is_for_and_one_build_per_upload():
+    import draft
+    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec); theirs = A.sample("primary"); theirs["school"]["name"] = "Somewhere Else Primary"
+    builds = []; orig = draft._build
+    draft._build = lambda *a, **kw: (builds.append(1), orig(*a, **kw))[1]
+    from ttgen import export; reads = []; ot = export.read_template
+    export.read_template = lambda *a, **kw: (reads.append(1), ot(*a, **kw))[1]
+    try: j = c.post("/api/draft", data=_draft_form(theirs, [_lesson_of(spec, row, row["teachers"])]), content_type="multipart/form-data").get_json()
+    finally: draft._build = orig; export.read_template = ot
+    assert j["file_school"] == "Somewhere Else Primary" and j["school"] == spec["school"]["name"] and j["other_school"] == spec["school"]["name"], j["school"]
+    assert len(builds) == 1 and len(reads) == 1, (builds, reads)
+
+def test_a_step5_change_does_not_land_on_a_replaced_setup():
+    import draft
+    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec); rows = [_lesson_of(spec, row, ["Elsewhere"])]
+    c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data")
+    k = f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"; orig = draft._build
+    def replaced(*a, **kw):
+        j = orig(*a, **kw); store.replace_setup(c.get("/api/setup").get_json()["spec"], "test"); return j
+    draft._build = replaced
+    try: r = c.post("/api/draft/decide", json={"key": k, "answer": "step5"})
+    finally: draft._build = orig
+    assert r.status_code == 400 and "replaced" in r.get_json()["error"], r.get_json()
+    assert next(x["teachers"] for x in c.get("/api/setup").get_json()["spec"]["lessons"] if x["_id"] == row["_id"]) != ["Elsewhere"]
 
 def test_publishing_with_no_draft_is_404():
     shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True)

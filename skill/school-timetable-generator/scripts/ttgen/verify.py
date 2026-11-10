@@ -138,7 +138,9 @@ def _lessons(m, spec, r, days):
     return [x for x in m["lessons"] if x["d"] in days and test(x)]
 
 def _inside(x, per): return [q for q in _span(x) if q in per]
-def _key(x, q=None): return f"{(x['classes'] or [''])[0]}|{x['d']}|{x['p'] if q is None else q}"
+def _key(x, q=None):
+    """the key detail of a hit on lesson x: class, group code (the subject for an entire-class lesson), day, period"""
+    return f"{(x['classes'] or [''])[0]}|{x['subject'] if x['group'] == ENTIRE else x['group']}|{x['d']}|{x['p'] if q is None else q}"
 
 def _not_available(m, spec, i, r, days, per):
     out = []
