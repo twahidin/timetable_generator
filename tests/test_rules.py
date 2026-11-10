@@ -86,4 +86,31 @@ def the_skill_says_its_version_and_asks_for_the_report():
     md = open(os.path.join(ROOT, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
     assert "Skill version: 2026-11" in md and "Rule report" in md and "In words" in md and "Not met" in md
 
+@t
+def rule_report_rows_forgive_a_title_row_t_numbers_and_header_variants():
+    from ttgen import export
+    rows = [("Rule report", None, None, None, None, None), (None, None, None, None, None, None),
+            ("#", "Strength", "Applies to", "Typed rule", "Met?", "How"), ("T1", "Must", "Sec 1", "No PE in the first period", "met", "Never at 0."), ("T2", "Prefer", "1A", "Art after recess", "Not met", "No room.")]
+    got = export.rule_report_rows(iter(rows))
+    assert [(r["no"], r["strength"], r["rule"], r["result"]) for r in got] == [(1, "Must", "No PE in the first period", "Met"), (2, "Prefer", "Art after recess", "Not met")], got
+    assert export.rule_report_rows(iter([("Notes", "Rule", "Result", "How"), ("x", "A", "Met", "y")]))[0]["no"] is None   # Notes is not No.
+
+@t
+def a_report_on_the_timetable_workbook_reaches_the_database():
+    from ttgen import export, database
+    from ttgen.samples import primary
+    with tempfile.TemporaryDirectory() as d:
+        sp = primary(); setup = os.path.join(d, "setup.xlsx"); template.write_template(sp, setup)
+        ds = sp["day_structure"]; lv = sp["school"]["levels"][0]; day = next(iter(ds[lv])); cls = next(c["class"] for c in sp["classes"] if c["level"] == lv)
+        x = next(x for x in sp["lessons"] if cls in x["classes"] and not x.get("block"))
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"
+        ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
+        p0 = ds[lv][day].index("L"); ws.append([1, day, p0, p0, 1, "", "", lv, "", cls, x["subject"], "Entire Class", ", ".join(x["teachers"]), "", "", ""])
+        rr = wb.create_sheet("Rule report"); rr.append(["No.", "Must / Prefer", "Applies to", "Rule", "Result", "How"]); rr.append(["T1", "Must", "Whole school", "Nothing in words", "Met", "Checked."])
+        tt = os.path.join(d, "timetable.xlsx"); wb.save(tt)
+        m = export.model_from_files(setup, tt); assert m["rule_report"][0]["no"] == 1 and m["rule_report"][0]["how"] == "Checked."
+        db = os.path.join(d, "t.sqlite"); database.write_db(m, db, spec=sp)
+        assert database.read_db(db)[6][0]["result"] == "Met"
+        m2 = export.model_from_files(None, db); assert m2["rule_report"][0]["rule"] == "Nothing in words"   # the database alone carries it on
+
 print(f"{n} checks passed")

@@ -165,22 +165,34 @@ def _result(v):
     if s in ("met", "yes", "y", "done", "kept"): return "Met"
     return ""
 
+_REPORT_COLS = {   # a header cell answers to a column by one of these tests (lower-cased, trimmed)
+    "no": lambda h: h in ("no", "no.", "#", "t", "number", "no. (t)") or h.startswith("no."),
+    "strength": lambda h: h.startswith(("must", "strength", "prefer")),
+    "applies": lambda h: h.startswith(("applies", "scope", "what it applies")),
+    "rule": lambda h: h == "rule" or h.startswith(("typed rule", "rule (", "in words", "sentence")),
+    "result": lambda h: h.startswith(("result", "met", "status", "outcome")),
+    "how": lambda h: h.startswith(("how", "comment", "note", "why")),
+}
+
 def rule_report_rows(rows):
-    """the rows of a Rule report (the first row is the header; columns matched by the start of their name: no, must,
-    applies, rule, result, how) as [{no, strength, applies, rule, result, how}]; blank rows skipped"""
-    rows = iter(rows)
-    hdr = [str(h).strip().lower() if h is not None else "" for h in next(rows, ())]
-    ix = {}
-    for k, start in (("no", "no"), ("strength", "must"), ("applies", "applies"), ("rule", "rule"), ("result", "result"), ("how", "how")):
-        ix[k] = next((i for i, h in enumerate(hdr) if h.startswith(start)), None)
+    """the rows of a Rule report as [{no, strength, applies, rule, result, how}]. The header is the first of the top rows
+    with a Result (or How) cell, so a title above it is skipped; column names are matched loosely (No./#/T, Must /
+    Prefer or Strength, Applies to, Rule or Typed rule, Result or Met?, How); a number written T1 reads as 1; blank
+    rows are skipped"""
+    rows = list(rows)
+    def cells(row): return [str(h).strip().lower() if h is not None else "" for h in row]
+    hi = next((i for i, row in enumerate(rows[:6]) if any(_REPORT_COLS["result"](h) or _REPORT_COLS["how"](h) for h in cells(row))), None)
+    if hi is None: return []
+    hdr = cells(rows[hi])
+    ix = {k: next((i for i, h in enumerate(hdr) if h and test(h)), None) for k, test in _REPORT_COLS.items()}
     def g(row, k):
         i = ix.get(k); return row[i] if i is not None and i < len(row) else None
     out = []
-    for row in rows:
+    for row in rows[hi + 1:]:
         if not any(v not in (None, "") for v in row): continue
         no = g(row, "no")
-        try: no = int(str(no).strip()) if no not in (None, "") else None
-        except ValueError: no = None
+        m = re.match(r"^\s*[Tt#]?\s*(\d+)", str(no)) if no not in (None, "") else None
+        no = int(m.group(1)) if m else None
         out.append(dict(no=no, strength=str(g(row, "strength") or "").strip(), applies=str(g(row, "applies") or "").strip(), rule=str(g(row, "rule") or "").strip(),
                         result=_result(g(row, "result")), how=str(g(row, "how") or "").strip()))
     return out

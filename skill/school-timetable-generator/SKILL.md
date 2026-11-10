@@ -42,7 +42,8 @@ subject-based banding) schools, and for any school that fills the same template.
    - each teacher: periods taught against allowance, and against the lesson periods of the levels they teach
      (above about 85% is usually impossible to pack);
    - each block: groups needing a special room kind at once against the number of rooms of that kind.
-3. **Solve and export in one go.**
+3. **Solve and export in one go** (when the setup has no rules "In words"; with them, solve first, add the Rule report
+   sheet, then export: see **Typed rules** below).
    `python -m ttgen solve SETUP.xlsx --out TIMETABLE.xlsx --time 300 --workers 8 --export OUTPUT_FOLDER`.
    A 16-18 class school usually has a first complete timetable within a minute or two and keeps improving it
    (fewer after-school lessons, fewer bent Prefer rules) for 5-15 minutes; 30+ classes with heavy banding may need
@@ -174,8 +175,13 @@ lists each one as "For the agent to honour: T1 · Must · Sec 1 · No PE in the 
 - honour every **Must** (add the constraint your solver needs for it; if it cannot be met, say so before solving, never drop it silently);
 - try every **Prefer** and keep it where the timetable allows;
 - hand back the **Rule report** (one row per typed rule, numbered as `check` numbers them, with `Met`, `Partly` or `Not met`
-  and one sentence saying how it was met or why it could not be) as a `Rule report` sheet in the Lessons workbook; `ttgen
-  export` carries it into the database. A timetable without the report leaves the committee guessing.
+  and one sentence saying how it was met or why it could not be). The report rides on the timetable workbook, and the
+  database is made from that workbook, so the order matters:
+  1. solve: `python -m ttgen solve SETUP.xlsx --out TIMETABLE.xlsx` (without `--export`, or export again after step 2);
+  2. add a sheet named `Rule report` to `TIMETABLE.xlsx` with the columns `No., Must / Prefer, Applies to, Rule, Result, How`;
+  3. `python -m ttgen export SETUP.xlsx TIMETABLE.xlsx --out OUTPUT_FOLDER`: the `.sqlite` it writes carries the report as
+     its `rule_report` table, and that is the file to hand back (with `TIMETABLE.xlsx` beside it).
+  A database written before the sheet was added has no report, and the committee app then says "No rule report came back".
 
 ## Building it without the scripts
 
