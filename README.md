@@ -69,10 +69,22 @@ to print, one page per class. Students not on the list use the general student c
    which configuration the timetable was made from, are shown too. The warnings are listed by kind and then by class,
    teacher or group, with the timetable's side and step 5's side. For each one, **Update step 5** changes the setup to
    match the timetable, and **Leave it** keeps the warning on the list as left for now (**Reopen** takes it back);
-   what you left stays left when you upload the file again. A fix in the app comes in a later stage. **Publish this
+   what you left stays left when you upload the file again. A rule in words that reads **Check again** has a **Still met**
+   button for when you have looked. **Fix the timetable** (on a warning, or the Fix card below the list) shows one
+   class's or one teacher's week as a table; pick a class or a teacher, and a week when the school has two, then select a
+   lesson. Every slot is coloured by what a fix there would do (green is open, amber is open but less wanted, red is
+   not allowed, grey is a slot the lesson cannot go to: not lesson time, outside the day, or another lesson is there
+   that it cannot swap with); click a green or amber slot to move the lesson, or a lesson there to swap with it (in a
+   teacher's week an open slot can be a swap with the class's lesson there; a swap that also moves another class's
+   lesson asks first). The side panel also changes the teacher or
+   the room, deletes an extra lesson, and, with nothing selected, lists a class's missing periods with **Add a lesson**.
+   Every fix is kept with its sentence under **Fixes**, and **Undo the last fix** takes the last one back. A fix that
+   would cause a clash, change a subject's periods from the plan or newly break a Must rule is refused (red), so a clean
+   draft stays clean. **Download the
+   draft (.sqlite)** carries the draft with its fixes elsewhere (Make printouts accepts it). **Publish this
    timetable** then makes the draft what teachers and students see, with every download and the personal student codes
    (about a minute), even with warnings open: **Published now** says which setup version it was checked against, how many
-   warnings were left open and what they said. The rule report and the choices used stay with the published timetable.
+   warnings were left open and what they said, and lists the fixes made in the app. The rule report and the choices used stay with the published timetable.
    **Make printouts** gives the same files without publishing. For an agent, `python -m ttgen check-timetable
    TIMETABLE [--setup SETUP.xlsx]` prints the same check.
 

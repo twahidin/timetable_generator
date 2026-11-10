@@ -67,7 +67,7 @@ def deployment(m, spec):
     plan, got, out = planned_rows(spec), placed(m), []
     subjects = {str(s["subject"]) for s in spec["subjects"]}
     def where(key, e):
-        x = e["lessons"][0]; return dict(cls=key[1] if key[0] == "C" else (x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"])
+        x = e["lessons"][0]; return dict(cls=key[1] if key[0] == "C" else (x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"], id=x["id"], row=x["group"])
     for key in plan:
         p, k, what = plan[key], _kstr(key), _name(key); group = p["classes"][0] if p["classes"] else "School"
         if key not in got:
@@ -105,8 +105,9 @@ def clashes(m):
     out, own = [], set(m.get("choice_problems") or ())   # the second-choice sentences are listed as choice warnings
     for text in m["checks"]["problems"]:
         if text.endswith("planned.") or text in own: continue
-        who = re.match(r"(?:Teacher double-booked|Class clash): (.+?) on ", text)
-        out.append(warning("clash:" + text, "clash", text, group=who.group(1) if who else "School"))
+        who = re.match(r"(Teacher double-booked|Class clash): (.+?) on ", text)   # whose week the Fix the timetable button opens
+        where = (dict(teacher=who.group(2)) if who.group(1).startswith("Teacher") else dict(cls=who.group(2))) if who else None
+        out.append(warning("clash:" + text, "clash", text, group=who.group(2) if who else "School", where=where))
     return out
 
 
@@ -143,7 +144,7 @@ def _pr(per): return f"periods {per[0]}-{per[-1]}"
 def _hit(m, r, i, detail, sentence, group, x=None):
     """one warning for rule row i; x is the lesson it names"""
     prefer = r.get("strength") == "Prefer"
-    where = dict(cls=(x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"]) if x else None
+    where = dict(cls=(x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"], id=x["id"], row=x["group"]) if x else None
     return warning(f"rule:{r.get('_id') or i}:{detail}", "rule", f"Rule {rule_label(r)}: {sentence}" + (" (Prefer)" if prefer else ""), "Prefer" if prefer else "Must", group, where)
 
 def _lessons(m, spec, r, days):
@@ -174,7 +175,9 @@ def _keep_free_together(m, spec, i, r, days, per):
         for w in who:
             if (w, x["d"]) in seen: continue
             seen.add((w, x["d"]))
-            out.append(_hit(m, r, i, f"{w}|{x['d']}", f"{w} has {x['subject']} on {m['days'][x['d']]} period {q}; {r['target']} keeps {_pr(per)} free together.", w, x))
+            h = _hit(m, r, i, f"{w}|{x['d']}", f"{w} has {x['subject']} on {m['days'][x['d']]} period {q}; {r['target']} keeps {_pr(per)} free together.", w, x)
+            h["where"] = dict(cls=h["where"]["cls"], day=h["where"]["day"], period=h["where"]["period"])   # about the day of a teacher or class, not the lesson that names it: no id or row
+            out.append(h)
     return out
 
 def _fixed_at(m, spec, i, r, days, per):
@@ -375,13 +378,30 @@ def typed(spec, report):
             out.append(warning(f"typed:{row.get('no')}:unknown", "typed", f"The rule report's line {row.get('no')} ({row.get('rule')}) is not a typed rule on step 6."))
     return out
 
+def typed_again(m, spec, touched, was=()):
+    """a typed rule reported Met or Partly whose lessons a fix changed, added or deleted (was: the rows as they were before a fix changed them): its report line may no longer be true, so it is to be checked again.
+    A rule whose scope cannot be read is about every lesson: any fix marks it."""
+    touched, was = set(touched or ()), list(was or ())
+    if not touched and not was: return []
+    rows = {}
+    for row in m.get("rule_report") or []: rows.setdefault(row.get("no"), row)
+    out = []
+    for n, _, r in typed_rules(spec):
+        res = str((rows.get(n) or {}).get("result") or "").strip()
+        if res not in ("Met", "Partly"): continue
+        test = in_scope(m, spec, r)
+        if test is not None and not (any(x["id"] in touched and test(x) for x in m["lessons"]) or any(test(x) for x in was)): continue
+        sentence = str(r.get("text") or "").strip().rstrip(".")
+        out.append(warning(f"typed:{n}:again", "typed", f"T{n} was reported {res.lower()}, but lessons it is about were changed in the app. Check it again: {sentence}.", r.get("strength") or "Must"))
+    return out
+
 def choices_(m):
     return [warning("choice:" + p, "choice", p) for p in m.get("choice_problems") or []]
 
-def warnings(m, spec=None):
+def warnings(m, spec=None, touched=(), was=()):
     """every warning for the timetable m, in KINDS order, and the rules that could not be checked"""
     spec = spec or m["checked_setup"]; rule_ws, not_checked = rules(m, spec)
-    ws = clashes(m) + deployment(m, spec) + rule_ws + typed(spec, m.get("rule_report")) + choices_(m); seen = {}
+    ws = clashes(m) + deployment(m, spec) + rule_ws + typed(spec, m.get("rule_report")) + typed_again(m, spec, touched, was) + choices_(m); seen = {}
     for w in ws:   # several hits can share a key (two groups in one slot): a decision belongs to one warning, so each key is made unique
         seen[w["key"]] = n = seen.get(w["key"], 0) + 1
         if n > 1: w["key"] += f"#{n}"

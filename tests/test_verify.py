@@ -22,7 +22,7 @@ def deployment_finds_teacher_periods_missing_and_extra():
     k = f"dep:C:{cls}:{subj}:teachers"; assert k in ws and ws[k]["sides"]["step5"] == row["teachers"][0]
     assert (ws[k]["ops"] == [["set", "lessons", row["_id"], "teachers", ["Nobody"]]]) if row.get("_id") else ws[k]["ops"] is None
     assert ws[k]["text"] == f"{subj} for {cls} is taught by Nobody on the timetable; step 5 says {row['teachers'][0]}." and ws[k]["group"] == cls
-    assert ws[k]["where"] == dict(cls=cls, day=m["days"][0], period=0)
+    assert ws[k]["where"] == dict(cls=cls, day=m["days"][0], period=0, id=1, row="Entire Class")
     assert all(w["kind"] == "deployment" for w in ws.values()) and sum(1 for w in ws.values() if w["key"].endswith(":missing")) == len(verify.planned_rows(sp)) - 1
     m2 = model_for(sp, [(0, 0, want - 1, [cls], subj, "Entire Class", row["teachers"], ""), (1, 0, 1, [cls], "Nothing", "Entire Class", row["teachers"], "")])
     ws = {w["key"]: w for w in verify.deployment(m2, sp)}
@@ -71,6 +71,17 @@ def clashes_drop_the_planned_lines_and_name_the_group():
     assert any(p.endswith("planned.") for p in m["checks"]["problems"])
     ws = verify.clashes(m); assert any(w["group"] == "Ms X" and w["key"].startswith("clash:Teacher double-booked") and w["kind"] == "clash" and w["strength"] == "Must" for w in ws)
     assert not any(w["text"].endswith("planned.") for w in ws)
+
+@t
+def a_teacher_or_class_clash_says_whose_week_to_open():
+    sp = primary(); c1, c2 = sp["classes"][0]["class"], sp["classes"][1]["class"]
+    m = model_for(sp, [(0, 0, 1, [c1], "English Language", "Entire Class", ["Ms X"], ""), (0, 0, 1, [c2], "Mathematics", "Entire Class", ["Ms X"], ""),
+                       (1, 0, 1, [c1], "Art", "Entire Class", ["Mr Y"], ""), (1, 0, 1, [c1], "Music", "Entire Class", ["Mr Z"], "")])
+    ws = verify.clashes(m)
+    t = [w for w in ws if w["text"].startswith("Teacher double-booked: Ms X on ")]; k = [w for w in ws if w["text"].startswith(f"Class clash: {c1} on ")]
+    assert t and all(w["where"] == dict(teacher="Ms X") for w in t), t
+    assert k and all(w["where"] == dict(cls=c1) for w in k), k
+    assert all(w["where"] is None for w in ws if not w["text"].startswith(("Teacher double-booked: ", "Class clash: "))), ws
 
 @t
 def ops_use_the_row_ids():
@@ -273,7 +284,7 @@ def after_school_slots_are_named_with_the_rows_strength():
     for row in (rule("School", "Whole school", "Avoid after-school slots", strength="Prefer"), rule("Level", lv, "Avoid after-school slots", strength="Prefer"), rule("Class", c, "Avoid after-school slots", strength="Prefer")):
         (ws, nc), m = with_grid(sp, [row], L, ext)
         assert len(ws) == 1 and nc == [] and ws[0]["key"] == f"rule:0:{c}|English|0|12" and ws[0]["group"] == c and ws[0]["strength"] == "Prefer"
-        assert ws[0]["where"] == dict(cls=c, day=m["days"][0], period=12) and ws[0]["text"].endswith(f"English for {c} is in an after-school slot on {m['days'][0]}. (Prefer)")
+        assert ws[0]["where"] == dict(cls=c, day=m["days"][0], period=12, id=1, row="Entire Class") and ws[0]["text"].endswith(f"English for {c} is in an after-school slot on {m['days'][0]}. (Prefer)")
     assert run(sp, [rule("School", "Whole school", "Avoid after-school slots")], L)[0][0] == []
     (ws, nc), _ = with_grid(sp, [rule("Teacher", t, "Avoid after-school slots")], L, ext); assert ws == [] and len(nc) == 1 and "scope" in nc[0]
 
@@ -316,6 +327,59 @@ def typed_rules_against_the_report():
     assert all(w["kind"] == "typed" and w["group"] == "School" for w in ws.values())
     rep2 = [dict(no=1, strength="Must", applies="", rule="x", result="Not met", how=""), dict(no=2, strength="Prefer", applies="", rule="y", result="Met", how="")]
     ws2 = {w["key"]: w for w in verify.typed(sp, rep2)}; assert set(ws2) == {"typed:1:Not met"} and ws2["typed:1:Not met"]["text"] == "T1 not met: No PE first."
+
+@t
+def typed_again_after_a_fix_touches_a_lesson_the_rule_is_about():
+    sp = primary(); lv = sp["classes"][0]["level"]; c = sp["classes"][0]["class"]; tch = sp["teachers"][0]["name"]
+    other = next(x["class"] for x in sp["classes"] if x["level"] != lv)
+    words = lambda scope, target, strength="Must": dict(scope=scope, target=target, rule="In words", text="No PE first.", strength=strength, week="Both", day="All")
+    line = lambda result, no=1: dict(no=no, strength="Must", applies="", rule="x", result=result, how="")
+    def again(rows, rep, touched):
+        s2 = copy.deepcopy(sp); s2["rules"] = rows
+        m = model_for(s2, [(0, 1, 1, [c], "English", "Entire Class", [tch], ""), (1, 1, 1, [other], "English", "Entire Class", [tch], "")])
+        m["lessons"][1]["level"] = next(x["level"] for x in sp["classes"] if x["class"] == other)   # model_for gives every lesson the first class's level
+        m["rule_report"] = rep; return verify.typed_again(m, m["checked_setup"], touched)
+    ws = again([words("Level", lv)], [line("Met")], {1}); assert len(ws) == 1 and ws[0]["key"] == "typed:1:again" and ws[0]["kind"] == "typed", ws
+    assert ws[0]["text"] == "T1 was reported met, but lessons it is about were changed in the app. Check it again: No PE first." and ws[0]["strength"] == "Must", ws
+    assert again([words("Level", lv)], [line("Met")], {2}) == [], "a touched lesson of another level"
+    assert again([words("Level", lv)], [line("Met")], set()) == [] and again([words("School", "Whole school")], [line("Met")], set()) == []
+    ws = again([words("School", "Whole school", "Prefer")], [line("Partly")], {2}); assert [w["key"] for w in ws] == ["typed:1:again"] and ws[0]["strength"] == "Prefer" and "reported partly" in ws[0]["text"], ws
+    assert again([words("School", "Whole school")], [line("Not met")], {1}) == [] and again([words("School", "Whole school")], [], {1}) == [] and again([words("School", "Whole school")], [line("")], {1}) == []
+    assert again([words("Class", c)], [line("Met")], {1}) != [] and again([words("Class", c)], [line("Met")], {2}) == []
+    assert again([words("Level", lv), words("School", "Whole school")], [line("Met", 2)], {1}) != [] and [w["key"] for w in again([words("Level", lv), words("School", "Whole school")], [line("Met", 2)], {1})] == ["typed:2:again"]
+    # warnings() puts them after the typed ones and before the choices
+    s2 = copy.deepcopy(sp); s2["rules"] = [words("School", "Whole school")]
+    m = model_for(s2, [(0, 1, 1, [c], "English", "Entire Class", [tch], "")]); m["rule_report"] = [line("Met")]; m["choice_problems"] = ["Second choice 1: no such rule."]
+    kinds = [(w["kind"], w["key"]) for w in verify.warnings(m, touched={1})["warnings"]]
+    assert kinds[-2:] == [("typed", "typed:1:again"), ("choice", "choice:Second choice 1: no such rule.")], kinds
+    assert ("typed", "typed:1:again") not in [(w["kind"], w["key"]) for w in verify.warnings(m)["warnings"]]
+
+@t
+def a_typed_rule_whose_scope_cannot_be_read_is_about_every_lesson():
+    sp = primary(); c = sp["classes"][0]["class"]; tch = sp["teachers"][0]["name"]
+    gone = dict(id=9, d=0, p=3, n=1, level="", block="", classes=[c], subject="Art", group="Entire Class", teachers=[tch], room="", ext=False, rain="")
+    def again(scope, result, touched, was=()):
+        s2 = copy.deepcopy(sp); s2["rules"] = [dict(scope=scope, target="Someone", rule="In words", text="No PE first.", strength="Must", week="Both", day="All")]
+        m = model_for(s2, [(0, 1, 1, [c], "English", "Entire Class", [tch], "")]); m["rule_report"] = [dict(no=1, strength="Must", applies="", rule="x", result=result, how="")]
+        return [w["key"] for w in verify.typed_again(m, m["checked_setup"], touched, was)]
+    for scope in ("", None, "Nonsense"):
+        assert again(scope, "Met", {1}) == ["typed:1:again"] and again(scope, "Partly", {7}) == ["typed:1:again"] and again(scope, "Met", set(), [gone]) == ["typed:1:again"], scope
+        assert again(scope, "Met", set()) == [] and again(scope, "Not met", {1}) == [], scope
+
+@t
+def typed_again_judges_the_rows_as_they_were_too():
+    sp = primary(); c = sp["classes"][0]["class"]; t1, t2 = sp["teachers"][0]["name"], sp["teachers"][1]["name"]
+    words = lambda scope, target: dict(scope=scope, target=target, rule="In words", text="No PE first.", strength="Must", week="Both", day="All")
+    line = [dict(no=1, strength="Must", applies="", rule="x", result="Met", how="")]
+    def again(row, touched, was):
+        s2 = copy.deepcopy(sp); s2["rules"] = [row]; m = model_for(s2, [(0, 1, 1, [c], "English", "Entire Class", [t2], "")]); m["rule_report"] = line
+        return [w["key"] for w in verify.typed_again(m, m["checked_setup"], touched, was)]
+    gone = dict(id=9, d=0, p=3, n=1, level="", block="", classes=[c], subject="Art", group="Entire Class", teachers=[t1], room="", ext=False, rain="")
+    assert again(words("Class", c), set(), [gone]) == ["typed:1:again"]
+    assert again(words("Teacher", t1), {1}, [gone]) == ["typed:1:again"] and again(words("Teacher", t1), {1}, []) == []
+    assert again(words("Teacher", t1), set(), []) == [] and again(words("Class", c), set(), ()) == [] and again(words("Class", "Nobody"), set(), [gone]) == []
+    m = model_for(dict(copy.deepcopy(sp), rules=[words("Class", c)]), [(0, 1, 1, [c], "English", "Entire Class", [t2], "")]); m["rule_report"] = line
+    assert [w["key"] for w in verify.warnings(m, touched=(), was=[gone])["warnings"] if w["kind"] == "typed"] == ["typed:1:again"]
 
 @t
 def choices_become_warnings():

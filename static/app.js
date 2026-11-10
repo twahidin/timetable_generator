@@ -1249,7 +1249,7 @@ document.addEventListener("click", async e => {
   if (e.target.dataset && (e.target.dataset.pick || e.target.dataset.pickall)) { pick(e.target, e.shiftKey); return; }
   if (e.target.dataset && e.target.dataset.mtick) { mtick(e.target, e.shiftKey); return; }
   if (e.target.dataset && e.target.dataset.gtick) { const gp = gpState(); e.target.checked ? gp.ticked.add(e.target.dataset.gtick) : gp.ticked.delete(e.target.dataset.gtick); render(); return; }
-  const b = e.target.closest("button, [data-pop], .issue, td.c, [data-mcard], [data-mbasket], [data-mstaff]"); if (!b) return;
+  const b = e.target.closest("button, [data-pop], .issue, td.c, [data-fxcell], [data-mcard], [data-mbasket], [data-mstaff]"); if (!b) return;
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
@@ -1298,6 +1298,7 @@ document.addEventListener("click", async e => {
   if (b.id === "exGo") { makePrintouts(); return; }
   if (b.id === "imCheck") { uploadDraft(false); return; }
   if (b.id === "imPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; publishDraft(); return; }
+  if (fxClick(b)) return;
   if (b.dataset.decide) { const i = b.dataset.decide.indexOf("|"); decide(b.dataset.decide.slice(0, i), b.dataset.decide.slice(i + 1)); return; }
   if (b.id === "copyPrompt") { const ta = $("#prompt"); const done = () => toast("Copied."); if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(done, () => { ta.select(); document.execCommand("copy"); done(); }); else { ta.select(); document.execCommand("copy"); done(); } return; }
   if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
@@ -2197,7 +2198,7 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
   const p = st.published, f = p ? p.files || {} : {};
   el.innerHTML = `<h2>Published now</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)}${p.source ? ` from ${esc(p.source)}` : ""} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
       <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
-      ${p.config_id ? `<p class="muted small">Made from configuration ${esc(p.config_id)}.</p>` : ""}${p.compared_v ? `<p class="muted small">Checked against the setup at ${esc(p.compared_v)}</p>` : ""}${p.compared_v ? ((p.left || []).length || p.open ? `<details><summary>${p.open} warning${p.open === 1 ? " was" : "s were"} left open</summary><ul>${(p.left || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>` : `<p class="muted small">0 warnings were left open</p>`) : ""}${p.compared_v ? ((p.fixes || []).length ? `<p class="muted small">${p.fixes.length} fixes</p>` : `<p class="muted small">No fixes were made in the app.</p>`) : ""}${ruleReportHTML(p.rule_report || [], S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0)}${choicesUsedHTML(p.choices_used || [], p.choice_problems || [], S.spec ? validChoices() : 0)}
+      ${p.config_id ? `<p class="muted small">Made from configuration ${esc(p.config_id)}.</p>` : ""}${p.compared_v ? `<p class="muted small">Checked against the setup at ${esc(p.compared_v)}</p>` : ""}${p.compared_v ? ((p.left || []).length || p.open ? `<details><summary>${p.open} warning${p.open === 1 ? " was" : "s were"} left open</summary><ul>${(p.left || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>` : `<p class="muted small">0 warnings were left open</p>`) : ""}${p.compared_v ? ((p.fixes || []).length ? `<details><summary>${p.fixes.length} fix${p.fixes.length === 1 ? "" : "es"} made in the app</summary><ol class="fxlist">${p.fixes.map(x => `<li>${esc(x)}</li>`).join("")}</ol></details>` : `<p class="muted small">No fixes were made in the app.</p>`) : ""}${ruleReportHTML(p.rule_report || [], S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0)}${choicesUsedHTML(p.choices_used || [], p.choice_problems || [], S.spec ? validChoices() : 0)}
       <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>${f.db ? `<a href="/files/db" title="Every lesson, class, teacher and room as a SQLite database, for other systems to import. It also holds the setup, so Make printouts can rebuild everything from it.">Timetable database (.sqlite), for other systems</a>` : ""}
       ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
       <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
@@ -2210,6 +2211,7 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
 document.addEventListener("change", e => {
   if (e.target.id === "exSetup" || e.target.id === "exTT") { const f = e.target.files[0]; $("#" + e.target.id + "Name").textContent = f ? f.name : "none chosen"; }
   if (e.target.dataset && e.target.dataset.dfilter) { S.dfilter = e.target.dataset.dfilter; drawDraft(); }
+  if (e.target.dataset && e.target.dataset.fxview && e.target.value) fxOpen(e.target.dataset.fxview, e.target.value, null, null);
 });
 /* the chosen setup workbook and timetable as form data, or null (with a message) when something is missing */
 function timetableForm() {
@@ -2247,7 +2249,7 @@ async function uploadDraft(replace) {
       return;
     }
     if (!r.ok) { drawDraft(); toast(j.error || "Could not check the timetable."); return; }
-    S.draft = j; drawDraft(); poll();
+    S.draft = j; S.fix = null; drawDraft(); poll();
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
   finally { btns.forEach(x => x.disabled = false); }
 }
@@ -2259,7 +2261,7 @@ async function publishDraft() {
     const r = await fetch("/api/draft/publish", { method: "POST" }), j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/login"; return; }
     if (!r.ok) { drawDraft(); toast(j.error || "Could not publish the timetable."); return; }
-    S.draft = j; drawDraft(); toast("Published. Teachers and students now see this timetable."); poll();
+    S.draft = j; S.fix = null; drawDraft(); toast("Published. Teachers and students now see this timetable."); poll();
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
   finally { btns.forEach(x => x.disabled = false); }
 }
@@ -2287,10 +2289,10 @@ function draftHTML(j) {
     <div class="row" style="margin-top:8px"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
     <p class="muted small">Its downloads and the personal student codes are below.</p>`;
   const ws = j.warnings || [], c = Draft.counts(ws), f = S.dfilter || "open", pub = G.st && G.st.published, n = j.open ?? c.open, nl = j.left ?? c.left, n5 = j.step5 ?? c.step5;   // the server counts the step 5 decisions whose warning has gone
-  const where = w => w.where ? ` · ${esc(w.where.cls)} · ${esc(w.where.day)} · period ${esc(w.where.period)}` : "";
+  const where = w => Draft.whereText(w).map(x => ` · ${esc(x)}`).join("");
   const row = w => { const d = w.decision && w.decision.answer, ans = Draft.answerText(w), side = Draft.sideText(w);
     return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}"><div class="wt">${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where(w)}</div>
-      <div class="row warnbtns">${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "left" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" ? "" : `<button data-decide="left|${esc(w.key)}">Leave it</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div></li>`; };
+      <div class="row warnbtns">${Draft.fixTarget(w) && d !== "step5" && d !== "fixed" && d !== "met" ? `<button data-fix="${esc(w.key)}">Fix the timetable</button>` : ""}${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "left" || d === "met" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" ? "" : `${/:again$/.test(w.key) ? `<button data-decide="met|${esc(w.key)}">Still met</button>` : ""}<button data-decide="left|${esc(w.key)}">Leave it</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div></li>`; };
   const groups = Draft.group(ws, f), nc = (j.not_checked || []);
   const kinds = groups.map(k => `<details open class="warnkind"><summary class="sev">${esc(k.title)} · ${k.groups.reduce((a, g) => a + g.items.length, 0)}</summary>
       ${k.groups.map(g => `<h4>${esc(g.name)}</h4><ul class="warnlist">${g.items.map(row).join("")}</ul>`).join("")}
@@ -2299,14 +2301,190 @@ function draftHTML(j) {
   return head + (j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.file_school)}</b>, but the setup saved in the app is for <b>${esc(j.school)}</b>. Check it is the right file.</p>` : "")
     + configLine(j)
     + `<p class="warnsum"><b>${n} warning${n === 1 ? "" : "s"} open</b> · ${nl} left for now · ${n5} settled on step 5</p>
-      <div class="row warnfilter">${[["open", "Open"], ["left", "Left for now"], ["all", "All"]].map(([v, l]) => `<label class="radio"><input type="radio" name="dfilter" data-dfilter="${v}"${v === f ? " checked" : ""}> ${l}</label>`).join("")}</div>
-      <p class="muted small">Fixing a lesson in the app comes in the next stage. Until then, fix the file and upload it again: what you left for now stays left.</p>`
+      <div class="row warnfilter">${[["open", "Open"], ["left", "Left for now"], ["all", "All"]].map(([v, l]) => `<label class="radio"><input type="radio" name="dfilter" data-dfilter="${v}"${v === f ? " checked" : ""}> ${l}</label>`).join("")}</div>`
     + (kinds || (ws.length ? `<p class="muted">Nothing in this list.</p>` : `<div class="okmsg">No warnings: no teacher, class, room or student is double-booked, and the timetable matches the setup.</div>`))
+    + fixesHTML(j) + `<div id="fxBox">${fixHTML()}</div>`
     + (j.after && j.after.length ? `<details><summary>${j.after.length} lesson${j.after.length === 1 ? " is" : "s are"} after school</summary>${list(j.after)}</details>` : "")
     + (j.notes && j.notes.length ? `<details><summary>Notes</summary>${list(j.notes)}</details>` : "")
     + ruleReportHTML(j.rule_report || [], j.typed || 0) + choicesUsedHTML(j.choices_used || [], j.choice_problems || [], j.choices || 0)
     + `<p class="muted small" style="margin-top:8px">${n} warning${n === 1 ? "" : "s"} open; you can still publish. ${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}</p>
     <div class="row"><button class="primary" id="imPublish">Publish this timetable</button></div>`;
+}
+/* ---------------- step 8: the Fix card. S.fix = {view, name, week, sel: {id, group} | null, grid, options, adding: key | null}.
+   Fetches happen in the handlers (fxGet, fxRefresh); drawing only reads S.fix. */
+const FX_BREAK = { F: "Assembly", R: "Recess", U: "Lunch", W: "Recess window", ".": "No lesson" };
+const FX = { n: 0, busy: false };
+const fxShorts = () => { const m = {}; ((S.spec && S.spec.teachers) || []).forEach(t => { if (t.name && t.short) m[t.name] = t.short; }); return m; };
+const fxDot = st => `<i class="dot ${esc(Grid.stateClass(st))}"></i>`;
+function fixesHTML(j) {   // what was fixed in the app, newest last, with undo, anything wrong with the fixes, and the download
+  const fl = j.fixes || [];
+  return `<h3 style="margin-top:14px">Fixes</h3>` + (fl.length
+      ? `<ol class="fxlist">${fl.map(x => `<li>${esc(x.text)} <span class="muted small">${esc(x.at)}</span></li>`).join("")}</ol><div class="row"><button id="fxUndo">Undo the last fix</button></div>`
+      : `<p class="muted small">No fixes have been made in the app yet.</p>`)
+    + (j.fix_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")
+    + `<p class="small"><a href="/api/draft/download">Download the draft (.sqlite)</a> <span class="muted">to carry on elsewhere; Make printouts accepts it.</span></p>`;
+}
+function fixHTML() {
+  const f = S.fix;
+  if (!f || !f.grid) return `<div class="fxcard"><h3>Fix the timetable</h3><p class="muted small">Move or swap a lesson, change its teacher or room, delete an extra lesson or add a missing one, here in the app. Each fix is checked against the timetable and the setup before it is made, and can be undone.</p><div class="row"><button id="fxOpen">Open the Fix card</button></div></div>`;
+  const g = f.grid, weeks = Grid.weeks(g.days), wk = weeks.find(w => w.name === f.week) || weeks[0], rows = Grid.table(g, wk), o = fxOpts(f), slots = o ? o.slots || [] : [];
+  const shorts = fxShorts(), lessonMode = !!(f.sel || f.adding);
+  const picker = (view, names, label) => `<label class="f">${label} <select data-fxview="${view}"><option value="">Choose…</option>${names.map(n => `<option value="${esc(n)}"${f.view === view && f.name === n ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></label>`;
+  const cell = c => {
+    if (c.covered) return "";
+    if (c.lessons.length) {
+      const btns = c.lessons.map(r => {
+        const own = f.sel && f.sel.id === r.id && f.sel.group === r.group, sw = f.sel && !own ? slots.find(s => s.swap === r.id) : null;
+        return `<button class="fxl ${sw ? esc(Grid.stateClass(sw.state)) : ""}${own ? " sel" : ""}" data-fxsel="${esc(r.id)}|${esc(r.group)}" title="${esc(sw && sw.why ? `${Grid.fullLabel(r)} — ${sw.why}` : Grid.fullLabel(r))}">${esc(Grid.label(r, shorts))}</button>`;
+      }).join("");
+      return `<td class="fxc has" rowspan="${c.rowspan}">${btns}</td>`;
+    }
+    const sl = lessonMode ? Grid.slotAt(slots, c.d, c.p) : null, st = sl ? Grid.stateClass(sl.state) : "";
+    return `<td class="fxc ${st}${FX_BREAK[c.code] && c.code !== "." ? " brk" : ""}"${sl ? ` data-fxcell="${Number(c.d)}|${Number(c.p)}" title="${esc(Grid.isSwap(sl) ? Grid.slotText(sl, g.days) : sl.why)}"` : ""}>${FX_BREAK[c.code] ? `<span class="muted">${esc(FX_BREAK[c.code])}</span>` : ""}</td>`;
+  };
+  const table = `<table class="fxgrid" style="min-width:${64 + wk.days.length * 100}px"><tr><th></th>${wk.days.map(d => `<th>${esc(d.label)}</th>`).join("")}</tr>${rows.map((r, p) => `<tr><th class="fxp">${p}<small>${esc(((g.times || [])[p] || [])[0] || "")}</small></th>${r.map(cell).join("")}</tr>`).join("")}</table>`;
+  const opt = (attrs, st, text, why) => `<button class="fxopt" ${attrs}>${fxDot(st)}<span>${esc(text)}${why ? ` <small class="muted">${esc(why)}</small>` : ""}</span></button>`;
+  let side;
+  if (f.sel) {
+    const r = Grid.lesson(g, f.sel.id, f.sel.group);
+    side = `<h4>Selected lesson</h4><p class="small">${esc(r ? r.what || Grid.label(r, shorts) : "")}</p>` + (!o ? (f.optFail ? `<p class="issue">Could not load the options. Select the lesson again.</p>` : `<p class="muted small">Loading the options…</p>`)
+      : `<h4>Possible moves</h4>${Grid.sorted(slots).map(s => opt(`data-fxgo="${Number(s.d)}|${Number(s.p)}"`, s.state, Grid.slotText(s, g.days), "")).join("") || `<p class="muted small">No slot is open to this lesson.</p>`}
+        <h4>Change the teacher</h4>${(o.teachers || []).map((t, i) => opt(`data-fxteacher="${i}"`, t.state, (t.teachers || []).join(", ") || "No teacher", t.why)).join("") || `<p class="muted small">No other teacher.</p>`}
+        <h4>Change the room</h4>${(o.rooms || []).map((t, i) => opt(`data-fxroom="${i}"`, t.state, t.room || "No room", t.why)).join("") || `<p class="muted small">No other room.</p>`}
+        ${o.delete && o.delete.state !== "no" ? `<h4>Delete</h4>${opt(`data-fxdelete="1"`, o.delete.state, "Delete this lesson", o.delete.why)}` : ""}`);
+  } else {
+    side = `<h4>Missing periods</h4>` + (g.short && g.short.length ? `<ul class="fxshort">${g.short.map(s => `<li><span class="small">${esc(s.name)}: ${esc(s.have)} of ${esc(s.want)} periods</span> <button data-fxadd="${esc(s.key)}">${f.adding === s.key ? "Cancel" : "Add a lesson"}</button></li>`).join("")}</ul>${f.adding ? (o ? `<p class="small">Click a green or amber slot to add a lesson there.</p>` : f.optFail ? `<p class="issue">Could not load the slots. Click Add a lesson again.</p>` : `<p class="muted small">Loading the slots…</p>`) : ""}`
+      : `<p class="muted small">${f.view === "class" ? "Nothing is missing for this class." : "Missing periods are shown for a class."}</p>`)
+      + `<p class="muted small">Click a lesson to see where it can go.</p>`;
+  }
+  return `<div class="fxcard"><h3>Fix the timetable</h3><div class="row fxpick">${picker("class", g.classes || [], "Class")}${picker("teacher", g.teachers || [], "Teacher")}
+      ${weeks.length > 1 ? `<span class="fxweeks">${weeks.map(w => `<button class="${w.name === wk.name ? "primary" : ""}" data-fxweek="${esc(w.name)}">${esc(w.name)} week</button>`).join("")}</span>` : ""}</div>
+    <p class="muted small">${esc(f.view === "class" ? "Class" : "Teacher")} ${esc(f.name)}. ${f.sel ? "Green is open, amber is open but less wanted, red is not allowed. Click the selected lesson again to let go of it." : "Click a lesson to select it."}</p>
+    <div class="fxlayout"><div class="fxwrap">${table}</div><div class="fxside">${side}</div></div></div>`;
+}
+function fxDraw() {   // the draft area again with the grid kept where it was scrolled
+  const w = $(".fxwrap"), s = $(".fxside"), pos = [w ? w.scrollLeft : 0, w ? w.scrollTop : 0, s ? s.scrollTop : 0];
+  drawDraft();
+  const w2 = $(".fxwrap"), s2 = $(".fxside"); if (w2) { w2.scrollLeft = pos[0]; w2.scrollTop = pos[1]; } if (s2) s2.scrollTop = pos[2];
+}
+async function fxGet(url) {
+  try {
+    const r = await fetch(url), j = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = "/login"; return null; }
+    if (!r.ok) { toast(j.error || "Something went wrong."); return null; }
+    return j;
+  } catch (e) { toast("Could not reach the server: " + e.message); return null; }
+}
+const fxQ = o => Object.keys(o).map(k => `${k}=${encodeURIComponent(o[k])}`).join("&");
+const fxWant = f => ({ view: f.view, name: f.name, id: f.sel ? f.sel.id : undefined, group: f.sel ? f.sel.group : undefined, key: !f.sel && f.adding ? f.adding : undefined });
+const fxOpts = f => f.options && f.optFor && Grid.wanted(f.optFor, fxWant(f)) ? f.options : null;   // the options only while they are for what is selected now
+async function fxOptions(f) {   // the options of the selected lesson, or the slots of the lesson being added; an answer for something no longer selected is dropped
+  f.options = null; f.optFail = false;
+  const asked = fxWant(f); let url = null;
+  if (asked.id !== undefined) url = "/api/draft/options?" + fxQ({ id: asked.id, group: asked.group });
+  else if (asked.key !== undefined) { const s = ((f.grid && f.grid.short) || []).find(x => x.key === asked.key); if (s) url = "/api/draft/options?" + fxQ({ add: asked.key, n: s.n }); }
+  if (!url) return;
+  const j = await fxGet(url);
+  if (!Grid.wanted(asked, fxWant(f))) return;
+  f.options = j; f.optFor = asked; f.optFail = !j;
+}
+async function fxRefresh(f) {   // the grid again, then the options when a lesson is still selected; false when the grid could not be fetched or is no longer wanted
+  const live = () => S.fix === f || f.opening;
+  const g = await fxGet("/api/draft/grid?" + fxQ({ view: f.view, name: f.name }));
+  if (!g || !live() || g.view !== f.view || g.name !== f.name) return false;
+  f.grid = g;
+  const weeks = Grid.weeks(g.days); if (!weeks.some(w => w.name === f.week)) f.week = weeks[0].name;
+  if (f.sel && !Grid.lesson(g, f.sel.id, f.sel.group)) f.sel = null;
+  if (f.adding && !(g.short || []).some(s => s.key === f.adding)) f.adding = null;
+  await fxOptions(f);
+  return live();
+}
+async function fxOpen(view, name, day, sel) {   // day: a day's name, to open on the week that holds it
+  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true }, n = ++FX.n;
+  const ok = await fxRefresh(f); f.opening = false;
+  if (!ok || n !== FX.n) return;
+  if (day) { const i = f.grid.days.indexOf(day), w = Grid.weeks(f.grid.days).find(x => x.days.some(d => d.i === i)); if (w) f.week = w.name; }
+  S.fix = f; fxDraw();
+  const box = $("#fxBox"); if (box && day !== null) box.scrollIntoView({ block: "start" });
+}
+async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again
+  const f = S.fix; S.draft = j; poll();
+  if (f) { const ok = await fxRefresh(f); if (S.fix !== f) return; if (!ok) toast("The fix was made, but the grid could not be loaded again. Pick the class again."); }
+  fxDraw();
+}
+async function fxFix(fix) {   // one fix; a refused one says why and the grid is fetched again
+  const f = S.fix; if (!f || FX.busy) return;
+  FX.busy = true;
+  try {
+    const j = await post("/api/draft/fix", fix);
+    if (j) { if (fix.kind === "add") f.adding = null; await fxAfter(j); }
+    else { await fxRefresh(f); if (S.fix === f) fxDraw(); }
+  } catch (e) { toast("Could not reach the server: " + e.message); } finally { FX.busy = false; }
+}
+async function fxUndo() {
+  if (FX.busy) return; FX.busy = true;
+  try { const j = await post("/api/draft/undo"); if (j) await fxAfter(j); } catch (e) { toast("Could not reach the server: " + e.message); } finally { FX.busy = false; }
+}
+async function fxSelect(sel) {
+  const f = S.fix; f.sel = sel; f.adding = null; f.options = null; f.optFail = false;
+  if (sel) { fxDraw(); await fxOptions(f); }
+  if (S.fix === f) fxDraw();
+}
+function fxAlso(sl) { return !Grid.isSwap(sl) || !(sl.also || []).length || confirm(sl.also.join("\n") + "\n\nSwap anyway?"); }   // a swap that moves another class's lesson too is confirmed first
+function fxStateOK(x) { if (x && (x.state === "ok" || x.state === "prefer")) return true; toast((x && x.why) || "That is not open."); return false; }
+function fxClick(b) {   // true when the click was the Fix card's or a warning's Fix button
+  const d = b.dataset, f = S.fix, split = v => { const i = v.indexOf("|"); return [v.slice(0, i), v.slice(i + 1)]; };
+  if (d.fix !== undefined) {
+    const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === d.fix), to = w && Draft.fixTarget(w);
+    if (!to) { toast("This warning is not about one class or teacher, so there is no grid to show."); return true; }
+    fxOpen(to.view, to.name, to.day, to.sel); return true;
+  }
+  if (b.id === "fxOpen") { fxOpenFirst(); return true; }
+  if (b.id === "fxUndo") { fxUndo(); return true; }
+  if (!f || !f.grid) return false;
+  if (d.fxweek !== undefined) { f.week = d.fxweek; fxDraw(); return true; }
+  if (d.fxsel !== undefined) {
+    const [id, group] = split(d.fxsel), row = { id: Number(id), group };
+    if (f.sel && Grid.same(f.sel, row)) { fxSelect(null); return true; }
+    const o = fxOpts(f), sl = f.sel && o ? (o.slots || []).find(s => s.swap === row.id) : null;
+    if (sl && (sl.state === "ok" || sl.state === "prefer")) {
+      if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); return true;
+    }
+    fxSelect(row); return true;
+  }
+  if (d.fxcell !== undefined && fxOpts(f)) {
+    const o = fxOpts(f), [dd, p] = split(d.fxcell), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
+    if (!fxStateOK(sl)) return true;
+    if (f.optFor.id !== undefined) { if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); }
+    else if (f.optFor.key !== undefined) { const s = (f.grid.short || []).find(x => x.key === f.optFor.key); if (s) fxFix(Grid.addFor(f.optFor.key, sl, s.n)); }
+    return true;
+  }
+  if (d.fxgo !== undefined && f.sel && fxOpts(f)) {
+    const o = fxOpts(f), [dd, p] = split(d.fxgo), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
+    if (!fxStateOK(sl)) return true;
+    if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); return true;
+  }
+  if (d.fxteacher !== undefined && f.sel && fxOpts(f)) {
+    const o = fxOpts(f), t = (o.teachers || [])[Number(d.fxteacher)];
+    if (t && fxStateOK(t)) fxFix({ kind: "teacher", key: o.key, teachers: t.teachers }); return true;
+  }
+  if (d.fxroom !== undefined && f.sel && fxOpts(f)) {
+    const o = fxOpts(f), t = (o.rooms || [])[Number(d.fxroom)];
+    if (t && fxStateOK(t)) fxFix({ kind: "room", id: f.optFor.id, group: f.optFor.group, room: t.room }); return true;
+  }
+  if (d.fxdelete !== undefined && f.sel && fxOpts(f)) {
+    const o = fxOpts(f); if (!fxStateOK(o.delete)) return true;
+    fxFix(Grid.deleteFor(f.grid, f.optFor)); return true;
+  }
+  if (d.fxadd !== undefined) {
+    const key = d.fxadd; f.sel = null; f.adding = f.adding === key ? null : key; f.options = null; f.optFail = false; fxDraw();
+    fxOptions(f).then(() => { if (S.fix === f) fxDraw(); }); return true;
+  }
+  return false;
+}
+async function fxOpenFirst() {   // the Fix card with nothing chosen: the setup's first class
+  const n = S.spec ? classNames()[0] : "";
+  if (n) await fxOpen("class", n, null, null); else toast("The setup has no classes to show.");
 }
 /* which configuration (the workbook's id) the timetable was made from, against the setup's version now */
 function configLine(j) {
