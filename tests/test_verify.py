@@ -277,4 +277,30 @@ def after_school_slots_are_named_with_the_rows_strength():
     assert run(sp, [rule("School", "Whole school", "Avoid after-school slots")], L)[0][0] == []
     (ws, nc), _ = with_grid(sp, [rule("Teacher", t, "Avoid after-school slots")], L, ext); assert ws == [] and len(nc) == 1 and "scope" in nc[0]
 
+@t
+def max_periods_a_day_counts_parallel_groups_once():
+    sp = primary(); c = sp["classes"][0]["class"]; t1, t2 = sp["teachers"][0]["name"], sp["teachers"][1]["name"]; row = rule("Class", c, "Max periods a day", number=3)
+    two = [(0, 2, 2, [c], "Art", "ZZ1", [t1], ""), (0, 2, 2, [c], "Music", "ZZ2", [t2], "")]
+    assert run(sp, [row], two)[0][0] == []
+    (ws, _), m = run(sp, [row], two + [(0, 6, 1, [c], "English", "Entire Class", [t1], "")] + [(0, 8, 1, [c], "English", "Entire Class", [t1], "")])
+    assert len(ws) == 1 and ws[0]["text"].endswith(f"{c} has 4 periods on {m['days'][0]}, more than 3.")
+    both = [(0, 2, 2, [c], "Art", "ZZ1", [t1], ""), (0, 2, 2, [c], "Art", "ZZ2", [t1], "")]   # a teacher in two lessons at once is one set of periods
+    assert run(sp, [rule("Teacher", t1, "Max periods a day", number=2)], both)[0][0] == []
+
+@t
+def a_number_that_is_not_whole_is_not_checked_not_a_crash():
+    sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]; L = [(0, 1, 3, [c], "English", "Entire Class", [t], "")]
+    for kind in ("Max periods a day", "Max periods in a row", "At most N at once"):
+        for bad in ("abc", 2.5):
+            (ws, nc), _ = run(sp, [rule("School" if kind != "At most N at once" else "Subject", "Whole school" if kind != "At most N at once" else "English", kind, number=bad)], L)
+            assert ws == [] and len(nc) == 1 and nc[0].endswith("Number is not a whole number")
+        assert len(run(sp, [rule("School", "Whole school", "Max periods a day", number="2.0")], L)[0][0]) == 1   # 2.0 is read as 2
+
+@t
+def same_time_skips_a_class_without_the_subject():
+    sp = primary(); lv = sp["classes"][0]["level"]; c1, c2, c3 = [x["class"] for x in sp["classes"] if x["level"] == lv][:3]; t = sp["teachers"][0]["name"]
+    row = rule("Level", lv, "Same time across classes", subject="Mathematics"); two = [(0, 2, 1, [c], "Mathematics", "Entire Class", [t], "") for c in (c1, c2)]
+    assert run(sp, [row], two)[0][0] == []
+    (ws, _), _ = run(sp, [row], two + [(0, 3, 1, [c3], "Mathematics", "Entire Class", [t], "")]); assert [w["group"] for w in ws] == [c3]
+
 print(f"{n} checks passed")

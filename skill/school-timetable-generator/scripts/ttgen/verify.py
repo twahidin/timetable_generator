@@ -193,6 +193,11 @@ def _only_in_venues(m, spec, i, r, days, per):
     return out
 
 # ----------------------------------------------------------------------------------------------- counts and patterns
+def _number(r):
+    """the rule's Number as a whole number, or None (2 and '2.0' are 2)"""
+    try: v = float(str(r.get("number"))); return int(v) if v == int(v) else None
+    except (ValueError, OverflowError): return None
+
 def _day_name(m, d): return m["days"][d]
 def _teachers_by_day(m, r, test=None):
     """(teacher, d) -> the periods that teacher is in lessons; a Teacher row looks at its target only"""
@@ -209,9 +214,9 @@ def _max_periods_a_day(m, spec, i, r, days, per):
     for x in _lessons(m, spec, r, days):
         if by_teacher: who = [t for t in x["teachers"] if r["scope"] == "School" or t == r["target"]]
         else: who = [c for c in x["classes"] if r["scope"] == "Class" and c == r["target"] or r["scope"] == "Level" and m["class_ix"].get(c, {}).get("level") == r["target"]]
-        for w in who: tally[(w, x["d"])] = tally.get((w, x["d"]), 0) + x["n"]
-    return [_hit(m, r, i, f"{w}|{d}", f"{w} has {n} periods on {_day_name(m, d)}, more than {r['number']}.", w)
-            for (w, d), n in sorted(tally.items(), key=lambda kv: (kv[0][1], kv[0][0])) if n > int(r["number"])]
+        for w in who: tally.setdefault((w, x["d"]), set()).update(_span(x))   # the periods occupied, so parallel groups count once
+    return [_hit(m, r, i, f"{w}|{d}", f"{w} has {len(ps)} periods on {_day_name(m, d)}, more than {_number(r)}.", w)
+            for (w, d), ps in sorted(tally.items(), key=lambda kv: (kv[0][1], kv[0][0])) if len(ps) > _number(r)]
 
 def _longest_run(periods):
     best = run = 0
@@ -219,9 +224,9 @@ def _longest_run(periods):
     return best
 
 def _max_periods_in_a_row(m, spec, i, r, days, per):
-    return [_hit(m, r, i, f"{t}|{d}", f"{t} teaches {n} periods in a row on {_day_name(m, d)}, more than {r['number']}.", t)
+    return [_hit(m, r, i, f"{t}|{d}", f"{t} teaches {n} periods in a row on {_day_name(m, d)}, more than {_number(r)}.", t)
             for (t, d), ps in sorted(_teachers_by_day(m, r, lambda x: x["d"] in days).items(), key=lambda kv: (kv[0][1], kv[0][0]))
-            if (n := _longest_run(ps)) > int(r["number"])]
+            if (n := _longest_run(ps)) > _number(r)]
 
 def _free_run(row, busy, length):
     """whether the teacher (busy periods) is free for a whole R run of the day's code string row, or length periods in a row inside a W run"""
@@ -244,14 +249,14 @@ def _at_least_one_recess(m, spec, i, r, days, per):
 def _at_most_n_at_once(m, spec, i, r, days, per):
     if r.get("scope") == "Room": return []   # check_model reports room capacity
     count = Counter((x["d"], q) for x in _lessons(m, spec, r, days) for q in _span(x) if q in per)
-    return [_hit(m, r, i, f"{d}|{q}", f"{r['number']}+ {r['target']} lessons at once on {_day_name(m, d)} period {q} ({n}).", r["target"])
-            for (d, q), n in sorted(count.items()) if n > int(r["number"])]
+    return [_hit(m, r, i, f"{d}|{q}", f"{_number(r)}+ {r['target']} lessons at once on {_day_name(m, d)} period {q} ({n}).", r["target"])
+            for (d, q), n in sorted(count.items()) if n > _number(r)]
 
 def _same_time_across_classes(m, spec, i, r, days, per):
     classes, times = [c for c, v in m["class_ix"].items() if v["level"] == r["target"]], {}
     for x in _lessons(m, spec, r, days):
         for c in x["classes"]: times.setdefault(c, set()).update((x["d"], q) for q in _span(x))
-    sets = {c: frozenset(times.get(c, ())) for c in classes}
+    sets = {c: frozenset(times[c]) for c in classes if c in times}   # a class without the subject is the deployment comparison's to report
     if not sets: return []
     common = Counter(sets.values()).most_common(1)[0][0]
     return [_hit(m, r, i, c, f"{c} has {r['subject']} at a different time from the other {r['target']} classes.", c) for c, s in sets.items() if s != common]
@@ -304,6 +309,7 @@ def rules(m, spec):
         elif rule == "Finish by" and _BLANK(r.get("to")): why = "it has no To period"
         elif rule in USES and r.get("scope") not in USES[rule]: why = f"scope {r.get('scope')} is not one this rule uses ({', '.join(USES[rule])})"
         elif rule in NEEDS_NUMBER and _BLANK(r.get("number")): why = "it has no Number"
+        elif rule in NEEDS_NUMBER and _number(r) is None: why = "Number is not a whole number"
         elif rule in ("Same time across classes", "Not on the same day as") and not names_list(r.get("subject")): why = "it names no subject"
         elif rule in NEEDS_PERIODS and _BLANK(r.get("from")) and _BLANK(r.get("to")): why = "it has no From or To period"
         elif rule == "Only these subjects" and not names_list(r.get("subject")): why = "it names no subjects"
