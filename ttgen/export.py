@@ -212,62 +212,65 @@ def model_from_files(setup_path, timetable_path, spec=None):
     elif setup_path: spec = read_template(setup_path)
     elif db and db[5]: spec = db[5]
     else: raise ValueError("Send the setup workbook too: this timetable file does not hold the setup.")
-    wbu = None if db else openpyxl.load_workbook(timetable_path, data_only=True)
-    used = list(db[7]) if db else (choices.used_from_rows(wbu[choices.USED_SHEET].iter_rows(values_only=True)) if choices.USED_SHEET in wbu.sheetnames else [])
-    k, choice_probs = choices.check_used(spec, used)
-    setup, spec = spec, choices.apply_all(spec, k)   # the timetable is checked against the setup with the second choices it used
-    derive(spec)
-    sc = spec["school"]; NP = int(sc["periods_per_day"]); ds = spec["day_structure"]
-    lv0 = next((lv for lv in sc["levels"] if lv in ds), None)
-    if lv0 is None: raise ValueError("The setup workbook's Day structure is empty.")
-    days = list(ds[lv0].keys()); dix = {d.lower(): i for i, d in enumerate(days)}
-    if db: wb = None; rows = iter([db[0]] + db[1])
-    else:
-        wb = wbu
-        if "Lessons" not in wb.sheetnames: raise ValueError("The timetable workbook has no Lessons sheet.")
-        rows = wb["Lessons"].iter_rows(values_only=True)
-    hdr = [str(h).strip() if h is not None else "" for h in next(rows)]
-    ix = {h.lower(): i for i, h in enumerate(hdr)}
-    def g(row, *names):
-        for n in names:
-            i = ix.get(n.lower())
-            if i is not None and i < len(row) and row[i] not in (None, ""): return row[i]
-        return None
-    out, ids, bad = [], {}, []
-    for k, row in enumerate(rows, start=2):
-        if not any(v not in (None, "") for v in row): continue
-        day = str(g(row, "Day") or "").strip(); p = g(row, "Start period")
-        if day.lower() not in dix or p is None: bad.append(k); continue
-        p = int(p); n = g(row, "Periods")
-        n = int(n) if n is not None else int(g(row, "End period") or p) - p + 1
-        subject = str(g(row, "Subject") or ""); group = str(g(row, "Group") or ENTIRE); block = str(g(row, "Block") or "")
-        lid = g(row, "Lesson ID")
-        if lid is None: lid = ids.setdefault((dix[day.lower()], p, n, block or f"{group}|{g(row, 'Classes')}"), len(ids) + 1)
-        out.append(dict(id=int(lid), d=dix[day.lower()], p=p, n=n, level=str(g(row, "Level") or ""), block=block,
-                        classes=_split_list(g(row, "Classes")), subject=subject, group=group, teachers=_split_list(g(row, "Teachers")),
-                        room=str(g(row, "Room") or ""), ext=str(g(row, "After school") or "").strip().lower() in ("yes", "y", "true", "1", "x"),
-                        rain=str(g(row, "Rain room") or "")))
-    notes, status = (list(db[2]), db[3]) if db else ([], None)
-    report = list(db[6]) if db else []
-    if wb and "Rule report" in wb.sheetnames: report = rule_report_rows(wb["Rule report"].iter_rows(values_only=True))
-    if wb and "Read me" in wb.sheetnames:
-        sect = None
-        for (v,) in wb["Read me"].iter_rows(min_col=1, max_col=1, values_only=True):
-            if v is None: continue
-            v = str(v)
-            if v in ("Checks", "After-school lessons", "Compromises", "Rules checked after solving", "Notes", "How to read", "Contents"): sect = v; continue
-            if "Solver status:" in v: status = v.split("Solver status:")[-1].strip(" .")
-            if sect in ("Notes", "Rules checked after solving"): notes.append(v)
-    if bad: notes.append(f"{len(bad)} rows on the Lessons sheet were skipped (unknown day or no start period): rows {', '.join(map(str, bad[:10]))}.")
-    recess = collections.defaultdict(list)   # the Recess sheet: each class's floating recess
-    for c, v in (db[4] if db else {}).items():
-        for day, p, n in v:
-            if str(day).lower() in dix: recess[c].append([dix[str(day).lower()], int(p), int(n)])
-    if wb and "Recess" in wb.sheetnames:
-        rows = wb["Recess"].iter_rows(values_only=True); h = {str(v).strip().lower(): i for i, v in enumerate(next(rows, ())) if v is not None}
-        for row in rows:
-            c, day, p, n = (row[h[k]] if k in h and h[k] < len(row) else None for k in ("class", "day", "start period", "periods"))
-            if c not in (None, "") and str(day or "").lower() in dix and p is not None: recess[str(c)].append([dix[str(day).lower()], int(p), int(n or 1)])
+    wbu = None if db else openpyxl.load_workbook(timetable_path, data_only=True, read_only=True)   # read-only: a solver's workbook has many merged cells and loads in seconds, not tens of seconds
+    try:
+        used = list(db[7]) if db else (choices.used_from_rows(wbu[choices.USED_SHEET].iter_rows(values_only=True)) if choices.USED_SHEET in wbu.sheetnames else [])
+        k, choice_probs = choices.check_used(spec, used)
+        setup, spec = spec, choices.apply_all(spec, k)   # the timetable is checked against the setup with the second choices it used
+        derive(spec)
+        sc = spec["school"]; NP = int(sc["periods_per_day"]); ds = spec["day_structure"]
+        lv0 = next((lv for lv in sc["levels"] if lv in ds), None)
+        if lv0 is None: raise ValueError("The setup workbook's Day structure is empty.")
+        days = list(ds[lv0].keys()); dix = {d.lower(): i for i, d in enumerate(days)}
+        if db: wb = None; rows = iter([db[0]] + db[1])
+        else:
+            wb = wbu
+            if "Lessons" not in wb.sheetnames: raise ValueError("The timetable workbook has no Lessons sheet.")
+            rows = wb["Lessons"].iter_rows(values_only=True)
+        hdr = [str(h).strip() if h is not None else "" for h in next(rows)]
+        ix = {h.lower(): i for i, h in enumerate(hdr)}
+        def g(row, *names):
+            for n in names:
+                i = ix.get(n.lower())
+                if i is not None and i < len(row) and row[i] not in (None, ""): return row[i]
+            return None
+        out, ids, bad = [], {}, []
+        for k, row in enumerate(rows, start=2):
+            if not any(v not in (None, "") for v in row): continue
+            day = str(g(row, "Day") or "").strip(); p = g(row, "Start period")
+            if day.lower() not in dix or p is None: bad.append(k); continue
+            p = int(p); n = g(row, "Periods")
+            n = int(n) if n is not None else int(g(row, "End period") or p) - p + 1
+            subject = str(g(row, "Subject") or ""); group = str(g(row, "Group") or ENTIRE); block = str(g(row, "Block") or "")
+            lid = g(row, "Lesson ID")
+            if lid is None: lid = ids.setdefault((dix[day.lower()], p, n, block or f"{group}|{g(row, 'Classes')}"), len(ids) + 1)
+            out.append(dict(id=int(lid), d=dix[day.lower()], p=p, n=n, level=str(g(row, "Level") or ""), block=block,
+                            classes=_split_list(g(row, "Classes")), subject=subject, group=group, teachers=_split_list(g(row, "Teachers")),
+                            room=str(g(row, "Room") or ""), ext=str(g(row, "After school") or "").strip().lower() in ("yes", "y", "true", "1", "x"),
+                            rain=str(g(row, "Rain room") or "")))
+        notes, status = (list(db[2]), db[3]) if db else ([], None)
+        report = list(db[6]) if db else []
+        if wb and "Rule report" in wb.sheetnames: report = rule_report_rows(wb["Rule report"].iter_rows(values_only=True))
+        if wb and "Read me" in wb.sheetnames:
+            sect = None
+            for (v,) in wb["Read me"].iter_rows(min_col=1, max_col=1, values_only=True):
+                if v is None: continue
+                v = str(v)
+                if v in ("Checks", "After-school lessons", "Compromises", "Rules checked after solving", "Notes", "How to read", "Contents"): sect = v; continue
+                if "Solver status:" in v: status = v.split("Solver status:")[-1].strip(" .")
+                if sect in ("Notes", "Rules checked after solving"): notes.append(v)
+        if bad: notes.append(f"{len(bad)} rows on the Lessons sheet were skipped (unknown day or no start period): rows {', '.join(map(str, bad[:10]))}.")
+        recess = collections.defaultdict(list)   # the Recess sheet: each class's floating recess
+        for c, v in (db[4] if db else {}).items():
+            for day, p, n in v:
+                if str(day).lower() in dix: recess[c].append([dix[str(day).lower()], int(p), int(n)])
+        if wb and "Recess" in wb.sheetnames:
+            rows = wb["Recess"].iter_rows(values_only=True); h = {str(v).strip().lower(): i for i, v in enumerate(next(rows, ())) if v is not None}
+            for row in rows:
+                c, day, p, n = (row[h[k]] if k in h and h[k] < len(row) else None for k in ("class", "day", "start period", "periods"))
+                if c not in (None, "") and str(day or "").lower() in dix and p is not None: recess[str(c)].append([dix[str(day).lower()], int(p), int(n or 1)])
+    finally:
+        if wbu is not None: wbu.close()
     m = _model(spec, days, out, notes=notes, status=status, recess=recess); m["rule_report"] = report
     m["file_school"] = file_school if spec_given else str((setup.get("school") or {}).get("name") or "").strip()
     m["setup"] = setup; m["checked_setup"] = spec; m["choices_used"] = used; m["choice_problems"] = choice_probs   # the database keeps the setup as downloaded

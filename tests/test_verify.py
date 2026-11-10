@@ -453,4 +453,24 @@ def a_typed_rule_with_an_unclear_result_is_a_warning():   # finding 9
         assert ws[0]["text"] == "T1: the rule report does not say whether it was met: No PE first. The agent says: Not sure.", ws[0]["text"]
     assert verify.typed(sp, [dict(no=1, result="Met")]) == []
 
+@t
+def the_timetable_workbook_is_read_read_only():   # finding 8
+    real, seen = export.openpyxl.load_workbook, []
+    def spy(*a, **kw): wb = real(*a, **kw); seen.append((kw, wb)); return wb
+    with tempfile.TemporaryDirectory() as d:
+        sp = primary(); ds = sp["day_structure"]; lv = sp["school"]["levels"][0]; day = next(iter(ds[lv])); cls = next(c["class"] for c in sp["classes"] if c["level"] == lv)
+        x = next(x for x in sp["lessons"] if cls in x["classes"] and not x.get("block"))
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"
+        ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
+        p0 = ds[lv][day].index("L"); ws.append([1, day, p0, p0, 1, "", "", lv, "", cls, x["subject"], "Entire Class", ", ".join(x["teachers"]), "", "", ""])
+        rm = wb.create_sheet("Read me"); rm.append(["Notes"]); rm.append(["A note."]); rm.append([None]); rm.append(["Solver status: OPTIMAL."])
+        rr = wb.create_sheet("Rule report"); rr.append(["No.", "Must / Prefer", "Applies to", "Rule", "Result", "How"]); rr.append([1, "Must", "Whole school", "x", "Met", "ok"])
+        rc = wb.create_sheet("Recess"); rc.append(["Class", "Day", "Start period", "Periods"]); rc.append([cls, day, 4, 1])
+        tt = os.path.join(d, "timetable.xlsx"); wb.save(tt)
+        export.openpyxl.load_workbook = spy
+        try: m = export.model_from_files(None, tt, spec=sp)
+        finally: export.openpyxl.load_workbook = real
+        assert seen and all(kw.get("read_only") for kw, _ in seen), seen
+        assert len(m["lessons"]) == 1 and "A note." in m["notes"] and m["status"] == "OPTIMAL" and m["rule_report"][0]["result"] == "Met" and m["recess"][cls] == [[0, 4, 1]], (m["notes"], m["status"], m["recess"])
+
 print(f"{n} checks passed")
