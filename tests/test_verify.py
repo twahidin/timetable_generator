@@ -11,7 +11,7 @@ def model_for(sp, placed):   # a model from hand-placed lessons: placed = [(day 
     sp = copy.deepcopy(sp); reader.derive(sp); days = list(sp["day_structure"][sp["school"]["levels"][0]].keys())
     L = [dict(id=i + 1, d=d, p=p, n=n_, level=sp["classes"][0]["level"] if cls else "", block="", classes=cls, subject=s, group=g, teachers=tt, room=r, ext=False, rain="")
          for i, (d, p, n_, cls, s, g, tt, r) in enumerate(placed)]
-    return export._model(sp, days, L)
+    m = export._model(sp, days, L); m.setdefault("checked_setup", sp); return m   # the derived setup, as the app passes it
 
 @t
 def deployment_finds_teacher_periods_missing_and_extra():
@@ -108,5 +108,64 @@ def an_extra_group_row_carries_its_code():
     m = model_for(sp, [(0, 0, 1, [cls], subj, "ZZ9", ["Ms X"], "")])
     ws = {w["key"]: w for w in verify.deployment(m, sp)}
     op = ws["dep:G:ZZ9:extra"]["ops"][0]; assert op[2]["code_override"] == "ZZ9" and op[2]["subject"] == subj and op[2]["classes"] == [cls]
+
+def rule(scope, target, kind, a=None, b=None, day="All", **kw):
+    r = dict(dict(scope=scope, target=target, rule=kind, week="Both", day=day, strength="Must"), **kw)
+    if a is not None: r["from"] = a
+    if b is not None: r["to"] = b
+    return r
+
+def run(sp, rows, placed):
+    sp = copy.deepcopy(sp); sp["rules"] = rows; m = model_for(sp, placed); return verify.rules(m, m["checked_setup"]), m
+
+@t
+def not_available_and_keep_free_together():
+    sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]
+    (ws, nc), m = run(sp, [rule("Teacher", t, "Not available", 0, 1)], [(0, 1, 1, [c], "English", "Entire Class", [t], "")])
+    assert len(ws) == 1 and ws[0]["key"] == f"rule:0:{c}|0|1" and ws[0]["group"] == t and ws[0]["where"]["period"] == 1 and nc == []
+    assert ws[0]["text"] == f"Rule Teacher · {t} · Not available: {t} has English for {c} on {m['days'][0]} period 1 but is not available (periods 0-1)."
+    assert run(sp, [rule("Teacher", t, "Not available", 0, 1)], [(0, 3, 1, [c], "English", "Entire Class", [t], "")])[0][0] == []
+    d = next(x["dept"] for x in sp["teachers"] if x["name"] == t); lv = sp["classes"][0]["level"]
+    for row, who in ((rule("Department", d, "Keep free together", 2, 3), t), (rule("Level", lv, "Keep free together", 2, 3), c)):
+        (ws, nc), m = run(sp, [row], [(1, 3, 1, [c], "English", "Entire Class", [t], "")])
+        assert len(ws) == 1 and ws[0]["key"] == f"rule:0:{who}|1" and ws[0]["group"] == who
+        assert ws[0]["text"].endswith(f"{who} has English on {m['days'][1]} period 3; {row['target']} keeps periods 2-3 free together.")
+        assert run(sp, [row], [(1, 5, 1, [c], "English", "Entire Class", [t], "")])[0][0] == []
+
+@t
+def fixed_at_only_in_not_in_finish_by():
+    sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]; L = lambda d, p, n_=1: [(d, p, n_, [c], "English", "Entire Class", [t], "")]
+    (ws, _), m = run(sp, [rule("Class", c, "Fixed at", 2, 9, day=None)], L(0, 3))
+    assert len(ws) == 1 and ws[0]["key"] == f"rule:0:{c}|0|3" and ws[0]["text"].endswith(f"English for {c} starts at period 3 on {m['days'][0]}, not period 2.")
+    assert run(sp, [rule("Class", c, "Fixed at", 2)], L(0, 2))[0][0] == []
+    (ws, _), m = run(sp, [rule("Class", c, "Not in periods", 2, 3)], L(0, 3))
+    assert len(ws) == 1 and ws[0]["text"].endswith(f"English for {c} is in periods 2-3 on {m['days'][0]}.")
+    assert run(sp, [rule("Class", c, "Not in periods", 2, 3)], L(0, 4))[0][0] == []
+    (ws, _), m = run(sp, [rule("Class", c, "Only in periods", 2, 4)], L(0, 4, 2))
+    assert len(ws) == 1 and ws[0]["text"].endswith(f"English for {c} is outside periods 2-4 on {m['days'][0]}.")
+    assert run(sp, [rule("Class", c, "Only in periods", 2, 4)], L(0, 3, 2))[0][0] == []
+    (ws, _), m = run(sp, [rule("Class", c, "Finish by", None, 3)], L(0, 3, 2))
+    assert len(ws) == 1 and ws[0]["text"].endswith(f"English for {c} ends at period 4 on {m['days'][0]}, after period 3.")
+    assert run(sp, [rule("Class", c, "Finish by", None, 3)], L(0, 2, 2))[0][0] == []
+    (ws, _), _ = run(sp, [rule("Class", c, "Not in periods", 2, 3, strength="Prefer")], L(0, 2))
+    assert ws[0]["strength"] == "Prefer" and ws[0]["text"].endswith(" (Prefer)") and ws[0]["kind"] == "rule"
+    assert run(sp, [rule("Class", c, "Not in periods", 2, 3, day=m["days"][1])], L(0, 2))[0][0] == []   # another day's rule
+
+@t
+def only_these_subjects_and_only_in_venues():
+    sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]
+    (ws, _), m = run(sp, [rule("School", "Whole school", "Only these subjects", 2, 3, subject="Mathematics")], [(0, 2, 1, [c], "English", "Entire Class", [t], ""), (0, 3, 1, [c], "Mathematics", "Entire Class", [t], "")])
+    assert len(ws) == 1 and ws[0]["key"] == f"rule:0:{c}|0|2" and ws[0]["text"].endswith(f"English for {c} is in periods 2-3 on {m['days'][0]}, kept for Mathematics.")
+    row = rule("School", "Whole school", "Only in venues", 2, 3, venues=["Hall", "ISH"])
+    (ws, _), m = run(sp, [row], [(0, 2, 1, [c], "English", "Entire Class", [t], "Lab"), (0, 3, 1, [c], "Art", "Entire Class", [t], "Hall"), (1, 3, 1, [c], "Art", "Entire Class", [t], "TBC"), (1, 5, 1, [c], "Art", "Entire Class", [t], "Lab")])
+    assert len(ws) == 1 and ws[0]["group"] == "Lab" and ws[0]["text"].endswith(f"English for {c} is in Lab on {m['days'][0]} period 2; only Hall, ISH are allowed in periods 2-3.")
+
+@t
+def rules_that_cannot_be_checked_are_listed():
+    sp = primary(); sp["rules"] = [dict(scope="Planet", target="Mars", rule="Not in periods", week="Both", day="All", **{"from": 0, "to": 1}, strength="Must"),
+                                   dict(scope="School", target="Whole school", rule="Not in periods", week="Both", day="All", strength="Must"),
+                                   dict(scope="School", target="Whole school", rule="In words", text="x", strength="Must")]
+    m = model_for(sp, []); ws, nc = verify.rules(m, m["checked_setup"]); assert ws == [] and len(nc) == 2 and "scope" in nc[0] and "From" in nc[1]
+    assert verify.rule_periods(dict(), 5) == range(0, 5) and verify.rule_days(["Odd Mon", "Even Mon", "Odd Tue"], dict(week="Odd", day="Mon")) == [0]
 
 print(f"{n} checks passed")

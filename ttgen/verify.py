@@ -3,6 +3,8 @@
 Every function that takes spec takes the checked setup (m["checked_setup"]), already derived."""
 import re
 from .export import ENTIRE
+from .solver import rule_label
+from .spec import names_list, subject_test
 
 KINDS = ("clash", "deployment", "rule", "typed", "choice")
 
@@ -91,3 +93,122 @@ def clashes(m):
         who = re.match(r"(?:Teacher double-booked|Class clash): (.+?) on ", text)
         out.append(warning("clash:" + text, "clash", text, group=who.group(1) if who else "School"))
     return out
+
+
+# ----------------------------------------------------------------------------------------------- the standard rules
+def rule_days(days, r):
+    """the day indexes a rule row covers (as the solver's _day_ok): Odd/Even by prefix, the day by its first three letters"""
+    wk, dy = str(r.get("week") or "Both"), str(r.get("day") or "All")
+    return [i for i, d in enumerate(days) if not (wk in ("Odd", "Even") and not d.startswith(wk)) and (dy == "All" or d.split()[-1][:3] == dy[:3])]
+
+def rule_periods(r, NP):
+    """the periods a rule row covers: blank From is 0, blank To is the last period"""
+    a, b = r.get("from"), r.get("to")
+    return range(int(a) if a not in (None, "") else 0, (int(b) if b not in (None, "") else NP - 1) + 1)
+
+def in_scope(m, spec, r):
+    """a test for lessons the rule row is about, or None when its scope is not one the checks know"""
+    sc, tg = r.get("scope"), r.get("target")
+    dept = lambda x: m["subjects"].get(x["subject"], {}).get("dept")
+    level = lambda c: m["class_ix"].get(c, {}).get("level")
+    tests = {"Teacher": lambda x: tg in x["teachers"], "Class": lambda x: tg in x["classes"], "Room": lambda x: x["room"] == tg,
+             "Level": lambda x: x["level"] == tg or (bool(x["classes"]) and all(level(c) == tg for c in x["classes"])),
+             "Block": lambda x: x["block"] == tg, "Subject": lambda x: subject_test([tg])(x["subject"], dept(x)),
+             "Department": lambda x: dept(x) == tg, "Group": lambda x: x["group"] == tg, "School": lambda x: True}
+    if sc not in tests: return None
+    base, sub = tests[sc], r.get("subject")
+    if not sub or r.get("rule") == "Only these subjects": return base
+    return lambda x: base(x) and subject_test([sub])(x["subject"], dept(x))
+
+
+def _what(x): return f"{x['subject']} for {x['classes'][0]}" if x["group"] == ENTIRE and x["classes"] else f"group {x['group']}"
+def _span(x): return range(x["p"], x["p"] + x["n"])
+def _pr(per): return f"periods {per[0]}-{per[-1]}"
+
+def _hit(m, r, i, detail, sentence, group, x=None):
+    """one warning for rule row i; x is the lesson it names"""
+    prefer = r.get("strength") == "Prefer"
+    where = dict(cls=(x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"]) if x else None
+    return warning(f"rule:{i}:{detail}", "rule", f"Rule {rule_label(r)}: {sentence}" + (" (Prefer)" if prefer else ""), "Prefer" if prefer else "Must", group, where)
+
+def _lessons(m, spec, r, days):
+    """the lessons in scope that sit on a rule day"""
+    test = in_scope(m, spec, r)
+    return [x for x in m["lessons"] if x["d"] in days and test(x)]
+
+def _inside(x, per): return [q for q in _span(x) if q in per]
+def _key(x, q=None): return f"{(x['classes'] or [''])[0]}|{x['d']}|{x['p'] if q is None else q}"
+
+def _not_available(m, spec, i, r, days, per):
+    out = []
+    for x in _lessons(m, spec, r, days):
+        if (q := next(iter(_inside(x, per)), None)) is None: continue
+        who = f"for {x['classes'][0]}" if x["group"] == ENTIRE and x["classes"] else f"group {x['group']}"
+        group = r["target"] if r.get("scope") in ("Teacher", "Class", "Room") else (x["classes"] or ["School"])[0]
+        out.append(_hit(m, r, i, _key(x, q), f"{r['target']} has {x['subject']} {who} on {m['days'][x['d']]} period {q} but is not available ({_pr(per)}).", group, x))
+    return out
+
+def _keep_free_together(m, spec, i, r, days, per):
+    out, seen = [], set()
+    for x in m["lessons"]:
+        if x["d"] not in days or (q := next(iter(_inside(x, per)), None)) is None: continue
+        if r.get("scope") == "Department": who = [t for t in x["teachers"] if m["teacher_ix"].get(t, {}).get("dept") == r["target"]]
+        else: who = [c for c in x["classes"] if m["class_ix"].get(c, {}).get("level") == r["target"]]
+        for w in who:
+            if (w, x["d"]) in seen: continue
+            seen.add((w, x["d"]))
+            out.append(_hit(m, r, i, f"{w}|{x['d']}", f"{w} has {x['subject']} on {m['days'][x['d']]} period {q}; {r['target']} keeps {_pr(per)} free together.", w, x))
+    return out
+
+def _fixed_at(m, spec, i, r, days, per):
+    a = int(r["from"])
+    return [_hit(m, r, i, _key(x), f"{_what(x)} starts at period {x['p']} on {m['days'][x['d']]}, not period {a}.", (x["classes"] or ["School"])[0], x)
+            for x in _lessons(m, spec, r, days) if x["p"] != a]
+
+def _not_in_periods(m, spec, i, r, days, per):
+    return [_hit(m, r, i, _key(x), f"{_what(x)} is in {_pr(per)} on {m['days'][x['d']]}.", (x["classes"] or ["School"])[0], x)
+            for x in _lessons(m, spec, r, days) if _inside(x, per)]
+
+def _only_in_periods(m, spec, i, r, days, per):
+    return [_hit(m, r, i, _key(x), f"{_what(x)} is outside {_pr(per)} on {m['days'][x['d']]}.", (x["classes"] or ["School"])[0], x)
+            for x in _lessons(m, spec, r, days) if any(q not in per for q in _span(x))]
+
+def _finish_by(m, spec, i, r, days, per):
+    to = int(r["to"])
+    return [_hit(m, r, i, _key(x), f"{_what(x)} ends at period {x['p'] + x['n'] - 1} on {m['days'][x['d']]}, after period {to}.", (x["classes"] or ["School"])[0], x)
+            for x in _lessons(m, spec, r, days) if x["p"] + x["n"] - 1 > to]
+
+def _only_these_subjects(m, spec, i, r, days, per):
+    ok, names = subject_test(names_list(r["subject"])), ", ".join(names_list(r["subject"]))
+    return [_hit(m, r, i, _key(x), f"{_what(x)} is in {_pr(per)} on {m['days'][x['d']]}, kept for {names}.", (x["classes"] or ["School"])[0], x)
+            for x in _lessons(m, spec, r, days) if _inside(x, per) and not ok(x["subject"], m["subjects"].get(x["subject"], {}).get("dept"))]
+
+def _only_in_venues(m, spec, i, r, days, per):
+    venues, out = names_list(r.get("venues")), []
+    for x in _lessons(m, spec, r, days):
+        q = next(iter(_inside(x, per)), None)
+        if q is None or x["room"] in ("", "TBC", None) or x["room"] in venues: continue
+        out.append(_hit(m, r, i, _key(x, q), f"{_what(x)} is in {x['room']} on {m['days'][x['d']]} period {q}; only {', '.join(venues)} are allowed in {_pr(per)}.", x["room"], x))
+    return out
+
+CHECKERS = {"Not available": _not_available, "Keep free together": _keep_free_together, "Fixed at": _fixed_at, "Not in periods": _not_in_periods,
+            "Only in periods": _only_in_periods, "Finish by": _finish_by, "Only these subjects": _only_these_subjects, "Only in venues": _only_in_venues}
+_BLANK = lambda v: v in (None, "")
+
+def rules(m, spec):
+    """(warnings, not_checked): each rule row except 'In words' goes to its checker; a row that cannot be checked is listed with why"""
+    out, skipped = [], []
+    for i, r in enumerate(spec.get("rules") or []):
+        rule = r.get("rule")
+        if rule == "In words": continue
+        why = None
+        if rule not in CHECKERS: why = "this kind of rule is not checked here"
+        elif in_scope(m, spec, r) is None: why = f"scope {r.get('scope')} is not one the check knows"
+        elif rule == "Fixed at" and _BLANK(r.get("from")): why = "it has no From period"
+        elif rule == "Finish by" and _BLANK(r.get("to")): why = "it has no To period"
+        elif rule not in ("Fixed at", "Finish by", "Only these subjects") and _BLANK(r.get("from")) and _BLANK(r.get("to")): why = "it has no From or To period"
+        elif rule == "Only these subjects" and not names_list(r.get("subject")): why = "it names no subjects"
+        elif rule == "Only in venues" and not names_list(r.get("venues")): why = "it names no venues"
+        if why: skipped.append(f"{rule_label(r)}: {why}"); continue
+        out += CHECKERS[rule](m, spec, i, r, rule_days(m["days"], r), rule_periods(r, m["NP"]))
+    return out, skipped
