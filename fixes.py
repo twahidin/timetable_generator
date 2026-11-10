@@ -29,6 +29,14 @@ def _slot(spec, days, d, p, n):
     """the lesson, n periods long from period p on day d, must be inside the day"""
     if not all(isinstance(v, int) and not isinstance(v, bool) for v in (d, p, n)) or not 0 <= d < len(days) or p < 0 or n < 1 or p + n > int(spec["school"]["periods_per_day"]): raise ValueError("That is outside the day.")
 
+def _after(spec, days, rows, d, p, n):
+    """whether the lesson (its rows) in periods p .. p+n-1 of day d is in an after-school slot: a period coded A in the day
+    structure for a level of the lesson (a row's level, else its classes' levels); a level or day the structure lacks is not"""
+    ds = spec.get("day_structure") or {}; cl = {str(c.get("class")): c.get("level") for c in spec.get("classes") or []}
+    levels = {lv for x in rows for lv in ([x["level"]] if x.get("level") in ds else [cl.get(c) for c in x["classes"]])}
+    codes = [str((ds.get(lv) or {}).get(days[d]) or "") for lv in levels if 0 <= d < len(days)]
+    return any(q < len(c) and c[q] == "A" for c in codes for q in range(p, p + n))
+
 def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None):
     """change lessons (a list the caller owns) in place and return the sentence for the committee; ValueError(sentence) when the
     fix cannot apply (every kind checks before it changes anything). new_id: the id an add takes (default 1 + the highest in
@@ -40,7 +48,8 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None):
     if kind == "move":
         rows = _rows(lessons, fix["id"]); _slot(spec, days, fix["d"], fix["p"], rows[0]["n"]); a = rows[0]; text = f"Moved {what(a)} from {when(days, a['d'], a['p'])} to {when(days, fix['d'], fix['p'])}."
         keep(rows)
-        for x in rows: x["d"], x["p"] = fix["d"], fix["p"]
+        ext = _after(spec, days, rows, fix["d"], fix["p"], a["n"])
+        for x in rows: x["d"], x["p"], x["ext"] = fix["d"], fix["p"], ext
         touched.add(fix["id"]); return text
     if kind == "swap":
         ra, rb = _rows(lessons, fix["a"]), _rows(lessons, fix["b"]); a, b = ra[0], rb[0]
@@ -48,8 +57,9 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None):
         text = f"Swapped {what(a)} ({when(days, a['d'], a['p'])}) with {what(b)} ({when(days, b['d'], b['p'])})."
         (da, pa), (db, pb) = (a["d"], a["p"]), (b["d"], b["p"])
         keep(ra + rb)
-        for x in ra: x["d"], x["p"] = db, pb
-        for x in rb: x["d"], x["p"] = da, pa
+        ea, eb = _after(spec, days, ra, db, pb, a["n"]), _after(spec, days, rb, da, pa, b["n"])
+        for x in ra: x["d"], x["p"], x["ext"] = db, pb, ea
+        for x in rb: x["d"], x["p"], x["ext"] = da, pa, eb
         touched |= {fix["a"], fix["b"]}; return text
     if kind == "teacher":
         key = _key(fix["key"]); name = verify._name(key); known = {x["name"] for x in spec.get("teachers") or []}
@@ -77,7 +87,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None):
         x = dict(id=new_id if new_id is not None else 1 + max([y["id"] for y in lessons], default=0), d=fix["d"], p=fix["p"], n=fix["n"], level=e["level"] or "", block=str(e["rows"][0].get("block") or ""),
                  classes=list(e["classes"]), subject=e["subject"], group=ENTIRE if key[0] == "C" else key[1],
                  teachers=list(dict.fromkeys(t for r in e["rows"] for t in r.get("teachers") or [])), room=fix["room"], ext=False, rain="")
-        lessons.append(x); touched.add(x["id"])
+        x["ext"] = _after(spec, days, [x], x["d"], x["p"], x["n"]); lessons.append(x); touched.add(x["id"])
         return f"Added {what(x)} on {when(days, x['d'], x['p'])} ({x['n']} period{'' if x['n'] == 1 else 's'}) {'in ' + x['room'] if x['room'] else 'with no room'}."
     if kind == "delete":
         rows = [x for x in _rows(lessons, fix["id"]) if fix.get("group") is None or x["group"] == fix["group"]]
