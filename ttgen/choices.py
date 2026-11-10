@@ -45,7 +45,35 @@ def rule_words(spec, i):
     if r.get("rule") == TYPED:
         n = next((n for n, j, _ in typed_rules(spec) if j == i), 1)
         return "Rule: " + typed_label(n, r)
-    return "Rule: " + rule_label(r)
+    return "Rule: " + " · ".join([rule_label(r)] + _parts(r))
+
+def _num(v):
+    """a period or a number as the sheet shows it: 3, not 3.0"""
+    return int(v) if isinstance(v, float) and v.is_integer() else v
+
+def _parts(r):
+    """what tells two rule rows of one kind apart, after the label: the week (not Both), the day (not All), the periods, the
+    number and the venues. Not the strength: that is what a second choice changes."""
+    out, blank = [], lambda v: v in (None, "")
+    if not blank(r.get("week")) and str(r["week"]).strip() != "Both": out.append(str(r["week"]).strip())
+    if not blank(r.get("day")) and str(r["day"]).strip() != "All": out.append(str(r["day"]).strip())
+    a, b = _num(r.get("from")), _num(r.get("to"))
+    if not blank(a): out.append(f"period {a}" if blank(b) or str(b) == str(a) else f"periods {a}-{b}")
+    if not blank(r.get("number")): out.append(f"number {_num(r['number'])}")
+    v = r.get("venues")
+    v = ", ".join(str(x) for x in v if not blank(x)) if isinstance(v, (list, tuple)) else str(v or "").strip()
+    if v: out.append(v)
+    return out
+
+def settings_rows(spec):
+    """the indexes in spec['rules'] of the rows the Settings sheet stands for (the first Must row of each setting, as
+    spec.split_rules places them): a choice on the rule list is never one of these"""
+    out, seen = set(), set()
+    for j, r in enumerate(spec.get("rules") or []):
+        if str(r.get("strength") or "Must") != "Must": continue
+        s = next((s for s in SETTING_RULES if s["rule"] and _is_rule(r, s)), None)
+        if s and s["key"] not in seen: seen.add(s["key"]); out.add(j)
+    return out
 
 def _clock(t):
     """a clock time as 9.00 or 11.20 (no am/pm)"""
@@ -176,9 +204,27 @@ def problems(spec):
             shown = f"{_clock(w[0])} to {_clock(w[1])}"
             if b - a < rf["length"] * int(spec["school"]["period_minutes"]) or hi - lo + 1 < rf["length"]:
                 say(f"The window {shown} is shorter than the recess ({rf['length']} period{'s' if rf['length'] != 1 else ''})."); continue
-            if hi < rf["from"] or lo > rf["to"]: say(f"The window {shown} does not include the recess ({rf['text']}).")
+            if hi < rf["from"] or lo > rf["to"]: say(f"The window {shown} does not include the recess ({rf['text']})."); continue
+            have = _float_length(spec)
+            if have is not None and have != rf["length"]:
+                say(f"{lv}'s recess is {_periods(rf['length'])} but Floating recess length on Settings is {have}.")
         else: say("This choice is not a setting, a rule or a recess.")
-    return out
+    bad, first = {i for i, _ in out}, None   # a recess choice floats at the length the first one in the order sets
+    for i, c in ordered(spec):
+        if c.get("kind") != "recess" or i in bad: continue
+        n = recess_first(spec, c.get("level"))["length"]
+        if first is None: first = (c.get("level"), n)
+        elif n != first[1]: out.append((i, f"{c.get('level')}'s recess is {_periods(n)} but the recess choice for {first[0]} floats {first[1]}."))
+    return sorted(out, key=lambda x: x[0])
+
+def _periods(n): return f"{n} period{'s' if n != 1 else ''}"
+
+def _float_length(spec):
+    """the Floating recess length on Settings as a whole number, or None when it is not there or blank"""
+    row = next((x for x in (spec.get("school") or {}).get("extra_settings") or [] if str(x[0] or "").strip().lower().startswith("floating recess length")), None)
+    if row is None or len(row) < 2 or row[1] in (None, ""): return None
+    try: return int(float(str(row[1]).strip()))
+    except ValueError: return None
 
 def _valid(spec):
     bad = {i for i, _ in problems(spec)}
@@ -281,16 +327,20 @@ def used_from_rows(rows):
 
 def check_used(spec, used):
     """(k, problems): k is the number of leading choices (by no) marked Second choice; problems are sentences for a row that names
-    no choice on the list and for a second choice after a first. Rows with no number are ignored."""
+    no choice on the list, for a second choice on a choice with a problem (a first choice there is ignored) and for a second
+    choice after a first. Rows with no number are ignored."""
     pos = {i: n for n, (i, _) in enumerate(ordered(spec), start=1)}
     valid = [(pos[i], c) for i, c in _valid(spec)]
-    by_no = dict(valid)
+    by_no = dict(valid); bad = {pos[i] for i, _ in problems(spec)}   # numbered on the sheet, but skipped
     second = {u["no"] for u in used if u.get("no") is not None and u.get("used") == "Second choice"}
     missed = next((no for no, _ in valid if no not in second), None)   # the first choice not given way on
     probs = []
     for u in sorted((u for u in used if u.get("no") is not None), key=lambda u: u["no"]):
         no = u["no"]
-        if no not in by_no: probs.append(f"Choices used names item {no}, which is not on the list.")
+        if no not in by_no:
+            if no in bad:
+                if u.get("used") == "Second choice": probs.append(f"Choices used gives way on item {no}, which has a problem and cannot be given way on.")
+            else: probs.append(f"Choices used names item {no}, which is not on the list.")
         elif u.get("used") == "Second choice" and missed is not None and no > missed:
             probs.append(f"Item {no} ({item_label(spec, by_no[no])}) was given way on while item {missed} ({item_label(spec, by_no[missed])}) was not: the agent must give way in order.")
     k = 0

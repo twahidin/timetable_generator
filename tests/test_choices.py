@@ -24,7 +24,7 @@ def ordered_and_labels():
     assert [c["kind"] for _, c in o] == ["setting", "recess", "rule", "rule"]
     assert choices.item_label(sp, o[0][1]) == "After-school slot allowed when a class cannot fit" and choices.first_text(sp, o[0][1]) == "No" and choices.second_text(sp, o[0][1]) == "Yes"
     assert choices.item_label(sp, o[1][1]) == "Recess for Sec 2" and choices.first_text(sp, o[1][1]).startswith("Fixed at ") and choices.second_text(sp, o[1][1]) == "Floating between 9.00 and 11.20"
-    assert choices.item_label(sp, o[2][1]) == "Rule: Level · Sec 1 · Not in periods" and choices.second_text(sp, o[2][1]).startswith("Instead: ")
+    assert choices.item_label(sp, o[2][1]) == "Rule: Level · Sec 1 · Not in periods · periods 20-22" and choices.second_text(sp, o[2][1]).startswith("Instead: ")
     assert choices.item_label(sp, o[3][1]) == "Rule: T1 · Must · Whole school · No PE in the first period" and choices.second_text(sp, o[3][1]) == "Make it Prefer"
 
 @t
@@ -142,5 +142,64 @@ def a_workbook_without_the_id_row_reads_without_one():
         assert reader.read_template(path)["school"]["config_id"] == "v7+"
         ws.delete_rows(r); wb.save(path)
         assert "config_id" not in reader.read_template(path)["school"]
+
+@t
+def a_rule_label_carries_what_tells_two_rows_apart():
+    sp = secondary(); base = dict(scope="Class", target="1A", rule="Fixed at", subject="Art", week="Odd", day="Mon", **{"from": 3, "to": 3}, number=2, venues=["Art Room", "Studio"], strength="Prefer")
+    sp["rules"] = [base, dict(base, week="Both", day="All", to=None, number=None, venues=[]), dict(base, **{"from": 4.0, "to": 6.0})]
+    assert choices.rule_words(sp, 0) == "Rule: Class · 1A · Art · Fixed at · Odd · Mon · period 3 · number 2 · Art Room, Studio", choices.rule_words(sp, 0)
+    assert choices.rule_words(sp, 1) == "Rule: Class · 1A · Art · Fixed at · period 3", choices.rule_words(sp, 1)
+    assert "· periods 4-6 ·" in choices.rule_words(sp, 2), choices.rule_words(sp, 2)
+
+@t
+def a_rule_choice_comes_back_on_its_own_rule_when_two_rules_share_a_kind():
+    sp = secondary(); n0 = len(sp["rules"])
+    A = dict(scope="Level", target="Sec 1", rule="Not in periods", week="Both", day="Mon", **{"from": 0, "to": 1}, strength="Must")
+    sp["rules"] = list(sp["rules"]) + [A, dict(A, day="Fri", **{"from": 6, "to": 7})]
+    sp["choices"] = [dict(kind="rule", rule=n0 + 1, fallback="Drop", order=1)]
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "s.xlsx"); template.write_template(sp, p); back = reader.read_template(p)
+    r = back["rules"][back["choices"][0]["rule"]]; assert (r["day"], r["from"], r["to"]) == ("Fri", 6, 7), r
+    left = [(x.get("day"), x.get("from")) for x in choices.apply_all(back, 1)["rules"] if x.get("rule") == "Not in periods" and x.get("target") == "Sec 1"]
+    assert ("Mon", 0) in left and ("Fri", 6) not in left and len(left) == len([x for x in back["rules"] if x.get("rule") == "Not in periods" and x.get("target") == "Sec 1"]) - 1, left
+
+@t
+def a_prefer_twin_of_a_settings_row_is_not_matched_to_the_settings_row():
+    sp = secondary(); must = dict(scope="School", target="Whole school", rule="Max periods a day", week="Both", day="All", number=6, strength="Must")
+    sp["rules"] = [r for r in sp["rules"] if r.get("rule") != "Max periods a day"] + [must, dict(must, strength="Prefer")]
+    sp["choices"] = [dict(kind="rule", rule=len(sp["rules"]) - 1, fallback="Drop", order=1)]
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "s.xlsx"); template.write_template(sp, p); back = reader.read_template(p)
+    assert back["rules"][back["choices"][0]["rule"]]["strength"] == "Prefer"
+    left = [x["strength"] for x in choices.apply_all(back, 1)["rules"] if x.get("rule") == "Max periods a day"]
+    assert left == ["Must"], left
+
+def floats(level_len, set_len=None):
+    """the sample with Sec 3 floating already and Sec 1's fixed recess level_len periods long"""
+    sp = secondary(); ds = sp["day_structure"]
+    for d, row in ds["Sec 3"].items(): ds["Sec 3"][d] = row.replace("RR", "WW")
+    if level_len == 1:
+        for d, row in ds["Sec 1"].items(): ds["Sec 1"][d] = row.replace("RR", "RL", 1)
+    sp["school"]["extra_settings"] = [x for x in sp["school"].get("extra_settings", []) if not str(x[0]).startswith("Floating recess length")]
+    if set_len is not None: sp["school"]["extra_settings"].append(["Floating recess length (periods)", set_len, ""])
+    return sp
+
+@t
+def a_recess_choice_that_would_float_at_another_length_is_a_problem():
+    sp = floats(1, 2); sp["choices"] = [dict(kind="recess", level="Sec 1", window=["09:10", "11:00"], order=1)]
+    assert choices.problems(sp) == [(0, "Sec 1's recess is 1 period but Floating recess length on Settings is 2.")], choices.problems(sp)
+    sp = floats(2, "1"); sp["choices"] = [dict(kind="recess", level="Sec 1", window=["09:10", "11:00"], order=1)]
+    assert choices.problems(sp) == [(0, "Sec 1's recess is 2 periods but Floating recess length on Settings is 1.")], choices.problems(sp)
+    sp = floats(2, 2); sp["choices"] = [dict(kind="recess", level="Sec 1", window=["09:10", "11:00"], order=1)]; assert choices.problems(sp) == []
+    sp = floats(1, ""); sp["choices"] = [dict(kind="recess", level="Sec 1", window=["09:10", "11:00"], order=2), dict(kind="recess", level="Sec 2", window=["09:10", "11:00"], order=1)]
+    assert choices.problems(sp) == [(0, "Sec 1's recess is 1 period but the recess choice for Sec 2 floats 2.")], choices.problems(sp)
+    assert [x[1] for x in choices.apply_all(sp, 2)["school"]["extra_settings"] if str(x[0]).startswith("Floating recess length")] == [2]
+
+@t
+def choices_used_on_a_choice_with_a_problem():
+    sp = with_choices(); sp["choices"].append(dict(kind="rule", rule=99, fallback="Drop", order=5))
+    assert choices.check_used(sp, [dict(no=5, used="First choice")]) == (0, [])
+    k, probs = choices.check_used(sp, [dict(no=5, used="Second choice")])
+    assert probs == ["Choices used gives way on item 5, which has a problem and cannot be given way on."], probs
 
 print(f"{n} checks passed")

@@ -244,7 +244,8 @@ def _read_choices(wb, sc, rules):
     if C.SHEET not in wb.sheetnames: return []
     ws = wb[C.SHEET]
     sc["choices_mode"] = "compare" if str(ws["B3"].value or "").strip() == C.MODES["compare"] else "fallback"
-    labels = [C.rule_words({"rules": rules}, i) for i in range(len(rules))]; taken = set(); out = []
+    labels = [C.rule_words({"rules": rules}, i) for i in range(len(rules))]; out = []
+    taken = C.settings_rows({"rules": rules})   # a row on Settings is never the rule a choice is about
     for pos, x in enumerate(_table(ws, "No.")[1], start=1):
         kind = str(x.get("Kind") or "").strip().lower(); item = str(x.get("Item") or "").strip(); second = x.get("Second choice")
         if kind == "setting":

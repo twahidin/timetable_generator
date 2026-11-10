@@ -183,4 +183,30 @@ t("setFallback copies the rule for Instead once, and only on a rule choice", () 
   assert.strictEqual(Choices.setFallback(s, 1, "Drop"), false); assert.strictEqual(s.choices[1].fallback, undefined);
   assert.strictEqual(Choices.setFallback(s, 5, "Drop"), false);
 });
+t("itemLabel carries the week, day, periods, number and venues that tell two rules apart", () => {
+  const s = fixture();
+  s.rules.push({ _id: "m", scope: "Level", target: "Sec 1", rule: "Not in periods", week: "Both", day: "Mon", from: 0, to: 1, strength: "Must" },
+    { _id: "f", scope: "Level", target: "Sec 1", rule: "Not in periods", week: "Both", day: "Fri", from: 6, to: 7, strength: "Must" },
+    { _id: "x", scope: "Class", target: "1A", subject: "Art", rule: "Fixed at", week: "Odd", day: "Mon", from: 3, to: 3, number: 2, venues: ["Art Room", "Studio"], strength: "Prefer" },
+    { _id: "y", scope: "Class", target: "1A", subject: "Art", rule: "Fixed at", week: "Both", day: "All", from: "3", to: "", venues: [] });
+  assert.strictEqual(Choices.itemLabel(s, { kind: "rule", rule_id: "m" }, SET), "Rule: Level · Sec 1 · Not in periods · Mon · periods 0-1");
+  assert.strictEqual(Choices.itemLabel(s, { kind: "rule", rule_id: "f" }, SET), "Rule: Level · Sec 1 · Not in periods · Fri · periods 6-7");
+  assert.strictEqual(Choices.itemLabel(s, { kind: "rule", rule_id: "x" }, SET), "Rule: Class · 1A · Art · Fixed at · Odd · Mon · period 3 · number 2 · Art Room, Studio");
+  assert.strictEqual(Choices.itemLabel(s, { kind: "rule", rule_id: "y" }, SET), "Rule: Class · 1A · Art · Fixed at · period 3");
+  assert.strictEqual(Choices.itemLabel(s, { kind: "rule", rule_id: "r3" }, SET), "Rule: School · Whole school · Max periods a day · number 6");
+});
+t("a recess choice that would float at another length is a problem", () => {
+  const s = fixture(); s.day_structure["Sec 1"].Tuesday = ".".repeat(7) + "R" + ".".repeat(6);   // Sec 1: a one-period recess
+  s.school.extra_settings = [["Floating recess length (periods)", 2, ""]];
+  s.choices = [{ kind: "recess", order: 1, level: "Sec 1", window: ["09:00", "11:20"] }];
+  assert.deepStrictEqual(Choices.problems(s, SET), { 0: ["Sec 1's recess is 1 period but Floating recess length on Settings is 2."] });
+  assert.strictEqual(Choices.newRecess(Object.assign({}, s, { choices: [] }), "Sec 1", "09:00", "11:20").error, "Sec 1's recess is 1 period but Floating recess length on Settings is 2.");
+  s.school.extra_settings = [["Floating recess length (periods)", "1", ""]]; s.choices[0].level = "Sec 2";
+  assert.deepStrictEqual(Choices.problems(s, SET), { 0: ["Sec 2's recess is 2 periods but Floating recess length on Settings is 1."] });
+  s.school.extra_settings = [["Floating recess length (periods)", "", ""]];
+  s.choices = [{ kind: "recess", order: 2, level: "Sec 1", window: ["09:00", "11:20"] }, { kind: "recess", order: 1, level: "Sec 2", window: ["09:00", "11:20"] }];
+  assert.deepStrictEqual(Choices.problems(s, SET), { 0: ["Sec 1's recess is 1 period but the recess choice for Sec 2 floats 2."] });
+  s.school.extra_settings = [["Floating recess length (periods)", 2, ""]]; s.choices = [s.choices[1]];
+  assert.deepStrictEqual(Choices.problems(s, SET), {});
+});
 console.log(`${n} cases passed`);

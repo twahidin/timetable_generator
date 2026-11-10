@@ -41,7 +41,19 @@ var Choices = (function () {
       parts.push(String(r.text || "").trim());
       return "Rule: " + parts.join(" · ");
     }
-    return "Rule: " + ruleLabel(r);
+    return "Rule: " + [ruleLabel(r)].concat(ruleParts(r)).join(" · ");
+  }
+  /* what tells two rule rows of one kind apart, after the label: the week (not Both), the day (not All), the periods, the
+     number and the venues. Not the strength: that is what a second choice changes. */
+  function ruleParts(r) {
+    var out = [], a = r.from, b = r.to, v = r.venues;
+    if (!blank(r.week) && String(r.week).trim() !== "Both") out.push(String(r.week).trim());
+    if (!blank(r.day) && String(r.day).trim() !== "All") out.push(String(r.day).trim());
+    if (!blank(a)) out.push(blank(b) || String(b) === String(a) ? "period " + a : "periods " + a + "-" + b);
+    if (!blank(r.number)) out.push("number " + r.number);
+    v = Array.isArray(v) ? v.filter(function (x) { return !blank(x); }).join(", ") : String(blank(v) ? "" : v).trim();
+    if (v) out.push(v);
+    return out;
   }
 
   /* clock times */
@@ -101,7 +113,17 @@ var Choices = (function () {
     if (b - a < rf.length * parseInt(school(spec).period_minutes, 10) || hi - lo + 1 < rf.length)
       return "The window " + shown + " is shorter than the recess (" + rf.length + " period" + (rf.length !== 1 ? "s" : "") + ").";
     if (hi < rf.from || lo > rf.to) return "The window " + shown + " does not include the recess (" + rf.text + ").";
+    var have = floatLength(spec);
+    if (have !== null && have !== rf.length) return lv + "'s recess is " + periods(rf.length) + " but Floating recess length on Settings is " + have + ".";
     return "";
+  }
+  function periods(n) { return n + " period" + (n !== 1 ? "s" : ""); }
+  /* the Floating recess length on Settings as a whole number, or null when it is not there or blank */
+  function floatLength(spec) {
+    var row = (school(spec).extra_settings || []).find(function (x) { return String(x[0] || "").trim().toLowerCase().indexOf("floating recess length") === 0; });
+    if (!row || row.length < 2 || blank(row[1])) return null;
+    var n = parseInt(parseFloat(String(row[1]).trim()), 10);
+    return isNaN(n) ? null : n;
   }
 
   function itemLabel(spec, c, SET) {
@@ -161,6 +183,13 @@ var Choices = (function () {
         t = recessProblem(spec, c.level, c.window);
         if (t) say(t);
       } else say("This choice is not a setting, a rule or a recess.");
+    });
+    var first = null;   // a recess choice floats at the length the first one in the order sets
+    ordered(spec).forEach(function (x) {
+      if (x.c.kind !== "recess" || out[x.i]) return;
+      var n = recessFirst(spec, x.c.level).length;
+      if (first === null) first = { level: x.c.level, length: n };
+      else if (n !== first.length) out[x.i] = [x.c.level + "'s recess is " + periods(n) + " but the recess choice for " + first.level + " floats " + first.length + "."];
     });
     return out;
   }
