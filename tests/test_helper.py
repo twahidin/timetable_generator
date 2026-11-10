@@ -109,6 +109,28 @@ def blocked_when_nothing_passes():
     assert all(set(b) == {"text", "why"} and b["text"].startswith(f"Move English Language for {A} to ") and b["why"] == f"{t0} is teaching Other for {B} then." for b in out["blocked"]), out
 
 @t
+def a_new_difference_is_not_settling_even_when_another_goes():   # review round 1
+    m, sp = model_with([lesson(1, 2, 5, 3, [A], "Music", ENTIRE, ["Umairah Tan"], room="Music Room", level=LV)])
+    w = one_of(verify.deployment(m, sp), "1A:Music:periods"); gone = helper.chain(m, sp, DAYS, [dict(kind="delete", id=1)])["lessons"]
+    assert "dep:C:1A:Music:missing" in {v["key"] for v in verify.deployment(dict(m, lessons=gone), sp)}
+    assert not helper.settles(m, sp, DAYS, w, gone)   # periods traded for missing: one difference for another
+    out = helper.suggest(m, sp, DAYS, w); assert not [b for b in out["blocked"] if b["text"].startswith("Delete")], out
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, ["Sabrina Koh"], level=LV), lesson(2, 1, 2, 1, [A], "English Language", ENTIRE, ["Michelle Goh"], level=LV)])
+    ws = verify.deployment(m, sp); w = one_of(ws, "1A:Mathematics:teachers"); assert one_of(ws, "1A:English Language:teachers")
+    L = helper.chain(m, sp, DAYS, [dict(kind="teacher", key="C:1A:Mathematics", teachers=["Michelle Goh"])])["lessons"]
+    assert helper.settles(m, sp, DAYS, w, L)   # the English difference was there before: not new
+
+@t
+def the_none_sentences_and_a_row_with_no_teacher():   # review round 1
+    m, sp = model_with([lesson(1, 0, 1, 1, [A], "Mathematics", ENTIRE, ["Michelle Goh"], level=LV)], rules=[rule(A, "Not in periods", 1, 10)])
+    w = next(w for w in verify.rules(m, sp)[0]); assert helper.candidates(m, sp, DAYS, w)   # every move still breaks it: nothing settles, nothing is refused
+    assert helper.suggest(m, sp, DAYS, w) == dict(suggestions=[], none="The app found no single fix that settles this. Select a lesson on the grid to see where it can go.", blocked=[])
+    rows = [dict(x, teachers=[]) if x["classes"] == [A] and x["subject"] == "Mathematics" and x["code"] == ENTIRE else x for x in SP["lessons"]]
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, ["Sabrina Koh"], level=LV)], lessons=rows)
+    w = one_of(verify.deployment(m, sp), "1A:Mathematics:teachers")
+    assert helper.candidates(m, sp, DAYS, w) == [] and helper.suggest(m, sp, DAYS, w)["none"] == helper.NOTHING
+
+@t
 def blocker_names_the_lesson_in_the_way():
     t0 = "Sabrina Koh"
     m, sp = model_with([lesson(1, 0, 2, 1, [A], "English Language", ENTIRE, [t0], level=LV), lesson(2, 1, 3, 1, [B], "Other", ENTIRE, [t0], level=LV),

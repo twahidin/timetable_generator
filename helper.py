@@ -9,6 +9,7 @@ from ttgen.export import ENTIRE
 
 NOTHING = "The app has no suggestion for this one. Select a lesson on the grid to see where it can go."
 NONE_PASS = "Nothing settles this without breaking a rule or a clash."
+NO_SINGLE = "The app found no single fix that settles this. Select a lesson on the grid to see where it can go."
 OK = ("ok", "prefer")
 MAX_LESSONS = 8      # involved lessons whose slots are tried
 MAX_BLOCKED = 60     # refused fixes tried for the blocked list
@@ -170,29 +171,40 @@ def _dep_keys(m, spec, lessons, K):
     L = [x for x in lessons if any(k in K for k in _keys_of(x))]
     return [w["key"] for w in verify.deployment(dict(m, lessons=L), sp) if _dep_parts(w["key"])[0] in K]
 
-def settles(m, spec, days, w, lessons):
-    """with lessons in place of the timetable's: is the warning gone, and has the count of deployment warnings not risen?
-    Only the checks the warning needs are run (its rule row, its teacher's or class's overlaps, the keys the change reaches)."""
-    kind, key = w.get("kind"), _base(w.get("key"))
-    mine, theirs = {id(x) for x in m["lessons"]}, {id(x) for x in lessons}
-    changed = [x for x in m["lessons"] if id(x) not in theirs] + [x for x in lessons if id(x) not in mine]
-    K = {k for x in changed for k in _keys_of(x)}; dk = _dep_parts(key)[0] if kind == "deployment" else None
-    if dk: K.add(dk)
+def _before(m, spec, w):
+    """what settles reads of the timetable as it is, worked out once per warning: the deployment warning keys, the setup
+    with only the warning's rule row, the teacher or class of a clash and the slots it names"""
+    kind, key = w.get("kind"), _base(w.get("key")); out = dict(dep=set(_dep_all(m, spec)), dk=_dep_parts(key)[0] if kind == "deployment" else None)
     if kind == "rule":
         i, r = _rule_row(spec, key)
-        if i is None: return False
-        sp = dict(spec, rules=[r if j == i else {"rule": "In words"} for j, r in enumerate(spec.get("rules") or [])])
-        ws, s = verify.rules(dict(m, lessons=lessons), sp)[0], fixes._subject(w)
+        out["sp"] = None if i is None else dict(spec, rules=[r if j == i else {"rule": "In words"} for j, r in enumerate(spec.get("rules") or [])])
+    if kind == "clash":
+        who, teacher = _clash_who(w); out.update(who=who, teacher=teacher, named=_clash_slots(m, w, who) if who else None)
+    return out
+
+def _dep_all(m, spec): return [v["key"] for v in verify.deployment(m, spec)]
+
+def settles(m, spec, days, w, lessons, memo=None):
+    """with lessons in place of the timetable's: is the warning gone, with no new difference from step 5 (no deployment
+    warning that was not there before)? Only the checks the warning needs are run (its rule row, its teacher's or class's
+    overlaps, the deployment keys the change reaches). memo: _before(m, spec, w), to share across the candidates of one warning"""
+    b = memo if memo is not None else _before(m, spec, w); kind, key, dk = w.get("kind"), _base(w.get("key")), b["dk"]
+    mine, theirs = {id(x) for x in m["lessons"]}, {id(x) for x in lessons}
+    changed = [x for x in m["lessons"] if id(x) not in theirs] + [x for x in lessons if id(x) not in mine]
+    K = {k for x in changed for k in _keys_of(x)}
+    if dk: K.add(dk)
+    if kind == "rule":
+        if b["sp"] is None: return False
+        ws, s = verify.rules(dict(m, lessons=lessons), b["sp"])[0], fixes._subject(w)
         if any((fixes._subject(v) == s) if isinstance(s, tuple) else v["key"] == key for v in ws): return False
     elif kind == "clash":
-        who, teacher = _clash_who(w)
-        if who is None: return False
-        over, named = _overlaps(lessons, who, teacher), _clash_slots(m, w, who)
+        if b["who"] is None: return False
+        over, named = _overlaps(lessons, b["who"], b["teacher"]), b["named"]
         if (named & set(over)) if named else over: return False
     elif not dk: return False
     if not K: return True
-    before, after = _dep_keys(m, spec, m["lessons"], K), _dep_keys(m, spec, lessons, K)
-    return (not dk or key not in after) and len(after) <= len(before)
+    after = set(_dep_keys(m, spec, lessons, K))
+    return not (dk and key in after) and not (after - b["dep"] - {key})
 
 
 # ----------------------------------------------------------------------------------------------- what to try
@@ -219,7 +231,7 @@ def _options(m, spec, days, w, ctx=None):
             if k is None: return [], []
             ks, rows = verify._kstr(k), _of_key(m["lessons"], k)
             have, want = sum({x["id"]: x["n"] for x in rows}.values()), (e or {}).get("periods", 0)
-            if part == "teachers" and e: good.append([dict(kind="teacher", key=ks, teachers=sorted(e["teachers"]))])
+            if part == "teachers" and e and e["teachers"]: good.append([dict(kind="teacher", key=ks, teachers=sorted(e["teachers"]))])
             elif part in ("periods", "missing") and e and have < want:
                 n = next((x["n"] for x in fixes.short(m, spec) if x["key"] == ks), 1); c = fixes._ctx(m, ctx)
                 for s in fixes.add_slots(m, spec, days, ks, n):
@@ -275,12 +287,13 @@ def suggest(m, spec, days, w, limit=3):
     if they were allowed, as dict(text, why)"""
     ctx = fixes._ctx(m); good, bad = _options(m, spec, days, w, ctx)
     if not good and not bad: return dict(suggestions=[], none=NOTHING, blocked=[])
-    out, seen = [], set()
+    out, seen, passed, memo = [], set(), False, _before(m, spec, w)
     for fx in good:
         if repr(fx) in seen: continue
         seen.add(repr(fx)); c = chain(m, spec, days, fx, ctx)
         if c["state"] in OK:
-            if settles(m, spec, days, w, c["lessons"]): out.append(_suggestion(m, spec, days, fx, c))
+            passed = True
+            if settles(m, spec, days, w, c["lessons"], memo): out.append(_suggestion(m, spec, days, fx, c))
         elif c["state"] == "no": bad.append((fx, c["why"]))
     out.sort(key=lambda s: rank(m, spec, days, s))
     if out: return dict(suggestions=out[:limit], none=None, blocked=[])
@@ -289,7 +302,7 @@ def suggest(m, spec, days, w, limit=3):
     for fx, why in bad[:MAX_BLOCKED]:
         if repr(fx) in tried: continue
         tried.add(repr(fx)); r = _apply(m["lessons"], fx, spec, days)
-        if not r["problems"] and settles(m, spec, days, w, r["lessons"]):
+        if not r["problems"] and settles(m, spec, days, w, r["lessons"], memo):
             blocked.append(dict(text=" Then ".join(say(m, spec, days, f) for f in fx), why=why))
             if len(blocked) == 3: break
-    return dict(suggestions=[], none=NONE_PASS, blocked=blocked)
+    return dict(suggestions=[], none=NO_SINGLE if passed and not blocked else NONE_PASS, blocked=blocked)
