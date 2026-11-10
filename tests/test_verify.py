@@ -213,12 +213,12 @@ def at_least_one_recess_needs_a_free_recess_or_a_free_stretch_of_a_window():
     assert run(sp, [row], L(4, 5))[0][0] == []   # the P5-6 recess is free
     assert len(run(sp, [rule("Teacher", t, "At least one recess a day")], L(4, 5, 6))[0][0]) == 1
     def window(m):
-        for lv in m["grid"]: m["grid"][lv][0] = "FLLLWWWWLLLL.."
+        for lv in m["raw_grid"]: m["raw_grid"][lv][0] = "FLLLWWWWLLLL.."   # the raw day (m["grid"] has W as L)
     assert len(with_grid(sp, [row], L(4, 6), window)[0][0]) == 1   # 5 and 7 are free, but not two in a row (recess length 2)
     assert with_grid(sp, [row], L(4, 5), window)[0][0] == []
     assert with_grid(sp, [row], L(4, 5, 6, 7), window)[0][0] != []
     def none(m):
-        for lv in m["grid"]: m["grid"][lv][0] = "FLLLLLLLLLLL.."
+        for lv in m["raw_grid"]: m["raw_grid"][lv][0] = "FLLLLLLLLLLL.."   # the raw day (m["grid"] has W as L)
     assert [w for w in with_grid(sp, [row], L(4, 5, 6), none)[0][0] if w["key"].endswith("|0")] == []   # no level has a recess that day
 
 @t
@@ -370,5 +370,87 @@ def parallel_group_lessons_in_one_slot_have_their_own_keys():
     (ws, _), _ = with_grid(sp, [row], both, ext); keys = [w["key"] for w in ws]
     assert keys == [f"rule:0:{c}|ZZ1|0|12", f"rule:0:{c}|ZZ2|0|12"] and not any("#" in k for k in keys), keys
     (ws2, _), _ = with_grid(sp, [row], both[1:], ext); assert [w["key"] for w in ws2] == [keys[1]]
+
+@t
+def an_extra_lesson_gives_an_add_op_appended_with_the_class_level():   # finding 1: the add row the step 5 update sends
+    sp = primary(); cls = sp["classes"][0]["class"]; lv = sp["classes"][0]["level"]; subj = sp["subjects"][0]["subject"]; t_ = sp["teachers"][0]["name"]; reader.derive(sp)
+    m = model_for(sp, [(0, 0, 1, [cls], subj, "Entire Class", [t_], ""), (1, 0, 1, [cls], subj, "Entire Class", [t_], "")])
+    m["lessons"] = [x for x in m["lessons"]]; sp2 = copy.deepcopy(sp); sp2["lessons"] = [x for x in sp2["lessons"] if not (cls in x["classes"] and x["subject"] == subj)]
+    for x in m["lessons"]: x["level"] = ""   # a workbook without a Level column
+    ws = {w["key"]: w for w in verify.deployment(m, sp2)}
+    op = ws[f"dep:C:{cls}:{subj}:extra"]["ops"]; assert len(op) == 1 and op[0][:2] == ["add", "lessons"], op
+    assert op[0][2] == dict(level=lv, subject=subj, classes=[cls], teachers=[t_]), op[0][2]
+    assert op[0][3] == verify.APPEND and op[0][3] != "" and "_id" not in op[0][2]   # appended, not put first; the id is given when it is applied
+    import sync
+    s3 = copy.deepcopy(sp2); sync.ensure_ids(s3); row = dict(op[0][2], _id=sync.new_id()); sync.apply(s3, [["add", "lessons", row, op[0][3]]])
+    assert s3["lessons"][-1]["_id"] == row["_id"]
+
+@t
+def once_a_day_allows_the_spread_the_solver_makes():   # finding 2: 7 lessons over 5 days may meet twice on a day
+    sp = primary(); c = sp["classes"][0]["class"]; t_ = sp["teachers"][0]["name"]; row = rule("School", "Whole school", "Once a day per group")
+    seven = [(d, p, 1, [c], "English", "Entire Class", [t_], "") for d, p in ((0, 1), (0, 4), (1, 1), (1, 4), (2, 1), (3, 1), (4, 1))]
+    (ws, nc), m = run(sp, [row], seven); assert ws == [] and nc == [], ws
+    (ws, _), m = run(sp, [row], seven[:6] + [(0, 6, 1, [c], "English", "Entire Class", [t_], "")])
+    assert len(ws) == 1 and ws[0]["text"].endswith(f"English for {c} meets 3 times on {m['days'][0]}."), [w["text"] for w in ws]
+
+@t
+def at_least_one_recess_sees_the_recess_windows_of_the_setup():   # finding 3: W is turned into L on m["grid"]
+    sp = primary(); c = sp["classes"][0]["class"]; t_ = sp["teachers"][0]["name"]; row = rule("School", "Whole school", "At least one recess a day")
+    for lv in sp["day_structure"]: d0 = next(iter(sp["day_structure"][lv])); sp["day_structure"][lv][d0] = "FLLLWWWWLLLL.."
+    L = lambda *ps: [(0, p, 1, [c], "English", "Entire Class", [t_], "") for p in ps]
+    (ws, nc), m = run(sp, [row], L(*range(1, 12)))
+    assert [w["key"] for w in ws] == [f"rule:0:{t_}|0"] and nc == [], ws
+    assert run(sp, [row], L(1, 2, 3, 4, 7, 8, 9, 10, 11))[0][0] == []   # 5 and 6 free: the recess length inside the window
+
+@t
+def a_rule_row_with_an_id_keys_its_warnings_by_the_id():   # finding 4
+    sp = primary(); c = sp["classes"][0]["class"]; t_ = sp["teachers"][0]["name"]; L = [(0, 3, 1, [c], "English", "Entire Class", [t_], "")]
+    other = rule("Class", "Nobody", "Not in periods", 0, 0, _id="r0000000aa")
+    (ws, _), _ = run(sp, [other, rule("Class", c, "Not in periods", 2, 3, _id="r0000000bb")], L)
+    assert [w["key"] for w in ws] == [f"rule:r0000000bb:{c}|English|0|3"], ws
+
+@t
+def a_rule_row_with_bad_periods_is_not_checked_not_a_crash():   # finding 5
+    sp = primary(); c = sp["classes"][0]["class"]; t_ = sp["teachers"][0]["name"]; L = [(0, 3, 1, [c], "English", "Entire Class", [t_], "")]
+    for kind in ("Not available", "Fixed at", "Finish by", "Not in periods", "Only in periods"):
+        for a, b in (("two", 3), (1, "x"), (2.5, 3), (4, 2)):
+            r = rule("Teacher" if kind == "Not available" else "Class", t_ if kind == "Not available" else c, kind, a, b)
+            (ws, nc), _ = run(sp, [r, rule("Class", c, "Not in periods", 3, 3)], L)
+            assert len(ws) == 1 and len(nc) == 1 and ("whole number" in nc[0] or "after its To" in nc[0]), (kind, a, b, nc)
+    (ws, nc), _ = run(sp, [rule("Class", c, "Not in periods", "2", "3.0")], L); assert len(ws) == 1 and nc == []   # '2' and 3.0 are whole numbers
+
+@t
+def a_special_room_week_row_may_be_in_a_classroom_on_its_other_week():   # finding 6
+    from ttgen.samples import secondary
+    sp = secondary(); reader.derive(sp)
+    row = next(x for x in sp["lessons"] if not x.get("block") and x.get("room_kind") not in (None, "classroom") and len(x["classes"]) == 1); row["room_weeks"] = "Odd"
+    cls = row["classes"][0]; room = next(v["room"] for v in sp["venues"] if (v.get("kind") or "classroom") == "classroom")
+    days = list(sp["day_structure"][sp["school"]["levels"][0]].keys()); odd, even = days.index(next(d for d in days if d.startswith("Odd"))), days.index(next(d for d in days if d.startswith("Even")))
+    for d, bad in ((even, False), (odd, True)):
+        m = model_for(sp, [(d, 1, row["periods"], [cls], row["subject"], "Entire Class", row["teachers"], room)])
+        assert any(w["key"] == f"dep:C:{cls}:{row['subject']}:venue" for w in verify.deployment(m, sp)) == bad, (d, bad)
+
+@t
+def a_missing_auto_coded_block_row_has_no_op_and_an_entire_class_row_has_the_del():   # finding 7
+    import sync
+    sp = primary(); sync.ensure_ids(sp); reader.derive(sp)
+    b = next(x for x in sp["lessons"] if x.get("block") and not x.get("code_override") and len(x["classes"]) == 1) if any(x.get("block") and len(x["classes"]) == 1 for x in sp["lessons"]) else None
+    if b is None:   # the sample's block rows cover several classes: make one that covers one
+        b = next(x for x in sp["lessons"] if x.get("block")); b["classes"] = b["classes"][:1]; reader.derive(sp)
+    e = next(x for x in sp["lessons"] if not x.get("block") and len(x["classes"]) == 1)
+    ws = {w["key"]: w for w in verify.deployment(model_for(sp, []), sp)}
+    assert ws[f"dep:G:{b['code']}:missing"]["ops"] is None
+    assert ws[f"dep:C:{e['classes'][0]}:{e['subject']}:missing"]["ops"] == [["del", "lessons", e["_id"]]]
+    b["code_override"] = b["code"]; ws = {w["key"]: w for w in verify.deployment(model_for(sp, []), sp)}
+    assert ws[f"dep:G:{b['code']}:missing"]["ops"] == [["del", "lessons", b["_id"]]]
+
+@t
+def a_typed_rule_with_an_unclear_result_is_a_warning():   # finding 9
+    sp = primary(); sp["rules"] = [dict(scope="School", target="Whole school", rule="In words", text="No PE first", strength="Prefer", week="Both", day="All")]
+    for res in ("", "Maybe", None):
+        ws = verify.typed(sp, [dict(no=1, strength="Prefer", applies="", rule="x", result=res, how="Not sure.")])
+        assert [w["key"] for w in ws] == ["typed:1:unclear"] and ws[0]["strength"] == "Prefer", ws
+        assert ws[0]["text"] == "T1: the rule report does not say whether it was met: No PE first. The agent says: Not sure.", ws[0]["text"]
+    assert verify.typed(sp, [dict(no=1, result="Met")]) == []
 
 print(f"{n} checks passed")

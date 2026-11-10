@@ -8,6 +8,7 @@ from .solver import rule_label
 from .spec import floating_recess, names_list, subject_test, typed_rules
 
 KINDS = ("clash", "deployment", "rule", "typed", "choice")
+APPEND = "(end)"   # an add op's "after": not a row id, so sync.apply puts the row last ("" would put it first and renumber the group codes after it)
 
 def warning(key, kind, text, strength="Must", group="School", where=None, sides=None, ops=None):
     """one warning in the shape the draft page lists"""
@@ -26,10 +27,10 @@ def planned_rows(spec):
         whole = x.get("code") == ENTIRE
         for c in (x["classes"] if whole else [None]):
             key = ("C", c, x["subject"]) if whole else ("G", x["code"])
-            e = out.setdefault(key, dict(rows=[], teachers=set(), periods=0, room_kind=None, classes=[c] if whole else list(x["classes"]), level=x.get("level"), subject=x["subject"]))
+            e = out.setdefault(key, dict(rows=[], teachers=set(), periods=0, room_kind=None, room_weeks=None, classes=[c] if whole else list(x["classes"]), level=x.get("level"), subject=x["subject"]))
             e["rows"].append(x); e["teachers"] |= set(x.get("teachers") or [])
             e["periods"] = e["periods"] + int(x["periods"]) if whole else int(x["periods"])   # as _model: entire-class rows add up, a group's code is one lesson
-            e["room_kind"] = e["room_kind"] or x.get("room_kind")
+            e["room_kind"] = e["room_kind"] or x.get("room_kind"); e["room_weeks"] = e["room_weeks"] or x.get("room_weeks")
     return out
 
 def placed(m):
@@ -52,6 +53,15 @@ def _ids(rows):
     """the ids of rows an op may act on; none when a row covers more than one class (the op would reach the others too)"""
     return [] if any(len(x["classes"]) > 1 for x in rows) else [x["_id"] for x in rows if x.get("_id")]
 
+def _del_ids(rows):
+    """the ids of rows a del may remove: as _ids, and none when a row is a block row with an automatic group code (the
+    codes are numbered in row order, so removing one would rename the groups after it)"""
+    return [] if any(x.get("block") and not x.get("code_override") for x in rows) else _ids(rows)
+
+def _other_week(day, weeks):
+    """whether the day is in the other week of a row whose special room is on `weeks` only (Odd or Even)"""
+    return weeks in ("Odd", "Even") and str(day).split()[0] in ("Odd", "Even") and not str(day).startswith(weeks)
+
 def deployment(m, spec):
     """one warning per difference between the timetable and step 5 (teachers, periods, venue kind, missing, extra)"""
     plan, got, out = planned_rows(spec), placed(m), []
@@ -61,7 +71,7 @@ def deployment(m, spec):
     for key in plan:
         p, k, what = plan[key], _kstr(key), _name(key); group = p["classes"][0] if p["classes"] else "School"
         if key not in got:
-            ids = _ids(p["rows"])
+            ids = _del_ids(p["rows"])
             out.append(warning(f"dep:{k}:missing", "deployment", f"{what} is on step 5 but not on the timetable.", group=group, ops=[["del", "lessons", i] for i in ids] or None))
             continue
         g = got[key]; w = where(key, g)
@@ -75,14 +85,18 @@ def deployment(m, spec):
         if p["room_kind"]:
             for x in g["lessons"]:
                 kind = m["room_ix"].get(x["room"], {}).get("kind") if x["room"] and x["room"] != "TBC" else None
+                if kind == "classroom" and _other_week(m["days"][x["d"]], p["room_weeks"]): continue   # as the solver: a classroom on its other week
                 if kind and kind != p["room_kind"]:
                     out.append(warning(f"dep:{k}:venue", "deployment", f"{what} is in {x['room']} ({kind}); step 3 asks for {p['room_kind']}.", group=group, where=w)); break
+    class_level = {str(c["class"]): str(c.get("level") or "") for c in spec["classes"]}
     for key, g in got.items():
         if key in plan: continue
         k, x = _kstr(key), g["lessons"][0]
         classes = [key[1]] if key[0] == "C" else list(x["classes"])
-        ops = [["add", "lessons", dict(level=x["level"], subject=x["subject"], classes=classes, teachers=sorted(g["teachers"]), block=x["block"] or None,
-                                                  **({} if key[0] == "C" else dict(code_override=key[1]))), ""]] if x["subject"] in subjects else None
+        level = x["level"] or next((class_level[c] for c in classes if class_level.get(c)), "")   # a workbook without a Level column: the class's level
+        row = dict(level=level, subject=x["subject"], classes=classes, teachers=sorted(g["teachers"]))
+        if key[0] == "G": row.update(code_override=key[1], **({"block": x["block"]} if x["block"] else {}))   # an entire-class row has no block (it would get a group code)
+        ops = [["add", "lessons", row, APPEND]] if x["subject"] in subjects else None   # the row's _id is given when it is applied (draft.decide)
         out.append(warning(f"dep:{k}:extra", "deployment", f"{_name(key)} is on the timetable but not on step 5.", group=classes[0] if classes else "School", where=where(key, g), ops=ops))
     return out
 
@@ -130,7 +144,7 @@ def _hit(m, r, i, detail, sentence, group, x=None):
     """one warning for rule row i; x is the lesson it names"""
     prefer = r.get("strength") == "Prefer"
     where = dict(cls=(x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"]) if x else None
-    return warning(f"rule:{i}:{detail}", "rule", f"Rule {rule_label(r)}: {sentence}" + (" (Prefer)" if prefer else ""), "Prefer" if prefer else "Must", group, where)
+    return warning(f"rule:{r.get('_id') or i}:{detail}", "rule", f"Rule {rule_label(r)}: {sentence}" + (" (Prefer)" if prefer else ""), "Prefer" if prefer else "Must", group, where)
 
 def _lessons(m, spec, r, days):
     """the lessons in scope that sit on a rule day"""
@@ -243,7 +257,7 @@ def _at_least_one_recess(m, spec, i, r, days, per):
     length, out = floating_recess(spec["school"])["length"], []
     for (t, d), busy in sorted(_teachers_by_day(m, r).items(), key=lambda kv: (kv[0][1], kv[0][0])):
         if d not in days: continue
-        rows = [g[d] for g in m["grid"].values() if d < len(g)]
+        rows = [g[d] for g in (m.get("raw_grid") or m["grid"]).values() if d < len(g)]   # the raw day: m["grid"] has its recess windows as lesson time
         if any(c in row for row in rows for c in "RW") and not any(_free_run(row, busy, length) for row in rows):
             out.append(_hit(m, r, i, f"{t}|{d}", f"{t} has no recess on {_day_name(m, d)}.", t))
     return out
@@ -274,12 +288,16 @@ def _not_on_the_same_day_as(m, spec, i, r, days, per):
     return [_hit(m, r, i, f"{c}|{d}", f"{c} has {r['target']} and {r['subject']} on {_day_name(m, d)}.", c) for (c, d), h in sorted(seen.items(), key=lambda kv: (kv[0][1], kv[0][0])) if all(h)]
 
 def _once_a_day_per_group(m, spec, i, r, days, per):
-    ids, first = {}, {}
+    """as the solver: once a day when a group's lessons fit in the days, else at most ceil(lessons / days) a day"""
+    ids, first, every = {}, {}, {}
+    for x in m["lessons"]:
+        for k in ([("C", c, x["subject"]) for c in x["classes"]] if x["group"] == ENTIRE else [("G", x["group"])]): every.setdefault(k, set()).add(x["id"])
     for x in _lessons(m, spec, r, days):
         for k in ([("C", c, x["subject"]) for c in x["classes"]] if x["group"] == ENTIRE else [("G", x["group"])]):
             ids.setdefault((k, x["d"]), set()).add(x["id"]); first.setdefault((k, x["d"]), x)
-    return [_hit(m, r, i, f"{_kstr(k)}|{d}", f"{_name(k)} meets twice on {_day_name(m, d)}.", (first[k, d]["classes"] or ["School"])[0])
-            for (k, d), s in sorted(ids.items(), key=lambda kv: (kv[0][1], kv[0][0])) if len(s) > 1]
+    cap = lambda k: max(1, -(-len(every[k]) // max(1, m["ND"])))
+    return [_hit(m, r, i, f"{_kstr(k)}|{d}", f"{_name(k)} meets {'twice' if len(s) == 2 else f'{len(s)} times'} on {_day_name(m, d)}.", (first[k, d]["classes"] or ["School"])[0])
+            for (k, d), s in sorted(ids.items(), key=lambda kv: (kv[0][1], kv[0][0])) if len(s) > cap(k)]
 
 def _avoid_after_school(m, spec, i, r, days, per):
     return [_hit(m, r, i, _key(x), f"{_what(x)} is in an after-school slot on {_day_name(m, x['d'])}.", (x["classes"] or ["School"])[0], x)
@@ -297,14 +315,29 @@ NEEDS_NUMBER = ("Max periods a day", "Max periods in a row", "At most N at once"
 NEEDS_PERIODS = ("Not available", "Keep free together", "Not in periods", "Only in periods", "Only in venues")
 _BLANK = lambda v: v in (None, "")
 
+def _whole(v):
+    """a From or To cell as a whole number, or None (3, '3' and 3.0 are 3)"""
+    try: f = float(str(v).strip()); return int(f) if f == int(f) else None
+    except (ValueError, OverflowError): return None
+
+def _bad_periods(r):
+    """why the row's From and To cannot be used, or None; a row with good ones gets them as whole numbers"""
+    for k, name in (("from", "From"), ("to", "To")):
+        if _BLANK(r.get(k)): continue
+        if _whole(r[k]) is None: return f"{name} is not a whole number"
+    a, b = (None if _BLANK(r.get(k)) else _whole(r[k]) for k in ("from", "to"))
+    if a is not None and b is not None and a > b: return "its From period is after its To period"
+    return None
+
 def rules(m, spec):
     """(warnings, not_checked): each rule row except 'In words' goes to its checker; a row that cannot be checked is listed with why"""
     out, skipped = [], []
     for i, r in enumerate(spec.get("rules") or []):
         rule = r.get("rule")
         if rule == "In words": continue
-        why = None
-        if rule not in CHECKERS: why = "this kind of rule is not checked here"
+        why = _bad_periods(r)
+        if why: pass
+        elif rule not in CHECKERS: why = "this kind of rule is not checked here"
         elif in_scope(m, spec, r) is None: why = f"scope {r.get('scope')} is not one the check knows"
         elif rule == "Keep free together" and r.get("scope") not in ("Department", "Level"): why = f"scope {r.get('scope')} is not one this rule uses (Department or Level)"
         elif rule == "Fixed at" and _BLANK(r.get("from")): why = "it has no From period"
@@ -317,6 +350,7 @@ def rules(m, spec):
         elif rule == "Only these subjects" and not names_list(r.get("subject")): why = "it names no subjects"
         elif rule == "Only in venues" and not names_list(r.get("venues")): why = "it names no venues"
         if why: skipped.append(f"{rule_label(r)}: {why}"); continue
+        r = dict(r, **{k: _whole(r[k]) for k in ("from", "to") if not _BLANK(r.get(k))})   # '2' and 3.0 read as 2 and 3
         out += CHECKERS[rule](m, spec, i, r, rule_days(m["days"], r), rule_periods(r, m["NP"]))
     return out, skipped
 
@@ -331,10 +365,11 @@ def typed(spec, report):
         nums.add(n); row = rows.get(n); sentence = str(r.get("text") or "").strip().rstrip("."); strength = r.get("strength") or "Must"
         if row is None:
             out.append(warning(f"typed:{n}:none", "typed", f"T{n} has no line in the rule report: {sentence}.", strength)); continue
-        res = str(row.get("result") or "").strip()
+        res = str(row.get("result") or "").strip(); how = str(row.get("how") or "").strip(); says = f" The agent says: {how}" if how else ""
         if res in ("Not met", "Partly"):
-            how = str(row.get("how") or "").strip()
-            out.append(warning(f"typed:{n}:{res}", "typed", f"T{n} {res.lower()}: {sentence}." + (f" The agent says: {how}" if how else ""), strength))
+            out.append(warning(f"typed:{n}:{res}", "typed", f"T{n} {res.lower()}: {sentence}." + says, strength))
+        elif res != "Met":   # a blank or unknown result is not taken as met
+            out.append(warning(f"typed:{n}:unclear", "typed", f"T{n}: the rule report does not say whether it was met: {sentence}." + says, strength))
     for row in report or []:
         if row.get("no") not in nums:
             out.append(warning(f"typed:{row.get('no')}:unknown", "typed", f"The rule report's line {row.get('no')} ({row.get('rule')}) is not a typed rule on step 6."))

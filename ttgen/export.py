@@ -120,7 +120,7 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
         else: planned[("G", x["code"])] = int(x["periods"])
     m = dict(school=dict(name=sc.get("name") or "School", timetable=sc.get("timetable") or "Timetable", weeks=int(sc.get("weeks") or 1),
                          period_minutes=int(sc["period_minutes"]), start_time=str(sc["start_time"]), kind=sc.get("kind") or ""),
-             days=list(days), NP=NP, ND=ND, times=times, grid=grid, cgrid=cgrid, recess={c: [list(x) for x in v] for c, v in (recess or {}).items()},
+             days=list(days), NP=NP, ND=ND, times=times, grid=grid, raw_grid=raw, cgrid=cgrid, recess={c: [list(x) for x in v] for c, v in (recess or {}).items()},
              keep=keep, levels=levels, classes=classes, teachers=teachers, rooms=rooms,
              subjects=subjects, lessons=lessons, students=students, room_cap=cap, planned=planned, notes=list(notes or []), status=status,
              generated=datetime.date.today().strftime("%d %b %Y"))
