@@ -41,6 +41,14 @@ def move_and_swap():
     out = fixes.apply(L2, [dict(kind="swap", a=1, b=2)], sp, DAYS); assert len(out["problems"]) == 1 and out["touched"] == set()
 
 @t
+def apply_keeps_the_rows_as_they_were():
+    sp, L = two_lessons(); other = next(x["name"] for x in SP["teachers"] if x["name"] not in TEACHERS)
+    out = fixes.apply(L, [dict(kind="delete", id=2), dict(kind="teacher", key=KEY, teachers=[other]), dict(kind="move", id=1, d=2, p=0)], sp, DAYS)
+    assert [(x["id"], x["d"], x["p"], x["teachers"]) for x in out["was"]] == [(2, 1, 4, TEACHERS), (1, 0, 2, TEACHERS), (1, 0, 2, [other])], out["was"]
+    assert out["was"][0] is not L[1] and L[0]["teachers"] == TEACHERS and fixes.apply(L, [], sp, DAYS)["was"] == []
+    got = {}; fixes.editor([dict(kind="move", id=1, d=2, p=0)], got)(copy.deepcopy(L), sp, DAYS); assert [x["id"] for x in got["was"]] == [1] and got["touched"] == {1}
+
+@t
 def a_block_lesson_moves_every_row():
     sp, L = one_block()
     out = fixes.apply(L, [dict(kind="move", id=7, d=3, p=5)], sp, DAYS)
@@ -276,7 +284,7 @@ if "--full" in sys.argv:
         if any(x.endswith(LESSON_TIME) or x.endswith(LESSON_TIME[2] + ".") for x in new): return "na"
         if [x for x in new if not x.endswith("planned.")]: return "no"
         if {k: v["periods"] for k, v in verify.placed(m2).items()} != {k: v["periods"] for k, v in verify.placed(m).items()}: return "no"
-        subj = lambda mm: {((w["key"].split(":", 2)[1], w["where"]["id"]) if (w["where"] or {}).get("id") is not None else w["key"]): w["strength"] for w in verify.rules(mm, sp)[0]}
+        subj = lambda mm: {fixes._subject(w): w["strength"] for w in verify.rules(mm, sp)[0]}
         sb, sa = subj(m), subj(m2); new = [v for k, v in sa.items() if k not in sb]
         return "no" if "Must" in new else "prefer" if new else "ok"
 

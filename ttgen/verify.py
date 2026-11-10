@@ -377,10 +377,10 @@ def typed(spec, report):
             out.append(warning(f"typed:{row.get('no')}:unknown", "typed", f"The rule report's line {row.get('no')} ({row.get('rule')}) is not a typed rule on step 6."))
     return out
 
-def typed_again(m, spec, touched):
-    """a typed rule reported Met or Partly whose lessons a fix changed or added: its report line may no longer be true, so it is to be checked again"""
-    touched = set(touched or ())
-    if not touched: return []
+def typed_again(m, spec, touched, was=()):
+    """a typed rule reported Met or Partly whose lessons a fix changed, added or deleted (was: the rows as they were before a fix changed them): its report line may no longer be true, so it is to be checked again"""
+    touched, was = set(touched or ()), list(was or ())
+    if not touched and not was: return []
     rows = {}
     for row in m.get("rule_report") or []: rows.setdefault(row.get("no"), row)
     out = []
@@ -388,7 +388,7 @@ def typed_again(m, spec, touched):
         res = str((rows.get(n) or {}).get("result") or "").strip()
         if res not in ("Met", "Partly"): continue
         test = in_scope(m, spec, r)
-        if test is None or not any(x["id"] in touched and test(x) for x in m["lessons"]): continue
+        if test is None or not (any(x["id"] in touched and test(x) for x in m["lessons"]) or any(test(x) for x in was)): continue
         sentence = str(r.get("text") or "").strip().rstrip(".")
         out.append(warning(f"typed:{n}:again", "typed", f"T{n} was reported {res.lower()}, but lessons it is about were changed in the app. Check it again: {sentence}.", r.get("strength") or "Must"))
     return out
@@ -396,10 +396,10 @@ def typed_again(m, spec, touched):
 def choices_(m):
     return [warning("choice:" + p, "choice", p) for p in m.get("choice_problems") or []]
 
-def warnings(m, spec=None, touched=()):
+def warnings(m, spec=None, touched=(), was=()):
     """every warning for the timetable m, in KINDS order, and the rules that could not be checked"""
     spec = spec or m["checked_setup"]; rule_ws, not_checked = rules(m, spec)
-    ws = clashes(m) + deployment(m, spec) + rule_ws + typed(spec, m.get("rule_report")) + typed_again(m, spec, touched) + choices_(m); seen = {}
+    ws = clashes(m) + deployment(m, spec) + rule_ws + typed(spec, m.get("rule_report")) + typed_again(m, spec, touched, was) + choices_(m); seen = {}
     for w in ws:   # several hits can share a key (two groups in one slot): a decision belongs to one warning, so each key is made unique
         seen[w["key"]] = n = seen.get(w["key"], 0) + 1
         if n > 1: w["key"] += f"#{n}"

@@ -344,6 +344,21 @@ def typed_again_after_a_fix_touches_a_lesson_the_rule_is_about():
     assert ("typed", "typed:1:again") not in [(w["kind"], w["key"]) for w in verify.warnings(m)["warnings"]]
 
 @t
+def typed_again_judges_the_rows_as_they_were_too():
+    sp = primary(); c = sp["classes"][0]["class"]; t1, t2 = sp["teachers"][0]["name"], sp["teachers"][1]["name"]
+    words = lambda scope, target: dict(scope=scope, target=target, rule="In words", text="No PE first.", strength="Must", week="Both", day="All")
+    line = [dict(no=1, strength="Must", applies="", rule="x", result="Met", how="")]
+    def again(row, touched, was):
+        s2 = copy.deepcopy(sp); s2["rules"] = [row]; m = model_for(s2, [(0, 1, 1, [c], "English", "Entire Class", [t2], "")]); m["rule_report"] = line
+        return [w["key"] for w in verify.typed_again(m, m["checked_setup"], touched, was)]
+    gone = dict(id=9, d=0, p=3, n=1, level="", block="", classes=[c], subject="Art", group="Entire Class", teachers=[t1], room="", ext=False, rain="")
+    assert again(words("Class", c), set(), [gone]) == ["typed:1:again"]
+    assert again(words("Teacher", t1), {1}, [gone]) == ["typed:1:again"] and again(words("Teacher", t1), {1}, []) == []
+    assert again(words("Teacher", t1), set(), []) == [] and again(words("Class", c), set(), ()) == [] and again(words("Class", "Nobody"), set(), [gone]) == []
+    m = model_for(dict(copy.deepcopy(sp), rules=[words("Class", c)]), [(0, 1, 1, [c], "English", "Entire Class", [t2], "")]); m["rule_report"] = line
+    assert [w["key"] for w in verify.warnings(m, touched=(), was=[gone])["warnings"] if w["kind"] == "typed"] == ["typed:1:again"]
+
+@t
 def choices_become_warnings():
     ws = verify.choices_(dict(choice_problems=["Second choice 1: no such rule."]))
     assert len(ws) == 1 and ws[0]["kind"] == "choice" and ws[0]["key"] == "choice:Second choice 1: no such rule." and ws[0]["text"] == "Second choice 1: no such rule."

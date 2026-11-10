@@ -489,6 +489,19 @@ def test_a_typed_rule_is_checked_again_after_a_fix_and_the_lead_can_settle_it():
     finally:
         c.put("/api/setup", json=saved)
 
+def test_deleting_a_lesson_of_a_class_marks_its_typed_rule_to_check_again():
+    spec = c.get("/api/setup").get_json()["spec"]; saved = copy.deepcopy(spec)
+    spec["rules"] = list(spec.get("rules") or []) + [dict(scope="Class", target="1A", rule="In words", text="1A is not rushed", strength="Must", week="Both", day="All")]
+    try:
+        assert c.put("/api/setup", json=spec).status_code == 200
+        rows = [("Mon", 1, 1, "P1", "1A", "Zzz Extra", ["Umairah Tan"])]; rep = [(1, "Must", "1A", "1A is not rushed", "Met", "Checked.")]
+        assert c.post("/api/draft", data=_draft_form(spec, rows, rep, replace="1"), content_type="multipart/form-data").status_code == 200
+        assert "typed:1:again" not in _warn_keys(c.get("/api/draft").get_json())
+        j = c.post("/api/draft/fix", json=dict(kind="delete", id=_lid("1A", "Zzz Extra"))).get_json(); assert len(j["fixes"]) == 1, j
+        w = next(w for w in j["warnings"] if w["key"] == "typed:1:again"); assert w["text"].endswith("Check it again: 1A is not rushed."), w
+    finally:
+        c.put("/api/setup", json=saved)
+
 def test_an_add_without_a_room_and_a_delete():
     _grid_draft(); a = c.get("/api/draft/options?add=C:1A:Art&n=1").get_json()["slots"]; s = next(s for s in a if s["state"] in ("ok", "prefer"))
     j = c.post("/api/draft/fix", json=dict(kind="add", key="C:1A:Art", d=s["d"], p=s["p"], n=1)).get_json(); assert j["fixes"][0]["text"].startswith("Added "), j

@@ -29,14 +29,17 @@ def _slot(spec, days, d, p, n):
     """the lesson, n periods long from period p on day d, must be inside the day"""
     if not all(isinstance(v, int) and not isinstance(v, bool) for v in (d, p, n)) or not 0 <= d < len(days) or p < 0 or n < 1 or p + n > int(spec["school"]["periods_per_day"]): raise ValueError("That is outside the day.")
 
-def apply_one(lessons, fix, spec, days, new_id=None, touched=None):
+def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None):
     """change lessons (a list the caller owns) in place and return the sentence for the committee; ValueError(sentence) when the
     fix cannot apply (every kind checks before it changes anything). new_id: the id an add takes (default 1 + the highest in
-    lessons); touched: a set the ids of lessons changed or added are put into."""
+    lessons); touched: a set the ids of lessons changed or added are put into; was: a list that copies of the rows as they were
+    just before a fix changed or deleted them are appended to."""
     if not isinstance(fix, dict): raise ValueError("it is not complete.")
-    kind = fix.get("kind"); touched = set() if touched is None else touched
+    kind = fix.get("kind"); touched = set() if touched is None else touched; was = [] if was is None else was
+    keep = lambda rows: was.extend(copy.deepcopy(list(rows)))
     if kind == "move":
         rows = _rows(lessons, fix["id"]); _slot(spec, days, fix["d"], fix["p"], rows[0]["n"]); a = rows[0]; text = f"Moved {what(a)} from {when(days, a['d'], a['p'])} to {when(days, fix['d'], fix['p'])}."
+        keep(rows)
         for x in rows: x["d"], x["p"] = fix["d"], fix["p"]
         touched.add(fix["id"]); return text
     if kind == "swap":
@@ -44,6 +47,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None):
         if a["n"] != b["n"]: raise ValueError(f"{what(a)} and {what(b)} are not the same length, so they cannot swap places.")
         text = f"Swapped {what(a)} ({when(days, a['d'], a['p'])}) with {what(b)} ({when(days, b['d'], b['p'])})."
         (da, pa), (db, pb) = (a["d"], a["p"]), (b["d"], b["p"])
+        keep(ra + rb)
         for x in ra: x["d"], x["p"] = db, pb
         for x in rb: x["d"], x["p"] = da, pa
         touched |= {fix["a"], fix["b"]}; return text
@@ -54,6 +58,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None):
         bad = [x for x in fix["teachers"] if x not in known]
         if bad: raise ValueError(f"{', '.join(bad)} {'is' if len(bad) == 1 else 'are'} not on the setup's list of teachers.")
         old = list(dict.fromkeys(t for x in rows for t in x["teachers"]))
+        keep(rows)
         for x in rows: x["teachers"] = list(fix["teachers"])
         touched |= {x["id"] for x in rows}
         return f"{name} is now taught by {_names(fix['teachers'])}, not {_names(old)}."
@@ -62,7 +67,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None):
         if x is None: raise ValueError(f"There is no row of {fix['group']} in that lesson.")
         if fix["room"] and fix["room"] not in {v["room"] for v in spec.get("venues") or []}: raise ValueError(f"{fix['room']} is not on the setup's list of rooms.")
         text = f"{what(x)} on {when(days, x['d'], x['p'])} is now in {fix['room'] or 'no room'}, not {x['room'] or 'no room'}."
-        x["room"] = fix["room"]; touched.add(x["id"])
+        keep([x]); x["room"] = fix["room"]; touched.add(x["id"])
         return text
     if kind == "add":
         key = _key(fix["key"]); e = verify.planned_rows(spec).get(key)
@@ -78,27 +83,27 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None):
         rows = [x for x in _rows(lessons, fix["id"]) if fix.get("group") is None or x["group"] == fix["group"]]
         if not rows: raise ValueError(f"There is no row of {fix['group']} in that lesson.")
         a = rows[0]; text = f"Deleted {what(a)} on {when(days, a['d'], a['p'])}."
-        lessons[:] = [x for x in lessons if not any(x is r for r in rows)]
+        keep(rows); lessons[:] = [x for x in lessons if not any(x is r for r in rows)]
         if not any(x["id"] == fix["id"] for x in lessons): touched.discard(fix["id"])
         return text
     raise ValueError("This kind of fix is not known.")
 
 def apply(lessons, fixes, spec, days):
-    """a copy of lessons with every fix applied in order -> dict(lessons, texts, problems, touched). A fix that cannot apply
+    """a copy of lessons with every fix applied in order -> dict(lessons, texts, problems, touched, was). A fix that cannot apply
     (the file or the setup changed since, or it is malformed) is skipped and named in problems; touched is the ids of lessons
-    a fix changed or added. An add takes 1 + the highest id as read from the file, plus one per add before it."""
-    L, texts, problems, touched = copy.deepcopy(lessons), [], [], set()
+    a fix changed or added; was is the rows as they were just before each fix changed or deleted them (a row changed twice appears twice). An add takes 1 + the highest id as read from the file, plus one per add before it."""
+    L, texts, problems, touched, was = copy.deepcopy(lessons), [], [], set(), []
     nxt = 1 + max([x["id"] for x in L], default=0)
     for f in fixes:
-        try: texts.append(apply_one(L, f, spec, days, new_id=nxt, touched=touched))
+        try: texts.append(apply_one(L, f, spec, days, new_id=nxt, touched=touched, was=was))
         except Exception as e: problems.append(f"A fix could not be applied: {e if isinstance(e, ValueError) else 'it is not complete.'}"); continue
         if isinstance(f, dict) and f.get("kind") == "add": nxt += 1
-    return dict(lessons=L, texts=texts, problems=problems, touched=touched)
+    return dict(lessons=L, texts=texts, problems=problems, touched=touched, was=was)
 
 def editor(fixes, out):
-    """the edit function for model_from_files: applies the fixes to the lessons read from the file and leaves texts, problems and touched in out"""
+    """the edit function for model_from_files: applies the fixes to the lessons read from the file and leaves texts, problems, touched and was in out"""
     def edit(lessons, spec, days):
-        r = apply(lessons, fixes, spec, days); out.update(texts=r["texts"], problems=r["problems"], touched=r["touched"]); return r["lessons"]
+        r = apply(lessons, fixes, spec, days); out.update(texts=r["texts"], problems=r["problems"], touched=r["touched"], was=r["was"]); return r["lessons"]
     return edit
 
 

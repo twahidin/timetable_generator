@@ -57,7 +57,7 @@ def summary():
 
 def model_now(rec=None):
     """(model, setup record, fx) of the draft with its fixes applied, checked against the setup record (default: as it is now).
-    fx = dict(texts, problems, touched) from fixes.apply. One model is kept, for the same upload, setup version and fixes; it is
+    fx = dict(texts, problems, touched, was) from fixes.apply. One model is kept, for the same upload, setup version and fixes; it is
     shared between requests, so nothing may change it."""
     rec = rec or store.setup_record(); spec = rec["spec"]
     if not spec: raise LookupError("no setup")
@@ -76,11 +76,11 @@ def _build(m=None, rec=None):
     before decisions are laid over them. m: a model already built (by save, with no fixes yet)."""
     if m is None: m, rec, fx = model_now(rec)
     else:
-        rec = rec or store.setup_record(); fx = dict(texts=[], problems=[], touched=set())
+        rec = rec or store.setup_record(); fx = dict(texts=[], problems=[], touched=set(), was=[])
         if not rec["spec"]: raise LookupError("no setup")
     spec = rec["spec"]
     with _lock: meta = store.read_json(_p("meta.json"), {})
-    ws = verify.warnings(m, touched=fx["touched"]); ch = m["checks"]
+    ws = verify.warnings(m, touched=fx["touched"], was=fx.get("was") or ()); ch = m["checks"]
     cid, ver = meta.get("config_id") or "", rec["v"]; got = re.fullmatch(r"v(\d+)", cid)
     state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
              "same" if int(got[1]) == ver else "older" if int(got[1]) < ver else "newer")
