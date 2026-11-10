@@ -6,7 +6,7 @@
 
 The model comes from the solver result in memory (model_from_result) or from the setup workbook plus a timetable
 workbook whose Lessons sheet uses LESSON_HEADERS (model_from_files), so a timetable made another way exports too."""
-import collections, datetime, json, os, re, zipfile
+import collections, copy, datetime, json, os, re, zipfile
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter as CL
@@ -198,11 +198,16 @@ def rule_report_rows(rows):
                         result=_result(g(row, "result")), how=str(g(row, "how") or "").strip()))
     return out
 
-def model_from_files(setup_path, timetable_path):
+def model_from_files(setup_path, timetable_path, spec=None):
     """the export model from a setup workbook and a timetable: a workbook with a Lessons sheet (hand-over format), or a
-    SQLite database (ttgen.database). A database written by write_db keeps the setup, so setup_path may then be None."""
+    SQLite database (ttgen.database). A database written by write_db keeps the setup, so setup_path may then be None.
+    spec: a setup to check against instead (copied; the file's own setup then only lends its configuration id)."""
     db = read_db(timetable_path) if is_db(timetable_path) else None
-    if setup_path: spec = read_template(setup_path)
+    if spec is not None:
+        own = read_template(setup_path) if setup_path else (db[5] if db else None)
+        spec = copy.deepcopy(spec); cid = ((own or {}).get("school") or {}).get("config_id")
+        if cid: spec.setdefault("school", {})["config_id"] = cid
+    elif setup_path: spec = read_template(setup_path)
     elif db and db[5]: spec = db[5]
     else: raise ValueError("Send the setup workbook too: this timetable file does not hold the setup.")
     wbu = None if db else openpyxl.load_workbook(timetable_path, data_only=True)
@@ -262,7 +267,7 @@ def model_from_files(setup_path, timetable_path):
             c, day, p, n = (row[h[k]] if k in h and h[k] < len(row) else None for k in ("class", "day", "start period", "periods"))
             if c not in (None, "") and str(day or "").lower() in dix and p is not None: recess[str(c)].append([dix[str(day).lower()], int(p), int(n or 1)])
     m = _model(spec, days, out, notes=notes, status=status, recess=recess); m["rule_report"] = report
-    m["setup"] = setup; m["choices_used"] = used; m["choice_problems"] = choice_probs   # the database keeps the setup as downloaded
+    m["setup"] = setup; m["checked_setup"] = spec; m["choices_used"] = used; m["choice_problems"] = choice_probs   # the database keeps the setup as downloaded
     if choice_probs: m["checks"]["problems"] = list(m["checks"]["problems"]) + choice_probs
     m["checks"]["ok"] = not m["checks"]["problems"]
     return m
