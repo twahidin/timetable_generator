@@ -220,15 +220,16 @@ def published():
             _cache.update(stamp=stamp, value=dict(meta=meta, model=model, codes=codes, views={}))
         return _cache["value"]
 
-def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print, spec=None, extra=None):
+def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print, spec=None, extra=None, edit=None):
     """export everything into a fresh folder, then swap it in so viewers never see a half-written timetable. The
     timetable is a workbook with a Lessons sheet or a timetable database; setup_xlsx may be None for a database this app
     or the skill made (it holds its setup). source names a timetable made outside the app (the file it came from).
-    spec: the setup to check it against (the file's own setup then only lends its configuration id); extra: more for meta.json."""
+    spec: the setup to check it against (the file's own setup then only lends its configuration id); extra: more for meta.json;
+    edit: applied to the lessons read from the file (the draft's fixes)."""
     with _publishing:
         tmp, old = PUB + ".new", PUB + ".old"
         shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp)
-        m = model_from_files(setup_xlsx, timetable_path, spec=spec)
+        m = model_from_files(setup_xlsx, timetable_path, spec=spec, edit=edit); m["fixes"] = (extra or {}).get("fixes") or []
         log("Making the Excel workbook, the timetable finder, the PDFs and the timetable database...")
         out = export_all(m, tmp, log=lambda *a: None)
         if setup_xlsx: shutil.copy(setup_xlsx, os.path.join(tmp, "setup.xlsx"))

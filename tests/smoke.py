@@ -426,6 +426,88 @@ def test_a_draft_that_cannot_be_checked_is_a_sentence_not_a_500():   # finding 5
     for x in (r, g): assert x.status_code == 400 and x.get_json()["error"].startswith("Could not check the timetable against the setup"), (x.status_code, x.get_data()[:200])
     assert c.get("/api/draft").status_code == 200
 
+def _grid_draft():   # three lessons of two classes: U's Art for 1A (Mon p1), Art for 1B (Tue p1) and a Mathematics of 1B (Wed p3) that U also teaches
+    spec = c.get("/api/setup").get_json()["spec"]; ds = spec["day_structure"]["P1"]; days = list(ds); p = ds[days[0]].index("L"); U = "Umairah Tan"
+    rows = [(days[0], p, 1, "P1", "1A", "Art", [U]), (days[1], p, 1, "P1", "1B", "Art", [U]), (days[2], p + 2, 1, "P1", "1B", "Mathematics", [U])]
+    assert c.post("/api/draft", data=_draft_form(spec, rows, replace="1"), content_type="multipart/form-data").status_code == 200
+    return days, p
+
+def _lid(cls="1A", subject="Art"):
+    return next(x["id"] for x in c.get("/api/draft/grid?view=class&name=" + cls).get_json()["lessons"] if x["subject"] == subject)
+
+def test_the_grid_of_a_class_and_a_teacher():
+    A.app.testing = True; days, p = _grid_draft()
+    j = c.get("/api/draft/grid?view=class&name=1A").get_json()
+    assert j["view"] == "class" and j["name"] == "1A" and j["days"] == days and len(j["codes"]) == len(days) and "1A" in j["classes"] and "Umairah Tan" in j["teachers"], j
+    assert [(x["subject"], x["d"], x["p"], x["n"]) for x in j["lessons"]] == [("Art", 0, p, 1)] and j["lessons"][0]["what"] == "Art for 1A" and set(j["lessons"][0]) == {"id", "group", "subject", "classes", "teachers", "room", "d", "p", "n", "block", "what"}
+    assert any(s["key"] == "C:1A:Art" and s["have"] == 1 for s in j["short"]) and len(j["times"]) == j["NP"]
+    t = c.get("/api/draft/grid?view=teacher&name=Umairah%20Tan").get_json()
+    assert len(t["lessons"]) == 3 and t["short"] == [] and all(set(r) <= set("L.") for r in t["codes"]) and "L" in t["codes"][0]
+    assert c.get("/api/draft/grid?view=class&name=Nobody").status_code == 400
+    assert c.get("/api/draft/grid?view=room&name=1A").status_code == 400
+
+def test_the_options_of_a_lesson_and_of_an_add():
+    _grid_draft(); lid = _lid(); j = c.get(f"/api/draft/options?id={lid}").get_json()
+    assert set(j) == {"slots", "teachers", "rooms", "delete", "key"} and j["key"] == "C:1A:Art" and j["delete"]["state"] in ("ok", "prefer", "no", "na") and j["slots"]
+    assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in j["slots"])
+    r = c.get(f"/api/draft/options?id={lid}&group=Entire%20Class"); assert r.status_code == 200
+    a = c.get("/api/draft/options?add=C:1A:Art&n=1").get_json(); assert set(a) == {"slots"} and a["slots"] and set(a["slots"][0]) == {"d", "p", "state", "why"}
+    assert c.get("/api/draft/options?id=99999").status_code == 400 and c.get("/api/draft/options").status_code == 400
+
+def test_a_fix_moves_the_lesson_and_undo_brings_it_back():
+    _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
+    j = c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"])).get_json(); assert len(j["fixes"]) == 1 and j["fixes"][0]["text"].startswith("Moved "), j
+    g = c.get("/api/draft/grid?view=class&name=1A").get_json(); assert (s["d"], s["p"]) in {(x["d"], x["p"]) for x in g["lessons"] if x["id"] == lid}
+    assert c.get("/api/status").get_json()["draft"]["open"] == j["open"]
+    assert store.read_json(os.path.join(store.DATA, "draft", "meta.json"))["fixes"][0]["at"]
+    j = c.post("/api/draft/undo").get_json(); assert j["fixes"] == [] and c.post("/api/draft/undo").status_code == 400
+    assert c.post("/api/draft/undo").get_json() == {"error": "There is nothing to undo."}
+
+def test_an_add_without_a_room_and_a_delete_and_a_teacher_fix():
+    _grid_draft(); a = c.get("/api/draft/options?add=C:1A:Art&n=1").get_json()["slots"]; s = next(s for s in a if s["state"] in ("ok", "prefer"))
+    j = c.post("/api/draft/fix", json=dict(kind="add", key="C:1A:Art", d=s["d"], p=s["p"], n=1)).get_json(); assert j["fixes"][0]["text"].startswith("Added "), j
+    assert len(c.get("/api/draft/grid?view=class&name=1A").get_json()["lessons"]) == 2
+    t = c.get("/api/draft/options?id=%d" % _lid("1B", "Mathematics")).get_json()["teachers"]; assert isinstance(t, list)
+    r = c.post("/api/draft/fix", json=dict(kind="delete", id=_lid("1B", "Mathematics"))); assert r.status_code == 400 and "step 3 plans" in r.get_json()["error"], r.get_json()   # the plan would be broken
+    spec = c.get("/api/setup").get_json()["spec"]; rows = [("Mon", 1, 1, "P1", "1A", "Zzz Extra", ["Umairah Tan"])]
+    assert c.post("/api/draft", data=_draft_form(spec, rows, replace="1"), content_type="multipart/form-data").status_code == 200
+    j = c.post("/api/draft/fix", json=dict(kind="delete", id=_lid("1A", "Zzz Extra"))).get_json(); assert len(j["fixes"]) == 1 and j["fixes"][0]["text"].startswith("Deleted "), j
+    assert c.post("/api/draft/fix", json=dict(kind="nonsense")).status_code == 400 and c.post("/api/draft/fix", json=[1]).status_code == 400
+
+def test_a_fix_into_a_clash_is_refused_with_the_sentence():   # judged on the server's draft, whatever the page showed
+    days, p = _grid_draft(); lid = _lid()
+    r = c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=2, p=p + 2)); assert r.status_code == 400 and "is teaching" in r.get_json()["error"], r.get_json()
+    assert c.get("/api/draft").get_json()["fixes"] == []
+
+def test_fixes_survive_a_setup_change_or_say_so():
+    _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
+    c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"]))
+    rec = c.get("/api/setup").get_json(); cl = next(x for x in rec["spec"]["classes"] if x["class"] == "1A")
+    assert _changes("Z", rec["v"], [["set", "classes", cl["_id"], "class", "1Z"]])[0] == 200
+    r = c.get("/api/draft"); j = r.get_json(); assert r.status_code == 200 and (len(j["fixes"]) == 1 or j["fix_problems"]), j
+    assert any(x["id"] == lid for x in c.get("/api/draft/grid?view=class&name=1A").get_json()["lessons"])
+
+def test_the_draft_downloads_with_its_fixes():
+    import io
+    from ttgen.database import read_db
+    _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
+    c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"]))
+    r = c.get("/api/draft/download"); assert r.status_code == 200 and "draft.sqlite" in r.headers["Content-Disposition"], r.headers
+    path = os.path.join(tempfile.mkdtemp(), "d.sqlite"); open(path, "wb").write(r.data); header, rows = read_db(path)[:2]
+    ix = {h: i for i, h in enumerate(header)}; art = [x for x in rows if x[ix["Subject"]] == "Art" and x[ix["Classes"]] == "1A"]
+    assert len(art) == 1 and art[0][ix["Day"]] == c.get("/api/draft/grid?view=class&name=1A").get_json()["days"][s["d"]] and art[0][ix["Start period"]] == s["p"]
+    shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"))
+    assert c.get("/api/draft/download").status_code == 404 and c.get("/api/draft/grid?view=class&name=1A").status_code == 404 and c.post("/api/draft/undo").status_code == 404
+
+def test_a_draft_whose_fixes_are_published_is_replaced_without_the_question():
+    spec = c.get("/api/setup").get_json()["spec"]; rows = [_lesson_of(spec, _one_class_row(spec), ["Nobody"])]
+    c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data")
+    mp = os.path.join(store.DATA, "draft", "meta.json"); meta = store.read_json(mp)
+    store.write_json(mp, dict(meta, fixes=[{"x": 1}], published_fixes=1))
+    assert c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data").status_code == 200
+    store.write_json(mp, dict(store.read_json(mp), fixes=[{"x": 1}, {"x": 2}], published_fixes=1))
+    assert c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data").status_code == 409
+
 def test_publish_uses_the_setup_the_draft_was_checked_against():   # finding 10
     import draft
     spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec)
@@ -462,11 +544,22 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     assert d["rule_report"][0]["result"] == "Met" and d["typed"] == 0, d["rule_report"]
     assert d["config_id"] == f"v{v}" and d["config_state"] == "same", d
     assert d["choices_used"][0]["used"] == "First choice" and d["choices"] == 0, d
+    fixed = None   # the first lesson of any class with a slot that is not refused: a move, or a swap when the week is full
+    for cl in c.get("/api/setup").get_json()["spec"]["classes"]:
+        for x in c.get("/api/draft/grid?view=class&name=" + cl["class"]).get_json()["lessons"]:
+            sl = next((s for s in c.get(f"/api/draft/options?id={x['id']}").get_json()["slots"] if s["state"] in ("ok", "prefer")), None)
+            if sl: fixed = c.post("/api/draft/fix", json=dict(kind="swap", a=x["id"], b=sl["swap"]) if sl["swap"] else dict(kind="move", id=x["id"], d=sl["d"], p=sl["p"])).get_json(); break
+        if fixed: break
+    assert fixed and len(fixed["fixes"]) == 1, fixed
     r = c.post("/api/draft/publish"); j = r.get_json(); assert r.status_code == 200 and j["published"] is True, j
     p = c.get("/api/status").get_json()["published"]
     assert p and p["source"] == "timetable.xlsx" and p["rule_report"][0]["how"] == "Checked.", p
-    assert p["compared_v"] == f"v{v}" == d["setup_version"] and p["open"] == d["open"] and p["fixes"] == [] and isinstance(p["left"], list), p
+    assert p["compared_v"] == f"v{v}" == d["setup_version"] and p["open"] == fixed["open"] and p["fixes"] == [fixed["fixes"][0]["text"]] and isinstance(p["left"], list), p
     assert p["choices_used"] == d["choices_used"] and p["choice_problems"] and p["config_id"] == d["config_id"], p
+    import openpyxl
+    wb = openpyxl.load_workbook(os.path.join(store.PUB, store.published()["meta"]["files"]["excel"])); col = [r[0] for r in wb["Read me"].iter_rows(max_col=1, values_only=True)]
+    assert "Fixes made in the app" in col and fixed["fixes"][0]["text"] in col, col
+    assert store.read_json(os.path.join(store.DATA, "draft", "meta.json"))["published_fixes"] == 1
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
     assert t.get("/timetable").status_code == 200
 

@@ -1,8 +1,9 @@
 """The draft: the timetable the committee uploaded, kept on the server beside the saved setup. It is checked against the
 setup as it is now (ttgen.verify), each difference is decided on (change step 5, leave it, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
-import json, os, re, shutil, threading
-from ttgen.export import model_from_files
+import copy, json, os, re, shutil, threading
+from ttgen.export import ENTIRE, model_from_files
+from ttgen.database import write_db
 from ttgen.spec import typed_rules
 from ttgen import choices, verify
 import store, sync, fixes
@@ -10,6 +11,7 @@ import store, sync, fixes
 DIR = os.path.join(store.DATA, "draft")
 ANSWERS = ("step5", "left", "open")
 _lock = threading.RLock()   # always taken before store's locks, never inside them
+class NoDraft(Exception): pass
 _cache = {}                 # one entry: the model of the draft with its fixes applied, (key, model, fx); one worker, so a dict under _lock
 
 def _p(name): return os.path.join(DIR, name)
@@ -134,13 +136,87 @@ def decide(key, answer):
         return _finish(_build(), (key, dict(answer="step5", at=store.now())))
 
 def publish():
-    """make the draft the published timetable, checked against the setup as it is now"""
+    """make the draft the published timetable, with its fixes applied, checked against the setup as it is now"""
     with _lock:
         rec = store.setup_record(); j = info(rec=rec)   # one read of the setup: the one checked against is the one published with
         if j is None: raise FileNotFoundError("no draft")
         meta = store.read_json(_p("meta.json"), {}); decisions = store.read_json(_p("decisions.json"), {}) or {}
         left = [w["text"] for w in j["warnings"] if (w["decision"] or {}).get("answer") == "left"]
+        fl = meta.get("fixes") or []; texts = model_now(rec)[2]["texts"]
         sp, tp = paths()
-        store.publish(sp, tp, source=meta.get("source"), spec=rec["spec"], log=lambda *x: None,
-                      extra=dict(compared_v=j["setup_version"], open=j["open"], left=left, decisions={k: d["answer"] for k, d in decisions.items()}, fixes=[]))
+        store.publish(sp, tp, source=meta.get("source"), spec=rec["spec"], log=lambda *x: None, edit=fixes.editor(fl, {}),
+                      extra=dict(compared_v=j["setup_version"], open=j["open"], left=left, decisions={k: d["answer"] for k, d in decisions.items()}, fixes=list(texts)))
+        store.write_json(_p("meta.json"), dict(store.read_json(_p("meta.json"), {}), published_fixes=len(fl)))
         return dict(j, published=True)
+
+# ------------------------------------------------------------------------------------------------ the grid and the fixes
+
+NOT_FOUND = "There is no class or teacher of that name on the timetable."
+FIELDS = dict(move=("id", "d", "p"), swap=("a", "b"), teacher=("key", "teachers"), room=("id", "group", "room"), add=("key", "d", "p", "n"), delete=("id",))
+
+def _now():
+    if not exists(): raise NoDraft("There is no draft.")
+    return model_now()
+
+def grid(view, name):
+    """one class's or teacher's week with its lessons, for the grid -> dict(view, name, days, NP, times, codes, lessons, classes, teachers, short)"""
+    m, rec, fx = _now(); cls = view == "class"
+    if view not in ("class", "teacher") or name not in (m["class_ix"] if cls else m["teacher_ix"]): raise ValueError(NOT_FOUND)
+    if cls: codes = m["cgrid"].get(name) or m["grid"].get(m["class_ix"][name]["level"]) or ["." * m["NP"]] * len(m["days"])
+    else: codes = ["".join("L" if any(g[d][p] in "LA" for g in m["grid"].values()) else "." for p in range(m["NP"])) for d in range(len(m["days"]))]
+    rows = [x for x in m["lessons"] if name in x["classes" if cls else "teachers"]]
+    keep = lambda e: name in e["classes"]
+    return dict(view=view, name=name, days=list(m["days"]), NP=m["NP"], times=m["times"], codes=list(codes),
+                lessons=[dict(id=x["id"], group=x["group"], subject=x["subject"], classes=list(x["classes"]), teachers=list(x["teachers"]), room=x["room"], d=x["d"], p=x["p"], n=x["n"],
+                              block=x["block"], what=fixes.what(x)) for x in rows],
+                classes=[c["name"] for c in m["classes"]], teachers=[t["name"] for t in m["teachers"]],
+                short=[s for s in fixes.short(m, m["checked_setup"]) if cls and keep(verify.planned_rows(m["checked_setup"])[tuple(s["key"].split(":", 2 if s["key"].startswith("C:") else 1))])])
+
+def options(lesson_id=None, group=None, add=None, n=None):
+    """what the committee can do with one lesson (every slot, teacher, room, the delete, judged), or where a lesson of step 5 can be added"""
+    m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]
+    if add is not None:
+        try: n = int(n)
+        except (TypeError, ValueError): raise ValueError("Say how many periods the lesson is.")
+        return dict(slots=fixes.add_slots(m, spec, days, add, n))
+    try: lid = int(lesson_id)
+    except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
+    rows = fixes._rows(m["lessons"], lid); key = verify._kstr(fixes._row_key(rows[0])); g = group if group is not None else rows[0]["group"]
+    return dict(key=key, slots=fixes.slots(m, spec, days, lid), teachers=fixes.teacher_options(m, spec, days, key), rooms=fixes.room_options(m, spec, days, lid, g),
+                delete=fixes.can_delete(m, spec, days, lid, group))
+
+def _whole(f):
+    """a fix as the page posted it, cut to its kind's fields (the server adds at and text), or ValueError(sentence)"""
+    if not isinstance(f, dict) or f.get("kind") not in FIELDS: raise ValueError("This kind of fix is not known.")
+    k = f["kind"]; out = dict(kind=k, **{x: f[x] for x in FIELDS[k] if x in f})
+    if len(out) != len(FIELDS[k]) + 1: raise ValueError("The fix is not complete.")
+    if k == "add": out["room"] = f.get("room")
+    if k == "delete" and f.get("group") is not None: out["group"] = f["group"]
+    if k == "teacher" and not (isinstance(out["teachers"], list) and all(isinstance(t, str) for t in out["teachers"])): raise ValueError("The fix is not complete.")
+    return out
+
+def fix(move):
+    """make one fix: judged against the draft as it is now, and kept only when the timetable allows it. Returns info()."""
+    f = _whole(move)
+    with _lock:   # from the judgement to the write: two clicks cannot both pass the judgement on the same state
+        m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]
+        if f["kind"] == "add" and not f["room"]: f["room"] = fixes.add_room(m, spec, f["key"], f["d"], f["p"], f["n"]) if isinstance(f["n"], int) and isinstance(f["d"], int) and isinstance(f["p"], int) else ""
+        j = fixes.judge(m, spec, days, f)
+        if j["state"] in ("no", "na"): raise ValueError(j["why"])
+        text = fixes.apply_one(copy.deepcopy(m["lessons"]), f, spec, days)   # the sentence of the fix as it is made
+        meta = store.read_json(_p("meta.json"), {})
+        store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=store.now(), text=text)]))
+        return info()
+
+def undo():
+    """drop the last fix. Returns info()."""
+    with _lock:
+        if not exists(): raise NoDraft("There is no draft.")
+        meta = store.read_json(_p("meta.json"), {}); fl = list(meta.get("fixes") or [])
+        if not fl: raise ValueError("There is nothing to undo.")
+        fl.pop(); store.write_json(_p("meta.json"), dict(meta, fixes=fl, published_fixes=min(meta.get("published_fixes", 0), len(fl))))
+        return info()
+
+def database(path):
+    """the draft with its fixes as a timetable database at path"""
+    write_db(_now()[0], path)

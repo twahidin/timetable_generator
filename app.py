@@ -347,10 +347,12 @@ def export_printouts():
 
 NO_SETUP = "Save the school's setup first: the timetable is checked against it."
 
-def _checked(build):
-    """the draft checked against the setup, as JSON; a check that goes wrong is a sentence (400), not a server error"""
+def _checked(build, sentences=False):
+    """the draft checked against the setup, as JSON; a check that goes wrong is a sentence (400), not a server error.
+    sentences: a ValueError is already a sentence for the committee, and no draft is a 404"""
     try: return jsonify(build())
-    except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
+    except draft.NoDraft as e: return {"error": str(e)}, 404
+    except ValueError as e: return {"error": str(e) if sentences else f"Could not read the files: {e}"}, 400
     except Exception as e:
         if type(e) is LookupError: return {"error": NO_SETUP}, 409   # no setup saved (a KeyError or IndexError is a fault in the check)
         app.logger.exception("checking the draft")
@@ -363,8 +365,8 @@ def draft_upload():
     server and checked against the saved setup. A draft with fixes that were never published is replaced only with replace=1."""
     spec, _ = store.load_setup()
     if not spec: return {"error": NO_SETUP}, 409
-    fixes = (store.read_json(os.path.join(draft.DIR, "meta.json"), {}) or {}).get("fixes") or []
-    if fixes and request.form.get("replace") != "1": return {"error": "The draft has fixes that were never published.", "fixes": len(fixes)}, 409
+    meta = store.read_json(os.path.join(draft.DIR, "meta.json"), {}) or {}; fixes = meta.get("fixes") or []
+    if len(fixes) > meta.get("published_fixes", 0) and request.form.get("replace") != "1": return {"error": "The draft has fixes that were never published.", "fixes": len(fixes)}, 409
     work = tempfile.mkdtemp(prefix="tt-")
     try:
         try:
@@ -386,6 +388,44 @@ def draft_decide():
     try: return jsonify(draft.decide(str(body.get("key") or ""), body.get("answer")))
     except ValueError as e: return {"error": str(e)}, 400
     except LookupError: return {"error": NO_SETUP}, 409
+
+@app.get("/api/draft/grid")
+@need("committee")
+def draft_grid():
+    return _checked(lambda: draft.grid(request.args.get("view"), request.args.get("name")), sentences=True)
+
+@app.get("/api/draft/options")
+@need("committee")
+def draft_options():
+    q = request.args
+    if q.get("add") is None and q.get("id") is None: return {"error": "Say which lesson."}, 400
+    return _checked(lambda: draft.options(q.get("id"), q.get("group"), q.get("add"), q.get("n")), sentences=True)
+
+@app.post("/api/draft/fix")
+@need("committee")
+def draft_fix():
+    return _checked(lambda: draft.fix(request.get_json(force=True, silent=True)), sentences=True)
+
+@app.post("/api/draft/undo")
+@need("committee")
+def draft_undo():
+    return _checked(draft.undo, sentences=True)
+
+@app.get("/api/draft/download")
+@need("committee")
+def draft_download():
+    """the draft with its fixes as a timetable database, to carry on elsewhere"""
+    from ttgen.export import safe_name
+    work = tempfile.mkdtemp(prefix="tt-")
+    try:
+        try: m = draft._now()[0]; path = os.path.join(work, "draft.sqlite"); draft.database(path)
+        except draft.NoDraft as e: return {"error": str(e)}, 404
+        except LookupError: return {"error": NO_SETUP}, 409
+        except Exception as e:
+            app.logger.exception("downloading the draft"); return {"error": f"Could not make the file: {e}"}, 400
+        with open(path, "rb") as f: data = io.BytesIO(f.read())
+        return send_file(data, as_attachment=True, download_name=safe_name(f"{m['school']['name']} {m['school']['timetable']}") + " - draft.sqlite", mimetype="application/vnd.sqlite3")
+    finally: shutil.rmtree(work, ignore_errors=True)
 
 @app.post("/api/draft/publish")
 @need("committee")

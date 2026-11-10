@@ -351,20 +351,21 @@ def room_options(m, spec, days, lesson_id, group):
     c = _ctx(m)
     return [dict(room=r, **_pick(judge(m, spec, days, dict(kind="room", id=lesson_id, group=group, room=r), c))) for r in dict.fromkeys(rooms) if r and r != x["room"]]
 
-def add_slots(m, spec, days, key, n):
-    """every (d, p) judged as an add of an n-period lesson of the key, in the class's home room for a classroom lesson, else
-    the first free room of the kind, else no room -> [dict(d, p, state, why)]"""
+def add_room(m, spec, key, d, p, n, ctx=None):
+    """the room an add of an n-period lesson of the key at (d, p) takes: the class's home room for a classroom lesson, else the
+    first free room of the kind, else no room"""
     k = _key(key); e = verify.planned_rows(spec).get(k)
     if not e: raise ValueError(f"Step 5 has no lesson for {verify._name(k)}.")
-    c = _ctx(m); b = c["busy"]; kind = e["room_kind"] or "classroom"; home = m["class_ix"].get((e["classes"] or [""])[0], {}).get("home") or ""
-    kinds = [str(v["room"]) for v in spec.get("venues") or [] if (v.get("kind") or "classroom") == kind]
-    free = lambda r, d, p: b.clash([dict(id=None, teachers=[], classes=[], group=ENTIRE, room=r, rain="")], d, p, n) is None
-    out = []
-    for d in range(len(days)):
-        for p in range(m["NP"]):
-            room = home if kind == "classroom" and home else next((r for r in kinds if free(r, d, p)), "")
-            out.append(dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="add", key=key, d=d, p=p, n=n, room=room), c))))
-    return out
+    b = _ctx(m, ctx)["busy"]; kind = e["room_kind"] or "classroom"; home = m["class_ix"].get((e["classes"] or [""])[0], {}).get("home") or ""
+    if kind == "classroom" and home: return home
+    free = lambda r: b.clash([dict(id=None, teachers=[], classes=[], group=ENTIRE, room=r, rain="")], d, p, n) is None
+    return next((str(v["room"]) for v in spec.get("venues") or [] if (v.get("kind") or "classroom") == kind and free(str(v["room"]))), "")
+
+def add_slots(m, spec, days, key, n):
+    """every (d, p) judged as an add of an n-period lesson of the key, in the room add_room chooses -> [dict(d, p, state, why)]"""
+    c = _ctx(m); add_room(m, spec, key, 0, 0, n, c)   # raises for a key step 5 does not have
+    return [dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="add", key=key, d=d, p=p, n=n, room=add_room(m, spec, key, d, p, n, c)), c)))
+            for d in range(len(days)) for p in range(m["NP"])]
 
 def can_delete(m, spec, days, lesson_id, group=None):
     """a delete of the lesson (or its row of group) judged -> dict(state, why)"""

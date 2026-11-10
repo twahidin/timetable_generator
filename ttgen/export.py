@@ -791,6 +791,7 @@ def write_excel(m, path, log=print):
     lines += [("All checks passed: no teacher, room, class or student is double-booked; every subject has its planned periods; nothing sits in a break.", "ok")] \
         if ch["ok"] else [(p, "bad") for p in ch["problems"][:60]]
     if ch["side_by_side"]: lines.append((f"{ch['side_by_side']} class-periods have two banded lessons side by side for different students (for example extra periods for one group).", ""))
+    if m.get("fixes"): lines += [("Fixes made in the app", "h")] + [(f, "") for f in m["fixes"]]
     lines += [("After-school lessons", "h")] + ([(a, "") for a in ch["after_school"]] or [("None.", "")])
     comp = m.get("compromises") or []
     lines += [("Compromises", "h")] + ([(f"{len(comp)} things this timetable gives up: teachers over their allowance, Prefer rules it does not keep, and Max periods in a row. "
