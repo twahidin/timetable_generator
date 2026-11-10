@@ -1169,6 +1169,7 @@ const VIEWS = {
       <div class="dl">
         <div class="card"><h2>1 · Configuration workbook</h2><p class="muted">Everything you entered, as the .xlsx template.</p><button class="primary" id="build">Download workbook (.xlsx)</button></div>
         <div class="card"><h2>2 · The timetable skill</h2><p class="muted">Use the zip when the chatbot can run code: its scripts make a timetable file this app can publish as it is. SKILL.md alone is for a chatbot that cannot run code.</p><div class="row"><a href="/download/skill.zip"><button class="primary">Skill (.zip)</button></a><a href="/download/SKILL.md"><button>SKILL.md only</button></a></div></div>
+        <div class="card"><h2>3 · Starter prompt</h2><p class="muted">Paste this into the chatbot with the two files.</p><textarea id="prompt" readonly rows="7">${esc(starterPrompt())}</textarea><div class="row"><button id="copyPrompt">Copy</button></div></div>
         <div class="card"><h2>Keep a copy</h2><p class="muted">The setup as a progress file, to keep or to open on another computer.</p><div class="row"><button id="saveJson" title="Download the setup as a progress file">Save to file</button>${committee() && !S.practice ? `<label class="filebtn" title="Open a progress file: it replaces the school's setup for everyone">Load from file<input type="file" id="loadJson" accept=".json" hidden></label>` : ""}</div>${committee() && !S.practice ? copiesList() : ""}</div>
       </div>
       <div class="card" style="margin-top:16px"><h2>How to make the timetable</h2><ol class="howto">
@@ -1244,6 +1245,7 @@ document.addEventListener("click", async e => {
   if (b.id === "exGo") { makePrintouts(); return; }
   if (b.id === "imCheck") { importTimetable(false); return; }
   if (b.id === "imPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; importTimetable(true); return; }
+  if (b.id === "copyPrompt") { const ta = $("#prompt"); const done = () => toast("Copied."); if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(done, () => { ta.select(); document.execCommand("copy"); done(); }); else { ta.select(); document.execCommand("copy"); done(); } return; }
   if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
 });
 document.addEventListener("toggle", e => { if (e.target.classList && e.target.classList.contains("bands")) S.bandsOpen = e.target.open; }, true);
@@ -2125,6 +2127,7 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
   const p = st.published, f = p ? p.files || {} : {};
   el.innerHTML = `<h2>Published now</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)}${p.source ? ` from ${esc(p.source)}` : ""} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
       <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
+      ${ruleReportHTML(p.rule_report || [], S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0)}
       <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>${f.db ? `<a href="/files/db" title="Every lesson, class, teacher and room as a SQLite database, for other systems to import. It also holds the setup, so Make printouts can rebuild everything from it.">Timetable database (.sqlite), for other systems</a>` : ""}
       ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
       <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
@@ -2183,8 +2186,23 @@ function importHTML(j) {
             : `<details open><summary class="sev crit">${j.problems.length + j.more} problem${j.problems.length + j.more === 1 ? "" : "s"} found</summary>${list(j.problems, j.more)}</details>`)
     + (j.after.length ? `<details><summary>${j.after.length} lesson${j.after.length === 1 ? " is" : "s are"} after school</summary>${list(j.after)}</details>` : "")
     + (j.notes.length ? `<details><summary>Notes</summary>${list(j.notes)}</details>` : "")
+    + ruleReportHTML(j.rule_report || [], j.typed || 0)
     + `<p class="muted small" style="margin-top:8px">${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}${j.ok ? "" : " You can still publish it; the problems stay listed in its Read me sheet."}</p>
     <div class="row"><button class="primary" id="imPublish">Publish this timetable</button></div>`;
+}
+/* the agent's rule report (one line per typed rule: Met, Partly, Not met and how), and whether it matches the setup's typed rules */
+function ruleReportHTML(report, typed) {
+  if (!report.length && !typed) return "";
+  const cls = r => ({ Met: "met", Partly: "partly", "Not met": "notmet" }[r.result] || "");
+  const note = !report.length ? `<p class="issue">No rule report came back. The setup has ${typed} typed rule${typed === 1 ? "" : "s"}; ask the agent for the Rule report sheet.</p>`
+    : typed && report.length !== typed ? `<p class="issue">The setup has ${typed} typed rule${typed === 1 ? "" : "s"}; the report has ${report.length}.</p>` : "";
+  const rows = report.map(r => `<tr><td>${esc(r.no ?? "")}</td><td>${esc(r.strength)}</td><td>${esc(r.applies)}</td><td>${esc(r.rule)}</td><td class="${cls(r)}">${esc(r.result || "?")}</td><td>${esc(r.how)}</td></tr>`).join("");
+  return `<h3 style="margin-top:14px">Rule report</h3>${note}${report.length ? `<div class="tablewrap" style="max-height:none"><table class="rr"><tr><th>No.</th><th>Must / Prefer</th><th>Applies to</th><th>Rule</th><th>Result</th><th>How</th></tr>${rows}</table></div>` : ""}`;
+}
+/* what the committee pastes into the chatbot with the workbook and the skill */
+function starterPrompt() {
+  const n = S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0, v = (S.meta && S.meta.skill_version) || "";
+  return `Use the attached school-timetable-generator skill${v ? ` (version ${v})` : ""}, not an older installed copy. Make the timetable for ${sc().name || "the school"} ${sc().timetable || ""} from the attached setup workbook: run python -m ttgen check first and tell me every problem; then solve and export with python -m ttgen; hand back the timetable database (.sqlite) written by ttgen export, or, if you cannot run code, a workbook with a Lessons sheet in the hand-over format in SKILL.md.${n ? ` The setup has ${n} typed rule${n === 1 ? "" : "s"} (Rule "In words" on the More rules sheet): honour every Must, try every Prefer, and hand back the Rule report sheet with one line per typed rule: Met, Partly or Not met, and how.` : ""} Do not change the setup.`.replace(/\s+/g, " ").trim();
 }
 function dl(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
 async function buildXlsx() {

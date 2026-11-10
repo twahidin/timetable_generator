@@ -145,7 +145,7 @@ def meta(kind):
     sc = defaults(kind_ok(kind))
     return jsonify(rule_types=[dict(rule=a, scopes=b, needs_time=c == "Y", needs_number=d == "Y", meaning=e, example=f) for a, b, c, d, e, f in RULE_TYPES],
                    scopes=SCOPES, codes=CODES, defaults=sc, setting_rules=SETTING_RULES,
-                   roles=[dict(role=a, what=b, allowance=c, group=d) for a, b, c, d in ROLES])
+                   roles=[dict(role=a, what=b, allowance=c, group=d) for a, b, c, d in ROLES], skill_version=SKILL_VERSION)
 
 @app.get("/api/sample/<kind>")
 @need("committee", "head")
