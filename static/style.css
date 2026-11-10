@@ -225,3 +225,13 @@ tr.instead td{background:var(--chip);border-bottom:1px solid var(--line)}tr.inst
 .cmode{margin:0 0 12px;font-size:13px}.cmode label.radio{display:block;margin:4px 0;line-height:1.45}
 #prompt{width:100%;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0;resize:vertical;background:var(--input)}
 table.rr td.met{color:var(--ok);font-weight:600}table.rr td.partly{color:#b45309;font-weight:600}table.rr td.notmet{color:var(--warn);font-weight:600}
+
+/* step 8: the draft's warnings */
+.warnsum{margin:10px 0 4px}.warnfilter{gap:14px;margin:4px 0}.warnfilter .radio{margin:0}
+details.warnkind{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:#fff}
+details.warnkind>summary{font-size:13.5px;font-weight:600;color:var(--ink)}
+details.warnkind h4{margin:10px 0 2px;font-size:13px;color:var(--navy)}
+ul.warnlist{list-style:none;margin:0;padding:0}
+.warn{padding:8px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.45}.warn:first-child{border-top:0}
+.warn.prefer .wt{color:var(--muted)}.warnbtns{gap:6px;margin-top:4px}.warnbtns button{padding:3px 10px;font-size:12px}
+.chip.decision{background:var(--chip);color:var(--ink)}.chip.decision.step5{background:var(--ok-bg);color:var(--ok)}.chip.decision.left{background:#fff4d6;color:#7a5a00}
