@@ -184,8 +184,8 @@ def options(lesson_id=None, group=None, add=None, n=None):
     m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]
     if add is not None:
         try: n = int(n)
-        except (TypeError, ValueError): raise ValueError("Say how many periods the lesson is.")
-        return dict(slots=fixes.add_slots(m, spec, days, add, n))
+        except (TypeError, ValueError): n = None
+        return dict(slots=fixes.add_slots(m, spec, days, add, _length(n, m)))
     try: lid = int(lesson_id)
     except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
     rows = fixes._rows(m["lessons"], lid); row = rows[0] if group is None else next((x for x in rows if x["group"] == group), None)
@@ -193,6 +193,11 @@ def options(lesson_id=None, group=None, add=None, n=None):
     key = verify._kstr(fixes._row_key(row)); g = row["group"]
     return dict(key=key, slots=fixes.slots(m, spec, days, lid), teachers=fixes.teacher_options(m, spec, days, key), rooms=fixes.room_options(m, spec, days, lid, g),
                 delete=fixes.can_delete(m, spec, days, lid, group))
+
+def _length(n, m):
+    """an add's n, a whole number from 1 to the periods in a day, or ValueError(sentence)"""
+    if not (isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= m["NP"]): raise ValueError("Say how many periods the lesson is.")
+    return n
 
 def _whole(f):
     """a fix as the page posted it, cut to its kind's fields (the server adds at and text), or ValueError(sentence)"""
@@ -209,7 +214,9 @@ def fix(move):
     f = _whole(move)
     with _lock:   # from the judgement to the write: two clicks cannot both pass the judgement on the same state
         m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]
-        if f["kind"] == "add" and not f["room"]: f["room"] = fixes.add_room(m, spec, f["key"], f["d"], f["p"], f["n"]) if isinstance(f["n"], int) and isinstance(f["d"], int) and isinstance(f["p"], int) else ""
+        if f["kind"] == "add":
+            _length(f["n"], m)
+            if not f["room"]: f["room"] = fixes.add_room(m, spec, f["key"], f["d"], f["p"], f["n"]) if isinstance(f["d"], int) and isinstance(f["p"], int) else ""
         j = fixes.judge(m, spec, days, f)
         if j["state"] in ("no", "na"): raise ValueError(j["why"])
         text = fixes.apply_one(copy.deepcopy(m["lessons"]), f, spec, days)   # the sentence of the fix as it is made
@@ -227,5 +234,7 @@ def undo():
         return info()
 
 def database(path):
-    """the draft with its fixes as a timetable database at path"""
-    write_db(_now()[0], path)
+    """the draft with its fixes as a timetable database at path, its setup labelled with the setup's version now (on a copy:
+    the cached model is shared)"""
+    m, rec, fx = _now(); setup = dict(m["setup"]); setup["school"] = dict(setup.get("school") or {}, config_id=f"v{rec['v']}")
+    write_db(m, path, spec=setup)

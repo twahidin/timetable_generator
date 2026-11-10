@@ -557,6 +557,19 @@ def test_a_fix_into_a_clash_is_refused_with_the_sentence():   # judged on the se
 def _first_ok(options, key="slots", **no):
     return next(x for x in options[key] if x["state"] in ("ok", "prefer") and not x.get("swap"))
 
+def test_a_fix_that_changes_nothing_is_refused():
+    days, p = _grid_draft(); lid = _lid(); g = c.get("/api/draft/grid?view=class&name=1A").get_json(); x = next(x for x in g["lessons"] if x["id"] == lid)
+    for f in (dict(kind="move", id=lid, d=x["d"], p=x["p"]), dict(kind="swap", a=lid, b=lid)):
+        r = c.post("/api/draft/fix", json=f); assert r.status_code == 400 and r.get_json() == {"error": "That changes nothing."}, (f, r.get_json())
+    assert c.get("/api/draft").get_json()["fixes"] == []
+
+def test_an_add_must_say_a_length_inside_the_day():
+    days, p = _grid_draft(); NP = c.get("/api/draft/grid?view=class&name=1A").get_json()["NP"]; said = {"error": "Say how many periods the lesson is."}
+    for n in (0, -1, NP + 1, 10 ** 9, "x", 1.5, True):
+        r = c.get(f"/api/draft/options?add=C:1A:Art&n={n}"); assert r.status_code == 400 and r.get_json() == said, (n, r.get_json())
+        r = c.post("/api/draft/fix", json=dict(kind="add", key="C:1A:Art", d=4, p=p, n=n)); assert r.status_code == 400 and r.get_json() == said, (n, r.get_json())
+    assert c.get(f"/api/draft/options?add=C:1A:Art&n={NP}").status_code == 200 and c.get("/api/draft").get_json()["fixes"] == []
+
 def test_a_fix_still_applies_after_a_step5_change_that_keeps_it_valid():
     _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
     c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"]))
@@ -582,6 +595,10 @@ def test_the_draft_downloads_with_its_fixes():
     path = os.path.join(tempfile.mkdtemp(), "d.sqlite"); open(path, "wb").write(r.data); header, rows = read_db(path)[:2]
     ix = {h: i for i, h in enumerate(header)}; art = [x for x in rows if x[ix["Subject"]] == "Art" and x[ix["Classes"]] == "1A"]
     assert len(art) == 1 and art[0][ix["Day"]] == c.get("/api/draft/grid?view=class&name=1A").get_json()["days"][s["d"]] and art[0][ix["Start period"]] == s["p"]
+    rec = c.get("/api/setup").get_json(); row = next(x for x in rec["spec"]["lessons"] if x["classes"] == ["1B"] and x["subject"] == "Art")
+    assert _changes("Z", rec["v"], [["set", "lessons", row["_id"], "teachers", ["Umairah Tan", "Michelle Goh"]]])[0] == 200
+    r = c.get("/api/draft/download"); open(path, "wb").write(r.data); got = read_db(path)[5]
+    assert got["school"]["config_id"] == f"v{rec['v'] + 1}" and c.get("/api/draft").get_json()["config_id"] != f"v{rec['v'] + 1}", got["school"]
     shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"))
     assert c.get("/api/draft/download").status_code == 404 and c.get("/api/draft/grid?view=class&name=1A").status_code == 404 and c.post("/api/draft/undo").status_code == 404
 

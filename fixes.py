@@ -78,7 +78,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None):
                  classes=list(e["classes"]), subject=e["subject"], group=ENTIRE if key[0] == "C" else key[1],
                  teachers=list(dict.fromkeys(t for r in e["rows"] for t in r.get("teachers") or [])), room=fix["room"], ext=False, rain="")
         lessons.append(x); touched.add(x["id"])
-        return f"Added {what(x)} on {when(days, x['d'], x['p'])} ({x['n']} periods) {'in ' + x['room'] if x['room'] else 'with no room'}."
+        return f"Added {what(x)} on {when(days, x['d'], x['p'])} ({x['n']} period{'' if x['n'] == 1 else 's'}) {'in ' + x['room'] if x['room'] else 'with no room'}."
     if kind == "delete":
         rows = [x for x in _rows(lessons, fix["id"]) if fix.get("group") is None or x["group"] == fix["group"]]
         if not rows: raise ValueError(f"There is no row of {fix['group']} in that lesson.")
@@ -91,12 +91,13 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None):
 def apply(lessons, fixes, spec, days):
     """a copy of lessons with every fix applied in order -> dict(lessons, texts, problems, touched, was). A fix that cannot apply
     (the file or the setup changed since, or it is malformed) is skipped and named in problems; touched is the ids of lessons
-    a fix changed or added; was is the rows as they were just before each fix changed or deleted them (a row changed twice appears twice). An add takes 1 + the highest id as read from the file, plus one per add before it."""
+    a fix changed or added; was is the rows as they were just before each fix changed or deleted them (a row changed twice appears twice). An add takes 1 + the highest id as read from the file, plus one per add before it, applied or skipped: an
+    add's id depends only on its place among the adds, so a later fix made for "the second add" still finds it."""
     L, texts, problems, touched, was = copy.deepcopy(lessons), [], [], set(), []
     nxt = 1 + max([x["id"] for x in L], default=0)
     for f in fixes:
         try: texts.append(apply_one(L, f, spec, days, new_id=nxt, touched=touched, was=was))
-        except Exception as e: problems.append(f"A fix could not be applied: {e if isinstance(e, ValueError) else 'it is not complete.'}"); continue
+        except Exception as e: problems.append(f"A fix could not be applied: {e if isinstance(e, ValueError) else 'it is not complete.'}")
         if isinstance(f, dict) and f.get("kind") == "add": nxt += 1
     return dict(lessons=L, texts=texts, problems=problems, touched=touched, was=was)
 
@@ -260,6 +261,7 @@ def judge(m, spec, days, fix, ctx=None):
         apply_one(new, fix, spec, days, new_id=c["next_id"])
     except ValueError as e: return res("na", str(e))
     except (KeyError, TypeError): return res("na", "That fix is not complete.")
+    if (kind == "move" and (old[0]["d"], old[0]["p"]) == (fix["d"], fix["p"])) or (kind == "swap" and fix["a"] == fix["b"]): return res("na", "That changes nothing.")
     if kind == "swap":
         ra, rb = b.ids[fix["a"]], b.ids[fix["b"]]
         if set(_classes(ra)) != set(_classes(rb)) and (_block(ra) or _block(rb)): return res("na", "A block lesson can only swap with a lesson of the same classes.")
@@ -357,14 +359,16 @@ def room_options(m, spec, days, lesson_id, group):
     return [dict(room=r, **_pick(judge(m, spec, days, dict(kind="room", id=lesson_id, group=group, room=r), c))) for r in dict.fromkeys(rooms) if r and r != x["room"]]
 
 def add_room(m, spec, key, d, p, n, ctx=None):
-    """the room an add of an n-period lesson of the key at (d, p) takes: the class's home room for a classroom lesson, else the
-    first free room of the kind, else no room"""
+    """the room an add of an n-period lesson of the key at (d, p) takes: the first room free in all its periods among the home
+    rooms of its classes, in order (for a classroom lesson: a row with no room kind is one), then the other rooms of its kind;
+    else no room ("", which never clashes)"""
     k = _key(key); e = verify.planned_rows(spec).get(k)
     if not e: raise ValueError(f"Step 5 has no lesson for {verify._name(k)}.")
-    b = _ctx(m, ctx)["busy"]; kind = e["room_kind"] or "classroom"; home = m["class_ix"].get((e["classes"] or [""])[0], {}).get("home") or ""
-    if kind == "classroom" and home: return home
+    b = _ctx(m, ctx)["busy"]; kind = e["room_kind"] or "classroom"
+    homes = [m["class_ix"].get(c, {}).get("home") or "" for c in e["classes"]] if kind == "classroom" else []
+    rooms = [str(r) for r in dict.fromkeys(homes + [v["room"] for v in spec.get("venues") or [] if (v.get("kind") or "classroom") == kind]) if r]
     free = lambda r: b.clash([dict(id=None, teachers=[], classes=[], group=ENTIRE, room=r, rain="")], d, p, n) is None
-    return next((str(v["room"]) for v in spec.get("venues") or [] if (v.get("kind") or "classroom") == kind and free(str(v["room"]))), "")
+    return next((r for r in rooms if free(r)), "")
 
 def add_slots(m, spec, days, key, n):
     """every (d, p) judged as an add of an n-period lesson of the key, in the room add_room chooses -> [dict(d, p, state, why)]"""

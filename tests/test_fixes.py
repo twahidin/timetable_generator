@@ -1,5 +1,5 @@
 """Plain-assert tests for fixes applied to the lessons of a draft: .venv/bin/python tests/test_fixes.py"""
-import copy, os, random, subprocess, sys, tempfile, time
+import collections, copy, os, random, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE); sys.path.insert(0, ROOT)
 import fixes  # noqa: E402
 from ttgen import export, reader, template, verify  # noqa: E402
@@ -66,14 +66,15 @@ def teacher_room_add_delete():
     out = fixes.apply(L, [dict(kind="add", key=KEY, d=4, p=0, n=1, room=ROOM)], sp, DAYS)
     new = by_id(out["lessons"], 3); assert len(out["lessons"]) == 3 and out["touched"] == {3}
     assert (new["subject"], new["classes"], new["group"], new["teachers"], new["level"], new["block"], new["d"], new["p"], new["n"], new["room"]) == (SUBJ, [CLS], ENTIRE, TEACHERS, ROW["level"], "", 4, 0, 1, ROOM)
-    assert out["texts"] == [f"Added {SUBJ} for {CLS} on {DAYS[4]} period 0 (1 periods) in {ROOM}."]
-    assert fixes.apply(L, [dict(kind="add", key=KEY, d=4, p=0, n=1, room="")], sp, DAYS)["texts"] == [f"Added {SUBJ} for {CLS} on {DAYS[4]} period 0 (1 periods) with no room."]
+    assert out["texts"] == [f"Added {SUBJ} for {CLS} on {DAYS[4]} period 0 (1 period) in {ROOM}."]
+    assert fixes.apply(L, [dict(kind="add", key=KEY, d=4, p=0, n=1, room="")], sp, DAYS)["texts"] == [f"Added {SUBJ} for {CLS} on {DAYS[4]} period 0 (1 period) with no room."]
     out = fixes.apply(L, [dict(kind="delete", id=2)], sp, DAYS)
     assert [x["id"] for x in out["lessons"]] == [1] and out["texts"] == [f"Deleted {fixes.what(L[1])} on {DAYS[1]} period 4."]
     sp, B = one_block(); g = B[0]["group"]
     out = fixes.apply(B, [dict(kind="delete", id=7, group=g)], sp, DAYS); assert [x["group"] for x in out["lessons"]] == [x["group"] for x in B[1:]]
     out = fixes.apply(B, [dict(kind="add", key=f"G:{g}", d=1, p=1, n=2, room="")], sp, DAYS)
     new = by_id(out["lessons"], 8); assert (new["group"], new["classes"], new["block"]) == (g, B[0]["classes"], B[0]["block"])
+    assert out["texts"] == [f"Added group {g} on {DAYS[1]} period 1 (2 periods) with no room."]
     for bad in (dict(kind="teacher", key=KEY, teachers=["Nobody Real"]), dict(kind="room", id=1, group=ENTIRE, room="Nowhere"), dict(kind="add", key="C:9Z:Nothing", d=0, p=0, n=1, room="")):
         assert len(fixes.apply(L, [bad], sp, DAYS)["problems"]) == 1
 
@@ -246,15 +247,44 @@ def teacher_room_add_delete_options():
     assert not [x for x in fixes.short(m, sp) if x["key"] == KEY] and fixes.can_delete(m, sp, DAYS, 4) == dict(state="ok", why="")
     assert fixes.can_delete(m, sp, DAYS, 3)["state"] == "no" and at(fixes.add_slots(m, sp, DAYS, KEY, 1), 4, 2)["state"] == "no"
 
+@t
+def an_add_takes_its_id_from_its_place_among_the_adds():   # a skipped add still counts, so later fixes act on the lesson they were made for
+    sp, L = two_lessons(); k1, k2 = dict(kind="add", key=KEY, d=4, p=0, n=1, room=""), dict(kind="add", key=KEY, d=3, p=0, n=1, room="")
+    for k0 in (dict(kind="add", key=KEY, d=2, p=6, n=1, room=""), dict(kind="add", key="C:9Z:Nothing", d=2, p=6, n=1, room="")):
+        out = fixes.apply(L, [k0, k1, k2, dict(kind="move", id=4, d=2, p=0)], sp, DAYS)
+        assert sorted((x["id"], x["d"], x["p"]) for x in out["lessons"] if x["id"] in (4, 5)) == [(4, 2, 0), (5, 3, 0)], out["lessons"]
+    assert len(out["problems"]) == 1 and out["touched"] == {4, 5}, out
+
+@t
+def an_add_takes_the_first_free_home_room_then_another_room_of_its_kind():
+    home = lambda c: next(x["home_room"] for x in SP["classes"] if x["class"] == c)
+    other = next(c["class"] for c in SP["classes"] if c["class"] != CLS and c["level"] == LV); t = next(x for x in T if x not in TEACHERS)
+    m, sp = model_with([lesson(1, 4, 2, 1, [other], "Science", ENTIRE, [t], room=home(CLS), level=LV)])
+    assert at(fixes.add_slots(m, sp, DAYS, KEY, 1), 4, 2)["state"] == "ok"
+    r = fixes.add_room(m, sp, KEY, 4, 2, 1); classrooms = [v["room"] for v in SP["venues"] if (v.get("kind") or "classroom") == "classroom"]
+    assert r != home(CLS) and r in classrooms, r
+    assert fixes.add_room(m, sp, KEY, 3, 2, 1) == home(CLS) and fixes.add_room(m, sp, KEY, 4, 1, 2) != home(CLS)   # the two periods must both be free
+    g = "1ML1"; e = verify.planned_rows(SP)[("G", g)]; c1, c2 = e["classes"][:2]
+    m, sp = model_with([lesson(1, 4, 2, 1, [other], "Science", ENTIRE, [t], room=home(c1), level=LV)])
+    assert fixes.add_room(m, sp, f"G:{g}", 4, 2, 1) == home(c2) and fixes.add_room(m, sp, f"G:{g}", 3, 2, 1) == home(c1)
+
+@t
+def a_fix_that_changes_nothing_is_na():
+    L = [lesson(1, 0, 2, 2, [A], SUBJ, ENTIRE, [T[0]], level=LV)]; m, sp = model_with(L)
+    none = dict(state="na", why="That changes nothing.", must=[], prefer=[])
+    assert fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=0, p=2)) == none and fixes.judge(m, sp, DAYS, dict(kind="swap", a=1, b=1)) == none
+
 if "--full" in sys.argv:
+    SOLVED = []
     def solved_primary():
-        """the primary sample solved as tests/smoke.py --full does, checked against its setup plus the WIDE rule rows -> (m, setup, days, timetable path)"""
+        """the primary sample solved as tests/smoke.py --full does (once), checked against its setup plus the WIDE rule rows -> (m, setup, days, timetable path)"""
+        if SOLVED: return SOLVED[0]
         work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx"); env = dict(os.environ, PYTHONPATH=ROOT)
         subprocess.run([sys.executable, "-m", "ttgen", "sample", "primary", "--out", setup], check=True, env=env, cwd=ROOT, capture_output=True)
         done = subprocess.run([sys.executable, "-m", "ttgen", "solve", setup, "--out", tt, "--time", "30"], env=env, cwd=ROOT, capture_output=True)   # 30 s: feasible and clean in 15
         assert done.returncode == 0 and os.path.exists(tt), "The solve did not finish in the time given, so there is no timetable to check."
         own = export.model_from_files(setup, tt)["setup"]; sp = copy.deepcopy(own); sp["rules"] = list(sp.get("rules") or []) + WIDE
-        m = export.model_from_files(None, tt, spec=sp); return m, sp, m["days"], tt
+        m = export.model_from_files(None, tt, spec=sp); SOLVED.append((m, sp, m["days"], tt)); return SOLVED[0]
 
     def r_(scope, target, rule, strength="Must", **k): return dict(scope=scope, target=target, rule=rule, strength=strength, week="Both", day=k.pop("day", "All"), **k)
     WIDE = [r_("Level", "P1", "Keep free together", "Prefer", day="Tue", **{"from": 7, "to": 8}), r_("Department", "MA", "At most N at once", number=3),
@@ -297,5 +327,81 @@ if "--full" in sys.argv:
             live = [s for s in S if s["state"] != "na"]
             for s in random.Random(1).sample(live, min(5, len(live))):
                 assert s["state"] == full_state(m, sp, days, tt, lid, s), (lid, s)
+
+    def ref_state(m0, sp, days, tt, base, fix):
+        """the reference for any kind of fix: the fixes before it (base, of which m0 is the model) and the fix applied to every
+        lesson through the app's own path, every check rebuilt, by the spec's rule of clean"""
+        out = {}; m2 = export.model_from_files(None, tt, spec=m0["setup"], edit=fixes.editor(base + [fix], out))
+        if out["problems"]: return "na"
+        if fix["kind"] == "swap":
+            ra, rb = rows_of(m0, fix["a"]), rows_of(m0, fix["b"]); blk = lambda r: len(r) > 1 or any(x["block"] for x in r)
+            if {c for x in ra for c in x["classes"]} != {c for x in rb for c in x["classes"]} and (blk(ra) or blk(rb)): return "na"
+        new = set(m2["checks"]["problems"]) - set(m0["checks"]["problems"])
+        if any(x.endswith(LESSON_TIME) or x.endswith(LESSON_TIME[2] + ".") for x in new): return "na"
+        if [x for x in new if not x.endswith("planned.")]: return "no"
+        p0, p2 = ({k: v["periods"] for k, v in verify.placed(mm).items()} for mm in (m0, m2))
+        for k in set(p0) | set(p2):
+            was, now, want = p0.get(k, 0), p2.get(k, 0), m0["planned"].get(k, 0)
+            if now != was and not (was < now <= want or want <= now < was): return "no"
+        subj = lambda mm: {fixes._subject(w): w["strength"] for w in verify.rules(mm, sp)[0]}
+        sb, sa = subj(m0), subj(m2); new = [v for k, v in sa.items() if k not in sb]
+        if "Must" in new: return "no"
+        if fix["kind"] in ("teacher", "add", "delete"):
+            def load(mm):
+                out = collections.Counter(); seen = set()
+                for x in mm["lessons"]:
+                    for t_ in x["teachers"]:
+                        if (x["id"], t_) not in seen: seen.add((x["id"], t_)); out[t_] += x["n"]
+                return out
+            l0, l2 = load(m0), load(m2)
+            for t_ in l2:
+                cap = fixes._allowance(m0["teacher_ix"].get(t_, {}).get("allowance"))
+                if cap is not None and l2[t_] > cap and l2[t_] > l0[t_]: new.append("Prefer")
+        return "prefer" if new else "ok"
+
+    def slot_fix(lid, s): return dict(kind="swap", a=lid, b=s["swap"]) if s["swap"] else dict(kind="move", id=lid, d=s["d"], p=s["p"])
+
+    def with_fixes(sp, tt, base):
+        out = {}; m = export.model_from_files(None, tt, spec=sp, edit=fixes.editor(base, out)); assert not out["problems"], out["problems"]; return m
+
+    @t
+    def the_reduced_check_agrees_with_the_full_one_for_every_kind_and_a_chain():
+        m, raw, days, tt = solved_primary(); sp = m["checked_setup"]; R = random.Random(2); seen = collections.Counter()   # the derived setup, as the app passes it
+        def agree(m0, base, fix, state):
+            ref = ref_state(m0, sp, days, tt, base, fix); seen[fix["kind"], state] += 1; assert state == ref, (fix, state, ref, fixes.judge(m0, sp, days, fix))
+        by = {}
+        for x in m["lessons"]: by.setdefault(x["id"], []).append(x)
+        whole = [i for i, r in by.items() if len(r) == 1 and r[0]["group"] == ENTIRE and not r[0]["block"]]
+        # teacher fixes on a few keys
+        for lid in R.sample(whole, 3):
+            key = verify._kstr(fixes._row_key(by[lid][0]))
+            for o in fixes.teacher_options(m, sp, days, key)[:2]: agree(m, [], dict(kind="teacher", key=key, teachers=o["teachers"]), o["state"])
+        # an add towards the plan: one lesson dropped from the solved timetable first
+        for gone in [i for i in whole if by[i][0]["n"] == 1][:5] + whole[:1]:   # a one-period lesson has the most open slots
+            key = verify._kstr(fixes._row_key(by[gone][0])); base = [dict(kind="delete", id=gone)]; m1 = with_fixes(raw, tt, base)
+            assert any(x["key"] == key for x in fixes.short(m1, sp)); k = by[gone][0]["n"]; S = fixes.add_slots(m1, sp, days, key, k)
+            open_ = [s for s in S if s["state"] in ("ok", "prefer")]
+            if open_: break
+        assert open_, "no add towards the plan has an open slot"
+        for s in R.sample(open_, min(2, len(open_))) + R.sample([s for s in S if s["state"] == "no"], 3):
+            agree(m1, base, dict(kind="add", key=key, d=s["d"], p=s["p"], n=k, room=fixes.add_room(m1, sp, key, s["d"], s["p"], k)), s["state"])
+        # a delete of an extra lesson: a duplicate added first
+        def free_dup(i):   # a slot where a copy of lesson i clashes with nothing (only its count is past the plan)
+            x = by[i][0]; return next((s for s in fixes.add_slots(m, sp, days, verify._kstr(fixes._row_key(x)), x["n"]) if s["why"].startswith("That would leave")), None)
+        dup, s = next((i, s) for i in [i for i in whole if i != gone and by[i][0]["n"] == 1] + whole for s in [free_dup(i)] if s)
+        x = by[dup][0]; key = verify._kstr(fixes._row_key(x))
+        base = [dict(kind="add", key=key, d=s["d"], p=s["p"], n=x["n"], room="")]; m1 = with_fixes(raw, tt, base); new_id = max(by) + 1
+        assert rows_of(m1, new_id)
+        for lid in (new_id, dup, next(i for i in whole if i not in (dup, gone))): agree(m1, base, dict(kind="delete", id=lid), fixes.can_delete(m1, sp, days, lid)["state"])
+        assert fixes.can_delete(m1, sp, days, new_id)["state"] in ("ok", "prefer")
+        # a chain: the second fix judged after the first is applied
+        lid, first = next((i, s) for i in whole[3:] for s in fixes.slots(m, sp, days, i) if s["state"] in ("ok", "prefer"))
+        base = [slot_fix(lid, first)]; m1 = with_fixes(raw, tt, base)
+        nxt = next(i for i in whole if i != lid and set(by[i][0]["classes"]) & set(by[lid][0]["classes"]))
+        S = [s for s in fixes.slots(m1, sp, days, nxt) if s["state"] != "na"]
+        for s in R.sample(S, 4): agree(m1, base, slot_fix(nxt, s), s["state"])
+        back = fixes.judge(m1, sp, days, dict(kind="move", id=lid, d=by[lid][0]["d"], p=by[lid][0]["p"]))["state"]; agree(m1, base, dict(kind="move", id=lid, d=by[lid][0]["d"], p=by[lid][0]["p"]), back)
+        assert {k_ for k_, _ in seen} >= {"teacher", "add", "delete", "move"} and len({st for _, st in seen}) >= 2, seen
+        print("  agreed:", dict(seen))
 
 print(f"{n} checks passed")
