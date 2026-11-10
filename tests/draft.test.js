@@ -39,4 +39,21 @@ t("texts", () => {
   assert.equal(Draft.answerText({ decision: null }), "");
 });
 t("kinds", () => { assert.deepEqual(Draft.KINDS, ["clash", "deployment", "rule", "typed", "choice"]); assert.equal(Draft.KIND_TEXT.typed, "Rules in words"); });
+t("whereText: only the parts a warning's where has", () => {
+  assert.deepStrictEqual(Draft.whereText({ where: { cls: "1A", day: "Mon", period: 0, id: 3, row: "Entire Class" } }), ["1A", "Mon", "period 0"]);
+  assert.deepStrictEqual(Draft.whereText({ where: { teacher: "Ms Ong" } }), ["Ms Ong"]);
+  assert.deepStrictEqual(Draft.whereText({ where: { cls: "2B" } }), ["2B"]);
+  assert.deepStrictEqual(Draft.whereText({ where: { cls: "", day: "Tue", period: 4 } }), ["Tue", "period 4"]);
+  assert.deepStrictEqual(Draft.whereText({ where: null }), []);
+});
+
+t("fixTarget: the week a warning's Fix the timetable button opens", () => {
+  assert.deepStrictEqual(Draft.fixTarget({ where: { cls: "1A", day: "Mon", period: 0, id: 3, row: "Entire Class" } }), { view: "class", name: "1A", day: "Mon", sel: { id: 3, group: "Entire Class" } });
+  assert.deepStrictEqual(Draft.fixTarget({ where: { cls: "1A", day: "Mon", period: 2 } }), { view: "class", name: "1A", day: "Mon", sel: null });
+  assert.deepStrictEqual(Draft.fixTarget({ where: { teacher: "Ms Ong" } }), { view: "teacher", name: "Ms Ong", day: "", sel: null });
+  assert.deepStrictEqual(Draft.fixTarget({ where: { cls: "2B" } }), { view: "class", name: "2B", day: "", sel: null });
+  assert.strictEqual(Draft.fixTarget({ where: { cls: "", day: "Mon", period: 1 } }), null);
+  assert.strictEqual(Draft.fixTarget({ where: null }), null);
+});
+
 console.log(n + " checks passed");

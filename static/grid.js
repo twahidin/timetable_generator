@@ -57,8 +57,23 @@ var Grid = (function () {
 
   function slotText(slot, days) {
     var where = days[slot.d] + " period " + slot.p;
-    var text = (slot.swap === null || slot.swap === undefined ? "Move to " : "Swap with the lesson on ") + where;
+    var text = (isSwap(slot) ? "Swap with the lesson on " : "Move to ") + where;
     return slot.why ? text + " — " + slot.why : text;
+  }
+
+  function isSwap(slot) { return !!slot && slot.swap !== null && slot.swap !== undefined; }
+  /* the fix to post for a click on a slot with the lesson sel ({id, group}) selected: the swap the slot offers, else a move there */
+  function fixFor(sel, slot) {
+    return isSwap(slot) ? { kind: "swap", a: sel.id, b: slot.swap } : { kind: "move", id: sel.id, d: slot.d, p: slot.p };
+  }
+  /* the fix to post for a click on a slot while a lesson of key, n periods long, is being added */
+  function addFor(key, slot, n) { return { kind: "add", key: key, d: slot.d, p: slot.p, n: Number(n) }; }
+  /* a delete of the selected row: with its group when the lesson has more than one row in the grid or is a block (the
+     options judged that row alone), else the whole lesson */
+  function deleteFor(payload, sel) {
+    var rows = (payload.lessons || []).filter(function (r) { return r.id === sel.id; });
+    var row = rows.find(function (r) { return r.group === sel.group; });
+    return rows.length > 1 || (row && row.block) ? { kind: "delete", id: sel.id, group: sel.group } : { kind: "delete", id: sel.id };
   }
 
   /* a new list: ok, then prefer, then no; na left out; within a state by day, then period */
@@ -83,6 +98,6 @@ var Grid = (function () {
     return asked.view === now.view && asked.name === now.name && asked.key === now.key && asked.id === now.id && asked.group === now.group;
   }
 
-  return { label: label, fullLabel: fullLabel, wanted: wanted, weeks: weeks, table: table, lesson: lesson, same: same, slotAt: slotAt, stateClass: stateClass, slotText: slotText, sorted: sorted };
+  return { fixFor: fixFor, addFor: addFor, deleteFor: deleteFor, isSwap: isSwap, label: label, fullLabel: fullLabel, wanted: wanted, weeks: weeks, table: table, lesson: lesson, same: same, slotAt: slotAt, stateClass: stateClass, slotText: slotText, sorted: sorted };
 })();
 if (typeof module !== "undefined") module.exports = Grid;

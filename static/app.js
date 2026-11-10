@@ -2289,10 +2289,10 @@ function draftHTML(j) {
     <div class="row" style="margin-top:8px"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
     <p class="muted small">Its downloads and the personal student codes are below.</p>`;
   const ws = j.warnings || [], c = Draft.counts(ws), f = S.dfilter || "open", pub = G.st && G.st.published, n = j.open ?? c.open, nl = j.left ?? c.left, n5 = j.step5 ?? c.step5;   // the server counts the step 5 decisions whose warning has gone
-  const where = w => w.where ? ` · ${esc(w.where.cls)} · ${esc(w.where.day)} · period ${esc(w.where.period)}` : "";
+  const where = w => Draft.whereText(w).map(x => ` · ${esc(x)}`).join("");
   const row = w => { const d = w.decision && w.decision.answer, ans = Draft.answerText(w), side = Draft.sideText(w);
     return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}"><div class="wt">${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where(w)}</div>
-      <div class="row warnbtns">${w.where && d !== "step5" && d !== "fixed" && d !== "met" ? `<button data-fix="${esc(w.key)}">Fix the timetable</button>` : ""}${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "left" || d === "met" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" ? "" : `${/:again$/.test(w.key) ? `<button data-decide="met|${esc(w.key)}">Still met</button>` : ""}<button data-decide="left|${esc(w.key)}">Leave it</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div></li>`; };
+      <div class="row warnbtns">${Draft.fixTarget(w) && d !== "step5" && d !== "fixed" && d !== "met" ? `<button data-fix="${esc(w.key)}">Fix the timetable</button>` : ""}${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "left" || d === "met" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" ? "" : `${/:again$/.test(w.key) ? `<button data-decide="met|${esc(w.key)}">Still met</button>` : ""}<button data-decide="left|${esc(w.key)}">Leave it</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div></li>`; };
   const groups = Draft.group(ws, f), nc = (j.not_checked || []);
   const kinds = groups.map(k => `<details open class="warnkind"><summary class="sev">${esc(k.title)} · ${k.groups.reduce((a, g) => a + g.items.length, 0)}</summary>
       ${k.groups.map(g => `<h4>${esc(g.name)}</h4><ul class="warnlist">${g.items.map(row).join("")}</ul>`).join("")}
@@ -2340,7 +2340,7 @@ function fixHTML() {
       return `<td class="fxc has" rowspan="${c.rowspan}">${btns}</td>`;
     }
     const sl = lessonMode ? Grid.slotAt(slots, c.d, c.p) : null, st = sl ? Grid.stateClass(sl.state) : "";
-    return `<td class="fxc ${st}${FX_BREAK[c.code] && c.code !== "." ? " brk" : ""}"${sl ? ` data-fxcell="${Number(c.d)}|${Number(c.p)}" title="${esc(sl.why)}"` : ""}>${FX_BREAK[c.code] ? `<span class="muted">${esc(FX_BREAK[c.code])}</span>` : ""}</td>`;
+    return `<td class="fxc ${st}${FX_BREAK[c.code] && c.code !== "." ? " brk" : ""}"${sl ? ` data-fxcell="${Number(c.d)}|${Number(c.p)}" title="${esc(Grid.isSwap(sl) ? Grid.slotText(sl, g.days) : sl.why)}"` : ""}>${FX_BREAK[c.code] ? `<span class="muted">${esc(FX_BREAK[c.code])}</span>` : ""}</td>`;
   };
   const table = `<table class="fxgrid" style="min-width:${64 + wk.days.length * 100}px"><tr><th></th>${wk.days.map(d => `<th>${esc(d.label)}</th>`).join("")}</tr>${rows.map((r, p) => `<tr><th class="fxp">${p}<small>${esc(((g.times || [])[p] || [])[0] || "")}</small></th>${r.map(cell).join("")}</tr>`).join("")}</table>`;
   const opt = (attrs, st, text, why) => `<button class="fxopt" ${attrs}>${fxDot(st)}<span>${esc(text)}${why ? ` <small class="muted">${esc(why)}</small>` : ""}</span></button>`;
@@ -2430,13 +2430,14 @@ async function fxSelect(sel) {
   if (sel) { fxDraw(); await fxOptions(f); }
   if (S.fix === f) fxDraw();
 }
+function fxAlso(sl) { return !Grid.isSwap(sl) || !(sl.also || []).length || confirm(sl.also.join("\n") + "\n\nSwap anyway?"); }   // a swap that moves another class's lesson too is confirmed first
 function fxStateOK(x) { if (x && (x.state === "ok" || x.state === "prefer")) return true; toast((x && x.why) || "That is not open."); return false; }
 function fxClick(b) {   // true when the click was the Fix card's or a warning's Fix button
   const d = b.dataset, f = S.fix, split = v => { const i = v.indexOf("|"); return [v.slice(0, i), v.slice(i + 1)]; };
   if (d.fix !== undefined) {
-    const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === d.fix), wh = w && w.where; if (!wh) return true;
-    if (!wh.cls) { toast("This warning is not about one class, so there is no grid to show."); return true; }
-    fxOpen("class", wh.cls, wh.day, wh.id !== undefined && wh.id !== null ? { id: Number(wh.id), group: wh.row } : null); return true;
+    const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === d.fix), to = w && Draft.fixTarget(w);
+    if (!to) { toast("This warning is not about one class or teacher, so there is no grid to show."); return true; }
+    fxOpen(to.view, to.name, to.day, to.sel); return true;
   }
   if (b.id === "fxOpen") { fxOpenFirst(); return true; }
   if (b.id === "fxUndo") { fxUndo(); return true; }
@@ -2447,23 +2448,21 @@ function fxClick(b) {   // true when the click was the Fix card's or a warning's
     if (f.sel && Grid.same(f.sel, row)) { fxSelect(null); return true; }
     const o = fxOpts(f), sl = f.sel && o ? (o.slots || []).find(s => s.swap === row.id) : null;
     if (sl && (sl.state === "ok" || sl.state === "prefer")) {
-      if ((sl.also || []).length && !confirm(sl.also.join("\n") + "\n\nSwap anyway?")) return true;
-      fxFix({ kind: "swap", a: f.optFor.id, b: row.id }); return true;
+      if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); return true;
     }
     fxSelect(row); return true;
   }
   if (d.fxcell !== undefined && fxOpts(f)) {
     const o = fxOpts(f), [dd, p] = split(d.fxcell), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
     if (!fxStateOK(sl)) return true;
-    if (f.optFor.id !== undefined) fxFix({ kind: "move", id: f.optFor.id, d: Number(dd), p: Number(p) });
-    else if (f.optFor.key !== undefined) { const s = (f.grid.short || []).find(x => x.key === f.optFor.key); if (s) fxFix({ kind: "add", key: f.optFor.key, d: Number(dd), p: Number(p), n: Number(s.n) }); }
+    if (f.optFor.id !== undefined) { if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); }
+    else if (f.optFor.key !== undefined) { const s = (f.grid.short || []).find(x => x.key === f.optFor.key); if (s) fxFix(Grid.addFor(f.optFor.key, sl, s.n)); }
     return true;
   }
   if (d.fxgo !== undefined && f.sel && fxOpts(f)) {
     const o = fxOpts(f), [dd, p] = split(d.fxgo), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
     if (!fxStateOK(sl)) return true;
-    if ((sl.also || []).length && !confirm(sl.also.join("\n") + "\n\nGo ahead?")) return true;
-    fxFix(sl.swap === null || sl.swap === undefined ? { kind: "move", id: f.optFor.id, d: Number(dd), p: Number(p) } : { kind: "swap", a: f.optFor.id, b: sl.swap }); return true;
+    if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); return true;
   }
   if (d.fxteacher !== undefined && f.sel && fxOpts(f)) {
     const o = fxOpts(f), t = (o.teachers || [])[Number(d.fxteacher)];
@@ -2475,9 +2474,7 @@ function fxClick(b) {   // true when the click was the Fix card's or a warning's
   }
   if (d.fxdelete !== undefined && f.sel && fxOpts(f)) {
     const o = fxOpts(f); if (!fxStateOK(o.delete)) return true;
-    const r = Grid.lesson(f.grid, f.optFor.id, f.optFor.group), fix = { kind: "delete", id: f.optFor.id };
-    if (r && r.block) fix.group = f.optFor.group;
-    fxFix(fix); return true;
+    fxFix(Grid.deleteFor(f.grid, f.optFor)); return true;
   }
   if (d.fxadd !== undefined) {
     const key = d.fxadd; f.sel = null; f.adding = f.adding === key ? null : key; f.options = null; f.optFail = false; fxDraw();

@@ -44,6 +44,21 @@ var Draft = (function () {
 
   function sideText(w) { var s = w && w.sides; return s ? "Timetable: " + s.timetable + " · Step 5: " + s.step5 : ""; }
 
-  return { KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
+  /* the parts of a warning's where that are there, in words: teacher, class, day, "period N" */
+  function whereText(w) {
+    var h = (w && w.where) || {};
+    return [h.teacher, h.cls, h.day, h.period === null || h.period === undefined || h.period === "" ? "" : "period " + h.period].filter(function (x) { return x !== null && x !== undefined && x !== ""; }).map(String);
+  }
+  /* the week the warning's Fix the timetable button opens -> {view, name, day, sel} or null when there is none: the teacher's
+     week, else the class's (on the warning's day, its lesson selected); day "" opens the first week */
+  function fixTarget(w) {
+    var h = w && w.where;
+    if (!h) return null;
+    if (h.teacher) return { view: "teacher", name: h.teacher, day: "", sel: null };
+    if (!h.cls) return null;
+    return { view: "class", name: h.cls, day: h.day || "", sel: h.id !== undefined && h.id !== null ? { id: Number(h.id), group: h.row } : null };
+  }
+
+  return { whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
 })();
 if (typeof module !== "undefined") module.exports = Draft;

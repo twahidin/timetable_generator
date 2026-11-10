@@ -73,8 +73,10 @@ to print, one page per class. Students not on the list use the general student c
    button for when you have looked. **Fix the timetable** (on a warning, or the Fix card below the list) shows one
    class's or one teacher's week as a table; pick a class or a teacher, and a week when the school has two, then select a
    lesson. Every slot is coloured by what a fix there would do (green is open, amber is open but less wanted, red is
-   not allowed, grey is not lesson time); click a green or amber slot to move the lesson, or a lesson there to swap
-   with it (a swap that also moves another class's lesson asks first). The side panel also changes the teacher or
+   not allowed, grey is a slot the lesson cannot go to: not lesson time, outside the day, or another lesson is there
+   that it cannot swap with); click a green or amber slot to move the lesson, or a lesson there to swap with it (in a
+   teacher's week an open slot can be a swap with the class's lesson there; a swap that also moves another class's
+   lesson asks first). The side panel also changes the teacher or
    the room, deletes an extra lesson, and, with nothing selected, lists a class's missing periods with **Add a lesson**.
    Every fix is kept with its sentence under **Fixes**, and **Undo the last fix** takes the last one back. A fix that
    would cause a clash, change a subject's periods from the plan or newly break a Must rule is refused (red), so a clean

@@ -150,4 +150,29 @@ t("wanted: an answer counts only for the same view, name, lesson and add key", (
   assert.ok(!Grid.wanted(a, null));
 });
 
+t("fixFor: a slot with a swap posts the swap, any other slot a move", () => {
+  const sel = { id: 5, group: "Entire Class" };
+  assert.deepStrictEqual(Grid.fixFor(sel, { d: 2, p: 3, state: "ok", why: "", swap: 9, also: [] }), { kind: "swap", a: 5, b: 9 });
+  assert.deepStrictEqual(Grid.fixFor(sel, { d: 2, p: 3, state: "ok", why: "", swap: 0, also: [] }), { kind: "swap", a: 5, b: 0 });   // an id of 0 is still a swap
+  assert.deepStrictEqual(Grid.fixFor(sel, { d: 2, p: 3, state: "ok", why: "", swap: null, also: [] }), { kind: "move", id: 5, d: 2, p: 3 });
+  assert.deepStrictEqual(Grid.fixFor(sel, { d: 0, p: 0, state: "prefer" }), { kind: "move", id: 5, d: 0, p: 0 });
+});
+
+t("addFor: the key, the slot and the length", () => {
+  assert.deepStrictEqual(Grid.addFor("C:1A:Art", { d: 1, p: 4, state: "ok" }, 2), { kind: "add", key: "C:1A:Art", d: 1, p: 4, n: 2 });
+  assert.deepStrictEqual(Grid.addFor("G:1ML1", { d: 0, p: 0 }, "1"), { kind: "add", key: "G:1ML1", d: 0, p: 0, n: 1 });
+});
+
+t("deleteFor: the group is posted when the lesson has more than one row in the grid, or is a block", () => {
+  const one = payload(["Mon"], [lz(3, "Entire Class", 0, 1, 1), lz(4, "1MAA1", 0, 2, 1), lz(4, "1MAA2", 0, 2, 1), lz(6, "1ART1", 0, 3, 1, { block: "Art band" })]);
+  assert.deepStrictEqual(Grid.deleteFor(one, { id: 3, group: "Entire Class" }), { kind: "delete", id: 3 });
+  assert.deepStrictEqual(Grid.deleteFor(one, { id: 4, group: "1MAA2" }), { kind: "delete", id: 4, group: "1MAA2" });   // two rows and no block
+  assert.deepStrictEqual(Grid.deleteFor(one, { id: 6, group: "1ART1" }), { kind: "delete", id: 6, group: "1ART1" });
+});
+
+t("slotText: a swap slot names the swap", () => {
+  assert.strictEqual(Grid.slotText({ d: 1, p: 2, swap: 7, why: "" }, ["Mon", "Tue"]), "Swap with the lesson on Tue period 2");
+  assert.strictEqual(Grid.slotText({ d: 0, p: 2, swap: null, why: "Not ideal." }, ["Mon", "Tue"]), "Move to Mon period 2 — Not ideal.");
+});
+
 console.log(`${n} cases passed`);
