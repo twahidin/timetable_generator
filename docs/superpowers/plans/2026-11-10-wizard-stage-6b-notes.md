@@ -65,6 +65,8 @@ Tests and tidiness
 - A real mouse drag of the give-way rows (the drags were synthetic drag events, as in stage 5).
 - The browser's own Download workbook click (the workbook came from the same endpoint with curl).
 - The unsaved, unknown and newer configuration states from a real upload (only their drawing was checked; same and older were reached with a real upload).
-- A real head-of-department sign-in (the role was set from the console): step 6 read-only, no controls enabled.
-- The user's own school: only the sample schools were used.
+- The "Even after every second choice" state of Will it fit? was only checked by painting a stubbed result, never produced for real.
+- The empty and not-on-list Choices used states were only checked by calling `choicesUsedHTML` directly in the page.
+- A real head-of-department sign-in (the role was set, not signed in as one): step 6 read-only, no controls enabled.
+- The user's own school: the secondary sample only.
 - Compare mode and the `--export` folders of `ttgen solve` were not run by hand (covered by tests only).

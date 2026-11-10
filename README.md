@@ -70,8 +70,8 @@ to print, one page per class. Students not on the list use the general student c
    was made from ("Made from this configuration (v15)", or that the setup has moved on, the workbook was downloaded with
    unsaved changes, the timetable is from a newer copy or it does not say), and lists the **Choices used** (first or
    second choice for each item on the give-way list). Setups with second choices are checked with the fallbacks
-   applied, and the check reports a Choices used list that gives way on an item that is not on the list or out of
-   order, or names an item that is not there. **Publish this timetable** then makes it what teachers
+   applied, and the check reports a Choices used list that names an item that is not on the list, or gives way out
+   of order. **Publish this timetable** then makes it what teachers
    and students see, with every download and the personal student codes (about a minute); the rule report and the choices used stay with
    the published timetable and are shown under **Published now**, with its configuration. **Make printouts** gives the same files without
    publishing. A later project checks the report against the timetable; today the app keeps and shows it.
