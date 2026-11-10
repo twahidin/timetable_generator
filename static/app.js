@@ -2327,7 +2327,7 @@ function fixesHTML(j) {   // what was fixed in the app, newest last, with undo, 
 function fixHTML() {
   const f = S.fix;
   if (!f || !f.grid) return `<div class="fxcard"><h3>Fix the timetable</h3><p class="muted small">Move or swap a lesson, change its teacher or room, delete an extra lesson or add a missing one, here in the app. Each fix is checked against the timetable and the setup before it is made, and can be undone.</p><div class="row"><button id="fxOpen">Open the Fix card</button></div></div>`;
-  const g = f.grid, weeks = Grid.weeks(g.days), wk = weeks.find(w => w.name === f.week) || weeks[0], rows = Grid.table(g, wk), o = f.options, slots = o ? o.slots || [] : [];
+  const g = f.grid, weeks = Grid.weeks(g.days), wk = weeks.find(w => w.name === f.week) || weeks[0], rows = Grid.table(g, wk), o = fxOpts(f), slots = o ? o.slots || [] : [];
   const shorts = fxShorts(), lessonMode = !!(f.sel || f.adding);
   const picker = (view, names, label) => `<label class="f">${label} <select data-fxview="${view}"><option value="">Choose…</option>${names.map(n => `<option value="${esc(n)}"${f.view === view && f.name === n ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></label>`;
   const cell = c => {
@@ -2335,7 +2335,7 @@ function fixHTML() {
     if (c.lessons.length) {
       const btns = c.lessons.map(r => {
         const own = f.sel && f.sel.id === r.id && f.sel.group === r.group, sw = f.sel && !own ? slots.find(s => s.swap === r.id) : null;
-        return `<button class="fxl ${sw ? esc(Grid.stateClass(sw.state)) : ""}${own ? " sel" : ""}" data-fxsel="${esc(r.id)}|${esc(r.group)}" title="${esc(sw && sw.why ? `${r.what} — ${sw.why}` : r.what)}">${esc(Grid.label(r, shorts))}</button>`;
+        return `<button class="fxl ${sw ? esc(Grid.stateClass(sw.state)) : ""}${own ? " sel" : ""}" data-fxsel="${esc(r.id)}|${esc(r.group)}" title="${esc(sw && sw.why ? `${Grid.fullLabel(r)} — ${sw.why}` : Grid.fullLabel(r))}">${esc(Grid.label(r, shorts))}</button>`;
       }).join("");
       return `<td class="fxc has" rowspan="${c.rowspan}">${btns}</td>`;
     }
@@ -2347,13 +2347,13 @@ function fixHTML() {
   let side;
   if (f.sel) {
     const r = Grid.lesson(g, f.sel.id, f.sel.group);
-    side = `<h4>Selected lesson</h4><p class="small">${esc(r ? r.what || Grid.label(r, shorts) : "")}</p>` + (!o ? `<p class="muted small">Loading the options…</p>`
+    side = `<h4>Selected lesson</h4><p class="small">${esc(r ? r.what || Grid.label(r, shorts) : "")}</p>` + (!o ? (f.optFail ? `<p class="issue">Could not load the options. Select the lesson again.</p>` : `<p class="muted small">Loading the options…</p>`)
       : `<h4>Possible moves</h4>${Grid.sorted(slots).map(s => opt(`data-fxgo="${Number(s.d)}|${Number(s.p)}"`, s.state, Grid.slotText(s, g.days), "")).join("") || `<p class="muted small">No slot is open to this lesson.</p>`}
         <h4>Change the teacher</h4>${(o.teachers || []).map((t, i) => opt(`data-fxteacher="${i}"`, t.state, (t.teachers || []).join(", ") || "No teacher", t.why)).join("") || `<p class="muted small">No other teacher.</p>`}
         <h4>Change the room</h4>${(o.rooms || []).map((t, i) => opt(`data-fxroom="${i}"`, t.state, t.room || "No room", t.why)).join("") || `<p class="muted small">No other room.</p>`}
         ${o.delete && o.delete.state !== "no" ? `<h4>Delete</h4>${opt(`data-fxdelete="1"`, o.delete.state, "Delete this lesson", o.delete.why)}` : ""}`);
   } else {
-    side = `<h4>Missing periods</h4>` + (g.short && g.short.length ? `<ul class="fxshort">${g.short.map(s => `<li><span class="small">${esc(s.name)}: ${esc(s.have)} of ${esc(s.want)} periods</span> <button data-fxadd="${esc(s.key)}">${f.adding === s.key ? "Cancel" : "Add a lesson"}</button></li>`).join("")}</ul>${f.adding ? (o ? `<p class="small">Click a green or amber slot to add a lesson there.</p>` : `<p class="muted small">Loading the slots…</p>`) : ""}`
+    side = `<h4>Missing periods</h4>` + (g.short && g.short.length ? `<ul class="fxshort">${g.short.map(s => `<li><span class="small">${esc(s.name)}: ${esc(s.have)} of ${esc(s.want)} periods</span> <button data-fxadd="${esc(s.key)}">${f.adding === s.key ? "Cancel" : "Add a lesson"}</button></li>`).join("")}</ul>${f.adding ? (o ? `<p class="small">Click a green or amber slot to add a lesson there.</p>` : f.optFail ? `<p class="issue">Could not load the slots. Click Add a lesson again.</p>` : `<p class="muted small">Loading the slots…</p>`) : ""}`
       : `<p class="muted small">${f.view === "class" ? "Nothing is missing for this class." : "Missing periods are shown for a class."}</p>`)
       + `<p class="muted small">Click a lesson to see where it can go.</p>`;
   }
@@ -2376,31 +2376,40 @@ async function fxGet(url) {
   } catch (e) { toast("Could not reach the server: " + e.message); return null; }
 }
 const fxQ = o => Object.keys(o).map(k => `${k}=${encodeURIComponent(o[k])}`).join("&");
-async function fxOptions(f) {   // the options of the selected lesson, or the slots of the lesson being added
-  f.options = null;
-  if (f.sel) f.options = await fxGet("/api/draft/options?" + fxQ({ id: f.sel.id, group: f.sel.group }));
-  else if (f.adding) { const s = ((f.grid && f.grid.short) || []).find(x => x.key === f.adding); if (s) f.options = await fxGet("/api/draft/options?" + fxQ({ add: f.adding, n: s.n })); }
+const fxWant = f => ({ view: f.view, name: f.name, id: f.sel ? f.sel.id : undefined, group: f.sel ? f.sel.group : undefined, key: !f.sel && f.adding ? f.adding : undefined });
+const fxOpts = f => f.options && f.optFor && Grid.wanted(f.optFor, fxWant(f)) ? f.options : null;   // the options only while they are for what is selected now
+async function fxOptions(f) {   // the options of the selected lesson, or the slots of the lesson being added; an answer for something no longer selected is dropped
+  f.options = null; f.optFail = false;
+  const asked = fxWant(f); let url = null;
+  if (asked.id !== undefined) url = "/api/draft/options?" + fxQ({ id: asked.id, group: asked.group });
+  else if (asked.key !== undefined) { const s = ((f.grid && f.grid.short) || []).find(x => x.key === asked.key); if (s) url = "/api/draft/options?" + fxQ({ add: asked.key, n: s.n }); }
+  if (!url) return;
+  const j = await fxGet(url);
+  if (!Grid.wanted(asked, fxWant(f))) return;
+  f.options = j; f.optFor = asked; f.optFail = !j;
 }
-async function fxRefresh(f) {   // the grid again, then the options when a lesson is still selected; false when the grid could not be fetched
+async function fxRefresh(f) {   // the grid again, then the options when a lesson is still selected; false when the grid could not be fetched or is no longer wanted
+  const live = () => S.fix === f || f.opening;
   const g = await fxGet("/api/draft/grid?" + fxQ({ view: f.view, name: f.name }));
-  if (!g) return false;
+  if (!g || !live() || g.view !== f.view || g.name !== f.name) return false;
   f.grid = g;
   const weeks = Grid.weeks(g.days); if (!weeks.some(w => w.name === f.week)) f.week = weeks[0].name;
   if (f.sel && !Grid.lesson(g, f.sel.id, f.sel.group)) f.sel = null;
   if (f.adding && !(g.short || []).some(s => s.key === f.adding)) f.adding = null;
   await fxOptions(f);
-  return true;
+  return live();
 }
 async function fxOpen(view, name, day, sel) {   // day: a day's name, to open on the week that holds it
-  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, adding: null }, n = ++FX.n;
-  if (!(await fxRefresh(f)) || n !== FX.n) return;
+  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true }, n = ++FX.n;
+  const ok = await fxRefresh(f); f.opening = false;
+  if (!ok || n !== FX.n) return;
   if (day) { const i = f.grid.days.indexOf(day), w = Grid.weeks(f.grid.days).find(x => x.days.some(d => d.i === i)); if (w) f.week = w.name; }
   S.fix = f; fxDraw();
   const box = $("#fxBox"); if (box && day !== null) box.scrollIntoView({ block: "start" });
 }
 async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again
   const f = S.fix; S.draft = j; poll();
-  if (f) { await fxRefresh(f); if (S.fix !== f) return; }
+  if (f) { const ok = await fxRefresh(f); if (S.fix !== f) return; if (!ok) toast("The fix was made, but the grid could not be loaded again. Pick the class again."); }
   fxDraw();
 }
 async function fxFix(fix) {   // one fix; a refused one says why and the grid is fetched again
@@ -2410,14 +2419,14 @@ async function fxFix(fix) {   // one fix; a refused one says why and the grid is
     const j = await post("/api/draft/fix", fix);
     if (j) { if (fix.kind === "add") f.adding = null; await fxAfter(j); }
     else { await fxRefresh(f); if (S.fix === f) fxDraw(); }
-  } finally { FX.busy = false; }
+  } catch (e) { toast("Could not reach the server: " + e.message); } finally { FX.busy = false; }
 }
 async function fxUndo() {
   if (FX.busy) return; FX.busy = true;
-  try { const j = await post("/api/draft/undo"); if (j) await fxAfter(j); } finally { FX.busy = false; }
+  try { const j = await post("/api/draft/undo"); if (j) await fxAfter(j); } catch (e) { toast("Could not reach the server: " + e.message); } finally { FX.busy = false; }
 }
 async function fxSelect(sel) {
-  const f = S.fix; f.sel = sel; f.adding = null; f.options = null;
+  const f = S.fix; f.sel = sel; f.adding = null; f.options = null; f.optFail = false;
   if (sel) { fxDraw(); await fxOptions(f); }
   if (S.fix === f) fxDraw();
 }
@@ -2436,42 +2445,42 @@ function fxClick(b) {   // true when the click was the Fix card's or a warning's
   if (d.fxsel !== undefined) {
     const [id, group] = split(d.fxsel), row = { id: Number(id), group };
     if (f.sel && Grid.same(f.sel, row)) { fxSelect(null); return true; }
-    const sl = f.sel && f.options ? (f.options.slots || []).find(s => s.swap === row.id) : null;
+    const o = fxOpts(f), sl = f.sel && o ? (o.slots || []).find(s => s.swap === row.id) : null;
     if (sl && (sl.state === "ok" || sl.state === "prefer")) {
       if ((sl.also || []).length && !confirm(sl.also.join("\n") + "\n\nSwap anyway?")) return true;
-      fxFix({ kind: "swap", a: f.sel.id, b: row.id }); return true;
+      fxFix({ kind: "swap", a: f.optFor.id, b: row.id }); return true;
     }
     fxSelect(row); return true;
   }
-  if (d.fxcell !== undefined && f.options) {
-    const [dd, p] = split(d.fxcell), sl = Grid.slotAt(f.options.slots, Number(dd), Number(p));
+  if (d.fxcell !== undefined && fxOpts(f)) {
+    const o = fxOpts(f), [dd, p] = split(d.fxcell), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
     if (!fxStateOK(sl)) return true;
-    if (f.sel) fxFix({ kind: "move", id: f.sel.id, d: Number(dd), p: Number(p) });
-    else if (f.adding) { const s = (f.grid.short || []).find(x => x.key === f.adding); if (s) fxFix({ kind: "add", key: f.adding, d: Number(dd), p: Number(p), n: Number(s.n) }); }
+    if (f.optFor.id !== undefined) fxFix({ kind: "move", id: f.optFor.id, d: Number(dd), p: Number(p) });
+    else if (f.optFor.key !== undefined) { const s = (f.grid.short || []).find(x => x.key === f.optFor.key); if (s) fxFix({ kind: "add", key: f.optFor.key, d: Number(dd), p: Number(p), n: Number(s.n) }); }
     return true;
   }
-  if (d.fxgo !== undefined && f.sel && f.options) {
-    const [dd, p] = split(d.fxgo), sl = Grid.slotAt(f.options.slots, Number(dd), Number(p));
+  if (d.fxgo !== undefined && f.sel && fxOpts(f)) {
+    const o = fxOpts(f), [dd, p] = split(d.fxgo), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
     if (!fxStateOK(sl)) return true;
     if ((sl.also || []).length && !confirm(sl.also.join("\n") + "\n\nGo ahead?")) return true;
-    fxFix(sl.swap === null || sl.swap === undefined ? { kind: "move", id: f.sel.id, d: Number(dd), p: Number(p) } : { kind: "swap", a: f.sel.id, b: sl.swap }); return true;
+    fxFix(sl.swap === null || sl.swap === undefined ? { kind: "move", id: f.optFor.id, d: Number(dd), p: Number(p) } : { kind: "swap", a: f.optFor.id, b: sl.swap }); return true;
   }
-  if (d.fxteacher !== undefined && f.sel && f.options) {
-    const t = (f.options.teachers || [])[Number(d.fxteacher)];
-    if (t && fxStateOK(t)) fxFix({ kind: "teacher", key: f.options.key, teachers: t.teachers }); return true;
+  if (d.fxteacher !== undefined && f.sel && fxOpts(f)) {
+    const o = fxOpts(f), t = (o.teachers || [])[Number(d.fxteacher)];
+    if (t && fxStateOK(t)) fxFix({ kind: "teacher", key: o.key, teachers: t.teachers }); return true;
   }
-  if (d.fxroom !== undefined && f.sel && f.options) {
-    const t = (f.options.rooms || [])[Number(d.fxroom)];
-    if (t && fxStateOK(t)) fxFix({ kind: "room", id: f.sel.id, group: f.sel.group, room: t.room }); return true;
+  if (d.fxroom !== undefined && f.sel && fxOpts(f)) {
+    const o = fxOpts(f), t = (o.rooms || [])[Number(d.fxroom)];
+    if (t && fxStateOK(t)) fxFix({ kind: "room", id: f.optFor.id, group: f.optFor.group, room: t.room }); return true;
   }
-  if (d.fxdelete !== undefined && f.sel && f.options) {
-    if (!fxStateOK(f.options.delete)) return true;
-    const r = Grid.lesson(f.grid, f.sel.id, f.sel.group), fix = { kind: "delete", id: f.sel.id };
-    if (r && r.block) fix.group = f.sel.group;
+  if (d.fxdelete !== undefined && f.sel && fxOpts(f)) {
+    const o = fxOpts(f); if (!fxStateOK(o.delete)) return true;
+    const r = Grid.lesson(f.grid, f.optFor.id, f.optFor.group), fix = { kind: "delete", id: f.optFor.id };
+    if (r && r.block) fix.group = f.optFor.group;
     fxFix(fix); return true;
   }
   if (d.fxadd !== undefined) {
-    const key = d.fxadd; f.sel = null; f.adding = f.adding === key ? null : key; f.options = null; fxDraw();
+    const key = d.fxadd; f.sel = null; f.adding = f.adding === key ? null : key; f.options = null; f.optFail = false; fxDraw();
     fxOptions(f).then(() => { if (S.fix === f) fxDraw(); }); return true;
   }
   return false;

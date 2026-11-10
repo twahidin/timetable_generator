@@ -174,7 +174,8 @@ def grid(view, name):
     keep = lambda e: name in e["classes"]
     return dict(view=view, name=name, days=list(m["days"]), NP=m["NP"], times=m["times"], codes=list(codes),
                 lessons=[dict(id=x["id"], group=x["group"], subject=x["subject"], classes=list(x["classes"]), teachers=list(x["teachers"]), room=x["room"], d=x["d"], p=x["p"], n=x["n"],
-                              block=x["block"], what=fixes.what(x)) for x in rows],
+                              block=x["block"], what=fixes.what(x),
+                              short=(m["subjects"].get(x["subject"]) or {}).get("short") or x["subject"], tshorts=[(m["teacher_ix"].get(t) or {}).get("short") or t for t in x["teachers"]]) for x in rows],
                 classes=[c["name"] for c in m["classes"]], teachers=[t["name"] for t in m["teachers"]],
                 short=[s for s in fixes.short(m, m["checked_setup"]) if cls and keep(verify.planned_rows(m["checked_setup"])[tuple(s["key"].split(":", 2 if s["key"].startswith("C:") else 1))])])
 

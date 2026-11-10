@@ -134,9 +134,20 @@ t("table: missing codes and a lesson with no length", () => {
   assert.deepStrictEqual(rows.slice(0, 3).map(r => r[0].rowspan), [1, 1, 1]);
 });
 
-t("label: subject, group and the teachers' short names; a name with no short stands for itself", () => {
+t("label: short subject, the group unless it is the whole class, teacher shorts; falls back to full words", () => {
+  assert.strictEqual(Grid.label(lz(1, "1MAA1", 0, 0, 1, { short: "Mat", tshorts: ["TAN", "LIM"], teachers: ["Mr Tan", "Ms Lim"] })), "Mat · 1MAA1 · TAN, LIM");
+  assert.strictEqual(Grid.label(lz(1, "Entire Class", 0, 0, 1, { short: "Art", tshorts: ["UT"], teachers: ["Umairah Tan"] })), "Art · UT");
   assert.strictEqual(Grid.label(lz(1, "1A", 0, 0, 1, { teachers: ["Mr Tan", "Ms Lim"] }), { "Mr Tan": "TAN" }), "Maths · 1A · TAN, Ms Lim");
-  assert.strictEqual(Grid.label(lz(1, "1A", 0, 0, 1, { teachers: [] }), null), "Maths · 1A");
+  assert.strictEqual(Grid.fullLabel(lz(1, "1A", 0, 0, 1, { teachers: ["Mr Tan"] })), "Maths · 1A · Mr Tan · R1");
+});
+
+t("wanted: an answer counts only for the same view, name, lesson and add key", () => {
+  const a = { view: "class", name: "1A", id: 5, group: "G" };
+  assert.ok(Grid.wanted(a, { view: "class", name: "1A", id: 5, group: "G" }));
+  assert.ok(!Grid.wanted(a, { view: "class", name: "1A", id: 6, group: "G" }));
+  assert.ok(!Grid.wanted(a, { view: "class", name: "1B", id: 5, group: "G" }));
+  assert.ok(!Grid.wanted(a, { view: "class", name: "1A", key: "C:1A:Art" }));
+  assert.ok(!Grid.wanted(a, null));
 });
 
 console.log(`${n} cases passed`);

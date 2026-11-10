@@ -68,12 +68,21 @@ var Grid = (function () {
     });
   }
 
-  /* one line for a lesson row in a cell: subject, group, then the teachers' short names (short: {name: short}; a name with no short stands for itself) */
+  /* one line for a lesson row in a cell: the subject's short form, the group unless it is the whole class, the teachers' short names
+     (the row's short and tshorts when the server gave them, else the full subject and names) */
   function label(r, short) {
-    var ts = (r.teachers || []).map(function (t) { return (short && short[t]) || t; });
-    return [r.subject, r.group].concat(ts.length ? [ts.join(", ")] : []).filter(Boolean).join(" · ");
+    var ts = (r.tshorts && r.tshorts.length === (r.teachers || []).length ? r.tshorts : (r.teachers || []).map(function (t) { return (short && short[t]) || t; }));
+    var group = r.group && r.group !== "Entire Class" ? r.group : "";
+    return [r.short || r.subject, group].concat(ts.length ? [ts.join(", ")] : []).filter(Boolean).join(" · ");
+  }
+  /* the full words for the button's title */
+  function fullLabel(r) { return [r.subject, r.group, (r.teachers || []).join(", "), r.room].filter(Boolean).join(" · "); }
+  /* is an answer fetched for `asked` still the one wanted now? same view and name (a grid), or the same selected lesson / add key (options) */
+  function wanted(asked, now) {
+    if (!asked || !now) return false;
+    return asked.view === now.view && asked.name === now.name && asked.key === now.key && asked.id === now.id && asked.group === now.group;
   }
 
-  return { label: label, weeks: weeks, table: table, lesson: lesson, same: same, slotAt: slotAt, stateClass: stateClass, slotText: slotText, sorted: sorted };
+  return { label: label, fullLabel: fullLabel, wanted: wanted, weeks: weeks, table: table, lesson: lesson, same: same, slotAt: slotAt, stateClass: stateClass, slotText: slotText, sorted: sorted };
 })();
 if (typeof module !== "undefined") module.exports = Grid;
