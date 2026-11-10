@@ -84,4 +84,29 @@ def ops_use_the_row_ids():
     miss = ws[f"dep:C:{gone['classes'][0]}:{gone['subject']}:missing"]["ops"]
     assert miss == [["del", "lessons", gone["_id"]]]
 
+@t
+def ops_are_left_out_when_a_row_covers_several_classes():
+    import sync
+    sp = primary(); row = next(x for x in sp["lessons"] if not x.get("block")); c1 = row["classes"][0]
+    c2 = next(c["class"] for c in sp["classes"] if c["class"] != c1 and c["level"] == row["level"]); row["classes"] = [c1, c2]
+    sync.ensure_ids(sp); reader.derive(sp)
+    m = model_for(sp, [(0, 0, row["periods"], [c1], row["subject"], "Entire Class", ["Nobody"], "")])
+    ws = {w["key"]: w for w in verify.deployment(m, sp)}
+    a, b = ws[f"dep:C:{c1}:{row['subject']}:teachers"], ws[f"dep:C:{c2}:{row['subject']}:missing"]
+    assert a["ops"] is None and b["ops"] is None
+
+@t
+def clashes_leave_out_the_choice_problems():
+    m = model_for(primary(), [(0, 0, 1, [primary()["classes"][0]["class"]], "English Language", "Entire Class", ["Ms X"], "")])
+    m["checks"]["problems"] = list(m["checks"]["problems"]) + ["A second choice was used out of order."]; m["choice_problems"] = ["A second choice was used out of order."]
+    assert not any("second choice" in w["text"] for w in verify.clashes(m)) and verify.clashes(m)
+
+@t
+def an_extra_group_row_carries_its_code():
+    import sync
+    sp = primary(); sync.ensure_ids(sp); cls = sp["classes"][0]["class"]; subj = sp["subjects"][0]["subject"]; reader.derive(sp)
+    m = model_for(sp, [(0, 0, 1, [cls], subj, "ZZ9", ["Ms X"], "")])
+    ws = {w["key"]: w for w in verify.deployment(m, sp)}
+    op = ws["dep:G:ZZ9:extra"]["ops"][0]; assert op[2]["code_override"] == "ZZ9" and op[2]["subject"] == subj and op[2]["classes"] == [cls]
+
 print(f"{n} checks passed")

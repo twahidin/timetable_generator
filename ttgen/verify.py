@@ -45,7 +45,9 @@ def placed(m):
 
 
 # ----------------------------------------------------------------------------------------------- the comparison
-def _ids(rows): return [x["_id"] for x in rows if x.get("_id")]
+def _ids(rows):
+    """the ids of rows an op may act on; none when a row covers more than one class (the op would reach the others too)"""
+    return [] if any(len(x["classes"]) > 1 for x in rows) else [x["_id"] for x in rows if x.get("_id")]
 
 def deployment(m, spec):
     """one warning per difference between the timetable and step 5 (teachers, periods, venue kind, missing, extra)"""
@@ -76,15 +78,16 @@ def deployment(m, spec):
         if key in plan: continue
         k, x = _kstr(key), g["lessons"][0]
         classes = [key[1]] if key[0] == "C" else list(x["classes"])
-        ops = [["add", "lessons", dict(level=x["level"], subject=x["subject"], classes=classes, teachers=sorted(g["teachers"]), block=x["block"] or None), ""]] if x["subject"] in subjects else None
+        ops = [["add", "lessons", dict(level=x["level"], subject=x["subject"], classes=classes, teachers=sorted(g["teachers"]), block=x["block"] or None,
+                                                  **({} if key[0] == "C" else dict(code_override=key[1]))), ""]] if x["subject"] in subjects else None
         out.append(warning(f"dep:{k}:extra", "deployment", f"{_name(key)} is on the timetable but not on step 5.", group=classes[0] if classes else "School", where=where(key, g), ops=ops))
     return out
 
 def clashes(m):
     """the independent checks' problems as warnings, without the period-count lines (the comparison owns those)"""
-    out = []
+    out, own = [], set(m.get("choice_problems") or ())   # the second-choice sentences are listed as choice warnings
     for text in m["checks"]["problems"]:
-        if text.endswith("planned."): continue
+        if text.endswith("planned.") or text in own: continue
         who = re.match(r"(?:Teacher double-booked|Class clash): (.+?) on ", text)
         out.append(warning("clash:" + text, "clash", text, group=who.group(1) if who else "School"))
     return out
