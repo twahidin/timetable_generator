@@ -68,6 +68,12 @@ var Grid = (function () {
     });
   }
 
-  return { weeks: weeks, table: table, lesson: lesson, same: same, slotAt: slotAt, stateClass: stateClass, slotText: slotText, sorted: sorted };
+  /* one line for a lesson row in a cell: subject, group, then the teachers' short names (short: {name: short}; a name with no short stands for itself) */
+  function label(r, short) {
+    var ts = (r.teachers || []).map(function (t) { return (short && short[t]) || t; });
+    return [r.subject, r.group].concat(ts.length ? [ts.join(", ")] : []).filter(Boolean).join(" · ");
+  }
+
+  return { label: label, weeks: weeks, table: table, lesson: lesson, same: same, slotAt: slotAt, stateClass: stateClass, slotText: slotText, sorted: sorted };
 })();
 if (typeof module !== "undefined") module.exports = Grid;

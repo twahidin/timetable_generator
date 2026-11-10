@@ -134,4 +134,9 @@ t("table: missing codes and a lesson with no length", () => {
   assert.deepStrictEqual(rows.slice(0, 3).map(r => r[0].rowspan), [1, 1, 1]);
 });
 
+t("label: subject, group and the teachers' short names; a name with no short stands for itself", () => {
+  assert.strictEqual(Grid.label(lz(1, "1A", 0, 0, 1, { teachers: ["Mr Tan", "Ms Lim"] }), { "Mr Tan": "TAN" }), "Maths · 1A · TAN, Ms Lim");
+  assert.strictEqual(Grid.label(lz(1, "1A", 0, 0, 1, { teachers: [] }), null), "Maths · 1A");
+});
+
 console.log(`${n} cases passed`);

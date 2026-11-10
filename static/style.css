@@ -235,3 +235,28 @@ ul.warnlist{list-style:none;margin:0;padding:0}
 .warn{padding:8px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.45}.warn:first-child{border-top:0}
 .warn.prefer .wt{color:var(--muted)}.warnbtns{gap:6px;margin-top:4px}.warnbtns button{padding:3px 10px;font-size:12px}
 .chip.decision{background:var(--chip);color:var(--ink)}.chip.decision.step5{background:var(--ok-bg);color:var(--ok)}.chip.decision.left{background:#fff4d6;color:#7a5a00}
+
+/* step 8: the Fix card, a week as a table with the slots coloured by what a fix there would do */
+.fxcard{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:#fff}
+.fxcard h3{margin:0 0 6px}.fxcard h4{margin:12px 0 4px;font-size:13px;color:var(--navy)}.fxcard h4:first-child{margin-top:0}
+.fxpick{gap:12px;margin-bottom:4px}.fxweeks{display:flex;gap:6px}.fxweeks button{padding:3px 10px;font-size:12px}
+.fxlayout{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.fxwrap{flex:1 1 480px;min-width:0;max-width:100%;overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:8px}
+.fxside{flex:0 1 250px;min-width:220px;max-height:72vh;overflow:auto}
+@media (max-width:900px){.fxside{flex:1 1 100%;max-height:none}}
+table.fxgrid{border-collapse:collapse;table-layout:fixed;width:100%;font-size:11px}
+table.fxgrid th{background:var(--chip);font-weight:600;padding:2px 4px;border:1px solid var(--line);position:sticky;top:0;z-index:1}
+table.fxgrid th.fxp{position:sticky;left:0;top:auto;width:64px;text-align:right;z-index:1;white-space:nowrap}
+table.fxgrid th.fxp small{display:block;font-weight:400;color:var(--muted);font-size:10px}
+table.fxgrid td.fxc{border:1px solid var(--line);padding:1px;vertical-align:top;height:20px;background:#fff;overflow:hidden}
+table.fxgrid td.brk{background:#eceef2}
+table.fxgrid td.ok{background:#d6f1e0;cursor:pointer}table.fxgrid td.prefer{background:#fff0c2;cursor:pointer}
+table.fxgrid td.no{background:#fbdcdc;cursor:not-allowed}table.fxgrid td.na{background:#eceef2}
+button.fxl{display:block;width:100%;margin:0 0 1px;padding:1px 4px;font-size:11px;line-height:1.3;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--line);border-radius:3px;background:var(--chip);color:var(--ink)}
+button.fxl:last-child{margin-bottom:0}
+button.fxl.ok{background:#d6f1e0}button.fxl.prefer{background:#fff0c2}button.fxl.no{background:#fbdcdc}button.fxl.na{background:#eceef2}
+button.fxl.sel{outline:2px solid var(--accent);outline-offset:-1px;font-weight:600}
+button.fxopt{display:flex;gap:8px;align-items:flex-start;width:100%;margin:0 0 3px;padding:4px 8px;font-size:12px;text-align:left;background:#fff}
+i.dot{display:inline-block;flex:none;width:9px;height:9px;margin-top:4px;border-radius:50%;background:#98a2b3}
+i.dot.ok{background:#12b76a}i.dot.prefer{background:#f5a524}i.dot.no{background:#d92d20}i.dot.na{background:#98a2b3}
+ol.fxlist{margin:4px 0 8px;padding-left:22px;font-size:13px}ul.fxshort{list-style:none;margin:0;padding:0}ul.fxshort li{margin:0 0 6px}

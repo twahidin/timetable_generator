@@ -73,6 +73,11 @@ def test_setup_round_trip():
     assert c.put("/api/setup", json=spec).status_code == 200
     assert c.get("/api/setup").get_json()["spec"]["school"]["name"] == spec["school"]["name"]
 
+def test_the_days_keep_their_order_through_the_api():   # the grid lists days in the setup's order, not alphabetically
+    spec = c.get("/api/sample/secondary").get_json(); ds = c.get("/api/setup").get_json()["spec"]["day_structure"]
+    days = lambda d: list(next(iter(d.values())).keys())
+    assert days(ds) == days(spec["day_structure"]) and days(ds)[:2] in (["Mon", "Tue"], ["Odd Mon", "Odd Tue"]), days(ds)
+
 def _check(spec): return c.post("/api/check", json=spec)
 
 def test_check_passes_the_sample():
