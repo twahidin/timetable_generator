@@ -78,4 +78,42 @@ def check_lists_the_choices():
         with contextlib.redirect_stdout(out): main.main(["check", p])
         assert " * Second choice 1: After-school slot allowed when a class cannot fit — No → Yes" in out.getvalue(), out.getvalue()
 
+@t
+def give_way_stops_at_the_first_fit():
+    sp = with_choices(); calls = []
+    def run(s): calls.append(s["school"]["after_school"]); return dict(lessons=[1] if len(calls) >= 3 else [], status="x")
+    out = choices.give_way(sp, run); assert [a["k"] for a in out] == [0, 1, 2] and out[-1]["res"]["lessons"] and calls[1] is True
+    calls.clear(); out = choices.give_way(sp, lambda s: dict(lessons=[1]), "compare"); assert [a["k"] for a in out] == [0, 1, 2, 3, 4]
+
+@t
+def choices_used_round_trips_and_is_checked():
+    sp = with_choices(); rows = choices.used_rows(sp, 2)
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "t.xlsx"); openpyxl.Workbook().save(p); choices.used_sheet(p, rows)
+        back = choices.used_from_rows(openpyxl.load_workbook(p)["Choices used"].iter_rows(values_only=True))
+        assert [u["used"] for u in back] == ["Second choice", "Second choice", "First choice", "First choice"]
+    assert choices.check_used(sp, back) == (2, [])
+    bad = [dict(no=1, used="First choice"), dict(no=3, used="Second choice"), dict(no=9, used="Second choice")]
+    k, probs = choices.check_used(sp, bad); assert k == 0 and len(probs) == 2 and "in order" in probs[0] and "not on the list" in probs[1], probs
+    assert choices.used_from_rows(iter([("Choices used",), ("#", "Item", "Used", "How"), ("2", "x", "given way", "")]))[0]["used"] == "Second choice"
+
+@t
+def a_timetable_with_a_floating_recess_passes_when_the_choice_was_used():
+    from ttgen import export, database
+    sp = with_choices(); sp["choices"] = [sp["choices"][0]]   # only the Sec 2 recess
+    with tempfile.TemporaryDirectory() as d:
+        setup = os.path.join(d, "setup.xlsx"); template.write_template(sp, setup)
+        ds = sp["day_structure"]["Sec 2"]; day = next(iter(ds)); row = ds[day]; p0 = row.index("R")   # a lesson placed in the fixed recess
+        cls = next(c["class"] for c in sp["classes"] if c["level"] == "Sec 2"); x = next(x for x in sp["lessons"] if cls in x["classes"] and not x.get("block"))
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"
+        ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
+        ws.append([1, day, p0, p0, 1, "", "", "Sec 2", "", cls, x["subject"], "Entire Class", ", ".join(x["teachers"]), "", "", ""])
+        tt = os.path.join(d, "t.xlsx"); wb.save(tt)
+        m = export.model_from_files(setup, tt); assert any("recess" in p or "break" in p for p in m["checks"]["problems"]), m["checks"]["problems"]
+        choices.used_sheet(tt, choices.used_rows(sp, 1))
+        m = export.model_from_files(setup, tt); assert not any("break" in p for p in m["checks"]["problems"]) and m["choices_used"][0]["used"] == "Second choice" and m["choice_problems"] == []
+        db = os.path.join(d, "t.sqlite"); database.write_db(m, db); assert database.read_db(db)[7][0]["used"] == "Second choice"
+        assert "R" in database.read_db(db)[5]["day_structure"]["Sec 2"][day]   # the database keeps the downloaded setup, not the fallback copy
+        m2 = export.model_from_files(None, db); assert m2["choices_used"][0]["item"] == "Recess for Sec 2"
+
 print(f"{n} checks passed")

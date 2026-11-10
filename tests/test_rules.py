@@ -77,7 +77,7 @@ def the_database_carries_the_rule_report():
         con.execute("INSERT INTO lessons VALUES (1, 'Odd Mon', 3, 2, 'Art', '1A')")
         con.execute("CREATE TABLE rule_report (no INTEGER, strength TEXT, applies TEXT, rule TEXT, result TEXT, how TEXT)")
         con.execute("INSERT INTO rule_report VALUES (1, 'Must', 'Sec 1', 'No PE in the first period', 'Met', 'Never at 0.')"); con.commit(); con.close()
-        out = database.read_db(p); assert len(out) == 7 and out[6] == [dict(no=1, strength="Must", applies="Sec 1", rule="No PE in the first period", result="Met", how="Never at 0.")], out[6]
+        out = database.read_db(p); assert len(out) == 8 and out[6] == [dict(no=1, strength="Must", applies="Sec 1", rule="No PE in the first period", result="Met", how="Never at 0.")], out[6]
         con = sqlite3.connect(p); con.execute("DROP TABLE rule_report"); con.commit(); con.close()
         assert database.read_db(p)[6] == []
 

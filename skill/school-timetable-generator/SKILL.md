@@ -83,7 +83,7 @@ subject-based banding) schools, and for any school that fills the same template.
 | `<School> <Timetable> - timetable finder.html` | one offline page: search box, browse by class/teacher/room/student, **Lessons** tab with filters and CSV download, **Who's free** (teachers, rooms and classes free at a chosen time, handy for relief), **Build a timetable** (a student picks their class and groups), **Checks**, print, light/dark | everyone: share by email or the school drive |
 | `PDF/Classes - all.pdf`, `Teachers - all.pdf`, `Rooms - all.pdf`, `Students - all.pdf` | one landscape A4 page each, bookmarked by level, department, room kind or class | printing |
 | `<School> <Timetable> - individual PDFs.zip` | the same pages as single files: `Classes/1A.pdf`, `Teachers/<name>.pdf`, `Rooms/<room>.pdf`, `Students/<class>/<id> <name>.pdf` | sending each person their own |
-| `<School> <Timetable> - timetable data.sqlite` | the timetable as a SQLite database: tables `lessons` (one row per group per lesson: day, week, start/end period and clock time, level, band, subject, group code, room, classes, teachers), `lesson_classes`, `lesson_teachers`, `classes`, `teachers`, `rooms`, `subjects`, `days`, `periods`, `day_structure`, `students` and `student_groups` (when the setup has a student list), `recess`, `rule_report` (the agent's answer per typed rule), `meta` (school, solver status, notes and the whole setup as JSON); views `class_timetable`, `teacher_timetable`, `room_timetable` | importing into another system (a school MIS, a booking or relief tool, Power BI, Excel's Power Query); rebuilding every output later from one file |
+| `<School> <Timetable> - timetable data.sqlite` | the timetable as a SQLite database: tables `lessons` (one row per group per lesson: day, week, start/end period and clock time, level, band, subject, group code, room, classes, teachers), `lesson_classes`, `lesson_teachers`, `classes`, `teachers`, `rooms`, `subjects`, `days`, `periods`, `day_structure`, `students` and `student_groups` (when the setup has a student list), `recess`, `rule_report` (the agent's answer per typed rule), `choices_used` (which second choices the agent gave way on: `no, item, used, how`), `meta` (school, solver status, notes and the whole setup as JSON); views `class_timetable`, `teacher_timetable`, `room_timetable` | importing into another system (a school MIS, a booking or relief tool, Power BI, Excel's Power Query); rebuilding every output later from one file |
 
 Student timetables need the `Students` sheet (each student's class and group codes). Without it the Students
 outputs are skipped and the HTML page's **Build a timetable** lets a student pick their groups instead; say so.
@@ -183,6 +183,25 @@ lists each one as "For the agent to honour: T1 · Must · Sec 1 · No PE in the 
      its `rule_report` table, and that is the file to hand back (with `TIMETABLE.xlsx` beside it).
   A database written before the sheet was added has no report, and the committee app then says "No rule report came back".
 
+### First and second choices (Choices sheet)
+
+The setup workbook's `Choices` sheet is a list, top to bottom, of things the committee would rather keep as they are but
+will give way on if no timetable fits: a setting (a second value), a rule (make it Prefer, give a different rule
+Instead, or Drop it) or a level's recess (let it float inside a window). `python -m ttgen check` lists them as "Second choice 1: ...".
+The mode on the sheet decides what you make: `Fall back only when needed` is one timetable; `Make one
+timetable for each` is one per step.
+
+- `python -m ttgen solve` does this by itself: first choices, then one item at a time from the top of the list, stopping as soon
+  as one fits (`--time` is per attempt). It prints " * Gave way on choice 2: ..." for each item it used and adds a `Choices used`
+  sheet to the workbook. With `Make one timetable for each` it writes one workbook per step (`TIMETABLE.xlsx` for the first choices,
+  `TIMETABLE - after choice 1.xlsx`, ... ) and, with `--export`, one folder each (`first choices`, `after choice 1`, ...).
+- An agent with its own solver does the same: solve with the first choices; if nothing fits, give way on item 1, then items 1 and 2,
+  and so on, in the order of the list, and stop at the first timetable that fits. **Never give way on anything that is not on the list.**
+- Hand back the **Choices used** sheet beside the Rule report, before `ttgen export`: columns `No., Item, Used, How`, one row per
+  choice on the list, numbered as `check` numbers them, Used = `First choice` or `Second choice`, How = one sentence (what was used).
+  `ttgen export` copies it into the database as `choices_used`, and checks the timetable against the setup with those second
+  choices applied (a floating recess is then not read as a lesson in a break). The database keeps the setup as downloaded.
+
 ## Building it without the scripts
 
 Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on cached formula values.
@@ -217,7 +236,7 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
    "Same time across classes": equal starts for the matching whole-class lessons. "Not on the same day as":
    different days. "Once a day per group": AllDifferent(days) when lessons <= days (Must) or costed (Prefer);
    otherwise at most ceil(lessons / days) per day. "At most N at once" (subject): AddCumulative.
-   Rules "In words" are not in the list: honour each Must with constraints you write for it, try each Prefer, and fill the Rule report (above).
+   Rules "In words" are not in the list: honour each Must with constraints you write for it, try each Prefer, and fill the Rule report (above). If the setup has a Choices sheet, solve with the first choices and give way in order (see **First and second choices**); fill `Choices used`.
 8. **Objective.** Minimise after-school periods (weighted by students affected) plus Prefer costs. Break symmetry by
    ordering identical lessons of a unit. Time limit 300 s, 8 workers.
 9. **Rooms and checks.** Assign rooms greedily by start time (home room for whole-class lessons; a group keeps the

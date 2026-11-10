@@ -228,3 +228,73 @@ def used_rows(spec, k):
         out.append(dict(no=pos[i], item=item_label(spec, c), used="Second choice" if second else "First choice",
                         how=second_text(spec, c) if second else first_text(spec, c)))
     return out
+
+def give_way(spec, run, mode="fallback"):
+    """[{k, spec, res}]: run(spec_k) -> res for k = 0 (the first choices), 1, 2, ... up to the number of valid choices, spec_k being
+    spec with the first k choices given way on. Fallback mode stops at the first res with lessons; compare mode runs every k."""
+    out = []
+    for k in range(len(_valid(spec)) + 1):
+        sp = apply_all(spec, k); res = run(sp)
+        out.append(dict(k=k, spec=sp, res=res))
+        if mode != "compare" and res.get("lessons"): break
+    return out
+
+def used_sheet(path, rows):
+    """add the sheet 'Choices used' (No., Item, Used, How) to the workbook at path, replacing one that is there"""
+    import openpyxl
+    from openpyxl.styles import Font
+    wb = openpyxl.load_workbook(path)
+    if USED_SHEET in wb.sheetnames: del wb[USED_SHEET]
+    ws = wb.create_sheet(USED_SHEET)
+    ws.append(["No.", "Item", "Used", "How"])
+    for c in ws[1]: c.font = Font(bold=True)
+    for r in rows: ws.append([r.get("no"), r.get("item"), r.get("used"), r.get("how")])
+    for col, w in zip("ABCD", (6, 50, 16, 60)): ws.column_dimensions[col].width = w
+    wb.save(path)
+
+def _used(v):
+    s = str(v if v is not None else "").strip().lower()
+    if s.startswith(("second", "fallback", "given way", "gave way")) or s in ("2", "2nd"): return "Second choice"
+    if s.startswith("first") or s in ("1", "1st"): return "First choice"
+    return ""
+
+def used_from_rows(rows):
+    """a Choices used sheet as [{no, item, used, how}], read loosely: a title row above the header is skipped, the header is the
+    first of the top rows with a Used cell, No. or # is the number, Used reads first/second/1/2/fallback/given way as
+    'First choice' or 'Second choice' (anything else as ''), blank rows are skipped"""
+    rows = list(rows)
+    def cells(row): return [str(h).strip().lower() if h is not None else "" for h in row]
+    hi = next((i for i, row in enumerate(rows[:6]) if any(h.startswith("used") for h in cells(row))), None)
+    if hi is None: return []
+    hdr = cells(rows[hi])
+    def col(test): return next((i for i, h in enumerate(hdr) if h and test(h)), None)
+    ix = dict(no=col(lambda h: h in ("no", "no.", "#", "number") or h.startswith("no.")), item=col(lambda h: h.startswith("item")),
+              used=col(lambda h: h.startswith("used")), how=col(lambda h: h.startswith("how")))
+    def g(row, k):
+        i = ix[k]; return row[i] if i is not None and i < len(row) else None
+    out = []
+    for row in rows[hi + 1:]:
+        if not any(v not in (None, "") for v in row): continue
+        no = g(row, "no"); m = re.match(r"^\s*#?\s*(\d+)", str(no)) if no not in (None, "") else None
+        out.append(dict(no=int(m.group(1)) if m else None, item=str(g(row, "item") or "").strip(), used=_used(g(row, "used")), how=str(g(row, "how") or "").strip()))
+    return out
+
+def check_used(spec, used):
+    """(k, problems): k is the number of leading choices (by no) marked Second choice; problems are sentences for a row that names
+    no choice on the list and for a second choice after a first. Rows with no number are ignored."""
+    pos = {i: n for n, (i, _) in enumerate(ordered(spec), start=1)}
+    valid = [(pos[i], c) for i, c in _valid(spec)]
+    by_no = dict(valid)
+    second = {u["no"] for u in used if u.get("no") is not None and u.get("used") == "Second choice"}
+    missed = next((no for no, _ in valid if no not in second), None)   # the first choice not given way on
+    probs = []
+    for u in sorted((u for u in used if u.get("no") is not None), key=lambda u: u["no"]):
+        no = u["no"]
+        if no not in by_no: probs.append(f"Choices used names item {no}, which is not on the list.")
+        elif u.get("used") == "Second choice" and missed is not None and no > missed:
+            probs.append(f"Item {no} ({item_label(spec, by_no[no])}) was given way on while item {missed} ({item_label(spec, by_no[missed])}) was not: the agent must give way in order.")
+    k = 0
+    for no, _ in valid:
+        if no in second: k += 1
+        else: break
+    return k, probs
