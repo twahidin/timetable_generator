@@ -174,7 +174,9 @@ def _keep_free_together(m, spec, i, r, days, per):
         for w in who:
             if (w, x["d"]) in seen: continue
             seen.add((w, x["d"]))
-            out.append(_hit(m, r, i, f"{w}|{x['d']}", f"{w} has {x['subject']} on {m['days'][x['d']]} period {q}; {r['target']} keeps {_pr(per)} free together.", w, x))
+            h = _hit(m, r, i, f"{w}|{x['d']}", f"{w} has {x['subject']} on {m['days'][x['d']]} period {q}; {r['target']} keeps {_pr(per)} free together.", w, x)
+            h["where"] = dict(cls=h["where"]["cls"], day=h["where"]["day"], period=h["where"]["period"])   # about the day of a teacher or class, not the lesson that names it: no id or row
+            out.append(h)
     return out
 
 def _fixed_at(m, spec, i, r, days, per):
@@ -375,13 +377,29 @@ def typed(spec, report):
             out.append(warning(f"typed:{row.get('no')}:unknown", "typed", f"The rule report's line {row.get('no')} ({row.get('rule')}) is not a typed rule on step 6."))
     return out
 
+def typed_again(m, spec, touched):
+    """a typed rule reported Met or Partly whose lessons a fix changed or added: its report line may no longer be true, so it is to be checked again"""
+    touched = set(touched or ())
+    if not touched: return []
+    rows = {}
+    for row in m.get("rule_report") or []: rows.setdefault(row.get("no"), row)
+    out = []
+    for n, _, r in typed_rules(spec):
+        res = str((rows.get(n) or {}).get("result") or "").strip()
+        if res not in ("Met", "Partly"): continue
+        test = in_scope(m, spec, r)
+        if test is None or not any(x["id"] in touched and test(x) for x in m["lessons"]): continue
+        sentence = str(r.get("text") or "").strip().rstrip(".")
+        out.append(warning(f"typed:{n}:again", "typed", f"T{n} was reported {res.lower()}, but lessons it is about were changed in the app. Check it again: {sentence}.", r.get("strength") or "Must"))
+    return out
+
 def choices_(m):
     return [warning("choice:" + p, "choice", p) for p in m.get("choice_problems") or []]
 
-def warnings(m, spec=None):
+def warnings(m, spec=None, touched=()):
     """every warning for the timetable m, in KINDS order, and the rules that could not be checked"""
     spec = spec or m["checked_setup"]; rule_ws, not_checked = rules(m, spec)
-    ws = clashes(m) + deployment(m, spec) + rule_ws + typed(spec, m.get("rule_report")) + choices_(m); seen = {}
+    ws = clashes(m) + deployment(m, spec) + rule_ws + typed(spec, m.get("rule_report")) + typed_again(m, spec, touched) + choices_(m); seen = {}
     for w in ws:   # several hits can share a key (two groups in one slot): a decision belongs to one warning, so each key is made unique
         seen[w["key"]] = n = seen.get(w["key"], 0) + 1
         if n > 1: w["key"] += f"#{n}"

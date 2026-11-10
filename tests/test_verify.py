@@ -318,6 +318,32 @@ def typed_rules_against_the_report():
     ws2 = {w["key"]: w for w in verify.typed(sp, rep2)}; assert set(ws2) == {"typed:1:Not met"} and ws2["typed:1:Not met"]["text"] == "T1 not met: No PE first."
 
 @t
+def typed_again_after_a_fix_touches_a_lesson_the_rule_is_about():
+    sp = primary(); lv = sp["classes"][0]["level"]; c = sp["classes"][0]["class"]; tch = sp["teachers"][0]["name"]
+    other = next(x["class"] for x in sp["classes"] if x["level"] != lv)
+    words = lambda scope, target, strength="Must": dict(scope=scope, target=target, rule="In words", text="No PE first.", strength=strength, week="Both", day="All")
+    line = lambda result, no=1: dict(no=no, strength="Must", applies="", rule="x", result=result, how="")
+    def again(rows, rep, touched):
+        s2 = copy.deepcopy(sp); s2["rules"] = rows
+        m = model_for(s2, [(0, 1, 1, [c], "English", "Entire Class", [tch], ""), (1, 1, 1, [other], "English", "Entire Class", [tch], "")])
+        m["lessons"][1]["level"] = next(x["level"] for x in sp["classes"] if x["class"] == other)   # model_for gives every lesson the first class's level
+        m["rule_report"] = rep; return verify.typed_again(m, m["checked_setup"], touched)
+    ws = again([words("Level", lv)], [line("Met")], {1}); assert len(ws) == 1 and ws[0]["key"] == "typed:1:again" and ws[0]["kind"] == "typed", ws
+    assert ws[0]["text"] == "T1 was reported met, but lessons it is about were changed in the app. Check it again: No PE first." and ws[0]["strength"] == "Must", ws
+    assert again([words("Level", lv)], [line("Met")], {2}) == [], "a touched lesson of another level"
+    assert again([words("Level", lv)], [line("Met")], set()) == [] and again([words("School", "Whole school")], [line("Met")], set()) == []
+    ws = again([words("School", "Whole school", "Prefer")], [line("Partly")], {2}); assert [w["key"] for w in ws] == ["typed:1:again"] and ws[0]["strength"] == "Prefer" and "reported partly" in ws[0]["text"], ws
+    assert again([words("School", "Whole school")], [line("Not met")], {1}) == [] and again([words("School", "Whole school")], [], {1}) == [] and again([words("School", "Whole school")], [line("")], {1}) == []
+    assert again([words("Class", c)], [line("Met")], {1}) != [] and again([words("Class", c)], [line("Met")], {2}) == []
+    assert again([words("Level", lv), words("School", "Whole school")], [line("Met", 2)], {1}) != [] and [w["key"] for w in again([words("Level", lv), words("School", "Whole school")], [line("Met", 2)], {1})] == ["typed:2:again"]
+    # warnings() puts them after the typed ones and before the choices
+    s2 = copy.deepcopy(sp); s2["rules"] = [words("School", "Whole school")]
+    m = model_for(s2, [(0, 1, 1, [c], "English", "Entire Class", [tch], "")]); m["rule_report"] = [line("Met")]; m["choice_problems"] = ["Second choice 1: no such rule."]
+    kinds = [(w["kind"], w["key"]) for w in verify.warnings(m, touched={1})["warnings"]]
+    assert kinds[-2:] == [("typed", "typed:1:again"), ("choice", "choice:Second choice 1: no such rule.")], kinds
+    assert ("typed", "typed:1:again") not in [(w["kind"], w["key"]) for w in verify.warnings(m)["warnings"]]
+
+@t
 def choices_become_warnings():
     ws = verify.choices_(dict(choice_problems=["Second choice 1: no such rule."]))
     assert len(ws) == 1 and ws[0]["kind"] == "choice" and ws[0]["key"] == "choice:Second choice 1: no such rule." and ws[0]["text"] == "Second choice 1: no such rule."

@@ -19,13 +19,15 @@ t("groups keep first-seen order", () => {
   assert.deepEqual(g[0].groups.map(x => [x.name, x.items.length]), [["Z", 2], ["A", 1]]);
 });
 t("counts", () => {
-  assert.deepEqual(Draft.counts(ws()), { open: 4 - 0, left: 1, step5: 1, must: 3, prefer: 1 });
+  assert.deepEqual(Draft.counts(ws()), { open: 4 - 0, left: 1, step5: 1, met: 0, must: 3, prefer: 1 });
+  assert.deepEqual(Draft.counts(ws().concat([W("t1:again", "typed", "School", { answer: "met" })])), { open: 4, left: 1, step5: 1, met: 1, must: 3, prefer: 1 });
 });
 t("isOpen", () => {
   assert.equal(Draft.isOpen(W("a", "clash", "g")), true);
   assert.equal(Draft.isOpen(W("a", "clash", "g", { answer: "left" })), true);
   assert.equal(Draft.isOpen(W("a", "clash", "g", { answer: "step5" })), false);
   assert.equal(Draft.isOpen(W("a", "clash", "g", { answer: "fixed" })), false);
+  assert.equal(Draft.isOpen(W("a", "typed", "g", { answer: "met" })), false);
 });
 t("texts", () => {
   assert.equal(Draft.sideText({ sides: { timetable: "Mr Tan", step5: "Mdm Lee" } }), "Timetable: Mr Tan · Step 5: Mdm Lee");
@@ -33,6 +35,7 @@ t("texts", () => {
   assert.equal(Draft.answerText({ decision: { answer: "left" } }), "Left for now");
   assert.equal(Draft.answerText({ decision: { answer: "step5" } }), "Step 5 updated");
   assert.equal(Draft.answerText({ decision: { answer: "fixed" } }), "Fixed");
+  assert.equal(Draft.answerText({ decision: { answer: "met" } }), "Checked: still met");
   assert.equal(Draft.answerText({ decision: null }), "");
 });
 t("kinds", () => { assert.deepEqual(Draft.KINDS, ["clash", "deployment", "rule", "typed", "choice"]); assert.equal(Draft.KIND_TEXT.typed, "Rules in words"); });

@@ -1,5 +1,5 @@
 """Server smoke checks. Run: .venv/bin/python tests/smoke.py   (add --full for the slow publish check)"""
-import os, secrets, subprocess, sys, tempfile
+import copy, os, secrets, subprocess, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
@@ -35,11 +35,14 @@ def test_status_shape():
 def test_old_runs_folder_is_harmless():
     assert c.get("/api/past-setups").status_code == 200
 
-def _lessons_workbook(rows):   # the Lessons sheet an agent hands over: rows = [(day, start, periods, level, class, subject, teachers)]
+def _lessons_workbook(rows, report=()):   # the Lessons sheet an agent hands over: rows = [(day, start, periods, level, class, subject, teachers)]; report: lines of its Rule report
     import io, openpyxl
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"
     ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
     for i, (day, p, n, lv, cls, subj, tch) in enumerate(rows, 1): ws.append([i, day, p, p + n - 1, n, "", "", lv, "", cls, subj, "Entire Class", ", ".join(tch), "", "", ""])
+    if report:
+        wr = wb.create_sheet("Rule report"); wr.append(["No.", "Must / Prefer", "Applies to", "Rule", "Result", "How"])
+        for line in report: wr.append(list(line))
     buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
 
 def _setup_workbook(spec):
@@ -48,9 +51,9 @@ def _setup_workbook(spec):
     d = tempfile.mkdtemp(); p = os.path.join(d, "setup.xlsx"); write_template(spec, p)
     return open(p, "rb").read()
 
-def _draft_form(spec, rows, **more):
+def _draft_form(spec, rows, report=(), **more):
     import io
-    return dict(setup=(io.BytesIO(_setup_workbook(spec)), "setup.xlsx"), timetable=(io.BytesIO(_lessons_workbook(rows)), "timetable.xlsx"), **more)
+    return dict(setup=(io.BytesIO(_setup_workbook(spec)), "setup.xlsx"), timetable=(io.BytesIO(_lessons_workbook(rows, report)), "timetable.xlsx"), **more)
 
 def _one_class_row(spec, skip=()):   # a step 5 row for exactly one class, with a teacher and periods
     return next(r for r in spec["lessons"] if not r.get("block") and r.get("code") == "Entire Class" and len(r.get("classes") or []) == 1 and r.get("teachers")
@@ -462,6 +465,29 @@ def test_a_fix_moves_the_lesson_and_undo_brings_it_back():
     assert store.read_json(os.path.join(store.DATA, "draft", "meta.json"))["fixes"][0]["at"]
     j = c.post("/api/draft/undo").get_json(); assert j["fixes"] == [] and c.post("/api/draft/undo").status_code == 400
     assert c.post("/api/draft/undo").get_json() == {"error": "There is nothing to undo."}
+
+def test_a_typed_rule_is_checked_again_after_a_fix_and_the_lead_can_settle_it():
+    _grid_draft(); spec = c.get("/api/setup").get_json()["spec"]; ds = spec["day_structure"]["P1"]; days = list(ds); p = ds[days[0]].index("L")
+    saved = copy.deepcopy(spec)
+    spec["rules"] = list(spec.get("rules") or []) + [dict(scope="School", target="Whole school", rule="In words", text="Nobody is rushed", strength="Prefer", week="Both", day="All")]
+    try:
+        assert c.put("/api/setup", json=spec).status_code == 200
+        rows = [(days[0], p, 1, "P1", "1A", "Art", ["Umairah Tan"]), (days[1], p, 1, "P1", "1B", "Art", ["Umairah Tan"])]
+        rep = [(1, "Prefer", "Whole school", "Nobody is rushed", "Met", "Checked.")]
+        assert c.post("/api/draft", data=_draft_form(spec, rows, rep, replace="1"), content_type="multipart/form-data").status_code == 200
+        j = c.get("/api/draft").get_json(); assert "typed:1:again" not in _warn_keys(j) and j["typed"] == 1 and not any(w["kind"] == "typed" for w in j["warnings"]), j["warnings"]
+        lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
+        j = c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"])).get_json(); w = next(w for w in j["warnings"] if w["key"] == "typed:1:again")
+        assert w["kind"] == "typed" and w["strength"] == "Prefer" and w["decision"] is None and w["text"] == "T1 was reported met, but lessons it is about were changed in the app. Check it again: Nobody is rushed.", w
+        n0 = j["open"]; assert c.post("/api/draft/decide", json=dict(key="deployment:x", answer="met")).status_code == 400
+        r = c.post("/api/draft/decide", json=dict(key="typed:1:again", answer="met")); j = r.get_json(); w = next(w for w in j["warnings"] if w["key"] == "typed:1:again")
+        assert r.status_code == 200 and w["decision"]["answer"] == "met" and w["decision"]["at"] and j["open"] == n0 - 1, j
+        dec = store.read_json(os.path.join(store.DATA, "draft", "decisions.json")); assert dec["typed:1:again"]["answer"] == "met"
+        r = c.post("/api/draft/decide", json=dict(key=_warn_keys(j)[0], answer="met")); assert r.status_code == 400 and r.get_json() == {"error": "That answer is only for a rule to check again."}, r.get_json()
+        assert c.post("/api/draft/decide", json=dict(key="typed:1:again", answer="open")).status_code == 200
+        assert next(w for w in c.get("/api/draft").get_json()["warnings"] if w["key"] == "typed:1:again")["decision"] is None
+    finally:
+        c.put("/api/setup", json=saved)
 
 def test_an_add_without_a_room_and_a_delete():
     _grid_draft(); a = c.get("/api/draft/options?add=C:1A:Art&n=1").get_json()["slots"]; s = next(s for s in a if s["state"] in ("ok", "prefer"))

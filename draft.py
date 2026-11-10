@@ -9,7 +9,7 @@ from ttgen import choices, verify
 import store, sync, fixes
 
 DIR = os.path.join(store.DATA, "draft")
-ANSWERS = ("step5", "left", "open")
+ANSWERS = ("step5", "left", "open", "met")
 _lock = threading.RLock()   # always taken before store's locks, never inside them
 class NoDraft(Exception): pass
 class UnpublishedFixes(Exception):
@@ -80,7 +80,7 @@ def _build(m=None, rec=None):
         if not rec["spec"]: raise LookupError("no setup")
     spec = rec["spec"]
     with _lock: meta = store.read_json(_p("meta.json"), {})
-    ws = verify.warnings(m); ch = m["checks"]
+    ws = verify.warnings(m, touched=fx["touched"]); ch = m["checks"]
     cid, ver = meta.get("config_id") or "", rec["v"]; got = re.fullmatch(r"v(\d+)", cid)
     state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
              "same" if int(got[1]) == ver else "older" if int(got[1]) < ver else "newer")
@@ -104,7 +104,7 @@ def _finish(j, change=None):
             else: decisions[change[0]] = change[1]
         decisions = {k: d for k, d in decisions.items() if k in keys or d.get("answer") == "step5"}
         ws = [dict(w, decision=decisions.get(w["key"])) for w in j["warnings"]]
-        n = sum(1 for w in ws if not w["decision"] or w["decision"]["answer"] == "left")
+        n = sum(1 for w in ws if not w["decision"] or w["decision"]["answer"] == "left")   # "met" and "step5" settle a warning
         if exists():
             store.write_json(_p("decisions.json"), decisions)
             store.write_json(_p("meta.json"), dict(store.read_json(_p("meta.json"), {}), open=n))
@@ -123,12 +123,13 @@ def _applied(op):
 def decide(key, answer):
     """record what to do with one warning; 'step5' changes the setup to match the timetable. Returns info()."""
     if answer not in ANSWERS: raise ValueError("Choose what to do with the warning.")
+    if answer == "met" and not key.endswith(":again"): raise ValueError("That answer is only for a rule to check again.")
     if not exists(): raise ValueError("There is no draft.")
     if answer != "step5":
         j = _build(); w = next((w for w in j["warnings"] if w["key"] == key), None)
         if answer == "open": return _finish(j, (key, None))
         if not w: raise ValueError("That warning is no longer on the list.")
-        return _finish(j, (key, dict(answer="left", at=store.now())))
+        return _finish(j, (key, dict(answer=answer, at=store.now())))
     with _lock:   # from the build to the change: a second click waits, then finds the warning gone (so a row is never added twice)
         j = _build(); w = next((w for w in j["warnings"] if w["key"] == key), None)
         if not w: raise ValueError("That warning is no longer on the list.")

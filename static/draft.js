@@ -27,19 +27,20 @@ var Draft = (function () {
     return out;
   }
 
-  /* open (no decision or left) with how many Must and Prefer among them, left, and settled on step 5 */
+  /* open (no decision or left) with how many Must and Prefer among them, left, settled on step 5, and checked as still met */
   function counts(warnings) {
-    var c = { open: 0, left: 0, step5: 0, must: 0, prefer: 0 };
+    var c = { open: 0, left: 0, step5: 0, met: 0, must: 0, prefer: 0 };
     (warnings || []).forEach(function (w) {
       var a = answer(w);
       if (a === "left") c.left++;
       if (a === "step5") c.step5++;
+      if (a === "met") c.met++;
       if (isOpen(w)) { c.open++; if (w.strength === "Prefer") c.prefer++; else c.must++; }
     });
     return c;
   }
 
-  function answerText(w) { return { left: "Left for now", step5: "Step 5 updated", fixed: "Fixed" }[answer(w)] || ""; }
+  function answerText(w) { return { left: "Left for now", step5: "Step 5 updated", fixed: "Fixed", met: "Checked: still met" }[answer(w)] || ""; }
 
   function sideText(w) { var s = w && w.sides; return s ? "Timetable: " + s.timetable + " · Step 5: " + s.step5 : ""; }
 

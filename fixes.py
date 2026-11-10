@@ -198,8 +198,8 @@ def neighbours(m, ids, busy=None):
 
 def _rule_ws(m, spec, lessons): return verify.rules(dict(m, lessons=lessons), spec)[0]
 def _subject(w):
-    """what a rule warning is about: (rule row, lesson id) for a lesson, wherever it sits; the warning's key for a day or a slot"""
-    return (w["key"].split(":", 2)[1], w["where"]["id"]) if w.get("where") else w["key"]
+    """what a rule warning is about: (rule row, lesson id) for a lesson, wherever it sits; the warning's key for a day or a slot (a where without an id)"""
+    return (w["key"].split(":", 2)[1], w["where"]["id"]) if (w.get("where") or {}).get("id") is not None else w["key"]
 
 def rule_subjects(m, spec, lessons):
     """{subject: the first warning about it} from the standard rules on these lessons only; a fix is worse where it adds a subject"""

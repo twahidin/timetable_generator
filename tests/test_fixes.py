@@ -181,6 +181,15 @@ def a_rule_broken_by_another_lesson_is_new():
     assert fixes.judge(m, sp, DAYS, dict(kind="move", id=40, d=2, p=7))["state"] == "ok"
 
 @t
+def keep_free_together_is_about_the_day_not_its_first_lesson():
+    dept = next(x["dept"] for x in SP["teachers"] if x["name"] == T[0]); win = dict(scope="Department", target=dept, rule="Keep free together", week="Both", day="All", strength="Must", **{"from": 2, "to": 3})
+    L = [lesson(1, 0, 2, 1, [A], "Art", ENTIRE, [T[0]], level=LV), lesson(2, 0, 3, 1, [B], "Art", ENTIRE, [T[0]], level=LV), lesson(3, 1, 5, 1, [A], "Art", ENTIRE, [T[0]], level=LV)]
+    m, sp = model_with(L, rules=[win]); ws = verify.rules(m, sp)[0]
+    assert [w["key"] for w in ws] == [f"rule:0:{T[0]}|0"] and ws[0]["where"]["day"] == DAYS[0] and ws[0]["where"]["period"] == 2 and "id" not in ws[0]["where"] and "row" not in ws[0]["where"], ws
+    r = fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=2, p=5)); assert r["state"] != "no" and r["must"] == [], r   # the day stays broken through lesson 2: not a new violation
+    r = fixes.judge(m, sp, DAYS, dict(kind="move", id=3, d=1, p=2)); assert r["state"] == "no" and r["why"].startswith("Rule Department"), r   # a clean day broken anew
+
+@t
 def a_lesson_length_in_any_spelling():
     rows = [dict(x, length="2.0") if x is ROW else dict(x, length="two") if x["classes"] == [CLS] and x["code"] == ENTIRE else x for x in SP["lessons"]]
     m, sp = model_with([lesson(1, 0, 2, 1, [CLS], SUBJ, ENTIRE, TEACHERS, level=LV)], lessons=rows)
@@ -234,7 +243,8 @@ if "--full" in sys.argv:
         """the primary sample solved as tests/smoke.py --full does, checked against its setup plus the WIDE rule rows -> (m, setup, days, timetable path)"""
         work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx"); env = dict(os.environ, PYTHONPATH=ROOT)
         subprocess.run([sys.executable, "-m", "ttgen", "sample", "primary", "--out", setup], check=True, env=env, cwd=ROOT, capture_output=True)
-        subprocess.run([sys.executable, "-m", "ttgen", "solve", setup, "--out", tt, "--time", "30"], env=env, cwd=ROOT, capture_output=True)   # 30 s: feasible and clean in 15
+        done = subprocess.run([sys.executable, "-m", "ttgen", "solve", setup, "--out", tt, "--time", "30"], env=env, cwd=ROOT, capture_output=True)   # 30 s: feasible and clean in 15
+        assert done.returncode == 0 and os.path.exists(tt), "The solve did not finish in the time given, so there is no timetable to check."
         own = export.model_from_files(setup, tt)["setup"]; sp = copy.deepcopy(own); sp["rules"] = list(sp.get("rules") or []) + WIDE
         m = export.model_from_files(None, tt, spec=sp); return m, sp, m["days"], tt
 
@@ -266,7 +276,7 @@ if "--full" in sys.argv:
         if any(x.endswith(LESSON_TIME) or x.endswith(LESSON_TIME[2] + ".") for x in new): return "na"
         if [x for x in new if not x.endswith("planned.")]: return "no"
         if {k: v["periods"] for k, v in verify.placed(m2).items()} != {k: v["periods"] for k, v in verify.placed(m).items()}: return "no"
-        subj = lambda mm: {((w["key"].split(":", 2)[1], w["where"]["id"]) if w["where"] else w["key"]): w["strength"] for w in verify.rules(mm, sp)[0]}
+        subj = lambda mm: {((w["key"].split(":", 2)[1], w["where"]["id"]) if (w["where"] or {}).get("id") is not None else w["key"]): w["strength"] for w in verify.rules(mm, sp)[0]}
         sb, sa = subj(m), subj(m2); new = [v for k, v in sa.items() if k not in sb]
         return "no" if "Must" in new else "prefer" if new else "ok"
 
