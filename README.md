@@ -9,7 +9,7 @@ code and download PDFs. The app does not generate timetables itself.
 |---|---|---|
 | `COMMITTEE_CODE` | timetable committee | the setup editor, the downloads, Publish, the personal student codes |
 | `TEACHER_CODE` | teachers | every class, teacher, room and student timetable, the lesson search, Who's free, PDFs |
-| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; everything on step 5's department map (who can teach what, who teaches which class, group or band), the table's groups and bands, and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
+| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; everything on step 5 (who can teach what, who teaches which class, group or band, new groups and bands, moving rows between bands), and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 
@@ -98,6 +98,23 @@ drop is one change: one Undo takes it back.
 Clicking any avatar (not its tick box) opens the teacher's **profile** in place of the cards: avatar with **New look**,
 name, role, department, load against allowance, **Can teach** with the levels (editable there, ✕ to remove a subject)
 and **Teaches** (every class and group they are on, ✕ to take them off). Details are changed on step 4.
+
+**Groups and bands (step 5).** The second view, **Groups and bands**, is where teaching groups and bands are made.
+On the left, **New teaching group**: level, G-level (filters the subjects), subject, band (none = a whole-class
+lesson), classes (empty = the band's classes) and students; the group code forms as you pick (level digit, subject
+code, G-level letter, running number, as the workbook has it) and **Add** makes the row. **Add one per class** makes a
+whole-class row for each class picked, or for every class of the level, skipping classes that have the subject already.
+Below it, **New band**: level, the subjects it covers, its classes (every class of the level unless you change them) and
+a name that forms from the level and subjects ("Sec 2 Mathematics"; "Sec 3 Option A" for a band of several subjects,
+the next free letter) and can be typed over; a name already used is refused. **Everyone takes one** is on unless the
+name says Option. **Add band** makes it and sets the group form's band to it.
+In the middle, **Not in a band**: the level's whole-class rows and pull-out groups, with a subject filter, **Select all
+shown** and **Deselect all**. Tick rows and **Move** them into a band, or drag a row (or every ticked row) onto a lane on
+the right. A whole class moved into a band becomes a group of it, and the band's classes widen to cover it. On the
+right, the level's bands as lanes, each with its groups (code, subject, students, teachers) and a ✕ that puts a group
+back in the pool; a teacher on two groups of one band is flagged on the lane. Moving a row changes later codes of that
+subject (1MAP3 becomes 1MAP2): the page says which, and when a student list names the old codes it asks first and
+says how many students are affected. The table view keeps the 15-column rows for bulk edits.
 
 **How a group's periods split into lessons.** The Lessons column on step 5's table view shows the usual split in grey (20 periods with a
 3-period lesson: 6×3 + 1×2). Type your own, such as `5x3 + 2x2` or `4x3 + 4x2`, on one row or on all ticked rows, or clear it to
