@@ -234,10 +234,53 @@ def read_template(path):
         while rows_ and not any(v not in ("", None) for v in rows_[-1]): rows_.pop()
         extra.append(dict(name=ws.title, rows=[[v if isinstance(v, (int, float, str)) else str(v) for v in row] for row in rows_]))
     return dict(school=sc, day_structure=day_structure, venues=venues, classes=classes, subjects=subjects, teachers=teachers,
-                blocks=blocks, lessons=lessons, rules=rules, students=students, combinations=combinations, roles=roles, extra_sheets=extra)
+                blocks=blocks, lessons=lessons, rules=rules, students=students, combinations=combinations, roles=roles, extra_sheets=extra,
+                choices=_read_choices(wb, sc, rules))
+
+def _read_choices(wb, sc, rules):
+    """the Choices sheet -> spec['choices'] (empty for a workbook without one); the mode goes to school['choices_mode']"""
+    from . import choices as C
+    if C.SHEET not in wb.sheetnames: return []
+    ws = wb[C.SHEET]
+    sc["choices_mode"] = "compare" if str(ws["B3"].value or "").strip() == C.MODES["compare"] else "fallback"
+    labels = [C.rule_words({"rules": rules}, i) for i in range(len(rules))]; taken = set(); out = []
+    for pos, x in enumerate(_table(ws, "No.")[1], start=1):
+        kind = str(x.get("Kind") or "").strip().lower(); item = str(x.get("Item") or "").strip(); second = x.get("Second choice")
+        if kind == "setting":
+            what = next((s for s in SETTING_RULES if item.lower().startswith(s["label"].lower()[:30])), None)
+            if what and what["number"] and str(second).strip().lstrip("-").isdigit(): second = int(str(second).strip())
+            out.append(dict(kind="setting", key=what["key"] if what else None, item=item, second=second if second is not None else "", order=pos))
+        elif kind == "rule":
+            i = next((j for j, lab in enumerate(labels) if lab == item and j not in taken), None)
+            if i is not None: taken.add(i)
+            c = dict(kind="rule", rule=i, item=item, order=pos); words = str(second or "").strip()
+            if words.startswith("Make it Prefer"): c["fallback"] = "Prefer"
+            elif words.startswith("Drop it"): c["fallback"] = "Drop"
+            elif words.startswith("Instead"):
+                c["fallback"] = "Instead"; c["instead"] = _instead_row(x)
+            else: c["fallback"] = None
+            out.append(c)
+        elif kind == "recess":
+            win = [_clock(x[h]) if x.get(h) not in (None, "") and _readable(x[h]) else x.get(h) for h in ("Window from", "Window to")]
+            out.append(dict(kind="recess", level=item[len("Recess for "):].strip() if item.startswith("Recess for ") else item,
+                            window=win if all(w not in (None, "") for w in win) else None, order=pos))
+    return out
+
+def _readable(t):
+    try: _minutes(t); return True
+    except (TypeError, ValueError): return False
+
+def _instead_row(x):
+    """the Instead columns of a Choices row, read as a More rules row (None when they are all empty)"""
+    r = {"scope": x.get("Applies to (kind)"), "target": x.get("Applies to"), "subject": x.get("Subject"), "rule": x.get("Rule"), "week": x.get("Week") or "Both",
+         "day": x.get("Day") or "All", "from": x.get("From period"), "to": x.get("To period"), "number": x.get("Number")}
+    if not any(x.get(h) not in (None, "") for h in ("Applies to (kind)", "Applies to", "Subject", "Rule", "From period", "To period", "Number", "Venues", "In words")): return None
+    if names_list(x.get("Venues")): r["venues"] = names_list(x.get("Venues"))
+    if r["rule"] == TYPED or x.get("In words") not in (None, ""): r["text"] = str(x.get("In words") or "").strip()
+    return r
 
 KNOWN_SHEETS = {"README", "Settings", "Period times", "Day structure", "1 Venues", "2 Classes", "3 Subjects", "4 Teachers", "Roles", "5 Blocks", "6 Lessons",
-                "7 Rules", "More rules", "Rule types", "Teacher availability", "Fixed lessons", "Students", "Combinations", "Lists"}
+                "7 Rules", "More rules", "Choices", "Choices used", "Rule types", "Teacher availability", "Fixed lessons", "Students", "Combinations", "Lists"}
 
 def _clock(t):
     m = _minutes(t); return f"{m // 60:02d}:{m % 60:02d}"

@@ -5,7 +5,7 @@ description: Generate a clash-free Singapore school timetable from a filled setu
 
 # School timetable generator
 
-Skill version: 2026-11 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill).
+Skill version: 2026-11.1 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill).
 
 Turns a filled **timetable setup workbook** into a timetable with no teacher, room or student in two places at once,
 then delivers it in three forms that always agree with each other:

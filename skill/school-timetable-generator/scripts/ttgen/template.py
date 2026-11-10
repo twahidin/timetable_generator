@@ -10,6 +10,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.formatting.rule import FormulaRule, CellIsRule
 from openpyxl.workbook.defined_name import DefinedName
+from . import choices
 from .spec import RULE_TYPES, SCOPES, CODES, EVERY_CLASS, RECESS_ROWS, SETTING_RULES, ROLES, SKILL_VERSION, day_names, names_list, order_days, scopes_for, split_rules
 
 NAVY, SLATE = "1F4E78", "5B6B7F"
@@ -505,6 +506,33 @@ def write_template(spec, path, extra_rows=120):
     B.dv(rw, f"E{R0}:E{rL}", "=WeekList", "Pick a week."); B.dv(rw, f"F{R0}:F{rL}", "=DayList", "All or a day.")
     B.dv(rw, f"G{R0}:H{rL}", "=PeriodList", "A period number (see Period times)."); B.dv(rw, f"K{R0}:K{rL}", "=StrengthList", "Must or Prefer.")
 
+    # ---------------- Choices (the order the agent gives way in when the first choices do not fit)
+    ch_rows = choices.ordered(spec)
+    ccols = [("No.", 5), ("Kind", 9), ("Item", 52), ("First choice", 30), ("Second choice", 34), ("Window from", 11), ("Window to", 11), ("Applies to (kind)", 12),
+             ("Applies to", 24), ("Subject", 24), ("Rule", 22), ("Week", 8), ("Day", 7), ("From period", 8), ("To period", 8), ("Number", 8), ("Venues", 20), ("In words", 40)]
+    CIN = {5, 6, 7} | set(range(8, 19))
+    cw = B.sheet(choices.SHEET, "If it does not fit, give way in this order",
+                 ["The agent gives way one item at a time from the top, and stops as soon as a timetable fits; it never gives way on anything that is not listed here."],
+                 ccols, CIN, hr=5)
+    cw["A3"] = "If the first choices do not fit"; cw["A3"].font = BF
+    cw["B3"] = choices.MODES[choices.mode(spec)]; cw["B3"].font = INF; cw["B3"].fill = INFILL
+    B.dv(cw, "B3", '"' + ",".join(choices.MODES.values()) + '"', "Pick one of the two.")
+    for i, (_, c) in enumerate(ch_rows):
+        r = 6 + i
+        vals = [i + 1, str(c.get("kind") or "").capitalize(), choices.item_label(spec, c), choices.first_text(spec, c), choices.second_text(spec, c)]
+        for j, v in enumerate(vals, start=1): cw.cell(r, j, v)
+        if c.get("kind") == "recess" and isinstance(c.get("window"), (list, tuple)) and len(c["window"]) == 2:
+            for j, v in ((6, c["window"][0]), (7, c["window"][1])):
+                try: cw.cell(r, j, _t(v))
+                except (ValueError, TypeError): cw.cell(r, j, v)
+        if c.get("kind") == "rule" and c.get("fallback") == "Instead":
+            x = c.get("instead") or {}
+            for j, k in enumerate(["scope", "target", "subject", "rule", "week", "day", "from", "to", "number", "venues", "text"], start=8):
+                cw.cell(r, j, ", ".join(names_list(x.get(k))) if k == "venues" else x.get(k))
+    cL = 6 + len(ch_rows) + 30
+    B.paint(cw, cL, CIN, 18)
+    for r in range(6, cL + 1): cw[f"F{r}"].number_format = cw[f"G{r}"].number_format = "h:mm AM/PM"
+
     # ---------------- Students
     nst = len(spec.get("students", []))
     SIN_ = set(range(1, 12))
@@ -533,7 +561,7 @@ def write_template(spec, path, extra_rows=120):
     B.paint(cb, 4 + len(combos) + 40, set(range(1, nsub + 5)), nsub + 4, first=4)
     B.name("ComboList", "OFFSET(Combinations!$B$4,0,0,MAX(1,COUNTA(Combinations!$B$4:$B$500)),1)")
 
-    order = ["README"] + extra + ["Settings", "Period times", "Day structure", V, C, S, T, "Roles", BL, L, TA, FX, MR, "Rule types", "Students", "Combinations", "Lists"]
+    order = ["README"] + extra + ["Settings", "Period times", "Day structure", V, C, S, T, "Roles", BL, L, TA, FX, MR, choices.SHEET, "Rule types", "Students", "Combinations", "Lists"]
     wb._sheets = [wb[n] for n in order]
     wb.active = 0
     from openpyxl.workbook.properties import CalcProperties

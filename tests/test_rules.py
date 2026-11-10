@@ -14,7 +14,7 @@ def with_typed():
 
 @t
 def the_rule_type_exists():
-    assert S.TYPED == "In words" and S.SKILL_VERSION == "2026-11"
+    assert S.TYPED == "In words" and S.SKILL_VERSION == "2026-11.1"
     row = next(r for r in S.RULE_TYPES if r[0] == "In words"); assert row[1] == "School, Level, Class, Subject, Room, Teacher" and row[2] == "N" and row[3] == "N"
     assert S.typed_rules(with_typed())[0][0] == 1 and S.typed_rules(with_typed())[1][0] == 2
     assert S.typed_label(1, TYPED) == "T1 · Must · Sec 1 · No PE in the first period"

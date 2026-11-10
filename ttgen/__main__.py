@@ -52,6 +52,12 @@ def main(argv=None):
         for i, p in rule_problems(spec, P): print(f" ! Rule {rule_label(spec['rules'][i])}: {p}")
         from .spec import typed_rules, typed_label
         for num, _, r in typed_rules(spec): print(" * For the agent to honour:", typed_label(num, r))
+        from . import choices
+        bad = {}
+        for i, p in choices.problems(spec): bad.setdefault(i, p)
+        for n, (i, c) in enumerate(choices.ordered(spec), start=1):
+            print(f" * Second choice {n}: {choices.item_label(spec, c)} — {choices.first_text(spec, c)} → {choices.second_text(spec, c)}")
+            if i in bad: print(f" ! Second choice {n}: {bad[i]}")
         return 0
     from .solver import solve
     from .report import write_timetable
