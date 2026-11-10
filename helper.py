@@ -9,10 +9,11 @@ from ttgen.export import ENTIRE
 
 NOTHING = "The app has no suggestion for this one. Select a lesson on the grid to see where it can go."
 NONE_PASS = "Nothing settles this without breaking a rule or a clash."
-NO_SINGLE = "The app found no single fix that settles this. Select a lesson on the grid to see where it can go."
+NO_FIX = "The app found no fix that settles this. Select a lesson on the grid to see where it can go."
 OK = ("ok", "prefer")
 MAX_LESSONS = 8      # involved lessons whose slots are tried
 MAX_BLOCKED = 60     # refused fixes tried for the blocked list
+MAX_PAIRS = 40       # pairs of fixes judged per warning
 
 def _base(key): return re.sub(r"#\d+$", "", key or "")   # verify.warnings makes repeated keys unique with #2, #3
 def _first(lessons, i): return next((x for x in lessons if x["id"] == i), None)
@@ -76,11 +77,12 @@ def say(m, spec, days, fix):
 
 def disturbs(m, spec, days, fx, steps):
     """what else a suggestion changes or gives, in sentences: a swap's other lesson, the Prefer rules and allowances it gives,
-    a teacher change's loads; ["Nothing else moves."] when there is nothing"""
+    a teacher change's loads, a move made before the last fix; ["Nothing else moves."] when there is nothing"""
     out, L = [], m["lessons"]
-    for f in fx:
+    for n_, f in enumerate(fx, 1):
         kind = f.get("kind"); after = _apply(L, [f], spec, days)["lessons"]
-        if kind == "swap":
+        if kind == "move" and n_ < len(fx) and (x := _first(L, f["id"])): out.append(f"{what(x)} moves to {when(days, f['d'], f['p'])}.")   # a move made room for the last fix
+        elif kind == "swap":
             a, b = _first(L, f["a"]), _first(L, f["b"])
             if a and b: out.append(f"{what(b)} moves to {when(days, a['d'], a['p'])}.")
         elif kind == "teacher":
@@ -96,13 +98,24 @@ def disturbs(m, spec, days, fx, steps):
 
 
 # ----------------------------------------------------------------------------------------------- judging a list of fixes
-def chain(m, spec, days, fx, ctx=None):
+def _after(m, spec, days, fx, memo):
+    """(the model with the fixes fx applied, its fixes._ctx), kept in memo by the fixes so later fixes share one index"""
+    k = repr(fx)
+    if memo is None or k not in memo:
+        mi = dict(m, lessons=_apply(m["lessons"], fx, spec, days)["lessons"]); v = (mi, fixes._ctx(mi))
+        if memo is None: return v
+        memo[k] = v
+    return memo[k]
+
+def chain(m, spec, days, fx, ctx=None, memo=None):
     """each fix judged in order on the timetable the earlier ones leave -> dict(state, why, steps, lessons, texts, touched, was).
     A "na" or "no" step stops the judging with its why; lessons, texts, touched and was are for the whole list.
-    ctx: a fixes._ctx of m to share across calls (the first step is judged on m)"""
+    ctx: a fixes._ctx of m to share across calls (the first step is judged on m); memo: a dict to share the timetables after
+    the earlier fixes across calls (pairs with the same first fix build its index once)"""
     steps, state, why = [], "ok", ""
     for i, f in enumerate(fx):
-        j = fixes.judge(m, spec, days, f, fixes._ctx(m, ctx)) if i == 0 else fixes.judge(dict(m, lessons=_apply(m["lessons"], fx[:i], spec, days)["lessons"]), spec, days, f)
+        mi, ci = (m, fixes._ctx(m, ctx)) if i == 0 else _after(m, spec, days, fx[:i], memo)
+        j = fixes.judge(mi, spec, days, f, ci)
         steps.append(j)
         if j["state"] not in OK: state, why = j["state"], j["why"]; break
         if j["state"] == "prefer" and state == "ok": state, why = "prefer", j["why"]
@@ -218,8 +231,14 @@ def _about_teacher(m, spec, w):
     r = _rule_row(spec, w.get("key"))[1]
     return (r is not None and r.get("scope") == "Teacher") or _rule_who(spec, w) in m["teacher_ix"]
 
-def _options(m, spec, days, w, ctx=None):
-    """(the fixes worth trying, the fixes already refused as [(fixes, why)]) for the warning"""
+def _slots(m, spec, days, i, memo=None):
+    """fixes.slots of lesson i, kept in memo (a dict) when one is given"""
+    if memo is None: return fixes.slots(m, spec, days, i)
+    if ("slots", i) not in memo: memo["slots", i] = fixes.slots(m, spec, days, i)
+    return memo["slots", i]
+
+def _options(m, spec, days, w, ctx=None, memo=None):
+    """(the fixes worth trying, the fixes already refused as [(fixes, why)]) for the warning; memo: see _slots"""
     good, bad = [], []
     def put(fx, j):
         if j["state"] in OK: good.append(fx)
@@ -247,7 +266,7 @@ def _options(m, spec, days, w, ctx=None):
         elif kind in ("rule", "clash"):
             ids, keys = involved(m, w)[:MAX_LESSONS], []
             for i in ids:
-                for s in fixes.slots(m, spec, days, i): put([dict(kind="swap", a=i, b=s["swap"]) if s["swap"] else dict(kind="move", id=i, d=s["d"], p=s["p"])], s)
+                for s in _slots(m, spec, days, i, memo): put([dict(kind="swap", a=i, b=s["swap"]) if s["swap"] else dict(kind="move", id=i, d=s["d"], p=s["p"])], s)
                 rows = fixes._rows(m["lessons"], i); who = _clash_who(w)[0] if kind == "clash" else _rule_who(spec, w)
                 keys += [verify._kstr(fixes._row_key(x)) for x in rows if who in x["teachers"]] or [verify._kstr(fixes._row_key(rows[0]))]
             if _about_teacher(m, spec, w):
@@ -259,6 +278,61 @@ def _options(m, spec, days, w, ctx=None):
 def candidates(m, spec, days, w):
     """the single fixes worth trying for the warning, each as a list of one fix"""
     return _options(m, spec, days, w)[0]
+
+def _moves(m, spec, days, i, avoid, ctx, k=3):
+    """up to k "ok" moves of lesson i (to an empty stretch of its classes, as fixes.slots makes moves, not swaps), none
+    touching the cells (d, q) in avoid, the nearest day first, then the nearest period"""
+    b = ctx["busy"]; rows = b.ids.get(i)
+    if not rows: return []
+    a = rows[0]; n_, cls, out = a["n"], fixes._classes(rows), []
+    near = sorted(((d, p) for d in range(len(days)) for p in range(m["NP"] - n_ + 1) if (d, p) != (a["d"], a["p"])), key=lambda s: (abs(s[0] - a["d"]), s[0], abs(s[1] - a["p"]), s[1]))
+    for d, p in near:
+        if any((d, q) in avoid for q in range(p, p + n_)) or any(y["id"] != i for c in cls for q in range(p, p + n_) for y in b.at.get(("c", c, d, q), ())): continue
+        f = dict(kind="move", id=i, d=d, p=p)
+        if fixes.judge(m, spec, days, f, ctx)["state"] == "ok":
+            out.append(f)
+            if len(out) == k: break
+    return out
+
+def _alone(b, rows, d, p, n_, ignore):
+    """the one lesson in the way of rows at (d, p): Busy.blocker's lesson, when nothing else is in the way once it is set aside; else None"""
+    y = b.blocker(rows, d, p, n_, ignore=ignore)
+    return y if y is not None and b.clash(rows, d, p, n_, ignore=set(ignore) | {y}) is None else None
+
+def pairs(m, spec, days, w, have, ctx=None, memo=None):
+    """two fixes together, for when the single fixes found (have) are fewer than three -> [[fix, fix]], at most MAX_PAIRS:
+    an involved lesson's move to a slot refused only because one other lesson B is there, after one of B's "ok" moves; a
+    deployment teachers difference's teacher fix refused only because step 5's teacher teaches one lesson B then, after one
+    of B's "ok" moves. ctx: a fixes._ctx of m; memo: see _slots"""
+    if len(have) >= 3: return []
+    c = fixes._ctx(m, ctx); b = c["busy"]; out, seen, kind = [], set(), w.get("kind")
+    def put(first, fx):
+        for f in first:
+            if len(out) < MAX_PAIRS and repr(p := [f, fx]) not in seen: seen.add(repr(p)); out.append(p)
+    try:
+        if kind in ("rule", "clash"):
+            for i in involved(m, w)[:MAX_LESSONS]:
+                rows = b.ids.get(i)
+                if not rows: continue
+                a = rows[0]
+                for s in sorted(_slots(m, spec, days, i, memo), key=lambda s: (s["d"] != a["d"], s["d"], s["p"])):
+                    if len(out) >= MAX_PAIRS: return out
+                    if s["state"] != "no" or s["swap"] or (y := _alone(b, rows, s["d"], s["p"], a["n"], {i})) is None: continue
+                    put(_moves(m, spec, days, y, {(s["d"], q) for q in range(s["p"], s["p"] + a["n"])}, c), dict(kind="move", id=i, d=s["d"], p=s["p"]))
+        elif kind == "deployment" and _dep_parts(w.get("key"))[1] == "teachers":
+            for fx in _options(m, spec, days, w, c, memo)[0]:
+                f = fx[0]
+                if f["kind"] != "teacher" or fixes.judge(m, spec, days, f, c)["state"] != "no": continue
+                ids = {x["id"] for x in _of_key(m["lessons"], fixes._key(f["key"]))}; who = set()
+                for i in ids:   # as fixes.judge sees a teacher change: only a teacher who was not there can clash
+                    rows = b.ids[i]; had = {t for y in rows for t in y["teachers"]}; x = rows[0]
+                    cand = [dict(y, teachers=[t for t in f["teachers"] if t not in had], classes=[], group=ENTIRE, rain="", room="") for y in rows]
+                    if b.clash(cand, x["d"], x["p"], x["n"], ignore=ids) is not None: who.add(_alone(b, cand, x["d"], x["p"], x["n"], ids))
+                if len(who) == 1 and None not in who:
+                    cells = {(x["d"], q) for i in ids for x in b.ids[i] for q in fixes._span(x)}
+                    put(_moves(m, spec, days, who.pop(), cells, c), f)
+    except ValueError: return []   # the warning names a lesson or key the timetable no longer has
+    return out
 
 def rank(m, spec, days, s):
     """the sort key of a suggestion: fewer fixes, fewer lessons moved, ok before prefer, a teacher change's lower load against
@@ -283,18 +357,22 @@ def _suggestion(m, spec, days, fx, c):
 
 def suggest(m, spec, days, w, limit=3):
     """up to limit ways to settle the warning -> dict(suggestions, none, blocked): suggestions dict(fixes, text, disturbs, state,
-    moved), ranked; none a sentence when there are none; blocked, when there are none, up to three fixes that would settle it
-    if they were allowed, as dict(text, why)"""
-    ctx = fixes._ctx(m); good, bad = _options(m, spec, days, w, ctx)
+    moved), the single fixes and, when fewer than three of them settle it, the pairs, ranked together; none a sentence when
+    there are none; blocked, when there are none, up to three single fixes that would settle it if they were allowed, as
+    dict(text, why)"""
+    ctx, keep = fixes._ctx(m), {}; good, bad = _options(m, spec, days, w, ctx, keep)
     if not good and not bad: return dict(suggestions=[], none=NOTHING, blocked=[])
-    out, seen, passed, memo = [], set(), False, _before(m, spec, w)
+    out, seen, memo = [], set(), _before(m, spec, w)
     for fx in good:
         if repr(fx) in seen: continue
         seen.add(repr(fx)); c = chain(m, spec, days, fx, ctx)
         if c["state"] in OK:
-            passed = True
             if settles(m, spec, days, w, c["lessons"], memo): out.append(_suggestion(m, spec, days, fx, c))
         elif c["state"] == "no": bad.append((fx, c["why"]))
+    for fx in pairs(m, spec, days, w, out, ctx, keep):   # [] when three singles were found
+        if repr(fx) in seen: continue
+        seen.add(repr(fx)); c = chain(m, spec, days, fx, ctx, keep)
+        if c["state"] in OK and settles(m, spec, days, w, c["lessons"], memo): out.append(_suggestion(m, spec, days, fx, c))
     out.sort(key=lambda s: rank(m, spec, days, s))
     if out: return dict(suggestions=out[:limit], none=None, blocked=[])
     blocked, tried = [], set()
@@ -305,4 +383,4 @@ def suggest(m, spec, days, w, limit=3):
         if not r["problems"] and settles(m, spec, days, w, r["lessons"], memo):
             blocked.append(dict(text=" Then ".join(say(m, spec, days, f) for f in fx), why=why))
             if len(blocked) == 3: break
-    return dict(suggestions=[], none=NO_SINGLE if passed and not blocked else NONE_PASS, blocked=blocked)
+    return dict(suggestions=[], none=NONE_PASS if blocked else NO_FIX, blocked=blocked)
