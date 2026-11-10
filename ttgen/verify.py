@@ -105,8 +105,9 @@ def clashes(m):
     out, own = [], set(m.get("choice_problems") or ())   # the second-choice sentences are listed as choice warnings
     for text in m["checks"]["problems"]:
         if text.endswith("planned.") or text in own: continue
-        who = re.match(r"(?:Teacher double-booked|Class clash): (.+?) on ", text)
-        out.append(warning("clash:" + text, "clash", text, group=who.group(1) if who else "School"))
+        who = re.match(r"(Teacher double-booked|Class clash): (.+?) on ", text)   # whose week the Fix the timetable button opens
+        where = (dict(teacher=who.group(2)) if who.group(1).startswith("Teacher") else dict(cls=who.group(2))) if who else None
+        out.append(warning("clash:" + text, "clash", text, group=who.group(2) if who else "School", where=where))
     return out
 
 
@@ -378,7 +379,8 @@ def typed(spec, report):
     return out
 
 def typed_again(m, spec, touched, was=()):
-    """a typed rule reported Met or Partly whose lessons a fix changed, added or deleted (was: the rows as they were before a fix changed them): its report line may no longer be true, so it is to be checked again"""
+    """a typed rule reported Met or Partly whose lessons a fix changed, added or deleted (was: the rows as they were before a fix changed them): its report line may no longer be true, so it is to be checked again.
+    A rule whose scope cannot be read is about every lesson: any fix marks it."""
     touched, was = set(touched or ()), list(was or ())
     if not touched and not was: return []
     rows = {}
@@ -388,7 +390,7 @@ def typed_again(m, spec, touched, was=()):
         res = str((rows.get(n) or {}).get("result") or "").strip()
         if res not in ("Met", "Partly"): continue
         test = in_scope(m, spec, r)
-        if test is None or not (any(x["id"] in touched and test(x) for x in m["lessons"]) or any(test(x) for x in was)): continue
+        if test is not None and not (any(x["id"] in touched and test(x) for x in m["lessons"]) or any(test(x) for x in was)): continue
         sentence = str(r.get("text") or "").strip().rstrip(".")
         out.append(warning(f"typed:{n}:again", "typed", f"T{n} was reported {res.lower()}, but lessons it is about were changed in the app. Check it again: {sentence}.", r.get("strength") or "Must"))
     return out

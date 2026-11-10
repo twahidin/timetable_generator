@@ -73,6 +73,17 @@ def clashes_drop_the_planned_lines_and_name_the_group():
     assert not any(w["text"].endswith("planned.") for w in ws)
 
 @t
+def a_teacher_or_class_clash_says_whose_week_to_open():
+    sp = primary(); c1, c2 = sp["classes"][0]["class"], sp["classes"][1]["class"]
+    m = model_for(sp, [(0, 0, 1, [c1], "English Language", "Entire Class", ["Ms X"], ""), (0, 0, 1, [c2], "Mathematics", "Entire Class", ["Ms X"], ""),
+                       (1, 0, 1, [c1], "Art", "Entire Class", ["Mr Y"], ""), (1, 0, 1, [c1], "Music", "Entire Class", ["Mr Z"], "")])
+    ws = verify.clashes(m)
+    t = [w for w in ws if w["text"].startswith("Teacher double-booked: Ms X on ")]; k = [w for w in ws if w["text"].startswith(f"Class clash: {c1} on ")]
+    assert t and all(w["where"] == dict(teacher="Ms X") for w in t), t
+    assert k and all(w["where"] == dict(cls=c1) for w in k), k
+    assert all(w["where"] is None for w in ws if not w["text"].startswith(("Teacher double-booked: ", "Class clash: "))), ws
+
+@t
 def ops_use_the_row_ids():
     import sync
     sp = primary(); sync.ensure_ids(sp); reader.derive(sp)
@@ -342,6 +353,18 @@ def typed_again_after_a_fix_touches_a_lesson_the_rule_is_about():
     kinds = [(w["kind"], w["key"]) for w in verify.warnings(m, touched={1})["warnings"]]
     assert kinds[-2:] == [("typed", "typed:1:again"), ("choice", "choice:Second choice 1: no such rule.")], kinds
     assert ("typed", "typed:1:again") not in [(w["kind"], w["key"]) for w in verify.warnings(m)["warnings"]]
+
+@t
+def a_typed_rule_whose_scope_cannot_be_read_is_about_every_lesson():
+    sp = primary(); c = sp["classes"][0]["class"]; tch = sp["teachers"][0]["name"]
+    gone = dict(id=9, d=0, p=3, n=1, level="", block="", classes=[c], subject="Art", group="Entire Class", teachers=[tch], room="", ext=False, rain="")
+    def again(scope, result, touched, was=()):
+        s2 = copy.deepcopy(sp); s2["rules"] = [dict(scope=scope, target="Someone", rule="In words", text="No PE first.", strength="Must", week="Both", day="All")]
+        m = model_for(s2, [(0, 1, 1, [c], "English", "Entire Class", [tch], "")]); m["rule_report"] = [dict(no=1, strength="Must", applies="", rule="x", result=result, how="")]
+        return [w["key"] for w in verify.typed_again(m, m["checked_setup"], touched, was)]
+    for scope in ("", None, "Nonsense"):
+        assert again(scope, "Met", {1}) == ["typed:1:again"] and again(scope, "Partly", {7}) == ["typed:1:again"] and again(scope, "Met", set(), [gone]) == ["typed:1:again"], scope
+        assert again(scope, "Met", set()) == [] and again(scope, "Not met", {1}) == [], scope
 
 @t
 def typed_again_judges_the_rows_as_they_were_too():
