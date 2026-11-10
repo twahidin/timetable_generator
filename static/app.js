@@ -2266,7 +2266,7 @@ async function publishDraft() {
 async function decide(answer, key) {   // answer is step5, left or open; the key is the warning's (it may hold a "|")
   const j = await post("/api/draft/decide", { key, answer });
   if (!j) return;
-  S.draft = j; render();
+  S.draft = j; drawDraft();   // only the result area: render() would reset the chosen file names
   poll();
 }
 /* the draft survives a reload: step 8 asks for it once when the server has one and this page does not */
@@ -2287,7 +2287,7 @@ function draftHTML(j) {
     <div class="row" style="margin-top:8px"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
     <p class="muted small">Its downloads and the personal student codes are below.</p>`;
   const ws = j.warnings || [], c = Draft.counts(ws), f = S.dfilter || "open", pub = G.st && G.st.published, n = j.open ?? c.open, nl = j.left ?? c.left, n5 = j.step5 ?? c.step5;   // the server counts the step 5 decisions whose warning has gone
-  const where = w => w.where ? ` · ${esc(w.where.cls)} · ${esc(w.where.day)} · period ${Number(w.where.period) + 1}` : "";
+  const where = w => w.where ? ` · ${esc(w.where.cls)} · ${esc(w.where.day)} · period ${esc(w.where.period)}` : "";
   const row = w => { const d = w.decision && w.decision.answer, ans = Draft.answerText(w), side = Draft.sideText(w);
     return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}"><div class="wt">${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where(w)}</div>
       <div class="row warnbtns">${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "left" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" ? "" : `<button data-decide="left|${esc(w.key)}">Leave it</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div></li>`; };
