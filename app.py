@@ -12,7 +12,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, store, sync
+import access, checks, draft, store, sync
 from ttgen import choices
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -301,10 +301,9 @@ def past_setups():
                             classes={b["block"]: b["classes"] for b in x["spec"].get("blocks") or [] if b.get("block") and b.get("classes")})
                        for x in store.past_setups()[:12]]}
 
-def _uploaded_timetable(work):
-    """the setup workbook and timetable sent with the request, saved in work and read: (setup path or None, timetable
-    path, export model). A database this app or the skill made holds its setup, so it can come alone."""
-    from ttgen.export import model_from_files
+def _save_uploads(work):
+    """the setup workbook and timetable sent with the request, saved in work: (setup path or None, timetable path). A
+    database this app or the skill made holds its setup, so it can come alone."""
     from ttgen.database import is_db
     a, b = request.files.get("setup"), request.files.get("timetable")
     if not b: raise ValueError("Send the timetable: a workbook with a Lessons sheet, or a timetable database (.sqlite).")
@@ -312,6 +311,12 @@ def _uploaded_timetable(work):
     sp = None
     if a: sp = os.path.join(work, "setup.xlsx"); a.save(sp)
     elif not is_db(tp): raise ValueError("Send the setup workbook too (only a timetable database from this app can come alone).")
+    return sp, tp
+
+def _uploaded_timetable(work):
+    """the files sent with the request, read against their own setup: (setup path or None, timetable path, export model)"""
+    from ttgen.export import model_from_files
+    sp, tp = _save_uploads(work)
     try: m = model_from_files(sp, tp)
     except Exception as e: raise ValueError(f"Could not read the files: {e}")
     if not m["lessons"]: raise ValueError("The timetable has no lessons.")
@@ -340,34 +345,48 @@ def export_printouts():
         return resp
     finally: shutil.rmtree(work, ignore_errors=True)
 
-@app.post("/api/import-timetable")
+NO_SETUP = "Save the school's setup first: the timetable is checked against it."
+
+@app.post("/api/draft")
 @need("committee")
-def import_timetable():
-    """a timetable made outside the app (the skill with an AI agent, or another program), sent like Printouts: checked
-    against its setup and summed up. With publish=1 it then becomes the published timetable."""
-    go = request.form.get("publish") == "1"
+def draft_upload():
+    """a timetable made outside the app (the skill with an AI agent, or another program) becomes the draft: kept on the
+    server and checked against the saved setup. A draft with fixes that were never published is replaced only with replace=1."""
+    spec, _ = store.load_setup()
+    if not spec: return {"error": NO_SETUP}, 409
+    fixes = (store.read_json(os.path.join(draft.DIR, "meta.json"), {}) or {}).get("fixes") or []
+    if fixes and request.form.get("replace") != "1": return {"error": "The draft has fixes that were never published.", "fixes": len(fixes)}, 409
     work = tempfile.mkdtemp(prefix="tt-")
     try:
-        try: sp, tp, m = _uploaded_timetable(work)
+        try:
+            sp, tp = _save_uploads(work)
+            draft.save(sp, tp, os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file", spec=spec)
         except ValueError as e: return {"error": str(e)}, 400
-        ch, (saved, _) = m["checks"], store.load_setup()
-        ours = str(((saved or {}).get("school") or {}).get("name") or "").strip()
-        cid = str(((m.get("setup") or {}).get("school") or {}).get("config_id") or "").strip(); ver = store.setup_record()["v"]
-        got = re.fullmatch(r"v(\d+)", cid)
-        state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
-                 "same" if int(got[1]) == ver else "older" if int(got[1]) < ver else "newer")
-        out = dict(config_id=cid, setup_version=f"v{ver}", config_state=state, school=m["school"]["name"], timetable=m["school"]["timetable"], ok=ch["ok"], problems=ch["problems"][:30],
-                   more=max(0, len(ch["problems"]) - 30), after=ch["after_school"][:30], lessons=ch["lessons"], classes=len(m["classes"]),
-                   teachers=len(m["teachers"]), students=len(m["students"]), notes=m["notes"][:12], published=False,
-                   rule_report=m.get("rule_report") or [], typed=len(typed_rules(saved)) if saved else 0,
-                   choices_used=m.get("choices_used") or [], choice_problems=m.get("choice_problems") or [],
-                   choices=len(saved.get("choices") or []) - len({i for i, _ in choices.problems(saved)}) if saved else 0,
-                   other_school=ours if ours and ours.lower() != str(m["school"]["name"]).strip().lower() else "")
-        if not go: return jsonify(out)
-        name = os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file"
-        store.publish(sp, tp, source=name, log=lambda *x: None)
-        return jsonify(dict(out, published=True))
+        return jsonify(draft.info())
     finally: shutil.rmtree(work, ignore_errors=True)
+
+@app.get("/api/draft")
+@need("committee")
+def draft_get():
+    try: return jsonify(draft.info() or {"draft": None})
+    except LookupError: return {"error": NO_SETUP}, 409
+    except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
+
+@app.post("/api/draft/decide")
+@need("committee")
+def draft_decide():
+    body = request.get_json(force=True, silent=True); body = body if isinstance(body, dict) else {}
+    try: return jsonify(draft.decide(str(body.get("key") or ""), body.get("answer")))
+    except ValueError as e: return {"error": str(e)}, 400
+    except LookupError: return {"error": NO_SETUP}, 409
+
+@app.post("/api/draft/publish")
+@need("committee")
+def draft_publish():
+    try: return jsonify(draft.publish())
+    except FileNotFoundError: return {"error": "There is no draft to publish."}, 404
+    except LookupError: return {"error": NO_SETUP}, 409
+    except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
 
 @app.get("/download/template/<kind>")
 @need("committee")
@@ -408,7 +427,8 @@ def pub_info():
     m = pub["meta"]
     return dict(at=m["published_at"], ok=m["ok"], after=len(m.get("after_school", [])), students=m.get("students", 0), classes=m.get("classes", 0),
                 files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on(), source=m.get("source"), rule_report=m.get("rule_report", []),
-                choices_used=m.get("choices_used", []), choice_problems=m.get("choice_problems", []), config_id=m.get("config_id", ""))
+                choices_used=m.get("choices_used", []), choice_problems=m.get("choice_problems", []), config_id=m.get("config_id", ""),
+                compared_v=m.get("compared_v", ""), open=m.get("open", 0), left=m.get("left", []), fixes=m.get("fixes", []))
 
 @app.get("/api/status")
 @need("committee", "head")
@@ -416,7 +436,7 @@ def status():
     have, probs = access.configured()
     _, at = store.load_setup()
     if role() == "head": return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info())
-    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info())
+    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary())
 
 NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
 

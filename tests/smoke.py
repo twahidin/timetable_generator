@@ -29,11 +29,41 @@ def test_removed_routes():
 
 def test_status_shape():
     j = c.get("/api/status").get_json()
-    assert set(j) == {"role", "codes", "code_problems", "volume", "setup_saved_at", "published"}, sorted(j)
-    assert j["published"] is None and j["role"] == "committee"
+    assert set(j) == {"role", "codes", "code_problems", "volume", "setup_saved_at", "published", "draft"}, sorted(j)
+    assert j["published"] is None and j["role"] == "committee" and j["draft"] is None
 
 def test_old_runs_folder_is_harmless():
     assert c.get("/api/past-setups").status_code == 200
+
+def _lessons_workbook(rows):   # the Lessons sheet an agent hands over: rows = [(day, start, periods, level, class, subject, teachers)]
+    import io, openpyxl
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"
+    ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
+    for i, (day, p, n, lv, cls, subj, tch) in enumerate(rows, 1): ws.append([i, day, p, p + n - 1, n, "", "", lv, "", cls, subj, "Entire Class", ", ".join(tch), "", "", ""])
+    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+def _setup_workbook(spec):
+    import io
+    from ttgen.template import write_template
+    d = tempfile.mkdtemp(); p = os.path.join(d, "setup.xlsx"); write_template(spec, p)
+    return open(p, "rb").read()
+
+def _draft_form(spec, rows, **more):
+    import io
+    return dict(setup=(io.BytesIO(_setup_workbook(spec)), "setup.xlsx"), timetable=(io.BytesIO(_lessons_workbook(rows)), "timetable.xlsx"), **more)
+
+def _one_class_row(spec, skip=()):   # a step 5 row for exactly one class, with a teacher and periods
+    return next(r for r in spec["lessons"] if not r.get("block") and r.get("code") == "Entire Class" and len(r.get("classes") or []) == 1 and r.get("teachers")
+                and r.get("periods") and r["classes"][0] not in skip)
+
+def _lesson_of(spec, row, teachers):
+    lv = row.get("level") or next(x["level"] for x in spec["classes"] if x["class"] == row["classes"][0]); ds = spec["day_structure"][lv]; day = next(iter(ds))
+    return (day, ds[day].index("L"), int(row["periods"]), lv, row["classes"][0], row["subject"], teachers)
+
+def test_draft_needs_a_saved_setup():   # runs before any test that saves a setup
+    r = c.post("/api/draft", data=_draft_form(A.sample("primary"), []), content_type="multipart/form-data")
+    assert r.status_code == 409 and "Save the school's setup first" in r.get_json()["error"], r.get_json()
+    assert c.get("/api/draft").get_json() == {"draft": None}
 
 def test_setup_round_trip():
     spec = c.get("/api/sample/secondary").get_json()
@@ -219,7 +249,7 @@ def test_the_head_check_runs_on_the_setup_held_under_the_lock():
     assert now["v"] == v2 and next(x for x in now["spec"]["teachers"] if x["_id"] == "newhire003")["name"] == "Batch hire"
 
 def test_a_head_cannot_download_or_publish_or_replace():
-    for method, url in (("POST", "/api/build"), ("PUT", "/api/setup"), ("POST", "/api/import-timetable"), ("GET", "/api/codes.csv"), ("POST", "/api/check"), ("GET", "/api/setup/copies"), ("POST", "/api/setup/restore")):
+    for method, url in (("POST", "/api/build"), ("PUT", "/api/setup"), ("POST", "/api/draft"), ("GET", "/api/codes.csv"), ("POST", "/api/check"), ("GET", "/api/setup/copies"), ("POST", "/api/setup/restore")):
         assert h.open(url, method=method, json={}).status_code == 401, url
     s = h.get("/api/status").get_json(); assert s["role"] == "head" and "codes" not in s and "code_problems" not in s
 
@@ -262,6 +292,64 @@ def test_the_workbook_carries_the_configuration_id():
     wb = openpyxl.load_workbook(io.BytesIO(c.post("/api/build", json=spec).data), read_only=True)
     assert {str(r[0]): r[1] for r in wb["Settings"].iter_rows(min_row=5, max_row=12, values_only=True) if r[0]}["Configuration id"] == f"v{v}+"
 
+def _warn_keys(j): return [w["key"] for w in j["warnings"]]
+
+def test_draft_upload_check_decide_publish():
+    spec = A.sample("primary"); assert c.put("/api/setup", json=spec).status_code == 200
+    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec)
+    rows = [_lesson_of(spec, row, ["Nobody"])]
+    r = c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data"); j = r.get_json()
+    assert r.status_code == 200 and j["open"] == len(j["warnings"]) and j["config_state"] in ("same", "older", "unknown", "unsaved"), j
+    assert len(set(_warn_keys(j))) == len(j["warnings"]) and j["left"] == 0 and j["fixes"] == [] and j["lessons"] == 1
+    k = f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"; assert k in _warn_keys(j)
+    j2 = c.post("/api/draft/decide", json={"key": k, "answer": "left"}).get_json()
+    assert j2["left"] == 1 and j2["open"] == j["open"] and next(w for w in j2["warnings"] if w["key"] == k)["decision"]["answer"] == "left"
+    j3 = c.post("/api/draft/decide", json={"key": k, "answer": "step5"}).get_json(); assert k not in _warn_keys(j3), _warn_keys(j3)[:5]
+    now = c.get("/api/setup").get_json()["spec"]; assert next(x["teachers"] for x in now["lessons"] if x["_id"] == row["_id"]) == ["Nobody"]
+    assert any("Before updating step 5 from the timetable" == x["what"] for x in c.get("/api/setup/copies").get_json())
+    kp = next((w["key"] for w in j3["warnings"] if w["key"].endswith(":periods")), None)
+    if kp is None:   # make a periods warning: one period too few for another class
+        row2 = _one_class_row(spec, skip=(row["classes"][0],)); l2 = _lesson_of(spec, row2, row2["teachers"]); l2 = l2[:2] + (max(1, l2[2] - 1),) + l2[3:]
+        c.post("/api/draft", data=_draft_form(spec, [_lesson_of(spec, row, ["Nobody"]), l2]), content_type="multipart/form-data")
+        kp = f"dep:C:{row2['classes'][0]}:{row2['subject']}:periods"
+    r = c.post("/api/draft/decide", json={"key": kp, "answer": "step5"}); assert r.status_code == 400 and "step 3" in r.get_json()["error"], r.get_json()
+    st = c.get("/api/status").get_json()["draft"]; assert st["open"] == c.get("/api/draft").get_json()["open"] and st["source"] == "timetable.xlsx" and st["uploaded_at"]
+    assert c.post("/api/draft/decide", json={"key": k, "answer": "open"}).status_code == 200
+    assert h is None or h.post("/api/draft/decide", json={"key": k, "answer": "left"}).status_code == 401
+
+def test_draft_decisions_survive_a_setup_change_and_stale_ones_go():
+    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec); other = _one_class_row(spec, skip=(row["classes"][0],))
+    c.post("/api/draft", data=_draft_form(spec, [_lesson_of(spec, row, row["teachers"])]), content_type="multipart/form-data")
+    k = f"dep:C:{other['classes'][0]}:{other['subject']}:missing"; j = c.get("/api/draft").get_json(); assert k in _warn_keys(j)
+    assert c.post("/api/draft/decide", json={"key": k, "answer": "left"}).get_json()["left"] >= 1
+    v = c.get("/api/setup").get_json()["v"]
+    assert c.post("/api/setup/changes", json={"client": "t", "since": v, "ops": [["del", "lessons", other["_id"]]]}).status_code == 200
+    j = c.get("/api/draft").get_json(); assert k not in _warn_keys(j) and j["setup_version"] == f"v{v + 1}"
+    assert k not in store.read_json(os.path.join(store.DATA, "draft", "decisions.json"), {})
+    r = c.post("/api/draft/decide", json={"key": k, "answer": "step5"}); assert r.status_code == 400 and "no longer on the list" in r.get_json()["error"]
+
+def test_a_new_upload_keeps_left_decisions():
+    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec); rows = [_lesson_of(spec, row, ["Somebody"])]
+    c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data")
+    k = f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"; c.post("/api/draft/decide", json={"key": k, "answer": "left"})
+    j = c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data").get_json()
+    assert j["left"] == 1 and next(w for w in j["warnings"] if w["key"] == k)["decision"]["answer"] == "left"
+    store.write_json(os.path.join(store.DATA, "draft", "meta.json"), dict(store.read_json(os.path.join(store.DATA, "draft", "meta.json")), fixes=[{"x": 1}]))
+    r = c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data")
+    assert r.status_code == 409 and r.get_json() == {"error": "The draft has fixes that were never published.", "fixes": 1}, r.get_json()
+    assert c.post("/api/draft", data=_draft_form(spec, rows, replace="1"), content_type="multipart/form-data").status_code == 200
+    assert c.get("/api/draft").get_json()["fixes"] == []
+
+def test_draft_for_another_school_is_said():
+    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec); theirs = A.sample("primary"); theirs["school"]["name"] = "Somewhere Else Primary"
+    j = c.post("/api/draft", data=_draft_form(theirs, [_lesson_of(spec, row, row["teachers"])]), content_type="multipart/form-data").get_json()
+    assert j["other_school"] == spec["school"]["name"], j.get("other_school")
+    assert c.post("/api/draft", data=dict(setup=(__import__("io").BytesIO(b"not a workbook"), "s.xlsx"), timetable=(__import__("io").BytesIO(b"x"), "t.xlsx")), content_type="multipart/form-data").status_code == 400
+
+def test_publishing_with_no_draft_is_404():
+    shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True)
+    assert c.post("/api/draft/publish").status_code == 404 and c.get("/api/status").get_json()["draft"] is None
+
 def test_publish_uploaded_timetable():   # slow: solves the primary sample
     work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx")
     env = dict(os.environ, PYTHONPATH=ROOT)
@@ -276,15 +364,16 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     import openpyxl   # the agent's rule report rides on the timetable workbook
     wb = openpyxl.load_workbook(tt); ws = wb.create_sheet("Rule report"); ws.append(["No.", "Must / Prefer", "Applies to", "Rule", "Result", "How"]); ws.append([1, "Must", "Whole school", "Nothing in words", "Met", "Checked."])
     wc = wb.create_sheet("Choices used"); wc.append(["No.", "Item", "Used", "How"]); wc.append([1, "x", "First choice", ""]); wb.save(tt)
-    r = c.post("/api/import-timetable", data={"publish": "1", "setup": (open(setup, "rb"), "setup.xlsx"), "timetable": (open(tt, "rb"), "timetable.xlsx")},
-               content_type="multipart/form-data")
-    j = r.get_json(); assert r.status_code == 200 and j["published"] is True, j
-    assert j["rule_report"][0]["result"] == "Met" and j["typed"] == 0, j["rule_report"]
-    assert j["config_id"] == f"v{v}" and j["config_state"] == "same", j
-    assert j["choices_used"][0]["used"] == "First choice" and j["choice_problems"] and j["choices"] == 0, j
+    r = c.post("/api/draft", data={"setup": (open(setup, "rb"), "setup.xlsx"), "timetable": (open(tt, "rb"), "timetable.xlsx")}, content_type="multipart/form-data")
+    d = r.get_json(); assert r.status_code == 200 and d["open"] >= 0 and len(set(w["key"] for w in d["warnings"])) == len(d["warnings"]), d
+    assert d["rule_report"][0]["result"] == "Met" and d["typed"] == 0, d["rule_report"]
+    assert d["config_id"] == f"v{v}" and d["config_state"] == "same", d
+    assert d["choices_used"][0]["used"] == "First choice" and d["choices"] == 0, d
+    r = c.post("/api/draft/publish"); j = r.get_json(); assert r.status_code == 200 and j["published"] is True, j
     p = c.get("/api/status").get_json()["published"]
     assert p and p["source"] == "timetable.xlsx" and p["rule_report"][0]["how"] == "Checked.", p
-    assert p["choices_used"] == j["choices_used"] and p["choice_problems"] == j["choice_problems"] and p["config_id"] == j["config_id"], p
+    assert p["compared_v"] == f"v{v}" and p["open"] == d["open"] and p["fixes"] == [] and isinstance(p["left"], list), p
+    assert p["choices_used"] == d["choices_used"] and p["choice_problems"] and p["config_id"] == d["config_id"], p
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
     assert t.get("/timetable").status_code == 200
 

@@ -344,4 +344,8 @@ def choices_(m):
 def warnings(m, spec=None):
     """every warning for the timetable m, in KINDS order, and the rules that could not be checked"""
     spec = spec or m["checked_setup"]; rule_ws, not_checked = rules(m, spec)
-    return dict(warnings=clashes(m) + deployment(m, spec) + rule_ws + typed(spec, m.get("rule_report")) + choices_(m), not_checked=not_checked)
+    ws = clashes(m) + deployment(m, spec) + rule_ws + typed(spec, m.get("rule_report")) + choices_(m); seen = {}
+    for w in ws:   # several hits can share a key (two groups in one slot): a decision belongs to one warning, so each key is made unique
+        seen[w["key"]] = n = seen.get(w["key"], 0) + 1
+        if n > 1: w["key"] += f"#{n}"
+    return dict(warnings=ws, not_checked=not_checked)
