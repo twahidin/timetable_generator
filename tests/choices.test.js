@@ -173,4 +173,14 @@ t("problems read as Python's do", () => {
   assert.deepStrictEqual(p[14], ["This choice is not a setting, a rule or a recess."]);
   assert.deepStrictEqual(p[15], ["The window 9.50 to 10.10 is shorter than the recess (2 periods)."]);
 });
+t("setFallback copies the rule for Instead once, and only on a rule choice", () => {
+  const s = fixture();
+  s.choices = [{ kind: "rule", order: 1, rule_id: "r1", fallback: "Drop" }, { kind: "setting", order: 2, key: "recess", second: "No" }];
+  assert.strictEqual(Choices.setFallback(s, 0, "Instead"), true);
+  assert.deepStrictEqual(s.choices[0].instead, { scope: "Level", target: "Sec 1", rule: "Not in periods", strength: "Must" });
+  s.choices[0].instead.from = 3; Choices.setFallback(s, 0, "Prefer"); Choices.setFallback(s, 0, "Instead");
+  assert.strictEqual(s.choices[0].instead.from, 3); assert.strictEqual(s.choices[0].fallback, "Instead");
+  assert.strictEqual(Choices.setFallback(s, 1, "Drop"), false); assert.strictEqual(s.choices[1].fallback, undefined);
+  assert.strictEqual(Choices.setFallback(s, 5, "Drop"), false);
+});
 console.log(`${n} cases passed`);

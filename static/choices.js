@@ -206,11 +206,18 @@ var Choices = (function () {
     if (FALLBACKS.indexOf(fallback) < 0) return { error: "Pick Make it Prefer, Instead or Drop it for the second choice." };
     if (hasChoice(spec, function (c) { return c.kind === "rule" && ruleIndex(spec, c) === i; })) return { error: ruleWords(spec, i) + " already has a second choice." };
     row = { kind: "rule", rule_id: ruleId, fallback: fallback };
-    if (fallback === "Instead") {
-      row.instead = instead ? JSON.parse(JSON.stringify(instead)) : JSON.parse(JSON.stringify(spec.rules[i]));
-      delete row.instead._id;
-    }
+    if (fallback === "Instead") row.instead = copyRule(instead || spec.rules[i]);
     return add(spec, row);
+  }
+  function copyRule(r) { var x = JSON.parse(JSON.stringify(r)); delete x._id; return x; }
+  /* the Second choice of a rule changed on the list: Instead starts from a copy of the rule when it has no rule of its own yet */
+  function setFallback(spec, i, fallback) {
+    var c = list(spec, "choices")[i], j;
+    if (!c || c.kind !== "rule") return false;
+    c.fallback = fallback;
+    j = ruleIndex(spec, c);
+    if (fallback === "Instead" && !(c.instead || {}).rule && j !== null) c.instead = copyRule(spec.rules[j]);
+    return true;
   }
   function newRecess(spec, level, from, to) {
     if (!timeOk(from) || !timeOk(to)) return { error: "Give the window as two times." };
@@ -244,6 +251,6 @@ var Choices = (function () {
 
   return { ordered: ordered, ruleLabel: ruleLabel, typedNo: typedNo, itemLabel: itemLabel, firstText: firstText, secondText: secondText,
     ruleIndex: ruleIndex, settingValue: settingValue, recessFirst: recessFirst, problems: problems, candidates: candidates,
-    newSetting: newSetting, newRule: newRule, newRecess: newRecess, move: move, moveTo: moveTo, prune: prune };
+    newSetting: newSetting, newRule: newRule, newRecess: newRecess, move: move, moveTo: moveTo, prune: prune, setFallback: setFallback };
 })();
 if (typeof module !== "undefined") module.exports = Choices;
