@@ -5,7 +5,7 @@ From the build ledger of `2026-11-10-wizard-stage-6b-choices-and-configuration-i
 ## Rulings (decisions made where the plan was silent or wrong)
 
 - Pre-flight: Task 1 also changes `SKILL.md`'s version line to 2026-11.1 (one line), so the README cell and the skill agree at every commit; Task 2 keeps the rest of the `SKILL.md` work. Cost if wrong: none (Task 2 would have written the same line).
-- Task 1: rule choices on the Choices sheet are matched back by label, first untaken (plan-mandated). Ids never reach the workbook and a label carries scope, target, subject and rule, so two identical labels are the same shape of rule and a swap only matters when their periods differ. Cost if wrong: an Instead payload lands on the twin rule.
+- Task 1: rule choices on the Choices sheet are matched back by label, first untaken (plan-mandated). Overturned at the final review: a label of scope, target, subject and rule let two Not in periods rows for one level share an Item, so a Drop came back on the wrong one. The Item now also carries the week (not Both), day (not All), periods, number and venues, never the strength, in `ttgen/choices.py` and `static/choices.js` alike; exact match with first untaken stays for true duplicates, and the Must rows that Settings stands for are never matched.
 - Task 1 review: periods are 0-based everywhere in the app (Settings says "Numbered 0-N-1"), so "periods 7-8" in the first-choice text is right; the recess rows default to Level. The README's stale `Skill version: 2026-11` was carried into this task and is now 2026-11.1.
 - Task 2 review: `solve --export` stored the fallback-applied setup in the database, so a re-export would re-apply Drop and Instead by index. The `record_choices` helper now sets `m["setup"]` to the setup as read. `read_db` callers are `export.model_from_files` (updated) and tests; `test_rules` checks the two copies of `ttgen` are identical.
 - Task 6: the brief's way of making the sums fail (a Sec 1 Not in periods over the day) is not critical in `checks.py`. The implementer used the no-school fixed lesson with a Drop choice, as Task 4's smoke test does. Cost if wrong: none, the check is equivalent.
@@ -16,7 +16,7 @@ From the build ledger of `2026-11-10-wizard-stage-6b-choices-and-configuration-i
 
 Reading and writing the Choices sheet
 
-- Rule choices are matched back by label, so identical labels are interchangeable (see Rulings).
+- Rule choices are matched back by label, so only rows identical in every labelled part are interchangeable (see Rulings).
 - A setting's label is matched by its first 30 characters, as the Settings reader does.
 - `used_from_rows` returns an empty list silently for an unreadable Choices used header (then k is 0 and a floated recess reads as a break).
 - An unrecognised Used value ("Seconds") reads as empty, which counts as First choice, and raises no problem.

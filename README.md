@@ -216,8 +216,8 @@ no sentence is flagged on step 6 and by `check`.
 that have a second choice. **+ Add a second choice** picks the item (a setting that is Yes/No or a number, a rule, or a
 level's recess) and what to do instead: a setting takes the other value; a rule is made **Prefer**, replaced by another
 rule (**Use this instead**) or **Drop**ped; a recess becomes floating between two times (recess for a level that has a
-fixed recess). Drag the rows, or use the arrows, to set the order; an item has one second choice, and a row whose rule
-or level has gone says what is missing. The workbook carries them on a **Choices** sheet (First choice and Second choice
+fixed recess). Drag the rows, or use the arrows, to set the order; an item has one second choice. Deleting a rule on step 6
+removes its second choice; a workbook row whose rule or level has gone says what is missing. The workbook carries them on a **Choices** sheet (First choice and Second choice
 columns, in order) with the pick from step 7. The agent tries the first choices; if no timetable fits, `python -m
 ttgen solve` gives way one item at a time from the top of the list and stops at the first timetable that fits, never
 changing anything that is not on the list (the setup's own rows are not changed: each fallback is applied to a copy).
