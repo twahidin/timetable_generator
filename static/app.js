@@ -244,7 +244,7 @@ function headLocks(main, id) {
   const off = (el, why) => { el.disabled = true; if (why && !el.title) el.title = why; };
   const all = () => [...main.querySelectorAll("input, select, textarea, button")];
   if (locked(id)) {
-    all().forEach(el => off(el));
+    all().forEach(el => { if (el.dataset.rtab === undefined) off(el); });   // the tabs of step 6 still switch
     main.querySelectorAll("[data-pop]").forEach(el => el.classList.add("ro"));
     main.insertAdjacentHTML("afterbegin", `<div class="notice readonly">Only the committee can change this step.</div>`);
     return;
@@ -410,6 +410,9 @@ const subjectTest = names => { const w = new Set(namesList(names).map(n => n.toL
 const EVERY = "Every class";   // Fixed lessons: that subject for every class of the level (Level All: of the whole school)
 const isFixedLesson = r => ["Class", "Group", "Level", "School"].includes(r.scope);
 const scopesOf = rt => String(rt.scopes || "").split(",").map(x => x.trim());
+const TABS = [["school", "School", ["School"]], ["levels", "Levels and classes", ["Level", "Class", "Block", "Group"]], ["subjects", "Subjects", ["Subject", "Department"]], ["venues", "Venues", ["Room"]], ["teachers", "Teachers", ["Teacher"]]];
+const R6 = { tab: "school" };   // step 6: the open tab
+const tabOf = r => (TABS.find(t => t[2].includes(r.scope)) || TABS[0])[0];
 function placeRules() {
   const out = { settings: {}, availability: [], fixed: [], more: [] };
   S.spec.rules.forEach((r, i) => {
@@ -773,6 +776,7 @@ function ruleProblems(info) {
     if (!can.includes(r.scope)) { say(`${r.rule} cannot apply to ${r.scope ? `a ${scope}` : "nothing"}; it applies to ${can.join(", ")}. This row is skipped.`); return; }
     if (!r.target) { say(`Pick the ${scope}: without one this row matches nothing.`); return; }
     if (!targetOptions(r.scope).includes(r.target)) { say(`${r.target} is not a${/^[aeiou]/.test(scope) ? "n" : ""} ${scope} on the setup, so this row matches nothing.${r.scope === "Level" ? " For every level, apply it to School." : ""}`); return; }
+    if (r.rule === "In words") { if (!String(r.text || "").trim()) say("Write the rule in words: without them this row says nothing."); return; }
     if (r.rule === "Only these subjects") {
       const names = namesList(r.subject), bad = names.filter(n => !sd.some(([s, d]) => subjectTest(n)(s, d)));
       if (!names.length) { say("List the subjects allowed in those periods under Subject. Without them this row does nothing."); return; }
@@ -1085,35 +1089,52 @@ const VIEWS = {
     const weeks = Number(sc().weeks) === 2 ? ["Both", "Odd", "Even"] : ["Both"], days = ["All", "Mon", "Tue", "Wed", "Thu", "Fri"];
     const where = placeRules(), bad = i => rowCls(out, crit, "rules", i), tip = i => esc((out.rules[i] || []).join(" "));
     const msg = (i, n) => out.rules[i] ? `<tr class="rowmsg ${bad(i)}"><td colspan="${n}">${out.rules[i].map(esc).join("<br>")}</td></tr>` : "";   // what is wrong with the row, under it
-    const avail = where.availability.map(i => { const r = S.spec.rules[i], [a, b] = ruleTimes(r);
-      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td style="min-width:180px">${sel(`spec.rules.${i}.target`, r.target, teacherNames())}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td>
-        <td><input data-time="${i}|0" type="time" value="${esc(a)}"></td><td><input data-time="${i}|1" type="time" value="${esc(b)}"></td><td class="calc">${r.from === r.to || r.to == null ? `period ${r.from}` : `periods ${r.from}–${r.to}`}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 8)}`; }).join("");
     const codes = groupCodes();
-    const fixed = where.fixed.map(i => { const r = S.spec.rules[i], every = ["Level", "School"].includes(r.scope), lv = every ? (r.scope === "Level" ? r.target : "All") : r.level || clsLevel(r.target);
+    const availRow = (i) => { const r = S.spec.rules[i], [a, b] = ruleTimes(r);
+      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td style="min-width:180px">${sel(`spec.rules.${i}.target`, r.target, teacherNames())}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td>
+        <td><input data-time="${i}|0" type="time" value="${esc(a)}"></td><td><input data-time="${i}|1" type="time" value="${esc(b)}"></td><td class="calc">${r.from === r.to || r.to == null ? `period ${r.from}` : `periods ${r.from}–${r.to}`}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 8)}`; };
+    const fixedRow = (i) => { const r = S.spec.rules[i], every = ["Level", "School"].includes(r.scope), lv = every ? (r.scope === "Level" ? r.target : "All") : r.level || clsLevel(r.target);
       const who = [EVERY, ...classNames().filter(c => !lv || lv === "All" || clsLevel(c) === lv), ...codes.filter(c => !lv || lv === "All" || String(lv).slice(-1) === c[0])];
-      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td><select data-fixlv="${i}">${["All", ...levels()].map(v => opt(v, lv || "All")).join("")}</select></td><td style="min-width:110px"><select data-fixwho="${i}">${opt("", every ? EVERY : r.target, "")}${who.map(v => opt(v, every ? EVERY : r.target)).join("")}${!every && r.target && !who.includes(r.target) ? opt(r.target, r.target, `${r.target} (not on list)`) : ""}</select></td><td style="min-width:180px">${sel(`spec.rules.${i}.subject`, r.subject, subjectNames())}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 8)}`; }).join("");
-    const more = where.more.map(i => { const r = S.spec.rules[i];
+      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td><select data-fixlv="${i}">${["All", ...levels()].map(v => opt(v, lv || "All")).join("")}</select></td><td style="min-width:110px"><select data-fixwho="${i}">${opt("", every ? EVERY : r.target, "")}${who.map(v => opt(v, every ? EVERY : r.target)).join("")}${!every && r.target && !who.includes(r.target) ? opt(r.target, r.target, `${r.target} (not on list)`) : ""}</select></td><td style="min-width:180px">${sel(`spec.rules.${i}.subject`, r.subject, subjectNames())}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 8)}`; };
+    const moreRow = (i, tabScopes) => { const r = S.spec.rules[i];
       const subjCell = r.rule === "Only these subjects" ? chips(`spec.rules.${i}.subject`, namesList(r.subject), "subjects") : sel(`spec.rules.${i}.subject`, r.subject, subjectNames());
       const venueCell = r.rule === "Only in venues" ? chips(`spec.rules.${i}.venues`, namesList(r.venues), "rooms") : '<span class="muted small">–</span>';
-      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td><select data-k="spec.rules.${i}.scope">${opt("", r.scope, "")}${S.meta.scopes.map(v => opt(v, r.scope, v === "Block" ? "Band" : v)).join("")}</select></td><td style="min-width:150px">${sel(`spec.rules.${i}.target`, r.target, targetOptions(r.scope))}</td><td style="min-width:180px">${subjCell}</td><td style="min-width:180px">${sel(`spec.rules.${i}.rule`, r.rule, RT.filter(t => !r.scope || scopesOf(t).includes(r.scope)).map(t => t.rule))}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td>${psel(`spec.rules.${i}.to`, r.to)}</td><td class="num">${inp(`spec.rules.${i}.number`, r.number, "number", 'style="width:56px"')}</td><td style="min-width:120px">${venueCell}</td><td>${sel(`spec.rules.${i}.strength`, r.strength || "Must", ["Must", "Prefer"], false)}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 13)}`; }).join("");
+      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td><select data-k="spec.rules.${i}.scope">${opt("", r.scope, "")}${S.meta.scopes.filter(v => tabScopes.includes(v) || v === r.scope).map(v => opt(v, r.scope, v === "Block" ? "Band" : v)).join("")}</select></td><td style="min-width:150px">${sel(`spec.rules.${i}.target`, r.target, targetOptions(r.scope))}</td><td style="min-width:180px">${subjCell}</td><td style="min-width:180px">${sel(`spec.rules.${i}.rule`, r.rule, RT.filter(t => !r.scope || scopesOf(t).includes(r.scope)).map(t => t.rule))}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td>${psel(`spec.rules.${i}.to`, r.to)}</td><td class="num">${inp(`spec.rules.${i}.number`, r.number, "number", 'style="width:56px"')}</td><td style="min-width:120px">${venueCell}</td><td>${sel(`spec.rules.${i}.strength`, r.strength || "Must", ["Must", "Prefer"], false)}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 13)}`; };
+    const typedNo = {}; let tn = 0; S.spec.rules.forEach((r, i) => { if (r.rule === "In words") typedNo[i] = ++tn; });
+    const typedRow = (i, tabScopes) => { const r = S.spec.rules[i];
+      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td class="calc">T${typedNo[i]}</td><td>${sel(`spec.rules.${i}.strength`, r.strength || "Must", ["Must", "Prefer"], false)}</td><td><select data-k="spec.rules.${i}.scope">${opt("", r.scope, "")}${S.meta.scopes.filter(v => tabScopes.includes(v) || v === r.scope).map(v => opt(v, r.scope, v === "Block" ? "Band" : v)).join("")}</select></td><td style="min-width:150px">${sel(`spec.rules.${i}.target`, r.target, targetOptions(r.scope))}</td><td class="words">${inp(`spec.rules.${i}.text`, r.text, "text", 'placeholder="What must, or should, happen"')}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 6)}`; };
+    const tab = TABS.find(t => t[0] === R6.tab) || TABS[0], [tid, tlabel, tscopes] = tab;
+    const standard = where.more.filter(i => S.spec.rules[i].rule !== "In words"), typed = where.more.filter(i => S.spec.rules[i].rule === "In words");
+    const onTab = (ix, id) => ix.filter(i => tabOf(S.spec.rules[i]) === id);
+    const count = id => onTab(where.availability, id).length + onTab(where.fixed, id).length + onTab(standard, id).length + onTab(typed, id).length;
+    const strip = `<div class="row tabs">${TABS.map(([id, label]) => `<button data-rtab="${id}" class="${id === tid ? "on" : ""}">${label}<span class="n">${count(id) || ""}</span></button>`).join("")}</div>`;
+    const first = tscopes[0], add = (k, label, title) => `<button data-add="${k}" data-scope="${esc(first)}"${title ? ` title="${esc(title)}"` : ""}>${label}</button>`;
+    const parts = [];
+    const av = onTab(where.availability, tid);
+    if (tid === "teachers") parts.push(`<h2>Teacher availability</h2><p class="muted">Times a teacher cannot teach (part-time days, a centre or programme after school). Times are clock times; every period they overlap is blocked.</p>
+      <div class="tablewrap"><table class="ruletable"><tr><th>Teacher</th><th>Week</th><th>Day</th><th>From</th><th>To</th><th>Blocks</th><th>Reason</th><th></th></tr>${av.map(availRow).join("")}</table></div>
+      <div class="row" style="margin:10px 0 16px"><button data-add="avail">+ Add block-out</button></div>`);
+    const fx = onTab(where.fixed, tid);
+    if (tid === "school" || tid === "levels") parts.push(`<h2>Fixed lessons</h2><p class="muted">Lessons that must start at a set time (optional): ${tid === "school" ? `<b>${EVERY}</b> with Level <b>All</b>: that subject for the whole school at once, such as CCE` : `a class with a subject, a group code from step 5, or <b>${EVERY}</b>: that subject for every class of the level at once`}. Leave empty to let the timetable place everything.</p>
+      <div class="tablewrap"><table class="ruletable"><tr><th>Level</th><th>Class or group</th><th>Subject</th><th>Week</th><th>Day</th><th>Start period</th><th>Note</th><th></th></tr>${fx.map(fixedRow).join("")}</table></div>
+      <div class="row" style="margin:10px 0 16px">${tid === "levels" ? `<button data-add="fixed">+ Add fixed lesson</button>` : `<button data-add="fixedall" title="A subject at one time for every class, such as whole-school CCE. One row per slot: a subject with two lessons a cycle needs two rows.">+ Every class at one time (CCE)</button>`}</div>`);
+    const st = onTab(standard, tid);
+    parts.push(`<h2>Standard rules</h2><p class="muted">From the list of rule types below. First pick what the rule applies to; the next drop-down lists only those. <b>Must</b> is never broken; <b>Prefer</b> is kept where possible.</p>
+      <div class="tablewrap"><table class="ruletable"><tr><th>Applies to</th><th>Which</th><th>Subject (optional)</th><th>Rule</th><th>Week</th><th>Day</th><th>From</th><th>To</th><th>Number</th><th title="For Only in venues: the rooms those lessons must use then">Venues</th><th>Must / Prefer</th><th>Note</th><th></th></tr>${st.map(i => moreRow(i, tscopes)).join("")}</table></div>
+      <div class="row" style="margin:10px 0 16px">${add("rules", "+ Add rule")}${tid === "school" ? `<button data-add="hbl" title="Only the subjects you tick are taught on that day; every other lesson goes on another day.">+ HBL day</button>` : ""}${tid === "subjects" ? `<button data-add="venuerule" title="Lessons of a subject that run into the times you pick go only in the rooms you pick (PE after 11.00 in the hall or ISH).">+ Lessons late in the day only in some rooms</button>` : ""}</div>`);
+    const ty = onTab(typed, tid);
+    parts.push(`<h2>Typed rules</h2><p class="muted">Anything the list cannot say, in a sentence. The timetable scripts do not enforce it: the agent honours a <b>Must</b>, tries a <b>Prefer</b>, and reports how each was met.</p>
+      <div class="tablewrap"><table class="ruletable typed"><tr><th></th><th>Must / Prefer</th><th>Applies to</th><th>Which</th><th>In words</th><th></th></tr>${ty.map(i => typedRow(i, tscopes)).join("") || `<tr><td colspan="6" class="muted small">None yet.</td></tr>`}</table></div>
+      <div class="row" style="margin:10px 0 4px">${add("typed", "+ Typed rule")}</div>
+      <details style="margin-top:12px"><summary class="muted">Rule types for this tab</summary><div class="tablewrap" style="max-height:none"><table><tr><th>Rule</th><th>Applies to</th><th>What it means</th><th>Example</th></tr>${RT.filter(t => scopesOf(t).some(x => tscopes.includes(x))).map(t => `<tr><td><b>${esc(t.rule)}</b></td><td>${esc(t.scopes)}</td><td>${esc(t.meaning)}</td><td class="muted">${esc(t.example)}</td></tr>`).join("")}</table></div></details>`);
     const s = sc();
-    return `<div class="card"><h1>Step 6 · Configuration and constraints</h1><p class="lead">The school-wide settings first, then the constraints: times a teacher cannot teach, lessons fixed at a set time, and any other rule.</p>
+    return `<div class="card"><h1>Step 6 · Configuration and constraints</h1><p class="lead">The school-wide settings first, then the constraints under five tabs: what applies to the whole school, to levels and classes, to subjects, to venues, and to teachers.</p>
       <h2>Configuration</h2><p class="muted">School-wide settings. They apply to every class and teacher.</p>
       <div class="grid2">${SET().map(x => `<label class="f">${esc(x.label)} ${x.number
         ? `<input data-set="${x.key}" type="number" min="1" value="${esc(settingValue(x.key))}" placeholder="no limit">`
         : `<select data-set="${x.key}">${["Yes", "No"].map(v => opt(v, settingValue(x.key))).join("")}</select>`}</label>`).join("")}
       ${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? "" : settingRow(x, i)).join("")}</div></div>
-      <div class="card"><h2>Teacher availability</h2><p class="muted">Times a teacher cannot teach (part-time days, a centre or programme after school). Times are clock times; every period they overlap is blocked.</p>
-      <div class="tablewrap"><table class="ruletable"><tr><th>Teacher</th><th>Week</th><th>Day</th><th>From</th><th>To</th><th>Blocks</th><th>Reason</th><th></th></tr>${avail}</table></div>
-      <div class="row" style="margin-top:10px"><button data-add="avail">+ Add block-out</button></div></div>
-      <div class="card"><h2>Fixed lessons</h2><p class="muted">Lessons that must start at a set time (optional): a class with a subject, a group code from step 5, or <b>${EVERY}</b>: that subject for every class of the level at once (Level <b>All</b>: the whole school), such as CCE. Leave empty to let the timetable place everything.</p>
-      <div class="tablewrap"><table class="ruletable"><tr><th>Level</th><th>Class or group</th><th>Subject</th><th>Week</th><th>Day</th><th>Start period</th><th>Note</th><th></th></tr>${fixed}</table></div>
-      <div class="row" style="margin-top:10px"><button data-add="fixed">+ Add fixed lesson</button><button data-add="fixedall" title="A subject at one time for every class, such as whole-school CCE. One row per slot: a subject with two lessons a cycle needs two rows.">+ Every class at one time (CCE)</button></div></div>
-      <div class="card"><h2>More rules</h2><p class="muted">Any other constraint: rooms, levels, subjects, Prefer rules and so on. First pick what the rule applies to; the next drop-down lists only those. <b>Must</b> is never broken; <b>Prefer</b> is kept where possible.</p>
-      <p class="muted">Common ones in a click: an <b>HBL day</b> (Only these subjects: only the subjects you tick are taught that day) and <b>lessons late in the day only in some rooms</b> (Only in venues: PE after 11.00 only in the hall, say).</p>
-      <div class="tablewrap"><table class="ruletable"><tr><th>Applies to</th><th>Which</th><th>Subject (optional)</th><th>Rule</th><th>Week</th><th>Day</th><th>From</th><th>To</th><th>Number</th><th title="For Only in venues: the rooms those lessons must use then">Venues</th><th>Must / Prefer</th><th>Note</th><th></th></tr>${more}</table></div>
-      <div class="row" style="margin-top:10px"><button data-add="rules">+ Add rule</button><button data-add="hbl" title="Only the subjects you tick are taught on that day; every other lesson goes on another day.">+ HBL day</button><button data-add="venuerule" title="Lessons of a subject that run into the times you pick go only in the rooms you pick (PE after 11.00 in the hall or ISH).">+ Lessons late in the day only in some rooms</button></div></div>
-      <div class="card"><h2>Rule types</h2><div class="tablewrap" style="max-height:none"><table><tr><th>Rule</th><th>Applies to</th><th>What it means</th><th>Example</th></tr>${RT.map(t => `<tr><td><b>${esc(t.rule)}</b></td><td>${esc(t.scopes)}</td><td>${esc(t.meaning)}</td><td class="muted">${esc(t.example)}</td></tr>`).join("")}</table></div></div>`;
+      <div class="card"><h2>Constraints</h2>${strip}${parts.join("")}</div>`;
   },
   students() {
     const { out, crit } = issues(); const L = S.spec.students, f = S.stu, q = f.q.trim().toLowerCase(), MAX = 200;
@@ -1141,7 +1162,7 @@ const VIEWS = {
     const { out, crit } = issues(); let n = 0, nc = 0;
     for (const [k, rows] of Object.entries(out)) if (k !== "global" && k !== "students") for (const [i, ms] of Object.entries(rows)) { n++; if (ms.some(m => isCrit(crit, k, i, m))) nc++; }
     return `<div class="card"><h1>Step 7 · Download</h1><p class="lead">Everything an AI agent needs to make the timetable: your setup as a workbook, and the timetable skill. The workbook keeps the drop-downs and formulas, so it can still be edited in Excel.</p>
-      <div><span class="stat"><b>${S.spec.classes.length}</b> classes</span><span class="stat"><b>${S.spec.teachers.length}</b> teachers</span><span class="stat"><b>${S.spec.blocks.length}</b> bands</span><span class="stat"><b>${S.spec.lessons.length}</b> lesson rows</span><span class="stat"><b>${S.spec.rules.length}</b> rules</span><span class="stat"><b>${S.spec.students.length}</b> students</span></div>
+      <div><span class="stat"><b>${S.spec.classes.length}</b> classes</span><span class="stat"><b>${S.spec.teachers.length}</b> teachers</span><span class="stat"><b>${S.spec.blocks.length}</b> bands</span><span class="stat"><b>${S.spec.lessons.length}</b> lesson rows</span><span class="stat"><b>${S.spec.rules.length}</b> rules</span>${(n => n ? `<span class="stat"><b>${n}</b> typed rule${n === 1 ? "" : "s"} for the agent to honour</span>` : "")(S.spec.rules.filter(r => r.rule === "In words").length)}<span class="stat"><b>${S.spec.students.length}</b> students</span></div>
       ${nc ? `<p class="issue crit" style="margin-top:12px">${nc} row${nc === 1 ? " has" : "s have"} a critical problem: no timetable can be made until ${nc === 1 ? "it is" : "they are"} fixed (see the right-hand panel).${n > nc ? ` ${n - nc} more ${n - nc === 1 ? "has" : "have"} only warnings.` : ""}</p>`
         : n ? `<p class="issue soft" style="margin-top:12px">Nothing critical. ${n} row${n === 1 ? " has" : "s have"} warnings for a person to check (see the right-hand panel); a timetable can still be made.</p>` : '<p class="okmsg" style="margin-top:12px">Everything checks out.</p>'}</div>
       <div class="card" id="fitCard" style="margin-top:16px"></div>
@@ -1187,7 +1208,8 @@ document.addEventListener("click", async e => {
   if (b.id === "copiesLoad") { try { S.copies = await getJSON("/api/setup/copies"); } catch (err) { toast("Could not load the earlier copies."); return; } render(); return; }
   if (b.dataset.restore) { restoreCopy(b.dataset.restore); return; }
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
-  if (b.dataset.add) { addRow(b.dataset.add); return; }
+  if (b.dataset.rtab) { R6.tab = b.dataset.rtab; render(); return; }
+  if (b.dataset.add) { addRow(b.dataset.add, b.dataset.scope); return; }
   if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); unpick(); save(); render(); return; }
   if (b.dataset.helper) { helper(b.dataset.helper); return; }
   if (b.dataset.avatar) { const t = S.spec.teachers[Number(b.dataset.avatar)]; if (t) { t.avatar = (Number(t.avatar) || 0) + 1; save(); render(); } return; }
@@ -1311,12 +1333,13 @@ function setFixedWho(r, lv, who) {   // Fixed lessons: Every class is the level 
   if (who === EVERY) { if (lv && lv !== "All") Object.assign(r, { scope: "Level", target: lv, level: lv }); else { Object.assign(r, { scope: "School", target: "Whole school" }); delete r.level; } return; }
   r.level = lv && lv !== "All" ? lv : null; r.target = who || null; r.scope = classNames().includes(who) ? "Class" : "Group";
 }
-function addRow(k) {
+function addRow(k, scope) {   // scope: a preset for a rule added from a tab of step 6
   const lv = levels()[0];
   const blank = { venues: { room: "", kind: "classroom", capacity: 40 }, classes: { class: "", level: lv, size: 38, home_room: null },
     subjects: { subject: "", code: "", tag: "-", dept: (sc().departments || [])[0], periods: {} }, teachers: { name: "", short: "", dept: (sc().departments || [])[0], allowance: sc().type === "primary" ? 36 : 64, provisional: isHead() && !S.practice ? "Yes" : "No", can_teach: [] },
     blocks: { block: "", level: lv, classes: [] }, lessons: { level: lv, subject: null, block: null, classes: [], teachers: [], students: null },
     rules: { scope: "Level", target: null, rule: "Not in periods", week: "Both", day: "All", strength: "Must" },
+    typed: { scope: "School", target: null, rule: "In words", text: "", strength: "Must", week: "Both", day: "All" },
     avail: { scope: "Teacher", target: null, rule: "Not available", week: "Both", day: "All", from: 0, to: 0, strength: "Must", times: [hhmm(0), hhmm(1)] },
     fixed: { scope: "Class", target: null, subject: null, rule: "Fixed at", level: lv, week: "Both", day: "Mon", from: 0, strength: "Must" },
     // the common rules, filled in as far as the setup allows: whole-school CCE, an HBL day, PE late in the day only in some rooms
@@ -1328,8 +1351,9 @@ function addRow(k) {
     roles: { role: "", what: "", allowance: null, group: "" },
     students: { id: "", name: "", level: clsLevel(S.stu.cls) || null, class: S.stu.cls || null, groups: [] } }[k];
   if (k === "students") S.stu.q = "";
-  const into = { avail: "rules", fixed: "rules", fixedall: "rules", hbl: "rules", venuerule: "rules" }[k] || k; S.spec[into] = S.spec[into] || [];
-  S.spec[into].push(JSON.parse(JSON.stringify(blank))); save();
+  const into = { avail: "rules", fixed: "rules", fixedall: "rules", hbl: "rules", venuerule: "rules", typed: "rules" }[k] || k; S.spec[into] = S.spec[into] || [];
+  const row = JSON.parse(JSON.stringify(blank)); if (scope && (k === "rules" || k === "typed")) { row.scope = scope; row.target = scope === "School" ? "Whole school" : null; }
+  S.spec[into].push(row); save();
   const show = () => { const last = document.getElementById(`${into}-${S.spec[into].length - 1}`); if (last) { last.scrollIntoView({ block: "center" }); const f = last.querySelector("input,select"); if (f) f.focus({ preventScroll: true }); } };
   render(); show(); poll();
 }
