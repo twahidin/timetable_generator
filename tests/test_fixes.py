@@ -274,6 +274,25 @@ def a_fix_that_changes_nothing_is_na():
     none = dict(state="na", why="That changes nothing.", must=[], prefer=[])
     assert fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=0, p=2)) == none and fixes.judge(m, sp, DAYS, dict(kind="swap", a=1, b=1)) == none
 
+@t
+def the_after_school_flag_follows_the_slot():
+    P5 = "P5"; ds = SP["day_structure"][P5][DAYS[0]]; aft = ds.index("A"); c5 = next(c["class"] for c in SP["classes"] if c["level"] == P5); key5 = next(f"C:{c5}:{x['subject']}" for x in SP["lessons"] if x["classes"] == [c5] and x["code"] == ENTIRE)
+    avoid = dict(scope="School", target="Whole school", rule="Avoid after-school slots", week="Both", day="All", strength="Prefer")
+    L = [dict(lesson(1, 0, aft, 1, [c5], "Art", ENTIRE, [T[0]], level=P5), ext=True), lesson(2, 1, 2, 1, [c5], "Music", ENTIRE, [T[1]], level=P5),
+         lesson(3, 2, 2, 1, [c5], "Science", ENTIRE, [T[2]])]   # lesson 3 has no level: its class's level is used
+    m, sp = model_with(L, rules=[avoid])
+    out = fixes.apply(L, [dict(kind="move", id=1, d=0, p=2)], sp, DAYS); assert by_id(out["lessons"], 1)["ext"] is False and by_id(out["lessons"], 2)["ext"] is False
+    assert [w for w in verify.rules(m, sp)[0] if w["where"]["id"] == 1] and not [w for w in verify.rules(dict(m, lessons=out["lessons"]), sp)[0] if w["where"]["id"] == 1]
+    out = fixes.apply(L, [dict(kind="move", id=2, d=1, p=aft)], sp, DAYS); assert by_id(out["lessons"], 2)["ext"] is True
+    r = fixes.judge(m, sp, DAYS, dict(kind="move", id=2, d=1, p=aft)); assert r["state"] == "prefer" and "Avoid after-school slots" in r["why"], r
+    r = fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=3, p=2)); assert r["state"] == "ok", r
+    out = fixes.apply(L, [dict(kind="move", id=3, d=2, p=aft)], sp, DAYS); assert by_id(out["lessons"], 3)["ext"] is True
+    out = fixes.apply(L, [dict(kind="swap", a=1, b=2)], sp, DAYS); assert (by_id(out["lessons"], 1)["ext"], by_id(out["lessons"], 2)["ext"]) == (False, True)
+    out = fixes.apply(L, [dict(kind="add", key=key5, d=4, p=aft, n=1, room=""), dict(kind="add", key=key5, d=4, p=2, n=1, room="")], sp, DAYS)
+    assert [x["ext"] for x in out["lessons"][3:]] == [True, False]
+    out = fixes.apply(L, [dict(kind="room", id=1, group=ENTIRE, room=ROOM)], sp, DAYS); assert by_id(out["lessons"], 1)["ext"] is True   # not moved: the file's flag stays
+    assert L[0]["ext"] is True and L[1]["ext"] is False
+
 if "--full" in sys.argv:
     SOLVED = []
     def solved_primary():
