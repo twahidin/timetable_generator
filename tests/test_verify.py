@@ -350,4 +350,14 @@ def check_timetable_prints_and_exits_one_on_a_must():
         text = out.getvalue(); assert code == 1 and "[deployment]" in text and "warnings (" in text, text
         assert text.splitlines()[1].startswith(" - [")
 
+@t
+def keys_shared_by_several_hits_are_made_unique_and_stay_stable():
+    sp = primary(); m = model_for(sp, []); real = verify.clashes
+    try:
+        verify.clashes = lambda m_: [verify.warning("rule:1:5A|4|11", "clash", "first"), verify.warning("rule:1:5A|4|11", "clash", "second"), verify.warning("rule:1:5A|4|11", "clash", "third")]
+        a = [w["key"] for w in verify.warnings(m, sp)["warnings"] if w["text"] in ("first", "second", "third")]
+        b = [w["key"] for w in verify.warnings(m, sp)["warnings"] if w["text"] in ("first", "second", "third")]
+    finally: verify.clashes = real
+    assert a == ["rule:1:5A|4|11", "rule:1:5A|4|11#2", "rule:1:5A|4|11#3"] and a == b, a
+
 print(f"{n} checks passed")
