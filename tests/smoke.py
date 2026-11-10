@@ -463,29 +463,70 @@ def test_a_fix_moves_the_lesson_and_undo_brings_it_back():
     j = c.post("/api/draft/undo").get_json(); assert j["fixes"] == [] and c.post("/api/draft/undo").status_code == 400
     assert c.post("/api/draft/undo").get_json() == {"error": "There is nothing to undo."}
 
-def test_an_add_without_a_room_and_a_delete_and_a_teacher_fix():
+def test_an_add_without_a_room_and_a_delete():
     _grid_draft(); a = c.get("/api/draft/options?add=C:1A:Art&n=1").get_json()["slots"]; s = next(s for s in a if s["state"] in ("ok", "prefer"))
     j = c.post("/api/draft/fix", json=dict(kind="add", key="C:1A:Art", d=s["d"], p=s["p"], n=1)).get_json(); assert j["fixes"][0]["text"].startswith("Added "), j
     assert len(c.get("/api/draft/grid?view=class&name=1A").get_json()["lessons"]) == 2
-    t = c.get("/api/draft/options?id=%d" % _lid("1B", "Mathematics")).get_json()["teachers"]; assert isinstance(t, list)
     r = c.post("/api/draft/fix", json=dict(kind="delete", id=_lid("1B", "Mathematics"))); assert r.status_code == 400 and "step 3 plans" in r.get_json()["error"], r.get_json()   # the plan would be broken
     spec = c.get("/api/setup").get_json()["spec"]; rows = [("Mon", 1, 1, "P1", "1A", "Zzz Extra", ["Umairah Tan"])]
     assert c.post("/api/draft", data=_draft_form(spec, rows, replace="1"), content_type="multipart/form-data").status_code == 200
     j = c.post("/api/draft/fix", json=dict(kind="delete", id=_lid("1A", "Zzz Extra"))).get_json(); assert len(j["fixes"]) == 1 and j["fixes"][0]["text"].startswith("Deleted "), j
     assert c.post("/api/draft/fix", json=dict(kind="nonsense")).status_code == 400 and c.post("/api/draft/fix", json=[1]).status_code == 400
 
+def test_a_teacher_fix_and_a_room_fix():
+    _grid_draft(); lid = _lid(); o = c.get(f"/api/draft/options?id={lid}").get_json()
+    t = next(x for x in o["teachers"] if x["state"] in ("ok", "prefer"))["teachers"]
+    j = c.post("/api/draft/fix", json=dict(kind="teacher", key="C:1A:Art", teachers=t)).get_json(); assert j["fixes"][0]["text"].startswith("Art for 1A is now taught by "), j
+    assert all(x["teachers"] == t for x in c.get("/api/draft/grid?view=class&name=1A").get_json()["lessons"] if x["subject"] == "Art")
+    rm = next(x for x in c.get(f"/api/draft/options?id={lid}").get_json()["rooms"] if x["state"] in ("ok", "prefer"))["room"]
+    j = c.post("/api/draft/fix", json=dict(kind="room", id=lid, group="Entire Class", room=rm)).get_json(); assert j["fixes"][1]["text"].startswith("Art for 1A on ") and f"is now in {rm}" in j["fixes"][1]["text"], j
+    assert next(x for x in c.get("/api/draft/grid?view=class&name=1A").get_json()["lessons"] if x["id"] == lid)["room"] == rm
+
+def test_options_of_a_group_row_name_that_groups_key():
+    spec = c.get("/api/setup").get_json()["spec"]; ds = spec["day_structure"]["P1"]; day = list(ds)[0]; p = ds[day].index("L")
+    import io, openpyxl
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"
+    ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
+    for subj, g, t in (("Chinese Language", "1CL1", "Adeline Tan"), ("Malay Language", "1ML1", "Charmaine Yeo")): ws.append([1, day, p, p, 1, "", "", "P1", "P1 Mother Tongue", "1A, 1B, 1C", subj, g, t, "", "", ""])
+    buf = io.BytesIO(); wb.save(buf)
+    assert c.post("/api/draft", data=dict(setup=(io.BytesIO(_setup_workbook(spec)), "setup.xlsx"), timetable=(io.BytesIO(buf.getvalue()), "timetable.xlsx"), replace="1"), content_type="multipart/form-data").status_code == 200
+    j = c.get("/api/draft/options?id=1&group=1ML1").get_json(); assert j["key"] == "G:1ML1" and j["rooms"] is not None, j
+    assert all(x["teachers"] != ["Adeline Tan"] for x in j["teachers"]) and any(x["teachers"] != ["Charmaine Yeo"] for x in j["teachers"]), j["teachers"]
+    assert c.get("/api/draft/options?id=1&group=1CL1").get_json()["key"] == "G:1CL1" and c.get("/api/draft/options?id=1").get_json()["key"] == "G:1CL1"
+
+def test_an_upload_over_unpublished_fixes_is_refused_by_the_draft_and_replace_clears_them():
+    spec = _grid_draft() and c.get("/api/setup").get_json()["spec"]; days, p = _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
+    c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"])); rows = [("Mon", p, 1, "P1", "1A", "Art", ["Umairah Tan"])]
+    r = c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data")
+    assert r.status_code == 409 and r.get_json() == {"error": "The draft has fixes that were never published.", "fixes": 1} and len(c.get("/api/draft").get_json()["fixes"]) == 1
+    import draft
+    try: draft.save(None, None, "x", spec); raise AssertionError("save took no notice of the fixes")
+    except draft.UnpublishedFixes as e: assert e.count == 1
+    assert c.post("/api/draft", data=_draft_form(spec, rows, replace="1"), content_type="multipart/form-data").status_code == 200 and c.get("/api/draft").get_json()["fixes"] == []
+
 def test_a_fix_into_a_clash_is_refused_with_the_sentence():   # judged on the server's draft, whatever the page showed
     days, p = _grid_draft(); lid = _lid()
     r = c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=2, p=p + 2)); assert r.status_code == 400 and "is teaching" in r.get_json()["error"], r.get_json()
     assert c.get("/api/draft").get_json()["fixes"] == []
 
-def test_fixes_survive_a_setup_change_or_say_so():
+def _first_ok(options, key="slots", **no):
+    return next(x for x in options[key] if x["state"] in ("ok", "prefer") and not x.get("swap"))
+
+def test_a_fix_still_applies_after_a_step5_change_that_keeps_it_valid():
     _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
     c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"]))
-    rec = c.get("/api/setup").get_json(); cl = next(x for x in rec["spec"]["classes"] if x["class"] == "1A")
-    assert _changes("Z", rec["v"], [["set", "classes", cl["_id"], "class", "1Z"]])[0] == 200
-    r = c.get("/api/draft"); j = r.get_json(); assert r.status_code == 200 and (len(j["fixes"]) == 1 or j["fix_problems"]), j
-    assert any(x["id"] == lid for x in c.get("/api/draft/grid?view=class&name=1A").get_json()["lessons"])
+    rec = c.get("/api/setup").get_json(); row = next(x for x in rec["spec"]["lessons"] if x["classes"] == ["1A"] and x["subject"] == "Art")
+    assert _changes("Z", rec["v"], [["set", "lessons", row["_id"], "teachers", ["Umairah Tan", "Michelle Goh"]]])[0] == 200
+    r = c.get("/api/draft"); j = r.get_json(); assert r.status_code == 200 and j["fix_problems"] == [] and len(j["fixes"]) == 1, j
+    assert {(x["d"], x["p"]) for x in c.get("/api/draft/grid?view=class&name=1A").get_json()["lessons"] if x["id"] == lid} == {(s["d"], s["p"])}
+
+def test_a_fix_the_setup_no_longer_allows_is_named_and_the_file_shows():
+    _grid_draft(); key = "C:1A:Art"; t = next(x for x in c.get(f"/api/draft/options?id={_lid()}").get_json()["teachers"] if x["state"] in ("ok", "prefer") and len(x["teachers"]) == 1)["teachers"]
+    j = c.post("/api/draft/fix", json=dict(kind="teacher", key=key, teachers=t)).get_json(); assert len(j["fixes"]) == 1, j
+    rec = c.get("/api/setup").get_json(); tid = next(x["_id"] for x in rec["spec"]["teachers"] if x["name"] == t[0])
+    assert _changes("Z", rec["v"], [["del", "teachers", tid]])[0] == 200
+    r = c.get("/api/draft"); j = r.get_json(); assert r.status_code == 200 and len(j["fix_problems"]) == 1 and j["fix_problems"][0].startswith("A fix could not be applied: "), j
+    assert c.get("/api/draft/grid?view=class&name=1A").get_json()["lessons"][0]["teachers"] == ["Umairah Tan"]
 
 def test_the_draft_downloads_with_its_fixes():
     import io

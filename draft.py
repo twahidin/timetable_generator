@@ -12,6 +12,9 @@ DIR = os.path.join(store.DATA, "draft")
 ANSWERS = ("step5", "left", "open")
 _lock = threading.RLock()   # always taken before store's locks, never inside them
 class NoDraft(Exception): pass
+class UnpublishedFixes(Exception):
+    """the draft has fixes that were never published; count: how many"""
+    def __init__(self, count): super().__init__("The draft has fixes that were never published."); self.count = count
 _cache = {}                 # one entry: the model of the draft with its fixes applied, (key, model, fx); one worker, so a dict under _lock
 
 def _p(name): return os.path.join(DIR, name)
@@ -24,10 +27,12 @@ def paths():
 
 def model(spec): return model_from_files(*paths(), spec=spec)
 
-def save(setup_path, timetable_path, source, spec):
+def save(setup_path, timetable_path, source, spec, replace=False):
     """replace the draft with these files, read against the setup spec first (so a file that cannot be read never replaces a
-    good draft); returns the model, for info(model=). The 'left' decisions carry over (info drops the ones whose warning is gone)."""
+    good draft); returns the model, for info(model=). UnpublishedFixes unless replace, when the draft has fixes that were never published. The 'left' decisions carry over (info drops the ones whose warning is gone)."""
     with _lock:
+        meta = store.read_json(_p("meta.json"), {}) or {} if exists() else {}; fl = meta.get("fixes") or []
+        if len(fl) > meta.get("published_fixes", 0) and not replace: raise UnpublishedFixes(len(fl))
         new, old = DIR + ".new", DIR + ".old"
         shutil.rmtree(new, ignore_errors=True); os.makedirs(new)
         if setup_path: shutil.copy(setup_path, os.path.join(new, "setup.xlsx"))
@@ -181,7 +186,9 @@ def options(lesson_id=None, group=None, add=None, n=None):
         return dict(slots=fixes.add_slots(m, spec, days, add, n))
     try: lid = int(lesson_id)
     except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
-    rows = fixes._rows(m["lessons"], lid); key = verify._kstr(fixes._row_key(rows[0])); g = group if group is not None else rows[0]["group"]
+    rows = fixes._rows(m["lessons"], lid); row = rows[0] if group is None else next((x for x in rows if x["group"] == group), None)
+    if row is None: raise ValueError(f"There is no row of {group} in that lesson.")
+    key = verify._kstr(fixes._row_key(row)); g = row["group"]
     return dict(key=key, slots=fixes.slots(m, spec, days, lid), teachers=fixes.teacher_options(m, spec, days, key), rooms=fixes.room_options(m, spec, days, lid, g),
                 delete=fixes.can_delete(m, spec, days, lid, group))
 

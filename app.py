@@ -365,13 +365,13 @@ def draft_upload():
     server and checked against the saved setup. A draft with fixes that were never published is replaced only with replace=1."""
     spec, _ = store.load_setup()
     if not spec: return {"error": NO_SETUP}, 409
-    meta = store.read_json(os.path.join(draft.DIR, "meta.json"), {}) or {}; fixes = meta.get("fixes") or []
-    if len(fixes) > meta.get("published_fixes", 0) and request.form.get("replace") != "1": return {"error": "The draft has fixes that were never published.", "fixes": len(fixes)}, 409
     work = tempfile.mkdtemp(prefix="tt-")
     try:
         try:
             sp, tp = _save_uploads(work)
-            m = draft.save(sp, tp, os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file", spec)
+            m = draft.save(sp, tp, os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file", spec,
+                           replace=request.form.get("replace") == "1")
+        except draft.UnpublishedFixes as e: return {"error": str(e), "fixes": e.count}, 409
         except ValueError as e: return {"error": str(e)}, 400
         return _checked(lambda: draft.info(model=m))
     finally: shutil.rmtree(work, ignore_errors=True)
