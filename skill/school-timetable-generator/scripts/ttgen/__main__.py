@@ -2,6 +2,7 @@
    python -m ttgen check SETUP.xlsx
    python -m ttgen solve SETUP.xlsx --out TIMETABLE.xlsx [--time 300] [--workers 8] [--staged] [--export DIR]
    python -m ttgen export SETUP.xlsx TIMETABLE.xlsx|TIMETABLE.sqlite --out DIR [--no-pdf] [--no-individual] [--no-html] [--no-excel] [--no-db]
+   python -m ttgen check-timetable TIMETABLE.xlsx|TIMETABLE.sqlite [--setup SETUP.xlsx]   (--setup is optional for a database)
    (export also writes the timetable as a SQLite database; a database written this way keeps the setup, so SETUP may be -)"""
 import argparse, os, shutil, sys
 from .reader import read_template, derive
@@ -32,6 +33,7 @@ def main(argv=None):
     v = sub.add_parser("solve"); v.add_argument("setup"); v.add_argument("--out", required=True); v.add_argument("--time", type=float, default=300)
     v.add_argument("--workers", type=int, default=8); v.add_argument("--staged", action="store_true", help="build level by level (big, tight schools); --time is per step")
     v.add_argument("--export", help="also write PDFs and the HTML finder into this folder")
+    k = sub.add_parser("check-timetable"); k.add_argument("timetable"); k.add_argument("--setup")
     e = sub.add_parser("export"); e.add_argument("setup"); e.add_argument("timetable"); e.add_argument("--out", required=True)
     for flag in ("pdf", "individual", "html", "excel", "db"): e.add_argument(f"--no-{flag}", action="store_true")
     a = ap.parse_args(argv)
@@ -47,6 +49,17 @@ def main(argv=None):
         for p in ch["problems"][:20]: print(" -", p)
         out = export_all(m, a.out, pdf=not a.no_pdf, individual=not a.no_individual, html=not a.no_html, excel=not a.no_excel, db=not a.no_db)
         _say_outputs(out); return 0 if ch["ok"] else 1
+    if a.cmd == "check-timetable":
+        from .export import model_from_files
+        from . import verify
+        m = model_from_files(a.setup, a.timetable); r = verify.warnings(m); ws = r["warnings"]
+        per = ", ".join(f"{sum(1 for w in ws if w['kind'] == kd)} {kd}" for kd in verify.KINDS if any(w["kind"] == kd for w in ws))
+        print(f"{len(ws)} warnings" + (f" ({per})" if per else ""))
+        for kd in verify.KINDS:
+            for w in ws:
+                if w["kind"] == kd: print(f" - [{kd}] {w['text']}")
+        for line in r["not_checked"]: print(f" ? Not checked: {line}")
+        return 1 if any(w["strength"] == "Must" for w in ws) else 0
     spec = read_template(a.setup)
     if a.cmd == "check":
         probs = derive(spec)

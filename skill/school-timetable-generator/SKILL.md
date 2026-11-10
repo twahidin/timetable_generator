@@ -5,7 +5,7 @@ description: Generate a clash-free Singapore school timetable from a filled setu
 
 # School timetable generator
 
-Skill version: 2026-11.1 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill).
+Skill version: 2026-11.2 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill).
 
 Turns a filled **timetable setup workbook** into a timetable with no teacher, room or student in two places at once,
 then delivers it in three forms that always agree with each other:
@@ -182,6 +182,10 @@ lists each one as "For the agent to honour: T1 · Must · Sec 1 · No PE in the 
   3. `python -m ttgen export SETUP.xlsx TIMETABLE.xlsx --out OUTPUT_FOLDER`: the `.sqlite` it writes carries the report as
      its `rule_report` table, and that is the file to hand back (with `TIMETABLE.xlsx` beside it).
   A database written before the sheet was added has no report, and the committee app then says "No rule report came back".
+
+Before you hand back, run `python -m ttgen check-timetable <the database>`. It lists the clashes, the places the timetable differs
+from the setup, the rules it breaks and the typed rules your report says are not met. Fix what it lists, or say in the notes why
+it stays: the committee sees the same list in the app.
 
 ### First and second choices (Choices sheet)
 

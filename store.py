@@ -220,14 +220,15 @@ def published():
             _cache.update(stamp=stamp, value=dict(meta=meta, model=model, codes=codes, views={}))
         return _cache["value"]
 
-def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print):
+def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print, spec=None, extra=None):
     """export everything into a fresh folder, then swap it in so viewers never see a half-written timetable. The
     timetable is a workbook with a Lessons sheet or a timetable database; setup_xlsx may be None for a database this app
-    or the skill made (it holds its setup). source names a timetable made outside the app (the file it came from)."""
+    or the skill made (it holds its setup). source names a timetable made outside the app (the file it came from).
+    spec: the setup to check it against (the file's own setup then only lends its configuration id); extra: more for meta.json."""
     with _publishing:
         tmp, old = PUB + ".new", PUB + ".old"
         shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp)
-        m = model_from_files(setup_xlsx, timetable_path)
+        m = model_from_files(setup_xlsx, timetable_path, spec=spec)
         log("Making the Excel workbook, the timetable finder, the PDFs and the timetable database...")
         out = export_all(m, tmp, log=lambda *a: None)
         if setup_xlsx: shutil.copy(setup_xlsx, os.path.join(tmp, "setup.xlsx"))
@@ -243,7 +244,7 @@ def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print):
                                                          classes=len(m["classes"]), students=len(m["students"]), lessons=ch["lessons"], files=files,
                                                          rule_report=m.get("rule_report") or [], choices_used=m.get("choices_used") or [],
                                                          choice_problems=m.get("choice_problems") or [],
-                                                         config_id=str(((m.get("setup") or {}).get("school") or {}).get("config_id") or "")))
+                                                         config_id=str(((m.get("setup") or {}).get("school") or {}).get("config_id") or ""), **(extra or {})))
         with _lock:
             shutil.rmtree(old, ignore_errors=True)
             if os.path.exists(PUB): os.replace(PUB, old)

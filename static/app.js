@@ -873,6 +873,7 @@ function render() {
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
   paintPublished();
+  if (id === "publish") loadDraft();
   if (id === "download") fitCheck();
 }
 const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules", choices: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings and the give-way list open step 6
@@ -894,12 +895,12 @@ function renderIssues() {
 
 function exportCard() {
   return `<div class="card" id="printouts"><h2>Publish the finished timetable</h2><p class="muted">Upload the timetable the chatbot made, with its setup workbook. The timetable can be a workbook with a Lessons sheet or a timetable database (.sqlite); a database made by this app or the skill holds its setup, so it can come on its own.</p>
-    <p class="muted"><b>Make printouts</b> gives you every timetable as PDFs (one page per class, teacher, room and student), one Excel file with them all, a searchable HTML page and the database, to keep or share. <b>Check, then publish</b> checks it against its setup and shows what it found; if you are happy, publish it and teachers and students see it straight away.</p>
+    <p class="muted"><b>Make printouts</b> gives you every timetable as PDFs (one page per class, teacher, room and student), one Excel file with them all, a searchable HTML page and the database, to keep or share. <b>Check</b> keeps the file as a draft, checks it against the setup and lists what it found; decide on each warning, then publish and teachers and students see it straight away.</p>
     <div class="row" style="margin-top:10px"><label class="filebtn">Setup workbook (.xlsx)<input type="file" id="exSetup" accept=".xlsx" hidden></label><span class="muted" id="exSetupName">none chosen</span></div>
     <div class="row" style="margin-top:8px"><label class="filebtn">Timetable (.xlsx or .sqlite)<input type="file" id="exTT" accept=".xlsx,.sqlite,.sqlite3,.db" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
     <div class="row" style="margin-top:10px"><label><input type="checkbox" id="exSingle" checked> Also a separate PDF for every class, teacher, room and student</label></div>
-    <div class="row" style="margin-top:12px"><button class="primary" id="exGo">Make printouts (.zip)</button><button id="imCheck">Check, then publish</button><span class="muted" id="exMsg"></span></div>
-    <div id="imResult"></div></div>`;
+    <div class="row" style="margin-top:12px"><button class="primary" id="exGo">Make printouts (.zip)</button><button id="imCheck">Check</button><span class="muted" id="exMsg"></span></div>
+    <div id="imResult">${S.draft ? draftHTML(S.draft) : ""}</div></div>`;
 }
 /* step 6's third card: the second choices in their give-way order, each editable in place, and the form that adds one */
 function giveWay(out, crit, psel, weeks, days) {
@@ -1295,8 +1296,9 @@ document.addEventListener("click", async e => {
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "fitAgain") { fitCheck(true); return; }
   if (b.id === "exGo") { makePrintouts(); return; }
-  if (b.id === "imCheck") { importTimetable(false); return; }
-  if (b.id === "imPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; importTimetable(true); return; }
+  if (b.id === "imCheck") { uploadDraft(false); return; }
+  if (b.id === "imPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; publishDraft(); return; }
+  if (b.dataset.decide) { const i = b.dataset.decide.indexOf("|"); decide(b.dataset.decide.slice(0, i), b.dataset.decide.slice(i + 1)); return; }
   if (b.id === "copyPrompt") { const ta = $("#prompt"); const done = () => toast("Copied."); if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(done, () => { ta.select(); document.execCommand("copy"); done(); }); else { ta.select(); document.execCommand("copy"); done(); } return; }
   if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
 });
@@ -2195,7 +2197,7 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
   const p = st.published, f = p ? p.files || {} : {};
   el.innerHTML = `<h2>Published now</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)}${p.source ? ` from ${esc(p.source)}` : ""} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
       <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
-      ${p.config_id ? `<p class="muted small">Made from configuration ${esc(p.config_id)}.</p>` : ""}${ruleReportHTML(p.rule_report || [], S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0)}${choicesUsedHTML(p.choices_used || [], p.choice_problems || [], S.spec ? validChoices() : 0)}
+      ${p.config_id ? `<p class="muted small">Made from configuration ${esc(p.config_id)}.</p>` : ""}${p.compared_v ? `<p class="muted small">Checked against the setup at ${esc(p.compared_v)}</p>` : ""}${p.compared_v ? ((p.left || []).length || p.open ? `<details><summary>${p.open} warning${p.open === 1 ? " was" : "s were"} left open</summary><ul>${(p.left || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>` : `<p class="muted small">0 warnings were left open</p>`) : ""}${p.compared_v ? ((p.fixes || []).length ? `<p class="muted small">${p.fixes.length} fixes</p>` : `<p class="muted small">No fixes were made in the app.</p>`) : ""}${ruleReportHTML(p.rule_report || [], S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0)}${choicesUsedHTML(p.choices_used || [], p.choice_problems || [], S.spec ? validChoices() : 0)}
       <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>${f.db ? `<a href="/files/db" title="Every lesson, class, teacher and room as a SQLite database, for other systems to import. It also holds the setup, so Make printouts can rebuild everything from it.">Timetable database (.sqlite), for other systems</a>` : ""}
       ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
       <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
@@ -2206,7 +2208,8 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
 
 /* ---------------- downloads */
 document.addEventListener("change", e => {
-  if (e.target.id === "exSetup" || e.target.id === "exTT") { const f = e.target.files[0]; $("#" + e.target.id + "Name").textContent = f ? f.name : "none chosen"; $("#imResult").innerHTML = ""; }
+  if (e.target.id === "exSetup" || e.target.id === "exTT") { const f = e.target.files[0]; $("#" + e.target.id + "Name").textContent = f ? f.name : "none chosen"; }
+  if (e.target.dataset && e.target.dataset.dfilter) { S.dfilter = e.target.dataset.dfilter; drawDraft(); }
 });
 /* the chosen setup workbook and timetable as form data, or null (with a message) when something is missing */
 function timetableForm() {
@@ -2227,35 +2230,82 @@ async function makePrintouts() {
   } catch (err) { msg.textContent = ""; toast("Could not make the printouts: " + err.message); }
   finally { go.disabled = false; }
 }
-/* a timetable made outside the app: check it against its setup, then (publish) make it the published timetable */
-async function importTimetable(publish) {
+/* a timetable made outside the app: kept on the server as the draft and checked against the setup as it is now */
+function drawDraft() { const box = $("#imResult"); if (box) box.innerHTML = S.draft ? draftHTML(S.draft) : ""; }
+async function uploadDraft(replace) {
   const fd = timetableForm(); if (!fd) return;
-  fd.append("publish", publish ? "1" : "0");
+  if (replace) fd.append("replace", "1");
   const box = $("#imResult"), btns = ["#imCheck", "#imPublish", "#exGo"].map(q => $(q)).filter(Boolean);
   btns.forEach(x => x.disabled = true);
-  box.innerHTML = `<p class="muted" style="margin-top:10px">${publish ? "Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute for a school with 600 students)…" : "Checking the timetable against its setup…"}</p>`;
+  box.innerHTML = `<p class="muted" style="margin-top:10px">Checking the timetable against the setup…</p>`;
   try {
-    const r = await fetch("/api/import-timetable", { method: "POST", body: fd }), j = await r.json().catch(() => ({}));
-    if (!r.ok) { box.innerHTML = ""; toast(j.error || (publish ? "Could not publish the timetable." : "Could not check the timetable.")); return; }
-    box.innerHTML = importHTML(j);
-    if (j.published) { toast("Published. Teachers and students now see this timetable."); poll(); }
-  } catch (err) { box.innerHTML = ""; toast("Could not reach the server: " + err.message); }
+    const r = await fetch("/api/draft", { method: "POST", body: fd }), j = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (r.status === 409 && j.fixes && !replace) {
+      drawDraft();
+      if (confirm(`The draft has ${j.fixes} fix${j.fixes === 1 ? "" : "es"} that ${j.fixes === 1 ? "was" : "were"} never published. Replace the draft with this file?`)) { btns.forEach(x => x.disabled = false); return uploadDraft(true); }
+      return;
+    }
+    if (!r.ok) { drawDraft(); toast(j.error || "Could not check the timetable."); return; }
+    S.draft = j; drawDraft(); poll();
+  } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
   finally { btns.forEach(x => x.disabled = false); }
 }
-function importHTML(j) {
+async function publishDraft() {
+  const box = $("#imResult"), btns = ["#imCheck", "#imPublish", "#exGo"].map(q => $(q)).filter(Boolean);
+  btns.forEach(x => x.disabled = true);
+  box.insertAdjacentHTML("beforeend", `<p class="muted" style="margin-top:10px">Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute for a school with 600 students)…</p>`);
+  try {
+    const r = await fetch("/api/draft/publish", { method: "POST" }), j = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (!r.ok) { drawDraft(); toast(j.error || "Could not publish the timetable."); return; }
+    S.draft = j; drawDraft(); toast("Published. Teachers and students now see this timetable."); poll();
+  } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
+  finally { btns.forEach(x => x.disabled = false); }
+}
+async function decide(answer, key) {   // answer is step5, left or open; the key is the warning's (it may hold a "|")
+  const j = await post("/api/draft/decide", { key, answer });
+  if (!j) return;
+  S.draft = j; drawDraft();   // only the result area: render() would reset the chosen file names
+  poll();
+}
+/* the draft survives a reload: step 8 asks for it once when the server has one and this page does not */
+async function loadDraft() {
+  if (S.draft || S.draftTried || !G.st || !G.st.draft) return;
+  S.draftTried = true;
+  try {
+    const r = await fetch("/api/draft"), j = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (r.ok && j.warnings) { S.draft = j; if (STEPS[S.step][0] === "publish") render(); }
+    else if (!r.ok && j.error) toast(j.error);
+  } catch (e) { }
+}
+function draftHTML(j) {
   const list = (xs, more) => `<ul>${xs.map(x => `<li>${esc(x)}</li>`).join("")}${more ? `<li>…and ${more} more</li>` : ""}</ul>`;
   const head = `<h3 style="margin-top:14px">${esc(j.school)} · ${esc(j.timetable)}</h3><p class="muted small">${j.lessons} lessons · ${j.classes} classes · ${j.teachers} teachers · ${j.students} students</p>`;
   if (j.published) return head + `<div class="okmsg">Published. Teachers and students now see this timetable.</div>
     <div class="row" style="margin-top:8px"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
     <p class="muted small">Its downloads and the personal student codes are below.</p>`;
-  const pub = G.st && G.st.published;
-  return head + (j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.school)}</b>, but the setup saved in the app is for <b>${esc(j.other_school)}</b>. Check it is the right file.</p>` : "")
-    + (j.ok ? `<div class="okmsg">All checks passed: no teacher, class, room or student is double-booked, every lesson is in lesson time, and every subject has the periods the setup plans.</div>`
-            : `<details open><summary class="sev crit">${j.problems.length + j.more} problem${j.problems.length + j.more === 1 ? "" : "s"} found</summary>${list(j.problems, j.more)}</details>`)
-    + (j.after.length ? `<details><summary>${j.after.length} lesson${j.after.length === 1 ? " is" : "s are"} after school</summary>${list(j.after)}</details>` : "")
-    + (j.notes.length ? `<details><summary>Notes</summary>${list(j.notes)}</details>` : "")
-    + configLine(j) + ruleReportHTML(j.rule_report || [], j.typed || 0) + choicesUsedHTML(j.choices_used || [], j.choice_problems || [], j.choices || 0)
-    + `<p class="muted small" style="margin-top:8px">${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}${j.ok ? "" : " You can still publish it; the problems stay listed in its Read me sheet."}</p>
+  const ws = j.warnings || [], c = Draft.counts(ws), f = S.dfilter || "open", pub = G.st && G.st.published, n = j.open ?? c.open, nl = j.left ?? c.left, n5 = j.step5 ?? c.step5;   // the server counts the step 5 decisions whose warning has gone
+  const where = w => w.where ? ` · ${esc(w.where.cls)} · ${esc(w.where.day)} · period ${esc(w.where.period)}` : "";
+  const row = w => { const d = w.decision && w.decision.answer, ans = Draft.answerText(w), side = Draft.sideText(w);
+    return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}"><div class="wt">${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where(w)}</div>
+      <div class="row warnbtns">${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "left" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" ? "" : `<button data-decide="left|${esc(w.key)}">Leave it</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div></li>`; };
+  const groups = Draft.group(ws, f), nc = (j.not_checked || []);
+  const kinds = groups.map(k => `<details open class="warnkind"><summary class="sev">${esc(k.title)} · ${k.groups.reduce((a, g) => a + g.items.length, 0)}</summary>
+      ${k.groups.map(g => `<h4>${esc(g.name)}</h4><ul class="warnlist">${g.items.map(row).join("")}</ul>`).join("")}
+      ${k.kind === "rule" && nc.length ? `<p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul>` : ""}</details>`).join("")
+    + (!groups.length && nc.length ? `<details open class="warnkind"><summary class="sev">Rules</summary><p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul></details>` : "");
+  return head + (j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.file_school)}</b>, but the setup saved in the app is for <b>${esc(j.school)}</b>. Check it is the right file.</p>` : "")
+    + configLine(j)
+    + `<p class="warnsum"><b>${n} warning${n === 1 ? "" : "s"} open</b> · ${nl} left for now · ${n5} settled on step 5</p>
+      <div class="row warnfilter">${[["open", "Open"], ["left", "Left for now"], ["all", "All"]].map(([v, l]) => `<label class="radio"><input type="radio" name="dfilter" data-dfilter="${v}"${v === f ? " checked" : ""}> ${l}</label>`).join("")}</div>
+      <p class="muted small">Fixing a lesson in the app comes in the next stage. Until then, fix the file and upload it again: what you left for now stays left.</p>`
+    + (kinds || (ws.length ? `<p class="muted">Nothing in this list.</p>` : `<div class="okmsg">No warnings: no teacher, class, room or student is double-booked, and the timetable matches the setup.</div>`))
+    + (j.after && j.after.length ? `<details><summary>${j.after.length} lesson${j.after.length === 1 ? " is" : "s are"} after school</summary>${list(j.after)}</details>` : "")
+    + (j.notes && j.notes.length ? `<details><summary>Notes</summary>${list(j.notes)}</details>` : "")
+    + ruleReportHTML(j.rule_report || [], j.typed || 0) + choicesUsedHTML(j.choices_used || [], j.choice_problems || [], j.choices || 0)
+    + `<p class="muted small" style="margin-top:8px">${n} warning${n === 1 ? "" : "s"} open; you can still publish. ${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}</p>
     <div class="row"><button class="primary" id="imPublish">Publish this timetable</button></div>`;
 }
 /* which configuration (the workbook's id) the timetable was made from, against the setup's version now */
