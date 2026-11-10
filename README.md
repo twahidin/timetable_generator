@@ -52,14 +52,20 @@ to print, one page per class. Students not on the list use the general student c
    first, each with a button to the step that fixes it; it runs again whenever the setup changes (`checks.py`).
 3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
+   `SKILL.md` carries a version line (`Skill version: 2026-11`) and the workbook's README sheet names the version it
+   was made for. A **Starter prompt** card has the text to paste into the chatbot with the two files, with a **Copy**
+   button: use the attached skill, check first, hand back the database or a Lessons workbook, fill in the rule report.
 4. **Make the timetable outside**: give the agent both, and ask it to generate the timetable and report anything that
    does not fit. It hands back a timetable database (`.sqlite`) or a timetable workbook (a Lessons sheet).
 5. **Publish** (step 8): upload that file (a workbook comes with its setup workbook; a database made by the skill holds
    its setup) and press **Check, then publish**. The app checks it against its setup (teacher, class, room and student
    clashes, lessons outside lesson time, periods placed against periods planned) and lists what it found, with a
-   warning when it is for another school than the saved setup. **Publish this timetable** then makes it what teachers
-   and students see, with every download and the personal student codes (about a minute). **Make printouts** gives the
-   same files without publishing.
+   warning when it is for another school than the saved setup. When the setup has typed rules (step 6), the check also
+   shows the agent's **Rule report** (one line per typed rule: Met, Partly or Not met, and how), says when none came
+   back, and when its rows do not match the setup's typed rules. **Publish this timetable** then makes it what teachers
+   and students see, with every download and the personal student codes (about a minute); the rule report stays with
+   the published timetable and is shown under **Published now**. **Make printouts** gives the same files without
+   publishing. A later project checks the report against the timetable; today the app keeps and shows it.
 
 **Timetable database.** Publishing (and every export, in the app or with `python -m ttgen export`) also writes the
 timetable as a SQLite database: every lesson with its day, times, classes, teachers and room, plus the classes,
@@ -180,6 +186,22 @@ These are read by the skill's solver (`ttgen`), which the outside agent runs, an
 
 A room holds one class at a time unless step 6 has a "Room · At most N at once" rule; a note on a Settings row such as
 "Field and Hall take 2 classes each" is read as those rules.
+
+**Constraints (step 6):** below the Configuration card, the constraints sit under five tabs by what they apply to:
+**School** (whole-school fixed lessons such as CCE, the HBL day, school-wide rules), **Levels and classes** (fixed
+lessons for a class or a group, rules for a level, class, band or group), **Subjects** (rules for a subject or a
+department, such as lessons late in the day only in some rooms), **Venues** (room limits and bookings) and **Teachers**
+(block-outs and teachers' rules). Each tab has its **Standard rules** table (the rule types below, with the Applies to
+list narrowed to the tab), a **Typed rules** table and, folded away, the rule types that apply to the tab. **+ Add
+rule** and **+ Typed rule** on a tab add a row for that tab.
+
+**Typed rules** are anything the list cannot say: **Must** or **Prefer**, what it applies to (the whole school, a level,
+a class, a subject, a venue or a teacher, from the same lists as other rules) and a sentence, such as "Must · Sec 1 ·
+No PE in the first period". They are numbered T1, T2… in setup order and go to the workbook as More rules rows with
+Rule = **In words** and the sentence in the **In words** column (an older workbook without the column still opens). The
+timetable scripts never enforce them: `python -m ttgen check` lists each one "for the agent to honour", `SKILL.md` tells
+the agent to honour every Must, try every Prefer and hand back a rule report, and step 7 counts them. A typed rule with
+no sentence is flagged on step 6 and by `check`.
 
 **Rules (step 6):** besides teacher block-outs, three common school rules have their own one-click rows. **Every
 class at one time** puts a subject at one slot for every class of a level, or of the whole school (Fixed lessons, Class
