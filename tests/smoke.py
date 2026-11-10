@@ -386,6 +386,59 @@ def test_a_step5_change_does_not_land_on_a_replaced_setup():
     assert r.status_code == 400 and "replaced" in r.get_json()["error"], r.get_json()
     assert next(x["teachers"] for x in c.get("/api/setup").get_json()["spec"]["lessons"] if x["_id"] == row["_id"]) != ["Elsewhere"]
 
+def test_step5_on_an_extra_lesson_adds_the_row_once_at_the_end():   # finding 1: the add had no id and was skipped
+    import draft, threading, time
+    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec); cls, subj = row["classes"][0], row["subject"]
+    v = c.get("/api/setup").get_json()["v"]
+    assert c.post("/api/setup/changes", json={"client": "t", "since": v, "ops": [["del", "lessons", row["_id"]]]}).status_code == 200
+    spec = c.get("/api/setup").get_json()["spec"]; lesson = _lesson_of(spec, row, row["teachers"]); lesson = lesson[:3] + ("",) + lesson[4:]   # no Level column value
+    c.post("/api/draft", data=_draft_form(spec, [lesson]), content_type="multipart/form-data")
+    k = f"dep:C:{cls}:{subj}:extra"; j = c.get("/api/draft").get_json(); assert k in _warn_keys(j), _warn_keys(j)[:8]
+    assert next(w for w in j["warnings"] if w["key"] == k)["ops"], "the extra lesson has no step 5 update"
+    orig, out = draft._build, []
+    def slow(*a, **kw): r = orig(*a, **kw); time.sleep(0.3); return r   # a double click: the second request comes while the first is building
+    def click():
+        try: out.append(draft.decide(k, "step5"))
+        except ValueError as e: out.append(e)
+    draft._build = slow
+    try:
+        ts = [threading.Thread(target=click) for _ in range(2)]
+        for t_ in ts: t_.start()
+        for t_ in ts: t_.join()
+    finally: draft._build = orig
+    now = c.get("/api/setup").get_json()["spec"]["lessons"]; added = [x for x in now if x["subject"] == subj and x.get("classes") == [cls]]
+    assert len(added) == 1 and now[-1] == added[0], (len(added), now[-1] if now else None)
+    lv = next(x["level"] for x in spec["classes"] if x["class"] == cls)
+    assert added[0]["level"] == lv and added[0]["teachers"] == sorted(row["teachers"]) and added[0].get("_id") and not added[0].get("block"), added[0]
+    assert sum(1 for o in out if isinstance(o, dict)) == 1 and sum(1 for o in out if isinstance(o, ValueError)) == 1, out
+    j = c.get("/api/draft").get_json(); assert k not in _warn_keys(j) and f"dep:C:{cls}:{subj}:periods" not in _warn_keys(j), [x for x in _warn_keys(j) if cls in x]
+
+def test_a_draft_that_cannot_be_checked_is_a_sentence_not_a_500():   # finding 5
+    from ttgen import verify
+    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec)
+    real = verify.warnings
+    def boom(*a, **kw): raise KeyError("something odd")
+    verify.warnings = boom
+    try:
+        r = c.post("/api/draft", data=_draft_form(spec, [_lesson_of(spec, row, row["teachers"])]), content_type="multipart/form-data")
+        g = c.get("/api/draft")
+    finally: verify.warnings = real
+    for x in (r, g): assert x.status_code == 400 and x.get_json()["error"].startswith("Could not check the timetable against the setup"), (x.status_code, x.get_data()[:200])
+    assert c.get("/api/draft").status_code == 200
+
+def test_publish_uses_the_setup_the_draft_was_checked_against():   # finding 10
+    import draft
+    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec)
+    c.post("/api/draft", data=_draft_form(spec, [_lesson_of(spec, row, row["teachers"])]), content_type="multipart/form-data")
+    real_rec, real_pub, calls, got = store.setup_record, store.publish, [], {}
+    def rec():
+        r = real_rec(); calls.append(1); r["v"] += len(calls) - 1; r["spec"]["school"]["name"] = f"Read {len(calls)}"; return r   # the setup changes between reads
+    def pub(sp, tp, **kw): got.update(kw)
+    store.setup_record, store.publish = rec, pub
+    try: j = draft.publish()
+    finally: store.setup_record, store.publish = real_rec, real_pub
+    assert got["extra"]["compared_v"] == j["setup_version"] and got["spec"]["school"]["name"] == f"Read {int(j['setup_version'][1:]) - real_rec()['v'] + 1}", (got["extra"]["compared_v"], got["spec"]["school"]["name"], j["setup_version"])
+
 def test_publishing_with_no_draft_is_404():
     shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True)
     assert c.post("/api/draft/publish").status_code == 404 and c.get("/api/status").get_json()["draft"] is None
@@ -412,7 +465,7 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     r = c.post("/api/draft/publish"); j = r.get_json(); assert r.status_code == 200 and j["published"] is True, j
     p = c.get("/api/status").get_json()["published"]
     assert p and p["source"] == "timetable.xlsx" and p["rule_report"][0]["how"] == "Checked.", p
-    assert p["compared_v"] == f"v{v}" and p["open"] == d["open"] and p["fixes"] == [] and isinstance(p["left"], list), p
+    assert p["compared_v"] == f"v{v}" == d["setup_version"] and p["open"] == d["open"] and p["fixes"] == [] and isinstance(p["left"], list), p
     assert p["choices_used"] == d["choices_used"] and p["choice_problems"] and p["config_id"] == d["config_id"], p
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
     assert t.get("/timetable").status_code == 200

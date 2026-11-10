@@ -347,6 +347,15 @@ def export_printouts():
 
 NO_SETUP = "Save the school's setup first: the timetable is checked against it."
 
+def _checked(build):
+    """the draft checked against the setup, as JSON; a check that goes wrong is a sentence (400), not a server error"""
+    try: return jsonify(build())
+    except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
+    except Exception as e:
+        if type(e) is LookupError: return {"error": NO_SETUP}, 409   # no setup saved (a KeyError or IndexError is a fault in the check)
+        app.logger.exception("checking the draft")
+        return {"error": f"Could not check the timetable against the setup: {e}"}, 400
+
 @app.post("/api/draft")
 @need("committee")
 def draft_upload():
@@ -362,15 +371,13 @@ def draft_upload():
             sp, tp = _save_uploads(work)
             m = draft.save(sp, tp, os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file", spec)
         except ValueError as e: return {"error": str(e)}, 400
-        return jsonify(draft.info(model=m))
+        return _checked(lambda: draft.info(model=m))
     finally: shutil.rmtree(work, ignore_errors=True)
 
 @app.get("/api/draft")
 @need("committee")
 def draft_get():
-    try: return jsonify(draft.info() or {"draft": None})
-    except LookupError: return {"error": NO_SETUP}, 409
-    except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
+    return _checked(lambda: draft.info() or {"draft": None})
 
 @app.post("/api/draft/decide")
 @need("committee")
