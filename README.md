@@ -52,9 +52,13 @@ to print, one page per class. Students not on the list use the general student c
    first, each with a button to the step that fixes it; it runs again whenever the setup changes (`checks.py`).
 3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
-   `SKILL.md` carries a version line (`Skill version: 2026-11`) and the workbook's README sheet names the version it
-   was made for. A **Starter prompt** card has the text to paste into the chatbot with the two files, with a **Copy**
-   button: use the attached skill, check first, hand back the database or a Lessons workbook, fill in the rule report.
+   `SKILL.md` carries a version line (`Skill version: 2026-11.1`) and the workbook's README sheet names the version it
+   was made for. When the setup has second choices (step 6), step 7 counts them and asks **If the first choices do not
+   fit:** **Fall back only when needed** (the default) or **Make one timetable for each**; the workbook carries the pick
+   on its Choices sheet. Every downloaded workbook also carries a **Configuration id** row on Settings (`v14`, or `v14+`
+   when it was downloaded with changes not yet saved). A **Starter prompt** card has the text to paste into the chatbot
+   with the two files, with a **Copy** button: use the attached skill, check first, hand back the database or a Lessons
+   workbook, fill in the rule report and the Choices used sheet.
 4. **Make the timetable outside**: give the agent both, and ask it to generate the timetable and report anything that
    does not fit. It hands back a timetable database (`.sqlite`) or a timetable workbook (a Lessons sheet).
 5. **Publish** (step 8): upload that file (a workbook comes with its setup workbook; a database made by the skill holds
@@ -62,9 +66,14 @@ to print, one page per class. Students not on the list use the general student c
    clashes, lessons outside lesson time, periods placed against periods planned) and lists what it found, with a
    warning when it is for another school than the saved setup. When the setup has typed rules (step 6), the check also
    shows the agent's **Rule report** (one line per typed rule: Met, Partly or Not met, and how), says when none came
-   back, and when its rows do not match the setup's typed rules. **Publish this timetable** then makes it what teachers
-   and students see, with every download and the personal student codes (about a minute); the rule report stays with
-   the published timetable and is shown under **Published now**. **Make printouts** gives the same files without
+   back, and when its rows do not match the setup's typed rules. The check also says which configuration the timetable
+   was made from ("Made from this configuration (v15)", or that the setup has moved on, the workbook was downloaded with
+   unsaved changes, the timetable is from a newer copy or it does not say), and lists the **Choices used** (first or
+   second choice for each item on the give-way list). Setups with second choices are checked with the fallbacks
+   applied, and the check reports a Choices used list that gives way on an item that is not on the list or out of
+   order, or names an item that is not there. **Publish this timetable** then makes it what teachers
+   and students see, with every download and the personal student codes (about a minute); the rule report and the choices used stay with
+   the published timetable and are shown under **Published now**, with its configuration. **Make printouts** gives the same files without
    publishing. A later project checks the report against the timetable; today the app keeps and shows it.
 
 **Timetable database.** Publishing (and every export, in the app or with `python -m ttgen export`) also writes the
@@ -202,6 +211,22 @@ Rule = **In words** and the sentence in the **In words** column (an older workbo
 timetable scripts never enforce them: `python -m ttgen check` lists each one "for the agent to honour", `SKILL.md` tells
 the agent to honour every Must, try every Prefer and hand back a rule report, and step 7 counts them. A typed rule with
 no sentence is flagged on step 6 and by `check`.
+
+**First and second choices (step 6):** below the constraints, **If it does not fit, give way in this order** lists items
+that have a second choice. **+ Add a second choice** picks the item (a setting that is Yes/No or a number, a rule, or a
+level's recess) and what to do instead: a setting takes the other value; a rule is made **Prefer**, replaced by another
+rule (**Use this instead**) or **Drop**ped; a recess becomes floating between two times (recess for a level that has a
+fixed recess). Drag the rows, or use the arrows, to set the order; an item has one second choice, and a row whose rule
+or level has gone says what is missing. The workbook carries them on a **Choices** sheet (First choice and Second choice
+columns, in order) with the pick from step 7. The agent tries the first choices; if no timetable fits, `python -m
+ttgen solve` gives way one item at a time from the top of the list and stops at the first timetable that fits, never
+changing anything that is not on the list (the setup's own rows are not changed: each fallback is applied to a copy).
+With **Make one timetable for each** it makes the first-choices timetable and one more after each step of the list
+(`... - after choice 2.xlsx`, or one folder each with `--export`) for the committee to compare. It hands back a
+**Choices used** sheet (item, First or Second choice, how), also written to the database, which Publish reads. Step 7's
+"Will it fit?" also says whether the sums pass after giving way ("With the first choices, 1 thing will not fit. Giving
+way in your order, the sums pass after choice 3: ...") or that they fail even after every second choice. Heads of
+department see the list but cannot change it.
 
 **Rules (step 6):** besides teacher block-outs, three common school rules have their own one-click rows. **Every
 class at one time** puts a subject at one slot for every class of a level, or of the whole school (Fixed lessons, Class
