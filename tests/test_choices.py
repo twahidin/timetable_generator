@@ -49,6 +49,15 @@ def problems_are_found_and_skipped():
     assert [u["used"] for u in choices.used_rows(sp, 2)] == ["Second choice", "Second choice", "First choice", "First choice"] and choices.used_rows(sp, 2)[0]["no"] == 1
 
 @t
+def bad_setting_values_are_skipped_and_prefer_rows_are_left_alone():
+    sp = with_choices(); sp["choices"] = [dict(kind="setting", key="max_day", second="3 periods", order=1), dict(kind="setting", key="after_school", second="Maybe", order=2)]
+    ps = dict(choices.problems(sp)); assert "whole number" in ps[0] and "Yes or No" in ps[1], ps
+    assert choices.apply_all(sp, 2)["rules"] == sp["rules"] and choices.apply_all(sp, 2)["school"]["after_school"] is False
+    sp = secondary(); sp["rules"] = [dict(scope="School", target="Whole school", rule="Max periods a day", week="Both", day="All", strength="Prefer", number=6)]
+    sp["choices"] = [dict(kind="setting", key="max_day", second="no limit", order=1)]
+    assert choices.first_text(sp, sp["choices"][0]) == "no limit" and choices.apply_all(sp, 1)["rules"] == sp["rules"]
+
+@t
 def the_choices_sheet_round_trips():
     sp = with_choices(); sp["school"]["choices_mode"] = "compare"
     with tempfile.TemporaryDirectory() as d:

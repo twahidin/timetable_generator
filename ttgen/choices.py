@@ -74,7 +74,7 @@ def set_setting(spec, key, value):
     if key == "after_school": sc["after_school"] = (v != "No")
     elif key == "pe_rain_home": sc["pe_rain_home"] = (v == "Yes")
     elif s["number"]:
-        mine = [r for r in spec["rules"] if _is_rule(r, s)]
+        mine = [r for r in spec["rules"] if _is_rule(r, s) and str(r.get("strength") or "Must") == "Must"]
         if v == "" or v.lower() == "no limit":
             spec["rules"] = [r for r in spec["rules"] if not any(r is m for m in mine)]
         else:
@@ -154,6 +154,9 @@ def problems(spec):
             if s is None: say(f"'{c.get('key') or c.get('item') or ''}' is not a setting the timetable knows."); continue
             sec = str(c.get("second") if c.get("second") is not None else "").strip()
             if sec == "": say("The second choice is blank."); continue
+            if s["number"]:
+                if sec.lower() != "no limit" and not sec.isdigit(): say("The second choice must be a whole number or no limit."); continue
+            elif sec not in ("Yes", "No"): say("The second choice must be Yes or No."); continue
             if sec.lower() == str(setting_value(spec, c["key"])).strip().lower(): say("The second choice is the same as the first.")
         elif kind == "rule":
             i_ = rule_index(spec, c)
