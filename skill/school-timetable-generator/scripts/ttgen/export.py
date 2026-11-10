@@ -17,7 +17,7 @@ from .database import is_db, read_db, write_db
 from .reader import read_template, derive
 from . import choices
 from .report import LESSON_HEADERS, short_subject, clock
-from .spec import periods_by_day, resolve_row, trim_day
+from .spec import order_days, periods_by_day, resolve_row, trim_day
 
 ENTIRE = "Entire Class"
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
@@ -221,7 +221,7 @@ def model_from_files(setup_path, timetable_path, spec=None):
         sc = spec["school"]; NP = int(sc["periods_per_day"]); ds = spec["day_structure"]
         lv0 = next((lv for lv in sc["levels"] if lv in ds), None)
         if lv0 is None: raise ValueError("The setup workbook's Day structure is empty.")
-        days = list(ds[lv0].keys()); dix = {d.lower(): i for i, d in enumerate(days)}
+        days = order_days(list(ds[lv0].keys())); dix = {d.lower(): i for i, d in enumerate(days)}   # calendar order: a setup saved from the browser holds its days alphabetically
         if db: wb = None; rows = iter([db[0]] + db[1])
         else:
             wb = wbu

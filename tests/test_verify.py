@@ -473,4 +473,20 @@ def the_timetable_workbook_is_read_read_only():   # finding 8
         assert seen and all(kw.get("read_only") for kw, _ in seen), seen
         assert len(m["lessons"]) == 1 and "A note." in m["notes"] and m["status"] == "OPTIMAL" and m["rule_report"][0]["result"] == "Met" and m["recess"][cls] == [[0, 4, 1]], (m["notes"], m["status"], m["recess"])
 
+@t
+def the_days_come_out_in_calendar_order_whatever_order_the_setup_holds_them_in():   # a setup saved from the browser holds its days alphabetically
+    with tempfile.TemporaryDirectory() as d:
+        sp = primary(); setup = os.path.join(d, "s.xlsx"); template.write_template(sp, setup)
+        ds = sp["day_structure"]; lv = sp["school"]["levels"][0]; want = list(ds[lv]); day = want[0]; cls = next(c["class"] for c in sp["classes"] if c["level"] == lv)
+        x = next(x for x in sp["lessons"] if cls in x["classes"] and not x.get("block"))
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"
+        ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
+        p0 = ds[lv][day].index("L"); ws.append([1, day, p0, p0, 1, "", "", lv, "", cls, x["subject"], "Entire Class", ", ".join(x["teachers"]), "", "", ""])
+        tt = os.path.join(d, "timetable.xlsx"); wb.save(tt)
+        mixed = copy.deepcopy(sp); mixed["day_structure"] = {l: {k: v[k] for k in sorted(v)} for l, v in mixed["day_structure"].items()}
+        assert list(mixed["day_structure"][lv]) != want                      # alphabetical: Fri, Mon, Thu, Tue, Wed
+        m = export.model_from_files(None, tt, spec=mixed)
+        assert m["days"] == want, m["days"]                                  # Mon to Fri again
+        assert m["days"][m["lessons"][0]["d"]] == day                        # and the lesson is still on its own day
+
 print(f"{n} checks passed")
