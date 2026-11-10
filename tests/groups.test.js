@@ -72,10 +72,10 @@ t("into a band: whole classes become groups, the band's classes widen, other lev
 t("out of a band, and what moving renumbers", () => {
   const s = fixture(); assert.strictEqual(Groups.fromBand(s, 3), false);
   const r = Groups.shift(s, c => Groups.fromBand(c, 0));
-  assert.deepStrictEqual(r, { changes: [["l1", "1MAP1", "Entire Class"], ["l2", "1MAP2", "1MAP1"]], students: 2 });
+  assert.deepStrictEqual(r, { changes: [["l1", "1MAP1", "Entire Class"], ["l2", "1MAP2", "1MAP1"]], students: 2, rules: 0 });
   assert.strictEqual(s.lessons[0].block, "Sec 1 Mathematics");   // the real setup is untouched
   assert.strictEqual(Groups.fromBand(s, 0), true); assert.strictEqual(s.lessons[0].block, null);
-  assert.deepStrictEqual(Groups.shift(s, c => Groups.toBand(c, [4], "Sec 1 Mathematics")), { changes: [["l5", "Entire Class", "1AR1"]], students: 0 });
+  assert.deepStrictEqual(Groups.shift(s, c => Groups.toBand(c, [4], "Sec 1 Mathematics")), { changes: [["l5", "Entire Class", "1AR1"]], students: 0, rules: 0 });
 });
 t("lanes: each band of the level with its groups and anyone on two of them", () => {
   const s = fixture(); s.lessons[1].teachers = ["Arjun Nair"];
@@ -87,5 +87,34 @@ t("lanes: each band of the level with its groups and anyone on two of them", () 
 t("the pool: unbanded rows of the level, by subject", () => {
   assert.deepStrictEqual(Groups.pool(fixture(), "Sec 1", "").map(p => [p.li, p.kind, p.code, p.title]), [[3, "class", "Entire Class", "1A, 1B · Art"], [4, "class", "Entire Class", "1C · Art"], [5, "group", "1MU1", "1C · Music"]]);
   assert.deepStrictEqual(Groups.pool(fixture(), "Sec 1", "Music").map(p => p.li), [5]); assert.deepStrictEqual(Groups.pool(fixture(), "Sec 2", ""), []);
+});
+t("a banded row with a kept code still takes a number, as the table counts it", () => {
+  const s = fixture(); s.lessons[1].code_override = "1MAX9";
+  assert.deepStrictEqual(Groups.codes(s).slice(0, 3), ["1MAP1", "1MAX9", "1MAA1"]);
+  assert.strictEqual(Groups.codeFor(s, "Sec 1", "Mathematics G3", "Sec 1 Option A"), "1MAP3");
+});
+t("a kept code is dropped when its group joins a band, and the move says so", () => {
+  const s = fixture(); const r = Groups.shift(s, c => Groups.toBand(c, [5], "Sec 1 Option A"));
+  assert.deepStrictEqual(r.changes, [["l6", "1MU1", "1MU1"]].filter(() => false).concat([]));   // same code, so no change listed
+  Groups.toBand(s, [5], "Sec 1 Option A"); assert.ok(!("code_override" in s.lessons[5])); assert.strictEqual(Groups.codes(s)[5], "1MU1");
+  s.lessons[5].code_override = undefined; s.lessons[5].block = null; s.lessons[5].code_override = "1MUZ";
+  const r2 = Groups.shift(s, c => Groups.toBand(c, [5], "Sec 1 Option A")); assert.deepStrictEqual(r2.changes, [["l6", "1MUZ", "1MU1"]]);
+});
+t("the code of a pull-out group with no band: the next free number, as Keep code does", () => {
+  const s = fixture(); assert.strictEqual(Groups.codeFor(s, "Sec 1", "Music", "", 9, ["1C"]), "1MU2");
+  assert.strictEqual(Groups.codeFor(s, "Sec 1", "Music", "", 31, ["1C"]), "Entire Class");
+  assert.strictEqual(Groups.pullOutCode(s, 4), null);   // Art for all 31 of 1C: whole class
+  s.lessons[4].students = 9; assert.strictEqual(Groups.pullOutCode(s, 4), "1AR1"); assert.strictEqual(s.lessons[4].code_override, "1AR1");
+  assert.strictEqual(Groups.pullOutCode(s, 4), null);   // it has its code now
+});
+t("a new band stores Everyone takes one only when it was chosen", () => {
+  const s = fixture(); Groups.newBand(s, { block: "Sec 1 Science", level: "Sec 1", classes: ["1A"] });
+  assert.ok(!("everyone" in s.blocks[2]));
+  Groups.newBand(s, { block: "Sec 1 Elective", level: "Sec 1", classes: ["1A"], everyone: false }); assert.strictEqual(s.blocks[3].everyone, false);
+});
+t("shift counts the Group rules that name a code about to change", () => {
+  const s = fixture(); s.rules = [{ scope: "Group", target: "1MAP2", rule: "Fixed at" }, { scope: "Class", target: "1A", rule: "Fixed at" }];
+  assert.deepStrictEqual(Groups.shift(s, c => Groups.fromBand(c, 0)).rules, 1);
+  assert.deepStrictEqual(Groups.shift(s, c => Groups.fromBand(c, 2)).rules, 0);
 });
 console.log(`${n} cases passed`);

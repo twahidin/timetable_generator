@@ -1047,10 +1047,10 @@ const VIEWS = {
     const gf = gfState(), bf = bfState(), tags = (sc().tags || []).map(t => t[0]).filter(t => t && t !== "-");
     const subjAt = lv => subjectNames().filter(n => ((subj(n) || {}).periods || {})[lv]);
     const gSubjects = subjAt(gf.level).filter(n => !gf.tag || (subj(n) || {}).tag === gf.tag), gBands = S.spec.blocks.filter(b => b.level === gf.level).map(b => b.block);
-    const bandPicked = gBands.includes(gf.block), code = Groups.codeFor(S.spec, gf.level, gf.subject, bandPicked ? gf.block : "");
+    const bandPicked = gBands.includes(gf.block), code = Groups.codeFor(S.spec, gf.level, gf.subject, bandPicked ? gf.block : "", gf.students, gf.classes);
     const codeLine = !gf.subject ? `<span class="muted small">Pick a subject to see the code.</span>` : code === "Entire Class" ? `<span class="muted small">Whole class: no group code.</span>` : `<span class="small">Code</span> <span class="codeline">${esc(code)}</span>`;
     const bSubjects = subjAt(bf.level).filter(n => !bf.subjects.includes(n)), suggested = Groups.bandName(bf.level, bf.subjects, blockNames());
-    const name = bf.touched ? bf.name : suggested, everyone = bf.evTouched ? bf.everyone : !/\bOption\b/.test(suggested);
+    const name = bf.touched ? bf.name : suggested, everyone = bf.evTouched ? bf.everyone : !/option|elective/i.test(name);
     return `<div class="gb"><section class="gforms card">
       <h3 style="margin:0 0 6px">New teaching group</h3><p class="muted small" style="margin:0 0 8px">A group of a band, or a whole-class lesson with no band. The code forms as you pick.</p>
       <label class="f">Level <select id="gfLevel">${levels().map(l => opt(l, gf.level)).join("")}</select></label>
@@ -1336,15 +1336,10 @@ function addRow(k) {
 /* a teaching group with no band and fewer students than its classes (a pull-out group, say 9 of 1A2) is a group of its
    own, not the whole class: it gets a code in Keep code, made like a band group's (level digit, subject code, level
    letter, then the first unused number), so the solver, the workbook and the student list all see it as a group */
-function groupCode(i) {
-  const x = S.spec.lessons[i]; if (!x || x.block || x.code_override || !x.subject) return;
-  const n = Number(x.students), size = (x.classes || []).reduce((a, c) => a + (Number((S.spec.classes.find(y => y.class === c) || {}).size) || 0), 0);
-  if (!(n > 0) || !size || n >= size) return;
-  const s = subj(x.subject) || {}, letter = Object.fromEntries((sc().tags || []).map(([a, b]) => [a, b]));
-  const pre = `${String(x.level).slice(-1)}${s.code || "??"}${letter[s.tag] || ""}`, used = new Set(lessonInfo().map(f => f.code));
-  let k = 1; while (used.has(`${pre}${k}`)) k++;
-  x.code_override = `${pre}${k}`;
-  toast(`${x.subject} for ${n} of the ${size} students in ${(x.classes || []).join(", ")} is a group of its own, so it gets code ${x.code_override} (Keep code). If the rest of the class has this subject at the same time, put it in their band instead.`);
+function groupCode(i) {   // a pull-out group gets a kept code (Groups.pullOutCode); said once here
+  const code = Groups.pullOutCode(S.spec, i); if (!code) return;
+  const x = S.spec.lessons[i], size = (x.classes || []).reduce((a, c) => a + (Number((S.spec.classes.find(y => y.class === c) || {}).size) || 0), 0);
+  toast(`${x.subject} for ${x.students} of the ${size} students in ${(x.classes || []).join(", ")} is a group of its own, so it gets code ${code} (Keep code). If the rest of the class has this subject at the same time, put it in their band instead.`);
 }
 /* a band whose classes all split into its groups (English, Mother Tongue, Maths by level): every student takes one of
    them. Option and elective bands are for some of the students only. The committee can tick or untick it (Bands). */
@@ -1586,11 +1581,13 @@ function lanesView() {   // the bands of the level as lanes, each with its group
 /* a row moving into a band gets a code of its own ("Entire Class" → 1AR1): that is not a renumbering, so it is not listed */
 const renumbered = sh => sh.changes.filter(([, a]) => a !== "Entire Class");
 const describeShift = sh => listing(renumbered(sh).map(([, a, b]) => `${a} → ${b}`), 4);
-function askShift(sh) {   // before a move that renumbers codes a student list names
-  const n = renumbered(sh).length; if (!n || !sh.students) return true;
-  return confirm(`This renumbers ${n} group code${n === 1 ? "" : "s"}: ${describeShift(sh)}. ${sh.students} student${sh.students === 1 ? "'s group list names" : "s' group lists name"} the old codes and will need updating on the Students step. Go on?`);
+function askShift(sh) {   // before a move that renumbers codes a student list or a Group rule names
+  const n = renumbered(sh).length; if (!n || !(sh.students || sh.rules)) return true;
+  const who = [sh.students ? `${sh.students} student${sh.students === 1 ? "'s group list names" : "s' group lists name"} the old codes (update them on the Students step)` : "",
+    sh.rules ? `${sh.rules} rule${sh.rules === 1 ? "" : "s"} on step 6 name${sh.rules === 1 ? "s" : ""} the old codes` : ""].filter(Boolean).join(", and ");
+  return confirm(`This renumbers ${n} group code${n === 1 ? "" : "s"}: ${describeShift(sh)}. ${who}. Go on?`);
 }
-const shiftNote = sh => renumbered(sh).length && !sh.students ? ` Codes changed: ${describeShift(sh)}.` : "";
+const shiftNote = sh => renumbered(sh).length && !(sh.students || sh.rules) ? ` Codes changed: ${describeShift(sh)}.` : "";
 function moveRows(lis, block) {
   if (!lis.length) { toast("Tick rows first."); return; }
   if (!block) { toast("Pick a band."); return; }
@@ -1602,8 +1599,9 @@ function moveRows(lis, block) {
 }
 function rowOut(li) {
   const x = S.spec.lessons[li]; if (!x || !x.block) return; const block = x.block;
-  const sh = Groups.shift(S.spec, c => Groups.fromBand(c, li)); if (!askShift(sh)) return;
-  Groups.fromBand(S.spec, li); save(); render(); toast(`Out of ${block}.${shiftNote(sh)}`);
+  const sh = Groups.shift(S.spec, c => { Groups.fromBand(c, li); Groups.pullOutCode(c, li); }); if (!askShift(sh)) return;
+  Groups.fromBand(S.spec, li); const kept = Groups.pullOutCode(S.spec, li); save(); render();
+  toast(`Out of ${block}.${kept ? ` It is a group of its own, with Keep code ${kept}.` : ""}${shiftNote(sh)}`);
 }
 function dropRows(e) {   // the lesson row indexes a drop carries ({rows: ids})
   let d = null; try { d = JSON.parse(e.dataTransfer.getData("text/plain") || "null"); } catch (err) { }
@@ -1618,9 +1616,10 @@ function groupsAction(k, v) {
   if (k === "gout") { rowOut(Number(v)); return; }
   if (k === "gfadd") {
     const r = Groups.newGroup(S.spec, gf); if (r.error) { toast(r.error); return; }
+    const kept = Groups.pullOutCode(S.spec, r.i);   // a pull-out group (fewer students than its classes hold) keeps a code of its own
     save(); const x = S.spec.lessons[r.i], code = lessonInfo()[r.i].code;
     gf.classes = []; gf.students = ""; render();
-    toast(`Added ${code === "Entire Class" ? "" : code + " "}${x.subject} for ${listing(x.classes)}.`); return;
+    toast(`Added ${code === "Entire Class" ? "" : code + " "}${x.subject} for ${listing(x.classes)}.${kept ? ` ${x.students} of the class: a group of its own, with Keep code ${kept}.` : ""}`); return;
   }
   if (k === "gfeach") {
     if (!gf.subject) { toast("Pick a subject."); return; }
@@ -1629,8 +1628,8 @@ function groupsAction(k, v) {
     save(); gf.classes = []; render(); toast(`${n} row${n === 1 ? "" : "s"} added.`); return;
   }
   if (k === "bfadd") {
-    const name = bf.touched ? bf.name : Groups.bandName(bf.level, bf.subjects, blockNames()), everyone = bf.evTouched ? bf.everyone : !/\bOption\b/.test(name);
-    const r = Groups.newBand(S.spec, { block: name, level: bf.level, classes: bf.classes, everyone }); if (r.error) { toast(r.error); return; }
+    const name = bf.touched ? bf.name : Groups.bandName(bf.level, bf.subjects, blockNames());
+    const r = Groups.newBand(S.spec, { block: name, level: bf.level, classes: bf.classes, everyone: bf.evTouched ? bf.everyone : undefined }); if (r.error) { toast(r.error); return; }
     save(); const b = S.spec.blocks[r.i]; gf.level = b.level; gf.block = b.block; gf.classes = []; M.bf = null; render();
     toast(`Band ${b.block} added. Add its groups above, or move rows into it below.`); return;
   }
@@ -1964,7 +1963,7 @@ async function tlFile(el) {   // an .xlsx goes through the server (its teachers 
 }
 document.addEventListener("input", e => {
   if (e.target.id === "gfStudents") { gfState().students = e.target.value; return; }
-  if (e.target.id === "bfName") { const bf = bfState(); bf.name = e.target.value; bf.touched = true; return; }
+  if (e.target.id === "bfName") { const bf = bfState(); bf.name = e.target.value; bf.touched = true; const ev = $("#bfEveryone"); if (ev && !bf.evTouched) ev.checked = !/option|elective/i.test(bf.name); return; }
   if (e.target.id === "mQ") { M.q = e.target.value; const rb = $("#rbody"); if (rb) rb.innerHTML = rosterList(mapDept()); return; }   // the roster only: a full redraw would take the caret
   if (["mnName", "mnShort", "mnAllow"].includes(e.target.id) && M.nf) { M.nf[{ mnName: "name", mnShort: "short", mnAllow: "allowance" }[e.target.id]] = e.target.value; return; }
   if (e.target.id !== "tlPaste") return;

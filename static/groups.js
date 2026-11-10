@@ -24,6 +24,7 @@ var Groups = (function () {
     for (i = 2; ; i++) if (!taken[norm(base + " " + i)]) return base + " " + i;
   }
 
+  function classSize(spec, c) { var row = rows(spec, "classes").find(function (y) { return y && y.class === c; }); return row ? (Number(row.size) || null) : null; }
   function letters(spec) {
     var out = {}; ((spec.school || {}).tags || []).forEach(function (t) { out[t[0]] = t[1] || ""; }); return out;
   }
@@ -38,24 +39,43 @@ var Groups = (function () {
     var seq = {};
     return rows(spec, "lessons").map(function (x) {
       if (!x || !x.subject) return "";
+      var k = x.level + "|" + x.subject;
+      if (x.block) seq[k] = (seq[k] || 0) + 1;   // a banded row takes a number even when it keeps its own code, as lessonInfo counts
       if (x.code_override) return String(x.code_override);
       if (!x.block) return "Entire Class";
-      var k = x.level + "|" + x.subject; seq[k] = (seq[k] || 0) + 1;
       return stem(spec, x.level, x.subject) + seq[k];
     });
   }
 
-  /* the code a row appended now would get */
-  function codeFor(spec, level, subject, block) {
+  function sizeOf(spec, classes) { return (classes || []).reduce(function (a, c) { return a + (classSize(spec, c) || 0); }, 0); }
+  function freeCode(spec, level, subject) {   // the first unused number on the stem, as Keep code picks it
+    var used = {}; codes(spec).forEach(function (c) { used[c] = true; });
+    var st = stem(spec, level, subject), k = 1; while (used[st + k]) k++;
+    return st + k;
+  }
+  /* the code a row appended now would get: in a band, the next number; with no band, "Entire Class" unless it is a
+     pull-out group (fewer students than its classes hold), which gets a code of its own */
+  function codeFor(spec, level, subject, block, students, classes) {
     if (!level || !subject) return "";
-    if (!block) return "Entire Class";
+    if (!block) {
+      var n0 = Number(students), size = sizeOf(spec, classes);
+      return n0 > 0 && size > 0 && n0 < size ? freeCode(spec, level, subject) : "Entire Class";
+    }
     var n = rows(spec, "lessons").filter(function (x) { return x && x.block && x.level === level && x.subject === subject; }).length;
     return stem(spec, level, subject) + (n + 1);
+  }
+  /* a row with no band for fewer students than its classes hold is a group of its own: it gets a kept code (null: not one) */
+  function pullOutCode(spec, li) {
+    var x = rows(spec, "lessons")[li];
+    if (!x || x.block || x.code_override || !x.subject) return null;
+    var n = Number(x.students), size = sizeOf(spec, x.classes);
+    if (!(n > 0) || !size || n >= size) return null;
+    x.code_override = freeCode(spec, x.level, x.subject);
+    return x.code_override;
   }
 
   /* ---- making and moving (the caller saves afterwards) */
   function bandOf(spec, name) { return rows(spec, "blocks").find(function (b) { return b && b.block === name; }) || null; }
-  function classSize(spec, c) { var row = rows(spec, "classes").find(function (y) { return y && y.class === c; }); return row ? (Number(row.size) || null) : null; }
 
   function newGroup(spec, f) {
     f = f || {};
@@ -94,7 +114,9 @@ var Groups = (function () {
     if (!f.level) return { error: "Pick a level." };
     if (!(f.classes || []).length) return { error: "Pick the band's classes." };
     if (!Array.isArray(spec.blocks)) spec.blocks = [];
-    spec.blocks.push({ block: name, level: f.level, classes: f.classes.slice(), everyone: !!f.everyone });
+    var band = { block: name, level: f.level, classes: f.classes.slice() };
+    if (typeof f.everyone === "boolean") band.everyone = f.everyone;   // left out: the name decides (option, elective)
+    spec.blocks.push(band);
     return { i: spec.blocks.length - 1 };
   }
 
@@ -106,7 +128,7 @@ var Groups = (function () {
     (lis || []).forEach(function (li) {
       var x = L[li]; if (!x) return;
       if (x.level !== band.level) { out.skipped++; return; }
-      x.block = block; out.moved++;
+      x.block = block; delete x.code_override; out.moved++;   // the band's own numbering takes over from a kept code
       (x.classes || []).forEach(function (c) { if (band.classes.indexOf(c) < 0) { band.classes.push(c); out.widened.push(c); } });
     });
     return out;
@@ -120,8 +142,8 @@ var Groups = (function () {
 
   /* what a change would do to the codes: run it on a copy, compare by row id, count the students naming a changed code */
   function shift(spec, fn) {
-    var copy = JSON.parse(JSON.stringify(spec));
-    var before = {}; rows(spec, "lessons").forEach(function (x, i) { if (x && x._id) before[x._id] = codes(spec)[i]; });
+    var copy = JSON.parse(JSON.stringify(spec)), was = codes(spec);
+    var before = {}; rows(spec, "lessons").forEach(function (x, i) { if (x && x._id) before[x._id] = was[i]; });
     fn(copy);
     var after = codes(copy), changes = [], old = {};
     rows(copy, "lessons").forEach(function (x, i) {
@@ -129,7 +151,8 @@ var Groups = (function () {
       changes.push([x._id, before[x._id], after[i]]); old[before[x._id]] = true;
     });
     var students = rows(spec, "students").filter(function (s) { return s && (s.groups || []).some(function (g) { return old[g]; }); }).length;
-    return { changes: changes, students: students };
+    var rulesN = rows(spec, "rules").filter(function (r) { return r && r.scope === "Group" && old[r.target]; }).length;
+    return { changes: changes, students: students, rules: rulesN };
   }
 
   /* ---- the bands page */
@@ -157,7 +180,7 @@ var Groups = (function () {
     return out;
   }
 
-  return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, lanes: lanes, pool: pool,
+  return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, pullOutCode: pullOutCode, lanes: lanes, pool: pool,
     newGroup: newGroup, addOnePerClass: addOnePerClass, newBand: newBand, toBand: toBand, fromBand: fromBand, shift: shift };
 })();
 if (typeof module !== "undefined") module.exports = Groups;
