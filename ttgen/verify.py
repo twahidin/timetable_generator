@@ -113,12 +113,12 @@ def in_scope(m, spec, r):
     level = lambda c: m["class_ix"].get(c, {}).get("level")
     tests = {"Teacher": lambda x: tg in x["teachers"], "Class": lambda x: tg in x["classes"], "Room": lambda x: x["room"] == tg,
              "Level": lambda x: x["level"] == tg or (bool(x["classes"]) and all(level(c) == tg for c in x["classes"])),
-             "Block": lambda x: x["block"] == tg, "Subject": lambda x: subject_test([tg])(x["subject"], dept(x)),
+             "Block": lambda x: x["block"] == tg, "Subject": lambda x: subject_test(tg)(x["subject"], dept(x)),
              "Department": lambda x: dept(x) == tg, "Group": lambda x: x["group"] == tg, "School": lambda x: True}
     if sc not in tests: return None
     base, sub = tests[sc], r.get("subject")
     if not sub or r.get("rule") == "Only these subjects": return base
-    return lambda x: base(x) and subject_test([sub])(x["subject"], dept(x))
+    return lambda x: base(x) and subject_test(sub)(x["subject"], dept(x))
 
 
 def _what(x): return f"{x['subject']} for {x['classes'][0]}" if x["group"] == ENTIRE and x["classes"] else f"group {x['group']}"
@@ -204,6 +204,7 @@ def rules(m, spec):
         why = None
         if rule not in CHECKERS: why = "this kind of rule is not checked here"
         elif in_scope(m, spec, r) is None: why = f"scope {r.get('scope')} is not one the check knows"
+        elif rule == "Keep free together" and r.get("scope") not in ("Department", "Level"): why = f"scope {r.get('scope')} is not one this rule uses (Department or Level)"
         elif rule == "Fixed at" and _BLANK(r.get("from")): why = "it has no From period"
         elif rule == "Finish by" and _BLANK(r.get("to")): why = "it has no To period"
         elif rule not in ("Fixed at", "Finish by", "Only these subjects") and _BLANK(r.get("from")) and _BLANK(r.get("to")): why = "it has no From or To period"

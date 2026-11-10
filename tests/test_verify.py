@@ -168,4 +168,12 @@ def rules_that_cannot_be_checked_are_listed():
     m = model_for(sp, []); ws, nc = verify.rules(m, m["checked_setup"]); assert ws == [] and len(nc) == 2 and "scope" in nc[0] and "From" in nc[1]
     assert verify.rule_periods(dict(), 5) == range(0, 5) and verify.rule_days(["Odd Mon", "Even Mon", "Odd Tue"], dict(week="Odd", day="Mon")) == [0]
 
+@t
+def keep_free_together_needs_a_department_or_level_and_subject_cells_are_split():
+    sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]; L = [(0, 3, 1, [c], "English", "Entire Class", [t], "")]
+    (ws, nc), _ = run(sp, [rule("Teacher", t, "Keep free together", 2, 3)], L)
+    assert ws == [] and len(nc) == 1 and nc[0].startswith("Teacher") and "scope" in nc[0]
+    (ws, _), _ = run(sp, [rule("Class", c, "Not in periods", 2, 3, subject="Maths, English")], L); assert len(ws) == 1
+    (ws, _), _ = run(sp, [rule("Subject", "Maths, English", "Not in periods", 2, 3)], L); assert len(ws) == 1
+
 print(f"{n} checks passed")
