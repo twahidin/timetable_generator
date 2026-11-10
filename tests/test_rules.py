@@ -59,4 +59,31 @@ def the_skill_copy_is_identical():
     diff = [f for f in files(a) if not filecmp.cmp(os.path.join(a, f), os.path.join(b, f), shallow=False)]
     assert not diff, diff
 
+@t
+def rule_report_rows_are_read_loosely():
+    from ttgen import export
+    rows = [("No.", "Must / Prefer", "Applies to", "Rule", "Result", "How"), (1, "Must", "Sec 1", "No PE in the first period", "MET", "PE never starts at period 0."),
+            (2, "Prefer", "1A", "Art after recess", "partly met", "Three of four lessons."), (None, None, None, None, None, None), ("3", "Must", "", "Hall free on Fri", "nope", "")]
+    got = export.rule_report_rows(iter(rows))
+    assert [(r["no"], r["strength"], r["result"]) for r in got] == [(1, "Must", "Met"), (2, "Prefer", "Partly"), (3, "Must", "")], got
+    assert got[0]["how"] == "PE never starts at period 0." and got[2]["applies"] == ""
+
+@t
+def the_database_carries_the_rule_report():
+    from ttgen import database
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "t.sqlite"); con = sqlite3.connect(p)
+        con.execute("CREATE TABLE lessons (id INTEGER PRIMARY KEY, day TEXT, start_period INTEGER, periods INTEGER, subject TEXT, classes TEXT)")
+        con.execute("INSERT INTO lessons VALUES (1, 'Odd Mon', 3, 2, 'Art', '1A')")
+        con.execute("CREATE TABLE rule_report (no INTEGER, strength TEXT, applies TEXT, rule TEXT, result TEXT, how TEXT)")
+        con.execute("INSERT INTO rule_report VALUES (1, 'Must', 'Sec 1', 'No PE in the first period', 'Met', 'Never at 0.')"); con.commit(); con.close()
+        out = database.read_db(p); assert len(out) == 7 and out[6] == [dict(no=1, strength="Must", applies="Sec 1", rule="No PE in the first period", result="Met", how="Never at 0.")], out[6]
+        con = sqlite3.connect(p); con.execute("DROP TABLE rule_report"); con.commit(); con.close()
+        assert database.read_db(p)[6] == []
+
+@t
+def the_skill_says_its_version_and_asks_for_the_report():
+    md = open(os.path.join(ROOT, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
+    assert "Skill version: 2026-11" in md and "Rule report" in md and "In words" in md and "Not met" in md
+
 print(f"{n} checks passed")

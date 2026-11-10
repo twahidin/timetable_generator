@@ -245,11 +245,14 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     env = dict(os.environ, PYTHONPATH=ROOT)
     subprocess.run([sys.executable, "-m", "ttgen", "sample", "primary", "--out", setup], check=True, env=env, cwd=ROOT)
     subprocess.run([sys.executable, "-m", "ttgen", "solve", setup, "--out", tt, "--time", "60"], env=env, cwd=ROOT)
+    import openpyxl   # the agent's rule report rides on the timetable workbook
+    wb = openpyxl.load_workbook(tt); ws = wb.create_sheet("Rule report"); ws.append(["No.", "Must / Prefer", "Applies to", "Rule", "Result", "How"]); ws.append([1, "Must", "Whole school", "Nothing in words", "Met", "Checked."]); wb.save(tt)
     r = c.post("/api/import-timetable", data={"publish": "1", "setup": (open(setup, "rb"), "setup.xlsx"), "timetable": (open(tt, "rb"), "timetable.xlsx")},
                content_type="multipart/form-data")
     j = r.get_json(); assert r.status_code == 200 and j["published"] is True, j
+    assert j["rule_report"][0]["result"] == "Met" and j["typed"] == 0, j["rule_report"]
     p = c.get("/api/status").get_json()["published"]
-    assert p and p["source"] == "timetable.xlsx"
+    assert p and p["source"] == "timetable.xlsx" and p["rule_report"][0]["how"] == "Checked.", p
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
     assert t.get("/timetable").status_code == 200
 

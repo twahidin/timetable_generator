@@ -11,7 +11,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
-from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, defaults
+from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, store, sync
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -351,6 +351,7 @@ def import_timetable():
         out = dict(school=m["school"]["name"], timetable=m["school"]["timetable"], ok=ch["ok"], problems=ch["problems"][:30],
                    more=max(0, len(ch["problems"]) - 30), after=ch["after_school"][:30], lessons=ch["lessons"], classes=len(m["classes"]),
                    teachers=len(m["teachers"]), students=len(m["students"]), notes=m["notes"][:12], published=False,
+                   rule_report=m.get("rule_report") or [], typed=len(typed_rules(saved)) if saved else 0,
                    other_school=ours if ours and ours.lower() != str(m["school"]["name"]).strip().lower() else "")
         if not go: return jsonify(out)
         name = os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file"
@@ -396,7 +397,7 @@ def pub_info():
     if not pub: return None
     m = pub["meta"]
     return dict(at=m["published_at"], ok=m["ok"], after=len(m.get("after_school", [])), students=m.get("students", 0), classes=m.get("classes", 0),
-                files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on(), source=m.get("source"))
+                files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on(), source=m.get("source"), rule_report=m.get("rule_report", []))
 
 @app.get("/api/status")
 @need("committee", "head")
