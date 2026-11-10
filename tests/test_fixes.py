@@ -97,4 +97,26 @@ def the_hook_edits_the_lessons_before_the_checks():
         assert (m["lessons"][0]["d"], m["lessons"][0]["p"]) == (2, p0) and out["touched"] == {1} and len(out["texts"]) == 1 and out["problems"] == []
         assert m["checks"]["lessons"] == 1 and (m["checks"]["after_school"] == m0["checks"]["after_school"])
 
+@t
+def an_added_id_is_not_reused_after_a_delete():
+    sp, L = two_lessons(); add = dict(kind="add", key=KEY, d=4, p=0, n=1, room="")
+    out = fixes.apply(L, [add, dict(kind="delete", id=3), add], sp, DAYS)
+    assert [x["id"] for x in out["lessons"]] == [1, 2, 4] and out["touched"] == {4}   # a deleted lesson is not touched
+    assert fixes.apply_one(copy.deepcopy(L), add, sp, DAYS).startswith("Added")      # four arguments still work
+
+@t
+def a_malformed_fix_is_skipped_and_listed():
+    sp, L = two_lessons(); good = dict(kind="move", id=1, d=2, p=0)
+    for bad in (dict(kind="teacher", key="C:9A", teachers=[]), dict(kind="add", key="C:9A", d=0, p=0, n=1, room=""), "move", dict(kind="move", id=1), dict(kind="teacher", key=5, teachers=[]), dict(kind="add", key="G", d=0, p=0, n=1, room="")):
+        out = fixes.apply(L, [bad, good], sp, DAYS)
+        assert len(out["problems"]) == 1 and len(out["texts"]) == 1 and by_id(out["lessons"], 1)["d"] == 2, bad
+
+@t
+def a_slot_outside_the_day_is_refused():
+    sp, L = two_lessons(); NP = int(sp["school"]["periods_per_day"])
+    for bad in (dict(kind="move", id=1, d=0, p=NP - 1), dict(kind="move", id=1, d=len(DAYS), p=0), dict(kind="move", id=1, d=-1, p=0),
+                dict(kind="add", key=KEY, d=0, p=NP, n=1, room=""), dict(kind="add", key=KEY, d=0, p=NP - 1, n=2, room="")):
+        out = fixes.apply(L, [bad], sp, DAYS); assert out["problems"] == ["A fix could not be applied: That is outside the day."] and out["lessons"] == L, bad
+    assert not fixes.apply(L, [dict(kind="move", id=1, d=0, p=NP - 2)], sp, DAYS)["problems"]
+
 print(f"{n} checks passed")
