@@ -19,21 +19,26 @@ var Grid = (function () {
     return out.length ? out : [{ name: "", days: [] }];
   }
 
-  /* one row per period, one cell per day of the week: {d, p, code, lessons, rowspan, covered} */
+  function span(r) { var k = Number(r.n); return k > 0 ? k : 1; }
+
+  /* one row per period, one cell per day of the week: {d, p, code, lessons, rowspan, covered}. A lesson that starts under
+     another's span joins that top cell (the span grows to the end of the last of them), so none is left unseen. */
   function table(payload, week) {
-    var rows = [], p, np = payload.NP, lessons = payload.lessons || [];
-    var under = {};   // "d:p" of the cells lying under an earlier cell's span
+    var np = payload.NP, all = payload.lessons || [], codes = payload.codes || [], rows = [], p;
     var cells = week.days.map(function (day) {
-      var col = [];
-      for (p = 0; p < np; p++) {
-        var here = lessons.filter(function (r) { return r.d === day.i && r.p === p; });
-        var span = here.reduce(function (m, r) { return Math.max(m, r.n); }, 1);
-        col.push({ d: day.i, p: p, code: (payload.codes[day.i] || "")[p] || ".", lessons: here, rowspan: span, covered: false });
+      var col = [], mine = all.filter(function (r) { return r.d === day.i; });
+      var byP = mine.map(function (r, i) { return { r: r, i: i }; }).sort(function (a, b) { return a.r.p - b.r.p || a.i - b.i; })
+        .map(function (x) { return x.r; });
+      for (p = 0; p < np; p++) col.push({ d: day.i, p: p, code: (codes[day.i] || "")[p] || ".", lessons: [], rowspan: 1, covered: false });
+      var q = 0, top, end, here, k;
+      while (q < byP.length) {
+        top = byP[q].p; end = top; here = [];
+        while (q < byP.length && byP[q].p < Math.max(end, top + 1)) { here.push(byP[q]); end = Math.max(end, byP[q].p + span(byP[q])); q++; }
+        if (top < 0 || top >= np) continue;
+        end = Math.min(end, np);
+        col[top].lessons = here; col[top].rowspan = end - top;
+        for (k = top + 1; k < end; k++) col[k].covered = true;
       }
-      col.forEach(function (c) {
-        if (c.covered) return;   // a lesson that starts under another's span does not cover cells of its own
-        for (var q = c.p + 1; q < c.p + c.rowspan && q < np; q++) col[q].covered = true;
-      });
       return col;
     });
     for (p = 0; p < np; p++) rows.push(cells.map(function (col) { return col[p]; }));

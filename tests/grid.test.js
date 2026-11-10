@@ -1,7 +1,7 @@
 // Plain-assert tests for static/grid.js (the week grid layout): run with `node tests/grid.test.js`
 const assert = require("assert");
 const Grid = require("../static/grid.js");
-let n = 0; const t = (name, f) => { f(); n++; };
+let n = 0; const t = (name, f) => { try { f(); } catch (e) { console.error("FAILED: " + name); throw e; } n++; };
 
 const lz = (id, group, d, p, k, extra) => Object.assign({ id: id, group: group, subject: "Maths", classes: ["1A"], teachers: ["Mr Tan"], room: "R1", d: d, p: p, n: k, block: false, what: "" }, extra || {});
 const payload = (days, lessons, codes) => ({ view: "class", name: "1A", days: days, NP: 5, times: [], codes: codes || days.map(() => "LLLRL"), lessons: lessons });
@@ -97,6 +97,41 @@ t("sorted: ok, prefer, no; na dropped; by day then period; new list", () => {
   assert.deepStrictEqual(s, copy);
   assert.deepStrictEqual(Grid.sorted([{ d: 0, p: 0, state: "na" }]), []);
   assert.deepStrictEqual(Grid.sorted([]), []);
+});
+
+t("table: a lesson starting under another's span joins its top cell", () => {
+  const A = lz("a", "g1", 0, 2, 2), B = lz("b", "g2", 0, 3, 2);
+  const p = payload(["Mon"], [B, A]);
+  const rows = Grid.table(p, Grid.weeks(p.days)[0]);
+  assert.deepStrictEqual(rows[2][0].lessons, [A, B]);
+  assert.strictEqual(rows[2][0].rowspan, 3);
+  assert.deepStrictEqual([3, 4].map(i => [rows[i][0].covered, rows[i][0].lessons.length]), [[true, 0], [true, 0]]);
+  assert.strictEqual(A.p, 2); assert.strictEqual(B.p, 3);
+});
+
+t("table: a chain of three overlapping lessons merges into one cell", () => {
+  const A = lz("a", "g1", 0, 0, 2), B = lz("b", "g2", 0, 1, 2), C = lz("c", "g3", 0, 2, 2);
+  const p = payload(["Mon"], [A, B, C]); p.NP = 6;
+  const rows = Grid.table(p, Grid.weeks(p.days)[0]);
+  assert.deepStrictEqual(rows[0][0].lessons, [A, B, C]);
+  assert.strictEqual(rows[0][0].rowspan, 4);
+  assert.deepStrictEqual(rows.map(r => r[0].covered), [false, true, true, true, false, false]);
+  assert.ok(rows.slice(1).every(r => r[0].lessons.length === 0));
+});
+
+t("table: rowspan stops at the end of the day", () => {
+  const p = payload(["Mon"], [lz("a", "g1", 0, 1, 5)]); p.NP = 3;
+  const rows = Grid.table(p, Grid.weeks(p.days)[0]);
+  assert.strictEqual(rows[1][0].rowspan, 2);
+  assert.strictEqual(rows[2][0].covered, true);
+});
+
+t("table: missing codes and a lesson with no length", () => {
+  const rs = [lz("a", "g1", 0, 0, 0), lz("b", "g2", 0, 1, null), lz("c", "g3", 0, 2, undefined)];
+  const p = payload(["Mon"], rs); delete p.codes;
+  const rows = Grid.table(p, Grid.weeks(p.days)[0]);
+  assert.deepStrictEqual(rows.map(r => r[0].code), [".", ".", ".", ".", "."]);
+  assert.deepStrictEqual(rows.slice(0, 3).map(r => r[0].rowspan), [1, 1, 1]);
 });
 
 console.log(`${n} cases passed`);
