@@ -14,7 +14,7 @@ lessons as it can (cheaper than bending a Prefer rule or pushing a lesson after 
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
-from .spec import PE_KIND, RULE_TYPES, SCOPES, WEEKDAYS, ampm, family as _family, floating_recess, names_list, periods_by_day, resolve_row, structure_vs_rules, \
+from .spec import PE_KIND, RULE_TYPES, SCOPES, TYPED, WEEKDAYS, ampm, family as _family, floating_recess, names_list, periods_by_day, resolve_row, structure_vs_rules, \
     subject_test, trim_day, windows as _windows
 
 W_PREF, W_SLACK, W_MOVE = 60, 40, 10
@@ -730,6 +730,9 @@ def rule_problems(spec, P=None):
         if str(target) not in lists.get(scope, set()):
             say(f"{target} is not a{'n' if str(scope)[0] in 'AEIOU' else ''} {str(scope).lower()} on the setup, so this row matches nothing."
                 + (" For every level, apply it to School." if scope == "Level" else "")); continue
+        if rule == TYPED:   # honoured by the agent, not the solver: only an empty sentence is a problem
+            if not str(r.get("text") or "").strip(): say("Write the rule in words: without them this row says nothing.")
+            continue
         if rule == "Only these subjects":
             names = names_list(subj)
             if not names: say("List the subjects allowed in those periods under Subject, separated by commas. Without them this row does nothing."); continue

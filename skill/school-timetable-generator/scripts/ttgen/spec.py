@@ -29,7 +29,25 @@ RULE_TYPES = [
     ("Not on the same day as", "Subject", "N", "N", "Applies to and Subject are never on the same day for a class.", "Subject · Physical Education · Design & Technology"),
     ("Once a day per group", "School, Subject", "N", "N", "A group meets at most once a day for a subject.", "School · Whole school"),
     ("Avoid after-school slots", "School, Level, Class", "N", "N", "Use the 'A' periods in Day structure only when a class cannot fit otherwise.", "School · Whole school"),
+    ("In words", "School, Level, Class, Subject, Room, Teacher", "N", "N", "A rule in plain words that the list cannot say. The timetable scripts do not enforce it: the agent honours a Must, tries a Prefer, and reports how each was met.", "Level · Sec 1 · No PE in the first period"),
 ]
+TYPED = "In words"             # a rule the agent honours and reports on; never enforced by the solver
+SKILL_VERSION = "2026-11"      # SKILL.md's version line and the one the workbook's README names
+
+def typed_rules(spec):
+    """[(number, index, rule)] for every rule row in words, numbered 1, 2, 3... in spec['rules'] order"""
+    out, n = [], 0
+    for i, r in enumerate(spec.get("rules", []) or []):
+        if isinstance(r, dict) and r.get("rule") == TYPED:
+            n += 1; out.append((n, i, r))
+    return out
+
+def typed_label(number, r):
+    """'T1 · Must · Sec 1 · No PE in the first period' (a blank target is left out)"""
+    parts = [f"T{number}", str(r.get("strength") or "Must")]
+    if str(r.get("target") or "").strip(): parts.append(str(r.get("target")).strip())
+    parts.append(str(r.get("text") or "").strip())
+    return " · ".join(parts)
 
 # rule rows on the Settings sheet: the row's label, a key, whether its value is a number (else Yes/No), and the rule it
 # stands for (after_school and pe_rain_home are school settings instead: No means the 'A' periods are never used; Yes keeps
