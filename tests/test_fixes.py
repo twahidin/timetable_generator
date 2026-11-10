@@ -138,7 +138,7 @@ def a_busy_teacher_class_room_or_student_is_a_clash():
     b = fixes.Busy(m)
     assert b.clash(rows_of(m, 1), 1, 2, 2, ignore={1}) == f"{T[0]} is teaching Science for {B} then." and b.clash(rows_of(m, 1), 3, 2, 2, ignore={1}) is None
     assert b.clash(rows_of(m, 1), 2, 5, 2, ignore={1}) == f"{A} has group G1 then." and b.clash(rows_of(m, 3), 0, 2, 2, ignore={3}) == f"{A} has Maths for {A} then."
-    assert b.clash(rows_of(m, 3), *slot_of(m, 4), ignore={3}) == "1 students of G1 have group G2 then."
+    assert b.clash(rows_of(m, 3), *slot_of(m, 4), ignore={3}) == "1 student of G1 has group G2 then."
     assert b.clash(rows_of(m, 5), 0, 2, 2, ignore={5}) == f"{ROOM} is in use then." and b.clash(rows_of(m, 5), 0, 2, 2, ignore={1, 5}) is None
     assert b.clash([dict(rows_of(m, 5)[0], room="TBC")], 0, 2, 2, ignore={5}) is None and b.clash([dict(rows_of(m, 5)[0], room="")], 0, 2, 2, ignore={5}) is None
     assert b.lesson_time(rows_of(m, 1), 0, RECESS, 1) == f"That is not lesson time for {A}." and b.lesson_time(rows_of(m, 1), 0, NP - 1, 2) == f"That is not lesson time for {A}."
@@ -164,6 +164,28 @@ def judge_states():
     r = j(kind="teacher", key=KEY.replace(CLS, A), teachers=[T[5]]); assert r["state"] == "prefer" and r["why"] == f"{T[5]} would have 3 periods, 1 over the allowance.", r
     assert j(kind="teacher", key=KEY.replace(CLS, A), teachers=[T[0]])["state"] == "ok"   # the same teacher: no new clash with Science, which is on another day
     r = j(kind="swap", a=1, b=6); assert r["state"] == "na" and "not the same length" in r["why"], r
+
+@t
+def a_rule_broken_by_another_lesson_is_new():
+    must = dict(scope="Class", target=A, rule="Not in periods", week="Both", day="All", **{"from": 9, "to": 10}, strength="Must")
+    L = [lesson(1, 0, 9, 1, [A], SUBJ, ENTIRE, [T[0]], level=LV), lesson(2, 1, 5, 1, [A], "Art", ENTIRE, [T[1]], level=LV)]
+    m, sp = model_with(L, rules=[must])
+    r = fixes.judge(m, sp, DAYS, dict(kind="swap", a=1, b=2))   # the break moves from lesson 1 to lesson 2: the same count, a new lesson breaking it
+    assert r["state"] == "no" and r["must"] == [r["why"]] and r["why"] == f"Rule Class · {A} · Not in periods: Art for {A} is in periods 9-10 on {DAYS[0]}.", r
+    assert fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=2, p=10))["state"] == "ok"   # lesson 1 still breaks it, elsewhere: not new
+    cap = dict(scope="Teacher", target=T[0], rule="Max periods a day", number=2, strength="Must")
+    L = [lesson(40 + k, 0, 1 + k, 1, [A], SUBJ, ENTIRE, [T[0]], level=LV) for k in range(3)] + [lesson(43 + k, 1, 5 + k, 1, [B], SUBJ, ENTIRE, [T[0]], level=LV) for k in range(2)]
+    m, sp = model_with(L, rules=[cap])
+    r = fixes.judge(m, sp, DAYS, dict(kind="move", id=40, d=1, p=7))   # Monday is no longer over, Tuesday now is
+    assert r["state"] == "no" and r["why"].endswith(f"{T[0]} has 3 periods on {DAYS[1]}, more than 2."), r
+    assert fixes.judge(m, sp, DAYS, dict(kind="move", id=40, d=2, p=7))["state"] == "ok"
+
+@t
+def a_lesson_length_in_any_spelling():
+    rows = [dict(x, length="2.0") if x is ROW else dict(x, length="two") if x["classes"] == [CLS] and x["code"] == ENTIRE else x for x in SP["lessons"]]
+    m, sp = model_with([lesson(1, 0, 2, 1, [CLS], SUBJ, ENTIRE, TEACHERS, level=LV)], lessons=rows)
+    sh = {x["key"]: x for x in fixes.short(m, sp)}; assert sh[KEY]["n"] == 2, sh[KEY]
+    assert all(x["n"] == 1 for k, x in sh.items() if k.startswith(f"C:{CLS}:") and k != KEY)
 
 @t
 def slots_for_a_lesson_and_a_block():
@@ -209,11 +231,18 @@ def teacher_room_add_delete_options():
 
 if "--full" in sys.argv:
     def solved_primary():
-        """the primary sample solved as tests/smoke.py --full does -> (m, setup, days, setup path, timetable path)"""
+        """the primary sample solved as tests/smoke.py --full does, checked against its setup plus the WIDE rule rows -> (m, setup, days, timetable path)"""
         work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx"); env = dict(os.environ, PYTHONPATH=ROOT)
         subprocess.run([sys.executable, "-m", "ttgen", "sample", "primary", "--out", setup], check=True, env=env, cwd=ROOT, capture_output=True)
-        subprocess.run([sys.executable, "-m", "ttgen", "solve", setup, "--out", tt, "--time", "60"], env=env, cwd=ROOT, capture_output=True)
-        m = export.model_from_files(setup, tt); return m, m["checked_setup"], m["days"], setup, tt
+        subprocess.run([sys.executable, "-m", "ttgen", "solve", setup, "--out", tt, "--time", "30"], env=env, cwd=ROOT, capture_output=True)   # 30 s: feasible and clean in 15
+        own = export.model_from_files(setup, tt)["setup"]; sp = copy.deepcopy(own); sp["rules"] = list(sp.get("rules") or []) + WIDE
+        m = export.model_from_files(None, tt, spec=sp); return m, sp, m["days"], tt
+
+    def r_(scope, target, rule, strength="Must", **k): return dict(scope=scope, target=target, rule=rule, strength=strength, week="Both", day=k.pop("day", "All"), **k)
+    WIDE = [r_("Level", "P1", "Keep free together", "Prefer", day="Tue", **{"from": 7, "to": 8}), r_("Department", "MA", "At most N at once", number=3),
+            r_("School", "Whole school", "Max periods a day", "Prefer", number=8), r_("School", "Whole school", "Max periods in a row", number=6),
+            r_("School", "Whole school", "At least one recess a day", "Prefer"), r_("Subject", "English Language", "Not on the same day as", "Prefer", subject="Art"),
+            r_("Subject", "Mathematics", "Once a day per group"), r_("Level", "P2", "Same time across classes", subject="Physical Education")]
 
     def sample_ids(m, k):
         """k lesson ids: a block lesson, a whole-class one, a group one, then others spread over the list"""
@@ -225,10 +254,10 @@ if "--full" in sys.argv:
         return out + rest[:: max(1, len(rest) // max(1, k - len(out)))][: k - len(out)]
 
     LESSON_TIME = ("sits in a break", "sits in a class's recess", "(Settings: Lessons end by)")
-    def full_state(m, sp, days, setup, tt, lid, s):
+    def full_state(m, sp, days, tt, lid, s):
         """the reference: the fix applied to every lesson through the app's own path, every check rebuilt, the same counting rule"""
         fix = dict(kind="swap", a=lid, b=s["swap"]) if s["swap"] else dict(kind="move", id=lid, d=s["d"], p=s["p"])
-        out = {}; m2 = export.model_from_files(setup, tt, edit=fixes.editor([fix], out))
+        out = {}; m2 = export.model_from_files(None, tt, spec=m["setup"], edit=fixes.editor([fix], out))
         if out["problems"]: return "na"
         if s["swap"]:
             ra, rb = rows_of(m, lid), rows_of(m, s["swap"]); blk = lambda r: len(r) > 1 or any(x["block"] for x in r)
@@ -237,17 +266,18 @@ if "--full" in sys.argv:
         if any(x.endswith(LESSON_TIME) or x.endswith(LESSON_TIME[2] + ".") for x in new): return "na"
         if [x for x in new if not x.endswith("planned.")]: return "no"
         if {k: v["periods"] for k, v in verify.placed(m2).items()} != {k: v["periods"] for k, v in verify.placed(m).items()}: return "no"
-        count = lambda mm: __import__("collections").Counter((w["key"].split(":", 2)[1], w["strength"]) for w in verify.rules(mm, sp)[0])
-        cb, ca = count(m), count(m2); rose = {k for k in ca if ca[k] > cb.get(k, 0)}
-        return "no" if any(k[1] == "Must" for k in rose) else "prefer" if rose else "ok"
+        subj = lambda mm: {((w["key"].split(":", 2)[1], w["where"]["id"]) if w["where"] else w["key"]): w["strength"] for w in verify.rules(mm, sp)[0]}
+        sb, sa = subj(m), subj(m2); new = [v for k, v in sa.items() if k not in sb]
+        return "no" if "Must" in new else "prefer" if new else "ok"
 
     @t
     def the_reduced_check_agrees_with_the_full_one_and_is_fast():
-        m, sp, days, setup, tt = solved_primary(); assert m["checks"]["ok"], m["checks"]["problems"][:5]
+        m, sp, days, tt = solved_primary(); assert m["checks"]["ok"], m["checks"]["problems"][:5]
+        assert not verify.rules(m, sp)[1], verify.rules(m, sp)[1]   # every WIDE row is checked
         for lid in sample_ids(m, 6):
             t0 = time.time(); S = fixes.slots(m, sp, days, lid); dt = time.time() - t0; assert dt < 2, (lid, dt)
             live = [s for s in S if s["state"] != "na"]
             for s in random.Random(1).sample(live, min(5, len(live))):
-                assert s["state"] == full_state(m, sp, days, setup, tt, lid, s), (lid, s)
+                assert s["state"] == full_state(m, sp, days, tt, lid, s), (lid, s)
 
 print(f"{n} checks passed")

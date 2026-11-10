@@ -67,7 +67,7 @@ def deployment(m, spec):
     plan, got, out = planned_rows(spec), placed(m), []
     subjects = {str(s["subject"]) for s in spec["subjects"]}
     def where(key, e):
-        x = e["lessons"][0]; return dict(cls=key[1] if key[0] == "C" else (x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"])
+        x = e["lessons"][0]; return dict(cls=key[1] if key[0] == "C" else (x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"], id=x["id"], row=x["group"])
     for key in plan:
         p, k, what = plan[key], _kstr(key), _name(key); group = p["classes"][0] if p["classes"] else "School"
         if key not in got:
@@ -143,7 +143,7 @@ def _pr(per): return f"periods {per[0]}-{per[-1]}"
 def _hit(m, r, i, detail, sentence, group, x=None):
     """one warning for rule row i; x is the lesson it names"""
     prefer = r.get("strength") == "Prefer"
-    where = dict(cls=(x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"]) if x else None
+    where = dict(cls=(x["classes"] or [""])[0], day=m["days"][x["d"]], period=x["p"], id=x["id"], row=x["group"]) if x else None
     return warning(f"rule:{r.get('_id') or i}:{detail}", "rule", f"Rule {rule_label(r)}: {sentence}" + (" (Prefer)" if prefer else ""), "Prefer" if prefer else "Must", group, where)
 
 def _lessons(m, spec, r, days):

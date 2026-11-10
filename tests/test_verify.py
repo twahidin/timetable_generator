@@ -22,7 +22,7 @@ def deployment_finds_teacher_periods_missing_and_extra():
     k = f"dep:C:{cls}:{subj}:teachers"; assert k in ws and ws[k]["sides"]["step5"] == row["teachers"][0]
     assert (ws[k]["ops"] == [["set", "lessons", row["_id"], "teachers", ["Nobody"]]]) if row.get("_id") else ws[k]["ops"] is None
     assert ws[k]["text"] == f"{subj} for {cls} is taught by Nobody on the timetable; step 5 says {row['teachers'][0]}." and ws[k]["group"] == cls
-    assert ws[k]["where"] == dict(cls=cls, day=m["days"][0], period=0)
+    assert ws[k]["where"] == dict(cls=cls, day=m["days"][0], period=0, id=1, row="Entire Class")
     assert all(w["kind"] == "deployment" for w in ws.values()) and sum(1 for w in ws.values() if w["key"].endswith(":missing")) == len(verify.planned_rows(sp)) - 1
     m2 = model_for(sp, [(0, 0, want - 1, [cls], subj, "Entire Class", row["teachers"], ""), (1, 0, 1, [cls], "Nothing", "Entire Class", row["teachers"], "")])
     ws = {w["key"]: w for w in verify.deployment(m2, sp)}
@@ -273,7 +273,7 @@ def after_school_slots_are_named_with_the_rows_strength():
     for row in (rule("School", "Whole school", "Avoid after-school slots", strength="Prefer"), rule("Level", lv, "Avoid after-school slots", strength="Prefer"), rule("Class", c, "Avoid after-school slots", strength="Prefer")):
         (ws, nc), m = with_grid(sp, [row], L, ext)
         assert len(ws) == 1 and nc == [] and ws[0]["key"] == f"rule:0:{c}|English|0|12" and ws[0]["group"] == c and ws[0]["strength"] == "Prefer"
-        assert ws[0]["where"] == dict(cls=c, day=m["days"][0], period=12) and ws[0]["text"].endswith(f"English for {c} is in an after-school slot on {m['days'][0]}. (Prefer)")
+        assert ws[0]["where"] == dict(cls=c, day=m["days"][0], period=12, id=1, row="Entire Class") and ws[0]["text"].endswith(f"English for {c} is in an after-school slot on {m['days'][0]}. (Prefer)")
     assert run(sp, [rule("School", "Whole school", "Avoid after-school slots")], L)[0][0] == []
     (ws, nc), _ = with_grid(sp, [rule("Teacher", t, "Avoid after-school slots")], L, ext); assert ws == [] and len(nc) == 1 and "scope" in nc[0]
 

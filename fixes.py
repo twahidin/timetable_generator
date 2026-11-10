@@ -108,6 +108,8 @@ def _no_room(r): return not r or r == "TBC"
 def _classes(rows): return list(dict.fromkeys(c for x in rows for c in x["classes"]))
 def _block(rows): return len(rows) > 1 or any(x["block"] for x in rows)
 
+def _students(k, code, y): return f"1 student of {code} has {what(y)} then." if k == 1 else f"{k} students of {code} have {what(y)} then."
+
 class Busy:
     """who and what is in use in each period, built once per request: teachers, classes, whole-class lessons, groups,
     rooms and rain rooms by (kind, name, day, period), each lesson's rows by id, and which groups share students"""
@@ -153,10 +155,10 @@ class Busy:
                 [(x["group"], g, k) for g, k in self.share.get(x["group"], {}).items()]
             for q in Q:
                 for who, g, k in pairs:
-                    if y := f(("g", g, d, q), ignore): return f"{k} students of {who} have {what(y)} then."
+                    if y := f(("g", g, d, q), ignore): return _students(k, who, y)
                 if x["group"] != ENTIRE:
                     for c, k in self.gcls.get(x["group"], {}).items():
-                        if y := f(("w", c, d, q), ignore): return f"{k} students of {x['group']} have {what(y)} then."
+                        if y := f(("w", c, d, q), ignore): return _students(k, x["group"], y)
         mine = collections.Counter(x["room"] for x in rows if not _no_room(x["room"]))
         for room, k in mine.items():
             for q in Q:
@@ -195,11 +197,15 @@ def neighbours(m, ids, busy=None):
     return [x for x in m["lessons"] if x["id"] in near]
 
 def _rule_ws(m, spec, lessons): return verify.rules(dict(m, lessons=lessons), spec)[0]
-def _count(ws): return collections.Counter((w["key"].split(":", 2)[1], w["strength"]) for w in ws)
+def _subject(w):
+    """what a rule warning is about: (rule row, lesson id) for a lesson, wherever it sits; the warning's key for a day or a slot"""
+    return (w["key"].split(":", 2)[1], w["where"]["id"]) if w.get("where") else w["key"]
 
-def rule_counts(m, spec, lessons):
-    """{(rule id, strength): warnings} from the standard rules on these lessons only"""
-    return _count(_rule_ws(m, spec, lessons))
+def rule_subjects(m, spec, lessons):
+    """{subject: the first warning about it} from the standard rules on these lessons only; a fix is worse where it adds a subject"""
+    out = {}
+    for w in _rule_ws(m, spec, lessons): out.setdefault(_subject(w), w)
+    return out
 
 def _bears(m, spec, r, x):
     """whether rule row r can see lesson row x at all, wherever it sits: a change to lessons it cannot see leaves its warnings as they were"""
@@ -235,6 +241,7 @@ def _allowance(v):
 def judge(m, spec, days, fix, ctx=None):
     """how a fix would leave the timetable -> dict(state, why, must, prefer): "na" it cannot go there, "no" a clash, a period
     count away from the plan or a Must rule broken anew, "prefer" only a Prefer rule or a teacher's allowance gives, else "ok".
+    Broken anew: a rule warning about a subject (rule_subjects) that had none before.
     ctx: the shared index of one request (slots and the option lists pass it)"""
     c = _ctx(m, ctx); b = c["busy"]
     res = lambda state, why="", must=(), prefer=(): dict(state=state, why=why, must=list(must), prefer=list(prefer))
@@ -284,12 +291,14 @@ def judge(m, spec, days, fix, ctx=None):
         sp = dict(spec, rules=[r if i in keep else {"rule": "In words"} for i, r in enumerate(rules)])
         mk = (id(spec), keep, frozenset(near))
         if mk not in c["memo"]:
-            L0 = [x for x in m["lessons"] if x["id"] in near]; c["memo"][mk] = (L0, _rule_ws(m, sp, L0))
-        L0, w0 = c["memo"][mk]; w1 = _rule_ws(m, sp, [x for x in L0 if x["id"] not in changed] + new)
-        c0, c1, texts = _count(w0), _count(w1), {w["text"] for w in w0}
-        for k in [k for k in c1 if c1[k] > c0.get(k, 0)]:
-            ws = [w for w in w1 if (w["key"].split(":", 2)[1], w["strength"]) == k]
-            (must if k[1] == "Must" else prefer).extend([w["text"] for w in ws if w["text"] not in texts] or [ws[0]["text"]])
+            L0 = [x for x in m["lessons"] if x["id"] in near]; c["memo"][mk] = (L0, rule_subjects(m, sp, L0))
+        L0, s0 = c["memo"][mk]; L1, put = [], set()
+        for x in L0:   # in the timetable's order, as the full check sees it (a day's first lesson names some warnings)
+            if x["id"] not in changed: L1.append(x)
+            elif x["id"] not in put: put.add(x["id"]); L1 += after.get(x["id"], [])
+        L1 += [x for x in new if x["id"] not in put]
+        for k, w in rule_subjects(m, sp, L1).items():
+            if k not in s0: (must if w["strength"] == "Must" else prefer).append(w["text"])
     if kind in ("teacher", "add", "delete"):
         for t in sorted({t for x in seen for t in x["teachers"]}):
             has = lambda rows: sum(r[0]["n"] for r in rows.values() if any(t in y["teachers"] for y in r))
@@ -361,6 +370,11 @@ def can_delete(m, spec, days, lesson_id, group=None):
     """a delete of the lesson (or its row of group) judged -> dict(state, why)"""
     return _pick(judge(m, spec, days, dict(kind="delete", id=lesson_id, group=group)))
 
+def _length(v):
+    """a lesson length in any spelling of a whole number ('2', 2.0, '2.0'), else 1"""
+    try: f = float(str(v).strip()); return int(f) if f == int(f) and f >= 1 else 1
+    except (ValueError, OverflowError): return 1
+
 def short(m, spec):
     """the keys timetabled below plan, for the Add list -> [dict(key, name, have, want, n)]; n is step 5's usual lesson
     length, at most what is missing"""
@@ -368,5 +382,5 @@ def short(m, spec):
     for k, e in verify.planned_rows(spec).items():
         have = got[k]["periods"] if k in got else 0
         if have < e["periods"]:
-            out.append(dict(key=verify._kstr(k), name=verify._name(k), have=have, want=e["periods"], n=min(int(e["rows"][0].get("length") or 1), e["periods"] - have)))
+            out.append(dict(key=verify._kstr(k), name=verify._name(k), have=have, want=e["periods"], n=min(_length(e["rows"][0].get("length")), e["periods"] - have)))
     return out
