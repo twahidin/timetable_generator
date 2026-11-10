@@ -145,34 +145,42 @@ class Busy:
 
     def _first(self, key, ignore): return next((y for y in self.at.get(key, ()) if y["id"] not in ignore), None)
 
-    def clash(self, rows, d, p, n, ignore=()):
-        """the first reason these rows cannot be in periods p .. p+n-1 of day d, the lessons with ids in ignore set aside, or None"""
+    def _why(self, rows, d, p, n, ignore):
+        """(the first reason, the lesson behind it or None for a room), or (None, None)"""
         ignore, Q, f = set(ignore), range(p, p + n), self._first
         for x in rows:
             for t in x["teachers"]:
                 for q in Q:
-                    if y := f(("t", t, d, q), ignore): return f"{t} is teaching {what(y)} then."
+                    if y := f(("t", t, d, q), ignore): return f"{t} is teaching {what(y)} then.", y
         for x in rows:
             for c in x["classes"]:
                 for q in Q:
-                    if y := f(("c" if x["group"] == ENTIRE else "w", c, d, q), ignore): return f"{c} has {what(y)} then."
+                    if y := f(("c" if x["group"] == ENTIRE else "w", c, d, q), ignore): return f"{c} has {what(y)} then.", y
         for x in rows:
             pairs = [(c, g, k) for c in x["classes"] for g, k in self.cgroups.get(c, {}).items()] if x["group"] == ENTIRE else \
                 [(x["group"], g, k) for g, k in self.share.get(x["group"], {}).items()]
             for q in Q:
                 for who, g, k in pairs:
-                    if y := f(("g", g, d, q), ignore): return _students(k, who, y)
+                    if y := f(("g", g, d, q), ignore): return _students(k, who, y), y
                 if x["group"] != ENTIRE:
                     for c, k in self.gcls.get(x["group"], {}).items():
-                        if y := f(("w", c, d, q), ignore): return _students(k, x["group"], y)
+                        if y := f(("w", c, d, q), ignore): return _students(k, x["group"], y), y
         mine = collections.Counter(x["room"] for x in rows if not _no_room(x["room"]))
         for room, k in mine.items():
             for q in Q:
-                if sum(y["id"] not in ignore for y in self.at.get(("r", room, d, q), ())) + k > self.m["room_cap"].get(room, 1) or f(("h", room, d, q), ignore): return f"{room} is in use then."
+                if sum(y["id"] not in ignore for y in self.at.get(("r", room, d, q), ())) + k > self.m["room_cap"].get(room, 1) or f(("h", room, d, q), ignore): return f"{room} is in use then.", None
         for x in rows:
             for h in _split_list(x.get("rain")):
-                if h != "TBC" and (h in mine or any(f(("r", h, d, q), ignore) for q in Q)): return f"{h} is in use then."
-        return None
+                if h != "TBC" and (h in mine or any(f(("r", h, d, q), ignore) for q in Q)): return f"{h} is in use then.", None
+        return None, None
+
+    def clash(self, rows, d, p, n, ignore=()):
+        """the first reason these rows cannot be in periods p .. p+n-1 of day d, the lessons with ids in ignore set aside, or None"""
+        return self._why(rows, d, p, n, ignore)[0]
+
+    def blocker(self, rows, d, p, n, ignore=()):
+        """the id of the lesson behind the reason clash gives for the same arguments; None when there is no clash or the reason is a room"""
+        y = self._why(rows, d, p, n, ignore)[1]; return None if y is None else y["id"]
 
     def lesson_time(self, rows, d, p, n):
         """'That is not lesson time for {class}.' when a period is not L or A for a class of the rows (its level's day and its
