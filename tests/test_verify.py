@@ -72,4 +72,16 @@ def clashes_drop_the_planned_lines_and_name_the_group():
     ws = verify.clashes(m); assert any(w["group"] == "Ms X" and w["key"].startswith("clash:Teacher double-booked") and w["kind"] == "clash" and w["strength"] == "Must" for w in ws)
     assert not any(w["text"].endswith("planned.") for w in ws)
 
+@t
+def ops_use_the_row_ids():
+    import sync
+    sp = primary(); sync.ensure_ids(sp); reader.derive(sp)
+    rows = [x for x in sp["lessons"] if not x.get("block")]; row, gone = rows[0], rows[1]; cls = row["classes"][0]
+    assert row.get("_id") and gone.get("_id") and (gone["classes"][0], gone["subject"]) != (cls, row["subject"])
+    m = model_for(sp, [(0, 0, row["periods"], [cls], row["subject"], "Entire Class", ["Nobody"], "")])
+    ws = {w["key"]: w for w in verify.deployment(m, sp)}
+    assert ws[f"dep:C:{cls}:{row['subject']}:teachers"]["ops"] == [["set", "lessons", row["_id"], "teachers", ["Nobody"]]]
+    miss = ws[f"dep:C:{gone['classes'][0]}:{gone['subject']}:missing"]["ops"]
+    assert miss == [["del", "lessons", gone["_id"]]]
+
 print(f"{n} checks passed")
