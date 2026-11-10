@@ -176,4 +176,105 @@ def keep_free_together_needs_a_department_or_level_and_subject_cells_are_split()
     (ws, _), _ = run(sp, [rule("Class", c, "Not in periods", 2, 3, subject="Maths, English")], L); assert len(ws) == 1
     (ws, _), _ = run(sp, [rule("Subject", "Maths, English", "Not in periods", 2, 3)], L); assert len(ws) == 1
 
+def with_grid(sp, rows, placed, edit=None):   # like run, but the model can be edited before the rules are checked
+    sp = copy.deepcopy(sp); sp["rules"] = rows; m = model_for(sp, placed)
+    if edit: edit(m)
+    return verify.rules(m, m["checked_setup"]), m
+
+@t
+def max_periods_a_day_per_teacher_class_level_and_school():
+    sp = primary(); c = sp["classes"][0]["class"]; lv = sp["classes"][0]["level"]; t = sp["teachers"][0]["name"]
+    L = [(0, 1, 3, [c], "English", "Entire Class", [t], ""), (0, 6, 1, [c], "Art", "Entire Class", [t], ""), (1, 1, 2, [c], "Art", "Entire Class", [t], "")]
+    for row, who in ((rule("Teacher", t, "Max periods a day", number=3), t), (rule("School", "Whole school", "Max periods a day", number=3), t),
+                     (rule("Class", c, "Max periods a day", number=3), c), (rule("Level", lv, "Max periods a day", number=3), c)):
+        (ws, nc), m = run(sp, [row], L)
+        assert len(ws) == 1 and nc == [] and ws[0]["key"] == f"rule:0:{who}|0" and ws[0]["group"] == who and ws[0]["where"] is None
+        assert ws[0]["text"].endswith(f"{who} has 4 periods on {m['days'][0]}, more than 3.") and ws[0]["strength"] == "Must"
+        assert run(sp, [dict(row, number=4)], L)[0][0] == []
+    (ws, nc), _ = run(sp, [rule("Subject", "Art", "Max periods a day", number=1)], L); assert ws == [] and len(nc) == 1 and "scope" in nc[0]
+    (ws, nc), _ = run(sp, [rule("School", "Whole school", "Max periods a day")], L); assert ws == [] and len(nc) == 1 and "Number" in nc[0]
+
+@t
+def max_periods_in_a_row_counts_unbroken_runs():
+    sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]; row = rule("School", "Whole school", "Max periods in a row", number=2)
+    (ws, nc), m = run(sp, [row], [(0, 1, 2, [c], "English", "Entire Class", [t], ""), (0, 3, 1, [c], "Art", "Entire Class", [t], "")])
+    assert len(ws) == 1 and nc == [] and ws[0]["key"] == f"rule:0:{t}|0" and ws[0]["group"] == t and ws[0]["where"] is None
+    assert ws[0]["text"].endswith(f"{t} teaches 3 periods in a row on {m['days'][0]}, more than 2.")
+    assert run(sp, [row], [(0, 1, 2, [c], "English", "Entire Class", [t], ""), (0, 4, 1, [c], "Art", "Entire Class", [t], "")])[0][0] == []   # a gap breaks the run
+    assert len(run(sp, [rule("Teacher", t, "Max periods in a row", number=2)], [(0, 1, 3, [c], "English", "Entire Class", [t], "")])[0][0]) == 1
+    (ws, nc), _ = run(sp, [rule("Class", c, "Max periods in a row", number=2)], [(0, 1, 3, [c], "English", "Entire Class", [t], "")]); assert ws == [] and len(nc) == 1
+
+@t
+def at_least_one_recess_needs_a_free_recess_or_a_free_stretch_of_a_window():
+    sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]; row = rule("School", "Whole school", "At least one recess a day")
+    L = lambda *ps: [(0, p, 1, [c], "English", "Entire Class", [t], "") for p in ps]
+    (ws, nc), m = run(sp, [row], L(4, 5, 6))   # the P1-2, P3-4 and P5-6 recesses are all taken
+    assert len(ws) == 1 and nc == [] and ws[0]["key"] == f"rule:0:{t}|0" and ws[0]["group"] == t and ws[0]["where"] is None and ws[0]["text"].endswith(f"{t} has no recess on {m['days'][0]}.")
+    assert run(sp, [row], L(4, 5))[0][0] == []   # the P5-6 recess is free
+    assert len(run(sp, [rule("Teacher", t, "At least one recess a day")], L(4, 5, 6))[0][0]) == 1
+    def window(m):
+        for lv in m["grid"]: m["grid"][lv][0] = "FLLLWWWWLLLL.."
+    assert len(with_grid(sp, [row], L(4, 6), window)[0][0]) == 1   # 5 and 7 are free, but not two in a row (recess length 2)
+    assert with_grid(sp, [row], L(4, 5), window)[0][0] == []
+    assert with_grid(sp, [row], L(4, 5, 6, 7), window)[0][0] != []
+    def none(m):
+        for lv in m["grid"]: m["grid"][lv][0] = "FLLLLLLLLLLL.."
+    assert [w for w in with_grid(sp, [row], L(4, 5, 6), none)[0][0] if w["key"].endswith("|0")] == []   # no level has a recess that day
+
+@t
+def at_most_n_at_once_for_a_subject_or_department_and_rooms_are_left_alone():
+    sp = primary(); cs = [x["class"] for x in sp["classes"][:3]]; t = sp["teachers"][0]["name"]
+    L = [(0, 3, 1, [c], "English Language", "Entire Class", [t], "") for c in cs]
+    (ws, nc), m = run(sp, [rule("Subject", "English Language", "At most N at once", number=2)], L)
+    assert len(ws) == 1 and nc == [] and ws[0]["key"] == "rule:0:0|3" and ws[0]["group"] == "English Language" and ws[0]["where"] is None
+    assert ws[0]["text"].endswith(f"2+ English Language lessons at once on {m['days'][0]} period 3 (3).")
+    assert run(sp, [rule("Subject", "English Language", "At most N at once", number=3)], L)[0][0] == []
+    dept = next(s["dept"] for s in sp["subjects"] if s["subject"] == "English Language")
+    (ws, _), m = run(sp, [rule("Department", dept, "At most N at once", number=2)], L)
+    assert len(ws) == 1 and ws[0]["text"].endswith(f"2+ {dept} lessons at once on {m['days'][0]} period 3 (3).")
+    assert run(sp, [rule("Room", "Hall", "At most N at once", number=1)], [(0, 3, 1, [c], "Art", "Entire Class", [t], "Hall") for c in cs])[0] == ([], [])
+
+@t
+def same_time_across_classes_names_the_odd_class_out():
+    sp = primary(); lv = sp["classes"][0]["level"]; c1, c2, c3 = [x["class"] for x in sp["classes"] if x["level"] == lv][:3]; t = sp["teachers"][0]["name"]
+    row = rule("Level", lv, "Same time across classes", subject="Mathematics")
+    L = lambda p3: [(0, 2, 1, [c1], "Mathematics", "Entire Class", [t], ""), (0, 2, 1, [c2], "Mathematics", "Entire Class", [t], ""), (0, p3, 1, [c3], "Mathematics", "Entire Class", [t], "")]
+    (ws, nc), _ = run(sp, [row], L(3))
+    assert len(ws) == 1 and nc == [] and ws[0]["key"] == f"rule:0:{c3}" and ws[0]["group"] == c3 and ws[0]["where"] is None
+    assert ws[0]["text"].endswith(f"{c3} has Mathematics at a different time from the other {lv} classes.")
+    assert run(sp, [row], L(2))[0][0] == []
+    (ws, nc), _ = run(sp, [rule("Level", lv, "Same time across classes")], L(3)); assert ws == [] and len(nc) == 1 and "subject" in nc[0]
+
+@t
+def not_on_the_same_day_as_names_the_class():
+    sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]; row = rule("Subject", "English", "Not on the same day as", subject="Mathematics")
+    L = lambda d2: [(0, 1, 1, [c], "English", "Entire Class", [t], ""), (d2, 3, 1, [c], "Mathematics", "Entire Class", [t], "")]
+    (ws, nc), m = run(sp, [row], L(0))
+    assert len(ws) == 1 and nc == [] and ws[0]["key"] == f"rule:0:{c}|0" and ws[0]["group"] == c and ws[0]["where"] is None
+    assert ws[0]["text"].endswith(f"{c} has English and Mathematics on {m['days'][0]}.")
+    assert run(sp, [row], L(1))[0][0] == []
+    (ws, nc), _ = run(sp, [rule("Class", c, "Not on the same day as", subject="Mathematics")], L(0)); assert ws == [] and len(nc) == 1 and "scope" in nc[0]
+
+@t
+def once_a_day_per_group_finds_a_group_met_twice():
+    sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]; row = rule("School", "Whole school", "Once a day per group")
+    (ws, nc), m = run(sp, [row], [(0, 1, 1, [c], "English", "Entire Class", [t], ""), (0, 4, 1, [c], "English", "Entire Class", [t], ""), (1, 1, 1, [c], "English", "Entire Class", [t], ""),
+                                  (0, 2, 1, [c], "Art", "ZZ1", [t], ""), (0, 5, 1, [c], "Art", "ZZ1", [t], ""), (1, 2, 1, [c], "Art", "ZZ1", [t], "")])
+    assert nc == [] and sorted(w["text"].split(": ", 1)[1] for w in ws) == sorted([f"English for {c} meets twice on {m['days'][0]}.", f"group ZZ1 meets twice on {m['days'][0]}."])
+    assert all(w["where"] is None and w["strength"] == "Must" for w in ws) and {w["group"] for w in ws} == {c}
+    assert len({w["key"] for w in ws}) == 2
+    (ws, _), _ = run(sp, [rule("Subject", "Art", "Once a day per group")], [(0, 1, 1, [c], "English", "Entire Class", [t], ""), (0, 4, 1, [c], "English", "Entire Class", [t], "")]); assert ws == []
+
+@t
+def after_school_slots_are_named_with_the_rows_strength():
+    sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]; lv = sp["classes"][0]["level"]
+    L = [(0, 12, 1, [c], "English", "Entire Class", [t], ""), (0, 2, 1, [c], "English", "Entire Class", [t], "")]
+    def ext(m): m["lessons"][0]["ext"] = True
+    for row in (rule("School", "Whole school", "Avoid after-school slots", strength="Prefer"), rule("Level", lv, "Avoid after-school slots", strength="Prefer"), rule("Class", c, "Avoid after-school slots", strength="Prefer")):
+        (ws, nc), m = with_grid(sp, [row], L, ext)
+        assert len(ws) == 1 and nc == [] and ws[0]["key"] == f"rule:0:{c}|0|12" and ws[0]["group"] == c and ws[0]["strength"] == "Prefer"
+        assert ws[0]["where"] == dict(cls=c, day=m["days"][0], period=12) and ws[0]["text"].endswith(f"English for {c} is in an after-school slot on {m['days'][0]}. (Prefer)")
+    assert run(sp, [rule("School", "Whole school", "Avoid after-school slots")], L)[0][0] == []
+    (ws, nc), _ = with_grid(sp, [rule("Teacher", t, "Avoid after-school slots")], L, ext); assert ws == [] and len(nc) == 1 and "scope" in nc[0]
+
 print(f"{n} checks passed")

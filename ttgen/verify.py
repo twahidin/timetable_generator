@@ -2,9 +2,10 @@
 (dict key, kind, text, strength, group, where, sides, ops). Periods are 0-based; day names are the setup's.
 Every function that takes spec takes the checked setup (m["checked_setup"]), already derived."""
 import re
+from collections import Counter
 from .export import ENTIRE
 from .solver import rule_label
-from .spec import names_list, subject_test
+from .spec import floating_recess, names_list, subject_test
 
 KINDS = ("clash", "deployment", "rule", "typed", "choice")
 
@@ -191,8 +192,102 @@ def _only_in_venues(m, spec, i, r, days, per):
         out.append(_hit(m, r, i, _key(x, q), f"{_what(x)} is in {x['room']} on {m['days'][x['d']]} period {q}; only {', '.join(venues)} are allowed in {_pr(per)}.", x["room"], x))
     return out
 
+# ----------------------------------------------------------------------------------------------- counts and patterns
+def _day_name(m, d): return m["days"][d]
+def _teachers_by_day(m, r, test=None):
+    """(teacher, d) -> the periods that teacher is in lessons; a Teacher row looks at its target only"""
+    out = {}
+    for x in m["lessons"]:
+        if test and not test(x): continue
+        for t in x["teachers"]:
+            if r.get("scope") == "Teacher" and t != r["target"]: continue
+            out.setdefault((t, x["d"]), set()).update(_span(x))
+    return out
+
+def _max_periods_a_day(m, spec, i, r, days, per):
+    by_teacher, tally = r.get("scope") in ("Teacher", "School"), {}
+    for x in _lessons(m, spec, r, days):
+        if by_teacher: who = [t for t in x["teachers"] if r["scope"] == "School" or t == r["target"]]
+        else: who = [c for c in x["classes"] if r["scope"] == "Class" and c == r["target"] or r["scope"] == "Level" and m["class_ix"].get(c, {}).get("level") == r["target"]]
+        for w in who: tally[(w, x["d"])] = tally.get((w, x["d"]), 0) + x["n"]
+    return [_hit(m, r, i, f"{w}|{d}", f"{w} has {n} periods on {_day_name(m, d)}, more than {r['number']}.", w)
+            for (w, d), n in sorted(tally.items(), key=lambda kv: (kv[0][1], kv[0][0])) if n > int(r["number"])]
+
+def _longest_run(periods):
+    best = run = 0
+    for q in sorted(periods): run = run + 1 if q - 1 in periods else 1; best = max(best, run)
+    return best
+
+def _max_periods_in_a_row(m, spec, i, r, days, per):
+    return [_hit(m, r, i, f"{t}|{d}", f"{t} teaches {n} periods in a row on {_day_name(m, d)}, more than {r['number']}.", t)
+            for (t, d), ps in sorted(_teachers_by_day(m, r, lambda x: x["d"] in days).items(), key=lambda kv: (kv[0][1], kv[0][0]))
+            if (n := _longest_run(ps)) > int(r["number"])]
+
+def _free_run(row, busy, length):
+    """whether the teacher (busy periods) is free for a whole R run of the day's code string row, or length periods in a row inside a W run"""
+    for run_ in re.finditer(r"R+", row):
+        if not busy & set(range(run_.start(), run_.end())): return True
+    for run_ in re.finditer(r"W+", row):
+        a, b = run_.start(), run_.end(); need = min(length, b - a)
+        if any(not busy & set(range(s, s + need)) for s in range(a, b - need + 1)): return True
+    return False
+
+def _at_least_one_recess(m, spec, i, r, days, per):
+    length, out = floating_recess(spec["school"])["length"], []
+    for (t, d), busy in sorted(_teachers_by_day(m, r).items(), key=lambda kv: (kv[0][1], kv[0][0])):
+        if d not in days: continue
+        rows = [g[d] for g in m["grid"].values() if d < len(g)]
+        if any(c in row for row in rows for c in "RW") and not any(_free_run(row, busy, length) for row in rows):
+            out.append(_hit(m, r, i, f"{t}|{d}", f"{t} has no recess on {_day_name(m, d)}.", t))
+    return out
+
+def _at_most_n_at_once(m, spec, i, r, days, per):
+    if r.get("scope") == "Room": return []   # check_model reports room capacity
+    count = Counter((x["d"], q) for x in _lessons(m, spec, r, days) for q in _span(x) if q in per)
+    return [_hit(m, r, i, f"{d}|{q}", f"{r['number']}+ {r['target']} lessons at once on {_day_name(m, d)} period {q} ({n}).", r["target"])
+            for (d, q), n in sorted(count.items()) if n > int(r["number"])]
+
+def _same_time_across_classes(m, spec, i, r, days, per):
+    classes, times = [c for c, v in m["class_ix"].items() if v["level"] == r["target"]], {}
+    for x in _lessons(m, spec, r, days):
+        for c in x["classes"]: times.setdefault(c, set()).update((x["d"], q) for q in _span(x))
+    sets = {c: frozenset(times.get(c, ())) for c in classes}
+    if not sets: return []
+    common = Counter(sets.values()).most_common(1)[0][0]
+    return [_hit(m, r, i, c, f"{c} has {r['subject']} at a different time from the other {r['target']} classes.", c) for c, s in sets.items() if s != common]
+
+def _not_on_the_same_day_as(m, spec, i, r, days, per):
+    dept = lambda x: m["subjects"].get(x["subject"], {}).get("dept")
+    a, b, seen = subject_test(r["target"]), subject_test(r["subject"]), {}
+    for x in m["lessons"]:
+        if x["d"] not in days: continue
+        for c in x["classes"]:
+            has = seen.setdefault((c, x["d"]), [False, False])
+            has[0] |= a(x["subject"], dept(x)); has[1] |= b(x["subject"], dept(x))
+    return [_hit(m, r, i, f"{c}|{d}", f"{c} has {r['target']} and {r['subject']} on {_day_name(m, d)}.", c) for (c, d), h in sorted(seen.items(), key=lambda kv: (kv[0][1], kv[0][0])) if all(h)]
+
+def _once_a_day_per_group(m, spec, i, r, days, per):
+    ids, first = {}, {}
+    for x in _lessons(m, spec, r, days):
+        for k in ([("C", c, x["subject"]) for c in x["classes"]] if x["group"] == ENTIRE else [("G", x["group"])]):
+            ids.setdefault((k, x["d"]), set()).add(x["id"]); first.setdefault((k, x["d"]), x)
+    return [_hit(m, r, i, f"{_kstr(k)}|{d}", f"{_name(k)} meets twice on {_day_name(m, d)}.", (first[k, d]["classes"] or ["School"])[0])
+            for (k, d), s in sorted(ids.items(), key=lambda kv: (kv[0][1], kv[0][0])) if len(s) > 1]
+
+def _avoid_after_school(m, spec, i, r, days, per):
+    return [_hit(m, r, i, _key(x), f"{_what(x)} is in an after-school slot on {_day_name(m, x['d'])}.", (x["classes"] or ["School"])[0], x)
+            for x in _lessons(m, spec, r, days) if x.get("ext")]
+
 CHECKERS = {"Not available": _not_available, "Keep free together": _keep_free_together, "Fixed at": _fixed_at, "Not in periods": _not_in_periods,
-            "Only in periods": _only_in_periods, "Finish by": _finish_by, "Only these subjects": _only_these_subjects, "Only in venues": _only_in_venues}
+            "Only in periods": _only_in_periods, "Finish by": _finish_by, "Only these subjects": _only_these_subjects, "Only in venues": _only_in_venues,
+            "Max periods a day": _max_periods_a_day, "Max periods in a row": _max_periods_in_a_row, "At least one recess a day": _at_least_one_recess,
+            "At most N at once": _at_most_n_at_once, "Same time across classes": _same_time_across_classes, "Not on the same day as": _not_on_the_same_day_as,
+            "Once a day per group": _once_a_day_per_group, "Avoid after-school slots": _avoid_after_school}
+USES = {"Max periods a day": ("Teacher", "Class", "Level", "School"), "Max periods in a row": ("Teacher", "School"), "At least one recess a day": ("Teacher", "School"),
+        "At most N at once": ("Subject", "Department", "Room"), "Same time across classes": ("Level",), "Not on the same day as": ("Subject",),
+        "Once a day per group": ("School", "Subject"), "Avoid after-school slots": ("School", "Level", "Class")}   # the scopes each count or pattern rule is checked for
+NEEDS_NUMBER = ("Max periods a day", "Max periods in a row", "At most N at once")
+NEEDS_PERIODS = ("Not available", "Keep free together", "Not in periods", "Only in periods", "Only in venues")
 _BLANK = lambda v: v in (None, "")
 
 def rules(m, spec):
@@ -207,7 +302,10 @@ def rules(m, spec):
         elif rule == "Keep free together" and r.get("scope") not in ("Department", "Level"): why = f"scope {r.get('scope')} is not one this rule uses (Department or Level)"
         elif rule == "Fixed at" and _BLANK(r.get("from")): why = "it has no From period"
         elif rule == "Finish by" and _BLANK(r.get("to")): why = "it has no To period"
-        elif rule not in ("Fixed at", "Finish by", "Only these subjects") and _BLANK(r.get("from")) and _BLANK(r.get("to")): why = "it has no From or To period"
+        elif rule in USES and r.get("scope") not in USES[rule]: why = f"scope {r.get('scope')} is not one this rule uses ({', '.join(USES[rule])})"
+        elif rule in NEEDS_NUMBER and _BLANK(r.get("number")): why = "it has no Number"
+        elif rule in ("Same time across classes", "Not on the same day as") and not names_list(r.get("subject")): why = "it names no subject"
+        elif rule in NEEDS_PERIODS and _BLANK(r.get("from")) and _BLANK(r.get("to")): why = "it has no From or To period"
         elif rule == "Only these subjects" and not names_list(r.get("subject")): why = "it names no subjects"
         elif rule == "Only in venues" and not names_list(r.get("venues")): why = "it names no venues"
         if why: skipped.append(f"{rule_label(r)}: {why}"); continue
