@@ -131,4 +131,16 @@ def solve_keeps_the_setup_as_downloaded_in_the_database():
         db = os.path.join(d, "t.sqlite"); database.write_db(m, db)
         assert database.read_db(db)[5] == json.loads(json.dumps(read, default=str)) and database.read_db(db)[7][0]["used"] == "Second choice"
 
+@t
+def a_workbook_without_the_id_row_reads_without_one():
+    sp = secondary()
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "s.xlsx"); template.write_template(sp, path)
+        wb = openpyxl.load_workbook(path); ws = wb["Settings"]
+        r = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 1).value == "Configuration id")
+        ws.cell(r, 2).value = "v7+"; wb.save(path)
+        assert reader.read_template(path)["school"]["config_id"] == "v7+"
+        ws.delete_rows(r); wb.save(path)
+        assert "config_id" not in reader.read_template(path)["school"]
+
 print(f"{n} checks passed")

@@ -95,6 +95,16 @@ def _copy(rec):
 def setup_record():
     with _setup_lock: return _copy(_load())
 
+def _strip(x):
+    if isinstance(x, dict): return {k: _strip(v) for k, v in x.items() if not str(k).startswith("_") and k != "config_id"}
+    if isinstance(x, list): return [_strip(i) for i in x]
+    return x
+
+def config_id(spec):
+    """the setup's version as the workbook carries it: v<N>, with + when the spec differs from the saved one"""
+    r = setup_record()
+    return f"v{r['v']}" + ("+" if sync._canon(_strip(spec)) != sync._canon(_strip(r["spec"])) else "")
+
 def load_setup():
     r = setup_record()
     return (r["spec"], r["saved_at"]) if r["spec"] else (None, None)

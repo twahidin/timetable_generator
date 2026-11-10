@@ -105,10 +105,11 @@ def read_template(path):
               periods_per_day=int(kv.get("Periods in a day") or sc["periods_per_day"]),
               lesson_length=int(kv.get("Lesson length (periods)") or kv.get("Standard lesson length (periods)") or sc["lesson_length"]))
     # rule rows on Settings (once a day, after school, PE at once, daily cap, recess); rows the app does not know are kept as they are
-    rules, known = [], {"School", "Timetable", "School type", "Weeks in cycle", "Cycle", "Period length (minutes)", "Period 0 starts at", "Periods in a day",
+    rules, known = [], {"School", "Timetable", "Configuration id", "School type", "Weeks in cycle", "Cycle", "Period length (minutes)", "Period 0 starts at", "Periods in a day",
                         "Standard lesson length (periods)", "Lesson length (periods)", "Lesson lengths"}
     sc["extra_settings"] = []
     for k, v, note in rows:
+        if k == "Configuration id" and v not in (None, ""): sc["config_id"] = str(v).strip()
         what = next((s for s in SETTING_RULES if k.lower().startswith(s["label"].lower()[:30])), None)
         if what is None:
             if k not in known: sc["extra_settings"].append([k, v.strftime("%H:%M") if isinstance(v, datetime.time) else v, note])

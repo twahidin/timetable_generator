@@ -126,7 +126,8 @@ def write_template(spec, path, extra_rows=120):
     st["A2"] = "Blue text on yellow = cells to edit. Everything else in the workbook reads from here."; st["A2"].font = NOTE
     B.head(st, 4, ["Setting", "Value", "Notes"])
     cycle = "2 weeks (Odd, Even)" if int(sc["weeks"]) == 2 else "1 week"
-    rows = [("School", sc["name"], ""), ("Timetable", sc["timetable"], "")] + ([] if secondary else [("School type", sc["type"], "primary or secondary")]) + \
+    rows = [("School", sc["name"], ""), ("Timetable", sc["timetable"], ""),
+            ("Configuration id", sc.get("config_id") or "", "The setup's version when this workbook was downloaded. A timetable made from it carries the same id; Publish checks they match.")] + ([] if secondary else [("School type", sc["type"], "primary or secondary")]) + \
            [("Cycle", cycle, "Each week is Monday to Friday; the Day structure sheet has a row for each day." if int(sc["weeks"]) == 2 else "Every week is the same."),
             ("Period length (minutes)", int(sc["period_minutes"]), ""), ("Period 0 starts at", _t(sc["start_time"]), ""),
             ("Periods in a day", NP, f"Numbered 0-{NP - 1}."),

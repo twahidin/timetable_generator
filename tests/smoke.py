@@ -240,10 +240,26 @@ def test_read_table_reads_no_more_than_60_columns():
     rows = r.get_json()["rows"]; assert r.status_code == 200 and max(len(x) for x in rows) <= 60, max(len(x) for x in rows)
     assert ["Made Up Teacher", "MUT"] == rows[1][:2] and not any(rows[1][2:])
 
+def test_the_workbook_carries_the_configuration_id():
+    import io, openpyxl
+    spec = c.get("/api/setup").get_json()["spec"]; v = c.get("/api/setup").get_json()["v"]
+    wb = openpyxl.load_workbook(io.BytesIO(c.post("/api/build", json=spec).data), read_only=True)
+    rows = {str(r[0]): r[1] for r in wb["Settings"].iter_rows(min_row=5, max_row=12, values_only=True) if r[0]}
+    assert rows["Configuration id"] == f"v{v}", rows
+    spec["school"]["name"] = "Changed School"
+    wb = openpyxl.load_workbook(io.BytesIO(c.post("/api/build", json=spec).data), read_only=True)
+    assert {str(r[0]): r[1] for r in wb["Settings"].iter_rows(min_row=5, max_row=12, values_only=True) if r[0]}["Configuration id"] == f"v{v}+"
+
 def test_publish_uploaded_timetable():   # slow: solves the primary sample
     work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx")
     env = dict(os.environ, PYTHONPATH=ROOT)
     subprocess.run([sys.executable, "-m", "ttgen", "sample", "primary", "--out", setup], check=True, env=env, cwd=ROOT)
+    import openpyxl
+    v = c.get("/api/setup").get_json()["v"]
+    wbs = openpyxl.load_workbook(setup); ws0 = wbs["Settings"]
+    for row in ws0.iter_rows(min_col=1, max_col=2):
+        if row[0].value == "Configuration id": row[1].value = f"v{v}"
+    wbs.save(setup)
     subprocess.run([sys.executable, "-m", "ttgen", "solve", setup, "--out", tt, "--time", "60"], env=env, cwd=ROOT)
     import openpyxl   # the agent's rule report rides on the timetable workbook
     wb = openpyxl.load_workbook(tt); ws = wb.create_sheet("Rule report"); ws.append(["No.", "Must / Prefer", "Applies to", "Rule", "Result", "How"]); ws.append([1, "Must", "Whole school", "Nothing in words", "Met", "Checked."]); wb.save(tt)
@@ -251,6 +267,7 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
                content_type="multipart/form-data")
     j = r.get_json(); assert r.status_code == 200 and j["published"] is True, j
     assert j["rule_report"][0]["result"] == "Met" and j["typed"] == 0, j["rule_report"]
+    assert j["config_id"] == f"v{v}" and j["config_state"] == "same", j
     p = c.get("/api/status").get_json()["published"]
     assert p and p["source"] == "timetable.xlsx" and p["rule_report"][0]["how"] == "Checked.", p
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
