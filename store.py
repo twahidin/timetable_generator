@@ -96,7 +96,7 @@ def setup_record():
     with _setup_lock: return _copy(_load())
 
 def _strip(x):
-    if isinstance(x, dict): return {k: _strip(v) for k, v in x.items() if not str(k).startswith("_") and k != "config_id"}
+    if isinstance(x, dict): return {k: _strip(v) for k, v in x.items() if not str(k).startswith("_") and k != "config_id" and not (k == "choices" and v == [])}   # no choices is the same as none saved
     if isinstance(x, list): return [_strip(i) for i in x]
     return x
 
@@ -241,7 +241,9 @@ def publish(setup_xlsx, timetable_path, run_id=None, source=None, log=print):
         write_json(os.path.join(tmp, "meta.json"), dict(published_at=now(), run=run_id, source=source, school=m["school"]["name"], timetable=m["school"]["timetable"],
                                                          ok=ch["ok"], problems=ch["problems"][:20], after_school=ch["after_school"],
                                                          classes=len(m["classes"]), students=len(m["students"]), lessons=ch["lessons"], files=files,
-                                                         rule_report=m.get("rule_report") or []))
+                                                         rule_report=m.get("rule_report") or [], choices_used=m.get("choices_used") or [],
+                                                         choice_problems=m.get("choice_problems") or [],
+                                                         config_id=str(((m.get("setup") or {}).get("school") or {}).get("config_id") or "")))
         with _lock:
             shutil.rmtree(old, ignore_errors=True)
             if os.path.exists(PUB): os.replace(PUB, old)

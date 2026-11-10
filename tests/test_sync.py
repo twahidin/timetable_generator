@@ -55,7 +55,7 @@ for case in CASES:
 # constants and ids
 assert sync.MERGE == {"teachers": ("can_teach",), "students": ("groups",)}
 assert sync.LISTS == ("venues", "classes", "subjects", "teachers", "blocks", "lessons",
-                      "rules", "students", "combinations", "roles")
+                      "rules", "students", "combinations", "roles", "choices")
 i = sync.new_id()
 assert len(i) == 10 and all(c in "abcdefghijklmnopqrstuvwxyz0123456789" for c in i)
 assert sync.new_id() != sync.new_id()
@@ -136,6 +136,18 @@ assert "provisional" in refused[1][1] and all(w.endswith(".") for _, w in refuse
 assert sync.head_split(spec, []) == ([], [])
 assert sync.head_may(spec, batch) == refused[0][1]
 assert sync.head_split(spec, ["x", [["set"]]])[1][0] == (0, "Department heads cannot send that change.")
+passed += 1
+
+# choices are a list; ensure_ids links each to its rule by the rule's _id, and a head cannot touch them
+spec = {"rules": [{"rule": "In words"}], "choices": [{"kind": "rule", "rule": 0}, {"kind": "rule", "rule": 7}]}
+assert "choices" in sync.LISTS
+assert sync.ensure_ids(spec) is True
+a, b = spec["choices"]
+assert a["_id"] and b["_id"] and a["rule_id"] == spec["rules"][0]["_id"] and b["rule_id"] is None, spec
+assert "rule" not in a and "rule" not in b, spec
+assert sync.ensure_ids(spec) is False
+why = sync.head_split(spec, [["add", "choices", {"kind": "rule"}, ""]])[1][0][1]
+assert "choices" in why, why
 passed += 1
 
 # a list section that is null or not a list: add starts it as a list, del / set / merge skip (same as sync.js)
