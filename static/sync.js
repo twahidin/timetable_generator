@@ -11,7 +11,7 @@
 var Sync = (function () {
   "use strict";
   var LISTS = ["venues", "classes", "subjects", "teachers", "blocks", "lessons",
-    "rules", "students", "combinations", "roles"];
+    "rules", "students", "combinations", "roles", "choices"];
   var MERGE = { teachers: ["can_teach"], students: ["groups"] };
   var ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
   var RESERVED_TOP = LISTS.concat(["school", "day_structure"]);
@@ -71,6 +71,15 @@ var Sync = (function () {
           added = true;
         }
       });
+    });
+    var rules = rowsOf(spec, "rules");
+    rowsOf(spec, "choices").forEach(function (c) {   // a choice about a rule follows the rule by its id, not by its place in the list
+      if (isObj(c) && typeof c.rule === "number" && Math.floor(c.rule) === c.rule && !c.rule_id) {
+        var r = c.rule >= 0 && c.rule < rules.length ? rules[c.rule] : null;
+        c.rule_id = isObj(r) && r._id ? r._id : null;
+        delete c.rule;
+        added = true;
+      }
     });
     return added;
   }

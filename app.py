@@ -4,7 +4,7 @@ Committee (COMMITTEE_CODE): fill the setup step by step, download it with the ti
 to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable."""
-import copy, io, os, shutil, sys, tempfile, zipfile
+import copy, io, os, re, shutil, sys, tempfile, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -13,6 +13,7 @@ from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, store, sync
+from ttgen import choices
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -160,7 +161,8 @@ def api_blank(kind): return jsonify(blank(kind_ok(kind)))
 def build():
     spec = request.get_json(force=True, silent=True)
     if not spec or "school" not in spec: return {"error": "No setup data sent."}, 400
-    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students"): spec.setdefault(k, [])
+    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "choices"): spec.setdefault(k, [])
+    spec["school"]["config_id"] = store.config_id(spec)
     try: buf = xlsx_bytes(spec)
     except Exception as e: return {"error": f"Could not build the workbook: {e}"}, 400
     name = "".join(ch for ch in (spec["school"].get("name") or "School") if ch.isalnum() or ch in " -_").strip().replace(" ", "_") or "School"
@@ -180,7 +182,7 @@ def import_xlsx():
 
 def normalise(spec):
     """the editor's JSON -> the exact spec an agent would read from the workbook (codes, periods and lesson lengths worked out)"""
-    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students"): spec.setdefault(k, [])
+    for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "choices"): spec.setdefault(k, [])
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp: path = tmp.name
     try:
         write_template(spec, path); return read_template(path)
@@ -194,10 +196,12 @@ def check_setup():
     used. Returns every finding, critical first"""
     spec = request.get_json(force=True, silent=True)
     if not spec or "school" not in spec: return {"error": "No setup data sent."}, 400
-    try: found = checks.findings(normalise(copy.deepcopy(spec)))
+    try:
+        norm = normalise(copy.deepcopy(spec)); found = checks.findings(norm)
+        fall = checks.with_fallbacks(norm) if norm.get("choices") else None
     except Exception as e: return {"error": f"The setup could not be checked: {e}"}, 400
     crit = sum(1 for f in found if f["level"] == checks.CRITICAL)
-    return jsonify(findings=found, critical=crit, warnings=len(found) - crit)
+    return jsonify(findings=found, critical=crit, warnings=len(found) - crit, fallbacks=fall)
 
 @app.post("/api/read-table")
 @need("committee")
@@ -348,10 +352,16 @@ def import_timetable():
         except ValueError as e: return {"error": str(e)}, 400
         ch, (saved, _) = m["checks"], store.load_setup()
         ours = str(((saved or {}).get("school") or {}).get("name") or "").strip()
-        out = dict(school=m["school"]["name"], timetable=m["school"]["timetable"], ok=ch["ok"], problems=ch["problems"][:30],
+        cid = str(((m.get("setup") or {}).get("school") or {}).get("config_id") or "").strip(); ver = store.setup_record()["v"]
+        got = re.fullmatch(r"v(\d+)", cid)
+        state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
+                 "same" if int(got[1]) == ver else "older" if int(got[1]) < ver else "newer")
+        out = dict(config_id=cid, setup_version=f"v{ver}", config_state=state, school=m["school"]["name"], timetable=m["school"]["timetable"], ok=ch["ok"], problems=ch["problems"][:30],
                    more=max(0, len(ch["problems"]) - 30), after=ch["after_school"][:30], lessons=ch["lessons"], classes=len(m["classes"]),
                    teachers=len(m["teachers"]), students=len(m["students"]), notes=m["notes"][:12], published=False,
                    rule_report=m.get("rule_report") or [], typed=len(typed_rules(saved)) if saved else 0,
+                   choices_used=m.get("choices_used") or [], choice_problems=m.get("choice_problems") or [],
+                   choices=len(saved.get("choices") or []) - len({i for i, _ in choices.problems(saved)}) if saved else 0,
                    other_school=ours if ours and ours.lower() != str(m["school"]["name"]).strip().lower() else "")
         if not go: return jsonify(out)
         name = os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file"
@@ -397,7 +407,8 @@ def pub_info():
     if not pub: return None
     m = pub["meta"]
     return dict(at=m["published_at"], ok=m["ok"], after=len(m.get("after_school", [])), students=m.get("students", 0), classes=m.get("classes", 0),
-                files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on(), source=m.get("source"), rule_report=m.get("rule_report", []))
+                files=m.get("files", {}), problems=m.get("problems", []), personal=access.personal_codes_on(), source=m.get("source"), rule_report=m.get("rule_report", []),
+                choices_used=m.get("choices_used", []), choice_problems=m.get("choice_problems", []), config_id=m.get("config_id", ""))
 
 @app.get("/api/status")
 @need("committee", "head")

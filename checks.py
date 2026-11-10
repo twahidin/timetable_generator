@@ -159,6 +159,22 @@ def findings(spec, P=None):
     out.sort(key=lambda f: f["level"] != CRITICAL)   # stable: critical first, each kind in the order found
     return out
 
+def with_fallbacks(spec):
+    """Will it fit? down the give-way order: {critical: [n0, n1, ...], pass_at, items}. n_k counts the critical findings
+    once the first k valid choices are taken as the second choice (a step that fails to check counts as the one before it);
+    it stops at the first k with none. pass_at is that k, or None when every step still has some."""
+    from ttgen import choices
+    n = len(choices.ordered(spec)) - len({i for i, _ in choices.problems(spec)})
+    counts = []
+    for k in range(n + 1):
+        try: counts.append(sum(1 for f in findings(choices.apply_all(spec, k)) if f["level"] == CRITICAL))
+        except Exception:
+            if not counts: raise
+            counts.append(counts[-1])
+        if counts[-1] == 0: break
+    items = [choices.item_label(spec, c) for i, c in choices.ordered(spec) if i not in {i for i, _ in choices.problems(spec)}]
+    return dict(critical=counts, pass_at=counts.index(0) if 0 in counts else None, items=items)
+
 def _teacher_fit(P):
     """teachers with more periods of lessons than the cycle has times they can teach them: their levels' lesson (and
     after-school) periods, less the times a Must rule blocks them out. No timetable can fit them."""

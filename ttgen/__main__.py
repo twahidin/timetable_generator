@@ -13,6 +13,17 @@ def _say_outputs(out):
             for p in v: print("wrote", p)
         else: print("wrote", v, f"({names.get(k, k)})")
 
+def record_choices(m, spec, k, path):
+    """after a solve at k: put the Choices used rows on the model m and on the workbook at path, and keep the setup as downloaded
+    in m (the solver ran on the copy with the first k choices given way on, which must not reach the database)"""
+    from . import choices
+    rows = choices.used_rows(spec, k)
+    if m is not None: m["setup"] = spec
+    if rows:
+        choices.used_sheet(path, rows)
+        if m is not None: m["choices_used"] = rows
+    return rows
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="ttgen")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -52,24 +63,49 @@ def main(argv=None):
         for i, p in rule_problems(spec, P): print(f" ! Rule {rule_label(spec['rules'][i])}: {p}")
         from .spec import typed_rules, typed_label
         for num, _, r in typed_rules(spec): print(" * For the agent to honour:", typed_label(num, r))
+        from . import choices
+        bad = {}
+        for i, p in choices.problems(spec): bad.setdefault(i, p)
+        for n, (i, c) in enumerate(choices.ordered(spec), start=1):
+            print(f" * Second choice {n}: {choices.item_label(spec, c)} — {choices.first_text(spec, c)} → {choices.second_text(spec, c)}")
+            if i in bad: print(f" ! Second choice {n}: {bad[i]}")
         return 0
     from .solver import solve
     from .report import write_timetable
-    if a.staged:
-        from .staged import solve_staged
-        res = solve_staged(spec, time_per_step=a.time, workers=a.workers)
-    else: res = solve(spec, time_limit=a.time, workers=a.workers)
-    probs, stats, post, m = write_timetable(res, a.out, return_model=True)
-    print("wrote", a.out, stats)
-    for p in (probs or ["Checks passed: no clashes, every lesson placed with its planned periods."]): print(" -", p)
-    for p in post + res.get("notes", []): print(" *", p)
-    if a.export and m is not None:
-        from .export import export_all, safe_name
-        out = export_all(m, a.export, excel=False)
-        dst = os.path.join(a.export, safe_name(f"{m['school']['name']} {m['school']['timetable']}") + " - all timetables.xlsx")
-        shutil.copyfile(a.out, dst); out["excel"] = dst
-        _say_outputs(out)
-    return 0 if res["lessons"] and not probs else 1
+    from . import choices
+    def run(sp):
+        if a.staged:
+            from .staged import solve_staged
+            return solve_staged(sp, time_per_step=a.time, workers=a.workers)
+        return solve(sp, time_limit=a.time, workers=a.workers)
+    cmode = choices.mode(spec)
+    attempts = choices.give_way(spec, run, cmode)
+    if cmode == "compare":
+        stem, ext = os.path.splitext(a.out)
+        todo = [(at, a.out if at["k"] == 0 else f"{stem} - after choice {at['k']}{ext}") for at in attempts]
+    else: todo = [(attempts[-1], a.out)]
+    ok, any_lessons = True, False
+    for at, path in todo:
+        k, res = at["k"], at["res"]
+        probs, stats, post, m = write_timetable(res, path, return_model=True)
+        rows = record_choices(m, spec, k, path) if res["lessons"] else []
+        if cmode == "compare": print(f"--- {'First choices' if k == 0 else f'After choice {k}'} ---")
+        print("wrote", path, stats)
+        for p in (probs or ["Checks passed: no clashes, every lesson placed with its planned periods."]): print(" -", p)
+        for p in post + res.get("notes", []): print(" *", p)
+        for r in rows:
+            if r["used"] == "Second choice": print(f" * Gave way on choice {r['no']}: {r['item']} ({r['how']})")
+        if m is not None and a.export:
+            from .export import export_all, safe_name
+            folder = a.export if cmode != "compare" else os.path.join(a.export, "first choices" if k == 0 else f"after choice {k}")
+            out = export_all(m, folder, excel=False)
+            dst = os.path.join(folder, safe_name(f"{m['school']['name']} {m['school']['timetable']}") + " - all timetables.xlsx")
+            shutil.copyfile(path, dst); out["excel"] = dst
+            _say_outputs(out)
+        if res["lessons"]:
+            any_lessons = True
+            if probs: ok = False
+    return 0 if any_lessons and ok else 1
 
 if __name__ == "__main__":
     sys.exit(main())

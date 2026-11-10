@@ -14,7 +14,7 @@ def with_typed():
 
 @t
 def the_rule_type_exists():
-    assert S.TYPED == "In words" and S.SKILL_VERSION == "2026-11"
+    assert S.TYPED == "In words" and S.SKILL_VERSION == "2026-11.1"
     row = next(r for r in S.RULE_TYPES if r[0] == "In words"); assert row[1] == "School, Level, Class, Subject, Room, Teacher" and row[2] == "N" and row[3] == "N"
     assert S.typed_rules(with_typed())[0][0] == 1 and S.typed_rules(with_typed())[1][0] == 2
     assert S.typed_label(1, TYPED) == "T1 · Must · Sec 1 · No PE in the first period"
@@ -77,7 +77,7 @@ def the_database_carries_the_rule_report():
         con.execute("INSERT INTO lessons VALUES (1, 'Odd Mon', 3, 2, 'Art', '1A')")
         con.execute("CREATE TABLE rule_report (no INTEGER, strength TEXT, applies TEXT, rule TEXT, result TEXT, how TEXT)")
         con.execute("INSERT INTO rule_report VALUES (1, 'Must', 'Sec 1', 'No PE in the first period', 'Met', 'Never at 0.')"); con.commit(); con.close()
-        out = database.read_db(p); assert len(out) == 7 and out[6] == [dict(no=1, strength="Must", applies="Sec 1", rule="No PE in the first period", result="Met", how="Never at 0.")], out[6]
+        out = database.read_db(p); assert len(out) == 8 and out[6] == [dict(no=1, strength="Must", applies="Sec 1", rule="No PE in the first period", result="Met", how="Never at 0.")], out[6]
         con = sqlite3.connect(p); con.execute("DROP TABLE rule_report"); con.commit(); con.close()
         assert database.read_db(p)[6] == []
 

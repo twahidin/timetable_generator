@@ -412,6 +412,9 @@ const isFixedLesson = r => ["Class", "Group", "Level", "School"].includes(r.scop
 const scopesOf = rt => String(rt.scopes || "").split(",").map(x => x.trim());
 const TABS = [["school", "School", ["School"]], ["levels", "Levels and classes", ["Level", "Class", "Block", "Group"]], ["subjects", "Subjects", ["Subject", "Department"]], ["venues", "Venues", ["Room"]], ["teachers", "Teachers", ["Teacher"]]];
 const R6 = { tab: "school" };   // step 6: the open tab
+const CF = { open: false, kind: "setting", key: "", rule: "", level: "", second: "", fallback: "", from: "", to: "" };   // step 6: the + Add a second choice form
+const FALLBACK_LABELS = [["Prefer", "Make it Prefer"], ["Instead", "Use this instead"], ["Drop", "Drop it"]];
+const validChoices = () => (S.spec.choices || []).length - Object.keys(Choices.problems(S.spec, SET())).length;   // as the server counts them
 const tabOf = r => (TABS.find(t => t[2].includes(r.scope)) || TABS[0])[0];
 function placeRules() {
   const out = { settings: {}, availability: [], fixed: [], more: [] };
@@ -589,9 +592,10 @@ function teachingGroups(subject) {   // groups or classes taught this subject on
 }
 function canTeach(t, subject, level) { return DeptMap.canTeach(S.spec.teachers.find(x => x.name === t), subject, level, bands()); }
 function issues() {
-  const out = { school: {}, config: {}, lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
+  const out = { school: {}, config: {}, choices: {}, lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
   // hard: no timetable can be made until it is fixed (critical). The rest are warnings: a timetable can still be made, but a person should look.
   const crit = new Set(), add = (k, i, m, hard) => { (out[k][i] = out[k][i] || []).push(m); if (hard) crit.add(`${k}|${i}|${m}`); };
+  Object.entries(Choices.problems(S.spec, SET())).forEach(([i, ms]) => ms.forEach(m => add("choices", i, `${Choices.itemLabel(S.spec, S.spec.choices[i], SET())}: ${m}`)));   // the give-way list: warnings
   (sc().extra_settings || []).forEach((x, i) => {   // 'Lessons end by (...)' rows on Settings
     if (!String(x[0]).toLowerCase().startsWith("lessons end by") || x[1] == null || x[1] === "") return;   // blank: no end time on those days
     if (!/^\d{1,2}:\d{2}$/.test(String(x[1]))) { add("config", i, `${x[0]}: give a time such as 12:40, or clear it for no end time.`, true); return; }
@@ -871,7 +875,7 @@ function render() {
   paintPublished();
   if (id === "download") fitCheck();
 }
-const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings open step 6
+const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules", choices: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings and the give-way list open step 6
 function count(id) { if (!S.spec) return ""; const m = { venues: "venues", classes: "classes", subjects: "subjects", teachers: "teachers", blocks: "blocks", lessons: "lessons", rules: "rules", students: "students" }[id]; return m ? S.spec[m].length : ""; }
 function renderIssues() {
   const el = $("#issues"); if (!S.spec) { el.innerHTML = ""; return; }
@@ -896,6 +900,48 @@ function exportCard() {
     <div class="row" style="margin-top:10px"><label><input type="checkbox" id="exSingle" checked> Also a separate PDF for every class, teacher, room and student</label></div>
     <div class="row" style="margin-top:12px"><button class="primary" id="exGo">Make printouts (.zip)</button><button id="imCheck">Check, then publish</button><span class="muted" id="exMsg"></span></div>
     <div id="imResult"></div></div>`;
+}
+/* step 6's third card: the second choices in their give-way order, each editable in place, and the form that adds one */
+function giveWay(out, crit, psel, weeks, days) {
+  const ord = Choices.ordered(S.spec), drag = !locked("rules"), bad = i => rowCls(out, crit, "choices", i);
+  const second = (i, c) => { const p = `spec.choices.${i}`, st = SET().find(x => x.key === c.key);
+    if (c.kind === "setting") return !st ? '<span class="muted small">–</span>' : st.number ? inp(`${p}.second`, c.second === "no limit" ? "" : c.second, "number", 'min="1" placeholder="no limit" style="width:80px"') : sel(`${p}.second`, c.second, ["Yes", "No"], false);
+    if (c.kind === "rule") return `<select data-k="${p}.fallback">${opt("", c.fallback, "")}${FALLBACK_LABELS.map(([v, l]) => opt(v, c.fallback, l)).join("")}</select>`;
+    if (c.kind === "recess") { const w = c.window || []; return `<input data-k="${p}.window.0" type="time" value="${esc(w[0])}"> to <input data-k="${p}.window.1" type="time" value="${esc(w[1])}">`; }
+    return "";
+  };
+  const instead = (i, c) => { if (c.kind !== "rule" || c.fallback !== "Instead" || !c.instead) return ""; const r = c.instead, p = `spec.choices.${i}.instead`, f = (l, x) => `<label class="f">${l} ${x}</label>`;
+    const fields = r.rule === "In words" ? f("In words", inp(`${p}.text`, r.text, "text", 'style="min-width:320px"'))
+      : [f("Subject", r.rule === "Only these subjects" ? chips(`${p}.subject`, namesList(r.subject), "subjects") : sel(`${p}.subject`, r.subject, subjectNames())), f("Week", sel(`${p}.week`, r.week || "Both", weeks, false)), f("Day", sel(`${p}.day`, r.day || "All", days, false)),
+        f("From", psel(`${p}.from`, r.from)), f("To", psel(`${p}.to`, r.to)), f("Number", inp(`${p}.number`, r.number, "number", 'style="width:56px"')), r.rule === "Only in venues" ? f("Venues", chips(`${p}.venues`, namesList(r.venues), "rooms")) : ""].join("");
+    return `<tr class="instead"><td></td><td colspan="4"><span class="muted small">Instead: ${esc(Choices.ruleLabel(r))}</span><div class="row" style="margin-top:4px">${fields}</div></td></tr>`; };
+  const row = ({ i, c }, n) => `<tr id="choices-${i}" class="${bad(i)}"${drag ? ` draggable="true" data-cdrag="${i}"` : ""}><td class="calc">${n + 1} <button class="small" data-cmove="${i}|-1" title="Move up"${n ? "" : " disabled"}>▲</button><button class="small" data-cmove="${i}|1" title="Move down"${n < ord.length - 1 ? "" : " disabled"}>▼</button></td>
+    <td class="item">${esc(Choices.itemLabel(S.spec, c, SET()))}</td><td>${esc(Choices.firstText(S.spec, c, SET()))}</td><td class="second">${second(i, c)}</td><td>${delBtn("choices", i)}</td></tr>${instead(i, c)}${out.choices[i] ? `<tr class="rowmsg ${bad(i)}"><td colspan="5">${out.choices[i].map(esc).join("<br>")}</td></tr>` : ""}`;
+  return `<div class="card"><h2>If it does not fit, give way in this order</h2><p class="muted">The agent tries the first choices. If no timetable fits, it gives way on one item at a time, from the top of this list, and stops as soon as a timetable fits. Nothing that is not on the list is changed. Drag the rows, or use the arrows, to set the order.</p>
+    <div class="tablewrap"><table class="giveway"><tr><th>#</th><th>Item</th><th>First choice</th><th>Second choice</th><th></th></tr>${ord.map(row).join("") || `<tr><td colspan="5" class="muted small">None yet. Without a list, the agent uses only the first choices.</td></tr>`}</table></div>
+    <div class="cend" data-cend="1">${CF.open ? choiceForm() : `<div class="row" style="margin:10px 0 4px"><button data-cfopen="1">+ Add a second choice</button></div>`}</div></div>`;
+}
+function choiceForm() {   // + Add a second choice: what kind, which item (only those without one), then its second choice
+  const cand = Choices.candidates(S.spec, SET()), k = CF.kind, key = { setting: "key", rule: "rule", recess: "level" }[k];
+  const items = k === "setting" ? cand.settings.map(x => [x, SET().find(s => s.key === x).label])
+    : k === "rule" ? cand.rules.map(j => S.spec.rules[j]._id).filter(Boolean).map(id => [id, Choices.itemLabel(S.spec, { kind: "rule", rule_id: id }, SET())])
+    : cand.levels.map(l => [l, `Recess for ${l}`]);
+  const csel = (f, list, blank = true) => `<select data-cf="${f}">${blank ? opt("", CF[f], "") : ""}${list.map(([v, l]) => opt(v, CF[f], l)).join("")}</select>`, st = SET().find(s => s.key === CF.key);
+  const second = k === "setting" ? (!st ? "" : st.number ? `<input data-cf="second" type="number" min="1" value="${esc(CF.second)}" placeholder="no limit" style="width:80px">` : csel("second", [["Yes", "Yes"], ["No", "No"]], false))
+    : k === "rule" ? csel("fallback", FALLBACK_LABELS) : `<input data-cf="from" type="time" value="${esc(CF.from)}"> to <input data-cf="to" type="time" value="${esc(CF.to)}">`;
+  const picked = CF[key] ? Choices.firstText(S.spec, { kind: k, key: CF.key, rule_id: CF.rule, level: CF.level }, SET()) : "";
+  return `<div class="row cf"><label class="f">Kind ${csel("kind", [["setting", "A setting"], ["rule", "A rule"], ["recess", "A level's recess"]], false)}</label><label class="f">Item ${csel(key, items)}</label>
+    <label class="f">Second choice <span>${second}</span></label><button class="primary" data-cfadd="1">Add</button><button data-cfcancel="1">Cancel</button></div>
+    ${picked ? `<p class="muted small">First choice: ${esc(picked)}</p>` : ""}${items.length ? "" : `<p class="muted small">${{ setting: "Every setting", rule: "Every rule", recess: "Every level with a fixed recess" }[k]} already has a second choice.</p>`}`;
+}
+function cfAdd() {   // the form's values as they are now (a box typed in may not have sent its change yet), then one new row
+  document.querySelectorAll("[data-cf]").forEach(x => { CF[x.dataset.cf] = x.value; });
+  const st = SET().find(x => x.key === CF.key);
+  const r = CF.kind === "setting" ? Choices.newSetting(S.spec, SET(), CF.key, st && st.number && CF.second === "" ? "no limit" : CF.second)
+    : CF.kind === "rule" ? Choices.newRule(S.spec, CF.rule, CF.fallback) : Choices.newRecess(S.spec, CF.level, CF.from, CF.to);
+  if (r.error) { toast(r.error); return; }
+  CF.open = false; save(); render();
+  const el = document.getElementById(`choices-${r.i}`); if (el) el.scrollIntoView({ block: "center" });
 }
 const VIEWS = {
   start() {
@@ -1135,7 +1181,7 @@ const VIEWS = {
         ? `<input data-set="${x.key}" type="number" min="1" value="${esc(settingValue(x.key))}" placeholder="no limit">`
         : `<select data-set="${x.key}">${["Yes", "No"].map(v => opt(v, settingValue(x.key))).join("")}</select>`}</label>`).join("")}
       ${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? "" : settingRow(x, i)).join("")}</div></div>
-      <div class="card"><h2>Constraints</h2>${strip}${parts.join("")}</div>`;
+      <div class="card"><h2>Constraints</h2>${strip}${parts.join("")}</div>${giveWay(out, crit, psel, weeks, days)}`;
   },
   students() {
     const { out, crit } = issues(); const L = S.spec.students, f = S.stu, q = f.q.trim().toLowerCase(), MAX = 200;
@@ -1160,15 +1206,16 @@ const VIEWS = {
       <div class="row" style="margin-top:10px"><button data-add="students">+ Add student</button></div></div>`;
   },
   download() {
-    const { out, crit } = issues(); let n = 0, nc = 0;
+    const { out, crit } = issues(); let n = 0, nc = 0; const nch = (S.spec.choices || []).length, mode = sc().choices_mode === "compare" ? "compare" : "fallback";
     for (const [k, rows] of Object.entries(out)) if (k !== "global" && k !== "students") for (const [i, ms] of Object.entries(rows)) { n++; if (ms.some(m => isCrit(crit, k, i, m))) nc++; }
     return `<div class="card"><h1>Step 7 · Download</h1><p class="lead">Everything an AI agent needs to make the timetable: your setup as a workbook, and the timetable skill. The workbook keeps the drop-downs and formulas, so it can still be edited in Excel.</p>
-      <div><span class="stat"><b>${S.spec.classes.length}</b> classes</span><span class="stat"><b>${S.spec.teachers.length}</b> teachers</span><span class="stat"><b>${S.spec.blocks.length}</b> bands</span><span class="stat"><b>${S.spec.lessons.length}</b> lesson rows</span><span class="stat"><b>${S.spec.rules.length}</b> rules</span>${(n => n ? `<span class="stat"><b>${n}</b> typed rule${n === 1 ? "" : "s"} for the agent to honour</span>` : "")(S.spec.rules.filter(r => r.rule === "In words").length)}<span class="stat"><b>${S.spec.students.length}</b> students</span></div>
+      <div><span class="stat"><b>${S.spec.classes.length}</b> classes</span><span class="stat"><b>${S.spec.teachers.length}</b> teachers</span><span class="stat"><b>${S.spec.blocks.length}</b> bands</span><span class="stat"><b>${S.spec.lessons.length}</b> lesson rows</span><span class="stat"><b>${S.spec.rules.length}</b> rules</span>${(n => n ? `<span class="stat"><b>${n}</b> typed rule${n === 1 ? "" : "s"} for the agent to honour</span>` : "")(S.spec.rules.filter(r => r.rule === "In words").length)}${nch ? `<span class="stat"><b>${nch}</b> second choice${nch === 1 ? "" : "s"}</span>` : ""}<span class="stat"><b>${S.spec.students.length}</b> students</span></div>
       ${nc ? `<p class="issue crit" style="margin-top:12px">${nc} row${nc === 1 ? " has" : "s have"} a critical problem: no timetable can be made until ${nc === 1 ? "it is" : "they are"} fixed (see the right-hand panel).${n > nc ? ` ${n - nc} more ${n - nc === 1 ? "has" : "have"} only warnings.` : ""}</p>`
         : n ? `<p class="issue soft" style="margin-top:12px">Nothing critical. ${n} row${n === 1 ? " has" : "s have"} warnings for a person to check (see the right-hand panel); a timetable can still be made.</p>` : '<p class="okmsg" style="margin-top:12px">Everything checks out.</p>'}</div>
       <div class="card" id="fitCard" style="margin-top:16px"></div>
       <div class="dl">
-        <div class="card"><h2>1 · Configuration workbook</h2><p class="muted">Everything you entered, as the .xlsx template.</p><button class="primary" id="build">Download workbook (.xlsx)</button></div>
+        <div class="card"><h2>1 · Configuration workbook</h2><p class="muted">Everything you entered, as the .xlsx template.</p>${nch ? `<div class="cmode"><p style="margin:0 0 4px">If the first choices do not fit:</p>${[["fallback", "Fall back only when needed", "one timetable with as many first choices as possible; the agent gives way down the list and stops at the first that fits."],
+          ["compare", "Make one timetable for each", "the first choices, then one more after each step of the list, for the committee to compare (more solving time)."]].map(([v, l, m]) => `<label class="radio"><input type="radio" name="choicesMode" data-k="spec.school.choices_mode" value="${v}"${v === mode ? " checked" : ""}> <b>${l}</b>: <span class="muted">${m}</span></label>`).join("")}</div>` : ""}<button class="primary" id="build">Download workbook (.xlsx)</button></div>
         <div class="card"><h2>2 · The timetable skill</h2><p class="muted">Use the zip when the chatbot can run code: its scripts make a timetable file this app can publish as it is. SKILL.md alone is for a chatbot that cannot run code.</p><div class="row"><a href="/download/skill.zip"><button class="primary">Skill (.zip)</button></a><a href="/download/SKILL.md"><button>SKILL.md only</button></a></div></div>
         <div class="card"><h2>3 · Starter prompt</h2><p class="muted">Paste this into the chatbot with the two files.</p><textarea id="prompt" readonly rows="7">${esc(starterPrompt())}</textarea><div class="row"><button id="copyPrompt">Copy</button></div></div>
         <div class="card"><h2>Keep a copy</h2><p class="muted">The setup as a progress file, to keep or to open on another computer.</p><div class="row"><button id="saveJson" title="Download the setup as a progress file">Save to file</button>${committee() && !S.practice ? `<label class="filebtn" title="Open a progress file: it replaces the school's setup for everyone">Load from file<input type="file" id="loadJson" accept=".json" hidden></label>` : ""}</div>${committee() && !S.practice ? copiesList() : ""}</div>
@@ -1212,7 +1259,11 @@ document.addEventListener("click", async e => {
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
   if (b.dataset.rtab) { R6.tab = b.dataset.rtab; render(); return; }
   if (b.dataset.add) { addRow(b.dataset.add, b.dataset.scope); return; }
-  if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); unpick(); save(); render(); return; }
+  if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
+  if (b.dataset.cmove) { const [i, d] = b.dataset.cmove.split("|").map(Number); if (!Choices.move(S.spec, i, d)) return; save(); render(); const nb = $(`[data-cmove="${i}|${d}"]`); if (nb && !nb.disabled) nb.focus({ preventScroll: true }); return; }
+  if (b.dataset.cfopen) { Object.assign(CF, { open: true, kind: "setting", key: "", rule: "", level: "", second: "", fallback: "", from: "", to: "" }); render(); return; }
+  if (b.dataset.cfcancel) { CF.open = false; render(); return; }
+  if (b.dataset.cfadd) { cfAdd(); return; }
   if (b.dataset.helper) { helper(b.dataset.helper); return; }
   if (b.dataset.avatar) { const t = S.spec.teachers[Number(b.dataset.avatar)]; if (t) { t.avatar = (Number(t.avatar) || 0) + 1; save(); render(); } return; }
   if (b.dataset.brush !== undefined) { S.brush = b.dataset.brush; render(); return; }
@@ -1282,6 +1333,11 @@ document.addEventListener("change", async e => {
   if (el.id === "pastPick") { S.pastPick = el.value; return; }
   if (el.id === "stuCls" || el.id === "stuQ") { S.stu[el.id === "stuCls" ? "cls" : "q"] = el.value; render(); return; }
   if (["tgLv", "tgSubj", "tgT"].includes(el.id)) { S.tg[{ tgLv: "lv", tgSubj: "subj", tgT: "t" }[el.id]] = el.value; render(); return; }
+  if (el.dataset.cf) {   // the + Add a second choice form (not saved): a new kind starts afresh; a Yes/No setting offers the other value
+    const f = el.dataset.cf; CF[f] = el.value;
+    if (f === "kind") Object.assign(CF, { key: "", rule: "", level: "", second: "", fallback: "", from: "", to: "" });
+    if (f === "key") { const st = SET().find(x => x.key === el.value); CF.second = st && !st.number ? (Choices.settingValue(S.spec, SET(), st.key) === "Yes" ? "No" : "Yes") : ""; }
+    if (el.tagName === "SELECT") render(); return; }
   if (["pickA", "pickP"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; return; }   // typed boxes: no redraw, or it would swallow the click on the button next to them
   if (["pickT", "pickG", "pickC", "pickS", "pickV", "pickD", "pickR"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
   if (el.id === "mLevel") { M.level = el.value; render(); return; }
@@ -1312,7 +1368,9 @@ document.addEventListener("change", async e => {
   let v = el.value; if (el.type === "number") v = v === "" ? null : Number(v); if (v === "") v = null;
   if (/\.(from|to)$/.test(path) && v !== null) v = Number(v);
   if (/^spec\.school\.(weeks|periods_per_day|period_minutes|lesson_length)$/.test(path)) v = Number(v);
+  if (/^spec\.choices\.\d+\.second$/.test(path) && v === null) v = "no limit";   // a number setting's second choice left blank
   setPath(path, v);
+  const cfb = path.match(/^spec\.choices\.(\d+)\.fallback$/); if (cfb) Choices.setFallback(S.spec, Number(cfb[1]), v);
   const m = path.match(/^spec\.lessons\.(\d+)\.block$/);
   if (m && v) { const b = S.spec.blocks.find(x => x.block === v); if (b) { S.spec.lessons[m[1]].classes = [...(b.classes || [])]; S.spec.lessons[m[1]].level = b.level || S.spec.lessons[m[1]].level; } }
   const t = path.match(/^spec\.lessons\.(\d+)\.teachers\.(\d+)$/); if (t) S.spec.lessons[t[1]].teachers = (S.spec.lessons[t[1]].teachers || []).map(x => x || null);
@@ -1559,11 +1617,12 @@ function dropIds(e) {   // the teacher indexes a drop carries (ids, as JSON in t
   if (!Array.isArray(ids) || !S.spec) return [];
   return S.spec.teachers.map((t, i) => [t, i]).filter(([t]) => t && ids.includes(t._id)).map(([, i]) => i);
 }
-const dropZone = e => e.target.closest ? e.target.closest("[data-mbasket], [data-mstaff], [data-mcard], [data-glane]") : null;
+const dropZone = e => e.target.closest ? e.target.closest("[data-mbasket], [data-mstaff], [data-mcard], [data-glane], tr[data-cdrag], [data-cend]") : null;
 document.addEventListener("dragstart", e => {
-  const el = e.target.closest && e.target.closest("[data-mdrag], [data-gdrag]"); if (!el) return;
+  const el = e.target.closest && e.target.closest("[data-mdrag], [data-gdrag], [data-cdrag]"); if (!el) return;
   let payload;
-  if (el.dataset.gdrag !== undefined) { const gp = gpState(), id = el.dataset.gdrag; payload = { rows: gp.ticked.has(id) ? [...gp.ticked] : [id] }; }   // a ticked row drags every ticked row
+  if (el.dataset.cdrag !== undefined) payload = { choice: Number(el.dataset.cdrag) };   // a row of the give-way list
+  else if (el.dataset.gdrag !== undefined) { const gp = gpState(), id = el.dataset.gdrag; payload = { rows: gp.ticked.has(id) ? [...gp.ticked] : [id] }; }   // a ticked row drags every ticked row
   else { const id = el.dataset.mdrag; payload = M.ticked.has(id) ? [...M.ticked] : [id]; }   // a ticked teacher drags every ticked teacher
   e.dataTransfer.setData("text/plain", JSON.stringify(payload)); e.dataTransfer.effectAllowed = "copyMove";
   const m = $(".map, .gb"); if (m) m.classList.add("dragging");
@@ -1574,6 +1633,10 @@ document.addEventListener("dragleave", e => { const z = dropZone(e); if (z && !(
 document.addEventListener("drop", e => {
   const z = dropZone(e); if (!z) return; e.preventDefault(); z.classList.remove("over");
   if (z.dataset.glane !== undefined) { const lis = dropRows(e); if (lis.length) moveRows(lis, z.dataset.glane); return; }
+  if (z.dataset.cdrag !== undefined || z.dataset.cend !== undefined) {   // the give-way list: before the row dropped on, or last when dropped below the table
+    let p = {}; try { p = JSON.parse(e.dataTransfer.getData("text/plain") || "{}"); } catch (err) { }
+    if (locked(G.shown) || !p || typeof p.choice !== "number") return;
+    if (Choices.moveTo(S.spec, p.choice, z.dataset.cend !== undefined ? null : Number(z.dataset.cdrag))) { save(); render(); } return; }
   const idxs = dropIds(e); if (!idxs.length) return;
   if (z.dataset.mbasket !== undefined) basketAdd(z.dataset.mbasket, idxs);
   else if (z.dataset.mstaff !== undefined) staffDrop(idxs);
@@ -2117,8 +2180,11 @@ function paintFit() {
   const j = FIT.res; if (!j) { el.innerHTML = head; return; }
   const item = f => { const at = stepAt(f.area); return `<li>${esc(f.text)}${at > 0 ? ` <button class="small" data-step="${at}">Open ${esc(STEPS[at][1].replace(/^\d+ /, ""))}</button>` : ""}</li>`; };
   const hard = j.findings.filter(f => f.level === "critical"), soft = j.findings.filter(f => f.level !== "critical");
+  const fb = j.fallbacks, things = m => `${m} thing${m === 1 ? "" : "s"}`;   // the sums again down the give-way list, when the first choices fail
+  const down = !fb || !(j.critical > 0) ? "" : fb.pass_at == null ? `<p class="issue crit">Even after every second choice (${fb.items.length}), ${things(fb.critical[fb.critical.length - 1])} will not fit.</p>`
+    : fb.pass_at >= 1 ? `<p class="issue soft">With the first choices, ${things(j.critical)} will not fit. Giving way in your order, the sums pass after choice ${fb.pass_at}: ${esc(fb.items.slice(0, fb.pass_at).join("; "))}.</p>` : "";
   el.innerHTML = head + (hard.length
-      ? `<p class="issue crit">${hard.length} thing${hard.length === 1 ? "" : "s"} will not fit: no timetable can be made until ${hard.length === 1 ? "it is" : "they are"} fixed.</p>
+      ? `<p class="issue crit">${hard.length} thing${hard.length === 1 ? "" : "s"} will not fit: no timetable can be made until ${hard.length === 1 ? "it is" : "they are"} fixed.</p>${down}
          <details open><summary class="sev crit">Critical · ${hard.length}</summary><ul class="fitlist">${hard.map(item).join("")}</ul></details>`
       : `<p class="okmsg">Nothing critical: by these sums a timetable can be made from this setup.</p>`)
     + (soft.length ? `<details ${hard.length ? "" : "open"}><summary class="sev">Warnings · ${soft.length}</summary><p class="muted small">A timetable can still be made; a person should look at these.</p><ul class="fitlist">${soft.map(item).join("")}</ul></details>` : "")
@@ -2129,7 +2195,7 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
   const p = st.published, f = p ? p.files || {} : {};
   el.innerHTML = `<h2>Published now</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)}${p.source ? ` from ${esc(p.source)}` : ""} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
       <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
-      ${ruleReportHTML(p.rule_report || [], S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0)}
+      ${p.config_id ? `<p class="muted small">Made from configuration ${esc(p.config_id)}.</p>` : ""}${ruleReportHTML(p.rule_report || [], S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0)}${choicesUsedHTML(p.choices_used || [], p.choice_problems || [], S.spec ? validChoices() : 0)}
       <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>${f.db ? `<a href="/files/db" title="Every lesson, class, teacher and room as a SQLite database, for other systems to import. It also holds the setup, so Make printouts can rebuild everything from it.">Timetable database (.sqlite), for other systems</a>` : ""}
       ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
       <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
@@ -2188,9 +2254,25 @@ function importHTML(j) {
             : `<details open><summary class="sev crit">${j.problems.length + j.more} problem${j.problems.length + j.more === 1 ? "" : "s"} found</summary>${list(j.problems, j.more)}</details>`)
     + (j.after.length ? `<details><summary>${j.after.length} lesson${j.after.length === 1 ? " is" : "s are"} after school</summary>${list(j.after)}</details>` : "")
     + (j.notes.length ? `<details><summary>Notes</summary>${list(j.notes)}</details>` : "")
-    + ruleReportHTML(j.rule_report || [], j.typed || 0)
+    + configLine(j) + ruleReportHTML(j.rule_report || [], j.typed || 0) + choicesUsedHTML(j.choices_used || [], j.choice_problems || [], j.choices || 0)
     + `<p class="muted small" style="margin-top:8px">${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}${j.ok ? "" : " You can still publish it; the problems stay listed in its Read me sheet."}</p>
     <div class="row"><button class="primary" id="imPublish">Publish this timetable</button></div>`;
+}
+/* which configuration (the workbook's id) the timetable was made from, against the setup's version now */
+function configLine(j) {
+  const id = esc(j.config_id), now = esc(j.setup_version);
+  return { same: `<p class="okmsg">Made from this configuration (${id}).</p>`,
+    older: `<p class="issue">Made from configuration ${id}; the setup is now ${now}. Changes since then are not in this timetable.</p>`,
+    unsaved: `<p class="issue">Made from a workbook that was downloaded with unsaved changes (${id}), so it may not match the setup saved here (${now}).</p>`,
+    unknown: `<p class="muted small">The timetable does not say which configuration it was made from (an older workbook).</p>`,
+    newer: `<p class="issue">The timetable's configuration ${id} is newer than this setup's ${now}: it was made from another copy.</p>` }[j.config_state] || "";
+}
+/* the Choices used list that came back (first or second choice for each item on the give-way list), and what is wrong with it */
+function choicesUsedHTML(used, problems, n) {
+  if (!used.length && !n) return "";
+  const lc = t => t ? t[0].toLowerCase() + t.slice(1) : "", bad = problems.map(x => `<p class="issue">${esc(x)}</p>`).join("");
+  if (!used.length) return `<h3 style="margin-top:14px">Choices used</h3><p class="issue">No Choices used list came back. The setup has ${n} second choice${n === 1 ? "" : "s"}; the timetable was checked against the first choices.</p>${bad}`;
+  return `<h3 style="margin-top:14px">Choices used</h3><ul class="fitlist">${used.map(u => `<li>${esc(u.item)}: ${esc(String(u.used || "").toLowerCase())}${u.how ? `, ${esc(lc(String(u.how)))}` : ""}</li>`).join("")}</ul>${bad}`;
 }
 /* the agent's rule report (one line per typed rule: Met, Partly, Not met and how), and whether it matches the setup's typed rules */
 function ruleReportHTML(report, typed) {
@@ -2203,8 +2285,8 @@ function ruleReportHTML(report, typed) {
 }
 /* what the committee pastes into the chatbot with the workbook and the skill */
 function starterPrompt() {
-  const n = S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0, v = (S.meta && S.meta.skill_version) || "";
-  return `Use the attached school-timetable-generator skill${v ? ` (version ${v})` : ""}, not an older installed copy. Make the timetable for ${sc().name || "the school"} ${sc().timetable || ""} from the attached setup workbook: run python -m ttgen check first and tell me every problem; then solve and export with python -m ttgen; hand back the timetable database (.sqlite) written by ttgen export, or, if you cannot run code, a workbook with a Lessons sheet in the hand-over format in SKILL.md.${n ? ` The setup has ${n} typed rule${n === 1 ? "" : "s"} (Rule "In words" on the More rules sheet): honour every Must, try every Prefer, then add a Rule report sheet to the timetable workbook (one line per typed rule: Met, Partly or Not met, and how) and run ttgen export on that workbook, so the database you hand back carries the report.` : ""} Do not change the setup.`.replace(/\s+/g, " ").trim();
+  const n = S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0, v = (S.meta && S.meta.skill_version) || "", nch = S.spec ? (S.spec.choices || []).length : 0;
+  return `Use the attached school-timetable-generator skill${v ? ` (version ${v})` : ""}, not an older installed copy. Make the timetable for ${sc().name || "the school"} ${sc().timetable || ""} from the attached setup workbook: run python -m ttgen check first and tell me every problem; then solve and export with python -m ttgen; hand back the timetable database (.sqlite) written by ttgen export, or, if you cannot run code, a workbook with a Lessons sheet in the hand-over format in SKILL.md.${n ? ` The setup has ${n} typed rule${n === 1 ? "" : "s"} (Rule "In words" on the More rules sheet): honour every Must, try every Prefer, then add a Rule report sheet to the timetable workbook (one line per typed rule: Met, Partly or Not met, and how) and run ttgen export on that workbook, so the database you hand back carries the report.` : ""}${nch ? ` The setup has ${nch} second choice${nch === 1 ? "" : "s"} on the Choices sheet: try the first choices; if no timetable fits, give way one item at a time from the top of the list and stop at the first that fits (python -m ttgen solve does this); never give way on anything that is not on the list; hand back the Choices used sheet beside the Rule report.${sc().choices_mode === "compare" ? " Make one timetable for each step of the list." : ""}` : ""} Do not change the setup.`.replace(/\s+/g, " ").trim();
 }
 function dl(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
 async function buildXlsx() {

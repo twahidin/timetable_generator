@@ -15,7 +15,7 @@ import json
 import secrets
 
 LISTS = ("venues", "classes", "subjects", "teachers", "blocks", "lessons",
-         "rules", "students", "combinations", "roles")
+         "rules", "students", "combinations", "roles", "choices")
 MERGE = {"teachers": ("can_teach",), "students": ("groups",)}
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 _RESERVED_TOP = set(LISTS) | {"school", "day_structure"}
@@ -63,6 +63,14 @@ def ensure_ids(spec):
                 used.add(rid)
                 row["_id"] = rid
                 added = True
+    rules = _rows(spec, "rules")
+    for c in _rows(spec, "choices"):   # a choice about a rule follows the rule by its id, not by its place in the list
+        i = c.get("rule") if isinstance(c, dict) else None
+        if isinstance(i, int) and not isinstance(i, bool) and not c.get("rule_id"):
+            r = rules[i] if 0 <= i < len(rules) else None
+            c["rule_id"] = r.get("_id") if isinstance(r, dict) else None
+            del c["rule"]
+            added = True
     return added
 
 

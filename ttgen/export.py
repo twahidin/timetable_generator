@@ -15,6 +15,7 @@ from openpyxl.worksheet.pagebreak import Break
 from openpyxl.worksheet.merge import MergedCellRange
 from .database import is_db, read_db, write_db
 from .reader import read_template, derive
+from . import choices
 from .report import LESSON_HEADERS, short_subject, clock
 from .spec import periods_by_day, resolve_row, trim_day
 
@@ -204,6 +205,10 @@ def model_from_files(setup_path, timetable_path):
     if setup_path: spec = read_template(setup_path)
     elif db and db[5]: spec = db[5]
     else: raise ValueError("Send the setup workbook too: this timetable file does not hold the setup.")
+    wbu = None if db else openpyxl.load_workbook(timetable_path, data_only=True)
+    used = list(db[7]) if db else (choices.used_from_rows(wbu[choices.USED_SHEET].iter_rows(values_only=True)) if choices.USED_SHEET in wbu.sheetnames else [])
+    k, choice_probs = choices.check_used(spec, used)
+    setup, spec = spec, choices.apply_all(spec, k)   # the timetable is checked against the setup with the second choices it used
     derive(spec)
     sc = spec["school"]; NP = int(sc["periods_per_day"]); ds = spec["day_structure"]
     lv0 = next((lv for lv in sc["levels"] if lv in ds), None)
@@ -211,7 +216,7 @@ def model_from_files(setup_path, timetable_path):
     days = list(ds[lv0].keys()); dix = {d.lower(): i for i, d in enumerate(days)}
     if db: wb = None; rows = iter([db[0]] + db[1])
     else:
-        wb = openpyxl.load_workbook(timetable_path, data_only=True)
+        wb = wbu
         if "Lessons" not in wb.sheetnames: raise ValueError("The timetable workbook has no Lessons sheet.")
         rows = wb["Lessons"].iter_rows(values_only=True)
     hdr = [str(h).strip() if h is not None else "" for h in next(rows)]
@@ -257,6 +262,9 @@ def model_from_files(setup_path, timetable_path):
             c, day, p, n = (row[h[k]] if k in h and h[k] < len(row) else None for k in ("class", "day", "start period", "periods"))
             if c not in (None, "") and str(day or "").lower() in dix and p is not None: recess[str(c)].append([dix[str(day).lower()], int(p), int(n or 1)])
     m = _model(spec, days, out, notes=notes, status=status, recess=recess); m["rule_report"] = report
+    m["setup"] = setup; m["choices_used"] = used; m["choice_problems"] = choice_probs   # the database keeps the setup as downloaded
+    if choice_probs: m["checks"]["problems"] = list(m["checks"]["problems"]) + choice_probs
+    m["checks"]["ok"] = not m["checks"]["problems"]
     return m
 
 

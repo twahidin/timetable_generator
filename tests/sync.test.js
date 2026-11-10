@@ -49,7 +49,7 @@ for (const c of cases) {
 // constants and ids
 assert.deepStrictEqual(Sync.MERGE, { teachers: ["can_teach"], students: ["groups"] });
 assert.deepStrictEqual(Sync.LISTS, ["venues", "classes", "subjects", "teachers", "blocks", "lessons",
-  "rules", "students", "combinations", "roles"]);
+  "rules", "students", "combinations", "roles", "choices"]);
 assert(/^[a-z0-9]{10}$/.test(Sync.newId()));
 assert.notStrictEqual(Sync.newId(), Sync.newId());
 
@@ -63,6 +63,17 @@ assert.notStrictEqual(Sync.newId(), Sync.newId());
   assert.strictEqual(Sync.ensureIds(spec), false);
   assert.deepStrictEqual(spec, before);
   assert.strictEqual(Sync.ensureIds({ school: {} }), false);
+}
+passed++;
+
+// ensureIds links a choice to its rule by the rule's id
+{
+  const spec = { rules: [{ rule: "In words" }], choices: [{ kind: "rule", rule: 0 }, { kind: "rule", rule: 7 }] };
+  assert.strictEqual(Sync.ensureIds(spec), true);
+  const [a, b] = spec.choices;
+  assert(a._id && b._id && a.rule_id === spec.rules[0]._id && b.rule_id === null);
+  assert(!("rule" in a) && !("rule" in b));
+  assert.strictEqual(Sync.ensureIds(spec), false);
 }
 passed++;
 

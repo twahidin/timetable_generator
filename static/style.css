@@ -217,5 +217,11 @@ button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .tabs button{border-radius:999px}.tabs button .n{margin-left:6px;color:var(--muted);font-variant-numeric:tabular-nums}
 .tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}.tabs button.on .n{color:#fff}
 table.typed td.words input{width:100%;min-width:320px}
+/* step 6: the give-way list of second choices; step 7: the mode */
+table.giveway td.item{min-width:260px}table.giveway td.second{white-space:nowrap}table.giveway td.second input[type=time]{width:120px}.giveway button.small{padding:1px 6px;font-size:11px;margin-left:2px}
+.giveway tr[draggable] td:first-child{cursor:grab}.giveway tr.over td{background:#eef5ff}.cend.over{outline:1px dashed var(--accent);border-radius:8px}
+tr.instead td{background:var(--chip);border-bottom:1px solid var(--line)}tr.instead label.f{font-size:12px}
+.cf{align-items:flex-end;margin:10px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#f8fafc}
+.cmode{margin:0 0 12px;font-size:13px}.cmode label.radio{display:block;margin:4px 0;line-height:1.45}
 #prompt{width:100%;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0;resize:vertical;background:var(--input)}
 table.rr td.met{color:var(--ok);font-weight:600}table.rr td.partly{color:#b45309;font-weight:600}table.rr td.notmet{color:var(--warn);font-weight:600}
