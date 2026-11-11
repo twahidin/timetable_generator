@@ -81,5 +81,36 @@ t("stateWord", () => {
   assert.strictEqual(Draft.stateWord("no"), "");
   assert.strictEqual(Draft.stateWord(undefined), "");
 });
+const K = (key, kind, where) => ({ key, kind, where: where === undefined ? null : where, text: key });
+t("follow: the exact key stays", () => {
+  const was = { key: "clash:A", kind: "clash", where: { teacher: "Ms X" } };
+  assert.deepEqual(Draft.follow(was, [K("clash:B", "clash", { teacher: "Ms X" }), K("clash:A", "clash", { teacher: "Ms X" })]), { key: "clash:A", how: "same" });
+});
+t("follow: a card opened on k#2 is followed to k when only k remains", () => {
+  assert.deepEqual(Draft.follow({ key: "clash:A#2", kind: "clash", where: null }, [K("clash:A", "clash")]), { key: "clash:A", how: "same" });
+  assert.deepEqual(Draft.follow({ key: "clash:A", kind: "clash", where: null }, [K("clash:A#3", "clash"), K("clash:A#2", "clash")]), { key: "clash:A#3", how: "same" });
+});
+t("follow: a narrowed clash for the same teacher is followed as changed, another teacher is not", () => {
+  const was = { key: "clash:Teacher double-booked: Ms X on Mon period 2.", kind: "clash", where: { teacher: "Ms X" } };
+  assert.deepEqual(Draft.follow(was, [K("clash:other", "clash", { teacher: "Ms Y" }), K("clash:Teacher double-booked: Ms X on Mon period 3.", "clash", { teacher: "Ms X" })]), { key: "clash:Teacher double-booked: Ms X on Mon period 3.", how: "changed" });
+  assert.strictEqual(Draft.follow(was, [K("clash:other", "clash", { teacher: "Ms Y" }), K("clash:cls", "clash", { cls: "1A" })]), null);
+  const c = { key: "clash:Class clash: 1A", kind: "clash", where: { cls: "1A" } };
+  assert.deepEqual(Draft.follow(c, [K("clash:Class clash: 1A on Tue", "clash", { cls: "1A" })]), { key: "clash:Class clash: 1A on Tue", how: "changed" });
+});
+t("follow: a rule warning for the same rule and lesson in a new slot is followed, another lesson is not", () => {
+  const was = { key: "rule:3:1A|Maths|0|2", kind: "rule", where: { id: 7, row: "Entire Class" } };
+  assert.deepEqual(Draft.follow(was, [K("rule:3:1A|Maths|1|4", "rule", { id: 7, row: "Entire Class" })]), { key: "rule:3:1A|Maths|1|4", how: "changed" });
+  assert.strictEqual(Draft.follow(was, [K("rule:3:1A|Maths|1|4", "rule", { id: 8, row: "Entire Class" })]), null);
+  assert.strictEqual(Draft.follow(was, [K("rule:4:1A|Maths|1|4", "rule", { id: 7, row: "Entire Class" })]), null);
+  assert.strictEqual(Draft.follow(was, [K("rule:3:1A|Maths|1|4", "rule", { id: 7, row: "Group 2" })]), null);
+});
+t("follow: nothing to follow gives null and a was without where never throws", () => {
+  assert.strictEqual(Draft.follow({ key: "dep:1", kind: "deployment", where: null }, [K("dep:2", "deployment")]), null);
+  assert.strictEqual(Draft.follow({ key: "t:1", kind: "typed", where: { teacher: "Ms X" } }, [K("t:2", "typed", { teacher: "Ms X" })]), null);
+  assert.strictEqual(Draft.follow({ key: "clash:A", kind: "clash" }, [K("clash:B", "clash", { teacher: "Ms X" })]), null);
+  assert.strictEqual(Draft.follow({ key: "rule:1:a|b|0|0", kind: "rule" }, [K("rule:1:a|b|0|1", "rule")]), null);
+  assert.strictEqual(Draft.follow({ key: "clash:A", kind: "clash", where: null }, []), null);
+  assert.strictEqual(Draft.follow({ key: "clash:A", kind: "clash", where: null }, undefined), null);
+});
 
 console.log(n + " checks passed");

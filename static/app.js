@@ -2369,7 +2369,7 @@ function fxWaysHTML(f) {   // the helper's block: the ways to settle the warning
   const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === f.warn), a = fxWaysOf(f);
   const close = `<button data-fxwaysclose="1">Close</button>`;
   let body;
-  if (f.settled) body = `<p class="small">This warning is settled.</p><div class="row">${close}</div>`;
+  if (f.settled) body = `<p class="small">This warning is no longer on the list.</p><div class="row">${close}</div>`;
   else if (!a) body = f.waysFail ? `<p class="issue small">Could not load the ways.</p><div class="row">${close}</div>` : `<p class="muted small">Looking for ways…</p>`;
   else {
     const sg = a.suggestions || [], bl = a.blocked || [];
@@ -2379,7 +2379,7 @@ function fxWaysHTML(f) {   // the helper's block: the ways to settle the warning
       + (!sg.length && bl.length ? `<p class="small">The nearest ways, and what each breaks:</p><ul class="small">${bl.map(x => `<li>${esc(x.text)} <span class="muted">${esc(x.why)}</span></li>`).join("")}</ul>` : "")
       + `<div class="row">${close}</div>`;
   }
-  return `<div class="fxways"><h4>Ways to settle this</h4>${w ? `<p class="small">${esc(w.text)}</p>` : ""}${body}</div>`;
+  return `<div class="fxways"><h4>Ways to settle this</h4>${f.changed && !f.settled ? `<p class="small">This warning has changed: ${esc(f.changed)}</p>` : w ? `<p class="small">${esc(w.text)}</p>` : ""}${body}</div>`;
 }
 function fxSmallHTML(c) {   // one other class's week as a read-only table, the lessons the preview marks outlined
   const shorts = fxShorts();
@@ -2442,9 +2442,9 @@ async function fxApply(fixes) {   // one or two fixes together, as received; all
     const j = await post("/api/draft/fixes", { fixes });
     if (j) await fxAfter(j);
     else {   // refused: the sentence is toasted; the draft, the grid and the ways are fetched again (the list may have changed under the card)
-      f.pre = null; f.preWant = null;
+      f.pre = null; f.preWant = null; f.ways = null; f.waysFail = false;   // the old Show and Apply buttons are not live while the new ways load
       const d = await fxGet("/api/draft"); if (S.fix !== f) return;
-      if (d && d.warnings) { S.draft = d; poll(); if (f.warn && !d.warnings.some(w => w.key === f.warn)) { f.settled = true; f.ways = null; } }
+      if (d && d.warnings) { S.draft = d; poll(); fxFollow(f, d.warnings); }
       await fxRefresh(f); if (S.fix !== f) return; fxDraw();
       if (f.warn && !f.settled) { await fxWays(f); if (S.fix === f) fxDraw(); }
     }
@@ -2472,8 +2472,8 @@ async function fxRefresh(f) {   // the grid again, then the options when a lesso
   await fxOptions(f);
   return live();
 }
-async function fxOpen(view, name, day, sel, warn) {   // day: a day's name, to open on the week that holds it; warn: the key of the warning it was opened from
-  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true, warn: warn || null, ways: null, waysFail: false, settled: false, pre: null, preWant: null }, n = ++FX.n;
+async function fxOpen(view, name, day, sel, warn) {   // day: a day's name, to open on the week that holds it; warn: the warning it was opened from (the warning itself: its key, kind and where are kept)
+  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true, warn: warn ? warn.key : null, was: warn ? { key: warn.key, kind: warn.kind, where: warn.where || null } : null, changed: "", ways: null, waysFail: false, settled: false, pre: null, preWant: null }, n = ++FX.n;
   const ok = await fxRefresh(f); f.opening = false;
   if (!ok || n !== FX.n) return;
   if (day) { const i = f.grid.days.indexOf(day), w = Grid.weeks(f.grid.days).find(x => x.days.some(d => d.i === i)); if (w) f.week = w.name; }
@@ -2481,12 +2481,21 @@ async function fxOpen(view, name, day, sel, warn) {   // day: a day's name, to o
   const box = $("#fxBox"); if (box && day !== null) box.scrollIntoView({ block: "start" });
   if (f.warn) { await fxWays(f); if (S.fix === f) fxDraw(); }
 }
+function fxFollow(f, warnings) {   // the warning the card was opened on, found again in the list: its key carried on, or the changed warning taken; false when it is gone
+  if (!f.warn) return false;
+  const r = Draft.follow(f.was, warnings); f.settled = !r;
+  if (!r) return false;
+  const w = warnings.find(x => x.key === r.key);
+  f.warn = r.key; f.was = { key: w.key, kind: w.kind, where: w.where || null };
+  if (r.how === "changed") f.changed = w.text;
+  return true;
+}
 async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again, then the ways when the card has a warning
   const f = S.fix; S.draft = j; poll();
   if (f) {
     f.pre = null; f.preWant = null;
-    const still = !!f.warn && j.warnings.some(w => w.key === f.warn);
-    if (f.warn) { f.settled = !still; f.ways = null; f.waysFail = false; }
+    const still = !!f.warn && fxFollow(f, j.warnings);
+    if (f.warn) { f.ways = null; f.waysFail = false; }
     const ok = await fxRefresh(f); if (S.fix !== f) return; if (!ok) toast("The fix was made, but the grid could not be loaded again. Pick the class again.");
     fxDraw();
     if (still) { await fxWays(f); if (S.fix === f) fxDraw(); }
@@ -2523,7 +2532,7 @@ function fxClick(b) {   // true when the click was the Fix card's or a warning's
   if (d.fix !== undefined) {
     const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === d.fix), to = w && Draft.fixTarget(w);
     if (!to) { toast("This warning is not about one class or teacher, so there is no grid to show."); return true; }
-    fxOpen(to.view, to.name, to.day, to.sel, w.key); return true;
+    fxOpen(to.view, to.name, to.day, to.sel, w); return true;
   }
   if (b.id === "fxOpen") { fxOpenFirst(); return true; }
   if (b.id === "fxUndo") { fxUndo(); return true; }

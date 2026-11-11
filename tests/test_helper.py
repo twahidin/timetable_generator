@@ -45,9 +45,9 @@ def a_lesson_breaking_a_rule_gets_moves_that_stop_breaking_it():
     assert helper.involved(m, w) == [1]
     out = helper.suggest(m, sp, DAYS, w); S = out["suggestions"]
     assert [s["fixes"] for s in S] == [[dict(kind="move", id=1, d=1, p=q)] for q in (2, 3, 6)], S   # the same day first; the swap at period 5 moves two lessons
-    assert [s["text"] for s in S] == [f"Move Mathematics for {A} to {DAYS[1]} period {q}." for q in (2, 3, 6)] and all(s["disturbs"] == ["Nothing else moves."] and s["moved"] == 1 for s in S)
+    assert [s["text"] for s in S] == [f"Move Mathematics for {A} from {DAYS[1]} period 0 to {DAYS[1]} period {q}." for q in (2, 3, 6)] and all(s["disturbs"] == ["Nothing else moves."] and s["moved"] == 1 for s in S)
     swap, ok = dict(kind="swap", a=1, b=2), dict(state="ok", why="", must=[], prefer=[])
-    assert helper.say(m, sp, DAYS, swap) == f"Swap Mathematics for {A} with Art for {A} ({DAYS[1]} period 5)." and helper.disturbs(m, sp, DAYS, [swap], [ok]) == [f"Art for {A} moves to {DAYS[1]} period 0."]
+    assert helper.say(m, sp, DAYS, swap) == f"Swap Mathematics for {A} ({DAYS[1]} period 0) with Art for {A} ({DAYS[1]} period 5)." and helper.disturbs(m, sp, DAYS, [swap], [ok]) == [f"Art for {A} moves to {DAYS[1]} period 0."]
     for s in S:
         L = helper.chain(m, sp, DAYS, s["fixes"])["lessons"]; assert helper.settles(m, sp, DAYS, w, L)
         assert not [v for v in verify.rules(dict(m, lessons=L), sp)[0] if fixes._subject(v) == fixes._subject(w)]
@@ -106,7 +106,7 @@ def blocked_when_nothing_passes():
     m, sp = model_with(L, rules=[rule(A, "Not in periods", 1, 1)])
     w = next(w for w in verify.rules(m, sp)[0] if w["where"]["id"] == 1); out = helper.suggest(m, sp, DAYS, w)
     assert out["suggestions"] == [] and out["none"] == "Nothing settles this without breaking a rule or a clash." and 1 <= len(out["blocked"]) <= 3, out
-    assert all(set(b) == {"text", "why"} and b["text"].startswith(f"Move English Language for {A} to ") and b["why"] == f"{t0} is teaching Other for {B} then." for b in out["blocked"]), out
+    assert all(set(b) == {"text", "why"} and b["text"].startswith(f"Move English Language for {A} from ") and b["why"] == f"{t0} is teaching Other for {B} then." for b in out["blocked"]), out
 
 @t
 def a_new_difference_is_not_settling_even_when_another_goes():   # review round 1
@@ -169,7 +169,7 @@ def a_pair_frees_the_slot_first():
     out = helper.suggest(m, sp, DAYS, w); S = out["suggestions"]
     first, second = dict(kind="move", id=2, d=3, p=5), dict(kind="move", id=1, d=S0[0], p=S0[1])
     assert len(S) == 1 and S[0]["fixes"] == [first, second] and S[0]["state"] == "ok" and S[0]["moved"] == 2, out
-    assert S[0]["text"] == f"Move Other for {B} to {DAYS[3]} period 5. Then Move English Language for {A} to {DAYS[2]} period 3.", S[0]["text"]
+    assert S[0]["text"] == f"Move Other for {B} from {DAYS[2]} period 3 to {DAYS[3]} period 5. Then Move English Language for {A} from {DAYS[0]} period 0 to {DAYS[2]} period 3.", S[0]["text"]
     assert S[0]["disturbs"] == [f"Other for {B} moves to {DAYS[3]} period 5."], S[0]["disturbs"]
     c = helper.chain(m, sp, DAYS, S[0]["fixes"]); assert c["state"] == "ok" and [j["state"] for j in c["steps"]] == ["ok", "ok"]
     assert fixes.judge(m, sp, DAYS, second)["state"] == "no"   # alone, the second is a clash
@@ -202,7 +202,7 @@ def a_teacher_handback_after_moving_the_lesson_in_the_way():
     assert j["state"] == "no" and j["why"] == f"{right} is teaching Other for {B} then."
     out = helper.suggest(m, sp, DAYS, w); S = out["suggestions"]
     assert len(S) == 1 and S[0]["fixes"] == [dict(kind="move", id=2, d=F[0], p=F[1]), give] and S[0]["state"] == "ok" and S[0]["moved"] == 2, out
-    assert S[0]["text"] == f"Move Other for {B} to {DAYS[1]} period 3. Then Give Mathematics for {A} to {right}."
+    assert S[0]["text"] == f"Move Other for {B} from {DAYS[0]} period 2 to {DAYS[1]} period 3. Then Give Mathematics for {A} to {right}."
     assert S[0]["disturbs"] == [f"Other for {B} moves to {DAYS[1]} period 3.", f"{wrong} drops to 0 periods, {right} rises to 2."], S[0]["disturbs"]
     assert helper.chain(m, sp, DAYS, S[0]["fixes"])["state"] == "ok" and m["lessons"] == before
 
@@ -212,6 +212,25 @@ def a_block_lesson_counts_once():                               # Review Focus 5
     assert len(S) == 1 and S[0]["fixes"] == [dict(kind="move", id=2, d=3, p=5), dict(kind="move", id=1, d=S0[0], p=S0[1])] and S[0]["moved"] == 2, S
     c = helper.chain(m, sp, DAYS, S[0]["fixes"]); assert len(c["was"]) == 4 and all((x["d"], x["p"]) == (3, 5) for x in c["lessons"] if x["id"] == 2)
     assert m["lessons"] == before
+
+@t
+def two_moves_to_the_same_slot_read_differently_and_each_names_where_its_lesson_is_now():
+    T = "Michelle Goh"   # a double and a single lesson of one class and subject, in a clash at period 6: either can go to the same open slot
+    m, sp = model_with([lesson(1, 0, 5, 2, [A], "Mathematics", ENTIRE, [T], level=LV), lesson(2, 0, 6, 1, [A], "Mathematics", ENTIRE, [T], level=LV)])
+    w = next(w for w in verify.clashes(m) if w["where"] == dict(teacher=T))
+    S = helper.suggest(m, sp, DAYS, w, limit=50)["suggestions"]
+    to = lambda s: (s["fixes"][0]["d"], s["fixes"][0]["p"]); same = [(a, b) for a in S for b in S if a is not b and a["fixes"][0]["id"] == 1 and b["fixes"][0]["id"] == 2 and to(a) == to(b)]
+    assert same, [s["text"] for s in S]
+    for a, b in same:
+        assert a["text"] != b["text"], a["text"]
+        assert a["text"] == f"Move Mathematics for {A} from {DAYS[0]} period 5 to {DAYS[to(a)[0]]} period {to(a)[1]}." and b["text"] == f"Move Mathematics for {A} from {DAYS[0]} period 6 to {DAYS[to(b)[0]]} period {to(b)[1]}.", (a["text"], b["text"])
+    assert len({s["text"] for s in S}) == len(S)
+
+@t
+def the_second_fix_of_a_pair_names_the_slot_its_lesson_is_in_after_the_first():
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, ["Michelle Goh"], level=LV)])
+    first, second = dict(kind="move", id=1, d=1, p=3), dict(kind="move", id=1, d=2, p=6)
+    assert helper.says(m, sp, DAYS, [first, second]) == f"Move Mathematics for {A} from {DAYS[0]} period 2 to {DAYS[1]} period 3. Then Move Mathematics for {A} from {DAYS[1]} period 3 to {DAYS[2]} period 6."
 
 if "--full" in sys.argv:
     SOLVED = []
@@ -252,6 +271,7 @@ if "--full" in sys.argv:
         slow, offered, pairs = 0.0, 0, 0
         for w in ws:
             t0 = time.time(); out = helper.suggest(m, sp, days, w); dt = time.time() - t0; slow = max(slow, dt); assert dt < 2, (w["key"], dt)
+            assert len({s["text"] for s in out["suggestions"]}) == len(out["suggestions"]), (w["key"], [s["text"] for s in out["suggestions"]])   # never two lines that read the same
             for s in out["suggestions"]:
                 offered += 1; pairs += len(s["fixes"]) == 2
                 assert helper.chain(m, sp, days, s["fixes"])["state"] in ("ok", "prefer"), (w["key"], s["text"])

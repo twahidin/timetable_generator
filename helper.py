@@ -64,8 +64,9 @@ def _apply(lessons, fx, spec, days):
 def say(m, spec, days, fix):
     """the fix as an instruction for the committee"""
     L, kind = m["lessons"], fix.get("kind")
-    if kind == "move": return f"Move {what(_first(L, fix['id']))} to {when(days, fix['d'], fix['p'])}."
-    if kind == "swap": b = _first(L, fix["b"]); return f"Swap {what(_first(L, fix['a']))} with {what(b)} ({when(days, b['d'], b['p'])})."
+    if kind == "move":
+        x = _first(L, fix["id"]); return f"Move {what(x)} from {when(days, x['d'], x['p'])} to {when(days, fix['d'], fix['p'])}."
+    if kind == "swap": a, b = _first(L, fix["a"]), _first(L, fix["b"]); return f"Swap {what(a)} ({when(days, a['d'], a['p'])}) with {what(b)} ({when(days, b['d'], b['p'])})."
     if kind == "teacher": return f"Give {verify._name(fixes._key(fix['key']))} to {fixes._names(fix['teachers'])}."
     if kind == "room":
         x = next(x for x in fixes._rows(L, fix["id"]) if x["group"] == fix["group"]); return f"Put {what(x)} in {fix['room'] or 'no room'}."
@@ -74,6 +75,13 @@ def say(m, spec, days, fix):
     if kind == "delete":
         x = next(x for x in fixes._rows(L, fix["id"]) if fix.get("group") is None or x["group"] == fix["group"]); return f"Delete {what(x)} on {when(days, x['d'], x['p'])}."
     raise ValueError("This kind of fix is not known.")
+
+def says(m, spec, days, fx):
+    """the sentences of a list of fixes joined by " Then ": each fix is worded on the timetable the earlier ones leave"""
+    out, L = [], m["lessons"]
+    for f in fx:
+        out.append(say(dict(m, lessons=L), spec, days, f)); L = _apply(L, [f], spec, days)["lessons"]
+    return " Then ".join(out)
 
 def disturbs(m, spec, days, fx, steps):
     """what else a suggestion changes or gives, in sentences: a swap's other lesson, the Prefer rules and allowances it gives,
@@ -352,7 +360,7 @@ def rank(m, spec, days, s):
     return (len(fx), s["moved"], 0 if s["state"] == "ok" else 1, load, other, d, p)
 
 def _suggestion(m, spec, days, fx, c):
-    return dict(fixes=fx, text=" Then ".join(say(m, spec, days, f) for f in fx), disturbs=disturbs(m, spec, days, fx, c["steps"]),
+    return dict(fixes=fx, text=says(m, spec, days, fx), disturbs=disturbs(m, spec, days, fx, c["steps"]),
                 state=c["state"], moved=len(c["touched"] | {x["id"] for x in c["was"]}))
 
 def suggest(m, spec, days, w, limit=3):
@@ -381,6 +389,6 @@ def suggest(m, spec, days, w, limit=3):
         if repr(fx) in tried: continue
         tried.add(repr(fx)); r = _apply(m["lessons"], fx, spec, days)
         if not r["problems"] and settles(m, spec, days, w, r["lessons"], memo):
-            blocked.append(dict(text=" Then ".join(say(m, spec, days, f) for f in fx), why=why))
+            blocked.append(dict(text=says(m, spec, days, fx), why=why))
             if len(blocked) == 3: break
     return dict(suggestions=[], none=NONE_PASS if blocked else NO_FIX, blocked=blocked)

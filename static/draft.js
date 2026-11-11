@@ -77,6 +77,24 @@ var Draft = (function () {
   /* a suggestion's state in words */
   function stateWord(state) { return state === "ok" ? "Clean" : state === "prefer" ? "Bends a Prefer" : ""; }
 
-  return { batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
+  /* the warning the card was opened on (was: {key, kind, where}), found again in the list now -> {key, how} or null.
+     "same": the key is there, or only renumbered (#2, #3); "changed": a clash for the same teacher or class, or a rule warning
+     for the same rule and lesson, under a new key; null when there is nothing to follow */
+  function follow(was, warnings) {
+    var list = warnings || [], base = function (k) { return String(k).replace(/#\d+$/, ""); };
+    if (!was || was.key === undefined || was.key === null) return null;
+    var hit = list.filter(function (w) { return w.key === was.key; })[0] || list.filter(function (w) { return base(w.key) === base(was.key); })[0];
+    if (hit) return { key: hit.key, how: "same" };
+    var wh = was.where || null;
+    if (was.kind === "clash" && wh && (wh.teacher || wh.cls)) {
+      hit = list.filter(function (w) { var x = w.where || {}; return w.kind === "clash" && (wh.teacher ? x.teacher === wh.teacher : x.cls === wh.cls); })[0];
+    } else if (was.kind === "rule" && wh && wh.id !== undefined && wh.id !== null) {
+      var rid = function (k) { return String(k).split(":")[1]; };
+      hit = list.filter(function (w) { var x = w.where || {}; return w.kind === "rule" && rid(w.key) === rid(was.key) && x.id === wh.id && x.row === wh.row; })[0];
+    }
+    return hit ? { key: hit.key, how: "changed" } : null;
+  }
+
+  return { follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
 })();
 if (typeof module !== "undefined") module.exports = Draft;
