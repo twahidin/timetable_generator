@@ -684,6 +684,9 @@ def test_the_typed_request_is_off_without_a_key_and_on_with_the_mock_reader():
         r = _ask(words="move Art for 1A off Mon"); assert r.status_code == 404 and r.get_json() == {"error": NOT_ON}, r.get_json()
     with _typed_env(TYPED_REQUEST_MODEL="mock", ANTHROPIC_API_KEY=None): assert c.get("/api/status").get_json()["typed"] is True
     with _typed_env(TYPED_REQUEST_MODEL=None, ANTHROPIC_API_KEY="sk-ant-test-not-a-key"): assert c.get("/api/status").get_json()["typed"] is True
+    with _typed_env(TYPED_REQUEST_MODEL=None, ANTHROPIC_API_KEY=None, AI_PROVIDER="anthropic", AI_API_KEY="sk-ant-test-not-a-key"): assert c.get("/api/status").get_json()["typed"] is True   # the key under an earlier version's name
+    with _typed_env(TYPED_REQUEST_MODEL=None, ANTHROPIC_API_KEY=None, AI_PROVIDER="openai", AI_API_KEY="sk-test-not-a-key"):                                                                   # another provider's key is not used
+        assert c.get("/api/status").get_json()["typed"] is False and _ask(words="move Art for 1A off Mon").status_code == 404
 
 def test_the_typed_route_needs_a_draft_a_setup_and_a_json_object():
     import shutil; shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True)
@@ -739,16 +742,17 @@ def test_a_choice_answered_with_pick_and_the_ask_does_not_read_the_words_again()
 
 def test_a_failed_call_is_the_one_sentence_and_the_key_is_nowhere():   # Review Focus 1
     import io, logging, contextlib, typed; _grid_draft(); KEY = "sk-ant-test-not-a-key"
-    with _typed_env(TYPED_REQUEST_MODEL=None, ANTHROPIC_API_KEY=KEY):
-        def boom(words): raise RuntimeError("401 invalid x-api-key " + KEY)
-        typed._call = boom                                                                     # never the real client
-        logs, out, err = io.StringIO(), io.StringIO(), io.StringIO(); hd = logging.StreamHandler(logs); root = logging.getLogger(); root.addHandler(hd); old = root.level; root.setLevel(logging.DEBUG)
-        try:
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err): r = _ask(words="move Art for 1A off Mon")
-        finally: root.removeHandler(hd); root.setLevel(old)
-        assert r.status_code == 200 and r.get_json() == {"ok": False, "error": typed.FAILED}, r.get_json()
-        assert KEY not in r.get_data(as_text=True) and KEY not in logs.getvalue() and KEY not in out.getvalue() and KEY not in err.getvalue()
-        assert c.get("/api/draft").get_json()["fixes"] == []
+    for names in (dict(ANTHROPIC_API_KEY=KEY), dict(ANTHROPIC_API_KEY=None, AI_PROVIDER="anthropic", AI_API_KEY=KEY)):   # the key under either name
+      with _typed_env(TYPED_REQUEST_MODEL=None, **names):
+          def boom(words): raise RuntimeError("401 invalid x-api-key " + KEY)
+          typed._call = boom                                                                     # never the real client
+          logs, out, err = io.StringIO(), io.StringIO(), io.StringIO(); hd = logging.StreamHandler(logs); root = logging.getLogger(); root.addHandler(hd); old = root.level; root.setLevel(logging.DEBUG)
+          try:
+              with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err): r = _ask(words="move Art for 1A off Mon")
+          finally: root.removeHandler(hd); root.setLevel(old)
+          assert r.status_code == 200 and r.get_json() == {"ok": False, "error": typed.FAILED}, r.get_json()
+          assert KEY not in r.get_data(as_text=True) and KEY not in logs.getvalue() and KEY not in out.getvalue() and KEY not in err.getvalue()
+          assert c.get("/api/draft").get_json()["fixes"] == []
 
 def test_a_fault_after_the_reading_says_so_and_leaves_a_trace_without_the_message():
     import io, logging, contextlib, typed; _grid_draft(); KEY = "sk-ant-test-not-a-key"; real = typed.answer
