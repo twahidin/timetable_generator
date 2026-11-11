@@ -59,7 +59,6 @@ passed++;
 }
 passed++;
 
-
 // ---- what the page does on an edit
 const clone = copy, row = (s, id) => s.lessons.find((r) => r._id === id);
 const base = () => ({
@@ -73,7 +72,10 @@ const base = () => ({
 const old = () => ({ school: {}, subjects: [{ _id: "s1", subject: "CE 1", periods: { "Sec 1": 1 } }], teachers: [{ _id: "t0", name: "Tan" }],
   classes: [{ _id: "c1", class: "1A", level: "Sec 1" }], lessons: [{ _id: "r1", level: "Sec 1", subject: "CE 1", block: null, classes: ["1A"], teachers: ["Goh"], students: null }] });
 const noParents = (s, ci) => { delete s.classes[ci].parents; };
-const t = (name, fn) => { fn(); passed++; };
+const t = (name, fn) => {
+  try { fn(); } catch (e) { console.error("FAILED: " + name); throw e; }
+  passed++;
+};
 
 t("a hand change of a following lesson is marked, and stays", () => {
   const prev = base(); const now = clone(prev); row(now, "ce1-1A").teachers = ["Goh"];
@@ -202,5 +204,59 @@ t("issues: the five sentences, in order", () => {
   assert.deepStrictEqual(Parents.issues(h), []);
 });
 t("issues on a setup from before this change is empty", () => { assert.deepStrictEqual(Parents.issues(old()), []); });
+
+const shared = () => { const s = base(); s.lessons = [{ _id: "R", level: "Sec 1", subject: "CE 1", block: null, classes: ["1A", "1B"], teachers: ["Tan", "Lim", "Goh", "Ong"], students: null }]; return s; };
+t("first Class Parents for a class do not mark a shared lesson that followed the other class's box", () => {
+  const s = shared(); const prev = clone(s);
+  Parents.setParents(s, 0, []); Parents.settle(s, prev, true);
+  assert.deepStrictEqual(row(s, "R").teachers, ["Goh", "Ong"]);
+  const mid = clone(s);
+  Parents.setParents(s, 0, ["Tan", "Lim"]); Parents.settle(s, mid, true);
+  assert.deepStrictEqual([row(s, "R").teachers, row(s, "R").by_hand], [["Tan", "Lim", "Goh", "Ong"], undefined]);
+  const u = shared(); noParents(u, 0); Parents.derive(u); assert.deepStrictEqual(row(u, "R").teachers, ["Goh", "Ong"]);
+  const mid2 = clone(u); Parents.setParents(u, 0, ["Tan", "Lim"]); Parents.settle(u, mid2, true);
+  assert.deepStrictEqual([row(u, "R").teachers, row(u, "R").by_hand], [["Tan", "Lim", "Goh", "Ong"], undefined]);
+  const w = shared(); noParents(w, 0); row(w, "R").teachers = ["Goh", "Ong", "Koh"];
+  Parents.setParents(w, 0, ["Tan"]); assert.strictEqual(row(w, "R").by_hand, true);
+});
+t("typing a teacher on a lesson of a class with no Class Parents marks nothing, and the issue stays", () => {
+  const prev = base(); noParents(prev, 1); prev.lessons.forEach((r) => { if (r.classes[0] === "1B") r.teachers = []; });
+  const now = clone(prev); row(now, "ce1-1B").teachers = ["Koh"];
+  now.lessons.push({ _id: "n", level: "Sec 1", subject: "CE 2", block: null, classes: ["1B"], teachers: ["Koh"], students: null });
+  assert.strictEqual(Parents.settle(now, prev, true), false);
+  assert.ok(now.lessons.every((r) => !("by_hand" in r)));
+  assert.deepStrictEqual(row(now, "ce1-1B").teachers, ["Koh"]);
+  assert.ok(Parents.issues(now).some((x) => x.text === "1B has no Class Parents yet."));
+  const a = clone(now); Parents.setParents(a, 1, ["Goh"]); assert.strictEqual(row(a, "ce1-1B").by_hand, true);
+  const b = clone(now); Parents.setParents(b, 1, ["Koh"]); assert.strictEqual(row(b, "ce1-1B").by_hand, undefined);
+});
+t("a lesson that becomes staffed by an edit keeps its typed teachers", () => {
+  const prev = base(); prev.lessons.push({ _id: "m", level: "Sec 1", subject: "Art", block: null, classes: ["1A"], teachers: ["Koh"], students: null },
+    { _id: "e", level: "Sec 1", subject: "Art", block: null, classes: ["1B"], teachers: [], students: null },
+    { _id: "g", level: "Sec 1", subject: "CE 2", block: "Band", classes: ["1B"], teachers: ["Koh"], students: null });
+  const now = clone(prev); row(now, "m").subject = "CE 1"; row(now, "e").subject = "CE 1"; row(now, "g").block = null;
+  Parents.settle(now, prev, true);
+  assert.deepStrictEqual([row(now, "m").by_hand, row(now, "m").teachers], [true, ["Koh"]]);
+  assert.deepStrictEqual([row(now, "e").by_hand, row(now, "e").teachers], [undefined, ["Goh", "Ong"]]);
+  assert.deepStrictEqual([row(now, "g").by_hand, row(now, "g").teachers], [true, ["Koh"]]);
+});
+t("fill leaves out a name that is a Class Parent of another class on the same shared lesson", () => {
+  const s = shared(); noParents(s, 0); row(s, "R").teachers = ["Goh", "Ong"];
+  assert.strictEqual(Parents.fillCount(s), 0); assert.strictEqual(Parents.fill(s), 0); assert.ok(!("parents" in s.classes[0]));
+  row(s, "R").teachers = ["Goh", "Koh", "Ong"];
+  assert.strictEqual(Parents.fill(s), 1); assert.deepStrictEqual(s.classes[0].parents, ["Koh"]);
+});
+t("taking Class Parents off leaves another class's typed lesson alone", () => {
+  const s = base(); noParents(s, 1); s.lessons.forEach((r) => { if (r.classes[0] === "1B") r.teachers = ["Koh"]; });
+  Parents.setParents(s, 0, []);
+  assert.deepStrictEqual([row(s, "ce1-1B").teachers, row(s, "ce1-1A").teachers], [["Koh"], []]);
+});
+t("issues: a subject named twice gives one sentence, a teacher named twice one sentence", () => {
+  const s = base(); s.school.parents_subjects = ["Gone", "CE 1", "Gone"]; s.classes[1].parents = ["Tan"];
+  s.teachers.push({ _id: "dup", name: "Tan" });
+  const got = Parents.issues(s);
+  assert.strictEqual(got.filter((x) => x.kind === "config").length, 1);
+  const tt = got.filter((x) => x.kind === "teachers"); assert.strictEqual(tt.length, 1); assert.strictEqual(tt[0].i, 0);
+});
 
 console.log(passed + " cases passed");

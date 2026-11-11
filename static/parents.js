@@ -121,9 +121,10 @@ var Parents = (function () {
       list(spec, "lessons").forEach(function (r) {
         if (!follows(spec, r)) return;
         var p = r._id != null ? was[r._id] : null, have = names(r), w = want(spec, r);
-        if (p) {
+        if (!w.length) return;   // a class with no Class Parents: the row keeps what was typed, and is not marked
+        if (p && staffed(prev, p)) {
           if (same(have, names(p)) || JSON.stringify(want(prev, p)) !== JSON.stringify(w)) return;
-        } else if (!have.length || !w.length || same(have, w)) return;
+        } else if (!have.length || same(have, w)) return;   // new, or newly staffed
         r.by_hand = true; marked = true;
       });
     }
@@ -133,10 +134,20 @@ var Parents = (function () {
   function setParents(spec, ci, l) {
     var c = list(spec, "classes")[ci];
     if (!c) return;
-    var before = names(c), after = clean(l);
+    var before = names(c), after = clean(l), keep = [];
+    if (!before.length && after.length) {
+      // a shared row that held exactly the other classes' people was following, not typed: leave it unmarked
+      list(spec, "lessons").forEach(function (r) {
+        var w = follows(spec, r) && (r.classes || []).indexOf(c["class"]) >= 0 ? want(spec, r) : [];
+        if (w.length && same(names(r), w)) keep.push([r, r.by_hand === true]);
+      });
+    }
     if (after.length) { if (JSON.stringify(c.parents) !== JSON.stringify(after)) c.parents = after; }
     else if ("parents" in c) delete c.parents;
-    if (!before.length && after.length) adopt(spec, { classes: [c["class"]] });
+    if (!before.length && after.length) {
+      adopt(spec, { classes: [c["class"]] });
+      keep.forEach(function (k) { if (!k[1]) delete k[0].by_hand; });
+    }
     if (before.length && !after.length) {
       list(spec, "lessons").forEach(function (r) {
         if (!follows(spec, r) || (r.classes || []).indexOf(c["class"]) < 0 || want(spec, r).length || !names(r).length) return;
@@ -173,7 +184,10 @@ var Parents = (function () {
       var got = [];
       list(spec, "lessons").forEach(function (r) {
         if (!staffed(spec, r) || (r.classes || []).indexOf(c["class"]) < 0) return;
-        names(r).forEach(function (n) { if (got.indexOf(n) < 0) got.push(n); });
+        names(r).forEach(function (n) {
+          var other = (r.classes || []).some(function (cn) { return cn !== c["class"] && names(classOf(spec, cn)).indexOf(n) >= 0; });
+          if (!other && got.indexOf(n) < 0) got.push(n);
+        });
       });
       if (got.length) out.push([i, got.slice(0, m)]);
     });
@@ -221,9 +235,11 @@ var Parents = (function () {
     classes.forEach(function (c, i) {
       names(c).forEach(function (n) { if (known[n] !== true) add("classes", i, c["class"] + ": " + n + " is not on the teacher list."); });
     });
+    var seen = {};
     list(spec, "teachers").forEach(function (t, i) {
       var cs = of(spec, t && t.name);
-      if (cs.length < 2) return;
+      if (cs.length < 2 || seen[t.name] === true) return;
+      seen[t.name] = true;
       add("teachers", i, t.name + " is one of the " + nm + " of " + cs.slice(0, -1).join(", ") + " and " + cs[cs.length - 1] +
         ": their lessons together cannot be at the same time.");
     });
