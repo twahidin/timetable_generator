@@ -791,7 +791,65 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
     assert t.get("/timetable").status_code == 200
 
-NEED_HEADS = {"test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
+# Class Parents on the server: one named subject (made up), class 1A with a Class Parent; each test starts from the sample and the last puts it back
+PSUBJ = "Pastoral Care"
+def _cp_start():
+    c.put("/api/setup", json=c.get("/api/sample/secondary").get_json()); return c.get("/api/setup").get_json()
+
+def _cp_name(rec, client="A", parents=("Pastoral A",)):   # what a stale page sends: the subject, the name, the box, and no lesson ops
+    cid = next(x["_id"] for x in rec["spec"]["classes"] if x["class"] == "1A")
+    return _changes(client, rec["v"], [["add", "subjects", {"_id": "pcsubj001", "subject": PSUBJ, "code": "PC", "periods": {"Sec 1": 2}}, ""],
+                                       ["school", "parents_subjects", [PSUBJ]], ["set", "classes", cid, "parents", list(parents)]])
+
+def _cp_rows(spec): return {r["classes"][0]: r for r in spec["lessons"] if r.get("subject") == PSUBJ}
+
+def test_class_parents_are_kept_right_on_the_server():               # Review Focus 1
+    rec = _cp_start(); v0 = rec["v"]
+    code, j = _cp_name(rec)
+    assert code == 200 and j["v"] == v0 + 2, (code, j)                # the caller's change, then what the server put right
+    rows = _cp_rows(c.get("/api/setup").get_json()["spec"])
+    sec1 = [x["class"] for x in rec["spec"]["classes"] if x["level"] == "Sec 1"]
+    assert sorted(rows) == sorted(sec1) and rows["1A"]["teachers"] == ["Pastoral A"] and all(not rows[k]["teachers"] for k in sec1 if k != "1A"), rows
+    assert rows["1A"]["_id"].startswith("cp-")
+    assert len(j["patches"]) == 1 and j["patches"][0]["v"] == v0 + 2 and any(o[0] == "add" and o[1] == "lessons" for o in j["patches"][0]["ops"]), j   # the sender is told too
+    code, k = _changes("B", v0)                                       # a second browser gets both entries
+    assert [p["v"] for p in k["patches"]] == [v0 + 1, v0 + 2], k
+    assert [e["client"] for e in list(store._log)[-2:]] == ["A", "parents"]
+
+def test_a_stale_tab_cannot_undo_a_following_lesson():
+    rec = _cp_start(); _cp_name(rec)
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]
+    code, j = _changes("A", rec["v"], [["set", "lessons", row["_id"], "teachers", ["Koh"]]])
+    assert code == 200 and j["v"] == rec["v"] + 2, j
+    assert _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]["teachers"] == ["Pastoral A"]
+    assert ["set", "lessons", row["_id"], "teachers", ["Pastoral A"]] in j["patches"][0]["ops"], j     # and the sender is told
+
+def test_a_hand_change_with_its_mark_is_kept():
+    rec = _cp_start(); _cp_name(rec)
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; cid = next(x["_id"] for x in rec["spec"]["classes"] if x["class"] == "1A")
+    code, j = _changes("A", rec["v"], [["set", "lessons", row["_id"], "teachers", ["Koh"]], ["set", "lessons", row["_id"], "by_hand", True]])
+    assert code == 200 and j["v"] == rec["v"] + 1 and not j["patches"], j
+    code, j = _changes("A", j["v"], [["set", "classes", cid, "parents", ["Pastoral B"]]]); assert j["v"] == rec["v"] + 2, j
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Koh"] and r["by_hand"] is True, r
+
+def test_a_head_cannot_change_a_staffed_lesson():                    # in NEED_HEADS
+    rec = _cp_start(); _cp_name(rec)
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]
+    code, j = _changes("H", rec["v"], [["set", "lessons", row["_id"], "teachers", ["Koh"]], ["set", "lessons", row["_id"], "students", 5]], who=h)
+    assert code == 200 and j["refused"] == [{"i": 0, "why": sync.PARENTS_WHY}] and j["v"] == rec["v"] + 1, j
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Pastoral A"] and r["students"] == 5, r
+
+def test_a_setup_put_whole_is_put_right():
+    spec = c.get("/api/sample/secondary").get_json()
+    spec["subjects"].append({"subject": PSUBJ, "code": "PC", "periods": {"Sec 1": 2}}); spec["school"]["parents_subjects"] = [PSUBJ]
+    next(x for x in spec["classes"] if x["class"] == "1A")["parents"] = ["Pastoral A"]
+    spec["lessons"].append({"level": "Sec 1", "subject": PSUBJ, "block": None, "classes": ["1A"], "teachers": ["Someone Else"], "students": None})
+    assert c.put("/api/setup", json=spec).status_code == 200
+    rows = _cp_rows(c.get("/api/setup").get_json()["spec"])
+    assert rows["1A"]["teachers"] == ["Pastoral A"] and "by_hand" not in rows["1A"] and len(rows) == 4, rows
+    _cp_start()                                                       # the sample back, for the tests after
+
+NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
               "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace", "test_a_head_cannot_reach_the_helper_routes"}
 
 if __name__ == "__main__":
