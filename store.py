@@ -152,19 +152,22 @@ def apply_changes(ops, client, check=None, since=None, filter=None):
             if why: raise Refused(why)
         refused = []
         if filter: ops, refused = filter(cur["spec"], ops)
-        if not ops: return cur["v"], refused
+        if not ops: return cur["v"], refused, None
         if datetime.datetime.now().timestamp() - _last_point[0] > POINT_EVERY or _risky(ops): restore_point("While working")
         sync.apply(cur["spec"], ops)
         cur["v"] += 1
         _log.append(dict(v=cur["v"], client=client, ops=ops))
         # the net for a stale or second tab, a head's tab and whole setups: put the Class Parents' lessons right and log it
         # under another client id, so every browser (the sender too: changes_since skips only its own id) is told
-        before = copy.deepcopy(cur["spec"])
-        if parents.derive(cur["spec"]):
-            cur["v"] += 1
-            _log.append(dict(v=cur["v"], client="parents", ops=sync.diff(before, cur["spec"])))
+        mine = cur["v"]    # the version of the caller's own ops: the sender applies what came before it first and what came after it last
+        sp = cur["spec"]
+        if (sp.get("school") or {}).get("parents_subjects") or any(r.get("by_hand") for r in sp.get("lessons") or []):    # nothing to derive for a school not using it
+            before = copy.deepcopy(sp)
+            if parents.derive(sp):
+                cur["v"] += 1
+                _log.append(dict(v=cur["v"], client="parents", ops=sync.diff(before, sp)))
         _stamp(); _write_setup()
-        return cur["v"], refused
+        return cur["v"], refused, mine
 
 def changes_since(since, client, upto=None):
     """what other clients changed after version since; a reset when the log no longer reaches back that far.

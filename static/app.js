@@ -132,14 +132,15 @@ async function syncNow() {
     } else if (!r.ok) throw new Error(j.error || `status ${r.status}`);
     else if (j.reset) { await catchUp(j, sent, ops, r.ok && ops.length > 0); wait = 0; }
     else {
-      const theirs = (j.patches || []).flatMap(p => p.ops || []);
+      const ps = j.patches || [], mineAt = typeof j.mine === "number" ? j.mine : null;   // patches after our own ops (the server's put-right) apply after them
+      const theirs = ps.filter(p => mineAt === null || p.v < mineAt).flatMap(p => p.ops || []), after = ps.filter(p => mineAt !== null && p.v > mineAt).flatMap(p => p.ops || []);
       // operations the server would not make for this person (a head) are left out of what it applied: they drop out of
       // the working copy too, as they are in neither the new base nor the edits made since the send
       const no = new Set((j.refused || []).map(x => x.i)), ours = ops.filter((_, i) => !no.has(i));
-      const nb = Sync.rebase(SYNC.base, sent, working(), theirs, ours);
+      const nb = Sync.rebase(SYNC.base, sent, working(), theirs, ours, after);
       SYNC.base = nb.base; SYNC.v = j.v;
-      if (theirs.length || no.size) takeSpec(nb.spec);
-      if (theirs.length || ops.length) keepLocal();   // the base moved: what is kept as not sent must move with it
+      if (theirs.length || after.length || no.size) takeSpec(nb.spec);
+      if (theirs.length || after.length || ops.length) keepLocal();   // the base moved: what is kept as not sent must move with it
       if (no.size) {
         const why = [...new Set(j.refused.map(x => x.why))].join(" ");
         toast(`${no.size} change${no.size === 1 ? "" : "s"} could not be made: ${why}`);
