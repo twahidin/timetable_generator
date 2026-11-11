@@ -48,8 +48,11 @@ def label(spec):
 
 
 def _text(v):
-    """Only a non-empty string (after trimming) counts as a block or a code; null, "", [], {} and 0 do not."""
-    return isinstance(v, str) and v.strip() != ""
+    """A block or a code is a non-empty string (after trimming) or a number other than 0 (a code typed as 12 in a
+    workbook arrives as a number); null, "", [], {}, 0, True do not count."""
+    if isinstance(v, str):
+        return v.strip() != ""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and v not in (float("inf"), float("-inf")) and v != 0
 
 
 def whole(row):

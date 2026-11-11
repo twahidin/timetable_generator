@@ -34,8 +34,9 @@ var Parents = (function () {
 
   function label(spec) { return String(school(spec).parents_name || "").trim() || "Form teachers"; }
 
-  // Only a non-empty string (after trimming) counts as a block or a code; null, "", [], {} and 0 do not.
-  function text(v) { return typeof v === "string" && v.trim() !== ""; }
+  // A block or a code is a non-empty string (after trimming) or a number other than 0 (a code typed as 12 in a
+  // workbook arrives as a number); null, "", [], {}, 0, true do not count.
+  function text(v) { return typeof v === "string" ? v.trim() !== "" : typeof v === "number" && isFinite(v) && v !== 0; }
   // A whole-class row: in no block and with no code override.
   function whole(row) { return !text(row.block) && !text(row.code_override); }
 
