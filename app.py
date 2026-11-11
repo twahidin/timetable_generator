@@ -412,6 +412,24 @@ def draft_fix():
 def draft_undo():
     return _checked(draft.undo, sentences=True)
 
+@app.get("/api/draft/suggest")
+@need("committee")
+def draft_suggest():
+    return _checked(lambda: draft.suggest(request.args.get("key") or ""), sentences=True)
+
+def _posted_fixes():
+    body = request.get_json(force=True, silent=True); return body.get("fixes") if isinstance(body, dict) else None
+
+@app.post("/api/draft/fixes")
+@need("committee")
+def draft_fixes():
+    return _checked(lambda: draft.fix_many(_posted_fixes()), sentences=True)
+
+@app.post("/api/draft/preview")
+@need("committee")
+def draft_preview():
+    return _checked(lambda: draft.preview(_posted_fixes()), sentences=True)
+
 @app.get("/api/draft/download")
 @need("committee")
 def draft_download():

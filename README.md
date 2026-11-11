@@ -76,11 +76,17 @@ to print, one page per class. Students not on the list use the general student c
    not allowed, grey is a slot the lesson cannot go to: not lesson time, outside the day, or another lesson is there
    that it cannot swap with); click a green or amber slot to move the lesson, or a lesson there to swap with it (in a
    teacher's week an open slot can be a swap with the class's lesson there; a swap that also moves another class's
-   lesson asks first). The side panel also changes the teacher or
+   lesson opens **Before you apply** first, with that class's week). The side panel also changes the teacher or
    the room, deletes an extra lesson, and, with nothing selected, lists a class's missing periods with **Add a lesson**.
    Every fix is kept with its sentence under **Fixes**, and **Undo the last fix** takes the last one back. A fix that
    would cause a clash, change a subject's periods from the plan or newly break a Must rule is refused (red), so a clean
-   draft stays clean. **Download the
+   draft stays clean. **Fix the timetable** on a warning also opens **Ways to settle this**: up to three ways, each
+   already checked, with what each one disturbs and whether it is clean or bends a Prefer. **Show** opens **Before you
+   apply** under the grid: the sentences, and the week of each other class the fixes touch with the moved, changed or
+   new lessons outlined; **Apply** makes the fixes, **Cancel** leaves everything as it was. Where one fix is not enough
+   a way can be two fixes made together; they are one entry under **Fixes** and **Undo the last two fixes** takes both
+   back. When no way settles a warning the panel says so and lists the nearest ways with what each breaks; those are
+   blocked (they would cause a clash or newly break a Must rule) and have no button. **Download the
    draft (.sqlite)** carries the draft with its fixes elsewhere (Make printouts accepts it). **Publish this
    timetable** then makes the draft what teachers and students see, with every download and the personal student codes
    (about a minute), even with warnings open: **Published now** says which setup version it was checked against, how many
