@@ -145,4 +145,11 @@ t("opts.exempt lets a teacher on with no basket entry, and needBasket does not a
   const r2 = DeptMap.deploy(s, { kind: "group", li: 1 }, [3], { exempt: ex });   // someone else, outside the basket, is still refused
   assert.strictEqual(r2.refused.length, 1);
 });
+t("the refusal says the number: three, four, five, six", () => {
+  [[3, "three"], [4, "four"], [5, "five"], [6, "six"]].forEach(([m, w]) => {
+    const s = fixture(); s.lessons[2].teachers = Array.from({ length: m }, (_, k) => "Person " + k); s.teachers[1].can_teach = [{ subject: "Mathematics", levels: "All" }];
+    const r = DeptMap.deploy(s, { kind: "group", li: 2, title: "2MA2" }, [1], m === 3 ? {} : { max: m });
+    assert.strictEqual(r.refused[0].why, `2MA2 would have ${m + 1} teachers; ${w} is the most.`);
+  });
+});
 console.log(`${n} cases passed`);
