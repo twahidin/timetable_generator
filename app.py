@@ -12,7 +12,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, draft, store, sync
+import access, checks, draft, store, sync, typed
 from ttgen import choices
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -431,6 +431,20 @@ def draft_fixes():
 def draft_preview():
     return _checked(lambda: draft.preview(_posted_fixes()), sentences=True)
 
+NO_TYPED = "Typing a request is not set up on this server."
+
+@app.post("/api/draft/ask")
+@need("committee")
+def draft_ask():
+    """the lead's typed request: the words read into an ask by a language model, then answered from the draft with the helper's own checks. 200 for every outcome
+    about the request itself (ok false carries the sentence). Nothing is stored or logged: not the words, the ask or the answer."""
+    if not typed.enabled(): return {"error": NO_TYPED}, 404
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict): return {"error": "Send the request as JSON."}, 400
+    try: return jsonify(draft.ask(body.get("words"), body.get("pick"), body.get("ask")))
+    except draft.NoDraft as e: return {"error": str(e)}, 400
+    except Exception: return jsonify(ok=False, error=typed.FAILED)     # never a 500, and never an exception's text (it could hold the key)
+
 @app.get("/api/draft/download")
 @need("committee")
 def draft_download():
@@ -503,7 +517,7 @@ def status():
     have, probs = access.configured()
     _, at = store.load_setup()
     if role() == "head": return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info())
-    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary())
+    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), typed=typed.enabled())
 
 NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
 

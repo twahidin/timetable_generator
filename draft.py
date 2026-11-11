@@ -6,7 +6,7 @@ from ttgen.export import ENTIRE, model_from_files
 from ttgen.database import write_db
 from ttgen.spec import typed_rules
 from ttgen import choices, verify
-import store, sync, fixes, helper
+import store, sync, fixes, helper, typed
 
 DIR = os.path.join(store.DATA, "draft")
 ANSWERS = ("step5", "left", "open", "met")
@@ -278,6 +278,20 @@ def preview(moves):
     now = {(x["id"], x["group"]) for x in L}
     return dict(state=c["state"], why=c["why"], texts=c["texts"], classes=out,
                 gone=[dict(cls=n, what=fixes.what(x), d=x["d"], p=x["p"]) for k, x in last.items() if k not in now for n in x["classes"]])
+
+def _pick_ok(p): return isinstance(p, dict) and len(p) <= 10 and all(isinstance(k, str) and isinstance(v, str) and len(k) <= 250 and len(v) <= 250 for k, v in p.items())
+
+def ask(words, pick=None, ask=None):
+    """the typed request answered on the draft as it is now -> dict(ok=False, error) or dict(ok=True, ask, **typed.answer). Without ask the words are read by the
+    model (typed.read, outside every lock: it can take 20 seconds); with ask (sent back with pick to settle a choice) the model is not called again. Nothing is kept."""
+    if not exists(): raise NoDraft("There is no draft.")
+    if ask is None:
+        r = typed.read(words)
+        if not r["ok"]: return r
+        ask = r["ask"]
+    elif not typed.check(ask): return dict(ok=False, error=typed.FAILED)
+    m, rec, fx = _now()
+    return dict(ok=True, ask=ask, **typed.answer(m, m["checked_setup"], m["days"], ask, pick if _pick_ok(pick) else None))
 
 def undo():
     """drop the last fix, and the fixes made together with it (the same batch). Returns info()."""
