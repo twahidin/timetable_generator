@@ -10,7 +10,8 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.formatting.rule import FormulaRule, CellIsRule
 from openpyxl.workbook.defined_name import DefinedName
-from . import choices
+from . import choices, parents as PA
+from .reader import parents_max
 from .spec import RULE_TYPES, SCOPES, CODES, EVERY_CLASS, RECESS_ROWS, SETTING_RULES, ROLES, SKILL_VERSION, day_names, names_list, order_days, scopes_for, split_rules
 
 NAVY, SLATE = "1F4E78", "5B6B7F"
@@ -20,7 +21,7 @@ BF = Font(name="Arial", size=10); CF = PatternFill("solid", fgColor="EDEDED")
 TITLE = Font(name="Arial", size=14, bold=True, color=NAVY); NOTE = Font(name="Arial", size=9, italic=True, color="595959")
 EXF = Font(name="Arial", size=10, italic=True, color="7F7F7F"); RED = PatternFill("solid", fgColor="F4B6B6")
 HR, R0 = 5, 6          # header row and first data row of steps 1-6
-NTCH, NPAIR = 3, 8
+NPAIR = 8
 BOX = Border(*(Side(style="thin", color="C9D3E0"),) * 4)
 LENGTH_NAME = {1: "Singles", 2: "Doubles", 3: "Triples", 4: "Quadruples"}
 
@@ -74,6 +75,10 @@ def write_template(spec, path, extra_rows=120):
     TA, FX, MR = "Teacher availability", "Fixed lessons", "More rules"
     rules = split_rules(spec)
     NCLS = max([9] + [len(x.get("classes") or []) for x in spec["blocks"] + spec["lessons"]])
+    NTCH = max([3] + [len(PA.names(x)) for x in spec["lessons"]])   # the widest lesson's teachers, never fewer than three columns
+    PNAME = PA.label(spec); PSUBS = PA.subjects(spec)
+    PUSED = any(sc.get(k) for k in ("parents_name", "parents_max", "parents_subjects")) or any(PA.names(c) for c in spec["classes"])
+    NCP = max([parents_max(sc.get("parents_max")) or 2] + [len(PA.names(c)) for c in spec["classes"]]) if PUSED else 0   # Class Parents columns on Classes
     nV, nC, nS = len(spec["venues"]), len(spec["classes"]), len(spec["subjects"])
     nT, nB, nL = len(spec["teachers"]), len(spec["blocks"]), len(spec["lessons"])
     LAST = lambda n: R0 + n + extra_rows
@@ -141,6 +146,10 @@ def write_template(spec, path, extra_rows=120):
                  recess="Yes: every teacher is free for a recess each day (a whole recess, or the recess length inside a recess window). The solver keeps it.",
                  pe_rain_home="Yes: while a class has PE (a 'pe venue' lesson) nothing else uses its home room, so the class can go there when it rains. The timetables show it as the rain room.")
     rows += [(s["label"], vals[s["key"]], notes[s["key"]]) for s in SETTING_RULES]
+    if PUSED:   # Class Parents: what the school calls them, the most a class has, the lessons they take (the typed values; blank where not set)
+        rows += [("Form teachers are called", sc.get("parents_name") or "", f"What the school calls a class's form teachers; it heads their columns on Step 2 (blank: {PA.label({})})."),
+                 ("Most form teachers for a class", parents_max(sc.get("parents_max")) or "", "A whole number from 1 to 6 (blank: 2). The Classes sheet has this many columns."),
+                 ("Form teachers take these lessons", ", ".join(str(x) for x in sc.get("parents_subjects") or []), "Subjects from Step 3, separated by commas. Their lessons are taken by the class's form teachers unless 'Changed by hand' on the Lessons sheet (Step 6 · Lessons) says Yes.")]
     clock_txt = lambda v: _t(v) if isinstance(v, str) and len(v) <= 5 and v.count(":") == 1 and v.replace(":", "").isdigit() else v   # '15:20' back to a time
     more_rows = list(sc.get("extra_settings", []))
     if any("W" in str(row) for d in spec.get("day_structure", {}).values() for row in d.values()):   # recess windows: their Settings rows
@@ -155,6 +164,7 @@ def write_template(spec, path, extra_rows=120):
         if isinstance(v, datetime.time): c.number_format = "h:mm AM/PM"
     yn = " ".join(f"B{at[s['label']]}" for s in SETTING_RULES if not s["number"])
     B.dv(st, yn, '"Yes,No"', "Yes or No.")
+    if PUSED: B.dv(st, f"B{at['Most form teachers for a class']}", '"1,2,3,4,5,6"', "A whole number from 1 to 6.")
     for k, r in at.items():
         if str(k).lower().startswith("students have no free periods"): B.dv(st, f"B{r}", '"Yes,Prefer,No"', "Yes, Prefer or No.")
         if str(k).lower().startswith("floating recess goes by"): B.dv(st, f"B{r}", '"Level,Class"', "Level or Class.")
@@ -230,14 +240,17 @@ def write_template(spec, path, extra_rows=120):
 
     # ---------------- 2 Classes
     cw = B.sheet(C, "Step 2 · Classes", ["One row per form class. Home room is picked from the Venues list.", "Blue on yellow = type or pick. Grey = worked out for you."],
-                 [("Class", 10), ("Level", 9), ("Students", 10), ("Home room", 12), ("Lessons listed", 13), ("Note", 34)], {1, 2, 3, 4, 6})
+                 [("Class", 10), ("Level", 9), ("Students", 10), ("Home room", 12), ("Lessons listed", 13), ("Note", 34)] + [(f"{PNAME} {k}", 16) for k in range(1, NCP + 1)],
+                 {1, 2, 3, 4, 6} | set(range(7, 7 + NCP)))
     for i, x in enumerate(spec["classes"]):
         for j, k in enumerate(["class", "level", "size", "home_room", None, "note"], start=1):
             if k: cw.cell(R0 + i, j, x.get(k))
-    B.paint(cw, LAST(nC), {1, 2, 3, 4, 6}, 6)
+        for k, n in enumerate(PA.names(x)): cw.cell(R0 + i, 7 + k, n)
+    B.paint(cw, LAST(nC), {1, 2, 3, 4, 6} | set(range(7, 7 + NCP)), 6 + NCP)
     lcls = f"'{L}'!$D${R0}:${CL(3 + NCLS)}${R0 + 1999}"
     for r in range(R0, LAST(nC) + 1): cw.cell(r, 5, f'=IF(A{r}="","",SUMPRODUCT(({lcls}=A{r})*1))')
     B.dv(cw, f"B{R0}:B{LAST(nC)}", "=LevelList", "Pick a level."); B.dv(cw, f"D{R0}:D{LAST(nC)}", "=RoomList", "Pick a room from Step 1.")
+    if NCP: B.dv(cw, f"G{R0}:{CL(6 + NCP)}{LAST(nC)}", "=TeacherList", "Pick a teacher from Step 4.")
     B.name("ClassList", B.dyn(C, "A"))
 
     # ---------------- 3 Subjects (a Lesson length column only when some subject differs from the standard)
@@ -266,7 +279,7 @@ def write_template(spec, path, extra_rows=120):
     short_h, full_h = (LENGTH_NAME.get(L_std - 1, "Short lessons"), LENGTH_NAME.get(L_std, "Full lessons")) if not own_len else ("Short lessons", "Full lessons")
     names = ["Level", "Subject", "Block"] + [f"Class {i}" for i in range(1, NCLS + 1)] + [f"Teacher {i}" for i in range(1, NTCH + 1)] + \
             ["Students", "Periods (only if different)", "Code (only to keep an old one)", "Lesson pattern (only if different)", "Group code", "Periods"] + (["Lesson length"] if own_len else []) + \
-            [short_h, full_h, "Room kind", "Teacher periods", "Check", "Note", "Special room weeks"]
+            [short_h, full_h, "Room kind", "Teacher periods", "Check", "Note", "Special room weeks", "Changed by hand"]
     COL = {n: CL(j) for j, n in enumerate(names, start=1)}
     LQ = f"'{L}'"; TC = [COL[f"Teacher {k}"] for k in range(1, NTCH + 1)]; TPC = COL["Teacher periods"]
 
@@ -376,10 +389,10 @@ def write_template(spec, path, extra_rows=120):
 
     # ---------------- 6 Lessons
     widths = {"Level": 8, "Subject": 32, "Block": 32, "Students": 9, "Periods (only if different)": 11, "Code (only to keep an old one)": 11, "Lesson pattern (only if different)": 14, "Group code": 11,
-              "Periods": 8, "Lesson length": 8, short_h: 8, full_h: 8, "Room kind": 13, "Teacher periods": 9, "Check": 40, "Note": 28, "Special room weeks": 11}
+              "Periods": 8, "Lesson length": 8, short_h: 8, full_h: 8, "Room kind": 13, "Teacher periods": 9, "Check": 40, "Note": 28, "Special room weeks": 11, "Changed by hand": 9}
     lcols = [(n, widths.get(n, 7 if n.startswith("Class") else 20)) for n in names]
     lcols[2] = ("Block (empty = whole class)", 32)
-    LIN = set(range(1, 4 + NCLS + NTCH + 4)) | {len(names) - 1, len(names)}
+    LIN = set(range(1, 4 + NCLS + NTCH + 4)) | {names.index(n) + 1 for n in ("Note", "Special room weeks", "Changed by hand")}
     lw = B.sheet(L, "Step 6 · Lessons: one row per group (or per class for whole-class subjects)",
                  ["Pick level, subject and block; pick the class(es) and teacher(s). Leave Block empty for a whole-class lesson.",
                   f"Group code, periods, {short_h.lower()}/{full_h.lower()} and room kind fill in from Steps 3-5. To split a group's periods your own way, write the lessons in Lesson pattern, such as 5x3 + 2x2 (five 3-period lessons and two 2-period ones). Check flags a teacher not set to teach the subject, a teacher twice in a block, missing periods or a repeated code."], lcols, LIN)
@@ -388,10 +401,11 @@ def write_template(spec, path, extra_rows=120):
         rr = R0 + i
         lw.cell(rr, 1, x["level"]); lw.cell(rr, 2, x["subject"]); lw.cell(rr, 3, x.get("block") or None)
         for k, c in enumerate(x["classes"][:NCLS]): lw.cell(rr, 4 + k, c)
-        for k, t in enumerate((x.get("teachers") or [])[:NTCH]): lw.cell(rr, 4 + NCLS + k, t)
+        for k, t in enumerate(PA.names(x)): lw.cell(rr, 4 + NCLS + k, t)
         c0 = 4 + NCLS + NTCH
-        lw.cell(rr, c0, x.get("students")); lw.cell(rr, c0 + 1, x.get("periods_override")); lw.cell(rr, c0 + 2, x.get("code_override")); lw.cell(rr, c0 + 3, pattern_text(x["pattern"]) if x.get("pattern") else x.get("pattern_text")); lw.cell(rr, len(names) - 1, x.get("note"))
-        if x.get("room_weeks"): lw.cell(rr, len(names), x["room_weeks"])
+        lw.cell(rr, c0, x.get("students")); lw.cell(rr, c0 + 1, x.get("periods_override")); lw.cell(rr, c0 + 2, x.get("code_override")); lw.cell(rr, c0 + 3, pattern_text(x["pattern"]) if x.get("pattern") else x.get("pattern_text")); lw.cell(rr, names.index("Note") + 1, x.get("note"))
+        if x.get("room_weeks"): lw.cell(rr, names.index("Special room weeks") + 1, x["room_weeks"])
+        if x.get("by_hand") is True: lw.cell(rr, len(names), "Yes")
     nLast = LAST(nL) + 100
     B.paint(lw, nLast, LIN, len(names))
     c_ = COL; CF1, CFN = c_["Class 1"], c_[f"Class {NCLS}"]
@@ -413,13 +427,21 @@ def write_template(spec, path, extra_rows=120):
         lw[FU] = f'=IF(OR(N({P_})=0,{PT}<>""),"",({P_}-{SH}*({LN}-1))/{LN})'
         lw[RK] = f'=IF({B_}="","",IFERROR(IF({idx("E", r)}="","home room",{idx("E", r)}),""))'
         lw[TP] = f'=IF(N({P_})=0,0,{P_}*IF({C_}="",MAX(1,COUNTA({CF1}{r}:{CFN}{r})),1))'
+        named = f"OR({','.join('B%d=%s' % (r, chr(34) + str(n).replace(chr(34), chr(34) * 2) + chr(34)) for n in PSUBS)})" if PSUBS else ""
         def can(tc):
             k = f"IFERROR(INDEX('{T}'!${KEYC}${R0}:${KEYC}${R0 + 999},MATCH({tc}{r},'{T}'!$A${R0}:$A${R0 + 999},0)),\"\")"
             ok = f'ISNUMBER(FIND("|"&{B_}&"@All|",{k}))+ISNUMBER(FIND("|"&{B_}&"@"&{A_}&"|",{k}))+ISNUMBER(FIND("|"&{B_}&"@"&{band_of(A_)}&"|",{k}))'
-            twice = "+".join(f"COUNTIFS($C${R0}:$C${R0 + 1999},{C_},${c}${R0}:${c}${R0 + 1999},{tc}{r})" for c in TC)
-            return f'IF({tc}{r}="","",IF({ok}=0,{tc}{r}&" not set to teach this at "&{A_}&". ","")&IF(AND({C_}<>"",{twice}>1),{tc}{r}&" twice in this block. ",""))'
+            return f'IF({ok}=0,{tc}{r}&" not set to teach this at "&{A_}&". ","")'
+        def twice(tc):
+            if NTCH <= 6: t2 = "+".join(f"COUNTIFS($C${R0}:$C${R0 + 1999},{C_},${c}${R0}:${c}${R0 + 1999},{tc}{r})" for c in TC)
+            else: t2 = f"SUMPRODUCT(($C${R0}:$C${R0 + 1999}={C_})*(${TC[0]}${R0}:${TC[-1]}${R0 + 1999}={tc}{r}))"   # one range term, not one per column (Excel's 8192-character limit)
+            return f'IF(AND({C_}<>"",{t2}>1),{tc}{r}&" twice in this block. ","")'
+        # Can teach is tested for the first six Teacher columns only: a lesson holds more than six teachers only when it follows the form
+        # teachers of several classes (by hand the most is six), and those are never tested. A named subject's lessons skip it, once for the row.
+        if named: tchk = f'IF({named},"",' + "&".join(f'IF({tc}{r}="","",{can(tc)})' for tc in TC[:6]) + ")&" + "&".join(f'IF({tc}{r}="","",{twice(tc)})' for tc in TC)
+        else: tchk = "&".join(f'IF({tc}{r}="","",{can(tc)}&{twice(tc)})' if i < 6 else f'IF({tc}{r}="","",{twice(tc)})' for i, tc in enumerate(TC))
         lw[CK] = (f'=IF({B_}="","",TRIM(IF(N({P_})=0,"No periods for "&{A_}&" on Subjects. ","")&IF(COUNTA({CF1}{r}:{CFN}{r})=0,"No class. ","")'
-                  f'&IF(COUNTA({TC[0]}{r}:{TC[-1]}{r})=0,"No teacher. ","")&' + "&".join(can(tc) for tc in TC) +
+                  f'&IF(COUNTA({TC[0]}{r}:{TC[-1]}{r})=0,"No teacher. ","")&' + tchk +
                   f'&IF(AND({GC}<>"Entire Class",COUNTIF(${c_["Group code"]}${R0}:${c_["Group code"]}${R0 + 1999},{GC})>1),"Code used twice. ","")'
                   f"&IF(AND({C_}<>\"\",COUNTIF('{BL}'!$A${R0}:$A${R0 + 999},{C_})=0),\"Block not on Step 5. \",\"\")))")
         lw[CK].alignment = Alignment(wrap_text=True, vertical="top")
@@ -427,8 +449,9 @@ def write_template(spec, path, extra_rows=120):
     lw.conditional_formatting.add(f"{ck}{R0}:{ck}{nLast}", FormulaRule(formula=[f"LEN({ck}{R0})>0"], fill=RED))
     B.dv(lw, f"A{R0}:A{nLast}", "=LevelList", "Pick a level."); B.dv(lw, f"B{R0}:B{nLast}", "=SubjectList", "Pick a subject from Step 3.")
     B.dv(lw, f"C{R0}:C{nLast}", "=BlockList", "Pick a block from Step 5, or leave empty for a whole-class lesson.")
-    if int(sc["weeks"]) == 2: B.dv(lw, f"{CL(len(names))}{R0}:{CL(len(names))}{nLast}", '"Odd,Even"', "Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other. Blank = every week.")
+    if int(sc["weeks"]) == 2: B.dv(lw, f"{COL['Special room weeks']}{R0}:{COL['Special room weeks']}{nLast}", '"Odd,Even"', "Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other. Blank = every week.")
     B.dv(lw, f"{CF1}{R0}:{CFN}{nLast}", "=ClassList", "Pick a class from Step 2."); B.dv(lw, f"{TC[0]}{R0}:{TC[-1]}{nLast}", "=TeacherList", "Pick a teacher from Step 4.")
+    B.dv(lw, f"{COL['Changed by hand']}{R0}:{COL['Changed by hand']}{nLast}", '"Yes"', "Yes, or leave empty. The app sets this on a lesson whose teachers were changed by hand.")
     lw.auto_filter.ref = f"A{HR}:{CL(len(names))}{R0 + max(nL, 1) - 1}"
     week_src = '"Odd,Even,Both"' if int(sc["weeks"]) == 2 else '"Both"'; day_src = '"All,Mon,Tue,Wed,Thu,Fri"'
 

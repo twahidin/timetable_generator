@@ -5,6 +5,7 @@ Reads the current layout (Teacher availability, Fixed lessons and rule rows on S
 template) and the older one (a 7 Rules sheet). Everything that constrains the timetable becomes a rule on spec['rules']."""
 import collections, datetime, re
 import openpyxl
+from . import parents as PA
 from .spec import defaults, lesson_split, names_list, ALL_LEVELS, EVERY_CLASS, SETTING_RULES, TYPED
 
 FIXED_COLS = ("Level", "Class(es) or group", "Subject", "Week", "Day", "Start period", "Note")   # Fixed lessons, as the template writes it
@@ -45,8 +46,12 @@ def _table(ws, first, cols=None):
             out.append(d)
     return hdr, out
 
-def _first_col(row, prefix, n):
-    return [row.get(f"{prefix} {i}") for i in range(1, n + 1) if row.get(f"{prefix} {i}")]
+def _first_col(row, prefix, n=None):
+    """the filled cells of a row's 'prefix 1', 'prefix 2'... columns in order of N, however many there are"""
+    ks = sorted((int(m[1]), k) for k in row for m in [re.fullmatch(re.escape(prefix) + r" (\d+)", str(k))] if m)
+    return [row[k] for _, k in ks if row[k]]
+
+parents_max = PA.maximum   # one reading of the school's maximum, shared with the rule
 
 def _minutes(t):
     """a clock time (time, datetime, '13:40', or an Excel day fraction) -> minutes after midnight"""
@@ -89,10 +94,16 @@ def _room_rules_from_notes(rows, venues, rules):
                                     note=f"From the Settings note on '{k}': {note}"))
     return out
 
+def _setting_rows(st):
+    """rows 5 to 59, and on past 59 only while the labels carry on without a gap (many extra settings push the rows down; text typed far below is not a setting)"""
+    end = 60
+    while end <= st.max_row and st.cell(end, 1).value: end += 1
+    return range(5, end)
+
 def read_template(path):
     wb = openpyxl.load_workbook(path, data_only=False)
     st = wb["Settings"]
-    rows = [(str(st.cell(r, 1).value).strip(), st.cell(r, 2).value, st.cell(r, 3).value) for r in range(5, 60) if st.cell(r, 1).value]
+    rows = [(str(st.cell(r, 1).value).strip(), st.cell(r, 2).value, st.cell(r, 3).value) for r in _setting_rows(st) if st.cell(r, 1).value]
     kv = {k: v for k, v, _ in rows}
     kind = str(kv.get("School type") or "secondary").lower()
     sc: dict = defaults("primary" if kind.startswith("pri") else "secondary")
@@ -108,8 +119,15 @@ def read_template(path):
     rules, known = [], {"School", "Timetable", "Configuration id", "School type", "Weeks in cycle", "Cycle", "Period length (minutes)", "Period 0 starts at", "Periods in a day",
                         "Standard lesson length (periods)", "Lesson length (periods)", "Lesson lengths"}
     sc["extra_settings"] = []
+    PROWS = {"form teachers are called": "parents_name", "most form teachers for a class": "parents_max", "form teachers take these lessons": "parents_subjects"}
     for k, v, note in rows:
         if k == "Configuration id" and v not in (None, ""): sc["config_id"] = str(v).strip()
+        if k.strip().lower() in PROWS:   # the Class Parents rows: whole labels, matched before the 30-letter match below and never an extra setting
+            key = PROWS[k.strip().lower()]
+            if key == "parents_name" and str(v or "").strip(): sc[key] = str(v).strip()
+            elif key == "parents_max" and parents_max(v): sc[key] = parents_max(v)
+            elif key == "parents_subjects" and _names(v): sc[key] = _names(v)
+            continue
         what = next((s for s in SETTING_RULES if k.lower().startswith(s["label"].lower()[:30])), None)
         if what is None:
             if k not in known: sc["extra_settings"].append([k, v.strftime("%H:%M") if isinstance(v, datetime.time) else v, note])
@@ -147,7 +165,9 @@ def read_template(path):
     venues = [dict(room=str(x["Room"]), kind=x.get("Kind"), capacity=x.get("Capacity"), building=x.get("Building") or x.get("Block"), floor=x.get("Floor") or x.get("Floor / level"),
                    note=x.get("Note"), only_for=_names(next((v for h, v in x.items() if h.startswith("For")), None))) for x in ven if x.get("Room")]
     _, cl = _table(wb["2 Classes"], "Class")
-    classes = [{"class": str(x["Class"]), "level": x.get("Level"), "size": x.get("Students") or 0, "home_room": x.get("Home room"), "note": x.get("Note")} for x in cl if x.get("Class")]
+    pn = PA.label({"school": sc})   # the Class Parents columns are headed with the school's word and a number
+    classes = [dict({"class": str(x["Class"]), "level": x.get("Level"), "size": x.get("Students") or 0, "home_room": x.get("Home room"), "note": x.get("Note")},
+                    **({"parents": [str(p) for p in _first_col(x, pn)]} if _first_col(x, pn) else {})) for x in cl if x.get("Class")]
     sh, su = _table(wb["3 Subjects"], "Subject")
     lvcols = [h for h in sh if h in sc["levels"]]
     lenh = next((h for h in sh if h.startswith("Lesson length")), None); kindh = next((h for h in sh if h.startswith("Room kind")), None)
@@ -161,13 +181,14 @@ def read_template(path):
         teachers.append(dict(name=str(x["Teacher"]), short=x.get("Short"), dept=x.get("Department"), allowance=x.get("Allowance (periods)"),
                              provisional=x.get("Provisional"), can_teach=ct, role=x.get("Role"), other_duties=x.get("Other duties"), note=x.get("Note")))
     _, bl = _table(wb["5 Blocks"], "Block")
-    blocks = [dict(block=str(x["Block"]), level=x.get("Level"), classes=[str(c) for c in _first_col(x, "Class", 12)], note=x.get("Note")) for x in bl if x.get("Block")]
+    blocks = [dict(block=str(x["Block"]), level=x.get("Level"), classes=[str(c) for c in _first_col(x, "Class")], note=x.get("Note")) for x in bl if x.get("Block")]
     lh, le = _table(wb["6 Lessons"], "Level")
     bh = next((h for h in lh if h.startswith("Block")), "Block")
-    lessons = [dict(level=x.get("Level"), subject=x.get("Subject"), block=x.get(bh), classes=[str(c) for c in _first_col(x, "Class", 12)],
-                    teachers=[str(t) for t in _first_col(x, "Teacher", 3)], students=x.get("Students"),
+    lessons = [dict(level=x.get("Level"), subject=x.get("Subject"), block=x.get(bh), classes=[str(c) for c in _first_col(x, "Class")],
+                    teachers=[str(t) for t in _first_col(x, "Teacher")], students=x.get("Students"),
                     periods_override=x.get("Periods (only if different)"), code_override=x.get("Code (only to keep an old one)"), note=x.get("Note"),
-                    room_weeks=_week(x.get("Special room weeks")), **_pattern_cell(x.get("Lesson pattern (only if different)")))
+                    room_weeks=_week(x.get("Special room weeks")), **_pattern_cell(x.get("Lesson pattern (only if different)")),
+                    **({"by_hand": True} if _yes(x.get("Changed by hand")) else {}))
                for x in le if x.get("Subject")]
     for name in ("7 Rules", "More rules"):
         if name not in wb.sheetnames: continue
@@ -234,9 +255,11 @@ def read_template(path):
         rows_ = [[("" if v is None else v.strftime("%H:%M") if isinstance(v, datetime.time) else v) for v in row] for row in ws.iter_rows(values_only=True)]
         while rows_ and not any(v not in ("", None) for v in rows_[-1]): rows_.pop()
         extra.append(dict(name=ws.title, rows=[[v if isinstance(v, (int, float, str)) else str(v) for v in row] for row in rows_]))
-    return dict(school=sc, day_structure=day_structure, venues=venues, classes=classes, subjects=subjects, teachers=teachers,
-                blocks=blocks, lessons=lessons, rules=rules, students=students, combinations=combinations, roles=roles, extra_sheets=extra,
-                choices=_read_choices(wb, sc, rules))
+    out = dict(school=sc, day_structure=day_structure, venues=venues, classes=classes, subjects=subjects, teachers=teachers,
+               blocks=blocks, lessons=lessons, rules=rules, students=students, combinations=combinations, roles=roles, extra_sheets=extra,
+               choices=_read_choices(wb, sc, rules))
+    if "Changed by hand" not in lh and PA.subjects(out): PA.adopt(out)   # an older workbook: teachers typed on a named subject's lessons are kept, not replaced
+    return out
 
 def _read_choices(wb, sc, rules):
     """the Choices sheet -> spec['choices'] (empty for a workbook without one); the mode goes to school['choices_mode']"""

@@ -117,4 +117,39 @@ t("a mixed drop that would go past three takes none, even with the basket questi
   assert.deepStrictEqual(r2.placed, []); assert.strictEqual(r2.refused[0].why, "2MA2 would have 4 teachers; three is the most.");
   assert.deepStrictEqual([s.teachers[1].can_teach, s.teachers[3].can_teach, s.lessons[2].teachers], [[], [], ["Arjun Nair", "Wei Lin Tan"]]);
 });
+t("deploy with opts.max puts a fourth teacher on and refuses a fifth with the number", () => {
+  const s = fixture(); s.teachers[1].can_teach = [{ subject: "Mathematics", levels: "All" }]; s.teachers[3].can_teach = [{ subject: "Mathematics", levels: "All" }];
+  s.lessons[2].teachers = ["Arjun Nair", "Wei Lin Tan"];
+  const r = DeptMap.deploy(s, { kind: "group", li: 2, title: "2MA2" }, [1, 3], { max: 4 });
+  assert.deepStrictEqual(r.placed, ["Priya Menon", "Hafiz Osman"]); assert.strictEqual(s.lessons[2].teachers.length, 4);
+  s.teachers[0].can_teach = [{ subject: "Mathematics", levels: "All" }]; s.teachers.push({ name: "Fifth Person", can_teach: [{ subject: "Mathematics", levels: "All" }] });
+  const r2 = DeptMap.deploy(s, { kind: "group", li: 2, title: "2MA2" }, [4], { max: 4 });
+  assert.deepStrictEqual(r2.placed, []); assert.strictEqual(r2.refused[0].why, "2MA2 would have 5 teachers; four is the most.");
+  assert.strictEqual(DeptMap.deploy(s, { kind: "group", li: 2, title: "2MA2" }, [4], { max: 6 }).placed.length, 1);
+  const r3 = DeptMap.deploy(fixture(), { kind: "group", li: 2, title: "2MA2" }, [1, 3], {});   // no opts.max: three, as before
+  assert.deepStrictEqual(r3.placed, []);
+});
+t("without opts.max a fourth teacher is refused with three is the most", () => {
+  const s = fixture(); s.lessons[2].teachers = ["Arjun Nair", "Wei Lin Tan", "Priya Menon"]; s.teachers[3].can_teach = [{ subject: "Mathematics", levels: "All" }];
+  const r = DeptMap.deploy(s, { kind: "group", li: 2, title: "2MA2" }, [3], {});
+  assert.strictEqual(r.refused[0].why, "2MA2 would have 4 teachers; three is the most.");
+});
+t("opts.exempt lets a teacher on with no basket entry, and needBasket does not ask about them", () => {
+  const s = fixture(); const card = { kind: "class", li: 0, cls: "1B" }, ex = nm => nm === "Priya Menon";
+  assert.deepStrictEqual(DeptMap.needBasket(s, card, [1, 3], {}), ["Priya Menon", "Hafiz Osman"]);
+  assert.deepStrictEqual(DeptMap.needBasket(s, card, [1, 3], { exempt: ex }), ["Hafiz Osman"]);
+  assert.deepStrictEqual(DeptMap.needBasket(s, card, [1], { exempt: ex }), []);
+  const r = DeptMap.deploy(s, card, [1], { exempt: ex });
+  assert.deepStrictEqual([r.placed, r.refused], [["Priya Menon"], []]);
+  assert.deepStrictEqual(s.teachers[1].can_teach, []);   // exempt is not the basket: nothing is added to it
+  const r2 = DeptMap.deploy(s, { kind: "group", li: 1 }, [3], { exempt: ex });   // someone else, outside the basket, is still refused
+  assert.strictEqual(r2.refused.length, 1);
+});
+t("the refusal says the number: three, four, five, six", () => {
+  [[3, "three"], [4, "four"], [5, "five"], [6, "six"]].forEach(([m, w]) => {
+    const s = fixture(); s.lessons[2].teachers = Array.from({ length: m }, (_, k) => "Person " + k); s.teachers[1].can_teach = [{ subject: "Mathematics", levels: "All" }];
+    const r = DeptMap.deploy(s, { kind: "group", li: 2, title: "2MA2" }, [1], m === 3 ? {} : { max: m });
+    assert.strictEqual(r.refused[0].why, `2MA2 would have ${m + 1} teachers; ${w} is the most.`);
+  });
+});
 console.log(`${n} cases passed`);

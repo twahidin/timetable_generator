@@ -127,7 +127,9 @@ const NP = D.NP, DAYS = D.days, ND = DAYS.length, WEEKS = D.school.weeks || 1, P
 const ENTIRE = "Entire Class", BREAK = { F: "Assembly", R: "Recess", U: "Lunch" };
 const L = D.lessons.map(r => ({ id: r[0], d: r[1], p: r[2], n: r[3], level: r[4], block: r[5], classes: r[6], subject: r[7], group: r[8], teachers: r[9], room: r[10], ext: !!r[11], rain: r[12] || "" }));
 const roomLine = x => x.rain ? `${x.room} (rain ${x.rain})` : x.room;   // a PE lesson's rain room: its class's home room, kept free
-const CLS = D.classes.map(r => ({ name: r[0], level: r[1], size: r[2], home: r[3] }));
+const CLS = D.classes.map(r => ({ name: r[0], level: r[1], size: r[2], home: r[3], parents: r[4] || [] }));   // an older page's data has no fifth element
+const PNAME = D.parents_name || "Form teachers";
+const parentsLine = c => { const ps = (cIx.get(c) || {}).parents || []; return ps.length ? ` · ${PNAME}: ${ps.join(", ")}` : ""; };
 const TCH = D.teachers.map(r => ({ name: r[0], short: r[1], dept: r[2], allowance: r[3] }));
 const ROOMS = D.rooms.map(r => ({ name: r[0], kind: r[1], cap: r[2] }));
 const STU = D.students.map(r => ({ id: String(r[0]), name: r[1], cls: r[2], groups: r[3] }));
@@ -181,7 +183,7 @@ function classView(c) {
   for (const [k, e] of ent) { if (k.startsWith("|")) legend.push({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"} · ${e.periods} periods` });
     else { const b = e.x.block || e.x.group; if (!blocks.has(b)) blocks.set(b, []); blocks.get(b).push(e); } }
   for (const [b, es] of blocks) legend.push({ color: colorOf(es[0].x.subject), label: blockLabel(b, info.level), text: `${Math.max(...es.map(e => e.periods))} periods · ` + es.map(e => `${short(e.x.subject)} ${e.x.group} (${tshort(e.x.teachers)}, ${common(e.rooms) || "-"})`).join("; ") });
-  return { kind: "class", key: c, kicker: "Class", title: `Class ${c}`, sub: `${info.level} · ${info.size || "-"} students · home room ${info.home || "-"}`,
+  return { kind: "class", key: c, kicker: "Class", title: `Class ${c}`, sub: `${info.level} · ${info.size || "-"} students · home room ${info.home || "-"}${parentsLine(c)}`,
     stats: [[info.level, "level"], [info.size || "-", "students"], [info.home || "-", "home room"], [used.size, "periods a cycle"]], codes: (D.cgrid || {})[c] || codesFor([info.level]), cells, legend, lt: "Subjects, teachers and rooms", rows };
 }
 function teacherView(t) {
@@ -193,8 +195,9 @@ function teacherView(t) {
     for (const x of xs) { const k = x.subject + "|" + (x.group !== ENTIRE ? x.group : x.classes.join(", ")); let e = ent.get(k); if (!e) ent.set(k, e = { x, periods: 0, rooms: [] }); e.periods += x.n; e.rooms.push(x.room); }
   }
   const legend = [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? `${e.x.group} (${compact(e.x.classes)})` : e.x.classes.join(", ")} · ${e.periods} periods · ${common(e.rooms) || "-"}` }));
-  const days = Object.values(per);
-  return { kind: "teacher", key: t, kicker: "Teacher", title: t, sub: [info.dept && `Department ${info.dept}`, info.short && info.short !== t && `short name ${info.short}`].filter(Boolean).join(" · "),
+  const days = Object.values(per), mine = CLS.filter(c => c.parents.includes(t)).map(c => c.name);
+  const base = [info.dept && `Department ${info.dept}`, info.short && info.short !== t && `short name ${info.short}`].filter(Boolean).join(" · ");
+  return { kind: "teacher", key: t, kicker: "Teacher", title: t, sub: mine.length ? `${base || "Teacher"} · ${PNAME} of ${mine.join(", ")}` : base,
     stats: [[total, "periods a cycle"], [info.allowance || "-", "allowance"], [days.length ? Math.max(...days) : 0, "most in a day"], [days.length, "days teaching"]], codes: codesFor(rows.map(x => x.level)), cells, legend, lt: "Teaching", rows };
 }
 function roomView(r) {
@@ -221,7 +224,7 @@ function personalView(cls, groups, head) {
     stats: [[cls, "class"], [lv || "-", "level"], [groups.length, "groups"], [used.size, "periods a cycle"]],
     legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.group !== ENTIRE ? e.x.group : "with the class"} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"} · ${e.periods} periods` })) }, head);
 }
-const studentView = id => { const s = sIx.get(id); return personalView(s.cls, s.groups, { key: id, kicker: "Student", title: s.name, sub: `${s.id} · Class ${s.cls} · ${(cIx.get(s.cls) || {}).level || ""}` }); };
+const studentView = id => { const s = sIx.get(id); return personalView(s.cls, s.groups, { key: id, kicker: "Student", title: s.name, sub: `${s.id} · Class ${s.cls} · ${(cIx.get(s.cls) || {}).level || ""}${parentsLine(s.cls)}` }); };
 
 // ------------------------------------------------------------------ grid
 function lanes(cells) {

@@ -214,11 +214,12 @@ var Sync = (function () {
   }
 
   // base: last confirmed copy; sent: copy the diff was taken from; now: working copy when the
-  // answer came back; theirs: others' operations applied first; ours: the operations just accepted.
-  function rebase(base, sent, now, theirs, ours) {
+  // answer came back; theirs: others' operations applied first; ours: the operations just accepted; after (optional): what the server did after them.
+  function rebase(base, sent, now, theirs, ours, after) {
     var nb = clone(base);
     apply(nb, theirs);
     apply(nb, ours);
+    if (after) apply(nb, after);   // what the server put right after our operations
     var spec = clone(nb);
     apply(spec, diff(sent, now));
     return { base: nb, spec: spec };

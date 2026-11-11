@@ -251,7 +251,7 @@ def test_the_head_check_runs_on_the_setup_held_under_the_lock():
     assert sync.head_may(spec, stale) is None                      # judged on a copy taken earlier, the teacher is still provisional
     c.post("/api/setup/changes", json={"since": v, "client": "C", "ops": [["set", "teachers", "newhire003", "provisional", "No"]]})   # the committee confirms the teacher meanwhile
     v2 = c.get("/api/setup").get_json()["v"]
-    v3, refused = store.apply_changes(stale, "H", filter=sync.head_split)
+    v3, refused, _ = store.apply_changes(stale, "H", filter=sync.head_split)
     assert v3 == v2 and [i for i, _ in refused] == [0] and "provisional" in refused[0][1]
     now = c.get("/api/setup").get_json()
     assert now["v"] == v2 and next(x for x in now["spec"]["teachers"] if x["_id"] == "newhire003")["name"] == "Batch hire"
@@ -791,7 +791,159 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
     assert t.get("/timetable").status_code == 200
 
-NEED_HEADS = {"test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
+# Class Parents on the server: one named subject (made up), class 1A with a Class Parent; each test starts from the sample and the last puts it back
+PSUBJ = "Pastoral Care"
+def _cp_start():
+    c.put("/api/setup", json=c.get("/api/sample/secondary").get_json()); return c.get("/api/setup").get_json()
+
+class _Page:   # a browser's copy kept the way the page does (static/app.js syncNow): patches before our ops, our accepted ops, patches after
+    def __init__(s, cid, rec, who=None): s.id, s.who, s.spec, s.v = cid, who or c, copy.deepcopy(rec["spec"]), rec["v"]
+    def post(s, ops):
+        j = s.who.post("/api/setup/changes", json={"since": s.v, "client": s.id, "ops": ops}).get_json(); return s._take(j, ops)
+    def poll(s): return s._take(s.who.get(f"/api/setup/changes?since={s.v}&client={s.id}").get_json(), [])
+    def _take(s, j, ops):
+        assert not j.get("reset"), j
+        ps, mine = j.get("patches", []), j.get("mine"); no = {x["i"] for x in j.get("refused", [])}
+        sync.apply(s.spec, [o for p in ps if mine is None or p["v"] < mine for o in p["ops"]])
+        sync.apply(s.spec, [o for i, o in enumerate(ops) if i not in no])
+        sync.apply(s.spec, [o for p in ps if mine is not None and p["v"] > mine for o in p["ops"]])
+        s.v = j["v"]; return j
+    def same(s, what):
+        r = c.get("/api/setup").get_json()
+        assert s.v == r["v"] and not sync.diff(r["spec"], s.spec) and not sync.diff(s.spec, r["spec"]) and [x["_id"] for x in s.spec["lessons"]] == [x["_id"] for x in r["spec"]["lessons"]], (what, s.id, s.v, r["v"], sync.diff(r["spec"], s.spec)[:3])
+
+def _cp_name(rec, client="A", parents=("Pastoral A",)):   # what a stale page sends: the subject, the name, the box, and no lesson ops
+    cid = next(x["_id"] for x in rec["spec"]["classes"] if x["class"] == "1A")
+    return [["add", "subjects", {"_id": "pcsubj001", "subject": PSUBJ, "code": "PC", "periods": {"Sec 1": 2}}, ""],
+            ["school", "parents_subjects", [PSUBJ]], ["set", "classes", cid, "parents", list(parents)]]
+
+def _cp_rows(spec): return {r["classes"][0]: r for r in spec["lessons"] if r.get("subject") == PSUBJ}
+
+def test_class_parents_are_kept_right_on_the_server():               # Review Focus 1
+    rec = _cp_start(); v0 = rec["v"]; a = _Page("A", rec); b = _Page("B", rec)
+    j = a.post(_cp_name(rec))
+    assert j["v"] == v0 + 2 and j["mine"] == v0 + 1, j                # the caller's change, then what the server put right
+    a.same("sender")
+    rows = _cp_rows(c.get("/api/setup").get_json()["spec"])
+    sec1 = [x["class"] for x in rec["spec"]["classes"] if x["level"] == "Sec 1"]
+    assert sorted(rows) == sorted(sec1) and rows["1A"]["teachers"] == ["Pastoral A"] and all(not rows[k]["teachers"] for k in sec1 if k != "1A"), rows
+    assert rows["1A"]["_id"].startswith("cp-")
+    assert len(j["patches"]) == 1 and j["patches"][0]["v"] == v0 + 2 and any(o[0] == "add" and o[1] == "lessons" for o in j["patches"][0]["ops"]), j   # the sender is told too
+    k = b.poll(); assert [p["v"] for p in k["patches"]] == [v0 + 1, v0 + 2] and "mine" not in k, k    # a second browser gets both entries
+    b.same("poller")
+    assert [e["client"] for e in list(store._log)[-2:]] == ["A", "parents"]
+
+def test_a_stale_tab_cannot_undo_a_following_lesson():
+    rec = _cp_start(); a = _Page("A", rec); b = _Page("B", rec); a.post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; b.poll()
+    stale = _Page("S", rec); stale.v = rec["v"]
+    j = stale.post([["set", "lessons", row["_id"], "teachers", ["Koh"]]])
+    assert j["v"] == rec["v"] + 2 and j["mine"] == rec["v"] + 1, j
+    assert _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]["teachers"] == ["Pastoral A"]
+    assert ["set", "lessons", row["_id"], "teachers", ["Pastoral A"]] in j["patches"][0]["ops"], j     # and the sender is told
+    stale.same("stale sender (its copy must not keep Koh)"); b.poll(); b.same("poller"); a.poll(); a.same("A")
+
+def test_a_hand_change_with_its_mark_is_kept():
+    rec = _cp_start(); a = _Page("A", rec); a.post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; cid = next(x["_id"] for x in rec["spec"]["classes"] if x["class"] == "1A")
+    j = a.post([["set", "lessons", row["_id"], "teachers", ["Koh"]], ["set", "lessons", row["_id"], "by_hand", True]])
+    assert j["v"] == rec["v"] + 1 and not j["patches"] and j["mine"] == j["v"], j
+    j = a.post([["set", "classes", cid, "parents", ["Pastoral B"]]]); assert j["v"] == rec["v"] + 2, j
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Koh"] and r["by_hand"] is True, r
+    a.same("A")
+
+def test_a_head_cannot_change_a_staffed_lesson():                    # in NEED_HEADS
+    rec = _cp_start(); _Page("A", rec).post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; hp = _Page("H", rec, h)
+    j = hp.post([["set", "lessons", row["_id"], "teachers", ["Koh"]], ["set", "lessons", row["_id"], "students", 5]])
+    assert j["refused"] == [{"i": 0, "why": sync.PARENTS_WHY}] and j["v"] == rec["v"] + 1, j
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Pastoral A"] and r["students"] == 5, r
+    hp.same("head")
+    rec = c.get("/api/setup").get_json(); one = dict(_id="hb1", level="Sec 1", subject="Mathematics", block=None, classes=["1A"], teachers=["Typed T"])   # two steps of one batch
+    j = hp.post([["add", "lessons", one, ""], ["set", "lessons", "hb1", "subject", PSUBJ]])
+    assert [x["i"] for x in j["refused"]] == [1] and j["refused"][0]["why"] == sync.PARENTS_WHY, j
+    r = next(x for x in c.get("/api/setup").get_json()["spec"]["lessons"] if x["_id"] == "hb1"); assert r["subject"] == "Mathematics" and r["teachers"] == ["Typed T"], r
+
+def test_a_head_sends_a_malformed_lessons_op():                     # in NEED_HEADS
+    rec = _cp_start(); _Page("A", rec).post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; hp = _Page("H", rec, h)
+    other = next(x for x in rec["spec"]["lessons"] if x["subject"] != PSUBJ)     # a row the rule does not take: the old code read op[4] here
+    j = hp.post([["set", "lessons", other["_id"], "note"], ["merge", "lessons", row["_id"], "block", [], []]])
+    assert [x["i"] for x in j["refused"]] == [0, 1], j
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Pastoral A"] and r["block"] is None, r
+
+def test_a_school_not_using_class_parents_gets_one_version_and_one_entry():
+    rec = _cp_start(); n = len(store._log); v = rec["v"]
+    code, j = _changes("A", v, [["school", "timetable", "Term 3"]]); assert j["v"] == v + 1 and j["mine"] == v + 1 and len(store._log) == n + 1, j
+
+def test_a_setup_put_whole_is_put_right():
+    spec = c.get("/api/sample/secondary").get_json()
+    spec["subjects"].append({"subject": PSUBJ, "code": "PC", "periods": {"Sec 1": 2}}); spec["school"]["parents_subjects"] = [PSUBJ]
+    next(x for x in spec["classes"] if x["class"] == "1A")["parents"] = ["Pastoral A"]
+    spec["lessons"].append({"level": "Sec 1", "subject": PSUBJ, "block": None, "classes": ["1A"], "teachers": ["Someone Else"], "students": None})
+    assert c.put("/api/setup", json=spec).status_code == 200
+    rows = _cp_rows(c.get("/api/setup").get_json()["spec"])
+    assert rows["1A"]["teachers"] == ["Pastoral A"] and "by_hand" not in rows["1A"] and len(rows) == 4, rows
+    _cp_start()                                                       # the sample back, for the tests after
+
+def _cp_draft(spec, teachers):   # a draft of one lesson: the staffed Pastoral Care lesson of 1A taken by the given teachers
+    row = _cp_rows(spec)["1A"]; c.post("/api/draft", data=_draft_form(spec, [_lesson_of(spec, dict(row, periods=2), teachers)]), content_type="multipart/form-data"); return row
+
+def test_update_step_5_on_a_staffed_lesson_keeps_the_timetables_teachers():
+    rec = _cp_start(); a = _Page("A", rec); a.post(_cp_name(rec))
+    spec = c.get("/api/setup").get_json()["spec"]; row = _cp_rows(spec)["1A"]; assert row["teachers"] == ["Pastoral A"] and "by_hand" not in row
+    _cp_draft(spec, ["Elsewhere T"]); k = f"dep:C:1A:{PSUBJ}:teachers"; j = c.get("/api/draft").get_json(); w = next(x for x in j["warnings"] if x["key"] == k)
+    assert w["ops"] == [["set", "lessons", row["_id"], "teachers", ["Elsewhere T"]], ["set", "lessons", row["_id"], "by_hand", True]], w["ops"]
+    assert c.post("/api/draft/decide", json={"key": k, "answer": "step5"}).status_code == 200
+    spec = c.get("/api/setup").get_json()["spec"]; r = _cp_rows(spec)["1A"]; assert r["teachers"] == ["Elsewhere T"] and r["by_hand"] is True, r
+    cid = next(x["_id"] for x in spec["classes"] if x["class"] == "1A")                       # another change: the box changes, the marked lesson stays
+    assert c.post("/api/setup/changes", json={"client": "t", "since": c.get("/api/setup").get_json()["v"], "ops": [["set", "classes", cid, "parents", ["Pastoral B"]]]}).status_code == 200
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Elsewhere T"] and r["by_hand"] is True, r
+    _cp_start()
+
+def test_published_pages_name_the_class_parents():
+    import io, pickle
+    from ttgen import export
+    rec = _cp_start(); a = _Page("A", rec); a.post(_cp_name(rec, parents=("Pastoral A", "Pastoral B")))
+    spec = c.get("/api/setup").get_json()["spec"]; row = _cp_rows(spec)["1A"]
+    _cp_draft(spec, ["Pastoral A", "Pastoral B"]); assert c.post("/api/draft/publish").status_code == 200
+    m = store.published()["model"]; line = " · Form teachers: Pastoral A, Pastoral B"
+    assert next(x for x in m["classes"] if x["name"] == "1A")["parents"] == ["Pastoral A", "Pastoral B"] and m["parents_name"] == "Form teachers"
+    assert next(x for x in m["classes"] if x["name"] == "1B")["parents"] == []
+    assert export.class_view(m, "1A")["subtitle"].endswith(line) and "Form teachers" not in export.class_view(m, "1B")["subtitle"]
+    assert export.teacher_view(m, "Pastoral A")["subtitle"].endswith(" · Form teachers of 1A")
+    d = export.html_data(m); assert next(x for x in d["classes"] if x[0] == "1A")[4] == ["Pastoral A", "Pastoral B"] and d["parents_name"] == "Form teachers", d["classes"][:2]
+    pdf = c.get("/pdf/classes/1A"); assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
+    assert '"parents_name":"Form teachers"' in c.get("/timetable").get_data(as_text=True)
+    old = pickle.loads(pickle.dumps(m)); old.pop("parents_name")                                  # a model pickled before this change
+    for x in old["classes"]: x.pop("parents")
+    assert export.class_view(old, "1A")["subtitle"] == export.class_view(m, "1A")["subtitle"].replace(line, "")
+    assert export.teacher_view(old, "Pastoral A")["subtitle"] == "Teacher" and export.html_data(old)["parents_name"] == "Form teachers" and all(len(x) == 5 and x[4] == [] for x in export.html_data(old)["classes"])
+    assert export.pdf_bytes(old, export.class_view(old, "1A"))[:4] == b"%PDF" and export.pdf_bytes(old, export.teacher_view(old, "Pastoral A"))[:4] == b"%PDF"
+    shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
+
+def test_a_class_form_teachers_are_never_cut_off_the_printed_timetable():
+    import copy as cp
+    from ttgen import export
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    rec = _cp_start(); a = _Page("A", rec); names = ["Mrs Alexandrina Featherstonehaugh-Smythe", "Mr Bartholomew Wolfeschlegelstein", "Ms Cornelia Vandenberghe-Okonkwo", "Dr Maximilian Papadopoulos-Lindqvist"]
+    a.post(_cp_name(rec, parents=names)); spec = c.get("/api/setup").get_json()["spec"]; _cp_draft(spec, names); assert c.post("/api/draft/publish").status_code == 200
+    m = store.published()["model"]; v = export.class_view(m, "1A"); lines = export._parents_block(v)
+    assert len(lines) >= 2 and "…" not in "".join(lines) and all(any(n in l for l in lines) for n in names), lines   # each name whole on one line
+    R, _ = export._fonts(); assert all(stringWidth(l, R, 8.6) <= 420 for l in lines), lines
+    assert "Form teachers" not in v["pdf_subtitle"] and v["subtitle"].endswith(", ".join(names))
+    assert export.pdf_bytes(m, v)[:4] == b"%PDF"
+    plain = cp.deepcopy(m)                                         # no form teachers: the page comes out exactly as a model without the keys draws it
+    for x in plain["classes"]: x["parents"] = []
+    old = cp.deepcopy(m); old.pop("parents_name")
+    for x in old["classes"]: x.pop("parents")
+    import re; same = lambda x: re.sub(rb"/(CreationDate|ModDate)\s*\([^)]*\)|/ID\s*\[[^\]]*\]", b"", x)   # a PDF's date and id differ on every run
+    assert export._parents_block(export.class_view(plain, "1B")) == [] and same(export.pdf_bytes(plain, export.class_view(plain, "1A"))) == same(export.pdf_bytes(old, export.class_view(old, "1A")))
+    for cl in m["classes"]:                                        # every class page still draws, with the block, within the page
+        pb = export.pdf_bytes(m, dict(export.class_view(m, cl["name"]), parents_line="Form teachers: " + ", ".join(names))); assert pb[:4] == b"%PDF"
+    shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
+
+NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_sends_a_malformed_lessons_op", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
               "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace", "test_a_head_cannot_reach_the_helper_routes"}
 
 if __name__ == "__main__":

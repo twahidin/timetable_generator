@@ -161,4 +161,46 @@ for bad in (None, "x", {"a": 1}):
     assert spec == {"roles": bad}
 passed += 1
 
+# a head may not touch the lessons the Class Parents take: the staffed rows' teachers, mark, subject, block, code, classes,
+# level, nor delete one, nor make a row staffed that was not (an add, or a set that leaves it staffed)
+SUBJ = "Form Period"
+def staffed_setup():
+    return {"school": {"parents_subjects": [SUBJ]}, "subjects": [{"_id": "s1", "subject": SUBJ}, {"_id": "s2", "subject": "Maths"}],
+            "classes": [{"_id": "c1", "class": "1A", "level": "Sec 1", "parents": ["Lim", "Tan"]}, {"_id": "c2", "class": "1B", "level": "Sec 1"}],
+            "lessons": [dict(_id="L1", level="Sec 1", subject=SUBJ, block=None, classes=["1A"], teachers=["Lim", "Tan"]),
+                        dict(_id="L2", level="Sec 1", subject="Maths", block=None, classes=["1A"], teachers=["Ong"]),
+                        dict(_id="L3", level="Sec 1", subject=SUBJ, block="Band A", classes=["1A"], teachers=["Ong"])]}
+sp = staffed_setup()
+WHY = "Only the committee can change these lessons: their teachers are the class's form teachers."
+for op in (["set", "lessons", "L1", "teachers", ["Koh"]], ["set", "lessons", "L1", "by_hand", True], ["del", "lessons", "L1"],
+           ["set", "lessons", "L1", "subject", "Maths"], ["set", "lessons", "L1", "block", "Band A"], ["set", "lessons", "L1", "classes", ["1B"]],
+           ["set", "lessons", "L1", "level", "Sec 2"], ["set", "lessons", "L1", "code_override", "X"],
+           ["set", "lessons", "L2", "subject", SUBJ],                    # the ordinary row would become staffed
+           ["set", "lessons", "L3", "block", None],                      # so would a block row with its block cleared
+           ["add", "lessons", dict(_id="n1", level="Sec 1", subject=SUBJ, block=None, classes=["1B"], teachers=[]), ""]):
+    assert sync.head_may(sp, [op]) == WHY, op
+for op in (["set", "lessons", "L2", "teachers", ["Koh"]], ["set", "lessons", "L1", "note", "x"], ["set", "lessons", "L1", "students", 9],
+           ["set", "lessons", "L3", "teachers", ["Koh"]],                # a block row of the named subject is not staffed
+           ["add", "lessons", dict(_id="n2", level="Sec 1", subject=SUBJ, block="Band A", classes=["1B"], teachers=[]), ""],
+           ["add", "lessons", dict(_id="n3", level="Sec 1", subject="Maths", block=None, classes=["1B"], teachers=[]), ""], ["del", "lessons", "L2"]):
+    assert sync.head_may(sp, [op]) is None, op
+assert sync.head_split(sp, [["set", "lessons", "L2", "students", 1], ["del", "lessons", "L1"]]) == ([["set", "lessons", "L2", "students", 1]], [(1, WHY)])
+# one batch cannot get round it: each op is judged on the setup as the allowed ones before it leave it
+for first, then in ((dict(_id="n8", level="Sec 1", subject="Maths", block=None, classes=["1A"], teachers=["Typed T"]), ["set", "lessons", "n8", "subject", SUBJ]),
+                    (dict(_id="n8", level="Sec 1", subject=SUBJ, block="Band A", classes=["1B"], teachers=[]), ["set", "lessons", "n8", "block", None])):
+    ok, refused = sync.head_split(sp, [["add", "lessons", first, ""], then])
+    assert ok == [["add", "lessons", first, ""]] and refused == [(1, WHY)], (ok, refused)
+    assert [r["_id"] for r in sp["lessons"]] == ["L1", "L2", "L3"]       # the setup judged on is not changed
+# a malformed lessons op from a head is refused with the usual sentence and never raises; a merge on a lesson is refused whatever the field
+SEND = "Department heads cannot send that change."
+for op in (["set", "lessons", "L1"], ["set", "lessons", "L1", "note"], ["set", "lessons", "L2", "students", 1, 2], ["set", "lessons"], ["del", "lessons"], ["add", "lessons"],
+           ["merge", "lessons", "L2", "classes"], ["merge", "lessons", "L2", "classes", "x", []], ["set", "lessons", 5, "note", "x"], ["set", "lessons", "L2", 7, "x"]):
+    assert sync.head_may(sp, [op]) == SEND, op
+assert sync.head_split(sp, [["set", "lessons", "L2"], ["set", "lessons", "L2", "students", 1]]) == ([["set", "lessons", "L2", "students", 1]], [(0, SEND)])
+assert sync.head_may(sp, [["merge", "lessons", "L3", "block", [], []]]) == WHY     # a group row would become a staffed row
+assert sync.head_may(sp, [["merge", "lessons", "L1", "classes", [], []]]) == WHY   # a staffed row
+assert sync.head_may(sp, [["merge", "lessons", "L2", "classes", ["1B"], []]]) == SEND
+assert sync.head_may(sp, [["merge", "lessons", "L2", "block", [], []]]) == SEND
+passed += 1
+
 print(f"{passed} cases passed")
