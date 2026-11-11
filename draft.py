@@ -71,12 +71,12 @@ def model_now(rec=None):
     with _lock: _cache.clear(); _cache.update(key=key, m=m, fx=fx)
     return m, rec, fx
 
-def _build(m=None, rec=None):
+def _build(m=None, rec=None, fx=None):
     """the draft with its fixes applied, checked against the setup as it is now (or rec, a setup record): the fields of info()
-    before decisions are laid over them. m: a model already built (by save, with no fixes yet)."""
+    before decisions are laid over them. m: a model already built (by save, with no fixes yet, or with its rec and fx from model_now)."""
     if m is None: m, rec, fx = model_now(rec)
     else:
-        rec = rec or store.setup_record(); fx = dict(texts=[], problems=[], touched=set(), was=[])
+        rec = rec or store.setup_record(); fx = fx or dict(texts=[], problems=[], touched=set(), was=[])
         if not rec["spec"]: raise LookupError("no setup")
     spec = rec["spec"]
     with _lock: meta = store.read_json(_p("meta.json"), {})
@@ -245,13 +245,14 @@ def fix_many(moves):
         m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]; fl = _fixes_of(moves, m, spec, days)
         c = helper.chain(m, spec, days, fl)
         if c["state"] in ("no", "na"): raise ValueError(c["why"])
+        if len(c["texts"]) != len(fl): raise ValueError("That fix could not be made. Check the list again.")
         batch, at = secrets.token_hex(4), store.now(); meta = store.read_json(_p("meta.json"), {})
         store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=at, text=t, batch=batch) for f, t in zip(fl, c["texts"])]))
         return info()
 
 def suggest(key):
     """ways to settle the warning with that key, as the draft is now -> helper.suggest's dict(suggestions, none, blocked)"""
-    m, rec, fx = _now(); w = next((w for w in _build()["warnings"] if w["key"] == key), None)
+    m, rec, fx = _now(); w = next((w for w in _build(m, rec, fx)["warnings"] if w["key"] == key), None)
     if not w: raise ValueError("That warning is no longer on the list.")
     return helper.suggest(m, m["checked_setup"], m["days"], w)
 
@@ -263,12 +264,12 @@ def preview(moves):
     c = helper.chain(m, spec, days, fl)
     if c["state"] in ("no", "na"): c = dict(helper.chain(m, spec, days, fl[:len(c["steps"]) - 1]), state=c["state"], why=c["why"])
     L, was, touched = c["lessons"], c["was"], c["touched"]; first, last = {}, {}
-    for x in was: first.setdefault((x["id"], x["group"]), x); first.setdefault(x["id"], x); last[(x["id"], x["group"])] = x
+    for x in was: first.setdefault((x["id"], x["group"]), x); last[(x["id"], x["group"])] = x
     names = {n for x in was for n in x["classes"]} | {n for x in L if x["id"] in touched for n in x["classes"]}
     def mark(x):
-        w = first.get((x["id"], x["group"])) or first.get(x["id"])
+        w = first.get((x["id"], x["group"]))   # a row is judged by its own row as it was; a sibling row of a changed lesson that was not changed has none
         if x["id"] not in touched: return dict(mark="")
-        if w is None: return dict(mark="new")
+        if w is None: return dict(mark="" if any(k[0] == x["id"] for k in first) else "new")
         if (x["d"], x["p"]) != (w["d"], w["p"]): return dict(mark="moved", was=dict(d=w["d"], p=w["p"]))
         return dict(mark="changed" if x["teachers"] != w["teachers"] or x["room"] != w["room"] else "")
     marks, mi, out = {(x["id"], x["group"]): mark(x) for x in L}, dict(m, lessons=L), []

@@ -567,14 +567,50 @@ def test_a_batch_is_all_or_nothing_and_undone_together():
         r = c.post("/api/draft/fixes", json=body); assert r.status_code == 400, body
     assert c.post("/api/draft/fixes", json={"fixes": [_mv(a, s1)] * 3}).get_json() == {"error": "Send one or two fixes."} and c.get("/api/draft").get_json()["fixes"] == []
 
-def test_a_batch_add_without_a_room_gets_one_and_a_stale_suggestion_is_refused_whole():
-    _grid_draft(); a = _lid("1A", "Art"); lid3 = _lid("1B", "Mathematics")
-    k = next(w["key"] for w in c.get("/api/draft").get_json()["warnings"] if w["key"].startswith("rule:"))   # U is not available at Wed period 3
-    S = next(s for s in c.get(f"/api/draft/suggest?key={k}").get_json()["suggestions"] if s["fixes"][0]["kind"] == "move" and s["fixes"][0]["id"] == lid3)
-    t = S["fixes"][0]; assert c.post("/api/draft/fix", json=_mv(a, t)).status_code == 200   # 1A's Art takes the slot the suggestion moves to
-    r = c.post("/api/draft/fixes", json={"fixes": S["fixes"]}); assert r.status_code == 400 and r.get_json()["error"] and len(c.get("/api/draft").get_json()["fixes"]) == 1, r.get_json()
-    j = c.post("/api/draft/fixes", json={"fixes": [dict(kind="add", key="C:1A:Art", d=s["d"], p=s["p"], n=1)]}).get_json() if (s := next((s for s in c.get("/api/draft/options?add=C:1A:Art&n=1").get_json()["slots"] if s["state"] in ("ok", "prefer")), None)) else None
-    assert j is None or j["fixes"][-1]["kind"] == "add" and j["fixes"][-1]["batch"]
+def test_a_batch_add_without_a_room_gets_one():
+    _grid_draft(); s = next(s for s in c.get("/api/draft/options?add=C:1A:Art&n=1").get_json()["slots"] if s["state"] in ("ok", "prefer"))
+    j = c.post("/api/draft/fixes", json={"fixes": [dict(kind="add", key="C:1A:Art", d=s["d"], p=s["p"], n=1)]}).get_json()
+    assert j["fixes"][-1]["kind"] == "add" and j["fixes"][-1]["batch"] and j["fixes"][-1]["text"].startswith("Added "), j["fixes"]
+    assert c.post("/api/draft/fixes", json={"fixes": [dict(kind="add", key="C:1A:Art", d=s["d"], p=s["p"], n=0)]}).status_code == 400
+
+def _pair_draft():   # Task 2's frame: 1A's English at period 0 breaks a Must rule; its only open slot S is taken by Sabrina Koh's lesson of 1B, which can itself move
+    import io, openpyxl
+    spec = c.get("/api/setup").get_json()["spec"]; ds = spec["day_structure"]["P1"]; days = list(ds); every = [(d, p) for d in range(len(days)) for p in range(len(ds[days[d]])) if ds[days[d]][p] == "L"]; S, T0 = (2, 3), "Sabrina Koh"
+    assert S in every and (3, 5) in every
+    rows = [(days[0], 0, 1, "P1", "1A", "English Language", [T0]), (days[S[0]], S[1], 1, "P1", "1B", "Other", [T0])]
+    rows += [(days[d], p, 1, "P1", "1A", "Art", ["Umairah Tan"]) for d, p in every if (d, p) != S] + [(days[d], p, 1, "P1", "1B", "Music", ["Jasper Wong"]) for d, p in every if (d, p) not in (S, (3, 5))]
+    saved = copy.deepcopy(spec); spec["rules"] = list(spec.get("rules") or []) + [dict(scope="Class", target="1A", rule="Not in periods", week="Both", day="All", strength="Must", **{"from": 0, "to": 0})]
+    assert c.put("/api/setup", json=spec).status_code == 200
+    assert c.post("/api/draft", data=_draft_form(spec, rows, replace="1"), content_type="multipart/form-data").status_code == 200
+    w = next(w for w in c.get("/api/draft").get_json()["warnings"] if w["key"].startswith("rule:") and "English Language" in w["text"])
+    return saved, w["key"], _lid("1A", "English Language"), _lid("1B", "Other"), _lid("1B", "Music")
+
+def test_a_stale_pair_is_refused_whole():
+    saved, k, eng, other, music = _pair_draft()
+    try:
+        S = c.get("/api/draft/suggest", query_string={"key": k}).get_json()["suggestions"]; pair = next(s for s in S if len(s["fixes"]) == 2)
+        assert pair["fixes"] == [dict(kind="move", id=other, d=3, p=5), dict(kind="move", id=eng, d=2, p=3)], S
+        assert c.post("/api/draft/fix", json=dict(kind="move", id=music, d=3, p=5)).status_code == 200   # another fix takes the slot the pair moves the first lesson to
+        before = c.get("/api/draft").get_json()["fixes"]; assert len(before) == 1
+        r = c.post("/api/draft/fixes", json={"fixes": pair["fixes"]}); assert r.status_code == 400 and r.get_json()["error"], r.get_json()
+        assert c.get("/api/draft").get_json()["fixes"] == before
+        assert c.post("/api/draft/preview", json={"fixes": pair["fixes"]}).get_json()["state"] == "no"
+    finally: c.put("/api/setup", json=saved)
+
+def test_two_identical_fixes_are_refused_whole_and_undo_takes_a_batch_whole():
+    _grid_draft(); a, b = _lid("1A", "Art"), _lid("1B", "Art"); s1 = _free_slot(a); s2 = _free_slot(b, skip={(s1["d"], s1["p"])}); x = _mv(a, s1)
+    r = c.post("/api/draft/fixes", json={"fixes": [x, x]}); assert r.status_code == 400 and r.get_json() == {"error": "That changes nothing."} and c.get("/api/draft").get_json()["fixes"] == []
+    c.post("/api/draft/fixes", json={"fixes": [x, _mv(b, s2)]}); s3 = _free_slot(_lid("1B", "Mathematics"), skip={(s1["d"], s1["p"]), (s2["d"], s2["p"])})
+    assert c.post("/api/draft/fix", json=_mv(_lid("1B", "Mathematics"), s3)).status_code == 200 and len(c.get("/api/draft").get_json()["fixes"]) == 3
+    assert len(c.post("/api/draft/undo").get_json()["fixes"]) == 2 and c.post("/api/draft/undo").get_json()["fixes"] == []   # the single alone, then the pair together
+
+def test_fix_many_writes_nothing_when_a_fix_was_skipped():
+    import helper
+    _grid_draft(); a, b = _lid("1A", "Art"), _lid("1B", "Art"); real = helper.chain
+    helper.chain = lambda *x, **k: dict(real(*x, **k), texts=["only one"])
+    try: r = c.post("/api/draft/fixes", json={"fixes": [_mv(a, _free_slot(a)), _mv(b, _free_slot(b, skip={(_free_slot(a)["d"], _free_slot(a)["p"])}))]})
+    finally: helper.chain = real
+    assert r.status_code == 400 and r.get_json() == {"error": "That fix could not be made. Check the list again."} and c.get("/api/draft").get_json()["fixes"] == []
 
 def _marks(j, cls): return {x["id"]: (x["mark"], x.get("was")) for x in next(k for k in j["classes"] if k["name"] == cls)["lessons"]}
 
@@ -606,6 +642,22 @@ def test_the_preview_of_a_block_and_of_a_delete():
     assert j["state"] in ("ok", "prefer") and j["gone"] == [dict(cls="1A", what="Zzz Extra for 1A", d=1, p=1)] and [k["name"] for k in j["classes"]] == ["1A"] and extra not in _marks(j, "1A"), j
     j = c.post("/api/draft/preview", json={"fixes": [dict(kind="room", id=art, group="Entire Class", room=next(x for x in c.get(f"/api/draft/options?id={art}").get_json()["rooms"] if x["state"] in ("ok", "prefer"))["room"])]}).get_json()
     assert _marks(j, "1A")[art] == ("changed", None), j
+    assert c.get("/api/draft").get_json()["fixes"] == []
+
+def test_marks_are_of_the_row_that_changed_not_of_its_lesson():
+    import io, openpyxl
+    spec = c.get("/api/setup").get_json()["spec"]   # lesson 1 is a block of two groups; 1A has two Mathematics lessons
+    rows = [("Mon", 1, 1, "P1", "1A, 1B", "Art", ["Umairah Tan"]), ("Mon", 1, 1, "P1", "1A, 1B", "Art", ["Jasper Wong"]), ("Tue", 1, 1, "P1", "1A", "Mathematics", ["Umairah Tan"]), ("Wed", 1, 1, "P1", "1A", "Mathematics", ["Umairah Tan"])]
+    wb = openpyxl.load_workbook(io.BytesIO(_lessons_workbook(rows))); ws = wb.active; ws["A3"] = 1; ws["I2"] = ws["I3"] = "BX"; ws["L2"], ws["L3"] = "GX1", "GX2"; buf = io.BytesIO(); wb.save(buf)
+    assert c.post("/api/draft", data=dict(setup=(io.BytesIO(_setup_workbook(spec)), "setup.xlsx"), timetable=(io.BytesIO(buf.getvalue()), "timetable.xlsx"), replace="1"), content_type="multipart/form-data").status_code == 200
+    blk = _lid("1A", "Art"); pv = lambda f: c.post("/api/draft/preview", json={"fixes": [f]}).get_json()
+    by = lambda j, cls: {(x["id"], x["group"]): x["mark"] for x in next(k for k in j["classes"] if k["name"] == cls)["lessons"]}
+    o = c.get(f"/api/draft/options?id={blk}&group=GX1").get_json()
+    j = pv(dict(kind="teacher", key="G:GX1", teachers=[next(x for x in o["teachers"] if x["state"] in ("ok", "prefer"))["teachers"][0]])); assert j["state"] in ("ok", "prefer"), j
+    assert by(j, "1A")[(blk, "GX1")] == "changed" and by(j, "1A")[(blk, "GX2")] == "" and by(j, "1B") == {(blk, "GX1"): "changed", (blk, "GX2"): ""}, j["classes"]
+    j = pv(dict(kind="room", id=blk, group="GX2", room=next(x for x in o["rooms"] if x["state"] in ("ok", "prefer"))["room"])); assert by(j, "1A")[(blk, "GX2")] == "changed" and by(j, "1A")[(blk, "GX1")] == "", j
+    t = next(x for x in c.get(f"/api/draft/options?id={_lid('1A', 'Mathematics')}").get_json()["teachers"] if x["state"] in ("ok", "prefer"))["teachers"]
+    j = pv(dict(kind="teacher", key="C:1A:Mathematics", teachers=t)); assert [v for (i, g), v in by(j, "1A").items() if i != blk] == ["changed", "changed"] and all(v == "" for (i, g), v in by(j, "1A").items() if i == blk), j
     assert c.get("/api/draft").get_json()["fixes"] == []
 
 def test_a_head_cannot_reach_the_helper_routes():
