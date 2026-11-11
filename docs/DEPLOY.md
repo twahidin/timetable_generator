@@ -116,7 +116,7 @@ about a minute for a 600-student school and uses one vCPU.
 
 ## What leaves the server
 
-Nothing, unless you set `ANTHROPIC_API_KEY`. The app has no AI inside and makes no outbound calls of its own. With the key set, the box on the Fix card sends the words the lead types in it (at most 300 characters) and a fixed instruction to Anthropic, and nothing else: no list of teachers, classes, students or lessons, and no part of the timetable. The app finds the lessons and people itself. A name the lead types is part of their words. Nothing typed is stored.
+Nothing, unless you set `ANTHROPIC_API_KEY`. The app has no AI inside and makes no outbound calls of its own. With the key set, the box on the Fix card sends the words the lead types in it (at most 300 characters) and a fixed instruction to Anthropic, and nothing else: no list of teachers, classes, students or lessons, and no part of the timetable. The words go to Anthropic's API at its usual address; do not set `ANTHROPIC_BASE_URL` on the service, which would send them to another address. The app finds the lessons and people itself. A name the lead types is part of their words. Nothing typed is stored.
 
 Who sees what inside the app: a head's browser receives the whole setup, because the editor works on all of it, including
 the student list once students are added, although the Students, Download and Publish steps are hidden from heads and

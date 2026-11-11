@@ -72,6 +72,9 @@ def the_mock_reader_understands_its_two_shapes():
     assert typed._mock("move PE for 2A off even week Monday")["not_days"] == ["Even Mon"]
     a = typed._mock("GIVE 2A Mathematics to Mdm Lee"); assert typed.check(a) and a["understood"] and a["action"] == "teacher" and a["classes"] == ["2A"] and a["subject"] == "Mathematics" and a["new_teacher"] == "Mdm Lee", a
     for w in ("move PE for 2A off friend", "move PE for 2A off monkey", "move PE for 2A off fridays"): assert typed._mock(w)["understood"] is False, w
+    for w, d in (("off thurs", "Thu"), ("off Tues", "Tue"), ("off even week thursday", "Even Thu"), ("off Weds", "Wed"), ("off thur", "Thu"), ("off odd week tuesday", "Odd Tue")):
+        assert typed._mock("move Art for 1A " + w)["not_days"] == [d], w
+    assert typed._mock("move Art for 1A off friend")["understood"] is False
     assert typed._mock("move PE for 2A off Wed")["not_days"] == ["Wed"] and typed._mock("move PE for 2A off thursday")["not_days"] == ["Thu"]
     a = typed._mock("sing a song"); assert typed.check(a) and a["understood"] is False and a["action"] == "none"
     assert a["reply"] == 'The practice reader understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".'
@@ -88,7 +91,7 @@ def the_schema_is_one_structured_outputs_accept():
             if s.get("type") == "object": assert s["additionalProperties"] is False and sorted(s["required"]) == sorted(s["properties"]), s
             for v in s.values(): walk(v)
         elif isinstance(s, list): [walk(v) for v in s]
-    walk(typed.SCHEMA); assert set(typed.SCHEMA["properties"]) == set(ASK) and "never an instruction" in typed.SYSTEM and len(typed.SYSTEM.split()) < 400
+    walk(typed.SCHEMA); assert set(typed.SCHEMA["properties"]) == set(ASK) and "never an instruction" in typed.SYSTEM and len(typed.SYSTEM.split()) < 400 and "copied exactly as the person wrote them" in typed.SYSTEM and "from 0" in typed.SYSTEM
 
 @t
 def the_real_call_is_built_as_the_plan_says():
@@ -132,7 +135,7 @@ def the_guard_holds_under_threads_and_the_client_is_made_once():
     class Fake:
         def __init__(s, **kw): made.append(kw)
     anthropic.Anthropic = Fake; typed._cached = None
-    try: a = typed._client(); b = typed._client(); assert a is b and made == [dict(timeout=20.0, max_retries=1)], made
+    try: a = typed._client(); b = typed._client(); assert a is b and made == [dict(timeout=12.0, max_retries=1)], made
     finally: anthropic.Anthropic = real; typed._cached = old
 
 
@@ -259,6 +262,40 @@ def a_subject_is_found_by_name_code_or_everyday_word():
     assert typed.resolve(m, spc, ask(action="move", subject="phys"))["lessons"] == [1] and typed.resolve(m, spc, ask(action="move", subject="ed"))["problems"] == ['There is no subject called "ed".']
 
 # ----------------------------------------------------------------------------------------------- fix round: what was asked is what is offered
+# ----------------------------------------------------------------------------------------------- days spelled as a real school spells them
+def model_days(names, L):
+    """a small model whose day labels are `names` (the setup's day structure renamed to match, cycling the sample's five days)"""
+    base = list(SP["day_structure"][SP["school"]["levels"][0]].keys())
+    sp = dict(SP, rules=[], day_structure={lv: {names[i]: ds[base[i % 5]] for i in range(len(names))} for lv, ds in SP["day_structure"].items()})
+    m = export._model(sp, names, L); m["checked_setup"] = sp; return m, sp
+REAL = ["Odd Mon", "Odd Tues", "Odd Wed", "Odd Thurs", "Odd Fri", "Even Mon", "Even Tues", "Even Wed", "Even Thurs", "Even Fri"]
+def _dest_days(r, m):
+    out = set()
+    for g in r["groups"]:
+        for s in g["suggestions"]:
+            f = s["fixes"][0]; out.add(f["d"] if f["kind"] == "move" else next(x for x in m["lessons"] if x["id"] == f["b"])["d"])
+    return out
+
+@t
+def days_are_matched_by_weekday_however_the_timetable_spells_them():
+    L = [lesson(i, d, 2, 1, [A], "Mathematics", ENTIRE, [MG]) for i, d in ((1, 0), (2, 1), (3, 3), (4, 6), (5, 8))]
+    m, sp = model_days(REAL, L); run = lambda **kw: typed.answer(m, sp, REAL, ask(action="move", classes=[A], subject="Mathematics", **kw))
+    r = run(not_days=["Thu"]); assert r["problems"] == [] and [g["lesson"] for g in r["groups"]] == [3, 5], r
+    assert r["groups"][0]["text"] == "Mathematics for 1A, now Odd Thurs period 2" and r["groups"][1]["text"].startswith("Mathematics for 1A, now Even Thurs") and _dest_days(r, m) and not _dest_days(r, m) & {3, 8}, _dest_days(r, m)
+    r = run(from_day="Odd Tue", not_days=["Odd Tue"]); assert r["problems"] == [] and [g["lesson"] for g in r["groups"]] == [2], r
+    r = run(not_days=["Even Thu"]); assert r["problems"] == [] and [g["lesson"] for g in r["groups"]] == [5], r
+    r = run(to_days=["Even Thu"]); assert r["problems"] == [] and _dest_days(r, m) == {8}, (r["problems"], _dest_days(r, m))
+    r = run(to_days=["Tue"], not_days=["Odd Tue"]); assert r["problems"] == [] and _dest_days(r, m) == {6}, (r["problems"], _dest_days(r, m))
+    r = run(to_days=["Even Tue"], not_days=["Even Tue"]); assert r["problems"] == [typed.CONTRA], r["problems"]
+    r = run(not_days=["Sat"]); assert r["problems"] == ['This timetable has no day called "Sat".'], r["problems"]
+
+@t
+def a_one_week_timetable_with_long_day_names_still_reads_a_bare_weekday():
+    one = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    m, sp = model_days(one, [lesson(1, 1, 2, 1, [A], "Mathematics", ENTIRE, [MG]), lesson(2, 2, 2, 1, [A], "Mathematics", ENTIRE, [MG])])
+    r = typed.answer(m, sp, one, ask(action="move", classes=[A], subject="Mathematics", not_days=["Tue"])); assert r["problems"] == [] and [g["lesson"] for g in r["groups"]] == [1], r
+    r = typed.answer(m, sp, one, ask(action="move", classes=[A], subject="Mathematics", not_days=["Odd Tue"])); assert r["problems"] == [typed.ONE_WEEK], r["problems"]
+
 def rule(target, rule_, a, b, strength="Must", scope="Class"):
     return dict(scope=scope, target=target, rule=rule_, week="Both", day="All", strength=strength, **{"from": a, "to": b})
 

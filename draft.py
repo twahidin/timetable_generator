@@ -283,7 +283,7 @@ def _pick_ok(p): return isinstance(p, dict) and len(p) <= 10 and all(isinstance(
 
 def ask(words, pick=None, ask=None):
     """the typed request answered on the draft as it is now -> dict(ok=False, error) or dict(ok=True, ask, **typed.answer). Without ask the words are read by the
-    model (typed.read, outside every lock: it can take 20 seconds); with ask (sent back with pick to settle a choice) the model is not called again. Nothing is kept."""
+    model (typed.read, outside every lock: it can take up to about 25 seconds); with ask (sent back with pick to settle a choice) the model is not called again. Nothing is kept."""
     if not exists(): raise NoDraft("There is no draft.")
     if ask is None:
         r = typed.read(words)
