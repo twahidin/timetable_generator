@@ -14,7 +14,8 @@ workbook has only Teacher 1 to Teacher 3.
 
 The committee lead asked for three things: a way to say who a class's Class Parents are; the name and the maximum as
 school settings (other schools say "form teachers" and have two); and the Class Parents put on the class's CP Time and
-CCE lessons, as a constraint, all of them together on every such lesson.
+CCE lessons, as a constraint, all of them together on every such lesson. The constraint is a default: it fills those
+lessons by itself, and the committee can still change any one of them by hand.
 
 ## What it is
 
@@ -25,24 +26,31 @@ CCE lessons, as a constraint, all of them together on every such lesson.
 3. **A constraint on step 6** (the Settings tab, beside the other school-wide settings): "{Class Parents} take these
    lessons", with a pick-list of subjects. CTSS picks CP Time, Character Education 1 and Character Education 2. Empty
    means the constraint is off and the Class Parents are only recorded and shown.
-4. **What the constraint does.** For every class and every subject it names:
-   - the class's whole-class lesson of that subject has exactly the class's Class Parents as its teachers, all of
-     them, in the order of the box on step 2;
+4. **What the constraint does.** It is a default rule. For every class and every subject it names:
+   - the class's whole-class lesson of that subject has the class's Class Parents as its teachers, all of them, in
+     the order of the box on step 2, and follows the box when it changes;
    - when the subject has periods at the class's level and the class has no lesson of it yet, the lesson is made
      (this is how CP Time gets its 32 lessons);
-   - the teachers of those lessons are changed in one place only, the box on step 2. On step 5 (the map and the
-     table) those lessons show their teachers but do not take drops, ticks or typing, and say why: "Changed on step 2:
-     these are the class's {Class Parents}."
-   It is a Must. There is no Prefer form.
+   - the committee can change the teachers of any one such lesson by hand on step 5 (the map or the table), for
+     example when one Class Parent cannot take Character Education 2 and someone else does. That lesson is then
+     marked "Changed by hand". It keeps its teachers and no longer follows the box on step 2, until the committee
+     clicks "Back to the {Class Parents}" on it, which puts the Class Parents on again and has it follow again.
+   A lesson that follows always has exactly the Class Parents; there is no Prefer form of that.
 5. **A first fill.** While some class has no Class Parents and the constraint names at least one subject, step 2
    offers "Take them from the lessons": each such class gets the teachers now on its lessons of the named subjects
    (in the order they appear, each once, up to the maximum). Classes that already have Class Parents are left alone.
    The committee sees how many classes would be filled before agreeing.
-6. **Four teachers on a lesson.** A lesson that the constraint staffs may hold as many teachers as the school's
-   maximum. The workbook's Lessons sheet gets as many Teacher columns as the widest lesson needs (never fewer than
-   three), the way it already grows its Class columns. Every other lesson keeps today's limit of three on the map and
-   in the table.
-7. **Where they show.** A small badge with the school's name for them on the class's cards on step 5; on a teacher's
+   Teachers already typed on a lesson are never replaced without the committee's say. When a subject is first named
+   by the constraint, or Class Parents are first given to a class: a lesson with no teachers gets the Class Parents
+   and follows; a lesson whose teachers are the same people as the Class Parents follows; a lesson with other
+   teachers keeps them and is marked "Changed by hand". Step 2 says how many lessons are changed by hand and offers
+   "Put the {Class Parents} on all of them", which asks first.
+6. **Four teachers on a lesson.** A lesson of a subject the constraint names, following or changed by hand, may
+   hold as many teachers as the school's maximum (never fewer than three). The workbook's Lessons sheet gets as
+   many Teacher columns as the widest lesson needs (never fewer than three), the way it already grows its Class
+   columns. Every other lesson keeps today's limit of three on the map and in the table.
+7. **Where they show.** A small badge with the school's name for them on the class's cards on step 5, and on a
+   lesson changed by hand the words "Changed by hand" with its "Back to the {Class Parents}" button; on a teacher's
    profile, "{Class Parent} of 3I4"; on the published class timetable, a line under the class's name; on a teacher's
    own published timetable, the same line as on the profile.
 8. **In the workbook.** The Classes sheet gets one column per place ("Class Parent 1" to "Class Parent 4" at CTSS,
@@ -63,16 +71,20 @@ CCE lessons, as a constraint, all of them together on every such lesson.
 
 ## What would make it a failure
 
-- A class whose CP Time or Character Education lesson quietly has other teachers than its Class Parents, in the
-  setup, in the workbook, or after a change on step 2.
+- A CP Time or Character Education lesson with other teachers than the class's Class Parents that is not marked
+  "Changed by hand": in the setup, in the workbook, or after a change on step 2.
+- Teachers the committee typed on a lesson replaced without being asked.
+- A lesson changed by hand quietly put back when the box on step 2 changes.
 - A fourth teacher dropped silently when the workbook is written or read.
 - A committee that has typed its 64 rows being asked to type the Class Parents again.
 - A department head, or a stale browser tab, changing those lessons' teachers behind the committee's back.
+- No way to see which lessons were changed by hand.
 
 ## Things to fix (the list on the right of every step)
 
-- A class with no Class Parents while the constraint names a subject: "3I4 has no Class Parents: its CP Time and
-  Character Education lessons have no teacher."
+- A class with no Class Parents while the constraint names a subject and one of its lessons follows: "3I4 has no
+  Class Parents: its CP Time and Character Education lessons have no teacher."
+- Lessons changed by hand are not a thing to fix. They are counted on step 2 and marked on step 5.
 - A teacher who is a Class Parent of two classes: "{Name} is a Class Parent of 3I4 and 3I5: their CP Time and
   Character Education lessons cannot be at the same time." A warning only; some schools do this on purpose.
 - A Class Parent who is no longer on the step 4 list.
@@ -80,22 +92,26 @@ CCE lessons, as a constraint, all of them together on every such lesson.
 
 ## Rules that follow from the rest of the app
 
-- Only the committee changes Class Parents, the two settings and the constraint. Department heads see them and
-  cannot change them, and cannot change the teachers of a lesson the constraint staffs. The server refuses it, not
-  only the page.
+- Only the committee changes Class Parents, the two settings and the constraint, and only the committee changes a
+  lesson of a named subject by hand or puts it back. Department heads see all of it and cannot change it. The
+  server refuses it, not only the page.
 - Renaming or removing a teacher on step 4 does not follow through to lessons today: the old name stays on the
   lesson, flagged "(not on list)". Class Parents behave the same way, and stay in step with their lessons: the old
   name shows flagged in the box on step 2 and on the lessons it staffs, and putting the right name in the box puts
   it on the lessons. Renaming a class is the same as today too: the Class Parents stay with the class row.
-- The lessons are always worked out from the boxes, never the other way round. After every change, wherever it
-  comes from (the page, another tab, a department head, a workbook or progress file loaded, an earlier copy
-  restored), the lessons the constraint staffs are put right again, on the page and on the server, and the server's
-  result wins. A stale tab cannot leave them wrong.
+- A lesson that follows is always worked out from the box, never the other way round. After every change, wherever
+  it comes from (the page, another tab, a workbook or progress file loaded, an earlier copy restored), the lessons
+  that follow are put right again, on the page and on the server, and the server's result wins. A stale tab cannot
+  leave a following lesson wrong. A change of teachers by hand and its "Changed by hand" mark travel together as
+  one change, so one never arrives without the other.
+- The mark is kept in the workbook (a column on the Lessons sheet) so it survives the round trip. A workbook from
+  the outside agent or an older one, with no such column, is read by the rule above for teachers already typed: same
+  people follows, other people is marked.
 - On Publish, a returned timetable with other teachers on such a lesson shows as a difference from step 5, as for
-  any lesson. For these lessons "Update step 5" is not offered: the sentence says to change the class's Class
-  Parents on step 2, or to fix the timetable.
-- A Class Parent does not need the subject under Can teach on step 4. A lesson the constraint staffs never shows
-  "cannot teach this subject".
+  any lesson. "Update step 5" is offered as for any lesson, and marks the lesson "Changed by hand".
+- A Class Parent does not need the subject under Can teach on step 4: a Class Parent on their class's lesson never
+  shows "cannot teach this subject". A teacher put on by hand who is not a Class Parent of the class is checked as
+  on any lesson.
 - The maximum is a cap, not a quota: a class with one Class Parent is complete. Only a class with none is flagged.
 - The lessons carry the periods step 3 gives the subject at the class's level, as every lesson does (in a two-week
   timetable, the periods of the two weeks). A level where the subject has no periods gets no lesson.
@@ -104,8 +120,8 @@ CCE lessons, as a constraint, all of them together on every such lesson.
 - A new class added on step 2 gets its lessons of the named subjects once it has a level, with no teachers until its
   Class Parents are picked.
 - Turning the constraint off, or taking a subject out of it, leaves the lessons and their teachers as they are and
-  makes them ordinary lessons again (changeable on step 5; a lesson holding more than three teachers keeps them, and
-  the map says it is full).
+  makes them ordinary lessons again, with no marks (a lesson holding more than three teachers keeps them, and the
+  map says it is full).
 - Lowering the maximum below what a class already has is refused with a sentence naming the classes.
 - Changes save and merge by themselves like every other change, and Undo takes back the Class Parents change and
   what it did to the lessons as one step.
@@ -114,7 +130,11 @@ CCE lessons, as a constraint, all of them together on every such lesson.
 
 ## Calls made in this document (the committee did not decide these; say if any is wrong)
 
-- The constraint is a Must with no Prefer form.
+- Only the committee may change such a lesson by hand; department heads may not.
+- A lesson changed by hand stays as it is when the box on step 2 changes, and when a Class Parent is renamed or
+  removed.
+- Teachers already typed are never replaced without asking (the rule under "A first fill").
+- "Same people" ignores the order of the names.
 - The default name is "Form teachers" and the default maximum is 2; the maximum can be 1 to 6.
 - The constraint applies to a class's whole-class lesson of a named subject. A named subject taught in groups or
   bands is not touched and is listed under Things to fix as "cannot be staffed by {Class Parents}: it is taught in
@@ -124,8 +144,8 @@ CCE lessons, as a constraint, all of them together on every such lesson.
 - The constraint is worked out class by class. A class with a whole-class lesson of a named subject: that lesson is
   staffed. A class taught that subject in groups: left alone and listed under Things to fix. A class with neither,
   where the subject has periods at its level: the lesson is made.
-- A Class Parent needs no Can teach entry for these lessons (see the rules above).
-- "Update step 5" is not offered for a teacher difference on these lessons.
+- A Class Parent needs no Can teach entry for their class's lessons (see the rules above).
+- "Update step 5" on such a lesson marks it "Changed by hand".
 - The name, the maximum and the list of subjects are kept with the school's settings (`spec.school`), so only the
   committee can change them; in the workbook the new Classes columns come after Note and are read by their heading.
 - A teacher may be a Class Parent of more than one class; it is a warning, not refused.
@@ -142,7 +162,8 @@ CCE lessons, as a constraint, all of them together on every such lesson.
 - Where the solver, the checks, the will-it-fit view, the PDF and the timetable pages assume three teachers, and what
   each needs.
 - The tests. At least: the workbook round trip with four teachers and with the new Classes columns; the constraint
-  after each kind of change listed above; a head's attempt refused by the server; the first fill on a setup shaped
+  after each kind of change listed above; a lesson changed by hand staying put through each of them and going back
+  with its button; typed teachers never replaced unasked; a head's attempt refused by the server; the first fill on a setup shaped
   like CTSS's (two subjects naming the same one to three teachers per class, a third subject with no lessons).
 
 ## What exists today (for the builder)
