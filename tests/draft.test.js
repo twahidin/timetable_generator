@@ -56,4 +56,30 @@ t("fixTarget: the week a warning's Fix the timetable button opens", () => {
   assert.strictEqual(Draft.fixTarget({ where: null }), null);
 });
 
+t("batches: neighbours with the same batch are one entry, newest last", () => {
+  const f = (text, batch) => ({ text: text, at: "t", kind: "move", batch: batch });
+  const out = Draft.batches([f("a", null), f("b", "x1"), f("c", "x1"), f("d", null)]);
+  assert.deepStrictEqual(out.map(e => e.batch), [null, "x1", null]);
+  assert.deepStrictEqual(out.map(e => e.items.map(i => i.text)), [["a"], ["b", "c"], ["d"]]);
+  assert.deepStrictEqual(Draft.batches([f("a", "x"), f("b", "x"), f("c", "x")]).map(e => e.items.length), [3]);   // a batch of three
+  assert.deepStrictEqual(Draft.batches([f("a", "x"), f("b", "y"), f("c", "x")]).map(e => e.items.length), [1, 1, 1]);   // not neighbours
+  assert.deepStrictEqual(Draft.batches([{ text: "m" }, { text: "n", batch: null }]).map(e => e.items.length), [1, 1]);   // a missing batch
+  assert.deepStrictEqual(Draft.batches([]), []);
+  assert.deepStrictEqual(Draft.batches(undefined), []);
+});
+t("undoText: by the size of the last entry", () => {
+  const f = (batch) => ({ text: "t", at: "t", kind: "move", batch: batch });
+  assert.strictEqual(Draft.undoText([]), "");
+  assert.strictEqual(Draft.undoText([f("x"), f(null)]), "Undo the last fix");
+  assert.strictEqual(Draft.undoText([f(null), f("x"), f("x")]), "Undo the last two fixes");
+  assert.strictEqual(Draft.undoText([f("x"), f("x"), f("x")]), "Undo the last 3 fixes");
+  assert.strictEqual(Draft.undoText([f("x"), f("x"), f("x"), f("x")]), "Undo the last 4 fixes");
+});
+t("stateWord", () => {
+  assert.strictEqual(Draft.stateWord("ok"), "Clean");
+  assert.strictEqual(Draft.stateWord("prefer"), "Bends a Prefer");
+  assert.strictEqual(Draft.stateWord("no"), "");
+  assert.strictEqual(Draft.stateWord(undefined), "");
+});
+
 console.log(n + " checks passed");

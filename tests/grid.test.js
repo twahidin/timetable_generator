@@ -175,4 +175,35 @@ t("slotText: a swap slot names the swap", () => {
   assert.strictEqual(Grid.slotText({ d: 0, p: 2, swap: null, why: "Not ideal." }, ["Mon", "Tue"]), "Move to Mon period 2 — Not ideal.");
 });
 
+t("markClass and wasText: the mark, and where a moved row was", () => {
+  const days = ["Mon", "Tue"];
+  assert.strictEqual(Grid.markClass({ mark: "moved" }), "moved");
+  assert.strictEqual(Grid.markClass({ mark: "changed" }), "changed");
+  assert.strictEqual(Grid.markClass({ mark: "new" }), "new");
+  assert.strictEqual(Grid.markClass({ mark: "" }), "");
+  assert.strictEqual(Grid.markClass({}), "");
+  assert.strictEqual(Grid.markClass({ mark: "weird" }), "");
+  assert.strictEqual(Grid.wasText({ mark: "moved", was: { d: 1, p: 3 } }, days), "was Tue period 3");
+  assert.strictEqual(Grid.wasText({ mark: "moved", was: { d: 0, p: 0 } }, days), "was Mon period 0");
+  assert.strictEqual(Grid.wasText({ mark: "moved" }, days), "");   // a mark but no was
+  assert.strictEqual(Grid.wasText({ mark: "changed", was: { d: 1, p: 3 } }, days), "");
+  assert.strictEqual(Grid.wasText({ mark: "" }, days), "");
+});
+
+t("others: a class view drops the shown class, a teacher view keeps all", () => {
+  const pv = { classes: [{ view: "class", name: "1A" }, { view: "class", name: "1B" }, { view: "class", name: "2C" }] };
+  assert.deepStrictEqual(Grid.others(pv, { view: "class", name: "1B" }).map(c => c.name), ["1A", "2C"]);
+  assert.deepStrictEqual(Grid.others(pv, { view: "teacher", name: "1B" }).map(c => c.name), ["1A", "1B", "2C"]);
+  assert.deepStrictEqual(Grid.others(pv, { view: "class", name: "9Z" }).map(c => c.name), ["1A", "1B", "2C"]);
+  assert.deepStrictEqual(Grid.others({ classes: [] }, { view: "class", name: "1A" }), []);
+  assert.deepStrictEqual(Grid.others({}, { view: "teacher", name: "Mr Tan" }), []);
+  assert.deepStrictEqual(Grid.others(null, { view: "class", name: "1A" }), []);
+});
+
+t("previewFor: the one fix a click on a slot posts, as a list", () => {
+  const sel = { id: 5, group: "Entire Class" };
+  assert.deepStrictEqual(Grid.previewFor(sel, { d: 2, p: 3, swap: null }), [{ kind: "move", id: 5, d: 2, p: 3 }]);
+  assert.deepStrictEqual(Grid.previewFor(sel, { d: 2, p: 3, swap: 9 }), [{ kind: "swap", a: 5, b: 9 }]);
+});
+
 console.log(`${n} cases passed`);

@@ -59,6 +59,24 @@ var Draft = (function () {
     return { view: "class", name: h.cls, day: h.day || "", sel: h.id !== undefined && h.id !== null ? { id: Number(h.id), group: h.row } : null };
   }
 
-  return { whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
+  /* [{batch, items}]: neighbours with the same non-null batch are one entry; any other fix is its own; order kept, newest last */
+  function batches(fixes) {
+    var out = [];
+    (fixes || []).forEach(function (f) {
+      var last = out[out.length - 1];
+      if (f.batch && last && last.batch === f.batch) last.items.push(f);
+      else out.push({ batch: f.batch || null, items: [f] });
+    });
+    return out;
+  }
+  /* the Undo button's words: it undoes the newest entry, which may be a batch */
+  function undoText(fixes) {
+    var all = batches(fixes), k = all.length ? all[all.length - 1].items.length : 0;
+    return !k ? "" : k === 1 ? "Undo the last fix" : k === 2 ? "Undo the last two fixes" : "Undo the last " + k + " fixes";
+  }
+  /* a suggestion's state in words */
+  function stateWord(state) { return state === "ok" ? "Clean" : state === "prefer" ? "Bends a Prefer" : ""; }
+
+  return { batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
 })();
 if (typeof module !== "undefined") module.exports = Draft;
