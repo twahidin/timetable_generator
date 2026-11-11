@@ -226,4 +226,20 @@ def the_settings_rows_are_read_as_before_below_row_59():
     assert len(read(write(sp))["school"]["extra_settings"]) == 70
 
 
+def named(sp, k):
+    for i in range(len(sp["subjects"]), k): sp["subjects"].append(dict(sp["subjects"][0], subject=f"Extra subject {i}", _id=f"x{i}"))
+    sp["school"]["parents_subjects"] = [x["subject"] for x in sp["subjects"][:k]]
+    return sp
+
+
+@t
+def the_check_formula_length_does_not_grow_with_named_subjects_or_past_six_columns():
+    for n, k in ((18, 5), (12, 30), (18, 0), (15, 2)):
+        assert check_cells(write(named(wide(n), k)))[1] < 8192, (n, k)
+    f = check_cells(write(named(wide(6), 2)))[0][0]                           # the test is written once around the Can teach chain, not per teacher
+    assert f.count('OR(B6="') == 1 and f.count("not set to teach") == 6 and f.count("twice in this block") == 6
+    guard = f.index('IF(OR(B6='); assert f.index("not set to teach") > guard and f.index("twice in this block") > f.index("not set to teach", guard)   # twice stays outside it
+    g = check_cells(write(wide(9)))[0][0]; assert g.count("not set to teach") == 6 and g.count("twice in this block") == 9 and g.count("No teacher.") == 1   # 7 and beyond: no Can teach test
+
+
 print(f"{passed} cases passed")

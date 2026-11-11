@@ -427,16 +427,21 @@ def write_template(spec, path, extra_rows=120):
         lw[FU] = f'=IF(OR(N({P_})=0,{PT}<>""),"",({P_}-{SH}*({LN}-1))/{LN})'
         lw[RK] = f'=IF({B_}="","",IFERROR(IF({idx("E", r)}="","home room",{idx("E", r)}),""))'
         lw[TP] = f'=IF(N({P_})=0,0,{P_}*IF({C_}="",MAX(1,COUNTA({CF1}{r}:{CFN}{r})),1))'
-        named = f"OR({','.join('B%d=%s' % (r, chr(34) + str(n).replace(chr(34), chr(34) * 2) + chr(34)) for n in PSUBS)})*1" if PSUBS else ""
+        named = f"OR({','.join('B%d=%s' % (r, chr(34) + str(n).replace(chr(34), chr(34) * 2) + chr(34)) for n in PSUBS)})" if PSUBS else ""
         def can(tc):
             k = f"IFERROR(INDEX('{T}'!${KEYC}${R0}:${KEYC}${R0 + 999},MATCH({tc}{r},'{T}'!$A${R0}:$A${R0 + 999},0)),\"\")"
             ok = f'ISNUMBER(FIND("|"&{B_}&"@All|",{k}))+ISNUMBER(FIND("|"&{B_}&"@"&{A_}&"|",{k}))+ISNUMBER(FIND("|"&{B_}&"@"&{band_of(A_)}&"|",{k}))'
-            if NTCH <= 6: twice = "+".join(f"COUNTIFS($C${R0}:$C${R0 + 1999},{C_},${c}${R0}:${c}${R0 + 1999},{tc}{r})" for c in TC)
-            else: twice = f"SUMPRODUCT(($C${R0}:$C${R0 + 1999}={C_})*(${TC[0]}${R0}:${TC[-1]}${R0 + 1999}={tc}{r}))"   # one range term, not one per column (Excel's 8192-character limit)
-            if named: ok = f"({ok}+{named})"   # a named subject's lessons are taken by the class's form teachers: not tested here
-            return f'IF({tc}{r}="","",IF({ok}=0,{tc}{r}&" not set to teach this at "&{A_}&". ","")&IF(AND({C_}<>"",{twice}>1),{tc}{r}&" twice in this block. ",""))'
+            return f'IF({ok}=0,{tc}{r}&" not set to teach this at "&{A_}&". ","")'
+        def twice(tc):
+            if NTCH <= 6: t2 = "+".join(f"COUNTIFS($C${R0}:$C${R0 + 1999},{C_},${c}${R0}:${c}${R0 + 1999},{tc}{r})" for c in TC)
+            else: t2 = f"SUMPRODUCT(($C${R0}:$C${R0 + 1999}={C_})*(${TC[0]}${R0}:${TC[-1]}${R0 + 1999}={tc}{r}))"   # one range term, not one per column (Excel's 8192-character limit)
+            return f'IF(AND({C_}<>"",{t2}>1),{tc}{r}&" twice in this block. ","")'
+        # Can teach is tested for the first six Teacher columns only: a lesson holds more than six teachers only when it follows the form
+        # teachers of several classes (by hand the most is six), and those are never tested. A named subject's lessons skip it, once for the row.
+        if named: tchk = f'IF({named},"",' + "&".join(f'IF({tc}{r}="","",{can(tc)})' for tc in TC[:6]) + ")&" + "&".join(f'IF({tc}{r}="","",{twice(tc)})' for tc in TC)
+        else: tchk = "&".join(f'IF({tc}{r}="","",{can(tc)}&{twice(tc)})' if i < 6 else f'IF({tc}{r}="","",{twice(tc)})' for i, tc in enumerate(TC))
         lw[CK] = (f'=IF({B_}="","",TRIM(IF(N({P_})=0,"No periods for "&{A_}&" on Subjects. ","")&IF(COUNTA({CF1}{r}:{CFN}{r})=0,"No class. ","")'
-                  f'&IF(COUNTA({TC[0]}{r}:{TC[-1]}{r})=0,"No teacher. ","")&' + "&".join(can(tc) for tc in TC) +
+                  f'&IF(COUNTA({TC[0]}{r}:{TC[-1]}{r})=0,"No teacher. ","")&' + tchk +
                   f'&IF(AND({GC}<>"Entire Class",COUNTIF(${c_["Group code"]}${R0}:${c_["Group code"]}${R0 + 1999},{GC})>1),"Code used twice. ","")'
                   f"&IF(AND({C_}<>\"\",COUNTIF('{BL}'!$A${R0}:$A${R0 + 999},{C_})=0),\"Block not on Step 5. \",\"\")))")
         lw[CK].alignment = Alignment(wrap_text=True, vertical="top")
