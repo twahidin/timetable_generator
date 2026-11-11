@@ -199,23 +199,23 @@ def names_are_never_guessed():
     L = [lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG]), lesson(2, 1, 3, 1, [A], "Additional Mathematics", ENTIRE, [MG]), lesson(3, 2, 3, 1, ["1B"], "Mathematics", ENTIRE, [MG])]
     m, sp = model_with(L, teachers=sp2["teachers"], subjects=sp2["subjects"])
     r = typed.answer(m, sp, DAYS, ask(action="teacher", classes=[A], subject="Mathematics", new_teacher="Quek"))
-    assert r["choices"] == [dict(field="new_teacher", said="Quek", options=["Quek Mei Ling", "Quek Hong Wei"])] and r["groups"] == [] and r["problems"] == [], r
-    r = typed.answer(m, sp, DAYS, ask(action="teacher", classes=[A], subject="Mathematics", new_teacher="Quek"), pick={"new_teacher": "Quek Hong Wei"})
+    assert r["choices"] == [dict(id="new_teacher|Quek", field="new_teacher", said="Quek", options=["Quek Mei Ling", "Quek Hong Wei"])] and r["groups"] == [] and r["problems"] == [], r
+    r = typed.answer(m, sp, DAYS, ask(action="teacher", classes=[A], subject="Mathematics", new_teacher="Quek"), pick={"new_teacher|Quek": "Quek Hong Wei"})
     assert r["choices"] == [] and len(r["groups"]) == 1 and r["groups"][0]["suggestions"][0]["fixes"][0]["teachers"] == ["Quek Hong Wei"], r
-    assert typed.resolve(m, sp, ask(action="teacher", new_teacher="Mdm. Quek Mei"), None)["teacher"] == "Quek Mei Ling" and typed.resolve(m, sp, ask(action="teacher", new_teacher="Hong Wei Q"))["teacher"] == "Quek Hong Wei"
+    assert typed.resolve(m, sp, ask(action="teacher", new_teacher="Mdm. Quek Mei"), None)["new_teacher"] == "Quek Mei Ling" and typed.resolve(m, sp, ask(action="teacher", new_teacher="Hong Wei Q"))["new_teacher"] == "Quek Hong Wei"
     r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="maths", not_days=["Mon"]))      # Mathematics and Additional Mathematics are both 1A's
-    assert r["choices"] == [dict(field="subject", said="maths", options=["Mathematics", "Additional Mathematics"])] and r["groups"] == [], r
-    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="maths", not_days=["Mon"]), pick={"subject": "Additional Mathematics"}); assert [g["lesson"] for g in r["groups"]] == [2], r
-    r = typed.answer(m, sp, DAYS, ask(action="move", classes=["1B"], subject="maths", not_days=["Mon"])); assert r["choices"] == [] and [g["lesson"] for g in r["groups"]] == [3]   # only one is 1B's
+    assert r["choices"] == [dict(id="subject|maths", field="subject", said="maths", options=["Mathematics", "Additional Mathematics"])] and r["groups"] == [], r
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="maths", to_days=["Mon"]), pick={"subject|maths": "Additional Mathematics"}); assert [g["lesson"] for g in r["groups"]] == [2], r
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=["1B"], subject="maths", to_days=["Mon"])); assert r["choices"] == [] and [g["lesson"] for g in r["groups"]] == [3]   # only one is 1B's
     r = typed.answer(m, sp, DAYS, ask(action="move", classes=["9Z"], not_days=["Mon"])); assert r["problems"] == ['There is no class or level called "9Z".'] and r["groups"] == [], r
     r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], teacher="Nobody Here", not_days=["Mon"])); assert r["problems"] == ['There is no teacher called "Nobody Here".']
-    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Basket Weaving", not_days=["Mon"])); assert r["problems"] == [typed.NO_LESSON] == ["No lesson of the timetable matches that."]
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Basket Weaving", not_days=["Mon"])); assert r["problems"] == ['There is no subject called "Basket Weaving".']
     assert typed.resolve(m, sp, ask(action="move", teacher="Ms Goh's"))["lessons"] == [1, 2, 3] and typed.resolve(m, sp, ask(action="move", group="nothing"))["problems"] == [typed.NO_LESSON]
     for s in ("Mdm", "Dr."): assert typed.resolve(m, sp, ask(action="move", teacher=s))["problems"], s     # a title alone names nobody
     # a class written two ways that differ only in case or spaces, with no exact match, is a choice
     m2 = dict(m, classes=[dict(name="2 A", level="S2"), dict(name="2  A", level="S2"), dict(name="3A", level="S3")])
-    assert typed.resolve(m2, sp, ask(action="move", classes=["2a"]))["choices"] == [dict(field="classes", said="2a", options=["2 A", "2  A"])]
-    assert typed.resolve(m2, sp, ask(action="move", classes=["2a"]), pick={"classes": "2  A"})["choices"] == [] and typed.resolve(m2, sp, ask(action="move", classes=["2 a"]))["choices"] == []
+    assert typed.resolve(m2, sp, ask(action="move", classes=["2a"]))["choices"] == [dict(id="classes|2a", field="classes", said="2a", options=["2 A", "2  A"])]
+    assert typed.resolve(m2, sp, ask(action="move", classes=["2a"]), pick={"classes|2a": "2  A"})["choices"] == [] and typed.resolve(m2, sp, ask(action="move", classes=["2 a"]))["choices"] == []
     assert typed.resolve(m2, sp, ask(action="move", classes=["3 a"]))["problems"] == ['There is no class or level called "3 a".']     # one loose match is still not an exact one
 
 @t
@@ -230,11 +230,11 @@ def an_ask_outside_the_actions_does_nothing():
 @t
 def many_lessons_are_answered_eight_at_a_time():
     m, sp = model_with([lesson(i, i % 5, 1 + i // 5, 1, [A], "Mathematics", ENTIRE, [MG]) for i in range(1, 13)])
-    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Mathematics", not_days=["Fri"]))
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Mathematics", to_days=["Fri"]))
     assert len(r["groups"]) == 8 and r["more"] == 4 and r["narrow"] == "That matches 12 lessons. Here are the first 8; name a class or a day to narrow it.", r
     order = [(x["d"], x["p"]) for g in r["groups"] for x in m["lessons"] if x["id"] == g["lesson"]]; assert order == sorted(order)
-    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Mathematics", from_day="Mon", not_days=["Fri"])); assert r["more"] == 0 and r["narrow"] is None and len(r["groups"]) == 2
-    r = typed.answer(m, sp, DAYS, ask(action="move", group="nothing", not_days=["Fri"])); assert r["problems"] == [typed.NO_LESSON]
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Mathematics", from_day="Mon", to_days=["Fri"])); assert r["more"] == 0 and r["narrow"] is None and len(r["groups"]) == 2
+    r = typed.answer(m, sp, DAYS, ask(action="move", group="nothing", to_days=["Fri"])); assert r["problems"] == [typed.NO_LESSON]
 
 @t
 def a_level_means_its_classes_and_a_bare_weekday_means_every_week():
@@ -256,7 +256,118 @@ def a_subject_is_found_by_name_code_or_everyday_word():
     m = dict(days=DAYS, classes=[dict(name="2A", level="S2")], lessons=L)
     for said, want in (("pe", [1]), ("PE", [1]), ("physical", [1]), ("education", [1]), ("Maths", [2, 3]), ("MA", [2, 3]), ("art", [4]), ("Mathematics", [2])):
         r = typed.resolve(m, spc, ask(action="move", subject=said)); assert r["lessons"] == want and r["choices"] == [], (said, r)
-    assert typed.resolve(m, spc, ask(action="move", subject="phys"))["lessons"] == [1] and typed.resolve(m, spc, ask(action="move", subject="ed"))["problems"] == [typed.NO_LESSON]
+    assert typed.resolve(m, spc, ask(action="move", subject="phys"))["lessons"] == [1] and typed.resolve(m, spc, ask(action="move", subject="ed"))["problems"] == ['There is no subject called "ed".']
+
+# ----------------------------------------------------------------------------------------------- fix round: what was asked is what is offered
+def rule(target, rule_, a, b, strength="Must", scope="Class"):
+    return dict(scope=scope, target=target, rule=rule_, week="Both", day="All", strength=strength, **{"from": a, "to": b})
+
+def spec_of(**kw): return dict(subjects=[], teachers=[], venues=[], **kw)
+def fake(L, classes=("1A",), days=None): return dict(days=days or DAYS, classes=[dict(name=c, level="P1") for c in classes], lessons=L, NP=12)
+BAND = lambda i=1, d=0, p=2: [lesson(i, d, p, 1, [A], "Tamil Language", "TL1", ["Benjamin Teo"], room="1-01", block="BX"), lesson(i, d, p, 1, [A], "Chinese Language", "CL1", ["Adeline Tan"], room="1-02", block="BX")]
+
+@t
+def off_a_day_means_the_lessons_on_that_day():
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG]), lesson(2, 1, 2, 1, [A], "Mathematics", ENTIRE, [MG]), lesson(3, 4, 2, 1, [A], "Mathematics", ENTIRE, [MG])])
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Mathematics", not_days=["Fri"])); assert [g["lesson"] for g in r["groups"]] == [3] and r["problems"] == [], r
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Mathematics", not_days=["Wed"])); assert r["problems"] == ["No lesson that matches is on that day."] and r["groups"] == [], r
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Mathematics", from_day="Mon", not_days=["Fri"])); assert [g["lesson"] for g in r["groups"]] == [1]   # a day named as where it is now wins
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Mathematics", to_days=["Wed"])); assert [g["lesson"] for g in r["groups"]] == [1, 2, 3]       # not_days not given: every lesson
+
+@t
+def a_band_is_read_row_by_row():
+    m, sp = model_with(BAND() + [lesson(2, 1, 2, 1, [A], "Mathematics", ENTIRE, [MG])])
+    r = typed.resolve(m, sp, ask(action="move", classes=[A], subject="Tamil Language")); assert r["lessons"] == [1] and [x["group"] for x in r["rows"][1]] == ["TL1"], r
+    assert typed.resolve(m, sp, ask(action="move", classes=[A], subject="Chinese Language", teacher="Benjamin Teo"))["problems"] == [typed.NO_LESSON]    # no one row has both
+    assert typed.resolve(m, sp, ask(action="move", classes=[A], teacher="Benjamin Teo"))["lessons"] == [1]
+    r = typed.answer(m, sp, DAYS, ask(action="teacher", teacher="Benjamin Teo", new_teacher=MG))
+    assert [g["lesson"] for g in r["groups"]] == [1] and r["groups"][0]["text"] == "group TL1, now Mon period 2" and r["groups"][0]["suggestions"][0]["fixes"] == [dict(kind="teacher", key="G:TL1", teachers=[MG])], r
+    r = typed.answer(m, sp, DAYS, ask(action="teacher", classes=[A], subject="Chinese Language", new_teacher=MG)); assert r["groups"][0]["suggestions"][0]["fixes"][0]["key"] == "G:CL1"
+    r = typed.answer(m, sp, DAYS, ask(action="room", classes=[A], subject="Tamil Language", new_room="1-03")); assert r["groups"][0]["suggestions"][0]["fixes"] == [dict(kind="room", id=1, group="TL1", room="1-03")], r
+    r = typed.answer(m, sp, DAYS, ask(action="room", classes=[A], subject="Tamil Language", new_room="1-01")); assert r["groups"][0]["none"] == typed.SAME           # that row is there already
+    r = typed.answer(m, sp, DAYS, ask(action="room", classes=[A], teacher="Adeline Tan", new_room="1-03")); assert r["groups"][0]["suggestions"][0]["fixes"][0]["group"] == "CL1"
+    r = typed.answer(m, sp, DAYS, ask(action="teacher", classes=[A], new_teacher=MG, from_day="Mon"))     # both rows match: each key is its own group
+    assert sorted(g["suggestions"][0]["fixes"][0]["key"] for g in r["groups"] if g["suggestions"]) == ["G:CL1", "G:TL1"], r
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], subject="Tamil Language", to_days=["Tue"]))
+    ss = r["groups"][0]["suggestions"]; assert ss and all("This lesson is a band: it moves for CL1 (1A) too." in s["disturbs"] for s in ss), r
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], from_day="Mon", to_days=["Tue"]))        # every row matches: nothing else moves
+    assert all(not any("band" in d for d in s["disturbs"]) for s in r["groups"][0]["suggestions"])
+
+@t
+def a_subject_with_no_lesson_falls_back_to_its_family():
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Science (Standard)", ENTIRE, [MG]), lesson(2, 1, 2, 1, [A], "Science (Foundation)", ENTIRE, [MG])])
+    r = typed.resolve(m, sp, ask(action="move", classes=[A], subject="Science")); assert r["lessons"] == [1, 2] and r["choices"] == [] and r["problems"] == [], r
+    assert typed.resolve(m, sp, ask(action="move", classes=["1B"], subject="Science"))["problems"] == [typed.NO_LESSON]
+
+@t
+def short_words_never_match():
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Art", ENTIRE, [MG]), lesson(2, 1, 2, 1, [A], "Character and Citizenship Education", ENTIRE, [MG]), lesson(3, 2, 2, 1, [A], "Physical Education", ENTIRE, [MG])])
+    for w in ("a", "p", "and", "of the", "ed"): assert typed.resolve(m, sp, ask(action="move", subject=w))["problems"] == [f'There is no subject called "{w}".'], w
+    assert typed.resolve(m, sp, ask(action="move", subject="PE"))["lessons"] == [3] and typed.resolve(m, sp, ask(action="move", subject="art"))["lessons"] == [1] and typed.resolve(m, sp, ask(action="move", subject="citizenship and character"))["lessons"] == [2]
+    f = fake([lesson(1, 0, 2, 1, [A], "Art", ENTIRE, [])]); sv = spec_of(); sv["venues"] = [dict(room="Hall 2"), dict(room="Lab")]
+    assert typed.resolve(f, sv, ask(action="room", new_room="2"))["problems"] == ['There is no room called "2".'] and typed.resolve(f, sv, ask(action="room", new_room="la"))["problems"]
+    assert typed.resolve(f, sv, ask(action="room", new_room="hall"))["new_room"] == "Hall 2" and typed.resolve(f, sv, ask(action="room", new_room="LAB"))["new_room"] == "Lab" and typed.resolve(f, sv, ask(action="room", new_room="hall 2"))["new_room"] == "Hall 2"
+
+@t
+def a_swap_of_two_lessons_alike_is_not_offered():
+    every = [(d, p) for d in range(len(DAYS)) for p in (1, 2, 3, 5, 6, 7, 8, 9, 10) if (d, p) != (0, 2)]
+    L = [lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG], room="1-01")] + [lesson(10 + k, d, p, 1, [A], "Mathematics", ENTIRE, [MG], room="1-01") for k, (d, p) in enumerate(every)]
+    m, sp = model_with(L); g = typed.answer(m, sp, DAYS, ask(action="move", from_day="Mon", from_period=2, to_days=["Tue"]))["groups"][0]
+    assert g["suggestions"] == [] and g["none"] == typed.NO_SLOT, g
+    L[1 + every.index((1, 3))] = lesson(500, 1, 3, 1, [A], "Art", ENTIRE, ["Umairah Tan"], room="1-01"); m, sp = model_with(L)
+    g = typed.answer(m, sp, DAYS, ask(action="move", from_day="Mon", from_period=2, to_days=["Tue"]))["groups"][0]
+    assert [s["fixes"] for s in g["suggestions"]] == [[dict(kind="swap", a=1, b=500)]] and g["suggestions"][0]["disturbs"].count("Art for 1A moves to Mon period 2.") == 1, g
+
+@t
+def a_change_that_differs_from_step_5_says_so():
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG])])
+    g = typed.answer(m, sp, DAYS, ask(action="teacher", classes=[A], subject="Mathematics", new_teacher=SK))["groups"][0]
+    assert g["suggestions"] and typed.STEP5 == "This differs from step 5, so it will show as a warning." and typed.STEP5 in g["suggestions"][0]["disturbs"], g
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [SK])])      # step 5 plans Michelle Goh: giving it to her fixes the difference
+    g = typed.answer(m, sp, DAYS, ask(action="teacher", classes=[A], subject="Mathematics", new_teacher=MG))["groups"][0]
+    assert g["suggestions"] and typed.STEP5 not in g["suggestions"][0]["disturbs"], g
+
+@t
+def contradictory_asks_are_one_sentence():
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG])]); one = ["That asks for days or periods that cannot all hold. Say it another way."]
+    for kw in (dict(to_days=["Mon", "Tue"], not_days=["Mon"]), dict(to_days=["Tue"], to_period_from=5, to_period_to=3), dict(to_days=["Tue"], to_period_from=99), dict(to_days=["Tue"], to_period_from=m["NP"])):
+        r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], **kw)); assert r["problems"] == one and r["groups"] == [], (kw, r)
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], to_days=["Tue"], to_period_from=3, to_period_to=3)); assert r["problems"] == [] and r["groups"]
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], to_days=["Tue"], to_period_from=3)); assert r["problems"] == []        # one end only is fine
+
+@t
+def a_pick_must_be_one_of_the_options_for_that_choice():
+    sp2 = dict(SP, teachers=SP["teachers"] + [dict(name="Quek Mei Ling", short="x", dept="X", allowance=36, can_teach=[]), dict(name="Quek Hong Wei", short="y", dept="X", allowance=36, can_teach=[])])
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG])], teachers=sp2["teachers"]); a = ask(action="teacher", classes=[A], subject="Mathematics", new_teacher="Quek")
+    for bad in ({"new_teacher|Quek": MG}, {"new_teacher|Quek": "Quek"}, {"new_teacher": "Quek Hong Wei"}, {"teacher|Quek": "Quek Hong Wei"}, {"new_teacher|Quek": None}, {"new_teacher|Quek": ["Quek Hong Wei"]}, "Quek Hong Wei", 5):
+        r = typed.answer(m, sp, DAYS, a, pick=bad); assert len(r["choices"]) == 1 and r["choices"][0]["id"] == "new_teacher|Quek" and r["groups"] == [], (bad, r)
+    r = typed.answer(m, sp, DAYS, a, pick={"new_teacher|Quek": "Quek Mei Ling", "junk|x": "y"}); assert r["choices"] == [] and r["groups"][0]["suggestions"][0]["fixes"][0]["teachers"] == ["Quek Mei Ling"]
+    f = fake([lesson(1, 0, 2, 1, ["2 A"], "Art", ENTIRE, []), lesson(2, 1, 2, 1, ["3 B"], "Art", ENTIRE, [])], classes=("2 A", "2  A", "3 B", "3  B")); sv = spec_of()
+    ch = typed.resolve(f, sv, ask(action="move", classes=["2a", "3b"]))["choices"]; assert [c["id"] for c in ch] == ["classes|2a", "classes|3b"], ch
+    r = typed.resolve(f, sv, ask(action="move", classes=["2a", "3b"]), pick={"classes|2a": "2 A", "classes|3b": "3  B"}); assert r["choices"] == [] and r["lessons"] == [1] or r["lessons"] == [1, 2], r
+    r = typed.resolve(f, sv, ask(action="move", classes=["2a", "3b"]), pick={"classes|2a": "2 A"}); assert [c["id"] for c in r["choices"]] == ["classes|3b"]
+
+@t
+def the_rules_of_the_period_range_and_the_start_are_held():
+    m, sp = model_with([lesson(1, 0, 2, 2, [A], "Mathematics", ENTIRE, [MG])])
+    g = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], to_days=["Tue"], to_period_from=1, to_period_to=2))["groups"][0]       # two periods long: it must end by period 2
+    assert sorted(s["fixes"][0]["p"] for s in g["suggestions"]) == [1], g
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG]), lesson(2, 0, 3, 1, [A], "Mathematics", ENTIRE, [MG]), lesson(3, 1, 3, 1, [A], "Mathematics", ENTIRE, [MG])])
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], from_period=3, to_days=["Wed"])); assert [g["lesson"] for g in r["groups"]] == [2, 3], r
+    r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], from_period=3, from_day="Tue", to_days=["Wed"])); assert [g["lesson"] for g in r["groups"]] == [3], r
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG])], rules=[dict(rule(A, "Not in periods", 5, 5), strength="Prefer")])
+    g = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], to_days=["Tue"], to_period_from=5, to_period_to=5))["groups"][0]
+    assert g["suggestions"] and all(s["state"] == "prefer" for s in g["suggestions"]) and g["none"] is None, g            # a prefer way is still a way
+
+@t
+def the_teacher_cap_counts_keys_and_a_refused_room_says_why():
+    cls = [c["class"] for c in SP["classes"]][:10]; lv = {c["class"]: c["level"] for c in SP["classes"]}
+    m, sp = model_with([lesson(i + 1, i % 5, 1 + i // 5, 1, [c], "Mathematics", ENTIRE, [SK], level=lv[c]) for i, c in enumerate(cls)])
+    r = typed.answer(m, sp, DAYS, ask(action="teacher", subject="Mathematics", new_teacher=MG))
+    assert len(r["groups"]) == 8 and r["more"] == 2 and r["narrow"] == "That matches 10 classes or groups. Here are the first 8; name a class to narrow it.", r
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG], room="1-01"), lesson(2, 0, 2, 1, ["1B"], "Mathematics", ENTIRE, [SK], room="1-02")])
+    g = typed.answer(m, sp, DAYS, ask(action="room", classes=[A], new_room="1-02"))["groups"][0]
+    c = helper.chain(m, sp, DAYS, [dict(kind="room", id=1, group=ENTIRE, room="1-02")]); assert c["state"] == "no" and g["suggestions"] == [] and g["none"] == c["why"] and g["none"], (g, c["why"])
 
 if "--full" in sys.argv:
     import subprocess, tempfile, time
@@ -269,7 +380,7 @@ if "--full" in sys.argv:
         m = export.model_from_files(setup, tt); sp = m["checked_setup"]; days = m["days"]; print("  days:", days[:3], "...", len(days))
         said = "Odd Fri" if any(d.startswith("Odd ") for d in days) else "Fri"
         t0 = time.time(); r = typed.answer(m, sp, days, ask(action="move", subject="Physical Education", not_days=[said])); dt = time.time() - t0
-        assert dt < 2, dt; assert r["problems"] == [] and r["choices"] == [] and len(r["groups"]) == 8 and r["more"] > 0, (r["problems"], r["choices"], len(r["groups"]), r["more"])
+        assert dt < 2, dt; assert r["problems"] == [] and r["choices"] == [] and r["groups"], (r["problems"], r["choices"], len(r["groups"]), r["more"])
         offered = sum(len(g["suggestions"]) for g in r["groups"]); print(f"  {len(r['groups'])} lessons answered (+{r['more']}), {offered} suggestions, {dt:.2f} s")
         for g in r["groups"]:
             assert len(g["suggestions"]) <= 3 and (g["none"] is None) == bool(g["suggestions"])
@@ -277,6 +388,6 @@ if "--full" in sys.argv:
                 assert helper.chain(m, sp, days, s["fixes"])["state"] in ("ok", "prefer")
                 f = s["fixes"][0]; row = next(x for x in m["lessons"] if x["id"] == (f["id"] if f["kind"] == "move" else f["a"]))
                 dest = (f["d"] if f["kind"] == "move" else next(x for x in m["lessons"] if x["id"] == f["b"])["d"])
-                assert days[dest] != said and (f["kind"] == "swap" or row["id"] == g["lesson"]), (said, s["text"])
+                assert days[dest] != said and days[row['d']] == said and (f["kind"] == "swap" or row["id"] == g["lesson"]), (said, s["text"])
 
 print(f"{n} typed checks passed")
