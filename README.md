@@ -10,6 +10,8 @@ code and download PDFs. The app does not generate timetables itself.
 | `COMMITTEE_CODE` | timetable committee | the setup editor, the downloads, Publish, the personal student codes |
 | `TEACHER_CODE` | teachers | every class, teacher, room and student timetable, the lesson search, Who's free, PDFs |
 | `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; everything on step 5 (who can teach what, who teaches which class, group or band, new groups and bands, moving rows between bands), and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
+| `ANTHROPIC_API_KEY` (optional) | the committee, in Railway | with it set, the Fix card on step 8 has a box to type a request in words; only those words go to Anthropic |
+| `TYPED_REQUEST_MODEL` (optional) | the committee, in Railway | the model that reads the words, `claude-opus-5-5` unless set; `mock` is a practice reader that needs no key |
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 
@@ -99,7 +101,7 @@ is not on step 3, and a named subject the class has only in groups.
    apply** under the grid: the sentences, and the week of each other class the fixes touch with the moved, changed or
    new lessons outlined; **Apply** makes the fixes, **Cancel** leaves everything as it was. Where one fix is not enough
    a way can be two fixes made together; they are one entry under **Fixes** and **Undo the last two fixes** takes both
-   back. When no way settles a warning the panel says so and lists the nearest ways with what each breaks; those are
+   back. With `ANTHROPIC_API_KEY` set, the Fix card also has a box above the ways: type what you want in your own words ("move PE for 2A off Friday", "give 2A maths to Mdm Lee"). It takes three kinds of request: move lessons, change who teaches a lesson, change a lesson's room. A language model only reads the words into a small request; the app finds the lessons and people itself, asks which one when a name could be several, and runs the same checks as **Ways to settle this**, showing up to three ways per lesson with **Show** and **Apply**. Nothing changes until you press Apply, and anything else you ask to keep is repeated back as not checked. The whole site can send 30 requests in 10 minutes. If the words cannot be read, the box says so and the helper's own suggestions carry on; without the key the box is not there and the helper works as before. When no way settles a warning the panel says so and lists the nearest ways with what each breaks; those are
    blocked (they would cause a clash or newly break a Must rule) and have no button. **Download the
    draft (.sqlite)** carries the draft with its fixes elsewhere (Make printouts accepts it). **Publish this
    timetable** then makes the draft what teachers and students see, with every download and the personal student codes
@@ -322,7 +324,10 @@ python app.py            # http://localhost:8000  (or: gunicorn app:app --worker
 node tests/sync.test.js                  # the same changes, in the browser's JavaScript
 node tests/people.test.js                # reading a teacher list and the avatars
 node tests/split.test.js                 # periods cut into lessons, as ttgen cuts them
+.venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 ```
+To try the Fix card's box without a key, start with `TYPED_REQUEST_MODEL=mock`: it understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".
+
 Keep one gunicorn worker (with threads): publishing swaps files in under a lock held in the web process.
 
 **Saving the setup.** There is no Save button: every change is saved for the school by itself, on the volume, and the
@@ -349,6 +354,8 @@ and an earlier copy is kept. **Save to file** and **Load from file**, on step 7,
 | `tests/smoke.py` | server checks, run with plain Python (no test runner) |
 | `tests/test_sync.py`, `tests/sync.test.js` | the setup changes, checked in Python and in JavaScript against the same cases |
 | `static/people.js` | reading a teacher list, matching it to the teachers already there, and drawing the avatars; Node can run it for the tests |
+| `typed.py` | the typed request on the Fix card: the one place a language model is called (the words in, a small request out), then the names matched to the draft and the ways checked, with no model |
+| `tests/test_typed.py` | those, with no network and no key |
 | `tests/people.test.js` | those checks, run with Node |
 | `static/parents.js`, `ttgen/parents.py` | the form teachers' rule, written twice for the page and the server and kept in step by `tests/parents_cases.json` |
 | `tests/parents.test.js`, `tests/test_parents.py` | those cases, run with Node and with Python |

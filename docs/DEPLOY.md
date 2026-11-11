@@ -56,6 +56,7 @@ TEACHER_CODE=
 STUDENT_CODE=
 HEADS_CODE=
 SCHOOL_NAME=
+ANTHROPIC_API_KEY=
 ```
 
 To make a random string, run `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`, or use a password
@@ -68,6 +69,8 @@ manager's generator.
 | `TEACHER_CODE` | **yes** | Teachers' code: every class, teacher, room and student timetable, Who's free, PDFs. | none. At least 6 letters or digits. |
 | `STUDENT_CODE` | **yes** | Students' code: class timetables and **Build my timetable**. | none. At least 6 letters or digits. |
 | `HEADS_CODE` | no | Heads of department's code. With it set, the sign-in page has a fourth choice, **Department heads**. A head sees every step except Download, Publish and Students, and can change everything on step 5's department map and table (who can teach what, who teaches which class, group or band, teaching groups, bands); they can add a teacher (marked provisional until the committee confirms them) and edit a teacher who is still provisional. The server refuses any other change: a refused change is skipped and reported to the head, and the rest of their work is kept. | none: leave it out and there is no heads' sign-in. At least 6 letters or digits, different from the other codes. |
+| `ANTHROPIC_API_KEY` | no | With it set, the Fix card on step 8 has a box to type a request in your own words. The committee adds it in Railway themselves; the app never shows it. Only the words typed in the box (at most 300 characters) and a fixed instruction go to Anthropic: no list of teachers, classes, students or lessons. A name the lead types is part of their words. | none: leave it out and the box is not there; the Fix card works as before. |
+| `TYPED_REQUEST_MODEL` | no | The model that reads the words in the box. `mock` turns on a practice reader that needs no key and understands two sentence shapes, for trying the box locally. | `claude-opus-5-5` |
 | `SCHOOL_NAME` | no | Shown on the sign-in page until a timetable is published (then the published school name is shown), and used to name a blank setup. | `School timetable` on the sign-in page |
 | `DATA_DIR` | no | Where the data goes, if not the volume. Leave it unset on Railway. | the volume's mount path, else `data/` in the app folder |
 
@@ -113,7 +116,7 @@ about a minute for a 600-student school and uses one vCPU.
 
 ## What leaves the server
 
-Nothing. The app makes no outbound calls: it has no AI inside and sends no data anywhere.
+Nothing, unless you set `ANTHROPIC_API_KEY`. The app has no AI inside and makes no outbound calls of its own. With the key set, the box on the Fix card sends the words the lead types in it (at most 300 characters) and a fixed instruction to Anthropic, and nothing else: no list of teachers, classes, students or lessons, and no part of the timetable. The app finds the lessons and people itself. A name the lead types is part of their words. Nothing typed is stored.
 
 Who sees what inside the app: a head's browser receives the whole setup, because the editor works on all of it, including
 the student list once students are added, although the Students, Download and Publish steps are hidden from heads and
