@@ -83,7 +83,9 @@ var Parents = (function () {
         if (!s || !s._id || !(Number(isObj(s.periods) ? s.periods[c.level] : 0) > 0)) return;
         var has = lessons.some(function (r) { return r.subject === sn && (r.classes || []).indexOf(c["class"]) >= 0; });
         if (has) return;
-        lessons.push({ _id: "cp-" + c._id + "-" + s._id, level: c.level, subject: sn, block: null,
+        var id = "cp-" + c._id + "-" + s._id, base = id, k = 2;  // never an id a row already has
+        while (lessons.some(function (r) { return r._id === id; })) id = base + "-" + k++;
+        lessons.push({ _id: id, level: c.level, subject: sn, block: null,
           classes: [c["class"]], teachers: names(c), students: null });
         changed = true;
       });

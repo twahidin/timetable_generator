@@ -110,7 +110,11 @@ def derive(spec):
                 continue
             if any(r.get("subject") == sn and c.get("class") in (r.get("classes") or []) for r in lessons):
                 continue
-            lessons.append({"_id": "cp-" + str(c["_id"]) + "-" + str(s["_id"]), "level": c["level"], "subject": sn, "block": None,
+            rid = base = "cp-" + str(c["_id"]) + "-" + str(s["_id"])
+            k = 2
+            while any(r.get("_id") == rid for r in lessons):  # never an id a row already has
+                rid, k = base + "-" + str(k), k + 1
+            lessons.append({"_id": rid, "level": c["level"], "subject": sn, "block": None,
                             "classes": [c.get("class")], "teachers": names(c), "students": None})
             changed = True
     for r in lessons:
