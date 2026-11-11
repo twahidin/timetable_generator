@@ -564,7 +564,7 @@ function recessSetting(label) {   // [row index, value] of a floating recess row
 }
 
 /* ---------------- derived values (same logic as the workbook formulas) */
-function split(p, L) { p = Number(p) || 0; L = Number(L) || 1; if (p <= 0) return [0, 0]; if (L <= 1) return [p, 0]; let s = ((-p % L) + L) % L; if (s * (L - 1) > p) s = 0; return [(p - s * (L - 1)) / L, s]; }
+function split(p, L) { p = Number(p) || 0; L = Number(L) || 1; if (p <= 0) return [0, 0]; if (L <= 1) return [p, 0]; let s = ((-p % L) + L) % L; if (s * (L - 1) > p) s = 0; return [Math.floor((p - s * (L - 1)) / L), s]; }   // whole numbers always, as ttgen.spec.lesson_split: periods that cannot be cut exactly lose the remainder (the Things to fix list says so)
 const patText = p => { const n = {}; p.forEach(v => n[v] = (n[v] || 0) + 1); return Object.keys(n).map(Number).sort((a, b) => b - a).map(v => `${n[v]}×${v}`).join(" + "); };
 function parsePattern(t) {   // "5x3 + 2x2" or "3, 3, 2": the lesson lengths, longest first; null when it cannot be read (ttgen.reader.parse_pattern)
   const out = [];
@@ -673,6 +673,14 @@ function issues() {
       add("blocks", i, `${b.block}: its groups are planned for ${inG} students but its classes have ${inC}, so ${inC - inG} ${inC - inG === 1 ? "is" : "are"} in none of them.`);
   });
   S.spec.subjects.forEach((s, i) => { if (!Object.values(s.periods || {}).some(Number)) add("subjects", i, `${s.subject || "Subject"}: no periods for any level.`); });
+  {   // periods that cannot be cut into lessons of the usual length or one shorter (1 period under a 3-period lesson): the remainder would not be timetabled
+    const uncut = (p, L) => { const [f, sh] = split(p, L); return p - f * L - sh * (L - 1); }, used = new Set(S.spec.lessons.map(x => `${x.level}|${x.subject}`));
+    const say = (what, p, L, lost) => `${what}: ${p} period${p === 1 ? "" : "s"} cannot be cut into lessons of ${L} or ${L - 1} periods, so ${lost === p ? (p === 1 ? "it" : "they") : lost} would not be timetabled.`;
+    S.spec.subjects.forEach((s, i) => { const L = Number(s.lesson_length) || Number(sc().lesson_length) || 1;
+      Object.entries(s.periods || {}).forEach(([lv, v]) => { const p = Number(v) || 0, lost = uncut(p, L); if (lost && used.has(`${lv}|${s.subject}`)) add("subjects", i, `${say(`${s.subject} at ${lv}`, p, L, lost)} Give the subject its own lesson length on this step.`); }); });
+    S.spec.lessons.forEach((x, i) => { const p = Number(x.periods_override) || 0; if (!p) return; const sb = subj(x.subject) || {}, L = Number(sb.lesson_length) || Number(sc().lesson_length) || 1, lost = uncut(p, L);
+      if (lost && !((x.pattern || []).length && x.pattern.map(Number).reduce((a, b) => a + b, 0) === p)) add("lessons", i, `${say("This row's own periods", p, L, lost)} Change them, or give the row a lesson pattern.`); });
+  }
   ruleProblems(info).forEach(([i, m, hard]) => add("rules", i, m, hard));
   // rooms: 'For' names a subject, department or level; each group fits some room it may use; a home room seats its class
   const forOk = new Set(forNames());
