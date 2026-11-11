@@ -51,10 +51,7 @@ def _first_col(row, prefix, n=None):
     ks = sorted((int(m[1]), k) for k in row for m in [re.fullmatch(re.escape(prefix) + r" (\d+)", str(k))] if m)
     return [row[k] for _, k in ks if row[k]]
 
-def parents_max(v):
-    """the school's most Class Parents when it counts (a whole number 1 to 6, as a number or digits), else None"""
-    if isinstance(v, str) and v.strip().isascii() and v.strip().isdigit(): v = int(v.strip())
-    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf") and v == int(v) and 1 <= v <= 6 else None
+parents_max = PA.maximum   # one reading of the school's maximum, shared with the rule
 
 def _minutes(t):
     """a clock time (time, datetime, '13:40', or an Excel day fraction) -> minutes after midnight"""
@@ -97,10 +94,16 @@ def _room_rules_from_notes(rows, venues, rules):
                                     note=f"From the Settings note on '{k}': {note}"))
     return out
 
+def _setting_rows(st):
+    """rows 5 to 59, and on past 59 only while the labels carry on without a gap (many extra settings push the rows down; text typed far below is not a setting)"""
+    end = 60
+    while end <= st.max_row and st.cell(end, 1).value: end += 1
+    return range(5, end)
+
 def read_template(path):
     wb = openpyxl.load_workbook(path, data_only=False)
     st = wb["Settings"]
-    rows = [(str(st.cell(r, 1).value).strip(), st.cell(r, 2).value, st.cell(r, 3).value) for r in range(5, max(60, st.max_row + 1)) if st.cell(r, 1).value]   # past row 59 too: many extra settings push the rows below down
+    rows = [(str(st.cell(r, 1).value).strip(), st.cell(r, 2).value, st.cell(r, 3).value) for r in _setting_rows(st) if st.cell(r, 1).value]
     kv = {k: v for k, v, _ in rows}
     kind = str(kv.get("School type") or "secondary").lower()
     sc: dict = defaults("primary" if kind.startswith("pri") else "secondary")

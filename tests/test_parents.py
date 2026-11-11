@@ -45,8 +45,10 @@ assert P.same(["Tan", "Lim"], ["Lim", "Tan"]) is True
 assert P.same(["Tan"], ["Tan", "Lim"]) is False
 assert P.same([], [None]) is True
 for given, expect in [(2, 3), (4, 4), ("4", 4), (6, 6), (7, 3), (0, 3), (2.5, 3), ("x", 3), ("0x10", 3), ([4], 3), (None, 3),
-                      (float("inf"), 3), (True, 3)]:
+                      (float("inf"), 3), (True, 3), (" 4 ", 4), (" ", 3)]:
     assert P.cap({"school": {"parents_max": given}}) == expect, ("cap", given)
+for given, expect in [(" 4 ", 4), ("5", 5), (3, 3), (0, None), (7, None), ("x", None), (2.5, None), (True, None), (" ", None), (None, None)]:
+    assert P.maximum(given) == expect, ("maximum", given)
 assert P.cap({"school": {}}) == 3
 assert P.cap({}) == 3
 assert P.label(spec) == "Form teachers"
@@ -182,6 +184,48 @@ def the_skill_version_is_2026_11_3():
     assert SPEC.SKILL_VERSION == "2026-11.3"
     assert "2026-11.3" in open(os.path.join(root, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
     assert "2026-11.3" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
+
+
+import subprocess  # noqa: E402
+
+
+def check_cells(p, rows=(6, 7, 30)):
+    ws = openpyxl.load_workbook(p)["6 Lessons"]
+    ck = next(j for j in range(1, ws.max_column + 1) if ws.cell(5, j).value == "Check")
+    return [ws.cell(r, ck).value for r in rows], max(len(str(c.value)) for row in ws.iter_rows(min_row=6) for c in row if isinstance(c.value, str))
+
+
+def wide(n):
+    sp = primary(); sp["lessons"][0]["teachers"] = [t["name"] for t in sp["teachers"][:n]]
+    return sp
+
+
+@t
+def the_check_formula_stays_within_excels_limit_however_many_teacher_columns():
+    cells, longest = check_cells(write(wide(12)))
+    assert longest < 8192 and "SUMPRODUCT" in cells[0], longest          # was 13306 characters at 12 columns
+    assert check_cells(write(wide(9)))[1] < 8192                           # was 8919: a lesson of three classes with three Class Parents each
+
+
+@t
+def up_to_six_teacher_columns_the_check_formula_is_as_it_was():
+    old = tempfile.mkdtemp()
+    subprocess.run("git archive c2dd35f ttgen | tar -x -C " + old, shell=True, cwd=os.path.dirname(HERE), check=True)
+    src = open(os.path.join(old, "ttgen", "template.py"), encoding="utf-8").read(); assert "NTCH, NPAIR = 3, 8" in src
+    for n, tc in ((3, 3), (6, 6)):
+        open(os.path.join(old, "ttgen", "template.py"), "w", encoding="utf-8").write(src.replace("NTCH, NPAIR = 3, 8", f"NTCH, NPAIR = {tc}, 8"))
+        out = os.path.join(old, f"o{n}.xlsx")
+        subprocess.run([sys.executable, "-c", "import sys,copy;sys.path.insert(0,sys.argv[1]);from ttgen import template,samples;"
+                        "sp=samples.primary();sp['lessons'][0]['teachers']=[t['name'] for t in sp['teachers'][:int(sys.argv[3])]];template.write_template(sp,sys.argv[2])", old, out, str(n)], check=True)
+        assert check_cells(out)[0] == check_cells(write(wide(n)))[0], n
+
+
+@t
+def the_settings_rows_are_read_as_before_below_row_59():
+    base = write(primary()); wb = openpyxl.load_workbook(base); wb["Settings"].cell(80, 1, "Something typed far below"); wb.save(base)
+    assert read(base) == read(write(primary()))
+    sp = primary(); sp["school"]["extra_settings"] = [[f"Extra {i}", i, ""] for i in range(70)]
+    assert len(read(write(sp))["school"]["extra_settings"]) == 70
 
 
 print(f"{passed} cases passed")

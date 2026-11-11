@@ -431,7 +431,8 @@ def write_template(spec, path, extra_rows=120):
         def can(tc):
             k = f"IFERROR(INDEX('{T}'!${KEYC}${R0}:${KEYC}${R0 + 999},MATCH({tc}{r},'{T}'!$A${R0}:$A${R0 + 999},0)),\"\")"
             ok = f'ISNUMBER(FIND("|"&{B_}&"@All|",{k}))+ISNUMBER(FIND("|"&{B_}&"@"&{A_}&"|",{k}))+ISNUMBER(FIND("|"&{B_}&"@"&{band_of(A_)}&"|",{k}))'
-            twice = "+".join(f"COUNTIFS($C${R0}:$C${R0 + 1999},{C_},${c}${R0}:${c}${R0 + 1999},{tc}{r})" for c in TC)
+            if NTCH <= 6: twice = "+".join(f"COUNTIFS($C${R0}:$C${R0 + 1999},{C_},${c}${R0}:${c}${R0 + 1999},{tc}{r})" for c in TC)
+            else: twice = f"SUMPRODUCT(($C${R0}:$C${R0 + 1999}={C_})*(${TC[0]}${R0}:${TC[-1]}${R0 + 1999}={tc}{r}))"   # one range term, not one per column (Excel's 8192-character limit)
             if named: ok = f"({ok}+{named})"   # a named subject's lessons are taken by the class's form teachers: not tested here
             return f'IF({tc}{r}="","",IF({ok}=0,{tc}{r}&" not set to teach this at "&{A_}&". ","")&IF(AND({C_}<>"",{twice}>1),{tc}{r}&" twice in this block. ",""))'
         lw[CK] = (f'=IF({B_}="","",TRIM(IF(N({P_})=0,"No periods for "&{A_}&" on Subjects. ","")&IF(COUNTA({CF1}{r}:{CFN}{r})=0,"No class. ","")'

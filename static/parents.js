@@ -24,12 +24,13 @@ var Parents = (function () {
     return named.filter(function (n, i) { return have[n] === true && named.indexOf(n) === i; });
   }
 
-  // A whole number 1 to 6, given as a number or as digits; anything else counts as 2.
-  function cap(spec) {
-    var v = school(spec).parents_max;
-    if (typeof v === "string" && /^[0-9]+$/.test(v)) v = Number(v);
-    return Math.max(3, typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 6 ? v : 2);
+  // The most Class Parents when it counts (a whole number 1 to 6, as a number or digits, spaces around digits allowed), else null.
+  function maximum(v) {
+    if (typeof v === "string" && /^[0-9]+$/.test(v.trim())) v = Number(v.trim());
+    return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 6 ? v : null;
   }
+  // max(3, the maximum); anything that does not count is 2.
+  function cap(spec) { return Math.max(3, maximum(school(spec).parents_max) || 2); }
 
   function label(spec) { return String(school(spec).parents_name || "").trim() || "Form teachers"; }
 
@@ -102,11 +103,7 @@ var Parents = (function () {
   // ---- what the page does on an edit (page only: the server never marks hand changes)
 
   // The maximum as the school set it: a whole number 1 to 6 (number or digits), else 2.
-  function pmax(spec) {
-    var v = school(spec).parents_max;
-    if (typeof v === "string" && /^[0-9]+$/.test(v)) v = Number(v);
-    return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 6 ? v : 2;
-  }
+  function pmax(spec) { return maximum(school(spec).parents_max) || 2; }
   function clean(l) {
     var out = [];
     (Array.isArray(l) ? l : []).forEach(function (n) { if (!blank(n) && out.indexOf(n) < 0) out.push(n); });
@@ -259,7 +256,7 @@ var Parents = (function () {
     return out;
   }
 
-  return { names: names, subjects: subjects, cap: cap, label: label, staffed: staffed, follows: follows,
+  return { names: names, subjects: subjects, cap: cap, maximum: maximum, label: label, staffed: staffed, follows: follows,
     want: want, same: same, adopt: adopt, derive: derive, settle: settle, setParents: setParents, setSubjects: setSubjects,
     setMax: setMax, fillCount: fillCount, fill: fill, handRows: handRows, back: back, backAll: backAll,
     exempt: exempt, of: of, issues: issues };

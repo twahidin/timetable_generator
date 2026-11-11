@@ -31,13 +31,16 @@ def subjects(spec):
     return [n for i, n in enumerate(named) if n in have and named.index(n) == i]
 
 
+def maximum(v):
+    """The most Class Parents when it counts (a whole number 1 to 6, as a number or digits, spaces around digits allowed), else None."""
+    if isinstance(v, str) and v.strip().isascii() and v.strip().isdigit():
+        v = int(v.strip())
+    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf") and v == int(v) and 1 <= v <= 6 else None
+
+
 def cap(spec):
-    """max(3, parents_max) where parents_max is a whole number 1 to 6 (a number or digits); anything else counts as 2."""
-    v = _school(spec).get("parents_max")
-    if isinstance(v, str) and v.isascii() and v.isdigit():
-        v = int(v)
-    n = v if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf") and v == int(v) and 1 <= v <= 6 else 2
-    return max(3, int(n))
+    """max(3, parents_max) where parents_max counts (see maximum); anything else counts as 2."""
+    return max(3, maximum(_school(spec).get("parents_max")) or 2)
 
 
 def label(spec):
