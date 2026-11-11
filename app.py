@@ -4,7 +4,7 @@ Committee (COMMITTEE_CODE): fill the setup step by step, download it with the ti
 to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable."""
-import copy, io, os, re, shutil, sys, tempfile, zipfile
+import copy, io, os, re, shutil, sys, tempfile, traceback, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -12,7 +12,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, draft, store, sync
+import access, checks, draft, store, sync, typed
 from ttgen import choices
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -431,6 +431,24 @@ def draft_fixes():
 def draft_preview():
     return _checked(lambda: draft.preview(_posted_fixes()), sentences=True)
 
+NO_TYPED = "Typing a request is not set up on this server."
+
+@app.post("/api/draft/ask")
+@need("committee")
+def draft_ask():
+    """the lead's typed request: the words read into an ask by a language model, then answered from the draft with the helper's own checks. 200 for every outcome
+    about the request itself (ok false carries the sentence). Nothing is stored or logged: not the words, the ask or the answer."""
+    if not typed.enabled(): return {"error": NO_TYPED}, 404
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict): return {"error": "Send the request as JSON."}, 400
+    try: return jsonify(draft.ask(body.get("words"), body.get("pick"), body.get("ask")))
+    except draft.NoDraft as e: return {"error": str(e)}, 404            # as the other draft routes say it
+    except Exception as e:
+        if type(e) is LookupError: return {"error": NO_SETUP}, 409
+        # typed.read never raises, so a fault here came after the words were read. Logged as the type and the frames only: the message could hold the key or the words.
+        app.logger.error("typed request failed after reading: %s\n%s", type(e).__name__, "".join(traceback.format_tb(e.__traceback__)))
+        return jsonify(ok=False, error=typed.BROKE)                    # 200, never a 500
+
 @app.get("/api/draft/download")
 @need("committee")
 def draft_download():
@@ -503,7 +521,7 @@ def status():
     have, probs = access.configured()
     _, at = store.load_setup()
     if role() == "head": return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info())
-    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary())
+    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), typed=typed.enabled())
 
 NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
 

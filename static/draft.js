@@ -95,6 +95,19 @@ var Draft = (function () {
     return hit ? { key: hit.key, how: "changed" } : null;
   }
 
-  return { follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
+  /* the line above a typed request's results: the model's reply, the count left out, and what was asked beyond the ask (the app did not check that) */
+  function askSummary(a) {
+    if (!a) return "";
+    if (a.ok === false) return a.error || "";
+    var out = [];
+    if (a.reply) out.push(a.reply);
+    if (a.more) out.push(a.more === 1 ? "1 more lesson matches." : a.more + " more lessons match.");
+    if (a.keep && a.keep.length) out.push("You also asked: " + a.keep.join("; ") + ". The app did not check this: look at the preview before you apply.");
+    return out.join(" ");
+  }
+  /* the word a choice question uses for the field the name was meant for */
+  function choiceWord(field) { return { classes: "class", subject: "subject", teacher: "teacher", new_teacher: "teacher", new_room: "room" }[field] || "name"; }
+
+  return { askSummary: askSummary, choiceWord: choiceWord, follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
 })();
 if (typeof module !== "undefined") module.exports = Draft;
