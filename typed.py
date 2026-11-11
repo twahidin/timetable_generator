@@ -49,10 +49,17 @@ _lock = threading.Lock()           # the app runs with several threads: filter, 
 _seen = []                         # times of the last reads that went to the call
 def _now(): return time.monotonic()
 
-def enabled(): return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()) or model() == "mock"
+def _env(name): return os.environ.get(name, "").strip()
+def _earlier():
+    """the key a server set up for an earlier version still holds: AI_API_KEY, only when AI_PROVIDER says anthropic (another provider's key, or one with no provider named, is never used)"""
+    return _env("AI_API_KEY") if _env("AI_PROVIDER").lower() == "anthropic" else ""
+def _key(): return _env("ANTHROPIC_API_KEY") or _earlier()
+def enabled(): return bool(_key()) or model() == "mock"
 def model():
-    m = os.environ.get("TYPED_REQUEST_MODEL", "").strip()
-    return "mock" if m.lower() == "mock" else m or "claude-opus-5-5"
+    m = _env("TYPED_REQUEST_MODEL")
+    if m.lower() == "mock": return "mock"
+    if not m and not _env("ANTHROPIC_API_KEY") and _earlier(): m = _env("AI_MODEL")   # the earlier names go together: AI_MODEL counts only when AI_API_KEY is the key in use
+    return "claude-opus-5-5" if not m or m.lower() == "mock" else m
 
 def _strs_ok(v): return isinstance(v, list) and len(v) <= MAX_LIST and all(isinstance(x, str) and len(x) <= MAX_STR for x in v)
 def _int(v): return isinstance(v, int) and not isinstance(v, bool)
@@ -97,7 +104,7 @@ def _client():
     with _lock:
         if _cached is None:
             import anthropic                                   # inside, so the app and the tests run without the SDK
-            _cached = anthropic.Anthropic(timeout=12.0, max_retries=1)   # at worst about 25 seconds with the one retry; the key comes from ANTHROPIC_API_KEY, by the SDK's own default
+            _cached = anthropic.Anthropic(api_key=_key(), timeout=12.0, max_retries=1)   # at worst about 25 seconds with the one retry; the key is handed over by name, as it may be under AI_API_KEY
         return _cached
 
 def _call(words):

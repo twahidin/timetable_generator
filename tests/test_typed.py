@@ -56,14 +56,42 @@ def the_cost_guard_stops_the_thirty_first_request():
         clock[0] += 601; assert typed.read("move PE off Friday", call=call)["ok"] and len(calls) == 31
     finally: import time; typed._now = time.monotonic
 
+OFF = dict(ANTHROPIC_API_KEY=None, TYPED_REQUEST_MODEL=None, AI_API_KEY=None, AI_PROVIDER=None, AI_MODEL=None)   # no key and no model under either set of names
+
 @t
 def enabled_follows_the_key_and_the_mock_setting():
+  with env(**OFF):
     with env(ANTHROPIC_API_KEY=None, TYPED_REQUEST_MODEL=None): assert typed.enabled() is False and typed.model() == "claude-opus-5-5"
     with env(ANTHROPIC_API_KEY="  ", TYPED_REQUEST_MODEL=None): assert typed.enabled() is False
     with env(ANTHROPIC_API_KEY="k", TYPED_REQUEST_MODEL=None): assert typed.enabled() is True
     with env(ANTHROPIC_API_KEY=None, TYPED_REQUEST_MODEL="mock"): assert typed.enabled() is True and typed.model() == "mock"
     with env(ANTHROPIC_API_KEY=None, TYPED_REQUEST_MODEL=" other-model "): assert typed.enabled() is False and typed.model() == "other-model"
     with env(ANTHROPIC_API_KEY=None, TYPED_REQUEST_MODEL="  "): assert typed.model() == "claude-opus-5-5"
+
+def on(**kw): return env(**{**OFF, **kw})
+@t
+def the_key_of_an_earlier_version_turns_the_box_on_when_its_provider_is_anthropic():
+    with on(): assert typed._key() == "" and typed.enabled() is False
+    with on(AI_API_KEY=" old ", AI_PROVIDER=" Anthropic "): assert typed._key() == "old" and typed.enabled() is True
+    with on(AI_API_KEY="old"): assert typed._key() == "" and typed.enabled() is False                           # no provider named: the earlier versions called that not set up, and the key could be anyone's
+    with on(AI_API_KEY="old", AI_PROVIDER="openai"): assert typed._key() == "" and typed.enabled() is False     # another provider's key is never sent to Anthropic
+    with on(AI_API_KEY="  ", AI_PROVIDER="anthropic"): assert typed.enabled() is False
+    with on(AI_API_KEY="old", AI_PROVIDER="anthropic", ANTHROPIC_API_KEY="new"): assert typed._key() == "new"   # the new name wins
+    with on(AI_API_KEY="old", ANTHROPIC_API_KEY="new", AI_PROVIDER="openai"): assert typed._key() == "new"
+
+@t
+def the_model_of_an_earlier_version_is_used_only_with_its_key():
+    A = dict(AI_API_KEY="old", AI_PROVIDER="anthropic")
+    with on(**A, AI_MODEL=" some-model "): assert typed.model() == "some-model"
+    with on(**A, AI_MODEL="some-model", TYPED_REQUEST_MODEL="mine"): assert typed.model() == "mine"               # the box's own setting wins
+    with on(**A, AI_MODEL="some-model", TYPED_REQUEST_MODEL="mock"): assert typed.model() == "mock"
+    with on(**A, AI_MODEL="mock"): assert typed.model() == "claude-opus-5-5"                                     # the practice reader is switched on by TYPED_REQUEST_MODEL only
+    with on(**A): assert typed.model() == "claude-opus-5-5"
+    with on(AI_PROVIDER="anthropic", AI_MODEL="left-over"): assert typed.model() == "claude-opus-5-5" and typed.enabled() is False   # a model with no key is nothing
+    with on(AI_API_KEY="old", AI_MODEL="left-over"): assert typed.model() == "claude-opus-5-5"                   # nor one whose key is not used
+    with on(ANTHROPIC_API_KEY="new", AI_PROVIDER="anthropic", AI_MODEL="left-over"): assert typed.model() == "claude-opus-5-5"   # a left-over model does not change a server set up by the new names
+    with on(ANTHROPIC_API_KEY="new", **A, AI_MODEL="left-over"): assert typed.model() == "claude-opus-5-5"
+    with on(AI_API_KEY="old", AI_PROVIDER="openai", AI_MODEL="gpt-x"): assert typed.model() == "claude-opus-5-5"
 
 @t
 def the_mock_reader_understands_its_two_shapes():
@@ -134,8 +162,11 @@ def the_guard_holds_under_threads_and_the_client_is_made_once():
     made = []; real = anthropic.Anthropic; old = typed._cached
     class Fake:
         def __init__(s, **kw): made.append(kw)
-    anthropic.Anthropic = Fake; typed._cached = None
-    try: a = typed._client(); b = typed._client(); assert a is b and made == [dict(timeout=12.0, max_retries=1)], made
+    anthropic.Anthropic = Fake
+    try:
+        for kw, key in ((dict(ANTHROPIC_API_KEY="k"), "k"), (dict(AI_API_KEY="old", AI_PROVIDER="anthropic"), "old"), (dict(AI_API_KEY="old", AI_PROVIDER="anthropic", ANTHROPIC_API_KEY="k"), "k")):
+            made.clear(); typed._cached = None
+            with on(**kw): a = typed._client(); b = typed._client(); assert a is b and made == [dict(api_key=key, timeout=12.0, max_retries=1)], (kw.keys(), len(made))   # the key is handed over by name, whichever variable holds it
     finally: anthropic.Anthropic = real; typed._cached = old
 
 
