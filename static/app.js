@@ -1345,6 +1345,7 @@ document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / C
   if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
   e.preventDefault(); undo(k === "z" && !e.shiftKey);
 });
+document.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing && e.target.id === "fxAskIn") { e.preventDefault(); fxAsk(); } });   // Enter in the typed-request box asks; nothing while a request is out (fxAsk)
 let painting = false;
 document.addEventListener("mousedown", e => { const c = e.target.closest("td.c"); if (!c || locked(G.shown)) return; painting = true; paint(c); e.preventDefault(); });
 document.addEventListener("mouseover", e => { if (!painting) return; const c = e.target.closest("td.c"); if (c) paint(c); });
@@ -2109,6 +2110,7 @@ async function tlFile(el) {   // an .xlsx goes through the server (its teachers 
   TL.text = text; tlRead();
 }
 document.addEventListener("input", e => {
+  if (e.target.id === "fxAskIn") { if (S.fix) S.fix.words = e.target.value; return; }
   if (e.target.id === "gfStudents") { gfState().students = e.target.value; return; }
   if (e.target.id === "bfName") { const bf = bfState(); bf.name = e.target.value; bf.touched = true; const ev = $("#bfEveryone"); if (ev && !bf.evTouched) ev.checked = !/option|elective/i.test(bf.name); return; }
   if (e.target.id === "mQ") { M.q = e.target.value; const rb = $("#rbody"); if (rb) rb.innerHTML = rosterList(mapDept()); return; }   // the roster only: a full redraw would take the caret
@@ -2290,7 +2292,12 @@ async function makePrintouts() {
   finally { go.disabled = false; }
 }
 /* a timetable made outside the app: kept on the server as the draft and checked against the setup as it is now */
-function drawDraft() { const box = $("#imResult"); if (box) box.innerHTML = S.draft ? draftHTML(S.draft) : ""; }
+function drawDraft() {   // the box for a typed request (and the buttons that answer it) keeps the focus and the caret across the redraw; its text comes back from S.fix.words
+  const box = $("#imResult"); if (!box) return;
+  const a = document.activeElement, mine = a && a.matches && a.matches("#fxAskIn, #fxAsk, [data-fxpick]"), caret = mine && a.id === "fxAskIn" ? [a.selectionStart, a.selectionEnd] : null;
+  box.innerHTML = S.draft ? draftHTML(S.draft) : "";
+  const inp = mine && $("#fxAskIn"); if (inp) { inp.focus(); const n = inp.value.length; try { inp.setSelectionRange(caret ? caret[0] : n, caret ? caret[1] : n); } catch (e) { } }
+}
 async function uploadDraft(replace) {
   const fd = timetableForm(); if (!fd) return;
   if (replace) fd.append("replace", "1");
@@ -2415,11 +2422,56 @@ function fixHTML() {
       : `<p class="muted small">${f.view === "class" ? "Nothing is missing for this class." : "Missing periods are shown for a class."}</p>`)
       + `<p class="muted small">Click a lesson to see where it can go.</p>`;
   }
-  side = fxWaysHTML(f) + side;
+  side = fxAskHTML(f) + fxWaysHTML(f) + side;
   return `<div class="fxcard"><h3>Fix the timetable</h3><div class="row fxpick">${picker("class", g.classes || [], "Class")}${picker("teacher", g.teachers || [], "Teacher")}
       ${weeks.length > 1 ? `<span class="fxweeks">${weeks.map(w => `<button class="${w.name === wk.name ? "primary" : ""}" data-fxweek="${esc(w.name)}">${esc(w.name)} week</button>`).join("")}</span>` : ""}</div>
     <p class="muted small">${esc(f.view === "class" ? "Class" : "Teacher")} ${esc(f.name)}. ${f.sel ? "Green is open, amber is open but less wanted, red is not allowed. Click the selected lesson again to let go of it." : "Click a lesson to select it."}</p>
     <div class="fxlayout"><div class="fxwrap">${table}</div><div class="fxside">${side}</div></div>${fxPreHTML(f)}</div>`;
+}
+function fxSugHTML(x, id) {   // one checked suggestion: the sentence, what it disturbs, its state, Show and Apply. id finds it again in fxSuggestion
+  return `<div class="fxway"><div class="small"><b>${esc(x.text)}</b></div>${(x.disturbs || []).length ? `<ul class="small muted">${x.disturbs.map(d => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
+        <div class="row">${Draft.stateWord(x.state) ? `<span class="fxstate small">${fxDot(x.state)} ${esc(Draft.stateWord(x.state))}</span>` : ""}<button data-fxshow="${id}">Show</button><button class="primary" data-fxapply="${id}">Apply</button></div></div>`;
+}
+/* the box for a typed request, only when the server says it is on (G.st.typed). S.fix holds words (the box's text), ans (the answer), pick (choices
+   settled so far), askN (drops a late answer) and askBusy. Everything in the answer is text from the server: esc() everywhere. */
+function fxAskHTML(f) {
+  if (!(G.st && G.st.typed)) return "";
+  const a = f.ans, bad = a && a.ok === false;
+  let out = "";
+  if (bad) out = `<p class="muted small">${esc(a.error)}</p>`;
+  else if (a) {
+    const hasSug = (a.groups || []).length;
+    out = `<p class="small">${esc(Draft.askSummary(a))}</p>`
+      + (a.problems || []).map(x => `<p class="small">${esc(x)}</p>`).join("")
+      + (a.choices || []).map((c, ci) => `<div class="fxchoice"><p class="small">Which ${esc(Draft.choiceWord(c.field))} did you mean by "${esc(c.said)}"?</p><div class="row">${(c.options || []).map((o, oi) => `<button data-fxpick="${ci}|${oi}">${esc(o)}</button>`).join("")}</div></div>`).join("")
+      + (a.groups || []).map((g, gi) => `<div class="fxgroup"><p class="small"><b>${esc(g.text)}</b></p>${(g.suggestions || []).map((x, si) => fxSugHTML(x, `a${gi}.${si}`)).join("")}${g.none ? `<p class="small">${esc(g.none)}</p>` : ""}</div>`).join("")
+      + (a.narrow ? `<p class="small">${esc(a.narrow)}</p>` : "")
+      + (hasSug ? `<p class="muted small">These are suggestions from your words. Nothing changes until you press Apply.</p>` : "");
+  }
+  return `<div class="fxask"><div class="row"><input id="fxAskIn" type="text" maxlength="300" autocomplete="off" placeholder="Or say what you want, for example: move PE for 2A off Friday" value="${esc(f.words)}"><button id="fxAsk"${f.askBusy ? " disabled" : ""}>${f.askBusy ? "Reading…" : "Ask"}</button></div>${out}</div>`;
+}
+function fxAskClear(f) { f.ans = null; f.pick = {}; f.askN++; f.askBusy = false; }   // the answer goes (the timetable changed under it); the words stay
+async function fxAsk(choice) {   // choice: [choice index, option index] when the lead answered a question: asked again with the same ask and the picks so far
+  const f = S.fix; if (!f || f.askBusy) return;
+  let body;
+  if (choice) {
+    const c = f.ans && f.ans.ask && (f.ans.choices || [])[choice[0]], o = c && (c.options || [])[choice[1]]; if (o === undefined) return;
+    f.pick = Object.assign({}, f.pick, { [c.id]: o }); body = { words: f.askWords, ask: f.ans.ask, pick: f.pick };
+  } else {
+    const w = String(f.words || "").trim(); if (!w) return;
+    f.pick = {}; f.askWords = w; body = { words: w };
+  }
+  const n = ++f.askN; f.askBusy = true; f.ans = null; fxDraw();
+  let ans;
+  try {
+    const r = await fetch("/api/draft/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (r.status === 401) { location.href = "/login"; return; }
+    const j = await r.json().catch(() => ({}));
+    ans = r.status >= 500 ? { ok: false, error: "Could not reach the server." } : r.ok || j.error ? j : { ok: false, error: "Something went wrong." };
+    if (!r.ok) ans.ok = false;
+  } catch (e) { ans = { ok: false, error: "Could not reach the server: " + e.message }; }
+  if (S.fix !== f || f.askN !== n) return;   // closed, or asked again, meanwhile
+  f.askBusy = false; f.ans = ans; fxDraw();
 }
 function fxWaysHTML(f) {   // the helper's block: the ways to settle the warning the card was opened from, each already checked
   if (!f.warn) return "";
@@ -2430,8 +2482,7 @@ function fxWaysHTML(f) {   // the helper's block: the ways to settle the warning
   else if (!a) body = f.waysFail ? `<p class="issue small">Could not load the ways.</p><div class="row">${close}</div>` : `<p class="muted small">Looking for ways…</p>`;
   else {
     const sg = a.suggestions || [], bl = a.blocked || [];
-    body = sg.map((x, i) => `<div class="fxway"><div class="small"><b>${esc(x.text)}</b></div>${(x.disturbs || []).length ? `<ul class="small muted">${x.disturbs.map(d => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
-        <div class="row">${Draft.stateWord(x.state) ? `<span class="fxstate small">${fxDot(x.state)} ${esc(Draft.stateWord(x.state))}</span>` : ""}<button data-fxshow="${i}">Show</button><button class="primary" data-fxapply="${i}">Apply</button></div></div>`).join("")
+    body = sg.map((x, i) => fxSugHTML(x, i)).join("")
       + (a.none ? `<p class="small">${esc(a.none)}</p>` : "")
       + (!sg.length && bl.length ? `<p class="small">The nearest ways, and what each breaks:</p><ul class="small">${bl.map(x => `<li>${esc(x.text)} <span class="muted">${esc(x.why)}</span></li>`).join("")}</ul>` : "")
       + `<div class="row">${close}</div>`;
@@ -2530,7 +2581,7 @@ async function fxRefresh(f) {   // the grid again, then the options when a lesso
   return live();
 }
 async function fxOpen(view, name, day, sel, warn) {   // day: a day's name, to open on the week that holds it; warn: the warning it was opened from (the warning itself: its key, kind and where are kept)
-  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true, warn: warn ? warn.key : null, was: warn ? { key: warn.key, kind: warn.kind, where: warn.where || null } : null, changed: "", ways: null, waysFail: false, settled: false, pre: null, preWant: null }, n = ++FX.n;
+  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true, warn: warn ? warn.key : null, was: warn ? { key: warn.key, kind: warn.kind, where: warn.where || null } : null, changed: "", ways: null, waysFail: false, settled: false, pre: null, preWant: null, words: "", ans: null, pick: {}, askN: 0, askBusy: false, askWords: "" }, n = ++FX.n;
   const ok = await fxRefresh(f); f.opening = false;
   if (!ok || n !== FX.n) return;
   if (day) { const i = f.grid.days.indexOf(day), w = Grid.weeks(f.grid.days).find(x => x.days.some(d => d.i === i)); if (w) f.week = w.name; }
@@ -2550,7 +2601,7 @@ function fxFollow(f, warnings) {   // the warning the card was opened on, found 
 async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again, then the ways when the card has a warning
   const f = S.fix; S.draft = j; poll();
   if (f) {
-    f.pre = null; f.preWant = null;
+    f.pre = null; f.preWant = null; fxAskClear(f);
     const still = !!f.warn && fxFollow(f, j.warnings);
     if (f.warn) { f.ways = null; f.waysFail = false; }
     const ok = await fxRefresh(f); if (S.fix !== f) return; if (!ok) toast("The fix was made, but the grid could not be loaded again. Pick the class again.");
@@ -2582,7 +2633,10 @@ function fxGo(sl) {   // a click on a slot: a swap that moves another class's le
   const sel = S.fix.optFor;
   if (Grid.isSwap(sl) && (sl.also || []).length) fxPreview(Grid.previewFor(sel, sl)); else fxFix(Grid.fixFor(sel, sl));
 }
-function fxSuggestion(f, i) { const a = fxWaysOf(f); return a && (a.suggestions || [])[Number(i)] || null; }
+function fxSuggestion(f, i) {   // "3": the ways' third; "a1.0": the typed answer's second lesson, first suggestion
+  if (/^a\d+\.\d+$/.test(i)) { const [g, k] = i.slice(1).split(".").map(Number), a = f.ans && f.ans.ok !== false && f.ans.groups; return a && a[g] && (a[g].suggestions || [])[k] || null; }
+  const a = fxWaysOf(f); return a && (a.suggestions || [])[Number(i)] || null;
+}
 function fxStateOK(x) { if (x && (x.state === "ok" || x.state === "prefer")) return true; toast((x && x.why) || "That is not open."); return false; }
 function fxClick(b) {   // true when the click was the Fix card's or a warning's Fix button
   const d = b.dataset, f = S.fix, split = v => { const i = v.indexOf("|"); return [v.slice(0, i), v.slice(i + 1)]; };
@@ -2594,6 +2648,8 @@ function fxClick(b) {   // true when the click was the Fix card's or a warning's
   if (b.id === "fxOpen") { fxOpenFirst(); return true; }
   if (b.id === "fxUndo") { fxUndo(); return true; }
   if (!f || !f.grid) return false;
+  if (b.id === "fxAsk") { fxAsk(); return true; }
+  if (d.fxpick !== undefined) { fxAsk(d.fxpick.split("|").map(Number)); return true; }
   if (d.fxshow !== undefined) { const x = fxSuggestion(f, d.fxshow); if (x) fxPreview(x.fixes); return true; }
   if (d.fxapply !== undefined) { const x = fxSuggestion(f, d.fxapply); if (x) fxApply(x.fixes); return true; }
   if (d.fxwaysclose !== undefined) { f.warn = null; f.ways = null; f.settled = false; f.waysFail = false; fxDraw(); return true; }

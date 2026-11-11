@@ -113,4 +113,21 @@ t("follow: nothing to follow gives null and a was without where never throws", (
   assert.strictEqual(Draft.follow({ key: "clash:A", kind: "clash", where: null }, undefined), null);
 });
 
+t("askSummary: the reply, the count of more lessons, what was asked beyond the ask, an error", () => {
+  const ok = o => Object.assign({ ok: true, understood: true, reply: "Moving PE for 2A off Friday.", more: 0, keep: [] }, o);
+  assert.equal(Draft.askSummary(ok()), "Moving PE for 2A off Friday.");
+  assert.equal(Draft.askSummary(ok({ more: 3 })), "Moving PE for 2A off Friday. 3 more lessons match.");
+  assert.equal(Draft.askSummary(ok({ keep: ["keep the doubles together", "not before recess"] })), "Moving PE for 2A off Friday. You also asked: keep the doubles together; not before recess. The app did not check this: look at the preview before you apply.");
+  assert.equal(Draft.askSummary(ok({ more: 2, keep: ["keep the doubles together"] })), "Moving PE for 2A off Friday. 2 more lessons match. You also asked: keep the doubles together. The app did not check this: look at the preview before you apply.");
+  assert.equal(Draft.askSummary({ ok: false, error: "Keep the request under 300 characters." }), "Keep the request under 300 characters.");
+  assert.equal(Draft.askSummary(ok({ understood: false, reply: "I did not follow that.", keep: [] })), "I did not follow that.");
+  assert.equal(Draft.askSummary(ok({ reply: "", more: 1 })), "1 more lessons match.");
+  assert.equal(Draft.askSummary(null), "");
+  assert.equal(Draft.askSummary(ok({ reply: undefined, keep: undefined, more: undefined })), "");
+});
+t("choiceWord: the question's word for the field", () => {
+  assert.deepEqual(["classes", "subject", "teacher", "new_teacher", "new_room"].map(Draft.choiceWord), ["class", "subject", "teacher", "teacher", "room"]);
+  assert.equal(Draft.choiceWord("whatever"), "name");
+});
+
 console.log(n + " checks passed");
