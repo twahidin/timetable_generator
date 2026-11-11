@@ -185,6 +185,12 @@ for op in (["set", "lessons", "L2", "teachers", ["Koh"]], ["set", "lessons", "L1
            ["add", "lessons", dict(_id="n3", level="Sec 1", subject="Maths", block=None, classes=["1B"], teachers=[]), ""], ["del", "lessons", "L2"]):
     assert sync.head_may(sp, [op]) is None, op
 assert sync.head_split(sp, [["set", "lessons", "L2", "students", 1], ["del", "lessons", "L1"]]) == ([["set", "lessons", "L2", "students", 1]], [(1, WHY)])
+# one batch cannot get round it: each op is judged on the setup as the allowed ones before it leave it
+for first, then in ((dict(_id="n8", level="Sec 1", subject="Maths", block=None, classes=["1A"], teachers=["Typed T"]), ["set", "lessons", "n8", "subject", SUBJ]),
+                    (dict(_id="n8", level="Sec 1", subject=SUBJ, block="Band A", classes=["1B"], teachers=[]), ["set", "lessons", "n8", "block", None])):
+    ok, refused = sync.head_split(sp, [["add", "lessons", first, ""], then])
+    assert ok == [["add", "lessons", first, ""]] and refused == [(1, WHY)], (ok, refused)
+    assert [r["_id"] for r in sp["lessons"]] == ["L1", "L2", "L3"]       # the setup judged on is not changed
 passed += 1
 
 print(f"{passed} cases passed")

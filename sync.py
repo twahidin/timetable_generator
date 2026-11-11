@@ -296,12 +296,18 @@ def head_split(spec, ops):
     (index in ops, sentence). Heads may change lessons and blocks, who a teacher can teach, add a teacher, and the
     details of a teacher who is still provisional (or added earlier in the same batch)."""
     allowed, refused = [], []
+    work = spec    # each op is judged on the setup as the allowed ones before it in this batch leave it (a row added, then changed, in one batch)
     for i, op in enumerate(ops):
-        why = _head_why(spec, op)
+        why = _head_why(work, op)
         if why:
             refused.append((i, why))
         else:
             allowed.append(op)
+            if isinstance(op, list) and len(op) > 1 and op[1] == "lessons":
+                if work is spec:
+                    work = dict(spec)
+                    work["lessons"] = copy.deepcopy(spec.get("lessons") if isinstance(spec.get("lessons"), list) else [])
+                apply(work, [op])
     return allowed, refused
 
 

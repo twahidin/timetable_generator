@@ -251,7 +251,7 @@ def test_the_head_check_runs_on_the_setup_held_under_the_lock():
     assert sync.head_may(spec, stale) is None                      # judged on a copy taken earlier, the teacher is still provisional
     c.post("/api/setup/changes", json={"since": v, "client": "C", "ops": [["set", "teachers", "newhire003", "provisional", "No"]]})   # the committee confirms the teacher meanwhile
     v2 = c.get("/api/setup").get_json()["v"]
-    v3, refused = store.apply_changes(stale, "H", filter=sync.head_split)
+    v3, refused, _ = store.apply_changes(stale, "H", filter=sync.head_split)
     assert v3 == v2 and [i for i, _ in refused] == [0] and "provisional" in refused[0][1]
     now = c.get("/api/setup").get_json()
     assert now["v"] == v2 and next(x for x in now["spec"]["teachers"] if x["_id"] == "newhire003")["name"] == "Batch hire"
@@ -796,48 +796,77 @@ PSUBJ = "Pastoral Care"
 def _cp_start():
     c.put("/api/setup", json=c.get("/api/sample/secondary").get_json()); return c.get("/api/setup").get_json()
 
+class _Page:   # a browser's copy kept the way the page does (static/app.js syncNow): patches before our ops, our accepted ops, patches after
+    def __init__(s, cid, rec, who=None): s.id, s.who, s.spec, s.v = cid, who or c, copy.deepcopy(rec["spec"]), rec["v"]
+    def post(s, ops):
+        j = s.who.post("/api/setup/changes", json={"since": s.v, "client": s.id, "ops": ops}).get_json(); return s._take(j, ops)
+    def poll(s): return s._take(s.who.get(f"/api/setup/changes?since={s.v}&client={s.id}").get_json(), [])
+    def _take(s, j, ops):
+        assert not j.get("reset"), j
+        ps, mine = j.get("patches", []), j.get("mine"); no = {x["i"] for x in j.get("refused", [])}
+        sync.apply(s.spec, [o for p in ps if mine is None or p["v"] < mine for o in p["ops"]])
+        sync.apply(s.spec, [o for i, o in enumerate(ops) if i not in no])
+        sync.apply(s.spec, [o for p in ps if mine is not None and p["v"] > mine for o in p["ops"]])
+        s.v = j["v"]; return j
+    def same(s, what):
+        r = c.get("/api/setup").get_json()
+        assert s.v == r["v"] and not sync.diff(r["spec"], s.spec) and not sync.diff(s.spec, r["spec"]) and [x["_id"] for x in s.spec["lessons"]] == [x["_id"] for x in r["spec"]["lessons"]], (what, s.id, s.v, r["v"], sync.diff(r["spec"], s.spec)[:3])
+
 def _cp_name(rec, client="A", parents=("Pastoral A",)):   # what a stale page sends: the subject, the name, the box, and no lesson ops
     cid = next(x["_id"] for x in rec["spec"]["classes"] if x["class"] == "1A")
-    return _changes(client, rec["v"], [["add", "subjects", {"_id": "pcsubj001", "subject": PSUBJ, "code": "PC", "periods": {"Sec 1": 2}}, ""],
-                                       ["school", "parents_subjects", [PSUBJ]], ["set", "classes", cid, "parents", list(parents)]])
+    return [["add", "subjects", {"_id": "pcsubj001", "subject": PSUBJ, "code": "PC", "periods": {"Sec 1": 2}}, ""],
+            ["school", "parents_subjects", [PSUBJ]], ["set", "classes", cid, "parents", list(parents)]]
 
 def _cp_rows(spec): return {r["classes"][0]: r for r in spec["lessons"] if r.get("subject") == PSUBJ}
 
 def test_class_parents_are_kept_right_on_the_server():               # Review Focus 1
-    rec = _cp_start(); v0 = rec["v"]
-    code, j = _cp_name(rec)
-    assert code == 200 and j["v"] == v0 + 2, (code, j)                # the caller's change, then what the server put right
+    rec = _cp_start(); v0 = rec["v"]; a = _Page("A", rec); b = _Page("B", rec)
+    j = a.post(_cp_name(rec))
+    assert j["v"] == v0 + 2 and j["mine"] == v0 + 1, j                # the caller's change, then what the server put right
+    a.same("sender")
     rows = _cp_rows(c.get("/api/setup").get_json()["spec"])
     sec1 = [x["class"] for x in rec["spec"]["classes"] if x["level"] == "Sec 1"]
     assert sorted(rows) == sorted(sec1) and rows["1A"]["teachers"] == ["Pastoral A"] and all(not rows[k]["teachers"] for k in sec1 if k != "1A"), rows
     assert rows["1A"]["_id"].startswith("cp-")
     assert len(j["patches"]) == 1 and j["patches"][0]["v"] == v0 + 2 and any(o[0] == "add" and o[1] == "lessons" for o in j["patches"][0]["ops"]), j   # the sender is told too
-    code, k = _changes("B", v0)                                       # a second browser gets both entries
-    assert [p["v"] for p in k["patches"]] == [v0 + 1, v0 + 2], k
+    k = b.poll(); assert [p["v"] for p in k["patches"]] == [v0 + 1, v0 + 2] and "mine" not in k, k    # a second browser gets both entries
+    b.same("poller")
     assert [e["client"] for e in list(store._log)[-2:]] == ["A", "parents"]
 
 def test_a_stale_tab_cannot_undo_a_following_lesson():
-    rec = _cp_start(); _cp_name(rec)
-    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]
-    code, j = _changes("A", rec["v"], [["set", "lessons", row["_id"], "teachers", ["Koh"]]])
-    assert code == 200 and j["v"] == rec["v"] + 2, j
+    rec = _cp_start(); a = _Page("A", rec); b = _Page("B", rec); a.post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; b.poll()
+    stale = _Page("S", rec); stale.v = rec["v"]
+    j = stale.post([["set", "lessons", row["_id"], "teachers", ["Koh"]]])
+    assert j["v"] == rec["v"] + 2 and j["mine"] == rec["v"] + 1, j
     assert _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]["teachers"] == ["Pastoral A"]
     assert ["set", "lessons", row["_id"], "teachers", ["Pastoral A"]] in j["patches"][0]["ops"], j     # and the sender is told
+    stale.same("stale sender (its copy must not keep Koh)"); b.poll(); b.same("poller"); a.poll(); a.same("A")
 
 def test_a_hand_change_with_its_mark_is_kept():
-    rec = _cp_start(); _cp_name(rec)
+    rec = _cp_start(); a = _Page("A", rec); a.post(_cp_name(rec))
     rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; cid = next(x["_id"] for x in rec["spec"]["classes"] if x["class"] == "1A")
-    code, j = _changes("A", rec["v"], [["set", "lessons", row["_id"], "teachers", ["Koh"]], ["set", "lessons", row["_id"], "by_hand", True]])
-    assert code == 200 and j["v"] == rec["v"] + 1 and not j["patches"], j
-    code, j = _changes("A", j["v"], [["set", "classes", cid, "parents", ["Pastoral B"]]]); assert j["v"] == rec["v"] + 2, j
+    j = a.post([["set", "lessons", row["_id"], "teachers", ["Koh"]], ["set", "lessons", row["_id"], "by_hand", True]])
+    assert j["v"] == rec["v"] + 1 and not j["patches"] and j["mine"] == j["v"], j
+    j = a.post([["set", "classes", cid, "parents", ["Pastoral B"]]]); assert j["v"] == rec["v"] + 2, j
     r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Koh"] and r["by_hand"] is True, r
+    a.same("A")
 
 def test_a_head_cannot_change_a_staffed_lesson():                    # in NEED_HEADS
-    rec = _cp_start(); _cp_name(rec)
-    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]
-    code, j = _changes("H", rec["v"], [["set", "lessons", row["_id"], "teachers", ["Koh"]], ["set", "lessons", row["_id"], "students", 5]], who=h)
-    assert code == 200 and j["refused"] == [{"i": 0, "why": sync.PARENTS_WHY}] and j["v"] == rec["v"] + 1, j
+    rec = _cp_start(); _Page("A", rec).post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; hp = _Page("H", rec, h)
+    j = hp.post([["set", "lessons", row["_id"], "teachers", ["Koh"]], ["set", "lessons", row["_id"], "students", 5]])
+    assert j["refused"] == [{"i": 0, "why": sync.PARENTS_WHY}] and j["v"] == rec["v"] + 1, j
     r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Pastoral A"] and r["students"] == 5, r
+    hp.same("head")
+    rec = c.get("/api/setup").get_json(); one = dict(_id="hb1", level="Sec 1", subject="Mathematics", block=None, classes=["1A"], teachers=["Typed T"])   # two steps of one batch
+    j = hp.post([["add", "lessons", one, ""], ["set", "lessons", "hb1", "subject", PSUBJ]])
+    assert [x["i"] for x in j["refused"]] == [1] and j["refused"][0]["why"] == sync.PARENTS_WHY, j
+    r = next(x for x in c.get("/api/setup").get_json()["spec"]["lessons"] if x["_id"] == "hb1"); assert r["subject"] == "Mathematics" and r["teachers"] == ["Typed T"], r
+
+def test_a_school_not_using_class_parents_gets_one_version_and_one_entry():
+    rec = _cp_start(); n = len(store._log); v = rec["v"]
+    code, j = _changes("A", v, [["school", "timetable", "Term 3"]]); assert j["v"] == v + 1 and j["mine"] == v + 1 and len(store._log) == n + 1, j
 
 def test_a_setup_put_whole_is_put_right():
     spec = c.get("/api/sample/secondary").get_json()
