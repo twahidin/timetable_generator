@@ -914,6 +914,27 @@ def test_published_pages_name_the_class_parents():
     assert export.pdf_bytes(old, export.class_view(old, "1A"))[:4] == b"%PDF" and export.pdf_bytes(old, export.teacher_view(old, "Pastoral A"))[:4] == b"%PDF"
     shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
 
+def test_a_class_form_teachers_are_never_cut_off_the_printed_timetable():
+    import copy as cp
+    from ttgen import export
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    rec = _cp_start(); a = _Page("A", rec); names = ["Mrs Alexandrina Featherstonehaugh-Smythe", "Mr Bartholomew Wolfeschlegelstein", "Ms Cornelia Vandenberghe-Okonkwo", "Dr Maximilian Papadopoulos-Lindqvist"]
+    a.post(_cp_name(rec, parents=names)); spec = c.get("/api/setup").get_json()["spec"]; _cp_draft(spec, names); assert c.post("/api/draft/publish").status_code == 200
+    m = store.published()["model"]; v = export.class_view(m, "1A"); lines = export._parents_block(v)
+    assert len(lines) >= 2 and "…" not in "".join(lines) and all(any(n in l for l in lines) for n in names), lines   # each name whole on one line
+    R, _ = export._fonts(); assert all(stringWidth(l, R, 8.6) <= 420 for l in lines), lines
+    assert "Form teachers" not in v["pdf_subtitle"] and v["subtitle"].endswith(", ".join(names))
+    assert export.pdf_bytes(m, v)[:4] == b"%PDF"
+    plain = cp.deepcopy(m)                                         # no form teachers: the page comes out exactly as a model without the keys draws it
+    for x in plain["classes"]: x["parents"] = []
+    old = cp.deepcopy(m); old.pop("parents_name")
+    for x in old["classes"]: x.pop("parents")
+    import re; same = lambda x: re.sub(rb"/(CreationDate|ModDate)\s*\([^)]*\)|/ID\s*\[[^\]]*\]", b"", x)   # a PDF's date and id differ on every run
+    assert export._parents_block(export.class_view(plain, "1B")) == [] and same(export.pdf_bytes(plain, export.class_view(plain, "1A"))) == same(export.pdf_bytes(old, export.class_view(old, "1A")))
+    for cl in m["classes"]:                                        # every class page still draws, with the block, within the page
+        pb = export.pdf_bytes(m, dict(export.class_view(m, cl["name"]), parents_line="Form teachers: " + ", ".join(names))); assert pb[:4] == b"%PDF"
+    shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
+
 NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
               "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace", "test_a_head_cannot_reach_the_helper_routes"}
 
