@@ -52,7 +52,7 @@ to print, one page per class. Students not on the list use the general student c
    first, each with a button to the step that fixes it; it runs again whenever the setup changes (`checks.py`).
 3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
-   `SKILL.md` carries a version line (`Skill version: 2026-11.2`) and the workbook's README sheet names the version it
+   `SKILL.md` carries a version line (`Skill version: 2026-11.3`) and the workbook's README sheet names the version it
    was made for. When the setup has second choices (step 6), step 7 counts them and asks **If the first choices do not
    fit:** **Fall back only when needed** (the default) or **Make one timetable for each**; the workbook carries the pick
    on its Choices sheet. Every downloaded workbook also carries a **Configuration id** row on Settings (`v14`, or `v14+`
