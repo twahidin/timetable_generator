@@ -1528,23 +1528,25 @@ function newTeacherForm(dept) {   // + New teacher: a hire, or a post still to b
     <label class="f">Allowance <input id="mnAllow" type="number" value="${esc(f.allowance)}" placeholder="${esc(guide(f.role))}" title="Empty: the role's guide allowance"></label></div>
     <div class="row" style="margin-top:8px"><button class="primary" data-mnewgo>Add</button><button class="ghost" data-mnewcancel>Cancel</button>${isHead() && !S.practice ? `<span class="muted small">The committee confirms new teachers on step 4.</span>` : ""}</div></div>`;
 }
-/* an avatar that opens the profile and can be dragged, with a ✕ when `x` names the action */
-function avx(t, size, x) {
-  return `<span class="avx"><button class="avatar" data-mprofile="${esc(t._id)}" draggable="true" data-mdrag="${esc(t._id)}" title="${esc(t.name || "")}: profile">${avatarOf(t, size)}</button>${x ? `<button class="x" ${x} title="Take ${esc(t.name || "")} off">✕</button>` : ""}</span>`;
+/* an avatar that opens the profile and can be dragged, with a ✕ when `x` names the action; `named` puts the teacher's
+   short name (else the name) under it, cut to the avatar's column with the full name on hover */
+function avx(t, size, x, named) {
+  const label = named ? `<span class="avn" title="${esc(t.name || "")}">${esc(t.short || t.name || "")}</span>` : "";
+  return `<span class="avx${named ? " named" : ""}"><button class="avatar" data-mprofile="${esc(t._id)}" draggable="true" data-mdrag="${esc(t._id)}" title="${esc(t.name || "")}: profile">${avatarOf(t, size)}</button>${x ? `<button class="x" ${x} title="Take ${esc(t.name || "")} off">✕</button>` : ""}${label}</span>`;
 }
 function basketsView(dept) {   // the middle column: one basket per subject of the department, and the staff room
   const T = S.spec.teachers, ro = DeptMap.roster(S.spec, dept, M.extra), B = DeptMap.baskets(S.spec, dept), staff = DeptMap.staffRoom(S.spec, ro);
   const bk = b => `<div class="basket" data-mbasket="${esc(b.subject)}" title="Click to add the ticked teachers, or drop teachers here"><div class="row small" style="justify-content:space-between"><b>${esc(b.subject)}</b><span class="muted">${b.teachers.length}</span></div>
-    <div class="avs">${b.teachers.map(i => avx(T[i], 28, `data-mbx="${esc(T[i]._id)}|${esc(b.subject)}"`)).join("") || `<span class="muted small">No one yet</span>`}</div></div>`;
+    <div class="avs">${b.teachers.map(i => avx(T[i], 28, `data-mbx="${esc(T[i]._id)}|${esc(b.subject)}"`, true)).join("") || `<span class="muted small">No one yet</span>`}</div></div>`;
   return `<section class="baskets card"><h3 style="margin:0 0 4px">Can teach</h3><p class="muted small" style="margin:0 0 8px">Tick teachers and click a subject, or drag them in. Teachers of other departments show here too.</p>
     <div class="blist keep">${B.map(bk).join("") || `<p class="muted small">No subjects for ${esc(dept)} on step 3.</p>`}
     <div class="basket staff" data-mstaff title="Drop teachers here to take them out of this department's baskets"><div class="row small" style="justify-content:space-between"><b>Staff room</b><span class="muted">no subject yet · ${staff.length}</span></div>
-    <div class="avs">${staff.map(i => avx(T[i], 28, "")).join("") || `<span class="muted small">Everyone on the roster has a subject.</span>`}</div></div></div></section>`;
+    <div class="avs">${staff.map(i => avx(T[i], 28, "", true)).join("") || `<span class="muted small">Everyone on the roster has a subject.</span>`}</div></div></div></section>`;
 }
 function cardsView(dept) {   // the right-hand column: where the department's subjects are taught
   const info = lessonInfo(), cards = DeptMap.cards(S.spec, info, dept, M.tab, M.level);
   const tabs = [["classes", "Classes"], ["groups", "Teaching groups"], ["bands", "Bands"]].map(([k, l]) => `<button class="small ${M.tab === k ? "on" : ""}" data-mtab="${k}">${l}</button>`).join("");
-  const tcard = (nm, key) => { const t = S.spec.teachers.find(x => x.name === nm); return t ? avx(t, 28, `data-mx="${esc(key)}|${esc(nm)}"`) : `<span class="chip">${esc(nm)} (not on list) <button class="x" data-mx="${esc(key)}|${esc(nm)}" title="Take ${esc(nm)} off">✕</button></span>`; };
+  const tcard = (nm, key) => { const t = S.spec.teachers.find(x => x.name === nm); return t ? avx(t, 28, `data-mx="${esc(key)}|${esc(nm)}"`, true) : `<span class="chip">${esc(nm)} (not on list) <button class="x" data-mx="${esc(key)}|${esc(nm)}" title="Take ${esc(nm)} off">✕</button></span>`; };
   const card = c => { const key = c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`, room = DeptMap.MAX - c.teachers.length;
     return `<div class="gcard" data-mcard="${esc(key)}" title="Click to deploy the ticked teachers, or drop teachers here"><div class="row small" style="justify-content:space-between"><b>${esc(c.title)}</b><span class="muted">${esc(c.level)} · ${c.periods || "?"} periods</span></div><div class="small muted">${esc(c.subject)}</div>
       <div class="avs">${c.teachers.map(nm => tcard(nm, key)).join("")}${room > 0 ? `<span class="plus" title="Room for ${room} more">+</span>` : ""}</div></div>`; };
