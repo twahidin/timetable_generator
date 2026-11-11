@@ -278,7 +278,8 @@ def _best(m, spec, days, cands, ctx, extra, k=3):
     out = []
     for g, c, also in good[:k]:
         s = helper._suggestion(m, spec, days, g["fixes"], c); said = " ".join(s["disturbs"])
-        out.append(_plus(s, extra + [a for a in also if re.match(r"This also moves (.*) to ", a).group(1) not in said]))
+        names = {fixes.what(x) for x in fixes._rows(m["lessons"], g["fixes"][0]["b"])} if also and g["fixes"][0]["kind"] == "swap" else set()   # the other lesson of the swap, by its id, not by the wording of the sentence
+        out.append(_plus(s, extra + [a for a in also if not any(n in said for n in names)]))
     return out
 
 class _Step5:
@@ -302,7 +303,7 @@ def answer(m, spec, days, ask, pick=None):
     lo, hi = ask["to_period_from"], ask["to_period_to"]
     if act == "move":
         if not (ask["to_days"] or ask["not_days"] or lo >= 0 or hi >= 0): out["problems"].append(NO_WHERE)
-        elif set(D["to_days"]) & set(D["not_days"]) or (lo >= 0 and hi >= 0 and lo > hi) or (lo >= 0 and lo >= m.get("NP", 10**6)): out["problems"].append(CONTRA)
+        elif (D["to_days"] and set(D["to_days"]) <= set(D["not_days"])) or (lo >= 0 and hi >= 0 and lo > hi) or (lo >= 0 and lo >= m.get("NP", 10**6)): out["problems"].append(CONTRA)
     if act == "teacher" and not ask["new_teacher"].strip(): out["problems"].append(NO_TEACHER)
     if act == "room" and not ask["new_room"].strip(): out["problems"].append(NO_ROOM)
     if out["choices"] or out["problems"]: return out

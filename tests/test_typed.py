@@ -330,10 +330,33 @@ def a_change_that_differs_from_step_5_says_so():
 @t
 def contradictory_asks_are_one_sentence():
     m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG])]); one = ["That asks for days or periods that cannot all hold. Say it another way."]
-    for kw in (dict(to_days=["Mon", "Tue"], not_days=["Mon"]), dict(to_days=["Tue"], to_period_from=5, to_period_to=3), dict(to_days=["Tue"], to_period_from=99), dict(to_days=["Tue"], to_period_from=m["NP"])):
+    for kw in (dict(to_days=["Mon"], not_days=["Mon"]), dict(to_days=["Tue"], to_period_from=5, to_period_to=3), dict(to_days=["Tue"], to_period_from=99), dict(to_days=["Tue"], to_period_from=m["NP"])):
         r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], **kw)); assert r["problems"] == one and r["groups"] == [], (kw, r)
     r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], to_days=["Tue"], to_period_from=3, to_period_to=3)); assert r["problems"] == [] and r["groups"]
     r = typed.answer(m, sp, DAYS, ask(action="move", classes=[A], to_days=["Tue"], to_period_from=3)); assert r["problems"] == []        # one end only is fine
+
+@t
+def a_day_half_excluded_is_not_a_contradiction():
+    import copy; days2 = [w + d for w in ("Odd ", "Even ") for d in ("Mon", "Tue", "Wed", "Thu", "Fri")]; sp = copy.deepcopy(dict(SP, rules=[]))   # a two-week timetable: the same day twice
+    sp["day_structure"] = {lv: {d: ds[DAYS[i % 5]] for i, d in enumerate(days2)} for lv, ds in sp["day_structure"].items()}
+    m = export._model(sp, days2, [lesson(1, 4, 2, 1, [A], "Mathematics", ENTIRE, [MG])]); m["checked_setup"] = sp
+    r = typed.answer(m, sp, days2, ask(action="move", classes=[A], to_days=["Fri"], not_days=["Odd Fri"]))
+    assert typed.CONTRA not in r["problems"] and r["problems"] == [], r              # Even Fri is left
+    assert r["groups"] and all(s["fixes"][0].get("d") != 4 for g in r["groups"] for s in g["suggestions"]), r
+    r = typed.answer(m, sp, days2, ask(action="move", classes=[A], to_days=["Fri"], not_days=["Fri"])); assert r["problems"] == [typed.CONTRA], r
+    r = typed.answer(m, sp, days2, ask(action="move", classes=[A], to_days=["Odd Fri", "Even Fri"], not_days=["Fri"])); assert r["problems"] == [typed.CONTRA], r
+
+@t
+def a_swaps_other_lesson_does_not_depend_on_the_wording_of_a_sentence():
+    every = [(d, p) for d in range(len(DAYS)) for p in (1, 2, 3, 5, 6, 7, 8, 9, 10) if (d, p) != (0, 2)]
+    L = [lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [MG], room="1-01")] + [lesson(10 + k, d, p, 1, [A], "Mathematics", ENTIRE, [MG], room="1-01") for k, (d, p) in enumerate(every)]
+    L[1 + every.index((1, 3))] = lesson(500, 1, 3, 1, [A, "1B"], "Art", ENTIRE, ["Umairah Tan"], room="1-01"); m, sp = model_with(L)
+    real = fixes.slots
+    def reworded(*a, **k): return [dict(s, also=["Something else goes too." for _ in s["also"]]) for s in real(*a, **k)]
+    fixes.slots = reworded
+    try: g = typed.answer(m, sp, DAYS, ask(action="move", from_day="Mon", from_period=2, to_days=["Tue"]))["groups"][0]
+    finally: fixes.slots = real
+    assert [s["fixes"] for s in g["suggestions"]] == [[dict(kind="swap", a=1, b=500)]] and g["suggestions"][0]["disturbs"] == ["Art for 1A, 1B moves to Mon period 2."], g   # already said by the swap itself: not said twice
 
 @t
 def a_pick_must_be_one_of_the_options_for_that_choice():
