@@ -107,6 +107,24 @@ def ops_are_left_out_when_a_row_covers_several_classes():
     assert a["ops"] is None and b["ops"] is None
 
 @t
+def a_teacher_difference_on_a_staffed_lesson_marks_it_by_hand():
+    import sync
+    sp = primary(); rows = [x for x in sp["lessons"] if not x.get("block") and len(x["classes"]) == 1 and x.get("periods")]
+    row, other = rows[0], next(x for x in rows if x["subject"] != rows[0]["subject"])
+    sp["school"]["parents_subjects"] = [row["subject"]]; sync.ensure_ids(sp); reader.derive(sp)
+    m = model_for(sp, [(0, 0, row["periods"], row["classes"], row["subject"], "Entire Class", ["Nobody"], ""), (1, 0, other["periods"], other["classes"], other["subject"], "Entire Class", ["Nobody"], "")])
+    ws = {w["key"]: w for w in verify.deployment(m, sp)}
+    ops = ws[f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"]["ops"]
+    assert ops == [["set", "lessons", row["_id"], "teachers", ["Nobody"]], ["set", "lessons", row["_id"], "by_hand", True]], ops   # the teachers first, then the mark
+    assert ws[f"dep:C:{other['classes'][0]}:{other['subject']}:teachers"]["ops"] == [["set", "lessons", other["_id"], "teachers", ["Nobody"]]]   # an ordinary row: one op
+    sp["school"]["parents_subjects"] = []; m = model_for(sp, [(0, 0, row["periods"], row["classes"], row["subject"], "Entire Class", ["Nobody"], "")])
+    assert {w["key"]: w for w in verify.deployment(m, sp)}[f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"]["ops"] == [["set", "lessons", row["_id"], "teachers", ["Nobody"]]]   # the rule off: as today
+    sp["school"]["parents_subjects"] = [row["subject"]]; c2 = next(c["class"] for c in sp["classes"] if c["class"] != row["classes"][0] and c["level"] == row["level"])
+    shared = copy.deepcopy(sp); r2 = next(x for x in shared["lessons"] if x["_id"] == row["_id"]); r2["classes"] = [row["classes"][0], c2]
+    m = model_for(shared, [(0, 0, row["periods"], [row["classes"][0]], row["subject"], "Entire Class", ["Nobody"], "")])
+    assert {w["key"]: w for w in verify.deployment(m, shared)}[f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"]["ops"] is None   # a row of two classes: no op, staffed or not
+
+@t
 def clashes_leave_out_the_choice_problems():
     m = model_for(primary(), [(0, 0, 1, [primary()["classes"][0]["class"]], "English Language", "Entire Class", ["Ms X"], "")])
     m["checks"]["problems"] = list(m["checks"]["problems"]) + ["A second choice was used out of order."]; m["choice_problems"] = ["A second choice was used out of order."]

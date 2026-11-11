@@ -878,6 +878,42 @@ def test_a_setup_put_whole_is_put_right():
     assert rows["1A"]["teachers"] == ["Pastoral A"] and "by_hand" not in rows["1A"] and len(rows) == 4, rows
     _cp_start()                                                       # the sample back, for the tests after
 
+def _cp_draft(spec, teachers):   # a draft of one lesson: the staffed Pastoral Care lesson of 1A taken by the given teachers
+    row = _cp_rows(spec)["1A"]; c.post("/api/draft", data=_draft_form(spec, [_lesson_of(spec, dict(row, periods=2), teachers)]), content_type="multipart/form-data"); return row
+
+def test_update_step_5_on_a_staffed_lesson_keeps_the_timetables_teachers():
+    rec = _cp_start(); a = _Page("A", rec); a.post(_cp_name(rec))
+    spec = c.get("/api/setup").get_json()["spec"]; row = _cp_rows(spec)["1A"]; assert row["teachers"] == ["Pastoral A"] and "by_hand" not in row
+    _cp_draft(spec, ["Elsewhere T"]); k = f"dep:C:1A:{PSUBJ}:teachers"; j = c.get("/api/draft").get_json(); w = next(x for x in j["warnings"] if x["key"] == k)
+    assert w["ops"] == [["set", "lessons", row["_id"], "teachers", ["Elsewhere T"]], ["set", "lessons", row["_id"], "by_hand", True]], w["ops"]
+    assert c.post("/api/draft/decide", json={"key": k, "answer": "step5"}).status_code == 200
+    spec = c.get("/api/setup").get_json()["spec"]; r = _cp_rows(spec)["1A"]; assert r["teachers"] == ["Elsewhere T"] and r["by_hand"] is True, r
+    cid = next(x["_id"] for x in spec["classes"] if x["class"] == "1A")                       # another change: the box changes, the marked lesson stays
+    assert c.post("/api/setup/changes", json={"client": "t", "since": c.get("/api/setup").get_json()["v"], "ops": [["set", "classes", cid, "parents", ["Pastoral B"]]]}).status_code == 200
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Elsewhere T"] and r["by_hand"] is True, r
+    _cp_start()
+
+def test_published_pages_name_the_class_parents():
+    import io, pickle
+    from ttgen import export
+    rec = _cp_start(); a = _Page("A", rec); a.post(_cp_name(rec, parents=("Pastoral A", "Pastoral B")))
+    spec = c.get("/api/setup").get_json()["spec"]; row = _cp_rows(spec)["1A"]
+    _cp_draft(spec, ["Pastoral A", "Pastoral B"]); assert c.post("/api/draft/publish").status_code == 200
+    m = store.published()["model"]; line = " · Form teachers: Pastoral A, Pastoral B"
+    assert next(x for x in m["classes"] if x["name"] == "1A")["parents"] == ["Pastoral A", "Pastoral B"] and m["parents_name"] == "Form teachers"
+    assert next(x for x in m["classes"] if x["name"] == "1B")["parents"] == []
+    assert export.class_view(m, "1A")["subtitle"].endswith(line) and "Form teachers" not in export.class_view(m, "1B")["subtitle"]
+    assert export.teacher_view(m, "Pastoral A")["subtitle"].endswith(" · Form teachers of 1A")
+    d = export.html_data(m); assert next(x for x in d["classes"] if x[0] == "1A")[4] == ["Pastoral A", "Pastoral B"] and d["parents_name"] == "Form teachers", d["classes"][:2]
+    pdf = c.get("/pdf/classes/1A"); assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
+    assert '"parents_name":"Form teachers"' in c.get("/timetable").get_data(as_text=True)
+    old = pickle.loads(pickle.dumps(m)); old.pop("parents_name")                                  # a model pickled before this change
+    for x in old["classes"]: x.pop("parents")
+    assert export.class_view(old, "1A")["subtitle"] == export.class_view(m, "1A")["subtitle"].replace(line, "")
+    assert export.teacher_view(old, "Pastoral A")["subtitle"] == "Teacher" and export.html_data(old)["parents_name"] == "Form teachers" and all(len(x) == 5 and x[4] == [] for x in export.html_data(old)["classes"])
+    assert export.pdf_bytes(old, export.class_view(old, "1A"))[:4] == b"%PDF" and export.pdf_bytes(old, export.teacher_view(old, "Pastoral A"))[:4] == b"%PDF"
+    shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
+
 NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
               "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace", "test_a_head_cannot_reach_the_helper_routes"}
 

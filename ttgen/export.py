@@ -15,7 +15,7 @@ from openpyxl.worksheet.pagebreak import Break
 from openpyxl.worksheet.merge import MergedCellRange
 from .database import is_db, read_db, write_db
 from .reader import read_template, derive
-from . import choices
+from . import choices, parents as _parents
 from .report import LESSON_HEADERS, short_subject, clock
 from .spec import order_days, periods_by_day, resolve_row, trim_day
 
@@ -77,11 +77,11 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
             for d, p, n in (recess or {}).get(str(c["class"]), []): spans[d].append((p, n))
             cgrid[str(c["class"])] = [resolve_row(row, spans[d]) for d, row in enumerate(raw[lv])]
     times = [[clock(sc, p), clock(sc, p + 1)] for p in range(NP)]
-    classes = [dict(name=str(c["class"]), level=str(c.get("level") or ""), size=c.get("size") or "", home=c.get("home_room") or "") for c in spec["classes"]]
+    classes = [dict(name=str(c["class"]), level=str(c.get("level") or ""), size=c.get("size") or "", home=c.get("home_room") or "", parents=_parents.names(c)) for c in spec["classes"]]   # names as the setup holds them
     seen = {c["name"] for c in classes}
     for L in lessons:
         for c in L["classes"]:
-            if c not in seen: seen.add(c); classes.append(dict(name=c, level=L["level"], size="", home=""))
+            if c not in seen: seen.add(c); classes.append(dict(name=c, level=L["level"], size="", home="", parents=[]))
     teachers = [dict(name=str(t["name"]), short=str(t.get("short") or t["name"]), dept=t.get("dept") or "", allowance=t.get("allowance") or "", other=t.get("other_duties") or "") for t in spec["teachers"]]
     seen = {t["name"] for t in teachers}
     for L in lessons:
@@ -121,7 +121,7 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
     m = dict(school=dict(name=sc.get("name") or "School", timetable=sc.get("timetable") or "Timetable", weeks=int(sc.get("weeks") or 1),
                          period_minutes=int(sc["period_minutes"]), start_time=str(sc["start_time"]), kind=sc.get("kind") or ""),
              days=list(days), NP=NP, ND=ND, times=times, grid=grid, raw_grid=raw, cgrid=cgrid, recess={c: [list(x) for x in v] for c, v in (recess or {}).items()},
-             keep=keep, levels=levels, classes=classes, teachers=teachers, rooms=rooms,
+             keep=keep, levels=levels, classes=classes, parents_name=_parents.label(spec), teachers=teachers, rooms=rooms,
              subjects=subjects, lessons=lessons, students=students, room_cap=cap, planned=planned, notes=list(notes or []), status=status,
              generated=datetime.date.today().strftime("%d %b %Y"))
     m["setup"] = spec   # kept in the timetable database, so that file alone rebuilds every output
@@ -403,6 +403,11 @@ def _room_line(x):
     """a lesson's room as a timetable cell shows it, with the rain room of a PE lesson: 'Field (rain B2-3)'"""
     return f"{x['room']} (rain {x['rain']})" if x.get("rain") else x["room"]
 
+def _parents_line(m, c):
+    """' · Form teachers: A, B' for a class that has some; read with .get, a model published before Class Parents has neither key"""
+    ps = (m["class_ix"].get(c) or {}).get("parents") or []
+    return f" · {m.get('parents_name') or 'Form teachers'}: {', '.join(ps)}" if ps else ""
+
 def class_view(m, c):
     info = m["class_ix"][c]; rows = [x for x in m["lessons"] if c in x["classes"]]
     bgroups = collections.defaultdict(set)
@@ -447,7 +452,7 @@ def class_view(m, c):
                            text=f"{max(e['periods'] for e in es)} periods · " + "; ".join(parts)))
     nper = len(used)
     stats = [(info["level"], "level"), (str(info["size"] or "-"), "students"), (info["home"] or "-", "home room"), (str(nper), "periods a cycle")]
-    sub = f"{info['level']} · {info['size']} students · home room {info['home'] or '-'}"
+    sub = f"{info['level']} · {info['size']} students · home room {info['home'] or '-'}" + _parents_line(m, c)
     return dict(kind="classes", key=c, kicker="Class", title=f"Class {c}", subtitle=sub, stats=stats, codes=m["cgrid"].get(c) or _codes_for(m, [info["level"]]),
                 cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=info["level"])
 
@@ -472,7 +477,8 @@ def teacher_view(m, t):
     stats = [(str(total), "periods a cycle"), (str(info.get("allowance") or "-"), "allowance"), (str(busiest), "most in a day"), (str(len(per_day)), "days teaching")]
     sub = " · ".join(x for x in (f"Department {info['dept']}" if info["dept"] else "", f"short name {info['short']}" if info["short"] != t else "",
                                      f"{ext} after-school periods" if ext else "") if x)
-    lv = [x["level"] for x in rows]
+    lv = [x["level"] for x in rows]; mine = [c["name"] for c in m["classes"] if t in (c.get("parents") or [])]
+    if mine: sub = (sub or "Teacher") + f" · {m.get('parents_name') or 'Form teachers'} of {', '.join(mine)}"
     return dict(kind="teachers", key=t, kicker="Teacher", title=t, subtitle=sub or "Teacher", stats=stats, codes=_codes_for(m, lv), cells=cells,
                 legend=legend, legend_title="Teaching", group=info["dept"] or "Other")
 
@@ -512,7 +518,7 @@ def student_view(m, s):
               for s_, e in ent.items()]
     lv = m["class_ix"].get(s["cls"], {}).get("level") or s["level"]
     stats = [(s["cls"], "class"), (lv, "level"), (str(len(s["groups"])), "groups"), (str(len(used)), "periods a cycle")]
-    return dict(kind="students", key=s["id"], kicker="Student", title=s["name"], subtitle=f"{s['id']} · Class {s['cls']} · {lv}",
+    return dict(kind="students", key=s["id"], kicker="Student", title=s["name"], subtitle=f"{s['id']} · Class {s['cls']} · {lv}" + _parents_line(m, s["cls"]),
                 stats=stats, codes=m["cgrid"].get(s["cls"]) or _codes_for(m, [lv]), cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=s["cls"])
 
 def all_views(m, kind):
@@ -941,7 +947,7 @@ def html_data(m, view="full", student_id=None, app=None):
     builder, no student list), personal (one student's own lessons only). Filtering happens here, on the server."""
     pal = [[t, a] for t, a in PALETTE]
     d = dict(school=m["school"], generated=m["generated"], days=m["days"], NP=m["NP"], times=m["times"], grid=m["grid"], cgrid=m["cgrid"], levels=m["levels"],
-             classes=[[c["name"], c["level"], c["size"], c["home"]] for c in m["classes"]],
+             classes=[[c["name"], c["level"], c["size"], c["home"], c.get("parents") or []] for c in m["classes"]], parents_name=m.get("parents_name") or "Form teachers",
              teachers=[[t["name"], t["short"], t["dept"], t["allowance"]] for t in m["teachers"]],
              rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1)] for r in m["rooms"]],
              subjects={k: [v["short"], v["color"]] for k, v in m["subjects"].items()}, palette=pal, ext=list(EXT),
