@@ -31,6 +31,9 @@ def every_failure_of_the_call_is_the_one_sentence():
     for bad in (None, "text", {}, dict(ASK, action="delete"), dict(ASK, classes="2A"), {k: v for k, v in ASK.items() if k != "keep"}, dict(ASK, extra=1), dict(ASK, subject="x" * 201),
                 dict(ASK, classes=["c"] * 21), dict(ASK, understood=1), dict(ASK, from_period=True), dict(ASK, from_period="3"), dict(ASK, keep=[1]), dict(ASK, not_days=[None])):
         assert typed.read("move PE off Friday", call=lambda w, bad=bad: bad) == dict(ok=False, error=typed.FAILED), bad
+    for bad in (dict(ASK, from_day="Friday please"), dict(ASK, not_days=["Friday"]), dict(ASK, to_days=["odd Fri"]), dict(ASK, from_period=-5), dict(ASK, from_period=61), dict(ASK, to_period_from=10**100), dict(ASK, to_period_to=-2)):
+        assert typed.check(bad) is False, bad
+    assert typed.check(dict(ASK, from_day="Odd Fri", not_days=["Even Mon", "Tue"], to_days=["Thu"], from_period=60, to_period_from=-1)) is True and typed.check(dict(ASK, from_day="")) is True
     assert typed.check(ASK) is True and typed.check(dict(ASK, from_period=4, classes=["c"] * 20, subject="x" * 200)) is True
 
 @t
@@ -65,8 +68,12 @@ def the_mock_reader_understands_its_two_shapes():
     a = typed._mock("move Mathematics for 3B off odd friday"); assert a["not_days"] == ["Odd Fri"] and a["subject"] == "Mathematics", a
     assert typed._mock("move PE for 2A off even week Monday")["not_days"] == ["Even Mon"]
     a = typed._mock("GIVE 2A Mathematics to Mdm Lee"); assert typed.check(a) and a["understood"] and a["action"] == "teacher" and a["classes"] == ["2A"] and a["subject"] == "Mathematics" and a["new_teacher"] == "Mdm Lee", a
+    for w in ("move PE for 2A off friend", "move PE for 2A off monkey", "move PE for 2A off fridays"): assert typed._mock(w)["understood"] is False, w
+    assert typed._mock("move PE for 2A off Wed")["not_days"] == ["Wed"] and typed._mock("move PE for 2A off thursday")["not_days"] == ["Thu"]
     a = typed._mock("sing a song"); assert typed.check(a) and a["understood"] is False and a["action"] == "none"
     assert a["reply"] == 'The practice reader understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".'
+    with env(ANTHROPIC_API_KEY=None, TYPED_REQUEST_MODEL="MOCK "):
+        assert typed.enabled() and typed.model() == "mock" and typed.read("move PE for 2A off Friday")["ask"]["not_days"] == ["Fri"]
     with env(ANTHROPIC_API_KEY=None, TYPED_REQUEST_MODEL="mock"):
         assert typed.read("move PE for 2A off Friday")["ask"]["not_days"] == ["Fri"] and typed.read("sing")["ask"]["understood"] is False
 
@@ -96,7 +103,7 @@ def the_real_call_is_built_as_the_plan_says():
             assert typed._call("move PE for 2A off Friday") == ASK
             assert seen["messages"] == [dict(role="user", content="move PE for 2A off Friday")] and seen["system"] == typed.SYSTEM and seen["model"] == typed.model() == "claude-opus-5-5"
             assert seen["max_tokens"] == 4000 and seen["output_config"] == dict(effort="low", format=dict(type="json_schema", schema=typed.SCHEMA))
-            assert seen["betas"] == ["server-side-fallback-2026-07-01"] and seen["fallbacks"] == "default" and "tools" not in seen
+            assert seen["betas"] == ["server-side-fallback-2026-07-01"] and seen["fallbacks"] == "default" and "tools" not in seen and "thinking" not in seen and "temperature" not in seen
         for s in ("refusal", "max_tokens"):
             stop[0] = s
             try: typed._call("x"); assert False, s
@@ -107,5 +114,22 @@ def the_real_call_is_built_as_the_plan_says():
         reply[:] = [dict(type="text", text="not json")]
         assert typed.read("move PE off Friday", call=typed._call) == dict(ok=False, error=typed.FAILED)
     finally: typed._client = old
+
+@t
+def the_guard_holds_under_threads_and_the_client_is_made_once():
+    import threading, anthropic
+    clock = [5.0]; typed._now = lambda: clock[0]; ok = []
+    def go():
+        for _ in range(10): ok.append(typed.read("move PE off Friday", call=lambda w: dict(ASK))["ok"])
+    try:
+        th = [threading.Thread(target=go) for _ in range(8)]; [x.start() for x in th]; [x.join() for x in th]
+    finally: import time; typed._now = time.monotonic
+    assert ok.count(True) == 30 and len(typed._seen) == 30, (ok.count(True), len(typed._seen))
+    made = []; real = anthropic.Anthropic; old = typed._cached
+    class Fake:
+        def __init__(s, **kw): made.append(kw)
+    anthropic.Anthropic = Fake; typed._cached = None
+    try: a = typed._client(); b = typed._client(); assert a is b and made == [dict(timeout=20.0, max_retries=1)], made
+    finally: anthropic.Anthropic = real; typed._cached = old
 
 print(f"{n} typed checks passed")
