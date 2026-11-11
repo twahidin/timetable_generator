@@ -32,13 +32,12 @@ def subjects(spec):
 
 
 def cap(spec):
-    try:
-        v = float(_school(spec).get("parents_max") or 0)
-    except (TypeError, ValueError):
-        v = 0
-    v = v or 2  # also NaN, as in the page's `Number(x) || 2`
-    v = max(3, v)
-    return int(v) if v == int(v) else v
+    """max(3, parents_max) where parents_max is a whole number 1 to 6 (a number or digits); anything else counts as 2."""
+    v = _school(spec).get("parents_max")
+    if isinstance(v, str) and v.isascii() and v.isdigit():
+        v = int(v)
+    n = v if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf") and v == int(v) and 1 <= v <= 6 else 2
+    return max(3, int(n))
 
 
 def label(spec):
@@ -58,7 +57,9 @@ def want(spec, row):
     out = []
     for cn in row.get("classes") or []:
         c = next((k for k in _list(spec, "classes") if k.get("class") == cn), None)
-        out += [n for n in names(c) if n not in out]
+        for n in names(c):
+            if n not in out:
+                out.append(n)
     return out
 
 
@@ -90,7 +91,7 @@ def derive(spec):
     """Put the setup right. Returns whether anything changed."""
     changed, subs, lessons = False, subjects(spec), _list(spec, "lessons")
     for r in lessons:
-        if "by_hand" in r and not staffed(spec, r):
+        if "by_hand" in r and (r["by_hand"] is not True or not staffed(spec, r)):
             del r["by_hand"]
             changed = True
     if not subs:
@@ -100,15 +101,16 @@ def derive(spec):
             continue
         for sn in subs:
             s = next((k for k in _list(spec, "subjects") if k.get("subject") == sn), None)
+            per = s.get("periods") if s else None
             try:
-                p = float((s.get("periods") or {}).get(c["level"]) or 0) if s else 0
+                p = float((per.get(c["level"]) if isinstance(per, dict) else 0) or 0)
             except (TypeError, ValueError):
                 p = 0
             if not s or not s.get("_id") or not p > 0:
                 continue
             if any(r.get("subject") == sn and c.get("class") in (r.get("classes") or []) for r in lessons):
                 continue
-            lessons.append({"_id": "cp-" + c["_id"] + "-" + s["_id"], "level": c["level"], "subject": sn, "block": None,
+            lessons.append({"_id": "cp-" + str(c["_id"]) + "-" + str(s["_id"]), "level": c["level"], "subject": sn, "block": None,
                             "classes": [c.get("class")], "teachers": names(c), "students": None})
             changed = True
     for r in lessons:

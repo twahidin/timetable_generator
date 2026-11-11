@@ -39,10 +39,11 @@ assert.deepStrictEqual(Parents.want(spec, { subject: "CE 1", classes: ["1B"] }),
 assert.strictEqual(Parents.same(["Tan", "Lim"], ["Lim", "Tan"]), true);
 assert.strictEqual(Parents.same(["Tan"], ["Tan", "Lim"]), false);
 assert.strictEqual(Parents.same([], [null]), true);
-assert.strictEqual(Parents.cap({ school: { parents_max: 2 } }), 3);
-assert.strictEqual(Parents.cap({ school: { parents_max: 4 } }), 4);
-assert.strictEqual(Parents.cap({ school: { parents_max: "x" } }), 3);
+[[2, 3], [4, 4], ["4", 4], [6, 6], [7, 3], [0, 3], [2.5, 3], ["x", 3], ["0x10", 3], [[4], 3], [null, 3], [Infinity, 3]].forEach(function (p) {
+  assert.strictEqual(Parents.cap({ school: { parents_max: p[0] } }), p[1], "cap " + String(p[0]));
+});
 assert.strictEqual(Parents.cap({ school: {} }), 3);
+assert.strictEqual(Parents.cap({}), 3);
 assert.strictEqual(Parents.label(spec), "Form teachers");
 assert.strictEqual(Parents.label({ school: { parents_name: " Class Parents " } }), "Class Parents");
 assert.strictEqual(Parents.label({}), "Form teachers");

@@ -6,6 +6,7 @@ var Parents = (function () {
 
   var blank = function (n) { return n == null || String(n).trim() === ""; };
   var school = function (spec) { return (spec && spec.school) || {}; };
+  var isObj = function (v) { return !!v && typeof v === "object" && !Array.isArray(v); };
   var list = function (spec, k) { return (spec && Array.isArray(spec[k])) ? spec[k] : []; };
 
   // A row's teachers (or a class's parents) with blanks dropped.
@@ -23,7 +24,12 @@ var Parents = (function () {
     return named.filter(function (n, i) { return have[n] === true && named.indexOf(n) === i; });
   }
 
-  function cap(spec) { return Math.max(3, Number(school(spec).parents_max) || 2); }
+  // A whole number 1 to 6, given as a number or as digits; anything else counts as 2.
+  function cap(spec) {
+    var v = school(spec).parents_max;
+    if (typeof v === "string" && /^[0-9]+$/.test(v)) v = Number(v);
+    return Math.max(3, typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 6 ? v : 2);
+  }
 
   function label(spec) { return String(school(spec).parents_name || "").trim() || "Form teachers"; }
 
@@ -67,14 +73,14 @@ var Parents = (function () {
   function derive(spec) {
     var changed = false, subs = subjects(spec), lessons = list(spec, "lessons");
     lessons.forEach(function (r) {
-      if ("by_hand" in r && !staffed(spec, r)) { delete r.by_hand; changed = true; }
+      if ("by_hand" in r && (r.by_hand !== true || !staffed(spec, r))) { delete r.by_hand; changed = true; }
     });
     if (!subs.length) return changed;
     list(spec, "classes").forEach(function (c) {
       if (!c._id || !c.level) return;
       subs.forEach(function (sn) {
         var s = list(spec, "subjects").filter(function (k) { return k.subject === sn; })[0];
-        if (!s || !s._id || !(Number((s.periods || {})[c.level]) > 0)) return;
+        if (!s || !s._id || !(Number(isObj(s.periods) ? s.periods[c.level] : 0) > 0)) return;
         var has = lessons.some(function (r) { return r.subject === sn && (r.classes || []).indexOf(c["class"]) >= 0; });
         if (has) return;
         lessons.push({ _id: "cp-" + c._id + "-" + s._id, level: c.level, subject: sn, block: null,

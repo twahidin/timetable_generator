@@ -44,10 +44,11 @@ assert P.want(spec, {"subject": "CE 1", "classes": ["1B"]}) == []
 assert P.same(["Tan", "Lim"], ["Lim", "Tan"]) is True
 assert P.same(["Tan"], ["Tan", "Lim"]) is False
 assert P.same([], [None]) is True
-assert P.cap({"school": {"parents_max": 2}}) == 3
-assert P.cap({"school": {"parents_max": 4}}) == 4
-assert P.cap({"school": {"parents_max": "x"}}) == 3
+for given, expect in [(2, 3), (4, 4), ("4", 4), (6, 6), (7, 3), (0, 3), (2.5, 3), ("x", 3), ("0x10", 3), ([4], 3), (None, 3),
+                      (float("inf"), 3), (True, 3)]:
+    assert P.cap({"school": {"parents_max": given}}) == expect, ("cap", given)
 assert P.cap({"school": {}}) == 3
+assert P.cap({}) == 3
 assert P.label(spec) == "Form teachers"
 assert P.label({"school": {"parents_name": " Class Parents "}}) == "Class Parents"
 assert P.label({}) == "Form teachers"
