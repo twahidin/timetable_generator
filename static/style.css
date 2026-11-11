@@ -190,6 +190,11 @@ button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .avx .x{position:absolute;top:-6px;right:-8px;font-size:10px;line-height:1;padding:1px 4px;border-radius:999px;color:var(--warn);background:var(--panel);display:none}
 .avx:hover .x,.avx:focus-within .x{display:block}
 @media (hover:none){.avx .x{display:block}}
+.avx.named{display:inline-flex;flex-direction:column;align-items:center;width:62px;line-height:1.15}
+.avx.named .avatar{line-height:0}
+.avx.named .x{right:8px}
+.avn{display:block;max-width:62px;margin-top:2px;font-size:11px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.avs:has(.avx.named){align-items:flex-start;gap:6px 2px}
 .gcard{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px;cursor:pointer;background:var(--panel)}
 .gcard:hover{border-color:#c5ccd8}
 .gcard .plus{display:inline-flex;width:28px;height:28px;border:1px dashed #cdd5e1;border-radius:50%;align-items:center;justify-content:center;color:var(--muted)}

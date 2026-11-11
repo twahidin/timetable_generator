@@ -132,7 +132,8 @@ teachers of other departments with **+ Add to roster**, for a teacher who teache
 department. **+ New teacher** adds a hire or a post still to be filled: name (or a placeholder such as "New Mathematics
 teacher 1"), short name, department, role and allowance (the role's guide when left empty); a head's new teacher is
 provisional until the committee confirms them on step 4.
-In the middle, **Can teach**: a basket per subject of the department with the avatars of everyone who can teach it, from
+In the middle, **Can teach**: a basket per subject of the department with the avatars of everyone who can teach it (each with the teacher's short
+name under it, the full name on hover; the cards on the right show the names the same way), from
 any department, and a **Staff room** for roster teachers with no subject yet. Tick teachers and click a basket, or drag
 them in (dragging a ticked teacher drags every ticked teacher). The ✕ on an avatar in a basket takes the subject off
 them; dropping teachers on the staff room takes them out of every basket of the department. Either asks first, and says
