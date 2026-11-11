@@ -273,3 +273,4 @@ table.fxgrid.small th.fxp{width:28px;font-size:10px}
 table.fxgrid.small td.fxc{height:14px;padding:0}
 table.fxgrid.small .fxl{display:block;margin:0 0 1px;padding:0 3px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--line);border-radius:3px;background:var(--chip)}
 .fxl.mk-moved{outline:2px solid #6941c6;outline-offset:-1px}.fxl.mk-changed{outline:2px solid #1570ef;outline-offset:-1px}.fxl.mk-new{outline:2px dashed #067647;outline-offset:-1px}
+select[data-parent]{width:132px;min-width:132px}   /* a Class Parents box shows the whole name */

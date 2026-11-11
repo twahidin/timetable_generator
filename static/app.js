@@ -23,7 +23,8 @@ SYNC.client = Sync.newId();   // new on every load: a duplicated tab must not sh
 const REPLACED = "The committee replaced the school's setup.";
 const DROPPED = "The committee replaced the school's setup, so the changes you had not sent were dropped.";
 function save(o) {
-  if (S.spec) Sync.ensureIds(S.spec);
+  // ids first, then the Class Parents rule (a lesson it makes takes its id from its class and subject); hand: only a person's own edit may mark "Changed by hand"
+  if (S.spec) { Sync.ensureIds(S.spec); Parents.settle(S.spec, S.snap, !(o && (o.quiet || o.remote))); }
   const js = S.spec ? JSON.stringify(S.spec) : null;
   if (js !== S.last) {
     if (S.snap && js && !(o && o.quiet)) {   // an entry holds the operations that take back (and bring again) this change
@@ -726,6 +727,7 @@ function issues() {
     if (l.length < size) add("students", l[0], `${c.class}: ${l.length} of ${size} students listed. Once a class has a list, only the students on it are checked for clashes.`);
     if (l.length > size) add("students", l[0], `${c.class}: ${l.length} students listed but the class has ${size} on step 2.`);
   });
+  Parents.issues(S.spec).forEach(x => add(x.kind, x.i, x.text));   // Class Parents: none of these is hard
   return { out, load, info, crit };
 }
 const isCrit = (C, k, i, m) => C.has(`${k}|${i}|${m}`);
@@ -991,6 +993,8 @@ const VIEWS = {
         <label class="f">Levels (comma separated) <input data-list="levels" value="${esc(levels().join(", "))}"></label>
         <label class="f">Departments <input data-list="departments" value="${esc((s.departments || []).join(", "))}"></label>
         <label class="f">Room kinds <input data-list="room_kinds" value="${esc((s.room_kinds || []).join(", "))}"></label>
+        <label class="f">What your school calls a class's form teachers ${inp("spec.school.parents_name", s.parents_name, "text", 'placeholder="Form teachers"')}</label>
+        <label class="f">Most a class can have <input data-pmax type="number" min="1" max="6" value="${esc(Parents.maximum(s.parents_max) || 2)}"></label>
       </div></div>
       <div class="card"><h2>Day structure</h2>${(w => w.length ? `<div class="notice"><b>The Day structure and the settings on step 6 disagree.</b> The rules win where they are stricter, so make them say the same:<ul>${w.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "")(structureWarnings())}<div class="legend">Brush: ${["L", "R", "W", "U", "F", "A", ""].map(c => `<button class="small ${S.brush === c ? "primary" : ""}" data-brush="${c}"><i class="c-${c}" style="width:12px;height:12px;display:inline-block;border-radius:3px;vertical-align:-2px"></i> ${{ L: "Lesson", R: "Recess", W: "Recess window", U: "Lunch", F: "Flag / assembly", A: "After-school slot", "": "No school" }[c]}</button>`).join("")}</div>
       <p class="muted" style="margin:4px 0 10px">Click or drag across cells to paint them with the brush.</p>
@@ -1008,10 +1012,18 @@ const VIEWS = {
   },
   classes() {
     const { out, crit } = issues();
-    return `<div class="card"><h1>Step 2 · Classes</h1><p class="lead">Form classes with their level, size and home room (picked from step 1).</p>
+    const nm = Parents.label(S.spec), pm = Parents.maximum(sc().parents_max) || 2, T = teacherNames(), held = c => Parents.names(c).length;
+    const NP = Math.max(pm, ...S.spec.classes.map(held));   // a class holding more than the school's most keeps its boxes
+    const pcells = (c, i) => { const mine = Math.max(pm, held(c)); let h = "";
+      for (let k = 0; k < NP; k++) { if (k >= mine) { h += "<td></td>"; continue; } const cur = Parents.names(c)[k] || "";
+        h += `<td><select data-parent="${i}|${k}">${opt("", cur, "")}${T.map(t => opt(t, cur)).join("")}${cur && !T.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}</select></td>`; }
+      return h; };
+    const hand = Parents.handRows(S.spec).length, fc = Parents.fillCount(S.spec);
+    const bar = Parents.subjects(S.spec).length && (hand || fc) ? `<div class="helper row">${hand ? `<span>${hand} ${hand === 1 ? "lesson" : "lessons"} changed by hand</span><button data-pback="1">Put the ${esc(nm)} on all of them</button>` : ""}${fc ? `<button data-pfill="1">Take them from the lessons</button>` : ""}</div>` : "";
+    return `<div class="card"><h1>Step 2 · Classes</h1><p class="lead">Form classes with their level, size and home room (picked from step 1).</p>${bar}
       <div class="helper row"><b>Add classes</b> level ${sel("_hc", levels()[0], levels(), false, 'id="hcLevel" data-k=""')} names <input id="hcNames" value="A, B, C, D" style="width:120px"> students <input id="hcSize" type="number" value="38" style="width:70px"> <button data-helper="classes">Add (home rooms filled from free classrooms)</button></div>
-      <div class="tablewrap"><table><tr><th>Class</th><th>Level</th><th>Students</th><th>Home room</th><th>Lesson rows</th><th>Note</th><th></th></tr>
-      ${S.spec.classes.map((c, i) => `<tr id="classes-${i}" class="${rowCls(out, crit, "classes", i)}"><td>${inp(`spec.classes.${i}.class`, c.class)}</td><td>${sel(`spec.classes.${i}.level`, c.level, levels())}</td><td class="num">${inp(`spec.classes.${i}.size`, c.size, "number")}</td><td>${sel(`spec.classes.${i}.home_room`, c.home_room, rooms())}</td><td class="calc">${S.spec.lessons.filter(x => (x.classes || []).includes(c.class)).length}</td><td>${inp(`spec.classes.${i}.note`, c.note)}</td><td>${delBtn("classes", i)}</td></tr>`).join("")}
+      <div class="tablewrap"><table><tr><th>Class</th><th>Level</th><th>Students</th><th>Home room</th><th colspan="${NP}">${esc(nm)}</th><th>Lesson rows</th><th>Note</th><th></th></tr>
+      ${S.spec.classes.map((c, i) => `<tr id="classes-${i}" class="${rowCls(out, crit, "classes", i)}"><td>${inp(`spec.classes.${i}.class`, c.class)}</td><td>${sel(`spec.classes.${i}.level`, c.level, levels())}</td><td class="num">${inp(`spec.classes.${i}.size`, c.size, "number")}</td><td>${sel(`spec.classes.${i}.home_room`, c.home_room, rooms())}</td>${pcells(c, i)}<td class="calc">${S.spec.lessons.filter(x => (x.classes || []).includes(c.class)).length}</td><td>${inp(`spec.classes.${i}.note`, c.note)}</td><td>${delBtn("classes", i)}</td></tr>`).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="classes">+ Add class</button></div></div>`;
   },
   subjects() {
@@ -1182,7 +1194,9 @@ const VIEWS = {
       <div class="grid2">${SET().map(x => `<label class="f">${esc(x.label)} ${x.number
         ? `<input data-set="${x.key}" type="number" min="1" value="${esc(settingValue(x.key))}" placeholder="no limit">`
         : `<select data-set="${x.key}">${["Yes", "No"].map(v => opt(v, settingValue(x.key))).join("")}</select>`}</label>`).join("")}
-      ${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? "" : settingRow(x, i)).join("")}</div></div>
+      ${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? "" : settingRow(x, i)).join("")}</div>
+      <div class="row" style="margin-top:12px"><b>${esc(Parents.label(S.spec))} take these lessons</b>${chips("spec.school.parents_subjects", namesList(s.parents_subjects), "subjects")}</div>
+      <p class="muted small" style="margin:4px 0 0">They are put on these lessons for every class, all together. You can still change one lesson by hand on step 5.</p></div>
       <div class="card"><h2>Constraints</h2>${strip}${parts.join("")}</div>${giveWay(out, crit, psel, weeks, days)}`;
   },
   students() {
@@ -1254,6 +1268,8 @@ document.addEventListener("click", async e => {
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
+  if (b.dataset.pback) { const n = Parents.handRows(S.spec).length, nm = Parents.label(S.spec); if (!n || !confirm(`Put the ${nm} back on ${n} ${n === 1 ? "lesson" : "lessons"}? The teachers typed on them are replaced.`)) return; Parents.backAll(S.spec); save(); render(); poll(); return; }
+  if (b.dataset.pfill) { const n = Parents.fillCount(S.spec), nm = Parents.label(S.spec); if (!n || !confirm(`Give ${n} ${n === 1 ? "class" : "classes"} their ${nm} from the teachers now on their lessons?`)) return; Parents.fill(S.spec); save(); render(); poll(); return; }
   if (b.id === "practiceBack") { leavePractice(); return; }
   if (b.dataset.old) { oldChoice(b.dataset.old); return; }
   if (b.id === "copiesLoad") { try { S.copies = await getJSON("/api/setup/copies"); } catch (err) { toast("Could not load the earlier copies."); return; } render(); return; }
@@ -1360,6 +1376,10 @@ document.addEventListener("change", async e => {
   if (el.dataset.pick || el.dataset.pickall) return;
   if (el.dataset.pat !== undefined) { if (setPattern(S.spec.lessons[Number(el.dataset.pat)], el.value)) { save(); render(); } else { const x = S.spec.lessons[Number(el.dataset.pat)]; el.value = (x.pattern || []).length ? patText(x.pattern.map(Number)) : ""; el.focus(); } return; }
   if (el.dataset.set) { setSetting(el.dataset.set, el.value); save(); render(); return; }
+  if (el.dataset.pmax !== undefined) { const msg = Parents.setMax(S.spec, el.value); if (msg) toast(msg); save(); render(); poll(); return; }   // a refusal leaves the old number, redrawn
+  if (el.dataset.parent) {   // a Class Parents box: all of that class's boxes make its list (setPath would throw on a class with no list)
+    const i = Number(el.dataset.parent.split("|")[0]);
+    Parents.setParents(S.spec, i, [...el.closest("tr").querySelectorAll("[data-parent]")].map(x => x.value)); save(); render(); poll(); return; }
   if (el.dataset.time) {   // a block-out's clock time: keep the times and block every period they overlap
     const [i, k] = el.dataset.time.split("|").map(Number), r = S.spec.rules[i];
     r.times = [...ruleTimes(r)]; r.times[k] = el.value; [r.from, r.to] = periodsBetween(r.times[0], r.times[1]); save(); render(); return; }
@@ -1368,6 +1388,7 @@ document.addEventListener("change", async e => {
     setFixedWho(r, tr.querySelector("[data-fixlv]").value, tr.querySelector("[data-fixwho]").value); save(); render(); return;
   }
   const path = el.dataset.k; if (!path) return;
+  if (path === "spec.school.parents_name") { const t = el.value.trim(); if (t) sc().parents_name = t; else delete sc().parents_name; save(); render(); poll(); return; }   // an empty box takes the key away
   if (el.type === "checkbox") { setPath(path, el.checked); save(); render(); return; }
   let v = el.value; if (el.type === "number") v = v === "" ? null : Number(v); if (v === "") v = null;
   if (/\.(from|to)$/.test(path) && v !== null) v = Number(v);
@@ -2036,9 +2057,12 @@ function tlAction(k) {
     const who = n === 1 ? "1 teacher who is" : `${n} teachers who are`;
     const lessons = !hit ? "No lesson on step 5 names them."
       : `${hit === 1 ? "1 lesson" : `${hit} lessons`} on step 5 name${hit === 1 ? "s" : ""} them, and lose${hit === 1 ? "s" : ""} them (a shared lesson keeps its other teacher).`;
-    if (!confirm(`${warn}Remove ${who} not in this list? ${lessons} Undo takes it back.`)) return;
+    const cl = S.spec.classes.filter(c => Parents.names(c).some(t => gone.has(t))).length;
+    const forms = !cl ? "" : ` They also leave the ${Parents.label(S.spec)} of ${cl === 1 ? "1 class" : `${cl} classes`}.`;
+    if (!confirm(`${warn}Remove ${who} not in this list? ${lessons}${forms} Undo takes it back.`)) return;
     [...p.missing].sort((a, b) => b - a).forEach(i => T.splice(i, 1));
     S.spec.lessons.forEach(x => { if ((x.teachers || []).some(t => gone.has(t))) x.teachers = x.teachers.filter(t => t && !gone.has(t)); });
+    S.spec.classes.forEach((c, i) => { if (Parents.names(c).some(t => gone.has(t))) Parents.setParents(S.spec, i, Parents.names(c).filter(t => !gone.has(t))); });   // and off every class's Class Parents
     unpick(); save(); TL.msg = `Removed ${n} teacher${n === 1 ? "" : "s"}. Undo takes it back.`; toast(TL.msg);
   }
   TL.sig = teachersSig();   // what this card just did is not a change "by other means": the preview stays, worked out again
@@ -2067,6 +2091,7 @@ document.addEventListener("input", e => {
 });
 
 /* ---------------- pop-ups: class picker, can-teach editor */
+const PCPATH = "spec.school.parents_subjects";
 function openPop(anchor) {
   const pop = $("#pop"); const path = anchor.dataset.path; const r = anchor.getBoundingClientRect();
   pop.style.left = `${Math.min(window.scrollX + r.left, window.scrollX + window.innerWidth - 440)}px`; pop.style.top = `${window.scrollY + r.bottom + 6}px`; pop.dataset.path = path; pop.dataset.what = anchor.dataset.pop;
@@ -2092,12 +2117,14 @@ function openPop(anchor) {
       + (c && !blocks.size && !other.length ? `<p class="muted">No groups on step 5 include ${esc(c)} yet.</p>` : "")
       + `<div class="row"><button class="small primary" data-popdone="1">Done</button></div>`;
   } else if (anchor.dataset.pop === "subjects") {   // Only these subjects (an HBL day): a department, or subjects without their G1/G2/G3 tag
-    const cur = new Set(namesList(getPath(path)).map(n => n.toLowerCase())), by = new Map();
-    S.spec.subjects.filter(s => s.subject).forEach(s => { const d = s.dept || "Other"; if (!by.has(d)) by.set(d, new Set()); by.get(d).add(untag(s.subject)); });
+    const pc = path === PCPATH;   // the Class Parents subjects: the names as they are on step 3, one by one
+    const cur = new Set(namesList(getPath(path)).map(n => n.toLowerCase())), by = new Map(), tg = n => pc ? n : untag(n);
+    S.spec.subjects.filter(s => s.subject).forEach(s => { const d = s.dept || "Other"; if (!by.has(d)) by.set(d, new Set()); by.get(d).add(tg(s.subject)); });
     const box = (v, label, cls = "") => `<label class="${cls}"><input type="checkbox" value="${esc(v)}" ${cur.has(String(v).toLowerCase()) ? "checked" : ""}>${label}</label>`;
-    const known = new Set([...by.keys(), ...[...by.values()].flatMap(s => [...s])].map(x => String(x).toLowerCase())), lost = namesList(getPath(path)).filter(n => !known.has(n.toLowerCase()));
-    pop.innerHTML = `<h3>Subjects taught then</h3><p class="muted small" style="margin:0 0 6px">Tick a department for all its subjects, or single subjects (every G1/G2/G3 group of it). Every other lesson is kept out of those periods.</p>`
-      + [...by].map(([d, ss]) => `<div class="gblock"><div class="opts wide">${d !== "Other" ? box(d, `<b>All ${esc(d)}</b>`) : ""}${[...ss].map(s => box(s, esc(s))).join("")}</div></div>`).join("")
+    const known = new Set([...(pc ? [] : by.keys()), ...[...by.values()].flatMap(s => [...s])].map(x => String(x).toLowerCase())), lost = namesList(getPath(path)).filter(n => !known.has(n.toLowerCase()));
+    pop.innerHTML = (pc ? `<h3>${esc(Parents.label(S.spec))} take these lessons</h3><p class="muted small" style="margin:0 0 6px">Tick the subjects whose lessons they take.</p>`
+      : `<h3>Subjects taught then</h3><p class="muted small" style="margin:0 0 6px">Tick a department for all its subjects, or single subjects (every G1/G2/G3 group of it). Every other lesson is kept out of those periods.</p>`)
+      + [...by].map(([d, ss]) => `<div class="gblock"><div class="opts wide">${d !== "Other" && !pc ? box(d, `<b>All ${esc(d)}</b>`) : ""}${[...ss].map(s => box(s, esc(s))).join("")}</div></div>`).join("")
       + (lost.length ? `<div class="gblock"><div class="muted small">Not on step 3 (untick to remove)</div><div class="opts wide">${lost.map(n => box(n, esc(n))).join("")}</div></div>` : "")
       + `<div class="row"><button class="small" data-popnone="1">None</button><button class="small primary" data-popdone="1">Done</button></div>`;
   } else if (anchor.dataset.pop === "rooms") {   // Only in venues: the rooms, by kind
@@ -2125,6 +2152,7 @@ function readCt() { return [...document.querySelectorAll("#ctRows [data-ct]")].m
 function commitPop() {
   const pop = $("#pop"); if (pop.hidden) return; const path = pop.dataset.path;
   if (pop.dataset.what === "classes") setPath(path, [...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value));
+  else if (pop.dataset.what === "subjects" && path === PCPATH) Parents.setSubjects(S.spec, [...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value));
   else if (pop.dataset.what === "subjects") setPath(path, [...new Set([...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value))].join(", ") || null);   // one cell, as on the workbook
   else if (pop.dataset.what === "rooms") setPath(path, [...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value));
   else if (pop.dataset.what === "groups") {
