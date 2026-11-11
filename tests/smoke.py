@@ -685,12 +685,18 @@ def test_the_typed_request_is_off_without_a_key_and_on_with_the_mock_reader():
     with _typed_env(TYPED_REQUEST_MODEL="mock", ANTHROPIC_API_KEY=None): assert c.get("/api/status").get_json()["typed"] is True
     with _typed_env(TYPED_REQUEST_MODEL=None, ANTHROPIC_API_KEY="sk-ant-test-not-a-key"): assert c.get("/api/status").get_json()["typed"] is True
 
-def test_the_typed_route_needs_a_draft_and_a_json_object():
+def test_the_typed_route_needs_a_draft_a_setup_and_a_json_object():
     import shutil; shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True)
     with _typed_env(TYPED_REQUEST_MODEL="mock"):
-        import typed; typed.read = lambda *a, **k: (_ for _ in ()).throw(AssertionError("the reader was called with no draft"))
-        r = _ask(words="move Art for 1A off Mon"); assert r.status_code == 400 and r.get_json() == {"error": "There is no draft."}, r.get_json()
-        _grid_draft()
+        import typed; real_read = typed.read; typed.read = lambda *a, **k: (_ for _ in ()).throw(AssertionError("the reader was called with no draft"))
+        r = _ask(words="move Art for 1A off Mon"); assert r.status_code == 404 and r.get_json() == {"error": "There is no draft."}, r.get_json()
+        assert c.post("/api/draft/preview", json={"fixes": []}).status_code == 404       # the other draft routes say no draft the same way
+        typed.read = real_read; _grid_draft()
+        real = A.draft._now
+        def nosetup(): raise LookupError()                                                # what no saved setup raises
+        A.draft._now = nosetup
+        try: r = _ask(words="move Art for 1A off Mon"); assert r.status_code == 409 and r.get_json() == {"error": A.NO_SETUP}, (r.status_code, r.get_json())
+        finally: A.draft._now = real
         for body in ("x", [1], 5, None):
             r = c.post("/api/draft/ask", json=body); assert r.status_code == 400 and r.get_json()["error"], body
         assert c.post("/api/draft/ask", data="not json", content_type="text/plain").status_code == 400
@@ -706,12 +712,16 @@ def test_a_typed_request_finds_the_lesson_and_its_ways_are_applied_through_the_f
         assert c.get("/api/draft").get_json()["fixes"] == []                                    # asking changes nothing
         r = c.post("/api/draft/fixes", json={"fixes": sug[0]["fixes"]}); assert r.status_code == 200, r.get_json()
         assert next(x for x in c.get("/api/draft/grid?view=class&name=1A").get_json()["lessons"] if x["id"] == a)["d"] != 0
-        # the draft changed since the ask: a way left over is judged on the draft as it is, whole or not at all
-        before = len(c.get("/api/draft").get_json()["fixes"])
-        for s in sug[1:]:
-            r = c.post("/api/draft/fixes", json={"fixes": s["fixes"]}); now = len(c.get("/api/draft").get_json()["fixes"])
-            assert (r.status_code == 200 and now == before + 1) or (r.status_code == 400 and r.get_json()["error"] and now == before), (r.status_code, r.get_json())
-            before = now
+
+def test_a_way_left_over_after_the_draft_changed_is_refused_whole():   # Review Focus 5
+    days, p = _grid_draft()
+    with _typed_env(TYPED_REQUEST_MODEL="mock"):
+        a, b = _lid("1A", "Art"), _lid("1B", "Art"); j = _ask(words=f"move Art for 1A off {days[0]}").get_json()
+        mv = next(s for s in j["groups"][0]["suggestions"] if s["fixes"][0]["kind"] == "move"); f = mv["fixes"][0]
+        r = c.post("/api/draft/fix", json=dict(kind="move", id=b, d=f["d"], p=f["p"])); assert r.status_code == 200, r.get_json()    # the same teacher's other lesson takes the target slot
+        before = c.get("/api/draft").get_json()["fixes"]; assert len(before) == 1
+        r = c.post("/api/draft/fixes", json={"fixes": mv["fixes"]}); assert r.status_code == 400 and r.get_json()["error"], (r.status_code, r.get_json())
+        assert c.get("/api/draft").get_json()["fixes"] == before
 
 def test_a_choice_answered_with_pick_and_the_ask_does_not_read_the_words_again():
     _grid_draft(); import typed
@@ -740,12 +750,34 @@ def test_a_failed_call_is_the_one_sentence_and_the_key_is_nowhere():   # Review 
         assert KEY not in r.get_data(as_text=True) and KEY not in logs.getvalue() and KEY not in out.getvalue() and KEY not in err.getvalue()
         assert c.get("/api/draft").get_json()["fixes"] == []
 
-def test_a_head_and_a_teacher_cannot_reach_the_typed_route():
-    t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
+def test_a_fault_after_the_reading_says_so_and_leaves_a_trace_without_the_message():
+    import io, logging, contextlib, typed; _grid_draft(); KEY = "sk-ant-test-not-a-key"; real = typed.answer
     with _typed_env(TYPED_REQUEST_MODEL="mock"):
-        for who in [t] + ([h] if h else []): assert _ask(who, words="move Art for 1A off Mon").status_code in (401, 403)
-        assert A.app.test_client().post("/api/draft/ask", json={"words": "x"}).status_code in (401, 403)
-        assert "typed" not in (h.get("/api/status").get_json() if h else {})
+        assert typed.BROKE == "Something went wrong working that out. The suggestions below still work."
+        def broken(*a, **k): raise KeyError(KEY + " in a message")
+        typed.answer = broken
+        logs, err = io.StringIO(), io.StringIO(); hd = logging.StreamHandler(logs); lg = A.app.logger; lg.addHandler(hd); old = lg.level; lg.setLevel(logging.DEBUG)
+        try:
+            with contextlib.redirect_stderr(err): r = _ask(words="move Art for 1A off Mon")
+        finally: lg.removeHandler(hd); lg.setLevel(old); typed.answer = real
+        assert r.status_code == 200 and r.get_json() == {"ok": False, "error": typed.BROKE}, r.get_json()
+        seen = logs.getvalue(); assert KEY not in r.get_data(as_text=True) and KEY not in seen and KEY not in err.getvalue() and "move Art" not in seen + err.getvalue()
+        assert seen.count("typed request failed after reading: KeyError") == 1 and "draft.py" in seen and "in ask" in seen, seen           # the type name once, and the frames
+
+def test_nobody_but_the_committee_reaches_the_typed_route_whether_it_is_on_or_off():
+    def who(role_):
+        k = A.app.test_client()
+        if role_: 
+            with k.session_transaction() as ss: ss["role"] = role_; ss["sid"] = "s1" if role_ == "personal" else None
+        return k
+    clients = {r: who(r) for r in ("teacher", "student", "personal", None)}
+    if h: clients["head"] = h
+    for env in (dict(TYPED_REQUEST_MODEL=None, ANTHROPIC_API_KEY=None), dict(TYPED_REQUEST_MODEL="mock")):
+        with _typed_env(**env):
+            for name, k in clients.items():
+                ref = k.get("/api/draft/suggest?key=x"); r = _ask(k, words="move Art for 1A off Mon")
+                assert r.status_code in (401, 403) and (r.status_code, r.get_json()) == (ref.status_code, ref.get_json()) and NOT_ON not in r.get_data(as_text=True), (name, env, r.status_code, r.get_json())
+                assert "typed" not in (k.get("/api/status").get_json() or {})
 
 def test_an_upload_over_unpublished_fixes_is_refused_by_the_draft_and_replace_clears_them():
     spec = _grid_draft() and c.get("/api/setup").get_json()["spec"]; days, p = _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])

@@ -7,6 +7,7 @@ FAILED = "The request could not be read just now. The suggestions below still wo
 TOO_LONG = "Keep the request under 300 characters."
 BUSY = "Too many typed requests just now. Try again in a few minutes."
 BLANK = "Type what you want changed."
+BROKE = "Something went wrong working that out. The suggestions below still work."     # a fault after the words were read
 ACTIONS = ("move", "teacher", "room", "none")
 MAX_LIST, MAX_STR = 20, 200
 GUARD_N, GUARD_S = 30, 600          # at most 30 reads that reach the call in any 10 minutes, for the whole server

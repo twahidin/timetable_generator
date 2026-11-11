@@ -4,7 +4,7 @@ Committee (COMMITTEE_CODE): fill the setup step by step, download it with the ti
 to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable."""
-import copy, io, os, re, shutil, sys, tempfile, zipfile
+import copy, io, os, re, shutil, sys, tempfile, traceback, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -442,8 +442,12 @@ def draft_ask():
     body = request.get_json(force=True, silent=True)
     if not isinstance(body, dict): return {"error": "Send the request as JSON."}, 400
     try: return jsonify(draft.ask(body.get("words"), body.get("pick"), body.get("ask")))
-    except draft.NoDraft as e: return {"error": str(e)}, 400
-    except Exception: return jsonify(ok=False, error=typed.FAILED)     # never a 500, and never an exception's text (it could hold the key)
+    except draft.NoDraft as e: return {"error": str(e)}, 404            # as the other draft routes say it
+    except Exception as e:
+        if type(e) is LookupError: return {"error": NO_SETUP}, 409
+        # typed.read never raises, so a fault here came after the words were read. Logged as the type and the frames only: the message could hold the key or the words.
+        app.logger.error("typed request failed after reading: %s\n%s", type(e).__name__, "".join(traceback.format_tb(e.__traceback__)))
+        return jsonify(ok=False, error=typed.BROKE)                    # 200, never a 500
 
 @app.get("/api/draft/download")
 @need("committee")
