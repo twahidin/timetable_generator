@@ -47,8 +47,18 @@ def label(spec):
     return str(_school(spec).get("parents_name") or "").strip() or "Form teachers"
 
 
+def _text(v):
+    """Only a non-empty string (after trimming) counts as a block or a code; null, "", [], {} and 0 do not."""
+    return isinstance(v, str) and v.strip() != ""
+
+
+def whole(row):
+    """A whole-class row: in no block and with no code override."""
+    return not _text(row.get("block")) and not _text(row.get("code_override"))
+
+
 def staffed(spec, row):
-    return bool(row) and not row.get("block") and not row.get("code_override") and row.get("subject") in subjects(spec)
+    return bool(row) and whole(row) and row.get("subject") in subjects(spec)
 
 
 def follows(spec, row):

@@ -1078,11 +1078,12 @@ const VIEWS = {
     const { out, crit, info, load } = issues(); const T = teacherNames(), f = S.tg, P = S.pick;
     const tsel = (i, k, x) => { const path = `spec.lessons.${i}.teachers.${k}`; const cur = (x.teachers || [])[k] || ""; const yes = T.filter(t => canTeachRow(t, x)), no = T.filter(t => !yes.includes(t)), lock = cpBlock(x);
       return `<select data-k="${path}" ${lock ? `disabled title="${esc(cpWhy())}"` : ""}>${opt("", cur, "")}<optgroup label="Can teach this">${yes.map(t => opt(t, cur)).join("")}</optgroup><optgroup label="Others">${no.map(t => opt(t, cur)).join("")}</optgroup></select>`; };
-    const NT = Parents.subjects(S.spec).length ? Math.max(Parents.cap(S.spec), ...S.spec.lessons.filter(x => Parents.staffed(S.spec, x)).map(x => Parents.names(x).length)) : 3;   // a staffed row following a shared lesson may hold more than the school's most
-    const tcell = (i, k, x) => k >= 3 && (!Parents.staffed(S.spec, x) || k >= Math.max(Parents.cap(S.spec), Parents.names(x).length)) ? "<td></td>" : `<td style="min-width:${k ? 120 : 150}px">${tsel(i, k, x)}</td>`;
     const rows = S.spec.lessons.map((x, i) => [x, i]).filter(([x]) => (!f.lv || x.level === f.lv) && (!f.subj || x.subject === f.subj)
       && (!f.t || (f.t === "-" ? !(x.teachers || []).some(Boolean) : (x.teachers || []).includes(f.t))));
     P.shown.lessons = rows.map(([, i]) => i);
+    const held = x => (x.teachers || []).reduce((m, n, k) => String(n == null ? "" : n).trim() ? k + 1 : m, 0);   // a lesson never hides a teacher it holds (blanks at the end do not count)
+    const NT = Math.max(3, Parents.subjects(S.spec).length ? Parents.cap(S.spec) : 0, ...rows.map(([x]) => held(x)));   // a staffed row following a shared lesson, or one kept from before the rule went off, may hold more
+    const tcell = (i, k, x) => k >= (Parents.staffed(S.spec, x) ? Math.max(Parents.cap(S.spec), held(x)) : Math.max(3, held(x))) ? "<td></td>" : `<td style="min-width:${k ? 120 : 150}px">${tsel(i, k, x)}</td>`;
     const all = rows.length && rows.every(([, i]) => P.lessons.has(i));
     return `<div class="card"><h2>Table view</h2><p class="lead">Every teaching group (TG) and the teachers deployed to it. A whole-class subject is one group per class; a band splits its classes into groups that all have lessons at the same time. Set up the bands first, then add the groups and deploy teachers below.</p>
       ${VIEWS._bands(out, info, crit)}</div>
@@ -1594,10 +1595,11 @@ function profileView(t, i) {   // a teacher's profile, in place of the cards whi
   const mayLook = !isHead() || S.practice || provisionalRow(t);   // the server lets a head change only a provisional teacher's row
   const canRows = (t.can_teach || []).map((c, k) => `<div class="row" style="gap:6px;margin-bottom:4px"><span style="flex:1">${esc(c.subject)}</span>${sel(`spec.teachers.${i}.can_teach.${k}.levels`, c.levels || "All", scopes(), false, 'style="width:auto"')}<button class="small danger" data-mpx="${esc(c.subject)}" title="Take ${esc(c.subject)} off">✕</button></div>`).join("") || `<p class="muted small">No subject yet: tick them and click a basket.</p>`;
   const tRows = teaches.map(c => `<div class="row" style="gap:6px;margin-bottom:4px"><span style="flex:1">${esc(c.title)} · ${esc(c.subject)} · ${c.periods || "?"} periods</span>${c.kind === "class" && cpBlock(S.spec.lessons[c.li]) ? "" : `<button class="small danger" data-mx="${esc(key(c))}|${esc(t.name)}" title="Take ${esc(t.name)} off ${esc(c.title)}">✕</button>`}</div>`).join("") || `<p class="muted small">Not deployed yet.</p>`;
+  const fc = Parents.of(S.spec, t.name);   // the classes this teacher is a form teacher of
   return `<section class="cards card profile"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Profile</h3><button class="small ghost" data-mclose>✕ Close</button></div>
     <div class="row" style="align-items:flex-start;margin-top:8px;flex-wrap:nowrap"><div style="text-align:center">${avatarOf(t, 64)}${mayLook ? `<div><button class="small" data-avatar="${i}" title="Another face for this teacher">New look</button></div>` : ""}</div>
     <div style="min-width:0"><div style="font-weight:600">${esc(t.name || "")}</div><div class="muted small">${esc(t.short || "")}${t.role ? ` · ${esc(t.role)}` : ""}${t.dept ? ` · ${esc(t.dept)}` : ""}${provisionalRow(t) ? ` <span class="tag">provisional</span>` : ""}</div>
-    <div class="small ${ld.over ? "overtxt" : ""}" style="margin-top:4px">${ld.lessons || 0} periods deployed${ld.duties ? ` + ${ld.duties} other duties` : ""}${ld.allowance ? ` = ${ld.total} of ${ld.allowance}` : ""}</div></div></div>
+    <div class="small ${ld.over ? "overtxt" : ""}" style="margin-top:4px">${ld.lessons || 0} periods deployed${ld.duties ? ` + ${ld.duties} other duties` : ""}${ld.allowance ? ` = ${ld.total} of ${ld.allowance}` : ""}</div>${fc.length ? `<div class="small" style="margin-top:4px">${esc(Parents.label(S.spec))} of ${esc(fc.join(", "))}</div>` : ""}</div></div>
     <h4>Can teach</h4>${canRows}<h4>Teaches</h4><div class="keep" style="max-height:40vh;overflow:auto">${tRows}</div>
     <p class="muted small" style="margin:10px 0 0">${isHead() && !S.practice ? "Details are changed by the committee on step 4; a provisional teacher's by you there." : "Details are changed on step 4."}</p></section>`;
 }

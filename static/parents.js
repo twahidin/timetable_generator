@@ -34,8 +34,13 @@ var Parents = (function () {
 
   function label(spec) { return String(school(spec).parents_name || "").trim() || "Form teachers"; }
 
+  // Only a non-empty string (after trimming) counts as a block or a code; null, "", [], {} and 0 do not.
+  function text(v) { return typeof v === "string" && v.trim() !== ""; }
+  // A whole-class row: in no block and with no code override.
+  function whole(row) { return !text(row.block) && !text(row.code_override); }
+
   function staffed(spec, row) {
-    return !!row && !row.block && !row.code_override && subjects(spec).indexOf(row.subject) >= 0;
+    return !!row && whole(row) && subjects(spec).indexOf(row.subject) >= 0;
   }
 
   function follows(spec, row) { return staffed(spec, row) && row.by_hand !== true; }
@@ -249,7 +254,7 @@ var Parents = (function () {
     classes.forEach(function (c, i) {
       subs.forEach(function (sn) {
         var mine = lessons.filter(function (r) { return r.subject === sn && (r.classes || []).indexOf(c["class"]) >= 0; });
-        if (mine.length && !mine.some(function (r) { return !r.block && !r.code_override; }))
+        if (mine.length && !mine.some(whole))
           add("classes", i, sn + " for " + c["class"] + " cannot be staffed by its " + nm + ": it is taught in groups.");
       });
     });

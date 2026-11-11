@@ -191,6 +191,16 @@ for first, then in ((dict(_id="n8", level="Sec 1", subject="Maths", block=None, 
     ok, refused = sync.head_split(sp, [["add", "lessons", first, ""], then])
     assert ok == [["add", "lessons", first, ""]] and refused == [(1, WHY)], (ok, refused)
     assert [r["_id"] for r in sp["lessons"]] == ["L1", "L2", "L3"]       # the setup judged on is not changed
+# a malformed lessons op from a head is refused with the usual sentence and never raises; a merge on a lesson is refused whatever the field
+SEND = "Department heads cannot send that change."
+for op in (["set", "lessons", "L1"], ["set", "lessons", "L1", "note"], ["set", "lessons", "L2", "students", 1, 2], ["set", "lessons"], ["del", "lessons"], ["add", "lessons"],
+           ["merge", "lessons", "L2", "classes"], ["merge", "lessons", "L2", "classes", "x", []], ["set", "lessons", 5, "note", "x"], ["set", "lessons", "L2", 7, "x"]):
+    assert sync.head_may(sp, [op]) == SEND, op
+assert sync.head_split(sp, [["set", "lessons", "L2"], ["set", "lessons", "L2", "students", 1]]) == ([["set", "lessons", "L2", "students", 1]], [(0, SEND)])
+assert sync.head_may(sp, [["merge", "lessons", "L3", "block", [], []]]) == WHY     # a group row would become a staffed row
+assert sync.head_may(sp, [["merge", "lessons", "L1", "classes", [], []]]) == WHY   # a staffed row
+assert sync.head_may(sp, [["merge", "lessons", "L2", "classes", ["1B"], []]]) == SEND
+assert sync.head_may(sp, [["merge", "lessons", "L2", "block", [], []]]) == SEND
 passed += 1
 
 print(f"{passed} cases passed")

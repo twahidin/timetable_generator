@@ -149,7 +149,7 @@ def write_template(spec, path, extra_rows=120):
     if PUSED:   # Class Parents: what the school calls them, the most a class has, the lessons they take (the typed values; blank where not set)
         rows += [("Form teachers are called", sc.get("parents_name") or "", f"What the school calls a class's form teachers; it heads their columns on Step 2 (blank: {PA.label({})})."),
                  ("Most form teachers for a class", parents_max(sc.get("parents_max")) or "", "A whole number from 1 to 6 (blank: 2). The Classes sheet has this many columns."),
-                 ("Form teachers take these lessons", ", ".join(str(x) for x in sc.get("parents_subjects") or []), "Subjects from Step 3, separated by commas. Their lessons are taken by the class's form teachers unless 'Changed by hand' on Step 6 says Yes.")]
+                 ("Form teachers take these lessons", ", ".join(str(x) for x in sc.get("parents_subjects") or []), "Subjects from Step 3, separated by commas. Their lessons are taken by the class's form teachers unless 'Changed by hand' on the Lessons sheet (Step 6 · Lessons) says Yes.")]
     clock_txt = lambda v: _t(v) if isinstance(v, str) and len(v) <= 5 and v.count(":") == 1 and v.replace(":", "").isdigit() else v   # '15:20' back to a time
     more_rows = list(sc.get("extra_settings", []))
     if any("W" in str(row) for d in spec.get("day_structure", {}).values() for row in d.values()):   # recess windows: their Settings rows

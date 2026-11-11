@@ -864,6 +864,14 @@ def test_a_head_cannot_change_a_staffed_lesson():                    # in NEED_H
     assert [x["i"] for x in j["refused"]] == [1] and j["refused"][0]["why"] == sync.PARENTS_WHY, j
     r = next(x for x in c.get("/api/setup").get_json()["spec"]["lessons"] if x["_id"] == "hb1"); assert r["subject"] == "Mathematics" and r["teachers"] == ["Typed T"], r
 
+def test_a_head_sends_a_malformed_lessons_op():                     # in NEED_HEADS
+    rec = _cp_start(); _Page("A", rec).post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; hp = _Page("H", rec, h)
+    other = next(x for x in rec["spec"]["lessons"] if x["subject"] != PSUBJ)     # a row the rule does not take: the old code read op[4] here
+    j = hp.post([["set", "lessons", other["_id"], "note"], ["merge", "lessons", row["_id"], "block", [], []]])
+    assert [x["i"] for x in j["refused"]] == [0, 1], j
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Pastoral A"] and r["block"] is None, r
+
 def test_a_school_not_using_class_parents_gets_one_version_and_one_entry():
     rec = _cp_start(); n = len(store._log); v = rec["v"]
     code, j = _changes("A", v, [["school", "timetable", "Term 3"]]); assert j["v"] == v + 1 and j["mine"] == v + 1 and len(store._log) == n + 1, j
@@ -935,7 +943,7 @@ def test_a_class_form_teachers_are_never_cut_off_the_printed_timetable():
         pb = export.pdf_bytes(m, dict(export.class_view(m, cl["name"]), parents_line="Form teachers: " + ", ".join(names))); assert pb[:4] == b"%PDF"
     shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
 
-NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
+NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_sends_a_malformed_lessons_op", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
               "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace", "test_a_head_cannot_reach_the_helper_routes"}
 
 if __name__ == "__main__":

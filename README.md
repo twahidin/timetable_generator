@@ -54,8 +54,9 @@ to print, one page per class. Students not on the list use the general student c
    timetable can be made until it is fixed (a teacher on two groups of one band, a fixed lesson outside lesson time,
    fixed lessons that put one teacher in two places). *Warnings* (amber): a timetable can still be made, but a person
    should look (a teacher over their allowance, a room that seats too few, a rule that matches no lesson). Form teachers add
-three lines: a class with none yet ("3I4 has no Form teachers yet."), a teacher who is a form teacher of two classes
-(a warning: their lessons cannot be at the same time), and a named subject the class has only in groups.
+five lines: a class with none yet ("3I4 has no Form teachers yet."), a form teacher who is not on the teacher list, a
+teacher who is a form teacher of two classes (a warning: their lessons cannot be at the same time), a named subject that
+is not on step 3, and a named subject the class has only in groups.
 2. **Will it fit?** Step 7 opens with the sums on the setup as it stands, before anything goes to an agent: each
    class's periods against the lesson periods of its days, lessons against the stretches between breaks (a 3-period
    lesson cannot run across recess), a lesson longer than any stretch, special rooms against the lessons that need
@@ -253,8 +254,9 @@ no sentence is flagged on step 6 and by `check`.
 **Form teachers' lessons (step 6):** in the Configuration card, **Form teachers take these lessons** names subjects (tick
 them from step 3). For every class, its whole-class lesson of each named subject then has the class's form teachers, all
 of them together and in the order of the box on step 2, and follows that box. A missing lesson is made when the subject
-has periods at the class's level. This is a default: teachers already typed on such a lesson are kept and the lesson is
-marked "Changed by hand". Turn it off by naming no subject; the lessons then stay as they are. The agent sees ordinary
+has periods at the class's level. This is a default, and typed teachers are never replaced: when the class has form teachers and the lesson holds other
+people, the lesson keeps its teachers and is marked "Changed by hand"; a lesson with nobody on it takes the form teachers;
+a lesson with the same people simply follows. Turn it off by naming no subject; the lessons then stay as they are. The agent sees ordinary
 lessons. A subject taught in groups is left alone. In the workbook, the Lessons sheet has as many Teacher columns as the
 widest lesson needs (never fewer than three) and a **Changed by hand** column; the Classes sheet has one column per form
 teacher, headed with the school's word and a number; Settings has three rows for the word, the most and the subjects. An

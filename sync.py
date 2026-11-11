@@ -241,6 +241,12 @@ def _head_lessons_why(spec, op):
     subject, block, code, classes or level, delete it, or make a row staffed that was not (by an add or a set). Judged
     from the row as it is and as the op would leave it. Other changes to lessons stay open."""
     name = op[0]
+    if _ARITY.get(name) != len(op) or not all(isinstance(op[i], str) for i in _STR_ARGS[name]):
+        return "Department heads cannot send that change."    # malformed: apply would skip it, and the checks below read its positions
+    if name == "merge":    # lessons have no merged fields; judged on the row as an empty list in that field would leave it
+        row = _find(spec, "lessons", op[2])
+        after = dict(row or {}, **{op[3]: []})
+        return PARENTS_WHY if row is not None and (parents.staffed(spec, row) or parents.staffed(spec, after)) else "Department heads cannot send that change."
     if name == "add":
         return PARENTS_WHY if len(op) > 2 and isinstance(op[2], dict) and parents.staffed(spec, op[2]) else None
     row = _find(spec, "lessons", op[2]) if len(op) > 2 else None
