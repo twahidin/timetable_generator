@@ -20,6 +20,15 @@ step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher
 rules sheets. Step 4 starts with the **Roles** (fill them first: the teacher list is checked against them), then the
 teacher list, then the teachers table.
 
+**Form teachers.** A class can have form teachers, who take its lessons together. **School & day** has two settings for
+them: what the school calls them (**What your school calls a class's form teachers**, default "Form teachers"; a school
+may type "Class Parents" and that word then takes the place of "Form teachers" everywhere below) and **Most a class can
+have** (1 to 6, default 2; lowering it below what a class already has is refused). On step 2 each class's form teachers
+are picked in order from the step 4 list. When some class has none, **Take them from the lessons** (it asks first) fills
+the classes that have none from the teachers already on their lessons of the subjects step 6 names. A line above the
+table counts the lessons changed by hand and offers **Put the Form teachers on all of them** (it asks first). Only the
+committee changes any of this.
+
 The student list goes in on the **Students** step, after the timetable is made (it is not needed to make one): paste it from Excel or a CSV, or upload an .xlsx or
 .csv, with each student's ID, name, class and group codes; the committee can then edit each student's groups there.
 To fill groups in the app, tick students (shift-click for a run, or the top box for everyone shown) and **Add to group**,
@@ -44,7 +53,10 @@ to print, one page per class. Students not on the list use the general student c
 1. **Build the setup** on the steps. The **Things to fix** panel lists what does not add up. *Critical* (red): no
    timetable can be made until it is fixed (a teacher on two groups of one band, a fixed lesson outside lesson time,
    fixed lessons that put one teacher in two places). *Warnings* (amber): a timetable can still be made, but a person
-   should look (a teacher over their allowance, a room that seats too few, a rule that matches no lesson).
+   should look (a teacher over their allowance, a room that seats too few, a rule that matches no lesson). Form teachers add
+five lines: a class with none yet ("3I4 has no Form teachers yet."), a form teacher who is not on the teacher list, a
+teacher who is a form teacher of two classes (a warning: their lessons cannot be at the same time), a named subject that
+is not on step 3, and a named subject the class has only in groups.
 2. **Will it fit?** Step 7 opens with the sums on the setup as it stands, before anything goes to an agent: each
    class's periods against the lesson periods of its days, lessons against the stretches between breaks (a 3-period
    lesson cannot run across recess), a lesson longer than any stretch, special rooms against the lessons that need
@@ -52,7 +64,7 @@ to print, one page per class. Students not on the list use the general student c
    first, each with a button to the step that fixes it; it runs again whenever the setup changes (`checks.py`).
 3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
-   `SKILL.md` carries a version line (`Skill version: 2026-11.2`) and the workbook's README sheet names the version it
+   `SKILL.md` carries a version line (`Skill version: 2026-11.3`) and the workbook's README sheet names the version it
    was made for. When the setup has second choices (step 6), step 7 counts them and asks **If the first choices do not
    fit:** **Fall back only when needed** (the default) or **Make one timetable for each**; the workbook carries the pick
    on its Choices sheet. Every downloaded workbook also carries a **Configuration id** row on Settings (`v14`, or `v14+`
@@ -64,7 +76,9 @@ to print, one page per class. Students not on the list use the general student c
 5. **Publish** (step 8): upload that file (a workbook comes with its setup workbook; a database made by the skill holds
    its setup) and press **Check**. The upload becomes the **draft**, kept on the server, and the app checks it four ways
    against the setup as it is now: clashes (teacher, class, room and student double-booked, lessons outside lesson time),
-   differences from the deployment (who teaches what, periods placed against periods planned, rooms), the setup's rules,
+   differences from the deployment (who teaches what, periods placed against periods planned, rooms; other teachers than the
+   form teachers on a lesson they take show here like any other, and **Update step 5** keeps the timetable's teachers and
+   marks the lesson "Changed by hand"), the setup's rules,
    and the typed rules and choices used that the agent reported. A warning for another school than the saved setup, and
    which configuration the timetable was made from, are shown too. The warnings are listed by kind and then by class,
    teacher or group, with the timetable's side and step 5's side. For each one, **Update step 5** changes the setup to
@@ -76,15 +90,23 @@ to print, one page per class. Students not on the list use the general student c
    not allowed, grey is a slot the lesson cannot go to: not lesson time, outside the day, or another lesson is there
    that it cannot swap with); click a green or amber slot to move the lesson, or a lesson there to swap with it (in a
    teacher's week an open slot can be a swap with the class's lesson there; a swap that also moves another class's
-   lesson asks first). The side panel also changes the teacher or
+   lesson opens **Before you apply** first, with that class's week). The side panel also changes the teacher or
    the room, deletes an extra lesson, and, with nothing selected, lists a class's missing periods with **Add a lesson**.
    Every fix is kept with its sentence under **Fixes**, and **Undo the last fix** takes the last one back. A fix that
    would cause a clash, change a subject's periods from the plan or newly break a Must rule is refused (red), so a clean
-   draft stays clean. **Download the
+   draft stays clean. **Fix the timetable** on a warning also opens **Ways to settle this**: up to three ways, each
+   already checked, with what each one disturbs and whether it is clean or bends a Prefer. **Show** opens **Before you
+   apply** under the grid: the sentences, and the week of each other class the fixes touch with the moved, changed or
+   new lessons outlined; **Apply** makes the fixes, **Cancel** leaves everything as it was. Where one fix is not enough
+   a way can be two fixes made together; they are one entry under **Fixes** and **Undo the last two fixes** takes both
+   back. When no way settles a warning the panel says so and lists the nearest ways with what each breaks; those are
+   blocked (they would cause a clash or newly break a Must rule) and have no button. **Download the
    draft (.sqlite)** carries the draft with its fixes elsewhere (Make printouts accepts it). **Publish this
    timetable** then makes the draft what teachers and students see, with every download and the personal student codes
    (about a minute), even with warnings open: **Published now** says which setup version it was checked against, how many
    warnings were left open and what they said, and lists the fixes made in the app. The rule report and the choices used stay with the published timetable.
+   The published class timetable names the class's form teachers under its title (on the PDF as a line of its own), and a
+   teacher's timetable says which classes they are a form teacher of; both come from the setup it was checked against.
    **Make printouts** gives the same files without publishing. For an agent, `python -m ttgen check-timetable
    TIMETABLE [--setup SETUP.xlsx]` prints the same check.
 
@@ -155,6 +177,11 @@ the teacher's load now and with those groups; groups they are not set to teach, 
 On step 4 (Teachers), filter by department or subject, tick teachers and give them a subject they can teach (at all
 levels, one level or a band of levels), take a subject off them, or set their department, role or allowance together.
 A row may name up to three teachers (co-teaching), each blocked for the lesson and counted the full periods.
+A lesson the form teachers take may hold as many as the school's most (never fewer than three). On the map its card shows
+the school's word as a badge, and the table row shows "Changed by hand" when it applies. The committee can still
+change one such lesson by hand; it is then marked "Changed by hand" and no longer follows step 2 until **Back to the
+Form teachers** puts them on again. A form teacher needs no Can teach entry for their own class's lesson. Heads of
+department see these lessons and cannot change them.
 
 **The teacher list.** On step 4 the committee can upload the school's teacher list. In a practice copy (the sample
 school, to try things on) a head of department can too; on the school's own setup a head cannot. Paste
@@ -225,6 +252,17 @@ timetable scripts never enforce them: `python -m ttgen check` lists each one "fo
 the agent to honour every Must, try every Prefer and hand back a rule report, and step 7 counts them. A typed rule with
 no sentence is flagged on step 6 and by `check`.
 
+**Form teachers' lessons (step 6):** in the Configuration card, **Form teachers take these lessons** names subjects (tick
+them from step 3). For every class, its whole-class lesson of each named subject then has the class's form teachers, all
+of them together and in the order of the box on step 2, and follows that box. A missing lesson is made when the subject
+has periods at the class's level. This is a default, and typed teachers are never replaced: when the class has form teachers and the lesson holds other
+people, the lesson keeps its teachers and is marked "Changed by hand"; a lesson with nobody on it takes the form teachers;
+a lesson with the same people simply follows. Turn it off by naming no subject; the lessons then stay as they are. The agent sees ordinary
+lessons. A subject taught in groups is left alone. In the workbook, the Lessons sheet has as many Teacher columns as the
+widest lesson needs (never fewer than three) and a **Changed by hand** column; the Classes sheet has one column per form
+teacher, headed with the school's word and a number; Settings has three rows for the word, the most and the subjects. An
+older workbook reads as before: no form teachers, the rule off, and teachers typed on a named subject's lessons kept.
+
 **First and second choices (step 6):** below the constraints, **If it does not fit, give way in this order** lists items
 that have a second choice. **+ Add a second choice** picks the item (a setting that is Yes/No or a number, a rule, or a
 level's recess) and what to do instead: a setting takes the other value; a rule is made **Prefer**, replaced by another
@@ -284,6 +322,7 @@ python app.py            # http://localhost:8000  (or: gunicorn app:app --worker
 .venv/bin/python tests/test_sync.py      # the setup changes, in Python
 node tests/sync.test.js                  # the same changes, in the browser's JavaScript
 node tests/people.test.js                # reading a teacher list and the avatars
+node tests/split.test.js                 # periods cut into lessons, as ttgen cuts them
 ```
 Keep one gunicorn worker (with threads): publishing swaps files in under a lock held in the web process.
 
@@ -312,6 +351,9 @@ and an earlier copy is kept. **Save to file** and **Load from file**, on step 7,
 | `tests/test_sync.py`, `tests/sync.test.js` | the setup changes, checked in Python and in JavaScript against the same cases |
 | `static/people.js` | reading a teacher list, matching it to the teachers already there, and drawing the avatars; Node can run it for the tests |
 | `tests/people.test.js` | those checks, run with Node |
+| `static/parents.js`, `ttgen/parents.py` | the form teachers' rule, written twice for the page and the server and kept in step by `tests/parents_cases.json` |
+| `tests/parents.test.js`, `tests/test_parents.py` | those cases, run with Node and with Python |
+| `tests/split.test.js`, `tests/split_cases.json` | how a subject's periods are cut into lessons, the same on the page and in `ttgen` |
 | `static/` | the committee's step-by-step editor and the sign-in page style |
 | `ttgen/` | the Python package: template, reader, solver, checks and the Excel/PDF/HTML outputs |
 | `skill/school-timetable-generator/` | the skill (`SKILL.md` + `scripts/ttgen`) for any AI agent outside the app |

@@ -109,6 +109,19 @@ passed++;
 }
 passed++;
 
+// rebase with `after`: what the server did after our operations goes on last (a stale tab's change put right)
+{
+  const base = { lessons: [{ _id: "r1", teachers: ["Tan"] }] };
+  const sent = copy(base); sent.lessons[0].teachers = ["Koh"];
+  const now = copy(sent); now.lessons[0].note = "typed meanwhile";
+  const ours = [["set", "lessons", "r1", "teachers", ["Koh"]]], after = [["set", "lessons", "r1", "teachers", ["Tan"]]];
+  const r = Sync.rebase(base, sent, now, [], ours, after);
+  assert.deepStrictEqual(r.base.lessons[0].teachers, ["Tan"]);
+  assert.deepStrictEqual(r.spec.lessons[0], { _id: "r1", teachers: ["Tan"], note: "typed meanwhile" });
+  assert.deepStrictEqual(Sync.rebase(base, sent, now, [], ours).base.lessons[0].teachers, ["Koh"], "without after as before");
+}
+passed++;
+
 // malformed merge lists are skipped, never half-applied or thrown on
 [ "x", { a: 1 }, null, 5 ].forEach((bad) => [4, 5].forEach((pos) => {
   const op = ["merge", "teachers", "t1", "can_teach", [], []];

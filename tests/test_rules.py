@@ -14,7 +14,7 @@ def with_typed():
 
 @t
 def the_rule_type_exists():
-    assert S.TYPED == "In words" and S.SKILL_VERSION == "2026-11.2"
+    assert S.TYPED == "In words" and S.SKILL_VERSION == "2026-11.3"
     row = next(r for r in S.RULE_TYPES if r[0] == "In words"); assert row[1] == "School, Level, Class, Subject, Room, Teacher" and row[2] == "N" and row[3] == "N"
     assert S.typed_rules(with_typed())[0][0] == 1 and S.typed_rules(with_typed())[1][0] == 2
     assert S.typed_label(1, TYPED) == "T1 · Must · Sec 1 · No PE in the first period"
@@ -50,6 +50,12 @@ def check_lists_typed_rules_and_flags_an_empty_one():
         with contextlib.redirect_stdout(out): main.main(["check", p])
         text = out.getvalue(); assert " * For the agent to honour: T1 · Must · Sec 1 · No PE in the first period" in text, text
         assert "Write the rule in words" in text
+
+@t
+def lessons_are_cut_as_the_page_cuts_them():
+    import json   # the same table tests/split.test.js checks the page's split() against: whole numbers always
+    for p, L, full, short in json.load(open(os.path.join(HERE, "split_cases.json"))):
+        assert S.lesson_split(p, L)[:2] == (full, short), (p, L, S.lesson_split(p, L))
 
 @t
 def the_skill_copy_is_identical():

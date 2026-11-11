@@ -15,7 +15,7 @@ from openpyxl.worksheet.pagebreak import Break
 from openpyxl.worksheet.merge import MergedCellRange
 from .database import is_db, read_db, write_db
 from .reader import read_template, derive
-from . import choices
+from . import choices, parents as _parents
 from .report import LESSON_HEADERS, short_subject, clock
 from .spec import order_days, periods_by_day, resolve_row, trim_day
 
@@ -77,11 +77,11 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
             for d, p, n in (recess or {}).get(str(c["class"]), []): spans[d].append((p, n))
             cgrid[str(c["class"])] = [resolve_row(row, spans[d]) for d, row in enumerate(raw[lv])]
     times = [[clock(sc, p), clock(sc, p + 1)] for p in range(NP)]
-    classes = [dict(name=str(c["class"]), level=str(c.get("level") or ""), size=c.get("size") or "", home=c.get("home_room") or "") for c in spec["classes"]]
+    classes = [dict(name=str(c["class"]), level=str(c.get("level") or ""), size=c.get("size") or "", home=c.get("home_room") or "", parents=_parents.names(c)) for c in spec["classes"]]   # names as the setup holds them
     seen = {c["name"] for c in classes}
     for L in lessons:
         for c in L["classes"]:
-            if c not in seen: seen.add(c); classes.append(dict(name=c, level=L["level"], size="", home=""))
+            if c not in seen: seen.add(c); classes.append(dict(name=c, level=L["level"], size="", home="", parents=[]))
     teachers = [dict(name=str(t["name"]), short=str(t.get("short") or t["name"]), dept=t.get("dept") or "", allowance=t.get("allowance") or "", other=t.get("other_duties") or "") for t in spec["teachers"]]
     seen = {t["name"] for t in teachers}
     for L in lessons:
@@ -121,7 +121,7 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
     m = dict(school=dict(name=sc.get("name") or "School", timetable=sc.get("timetable") or "Timetable", weeks=int(sc.get("weeks") or 1),
                          period_minutes=int(sc["period_minutes"]), start_time=str(sc["start_time"]), kind=sc.get("kind") or ""),
              days=list(days), NP=NP, ND=ND, times=times, grid=grid, raw_grid=raw, cgrid=cgrid, recess={c: [list(x) for x in v] for c, v in (recess or {}).items()},
-             keep=keep, levels=levels, classes=classes, teachers=teachers, rooms=rooms,
+             keep=keep, levels=levels, classes=classes, parents_name=_parents.label(spec), teachers=teachers, rooms=rooms,
              subjects=subjects, lessons=lessons, students=students, room_cap=cap, planned=planned, notes=list(notes or []), status=status,
              generated=datetime.date.today().strftime("%d %b %Y"))
     m["setup"] = spec   # kept in the timetable database, so that file alone rebuilds every output
@@ -403,6 +403,21 @@ def _room_line(x):
     """a lesson's room as a timetable cell shows it, with the rain room of a PE lesson: 'Field (rain B2-3)'"""
     return f"{x['room']} (rain {x['rain']})" if x.get("rain") else x["room"]
 
+def _parents_text(m, c):
+    """'Form teachers: A, B' for a class that has some, else ''; read with .get, a model published before Class Parents has neither key"""
+    ps = (m["class_ix"].get(c) or {}).get("parents") or []
+    return f"{m.get('parents_name') or 'Form teachers'}: {', '.join(ps)}" if ps else ""
+
+def _parents_block(v):
+    """the PDF's form teachers line, wrapped to the subtitle's width so no name is ever cut: [] when the view has none"""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    R, _ = _fonts(); lines, cur = [], ""
+    for seg in (v.get("parents_line") or "").split(", "):   # break between names, never inside one
+        t = f"{cur}, {seg}" if cur else seg
+        if cur and stringWidth(t, R, 8.6) > 420: lines.append(cur + ","); cur = seg
+        else: cur = t
+    return lines + [cur] if cur else []
+
 def class_view(m, c):
     info = m["class_ix"][c]; rows = [x for x in m["lessons"] if c in x["classes"]]
     bgroups = collections.defaultdict(set)
@@ -447,8 +462,8 @@ def class_view(m, c):
                            text=f"{max(e['periods'] for e in es)} periods · " + "; ".join(parts)))
     nper = len(used)
     stats = [(info["level"], "level"), (str(info["size"] or "-"), "students"), (info["home"] or "-", "home room"), (str(nper), "periods a cycle")]
-    sub = f"{info['level']} · {info['size']} students · home room {info['home'] or '-'}"
-    return dict(kind="classes", key=c, kicker="Class", title=f"Class {c}", subtitle=sub, stats=stats, codes=m["cgrid"].get(c) or _codes_for(m, [info["level"]]),
+    sub = f"{info['level']} · {info['size']} students · home room {info['home'] or '-'}"; pl = _parents_text(m, c)
+    return dict(kind="classes", key=c, kicker="Class", title=f"Class {c}", subtitle=sub + (f" · {pl}" if pl else ""), pdf_subtitle=sub, parents_line=pl, stats=stats, codes=m["cgrid"].get(c) or _codes_for(m, [info["level"]]),
                 cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=info["level"])
 
 def teacher_view(m, t):
@@ -472,8 +487,9 @@ def teacher_view(m, t):
     stats = [(str(total), "periods a cycle"), (str(info.get("allowance") or "-"), "allowance"), (str(busiest), "most in a day"), (str(len(per_day)), "days teaching")]
     sub = " · ".join(x for x in (f"Department {info['dept']}" if info["dept"] else "", f"short name {info['short']}" if info["short"] != t else "",
                                      f"{ext} after-school periods" if ext else "") if x)
-    lv = [x["level"] for x in rows]
-    return dict(kind="teachers", key=t, kicker="Teacher", title=t, subtitle=sub or "Teacher", stats=stats, codes=_codes_for(m, lv), cells=cells,
+    lv = [x["level"] for x in rows]; mine = [c["name"] for c in m["classes"] if t in (c.get("parents") or [])]
+    pl = f"{m.get('parents_name') or 'Form teachers'} of {', '.join(mine)}" if mine else ""
+    return dict(kind="teachers", key=t, kicker="Teacher", title=t, subtitle=((sub or "Teacher") + f" · {pl}") if pl else (sub or "Teacher"), pdf_subtitle=sub or "Teacher", parents_line=pl, stats=stats, codes=_codes_for(m, lv), cells=cells,
                 legend=legend, legend_title="Teaching", group=info["dept"] or "Other")
 
 def room_view(m, r):
@@ -510,9 +526,9 @@ def student_view(m, s):
     legend = [dict(color=_color(m, s_), label=abbrev(s_), text=f"{s_} · {e['x']['group'] if e['x']['group'] != ENTIRE else 'with the class'} · "
                                                              f"{', '.join(e['x']['teachers']) or '-'} · {_common(e['rooms']) or '-'} · {e['periods']} periods")
               for s_, e in ent.items()]
-    lv = m["class_ix"].get(s["cls"], {}).get("level") or s["level"]
+    lv = m["class_ix"].get(s["cls"], {}).get("level") or s["level"]; pl = _parents_text(m, s["cls"])
     stats = [(s["cls"], "class"), (lv, "level"), (str(len(s["groups"])), "groups"), (str(len(used)), "periods a cycle")]
-    return dict(kind="students", key=s["id"], kicker="Student", title=s["name"], subtitle=f"{s['id']} · Class {s['cls']} · {lv}",
+    return dict(kind="students", key=s["id"], kicker="Student", title=s["name"], subtitle=f"{s['id']} · Class {s['cls']} · {lv}" + (f" · {pl}" if pl else ""), pdf_subtitle=f"{s['id']} · Class {s['cls']} · {lv}", parents_line=pl,
                 stats=stats, codes=m["cgrid"].get(s["cls"]) or _codes_for(m, [lv]), cells=cells, legend=legend, legend_title="Subjects, teachers and rooms", group=s["cls"])
 
 def all_views(m, kind):
@@ -638,16 +654,18 @@ def draw_page(c, m, v, page=None):
     c.setFillColor(_hex("FFFFFF")); c.setFont(B, 6.6); c.drawString(M + 5, H - 47.5, kick)
     title, ts = _fit(v["title"], B, 19, 420, 12)
     c.setFillColor(_hex(INK)); c.setFont(B, ts); c.drawString(M + kw + 8, H - 51.5, title)
-    c.setFillColor(_hex(SUB)); c.setFont(R, 8.6); c.drawString(M, H - 66, _fit(v["subtitle"], R, 8.6, 420)[0])
+    c.setFillColor(_hex(SUB)); c.setFont(R, 8.6); c.drawString(M, H - 66, _fit(v.get("pdf_subtitle", v["subtitle"]), R, 8.6, 420)[0])
+    pb = _parents_block(v); xtra = 10.5 * len(pb)   # the form teachers: their own lines under the subtitle, the grid moves down by what they need
+    for i, ln in enumerate(pb): c.drawString(M, H - 76 - 10.5 * i + 0.5, ln)
     x = W - M
     for val, lab in reversed(v["stats"]):
         vw = max(stringWidth(str(val), B, 12), stringWidth(lab, R, 6.4)) + 4
         c.setFillColor(_hex(INK)); c.setFont(B, 12); c.drawRightString(x, H - 52, _fit(str(val), B, 12, 110)[0])
         c.setFillColor(_hex(MUTED)); c.setFont(R, 6.4); c.drawRightString(x, H - 61, lab)
         x -= min(vw, 112) + 16
-    c.setStrokeColor(_hex(LINE)); c.setLineWidth(0.8); c.line(M, H - 74, W - M, H - 74)
+    c.setStrokeColor(_hex(LINE)); c.setLineWidth(0.8); c.line(M, H - 74 - xtra, W - M, H - 74 - xtra)
     # legend size decides the grid height (rows never shorter than min_rh)
-    foot = 20; gtop = H - 84; hdr = 21; wcol = 13 if m["school"]["weeks"] > 1 else 0; dcol = 30
+    foot = 20; gtop = H - 84 - xtra; hdr = 21; wcol = 13 if m["school"]["weeks"] > 1 else 0; dcol = 30
     min_rh = 27 if ND > 6 else 40
     lay = _legend_layout(v, R, B, W - 2 * M, max_h=gtop - hdr - ND * min_rh - 8 - foot - 6)
     leg_top = foot + 6 + lay["h"]
@@ -941,7 +959,7 @@ def html_data(m, view="full", student_id=None, app=None):
     builder, no student list), personal (one student's own lessons only). Filtering happens here, on the server."""
     pal = [[t, a] for t, a in PALETTE]
     d = dict(school=m["school"], generated=m["generated"], days=m["days"], NP=m["NP"], times=m["times"], grid=m["grid"], cgrid=m["cgrid"], levels=m["levels"],
-             classes=[[c["name"], c["level"], c["size"], c["home"]] for c in m["classes"]],
+             classes=[[c["name"], c["level"], c["size"], c["home"], c.get("parents") or []] for c in m["classes"]], parents_name=m.get("parents_name") or "Form teachers",
              teachers=[[t["name"], t["short"], t["dept"], t["allowance"]] for t in m["teachers"]],
              rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1)] for r in m["rooms"]],
              subjects={k: [v["short"], v["color"]] for k, v in m["subjects"].items()}, palette=pal, ext=list(EXT),
@@ -980,7 +998,7 @@ def custom_view(m, cls, groups):
     """a student's timetable from their class and chosen groups (the finder's 'Build a timetable')"""
     info = m["class_ix"][cls]
     v = student_view(m, dict(id="custom", name=f"Class {cls}", cls=cls, level=info["level"], groups=list(groups)))
-    v["subtitle"] = f"Class {cls} · {info['level']} · groups {', '.join(groups) or '-'}"
+    v["subtitle"] = f"Class {cls} · {info['level']} · groups {', '.join(groups) or '-'}"; v.pop("pdf_subtitle", None); v.pop("parents_line", None)
     return v
 
 def group_options(m, cls):

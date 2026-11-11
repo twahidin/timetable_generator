@@ -3,6 +3,7 @@
 import collections, copy, csv, datetime, io, json, os, pickle, shutil, threading, time
 from ttgen.export import model_from_files, export_all
 import sync
+from ttgen import parents
 from access import personal_code, personal_codes_on, norm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -68,7 +69,8 @@ def _load():
     x = read_json(SETUP_FILE)
     if not x or not x.get("spec"): return _setup
     _setup.update(spec=x["spec"], saved_at=x.get("saved_at"), ts=x.get("ts") or 0, v=x.get("v") or 0, replaced_v=x.get("replaced_v") or 0)
-    if not _setup["v"] or sync.ensure_ids(_setup["spec"]):
+    fixed = sync.ensure_ids(_setup["spec"])
+    if parents.derive(_setup["spec"]) or fixed or not _setup["v"]:    # a made row's id needs the class's and the subject's ids
         _setup["v"] += 1
         _write_setup()
     _log.clear()
@@ -113,7 +115,7 @@ def replace_setup(spec, why):
     """the whole setup replaced (a save of everything, an imported workbook, a restore): everyone fetches it again"""
     with _setup_lock:
         if _load(): restore_point("Before: " + why)
-        sync.ensure_ids(spec)
+        sync.ensure_ids(spec); parents.derive(spec)
         _setup.update(spec=spec, v=_setup.get("v", 0) + 1)
         _setup["replaced_v"] = _setup["v"]
         _stamp(); _log.clear(); _write_setup()
@@ -150,13 +152,22 @@ def apply_changes(ops, client, check=None, since=None, filter=None):
             if why: raise Refused(why)
         refused = []
         if filter: ops, refused = filter(cur["spec"], ops)
-        if not ops: return cur["v"], refused
+        if not ops: return cur["v"], refused, None
         if datetime.datetime.now().timestamp() - _last_point[0] > POINT_EVERY or _risky(ops): restore_point("While working")
         sync.apply(cur["spec"], ops)
         cur["v"] += 1
-        _stamp(); _write_setup()
         _log.append(dict(v=cur["v"], client=client, ops=ops))
-        return cur["v"], refused
+        # the net for a stale or second tab, a head's tab and whole setups: put the Class Parents' lessons right and log it
+        # under another client id, so every browser (the sender too: changes_since skips only its own id) is told
+        mine = cur["v"]    # the version of the caller's own ops: the sender applies what came before it first and what came after it last
+        sp = cur["spec"]
+        if (sp.get("school") or {}).get("parents_subjects") or any(r.get("by_hand") for r in sp.get("lessons") or []):    # nothing to derive for a school not using it
+            before = copy.deepcopy(sp)
+            if parents.derive(sp):
+                cur["v"] += 1
+                _log.append(dict(v=cur["v"], client="parents", ops=sync.diff(before, sp)))
+        _stamp(); _write_setup()
+        return cur["v"], refused, mine
 
 def changes_since(since, client, upto=None):
     """what other clients changed after version since; a reset when the log no longer reaches back that far.

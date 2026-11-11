@@ -272,11 +272,12 @@ def post_setup_changes():
         for op in ops:      # a teacher added by a head is provisional until the committee confirms
             if isinstance(op, list) and len(op) == 4 and op[0] == "add" and op[1] == "teachers" and isinstance(op[2], dict): op[2]["provisional"] = "Yes"
     since = _int(body.get("since"))
-    try: v, refused = store.apply_changes(ops, client, since=since, filter=split)
+    try: v, refused, mine = store.apply_changes(ops, client, since=since, filter=split)
     except store.Replaced: return _changes_reply(since, client)
     except store.Refused as e: return {"error": str(e)}, 403
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
     reply = _changes_reply(since, client, v)
+    if mine is not None: reply["mine"] = mine    # the version of the sender's own ops: the page applies patches below it first and above it last
     if refused: reply["refused"] = [dict(i=i, why=why) for i, why in refused]
     return reply
 
@@ -411,6 +412,24 @@ def draft_fix():
 @need("committee")
 def draft_undo():
     return _checked(draft.undo, sentences=True)
+
+@app.get("/api/draft/suggest")
+@need("committee")
+def draft_suggest():
+    return _checked(lambda: draft.suggest(request.args.get("key") or ""), sentences=True)
+
+def _posted_fixes():
+    body = request.get_json(force=True, silent=True); return body.get("fixes") if isinstance(body, dict) else None
+
+@app.post("/api/draft/fixes")
+@need("committee")
+def draft_fixes():
+    return _checked(lambda: draft.fix_many(_posted_fixes()), sentences=True)
+
+@app.post("/api/draft/preview")
+@need("committee")
+def draft_preview():
+    return _checked(lambda: draft.preview(_posted_fixes()), sentences=True)
 
 @app.get("/api/draft/download")
 @need("committee")

@@ -23,7 +23,9 @@ SYNC.client = Sync.newId();   // new on every load: a duplicated tab must not sh
 const REPLACED = "The committee replaced the school's setup.";
 const DROPPED = "The committee replaced the school's setup, so the changes you had not sent were dropped.";
 function save(o) {
-  if (S.spec) Sync.ensureIds(S.spec);
+  // ids first, then the Class Parents rule (a lesson it makes takes its id from its class and subject); hand: only a person's own edit may mark "Changed by hand"
+  // a head cannot change these lessons: running the rule on a head's page would make a missing lesson the server then refuses, reported to the head as a change they never made
+  if (S.spec) { Sync.ensureIds(S.spec); if (!(isHead() && !S.practice)) Parents.settle(S.spec, S.snap, !(o && (o.quiet || o.remote))); }
   const js = S.spec ? JSON.stringify(S.spec) : null;
   if (js !== S.last) {
     if (S.snap && js && !(o && o.quiet)) {   // an entry holds the operations that take back (and bring again) this change
@@ -132,14 +134,15 @@ async function syncNow() {
     } else if (!r.ok) throw new Error(j.error || `status ${r.status}`);
     else if (j.reset) { await catchUp(j, sent, ops, r.ok && ops.length > 0); wait = 0; }
     else {
-      const theirs = (j.patches || []).flatMap(p => p.ops || []);
+      const ps = j.patches || [], mineAt = typeof j.mine === "number" ? j.mine : null;   // patches after our own ops (the server's put-right) apply after them
+      const theirs = ps.filter(p => mineAt === null || p.v < mineAt).flatMap(p => p.ops || []), after = ps.filter(p => mineAt !== null && p.v > mineAt).flatMap(p => p.ops || []);
       // operations the server would not make for this person (a head) are left out of what it applied: they drop out of
       // the working copy too, as they are in neither the new base nor the edits made since the send
       const no = new Set((j.refused || []).map(x => x.i)), ours = ops.filter((_, i) => !no.has(i));
-      const nb = Sync.rebase(SYNC.base, sent, working(), theirs, ours);
+      const nb = Sync.rebase(SYNC.base, sent, working(), theirs, ours, after);
       SYNC.base = nb.base; SYNC.v = j.v;
-      if (theirs.length || no.size) takeSpec(nb.spec);
-      if (theirs.length || ops.length) keepLocal();   // the base moved: what is kept as not sent must move with it
+      if (theirs.length || after.length || no.size) takeSpec(nb.spec);
+      if (theirs.length || after.length || ops.length) keepLocal();   // the base moved: what is kept as not sent must move with it
       if (no.size) {
         const why = [...new Set(j.refused.map(x => x.why))].join(" ");
         toast(`${no.size} change${no.size === 1 ? "" : "s"} could not be made: ${why}`);
@@ -561,7 +564,7 @@ function recessSetting(label) {   // [row index, value] of a floating recess row
 }
 
 /* ---------------- derived values (same logic as the workbook formulas) */
-function split(p, L) { p = Number(p) || 0; L = Number(L) || 1; if (p <= 0) return [0, 0]; if (L <= 1) return [p, 0]; let s = ((-p % L) + L) % L; if (s * (L - 1) > p) s = 0; return [(p - s * (L - 1)) / L, s]; }
+function split(p, L) { p = Number(p) || 0; L = Number(L) || 1; if (p <= 0) return [0, 0]; if (L <= 1) return [p, 0]; let s = ((-p % L) + L) % L; if (s * (L - 1) > p) s = 0; return [Math.floor((p - s * (L - 1)) / L), s]; }   // whole numbers always, as ttgen.spec.lesson_split: periods that cannot be cut exactly lose the remainder (the Things to fix list says so)
 const patText = p => { const n = {}; p.forEach(v => n[v] = (n[v] || 0) + 1); return Object.keys(n).map(Number).sort((a, b) => b - a).map(v => `${n[v]}×${v}`).join(" + "); };
 function parsePattern(t) {   // "5x3 + 2x2" or "3, 3, 2": the lesson lengths, longest first; null when it cannot be read (ttgen.reader.parse_pattern)
   const out = [];
@@ -591,6 +594,10 @@ function teachingGroups(subject) {   // groups or classes taught this subject on
   return S.spec.lessons.filter(x => x.subject === subject).reduce((n, x) => n + (x.block || x.code_override ? 1 : (x.classes || []).length), 0);
 }
 function canTeach(t, subject, level) { return DeptMap.canTeach(S.spec.teachers.find(x => x.name === t), subject, level, bands()); }
+const canTeachRow = (t, x) => canTeach(t, x.subject, x.level) || Parents.exempt(S.spec, x, t);   // a class's form teachers need no Can teach entry for its own lessons
+const cpBlock = x => isHead() && !S.practice && Parents.staffed(S.spec, x);   // a head cannot change a staffed lesson's teachers
+const cpWhy = () => `Only the committee can change these lessons: their teachers are the class's ${Parents.label(S.spec)}.`
+const cpHand = (x, i, dis) => x.by_hand === true && Parents.staffed(S.spec, x) ? `<span class="small muted">Changed by hand</span> <button class="small ghost" data-cpback="${i}" ${dis ? `disabled title="${esc(cpWhy())}"` : ""}>Back to the ${esc(Parents.label(S.spec))}</button>` : "";
 function issues() {
   const out = { school: {}, config: {}, choices: {}, lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
   // hard: no timetable can be made until it is fixed (critical). The rest are warnings: a timetable can still be made, but a person should look.
@@ -627,7 +634,7 @@ function issues() {
     if (!(x.classes || []).length) add("lessons", i, "No class.");
     if (!(x.teachers || []).filter(Boolean).length) add("lessons", i, "No teacher.");
     for (const t of (x.teachers || []).filter(Boolean)) {
-      if (!canTeach(t, x.subject, x.level)) add("lessons", i, `${t} is not set to teach this at ${x.level}.`);
+      if (!canTeachRow(t, x)) add("lessons", i, `${t} is not set to teach this at ${x.level}.`);
       if (x.block && S.spec.lessons.filter(y => y.block === x.block && (y.teachers || []).includes(t)).length > 1) add("lessons", i, `${t} twice in this band: a band's groups meet at the same time, so no timetable can be made.`, true);
     }
     if (x.block && !blockNames().includes(x.block)) add("lessons", i, "Band not on the Bands list (top of step 5).");
@@ -666,6 +673,14 @@ function issues() {
       add("blocks", i, `${b.block}: its groups are planned for ${inG} students but its classes have ${inC}, so ${inC - inG} ${inC - inG === 1 ? "is" : "are"} in none of them.`);
   });
   S.spec.subjects.forEach((s, i) => { if (!Object.values(s.periods || {}).some(Number)) add("subjects", i, `${s.subject || "Subject"}: no periods for any level.`); });
+  {   // periods that cannot be cut into lessons of the usual length or one shorter (1 period under a 3-period lesson): the remainder would not be timetabled
+    const uncut = (p, L) => { const [f, sh] = split(p, L); return p - f * L - sh * (L - 1); }, used = new Set(S.spec.lessons.map(x => `${x.level}|${x.subject}`));
+    const say = (what, p, L, lost) => `${what}: ${p} period${p === 1 ? "" : "s"} cannot be cut into lessons of ${L} or ${L - 1} periods, so ${lost === p ? (p === 1 ? "it" : "they") : lost} would not be timetabled.`;
+    S.spec.subjects.forEach((s, i) => { const L = Number(s.lesson_length) || Number(sc().lesson_length) || 1;
+      Object.entries(s.periods || {}).forEach(([lv, v]) => { const p = Number(v) || 0, lost = uncut(p, L); if (lost && used.has(`${lv}|${s.subject}`)) add("subjects", i, `${say(`${s.subject} at ${lv}`, p, L, lost)} Give the subject its own lesson length on this step.`); }); });
+    S.spec.lessons.forEach((x, i) => { const p = Number(x.periods_override) || 0; if (!p) return; const sb = subj(x.subject) || {}, L = Number(sb.lesson_length) || Number(sc().lesson_length) || 1, lost = uncut(p, L);
+      if (lost && !((x.pattern || []).length && x.pattern.map(Number).reduce((a, b) => a + b, 0) === p)) add("lessons", i, `${say("This row's own periods", p, L, lost)} Change them, or give the row a lesson pattern.`); });
+  }
   ruleProblems(info).forEach(([i, m, hard]) => add("rules", i, m, hard));
   // rooms: 'For' names a subject, department or level; each group fits some room it may use; a home room seats its class
   const forOk = new Set(forNames());
@@ -725,6 +740,7 @@ function issues() {
     if (l.length < size) add("students", l[0], `${c.class}: ${l.length} of ${size} students listed. Once a class has a list, only the students on it are checked for clashes.`);
     if (l.length > size) add("students", l[0], `${c.class}: ${l.length} students listed but the class has ${size} on step 2.`);
   });
+  Parents.issues(S.spec).forEach(x => add(x.kind, x.i, x.text));   // Class Parents: none of these is hard
   return { out, load, info, crit };
 }
 const isCrit = (C, k, i, m) => C.has(`${k}|${i}|${m}`);
@@ -849,7 +865,7 @@ const opt = (v, cur, label) => `<option value="${esc(v)}"${String(v) === String(
 const sel = (path, cur, list, blank = true, extra = "") => `<select data-k="${path}" ${extra}>${blank ? opt("", cur, "") : ""}${list.map(v => opt(v, cur)).join("")}${cur && !list.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}</select>`;
 const inp = (path, cur, type = "text", extra = "") => `<input data-k="${path}" type="${type}" value="${esc(cur)}" ${extra}>`;
 const chips = (path, arr, what, extra = "") => `<div class="chips" data-pop="${what}" data-path="${path}" ${extra}>${(arr || []).length ? arr.map(a => `<span class="chip">${esc(a)}</span>`).join("") : '<span class="muted">pick…</span>'}</div>`;
-const delBtn = (k, i) => `<button class="small danger" data-del="${k}.${i}" title="Remove row">✕</button>`;
+const delBtn = (k, i, off) => `<button class="small danger" data-del="${k}.${i}" ${off ? `disabled title="${esc(off)}"` : 'title="Remove row"'}>✕</button>`;
 const ROOTS = { _gf: () => gfState(), _bf: () => bfState() };   // step 5's form state, addressed like the setup
 const rootOf = ks => ROOTS[ks[0]] ? ROOTS[ks.shift()]() : S;
 function getPath(p) { const ks = p.split("."); const root = rootOf(ks); return ks.reduce((o, k) => (o == null ? o : o[k]), root); }
@@ -990,6 +1006,8 @@ const VIEWS = {
         <label class="f">Levels (comma separated) <input data-list="levels" value="${esc(levels().join(", "))}"></label>
         <label class="f">Departments <input data-list="departments" value="${esc((s.departments || []).join(", "))}"></label>
         <label class="f">Room kinds <input data-list="room_kinds" value="${esc((s.room_kinds || []).join(", "))}"></label>
+        <label class="f">What your school calls a class's form teachers ${inp("spec.school.parents_name", s.parents_name, "text", 'placeholder="Form teachers"')}</label>
+        <label class="f">Most a class can have <input data-pmax type="number" min="1" max="6" value="${esc(Parents.maximum(s.parents_max) || 2)}"></label>
       </div></div>
       <div class="card"><h2>Day structure</h2>${(w => w.length ? `<div class="notice"><b>The Day structure and the settings on step 6 disagree.</b> The rules win where they are stricter, so make them say the same:<ul>${w.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "")(structureWarnings())}<div class="legend">Brush: ${["L", "R", "W", "U", "F", "A", ""].map(c => `<button class="small ${S.brush === c ? "primary" : ""}" data-brush="${c}"><i class="c-${c}" style="width:12px;height:12px;display:inline-block;border-radius:3px;vertical-align:-2px"></i> ${{ L: "Lesson", R: "Recess", W: "Recess window", U: "Lunch", F: "Flag / assembly", A: "After-school slot", "": "No school" }[c]}</button>`).join("")}</div>
       <p class="muted" style="margin:4px 0 10px">Click or drag across cells to paint them with the brush.</p>
@@ -1007,10 +1025,18 @@ const VIEWS = {
   },
   classes() {
     const { out, crit } = issues();
-    return `<div class="card"><h1>Step 2 · Classes</h1><p class="lead">Form classes with their level, size and home room (picked from step 1).</p>
+    const nm = Parents.label(S.spec), pm = Parents.maximum(sc().parents_max) || 2, T = teacherNames(), held = c => Parents.names(c).length;
+    const NP = Math.max(pm, ...S.spec.classes.map(held));   // a class holding more than the school's most keeps its boxes
+    const pcells = (c, i) => { const mine = Math.max(pm, held(c)); let h = "";
+      for (let k = 0; k < NP; k++) { if (k >= mine) { h += "<td></td>"; continue; } const cur = Parents.names(c)[k] || "";
+        h += `<td><select data-parent="${i}|${k}">${opt("", cur, "")}${T.map(t => opt(t, cur)).join("")}${cur && !T.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}</select></td>`; }
+      return h; };
+    const hand = Parents.handRows(S.spec).length, fc = Parents.fillCount(S.spec);
+    const bar = Parents.subjects(S.spec).length && (hand || fc) ? `<div class="helper row">${hand ? `<span>${hand} ${hand === 1 ? "lesson" : "lessons"} changed by hand</span><button data-pback="1">Put the ${esc(nm)} on all of them</button>` : ""}${fc ? `<button data-pfill="1">Take them from the lessons</button>` : ""}</div>` : "";
+    return `<div class="card"><h1>Step 2 · Classes</h1><p class="lead">Form classes with their level, size and home room (picked from step 1).</p>${bar}
       <div class="helper row"><b>Add classes</b> level ${sel("_hc", levels()[0], levels(), false, 'id="hcLevel" data-k=""')} names <input id="hcNames" value="A, B, C, D" style="width:120px"> students <input id="hcSize" type="number" value="38" style="width:70px"> <button data-helper="classes">Add (home rooms filled from free classrooms)</button></div>
-      <div class="tablewrap"><table><tr><th>Class</th><th>Level</th><th>Students</th><th>Home room</th><th>Lesson rows</th><th>Note</th><th></th></tr>
-      ${S.spec.classes.map((c, i) => `<tr id="classes-${i}" class="${rowCls(out, crit, "classes", i)}"><td>${inp(`spec.classes.${i}.class`, c.class)}</td><td>${sel(`spec.classes.${i}.level`, c.level, levels())}</td><td class="num">${inp(`spec.classes.${i}.size`, c.size, "number")}</td><td>${sel(`spec.classes.${i}.home_room`, c.home_room, rooms())}</td><td class="calc">${S.spec.lessons.filter(x => (x.classes || []).includes(c.class)).length}</td><td>${inp(`spec.classes.${i}.note`, c.note)}</td><td>${delBtn("classes", i)}</td></tr>`).join("")}
+      <div class="tablewrap"><table class="classtable"><tr><th>Class</th><th>Level</th><th>Students</th><th>Home room</th><th colspan="${NP}">${esc(nm)}</th><th>Lesson rows</th><th>Note</th><th></th></tr>
+      ${S.spec.classes.map((c, i) => `<tr id="classes-${i}" class="${rowCls(out, crit, "classes", i)}"><td>${inp(`spec.classes.${i}.class`, c.class)}</td><td>${sel(`spec.classes.${i}.level`, c.level, levels())}</td><td class="num">${inp(`spec.classes.${i}.size`, c.size, "number")}</td><td>${sel(`spec.classes.${i}.home_room`, c.home_room, rooms())}</td>${pcells(c, i)}<td class="calc">${S.spec.lessons.filter(x => (x.classes || []).includes(c.class)).length}</td><td>${inp(`spec.classes.${i}.note`, c.note)}</td><td>${delBtn("classes", i)}</td></tr>`).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="classes">+ Add class</button></div></div>`;
   },
   subjects() {
@@ -1058,11 +1084,14 @@ const VIEWS = {
   },
   table() {
     const { out, crit, info, load } = issues(); const T = teacherNames(), f = S.tg, P = S.pick;
-    const tsel = (i, k, x) => { const path = `spec.lessons.${i}.teachers.${k}`; const cur = (x.teachers || [])[k] || ""; const yes = T.filter(t => canTeach(t, x.subject, x.level)), no = T.filter(t => !yes.includes(t));
-      return `<select data-k="${path}">${opt("", cur, "")}<optgroup label="Can teach this">${yes.map(t => opt(t, cur)).join("")}</optgroup><optgroup label="Others">${no.map(t => opt(t, cur)).join("")}</optgroup></select>`; };
+    const tsel = (i, k, x) => { const path = `spec.lessons.${i}.teachers.${k}`; const cur = (x.teachers || [])[k] || ""; const yes = T.filter(t => canTeachRow(t, x)), no = T.filter(t => !yes.includes(t)), lock = cpBlock(x);
+      return `<select data-k="${path}" ${lock ? `disabled title="${esc(cpWhy())}"` : ""}>${opt("", cur, "")}<optgroup label="Can teach this">${yes.map(t => opt(t, cur)).join("")}</optgroup><optgroup label="Others">${no.map(t => opt(t, cur)).join("")}</optgroup></select>`; };
     const rows = S.spec.lessons.map((x, i) => [x, i]).filter(([x]) => (!f.lv || x.level === f.lv) && (!f.subj || x.subject === f.subj)
       && (!f.t || (f.t === "-" ? !(x.teachers || []).some(Boolean) : (x.teachers || []).includes(f.t))));
     P.shown.lessons = rows.map(([, i]) => i);
+    const held = x => (x.teachers || []).reduce((m, n, k) => String(n == null ? "" : n).trim() ? k + 1 : m, 0);   // a lesson never hides a teacher it holds (blanks at the end do not count)
+    const NT = Math.max(3, Parents.subjects(S.spec).length ? Parents.cap(S.spec) : 0, ...rows.map(([x]) => held(x)));   // a staffed row following a shared lesson, or one kept from before the rule went off, may hold more
+    const tcell = (i, k, x) => k >= (Parents.staffed(S.spec, x) ? Math.max(Parents.cap(S.spec), held(x)) : Math.max(3, held(x))) ? "<td></td>" : `<td style="min-width:${k ? 120 : 150}px">${tsel(i, k, x)}</td>`;
     const all = rows.length && rows.every(([, i]) => P.lessons.has(i));
     return `<div class="card"><h2>Table view</h2><p class="lead">Every teaching group (TG) and the teachers deployed to it. A whole-class subject is one group per class; a band splits its classes into groups that all have lessons at the same time. Set up the bands first, then add the groups and deploy teachers below.</p>
       ${VIEWS._bands(out, info, crit)}</div>
@@ -1074,8 +1103,9 @@ const VIEWS = {
         <select id="tgT">${opt("", f.t, "Any teacher")}${opt("-", f.t, "No teacher yet")}${T.map(t => opt(t, f.t)).join("")}</select>
         <span class="muted small">${rows.length === S.spec.lessons.length ? `${rows.length} rows` : `${rows.length} of ${S.spec.lessons.length} rows`}</span></div>
       ${tgBar(load, info)}
-      <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="lessons" title="Tick every row shown (${rows.length})" ${all ? "checked" : ""}></th><th>Level</th><th>Subject</th><th>Band</th><th>Classes</th><th>Teacher 1</th><th>Teacher 2</th><th title="A third teacher in the room (co-teaching)">Teacher 3</th><th>Students</th><th>Periods override</th><th>Keep code</th>${Number(sc().weeks) === 2 ? '<th title="Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other">Special room weeks</th>' : ""}<th>Code</th><th>Periods</th><th title="Type your own split, such as 5x3 + 2x2. Empty = the usual split shown in grey.">Lessons</th><th></th></tr>
-      ${rows.map(([x, i]) => `<tr id="lessons-${i}" class="${rowCls(out, crit, "lessons", i)}${P.lessons.has(i) ? " picked" : ""}" title="${esc((out.lessons[i] || []).join(" "))}"><td><input type="checkbox" data-pick="lessons.${i}" ${P.lessons.has(i) ? "checked" : ""}></td><td class="lv">${sel(`spec.lessons.${i}.level`, x.level, levels())}</td><td style="min-width:200px">${sel(`spec.lessons.${i}.subject`, x.subject, subjectNames().filter(n => (subj(n).periods || {})[x.level] || n === x.subject))}</td><td style="min-width:160px">${sel(`spec.lessons.${i}.block`, x.block, S.spec.blocks.filter(b => !x.level || b.level === x.level).map(b => b.block))}</td><td style="min-width:120px">${chips(`spec.lessons.${i}.classes`, x.classes, "classes", `data-level="${esc(x.level || "")}"`)}</td><td style="min-width:150px">${tsel(i, 0, x)}</td><td style="min-width:120px">${tsel(i, 1, x)}</td><td style="min-width:120px">${tsel(i, 2, x)}</td><td class="num">${inp(`spec.lessons.${i}.students`, x.students, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.periods_override`, x.periods_override, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.code_override`, x.code_override, "text", 'style="width:70px"')}</td>${Number(sc().weeks) === 2 ? `<td><select data-k="spec.lessons.${i}.room_weeks" ${special(x) ? "" : "disabled title=\"Only for a subject with a special room kind, such as a lab (step 3)\""}>${opt("", x.room_weeks || "", "every week")}${opt("Odd", x.room_weeks, "Odd only")}${opt("Even", x.room_weeks, "Even only")}</select></td>` : ""}<td class="calc">${esc(info[i].code)}</td><td class="calc">${info[i].p || ""}</td><td><input id="pat-${i}" data-pat="${i}" value="${esc((x.pattern || []).length ? patText(x.pattern.map(Number)) : x.pattern_text || "")}" placeholder="${esc(info[i].auto)}" title="How the periods split into lessons: 5x3 + 2x2 is five 3-period lessons and two 2-period ones. Empty = the usual split shown in grey." style="width:112px"></td><td>${delBtn("lessons", i)}</td></tr>`).join("")}
+      <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="lessons" title="Tick every row shown (${rows.length})" ${all ? "checked" : ""}></th><th>Level</th><th>Subject</th><th>Band</th><th>Classes</th><th>Teacher 1</th><th>Teacher 2</th><th title="A third teacher in the room (co-teaching)">Teacher 3</th>${Array.from({ length: NT - 3 }, (_, k) => `<th>Teacher ${k + 4}</th>`).join("")}<th>Students</th><th>Periods override</th><th>Keep code</th>${Number(sc().weeks) === 2 ? '<th title="Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other">Special room weeks</th>' : ""}<th>Code</th><th>Periods</th><th title="Type your own split, such as 5x3 + 2x2. Empty = the usual split shown in grey.">Lessons</th><th></th></tr>
+      ${rows.map(([x, i]) => { const lk = cpBlock(x), ro = h => lk ? h.replace('class="chips"', 'class="chips ro"') : h, D = lk ? `disabled title="${esc(cpWhy())}"` : "";   // the server refuses a head's change to a staffed row's subject, level, band, classes, code and deletion
+      return `<tr id="lessons-${i}" class="${rowCls(out, crit, "lessons", i)}${P.lessons.has(i) ? " picked" : ""}" title="${esc((out.lessons[i] || []).join(" "))}"><td><input type="checkbox" data-pick="lessons.${i}" ${P.lessons.has(i) ? "checked" : ""}></td><td class="lv">${sel(`spec.lessons.${i}.level`, x.level, levels(), true, D)}</td><td style="min-width:200px">${sel(`spec.lessons.${i}.subject`, x.subject, subjectNames().filter(n => (subj(n).periods || {})[x.level] || n === x.subject), true, D)}</td><td style="min-width:160px">${sel(`spec.lessons.${i}.block`, x.block, S.spec.blocks.filter(b => !x.level || b.level === x.level).map(b => b.block), true, D)}</td><td style="min-width:120px">${ro(chips(`spec.lessons.${i}.classes`, x.classes, "classes", `data-level="${esc(x.level || "")}"${lk ? ` title="${esc(cpWhy())}"` : ""}`))}</td>${Array.from({ length: NT }, (_, k) => tcell(i, k, x)).join("")}<td class="num">${inp(`spec.lessons.${i}.students`, x.students, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.periods_override`, x.periods_override, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.code_override`, x.code_override, "text", `style="width:70px" ${D}`)}</td>${Number(sc().weeks) === 2 ? `<td><select data-k="spec.lessons.${i}.room_weeks" ${special(x) ? "" : "disabled title=\"Only for a subject with a special room kind, such as a lab (step 3)\""}>${opt("", x.room_weeks || "", "every week")}${opt("Odd", x.room_weeks, "Odd only")}${opt("Even", x.room_weeks, "Even only")}</select></td>` : ""}<td class="calc">${esc(info[i].code)}</td><td class="calc">${info[i].p || ""}</td><td><input id="pat-${i}" data-pat="${i}" value="${esc((x.pattern || []).length ? patText(x.pattern.map(Number)) : x.pattern_text || "")}" placeholder="${esc(info[i].auto)}" title="How the periods split into lessons: 5x3 + 2x2 is five 3-period lessons and two 2-period ones. Empty = the usual split shown in grey." style="width:112px"></td><td>${cpHand(x, i, lk)} ${delBtn("lessons", i, lk && cpWhy())}</td></tr>`; }).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="lessons">+ Add teaching group</button></div></div>`;
   },
   map() {   // step 5's department map: roster (left), baskets (middle), cards (right)
@@ -1181,7 +1211,9 @@ const VIEWS = {
       <div class="grid2">${SET().map(x => `<label class="f">${esc(x.label)} ${x.number
         ? `<input data-set="${x.key}" type="number" min="1" value="${esc(settingValue(x.key))}" placeholder="no limit">`
         : `<select data-set="${x.key}">${["Yes", "No"].map(v => opt(v, settingValue(x.key))).join("")}</select>`}</label>`).join("")}
-      ${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? "" : settingRow(x, i)).join("")}</div></div>
+      ${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? "" : settingRow(x, i)).join("")}</div>
+      <div class="row" style="margin-top:12px"><b>${esc(Parents.label(S.spec))} take these lessons</b>${chips("spec.school.parents_subjects", namesList(s.parents_subjects), "subjects")}</div>
+      <p class="muted small" style="margin:4px 0 0">They are put on these lessons for every class, all together. You can still change one lesson by hand on step 5.</p></div>
       <div class="card"><h2>Constraints</h2>${strip}${parts.join("")}</div>${giveWay(out, crit, psel, weeks, days)}`;
   },
   students() {
@@ -1253,6 +1285,9 @@ document.addEventListener("click", async e => {
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
+  if (b.dataset.cpback !== undefined) { const i = Number(b.dataset.cpback), x = S.spec.lessons[i]; if (!x || cpBlock(x)) return; Parents.back(S.spec, i); save(); render(); poll(); return; }
+  if (b.dataset.pback) { const n = Parents.handRows(S.spec).length, nm = Parents.label(S.spec); if (!n || !confirm(`Put the ${nm} back on ${n} ${n === 1 ? "lesson" : "lessons"}? The teachers typed on them are replaced.`)) return; Parents.backAll(S.spec); save(); render(); poll(); return; }
+  if (b.dataset.pfill) { const n = Parents.fillCount(S.spec), nm = Parents.label(S.spec); if (!n || !confirm(`Give ${n} ${n === 1 ? "class" : "classes"} their ${nm} from the teachers now on their lessons?`)) return; Parents.fill(S.spec); save(); render(); poll(); return; }
   if (b.id === "practiceBack") { leavePractice(); return; }
   if (b.dataset.old) { oldChoice(b.dataset.old); return; }
   if (b.id === "copiesLoad") { try { S.copies = await getJSON("/api/setup/copies"); } catch (err) { toast("Could not load the earlier copies."); return; } render(); return; }
@@ -1359,6 +1394,10 @@ document.addEventListener("change", async e => {
   if (el.dataset.pick || el.dataset.pickall) return;
   if (el.dataset.pat !== undefined) { if (setPattern(S.spec.lessons[Number(el.dataset.pat)], el.value)) { save(); render(); } else { const x = S.spec.lessons[Number(el.dataset.pat)]; el.value = (x.pattern || []).length ? patText(x.pattern.map(Number)) : ""; el.focus(); } return; }
   if (el.dataset.set) { setSetting(el.dataset.set, el.value); save(); render(); return; }
+  if (el.dataset.pmax !== undefined) { const msg = Parents.setMax(S.spec, el.value); if (msg) toast(msg); save(); render(); poll(); return; }   // a refusal leaves the old number, redrawn
+  if (el.dataset.parent) {   // a Class Parents box: all of that class's boxes make its list (setPath would throw on a class with no list)
+    const i = Number(el.dataset.parent.split("|")[0]);
+    Parents.setParents(S.spec, i, [...el.closest("tr").querySelectorAll("[data-parent]")].map(x => x.value)); save(); render(); poll(); return; }
   if (el.dataset.time) {   // a block-out's clock time: keep the times and block every period they overlap
     const [i, k] = el.dataset.time.split("|").map(Number), r = S.spec.rules[i];
     r.times = [...ruleTimes(r)]; r.times[k] = el.value; [r.from, r.to] = periodsBetween(r.times[0], r.times[1]); save(); render(); return; }
@@ -1367,6 +1406,7 @@ document.addEventListener("change", async e => {
     setFixedWho(r, tr.querySelector("[data-fixlv]").value, tr.querySelector("[data-fixwho]").value); save(); render(); return;
   }
   const path = el.dataset.k; if (!path) return;
+  if (path === "spec.school.parents_name") { const t = el.value.trim(); if (t) sc().parents_name = t; else delete sc().parents_name; save(); render(); poll(); return; }   // an empty box takes the key away
   if (el.type === "checkbox") { setPath(path, el.checked); save(); render(); return; }
   let v = el.value; if (el.type === "number") v = v === "" ? null : Number(v); if (v === "") v = null;
   if (/\.(from|to)$/.test(path) && v !== null) v = Number(v);
@@ -1483,7 +1523,7 @@ function pick(el, shift) {   // a tick box on a teaching-group or student row; s
 function tgBar(load, info) {
   const P = S.pick, ix = [...P.lessons].filter(i => S.spec.lessons[i]); if (!ix.length) return "";
   const rows = ix.map(i => S.spec.lessons[i]), T = teacherNames();
-  const yes = T.filter(t => rows.every(x => canTeach(t, x.subject, x.level))), no = T.filter(t => !yes.includes(t));
+  const yes = T.filter(t => rows.every(x => canTeachRow(t, x))), no = T.filter(t => !yes.includes(t));
   const t = S.spec.teachers.find(x => x.name === P.t); let line = "", over = false;
   if (t) {
     const now = (load[t.name] || 0) + (Number(t.other_duties) || 0), more = ix.filter(i => !(S.spec.lessons[i].teachers || []).includes(t.name)).reduce((a, i) => a + info[i].tp, 0);
@@ -1492,7 +1532,7 @@ function tgBar(load, info) {
   }
   const off = t ? "" : "disabled";
   return `<div class="bulk row"><b>${ix.length} ticked</b> teacher <select id="pickT">${opt("", P.t, "pick…")}<optgroup label="Can teach all of them">${yes.map(n => opt(n, P.t)).join("")}</optgroup><optgroup label="Others">${no.map(n => opt(n, P.t)).join("")}</optgroup></select>
-    <button data-bulk="t1" ${off} title="Replaces Teacher 1 on every ticked row">Make Teacher 1</button><button data-bulk="t2" ${off} title="Adds them as Teacher 2 or 3 (co-teaching), or Teacher 1 on a row with none">Add as co-teacher</button><button data-bulk="tx" ${off}>Take off</button>
+    <button data-bulk="t1" ${off} title="Replaces Teacher 1 on every ticked row">Make Teacher 1</button><button data-bulk="t2" ${off} title="Adds them as a co-teacher, or as Teacher 1 on a row with none">Add as co-teacher</button><button data-bulk="tx" ${off}>Take off</button>
     ${line ? `<span class="small ${over ? "over" : "muted"}">${esc(line)}</span>` : ""}
     <span class="muted">·</span> lessons <input id="pickP" value="${esc(P.p)}" placeholder="5x3 + 2x2" title="Leave empty to go back to the usual split" style="width:104px"><button data-bulk="pat">Set lessons</button><button class="small ghost" data-bulk="tnone">Clear ticks</button></div>`;
 }
@@ -1546,10 +1586,11 @@ function basketsView(dept) {   // the middle column: one basket per subject of t
 function cardsView(dept) {   // the right-hand column: where the department's subjects are taught
   const info = lessonInfo(), cards = DeptMap.cards(S.spec, info, dept, M.tab, M.level);
   const tabs = [["classes", "Classes"], ["groups", "Teaching groups"], ["bands", "Bands"]].map(([k, l]) => `<button class="small ${M.tab === k ? "on" : ""}" data-mtab="${k}">${l}</button>`).join("");
-  const tcard = (nm, key) => { const t = S.spec.teachers.find(x => x.name === nm); return t ? avx(t, 28, `data-mx="${esc(key)}|${esc(nm)}"`, true) : `<span class="chip">${esc(nm)} (not on list) <button class="x" data-mx="${esc(key)}|${esc(nm)}" title="Take ${esc(nm)} off">✕</button></span>`; };
-  const card = c => { const key = c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`, room = DeptMap.MAX - c.teachers.length;
-    return `<div class="gcard" data-mcard="${esc(key)}" title="Click to deploy the ticked teachers, or drop teachers here"><div class="row small" style="justify-content:space-between"><b>${esc(c.title)}</b><span class="muted">${esc(c.level)} · ${c.periods || "?"} periods</span></div><div class="small muted">${esc(c.subject)}</div>
-      <div class="avs">${c.teachers.map(nm => tcard(nm, key)).join("")}${room > 0 ? `<span class="plus" title="Room for ${room} more">+</span>` : ""}</div></div>`; };
+  const tcard = (nm, key, lock) => { const t = S.spec.teachers.find(x => x.name === nm); return t ? avx(t, 28, lock ? "" : `data-mx="${esc(key)}|${esc(nm)}"`, true) : `<span class="chip">${esc(nm)} (not on list)${lock ? "" : ` <button class="x" data-mx="${esc(key)}|${esc(nm)}" title="Take ${esc(nm)} off">✕</button>`}</span>`; };
+  const card = c => { const key = c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`, x = S.spec.lessons[c.li], stf = c.kind === "class" && Parents.staffed(S.spec, x), lock = stf && cpBlock(x);
+    const room = (stf ? Parents.cap(S.spec) : DeptMap.MAX) - c.teachers.length;
+    return `<div class="gcard${lock ? " locked" : ""}" data-mcard="${esc(key)}" title="${esc(lock ? cpWhy() : "Click to deploy the ticked teachers, or drop teachers here")}"><div class="row small" style="justify-content:space-between"><span><b>${esc(c.title)}</b>${stf ? ` <span class="cpbadge">${esc(Parents.label(S.spec))}</span>` : ""}</span><span class="muted">${esc(c.level)} · ${c.periods || "?"} periods</span></div><div class="small muted">${esc(c.subject)}${stf ? ` ${cpHand(x, c.li, lock)}` : ""}</div>
+      <div class="avs">${c.teachers.map(nm => tcard(nm, key, lock)).join("")}${room > 0 && !lock ? `<span class="plus" title="Room for ${room} more">+</span>` : ""}</div></div>`; };
   const band = b => `<div class="lane"><div class="row small" style="justify-content:space-between"><b>${esc(b.title)}</b><span class="muted">${esc(b.level)} · ${b.groups.length} group${b.groups.length === 1 ? "" : "s"}</span></div>
     ${b.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}${b.groups.map(card).join("")}</div>`;
   const what = { classes: "whole-class lessons", groups: "teaching groups", bands: "bands" }[M.tab];
@@ -1563,11 +1604,12 @@ function profileView(t, i) {   // a teacher's profile, in place of the cards whi
   [...new Set(S.spec.subjects.map(x => x.dept))].forEach(d => ["classes", "groups"].forEach(tab => DeptMap.cards(S.spec, info, d, tab, "").forEach(c => { if (c.teachers.includes(t.name) && !seen.has(key(c))) { seen.add(key(c)); teaches.push(c); } })));
   const mayLook = !isHead() || S.practice || provisionalRow(t);   // the server lets a head change only a provisional teacher's row
   const canRows = (t.can_teach || []).map((c, k) => `<div class="row" style="gap:6px;margin-bottom:4px"><span style="flex:1">${esc(c.subject)}</span>${sel(`spec.teachers.${i}.can_teach.${k}.levels`, c.levels || "All", scopes(), false, 'style="width:auto"')}<button class="small danger" data-mpx="${esc(c.subject)}" title="Take ${esc(c.subject)} off">✕</button></div>`).join("") || `<p class="muted small">No subject yet: tick them and click a basket.</p>`;
-  const tRows = teaches.map(c => `<div class="row" style="gap:6px;margin-bottom:4px"><span style="flex:1">${esc(c.title)} · ${esc(c.subject)} · ${c.periods || "?"} periods</span><button class="small danger" data-mx="${esc(key(c))}|${esc(t.name)}" title="Take ${esc(t.name)} off ${esc(c.title)}">✕</button></div>`).join("") || `<p class="muted small">Not deployed yet.</p>`;
+  const tRows = teaches.map(c => `<div class="row" style="gap:6px;margin-bottom:4px"><span style="flex:1">${esc(c.title)} · ${esc(c.subject)} · ${c.periods || "?"} periods</span>${c.kind === "class" && cpBlock(S.spec.lessons[c.li]) ? "" : `<button class="small danger" data-mx="${esc(key(c))}|${esc(t.name)}" title="Take ${esc(t.name)} off ${esc(c.title)}">✕</button>`}</div>`).join("") || `<p class="muted small">Not deployed yet.</p>`;
+  const fc = Parents.of(S.spec, t.name);   // the classes this teacher is a form teacher of
   return `<section class="cards card profile"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Profile</h3><button class="small ghost" data-mclose>✕ Close</button></div>
     <div class="row" style="align-items:flex-start;margin-top:8px;flex-wrap:nowrap"><div style="text-align:center">${avatarOf(t, 64)}${mayLook ? `<div><button class="small" data-avatar="${i}" title="Another face for this teacher">New look</button></div>` : ""}</div>
     <div style="min-width:0"><div style="font-weight:600">${esc(t.name || "")}</div><div class="muted small">${esc(t.short || "")}${t.role ? ` · ${esc(t.role)}` : ""}${t.dept ? ` · ${esc(t.dept)}` : ""}${provisionalRow(t) ? ` <span class="tag">provisional</span>` : ""}</div>
-    <div class="small ${ld.over ? "overtxt" : ""}" style="margin-top:4px">${ld.lessons || 0} periods deployed${ld.duties ? ` + ${ld.duties} other duties` : ""}${ld.allowance ? ` = ${ld.total} of ${ld.allowance}` : ""}</div></div></div>
+    <div class="small ${ld.over ? "overtxt" : ""}" style="margin-top:4px">${ld.lessons || 0} periods deployed${ld.duties ? ` + ${ld.duties} other duties` : ""}${ld.allowance ? ` = ${ld.total} of ${ld.allowance}` : ""}</div>${fc.length ? `<div class="small" style="margin-top:4px">${esc(Parents.label(S.spec))} of ${esc(fc.join(", "))}</div>` : ""}</div></div>
     <h4>Can teach</h4>${canRows}<h4>Teaches</h4><div class="keep" style="max-height:40vh;overflow:auto">${tRows}</div>
     <p class="muted small" style="margin:10px 0 0">${isHead() && !S.practice ? "Details are changed by the committee on step 4; a provisional teacher's by you there." : "Details are changed on step 4."}</p></section>`;
 }
@@ -1578,9 +1620,12 @@ function cardAt(key) {   // "li|cls" (a class card) or "li|" (a group card)
 function placeOn(card, idxs) {   // deploy teachers (ticked, or dropped) onto a card: ask first, then write once
   if (!card) return;
   if (!idxs.length) { toast("Tick teachers first, then click a card."); return; }
-  const x = S.spec.lessons[card.li], nb = DeptMap.needBasket(S.spec, card, idxs);
+  const x = S.spec.lessons[card.li], stf = card.kind === "class" && Parents.staffed(S.spec, x);
+  if (stf && cpBlock(x)) { toast(cpWhy()); return; }
+  const po = stf ? { max: Parents.cap(S.spec), exempt: nm => Parents.exempt(S.spec, { ...x, classes: [card.cls] }, nm) } : {};   // a staffed lesson holds the school's most, and its form teachers need no basket
+  const nb = DeptMap.needBasket(S.spec, card, idxs, po);
   const add = nb.length > 0 && confirm(`${listing(nb)} ${nb.length === 1 ? "is" : "are"} not in the ${x.subject} basket. Add ${nb.length === 1 ? "them" : "them all"} to the basket and place them?`);
-  const r = DeptMap.deploy(S.spec, card, idxs, { addToBasket: add });
+  const r = DeptMap.deploy(S.spec, card, idxs, { ...po, addToBasket: add });
   if (r.placed.length) { save(); render(); }
   const where = `${card.title} ${x.subject}`, over = r.refused.filter(f => !f.why.endsWith("basket.")), left = r.refused.filter(f => f.why.endsWith("basket."));
   const parts = [];
@@ -1614,7 +1659,9 @@ function staffDrop(idxs) {   // dropped on the staff room: out of every basket o
   basketRemove(pairs);
 }
 function cardRemove(key, name) {
-  const card = cardAt(key); if (!card || !DeptMap.undeploy(S.spec, card, name)) return;
+  const card = cardAt(key); if (!card) return;
+  if (card.kind === "class" && cpBlock(S.spec.lessons[card.li])) { toast(cpWhy()); return; }
+  if (!DeptMap.undeploy(S.spec, card, name)) return;
   save(); render(); toast(`Took ${name} off ${card.title} ${S.spec.lessons[card.li].subject}.`);
 }
 function dropIds(e) {   // the teacher indexes a drop carries (ids, as JSON in text/plain)
@@ -1817,18 +1864,21 @@ function bulk(k) {   // one change for every ticked row, so one Undo takes it al
   if (k === "tnone" || k === "snone") { P[k === "tnone" ? "lessons" : "students"].clear(); render(); return; }
   if (k[0] === "t") {
     const t = P.t, ix = [...P.lessons].filter(i => S.spec.lessons[i]); if (!t || !ix.length) return;
-    let n = 0, full = 0;
+    let n = 0, full = 0, left = 0, kept = 0;
     for (const i of ix) {
       const x = S.spec.lessons[i], ts = (x.teachers || []).filter(Boolean), was = ts.includes(t);
-      if (k === "t1") { if (ts[0] === t) continue; x.teachers = [t, ...ts.slice(1).filter(y => y !== t)]; }
-      if (k === "t2") { if (was) continue; if (ts.length >= 3) { full++; continue; } x.teachers = [...ts, t]; }
+      if (cpBlock(x)) { left++; continue; }   // a head leaves the form teachers' lessons alone
+      if (k === "t1") { if (ts[0] === t) continue; if (Parents.follows(S.spec, x) && Parents.want(S.spec, x).includes(t)) { kept++; continue; } x.teachers = [t, ...ts.slice(1).filter(y => y !== t)]; }
+      if (k === "t2") { if (was) continue; if (ts.length >= (Parents.staffed(S.spec, x) ? Parents.cap(S.spec) : 3)) { full++; continue; } x.teachers = [...ts, t]; }
       if (k === "tx") { if (!was) continue; x.teachers = ts.filter(y => y !== t); }
       n++;
     }
     save(); render();
     const { out } = issues(), has = m => k === "tx" ? 0 : ix.filter(i => (out.lessons[i] || []).some(x => x.startsWith(`${t} ${m}`))).length;
     const cant = has("is not set to teach"), twice = has("twice in this band");
-    toast(`${{ t1: `${t} is now Teacher 1 of`, t2: `${t} now co-teaches`, tx: `${t} was taken off` }[k]} ${n} group${s1(n)}` + (full ? `; ${full} already had three teachers` : "")
+    toast(`${{ t1: `${t} is now Teacher 1 of`, t2: `${t} now co-teaches`, tx: `${t} was taken off` }[k]} ${n} group${s1(n)}` + (full ? `; ${full} already had as many teachers as they can hold` : "")
+      + (kept ? `; ${kept} lesson${s1(kept)} keep the order of their ${Parents.label(S.spec)}` : "")
+      + (left ? `; ${left} lesson${s1(left)} of the ${Parents.label(S.spec)} ${left === 1 ? "was" : "were"} left alone` : "")
       + (cant ? `; ${cant} ${cant === 1 ? "is a subject or level" : "are subjects or levels"} they are not set to teach (step 4)` : "")
       + (twice ? `; ${twice} ${twice === 1 ? "is" : "are"} in a band where they already teach a group, and a band's groups meet at the same time` : "") + ". Undo takes it back.");
     return;
@@ -2037,9 +2087,12 @@ function tlAction(k) {
     const who = n === 1 ? "1 teacher who is" : `${n} teachers who are`;
     const lessons = !hit ? "No lesson on step 5 names them."
       : `${hit === 1 ? "1 lesson" : `${hit} lessons`} on step 5 name${hit === 1 ? "s" : ""} them, and lose${hit === 1 ? "s" : ""} them (a shared lesson keeps its other teacher).`;
-    if (!confirm(`${warn}Remove ${who} not in this list? ${lessons} Undo takes it back.`)) return;
+    const cl = S.spec.classes.filter(c => Parents.names(c).some(t => gone.has(t))).length;
+    const forms = !cl ? "" : ` They also leave the ${Parents.label(S.spec)} of ${cl === 1 ? "1 class" : `${cl} classes`}.`;
+    if (!confirm(`${warn}Remove ${who} not in this list? ${lessons}${forms} Undo takes it back.`)) return;
     [...p.missing].sort((a, b) => b - a).forEach(i => T.splice(i, 1));
     S.spec.lessons.forEach(x => { if ((x.teachers || []).some(t => gone.has(t))) x.teachers = x.teachers.filter(t => t && !gone.has(t)); });
+    S.spec.classes.forEach((c, i) => { if (Parents.names(c).some(t => gone.has(t))) Parents.setParents(S.spec, i, Parents.names(c).filter(t => !gone.has(t))); });   // and off every class's Class Parents
     unpick(); save(); TL.msg = `Removed ${n} teacher${n === 1 ? "" : "s"}. Undo takes it back.`; toast(TL.msg);
   }
   TL.sig = teachersSig();   // what this card just did is not a change "by other means": the preview stays, worked out again
@@ -2068,6 +2121,7 @@ document.addEventListener("input", e => {
 });
 
 /* ---------------- pop-ups: class picker, can-teach editor */
+const PCPATH = "spec.school.parents_subjects";
 function openPop(anchor) {
   const pop = $("#pop"); const path = anchor.dataset.path; const r = anchor.getBoundingClientRect();
   pop.style.left = `${Math.min(window.scrollX + r.left, window.scrollX + window.innerWidth - 440)}px`; pop.style.top = `${window.scrollY + r.bottom + 6}px`; pop.dataset.path = path; pop.dataset.what = anchor.dataset.pop;
@@ -2093,12 +2147,14 @@ function openPop(anchor) {
       + (c && !blocks.size && !other.length ? `<p class="muted">No groups on step 5 include ${esc(c)} yet.</p>` : "")
       + `<div class="row"><button class="small primary" data-popdone="1">Done</button></div>`;
   } else if (anchor.dataset.pop === "subjects") {   // Only these subjects (an HBL day): a department, or subjects without their G1/G2/G3 tag
-    const cur = new Set(namesList(getPath(path)).map(n => n.toLowerCase())), by = new Map();
-    S.spec.subjects.filter(s => s.subject).forEach(s => { const d = s.dept || "Other"; if (!by.has(d)) by.set(d, new Set()); by.get(d).add(untag(s.subject)); });
+    const pc = path === PCPATH;   // the Class Parents subjects: the names as they are on step 3, one by one
+    const cur = new Set(namesList(getPath(path)).map(n => n.toLowerCase())), by = new Map(), tg = n => pc ? n : untag(n);
+    S.spec.subjects.filter(s => s.subject).forEach(s => { const d = s.dept || "Other"; if (!by.has(d)) by.set(d, new Set()); by.get(d).add(tg(s.subject)); });
     const box = (v, label, cls = "") => `<label class="${cls}"><input type="checkbox" value="${esc(v)}" ${cur.has(String(v).toLowerCase()) ? "checked" : ""}>${label}</label>`;
-    const known = new Set([...by.keys(), ...[...by.values()].flatMap(s => [...s])].map(x => String(x).toLowerCase())), lost = namesList(getPath(path)).filter(n => !known.has(n.toLowerCase()));
-    pop.innerHTML = `<h3>Subjects taught then</h3><p class="muted small" style="margin:0 0 6px">Tick a department for all its subjects, or single subjects (every G1/G2/G3 group of it). Every other lesson is kept out of those periods.</p>`
-      + [...by].map(([d, ss]) => `<div class="gblock"><div class="opts wide">${d !== "Other" ? box(d, `<b>All ${esc(d)}</b>`) : ""}${[...ss].map(s => box(s, esc(s))).join("")}</div></div>`).join("")
+    const known = new Set([...(pc ? [] : by.keys()), ...[...by.values()].flatMap(s => [...s])].map(x => String(x).toLowerCase())), lost = namesList(getPath(path)).filter(n => !known.has(n.toLowerCase()));
+    pop.innerHTML = (pc ? `<h3>${esc(Parents.label(S.spec))} take these lessons</h3><p class="muted small" style="margin:0 0 6px">Tick the subjects whose lessons they take.</p>`
+      : `<h3>Subjects taught then</h3><p class="muted small" style="margin:0 0 6px">Tick a department for all its subjects, or single subjects (every G1/G2/G3 group of it). Every other lesson is kept out of those periods.</p>`)
+      + [...by].map(([d, ss]) => `<div class="gblock"><div class="opts wide">${d !== "Other" && !pc ? box(d, `<b>All ${esc(d)}</b>`) : ""}${[...ss].map(s => box(s, esc(s))).join("")}</div></div>`).join("")
       + (lost.length ? `<div class="gblock"><div class="muted small">Not on step 3 (untick to remove)</div><div class="opts wide">${lost.map(n => box(n, esc(n))).join("")}</div></div>` : "")
       + `<div class="row"><button class="small" data-popnone="1">None</button><button class="small primary" data-popdone="1">Done</button></div>`;
   } else if (anchor.dataset.pop === "rooms") {   // Only in venues: the rooms, by kind
@@ -2126,6 +2182,7 @@ function readCt() { return [...document.querySelectorAll("#ctRows [data-ct]")].m
 function commitPop() {
   const pop = $("#pop"); if (pop.hidden) return; const path = pop.dataset.path;
   if (pop.dataset.what === "classes") setPath(path, [...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value));
+  else if (pop.dataset.what === "subjects" && path === PCPATH) Parents.setSubjects(S.spec, [...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value));
   else if (pop.dataset.what === "subjects") setPath(path, [...new Set([...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value))].join(", ") || null);   // one cell, as on the workbook
   else if (pop.dataset.what === "rooms") setPath(path, [...pop.querySelectorAll("input[type=checkbox]:checked")].map(x => x.value));
   else if (pop.dataset.what === "groups") {
@@ -2321,7 +2378,7 @@ const fxDot = st => `<i class="dot ${esc(Grid.stateClass(st))}"></i>`;
 function fixesHTML(j) {   // what was fixed in the app, newest last, with undo, anything wrong with the fixes, and the download
   const fl = j.fixes || [];
   return `<h3 style="margin-top:14px">Fixes</h3>` + (fl.length
-      ? `<ol class="fxlist">${fl.map(x => `<li>${esc(x.text)} <span class="muted small">${esc(x.at)}</span></li>`).join("")}</ol><div class="row"><button id="fxUndo">Undo the last fix</button></div>`
+      ? `<ol class="fxlist">${Draft.batches(fl).map(b => `<li>${b.items.map(x => `<div>${esc(x.text)}</div>`).join("")}<span class="muted small">${esc(b.items[b.items.length - 1].at)}</span></li>`).join("")}</ol><div class="row"><button id="fxUndo">${esc(Draft.undoText(fl))}</button></div>`
       : `<p class="muted small">No fixes have been made in the app yet.</p>`)
     + (j.fix_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")
     + `<p class="small"><a href="/api/draft/download">Download the draft (.sqlite)</a> <span class="muted">to carry on elsewhere; Make printouts accepts it.</span></p>`;
@@ -2330,14 +2387,15 @@ function fixHTML() {
   const f = S.fix;
   if (!f || !f.grid) return `<div class="fxcard"><h3>Fix the timetable</h3><p class="muted small">Move or swap a lesson, change its teacher or room, delete an extra lesson or add a missing one, here in the app. Each fix is checked against the timetable and the setup before it is made, and can be undone.</p><div class="row"><button id="fxOpen">Open the Fix card</button></div></div>`;
   const g = f.grid, weeks = Grid.weeks(g.days), wk = weeks.find(w => w.name === f.week) || weeks[0], rows = Grid.table(g, wk), o = fxOpts(f), slots = o ? o.slots || [] : [];
-  const shorts = fxShorts(), lessonMode = !!(f.sel || f.adding);
+  const shorts = fxShorts(), lessonMode = !!(f.sel || f.adding), mk = f.pre ? Grid.marks(f.pre.answer, { view: f.view, name: f.name }) : {};
   const picker = (view, names, label) => `<label class="f">${label} <select data-fxview="${view}"><option value="">Choose…</option>${names.map(n => `<option value="${esc(n)}"${f.view === view && f.name === n ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></label>`;
   const cell = c => {
     if (c.covered) return "";
     if (c.lessons.length) {
       const btns = c.lessons.map(r => {
         const own = f.sel && f.sel.id === r.id && f.sel.group === r.group, sw = f.sel && !own ? slots.find(s => s.swap === r.id) : null;
-        return `<button class="fxl ${sw ? esc(Grid.stateClass(sw.state)) : ""}${own ? " sel" : ""}" data-fxsel="${esc(r.id)}|${esc(r.group)}" title="${esc(sw && sw.why ? `${Grid.fullLabel(r)} — ${sw.why}` : Grid.fullLabel(r))}">${esc(Grid.label(r, shorts))}</button>`;
+        const m = mk[r.id + "|" + r.group], mc = m ? Grid.markClass(m) : "", tip = (sw && sw.why ? `${Grid.fullLabel(r)} — ${sw.why}` : Grid.fullLabel(r)) + (mc ? ` — ${mc} in the preview` : "");
+        return `<button class="fxl ${sw ? esc(Grid.stateClass(sw.state)) : ""}${own ? " sel" : ""}${mc ? ` mk-${mc}` : ""}" data-fxsel="${esc(r.id)}|${esc(r.group)}" title="${esc(tip)}">${esc(Grid.label(r, shorts))}</button>`;
       }).join("");
       return `<td class="fxc has" rowspan="${c.rowspan}">${btns}</td>`;
     }
@@ -2359,10 +2417,52 @@ function fixHTML() {
       : `<p class="muted small">${f.view === "class" ? "Nothing is missing for this class." : "Missing periods are shown for a class."}</p>`)
       + `<p class="muted small">Click a lesson to see where it can go.</p>`;
   }
+  side = fxWaysHTML(f) + side;
   return `<div class="fxcard"><h3>Fix the timetable</h3><div class="row fxpick">${picker("class", g.classes || [], "Class")}${picker("teacher", g.teachers || [], "Teacher")}
       ${weeks.length > 1 ? `<span class="fxweeks">${weeks.map(w => `<button class="${w.name === wk.name ? "primary" : ""}" data-fxweek="${esc(w.name)}">${esc(w.name)} week</button>`).join("")}</span>` : ""}</div>
     <p class="muted small">${esc(f.view === "class" ? "Class" : "Teacher")} ${esc(f.name)}. ${f.sel ? "Green is open, amber is open but less wanted, red is not allowed. Click the selected lesson again to let go of it." : "Click a lesson to select it."}</p>
-    <div class="fxlayout"><div class="fxwrap">${table}</div><div class="fxside">${side}</div></div></div>`;
+    <div class="fxlayout"><div class="fxwrap">${table}</div><div class="fxside">${side}</div></div>${fxPreHTML(f)}</div>`;
+}
+function fxWaysHTML(f) {   // the helper's block: the ways to settle the warning the card was opened from, each already checked
+  if (!f.warn) return "";
+  const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === f.warn), a = fxWaysOf(f);
+  const close = `<button data-fxwaysclose="1">Close</button>`;
+  let body;
+  if (f.settled) body = `<p class="small">This warning is no longer on the list.</p><div class="row">${close}</div>`;
+  else if (!a) body = f.waysFail ? `<p class="issue small">Could not load the ways.</p><div class="row">${close}</div>` : `<p class="muted small">Looking for ways…</p>`;
+  else {
+    const sg = a.suggestions || [], bl = a.blocked || [];
+    body = sg.map((x, i) => `<div class="fxway"><div class="small"><b>${esc(x.text)}</b></div>${(x.disturbs || []).length ? `<ul class="small muted">${x.disturbs.map(d => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
+        <div class="row">${Draft.stateWord(x.state) ? `<span class="fxstate small">${fxDot(x.state)} ${esc(Draft.stateWord(x.state))}</span>` : ""}<button data-fxshow="${i}">Show</button><button class="primary" data-fxapply="${i}">Apply</button></div></div>`).join("")
+      + (a.none ? `<p class="small">${esc(a.none)}</p>` : "")
+      + (!sg.length && bl.length ? `<p class="small">The nearest ways, and what each breaks:</p><ul class="small">${bl.map(x => `<li>${esc(x.text)} <span class="muted">${esc(x.why)}</span></li>`).join("")}</ul>` : "")
+      + `<div class="row">${close}</div>`;
+  }
+  return `<div class="fxways"><h4>Ways to settle this</h4>${f.changed && !f.settled ? `<p class="small">This warning has changed: ${esc(f.changed)}</p>` : w ? `<p class="small">${esc(w.text)}</p>` : ""}${body}</div>`;
+}
+function fxSmallHTML(c) {   // one other class's week as a read-only table, the lessons the preview marks outlined
+  const shorts = fxShorts();
+  return Grid.weeks(c.days).map(wk => {
+    const cell = k => {
+      if (k.covered) return "";
+      if (k.lessons.length) return `<td class="fxc has" rowspan="${k.rowspan}">${k.lessons.map(r => { const mc = Grid.markClass(r), was = Grid.wasText(r, c.days);
+        return `<div class="fxl${mc ? ` mk-${mc}` : ""}" title="${esc([Grid.fullLabel(r), was].filter(Boolean).join(" — "))}">${esc(Grid.label(r, shorts))}</div>`; }).join("")}</td>`;
+      return `<td class="fxc${FX_BREAK[k.code] && k.code !== "." ? " brk" : ""}"></td>`;
+    };
+    return `<div class="fxsm"><h5>${esc(c.name)}${wk.name ? ` · ${esc(wk.name)} week` : ""}</h5><div class="fxwrap small"><table class="fxgrid small" style="min-width:${28 + wk.days.length * 70}px"><tr><th></th>${wk.days.map(d => `<th>${esc(d.label)}</th>`).join("")}</tr>${Grid.table(c, wk).map((r, p) => `<tr><th class="fxp">${p}</th>${r.map(cell).join("")}</tr>`).join("")}</table></div></div>`;
+  }).join("");
+}
+function fxPreHTML(f) {   // Before you apply: what the fixes would do, drawn from the preview answer kept in S.fix
+  if (!f.preWant) return "";
+  if (!f.pre) return `<div class="fxpre"><h4>Before you apply</h4><p class="muted small">Loading the preview…</p></div>`;
+  const a = f.pre.answer, ok = a.state === "ok" || a.state === "prefer", others = Grid.others(a, { view: f.view, name: f.name }), gone = a.gone || [];
+  return `<div class="fxpre"><h4>Before you apply</h4>
+    <ul class="small">${(a.texts || []).map(t => `<li>${esc(t)}</li>`).join("")}</ul>
+    <p class="small">${fxDot(ok ? a.state : "no")} ${esc(ok ? Draft.stateWord(a.state) : a.why || "These fixes are not open.")}</p>
+    ${others.length || gone.length || (a.classes || []).length ? `<p class="muted small">Outlined: lessons that move, change or are new.</p>` : ""}
+    ${others.map(fxSmallHTML).join("")}
+    ${gone.length ? `<ul class="small">${gone.map(g => `<li>${esc(g.what)} is deleted from ${esc(g.cls)}.</li>`).join("")}</ul>` : ""}
+    <div class="row">${ok ? `<button class="primary" data-fxpreapply="1">Apply</button>` : ""}<button data-fxprecancel="1">Cancel</button></div></div>`;
 }
 function fxDraw() {   // the draft area again with the grid kept where it was scrolled
   const w = $(".fxwrap"), s = $(".fxside"), pos = [w ? w.scrollLeft : 0, w ? w.scrollTop : 0, s ? s.scrollTop : 0];
@@ -2379,6 +2479,36 @@ async function fxGet(url) {
 }
 const fxQ = o => Object.keys(o).map(k => `${k}=${encodeURIComponent(o[k])}`).join("&");
 const fxWant = f => ({ view: f.view, name: f.name, id: f.sel ? f.sel.id : undefined, group: f.sel ? f.sel.group : undefined, key: !f.sel && f.adding ? f.adding : undefined });
+const fxWaysOf = f => f.ways && f.ways.key === f.warn ? f.ways.answer : null;   // the ways only while they are for the warning the card is open for
+async function fxWays(f) {   // the ways to settle the warning the card was opened from; an answer for another warning is dropped
+  const asked = f.warn; f.ways = null; f.waysFail = false; if (!asked) return;
+  const j = await fxGet("/api/draft/suggest?" + fxQ({ key: asked }));
+  if (S.fix !== f || f.warn !== asked) return;
+  f.ways = j ? { key: asked, answer: j } : null; f.waysFail = !j;
+}
+async function fxPreview(fixes) {   // what the fixes would do, shown under the grid; nothing is changed. An answer for other fixes is dropped
+  const f = S.fix; if (!f) return;
+  const asked = JSON.stringify(fixes); f.preWant = asked; f.pre = null; fxDraw();
+  let j = null; try { j = await post("/api/draft/preview", { fixes }); } catch (e) { toast("Could not reach the server: " + e.message); }
+  if (S.fix !== f || f.preWant !== asked) return;
+  if (j) f.pre = { fixes, answer: j }; else f.preWant = null;
+  fxDraw(); const box = $(".fxpre"); if (box) box.scrollIntoView({ block: "nearest" });
+}
+async function fxApply(fixes) {   // one or two fixes together, as received; all or nothing
+  const f = S.fix; if (!f || FX.busy) return;
+  FX.busy = true;
+  try {
+    const j = await post("/api/draft/fixes", { fixes });
+    if (j) await fxAfter(j);
+    else {   // refused: the sentence is toasted; the draft, the grid and the ways are fetched again (the list may have changed under the card)
+      f.pre = null; f.preWant = null; f.ways = null; f.waysFail = false;   // the old Show and Apply buttons are not live while the new ways load
+      const d = await fxGet("/api/draft"); if (S.fix !== f) return;
+      if (d && d.warnings) { S.draft = d; poll(); fxFollow(f, d.warnings); }
+      await fxRefresh(f); if (S.fix !== f) return; fxDraw();
+      if (f.warn && !f.settled) { await fxWays(f); if (S.fix === f) fxDraw(); }
+    }
+  } catch (e) { toast("Could not reach the server: " + e.message); } finally { FX.busy = false; }
+}
 const fxOpts = f => f.options && f.optFor && Grid.wanted(f.optFor, fxWant(f)) ? f.options : null;   // the options only while they are for what is selected now
 async function fxOptions(f) {   // the options of the selected lesson, or the slots of the lesson being added; an answer for something no longer selected is dropped
   f.options = null; f.optFail = false;
@@ -2401,17 +2531,35 @@ async function fxRefresh(f) {   // the grid again, then the options when a lesso
   await fxOptions(f);
   return live();
 }
-async function fxOpen(view, name, day, sel) {   // day: a day's name, to open on the week that holds it
-  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true }, n = ++FX.n;
+async function fxOpen(view, name, day, sel, warn) {   // day: a day's name, to open on the week that holds it; warn: the warning it was opened from (the warning itself: its key, kind and where are kept)
+  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true, warn: warn ? warn.key : null, was: warn ? { key: warn.key, kind: warn.kind, where: warn.where || null } : null, changed: "", ways: null, waysFail: false, settled: false, pre: null, preWant: null }, n = ++FX.n;
   const ok = await fxRefresh(f); f.opening = false;
   if (!ok || n !== FX.n) return;
   if (day) { const i = f.grid.days.indexOf(day), w = Grid.weeks(f.grid.days).find(x => x.days.some(d => d.i === i)); if (w) f.week = w.name; }
   S.fix = f; fxDraw();
   const box = $("#fxBox"); if (box && day !== null) box.scrollIntoView({ block: "start" });
+  if (f.warn) { await fxWays(f); if (S.fix === f) fxDraw(); }
 }
-async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again
+function fxFollow(f, warnings) {   // the warning the card was opened on, found again in the list: its key carried on, or the changed warning taken; false when it is gone
+  if (!f.warn) return false;
+  const r = Draft.follow(f.was, warnings); f.settled = !r;
+  if (!r) return false;
+  const w = warnings.find(x => x.key === r.key);
+  f.warn = r.key; f.was = { key: w.key, kind: w.kind, where: w.where || null };
+  if (r.how === "changed") f.changed = w.text;
+  return true;
+}
+async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again, then the ways when the card has a warning
   const f = S.fix; S.draft = j; poll();
-  if (f) { const ok = await fxRefresh(f); if (S.fix !== f) return; if (!ok) toast("The fix was made, but the grid could not be loaded again. Pick the class again."); }
+  if (f) {
+    f.pre = null; f.preWant = null;
+    const still = !!f.warn && fxFollow(f, j.warnings);
+    if (f.warn) { f.ways = null; f.waysFail = false; }
+    const ok = await fxRefresh(f); if (S.fix !== f) return; if (!ok) toast("The fix was made, but the grid could not be loaded again. Pick the class again.");
+    fxDraw();
+    if (still) { await fxWays(f); if (S.fix === f) fxDraw(); }
+    return;
+  }
   fxDraw();
 }
 async function fxFix(fix) {   // one fix; a refused one says why and the grid is fetched again
@@ -2432,39 +2580,48 @@ async function fxSelect(sel) {
   if (sel) { fxDraw(); await fxOptions(f); }
   if (S.fix === f) fxDraw();
 }
-function fxAlso(sl) { return !Grid.isSwap(sl) || !(sl.also || []).length || confirm(sl.also.join("\n") + "\n\nSwap anyway?"); }   // a swap that moves another class's lesson too is confirmed first
+function fxGo(sl) {   // a click on a slot: a swap that moves another class's lesson too opens the preview first, any other move or swap is made at once
+  const sel = S.fix.optFor;
+  if (Grid.isSwap(sl) && (sl.also || []).length) fxPreview(Grid.previewFor(sel, sl)); else fxFix(Grid.fixFor(sel, sl));
+}
+function fxSuggestion(f, i) { const a = fxWaysOf(f); return a && (a.suggestions || [])[Number(i)] || null; }
 function fxStateOK(x) { if (x && (x.state === "ok" || x.state === "prefer")) return true; toast((x && x.why) || "That is not open."); return false; }
 function fxClick(b) {   // true when the click was the Fix card's or a warning's Fix button
   const d = b.dataset, f = S.fix, split = v => { const i = v.indexOf("|"); return [v.slice(0, i), v.slice(i + 1)]; };
   if (d.fix !== undefined) {
     const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === d.fix), to = w && Draft.fixTarget(w);
     if (!to) { toast("This warning is not about one class or teacher, so there is no grid to show."); return true; }
-    fxOpen(to.view, to.name, to.day, to.sel); return true;
+    fxOpen(to.view, to.name, to.day, to.sel, w); return true;
   }
   if (b.id === "fxOpen") { fxOpenFirst(); return true; }
   if (b.id === "fxUndo") { fxUndo(); return true; }
   if (!f || !f.grid) return false;
+  if (d.fxshow !== undefined) { const x = fxSuggestion(f, d.fxshow); if (x) fxPreview(x.fixes); return true; }
+  if (d.fxapply !== undefined) { const x = fxSuggestion(f, d.fxapply); if (x) fxApply(x.fixes); return true; }
+  if (d.fxwaysclose !== undefined) { f.warn = null; f.ways = null; f.settled = false; f.waysFail = false; fxDraw(); return true; }
+  if (d.fxpreapply !== undefined) { if (f.pre) fxApply(f.pre.fixes); return true; }
+  if (d.fxprecancel !== undefined) { f.pre = null; f.preWant = null; fxDraw(); return true; }
   if (d.fxweek !== undefined) { f.week = d.fxweek; fxDraw(); return true; }
   if (d.fxsel !== undefined) {
     const [id, group] = split(d.fxsel), row = { id: Number(id), group };
     if (f.sel && Grid.same(f.sel, row)) { fxSelect(null); return true; }
     const o = fxOpts(f), sl = f.sel && o ? (o.slots || []).find(s => s.swap === row.id) : null;
     if (sl && (sl.state === "ok" || sl.state === "prefer")) {
-      if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); return true;
+      fxGo(sl); return true;
     }
     fxSelect(row); return true;
   }
   if (d.fxcell !== undefined && fxOpts(f)) {
     const o = fxOpts(f), [dd, p] = split(d.fxcell), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
     if (!fxStateOK(sl)) return true;
-    if (f.optFor.id !== undefined) { if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); }
+    if (f.optFor.id !== undefined) fxGo(sl);
     else if (f.optFor.key !== undefined) { const s = (f.grid.short || []).find(x => x.key === f.optFor.key); if (s) fxFix(Grid.addFor(f.optFor.key, sl, s.n)); }
     return true;
   }
   if (d.fxgo !== undefined && f.sel && fxOpts(f)) {
     const o = fxOpts(f), [dd, p] = split(d.fxgo), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
     if (!fxStateOK(sl)) return true;
-    if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); return true;
+    fxGo(sl); return true;
   }
   if (d.fxteacher !== undefined && f.sel && fxOpts(f)) {
     const o = fxOpts(f), t = (o.teachers || [])[Number(d.fxteacher)];

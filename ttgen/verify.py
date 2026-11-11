@@ -3,6 +3,7 @@
 Every function that takes spec takes the checked setup (m["checked_setup"]), already derived."""
 import re
 from collections import Counter
+from . import parents
 from .export import ENTIRE
 from .solver import rule_label
 from .spec import floating_recess, names_list, subject_test, typed_rules
@@ -77,8 +78,10 @@ def deployment(m, spec):
         g = got[key]; w = where(key, g)
         if g["teachers"] != p["teachers"]:
             a, b = ", ".join(sorted(g["teachers"])), ", ".join(sorted(p["teachers"])); ids = _ids(p["rows"])
+            ops = [["set", "lessons", i, "teachers", sorted(g["teachers"])] for i in ids]
+            ops += [["set", "lessons", x["_id"], "by_hand", True] for x in p["rows"] if ids and parents.staffed(spec, x)]   # a staffed row would be put back by the Class Parents rule: mark it with the teachers
             out.append(warning(f"dep:{k}:teachers", "deployment", f"{what} is taught by {a} on the timetable; step 5 says {b}.", group=group, where=w,
-                               sides=dict(timetable=a, step5=b), ops=[["set", "lessons", i, "teachers", sorted(g["teachers"])] for i in ids] or None))
+                               sides=dict(timetable=a, step5=b), ops=ops or None))
         if g["periods"] != p["periods"]:
             out.append(warning(f"dep:{k}:periods", "deployment", f"{what}: {g['periods']} periods timetabled, {p['periods']} on step 3.", group=group, where=w,
                                sides=dict(timetable=str(g["periods"]), step5=str(p["periods"]))))

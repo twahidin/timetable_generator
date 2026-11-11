@@ -59,6 +59,42 @@ var Draft = (function () {
     return { view: "class", name: h.cls, day: h.day || "", sel: h.id !== undefined && h.id !== null ? { id: Number(h.id), group: h.row } : null };
   }
 
-  return { whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
+  /* [{batch, items}]: neighbours with the same non-null batch are one entry; any other fix is its own; order kept, newest last */
+  function batches(fixes) {
+    var out = [];
+    (fixes || []).forEach(function (f) {
+      var last = out[out.length - 1];
+      if (f.batch && last && last.batch === f.batch) last.items.push(f);
+      else out.push({ batch: f.batch || null, items: [f] });
+    });
+    return out;
+  }
+  /* the Undo button's words: it undoes the newest entry, which may be a batch */
+  function undoText(fixes) {
+    var all = batches(fixes), k = all.length ? all[all.length - 1].items.length : 0;
+    return !k ? "" : k === 1 ? "Undo the last fix" : k === 2 ? "Undo the last two fixes" : "Undo the last " + k + " fixes";
+  }
+  /* a suggestion's state in words */
+  function stateWord(state) { return state === "ok" ? "Clean" : state === "prefer" ? "Bends a Prefer" : ""; }
+
+  /* the warning the card was opened on (was: {key, kind, where}), found again in the list now -> {key, how} or null.
+     "same": the key is there, or only renumbered (#2, #3); "changed": a clash for the same teacher or class, or a rule warning
+     for the same rule and lesson, under a new key; null when there is nothing to follow */
+  function follow(was, warnings) {
+    var list = warnings || [], base = function (k) { return String(k).replace(/#\d+$/, ""); };
+    if (!was || was.key === undefined || was.key === null) return null;
+    var hit = list.filter(function (w) { return w.key === was.key; })[0] || list.filter(function (w) { return base(w.key) === base(was.key); })[0];
+    if (hit) return { key: hit.key, how: "same" };
+    var wh = was.where || null;
+    if (was.kind === "clash" && wh && (wh.teacher || wh.cls)) {
+      hit = list.filter(function (w) { var x = w.where || {}; return w.kind === "clash" && (wh.teacher ? x.teacher === wh.teacher : x.cls === wh.cls); })[0];
+    } else if (was.kind === "rule" && wh && wh.id !== undefined && wh.id !== null) {
+      var rid = function (k) { return String(k).split(":")[1]; };
+      hit = list.filter(function (w) { var x = w.where || {}; return w.kind === "rule" && rid(w.key) === rid(was.key) && x.id === wh.id && x.row === wh.row; })[0];
+    }
+    return hit ? { key: hit.key, how: "changed" } : null;
+  }
+
+  return { follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
 })();
 if (typeof module !== "undefined") module.exports = Draft;

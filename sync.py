@@ -13,6 +13,7 @@ Operations (applied in order):
 import copy
 import json
 import secrets
+from ttgen import parents
 
 LISTS = ("venues", "classes", "subjects", "teachers", "blocks", "lessons",
          "rules", "students", "combinations", "roles", "choices")
@@ -231,6 +232,43 @@ _STR_ARGS = {"set": (1, 2, 3), "merge": (1, 2, 3), "add": (1,), "del": (1, 2),
              "school": (1,), "day": (1, 2), "top": (1,)}
 
 
+PARENTS_WHY = "Only the committee can change these lessons: their teachers are the class's form teachers."
+_PARENTS_FIELDS = ("teachers", "by_hand", "subject", "block", "code_override", "classes", "level")
+
+
+def _head_lessons_why(spec, op):
+    """The lessons the Class Parents take are the committee's: a head may not change a staffed row's teachers, mark,
+    subject, block, code, classes or level, delete it, or make a row staffed that was not (by an add or a set). Judged
+    from the row as it is and as the op would leave it. Other changes to lessons stay open."""
+    name = op[0]
+    if _ARITY.get(name) != len(op) or not all(isinstance(op[i], str) for i in _STR_ARGS[name]):
+        return "Department heads cannot send that change."    # malformed: apply would skip it, and the checks below read its positions
+    if name == "merge":    # lessons have no merged fields; judged on the row as an empty list in that field would leave it
+        row = _find(spec, "lessons", op[2])
+        after = dict(row or {}, **{op[3]: []})
+        return PARENTS_WHY if row is not None and (parents.staffed(spec, row) or parents.staffed(spec, after)) else "Department heads cannot send that change."
+    if name == "add":
+        return PARENTS_WHY if len(op) > 2 and isinstance(op[2], dict) and parents.staffed(spec, op[2]) else None
+    row = _find(spec, "lessons", op[2]) if len(op) > 2 else None
+    if row is None:
+        return None
+    was = parents.staffed(spec, row)
+    if name == "del":
+        return PARENTS_WHY if was else None
+    if len(op) < 4 or not isinstance(op[3], str):
+        return None
+    if was and op[3] in _PARENTS_FIELDS:
+        return PARENTS_WHY
+    if not was and name == "set":
+        after = dict(row)
+        if op[4] is None:
+            after.pop(op[3], None)
+        else:
+            after[op[3]] = op[4]
+        return PARENTS_WHY if parents.staffed(spec, after) else None
+    return None
+
+
 def _head_why(spec, op):
     """None if a head of department may make the one operation `op` on `spec`, else a sentence saying why not."""
     if not isinstance(op, list) or not op or not isinstance(op[0], str):
@@ -239,7 +277,9 @@ def _head_why(spec, op):
     if name in ("school", "day", "top"):
         return "Department heads cannot change the school details, the day structure or other settings."
     section = op[1] if len(op) > 1 else None
-    if section in ("lessons", "blocks"):
+    if section == "lessons":
+        return _head_lessons_why(spec, op)
+    if section == "blocks":
         return None
     if section != "teachers":
         return f"Department heads cannot change {section if isinstance(section, str) else 'that'}."
@@ -262,12 +302,18 @@ def head_split(spec, ops):
     (index in ops, sentence). Heads may change lessons and blocks, who a teacher can teach, add a teacher, and the
     details of a teacher who is still provisional (or added earlier in the same batch)."""
     allowed, refused = [], []
+    work = spec    # each op is judged on the setup as the allowed ones before it in this batch leave it (a row added, then changed, in one batch)
     for i, op in enumerate(ops):
-        why = _head_why(spec, op)
+        why = _head_why(work, op)
         if why:
             refused.append((i, why))
         else:
             allowed.append(op)
+            if isinstance(op, list) and len(op) > 1 and op[1] == "lessons":
+                if work is spec:
+                    work = dict(spec)
+                    work["lessons"] = copy.deepcopy(spec.get("lessons") if isinstance(spec.get("lessons"), list) else [])
+                apply(work, [op])
     return allowed, refused
 
 

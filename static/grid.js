@@ -76,6 +76,29 @@ var Grid = (function () {
     return rows.length > 1 || (row && row.block) ? { kind: "delete", id: sel.id, group: sel.group } : { kind: "delete", id: sel.id };
   }
 
+  /* the fixes to preview for a click on a slot with sel selected: the one fix fixFor gives */
+  function previewFor(sel, slot) { return [fixFor(sel, slot)]; }
+  /* how a lesson row in a preview is marked: "moved", "changed", "new" or "" */
+  function markClass(row) { var m = row && row.mark; return m === "moved" || m === "changed" || m === "new" ? m : ""; }
+  /* where a moved row was, in words; "" for any other row or one without a was */
+  function wasText(row, days) { return row && row.mark === "moved" && row.was ? "was " + days[row.was.d] + " period " + row.was.p : ""; }
+  /* the preview's classes other than the one on the main grid (a teacher view has none on it, so all of them) */
+  function others(preview, shown) {
+    var all = (preview && preview.classes) || [];
+    return shown && shown.view === "class" ? all.filter(function (c) { return c.name !== shown.name; }) : all.slice();
+  }
+
+  /* {"id|group": the preview's row} for the rows a preview marks that the main grid can show: those of the shown class, or
+     of every class when a teacher's week is shown */
+  function marks(preview, shown) {
+    var out = {};
+    ((preview && preview.classes) || []).forEach(function (c) {
+      if (shown && shown.view === "class" && c.name !== shown.name) return;
+      (c.lessons || []).forEach(function (r) { if (markClass(r)) out[r.id + "|" + r.group] = r; });
+    });
+    return out;
+  }
+
   /* a new list: ok, then prefer, then no; na left out; within a state by day, then period */
   function sorted(slots) {
     return (slots || []).filter(function (s) { return s.state in ORDER; }).sort(function (a, b) {
@@ -98,6 +121,6 @@ var Grid = (function () {
     return asked.view === now.view && asked.name === now.name && asked.key === now.key && asked.id === now.id && asked.group === now.group;
   }
 
-  return { fixFor: fixFor, addFor: addFor, deleteFor: deleteFor, isSwap: isSwap, label: label, fullLabel: fullLabel, wanted: wanted, weeks: weeks, table: table, lesson: lesson, same: same, slotAt: slotAt, stateClass: stateClass, slotText: slotText, sorted: sorted };
+  return { marks: marks, previewFor: previewFor, markClass: markClass, wasText: wasText, others: others, fixFor: fixFor, addFor: addFor, deleteFor: deleteFor, isSwap: isSwap, label: label, fullLabel: fullLabel, wanted: wanted, weeks: weeks, table: table, lesson: lesson, same: same, slotAt: slotAt, stateClass: stateClass, slotText: slotText, sorted: sorted };
 })();
 if (typeof module !== "undefined") module.exports = Grid;

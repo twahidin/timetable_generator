@@ -251,7 +251,7 @@ def test_the_head_check_runs_on_the_setup_held_under_the_lock():
     assert sync.head_may(spec, stale) is None                      # judged on a copy taken earlier, the teacher is still provisional
     c.post("/api/setup/changes", json={"since": v, "client": "C", "ops": [["set", "teachers", "newhire003", "provisional", "No"]]})   # the committee confirms the teacher meanwhile
     v2 = c.get("/api/setup").get_json()["v"]
-    v3, refused = store.apply_changes(stale, "H", filter=sync.head_split)
+    v3, refused, _ = store.apply_changes(stale, "H", filter=sync.head_split)
     assert v3 == v2 and [i for i, _ in refused] == [0] and "provisional" in refused[0][1]
     now = c.get("/api/setup").get_json()
     assert now["v"] == v2 and next(x for x in now["spec"]["teachers"] if x["_id"] == "newhire003")["name"] == "Batch hire"
@@ -539,6 +539,131 @@ def test_options_of_a_group_row_name_that_groups_key():
     assert all(x["teachers"] != ["Adeline Tan"] for x in j["teachers"]) and any(x["teachers"] != ["Charmaine Yeo"] for x in j["teachers"]), j["teachers"]
     assert c.get("/api/draft/options?id=1&group=1CL1").get_json()["key"] == "G:1CL1" and c.get("/api/draft/options?id=1").get_json()["key"] == "G:1CL1"
 
+def _free_slot(lid, skip=()):   # the first slot of a lesson the lead is allowed to move it to, that is not skip
+    return next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] in ("ok", "prefer") and not s["swap"] and (s["d"], s["p"]) not in skip)
+
+def _mv(lid, s): return dict(kind="move", id=lid, d=s["d"], p=s["p"])
+
+def test_suggest_for_a_warning_and_for_one_that_is_gone():
+    _grid_draft(); k = "dep:C:1B:Mathematics:teachers"; assert k in _warn_keys(c.get("/api/draft").get_json())   # U teaches it, step 5 names another
+    j = c.get("/api/draft/suggest", query_string={"key": k}).get_json()
+    assert set(j) == {"suggestions", "none", "blocked"} and j["suggestions"] and j["suggestions"][0]["fixes"][0]["kind"] == "teacher", j
+    assert set(j["suggestions"][0]) == {"fixes", "text", "disturbs", "state", "moved"} and c.get("/api/draft").get_json()["fixes"] == []
+    r = c.get("/api/draft/suggest", query_string={"key": "dep:C:Nobody:Nothing:teachers"}); assert r.status_code == 400 and r.get_json() == {"error": "That warning is no longer on the list."}
+
+def test_a_batch_is_all_or_nothing_and_undone_together():
+    _grid_draft(); a, b = _lid("1A", "Art"), _lid("1B", "Art"); s1 = _free_slot(a); s2 = _free_slot(b, skip={(s1["d"], s1["p"])})
+    j = c.post("/api/draft/fix", json=_mv(b, s2)).get_json(); assert len(j["fixes"]) == 1 and j["fixes"][0]["batch"] is None   # the grid's own click: no batch
+    before = c.get("/api/draft").get_json()
+    r = c.post("/api/draft/fixes", json={"fixes": [_mv(a, s1), dict(kind="move", id=_lid("1B", "Mathematics"), d=s1["d"], p=s1["p"])]})   # the second clashes with the first, after it
+    assert r.status_code == 400 and "is teaching" in r.get_json()["error"] and c.get("/api/draft").get_json()["fixes"] == before["fixes"], r.get_json()
+    j = c.post("/api/draft/fixes", json={"fixes": [_mv(a, s1), _mv(b, _free_slot(b, skip={(s1["d"], s1["p"])}))]}).get_json()
+    assert len(j["fixes"]) == len(before["fixes"]) + 2 and j["fixes"][-1]["batch"] == j["fixes"][-2]["batch"] is not None and j["fixes"][-1]["text"].startswith("Moved "), j["fixes"]
+    saved = store.read_json(os.path.join(store.DATA, "draft", "meta.json"))["fixes"]; assert all(f["at"] and f["batch"] for f in saved[-2:]) and "batch" not in saved[0]
+    j = c.post("/api/draft/undo").get_json(); assert j["fixes"] == before["fixes"]
+    j = c.post("/api/draft/fixes", json={"fixes": [_mv(a, s1)]}).get_json(); assert j["fixes"][-1]["batch"]   # a list of one is a batch too
+    assert c.post("/api/draft/undo").get_json()["fixes"] == before["fixes"] and c.post("/api/draft/undo").get_json()["fixes"] == []   # the single click goes alone
+    for body in ({"fixes": []}, {"fixes": [_mv(a, s1)] * 3}, {"fixes": "x"}, {"nothing": 1}, [1]):
+        r = c.post("/api/draft/fixes", json=body); assert r.status_code == 400, body
+    assert c.post("/api/draft/fixes", json={"fixes": [_mv(a, s1)] * 3}).get_json() == {"error": "Send one or two fixes."} and c.get("/api/draft").get_json()["fixes"] == []
+
+def test_a_batch_add_without_a_room_gets_one():
+    _grid_draft(); s = next(s for s in c.get("/api/draft/options?add=C:1A:Art&n=1").get_json()["slots"] if s["state"] in ("ok", "prefer"))
+    j = c.post("/api/draft/fixes", json={"fixes": [dict(kind="add", key="C:1A:Art", d=s["d"], p=s["p"], n=1)]}).get_json()
+    assert j["fixes"][-1]["kind"] == "add" and j["fixes"][-1]["batch"] and j["fixes"][-1]["text"].startswith("Added "), j["fixes"]
+    assert c.post("/api/draft/fixes", json={"fixes": [dict(kind="add", key="C:1A:Art", d=s["d"], p=s["p"], n=0)]}).status_code == 400
+
+def _pair_draft():   # Task 2's frame: 1A's English at period 0 breaks a Must rule; its only open slot S is taken by Sabrina Koh's lesson of 1B, which can itself move
+    import io, openpyxl
+    spec = c.get("/api/setup").get_json()["spec"]; ds = spec["day_structure"]["P1"]; days = list(ds); every = [(d, p) for d in range(len(days)) for p in range(len(ds[days[d]])) if ds[days[d]][p] == "L"]; S, T0 = (2, 3), "Sabrina Koh"
+    assert S in every and (3, 5) in every
+    rows = [(days[0], 0, 1, "P1", "1A", "English Language", [T0]), (days[S[0]], S[1], 1, "P1", "1B", "Other", [T0])]
+    rows += [(days[d], p, 1, "P1", "1A", "Art", ["Umairah Tan"]) for d, p in every if (d, p) != S] + [(days[d], p, 1, "P1", "1B", "Music", ["Jasper Wong"]) for d, p in every if (d, p) not in (S, (3, 5))]
+    saved = copy.deepcopy(spec); spec["rules"] = list(spec.get("rules") or []) + [dict(scope="Class", target="1A", rule="Not in periods", week="Both", day="All", strength="Must", **{"from": 0, "to": 0})]
+    assert c.put("/api/setup", json=spec).status_code == 200
+    assert c.post("/api/draft", data=_draft_form(spec, rows, replace="1"), content_type="multipart/form-data").status_code == 200
+    w = next(w for w in c.get("/api/draft").get_json()["warnings"] if w["key"].startswith("rule:") and "English Language" in w["text"])
+    return saved, w["key"], _lid("1A", "English Language"), _lid("1B", "Other"), _lid("1B", "Music")
+
+def test_a_stale_pair_is_refused_whole():
+    saved, k, eng, other, music = _pair_draft()
+    try:
+        S = c.get("/api/draft/suggest", query_string={"key": k}).get_json()["suggestions"]; pair = next(s for s in S if len(s["fixes"]) == 2)
+        assert pair["fixes"] == [dict(kind="move", id=other, d=3, p=5), dict(kind="move", id=eng, d=2, p=3)], S
+        assert c.post("/api/draft/fix", json=dict(kind="move", id=music, d=3, p=5)).status_code == 200   # another fix takes the slot the pair moves the first lesson to
+        before = c.get("/api/draft").get_json()["fixes"]; assert len(before) == 1
+        r = c.post("/api/draft/fixes", json={"fixes": pair["fixes"]}); assert r.status_code == 400 and r.get_json()["error"], r.get_json()
+        assert c.get("/api/draft").get_json()["fixes"] == before
+        assert c.post("/api/draft/preview", json={"fixes": pair["fixes"]}).get_json()["state"] == "no"
+    finally: c.put("/api/setup", json=saved)
+
+def test_two_identical_fixes_are_refused_whole_and_undo_takes_a_batch_whole():
+    _grid_draft(); a, b = _lid("1A", "Art"), _lid("1B", "Art"); s1 = _free_slot(a); s2 = _free_slot(b, skip={(s1["d"], s1["p"])}); x = _mv(a, s1)
+    r = c.post("/api/draft/fixes", json={"fixes": [x, x]}); assert r.status_code == 400 and r.get_json() == {"error": "That changes nothing."} and c.get("/api/draft").get_json()["fixes"] == []
+    c.post("/api/draft/fixes", json={"fixes": [x, _mv(b, s2)]}); s3 = _free_slot(_lid("1B", "Mathematics"), skip={(s1["d"], s1["p"]), (s2["d"], s2["p"])})
+    assert c.post("/api/draft/fix", json=_mv(_lid("1B", "Mathematics"), s3)).status_code == 200 and len(c.get("/api/draft").get_json()["fixes"]) == 3
+    assert len(c.post("/api/draft/undo").get_json()["fixes"]) == 2 and c.post("/api/draft/undo").get_json()["fixes"] == []   # the single alone, then the pair together
+
+def test_fix_many_writes_nothing_when_a_fix_was_skipped():
+    import helper
+    _grid_draft(); a, b = _lid("1A", "Art"), _lid("1B", "Art"); real = helper.chain
+    helper.chain = lambda *x, **k: dict(real(*x, **k), texts=["only one"])
+    try: r = c.post("/api/draft/fixes", json={"fixes": [_mv(a, _free_slot(a)), _mv(b, _free_slot(b, skip={(_free_slot(a)["d"], _free_slot(a)["p"])}))]})
+    finally: helper.chain = real
+    assert r.status_code == 400 and r.get_json() == {"error": "That fix could not be made. Check the list again."} and c.get("/api/draft").get_json()["fixes"] == []
+
+def _marks(j, cls): return {x["id"]: (x["mark"], x.get("was")) for x in next(k for k in j["classes"] if k["name"] == cls)["lessons"]}
+
+def test_the_preview_shows_every_class_touched_and_changes_nothing():
+    days, p = _grid_draft(); a, b, m3 = _lid("1A", "Art"), _lid("1B", "Art"), _lid("1B", "Mathematics")
+    before = c.get("/api/draft").get_json()["fixes"]
+    j = c.post("/api/draft/preview", json={"fixes": [dict(kind="swap", a=a, b=b)]}).get_json()
+    assert set(j) == {"state", "why", "texts", "classes", "gone"} and j["state"] in ("ok", "prefer") and j["texts"][0].startswith("Swapped ") and j["gone"] == [], j
+    assert sorted(k["name"] for k in j["classes"]) == ["1A", "1B"] and all(set(k) >= {"view", "name", "days", "NP", "times", "codes", "lessons", "classes", "teachers", "short"} for k in j["classes"])
+    assert _marks(j, "1A") == {a: ("moved", dict(d=0, p=p))} and _marks(j, "1B") == {b: ("moved", dict(d=1, p=p)), m3: ("", None)}, j["classes"]
+    g = next(k for k in j["classes"] if k["name"] == "1A")["lessons"][0]; assert (g["d"], g["p"]) == (1, p) and set(g) >= {"id", "group", "subject", "classes", "teachers", "room", "d", "p", "n", "block", "what", "tshorts", "mark"}
+    assert c.get("/api/draft").get_json()["fixes"] == before and c.get(f"/api/draft/grid?view=class&name=1A").get_json()["lessons"][0]["d"] == 0
+    r = c.post("/api/draft/preview", json={"fixes": [dict(kind="move", id=a, d=2, p=p + 2)]}); j = r.get_json()   # refused: 200, and the timetable as it was
+    assert r.status_code == 200 and j["state"] == "no" and "is teaching" in j["why"] and j["classes"] == [] and j["gone"] == [], j
+    j = c.post("/api/draft/preview", json={"fixes": [_mv(a, _free_slot(a)), _mv(b, dict(d=2, p=p + 2))]}).get_json()   # the second refused: the first shows
+    assert j["state"] == "no" and _marks(j, "1A")[a][0] == "moved" and len(j["texts"]) == 1, j
+    for body in ({"fixes": []}, {"fixes": [1, 2, 3]}, {"fixes": "x"}, {}): assert c.post("/api/draft/preview", json=body).status_code == 400, body
+    assert c.get("/api/draft").get_json()["fixes"] == before
+
+def test_the_preview_of_a_block_and_of_a_delete():
+    import io, openpyxl
+    spec = c.get("/api/setup").get_json()["spec"]; rows = [("Mon", 1, 1, "P1", "1A, 1B", "Art", ["Umairah Tan"]), ("Tue", 1, 1, "P1", "1A", "Zzz Extra", ["Umairah Tan"])]
+    wb = openpyxl.load_workbook(io.BytesIO(_lessons_workbook(rows))); wb.active["I2"] = "Blk"; buf = io.BytesIO(); wb.save(buf)   # the Art lesson is a block of 1A and 1B
+    assert c.post("/api/draft", data=dict(setup=(io.BytesIO(_setup_workbook(spec)), "setup.xlsx"), timetable=(io.BytesIO(buf.getvalue()), "timetable.xlsx"), replace="1"), content_type="multipart/form-data").status_code == 200
+    art, extra = _lid("1B", "Art"), _lid("1A", "Zzz Extra"); s = _free_slot(art)
+    j = c.post("/api/draft/preview", json={"fixes": [_mv(art, s)]}).get_json()
+    assert j["state"] in ("ok", "prefer") and sorted(k["name"] for k in j["classes"]) == ["1A", "1B"] and _marks(j, "1B")[art][0] == "moved" and _marks(j, "1A")[art] == _marks(j, "1B")[art], j
+    j = c.post("/api/draft/preview", json={"fixes": [dict(kind="delete", id=extra)]}).get_json()
+    assert j["state"] in ("ok", "prefer") and j["gone"] == [dict(cls="1A", what="Zzz Extra for 1A", d=1, p=1)] and [k["name"] for k in j["classes"]] == ["1A"] and extra not in _marks(j, "1A"), j
+    j = c.post("/api/draft/preview", json={"fixes": [dict(kind="room", id=art, group="Entire Class", room=next(x for x in c.get(f"/api/draft/options?id={art}").get_json()["rooms"] if x["state"] in ("ok", "prefer"))["room"])]}).get_json()
+    assert _marks(j, "1A")[art] == ("changed", None), j
+    assert c.get("/api/draft").get_json()["fixes"] == []
+
+def test_marks_are_of_the_row_that_changed_not_of_its_lesson():
+    import io, openpyxl
+    spec = c.get("/api/setup").get_json()["spec"]   # lesson 1 is a block of two groups; 1A has two Mathematics lessons
+    rows = [("Mon", 1, 1, "P1", "1A, 1B", "Art", ["Umairah Tan"]), ("Mon", 1, 1, "P1", "1A, 1B", "Art", ["Jasper Wong"]), ("Tue", 1, 1, "P1", "1A", "Mathematics", ["Umairah Tan"]), ("Wed", 1, 1, "P1", "1A", "Mathematics", ["Umairah Tan"])]
+    wb = openpyxl.load_workbook(io.BytesIO(_lessons_workbook(rows))); ws = wb.active; ws["A3"] = 1; ws["I2"] = ws["I3"] = "BX"; ws["L2"], ws["L3"] = "GX1", "GX2"; buf = io.BytesIO(); wb.save(buf)
+    assert c.post("/api/draft", data=dict(setup=(io.BytesIO(_setup_workbook(spec)), "setup.xlsx"), timetable=(io.BytesIO(buf.getvalue()), "timetable.xlsx"), replace="1"), content_type="multipart/form-data").status_code == 200
+    blk = _lid("1A", "Art"); pv = lambda f: c.post("/api/draft/preview", json={"fixes": [f]}).get_json()
+    by = lambda j, cls: {(x["id"], x["group"]): x["mark"] for x in next(k for k in j["classes"] if k["name"] == cls)["lessons"]}
+    o = c.get(f"/api/draft/options?id={blk}&group=GX1").get_json()
+    j = pv(dict(kind="teacher", key="G:GX1", teachers=[next(x for x in o["teachers"] if x["state"] in ("ok", "prefer"))["teachers"][0]])); assert j["state"] in ("ok", "prefer"), j
+    assert by(j, "1A")[(blk, "GX1")] == "changed" and by(j, "1A")[(blk, "GX2")] == "" and by(j, "1B") == {(blk, "GX1"): "changed", (blk, "GX2"): ""}, j["classes"]
+    j = pv(dict(kind="room", id=blk, group="GX2", room=next(x for x in o["rooms"] if x["state"] in ("ok", "prefer"))["room"])); assert by(j, "1A")[(blk, "GX2")] == "changed" and by(j, "1A")[(blk, "GX1")] == "", j
+    t = next(x for x in c.get(f"/api/draft/options?id={_lid('1A', 'Mathematics')}").get_json()["teachers"] if x["state"] in ("ok", "prefer"))["teachers"]
+    j = pv(dict(kind="teacher", key="C:1A:Mathematics", teachers=t)); assert [v for (i, g), v in by(j, "1A").items() if i != blk] == ["changed", "changed"] and all(v == "" for (i, g), v in by(j, "1A").items() if i == blk), j
+    assert c.get("/api/draft").get_json()["fixes"] == []
+
+def test_a_head_cannot_reach_the_helper_routes():
+    for method, url in (("GET", "/api/draft/suggest?key=x"), ("POST", "/api/draft/fixes"), ("POST", "/api/draft/preview")):
+        assert h.open(url, method=method, json={"fixes": []}).status_code in (401, 403), url
+
 def test_an_upload_over_unpublished_fixes_is_refused_by_the_draft_and_replace_clears_them():
     spec = _grid_draft() and c.get("/api/setup").get_json()["spec"]; days, p = _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
     c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"])); rows = [("Mon", p, 1, "P1", "1A", "Art", ["Umairah Tan"])]
@@ -666,8 +791,160 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     t = A.app.test_client(); t.post("/login", data={"as": "teacher", "code": CODES["TEACHER_CODE"]})
     assert t.get("/timetable").status_code == 200
 
-NEED_HEADS = {"test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
-              "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace"}
+# Class Parents on the server: one named subject (made up), class 1A with a Class Parent; each test starts from the sample and the last puts it back
+PSUBJ = "Pastoral Care"
+def _cp_start():
+    c.put("/api/setup", json=c.get("/api/sample/secondary").get_json()); return c.get("/api/setup").get_json()
+
+class _Page:   # a browser's copy kept the way the page does (static/app.js syncNow): patches before our ops, our accepted ops, patches after
+    def __init__(s, cid, rec, who=None): s.id, s.who, s.spec, s.v = cid, who or c, copy.deepcopy(rec["spec"]), rec["v"]
+    def post(s, ops):
+        j = s.who.post("/api/setup/changes", json={"since": s.v, "client": s.id, "ops": ops}).get_json(); return s._take(j, ops)
+    def poll(s): return s._take(s.who.get(f"/api/setup/changes?since={s.v}&client={s.id}").get_json(), [])
+    def _take(s, j, ops):
+        assert not j.get("reset"), j
+        ps, mine = j.get("patches", []), j.get("mine"); no = {x["i"] for x in j.get("refused", [])}
+        sync.apply(s.spec, [o for p in ps if mine is None or p["v"] < mine for o in p["ops"]])
+        sync.apply(s.spec, [o for i, o in enumerate(ops) if i not in no])
+        sync.apply(s.spec, [o for p in ps if mine is not None and p["v"] > mine for o in p["ops"]])
+        s.v = j["v"]; return j
+    def same(s, what):
+        r = c.get("/api/setup").get_json()
+        assert s.v == r["v"] and not sync.diff(r["spec"], s.spec) and not sync.diff(s.spec, r["spec"]) and [x["_id"] for x in s.spec["lessons"]] == [x["_id"] for x in r["spec"]["lessons"]], (what, s.id, s.v, r["v"], sync.diff(r["spec"], s.spec)[:3])
+
+def _cp_name(rec, client="A", parents=("Pastoral A",)):   # what a stale page sends: the subject, the name, the box, and no lesson ops
+    cid = next(x["_id"] for x in rec["spec"]["classes"] if x["class"] == "1A")
+    return [["add", "subjects", {"_id": "pcsubj001", "subject": PSUBJ, "code": "PC", "periods": {"Sec 1": 2}}, ""],
+            ["school", "parents_subjects", [PSUBJ]], ["set", "classes", cid, "parents", list(parents)]]
+
+def _cp_rows(spec): return {r["classes"][0]: r for r in spec["lessons"] if r.get("subject") == PSUBJ}
+
+def test_class_parents_are_kept_right_on_the_server():               # Review Focus 1
+    rec = _cp_start(); v0 = rec["v"]; a = _Page("A", rec); b = _Page("B", rec)
+    j = a.post(_cp_name(rec))
+    assert j["v"] == v0 + 2 and j["mine"] == v0 + 1, j                # the caller's change, then what the server put right
+    a.same("sender")
+    rows = _cp_rows(c.get("/api/setup").get_json()["spec"])
+    sec1 = [x["class"] for x in rec["spec"]["classes"] if x["level"] == "Sec 1"]
+    assert sorted(rows) == sorted(sec1) and rows["1A"]["teachers"] == ["Pastoral A"] and all(not rows[k]["teachers"] for k in sec1 if k != "1A"), rows
+    assert rows["1A"]["_id"].startswith("cp-")
+    assert len(j["patches"]) == 1 and j["patches"][0]["v"] == v0 + 2 and any(o[0] == "add" and o[1] == "lessons" for o in j["patches"][0]["ops"]), j   # the sender is told too
+    k = b.poll(); assert [p["v"] for p in k["patches"]] == [v0 + 1, v0 + 2] and "mine" not in k, k    # a second browser gets both entries
+    b.same("poller")
+    assert [e["client"] for e in list(store._log)[-2:]] == ["A", "parents"]
+
+def test_a_stale_tab_cannot_undo_a_following_lesson():
+    rec = _cp_start(); a = _Page("A", rec); b = _Page("B", rec); a.post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; b.poll()
+    stale = _Page("S", rec); stale.v = rec["v"]
+    j = stale.post([["set", "lessons", row["_id"], "teachers", ["Koh"]]])
+    assert j["v"] == rec["v"] + 2 and j["mine"] == rec["v"] + 1, j
+    assert _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]["teachers"] == ["Pastoral A"]
+    assert ["set", "lessons", row["_id"], "teachers", ["Pastoral A"]] in j["patches"][0]["ops"], j     # and the sender is told
+    stale.same("stale sender (its copy must not keep Koh)"); b.poll(); b.same("poller"); a.poll(); a.same("A")
+
+def test_a_hand_change_with_its_mark_is_kept():
+    rec = _cp_start(); a = _Page("A", rec); a.post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; cid = next(x["_id"] for x in rec["spec"]["classes"] if x["class"] == "1A")
+    j = a.post([["set", "lessons", row["_id"], "teachers", ["Koh"]], ["set", "lessons", row["_id"], "by_hand", True]])
+    assert j["v"] == rec["v"] + 1 and not j["patches"] and j["mine"] == j["v"], j
+    j = a.post([["set", "classes", cid, "parents", ["Pastoral B"]]]); assert j["v"] == rec["v"] + 2, j
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Koh"] and r["by_hand"] is True, r
+    a.same("A")
+
+def test_a_head_cannot_change_a_staffed_lesson():                    # in NEED_HEADS
+    rec = _cp_start(); _Page("A", rec).post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; hp = _Page("H", rec, h)
+    j = hp.post([["set", "lessons", row["_id"], "teachers", ["Koh"]], ["set", "lessons", row["_id"], "students", 5]])
+    assert j["refused"] == [{"i": 0, "why": sync.PARENTS_WHY}] and j["v"] == rec["v"] + 1, j
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Pastoral A"] and r["students"] == 5, r
+    hp.same("head")
+    rec = c.get("/api/setup").get_json(); one = dict(_id="hb1", level="Sec 1", subject="Mathematics", block=None, classes=["1A"], teachers=["Typed T"])   # two steps of one batch
+    j = hp.post([["add", "lessons", one, ""], ["set", "lessons", "hb1", "subject", PSUBJ]])
+    assert [x["i"] for x in j["refused"]] == [1] and j["refused"][0]["why"] == sync.PARENTS_WHY, j
+    r = next(x for x in c.get("/api/setup").get_json()["spec"]["lessons"] if x["_id"] == "hb1"); assert r["subject"] == "Mathematics" and r["teachers"] == ["Typed T"], r
+
+def test_a_head_sends_a_malformed_lessons_op():                     # in NEED_HEADS
+    rec = _cp_start(); _Page("A", rec).post(_cp_name(rec))
+    rec = c.get("/api/setup").get_json(); row = _cp_rows(rec["spec"])["1A"]; hp = _Page("H", rec, h)
+    other = next(x for x in rec["spec"]["lessons"] if x["subject"] != PSUBJ)     # a row the rule does not take: the old code read op[4] here
+    j = hp.post([["set", "lessons", other["_id"], "note"], ["merge", "lessons", row["_id"], "block", [], []]])
+    assert [x["i"] for x in j["refused"]] == [0, 1], j
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Pastoral A"] and r["block"] is None, r
+
+def test_a_school_not_using_class_parents_gets_one_version_and_one_entry():
+    rec = _cp_start(); n = len(store._log); v = rec["v"]
+    code, j = _changes("A", v, [["school", "timetable", "Term 3"]]); assert j["v"] == v + 1 and j["mine"] == v + 1 and len(store._log) == n + 1, j
+
+def test_a_setup_put_whole_is_put_right():
+    spec = c.get("/api/sample/secondary").get_json()
+    spec["subjects"].append({"subject": PSUBJ, "code": "PC", "periods": {"Sec 1": 2}}); spec["school"]["parents_subjects"] = [PSUBJ]
+    next(x for x in spec["classes"] if x["class"] == "1A")["parents"] = ["Pastoral A"]
+    spec["lessons"].append({"level": "Sec 1", "subject": PSUBJ, "block": None, "classes": ["1A"], "teachers": ["Someone Else"], "students": None})
+    assert c.put("/api/setup", json=spec).status_code == 200
+    rows = _cp_rows(c.get("/api/setup").get_json()["spec"])
+    assert rows["1A"]["teachers"] == ["Pastoral A"] and "by_hand" not in rows["1A"] and len(rows) == 4, rows
+    _cp_start()                                                       # the sample back, for the tests after
+
+def _cp_draft(spec, teachers):   # a draft of one lesson: the staffed Pastoral Care lesson of 1A taken by the given teachers
+    row = _cp_rows(spec)["1A"]; c.post("/api/draft", data=_draft_form(spec, [_lesson_of(spec, dict(row, periods=2), teachers)]), content_type="multipart/form-data"); return row
+
+def test_update_step_5_on_a_staffed_lesson_keeps_the_timetables_teachers():
+    rec = _cp_start(); a = _Page("A", rec); a.post(_cp_name(rec))
+    spec = c.get("/api/setup").get_json()["spec"]; row = _cp_rows(spec)["1A"]; assert row["teachers"] == ["Pastoral A"] and "by_hand" not in row
+    _cp_draft(spec, ["Elsewhere T"]); k = f"dep:C:1A:{PSUBJ}:teachers"; j = c.get("/api/draft").get_json(); w = next(x for x in j["warnings"] if x["key"] == k)
+    assert w["ops"] == [["set", "lessons", row["_id"], "teachers", ["Elsewhere T"]], ["set", "lessons", row["_id"], "by_hand", True]], w["ops"]
+    assert c.post("/api/draft/decide", json={"key": k, "answer": "step5"}).status_code == 200
+    spec = c.get("/api/setup").get_json()["spec"]; r = _cp_rows(spec)["1A"]; assert r["teachers"] == ["Elsewhere T"] and r["by_hand"] is True, r
+    cid = next(x["_id"] for x in spec["classes"] if x["class"] == "1A")                       # another change: the box changes, the marked lesson stays
+    assert c.post("/api/setup/changes", json={"client": "t", "since": c.get("/api/setup").get_json()["v"], "ops": [["set", "classes", cid, "parents", ["Pastoral B"]]]}).status_code == 200
+    r = _cp_rows(c.get("/api/setup").get_json()["spec"])["1A"]; assert r["teachers"] == ["Elsewhere T"] and r["by_hand"] is True, r
+    _cp_start()
+
+def test_published_pages_name_the_class_parents():
+    import io, pickle
+    from ttgen import export
+    rec = _cp_start(); a = _Page("A", rec); a.post(_cp_name(rec, parents=("Pastoral A", "Pastoral B")))
+    spec = c.get("/api/setup").get_json()["spec"]; row = _cp_rows(spec)["1A"]
+    _cp_draft(spec, ["Pastoral A", "Pastoral B"]); assert c.post("/api/draft/publish").status_code == 200
+    m = store.published()["model"]; line = " · Form teachers: Pastoral A, Pastoral B"
+    assert next(x for x in m["classes"] if x["name"] == "1A")["parents"] == ["Pastoral A", "Pastoral B"] and m["parents_name"] == "Form teachers"
+    assert next(x for x in m["classes"] if x["name"] == "1B")["parents"] == []
+    assert export.class_view(m, "1A")["subtitle"].endswith(line) and "Form teachers" not in export.class_view(m, "1B")["subtitle"]
+    assert export.teacher_view(m, "Pastoral A")["subtitle"].endswith(" · Form teachers of 1A")
+    d = export.html_data(m); assert next(x for x in d["classes"] if x[0] == "1A")[4] == ["Pastoral A", "Pastoral B"] and d["parents_name"] == "Form teachers", d["classes"][:2]
+    pdf = c.get("/pdf/classes/1A"); assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
+    assert '"parents_name":"Form teachers"' in c.get("/timetable").get_data(as_text=True)
+    old = pickle.loads(pickle.dumps(m)); old.pop("parents_name")                                  # a model pickled before this change
+    for x in old["classes"]: x.pop("parents")
+    assert export.class_view(old, "1A")["subtitle"] == export.class_view(m, "1A")["subtitle"].replace(line, "")
+    assert export.teacher_view(old, "Pastoral A")["subtitle"] == "Teacher" and export.html_data(old)["parents_name"] == "Form teachers" and all(len(x) == 5 and x[4] == [] for x in export.html_data(old)["classes"])
+    assert export.pdf_bytes(old, export.class_view(old, "1A"))[:4] == b"%PDF" and export.pdf_bytes(old, export.teacher_view(old, "Pastoral A"))[:4] == b"%PDF"
+    shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
+
+def test_a_class_form_teachers_are_never_cut_off_the_printed_timetable():
+    import copy as cp
+    from ttgen import export
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    rec = _cp_start(); a = _Page("A", rec); names = ["Mrs Alexandrina Featherstonehaugh-Smythe", "Mr Bartholomew Wolfeschlegelstein", "Ms Cornelia Vandenberghe-Okonkwo", "Dr Maximilian Papadopoulos-Lindqvist"]
+    a.post(_cp_name(rec, parents=names)); spec = c.get("/api/setup").get_json()["spec"]; _cp_draft(spec, names); assert c.post("/api/draft/publish").status_code == 200
+    m = store.published()["model"]; v = export.class_view(m, "1A"); lines = export._parents_block(v)
+    assert len(lines) >= 2 and "…" not in "".join(lines) and all(any(n in l for l in lines) for n in names), lines   # each name whole on one line
+    R, _ = export._fonts(); assert all(stringWidth(l, R, 8.6) <= 420 for l in lines), lines
+    assert "Form teachers" not in v["pdf_subtitle"] and v["subtitle"].endswith(", ".join(names))
+    assert export.pdf_bytes(m, v)[:4] == b"%PDF"
+    plain = cp.deepcopy(m)                                         # no form teachers: the page comes out exactly as a model without the keys draws it
+    for x in plain["classes"]: x["parents"] = []
+    old = cp.deepcopy(m); old.pop("parents_name")
+    for x in old["classes"]: x.pop("parents")
+    import re; same = lambda x: re.sub(rb"/(CreationDate|ModDate)\s*\([^)]*\)|/ID\s*\[[^\]]*\]", b"", x)   # a PDF's date and id differ on every run
+    assert export._parents_block(export.class_view(plain, "1B")) == [] and same(export.pdf_bytes(plain, export.class_view(plain, "1A"))) == same(export.pdf_bytes(old, export.class_view(old, "1A")))
+    for cl in m["classes"]:                                        # every class page still draws, with the block, within the page
+        pb = export.pdf_bytes(m, dict(export.class_view(m, cl["name"]), parents_line="Form teachers: " + ", ".join(names))); assert pb[:4] == b"%PDF"
+    shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
+
+NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_sends_a_malformed_lessons_op", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
+              "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace", "test_a_head_cannot_reach_the_helper_routes"}
 
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and (k != "test_publish_uploaded_timetable" or "--full" in sys.argv)
