@@ -1345,7 +1345,7 @@ document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / C
   if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
   e.preventDefault(); undo(k === "z" && !e.shiftKey);
 });
-document.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing && e.target.id === "fxAskIn") { e.preventDefault(); fxAsk(); } });   // Enter in the typed-request box asks; nothing while a request is out (fxAsk)
+document.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing && e.target.id === "fxAskIn") { e.preventDefault(); if (!e.shiftKey) fxAsk(); } });   // Enter in the typed-request box asks; nothing while a request is out (fxAsk)
 let painting = false;
 document.addEventListener("mousedown", e => { const c = e.target.closest("td.c"); if (!c || locked(G.shown)) return; painting = true; paint(c); e.preventDefault(); });
 document.addEventListener("mouseover", e => { if (!painting) return; const c = e.target.closest("td.c"); if (c) paint(c); });
@@ -2378,6 +2378,7 @@ function draftHTML(j) {
    Fetches happen in the handlers (fxGet, fxRefresh); drawing only reads S.fix. */
 const FX_BREAK = { F: "Assembly", R: "Recess", U: "Lunch", W: "Recess window", ".": "No lesson" };
 const FX = { n: 0, busy: false };
+const FX_BROKE = "Something went wrong working that out. The suggestions below still work.";   // the server's own sentence for a fault (typed.BROKE)
 const fxShorts = () => { const m = {}; ((S.spec && S.spec.teachers) || []).forEach(t => { if (t.name && t.short) m[t.name] = t.short; }); return m; };
 const fxDot = st => `<i class="dot ${esc(Grid.stateClass(st))}"></i>`;
 function fixesHTML(j) {   // what was fixed in the app, newest last, with undo, anything wrong with the fixes, and the download
@@ -2440,7 +2441,7 @@ function fxAskHTML(f) {
   let out = "";
   if (bad) out = `<p class="muted small">${esc(a.error)}</p>`;
   else if (a) {
-    const hasSug = (a.groups || []).length;
+    const hasSug = (a.groups || []).some(g => (g.suggestions || []).length);
     out = `<p class="small">${esc(Draft.askSummary(a))}</p>`
       + (a.problems || []).map(x => `<p class="small">${esc(x)}</p>`).join("")
       + (a.choices || []).map((c, ci) => `<div class="fxchoice"><p class="small">Which ${esc(Draft.choiceWord(c.field))} did you mean by "${esc(c.said)}"?</p><div class="row">${(c.options || []).map((o, oi) => `<button data-fxpick="${ci}|${oi}">${esc(o)}</button>`).join("")}</div></div>`).join("")
@@ -2448,7 +2449,7 @@ function fxAskHTML(f) {
       + (a.narrow ? `<p class="small">${esc(a.narrow)}</p>` : "")
       + (hasSug ? `<p class="muted small">These are suggestions from your words. Nothing changes until you press Apply.</p>` : "");
   }
-  return `<div class="fxask"><div class="row"><input id="fxAskIn" type="text" maxlength="300" autocomplete="off" placeholder="Or say what you want, for example: move PE for 2A off Friday" value="${esc(f.words)}"><button id="fxAsk"${f.askBusy ? " disabled" : ""}>${f.askBusy ? "Reading…" : "Ask"}</button></div>${out}</div>`;
+  return `<div class="fxask"><textarea id="fxAskIn" rows="3" maxlength="300" aria-label="Say what you want changed" placeholder="Or say what you want, for example: move PE for 2A off Friday">${esc(f.words)}</textarea><div class="row fxaskgo"><button id="fxAsk"${f.askBusy ? " disabled" : ""}>${f.askBusy ? "Reading…" : "Ask"}</button></div>${out}</div>`;
 }
 function fxAskClear(f) { f.ans = null; f.pick = {}; f.askN++; f.askBusy = false; }   // the answer goes (the timetable changed under it); the words stay
 async function fxAsk(choice) {   // choice: [choice index, option index] when the lead answered a question: asked again with the same ask and the picks so far
@@ -2468,7 +2469,8 @@ async function fxAsk(choice) {   // choice: [choice index, option index] when th
     if (r.status === 401) { location.href = "/login"; return; }
     const j = await r.json().catch(() => ({}));
     ans = r.status >= 500 ? { ok: false, error: "Could not reach the server." } : r.ok || j.error ? j : { ok: false, error: "Something went wrong." };
-    if (!r.ok) ans.ok = false;
+    if (!r.ok || (ans.ok !== true && ans.ok !== false)) ans.ok = false;
+    if (ans.ok === false && !ans.error) ans.error = FX_BROKE;
   } catch (e) { ans = { ok: false, error: "Could not reach the server: " + e.message }; }
   if (S.fix !== f || f.askN !== n) return;   // closed, or asked again, meanwhile
   f.askBusy = false; f.ans = ans; fxDraw();
@@ -2550,7 +2552,7 @@ async function fxApply(fixes) {   // one or two fixes together, as received; all
     const j = await post("/api/draft/fixes", { fixes });
     if (j) await fxAfter(j);
     else {   // refused: the sentence is toasted; the draft, the grid and the ways are fetched again (the list may have changed under the card)
-      f.pre = null; f.preWant = null; f.ways = null; f.waysFail = false;   // the old Show and Apply buttons are not live while the new ways load
+      f.pre = null; f.preWant = null; f.ways = null; f.waysFail = false; fxAskClear(f);   // the typed answer too: it is as stale as the ways. The old Show and Apply buttons are not live while the new ways load
       const d = await fxGet("/api/draft"); if (S.fix !== f) return;
       if (d && d.warnings) { S.draft = d; poll(); fxFollow(f, d.warnings); }
       await fxRefresh(f); if (S.fix !== f) return; fxDraw();

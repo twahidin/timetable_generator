@@ -101,7 +101,7 @@ var Draft = (function () {
     if (a.ok === false) return a.error || "";
     var out = [];
     if (a.reply) out.push(a.reply);
-    if (a.more) out.push(a.more + " more lessons match.");
+    if (a.more) out.push(a.more === 1 ? "1 more lesson matches." : a.more + " more lessons match.");
     if (a.keep && a.keep.length) out.push("You also asked: " + a.keep.join("; ") + ". The app did not check this: look at the preview before you apply.");
     return out.join(" ");
   }

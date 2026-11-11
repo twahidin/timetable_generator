@@ -283,6 +283,7 @@ table.classtable td:nth-child(2) select{min-width:88px}
 table.classtable td:nth-child(3) input{min-width:76px}
 table.classtable td:nth-child(4) select{min-width:104px}
 .fxask{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 12px;background:#f8fafc}
-.fxask>.row{gap:6px;align-items:center;flex-wrap:nowrap}.fxask input{flex:1;min-width:0}
+.fxask>.row{gap:6px;align-items:center}
 .fxask p{margin:6px 0 0}.fxchoice .row{gap:6px;margin-top:4px}.fxchoice button{padding:3px 10px;font-size:12px}
 .fxgroup{border-top:1px solid var(--line);margin-top:8px;padding-top:2px}.fxgroup .fxway{padding:6px 0 2px}.fxgroup .fxway:first-of-type{border-top:0}.fxgroup .fxway button{padding:3px 10px;font-size:12px}
+.fxask textarea{display:block;width:100%;box-sizing:border-box;resize:none;font:inherit}.fxaskgo{justify-content:flex-end;margin-top:6px}

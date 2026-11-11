@@ -121,7 +121,7 @@ t("askSummary: the reply, the count of more lessons, what was asked beyond the a
   assert.equal(Draft.askSummary(ok({ more: 2, keep: ["keep the doubles together"] })), "Moving PE for 2A off Friday. 2 more lessons match. You also asked: keep the doubles together. The app did not check this: look at the preview before you apply.");
   assert.equal(Draft.askSummary({ ok: false, error: "Keep the request under 300 characters." }), "Keep the request under 300 characters.");
   assert.equal(Draft.askSummary(ok({ understood: false, reply: "I did not follow that.", keep: [] })), "I did not follow that.");
-  assert.equal(Draft.askSummary(ok({ reply: "", more: 1 })), "1 more lessons match.");
+  assert.equal(Draft.askSummary(ok({ reply: "", more: 1 })), "1 more lesson matches.");
   assert.equal(Draft.askSummary(null), "");
   assert.equal(Draft.askSummary(ok({ reply: undefined, keep: undefined, more: undefined })), "");
 });
