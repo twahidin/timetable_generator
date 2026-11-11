@@ -50,6 +50,6 @@ The browser checks (scratch server, a spoiled draft of each sample) covered: the
 
 ## Left in the fix wave
 
-- Two lessons that are the same in every way (class, subject, group and slot) still give two suggestions that read the same; nothing in a sentence can tell them apart. The spoiled samples do not produce this.
+- Two lessons that are the same in every way (class, subject, group and slot) gave two suggestions that read the same. The fix wave's report said the samples do not produce this; the slow full run of the helper's tests did produce it afterwards (its solved timetable differs from run to run), so it was fixed after the re-review, test first: lines that read the same are offered once, the better ranked, and the place freed is filled by the next. That last change was not seen by a reviewer.
 - Once a card has said "This warning has changed", the line stays on later redraws of the same card.
 - The page's following of a warning has no automated test of its own (`Draft.follow` has; the wiring in `app.js` was read and tried by hand).

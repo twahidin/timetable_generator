@@ -227,6 +227,16 @@ def two_moves_to_the_same_slot_read_differently_and_each_names_where_its_lesson_
     assert len({s["text"] for s in S}) == len(S)
 
 @t
+def two_lessons_alike_in_every_way_give_one_line_not_two():
+    T = "Michelle Goh"   # two single lessons of one class and subject in the same slot: moving either reads the same, so it is offered once
+    m, sp = model_with([lesson(1, 0, 6, 1, [A], "Mathematics", ENTIRE, [T], level=LV), lesson(2, 0, 6, 1, [A], "Mathematics", ENTIRE, [T], level=LV)])
+    w = next(w for w in verify.clashes(m) if w["where"] == dict(teacher=T))
+    for limit in (3, 50):
+        S = helper.suggest(m, sp, DAYS, w, limit=limit)["suggestions"]; texts = [s["text"] for s in S]
+        assert S and len(set(texts)) == len(texts), texts
+    assert len(helper.suggest(m, sp, DAYS, w)["suggestions"]) == 3   # the places freed by the lines left out are filled
+
+@t
 def the_second_fix_of_a_pair_names_the_slot_its_lesson_is_in_after_the_first():
     m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, ["Michelle Goh"], level=LV)])
     first, second = dict(kind="move", id=1, d=1, p=3), dict(kind="move", id=1, d=2, p=6)

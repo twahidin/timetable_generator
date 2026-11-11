@@ -381,7 +381,8 @@ def suggest(m, spec, days, w, limit=3):
         if repr(fx) in seen: continue
         seen.add(repr(fx)); c = chain(m, spec, days, fx, ctx, keep)
         if c["state"] in OK and settles(m, spec, days, w, c["lessons"], memo): out.append(_suggestion(m, spec, days, fx, c))
-    out.sort(key=lambda s: rank(m, spec, days, s))
+    out.sort(key=lambda s: rank(m, spec, days, s)); said = set()
+    out = [s for s in out if not (s["text"] in said or said.add(s["text"]))]   # two lessons alike in every way: one line, the better ranked
     if out: return dict(suggestions=out[:limit], none=None, blocked=[])
     blocked, tried = [], set()
     bad.sort(key=lambda b: rank(m, spec, days, dict(fixes=b[0], moved=0, state="ok")))   # the nearest first
@@ -389,6 +390,8 @@ def suggest(m, spec, days, w, limit=3):
         if repr(fx) in tried: continue
         tried.add(repr(fx)); r = _apply(m["lessons"], fx, spec, days)
         if not r["problems"] and settles(m, spec, days, w, r["lessons"], memo):
-            blocked.append(dict(text=says(m, spec, days, fx), why=why))
+            b = dict(text=says(m, spec, days, fx), why=why)
+            if b in blocked: continue   # the same line for a lesson alike in every way
+            blocked.append(b)
             if len(blocked) == 3: break
     return dict(suggestions=[], none=NONE_PASS if blocked else NO_FIX, blocked=blocked)
