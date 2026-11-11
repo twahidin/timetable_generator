@@ -539,6 +539,79 @@ def test_options_of_a_group_row_name_that_groups_key():
     assert all(x["teachers"] != ["Adeline Tan"] for x in j["teachers"]) and any(x["teachers"] != ["Charmaine Yeo"] for x in j["teachers"]), j["teachers"]
     assert c.get("/api/draft/options?id=1&group=1CL1").get_json()["key"] == "G:1CL1" and c.get("/api/draft/options?id=1").get_json()["key"] == "G:1CL1"
 
+def _free_slot(lid, skip=()):   # the first slot of a lesson the lead is allowed to move it to, that is not skip
+    return next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] in ("ok", "prefer") and not s["swap"] and (s["d"], s["p"]) not in skip)
+
+def _mv(lid, s): return dict(kind="move", id=lid, d=s["d"], p=s["p"])
+
+def test_suggest_for_a_warning_and_for_one_that_is_gone():
+    _grid_draft(); k = "dep:C:1B:Mathematics:teachers"; assert k in _warn_keys(c.get("/api/draft").get_json())   # U teaches it, step 5 names another
+    j = c.get("/api/draft/suggest", query_string={"key": k}).get_json()
+    assert set(j) == {"suggestions", "none", "blocked"} and j["suggestions"] and j["suggestions"][0]["fixes"][0]["kind"] == "teacher", j
+    assert set(j["suggestions"][0]) == {"fixes", "text", "disturbs", "state", "moved"} and c.get("/api/draft").get_json()["fixes"] == []
+    r = c.get("/api/draft/suggest", query_string={"key": "dep:C:Nobody:Nothing:teachers"}); assert r.status_code == 400 and r.get_json() == {"error": "That warning is no longer on the list."}
+
+def test_a_batch_is_all_or_nothing_and_undone_together():
+    _grid_draft(); a, b = _lid("1A", "Art"), _lid("1B", "Art"); s1 = _free_slot(a); s2 = _free_slot(b, skip={(s1["d"], s1["p"])})
+    j = c.post("/api/draft/fix", json=_mv(b, s2)).get_json(); assert len(j["fixes"]) == 1 and j["fixes"][0]["batch"] is None   # the grid's own click: no batch
+    before = c.get("/api/draft").get_json()
+    r = c.post("/api/draft/fixes", json={"fixes": [_mv(a, s1), dict(kind="move", id=_lid("1B", "Mathematics"), d=s1["d"], p=s1["p"])]})   # the second clashes with the first, after it
+    assert r.status_code == 400 and "is teaching" in r.get_json()["error"] and c.get("/api/draft").get_json()["fixes"] == before["fixes"], r.get_json()
+    j = c.post("/api/draft/fixes", json={"fixes": [_mv(a, s1), _mv(b, _free_slot(b, skip={(s1["d"], s1["p"])}))]}).get_json()
+    assert len(j["fixes"]) == len(before["fixes"]) + 2 and j["fixes"][-1]["batch"] == j["fixes"][-2]["batch"] is not None and j["fixes"][-1]["text"].startswith("Moved "), j["fixes"]
+    saved = store.read_json(os.path.join(store.DATA, "draft", "meta.json"))["fixes"]; assert all(f["at"] and f["batch"] for f in saved[-2:]) and "batch" not in saved[0]
+    j = c.post("/api/draft/undo").get_json(); assert j["fixes"] == before["fixes"]
+    j = c.post("/api/draft/fixes", json={"fixes": [_mv(a, s1)]}).get_json(); assert j["fixes"][-1]["batch"]   # a list of one is a batch too
+    assert c.post("/api/draft/undo").get_json()["fixes"] == before["fixes"] and c.post("/api/draft/undo").get_json()["fixes"] == []   # the single click goes alone
+    for body in ({"fixes": []}, {"fixes": [_mv(a, s1)] * 3}, {"fixes": "x"}, {"nothing": 1}, [1]):
+        r = c.post("/api/draft/fixes", json=body); assert r.status_code == 400, body
+    assert c.post("/api/draft/fixes", json={"fixes": [_mv(a, s1)] * 3}).get_json() == {"error": "Send one or two fixes."} and c.get("/api/draft").get_json()["fixes"] == []
+
+def test_a_batch_add_without_a_room_gets_one_and_a_stale_suggestion_is_refused_whole():
+    _grid_draft(); a = _lid("1A", "Art"); lid3 = _lid("1B", "Mathematics")
+    k = next(w["key"] for w in c.get("/api/draft").get_json()["warnings"] if w["key"].startswith("rule:"))   # U is not available at Wed period 3
+    S = next(s for s in c.get(f"/api/draft/suggest?key={k}").get_json()["suggestions"] if s["fixes"][0]["kind"] == "move" and s["fixes"][0]["id"] == lid3)
+    t = S["fixes"][0]; assert c.post("/api/draft/fix", json=_mv(a, t)).status_code == 200   # 1A's Art takes the slot the suggestion moves to
+    r = c.post("/api/draft/fixes", json={"fixes": S["fixes"]}); assert r.status_code == 400 and r.get_json()["error"] and len(c.get("/api/draft").get_json()["fixes"]) == 1, r.get_json()
+    j = c.post("/api/draft/fixes", json={"fixes": [dict(kind="add", key="C:1A:Art", d=s["d"], p=s["p"], n=1)]}).get_json() if (s := next((s for s in c.get("/api/draft/options?add=C:1A:Art&n=1").get_json()["slots"] if s["state"] in ("ok", "prefer")), None)) else None
+    assert j is None or j["fixes"][-1]["kind"] == "add" and j["fixes"][-1]["batch"]
+
+def _marks(j, cls): return {x["id"]: (x["mark"], x.get("was")) for x in next(k for k in j["classes"] if k["name"] == cls)["lessons"]}
+
+def test_the_preview_shows_every_class_touched_and_changes_nothing():
+    days, p = _grid_draft(); a, b, m3 = _lid("1A", "Art"), _lid("1B", "Art"), _lid("1B", "Mathematics")
+    before = c.get("/api/draft").get_json()["fixes"]
+    j = c.post("/api/draft/preview", json={"fixes": [dict(kind="swap", a=a, b=b)]}).get_json()
+    assert set(j) == {"state", "why", "texts", "classes", "gone"} and j["state"] in ("ok", "prefer") and j["texts"][0].startswith("Swapped ") and j["gone"] == [], j
+    assert sorted(k["name"] for k in j["classes"]) == ["1A", "1B"] and all(set(k) >= {"view", "name", "days", "NP", "times", "codes", "lessons", "classes", "teachers", "short"} for k in j["classes"])
+    assert _marks(j, "1A") == {a: ("moved", dict(d=0, p=p))} and _marks(j, "1B") == {b: ("moved", dict(d=1, p=p)), m3: ("", None)}, j["classes"]
+    g = next(k for k in j["classes"] if k["name"] == "1A")["lessons"][0]; assert (g["d"], g["p"]) == (1, p) and set(g) >= {"id", "group", "subject", "classes", "teachers", "room", "d", "p", "n", "block", "what", "tshorts", "mark"}
+    assert c.get("/api/draft").get_json()["fixes"] == before and c.get(f"/api/draft/grid?view=class&name=1A").get_json()["lessons"][0]["d"] == 0
+    r = c.post("/api/draft/preview", json={"fixes": [dict(kind="move", id=a, d=2, p=p + 2)]}); j = r.get_json()   # refused: 200, and the timetable as it was
+    assert r.status_code == 200 and j["state"] == "no" and "is teaching" in j["why"] and j["classes"] == [] and j["gone"] == [], j
+    j = c.post("/api/draft/preview", json={"fixes": [_mv(a, _free_slot(a)), _mv(b, dict(d=2, p=p + 2))]}).get_json()   # the second refused: the first shows
+    assert j["state"] == "no" and _marks(j, "1A")[a][0] == "moved" and len(j["texts"]) == 1, j
+    for body in ({"fixes": []}, {"fixes": [1, 2, 3]}, {"fixes": "x"}, {}): assert c.post("/api/draft/preview", json=body).status_code == 400, body
+    assert c.get("/api/draft").get_json()["fixes"] == before
+
+def test_the_preview_of_a_block_and_of_a_delete():
+    import io, openpyxl
+    spec = c.get("/api/setup").get_json()["spec"]; rows = [("Mon", 1, 1, "P1", "1A, 1B", "Art", ["Umairah Tan"]), ("Tue", 1, 1, "P1", "1A", "Zzz Extra", ["Umairah Tan"])]
+    wb = openpyxl.load_workbook(io.BytesIO(_lessons_workbook(rows))); wb.active["I2"] = "Blk"; buf = io.BytesIO(); wb.save(buf)   # the Art lesson is a block of 1A and 1B
+    assert c.post("/api/draft", data=dict(setup=(io.BytesIO(_setup_workbook(spec)), "setup.xlsx"), timetable=(io.BytesIO(buf.getvalue()), "timetable.xlsx"), replace="1"), content_type="multipart/form-data").status_code == 200
+    art, extra = _lid("1B", "Art"), _lid("1A", "Zzz Extra"); s = _free_slot(art)
+    j = c.post("/api/draft/preview", json={"fixes": [_mv(art, s)]}).get_json()
+    assert j["state"] in ("ok", "prefer") and sorted(k["name"] for k in j["classes"]) == ["1A", "1B"] and _marks(j, "1B")[art][0] == "moved" and _marks(j, "1A")[art] == _marks(j, "1B")[art], j
+    j = c.post("/api/draft/preview", json={"fixes": [dict(kind="delete", id=extra)]}).get_json()
+    assert j["state"] in ("ok", "prefer") and j["gone"] == [dict(cls="1A", what="Zzz Extra for 1A", d=1, p=1)] and [k["name"] for k in j["classes"]] == ["1A"] and extra not in _marks(j, "1A"), j
+    j = c.post("/api/draft/preview", json={"fixes": [dict(kind="room", id=art, group="Entire Class", room=next(x for x in c.get(f"/api/draft/options?id={art}").get_json()["rooms"] if x["state"] in ("ok", "prefer"))["room"])]}).get_json()
+    assert _marks(j, "1A")[art] == ("changed", None), j
+    assert c.get("/api/draft").get_json()["fixes"] == []
+
+def test_a_head_cannot_reach_the_helper_routes():
+    for method, url in (("GET", "/api/draft/suggest?key=x"), ("POST", "/api/draft/fixes"), ("POST", "/api/draft/preview")):
+        assert h.open(url, method=method, json={"fixes": []}).status_code in (401, 403), url
+
 def test_an_upload_over_unpublished_fixes_is_refused_by_the_draft_and_replace_clears_them():
     spec = _grid_draft() and c.get("/api/setup").get_json()["spec"]; days, p = _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
     c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"])); rows = [("Mon", p, 1, "P1", "1A", "Art", ["Umairah Tan"])]
@@ -667,7 +740,7 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
     assert t.get("/timetable").status_code == 200
 
 NEED_HEADS = {"test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
-              "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace"}
+              "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace", "test_a_head_cannot_reach_the_helper_routes"}
 
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and (k != "test_publish_uploaded_timetable" or "--full" in sys.argv)

@@ -1,12 +1,12 @@
 """The draft: the timetable the committee uploaded, kept on the server beside the saved setup. It is checked against the
 setup as it is now (ttgen.verify), each difference is decided on (change step 5, leave it, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
-import copy, json, os, re, shutil, threading
+import copy, json, os, re, secrets, shutil, threading
 from ttgen.export import ENTIRE, model_from_files
 from ttgen.database import write_db
 from ttgen.spec import typed_rules
 from ttgen import choices, verify
-import store, sync, fixes
+import store, sync, fixes, helper
 
 DIR = os.path.join(store.DATA, "draft")
 ANSWERS = ("step5", "left", "open", "met")
@@ -89,7 +89,7 @@ def _build(m=None, rec=None):
                 school=m["school"]["name"], file_school=theirs, timetable=m["school"]["timetable"], lessons=ch["lessons"], classes=len(m["classes"]), teachers=len(m["teachers"]),
                 students=len(m["students"]), after=ch["after_school"][:30], notes=m["notes"][:12], rule_report=m.get("rule_report") or [],
                 choices_used=m.get("choices_used") or [], choices=len(spec.get("choices") or []) - len({i for i, _ in choices.problems(spec)}),
-                typed=len(typed_rules(spec)), warnings=ws["warnings"], not_checked=ws["not_checked"], fixes=[dict(text=f.get("text"), at=f.get("at"), kind=f.get("kind")) for f in meta.get("fixes") or []], fix_problems=fx["problems"],
+                typed=len(typed_rules(spec)), warnings=ws["warnings"], not_checked=ws["not_checked"], fixes=[dict(text=f.get("text"), at=f.get("at"), kind=f.get("kind"), batch=f.get("batch")) for f in meta.get("fixes") or []], fix_problems=fx["problems"],
                 other_school=ours if ours and theirs and ours.lower() != theirs.lower() else "")
 
 def _finish(j, change=None):
@@ -164,9 +164,9 @@ def _now():
     if not exists(): raise NoDraft("There is no draft.")
     return model_now()
 
-def grid(view, name):
-    """one class's or teacher's week with its lessons, for the grid -> dict(view, name, days, NP, times, codes, lessons, classes, teachers, short)"""
-    m, rec, fx = _now(); cls = view == "class"
+def _payload(m, view, name, short=True):
+    """one class's or teacher's week with its lessons, from a model (or a dict(m, lessons=...)) -> dict(view, name, days, NP, times, codes, lessons, classes, teachers, short); short=False leaves short empty"""
+    cls = view == "class"
     if view not in ("class", "teacher") or name not in (m["class_ix"] if cls else m["teacher_ix"]): raise ValueError(NOT_FOUND)
     if cls: codes = m["cgrid"].get(name) or m["grid"].get(m["class_ix"][name]["level"]) or ["." * m["NP"]] * len(m["days"])
     else: codes = ["".join("L" if any(g[d][p] in "LA" for g in m["grid"].values()) else "." for p in range(m["NP"])) for d in range(len(m["days"]))]
@@ -177,7 +177,11 @@ def grid(view, name):
                               block=x["block"], what=fixes.what(x),
                               short=(m["subjects"].get(x["subject"]) or {}).get("short") or x["subject"], tshorts=[(m["teacher_ix"].get(t) or {}).get("short") or t for t in x["teachers"]]) for x in rows],
                 classes=[c["name"] for c in m["classes"]], teachers=[t["name"] for t in m["teachers"]],
-                short=[s for s in fixes.short(m, m["checked_setup"]) if cls and keep(verify.planned_rows(m["checked_setup"])[tuple(s["key"].split(":", 2 if s["key"].startswith("C:") else 1))])])
+                short=[s for s in fixes.short(m, m["checked_setup"]) if cls and keep(verify.planned_rows(m["checked_setup"])[tuple(s["key"].split(":", 2 if s["key"].startswith("C:") else 1))])] if short else [])
+
+def grid(view, name):
+    """one class's or teacher's week with its lessons, for the grid"""
+    return _payload(_now()[0], view, name)
 
 def options(lesson_id=None, group=None, add=None, n=None):
     """what the committee can do with one lesson (every slot, teacher, room, the delete, judged), or where a lesson of step 5 can be added"""
@@ -224,13 +228,65 @@ def fix(move):
         store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=store.now(), text=text)]))
         return info()
 
+def _fixes_of(moves, m, spec, days):
+    """a list of one or two fixes as the page posted them, each whole (an add with no room gets the one that fits on the timetable the earlier fixes leave), or ValueError(sentence)"""
+    if not isinstance(moves, list) or not 1 <= len(moves) <= 2: raise ValueError("Send one or two fixes.")
+    out = []
+    for f in map(_whole, moves):
+        if f["kind"] == "add":
+            _length(f["n"], m)
+            if not f["room"]: f["room"] = fixes.add_room(dict(m, lessons=helper.chain(m, spec, days, out)["lessons"]), spec, f["key"], f["d"], f["p"], f["n"]) if isinstance(f["d"], int) and isinstance(f["p"], int) else ""
+        out.append(f)
+    return out
+
+def fix_many(moves):
+    """make one or two fixes together: each judged on the timetable the earlier ones leave, all kept (with one batch id) or none. Returns info()."""
+    with _lock:   # from the judgement to the write, as fix does
+        m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]; fl = _fixes_of(moves, m, spec, days)
+        c = helper.chain(m, spec, days, fl)
+        if c["state"] in ("no", "na"): raise ValueError(c["why"])
+        batch, at = secrets.token_hex(4), store.now(); meta = store.read_json(_p("meta.json"), {})
+        store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=at, text=t, batch=batch) for f, t in zip(fl, c["texts"])]))
+        return info()
+
+def suggest(key):
+    """ways to settle the warning with that key, as the draft is now -> helper.suggest's dict(suggestions, none, blocked)"""
+    m, rec, fx = _now(); w = next((w for w in _build()["warnings"] if w["key"] == key), None)
+    if not w: raise ValueError("That warning is no longer on the list.")
+    return helper.suggest(m, m["checked_setup"], m["days"], w)
+
+def preview(moves):
+    """what the fixes would do, written nowhere -> dict(state, why, texts, classes, gone). classes: the week of every class a changed lesson is of, before or
+    after, as grid gives it, each lesson with mark (moved, changed, new or '') and, when moved, was = dict(d, p); gone: the lessons deleted. A list that is
+    refused shows the timetable up to the fix refused."""
+    m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]; fl = _fixes_of(moves, m, spec, days)
+    c = helper.chain(m, spec, days, fl)
+    if c["state"] in ("no", "na"): c = dict(helper.chain(m, spec, days, fl[:len(c["steps"]) - 1]), state=c["state"], why=c["why"])
+    L, was, touched = c["lessons"], c["was"], c["touched"]; first, last = {}, {}
+    for x in was: first.setdefault((x["id"], x["group"]), x); first.setdefault(x["id"], x); last[(x["id"], x["group"])] = x
+    names = {n for x in was for n in x["classes"]} | {n for x in L if x["id"] in touched for n in x["classes"]}
+    def mark(x):
+        w = first.get((x["id"], x["group"])) or first.get(x["id"])
+        if x["id"] not in touched: return dict(mark="")
+        if w is None: return dict(mark="new")
+        if (x["d"], x["p"]) != (w["d"], w["p"]): return dict(mark="moved", was=dict(d=w["d"], p=w["p"]))
+        return dict(mark="changed" if x["teachers"] != w["teachers"] or x["room"] != w["room"] else "")
+    marks, mi, out = {(x["id"], x["group"]): mark(x) for x in L}, dict(m, lessons=L), []
+    for n in (c_["name"] for c_ in m["classes"] if c_["name"] in names):
+        g = _payload(mi, "class", n, short=False); g["lessons"] = [dict(r, **marks[(r["id"], r["group"])]) for r in g["lessons"]]; out.append(g)
+    now = {(x["id"], x["group"]) for x in L}
+    return dict(state=c["state"], why=c["why"], texts=c["texts"], classes=out,
+                gone=[dict(cls=n, what=fixes.what(x), d=x["d"], p=x["p"]) for k, x in last.items() if k not in now for n in x["classes"]])
+
 def undo():
-    """drop the last fix. Returns info()."""
+    """drop the last fix, and the fixes made together with it (the same batch). Returns info()."""
     with _lock:
         if not exists(): raise NoDraft("There is no draft.")
         meta = store.read_json(_p("meta.json"), {}); fl = list(meta.get("fixes") or [])
         if not fl: raise ValueError("There is nothing to undo.")
-        fl.pop(); store.write_json(_p("meta.json"), dict(meta, fixes=fl, published_fixes=min(meta.get("published_fixes", 0), len(fl))))
+        b = fl.pop().get("batch")
+        while b and fl and fl[-1].get("batch") == b: fl.pop()
+        store.write_json(_p("meta.json"), dict(meta, fixes=fl, published_fixes=min(meta.get("published_fixes", 0), len(fl))))
         return info()
 
 def database(path):
