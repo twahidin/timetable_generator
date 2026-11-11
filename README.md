@@ -321,6 +321,7 @@ python app.py            # http://localhost:8000  (or: gunicorn app:app --worker
 .venv/bin/python tests/test_sync.py      # the setup changes, in Python
 node tests/sync.test.js                  # the same changes, in the browser's JavaScript
 node tests/people.test.js                # reading a teacher list and the avatars
+node tests/split.test.js                 # periods cut into lessons, as ttgen cuts them
 ```
 Keep one gunicorn worker (with threads): publishing swaps files in under a lock held in the web process.
 
@@ -351,6 +352,7 @@ and an earlier copy is kept. **Save to file** and **Load from file**, on step 7,
 | `tests/people.test.js` | those checks, run with Node |
 | `static/parents.js`, `ttgen/parents.py` | the form teachers' rule, written twice for the page and the server and kept in step by `tests/parents_cases.json` |
 | `tests/parents.test.js`, `tests/test_parents.py` | those cases, run with Node and with Python |
+| `tests/split.test.js`, `tests/split_cases.json` | how a subject's periods are cut into lessons, the same on the page and in `ttgen` |
 | `static/` | the committee's step-by-step editor and the sign-in page style |
 | `ttgen/` | the Python package: template, reader, solver, checks and the Excel/PDF/HTML outputs |
 | `skill/school-timetable-generator/` | the skill (`SKILL.md` + `scripts/ttgen`) for any AI agent outside the app |

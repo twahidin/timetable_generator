@@ -52,6 +52,12 @@ def check_lists_typed_rules_and_flags_an_empty_one():
         assert "Write the rule in words" in text
 
 @t
+def lessons_are_cut_as_the_page_cuts_them():
+    import json   # the same table tests/split.test.js checks the page's split() against: whole numbers always
+    for p, L, full, short in json.load(open(os.path.join(HERE, "split_cases.json"))):
+        assert S.lesson_split(p, L)[:2] == (full, short), (p, L, S.lesson_split(p, L))
+
+@t
 def the_skill_copy_is_identical():
     a, b = os.path.join(ROOT, "ttgen"), os.path.join(ROOT, "skill", "school-timetable-generator", "scripts", "ttgen")
     def files(root): return sorted(os.path.relpath(os.path.join(dp, f), root) for dp, dn, fn in os.walk(root) if "__pycache__" not in dp for f in fn if not f.endswith(".pyc"))
