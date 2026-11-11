@@ -2319,7 +2319,7 @@ const fxDot = st => `<i class="dot ${esc(Grid.stateClass(st))}"></i>`;
 function fixesHTML(j) {   // what was fixed in the app, newest last, with undo, anything wrong with the fixes, and the download
   const fl = j.fixes || [];
   return `<h3 style="margin-top:14px">Fixes</h3>` + (fl.length
-      ? `<ol class="fxlist">${fl.map(x => `<li>${esc(x.text)} <span class="muted small">${esc(x.at)}</span></li>`).join("")}</ol><div class="row"><button id="fxUndo">Undo the last fix</button></div>`
+      ? `<ol class="fxlist">${Draft.batches(fl).map(b => `<li>${b.items.map(x => `<div>${esc(x.text)}</div>`).join("")}<span class="muted small">${esc(b.items[b.items.length - 1].at)}</span></li>`).join("")}</ol><div class="row"><button id="fxUndo">${esc(Draft.undoText(fl))}</button></div>`
       : `<p class="muted small">No fixes have been made in the app yet.</p>`)
     + (j.fix_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")
     + `<p class="small"><a href="/api/draft/download">Download the draft (.sqlite)</a> <span class="muted">to carry on elsewhere; Make printouts accepts it.</span></p>`;
@@ -2328,14 +2328,15 @@ function fixHTML() {
   const f = S.fix;
   if (!f || !f.grid) return `<div class="fxcard"><h3>Fix the timetable</h3><p class="muted small">Move or swap a lesson, change its teacher or room, delete an extra lesson or add a missing one, here in the app. Each fix is checked against the timetable and the setup before it is made, and can be undone.</p><div class="row"><button id="fxOpen">Open the Fix card</button></div></div>`;
   const g = f.grid, weeks = Grid.weeks(g.days), wk = weeks.find(w => w.name === f.week) || weeks[0], rows = Grid.table(g, wk), o = fxOpts(f), slots = o ? o.slots || [] : [];
-  const shorts = fxShorts(), lessonMode = !!(f.sel || f.adding);
+  const shorts = fxShorts(), lessonMode = !!(f.sel || f.adding), mk = f.pre ? Grid.marks(f.pre.answer, { view: f.view, name: f.name }) : {};
   const picker = (view, names, label) => `<label class="f">${label} <select data-fxview="${view}"><option value="">Choose…</option>${names.map(n => `<option value="${esc(n)}"${f.view === view && f.name === n ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></label>`;
   const cell = c => {
     if (c.covered) return "";
     if (c.lessons.length) {
       const btns = c.lessons.map(r => {
         const own = f.sel && f.sel.id === r.id && f.sel.group === r.group, sw = f.sel && !own ? slots.find(s => s.swap === r.id) : null;
-        return `<button class="fxl ${sw ? esc(Grid.stateClass(sw.state)) : ""}${own ? " sel" : ""}" data-fxsel="${esc(r.id)}|${esc(r.group)}" title="${esc(sw && sw.why ? `${Grid.fullLabel(r)} — ${sw.why}` : Grid.fullLabel(r))}">${esc(Grid.label(r, shorts))}</button>`;
+        const m = mk[r.id + "|" + r.group], mc = m ? Grid.markClass(m) : "", tip = (sw && sw.why ? `${Grid.fullLabel(r)} — ${sw.why}` : Grid.fullLabel(r)) + (mc ? ` — ${mc} in the preview` : "");
+        return `<button class="fxl ${sw ? esc(Grid.stateClass(sw.state)) : ""}${own ? " sel" : ""}${mc ? ` mk-${mc}` : ""}" data-fxsel="${esc(r.id)}|${esc(r.group)}" title="${esc(tip)}">${esc(Grid.label(r, shorts))}</button>`;
       }).join("");
       return `<td class="fxc has" rowspan="${c.rowspan}">${btns}</td>`;
     }
@@ -2357,10 +2358,52 @@ function fixHTML() {
       : `<p class="muted small">${f.view === "class" ? "Nothing is missing for this class." : "Missing periods are shown for a class."}</p>`)
       + `<p class="muted small">Click a lesson to see where it can go.</p>`;
   }
+  side = fxWaysHTML(f) + side;
   return `<div class="fxcard"><h3>Fix the timetable</h3><div class="row fxpick">${picker("class", g.classes || [], "Class")}${picker("teacher", g.teachers || [], "Teacher")}
       ${weeks.length > 1 ? `<span class="fxweeks">${weeks.map(w => `<button class="${w.name === wk.name ? "primary" : ""}" data-fxweek="${esc(w.name)}">${esc(w.name)} week</button>`).join("")}</span>` : ""}</div>
     <p class="muted small">${esc(f.view === "class" ? "Class" : "Teacher")} ${esc(f.name)}. ${f.sel ? "Green is open, amber is open but less wanted, red is not allowed. Click the selected lesson again to let go of it." : "Click a lesson to select it."}</p>
-    <div class="fxlayout"><div class="fxwrap">${table}</div><div class="fxside">${side}</div></div></div>`;
+    <div class="fxlayout"><div class="fxwrap">${table}</div><div class="fxside">${side}</div></div>${fxPreHTML(f)}</div>`;
+}
+function fxWaysHTML(f) {   // the helper's block: the ways to settle the warning the card was opened from, each already checked
+  if (!f.warn) return "";
+  const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === f.warn), a = fxWaysOf(f);
+  const close = `<button data-fxwaysclose="1">Close</button>`;
+  let body;
+  if (f.settled) body = `<p class="small">This warning is settled.</p><div class="row">${close}</div>`;
+  else if (!a) body = f.waysFail ? `<p class="issue small">Could not load the ways.</p><div class="row">${close}</div>` : `<p class="muted small">Looking for ways…</p>`;
+  else {
+    const sg = a.suggestions || [], bl = a.blocked || [];
+    body = sg.map((x, i) => `<div class="fxway"><div class="small"><b>${esc(x.text)}</b></div>${(x.disturbs || []).length ? `<ul class="small muted">${x.disturbs.map(d => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
+        <div class="row">${Draft.stateWord(x.state) ? `<span class="fxstate small">${fxDot(x.state)} ${esc(Draft.stateWord(x.state))}</span>` : ""}<button data-fxshow="${i}">Show</button><button class="primary" data-fxapply="${i}">Apply</button></div></div>`).join("")
+      + (a.none ? `<p class="small">${esc(a.none)}</p>` : "")
+      + (!sg.length && bl.length ? `<p class="small">The nearest ways, and what each breaks:</p><ul class="small">${bl.map(x => `<li>${esc(x.text)} <span class="muted">${esc(x.why)}</span></li>`).join("")}</ul>` : "")
+      + `<div class="row">${close}</div>`;
+  }
+  return `<div class="fxways"><h4>Ways to settle this</h4>${w ? `<p class="small">${esc(w.text)}</p>` : ""}${body}</div>`;
+}
+function fxSmallHTML(c) {   // one other class's week as a read-only table, the lessons the preview marks outlined
+  const shorts = fxShorts();
+  return Grid.weeks(c.days).map(wk => {
+    const cell = k => {
+      if (k.covered) return "";
+      if (k.lessons.length) return `<td class="fxc has" rowspan="${k.rowspan}">${k.lessons.map(r => { const mc = Grid.markClass(r), was = Grid.wasText(r, c.days);
+        return `<div class="fxl${mc ? ` mk-${mc}` : ""}" title="${esc([Grid.fullLabel(r), was].filter(Boolean).join(" — "))}">${esc(Grid.label(r, shorts))}</div>`; }).join("")}</td>`;
+      return `<td class="fxc${FX_BREAK[k.code] && k.code !== "." ? " brk" : ""}"></td>`;
+    };
+    return `<div class="fxsm"><h5>${esc(c.name)}${wk.name ? ` · ${esc(wk.name)} week` : ""}</h5><div class="fxwrap small"><table class="fxgrid small" style="min-width:${28 + wk.days.length * 70}px"><tr><th></th>${wk.days.map(d => `<th>${esc(d.label)}</th>`).join("")}</tr>${Grid.table(c, wk).map((r, p) => `<tr><th class="fxp">${p}</th>${r.map(cell).join("")}</tr>`).join("")}</table></div></div>`;
+  }).join("");
+}
+function fxPreHTML(f) {   // Before you apply: what the fixes would do, drawn from the preview answer kept in S.fix
+  if (!f.preWant) return "";
+  if (!f.pre) return `<div class="fxpre"><h4>Before you apply</h4><p class="muted small">Loading the preview…</p></div>`;
+  const a = f.pre.answer, ok = a.state === "ok" || a.state === "prefer", others = Grid.others(a, { view: f.view, name: f.name }), gone = a.gone || [];
+  return `<div class="fxpre"><h4>Before you apply</h4>
+    <ul class="small">${(a.texts || []).map(t => `<li>${esc(t)}</li>`).join("")}</ul>
+    <p class="small">${fxDot(ok ? a.state : "no")} ${esc(ok ? Draft.stateWord(a.state) : a.why || "These fixes are not open.")}</p>
+    ${others.length || gone.length || (a.classes || []).length ? `<p class="muted small">Outlined: lessons that move, change or are new.</p>` : ""}
+    ${others.map(fxSmallHTML).join("")}
+    ${gone.length ? `<ul class="small">${gone.map(g => `<li>${esc(g.what)} is deleted from ${esc(g.cls)}.</li>`).join("")}</ul>` : ""}
+    <div class="row">${ok ? `<button class="primary" data-fxpreapply="1">Apply</button>` : ""}<button data-fxprecancel="1">Cancel</button></div></div>`;
 }
 function fxDraw() {   // the draft area again with the grid kept where it was scrolled
   const w = $(".fxwrap"), s = $(".fxside"), pos = [w ? w.scrollLeft : 0, w ? w.scrollTop : 0, s ? s.scrollTop : 0];
@@ -2377,6 +2420,36 @@ async function fxGet(url) {
 }
 const fxQ = o => Object.keys(o).map(k => `${k}=${encodeURIComponent(o[k])}`).join("&");
 const fxWant = f => ({ view: f.view, name: f.name, id: f.sel ? f.sel.id : undefined, group: f.sel ? f.sel.group : undefined, key: !f.sel && f.adding ? f.adding : undefined });
+const fxWaysOf = f => f.ways && f.ways.key === f.warn ? f.ways.answer : null;   // the ways only while they are for the warning the card is open for
+async function fxWays(f) {   // the ways to settle the warning the card was opened from; an answer for another warning is dropped
+  const asked = f.warn; f.ways = null; f.waysFail = false; if (!asked) return;
+  const j = await fxGet("/api/draft/suggest?" + fxQ({ key: asked }));
+  if (S.fix !== f || f.warn !== asked) return;
+  f.ways = j ? { key: asked, answer: j } : null; f.waysFail = !j;
+}
+async function fxPreview(fixes) {   // what the fixes would do, shown under the grid; nothing is changed. An answer for other fixes is dropped
+  const f = S.fix; if (!f) return;
+  const asked = JSON.stringify(fixes); f.preWant = asked; f.pre = null; fxDraw();
+  let j = null; try { j = await post("/api/draft/preview", { fixes }); } catch (e) { toast("Could not reach the server: " + e.message); }
+  if (S.fix !== f || f.preWant !== asked) return;
+  if (j) f.pre = { fixes, answer: j }; else f.preWant = null;
+  fxDraw(); const box = $(".fxpre"); if (box) box.scrollIntoView({ block: "nearest" });
+}
+async function fxApply(fixes) {   // one or two fixes together, as received; all or nothing
+  const f = S.fix; if (!f || FX.busy) return;
+  FX.busy = true;
+  try {
+    const j = await post("/api/draft/fixes", { fixes });
+    if (j) await fxAfter(j);
+    else {   // refused: the sentence is toasted; the draft, the grid and the ways are fetched again (the list may have changed under the card)
+      f.pre = null; f.preWant = null;
+      const d = await fxGet("/api/draft"); if (S.fix !== f) return;
+      if (d && d.warnings) { S.draft = d; poll(); if (f.warn && !d.warnings.some(w => w.key === f.warn)) { f.settled = true; f.ways = null; } }
+      await fxRefresh(f); if (S.fix !== f) return; fxDraw();
+      if (f.warn && !f.settled) { await fxWays(f); if (S.fix === f) fxDraw(); }
+    }
+  } catch (e) { toast("Could not reach the server: " + e.message); } finally { FX.busy = false; }
+}
 const fxOpts = f => f.options && f.optFor && Grid.wanted(f.optFor, fxWant(f)) ? f.options : null;   // the options only while they are for what is selected now
 async function fxOptions(f) {   // the options of the selected lesson, or the slots of the lesson being added; an answer for something no longer selected is dropped
   f.options = null; f.optFail = false;
@@ -2399,17 +2472,26 @@ async function fxRefresh(f) {   // the grid again, then the options when a lesso
   await fxOptions(f);
   return live();
 }
-async function fxOpen(view, name, day, sel) {   // day: a day's name, to open on the week that holds it
-  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true }, n = ++FX.n;
+async function fxOpen(view, name, day, sel, warn) {   // day: a day's name, to open on the week that holds it; warn: the key of the warning it was opened from
+  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true, warn: warn || null, ways: null, waysFail: false, settled: false, pre: null, preWant: null }, n = ++FX.n;
   const ok = await fxRefresh(f); f.opening = false;
   if (!ok || n !== FX.n) return;
   if (day) { const i = f.grid.days.indexOf(day), w = Grid.weeks(f.grid.days).find(x => x.days.some(d => d.i === i)); if (w) f.week = w.name; }
   S.fix = f; fxDraw();
   const box = $("#fxBox"); if (box && day !== null) box.scrollIntoView({ block: "start" });
+  if (f.warn) { await fxWays(f); if (S.fix === f) fxDraw(); }
 }
-async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again
+async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again, then the ways when the card has a warning
   const f = S.fix; S.draft = j; poll();
-  if (f) { const ok = await fxRefresh(f); if (S.fix !== f) return; if (!ok) toast("The fix was made, but the grid could not be loaded again. Pick the class again."); }
+  if (f) {
+    f.pre = null; f.preWant = null;
+    const still = !!f.warn && j.warnings.some(w => w.key === f.warn);
+    if (f.warn) { f.settled = !still; f.ways = null; f.waysFail = false; }
+    const ok = await fxRefresh(f); if (S.fix !== f) return; if (!ok) toast("The fix was made, but the grid could not be loaded again. Pick the class again.");
+    fxDraw();
+    if (still) { await fxWays(f); if (S.fix === f) fxDraw(); }
+    return;
+  }
   fxDraw();
 }
 async function fxFix(fix) {   // one fix; a refused one says why and the grid is fetched again
@@ -2430,39 +2512,48 @@ async function fxSelect(sel) {
   if (sel) { fxDraw(); await fxOptions(f); }
   if (S.fix === f) fxDraw();
 }
-function fxAlso(sl) { return !Grid.isSwap(sl) || !(sl.also || []).length || confirm(sl.also.join("\n") + "\n\nSwap anyway?"); }   // a swap that moves another class's lesson too is confirmed first
+function fxGo(sl) {   // a click on a slot: a swap that moves another class's lesson too opens the preview first, any other move or swap is made at once
+  const sel = S.fix.optFor;
+  if (Grid.isSwap(sl) && (sl.also || []).length) fxPreview(Grid.previewFor(sel, sl)); else fxFix(Grid.fixFor(sel, sl));
+}
+function fxSuggestion(f, i) { const a = fxWaysOf(f); return a && (a.suggestions || [])[Number(i)] || null; }
 function fxStateOK(x) { if (x && (x.state === "ok" || x.state === "prefer")) return true; toast((x && x.why) || "That is not open."); return false; }
 function fxClick(b) {   // true when the click was the Fix card's or a warning's Fix button
   const d = b.dataset, f = S.fix, split = v => { const i = v.indexOf("|"); return [v.slice(0, i), v.slice(i + 1)]; };
   if (d.fix !== undefined) {
     const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === d.fix), to = w && Draft.fixTarget(w);
     if (!to) { toast("This warning is not about one class or teacher, so there is no grid to show."); return true; }
-    fxOpen(to.view, to.name, to.day, to.sel); return true;
+    fxOpen(to.view, to.name, to.day, to.sel, w.key); return true;
   }
   if (b.id === "fxOpen") { fxOpenFirst(); return true; }
   if (b.id === "fxUndo") { fxUndo(); return true; }
   if (!f || !f.grid) return false;
+  if (d.fxshow !== undefined) { const x = fxSuggestion(f, d.fxshow); if (x) fxPreview(x.fixes); return true; }
+  if (d.fxapply !== undefined) { const x = fxSuggestion(f, d.fxapply); if (x) fxApply(x.fixes); return true; }
+  if (d.fxwaysclose !== undefined) { f.warn = null; f.ways = null; f.settled = false; f.waysFail = false; fxDraw(); return true; }
+  if (d.fxpreapply !== undefined) { if (f.pre) fxApply(f.pre.fixes); return true; }
+  if (d.fxprecancel !== undefined) { f.pre = null; f.preWant = null; fxDraw(); return true; }
   if (d.fxweek !== undefined) { f.week = d.fxweek; fxDraw(); return true; }
   if (d.fxsel !== undefined) {
     const [id, group] = split(d.fxsel), row = { id: Number(id), group };
     if (f.sel && Grid.same(f.sel, row)) { fxSelect(null); return true; }
     const o = fxOpts(f), sl = f.sel && o ? (o.slots || []).find(s => s.swap === row.id) : null;
     if (sl && (sl.state === "ok" || sl.state === "prefer")) {
-      if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); return true;
+      fxGo(sl); return true;
     }
     fxSelect(row); return true;
   }
   if (d.fxcell !== undefined && fxOpts(f)) {
     const o = fxOpts(f), [dd, p] = split(d.fxcell), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
     if (!fxStateOK(sl)) return true;
-    if (f.optFor.id !== undefined) { if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); }
+    if (f.optFor.id !== undefined) fxGo(sl);
     else if (f.optFor.key !== undefined) { const s = (f.grid.short || []).find(x => x.key === f.optFor.key); if (s) fxFix(Grid.addFor(f.optFor.key, sl, s.n)); }
     return true;
   }
   if (d.fxgo !== undefined && f.sel && fxOpts(f)) {
     const o = fxOpts(f), [dd, p] = split(d.fxgo), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
     if (!fxStateOK(sl)) return true;
-    if (fxAlso(sl)) fxFix(Grid.fixFor(f.optFor, sl)); return true;
+    fxGo(sl); return true;
   }
   if (d.fxteacher !== undefined && f.sel && fxOpts(f)) {
     const o = fxOpts(f), t = (o.teachers || [])[Number(d.fxteacher)];

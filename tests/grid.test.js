@@ -206,4 +206,14 @@ t("previewFor: the one fix a click on a slot posts, as a list", () => {
   assert.deepStrictEqual(Grid.previewFor(sel, { d: 2, p: 3, swap: 9 }), [{ kind: "swap", a: 5, b: 9 }]);
 });
 
+t("marks: the marked rows the main grid can show, by id and group", () => {
+  const pv = { classes: [
+    { view: "class", name: "1A", lessons: [{ id: 1, group: "Entire Class", mark: "moved" }, { id: 2, group: "Entire Class", mark: "" }] },
+    { view: "class", name: "1B", lessons: [{ id: 3, group: "G1", mark: "changed" }, { id: 4, group: "Entire Class", mark: "new" }] }] };
+  assert.deepStrictEqual(Object.keys(Grid.marks(pv, { view: "class", name: "1A" })), ["1|Entire Class"]);
+  assert.deepStrictEqual(Object.keys(Grid.marks(pv, { view: "class", name: "1B" })), ["3|G1", "4|Entire Class"]);
+  assert.deepStrictEqual(Object.keys(Grid.marks(pv, { view: "teacher", name: "Mr Tan" })), ["1|Entire Class", "3|G1", "4|Entire Class"]);
+  assert.deepStrictEqual(Grid.marks(null, { view: "class", name: "1A" }), {});
+});
+
 console.log(`${n} cases passed`);
