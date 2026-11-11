@@ -24,7 +24,8 @@ const REPLACED = "The committee replaced the school's setup.";
 const DROPPED = "The committee replaced the school's setup, so the changes you had not sent were dropped.";
 function save(o) {
   // ids first, then the Class Parents rule (a lesson it makes takes its id from its class and subject); hand: only a person's own edit may mark "Changed by hand"
-  if (S.spec) { Sync.ensureIds(S.spec); Parents.settle(S.spec, S.snap, !(o && (o.quiet || o.remote))); }
+  // a head cannot change these lessons: running the rule on a head's page would make a missing lesson the server then refuses, reported to the head as a change they never made
+  if (S.spec) { Sync.ensureIds(S.spec); if (!(isHead() && !S.practice)) Parents.settle(S.spec, S.snap, !(o && (o.quiet || o.remote))); }
   const js = S.spec ? JSON.stringify(S.spec) : null;
   if (js !== S.last) {
     if (S.snap && js && !(o && o.quiet)) {   // an entry holds the operations that take back (and bring again) this change
@@ -593,6 +594,10 @@ function teachingGroups(subject) {   // groups or classes taught this subject on
   return S.spec.lessons.filter(x => x.subject === subject).reduce((n, x) => n + (x.block || x.code_override ? 1 : (x.classes || []).length), 0);
 }
 function canTeach(t, subject, level) { return DeptMap.canTeach(S.spec.teachers.find(x => x.name === t), subject, level, bands()); }
+const canTeachRow = (t, x) => canTeach(t, x.subject, x.level) || Parents.exempt(S.spec, x, t);   // a class's form teachers need no Can teach entry for its own lessons
+const cpBlock = x => isHead() && !S.practice && Parents.staffed(S.spec, x);   // a head cannot change a staffed lesson's teachers
+const cpWhy = () => `Only the committee can change these lessons: their teachers are the class's ${Parents.label(S.spec)}.`
+const cpHand = (x, i, dis) => x.by_hand === true && Parents.staffed(S.spec, x) ? `<span class="small muted">Changed by hand</span> <button class="small ghost" data-cpback="${i}" ${dis ? `disabled title="${esc(cpWhy())}"` : ""}>Back to the ${esc(Parents.label(S.spec))}</button>` : "";
 function issues() {
   const out = { school: {}, config: {}, choices: {}, lessons: {}, rules: {}, teachers: {}, blocks: {}, classes: {}, subjects: {}, venues: {}, students: {}, global: [] };
   // hard: no timetable can be made until it is fixed (critical). The rest are warnings: a timetable can still be made, but a person should look.
@@ -629,7 +634,7 @@ function issues() {
     if (!(x.classes || []).length) add("lessons", i, "No class.");
     if (!(x.teachers || []).filter(Boolean).length) add("lessons", i, "No teacher.");
     for (const t of (x.teachers || []).filter(Boolean)) {
-      if (!canTeach(t, x.subject, x.level)) add("lessons", i, `${t} is not set to teach this at ${x.level}.`);
+      if (!canTeachRow(t, x)) add("lessons", i, `${t} is not set to teach this at ${x.level}.`);
       if (x.block && S.spec.lessons.filter(y => y.block === x.block && (y.teachers || []).includes(t)).length > 1) add("lessons", i, `${t} twice in this band: a band's groups meet at the same time, so no timetable can be made.`, true);
     }
     if (x.block && !blockNames().includes(x.block)) add("lessons", i, "Band not on the Bands list (top of step 5).");
@@ -1022,7 +1027,7 @@ const VIEWS = {
     const bar = Parents.subjects(S.spec).length && (hand || fc) ? `<div class="helper row">${hand ? `<span>${hand} ${hand === 1 ? "lesson" : "lessons"} changed by hand</span><button data-pback="1">Put the ${esc(nm)} on all of them</button>` : ""}${fc ? `<button data-pfill="1">Take them from the lessons</button>` : ""}</div>` : "";
     return `<div class="card"><h1>Step 2 · Classes</h1><p class="lead">Form classes with their level, size and home room (picked from step 1).</p>${bar}
       <div class="helper row"><b>Add classes</b> level ${sel("_hc", levels()[0], levels(), false, 'id="hcLevel" data-k=""')} names <input id="hcNames" value="A, B, C, D" style="width:120px"> students <input id="hcSize" type="number" value="38" style="width:70px"> <button data-helper="classes">Add (home rooms filled from free classrooms)</button></div>
-      <div class="tablewrap"><table><tr><th>Class</th><th>Level</th><th>Students</th><th>Home room</th><th colspan="${NP}">${esc(nm)}</th><th>Lesson rows</th><th>Note</th><th></th></tr>
+      <div class="tablewrap"><table class="classtable"><tr><th>Class</th><th>Level</th><th>Students</th><th>Home room</th><th colspan="${NP}">${esc(nm)}</th><th>Lesson rows</th><th>Note</th><th></th></tr>
       ${S.spec.classes.map((c, i) => `<tr id="classes-${i}" class="${rowCls(out, crit, "classes", i)}"><td>${inp(`spec.classes.${i}.class`, c.class)}</td><td>${sel(`spec.classes.${i}.level`, c.level, levels())}</td><td class="num">${inp(`spec.classes.${i}.size`, c.size, "number")}</td><td>${sel(`spec.classes.${i}.home_room`, c.home_room, rooms())}</td>${pcells(c, i)}<td class="calc">${S.spec.lessons.filter(x => (x.classes || []).includes(c.class)).length}</td><td>${inp(`spec.classes.${i}.note`, c.note)}</td><td>${delBtn("classes", i)}</td></tr>`).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="classes">+ Add class</button></div></div>`;
   },
@@ -1071,8 +1076,10 @@ const VIEWS = {
   },
   table() {
     const { out, crit, info, load } = issues(); const T = teacherNames(), f = S.tg, P = S.pick;
-    const tsel = (i, k, x) => { const path = `spec.lessons.${i}.teachers.${k}`; const cur = (x.teachers || [])[k] || ""; const yes = T.filter(t => canTeach(t, x.subject, x.level)), no = T.filter(t => !yes.includes(t));
-      return `<select data-k="${path}">${opt("", cur, "")}<optgroup label="Can teach this">${yes.map(t => opt(t, cur)).join("")}</optgroup><optgroup label="Others">${no.map(t => opt(t, cur)).join("")}</optgroup></select>`; };
+    const tsel = (i, k, x) => { const path = `spec.lessons.${i}.teachers.${k}`; const cur = (x.teachers || [])[k] || ""; const yes = T.filter(t => canTeachRow(t, x)), no = T.filter(t => !yes.includes(t)), lock = cpBlock(x);
+      return `<select data-k="${path}" ${lock ? `disabled title="${esc(cpWhy())}"` : ""}>${opt("", cur, "")}<optgroup label="Can teach this">${yes.map(t => opt(t, cur)).join("")}</optgroup><optgroup label="Others">${no.map(t => opt(t, cur)).join("")}</optgroup></select>`; };
+    const NT = Parents.subjects(S.spec).length ? Math.max(Parents.cap(S.spec), ...S.spec.lessons.filter(x => Parents.staffed(S.spec, x)).map(x => Parents.names(x).length)) : 3;   // a staffed row following a shared lesson may hold more than the school's most
+    const tcell = (i, k, x) => k >= 3 && !Parents.staffed(S.spec, x) ? "<td></td>" : `<td style="min-width:${k ? 120 : 150}px">${tsel(i, k, x)}</td>`;
     const rows = S.spec.lessons.map((x, i) => [x, i]).filter(([x]) => (!f.lv || x.level === f.lv) && (!f.subj || x.subject === f.subj)
       && (!f.t || (f.t === "-" ? !(x.teachers || []).some(Boolean) : (x.teachers || []).includes(f.t))));
     P.shown.lessons = rows.map(([, i]) => i);
@@ -1087,8 +1094,8 @@ const VIEWS = {
         <select id="tgT">${opt("", f.t, "Any teacher")}${opt("-", f.t, "No teacher yet")}${T.map(t => opt(t, f.t)).join("")}</select>
         <span class="muted small">${rows.length === S.spec.lessons.length ? `${rows.length} rows` : `${rows.length} of ${S.spec.lessons.length} rows`}</span></div>
       ${tgBar(load, info)}
-      <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="lessons" title="Tick every row shown (${rows.length})" ${all ? "checked" : ""}></th><th>Level</th><th>Subject</th><th>Band</th><th>Classes</th><th>Teacher 1</th><th>Teacher 2</th><th title="A third teacher in the room (co-teaching)">Teacher 3</th><th>Students</th><th>Periods override</th><th>Keep code</th>${Number(sc().weeks) === 2 ? '<th title="Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other">Special room weeks</th>' : ""}<th>Code</th><th>Periods</th><th title="Type your own split, such as 5x3 + 2x2. Empty = the usual split shown in grey.">Lessons</th><th></th></tr>
-      ${rows.map(([x, i]) => `<tr id="lessons-${i}" class="${rowCls(out, crit, "lessons", i)}${P.lessons.has(i) ? " picked" : ""}" title="${esc((out.lessons[i] || []).join(" "))}"><td><input type="checkbox" data-pick="lessons.${i}" ${P.lessons.has(i) ? "checked" : ""}></td><td class="lv">${sel(`spec.lessons.${i}.level`, x.level, levels())}</td><td style="min-width:200px">${sel(`spec.lessons.${i}.subject`, x.subject, subjectNames().filter(n => (subj(n).periods || {})[x.level] || n === x.subject))}</td><td style="min-width:160px">${sel(`spec.lessons.${i}.block`, x.block, S.spec.blocks.filter(b => !x.level || b.level === x.level).map(b => b.block))}</td><td style="min-width:120px">${chips(`spec.lessons.${i}.classes`, x.classes, "classes", `data-level="${esc(x.level || "")}"`)}</td><td style="min-width:150px">${tsel(i, 0, x)}</td><td style="min-width:120px">${tsel(i, 1, x)}</td><td style="min-width:120px">${tsel(i, 2, x)}</td><td class="num">${inp(`spec.lessons.${i}.students`, x.students, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.periods_override`, x.periods_override, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.code_override`, x.code_override, "text", 'style="width:70px"')}</td>${Number(sc().weeks) === 2 ? `<td><select data-k="spec.lessons.${i}.room_weeks" ${special(x) ? "" : "disabled title=\"Only for a subject with a special room kind, such as a lab (step 3)\""}>${opt("", x.room_weeks || "", "every week")}${opt("Odd", x.room_weeks, "Odd only")}${opt("Even", x.room_weeks, "Even only")}</select></td>` : ""}<td class="calc">${esc(info[i].code)}</td><td class="calc">${info[i].p || ""}</td><td><input id="pat-${i}" data-pat="${i}" value="${esc((x.pattern || []).length ? patText(x.pattern.map(Number)) : x.pattern_text || "")}" placeholder="${esc(info[i].auto)}" title="How the periods split into lessons: 5x3 + 2x2 is five 3-period lessons and two 2-period ones. Empty = the usual split shown in grey." style="width:112px"></td><td>${delBtn("lessons", i)}</td></tr>`).join("")}
+      <div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="lessons" title="Tick every row shown (${rows.length})" ${all ? "checked" : ""}></th><th>Level</th><th>Subject</th><th>Band</th><th>Classes</th><th>Teacher 1</th><th>Teacher 2</th><th title="A third teacher in the room (co-teaching)">Teacher 3</th>${Array.from({ length: NT - 3 }, (_, k) => `<th>Teacher ${k + 4}</th>`).join("")}<th>Students</th><th>Periods override</th><th>Keep code</th>${Number(sc().weeks) === 2 ? '<th title="Odd or Even: the group uses its special room (lab, studio...) on that week only, and a classroom on the other">Special room weeks</th>' : ""}<th>Code</th><th>Periods</th><th title="Type your own split, such as 5x3 + 2x2. Empty = the usual split shown in grey.">Lessons</th><th></th></tr>
+      ${rows.map(([x, i]) => `<tr id="lessons-${i}" class="${rowCls(out, crit, "lessons", i)}${P.lessons.has(i) ? " picked" : ""}" title="${esc((out.lessons[i] || []).join(" "))}"><td><input type="checkbox" data-pick="lessons.${i}" ${P.lessons.has(i) ? "checked" : ""}></td><td class="lv">${sel(`spec.lessons.${i}.level`, x.level, levels())}</td><td style="min-width:200px">${sel(`spec.lessons.${i}.subject`, x.subject, subjectNames().filter(n => (subj(n).periods || {})[x.level] || n === x.subject))}</td><td style="min-width:160px">${sel(`spec.lessons.${i}.block`, x.block, S.spec.blocks.filter(b => !x.level || b.level === x.level).map(b => b.block))}</td><td style="min-width:120px">${chips(`spec.lessons.${i}.classes`, x.classes, "classes", `data-level="${esc(x.level || "")}"`)}</td>${Array.from({ length: NT }, (_, k) => tcell(i, k, x)).join("")}<td class="num">${inp(`spec.lessons.${i}.students`, x.students, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.periods_override`, x.periods_override, "number", 'style="width:60px"')}</td><td class="num">${inp(`spec.lessons.${i}.code_override`, x.code_override, "text", 'style="width:70px"')}</td>${Number(sc().weeks) === 2 ? `<td><select data-k="spec.lessons.${i}.room_weeks" ${special(x) ? "" : "disabled title=\"Only for a subject with a special room kind, such as a lab (step 3)\""}>${opt("", x.room_weeks || "", "every week")}${opt("Odd", x.room_weeks, "Odd only")}${opt("Even", x.room_weeks, "Even only")}</select></td>` : ""}<td class="calc">${esc(info[i].code)}</td><td class="calc">${info[i].p || ""}</td><td><input id="pat-${i}" data-pat="${i}" value="${esc((x.pattern || []).length ? patText(x.pattern.map(Number)) : x.pattern_text || "")}" placeholder="${esc(info[i].auto)}" title="How the periods split into lessons: 5x3 + 2x2 is five 3-period lessons and two 2-period ones. Empty = the usual split shown in grey." style="width:112px"></td><td>${cpHand(x, i, cpBlock(x))} ${delBtn("lessons", i)}</td></tr>`).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="lessons">+ Add teaching group</button></div></div>`;
   },
   map() {   // step 5's department map: roster (left), baskets (middle), cards (right)
@@ -1268,6 +1275,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
+  if (b.dataset.cpback !== undefined) { const i = Number(b.dataset.cpback), x = S.spec.lessons[i]; if (!x || cpBlock(x)) return; Parents.back(S.spec, i); save(); render(); poll(); return; }
   if (b.dataset.pback) { const n = Parents.handRows(S.spec).length, nm = Parents.label(S.spec); if (!n || !confirm(`Put the ${nm} back on ${n} ${n === 1 ? "lesson" : "lessons"}? The teachers typed on them are replaced.`)) return; Parents.backAll(S.spec); save(); render(); poll(); return; }
   if (b.dataset.pfill) { const n = Parents.fillCount(S.spec), nm = Parents.label(S.spec); if (!n || !confirm(`Give ${n} ${n === 1 ? "class" : "classes"} their ${nm} from the teachers now on their lessons?`)) return; Parents.fill(S.spec); save(); render(); poll(); return; }
   if (b.id === "practiceBack") { leavePractice(); return; }
@@ -1505,7 +1513,7 @@ function pick(el, shift) {   // a tick box on a teaching-group or student row; s
 function tgBar(load, info) {
   const P = S.pick, ix = [...P.lessons].filter(i => S.spec.lessons[i]); if (!ix.length) return "";
   const rows = ix.map(i => S.spec.lessons[i]), T = teacherNames();
-  const yes = T.filter(t => rows.every(x => canTeach(t, x.subject, x.level))), no = T.filter(t => !yes.includes(t));
+  const yes = T.filter(t => rows.every(x => canTeachRow(t, x))), no = T.filter(t => !yes.includes(t));
   const t = S.spec.teachers.find(x => x.name === P.t); let line = "", over = false;
   if (t) {
     const now = (load[t.name] || 0) + (Number(t.other_duties) || 0), more = ix.filter(i => !(S.spec.lessons[i].teachers || []).includes(t.name)).reduce((a, i) => a + info[i].tp, 0);
@@ -1514,7 +1522,7 @@ function tgBar(load, info) {
   }
   const off = t ? "" : "disabled";
   return `<div class="bulk row"><b>${ix.length} ticked</b> teacher <select id="pickT">${opt("", P.t, "pick…")}<optgroup label="Can teach all of them">${yes.map(n => opt(n, P.t)).join("")}</optgroup><optgroup label="Others">${no.map(n => opt(n, P.t)).join("")}</optgroup></select>
-    <button data-bulk="t1" ${off} title="Replaces Teacher 1 on every ticked row">Make Teacher 1</button><button data-bulk="t2" ${off} title="Adds them as Teacher 2 or 3 (co-teaching), or Teacher 1 on a row with none">Add as co-teacher</button><button data-bulk="tx" ${off}>Take off</button>
+    <button data-bulk="t1" ${off} title="Replaces Teacher 1 on every ticked row">Make Teacher 1</button><button data-bulk="t2" ${off} title="Adds them as a co-teacher, or as Teacher 1 on a row with none">Add as co-teacher</button><button data-bulk="tx" ${off}>Take off</button>
     ${line ? `<span class="small ${over ? "over" : "muted"}">${esc(line)}</span>` : ""}
     <span class="muted">·</span> lessons <input id="pickP" value="${esc(P.p)}" placeholder="5x3 + 2x2" title="Leave empty to go back to the usual split" style="width:104px"><button data-bulk="pat">Set lessons</button><button class="small ghost" data-bulk="tnone">Clear ticks</button></div>`;
 }
@@ -1566,10 +1574,11 @@ function basketsView(dept) {   // the middle column: one basket per subject of t
 function cardsView(dept) {   // the right-hand column: where the department's subjects are taught
   const info = lessonInfo(), cards = DeptMap.cards(S.spec, info, dept, M.tab, M.level);
   const tabs = [["classes", "Classes"], ["groups", "Teaching groups"], ["bands", "Bands"]].map(([k, l]) => `<button class="small ${M.tab === k ? "on" : ""}" data-mtab="${k}">${l}</button>`).join("");
-  const tcard = (nm, key) => { const t = S.spec.teachers.find(x => x.name === nm); return t ? avx(t, 28, `data-mx="${esc(key)}|${esc(nm)}"`) : `<span class="chip">${esc(nm)} (not on list) <button class="x" data-mx="${esc(key)}|${esc(nm)}" title="Take ${esc(nm)} off">✕</button></span>`; };
-  const card = c => { const key = c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`, room = DeptMap.MAX - c.teachers.length;
-    return `<div class="gcard" data-mcard="${esc(key)}" title="Click to deploy the ticked teachers, or drop teachers here"><div class="row small" style="justify-content:space-between"><b>${esc(c.title)}</b><span class="muted">${esc(c.level)} · ${c.periods || "?"} periods</span></div><div class="small muted">${esc(c.subject)}</div>
-      <div class="avs">${c.teachers.map(nm => tcard(nm, key)).join("")}${room > 0 ? `<span class="plus" title="Room for ${room} more">+</span>` : ""}</div></div>`; };
+  const tcard = (nm, key, lock) => { const t = S.spec.teachers.find(x => x.name === nm); return t ? avx(t, 28, lock ? "" : `data-mx="${esc(key)}|${esc(nm)}"`) : `<span class="chip">${esc(nm)} (not on list)${lock ? "" : ` <button class="x" data-mx="${esc(key)}|${esc(nm)}" title="Take ${esc(nm)} off">✕</button>`}</span>`; };
+  const card = c => { const key = c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`, x = S.spec.lessons[c.li], stf = c.kind === "class" && Parents.staffed(S.spec, x), lock = stf && cpBlock(x);
+    const room = (stf ? Parents.cap(S.spec) : DeptMap.MAX) - c.teachers.length;
+    return `<div class="gcard${lock ? " locked" : ""}" data-mcard="${esc(key)}" title="${esc(lock ? cpWhy() : "Click to deploy the ticked teachers, or drop teachers here")}"><div class="row small" style="justify-content:space-between"><span><b>${esc(c.title)}</b>${stf ? ` <span class="cpbadge">${esc(Parents.label(S.spec))}</span>` : ""}</span><span class="muted">${esc(c.level)} · ${c.periods || "?"} periods</span></div><div class="small muted">${esc(c.subject)}${stf ? ` ${cpHand(x, c.li, lock)}` : ""}</div>
+      <div class="avs">${c.teachers.map(nm => tcard(nm, key, lock)).join("")}${room > 0 && !lock ? `<span class="plus" title="Room for ${room} more">+</span>` : ""}</div></div>`; };
   const band = b => `<div class="lane"><div class="row small" style="justify-content:space-between"><b>${esc(b.title)}</b><span class="muted">${esc(b.level)} · ${b.groups.length} group${b.groups.length === 1 ? "" : "s"}</span></div>
     ${b.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}${b.groups.map(card).join("")}</div>`;
   const what = { classes: "whole-class lessons", groups: "teaching groups", bands: "bands" }[M.tab];
@@ -1598,9 +1607,12 @@ function cardAt(key) {   // "li|cls" (a class card) or "li|" (a group card)
 function placeOn(card, idxs) {   // deploy teachers (ticked, or dropped) onto a card: ask first, then write once
   if (!card) return;
   if (!idxs.length) { toast("Tick teachers first, then click a card."); return; }
-  const x = S.spec.lessons[card.li], nb = DeptMap.needBasket(S.spec, card, idxs);
+  const x = S.spec.lessons[card.li], stf = card.kind === "class" && Parents.staffed(S.spec, x);
+  if (stf && cpBlock(x)) { toast(cpWhy()); return; }
+  const po = stf ? { max: Parents.cap(S.spec), exempt: nm => Parents.exempt(S.spec, { ...x, classes: [card.cls] }, nm) } : {};   // a staffed lesson holds the school's most, and its form teachers need no basket
+  const nb = DeptMap.needBasket(S.spec, card, idxs, po);
   const add = nb.length > 0 && confirm(`${listing(nb)} ${nb.length === 1 ? "is" : "are"} not in the ${x.subject} basket. Add ${nb.length === 1 ? "them" : "them all"} to the basket and place them?`);
-  const r = DeptMap.deploy(S.spec, card, idxs, { addToBasket: add });
+  const r = DeptMap.deploy(S.spec, card, idxs, { ...po, addToBasket: add });
   if (r.placed.length) { save(); render(); }
   const where = `${card.title} ${x.subject}`, over = r.refused.filter(f => !f.why.endsWith("basket.")), left = r.refused.filter(f => f.why.endsWith("basket."));
   const parts = [];
@@ -1634,7 +1646,9 @@ function staffDrop(idxs) {   // dropped on the staff room: out of every basket o
   basketRemove(pairs);
 }
 function cardRemove(key, name) {
-  const card = cardAt(key); if (!card || !DeptMap.undeploy(S.spec, card, name)) return;
+  const card = cardAt(key); if (!card) return;
+  if (card.kind === "class" && cpBlock(S.spec.lessons[card.li])) { toast(cpWhy()); return; }
+  if (!DeptMap.undeploy(S.spec, card, name)) return;
   save(); render(); toast(`Took ${name} off ${card.title} ${S.spec.lessons[card.li].subject}.`);
 }
 function dropIds(e) {   // the teacher indexes a drop carries (ids, as JSON in text/plain)
@@ -1837,18 +1851,20 @@ function bulk(k) {   // one change for every ticked row, so one Undo takes it al
   if (k === "tnone" || k === "snone") { P[k === "tnone" ? "lessons" : "students"].clear(); render(); return; }
   if (k[0] === "t") {
     const t = P.t, ix = [...P.lessons].filter(i => S.spec.lessons[i]); if (!t || !ix.length) return;
-    let n = 0, full = 0;
+    let n = 0, full = 0, left = 0;
     for (const i of ix) {
       const x = S.spec.lessons[i], ts = (x.teachers || []).filter(Boolean), was = ts.includes(t);
+      if (cpBlock(x)) { left++; continue; }   // a head leaves the form teachers' lessons alone
       if (k === "t1") { if (ts[0] === t) continue; x.teachers = [t, ...ts.slice(1).filter(y => y !== t)]; }
-      if (k === "t2") { if (was) continue; if (ts.length >= 3) { full++; continue; } x.teachers = [...ts, t]; }
+      if (k === "t2") { if (was) continue; if (ts.length >= (Parents.staffed(S.spec, x) ? Parents.cap(S.spec) : 3)) { full++; continue; } x.teachers = [...ts, t]; }
       if (k === "tx") { if (!was) continue; x.teachers = ts.filter(y => y !== t); }
       n++;
     }
     save(); render();
     const { out } = issues(), has = m => k === "tx" ? 0 : ix.filter(i => (out.lessons[i] || []).some(x => x.startsWith(`${t} ${m}`))).length;
     const cant = has("is not set to teach"), twice = has("twice in this band");
-    toast(`${{ t1: `${t} is now Teacher 1 of`, t2: `${t} now co-teaches`, tx: `${t} was taken off` }[k]} ${n} group${s1(n)}` + (full ? `; ${full} already had three teachers` : "")
+    toast(`${{ t1: `${t} is now Teacher 1 of`, t2: `${t} now co-teaches`, tx: `${t} was taken off` }[k]} ${n} group${s1(n)}` + (full ? `; ${full} already had as many teachers as they can hold` : "")
+      + (left ? `; ${left} lesson${s1(left)} of the ${Parents.label(S.spec)} ${left === 1 ? "was" : "were"} left alone` : "")
       + (cant ? `; ${cant} ${cant === 1 ? "is a subject or level" : "are subjects or levels"} they are not set to teach (step 4)` : "")
       + (twice ? `; ${twice} ${twice === 1 ? "is" : "are"} in a band where they already teach a group, and a band's groups meet at the same time` : "") + ". Undo takes it back.");
     return;

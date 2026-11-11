@@ -102,7 +102,8 @@ var DeptMap = (function () {
   }
 
   /* ---- what the map writes (the caller saves afterwards) */
-  var MAX = 3;   // teachers on one card (Teacher 1 to 3)
+  var MAX = 3;   // teachers on one card (Teacher 1 to 3); a staffed lesson may hold more (opts.max)
+  var NUM = ["zero", "one", "two", "three", "four", "five", "six"];
 
   function canTeach(t, subject, level, bandOf) {
     return !!t && (t.can_teach || []).some(function (c) {
@@ -122,8 +123,10 @@ var DeptMap = (function () {
     return { row: copy, split: true };
   }
 
+  /* opts.max: the most teachers on the card (default MAX); opts.exempt(name): lets that teacher on without the subject in Can teach */
   function deploy(spec, card, idxs, opts) {
     opts = opts || {};
+    var max = Number(opts.max) || MAX, exempt = opts.exempt || function () { return false; };
     var T = rows(spec, "teachers"), x = rows(spec, "lessons")[card.li];
     var out = { placed: [], already: [], refused: [], split: false };
     if (!x) return out;
@@ -132,16 +135,16 @@ var DeptMap = (function () {
     (idxs || []).forEach(function (i) {
       var t = T[i]; if (!t || !t.name) return;
       if (on.indexOf(t.name) >= 0) { out.already.push(t.name); return; }
-      if (!hasSubject(t, x.subject) && !opts.addToBasket) { out.refused.push({ name: t.name, why: t.name + " is not in the " + x.subject + " basket." }); return; }
+      if (!hasSubject(t, x.subject) && !exempt(t.name) && !opts.addToBasket) { out.refused.push({ name: t.name, why: t.name + " is not in the " + x.subject + " basket." }); return; }
       left.push(t);
     });
     if (!left.length) return out;
-    if (on.length + left.length > MAX) {   // judged before anyone joins a basket, so a refused drop changes nothing
-      var why = title + " would have " + (on.length + left.length) + " teachers; three is the most.";
+    if (on.length + left.length > max) {   // judged before anyone joins a basket, so a refused drop changes nothing
+      var why = title + " would have " + (on.length + left.length) + " teachers; " + (NUM[max] || max) + " is the most.";
       left.forEach(function (t) { out.refused.push({ name: t.name, why: why }); });
       return out;
     }
-    left.forEach(function (t) { if (!hasSubject(t, x.subject)) t.can_teach = (t.can_teach || []).concat([{ subject: x.subject, levels: "All" }]); });
+    left.forEach(function (t) { if (!hasSubject(t, x.subject) && !exempt(t.name)) t.can_teach = (t.can_teach || []).concat([{ subject: x.subject, levels: "All" }]); });
     var r = rowFor(spec, card); out.split = r.split;
     out.placed = left.map(function (t) { return t.name; });
     r.row.teachers = names(r.row).concat(out.placed);
@@ -149,11 +152,11 @@ var DeptMap = (function () {
   }
 
   /* who, of these teachers, is not in the card's subject's basket (and not on the card already): asked about before any deploy */
-  function needBasket(spec, card, idxs) {
-    var T = rows(spec, "teachers"), x = rows(spec, "lessons")[card.li], out = [];
+  function needBasket(spec, card, idxs, opts) {
+    var exempt = (opts && opts.exempt) || function () { return false; }, T = rows(spec, "teachers"), x = rows(spec, "lessons")[card.li], out = [];
     if (!x) return out;
     var on = names(x);
-    (idxs || []).forEach(function (i) { var t = T[i]; if (t && t.name && on.indexOf(t.name) < 0 && !hasSubject(t, x.subject)) out.push(t.name); });
+    (idxs || []).forEach(function (i) { var t = T[i]; if (t && t.name && on.indexOf(t.name) < 0 && !hasSubject(t, x.subject) && !exempt(t.name)) out.push(t.name); });
     return out;
   }
 
