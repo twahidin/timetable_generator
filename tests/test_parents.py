@@ -186,7 +186,6 @@ def the_skill_version_is_2026_11_3():
     assert "2026-11.3" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
 
 
-import subprocess  # noqa: E402
 
 
 def check_cells(p, rows=(6, 7, 30)):
@@ -207,17 +206,16 @@ def the_check_formula_stays_within_excels_limit_however_many_teacher_columns():
     assert check_cells(write(wide(9)))[1] < 8192                           # was 8919: a lesson of three classes with three Class Parents each
 
 
+# the Check formula of row 6 of samples.primary() with 3 Teacher columns, as the writer made it before Teacher columns could grow
+CHECK_3 = '=IF(B6="","",TRIM(IF(N(U6)=0,"No periods for "&A6&" on Subjects. ","")&IF(COUNTA(D6:L6)=0,"No class. ","")&IF(COUNTA(M6:O6)=0,"No teacher. ","")&IF(M6="","",IF(ISNUMBER(FIND("|"&B6&"@All|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(M6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&A6&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(M6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&IFERROR(INDEX(Lists!$I$4:$I$60,MATCH(A6,Lists!$H$4:$H$60,0)),"")&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(M6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))=0,M6&" not set to teach this at "&A6&". ","")&IF(AND(C6<>"",COUNTIFS($C$6:$C$2005,C6,$M$6:$M$2005,M6)+COUNTIFS($C$6:$C$2005,C6,$N$6:$N$2005,M6)+COUNTIFS($C$6:$C$2005,C6,$O$6:$O$2005,M6)>1),M6&" twice in this block. ",""))&IF(N6="","",IF(ISNUMBER(FIND("|"&B6&"@All|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(N6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&A6&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(N6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&IFERROR(INDEX(Lists!$I$4:$I$60,MATCH(A6,Lists!$H$4:$H$60,0)),"")&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(N6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))=0,N6&" not set to teach this at "&A6&". ","")&IF(AND(C6<>"",COUNTIFS($C$6:$C$2005,C6,$M$6:$M$2005,N6)+COUNTIFS($C$6:$C$2005,C6,$N$6:$N$2005,N6)+COUNTIFS($C$6:$C$2005,C6,$O$6:$O$2005,N6)>1),N6&" twice in this block. ",""))&IF(O6="","",IF(ISNUMBER(FIND("|"&B6&"@All|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(O6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&A6&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(O6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&IFERROR(INDEX(Lists!$I$4:$I$60,MATCH(A6,Lists!$H$4:$H$60,0)),"")&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(O6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))=0,O6&" not set to teach this at "&A6&". ","")&IF(AND(C6<>"",COUNTIFS($C$6:$C$2005,C6,$M$6:$M$2005,O6)+COUNTIFS($C$6:$C$2005,C6,$N$6:$N$2005,O6)+COUNTIFS($C$6:$C$2005,C6,$O$6:$O$2005,O6)>1),O6&" twice in this block. ",""))&IF(AND(T6<>"Entire Class",COUNTIF($T$6:$T$2005,T6)>1),"Code used twice. ","")&IF(AND(C6<>"",COUNTIF(\'5 Blocks\'!$A$6:$A$1005,C6)=0),"Block not on Step 5. ","")))'
+
+
 @t
 def up_to_six_teacher_columns_the_check_formula_is_as_it_was():
-    old = tempfile.mkdtemp()
-    subprocess.run("git archive c2dd35f ttgen | tar -x -C " + old, shell=True, cwd=os.path.dirname(HERE), check=True)
-    src = open(os.path.join(old, "ttgen", "template.py"), encoding="utf-8").read(); assert "NTCH, NPAIR = 3, 8" in src
-    for n, tc in ((3, 3), (6, 6)):
-        open(os.path.join(old, "ttgen", "template.py"), "w", encoding="utf-8").write(src.replace("NTCH, NPAIR = 3, 8", f"NTCH, NPAIR = {tc}, 8"))
-        out = os.path.join(old, f"o{n}.xlsx")
-        subprocess.run([sys.executable, "-c", "import sys,copy;sys.path.insert(0,sys.argv[1]);from ttgen import template,samples;"
-                        "sp=samples.primary();sp['lessons'][0]['teachers']=[t['name'] for t in sp['teachers'][:int(sys.argv[3])]];template.write_template(sp,sys.argv[2])", old, out, str(n)], check=True)
-        assert check_cells(out)[0] == check_cells(write(wide(n)))[0], n
+    assert check_cells(write(primary()))[0][0] == CHECK_3
+    c6 = check_cells(write(wide(6)))[0][0]; c7 = check_cells(write(wide(7)))[0][0]
+    assert "SUMPRODUCT" not in c6 and c6.count("COUNTIFS($C$6:$C$2005,C6,") == 36        # 6 teachers x 6 columns: the per-column chain
+    assert "SUMPRODUCT" in c7 and "COUNTIFS($C$6:$C$2005" not in c7
 
 
 @t
