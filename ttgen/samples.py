@@ -36,7 +36,7 @@ class Staffing:
     def teachers(self):
         return [dict(name=x["name"], short=x["short"], dept=x["dept"], allowance=self.allow, provisional="No") for x in self.t]
     def subjects_taught(self, name):
-        """how many subjects the builder gave the teacher (at most 8, as the old Can teach list held)"""
+        """how many subjects the builder gave the teacher (at most 8, as before)"""
         return min(len(next(x for x in self.t if x["name"] == name)["subjects"]), 8)
 
 SFIRST = ["Aiden", "Alicia", "Amirul", "Anya", "Arjun", "Bella", "Brandon", "Caleb", "Chloe", "Daniel", "Dhruv", "Elijah", "Emma", "Ethan", "Faris",

@@ -354,15 +354,20 @@ def slots(m, spec, days, lesson_id):
             else: out.append(dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[]))
     return out
 
-def _card(spec, subject):
-    """step 3's card of a subject: (department, code, name less its own tag at the end when the tag is one of the school's);
-    a subject not on the list is a card of its own"""
-    tags = {str(a) for a, _ in (spec.get("school") or {}).get("tags") or [] if str(a) != "-"}
-    s = next((x for x in spec.get("subjects") or [] if x.get("subject") == subject), None)
-    if s is None: return ("", "", str(subject))
-    name = str(s["subject"]); tag = str(s.get("tag") or "")
-    if tag in tags and name.endswith(tag): name = name[:-len(tag)].strip()
-    return (str(s.get("dept") or "").strip(), str(s.get("code") or "").strip(), name)
+def _cards(spec):
+    """step 3's cards, as static/subjectview.js reads them -> {subject name (trimmed): card}, a card being (department, code,
+    name) trimmed, the name less its own tag when that tag is one of the school's and the name is the tag alone or ends with a
+    space and the tag; rows that are not dicts and tag entries that are not lists are skipped"""
+    school = spec.get("school") if isinstance(spec.get("school"), dict) else {}
+    entries = school.get("tags") if isinstance(school.get("tags"), (list, tuple)) else []
+    tags = {str(e[0]).strip() for e in entries if isinstance(e, (list, tuple)) and e and e[0] is not None} - {"", "-"}
+    out = {}
+    for r in spec.get("subjects") or []:
+        if not isinstance(r, dict) or r.get("subject") is None: continue
+        name = str(r["subject"]).strip(); tag = str(r.get("tag") or "").strip()
+        if tag in tags and name.endswith(" " + tag): name = name[:len(name) - len(tag)].strip()
+        out.setdefault(str(r["subject"]).strip(), (str(r.get("dept") or "").strip(), str(r.get("code") or "").strip(), name))
+    return out
 
 def teacher_options(m, spec, days, key):
     """who could take the key's lesson, judged as a teacher fix (the current teachers left out) -> [dict(teachers, state, why)]:
@@ -371,14 +376,12 @@ def teacher_options(m, spec, days, key):
     two the teacher list's order"""
     k = _key(key); e = verify.planned_rows(spec).get(k); c = _ctx(m)
     rows = [x for x in m["lessons"] if (x["group"] == ENTIRE and k[0] == "C" and k[1] in x["classes"] and x["subject"] == k[2]) or (k[0] == "G" and x["group"] == k[1])]
-    subject = e["subject"] if e else k[2] if k[0] == "C" else rows[0]["subject"] if rows else ""
+    subject = (e["subject"] if e else k[2] if k[0] == "C" else rows[0]["subject"] if rows else "").strip()
     now = {t for x in rows for t in x["teachers"]}
-    card = _card(spec, subject); dept = card[0]
-    cards = {}   # the subjects of the setup's card, by name
-    for s in spec.get("subjects") or []: cards.setdefault(_card(spec, s.get("subject")), set()).add(s.get("subject"))
-    of_card = cards.get(card, set()) | {subject}
-    on = {t for x in spec.get("lessons") or [] if x.get("subject") in of_card for t in x.get("teachers") or []}
-    team = [t for t in spec.get("teachers") or [] if t.get("name")]
+    cards = _cards(spec); card = cards.get(subject, ("", "", subject)); dept = card[0]
+    of_card = {n for n, v in cards.items() if v == card} | {subject}
+    on = {t for x in spec.get("lessons") or [] if isinstance(x, dict) and str(x.get("subject") or "").strip() in of_card for t in x.get("teachers") or []}
+    team = [t for t in spec.get("teachers") or [] if isinstance(t, dict) and t.get("name")]
     opts = ([sorted(e["teachers"])] if e and e["teachers"] else []) + [[t["name"]] for t in team if t["name"] in on] \
         + ([[t["name"]] for t in team if t["name"] not in on and dept in spec_mod.teacher_depts(t)] if dept else [])
     opts = [o for o in dict.fromkeys(map(tuple, opts)) if set(o) != now and not (len(o) == 1 and o[0] in now)]

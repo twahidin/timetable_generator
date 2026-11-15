@@ -251,7 +251,7 @@ def slots_for_a_lesson_and_a_block():
 @t
 def teachers_offered_are_those_who_teach_the_subject_then_its_department():
     # Mathematics G3 and G2 are one card; Aye teaches the G2 one; Bee and Cee (by a second department) are in MA; Dee is not
-    row = lambda sub, cls, tags, tg: dict(ROW, subject=sub, tag=tg, classes=cls, teachers=tags, code=ENTIRE, block=None, periods=2, level=LV)
+    row = lambda sub, cls, who, tg: dict(ROW, subject=sub, tag=tg, classes=cls, teachers=who, code=ENTIRE, block=None, periods=2, level=LV)
     subs = [dict(subject="Mathematics G3", code="MA", tag="G3", dept="MA", periods={}), dict(subject="Mathematics G2", code="MA", tag="G2", dept="MA", periods={})]
     tch = [dict(name=n, short=n, dept=d, **x) for n, d, x in [("Dee", "SC", {}), ("Cee", "SC", dict(dept2="MA")), ("Bee", "MA", {}), ("Aye", "SC", {}), ("Now", "MA", {})]]
     rows = [row("Mathematics G3", [CLS], ["Now"], "G3"), row("Mathematics G2", [B], ["Aye"], "G2")]
@@ -260,6 +260,24 @@ def teachers_offered_are_those_who_teach_the_subject_then_its_department():
     m, sp = model_with(L, school=school, subjects=subs, teachers=tch, lessons=rows)
     key = f"C:{CLS}:Mathematics G3"
     assert [o["teachers"] for o in fixes.teacher_options(m, sp, DAYS, key)] == [["Aye"], ["Cee"], ["Bee"]], fixes.teacher_options(m, sp, DAYS, key)
+
+@t
+def a_card_is_step_3s_card():
+    # (a) "Drama" with tag a is not "Dram"; (b) spaces round a name and its G-level still join the card; (c) odd setups do not raise
+    mk = lambda subs, tch, rows, tags, L: model_with(L, school=dict(SP["school"], tags=tags), subjects=subs, teachers=tch, lessons=rows)
+    sub = lambda n, tg: dict(subject=n, code="DR", tag=tg, dept="AR", periods={})
+    rw = lambda n, cls, who: dict(ROW, subject=n, classes=cls, teachers=who, code=ENTIRE, block=None, periods=2, level=LV)
+    tch = [dict(name="Now", short="N", dept="XX"), dict(name="Ann", short="A", dept="XX"), dict(name="Bo", short="B", dept="YY")]
+    offers = lambda m, sp, name: [o["teachers"] for o in fixes.teacher_options(m, sp, DAYS, f"C:{CLS}:{name}")]
+    L = lambda n: [lesson(1, 0, 2, 2, [CLS], n, ENTIRE, ["Now"], level=LV)]
+    m, sp = mk([sub("Drama", "a"), sub("Dram", "-")], tch, [rw("Drama", [CLS], ["Now"]), rw("Dram", [B], ["Ann"])], [["a", "A"], ["-", ""]], L("Drama"))
+    assert offers(m, sp, "Drama") == [], offers(m, sp, "Drama")   # Ann teaches "Dram", which is not Drama's card
+    m, sp = mk([sub("  Art G3 ", "G3"), sub("Art G2", "G2")], tch, [rw("Art G3", [CLS], ["Now"]), rw("Art G2", [B], ["Ann"])], [["G3", "P"], ["G2", "A"]], L("Art G3"))
+    assert offers(m, sp, "Art G3") == [["Ann"]], offers(m, sp, "Art G3")
+    m, sp = mk([sub("Art G3", "G3")], tch, [rw("Art G3", [CLS], ["Now"])], [["G3", "P"]], L("Art G3"))
+    for odd in (dict(subjects=[None, sub("Art G3", "G3")], teachers=[None] + tch), dict(school=dict(sp["school"], tags="G3")), dict(school=dict(sp["school"], tags=None)),
+                dict(school=dict(sp["school"], tags=[None, "G3", [], ["G3", "P"]]))):
+        assert isinstance(fixes.teacher_options(m, dict(sp, **odd), DAYS, f"C:{CLS}:Art G3"), list)
 
 @t
 def nobody_to_offer_is_an_empty_list():

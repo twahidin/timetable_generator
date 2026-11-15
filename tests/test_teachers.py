@@ -103,4 +103,16 @@ def allocate_is_gone():
     assert not any(os.path.exists(os.path.join(ROOT, d, "allocate.py")) for d in ("ttgen", "skill/school-timetable-generator/scripts/ttgen"))
 
 
+@t
+def the_samples_have_no_can_teach():
+    assert all("can_teach" not in x and "dept2" not in x for f in (secondary, primary) for x in f()["teachers"])
+
+
+@t
+def the_samples_keep_their_part_time_teacher():
+    # the part-time teacher's name, as the samples named it before Can teach left them
+    for f, who in ((secondary, "Hakim Kumar"), (primary, "Umairah Tan")):
+        assert [r["target"] for r in f()["rules"] if r["scope"] == "Teacher" and r["note"].startswith("part-time")] == [who]
+
+
 print(f"{passed} checks passed")
