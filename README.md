@@ -33,6 +33,8 @@ committee changes any of this.
 
 **Step 2's three views.** Step 2 shows the classes as **Cards** (one card per class under its level, with its home room, its form teachers and its subjects; a click opens the card to change it), as **Bands** (a picture of how each level's subjects are banded) or as the **Table** (every field in a row). On Bands, pick a level: whole-class subjects are filled cells, and each band is a bar across its classes with its groups and sizes; a click on a bar opens it on step 5's **Groups and bands**, which has a button back to the picture. The choice is remembered in your browser; department heads see all three and can change nothing.
 
+**Step 3's two views.** Step 3 shows the subjects as **Cards** (a subject and its G-levels are one card: the name is typed once, the G-levels are ticked, and one periods grid has a row per G-level) or as the **Table** (a row per subject and G-level). The choice is remembered in your browser; department heads see both and can change nothing.
+
 The student list goes in on the **Students** step, after the timetable is made (it is not needed to make one): paste it from Excel or a CSV, or upload an .xlsx or
 .csv, with each student's ID, name, class and group codes; the committee can then edit each student's groups there.
 To fill groups in the app, tick students (shift-click for a run, or the top box for everyone shown) and **Add to group**,
@@ -329,6 +331,7 @@ node tests/people.test.js                # reading a teacher list and the avatar
 node tests/split.test.js                 # periods cut into lessons, as ttgen cuts them
 node tests/classview.test.js            # step 2's cards and band picture
 node tests/venueview.test.js            # step 1's blocks view
+node tests/subjectview.test.js          # step 3's subject cards
 .venv/bin/python tests/test_venues.py   # equipment and configuration through the workbook
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 ```

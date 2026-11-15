@@ -247,7 +247,7 @@ function headLocks(main, id) {
   const off = (el, why) => { el.disabled = true; if (why && !el.title) el.title = why; };
   const all = () => [...main.querySelectorAll("input, select, textarea, button")];
   if (locked(id)) {
-    all().forEach(el => { if (el.dataset.rtab === undefined && el.dataset.cview === undefined && el.dataset.vview === undefined && el.dataset.cclose === undefined && el.dataset.vroom === undefined && el.dataset.vclose === undefined && el.dataset.cband === undefined && el.id !== "cvLevel") off(el); });   // the tabs of step 6 and the views of step 2 still switch, the level picker and the bars of Bands work, an open card still closes, and a room of step 1 opens (to read) and closes
+    all().forEach(el => { if (el.dataset.rtab === undefined && el.dataset.cview === undefined && el.dataset.vview === undefined && el.dataset.sview === undefined && el.dataset.cclose === undefined && el.dataset.vroom === undefined && el.dataset.vclose === undefined && el.dataset.cband === undefined && el.id !== "cvLevel") off(el); });   // the tabs of step 6 and the views of steps 2 and 3 still switch, the level picker and the bars of Bands work, an open card still closes, and a room of step 1 opens (to read) and closes
     main.querySelectorAll("[data-pop]").forEach(el => el.classList.add("ro"));
     main.insertAdjacentHTML("afterbegin", `<div class="notice readonly">Only the committee can change this step.</div>`);
     return;
@@ -1136,6 +1136,57 @@ function openBands(level) {   // from step 5: step 2 on Bands at that level
   CV.view = "bands"; if (ClassView.levels(S.spec).includes(level)) CV.level = level; cvOpen(null); try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { }
   S.step = STEPS.findIndex(x => x[0] === "classes"); save(); render(); window.scrollTo(0, 0);
 }
+const SUBJECTVIEW = "ttsetup.view.subjects";
+const SV = { view: "cards" };   // "cards" or "table"; kept for each person in their browser
+try { const sv = localStorage.getItem(SUBJECTVIEW); if (["cards", "table"].includes(sv)) SV.view = sv; } catch (e) { }
+function subjectsTable() {   // today's table and its Add button
+  const { out, crit } = issues(); const tags = (sc().tags || []).map(t => t[0]);
+  return `<div class="tablewrap"><table><tr><th>Subject</th><th>Code</th><th>${tagLabel()}</th><th>Department</th><th>Room kind</th><th>Lesson length</th>${levels().map(l => `<th>${esc(l)}</th>`).join("")}<th title="How many groups or classes have this subject on step 5 (Teaching groups & deployment): a banded group counts once, a whole-class subject once per class. 0: none yet, so it is not timetabled.">Teaching groups</th><th></th></tr>
+      ${S.spec.subjects.map((s, i) => `<tr id="subjects-${i}" class="${rowCls(out, crit, "subjects", i)}"><td style="min-width:220px">${inp(`spec.subjects.${i}.subject`, s.subject)}</td><td class="num">${inp(`spec.subjects.${i}.code`, s.code, "text", 'style="width:54px"')}</td><td>${sel(`spec.subjects.${i}.tag`, s.tag, tags, false)}</td><td>${sel(`spec.subjects.${i}.dept`, s.dept, sc().departments || [])}</td><td>${sel(`spec.subjects.${i}.room_kind`, s.room_kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.subjects.${i}.lesson_length`, s.lesson_length, "number", 'style="width:56px"')}</td>${levels().map(l => `<td class="num">${inp(`spec.subjects.${i}.periods.${l}`, (s.periods || {})[l], "number", 'style="width:56px"')}</td>`).join("")}<td class="calc">${teachingGroups(s.subject)}</td><td>${delBtn("subjects", i)}</td></tr>`).join("")}
+      </table></div><div class="row" style="margin-top:10px"><button data-add="subjects">+ Add subject</button></div>`;
+}
+/* step 3, Cards view: a subject and its G-levels as one card, a column per department. Nothing is kept between draws: the cards come from SubjectView.columns each time. */
+function subjectsCards() {
+  const { out, crit } = issues(), cols = SubjectView.columns(S.spec), T = SubjectView.tags(S.spec), L = levels(), subs = S.spec.subjects;
+  const tw = tagLabel() === "G-level" ? "G-level" : "level tag", tl = tw + "s";
+  const kinds = sc().room_kinds || [], depts = sc().departments || [], allTags = (sc().tags || []).map(t => t[0]);
+  const addBtn = d => `<button class="small" data-sadd="${encodeURIComponent(d)}">+ Add a subject</button>`;
+  if (!cols.length) return `<p class="muted">No subjects yet. Add one here, or switch to Table.</p><div class="row" style="margin-top:10px">${addBtn("")}</div>`;
+  const TG = `title="How many groups or classes have this subject on step 5 (Teaching groups & deployment): a banded group counts once, a whole-class subject once per class. 0: none yet, so it is not timetabled."`;
+  const sjSel = (id, what, cur, list) => `<select id="${id}" data-sset="${what}">${opt("", cur, "")}${list.map(v => opt(v, cur)).join("")}${cur && !list.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}</select>`;
+  const mark = ris => ris.some(ri => (out.subjects[ri] || []).some(m => isCrit(crit, "subjects", ri, m))) ? "bad" : ris.some(ri => (out.subjects[ri] || []).length) ? "caution" : "";
+  const periods = ri => L.map(l => `<td class="num">${inp(`spec.subjects.${ri}.periods.${l}`, ((subs[ri] || {}).periods || {})[l], "number", 'style="width:56px"')}</td>`).join("");
+  const msgsOf = ris => { const m = ris.flatMap(ri => out.subjects[ri] || []); return m.length ? `<div class="sjmsgs">${m.map(x => `<div>${esc(x)}</div>`).join("")}</div>` : ""; };
+  const odd = c => {   // a row shown as it is: the table's own boxes
+    const ri = c.ri, s = subs[ri] || {}, why = c.odd === "tag" ? `This row's name and its ${tw} do not match, so it is shown as it is. Make them match and it joins its subject's card.` : "Another row has this name and G-level. Delete one of the two.";
+    return `<div class="sjcard sjodd ${mark([ri])}" data-scard="${ri}">
+      <div class="sjfields"><label>Subject ${inp(`spec.subjects.${ri}.subject`, s.subject)}</label><label>Code ${inp(`spec.subjects.${ri}.code`, s.code, "text", 'style="width:70px"')}</label><label>${esc(tagLabel())} ${sel(`spec.subjects.${ri}.tag`, s.tag, allTags, false)}</label>
+        <label>Department ${sel(`spec.subjects.${ri}.dept`, s.dept, depts)}</label><label>Room kind ${sel(`spec.subjects.${ri}.room_kind`, s.room_kind, kinds)}</label><label>Lesson length ${inp(`spec.subjects.${ri}.lesson_length`, s.lesson_length, "number", 'style="width:70px"')}</label></div>
+      <p class="muted small sjwhy">${esc(why)}</p>
+      <div class="sjgridwrap"><table class="sjgrid"><tr>${L.map(l => `<th>${esc(l)}</th>`).join("")}<th ${TG}>Teaching groups</th></tr>
+        <tr id="subjects-${ri}" class="${rowCls(out, crit, "subjects", ri)}">${periods(ri)}<td class="calc">${teachingGroups(s.subject)}</td></tr></table></div>
+      ${msgsOf([ri])}<div class="row" style="margin-top:8px">${delBtn("subjects", ri)}</div></div>`;
+  };
+  const card = c => {
+    if (c.odd) return odd(c);
+    const ri = c.ri, first = subs[c.rows[0].ri] || {}, named = c.name !== "", ris = c.rows.map(x => x.ri), tagged = c.ticked.length > 0;
+    const ticks = (c.plain !== null && tagged ? [`<label class="sjtick"><input type="checkbox" id="sjtick-${ri}-plain" data-stick="" checked ${named ? "" : 'disabled title="Give the subject a name first."'}> no ${esc(tw)}</label>`] : [])
+      .concat(T.map((t, n) => `<label class="sjtick"><input type="checkbox" id="sjtick-${ri}-${n}" data-stick="${esc(t)}" ${c.ticked.includes(t) ? "checked" : ""} ${named ? "" : 'disabled title="Give the subject a name first."'}> ${esc(t)}</label>`));
+    const label = x => tagged ? (x.tag === "" ? `no ${esc(tw)}` : esc(x.tag)) : "";
+    const showKind = !c.same_kind, showLen = !c.same_length;
+    const grid = `<div class="sjgridwrap"><table class="sjgrid"><tr><th></th>${showKind ? "<th>Room kind</th>" : ""}${showLen ? "<th>Lesson length</th>" : ""}${L.map(l => `<th>${esc(l)}</th>`).join("")}<th ${TG}>Teaching groups</th></tr>
+      ${c.rows.map(x => `<tr id="subjects-${x.ri}" class="${rowCls(out, crit, "subjects", x.ri)}"><th scope="row" class="sjrow">${label(x)}</th>${showKind ? `<td>${sel(`spec.subjects.${x.ri}.room_kind`, (subs[x.ri] || {}).room_kind, kinds)}</td>` : ""}${showLen ? `<td class="num">${inp(`spec.subjects.${x.ri}.lesson_length`, (subs[x.ri] || {}).lesson_length, "number", 'style="width:56px"')}</td>` : ""}${periods(x.ri)}<td class="calc">${teachingGroups((subs[x.ri] || {}).subject)}</td></tr>`).join("")}</table></div>`;
+    return `<div class="sjcard ${mark(ris)}" data-scard="${ri}">
+      <div class="sjtop"><input id="sjname-${ri}" data-sname placeholder="Subject name" value="${esc(c.name)}"><input id="sjcode-${ri}" data-sset="code" placeholder="Code" value="${esc(c.code)}" style="width:64px"><button class="small danger" data-sremove title="Remove this subject and all its ${esc(tl)}">Delete</button></div>
+      ${ticks.length ? `<div class="sjticks">${ticks.join("")}</div>` : ""}
+      ${grid}
+      ${showKind || showLen ? `<p class="muted small sjwhy">The ${esc(tl)} differ in room kind or lesson length: each has its own below.</p>` : ""}
+      <div class="sjfields"><label>Department ${sjSel(`sjdept-${ri}`, "dept", first.dept, depts)}</label>${showKind ? "" : `<label>Room kind ${sjSel(`sjkind-${ri}`, "room_kind", first.room_kind, kinds)}</label>`}${showLen ? "" : `<label>Lesson length <input type="number" id="sjlen-${ri}" data-sset="lesson_length" value="${esc(first.lesson_length)}" style="width:70px"></label>`}</div>
+      ${msgsOf(ris)}</div>`;
+  };
+  return `<div class="sjcols">${cols.map(col => `<section class="sjcol"><div class="sjhead"><b>${col.dept === "" ? "No department yet" : esc(col.dept)}</b><span class="muted small">${col.cards.length} subject${col.cards.length === 1 ? "" : "s"}</span></div>
+    ${col.cards.map(card).join("")}<div class="row">${addBtn(col.dept)}</div></section>`).join("")}</div>`;
+}
 const VIEWS = {
   start() {
     const how = `<div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a band, a lesson with no periods).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
@@ -1202,12 +1253,12 @@ const VIEWS = {
     return `<div class="card"><div class="row" style="justify-content:space-between"><div><h1 style="margin:0">Step 2 · Classes</h1><p class="lead" style="margin:6px 0 0">Form classes with their level, size and home room (picked from step 1).</p></div><div class="row switch">${sw("cards")}${sw("bands")}${sw("table")}</div></div>
       ${CV.view === "bands" ? classesBands() : classesBars() + (CV.view === "table" ? classesTable() : classesCards())}</div>`;
   },
-  subjects() {
-    const { out, crit } = issues(); const tags = (sc().tags || []).map(t => t[0]);
-    return `<div class="card"><h1>Step 3 · Subjects</h1><p class="lead">Periods per ${Number(sc().weeks) === 2 ? "fortnight" : "week"} for each level that takes the subject (blank = not offered). Lessons are ${sc().lesson_length} periods long unless the subject says otherwise; leftovers become one or two shorter lessons. The code names the groups (1ELP1…). ${tagLabel()} is the level of study used for banding. <b>Teaching groups</b> fills in by itself: how many groups or classes are taught the subject on step 5 (each group in a band counts once, a whole-class subject once per class). 0 means no lessons yet, so it is not timetabled.</p>
-      <div class="tablewrap"><table><tr><th>Subject</th><th>Code</th><th>${tagLabel()}</th><th>Department</th><th>Room kind</th><th>Lesson length</th>${levels().map(l => `<th>${esc(l)}</th>`).join("")}<th title="How many groups or classes have this subject on step 5 (Teaching groups & deployment): a banded group counts once, a whole-class subject once per class. 0: none yet, so it is not timetabled.">Teaching groups</th><th></th></tr>
-      ${S.spec.subjects.map((s, i) => `<tr id="subjects-${i}" class="${rowCls(out, crit, "subjects", i)}"><td style="min-width:220px">${inp(`spec.subjects.${i}.subject`, s.subject)}</td><td class="num">${inp(`spec.subjects.${i}.code`, s.code, "text", 'style="width:54px"')}</td><td>${sel(`spec.subjects.${i}.tag`, s.tag, tags, false)}</td><td>${sel(`spec.subjects.${i}.dept`, s.dept, sc().departments || [])}</td><td>${sel(`spec.subjects.${i}.room_kind`, s.room_kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.subjects.${i}.lesson_length`, s.lesson_length, "number", 'style="width:56px"')}</td>${levels().map(l => `<td class="num">${inp(`spec.subjects.${i}.periods.${l}`, (s.periods || {})[l], "number", 'style="width:56px"')}</td>`).join("")}<td class="calc">${teachingGroups(s.subject)}</td><td>${delBtn("subjects", i)}</td></tr>`).join("")}
-      </table></div><div class="row" style="margin-top:10px"><button data-add="subjects">+ Add subject</button></div></div>`;
+  subjects() {   // step 3: the same subjects as Cards (a subject and its G-levels in one card) or as the Table
+    const sw = v => `<button class="${SV.view === v ? "on" : ""}" data-sview="${v}">${{ cards: "Cards", table: "Table" }[v]}</button>`;
+    const tl = tagLabel() === "G-level" ? "G-levels" : tagLabel().toLowerCase() + "s";
+    return `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><h1 style="margin:0">Step 3 · Subjects</h1></div><div class="row switch">${sw("cards")}${sw("table")}</div></div>
+      <p class="lead">Periods per ${Number(sc().weeks) === 2 ? "fortnight" : "week"} for each level that takes the subject (blank = not offered). Lessons are ${sc().lesson_length} periods long unless the subject says otherwise; leftovers become one or two shorter lessons. The code names the groups (1ELP1…). ${tagLabel()} is the level of study used for banding. <b>Teaching groups</b> fills in by itself: how many groups or classes are taught the subject on step 5 (each group in a band counts once, a whole-class subject once per class). 0 means no lessons yet, so it is not timetabled. On Cards, a subject and its ${tl} are one card: type the name once and tick the ${tl}.</p>
+      ${SV.view === "table" ? subjectsTable() : subjectsCards()}</div>`;
   },
   teachers() {
     const { out, crit, load } = issues(), f = S.tf, P = S.pick, q = f.q.trim().toLowerCase();
@@ -1459,6 +1510,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.restore) { restoreCopy(b.dataset.restore); return; }
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
   if (b.dataset.rtab) { R6.tab = b.dataset.rtab; render(); return; }
+  if (b.dataset.sview) { SV.view = b.dataset.sview === "table" ? "table" : "cards"; try { localStorage.setItem(SUBJECTVIEW, SV.view); } catch (e) { } render(); return; }
   if (b.dataset.vview) { VV.view = b.dataset.vview === "table" ? "table" : "blocks"; VV.open = null; VV.openId = null; try { localStorage.setItem(VENUEVIEW, VV.view); } catch (e) { } render(); return; }
   if (b.dataset.vroom !== undefined) { const vi = Number(b.dataset.vroom); if (!S.spec.venues[vi]) return; const was = VV.open === vi; vvOpen(was ? null : vi); render();
     if (was) { const t = document.querySelector(`[data-vroom="${vi}"]`); if (t) t.focus({ preventScroll: true }); }
