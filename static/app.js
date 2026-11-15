@@ -1148,7 +1148,7 @@ function subjectsTable() {   // today's table and its Add button
 /* step 3, Cards view: a subject and its G-levels as one card, a column per department. Nothing is kept between draws: the cards come from SubjectView.columns each time. */
 function subjectsCards() {
   const { out, crit } = issues(), cols = SubjectView.columns(S.spec), T = SubjectView.tags(S.spec), L = levels(), subs = S.spec.subjects;
-  const tw = tagLabel() === "G-level" ? "G-level" : "level tag", tl = tw + "s";
+  const tw = sjWord(), tl = sjWord(true);
   const kinds = sc().room_kinds || [], depts = sc().departments || [], allTags = (sc().tags || []).map(t => t[0]);
   const addBtn = d => `<button class="small" data-sadd="${encodeURIComponent(d)}">+ Add a subject</button>`;
   if (!cols.length) return `<p class="muted">No subjects yet. Add one here, or switch to Table.</p><div class="row" style="margin-top:10px">${addBtn("")}</div>`;
@@ -1197,16 +1197,19 @@ function sjShow(ri, sel, scroll) {   // after a redraw: the card that holds this
   return c;
 }
 const sjNum = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+function sjWord(plural) { return (tagLabel() === "G-level" ? "G-level" : "level tag") + (plural ? "s" : ""); }   // the school's own word for a G-level
 function sjName(e) {   // the name box: every row of the card is renamed
+  if (locked("subjects")) return;
   const el = e.target, c = sjCardOf(Number(el.closest("[data-scard]").dataset.scard));
   if (!c) { render(); return; }
   if (el.value.trim() !== c.name) {
-    if (!SubjectView.rename(S.spec, c.ri, el.value)) { toast("A subject with G-levels needs a name."); render(); return; }
+    if (!SubjectView.rename(S.spec, c.ri, el.value)) { toast(`A subject with ${sjWord(true)} needs a name.`); render(); return; }
     save(); render(); poll(); return;
   }
   render();
 }
 function sjSet(e) {   // code, department, room kind, lesson length: the same value on every row, stored as the table stores it
+  if (locked("subjects")) return;
   const el = e.target, c = sjCardOf(Number(el.closest("[data-scard]").dataset.scard)); if (!c) { render(); return; }
   let v = el.value; if (el.type === "number") v = v === "" ? null : Number(v); if (v === "") v = null;
   if (!SubjectView.set(S.spec, c.ri, el.dataset.sset, v)) { render(); return; }
@@ -1214,6 +1217,7 @@ function sjSet(e) {   // code, department, room kind, lesson length: the same va
   if (el.dataset.sset === "dept") sjShow(c.rows[0].ri, "[data-sset=dept]", true);
 }
 function sjTick(e) {   // a G-level's tick box: ticked adds it, unticked takes it off (asking first when lessons use it)
+  if (locked("subjects")) return;
   const el = e.target, tag = el.dataset.stick, c = sjCardOf(Number(el.closest("[data-scard]").dataset.scard));
   if (!c) { render(); return; }
   if (el.checked) {
@@ -1234,15 +1238,17 @@ function sjTick(e) {   // a G-level's tick box: ticked adds it, unticked takes i
   else if (left) sjShow(left.ri > row.ri ? left.ri - 1 : left.ri, tag === "" ? "[data-sname]" : `[data-stick="${CSS.escape(tag)}"]`);
 }
 function sjRemove(b) {   // Delete: always asks
+  if (locked("subjects")) return;
   const c = sjCardOf(Number(b.closest("[data-scard]").dataset.scard)); if (!c) { render(); return; }
   const names = new Set(c.rows.map(x => x.subject).filter(x => x !== "")), n = [...names].reduce((a, s) => a + SubjectView.uses(S.spec, s), 0);
-  const tl = tagLabel() === "G-level" ? "G-levels" : "level tags";
+  const tl = sjWord(true);
   const what = c.name === "" ? "this subject" : c.rows.length === 1 ? c.name : `${c.name} and its ${c.rows.length} ${tl}`;
-  if (!confirm(`Remove ${what}?${n ? ` ${sjNum(n, "lesson row", "lesson rows")} of step 5 use ${n === 1 ? "it" : "them"}.` : ""} Undo takes it back.`)) return;
+  if (!confirm(`Remove ${what}?${n ? ` ${sjNum(n, "lesson row", "lesson rows")} of step 5 ${n === 1 ? "uses" : "use"} ${c.rows.length === 1 ? "it" : "them"}.` : ""} Undo takes it back.`)) return;
   if (!SubjectView.remove(S.spec, c.ri)) return;
   unpick(); save(); render(); poll();
 }
 function sjAdd(dept) {
+  if (locked("subjects")) return;
   const ri = SubjectView.add(S.spec, dept); save(); render(); poll();
   const c = sjShow(ri, "[data-sname]", false); if (c) c.scrollIntoView({ block: "center" });
 }
@@ -1314,7 +1320,7 @@ const VIEWS = {
   },
   subjects() {   // step 3: the same subjects as Cards (a subject and its G-levels in one card) or as the Table
     const sw = v => `<button class="${SV.view === v ? "on" : ""}" data-sview="${v}">${{ cards: "Cards", table: "Table" }[v]}</button>`;
-    const tl = tagLabel() === "G-level" ? "G-levels" : tagLabel().toLowerCase() + "s";
+    const tl = sjWord(true);
     return `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><h1 style="margin:0">Step 3 · Subjects</h1></div><div class="row switch">${sw("cards")}${sw("table")}</div></div>
       <p class="lead">Periods per ${Number(sc().weeks) === 2 ? "fortnight" : "week"} for each level that takes the subject (blank = not offered). Lessons are ${sc().lesson_length} periods long unless the subject says otherwise; leftovers become one or two shorter lessons. The code names the groups (1ELP1…). ${tagLabel()} is the level of study used for banding. <b>Teaching groups</b> fills in by itself: how many groups or classes are taught the subject on step 5 (each group in a band counts once, a whole-class subject once per class). 0 means no lessons yet, so it is not timetabled. On Cards, a subject and its ${tl} are one card: type the name once and tick the ${tl}.</p>
       ${SV.view === "table" ? subjectsTable() : subjectsCards()}</div>`;
