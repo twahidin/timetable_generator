@@ -287,6 +287,23 @@ table.classtable td:nth-child(1) input{min-width:64px}
 table.classtable td:nth-child(2) select{min-width:88px}
 table.classtable td:nth-child(3) input{min-width:76px}
 table.classtable td:nth-child(4) select{min-width:104px}
+/* step 2, Cards view: a grid of class cards per level; an open card spreads over the row */
+.clevel{margin:16px 0 8px;font-size:14px;color:var(--navy)}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;align-items:start}
+.ccard{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel);cursor:pointer}
+.ccard:hover{border-color:#c5ccd8}
+.ccard.caution{background:#fff7e6}.ccard.bad{background:var(--warn-bg)}
+.ccard .chead{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.ccard .plus{display:inline-flex;width:28px;height:28px;border:1px dashed #cdd5e1;border-radius:50%;align-items:center;justify-content:center;color:var(--muted)}
+.csubs{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.chip.cwhole{background:var(--ok-bg);color:var(--ok)}
+.chip.cpart{background:#fff4d6;color:#7a5a00}
+.ccard.open{grid-column:1/-1;cursor:default;border-color:var(--accent)}
+.cfields{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 12px}
+.cfields label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted)}
+.cfields .cwide{grid-column:span 2}
+.cboxes{display:flex;flex-wrap:wrap;gap:6px}
+.cmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}
 .fxask{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 12px;background:#f8fafc}
 .fxask>.row{gap:6px;align-items:center}
 .fxask p{margin:6px 0 0}.fxchoice .row{gap:6px;margin-top:4px}.fxchoice button{padding:3px 10px;font-size:12px}
