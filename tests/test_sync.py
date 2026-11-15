@@ -111,16 +111,19 @@ passed += 1
 # what a head of department may change
 spec = {"teachers": [{"_id": "t1", "provisional": "No"}, {"_id": "t2", "provisional": "Yes"}, {"_id": "t3"}], "classes": [{"_id": "c1"}]}
 for ok in ([["set", "lessons", "l1", "students", 12]], [["add", "blocks", {"_id": "b9"}, ""]], [["del", "lessons", "l1"]],
-           [["merge", "teachers", "t1", "can_teach", [], []]], [["add", "teachers", {"_id": "t9", "provisional": "No"}, ""]],
-           [["set", "teachers", "t2", "name", "X"]], [["del", "teachers", "t2"]], []):
+           [["add", "teachers", {"_id": "t9", "provisional": "No"}, ""]],
+           [["set", "teachers", "t2", "name", "X"]], [["set", "teachers", "t2", "dept", "SC"]], [["del", "teachers", "t2"]], []):
     assert sync.head_may(spec, ok) is None, ok
 for bad in ([["set", "classes", "c1", "size", 9]], [["school", "name", "X"]], [["day", "Sec 1", "Mon", "FL"]], [["top", "k", 1]],
             [["set", "teachers", "t1", "name", "X"]], [["set", "teachers", "t3", "name", "X"]], [["del", "teachers", "t1"]],
+            [["merge", "teachers", "t1", "can_teach", [], []]], [["set", "teachers", "t2", "dept2", "SC"]],
             [["set", "teachers", "t2", "provisional", "No"]], [["add", "classes", {"_id": "c2"}, ""]],
             [["set", "lessons", "l1", "students", 1], ["set", "classes", "c1", "size", 9]], ["x"], [[]], [["set"]]):
     why = sync.head_may(spec, bad)
     assert isinstance(why, str) and why.endswith("."), bad
 assert "classes" in sync.head_may(spec, [["set", "classes", "c1", "size", 9]])
+assert sync.head_may(spec, [["set", "teachers", "t2", "dept2", "SC"]]) == "Only the committee gives a teacher a second department."
+assert sync.head_may(spec, [["merge", "teachers", "t1", "can_teach", [], []]]) == "Department heads can only add a teacher, or edit a provisional teacher."
 passed += 1
 
 # a head's batch is split: what they may make is applied, the rest is refused with a reason (index in the batch)

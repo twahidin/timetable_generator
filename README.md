@@ -9,7 +9,7 @@ code and download PDFs. The app does not generate timetables itself.
 |---|---|---|
 | `COMMITTEE_CODE` | timetable committee | the setup editor, the downloads, Publish, the personal student codes |
 | `TEACHER_CODE` | teachers | every class, teacher, room and student timetable, the lesson search, Who's free, PDFs |
-| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; everything on step 5 (who can teach what, who teaches which class, group or band, new groups and bands, moving rows between bands), and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
+| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; everything on step 5 (who teaches which class and group, new groups and bands, moving rows between bands), and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
 | `ANTHROPIC_API_KEY` (optional) | the committee, in Railway | with it set, the Fix card on step 8 has a box to type a request in words; only those words go to Anthropic. A server that still has `AI_PROVIDER=anthropic` and `AI_API_KEY` from an earlier version has the box too |
 | `TYPED_REQUEST_MODEL` (optional) | the committee, in Railway | the model that reads the words, `claude-opus-5-5` unless set (with the earlier `AI_API_KEY`, the model `AI_MODEL` names); `mock` is a practice reader that needs no key |
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
@@ -136,7 +136,7 @@ teachers of other departments with **+ Add to roster**, for a teacher who teache
 department. **+ New teacher** adds a hire or a post still to be filled: name (or a placeholder such as "New Mathematics
 teacher 1"), short name, department, role and allowance (the role's guide when left empty); a head's new teacher is
 provisional until the committee confirms them on step 4.
-In the middle, **Can teach**: a basket per subject of the department with the avatars of everyone who can teach it (each with the teacher's short
+In the middle, **Can teach**: a basket per subject of the department with the avatars of everyone able to teach it (each with the teacher's short
 name under it, the full name on hover; the cards on the right show the names the same way), from
 any department, and a **Staff room** for roster teachers with no subject yet. Tick teachers and click a basket, or drag
 them in (dragging a ticked teacher drags every ticked teacher). The ✕ on an avatar in a basket takes the subject off

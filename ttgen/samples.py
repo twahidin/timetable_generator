@@ -34,17 +34,10 @@ class Staffing:
         x["load"] += periods; x["subjects"].setdefault(subj, set()).add(level); x["classes"] |= set(classes)
         return x["name"]
     def teachers(self):
-        bands = self.school["bands"]; out = []
-        for x in self.t:
-            ct = []
-            for s, lv in x["subjects"].items():
-                lv = sorted(lv)
-                if len(lv) == 1: sc = lv[0]
-                elif len({bands[v] for v in lv}) == 1 and len(lv) == 2: sc = bands[lv[0]]
-                else: sc = "All"
-                ct.append(dict(subject=s, levels=sc))
-            out.append(dict(name=x["name"], short=x["short"], dept=x["dept"], allowance=self.allow, provisional="No", can_teach=ct[:8]))
-        return out
+        return [dict(name=x["name"], short=x["short"], dept=x["dept"], allowance=self.allow, provisional="No") for x in self.t]
+    def subjects_taught(self, name):
+        """how many subjects the builder gave the teacher (at most 8, as the old Can teach list held)"""
+        return min(len(next(x for x in self.t if x["name"] == name)["subjects"]), 8)
 
 SFIRST = ["Aiden", "Alicia", "Amirul", "Anya", "Arjun", "Bella", "Brandon", "Caleb", "Chloe", "Daniel", "Dhruv", "Elijah", "Emma", "Ethan", "Faris",
           "Gabriel", "Hannah", "Haziq", "Isaac", "Isabelle", "Jayden", "Jia Hui", "Jun Jie", "Kai", "Kayla", "Lucas", "Lydia", "Marcus", "Megan",
@@ -148,7 +141,7 @@ def _build(school, day_structure, venues, classes, subjects, plan, rules, allowa
                 s = next(x for x in subjects if x["subject"] == l["subject"]); p_ = s["periods"][l["level"]]; L_ = s.get("lesson_length") or school["lesson_length"]
                 out = max(out, -(-p_ // L_))
         return out
-    part = min(teachers, key=lambda t: (lessons_of(t["name"]), -len(t["can_teach"])))["name"]
+    part = min(teachers, key=lambda t: (lessons_of(t["name"]), -st.subjects_taught(t["name"])))["name"]
     return dict(school=school, day_structure=day_structure, venues=venues, classes=classes, subjects=subjects, teachers=teachers,
                 blocks=blocks, lessons=lessons, rules=rules(teachers, part), students=[], combinations=combinations or [])
 

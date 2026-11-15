@@ -3,6 +3,7 @@ import collections, copy, os, random, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE); sys.path.insert(0, ROOT)
 import fixes  # noqa: E402
 from ttgen import export, reader, template, verify  # noqa: E402
+from ttgen import spec as spec_mod  # noqa: E402
 from ttgen.export import ENTIRE  # noqa: E402
 from ttgen.samples import primary  # noqa: E402
 import openpyxl  # noqa: E402
@@ -248,8 +249,33 @@ def slots_for_a_lesson_and_a_block():
     ok = [s for s in S if s["state"] == "ok"]; assert ok and all(not [x for x in L if x["id"] != 7 and x["d"] == s["d"] and set(x["classes"]) & set(cls) and x["p"] < s["p"] + 2 and s["p"] < x["p"] + x["n"]] for s in ok)
 
 @t
+def teachers_offered_are_those_who_teach_the_subject_then_its_department():
+    # Mathematics G3 and G2 are one card; Aye teaches the G2 one; Bee and Cee (by a second department) are in MA; Dee is not
+    row = lambda sub, cls, tags, tg: dict(ROW, subject=sub, tag=tg, classes=cls, teachers=tags, code=ENTIRE, block=None, periods=2, level=LV)
+    subs = [dict(subject="Mathematics G3", code="MA", tag="G3", dept="MA", periods={}), dict(subject="Mathematics G2", code="MA", tag="G2", dept="MA", periods={})]
+    tch = [dict(name=n, short=n, dept=d, **x) for n, d, x in [("Dee", "SC", {}), ("Cee", "SC", dict(dept2="MA")), ("Bee", "MA", {}), ("Aye", "SC", {}), ("Now", "MA", {})]]
+    rows = [row("Mathematics G3", [CLS], ["Now"], "G3"), row("Mathematics G2", [B], ["Aye"], "G2")]
+    school = dict(SP["school"], tags=[["G3", "P"], ["G2", "A"], ["-", ""]])
+    L = [lesson(1, 0, 2, 2, [CLS], "Mathematics G3", ENTIRE, ["Now"], level=LV)]
+    m, sp = model_with(L, school=school, subjects=subs, teachers=tch, lessons=rows)
+    key = f"C:{CLS}:Mathematics G3"
+    assert [o["teachers"] for o in fixes.teacher_options(m, sp, DAYS, key)] == [["Aye"], ["Cee"], ["Bee"]], fixes.teacher_options(m, sp, DAYS, key)
+
+@t
+def nobody_to_offer_is_an_empty_list():
+    # a subject with no department, taught only by its own teacher; and a lesson whose subject is not on step 3's list
+    subs = [dict(subject="Assembly talk", code="AT", tag="-", dept="", periods={})]
+    rows = [dict(ROW, subject="Assembly talk", tag="-", classes=[CLS], teachers=["Solo"], code=ENTIRE, block=None, periods=2, level=LV)]
+    tch = [dict(name="Solo", short="Solo", dept="MA"), dict(name="Other", short="Other", dept="MA")]
+    L = [lesson(1, 0, 2, 2, [CLS], "Assembly talk", ENTIRE, ["Solo"], level=LV), lesson(2, 1, 2, 2, [B], "Unlisted", ENTIRE, ["Solo"], level=LV)]
+    m, sp = model_with(L, subjects=subs, teachers=tch, lessons=rows)
+    assert fixes.teacher_options(m, sp, DAYS, f"C:{CLS}:Assembly talk") == []
+    assert fixes.teacher_options(m, sp, DAYS, f"C:{B}:Unlisted") == []
+
+@t
 def teacher_room_add_delete_options():
-    P = verify.planned_rows(SP)[("C", CLS, SUBJ)]["periods"]; can = [x["name"] for x in SP["teachers"] if any(c.get("subject") == SUBJ for c in x.get("can_teach") or []) and x["name"] not in TEACHERS]
+    P = verify.planned_rows(SP)[("C", CLS, SUBJ)]["periods"]; dept = next(s["dept"] for s in SP["subjects"] if s["subject"] == SUBJ)
+    can = [x["name"] for x in SP["teachers"] if dept in spec_mod.teacher_depts(x) and x["name"] not in TEACHERS]
     free, busy = can[0], can[1]; home = next(c["home_room"] for c in SP["classes"] if c["class"] == CLS); other = next(v["room"] for v in SP["venues"] if v.get("kind") == "classroom" and v["room"] != home)
     L = [lesson(1, 0, 2, 2, [CLS], SUBJ, ENTIRE, TEACHERS, room=other, level=LV)] + [lesson(10 + k, 1 + k // 6, 5 + k % 6, 1, [CLS], SUBJ, ENTIRE, TEACHERS, level=LV) for k in range(P - 3)] \
         + [lesson(2, 0, 2, 2, [B], "Science", ENTIRE, [busy], room=home, level=LV)]

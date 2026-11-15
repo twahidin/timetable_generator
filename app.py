@@ -62,7 +62,7 @@ def page(title, body):
 CHOICES = {
     "committee": dict(title="Build and publish the timetable", blurb="Timetable committee: build the setup, download it, publish the timetable.",
                       label="Committee code", hint="Use the code given to the timetable committee.", roles=("committee",)),
-    "heads": dict(title="Department heads", blurb="Heads of department: who can teach what, teaching groups and bands.",
+    "heads": dict(title="Department heads", blurb="Heads of department: who teaches which class and group, teaching groups and bands.",
                   label="Heads' code", hint="Use the code given to heads of department.", roles=("head",)),
     "teacher": dict(title="Teacher's timetable", blurb="Every class, teacher and room timetable, Who's free and PDFs.",
                     label="Teacher code", hint="Use the teacher code the school gave you.", roles=("teacher",)),
@@ -270,7 +270,7 @@ def post_setup_changes():
         # head may not make is skipped and named in the answer, the rest of their work is applied
         split = sync.head_split
         for op in ops:      # a teacher added by a head is provisional until the committee confirms
-            if isinstance(op, list) and len(op) == 4 and op[0] == "add" and op[1] == "teachers" and isinstance(op[2], dict): op[2]["provisional"] = "Yes"
+            if isinstance(op, list) and len(op) == 4 and op[0] == "add" and op[1] == "teachers" and isinstance(op[2], dict): op[2]["provisional"] = "Yes"; op[2].pop("dept2", None)
     since = _int(body.get("since"))
     try: v, refused, mine = store.apply_changes(ops, client, since=since, filter=split)
     except store.Replaced: return _changes_reply(since, client)
