@@ -332,6 +332,7 @@ node tests/split.test.js                 # periods cut into lessons, as ttgen cu
 node tests/classview.test.js            # step 2's cards and band picture
 node tests/venueview.test.js            # step 1's blocks view
 node tests/subjectview.test.js          # step 3's subject cards
+node tests/teacherview.test.js          # step 4's teacher cards and the second department
 .venv/bin/python tests/test_venues.py   # equipment and configuration through the workbook
 .venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, an older workbook read as before
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
