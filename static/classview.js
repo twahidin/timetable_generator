@@ -103,7 +103,7 @@ var ClassView = (function () {
 
     // bands: a bar on the first row of its label where none of its classes is taken
     lanes.forEach(function (l) {
-      if ((l.level || "") !== level) return;
+      if ((l.level || "") !== level || !l.block) return;   // a band with no name yet is not drawn
       var want = Object.create(null), ks = [];
       (l.classes.length ? l.classes : [].concat.apply([], l.groups.map(function (g) { return g.classes; }))).forEach(function (cn) {
         if (cn in at && !want[cn]) { want[cn] = true; ks.push(at[cn]); }
@@ -116,13 +116,13 @@ var ClassView = (function () {
         if (last && last[0] + last[1] === k) last[1]++; else spans.push([k, 1]);
       });
       var subs = [];
-      l.groups.forEach(function (g) { var f = G.untag(g.subject); if (f && subs.indexOf(f) < 0) subs.push(f); });
+      l.groups.forEach(function (g) { var f = g.subject ? G.untag(g.subject) : ""; if (f && subs.indexOf(f) < 0) subs.push(f); });
       var list = put(subs.length === 1 ? subs[0] : l.block), i = 0;
       while (list[i] && ks.some(function (k) { return list[i].used[k]; })) i++;
       var row = rowOf(list, i);
       ks.forEach(function (k) { row.used[k] = true; });
       row.bars.push({ block: l.block, bi: l.bi, classes: ks.map(function (k) { return cols[k]; }), spans: spans,
-        groups: l.groups.map(function (g) { return { code: g.code, subject: g.subject, students: g.students }; }) });
+        groups: l.groups.map(function (g) { return { code: g.code || "", subject: g.subject || "", students: g.students }; }) });
     });
 
     // labels in the order of step 3's subjects, then the rest as they turned up

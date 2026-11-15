@@ -1038,8 +1038,8 @@ function classesBands() {   // a picture of one level: a column per class, a row
       else if (c) h += `<div class="cpcell" style="grid-row:${row};grid-column:${col(k)}" title="Part of the class, in a teaching group">${esc(c.code)}</div>`;
       else if (!covered.has(k)) h += `<div class="cecell" style="grid-row:${row};grid-column:${col(k)}"></div>`; });
     r.bars.forEach(b => b.spans.forEach(([f, n], pi) => {
-      const chips = pi ? "" : `<span class="cchips">${b.groups.map(g => { const f2 = Groups.untag(g.subject), rest = f2 === r.label ? g.subject.trim().slice(r.label.length).trim() : "";
-        return `<span class="chip">${esc(rest || g.subject)}${g.students != null ? ` · ${esc(g.students)}` : ""}</span>`; }).join("")}</span>`;
+      const chips = pi ? "" : `<span class="cchips">${b.groups.map(g => { const sub = g.subject || "", rest = sub && Groups.untag(sub) === r.label ? sub.trim().slice(r.label.length).trim() : "";
+        return `<span class="chip">${esc(rest || sub || "No subject yet")}${g.students != null ? ` · ${esc(g.students)}` : ""}</span>`; }).join("")}</span>`;
       h += `<button class="cbar" data-cband="${esc(b.block)}" style="grid-row:${row};grid-column:${col(f)} / span ${n}" title="Open ${esc(b.block)} on step 5"><b>${esc(b.block)}</b>${chips}</button>`; }));
     return h; }).join("");
   return `${picker}<div class="bandwrap"><div class="bandgrid" style="grid-template-columns:minmax(120px,max-content) repeat(${pic.classes.length},minmax(84px,1fr))"><div class="chcol corner" style="grid-row:1;grid-column:1"></div>${head}${cells}</div></div>`;

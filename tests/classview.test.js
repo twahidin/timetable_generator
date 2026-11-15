@@ -134,4 +134,19 @@ t("a_school_sized_setup_is_quick", () => {
   const t0 = Date.now(); const L = ClassView.cards(s); const B = s.school.levels.map(lv => ClassView.bands(s, lv)); const ms = Date.now() - t0;
   assert.strictEqual(L.reduce((a, l) => a + l.cards.length, 0), 32); assert.ok(B.every(b => b.rows.length >= 34)); assert.ok(ms < 300, `took ${ms} ms`);
 });
+t("a_band_with_no_name_yet_is_not_drawn", () => {
+  const s = fixture(); s.blocks.push({ block: "", level: "Sec 3", classes: ["3A"] }, { level: "Sec 3", classes: ["3B"] });
+  s.lessons.push({ level: "Sec 3", subject: "Art", block: "", classes: ["3A"], students: 5 });
+  const B = ClassView.bands(s, "Sec 3"), bars = B.rows.reduce((a, r) => a.concat(r.bars), []);
+  assert.ok(bars.every(b => b.block)); assert.strictEqual(bars.length, 3);                 // the three named bands of the fixture, nothing else
+  assert.deepStrictEqual(cellKinds(B.rows.find(r => r.label === "Art")), ["whole", null, null, null]);   // the row with an empty band box is a whole-class cell, once
+});
+t("a_group_with_no_subject_yet_does_not_change_its_bands_label", () => {
+  const s = fixture(); s.lessons.push({ level: "Sec 3", block: "Sec 3 Mathematics", classes: ["3A"], students: 3 }, { level: "Sec 3", subject: null, block: "Sec 3 Option A", classes: ["3A"] });
+  const B = ClassView.bands(s, "Sec 3"), m = B.rows.find(r => r.label === "Mathematics"), a = B.rows.find(r => r.label === "Sec 3 Option A");
+  assert.deepStrictEqual(m.bars[0].groups[m.bars[0].groups.length - 1], { code: "", subject: "", students: 3 });
+  assert.deepStrictEqual(a.bars[0].groups[a.bars[0].groups.length - 1], { code: "", subject: "", students: null });
+  const only = fixture(); only.blocks = only.blocks.slice(0, 1); only.lessons = [{ level: "Sec 3", block: "Sec 3 Mathematics", classes: ["3A"], students: 3 }];
+  assert.deepStrictEqual(ClassView.bands(only, "Sec 3").rows.map(r => r.label), ["Sec 3 Mathematics"]);   // no group has a subject: the band's own name
+});
 console.log(n + " cases passed");
