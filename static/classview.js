@@ -70,6 +70,72 @@ var ClassView = (function () {
     });
   }
 
-  return { cards: cards, levels: levels };
+  /* The band picture of one level: a column per class, a row per label. Subjects taken whole or as a kept group are
+     cells; a band is a bar across the columns of its classes, on the row of its subject (or its own name). */
+  function bands(spec, level) {
+    level = level == null ? "" : String(level);
+    var cols = [], at = Object.create(null);   // typed names key these tables
+    rows(spec, "classes").forEach(function (c) {
+      if (c && c["class"] && levelOf(c) === level && !(c["class"] in at)) { at[c["class"]] = cols.length; cols.push(c["class"]); }
+    });
+    if (!cols.length) return { level: level, classes: [], rows: [] };
+
+    var codes = G.codes(spec || {}), lanes = G.lanes(spec || {}, level);
+    var byLabel = Object.create(null), labels = [];
+    function put(label) {
+      if (!byLabel[label]) { byLabel[label] = []; labels.push(label); }
+      return byLabel[label];
+    }
+    function rowOf(list, i) { return list[i] || (list[i] = { cells: cols.map(function () { return null; }), bars: [], used: cols.map(function () { return false; }) }); }
+
+    // subjects with no band: one cell per class on the first row of the subject's label
+    rows(spec, "lessons").forEach(function (x, i) {
+      if (!x || x.block || !x.subject || !Array.isArray(x.classes)) return;
+      var code = codes[i], list = null;
+      x.classes.forEach(function (cn) {
+        if (!(cn in at)) return;
+        var row = rowOf(list || (list = put(G.untag(x.subject))), 0), k = at[cn], was = row.cells[k];
+        if (code === "Entire Class") row.cells[k] = { kind: "whole" };
+        else if (!was) row.cells[k] = { kind: "part", code: code };
+        row.used[k] = true;
+      });
+    });
+
+    // bands: a bar on the first row of its label where none of its classes is taken
+    lanes.forEach(function (l) {
+      if ((l.level || "") !== level) return;
+      var want = Object.create(null), ks = [];
+      (l.classes.length ? l.classes : [].concat.apply([], l.groups.map(function (g) { return g.classes; }))).forEach(function (cn) {
+        if (cn in at && !want[cn]) { want[cn] = true; ks.push(at[cn]); }
+      });
+      if (!ks.length) return;
+      ks.sort(function (a, b) { return a - b; });
+      var spans = [];
+      ks.forEach(function (k) {
+        var last = spans[spans.length - 1];
+        if (last && last[0] + last[1] === k) last[1]++; else spans.push([k, 1]);
+      });
+      var subs = [];
+      l.groups.forEach(function (g) { var f = G.untag(g.subject); if (f && subs.indexOf(f) < 0) subs.push(f); });
+      var list = put(subs.length === 1 ? subs[0] : l.block), i = 0;
+      while (list[i] && ks.some(function (k) { return list[i].used[k]; })) i++;
+      var row = rowOf(list, i);
+      ks.forEach(function (k) { row.used[k] = true; });
+      row.bars.push({ block: l.block, bi: l.bi, classes: ks.map(function (k) { return cols[k]; }), spans: spans,
+        groups: l.groups.map(function (g) { return { code: g.code, subject: g.subject, students: g.students }; }) });
+    });
+
+    // labels in the order of step 3's subjects, then the rest as they turned up
+    var order = Object.create(null);
+    rows(spec, "subjects").forEach(function (s, i) { var f = s && s.subject ? G.untag(s.subject) : ""; if (f && !(f in order)) order[f] = i; });
+    var known = labels.filter(function (l) { return l in order; }).sort(function (a, b) { return order[a] - order[b]; });
+    var out = [];
+    known.concat(labels.filter(function (l) { return !(l in order); })).forEach(function (label) {
+      byLabel[label].forEach(function (r) { if (r) out.push({ label: label, cells: r.cells, bars: r.bars }); });
+    });
+    return { level: level, classes: cols, rows: out };
+  }
+
+  return { cards: cards, levels: levels, bands: bands };
 })();
 if (typeof module !== "undefined") module.exports = ClassView;
