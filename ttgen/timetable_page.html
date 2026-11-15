@@ -131,7 +131,7 @@ const CLS = D.classes.map(r => ({ name: r[0], level: r[1], size: r[2], home: r[3
 const PNAME = D.parents_name || "Form teachers";
 const parentsLine = c => { const ps = (cIx.get(c) || {}).parents || []; return ps.length ? ` · ${PNAME}: ${ps.join(", ")}` : ""; };
 const TCH = D.teachers.map(r => ({ name: r[0], short: r[1], dept: r[2], allowance: r[3] }));
-const ROOMS = D.rooms.map(r => ({ name: r[0], kind: r[1], cap: r[2] }));
+const ROOMS = D.rooms.map(r => ({ name: r[0], kind: r[1], cap: r[2], equipment: r[3] || [], config: r[4] || "" }));   // an older page's data has three elements
 const STU = D.students.map(r => ({ id: String(r[0]), name: r[1], cls: r[2], groups: r[3] }));
 const cIx = new Map(CLS.map(c => [c.name, c])), tIx = new Map(TCH.map(t => [t.name, t])), rIx = new Map(ROOMS.map(r => [r.name, r])), sIx = new Map(STU.map(s => [s.id, s]));
 const uniq = a => [...new Set(a)];
@@ -208,7 +208,7 @@ function roomView(r) {
     for (const x of xs) { const k = x.subject + "|" + (x.group !== ENTIRE ? x.group : x.classes.join(", ")); let e = ent.get(k); if (!e) ent.set(k, e = { x, periods: 0 }); e.periods += x.n; }
   }
   const codes = codesFor(rows.map(x => x.level)), open = codes ? codes.join("").split("").filter(c => c === "L").length : ND * NP;
-  return { kind: "room", key: r, kicker: "Room", title: r, sub: `${info.kind || ""}${info.cap > 1 ? ` · ${info.cap} groups at once` : ""}`,
+  return { kind: "room", key: r, kicker: "Room", title: r, sub: `${info.kind || ""}${info.cap > 1 ? ` · ${info.cap} groups at once` : ""}${(info.equipment || []).length ? ` · Equipment: ${info.equipment.join(", ")}` : ""}${info.config ? ` · Configuration: ${info.config}` : ""}`,
     stats: [[info.kind || "-", "kind"], [used.size, "periods used"], [Math.round(100 * used.size / Math.max(1, open)) + "%", "of lesson time"]], codes, cells,
     legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? e.x.group : e.x.classes.join(", ")} · ${tshort(e.x.teachers)} · ${e.periods} periods` })), lt: "Used by", rows };
 }

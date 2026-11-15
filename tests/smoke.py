@@ -1079,7 +1079,7 @@ def test_a_published_room_page_shows_its_equipment():
     assert ix[other]["equipment"] == [] and ix[other]["configuration"] == ""
     end = " · Equipment: 30 keyboards, 2 amps · Configuration: cluster seating"; v = export.room_view(m, used)
     assert v["subtitle"].endswith(end) and v["pdf_subtitle"] == v["subtitle"][:-len(end)], v["subtitle"]
-    plain = lambda r: export.room_view(m, r)["subtitle"]; info = ix[other]
+    info = ix[other]
     want = info["kind"].capitalize() + (f" · holds {info['capacity']}" if info["capacity"] else "")
     vo = export.room_view(m, other); assert vo["subtitle"] == want and export._parents_block(vo) == [], vo["subtitle"]
     pdf = c.get(f"/pdf/rooms/{used}"); assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
@@ -1092,6 +1092,30 @@ def test_a_published_room_page_shows_its_equipment():
     vb = export.room_view(big, used); lines = export._parents_block(vb); R, _ = export._fonts()
     assert len(lines) >= 2 and all(stringWidth(l, R, 8.6) <= 420 for l in lines) and all(any(i in l for l in lines) for i in items), lines
     assert export.pdf_bytes(big, vb)[:4] == b"%PDF"
+    # the Excel heading line keeps every stat the plain subtitle does not hold (equipment text must not hide "30 periods used")
+    import openpyxl
+    three = cp.deepcopy(m); next(r for r in three["rooms"] if r["name"] == used)["equipment"] = ["30 keyboards", "2 amps", "1 projector"]
+    three["lessons"][0]["room"] = used                                 # the sample timetable names no room: put one lesson in it so the room has a sheet and stats
+    vt = export.room_view(three, used); xp = os.path.join(tempfile.mkdtemp(), "t.xlsx"); export.write_excel(three, xp, log=lambda *a: None)
+    ws = openpyxl.load_workbook(xp)["Rooms"]
+    r0 = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 1).value == used); head = ws.cell(r0 + 1, 1).value
+    for a_, b_ in vt["stats"]:
+        if str(a_) not in vt["pdf_subtitle"]: assert f"{a_} {b_}" in head, (a_, b_, head)
+    # the published web page: its data rows, an older model, and the served page
+    rows = {r[0]: r for r in export.html_data(m)["rooms"]}
+    assert rows[used][3:] == [["30 keyboards", "2 amps"], "cluster seating"] and rows[other][3:] == [[], ""], rows[used]
+    assert all(r[3:] == [[], ""] for r in export.html_data(old)["rooms"])
+    page = c.get("/timetable").get_data(as_text=True); assert "30 keyboards" in page and "Equipment: " in page
+    xs = cp.deepcopy(m); next(r for r in xs["rooms"] if r["name"] == used)["equipment"] = ["<b>x</b>"]
+    html = export.render_html(xs)                                    # the item travels as JSON in a script, its "</" escaped: no raw tag anywhere in the page text
+    assert "<b>x</b>" not in html and "<b>x<\\/b>" in html
+    src = open(os.path.join(ROOT, "ttgen", "timetable_page.html"), encoding="utf-8").read()
+    assert "${esc(v.sub || \"\")}" in src and "Equipment: ${" in src                                # the header is built from sub through esc(), as the Class Parents line is
+    # a long configuration wraps at " · " too: every line within the subtitle's width
+    lg = cp.deepcopy(m); rr = next(r for r in lg["rooms"] if r["name"] == used); rr["equipment"] = ["30 keyboards", "2 amps", "1 projector"]; rr["configuration"] = "cluster seating " + "with a very long note about the layout " * 2 + "end"
+    assert len(rr["configuration"]) >= 90; ls = export._parents_block(export.room_view(lg, used))
+    assert len(ls) >= 2 and all(stringWidth(l, R, 8.6) <= 420 for l in ls), ls
+    assert export.pdf_bytes(lg, export.room_view(lg, used))[:4] == b"%PDF"
     shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
 
 NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_sends_a_malformed_lessons_op", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
