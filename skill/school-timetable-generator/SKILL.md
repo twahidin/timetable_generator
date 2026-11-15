@@ -5,7 +5,7 @@ description: Generate a clash-free Singapore school timetable from a filled setu
 
 # School timetable generator
 
-Skill version: 2026-11.4 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
+Skill version: 2026-11.5 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
 
 Turns a filled **timetable setup workbook** into a timetable with no teacher, room or student in two places at once,
 then delivers it in three forms that always agree with each other:
@@ -35,7 +35,7 @@ subject-based banding) schools, and for any school that fills the same template.
 1. **Check the input first.** `python -m ttgen check SETUP.xlsx`. Fix or report every problem before solving:
    subjects with no periods for a level, rows with no class or teacher, unknown subjects. Also open `6 Lessons`,
    `More rules` and `4 Teachers`: text in a **Check** or **Load check** column is a problem the person must fix
-   (teacher not set to teach the subject, teacher twice in a block, repeated code, over allowance).
+   (teacher twice in a block, repeated code, over allowance).
 2. **Do the capacity sums** (cheap, catches most impossible inputs):
    - each class: periods it needs (whole-class subjects + the longest group in each block it belongs to) against the
      `L` periods in its level's Day structure, remembering that lessons have fixed lengths and cannot cross a break;
@@ -115,7 +115,7 @@ one row per typed rule in the order `python -m ttgen check` lists them; Result i
 | 1 Venues | room | Room, Kind (classroom, lab, pe venue, ...), Capacity, Block (building), Floor / level, Equipment, Configuration (notes only: never read them as constraints) |
 | 2 Classes | form class | Class, Level, Students, Home room |
 | 3 Subjects | subject | Subject, Code, G-level (G1/G2/G3 or -; `Level tag` with Std/Fdn/Higher for primary), Department, Room kind (blank = home room), optional Lesson length, then periods per cycle for each level |
-| 4 Teachers | teacher | Teacher, Short, Department, Allowance, Provisional, up to 8 pairs of Can teach / at (All, a level or a band such as Sec 1-2), Note, Role (from `Roles`), Other duties (periods); formulas show Periods given, Spare, Total load, Role guide, % of allowance, Load check |
+| 4 Teachers | teacher | Teacher, Short, Department, Department 2 (optional: a teacher who teaches in two departments), Allowance, Provisional, Note, Role (from `Roles`), Other duties (periods); formulas show Periods given, Spare, Total load, Role guide, % of allowance, Load check. A workbook made before 2026-11.5 has Can teach columns: ignore them. Any teacher may take any lesson the Lessons sheet gives them. |
 | Roles | role | Role, What it is, Guide allowance, Group (Management, Teacher, ...); above the table, the teacher (EO) and management average loads and the even-spread margin |
 | 5 Blocks | block | Block name, Level, Class 1-9 (more if needed): classes whose students are split into groups that all have lessons at the same time |
 | 6 Lessons | group, or class for a whole-class subject | Level, Subject, Block (empty = whole class), Class 1-9, Teacher 1-3, Students, optional Periods / Code overrides; formulas show Group code, Periods, Doubles and Triples (or the lesson lengths in use), Room kind, Teacher periods, Check |

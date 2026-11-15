@@ -70,7 +70,7 @@ is not on step 3, and a named subject the class has only in groups.
    first, each with a button to the step that fixes it; it runs again whenever the setup changes (`checks.py`).
 3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
-   `SKILL.md` carries a version line (`Skill version: 2026-11.4`) and the workbook's README sheet names the version it
+   `SKILL.md` carries a version line (`Skill version: 2026-11.5`) and the workbook's README sheet names the version it
    was made for. When the setup has second choices (step 6), step 7 counts them and asks **If the first choices do not
    fit:** **Fall back only when needed** (the default) or **Make one timetable for each**; the workbook carries the pick
    on its Choices sheet. Every downloaded workbook also carries a **Configuration id** row on Settings (`v14`, or `v14+`
@@ -333,6 +333,7 @@ node tests/classview.test.js            # step 2's cards and band picture
 node tests/venueview.test.js            # step 1's blocks view
 node tests/subjectview.test.js          # step 3's subject cards
 .venv/bin/python tests/test_venues.py   # equipment and configuration through the workbook
+.venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, no Can teach
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 ```
 To try the Fix card's box without a key, start with `TYPED_REQUEST_MODEL=mock`: it understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".
