@@ -107,6 +107,16 @@ t("a_tick_that_cannot_be_made_changes_nothing", () => {
   same(s, () => assert.deepStrictEqual([SubjectView.tick(s, 0, "G3"), SubjectView.tick(s, 0, "G9"), SubjectView.tick(s, 0, "-"), SubjectView.tick(s, 0, ""), SubjectView.tick(s, 9, "G2"), SubjectView.tick(s, 10, "G3"), SubjectView.tick(s, 99, "G3"), SubjectView.tick({}, 0, "G3")],
     [null, null, null, null, null, null, null, null]));   // ticked already; not one of the school's tags; a row shown as it is; a card with no name; no such row
 });
+t("a_tick_never_makes_a_second_subject_of_one_name", () => {
+  const s = fixture();
+  s.subjects.push({ subject: "Science G2", tag: "-", dept: "Science", code: "SC" });                          // 9: typed in the table with no G-level
+  same(s, () => assert.strictEqual(SubjectView.tick(s, 5, "G2"), null));                                      // the row would be added
+  s.subjects.push({ subject: "Art G3", tag: "G2", dept: "Aesthetics", code: "AR" });                          // 10
+  same(s, () => assert.strictEqual(SubjectView.tick(s, 7, "G3"), null));                                      // the row would be changed
+  s.subjects.push({ subject: " Art G1 ", tag: "G1", dept: "Humanities", code: "AH" });                        // 11: another department, spaces round the name
+  same(s, () => assert.strictEqual(SubjectView.tick(s, 7, "G1"), null));
+  assert.deepStrictEqual(SubjectView.tick(s, 7, "G2"), { ri: 7, how: "changed" });                            // a name nobody has is still fine
+});
 t("unticking_removes_the_row_and_the_last_tag_leaves_the_subject_with_no_tag_and_no_periods", () => {
   const s = fixture(), g3 = s.subjects[0];
   assert.deepStrictEqual(SubjectView.untick(s, 0, "G2"), { how: "removed" });

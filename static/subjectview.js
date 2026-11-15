@@ -109,6 +109,8 @@ var SubjectView = (function () {
     var card = cardAt(spec, ri);
     if (!card || card.odd || card.name === "" || tags(spec).indexOf(tag) < 0 || card.ticked.indexOf(tag) >= 0) return null;
     var list = spec.subjects, label = card.name + " " + tag;
+    var mine = card.rows.length === 1 && card.rows[0].tag === "" ? card.rows[0].ri : -1;
+    if (list.some(function (r, i) { return i !== mine && r && typeof r === "object" && text(r.subject) === label; })) return null;
     if (card.rows.length === 1 && card.rows[0].tag === "" && uses(spec, card.rows[0].subject) === 0) {
       var only = list[card.rows[0].ri];
       only.subject = label; only.tag = tag;
