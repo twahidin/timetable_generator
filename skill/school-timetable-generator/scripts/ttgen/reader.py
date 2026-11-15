@@ -178,7 +178,7 @@ def read_template(path):
     teachers = []
     for x in te:
         if not x.get("Teacher"): continue
-        d1, d2 = x.get("Department"), str(x.get("Department 2") or "").strip() or None   # Can teach columns of an older workbook are not read
+        d1, d2 = x.get("Department"), str(x.get("Department 2") or "").strip() or None   # columns of an older workbook not named here are not read
         teachers.append(dict(name=str(x["Teacher"]), short=x.get("Short"), dept=d1, dept2=None if d2 == str(d1 or "").strip() else d2, allowance=x.get("Allowance (periods)"),
                              provisional=x.get("Provisional"), role=x.get("Role"), other_duties=x.get("Other duties"), note=x.get("Note")))
     _, bl = _table(wb["5 Blocks"], "Block")

@@ -333,7 +333,7 @@ node tests/classview.test.js            # step 2's cards and band picture
 node tests/venueview.test.js            # step 1's blocks view
 node tests/subjectview.test.js          # step 3's subject cards
 .venv/bin/python tests/test_venues.py   # equipment and configuration through the workbook
-.venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, no Can teach
+.venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, an older workbook read as before
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 ```
 To try the Fix card's box without a key, start with `TYPED_REQUEST_MODEL=mock`: it understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".

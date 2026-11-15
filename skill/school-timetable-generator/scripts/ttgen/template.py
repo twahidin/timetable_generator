@@ -91,7 +91,7 @@ def write_template(spec, path, extra_rows=120):
              ("2", C, "List the classes; pick each one's level and home room (from Step 1)."),
              ("3", S, f"List the subjects with code, {TAGH}, department, room kind (Step 1 kinds) and periods a {fortnight} per level. "
                       f"{LENGTH_NAME.get(L_std - 1, 'Shorter lessons')} and {LENGTH_NAME.get(L_std, 'full lessons').lower()} follow from the periods."),
-             ("4", T, "List the teachers with their department and role. Periods given and Spare update as you fill Step 6. "
+             ("4", T, "List the teachers with their department. Periods given and Spare update as you fill Step 6. "
                       "Pick each teacher's role (HOD, SH, EO...); the Roles sheet shows the load by role."),
              ("5", BL, "Name each block of groups that run together and pick its classes (Step 2). Its groups, student totals and longest periods fill in from Step 6."),
              ("6", L, "One row per group (or per class for whole-class subjects): pick level, subject (Step 3), block (Step 5), classes (Step 2) and teachers (Step 4). "
