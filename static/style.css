@@ -354,3 +354,26 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .vfields .vwide{grid-column:span 2}
 .vdraft{margin-top:8px;align-items:flex-end;gap:8px}
 .vmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}
+/* step 3, Cards view: a column per department, a card per subject with one periods grid */
+.sjcols{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-items:start}
+.sjcol{min-width:0;display:flex;flex-direction:column;gap:10px}
+.sjhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;border-bottom:2px solid var(--line);padding-bottom:4px}
+.sjhead b{color:var(--navy)}
+.sjcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel)}
+.sjcard.caution{background:#fff7e6}.sjcard.bad{background:var(--warn-bg)}
+.sjtop{display:flex;gap:6px;align-items:center}
+.sjtop input[data-sname]{flex:1;min-width:0;font-weight:600}
+.sjticks{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:12.5px}
+.sjtick{display:inline-flex;gap:4px;align-items:center}
+.sjgridwrap{overflow-x:auto;margin-top:8px}
+.sjgrid{border-collapse:collapse}
+.sjgrid th{position:static;white-space:nowrap;padding:4px 3px}
+.sjgrid td{padding:4px 2px}
+.sjgrid input[type=number]{width:40px!important;padding:4px 2px}
+.sjgrid th:last-child,.sjgrid th.sjrow{white-space:normal}
+.sjgrid th:last-child{min-width:54px}
+.sjgrid th.sjrow{background:transparent;color:var(--ink);font-size:12.5px}
+.sjfields{display:flex;flex-wrap:wrap;gap:6px 10px;margin-top:8px}
+.sjfields label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted)}
+.sjwhy{margin:8px 0 0}
+.sjmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}
