@@ -231,10 +231,10 @@ def rule_subjects(m, spec, lessons):
     for w in _rule_ws(m, spec, lessons): out.setdefault(_subject(w), w)
     return out
 
-def _bears(m, spec, r, x):
+def _bears(m, spec, r, x, depts):
     """whether rule row r can see lesson row x at all, wherever it sits: a change to lessons it cannot see leaves its warnings as they were"""
     rule, sc, tg = r.get("rule"), r.get("scope"), r.get("target")
-    if rule == "Keep free together": return any(m["teacher_ix"].get(t, {}).get("dept") == tg for t in x["teachers"]) or any(m["class_ix"].get(c, {}).get("level") == tg for c in x["classes"])
+    if rule == "Keep free together": return any(tg in depts.get(t, ()) for t in x["teachers"]) or any(m["class_ix"].get(c, {}).get("level") == tg for c in x["classes"])
     if rule == "Not on the same day as":
         dept = m["subjects"].get(x["subject"], {}).get("dept"); return verify.subject_test(tg)(x["subject"], dept) or verify.subject_test(r.get("subject"))(x["subject"], dept)
     if rule in ("At least one recess a day", "Max periods in a row"): return sc != "Teacher" or tg in x["teachers"]
@@ -306,7 +306,8 @@ def judge(m, spec, days, fix, ctx=None):
             was = c["placed"].get(k, 0); now, want = was - ko[k] + kn[k], m["planned"].get(k, 0)
             if now != was and not (was < now <= want or want <= now < was): return res("no", f"That would leave {verify._name(k)} with {now} periods; step 3 plans {want}.")
     rules = spec.get("rules") or []; seen = old + new
-    keep = tuple(i for i, r in enumerate(rules) if r.get("rule") != "In words" and any(_bears(m, spec, r, x) for x in seen))
+    depts = c["memo"].setdefault(("depts", id(spec)), verify.teacher_depts(m, spec))   # once per request and setup, not per lesson
+    keep = tuple(i for i, r in enumerate(rules) if r.get("rule") != "In words" and any(_bears(m, spec, r, x, depts) for x in seen))
     near = _near(b, old) | _near(b, new)
     for i in keep:
         if rules[i].get("rule") in WIDE and (test := verify.in_scope(m, spec, rules[i])):

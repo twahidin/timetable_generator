@@ -6,7 +6,7 @@ from collections import Counter
 from . import parents
 from .export import ENTIRE
 from .solver import rule_label
-from .spec import floating_recess, names_list, subject_test, typed_rules
+from .spec import floating_recess, names_list, subject_test, teacher_depts as teacher_depts_of, typed_rules
 
 KINDS = ("clash", "deployment", "rule", "typed", "choice")
 APPEND = "(end)"   # an add op's "after": not a row id, so sync.apply puts the row last ("" would put it first and renumber the group codes after it)
@@ -169,11 +169,18 @@ def _not_available(m, spec, i, r, days, per):
         out.append(_hit(m, r, i, _key(x, q), f"{r['target']} has {x['subject']} {who} on {m['days'][x['d']]} period {q} but is not available ({_pr(per)}).", group, x))
     return out
 
+def teacher_depts(m, spec):
+    """{teacher: their departments, home first}: every teacher of the setup; one the timetable names and the setup does not keeps the department the timetable gives"""
+    out = {t["name"]: teacher_depts_of(t) for t in spec.get("teachers", [])}
+    for name, t in m["teacher_ix"].items():
+        if name not in out: out[name] = teacher_depts_of(t)
+    return out
+
 def _keep_free_together(m, spec, i, r, days, per):
-    out, seen = [], set()
+    out, seen = [], set(); depts = teacher_depts(m, spec) if r.get("scope") == "Department" else {}
     for x in m["lessons"]:
         if x["d"] not in days or (q := next(iter(_inside(x, per)), None)) is None: continue
-        if r.get("scope") == "Department": who = [t for t in x["teachers"] if m["teacher_ix"].get(t, {}).get("dept") == r["target"]]
+        if r.get("scope") == "Department": who = [t for t in x["teachers"] if r["target"] in depts.get(t, ())]
         else: who = [c for c in x["classes"] if m["class_ix"].get(c, {}).get("level") == r["target"]]
         for w in who:
             if (w, x["d"]) in seen: continue

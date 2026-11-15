@@ -15,7 +15,7 @@ import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
 from .spec import PE_KIND, RULE_TYPES, SCOPES, TYPED, WEEKDAYS, ampm, family as _family, floating_recess, names_list, periods_by_day, resolve_row, structure_vs_rules, \
-    subject_test, trim_day, windows as _windows
+    subject_test, teacher_depts, trim_day, windows as _windows
 
 W_PREF, W_SLACK, W_MOVE = 60, 40, 10
 RECESS_KEY = "~recess"   # in a placements file: {class: [[start, length]]}, each class's floating recess
@@ -35,7 +35,7 @@ class Problem:
         self.cls = {c["class"]: c for c in spec["classes"]}
         self.level_of = {c["class"]: c["level"] for c in spec["classes"]}
         self.rows = [x for x in spec["lessons"] if x.get("periods") and x.get("classes")]
-        self.tdept = {t["name"]: t.get("dept") for t in spec["teachers"]}
+        self.tdepts = {t["name"]: teacher_depts(t) for t in spec["teachers"]}
         fr = floating_recess(sc); self.RL, self.recess_by, self.recess_cap = fr["length"], fr["by"], fr["at_once"]
         self.windows = {lv: [_windows(row) for row in rows] for lv, rows in self.grid.items()}   # per day: [(first, last)] of each W run
         self._units()
@@ -515,7 +515,7 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
     busy_t = collections.defaultdict(set); soft_t = collections.defaultdict(collections.Counter)
     for r in has("Not available", "Teacher") + has("Keep free together", "Department"):
         S, _ = P.rule_positions(r)
-        who = [r["target"]] if r["scope"] == "Teacher" else [t for t, d in P.tdept.items() if d == r["target"]]
+        who = [r["target"]] if r["scope"] == "Teacher" else [t for t, ds in P.tdepts.items() if r["target"] in ds]
         for t in who:
             if str(r.get("strength") or "Must") == "Must": busy_t[t] |= S
             else:

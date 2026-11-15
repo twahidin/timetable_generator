@@ -10,7 +10,8 @@ from openpyxl.utils import get_column_letter
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-from ttgen import reader, spec, template  # noqa: E402
+import checks  # noqa: E402
+from ttgen import reader, solver, spec, template  # noqa: E402
 from ttgen.samples import primary, secondary  # noqa: E402
 
 passed = 0
@@ -83,6 +84,18 @@ def a_stored_can_teach_is_left_out_of_the_workbook():
     sp = secondary(); sp["teachers"][0]["can_teach"] = [dict(subject=sp["subjects"][0]["subject"], levels="All")]
     p = write(sp); assert not [h for h in headings(p, "4 Teachers") if str(h).startswith("Can teach")]
     assert "can_teach" not in reader.read_template(p)["teachers"][0] and sp["teachers"][0]["can_teach"]   # the setup's own list is not touched
+
+
+@t
+def the_solver_and_the_checks_block_a_second_department_too():
+    sp = secondary(); reader.derive(sp); T = next(x for x in sp["teachers"] if any(x["name"] in (l.get("teachers") or []) for l in sp["lessons"]))
+    d2 = next(d for d in sp["school"]["departments"] if d != T["dept"])
+    T["dept2"] = d2; P = solver.Problem(sp)
+    assert P.tdepts[T["name"]] == [T["dept"], d2] and not hasattr(P, "tdept")
+    # a Must rule that keeps d2 free for every period of every day (no from or to: the whole day): this teacher, who has lessons, can no longer fit them
+    sp["rules"].append(dict(scope="Department", target=d2, rule="Keep free together", week="Both", day="All", strength="Must"))
+    assert any(line.startswith(T["name"] + " teaches") for line in checks._teacher_fit(solver.Problem(sp)))
+    del T["dept2"]; assert not any(line.startswith(T["name"] + " teaches") for line in checks._teacher_fit(solver.Problem(sp)))
 
 
 @t

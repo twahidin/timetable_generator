@@ -227,7 +227,7 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
    tag). For each kind: NoOverlap over the class's whole-class lessons plus the block lessons that kind attends.
    Also NoOverlap(whole-class lessons of the class + all lessons of each block listing the class).
 5. **Teachers.** NoOverlap over every lesson they take part in, plus fixed intervals for Must "Not available" and
-   "Keep free together" (department).
+   "Keep free together" (department). A teacher with a Department 2 counts in both departments.
 6. **Rooms.** Per room kind, AddCumulative with capacity = number of rooms of that kind (a room's "At most N at
    once" rule counts it N times); demand = groups of that kind in the lesson; rows with no kind use classrooms.
    Room "Not available" adds fixed demand. "Only in venues" (Must): where a lesson may start decides which rooms it may

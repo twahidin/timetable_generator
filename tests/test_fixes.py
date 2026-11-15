@@ -199,6 +199,18 @@ def keep_free_together_is_about_the_day_not_its_first_lesson():
     r = fixes.judge(m, sp, DAYS, dict(kind="move", id=3, d=1, p=2)); assert r["state"] == "no" and r["why"].startswith("Rule Department"), r   # a clean day broken anew
 
 @t
+def keep_free_together_bears_on_a_second_department_teacher():
+    other = next(d for d in SP["school"]["departments"] if d != next(x["dept"] for x in SP["teachers"] if x["name"] == T[0]))
+    win = dict(scope="Department", target=other, rule="Keep free together", week="Both", day="All", strength="Must", **{"from": 2, "to": 3})
+    L = [lesson(1, 0, 5, 1, [A], "Art", ENTIRE, [T[0]], level=LV)]
+    teachers = [dict(x, dept2=other) if x["name"] == T[0] else x for x in SP["teachers"]]
+    m, sp = model_with(L, rules=[win], teachers=teachers); depts = verify.teacher_depts(m, sp)
+    assert fixes._bears(m, sp, win, m["lessons"][0], depts)
+    m0, sp0 = model_with(L, rules=[win]); assert not fixes._bears(m0, sp0, win, m0["lessons"][0], verify.teacher_depts(m0, sp0))
+    r = fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=1, p=2)); assert r["state"] == "no" and r["why"].startswith("Rule Department"), r   # into the window
+    assert fixes.judge(m0, sp0, DAYS, dict(kind="move", id=1, d=1, p=2))["state"] != "no"
+
+@t
 def a_lesson_length_in_any_spelling():
     rows = [dict(x, length="2.0") if x is ROW else dict(x, length="two") if x["classes"] == [CLS] and x["code"] == ENTIRE else x for x in SP["lessons"]]
     m, sp = model_with([lesson(1, 0, 2, 1, [CLS], SUBJ, ENTIRE, TEACHERS, level=LV)], lessons=rows)
