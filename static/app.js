@@ -247,7 +247,7 @@ function headLocks(main, id) {
   const off = (el, why) => { el.disabled = true; if (why && !el.title) el.title = why; };
   const all = () => [...main.querySelectorAll("input, select, textarea, button")];
   if (locked(id)) {
-    all().forEach(el => { if (el.dataset.rtab === undefined && el.dataset.cview === undefined && el.dataset.cclose === undefined && el.dataset.cband === undefined && el.id !== "cvLevel") off(el); });   // the tabs of step 6 and the views of step 2 still switch, the level picker and the bars of Bands work, and an open card still closes
+    all().forEach(el => { if (el.dataset.rtab === undefined && el.dataset.cview === undefined && el.dataset.vview === undefined && el.dataset.cclose === undefined && el.dataset.cband === undefined && el.id !== "cvLevel") off(el); });   // the tabs of step 6 and the views of step 2 still switch, the level picker and the bars of Bands work, and an open card still closes
     main.querySelectorAll("[data-pop]").forEach(el => el.classList.add("ro"));
     main.insertAdjacentHTML("afterbegin", `<div class="notice readonly">Only the committee can change this step.</div>`);
     return;
@@ -960,6 +960,35 @@ function cfAdd() {   // the form's values as they are now (a box typed in may no
   CF.open = false; save(); render();
   const el = document.getElementById(`choices-${r.i}`); if (el) el.scrollIntoView({ block: "center" });
 }
+/* ---------------- step 1: the Blocks and Table views of the rooms */
+const VENUEVIEW = "ttsetup.view.venues";
+const VV = { view: "blocks", open: null, openId: null, draft: null };   // open: the index of the open room, found again by openId (the row's own _id) on each draw
+try { const vv = localStorage.getItem(VENUEVIEW); if (["blocks", "table"].includes(vv)) VV.view = vv; } catch (e) { }
+function venuesTable() {   // today's table, and two notes at its end
+  const { out, crit } = issues();
+  return `<div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Block</th><th>Floor / level</th><th>Home room of</th><th>For</th><th>Note</th><th>Equipment</th><th>Configuration</th><th></th></tr>
+      ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${rowCls(out, crit, "venues", i)}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.only_for" list="forNames" value="${esc((v.only_for || []).join(", "))}" placeholder="anyone"></td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.equipment" value="${esc((Array.isArray(v.equipment) ? v.equipment : []).join(", "))}" placeholder="none"></td><td style="min-width:150px">${inp(`spec.venues.${i}.configuration`, v.configuration)}</td><td>${delBtn("venues", i)}</td></tr>`).join("")}
+      </table></div><datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div>`;
+}
+/* the kinds the app ships with: a fixed colour and a short mark each; any other kind is neutral */
+const VKINDS = { "classroom": ["CR", "#2563eb"], "lab": ["LB", "#7c3aed"], "science room": ["SC", "#0e7490"], "computer lab": ["CL", "#0369a1"], "art room": ["AR", "#c2410c"], "d&t studio": ["DT", "#a16207"], "food lab": ["FL", "#be185d"], "music room": ["MU", "#9333ea"], "pe venue": ["PE", "#15803d"], "hall": ["HL", "#b45309"], "special room": ["SP", "#475569"] };
+const vkindOf = k => { const key = String(k || "").trim().toLowerCase(); return Object.prototype.hasOwnProperty.call(VKINDS, key) ? VKINDS[key] : ["··", "#7b8496"]; };
+const vkindMark = k => { const [m, c] = vkindOf(k); return `<i class="vmark" style="background:${c}">${esc(m)}</i>`; };
+function venuesBlocks() {   // the rooms by block and floor, to look at
+  const { out, crit } = issues();
+  const bl = VenueView.blocks(S.spec);
+  if (!bl.length) return `<p class="muted vempty">No rooms yet. Add them with the bar above, or switch to Table.</p>`;
+  const used = VenueView.kinds(S.spec).filter(k => S.spec.venues.some(v => v && v.kind === k));
+  const legend = used.length ? `<div class="vlegend">${used.map(k => `<span>${vkindMark(k)} ${esc(k)}</span>`).join("")}</div>` : "";
+  const tile = r => {
+    const line = r.home.length ? `Home of ${r.home.join(", ")}` : r.only_for.length ? `Kept for ${r.only_for.join(", ")}` : "";
+    const notes = r.equipment.length || r.configuration.trim() ? `<span class="vflag" title="${esc([r.equipment.length ? "Equipment: " + r.equipment.join(", ") : "", r.configuration.trim() ? "Configuration: " + r.configuration.trim() : ""].filter(Boolean).join(". "))}">+ notes</span>` : "";
+    return `<button class="vtile ${rowCls(out, crit, "venues", r.vi)}" data-vroom="${r.vi}" id="venues-${r.vi}"><span class="vname">${r.room ? esc(r.room) : "(no name yet)"}${notes}</span><span class="vkind">${vkindMark(r.kind)} ${esc(r.kind || "no kind")}${r.capacity != null ? ` · ${esc(r.capacity)} seats` : ""}</span>${line ? `<span class="vnote">${esc(line)}</span>` : ""}</button>`;
+  };
+  const floorName = f => f === "" ? "No floor yet" : /^-?\d+(\.\d+)?$/.test(f) ? `Floor ${f}` : f;
+  return `${legend}<div class="vblocks">${bl.map(b => `<section class="vpanel"><h3>${b.block === "" ? "No block yet" : esc(b.block)} <span class="muted">${b.rooms} ${b.rooms === 1 ? "room" : "rooms"} · ${b.seats} seats</span></h3>
+      ${b.floors.map(f => `<div class="vfloor"><div class="vflabel">${esc(floorName(f.floor))}</div><div class="vtiles">${f.rooms.map(tile).join("")}</div></div>`).join("")}</section>`).join("")}</div>`;
+}
 /* ---------------- step 2: the Cards, Bands and Table views of the classes */
 const CLASSVIEW = "ttsetup.view.classes";
 const CV = { view: "cards", open: null, openId: null, level: "" };   // open: the index of the open card, found again by openId (the row's own _id) on each draw, so another person's change cannot move it to another class
@@ -1110,13 +1139,11 @@ const VIEWS = {
       ${hasWindows() ? `<h3 style="margin:14px 0 4px">Floating recess</h3><p class="muted" style="margin:0 0 8px">For the W periods: the solver puts a recess of this length in each recess window. Make a window the recess plus whole lessons (for example 2 + 3 + 3 periods with 3-period lessons), so the lessons still fit wherever the recess goes.</p>
         <div class="grid2">${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? settingRow(x, i) : "").join("")}</div>` : ""}</div>`;
   },
-  venues() {
-    const { out, crit } = issues();
-    return `<div class="card"><h1>Step 1 · Venues</h1><p class="lead">Every room. Its kind decides which subjects may use it (you set a subject's room kind on step 3). <b>Capacity</b> is seats: a group only goes in a room that seats it. <b>For</b> keeps a room for some subjects, departments or levels (for example "Chemistry G3, Sec 3"); blank = anyone. A room that holds two classes at once (a field, a hall) gets an "At most N at once" rule on step 6.</p>
+  venues() {   // step 1: the same rooms as Blocks (by block and floor) or as the Table
+    const sw = v => `<button class="${VV.view === v ? "on" : ""}" data-vview="${v}">${{ blocks: "Blocks", table: "Table" }[v]}</button>`;
+    return `<div class="card"><div class="row" style="justify-content:space-between"><div><h1 style="margin:0">Step 1 · Venues</h1></div><div class="row switch">${sw("blocks")}${sw("table")}</div></div><p class="lead">Every room. Its kind decides which subjects may use it (you set a subject's room kind on step 3). <b>Capacity</b> is seats: a group only goes in a room that seats it. <b>For</b> keeps a room for some subjects, departments or levels (for example "Chemistry G3, Sec 3"); blank = anyone. A room that holds two classes at once (a field, a hall) gets an "At most N at once" rule on step 6. <b>Equipment</b> and <b>Configuration</b> are notes for people: nothing checks them.</p>
       <div class="helper row"><b>Add rooms</b> prefix ${`<input id="hvPre" value="B1-" style="width:70px">`} from <input id="hvFrom" type="number" value="1" style="width:60px"> to <input id="hvTo" type="number" value="8" style="width:60px"> kind ${sel("_hv", "classroom", sc().room_kinds || [], false, 'id="hvKind" data-k=""')} <button data-helper="venues">Add</button></div>
-      <div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Block</th><th>Floor / level</th><th>Home room of</th><th>For</th><th>Note</th><th></th></tr>
-      ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${rowCls(out, crit, "venues", i)}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.only_for" list="forNames" value="${esc((v.only_for || []).join(", "))}" placeholder="anyone"></td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td>${delBtn("venues", i)}</td></tr>`).join("")}
-      </table></div><datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div></div>`;
+      ${VV.view === "table" ? venuesTable() : venuesBlocks()}</div>`;
   },
   classes() {   // step 2: the same classes as Cards, as Bands (a picture per level) or as the Table
     const sw = v => `<button class="${CV.view === v ? "on" : ""}" data-cview="${v}">${{ cards: "Cards", bands: "Bands", table: "Table" }[v]}</button>`;
@@ -1380,6 +1407,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.restore) { restoreCopy(b.dataset.restore); return; }
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
   if (b.dataset.rtab) { R6.tab = b.dataset.rtab; render(); return; }
+  if (b.dataset.vview) { VV.view = b.dataset.vview === "table" ? "table" : "blocks"; VV.open = null; VV.openId = null; try { localStorage.setItem(VENUEVIEW, VV.view); } catch (e) { } render(); return; }
   if (b.dataset.cview) { CV.view = ["cards", "bands", "table"].includes(b.dataset.cview) ? b.dataset.cview : "cards"; cvOpen(null); try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } render(); return; }
   if (b.dataset.cclose) { cvOpen(null); render(); return; }
   if (b.dataset.cband !== undefined) { openBand(b.dataset.cband); return; }

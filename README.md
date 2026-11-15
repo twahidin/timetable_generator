@@ -20,7 +20,7 @@ code and download PDFs. The app does not generate timetables itself.
 7 Download · 8 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
 step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Fixed lessons and More
 rules sheets. Step 4 starts with the **Roles** (fill them first: the teacher list is checked against them), then the
-teacher list, then the teachers table.
+teacher list, then the teachers table. Step 1 shows the rooms two ways, **Blocks** (a panel per block, a row per floor, a tile per room) and **Table**; the choice is remembered in your browser. A room can carry **Equipment** and a **Configuration**, two plain notes that are only shown (in the table, on the Blocks tile, in the workbook and on the room's page) and that no check reads.
 
 **Form teachers.** A class can have form teachers, who take its lessons together. **School & day** has two settings for
 them: what the school calls them (**What your school calls a class's form teachers**, default "Form teachers"; a school
@@ -328,6 +328,8 @@ node tests/sync.test.js                  # the same changes, in the browser's Ja
 node tests/people.test.js                # reading a teacher list and the avatars
 node tests/split.test.js                 # periods cut into lessons, as ttgen cuts them
 node tests/classview.test.js            # step 2's cards and band picture
+node tests/venueview.test.js            # step 1's blocks view
+.venv/bin/python tests/test_venues.py   # equipment and configuration through the workbook
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 ```
 To try the Fix card's box without a key, start with `TYPED_REQUEST_MODEL=mock`: it understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".
