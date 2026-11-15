@@ -5,7 +5,7 @@ description: Generate a clash-free Singapore school timetable from a filled setu
 
 # School timetable generator
 
-Skill version: 2026-11.3 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
+Skill version: 2026-11.4 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
 
 Turns a filled **timetable setup workbook** into a timetable with no teacher, room or student in two places at once,
 then delivers it in three forms that always agree with each other:
@@ -112,7 +112,7 @@ one row per typed rule in the order `python -m ttgen check` lists them; Result i
 |---|---|---|
 | Settings | setting | School, Timetable, (School type: primary only), Cycle (1 week, or 2 weeks Odd/Even), Period length (minutes), Period 0 starts at, Periods in a day, Lesson length (periods); then the school-wide rule rows: Same subject at most once a day (per group) Yes/No, After-school slot allowed when a class cannot fit Yes/No (No: the `A` periods are never used), Most PE classes at the same time (number), Most teaching periods a teacher has in a day (number), Every teacher gets at least one recess a day Yes/No, In rain, PE goes to the class's home room Yes/No (Yes: while a class has a lesson in a `pe venue`, its home room stays free and is its rain room); any other rows are notes |
 | Day structure | level and day | one cell per period: `F` flag/assembly, `L` lesson, `R` recess, `W` recess window (the solver puts the recess somewhere in it; the rest is lesson time), `U` lunch, `A` after-school slot (used only if needed), blank = no school. Day names as the school writes them (e.g. `Odd Tues`) |
-| 1 Venues | room | Room, Kind (classroom, lab, pe venue, ...), Capacity, Block (building), Floor / level |
+| 1 Venues | room | Room, Kind (classroom, lab, pe venue, ...), Capacity, Block (building), Floor / level, Equipment, Configuration (notes only: never read them as constraints) |
 | 2 Classes | form class | Class, Level, Students, Home room |
 | 3 Subjects | subject | Subject, Code, G-level (G1/G2/G3 or -; `Level tag` with Std/Fdn/Higher for primary), Department, Room kind (blank = home room), optional Lesson length, then periods per cycle for each level |
 | 4 Teachers | teacher | Teacher, Short, Department, Allowance, Provisional, up to 8 pairs of Can teach / at (All, a level or a band such as Sec 1-2), Note, Role (from `Roles`), Other duties (periods); formulas show Periods given, Spare, Total load, Role guide, % of allowance, Load check |

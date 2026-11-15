@@ -87,10 +87,11 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
     for L in lessons:
         for t in L["teachers"]:
             if t not in seen: seen.add(t); teachers.append(dict(name=t, short=t, dept="", allowance="", other=""))
-    rooms = [dict(name=str(v["room"]), kind=v.get("kind") or "classroom", capacity=v.get("capacity") or "") for v in spec["venues"]]
+    rooms = [dict(name=str(v["room"]), kind=v.get("kind") or "classroom", capacity=v.get("capacity") or "",
+                  equipment=[str(e).strip() for e in v.get("equipment") or [] if str(e).strip()], configuration=str(v.get("configuration") or "").strip()) for v in spec["venues"]]
     seen = {r["name"] for r in rooms}
     for L in lessons:
-        if L["room"] and L["room"] not in seen: seen.add(L["room"]); rooms.append(dict(name=L["room"], kind="to be confirmed" if L["room"] == "TBC" else "other", capacity=""))
+        if L["room"] and L["room"] not in seen: seen.add(L["room"]); rooms.append(dict(name=L["room"], kind="to be confirmed" if L["room"] == "TBC" else "other", capacity="", equipment=[], configuration=""))
     used_rooms = {L["room"] for L in lessons if L["room"]}
     rooms = [r for r in rooms if r["name"] in used_rooms] + [r for r in rooms if r["name"] not in used_rooms]
     depts = []
@@ -409,10 +410,10 @@ def _parents_text(m, c):
     return f"{m.get('parents_name') or 'Form teachers'}: {', '.join(ps)}" if ps else ""
 
 def _parents_block(v):
-    """the PDF's form teachers line, wrapped to the subtitle's width so no name is ever cut: [] when the view has none"""
+    """the PDF's second line (form teachers, or a room's equipment and configuration), wrapped to the subtitle's width so no item is ever cut: [] when the view has none"""
     from reportlab.pdfbase.pdfmetrics import stringWidth
     R, _ = _fonts(); lines, cur = [], ""
-    for seg in (v.get("parents_line") or "").split(", "):   # break between names, never inside one
+    for seg in (v.get("parents_line") or v.get("extra_line") or "").split(", "):   # break between names, never inside one
         t = f"{cur}, {seg}" if cur else seg
         if cur and stringWidth(t, R, 8.6) > 420: lines.append(cur + ","); cur = seg
         else: cur = t
@@ -508,7 +509,10 @@ def room_view(m, r):
     lv = [x["level"] for x in rows]; codes = _codes_for(m, lv)
     open_ = sum(ch in "L" for row in (codes or []) for ch in row) or 1
     stats = [(info["kind"], "kind"), (str(m["room_cap"].get(r, 1)), "groups at once"), (str(len(used)), "periods used"), (f"{round(100 * len(used) / open_)}%", "of lesson time")]
-    return dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=f"{info['kind'].capitalize()}" + (f" · holds {info['capacity']}" if info["capacity"] else ""),
+    plain = f"{info['kind'].capitalize()}" + (f" · holds {info['capacity']}" if info["capacity"] else "")
+    eq, cf = ", ".join(info.get("equipment") or []), info.get("configuration") or ""   # read with .get: a model published before this has neither
+    more = " · ".join(x for x in (f"Equipment: {eq}" if eq else "", f"Configuration: {cf}" if cf else "") if x)
+    return dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=plain + (f" · {more}" if more else ""), pdf_subtitle=plain, extra_line=more,
                 stats=stats, codes=codes, cells=cells, legend=legend, legend_title="Used by", group=info["kind"])
 
 def student_rows(m, cls, groups):

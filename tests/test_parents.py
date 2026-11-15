@@ -179,11 +179,11 @@ def the_workbook_does_not_check_can_teach_on_the_named_subjects():
 
 
 @t
-def the_skill_version_is_2026_11_3():
+def the_skill_version_is_2026_11_4():
     root = os.path.dirname(HERE)
-    assert SPEC.SKILL_VERSION == "2026-11.3"
-    assert "2026-11.3" in open(os.path.join(root, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
-    assert "2026-11.3" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
+    assert SPEC.SKILL_VERSION == "2026-11.4"
+    assert "2026-11.4" in open(os.path.join(root, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
+    assert "2026-11.4" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
 
 
 
