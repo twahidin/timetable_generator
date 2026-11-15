@@ -63,4 +63,21 @@ t("kinds_are_the_schools_list_then_any_other_found_on_a_room", () => {
   assert.deepStrictEqual(VenueView.kinds({ venues: [{ room: "A", kind: "" }, { room: "B", kind: "studio" }, { room: "C", kind: "studio" }] }), ["studio"]);
   assert.deepStrictEqual(VenueView.kinds({}), []);
 });
+t("the_next_room_never_hangs_and_never_prints_an_exponent", () => {
+  const big = { venues: [{ room: "R-99999999999999999999", building: "L", floor: 1 }, { room: "R-100000000000000000000", building: "Z", floor: 1 }] };
+  assert.strictEqual(VenueView.nextRoom(big, "L", "1").room, "R-100000000000000000001");
+  const huge = { venues: [{ room: "R-000000000000000000000001", building: "L", floor: 1 }] };
+  assert.strictEqual(VenueView.nextRoom(huge, "L", "1").room, "R-000000000000000000000002");
+  assert.strictEqual(VenueView.nextRoom({ venues: [{ room: "99", building: "L", floor: 1 }] }, "L", "1").room, "100");          // a name that is only digits; 99 grows to 100
+  const full = { venues: [{ room: "T1", kind: "lab", capacity: 9, building: "L", floor: 2 }] };
+  for (let i = 2; i <= 1500; i++) full.venues.push({ room: "T" + i, building: "Z", floor: 1 });
+  assert.deepStrictEqual(VenueView.nextRoom(full, "L", "2"), { room: "", kind: "lab", capacity: 9 });                          // a thousand names in a row are used: no suggestion
+});
+t("a_name_with_a_space_at_its_end_still_gives_the_next_name", () => {
+  assert.strictEqual(VenueView.nextRoom({ venues: [{ room: "B2-10 ", building: "B", floor: 2 }] }, "B", "2").room, "B2-11");
+});
+t("kinds_that_are_not_a_list_count_as_none", () => {
+  assert.deepStrictEqual(VenueView.kinds({ school: { room_kinds: "classroom, lab" }, venues: [{ room: "A", kind: "studio" }] }), ["studio"]);
+  assert.deepStrictEqual(VenueView.nextRoom({ school: { room_kinds: "classroom" }, venues: [] }, "B", "1"), { room: "", kind: "classroom", capacity: null });
+});
 console.log(n + " cases passed");

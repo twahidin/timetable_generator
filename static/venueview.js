@@ -61,9 +61,19 @@ var VenueView = (function () {
   function kinds(spec) {
     var out = [], seen = Object.create(null);
     function add(k) { if (k == null || String(k) === "" || seen[k]) return; seen[k] = true; out.push(String(k)); }
-    ((spec && spec.school && spec.school.room_kinds) || []).forEach(add);
+    var own = spec && spec.school && spec.school.room_kinds;
+    (Array.isArray(own) ? own : []).forEach(add);
     rows(spec, "venues").forEach(function (v) { if (v && typeof v === "object") add(v.kind); });
     return out;
+  }
+
+  /* one more, done on the digits as text so a long number never loses its last places; 09 gives 10, 99 gives 100 */
+  function plusOne(d) {
+    var a = d.split(""), i = a.length - 1;
+    while (i >= 0 && a[i] === "9") { a[i] = "0"; i--; }
+    if (i < 0) return "1" + a.join("");
+    a[i] = String(Number(a[i]) + 1);
+    return a.join("");
   }
 
   /* the room about to be added on a floor: the floor's last room's kind and capacity, and its name one higher */
@@ -72,11 +82,14 @@ var VenueView = (function () {
     blocks(spec).forEach(function (x) { if (x.block === b) found = x; });
     if (found) found.floors.forEach(function (x) { if (x.floor === f && x.rooms.length) last = x.rooms[x.rooms.length - 1]; });
     if (!last) return { room: "", kind: kinds(spec)[0] || "classroom", capacity: null };
-    var used = Object.create(null), room = "", m = /^(.*?)(\d+)$/.exec(last.room);
+    var used = Object.create(null), room = "", m = /^(.*?)(\d+)$/.exec(last.room.trim()), tries = 0;
     rows(spec, "venues").forEach(function (v) { if (v && v.room) used[String(v.room).trim().toLowerCase()] = true; });
     if (m) {
-      var num = Number(m[2]) + 1;
-      do { room = m[1] + String(num).padStart(m[2].length, "0"); num++; } while (used[room.trim().toLowerCase()]);
+      var digits = m[2];
+      do {
+        if (tries++ >= 1000) { room = ""; break; }
+        digits = plusOne(digits); room = m[1] + digits;
+      } while (used[room.trim().toLowerCase()]);
     }
     return { room: room, kind: last.kind, capacity: last.capacity };
   }
