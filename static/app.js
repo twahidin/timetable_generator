@@ -1813,7 +1813,8 @@ function poolView() {   // rows at the level with no band: tick (or drag) them i
 }
 function lanesView() {   // the bands of the level as lanes, each with its groups
   const gp = gpState(), lanes = Groups.lanes(S.spec, gp.level);
-  const av = nm => { const t = S.spec.teachers.find(x => x.name === nm); return t ? `<span title="${esc(nm)}">${avatarOf(t, 24)}</span>` : `<span class="chip">${esc(nm)}</span>`; };
+  const av = nm => { const t = S.spec.teachers.find(x => x.name === nm);   // the face with the teacher's short name beside it: a face alone does not say who it is
+    return t ? `<span class="gav" title="${esc(nm)}">${avatarOf(t, 24)}<span class="gavn">${esc(t.short || t.name || "")}</span></span>` : `<span class="chip">${esc(nm)}</span>`; };
   const grow = (g, l) => { const own = g.classes.join(",") !== l.classes.join(",");   // a group of fewer classes than its band says which
     return `<div class="grow"><span class="codeline small">${esc(g.code)}</span><span style="flex:1;min-width:0">${esc(g.subject)}${own ? ` <span class="muted small">${esc(g.classes.join(", "))}</span>` : ""}</span>${g.students != null ? `<span class="muted small" title="Students">${g.students}</span>` : ""}<span class="avs" style="margin:0;min-height:0">${g.teachers.map(av).join("")}</span><button class="small danger" data-gout="${g.li}" title="Out of the band, back to the pool">✕</button></div>`; };
   const lane = l => `<div class="lane" data-glane="${esc(l.block)}"><div class="row small" style="justify-content:space-between"><b>${esc(l.block)}</b><span class="muted">${esc(l.classes.join(", "))}${l.everyone ? " · everyone takes one" : ""}</span></div><div class="muted small">Its groups have lessons at the same time.</div>

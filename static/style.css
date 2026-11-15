@@ -195,6 +195,8 @@ button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .avx.named .x{right:8px}
 .avn{display:block;max-width:62px;margin-top:2px;font-size:11px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .avs:has(.avx.named){align-items:flex-start;gap:6px 2px}
+.gav{display:inline-flex;align-items:center;gap:5px;line-height:0}
+.gavn{font-size:12px;line-height:1.2;color:var(--ink);max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gcard{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px;cursor:pointer;background:var(--panel)}
 .gcard:hover{border-color:#c5ccd8}
 .gcard .plus{display:inline-flex;width:28px;height:28px;border:1px dashed #cdd5e1;border-radius:50%;align-items:center;justify-content:center;color:var(--muted)}
