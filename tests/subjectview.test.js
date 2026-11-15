@@ -123,14 +123,17 @@ t("a_tick_never_makes_a_second_subject_at_a_level_the_subject_has_under_another_
                { subject: "English Language (Standard)", code: "EL", tag: "Std", dept: "EL", periods: {} },
                { subject: "Mathematics", code: "", tag: "-", dept: "MA", periods: {} },
                { subject: "Maths (Standard)", code: "", tag: "Std", dept: "MA", periods: {} },
-               { subject: "Art (Standard)", code: "EL", tag: "Std", dept: "MA", periods: {} }], lessons: [] };
-  assert.deepStrictEqual(all(p).map(c => [c.name, c.odd]), [["English Language", ""], ["English Language (Standard)", "tag"], ["Mathematics", ""], ["Maths (Standard)", "tag"], ["Art (Standard)", "tag"]]);
+               { subject: "Art (Standard)", code: "EL", tag: "Std", dept: "MA", periods: {} },
+               { subject: "Literature Fdn", code: "EL", tag: "Fdn", dept: "EL", periods: {} }], lessons: [] };
+  assert.deepStrictEqual(all(p).map(c => [c.name, c.odd]), [["English Language", ""], ["English Language (Standard)", "tag"], ["Mathematics", ""], ["Maths (Standard)", "tag"], ["Art (Standard)", "tag"], ["Literature", ""]]);
   assert.strictEqual(SubjectView.clash(p, 0, "Std"), "English Language (Standard)");
   same(p, () => assert.strictEqual(SubjectView.tick(p, 0, "Std"), null));                       // the subject has a Standard already, under another name
-  assert.strictEqual(SubjectView.clash(p, 0, "Fdn"), "");
+  assert.strictEqual(SubjectView.clash(p, 0, "Fdn"), "");                                       // Literature's Fdn is another subject's
+  assert.strictEqual(SubjectView.clash(p, 5, "Std"), "");   // "English Language (Standard)" is not Literature's
   assert.strictEqual(SubjectView.clash(p, 2, "Std"), "");                                       // no code: a department's subjects with no code yet are not one subject
   assert.deepStrictEqual(SubjectView.tick(p, 2, "Std"), { ri: 2, how: "changed" });
   assert.deepStrictEqual(SubjectView.tick(p, 0, "Fdn"), { ri: 0, how: "changed" });
+  assert.deepStrictEqual(SubjectView.tick(p, 5, "Std"), { ri: 6, how: "added" });
   const s = fixture(); s.subjects.push({ subject: "Science G2", tag: "-", dept: "Science", code: "SC" });
   assert.strictEqual(SubjectView.clash(s, 5, "G2"), "Science G2");                              // the name itself is taken
   assert.deepStrictEqual([SubjectView.clash(s, 0, "G3"), SubjectView.clash(s, 99, "G3"), SubjectView.clash(s, 9, "G3"), SubjectView.clash(s, 0, "G9"), SubjectView.clash({}, 0, "G3")], ["", "", "", "", ""]);

@@ -109,12 +109,13 @@ var SubjectView = (function () {
   function clash(spec, ri, tag) {
     var card = cardAt(spec, ri);
     if (!card || card.odd || card.name === "" || tags(spec).indexOf(tag) < 0) return "";
-    var inside = Object.create(null), label = card.name + " " + tag, found = "";
+    var inside = Object.create(null), shown = Object.create(null), label = card.name + " " + tag, found = "";
     card.rows.forEach(function (x) { inside[x.ri] = true; });
+    columns(spec).forEach(function (col) { col.cards.forEach(function (c) { if (c.odd === "tag") shown[c.ri] = true; }); });
     spec.subjects.some(function (r, i) {
       if (inside[i] || !r || typeof r !== "object") return false;
       var name = text(r.subject), tg = text(r.tag);
-      if (name === label || (tg === tag && text(r.dept) === card.dept && card.code !== "" && text(r.code) === card.code)) { found = name; return true; }
+      if (name === label || (shown[i] && tg === tag && text(r.dept) === card.dept && card.code !== "" && text(r.code) === card.code && name.indexOf(card.name) === 0)) { found = name; return true; }
       return false;
     });
     return found;
