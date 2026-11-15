@@ -321,6 +321,6 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .cbar{background:#e8f0fe;border:1px solid var(--accent);color:var(--ink);border-radius:6px;min-height:30px;padding:3px 8px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;text-align:left;cursor:pointer;font-size:12.5px;z-index:1}
 .cbar:hover{background:#d8e6fd}
 .cbar .cchips{display:flex;flex-wrap:wrap;gap:4px}
-.legend{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+.cvlegend{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
 .lgd{display:inline-block;width:14px;height:12px;border-radius:3px;margin-left:8px}
 .lgd.whole{background:var(--ok-bg)}.lgd.bar{background:#e8f0fe;border:1px solid var(--accent)}.lgd.part{background:#fff4d6}

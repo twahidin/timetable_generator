@@ -1025,7 +1025,7 @@ function classesBands() {   // a picture of one level: a column per class, a row
   if (!L.length) return `<p class="muted">No classes yet. Add them on Cards or the Table.</p>`;
   const lv = cvLevel(), name = lv || "No level", pic = ClassView.bands(S.spec, lv);
   const picker = `<div class="row" style="margin:12px 0 8px"><label>Level <select id="cvLevel">${L.map(l => opt(l, lv, l || "No level")).join("")}</select></label>
-    <span class="legend small muted"><span class="lgd whole"></span>Whole class <span class="lgd bar"></span>Band: its groups meet at the same time <span class="lgd part"></span>Part of the class</span></div>`;
+    <span class="cvlegend small muted"><span class="lgd whole"></span>Whole class <span class="lgd bar"></span>Band: its groups meet at the same time <span class="lgd part"></span>Part of the class</span></div>`;
   if (!pic.classes.length) return `${picker}<p class="muted">No classes at ${esc(name)} yet.</p>`;
   if (!pic.rows.length) return `${picker}<p class="muted">No lesson rows for ${esc(name)} yet. Add them on step 5.</p>`;
   const col = k => k + 2, head = pic.classes.map((c, k) => `<div class="chcol" style="grid-row:1;grid-column:${col(k)}">${esc(c)}</div>`).join("");
