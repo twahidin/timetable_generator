@@ -70,4 +70,76 @@ t("how_many_lesson_rows_name_a_subject", () => {
   const s = fixture();
   assert.deepStrictEqual([SubjectView.uses(s, "Mathematics G3"), SubjectView.uses(s, "PE"), SubjectView.uses(s, "Art"), SubjectView.uses(s, ""), SubjectView.uses({}, "PE")], [2, 2, 0, 0, 0]);
 });
+t("names_like_proto_are_names_like_any_other_and_lists_that_are_not_lists_are_empty", () => {
+  const s = { school: { departments: ["toString"], tags: [["__proto__", "P"], ["toString", "T"], ["-", ""]] },
+    subjects: [{ subject: "constructor __proto__", tag: "__proto__", code: "constructor", dept: "toString" }, { subject: "constructor toString", tag: "toString", code: "constructor", dept: "toString" }],
+    lessons: [{ subject: "__proto__", classes: ["1A"] }, { subject: "__proto__" }, { subject: "constructor __proto__", classes: ["1A", "1B"] }] };
+  assert.deepStrictEqual(SubjectView.tags(s), ["__proto__", "toString"]);
+  assert.deepStrictEqual(SubjectView.columns(s).map(c => [c.dept, c.cards.map(k => [k.name, k.code, k.odd, k.ticked, k.rows.map(r => r.ri)])]), [["toString", [["constructor", "constructor", "", ["__proto__", "toString"], [0, 1]]]]]);
+  assert.deepStrictEqual([SubjectView.uses(s, "__proto__"), SubjectView.uses(s, "constructor"), SubjectView.uses(s, "toString")], [2, 0, 0]);
+  assert.deepStrictEqual([SubjectView.columns(s)[0].cards[0].rows.map(r => r.lessons), SubjectView.columns(s)[0].cards[0].rows.map(r => r.groups)], [[1, 0], [2, 0]]);
+  const bad = [{ school: 5 }, { school: { tags: "G3", departments: 7 }, subjects: "a", lessons: {} }, null];
+  bad.forEach(b => { assert.deepStrictEqual(SubjectView.columns(b), []); assert.deepStrictEqual(SubjectView.tags(b), []); });
+  const q = { subjects: [{ subject: "7", tag: "-", code: "S", dept: "Maths" }], lessons: [{ subject: 7, classes: ["1A"] }] };            // a lesson that names a subject by a number
+  assert.deepStrictEqual([SubjectView.columns(q)[0].cards[0].rows[0].lessons, SubjectView.uses(q, "7"), SubjectView.uses(q, 7)], [1, 1, 1]);
+});
+/* ---- the changes ---- */
+t("ticking_adds_the_row_named_name_and_tag_after_the_cards_last_row", () => {
+  const s = fixture(), before = s.subjects.slice();
+  assert.deepStrictEqual(SubjectView.tick(s, 5, "G2"), { ri: 7, how: "added" });                             // Science: its rows are 3, 5 and 6
+  assert.deepStrictEqual(s.subjects[7], { subject: "Science G2", code: "SC", tag: "G2", dept: "Science", periods: {}, room_kind: "lab" });   // room kind and lesson length as the card's first row has them
+  assert.deepStrictEqual(s.subjects.filter(r => r !== s.subjects[7]), before);                              // every other row is the same row, in the same order
+  assert.deepStrictEqual(card(s, "Science").rows.map(r => [r.ri, r.tag]), [[5, ""], [6, "G3"], [7, "G2"], [3, "G1"]]);
+  assert.deepStrictEqual([card(s, "Art").ri, card(s, "CP Time").ri], [8, 9]);                               // the cards below moved down one place and are still themselves
+});
+t("the_first_tag_of_a_plain_subject_changes_its_row_when_no_lesson_uses_it_and_adds_one_when_lessons_do", () => {
+  const s = fixture(), art = s.subjects[7], pe = s.subjects[2];
+  assert.deepStrictEqual(SubjectView.tick(s, 7, "G3"), { ri: 7, how: "changed" });
+  assert.strictEqual(s.subjects[7], art); assert.deepStrictEqual(art, { _id: "s8", subject: "Art G3", code: "AR", tag: "G3", dept: "Aesthetics", periods: { "Sec 2": 2 } });   // its periods came across
+  assert.strictEqual(s.subjects.length, 9);
+  assert.deepStrictEqual(SubjectView.tick(s, 2, "G3"), { ri: 3, how: "added" });                             // PE has lessons: it stays, as the row with no G-level
+  assert.strictEqual(s.subjects[2], pe); assert.strictEqual(pe.subject, "PE");
+  assert.deepStrictEqual(s.subjects[3], { subject: "PE G3", code: "PE", tag: "G3", dept: "PE & CCA", periods: {}, room_kind: "pe venue", lesson_length: 2 });
+  assert.deepStrictEqual([card(s, "PE").plain, card(s, "PE").ticked], [2, ["G3"]]);
+});
+t("a_tick_that_cannot_be_made_changes_nothing", () => {
+  const s = fixture(); s.subjects.push({ subject: "Chemistry", tag: "G3", dept: "Science", code: "CH" }, { subject: "", tag: "-", dept: "Science", code: "" });
+  same(s, () => assert.deepStrictEqual([SubjectView.tick(s, 0, "G3"), SubjectView.tick(s, 0, "G9"), SubjectView.tick(s, 0, "-"), SubjectView.tick(s, 0, ""), SubjectView.tick(s, 9, "G2"), SubjectView.tick(s, 10, "G3"), SubjectView.tick(s, 99, "G3"), SubjectView.tick({}, 0, "G3")],
+    [null, null, null, null, null, null, null, null]));   // ticked already; not one of the school's tags; a row shown as it is; a card with no name; no such row
+});
+t("unticking_removes_the_row_and_the_last_tag_leaves_the_subject_with_no_tag_and_no_periods", () => {
+  const s = fixture(), g3 = s.subjects[0];
+  assert.deepStrictEqual(SubjectView.untick(s, 0, "G2"), { how: "removed" });
+  assert.deepStrictEqual(s.subjects.map(r => r.subject).slice(0, 4), ["Mathematics G3", "PE", "Science G1", "Mathematics G1"]);
+  assert.deepStrictEqual(SubjectView.untick(s, 0, "G1"), { how: "removed" });
+  assert.deepStrictEqual(SubjectView.untick(s, 0, "G3"), { how: "emptied" });
+  assert.strictEqual(s.subjects[0], g3); assert.deepStrictEqual(g3, { _id: "s1", subject: "Mathematics", code: "MA", tag: "-", dept: "Mathematics", room_kind: null, lesson_length: null, periods: {} });
+  const m = fixture(); assert.deepStrictEqual(SubjectView.untick(m, 3, ""), { how: "removed" });              // Science's row with no G-level
+  assert.deepStrictEqual([card(m, "Science").plain, card(m, "Science").ticked, m.subjects.length], [null, ["G3", "G1"], 8]);
+  const z = fixture(); same(z, () => assert.deepStrictEqual([SubjectView.untick(z, 2, ""), SubjectView.untick(z, 0, "G9"), SubjectView.untick(z, 2, "G3"), SubjectView.untick(z, 99, "G3")], [null, null, null, null]));   // PE's only row is the card; tags not on the card; no such row
+});
+t("a_name_a_code_a_department_a_room_kind_or_a_lesson_length_goes_to_every_row_of_the_card", () => {
+  const s = fixture(), lessons = JSON.stringify(s.lessons);
+  assert.strictEqual(SubjectView.rename(s, 4, "  Maths "), true);
+  assert.deepStrictEqual([0, 1, 4].map(i => s.subjects[i].subject), ["Maths G3", "Maths G2", "Maths G1"]);
+  assert.strictEqual(JSON.stringify(s.lessons), lessons);                                                    // the lessons keep the name they had, as after a change of name in the table
+  same(s, () => assert.strictEqual(SubjectView.rename(s, 0, "  "), false));                                  // a subject with G-levels needs a name
+  assert.strictEqual(SubjectView.rename(s, 2, ""), true); assert.strictEqual(s.subjects[2].subject, "");     // one with none may lose it
+  assert.strictEqual(SubjectView.set(s, 0, "code", "MT"), true); assert.deepStrictEqual([0, 1, 4].map(i => s.subjects[i].code), ["MT", "MT", "MT"]);
+  assert.strictEqual(SubjectView.set(s, 3, "room_kind", "lab"), true); assert.strictEqual(SubjectView.set(s, 3, "lesson_length", null), true);
+  assert.deepStrictEqual([card(s, "Science").same_kind, card(s, "Science").same_length], [true, true]);
+  assert.strictEqual(SubjectView.set(s, 0, "dept", "Science"), true);
+  assert.deepStrictEqual(SubjectView.columns(s).slice(0, 2).map(c => [c.dept, c.cards.map(k => k.name)]), [["Mathematics", []], ["Science", ["Maths", "Science"]]]);
+  same(s, () => assert.deepStrictEqual([SubjectView.set(s, 0, "subject", "x"), SubjectView.set(s, 0, "periods", {}), SubjectView.set(s, 99, "code", "x"), SubjectView.rename(s, 99, "x")], [false, false, false, false]));
+  const o = fixture(); o.subjects.push({ subject: "Chemistry", tag: "G3", dept: "Science", code: "CH" });
+  same(o, () => assert.deepStrictEqual([SubjectView.rename(o, 9, "Chemistry G3"), SubjectView.set(o, 9, "code", "X")], [false, false]));   // a row shown as it is is changed through the table's own boxes
+});
+t("a_card_is_removed_with_all_its_rows_and_a_new_one_starts_empty_in_its_department", () => {
+  const s = fixture();
+  assert.strictEqual(SubjectView.remove(s, 1), 3); assert.deepStrictEqual(s.subjects.map(r => r.subject), ["PE", "Science G1", "Science", "Science G3", "Art", "CP Time"]);
+  assert.strictEqual(SubjectView.remove(s, 99), 0); assert.strictEqual(s.subjects.length, 6);
+  assert.strictEqual(SubjectView.add(s, "Humanities"), 6); assert.deepStrictEqual(s.subjects[6], { subject: "", code: "", tag: "-", dept: "Humanities", periods: {} });
+  assert.strictEqual(SubjectView.add(s, ""), 7); assert.strictEqual(s.subjects[7].dept, null);
+  const e = {}; assert.strictEqual(SubjectView.add(e, "Science"), 0); assert.strictEqual(e.subjects.length, 1);
+});
 console.log(n + " cases passed");

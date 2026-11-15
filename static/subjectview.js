@@ -23,8 +23,9 @@ var SubjectView = (function () {
 
   /* how many lesson rows name exactly this subject */
   function uses(spec, subject) {
-    if (subject == null || subject === "") return 0;
-    return rows(spec, "lessons").filter(function (x) { return isLesson(x) && x.subject === subject; }).length;
+    var name = text(subject);
+    if (name === "") return 0;
+    return rows(spec, "lessons").filter(function (x) { return isLesson(x) && text(x.subject) === name; }).length;
   }
 
   /* the table's "Teaching groups" figure: a lesson row with a band or a code of its own counts once, any other once per class */
@@ -41,8 +42,8 @@ var SubjectView = (function () {
     T.forEach(function (t, i) { order[t] = i; });
     var used = Object.create(null), grp = Object.create(null);
     rows(spec, "lessons").forEach(function (x) {
-      if (!isLesson(x) || x.subject == null || x.subject === "") return;
-      var s = x.subject;
+      var s = isLesson(x) ? text(x.subject) : "";
+      if (s === "") return;
       used[s] = (used[s] || 0) + 1; grp[s] = (grp[s] || 0) + groupsOf(x);
     });
 
@@ -90,6 +91,78 @@ var SubjectView = (function () {
     return cols;
   }
 
-  return { tags: tags, columns: columns, uses: uses };
+  /* ---- the changes a card makes: each changes spec.subjects in place and leaves the setup as it was when it answers null, false or 0 ---- */
+
+  /* the card that holds the row at this index, or null */
+  function cardAt(spec, ri) {
+    var cols = columns(spec), i, j, k;
+    for (i = 0; i < cols.length; i++)
+      for (j = 0; j < cols[i].cards.length; j++)
+        for (k = 0; k < cols[i].cards[j].rows.length; k++)
+          if (cols[i].cards[j].rows[k].ri === ri) return cols[i].cards[j];
+    return null;
+  }
+  function rowOf(card, tag) { return card.rows.filter(function (x) { return x.tag === tag; })[0] || null; }
+  function lastRi(card) { return Math.max.apply(null, card.rows.map(function (x) { return x.ri; })); }
+
+  function tick(spec, ri, tag) {
+    var card = cardAt(spec, ri);
+    if (!card || card.odd || card.name === "" || tags(spec).indexOf(tag) < 0 || card.ticked.indexOf(tag) >= 0) return null;
+    var list = spec.subjects, label = card.name + " " + tag;
+    if (card.rows.length === 1 && card.rows[0].tag === "" && uses(spec, card.rows[0].subject) === 0) {
+      var only = list[card.rows[0].ri];
+      only.subject = label; only.tag = tag;
+      return { ri: card.rows[0].ri, how: "changed" };
+    }
+    var first = list[card.ri];
+    var row = { subject: label, code: first.code == null ? "" : first.code, tag: tag, dept: first.dept == null ? null : first.dept, periods: {} };
+    if (Object.prototype.hasOwnProperty.call(first, "room_kind")) row.room_kind = first.room_kind;
+    if (Object.prototype.hasOwnProperty.call(first, "lesson_length")) row.lesson_length = first.lesson_length;
+    var at = lastRi(card) + 1;
+    list.splice(at, 0, row);
+    return { ri: at, how: "added" };
+  }
+
+  function untick(spec, ri, tag) {
+    var card = cardAt(spec, ri);
+    if (!card || card.odd) return null;
+    var row = rowOf(card, tag);
+    if (!row) return null;
+    if (card.rows.length > 1) { spec.subjects.splice(row.ri, 1); return { how: "removed" }; }
+    if (tag === "") return null;
+    var r = spec.subjects[row.ri];
+    r.subject = card.name; r.tag = "-"; r.periods = {};
+    return { how: "emptied" };
+  }
+
+  function rename(spec, ri, name) {
+    var card = cardAt(spec, ri), n = text(name);
+    if (!card || card.odd || (n === "" && card.ticked.length > 0)) return false;
+    card.rows.forEach(function (x) { spec.subjects[x.ri].subject = x.tag === "" ? n : n + " " + x.tag; });
+    return true;
+  }
+
+  function set(spec, ri, field, value) {
+    if (["code", "dept", "room_kind", "lesson_length"].indexOf(field) < 0) return false;
+    var card = cardAt(spec, ri);
+    if (!card || card.odd) return false;
+    card.rows.forEach(function (x) { spec.subjects[x.ri][field] = value; });
+    return true;
+  }
+
+  function remove(spec, ri) {
+    var card = cardAt(spec, ri);
+    if (!card) return 0;
+    card.rows.map(function (x) { return x.ri; }).sort(function (a, b) { return b - a; }).forEach(function (i) { spec.subjects.splice(i, 1); });
+    return card.rows.length;
+  }
+
+  function add(spec, dept) {
+    if (!Array.isArray(spec.subjects)) spec.subjects = [];
+    spec.subjects.push({ subject: "", code: "", tag: "-", dept: dept === "" || dept == null ? null : dept, periods: {} });
+    return spec.subjects.length - 1;
+  }
+
+  return { tags: tags, columns: columns, uses: uses, tick: tick, untick: untick, rename: rename, set: set, remove: remove, add: add };
 })();
 if (typeof module !== "undefined") module.exports = SubjectView;
