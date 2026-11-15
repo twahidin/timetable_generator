@@ -409,16 +409,23 @@ def _parents_text(m, c):
     ps = (m["class_ix"].get(c) or {}).get("parents") or []
     return f"{m.get('parents_name') or 'Form teachers'}: {', '.join(ps)}" if ps else ""
 
+EXTRA_LINES = 6   # the most lines a room's equipment and configuration take on its printed timetable; form teachers are never cut
 def _parents_block(v):
     """the PDF's second line (form teachers, or a room's equipment and configuration), wrapped to the subtitle's width so no item is ever cut: [] when the view has none"""
     from reportlab.pdfbase.pdfmetrics import stringWidth
     R, _ = _fonts(); lines, cur = [], ""
-    segs = re.split(r"(?<=, )|(?<= · )", v.get("parents_line") or v.get("extra_line") or "")   # break between names or items, never inside one; the separator stays on the line it closes
+    own = v.get("parents_line")
+    segs = re.split(r"(?<=, )|(?<= · )", own or v.get("extra_line") or "")   # break between names or items, never inside one; the separator stays on the line it closes
     for seg in [x for x in segs if x]:
         t = cur + seg
         if cur and stringWidth(t.rstrip(), R, 8.6) > 420: lines.append(cur.rstrip()); cur = seg
         else: cur = t
-    return lines + [cur] if cur else []
+    out = lines + [cur] if cur else []
+    if not own and len(out) > EXTRA_LINES:   # a room's notes take at most this many printed lines (each one moves the grid down); the web page and the Excel file hold them all
+        out = out[:EXTRA_LINES]; last = out[-1].rstrip(" ,·")
+        while stringWidth(last + " …", R, 8.6) > 420 and ", " in last: last = last[:last.rindex(", ")]
+        out[-1] = last + " …"
+    return out
 
 def class_view(m, c):
     info = m["class_ix"][c]; rows = [x for x in m["lessons"] if c in x["classes"]]

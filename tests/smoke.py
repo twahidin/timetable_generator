@@ -1116,6 +1116,14 @@ def test_a_published_room_page_shows_its_equipment():
     assert len(rr["configuration"]) >= 90; ls = export._parents_block(export.room_view(lg, used))
     assert len(ls) >= 2 and all(stringWidth(l, R, 8.6) <= 420 for l in ls), ls
     assert export.pdf_bytes(lg, export.room_view(lg, used))[:4] == b"%PDF"
+    # a pasted inventory does not push the printed grid off the page: at most six lines, the last ending "…"; a list that fits is whole
+    assert "…" not in " ".join(lines) and len(lines) <= 6, lines
+    inv = cp.deepcopy(m); next(r for r in inv["rooms"] if r["name"] == used)["equipment"] = [f"{i:03d} " + "y" * 26 for i in range(120)]
+    vi_ = export.room_view(inv, used); li = export._parents_block(vi_)
+    assert len(li) == 6 and li[-1].endswith(" …") and all(stringWidth(l, R, 8.6) <= 420 for l in li) and "000 " in li[0], li
+    assert "119 " in vi_["subtitle"] and export.pdf_bytes(inv, vi_)[:4] == b"%PDF"            # the web page and the Excel file still hold the whole list
+    many = cp.deepcopy(m); cv = export.class_view(many, many["classes"][0]["name"]); cv["parents_line"] = "Form teachers: " + ", ".join(f"Teacher Number {i:02d}" for i in range(60))
+    assert len(export._parents_block(cv)) > 6 and "…" not in " ".join(export._parents_block(cv))   # form teachers are never cut, however many
     shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
 
 NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_sends_a_malformed_lessons_op", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
