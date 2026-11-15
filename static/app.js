@@ -1158,14 +1158,14 @@ function subjectsCards() {
   const periods = ri => L.map(l => `<td class="num">${inp(`spec.subjects.${ri}.periods.${l}`, ((subs[ri] || {}).periods || {})[l], "number", 'style="width:56px"')}</td>`).join("");
   const msgsOf = ris => { const m = ris.flatMap(ri => out.subjects[ri] || []); return m.length ? `<div class="sjmsgs">${m.map(x => `<div>${esc(x)}</div>`).join("")}</div>` : ""; };
   const odd = c => {   // a row shown as it is: the table's own boxes
-    const ri = c.ri, s = subs[ri] || {}, why = c.odd === "tag" ? `This row's name and its ${tw} do not match, so it is shown as it is. Make them match and it joins its subject's card.` : "Another row has this name and G-level. Delete one of the two.";
+    const ri = c.ri, s = subs[ri] || {}, why = c.odd === "tag" ? `This row's name and its ${tw} do not match, so it is shown as it is. Make them match and it joins its subject's card.` : `Another row has this name and ${tw}. Delete one of the two.`;
     return `<div class="sjcard sjodd ${mark([ri])}" data-scard="${ri}">
       <div class="sjfields"><label>Subject ${inp(`spec.subjects.${ri}.subject`, s.subject)}</label><label>Code ${inp(`spec.subjects.${ri}.code`, s.code, "text", 'style="width:70px"')}</label><label>${esc(tagLabel())} ${sel(`spec.subjects.${ri}.tag`, s.tag, allTags, false)}</label>
         <label>Department ${sel(`spec.subjects.${ri}.dept`, s.dept, depts)}</label><label>Room kind ${sel(`spec.subjects.${ri}.room_kind`, s.room_kind, kinds)}</label><label>Lesson length ${inp(`spec.subjects.${ri}.lesson_length`, s.lesson_length, "number", 'style="width:70px"')}</label></div>
       <p class="muted small sjwhy">${esc(why)}</p>
       <div class="sjgridwrap"><table class="sjgrid"><tr>${L.map(l => `<th>${esc(l)}</th>`).join("")}<th ${TG}>Teaching groups</th></tr>
         <tr id="subjects-${ri}" class="${rowCls(out, crit, "subjects", ri)}">${periods(ri)}<td class="calc">${teachingGroups(s.subject)}</td></tr></table></div>
-      ${msgsOf([ri])}<div class="row" style="margin-top:8px">${delBtn("subjects", ri)}</div></div>`;
+      ${msgsOf([ri])}<div class="row" style="margin-top:8px"><button class="small danger" data-sremove title="Remove this row">Delete</button></div></div>`;
   };
   const card = c => {
     if (c.odd) return odd(c);
@@ -1186,6 +1186,65 @@ function subjectsCards() {
   };
   return `<div class="sjcols">${cols.map(col => `<section class="sjcol"><div class="sjhead"><b>${col.dept === "" ? "No department yet" : esc(col.dept)}</b><span class="muted small">${col.cards.length} subject${col.cards.length === 1 ? "" : "s"}</span></div>
     ${col.cards.map(card).join("")}<div class="row">${addBtn(col.dept)}</div></section>`).join("")}</div>`;
+}
+/* step 3, Cards view: what a card's boxes do. A card is found again from SubjectView.columns after every change (a row's index moves when rows come or go). */
+function sjCardOf(ri) { for (const col of SubjectView.columns(S.spec)) for (const c of col.cards) if (c.rows.some(x => x.ri === ri)) return c; return null; }
+function sjShow(ri, sel, scroll) {   // after a redraw: the card that holds this row, the box in it (if sel) with the keyboard, the card in view (if scroll)
+  const row = document.getElementById(`subjects-${ri}`), c = row && row.closest("[data-scard]");
+  if (!c) return null;
+  const el = sel && c.querySelector(sel); if (el && !el.disabled) el.focus({ preventScroll: true });
+  if (scroll) c.scrollIntoView({ block: "nearest" });
+  return c;
+}
+const sjNum = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+function sjName(e) {   // the name box: every row of the card is renamed
+  const el = e.target, c = sjCardOf(Number(el.closest("[data-scard]").dataset.scard));
+  if (!c) { render(); return; }
+  if (el.value.trim() !== c.name) {
+    if (!SubjectView.rename(S.spec, c.ri, el.value)) { toast("A subject with G-levels needs a name."); render(); return; }
+    save(); render(); poll(); return;
+  }
+  render();
+}
+function sjSet(e) {   // code, department, room kind, lesson length: the same value on every row, stored as the table stores it
+  const el = e.target, c = sjCardOf(Number(el.closest("[data-scard]").dataset.scard)); if (!c) { render(); return; }
+  let v = el.value; if (el.type === "number") v = v === "" ? null : Number(v); if (v === "") v = null;
+  if (!SubjectView.set(S.spec, c.ri, el.dataset.sset, v)) { render(); return; }
+  save(); render(); poll();
+  if (el.dataset.sset === "dept") sjShow(c.rows[0].ri, "[data-sset=dept]", true);
+}
+function sjTick(e) {   // a G-level's tick box: ticked adds it, unticked takes it off (asking first when lessons use it)
+  const el = e.target, tag = el.dataset.stick, c = sjCardOf(Number(el.closest("[data-scard]").dataset.scard));
+  if (!c) { render(); return; }
+  if (el.checked) {
+    const r = tag === "" ? null : SubjectView.tick(S.spec, c.ri, tag);
+    if (!r) {
+      if (tag !== "" && S.spec.subjects.some(x => x && String(x.subject == null ? "" : x.subject).trim() === `${c.name} ${tag}`)) toast(`${c.name} ${tag} is already on the list, on a card of its own.`);
+      render(); return;
+    }
+    save(); render(); poll(); sjShow(r.ri, `[data-stick="${CSS.escape(tag)}"]`); return;
+  }
+  const row = c.rows.find(x => x.tag === tag); if (!row) { render(); return; }
+  const n = SubjectView.uses(S.spec, row.subject);
+  if (n > 0 && !confirm(`${row.subject} is on ${sjNum(n, "lesson row", "lesson rows")} of step 5. Take it off step 3? Those lessons keep the name and show it as not on the list until they are given a subject. Undo takes it back.`)) { render(); return; }
+  const left = c.rows.find(x => x.ri !== row.ri), r = SubjectView.untick(S.spec, c.ri, tag);
+  if (!r) { render(); return; }
+  save(); render(); poll();
+  if (r.how === "emptied") sjShow(row.ri, `[data-stick="${CSS.escape(tag)}"]`);
+  else if (left) sjShow(left.ri > row.ri ? left.ri - 1 : left.ri, tag === "" ? "[data-sname]" : `[data-stick="${CSS.escape(tag)}"]`);
+}
+function sjRemove(b) {   // Delete: always asks
+  const c = sjCardOf(Number(b.closest("[data-scard]").dataset.scard)); if (!c) { render(); return; }
+  const names = new Set(c.rows.map(x => x.subject).filter(x => x !== "")), n = [...names].reduce((a, s) => a + SubjectView.uses(S.spec, s), 0);
+  const tl = tagLabel() === "G-level" ? "G-levels" : "level tags";
+  const what = c.name === "" ? "this subject" : c.rows.length === 1 ? c.name : `${c.name} and its ${c.rows.length} ${tl}`;
+  if (!confirm(`Remove ${what}?${n ? ` ${sjNum(n, "lesson row", "lesson rows")} of step 5 use ${n === 1 ? "it" : "them"}.` : ""} Undo takes it back.`)) return;
+  if (!SubjectView.remove(S.spec, c.ri)) return;
+  unpick(); save(); render(); poll();
+}
+function sjAdd(dept) {
+  const ri = SubjectView.add(S.spec, dept); save(); render(); poll();
+  const c = sjShow(ri, "[data-sname]", false); if (c) c.scrollIntoView({ block: "center" });
 }
 const VIEWS = {
   start() {
@@ -1523,6 +1582,8 @@ document.addEventListener("click", async e => {
   if (b.dataset.vblock !== undefined) { if (locked("venues")) return; VV.draft = { what: "block", text: "" }; render(); const i = $("#vvBlockName"); if (i) i.focus(); return; }
   if (b.dataset.vblockadd !== undefined) { if (locked("venues")) return; vvAddBlock(); return; }
   if (b.dataset.vkindadd !== undefined) { if (locked("venues")) return; vvAddKind(Number(b.dataset.vkindadd)); return; }
+  if (b.dataset.sadd !== undefined) { if (locked("subjects")) return; sjAdd(decodeURIComponent(b.dataset.sadd)); return; }
+  if (b.dataset.sremove !== undefined) { if (locked("subjects")) return; sjRemove(b); return; }
   if (b.dataset.cview) { CV.view = ["cards", "bands", "table"].includes(b.dataset.cview) ? b.dataset.cview : "cards"; cvOpen(null); try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } render(); return; }
   if (b.dataset.cclose) { cvOpen(null); render(); return; }
   if (b.dataset.cband !== undefined) { openBand(b.dataset.cband); return; }
@@ -1662,6 +1723,10 @@ document.addEventListener("change", async e => {
     const v = S.spec.venues[Number(el.dataset.vkind)]; if (!v || locked("venues")) return;
     if (el.value === VNEWKIND) { VV.draft = { what: "kind", text: "" }; render(); const i = $("#vvKindName"); if (i) i.focus(); return; }
     v.kind = el.value === "" ? null : el.value; save(); render(); return; }
+  if (el.dataset.sname !== undefined || el.dataset.sset !== undefined || el.dataset.stick !== undefined) {   // a box on a subject card (step 3)
+    if (locked("subjects") || !el.closest("[data-scard]")) return;
+    if (el.dataset.sname !== undefined) sjName(e); else if (el.dataset.sset !== undefined) sjSet(e); else sjTick(e);
+    return; }
   const path = el.dataset.k; if (!path) return;
   if (path === "spec.school.parents_name") { const t = el.value.trim(); if (t) sc().parents_name = t; else delete sc().parents_name; save(); render(); poll(); return; }   // an empty box takes the key away
   if (el.type === "checkbox") { setPath(path, el.checked); save(); render(); return; }
