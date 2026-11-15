@@ -31,6 +31,8 @@ the classes that have none from the teachers already on their lessons of the sub
 table counts the lessons changed by hand and offers **Put the Form teachers on all of them** (it asks first). Only the
 committee changes any of this.
 
+**Step 2's three views.** Step 2 shows the classes as **Cards** (one card per class under its level, with its home room, its form teachers and its subjects; a click opens the card to change it), as **Bands** (a picture of how each level's subjects are banded) or as the **Table** (every field in a row). On Bands, pick a level: whole-class subjects are filled cells, and each band is a bar across its classes with its groups and sizes; a click on a bar opens it on step 5's **Groups and bands**, which has a button back to the picture. The choice is remembered in your browser; department heads see all three and can change nothing.
+
 The student list goes in on the **Students** step, after the timetable is made (it is not needed to make one): paste it from Excel or a CSV, or upload an .xlsx or
 .csv, with each student's ID, name, class and group codes; the committee can then edit each student's groups there.
 To fill groups in the app, tick students (shift-click for a run, or the top box for everyone shown) and **Add to group**,
@@ -325,6 +327,7 @@ python app.py            # http://localhost:8000  (or: gunicorn app:app --worker
 node tests/sync.test.js                  # the same changes, in the browser's JavaScript
 node tests/people.test.js                # reading a teacher list and the avatars
 node tests/split.test.js                 # periods cut into lessons, as ttgen cuts them
+node tests/classview.test.js            # step 2's cards and band picture
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 ```
 To try the Fix card's box without a key, start with `TYPED_REQUEST_MODEL=mock`: it understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".

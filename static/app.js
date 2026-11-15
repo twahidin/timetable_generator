@@ -247,7 +247,7 @@ function headLocks(main, id) {
   const off = (el, why) => { el.disabled = true; if (why && !el.title) el.title = why; };
   const all = () => [...main.querySelectorAll("input, select, textarea, button")];
   if (locked(id)) {
-    all().forEach(el => { if (el.dataset.rtab === undefined) off(el); });   // the tabs of step 6 still switch
+    all().forEach(el => { if (el.dataset.rtab === undefined && el.dataset.cview === undefined && el.dataset.cclose === undefined && el.dataset.cband === undefined && el.id !== "cvLevel") off(el); });   // the tabs of step 6 and the views of step 2 still switch, the level picker and the bars of Bands work, and an open card still closes
     main.querySelectorAll("[data-pop]").forEach(el => el.classList.add("ro"));
     main.insertAdjacentHTML("afterbegin", `<div class="notice readonly">Only the committee can change this step.</div>`);
     return;
@@ -960,6 +960,101 @@ function cfAdd() {   // the form's values as they are now (a box typed in may no
   CF.open = false; save(); render();
   const el = document.getElementById(`choices-${r.i}`); if (el) el.scrollIntoView({ block: "center" });
 }
+/* ---------------- step 2: the Cards, Bands and Table views of the classes */
+const CLASSVIEW = "ttsetup.view.classes";
+const CV = { view: "cards", open: null, openId: null, level: "" };   // open: the index of the open card, found again by openId (the row's own _id) on each draw, so another person's change cannot move it to another class
+const cvOpen = ci => { CV.open = ci; const r = ci === null ? null : S.spec.classes[ci]; CV.openId = r && r._id ? r._id : null; };
+function cvResolve() {
+  if (CV.openId) { const i = S.spec.classes.findIndex(c => c && c._id === CV.openId); CV.open = i < 0 ? null : i; if (i < 0) CV.openId = null; }
+  else if (CV.open !== null) { const r = S.spec.classes[CV.open]; if (r && r._id) CV.openId = r._id; }
+}
+try { const cv = localStorage.getItem(CLASSVIEW); if (["cards", "bands", "table"].includes(cv)) CV.view = cv; } catch (e) { }
+function classesBars() {   // the two helper bars above the Cards and the Table
+  const nm = Parents.label(S.spec);
+  const hand = Parents.handRows(S.spec).length, fc = Parents.fillCount(S.spec);
+  const bar = Parents.subjects(S.spec).length && (hand || fc) ? `<div class="helper row">${hand ? `<span>${hand} ${hand === 1 ? "lesson" : "lessons"} changed by hand</span><button data-pback="1">Put the ${esc(nm)} on all of them</button>` : ""}${fc ? `<button data-pfill="1">Take them from the lessons</button>` : ""}</div>` : "";
+  return `${bar}
+      <div class="helper row"><b>Add classes</b> level ${sel("_hc", levels()[0], levels(), false, 'id="hcLevel" data-k=""')} names <input id="hcNames" value="A, B, C, D" style="width:120px"> students <input id="hcSize" type="number" value="38" style="width:70px"> <button data-helper="classes">Add (home rooms filled from free classrooms)</button></div>`;
+}
+function classesTable() {   // today's table, as it was
+  const { out, crit } = issues();
+  const nm = Parents.label(S.spec), pm = Parents.maximum(sc().parents_max) || 2, T = teacherNames(), held = c => Parents.names(c).length;
+  const NP = Math.max(pm, ...S.spec.classes.map(held));   // a class holding more than the school's most keeps its boxes
+  const pcells = (c, i) => { const mine = Math.max(pm, held(c)); let h = "";
+    for (let k = 0; k < NP; k++) { if (k >= mine) { h += "<td></td>"; continue; } const cur = Parents.names(c)[k] || "";
+      h += `<td><select data-parent="${i}|${k}">${opt("", cur, "")}${T.map(t => opt(t, cur)).join("")}${cur && !T.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}</select></td>`; }
+    return h; };
+  return `<div class="tablewrap"><table class="classtable"><tr><th>Class</th><th>Level</th><th>Students</th><th>Home room</th><th colspan="${NP}">${esc(nm)}</th><th>Lesson rows</th><th>Note</th><th></th></tr>
+      ${S.spec.classes.map((c, i) => `<tr id="classes-${i}" data-parents="${i}" class="${rowCls(out, crit, "classes", i)}"><td>${inp(`spec.classes.${i}.class`, c.class)}</td><td>${sel(`spec.classes.${i}.level`, c.level, levels())}</td><td class="num">${inp(`spec.classes.${i}.size`, c.size, "number")}</td><td>${sel(`spec.classes.${i}.home_room`, c.home_room, rooms())}</td>${pcells(c, i)}<td class="calc">${S.spec.lessons.filter(x => (x.classes || []).includes(c.class)).length}</td><td>${inp(`spec.classes.${i}.note`, c.note)}</td><td>${delBtn("classes", i)}</td></tr>`).join("")}
+      </table></div><div class="row" style="margin-top:10px"><button data-add="classes">+ Add class</button></div>`;
+}
+function classesCards() {   // one grid of cards per level; a click opens a card to change the class
+  const { out, crit } = issues(), nm = Parents.label(S.spec), pm = Parents.maximum(sc().parents_max) || 2, T = teacherNames();
+  cvResolve(); if (CV.open !== null && !S.spec.classes[CV.open]) cvOpen(null);
+  const people = n => { const t = S.spec.teachers.find(x => x && x.name === n);
+    return t ? `<span class="avx named" title="${esc(n)}">${avatarOf(t, 28)}<span class="avn">${esc(t.short || n)}</span></span>` : `<span class="chip" title="${esc(n)} (not on the teacher list)">${esc(n)}</span>`; };
+  const openCard = ci => { const c = S.spec.classes[ci], names = Parents.names(c), mine = Math.max(pm, names.length), msgs = out.classes[ci] || [];
+    const boxes = Array.from({ length: mine }, (_, k) => { const cur = names[k] || "";
+      return `<select data-parent="${ci}|${k}">${opt("", cur, "")}${T.map(t => opt(t, cur)).join("")}${cur && !T.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}</select>`; }).join("");
+    return `<div class="ccard open ${rowCls(out, crit, "classes", ci)}" id="classes-${ci}" data-ccard="${ci}" data-parents="${ci}">
+      <div class="cfields"><label>Class ${inp(`spec.classes.${ci}.class`, c.class)}</label><label>Level ${sel(`spec.classes.${ci}.level`, c.level, levels())}</label>
+        <label>Students ${inp(`spec.classes.${ci}.size`, c.size, "number")}</label><label>Home room ${sel(`spec.classes.${ci}.home_room`, c.home_room, rooms())}</label>
+        <label class="cwide">${esc(nm)}<span class="cboxes">${boxes}</span></label><label class="cwide">Note ${inp(`spec.classes.${ci}.note`, c.note)}</label></div>
+      ${msgs.length ? `<div class="cmsgs">${msgs.map(m => `<div>${esc(m)}</div>`).join("")}</div>` : ""}
+      <div class="row" style="margin-top:8px">${delBtn("classes", ci)} <button class="small" data-cclose="1">Close</button></div></div>`; };
+  const card = k => { if (CV.open === k.ci) return openCard(k.ci);
+    const held = k.parents.length;
+    const count = k.real !== null ? `${k.real} on the list · ${k.planned === null ? "?" : k.planned} planned` : `${k.planned === null ? "?" : k.planned} planned`;
+    return `<div class="ccard ${rowCls(out, crit, "classes", k.ci)}" id="classes-${k.ci}" data-ccard="${k.ci}"><div class="chead"><b>${esc(k["class"] || "(no name yet)")}</b><span class="muted small">${count}</span></div>
+      <div class="muted small">${k.home_room ? `Home room ${esc(k.home_room)}` : "No home room"}</div>
+      <div class="avs">${k.parents.map(people).join("")}${held < pm ? `<span class="plus" title="Add one">+</span>` : ""}</div>
+      ${k.subjects.length ? `<div class="csubs">${k.subjects.map(s => `<span class="chip ${s.whole ? "cwhole" : "cpart"}" title="${s.whole ? "The whole class together" : "Part of the class, in a teaching group"}">${esc(s.subject)}${!s.whole && s.count !== null ? ` · ${s.count}` : ""}</span>`).join("")}</div>` : ""}</div>`; };
+  const view = ClassView.cards(S.spec), shown = new Set();
+  const groups = view.map(g => { g.cards.forEach(k => shown.add(k.ci));
+    const n = g.cards.length;
+    return `<h3 class="clevel">${esc(g.level || "No level")} · ${n} ${n === 1 ? "class" : "classes"} · ${g.planned} students${g.real !== null ? ` · ${g.real} on the list` : ""}</h3><div class="cgrid">${g.cards.map(card).join("")}</div>`; });
+  const fresh = S.spec.classes.map((c, ci) => [c, ci]).filter(([c, ci]) => c && !shown.has(ci))   // a class with no name yet has no level to sit under
+    .map(([c, ci]) => ({ ci, "class": "", planned: c.size === "" || c.size == null || isNaN(Number(c.size)) ? null : Number(c.size), real: null, home_room: c.home_room || "", parents: Parents.names(c), subjects: [] }));
+  if (fresh.length) groups.push(`<h3 class="clevel">New classes</h3><div class="cgrid">${fresh.map(card).join("")}</div>`);
+  return (groups.length ? groups.join("") : `<p class="muted">No classes yet. Add them with the bar above.</p>`)
+    + `<div class="row" style="margin-top:10px"><button data-cadd="1">+ Add class</button></div>`;
+}
+function cvLevel() { const L = ClassView.levels(S.spec); if (!L.includes(CV.level)) CV.level = L.length ? L[0] : ""; return CV.level; }   // the level shown on Bands: the chosen one, else the first
+function classesBands() {   // a picture of one level: a column per class, a row per label; bands are bars across their classes
+  const L = ClassView.levels(S.spec);
+  if (!L.length) return `<p class="muted">No classes yet. Add them on Cards or the Table.</p>`;
+  const lv = cvLevel(), name = lv || "No level", pic = ClassView.bands(S.spec, lv);
+  const picker = `<div class="row" style="margin:12px 0 8px"><label>Level <select id="cvLevel">${L.map(l => opt(l, lv, l || "No level")).join("")}</select></label>
+    <span class="cvlegend small muted"><span class="lgd whole"></span>Whole class <span class="lgd bar"></span>Band: its groups meet at the same time <span class="lgd part"></span>Part of the class</span></div>`;
+  if (!pic.classes.length) return `${picker}<p class="muted">No classes at ${esc(name)} yet.</p>`;
+  if (!pic.rows.length) return `${picker}<p class="muted">No lesson rows for ${esc(name)} yet. Add them on step 5.</p>`;
+  const col = k => k + 2, head = pic.classes.map((c, k) => `<div class="chcol" style="grid-row:1;grid-column:${col(k)}">${esc(c)}</div>`).join("");
+  const cells = pic.rows.map((r, i) => {
+    const row = i + 2, same = i > 0 && pic.rows[i - 1].label === r.label, covered = new Set();
+    r.bars.forEach(b => b.spans.forEach(([f, n]) => { for (let k = f; k < f + n; k++) covered.add(k); }));
+    let h = `<div class="clab${same ? " again" : ""}" style="grid-row:${row};grid-column:1">${esc(r.label)}</div>`;
+    pic.classes.forEach((_, k) => { const c = r.cells[k];
+      if (c && c.kind === "whole") h += `<div class="cwcell" style="grid-row:${row};grid-column:${col(k)}" title="The whole class together"></div>`;
+      else if (c) h += `<div class="cpcell" style="grid-row:${row};grid-column:${col(k)}" title="Part of the class, in a teaching group">${esc(c.code)}</div>`;
+      else if (!covered.has(k)) h += `<div class="cecell" style="grid-row:${row};grid-column:${col(k)}"></div>`; });
+    r.bars.forEach(b => b.spans.forEach(([f, n], pi) => {
+      const chips = pi ? "" : `<span class="cchips">${b.groups.map(g => { const sub = g.subject || "", rest = sub && Groups.untag(sub) === r.label ? sub.trim().slice(r.label.length).trim() : "";
+        return `<span class="chip">${esc(rest || sub || "No subject yet")}${g.students != null ? ` · ${esc(g.students)}` : ""}</span>`; }).join("")}</span>`;
+      h += `<button class="cbar" data-cband="${esc(b.block)}" style="grid-row:${row};grid-column:${col(f)} / span ${n}" title="Open ${esc(b.block)} on step 5"><b>${esc(b.block)}</b>${chips}</button>`; }));
+    return h; }).join("");
+  return `${picker}<div class="bandwrap"><div class="bandgrid" style="grid-template-columns:minmax(120px,max-content) repeat(${pic.classes.length},minmax(84px,1fr))"><div class="chcol corner" style="grid-row:1;grid-column:1"></div>${head}${cells}</div></div>`;
+}
+function openBand(block) {   // from a bar: step 5 on Groups and bands, at the level shown, with the band in view
+  const lv = cvLevel(); M.view = "groups"; try { localStorage.setItem(MAPVIEW, M.view); } catch (e) { }
+  const gp = gpState(); if (levels().includes(lv) && gp.level !== lv) { gp.level = lv; gp.subject = ""; gp.ticked.clear(); M.gpTo = ""; }
+  S.step = STEPS.findIndex(x => x[0] === "lessons"); save(); render(); window.scrollTo(0, 0);
+  const lane = [...document.querySelectorAll("[data-glane]")].find(x => x.dataset.glane === block);
+  if (lane) lane.scrollIntoView({ block: "center" });
+}
+function openBands(level) {   // from step 5: step 2 on Bands at that level
+  CV.view = "bands"; if (ClassView.levels(S.spec).includes(level)) CV.level = level; cvOpen(null); try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { }
+  S.step = STEPS.findIndex(x => x[0] === "classes"); save(); render(); window.scrollTo(0, 0);
+}
 const VIEWS = {
   start() {
     const how = `<div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a band, a lesson with no periods).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
@@ -1023,21 +1118,10 @@ const VIEWS = {
       ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${rowCls(out, crit, "venues", i)}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.only_for" list="forNames" value="${esc((v.only_for || []).join(", "))}" placeholder="anyone"></td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td>${delBtn("venues", i)}</td></tr>`).join("")}
       </table></div><datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div></div>`;
   },
-  classes() {
-    const { out, crit } = issues();
-    const nm = Parents.label(S.spec), pm = Parents.maximum(sc().parents_max) || 2, T = teacherNames(), held = c => Parents.names(c).length;
-    const NP = Math.max(pm, ...S.spec.classes.map(held));   // a class holding more than the school's most keeps its boxes
-    const pcells = (c, i) => { const mine = Math.max(pm, held(c)); let h = "";
-      for (let k = 0; k < NP; k++) { if (k >= mine) { h += "<td></td>"; continue; } const cur = Parents.names(c)[k] || "";
-        h += `<td><select data-parent="${i}|${k}">${opt("", cur, "")}${T.map(t => opt(t, cur)).join("")}${cur && !T.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}</select></td>`; }
-      return h; };
-    const hand = Parents.handRows(S.spec).length, fc = Parents.fillCount(S.spec);
-    const bar = Parents.subjects(S.spec).length && (hand || fc) ? `<div class="helper row">${hand ? `<span>${hand} ${hand === 1 ? "lesson" : "lessons"} changed by hand</span><button data-pback="1">Put the ${esc(nm)} on all of them</button>` : ""}${fc ? `<button data-pfill="1">Take them from the lessons</button>` : ""}</div>` : "";
-    return `<div class="card"><h1>Step 2 · Classes</h1><p class="lead">Form classes with their level, size and home room (picked from step 1).</p>${bar}
-      <div class="helper row"><b>Add classes</b> level ${sel("_hc", levels()[0], levels(), false, 'id="hcLevel" data-k=""')} names <input id="hcNames" value="A, B, C, D" style="width:120px"> students <input id="hcSize" type="number" value="38" style="width:70px"> <button data-helper="classes">Add (home rooms filled from free classrooms)</button></div>
-      <div class="tablewrap"><table class="classtable"><tr><th>Class</th><th>Level</th><th>Students</th><th>Home room</th><th colspan="${NP}">${esc(nm)}</th><th>Lesson rows</th><th>Note</th><th></th></tr>
-      ${S.spec.classes.map((c, i) => `<tr id="classes-${i}" class="${rowCls(out, crit, "classes", i)}"><td>${inp(`spec.classes.${i}.class`, c.class)}</td><td>${sel(`spec.classes.${i}.level`, c.level, levels())}</td><td class="num">${inp(`spec.classes.${i}.size`, c.size, "number")}</td><td>${sel(`spec.classes.${i}.home_room`, c.home_room, rooms())}</td>${pcells(c, i)}<td class="calc">${S.spec.lessons.filter(x => (x.classes || []).includes(c.class)).length}</td><td>${inp(`spec.classes.${i}.note`, c.note)}</td><td>${delBtn("classes", i)}</td></tr>`).join("")}
-      </table></div><div class="row" style="margin-top:10px"><button data-add="classes">+ Add class</button></div></div>`;
+  classes() {   // step 2: the same classes as Cards, as Bands (a picture per level) or as the Table
+    const sw = v => `<button class="${CV.view === v ? "on" : ""}" data-cview="${v}">${{ cards: "Cards", bands: "Bands", table: "Table" }[v]}</button>`;
+    return `<div class="card"><div class="row" style="justify-content:space-between"><div><h1 style="margin:0">Step 2 · Classes</h1><p class="lead" style="margin:6px 0 0">Form classes with their level, size and home room (picked from step 1).</p></div><div class="row switch">${sw("cards")}${sw("bands")}${sw("table")}</div></div>
+      ${CV.view === "bands" ? classesBands() : classesBars() + (CV.view === "table" ? classesTable() : classesCards())}</div>`;
   },
   subjects() {
     const { out, crit } = issues(); const tags = (sc().tags || []).map(t => t[0]);
@@ -1281,6 +1365,8 @@ document.addEventListener("click", async e => {
   if (e.target.dataset && (e.target.dataset.pick || e.target.dataset.pickall)) { pick(e.target, e.shiftKey); return; }
   if (e.target.dataset && e.target.dataset.mtick) { mtick(e.target, e.shiftKey); return; }
   if (e.target.dataset && e.target.dataset.gtick) { const gp = gpState(); e.target.checked ? gp.ticked.add(e.target.dataset.gtick) : gp.ticked.delete(e.target.dataset.gtick); render(); return; }
+  const cc = e.target.closest("[data-ccard]");   // a class card: a click on its face opens it (not on a field or button inside the open one)
+  if (cc && !e.target.closest("button, input, select, textarea, label") && Number(cc.dataset.ccard) !== CV.open) { cvOpen(Number(cc.dataset.ccard)); render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "nearest" }); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c, [data-fxcell], [data-mcard], [data-mbasket], [data-mstaff]"); if (!b) return;
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
@@ -1294,8 +1380,13 @@ document.addEventListener("click", async e => {
   if (b.dataset.restore) { restoreCopy(b.dataset.restore); return; }
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
   if (b.dataset.rtab) { R6.tab = b.dataset.rtab; render(); return; }
+  if (b.dataset.cview) { CV.view = ["cards", "bands", "table"].includes(b.dataset.cview) ? b.dataset.cview : "cards"; cvOpen(null); try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } render(); return; }
+  if (b.dataset.cclose) { cvOpen(null); render(); return; }
+  if (b.dataset.cband !== undefined) { openBand(b.dataset.cband); return; }
+  if (b.dataset.cbands !== undefined) { openBands(b.dataset.cbands); return; }
+  if (b.dataset.cadd) { addRow("classes"); cvOpen(S.spec.classes.length - 1); render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "center" }); return; }
   if (b.dataset.add) { addRow(b.dataset.add, b.dataset.scope); return; }
-  if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
+  if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
   if (b.dataset.cmove) { const [i, d] = b.dataset.cmove.split("|").map(Number); if (!Choices.move(S.spec, i, d)) return; save(); render(); const nb = $(`[data-cmove="${i}|${d}"]`); if (nb && !nb.disabled) nb.focus({ preventScroll: true }); return; }
   if (b.dataset.cfopen) { Object.assign(CF, { open: true, kind: "setting", key: "", rule: "", level: "", second: "", fallback: "", from: "", to: "" }); render(); return; }
   if (b.dataset.cfcancel) { CF.open = false; render(); return; }
@@ -1327,7 +1418,13 @@ document.addEventListener("click", async e => {
     if (/^lessons-/.test(b.dataset.row)) S.tg = { lv: "", subj: "", t: "" };
     if (/^teachers-/.test(b.dataset.row)) S.tf = { dept: "", subj: "", q: "" };
     if (!stepShown(Number(b.dataset.go))) return;
-    S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
+    S.step = Number(b.dataset.go);
+    const ck = /^classes-(\d+)$/.exec(b.dataset.row);
+    if (ck && S.spec.classes[Number(ck[1])]) {   // a class: its card opens, on Cards, so its messages show (Bands switches to Cards first)
+      if (CV.view === "bands") { CV.view = "cards"; try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } }
+      if (CV.view === "cards") cvOpen(Number(ck[1]));
+    }
+    render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "fitAgain") { fitCheck(true); return; }
   if (b.id === "exGo") { makePrintouts(); return; }
@@ -1379,6 +1476,7 @@ document.addEventListener("change", async e => {
     if (el.tagName === "SELECT") render(); return; }
   if (["pickA", "pickP"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; return; }   // typed boxes: no redraw, or it would swallow the click on the button next to them
   if (["pickT", "pickG", "pickC", "pickS", "pickV", "pickD", "pickR"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
+  if (el.id === "cvLevel") { CV.level = el.value; render(); return; }
   if (el.id === "mLevel") { M.level = el.value; render(); return; }
   if (el.id === "gpLevel") { const gp = gpState(); gp.level = el.value; gp.subject = ""; gp.ticked.clear(); M.gpTo = ""; render(); return; }
   if (el.id === "gpSubject") { gpState().subject = el.value; render(); return; }
@@ -1398,7 +1496,7 @@ document.addEventListener("change", async e => {
   if (el.dataset.pmax !== undefined) { const msg = Parents.setMax(S.spec, el.value); if (msg) toast(msg); save(); render(); poll(); return; }   // a refusal leaves the old number, redrawn
   if (el.dataset.parent) {   // a Class Parents box: all of that class's boxes make its list (setPath would throw on a class with no list)
     const i = Number(el.dataset.parent.split("|")[0]);
-    Parents.setParents(S.spec, i, [...el.closest("tr").querySelectorAll("[data-parent]")].map(x => x.value)); save(); render(); poll(); return; }
+    Parents.setParents(S.spec, i, [...el.closest("[data-parents]").querySelectorAll("[data-parent]")].map(x => x.value)); save(); render(); poll(); return; }
   if (el.dataset.time) {   // a block-out's clock time: keep the times and block every period they overlap
     const [i, k] = el.dataset.time.split("|").map(Number), r = S.spec.rules[i];
     r.times = [...ruleTimes(r)]; r.times[k] = el.value; [r.from, r.to] = periodsBetween(r.times[0], r.times[1]); save(); render(); return; }
@@ -1708,7 +1806,7 @@ function poolView() {   // rows at the level with no band: tick (or drag) them i
   const row = p => { const id = S.spec.lessons[p.li]._id, on = gp.ticked.has(id);
     return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}"><span class="handle" draggable="true" data-gdrag="${esc(id)}" title="Drag into a band">⋮⋮</span><span style="flex:1;min-width:0">${esc(p.title)}</span>${p.kind === "group" ? `<span class="codeline small">${esc(p.code)}</span>` : ""}<span class="muted small" title="Students">${p.students != null ? p.students : ""}</span></div>`; };
   return `<section class="gpool card"><h3 style="margin:0 0 6px">Not in a band</h3><p class="muted small" style="margin:0 0 8px">Whole-class rows and groups with their own code. Tick rows and move them into a band, or drag them onto one.</p>
-    <div class="row"><select id="gpLevel">${levels().map(l => opt(l, gp.level)).join("")}</select><select id="gpSubject">${opt("", gp.subject, "All subjects")}${subjects.map(n => opt(n, gp.subject)).join("")}</select></div>
+    <div class="row"><select id="gpLevel">${levels().map(l => opt(l, gp.level)).join("")}</select><select id="gpSubject">${opt("", gp.subject, "All subjects")}${subjects.map(n => opt(n, gp.subject)).join("")}</select>${gp.level ? `<button class="small" data-cbands="${esc(gp.level)}">See how ${esc(gp.level)} is banded</button>` : `<button class="small" data-cbands="">See how the levels are banded</button>`}</div>
     <div class="row" style="margin:8px 0"><button class="small" data-gall>Select all shown</button><button class="small" data-gnone>Deselect all</button><span class="muted small">${items.length} row${items.length === 1 ? "" : "s"}${gp.ticked.size ? ` · ${gp.ticked.size} ticked` : ""}</span></div>
     <div class="plist keep">${items.map(row).join("") || `<p class="muted small">Every row at ${esc(gp.level)} is in a band.</p>`}</div>
     <div class="row" style="margin-top:10px"><span>Move into band</span><select id="gpTo">${opt("", M.gpTo || "", "")}${lanes.map(l => opt(l.block, M.gpTo || "")).join("")}</select><button data-gmove ${gp.ticked.size && lanes.length ? "" : "disabled"}>Move</button></div></section>`;

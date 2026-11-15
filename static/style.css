@@ -287,8 +287,40 @@ table.classtable td:nth-child(1) input{min-width:64px}
 table.classtable td:nth-child(2) select{min-width:88px}
 table.classtable td:nth-child(3) input{min-width:76px}
 table.classtable td:nth-child(4) select{min-width:104px}
+/* step 2, Cards view: a grid of class cards per level; an open card spreads over the row */
+.clevel{margin:16px 0 8px;font-size:14px;color:var(--navy)}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;align-items:start}
+.ccard{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel);cursor:pointer}
+.ccard:hover{border-color:#c5ccd8}
+.ccard.caution{background:#fff7e6}.ccard.bad{background:var(--warn-bg)}
+.ccard .chead{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.ccard .plus{display:inline-flex;width:28px;height:28px;border:1px dashed #cdd5e1;border-radius:50%;align-items:center;justify-content:center;color:var(--muted)}
+.csubs{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.chip.cwhole{background:var(--ok-bg);color:var(--ok)}
+.chip.cpart{background:#fff4d6;color:#7a5a00}
+.ccard.open{grid-column:1/-1;cursor:default;border-color:var(--accent)}
+.cfields{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 12px}
+.cfields label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted)}
+.cfields .cwide{grid-column:span 2}
+.cboxes{display:flex;flex-wrap:wrap;gap:6px}
+.cmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}
 .fxask{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 12px;background:#f8fafc}
 .fxask>.row{gap:6px;align-items:center}
 .fxask p{margin:6px 0 0}.fxchoice .row{gap:6px;margin-top:4px}.fxchoice button{padding:3px 10px;font-size:12px}
 .fxgroup{border-top:1px solid var(--line);margin-top:8px;padding-top:2px}.fxgroup .fxway{padding:6px 0 2px}.fxgroup .fxway:first-of-type{border-top:0}.fxgroup .fxway button{padding:3px 10px;font-size:12px}
 .fxask textarea{display:block;width:100%;box-sizing:border-box;resize:none;font:inherit}.fxaskgo{justify-content:flex-end;margin-top:6px}
+/* step 2, Bands view: a grid of classes; bars are bands across their classes. The label column stays while the grid scrolls sideways */
+.bandwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.bandgrid{display:grid;gap:4px;padding:8px;align-items:stretch;min-width:min-content}
+.bandgrid .chcol{font-weight:600;font-size:12.5px;text-align:center;color:var(--navy);padding:2px 0}
+.bandgrid .clab,.bandgrid .corner{position:sticky;left:0;z-index:2;background:var(--panel);padding:4px 8px 4px 0;font-size:13px;display:flex;align-items:center}
+.bandgrid .clab.again{color:var(--muted);font-size:12px}
+.cwcell{background:var(--ok-bg);border-radius:6px;min-height:30px}
+.cpcell{background:#fff4d6;color:#7a5a00;border-radius:6px;min-height:30px;display:flex;align-items:center;justify-content:center;font-size:12px}
+.cecell{border:1px dashed #cdd5e1;border-radius:6px;min-height:30px}
+.cbar{background:#e8f0fe;border:1px solid var(--accent);color:var(--ink);border-radius:6px;min-height:30px;padding:3px 8px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;text-align:left;cursor:pointer;font-size:12.5px;z-index:1}
+.cbar:hover{background:#d8e6fd}
+.cbar .cchips{display:flex;flex-wrap:wrap;gap:4px}
+.cvlegend{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+.lgd{display:inline-block;width:14px;height:12px;border-radius:3px;margin-left:8px}
+.lgd.whole{background:var(--ok-bg)}.lgd.bar{background:#e8f0fe;border:1px solid var(--accent)}.lgd.part{background:#fff4d6}
