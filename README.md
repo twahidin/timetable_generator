@@ -20,7 +20,7 @@ code and download PDFs. The app does not generate timetables itself.
 7 Download · 8 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
 step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Fixed lessons and More
 rules sheets. Step 4 starts with the **Roles** (fill them first: the teacher list is checked against them), then the
-teacher list, then the teachers table. Step 1 shows the rooms two ways, **Blocks** (a panel per block, a row per floor, a tile per room) and **Table**; the choice is remembered in your browser. A room can carry **Equipment** and a **Configuration**, two plain notes that are only shown (in the table, on the Blocks tile, in the workbook and on the room's page) and that no check reads.
+teacher list, then the teachers table. Step 1 shows the rooms two ways, **Blocks** (a panel per block, a row per floor, a tile per room) and **Table**; the choice is remembered in your browser. A room can carry **Equipment** and a **Configuration**, two plain notes that are only shown (in the table, on the Blocks tile, in the workbook and on the room's page) and that no check reads. On Blocks, a click on a room opens it to change; **+ Room** on a floor, **+ Floor** on a block and **+ Block** add a room (each in one step you can undo), and **New kind…** in a room's Kind box adds a kind to the school's list.
 
 **Form teachers.** A class can have form teachers, who take its lessons together. **School & day** has two settings for
 them: what the school calls them (**What your school calls a class's form teachers**, default "Form teachers"; a school
