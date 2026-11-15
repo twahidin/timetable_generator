@@ -247,7 +247,7 @@ function headLocks(main, id) {
   const off = (el, why) => { el.disabled = true; if (why && !el.title) el.title = why; };
   const all = () => [...main.querySelectorAll("input, select, textarea, button")];
   if (locked(id)) {
-    all().forEach(el => { if (el.dataset.rtab === undefined && el.dataset.cview === undefined && el.dataset.cclose === undefined && el.dataset.cband === undefined && el.id !== "cvLevel") off(el); });   // the tabs of step 6 and the views of step 2 still switch, the level picker and the bars of Bands work, and an open card still closes
+    all().forEach(el => { if (el.dataset.rtab === undefined && el.dataset.cview === undefined && el.dataset.vview === undefined && el.dataset.cclose === undefined && el.dataset.vroom === undefined && el.dataset.vclose === undefined && el.dataset.cband === undefined && el.id !== "cvLevel") off(el); });   // the tabs of step 6 and the views of step 2 still switch, the level picker and the bars of Bands work, an open card still closes, and a room of step 1 opens (to read) and closes
     main.querySelectorAll("[data-pop]").forEach(el => el.classList.add("ro"));
     main.insertAdjacentHTML("afterbegin", `<div class="notice readonly">Only the committee can change this step.</div>`);
     return;
@@ -960,14 +960,95 @@ function cfAdd() {   // the form's values as they are now (a box typed in may no
   CF.open = false; save(); render();
   const el = document.getElementById(`choices-${r.i}`); if (el) el.scrollIntoView({ block: "center" });
 }
+/* ---------------- step 1: the Blocks and Table views of the rooms */
+/* the open card or room is held by its row's own _id and found again on each draw, so another person's change cannot
+   turn it into a different row; a row with no _id yet (not saved once) is held by its place until its first save */
+function heldOpen(H, rows, i) { H.open = i; const r = i === null ? null : rows[i]; H.openId = r && r._id ? r._id : null; }
+function heldResolve(H, rows) {
+  if (H.openId) { const i = rows.findIndex(c => c && c._id === H.openId); H.open = i < 0 ? null : i; if (i < 0) H.openId = null; }
+  else if (H.open !== null) { const r = rows[H.open]; if (r && r._id) H.openId = r._id; }
+}
+const VENUEVIEW = "ttsetup.view.venues";
+const VV = { view: "blocks", open: null, openId: null, draft: null };   // open: the index of the open room, found again by openId (the row's own _id) on each draw
+// draft: a small box being filled in ({ what: "kind" } the open room's new kind, { what: "block" } a new block), not saved
+const VNEWKIND = "__new_kind__";   // the last choice of an open room's Kind box
+const vvOpen = vi => { heldOpen(VV, S.spec.venues, vi); VV.draft = null; };
+const vvResolve = () => heldResolve(VV, S.spec.venues);
+try { const vv = localStorage.getItem(VENUEVIEW); if (["blocks", "table"].includes(vv)) VV.view = vv; } catch (e) { }
+function venuesTable() {   // today's table, and two notes at its end
+  const { out, crit } = issues();
+  return `<div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Block</th><th>Floor / level</th><th>Home room of</th><th>For</th><th>Note</th><th>Equipment</th><th>Configuration</th><th></th></tr>
+      ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${rowCls(out, crit, "venues", i)}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.only_for" list="forNames" value="${esc((v.only_for || []).join(", "))}" placeholder="anyone"></td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.equipment" value="${esc((Array.isArray(v.equipment) ? v.equipment : []).join(", "))}" placeholder="none"></td><td style="min-width:150px">${inp(`spec.venues.${i}.configuration`, v.configuration)}</td><td>${delBtn("venues", i)}</td></tr>`).join("")}
+      </table></div><datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div>`;
+}
+/* the kinds the app ships with: a fixed colour and a short mark each; any other kind is neutral */
+const VKINDS = { "classroom": ["CR", "#2563eb"], "lab": ["LB", "#7c3aed"], "science room": ["SC", "#0e7490"], "computer lab": ["CL", "#0369a1"], "art room": ["AR", "#c2410c"], "d&t studio": ["DT", "#a16207"], "food lab": ["FL", "#be185d"], "music room": ["MU", "#9333ea"], "pe venue": ["PE", "#15803d"], "hall": ["HL", "#b45309"], "special room": ["SP", "#475569"] };
+const vkindOf = k => { const key = String(k || "").trim().toLowerCase(); return Object.prototype.hasOwnProperty.call(VKINDS, key) ? VKINDS[key] : ["··", "#7b8496"]; };
+const vkindMark = k => { const [m, c] = vkindOf(k); return `<i class="vmark" style="background:${c}">${esc(m)}</i>`; };
+function venuesBlocks() {   // the rooms by block and floor; a click on a tile opens the room to change it
+  const { out, crit } = issues();
+  vvResolve(); if (VV.open !== null && !S.spec.venues[VV.open]) vvOpen(null);
+  const bl = VenueView.blocks(S.spec);
+  const add = `<div class="row vblockbar">${VV.draft && VV.draft.what === "block"
+    ? `<label>New block's name <input id="vvBlockName" value="${esc(VV.draft.text || "")}" autocomplete="off"></label> <button data-vblockadd="1">Add</button> <button data-vdraftx="1">Cancel</button><span class="muted small">It starts with one room, on floor 1.</span>`
+    : `<button data-vblock="1">+ Block</button>`}</div>`;
+  if (!bl.length) return `<p class="muted vempty">No rooms yet. Add them with the bar above, or add a block here.</p>${add}`;
+  const used = VenueView.kinds(S.spec).filter(k => S.spec.venues.some(v => v && v.kind === k));
+  const legend = used.length ? `<div class="vlegend">${used.map(k => `<span>${vkindMark(k)} ${esc(k)}</span>`).join("")}</div>` : "";
+  const tile = r => {
+    const line = r.home.length ? `Home of ${r.home.join(", ")}` : r.only_for.length ? `Kept for ${r.only_for.join(", ")}` : "";
+    const notes = r.equipment.length || r.configuration.trim() ? `<span class="vflag" title="${esc([r.equipment.length ? "Equipment: " + r.equipment.join(", ") : "", r.configuration.trim() ? "Configuration: " + r.configuration.trim() : ""].filter(Boolean).join(". "))}">+ notes</span>` : "";
+    const open = VV.open === r.vi;   // the open room's own box carries the row's id, so a message can scroll to it
+    return `<button class="vtile ${open ? "on " : ""}${rowCls(out, crit, "venues", r.vi)}" data-vroom="${r.vi}"${open ? ' aria-expanded="true"' : ' aria-expanded="false"'}${open ? "" : ` id="venues-${r.vi}"`}><span class="vname">${r.room ? esc(r.room) : "(no name yet)"}${notes}</span><span class="vkind">${vkindMark(r.kind)} ${esc(r.kind || "no kind")}${r.capacity != null ? ` · ${esc(r.capacity)} seats` : ""}</span>${line ? `<span class="vnote">${esc(line)}</span>` : ""}</button>`;
+  };
+  const openRoom = vi => {
+    const v = S.spec.venues[vi], p = f => `spec.venues.${vi}.${f}`, msgs = out.venues[vi] || [];
+    const kinds = sc().room_kinds || [], cur = v.kind || "";
+    const kindBox = `<select id="vvKind" data-vkind="${vi}">${opt("", cur, "")}${kinds.map(k => opt(k, cur)).join("")}${cur && !kinds.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}<option value="${VNEWKIND}">New kind…</option></select>`;
+    const draft = VV.draft && VV.draft.what === "kind"
+      ? `<div class="row vdraft"><label>New kind's name <input id="vvKindName" value="${esc(VV.draft.text || "")}" autocomplete="off"></label> <button data-vkindadd="${vi}">Add</button> <button data-vdraftx="1">Cancel</button></div>` : "";
+    return `<div class="vopen ${rowCls(out, crit, "venues", vi)}" id="venues-${vi}" data-vopen="${vi}">
+      <div class="vfields"><label>Room ${inp(p("room"), v.room)}</label><label>Kind ${kindBox}</label><label>Capacity ${inp(p("capacity"), v.capacity, "number")}</label>
+        <label>Block ${inp(p("building"), v.building)}</label><label>Floor / level ${inp(p("floor"), v.floor)}</label>
+        <label>For <input data-names="${p("only_for")}" list="forNames" value="${esc((Array.isArray(v.only_for) ? v.only_for : []).join(", "))}" placeholder="anyone"></label>
+        <label class="vwide">Equipment <input data-names="${p("equipment")}" value="${esc((Array.isArray(v.equipment) ? v.equipment : []).join(", "))}" placeholder="none"></label>
+        <label class="vwide">Configuration ${inp(p("configuration"), v.configuration)}</label><label class="vwide">Note ${inp(p("note"), v.note)}</label></div>${draft}
+      ${msgs.length ? `<div class="vmsgs">${msgs.map(m => `<div>${esc(m)}</div>`).join("")}</div>` : ""}
+      <div class="row" style="margin-top:8px">${delBtn("venues", vi)} <button class="small" data-vclose="1">Close</button></div></div>`;
+  };
+  const floorName = f => f === "" ? "No floor yet" : /^-?\d+(\.\d+)?$/.test(f) ? `Floor ${f}` : f;
+  const at = (b, f) => `${encodeURIComponent(b)}|${encodeURIComponent(f)}`;   // "{block}|{floor}", each part encoded so a name with a bar in it still splits right
+  return `${legend}<div class="vblocks">${bl.map(b => `<section class="vpanel"><h3>${b.block === "" ? "No block yet" : esc(b.block)} <span class="muted">${b.rooms} ${b.rooms === 1 ? "room" : "rooms"} · ${b.seats} seats</span> <button class="small vfloorbtn" data-vfloor="${esc(b.block)}">+ Floor</button></h3>
+      ${b.floors.map(f => `<div class="vfloor"><div class="vflabel">${esc(floorName(f.floor))}</div><div class="vtiles">${f.rooms.map(tile).join("")}<button class="small vaddbtn" data-vadd="${esc(at(b.block, f.floor))}">+ Room</button></div>${f.rooms.some(r => r.vi === VV.open) ? openRoom(VV.open) : ""}</div>`).join("")}</section>`).join("")}</div>${add}
+    <datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist>`;
+}
+/* a room added from the Blocks view goes on the list the way the Add rooms bar adds one: pushed, then one save; it opens at once */
+function vvAddRoom(block, floor) {
+  const n = VenueView.nextRoom(S.spec, block, floor), row = { room: n.room, kind: n.kind, capacity: n.capacity };
+  if (String(block).trim() !== "") row.building = String(block).trim();
+  if (String(floor).trim() !== "") row.floor = String(floor).trim();
+  S.spec.venues.push(row); save();
+  const vi = S.spec.venues.length - 1; vvOpen(vi); render();
+  const o = document.getElementById(`venues-${vi}`); if (o) o.scrollIntoView({ block: "center" });
+  if (!n.room) { const f = o && o.querySelector(`[data-k="spec.venues.${vi}.room"]`); if (f) f.focus({ preventScroll: true }); }
+}
+function vvAddBlock() {
+  const el = $("#vvBlockName"), name = el ? el.value.trim() : "";
+  if (!name) { if (el) el.focus(); return; }
+  vvAddRoom(name, "1");
+}
+function vvAddKind(vi) {   // the name goes at the end of the school's list (if no kind of that name is there, any case) and on the room: one save
+  const el = $("#vvKindName"), name = el ? el.value.trim() : "", v = S.spec.venues[vi];
+  if (!name || !v) { if (el) el.focus(); return; }
+  const list = sc().room_kinds || [], have = list.find(k => String(k).toLowerCase() === name.toLowerCase());
+  if (have === undefined) sc().room_kinds = [...list, name];
+  v.kind = have === undefined ? name : have; VV.draft = null; save(); render();
+}
 /* ---------------- step 2: the Cards, Bands and Table views of the classes */
 const CLASSVIEW = "ttsetup.view.classes";
 const CV = { view: "cards", open: null, openId: null, level: "" };   // open: the index of the open card, found again by openId (the row's own _id) on each draw, so another person's change cannot move it to another class
-const cvOpen = ci => { CV.open = ci; const r = ci === null ? null : S.spec.classes[ci]; CV.openId = r && r._id ? r._id : null; };
-function cvResolve() {
-  if (CV.openId) { const i = S.spec.classes.findIndex(c => c && c._id === CV.openId); CV.open = i < 0 ? null : i; if (i < 0) CV.openId = null; }
-  else if (CV.open !== null) { const r = S.spec.classes[CV.open]; if (r && r._id) CV.openId = r._id; }
-}
+const cvOpen = ci => heldOpen(CV, S.spec.classes, ci);
+const cvResolve = () => heldResolve(CV, S.spec.classes);
 try { const cv = localStorage.getItem(CLASSVIEW); if (["cards", "bands", "table"].includes(cv)) CV.view = cv; } catch (e) { }
 function classesBars() {   // the two helper bars above the Cards and the Table
   const nm = Parents.label(S.spec);
@@ -1110,13 +1191,11 @@ const VIEWS = {
       ${hasWindows() ? `<h3 style="margin:14px 0 4px">Floating recess</h3><p class="muted" style="margin:0 0 8px">For the W periods: the solver puts a recess of this length in each recess window. Make a window the recess plus whole lessons (for example 2 + 3 + 3 periods with 3-period lessons), so the lessons still fit wherever the recess goes.</p>
         <div class="grid2">${(s.extra_settings || []).map((x, i) => isRecessRow(x) ? settingRow(x, i) : "").join("")}</div>` : ""}</div>`;
   },
-  venues() {
-    const { out, crit } = issues();
-    return `<div class="card"><h1>Step 1 · Venues</h1><p class="lead">Every room. Its kind decides which subjects may use it (you set a subject's room kind on step 3). <b>Capacity</b> is seats: a group only goes in a room that seats it. <b>For</b> keeps a room for some subjects, departments or levels (for example "Chemistry G3, Sec 3"); blank = anyone. A room that holds two classes at once (a field, a hall) gets an "At most N at once" rule on step 6.</p>
+  venues() {   // step 1: the same rooms as Blocks (by block and floor) or as the Table
+    const sw = v => `<button class="${VV.view === v ? "on" : ""}" data-vview="${v}">${{ blocks: "Blocks", table: "Table" }[v]}</button>`;
+    return `<div class="card"><div class="row" style="justify-content:space-between"><div><h1 style="margin:0">Step 1 · Venues</h1></div><div class="row switch">${sw("blocks")}${sw("table")}</div></div><p class="lead">Every room. Its kind decides which subjects may use it (you set a subject's room kind on step 3). <b>Capacity</b> is seats: a group only goes in a room that seats it. <b>For</b> keeps a room for some subjects, departments or levels (for example "Chemistry G3, Sec 3"); blank = anyone. A room that holds two classes at once (a field, a hall) gets an "At most N at once" rule on step 6. <b>Equipment</b> and <b>Configuration</b> are notes for people: nothing checks them.</p>
       <div class="helper row"><b>Add rooms</b> prefix ${`<input id="hvPre" value="B1-" style="width:70px">`} from <input id="hvFrom" type="number" value="1" style="width:60px"> to <input id="hvTo" type="number" value="8" style="width:60px"> kind ${sel("_hv", "classroom", sc().room_kinds || [], false, 'id="hvKind" data-k=""')} <button data-helper="venues">Add</button></div>
-      <div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Block</th><th>Floor / level</th><th>Home room of</th><th>For</th><th>Note</th><th></th></tr>
-      ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${rowCls(out, crit, "venues", i)}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.only_for" list="forNames" value="${esc((v.only_for || []).join(", "))}" placeholder="anyone"></td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td>${delBtn("venues", i)}</td></tr>`).join("")}
-      </table></div><datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div></div>`;
+      ${VV.view === "table" ? venuesTable() : venuesBlocks()}</div>`;
   },
   classes() {   // step 2: the same classes as Cards, as Bands (a picture per level) or as the Table
     const sw = v => `<button class="${CV.view === v ? "on" : ""}" data-cview="${v}">${{ cards: "Cards", bands: "Bands", table: "Table" }[v]}</button>`;
@@ -1380,13 +1459,25 @@ document.addEventListener("click", async e => {
   if (b.dataset.restore) { restoreCopy(b.dataset.restore); return; }
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
   if (b.dataset.rtab) { R6.tab = b.dataset.rtab; render(); return; }
+  if (b.dataset.vview) { VV.view = b.dataset.vview === "table" ? "table" : "blocks"; VV.open = null; VV.openId = null; try { localStorage.setItem(VENUEVIEW, VV.view); } catch (e) { } render(); return; }
+  if (b.dataset.vroom !== undefined) { const vi = Number(b.dataset.vroom); if (!S.spec.venues[vi]) return; const was = VV.open === vi; vvOpen(was ? null : vi); render();
+    if (was) { const t = document.querySelector(`[data-vroom="${vi}"]`); if (t) t.focus({ preventScroll: true }); }
+    else { const o = document.getElementById(`venues-${vi}`); if (o) { o.scrollIntoView({ block: "nearest" }); const f = o.querySelector("input:not(:disabled), select:not(:disabled)") || o.querySelector("[data-vclose]"); if (f) f.focus({ preventScroll: true }); } }
+    return; }
+  if (b.dataset.vclose !== undefined) { const vi = VV.open; vvOpen(null); render(); const t = vi !== null && document.querySelector(`[data-vroom="${vi}"]`); if (t) t.focus({ preventScroll: true }); return; }
+  if (b.dataset.vdraftx !== undefined) { VV.draft = null; render(); return; }
+  if (b.dataset.vadd !== undefined) { if (locked("venues")) return; const [bk, fl] = b.dataset.vadd.split("|").map(decodeURIComponent); vvAddRoom(bk, fl); return; }
+  if (b.dataset.vfloor !== undefined) { if (locked("venues")) return; vvAddRoom(b.dataset.vfloor, VenueView.nextFloor(S.spec, b.dataset.vfloor)); return; }
+  if (b.dataset.vblock !== undefined) { if (locked("venues")) return; VV.draft = { what: "block", text: "" }; render(); const i = $("#vvBlockName"); if (i) i.focus(); return; }
+  if (b.dataset.vblockadd !== undefined) { if (locked("venues")) return; vvAddBlock(); return; }
+  if (b.dataset.vkindadd !== undefined) { if (locked("venues")) return; vvAddKind(Number(b.dataset.vkindadd)); return; }
   if (b.dataset.cview) { CV.view = ["cards", "bands", "table"].includes(b.dataset.cview) ? b.dataset.cview : "cards"; cvOpen(null); try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } render(); return; }
   if (b.dataset.cclose) { cvOpen(null); render(); return; }
   if (b.dataset.cband !== undefined) { openBand(b.dataset.cband); return; }
   if (b.dataset.cbands !== undefined) { openBands(b.dataset.cbands); return; }
   if (b.dataset.cadd) { addRow("classes"); cvOpen(S.spec.classes.length - 1); render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "center" }); return; }
   if (b.dataset.add) { addRow(b.dataset.add, b.dataset.scope); return; }
-  if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
+  if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "venues") vvOpen(null); if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
   if (b.dataset.cmove) { const [i, d] = b.dataset.cmove.split("|").map(Number); if (!Choices.move(S.spec, i, d)) return; save(); render(); const nb = $(`[data-cmove="${i}|${d}"]`); if (nb && !nb.disabled) nb.focus({ preventScroll: true }); return; }
   if (b.dataset.cfopen) { Object.assign(CF, { open: true, kind: "setting", key: "", rule: "", level: "", second: "", fallback: "", from: "", to: "" }); render(); return; }
   if (b.dataset.cfcancel) { CF.open = false; render(); return; }
@@ -1424,6 +1515,8 @@ document.addEventListener("click", async e => {
       if (CV.view === "bands") { CV.view = "cards"; try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } }
       if (CV.view === "cards") cvOpen(Number(ck[1]));
     }
+    const vk = /^venues-(\d+)$/.exec(b.dataset.row);
+    if (vk && VV.view === "blocks" && S.spec.venues[Number(vk[1])]) vvOpen(Number(vk[1]));   // a room: its box opens, on Blocks, so its messages show (the Table stays as it is)
     render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "fitAgain") { fitCheck(true); return; }
@@ -1441,6 +1534,15 @@ document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / C
   const k = e.key.toLowerCase(); if (k !== "z" && k !== "y") return;
   if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
   e.preventDefault(); undo(k === "z" && !e.shiftKey);
+});
+document.addEventListener("input", e => { if (VV.draft && (e.target.id === "vvKindName" || e.target.id === "vvBlockName")) VV.draft.text = e.target.value; });
+document.addEventListener("keydown", e => {   // step 1, Blocks: Enter in a small name box adds; Escape drops the box, or closes the open room
+  if (e.isComposing || S.asking || !S.spec || !STEPS[S.step] || STEPS[S.step][0] !== "venues" || VV.view !== "blocks") return;
+  if (e.key === "Enter" && (e.target.id === "vvKindName" || e.target.id === "vvBlockName")) { e.preventDefault(); const b = document.querySelector(e.target.id === "vvKindName" ? "[data-vkindadd]" : "[data-vblockadd]"); if (b) b.click(); return; }
+  if (e.key !== "Escape" || (VV.open === null && !VV.draft)) return;
+  e.preventDefault(); const a = document.activeElement; if (a && a.blur && $("#main").contains(a)) a.blur();   // a box being typed in keeps what was typed first
+  if (VV.draft) { VV.draft = null; render(); return; }
+  const vi = VV.open; vvOpen(null); render(); const t = document.querySelector(`[data-vroom="${vi}"]`); if (t) t.focus({ preventScroll: true });
 });
 document.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing && e.target.id === "fxAskIn") { e.preventDefault(); if (!e.shiftKey) fxAsk(); } });   // Enter in the typed-request box asks; nothing while a request is out (fxAsk)
 let painting = false;
@@ -1504,6 +1606,10 @@ document.addEventListener("change", async e => {
     const tr = el.closest("tr"), r = S.spec.rules[Number(el.dataset.fixlv ?? el.dataset.fixwho)];
     setFixedWho(r, tr.querySelector("[data-fixlv]").value, tr.querySelector("[data-fixwho]").value); save(); render(); return;
   }
+  if (el.dataset.vkind !== undefined) {   // the open room's Kind box: a kind, or "New kind…" (a small box for its name)
+    const v = S.spec.venues[Number(el.dataset.vkind)]; if (!v || locked("venues")) return;
+    if (el.value === VNEWKIND) { VV.draft = { what: "kind", text: "" }; render(); const i = $("#vvKindName"); if (i) i.focus(); return; }
+    v.kind = el.value === "" ? null : el.value; save(); render(); return; }
   const path = el.dataset.k; if (!path) return;
   if (path === "spec.school.parents_name") { const t = el.value.trim(); if (t) sc().parents_name = t; else delete sc().parents_name; save(); render(); poll(); return; }   // an empty box takes the key away
   if (el.type === "checkbox") { setPath(path, el.checked); save(); render(); return; }
@@ -1523,6 +1629,7 @@ document.addEventListener("change", async e => {
   if (/^spec\.school\.(weeks|periods_per_day)$/.test(path)) ensureDays();
   if (/\.(room|class|subject|name|block)$/.test(path)) renameRefs(e.target, path, v);
   save(); render(); poll();
+  if (/^spec\.venues\.\d+\.(building|floor)$/.test(path) && VV.view === "blocks" && VV.open !== null) { const o = document.getElementById(`venues-${VV.open}`); if (o) o.scrollIntoView({ block: "nearest" }); }   // the room moved to its new place and stays open
 });
 function renameRefs() { /* references are by name; renaming leaves old names flagged as "(not on list)" for the user to fix */ }
 

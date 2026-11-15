@@ -163,7 +163,8 @@ def read_template(path):
         day_structure.setdefault(str(lv), {})[str(d)] = codes
     _, ven = _table(wb["1 Venues"], "Room")
     venues = [dict(room=str(x["Room"]), kind=x.get("Kind"), capacity=x.get("Capacity"), building=x.get("Building") or x.get("Block"), floor=x.get("Floor") or x.get("Floor / level"),
-                   note=x.get("Note"), only_for=_names(next((v for h, v in x.items() if h.startswith("For")), None))) for x in ven if x.get("Room")]
+                   note=x.get("Note"), only_for=_names(next((v for h, v in x.items() if h.startswith("For")), None)),
+                   equipment=_names(x.get("Equipment")), configuration=str(x.get("Configuration") or "").strip() or None) for x in ven if x.get("Room")]
     _, cl = _table(wb["2 Classes"], "Class")
     pn = PA.label({"school": sc})   # the Class Parents columns are headed with the school's word and a number
     classes = [dict({"class": str(x["Class"]), "level": x.get("Level"), "size": x.get("Students") or 0, "home_room": x.get("Home room"), "note": x.get("Note")},

@@ -87,10 +87,11 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
     for L in lessons:
         for t in L["teachers"]:
             if t not in seen: seen.add(t); teachers.append(dict(name=t, short=t, dept="", allowance="", other=""))
-    rooms = [dict(name=str(v["room"]), kind=v.get("kind") or "classroom", capacity=v.get("capacity") or "") for v in spec["venues"]]
+    rooms = [dict(name=str(v["room"]), kind=v.get("kind") or "classroom", capacity=v.get("capacity") or "",
+                  equipment=[str(e).strip() for e in v.get("equipment") or [] if str(e).strip()], configuration=str(v.get("configuration") or "").strip()) for v in spec["venues"]]
     seen = {r["name"] for r in rooms}
     for L in lessons:
-        if L["room"] and L["room"] not in seen: seen.add(L["room"]); rooms.append(dict(name=L["room"], kind="to be confirmed" if L["room"] == "TBC" else "other", capacity=""))
+        if L["room"] and L["room"] not in seen: seen.add(L["room"]); rooms.append(dict(name=L["room"], kind="to be confirmed" if L["room"] == "TBC" else "other", capacity="", equipment=[], configuration=""))
     used_rooms = {L["room"] for L in lessons if L["room"]}
     rooms = [r for r in rooms if r["name"] in used_rooms] + [r for r in rooms if r["name"] not in used_rooms]
     depts = []
@@ -408,15 +409,23 @@ def _parents_text(m, c):
     ps = (m["class_ix"].get(c) or {}).get("parents") or []
     return f"{m.get('parents_name') or 'Form teachers'}: {', '.join(ps)}" if ps else ""
 
+EXTRA_LINES = 6   # the most lines a room's equipment and configuration take on its printed timetable; form teachers are never cut
 def _parents_block(v):
-    """the PDF's form teachers line, wrapped to the subtitle's width so no name is ever cut: [] when the view has none"""
+    """the PDF's second line (form teachers, or a room's equipment and configuration), wrapped to the subtitle's width so no item is ever cut: [] when the view has none"""
     from reportlab.pdfbase.pdfmetrics import stringWidth
     R, _ = _fonts(); lines, cur = [], ""
-    for seg in (v.get("parents_line") or "").split(", "):   # break between names, never inside one
-        t = f"{cur}, {seg}" if cur else seg
-        if cur and stringWidth(t, R, 8.6) > 420: lines.append(cur + ","); cur = seg
+    own = v.get("parents_line")
+    segs = re.split(r"(?<=, )|(?<= · )", own or v.get("extra_line") or "")   # break between names or items, never inside one; the separator stays on the line it closes
+    for seg in [x for x in segs if x]:
+        t = cur + seg
+        if cur and stringWidth(t.rstrip(), R, 8.6) > 420: lines.append(cur.rstrip()); cur = seg
         else: cur = t
-    return lines + [cur] if cur else []
+    out = lines + [cur] if cur else []
+    if not own and len(out) > EXTRA_LINES:   # a room's notes take at most this many printed lines (each one moves the grid down); the web page and the Excel file hold them all
+        out = out[:EXTRA_LINES]; last = out[-1].rstrip(" ,·")
+        while stringWidth(last + " …", R, 8.6) > 420 and ", " in last: last = last[:last.rindex(", ")]
+        out[-1] = last + " …"
+    return out
 
 def class_view(m, c):
     info = m["class_ix"][c]; rows = [x for x in m["lessons"] if c in x["classes"]]
@@ -508,7 +517,10 @@ def room_view(m, r):
     lv = [x["level"] for x in rows]; codes = _codes_for(m, lv)
     open_ = sum(ch in "L" for row in (codes or []) for ch in row) or 1
     stats = [(info["kind"], "kind"), (str(m["room_cap"].get(r, 1)), "groups at once"), (str(len(used)), "periods used"), (f"{round(100 * len(used) / open_)}%", "of lesson time")]
-    return dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=f"{info['kind'].capitalize()}" + (f" · holds {info['capacity']}" if info["capacity"] else ""),
+    plain = f"{info['kind'].capitalize()}" + (f" · holds {info['capacity']}" if info["capacity"] else "")
+    eq, cf = ", ".join(info.get("equipment") or []), info.get("configuration") or ""   # read with .get: a model published before this has neither
+    more = " · ".join(x for x in (f"Equipment: {eq}" if eq else "", f"Configuration: {cf}" if cf else "") if x)
+    return dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=plain + (f" · {more}" if more else ""), pdf_subtitle=plain, extra_line=more,
                 stats=stats, codes=codes, cells=cells, legend=legend, legend_title="Used by", group=info["kind"])
 
 def student_rows(m, cls, groups):
@@ -843,7 +855,7 @@ def write_excel(m, path, log=print):
         for v in vs:
             links[name].append((v, r0))
             ws.cell(r0, 1, f"{v['title']}").font = XF(bold=True, size=13, color=NAVY)
-            extra = [f"{a} {b}" for a, b in v["stats"] if str(a) not in v["subtitle"]]
+            extra = [f"{a} {b}" for a, b in v["stats"] if str(a) not in v.get("pdf_subtitle", v["subtitle"])]
             ws.cell(r0 + 1, 1, v["subtitle"] + ("   ·   " + "   ".join(extra) if extra else "")).font = XF(size=9, color="4A5566")
             hr = r0 + 2; ws.cell(hr, 1, "Day").font = XF(bold=True, color="FFFFFF"); ws.cell(hr, 1).fill = hdrfill
             for p in range(NP):
@@ -961,7 +973,7 @@ def html_data(m, view="full", student_id=None, app=None):
     d = dict(school=m["school"], generated=m["generated"], days=m["days"], NP=m["NP"], times=m["times"], grid=m["grid"], cgrid=m["cgrid"], levels=m["levels"],
              classes=[[c["name"], c["level"], c["size"], c["home"], c.get("parents") or []] for c in m["classes"]], parents_name=m.get("parents_name") or "Form teachers",
              teachers=[[t["name"], t["short"], t["dept"], t["allowance"]] for t in m["teachers"]],
-             rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1)] for r in m["rooms"]],
+             rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1), r.get("equipment") or [], r.get("configuration") or ""] for r in m["rooms"]],   # equipment and configuration: notes only
              subjects={k: [v["short"], v["color"]] for k, v in m["subjects"].items()}, palette=pal, ext=list(EXT),
              lessons=[[x["id"], x["d"], x["p"], x["n"], x["level"], x["block"], x["classes"], x["subject"], x["group"], x["teachers"], x["room"], int(x["ext"])] + ([x["rain"]] if x.get("rain") else [])
                       for x in m["lessons"]],

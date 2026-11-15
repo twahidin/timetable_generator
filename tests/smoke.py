@@ -1062,6 +1062,70 @@ def test_a_class_form_teachers_are_never_cut_off_the_printed_timetable():
         pb = export.pdf_bytes(m, dict(export.class_view(m, cl["name"]), parents_line="Form teachers: " + ", ".join(names))); assert pb[:4] == b"%PDF"
     shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
 
+def test_a_published_room_page_shows_its_equipment():
+    import copy as cp, io, pickle
+    from ttgen import export
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    rec = _cp_start(); a = _Page("A", rec); a.post(_cp_name(rec)); spec = c.get("/api/setup").get_json()["spec"]
+    shutil = __import__("shutil"); _cp_draft(spec, ["Pastoral A"]); assert c.post("/api/draft/publish").status_code == 200
+    used, other = spec["venues"][0]["room"], spec["venues"][1]["room"]   # the timetable file here names no room: every room of the setup is on the published model
+    shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True)
+    spec = c.get("/api/setup").get_json()["spec"]; vid = next(v["_id"] for v in spec["venues"] if v["room"] == used)
+    assert c.post("/api/setup/changes", json={"client": "t", "since": c.get("/api/setup").get_json()["v"], "ops": [
+        ["set", "venues", vid, "equipment", ["30 keyboards", "2 amps"]], ["set", "venues", vid, "configuration", "cluster seating"]]}).status_code == 200
+    _cp_draft(c.get("/api/setup").get_json()["spec"], ["Pastoral A"]); assert c.post("/api/draft/publish").status_code == 200
+    m = store.published()["model"]; ix = {r["name"]: r for r in m["rooms"]}
+    assert ix[used]["equipment"] == ["30 keyboards", "2 amps"] and ix[used]["configuration"] == "cluster seating"
+    assert ix[other]["equipment"] == [] and ix[other]["configuration"] == ""
+    end = " · Equipment: 30 keyboards, 2 amps · Configuration: cluster seating"; v = export.room_view(m, used)
+    assert v["subtitle"].endswith(end) and v["pdf_subtitle"] == v["subtitle"][:-len(end)], v["subtitle"]
+    info = ix[other]
+    want = info["kind"].capitalize() + (f" · holds {info['capacity']}" if info["capacity"] else "")
+    vo = export.room_view(m, other); assert vo["subtitle"] == want and export._parents_block(vo) == [], vo["subtitle"]
+    pdf = c.get(f"/pdf/rooms/{used}"); assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
+    old = pickle.loads(pickle.dumps(m))
+    for r in old["rooms"]: r.pop("equipment"); r.pop("configuration")
+    assert export.room_view(old, used)["subtitle"] == v["subtitle"][:-len(end)] and export.room_view(old, other)["subtitle"] == want
+    assert export.pdf_bytes(old, export.room_view(old, used))[:4] == b"%PDF"
+    big = cp.deepcopy(m); items = [f"{i:02d} " + "x" * 27 for i in range(12)]; assert all(len(i) == 30 for i in items)
+    next(r for r in big["rooms"] if r["name"] == used)["equipment"] = items
+    vb = export.room_view(big, used); lines = export._parents_block(vb); R, _ = export._fonts()
+    assert len(lines) >= 2 and all(stringWidth(l, R, 8.6) <= 420 for l in lines) and all(any(i in l for l in lines) for i in items), lines
+    assert export.pdf_bytes(big, vb)[:4] == b"%PDF"
+    # the Excel heading line keeps every stat the plain subtitle does not hold (equipment text must not hide "30 periods used")
+    import openpyxl
+    three = cp.deepcopy(m); next(r for r in three["rooms"] if r["name"] == used)["equipment"] = ["30 keyboards", "2 amps", "1 projector"]
+    three["lessons"][0]["room"] = used                                 # the sample timetable names no room: put one lesson in it so the room has a sheet and stats
+    vt = export.room_view(three, used); xp = os.path.join(tempfile.mkdtemp(), "t.xlsx"); export.write_excel(three, xp, log=lambda *a: None)
+    ws = openpyxl.load_workbook(xp)["Rooms"]
+    r0 = next(r for r in range(1, ws.max_row + 1) if ws.cell(r, 1).value == used); head = ws.cell(r0 + 1, 1).value
+    for a_, b_ in vt["stats"]:
+        if str(a_) not in vt["pdf_subtitle"]: assert f"{a_} {b_}" in head, (a_, b_, head)
+    # the published web page: its data rows, an older model, and the served page
+    rows = {r[0]: r for r in export.html_data(m)["rooms"]}
+    assert rows[used][3:] == [["30 keyboards", "2 amps"], "cluster seating"] and rows[other][3:] == [[], ""], rows[used]
+    assert all(r[3:] == [[], ""] for r in export.html_data(old)["rooms"])
+    page = c.get("/timetable").get_data(as_text=True); assert "30 keyboards" in page and "Equipment: " in page
+    xs = cp.deepcopy(m); next(r for r in xs["rooms"] if r["name"] == used)["equipment"] = ["<b>x</b>"]
+    html = export.render_html(xs)                                    # the item travels as JSON in a script, its "</" escaped: no raw tag anywhere in the page text
+    assert "<b>x</b>" not in html and "<b>x<\\/b>" in html
+    src = open(os.path.join(ROOT, "ttgen", "timetable_page.html"), encoding="utf-8").read()
+    assert "${esc(v.sub || \"\")}" in src and "Equipment: ${" in src                                # the header is built from sub through esc(), as the Class Parents line is
+    # a long configuration wraps at " · " too: every line within the subtitle's width
+    lg = cp.deepcopy(m); rr = next(r for r in lg["rooms"] if r["name"] == used); rr["equipment"] = ["30 keyboards", "2 amps", "1 projector"]; rr["configuration"] = "cluster seating " + "with a very long note about the layout " * 2 + "end"
+    assert len(rr["configuration"]) >= 90; ls = export._parents_block(export.room_view(lg, used))
+    assert len(ls) >= 2 and all(stringWidth(l, R, 8.6) <= 420 for l in ls), ls
+    assert export.pdf_bytes(lg, export.room_view(lg, used))[:4] == b"%PDF"
+    # a pasted inventory does not push the printed grid off the page: at most six lines, the last ending "…"; a list that fits is whole
+    assert "…" not in " ".join(lines) and len(lines) <= 6, lines
+    inv = cp.deepcopy(m); next(r for r in inv["rooms"] if r["name"] == used)["equipment"] = [f"{i:03d} " + "y" * 26 for i in range(120)]
+    vi_ = export.room_view(inv, used); li = export._parents_block(vi_)
+    assert len(li) == 6 and li[-1].endswith(" …") and all(stringWidth(l, R, 8.6) <= 420 for l in li) and "000 " in li[0], li
+    assert "119 " in vi_["subtitle"] and export.pdf_bytes(inv, vi_)[:4] == b"%PDF"            # the web page and the Excel file still hold the whole list
+    many = cp.deepcopy(m); cv = export.class_view(many, many["classes"][0]["name"]); cv["parents_line"] = "Form teachers: " + ", ".join(f"Teacher Number {i:02d}" for i in range(60))
+    assert len(export._parents_block(cv)) > 6 and "…" not in " ".join(export._parents_block(cv))   # form teachers are never cut, however many
+    shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
+
 NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_sends_a_malformed_lessons_op", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
               "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace", "test_a_head_cannot_reach_the_helper_routes"}
 
