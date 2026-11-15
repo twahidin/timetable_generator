@@ -105,12 +105,26 @@ var SubjectView = (function () {
   function rowOf(card, tag) { return card.rows.filter(function (x) { return x.tag === tag; })[0] || null; }
   function lastRi(card) { return Math.max.apply(null, card.rows.map(function (x) { return x.ri; })); }
 
+  /* the name of the first row outside this card that stands in the way of ticking this tag on it, or "" */
+  function clash(spec, ri, tag) {
+    var card = cardAt(spec, ri);
+    if (!card || card.odd || card.name === "" || tags(spec).indexOf(tag) < 0) return "";
+    var inside = Object.create(null), label = card.name + " " + tag, found = "";
+    card.rows.forEach(function (x) { inside[x.ri] = true; });
+    spec.subjects.some(function (r, i) {
+      if (inside[i] || !r || typeof r !== "object") return false;
+      var name = text(r.subject), tg = text(r.tag);
+      if (name === label || (tg === tag && text(r.dept) === card.dept && card.code !== "" && text(r.code) === card.code)) { found = name; return true; }
+      return false;
+    });
+    return found;
+  }
+
   function tick(spec, ri, tag) {
     var card = cardAt(spec, ri);
     if (!card || card.odd || card.name === "" || tags(spec).indexOf(tag) < 0 || card.ticked.indexOf(tag) >= 0) return null;
     var list = spec.subjects, label = card.name + " " + tag;
-    var mine = card.rows.length === 1 && card.rows[0].tag === "" ? card.rows[0].ri : -1;
-    if (list.some(function (r, i) { return i !== mine && r && typeof r === "object" && text(r.subject) === label; })) return null;
+    if (clash(spec, ri, tag) !== "") return null;
     if (card.rows.length === 1 && card.rows[0].tag === "" && uses(spec, card.rows[0].subject) === 0) {
       var only = list[card.rows[0].ri];
       only.subject = label; only.tag = tag;
@@ -165,6 +179,6 @@ var SubjectView = (function () {
     return spec.subjects.length - 1;
   }
 
-  return { tags: tags, columns: columns, uses: uses, tick: tick, untick: untick, rename: rename, set: set, remove: remove, add: add };
+  return { tags: tags, columns: columns, uses: uses, clash: clash, tick: tick, untick: untick, rename: rename, set: set, remove: remove, add: add };
 })();
 if (typeof module !== "undefined") module.exports = SubjectView;

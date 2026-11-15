@@ -1158,7 +1158,7 @@ function subjectsCards() {
   const periods = ri => L.map(l => `<td class="num">${inp(`spec.subjects.${ri}.periods.${l}`, ((subs[ri] || {}).periods || {})[l], "number", 'style="width:56px"')}</td>`).join("");
   const msgsOf = ris => { const m = ris.flatMap(ri => out.subjects[ri] || []); return m.length ? `<div class="sjmsgs">${m.map(x => `<div>${esc(x)}</div>`).join("")}</div>` : ""; };
   const odd = c => {   // a row shown as it is: the table's own boxes
-    const ri = c.ri, s = subs[ri] || {}, why = c.odd === "tag" ? `This row's name and its ${tw} do not match, so it is shown as it is. Make them match and it joins its subject's card.` : `Another row has this name and ${tw}. Delete one of the two.`;
+    const ri = c.ri, s = subs[ri] || {}, why = c.odd === "tag" ? (c.rows[0].tag !== "" ? `Shown as it is: this row's name does not end with its ${tw}, ${c.rows[0].tag}.` : `Shown as it is: this row's name ends with a ${tw} that is not set on it.`) : `Another row has this name and ${tw}. Delete one of the two.`;
     return `<div class="sjcard sjodd ${mark([ri])}" data-scard="${ri}">
       <div class="sjfields"><label>Subject ${inp(`spec.subjects.${ri}.subject`, s.subject)}</label><label>Code ${inp(`spec.subjects.${ri}.code`, s.code, "text", 'style="width:70px"')}</label><label>${esc(tagLabel())} ${sel(`spec.subjects.${ri}.tag`, s.tag, allTags, false)}</label>
         <label>Department ${sel(`spec.subjects.${ri}.dept`, s.dept, depts)}</label><label>Room kind ${sel(`spec.subjects.${ri}.room_kind`, s.room_kind, kinds)}</label><label>Lesson length ${inp(`spec.subjects.${ri}.lesson_length`, s.lesson_length, "number", 'style="width:70px"')}</label></div>
@@ -1180,7 +1180,7 @@ function subjectsCards() {
       <div class="sjtop"><input id="sjname-${ri}" data-sname placeholder="Subject name" value="${esc(c.name)}"><input id="sjcode-${ri}" data-sset="code" placeholder="Code" value="${esc(c.code)}" style="width:64px"><button class="small danger" data-sremove title="Remove this subject and all its ${esc(tl)}">Delete</button></div>
       ${ticks.length ? `<div class="sjticks">${ticks.join("")}</div>` : ""}
       ${grid}
-      ${showKind || showLen ? `<p class="muted small sjwhy">The ${esc(tl)} differ in room kind or lesson length: each has its own below.</p>` : ""}
+      ${showKind || showLen ? `<p class="muted small sjwhy">The ${esc(tl)} differ in room kind or lesson length: each has its own in the grid.</p>` : ""}
       <div class="sjfields"><label>Department ${sjSel(`sjdept-${ri}`, "dept", first.dept, depts)}</label>${showKind ? "" : `<label>Room kind ${sjSel(`sjkind-${ri}`, "room_kind", first.room_kind, kinds)}</label>`}${showLen ? "" : `<label>Lesson length <input type="number" id="sjlen-${ri}" data-sset="lesson_length" value="${esc(first.lesson_length)}" style="width:70px"></label>`}</div>
       ${msgsOf(ris)}</div>`;
   };
@@ -1198,6 +1198,10 @@ function sjShow(ri, sel, scroll) {   // after a redraw: the card that holds this
 }
 const sjNum = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 function sjWord(plural) { return (tagLabel() === "G-level" ? "G-level" : "level tag") + (plural ? "s" : ""); }   // the school's own word for a G-level
+function sjLost(names, ris) {   // lesson rows that name one of these subjects, when no row left on the list (outside ris) still has that name
+  const keep = new Set(S.spec.subjects.filter((x, i) => x && typeof x === "object" && !ris.includes(i)).map(x => String(x.subject == null ? "" : x.subject).trim()));
+  return [...new Set(names)].filter(x => x !== "" && !keep.has(x)).reduce((a, x) => a + SubjectView.uses(S.spec, x), 0);
+}
 function sjName(e) {   // the name box: every row of the card is renamed
   if (locked("subjects")) return;
   const el = e.target, c = sjCardOf(Number(el.closest("[data-scard]").dataset.scard));
@@ -1223,13 +1227,14 @@ function sjTick(e) {   // a G-level's tick box: ticked adds it, unticked takes i
   if (el.checked) {
     const r = tag === "" ? null : SubjectView.tick(S.spec, c.ri, tag);
     if (!r) {
-      if (tag !== "" && S.spec.subjects.some(x => x && String(x.subject == null ? "" : x.subject).trim() === `${c.name} ${tag}`)) toast(`${c.name} ${tag} is already on the list, on a card of its own.`);
+      const other = tag === "" ? "" : SubjectView.clash(S.spec, c.ri, tag);
+      if (other) toast(`${other} is already on the list as this subject's ${tag}, on a card of its own.`);
       render(); return;
     }
     save(); render(); poll(); sjShow(r.ri, `[data-stick="${CSS.escape(tag)}"]`); return;
   }
   const row = c.rows.find(x => x.tag === tag); if (!row) { render(); return; }
-  const n = SubjectView.uses(S.spec, row.subject);
+  const n = sjLost([row.subject], [row.ri]);
   if (n > 0 && !confirm(`${row.subject} is on ${sjNum(n, "lesson row", "lesson rows")} of step 5. Take it off step 3? Those lessons keep the name and show it as not on the list until they are given a subject. Undo takes it back.`)) { render(); return; }
   const left = c.rows.find(x => x.ri !== row.ri), r = SubjectView.untick(S.spec, c.ri, tag);
   if (!r) { render(); return; }
@@ -1240,9 +1245,9 @@ function sjTick(e) {   // a G-level's tick box: ticked adds it, unticked takes i
 function sjRemove(b) {   // Delete: always asks
   if (locked("subjects")) return;
   const c = sjCardOf(Number(b.closest("[data-scard]").dataset.scard)); if (!c) { render(); return; }
-  const names = new Set(c.rows.map(x => x.subject).filter(x => x !== "")), n = [...names].reduce((a, s) => a + SubjectView.uses(S.spec, s), 0);
-  const tl = sjWord(true);
-  const what = c.name === "" ? "this subject" : c.rows.length === 1 ? c.name : `${c.name} and its ${c.rows.length} ${tl}`;
+  const n = sjLost(c.rows.map(x => x.subject), c.rows.map(x => x.ri));
+  const k = c.ticked.length, one = c.rows.length === 1, nm = one ? c.rows[0].subject : c.name;
+  const what = nm === "" ? "this subject" : one ? nm : `${c.name} and its ${sjNum(k, sjWord(), sjWord(true))}`;
   if (!confirm(`Remove ${what}?${n ? ` ${sjNum(n, "lesson row", "lesson rows")} of step 5 ${n === 1 ? "uses" : "use"} ${c.rows.length === 1 ? "it" : "them"}.` : ""} Undo takes it back.`)) return;
   if (!SubjectView.remove(S.spec, c.ri)) return;
   unpick(); save(); render(); poll();

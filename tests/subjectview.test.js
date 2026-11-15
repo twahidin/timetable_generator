@@ -111,11 +111,29 @@ t("a_tick_never_makes_a_second_subject_of_one_name", () => {
   const s = fixture();
   s.subjects.push({ subject: "Science G2", tag: "-", dept: "Science", code: "SC" });                          // 9: typed in the table with no G-level
   same(s, () => assert.strictEqual(SubjectView.tick(s, 5, "G2"), null));                                      // the row would be added
-  s.subjects.push({ subject: "Art G3", tag: "G2", dept: "Aesthetics", code: "AR" });                          // 10
+  s.subjects.push({ subject: "Art G3", tag: "G2", dept: "Aesthetics", code: "AX" });                          // 10
   same(s, () => assert.strictEqual(SubjectView.tick(s, 7, "G3"), null));                                      // the row would be changed
   s.subjects.push({ subject: " Art G1 ", tag: "G1", dept: "Humanities", code: "AH" });                        // 11: another department, spaces round the name
   same(s, () => assert.strictEqual(SubjectView.tick(s, 7, "G1"), null));
   assert.deepStrictEqual(SubjectView.tick(s, 7, "G2"), { ri: 7, how: "changed" });                            // a name nobody has is still fine
+});
+t("a_tick_never_makes_a_second_subject_at_a_level_the_subject_has_under_another_name", () => {
+  const p = { school: { departments: ["EL", "MA"], tags: [["Std", "S"], ["Fdn", "F"], ["Higher", "H"], ["-", ""]] },
+    subjects: [{ subject: "English Language", code: "EL", tag: "-", dept: "EL", periods: {} },
+               { subject: "English Language (Standard)", code: "EL", tag: "Std", dept: "EL", periods: {} },
+               { subject: "Mathematics", code: "", tag: "-", dept: "MA", periods: {} },
+               { subject: "Maths (Standard)", code: "", tag: "Std", dept: "MA", periods: {} },
+               { subject: "Art (Standard)", code: "EL", tag: "Std", dept: "MA", periods: {} }], lessons: [] };
+  assert.deepStrictEqual(all(p).map(c => [c.name, c.odd]), [["English Language", ""], ["English Language (Standard)", "tag"], ["Mathematics", ""], ["Maths (Standard)", "tag"], ["Art (Standard)", "tag"]]);
+  assert.strictEqual(SubjectView.clash(p, 0, "Std"), "English Language (Standard)");
+  same(p, () => assert.strictEqual(SubjectView.tick(p, 0, "Std"), null));                       // the subject has a Standard already, under another name
+  assert.strictEqual(SubjectView.clash(p, 0, "Fdn"), "");
+  assert.strictEqual(SubjectView.clash(p, 2, "Std"), "");                                       // no code: a department's subjects with no code yet are not one subject
+  assert.deepStrictEqual(SubjectView.tick(p, 2, "Std"), { ri: 2, how: "changed" });
+  assert.deepStrictEqual(SubjectView.tick(p, 0, "Fdn"), { ri: 0, how: "changed" });
+  const s = fixture(); s.subjects.push({ subject: "Science G2", tag: "-", dept: "Science", code: "SC" });
+  assert.strictEqual(SubjectView.clash(s, 5, "G2"), "Science G2");                              // the name itself is taken
+  assert.deepStrictEqual([SubjectView.clash(s, 0, "G3"), SubjectView.clash(s, 99, "G3"), SubjectView.clash(s, 9, "G3"), SubjectView.clash(s, 0, "G9"), SubjectView.clash({}, 0, "G3")], ["", "", "", "", ""]);
 });
 t("unticking_removes_the_row_and_the_last_tag_leaves_the_subject_with_no_tag_and_no_periods", () => {
   const s = fixture(), g3 = s.subjects[0];
