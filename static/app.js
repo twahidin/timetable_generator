@@ -247,7 +247,7 @@ function headLocks(main, id) {
   const off = (el, why) => { el.disabled = true; if (why && !el.title) el.title = why; };
   const all = () => [...main.querySelectorAll("input, select, textarea, button")];
   if (locked(id)) {
-    all().forEach(el => { if (el.dataset.rtab === undefined && el.dataset.cview === undefined && el.dataset.cclose === undefined) off(el); });   // the tabs of step 6 and the views of step 2 still switch, and an open card still closes
+    all().forEach(el => { if (el.dataset.rtab === undefined && el.dataset.cview === undefined && el.dataset.cclose === undefined && el.dataset.cband === undefined && el.id !== "cvLevel") off(el); });   // the tabs of step 6 and the views of step 2 still switch, the level picker and the bars of Bands work, and an open card still closes
     main.querySelectorAll("[data-pop]").forEach(el => el.classList.add("ro"));
     main.insertAdjacentHTML("afterbegin", `<div class="notice readonly">Only the committee can change this step.</div>`);
     return;
@@ -1019,7 +1019,42 @@ function classesCards() {   // one grid of cards per level; a click opens a card
   return (groups.length ? groups.join("") : `<p class="muted">No classes yet. Add them with the bar above.</p>`)
     + `<div class="row" style="margin-top:10px"><button data-cadd="1">+ Add class</button></div>`;
 }
-function classesBands() { return `<p class="muted">The band picture is coming.</p>`; }   // Task 4 draws it here
+function cvLevel() { const L = ClassView.levels(S.spec); if (!L.includes(CV.level)) CV.level = L.length ? L[0] : ""; return CV.level; }   // the level shown on Bands: the chosen one, else the first
+function classesBands() {   // a picture of one level: a column per class, a row per label; bands are bars across their classes
+  const L = ClassView.levels(S.spec);
+  if (!L.length) return `<p class="muted">No classes yet. Add them on Cards or the Table.</p>`;
+  const lv = cvLevel(), name = lv || "No level", pic = ClassView.bands(S.spec, lv);
+  const picker = `<div class="row" style="margin:12px 0 8px"><label>Level <select id="cvLevel">${L.map(l => opt(l, lv, l || "No level")).join("")}</select></label>
+    <span class="legend small muted"><span class="lgd whole"></span>Whole class <span class="lgd bar"></span>Band: its groups meet at the same time <span class="lgd part"></span>Part of the class</span></div>`;
+  if (!pic.classes.length) return `${picker}<p class="muted">No classes at ${esc(name)} yet.</p>`;
+  if (!pic.rows.length) return `${picker}<p class="muted">No lesson rows for ${esc(name)} yet. Add them on step 5.</p>`;
+  const col = k => k + 2, head = pic.classes.map((c, k) => `<div class="chcol" style="grid-row:1;grid-column:${col(k)}">${esc(c)}</div>`).join("");
+  const cells = pic.rows.map((r, i) => {
+    const row = i + 2, same = i > 0 && pic.rows[i - 1].label === r.label, covered = new Set();
+    r.bars.forEach(b => b.spans.forEach(([f, n]) => { for (let k = f; k < f + n; k++) covered.add(k); }));
+    let h = `<div class="clab${same ? " again" : ""}" style="grid-row:${row};grid-column:1">${esc(r.label)}</div>`;
+    pic.classes.forEach((_, k) => { const c = r.cells[k];
+      if (c && c.kind === "whole") h += `<div class="cwcell" style="grid-row:${row};grid-column:${col(k)}" title="The whole class together"></div>`;
+      else if (c) h += `<div class="cpcell" style="grid-row:${row};grid-column:${col(k)}" title="Part of the class, in a teaching group">${esc(c.code)}</div>`;
+      else if (!covered.has(k)) h += `<div class="cecell" style="grid-row:${row};grid-column:${col(k)}"></div>`; });
+    r.bars.forEach(b => b.spans.forEach(([f, n], pi) => {
+      const chips = pi ? "" : `<span class="cchips">${b.groups.map(g => { const f2 = Groups.untag(g.subject), rest = f2 === r.label ? g.subject.trim().slice(r.label.length).trim() : "";
+        return `<span class="chip">${esc(rest || g.subject)}${g.students != null ? ` · ${esc(g.students)}` : ""}</span>`; }).join("")}</span>`;
+      h += `<button class="cbar" data-cband="${esc(b.block)}" style="grid-row:${row};grid-column:${col(f)} / span ${n}" title="Open ${esc(b.block)} on step 5"><b>${esc(b.block)}</b>${chips}</button>`; }));
+    return h; }).join("");
+  return `${picker}<div class="bandwrap"><div class="bandgrid" style="grid-template-columns:minmax(120px,max-content) repeat(${pic.classes.length},minmax(84px,1fr))"><div class="chcol corner" style="grid-row:1;grid-column:1"></div>${head}${cells}</div></div>`;
+}
+function openBand(block) {   // from a bar: step 5 on Groups and bands, at the level shown, with the band in view
+  const lv = cvLevel(); M.view = "groups"; try { localStorage.setItem(MAPVIEW, M.view); } catch (e) { }
+  const gp = gpState(); if (levels().includes(lv) && gp.level !== lv) { gp.level = lv; gp.subject = ""; gp.ticked.clear(); M.gpTo = ""; }
+  S.step = STEPS.findIndex(x => x[0] === "lessons"); save(); render(); window.scrollTo(0, 0);
+  const lane = [...document.querySelectorAll("[data-glane]")].find(x => x.dataset.glane === block);
+  if (lane) lane.scrollIntoView({ block: "center" });
+}
+function openBands(level) {   // from step 5: step 2 on Bands at that level
+  CV.view = "bands"; if (ClassView.levels(S.spec).includes(level)) CV.level = level; cvOpen(null); try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { }
+  S.step = STEPS.findIndex(x => x[0] === "classes"); save(); render(); window.scrollTo(0, 0);
+}
 const VIEWS = {
   start() {
     const how = `<div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a band, a lesson with no periods).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
@@ -1347,6 +1382,8 @@ document.addEventListener("click", async e => {
   if (b.dataset.rtab) { R6.tab = b.dataset.rtab; render(); return; }
   if (b.dataset.cview) { CV.view = ["cards", "bands", "table"].includes(b.dataset.cview) ? b.dataset.cview : "cards"; cvOpen(null); try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } render(); return; }
   if (b.dataset.cclose) { cvOpen(null); render(); return; }
+  if (b.dataset.cband !== undefined) { openBand(b.dataset.cband); return; }
+  if (b.dataset.cbands !== undefined) { openBands(b.dataset.cbands); return; }
   if (b.dataset.cadd) { addRow("classes"); cvOpen(S.spec.classes.length - 1); render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "center" }); return; }
   if (b.dataset.add) { addRow(b.dataset.add, b.dataset.scope); return; }
   if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
@@ -1439,6 +1476,7 @@ document.addEventListener("change", async e => {
     if (el.tagName === "SELECT") render(); return; }
   if (["pickA", "pickP"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; return; }   // typed boxes: no redraw, or it would swallow the click on the button next to them
   if (["pickT", "pickG", "pickC", "pickS", "pickV", "pickD", "pickR"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
+  if (el.id === "cvLevel") { CV.level = el.value; render(); return; }
   if (el.id === "mLevel") { M.level = el.value; render(); return; }
   if (el.id === "gpLevel") { const gp = gpState(); gp.level = el.value; gp.subject = ""; gp.ticked.clear(); M.gpTo = ""; render(); return; }
   if (el.id === "gpSubject") { gpState().subject = el.value; render(); return; }
@@ -1768,7 +1806,7 @@ function poolView() {   // rows at the level with no band: tick (or drag) them i
   const row = p => { const id = S.spec.lessons[p.li]._id, on = gp.ticked.has(id);
     return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}"><span class="handle" draggable="true" data-gdrag="${esc(id)}" title="Drag into a band">⋮⋮</span><span style="flex:1;min-width:0">${esc(p.title)}</span>${p.kind === "group" ? `<span class="codeline small">${esc(p.code)}</span>` : ""}<span class="muted small" title="Students">${p.students != null ? p.students : ""}</span></div>`; };
   return `<section class="gpool card"><h3 style="margin:0 0 6px">Not in a band</h3><p class="muted small" style="margin:0 0 8px">Whole-class rows and groups with their own code. Tick rows and move them into a band, or drag them onto one.</p>
-    <div class="row"><select id="gpLevel">${levels().map(l => opt(l, gp.level)).join("")}</select><select id="gpSubject">${opt("", gp.subject, "All subjects")}${subjects.map(n => opt(n, gp.subject)).join("")}</select></div>
+    <div class="row"><select id="gpLevel">${levels().map(l => opt(l, gp.level)).join("")}</select><select id="gpSubject">${opt("", gp.subject, "All subjects")}${subjects.map(n => opt(n, gp.subject)).join("")}</select>${gp.level ? `<button class="small" data-cbands="${esc(gp.level)}">See how ${esc(gp.level)} is banded</button>` : `<button class="small" data-cbands="">See how the levels are banded</button>`}</div>
     <div class="row" style="margin:8px 0"><button class="small" data-gall>Select all shown</button><button class="small" data-gnone>Deselect all</button><span class="muted small">${items.length} row${items.length === 1 ? "" : "s"}${gp.ticked.size ? ` · ${gp.ticked.size} ticked` : ""}</span></div>
     <div class="plist keep">${items.map(row).join("") || `<p class="muted small">Every row at ${esc(gp.level)} is in a band.</p>`}</div>
     <div class="row" style="margin-top:10px"><span>Move into band</span><select id="gpTo">${opt("", M.gpTo || "", "")}${lanes.map(l => opt(l.block, M.gpTo || "")).join("")}</select><button data-gmove ${gp.ticked.size && lanes.length ? "" : "disabled"}>Move</button></div></section>`;

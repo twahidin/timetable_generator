@@ -309,3 +309,18 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .fxask p{margin:6px 0 0}.fxchoice .row{gap:6px;margin-top:4px}.fxchoice button{padding:3px 10px;font-size:12px}
 .fxgroup{border-top:1px solid var(--line);margin-top:8px;padding-top:2px}.fxgroup .fxway{padding:6px 0 2px}.fxgroup .fxway:first-of-type{border-top:0}.fxgroup .fxway button{padding:3px 10px;font-size:12px}
 .fxask textarea{display:block;width:100%;box-sizing:border-box;resize:none;font:inherit}.fxaskgo{justify-content:flex-end;margin-top:6px}
+/* step 2, Bands view: a grid of classes; bars are bands across their classes. The label column stays while the grid scrolls sideways */
+.bandwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.bandgrid{display:grid;gap:4px;padding:8px;align-items:stretch;min-width:min-content}
+.bandgrid .chcol{font-weight:600;font-size:12.5px;text-align:center;color:var(--navy);padding:2px 0}
+.bandgrid .clab,.bandgrid .corner{position:sticky;left:0;z-index:2;background:var(--panel);padding:4px 8px 4px 0;font-size:13px;display:flex;align-items:center}
+.bandgrid .clab.again{color:var(--muted);font-size:12px}
+.cwcell{background:var(--ok-bg);border-radius:6px;min-height:30px}
+.cpcell{background:#fff4d6;color:#7a5a00;border-radius:6px;min-height:30px;display:flex;align-items:center;justify-content:center;font-size:12px}
+.cecell{border:1px dashed #cdd5e1;border-radius:6px;min-height:30px}
+.cbar{background:#e8f0fe;border:1px solid var(--accent);color:var(--ink);border-radius:6px;min-height:30px;padding:3px 8px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;text-align:left;cursor:pointer;font-size:12.5px;z-index:1}
+.cbar:hover{background:#d8e6fd}
+.cbar .cchips{display:flex;flex-wrap:wrap;gap:4px}
+.legend{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+.lgd{display:inline-block;width:14px;height:12px;border-radius:3px;margin-left:8px}
+.lgd.whole{background:var(--ok-bg)}.lgd.bar{background:#e8f0fe;border:1px solid var(--accent)}.lgd.part{background:#fff4d6}

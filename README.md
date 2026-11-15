@@ -31,7 +31,7 @@ the classes that have none from the teachers already on their lessons of the sub
 table counts the lessons changed by hand and offers **Put the Form teachers on all of them** (it asks first). Only the
 committee changes any of this.
 
-**Step 2's three views.** Step 2 shows the classes as **Cards** (one card per class under its level, with its home room, its form teachers and its subjects; a click opens the card to change it), as **Bands** (a picture of how each level's subjects are banded) or as the **Table** (every field in a row). The choice is remembered in your browser; department heads see all three and can change nothing.
+**Step 2's three views.** Step 2 shows the classes as **Cards** (one card per class under its level, with its home room, its form teachers and its subjects; a click opens the card to change it), as **Bands** (a picture of how each level's subjects are banded) or as the **Table** (every field in a row). On Bands, pick a level: whole-class subjects are filled cells, and each band is a bar across its classes with its groups and sizes; a click on a bar opens it on step 5's **Groups and bands**, which has a button back to the picture. The choice is remembered in your browser; department heads see all three and can change nothing.
 
 The student list goes in on the **Students** step, after the timetable is made (it is not needed to make one): paste it from Excel or a CSV, or upload an .xlsx or
 .csv, with each student's ID, name, class and group codes; the committee can then edit each student's groups there.
