@@ -962,7 +962,12 @@ function cfAdd() {   // the form's values as they are now (a box typed in may no
 }
 /* ---------------- step 2: the Cards, Bands and Table views of the classes */
 const CLASSVIEW = "ttsetup.view.classes";
-const CV = { view: "cards", open: null, level: "" };
+const CV = { view: "cards", open: null, openId: null, level: "" };   // open: the index of the open card, found again by openId (the row's own _id) on each draw, so another person's change cannot move it to another class
+const cvOpen = ci => { CV.open = ci; const r = ci === null ? null : S.spec.classes[ci]; CV.openId = r && r._id ? r._id : null; };
+function cvResolve() {
+  if (CV.openId) { const i = S.spec.classes.findIndex(c => c && c._id === CV.openId); CV.open = i < 0 ? null : i; if (i < 0) CV.openId = null; }
+  else if (CV.open !== null) { const r = S.spec.classes[CV.open]; if (r && r._id) CV.openId = r._id; }
+}
 try { const cv = localStorage.getItem(CLASSVIEW); if (["cards", "bands", "table"].includes(cv)) CV.view = cv; } catch (e) { }
 function classesBars() {   // the two helper bars above the Cards and the Table
   const nm = Parents.label(S.spec);
@@ -985,7 +990,7 @@ function classesTable() {   // today's table, as it was
 }
 function classesCards() {   // one grid of cards per level; a click opens a card to change the class
   const { out, crit } = issues(), nm = Parents.label(S.spec), pm = Parents.maximum(sc().parents_max) || 2, T = teacherNames();
-  if (CV.open !== null && !S.spec.classes[CV.open]) CV.open = null;
+  cvResolve(); if (CV.open !== null && !S.spec.classes[CV.open]) cvOpen(null);
   const people = n => { const t = S.spec.teachers.find(x => x && x.name === n);
     return t ? `<span class="avx named" title="${esc(n)}">${avatarOf(t, 28)}<span class="avn">${esc(t.short || n)}</span></span>` : `<span class="chip" title="${esc(n)} (not on the teacher list)">${esc(n)}</span>`; };
   const openCard = ci => { const c = S.spec.classes[ci], names = Parents.names(c), mine = Math.max(pm, names.length), msgs = out.classes[ci] || [];
@@ -1326,7 +1331,7 @@ document.addEventListener("click", async e => {
   if (e.target.dataset && e.target.dataset.mtick) { mtick(e.target, e.shiftKey); return; }
   if (e.target.dataset && e.target.dataset.gtick) { const gp = gpState(); e.target.checked ? gp.ticked.add(e.target.dataset.gtick) : gp.ticked.delete(e.target.dataset.gtick); render(); return; }
   const cc = e.target.closest("[data-ccard]");   // a class card: a click on its face opens it (not on a field or button inside the open one)
-  if (cc && !e.target.closest("button, input, select, textarea, label") && Number(cc.dataset.ccard) !== CV.open) { CV.open = Number(cc.dataset.ccard); render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "nearest" }); return; }
+  if (cc && !e.target.closest("button, input, select, textarea, label") && Number(cc.dataset.ccard) !== CV.open) { cvOpen(Number(cc.dataset.ccard)); render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "nearest" }); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c, [data-fxcell], [data-mcard], [data-mbasket], [data-mstaff]"); if (!b) return;
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
@@ -1340,11 +1345,11 @@ document.addEventListener("click", async e => {
   if (b.dataset.restore) { restoreCopy(b.dataset.restore); return; }
   if (b.dataset.begin) { const [k, w] = b.dataset.begin.split("|"); try { await begin(k, w); } catch (err) { toast("Could not load: " + err.message); } return; }
   if (b.dataset.rtab) { R6.tab = b.dataset.rtab; render(); return; }
-  if (b.dataset.cview) { CV.view = ["cards", "bands", "table"].includes(b.dataset.cview) ? b.dataset.cview : "cards"; CV.open = null; try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } render(); return; }
-  if (b.dataset.cclose) { CV.open = null; render(); return; }
-  if (b.dataset.cadd) { addRow("classes"); CV.open = S.spec.classes.length - 1; render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "center" }); return; }
+  if (b.dataset.cview) { CV.view = ["cards", "bands", "table"].includes(b.dataset.cview) ? b.dataset.cview : "cards"; cvOpen(null); try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } render(); return; }
+  if (b.dataset.cclose) { cvOpen(null); render(); return; }
+  if (b.dataset.cadd) { addRow("classes"); cvOpen(S.spec.classes.length - 1); render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "center" }); return; }
   if (b.dataset.add) { addRow(b.dataset.add, b.dataset.scope); return; }
-  if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); if (k === "classes") CV.open = null; if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
+  if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
   if (b.dataset.cmove) { const [i, d] = b.dataset.cmove.split("|").map(Number); if (!Choices.move(S.spec, i, d)) return; save(); render(); const nb = $(`[data-cmove="${i}|${d}"]`); if (nb && !nb.disabled) nb.focus({ preventScroll: true }); return; }
   if (b.dataset.cfopen) { Object.assign(CF, { open: true, kind: "setting", key: "", rule: "", level: "", second: "", fallback: "", from: "", to: "" }); render(); return; }
   if (b.dataset.cfcancel) { CF.open = false; render(); return; }
@@ -1376,7 +1381,13 @@ document.addEventListener("click", async e => {
     if (/^lessons-/.test(b.dataset.row)) S.tg = { lv: "", subj: "", t: "" };
     if (/^teachers-/.test(b.dataset.row)) S.tf = { dept: "", subj: "", q: "" };
     if (!stepShown(Number(b.dataset.go))) return;
-    S.step = Number(b.dataset.go); render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
+    S.step = Number(b.dataset.go);
+    const ck = /^classes-(\d+)$/.exec(b.dataset.row);
+    if (ck && S.spec.classes[Number(ck[1])]) {   // a class: its card opens, on Cards, so its messages show (Bands switches to Cards first)
+      if (CV.view === "bands") { CV.view = "cards"; try { localStorage.setItem(CLASSVIEW, CV.view); } catch (e) { } }
+      if (CV.view === "cards") cvOpen(Number(ck[1]));
+    }
+    render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "fitAgain") { fitCheck(true); return; }
   if (b.id === "exGo") { makePrintouts(); return; }
