@@ -211,6 +211,15 @@ def keep_free_together_bears_on_a_second_department_teacher():
     assert fixes.judge(m0, sp0, DAYS, dict(kind="move", id=1, d=1, p=2))["state"] != "no"
 
 @t
+def the_departments_are_worked_out_once_per_context():
+    L = [lesson(1, 0, 5, 1, [A], "Art", ENTIRE, [T[0]], level=LV)]; m, sp = model_with(L); ctx = fixes._ctx(m); real, calls = verify.teacher_depts, []
+    verify.teacher_depts = lambda *a: calls.append(1) or real(*a)
+    try:
+        for p in (2, 3): fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=1, p=p), ctx)
+    finally: verify.teacher_depts = real
+    assert len(calls) == 1, calls
+
+@t
 def a_lesson_length_in_any_spelling():
     rows = [dict(x, length="2.0") if x is ROW else dict(x, length="two") if x["classes"] == [CLS] and x["code"] == ENTIRE else x for x in SP["lessons"]]
     m, sp = model_with([lesson(1, 0, 2, 1, [CLS], SUBJ, ENTIRE, TEACHERS, level=LV)], lessons=rows)

@@ -306,7 +306,8 @@ def judge(m, spec, days, fix, ctx=None):
             was = c["placed"].get(k, 0); now, want = was - ko[k] + kn[k], m["planned"].get(k, 0)
             if now != was and not (was < now <= want or want <= now < was): return res("no", f"That would leave {verify._name(k)} with {now} periods; step 3 plans {want}.")
     rules = spec.get("rules") or []; seen = old + new
-    depts = c["memo"].setdefault(("depts", id(spec)), verify.teacher_depts(m, spec))   # once per request and setup, not per lesson
+    depts = c["memo"].get(("depts", id(spec)))   # worked out on the first judge of a context and setup, not per lesson or per call
+    if depts is None: depts = c["memo"][("depts", id(spec))] = verify.teacher_depts(m, spec)
     keep = tuple(i for i, r in enumerate(rules) if r.get("rule") != "In words" and any(_bears(m, spec, r, x, depts) for x in seen))
     near = _near(b, old) | _near(b, new)
     for i in keep:
