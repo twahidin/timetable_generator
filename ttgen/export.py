@@ -284,7 +284,7 @@ def model_from_files(setup_path, timetable_path, spec=None, edit=None):
 
 # ----------------------------------------------------------------------------------------------- independent checks
 def check_model(m):
-    NP, L = m["NP"], m["lessons"]; days = m["days"]; probs = []
+    NP, L = m["NP"], m["lessons"]; days = m["days"]; probs = []; place = {}   # place: a lesson-time line -> where it is (the row's first class and its day), for the Fix the timetable button
     where = lambda d, q: f"{days[d]} period {q} ({m['times'][q][0]})"
     tb = collections.defaultdict(set)
     for x in L:
@@ -324,15 +324,18 @@ def check_model(m):
                 if whole.get((c, d, q)): ccl.add((c, d, q))
                 else: side += 1
     probs += [f"Class clash: {c} on {w}." for c, d, w in spans(ccl)]
+    def put(x, text):
+        probs.append(text)
+        if x["classes"]: place[text] = dict(cls=x["classes"][0], day=days[x["d"]], period=x["p"], id=x["id"], row=x["group"])
     for x in L:
         lv = x["level"] if x["level"] in m["grid"] else m["class_ix"].get((x["classes"] or [""])[0], {}).get("level")
         k = m.get("keep", {}).get(m["days"][x["d"]])
         if k is not None and x["p"] + x["n"] > k:   # Settings 'Lessons end by': runs past the time for its day
-            probs.append(f"{x['subject']} {x['group']} ends after {m['times'][min(k, m['NP'] - 1)][0]} on {where(x['d'], x['p'])} (Settings: Lessons end by)."); continue
+            put(x, f"{x['subject']} {x['group']} ends after {m['times'][min(k, m['NP'] - 1)][0]} on {where(x['d'], x['p'])} (Settings: Lessons end by)."); continue
         if lv in m["grid"] and any(m["grid"][lv][x["d"]][q] not in "LA" for q in range(x["p"], min(m["NP"], x["p"] + x["n"]))):
-            probs.append(f"{x['subject']} {x['group']} sits in a break or outside the day on {where(x['d'], x['p'])}.")
+            put(x, f"{x['subject']} {x['group']} sits in a break or outside the day on {where(x['d'], x['p'])}.")
         elif any(m["cgrid"][c][x["d"]][q] == "R" for c in x["classes"] if c in m["cgrid"] for q in range(x["p"], min(m["NP"], x["p"] + x["n"]))):
-            probs.append(f"{x['subject']} {x['group']} sits in a class's recess on {where(x['d'], x['p'])}.")
+            put(x, f"{x['subject']} {x['group']} sits in a class's recess on {where(x['d'], x['p'])}.")
     placed = collections.Counter(); seen = set()
     for x in L:
         if x["group"] == ENTIRE:
@@ -368,7 +371,7 @@ def check_model(m):
     for lid, xs in lids.items():
         x = xs[0]; who = ", ".join(sorted({y["group"] if y["group"] != ENTIRE else ", ".join(y["classes"]) for y in xs}))
         after.append(f"{days[x['d']]} {m['times'][x['p']][0]}-{m['times'][x['p'] + x['n'] - 1][1]}: {x['block'] or x['subject']} ({who})")
-    return dict(problems=probs, after_school=after, side_by_side=side, lessons=len({x["id"] for x in L}), rows=len(L),
+    return dict(problems=probs, where=place, after_school=after, side_by_side=side, lessons=len({x["id"] for x in L}), rows=len(L),
                 students=len(m["students"]), ok=not probs)
 
 

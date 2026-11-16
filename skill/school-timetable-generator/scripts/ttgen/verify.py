@@ -119,7 +119,9 @@ def clashes(m):
         if text.endswith("planned.") or text in own: continue
         who = re.match(r"(Teacher double-booked|Class clash): (.+?) on ", text)   # whose week the Fix the timetable button opens
         where = (dict(teacher=who.group(2)) if who.group(1).startswith("Teacher") else dict(cls=who.group(2))) if who else None
-        out.append(warning("clash:" + text, "clash", text, group=who.group(2) if who else "School", where=where, crit=crit_of(text)))
+        at = (m["checks"].get("where") or {}).get(text)   # a lesson in a break, a recess or past the day: the lesson's first class and day
+        if at: where = dict(at)
+        out.append(warning("clash:" + text, "clash", text, group=at["cls"] if at else who.group(2) if who else "School", where=where, crit=crit_of(text)))
     seen = set()
     for x in m["lessons"]:   # a lesson row nobody teaches
         key = f"clash:noteacher:{x['id']}:{x['group']}"

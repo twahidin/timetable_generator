@@ -921,7 +921,7 @@ function exportCard() {
     <div class="row" style="margin-top:10px"><label class="filebtn">Setup workbook (.xlsx)<input type="file" id="exSetup" accept=".xlsx" hidden></label><span class="muted" id="exSetupName">none chosen</span></div>
     <div class="row" style="margin-top:8px"><label class="filebtn">Timetable (.xlsx or .sqlite)<input type="file" id="exTT" accept=".xlsx,.sqlite,.sqlite3,.db" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
     <div class="row" style="margin-top:12px"><button class="primary" id="imCheck">Check</button></div>
-    <div id="imResult">${S.draft ? draftHTML(S.draft) : ""}</div></div>`;
+    <div id="imResult">${S.draft ? draftHTML(S.draft) : loadingDraft() ? LOADING : ""}</div></div>`;
 }
 /* step 6's third card: the second choices in their give-way order, each editable in place, and the form that adds one */
 function giveWay(out, crit, psel, weeks, days) {
@@ -1734,6 +1734,12 @@ document.addEventListener("click", async e => {
   if (b.id === "fitAgain") { fitCheck(true); return; }
   if (b.id === "pbPrint") { makePrintouts(); return; }
   if (b.dataset.pbshow !== undefined) { S.step = stepAt("edit"); save(); render(); window.scrollTo(0, 0); fxClick({ dataset: { fix: b.dataset.pbshow } }); return; }   // step 8, then the Fix card on that warning as its own button opens it
+  if (b.dataset.pbfind !== undefined) {   // a critical mistake with no week to show: step 8, the list showing it, its row in view (rows are found by their data, not by a selector built from the key)
+    const key = b.dataset.pbfind, w = ((S.draft && S.draft.warnings) || []).find(x => x.key === key);
+    S.step = stepAt("edit"); if (w && !Draft.isOpen(w)) S.dfilter = "all"; else if (S.dfilter !== "all") S.dfilter = "open"; save(); render();
+    const li = [...document.querySelectorAll("#imResult li.warn")].find(x => x.dataset.wkey === key); if (li) li.scrollIntoView({ block: "center" }); else window.scrollTo(0, 0);
+    return;
+  }
   if (b.id === "imCheck") { uploadDraft(false); return; }
   if (b.id === "pbPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; publishDraft(); return; }
   if (fxClick(b)) return;
@@ -2720,8 +2726,16 @@ async function loadDraft() {
     const r = await fetch("/api/draft"), j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/login"; return; }
     if (r.ok && j.warnings) { S.draft = j; if (["edit", "publish"].includes(STEPS[S.step][0])) render(); }
-    else if (!r.ok && j.error) toast(j.error);
-  } catch (e) { }
+    else { S.draftFailed = true; if (!r.ok && j.error) toast(j.error); if (["edit", "publish"].includes(STEPS[S.step][0])) render(); }
+  } catch (e) { S.draftFailed = true; if (["edit", "publish"].includes(STEPS[S.step][0])) render(); }
+}
+const loadingDraft = () => !S.draft && !S.draftFailed && !!(G.st && G.st.draft);   // the server has a draft this page has not got yet
+const LOADING = `<p class="muted" style="margin-top:10px">Loading the draft…</p>`;
+const otherSchool = j => j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.file_school)}</b>, but the setup saved in the app is for <b>${esc(j.school)}</b>. Check it is the right file.</p>` : "";
+const fixList = fl => `<ol class="fxlist">${Draft.batches(fl).map(b => `<li>${b.items.map(x => `<div>${esc(x.text)}</div>`).join("")}<span class="muted small">${esc(b.items[b.items.length - 1].at)}</span></li>`).join("")}</ol>`;
+function warnHead(w) {   // a warning's first lines, the same on steps 8 and 9: its critical kind, the sentence, then strength, the two sides and where
+  const side = Draft.sideText(w), where = Draft.whereText(w).map(x => ` · ${esc(x)}`).join("");
+  return `<div class="wt">${w.crit ? `<span class="chip pbmark">${esc(Draft.critWord(w.crit))}</span>` : ""}${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where}</div>`;
 }
 function draftHead(j) { return `<h3 style="margin-top:14px">${esc(j.school)} · ${esc(j.timetable)}</h3><p class="muted small">${j.lessons} lessons · ${j.classes} classes · ${j.teachers} teachers · ${j.students} students</p>`; }
 function publishedMsg(j) {   // what both steps show once the draft is published
@@ -2733,16 +2747,15 @@ function draftHTML(j) {
   const head = draftHead(j);
   if (j.published) return publishedMsg(j) + `<p class="muted small">Its downloads and the personal student codes are on step 9.</p>`;
   const ws = j.warnings || [], c = Draft.counts(ws), f = S.dfilter === "all" ? "all" : "open", n = j.open ?? c.open, nc0 = j.critical ?? c.critical, n5 = j.step5 ?? c.step5;   // the server counts the step 5 decisions whose warning has gone
-  const where = w => Draft.whereText(w).map(x => ` · ${esc(x)}`).join("");
-  const row = w => { const d = w.decision && w.decision.answer, ans = Draft.answerText(w), side = Draft.sideText(w);
-    return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}"><div class="wt">${w.crit ? `<span class="chip pbmark">${esc(Draft.critWord(w.crit))}</span>` : ""}${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where(w)}</div>
+  const row = w => { const d = w.decision && w.decision.answer, ans = Draft.answerText(w);
+    return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}" data-wkey="${esc(w.key)}">${warnHead(w)}
       <div class="row warnbtns">${Draft.fixTarget(w) && d !== "step5" && d !== "fixed" && d !== "met" ? `<button data-fix="${esc(w.key)}">Fix the timetable</button>` : ""}${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "met" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" || !/:again$/.test(w.key) ? "" : `<button data-decide="met|${esc(w.key)}">Still met</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div></li>`; };
   const groups = Draft.group(ws, f), nc = (j.not_checked || []);
   const kinds = groups.map(k => `<details open class="warnkind"><summary class="sev">${esc(k.title)} · ${k.groups.reduce((a, g) => a + g.items.length, 0)}</summary>
       ${k.groups.map(g => `<h4>${esc(g.name)}</h4><ul class="warnlist">${g.items.map(row).join("")}</ul>`).join("")}
       ${k.kind === "rule" && nc.length ? `<p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul>` : ""}</details>`).join("")
     + (!groups.length && nc.length ? `<details open class="warnkind"><summary class="sev">Rules</summary><p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul></details>` : "");
-  return head + (j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.file_school)}</b>, but the setup saved in the app is for <b>${esc(j.school)}</b>. Check it is the right file.</p>` : "")
+  return head + otherSchool(j)
     + configLine(j)
     + `<p class="warnsum"><span class="${nc0 ? "pbcrit" : ""}">${nc0} critical</span> · <b>${n} warning${n === 1 ? "" : "s"} open</b> · ${n5} settled on step 5</p>
       <div class="row warnfilter">${[["open", "Open"], ["all", "All"]].map(([v, l]) => `<label class="radio"><input type="radio" name="dfilter" data-dfilter="${v}"${v === f ? " checked" : ""}> ${l}</label>`).join("")}</div>`
@@ -2757,21 +2770,20 @@ function draftHTML(j) {
 /* step 9: what will be published, read-only. Every critical mistake with a way back to step 8, every other open warning, the
    fixes, and the Publish button (off while a critical mistake remains; the server refuses as well) */
 function publishHTML(j) {
+  if (!j && loadingDraft()) return `<h2>The timetable to publish</h2>${LOADING}`;
   if (!j) return `<h2>The timetable to publish</h2><p class="muted">Nothing to publish yet. Upload a timetable on step 8.</p><div class="row"><button data-step="${stepAt("edit")}">Go to step 8</button></div>`;
   if (j.published) return publishedMsg(j);
   const ws = j.warnings || [], crit = Draft.critical(ws), nc = j.critical ?? crit.length, fl = j.fixes || [], pub = G.st && G.st.published, gate = Draft.gateText(nc);
-  const where = w => Draft.whereText(w).map(x => ` · ${esc(x)}`).join("");
-  const row = (w, show) => { const side = Draft.sideText(w);
-    return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}"><div class="wt">${w.crit ? `<span class="chip pbmark">${esc(Draft.critWord(w.crit))}</span>` : ""}${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where(w)}</div>
-      ${show ? `<div class="row warnbtns"><button data-pbshow="${esc(w.key)}">Show on step 8</button></div>` : ""}</li>`; };
+  const row = (w, show) => `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}">${warnHead(w)}
+      ${show ? `<div class="row warnbtns">${Draft.fixTarget(w) ? `<button data-pbshow="${esc(w.key)}">Show on step 8</button>` : `<button data-pbfind="${esc(w.key)}">Find it on step 8</button>`}</div>` : ""}</li>`;
   const groups = Draft.group(ws.filter(w => !w.crit), "open"), nw = groups.reduce((a, k) => a + k.groups.reduce((b, g) => b + g.items.length, 0), 0);
   const kinds = groups.map(k => { const m = k.groups.reduce((a, g) => a + g.items.length, 0);
     return `<details ${m > 20 ? "" : "open"} class="warnkind"><summary class="sev">${esc(k.title)} · ${m}</summary>${k.groups.map(g => `<h4>${esc(g.name)}</h4><ul class="warnlist">${g.items.map(w => row(w, false)).join("")}</ul>`).join("")}</details>`; }).join("");
-  return draftHead(j) + (j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.file_school)}</b>, but the setup saved in the app is for <b>${esc(j.school)}</b>. Check it is the right file.</p>` : "") + configLine(j)
+  return draftHead(j) + otherSchool(j) + configLine(j)
     + `<h3 class="sev ${nc ? "crit" : ""}" style="margin-top:14px">Critical mistakes · ${nc}</h3>`
     + (nc ? `<ul class="warnlist">${crit.map(w => row(w, true)).join("")}</ul>` : `<p class="okmsg">Nothing critical.</p>`)
     + `<h3 class="sev">Warnings · ${nw}</h3>` + (kinds || `<p class="muted small">No open warnings.</p>`)
-    + `<h3 class="sev">Changes made in the app · ${fl.length}</h3>` + (fl.length ? `<ol class="fxlist">${Draft.batches(fl).map(b => `<li>${b.items.map(x => `<div>${esc(x.text)}</div>`).join("")}<span class="muted small">${esc(b.items[b.items.length - 1].at)}</span></li>`).join("")}</ol>` : `<p class="muted small">No fixes have been made in the app.</p>`)
+    + `<h3 class="sev">Changes made in the app · ${fl.length}</h3>` + (fl.length ? fixList(fl) : `<p class="muted small">No fixes have been made in the app.</p>`)
     + (nc ? `<p class="issue crit" style="margin-top:12px">${esc(gate)}</p>`
         : `<p class="muted small" style="margin-top:12px">${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}</p>`)
     + `<div class="row"><button class="primary" id="pbPublish"${nc ? ` disabled title="${esc(gate)}"` : ""}>Publish this timetable</button></div><p class="muted small" id="pbMsg"></p>`;
@@ -2792,7 +2804,7 @@ const fxDot = st => `<i class="dot ${esc(Grid.stateClass(st))}"></i>`;
 function fixesHTML(j) {   // what was fixed in the app, newest last, with undo, and anything wrong with the fixes
   const fl = j.fixes || [];
   return `<h3 style="margin-top:14px">Fixes</h3>` + (fl.length
-      ? `<ol class="fxlist">${Draft.batches(fl).map(b => `<li>${b.items.map(x => `<div>${esc(x.text)}</div>`).join("")}<span class="muted small">${esc(b.items[b.items.length - 1].at)}</span></li>`).join("")}</ol><div class="row"><button id="fxUndo">${esc(Draft.undoText(fl))}</button></div>`
+      ? `${fixList(fl)}<div class="row"><button id="fxUndo">${esc(Draft.undoText(fl))}</button></div>`
       : `<p class="muted small">No fixes have been made in the app yet.</p>`)
     + (j.fix_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("");
 }

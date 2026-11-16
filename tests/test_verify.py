@@ -81,7 +81,7 @@ def a_teacher_or_class_clash_says_whose_week_to_open():
     t = [w for w in ws if w["text"].startswith("Teacher double-booked: Ms X on ")]; k = [w for w in ws if w["text"].startswith(f"Class clash: {c1} on ")]
     assert t and all(w["where"] == dict(teacher="Ms X") for w in t), t
     assert k and all(w["where"] == dict(cls=c1) for w in k), k
-    assert all(w["where"] is None for w in ws if not w["text"].startswith(("Teacher double-booked: ", "Class clash: "))), ws
+    assert all(w["where"] is None for w in ws if not w["text"].startswith(("Teacher double-booked: ", "Class clash: ")) and w["crit"] != "break"), ws   # a lesson in a break has its own place
 
 @t
 def ops_use_the_row_ids():
@@ -618,6 +618,28 @@ def a_lesson_with_no_teacher_is_critical():
     whole = clash_model(sp, [(0, 0, 1, [b], "English", "Entire Class", [], "")])
     w = [w for w in verify.clashes(whole) if w["crit"] == "noteacher"]
     assert [x["text"] for x in w] == [f"No teacher: English for {b} on {whole['days'][0]} period 0."] and w[0]["where"] == dict(cls=b)
+
+@t
+def a_lesson_in_a_break_or_a_recess_has_a_place_for_the_fix_button():
+    sp = primary(); a = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]
+    m0 = model_for(copy.deepcopy(sp), [(0, 0, 1, [a], "English", "Entire Class", [t], "")])
+    lv = m0["lessons"][0]["level"] if m0["lessons"][0]["level"] in m0["grid"] else m0["class_ix"][a]["level"]
+    brk = next(q for q in range(m0["NP"]) if m0["grid"][lv][0][q] not in "LA")        # a break of the level's first day
+    free = next(q for q in range(m0["NP"]) if m0["grid"][lv][1][q] in "LA")
+    whole = clash_model(sp, [(0, brk, 1, [a], "English", "Entire Class", [t], "")])
+    w = [x for x in verify.clashes(whole) if x["crit"] == "break"]
+    assert len(w) == 1 and w[0]["where"] and w[0]["where"]["cls"] == a and w[0]["where"]["day"] == whole["days"][0] and w[0]["group"] == a, w
+    m = model_for(copy.deepcopy(sp), [(1, free, 1, [a], "Music", "XB1", [t], "")]); m["cgrid"][a] = [list(r) for r in m["grid"][lv]]; m["cgrid"][a][1][free] = "R"       # a group lesson in its class's recess
+    m["checks"] = export.check_model(m)
+    w = [x for x in verify.clashes(m) if x["crit"] == "break"]
+    assert len(w) == 1 and "recess" in w[0]["text"] and w[0]["where"]["cls"] == a and w[0]["where"]["day"] == m["days"][1] and w[0]["group"] == a, w
+    assert w[0]["text"] in m["checks"]["problems"] and m["checks"]["where"][w[0]["text"]] == w[0]["where"]            # the line itself is as it was
+    # a teacher clash and a no-teacher warning keep their where
+    t2 = clash_model(sp, [(0, 1, 1, [a], "English", "Entire Class", [t], ""), (0, 1, 1, [sp["classes"][1]["class"]], "English", "Entire Class", [t], "")])
+    c = [x for x in verify.clashes(t2) if x["crit"] == "teacher"]
+    assert len(c) == 1 and c[0]["where"] == dict(teacher=t)
+    nt = [x for x in verify.clashes(clash_model(sp, [(0, 1, 1, [a], "English", "Entire Class", [], "")])) if x["crit"] == "noteacher"]
+    assert nt[0]["where"] == dict(cls=a)
 
 @t
 def two_bands_of_one_class_at_once_are_not_a_mistake():
