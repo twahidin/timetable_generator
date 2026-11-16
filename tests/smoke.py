@@ -492,6 +492,15 @@ def test_the_options_of_a_lesson_and_of_an_add():
     a = c.get("/api/draft/options?add=C:1A:Art&n=1").get_json(); assert set(a) == {"slots"} and a["slots"] and set(a["slots"][0]) == {"d", "p", "state", "why"}
     assert c.get("/api/draft/options?id=99999").status_code == 400 and c.get("/api/draft/options").status_code == 400
 
+def test_the_lesson_route_and_the_board_lists_for_teachers_and_rooms():
+    _grid_draft(); lid = _lid(); j = c.get(f"/api/draft/lesson?id={lid}").get_json()
+    assert set(j) == {"id", "group", "key", "what", "n_lessons", "teachers", "rooms"} and j["key"] == "C:1A:Art" and j["n_lessons"] >= 1 and j["teachers"] and j["rooms"]
+    assert set(j["teachers"][0]) == {"name", "short", "free", "doing", "rank"} and set(j["rooms"][0]) == {"room", "kind", "right", "free", "holding"}
+    assert c.get("/api/draft/lesson").status_code == 400 and c.get("/api/draft/lesson?id=99999").status_code == 400
+    b = c.get("/api/draft/board").get_json(); assert b["teachers"] and b["rooms"] and len(b["day"]) == len(b["days"]) and all(r["key"] for x in b["cards"] for r in x["rows"])
+    r = c.post("/api/draft/fix", json=dict(kind="teacher", key=j["key"], teachers=[], force=True)); assert r.status_code == 200   # no teacher is never a clash, so force is not needed and does no harm
+    assert c.post("/api/draft/undo").status_code == 200
+
 def test_a_fix_moves_the_lesson_and_undo_brings_it_back():
     _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
     j = c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"])).get_json(); assert len(j["fixes"]) == 1 and j["fixes"][0]["text"].startswith("Moved "), j

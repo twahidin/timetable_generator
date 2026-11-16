@@ -54,6 +54,10 @@ def _out(fix, own):
     if not isinstance(out, (list, tuple)) or (own is not None and own in out): raise ValueError("That fix is not complete.")
     return list(out)
 
+def rows_of_key(rows, k):
+    """the rows of the key k (a tuple from _key or _row_key): an entire-class row of the subject for a class of the key, or a row of the key's group"""
+    return [x for x in rows if (x["group"] == ENTIRE and k[0] == "C" and k[1] in x["classes"] and x["subject"] == k[2]) or (k[0] == "G" and x["group"] == k[1])]
+
 def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, pool=None):
     """change lessons (a list the caller owns) in place and return the sentence for the committee; ValueError(sentence) when the
     fix cannot apply (every kind checks before it changes anything). new_id: the id an add takes (default 1 + the highest in
@@ -108,7 +112,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
         lessons.extend(rows); touched.add(fix["id"]); return text
     if kind == "teacher":
         key = _key(fix["key"]); name = verify._name(key); known = {x["name"] for x in spec.get("teachers") or []}
-        rows = [x for x in lessons + pool if (x["group"] == ENTIRE and key[0] == "C" and key[1] in x["classes"] and x["subject"] == key[2]) or (key[0] == "G" and x["group"] == key[1])]
+        rows = rows_of_key(lessons + pool, key)
         if not rows: raise ValueError(f"There is no lesson of {name} on the timetable.")
         bad = [x for x in fix["teachers"] if x not in known]
         if bad: raise ValueError(f"{', '.join(bad)} {'is' if len(bad) == 1 else 'are'} not on the setup's list of teachers.")
@@ -116,6 +120,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
         keep(rows)
         for x in rows: x["teachers"] = list(fix["teachers"])
         touched |= {x["id"] for x in rows}
+        if not fix["teachers"]: return f"{name} now has no teacher; it had {_names(old)}."
         return f"{name} is now taught by {_names(fix['teachers'])}; it had no teacher." if not old else f"{name} is now taught by {_names(fix['teachers'])}, not {_names(old)}."
     if kind == "room":
         x = next((x for x in _rows(lessons + pool, fix["id"]) if x["group"] == fix["group"]), None)
@@ -326,8 +331,7 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
     kind = fix.get("kind")
     try:
         if kind == "teacher":
-            key = _key(fix["key"]); ids = {x["id"] for x in m["lessons"] if (x["group"] == ENTIRE and key[0] == "C" and key[1] in x["classes"] and x["subject"] == key[2]) or (key[0] == "G" and x["group"] == key[1])}
-            ids |= {x["id"] for x in pool if (x["group"] == ENTIRE and key[0] == "C" and key[1] in x["classes"] and x["subject"] == key[2]) or (key[0] == "G" and x["group"] == key[1])}
+            key = _key(fix["key"]); ids = {x["id"] for x in rows_of_key(m["lessons"], key)} | {x["id"] for x in rows_of_key(pool, key)}
         else: ids = {fix[k] for k in {"swap": ("a", "b")}.get(kind, ("id",) if kind in ("move", "room", "delete", "lift", "place") else ())}
         gone = {i for i in fix.get("out") or () if i in b.ids} - ids if kind in ("move", "place", "add") and isinstance(fix.get("out"), (list, tuple)) else set()
         old = [x for i in ids - gone for x in b.ids.get(i, ())]; new = [dict(x, teachers=list(x["teachers"]), classes=list(x["classes"])) for x in old]
@@ -476,6 +480,12 @@ def _cards(spec):
         out.setdefault(str(r["subject"]).strip(), (str(r.get("dept") or "").strip(), str(r.get("code") or "").strip(), name))
     return out
 
+def _on_card(spec, subject):
+    """(the teachers on a lesson of step 5 of the subject or of another subject of its step 3 card, the card's department)"""
+    cards = _cards(spec); card = cards.get(subject, ("", "", subject))
+    of_card = {n for n, v in cards.items() if v == card} | {subject}
+    return {t for x in spec.get("lessons") or [] if isinstance(x, dict) and str(x.get("subject") or "").strip() in of_card for t in x.get("teachers") or []}, card[0]
+
 def teacher_options(m, spec, days, key, pool=()):
     """who could take the key's lesson, judged as a teacher fix (the current teachers left out) -> [dict(teachers, state, why)]:
     step 5's teachers of the key, then each teacher of the setup's list who is on a lesson row of the subject or of another
@@ -485,9 +495,7 @@ def teacher_options(m, spec, days, key, pool=()):
     rows = [x for x in m["lessons"] if (x["group"] == ENTIRE and k[0] == "C" and k[1] in x["classes"] and x["subject"] == k[2]) or (k[0] == "G" and x["group"] == k[1])]
     subject = (e["subject"] if e else k[2] if k[0] == "C" else rows[0]["subject"] if rows else "").strip()
     now = {t for x in rows for t in x["teachers"]}
-    cards = _cards(spec); card = cards.get(subject, ("", "", subject)); dept = card[0]
-    of_card = {n for n, v in cards.items() if v == card} | {subject}
-    on = {t for x in spec.get("lessons") or [] if isinstance(x, dict) and str(x.get("subject") or "").strip() in of_card for t in x.get("teachers") or []}
+    on, dept = _on_card(spec, subject)
     team = [t for t in spec.get("teachers") or [] if isinstance(t, dict) and t.get("name")]
     opts = ([sorted(e["teachers"])] if e and e["teachers"] else []) + [[t["name"]] for t in team if t["name"] in on] \
         + ([[t["name"]] for t in team if t["name"] not in on and dept in spec_mod.teacher_depts(t)] if dept else [])
@@ -496,12 +504,16 @@ def teacher_options(m, spec, days, key, pool=()):
 
 def _row_key(x): return ("C", x["classes"][0], x["subject"]) if x["group"] == ENTIRE and x["classes"] else ("G", x["group"])
 
+def _room_kind(m, spec, x):
+    """the kind of room a row asks for: step 5's, else its present room's; None when neither says"""
+    e = verify.planned_rows(spec).get(_row_key(x)); return (e or {}).get("room_kind") or m["room_ix"].get(x["room"], {}).get("kind")
+
 def room_options(m, spec, days, lesson_id, group, pool=()):
     """the rooms of the row's kind (step 5's, else the current room's) and its class's home room, judged as a room fix (the
     current room left out) -> [dict(room, state, why)]"""
     x = next((x for x in _rows(m["lessons"], lesson_id) if x["group"] == group), None)
     if x is None: raise ValueError(f"There is no row of {group} in that lesson.")
-    e = verify.planned_rows(spec).get(_row_key(x)); kind = (e or {}).get("room_kind") or m["room_ix"].get(x["room"], {}).get("kind")
+    kind = _room_kind(m, spec, x)
     rooms = [str(v["room"]) for v in spec.get("venues") or [] if kind and (v.get("kind") or "classroom") == kind] + [m["class_ix"].get(k, {}).get("home") for k in x["classes"]]
     c = _ctx(m)
     return [dict(room=r, **_pick(judge(m, spec, days, dict(kind="room", id=lesson_id, group=group, room=r), c, pool))) for r in dict.fromkeys(rooms) if r and r != x["room"]]
@@ -544,3 +556,44 @@ def short(m, spec, pool=()):
         if have < e["periods"]:
             out.append(dict(key=verify._kstr(k), name=verify._name(k), have=have, want=e["periods"], n=min(_length(e["rows"][0].get("length")), e["periods"] - have)))
     return out
+
+def choices(m, spec, days, lesson_id, group=None, pool=()):
+    """who and which room could take one lesson row, as the board's editor lists them (read-only) -> dict(id, group, key, what, n_lessons,
+    teachers, rooms). The row is the lesson's row of group (default its first), on the timetable or in the pool. n_lessons: the lesson ids
+    the row's key has on the timetable and in the pool. teachers: every teacher of the setup once, dict(name, short, free, doing, rank), the
+    free ones first, each by rank (0 step 5's teachers of the key, 1 on a lesson of the subject or its card, 2 of the subject's department,
+    3 anyone) then the setup's order; free: on no lesson but those of the key on the timetable in any period of any of them; doing: the first
+    lesson they are on then, '{what} on {day} period {p}', else ''. rooms: every venue once, dict(room, kind, right, free, holding): right
+    is the kind step 5 asks for or a home room of the row's classes; free: it holds fewer other lessons than it takes at once in every
+    period of this lesson (always for a lesson in the pool); holding: what of the first lesson in it then, else ''. Ordered free and right,
+    free, then the rest, each in the setup's order"""
+    mine = [x for x in pool if x["id"] == lesson_id]; rows = mine or [x for x in m["lessons"] if x["id"] == lesson_id]
+    if not rows: raise ValueError("There is no lesson with that id on the timetable.")
+    row = rows[0] if group is None else next((x for x in rows if x["group"] == group), None)
+    if row is None: raise ValueError(f"There is no row of {group} in that lesson.")
+    k = _row_key(row); b = Busy(m); e = verify.planned_rows(spec).get(k)
+    held = rows_of_key(m["lessons"], k); placed = {x["id"] for x in held}
+    n_lessons = len({x["id"] for x in rows_of_key(list(m["lessons"]) + list(pool), k)})
+    order = sorted({x["id"]: x for x in held}.values(), key=lambda x: (x["d"], x["p"], x["id"]))
+    def doing(t):
+        for x in order:
+            for q in _span(x):
+                y = next((y for y in b.at.get(("t", t, x["d"], q), ()) if y["id"] not in placed), None)
+                if y: return f"{what(y)} on {when(days, y['d'], y['p'])}"
+        return ""
+    on, dept = _on_card(spec, (e["subject"] if e else row["subject"]).strip()); step5 = set(e["teachers"]) if e else set()
+    rank = lambda t: 0 if t["name"] in step5 else 1 if t["name"] in on else 2 if dept and dept in spec_mod.teacher_depts(t) else 3
+    team = list({t["name"]: t for t in spec.get("teachers") or [] if isinstance(t, dict) and t.get("name")}.values()); teachers = []
+    for t in team:
+        d = doing(t["name"]); teachers.append(dict(name=t["name"], short=(m["teacher_ix"].get(t["name"]) or {}).get("short") or t["name"], free=not d, doing=d, rank=rank(t)))
+    teachers.sort(key=lambda t: (not t["free"], t["rank"]))   # stable: the setup's order within
+    kind = _room_kind(m, spec, row); homes = {str(m["class_ix"].get(c, {}).get("home") or "") for c in row["classes"]} - {""}; rooms = []
+    for v in {str(v["room"]): v for v in spec.get("venues") or [] if isinstance(v, dict) and v.get("room")}.values():
+        room, vk = str(v["room"]), v.get("kind") or "classroom"; holding = ""
+        if not mine:
+            for q in _span(row):
+                there = list({y["id"]: y for y in b.at.get(("r", room, row["d"], q), ()) if y["id"] != lesson_id}.values())
+                if len(there) >= m["room_cap"].get(room, 1): holding = what(there[0]); break
+        rooms.append(dict(room=room, kind=vk, right=bool(kind and vk == kind) or room in homes, free=not holding, holding=holding))
+    rooms.sort(key=lambda r: 0 if r["free"] and r["right"] else 1 if r["free"] else 2)
+    return dict(id=lesson_id, group=row["group"], key=verify._kstr(k), what=what(row), n_lessons=n_lessons, teachers=teachers, rooms=rooms)

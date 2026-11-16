@@ -545,6 +545,24 @@ def test_marks():
     sp0, Bk = one_block(); Bk = [dict(x, d=0, p=2, teachers=[T[0]], room=ROOM) for x in Bk]; m, sp = model_with(Bk); b = fixes.Busy(m)
     assert fixes.marks(b, b.ids[7]) == []   # a band's own groups share a teacher and a room
 
+@t
+def test_no_teacher_and_no_room_are_never_a_clash():
+    L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room=ROOM, level=LV), lesson(2, 1, 2, 1, [B], "Art", ENTIRE, [T[1]], level=LV)]
+    m, sp = model_with(L); key = f"C:{A}:{SUBJ}"
+    j = fixes.judge(m, sp, DAYS, dict(kind="teacher", key=key, teachers=[])); assert j["state"] == "ok", j
+    j = fixes.judge(m, sp, DAYS, dict(kind="room", id=1, group=ENTIRE, room="")); assert j["state"] == "ok", j
+    rows = copy.deepcopy(m["lessons"]); name = verify._name(("C", A, SUBJ))
+    assert fixes.apply_one(rows, dict(kind="teacher", key=key, teachers=[]), sp, DAYS) == f"{name} now has no teacher; it had {T[0]}."
+    assert fixes.apply_one(rows, dict(kind="teacher", key=key, teachers=[T[2]]), sp, DAYS) == f"{name} is now taught by {T[2]}; it had no teacher."
+    assert fixes.apply_one(rows, dict(kind="teacher", key=key, teachers=[T[1]]), sp, DAYS) == f"{name} is now taught by {T[1]}, not {T[2]}."
+
+@t
+def test_marks_after_a_teacher_is_taken_away():
+    L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room=ROOM, level=LV)]
+    m, sp = model_with(L); rows = copy.deepcopy(m["lessons"])
+    fixes.apply_one(rows, dict(kind="teacher", key=f"C:{A}:{SUBJ}", teachers=[]), sp, DAYS)
+    b = fixes.Busy(dict(m, lessons=rows)); assert fixes.marks(b, b.ids[1]) == ["noteacher"], fixes.marks(b, b.ids[1])
+
 def _of_key(k, i, d, p, n_=1, who=None): return lesson(i, d, p, n_, [CLS], SUBJ, ENTIRE, list(who or TEACHERS), level=ROW["level"])
 PLAN = verify.planned_rows(SP)[("C", CLS, SUBJ)]["periods"]
 def _placed(k): return [_of_key(KEY, 10 + j, 1 + j // 6, 5 + j % 6) for j in range(k)]   # k one-period lessons of KEY
