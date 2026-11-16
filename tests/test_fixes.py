@@ -417,7 +417,8 @@ def test_delete_and_teacher_reach_a_lesson_in_the_pool():
     fixes.apply_one(L, dict(kind="lift", id=1), sp, DAYS, pool=pool)
     fixes.apply_one(L, dict(kind="teacher", key=KEY, teachers=[TEACHER]), sp, DAYS, pool=pool)
     assert pool[0]["teachers"] == [TEACHER] and L[0]["teachers"] == TEACHERS
-    fixes.apply_one(L, dict(kind="room", id=1, group=ENTIRE, room=ROOM), sp, DAYS, pool=pool); assert pool[0]["room"] == ROOM
+    assert fixes.apply_one(L, dict(kind="room", id=1, group=ENTIRE, room=ROOM), sp, DAYS, pool=pool) == f"{one} (not placed) is now in {ROOM}, not no room." and pool[0]["room"] == ROOM
+    assert fixes.apply_one(L, dict(kind="room", id=2, group=ENTIRE, room=ROOM), sp, DAYS, pool=pool) == f"{fixes.what(L[0])} on {DAYS[1]} period 4 is now in {ROOM}, not no room."
     assert fixes.apply_one(L, dict(kind="delete", id=1), sp, DAYS, pool=pool) == f"Deleted {one} (it was not placed)." and pool == [] and [x["id"] for x in L] == [2]
 
 @t
@@ -468,6 +469,8 @@ def test_a_fix_list_replayed_on_changed_lessons_skips_and_names():
     out = fixes.apply(L, [dict(kind="lift", id=1), dict(kind="place", id=1, d=1, p=4, out=[2])], sp, DAYS)
     assert out["problems"] == ["A fix could not be applied: There is no lesson with that id on the timetable.", "A fix could not be applied: That lesson is not waiting to be placed."], out["problems"]
     assert out["lessons"] == start and out["pool"] == [] and out["touched"] == set()
+    out = fixes.apply(L, [dict(kind="move", id=1, d=1, p=4, out=[2])], sp, DAYS)
+    assert out["problems"] == ["A fix could not be applied: There is no lesson with that id on the timetable."] and out["lessons"] == start and out["pool"] == [], out
 
 @t
 def test_judge_lift_place_and_push():
@@ -521,6 +524,50 @@ def test_marks():
     m["room_cap"] = dict(m["room_cap"], **{ROOM: 2}); b = fixes.Busy(m); assert fixes.marks(b, b.ids[1]) == ["teacher"]
     sp0, Bk = one_block(); Bk = [dict(x, d=0, p=2, teachers=[T[0]], room=ROOM) for x in Bk]; m, sp = model_with(Bk); b = fixes.Busy(m)
     assert fixes.marks(b, b.ids[7]) == []   # a band's own groups share a teacher and a room
+
+def _of_key(k, i, d, p, n_=1, who=None): return lesson(i, d, p, n_, [CLS], SUBJ, ENTIRE, list(who or TEACHERS), level=ROW["level"])
+PLAN = verify.planned_rows(SP)[("C", CLS, SUBJ)]["periods"]
+def _placed(k): return [_of_key(KEY, 10 + j, 1 + j // 6, 5 + j % 6) for j in range(k)]   # k one-period lessons of KEY
+def _leave(k): return f"That would leave {SUBJ} for {CLS} with {k} periods; step 3 plans {PLAN}."
+
+@t
+def test_a_pushed_out_or_pooled_lesson_still_counts_for_the_plan():
+    m, sp = model_with(_placed(PLAN))
+    r = fixes.judge(m, sp, DAYS, dict(kind="add", key=KEY, d=1, p=5, n=1, room="", out=[10]))
+    assert r["state"] == "no" and r["why"] == _leave(PLAN + 1), r   # 10 waits in the pool: still counted
+    m, sp = model_with(_placed(PLAN - 1)); pool = [_of_key(KEY, 50, 0, 2)]
+    r = fixes.judge(m, sp, DAYS, dict(kind="add", key=KEY, d=4, p=2, n=1, room=""), pool=pool); assert r["state"] == "no" and r["why"] == _leave(PLAN + 1), r
+    assert fixes.judge(m, sp, DAYS, dict(kind="add", key=KEY, d=4, p=2, n=1, room=""))["state"] == "ok"   # without the pool it is missing
+    r = fixes.judge(m, sp, DAYS, dict(kind="delete", id=50), pool=pool); assert r == dict(state="no", why=_leave(PLAN - 1), must=[], prefer=[]), r
+    assert fixes.judge(m, sp, DAYS, dict(kind="delete", id=10), pool=pool)["why"] == _leave(PLAN - 1)
+    m, sp = model_with(_placed(PLAN)); assert fixes.judge(m, sp, DAYS, dict(kind="delete", id=50), pool=pool) == dict(state="ok", why="", must=[], prefer=[])   # a surplus one
+
+@t
+def test_a_pooled_lesson_counts_in_the_teachers_load():
+    teachers = [dict(x, allowance=2) if x["name"] == TEACHER else x for x in SP["teachers"]]
+    m, sp = model_with([_of_key(KEY, 1, 0, 2)], teachers=teachers); pool = [_of_key(KEY, 5, 1, 2, n_=2)]
+    r = fixes.judge(m, sp, DAYS, dict(kind="teacher", key=KEY, teachers=[TEACHER]), pool=pool)
+    assert r["state"] == "prefer" and r["why"] == f"{TEACHER} would have 3 periods, 1 over the allowance.", r
+    assert fixes.judge(m, sp, DAYS, dict(kind="teacher", key=KEY, teachers=[TEACHER]))["state"] == "ok"
+
+@t
+def test_an_add_takes_an_id_past_the_pool_in_judge_too():
+    m, sp = model_with([lesson(1, 2, 2, 1, [A], "Art", ENTIRE, [T[0]], level=LV)]); pool = [lesson(2, 0, 2, 1, [B], "Music", ENTIRE, [T[1]], level=LV)]
+    f = dict(kind="add", key=KEY, d=4, p=2, n=1, room="", out=[2])
+    assert fixes.judge(m, sp, DAYS, f, pool=pool)["state"] == "ok", fixes.judge(m, sp, DAYS, f, pool=pool)
+    L = [lesson(1, 2, 2, 1, [A], "Art", ENTIRE, [T[0]], level=LV), pool[0]]; out = fixes.apply(L, [dict(kind="lift", id=2), f], sp, DAYS)
+    assert out["problems"] == [] and [x["id"] for x in out["pool"]] == [2] and out["texts"][1].startswith("Added ")
+
+@t
+def test_more_marks_and_a_place_on_a_break():
+    sp0, Bk = one_block(); ROOM2 = SP["venues"][1]["room"]
+    Bk = [dict(x, d=0, p=2, teachers=[T[0]], room=ROOM if j == 0 else ROOM2) for j, x in enumerate(Bk)]
+    m, sp = model_with(Bk); b = fixes.Busy(m); assert fixes.marks(b, b.ids[7]) == []   # in two rooms, none over
+    m, sp = model_with(Bk + [lesson(40, 0, 3, 1, [D], "Art", ENTIRE, [T[5]], room=ROOM2, level=LV)]); b = fixes.Busy(m)
+    assert fixes.marks(b, b.ids[7]) == ["room"] and fixes.marks(b, b.ids[40]) == ["room"]
+    m, sp = model_with([lesson(1, 0, RECESS, 1, [A], SUBJ, ENTIRE, [T[0]], level=LV)])
+    r = fixes.judge(m, sp, DAYS, dict(kind="place", id=5, d=0, p=RECESS, out=[1]), pool=[lesson(5, 2, 2, 1, [A], "Music", ENTIRE, [T[1]], level=LV)])
+    assert r == dict(state="na", why=f"That is not lesson time for {A}.", must=[], prefer=[]), r
 
 @t
 def test_short_counts_a_pooled_lesson_as_timetabled():

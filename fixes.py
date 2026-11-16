@@ -108,7 +108,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
         x = next((x for x in _rows(lessons + pool, fix["id"]) if x["group"] == fix["group"]), None)
         if x is None: raise ValueError(f"There is no row of {fix['group']} in that lesson.")
         if fix["room"] and fix["room"] not in {v["room"] for v in spec.get("venues") or []}: raise ValueError(f"{fix['room']} is not on the setup's list of rooms.")
-        text = f"{what(x)} on {when(days, x['d'], x['p'])} is now in {fix['room'] or 'no room'}, not {x['room'] or 'no room'}."
+        text = f"{what(x)} {'(not placed)' if pooled(fix['id']) else 'on ' + when(days, x['d'], x['p'])} is now in {fix['room'] or 'no room'}, not {x['room'] or 'no room'}."
         keep([x]); x["room"] = fix["room"]; touched.add(x["id"])
         return text
     if kind == "add":
@@ -305,7 +305,8 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
     ctx: the shared index of one request (slots and the option lists pass it); pool: the rows of the lessons not placed now.
     A lift is "ok" when it can apply; a place is judged as a move of the lesson from nowhere (no "changes nothing", no count
     against the plan); the lessons a fix pushes out (out) are off the timetable before and after, so they neither clash with
-    it nor count for a rule or the plan"""
+    it nor count for a rule. For the periods against the plan and a teacher's load a lesson in the pool counts as timetabled,
+    pushed out by this fix or waiting already: only a delete takes periods away and only an add brings them"""
     c = _ctx(m, ctx); b = c["busy"]
     res = lambda state, why="", must=(), prefer=(): dict(state=state, why=why, must=list(must), prefer=list(prefer))
     if not isinstance(fix, dict): return res("na", "That fix is not complete.")
@@ -313,10 +314,12 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
     try:
         if kind == "teacher":
             key = _key(fix["key"]); ids = {x["id"] for x in m["lessons"] if (x["group"] == ENTIRE and key[0] == "C" and key[1] in x["classes"] and x["subject"] == key[2]) or (key[0] == "G" and x["group"] == key[1])}
+            ids |= {x["id"] for x in pool if (x["group"] == ENTIRE and key[0] == "C" and key[1] in x["classes"] and x["subject"] == key[2]) or (key[0] == "G" and x["group"] == key[1])}
         else: ids = {fix[k] for k in {"swap": ("a", "b")}.get(kind, ("id",) if kind in ("move", "room", "delete", "lift", "place") else ())}
         gone = {i for i in fix.get("out") or () if i in b.ids} - ids if kind in ("move", "place", "add") and isinstance(fix.get("out"), (list, tuple)) else set()
         old = [x for i in ids - gone for x in b.ids.get(i, ())]; new = [dict(x, teachers=list(x["teachers"]), classes=list(x["classes"])) for x in old]
-        apply_one(new, fix, spec, days, new_id=c["next_id"], pool=[dict(x, teachers=list(x["teachers"]), classes=list(x["classes"])) for x in pool])
+        p0 = [x for x in pool if x["id"] in ids]; p1 = [dict(x, teachers=list(x["teachers"]), classes=list(x["classes"])) for x in p0]   # the pooled rows the fix can reach
+        apply_one(new, fix, spec, days, new_id=max([c["next_id"]] + [1 + x["id"] for x in pool]), pool=p1)
     except ValueError as e: return res("na", str(e))
     except (KeyError, TypeError): return res("na", "That fix is not complete.")
     if kind == "lift": return res("ok")
@@ -327,7 +330,7 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
     before, after = collections.defaultdict(list), collections.defaultdict(list)
     for x in old: before[x["id"]].append(x)
     for x in new: after[x["id"]].append(x)
-    changed = set(before) | set(after) | gone; off = {i: b.ids[i] for i in gone}   # pushed out: off the timetable before and after
+    changed = set(before) | set(after) | gone   # pushed out: off the timetable before and after, for clashes and rules
     moved = {i for i, r in after.items() if i not in before or (r[0]["d"], r[0]["p"]) != (before[i][0]["d"], before[i][0]["p"])}
     for i in moved:
         x = after[i][0]
@@ -342,9 +345,9 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
             if not why and len(after) > 1: why = Busy(m, [y for j, r in after.items() if j != i for y in r], base=b).clash(cand, x["d"], x["p"], x["n"])
             if why: return res("no", why)
     if kind in ("add", "delete"):
-        ko, kn, kg = _keys(old), _keys(new), _keys([x for r in off.values() for x in r])
+        ko, kn, kp = _keys(old + p0), _keys(new + p1), _keys(pool)   # a pooled lesson counts as timetabled, before and after
         for k in sorted(set(ko) | set(kn)):
-            was = c["placed"].get(k, 0) - kg[k]; now, want = was - ko[k] + kn[k], m["planned"].get(k, 0)
+            was = c["placed"].get(k, 0) + kp[k]; now, want = was - ko[k] + kn[k], m["planned"].get(k, 0)
             if now != was and not (was < now <= want or want <= now < was): return res("no", f"That would leave {verify._name(k)} with {now} periods; step 3 plans {want}.")
     rules = spec.get("rules") or []; seen = old + new
     depts = c["memo"].get(("depts", id(spec)))   # worked out on the first judge of a context and setup, not per lesson or per call
@@ -371,9 +374,11 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
         for k, w in rule_subjects(m, sp, L1).items():
             if k not in s0: (must if w["strength"] == "Must" else prefer).append(w["text"])
     if kind in ("teacher", "add", "delete"):
-        for t in sorted({t for x in seen for t in x["teachers"]}):
+        by = lambda rows: {i: [x for x in rows if x["id"] == i] for i in dict.fromkeys(x["id"] for x in rows)}
+        b0, b1, inpool = by(old + p0), by(new + p1), by(pool)
+        for t in sorted({t for x in seen + p0 + p1 for t in x["teachers"]}):
             has = lambda rows: sum(r[0]["n"] for r in rows.values() if any(t in y["teachers"] for y in r))
-            was = c["load"][t] - has(off); now = was - has(before) + has(after); cap = _allowance(m["teacher_ix"].get(t, {}).get("allowance"))
+            was = c["load"][t] + has(inpool); now = was - has(b0) + has(b1); cap = _allowance(m["teacher_ix"].get(t, {}).get("allowance"))
             if cap is not None and now > cap and now > was: prefer.append(f"{t} would have {now} periods, {now - cap:g} over the allowance.")
     if must: return res("no", must[0], must, prefer)
     if prefer: return res("prefer", prefer[0], must, prefer)
