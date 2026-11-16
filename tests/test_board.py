@@ -56,10 +56,19 @@ ROWS = [
 ]
 save_draft(ROWS)
 
-def card(i): return next(x for x in draft.board()["cards"] if x["id"] == i)
+def placed(b):
+    """every class of a card is in exactly one entry of levels and has codes"""
+    names = [x for l in b["levels"] for x in l["classes"]]
+    assert len(names) == len(set(names)) and set(names) == set(b["codes"]), names
+    for x in b["cards"]: assert x["classes"] and all(k in b["codes"] for k in x["classes"]), x
+
+def board():
+    b = draft.board(); placed(b); return b
+
+def card(i): return next(x for x in board()["cards"] if x["id"] == i)
 
 def test_every_lesson_is_on_exactly_one_card():
-    b = draft.board(); m = draft._now()[0]
+    b = board(); m = draft._now()[0]
     assert sorted(x["id"] for x in b["cards"]) == sorted({x["id"] for x in m["lessons"]})
     assert sum(len(x["rows"]) for x in b["cards"]) == len(m["lessons"]) == len(ROWS)
 
@@ -84,7 +93,7 @@ def test_a_band_with_no_block_is_named_by_its_subjects():
     finally: draft._now = real
 
 def test_codes_cover_every_class_and_day():
-    b = draft.board(); names = [x for l in b["levels"] for x in l["classes"]]
+    b = board(); names = [x for l in b["levels"] for x in l["classes"]]
     assert set(names) == set(b["codes"]) and all(len(v) == len(b["days"]) and all(len(s) == b["NP"] for s in v) for v in b["codes"].values())
     assert b["days"] == DAYS and b["NP"] == NPD and len(b["times"]) == NPD
     assert b["levels"][0]["level"] == SPEC["classes"][0]["level"] and CLASSES[0] in b["levels"][0]["classes"]
@@ -92,9 +101,22 @@ def test_codes_cover_every_class_and_day():
     json.dumps(b)
 
 def test_a_class_not_in_the_setup_has_a_row():
-    b = draft.board()
+    b = board()
     assert b["levels"][-1] == dict(level="Not in the setup", classes=["9Z"]) and b["codes"]["9Z"] == ["." * b["NP"]] * len(b["days"])
     assert [l["level"] for l in b["levels"][:-1]] == draft._now()[0]["levels"]
+
+def test_a_setup_class_on_a_level_the_model_lacks_is_not_lost():
+    m = draft._now()[0]; spec = m["checked_setup"]; real = draft._now
+    row = dict(m["lessons"][0], id=50, classes=["E1"], block="", group="Entire Class", level="")
+    m2 = dict(m, classes=m["classes"] + [dict(name="E1", level="", size="", home="", parents=[])], lessons=m["lessons"] + [row],
+              checked_setup=dict(spec, classes=spec["classes"] + [{"class": "E1", "level": ""}]))
+    try:
+        draft._now = lambda: (m2, None, None)
+        b = board()
+        assert b["levels"][-1] == dict(level="Not in the setup", classes=["E1", "9Z"])
+        assert b["codes"]["E1"] == ["." * b["NP"]] * len(b["days"])
+        assert next(x for x in b["cards"] if x["id"] == 50)["classes"] == ["E1"]
+    finally: draft._now = real
 
 def test_slots_are_the_editors_slots():
     assert draft.slots(PLAIN_ID) == dict(id=PLAIN_ID, slots=draft.options(PLAIN_ID)["slots"])
@@ -131,7 +153,7 @@ def test_the_routes():
 def test_the_board_of_two_thousand_rows_is_quick_and_small():
     rows = [dict(id=i + 1, day=DAYS[i % len(DAYS)], p=(i // len(DAYS)) % NPD, n=1, level=LEVEL, classes=[f"T{i % 32 + 1:02d}"], subject=(SUBJ, SUBJ2)[i % 2], teachers=[TEACHERS[i % 3]]) for i in range(2000)]
     save_draft(rows); draft._now()   # the model is built once and kept: the time is the board's own
-    t0 = time.time(); b = draft.board(); took = time.time() - t0
+    t0 = time.time(); b = draft.board(); placed(b); took = time.time() - t0
     assert len(b["cards"]) == 2000 and took < 1, took
     size = len(gzip.compress(json.dumps(b).encode()))
     assert size < 200000, size

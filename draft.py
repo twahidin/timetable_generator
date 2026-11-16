@@ -230,7 +230,8 @@ def board():
     by_id = {}
     for x in m["lessons"]: by_id.setdefault(x["id"], []).append(x)
     levels = [dict(level=lv, classes=[c for c, l in level_of.items() if l == lv]) for lv in m["levels"]]
-    extra = [c["name"] for c in m["classes"] if c["name"] not in level_of]   # not in the setup, or on a level it does not have
+    placed = {c for lv in levels for c in lv["classes"]}
+    extra = [c["name"] for c in m["classes"] if c["name"] not in placed]   # not in the setup, or on a level the model does not have
     if extra: levels.append(dict(level=NOT_IN_SETUP, classes=extra))
     codes = {}
     for lv in levels:
