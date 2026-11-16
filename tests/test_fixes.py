@@ -142,7 +142,7 @@ def model_with(L, **over):
 def rows_of(m, i): return [x for x in m["lessons"] if x["id"] == i]
 def slot_of(m, i): x = rows_of(m, i)[0]; return x["d"], x["p"], x["n"]
 def at(S, d, p): return next(s for s in S if (s["d"], s["p"]) == (d, p))
-def bare(s): return {k: v for k, v in s.items() if k != "push"}   # a slot's keys from before a push was offered
+def bare(s): return {k: v for k, v in s.items() if k not in ("push", "beside")}   # a slot's keys from before a push and a place beside were offered
 
 @t
 def a_busy_teacher_class_room_or_student_is_a_clash():
@@ -494,11 +494,29 @@ def test_judge_lift_place_and_push():
 def test_slots_say_what_a_push_would_take_out():
     L = [lesson(1, 0, 2, 2, [A], SUBJ, ENTIRE, [T[0]], level=LV), lesson(2, 1, 2, 2, [A], "Science", ENTIRE, [T[1]], level=LV), lesson(3, 3, 2, 2, [B], "Art", ENTIRE, [T[0]], level=LV)]
     m, sp = model_with(L); S = fixes.slots(m, sp, DAYS, 1); old = lambda s: {k: s[k] for k in ("d", "p", "state", "why", "swap", "also")}
-    assert all(set(s) == {"d", "p", "state", "why", "swap", "also", "push"} for s in S)
+    assert all(set(s) == {"d", "p", "state", "why", "swap", "also", "push", "beside"} for s in S)
     assert at(S, 1, 2)["push"] == dict(state="ok", why="", out=[dict(id=2, what=f"Science for {A}")]) and old(at(S, 1, 2)) == dict(d=1, p=2, state="ok", why="", swap=2, also=[])
     assert at(S, 2, 2)["push"] is None and old(at(S, 2, 2)) == dict(d=2, p=2, state="ok", why="", swap=None, also=[])
     assert at(S, 1, 1)["push"] == dict(state="ok", why="", out=[dict(id=2, what=f"Science for {A}")]) and at(S, 1, 1)["state"] == "na"
     assert at(S, 3, 2)["push"] is None and at(S, 3, 2)["state"] == "no"   # a teacher busy with another class: nothing of its class to push
+
+@t
+def test_slots_say_whether_a_lesson_can_go_beside_another():
+    # G1 and G2 of one class meet at once with no shared student; a whole-class lesson cannot share a group's time
+    L = [lesson(1, 0, 2, 1, [A], "Art", "G1", [T[0]], level=LV), lesson(2, 1, 2, 1, [A], "Music", "G2", [T[1]], level=LV),
+         lesson(3, 3, 2, 1, [A], SUBJ, ENTIRE, [T[2]], level=LV)]
+    m, sp = model_with(L); S = fixes.slots(m, sp, DAYS, 1)
+    assert at(S, 1, 2)["beside"] == dict(state="ok", why="") and bare(at(S, 1, 2)) == dict(d=1, p=2, state="ok", why="", swap=2, also=[])
+    assert at(S, 2, 2)["beside"] is None and at(S, 2, 2)["push"] is None
+    assert at(S, 3, 2)["beside"] == {k: v for k, v in fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=3, p=2)).items() if k in ("state", "why")}
+    S3 = fixes.slots(m, sp, DAYS, 3); b = at(S3, 1, 2)["beside"]
+    assert b["state"] == "no" and b["why"].startswith(f"{A} has "), b
+    assert at(S3, 1, 2)["state"] in ("na", "ok", "prefer", "no") and at(S3, 1, 2)["push"]["out"] == [dict(id=2, what=fixes.what(L[1]))]
+    pool = [lesson(5, 0, 3, 1, [A], "Drama", "G2", [T[3]], level=LV)]; L2 = L[:1] + L[2:]
+    m, sp = model_with(L2); P = fixes.slots(m, sp, DAYS, 5, pool=pool)
+    assert at(P, 0, 2)["beside"] == dict(state="ok", why="") and at(P, 0, 2)["push"]["out"] == [dict(id=1, what=fixes.what(L[0]))]
+    b = at(P, 3, 2)["beside"]; assert b["state"] == "no" and b["why"].startswith(f"{A} has "), b
+    assert at(P, 2, 2)["beside"] is None
 
 @t
 def test_slots_of_a_pooled_lesson_are_places():

@@ -391,7 +391,9 @@ def slots(m, spec, days, lesson_id, pool=()):
     (d, p) but its own: an empty stretch of its classes as a move, a stretch where exactly one other lesson of the same length
     starts as a swap, anything else occupied "na". For a lesson in the pool (the rows of the lessons not placed), every (d, p)
     as a place, swap always None. push: where other lessons of its classes are, those lessons (in id order) and how the move
-    or place is judged once they are pushed out, dict(state, why, out=[dict(id, what)]); None where there are none"""
+    or place is judged once they are pushed out, dict(state, why, out=[dict(id, what)]); None where there are none. beside:
+    where other lessons of its classes are, how the plain move or place (with them left there) is judged, dict(state, why);
+    None where there are none"""
     c = _ctx(m); b = c["busy"]; mine = [x for x in pool if x["id"] == lesson_id]
     rows = mine or _rows(m["lessons"], lesson_id); a = rows[0]; n, cls = a["n"], _classes(rows); out = []
     go = dict(kind="place" if mine else "move", id=lesson_id)
@@ -399,15 +401,17 @@ def slots(m, spec, days, lesson_id, pool=()):
         for p in range(m["NP"]):
             if not mine and (d, p) == (a["d"], a["p"]): continue
             there = {y["id"]: y for k in cls for q in range(p, min(p + n, m["NP"])) for y in b.at.get(("c", k, d, q), ()) if y["id"] != lesson_id}
-            ids = sorted(there); push = None
-            if ids: push = dict(**_pick(judge(m, spec, days, dict(go, d=d, p=p, out=ids), c, pool)), out=[dict(id=i, what=what(b.ids[i][0])) for i in ids])
+            ids = sorted(there); push = beside = None
+            if ids:
+                push = dict(**_pick(judge(m, spec, days, dict(go, d=d, p=p, out=ids), c, pool)), out=[dict(id=i, what=what(b.ids[i][0])) for i in ids])
+                beside = _pick(judge(m, spec, days, dict(go, d=d, p=p), c, pool))
             if mine or not there:
-                out.append(dict(d=d, p=p, **_pick(judge(m, spec, days, dict(go, d=d, p=p), c, pool)), swap=None, also=[], push=push)); continue
+                out.append(dict(d=d, p=p, **(beside or _pick(judge(m, spec, days, dict(go, d=d, p=p), c, pool))), swap=None, also=[], push=push, beside=beside)); continue
             y = next(iter(there.values()))
             if len(there) == 1 and (y["d"], y["p"], y["n"]) == (d, p, n):
                 also = [f"This also moves {what(y)} to {when(days, a['d'], a['p'])}."] if set(_classes(b.ids[y["id"]])) != set(cls) else []
-                out.append(dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="swap", a=lesson_id, b=y["id"]), c, pool)), swap=y["id"], also=also, push=push))
-            else: out.append(dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[], push=push))
+                out.append(dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="swap", a=lesson_id, b=y["id"]), c, pool)), swap=y["id"], also=also, push=push, beside=beside))
+            else: out.append(dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[], push=push, beside=beside))
     return out
 
 def marks(busy, rows, pool=False):

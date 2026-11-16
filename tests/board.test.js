@@ -262,12 +262,12 @@ t("asks: null with no other lesson; swap when allowed and ok or prefer; push whe
   const s = (o) => Object.assign(ev(0, 1), o);
   assert.strictEqual(Board.asks(ev(0, 1)), null);
   assert.strictEqual(Board.asks({ d: 0, p: 1, state: "ok", swap: null }), null);
-  assert.deepStrictEqual(Board.asks(s({ swap: 5, push: { state: "ok", why: "", out: out } })), { swap: true, push: true });
-  assert.deepStrictEqual(Board.asks(s({ swap: 5, state: "prefer", push: { state: "no", why: "x", out: out } })), { swap: true, push: true });
-  assert.deepStrictEqual(Board.asks(s({ swap: 5, state: "no", push: { state: "ok", why: "", out: out } })), { swap: false, push: true });
-  assert.deepStrictEqual(Board.asks(s({ swap: null, state: "ok", push: { state: "ok", why: "", out: out } })), { swap: false, push: true });
-  assert.deepStrictEqual(Board.asks(s({ swap: 5, state: "ok", push: { state: "na", why: "", out: out } })), { swap: true, push: false });
-  assert.deepStrictEqual(Board.asks(s({ swap: null, state: "na", push: { state: "na", why: "", out: out } })), { swap: false, push: false });
+  assert.deepStrictEqual(Board.asks(s({ swap: 5, push: { state: "ok", why: "", out: out } })), { swap: true, push: true , beside: false });
+  assert.deepStrictEqual(Board.asks(s({ swap: 5, state: "prefer", push: { state: "no", why: "x", out: out } })), { swap: true, push: true , beside: false });
+  assert.deepStrictEqual(Board.asks(s({ swap: 5, state: "no", push: { state: "ok", why: "", out: out } })), { swap: false, push: true , beside: false });
+  assert.deepStrictEqual(Board.asks(s({ swap: null, state: "ok", push: { state: "ok", why: "", out: out } })), { swap: false, push: true , beside: false });
+  assert.deepStrictEqual(Board.asks(s({ swap: 5, state: "ok", push: { state: "na", why: "", out: out } })), { swap: true, push: false , beside: false });
+  assert.deepStrictEqual(Board.asks(s({ swap: null, state: "na", push: { state: "na", why: "", out: out } })), { swap: false, push: false , beside: false });
 });
 
 t("fix: a move, a forced move, a swap, a push; the two-argument call as before", () => {
@@ -306,16 +306,16 @@ t("question: the text, the swap and push buttons, the also sentences", () => {
   const o1 = [{ id: 5, what: "Maths" }], o2 = [{ id: 5, what: "Maths" }, { id: 6, what: "Art" }], o3 = o2.concat([{ id: 7, what: "PE" }]);
   const s1 = Object.assign(ev(1, 2), { swap: 5, also: ["Art also moves."], push: { state: "ok", why: "", out: o1 } });
   assert.deepStrictEqual(Board.question(c, s1, b), { text: "Science on Tue period 2: another lesson is there.",
-    also: ["Art also moves."], swap: "Swap with Maths", push: "Push out Maths" });
+    also: ["Art also moves."], swap: "Swap with Maths", push: "Push out Maths", beside: null });
   const s2 = Object.assign(ev(1, 2), { push: { state: "no", why: "Mr Lee is busy.", out: o2 } });
   assert.deepStrictEqual(Board.question(c, s2, b), { text: "Science on Tue period 2: another lesson is there.",
-    also: ["It will still clash: Mr Lee is busy."], swap: null, push: "Push out Maths and Art" });
+    also: ["It will still clash: Mr Lee is busy."], swap: null, push: "Push out Maths and Art", beside: null });
   const s3 = Object.assign(ev(0, 4), { push: { state: "ok", why: "", out: o3 } });
   assert.strictEqual(Board.question(c, s3, b).push, "Push out 3 lessons");
   const s4 = Object.assign(ev(0, 4), { swap: 9, push: { state: "ok", why: "", out: o1 } });
   assert.strictEqual(Board.question(c, s4, b).swap, "Swap");
   const s5 = Object.assign(ev(0, 4), { swap: 5, push: { state: "na", why: "", out: o1 } });
-  assert.deepStrictEqual(Board.question(c, s5, b), { text: "Science on Mon period 4: another lesson is there.", also: [], swap: "Swap with Maths", push: null });
+  assert.deepStrictEqual(Board.question(c, s5, b), { text: "Science on Mon period 4: another lesson is there.", also: [], swap: "Swap with Maths", push: null, beside: null });
 });
 
 t("tell: the new sentences; a swap keeps today's words", () => {
@@ -326,6 +326,49 @@ t("tell: the new sentences; a swap keeps today's words", () => {
   assert.strictEqual(Board.tell(Object.assign(ev(1, 2), { state: "no", why: "Mr Lee is busy." }), days), "Move to Tue period 2. It will clash: Mr Lee is busy.");
   assert.strictEqual(Board.tell(ev(1, 2), days), "Move to Tue period 2.");
   assert.strictEqual(Board.tell({ d: 1, p: 2, state: "prefer", why: "Bends a rule.", swap: null }, days), "Move to Tue period 2. Bends a rule.");
+});
+
+/* fix round 1: a lesson put beside another of its classes (two groups of one class at once) */
+t("asks: beside when the plain move or place is ok or prefer; a slot with no beside key (an older server) offers none", () => {
+  const out = [{ id: 5, what: "Maths" }], s = (o) => Object.assign(ev(0, 1), { state: "na", push: { state: "ok", why: "", out: out } }, o);
+  assert.deepStrictEqual(Board.asks(s({ beside: { state: "ok", why: "" } })), { swap: false, push: true, beside: true });
+  assert.deepStrictEqual(Board.asks(s({ beside: { state: "prefer", why: "Bends a rule." } })), { swap: false, push: true, beside: true });
+  assert.deepStrictEqual(Board.asks(s({ beside: { state: "no", why: "1A has Maths then." } })), { swap: false, push: true, beside: false });
+  assert.deepStrictEqual(Board.asks(s({ beside: { state: "na", why: "" } })), { swap: false, push: true, beside: false });
+  assert.deepStrictEqual(Board.asks(s({ beside: null })), { swap: false, push: true, beside: false });
+  assert.deepStrictEqual(Board.asks(s({})), { swap: false, push: true, beside: false });
+  assert.strictEqual(Board.asks(Object.assign(ev(0, 1), { beside: null })), null);
+});
+
+t("question: Put it beside, named for one lesson, 'them' for several", () => {
+  const c = card(3, 0, 1, 1, ["1A"], { what: "Science" }), b = marked(board([c]));
+  const o1 = [{ id: 5, what: "Maths G1" }], o2 = o1.concat([{ id: 6, what: "Art G2" }]);
+  const s1 = Object.assign(ev(1, 2), { state: "na", push: { state: "ok", why: "", out: o1 }, beside: { state: "ok", why: "" } });
+  assert.deepStrictEqual(Board.question(c, s1, b), { text: "Science on Tue period 2: another lesson is there.", also: [], swap: null, push: "Push out Maths G1", beside: "Put it beside Maths G1" });
+  const s2 = Object.assign(ev(1, 2), { state: "na", push: { state: "na", why: "x", out: o2 }, beside: { state: "prefer", why: "Bends a rule." } });
+  const q2 = Board.question(c, s2, b); assert.strictEqual(q2.beside, "Put it beside them"); assert.strictEqual(q2.push, null);
+  const s3 = Object.assign(ev(1, 2), { state: "na", push: { state: "ok", why: "", out: o1 }, beside: { state: "no", why: "1A has Maths then." } });
+  assert.strictEqual(Board.question(c, s3, b).beside, null);
+  assert.strictEqual(Board.question(c, Object.assign(ev(1, 2), { state: "na", push: { state: "ok", why: "", out: o1 } }), b).beside, null);
+});
+
+t("fix beside: the plain move or place, with no push and no force", () => {
+  const out = [{ id: 5, what: "Maths" }], sl = Object.assign(ev(1, 2), { state: "na", swap: 5, push: { state: "no", why: "x", out: out }, beside: { state: "ok", why: "" } });
+  assert.deepStrictEqual(Board.fix(card(3, 0, 1, 1, ["1A"]), sl, "beside"), { kind: "move", id: 3, d: 1, p: 2 });
+  assert.deepStrictEqual(Board.fix(lifted(3, ["1A"]), Object.assign({}, sl, { state: "no" }), "beside"), { kind: "place", id: 3, d: 1, p: 2 });
+});
+
+t("tell with the card: a tray card is placed, and over another lesson it may push it out or go beside", () => {
+  const days = ["Mon", "Tue"], out = [{ id: 5, what: "Maths" }], tray = lifted(3, ["1A"]), on = card(3, 0, 1, 1, ["1A"]);
+  const there = Object.assign(ev(1, 2), { state: "na", push: { state: "ok", why: "", out: out }, beside: { state: "ok", why: "" } });
+  assert.strictEqual(Board.tell(there, days, tray), "Another lesson is there. Drop to push it out or put it beside.");
+  assert.strictEqual(Board.tell(there, days, on), "Another lesson is there. Drop to swap or push out.");
+  assert.strictEqual(Board.tell(there, days), "Another lesson is there. Drop to swap or push out.");
+  assert.strictEqual(Board.tell(ev(1, 2), days, tray), "Place on Tue period 2.");
+  assert.strictEqual(Board.tell(Object.assign(ev(1, 2), { state: "no", why: "Mr Lee is busy." }), days, tray), "Place on Tue period 2. It will clash: Mr Lee is busy.");
+  assert.strictEqual(Board.tell({ d: 1, p: 2, state: "prefer", why: "Bends a rule.", swap: null }, days, tray), "Place on Tue period 2. Bends a rule.");
+  assert.strictEqual(Board.tell(ev(1, 2), days, on), "Move to Tue period 2.");
+  assert.strictEqual(Board.tell(Object.assign(ev(1, 2), { swap: 5, push: { state: "ok", why: "", out: out } }), days, on), "Swap with the lesson on Tue period 2.");
 });
 
 console.log(`${n} cases passed`);

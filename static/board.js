@@ -158,19 +158,24 @@ var Board = (function () {
   /* a place that will clash: dropping there is forced */
   function forced(s) { return !!s && s.state === "no"; }
 
-  /* what a drop on a place with another lesson asks: swap (the one lesson, allowed and clean or bending) and push out */
+  function fits(j) { return !!j && (j.state === "ok" || j.state === "prefer"); }
+
+  /* what a drop on a place with another lesson asks: swap (the one lesson, allowed and clean or bending), push out, and
+     put it beside (the plain move or place, the other lessons left there, clean or bending; a slot from an older server
+     has no beside) */
   function asks(s) {
     if (!s || !s.push) return null;
-    return { swap: s.swap !== null && s.swap !== undefined && (s.state === "ok" || s.state === "prefer"), push: s.push.state !== "na" };
+    return { swap: s.swap !== null && s.swap !== undefined && fits(s), push: s.push.state !== "na", beside: fits(s.beside) };
   }
 
-  /* the fix a drop sends. how is "move" (default), "swap" or "push"; with no how, a slot with a swap gives the swap, as
-     before this stage. A lesson from the tray is placed, never swapped. */
+  /* the fix a drop sends. how is "move" (default), "swap", "push" or "beside" (the plain move or place, never forced);
+     with no how, a slot with a swap gives the swap, as before this stage. A lesson from the tray is placed, never swapped. */
   function fix(card, s, how) {
     var tray = card.d === null || card.d === undefined;
     if (how === undefined && !tray && s.swap !== null && s.swap !== undefined) how = "swap";
     if (how === "swap" && !tray) return { kind: "swap", a: card.id, b: s.swap };
     var out = { kind: tray ? "place" : "move", id: card.id, d: s.d, p: s.p };
+    if (how === "beside") return out;
     if (how === "push") {
       out.push = true;
       if (s.push && s.push.state === "no") out.force = true;
@@ -199,7 +204,7 @@ var Board = (function () {
   function question(card, s, board) {
     var a = asks(s) || { swap: false, push: false }, out = s.push ? s.push.out || [] : [];
     var text = card.what + " on " + board.days[s.d] + " period " + s.p + ": another lesson is there.";
-    var swap = null, push = null, also = [];
+    var swap = null, push = null, beside = null, also = [];
     if (a.swap) {
       var other = null;
       out.forEach(function (o) { if (other === null && o.id === s.swap) other = o; });
@@ -210,7 +215,8 @@ var Board = (function () {
       push = pushWords(out);
       if (s.push.state === "no") also.push("It will still clash: " + s.push.why);
     }
-    return { text: text, also: also, swap: swap, push: push };
+    if (a.beside && out.length) beside = out.length > 1 ? "Put it beside them" : "Put it beside " + out[0].what;
+    return { text: text, also: also, swap: swap, push: push, beside: beside };
   }
 
   /* with the board, the "No class" row (cls "") also takes a card none of whose classes is in a level */
@@ -219,13 +225,16 @@ var Board = (function () {
     return holds(card, r.cls);
   }
 
-  function tell(s, days) {
+  /* what the line says over a place; card (optional) tells a lesson from the tray, which is placed and never swapped */
+  function tell(s, days, card) {
     if (s.state === "own") return "This is where the lesson is now.";
-    var day = days[s.d], p = s.p, has = s.swap !== null && s.swap !== undefined;
+    var tray = !!card && (card.d === null || card.d === undefined), go = tray ? "Place on " : "Move to ";
+    var day = days[s.d], p = s.p, has = !tray && s.swap !== null && s.swap !== undefined;
+    if (s.push && tray) return "Another lesson is there. Drop to push it out or put it beside.";
     if (s.push && !(asks(s).swap)) return "Another lesson is there. Drop to swap or push out.";
     var text = has ? "Swap with the lesson on " + day + " period " + p + "."
-      : s.state === "no" && s.why ? "Move to " + day + " period " + p + ". It will clash: " + s.why
-      : "Move to " + day + " period " + p + ".";
+      : s.state === "no" && s.why ? go + day + " period " + p + ". It will clash: " + s.why
+      : go + day + " period " + p + ".";
     return s.why && !(s.state === "no" && !has) ? text + " " + s.why : text;
   }
 
