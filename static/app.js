@@ -888,10 +888,11 @@ function render() {
   // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
   const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap, .keep")].map(t => [t.scrollTop, t.scrollLeft]) : [];
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && (f.id ? `#${CSS.escape(f.id)}` : f.dataset.k ? `[data-k="${CSS.escape(f.dataset.k)}"]` : "");
-  G.shown = id;
+  G.shown = id; bdEnsure(id); const bw = same ? main.querySelector(".bdwrap") : null, bpos = bw ? [bw.scrollLeft, bw.scrollTop] : null;
   main.innerHTML = (S.practice && !S.asking ? `<div class="practice"><span>Practice copy: nothing here is saved for the school.</span><button id="practiceBack">Back to the school's setup</button></div>` : "") + (VIEWS[id] || (() => ""))();
   headLocks(main, id);
   main.querySelectorAll(".tablewrap, .keep").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
+  const bw2 = bpos && main.querySelector(".bdwrap"); if (bw2) { bw2.scrollLeft = bpos[0]; bw2.scrollTop = bpos[1]; }
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
   paintPublished();
@@ -1627,7 +1628,7 @@ const VIEWS = {
   edit() {
     if (S.practice) return `<div class="card"><h1>Step 8 · Upload and edit</h1><p class="lead">Uploading a timetable is off in a practice copy.</p></div>`;
     return `<div class="card"><h1>Step 8 · Upload and edit</h1><p class="lead">Bring back the timetable the AI agent made and check it. Change it here until it is right, then publish it on step 9. Nothing is visible to teachers or students until you publish.</p></div>
-      ${exportCard()}`;
+      ${exportCard()}${S.board ? `<div class="card" id="bdBox">${bdHTML()}</div>` : ""}`;
   },
   publish() {
     if (S.practice) return `<div class="card"><h1>Step 9 · Publish</h1><p class="lead">Publishing is off in a practice copy.</p></div>`;
@@ -1742,6 +1743,7 @@ document.addEventListener("click", async e => {
   }
   if (b.id === "imCheck") { uploadDraft(false); return; }
   if (b.id === "pbPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; publishDraft(); return; }
+  if (bdClick(b)) return;
   if (fxClick(b)) return;
   if (b.dataset.decide) { const i = b.dataset.decide.indexOf("|"); decide(b.dataset.decide.slice(0, i), b.dataset.decide.slice(i + 1)); return; }
   if (b.id === "copyPrompt") { const ta = $("#prompt"); const done = () => toast("Copied."); if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(done, () => { ta.select(); document.execCommand("copy"); done(); }); else { ta.select(); document.execCommand("copy"); done(); } return; }
@@ -2644,6 +2646,7 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
 /* ---------------- downloads */
 document.addEventListener("change", e => {
   if (e.target.id === "exSetup" || e.target.id === "exTT") { const f = e.target.files[0]; $("#" + e.target.id + "Name").textContent = f ? f.name : "none chosen"; }
+  if (e.target.id === "bdFind" && S.board) { S.board.find = e.target.value; bdDraw(); return; }
   if (e.target.dataset && e.target.dataset.dfilter) { S.dfilter = e.target.dataset.dfilter; drawDraft(); }
   if (e.target.dataset && e.target.dataset.fxview && e.target.value) fxOpen(e.target.dataset.fxview, e.target.value, null, null);
 });
@@ -2670,7 +2673,7 @@ async function makePrintouts() {   // step 9: the printouts of the draft, with t
 function drawDraft() {   // the box for a typed request (and the buttons that answer it) keeps the focus and the caret across the redraw; its text comes back from S.fix.words
   const box = $("#imResult"); if (!box) return;
   const a = document.activeElement, mine = a && a.matches && a.matches("#fxAskIn, #fxAsk, [data-fxpick]"), caret = mine && a.id === "fxAskIn" ? [a.selectionStart, a.selectionEnd] : null;
-  box.innerHTML = S.draft ? draftHTML(S.draft) : "";
+  box.innerHTML = S.draft ? draftHTML(S.draft) : ""; bdMount();
   const inp = mine && $("#fxAskIn"); if (inp) { inp.focus(); const n = inp.value.length; try { inp.setSelectionRange(caret ? caret[0] : n, caret ? caret[1] : n); } catch (e) { } }
 }
 async function uploadDraft(replace) {
@@ -2688,7 +2691,7 @@ async function uploadDraft(replace) {
       return;
     }
     if (!r.ok) { drawDraft(); toast(j.error || "Could not check the timetable."); return; }
-    S.draft = j; S.fix = null; drawDraft(); poll();
+    S.draft = j; S.fix = null; bdAfter(); drawDraft(); poll();
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
   finally { btns.forEach(x => x.disabled = false); }
 }
@@ -2710,14 +2713,14 @@ async function publishDraft() {   // step 9
     if (r.status === 401) { location.href = "/login"; return; }
     if (r.status === 409 && j.critical) { toast(j.error); await refreshDraft(); return; }   // a critical mistake arrived meanwhile: the list shows it now
     if (!r.ok) { again(); toast(j.error || "Could not publish the timetable."); return; }
-    S.draft = j; S.fix = null; again(); toast("Published. Teachers and students now see this timetable."); poll();
+    S.draft = j; S.fix = null; bdAfter(); again(); toast("Published. Teachers and students now see this timetable."); poll();
   } catch (err) { again(); toast("Could not reach the server: " + err.message); }
   finally { DR.hold = false; DR.seen = null; }   // the next status is taken as seen, so the same summary causes no fetch
 }
 async function decide(answer, key) {   // answer is step5, open or met; the key is the warning's (it may hold a "|")
   const j = await post("/api/draft/decide", { key, answer });
   if (!j) return;
-  S.draft = j; drawDraft();   // only the result area: render() would reset the chosen file names
+  S.draft = j; bdAfter(); drawDraft();   // only the result area: render() would reset the chosen file names
   poll();
 }
 /* the draft on steps 8 and 9: asked for the first time the page needs it, again each time the person opens either step, and again when
@@ -2754,7 +2757,7 @@ async function loadDraft(again) {   // again: the person has just opened step 8 
   if (!onDraftStep() || !S.draft) { S.draft = j; if (onDraftStep()) render(); }
   else if (STEPS[S.step][0] === "publish") { S.draft = j; render(); }
   else if (f) await fxAfter(j);   // the Fix card follows the new draft as it does after its own fix
-  else { S.draft = j; drawDraft(); }
+  else { S.draft = j; bdAfter(); drawDraft(); }
   draftWatch();
 }
 function draftWatch() {   // after each status: a draft that is not the one last fetched is fetched again while step 8 or 9 is on screen; elsewhere the next opening does it
@@ -3059,7 +3062,7 @@ function fxFollow(f, warnings) {   // the warning the card was opened on, found 
   return true;
 }
 async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again, then the ways when the card has a warning
-  const f = S.fix; S.draft = j; poll();
+  const f = S.fix; S.draft = j; poll(); bdLoad();
   if (f) {
     f.pre = null; f.preWant = null; fxAskClear(f);
     const still = !!f.warn && fxFollow(f, j.warnings);
@@ -3159,6 +3162,106 @@ async function fxOpenFirst() {   // the Fix card with nothing chosen: the setup'
   const n = S.spec ? classNames()[0] : "";
   if (n) await fxOpen("class", n, null, null); else toast("The setup has no classes to show.");
 }
+/* step 8's board: the whole school's timetable for one day (a row per class, the periods across), or one class's whole cycle
+   (a row per day), drawn from the cards of GET /api/draft/board and laid out by Board (board.js). S.board lives while step 8 is
+   open with a draft: {data, mode, find, fold, sel, slots, slotsFor, fail}. The cycle mode also keeps d, the day to go back to. */
+const BD = { gen: 0 };
+const bdShowable = () => !!(S.draft && !S.draft.published);
+function bdEnsure(id) {   // called by render(): the board exists on step 8 with a draft, and nowhere else
+  if (id !== "edit" || !bdShowable()) { if (S.board) { S.board = null; BD.gen++; } return; }
+  if (!S.board) { S.board = { data: null, mode: { kind: "day", d: 0 }, find: "", fold: {}, sel: null, slots: null, slotsFor: null, fail: false }; bdLoad(); }
+}
+function bdAfter() {   // a new draft answer is on the page: the board is fetched again (or made, when the draft is the first)
+  if (STEPS[S.step][0] !== "edit") return;
+  if (!bdShowable()) { if (S.board) { S.board = null; BD.gen++; } bdMount(); return; }
+  if (S.board) bdLoad(); else bdEnsure("edit");
+  bdMount();
+}
+function bdMount() {   // the card is there when there is a board, and gone when there is not
+  const box = $("#bdBox");
+  if (!S.board) { if (box) box.remove(); return; }
+  if (box) return;
+  const at = $("#printouts"); if (!at) return;
+  at.insertAdjacentHTML("afterend", `<div class="card" id="bdBox"></div>`); bdDraw();
+}
+const bdCard = id => { const d = S.board && S.board.data; return d && d.cards.find(c => c.id === id) || null; };
+const bdClasses = d => [].concat(...(d.levels || []).map(lv => lv.classes));
+async function bdLoad() {
+  const b = S.board; if (!b) return;
+  const gen = ++BD.gen, j = await fxGet("/api/draft/board");
+  if (S.board !== b || gen !== BD.gen) return;   // the step was left, or a newer fetch is out
+  if (!j || !Array.isArray(j.cards)) { b.data = null; b.fail = true; bdDraw(); return; }
+  b.data = j; b.fail = false;
+  const last = (j.days || []).length - 1;
+  if (b.mode.kind === "cycle" && !bdClasses(j).includes(b.mode.cls)) b.mode = { kind: "day", d: b.mode.d };
+  if (!(b.mode.d >= 0 && b.mode.d <= last)) b.mode.d = 0;   // a day past the last (or none at all) becomes the first
+  if (b.sel !== null && !bdCard(b.sel)) b.sel = null;
+  bdDraw();
+}
+function bdDraw() {   // #bdBox again, the board kept where it was scrolled
+  const box = $("#bdBox"); if (!box || !S.board) return;
+  const w = box.querySelector(".bdwrap"), pos = w ? [w.scrollLeft, w.scrollTop] : null, y = window.scrollY;
+  box.innerHTML = bdHTML();
+  const w2 = box.querySelector(".bdwrap"); if (w2 && pos) { w2.scrollLeft = pos[0]; w2.scrollTop = pos[1]; }
+  window.scrollTo(window.scrollX, y);
+}
+function bdPieces(row, d, find, sel) {
+  const st = [];
+  row.cards.forEach(x => {
+    const c = x.card, bx = Board.box(c, d.NP), ln = Board.lines(c, d), pal = (d.palette || [])[ln.color] || (d.palette || [])[0] || null;
+    const time = ((d.times || [])[c.p] || [])[0] || "", day = (d.days || [])[c.d] || "";
+    const tip = [c.what, `${day} period ${c.p}${time ? ` (${time})` : ""}`, ln.title].concat(ln.lines).filter(Boolean).join("\n");
+    const cls = "bdcard" + (sel === c.id ? " sel" : "") + (Board.matches(c, find, d) ? "" : " fade");
+    st.push(`<button class="${cls}" data-card="${c.id}" draggable="true" title="${esc(tip)}" style="grid-column:${bx.from + 2}/${bx.to + 3};grid-row:${x.lane + 1}${pal ? `;background:#${esc(pal[0])};border-left:3px solid #${esc(pal[1])}` : ""}"><b>${esc(ln.title)}</b>${ln.lines.map(l => `<span>${esc(l)}</span>`).join("")}</button>`);
+  });
+  return st.join("");
+}
+function bdRowHTML(row, b, cycle) {
+  const d = b.data, lab = cycle || row.key === "" ? `<span class="bdlab">${esc(row.label)}</span>` : `<button class="bdlab" data-bdcls="${esc(row.cls)}" title="Show ${esc(row.label)} for the whole cycle">${esc(row.label)}</button>`;
+  let cells = "";
+  for (let p = 0; p < d.NP; p++) cells += `<i class="bdcell${Board.open(row.codes.charAt(p)) ? "" : " brk"}" data-p="${p}" style="grid-column:${p + 2};grid-row:1/span ${row.lanes}"></i>`;
+  return `<div class="bdrow" data-row="${esc(row.key)}" data-d="${row.d}" data-cls="${esc(row.cls)}" style="grid-template-columns:var(--bdlab) repeat(${d.NP},minmax(var(--bdw),1fr));grid-template-rows:repeat(${row.lanes},minmax(var(--bdh),auto))">${lab}${cells}${bdPieces(row, d, b.find, b.sel)}</div>`;
+}
+function bdHTML() {
+  const b = S.board, d = b.data, head = `<h2>The timetable</h2>`;
+  if (!d) return head + `<p class="muted">${b.fail ? "The timetable could not be loaded. Open the step again." : "Loading the timetable…"}</p>`;
+  const weeks = Grid.weeks(d.days || []), m = b.mode, cycle = m.kind === "cycle";
+  const tabs = weeks.map(w => `<span class="bdweek">${weeks.length > 1 ? `<span class="muted small">${esc(w.name)}</span>` : ""}${w.days.map(x => `<button class="bdtab${!cycle && x.i === m.d ? " on" : ""}" data-bdday="${x.i}">${esc(x.label)}</button>`).join("")}</span>`).join("");
+  const finder = `<label class="bdfind">Find a subject: <select id="bdFind">${Board.finds(d).map(o => `<option value="${esc(o.value)}"${o.value === b.find ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>`;
+  const controls = `<div class="row bdctl">${cycle ? `<button data-bdall="1">All classes</button><b>${esc(m.cls)}: the whole cycle</b>` : tabs}${finder}</div>`;
+  const c = b.sel !== null ? bdCard(b.sel) : null;
+  let sel = "";
+  if (c) {
+    const time = ((d.times || [])[c.p] || [])[0], n = (c.rows || []).length;
+    sel = `<div class="bdsel"><span>${esc(c.what)} · ${esc((d.days || [])[c.d] || "")} period ${c.p}${time ? ` (${esc(time)})` : ""}${c.band ? ` · ${n} group${n === 1 ? "" : "s"}` : ""}</span>
+      ${(c.classes || []).length ? `<button data-bdmore="1">Teacher, room and more</button>` : ""}<button data-bdclose="1">Close</button></div>`;
+  }
+  const hdr = `<div class="bdhead" style="grid-template-columns:var(--bdlab) repeat(${d.NP},minmax(var(--bdw),1fr))"><span class="bdcorner"></span>${(d.times || []).slice(0, d.NP).map((t, p) => `<div class="bdph">${p}<small>${esc(t[0] || "")}</small></div>`).join("")}</div>`;
+  const body = Board.groups(d, m, weeks).map(g => {
+    const folded = !cycle && !!b.fold[g.name], k = g.rows.length;
+    const gh = cycle ? (g.name ? `<div class="bdgrp"><span>${esc(g.name)}</span></div>` : "")
+      : `<div class="bdgrp"><button data-bdfold="${esc(g.name)}" aria-expanded="${!folded}">${folded ? "▸" : "▾"} ${esc(g.name)}${folded ? ` (${k} class${k === 1 ? "" : "es"} hidden)` : ""}</button></div>`;
+    return gh + (folded ? "" : g.rows.map(r => bdRowHTML(r, b, cycle)).join(""));
+  }).join("");
+  return head + controls + `<p class="muted small">Drag a lesson to another time on its row, or click it and then click a place. Green is clean, amber bends a rule, red clashes, grey cannot take it.</p>${sel}
+    <div class="bdwrap"><div class="bdin" style="min-width:calc(var(--bdlab) + ${d.NP} * var(--bdw))">${hdr}${body}</div></div>`;
+}
+function bdClick(b) {   // true when the click was the board's
+  const d = b.dataset, bd = S.board; if (!bd) return false;
+  if (d.bdday !== undefined) { bd.mode = { kind: "day", d: Number(d.bdday) }; bdDraw(); return true; }
+  if (d.bdcls !== undefined) { bd.mode = { kind: "cycle", cls: d.bdcls, d: bd.mode.d }; bdDraw(); return true; }
+  if (d.bdall !== undefined) { bd.mode = { kind: "day", d: bd.mode.d }; bdDraw(); return true; }
+  if (d.bdfold !== undefined) { if (bd.fold[d.bdfold]) delete bd.fold[d.bdfold]; else bd.fold[d.bdfold] = true; bdDraw(); return true; }
+  if (d.bdclose !== undefined) { bd.sel = null; bdDraw(); return true; }
+  if (d.bdmore !== undefined) {
+    const c = bd.sel !== null ? bdCard(bd.sel) : null, r = c && c.rows && c.rows[0];
+    if (c && (c.classes || []).length) fxOpen("class", c.classes[0], bd.data.days[c.d], { id: c.id, group: r ? r.group : "" });
+    return true;
+  }
+  if (d.card !== undefined) { const id = Number(d.card); bd.sel = bd.sel === id ? null : id; bdDraw(); return true; }
+  return false;
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape" && S.board && S.board.sel !== null) { e.preventDefault(); S.board.sel = null; bdDraw(); } });
 /* which configuration (the workbook's id) the timetable was made from, against the setup's version now */
 function configLine(j) {
   const id = esc(j.config_id), now = esc(j.setup_version);
