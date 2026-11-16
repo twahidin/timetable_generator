@@ -3,8 +3,8 @@
 var Draft = (function () {
   "use strict";
 
-  var KINDS = ["clash", "deployment", "rule", "typed", "choice"];
-  var KIND_TEXT = { clash: "Clashes", deployment: "Differences from the deployment", rule: "Rules", typed: "Rules in words", choice: "Choices used" };
+  var KINDS = ["clash", "room", "deployment", "rule", "typed", "choice"];
+  var KIND_TEXT = { clash: "Clashes", room: "No room", deployment: "Differences from the deployment", rule: "Rules", typed: "Rules in words", choice: "Choices used" };
 
   function answer(w) { return w && w.decision ? w.decision.answer : ""; }
   /* a warning is open until it has a decision; an old "left" decision is no decision */
@@ -36,7 +36,7 @@ var Draft = (function () {
 
   /* a critical mistake's kind in words */
   function critWord(crit) {
-    return { teacher: "Teacher in two places", "class": "Class clash", room: "Room used twice", "break": "In a break or outside the day", noteacher: "No teacher" }[crit] || "";
+    return { teacher: "Teacher in two places", "class": "Class clash", room: "Room used twice", "break": "In a break or outside the day", noteacher: "No teacher", notplaced: "Not placed" }[crit] || "";
   }
 
   /* open (no decision) with how many Must and Prefer among them, how many are critical, settled on step 5, and checked as still met */
@@ -51,6 +51,9 @@ var Draft = (function () {
     });
     return c;
   }
+
+  /* the open warnings that are not critical mistakes, counted on their own */
+  function others(warnings) { return (warnings || []).filter(function (w) { return isOpen(w) && !w.crit; }).length; }
 
   function answerText(w) { return { step5: "Step 5 updated", fixed: "Fixed", met: "Checked: still met" }[answer(w)] || ""; }
 
@@ -99,7 +102,7 @@ var Draft = (function () {
     if (hit) return { key: hit.key, how: "same" };
     var wh = was.where || null;
     if (was.kind === "clash" && wh && (wh.teacher || wh.cls)) {
-      hit = list.filter(function (w) { var x = w.where || {}; return w.kind === "clash" && (wh.teacher ? x.teacher === wh.teacher : x.cls === wh.cls); })[0];
+      hit = list.filter(function (w) { var x = w.where || {}; return w.kind === "clash" && w.crit !== "notplaced" && (wh.teacher ? x.teacher === wh.teacher : x.cls === wh.cls); })[0];   // a lesson waiting in Not placed is not the clash it settled
     } else if (was.kind === "rule" && wh && wh.id !== undefined && wh.id !== null) {
       var rid = function (k) { return String(k).split(":")[1]; };
       hit = list.filter(function (w) { var x = w.where || {}; return w.kind === "rule" && rid(w.key) === rid(was.key) && x.id === wh.id && x.row === wh.row; })[0];
@@ -120,6 +123,6 @@ var Draft = (function () {
   /* the word a choice question uses for the field the name was meant for */
   function choiceWord(field) { return { classes: "class", subject: "subject", teacher: "teacher", new_teacher: "teacher", new_room: "room" }[field] || "name"; }
 
-  return { askSummary: askSummary, choiceWord: choiceWord, follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, critical: critical, gateText: gateText, critWord: critWord, group: group, counts: counts, answerText: answerText, sideText: sideText };
+  return { askSummary: askSummary, choiceWord: choiceWord, follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, critical: critical, gateText: gateText, critWord: critWord, group: group, counts: counts, others: others, answerText: answerText, sideText: sideText };
 })();
 if (typeof module !== "undefined") module.exports = Draft;

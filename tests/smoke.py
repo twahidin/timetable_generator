@@ -374,7 +374,7 @@ def test_a_new_upload_starts_with_no_decisions():
     assert next(w for w in j["warnings"] if w["key"] == k)["decision"] is None and j["open"] == len(j["warnings"]) and store.read_json(dp) == {}
     store.write_json(os.path.join(store.DATA, "draft", "meta.json"), dict(store.read_json(os.path.join(store.DATA, "draft", "meta.json")), fixes=[{"x": 1}]))
     r = c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data")
-    assert r.status_code == 409 and r.get_json() == {"error": "The draft has fixes that were never published.", "fixes": 1}, r.get_json()
+    assert r.status_code == 409 and r.get_json() == {"error": "The draft has changes that were never published.", "fixes": 1}, r.get_json()
     assert c.post("/api/draft", data=_draft_form(spec, rows, replace="1"), content_type="multipart/form-data").status_code == 200
     assert c.get("/api/draft").get_json()["fixes"] == []
 
@@ -487,7 +487,7 @@ def test_the_grid_of_a_class_and_a_teacher():
 def test_the_options_of_a_lesson_and_of_an_add():
     _grid_draft(); lid = _lid(); j = c.get(f"/api/draft/options?id={lid}").get_json()
     assert set(j) == {"slots", "teachers", "rooms", "delete", "key"} and j["key"] == "C:1A:Art" and j["delete"]["state"] in ("ok", "prefer", "no", "na") and j["slots"]
-    assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in j["slots"])
+    assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in j["slots"])   # the Fix card never reads a push or a place beside
     r = c.get(f"/api/draft/options?id={lid}&group=Entire%20Class"); assert r.status_code == 200
     a = c.get("/api/draft/options?add=C:1A:Art&n=1").get_json(); assert set(a) == {"slots"} and a["slots"] and set(a["slots"][0]) == {"d", "p", "state", "why"}
     assert c.get("/api/draft/options?id=99999").status_code == 400 and c.get("/api/draft/options").status_code == 400
@@ -821,11 +821,23 @@ def test_an_upload_over_unpublished_fixes_is_refused_by_the_draft_and_replace_cl
     spec = _grid_draft() and c.get("/api/setup").get_json()["spec"]; days, p = _grid_draft(); lid = _lid(); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
     c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"])); rows = [("Mon", p, 1, "P1", "1A", "Art", ["Umairah Tan"])]
     r = c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data")
-    assert r.status_code == 409 and r.get_json() == {"error": "The draft has fixes that were never published.", "fixes": 1} and len(c.get("/api/draft").get_json()["fixes"]) == 1
+    assert r.status_code == 409 and r.get_json() == {"error": "The draft has changes that were never published.", "fixes": 1} and len(c.get("/api/draft").get_json()["fixes"]) == 1
     import draft
     try: draft.save(None, None, "x", spec); raise AssertionError("save took no notice of the fixes")
     except draft.UnpublishedFixes as e: assert e.count == 1
     assert c.post("/api/draft", data=_draft_form(spec, rows, replace="1"), content_type="multipart/form-data").status_code == 200 and c.get("/api/draft").get_json()["fixes"] == []
+
+def test_a_lesson_not_placed_refuses_the_printouts_the_download_and_a_new_upload():
+    spec = c.get("/api/setup").get_json()["spec"]; days, p = _grid_draft(); lid = _lid()
+    j = c.post("/api/draft/fix", json=dict(kind="lift", id=lid)).get_json(); assert j["unplaced"] == 1 and j["critical"] >= 1, j
+    one = "1 lesson is not placed. Place it or delete it on step 8 first."
+    r = c.post("/api/draft/printouts", data=dict(single="0")); assert r.status_code == 409 and r.get_json() == {"error": one, "unplaced": 1}, r.get_json()
+    r = c.get("/api/draft/download"); assert r.status_code == 409 and r.get_json() == {"error": one, "unplaced": 1}, r.get_json()
+    assert c.post("/api/draft/publish").status_code == 409
+    r = c.post("/api/draft", data=_draft_form(spec, [("Mon", p, 1, "P1", "1A", "Art", ["Umairah Tan"])]), content_type="multipart/form-data")
+    assert r.status_code == 409 and r.get_json() == {"error": "The draft has changes that were never published. 1 lesson is waiting in Not placed.", "fixes": 1}, r.get_json()
+    b = c.get("/api/draft/board").get_json(); assert [x["id"] for x in b["unplaced"]] == [lid] and b["unplaced"][0]["marks"] == ["notplaced"]
+    c.post("/api/draft/undo"); assert c.get("/api/draft/download").status_code == 200
 
 def test_a_fix_into_a_clash_is_refused_with_the_sentence():   # judged on the server's draft, whatever the page showed
     days, p = _grid_draft(); lid = _lid()

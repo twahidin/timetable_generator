@@ -480,6 +480,7 @@ def draft_download():
     try:
         try: m = draft._now()[0]; path = os.path.join(work, "draft.sqlite"); draft.database(path)
         except draft.NoDraft as e: return {"error": str(e)}, 404
+        except draft.NotPlaced as e: return {"error": str(e), "unplaced": e.count}, 409
         except LookupError: return {"error": NO_SETUP}, 409
         except Exception as e:
             app.logger.exception("downloading the draft"); return {"error": f"Could not make the file: {e}"}, 400
@@ -493,6 +494,7 @@ def draft_publish():
     try: return jsonify(draft.publish())
     except FileNotFoundError: return {"error": "There is no draft to publish."}, 404
     except draft.Critical as e: return {"error": str(e), "critical": e.count}, 409
+    except draft.NotPlaced as e: return {"error": str(e), "unplaced": e.count}, 409
     except LookupError: return {"error": NO_SETUP}, 409
     except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
 
@@ -504,6 +506,7 @@ def draft_printouts():
     try:
         try: m, base = draft.printouts(os.path.join(work, "out"), request.form.get("single", "1") == "1")
         except draft.NoDraft as e: return {"error": str(e)}, 404
+        except draft.NotPlaced as e: return {"error": str(e), "unplaced": e.count}, 409
         except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
         except Exception as e:
             if type(e) is LookupError: return {"error": NO_SETUP}, 409

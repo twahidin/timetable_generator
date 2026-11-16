@@ -2,7 +2,7 @@
 setup as it is now (ttgen.verify), each difference is decided on (change step 5, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
 import copy, json, os, re, secrets, shutil, threading, uuid
-from ttgen.export import ENTIRE, PALETTE, block_label, model_from_files
+from ttgen.export import ENTIRE, PALETTE, model_from_files
 from ttgen.database import write_db
 from ttgen.spec import typed_rules
 from ttgen import choices, verify
@@ -19,8 +19,17 @@ def critical_text(n):
     """the sentence that says why Publish is refused"""
     return ("1 critical mistake" if n == 1 else f"{n} critical mistakes") + " must be settled on step 8 before the timetable can be published."
 class UnpublishedFixes(Exception):
-    """the draft has fixes that were never published; count: how many"""
-    def __init__(self, count): super().__init__("The draft has fixes that were never published."); self.count = count
+    """the draft has fixes that were never published; count: how many; waiting: how many lessons are in Not placed"""
+    def __init__(self, count, waiting=0):
+        super().__init__("The draft has changes that were never published." + (f" {waiting} lesson is waiting in Not placed." if waiting == 1 else f" {waiting} lessons are waiting in Not placed." if waiting else ""))
+        self.count = count
+def not_placed_text(n):
+    """the sentence that says why the printouts and the download are refused"""
+    return "1 lesson is not placed. Place it or delete it on step 8 first." if n == 1 else f"{n} lessons are not placed. Place them or delete them on step 8 first."
+class NotPlaced(Exception):
+    """lessons wait in Not placed, so nothing can be printed or downloaded; count: how many lessons"""
+    def __init__(self, count): super().__init__(not_placed_text(count)); self.count = count
+def _count(pool): return len({x["id"] for x in pool})
 _cache = {}                 # one entry: the model of the draft with its fixes applied, (key, model, fx); one worker, so a dict under _lock
 
 def _p(name): return os.path.join(DIR, name)
@@ -38,7 +47,7 @@ def save(setup_path, timetable_path, source, spec, replace=False):
     good draft); returns the model, for info(model=). UnpublishedFixes unless replace, when the draft has fixes that were never published. A new upload starts with no decisions."""
     with _lock:
         meta = store.read_json(_p("meta.json"), {}) or {} if exists() else {}; fl = meta.get("fixes") or []
-        if len(fl) > meta.get("published_fixes", 0) and not replace: raise UnpublishedFixes(len(fl))
+        if len(fl) > meta.get("published_fixes", 0) and not replace: raise UnpublishedFixes(len(fl), _waiting())
         new, old = DIR + ".new", DIR + ".old"
         shutil.rmtree(new, ignore_errors=True); os.makedirs(new)
         if setup_path: shutil.copy(setup_path, os.path.join(new, "setup.xlsx"))
@@ -55,6 +64,11 @@ def save(setup_path, timetable_path, source, spec, replace=False):
         os.replace(new, DIR); shutil.rmtree(old, ignore_errors=True); _cache.clear()
         return m
 
+def _waiting():
+    """how many lessons wait in Not placed in the draft now; 0 when it cannot be worked out (the sentence is then the shorter one)"""
+    try: return _count(model_now()[2]["pool"])
+    except Exception: return 0
+
 def summary():
     """what /api/status shows of the draft, from meta.json alone (no model is built)"""
     meta = store.read_json(_p("meta.json")) if exists() else None
@@ -62,7 +76,8 @@ def summary():
 
 def model_now(rec=None):
     """(model, setup record, fx) of the draft with its fixes applied, checked against the setup record (default: as it is now).
-    fx = dict(texts, problems, touched, was) from fixes.apply. One model is kept, for the same upload, setup version and fixes; it is
+    fx = dict(texts, problems, touched, was, pool) from fixes.apply; pool is the rows of the lessons not placed, which the model also carries
+    as m["pool"] for the helper and the typed request (they judge with it). One model is kept, for the same upload, setup version and fixes; it is
     shared between requests, so nothing may change it."""
     rec = rec or store.setup_record(); spec = rec["spec"]
     if not spec: raise LookupError("no setup")
@@ -73,19 +88,52 @@ def model_now(rec=None):
         args = paths()
     fx = {}; m = model_from_files(None, args[1], spec=spec, edit=fixes.editor(fl, fx))   # no re-read of the setup workbook: the spec is given
     if meta.get("config_id"): m["setup"].setdefault("school", {})["config_id"] = meta["config_id"]
+    fx.setdefault("pool", []); m["pool"] = fx["pool"]
     with _lock: _cache.clear(); _cache.update(key=key, m=m, fx=fx)
     return m, rec, fx
+
+def _unique(ws):
+    """the warnings with a key repeated made unique as verify.warnings does (#2, #3)"""
+    seen = {}
+    for w in ws:
+        seen[w["key"]] = n = seen.get(w["key"], 0) + 1
+        if n > 1: w["key"] += f"#{n}"
+    return ws
+
+def _own_warnings(m, pool):
+    """the warnings the draft makes itself: one critical "Not placed" for each lesson in the pool, and one "No room" (a warning, not critical)
+    for each lesson row on the timetable with no room"""
+    out, first = [], lambda x: (x["classes"] or [""])[0]
+    by = {}
+    for x in pool: by.setdefault(x["id"], []).append(x)
+    for i, rows in by.items():
+        c = first(rows[0]); out.append(verify.warning(f"clash:notplaced:{i}", "clash", f"Not placed: {fixes.what(rows[0])}.", group=c or "School", where=dict(cls=c, id=i), crit="notplaced"))
+    for x in m["lessons"]:
+        if fixes._no_room(x["room"]):
+            c = first(x); out.append(verify.warning(f"room:none:{x['id']}:{x['group']}", "room", f"No room: {fixes.what(x)} on {m['days'][x['d']]} period {x['p']}.", strength="Prefer",
+                                                    group=c or "School", where=dict(cls=c, day=m["days"][x["d"]], period=x["p"], id=x["id"], row=x["group"])))
+    return _unique(out)
+
+WAITING = " A lesson of it is waiting in Not placed."
+WAITING_REFUSED = "A lesson of it is waiting in Not placed. Place it or delete it first."
+def _withhold(ws, pool):
+    """a difference from step 5 about a lesson a pooled lesson belongs to is not offered as "update step 5": the timetable will change when it is placed"""
+    keys = {verify._kstr(k) for x in pool for k in helper._keys_of(x)}   # every key verify.placed would give its rows: one per class of a whole-class row, the group's
+    for w in ws:
+        k = re.fullmatch(r"dep:(.+):(?:missing|periods)(?:#\d+)?", w["key"])
+        if k and k[1] in keys: w["ops"] = None; w["text"] += WAITING
 
 def _build(m=None, rec=None, fx=None):
     """the draft with its fixes applied, checked against the setup as it is now (or rec, a setup record): the fields of info()
     before decisions are laid over them. m: a model already built (by save, with no fixes yet, or with its rec and fx from model_now)."""
     if m is None: m, rec, fx = model_now(rec)
     else:
-        rec = rec or store.setup_record(); fx = fx or dict(texts=[], problems=[], touched=set(), was=[])
+        rec = rec or store.setup_record(); fx = fx or dict(texts=[], problems=[], touched=set(), was=[], pool=[])
         if not rec["spec"]: raise LookupError("no setup")
     spec = rec["spec"]
     with _lock: meta = store.read_json(_p("meta.json"), {})
-    ws = verify.warnings(m, touched=fx["touched"], was=fx.get("was") or ()); ch = m["checks"]
+    ws = verify.warnings(m, touched=fx["touched"], was=fx.get("was") or ()); ch = m["checks"]; pool = fx.get("pool") or []
+    ws["warnings"] = ws["warnings"] + _own_warnings(m, pool); _withhold(ws["warnings"], pool)
     cid, ver = meta.get("config_id") or "", rec["v"]; got = re.fullmatch(r"v(\d+)", cid)
     state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
              "same" if int(got[1]) == ver else "older" if int(got[1]) < ver else "newer")
@@ -94,7 +142,7 @@ def _build(m=None, rec=None, fx=None):
                 school=m["school"]["name"], file_school=theirs, timetable=m["school"]["timetable"], lessons=ch["lessons"], classes=len(m["classes"]), teachers=len(m["teachers"]),
                 students=len(m["students"]), after=ch["after_school"][:30], notes=m["notes"][:12], rule_report=m.get("rule_report") or [],
                 choices_used=m.get("choices_used") or [], choices=len(spec.get("choices") or []) - len({i for i, _ in choices.problems(spec)}),
-                typed=len(typed_rules(spec)), warnings=ws["warnings"], not_checked=ws["not_checked"], fixes=[dict(text=f.get("text"), at=f.get("at"), kind=f.get("kind"), batch=f.get("batch")) for f in meta.get("fixes") or []], fix_problems=fx["problems"],
+                typed=len(typed_rules(spec)), warnings=ws["warnings"], not_checked=ws["not_checked"], fixes=[dict(text=f.get("text"), at=f.get("at"), kind=f.get("kind"), batch=f.get("batch")) for f in meta.get("fixes") or []], fix_problems=fx["problems"], unplaced=_count(pool),
                 other_school=ours if ours and theirs and ours.lower() != theirs.lower() else "")
 
 def _finish(j, change=None):
@@ -140,7 +188,9 @@ def decide(key, answer):
     with _lock:   # from the build to the change: a second click waits, then finds the warning gone (so a row is never added twice)
         j = _build(); w = next((w for w in j["warnings"] if w["key"] == key), None)
         if not w: raise ValueError("That warning is no longer on the list.")
-        if w["ops"] is None: raise ValueError("This difference is set on step 3 for the whole level; the app does not change it from here.")
+        if w["ops"] is None:
+            if w["kind"] != "deployment": raise ValueError("This warning cannot be settled by updating step 5.")
+            raise ValueError(WAITING_REFUSED if w["text"].endswith(WAITING) else "This difference is set on step 3 for the whole level; the app does not change it from here.")
         store.restore_point("Before updating step 5 from the timetable")
         try: store.apply_changes([_applied(op) for op in w["ops"]], client="draft", since=int(j["setup_version"][1:]))
         except store.Refused as e: raise ValueError(str(e))
@@ -156,7 +206,8 @@ def publish():
         meta = store.read_json(_p("meta.json"), {}); decisions = store.read_json(_p("decisions.json"), {}) or {}
         if j["critical"]: raise Critical(j["critical"])   # judged and written under this one lock: none can arrive in between
         left = [w["text"] for w in j["warnings"] if not w["decision"]]   # the warnings open at publishing
-        fl = meta.get("fixes") or []; texts = model_now(rec)[2]["texts"]
+        fl = meta.get("fixes") or []; fx = model_now(rec)[2]; texts = fx["texts"]
+        if fx["pool"]: raise NotPlaced(_count(fx["pool"]))   # a second guard: the critical count refuses first, but a lesson waiting is never published without
         sp, tp = paths()
         store.publish(sp, tp, source=meta.get("source"), spec=rec["spec"], log=lambda *x: None, edit=fixes.editor(fl, {}),
                       extra=dict(compared_v=j["setup_version"], open=j["open"], left=left, decisions={k: d["answer"] for k, d in decisions.items()}, fixes=list(texts)))
@@ -166,7 +217,7 @@ def publish():
 def printouts(out_dir, individual):
     """the printouts of the draft with its fixes applied, checked against the setup as it is now, written under out_dir by
     ttgen.export.export_all -> (model, base name of the folder made in out_dir). The model is built for this call, as publish builds
-    its own: export_all may change what it is given, so the shared cached one is never used."""
+    its own: export_all may change what it is given, so the shared cached one is never used. NotPlaced while a lesson waits in Not placed."""
     from ttgen.export import export_all, safe_name
     if not exists(): raise NoDraft("There is no draft.")
     rec = store.setup_record()
@@ -174,6 +225,7 @@ def printouts(out_dir, individual):
     with _lock:
         meta = store.read_json(_p("meta.json"), {}); fl = meta.get("fixes") or []; sp, tp = paths()
     fx = {}; m = model_from_files(sp, tp, spec=rec["spec"], edit=fixes.editor(fl, fx)); m["fixes"] = fx.get("texts") or []
+    if fx.get("pool"): raise NotPlaced(_count(fx["pool"]))
     base = safe_name(f"{m['school']['name']} {m['school']['timetable']}")
     export_all(m, os.path.join(out_dir, base), individual=individual, zip_individual=False, log=lambda *x: None)
     return m, base
@@ -181,13 +233,19 @@ def printouts(out_dir, individual):
 # ------------------------------------------------------------------------------------------------ the grid and the fixes
 
 NOT_FOUND = "There is no class or teacher of that name on the timetable."
-FIELDS = dict(move=("id", "d", "p"), swap=("a", "b"), teacher=("key", "teachers"), room=("id", "group", "room"), add=("key", "d", "p", "n"), delete=("id",))
+FIELDS = dict(move=("id", "d", "p"), swap=("a", "b"), teacher=("key", "teachers"), room=("id", "group", "room"), add=("key", "d", "p", "n"), delete=("id",), lift=("id",), place=("id", "d", "p"))
+FORCED = ("move", "place", "add", "delete")   # the kinds a request from the board may force
+PUSHED = ("move", "place", "add")             # the kinds a request from the board may push other lessons out for
 
 def _now():
     if not exists(): raise NoDraft("There is no draft.")
     return model_now()
 
-def _payload(m, view, name, short=True):
+def _planned(spec, key):
+    """the step 5 row (verify.planned_rows) of a key as the page and fixes.short spell it"""
+    return verify.planned_rows(spec)[tuple(key.split(":", 2 if key.startswith("C:") else 1))]
+
+def _payload(m, view, name, short=True, pool=()):
     """one class's or teacher's week with its lessons, from a model (or a dict(m, lessons=...)) -> dict(view, name, days, NP, times, codes, lessons, classes, teachers, short); short=False leaves short empty"""
     cls = view == "class"
     if view not in ("class", "teacher") or name not in (m["class_ix"] if cls else m["teacher_ix"]): raise ValueError(NOT_FOUND)
@@ -200,87 +258,128 @@ def _payload(m, view, name, short=True):
                               block=x["block"], what=fixes.what(x),
                               short=(m["subjects"].get(x["subject"]) or {}).get("short") or x["subject"], tshorts=[(m["teacher_ix"].get(t) or {}).get("short") or t for t in x["teachers"]]) for x in rows],
                 classes=[c["name"] for c in m["classes"]], teachers=[t["name"] for t in m["teachers"]],
-                short=[s for s in fixes.short(m, m["checked_setup"]) if cls and keep(verify.planned_rows(m["checked_setup"])[tuple(s["key"].split(":", 2 if s["key"].startswith("C:") else 1))])] if short else [])
+                short=[s for s in fixes.short(m, m["checked_setup"], pool) if cls and keep(_planned(m["checked_setup"], s["key"]))] if short else [])
 
 def grid(view, name):
     """one class's or teacher's week with its lessons, for the grid"""
-    return _payload(_now()[0], view, name)
+    m, rec, fx = _now(); return _payload(m, view, name, pool=fx["pool"])
 
 def options(lesson_id=None, group=None, add=None, n=None):
     """what the committee can do with one lesson (every slot, teacher, room, the delete, judged), or where a lesson of step 5 can be added"""
-    m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]
+    m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]   # a lesson in the pool is the board's, not the Fix card's
     if add is not None:
         try: n = int(n)
         except (TypeError, ValueError): n = None
-        return dict(slots=fixes.add_slots(m, spec, days, add, _length(n, m)))
+        return dict(slots=fixes.add_slots(m, spec, days, add, _length(n, m), fx["pool"]))
     try: lid = int(lesson_id)
     except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
     rows = fixes._rows(m["lessons"], lid); row = rows[0] if group is None else next((x for x in rows if x["group"] == group), None)
     if row is None: raise ValueError(f"There is no row of {group} in that lesson.")
     key = verify._kstr(fixes._row_key(row)); g = row["group"]
-    return dict(key=key, slots=fixes.slots(m, spec, days, lid), teachers=fixes.teacher_options(m, spec, days, key), rooms=fixes.room_options(m, spec, days, lid, g),
-                delete=fixes.can_delete(m, spec, days, lid, group))
+    return dict(key=key, slots=fixes.slots(m, spec, days, lid, fx["pool"], extras=False), teachers=fixes.teacher_options(m, spec, days, key, fx["pool"]), rooms=fixes.room_options(m, spec, days, lid, g, fx["pool"]),
+                delete=fixes.can_delete(m, spec, days, lid, group, fx["pool"]))
 
 NOT_IN_SETUP = "Not in the setup"
 
 def board():
-    """the whole draft as cards for the board -> dict(days, NP, times, levels, codes, subjects, palette, cards); one card per lesson id, with every row and class of it"""
-    m = _now()[0]; NP, nd = m["NP"], len(m["days"]); in_setup = {str(c["class"]) for c in m["checked_setup"]["classes"]}
+    """the whole draft as cards for the board -> dict(days, NP, times, levels, codes, subjects, palette, cards, unplaced, short); one card per lesson id, with every row
+    and class of it. Every card has marks (fixes.marks) and why (the reason Busy.clash gives for it at its own place, or ""); unplaced is the cards of the lessons
+    in the pool (d and p None, was the place they left, marks ["notplaced"]), by first class then id; short is fixes.short for the whole school, each with the
+    classes of its step 5 row"""
+    m, rec, fx = _now(); pool = fx["pool"]; NP, nd = m["NP"], len(m["days"]); in_setup = {str(c["class"]) for c in m["checked_setup"]["classes"]}
     level_of = {c["name"]: c["level"] for c in m["classes"] if c["name"] in in_setup}   # the model also lists a class only a lesson names
-    by_id = {}
+    by_id, waiting = {}, {}
     for x in m["lessons"]: by_id.setdefault(x["id"], []).append(x)
+    for x in pool: waiting.setdefault(x["id"], []).append(x)
     levels = [dict(level=lv, classes=[c for c, l in level_of.items() if l == lv]) for lv in m["levels"]]
     placed = {c for lv in levels for c in lv["classes"]}
     extra = [c["name"] for c in m["classes"] if c["name"] not in placed]   # not in the setup, or on a level the model does not have
+    extra += [c for c in dict.fromkeys(c for x in pool for c in x["classes"]) if c not in placed and c not in extra]   # a class only a lesson not placed names
     if extra: levels.append(dict(level=NOT_IN_SETUP, classes=extra))
     codes = {}
     for lv in levels:
         for c in lv["classes"]: codes[c] = list(m["cgrid"].get(c) or m["grid"].get(level_of.get(c)) or ["." * NP] * nd)
     short = lambda s: (m["subjects"].get(s) or {}).get("short") or s
-    tshort = {t: (m["teacher_ix"].get(t) or {}).get("short") or t for x in m["lessons"] for t in x["teachers"]}
+    tshort = {t: (m["teacher_ix"].get(t) or {}).get("short") or t for x in m["lessons"] + pool for t in x["teachers"]}
+    busy = fixes.Busy(m)
+
+    def card(i, rows):
+        a = rows[0]; band = fixes.band(rows, short)
+        return dict(id=i, d=a["d"], p=a["p"], n=a["n"], classes=list(dict.fromkeys(c for x in rows for c in x["classes"])), band=band, what=fixes.what(a),
+                    rows=[dict(group=x["group"], subject=x["subject"], teachers=list(x["teachers"]), tshorts=[tshort[t] for t in x["teachers"]], room=x["room"]) for x in rows])
     cards = []
     for i in sorted(by_id):
-        rows = by_id[i]; a = rows[0]; blocked = next((x for x in rows if x["block"]), None)
-        band = block_label(blocked["block"], blocked["level"]) if blocked else " / ".join(dict.fromkeys(short(x["subject"]) for x in rows)) if len(rows) > 1 else ""
-        cards.append(dict(id=i, d=a["d"], p=a["p"], n=a["n"], classes=list(dict.fromkeys(c for x in rows for c in x["classes"])), band=band, what=fixes.what(a),
-                          rows=[dict(group=x["group"], subject=x["subject"], teachers=list(x["teachers"]), tshorts=[tshort[t] for t in x["teachers"]], room=x["room"]) for x in rows]))
+        rows = by_id[i]; a = rows[0]
+        cards.append(dict(card(i, rows), marks=fixes.marks(busy, rows), why=busy.clash(rows, a["d"], a["p"], a["n"], ignore=(i,)) or ""))
+    unplaced = [dict(card(i, rows), d=None, p=None, was=dict(d=rows[0]["d"], p=rows[0]["p"]), marks=fixes.marks(busy, rows, pool=True), why="") for i, rows in waiting.items()]
+    unplaced.sort(key=lambda x: ((x["classes"] or [""])[0], x["id"]))
     return dict(days=list(m["days"]), NP=NP, times=m["times"], levels=levels, codes=codes,
                 subjects={k: [v.get("short") or k, v.get("color"), v.get("dept") or ""] for k, v in m["subjects"].items()},
-                palette=[list(c) for c in PALETTE], cards=cards)
+                palette=[list(c) for c in PALETTE], cards=cards, unplaced=unplaced,
+                short=[dict(s, classes=list(_planned(m["checked_setup"], s["key"])["classes"])) for s in fixes.short(m, m["checked_setup"], pool)])
 
 def slots(lesson_id):
-    """where one lesson may go: fixes.slots on the draft as it is now -> dict(id, slots)"""
-    m = _now()[0]
+    """where one lesson may go (on the timetable or waiting in Not placed): fixes.slots on the draft as it is now -> dict(id, slots, delete); delete is the judgement of deleting the whole lesson, dict(state, why)"""
+    m, rec, fx = _now()
     try: lid = int(lesson_id)
     except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
-    return dict(id=lid, slots=fixes.slots(m, m["checked_setup"], m["days"], lid))
+    spec, days, c = m["checked_setup"], m["days"], fixes._ctx(m)   # one index for the slots and the delete
+    return dict(id=lid, slots=fixes.slots(m, spec, days, lid, fx["pool"], ctx=c), delete=fixes.can_delete(m, spec, days, lid, pool=fx["pool"], ctx=c))
 
 def _length(n, m):
     """an add's n, a whole number from 1 to the periods in a day, or ValueError(sentence)"""
     if not (isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= m["NP"]): raise ValueError("Say how many periods the lesson is.")
     return n
 
-def _whole(f):
-    """a fix as the page posted it, cut to its kind's fields (the server adds at and text), or ValueError(sentence)"""
+def _whole(f, forcing=False):
+    """a fix as the page posted it, cut to its kind's fields (the server adds at and text), or ValueError(sentence). forcing (the board's
+    request only): force (only when exactly True) is kept on a move, place, add and delete with why (the sentence the page showed for
+    the place, when it is text), push on a move, place and add"""
     if not isinstance(f, dict) or f.get("kind") not in FIELDS: raise ValueError("This kind of fix is not known.")
     k = f["kind"]; out = dict(kind=k, **{x: f[x] for x in FIELDS[k] if x in f})
     if len(out) != len(FIELDS[k]) + 1: raise ValueError("The fix is not complete.")
     if k == "add": out["room"] = f.get("room")
     if k == "delete" and f.get("group") is not None: out["group"] = f["group"]
     if k == "teacher" and not (isinstance(out["teachers"], list) and all(isinstance(t, str) for t in out["teachers"])): raise ValueError("The fix is not complete.")
+    if forcing:
+        if k in FORCED and f.get("force") is True:
+            out["force"] = True
+            if isinstance(f.get("why"), str): out["why"] = f["why"]
+        if k in PUSHED and f.get("push") is True: out["push"] = True
     return out
 
+def _pushed(m, spec, f, pool):
+    """the ids of the lessons a move, a place or an add with push would push out, from the draft as it is now, in ascending order: every lesson other
+    than the fix's own with a row that shares a class with the lesson's rows (an add: the classes of its step 5 row) and a period with the target"""
+    d, p = f.get("d"), f.get("p")
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (d, p)): return []
+    if f["kind"] == "add":
+        try: e = verify.planned_rows(spec).get(fixes._key(f["key"]))
+        except ValueError: return []
+        own, classes, n = None, set((e or {}).get("classes") or ()), f["n"]
+    else:
+        rows = [x for x in (pool if f["kind"] == "place" else m["lessons"]) if x["id"] == f["id"]]
+        own, classes, n = f["id"], {c for x in rows for c in x["classes"]}, rows[0]["n"] if rows else 0
+    if not classes or not isinstance(n, int): return []
+    return sorted({x["id"] for x in m["lessons"] if x["id"] != own and x["d"] == d and set(x["classes"]) & classes and x["p"] < p + n and p < x["p"] + x["n"]})
+
 def fix(move):
-    """make one fix: judged against the draft as it is now, and kept only when the timetable allows it. Returns info()."""
-    f = _whole(move)
+    """make one fix: judged against the draft as it is now. na is refused with its sentence; no is refused with its sentence too, unless the request
+    has force (a move, place, add or delete from the board) and why, the sentence the page showed for that place, is the judgement's sentence now
+    (a place that went wrong for another reason since is refused, with the reason as it now is); with push the lessons of the same classes in the
+    way are worked out here, under the lock, and kept on the fix as out (none of push, force and why is kept). A lift needs no force. Returns info()."""
+    f = _whole(move, forcing=True); force, push, why = f.pop("force", False), f.pop("push", False), f.pop("why", None)
     with _lock:   # from the judgement to the write: two clicks cannot both pass the judgement on the same state
-        m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]
+        m, rec, fx = _now(); spec, days, pool = m["checked_setup"], m["days"], fx["pool"]
         if f["kind"] == "add":
             _length(f["n"], m)
             if not f["room"]: f["room"] = fixes.add_room(m, spec, f["key"], f["d"], f["p"], f["n"]) if isinstance(f["d"], int) and isinstance(f["p"], int) else ""
-        j = fixes.judge(m, spec, days, f)
-        if j["state"] in ("no", "na"): raise ValueError(j["why"])
-        text = fixes.apply_one(copy.deepcopy(m["lessons"]), f, spec, days)   # the sentence of the fix as it is made
+        if push and f["kind"] in PUSHED:
+            out = _pushed(m, spec, f, pool)
+            if out: f["out"] = out
+        j = fixes.judge(m, spec, days, f, pool=pool)
+        if j["state"] == "na" or (j["state"] == "no" and not (force and why == j["why"])): raise ValueError(j["why"])
+        text = fixes.apply_one(copy.deepcopy(m["lessons"]), f, spec, days, pool=copy.deepcopy(pool))   # the sentence of the fix as it is made
         meta = store.read_json(_p("meta.json"), {})
         store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=store.now(), text=text)]))
         return info()
@@ -289,7 +388,8 @@ def _fixes_of(moves, m, spec, days):
     """a list of one or two fixes as the page posted them, each whole (an add with no room gets the one that fits on the timetable the earlier fixes leave), or ValueError(sentence)"""
     if not isinstance(moves, list) or not 1 <= len(moves) <= 2: raise ValueError("Send one or two fixes.")
     out = []
-    for f in map(_whole, moves):
+    for f in map(_whole, moves):   # never forcing, and never a lesson that is not placed: a batch makes only clean changes
+        if f["kind"] in ("lift", "place"): raise ValueError("This kind of fix is not known.")
         if f["kind"] == "add":
             _length(f["n"], m)
             if not f["room"]: f["room"] = fixes.add_room(dict(m, lessons=helper.chain(m, spec, days, out)["lessons"]), spec, f["key"], f["d"], f["p"], f["n"]) if isinstance(f["d"], int) and isinstance(f["p"], int) else ""
@@ -363,6 +463,8 @@ def undo():
 
 def database(path):
     """the draft with its fixes as a timetable database at path, its setup labelled with the setup's version now (on a copy:
-    the cached model is shared)"""
-    m, rec, fx = _now(); setup = dict(m["setup"]); setup["school"] = dict(setup.get("school") or {}, config_id=f"v{rec['v']}")
+    the cached model is shared). NotPlaced while a lesson waits in Not placed."""
+    m, rec, fx = _now()
+    if fx["pool"]: raise NotPlaced(_count(fx["pool"]))
+    setup = dict(m["setup"]); setup["school"] = dict(setup.get("school") or {}, config_id=f"v{rec['v']}")
     write_db(m, path, spec=setup)

@@ -54,7 +54,7 @@ t("critWord", () => {
   assert.strictEqual(Draft.critWord("other"), "");
   assert.strictEqual(Draft.critWord(undefined), "");
 });
-t("kinds", () => { assert.deepEqual(Draft.KINDS, ["clash", "deployment", "rule", "typed", "choice"]); assert.equal(Draft.KIND_TEXT.typed, "Rules in words"); });
+t("kinds", () => { assert.deepEqual(Draft.KINDS, ["clash", "room", "deployment", "rule", "typed", "choice"]); assert.equal(Draft.KIND_TEXT.room, "No room"); assert.equal(Draft.KIND_TEXT.typed, "Rules in words"); });
 t("whereText: only the parts a warning's where has", () => {
   assert.deepStrictEqual(Draft.whereText({ where: { cls: "1A", day: "Mon", period: 0, id: 3, row: "Entire Class" } }), ["1A", "Mon", "period 0"]);
   assert.deepStrictEqual(Draft.whereText({ where: { teacher: "Ms Ong" } }), ["Ms Ong"]);
@@ -145,5 +145,25 @@ t("choiceWord: the question's word for the field", () => {
   assert.deepEqual(["classes", "subject", "teacher", "new_teacher", "new_room"].map(Draft.choiceWord), ["class", "subject", "teacher", "teacher", "room"]);
   assert.equal(Draft.choiceWord("whatever"), "name");
 });
+t("critWord: notplaced; an unknown word still gives nothing", () => {
+  assert.strictEqual(Draft.critWord("notplaced"), "Not placed");
+  assert.strictEqual(Draft.critWord("nope"), "");
+});
+t("a room warning is grouped under No room, after clashes and before the deployment", () => {
+  const g = Draft.group([W("d1", "deployment", "1A"), W("m1", "room", "Maths 1A"), W("m2", "room", "Art 1B"), W("c1", "clash", "Ms X", null, null, "teacher")], "open");
+  assert.deepEqual(g.map(x => x.kind), ["clash", "room", "deployment"]);
+  assert.equal(g[1].title, "No room");
+  assert.deepEqual(g[1].groups.map(x => x.name), ["Maths 1A", "Art 1B"]);
+});
 
+t("others: the open warnings that are not critical, counted directly", () => {
+  assert.strictEqual(Draft.others(ws()), 3);   // d1, d3 (an old "left" is open) and r1; c1 is critical, d2 and c2 are settled
+  assert.strictEqual(Draft.others(ws().concat([W("c3", "clash", "1A", { answer: "met" }, null, "teacher")])), 3);   // a settled critical one never takes one off
+  assert.strictEqual(Draft.others([]), 0); assert.strictEqual(Draft.others(undefined), 0);
+});
+t("follow: a settled clash is not followed onto a lesson waiting in Not placed", () => {
+  const was = { key: "clash:Class clash: 1A", kind: "clash", where: { cls: "1A" } };
+  assert.strictEqual(Draft.follow(was, [Object.assign(K("clash:notplaced:7", "clash", { cls: "1A", id: 7 }), { crit: "notplaced" })]), null);
+  assert.deepEqual(Draft.follow(was, [Object.assign(K("clash:notplaced:7", "clash", { cls: "1A", id: 7 }), { crit: "notplaced" }), Object.assign(K("clash:Class clash: 1A on Tue", "clash", { cls: "1A" }), { crit: "class" })]), { key: "clash:Class clash: 1A on Tue", how: "changed" });
+});
 console.log(n + " checks passed");

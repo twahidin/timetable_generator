@@ -93,33 +93,53 @@ is not on step 3, and a named subject the class has only in groups.
    and the typed rules and choices used that the agent reported. A warning for another school than the saved setup, and
    which configuration the timetable was made from, are shown too. Below the upload, the timetable is shown as a board
    of one day (a row per class, the periods across) or of one class's whole cycle; a lesson is dragged to another time
-   on its row, or clicked and then a place clicked, wherever the app allows the move or the swap, and **Undo the last
-   timetable change** puts it back. The list of warnings and the editor are below the board. The warnings are listed by
+   on its row, or clicked and then a place clicked, and **Undo the last timetable change** (at the end of the counters, or
+   Ctrl or Cmd+Z) puts it back. Each place is coloured: green is clean, amber bends a Prefer, red lands with a problem (a
+   clash or a broken rule), blue has another lesson there and asks, grey cannot take it (a break, outside the day).
+   A lesson dropped where it clashes lands there and is marked on its card, and the counters above the board (Not placed,
+   No teacher, In two places, In a break, No room) count what is wrong; a click on one steps through its lessons. A drop
+   on another lesson asks first: swap with it, put it beside it (when both can be there), or push it out; pushing out a band
+   names the band and says which other classes lose it too. Held over another
+   day's tab for half a second, a dragged lesson goes to that day. **Lift out** (or Ctrl or Cmd+X) takes a lesson off the
+   board, and a pushed-out lesson goes the same way: both wait in **Not placed**, a tab of the panel beside the board, until they
+   are dragged or pasted (Ctrl or Cmd+V, where the pointer is) back onto their row, deleted, or undone. **Delete this
+   lesson** asks first and says why when it should not go (step 5 asks for the lesson, or the rule it breaks); the tray's **Step 5 asks for these** lists the lessons
+   step 5 plans that the timetable lacks, to drag onto a free place. Nothing is published, printed or downloaded while a
+   lesson waits in Not placed: step 9 says how many and sends you back here. The panel beside the board (under it on a
+   narrow window) has three tabs: **Not placed**, **Warnings** and **Changes**; it is as tall as the board and scrolls on
+   its own, and a lesson dragged from the board onto any of its tabs is lifted out. A lesson with a warning is marked on
+   the board (its mark, or "1 warning"), the selected lesson's line lists its warnings, and **Show me** on a warning
+   goes to its lesson (or its class's whole cycle) and flashes it. **Changes** lists the changes made in the app, newest
+   first, with **Undo the last timetable change**. The warnings are listed by
    kind and then by class, teacher or group, with the timetable's side and step 5's side. For each one, **Update step
    5** changes the setup to match the timetable, and a rule in words that reads **Check again** has a **Still met**
-   button for when you have looked (**Reopen** takes it back). The summary line reads critical, warnings open and
+   button for when you have looked (**Reopen** takes it back). The summary line reads critical, other warnings open (the two add up to the Warnings tab's number) and
    settled on step 5. A **critical mistake** is a lesson with no teacher, a teacher in two places, a class clash, a room
    used by more lessons than it takes, or a lesson in a break or outside the day; each shows its kind in words before
    its sentence, and every one is listed. Everything else is a warning and never stops publishing. Two bands, or two
-   groups, of one class at the same time are not a clash. **Fix the timetable** (on a warning, or the Fix card below the
-   list) shows one class's or one teacher's week as a table; pick a class or a teacher, and a week when the school has
+   groups, of one class at the same time are not a clash. **Fix the timetable** (on a warning, or **Teacher, room and
+   more** on a selected lesson) opens the older one-class editor under the board, with **Close** at its top right; it shows one class's or one teacher's week as a table; pick a class or a teacher, and a week when the school has
    two, then select a lesson. Every slot is coloured by what a fix there would do (green is open, amber is open but less
    wanted, red is not allowed, grey is a slot the lesson cannot go to: not lesson time, outside the day, or another
    lesson is there that it cannot swap with); click a green or amber slot to move the lesson, or a lesson there to swap
    with it (in a teacher's week an open slot can be a swap with the class's lesson there; a swap that also moves another
    class's lesson opens **Before you apply** first, with that class's week). The side panel also changes the teacher or
    the room, deletes an extra lesson, and, with nothing selected, lists a class's missing periods with **Add a lesson**.
-   Every fix is kept with its sentence under **Fixes**, and **Undo the last fix** takes the last one back. A fix that
+   Every fix is kept with its sentence under **Changes**, and **Undo the last timetable change** takes the last one back. A fix that
    would cause a clash, change a subject's periods from the plan or newly break a Must rule is refused (red), so a clean
    draft stays clean. **Fix the timetable** on a warning also opens **Ways to settle this**: up to three ways, each
    already checked, with what each one disturbs and whether it is clean or bends a Prefer. **Show** opens **Before you
    apply** under the grid: the sentences, and the week of each other class the fixes touch with the moved, changed or
    new lessons outlined; **Apply** makes the fixes, **Cancel** leaves everything as it was. Where one fix is not enough
-   a way can be two fixes made together; they are one entry under **Fixes** and **Undo the last two fixes** takes both
-   back. With `ANTHROPIC_API_KEY` set, the Fix card also has a box above the ways: type what you want in your own words ("move PE for 2A off Friday", "give 2A maths to Mdm Lee"). It takes three kinds of request: move lessons, change who teaches a lesson, change a lesson's room. A language model only reads the words into a small request; the app finds the lessons and people itself, asks which one when a name could be several, and runs the same checks as **Ways to settle this**, showing up to three ways per lesson with **Show** and **Apply**. Nothing changes until you press Apply, and anything else you ask to keep is repeated back as not checked. The whole site can send 30 requests in 10 minutes. If the words cannot be read, the box says so and the helper's own suggestions carry on; without the key the box is not there and the helper works as before. When no way settles a warning the panel says so and lists the nearest ways with what each breaks; those are
-   blocked (they would cause a clash or newly break a Must rule) and have no button. Below the list, **Go to step 9** goes on.
+   a way can be two fixes made together; they are one entry under **Changes** and are undone together. With `ANTHROPIC_API_KEY` set, the editor also has a box above the ways (**Ask in words**, at the foot of the Warnings tab, opens it): type what you want in your own words ("move PE for 2A off Friday", "give 2A maths to Mdm Lee"). It takes three kinds of request: move lessons, change who teaches a lesson, change a lesson's room. A language model only reads the words into a small request; the app finds the lessons and people itself, asks which one when a name could be several, and runs the same checks as **Ways to settle this**, showing up to three ways per lesson with **Show** and **Apply**. Nothing changes until you press Apply, and anything else you ask to keep is repeated back as not checked. The whole site can send 30 requests in 10 minutes. If the words cannot be read, the box says so and the helper's own suggestions carry on; without the key the box is not there and the helper works as before. When no way settles a warning the panel says so and lists the nearest ways with what each breaks; those are
+   blocked (they would cause a clash or newly break a Must rule) and have no button. At the foot of the timetable card,
+   under the upload's notes, **Go to step 9** goes on. Steps 8 and 9 do not show the setup's "Things to fix" column, so the
+   timetable has the page's width.
 6. **Publish** (step 9): it shows the timetable as it will be published, read-only: the critical mistakes (each with
-   **Show on step 8**, which opens the Fix card on it), every other open warning, and the changes made in the app. **Publish
+   **Show on step 8**, which opens step 8 with the warning marked in the panel's Warnings tab and its lesson selected on
+   the board, or a lesson that is not placed selected in the Not placed tab), every other
+   open warning, and the changes made in the app. While a lesson waits in Not placed, the printouts and the draft's
+   download are replaced by how many are waiting. **Publish
    this timetable** is off while a critical mistake remains, with the reason above it, and the server refuses as well
    (it says how many critical mistakes are left), so a second tab cannot get round it. With none, it makes the draft what teachers and students see,
    with every download and the personal student codes (about a minute), even with warnings open: **Published now**

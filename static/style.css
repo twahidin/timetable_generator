@@ -80,6 +80,8 @@ input[data-pat]::placeholder{color:#9aa5b4}
 tr.picked td{background:#f2f7ff}
 .helper{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0}
 .stat{display:inline-block;margin-right:16px;color:var(--muted)}.stat b{color:var(--ink);font-size:16px}
+.layout.wide .issues{display:none}   /* steps 8 and 9: the setup's "Things to fix" is not shown, the timetable takes its width */
+@media (min-width:1101px){.layout.wide{grid-template-columns:200px 1fr}}
 @media (max-width:1100px){.layout{grid-template-columns:1fr}.steps{position:static;flex-direction:row;overflow:auto}.issues{position:static;max-height:none}}
 @media (max-width:640px){.layout{padding:12px}.top{padding:10px 12px}.sub{display:none}}
 .pop{max-width:560px}
@@ -417,11 +419,15 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .bdctl{align-items:center;gap:8px 14px;flex-wrap:wrap;margin:6px 0}
 .bdweek{display:inline-flex;gap:4px;align-items:center;margin-right:6px}
 .bdtab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.bdtab.hover{outline:3px solid var(--accent);outline-offset:1px}   /* a card in the air waits over this day's tab */
+#bdBox .bdold{display:none}   /* the board's rows and tray as they were when a drag began, kept (hidden) until it ends */
+#bdTray h3.bdshort{margin-top:10px}
+.bdcard.tray.short b{white-space:normal}
 .bdfind select{margin-left:4px}
-.bdsel{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--chip);border-radius:8px;padding:6px 10px;margin:6px 0;min-height:46px;box-sizing:border-box}
+.bdsel{display:flex;gap:6px 8px;align-items:center;align-content:flex-start;flex-wrap:wrap;background:var(--chip);border-radius:8px;padding:6px 10px;margin:6px 0;height:110px;overflow:auto;box-sizing:border-box}   /* a fixed height: the rows never move under the pointer when the line changes */
 .bdsel:empty{background:none}
-.bdtitle{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.bdtitle h2{margin:0}
-.bdundo{display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bdtitle{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;height:36px;overflow:hidden}.bdtitle h2{margin:0;flex:0 0 auto}
+.bdundo{display:inline-flex;gap:8px;align-items:center;flex-wrap:nowrap;min-width:0}.bdundo button{flex:0 0 auto}.bdundo span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bdwrap{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:8px}
 .bdin{position:relative}
 .bdhead,.bdrow{display:grid;font-size:11px}
@@ -442,11 +448,49 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcard.sel{outline:2px solid var(--accent);outline-offset:-1px;z-index:2}
 .bdcard.fade{opacity:.25}
 .bdcell.ok{background:#d6f1e0;cursor:pointer}.bdcell.prefer{background:#fff0c2;cursor:pointer}.bdcell.no{background:#fbdcdc;cursor:not-allowed}.bdcell.na{background:#eceef2}
+.bdcell.ask{background:#dcebfa;cursor:pointer}   /* another lesson is there and a drop asks: swap, put it beside or push it out */
 .bdcell.own{box-shadow:inset 0 0 0 2px var(--accent)}
 .bdcell.over{box-shadow:inset 0 0 0 3px var(--navy)}
 .bdrow.dim{opacity:.4}
 .bdcard[draggable=true]{cursor:grab}
 .bdmark{display:block;height:6px;border-left:1px solid var(--line);background:#fff}
-.bdmark.ok{background:#4cb87a}.bdmark.prefer{background:#f2b632}.bdmark.no{background:#e46a6a}.bdmark.na{background:#d3d7df}
+.bdmark.ok{background:#4cb87a}.bdmark.prefer{background:#f2b632}.bdmark.no{background:#e46a6a}.bdmark.na{background:#d3d7df}.bdmark.ask{background:#7fb2e5}
 .bdmark.own{background:var(--accent)}
 .bdcard.swap{outline:2px dashed #4cb87a;outline-offset:-2px}.bdcard.swap.swapprefer{outline-color:#f2b632}
+.bdcard{position:relative}
+.bdcard.crit{box-shadow:inset 0 0 0 2px #c62828}
+.bdcard.cfade{opacity:.25}
+.bdbadge{position:absolute;top:1px;right:1px;z-index:1;font-size:9px;line-height:1.3;font-style:normal;font-weight:600;padding:0 3px;border-radius:3px;max-width:calc(100% - 4px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff}
+.bdbadge.crit{background:#c62828}.bdbadge.warn{background:#f2b632;color:#3b2a00}
+.bdwhy{color:#8a1c1c}
+.bdcount{gap:6px;flex-wrap:wrap;margin:6px 0}
+.bdcount button.crit{background:#fbdcdc;border-color:#e46a6a;color:#8a1c1c}.bdcount button.warn{background:#fff0c2;border-color:#f2b632;color:#5c4200}
+.bdcount button[aria-disabled=true]{cursor:default}
+.bdcount .bdundo{margin-left:auto}.bdcount .bdundo.gone{visibility:hidden}   /* kept in the row while there is no change, so the row keeps its height */
+.bdmain{display:flex;gap:8px;align-items:flex-start;margin-top:8px}
+.bdmain .bdwrap{flex:1 1 auto;min-width:0;margin-top:0}
+#bdTray{font-size:11px}
+.bdtgrp{margin-top:6px}.bdtgrp:first-child{margin-top:0}.bdtgrp>b{display:block;margin-bottom:2px}
+.bdcard.tray{width:100%;margin:2px 0;min-height:var(--bdh);background:var(--chip)}
+.bdwas{font-style:italic}
+/* the side panel: as tall as the board (its body is laid over it, so a longer list never makes the card taller), its own scroll */
+#bdSide{flex:0 0 280px;width:280px;align-self:stretch;min-height:320px;position:relative;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:12px}
+.bdstabs{display:flex;gap:4px;height:40px;align-items:center;padding:0 6px;border-bottom:1px solid var(--line);box-sizing:border-box;overflow:hidden}
+.bdstab{flex:1 1 auto;min-width:0;padding:2px 6px;font-size:12px;line-height:1.15;white-space:normal}
+.bdstab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.bdsbody{position:absolute;top:40px;left:0;right:0;bottom:0;overflow:auto;padding:6px 8px}
+.bdsbody .warnsum{margin:0 0 4px}.bdsbody .warn{font-size:12px}.bdsbody h4{margin:8px 0 2px;font-size:12px}.bdsbody summary{font-size:13px}
+.bdsbody li.warn.on{background:#eef3fb;box-shadow:inset 3px 0 0 var(--accent);padding-left:6px}
+.bdsbody ol.fxlist{font-size:12px;margin-top:8px}
+.bdaskrow{margin-top:10px}
+.bdtdrop{display:none;position:absolute;top:44px;left:6px;right:6px;z-index:6;margin:0;padding:6px;border-radius:6px;background:#eef3fb;color:var(--navy);font-weight:600}
+#bdSide.lift{outline:2px dashed var(--navy);outline-offset:-2px}#bdSide.lift .bdtdrop{display:block}
+.bdnone{flex:1 1 auto;margin:0}
+.bdlw{flex:0 0 100%;font-size:12px}.bdlw.crit{color:#8a1c1c}
+@keyframes bdflash{0%,100%{filter:none}25%,60%{filter:brightness(1.25) drop-shadow(0 0 3px #f2b632)}}
+.bdcard.flash{animation:bdflash 1s ease-in-out 1}   /* Show me: the card's pieces flash once, nothing moves */
+#bdOld{margin-top:12px}.bdoldtop{justify-content:flex-end;margin:0}#bdOld .fxcard{margin-top:4px}
+#bdFoot{margin-top:12px}
+@media (max-width:1099px){#bdSide{flex-basis:220px;width:220px}}
+@media (max-width:899px){.bdmain{flex-direction:column;align-items:stretch}#bdSide{flex:none;width:auto;height:320px;min-height:0}}
+.bdcard.tray .bdwas{white-space:normal}
