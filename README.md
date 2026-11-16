@@ -10,7 +10,7 @@ code and download PDFs. The app does not generate timetables itself.
 | `COMMITTEE_CODE` | timetable committee | the setup editor, the downloads, Upload and edit, Publish, the personal student codes |
 | `TEACHER_CODE` | teachers | every class, teacher, room and student timetable, the lesson search, Who's free, PDFs |
 | `HEADS_CODE` (optional) | heads of department | every step to read except Download, Upload and edit, Publish and Students; everything on step 5 (who teaches which class and group, new groups and bands, moving rows between bands), and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
-| `ANTHROPIC_API_KEY` (optional) | the committee, in Railway | with it set, the Fix card on step 8 has a box to type a request in words; only those words go to Anthropic. A server that still has `AI_PROVIDER=anthropic` and `AI_API_KEY` from an earlier version has the box too |
+| `ANTHROPIC_API_KEY` (optional) | the committee, in Railway | with it set, step 8's Warnings tab has a box to type a request in words (**Ask in words**); only those words go to Anthropic. A server that still has `AI_PROVIDER=anthropic` and `AI_API_KEY` from an earlier version has the box too |
 | `TYPED_REQUEST_MODEL` (optional) | the committee, in Railway | the model that reads the words, `claude-opus-5-5` unless set (with the earlier `AI_API_KEY`, the model `AI_MODEL` names); `mock` is a practice reader that needs no key |
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
@@ -92,7 +92,8 @@ is not on step 3, and a named subject the class has only in groups.
    marks the lesson "Changed by hand"), the setup's rules,
    and the typed rules and choices used that the agent reported. A warning for another school than the saved setup, and
    which configuration the timetable was made from, are shown too. Below the upload, the timetable is shown as a board
-   of one day (a row per class, the periods across) or of one class's whole cycle; a lesson is dragged to another time
+   of one day, the periods across, with a row per class, per teacher or per room (**Rows: Classes, Teachers, Rooms**; a
+   "No teacher" and a "No room" row hold the lessons with none), or of one class's, teacher's or room's whole cycle; a lesson is dragged to another time
    on its row, or clicked and then a place clicked, and **Undo the last timetable change** (at the end of the counters, or
    Ctrl or Cmd+Z) puts it back. Each place is coloured: green is clean, amber bends a Prefer, red lands with a problem (a
    clash or a broken rule), blue has another lesson there and asks, grey cannot take it (a break, outside the day).
@@ -108,7 +109,7 @@ is not on step 3, and a named subject the class has only in groups.
    lesson waits in Not placed: step 9 says how many and sends you back here. The panel beside the board (under it on a
    narrow window) has three tabs: **Not placed**, **Warnings** and **Changes**; it is as tall as the board and scrolls on
    its own, and a lesson dragged from the board onto any of its tabs is lifted out. A lesson with a warning is marked on
-   the board (its mark, or "1 warning"), the selected lesson's line lists its warnings, and **Show me** on a warning
+   the board (its mark, or "1 warning"), the selected lesson's **Lesson** tab lists its warnings, and **Show me** on a warning
    goes to its lesson (or its class's whole cycle) and flashes it. **Changes** lists the changes made in the app, newest
    first, with **Undo the last timetable change**. The warnings are listed by
    kind and then by class, teacher or group, with the timetable's side and step 5's side. For each one, **Update step
@@ -117,22 +118,31 @@ is not on step 3, and a named subject the class has only in groups.
    settled on step 5. A **critical mistake** is a lesson with no teacher, a teacher in two places, a class clash, a room
    used by more lessons than it takes, or a lesson in a break or outside the day; each shows its kind in words before
    its sentence, and every one is listed. Everything else is a warning and never stops publishing. Two bands, or two
-   groups, of one class at the same time are not a clash. **Fix the timetable** (on a warning, or **Teacher, room and
-   more** on a selected lesson) opens the older one-class editor under the board, with **Close** at its top right; it shows one class's or one teacher's week as a table; pick a class or a teacher, and a week when the school has
-   two, then select a lesson. Every slot is coloured by what a fix there would do (green is open, amber is open but less
-   wanted, red is not allowed, grey is a slot the lesson cannot go to: not lesson time, outside the day, or another
-   lesson is there that it cannot swap with); click a green or amber slot to move the lesson, or a lesson there to swap
-   with it (in a teacher's week an open slot can be a swap with the class's lesson there; a swap that also moves another
-   class's lesson opens **Before you apply** first, with that class's week). The side panel also changes the teacher or
-   the room, deletes an extra lesson, and, with nothing selected, lists a class's missing periods with **Add a lesson**.
-   Every fix is kept with its sentence under **Changes**, and **Undo the last timetable change** takes the last one back. A fix that
-   would cause a clash, change a subject's periods from the plan or newly break a Must rule is refused (red), so a clean
-   draft stays clean. **Fix the timetable** on a warning also opens **Ways to settle this**: up to three ways, each
-   already checked, with what each one disturbs and whether it is clean or bends a Prefer. **Show** opens **Before you
-   apply** under the grid: the sentences, and the week of each other class the fixes touch with the moved, changed or
-   new lessons outlined; **Apply** makes the fixes, **Cancel** leaves everything as it was. Where one fix is not enough
-   a way can be two fixes made together; they are one entry under **Changes** and are undone together. With `ANTHROPIC_API_KEY` set, the editor also has a box above the ways (**Ask in words**, at the foot of the Warnings tab, opens it): type what you want in your own words ("move PE for 2A off Friday", "give 2A maths to Mdm Lee"). It takes three kinds of request: move lessons, change who teaches a lesson, change a lesson's room. A language model only reads the words into a small request; the app finds the lessons and people itself, asks which one when a name could be several, and runs the same checks as **Ways to settle this**, showing up to three ways per lesson with **Show** and **Apply**. Nothing changes until you press Apply, and anything else you ask to keep is repeated back as not checked. The whole site can send 30 requests in 10 minutes. If the words cannot be read, the box says so and the helper's own suggestions carry on; without the key the box is not there and the helper works as before. When no way settles a warning the panel says so and lists the nearest ways with what each breaks; those are
-   blocked (they would cause a clash or newly break a Must rule) and have no button. At the foot of the timetable card,
+   groups, of one class at the same time are not a clash. A lesson clicked on the board opens a fourth tab, **Lesson**:
+   its teachers and its room, each chosen from a list with **None** (no teacher is a critical mistake, no room a
+   warning), free ones first; a change of teacher is for all that class's or group's lessons of the subject (the tab
+   says how many), a change of room for that lesson or, ticked, all the group's lessons; a band has a block per group.
+   On the Teachers or Rooms rows a lesson dropped on another teacher's or room's row is handed to them, after a
+   question. A teacher or room busy then is given only when you say so, and both lessons are marked. **Show me** on a
+   teacher in two places opens the Teachers rows on that day with that teacher's lessons marked. On a warning about a
+   class or a teacher, **Ways to settle this** opens under the warning, in the panel: up to three ways, each already
+   checked, with what each one disturbs and whether it is clean or bends a Prefer; **Close** (or the button again)
+   shuts them, and opening another warning's ways shuts the first. **Preview** opens **Before you apply** under that
+   way: the sentences, and the week of each class the fixes touch with the moved, changed or new lessons outlined;
+   **Apply** makes the fixes, **Cancel** leaves everything as it was. After a change the ways follow their warning:
+   **Settled.**, or its new sentence and new ways. Where one fix is not enough a way can be two fixes made together;
+   they are one entry under **Changes** and are undone together. A fix that would cause a clash, change a subject's
+   periods from the plan or newly break a Must rule is never offered, so a clean draft stays clean. When no way settles a
+   warning the panel says so and lists the nearest ways with what each breaks; those are blocked and have no button.
+   With `ANTHROPIC_API_KEY` set, the foot of the Warnings tab has **Ask in words**: type what you want in your own words
+   ("move PE for 2A off Friday", "give 2A maths to Mdm Lee"). It takes three kinds of request: move lessons, change who
+   teaches a lesson, change a lesson's room. A language model only reads the words into a small request; the app finds
+   the lessons and people itself, asks which one when a name could be several, and runs the same checks as **Ways to
+   settle this**, showing up to three ways per lesson with **Preview** and **Apply**. Nothing changes until you press
+   Apply, and anything else you ask to keep is repeated back as not checked. The whole site can send 30 requests in 10
+   minutes. If the words cannot be read, the box says so; without the key the box is not there. Every change made on
+   step 8 is kept with its sentence under **Changes**, and **Undo the last timetable change** takes the last one back.
+   There is no other editor: everything is done on the board and in its panel. At the foot of the timetable card,
    under the upload's notes, **Go to step 9** goes on. Steps 8 and 9 do not show the setup's "Things to fix" column, so the
    timetable has the page's width.
 6. **Publish** (step 9): it shows the timetable as it will be published, read-only: the critical mistakes (each with
@@ -370,7 +380,7 @@ node tests/teacherview.test.js          # step 4's teacher cards and the second 
 .venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, an older workbook read as before
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 ```
-To try the Fix card's box without a key, start with `TYPED_REQUEST_MODEL=mock`: it understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".
+To try the **Ask in words** box without a key, start with `TYPED_REQUEST_MODEL=mock`: it understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".
 
 Keep one gunicorn worker (with threads): publishing swaps files in under a lock held in the web process.
 
@@ -398,7 +408,7 @@ and an earlier copy is kept. **Save to file** and **Load from file**, on step 7,
 | `tests/smoke.py` | server checks, run with plain Python (no test runner) |
 | `tests/test_sync.py`, `tests/sync.test.js` | the setup changes, checked in Python and in JavaScript against the same cases |
 | `static/people.js` | reading a teacher list, matching it to the teachers already there, and drawing the avatars; Node can run it for the tests |
-| `typed.py` | the typed request on the Fix card: the one place a language model is called (the words in, a small request out), then the names matched to the draft and the ways checked, with no model |
+| `typed.py` | the typed request (**Ask in words** on step 8): the one place a language model is called (the words in, a small request out), then the names matched to the draft and the ways checked, with no model |
 | `tests/test_typed.py` | those, with no network and no key |
 | `tests/people.test.js` | those checks, run with Node |
 | `static/parents.js`, `ttgen/parents.py` | the form teachers' rule, written twice for the page and the server and kept in step by `tests/parents_cases.json` |
