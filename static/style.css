@@ -468,7 +468,7 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdbadge.crit{background:#c62828}.bdbadge.warn{background:#f2b632;color:#3b2a00}
 .bdwhy{color:#8a1c1c}
 .bdcount{gap:6px;flex-wrap:wrap;margin:6px 0}
-.bdcount button.crit{background:#fbdcdc;border-color:#e46a6a;color:#8a1c1c}.bdcount button.warn{background:#fff0c2;border-color:#f2b632;color:#5c4200}
+.bdcount button.crit{background:#fbdcdc;border-color:#e46a6a;color:#8a1c1c}.bdcount button.warn{background:#fff0c2;border-color:#f2b632;color:#5c4200;padding:7px 12px;font-size:inherit;line-height:normal}   /* not the warning list's .warn: the row keeps its height when No room counts */
 .bdcount button[aria-disabled=true]{cursor:default}
 .bdcount .bdundo{margin-left:auto}.bdcount .bdundo.gone{visibility:hidden}   /* kept in the row while there is no change, so the row keeps its height */
 .bdmain{display:flex;gap:8px;align-items:flex-start;margin-top:8px}
@@ -491,6 +491,15 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 #bdSide.lift{outline:2px dashed var(--navy);outline-offset:-2px}#bdSide.lift .bdtdrop{display:block}
 .bdnone{flex:1 1 auto;margin:0}
 .bdlw{flex:0 0 100%;font-size:12px}.bdlw.crit{color:#8a1c1c}
+/* the Lesson tab: inside the panel's own scrolling body, so nothing it shows moves the rows */
+.bdles .bdlname{margin:0 0 4px}.bdles .bdlws{margin:0 0 6px}.bdles .bdlw{display:block;margin:0 0 2px}
+.bdlblk{border-top:1px solid var(--line);padding:4px 0 6px}
+.bdlhead{display:block;width:100%;text-align:left;font-size:12px;padding:2px 4px;margin:0}
+.bdlh{margin:6px 0 2px;font-weight:600}
+.bdll{display:block;margin:0 0 4px}.bdll span{display:block}
+.bdll select{display:block;width:100%;max-width:100%;box-sizing:border-box;font-size:12px}
+.bdlnote{margin:0 0 4px}
+.bdlall{display:flex;gap:4px;align-items:center}
 @keyframes bdflash{0%,100%{filter:none}25%,60%{filter:brightness(1.25) drop-shadow(0 0 3px #f2b632)}}
 .bdcard.flash{animation:bdflash 1s ease-in-out 1}   /* Show me: the card's pieces flash once, nothing moves */
 #bdOld{margin-top:12px}.bdoldtop{justify-content:flex-end;margin:0}#bdOld .fxcard{margin-top:4px}
