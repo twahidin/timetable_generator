@@ -186,6 +186,11 @@ def ids(b, key="cards"): return sorted(x["id"] for x in b[key])
 def waiting(j): return [w for w in j["warnings"] if w.get("crit") == "notplaced"]
 def fixes_stored(): return store.read_json(draft._p("meta.json"))["fixes"]
 def move(i, at, **kw): return dict(kind="move", id=i, d=at[0], p=at[1], **kw)
+def forced(f):
+    """a fix as the board posts it when the place is red: with force and the sentence the server gives for it now (a clean one needs neither)"""
+    plain = {k: v for k, v in f.items() if k not in ("force", "why")}
+    try: return draft.fix(plain)
+    except ValueError as e: return draft.fix(dict(plain, force=True, why=str(e)))
 
 def test_a_lift_is_in_info_the_board_and_the_counts():
     fresh(CLEAN); j0 = draft.info(); assert j0["unplaced"] == 0 and j0["critical"] == 0 and not waiting(j0) and draft.board()["unplaced"] == []
@@ -200,46 +205,48 @@ def test_a_lift_is_in_info_the_board_and_the_counts():
 
 def test_a_forced_move_needs_force():
     fresh(); f = move(OTHER_ID, P0); why = f"{CLASSES[0]} has {SUBJ} for {CLASSES[0]} then."
-    raises(ValueError, lambda: draft.fix(f), why); raises(ValueError, lambda: draft.fix(dict(f, force=1)), why); raises(ValueError, lambda: draft.fix(dict(f, force="yes")), why)
+    raises(ValueError, lambda: draft.fix(f), why); raises(ValueError, lambda: draft.fix(dict(f, force=1, why=why)), why); raises(ValueError, lambda: draft.fix(dict(f, force="yes", why=why)), why)
+    raises(ValueError, lambda: draft.fix(dict(f, force=True)), why)   # force with no why is refused as one without force
+    raises(ValueError, lambda: draft.fix(dict(f, force=True, why="Another reason.")), why); raises(ValueError, lambda: draft.fix(dict(f, force=True, why=None)), why)
     assert fixes_stored() == []
-    j = draft.fix(dict(f, force=True)); assert len(j["fixes"]) == 1 and "force" not in fixes_stored()[0] and "push" not in fixes_stored()[0]
+    j = draft.fix(dict(f, force=True, why=why)); assert len(j["fixes"]) == 1 and not {"force", "push", "why"} & set(fixes_stored()[0])
     x = card(OTHER_ID); assert "class" in x["marks"] and x["why"] == why and (x["d"], x["p"]) == P0, x
     assert "class" in card(PLAIN_ID)["marks"] and len(board()["cards"]) == 4
 
 def test_a_place_judged_na_is_refused_even_forced():
     fresh(); draft.fix(dict(kind="lift", id=PLAIN_ID)); f = dict(kind="place", id=PLAIN_ID, d=0, p=NPD)
-    raises(ValueError, lambda: draft.fix(f), "That is outside the day."); raises(ValueError, lambda: draft.fix(dict(f, force=True)), "That is outside the day.")
+    raises(ValueError, lambda: draft.fix(f), "That is outside the day."); raises(ValueError, lambda: draft.fix(dict(f, force=True, why="That is outside the day.")), "That is outside the day.")
     raises(ValueError, lambda: draft.fix(move(PLAIN_ID, (0, 2))), "That lesson is not placed. Place it first.")
     assert len(fixes_stored()) == 1 and draft.info()["unplaced"] == 1
 
 def test_a_push_is_worked_out_by_the_server():
-    fresh(); draft.fix(move(OTHER_ID, (0, L1 + 1), force=True))
-    j = draft.fix(move(BAND_ID, (0, L1), push=True, force=True)); f = fixes_stored()[-1]
+    fresh(); forced(move(OTHER_ID, (0, L1 + 1), force=True))
+    j = forced(move(BAND_ID, (0, L1), push=True, force=True)); f = fixes_stored()[-1]
     assert f["out"] == [PLAIN_ID, OTHER_ID] and "push" not in f and "force" not in f and "Pushed out:" in f["text"], f
     b = board(); assert ids(b, "unplaced") == [PLAIN_ID, OTHER_ID] and ids(b) == [BAND_ID, ODD_ID] and j["unplaced"] == 2
     assert [x["was"] for x in b["unplaced"]] == [dict(d=0, p=L1), dict(d=0, p=L1 + 1)]
     b = draft.undo() and board(); assert ids(b, "unplaced") == [] and ids(b) == [1, 2, 3, 4] and (card(BAND_ID)["d"], card(BAND_ID)["p"]) == B0
-    j = draft.fix(move(OTHER_ID, (3, 3), push=True, force=True)); assert "out" not in fixes_stored()[-1] and j["unplaced"] == 0   # nothing in the way: no out key
+    j = forced(move(OTHER_ID, (3, 3), push=True, force=True)); assert "out" not in fixes_stored()[-1] and j["unplaced"] == 0   # nothing in the way: no out key
     raises(ValueError, lambda: draft.fix(move(PLAIN_ID, (3, 3))), f"{CLASSES[0]} has {SUBJ2} for {CLASSES[0]} then.")   # a push is never assumed
     draft.fix(move(PLAIN_ID, (3, 3), push=True)); assert fixes_stored()[-1]["out"] == [OTHER_ID]   # with the push the clash is gone, so no force was needed
 
 def test_a_push_never_takes_a_lesson_of_another_class():
-    fresh(); draft.fix(move(ODD_ID, P0, push=True, force=True))   # 9Z shares a teacher and now a period with PLAIN, but not a class
+    fresh(); forced(move(ODD_ID, P0, push=True, force=True))   # 9Z shares a teacher and now a period with PLAIN, but not a class
     assert "out" not in fixes_stored()[-1] and ids(board(), "unplaced") == []
     assert {"teacher"} <= set(card(PLAIN_ID)["marks"])
 
 def test_a_second_push_of_the_same_lesson_finds_it_gone():
-    fresh(); draft.fix(move(OTHER_ID, B0, push=True, force=True)); assert fixes_stored()[-1]["out"] == [BAND_ID]
-    draft.fix(move(PLAIN_ID, B0, push=True, force=True)); assert fixes_stored()[-1]["out"] == [OTHER_ID]
+    fresh(); forced(move(OTHER_ID, B0, push=True, force=True)); assert fixes_stored()[-1]["out"] == [BAND_ID]
+    forced(move(PLAIN_ID, B0, push=True, force=True)); assert fixes_stored()[-1]["out"] == [OTHER_ID]
     b = board(); assert not set(ids(b)) & set(ids(b, "unplaced")) and ids(b, "unplaced") == [OTHER_ID, BAND_ID]
     draft.undo(); assert ids(board(), "unplaced") == [BAND_ID]
 
 def test_a_place_with_a_push_and_an_add_with_a_push():
-    fresh(); draft.fix(dict(kind="lift", id=BAND_ID)); draft.fix(dict(kind="place", id=BAND_ID, d=1, p=L1 + 1, push=True, force=True)); f = fixes_stored()[-1]
+    fresh(); draft.fix(dict(kind="lift", id=BAND_ID)); forced(dict(kind="place", id=BAND_ID, d=1, p=L1 + 1, push=True, force=True)); f = fixes_stored()[-1]
     assert f["out"] == [OTHER_ID] and ids(board(), "unplaced") == [OTHER_ID] and "push" not in f and "force" not in f, f
     draft.undo(); draft.undo(); b = board(); assert ids(b, "unplaced") == [] and all(isinstance(s["classes"], list) and s["classes"] for s in b["short"])
     sh = next(s for s in b["short"] if CLASSES[0] in s["classes"])
-    draft.fix(dict(kind="add", key=sh["key"], d=P0[0], p=P0[1], n=sh["n"], push=True, force=True)); f = fixes_stored()[-1]
+    forced(dict(kind="add", key=sh["key"], d=P0[0], p=P0[1], n=sh["n"], push=True, force=True)); f = fixes_stored()[-1]
     assert f["out"] == [PLAIN_ID] and "push" not in f and "force" not in f and f["text"].endswith(f"Pushed out: {SUBJ} for {CLASSES[0]}."), f
     assert ids(board(), "unplaced") == [PLAIN_ID]
 
@@ -265,7 +272,7 @@ def test_publish_printouts_and_download_are_refused_while_a_lesson_waits():
 def test_slots_of_a_waiting_lesson():
     fresh(); draft.fix(dict(kind="lift", id=PLAIN_ID)); s = draft.slots(PLAIN_ID)
     assert s["id"] == PLAIN_ID and len(s["slots"]) == len(DAYS) * NPD and all(x["swap"] is None for x in s["slots"]) and {"d", "p", "state", "why", "push"} <= set(s["slots"][0])
-    assert next(x for x in s["slots"] if (x["d"], x["p"]) == O0)["push"]["out"] == [dict(id=OTHER_ID, what=f"{SUBJ2} for {CLASSES[0]}")]
+    assert next(x for x in s["slots"] if (x["d"], x["p"]) == O0)["push"]["out"] == [dict(id=OTHER_ID, what=f"{SUBJ2} for {CLASSES[0]}", classes=[CLASSES[0]], groups=1)]
     raises(ValueError, lambda: draft.slots(99), NOT_FOUND); raises(ValueError, lambda: draft.options(lesson_id=PLAIN_ID), NOT_FOUND)
     assert c.get(f"/api/draft/slots?id={PLAIN_ID}").status_code == 200 and draft.slots(OTHER_ID)["id"] == OTHER_ID
 
@@ -309,10 +316,10 @@ def test_slots_answer_the_delete_of_any_lesson():
     P = verify.planned_rows(SPEC)[("C", CLASSES[0], SUBJ)]["periods"]
     leave = lambda k: f"That would leave {SUBJ} for {CLASSES[0]} with {k} periods; step 3 plans {P}."
     row = lambda j: dict(id=j + 1, day=DAYS[j % len(DAYS)], p=L1 + j // len(DAYS), n=1, level=LEVEL, classes=[CLASSES[0]], subject=SUBJ, teachers=[TEACHERS[0]], room=ROOMS[0])
-    fresh([row(j) for j in range(P)]); a = draft.slots(2); assert set(a) == {"id", "slots", "delete"} and a["delete"] == dict(state="no", why=leave(P - 1))   # a placed lesson step 5 asks for
-    draft.fix(dict(kind="lift", id=1)); assert draft.slots(1)["delete"] == dict(state="no", why=leave(P - 1))   # a waiting one
-    fresh([row(j) for j in range(P + 1)]); assert draft.slots(2)["delete"] == dict(state="ok", why="")   # a surplus one
-    draft.fix(dict(kind="lift", id=1)); assert draft.slots(1)["delete"] == dict(state="ok", why="") and draft.options(lesson_id=2)["delete"] == dict(state="ok", why="")
+    fresh([row(j) for j in range(P)]); a = draft.slots(2); assert set(a) == {"id", "slots", "delete"} and a["delete"] == dict(state="no", why=leave(P - 1), plan=True)   # a placed lesson step 5 asks for
+    draft.fix(dict(kind="lift", id=1)); assert draft.slots(1)["delete"] == dict(state="no", why=leave(P - 1), plan=True)   # a waiting one
+    fresh([row(j) for j in range(P + 1)]); assert draft.slots(2)["delete"] == dict(state="ok", why="", plan=False)   # a surplus one
+    draft.fix(dict(kind="lift", id=1)); assert draft.slots(1)["delete"] == dict(state="ok", why="", plan=False) and draft.options(lesson_id=2)["delete"] == dict(state="ok", why="", plan=False)
 
 def test_the_helper_and_the_batch_never_force():
     fresh(); f = move(OTHER_ID, P0, force=True, push=True)
@@ -328,6 +335,27 @@ def test_a_draft_from_before_this_stage_opens():
     old = [dict(kind="move", id=OTHER_ID, d=3, p=3, at="2026-01-01", text="Moved."), dict(kind="swap", a=PLAIN_ID, b=OTHER_ID, at="2026-01-01", text="Swapped.")]
     store.write_json(draft._p("meta.json"), dict(meta, fixes=old)); draft._cache.clear()
     j = draft.info(); b = board(); assert j["unplaced"] == 0 and b["unplaced"] == [] and len(b["cards"]) == 4 and all("marks" in x and "why" in x for x in b["cards"]) and (card(PLAIN_ID)["d"], card(PLAIN_ID)["p"]) == (3, 3)
+
+def test_a_stale_force_is_refused_with_the_reason_as_it_now_is():
+    from ttgen import verify
+    P = verify.planned_rows(SPEC)[("C", CLASSES[0], SUBJ)]["periods"]
+    leave = lambda k: f"That would leave {SUBJ} for {CLASSES[0]} with {k} periods; step 3 plans {P}."
+    row = lambda j: dict(id=j + 1, day=DAYS[j % len(DAYS)], p=L1 + j // len(DAYS), n=1, level=LEVEL, classes=[CLASSES[0]], subject=SUBJ, teachers=[TEACHERS[0]], room=ROOMS[0])
+    fresh([row(j) for j in range(P)]); seen = draft.slots(2)["delete"]["why"]; assert seen == leave(P - 1)   # what the page showed for deleting lesson 2
+    draft.fix(dict(kind="delete", id=3, force=True, why=leave(P - 1)))   # meanwhile a colleague deletes another lesson of it, for the same reason
+    raises(ValueError, lambda: draft.fix(dict(kind="delete", id=2, force=True, why=seen)), leave(P - 2)); assert len(fixes_stored()) == 1
+    raises(ValueError, lambda: draft.fix(dict(kind="delete", id=2, force=True)), leave(P - 2))
+    draft.fix(dict(kind="delete", id=2, force=True, why=leave(P - 2))); assert len(fixes_stored()) == 2 and not {"force", "why"} & set(fixes_stored()[-1])
+    r = c.post("/api/draft/fix", json=dict(kind="delete", id=4, force=True, why="Not the reason.")); assert r.status_code == 400 and r.get_json() == {"error": leave(P - 3)}, r.get_json()
+    r = c.post("/api/draft/fix", json=dict(kind="delete", id=4, force=True, why=leave(P - 3))); assert r.status_code == 200 and len(fixes_stored()) == 3
+    fresh(); f = move(OTHER_ID, P0, push=True); assert draft.slots(OTHER_ID) and draft.fix(f)   # a push that lands clean needs no force and no why
+    assert fixes_stored()[-1]["out"] == [PLAIN_ID]
+
+def test_a_band_pushed_out_is_named_as_a_band():
+    fresh(); forced(move(OTHER_ID, (0, L1 + 1)))
+    s = next(x for x in draft.slots(PLAIN_ID)["slots"] if (x["d"], x["p"]) == B0)
+    assert s["push"]["out"] == [dict(id=BAND_ID, what="the Band A band", classes=CLASSES, groups=3)], s["push"]
+    forced(move(PLAIN_ID, B0, push=True)); assert fixes_stored()[-1]["text"].endswith(" Pushed out: the Band A band."), fixes_stored()[-1]["text"]
 
 def test_marks_on_the_board_of_a_clean_draft_are_empty():
     fresh(CLEAN); b = board(); assert [x["marks"] for x in b["cards"]] == [[], []] and [x["why"] for x in b["cards"]] == ["", ""] and b["unplaced"] == []

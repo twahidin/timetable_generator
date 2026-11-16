@@ -1,7 +1,7 @@
 """Fixes to the draft: each is one change the committee made to the timetable they uploaded, kept as a small record and
 applied again, in order, to the lessons read from the file. Nothing here touches files or the setup."""
 import collections, copy
-from ttgen.export import ENTIRE, _split_list
+from ttgen.export import ENTIRE, _split_list, abbrev, block_label
 from ttgen import spec as spec_mod, verify
 
 KINDS = ("move", "swap", "teacher", "room", "add", "delete", "lift", "place")
@@ -9,6 +9,16 @@ KINDS = ("move", "swap", "teacher", "room", "add", "delete", "lift", "place")
 def what(x):
     """a lesson row in words: '{subject} for {class}' for an entire-class lesson, 'group {code}' otherwise"""
     return f"{x['subject']} for {', '.join(x['classes'])}" if x["group"] == ENTIRE else f"group {x['group']}"
+
+def band(rows, short=None):
+    """the name the board gives a lesson of several rows or a block: its block's label, else its subjects' short names joined
+    with " / "; "" for a lesson of one row with no block. short: a subject's short name (default: the model's, abbrev)"""
+    short = short or (lambda s: abbrev(s) or s); blocked = next((x for x in rows if x["block"]), None)
+    return block_label(blocked["block"], blocked["level"]) if blocked else " / ".join(dict.fromkeys(short(x["subject"]) for x in rows)) if len(rows) > 1 else ""
+
+def named(rows, short=None):
+    """a whole lesson (its rows) in words: "the {band} band" for a band, else what() of its row"""
+    b = band(rows, short); return f"the {b} band" if b else what(rows[0])
 
 def when(days, d, p): return f"{days[d]} period {p}"
 
@@ -50,8 +60,9 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
     lessons and pool); touched: a set the ids of lessons changed, added, lifted or placed are put into; was: a list that copies
     of the rows as they were just before a fix changed, deleted, lifted or placed them are appended to; pool: a list the caller
     owns holding the rows of the lessons that are not placed (each keeps the d and p it left). A lesson id is wholly in
-    lessons or wholly in pool. out (on a move, a place or an add): the ids of lessons lifted into the pool first, those
-    still on the timetable, in order; the sentence names them."""
+    lessons or wholly in pool. out (on a move, a place or an add): the ids of lessons lifted into the pool first, in order:
+    only those on the timetable with a row that shares a class with the lesson's rows and a period with where it goes (a fix
+    replayed after an earlier one was skipped never lifts a lesson that is no longer in the way); the sentence names them."""
     if not isinstance(fix, dict): raise ValueError("it is not complete.")
     kind = fix.get("kind"); touched = set() if touched is None else touched; pool = [] if pool is None else pool
     keep = (lambda rows: None) if was is None else lambda rows: was.extend(copy.deepcopy(list(rows)))   # no copies when nobody reads them
@@ -59,13 +70,15 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
     def lift(i):
         rows = [x for x in lessons if x["id"] == i]; keep(rows)
         lessons[:] = [x for x in lessons if x["id"] != i]; pool.extend(rows); touched.add(i); return rows
-    def push(out):
-        names = [what(lift(i)[0]) for i in dict.fromkeys(out) if any(x["id"] == i for x in lessons)]
+    def push(out, rows, d, p, n):
+        cls = {c for x in rows for c in x["classes"]}
+        hit = lambda i: any(x["id"] == i and x["d"] == d and set(x["classes"]) & cls and x["p"] < p + n and p < x["p"] + x["n"] for x in lessons)
+        names = [named(lift(i)) for i in dict.fromkeys(out) if hit(i)]
         return f" Pushed out: {', '.join(names)}." if names else ""
     if kind == "move":
         if pooled(fix["id"]): raise ValueError("That lesson is not placed. Place it first.")
         rows = _rows(lessons, fix["id"]); _slot(spec, days, fix["d"], fix["p"], rows[0]["n"]); out = _out(fix, fix["id"]); a = rows[0]
-        text = f"Moved {what(a)} from {when(days, a['d'], a['p'])} to {when(days, fix['d'], fix['p'])}." + push(out)
+        text = f"Moved {what(a)} from {when(days, a['d'], a['p'])} to {when(days, fix['d'], fix['p'])}." + push(out, rows, fix["d"], fix["p"], a["n"])
         keep(rows)
         ext = _after(spec, days, rows, fix["d"], fix["p"], a["n"])
         for x in rows: x["d"], x["p"], x["ext"] = fix["d"], fix["p"], ext
@@ -88,7 +101,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
         rows = [x for x in pool if x["id"] == fix["id"]]
         if not rows: raise ValueError("That lesson is not waiting to be placed.")
         _slot(spec, days, fix["d"], fix["p"], rows[0]["n"]); out = _out(fix, fix["id"])
-        text = f"Placed {what(rows[0])} on {when(days, fix['d'], fix['p'])}." + push(out)
+        text = f"Placed {what(rows[0])} on {when(days, fix['d'], fix['p'])}." + push(out, rows, fix["d"], fix["p"], rows[0]["n"])
         keep(rows); pool[:] = [x for x in pool if x["id"] != fix["id"]]
         ext = _after(spec, days, rows, fix["d"], fix["p"], rows[0]["n"])
         for x in rows: x["d"], x["p"], x["ext"] = fix["d"], fix["p"], ext
@@ -120,7 +133,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
         x = dict(id=i, d=fix["d"], p=fix["p"], n=fix["n"], level=e["level"] or "", block=str(e["rows"][0].get("block") or ""),
                  classes=list(e["classes"]), subject=e["subject"], group=ENTIRE if key[0] == "C" else key[1],
                  teachers=list(dict.fromkeys(t for r in e["rows"] for t in r.get("teachers") or [])), room=fix["room"], ext=False, rain="")
-        x["ext"] = _after(spec, days, [x], x["d"], x["p"], x["n"]); pushed = push(out); lessons.append(x); touched.add(x["id"])
+        x["ext"] = _after(spec, days, [x], x["d"], x["p"], x["n"]); pushed = push(out, [x], x["d"], x["p"], x["n"]); lessons.append(x); touched.add(x["id"])
         return f"Added {what(x)} on {when(days, x['d'], x['p'])} ({x['n']} period{'' if x['n'] == 1 else 's'}) {'in ' + x['room'] if x['room'] else 'with no room'}." + pushed
     if kind == "delete":
         side = pool if pooled(fix["id"]) else lessons
@@ -353,7 +366,7 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
         ko, kn, kp = _keys(old + p0), _keys(new + p1), _keys(pool)   # a pooled lesson counts as timetabled, before and after
         for k in sorted(set(ko) | set(kn)):
             was = c["placed"].get(k, 0) + kp[k]; now, want = was - ko[k] + kn[k], m["planned"].get(k, 0)
-            if now != was and not (was < now <= want or want <= now < was): return res("no", f"That would leave {verify._name(k)} with {now} periods; step 3 plans {want}.")
+            if now != was and not (was < now <= want or want <= now < was): return res("no", f"{LEAVE}{verify._name(k)} with {now} periods; step 3 plans {want}.")
     rules = spec.get("rules") or []; seen = old + new
     depts = c["memo"].get(("depts", id(spec)))   # worked out on the first judge of a context and setup, not per lesson or per call
     if depts is None: depts = c["memo"][("depts", id(spec))] = verify.teacher_depts(m, spec)
@@ -393,6 +406,8 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
     if prefer: return res("prefer", prefer[0], must, prefer)
     return res("ok")
 
+LEAVE = "That would leave "   # how the sentence of a period count away from step 5's plan starts
+
 def _pick(j, *keys): return {k: j[k] for k in ("state", "why") + keys}
 
 def slots(m, spec, days, lesson_id, pool=(), extras=True, ctx=None):
@@ -400,11 +415,13 @@ def slots(m, spec, days, lesson_id, pool=(), extras=True, ctx=None):
     (d, p) but its own: an empty stretch of its classes as a move, a stretch where exactly one other lesson of the same length
     starts as a swap, anything else occupied "na". For a lesson in the pool (the rows of the lessons not placed), every (d, p)
     as a place, swap always None. push: where other lessons of its classes are, those lessons (in id order) and how the move
-    or place is judged once they are pushed out, dict(state, why, out=[dict(id, what)]); None where there are none. beside:
+    or place is judged once they are pushed out, dict(state, why, out=[dict(id, what, classes, groups)]): what as named() says
+    it (a band by its band's name), classes all its classes, groups how many rows; None where there are none. beside:
     where other lessons of its classes are, how the plain move or place (with them left there) is judged, dict(state, why);
     None where there are none. extras=False (the Fix card, the helper, the typed request: they read only state, why, swap and also)
     leaves push and beside out, and their judgements unmade: each slot is dict(d, p, state, why, swap, also). ctx: see judge"""
     c = _ctx(m, ctx); b = c["busy"]; mine = [x for x in pool if x["id"] == lesson_id]
+    sh = lambda s: (m["subjects"].get(s) or {}).get("short") or s; name = lambda i: named(b.ids[i], sh)
     rows = mine or _rows(m["lessons"], lesson_id); a = rows[0]; n, cls = a["n"], _classes(rows); out = []
     go = dict(kind="place" if mine else "move", id=lesson_id)
     for d in range(len(days)):
@@ -413,14 +430,14 @@ def slots(m, spec, days, lesson_id, pool=(), extras=True, ctx=None):
             there = {y["id"]: y for k in cls for q in range(p, min(p + n, m["NP"])) for y in b.at.get(("c", k, d, q), ()) if y["id"] != lesson_id}
             ids = sorted(there); push = beside = None
             if ids and extras:
-                push = dict(**_pick(judge(m, spec, days, dict(go, d=d, p=p, out=ids), c, pool)), out=[dict(id=i, what=what(b.ids[i][0])) for i in ids])
+                push = dict(**_pick(judge(m, spec, days, dict(go, d=d, p=p, out=ids), c, pool)), out=[dict(id=i, what=name(i), classes=_classes(b.ids[i]), groups=len(b.ids[i])) for i in ids])
                 beside = _pick(judge(m, spec, days, dict(go, d=d, p=p), c, pool))
             more = dict(push=push, beside=beside) if extras else {}
             if mine or not there:
                 out.append(dict(d=d, p=p, **(beside or _pick(judge(m, spec, days, dict(go, d=d, p=p), c, pool))), swap=None, also=[], **more)); continue
             y = next(iter(there.values()))
             if len(there) == 1 and (y["d"], y["p"], y["n"]) == (d, p, n):
-                also = [f"This also moves {what(y)} to {when(days, a['d'], a['p'])}."] if set(_classes(b.ids[y["id"]])) != set(cls) else []
+                also = [f"This also moves {what(y)} to {when(days, a['d'], a['p'])}."] if set(_classes(b.ids[y["id"]])) != set(cls) else []   # a band swaps only with its own classes, so this names one row
                 out.append(dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="swap", a=lesson_id, b=y["id"]), c, pool)), swap=y["id"], also=also, **more))
             else: out.append(dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[], **more))
     return out
@@ -508,8 +525,10 @@ def add_slots(m, spec, days, key, n, pool=()):
             for d in range(len(days)) for p in range(m["NP"])]
 
 def can_delete(m, spec, days, lesson_id, group=None, pool=(), ctx=None):
-    """a delete of the lesson (or its row of group) judged -> dict(state, why); ctx: see judge"""
-    return _pick(judge(m, spec, days, dict(kind="delete", id=lesson_id, group=group), ctx, pool))
+    """a delete of the lesson (or its row of group) judged -> dict(state, why, plan); plan: the "no" is because step 5's planned
+    periods would be missed (a delete checks no clash: any other "no" is a rule). ctx: see judge"""
+    j = _pick(judge(m, spec, days, dict(kind="delete", id=lesson_id, group=group), ctx, pool))
+    return dict(j, plan=j["state"] == "no" and j["why"].startswith(LEAVE))
 
 def _length(v):
     """a lesson length in any spelling of a whole number ('2', 2.0, '2.0'), else 1"""

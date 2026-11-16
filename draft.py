@@ -2,7 +2,7 @@
 setup as it is now (ttgen.verify), each difference is decided on (change step 5, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
 import copy, json, os, re, secrets, shutil, threading, uuid
-from ttgen.export import ENTIRE, PALETTE, block_label, model_from_files
+from ttgen.export import ENTIRE, PALETTE, model_from_files
 from ttgen.database import write_db
 from ttgen.spec import typed_rules
 from ttgen import choices, verify
@@ -304,8 +304,7 @@ def board():
     busy = fixes.Busy(m)
 
     def card(i, rows):
-        a = rows[0]; blocked = next((x for x in rows if x["block"]), None)
-        band = block_label(blocked["block"], blocked["level"]) if blocked else " / ".join(dict.fromkeys(short(x["subject"]) for x in rows)) if len(rows) > 1 else ""
+        a = rows[0]; band = fixes.band(rows, short)
         return dict(id=i, d=a["d"], p=a["p"], n=a["n"], classes=list(dict.fromkeys(c for x in rows for c in x["classes"])), band=band, what=fixes.what(a),
                     rows=[dict(group=x["group"], subject=x["subject"], teachers=list(x["teachers"]), tshorts=[tshort[t] for t in x["teachers"]], room=x["room"]) for x in rows])
     cards = []
@@ -334,7 +333,8 @@ def _length(n, m):
 
 def _whole(f, forcing=False):
     """a fix as the page posted it, cut to its kind's fields (the server adds at and text), or ValueError(sentence). forcing (the board's
-    request only): force (only when exactly True) is kept on a move, place, add and delete, push on a move, place and add"""
+    request only): force (only when exactly True) is kept on a move, place, add and delete with why (the sentence the page showed for
+    the place, when it is text), push on a move, place and add"""
     if not isinstance(f, dict) or f.get("kind") not in FIELDS: raise ValueError("This kind of fix is not known.")
     k = f["kind"]; out = dict(kind=k, **{x: f[x] for x in FIELDS[k] if x in f})
     if len(out) != len(FIELDS[k]) + 1: raise ValueError("The fix is not complete.")
@@ -342,7 +342,9 @@ def _whole(f, forcing=False):
     if k == "delete" and f.get("group") is not None: out["group"] = f["group"]
     if k == "teacher" and not (isinstance(out["teachers"], list) and all(isinstance(t, str) for t in out["teachers"])): raise ValueError("The fix is not complete.")
     if forcing:
-        if k in FORCED and f.get("force") is True: out["force"] = True
+        if k in FORCED and f.get("force") is True:
+            out["force"] = True
+            if isinstance(f.get("why"), str): out["why"] = f["why"]
         if k in PUSHED and f.get("push") is True: out["push"] = True
     return out
 
@@ -363,9 +365,10 @@ def _pushed(m, spec, f, pool):
 
 def fix(move):
     """make one fix: judged against the draft as it is now. na is refused with its sentence; no is refused with its sentence too, unless the request
-    has force (a move, place, add or delete from the board); with push the lessons of the same classes in the way are worked out here, under the
-    lock, and kept on the fix as out (neither push nor force is kept). A lift needs no force. Returns info()."""
-    f = _whole(move, forcing=True); force, push = f.pop("force", False), f.pop("push", False)
+    has force (a move, place, add or delete from the board) and why, the sentence the page showed for that place, is the judgement's sentence now
+    (a place that went wrong for another reason since is refused, with the reason as it now is); with push the lessons of the same classes in the
+    way are worked out here, under the lock, and kept on the fix as out (none of push, force and why is kept). A lift needs no force. Returns info()."""
+    f = _whole(move, forcing=True); force, push, why = f.pop("force", False), f.pop("push", False), f.pop("why", None)
     with _lock:   # from the judgement to the write: two clicks cannot both pass the judgement on the same state
         m, rec, fx = _now(); spec, days, pool = m["checked_setup"], m["days"], fx["pool"]
         if f["kind"] == "add":
@@ -375,7 +378,7 @@ def fix(move):
             out = _pushed(m, spec, f, pool)
             if out: f["out"] = out
         j = fixes.judge(m, spec, days, f, pool=pool)
-        if j["state"] == "na" or (j["state"] == "no" and not force): raise ValueError(j["why"])
+        if j["state"] == "na" or (j["state"] == "no" and not (force and why == j["why"])): raise ValueError(j["why"])
         text = fixes.apply_one(copy.deepcopy(m["lessons"]), f, spec, days, pool=copy.deepcopy(pool))   # the sentence of the fix as it is made
         meta = store.read_json(_p("meta.json"), {})
         store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=store.now(), text=text)]))

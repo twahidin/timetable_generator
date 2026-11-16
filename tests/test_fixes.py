@@ -239,7 +239,7 @@ def slots_for_a_lesson_and_a_block():
     m, sp = model_with(L); S = fixes.slots(m, sp, DAYS, 1)
     assert len(S) == len(DAYS) * NP - 1 and not [s for s in S if (s["d"], s["p"]) == (0, 2)]
     assert bare(at(S, 2, 2)) == dict(d=2, p=2, state="ok", why="", swap=7, also=[]) and bare(at(S, 1, 2)) == dict(d=1, p=2, state="ok", why="", swap=None, also=[])
-    assert at(S, 2, 2)["push"]["out"] == [dict(id=7, what=f"Science for {A}")] and at(S, 1, 2)["push"] is None
+    assert at(S, 2, 2)["push"]["out"] == [dict(id=7, what=f"Science for {A}", classes=[A], groups=1)] and at(S, 1, 2)["push"] is None
     assert at(S, 3, 5)["state"] == "na" and at(S, 3, 5)["why"] == "Another lesson is there." and at(S, 3, 6)["why"] == "Another lesson is there."
     assert at(S, 4, 2)["swap"] == 9 and at(S, 4, 2)["also"] == [f"This also moves Assembly talk for {A}, {B} to {DAYS[0]} period 2."] and at(S, 4, 2)["state"] == "ok"
     assert at(S, 0, RECESS)["state"] == "na" and at(S, 0, NP - 1)["why"] == "That is outside the day."
@@ -313,9 +313,9 @@ def teacher_room_add_delete_options():
     A1 = fixes.add_slots(m, sp, DAYS, KEY, 1); assert len(A1) == len(DAYS) * NP and at(A1, 4, 2)["state"] == "ok" and at(A1, 0, 2)["state"] == "no"
     assert at(A1, 0, RECESS)["state"] == "na"
     A2 = fixes.add_slots(m, sp, DAYS, KEY, 2); assert at(A2, 4, 2) == dict(d=4, p=2, state="no", why=f"That would leave {SUBJ} for {CLS} with {P + 1} periods; step 3 plans {P}.")
-    assert fixes.can_delete(m, sp, DAYS, 1) == dict(state="no", why=f"That would leave {SUBJ} for {CLS} with {have - 2} periods; step 3 plans {P}.")
+    assert fixes.can_delete(m, sp, DAYS, 1) == dict(state="no", why=f"That would leave {SUBJ} for {CLS} with {have - 2} periods; step 3 plans {P}.", plan=True)
     m, sp = model_with(L + [lesson(3, 4, 7, 1, [CLS], SUBJ, ENTIRE, TEACHERS, level=LV), lesson(4, 4, 8, 1, [CLS], "Other", ENTIRE, TEACHERS, level=LV)])
-    assert not [x for x in fixes.short(m, sp) if x["key"] == KEY] and fixes.can_delete(m, sp, DAYS, 4) == dict(state="ok", why="")
+    assert not [x for x in fixes.short(m, sp) if x["key"] == KEY] and fixes.can_delete(m, sp, DAYS, 4) == dict(state="ok", why="", plan=False)
     assert fixes.can_delete(m, sp, DAYS, 3)["state"] == "no" and at(fixes.add_slots(m, sp, DAYS, KEY, 1), 4, 2)["state"] == "no"
 
 @t
@@ -497,9 +497,9 @@ def test_slots_say_what_a_push_would_take_out():
     assert all(set(s) == {"d", "p", "state", "why", "swap", "also", "push", "beside"} for s in S)
     plain = fixes.slots(m, sp, DAYS, 1, extras=False)   # the Fix card's, the helper's and the typed request's: no push, no beside, the rest the same
     assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in plain) and plain == [old(s) for s in S]
-    assert at(S, 1, 2)["push"] == dict(state="ok", why="", out=[dict(id=2, what=f"Science for {A}")]) and old(at(S, 1, 2)) == dict(d=1, p=2, state="ok", why="", swap=2, also=[])
+    assert at(S, 1, 2)["push"] == dict(state="ok", why="", out=[dict(id=2, what=f"Science for {A}", classes=[A], groups=1)]) and old(at(S, 1, 2)) == dict(d=1, p=2, state="ok", why="", swap=2, also=[])
     assert at(S, 2, 2)["push"] is None and old(at(S, 2, 2)) == dict(d=2, p=2, state="ok", why="", swap=None, also=[])
-    assert at(S, 1, 1)["push"] == dict(state="ok", why="", out=[dict(id=2, what=f"Science for {A}")]) and at(S, 1, 1)["state"] == "na"
+    assert at(S, 1, 1)["push"] == dict(state="ok", why="", out=[dict(id=2, what=f"Science for {A}", classes=[A], groups=1)]) and at(S, 1, 1)["state"] == "na"
     assert at(S, 3, 2)["push"] is None and at(S, 3, 2)["state"] == "no"   # a teacher busy with another class: nothing of its class to push
 
 @t
@@ -513,10 +513,10 @@ def test_slots_say_whether_a_lesson_can_go_beside_another():
     assert at(S, 3, 2)["beside"] == {k: v for k, v in fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=3, p=2)).items() if k in ("state", "why")}
     S3 = fixes.slots(m, sp, DAYS, 3); b = at(S3, 1, 2)["beside"]
     assert b["state"] == "no" and b["why"].startswith(f"{A} has "), b
-    assert at(S3, 1, 2)["state"] in ("na", "ok", "prefer", "no") and at(S3, 1, 2)["push"]["out"] == [dict(id=2, what=fixes.what(L[1]))]
+    assert at(S3, 1, 2)["state"] in ("na", "ok", "prefer", "no") and at(S3, 1, 2)["push"]["out"] == [dict(id=2, what=fixes.what(L[1]), classes=[A], groups=1)]
     pool = [lesson(5, 0, 3, 1, [A], "Drama", "G2", [T[3]], level=LV)]; L2 = L[:1] + L[2:]
     m, sp = model_with(L2); P = fixes.slots(m, sp, DAYS, 5, pool=pool)
-    assert at(P, 0, 2)["beside"] == dict(state="ok", why="") and at(P, 0, 2)["push"]["out"] == [dict(id=1, what=fixes.what(L[0]))]
+    assert at(P, 0, 2)["beside"] == dict(state="ok", why="") and at(P, 0, 2)["push"]["out"] == [dict(id=1, what=fixes.what(L[0]), classes=[A], groups=1)]
     b = at(P, 3, 2)["beside"]; assert b["state"] == "no" and b["why"].startswith(f"{A} has "), b
     assert at(P, 2, 2)["beside"] is None
 
@@ -526,7 +526,7 @@ def test_slots_of_a_pooled_lesson_are_places():
     S = fixes.slots(m, sp, DAYS, 5, pool=pool)
     assert len(S) == len(DAYS) * NP and all(s["swap"] is None and s["also"] == [] for s in S)
     assert {k: at(S, 0, 2)[k] for k in ("state", "why", "push")} == dict(state="ok", why="", push=None)
-    assert at(S, 2, 2)["state"] == "no" and at(S, 2, 2)["why"] == f"{A} has {SUBJ} for {A} then." and at(S, 2, 2)["push"] == dict(state="ok", why="", out=[dict(id=1, what=f"{SUBJ} for {A}")])
+    assert at(S, 2, 2)["state"] == "no" and at(S, 2, 2)["why"] == f"{A} has {SUBJ} for {A} then." and at(S, 2, 2)["push"] == dict(state="ok", why="", out=[dict(id=1, what=f"{SUBJ} for {A}", classes=[A], groups=1)])
     assert at(S, 0, RECESS)["state"] == "na"
 
 @t
@@ -566,8 +566,8 @@ def test_a_pushed_out_or_pooled_lesson_still_counts_for_the_plan():
 @t
 def test_the_option_lists_take_the_pool():
     m, sp = model_with(_placed(PLAN)); pool = [_of_key(KEY, 50, 0, 2)]
-    assert fixes.can_delete(m, sp, DAYS, 10) == fixes.can_delete(m, sp, DAYS, 10, pool=[]) == dict(state="no", why=_leave(PLAN - 1))   # a placed lesson step 5 asks for
-    assert fixes.can_delete(m, sp, DAYS, 10, pool=pool) == dict(state="ok", why="")   # the pooled one counts: this one is surplus
+    assert fixes.can_delete(m, sp, DAYS, 10) == fixes.can_delete(m, sp, DAYS, 10, pool=[]) == dict(state="no", why=_leave(PLAN - 1), plan=True)   # a placed lesson step 5 asks for
+    assert fixes.can_delete(m, sp, DAYS, 10, pool=pool) == dict(state="ok", why="", plan=False)   # the pooled one counts: this one is surplus
     m, sp = model_with(_placed(PLAN - 1)); A = fixes.add_slots(m, sp, DAYS, KEY, 1)
     assert any(x["state"] == "ok" for x in A) and A == fixes.add_slots(m, sp, DAYS, KEY, 1, pool=[])
     A = fixes.add_slots(m, sp, DAYS, KEY, 1, pool=pool); assert not [x for x in A if x["state"] in ("ok", "prefer")]
@@ -738,5 +738,42 @@ if "--full" in sys.argv:
         back = fixes.judge(m1, sp, days, dict(kind="move", id=lid, d=by[lid][0]["d"], p=by[lid][0]["p"]))["state"]; agree(m1, base, dict(kind="move", id=lid, d=by[lid][0]["d"], p=by[lid][0]["p"]), back)
         assert {k_ for k_, _ in seen} >= {"teacher", "add", "delete", "move"} and len({st for _, st in seen}) >= 2, seen
         print("  agreed:", dict(seen))
+
+# ----------------------------------------------------------------------------------------------- the fix wave after the whole-branch review
+@t
+def test_a_band_in_the_way_is_named_as_a_band_with_its_classes():
+    sp0, Bk = one_block(); cls = Bk[0]["classes"]; label = export.block_label(Bk[0]["block"], Bk[0]["level"]); assert label
+    L = Bk + [lesson(30, 1, 5, 2, [cls[1]], SUBJ, ENTIRE, [T[-1]], level=LV)]
+    m, sp = model_with(L); S = fixes.slots(m, sp, DAYS, 30)
+    assert at(S, 0, 0)["push"]["out"] == [dict(id=7, what=f"the {label} band", classes=cls, groups=3)], at(S, 0, 0)["push"]
+    assert fixes.named(Bk) == f"the {label} band" and fixes.band(Bk) == label and fixes.named(L[-1:]) == fixes.what(L[-1]) and fixes.band(L[-1:]) == ""
+    two = [dict(x, block="") for x in Bk]; shorts = " / ".join(dict.fromkeys(export.abbrev(x["subject"]) for x in two))
+    assert fixes.named(two) == f"the {shorts} band"   # a band with no block is named by its subjects, as the board names its card
+    pool = []; text = fixes.apply_one(copy.deepcopy(L), dict(kind="move", id=30, d=0, p=0, out=[7]), sp, DAYS, pool=pool)
+    assert text.endswith(f" Pushed out: the {label} band.") and {x["id"] for x in pool} == {7}, text
+
+@t
+def test_at_replay_out_lifts_only_a_lesson_still_in_the_way():
+    other = next(c["class"] for c in SP["classes"] if c["class"] != CLS)
+    sp, L = two_lessons(); L.append(lesson(3, 3, 0, 1, [other], "Art", ENTIRE, [TEACHER], level=ROW["level"]))   # another class, at the target
+    out = fixes.apply(L, [dict(kind="move", id=2, d=3, p=99), dict(kind="move", id=1, d=3, p=0, out=[2, 3])], sp, DAYS)   # the first is skipped: 2 never came
+    assert len(out["problems"]) == 1 and out["pool"] == [] and out["texts"] == [f"Moved {fixes.what(L[0])} from {DAYS[0]} period 2 to {DAYS[3]} period 0."], out
+    assert {x["id"]: (x["d"], x["p"]) for x in out["lessons"]} == {1: (3, 0), 2: (1, 4), 3: (3, 0)}
+    sp, L = two_lessons()   # the same day, a period apart: not in the way either
+    out = fixes.apply(L, [dict(kind="move", id=1, d=1, p=2, out=[2])], sp, DAYS); assert out["pool"] == [] and "Pushed out" not in out["texts"][0], out
+    out = fixes.apply(L, [dict(kind="move", id=1, d=1, p=3, out=[2])], sp, DAYS); assert [x["id"] for x in out["pool"]] == [2] and "Pushed out" in out["texts"][0], out   # periods 3-4 meet 4-5
+    pool = [lesson(5, 0, 0, 2, [CLS], "Music", ENTIRE, TEACHERS, level=ROW["level"])]; L2 = copy.deepcopy(two_lessons()[1])
+    assert "Pushed out" not in fixes.apply_one(L2, dict(kind="place", id=5, d=2, p=0, out=[1, 2]), sp, DAYS, pool=pool) and [x["id"] for x in pool] == []   # a place, nothing in the way
+    x = fixes.apply(two_lessons()[1], [dict(kind="add", key=KEY, d=0, p=2, n=1, room="", out=[1, 2])], sp, DAYS)
+    assert [y["id"] for y in x["pool"]] == [1] and x["texts"][0].endswith(f"Pushed out: {fixes.what(two_lessons()[1][0])}."), x   # an add: only the one it meets
+
+@t
+def test_the_delete_says_whether_its_no_is_the_plan():
+    m, sp = model_with(_placed(PLAN)); j = fixes.can_delete(m, sp, DAYS, 10)
+    assert j == dict(state="no", why=_leave(PLAN - 1), plan=True), j
+    m, sp = model_with(_placed(PLAN + 1)); assert fixes.can_delete(m, sp, DAYS, 10) == dict(state="ok", why="", plan=False)   # a surplus lesson
+    real = fixes.judge; fixes.judge = lambda *a, **k: dict(state="no", why="Rule Not available: Mr X has Art on Mon period 2.", must=["x"], prefer=[])
+    try: assert fixes.can_delete(m, sp, DAYS, 10) == dict(state="no", why="Rule Not available: Mr X has Art on Mon period 2.", plan=False)   # a no from a rule
+    finally: fixes.judge = real
 
 print(f"{n} checks passed")
