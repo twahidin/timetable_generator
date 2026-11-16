@@ -93,8 +93,17 @@ is not on step 3, and a named subject the class has only in groups.
    and the typed rules and choices used that the agent reported. A warning for another school than the saved setup, and
    which configuration the timetable was made from, are shown too. Below the upload, the timetable is shown as a board
    of one day (a row per class, the periods across) or of one class's whole cycle; a lesson is dragged to another time
-   on its row, or clicked and then a place clicked, wherever the app allows the move or the swap, and **Undo the last
-   timetable change** puts it back. The list of warnings and the editor are below the board. The warnings are listed by
+   on its row, or clicked and then a place clicked, and **Undo the last timetable change** puts it back. Each place is
+   coloured: green is clean, amber bends a Prefer, red lands but clashes, grey cannot take it (a break, outside the day).
+   A lesson dropped where it clashes lands there and is marked on its card, and the counters above the board (Not placed,
+   No teacher, In two places, In a break, No room) count what is wrong; a click on one steps through its lessons. A drop
+   on another lesson asks first: swap with it, put it beside it (when both can be there), or push it out. Held over another
+   day's tab for half a second, a dragged lesson goes to that day. **Lift out** (or Ctrl or Cmd+X) takes a lesson off the
+   board, and a pushed-out lesson goes the same way: both wait in **Not placed**, the tray beside the board, until they
+   are dragged or pasted (Ctrl or Cmd+V, where the pointer is) back onto their row, deleted, or undone. **Delete this
+   lesson** asks first and says when step 5 asks for the lesson; the tray's **Step 5 asks for these** lists the lessons
+   step 5 plans that the timetable lacks, to drag onto a free place. Nothing is published, printed or downloaded while a
+   lesson waits in Not placed: step 9 says how many and sends you back here. The list of warnings and the editor are below the board. The warnings are listed by
    kind and then by class, teacher or group, with the timetable's side and step 5's side. For each one, **Update step
    5** changes the setup to match the timetable, and a rule in words that reads **Check again** has a **Still met**
    button for when you have looked (**Reopen** takes it back). The summary line reads critical, warnings open and
@@ -119,7 +128,9 @@ is not on step 3, and a named subject the class has only in groups.
    back. With `ANTHROPIC_API_KEY` set, the Fix card also has a box above the ways: type what you want in your own words ("move PE for 2A off Friday", "give 2A maths to Mdm Lee"). It takes three kinds of request: move lessons, change who teaches a lesson, change a lesson's room. A language model only reads the words into a small request; the app finds the lessons and people itself, asks which one when a name could be several, and runs the same checks as **Ways to settle this**, showing up to three ways per lesson with **Show** and **Apply**. Nothing changes until you press Apply, and anything else you ask to keep is repeated back as not checked. The whole site can send 30 requests in 10 minutes. If the words cannot be read, the box says so and the helper's own suggestions carry on; without the key the box is not there and the helper works as before. When no way settles a warning the panel says so and lists the nearest ways with what each breaks; those are
    blocked (they would cause a clash or newly break a Must rule) and have no button. Below the list, **Go to step 9** goes on.
 6. **Publish** (step 9): it shows the timetable as it will be published, read-only: the critical mistakes (each with
-   **Show on step 8**, which opens the Fix card on it), every other open warning, and the changes made in the app. **Publish
+   **Show on step 8**, which opens the Fix card on it, or selects a lesson that is not placed in the tray), every other
+   open warning, and the changes made in the app. While a lesson waits in Not placed, the printouts and the draft's
+   download are replaced by how many are waiting. **Publish
    this timetable** is off while a critical mistake remains, with the reason above it, and the server refuses as well
    (it says how many critical mistakes are left), so a second tab cannot get round it. With none, it makes the draft what teachers and students see,
    with every download and the personal student codes (about a minute), even with warnings open: **Published now**

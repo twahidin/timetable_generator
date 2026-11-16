@@ -417,6 +417,10 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .bdctl{align-items:center;gap:8px 14px;flex-wrap:wrap;margin:6px 0}
 .bdweek{display:inline-flex;gap:4px;align-items:center;margin-right:6px}
 .bdtab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.bdtab.hover{outline:3px solid var(--accent);outline-offset:1px}   /* a card in the air waits over this day's tab */
+#bdBox .bdold{display:none}   /* the board's rows and tray as they were when a drag began, kept (hidden) until it ends */
+#bdTray h3.bdshort{margin-top:10px}
+.bdcard.tray.short b{white-space:normal}
 .bdfind select{margin-left:4px}
 .bdsel{display:flex;gap:6px 8px;align-items:center;align-content:flex-start;flex-wrap:wrap;background:var(--chip);border-radius:8px;padding:6px 10px;margin:6px 0;height:110px;overflow:auto;box-sizing:border-box}   /* a fixed height: the rows never move under the pointer when the line changes */
 .bdsel:empty{background:none}
