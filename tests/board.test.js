@@ -650,4 +650,17 @@ t("busyRefusal: only the server's two busy sentences, for that teacher or room",
   assert.strictEqual(Board.busyRefusal(null, "A1-01", "room"), false);
 });
 
+t("clashPlace: the day and first period a teacher clash's sentence names", () => {
+  const days = ["Odd Mon", "Odd Tue", "Even Mon", "Even Tue"];
+  assert.deepStrictEqual(Board.clashPlace("Teacher double-booked: Adeline Tan on Odd Mon period 1 (7.50).", days), { d: 0, p: 1 });
+  assert.deepStrictEqual(Board.clashPlace("Teacher double-booked: Farhan Low on Even Mon 11.30-12.30 (periods 12-14).", days), { d: 2, p: 12 });
+  assert.deepStrictEqual(Board.clashPlace("Teacher double-booked: Simon on Lee on Odd Tue period 3 (9.10).", days), { d: 1, p: 3 });   // a name that holds " on "
+  assert.deepStrictEqual(Board.clashPlace("Teacher double-booked: Ann Ho on Mon B period 4 (9.30).", ["Mon", "Mon B"]), { d: 1, p: 4 });   // the longer day's name first
+  assert.deepStrictEqual(Board.clashPlace("Teacher double-booked: Ann Ho on Mon period 4 (9.30).", ["Mon", "Mon B"]), { d: 0, p: 4 });
+  assert.strictEqual(Board.clashPlace("Teacher double-booked: Ann Ho on Sun period 4 (9.30).", days), null);
+  assert.strictEqual(Board.clashPlace("Teacher double-booked: Ann Ho.", days), null);
+  assert.strictEqual(Board.clashPlace(null, days), null);
+  assert.strictEqual(Board.clashPlace("Teacher double-booked: Ann Ho on Odd Mon period 1 (7.50).", null), null);
+});
+
 console.log(`${n} cases passed`);

@@ -464,6 +464,23 @@ var Board = (function () {
     return { id: null, d: d < 0 ? null : d, cls: h.cls };
   }
 
+  /* the place a teacher clash's sentence names ("...: {teacher} on {day} period {p} (7.50)." or "... on {day} 11.30-12.30 (periods 12-14).")
+     -> {d, p}: the day's index in days and the first period; null when it names no day of days. A name may hold " on ", so each " on "
+     is tried; the longest day's name is tried first ("Mon B" before "Mon") */
+  function clashPlace(text, days) {
+    var s = String(text || ""), list = (days || []).map(function (n, i) { return { n: String(n), i: i }; })
+      .sort(function (a, b) { return b.n.length - a.n.length; });
+    for (var at = s.indexOf(" on "); at >= 0; at = s.indexOf(" on ", at + 1)) {
+      var rest = s.slice(at + 4);
+      for (var k = 0; k < list.length; k++) {
+        if (rest.indexOf(list[k].n + " ") !== 0) continue;
+        var tail = rest.slice(list[k].n.length), m = /^ period (\d+)/.exec(tail) || /^ [\d.:]+-[\d.:]+ \(periods? (\d+)/.exec(tail);
+        if (m) return { d: list[k].i, p: Number(m[1]) };
+      }
+    }
+    return null;
+  }
+
   function keyName(card, key) {
     var parts = String(key || "").split(":");
     if (parts[0] === "G") return "group " + parts.slice(1).join(":");
@@ -540,7 +557,7 @@ var Board = (function () {
            start: start, slot: slot, states: states, can: can, target: target, aim: aim, fix: fix, onRow: onRow, tell: tell,
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
            lands: lands, forced: forced, asks: asks, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
-           warned: warned, flag: flag, at: at, of: of, hand: hand, handText: handText, people: people, venues: venues,
+           warned: warned, flag: flag, at: at, clashPlace: clashPlace, of: of, hand: hand, handText: handText, people: people, venues: venues,
            teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal };
 })();
 if (typeof module !== "undefined") module.exports = Board;

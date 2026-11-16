@@ -2741,6 +2741,7 @@ async function publishDraft() {   // step 9
 async function decide(answer, key) {   // answer is step5, open or met; the key is the warning's (it may hold a "|")
   const j = await post("/api/draft/decide", { key, answer });
   if (!j) return;
+  if (S.help && S.help.warn === key) fxShut(S.help);   // the warning is answered: its ways shut
   S.draft = j; drawDraft();   // only the result area: render() would reset the chosen file names
   poll();
 }
@@ -2872,7 +2873,7 @@ function fxBusy(v) { FX.busy = v; bdBusy(); }   // every sender sets it here, so
 const FX_BROKE = "Something went wrong working that out. The suggestions below still work.";   // the server's own sentence for a fault (typed.BROKE)
 const fxShorts = () => { const m = {}; ((S.spec && S.spec.teachers) || []).forEach(t => { if (t.name && t.short) m[t.name] = t.short; }); return m; };
 const fxDot = st => `<i class="dot ${esc(Grid.stateClass(st))}"></i>`;
-const fxHelp = () => S.help || (S.help = { warn: null, was: null, changed: "", settled: false, ways: null, waysFail: false, pre: null, preWant: null, preId: null, words: "", ans: null, pick: {}, askN: 0, askBusy: false, askWords: "" });
+const fxHelp = () => S.help || (S.help = { warn: null, was: null, changed: "", settled: false, ways: null, waysFail: false, waysN: 0, pre: null, preWant: null, preId: null, words: "", ans: null, pick: {}, askN: 0, askBusy: false, askWords: "" });
 function fixesHTML(j) {   // the Changes tab: undo of the last change, the changes made in the app, newest first, and the fixes that could not be applied
   const fl = j.fixes || [], dis = FX.busy ? " disabled" : "";
   return (fl.length
@@ -2988,13 +2989,13 @@ async function fxGet(url) {
 }
 const fxQ = o => Object.keys(o).map(k => `${k}=${encodeURIComponent(o[k])}`).join("&");
 const fxWaysOf = f => f.ways && f.ways.key === f.warn ? f.ways.answer : null;   // the ways only while they are for the warning open now
-async function fxWays(f) {   // the ways to settle the open warning; an answer for another warning is dropped
-  const asked = f.warn; f.ways = null; f.waysFail = false; if (!asked) return;
+async function fxWays(f) {   // the ways to settle the open warning; an answer for another warning, or older than the last fetch (waysN), is dropped
+  const asked = f.warn, n = ++f.waysN; f.ways = null; f.waysFail = false; if (!asked) return;
   const j = await fxGet("/api/draft/suggest?" + fxQ({ key: asked }));
-  if (S.help !== f || f.warn !== asked) return;
+  if (S.help !== f || f.warn !== asked || f.waysN !== n) return;
   f.ways = j ? { key: asked, answer: j } : null; f.waysFail = !j;
 }
-function fxShut(f) { f.warn = null; f.was = null; f.changed = ""; f.ways = null; f.waysFail = false; f.settled = false; if (f.preId && f.preId[0] !== "a") fxPreClear(f); }   // the ways closed (a preview of the typed answer stays)
+function fxShut(f) { f.waysN++; f.warn = null; f.was = null; f.changed = ""; f.ways = null; f.waysFail = false; f.settled = false; if (f.preId && f.preId[0] !== "a") fxPreClear(f); }   // the ways closed (a preview of the typed answer stays)
 function fxOpenWays(key) {   // "Ways to settle this": the ways open under that warning and are fetched; a second click shuts them; another warning's shuts the first
   const f = fxHelp(), w = ((S.draft && S.draft.warnings) || []).find(x => x.key === key), was = f.warn === key && !f.settled;
   fxShut(f);
@@ -3004,7 +3005,7 @@ function fxOpenWays(key) {   // "Ways to settle this": the ways open under that 
   fxWays(f).then(() => { if (S.help === f && f.warn === key) { fxDraw(); fxReveal($("#fxWays")); } });
 }
 async function fxPreview(fixes, id) {   // what the fixes would do, shown under the way id; nothing is changed. An answer for other fixes is dropped
-  const f = fxHelp();
+  const f = fxHelp(); if (FX.busy) { toast(BDWHY.busy); return; }   // a change is being saved: the preview would be of the timetable before it
   const asked = JSON.stringify(fixes); f.preWant = asked; f.preId = id; f.pre = null; fxDraw();
   let j = null; try { j = await post("/api/draft/preview", { fixes }); } catch (e) { toast("Could not reach the server: " + e.message); }
   if (S.help !== f || f.preWant !== asked || f.preId !== id) return;
@@ -3012,17 +3013,17 @@ async function fxPreview(fixes, id) {   // what the fixes would do, shown under 
   fxDraw(); fxReveal($("#bdSide .fxpre"));
 }
 async function fxApply(fixes) {   // one or two fixes together, as received; all or nothing
-  const f = fxHelp(); if (FX.busy) return;
+  const f = fxHelp(); if (FX.busy) { toast(BDWHY.busy); return; }
   fxBusy(true);
   try {
     const j = await post("/api/draft/fixes", { fixes });
-    if (j) { await fxAfter(j); if (S.help === f) fxReveal($("#fxWays")); }   // the ways (or "Settled.") brought into view in the panel
+    if (j) { f.reveal = true; await fxAfter(j); if (S.help === f) fxReveal($("#fxWays")); if (f.settled || !f.warn) f.reveal = false; }   // the ways (or "Settled.") brought into view in the panel, again when the new ways come
     else {   // refused: the sentence is toasted; the draft and the ways are fetched again (the list may have changed under them)
       fxPreClear(f); f.ways = null; f.waysFail = false; fxAskClear(f);   // the typed answer too: it is as stale as the ways. The old Preview and Apply buttons are not live while the new ways load
       const d = await fxGet("/api/draft"); if (S.help !== f) return;
       if (d && d.warnings) { S.draft = d; poll(); bdSync(); fxFollow(f, d.warnings); }
       drawDraft();
-      if (f.warn && !f.settled) { await fxWays(f); if (S.help === f) fxDraw(); }
+      if (f.warn && !f.settled) fxWays(f).then(() => { if (S.help === f) fxDraw(); });
     }
   } catch (e) { toast("Could not reach the server: " + e.message); } finally { fxBusy(false); }
 }
@@ -3042,7 +3043,7 @@ async function fxAfter(j) {   // every new draft answer comes here (the helper's
     if (f.warn) { fxFollow(f, j.warnings); f.ways = null; f.waysFail = false; }
   }
   drawDraft();
-  if (f && f.warn && !f.settled) { await fxWays(f); if (S.help === f) fxDraw(); }
+  if (f && f.warn && !f.settled) fxWays(f).then(() => { if (S.help === f) { fxDraw(); if (f.reveal) fxReveal($("#fxWays")); } f.reveal = false; });   // not awaited: the board is free at once
 }
 function fxSuggestion(f, i) {   // "3": the ways' third; "a1.0": the typed answer's second lesson, first suggestion
   if (/^a\d+\.\d+$/.test(i)) { const [g, k] = i.slice(1).split(".").map(Number), a = f.ans && f.ans.ok !== false && f.ans.groups; return a && a[g] && (a[g].suggestions || [])[k] || null; }
@@ -3751,16 +3752,17 @@ function bdGoTo(c) {   // the board shows card c: its day, or its class's cycle 
   bd.mode.d = c.d;   // the day shown, or the day the cycle view goes back to
   (d.levels || []).forEach(lv => { if (lv.classes.some(x => cls.includes(x))) delete bd.fold[lv.level]; });
 }
-/* where a warning's "Show me" goes: Board.at's lesson or class, else the teacher it names ({teacher, d, clash}: d the index of the day it
-   names, null with none); null when there is nowhere */
+/* where a warning's "Show me" goes: Board.at's lesson or class, else the teacher it names ({teacher, d, p, clash}: d the index of the day
+   it names, p the period, null with none; a clash names them in its sentence, Board.clashPlace); null when there is nowhere */
 function bdWhere(w, data) {
   const a = Board.at(w, data); if (a) return a;
   const h = w && w.where, t = h && h.teacher; if (!t) return null;
-  const d = h.day ? (data.days || []).indexOf(h.day) : -1;
-  return { id: null, teacher: t, d: d < 0 ? null : d, clash: w.kind === "clash" };
+  const pl = w.kind === "clash" ? Board.clashPlace(w.text, data.days || []) : null, d = h.day ? (data.days || []).indexOf(h.day) : pl ? pl.d : -1;
+  return { id: null, teacher: t, d: d < 0 ? null : d, p: pl && pl.d === d ? pl.p : null, clash: w.kind === "clash" };
 }
-function bdShowTeacher(a, stay) {   // a warning about a teacher: Teachers rows on its day, the first lesson of that teacher's row marked "In two places" then selected; a clash
-  // that names no day: the day shown when that row has such a lesson on it, else the first day that has; any other warning about a teacher with no day: their whole cycle
+function bdShowTeacher(a, stay) {   // a warning about a teacher: Teachers rows on its day, the lesson of that teacher's row at its period selected (one marked "In two
+  // places" first; with no period, the first marked one); a clash whose sentence names no place: the day shown when that row has a marked lesson on it, else the first
+  // day that has; any other warning about a teacher with no day: their whole cycle
   const b = S.board, d = b.data, by = "teacher", row = { by, name: a.teacher };
   const marked = x => (x.marks || []).includes("teacher") && Board.of(x, row).length > 0, shown = b.mode.d;
   b.from = null;
@@ -3769,7 +3771,9 @@ function bdShowTeacher(a, stay) {   // a warning about a teacher: Teachers rows 
   const day = a.d !== null ? a.d : d.cards.some(x => x.d === shown && marked(x)) || !any ? shown : any.d;
   b.mode = { kind: "day", d: day, by };
   Board.groups(d, b.mode, null).forEach(g => { if (g.rows.some(r => r.name === a.teacher)) delete b.fold[bdFoldKey(by, g.name)]; });
-  const c = d.cards.filter(x => x.d === day && marked(x)).sort((x, y) => x.p - y.p)[0] || null;
+  const covers = x => a.p === null || a.p === undefined || (x.p <= a.p && a.p < x.p + (Number(x.n) > 0 ? Number(x.n) : 1));
+  const mine = d.cards.filter(x => x.d === day && Board.of(x, row).length > 0 && covers(x)).sort((x, y) => x.p - y.p);
+  const c = mine.find(marked) || (a.p !== null && a.p !== undefined ? mine[0] : null) || null;
   b.sel = c ? c.id : null;
   if (c) { b.from = { cls: "", by, name: a.teacher, id: c.id }; bdLessonOpen(c.id, !stay); }
   return c;
