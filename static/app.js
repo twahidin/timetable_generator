@@ -1270,16 +1270,16 @@ const tkOpen = (ti, col) => { heldOpen(TV, S.spec.teachers, ti); TV.col = col ||
 const tkText = v => v == null ? "" : String(v).trim();
 const tkSecondOf = t => { const d2 = tkText(t.dept2); return d2 === tkText(t.dept) ? "" : d2; };   // the second department a row really has
 const tkMark = t => t.provisional === "Yes" ? ` <span class="headmark"${committee() ? ' title="A department head added this teacher. Set Provisional to No to confirm them."' : ""}>added by a head, not yet confirmed</span>` : "";
-function teachersTable(rows, load) {   // today's table less Can teach, plus Department 2
-  const { out, crit } = issues(), P = S.pick, lc = loadChecks(load), all = rows.length && rows.every(([, i]) => P.teachers.has(i)), depts = sc().departments || [];
+function teachersTable(rows, iss) {   // today's table less Can teach, plus Department 2
+  const { out, crit, load } = iss, P = S.pick, lc = loadChecks(load), all = rows.length && rows.every(([, i]) => P.teachers.has(i)), depts = sc().departments || [];
   return `<div class="tablewrap"><table><tr><th><input type="checkbox" data-pickall="teachers" title="Tick every teacher shown (${rows.length})" ${all ? "checked" : ""}></th><th></th><th>Teacher</th><th>Short</th><th>Department</th><th>Department 2</th><th>Allowance</th><th>Given</th><th>Spare</th><th>Role</th><th>Other duties</th><th>Total load</th><th>Load check</th><th>Provisional</th><th></th></tr>
     ${rows.map(([t, i]) => { const g = load[t.name] || 0; const sp = t.allowance ? Number(t.allowance) - g : ""; const tot = g + (Number(t.other_duties) || 0);
       return `<tr id="teachers-${i}" class="${rowCls(out, crit, "teachers", i)}${P.teachers.has(i) ? " picked" : ""}"><td><input type="checkbox" data-pick="teachers.${i}" ${P.teachers.has(i) ? "checked" : ""}></td><td class="avcell" title="New look is on the teacher's profile, step 5">${avatarOf(t, 32)}</td><td style="min-width:180px">${inp(`spec.teachers.${i}.name`, t.name)}</td><td>${inp(`spec.teachers.${i}.short`, t.short, "text", 'style="width:90px"')}</td><td>${sel(`spec.teachers.${i}.dept`, t.dept, depts)}</td><td>${sel(`spec.teachers.${i}.dept2`, tkSecondOf(t), depts.filter(d => d !== tkText(t.dept)))}</td><td class="num">${inp(`spec.teachers.${i}.allowance`, t.allowance, "number")}</td><td class="calc">${g}</td><td class="calc" style="${sp !== "" && sp < 0 ? "color:var(--warn);font-weight:600" : ""}">${sp}</td><td style="min-width:96px">${sel(`spec.teachers.${i}.role`, t.role, roles().map(r => r.role))}</td><td class="num">${inp(`spec.teachers.${i}.other_duties`, t.other_duties, "number", 'style="width:60px"')}</td><td class="calc" style="${t.allowance && tot > Number(t.allowance) ? "color:var(--warn);font-weight:600" : ""}">${tot}</td><td class="calc" style="white-space:normal;min-width:200px;${lc[i] ? "color:var(--warn)" : ""}">${esc(lc[i])}</td><td>${sel(`spec.teachers.${i}.provisional`, t.provisional, ["Yes", "No"])}${tkMark(t)}</td><td>${delBtn("teachers", i)}</td></tr>`; }).join("")}
     </table></div>`;
 }
 /* the Cards view: a column per department; a teacher with two departments has a card in each. Nothing is kept between draws but which card is open. */
-function teachersCards(cols, load) {
-  const { out, crit } = issues(), P = S.pick, T = S.spec.teachers, lc = loadChecks(load), depts = sc().departments || [], head = tkHead();
+function teachersCards(cols, iss) {
+  const { out, crit, load } = iss, P = S.pick, T = S.spec.teachers, lc = loadChecks(load), depts = sc().departments || [], head = tkHead();
   if (!cols.length) return `<p class="muted">No teachers yet. Add them with the bar above, or with + Add teacher.</p>`;
   // the open card is in the column it was opened in; if that column no longer holds the teacher, in their home column
   let openCol = null;
@@ -1317,10 +1317,10 @@ function teachersCards(cols, load) {
   return `${chipBar}<div class="tkcols">${cols.map(col => `<section class="tkcol"><div class="tkhead"><b>${col.dept === "" ? "No department yet" : esc(col.dept)}</b><span class="muted small">${col.cards.length} teacher${col.cards.length === 1 ? "" : "s"}</span></div>
     ${col.cards.length ? col.cards.map(c => card(c, col.dept)).join("") : `<p class="muted small">No teachers yet.</p>`}</section>`).join("")}</div>`;
 }
-function tkOpenCard(ti, cardEl) {   // opens the card that was clicked, in its column; Enter or Space on it opens it too
+function tkOpenCard(ti, cardEl) {   // opens the card that was clicked, in its column (from the keyboard, the name button opens it)
   let col = ""; try { col = decodeURIComponent(cardEl ? cardEl.dataset.tcol || "" : ""); } catch (e) { }
   tkOpen(ti, col); render();
-  const o = document.getElementById(`teachers-${ti}`) || document.querySelector(`.tkcard.open[data-tcard="${ti}"]`);
+  const o = document.querySelector(`.tkcard.open[data-tcard="${ti}"]`) || document.getElementById(`teachers-${ti}`);
   if (o) { o.scrollIntoView({ block: "nearest" }); const f = o.querySelector("input:not(:disabled), select:not(:disabled)") || o.querySelector("[data-tclose]"); if (f) f.focus({ preventScroll: true }); }
 }
 /* a second department given, changed or taken off (a chip dropped on a card, the Second department box, the ✕): one save, one Undo step, one toast */
@@ -1328,7 +1328,7 @@ function tkSecond(ti, dept) {
   if (tkHead()) return;
   const t = S.spec.teachers[ti]; if (!t) return;
   const r = TeacherView.setSecond(S.spec, ti, dept), nm = t.name || "This teacher", d = tkText(dept);
-  if (!r) return;
+  if (!r) { render(); return; }
   const said = { home: `${d} is already ${nm}'s department.`, same: `${nm} is already in ${d} too.` }[r.how];
   if (said) { render(); toast(said); return; }   // nothing to save
   const msg = { set: `${nm} is now in ${d} too.`, changed: `${nm}'s second department is now ${d}, not ${r.was}.`, off: `${r.was} taken off ${nm}.` }[r.how];
@@ -1408,7 +1408,7 @@ const VIEWS = {
       ${SV.view === "table" ? subjectsTable() : subjectsCards()}</div>`;
   },
   teachers() {   // step 4: the teachers as Cards (a column per department) or as the Table, then the Roles
-    const { load } = issues(), f = S.tf, P = S.pick, q = f.q.trim().toLowerCase(), cards = TV.view === "cards";
+    const iss = issues(), { load } = iss, f = S.tf, P = S.pick, q = f.q.trim().toLowerCase(), cards = TV.view === "cards";
     heldResolve(TV, S.spec.teachers); if (TV.open !== null && !S.spec.teachers[TV.open]) tkOpen(null);
     const rows = S.spec.teachers.map((t, i) => [t, i]).filter(([t]) => (!f.dept || People.inDept(t, f.dept)) && (!q || `${t.name || ""} ${t.short || ""}`.toLowerCase().includes(q)));
     const cols = cards ? TeacherView.columns(S.spec, { dept: f.dept, q: f.q.trim() }) : null;
@@ -1423,7 +1423,7 @@ const VIEWS = {
         <input id="tfQ" type="search" placeholder="Search name" title="Type, then press Enter" value="${esc(f.q)}" style="width:160px">
         <span class="muted small">${ix.length === S.spec.teachers.length ? `${ix.length} teachers` : `${ix.length} of ${S.spec.teachers.length} teachers`}</span></div>
       ${teacherBar()}
-      ${cards ? teachersCards(cols, load) : teachersTable(rows, load)}
+      ${cards ? teachersCards(cols, iss) : teachersTable(rows, iss)}
       <div class="row" style="margin-top:10px"><button data-add="teachers">+ Add teacher</button></div></div>
       ${VIEWS.roles(load)}`;
   },
@@ -1664,7 +1664,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.sview) { SV.view = b.dataset.sview === "table" ? "table" : "cards"; try { localStorage.setItem(SUBJECTVIEW, SV.view); } catch (e) { } render(); return; }
   if (b.dataset.tview) { TV.view = b.dataset.tview === "table" ? "table" : "cards"; tkOpen(null); try { localStorage.setItem(TEACHERVIEW, TV.view); } catch (e) { } render(); return; }
   if (b.dataset.topen !== undefined) { const ti = Number(b.dataset.topen), c = b.closest("[data-tcard]"); if (!S.spec.teachers[ti]) return; tkOpenCard(ti, c); return; }
-  if (b.dataset.tclose !== undefined) { const ti = TV.open; tkOpen(null); render(); const t = ti !== null && document.querySelector(`[data-topen="${ti}"]`); if (t) t.focus({ preventScroll: true }); return; }
+  if (b.dataset.tclose !== undefined) { const ti = TV.open, col = TV.col; tkOpen(null); render(); const c = ti !== null && [...document.querySelectorAll(`[data-tcard="${ti}"]`)].find(x => { try { return decodeURIComponent(x.dataset.tcol) === col; } catch (e) { return false; } }), t = c && c.querySelector("[data-topen]"); if (t) t.focus({ preventScroll: true }); return; }
   if (b.dataset.tsecond !== undefined) { if (tkHead()) return; tkSecond(Number(b.dataset.tsecond), ""); return; }
   if (b.dataset.vview) { VV.view = b.dataset.vview === "table" ? "table" : "blocks"; VV.open = null; VV.openId = null; try { localStorage.setItem(VENUEVIEW, VV.view); } catch (e) { } render(); return; }
   if (b.dataset.vroom !== undefined) { const vi = Number(b.dataset.vroom); if (!S.spec.venues[vi]) return; const was = VV.open === vi; vvOpen(was ? null : vi); render();
@@ -2439,7 +2439,7 @@ const TL_LABEL = { short: "short name", dept: "department", role: "role", allowa
 function uploadCard() {
   if (TL.read && TL.sig !== teachersSig()) tlClear();
   const xl = committee();   // an Excel file is read by the server, which reads it for the committee only
-  return `<div class="card" id="teacherUpload"><h2>2 · Upload the teacher list</h2>
+  return `<div class="card" id="teacherUpload"><h2>Upload the teacher list</h2>
     <p class="muted">Columns: Name, Short name, Department, Role, Allowance, Other duties, Note. Only Name is needed; a column you leave out is not changed.${xl ? "" : " Paste the list or choose a .csv file."}</p>
     <textarea id="tlPaste" rows="5" spellcheck="false" placeholder="Name&#9;Short name&#9;Department&#9;Role">${esc(TL.text)}</textarea>
     <div class="row" style="margin-top:8px"><label class="filebtn">Choose a file (${xl ? ".xlsx or .csv" : ".csv"})<input type="file" id="tlFile" accept="${xl ? ".xlsx,.csv" : ".csv"}" hidden></label><button class="primary" data-tl="read">Read the list</button></div>
