@@ -53,8 +53,8 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
     lessons or wholly in pool. out (on a move, a place or an add): the ids of lessons lifted into the pool first, those
     still on the timetable, in order; the sentence names them."""
     if not isinstance(fix, dict): raise ValueError("it is not complete.")
-    kind = fix.get("kind"); touched = set() if touched is None else touched; was = [] if was is None else was; pool = [] if pool is None else pool
-    keep = lambda rows: was.extend(copy.deepcopy(list(rows)))
+    kind = fix.get("kind"); touched = set() if touched is None else touched; pool = [] if pool is None else pool
+    keep = (lambda rows: None) if was is None else lambda rows: was.extend(copy.deepcopy(list(rows)))   # no copies when nobody reads them
     pooled = lambda i: any(x["id"] == i for x in pool)
     def lift(i):
         rows = [x for x in lessons if x["id"] == i]; keep(rows)
@@ -334,7 +334,12 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
     moved = {i for i, r in after.items() if i not in before or (r[0]["d"], r[0]["p"]) != (before[i][0]["d"], before[i][0]["p"])}
     for i in moved:
         x = after[i][0]
-        if why := b.lesson_time(after[i], x["d"], x["p"], x["n"]): return res("na", why)
+        if kind in ("move", "place"):   # the lesson's own rows: the same answer for every judgement of one place in a context
+            lk = ("time", kind, i, x["d"], x["p"])
+            if lk not in c["memo"]: c["memo"][lk] = b.lesson_time(after[i], x["d"], x["p"], x["n"])
+            why = c["memo"][lk]
+        else: why = b.lesson_time(after[i], x["d"], x["p"], x["n"])
+        if why: return res("na", why)
     if kind != "delete":
         for i, rows in after.items():
             if i in moved: cand = rows
@@ -352,15 +357,19 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
     rules = spec.get("rules") or []; seen = old + new
     depts = c["memo"].get(("depts", id(spec)))   # worked out on the first judge of a context and setup, not per lesson or per call
     if depts is None: depts = c["memo"][("depts", id(spec))] = verify.teacher_depts(m, spec)
-    keep = tuple(i for i, r in enumerate(rules) if r.get("rule") != "In words" and any(_bears(m, spec, r, x, depts) for x in seen))
-    near = _near(b, old) | _near(b, new)
-    for i in keep:
-        if rules[i].get("rule") in WIDE and (test := verify.in_scope(m, spec, rules[i])):
-            near |= c["memo"].setdefault(("wide", id(spec), i), {x["id"] for x in m["lessons"] if test(x)})
+    sk = ("scope", id(spec), kind, fix["id"]) if kind in ("move", "place") else None   # a move or a place changes only where the lesson sits, which no scope reads
+    if sk is not None and sk in c["memo"]: keep, near = c["memo"][sk]
+    else:
+        keep = tuple(i for i, r in enumerate(rules) if r.get("rule") != "In words" and any(_bears(m, spec, r, x, depts) for x in seen))
+        near = _near(b, old) | _near(b, new)
+        for i in keep:
+            if rules[i].get("rule") in WIDE and (test := verify.in_scope(m, spec, rules[i])):
+                near |= c["memo"].setdefault(("wide", id(spec), i), {x["id"] for x in m["lessons"] if test(x)})
+        if sk is not None: c["memo"][sk] = keep, frozenset(near)
     must, prefer = [], []
     if keep:
         sp = dict(spec, rules=[r if i in keep else {"rule": "In words"} for i, r in enumerate(rules)])
-        mk = (id(spec), keep, frozenset(near))
+        mk = (id(spec), keep, near if isinstance(near, frozenset) else frozenset(near))
         if mk not in c["memo"]:
             L0 = [x for x in m["lessons"] if x["id"] in near]; c["memo"][mk] = (L0, rule_subjects(m, sp, L0))
         L0, s0 = c["memo"][mk]; L1, put = [], set()
@@ -386,15 +395,16 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
 
 def _pick(j, *keys): return {k: j[k] for k in ("state", "why") + keys}
 
-def slots(m, spec, days, lesson_id, pool=()):
-    """every (d, p) of the week(s) judged -> [dict(d, p, state, why, swap, also, push)]. For a lesson on the timetable, every
+def slots(m, spec, days, lesson_id, pool=(), extras=True, ctx=None):
+    """every (d, p) of the week(s) judged -> [dict(d, p, state, why, swap, also, push, beside)]. For a lesson on the timetable, every
     (d, p) but its own: an empty stretch of its classes as a move, a stretch where exactly one other lesson of the same length
     starts as a swap, anything else occupied "na". For a lesson in the pool (the rows of the lessons not placed), every (d, p)
     as a place, swap always None. push: where other lessons of its classes are, those lessons (in id order) and how the move
     or place is judged once they are pushed out, dict(state, why, out=[dict(id, what)]); None where there are none. beside:
     where other lessons of its classes are, how the plain move or place (with them left there) is judged, dict(state, why);
-    None where there are none"""
-    c = _ctx(m); b = c["busy"]; mine = [x for x in pool if x["id"] == lesson_id]
+    None where there are none. extras=False (the Fix card, the helper, the typed request: they read only state, why, swap and also)
+    leaves push and beside out, and their judgements unmade: each slot is dict(d, p, state, why, swap, also). ctx: see judge"""
+    c = _ctx(m, ctx); b = c["busy"]; mine = [x for x in pool if x["id"] == lesson_id]
     rows = mine or _rows(m["lessons"], lesson_id); a = rows[0]; n, cls = a["n"], _classes(rows); out = []
     go = dict(kind="place" if mine else "move", id=lesson_id)
     for d in range(len(days)):
@@ -402,16 +412,17 @@ def slots(m, spec, days, lesson_id, pool=()):
             if not mine and (d, p) == (a["d"], a["p"]): continue
             there = {y["id"]: y for k in cls for q in range(p, min(p + n, m["NP"])) for y in b.at.get(("c", k, d, q), ()) if y["id"] != lesson_id}
             ids = sorted(there); push = beside = None
-            if ids:
+            if ids and extras:
                 push = dict(**_pick(judge(m, spec, days, dict(go, d=d, p=p, out=ids), c, pool)), out=[dict(id=i, what=what(b.ids[i][0])) for i in ids])
                 beside = _pick(judge(m, spec, days, dict(go, d=d, p=p), c, pool))
+            more = dict(push=push, beside=beside) if extras else {}
             if mine or not there:
-                out.append(dict(d=d, p=p, **(beside or _pick(judge(m, spec, days, dict(go, d=d, p=p), c, pool))), swap=None, also=[], push=push, beside=beside)); continue
+                out.append(dict(d=d, p=p, **(beside or _pick(judge(m, spec, days, dict(go, d=d, p=p), c, pool))), swap=None, also=[], **more)); continue
             y = next(iter(there.values()))
             if len(there) == 1 and (y["d"], y["p"], y["n"]) == (d, p, n):
                 also = [f"This also moves {what(y)} to {when(days, a['d'], a['p'])}."] if set(_classes(b.ids[y["id"]])) != set(cls) else []
-                out.append(dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="swap", a=lesson_id, b=y["id"]), c, pool)), swap=y["id"], also=also, push=push, beside=beside))
-            else: out.append(dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[], push=push, beside=beside))
+                out.append(dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="swap", a=lesson_id, b=y["id"]), c, pool)), swap=y["id"], also=also, **more))
+            else: out.append(dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[], **more))
     return out
 
 def marks(busy, rows, pool=False):
@@ -496,9 +507,9 @@ def add_slots(m, spec, days, key, n, pool=()):
     return [dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="add", key=key, d=d, p=p, n=n, room=add_room(m, spec, key, d, p, n, c)), c, pool)))
             for d in range(len(days)) for p in range(m["NP"])]
 
-def can_delete(m, spec, days, lesson_id, group=None, pool=()):
-    """a delete of the lesson (or its row of group) judged -> dict(state, why)"""
-    return _pick(judge(m, spec, days, dict(kind="delete", id=lesson_id, group=group), pool=pool))
+def can_delete(m, spec, days, lesson_id, group=None, pool=(), ctx=None):
+    """a delete of the lesson (or its row of group) judged -> dict(state, why); ctx: see judge"""
+    return _pick(judge(m, spec, days, dict(kind="delete", id=lesson_id, group=group), ctx, pool))
 
 def _length(v):
     """a lesson length in any spelling of a whole number ('2', 2.0, '2.0'), else 1"""

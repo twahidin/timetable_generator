@@ -487,7 +487,7 @@ def test_the_grid_of_a_class_and_a_teacher():
 def test_the_options_of_a_lesson_and_of_an_add():
     _grid_draft(); lid = _lid(); j = c.get(f"/api/draft/options?id={lid}").get_json()
     assert set(j) == {"slots", "teachers", "rooms", "delete", "key"} and j["key"] == "C:1A:Art" and j["delete"]["state"] in ("ok", "prefer", "no", "na") and j["slots"]
-    assert all(set(s) == {"d", "p", "state", "why", "swap", "also", "push", "beside"} for s in j["slots"])
+    assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in j["slots"])   # the Fix card never reads a push or a place beside
     r = c.get(f"/api/draft/options?id={lid}&group=Entire%20Class"); assert r.status_code == 200
     a = c.get("/api/draft/options?add=C:1A:Art&n=1").get_json(); assert set(a) == {"slots"} and a["slots"] and set(a["slots"][0]) == {"d", "p", "state", "why"}
     assert c.get("/api/draft/options?id=99999").status_code == 400 and c.get("/api/draft/options").status_code == 400

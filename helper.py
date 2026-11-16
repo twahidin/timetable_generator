@@ -245,8 +245,8 @@ def _about_teacher(m, spec, w):
 
 def _slots(m, spec, days, i, memo=None):
     """fixes.slots of lesson i, kept in memo (a dict) when one is given"""
-    if memo is None: return fixes.slots(m, spec, days, i, _pool(m))
-    if ("slots", i) not in memo: memo["slots", i] = fixes.slots(m, spec, days, i, _pool(m))
+    if memo is None: return fixes.slots(m, spec, days, i, _pool(m), extras=False)
+    if ("slots", i) not in memo: memo["slots", i] = fixes.slots(m, spec, days, i, _pool(m), extras=False)
     return memo["slots", i]
 
 def _options(m, spec, days, w, ctx=None, memo=None):

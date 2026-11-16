@@ -119,7 +119,10 @@ def test_a_setup_class_on_a_level_the_model_lacks_is_not_lost():
     finally: draft._now = real
 
 def test_slots_are_the_editors_slots():
-    assert draft.slots(PLAIN_ID) == dict(id=PLAIN_ID, slots=draft.options(PLAIN_ID)["slots"], delete=draft.options(PLAIN_ID)["delete"])
+    b, o = draft.slots(PLAIN_ID), draft.options(PLAIN_ID); bare = lambda s: {k: v for k, v in s.items() if k not in ("push", "beside")}
+    assert [bare(s) for s in b["slots"]] == o["slots"] and b["delete"] == o["delete"] and b["id"] == PLAIN_ID
+    assert all(set(s) == {"d", "p", "state", "why", "swap", "also", "push", "beside"} for s in b["slots"])   # the board's own: with the push and the place beside
+    assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in o["slots"])   # the Fix card's: as before this stage
     assert draft.slots(str(PLAIN_ID))["id"] == PLAIN_ID
 
 def test_slots_of_an_unknown_lesson_is_a_sentence():

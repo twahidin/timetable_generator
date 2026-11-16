@@ -276,7 +276,7 @@ def options(lesson_id=None, group=None, add=None, n=None):
     rows = fixes._rows(m["lessons"], lid); row = rows[0] if group is None else next((x for x in rows if x["group"] == group), None)
     if row is None: raise ValueError(f"There is no row of {group} in that lesson.")
     key = verify._kstr(fixes._row_key(row)); g = row["group"]
-    return dict(key=key, slots=fixes.slots(m, spec, days, lid, fx["pool"]), teachers=fixes.teacher_options(m, spec, days, key, fx["pool"]), rooms=fixes.room_options(m, spec, days, lid, g, fx["pool"]),
+    return dict(key=key, slots=fixes.slots(m, spec, days, lid, fx["pool"], extras=False), teachers=fixes.teacher_options(m, spec, days, key, fx["pool"]), rooms=fixes.room_options(m, spec, days, lid, g, fx["pool"]),
                 delete=fixes.can_delete(m, spec, days, lid, group, fx["pool"]))
 
 NOT_IN_SETUP = "Not in the setup"
@@ -324,7 +324,8 @@ def slots(lesson_id):
     m, rec, fx = _now()
     try: lid = int(lesson_id)
     except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
-    return dict(id=lid, slots=fixes.slots(m, m["checked_setup"], m["days"], lid, fx["pool"]), delete=fixes.can_delete(m, m["checked_setup"], m["days"], lid, pool=fx["pool"]))
+    spec, days, c = m["checked_setup"], m["days"], fixes._ctx(m)   # one index for the slots and the delete
+    return dict(id=lid, slots=fixes.slots(m, spec, days, lid, fx["pool"], ctx=c), delete=fixes.can_delete(m, spec, days, lid, pool=fx["pool"], ctx=c))
 
 def _length(n, m):
     """an add's n, a whole number from 1 to the periods in a day, or ValueError(sentence)"""

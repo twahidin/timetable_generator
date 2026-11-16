@@ -337,7 +337,7 @@ def answer(m, spec, days, ask, pick=None):
         rows, text = r["rows"][i], _group(m, days, i, r["rows"][i])
         if act == "move":
             a = fixes._rows(m["lessons"], i)[0]; cands = []; mine = _sig(m, i)
-            for s in fixes.slots(m, spec, days, i, helper._pool(m)):
+            for s in fixes.slots(m, spec, days, i, helper._pool(m), extras=False):
                 if s["state"] not in helper.OK or (D["to_days"] and s["d"] not in D["to_days"]) or s["d"] in D["not_days"]: continue
                 if (lo >= 0 and s["p"] < lo) or (hi >= 0 and s["p"] + a["n"] - 1 > hi): continue
                 if s["swap"] and _sig(m, s["swap"]) == mine: continue            # two lessons alike in every way: nothing a person can see changes
