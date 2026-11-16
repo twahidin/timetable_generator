@@ -425,12 +425,21 @@ def draft_slots():
     if request.args.get("id") is None: return {"error": "Say which lesson."}, 400
     return _checked(lambda: draft.slots(request.args.get("id")), sentences=True)
 
+@app.get("/api/draft/place")
+@need("committee")
+def draft_place():
+    """one place a lesson may be dropped on, judged with a push out and a place beside (nothing is changed)"""
+    if request.args.get("id") is None: return {"error": "Say which lesson."}, 400
+    try: d, p = int(request.args.get("d")), int(request.args.get("p"))
+    except (TypeError, ValueError): return {"error": "Say which place."}, 400
+    return _checked(lambda: draft.place(request.args.get("id"), d, p), sentences=True)
+
 @app.get("/api/draft/lesson")
 @need("committee")
 def draft_lesson():
     """who and which room could take one lesson row, for the board's editor (nothing is changed)"""
     if request.args.get("id") is None: return {"error": "Say which lesson."}, 400
-    return _checked(lambda: draft.lesson(request.args.get("id"), request.args.get("group")), sentences=True)
+    return _checked(lambda: draft.lesson(request.args.get("id"), request.args.get("group") or None), sentences=True)
 
 @app.post("/api/draft/fix")
 @need("committee")

@@ -7,7 +7,7 @@ os.environ.pop("HEADS_CODE", None)
 os.environ.update(DATA_DIR=DATA, SECRET_KEY=secrets.token_hex(16), AI_PROVIDER="anthropic", AI_API_KEY="", COMMITTEE_CODE=CODE, TEACHER_CODE=secrets.token_hex(4), STUDENT_CODE=secrets.token_hex(4))
 sys.path.insert(0, ROOT)
 import openpyxl  # noqa: E402
-import app as A, draft, store  # noqa: E402
+import app as A, draft, fixes as fixes_mod, store  # noqa: E402
 from ttgen.template import write_template  # noqa: E402
 
 c = A.app.test_client()
@@ -27,7 +27,7 @@ def workbook(rows):
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"
     ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
     for r in rows:
-        ws.append([r["id"], r["day"], r["p"], r["p"] + r["n"] - 1, r["n"], "", "", r["level"], r.get("block", ""), ", ".join(r["classes"]), r["subject"], r.get("group", "Entire Class"), ", ".join(r.get("teachers", [])), r.get("room", ""), "", ""])
+        ws.append([r["id"], r["day"], r["p"], r["p"] + r["n"] - 1, r["n"], "", "", r["level"], r.get("block", ""), ", ".join(r["classes"]), r["subject"], r.get("group", "Entire Class"), ", ".join(r.get("teachers", [])), r.get("room", ""), "", r.get("rain", "")])
     buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
 
 def setup_bytes(spec):
@@ -119,9 +119,9 @@ def test_a_setup_class_on_a_level_the_model_lacks_is_not_lost():
     finally: draft._now = real
 
 def test_slots_are_the_editors_slots():
-    b, o = draft.slots(PLAIN_ID), draft.options(PLAIN_ID); bare = lambda s: {k: v for k, v in s.items() if k not in ("push", "beside")}
+    b, o = draft.slots(PLAIN_ID), draft.options(PLAIN_ID); bare = lambda s: {k: v for k, v in s.items() if k != "there"}
     assert [bare(s) for s in b["slots"]] == o["slots"] and b["delete"] == o["delete"] and b["id"] == PLAIN_ID
-    assert all(set(s) == {"d", "p", "state", "why", "swap", "also", "push", "beside"} for s in b["slots"])   # the board's own: with the push and the place beside
+    assert all(set(s) == {"d", "p", "state", "why", "swap", "also", "there"} for s in b["slots"])   # the board's own: who is there, no push or place beside judged
     assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in o["slots"])   # the Fix card's: as before this stage
     assert draft.slots(str(PLAIN_ID))["id"] == PLAIN_ID
 
@@ -271,8 +271,8 @@ def test_publish_printouts_and_download_are_refused_while_a_lesson_waits():
 
 def test_slots_of_a_waiting_lesson():
     fresh(); draft.fix(dict(kind="lift", id=PLAIN_ID)); s = draft.slots(PLAIN_ID)
-    assert s["id"] == PLAIN_ID and len(s["slots"]) == len(DAYS) * NPD and all(x["swap"] is None for x in s["slots"]) and {"d", "p", "state", "why", "push"} <= set(s["slots"][0])
-    assert next(x for x in s["slots"] if (x["d"], x["p"]) == O0)["push"]["out"] == [dict(id=OTHER_ID, what=f"{SUBJ2} for {CLASSES[0]}", classes=[CLASSES[0]], groups=1)]
+    assert s["id"] == PLAIN_ID and len(s["slots"]) == len(DAYS) * NPD and all(x["swap"] is None for x in s["slots"]) and {"d", "p", "state", "why", "there"} <= set(s["slots"][0])
+    assert next(x for x in s["slots"] if (x["d"], x["p"]) == O0)["there"] == [dict(id=OTHER_ID, what=f"{SUBJ2} for {CLASSES[0]}", classes=[CLASSES[0]], groups=1)]
     raises(ValueError, lambda: draft.slots(99), NOT_FOUND); raises(ValueError, lambda: draft.options(lesson_id=PLAIN_ID), NOT_FOUND)
     assert c.get(f"/api/draft/slots?id={PLAIN_ID}").status_code == 200 and draft.slots(OTHER_ID)["id"] == OTHER_ID
 
@@ -354,7 +354,7 @@ def test_a_stale_force_is_refused_with_the_reason_as_it_now_is():
 def test_a_band_pushed_out_is_named_as_a_band():
     fresh(); forced(move(OTHER_ID, (0, L1 + 1)))
     s = next(x for x in draft.slots(PLAIN_ID)["slots"] if (x["d"], x["p"]) == B0)
-    assert s["push"]["out"] == [dict(id=BAND_ID, what="the Band A band", classes=CLASSES, groups=3)], s["push"]
+    assert s["there"] == [dict(id=BAND_ID, what="the Band A band", classes=CLASSES, groups=3)] and draft.place(PLAIN_ID, *B0)["push"]["out"] == s["there"], s["there"]
     forced(move(PLAIN_ID, B0, push=True)); assert fixes_stored()[-1]["text"].endswith(" Pushed out: the Band A band."), fixes_stored()[-1]["text"]
 
 def test_marks_on_the_board_of_a_clean_draft_are_empty():
@@ -401,7 +401,7 @@ def test_the_board_lists_teachers_by_department_and_rooms_by_kind():
     try:   # a teacher with no home department is listed last, with none; a teacher with a second department is under the home one only
         draft._now = lambda: (dict(m, checked_setup=dict(spec, teachers=teach)), None, dict(pool=[]))
         g = draft.board()["teachers"]; assert g[-1] == dict(dept="", teachers=[dict(name=teach[0]["name"], short=m["teacher_ix"][teach[0]["name"]]["short"]), dict(name="Floating Teacher", short="Floating Teacher")]), g[-1]
-        assert [x["dept"] for x in g] == depts + [""] if depts[0] != "MT" else True
+        assert [x["dept"] for x in g] == depts + [""] and depts[0] == "MT", (depts, [x["dept"] for x in g])   # the teacher with no home department is last; the one moved out of MT leaves MT first
     finally: draft._now = real
 
 def test_lesson_lists_free_teachers_first_in_the_editors_order():
@@ -427,7 +427,7 @@ def test_lesson_lists_free_rooms_of_the_right_kind_first():
     venues = [str(v["room"]) for v in SPEC["venues"]]; assert sorted(R) == sorted(venues) and len(j["rooms"]) == len(venues)
     assert R[ROOMS[0]] == dict(room=ROOMS[0], kind="classroom", right=True, free=True, holding="")   # its own room: this lesson does not count
     assert R[ROOMS[1]] == dict(room=ROOMS[1], kind="classroom", right=True, free=False, holding=W5), R[ROOMS[1]]
-    assert R[HALL]["free"] is False and R[HALL]["right"] is False and R[HALL]["kind"] == "pe venue" and R[HALL]["holding"] in (W8, f"{SUBJ2} for 1D")
+    assert R[HALL]["free"] is False and R[HALL]["right"] is False and R[HALL]["kind"] == "pe venue" and R[HALL]["holding"] == W8
     assert R["Field"]["free"] and not R["Field"]["right"] and R["Science Room 1"]["kind"] == "science room"
     rows[-1] = dict(rows[-1], room=""); save_draft(rows); R = by_name(draft.lesson(PLAIN_ID), "rooms", "room"); assert R[HALL]["free"] and R[HALL]["holding"] == ""   # one lesson in a room of two
     order = [(0 if r["free"] and r["right"] else 1 if r["free"] else 2, venues.index(r["room"])) for r in draft.lesson(PLAIN_ID)["rooms"]]; assert order == sorted(order), order
@@ -505,6 +505,89 @@ def test_the_lesson_route():
     assert NOSE.get(f"/api/draft/lesson?id={PLAIN_ID}").status_code == 401
     shutil.rmtree(draft.DIR); r = c.get(f"/api/draft/lesson?id={PLAIN_ID}"); assert r.status_code == 404 and r.get_json() == {"error": "There is no draft."}
     assert NOSE.get(f"/api/draft/lesson?id={PLAIN_ID}").status_code == 401
+
+def test_a_teacher_of_the_subjects_department_on_no_lesson_of_its_card_is_rank_two():
+    save_draft(TR); m = draft._now()[0]; spec = m["checked_setup"]; real = draft._now
+    teach = [dict(t) for t in spec["teachers"]] + [dict(name="Floating Teacher", dept="EL", dept2=None)]
+    try:
+        draft._now = lambda: (dict(m, checked_setup=dict(spec, teachers=teach)), None, dict(pool=[]))
+        T = by_name(draft.lesson(PLAIN_ID))
+        assert (T["Floating Teacher"]["rank"], T["Floating Teacher"]["free"]) == (2, True) and T["Jasper Wong"]["rank"] == 1 and T[ZACH]["rank"] == 3 and T[SABRINA]["rank"] == 0
+        names = [x["name"] for x in draft.lesson(PLAIN_ID)["teachers"] if x["free"]]; assert names.index("Jasper Wong") < names.index("Floating Teacher") < names.index(FREE)   # by rank among the free
+    finally: draft._now = real
+
+def test_a_class_home_room_is_right_when_step_5_asks_for_another_kind():
+    art = dict(id=20, day=DAYS[2], p=L1, n=1, level=LEVEL, classes=[C1], subject="Art", teachers=[TEACHERS[1]], room="Art Room")
+    save_draft(TR + [art]); j = draft.lesson(20); R = by_name(j, "rooms", "room"); home = str(draft._now()[0]["class_ix"][C1]["home"]); assert home == "1-01"
+    assert R["Art Room"]["right"] and R[home]["right"] and R[home]["kind"] == "classroom"   # the kind step 5 asks for, and the class's own room
+    assert not R["1-02"]["right"] and not R["Science Room 1"]["right"] and not R[HALL]["right"]
+    assert [r["room"] for r in j["rooms"]][:2] == [home, "Art Room"]   # free and right first, in the setup's order
+
+def test_a_room_is_free_when_a_room_fix_would_not_be_refused():
+    def at(i): return next(x for x in draft._now()[0]["lessons"] if x["id"] == i)
+    band = [dict(id=11, day=DAYS[0], p=L1, n=1, classes=[C3], subject=SUBJ2, group="G1", teachers=[ZACH], room=HALL, **BAND),
+            dict(id=11, day=DAYS[0], p=L1, n=1, classes=["1D"], subject=SUBJ, group="G2", teachers=[FREE], room=HALL, **BAND)]
+    save_draft([x for x in TR if x["id"] != 8] + band); R = by_name(draft.lesson(PLAIN_ID), "rooms", "room")
+    assert R[HALL] == dict(room=HALL, kind="pe venue", right=False, free=False, holding="group G1"), R[HALL]   # one lesson, two rows: the Hall is full
+    raises(ValueError, lambda: draft.fix(dict(kind="room", id=1, group=ENTIRE, room=HALL)), f"{HALL} is in use then.")
+    rain = dict(id=12, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=[C3], subject=SUBJ2, teachers=[ZACH], room="1-03", rain="Science Room 2")
+    save_draft(TR + [rain]); R = by_name(draft.lesson(PLAIN_ID), "rooms", "room")
+    assert R["Science Room 2"] == dict(room="Science Room 2", kind="science room", right=False, free=False, holding=W8), R["Science Room 2"]   # another lesson's rain room
+    raises(ValueError, lambda: draft.fix(dict(kind="room", id=1, group=ENTIRE, room="Science Room 2")), "Science Room 2 is in use then.")
+    assert R[ROOMS[0]]["free"] and R["Science Room 1"]["free"] and R["Field"]["free"]
+    own = dict(rain, id=1, classes=[C1], subject=SUBJ, teachers=[TEACHERS[0]], room=ROOMS[0], rain="Science Room 2")   # its own rain room is no obstacle
+    save_draft([own] + [x for x in TR if x["id"] != 1]); R = by_name(draft.lesson(1), "rooms", "room"); assert R["Science Room 2"]["free"] and R["Science Room 2"]["holding"] == ""
+    save_draft(TR); assert all(r["free"] == (r["holding"] == "") for r in draft.lesson(PLAIN_ID)["rooms"])
+
+def test_a_room_change_that_changes_nothing_is_not_stored():
+    S = "That changes nothing."; save_draft(TR + [dict(id=13, day=DAYS[1], p=L1, n=1, level=LEVEL, classes=[C3], subject=SUBJ2, teachers=[ZACH])])
+    f = dict(kind="room", id=1, group=ENTIRE, room=ROOMS[0])
+    raises(ValueError, lambda: draft.fix(f), S); raises(ValueError, lambda: draft.fix(dict(f, force=True, why=S)), S)
+    raises(ValueError, lambda: draft.fix(dict(kind="room", id=13, group=ENTIRE, room="")), S)   # a row with no room, to none
+    assert fixes_stored() == []
+    draft.fix(dict(f, room="")); assert card(1)["rows"][0]["room"] == "" and len(fixes_stored()) == 1   # a real change is still made
+    r = c.post("/api/draft/fix", json=dict(kind="room", id=1, group=ENTIRE, room="")); assert r.status_code == 400 and r.get_json() == {"error": S} and len(fixes_stored()) == 1
+    draft.undo(); R = "1-03"; a = dict(kind="room", id=1, group=ENTIRE, room=R, all=True)
+    draft.fix(dict(kind="room", id=6, group=ENTIRE, room=R)); draft.fix(a); fl = fixes_stored()   # lesson 6 is in R already: only lesson 1 is changed
+    assert [x["id"] for x in fl] == [6, 1] and "batch" in fl[1] and card(1)["rows"][0]["room"] == R and card(6)["rows"][0]["room"] == R
+    raises(ValueError, lambda: draft.fix(a), S); raises(ValueError, lambda: draft.fix(dict(a, force=True, why=S)), S); assert len(fixes_stored()) == 2
+    draft.undo(); draft.undo(); draft.fix(dict(kind="lift", id=6)); draft.fix(dict(kind="room", id=6, group=ENTIRE, room=R)); draft.fix(a)   # a lesson waiting in Not placed is judged the same way
+    assert [x["id"] for x in fixes_stored()] == [6, 6, 1] and draft._now()[2]["pool"][0]["room"] == R
+    raises(ValueError, lambda: draft.fix(a), S); raises(ValueError, lambda: draft.fix(dict(kind="room", id=6, group=ENTIRE, room=R)), S); assert len(fixes_stored()) == 3
+
+def test_the_place_route_and_the_slots_route_agree_with_the_draft():
+    fresh(); s = draft.slots(PLAIN_ID)["slots"]; x = next(x for x in s if x["there"]); d, p = x["d"], x["p"]
+    assert x["there"][0]["id"] == OTHER_ID and (d, p) == O0 and x["swap"] == OTHER_ID
+    r = c.get(f"/api/draft/place?id={PLAIN_ID}&d={d}&p={p}"); j = r.get_json()
+    assert r.status_code == 200 and j == draft.place(PLAIN_ID, d, p) and set(j) == {"d", "p", "state", "why", "swap", "also", "push", "beside"} and j["push"]["out"] == x["there"] and j["beside"]["state"] in ("ok", "prefer", "no", "na")
+    assert {k: j[k] for k in x if k != "there"} == {k: x[k] for k in x if k != "there"}
+    free = next(y for y in s if y["there"] is None); j = c.get(f"/api/draft/place?id={PLAIN_ID}&d={free['d']}&p={free['p']}").get_json()
+    assert j["push"] is None and j["beside"] is None and j["state"] == free["state"]
+    say = lambda url, code, text: (lambda r: r.status_code == code and r.get_json() == {"error": text})(c.get(url))
+    assert say("/api/draft/place", 400, "Say which lesson.") and say(f"/api/draft/place?d=0&p=0", 400, "Say which lesson.")
+    for q in ("", "&d=0", "&p=0", "&d=x&p=0", "&d=0&p=1.5", "&d=&p=", "&d=0&p="): assert say(f"/api/draft/place?id={PLAIN_ID}{q}", 400, "Say which place."), q
+    assert say("/api/draft/place?id=999999&d=0&p=0", 400, NOT_FOUND) and say("/api/draft/place?id=x&d=0&p=0", 400, NOT_FOUND)
+    for q in (f"d={len(DAYS)}&p=0", f"d=0&p={NPD}", "d=-1&p=0", "d=0&p=-1"): assert say(f"/api/draft/place?id={PLAIN_ID}&{q}", 400, "That is outside the day."), q
+    url = f"/api/draft/place?id={PLAIN_ID}&d=0&p=0"; assert "Content-Encoding" not in c.get(url).headers
+    draft.fix(dict(kind="lift", id=PLAIN_ID)); j = c.get(f"/api/draft/place?id={PLAIN_ID}&d={O0[0]}&p={O0[1]}").get_json()   # a waiting lesson: a place
+    assert j["swap"] is None and j["push"]["out"][0]["id"] == OTHER_ID
+    assert NOSE.get(url).status_code == 401
+    shutil.rmtree(draft.DIR); r = c.get(url); assert r.status_code == 404 and r.get_json() == {"error": "There is no draft."}; assert NOSE.get(url).status_code == 401
+
+def test_an_empty_group_in_the_lesson_route_is_no_group():
+    save_draft(PLAY); a = c.get(f"/api/draft/lesson?id={BAND_ID}&group=").get_json(); assert a == draft.lesson(BAND_ID) and a["group"] == "G1"
+    assert c.get(f"/api/draft/lesson?id={PLAIN_ID}&group=").get_json() == draft.lesson(PLAIN_ID)
+
+def test_who_is_much_quicker_than_the_push_and_the_place_beside():
+    cl = [x["class"] for x in SPEC["classes"] if x["level"] == LEVEL]   # classes of the setup, so its rules bear on every lesson
+    rows = [dict(id=i + 1, day=DAYS[i % len(DAYS)], p=(i // len(DAYS)) % NPD, n=1, level=LEVEL, classes=[cl[i % len(cl)]], subject=(SUBJ, SUBJ2)[i % 2], teachers=[TEACHERS[i % 3]]) for i in range(2000)]
+    for i in range(len(DAYS) * 4): rows[i] = dict(rows[i], classes=[cl[0]], day=DAYS[i % len(DAYS)], p=i // len(DAYS))   # lesson 1 is of cl[0], which has four lessons on every day
+    save_draft(rows); m, rec, fx = draft._now(); spec, days = m["checked_setup"], m["days"]
+    best = lambda f: min((lambda t0: (f(), time.time() - t0)[1])(time.time()) for _ in range(3))
+    who = best(lambda: draft.slots(1)); full = best(lambda: fixes_mod.slots(m, spec, days, 1, fx["pool"], extras=True))
+    s = draft.slots(1)["slots"]; print(f"slots of 2,000 rows: who {who:.3f} s (draft.slots), push and beside {full:.3f} s")
+    assert len({x["d"] for x in s if x["there"]}) == len(DAYS) and sum(1 for x in s if x["there"]) >= 15, "many places have a lesson of the class"
+    assert who < full / 3, (who, full)
 
 def test_the_board_of_two_thousand_rows_is_quick_and_small():
     rows = [dict(id=i + 1, day=DAYS[i % len(DAYS)], p=(i // len(DAYS)) % NPD, n=1, level=LEVEL, classes=[f"T{i % 32 + 1:02d}"], subject=(SUBJ, SUBJ2)[i % 2], teachers=[TEACHERS[i % 3]]) for i in range(2000)]

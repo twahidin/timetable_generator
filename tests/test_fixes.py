@@ -529,6 +529,44 @@ def test_slots_of_a_pooled_lesson_are_places():
     assert at(S, 2, 2)["state"] == "no" and at(S, 2, 2)["why"] == f"{A} has {SUBJ} for {A} then." and at(S, 2, 2)["push"] == dict(state="ok", why="", out=[dict(id=1, what=f"{SUBJ} for {A}", classes=[A], groups=1)])
     assert at(S, 0, RECESS)["state"] == "na"
 
+def _thirty():
+    """thirty lessons of 1A, 1B and both, on the days and periods, many on top of each other (the draft need not be clean)"""
+    r = random.Random(11); L = []
+    for i in range(1, 31):
+        L.append(lesson(i, r.randrange(len(DAYS)), r.randrange(0, 6), r.choice((1, 1, 2)), ([A], [B], [A, B])[i % 3], (SUBJ, "Science", "Art")[i % 3], ENTIRE, [T[i % 5]], level=LV))
+    return L
+
+WHO = {"d", "p", "state", "why", "swap", "also", "there"}
+
+@t
+def test_who_is_at_each_place_and_place_judges_the_one_dropped_on():
+    L = _thirty(); pool = [lesson(40, 0, 2, 2, [A], "Music", ENTIRE, [T[7]], level=LV)]; m, sp = model_with(L); seen = 0
+    for lid in list(range(1, 31)) + [40]:
+        mine = [x for x in pool if x["id"] == lid]; pl = pool
+        full = fixes.slots(m, sp, DAYS, lid, pl); who = fixes.slots(m, sp, DAYS, lid, pl, extras="who"); plain = fixes.slots(m, sp, DAYS, lid, pl, extras=False)
+        assert len(full) == len(who) == len(plain) and all(set(w) == WHO for w in who) and all(set(x) == {"d", "p", "state", "why", "swap", "also"} for x in plain)
+        for s, w, q in zip(full, who, plain):
+            assert w["there"] == (s["push"] and s["push"]["out"]) and (w["d"], w["p"]) == (s["d"], s["p"])
+            if w["there"] is not None:
+                seen += 1; assert [sorted(o) for o in w["there"]] == [sorted(dict(id=x["id"], what=x["what"], classes=x["classes"], groups=x["groups"])) for x in s["push"]["out"]] and [o["id"] for o in w["there"]] == sorted(o["id"] for o in w["there"])
+            if mine and w["there"] is not None: assert (w["state"], w["why"], w["swap"], w["also"]) == ("na", "Another lesson is there.", None, []), w
+            elif mine: assert {k: w[k] for k in q} == q == bare(s)
+            else: assert {k: w[k] for k in q} == q   # a lesson on the timetable: exactly as the Fix card's
+            assert fixes.place(m, sp, DAYS, lid, s["d"], s["p"], pl) == s, (lid, s["d"], s["p"])
+    assert seen > 100, seen   # the places with a lesson of the same classes were really there
+
+@t
+def test_place_of_a_free_place_has_no_push_and_no_beside_and_outside_the_day_is_refused():
+    L = _thirty(); m, sp = model_with(L); S = fixes.slots(m, sp, DAYS, 1); free = next(s for s in S if s["push"] is None)
+    p = fixes.place(m, sp, DAYS, 1, free["d"], free["p"]); assert p == free and p["push"] is None and p["beside"] is None
+    for d, q in ((len(DAYS), 0), (-1, 0), (0, NP), (0, -1), ("0", 0), (0, 1.5), (True, 0)):
+        try: fixes.place(m, sp, DAYS, 1, d, q)
+        except ValueError as e: assert str(e) == "That is outside the day.", (d, q, e)
+        else: raise AssertionError((d, q))
+    try: fixes.place(m, sp, DAYS, 999, 0, 0)
+    except ValueError as e: assert str(e) == "There is no lesson with that id on the timetable."
+    else: raise AssertionError("did not raise")
+
 @t
 def test_marks():
     L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room=ROOM, level=LV), lesson(2, 0, 2, 1, [B], "Art", ENTIRE, [T[0]], room=ROOM, level=LV),

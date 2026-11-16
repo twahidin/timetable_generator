@@ -347,12 +347,20 @@ def board():
                 short=[dict(s, classes=list(_planned(m["checked_setup"], s["key"])["classes"])) for s in fixes.short(m, m["checked_setup"], pool)])
 
 def slots(lesson_id):
-    """where one lesson may go (on the timetable or waiting in Not placed): fixes.slots on the draft as it is now -> dict(id, slots, delete); delete is the judgement of deleting the whole lesson, dict(state, why)"""
+    """where one lesson may go (on the timetable or waiting in Not placed): fixes.slots on the draft as it is now, saying who is at each place but
+    not judging a push or a place beside (see place) -> dict(id, slots, delete); delete is the judgement of deleting the whole lesson, dict(state, why)"""
     m, rec, fx = _now()
     try: lid = int(lesson_id)
     except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
     spec, days, c = m["checked_setup"], m["days"], fixes._ctx(m)   # one index for the slots and the delete
-    return dict(id=lid, slots=fixes.slots(m, spec, days, lid, fx["pool"], ctx=c), delete=fixes.can_delete(m, spec, days, lid, pool=fx["pool"], ctx=c))
+    return dict(id=lid, slots=fixes.slots(m, spec, days, lid, fx["pool"], extras="who", ctx=c), delete=fixes.can_delete(m, spec, days, lid, pool=fx["pool"], ctx=c))
+
+def place(lesson_id, d, p):
+    """one place the lesson may be dropped on, judged with a push out and a place beside where other lessons of its classes are: fixes.place -> dict(d, p, state, why, swap, also, push, beside)"""
+    m, rec, fx = _now()
+    try: lid = int(lesson_id)
+    except (TypeError, ValueError): raise ValueError(NOT_FOUND_LESSON)
+    return fixes.place(m, m["checked_setup"], m["days"], lid, d, p, fx["pool"])
 
 def _length(n, m):
     """an add's n, a whole number from 1 to the periods in a day, or ValueError(sentence)"""
@@ -408,6 +416,7 @@ def fix(move):
             if out: f["out"] = out
         if f["kind"] == "room" and all_:
             return _room_all(m, spec, days, pool, f, force, why)
+        if f["kind"] == "room" and _has_room(next((y for y in m["lessons"] + pool if y["id"] == f["id"] and y["group"] == f["group"]), None), f["room"]): raise ValueError(NOTHING)
         j = fixes.judge(m, spec, days, f, pool=pool)
         if j["state"] == "na" or (j["state"] == "no" and not (force and why == j["why"])): raise ValueError(j["why"])
         text = fixes.apply_one(copy.deepcopy(m["lessons"]), f, spec, days, pool=copy.deepcopy(pool))   # the sentence of the fix as it is made
@@ -415,15 +424,24 @@ def fix(move):
         store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=store.now(), text=text)]))
         return info()
 
+NOTHING = "That changes nothing."
+
+def _has_room(x, room):
+    """whether the lesson row x (None: there is none) already has the room (a row with no room has "" or TBC, which is the same as none)"""
+    return x is not None and (x["room"] == room or (fixes._no_room(x["room"]) and fixes._no_room(room)))
+
 def _room_all(m, spec, days, pool, f, force, why):
-    """a room fix for every lesson id of the row's key that has a row of the fix's group (on the timetable and in the pool), in ascending id order, each judged
+    """a room fix for every lesson id of the row's key that has a row of the fix's group and is not in that room yet (on the timetable and in the pool; "That changes
+    nothing." when none is left), in ascending id order, each judged
     on the timetable the earlier ones leave and all kept with one batch id (so one undo takes them back), or none. A "no" is kept only with force and why equal to
     its reason; any other "no", and every "na", refuses the whole with its sentence. Called under the lock. Returns info()."""
     rows = [y for y in m["lessons"] + pool if y["id"] == f["id"]]
     if not rows: raise ValueError(NOT_FOUND_LESSON)
     x = next((y for y in rows if y["group"] == f["group"]), None)
     if x is None: raise ValueError(f"There is no row of {f['group']} in that lesson.")
-    k = fixes._row_key(x); ids = sorted({y["id"] for y in fixes.rows_of_key(m["lessons"] + pool, k) if y["group"] == f["group"]})
+    k = fixes._row_key(x); rows = [y for y in fixes.rows_of_key(m["lessons"] + pool, k) if y["group"] == f["group"]]
+    ids = sorted({y["id"] for y in rows if not _has_room(y, f["room"])})   # the lessons already in that room are left as they are
+    if not ids: raise ValueError(NOTHING)
     lessons, pl, texts, fl = copy.deepcopy(m["lessons"]), copy.deepcopy(pool), [], []
     for i in ids:
         one = dict(kind="room", id=i, group=f["group"], room=f["room"]); j = fixes.judge(dict(m, lessons=lessons), spec, days, one, pool=pl)

@@ -492,6 +492,14 @@ def test_the_options_of_a_lesson_and_of_an_add():
     a = c.get("/api/draft/options?add=C:1A:Art&n=1").get_json(); assert set(a) == {"slots"} and a["slots"] and set(a["slots"][0]) == {"d", "p", "state", "why"}
     assert c.get("/api/draft/options?id=99999").status_code == 400 and c.get("/api/draft/options").status_code == 400
 
+def test_the_slots_say_who_and_the_place_route_judges_the_one_dropped_on():
+    _grid_draft(); lid = _lid(); j = c.get(f"/api/draft/slots?id={lid}").get_json()
+    assert set(j) == {"id", "slots", "delete"} and j["id"] == lid and j["slots"] and all(set(s) == {"d", "p", "state", "why", "swap", "also", "there"} for s in j["slots"])
+    s = j["slots"][0]; r = c.get(f"/api/draft/place?id={lid}&d={s['d']}&p={s['p']}"); assert r.status_code == 200
+    k = r.get_json(); assert set(k) == {"d", "p", "state", "why", "swap", "also", "push", "beside"} and (k["d"], k["p"]) == (s["d"], s["p"]) and (k["push"] is None) == (s["there"] is None)
+    assert c.get("/api/draft/place").status_code == 400 and c.get(f"/api/draft/place?id={lid}").get_json() == {"error": "Say which place."} and c.get("/api/draft/place?id=99999&d=0&p=0").status_code == 400
+    assert c.get(f"/api/draft/place?id={lid}&d=99&p=0").get_json() == {"error": "That is outside the day."}
+
 def test_the_lesson_route_and_the_board_lists_for_teachers_and_rooms():
     _grid_draft(); lid = _lid(); j = c.get(f"/api/draft/lesson?id={lid}").get_json()
     assert set(j) == {"id", "group", "key", "what", "n_lessons", "teachers", "rooms"} and j["key"] == "C:1A:Art" and j["n_lessons"] >= 1 and j["teachers"] and j["rooms"]

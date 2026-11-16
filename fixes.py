@@ -414,6 +414,27 @@ LEAVE = "That would leave "   # how the sentence of a period count away from ste
 
 def _pick(j, *keys): return {k: j[k] for k in ("state", "why") + keys}
 
+def _placer(m, spec, days, lesson_id, pool, extras, ctx):
+    """(the lesson's rows, a function (d, p) -> the slot there) for slots and place; extras: see slots"""
+    c = _ctx(m, ctx); b = c["busy"]; mine = [x for x in pool if x["id"] == lesson_id]
+    sh = lambda s: (m["subjects"].get(s) or {}).get("short") or s; name = lambda i: named(b.ids[i], sh)
+    rows = mine or _rows(m["lessons"], lesson_id); a = rows[0]; n, cls = a["n"], _classes(rows)
+    go = dict(kind="place" if mine else "move", id=lesson_id)
+    def listed(i): return dict(id=i, what=name(i), classes=_classes(b.ids[i]), groups=len(b.ids[i]))
+    def at(d, p):
+        there = {y["id"]: y for k in cls for q in range(p, min(p + n, m["NP"])) for y in b.at.get(("c", k, d, q), ()) if y["id"] != lesson_id}
+        ids = sorted(there); push = beside = None; judged = lambda **k: _pick(judge(m, spec, days, dict(go, d=d, p=p, **k), c, pool))
+        if ids and extras is True: push = dict(**judged(out=ids), out=[listed(i) for i in ids]); beside = judged()
+        more = dict(push=push, beside=beside) if extras is True else dict(there=[listed(i) for i in ids] if ids else None) if extras == "who" else {}
+        if mine and ids and extras == "who": return dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[], **more)
+        if mine or not there: return dict(d=d, p=p, **(beside or judged()), swap=None, also=[], **more)
+        y = next(iter(there.values()))
+        if len(there) == 1 and (y["d"], y["p"], y["n"]) == (d, p, n):
+            also = [f"This also moves {what(y)} to {when(days, a['d'], a['p'])}."] if set(_classes(b.ids[y["id"]])) != set(cls) else []   # a band swaps only with its own classes, so this names one row
+            return dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="swap", a=lesson_id, b=y["id"]), c, pool)), swap=y["id"], also=also, **more)
+        return dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[], **more)
+    return bool(mine), a, at
+
 def slots(m, spec, days, lesson_id, pool=(), extras=True, ctx=None):
     """every (d, p) of the week(s) judged -> [dict(d, p, state, why, swap, also, push, beside)]. For a lesson on the timetable, every
     (d, p) but its own: an empty stretch of its classes as a move, a stretch where exactly one other lesson of the same length
@@ -423,28 +444,17 @@ def slots(m, spec, days, lesson_id, pool=(), extras=True, ctx=None):
     it (a band by its band's name), classes all its classes, groups how many rows; None where there are none. beside:
     where other lessons of its classes are, how the plain move or place (with them left there) is judged, dict(state, why);
     None where there are none. extras=False (the Fix card, the helper, the typed request: they read only state, why, swap and also)
-    leaves push and beside out, and their judgements unmade: each slot is dict(d, p, state, why, swap, also). ctx: see judge"""
-    c = _ctx(m, ctx); b = c["busy"]; mine = [x for x in pool if x["id"] == lesson_id]
-    sh = lambda s: (m["subjects"].get(s) or {}).get("short") or s; name = lambda i: named(b.ids[i], sh)
-    rows = mine or _rows(m["lessons"], lesson_id); a = rows[0]; n, cls = a["n"], _classes(rows); out = []
-    go = dict(kind="place" if mine else "move", id=lesson_id)
-    for d in range(len(days)):
-        for p in range(m["NP"]):
-            if not mine and (d, p) == (a["d"], a["p"]): continue
-            there = {y["id"]: y for k in cls for q in range(p, min(p + n, m["NP"])) for y in b.at.get(("c", k, d, q), ()) if y["id"] != lesson_id}
-            ids = sorted(there); push = beside = None
-            if ids and extras:
-                push = dict(**_pick(judge(m, spec, days, dict(go, d=d, p=p, out=ids), c, pool)), out=[dict(id=i, what=name(i), classes=_classes(b.ids[i]), groups=len(b.ids[i])) for i in ids])
-                beside = _pick(judge(m, spec, days, dict(go, d=d, p=p), c, pool))
-            more = dict(push=push, beside=beside) if extras else {}
-            if mine or not there:
-                out.append(dict(d=d, p=p, **(beside or _pick(judge(m, spec, days, dict(go, d=d, p=p), c, pool))), swap=None, also=[], **more)); continue
-            y = next(iter(there.values()))
-            if len(there) == 1 and (y["d"], y["p"], y["n"]) == (d, p, n):
-                also = [f"This also moves {what(y)} to {when(days, a['d'], a['p'])}."] if set(_classes(b.ids[y["id"]])) != set(cls) else []   # a band swaps only with its own classes, so this names one row
-                out.append(dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="swap", a=lesson_id, b=y["id"]), c, pool)), swap=y["id"], also=also, **more))
-            else: out.append(dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[], **more))
-    return out
+    leaves push and beside out, and their judgements unmade: each slot is dict(d, p, state, why, swap, also). extras="who" (the
+    board's): the keys of False and there: None where no other lesson of its classes is, else those lessons as push.out lists them,
+    and no push or beside judged (see place); a lesson in the pool is "na" ("Another lesson is there.") where there is one. ctx: see judge"""
+    mine, a, at = _placer(m, spec, days, lesson_id, pool, extras, ctx)
+    return [at(d, p) for d in range(len(days)) for p in range(m["NP"]) if mine or (d, p) != (a["d"], a["p"])]
+
+def place(m, spec, days, lesson_id, d, p, pool=(), ctx=None):
+    """the one slot at (d, p) with everything slots(extras=True) gives it -> dict(d, p, state, why, swap, also, push, beside); push and
+    beside are None where no other lesson of the lesson's classes is. ValueError for an unknown lesson, or a place outside the days or periods"""
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (d, p)) or not 0 <= d < len(days) or not 0 <= p < m["NP"]: raise ValueError("That is outside the day.")
+    return _placer(m, spec, days, lesson_id, pool, True, ctx)[2](d, p)
 
 def marks(busy, rows, pool=False):
     """the critical mistakes of one lesson (its rows) as busy sees the timetable, in the order "notplaced", "noteacher", "break",
@@ -564,9 +574,9 @@ def choices(m, spec, days, lesson_id, group=None, pool=()):
     free ones first, each by rank (0 step 5's teachers of the key, 1 on a lesson of the subject or its card, 2 of the subject's department,
     3 anyone) then the setup's order; free: on no lesson but those of the key on the timetable in any period of any of them; doing: the first
     lesson they are on then, '{what} on {day} period {p}', else ''. rooms: every venue once, dict(room, kind, right, free, holding): right
-    is the kind step 5 asks for or a home room of the row's classes; free: it holds fewer other lessons than it takes at once in every
-    period of this lesson (always for a lesson in the pool); holding: what of the first lesson in it then, else ''. Ordered free and right,
-    free, then the rest, each in the setup's order"""
+    is the kind step 5 asks for or a home room of the row's classes; free: a room fix putting this row there would not be refused for the room
+    (Busy._why, this lesson set aside; always free for a lesson in the pool); holding: what of the first lesson in it (or having it as a rain
+    room) then, else the judgement's own sentence, '' when free. Ordered free and right, free, then the rest, each in the setup's order"""
     mine = [x for x in pool if x["id"] == lesson_id]; rows = mine or [x for x in m["lessons"] if x["id"] == lesson_id]
     if not rows: raise ValueError("There is no lesson with that id on the timetable.")
     row = rows[0] if group is None else next((x for x in rows if x["group"] == group), None)
@@ -589,11 +599,12 @@ def choices(m, spec, days, lesson_id, group=None, pool=()):
     teachers.sort(key=lambda t: (not t["free"], t["rank"]))   # stable: the setup's order within
     kind = _room_kind(m, spec, row); homes = {str(m["class_ix"].get(c, {}).get("home") or "") for c in row["classes"]} - {""}; rooms = []
     for v in {str(v["room"]): v for v in spec.get("venues") or [] if isinstance(v, dict) and v.get("room")}.values():
-        room, vk = str(v["room"]), v.get("kind") or "classroom"; holding = ""
-        if not mine:
-            for q in _span(row):
-                there = list({y["id"]: y for y in b.at.get(("r", room, row["d"], q), ()) if y["id"] != lesson_id}.values())
-                if len(there) >= m["room_cap"].get(room, 1): holding = what(there[0]); break
-        rooms.append(dict(room=room, kind=vk, right=bool(kind and vk == kind) or room in homes, free=not holding, holding=holding))
+        room, vk = str(v["room"]), v.get("kind") or "classroom"; free, holding = True, ""
+        if not mine:   # free: a room fix putting this row in the room would not be refused for the room (this lesson set aside)
+            why = b._why([dict(row, teachers=[], classes=[], group=ENTIRE, rain="", room=room)], row["d"], row["p"], row["n"], {lesson_id})[0]
+            if why:
+                held = [y for q in _span(row) for k in ("r", "h") for y in b.at.get((k, room, row["d"], q), ()) if y["id"] != lesson_id]
+                free, holding = False, what(held[0]) if held else why
+        rooms.append(dict(room=room, kind=vk, right=bool(kind and vk == kind) or room in homes, free=free, holding=holding))
     rooms.sort(key=lambda r: 0 if r["free"] and r["right"] else 1 if r["free"] else 2)
     return dict(id=lesson_id, group=row["group"], key=verify._kstr(k), what=what(row), n_lessons=n_lessons, teachers=teachers, rooms=rooms)
