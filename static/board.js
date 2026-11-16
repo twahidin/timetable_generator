@@ -136,6 +136,13 @@ var Board = (function () {
 
   function can(s) { return !!s && (s.state === "ok" || s.state === "prefer"); }
 
+  /* the slot that swaps the selected lesson with lesson id, when the app allows it, else null */
+  function target(slots, id) {
+    var found = null;
+    (slots || []).forEach(function (s) { if (!found && s.swap === id && can(s)) found = s; });
+    return found;
+  }
+
   function fix(card, s) {
     if (s.swap !== null && s.swap !== undefined) return { kind: "swap", a: card.id, b: s.swap };
     return { kind: "move", id: card.id, d: s.d, p: s.p };
@@ -157,6 +164,6 @@ var Board = (function () {
   }
 
   return { lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
-           start: start, slot: slot, states: states, can: can, fix: fix, onRow: onRow, tell: tell };
+           start: start, slot: slot, states: states, can: can, target: target, fix: fix, onRow: onRow, tell: tell };
 })();
 if (typeof module !== "undefined") module.exports = Board;

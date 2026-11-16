@@ -164,4 +164,13 @@ t("tell: the sentence for a move, a swap, a clash with its reason, and the card'
   assert.strictEqual(Board.tell({ d: 0, p: 2, state: "own", why: "", swap: null }, days), "This is where the lesson is now.");
 });
 
+t("target: the slot that swaps with a lesson, only when the app allows it", () => {
+  const slots = [{ d: 0, p: 1, state: "ok", why: "", swap: 7 }, { d: 0, p: 2, state: "prefer", why: "", swap: 8 }, { d: 0, p: 3, state: "no", why: "x", swap: 9 }, { d: 0, p: 4, state: "ok", why: "", swap: null }];
+  assert.strictEqual(Board.target(slots, 7), slots[0]);
+  assert.strictEqual(Board.target(slots, 8), slots[1]);
+  assert.strictEqual(Board.target(slots, 9), null);
+  assert.strictEqual(Board.target(slots, 5), null);
+  assert.strictEqual(Board.target(null, 7), null);
+});
+
 console.log(`${n} cases passed`);
