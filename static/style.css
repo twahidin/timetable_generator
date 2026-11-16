@@ -410,3 +410,5 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .tkfigs{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:12.5px;color:var(--muted)}
 .tkfigs b{color:var(--ink)}
 .tkmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}
+.pbcrit{color:var(--warn);font-weight:600}
+.chip.pbmark{background:var(--warn-bg);color:var(--warn);margin-right:6px;white-space:normal}
