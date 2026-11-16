@@ -1,8 +1,8 @@
 """The draft: the timetable the committee uploaded, kept on the server beside the saved setup. It is checked against the
 setup as it is now (ttgen.verify), each difference is decided on (change step 5, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
-import copy, json, os, re, secrets, shutil, threading
-from ttgen.export import ENTIRE, model_from_files
+import copy, json, os, re, secrets, shutil, threading, uuid
+from ttgen.export import ENTIRE, PALETTE, block_label, model_from_files
 from ttgen.database import write_db
 from ttgen.spec import typed_rules
 from ttgen import choices, verify
@@ -48,7 +48,7 @@ def save(setup_path, timetable_path, source, spec, replace=False):
             shutil.rmtree(new, ignore_errors=True); raise ValueError(f"Could not read the files: {e}")
         if not m["lessons"]: shutil.rmtree(new, ignore_errors=True); raise ValueError("The timetable has no lessons.")
         store.write_json(os.path.join(new, "decisions.json"), {})
-        store.write_json(os.path.join(new, "meta.json"), dict(source=source, uploaded_at=store.now(), fixes=[], school=m["file_school"],
+        store.write_json(os.path.join(new, "meta.json"), dict(source=source, uploaded_at=store.now(), upload_id=uuid.uuid4().hex, fixes=[], school=m["file_school"],
                                                               config_id=str(((m["setup"].get("school") or {}).get("config_id")) or "").strip()))
         shutil.rmtree(old, ignore_errors=True)
         if os.path.exists(DIR): os.replace(DIR, old)
@@ -58,7 +58,7 @@ def save(setup_path, timetable_path, source, spec, replace=False):
 def summary():
     """what /api/status shows of the draft, from meta.json alone (no model is built)"""
     meta = store.read_json(_p("meta.json")) if exists() else None
-    return dict(uploaded_at=meta.get("uploaded_at"), source=meta.get("source"), open=meta.get("open"), critical=meta.get("critical"), fixes=len(meta.get("fixes") or [])) if meta else None
+    return dict(uploaded_at=meta.get("uploaded_at"), upload_id=meta.get("upload_id"), source=meta.get("source"), open=meta.get("open"), critical=meta.get("critical"), fixes=len(meta.get("fixes") or [])) if meta else None
 
 def model_now(rec=None):
     """(model, setup record, fx) of the draft with its fixes applied, checked against the setup record (default: as it is now).
@@ -68,7 +68,7 @@ def model_now(rec=None):
     if not spec: raise LookupError("no setup")
     with _lock:
         meta = store.read_json(_p("meta.json"), {}); fl = meta.get("fixes") or []
-        key = (meta.get("uploaded_at"), rec["v"], json.dumps(fl, sort_keys=True))
+        key = (meta.get("uploaded_at"), meta.get("upload_id"), rec["v"], json.dumps(fl, sort_keys=True))
         if _cache.get("key") == key: return _cache["m"], rec, _cache["fx"]
         args = paths()
     fx = {}; m = model_from_files(None, args[1], spec=spec, edit=fixes.editor(fl, fx))   # no re-read of the setup workbook: the spec is given
@@ -90,7 +90,7 @@ def _build(m=None, rec=None, fx=None):
     state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
              "same" if int(got[1]) == ver else "older" if int(got[1]) < ver else "newer")
     ours, theirs = str((spec.get("school") or {}).get("name") or "").strip(), meta.get("school") or ""
-    return dict(source=meta.get("source"), uploaded_at=meta.get("uploaded_at"), config_id=cid, setup_version=f"v{ver}", config_state=state,
+    return dict(source=meta.get("source"), uploaded_at=meta.get("uploaded_at"), upload_id=meta.get("upload_id"), config_id=cid, setup_version=f"v{ver}", config_state=state,
                 school=m["school"]["name"], file_school=theirs, timetable=m["school"]["timetable"], lessons=ch["lessons"], classes=len(m["classes"]), teachers=len(m["teachers"]),
                 students=len(m["students"]), after=ch["after_school"][:30], notes=m["notes"][:12], rule_report=m.get("rule_report") or [],
                 choices_used=m.get("choices_used") or [], choices=len(spec.get("choices") or []) - len({i for i, _ in choices.problems(spec)}),
@@ -220,6 +220,40 @@ def options(lesson_id=None, group=None, add=None, n=None):
     key = verify._kstr(fixes._row_key(row)); g = row["group"]
     return dict(key=key, slots=fixes.slots(m, spec, days, lid), teachers=fixes.teacher_options(m, spec, days, key), rooms=fixes.room_options(m, spec, days, lid, g),
                 delete=fixes.can_delete(m, spec, days, lid, group))
+
+NOT_IN_SETUP = "Not in the setup"
+
+def board():
+    """the whole draft as cards for the board -> dict(days, NP, times, levels, codes, subjects, palette, cards); one card per lesson id, with every row and class of it"""
+    m = _now()[0]; NP, nd = m["NP"], len(m["days"]); in_setup = {str(c["class"]) for c in m["checked_setup"]["classes"]}
+    level_of = {c["name"]: c["level"] for c in m["classes"] if c["name"] in in_setup}   # the model also lists a class only a lesson names
+    by_id = {}
+    for x in m["lessons"]: by_id.setdefault(x["id"], []).append(x)
+    levels = [dict(level=lv, classes=[c for c, l in level_of.items() if l == lv]) for lv in m["levels"]]
+    placed = {c for lv in levels for c in lv["classes"]}
+    extra = [c["name"] for c in m["classes"] if c["name"] not in placed]   # not in the setup, or on a level the model does not have
+    if extra: levels.append(dict(level=NOT_IN_SETUP, classes=extra))
+    codes = {}
+    for lv in levels:
+        for c in lv["classes"]: codes[c] = list(m["cgrid"].get(c) or m["grid"].get(level_of.get(c)) or ["." * NP] * nd)
+    short = lambda s: (m["subjects"].get(s) or {}).get("short") or s
+    tshort = {t: (m["teacher_ix"].get(t) or {}).get("short") or t for x in m["lessons"] for t in x["teachers"]}
+    cards = []
+    for i in sorted(by_id):
+        rows = by_id[i]; a = rows[0]; blocked = next((x for x in rows if x["block"]), None)
+        band = block_label(blocked["block"], blocked["level"]) if blocked else " / ".join(dict.fromkeys(short(x["subject"]) for x in rows)) if len(rows) > 1 else ""
+        cards.append(dict(id=i, d=a["d"], p=a["p"], n=a["n"], classes=list(dict.fromkeys(c for x in rows for c in x["classes"])), band=band, what=fixes.what(a),
+                          rows=[dict(group=x["group"], subject=x["subject"], teachers=list(x["teachers"]), tshorts=[tshort[t] for t in x["teachers"]], room=x["room"]) for x in rows]))
+    return dict(days=list(m["days"]), NP=NP, times=m["times"], levels=levels, codes=codes,
+                subjects={k: [v.get("short") or k, v.get("color"), v.get("dept") or ""] for k, v in m["subjects"].items()},
+                palette=[list(c) for c in PALETTE], cards=cards)
+
+def slots(lesson_id):
+    """where one lesson may go: fixes.slots on the draft as it is now -> dict(id, slots)"""
+    m = _now()[0]
+    try: lid = int(lesson_id)
+    except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
+    return dict(id=lid, slots=fixes.slots(m, m["checked_setup"], m["days"], lid))
 
 def _length(n, m):
     """an add's n, a whole number from 1 to the periods in a day, or ValueError(sentence)"""

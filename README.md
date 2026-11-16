@@ -91,20 +91,23 @@ is not on step 3, and a named subject the class has only in groups.
    form teachers on a lesson they take show here like any other, and **Update step 5** keeps the timetable's teachers and
    marks the lesson "Changed by hand"), the setup's rules,
    and the typed rules and choices used that the agent reported. A warning for another school than the saved setup, and
-   which configuration the timetable was made from, are shown too. The warnings are listed by kind and then by class,
-   teacher or group, with the timetable's side and step 5's side. For each one, **Update step 5** changes the setup to
-   match the timetable, and a rule in words that reads **Check again** has a **Still met** button for when you have looked
-   (**Reopen** takes it back). The summary line reads critical, warnings open and settled on step 5. A **critical
-   mistake** is a lesson with no teacher, a teacher in two places, a class clash, a room used by more lessons than it
-   takes, or a lesson in a break or outside the day; each shows its kind in words before its sentence, and every
-   one is listed. Everything else is a warning and never stops publishing. Two bands, or two groups, of one class at
-   the same time are not a clash. **Fix the timetable** (on a warning, or the Fix card below the list) shows one
-   class's or one teacher's week as a table; pick a class or a teacher, and a week when the school has two, then select a
-   lesson. Every slot is coloured by what a fix there would do (green is open, amber is open but less wanted, red is
-   not allowed, grey is a slot the lesson cannot go to: not lesson time, outside the day, or another lesson is there
-   that it cannot swap with); click a green or amber slot to move the lesson, or a lesson there to swap with it (in a
-   teacher's week an open slot can be a swap with the class's lesson there; a swap that also moves another class's
-   lesson opens **Before you apply** first, with that class's week). The side panel also changes the teacher or
+   which configuration the timetable was made from, are shown too. Below the upload, the timetable is shown as a board
+   of one day (a row per class, the periods across) or of one class's whole cycle; a lesson is dragged to another time
+   on its row, or clicked and then a place clicked, wherever the app allows the move or the swap, and **Undo the last
+   timetable change** puts it back. The list of warnings and the editor are below the board. The warnings are listed by
+   kind and then by class, teacher or group, with the timetable's side and step 5's side. For each one, **Update step
+   5** changes the setup to match the timetable, and a rule in words that reads **Check again** has a **Still met**
+   button for when you have looked (**Reopen** takes it back). The summary line reads critical, warnings open and
+   settled on step 5. A **critical mistake** is a lesson with no teacher, a teacher in two places, a class clash, a room
+   used by more lessons than it takes, or a lesson in a break or outside the day; each shows its kind in words before
+   its sentence, and every one is listed. Everything else is a warning and never stops publishing. Two bands, or two
+   groups, of one class at the same time are not a clash. **Fix the timetable** (on a warning, or the Fix card below the
+   list) shows one class's or one teacher's week as a table; pick a class or a teacher, and a week when the school has
+   two, then select a lesson. Every slot is coloured by what a fix there would do (green is open, amber is open but less
+   wanted, red is not allowed, grey is a slot the lesson cannot go to: not lesson time, outside the day, or another
+   lesson is there that it cannot swap with); click a green or amber slot to move the lesson, or a lesson there to swap
+   with it (in a teacher's week an open slot can be a swap with the class's lesson there; a swap that also moves another
+   class's lesson opens **Before you apply** first, with that class's week). The side panel also changes the teacher or
    the room, deletes an extra lesson, and, with nothing selected, lists a class's missing periods with **Add a lesson**.
    Every fix is kept with its sentence under **Fixes**, and **Undo the last fix** takes the last one back. A fix that
    would cause a clash, change a subject's periods from the plan or newly break a Must rule is refused (red), so a clean

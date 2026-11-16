@@ -4,7 +4,7 @@ Committee (COMMITTEE_CODE): fill the setup step by step, download it with the ti
 to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable."""
-import copy, io, os, re, shutil, sys, tempfile, traceback, zipfile
+import copy, gzip, io, os, re, shutil, sys, tempfile, traceback, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -406,6 +406,24 @@ def draft_options():
     q = request.args
     if q.get("add") is None and q.get("id") is None: return {"error": "Say which lesson."}, 400
     return _checked(lambda: draft.options(q.get("id"), q.get("group"), q.get("add"), q.get("n")), sentences=True)
+
+def _gz(r):
+    """a 200 answer gzip'd when the request accepts it (the board is large and repeats itself)"""
+    r.vary.add("Accept-Encoding")
+    if r.status_code != 200 or "gzip" not in request.headers.get("Accept-Encoding", "").lower(): return r
+    r.set_data(gzip.compress(r.get_data(), 5)); r.headers["Content-Encoding"] = "gzip"; return r
+
+@app.get("/api/draft/board")
+@need("committee")
+def draft_board():
+    r = _checked(draft.board, sentences=True)
+    return _gz(r) if isinstance(r, Response) else r
+
+@app.get("/api/draft/slots")
+@need("committee")
+def draft_slots():
+    if request.args.get("id") is None: return {"error": "Say which lesson."}, 400
+    return _checked(lambda: draft.slots(request.args.get("id")), sentences=True)
 
 @app.post("/api/draft/fix")
 @need("committee")
