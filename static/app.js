@@ -3277,7 +3277,7 @@ function bdHTML() {
       : `<div class="bdgrp"><button data-bdfold="${esc(g.name)}" aria-expanded="${!folded}">${folded ? "▸" : "▾"} ${esc(g.name)}${folded ? ` (${k} class${k === 1 ? "" : "es"} hidden)` : ""}</button></div>`;
     return gh + (folded ? "" : g.rows.map(r => bdRowHTML(r, b, cycle, hit)).join(""));
   }).join("");
-  return head + controls + bdCountersHTML(d) + `<p class="muted small">Drag a lesson to another time on its row, or click it and then click a place. Green is clean, amber bends a rule, red lands but clashes, grey cannot take it. Drop on another lesson to swap or push it out.</p><div class="bdsel" id="bdLine" aria-live="polite">${bdLineHTML()}</div>
+  return head + controls + bdCountersHTML(d) + `<div class="bdsel" id="bdLine" aria-live="polite">${bdLineHTML()}</div>
     <div class="bdmain"><div class="bdwrap"><div class="bdin" style="min-width:calc(var(--bdlab) + ${d.NP} * var(--bdw))">${hdr}${body}</div></div>${bdTrayHTML(b, hit)}</div>`;
 }
 const bdOpenWarnings = () => ((S.draft && S.draft.warnings) || []).filter(w => !w.decision && !w.crit).length;   // the draft's open warnings that are not critical mistakes
@@ -3288,14 +3288,14 @@ function bdCountersHTML(d) {   // above the hint: what is wrong on the board, a 
 const bdLastFix = () => { const l = S.draft && S.draft.fixes; return l && l.length ? l[l.length - 1] : null; };
 function bdUndoHTML() {   // beside the heading: undo of the draft's last fix, with that fix's sentence
   const f = bdLastFix(); if (!f) return "";
-  return `<span class="bdundo"><button data-bdundo="1"${FX.busy ? " disabled" : ""}>Undo the last timetable change</button><span class="muted small">${esc(f.text || "")}</span></span>`;
+  return `<span class="bdundo"><button data-bdundo="1"${FX.busy ? " disabled" : ""}>Undo the last timetable change</button><span class="muted small" title="${esc(f.text || "")}">${esc(f.text || "")}</span></span>`;
 }
 function bdLineHTML() {   // the one status line under the hint: the swap question, else the place under the pointer, else the selected card, else the last change
   const b = S.board, d = b.data; if (!d) return "";
   const c = b.sel !== null ? bdCard(b.sel) : null, day = x => (d.days || [])[x] || "";
-  if (b.ask) {   // a lesson dropped where another is: Swap, Push out, Cancel, as the place allows
+  if (b.ask) {   // a lesson dropped where another is: Swap, Put it beside, Push out, Cancel, as the place allows
     const q = b.ask.q, dis = FX.busy ? " disabled" : "";
-    return `<span>${esc(q.text)}</span>${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.push ? `<button data-bdpush="1"${dis}>${esc(q.push)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
+    return `<span>${esc(q.text)}</span>${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.beside ? `<button data-bdbeside="1"${dis}>${esc(q.beside)}</button>` : ""}${q.push ? `<button data-bdpush="1"${dis}>${esc(q.push)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
   }
   if (b.pt) return `<span>${esc(b.pt)}</span>`;
   if (c) {
@@ -3306,12 +3306,13 @@ function bdLineHTML() {   // the one status line under the hint: the swap questi
     return `<span>${esc(c.what)} · ${esc(day(c.d))} period ${c.p}${time ? ` (${esc(time)})` : ""}${grp}</span>${why}
       ${(c.classes || []).length ? `<button data-bdmore="1">Teacher, room and more</button>` : ""}<button data-bdlift="1"${FX.busy ? " disabled" : ""}>Lift out</button><button data-bdclose="1">Close</button>`;
   }
-  return b.note ? `<span>${esc(b.note)}</span>` : "";
+  return b.note ? `<span>${esc(b.note)}</span>` : `<span class="muted small">${BDHINT}</span>`;   // with nothing to say, the line holds the hint
 }
+const BDHINT = "Drag a lesson to another time on its row, or click it and then click a place. Green is clean, amber bends a rule, red lands but clashes, grey cannot take it. Drop on another lesson to swap or push it out.";
 function bdLineDraw() { const el = $("#bdLine"); if (el && S.board && S.board.data) el.innerHTML = bdLineHTML(); }
 function bdBusy() {   // a post starts or ends: the board's buttons that post follow it, without a redraw
   const box = $("#bdBox"); if (!box) return;
-  box.querySelectorAll("[data-bdundo], [data-bdswap], [data-bdpush], [data-bdlift]").forEach(x => { x.disabled = FX.busy; });
+  box.querySelectorAll("[data-bdundo], [data-bdswap], [data-bdbeside], [data-bdpush], [data-bdlift]").forEach(x => { x.disabled = FX.busy; });
 }
 const BDST = ["own", "ok", "prefer", "no", "na"];
 function bdPaint() {   // the cells and the strip of every row take the state of the card selected or pressed, and the cards it can be swapped with get an outline (classes only, so a drag in the air is not cancelled); rows it cannot be dropped on are dimmed
@@ -3329,7 +3330,7 @@ function bdPaint() {   // the cells and the strip of every row take the state of
     r.querySelectorAll(".bdcell").forEach(paint);
     r.querySelectorAll(".bdmark").forEach(x => {
       const s = paint(x);
-      if (s) x.title = Board.tell(Board.slot(c, slots, day, Number(x.dataset.p)), d.days || []); else x.removeAttribute("title");
+      if (s) x.title = Board.tell(Board.slot(c, slots, day, Number(x.dataset.p)), d.days || [], c); else x.removeAttribute("title");
     });
   });
   const tg = {};
@@ -3383,12 +3384,12 @@ function bdSlotAt(c, at) {   // what the board knows of a place at = {cls, d, p,
   const slot = Board.aim(c, b.slots, at.d, at.p, bdInTray(c) ? null : at.over);   // a lesson from the tray is placed, never swapped
   return Object.assign({ slot }, bdJudge(c, slot));
 }
-const bdAsks = (c, s) => { const a = Board.asks(s); return a && bdInTray(c) ? { swap: false, push: a.push } : a; };
+const bdAsks = (c, s) => { const a = Board.asks(s); return a && bdInTray(c) ? Object.assign({}, a, { swap: false }) : a; };
 function bdJudge(c, s) {   // what a click or a drop on place s does: act "ask" (another lesson is there: the question), "move" (it lands, forced when red), or why it is refused
   if (!s) return { why: "none" };
   if (s.state === "own") return { why: "own" };
   const a = bdAsks(c, s);
-  if (a) { const q = Board.question(c, s, S.board.data); return (a.swap && q.swap) || (a.push && q.push) ? { act: "ask" } : { why: "stuck" }; }
+  if (a) { const q = Board.question(c, s, S.board.data); return (a.swap && q.swap) || (a.beside && q.beside) || (a.push && q.push) ? { act: "ask" } : { why: "stuck" }; }
   if (Board.lands(s)) return { act: "move" };
   return { why: "slot" };
 }
@@ -3434,8 +3435,9 @@ function bdClick(b) {   // true when the click was the board's
   if (d.bdclose !== undefined) { bd.sel = null; bd.ask = null; bdDraw(); bdWant(); return true; }
   if (d.bdundo !== undefined) { bdSend("/api/draft/undo", {}, null); return true; }
   if (d.bdcancel !== undefined) { bd.ask = null; bdLineDraw(); return true; }
-  if (d.bdswap !== undefined || d.bdpush !== undefined) {   // the question's answer: the fix of the lesson asked about, at the place asked about
-    const a = bd.ask, c = a && bdCard(a.id); if (c) bdSend("/api/draft/fix", Board.fix(c, a.slot, d.bdswap !== undefined ? "swap" : "push"), c); return true;
+  if (d.bdswap !== undefined || d.bdpush !== undefined || d.bdbeside !== undefined) {   // the question's answer: the fix of the lesson asked about, at the place asked about
+    const a = bd.ask, c = a && bdCard(a.id), how = d.bdswap !== undefined ? "swap" : d.bdbeside !== undefined ? "beside" : "push";
+    if (c) bdSend("/api/draft/fix", Board.fix(c, a.slot, how), c); return true;
   }
   if (d.bdlift !== undefined) { const c = bd.sel !== null ? bdCard(bd.sel) : null; if (c && !bdInTray(c)) bdSend("/api/draft/fix", Board.liftFix(c), c, true); return true; }
   if (d.bdcount !== undefined) { bdStep(d.bdcount); return true; }
@@ -3517,7 +3519,7 @@ document.addEventListener("dragover", e => {   // over a place: the cells it wou
   const key = `${row.dataset.row}|${row.dataset.d}|${p}|${o ? o.id : ""}|${a.slot ? a.slot.state : a.why}`;
   if (key === b.hv) return;
   b.hv = key; bdOver(row, o ? o.p : p, o || c); bdTrayLit(false);
-  b.pt = a.slot && a.why !== "stuck" ? Board.tell(a.slot, b.data.days) : wait ? bdAirText(b) : bdWhyText(a, true); bdLineDraw();
+  b.pt = a.slot && a.why !== "stuck" ? Board.tell(a.slot, b.data.days, c) : wait ? bdAirText(b) : bdWhyText(a, true); bdLineDraw();
 });
 document.addEventListener("drop", e => {
   const b = S.board; if (!b || !b.data || b.drag === null) return;
