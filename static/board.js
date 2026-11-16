@@ -143,6 +143,13 @@ var Board = (function () {
     return found;
   }
 
+  /* the slot a dragged lesson is aimed at: the swap with the lesson under the pointer (over, its id, or null) when the app
+     allows that swap, else the slot at the start p that the pointer gives on day d */
+  function aim(card, slots, d, p, over) {
+    var t = over !== null && over !== undefined && over !== card.id ? target(slots, over) : null;
+    return t || slot(card, slots, d, p);
+  }
+
   function fix(card, s) {
     if (s.swap !== null && s.swap !== undefined) return { kind: "swap", a: card.id, b: s.swap };
     return { kind: "move", id: card.id, d: s.d, p: s.p };
@@ -164,6 +171,6 @@ var Board = (function () {
   }
 
   return { lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
-           start: start, slot: slot, states: states, can: can, target: target, fix: fix, onRow: onRow, tell: tell };
+           start: start, slot: slot, states: states, can: can, target: target, aim: aim, fix: fix, onRow: onRow, tell: tell };
 })();
 if (typeof module !== "undefined") module.exports = Board;

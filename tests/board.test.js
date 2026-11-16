@@ -173,4 +173,16 @@ t("target: the slot that swaps with a lesson, only when the app allows it", () =
   assert.strictEqual(Board.target(null, 7), null);
 });
 
+t("aim: a pointer over a lesson it can swap with aims at that swap; anywhere else the start the pointer gives", () => {
+  const pe = card(3, 0, 9, 2, ["1A"]);
+  const slots = [{ d: 4, p: 4, state: "ok", why: "", swap: 7 }, { d: 0, p: 23, state: "prefer", why: "Bends a rule.", swap: null },
+    { d: 0, p: 12, state: "no", why: "Clash.", swap: 8 }, { d: 0, p: 5, state: "ok", why: "", swap: 9 }];
+  assert.strictEqual(Board.aim(pe, slots, 4, 5, 7), slots[0]);      // over the swap target, its start not under the card's start
+  assert.strictEqual(Board.aim(pe, slots, 0, 23, null), slots[1]);  // over nothing: the pointer's start
+  assert.strictEqual(Board.aim(pe, slots, 0, 23, 8), slots[1]);     // over a lesson it may not swap with: the pointer's start
+  assert.strictEqual(Board.aim(pe, slots, 0, 9, 3).state, "own");   // over itself: the pointer's start
+  assert.strictEqual(Board.aim(pe, slots, 0, 6, 11), null);         // a place with no slot
+  assert.strictEqual(Board.aim(pe, null, 0, 23, 7), null);
+});
+
 console.log(`${n} cases passed`);
