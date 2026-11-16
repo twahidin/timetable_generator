@@ -67,6 +67,8 @@ def test_draft_needs_a_saved_setup():   # runs before any test that saves a setu
     r = c.post("/api/draft", data=_draft_form(A.sample("primary"), []), content_type="multipart/form-data")
     assert r.status_code == 409 and "Save the school's setup first" in r.get_json()["error"], r.get_json()
     assert c.get("/api/draft").get_json() == {"draft": None}
+    r = c.post("/api/draft/printouts", data=dict(single="0"))   # neither a setup nor a draft: the draft is asked after first, so it is 404 (the 409 is for a draft with no setup)
+    assert r.status_code == 404 and r.get_json() == {"error": "There is no draft."}, r.get_json()
 
 def test_setup_round_trip():
     spec = c.get("/api/sample/secondary").get_json()
@@ -917,15 +919,15 @@ def test_the_draft_counts_critical_mistakes():
 
 def test_publish_is_refused_while_a_critical_mistake_remains():
     import draft
-    _clash_draft(); before = store.published(); stamp = (before or {}).get("meta", {}).get("published_at")
+    _clash_draft(); before = store.published(); stamp = (before or {}).get("meta", {}).get("published_at")   # None while nothing is published
     r = c.post("/api/draft/publish"); j = r.get_json()
     assert r.status_code == 409 and j == {"error": draft.critical_text(1), "critical": 1}, j
     assert draft.critical_text(1) == "1 critical mistake must be settled on step 8 before the timetable can be published."
     assert draft.critical_text(3) == "3 critical mistakes must be settled on step 8 before the timetable can be published."
-    assert ((store.published() or {}).get("meta") or {}).get("published_at") == stamp
+    assert (store.published() or {}).get("meta") == (before or {}).get("meta")   # the same record as before the refused attempt, or still none
     fixed, s = _settle_clash(); assert fixed["critical"] == 0, fixed["critical"]
     r = c.post("/api/draft/publish"); assert r.status_code == 200 and r.get_json()["published"] is True, r.get_json()
-    assert store.published()["meta"]["published_at"] != stamp or stamp is None
+    assert store.published()["meta"]["published_at"] != stamp and store.published()["meta"]["open"] == c.get("/api/status").get_json()["published"]["open"]
 
 def test_leave_it_is_gone():
     import draft
@@ -948,13 +950,21 @@ def test_printouts_come_from_the_draft_with_its_fixes():
     from ttgen.export import model_from_files
     _clash_draft(); fixed, s = _settle_clash()
     r = c.post("/api/draft/printouts", data=dict(single="0")); assert r.status_code == 200 and r.mimetype == "application/zip" and r.headers["X-Checks"], (r.status_code, r.get_data()[:200])
-    z = zipfile.ZipFile(io.BytesIO(r.data)); db = next(n for n in z.namelist() if n.endswith(".sqlite")); path = os.path.join(tempfile.mkdtemp(), "p.sqlite"); open(path, "wb").write(z.read(db))
-    m = model_from_files(None, path); art = [x for x in m["lessons"] if x["subject"] == "Art" and x["classes"] == ["1B"]]
+    z = zipfile.ZipFile(io.BytesIO(r.data)); db = next(n for n in z.namelist() if n.endswith(".sqlite")); tmp = tempfile.mkdtemp(); path = os.path.join(tmp, "p.sqlite")
+    with open(path, "wb") as f: f.write(z.read(db))
+    m = model_from_files(None, path); __import__("shutil").rmtree(tmp, ignore_errors=True); art = [x for x in m["lessons"] if x["subject"] == "Art" and x["classes"] == ["1B"]]
     assert len(art) == 1 and (art[0]["d"], art[0]["p"]) == (s["d"], s["p"]), [(x["d"], x["p"]) for x in art]
     assert any(n.endswith(".xlsx") for n in z.namelist()) and any(n.endswith(".html") for n in z.namelist())
     assert h is None or h.post("/api/draft/printouts", data=dict(single="0")).status_code == 401
     shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"))
     r = c.post("/api/draft/printouts", data=dict(single="0")); assert r.status_code == 404 and r.get_json() == {"error": "There is no draft."}, r.get_json()
+
+def test_printouts_with_a_draft_but_no_setup_are_409():   # the order of checks: no draft is 404 first, then a draft with no setup is 409
+    _clash_draft(); real = store.setup_record
+    store.setup_record = lambda: dict(real(), spec=None)
+    try: r = c.post("/api/draft/printouts", data=dict(single="0"))
+    finally: store.setup_record = real
+    assert r.status_code == 409 and "Save the school's setup first" in r.get_json()["error"], (r.status_code, r.get_json())
 
 def test_publishing_records_the_open_warnings():
     spec = c.get("/api/setup").get_json()["spec"]; ds = spec["day_structure"]["P1"]; days = list(ds)   # one period of Art for 1A at a time that is a lesson

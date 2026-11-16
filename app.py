@@ -324,6 +324,17 @@ def _uploaded_timetable(work):
     if not m["lessons"]: raise ValueError("The timetable has no lessons.")
     return sp, tp, m
 
+def _zip_response(m, out, base):
+    """the printouts folder out (named base inside the zip) as the zip answer, with the X-Checks sentence of the model m"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for root, _, files in os.walk(out):
+            for fn in sorted(files): full = os.path.join(root, fn); z.write(full, os.path.join(base, os.path.relpath(full, out)))
+    buf.seek(0); ch = m["checks"]
+    resp = send_file(buf, as_attachment=True, download_name=f"{base} - timetables.zip", mimetype="application/zip")
+    resp.headers["X-Checks"] = "All checks passed." if ch["ok"] else f"{len(ch['problems'])} problems found: see the Read me sheet or the Checks tab."
+    return resp
+
 @app.post("/api/export")
 @need("committee")
 def export_printouts():
@@ -337,14 +348,7 @@ def export_printouts():
         base = safe_name(f"{m['school']['name']} {m['school']['timetable']}")
         out = os.path.join(work, "out", base)
         export_all(m, out, individual=request.form.get("single", "1") == "1", zip_individual=False, log=lambda *x: None)
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for root, _, files in os.walk(out):
-                for fn in sorted(files): full = os.path.join(root, fn); z.write(full, os.path.join(base, os.path.relpath(full, out)))
-        buf.seek(0); ch = m["checks"]
-        resp = send_file(buf, as_attachment=True, download_name=f"{base} - timetables.zip", mimetype="application/zip")
-        resp.headers["X-Checks"] = "All checks passed." if ch["ok"] else f"{len(ch['problems'])} problems found: see the Read me sheet or the Checks tab."
-        return resp
+        return _zip_response(m, out, base)
     finally: shutil.rmtree(work, ignore_errors=True)
 
 NO_SETUP = "Save the school's setup first: the timetable is checked against it."
@@ -486,14 +490,7 @@ def draft_printouts():
         except Exception as e:
             if type(e) is LookupError: return {"error": NO_SETUP}, 409
             app.logger.exception("making the printouts of the draft"); return {"error": f"Could not make the printouts: {e}"}, 400
-        out = os.path.join(work, "out", base); buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for root, _, files in os.walk(out):
-                for fn in sorted(files): full = os.path.join(root, fn); z.write(full, os.path.join(base, os.path.relpath(full, out)))
-        buf.seek(0); ch = m["checks"]
-        resp = send_file(buf, as_attachment=True, download_name=f"{base} - timetables.zip", mimetype="application/zip")
-        resp.headers["X-Checks"] = "All checks passed." if ch["ok"] else f"{len(ch['problems'])} problems found: see the Read me sheet or the Checks tab."
-        return resp
+        return _zip_response(m, os.path.join(work, "out", base), base)
     finally: shutil.rmtree(work, ignore_errors=True)
 
 @app.get("/download/template/<kind>")
