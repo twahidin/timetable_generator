@@ -1312,7 +1312,7 @@ function teachersCards(cols, iss) {
     const dchips = ds.map((d, i) => i === 1 && !head ? `<span class="chip tkdsec">${esc(d)} <button class="tkx" data-tsecond="${c.ti}" title="Take ${esc(d)} off ${esc(t.name || "this teacher")}" aria-label="Take ${esc(d)} off ${esc(t.name || "this teacher")}">✕</button></span>` : `<span class="chip">${esc(d)}</span>`).join("");
     return `<div class="tkcard ${rowCls(out, crit, "teachers", c.ti)}${P.teachers.has(c.ti) ? " picked" : ""}" ${c.home ? `id="teachers-${c.ti}" ` : ""}data-tcard="${c.ti}" data-tcol="${esc(encodeURIComponent(colDept))}">
       <div class="tktop"><input type="checkbox" data-pick="teachers.${c.ti}" aria-label="Tick ${esc(t.name || "this teacher")}" ${P.teachers.has(c.ti) ? "checked" : ""}><span class="tkav">${avatarOf(t, 32)}</span>
-        <div class="tkwho"><button class="tkname" data-topen="${c.ti}" aria-expanded="false">${nm}</button>${t.short ? ` <span class="muted small">${esc(t.short)}</span>` : ""}<div class="muted small">${esc(t.role || "")}</div></div></div>
+        <div class="tkwho"><button class="tkname" data-topen="${c.ti}">${nm}</button>${t.short ? ` <span class="muted small">${esc(t.short)}</span>` : ""}<div class="muted small">${esc(t.role || "")}</div></div></div>
       <div class="tkdepts">${dchips}</div>
       <div class="tkloadrow"><div class="tkload${over ? " over" : ""}" title="${g} periods given${other ? ` + ${other} other duties` : ""}${A ? `, allowance ${A}` : ""}"><i style="width:${A ? Math.min(100, Math.round(100 * tot / A)) : 0}%"></i></div><span class="${over ? "overtxt" : "muted"} small">${A ? `${tot} / ${A}` : `${tot} periods`}</span></div>
       ${lc[c.ti] ? `<div class="tkcheck">${esc(lc[c.ti])}</div>` : ""}${t.provisional === "Yes" ? `<div class="small">${tkMark(t)}</div>` : ""}</div>`;
@@ -1339,7 +1339,7 @@ function tkSecond(ti, dept) {
 }
 const VIEWS = {
   start() {
-    const how = `<div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher not set up for a subject, a teacher twice in a band, a lesson with no periods).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
+    const how = `<div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher twice in a band, a lesson with no periods, a teacher over their allowance).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
     const samples = `<button data-begin="secondary|sample"><b>Secondary school · sample</b><span class="muted">A fictional 16-class secondary school with G1/G2/G3 banding, option bands and rules. Opens as a practice copy: nothing is saved for the school.</span></button>
         <button data-begin="primary|sample"><b>Primary school · sample</b><span class="muted">A fictional 18-class primary school, weekly timetable, Standard/Foundation banding at P5–P6. Opens as a practice copy: nothing is saved for the school.</span></button>`;
     const blanks = `<button data-begin="secondary|blank"><b>Secondary school · blank</b><span class="muted">Typical subjects and a day shape filled in; you add rooms, classes, teachers and lessons.</span></button>
@@ -1832,7 +1832,7 @@ document.addEventListener("change", async e => {
   if (/^spec\.school\.(weeks|periods_per_day|period_minutes|lesson_length)$/.test(path)) v = Number(v);
   if (/^spec\.choices\.\d+\.second$/.test(path) && v === null) v = "no limit";   // a number setting's second choice left blank
   setPath(path, v);
-  if (tkp && S.spec.teachers[Number(tkp[1])]) TeacherView.tidy(S.spec.teachers[Number(tkp[1])]);   // a home department now equal to the second takes the second off, in the same save
+  if (tkp && !tkHead() && S.spec.teachers[Number(tkp[1])]) TeacherView.tidy(S.spec.teachers[Number(tkp[1])]);   // a home department now equal to the second takes the second off, in the same save
   const cfb = path.match(/^spec\.choices\.(\d+)\.fallback$/); if (cfb) Choices.setFallback(S.spec, Number(cfb[1]), v);
   const m = path.match(/^spec\.lessons\.(\d+)\.block$/);
   if (m && v) { const b = S.spec.blocks.find(x => x.block === v); if (b) { S.spec.lessons[m[1]].classes = [...(b.classes || [])]; S.spec.lessons[m[1]].level = b.level || S.spec.lessons[m[1]].level; } }
@@ -1881,6 +1881,12 @@ function addRow(k, scope) {   // scope: a preset for a rule added from a tab of 
     if (k === "rules") { const rt = (S.meta.rule_types || []).find(t => !["In words", "Fixed at"].includes(t.rule) && scopesOf(t).includes(scope)); if (rt) row.rule = rt.rule; } }   // a rule that applies to the tab's scope (a fixed lesson has its own button)
   S.spec[into].push(row); save();
   const show = () => { const last = document.getElementById(`${into}-${S.spec[into].length - 1}`); if (last) { last.scrollIntoView({ block: "center" }); const f = last.querySelector("input,select"); if (f) f.focus({ preventScroll: true }); } };
+  if (k === "teachers" && TV.view === "cards") {   // on Cards the new teacher's card opens in its home column, with the cursor in Name (the Show bar's filter and search clear first, as a Things to fix click does)
+    const ti = S.spec.teachers.length - 1; S.tf = { dept: "", q: "" }; tkOpen(ti, People.depts(row)[0] || ""); render();
+    const o = document.getElementById(`teachers-${ti}`);
+    if (o) { o.scrollIntoView({ block: "nearest" }); const f = o.querySelector(`[data-k="spec.teachers.${ti}.name"]`); if (f) f.focus({ preventScroll: true }); }
+    poll(); return;
+  }
   render(); show(); poll();
 }
 /* a teaching group with no band and fewer students than its classes (a pull-out group, say 9 of 1A2) is a group of its
@@ -2438,7 +2444,7 @@ function tlAction(k) {
   if (k === "depts") { sc().departments = [...(sc().departments || []), ...p.unknownDepts]; save(); toast(`Added ${p.unknownDepts.join(", ")} to the departments. Undo takes it back.`); }
   if (k === "apply") {
     if (!p.add.length && !p.update.length) return;
-    p.update.forEach(u => Object.assign(T[u.i], u.changes));   // the same row object: its _id stays
+    p.update.forEach(u => { Object.assign(T[u.i], u.changes); TeacherView.tidy(T[u.i]); });   // the same row object: its _id stays; a Department that is now the second takes the second off
     p.add.forEach(t => T.push(t));
     save(); TL.msg = `Added ${p.add.length}, updated ${p.update.length}. Undo takes it back.`; toast(TL.msg);
   }
