@@ -2702,6 +2702,7 @@ async function refreshDraft() {   // the draft again from the server, and the st
 }
 async function publishDraft() {   // step 9
   const btn = $("#pbPublish"), msg = $("#pbMsg"), again = () => { if (STEPS[S.step][0] === "publish") render(); };
+  DR.hold = true; DR.gen++;   // no fetch of the draft, and no answer of one already sent, while the publish runs
   if (btn) btn.disabled = true;
   if (msg) msg.textContent = "Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute for a school with 600 students)…";
   try {
@@ -2711,6 +2712,7 @@ async function publishDraft() {   // step 9
     if (!r.ok) { again(); toast(j.error || "Could not publish the timetable."); return; }
     S.draft = j; S.fix = null; again(); toast("Published. Teachers and students now see this timetable."); poll();
   } catch (err) { again(); toast("Could not reach the server: " + err.message); }
+  finally { DR.hold = false; DR.seen = null; }   // the next status is taken as seen, so the same summary causes no fetch
 }
 async function decide(answer, key) {   // answer is step5, open or met; the key is the warning's (it may hold a "|")
   const j = await post("/api/draft/decide", { key, answer });
@@ -2721,16 +2723,16 @@ async function decide(answer, key) {   // answer is step5, open or met; the key 
 /* the draft on steps 8 and 9: asked for the first time the page needs it, again each time the person opens either step, and again when
    the status poll shows the server's draft is not the one last fetched (another tab's fix, or a change to the setup). A fetch that
    brings the same draft back changes nothing on the page. */
-const DR = { seen: null, busy: false, again: false };   // seen: the status's summary of the draft when the page last fetched it; busy: a fetch is under way; again: the person opened a step meanwhile
+const DR = { seen: null, busy: false, again: false, hold: false, gen: 0 };   // seen: the status's summary of the draft when the page last fetched it; busy: a fetch is under way; again: the person opened a step meanwhile
 const onDraftStep = () => ["edit", "publish"].includes(STEPS[S.step][0]);
-const draftSig = () => { const d = G.st && G.st.draft; return d ? JSON.stringify([d.uploaded_at, d.open, d.critical, d.fixes, G.st.setup_saved_at]) : ""; };
+const draftSig = () => { const d = G.st && G.st.draft; return d ? JSON.stringify([d.uploaded_at, d.open, d.critical, d.fixes]) : ""; };   // the draft summary alone: a change to the setup is picked up when the person opens the step
 async function loadDraft(again) {   // again: the person has just opened step 8 or 9
-  if (!G.st || !G.st.draft) return;
+  if (!G.st || !G.st.draft || DR.hold) return;   // hold: a publish is running
   if (DR.busy) { if (again) DR.again = true; return; }   // never two at once; an opening meanwhile is fetched for when this one is in
   if (!again && (S.draft || S.draftTried)) return;
   if (again) S.draftFailed = false;
   S.draftTried = true; DR.busy = true;
-  const sig = draftSig(), had = !!S.draft; let j = {}, ok = false;
+  const sig = draftSig(), had = !!S.draft, gen = DR.gen; let j = {}, ok = false;
   try {
     const r = await fetch("/api/draft"); j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/login"; return; }
@@ -2738,9 +2740,11 @@ async function loadDraft(again) {   // again: the person has just opened step 8 
     if (!ok && !had && !r.ok && j.error) toast(j.error);
   } catch (e) { }
   finally { DR.busy = false; }
+  if (DR.hold || gen !== DR.gen) return;   // a publish began meanwhile: this answer is older than its result
   if (FX.busy) return;   // a fix is being made: its own answer is the newer one, and the poll after it looks again
   if (DR.again) { DR.again = false; loadDraft(true); return; }
   if (!ok) {
+    DR.seen = sig;   // this summary was tried: not again until it changes or the step is opened
     if (!S.draft) { S.draftFailed = true; if (onDraftStep()) render(); }   // nothing to show: say so; a draft already on the page stays, with no error
     return;
   }
@@ -2754,7 +2758,7 @@ async function loadDraft(again) {   // again: the person has just opened step 8 
   draftWatch();
 }
 function draftWatch() {   // after each status: a draft that is not the one last fetched is fetched again while step 8 or 9 is on screen; elsewhere the next opening does it
-  if (DR.busy || !G.st) return;
+  if (DR.busy || DR.hold || !G.st) return;
   const sig = draftSig();
   if (DR.seen === null) { if (!!S.draft === !!sig) { DR.seen = sig; return; } }   // the first status: a baseline unless the page lacks a draft the server has, or has one the server lacks
   else if (sig === DR.seen) return;
