@@ -581,4 +581,63 @@ def the_days_come_out_in_calendar_order_whatever_order_the_setup_holds_them_in()
         assert m["days"] == want, m["days"]                                  # Mon to Fri again
         assert m["days"][m["lessons"][0]["d"]] == day                        # and the lesson is still on its own day
 
+@t
+def what_is_critical_and_what_is_not():
+    C = verify.crit_of
+    assert C("Teacher double-booked: Tan Wei Ming on Odd Mon 8.00-8.40 (periods 1-2).") == "teacher"
+    assert C("Class clash: 1A on Odd Mon period 3 (8.40).") == "class" and C("Room over capacity: Lab 1 on Odd Tue period 4 (9.00) (holds 1 at once).") == "room"
+    assert C("Art Entire Class sits in a break or outside the day on Odd Mon period 5 (9.20).") == "break"
+    assert C("PE Entire Class sits in a class's recess on Odd Mon period 5 (9.20).") == "break"
+    assert C("Mathematics G3 1EMP ends after 1.00 on Odd Fri period 16 (1.00) (Settings: Lessons end by).") == "break"
+    for text in ("Rain room in use: B4-1 on Odd Mon period 3 (8.40) is the home room of a class at PE, but a lesson is in it.",
+                 "3 students have two lessons at the same time, e.g. S1 A.", "group 1EMP: 4 periods timetabled, 6 planned.", ""):
+        assert C(text) == "", text
+
+def clash_model(sp, rows, rules=()):
+    sp = copy.deepcopy(sp); sp["rules"] = list(rules); m = model_for(sp, rows); m["checks"] = export.check_model(m); return m
+
+@t
+def a_teacher_in_two_places_is_critical_and_a_rule_is_not():
+    sp = primary(); a, b = sp["classes"][0]["class"], sp["classes"][1]["class"]; t = sp["teachers"][0]["name"]
+    (rule_ws, nc), m = run(sp, [rule("Teacher", t, "Not available", 0, 1)], [(0, 1, 1, [a], "English", "Entire Class", [t], ""), (0, 1, 1, [b], "English", "Entire Class", [t], "")])
+    m["checks"] = export.check_model(m)
+    crit = [w for w in verify.clashes(m) if w["crit"]]
+    assert [w["crit"] for w in crit] == ["teacher"] and crit[0]["kind"] == "clash" and crit[0]["text"].startswith("Teacher double-booked: " + t)
+    assert rule_ws and all(w["crit"] == "" for w in rule_ws)                # a broken Must rule is a warning
+
+@t
+def a_lesson_with_no_teacher_is_critical():
+    # a band lesson of two groups, the second with no teacher: one critical mistake, naming that group
+    sp = primary(); a, b = sp["classes"][0]["class"], sp["classes"][1]["class"]; t = sp["teachers"][0]["name"]
+    m = clash_model(sp, [(1, 4, 2, [a, b], "Music", "XB1", [t], ""), (1, 4, 2, [a, b], "Music", "XB2", [], "")])
+    assert m["lessons"][0]["id"] == 1 and m["lessons"][1]["id"] == 2     # model_for gives each row its own id; make them one band
+    for x in m["lessons"]: x["id"] = 7
+    ws = [w for w in verify.clashes(m) if w["crit"] == "noteacher"]
+    assert len(ws) == 1 and ws[0]["key"] == "clash:noteacher:7:XB2" and ws[0]["kind"] == "clash" and ws[0]["strength"] == "Must"
+    assert ws[0]["text"] == f"No teacher: group XB2 on {m['days'][1]} period 4." and ws[0]["where"] == dict(cls=a) and ws[0]["group"] == a
+    whole = clash_model(sp, [(0, 0, 1, [b], "English", "Entire Class", [], "")])
+    w = [w for w in verify.clashes(whole) if w["crit"] == "noteacher"]
+    assert [x["text"] for x in w] == [f"No teacher: English for {b} on {whole['days'][0]} period 0."] and w[0]["where"] == dict(cls=b)
+
+@t
+def two_bands_of_one_class_at_once_are_not_a_mistake():
+    # two group lessons (two different bands) of one class in the same period, different teachers and rooms: no warning with crit, and no "Class clash" line
+    sp = primary(); a = sp["classes"][0]["class"]; t1, t2 = sp["teachers"][0]["name"], sp["teachers"][1]["name"]
+    rooms = [v["room"] for v in sp["venues"][:2]]
+    m = clash_model(sp, [(2, 2, 1, [a], "Music", "XB1", [t1], rooms[0]), (2, 2, 1, [a], "Art", "XC1", [t2], rooms[1])])
+    assert not any(w["crit"] for w in verify.clashes(m)) and not any(x.startswith("Class clash") for x in m["checks"]["problems"])
+    whole = clash_model(sp, [(2, 2, 1, [a], "Music", "XB1", [t1], rooms[0]), (2, 2, 1, [a], "English", "Entire Class", [t2], rooms[1])])
+    assert [w["crit"] for w in verify.clashes(whole) if w["crit"]] == ["class"]            # a whole-class lesson with another is one
+
+@t
+def every_teacher_clash_is_listed_past_thirty():
+    # one teacher on two classes' lessons in each of 35 different periods (every second period of 5 days), so none join up
+    sp = primary(); a, b = sp["classes"][0]["class"], sp["classes"][1]["class"]; t = sp["teachers"][0]["name"]
+    slots = [(d, p) for d in range(5) for p in range(0, 14, 2)]; assert len(slots) == 35
+    rows = [(d, p, 1, [c], "English", "Entire Class", [t], "") for d, p in slots for c in (a, b)]
+    crit = lambda r: [w for w in verify.clashes(clash_model(sp, r)) if w["crit"] == "teacher"]
+    assert len(crit(rows)) == 35 and len({w["key"] for w in crit(rows)}) == 35
+    assert len(crit(rows[:-1])) == 34
+
+
 print(f"{n} checks passed")

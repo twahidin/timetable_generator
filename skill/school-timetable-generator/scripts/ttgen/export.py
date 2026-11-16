@@ -302,12 +302,12 @@ def check_model(m):
                 out.append((w, d, f"{days[d]} {m['times'][a][0]}-{m['times'][prev][1]} (periods {a}-{prev})" if prev > a else where(d, a)))
                 if q is not None: a = prev = q
         return out
-    probs += [f"Teacher double-booked: {t} on {w}." for t, d, w in spans({k for k, v in tb.items() if len(v) > 1})][:30]
+    probs += [f"Teacher double-booked: {t} on {w}." for t, d, w in spans({k for k, v in tb.items() if len(v) > 1})]
     rb = collections.Counter()
     for x in L:
         if x["room"] and x["room"] != "TBC":
             for q in range(x["p"], x["p"] + x["n"]): rb[(x["room"], x["d"], q)] += 1
-    probs += [f"Room over capacity: {r} on {w} (holds {m['room_cap'].get(r, 1)} at once)." for r, d, w in spans({k for k, n in rb.items() if n > m["room_cap"].get(k[0], 1)})][:30]
+    probs += [f"Room over capacity: {r} on {w} (holds {m['room_cap'].get(r, 1)} at once)." for r, d, w in spans({k for k, n in rb.items() if n > m["room_cap"].get(k[0], 1)})]
     rain = {(h, x["d"], q) for x in L for h in _split_list(x.get("rain")) if h != "TBC" for q in range(x["p"], x["p"] + x["n"])}   # home rooms kept for PE in rain
     probs += [f"Rain room in use: {r} on {w} is the home room of a class at PE, but a lesson is in it." for r, d, w in spans({k for k in rain if rb[k]})][:30]
     probs += [f"No rain room: {', '.join(x['classes'])} {x['subject']} on {m['days'][x['d']]} period {x['p']} (the home room is in use)." for x in L if x.get("rain") == "TBC"][:30]
@@ -323,7 +323,7 @@ def check_model(m):
             if len(ids) > 1:
                 if whole.get((c, d, q)): ccl.add((c, d, q))
                 else: side += 1
-    probs += [f"Class clash: {c} on {w}." for c, d, w in spans(ccl)][:30]
+    probs += [f"Class clash: {c} on {w}." for c, d, w in spans(ccl)]
     for x in L:
         lv = x["level"] if x["level"] in m["grid"] else m["class_ix"].get((x["classes"] or [""])[0], {}).get("level")
         k = m.get("keep", {}).get(m["days"][x["d"]])

@@ -11,9 +11,18 @@ from .spec import floating_recess, names_list, subject_test, teacher_depts as te
 KINDS = ("clash", "deployment", "rule", "typed", "choice")
 APPEND = "(end)"   # an add op's "after": not a row id, so sync.apply puts the row last ("" would put it first and renumber the group codes after it)
 
-def warning(key, kind, text, strength="Must", group="School", where=None, sides=None, ops=None):
-    """one warning in the shape the draft page lists"""
-    return dict(key=key, kind=kind, text=text, strength=strength, group=group, where=where, sides=sides, ops=ops)
+CRITICAL = ("teacher", "class", "room", "break", "noteacher")   # the kinds of mistake that stop publishing; a warning has crit ""
+
+def warning(key, kind, text, strength="Must", group="School", where=None, sides=None, ops=None, crit=""):
+    """one warning in the shape the draft page lists; crit is "" or one of CRITICAL"""
+    return dict(key=key, kind=kind, text=text, strength=strength, group=group, where=where, sides=sides, ops=ops, crit=crit)
+
+def crit_of(text):
+    """whether a line of the check's problems is a critical mistake, and of which kind ("" when it is not)"""
+    for start, kind in (("Teacher double-booked:", "teacher"), ("Room over capacity:", "room"), ("Class clash:", "class")):
+        if text.startswith(start): return kind
+    if " sits in a break or outside the day on " in text or " sits in a class's recess on " in text or text.endswith("(Settings: Lessons end by)."): return "break"
+    return ""
 
 
 # ----------------------------------------------------------------------------------------------- what step 5 plans, what the timetable placed
@@ -110,7 +119,13 @@ def clashes(m):
         if text.endswith("planned.") or text in own: continue
         who = re.match(r"(Teacher double-booked|Class clash): (.+?) on ", text)   # whose week the Fix the timetable button opens
         where = (dict(teacher=who.group(2)) if who.group(1).startswith("Teacher") else dict(cls=who.group(2))) if who else None
-        out.append(warning("clash:" + text, "clash", text, group=who.group(2) if who else "School", where=where))
+        out.append(warning("clash:" + text, "clash", text, group=who.group(2) if who else "School", where=where, crit=crit_of(text)))
+    seen = set()
+    for x in m["lessons"]:   # a lesson row nobody teaches
+        key = f"clash:noteacher:{x['id']}:{x['group']}"
+        if x["teachers"] or key in seen: continue
+        seen.add(key); c = (x["classes"] or ["School"])[0]
+        out.append(warning(key, "clash", f"No teacher: {_what(x)} on {m['days'][x['d']]} period {x['p']}.", group=c, where=dict(cls=c) if x["classes"] else None, crit="noteacher"))
     return out
 
 

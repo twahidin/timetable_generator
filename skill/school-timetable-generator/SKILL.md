@@ -5,7 +5,7 @@ description: Generate a clash-free Singapore school timetable from a filled setu
 
 # School timetable generator
 
-Skill version: 2026-11.5 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
+Skill version: 2026-11.6 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
 
 Turns a filled **timetable setup workbook** into a timetable with no teacher, room or student in two places at once,
 then delivers it in three forms that always agree with each other:
@@ -71,7 +71,7 @@ subject-based banding) schools, and for any school that fills the same template.
    after-school slots and why, what was compromised (teachers over their allowance, Prefer rules bent, Max periods in a
    row: the solve result lists them), any notes, and the Rule report for every typed rule. Give the person the Excel workbook, the
    HTML page, the four PDF books, the zip of single PDFs and the timetable database (.sqlite) for other systems; do not paste timetables into the chat.
-   If the school runs the timetable app, tell them they can publish it there: on step 8, **Publish**, upload the .sqlite (or the timetable workbook with the setup workbook) and press **Check, then publish**.
+   If the school runs the timetable app, tell them they can publish it there: on step 8, **Upload and edit**, upload the .sqlite (or the timetable workbook with the setup workbook), look at what the check found, then publish on step 9, **Publish**. The app will not publish while a critical mistake remains: a lesson with no teacher, a teacher or a whole class in two lessons at once, a room holding more lessons than it takes, or a lesson in a break or outside the day. Run `python -m ttgen check-timetable` before handing back and settle these first.
 
 ## Outputs
 
@@ -104,7 +104,7 @@ Day is exactly as on `Day structure` (e.g. `Odd Mon`); Group is the group code f
 Classes and Teachers are comma-separated; After school is `yes` or blank.
 When the setup has rules in words (below), the same workbook carries a `Rule report` sheet: `No., Must / Prefer, Applies to, Rule, Result, How`,
 one row per typed rule in the order `python -m ttgen check` lists them; Result is `Met`, `Partly` or `Not met`, How is one sentence.
-`ttgen export` copies it into the database as the `rule_report` table, and the committee app shows it on Publish.
+`ttgen export` copies it into the database as the `rule_report` table, and the committee app shows it on step 8.
 
 ## The template, sheet by sheet
 
