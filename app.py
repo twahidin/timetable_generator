@@ -470,8 +470,31 @@ def draft_download():
 def draft_publish():
     try: return jsonify(draft.publish())
     except FileNotFoundError: return {"error": "There is no draft to publish."}, 404
+    except draft.Critical as e: return {"error": str(e), "critical": e.count}, 409
     except LookupError: return {"error": NO_SETUP}, 409
     except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
+
+@app.post("/api/draft/printouts")
+@need("committee")
+def draft_printouts():
+    """the printouts (as /api/export makes them) of the draft with its fixes applied: a zip, with the same X-Checks header"""
+    work = tempfile.mkdtemp(prefix="tt-")
+    try:
+        try: m, base = draft.printouts(os.path.join(work, "out"), request.form.get("single", "1") == "1")
+        except draft.NoDraft as e: return {"error": str(e)}, 404
+        except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
+        except Exception as e:
+            if type(e) is LookupError: return {"error": NO_SETUP}, 409
+            app.logger.exception("making the printouts of the draft"); return {"error": f"Could not make the printouts: {e}"}, 400
+        out = os.path.join(work, "out", base); buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for root, _, files in os.walk(out):
+                for fn in sorted(files): full = os.path.join(root, fn); z.write(full, os.path.join(base, os.path.relpath(full, out)))
+        buf.seek(0); ch = m["checks"]
+        resp = send_file(buf, as_attachment=True, download_name=f"{base} - timetables.zip", mimetype="application/zip")
+        resp.headers["X-Checks"] = "All checks passed." if ch["ok"] else f"{len(ch['problems'])} problems found: see the Read me sheet or the Checks tab."
+        return resp
+    finally: shutil.rmtree(work, ignore_errors=True)
 
 @app.get("/download/template/<kind>")
 @need("committee")

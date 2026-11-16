@@ -1,5 +1,5 @@
 """The draft: the timetable the committee uploaded, kept on the server beside the saved setup. It is checked against the
-setup as it is now (ttgen.verify), each difference is decided on (change step 5, leave it, or still open), and the
+setup as it is now (ttgen.verify), each difference is decided on (change step 5, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
 import copy, json, os, re, secrets, shutil, threading
 from ttgen.export import ENTIRE, model_from_files
@@ -9,9 +9,15 @@ from ttgen import choices, verify
 import store, sync, fixes, helper, typed
 
 DIR = os.path.join(store.DATA, "draft")
-ANSWERS = ("step5", "left", "open", "met")
+ANSWERS = ("step5", "open", "met")
 _lock = threading.RLock()   # always taken before store's locks, never inside them
 class NoDraft(Exception): pass
+class Critical(Exception):
+    """the draft has critical mistakes, so it cannot be published; count: how many"""
+    def __init__(self, count): super().__init__(critical_text(count)); self.count = count
+def critical_text(n):
+    """the sentence that says why Publish is refused"""
+    return ("1 critical mistake" if n == 1 else f"{n} critical mistakes") + " must be settled on step 8 before the timetable can be published."
 class UnpublishedFixes(Exception):
     """the draft has fixes that were never published; count: how many"""
     def __init__(self, count): super().__init__("The draft has fixes that were never published."); self.count = count
@@ -29,7 +35,7 @@ def model(spec): return model_from_files(*paths(), spec=spec)
 
 def save(setup_path, timetable_path, source, spec, replace=False):
     """replace the draft with these files, read against the setup spec first (so a file that cannot be read never replaces a
-    good draft); returns the model, for info(model=). UnpublishedFixes unless replace, when the draft has fixes that were never published. The 'left' decisions carry over (info drops the ones whose warning is gone)."""
+    good draft); returns the model, for info(model=). UnpublishedFixes unless replace, when the draft has fixes that were never published. A new upload starts with no decisions."""
     with _lock:
         meta = store.read_json(_p("meta.json"), {}) or {} if exists() else {}; fl = meta.get("fixes") or []
         if len(fl) > meta.get("published_fixes", 0) and not replace: raise UnpublishedFixes(len(fl))
@@ -41,8 +47,7 @@ def save(setup_path, timetable_path, source, spec, replace=False):
         except Exception as e:
             shutil.rmtree(new, ignore_errors=True); raise ValueError(f"Could not read the files: {e}")
         if not m["lessons"]: shutil.rmtree(new, ignore_errors=True); raise ValueError("The timetable has no lessons.")
-        keep = {k: d for k, d in (store.read_json(_p("decisions.json"), {}) or {}).items() if d.get("answer") == "left"}
-        store.write_json(os.path.join(new, "decisions.json"), keep)
+        store.write_json(os.path.join(new, "decisions.json"), {})
         store.write_json(os.path.join(new, "meta.json"), dict(source=source, uploaded_at=store.now(), fixes=[], school=m["file_school"],
                                                               config_id=str(((m["setup"].get("school") or {}).get("config_id")) or "").strip()))
         shutil.rmtree(old, ignore_errors=True)
@@ -95,20 +100,21 @@ def _build(m=None, rec=None, fx=None):
 def _finish(j, change=None):
     """lay the decisions over the warnings and count them. Under the lock the decisions are read again from disk (a decision
     made while the model was being built stays), change = (key, decision or None) is applied, and a decision whose warning is
-    gone is dropped, except the step5 ones: they record that step 5 was updated from the timetable."""
+    gone is dropped, except the step5 ones: they record that step 5 was updated from the timetable. A decision that says "left"
+    (from a draft kept before that answer went) is dropped too: its warning is open again."""
     keys = {w["key"] for w in j["warnings"]}
     with _lock:
         decisions = store.read_json(_p("decisions.json"), {}) or {} if exists() else {}
         if change:
             if change[1] is None: decisions.pop(change[0], None)
             else: decisions[change[0]] = change[1]
-        decisions = {k: d for k, d in decisions.items() if k in keys or d.get("answer") == "step5"}
+        decisions = {k: d for k, d in decisions.items() if d.get("answer") != "left" and (k in keys or d.get("answer") == "step5")}
         ws = [dict(w, decision=decisions.get(w["key"])) for w in j["warnings"]]
-        n = sum(1 for w in ws if not w["decision"] or w["decision"]["answer"] == "left")   # "met" and "step5" settle a warning
+        n = sum(1 for w in ws if not w["decision"])   # "met" and "step5" settle a warning
         if exists():
             store.write_json(_p("decisions.json"), decisions)
             store.write_json(_p("meta.json"), dict(store.read_json(_p("meta.json"), {}), open=n))
-    return dict(j, warnings=ws, open=n, left=sum(1 for w in ws if (w["decision"] or {}).get("answer") == "left"),
+    return dict(j, warnings=ws, open=n, critical=sum(1 for w in ws if w.get("crit")),
                 step5=sum(1 for d in decisions.values() if d.get("answer") == "step5"))
 
 def info(model=None, rec=None):
@@ -147,13 +153,29 @@ def publish():
         rec = store.setup_record(); j = info(rec=rec)   # one read of the setup: the one checked against is the one published with
         if j is None: raise FileNotFoundError("no draft")
         meta = store.read_json(_p("meta.json"), {}); decisions = store.read_json(_p("decisions.json"), {}) or {}
-        left = [w["text"] for w in j["warnings"] if (w["decision"] or {}).get("answer") == "left"]
+        if j["critical"]: raise Critical(j["critical"])   # judged and written under this one lock: none can arrive in between
+        left = [w["text"] for w in j["warnings"] if not w["decision"]]   # the warnings open at publishing
         fl = meta.get("fixes") or []; texts = model_now(rec)[2]["texts"]
         sp, tp = paths()
         store.publish(sp, tp, source=meta.get("source"), spec=rec["spec"], log=lambda *x: None, edit=fixes.editor(fl, {}),
                       extra=dict(compared_v=j["setup_version"], open=j["open"], left=left, decisions={k: d["answer"] for k, d in decisions.items()}, fixes=list(texts)))
         store.write_json(_p("meta.json"), dict(store.read_json(_p("meta.json"), {}), published_fixes=len(fl)))
         return dict(j, published=True)
+
+def printouts(out_dir, individual):
+    """the printouts of the draft with its fixes applied, checked against the setup as it is now, written under out_dir by
+    ttgen.export.export_all -> (model, base name of the folder made in out_dir). The model is built for this call, as publish builds
+    its own: export_all may change what it is given, so the shared cached one is never used."""
+    from ttgen.export import export_all, safe_name
+    if not exists(): raise NoDraft("There is no draft.")
+    rec = store.setup_record()
+    if not rec["spec"]: raise LookupError("no setup")
+    with _lock:
+        meta = store.read_json(_p("meta.json"), {}); fl = meta.get("fixes") or []; sp, tp = paths()
+    fx = {}; m = model_from_files(sp, tp, spec=rec["spec"], edit=fixes.editor(fl, fx)); m["fixes"] = fx.get("texts") or []
+    base = safe_name(f"{m['school']['name']} {m['school']['timetable']}")
+    export_all(m, os.path.join(out_dir, base), individual=individual, zip_individual=False, log=lambda *x: None)
+    return m, base
 
 # ------------------------------------------------------------------------------------------------ the grid and the fixes
 
