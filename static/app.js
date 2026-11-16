@@ -3423,7 +3423,6 @@ function bdLessonFetch(one) {   // the open blocks' choices, a new round (one: t
     });
   });
 }
-const bdKeyName = key => { const p = String(key || "").split(":"); return p[0] === "G" ? "group " + p.slice(1).join(":") : p.slice(2).join(":") + " for " + p[1]; };   // as Board's handText names a row's key
 function bdLessonHTML(b) {
   const L = b.lesson, c = bdCard(L.id), d = b.data, rows = c.rows || [], band = !!c.band || rows.length > 1;
   const was = bdInTray(c) ? bdWas(d, c) : "", where = bdInTray(c) ? `Not placed${was ? ` (${was})` : ""}` : `${(d.days || [])[c.d] || ""} period ${c.p}`;
@@ -3454,7 +3453,7 @@ function bdLessonLists(L, r, j) {   // a list a teacher, one more to add a teach
     + `${group("Free, the right kind", v.right.map(rOpt).join(""))}${group("Free, another kind", v.other.map(rOpt).join(""))}${group("In use then", v.busy.map(rOpt).join(""))}</select>`;
   const n = j.n_lessons;
   return `<p class="bdlh">Teacher</p>${ts.map((t, i) => `<label class="bdll">${tList(i, t)}</label>`).join("")}<label class="bdll"><span>Add a teacher</span>${tList(ts.length, "")}</label>`
-    + `<p class="muted bdlnote">A change of teacher changes ${n === 1 ? "its 1 lesson" : `all ${n} lessons`} of ${esc(bdKeyName(j.key))}.</p>`
+    + `<p class="muted bdlnote">A change of teacher changes ${n === 1 ? "this one lesson" : `all ${n} lessons`} of ${esc(Board.keyName(null, j.key))}.</p>`
     + `<p class="bdlh">Room</p><label class="bdll">${rList}</label><label class="bdlall"><input type="checkbox" data-bdlall="${g}"${L.all[r.group] ? " checked" : ""}${dis}> all this group's lessons</label>`;
 }
 function bdLessonTeacher(c, r, j, i, v) {   // a teacher list's choice: a free one at once, a busy one or none at all after the line's question
@@ -3482,7 +3481,7 @@ function bdLessonRoom(c, r, j, v, all) {   // the room list's choice ("None" ask
    refusal is said, and the list goes back (the board is fetched again). The lesson stays selected and its lists are fetched again */
 async function bdLessonPost(c, fix, who) {
   const b = S.board; let why = null;
-  const refused = s => { if (who && String(s).indexOf(who + " is ") === 0) { why = s; return true; } return false; };
+  const refused = s => { if (Board.busyRefusal(s, who, fix.kind)) { why = s; return true; } return false; };   // only "{who} is teaching ... then." or "{who} is in use then."
   let ok = await bdSend("/api/draft/fix", fix, c, false, { stay: true, refused });
   if (why !== null && S.board === b) ok = await bdSend("/api/draft/fix", Object.assign({}, fix, { force: true, why }), c, false, { stay: true });
   if (ok && S.board === b && b.lesson && b.lesson.id === c.id) { b.lesson.all = {}; bdSideDraw(); }   // the tick box is for one change
@@ -3744,7 +3743,8 @@ async function bdHandAsk(c, from, to, pending, end, made) {
 }
 function bdHandGo(c, fix, pending, made) {   // Yes: the hand-over (with the pending move, as one batch); refused because that teacher or room is busy then, the line says why and asks again
   const refused = why => {
-    if (!bdBusyFor(c, fix, pending)) return false;
+    const r = (c.rows || []).find(y => y.key === fix.key), who = fix.kind === "room" ? fix.room : fix.teachers.find(t => !(r ? r.teachers || [] : []).includes(t));
+    if (!bdBusyFor(c, fix, pending) || !Board.busyRefusal(why, who, fix.kind)) return false;   // the server's own busy sentence for that teacher or room, not a rule
     bdYesNo({ id: c.id, text: why, ask: BDWHY.anyway, yes: "Yes, give it", run: () => bdHandForce(c, fix, why, pending, made) });
     return true;
   };
@@ -3949,6 +3949,7 @@ document.addEventListener("dragstart", e => {
   const q = row ? bdPeriodAt(row, e.clientX) : c.p; b.grab = row ? Board.grab(c, q < 0 ? c.p : q) : 0;   // a card from the tray is held by its start
   e.dataTransfer.setData("text/plain", "bd:" + c.id); e.dataTransfer.effectAllowed = "move";
   bdWant(); bdLineDraw();
+  if (b.lesson && !bdLessonOn(b)) bdSideDraw();   // another lesson is taken up: the Lesson tab of the one selected before closes (back to the tab before it); with a tray card in the air bdSideDraw leaves the panel for the drag's end (b.redraw), so the dragged element stays in the page
 });
 const bdOffText = c => bdInTray(c) ? BDWHY.offTray : BDWHY.off;   // a card in the air over the timetable card but off its row and the panel
 const bdAirText = b => b.lost ? BDWHY.gone : b.slotsFor === b.drag ? "" : b.changed ? BDWHY.changed : BDWHY.working;   // the line while the dragged card's slots are not here
@@ -4064,7 +4065,7 @@ const bdInField = e => !!(e.target.isContentEditable || (e.target.closest && e.t
 document.addEventListener("change", e => {   // the Lesson tab: a list's choice is acted on at once; the tick box is kept for the next room choice
   const el = e.target, ds = el.dataset || {}, b = S.board;
   if (ds.bdlt === undefined && ds.bdlr === undefined && ds.bdlall === undefined) return;
-  if (!bdLessonOn(b)) return;
+  if (!bdLessonOn(b)) { if (b) bdSideDraw(); return; }   // a list of a lesson no longer selected: the panel is drawn for the selection as it is
   const L = b.lesson;
   if (ds.bdlall !== undefined) { L.all[ds.bdlall] = el.checked; return; }
   const c = bdCard(L.id), g = ds.bdlt !== undefined ? ds.bdlt : ds.bdlr, r = (c.rows || []).find(x => x.group === g), j = L.got[g];

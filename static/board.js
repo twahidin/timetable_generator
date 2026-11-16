@@ -500,6 +500,16 @@ var Board = (function () {
     return "Give " + what + " to " + to.name + " in place of " + from.name + "?" + tail;
   }
 
+  /* whether the server refused a teacher or room fix because that teacher (kind "teacher") or room (kind "room") is busy then: its
+     sentence is "{name} is teaching ... then." or "{room} is in use then." (fixes.Busy); only then may the fix be forced with it */
+  function busyRefusal(sentence, who, kind) {
+    var s = typeof sentence === "string" ? sentence : "";
+    if (!who) return false;
+    if (kind === "teacher") return s.indexOf(who + " is teaching ") === 0 && / then\.$/.test(s);
+    if (kind === "room") return s === who + " is in use then.";
+    return false;
+  }
+
   /* a lesson's teachers split into those free then and those busy, each in the server's order */
   function people(lesson) {
     var all = (lesson && lesson.teachers) || [];
@@ -531,6 +541,6 @@ var Board = (function () {
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
            lands: lands, forced: forced, asks: asks, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
            warned: warned, flag: flag, at: at, of: of, hand: hand, handText: handText, people: people, venues: venues,
-           teacherFix: teacherFix, roomFix: roomFix };
+           teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal };
 })();
 if (typeof module !== "undefined") module.exports = Board;

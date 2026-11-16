@@ -633,4 +633,21 @@ t("handText: a subject with a colon; states: there and push together is ask; tea
   assert.deepStrictEqual(Board.teacherFix({ id: 1 }, crow({ teachers: [] }), 3, "Mr Ong"), { kind: "teacher", key: "C:1A:Maths", teachers: ["Mr Ong"] });
 });
 
+t("keyName: a class's subject with a colon, and a group", () => {
+  assert.strictEqual(Board.keyName(null, "C:1A:Art: Design"), "Art: Design for 1A");
+  assert.strictEqual(Board.keyName(null, "G:1MAA1"), "group 1MAA1");
+});
+
+t("busyRefusal: only the server's two busy sentences, for that teacher or room", () => {
+  assert.strictEqual(Board.busyRefusal("Jasper Goh is teaching Character and Citizenship Education for 3D then.", "Jasper Goh", "teacher"), true);
+  assert.strictEqual(Board.busyRefusal("Jasper Goh is teaching group 2ELP1 then.", "Jasper Lim", "teacher"), false);
+  assert.strictEqual(Board.busyRefusal("A1-01 is in use then.", "A1-01", "room"), true);
+  assert.strictEqual(Board.busyRefusal("A1-01 is not on the setup's list of rooms.", "A1-01", "room"), false);
+  assert.strictEqual(Board.busyRefusal("A1-01 is in use then.", "A1-01", "teacher"), false);
+  assert.strictEqual(Board.busyRefusal("Jasper Goh is teaching X then.", "Jasper Goh", "room"), false);
+  assert.strictEqual(Board.busyRefusal("Rule Room · Hall · Not available: Hall is not available.", "Hall", "room"), false);
+  assert.strictEqual(Board.busyRefusal("", "", "room"), false);
+  assert.strictEqual(Board.busyRefusal(null, "A1-01", "room"), false);
+});
+
 console.log(`${n} cases passed`);
