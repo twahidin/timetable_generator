@@ -8,9 +8,9 @@ from ttgen import verify
 from ttgen.export import ENTIRE
 
 NO_TEACHER = "This lesson has no teacher. Pick one under Change the teacher."   # moving a lesson never gives it one
-NOTHING = "The app has no suggestion for this one. Select a lesson on the grid to see where it can go."
+NOTHING = "The app has no suggestion for this one. Select its lesson on the board to see where it can go."
 NONE_PASS = "Nothing settles this without breaking a rule or a clash."
-NO_FIX = "The app found no fix that settles this. Select a lesson on the grid to see where it can go."
+NO_FIX = "The app found no fix that settles this. Select its lesson on the board to see where it can go."
 OK = ("ok", "prefer")
 MAX_LESSONS = 8      # involved lessons whose slots are tried
 MAX_BLOCKED = 60     # refused fixes tried for the blocked list
