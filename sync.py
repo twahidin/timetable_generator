@@ -283,8 +283,8 @@ def _head_why(spec, op):
         return None
     if section != "teachers":
         return f"Department heads cannot change {section if isinstance(section, str) else 'that'}."
-    if name == "merge" and len(op) > 3 and op[3] == "can_teach":
-        return None
+    if name == "set" and len(op) > 3 and op[3] == "dept2":
+        return "Only the committee gives a teacher a second department."
     if name == "add" and len(op) > 2 and isinstance(op[2], dict):
         return None
     if name in ("set", "del") and len(op) > 2 and (name == "del" or len(op) > 3 and op[3] != "provisional"):
@@ -294,13 +294,13 @@ def _head_why(spec, op):
         if row is None or row.get("provisional") == "Yes":
             return None
         return "Department heads can change a teacher's details only while the teacher is provisional."
-    return "Department heads can only change who a teacher can teach, add a teacher, or edit a provisional teacher."
+    return "Department heads can only add a teacher, or edit a provisional teacher."
 
 
 def head_split(spec, ops):
     """(allowed, refused): the operations in `ops` a head of department may make on `spec`, in order, and the others as
-    (index in ops, sentence). Heads may change lessons and blocks, who a teacher can teach, add a teacher, and the
-    details of a teacher who is still provisional (or added earlier in the same batch)."""
+    (index in ops, sentence). Heads may change lessons and blocks, add a teacher, and the details of a teacher who is
+    still provisional (or added earlier in the same batch), except a second department, which only the committee gives."""
     allowed, refused = [], []
     work = spec    # each op is judged on the setup as the allowed ones before it in this batch leave it (a row added, then changed, in one batch)
     for i, op in enumerate(ops):

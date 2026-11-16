@@ -182,7 +182,7 @@ def _teacher_fit(P):
     for r in P.spec.get("rules", []):
         if str(r.get("strength") or "Must") == "Must" and (r.get("rule"), r.get("scope")) in (("Not available", "Teacher"), ("Keep free together", "Department")):
             S, _ = P.rule_positions(r)
-            for t in [r["target"]] if r["scope"] == "Teacher" else [t for t, d in P.tdept.items() if d == r["target"]]: busy[t] |= S
+            for t in [r["target"]] if r["scope"] == "Teacher" else [t for t, ds in P.tdepts.items() if r["target"] in ds]: busy[t] |= S
     need, lvls = collections.Counter(), collections.defaultdict(set)
     for u in P.units:
         for ln, i in u["lessons"]:

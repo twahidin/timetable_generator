@@ -275,7 +275,7 @@ def compromises(res):
                     if n > N: add(nm, f"{who}: {n} periods on {P.days[d]} (at most {N} wanted).")
         elif nm in ("Not available", "Keep free together") and scope in ("Teacher", "Department"):
             S, _ = P.rule_positions(r)
-            for t in [tg] if scope == "Teacher" else [t for t, d in P.tdept.items() if d == tg]:
+            for t in [tg] if scope == "Teacher" else [t for t, ds in P.tdepts.items() if tg in ds]:
                 hit = sorted(tpos[t] & S)
                 if hit: add(nm, f"{t} teaches at {at(hit[0])}" + (f" and {len(hit) - 1} more periods" if len(hit) > 1 else "") +
                                (", a time marked not available." if nm == "Not available" else f", a time {tg} keeps free together."))

@@ -32,7 +32,15 @@ RULE_TYPES = [
     ("In words", "School, Level, Class, Subject, Room, Teacher", "N", "N", "A rule in plain words that the list cannot say. The timetable scripts do not enforce it: the agent honours a Must, tries a Prefer, and reports how each was met.", "Level · Sec 1 · No PE in the first period"),
 ]
 TYPED = "In words"             # a rule the agent honours and reports on; never enforced by the solver
-SKILL_VERSION = "2026-11.4"      # SKILL.md's version line and the one the workbook's README names
+SKILL_VERSION = "2026-11.5"      # SKILL.md's version line and the one the workbook's README names
+
+def teacher_depts(t):
+    """A teacher row's departments, home first: the trimmed, non-empty, different ones of dept and dept2"""
+    out = []
+    for k in ("dept", "dept2"):
+        d = str(t.get(k) or "").strip()
+        if d and d not in out: out.append(d)
+    return out
 
 def typed_rules(spec):
     """[(number, index, rule)] for every rule row in words, numbered 1, 2, 3... in spec['rules'] order"""

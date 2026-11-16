@@ -178,9 +178,9 @@ def read_template(path):
     teachers = []
     for x in te:
         if not x.get("Teacher"): continue
-        ct = [dict(subject=x.get(f"Can teach {p}"), levels=x.get(f"at {p}") or "All") for p in range(1, 9) if x.get(f"Can teach {p}")]
-        teachers.append(dict(name=str(x["Teacher"]), short=x.get("Short"), dept=x.get("Department"), allowance=x.get("Allowance (periods)"),
-                             provisional=x.get("Provisional"), can_teach=ct, role=x.get("Role"), other_duties=x.get("Other duties"), note=x.get("Note")))
+        d1, d2 = x.get("Department"), str(x.get("Department 2") or "").strip() or None   # columns of an older workbook not named here are not read
+        teachers.append(dict(name=str(x["Teacher"]), short=x.get("Short"), dept=d1, dept2=None if d2 == str(d1 or "").strip() else d2, allowance=x.get("Allowance (periods)"),
+                             provisional=x.get("Provisional"), role=x.get("Role"), other_duties=x.get("Other duties"), note=x.get("Note")))
     _, bl = _table(wb["5 Blocks"], "Block")
     blocks = [dict(block=str(x["Block"]), level=x.get("Level"), classes=[str(c) for c in _first_col(x, "Class")], note=x.get("Note")) for x in bl if x.get("Block")]
     lh, le = _table(wb["6 Lessons"], "Level")

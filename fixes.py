@@ -2,7 +2,7 @@
 applied again, in order, to the lessons read from the file. Nothing here touches files or the setup."""
 import collections, copy
 from ttgen.export import ENTIRE, _split_list
-from ttgen import verify
+from ttgen import spec as spec_mod, verify
 
 KINDS = ("move", "swap", "teacher", "room", "add", "delete")
 
@@ -231,10 +231,10 @@ def rule_subjects(m, spec, lessons):
     for w in _rule_ws(m, spec, lessons): out.setdefault(_subject(w), w)
     return out
 
-def _bears(m, spec, r, x):
+def _bears(m, spec, r, x, depts):
     """whether rule row r can see lesson row x at all, wherever it sits: a change to lessons it cannot see leaves its warnings as they were"""
     rule, sc, tg = r.get("rule"), r.get("scope"), r.get("target")
-    if rule == "Keep free together": return any(m["teacher_ix"].get(t, {}).get("dept") == tg for t in x["teachers"]) or any(m["class_ix"].get(c, {}).get("level") == tg for c in x["classes"])
+    if rule == "Keep free together": return any(tg in depts.get(t, ()) for t in x["teachers"]) or any(m["class_ix"].get(c, {}).get("level") == tg for c in x["classes"])
     if rule == "Not on the same day as":
         dept = m["subjects"].get(x["subject"], {}).get("dept"); return verify.subject_test(tg)(x["subject"], dept) or verify.subject_test(r.get("subject"))(x["subject"], dept)
     if rule in ("At least one recess a day", "Max periods in a row"): return sc != "Teacher" or tg in x["teachers"]
@@ -306,7 +306,9 @@ def judge(m, spec, days, fix, ctx=None):
             was = c["placed"].get(k, 0); now, want = was - ko[k] + kn[k], m["planned"].get(k, 0)
             if now != was and not (was < now <= want or want <= now < was): return res("no", f"That would leave {verify._name(k)} with {now} periods; step 3 plans {want}.")
     rules = spec.get("rules") or []; seen = old + new
-    keep = tuple(i for i, r in enumerate(rules) if r.get("rule") != "In words" and any(_bears(m, spec, r, x) for x in seen))
+    depts = c["memo"].get(("depts", id(spec)))   # worked out on the first judge of a context and setup, not per lesson or per call
+    if depts is None: depts = c["memo"][("depts", id(spec))] = verify.teacher_depts(m, spec)
+    keep = tuple(i for i, r in enumerate(rules) if r.get("rule") != "In words" and any(_bears(m, spec, r, x, depts) for x in seen))
     near = _near(b, old) | _near(b, new)
     for i in keep:
         if rules[i].get("rule") in WIDE and (test := verify.in_scope(m, spec, rules[i])):
@@ -352,15 +354,36 @@ def slots(m, spec, days, lesson_id):
             else: out.append(dict(d=d, p=p, state="na", why="Another lesson is there.", swap=None, also=[]))
     return out
 
+def _cards(spec):
+    """step 3's cards, as static/subjectview.js reads them -> {subject name (trimmed): card}, a card being (department, code,
+    name) trimmed, the name less its own tag when that tag is one of the school's and the name is the tag alone or ends with a
+    space and the tag; rows that are not dicts and tag entries that are not lists are skipped"""
+    school = spec.get("school") if isinstance(spec.get("school"), dict) else {}
+    entries = school.get("tags") if isinstance(school.get("tags"), (list, tuple)) else []
+    tags = {str(e[0]).strip() for e in entries if isinstance(e, (list, tuple)) and e and e[0] is not None} - {"", "-"}
+    out = {}
+    for r in spec.get("subjects") or []:
+        if not isinstance(r, dict) or r.get("subject") is None: continue
+        name = str(r["subject"]).strip(); tag = str(r.get("tag") or "").strip()
+        if tag in tags and name.endswith(" " + tag): name = name[:len(name) - len(tag)].strip()
+        out.setdefault(str(r["subject"]).strip(), (str(r.get("dept") or "").strip(), str(r.get("code") or "").strip(), name))
+    return out
+
 def teacher_options(m, spec, days, key):
-    """each teacher whose can_teach names the key's subject, and step 5's teachers of the key, judged as a teacher fix (the
-    current teachers left out) -> [dict(teachers, state, why)]"""
+    """who could take the key's lesson, judged as a teacher fix (the current teachers left out) -> [dict(teachers, state, why)]:
+    step 5's teachers of the key, then each teacher of the setup's list who is on a lesson row of the subject or of another
+    subject of its step 3 card, then each other teacher whose departments include the subject's department; inside the last
+    two the teacher list's order"""
     k = _key(key); e = verify.planned_rows(spec).get(k); c = _ctx(m)
     rows = [x for x in m["lessons"] if (x["group"] == ENTIRE and k[0] == "C" and k[1] in x["classes"] and x["subject"] == k[2]) or (k[0] == "G" and x["group"] == k[1])]
-    subject = e["subject"] if e else k[2] if k[0] == "C" else rows[0]["subject"] if rows else ""
+    subject = (e["subject"] if e else k[2] if k[0] == "C" else rows[0]["subject"] if rows else "").strip()
     now = {t for x in rows for t in x["teachers"]}
-    names = lambda v: [str(x.get("subject") if isinstance(x, dict) else x) for x in v] if isinstance(v, list) else verify.names_list(v)
-    opts = ([sorted(e["teachers"])] if e and e["teachers"] else []) + [[t["name"]] for t in spec.get("teachers") or [] if subject in names(t.get("can_teach"))]
+    cards = _cards(spec); card = cards.get(subject, ("", "", subject)); dept = card[0]
+    of_card = {n for n, v in cards.items() if v == card} | {subject}
+    on = {t for x in spec.get("lessons") or [] if isinstance(x, dict) and str(x.get("subject") or "").strip() in of_card for t in x.get("teachers") or []}
+    team = [t for t in spec.get("teachers") or [] if isinstance(t, dict) and t.get("name")]
+    opts = ([sorted(e["teachers"])] if e and e["teachers"] else []) + [[t["name"]] for t in team if t["name"] in on] \
+        + ([[t["name"]] for t in team if t["name"] not in on and dept in spec_mod.teacher_depts(t)] if dept else [])
     opts = [o for o in dict.fromkeys(map(tuple, opts)) if set(o) != now and not (len(o) == 1 and o[0] in now)]
     return [dict(teachers=list(o), **_pick(judge(m, spec, days, dict(kind="teacher", key=key, teachers=list(o)), c))) for o in opts]
 

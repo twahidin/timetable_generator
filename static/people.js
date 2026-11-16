@@ -248,7 +248,6 @@ var People = (function () {
         var guide = (roles || []).filter(function (r) { return r.role === t.role; })[0];
         if (guide && typeof guide.allowance === "number") t.allowance = guide.allowance;
       }
-      t.can_teach = [];
       t.provisional = "No";
       plan.add.push(t);
     });
@@ -267,7 +266,23 @@ var People = (function () {
     return plan;
   }
 
-  return { key: key, hash: hash, AVATAR: AVATAR, AVATAR_COMBOS: AVATAR_COMBOS,
+  /* a teacher row's departments, home first: the trimmed, non-empty, different ones of dept and dept2
+     (the page's twin of spec.teacher_depts in ttgen/spec.py) */
+  function depts(t) {
+    var out = [];
+    if (!t || typeof t !== "object") return out;
+    ["dept", "dept2"].forEach(function (k) {
+      var d = t[k] == null ? "" : String(t[k]).trim();
+      if (d && out.indexOf(d) < 0) out.push(d);
+    });
+    return out;
+  }
+  function inDept(t, dept) {
+    var d = dept == null ? "" : String(dept).trim();
+    return d !== "" && depts(t).indexOf(d) >= 0;
+  }
+
+  return { key: key, hash: hash, depts: depts, inDept: inDept, AVATAR: AVATAR, AVATAR_COMBOS: AVATAR_COMBOS,
     avatarParts: avatarParts, avatar: avatar, FIELDS: FIELDS,
     alike: alike, readTeachers: readTeachers, planTeachers: planTeachers };
 })();

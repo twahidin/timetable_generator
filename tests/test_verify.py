@@ -162,6 +162,16 @@ def not_available_and_keep_free_together():
         assert run(sp, [row], [(1, 5, 1, [c], "English", "Entire Class", [t], "")])[0][0] == []
 
 @t
+def keep_free_together_counts_a_second_department():
+    sp = primary(); c = sp["classes"][0]["class"]; T = sp["teachers"][0]; t = T["name"]
+    d2 = next(d for d in sp["school"]["departments"] if d != T["dept"]); row = rule("Department", d2, "Keep free together", 2, 3)
+    L = [(1, 3, 1, [c], "English", "Entire Class", [t], "")]
+    assert run(sp, [row], L)[0][0] == []                                    # not in that department: the rule does not see them
+    T["dept2"] = d2; (ws, nc), m = run(sp, [row], L)
+    assert len(ws) == 1 and ws[0]["group"] == t and ws[0]["text"].endswith(f"{d2} keeps periods 2-3 free together.")
+    assert verify.teacher_depts(m, m["checked_setup"])[t] == [T["dept"], d2]
+
+@t
 def fixed_at_only_in_not_in_finish_by():
     sp = primary(); c = sp["classes"][0]["class"]; t = sp["teachers"][0]["name"]; L = lambda d, p, n_=1: [(d, p, n_, [c], "English", "Entire Class", [t], "")]
     (ws, _), m = run(sp, [rule("Class", c, "Fixed at", 2, 9, day=None)], L(0, 3))

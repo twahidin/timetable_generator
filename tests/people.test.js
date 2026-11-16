@@ -31,7 +31,7 @@ t("no name gives a plain disc, not a face", () => {
   for (const x of ["", "   ", null, undefined]) { const s = People.avatar(x); assert.ok(s.startsWith("<svg") && !s.includes("<path")); }
 });
 t("nothing random is used", () => { const r = Math.random; Math.random = () => { throw new Error("random"); }; try { People.avatar("Lim Hui Min", 2); } finally { Math.random = r; } });
-const EX = [{ _id: "t1", name: "Tan Wei Ming", short: "Tan", dept: "MA", role: "EO", allowance: 104, can_teach: [{ subject: "Mathematics", levels: "All" }] },
+const EX = [{ _id: "t1", name: "Tan Wei Ming", short: "Tan", dept: "MA", role: "EO", allowance: 104, can_teach: [{ subject: "Mathematics", levels: "All" }], dept2: "SC" },
             { _id: "t2", name: "Lim Hui Min", short: "Lim", dept: "MA", role: "HOD", allowance: 67, can_teach: [] }];
 const ROLES = [{ role: "EO", allowance: 104 }, { role: "HOD", allowance: 67 }, { role: "ST", allowance: 86 }], DEPTS = ["MA", "SC"];
 
@@ -70,7 +70,7 @@ t("a list without allowance or role blanks nothing", () => {
 });
 t("a new teacher takes the role's guide allowance, a short name, and is not provisional", () => {
   const p = People.planTeachers(EX, [{ name: "Arjun Nair", role: "ST", dept: "SC" }], ROLES, DEPTS);
-  assert.deepStrictEqual(p.add, [{ name: "Arjun Nair", role: "ST", dept: "SC", short: "Arjun", allowance: 86, can_teach: [], provisional: "No" }]);
+  assert.deepStrictEqual(p.add, [{ name: "Arjun Nair", role: "ST", dept: "SC", short: "Arjun", allowance: 86, provisional: "No" }]);
   assert.deepStrictEqual(p.missing, [0, 1]);
 });
 t("roles and departments the setup does not have are listed once each", () => {
@@ -125,5 +125,25 @@ t("a new name that looks like a teacher not in the list is paired with them, onc
   const two = People.planTeachers([{ name: "Tan Wei Meng" }, { name: "Tan Wei Ming" }], [{ name: "Tan Wei-Ming" }], ROLES, DEPTS);
   assert.deepStrictEqual(two.alike, [{ add: "Tan Wei-Ming", missing: "Tan Wei Meng" }]);
   assert.deepStrictEqual(People.planTeachers(EX, [{ name: "Tan Wei Ming" }, { name: "Lim Hui Min" }], ROLES, DEPTS).alike, []);
+});
+t("a teacher updated by a list keeps a stored can_teach and dept2", () => {
+  const ex = JSON.parse(JSON.stringify(EX));
+  const p = People.planTeachers(ex, [{ name: "Tan Wei Ming", role: "ST" }], ROLES, DEPTS);
+  assert.deepStrictEqual(p.update, [{ i: 0, changes: { role: "ST" } }]);
+  assert.deepStrictEqual(ex[0].can_teach, [{ subject: "Mathematics", levels: "All" }]); assert.strictEqual(ex[0].dept2, "SC");
+});
+t("depts: home first, trimmed, non-empty and different", () => {
+  assert.deepStrictEqual(People.depts({ dept: "MA", dept2: "SC" }), ["MA", "SC"]);
+  assert.deepStrictEqual(People.depts({ dept: "MA", dept2: "MA" }), ["MA"]);
+  assert.deepStrictEqual(People.depts({ dept: " MA ", dept2: " MA" }), ["MA"]);
+  assert.deepStrictEqual(People.depts({ dept: "", dept2: "SC" }), ["SC"]);
+  assert.deepStrictEqual(People.depts({ dept: null }), []); assert.deepStrictEqual(People.depts({}), []);
+  assert.deepStrictEqual(People.depts(null), []);
+});
+t("inDept: either department counts", () => {
+  const r = { dept: " MA ", dept2: "SC" };
+  assert.strictEqual(People.inDept(r, "MA"), true); assert.strictEqual(People.inDept(r, " SC "), true);
+  assert.strictEqual(People.inDept(r, "PE"), false); assert.strictEqual(People.inDept(r, ""), false);
+  assert.strictEqual(People.inDept({}, ""), false); assert.strictEqual(People.inDept(null, "MA"), false);
 });
 console.log(`${n} cases passed`);

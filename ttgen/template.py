@@ -21,7 +21,6 @@ BF = Font(name="Arial", size=10); CF = PatternFill("solid", fgColor="EDEDED")
 TITLE = Font(name="Arial", size=14, bold=True, color=NAVY); NOTE = Font(name="Arial", size=9, italic=True, color="595959")
 EXF = Font(name="Arial", size=10, italic=True, color="7F7F7F"); RED = PatternFill("solid", fgColor="F4B6B6")
 HR, R0 = 5, 6          # header row and first data row of steps 1-6
-NPAIR = 8
 BOX = Border(*(Side(style="thin", color="C9D3E0"),) * 4)
 LENGTH_NAME = {1: "Singles", 2: "Doubles", 3: "Triples", 4: "Quadruples"}
 
@@ -76,7 +75,7 @@ def write_template(spec, path, extra_rows=120):
     rules = split_rules(spec)
     NCLS = max([9] + [len(x.get("classes") or []) for x in spec["blocks"] + spec["lessons"]])
     NTCH = max([3] + [len(PA.names(x)) for x in spec["lessons"]])   # the widest lesson's teachers, never fewer than three columns
-    PNAME = PA.label(spec); PSUBS = PA.subjects(spec)
+    PNAME = PA.label(spec)
     PUSED = any(sc.get(k) for k in ("parents_name", "parents_max", "parents_subjects")) or any(PA.names(c) for c in spec["classes"])
     NCP = max([parents_max(sc.get("parents_max")) or 2] + [len(PA.names(c)) for c in spec["classes"]]) if PUSED else 0   # Class Parents columns on Classes
     nV, nC, nS = len(spec["venues"]), len(spec["classes"]), len(spec["subjects"])
@@ -92,7 +91,7 @@ def write_template(spec, path, extra_rows=120):
              ("2", C, "List the classes; pick each one's level and home room (from Step 1)."),
              ("3", S, f"List the subjects with code, {TAGH}, department, room kind (Step 1 kinds) and periods a {fortnight} per level. "
                       f"{LENGTH_NAME.get(L_std - 1, 'Shorter lessons')} and {LENGTH_NAME.get(L_std, 'full lessons').lower()} follow from the periods."),
-             ("4", T, "List the teachers; pick the subjects (Step 3) and levels each can teach. Periods given and Spare update as you fill Step 6. "
+             ("4", T, "List the teachers with their department. Periods given and Spare update as you fill Step 6. "
                       "Pick each teacher's role (HOD, SH, EO...); the Roles sheet shows the load by role."),
              ("5", BL, "Name each block of groups that run together and pick its classes (Step 2). Its groups, student totals and longest periods fill in from Step 6."),
              ("6", L, "One row per group (or per class for whole-class subjects): pick level, subject (Step 3), block (Step 5), classes (Step 2) and teachers (Step 4). "
@@ -222,7 +221,6 @@ def write_template(spec, path, extra_rows=120):
                     ("RuleScopeList", "J"), ("SchoolList", "K"), ("WeekList", "L"), ("DayList", "M"), ("StrengthList", "N"), ("PeriodList", "O"), ("LevelAllList", "P")):
         B.name(nm, B.dyn("Lists", col, 4, 1000))
     letter_of = lambda tag: f'IFERROR(INDEX(Lists!$G$4:$G$60,MATCH({tag},Lists!$D$4:$D$60,0)),"")'
-    band_of = lambda lv: f'IFERROR(INDEX(Lists!$I$4:$I$60,MATCH({lv},Lists!$H$4:$H$60,0)),"")'
 
     # ---------------- 1 Venues
     VIN = {1, 2, 3, 4, 5, 7, 8, 9, 10}
@@ -287,49 +285,39 @@ def write_template(spec, path, extra_rows=120):
     LQ = f"'{L}'"; TC = [COL[f"Teacher {k}"] for k in range(1, NTCH + 1)]; TPC = COL["Teacher periods"]
 
     # ---------------- 4 Teachers (load, role and load check as on v9)
-    tcols = [("Teacher", 28), ("Short", 12), ("Department", 11), ("Allowance (periods)", 11), ("Provisional", 10)]
-    for p in range(1, NPAIR + 1): tcols += [(f"Can teach {p}", 28), (f"at {p}", 9)]
-    LO = 6 + 2 * NPAIR   # Periods given
-    tcols += [("Periods given", 10), ("Spare", 8), ("(key, used by checks)", 12), ("Note", 30), ("Role", 9), ("Other duties (periods)", 10),
-              ("Total load", 9), ("Role guide (periods)", 9), ("% of allowance", 9), ("Load check", 44)]
-    PG, SP, KY, NO, RO, OD, TL, RG, PC, LC = (CL(LO + k) for k in range(10))
-    TIN = set(range(1, LO)) | {LO + 3, LO + 4, LO + 5}
-    tw = B.sheet(T, "Step 4 · Teachers: who they are and what they can teach", ["Pick each subject a teacher can teach and the levels ('All', a level, or a band such as Sec 1-2). Lessons are checked against this.",
+    tcols = [("Teacher", 28), ("Short", 12), ("Department", 11), ("Department 2", 11), ("Allowance (periods)", 11), ("Provisional", 10),
+             ("Periods given", 10), ("Spare", 8), ("Note", 30), ("Role", 9), ("Other duties (periods)", 10),
+             ("Total load", 9), ("Role guide (periods)", 9), ("% of allowance", 9), ("Load check", 44)]
+    AL, PG, SP, NO, RO, OD, TL, RG, PC, LC = (CL(5 + k) for k in (0, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+    TIN = {1, 2, 3, 4, 5, 6, 9, 10, 11}
+    tw = B.sheet(T, "Step 4 · Teachers: who they are", ["Department 2 is for a teacher who teaches in two departments: they count in both. Who teaches what is on Step 6.",
                  "Periods given adds up every lesson the teacher has on Step 6; Spare = Allowance - Periods given (red when over).",
                  f"Blue on yellow = type or pick. Grey = worked out for you.  Role (column {RO}) comes from the Roles sheet; Load check flags management teaching as much as teachers, and teachers well below or above an even share."], tcols, TIN)
     for i, x in enumerate(spec["teachers"]):
         rr = R0 + i
-        for j, k in enumerate(["name", "short", "dept", "allowance", "provisional"], start=1): tw.cell(rr, j, x.get(k))
-        for p, ct in enumerate((x.get("can_teach") or [])[:NPAIR]):
-            tw.cell(rr, 6 + 2 * p, ct.get("subject")); tw.cell(rr, 7 + 2 * p, ct.get("levels") or "All")
+        for j, k in enumerate(["name", "short", "dept", "dept2", "allowance", "provisional"], start=1): tw.cell(rr, j, x.get(k))
         tw[f"{NO}{rr}"] = x.get("note"); tw[f"{RO}{rr}"] = x.get("role"); tw[f"{OD}{rr}"] = x.get("other_duties")
-    B.paint(tw, LAST(nT), TIN, LO + 9)
+    B.paint(tw, LAST(nT), TIN, len(tcols))
     RN = "Roles!$A$9:$A$28"
     for r in range(R0, LAST(nT) + 1):
         load = "+".join(f"SUMIF({LQ}!${c}${R0}:${c}${R0 + 1999},A{r},{LQ}!${TPC}${R0}:${TPC}${R0 + 1999})" for c in TC)
         tw[f"{PG}{r}"] = f'=IF(A{r}="","",{load})'
-        tw[f"{SP}{r}"] = f'=IF(OR(A{r}="",D{r}=""),"",D{r}-{PG}{r})'
-        key = "&".join(f'"|"&{CL(6 + 2 * p)}{r}&"@"&IF({CL(7 + 2 * p)}{r}="","All",{CL(7 + 2 * p)}{r})' for p in range(NPAIR)) + '&"|"'
-        tw[f"{KY}{r}"] = f'=IF(A{r}="","",{key})'; tw[f"{KY}{r}"].font = Font(name="Arial", size=7, color="8C8C8C")
+        tw[f"{SP}{r}"] = f'=IF(OR(A{r}="",{AL}{r}=""),"",{AL}{r}-{PG}{r})'
         tw[f"{TL}{r}"] = f'=IF(A{r}="","",N({PG}{r})+N({OD}{r}))'
         tw[f"{RG}{r}"] = f'=IF(OR(A{r}="",{RO}{r}=""),"",IFERROR(INDEX(Roles!$C$9:$C$28,MATCH({RO}{r},{RN},0)),""))'
-        tw[f"{PC}{r}"] = f'=IF(OR(A{r}="",N(D{r})=0),"",{TL}{r}/D{r})'; tw[f"{PC}{r}"].number_format = "0%"
+        tw[f"{PC}{r}"] = f'=IF(OR(A{r}="",N({AL}{r})=0),"",{TL}{r}/{AL}{r})'; tw[f"{PC}{r}"].number_format = "0%"
         tw[f"{LC}{r}"] = (f'=IF(A{r}="","",TRIM(IF({RO}{r}="","No role. ","")'
-                          f'&IF(AND(N({RG}{r})>0,N(D{r})>0,D{r}<>{RG}{r}),"Allowance differs from the "&{RO}{r}&" guide ("&{RG}{r}&"). ","")'
-                          f'&IF(AND(N(D{r})>0,{TL}{r}>D{r}),"Over allowance. ","")'
+                          f'&IF(AND(N({RG}{r})>0,N({AL}{r})>0,{AL}{r}<>{RG}{r}),"Allowance differs from the "&{RO}{r}&" guide ("&{RG}{r}&"). ","")'
+                          f'&IF(AND(N({AL}{r})>0,{TL}{r}>{AL}{r}),"Over allowance. ","")'
                           f'&IF(AND(IFERROR(INDEX(Roles!$D$9:$D$28,MATCH({RO}{r},{RN},0)),"")="Management",N(Roles!$C$3)>0,{TL}{r}>=Roles!$C$3),"Management teaching as much as the average teacher ("&ROUND(Roles!$C$3,0)&"). ","")'
                           f'&IF(AND({RO}{r}="EO",{TL}{r}>0,N(Roles!$C$3)>0,Roles!$C$3-{TL}{r}>=Roles!$C$5),"Below the teacher average by "&ROUND(Roles!$C$3-{TL}{r},0)&" periods. ","")'
                           f'&IF(AND({RO}{r}="EO",N(Roles!$C$3)>0,{TL}{r}-Roles!$C$3>=Roles!$C$5),"Above the teacher average by "&ROUND({TL}{r}-Roles!$C$3,0)&" periods. ","")'
-                          f'&IF(AND({RO}{r}<>"",N(D{r})>0,{TL}{r}=0),"No lessons yet. ","")))')
+                          f'&IF(AND({RO}{r}<>"",N({AL}{r})>0,{TL}{r}=0),"No lessons yet. ","")))')
         tw[f"{LC}{r}"].alignment = Alignment(wrap_text=True, vertical="top")
     tw.conditional_formatting.add(f"{SP}{R0}:{SP}{LAST(nT)}", CellIsRule(operator="lessThan", formula=["0"], fill=RED))
-    B.dv(tw, f"C{R0}:C{LAST(nT)}", "=DeptList", "Pick a department."); B.dv(tw, f"E{R0}:E{LAST(nT)}", "=YesNoList", "Yes or No.")
+    B.dv(tw, f"C{R0}:D{LAST(nT)}", "=DeptList", "Pick a department."); B.dv(tw, f"F{R0}:F{LAST(nT)}", "=YesNoList", "Yes or No.")
     B.dv(tw, f"{RO}{R0}:{RO}{LAST(nT)}", "=RoleList", "Pick a role from the Roles sheet.")
-    for p in range(NPAIR):
-        B.dv(tw, f"{CL(6 + 2 * p)}{R0}:{CL(6 + 2 * p)}{LAST(nT)}", "=SubjectList", "Pick a subject from Step 3.")
-        B.dv(tw, f"{CL(7 + 2 * p)}{R0}:{CL(7 + 2 * p)}{LAST(nT)}", "=ScopeList", "Pick All, a level or a band.")
     B.name("TeacherList", B.dyn(T, "A"))
-    KEYC = KY
 
     # ---------------- Roles
     ro = wb.create_sheet("Roles")
@@ -398,7 +386,7 @@ def write_template(spec, path, extra_rows=120):
     LIN = set(range(1, 4 + NCLS + NTCH + 4)) | {names.index(n) + 1 for n in ("Note", "Special room weeks", "Changed by hand")}
     lw = B.sheet(L, "Step 6 · Lessons: one row per group (or per class for whole-class subjects)",
                  ["Pick level, subject and block; pick the class(es) and teacher(s). Leave Block empty for a whole-class lesson.",
-                  f"Group code, periods, {short_h.lower()}/{full_h.lower()} and room kind fill in from Steps 3-5. To split a group's periods your own way, write the lessons in Lesson pattern, such as 5x3 + 2x2 (five 3-period lessons and two 2-period ones). Check flags a teacher not set to teach the subject, a teacher twice in a block, missing periods or a repeated code."], lcols, LIN)
+                  f"Group code, periods, {short_h.lower()}/{full_h.lower()} and room kind fill in from Steps 3-5. To split a group's periods your own way, write the lessons in Lesson pattern, such as 5x3 + 2x2 (five 3-period lessons and two 2-period ones). Check flags a teacher twice in a block, missing periods or a repeated code."], lcols, LIN)
     from .reader import pattern_text
     for i, x in enumerate(spec["lessons"]):
         rr = R0 + i
@@ -430,19 +418,11 @@ def write_template(spec, path, extra_rows=120):
         lw[FU] = f'=IF(OR(N({P_})=0,{PT}<>""),"",({P_}-{SH}*({LN}-1))/{LN})'
         lw[RK] = f'=IF({B_}="","",IFERROR(IF({idx("E", r)}="","home room",{idx("E", r)}),""))'
         lw[TP] = f'=IF(N({P_})=0,0,{P_}*IF({C_}="",MAX(1,COUNTA({CF1}{r}:{CFN}{r})),1))'
-        named = f"OR({','.join('B%d=%s' % (r, chr(34) + str(n).replace(chr(34), chr(34) * 2) + chr(34)) for n in PSUBS)})" if PSUBS else ""
-        def can(tc):
-            k = f"IFERROR(INDEX('{T}'!${KEYC}${R0}:${KEYC}${R0 + 999},MATCH({tc}{r},'{T}'!$A${R0}:$A${R0 + 999},0)),\"\")"
-            ok = f'ISNUMBER(FIND("|"&{B_}&"@All|",{k}))+ISNUMBER(FIND("|"&{B_}&"@"&{A_}&"|",{k}))+ISNUMBER(FIND("|"&{B_}&"@"&{band_of(A_)}&"|",{k}))'
-            return f'IF({ok}=0,{tc}{r}&" not set to teach this at "&{A_}&". ","")'
         def twice(tc):
             if NTCH <= 6: t2 = "+".join(f"COUNTIFS($C${R0}:$C${R0 + 1999},{C_},${c}${R0}:${c}${R0 + 1999},{tc}{r})" for c in TC)
             else: t2 = f"SUMPRODUCT(($C${R0}:$C${R0 + 1999}={C_})*(${TC[0]}${R0}:${TC[-1]}${R0 + 1999}={tc}{r}))"   # one range term, not one per column (Excel's 8192-character limit)
             return f'IF(AND({C_}<>"",{t2}>1),{tc}{r}&" twice in this block. ","")'
-        # Can teach is tested for the first six Teacher columns only: a lesson holds more than six teachers only when it follows the form
-        # teachers of several classes (by hand the most is six), and those are never tested. A named subject's lessons skip it, once for the row.
-        if named: tchk = f'IF({named},"",' + "&".join(f'IF({tc}{r}="","",{can(tc)})' for tc in TC[:6]) + ")&" + "&".join(f'IF({tc}{r}="","",{twice(tc)})' for tc in TC)
-        else: tchk = "&".join(f'IF({tc}{r}="","",{can(tc)}&{twice(tc)})' if i < 6 else f'IF({tc}{r}="","",{twice(tc)})' for i, tc in enumerate(TC))
+        tchk = "&".join(f'IF({tc}{r}="","",{twice(tc)})' for tc in TC)
         lw[CK] = (f'=IF({B_}="","",TRIM(IF(N({P_})=0,"No periods for "&{A_}&" on Subjects. ","")&IF(COUNTA({CF1}{r}:{CFN}{r})=0,"No class. ","")'
                   f'&IF(COUNTA({TC[0]}{r}:{TC[-1]}{r})=0,"No teacher. ","")&' + tchk +
                   f'&IF(AND({GC}<>"Entire Class",COUNTIF(${c_["Group code"]}${R0}:${c_["Group code"]}${R0 + 1999},{GC})>1),"Code used twice. ","")'

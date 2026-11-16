@@ -3,6 +3,7 @@ import collections, copy, os, random, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE); sys.path.insert(0, ROOT)
 import fixes  # noqa: E402
 from ttgen import export, reader, template, verify  # noqa: E402
+from ttgen import spec as spec_mod  # noqa: E402
 from ttgen.export import ENTIRE  # noqa: E402
 from ttgen.samples import primary  # noqa: E402
 import openpyxl  # noqa: E402
@@ -199,6 +200,27 @@ def keep_free_together_is_about_the_day_not_its_first_lesson():
     r = fixes.judge(m, sp, DAYS, dict(kind="move", id=3, d=1, p=2)); assert r["state"] == "no" and r["why"].startswith("Rule Department"), r   # a clean day broken anew
 
 @t
+def keep_free_together_bears_on_a_second_department_teacher():
+    other = next(d for d in SP["school"]["departments"] if d != next(x["dept"] for x in SP["teachers"] if x["name"] == T[0]))
+    win = dict(scope="Department", target=other, rule="Keep free together", week="Both", day="All", strength="Must", **{"from": 2, "to": 3})
+    L = [lesson(1, 0, 5, 1, [A], "Art", ENTIRE, [T[0]], level=LV)]
+    teachers = [dict(x, dept2=other) if x["name"] == T[0] else x for x in SP["teachers"]]
+    m, sp = model_with(L, rules=[win], teachers=teachers); depts = verify.teacher_depts(m, sp)
+    assert fixes._bears(m, sp, win, m["lessons"][0], depts)
+    m0, sp0 = model_with(L, rules=[win]); assert not fixes._bears(m0, sp0, win, m0["lessons"][0], verify.teacher_depts(m0, sp0))
+    r = fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=1, p=2)); assert r["state"] == "no" and r["why"].startswith("Rule Department"), r   # into the window
+    assert fixes.judge(m0, sp0, DAYS, dict(kind="move", id=1, d=1, p=2))["state"] != "no"
+
+@t
+def the_departments_are_worked_out_once_per_context():
+    L = [lesson(1, 0, 5, 1, [A], "Art", ENTIRE, [T[0]], level=LV)]; m, sp = model_with(L); ctx = fixes._ctx(m); real, calls = verify.teacher_depts, []
+    verify.teacher_depts = lambda *a: calls.append(1) or real(*a)
+    try:
+        for p in (2, 3): fixes.judge(m, sp, DAYS, dict(kind="move", id=1, d=1, p=p), ctx)
+    finally: verify.teacher_depts = real
+    assert len(calls) == 1, calls
+
+@t
 def a_lesson_length_in_any_spelling():
     rows = [dict(x, length="2.0") if x is ROW else dict(x, length="two") if x["classes"] == [CLS] and x["code"] == ENTIRE else x for x in SP["lessons"]]
     m, sp = model_with([lesson(1, 0, 2, 1, [CLS], SUBJ, ENTIRE, TEACHERS, level=LV)], lessons=rows)
@@ -227,8 +249,51 @@ def slots_for_a_lesson_and_a_block():
     ok = [s for s in S if s["state"] == "ok"]; assert ok and all(not [x for x in L if x["id"] != 7 and x["d"] == s["d"] and set(x["classes"]) & set(cls) and x["p"] < s["p"] + 2 and s["p"] < x["p"] + x["n"]] for s in ok)
 
 @t
+def teachers_offered_are_those_who_teach_the_subject_then_its_department():
+    # Mathematics G3 and G2 are one card; Aye teaches the G2 one; Bee and Cee (by a second department) are in MA; Dee is not
+    row = lambda sub, cls, who, tg: dict(ROW, subject=sub, tag=tg, classes=cls, teachers=who, code=ENTIRE, block=None, periods=2, level=LV)
+    subs = [dict(subject="Mathematics G3", code="MA", tag="G3", dept="MA", periods={}), dict(subject="Mathematics G2", code="MA", tag="G2", dept="MA", periods={})]
+    tch = [dict(name=n, short=n, dept=d, **x) for n, d, x in [("Dee", "SC", {}), ("Cee", "SC", dict(dept2="MA")), ("Bee", "MA", {}), ("Aye", "SC", {}), ("Now", "MA", {})]]
+    rows = [row("Mathematics G3", [CLS], ["Now"], "G3"), row("Mathematics G2", [B], ["Aye"], "G2")]
+    school = dict(SP["school"], tags=[["G3", "P"], ["G2", "A"], ["-", ""]])
+    L = [lesson(1, 0, 2, 2, [CLS], "Mathematics G3", ENTIRE, ["Now"], level=LV)]
+    m, sp = model_with(L, school=school, subjects=subs, teachers=tch, lessons=rows)
+    key = f"C:{CLS}:Mathematics G3"
+    assert [o["teachers"] for o in fixes.teacher_options(m, sp, DAYS, key)] == [["Aye"], ["Cee"], ["Bee"]], fixes.teacher_options(m, sp, DAYS, key)
+
+@t
+def a_card_is_step_3s_card():
+    # (a) "Drama" with tag a is not "Dram"; (b) spaces round a name and its G-level still join the card; (c) odd setups do not raise
+    mk = lambda subs, tch, rows, tags, L: model_with(L, school=dict(SP["school"], tags=tags), subjects=subs, teachers=tch, lessons=rows)
+    sub = lambda n, tg: dict(subject=n, code="DR", tag=tg, dept="AR", periods={})
+    rw = lambda n, cls, who: dict(ROW, subject=n, classes=cls, teachers=who, code=ENTIRE, block=None, periods=2, level=LV)
+    tch = [dict(name="Now", short="N", dept="XX"), dict(name="Ann", short="A", dept="XX"), dict(name="Bo", short="B", dept="YY")]
+    offers = lambda m, sp, name: [o["teachers"] for o in fixes.teacher_options(m, sp, DAYS, f"C:{CLS}:{name}")]
+    L = lambda n: [lesson(1, 0, 2, 2, [CLS], n, ENTIRE, ["Now"], level=LV)]
+    m, sp = mk([sub("Drama", "a"), sub("Dram", "-")], tch, [rw("Drama", [CLS], ["Now"]), rw("Dram", [B], ["Ann"])], [["a", "A"], ["-", ""]], L("Drama"))
+    assert offers(m, sp, "Drama") == [], offers(m, sp, "Drama")   # Ann teaches "Dram", which is not Drama's card
+    m, sp = mk([sub("  Art G3 ", "G3"), sub("Art G2", "G2")], tch, [rw("Art G3", [CLS], ["Now"]), rw("Art G2", [B], ["Ann"])], [["G3", "P"], ["G2", "A"]], L("Art G3"))
+    assert offers(m, sp, "Art G3") == [["Ann"]], offers(m, sp, "Art G3")
+    m, sp = mk([sub("Art G3", "G3")], tch, [rw("Art G3", [CLS], ["Now"])], [["G3", "P"]], L("Art G3"))
+    for odd in (dict(subjects=[None, sub("Art G3", "G3")], teachers=[None] + tch), dict(school=dict(sp["school"], tags="G3")), dict(school=dict(sp["school"], tags=None)),
+                dict(school=dict(sp["school"], tags=[None, "G3", [], ["G3", "P"]]))):
+        assert isinstance(fixes.teacher_options(m, dict(sp, **odd), DAYS, f"C:{CLS}:Art G3"), list)
+
+@t
+def nobody_to_offer_is_an_empty_list():
+    # a subject with no department, taught only by its own teacher; and a lesson whose subject is not on step 3's list
+    subs = [dict(subject="Assembly talk", code="AT", tag="-", dept="", periods={})]
+    rows = [dict(ROW, subject="Assembly talk", tag="-", classes=[CLS], teachers=["Solo"], code=ENTIRE, block=None, periods=2, level=LV)]
+    tch = [dict(name="Solo", short="Solo", dept="MA"), dict(name="Other", short="Other", dept="MA")]
+    L = [lesson(1, 0, 2, 2, [CLS], "Assembly talk", ENTIRE, ["Solo"], level=LV), lesson(2, 1, 2, 2, [B], "Unlisted", ENTIRE, ["Solo"], level=LV)]
+    m, sp = model_with(L, subjects=subs, teachers=tch, lessons=rows)
+    assert fixes.teacher_options(m, sp, DAYS, f"C:{CLS}:Assembly talk") == []
+    assert fixes.teacher_options(m, sp, DAYS, f"C:{B}:Unlisted") == []
+
+@t
 def teacher_room_add_delete_options():
-    P = verify.planned_rows(SP)[("C", CLS, SUBJ)]["periods"]; can = [x["name"] for x in SP["teachers"] if any(c.get("subject") == SUBJ for c in x.get("can_teach") or []) and x["name"] not in TEACHERS]
+    P = verify.planned_rows(SP)[("C", CLS, SUBJ)]["periods"]; dept = next(s["dept"] for s in SP["subjects"] if s["subject"] == SUBJ)
+    can = [x["name"] for x in SP["teachers"] if dept in spec_mod.teacher_depts(x) and x["name"] not in TEACHERS]
     free, busy = can[0], can[1]; home = next(c["home_room"] for c in SP["classes"] if c["class"] == CLS); other = next(v["room"] for v in SP["venues"] if v.get("kind") == "classroom" and v["room"] != home)
     L = [lesson(1, 0, 2, 2, [CLS], SUBJ, ENTIRE, TEACHERS, room=other, level=LV)] + [lesson(10 + k, 1 + k // 6, 5 + k % 6, 1, [CLS], SUBJ, ENTIRE, TEACHERS, level=LV) for k in range(P - 3)] \
         + [lesson(2, 0, 2, 2, [B], "Science", ENTIRE, [busy], room=home, level=LV)]

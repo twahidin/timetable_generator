@@ -166,24 +166,22 @@ def a_workbook_without_the_column_keeps_typed_teachers():
 
 
 @t
-def the_workbook_does_not_check_can_teach_on_the_named_subjects():
+def the_lessons_check_no_longer_tests_can_teach():
     def check(sp):
         ws = openpyxl.load_workbook(write(sp))["6 Lessons"]
         ck = next(j for j in range(1, ws.max_column + 1) if ws.cell(5, j).value == "Check")
         return ws.cell(6, ck).value
-    f = check(with_parents(primary())); g = check(primary())
-    assert f'B6="{SUBJ}"' in f and "not set to teach" in f and "No teacher." in f and "twice in this block" in f   # the guard is on the Can teach branch only
-    assert 'OR(B6=' not in g and "not set to teach" in g and "No teacher." in g                                       # nothing named: the formula is as before
-    two = with_parents(primary()); two["school"]["parents_subjects"] = [SUBJ, "Art"]
-    assert f'OR(B6="{SUBJ}",B6="Art")' in check(two)
+    for f in (check(with_parents(primary())), check(primary())):
+        assert "No teacher." in f and "twice in this block" in f
+        assert "not set to teach" not in f and "4 Teachers" not in f and "OR(B6=" not in f and f'B6="{SUBJ}"' not in f
 
 
 @t
-def the_skill_version_is_2026_11_4():
+def the_skill_version_is_2026_11_5():
     root = os.path.dirname(HERE)
-    assert SPEC.SKILL_VERSION == "2026-11.4"
-    assert "2026-11.4" in open(os.path.join(root, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
-    assert "2026-11.4" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
+    assert SPEC.SKILL_VERSION == "2026-11.5"
+    assert "2026-11.5" in open(os.path.join(root, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
+    assert "2026-11.5" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
 
 
 
@@ -206,8 +204,8 @@ def the_check_formula_stays_within_excels_limit_however_many_teacher_columns():
     assert check_cells(write(wide(9)))[1] < 8192                           # was 8919: a lesson of three classes with three Class Parents each
 
 
-# the Check formula of row 6 of samples.primary() with 3 Teacher columns, as the writer made it before Teacher columns could grow
-CHECK_3 = '=IF(B6="","",TRIM(IF(N(U6)=0,"No periods for "&A6&" on Subjects. ","")&IF(COUNTA(D6:L6)=0,"No class. ","")&IF(COUNTA(M6:O6)=0,"No teacher. ","")&IF(M6="","",IF(ISNUMBER(FIND("|"&B6&"@All|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(M6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&A6&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(M6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&IFERROR(INDEX(Lists!$I$4:$I$60,MATCH(A6,Lists!$H$4:$H$60,0)),"")&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(M6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))=0,M6&" not set to teach this at "&A6&". ","")&IF(AND(C6<>"",COUNTIFS($C$6:$C$2005,C6,$M$6:$M$2005,M6)+COUNTIFS($C$6:$C$2005,C6,$N$6:$N$2005,M6)+COUNTIFS($C$6:$C$2005,C6,$O$6:$O$2005,M6)>1),M6&" twice in this block. ",""))&IF(N6="","",IF(ISNUMBER(FIND("|"&B6&"@All|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(N6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&A6&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(N6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&IFERROR(INDEX(Lists!$I$4:$I$60,MATCH(A6,Lists!$H$4:$H$60,0)),"")&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(N6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))=0,N6&" not set to teach this at "&A6&". ","")&IF(AND(C6<>"",COUNTIFS($C$6:$C$2005,C6,$M$6:$M$2005,N6)+COUNTIFS($C$6:$C$2005,C6,$N$6:$N$2005,N6)+COUNTIFS($C$6:$C$2005,C6,$O$6:$O$2005,N6)>1),N6&" twice in this block. ",""))&IF(O6="","",IF(ISNUMBER(FIND("|"&B6&"@All|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(O6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&A6&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(O6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))+ISNUMBER(FIND("|"&B6&"@"&IFERROR(INDEX(Lists!$I$4:$I$60,MATCH(A6,Lists!$H$4:$H$60,0)),"")&"|",IFERROR(INDEX(\'4 Teachers\'!$X$6:$X$1005,MATCH(O6,\'4 Teachers\'!$A$6:$A$1005,0)),"")))=0,O6&" not set to teach this at "&A6&". ","")&IF(AND(C6<>"",COUNTIFS($C$6:$C$2005,C6,$M$6:$M$2005,O6)+COUNTIFS($C$6:$C$2005,C6,$N$6:$N$2005,O6)+COUNTIFS($C$6:$C$2005,C6,$O$6:$O$2005,O6)>1),O6&" twice in this block. ",""))&IF(AND(T6<>"Entire Class",COUNTIF($T$6:$T$2005,T6)>1),"Code used twice. ","")&IF(AND(C6<>"",COUNTIF(\'5 Blocks\'!$A$6:$A$1005,C6)=0),"Block not on Step 5. ","")))'
+# the Check formula of row 6 of samples.primary() with 3 Teacher columns (the Can teach test is gone: only the twice-in-a-block test is written per teacher)
+CHECK_3 = '=IF(B6="","",TRIM(IF(N(U6)=0,"No periods for "&A6&" on Subjects. ","")&IF(COUNTA(D6:L6)=0,"No class. ","")&IF(COUNTA(M6:O6)=0,"No teacher. ","")&IF(M6="","",IF(AND(C6<>"",COUNTIFS($C$6:$C$2005,C6,$M$6:$M$2005,M6)+COUNTIFS($C$6:$C$2005,C6,$N$6:$N$2005,M6)+COUNTIFS($C$6:$C$2005,C6,$O$6:$O$2005,M6)>1),M6&" twice in this block. ",""))&IF(N6="","",IF(AND(C6<>"",COUNTIFS($C$6:$C$2005,C6,$M$6:$M$2005,N6)+COUNTIFS($C$6:$C$2005,C6,$N$6:$N$2005,N6)+COUNTIFS($C$6:$C$2005,C6,$O$6:$O$2005,N6)>1),N6&" twice in this block. ",""))&IF(O6="","",IF(AND(C6<>"",COUNTIFS($C$6:$C$2005,C6,$M$6:$M$2005,O6)+COUNTIFS($C$6:$C$2005,C6,$N$6:$N$2005,O6)+COUNTIFS($C$6:$C$2005,C6,$O$6:$O$2005,O6)>1),O6&" twice in this block. ",""))&IF(AND(T6<>"Entire Class",COUNTIF($T$6:$T$2005,T6)>1),"Code used twice. ","")&IF(AND(C6<>"",COUNTIF(\'5 Blocks\'!$A$6:$A$1005,C6)=0),"Block not on Step 5. ","")))'
 
 
 @t
@@ -236,10 +234,9 @@ def named(sp, k):
 def the_check_formula_length_does_not_grow_with_named_subjects_or_past_six_columns():
     for n, k in ((18, 5), (12, 30), (18, 0), (15, 2)):
         assert check_cells(write(named(wide(n), k)))[1] < 8192, (n, k)
-    f = check_cells(write(named(wide(6), 2)))[0][0]                           # the test is written once around the Can teach chain, not per teacher
-    assert f.count('OR(B6="') == 1 and f.count("not set to teach") == 6 and f.count("twice in this block") == 6
-    guard = f.index('IF(OR(B6='); assert f.index("not set to teach") > guard and f.index("twice in this block") > f.index("not set to teach", guard)   # twice stays outside it
-    g = check_cells(write(wide(9)))[0][0]; assert g.count("not set to teach") == 6 and g.count("twice in this block") == 9 and g.count("No teacher.") == 1   # 7 and beyond: no Can teach test
+    f = check_cells(write(named(wide(6), 2)))[0][0]                           # a named subject changes nothing in the formula now
+    assert f == check_cells(write(wide(6)))[0][0] and "OR(B6=" not in f and "not set to teach" not in f and f.count("twice in this block") == 6
+    g = check_cells(write(wide(9)))[0][0]; assert g.count("twice in this block") == 9 and g.count("No teacher.") == 1
 
 
 print(f"{passed} cases passed")

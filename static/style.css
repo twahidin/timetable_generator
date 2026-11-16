@@ -164,45 +164,48 @@ button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .avstrip svg { display: block; }
 
 /* step 5: the department map */
-.map{display:grid;grid-template-columns:280px 1fr 320px;gap:12px;align-items:start}
-@media (max-width:900px){.map{grid-template-columns:1fr 1fr}.map .cards{grid-column:1/-1}}
+.map{display:flex;flex-direction:column;gap:12px}
 .map .card{margin-bottom:0;padding:12px 14px}
 .switch button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
-.rlist{max-height:calc(100vh - 300px);overflow:auto;margin-top:6px}
-.roster .trow{display:flex;gap:8px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--line)}
-.roster .trow.on{background:#eef5ff}
-.roster .tname{flex:1;min-width:0;line-height:1.25}
-.roster .tname > div:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.roster .trow input[type=checkbox]{margin:0;flex:0 0 auto}
 .load{flex:0 0 60px;height:6px;background:var(--chip);border-radius:3px;overflow:hidden}
 .load i{display:block;height:100%;background:var(--accent)}
 .load.over i{background:var(--warn)}
 .overtxt{color:var(--warn);font-weight:600}
 .tag{font-size:11px;background:var(--chip);border-radius:999px;padding:1px 6px;white-space:nowrap}
-.found .trow{display:flex;gap:8px;align-items:center;padding:3px 2px}
 .newt .grid2{grid-template-columns:1fr 1fr}
-.blist,.clist{max-height:calc(100vh - 300px);overflow:auto}
-.basket{border:1px dashed #cdd5e1;border-radius:10px;padding:8px;margin-bottom:8px;min-height:44px;cursor:pointer}
-.basket.staff{background:#f8fafc;cursor:default}
-.basket.over,.gcard.over{border-color:var(--accent);background:#eef5ff}
+.dpcard.over{border-color:var(--accent);background:#eef5ff}
 .avs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;min-height:28px}
 .avx{position:relative;display:inline-block;line-height:0}
-.avx .x{position:absolute;top:-6px;right:-8px;font-size:10px;line-height:1;padding:1px 4px;border-radius:999px;color:var(--warn);background:var(--panel);display:none}
-.avx:hover .x,.avx:focus-within .x{display:block}
-@media (hover:none){.avx .x{display:block}}
 .avx.named{display:inline-flex;flex-direction:column;align-items:center;width:62px;line-height:1.15}
 .avx.named .avatar{line-height:0}
-.avx.named .x{right:8px}
 .avn{display:block;max-width:62px;margin-top:2px;font-size:11px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .avs:has(.avx.named){align-items:flex-start;gap:6px 2px}
 .gav{display:inline-flex;align-items:center;gap:5px;line-height:0}
 .gavn{font-size:12px;line-height:1.2;color:var(--ink);max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gcard{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px;cursor:pointer;background:var(--panel)}
-.gcard:hover{border-color:#c5ccd8}
-.gcard .plus{display:inline-flex;width:28px;height:28px;border:1px dashed #cdd5e1;border-radius:50%;align-items:center;justify-content:center;color:var(--muted)}
+.dpcard .plus{display:inline-flex;width:28px;height:28px;border:1px dashed #cdd5e1;border-radius:50%;align-items:center;justify-content:center;color:var(--muted)}
 .lane{border-left:3px solid var(--navy);padding-left:8px;margin-bottom:12px}
-.map.dragging .gcard,.map.dragging .basket{outline:1px dashed #cdd5e1}
-.cards .small.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.map.dragging .dpcard{outline:1px dashed #cdd5e1}
+.dpfind{flex:1;min-width:200px;max-width:380px}
+.dpchips{display:flex;flex-wrap:wrap;gap:6px}
+.dpchip{display:flex;gap:8px;align-items:center;width:250px;padding:4px 8px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.dpchip.on{background:#eef5ff;border-color:var(--accent)}
+.dpchip input[type=checkbox]{margin:0;flex:0 0 auto}
+.dpcn{flex:1;min-width:0;line-height:1.25}
+.dpname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpothers{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:8px}
+.dpother{display:inline-flex;gap:6px;align-items:center}
+.dplevel{margin-top:14px}
+.dplevel h3{margin:0 0 6px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.dpsub{margin:10px 0}
+.dpsub h4{margin:0 0 6px;font-size:13px}
+.dpgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-top:6px}
+.dpcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;background:var(--panel);min-width:0}
+.dpcard:hover{border-color:#c5ccd8}
+.dpcard.locked{cursor:default}
+.dpts{margin-top:6px;display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.dpt{display:flex;gap:6px;align-items:center;width:100%;min-width:0}
+.dpn{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpx{border:0;background:none;padding:0 4px;font-size:11px;line-height:1;color:var(--warn);cursor:pointer}
 .profile h4{margin:12px 0 4px;font-size:13px}
 .profile select{width:auto}
 /* step 5: groups and bands */
@@ -282,7 +285,6 @@ table.fxgrid.small .fxl{display:block;margin:0 0 1px;padding:0 3px;line-height:1
 .fxl.mk-moved{outline:2px solid #6941c6;outline-offset:-1px}.fxl.mk-changed{outline:2px solid #1570ef;outline-offset:-1px}.fxl.mk-new{outline:2px dashed #067647;outline-offset:-1px}
 select[data-parent]{width:132px;min-width:132px}   /* a Class Parents box shows the whole name */
 .cpbadge{font-size:10px;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:0 6px;vertical-align:1px}   /* a staffed class card's badge: the school's word for form teachers */
-.gcard.locked{cursor:default}
 /* step 2: with the form teachers' boxes beside them, the first four boxes keep a readable width and the table scrolls sideways inside its wrapper */
 table.classtable{width:auto;min-width:100%}
 table.classtable td:nth-child(1) input{min-width:64px}
@@ -377,3 +379,34 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .sjfields label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted)}
 .sjwhy{margin:8px 0 0}
 .sjmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}
+/* step 4, Cards view: a column per department, a card per teacher (one in each of a teacher's two departments) */
+.tkchips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 12px}
+.tkdept[draggable=true]{cursor:grab;border:1px solid var(--line)}
+.tkcols{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-items:start}
+.tkcol{min-width:0;display:flex;flex-direction:column;gap:8px}
+.tkhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;border-bottom:2px solid var(--line);padding-bottom:4px}
+.tkhead b{color:var(--navy)}
+.tkcard{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel);cursor:pointer}
+.tkcard:hover{border-color:#c5ccd8}
+.tkcard.caution{background:#fff7e6}.tkcard.bad{background:var(--warn-bg)}
+.tkcard.picked{border-color:var(--accent)}
+.tkcard.over{border-color:var(--accent);background:#eef5ff}
+.tkcard.open{cursor:default;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.tktop{display:flex;gap:8px;align-items:center}
+.tktop input[type=checkbox]{margin:0;flex:0 0 auto}
+.tkav svg{display:block}
+.tkwho{flex:1;min-width:0;line-height:1.25}
+.tkname{border:0;background:transparent;padding:0;font-weight:600;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.tkdepts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tkx{border:0;background:transparent;padding:0 2px;font-size:11px;line-height:1;color:var(--muted);cursor:pointer}
+.tkx:hover{color:var(--warn)}
+.tkloadrow{display:flex;align-items:center;gap:8px;margin-top:6px}
+.tkload{flex:1;height:6px;background:var(--chip);border-radius:3px;overflow:hidden}
+.tkload i{display:block;height:100%;background:var(--accent)}
+.tkload.over i{background:var(--warn)}
+.tkcheck{margin-top:4px;color:var(--warn);font-size:12.5px}
+.tkfields{display:flex;flex-wrap:wrap;gap:6px 10px;margin-top:8px}
+.tkfields label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted)}
+.tkfigs{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:12.5px;color:var(--muted)}
+.tkfigs b{color:var(--ink)}
+.tkmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}

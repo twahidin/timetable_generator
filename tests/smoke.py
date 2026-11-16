@@ -220,7 +220,7 @@ def test_a_head_can_edit_only_provisional_teachers():
     code, j = _changes("H", v, [["set", "teachers", firm["_id"], "name", "Zed"]], who=h); assert code == 200 and len(j["refused"]) == 1
     code, j = _changes("H", v, [["set", "teachers", "newhire002", "provisional", "No"]], who=h); assert code == 200 and len(j["refused"]) == 1
     code, j = _changes("H", v, [["set", "teachers", "newhire002", "name", "Renamed"]], who=h); assert code == 200 and not j.get("refused")
-    code, j = _changes("H", v, [["merge", "teachers", firm["_id"], "can_teach", [{"levels": "All", "subject": "Qqq"}], []]], who=h); assert code == 200 and not j.get("refused")
+    code, j = _changes("H", v, [["merge", "teachers", firm["_id"], "can_teach", [{"levels": "All", "subject": "Qqq"}], []]], who=h); assert code == 200 and len(j["refused"]) == 1
     ts = {x["_id"]: x for x in c.get("/api/setup").get_json()["spec"]["teachers"]}
     assert ts[firm["_id"]]["name"] != "Zed" and ts["newhire002"]["provisional"] == "Yes" and ts["newhire002"]["name"] == "Renamed"
 
@@ -230,19 +230,42 @@ def test_a_head_can_add_and_fill_in_a_teacher_in_one_request():
     t = next(x for x in c.get("/api/setup").get_json()["spec"]["teachers"] if x["_id"] == "newhire003"); assert t["provisional"] == "Yes" and t["short"] == "BH"
 
 def test_a_heads_map_batch_is_applied_whole():
-    # one department-map session: a new teacher, a basket, a class split off a shared whole-class row, and a deployment
+    # one department-map session: a new teacher, a class split off a shared whole-class row, and a deployment
     rec = c.get("/api/setup").get_json(); v = rec["v"]; sp = rec["spec"]
     row = next(x for x in sp["lessons"] if not x.get("block") and x.get("subject"))
     ops = [["add", "teachers", {"_id": "maphire001", "name": "New Mathematics teacher 1", "dept": "MA"}, ""],
-           ["merge", "teachers", "maphire001", "can_teach", [{"subject": row["subject"], "levels": "All"}], []],
            ["set", "lessons", row["_id"], "classes", []],
            ["add", "lessons", {"_id": "mapsplit001", "level": row["level"], "subject": row["subject"], "block": None, "classes": row["classes"], "teachers": [], "students": row.get("students")}, row["_id"]],
            ["set", "lessons", "mapsplit001", "teachers", (row.get("teachers") or []) + ["New Mathematics teacher 1"]]]
     code, j = _changes("H", v, ops, who=h); assert code == 200 and not j.get("refused"), j
     now = c.get("/api/setup").get_json()["spec"]
-    t = next(x for x in now["teachers"] if x["_id"] == "maphire001"); assert t["provisional"] == "Yes" and t["can_teach"] == [{"subject": row["subject"], "levels": "All"}]
+    t = next(x for x in now["teachers"] if x["_id"] == "maphire001"); assert t["provisional"] == "Yes"
     L = {x["_id"]: x for x in now["lessons"]}
     assert L[row["_id"]]["classes"] == [] and L["mapsplit001"]["classes"] == row["classes"] and L["mapsplit001"]["teachers"][-1] == "New Mathematics teacher 1"
+
+def test_a_head_cannot_give_a_second_department():
+    v = c.get("/api/setup").get_json()["v"]
+    _changes("H", v, [["add", "teachers", {"_id": "newhire004", "name": "Two dept hire", "dept": "MA", "dept2": "SC"}, ""]], who=h)
+    rec = c.get("/api/setup").get_json(); v = rec["v"]
+    t = next(x for x in rec["spec"]["teachers"] if x["_id"] == "newhire004"); assert t["provisional"] == "Yes" and "dept2" not in t
+    code, j = _changes("H", v, [["set", "teachers", "newhire004", "dept2", "SC"]], who=h); assert code == 200 and len(j["refused"]) == 1
+    assert "dept2" not in next(x for x in c.get("/api/setup").get_json()["spec"]["teachers"] if x["_id"] == "newhire004")
+    code, j = _changes("C", v, [["set", "teachers", "newhire004", "dept2", "SC"]]); assert code == 200 and not j.get("refused")
+    assert next(x for x in c.get("/api/setup").get_json()["spec"]["teachers"] if x["_id"] == "newhire004")["dept2"] == "SC"
+
+def test_a_heads_old_can_teach_change_is_refused_and_the_rest_of_the_batch_lands():
+    rec = c.get("/api/setup").get_json(); v = rec["v"]; sp = rec["spec"]
+    row = next(x for x in sp["lessons"] if not x.get("block") and x.get("subject") and x.get("classes"))
+    ops = [["add", "teachers", {"_id": "maphire002", "name": "New Mathematics teacher 2", "dept": "MA"}, ""],
+           ["merge", "teachers", "maphire002", "can_teach", [{"subject": row["subject"], "levels": "All"}], []],
+           ["set", "lessons", row["_id"], "classes", []],
+           ["add", "lessons", {"_id": "mapsplit002", "level": row["level"], "subject": row["subject"], "block": None, "classes": row["classes"], "teachers": [], "students": row.get("students")}, row["_id"]],
+           ["set", "lessons", "mapsplit002", "teachers", (row.get("teachers") or []) + ["New Mathematics teacher 2"]]]
+    code, j = _changes("H", v, ops, who=h); assert code == 200 and len(j["refused"]) == 1, j
+    now = c.get("/api/setup").get_json()["spec"]
+    t = next(x for x in now["teachers"] if x["_id"] == "maphire002"); assert t["provisional"] == "Yes" and "can_teach" not in t
+    L = {x["_id"]: x for x in now["lessons"]}
+    assert L[row["_id"]]["classes"] == [] and L["mapsplit002"]["classes"] == row["classes"] and L["mapsplit002"]["teachers"][-1] == "New Mathematics teacher 2"
 
 def test_the_head_check_runs_on_the_setup_held_under_the_lock():
     rec = c.get("/api/setup").get_json(); v = rec["v"]; spec = rec["spec"]
@@ -536,8 +559,10 @@ def test_options_of_a_group_row_name_that_groups_key():
     buf = io.BytesIO(); wb.save(buf)
     assert c.post("/api/draft", data=dict(setup=(io.BytesIO(_setup_workbook(spec)), "setup.xlsx"), timetable=(io.BytesIO(buf.getvalue()), "timetable.xlsx"), replace="1"), content_type="multipart/form-data").status_code == 200
     j = c.get("/api/draft/options?id=1&group=1ML1").get_json(); assert j["key"] == "G:1ML1" and j["rooms"] is not None, j
-    assert all(x["teachers"] != ["Adeline Tan"] for x in j["teachers"]) and any(x["teachers"] != ["Charmaine Yeo"] for x in j["teachers"]), j["teachers"]
-    assert c.get("/api/draft/options?id=1&group=1CL1").get_json()["key"] == "G:1CL1" and c.get("/api/draft/options?id=1").get_json()["key"] == "G:1CL1"
+    # the offers are for the named group row: its own teacher is left out and the other group's teacher, of the same department, is offered
+    assert all(x["teachers"] != ["Charmaine Yeo"] for x in j["teachers"]) and any(x["teachers"] == ["Adeline Tan"] for x in j["teachers"]), j["teachers"]
+    j2 = c.get("/api/draft/options?id=1&group=1CL1").get_json(); assert j2["key"] == "G:1CL1" and c.get("/api/draft/options?id=1").get_json()["key"] == "G:1CL1"
+    assert all(x["teachers"] != ["Adeline Tan"] for x in j2["teachers"]) and any(x["teachers"] == ["Charmaine Yeo"] for x in j2["teachers"]), j2["teachers"]
 
 def _free_slot(lid, skip=()):   # the first slot of a lesson the lead is allowed to move it to, that is not skip
     return next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] in ("ok", "prefer") and not s["swap"] and (s["d"], s["p"]) not in skip)
@@ -1126,7 +1151,7 @@ def test_a_published_room_page_shows_its_equipment():
     assert len(export._parents_block(cv)) > 6 and "…" not in " ".join(export._parents_block(cv))   # form teachers are never cut, however many
     shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True); _cp_start()
 
-NEED_HEADS = {"test_a_head_cannot_change_a_staffed_lesson", "test_a_head_sends_a_malformed_lessons_op", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
+NEED_HEADS = {"test_a_head_cannot_give_a_second_department", "test_a_heads_old_can_teach_change_is_refused_and_the_rest_of_the_batch_lands", "test_a_head_cannot_change_a_staffed_lesson", "test_a_head_sends_a_malformed_lessons_op", "test_a_head_can_change_groups_but_not_classes", "test_a_heads_map_batch_is_applied_whole", "test_a_heads_refused_change_is_skipped_and_the_rest_applied", "test_a_heads_batch_that_is_all_refused_changes_nothing", "test_a_teacher_added_by_a_head_is_provisional",
               "test_a_head_can_edit_only_provisional_teachers", "test_a_head_can_add_and_fill_in_a_teacher_in_one_request", "test_the_head_check_runs_on_the_setup_held_under_the_lock", "test_a_head_cannot_download_or_publish_or_replace", "test_a_head_cannot_reach_the_helper_routes"}
 
 if __name__ == "__main__":
