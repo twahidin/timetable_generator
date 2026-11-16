@@ -495,7 +495,7 @@ def test_slots_say_what_a_push_would_take_out():
     L = [lesson(1, 0, 2, 2, [A], SUBJ, ENTIRE, [T[0]], level=LV), lesson(2, 1, 2, 2, [A], "Science", ENTIRE, [T[1]], level=LV), lesson(3, 3, 2, 2, [B], "Art", ENTIRE, [T[0]], level=LV)]
     m, sp = model_with(L); S = fixes.slots(m, sp, DAYS, 1); old = lambda s: {k: s[k] for k in ("d", "p", "state", "why", "swap", "also")}
     assert all(set(s) == {"d", "p", "state", "why", "swap", "also", "push", "beside"} for s in S)
-    plain = fixes.slots(m, sp, DAYS, 1, extras=False)   # the Fix card's, the helper's and the typed request's: no push, no beside, the rest the same
+    plain = fixes.slots(m, sp, DAYS, 1, extras=False)   # the old editor's callers (draft.options), the helper's and the typed request's: no push, no beside, the rest the same
     assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in plain) and plain == [old(s) for s in S]
     assert at(S, 1, 2)["push"] == dict(state="ok", why="", out=[dict(id=2, what=f"Science for {A}", classes=[A], groups=1)]) and old(at(S, 1, 2)) == dict(d=1, p=2, state="ok", why="", swap=2, also=[])
     assert at(S, 2, 2)["push"] is None and old(at(S, 2, 2)) == dict(d=2, p=2, state="ok", why="", swap=None, also=[])
@@ -529,6 +529,44 @@ def test_slots_of_a_pooled_lesson_are_places():
     assert at(S, 2, 2)["state"] == "no" and at(S, 2, 2)["why"] == f"{A} has {SUBJ} for {A} then." and at(S, 2, 2)["push"] == dict(state="ok", why="", out=[dict(id=1, what=f"{SUBJ} for {A}", classes=[A], groups=1)])
     assert at(S, 0, RECESS)["state"] == "na"
 
+def _thirty():
+    """thirty lessons of 1A, 1B and both, on the days and periods, many on top of each other (the draft need not be clean)"""
+    r = random.Random(11); L = []
+    for i in range(1, 31):
+        L.append(lesson(i, r.randrange(len(DAYS)), r.randrange(0, 6), r.choice((1, 1, 2)), ([A], [B], [A, B])[i % 3], (SUBJ, "Science", "Art")[i % 3], ENTIRE, [T[i % 5]], level=LV))
+    return L
+
+WHO = {"d", "p", "state", "why", "swap", "also", "there"}
+
+@t
+def test_who_is_at_each_place_and_place_judges_the_one_dropped_on():
+    L = _thirty(); pool = [lesson(40, 0, 2, 2, [A], "Music", ENTIRE, [T[7]], level=LV)]; m, sp = model_with(L); seen = 0
+    for lid in list(range(1, 31)) + [40]:
+        mine = [x for x in pool if x["id"] == lid]; pl = pool
+        full = fixes.slots(m, sp, DAYS, lid, pl); who = fixes.slots(m, sp, DAYS, lid, pl, extras="who"); plain = fixes.slots(m, sp, DAYS, lid, pl, extras=False)
+        assert len(full) == len(who) == len(plain) and all(set(w) == WHO for w in who) and all(set(x) == {"d", "p", "state", "why", "swap", "also"} for x in plain)
+        for s, w, q in zip(full, who, plain):
+            assert w["there"] == (s["push"] and s["push"]["out"]) and (w["d"], w["p"]) == (s["d"], s["p"])
+            if w["there"] is not None:
+                seen += 1; assert [sorted(o) for o in w["there"]] == [sorted(dict(id=x["id"], what=x["what"], classes=x["classes"], groups=x["groups"])) for x in s["push"]["out"]] and [o["id"] for o in w["there"]] == sorted(o["id"] for o in w["there"])
+            if mine and w["there"] is not None: assert (w["state"], w["why"], w["swap"], w["also"]) == ("na", "Another lesson is there.", None, []), w
+            elif mine: assert {k: w[k] for k in q} == q == bare(s)
+            else: assert {k: w[k] for k in q} == q   # a lesson on the timetable: exactly as without the extras
+            assert fixes.place(m, sp, DAYS, lid, s["d"], s["p"], pl) == s, (lid, s["d"], s["p"])
+    assert seen > 100, seen   # the places with a lesson of the same classes were really there
+
+@t
+def test_place_of_a_free_place_has_no_push_and_no_beside_and_outside_the_day_is_refused():
+    L = _thirty(); m, sp = model_with(L); S = fixes.slots(m, sp, DAYS, 1); free = next(s for s in S if s["push"] is None)
+    p = fixes.place(m, sp, DAYS, 1, free["d"], free["p"]); assert p == free and p["push"] is None and p["beside"] is None
+    for d, q in ((len(DAYS), 0), (-1, 0), (0, NP), (0, -1), ("0", 0), (0, 1.5), (True, 0)):
+        try: fixes.place(m, sp, DAYS, 1, d, q)
+        except ValueError as e: assert str(e) == "That is outside the day.", (d, q, e)
+        else: raise AssertionError((d, q))
+    try: fixes.place(m, sp, DAYS, 999, 0, 0)
+    except ValueError as e: assert str(e) == "There is no lesson with that id on the timetable."
+    else: raise AssertionError("did not raise")
+
 @t
 def test_marks():
     L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room=ROOM, level=LV), lesson(2, 0, 2, 1, [B], "Art", ENTIRE, [T[0]], room=ROOM, level=LV),
@@ -544,6 +582,24 @@ def test_marks():
     m["room_cap"] = dict(m["room_cap"], **{ROOM: 2}); b = fixes.Busy(m); assert fixes.marks(b, b.ids[1]) == ["teacher"]
     sp0, Bk = one_block(); Bk = [dict(x, d=0, p=2, teachers=[T[0]], room=ROOM) for x in Bk]; m, sp = model_with(Bk); b = fixes.Busy(m)
     assert fixes.marks(b, b.ids[7]) == []   # a band's own groups share a teacher and a room
+
+@t
+def test_no_teacher_and_no_room_are_never_a_clash():
+    L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room=ROOM, level=LV), lesson(2, 1, 2, 1, [B], "Art", ENTIRE, [T[1]], level=LV)]
+    m, sp = model_with(L); key = f"C:{A}:{SUBJ}"
+    j = fixes.judge(m, sp, DAYS, dict(kind="teacher", key=key, teachers=[])); assert j["state"] == "ok", j
+    j = fixes.judge(m, sp, DAYS, dict(kind="room", id=1, group=ENTIRE, room="")); assert j["state"] == "ok", j
+    rows = copy.deepcopy(m["lessons"]); name = verify._name(("C", A, SUBJ))
+    assert fixes.apply_one(rows, dict(kind="teacher", key=key, teachers=[]), sp, DAYS) == f"{name} now has no teacher; it had {T[0]}."
+    assert fixes.apply_one(rows, dict(kind="teacher", key=key, teachers=[T[2]]), sp, DAYS) == f"{name} is now taught by {T[2]}; it had no teacher."
+    assert fixes.apply_one(rows, dict(kind="teacher", key=key, teachers=[T[1]]), sp, DAYS) == f"{name} is now taught by {T[1]}, not {T[2]}."
+
+@t
+def test_marks_after_a_teacher_is_taken_away():
+    L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room=ROOM, level=LV)]
+    m, sp = model_with(L); rows = copy.deepcopy(m["lessons"])
+    fixes.apply_one(rows, dict(kind="teacher", key=f"C:{A}:{SUBJ}", teachers=[]), sp, DAYS)
+    b = fixes.Busy(dict(m, lessons=rows)); assert fixes.marks(b, b.ids[1]) == ["noteacher"], fixes.marks(b, b.ids[1])
 
 def _of_key(k, i, d, p, n_=1, who=None): return lesson(i, d, p, n_, [CLS], SUBJ, ENTIRE, list(who or TEACHERS), level=ROW["level"])
 PLAN = verify.planned_rows(SP)[("C", CLS, SUBJ)]["periods"]

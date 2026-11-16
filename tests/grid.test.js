@@ -61,42 +61,8 @@ t("table: a two-week school lays out one week at a time", () => {
   assert.strictEqual(e[0][0].d, 1); assert.strictEqual(e[0][0].lessons.length, 1); assert.strictEqual(e[0][0].code, "A");
 });
 
-t("lesson and same", () => {
-  const rs = [lz("b", "g1", 0, 0, 1), lz("b", "g2", 0, 0, 1)];
-  const p = payload(["Mon"], rs);
-  assert.strictEqual(Grid.lesson(p, "b", "g2"), rs[1]);
-  assert.strictEqual(Grid.lesson(p, "b", "g3"), null);
-  assert.strictEqual(Grid.lesson(p, "zz", "g1"), null);
-  assert.ok(Grid.same({ id: "b", group: "g1" }, { id: "b", group: "g1", d: 3 }));
-  assert.ok(!Grid.same({ id: "b", group: "g1" }, { id: "b", group: "g2" }));
-  assert.ok(!Grid.same({ id: "b", group: "g1" }, { id: "c", group: "g1" }));
-  assert.ok(!Grid.same(null, { id: "b", group: "g1" }));
-});
-
-t("slotAt, stateClass", () => {
-  const s = [{ d: 0, p: 1, state: "ok" }, { d: 1, p: 2, state: "no" }];
-  assert.strictEqual(Grid.slotAt(s, 1, 2), s[1]);
-  assert.strictEqual(Grid.slotAt(s, 1, 1), null);
-  assert.strictEqual(Grid.slotAt([], 0, 0), null);
+t("stateClass", () => {
   assert.deepStrictEqual(["ok", "prefer", "no", "na", "x", undefined].map(Grid.stateClass), ["ok", "prefer", "no", "na", "", ""]);
-});
-
-t("slotText: move or swap, with and without why", () => {
-  const days = ["Odd Mon", "Odd Tue"];
-  assert.strictEqual(Grid.slotText({ d: 1, p: 3, swap: null, why: null }, days), "Move to Odd Tue period 3");
-  assert.strictEqual(Grid.slotText({ d: 0, p: 0, swap: "x", why: "" }, days), "Swap with the lesson on Odd Mon period 0");
-  assert.strictEqual(Grid.slotText({ d: 0, p: 2, swap: "x", why: "Mr Tan is teaching then." }, days), "Swap with the lesson on Odd Mon period 2 — Mr Tan is teaching then.");
-  assert.strictEqual(Grid.slotText({ d: 0, p: 2, swap: null, why: "Not ideal." }, days), "Move to Odd Mon period 2 — Not ideal.");
-});
-
-t("sorted: ok, prefer, no; na dropped; by day then period; new list", () => {
-  const s = [{ d: 1, p: 0, state: "no" }, { d: 0, p: 4, state: "na" }, { d: 1, p: 2, state: "ok" }, { d: 0, p: 3, state: "prefer" }, { d: 0, p: 5, state: "ok" }, { d: 1, p: 1, state: "ok" }];
-  const copy = s.slice();
-  const out = Grid.sorted(s);
-  assert.deepStrictEqual(out.map(x => x.state + x.d + x.p), ["ok05", "ok11", "ok12", "prefer03", "no10"]);
-  assert.deepStrictEqual(s, copy);
-  assert.deepStrictEqual(Grid.sorted([{ d: 0, p: 0, state: "na" }]), []);
-  assert.deepStrictEqual(Grid.sorted([]), []);
 });
 
 t("table: a lesson starting under another's span joins its top cell", () => {
@@ -141,40 +107,6 @@ t("label: short subject, the group unless it is the whole class, teacher shorts;
   assert.strictEqual(Grid.fullLabel(lz(1, "1A", 0, 0, 1, { teachers: ["Mr Tan"] })), "Maths · 1A · Mr Tan · R1");
 });
 
-t("wanted: an answer counts only for the same view, name, lesson and add key", () => {
-  const a = { view: "class", name: "1A", id: 5, group: "G" };
-  assert.ok(Grid.wanted(a, { view: "class", name: "1A", id: 5, group: "G" }));
-  assert.ok(!Grid.wanted(a, { view: "class", name: "1A", id: 6, group: "G" }));
-  assert.ok(!Grid.wanted(a, { view: "class", name: "1B", id: 5, group: "G" }));
-  assert.ok(!Grid.wanted(a, { view: "class", name: "1A", key: "C:1A:Art" }));
-  assert.ok(!Grid.wanted(a, null));
-});
-
-t("fixFor: a slot with a swap posts the swap, any other slot a move", () => {
-  const sel = { id: 5, group: "Entire Class" };
-  assert.deepStrictEqual(Grid.fixFor(sel, { d: 2, p: 3, state: "ok", why: "", swap: 9, also: [] }), { kind: "swap", a: 5, b: 9 });
-  assert.deepStrictEqual(Grid.fixFor(sel, { d: 2, p: 3, state: "ok", why: "", swap: 0, also: [] }), { kind: "swap", a: 5, b: 0 });   // an id of 0 is still a swap
-  assert.deepStrictEqual(Grid.fixFor(sel, { d: 2, p: 3, state: "ok", why: "", swap: null, also: [] }), { kind: "move", id: 5, d: 2, p: 3 });
-  assert.deepStrictEqual(Grid.fixFor(sel, { d: 0, p: 0, state: "prefer" }), { kind: "move", id: 5, d: 0, p: 0 });
-});
-
-t("addFor: the key, the slot and the length", () => {
-  assert.deepStrictEqual(Grid.addFor("C:1A:Art", { d: 1, p: 4, state: "ok" }, 2), { kind: "add", key: "C:1A:Art", d: 1, p: 4, n: 2 });
-  assert.deepStrictEqual(Grid.addFor("G:1ML1", { d: 0, p: 0 }, "1"), { kind: "add", key: "G:1ML1", d: 0, p: 0, n: 1 });
-});
-
-t("deleteFor: the group is posted when the lesson has more than one row in the grid, or is a block", () => {
-  const one = payload(["Mon"], [lz(3, "Entire Class", 0, 1, 1), lz(4, "1MAA1", 0, 2, 1), lz(4, "1MAA2", 0, 2, 1), lz(6, "1ART1", 0, 3, 1, { block: "Art band" })]);
-  assert.deepStrictEqual(Grid.deleteFor(one, { id: 3, group: "Entire Class" }), { kind: "delete", id: 3 });
-  assert.deepStrictEqual(Grid.deleteFor(one, { id: 4, group: "1MAA2" }), { kind: "delete", id: 4, group: "1MAA2" });   // two rows and no block
-  assert.deepStrictEqual(Grid.deleteFor(one, { id: 6, group: "1ART1" }), { kind: "delete", id: 6, group: "1ART1" });
-});
-
-t("slotText: a swap slot names the swap", () => {
-  assert.strictEqual(Grid.slotText({ d: 1, p: 2, swap: 7, why: "" }, ["Mon", "Tue"]), "Swap with the lesson on Tue period 2");
-  assert.strictEqual(Grid.slotText({ d: 0, p: 2, swap: null, why: "Not ideal." }, ["Mon", "Tue"]), "Move to Mon period 2 — Not ideal.");
-});
-
 t("markClass and wasText: the mark, and where a moved row was", () => {
   const days = ["Mon", "Tue"];
   assert.strictEqual(Grid.markClass({ mark: "moved" }), "moved");
@@ -188,32 +120,6 @@ t("markClass and wasText: the mark, and where a moved row was", () => {
   assert.strictEqual(Grid.wasText({ mark: "moved" }, days), "");   // a mark but no was
   assert.strictEqual(Grid.wasText({ mark: "changed", was: { d: 1, p: 3 } }, days), "");
   assert.strictEqual(Grid.wasText({ mark: "" }, days), "");
-});
-
-t("others: a class view drops the shown class, a teacher view keeps all", () => {
-  const pv = { classes: [{ view: "class", name: "1A" }, { view: "class", name: "1B" }, { view: "class", name: "2C" }] };
-  assert.deepStrictEqual(Grid.others(pv, { view: "class", name: "1B" }).map(c => c.name), ["1A", "2C"]);
-  assert.deepStrictEqual(Grid.others(pv, { view: "teacher", name: "1B" }).map(c => c.name), ["1A", "1B", "2C"]);
-  assert.deepStrictEqual(Grid.others(pv, { view: "class", name: "9Z" }).map(c => c.name), ["1A", "1B", "2C"]);
-  assert.deepStrictEqual(Grid.others({ classes: [] }, { view: "class", name: "1A" }), []);
-  assert.deepStrictEqual(Grid.others({}, { view: "teacher", name: "Mr Tan" }), []);
-  assert.deepStrictEqual(Grid.others(null, { view: "class", name: "1A" }), []);
-});
-
-t("previewFor: the one fix a click on a slot posts, as a list", () => {
-  const sel = { id: 5, group: "Entire Class" };
-  assert.deepStrictEqual(Grid.previewFor(sel, { d: 2, p: 3, swap: null }), [{ kind: "move", id: 5, d: 2, p: 3 }]);
-  assert.deepStrictEqual(Grid.previewFor(sel, { d: 2, p: 3, swap: 9 }), [{ kind: "swap", a: 5, b: 9 }]);
-});
-
-t("marks: the marked rows the main grid can show, by id and group", () => {
-  const pv = { classes: [
-    { view: "class", name: "1A", lessons: [{ id: 1, group: "Entire Class", mark: "moved" }, { id: 2, group: "Entire Class", mark: "" }] },
-    { view: "class", name: "1B", lessons: [{ id: 3, group: "G1", mark: "changed" }, { id: 4, group: "Entire Class", mark: "new" }] }] };
-  assert.deepStrictEqual(Object.keys(Grid.marks(pv, { view: "class", name: "1A" })), ["1|Entire Class"]);
-  assert.deepStrictEqual(Object.keys(Grid.marks(pv, { view: "class", name: "1B" })), ["3|G1", "4|Entire Class"]);
-  assert.deepStrictEqual(Object.keys(Grid.marks(pv, { view: "teacher", name: "Mr Tan" })), ["1|Entire Class", "3|G1", "4|Entire Class"]);
-  assert.deepStrictEqual(Grid.marks(null, { view: "class", name: "1A" }), {});
 });
 
 console.log(`${n} cases passed`);

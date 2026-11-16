@@ -61,8 +61,8 @@ def a_lesson_with_no_teacher_is_not_offered_moves():
     m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [], level=LV), lesson(2, 1, 3, 1, [A], "English", ENTIRE, [T], level=LV), lesson(3, 1, 3, 1, [B], "English", ENTIRE, [T], level=LV)])
     m["checks"] = export.check_model(m); ws = verify.clashes(m)
     nt = next(w for w in ws if w["crit"] == "noteacher"); tc = next(w for w in ws if w["crit"] == "teacher")
-    assert nt["where"]["id"] == 1 and helper.involved(m, nt) == [1]   # the place keeps the lesson, so the Fix card selects it
-    out = helper.suggest(m, sp, DAYS, nt); assert out == dict(suggestions=[], none="This lesson has no teacher. Pick one under Change the teacher.", blocked=[]), out
+    assert nt["where"]["id"] == 1 and helper.involved(m, nt) == [1]   # the place keeps the lesson, so the helper's Show me selects it
+    out = helper.suggest(m, sp, DAYS, nt); assert out == dict(suggestions=[], none="This lesson has no teacher. Pick one on its Lesson tab.", blocked=[]), out
     assert helper.suggest(m, sp, DAYS, tc)["suggestions"]   # a teacher clash on the same model still has ways
 
 @t
@@ -107,7 +107,7 @@ def nothing_to_suggest_is_a_sentence():                         # Review Focus 4
     for w in (dict(key="typed:1:none", kind="typed", text="x", where=None), dict(key="choice:x", kind="choice", text="x", where=None),
               dict(key="clash:Room over capacity: R1 on Mon period 2.", kind="clash", text="x", where=None), dict(key="rule:0:1A|Maths|0|0", kind="rule", text="x", where=dict(cls="1A", day="Mon", period=0, id=999, row="Entire Class"))):
         out = helper.suggest(m, sp, DAYS, w); assert out == dict(suggestions=[], none=helper.NOTHING, blocked=[]), (w, out)
-    assert helper.NOTHING == "The app has no suggestion for this one. Select a lesson on the grid to see where it can go."
+    assert helper.NOTHING == "The app has no suggestion for this one. Select its lesson on the board to see where it can go."
 
 @t
 def blocked_when_nothing_passes():
@@ -134,7 +134,7 @@ def a_new_difference_is_not_settling_even_when_another_goes():   # review round 
 def the_none_sentences_and_a_row_with_no_teacher():   # review round 1
     m, sp = model_with([lesson(1, 0, 1, 1, [A], "Mathematics", ENTIRE, ["Michelle Goh"], level=LV)], rules=[rule(A, "Not in periods", 1, 10)])
     w = next(w for w in verify.rules(m, sp)[0]); assert helper.candidates(m, sp, DAYS, w)   # every move still breaks it: nothing settles, nothing is refused
-    assert helper.suggest(m, sp, DAYS, w) == dict(suggestions=[], none="The app found no fix that settles this. Select a lesson on the grid to see where it can go.", blocked=[])
+    assert helper.suggest(m, sp, DAYS, w) == dict(suggestions=[], none="The app found no fix that settles this. Select its lesson on the board to see where it can go.", blocked=[])
     rows = [dict(x, teachers=[]) if x["classes"] == [A] and x["subject"] == "Mathematics" and x["code"] == ENTIRE else x for x in SP["lessons"]]
     m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, ["Sabrina Koh"], level=LV)], lessons=rows)
     w = one_of(verify.deployment(m, sp), "1A:Mathematics:teachers")
@@ -158,7 +158,7 @@ def nothing_refused_shows_is_not_breaking_a_rule():   # carried from Task 1's re
     m, sp = model_with(L, rules=[rule(A, "Not in periods", 1, 10)])   # every move is refused (a clash) and would not settle it anyway
     w = next(w for w in verify.rules(m, sp)[0] if w["where"]["id"] == 1)
     assert helper.suggest(m, sp, DAYS, w) == dict(suggestions=[], none=helper.NO_FIX, blocked=[])
-    assert helper.NO_FIX == "The app found no fix that settles this. Select a lesson on the grid to see where it can go."
+    assert helper.NO_FIX == "The app found no fix that settles this. Select its lesson on the board to see where it can go."
 
 # a frame for the pairs: lesson 1 of 1A (Sabrina Koh) sits in period 0, which a Must rule forbids; 1A's other lesson time is
 # full of Art except S and a_free; Sabrina Koh teaches lesson 2 (1B) at S; 1B's lesson time is full of Music except S and b_free
