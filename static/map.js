@@ -8,8 +8,6 @@ var DeptMap = (function () {
   function rows(spec, k) { return Array.isArray(spec[k]) ? spec[k] : []; }
   function names(row) { return (row.teachers || []).filter(Boolean); }
   function subjectOf(spec, name) { return rows(spec, "subjects").find(function (s) { return s.subject === name; }) || null; }
-  function hasSubject(t, subject) { return (t.can_teach || []).some(function (c) { return c && c.subject === subject; }); }
-  function anySubject(t) { return (t.can_teach || []).some(function (c) { return c && c.subject; }); }
 
   /* each teacher's load: periods deployed (info[i].tp per row naming them) plus other duties, against the allowance */
   function loads(spec, info) {
@@ -40,9 +38,11 @@ var DeptMap = (function () {
     return out;
   }
 
+  /* those of idxs named on no lesson row */
   function unplaced(spec, idxs) {
-    var T = rows(spec, "teachers");
-    return (idxs || []).filter(function (i) { return T[i] && !anySubject(T[i]); });
+    var T = rows(spec, "teachers"), on = {};
+    rows(spec, "lessons").forEach(function (x) { if (x) names(x).forEach(function (nm) { on[nm] = true; }); });
+    return (idxs || []).filter(function (i) { return T[i] && !on[T[i].name]; });
   }
 
   /* teachers in neither department of the page whose name or short name contains q (at most 8) */
@@ -56,16 +56,7 @@ var DeptMap = (function () {
     return out;
   }
 
-  /* one basket per subject of the department: every teacher (any department) who can teach it */
-  function baskets(spec, dept) {
-    var T = rows(spec, "teachers");
-    return deptSubjects(spec, dept).map(function (s) {
-      var who = []; T.forEach(function (t, i) { if (t && hasSubject(t, s)) who.push(i); });
-      return { subject: s, teachers: who };
-    });
-  }
-
-  /* the cards of the right-hand column: one class of a whole-class row, a group, or a band with its groups */
+  /* the cards of one kind (the profile's "Teaches" list uses them): one class of a whole-class row, a group, or a band with its groups */
   function cards(spec, info, dept, tab, level) {
     var subs = deptSubjects(spec, dept), L = rows(spec, "lessons"), lv = (spec.school || {}).levels || [];
     var mine = function (x) { return x && x.subject && subs.indexOf(x.subject) >= 0 && (!level || x.level === level); };
@@ -105,7 +96,8 @@ var DeptMap = (function () {
 
   /* the department's page: for each level, its subjects in step 3's order (a subject's class cards in the class list's order,
      then its groups in no band), and each band as a lane at the place of the first of its subjects; every card of cards() once.
-     A band sits in the level of its first group. A subject with only band groups has no section of its own. */
+     A band gets one lane in each level where this department has groups of it, holding that level's groups; its "twice" is worked
+     out over all its groups of this department (every level) and given to each lane. A subject with only band groups has no section of its own. */
   function page(spec, info, dept, level) {
     info = info || [];
     var subs = deptSubjects(spec, dept), L = rows(spec, "lessons"), lv = (spec.school || {}).levels || [];
@@ -115,10 +107,16 @@ var DeptMap = (function () {
     var classIx = function (c) { for (var k = 0; k < classes.length; k++) if (classes[k] && classes[k]["class"] === c) return k; return classes.length; };
     var size = function (c) { var k = classIx(c); return k < classes.length ? count(classes[k].size) : null; };
     var bandIx = function (name) { for (var k = 0; k < bands.length; k++) if (bands[k] && bands[k].block && bands[k].block === name) return k; return -1; };
-    var byLevel = {}, seen = [];
+    var byLevel = {}, seen = [], bandCount = {}, bandTwice = {};
     var slot = function (l) { if (!byLevel[l]) { byLevel[l] = { classes: [], loose: [], lanes: {} }; seen.push(l); } return byLevel[l]; };
     L.forEach(function (x, i) {
-      if (!x || !x.subject || subs.indexOf(x.subject) < 0 || (level && x.level !== level)) return;
+      if (!x || !x.subject || subs.indexOf(x.subject) < 0) return;
+      var gb = x.block ? bandIx(x.block) : -1;
+      if (gb >= 0) names(x).forEach(function (nm) {   // every level, whatever the level box says
+        var c = bandCount[gb] = bandCount[gb] || {}; c[nm] = (c[nm] || 0) + 1;
+        if (c[nm] === 2) (bandTwice[gb] = bandTwice[gb] || []).push(nm);
+      });
+      if (level && x.level !== level) return;
       var at = slot(lvl(x));
       if (!x.block && !x.code_override) {
         if (!Array.isArray(x.classes)) return;
@@ -145,12 +143,9 @@ var DeptMap = (function () {
         if (cards.length) parts.push({ place: place, rank: 0, sub: 0, section: { kind: "subject", subject: sub, cards: cards } });
       });
       Object.keys(at.lanes).forEach(function (k) {
-        var gs = at.lanes[k], bi = Number(k), first = subs.length, counts = {}, twice = [];
-        gs.forEach(function (g) {
-          first = Math.min(first, subs.indexOf(g.subject));
-          g.teachers.forEach(function (nm) { counts[nm] = (counts[nm] || 0) + 1; if (counts[nm] === 2) twice.push(nm); });
-        });
-        parts.push({ place: first, rank: 1, sub: bi, section: { kind: "band", bi: bi, title: bands[bi].block, groups: gs, twice: twice } });
+        var gs = at.lanes[k], bi = Number(k), first = subs.length;
+        gs.forEach(function (g) { first = Math.min(first, subs.indexOf(g.subject)); });
+        parts.push({ place: first, rank: 1, sub: bi, section: { kind: "band", bi: bi, title: bands[bi].block, groups: gs, twice: (bandTwice[bi] || []).slice() } });
       });
       parts.sort(function (a, b) { return a.place - b.place || a.rank - b.rank || a.sub - b.sub; });
       return { level: o[0], sections: parts.map(function (p) { return p.section; }) };
@@ -160,12 +155,6 @@ var DeptMap = (function () {
   /* ---- what the map writes (the caller saves afterwards) */
   var MAX = 3;   // teachers on one card (Teacher 1 to 3); a staffed lesson may hold more (opts.max)
   var NUM = ["zero", "one", "two", "three", "four", "five", "six"];
-
-  function canTeach(t, subject, level, bandOf) {
-    return !!t && (t.can_teach || []).some(function (c) {
-      return c && c.subject === subject && (!c.levels || c.levels === "All" || c.levels === level || c.levels === (bandOf || {})[level]);
-    });
-  }
 
   /* a class card of a row that lists several classes: that class becomes a row of its own (a copy without the _id, which
      the sync gives it on save); returns the row the change goes on */
@@ -179,10 +168,10 @@ var DeptMap = (function () {
     return { row: copy, split: true };
   }
 
-  /* opts.max: the most teachers on the card (default MAX); opts.exempt(name): lets that teacher on without the subject in Can teach */
+  /* opts.max: the most teachers on the card (default MAX). A teacher is refused only when the card would hold too many */
   function deploy(spec, card, idxs, opts) {
     opts = opts || {};
-    var max = Number(opts.max) || MAX, exempt = opts.exempt || function () { return false; };
+    var max = Number(opts.max) || MAX;
     var T = rows(spec, "teachers"), x = rows(spec, "lessons")[card.li];
     var out = { placed: [], already: [], refused: [], split: false };
     if (!x) return out;
@@ -191,28 +180,17 @@ var DeptMap = (function () {
     (idxs || []).forEach(function (i) {
       var t = T[i]; if (!t || !t.name) return;
       if (on.indexOf(t.name) >= 0) { out.already.push(t.name); return; }
-      if (!hasSubject(t, x.subject) && !exempt(t.name) && !opts.addToBasket) { out.refused.push({ name: t.name, why: t.name + " is not in the " + x.subject + " basket." }); return; }
       left.push(t);
     });
     if (!left.length) return out;
-    if (on.length + left.length > max) {   // judged before anyone joins a basket, so a refused drop changes nothing
+    if (on.length + left.length > max) {   // a refused drop changes nothing
       var why = title + " would have " + (on.length + left.length) + " teachers; " + (NUM[max] || max) + " is the most.";
       left.forEach(function (t) { out.refused.push({ name: t.name, why: why }); });
       return out;
     }
-    left.forEach(function (t) { if (!hasSubject(t, x.subject) && !exempt(t.name)) t.can_teach = (t.can_teach || []).concat([{ subject: x.subject, levels: "All" }]); });
     var r = rowFor(spec, card); out.split = r.split;
     out.placed = left.map(function (t) { return t.name; });
     r.row.teachers = names(r.row).concat(out.placed);
-    return out;
-  }
-
-  /* who, of these teachers, is not in the card's subject's basket (and not on the card already): asked about before any deploy */
-  function needBasket(spec, card, idxs, opts) {
-    var exempt = (opts && opts.exempt) || function () { return false; }, T = rows(spec, "teachers"), x = rows(spec, "lessons")[card.li], out = [];
-    if (!x) return out;
-    var on = names(x);
-    (idxs || []).forEach(function (i) { var t = T[i]; if (t && t.name && on.indexOf(t.name) < 0 && !hasSubject(t, x.subject) && !exempt(t.name)) out.push(t.name); });
     return out;
   }
 
@@ -224,24 +202,6 @@ var DeptMap = (function () {
     return true;
   }
 
-  function addToBasket(spec, idxs, subject) {
-    var T = rows(spec, "teachers"), n = 0;
-    (idxs || []).forEach(function (i) {
-      var t = T[i]; if (!t || hasSubject(t, subject)) return;
-      t.can_teach = (t.can_teach || []).concat([{ subject: subject, levels: "All" }]); n++;
-    });
-    return n;
-  }
-
-  /* takes the subject off the teacher; the rows of that subject still naming them are counted, not changed */
-  function removeFromBasket(spec, idx, subject) {
-    var t = rows(spec, "teachers")[idx], n = 0;
-    if (!t) return { lessons: 0 };
-    t.can_teach = (t.can_teach || []).filter(function (c) { return !(c && c.subject === subject); });
-    rows(spec, "lessons").forEach(function (x) { if (x.subject === subject && names(x).indexOf(t.name) >= 0) n++; });
-    return { lessons: n };
-  }
-
   function newTeacher(spec, fields, roles, provisional) {
     var f = fields || {}, name = String(f.name || "").trim().replace(/\s+/g, " ");
     if (!name) return { error: "Give the teacher a name." };
@@ -251,7 +211,7 @@ var DeptMap = (function () {
     var allow = Number(f.allowance) || (role && Number(role.allowance)) || null;
     if (!Array.isArray(spec.teachers)) spec.teachers = [];
     spec.teachers.push({ name: name, short: String(f.short || "").trim() || name.split(" ")[0], dept: f.dept || "", role: f.role || "",
-      allowance: allow, provisional: provisional ? "Yes" : "No", can_teach: [] });
+      allowance: allow, provisional: provisional ? "Yes" : "No" });
     return { i: spec.teachers.length - 1 };
   }
 
@@ -262,8 +222,8 @@ var DeptMap = (function () {
 
   return {
     loads: loads, deptSubjects: deptSubjects, roster: roster, unplaced: unplaced, search: search,
-    baskets: baskets, staffRoom: unplaced, cards: cards, page: page, prune: prune, subjectOf: subjectOf,
-    MAX: MAX, canTeach: canTeach, needBasket: needBasket, deploy: deploy, undeploy: undeploy, addToBasket: addToBasket, removeFromBasket: removeFromBasket, newTeacher: newTeacher
+    cards: cards, page: page, prune: prune, subjectOf: subjectOf,
+    MAX: MAX, deploy: deploy, undeploy: undeploy, newTeacher: newTeacher
   };
 })();
 if (typeof module !== "undefined") module.exports = DeptMap;

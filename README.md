@@ -24,7 +24,7 @@ remembered in your browser. The **Roles** card is below the teachers: the teache
 have a **second department** beside their own (the committee gives it, and a head cannot): drag a department chip from
 the row above the columns onto a teacher's card, or pick it in the **Second department** box (in the open card or in the
 Table), or take it off with the ✕ on its chip. They then have a card in both departments' columns and are on both
-departments' pages on step 5. A click on a card opens it in place to change it. A stored Can teach list from an older setup
+departments' pages on step 5. A click on a card opens it in place to change it. A stored list of subjects a teacher could teach, from an older setup,
 stays in the file untouched; the page no longer shows or changes it. Step 1 shows the rooms two ways, **Blocks** (a panel per block, a row per floor, a tile per room) and **Table**; the choice is remembered in your browser. A room can carry **Equipment** and a **Configuration**, two plain notes that are only shown (in the table, on the Blocks tile, in the workbook and on the room's page) and that no check reads. On Blocks, a click on a room opens it to change; **+ Room** on a floor, **+ Floor** on a block and **+ Block** add a room (each in one step you can undo), and **New kind…** in a room's Kind box adds a kind to the school's list.
 
 **Form teachers.** A class can have form teachers, who take its lessons together. **School & day** has two settings for
@@ -131,34 +131,31 @@ keeps, and Prefer rules bend when they must. The Excel workbook lists what was g
 (teachers over their allowance, each Prefer rule not kept, Max periods in a row), and its Teacher load sheet shows other
 duties and a red "Over allowance by" column.
 
-**The department map (step 5).** The step opens on a map with three columns; **Table** at the top switches to the
+**The department map (step 5).** The step opens on the department's page; **Table** at the top switches to the
 15-column table of the same rows, for bulk edits, bands and new groups (the choice is remembered in the browser).
-On the left, the **roster**: a department switcher (every head sees every department), then its teachers with a tick
-box, avatar, role and a load bar (periods deployed plus other duties against the allowance; red when over). **Select
-all** (it shows a dash when only some are ticked), **Deselect all** and **Not placed yet** (ticks the teachers with no
-subject) sit above the list; shift-click ticks a run. The search box finds a teacher on the roster, and lists matching
-teachers of other departments with **+ Add to roster**, for a teacher who teaches a subject outside their own
-department. **+ New teacher** adds a hire or a post still to be filled: name (or a placeholder such as "New Mathematics
+At the top, a strip: a department switcher (every head sees every department), the number of teachers and how many are
+ticked, **Select all** (it shows a dash when only some are ticked), **Deselect all** and **No lessons yet** (ticks the
+teachers who are on no lesson row), and below them the department's teachers, home or second department, as chips that
+wrap: a tick box, avatar, name, a load bar (periods deployed plus other duties against the allowance; red when over)
+and the figures. A teacher whose home department is another one carries that department as a tag, and a teacher a head
+added carries "provisional" until the committee confirms them on step 4. Shift-click ticks a run. The search box finds
+a teacher in the strip, and lists matching teachers of other departments under **Others** with **+ Add**, to place a
+teacher who teaches a subject outside their own department; adding them to the page does not change their departments.
+**+ New teacher** adds a hire or a post still to be filled: name (or a placeholder such as "New Mathematics
 teacher 1"), short name, department, role and allowance (the role's guide when left empty); a head's new teacher is
 provisional until the committee confirms them on step 4.
-In the middle, **Can teach**: a basket per subject of the department with the avatars of everyone able to teach it (each with the teacher's short
-name under it, the full name on hover; the cards on the right show the names the same way), from
-any department, and a **Staff room** for roster teachers with no subject yet. Tick teachers and click a basket, or drag
-them in (dragging a ticked teacher drags every ticked teacher). The ✕ on an avatar in a basket takes the subject off
-them; dropping teachers on the staff room takes them out of every basket of the department. Either asks first, and says
-how many lesson rows still name them for it: those rows are not changed, and Things to fix flags them.
-On the right, **where they teach**: tabs **Classes** (one card per class for a whole-class lesson), **Teaching groups**
-and **Bands** (a lane per band, its groups inside; a teacher on two groups of one band is flagged on the lane), filtered
-to the department's subjects, with a level filter. Each card shows the code, subject, level, periods and up to three
-teachers. Click a card, or drop teachers on it, to deploy the ticked teachers: deploying **adds** (co-teaching), never
-replaces; a card that would go past three says so and takes none; the ✕ on an avatar takes that teacher off. A teacher
-must be in the subject's basket first: dropping one who is not asks whether to add them to the basket and place them. On
-Classes, a whole-class row that lists several classes shows one card per class, and changing one class's teachers moves
-that class to a row of its own in the table (the solver already treats each class's lesson separately). Every click or
-drop is one change: one Undo takes it back.
+Below the strip, **where they teach**: a level box ("All levels"), then each level as a section, and inside it each of
+the department's subjects in step 3's order, with a card for each class of a whole-class lesson and for each teaching
+group that is in no band. A band is a lane under its name, its groups inside (a teacher on two groups of one band is
+flagged on the lane). Each card shows the class or the group's code, its students and periods, and each teacher on a
+line of their own, with a ✕. Click a card, or drop teachers on it, to place the ticked teachers (dragging a ticked
+teacher drags every ticked teacher): placing **adds** (co-teaching), never replaces; a card that would go past three
+says so and takes none; the ✕ takes that teacher off. A whole-class row that lists several classes shows one card
+per class, and changing one class's teachers moves that class to a row of its own in the table (the solver already
+treats each class's lesson separately). Every click or drop is one change: one Undo takes it back.
 Clicking any avatar (not its tick box) opens the teacher's **profile** in place of the cards: avatar with **New look**,
-name, role, department, load against allowance, **Can teach** with the levels (editable there, ✕ to remove a subject)
-and **Teaches** (every class and group they are on, ✕ to take them off). Details are changed on step 4.
+name, role, department, load against allowance and **Teaches** (every class and group they are on, ✕ to take them
+off). Details are changed on step 4.
 
 **Groups and bands (step 5).** The second view, **Groups and bands**, is where teaching groups and bands are made.
 On the left, **New teaching group**: level, G-level (filters the subjects), subject, band (none = a whole-class
@@ -184,14 +181,15 @@ workbook carries it in the Lesson pattern column on the Lessons sheet.
 
 **Deploying in the table view.** On the same view, filter the teaching groups by level, subject or teacher, tick rows (shift-click
 for a run), pick a teacher and **Make Teacher 1**, **Add as co-teacher** or **Take off** for all of them at once. The bar shows
-the teacher's load now and with those groups; groups they are not set to teach, or two groups of one band, are flagged.
+the teacher's load now and with those groups; two groups of one band are flagged. In the teacher boxes and the bar's box,
+the teachers of the subject's department (home or second) come first, then the others.
 On step 4 (Teachers), filter by department (either department of a teacher counts), tick teachers and set their department,
 role or allowance together.
 A row may name up to three teachers (co-teaching), each blocked for the lesson and counted the full periods.
 A lesson the form teachers take may hold as many as the school's most (never fewer than three). On the map its card shows
 the school's word as a badge, and the table row shows "Changed by hand" when it applies. The committee can still
 change one such lesson by hand; it is then marked "Changed by hand" and no longer follows step 2 until **Back to the
-Form teachers** puts them on again. A form teacher needs no Can teach entry for their own class's lesson. Heads of
+Form teachers** puts them on again. Heads of
 department see these lessons and cannot change them.
 
 **The teacher list.** On step 4 the committee can upload the school's teacher list. In a practice copy (the sample
@@ -209,7 +207,7 @@ list twice (that row is left out), and says if it cannot find a name column. A n
 is not in the list ("Tan Wei-Ming" and "Tan Wei Ming") gets a warning: if they are one person, make the two names
 match and read the list again, or Apply adds a second teacher. A role or department that is not yet on the setup is
 listed, with **Add these roles** or **Add these departments**. **Apply** adds and updates in one step (one Undo takes
-it back); an updated teacher keeps their lessons and what they can teach. Before a list that makes 10 or more
+it back); an updated teacher keeps their lessons. Before a list that makes 10 or more
 changes to the teachers, the server keeps a restore point (**Restore an earlier copy**, on step 7, brings it back).
 Teachers who are not in the list are never removed by Apply: they are listed as "not in this list", and **Remove**
 asks first, saying how many lessons on step 5 name them.
