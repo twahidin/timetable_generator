@@ -13,6 +13,8 @@ APPEND = "(end)"   # an add op's "after": not a row id, so sync.apply puts the r
 
 CRITICAL = ("teacher", "class", "room", "break", "noteacher")   # the kinds of mistake that stop publishing; a warning has crit ""
 
+CRIT_WORDS = {"teacher": "Teacher in two places", "class": "Class clash", "room": "Room used twice", "break": "In a break or outside the day", "noteacher": "No teacher"}   # what the agent's check prints for each
+
 def warning(key, kind, text, strength="Must", group="School", where=None, sides=None, ops=None, crit=""):
     """one warning in the shape the draft page lists; crit is "" or one of CRITICAL"""
     return dict(key=key, kind=kind, text=text, strength=strength, group=group, where=where, sides=sides, ops=ops, crit=crit)
@@ -115,11 +117,12 @@ def deployment(m, spec):
 def clashes(m):
     """the independent checks' problems as warnings, without the period-count lines (the comparison owns those)"""
     out, own = [], set(m.get("choice_problems") or ())   # the second-choice sentences are listed as choice warnings
+    places = {t: list(p) for t, p in (m["checks"].get("where") or {}).items()}   # a line's places in order; lines that read the same take them one each
     for text in m["checks"]["problems"]:
         if text.endswith("planned.") or text in own: continue
         who = re.match(r"(Teacher double-booked|Class clash): (.+?) on ", text)   # whose week the Fix the timetable button opens
         where = (dict(teacher=who.group(2)) if who.group(1).startswith("Teacher") else dict(cls=who.group(2))) if who else None
-        at = (m["checks"].get("where") or {}).get(text)   # a lesson in a break, a recess or past the day: the lesson's first class and day
+        at = places[text].pop(0) if places.get(text) else None   # a lesson in a break, a recess, past the day or in a full room: its first class, day, period, id and row
         if at: where = dict(at)
         out.append(warning("clash:" + text, "clash", text, group=at["cls"] if at else who.group(2) if who else "School", where=where, crit=crit_of(text)))
     seen = set()
@@ -127,7 +130,8 @@ def clashes(m):
         key = f"clash:noteacher:{x['id']}:{x['group']}"
         if x["teachers"] or key in seen: continue
         seen.add(key); c = (x["classes"] or ["School"])[0]
-        out.append(warning(key, "clash", f"No teacher: {_what(x)} on {m['days'][x['d']]} period {x['p']}.", group=c, where=dict(cls=c) if x["classes"] else None, crit="noteacher"))
+        out.append(warning(key, "clash", f"No teacher: {_what(x)} on {m['days'][x['d']]} period {x['p']}.", group=c,
+                           where=dict(cls=c, day=m["days"][x["d"]], period=x["p"], id=x["id"], row=x["group"]) if x["classes"] else None, crit="noteacher"))
     return out
 
 

@@ -71,7 +71,7 @@ subject-based banding) schools, and for any school that fills the same template.
    after-school slots and why, what was compromised (teachers over their allowance, Prefer rules bent, Max periods in a
    row: the solve result lists them), any notes, and the Rule report for every typed rule. Give the person the Excel workbook, the
    HTML page, the four PDF books, the zip of single PDFs and the timetable database (.sqlite) for other systems; do not paste timetables into the chat.
-   If the school runs the timetable app, tell them they can publish it there: on step 8, **Upload and edit**, upload the .sqlite (or the timetable workbook with the setup workbook), look at what the check found, then publish on step 9, **Publish**. The app will not publish while a critical mistake remains: a lesson with no teacher, a teacher or a whole class in two lessons at once, a room holding more lessons than it takes, or a lesson in a break or outside the day. Run `python -m ttgen check-timetable` before handing back and settle these first.
+   If the school runs the timetable app, tell them they can publish it there: on step 8, **Upload and edit**, upload the .sqlite (or the timetable workbook with the setup workbook), look at what the check found, then publish on step 9, **Publish**. The app will not publish while a critical mistake remains: a lesson with no teacher, a teacher or a whole class in two lessons at once, a room holding more lessons than it takes, or a lesson in a break or outside the day. Run `python -m ttgen check-timetable` before handing back and settle these first: the lines it marks `[critical: ...]` are the ones the app will not publish with.
 
 ## Outputs
 

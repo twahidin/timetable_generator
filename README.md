@@ -118,7 +118,7 @@ is not on step 3, and a named subject the class has only in groups.
 6. **Publish** (step 9): it shows the timetable as it will be published, read-only: the critical mistakes (each with
    **Show on step 8**, which opens the Fix card on it), every other open warning, and the changes made in the app. **Publish
    this timetable** is off while a critical mistake remains, with the reason above it, and the server refuses as well
-   (it answers 409), so a second tab cannot get round it. With none, it makes the draft what teachers and students see,
+   (it says how many critical mistakes are left), so a second tab cannot get round it. With none, it makes the draft what teachers and students see,
    with every download and the personal student codes (about a minute), even with warnings open: **Published now**
    says which setup version it was checked against, how many warnings were open when it was published and what they
    said, and lists the fixes made in the app. **Make printouts (.zip)** on step 9 makes every timetable of the draft,

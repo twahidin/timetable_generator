@@ -71,7 +71,7 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None):
         keep(rows)
         for x in rows: x["teachers"] = list(fix["teachers"])
         touched |= {x["id"] for x in rows}
-        return f"{name} is now taught by {_names(fix['teachers'])}, not {_names(old)}."
+        return f"{name} is now taught by {_names(fix['teachers'])}; it had no teacher." if not old else f"{name} is now taught by {_names(fix['teachers'])}, not {_names(old)}."
     if kind == "room":
         x = next((x for x in _rows(lessons, fix["id"]) if x["group"] == fix["group"]), None)
         if x is None: raise ValueError(f"There is no row of {fix['group']} in that lesson.")

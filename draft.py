@@ -58,7 +58,7 @@ def save(setup_path, timetable_path, source, spec, replace=False):
 def summary():
     """what /api/status shows of the draft, from meta.json alone (no model is built)"""
     meta = store.read_json(_p("meta.json")) if exists() else None
-    return dict(uploaded_at=meta.get("uploaded_at"), source=meta.get("source"), open=meta.get("open")) if meta else None
+    return dict(uploaded_at=meta.get("uploaded_at"), source=meta.get("source"), open=meta.get("open"), critical=meta.get("critical"), fixes=len(meta.get("fixes") or [])) if meta else None
 
 def model_now(rec=None):
     """(model, setup record, fx) of the draft with its fixes applied, checked against the setup record (default: as it is now).
@@ -111,10 +111,11 @@ def _finish(j, change=None):
         decisions = {k: d for k, d in decisions.items() if d.get("answer") != "left" and (k in keys or d.get("answer") == "step5")}
         ws = [dict(w, decision=decisions.get(w["key"])) for w in j["warnings"]]
         n = sum(1 for w in ws if not w["decision"])   # "met" and "step5" settle a warning
+        crit = sum(1 for w in ws if w.get("crit"))
         if exists():
             store.write_json(_p("decisions.json"), decisions)
-            store.write_json(_p("meta.json"), dict(store.read_json(_p("meta.json"), {}), open=n))
-    return dict(j, warnings=ws, open=n, critical=sum(1 for w in ws if w.get("crit")),
+            store.write_json(_p("meta.json"), dict(store.read_json(_p("meta.json"), {}), open=n, critical=crit))
+    return dict(j, warnings=ws, open=n, critical=crit,
                 step5=sum(1 for d in decisions.values() if d.get("answer") == "step5"))
 
 def info(model=None, rec=None):

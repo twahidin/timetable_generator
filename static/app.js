@@ -895,7 +895,7 @@ function render() {
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
   paintPublished();
-  if (id === "edit" || id === "publish") loadDraft();
+  if (id === "edit" || id === "publish") { const again = G.refetch; G.refetch = false; loadDraft(again); }   // again: the person opened the step
   if (id === "download") fitCheck();
 }
 const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules", choices: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings and the give-way list open step 6
@@ -1655,7 +1655,7 @@ document.addEventListener("click", async e => {
   const tc = e.target.closest("[data-tcard]");   // a teacher card: a click on its face opens it (not on a box or button in it)
   if (tc && !e.target.closest("button, input, select, textarea, label") && !tc.classList.contains("open")) { tkOpenCard(Number(tc.dataset.tcard), tc); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c, [data-fxcell], [data-mcard]"); if (!b) return;
-  if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
+  if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); G.refetch = onDraftStep(); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
   if (b.dataset.cpback !== undefined) { const i = Number(b.dataset.cpback), x = S.spec.lessons[i]; if (!x || cpBlock(x)) return; Parents.back(S.spec, i); save(); render(); poll(); return; }
@@ -1733,10 +1733,10 @@ document.addEventListener("click", async e => {
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "fitAgain") { fitCheck(true); return; }
   if (b.id === "pbPrint") { makePrintouts(); return; }
-  if (b.dataset.pbshow !== undefined) { S.step = stepAt("edit"); save(); render(); window.scrollTo(0, 0); fxClick({ dataset: { fix: b.dataset.pbshow } }); return; }   // step 8, then the Fix card on that warning as its own button opens it
+  if (b.dataset.pbshow !== undefined) { S.step = stepAt("edit"); G.refetch = true; save(); render(); window.scrollTo(0, 0); fxClick({ dataset: { fix: b.dataset.pbshow } }); return; }   // step 8, then the Fix card on that warning as its own button opens it
   if (b.dataset.pbfind !== undefined) {   // a critical mistake with no week to show: step 8, the list showing it, its row in view (rows are found by their data, not by a selector built from the key)
     const key = b.dataset.pbfind, w = ((S.draft && S.draft.warnings) || []).find(x => x.key === key);
-    S.step = stepAt("edit"); if (w && !Draft.isOpen(w)) S.dfilter = "all"; else if (S.dfilter !== "all") S.dfilter = "open"; save(); render();
+    S.step = stepAt("edit"); G.refetch = true; if (w && !Draft.isOpen(w)) S.dfilter = "all"; else if (S.dfilter !== "all") S.dfilter = "open"; save(); render();
     const li = [...document.querySelectorAll("#imResult li.warn")].find(x => x.dataset.wkey === key); if (li) li.scrollIntoView({ block: "center" }); else window.scrollTo(0, 0);
     return;
   }
@@ -2587,7 +2587,7 @@ async function poll() {   // every few seconds: the published timetable and the 
     const r = await fetch("/api/status");
     if (r.status === 401) { location.href = "/login"; return; }
     G.st = await r.json();
-    paintPublished();
+    paintPublished(); draftWatch();
   } catch (e) { }
   G.inflight = false;
   G.timer = setTimeout(poll, 5000);
@@ -2718,16 +2718,51 @@ async function decide(answer, key) {   // answer is step5, open or met; the key 
   S.draft = j; drawDraft();   // only the result area: render() would reset the chosen file names
   poll();
 }
-/* the draft survives a reload: steps 8 and 9 ask for it once when the server has one and this page does not */
-async function loadDraft() {
-  if (S.draft || S.draftTried || !G.st || !G.st.draft) return;
-  S.draftTried = true;
+/* the draft on steps 8 and 9: asked for the first time the page needs it, again each time the person opens either step, and again when
+   the status poll shows the server's draft is not the one last fetched (another tab's fix, or a change to the setup). A fetch that
+   brings the same draft back changes nothing on the page. */
+const DR = { seen: null, busy: false, again: false };   // seen: the status's summary of the draft when the page last fetched it; busy: a fetch is under way; again: the person opened a step meanwhile
+const onDraftStep = () => ["edit", "publish"].includes(STEPS[S.step][0]);
+const draftSig = () => { const d = G.st && G.st.draft; return d ? JSON.stringify([d.uploaded_at, d.open, d.critical, d.fixes, G.st.setup_saved_at]) : ""; };
+async function loadDraft(again) {   // again: the person has just opened step 8 or 9
+  if (!G.st || !G.st.draft) return;
+  if (DR.busy) { if (again) DR.again = true; return; }   // never two at once; an opening meanwhile is fetched for when this one is in
+  if (!again && (S.draft || S.draftTried)) return;
+  if (again) S.draftFailed = false;
+  S.draftTried = true; DR.busy = true;
+  const sig = draftSig(), had = !!S.draft; let j = {}, ok = false;
   try {
-    const r = await fetch("/api/draft"), j = await r.json().catch(() => ({}));
+    const r = await fetch("/api/draft"); j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/login"; return; }
-    if (r.ok && j.warnings) { S.draft = j; if (["edit", "publish"].includes(STEPS[S.step][0])) render(); }
-    else { S.draftFailed = true; if (!r.ok && j.error) toast(j.error); if (["edit", "publish"].includes(STEPS[S.step][0])) render(); }
-  } catch (e) { S.draftFailed = true; if (["edit", "publish"].includes(STEPS[S.step][0])) render(); }
+    ok = r.ok && !!j.warnings;
+    if (!ok && !had && !r.ok && j.error) toast(j.error);
+  } catch (e) { }
+  finally { DR.busy = false; }
+  if (FX.busy) return;   // a fix is being made: its own answer is the newer one, and the poll after it looks again
+  if (DR.again) { DR.again = false; loadDraft(true); return; }
+  if (!ok) {
+    if (!S.draft) { S.draftFailed = true; if (onDraftStep()) render(); }   // nothing to show: say so; a draft already on the page stays, with no error
+    return;
+  }
+  DR.seen = sig;
+  if (S.draft && JSON.stringify(S.draft) === JSON.stringify(j)) { draftWatch(); return; }   // the same draft: nothing is redrawn
+  const f = S.fix;
+  if (!onDraftStep() || !S.draft) { S.draft = j; if (onDraftStep()) render(); }
+  else if (STEPS[S.step][0] === "publish") { S.draft = j; render(); }
+  else if (f) await fxAfter(j);   // the Fix card follows the new draft as it does after its own fix
+  else { S.draft = j; drawDraft(); }
+  draftWatch();
+}
+function draftWatch() {   // after each status: a draft that is not the one last fetched is fetched again while step 8 or 9 is on screen; elsewhere the next opening does it
+  if (DR.busy || !G.st) return;
+  const sig = draftSig();
+  if (DR.seen === null) { if (!!S.draft === !!sig) { DR.seen = sig; return; } }   // the first status: a baseline unless the page lacks a draft the server has, or has one the server lacks
+  else if (sig === DR.seen) return;
+  if (!sig) {   // the draft has gone
+    if (S.draft) { S.draft = null; S.fix = null; if (onDraftStep()) render(); }
+    DR.seen = sig; return;
+  }
+  if (onDraftStep() && !(S.draftFailed && !S.draft)) loadDraft(true);   // a first load that failed is tried again when the person opens the step, not every poll
 }
 const loadingDraft = () => !S.draft && !S.draftFailed && !!(G.st && G.st.draft);   // the server has a draft this page has not got yet
 const LOADING = `<p class="muted" style="margin-top:10px">Loading the draft…</p>`;

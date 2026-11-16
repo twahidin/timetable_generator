@@ -439,8 +439,17 @@ def check_timetable_prints_and_exits_one_on_a_must():
         p0 = ds[lv][day].index("L"); ws.append([1, day, p0, p0, 1, "", "", lv, "", cls, x["subject"], "Entire Class", ", ".join(x["teachers"]), "", "", ""])
         tt = os.path.join(d, "timetable.xlsx"); wb.save(tt); out = io.StringIO()
         with contextlib.redirect_stdout(out): code = cli.main(["check-timetable", tt, "--setup", setup])
-        text = out.getvalue(); assert code == 1 and "[deployment]" in text and "warnings (" in text, text
-        assert text.splitlines()[1].startswith(" - [")
+        text = out.getvalue(); assert code == 1 and "[deployment]" in text and "warnings, 0 critical (" in text, text
+        assert text.splitlines()[1].startswith(" - [") and "[critical" not in text
+        assert verify.CRIT_WORDS == {"teacher": "Teacher in two places", "class": "Class clash", "room": "Room used twice", "break": "In a break or outside the day", "noteacher": "No teacher"}
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"   # the same lesson with nobody to teach it: a critical mistake
+        ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
+        ws.append([1, day, p0, p0, 1, "", "", lv, "", cls, x["subject"], "Entire Class", "", "", "", ""])
+        tt2 = os.path.join(d, "timetable2.xlsx"); wb.save(tt2); out = io.StringIO()
+        with contextlib.redirect_stdout(out): code = cli.main(["check-timetable", tt2, "--setup", setup])
+        text = out.getvalue(); first = text.splitlines()[0]
+        assert code == 1 and first.split(" warnings, ")[1].startswith("1 critical"), text
+        assert any(l.startswith(" - [critical: No teacher] No teacher: ") for l in text.splitlines()), text
 
 @t
 def keys_shared_by_several_hits_are_made_unique_and_stay_stable():
@@ -614,10 +623,10 @@ def a_lesson_with_no_teacher_is_critical():
     for x in m["lessons"]: x["id"] = 7
     ws = [w for w in verify.clashes(m) if w["crit"] == "noteacher"]
     assert len(ws) == 1 and ws[0]["key"] == "clash:noteacher:7:XB2" and ws[0]["kind"] == "clash" and ws[0]["strength"] == "Must"
-    assert ws[0]["text"] == f"No teacher: group XB2 on {m['days'][1]} period 4." and ws[0]["where"] == dict(cls=a) and ws[0]["group"] == a
+    assert ws[0]["text"] == f"No teacher: group XB2 on {m['days'][1]} period 4." and ws[0]["where"] == dict(cls=a, day=m["days"][1], period=4, id=7, row="XB2") and ws[0]["group"] == a
     whole = clash_model(sp, [(0, 0, 1, [b], "English", "Entire Class", [], "")])
     w = [w for w in verify.clashes(whole) if w["crit"] == "noteacher"]
-    assert [x["text"] for x in w] == [f"No teacher: English for {b} on {whole['days'][0]} period 0."] and w[0]["where"] == dict(cls=b)
+    assert [x["text"] for x in w] == [f"No teacher: English for {b} on {whole['days'][0]} period 0."] and w[0]["where"] == dict(cls=b, day=whole["days"][0], period=0, id=1, row="Entire Class")
 
 @t
 def a_lesson_in_a_break_or_a_recess_has_a_place_for_the_fix_button():
@@ -633,13 +642,44 @@ def a_lesson_in_a_break_or_a_recess_has_a_place_for_the_fix_button():
     m["checks"] = export.check_model(m)
     w = [x for x in verify.clashes(m) if x["crit"] == "break"]
     assert len(w) == 1 and "recess" in w[0]["text"] and w[0]["where"]["cls"] == a and w[0]["where"]["day"] == m["days"][1] and w[0]["group"] == a, w
-    assert w[0]["text"] in m["checks"]["problems"] and m["checks"]["where"][w[0]["text"]] == w[0]["where"]            # the line itself is as it was
+    assert w[0]["text"] in m["checks"]["problems"] and m["checks"]["where"][w[0]["text"]] == [w[0]["where"]]            # the line itself is as it was; its places are kept in order
     # a teacher clash and a no-teacher warning keep their where
     t2 = clash_model(sp, [(0, 1, 1, [a], "English", "Entire Class", [t], ""), (0, 1, 1, [sp["classes"][1]["class"]], "English", "Entire Class", [t], "")])
     c = [x for x in verify.clashes(t2) if x["crit"] == "teacher"]
     assert len(c) == 1 and c[0]["where"] == dict(teacher=t)
     nt = [x for x in verify.clashes(clash_model(sp, [(0, 1, 1, [a], "English", "Entire Class", [], "")])) if x["crit"] == "noteacher"]
-    assert nt[0]["where"] == dict(cls=a)
+    assert nt[0]["where"]["cls"] == a
+
+@t
+def a_room_over_capacity_names_a_lesson_in_it_for_the_fix_button():
+    sp = primary(); a, b = sp["classes"][0]["class"], sp["classes"][1]["class"]; t1, t2 = sp["teachers"][0]["name"], sp["teachers"][1]["name"]
+    room = next(v["room"] for v in sp["venues"])
+    m = clash_model(sp, [(0, 1, 1, [a], "English", "Entire Class", [t1], room), (0, 1, 1, [b], "Music", "Entire Class", [t2], room)])
+    w = [x for x in verify.clashes(m) if x["crit"] == "room"]
+    assert len(w) == 1 and w[0]["text"].startswith(f"Room over capacity: {room} on "), w
+    assert w[0]["where"] == dict(cls=a, day=m["days"][0], period=1, id=1, row="Entire Class") and w[0]["group"] == a, w
+    longer = clash_model(sp, [(0, 1, 2, [a], "English", "Entire Class", [t1], room), (0, 2, 1, [b], "Music", "Entire Class", [t2], room)])   # the clash is in period 2 only; the first lesson in the room then is the first row
+    w = [x for x in verify.clashes(longer) if x["crit"] == "room"]
+    assert len(w) == 1 and w[0]["where"]["cls"] == a and w[0]["where"]["period"] == 1 and w[0]["where"]["id"] == 1, w
+
+@t
+def a_lesson_with_no_teacher_has_its_day_period_id_and_row_in_its_place():
+    sp = primary(); a = sp["classes"][0]["class"]
+    m = clash_model(sp, [(1, 3, 1, [a], "English", "Entire Class", [], "")])
+    w = [x for x in verify.clashes(m) if x["crit"] == "noteacher"]
+    assert len(w) == 1 and w[0]["where"] == dict(cls=a, day=m["days"][1], period=3, id=1, row="Entire Class") and w[0]["group"] == a, w
+
+@t
+def two_lines_that_read_the_same_hand_out_their_places_in_order():
+    sp = primary(); a, b = sp["classes"][0]["class"], sp["classes"][1]["class"]; t = sp["teachers"][0]["name"]
+    m0 = model_for(copy.deepcopy(sp), [(0, 0, 1, [a], "English", "Entire Class", [t], "")])
+    lv = m0["lessons"][0]["level"] if m0["lessons"][0]["level"] in m0["grid"] else m0["class_ix"][a]["level"]
+    brk = next(q for q in range(m0["NP"]) if m0["grid"][lv][0][q] not in "LA")
+    m = clash_model(sp, [(0, brk, 1, [a], "Music", "XB1", [t], ""), (0, brk, 1, [b], "Music", "XB1", [sp["teachers"][1]["name"]], "")])
+    lines = [x for x in m["checks"]["problems"] if "sits in a break" in x]
+    assert len(lines) == 2 and lines[0] == lines[1], lines                           # the same words twice, as before
+    w = [x for x in verify.clashes(m) if x["crit"] == "break"]
+    assert [x["where"]["cls"] for x in w] == [a, b] and [x["group"] for x in w] == [a, b], w
 
 @t
 def two_bands_of_one_class_at_once_are_not_a_mistake():

@@ -334,6 +334,8 @@ def test_draft_upload_check_decide_publish():
     r = c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data"); j = r.get_json()
     assert r.status_code == 200 and j["open"] == len(j["warnings"]) and j["config_state"] in ("same", "older", "unknown", "unsaved"), j
     assert len(set(_warn_keys(j))) == len(j["warnings"]) and "left" not in j and j["critical"] == sum(1 for w in j["warnings"] if w["crit"]) and j["fixes"] == [] and j["lessons"] == 1
+    st = c.get("/api/status").get_json()["draft"]; assert st["critical"] == j["critical"] and st["fixes"] == 0 and st["open"] == j["open"], (st, j["critical"])   # right after the upload
+    assert j == c.get("/api/draft").get_json()
     k = f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"; assert k in _warn_keys(j)
     j2 = c.post("/api/draft/decide", json={"key": k, "answer": "open"}).get_json()
     assert j2["open"] == j["open"] and "left" not in j2 and next(w for w in j2["warnings"] if w["key"] == k)["decision"] is None
@@ -495,8 +497,11 @@ def test_a_fix_moves_the_lesson_and_undo_brings_it_back():
     j = c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"])).get_json(); assert len(j["fixes"]) == 1 and j["fixes"][0]["text"].startswith("Moved "), j
     g = c.get("/api/draft/grid?view=class&name=1A").get_json(); assert (s["d"], s["p"]) in {(x["d"], x["p"]) for x in g["lessons"] if x["id"] == lid}
     assert c.get("/api/status").get_json()["draft"]["open"] == j["open"]
+    st = c.get("/api/status").get_json()["draft"]; assert st["critical"] == j["critical"] and st["fixes"] == 1, (st, j["critical"])   # after a fix
+    assert j == c.get("/api/draft").get_json()   # the page compares the two: the same draft is not redrawn
     assert store.read_json(os.path.join(store.DATA, "draft", "meta.json"))["fixes"][0]["at"]
     j = c.post("/api/draft/undo").get_json(); assert j["fixes"] == [] and c.post("/api/draft/undo").status_code == 400
+    st = c.get("/api/status").get_json()["draft"]; assert st["critical"] == j["critical"] and st["fixes"] == 0 and st["open"] == j["open"], (st, j["critical"])   # after the undo
     assert c.post("/api/draft/undo").get_json() == {"error": "There is nothing to undo."}
 
 def test_a_typed_rule_is_checked_again_after_a_fix_and_the_lead_can_settle_it():
