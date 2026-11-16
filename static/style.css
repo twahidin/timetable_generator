@@ -418,7 +418,10 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .bdweek{display:inline-flex;gap:4px;align-items:center;margin-right:6px}
 .bdtab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
 .bdfind select{margin-left:4px}
-.bdsel{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--chip);border-radius:8px;padding:6px 10px;margin:6px 0}
+.bdsel{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--chip);border-radius:8px;padding:6px 10px;margin:6px 0;min-height:34px;box-sizing:border-box}
+.bdsel:empty{background:none}
+.bdtitle{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.bdtitle h2{margin:0}
+.bdundo{display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap}
 .bdwrap{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:8px}
 .bdin{position:relative}
 .bdhead,.bdrow{display:grid;font-size:11px}
@@ -438,3 +441,8 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcard span{color:#3b4458}
 .bdcard.sel{outline:2px solid var(--accent);outline-offset:-1px;z-index:2}
 .bdcard.fade{opacity:.25}
+.bdcell.ok{background:#d6f1e0;cursor:pointer}.bdcell.prefer{background:#fff0c2;cursor:pointer}.bdcell.no{background:#fbdcdc;cursor:not-allowed}.bdcell.na{background:#eceef2}
+.bdcell.own{box-shadow:inset 0 0 0 2px var(--accent)}
+.bdcell.over{box-shadow:inset 0 0 0 3px var(--navy)}
+.bdrow.dim{opacity:.4}
+.bdcard[draggable=true]{cursor:grab}

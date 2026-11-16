@@ -91,7 +91,7 @@ is not on step 3, and a named subject the class has only in groups.
    form teachers on a lesson they take show here like any other, and **Update step 5** keeps the timetable's teachers and
    marks the lesson "Changed by hand"), the setup's rules,
    and the typed rules and choices used that the agent reported. A warning for another school than the saved setup, and
-   which configuration the timetable was made from, are shown too. The warnings are listed by kind and then by class,
+   which configuration the timetable was made from, are shown too. Below the upload, the timetable is shown as a board of one day (a row per class, the periods across) or of one class's whole cycle; a lesson is dragged to another time on its row, or clicked and then a place clicked, wherever the app allows the move or the swap, and **Undo the last change** puts it back. The list of warnings and the editor are below the board. The warnings are listed by kind and then by class,
    teacher or group, with the timetable's side and step 5's side. For each one, **Update step 5** changes the setup to
    match the timetable, and a rule in words that reads **Check again** has a **Still met** button for when you have looked
    (**Reopen** takes it back). The summary line reads critical, warnings open and settled on step 5. A **critical
