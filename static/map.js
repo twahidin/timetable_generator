@@ -34,7 +34,7 @@ var DeptMap = (function () {
   /* the department's teachers in setup order, then the visitors (by _id) not already there */
   function roster(spec, dept, extraIds) {
     var T = rows(spec, "teachers"), out = [];
-    T.forEach(function (t, i) { if (t && t.dept === dept) out.push(i); });
+    T.forEach(function (t, i) { if (t && P.inDept(t, dept)) out.push(i); });
     var want = {}; (extraIds || []).forEach(function (id) { want[id] = true; });
     T.forEach(function (t, i) { if (t && want[t._id] && out.indexOf(i) < 0) out.push(i); });
     return out;
@@ -45,12 +45,12 @@ var DeptMap = (function () {
     return (idxs || []).filter(function (i) { return T[i] && !anySubject(T[i]); });
   }
 
-  /* teachers of other departments whose name or short name contains q (at most 8) */
+  /* teachers in neither department of the page whose name or short name contains q (at most 8) */
   function search(spec, q, dept) {
     var k = P.key(q || ""); if (!k) return [];
     var out = [];
     rows(spec, "teachers").forEach(function (t, i) {
-      if (!t || t.dept === dept || out.length >= 8) return;
+      if (!t || P.inDept(t, dept) || out.length >= 8) return;
       if (P.key(t.name || "").indexOf(k) >= 0 || P.key(t.short || "").indexOf(k) >= 0) out.push(i);
     });
     return out;
@@ -99,6 +99,62 @@ var DeptMap = (function () {
       out2.push({ kind: "band", bi: bi, title: b.block, level: b.level, groups: gs, twice: twice });
     });
     return out2;
+  }
+
+  function count(v) { if (v === null || v === undefined || String(v).trim() === "") return null; var n = Number(v); return isFinite(n) ? n : null; }
+
+  /* the department's page: for each level, its subjects in step 3's order (a subject's class cards in the class list's order,
+     then its groups in no band), and each band as a lane at the place of the first of its subjects; every card of cards() once.
+     A band sits in the level of its first group. A subject with only band groups has no section of its own. */
+  function page(spec, info, dept, level) {
+    info = info || [];
+    var subs = deptSubjects(spec, dept), L = rows(spec, "lessons"), lv = (spec.school || {}).levels || [];
+    var classes = rows(spec, "classes"), bands = rows(spec, "blocks");
+    var inf = function (i) { return info[i] || {}; };
+    var lvl = function (x) { return x.level === undefined || x.level === null ? "" : x.level; };
+    var classIx = function (c) { for (var k = 0; k < classes.length; k++) if (classes[k] && classes[k]["class"] === c) return k; return classes.length; };
+    var size = function (c) { var k = classIx(c); return k < classes.length ? count(classes[k].size) : null; };
+    var bandIx = function (name) { for (var k = 0; k < bands.length; k++) if (bands[k] && bands[k].block && bands[k].block === name) return k; return -1; };
+    var byLevel = {}, seen = [];
+    var slot = function (l) { if (!byLevel[l]) { byLevel[l] = { classes: [], loose: [], lanes: {} }; seen.push(l); } return byLevel[l]; };
+    L.forEach(function (x, i) {
+      if (!x || !x.subject || subs.indexOf(x.subject) < 0 || (level && x.level !== level)) return;
+      var at = slot(lvl(x));
+      if (!x.block && !x.code_override) {
+        if (!Array.isArray(x.classes)) return;
+        x.classes.forEach(function (c) {
+          at.classes.push({ kind: "class", li: i, cls: c, title: c, subject: x.subject, level: lvl(x), periods: inf(i).p, students: size(c), teachers: names(x), block: null });
+        });
+        return;
+      }
+      var g = { kind: "group", li: i, title: inf(i).code, subject: x.subject, level: lvl(x), periods: inf(i).p, students: count(x.students), teachers: names(x), block: x.block || null };
+      var bi = x.block ? bandIx(x.block) : -1;
+      if (bi < 0) { at.loose.push(g); return; }
+      (at.lanes[bi] = at.lanes[bi] || []).push(g);
+    });
+    var rank = function (l) { var k = lv.indexOf(l); return k < 0 ? lv.length : k; };
+    var order = seen.map(function (l, k) { return [l, k]; }).sort(function (a, b) { return rank(a[0]) - rank(b[0]) || a[1] - b[1]; });
+    return order.map(function (o) {
+      var at = byLevel[o[0]], parts = [];
+      subs.forEach(function (sub, place) {
+        var cs = at.classes.filter(function (c) { return c.subject === sub; })
+          .map(function (c, k) { return [c, k]; })
+          .sort(function (a, b) { return classIx(a[0].cls) - classIx(b[0].cls) || a[0].li - b[0].li || a[1] - b[1]; })
+          .map(function (p) { return p[0]; });
+        var cards = cs.concat(at.loose.filter(function (g) { return g.subject === sub; }));
+        if (cards.length) parts.push({ place: place, rank: 0, sub: 0, section: { kind: "subject", subject: sub, cards: cards } });
+      });
+      Object.keys(at.lanes).forEach(function (k) {
+        var gs = at.lanes[k], bi = Number(k), first = subs.length, counts = {}, twice = [];
+        gs.forEach(function (g) {
+          first = Math.min(first, subs.indexOf(g.subject));
+          g.teachers.forEach(function (nm) { counts[nm] = (counts[nm] || 0) + 1; if (counts[nm] === 2) twice.push(nm); });
+        });
+        parts.push({ place: first, rank: 1, sub: bi, section: { kind: "band", bi: bi, title: bands[bi].block, groups: gs, twice: twice } });
+      });
+      parts.sort(function (a, b) { return a.place - b.place || a.rank - b.rank || a.sub - b.sub; });
+      return { level: o[0], sections: parts.map(function (p) { return p.section; }) };
+    });
   }
 
   /* ---- what the map writes (the caller saves afterwards) */
@@ -206,7 +262,7 @@ var DeptMap = (function () {
 
   return {
     loads: loads, deptSubjects: deptSubjects, roster: roster, unplaced: unplaced, search: search,
-    baskets: baskets, staffRoom: unplaced, cards: cards, prune: prune, subjectOf: subjectOf,
+    baskets: baskets, staffRoom: unplaced, cards: cards, page: page, prune: prune, subjectOf: subjectOf,
     MAX: MAX, canTeach: canTeach, needBasket: needBasket, deploy: deploy, undeploy: undeploy, addToBasket: addToBasket, removeFromBasket: removeFromBasket, newTeacher: newTeacher
   };
 })();
