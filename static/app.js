@@ -3172,7 +3172,7 @@ const bdShowable = () => !!(S.draft && !S.draft.published && !S.practice);
 const bdSig = j => JSON.stringify([j.uploaded_at, j.fixes]);   // which draft a board was fetched for
 function bdEnsure(id, opening) {   // the board exists on step 8 with a draft, and nowhere else; it is fetched again whenever it is not for the draft the page has (every place that takes a new draft ends here, through drawDraft, render, or bdSync); opening: the step is being drawn, so a failed fetch is tried again
   if (id !== "edit" || !bdShowable()) { if (S.board) { S.board = null; BD.gen++; } return; }
-  if (!S.board) S.board = { data: null, mode: { kind: "day", d: 0 }, find: "", fold: {}, sel: null, slots: null, slotsFor: null, asking: null, failFor: null, held: null, drag: null, grab: 0, hv: "", ask: null, pt: "", note: "", fail: false, sig: null };
+  if (!S.board) S.board = { data: null, mode: { kind: "day", d: 0 }, find: "", fold: {}, sel: null, slots: null, slotsFor: null, asking: null, failFor: null, pre: null, held: null, drag: null, grab: 0, hv: "", ask: null, pt: "", note: "", fail: false, sig: null };
   if (S.board.sig !== bdSig(S.draft) || (opening && S.board.fail)) bdLoad();
 }
 const bdWanted = () => { const b = S.board; return b.held !== null ? b.held : b.sel; };   // the card whose slots are wanted: the one pressed, else the one selected
@@ -3190,7 +3190,7 @@ const bdClasses = d => [].concat(...(d.levels || []).map(lv => lv.classes));
 async function bdLoad() {
   const b = S.board; if (!b) return;
   const gen = ++BD.gen; b.sig = bdSig(S.draft);
-  b.slots = null; b.slotsFor = null; b.asking = null; b.ask = null; b.drag = null; b.pt = ""; b.hv = ""; b.failFor = null; bdPaint();   // the slots belong to the draft they were asked on; their colours go at once
+  b.slots = null; b.slotsFor = null; b.asking = null; b.ask = null; b.drag = null; b.pt = ""; b.hv = ""; b.failFor = null; b.pre = null; bdPaint();   // the slots belong to the draft they were asked on; their colours go at once
   const j = await fxGet("/api/draft/board");
   if (S.board !== b || gen !== BD.gen) return;   // the step was left, or a newer fetch is out
   if (!j || !Array.isArray(j.cards)) { b.data = null; b.fail = true; bdDraw(); return; }
@@ -3298,11 +3298,19 @@ function bdPaint() {   // the cells and the strip of every row take the state of
     x.classList.toggle("swap", !!t); x.classList.toggle("swapok", !!t && t.state === "ok"); x.classList.toggle("swapprefer", !!t && t.state === "prefer");
   });
 }
+async function bdPre(id) {   // the slots of a pressed card, kept aside until the card is selected or dragged
+  const b = S.board; if (!b || (b.pre && b.pre.id === id)) return;
+  const mine = b.pre = { id, slots: null }, gen = BD.gen, j = await fxGet("/api/draft/slots?id=" + encodeURIComponent(id));
+  if (S.board !== b || gen !== BD.gen || b.pre !== mine) return;
+  if (j && Array.isArray(j.slots)) mine.slots = j.slots;
+  if (mine.slots && bdWanted() === id && b.slotsFor !== id) { b.slots = mine.slots; b.slotsFor = id; b.asking = null; b.failFor = null; bdPaint(); }
+}
 async function bdWant() {   // fetch where the wanted card may go, unless it is already here for this draft; an answer for another card is dropped
   const b = S.board; if (!b || !b.data) return;
   const id = bdWanted();
   if (id === null) { b.slots = null; b.slotsFor = null; b.asking = null; bdPaint(); return; }
   if (b.slotsFor === id || b.asking === id) { bdPaint(); return; }
+  if (b.pre && b.pre.id === id && b.pre.slots) { b.slots = b.pre.slots; b.slotsFor = id; b.failFor = null; bdPaint(); return; }
   b.slots = null; b.slotsFor = null; b.asking = id; b.failFor = null; bdPaint();
   const gen = BD.gen, j = await fxGet("/api/draft/slots?id=" + encodeURIComponent(id));
   if (S.board !== b || gen !== BD.gen || b.asking !== id) return;
@@ -3391,7 +3399,9 @@ function bdDragEnd() { const b = S.board; if (b) { b.drag = null; b.held = null;
 const bdAimed = (b, row, e) => { const q = bdPeriodAt(row, e.clientX); return q < 0 ? -1 : Math.min(b.data.NP - 1, Board.start(q, b.grab)); };   // the period the lesson would start at: the pointer's, less the part of the card that was held
 document.addEventListener("pointerdown", e => {
   const el = e.target.closest && e.target.closest(".bdcard"), b = S.board; if (!el || !b || !b.data || e.button > 0) return;
-  b.held = Number(el.dataset.card); bdWant();
+  const id = Number(el.dataset.card);
+  if (b.sel !== null && id !== b.sel && b.slotsFor === b.sel) { bdPre(id); return; }   // another card is selected and its slots are here: pressing must not drop them or its swap outlines; the pressed card's slots are fetched aside, for a drag or a click that takes it up
+  b.held = id; bdWant();
 });
 document.addEventListener("pointerup", () => {
   const b = S.board; if (!b || b.held === null) return;
