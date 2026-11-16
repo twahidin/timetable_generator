@@ -113,7 +113,7 @@ def test_a_setup_class_on_a_level_the_model_lacks_is_not_lost():
     try:
         draft._now = lambda: (m2, None, None)
         b = board()
-        assert b["levels"][-1] == dict(level="Not in the setup", classes=["E1", "9Z"])
+        assert b["levels"][-1] == dict(level="Not in the setup", classes=["9Z", "E1"])
         assert b["codes"]["E1"] == ["." * b["NP"]] * len(b["days"])
         assert next(x for x in b["cards"] if x["id"] == 50)["classes"] == ["E1"]
     finally: draft._now = real
