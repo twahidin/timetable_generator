@@ -54,7 +54,7 @@ t("critWord", () => {
   assert.strictEqual(Draft.critWord("other"), "");
   assert.strictEqual(Draft.critWord(undefined), "");
 });
-t("kinds", () => { assert.deepEqual(Draft.KINDS, ["clash", "deployment", "rule", "typed", "choice"]); assert.equal(Draft.KIND_TEXT.typed, "Rules in words"); });
+t("kinds", () => { assert.deepEqual(Draft.KINDS, ["clash", "room", "deployment", "rule", "typed", "choice"]); assert.equal(Draft.KIND_TEXT.room, "No room"); assert.equal(Draft.KIND_TEXT.typed, "Rules in words"); });
 t("whereText: only the parts a warning's where has", () => {
   assert.deepStrictEqual(Draft.whereText({ where: { cls: "1A", day: "Mon", period: 0, id: 3, row: "Entire Class" } }), ["1A", "Mon", "period 0"]);
   assert.deepStrictEqual(Draft.whereText({ where: { teacher: "Ms Ong" } }), ["Ms Ong"]);
@@ -144,6 +144,16 @@ t("askSummary: the reply, the count of more lessons, what was asked beyond the a
 t("choiceWord: the question's word for the field", () => {
   assert.deepEqual(["classes", "subject", "teacher", "new_teacher", "new_room"].map(Draft.choiceWord), ["class", "subject", "teacher", "teacher", "room"]);
   assert.equal(Draft.choiceWord("whatever"), "name");
+});
+t("critWord: notplaced; an unknown word still gives nothing", () => {
+  assert.strictEqual(Draft.critWord("notplaced"), "Not placed");
+  assert.strictEqual(Draft.critWord("nope"), "");
+});
+t("a room warning is grouped under No room, after clashes and before the deployment", () => {
+  const g = Draft.group([W("d1", "deployment", "1A"), W("m1", "room", "Maths 1A"), W("m2", "room", "Art 1B"), W("c1", "clash", "Ms X", null, null, "teacher")], "open");
+  assert.deepEqual(g.map(x => x.kind), ["clash", "room", "deployment"]);
+  assert.equal(g[1].title, "No room");
+  assert.deepEqual(g[1].groups.map(x => x.name), ["Maths 1A", "Art 1B"]);
 });
 
 console.log(n + " checks passed");

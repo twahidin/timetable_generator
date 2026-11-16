@@ -150,9 +150,67 @@ var Board = (function () {
     return t || slot(card, slots, d, p);
   }
 
-  function fix(card, s) {
-    if (s.swap !== null && s.swap !== undefined) return { kind: "swap", a: card.id, b: s.swap };
-    return { kind: "move", id: card.id, d: s.d, p: s.p };
+  /* a place a lesson can be put down on with nothing in the way to push out, even one that will clash (judged "no") */
+  function lands(s) {
+    return !!s && !s.push && (s.state === "ok" || s.state === "prefer" || s.state === "no");
+  }
+
+  /* a place that will clash: dropping there is forced */
+  function forced(s) { return !!s && s.state === "no"; }
+
+  /* what a drop on a place with another lesson asks: swap (the one lesson, allowed and clean or bending) and push out */
+  function asks(s) {
+    if (!s || !s.push) return null;
+    return { swap: s.swap !== null && s.swap !== undefined && (s.state === "ok" || s.state === "prefer"), push: s.push.state !== "na" };
+  }
+
+  /* the fix a drop sends. how is "move" (default), "swap" or "push"; with no how, a slot with a swap gives the swap, as
+     before this stage. A lesson from the tray is placed, never swapped. */
+  function fix(card, s, how) {
+    var tray = card.d === null || card.d === undefined;
+    if (how === undefined && !tray && s.swap !== null && s.swap !== undefined) how = "swap";
+    if (how === "swap" && !tray) return { kind: "swap", a: card.id, b: s.swap };
+    var out = { kind: tray ? "place" : "move", id: card.id, d: s.d, p: s.p };
+    if (how === "push") {
+      out.push = true;
+      if (s.push && s.push.state === "no") out.force = true;
+    } else if (forced(s)) out.force = true;
+    return out;
+  }
+
+  /* the fix that puts a lesson the plan wants more of onto the board */
+  function addFix(short, s, how) {
+    var out = { kind: "add", key: short.key, d: s.d, p: s.p, n: short.n };
+    if (how === "push") {
+      out.push = true;
+      if (s.push && s.push.state === "no") out.force = true;
+    } else if (forced(s)) out.force = true;
+    return out;
+  }
+
+  function liftFix(card) { return { kind: "lift", id: card.id }; }
+
+  function pushWords(out) {
+    var names = out.map(function (o) { return o.what; });
+    return names.length >= 3 ? "Push out " + names.length + " lessons" : "Push out " + names.join(" and ");
+  }
+
+  /* what the page asks when a lesson is dropped where another lesson is */
+  function question(card, s, board) {
+    var a = asks(s) || { swap: false, push: false }, out = s.push ? s.push.out || [] : [];
+    var text = card.what + " on " + board.days[s.d] + " period " + s.p + ": another lesson is there.";
+    var swap = null, push = null, also = [];
+    if (a.swap) {
+      var other = null;
+      out.forEach(function (o) { if (other === null && o.id === s.swap) other = o; });
+      swap = other ? "Swap with " + other.what : "Swap";
+      also = (s.also || []).slice();
+    }
+    if (a.push && out.length) {
+      push = pushWords(out);
+      if (s.push.state === "no") also.push("It will still clash: " + s.push.why);
+    }
+    return { text: text, also: also, swap: swap, push: push };
   }
 
   /* with the board, the "No class" row (cls "") also takes a card none of whose classes is in a level */
@@ -163,14 +221,92 @@ var Board = (function () {
 
   function tell(s, days) {
     if (s.state === "own") return "This is where the lesson is now.";
-    var day = days[s.d], p = s.p;
-    var text = s.swap !== null && s.swap !== undefined
-      ? "Swap with the lesson on " + day + " period " + p + "."
+    var day = days[s.d], p = s.p, has = s.swap !== null && s.swap !== undefined;
+    if (s.push && !(asks(s).swap)) return "Another lesson is there. Drop to swap or push out.";
+    var text = has ? "Swap with the lesson on " + day + " period " + p + "."
+      : s.state === "no" && s.why ? "Move to " + day + " period " + p + ". It will clash: " + s.why
       : "Move to " + day + " period " + p + ".";
-    return s.why ? text + " " + s.why : text;
+    return s.why && !(s.state === "no" && !has) ? text + " " + s.why : text;
+  }
+
+  /* the marks of a card, a missing list being empty */
+  function marksOf(card) { return card.marks || []; }
+
+  var MARK = { notplaced: "Not placed", noteacher: "No teacher", "break": "In a break", teacher: "In two places",
+    "class": "In two places", room: "In two places", noroom: "No room" };
+  var COUNTERS = [["notplaced", "Not placed"], ["noteacher", "No teacher"], ["twoplaces", "In two places"],
+    ["inbreak", "In a break"], ["noroom", "No room"]];
+
+  /* a mark that stops the publish: every one but "no room" */
+  function critical(card) { return marksOf(card).some(function (m) { return m !== "noroom"; }); }
+
+  /* the words on a card's corner: its first mark (the server lists them by weight), and whether it is critical */
+  function badge(card) {
+    var m = marksOf(card);
+    return m.length ? { text: MARK[m[0]] || "", crit: critical(card) } : null;
+  }
+
+  function firstClass(card) { return (card.classes || [])[0] || ""; }
+
+  /* the lessons not placed, in a group per first class: the levels' classes in order, other classes by name, "" last */
+  function tray(board) {
+    var order = [], seen = {}, groups = {}, extra = [];
+    (board.levels || []).forEach(function (lv) { lv.classes.forEach(function (c) { if (!seen[c]) { seen[c] = true; order.push(c); } }); });
+    (board.unplaced || []).forEach(function (c) {
+      var k = firstClass(c);
+      if (!Object.prototype.hasOwnProperty.call(groups, k)) { groups[k] = []; if (!seen[k] && k !== "") extra.push(k); }
+      groups[k].push(c);
+    });
+    extra.sort();
+    return order.concat(extra, [""]).filter(function (k) { return Object.prototype.hasOwnProperty.call(groups, k); })
+      .map(function (k) { return { cls: k, cards: groups[k] }; });
+  }
+
+  function has(card, kinds) { return marksOf(card).some(function (m) { return kinds.indexOf(m) >= 0; }); }
+
+  var TWO = ["teacher", "class", "room"];
+
+  function counts(board) {
+    var c = { notplaced: (board.unplaced || []).length, noteacher: 0, twoplaces: 0, inbreak: 0, noroom: 0 };
+    (board.cards || []).forEach(function (x) {
+      if (has(x, ["noteacher"])) c.noteacher++;
+      if (has(x, TWO)) c.twoplaces++;
+      if (has(x, ["break"])) c.inbreak++;
+      if (has(x, ["noroom"])) c.noroom++;
+    });
+    return c;
+  }
+
+  function byPlace(a, b) {
+    var x = firstClass(a), y = firstClass(b);
+    if (a.d !== b.d) return a.d - b.d;
+    if (a.p !== b.p) return a.p - b.p;
+    if (x !== y) return x === "" ? 1 : y === "" ? -1 : x < y ? -1 : 1;
+    return a.id - b.id;
+  }
+
+  /* the cards a counter counts: the tray's cards in the tray's order, the others by day, period, first class, id */
+  function hits(board, counter) {
+    if (counter === "notplaced") {
+      var out = [];
+      tray(board).forEach(function (g) { out = out.concat(g.cards); });
+      return out;
+    }
+    var kinds = { noteacher: ["noteacher"], twoplaces: TWO, inbreak: ["break"], noroom: ["noroom"] }[counter] || [];
+    return (board.cards || []).filter(function (c) { return has(c, kinds); }).sort(byPlace);
+  }
+
+  /* the card after the one with id in hits: the first when id is not there or is the last; null when there are none */
+  function step(list, id) {
+    if (!list.length) return null;
+    var at = -1;
+    list.forEach(function (c, i) { if (at < 0 && c.id === id) at = i; });
+    return list[at < 0 || at === list.length - 1 ? 0 : at + 1];
   }
 
   return { lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
-           start: start, slot: slot, states: states, can: can, target: target, aim: aim, fix: fix, onRow: onRow, tell: tell };
+           start: start, slot: slot, states: states, can: can, target: target, aim: aim, fix: fix, onRow: onRow, tell: tell,
+           MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
+           lands: lands, forced: forced, asks: asks, addFix: addFix, liftFix: liftFix, question: question };
 })();
 if (typeof module !== "undefined") module.exports = Board;

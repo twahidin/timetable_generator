@@ -3,8 +3,8 @@
 var Draft = (function () {
   "use strict";
 
-  var KINDS = ["clash", "deployment", "rule", "typed", "choice"];
-  var KIND_TEXT = { clash: "Clashes", deployment: "Differences from the deployment", rule: "Rules", typed: "Rules in words", choice: "Choices used" };
+  var KINDS = ["clash", "room", "deployment", "rule", "typed", "choice"];
+  var KIND_TEXT = { clash: "Clashes", room: "No room", deployment: "Differences from the deployment", rule: "Rules", typed: "Rules in words", choice: "Choices used" };
 
   function answer(w) { return w && w.decision ? w.decision.answer : ""; }
   /* a warning is open until it has a decision; an old "left" decision is no decision */
@@ -36,7 +36,7 @@ var Draft = (function () {
 
   /* a critical mistake's kind in words */
   function critWord(crit) {
-    return { teacher: "Teacher in two places", "class": "Class clash", room: "Room used twice", "break": "In a break or outside the day", noteacher: "No teacher" }[crit] || "";
+    return { teacher: "Teacher in two places", "class": "Class clash", room: "Room used twice", "break": "In a break or outside the day", noteacher: "No teacher", notplaced: "Not placed" }[crit] || "";
   }
 
   /* open (no decision) with how many Must and Prefer among them, how many are critical, settled on step 5, and checked as still met */
