@@ -42,29 +42,91 @@ var Board = (function () {
     return c && c[d] != null ? c[d] : dots(board.NP);
   }
 
-  function row(board, key, label, d, cls, codes, set) {
-    var placed = lanes(board.cards.filter(function (c) {
-      return c.d === d && (set && cls === "" ? classless(c, set) : holds(c, cls));
-    }));
+  function build(board, key, label, d, codes, test, extra) {
+    var placed = lanes(board.cards.filter(function (c) { return c.d === d && test(c); }));
     var used = 1;
     placed.forEach(function (x) { if (x.lane + 1 > used) used = x.lane + 1; });
-    return { key: key, label: label, d: d, cls: cls, codes: codes, lanes: used, cards: placed };
+    var out = { key: key, label: label, d: d, cls: "", codes: codes, lanes: used, cards: placed };
+    Object.keys(extra || {}).forEach(function (k) { out[k] = extra[k]; });
+    return out;
+  }
+
+  function row(board, key, label, d, cls, codes, set) {
+    var out = build(board, key, label, d, codes, function (c) { return set && cls === "" ? classless(c, set) : holds(c, cls); }, {});
+    out.cls = cls;
+    if (cls !== "") { out.by = "class"; out.name = cls; }
+    return out;
+  }
+
+  /* the rows of a card that put it in a teacher's or room's board row; name "" is the "No teacher" / "No room" row */
+  function matching(card, by, name) {
+    return (card.rows || []).filter(function (r) {
+      if (by === "teacher") {
+        var t = r.teachers || [];
+        return name === "" ? t.length === 0 : t.indexOf(name) >= 0;
+      }
+      return name === "" ? (r.room || "") === "" || r.room === "TBC" : r.room === name;
+    });
+  }
+
+  function dayCodes(board, d) {
+    var c = board.day && board.day[d] != null ? board.day[d] : null;
+    return c !== null ? c : dots(board.NP).replace(/\./g, "L");
+  }
+
+  function personRow(board, by, name, d) {
+    return build(board, name, name === "" ? (by === "teacher" ? "No teacher" : "No room") : name, d, dayCodes(board, d),
+      function (c) { return matching(c, by, name).length > 0; }, { by: by, name: name });
+  }
+
+  /* names of teachers (or rooms) the day's cards use, sorted */
+  function used(board, by, d) {
+    var seen = {};
+    board.cards.forEach(function (c) {
+      if (c.d !== d) return;
+      (c.rows || []).forEach(function (r) {
+        if (by === "teacher") (r.teachers || []).forEach(function (t) { if (t !== "") seen[t] = true; });
+        else if (r.room && r.room !== "TBC") seen[r.room] = true;
+      });
+    });
+    return Object.keys(seen).sort();
+  }
+
+  /* day mode by teacher or room: the "No ..." row first when a card needs it, a group per department or kind, then the
+     names the cards use that the setup lacks */
+  function peopleGroups(board, by, d) {
+    var out = [], listed = {}, src = by === "teacher" ? board.teachers || [] : board.rooms || [];
+    if (board.cards.some(function (c) { return c.d === d && matching(c, by, "").length > 0; })) out.push({ name: "", rows: [personRow(board, by, "", d)] });
+    src.forEach(function (g) {
+      var names = by === "teacher" ? (g.teachers || []).map(function (t) { return t.name; }) : g.rooms || [];
+      var title = by === "teacher" ? (g.dept === "" ? "No department" : g.dept) : g.kind;
+      names.forEach(function (n) { listed[n] = true; });
+      out.push({ name: title, rows: names.map(function (n) { return personRow(board, by, n, d); }) });
+    });
+    var extra = used(board, by, d).filter(function (n) { return !listed[n]; });
+    if (extra.length) out.push({ name: "Not in the setup", rows: extra.map(function (n) { return personRow(board, by, n, d); }) });
+    return out;
   }
 
   /* day mode: a group per level, a row per class, then "No class" when a card has none; cycle mode: a group per week,
-     a row per day for one class */
+     a row per day for one class, teacher or room; mode.by "teacher" or "room" makes the day rows per person */
   function groups(board, mode, weeks) {
+    var by = mode.by || "class";
     if (mode.kind === "cycle") {
       return (weeks || []).map(function (w) {
         return {
           name: w.name,
           rows: w.days.map(function (day) {
-            return row(board, String(day.i), day.label, day.i, mode.cls, codesFor(board, mode.cls, day.i));
+            if (by === "class") return row(board, String(day.i), day.label, day.i, mode.cls, codesFor(board, mode.cls, day.i));
+            var r = personRow(board, by, mode.name, day.i);
+            r.key = String(day.i); r.label = day.label;
+            return r;
           })
         };
       });
     }
     var d = mode.d, set = known(board);
+    if (by !== "class") return peopleGroups(board, by, d);
     var out = (board.levels || []).map(function (lv) {
       return { name: lv.level, rows: lv.classes.map(function (c) { return row(board, c, c, d, c, codesFor(board, c, d)); }) };
     });
@@ -83,9 +145,26 @@ var Board = (function () {
 
   function subjectOf(board, name) { return (board.subjects || {})[name] || null; }
 
-  function lines(card, board) {
-    var rows = card.rows || [], first = rows[0], info = first ? subjectOf(board, first.subject) : null;
+  /* the rows of the card that put it in this board row: all of them for a class row */
+  function of(card, r) {
+    var by = r && r.by ? r.by : "class";
+    return by === "class" ? (card.rows || []).slice() : matching(card, by, r.name || "");
+  }
+
+  function classText(card) {
+    var cs = card.classes || [];
+    return cs.slice(0, 3).join(", ") + (cs.length > 3 ? " +" + (cs.length - 3) : "");
+  }
+
+  function lines(card, board, r) {
+    var by = r && r.by ? r.by : "class", rows = card.rows || [];
+    var first = by === "class" ? rows[0] : of(card, r)[0] || rows[0], info = first ? subjectOf(board, first.subject) : null;
     var color = info && info[1] ? info[1] : 0;
+    if (by !== "class" && first) {
+      var title = card.band ? card.band : info && info[0] ? info[0] : first.subject;
+      var second = by === "teacher" ? first.room || "No room" : first.tshorts && first.tshorts.length ? first.tshorts.join(", ") : "No teacher";
+      return { title: title, lines: [classText(card), second], color: color };
+    }
     if (card.band) return { title: card.band, lines: [rows.length === 1 ? "1 group" : rows.length + " groups"], color: color };
     if (!first) return { title: "", lines: ["No teacher", "No room"], color: 0 };
     var teachers = first.tshorts && first.tshorts.length ? first.tshorts.join(", ") : "No teacher";
@@ -142,6 +221,7 @@ var Board = (function () {
     var out = [], p, s, o;
     for (p = 0; p < NP; p++) {
       s = slot(card, slots, d, p); o = s && s.state !== "own" ? offers(card, s) : null;
+      if (s && s.state !== "own" && Array.isArray(s.there) && s.there.length) { out.push("ask"); continue; }
       out.push(o ? (o.swap || o.push || o.beside ? "ask" : "na") : s && s.state ? s.state : "");
     }
     return out;
@@ -250,6 +330,7 @@ var Board = (function () {
 
   /* with the board, the "No class" row (cls "") also takes a card none of whose classes is in a level */
   function onRow(card, r, board) {
+    if (r.by === "teacher" || r.by === "room") return true;
     if (board && r.cls === "") return classless(card, known(board));
     return holds(card, r.cls);
   }
@@ -378,10 +459,73 @@ var Board = (function () {
     return { id: null, d: d < 0 ? null : d, cls: h.cls };
   }
 
+  function keyName(card, key) {
+    var parts = String(key || "").split(":");
+    if (parts[0] === "G") return "group " + parts.slice(1).join(":");
+    return parts.slice(2).join(":") + " for " + parts[1];
+  }
+
+  function same(from, to) {
+    var a = from && from.by, b = to && to.by;
+    return !!a && a === b && a !== "class";
+  }
+
+  /* the fix that hands the lesson from one teacher's (or room's) row to another's, or null when nothing would change */
+  function hand(card, from, to, board) {
+    if (!same(from, to) || from.name === to.name) return null;
+    var r = of(card, from)[0];
+    if (!r) return null;
+    if (from.by === "room") return to.name === (r.room || "") ? null : { kind: "room", id: card.id, group: r.group, room: to.name };
+    var t = (r.teachers || []).slice(), at = t.indexOf(from.name);
+    if (to.name !== "" && t.indexOf(to.name) >= 0) return null;
+    if (to.name === "") { if (at >= 0) t.splice(at, 1); }
+    else if (from.name === "" || at < 0) t.push(to.name);
+    else t[at] = to.name;
+    return { kind: "teacher", key: r.key, teachers: t };
+  }
+
+  /* what the page asks before a hand-over; n is the number of lessons the change touches */
+  function handText(card, from, to, n) {
+    var what = card.what;
+    if (from.by === "room") return to.name === "" ? "Leave " + what + " with no room?" : "Move " + what + " to " + to.name + "?";
+    var r = of(card, from)[0], name = keyName(card, r ? r.key : ""), count = n + (n === 1 ? " lesson" : " lessons");
+    var tail = " It changes " + count + " of " + name + ".";
+    if (to.name === "") return "Take " + from.name + " off " + what + "?" + tail;
+    if (from.name === "") return "Give " + what + " to " + to.name + "?" + tail;
+    return "Give " + what + " to " + to.name + " in place of " + from.name + "?" + tail;
+  }
+
+  /* a lesson's teachers split into those free then and those busy, each in the server's order */
+  function people(lesson) {
+    var all = (lesson && lesson.teachers) || [];
+    return { free: all.filter(function (x) { return x.free; }), busy: all.filter(function (x) { return !x.free; }) };
+  }
+
+  /* a lesson's rooms: free and right for it, free and not right, busy */
+  function venues(lesson) {
+    var all = (lesson && lesson.rooms) || [];
+    return { right: all.filter(function (x) { return x.free && x.right; }), other: all.filter(function (x) { return x.free && !x.right; }),
+             busy: all.filter(function (x) { return !x.free; }) };
+  }
+
+  /* the fix that puts name in place of the row's ith teacher ("" takes it away; i past the end adds), with no duplicates */
+  function teacherFix(lesson, r, i, name) {
+    var t = (r.teachers || []).slice();
+    if (name === "") t.splice(i, 1); else t[Math.min(i, t.length)] = name;
+    return { kind: "teacher", key: r.key, teachers: t.filter(function (x, k) { return t.indexOf(x) === k; }) };
+  }
+
+  function roomFix(lesson, r, room, all) {
+    var out = { kind: "room", id: lesson.id, group: r.group, room: room };
+    if (all) out.all = true;
+    return out;
+  }
+
   return { lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
            start: start, slot: slot, states: states, can: can, target: target, aim: aim, fix: fix, onRow: onRow, tell: tell,
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
            lands: lands, forced: forced, asks: asks, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
-           warned: warned, flag: flag, at: at };
+           warned: warned, flag: flag, at: at, of: of, hand: hand, handText: handText, people: people, venues: venues,
+           teacherFix: teacherFix, roomFix: roomFix };
 })();
 if (typeof module !== "undefined") module.exports = Board;
