@@ -888,7 +888,7 @@ function render() {
   // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
   const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap, .keep")].map(t => [t.scrollTop, t.scrollLeft]) : [];
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && (f.id ? `#${CSS.escape(f.id)}` : f.dataset.k ? `[data-k="${CSS.escape(f.dataset.k)}"]` : "");
-  G.shown = id; bdEnsure(id); const bw = same ? main.querySelector(".bdwrap") : null, bpos = bw ? [bw.scrollLeft, bw.scrollTop] : null;
+  G.shown = id; bdEnsure(id, true); const bw = same ? main.querySelector(".bdwrap") : null, bpos = bw ? [bw.scrollLeft, bw.scrollTop] : null;
   main.innerHTML = (S.practice && !S.asking ? `<div class="practice"><span>Practice copy: nothing here is saved for the school.</span><button id="practiceBack">Back to the school's setup</button></div>` : "") + (VIEWS[id] || (() => ""))();
   headLocks(main, id);
   main.querySelectorAll(".tablewrap, .keep").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
@@ -922,7 +922,7 @@ function exportCard() {
     <div class="row" style="margin-top:10px"><label class="filebtn">Setup workbook (.xlsx)<input type="file" id="exSetup" accept=".xlsx" hidden></label><span class="muted" id="exSetupName">none chosen</span></div>
     <div class="row" style="margin-top:8px"><label class="filebtn">Timetable (.xlsx or .sqlite)<input type="file" id="exTT" accept=".xlsx,.sqlite,.sqlite3,.db" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
     <div class="row" style="margin-top:12px"><button class="primary" id="imCheck">Check</button></div>
-    <div id="imResult">${S.draft ? draftHTML(S.draft) : loadingDraft() ? LOADING : ""}</div></div>`;
+    <div id="imResult">${S.draft ? draftHTML(S.draft)[0] : loadingDraft() ? LOADING : ""}</div></div>`;
 }
 /* step 6's third card: the second choices in their give-way order, each editable in place, and the form that adds one */
 function giveWay(out, crit, psel, weeks, days) {
@@ -1628,7 +1628,7 @@ const VIEWS = {
   edit() {
     if (S.practice) return `<div class="card"><h1>Step 8 · Upload and edit</h1><p class="lead">Uploading a timetable is off in a practice copy.</p></div>`;
     return `<div class="card"><h1>Step 8 · Upload and edit</h1><p class="lead">Bring back the timetable the AI agent made and check it. Change it here until it is right, then publish it on step 9. Nothing is visible to teachers or students until you publish.</p></div>
-      ${exportCard()}${S.board ? `<div class="card" id="bdBox">${bdHTML()}</div>` : ""}`;
+      ${exportCard()}${S.board ? `<div class="card" id="bdBox">${bdHTML()}</div>` : ""}<div class="card" id="imWarn"${S.draft && draftHTML(S.draft)[1] ? "" : " hidden"}>${S.draft ? draftHTML(S.draft)[1] : ""}</div>`;
   },
   publish() {
     if (S.practice) return `<div class="card"><h1>Step 9 · Publish</h1><p class="lead">Publishing is off in a practice copy.</p></div>`;
@@ -1738,7 +1738,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.pbfind !== undefined) {   // a critical mistake with no week to show: step 8, the list showing it, its row in view (rows are found by their data, not by a selector built from the key)
     const key = b.dataset.pbfind, w = ((S.draft && S.draft.warnings) || []).find(x => x.key === key);
     S.step = stepAt("edit"); G.refetch = true; if (w && !Draft.isOpen(w)) S.dfilter = "all"; else if (S.dfilter !== "all") S.dfilter = "open"; save(); render();
-    const li = [...document.querySelectorAll("#imResult li.warn")].find(x => x.dataset.wkey === key); if (li) li.scrollIntoView({ block: "center" }); else window.scrollTo(0, 0);
+    const li = [...document.querySelectorAll("#imWarn li.warn")].find(x => x.dataset.wkey === key); if (li) li.scrollIntoView({ block: "center" }); else window.scrollTo(0, 0);
     return;
   }
   if (b.id === "imCheck") { uploadDraft(false); return; }
@@ -2673,7 +2673,9 @@ async function makePrintouts() {   // step 9: the printouts of the draft, with t
 function drawDraft() {   // the box for a typed request (and the buttons that answer it) keeps the focus and the caret across the redraw; its text comes back from S.fix.words
   const box = $("#imResult"); if (!box) return;
   const a = document.activeElement, mine = a && a.matches && a.matches("#fxAskIn, #fxAsk, [data-fxpick]"), caret = mine && a.id === "fxAskIn" ? [a.selectionStart, a.selectionEnd] : null;
-  box.innerHTML = S.draft ? draftHTML(S.draft) : ""; bdMount();
+  const parts = S.draft ? draftHTML(S.draft) : ["", ""], warn = $("#imWarn");
+  box.innerHTML = parts[0]; if (warn) { warn.innerHTML = parts[1]; warn.hidden = !parts[1]; }
+  bdMount();
   const inp = mine && $("#fxAskIn"); if (inp) { inp.focus(); const n = inp.value.length; try { inp.setSelectionRange(caret ? caret[0] : n, caret ? caret[1] : n); } catch (e) { } }
 }
 async function uploadDraft(replace) {
@@ -2691,7 +2693,7 @@ async function uploadDraft(replace) {
       return;
     }
     if (!r.ok) { drawDraft(); toast(j.error || "Could not check the timetable."); return; }
-    S.draft = j; S.fix = null; bdAfter(); drawDraft(); poll();
+    S.draft = j; S.fix = null; drawDraft(); poll();
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
   finally { btns.forEach(x => x.disabled = false); }
 }
@@ -2713,14 +2715,14 @@ async function publishDraft() {   // step 9
     if (r.status === 401) { location.href = "/login"; return; }
     if (r.status === 409 && j.critical) { toast(j.error); await refreshDraft(); return; }   // a critical mistake arrived meanwhile: the list shows it now
     if (!r.ok) { again(); toast(j.error || "Could not publish the timetable."); return; }
-    S.draft = j; S.fix = null; bdAfter(); again(); toast("Published. Teachers and students now see this timetable."); poll();
+    S.draft = j; S.fix = null; again(); toast("Published. Teachers and students now see this timetable."); poll();
   } catch (err) { again(); toast("Could not reach the server: " + err.message); }
   finally { DR.hold = false; DR.seen = null; }   // the next status is taken as seen, so the same summary causes no fetch
 }
 async function decide(answer, key) {   // answer is step5, open or met; the key is the warning's (it may hold a "|")
   const j = await post("/api/draft/decide", { key, answer });
   if (!j) return;
-  S.draft = j; bdAfter(); drawDraft();   // only the result area: render() would reset the chosen file names
+  S.draft = j; drawDraft();   // only the result area: render() would reset the chosen file names
   poll();
 }
 /* the draft on steps 8 and 9: asked for the first time the page needs it, again each time the person opens either step, and again when
@@ -2752,12 +2754,12 @@ async function loadDraft(again) {   // again: the person has just opened step 8 
     return;
   }
   DR.seen = sig;
-  if (S.draft && JSON.stringify(S.draft) === JSON.stringify(j)) { draftWatch(); return; }   // the same draft: nothing is redrawn
+  if (S.draft && JSON.stringify(S.draft) === JSON.stringify(j)) { bdSync(); draftWatch(); return; }   // the same draft: nothing is redrawn (the board is fetched again if it is for another one)
   const f = S.fix;
   if (!onDraftStep() || !S.draft) { S.draft = j; if (onDraftStep()) render(); }
   else if (STEPS[S.step][0] === "publish") { S.draft = j; render(); }
   else if (f) await fxAfter(j);   // the Fix card follows the new draft as it does after its own fix
-  else { S.draft = j; bdAfter(); drawDraft(); }
+  else { S.draft = j; drawDraft(); }
   draftWatch();
 }
 function draftWatch() {   // after each status: a draft that is not the one last fetched is fetched again while step 8 or 9 is on screen; elsewhere the next opening does it
@@ -2784,10 +2786,10 @@ function publishedMsg(j) {   // what both steps show once the draft is published
   return draftHead(j) + `<div class="okmsg">Published. Teachers and students now see this timetable.</div>
     <div class="row" style="margin-top:8px"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>`;
 }
-function draftHTML(j) {
+function draftHTML(j) {   // [the head (the school, the counts, the configuration line), the warnings with the Fix card and the rest]; the head is drawn in the upload card, the rest in its own card after the board
   const list = (xs, more) => `<ul>${xs.map(x => `<li>${esc(x)}</li>`).join("")}${more ? `<li>…and ${more} more</li>` : ""}</ul>`;
   const head = draftHead(j);
-  if (j.published) return publishedMsg(j) + `<p class="muted small">Its downloads and the personal student codes are on step 9.</p>`;
+  if (j.published) return [publishedMsg(j) + `<p class="muted small">Its downloads and the personal student codes are on step 9.</p>`, ""];
   const ws = j.warnings || [], c = Draft.counts(ws), f = S.dfilter === "all" ? "all" : "open", n = j.open ?? c.open, nc0 = j.critical ?? c.critical, n5 = j.step5 ?? c.step5;   // the server counts the step 5 decisions whose warning has gone
   const row = w => { const d = w.decision && w.decision.answer, ans = Draft.answerText(w);
     return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}" data-wkey="${esc(w.key)}">${warnHead(w)}
@@ -2797,9 +2799,7 @@ function draftHTML(j) {
       ${k.groups.map(g => `<h4>${esc(g.name)}</h4><ul class="warnlist">${g.items.map(row).join("")}</ul>`).join("")}
       ${k.kind === "rule" && nc.length ? `<p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul>` : ""}</details>`).join("")
     + (!groups.length && nc.length ? `<details open class="warnkind"><summary class="sev">Rules</summary><p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul></details>` : "");
-  return head + otherSchool(j)
-    + configLine(j)
-    + `<p class="warnsum"><span class="${nc0 ? "pbcrit" : ""}">${nc0} critical</span> · <b>${n} warning${n === 1 ? "" : "s"} open</b> · ${n5} settled on step 5</p>
+  return [head + otherSchool(j) + configLine(j), `<p class="warnsum"><span class="${nc0 ? "pbcrit" : ""}">${nc0} critical</span> · <b>${n} warning${n === 1 ? "" : "s"} open</b> · ${n5} settled on step 5</p>
       <div class="row warnfilter">${[["open", "Open"], ["all", "All"]].map(([v, l]) => `<label class="radio"><input type="radio" name="dfilter" data-dfilter="${v}"${v === f ? " checked" : ""}> ${l}</label>`).join("")}</div>`
     + (kinds || (ws.length ? `<p class="muted">Nothing in this list.</p>` : `<div class="okmsg">No warnings: no teacher, class, room or student is double-booked, and the timetable matches the setup.</div>`))
     + fixesHTML(j) + `<div id="fxBox">${fixHTML()}</div>`
@@ -2807,7 +2807,7 @@ function draftHTML(j) {
     + (j.notes && j.notes.length ? `<details><summary>Notes</summary>${list(j.notes)}</details>` : "")
     + ruleReportHTML(j.rule_report || [], j.typed || 0) + choicesUsedHTML(j.choices_used || [], j.choice_problems || [], j.choices || 0)
     + `<p class="muted small" style="margin-top:8px">${esc(Draft.gateText(nc0))} Publish is on step 9.</p>
-    <div class="row"><button class="primary" data-step="${stepAt("publish")}">Go to step 9</button></div>`;
+    <div class="row"><button class="primary" data-step="${stepAt("publish")}">Go to step 9</button></div>`];
 }
 /* step 9: what will be published, read-only. Every critical mistake with a way back to step 8, every other open warning, the
    fixes, and the Publish button (off while a critical mistake remains; the server refuses as well) */
@@ -3015,7 +3015,7 @@ async function fxApply(fixes) {   // one or two fixes together, as received; all
     else {   // refused: the sentence is toasted; the draft, the grid and the ways are fetched again (the list may have changed under the card)
       f.pre = null; f.preWant = null; f.ways = null; f.waysFail = false; fxAskClear(f);   // the typed answer too: it is as stale as the ways. The old Show and Apply buttons are not live while the new ways load
       const d = await fxGet("/api/draft"); if (S.fix !== f) return;
-      if (d && d.warnings) { S.draft = d; poll(); fxFollow(f, d.warnings); }
+      if (d && d.warnings) { S.draft = d; poll(); bdSync(); fxFollow(f, d.warnings); }
       await fxRefresh(f); if (S.fix !== f) return; fxDraw();
       if (f.warn && !f.settled) { await fxWays(f); if (S.fix === f) fxDraw(); }
     }
@@ -3062,7 +3062,7 @@ function fxFollow(f, warnings) {   // the warning the card was opened on, found 
   return true;
 }
 async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again, then the ways when the card has a warning
-  const f = S.fix; S.draft = j; poll(); bdLoad();
+  const f = S.fix; S.draft = j; poll(); bdSync();
   if (f) {
     f.pre = null; f.preWant = null; fxAskClear(f);
     const still = !!f.warn && fxFollow(f, j.warnings);
@@ -3166,29 +3166,27 @@ async function fxOpenFirst() {   // the Fix card with nothing chosen: the setup'
    (a row per day), drawn from the cards of GET /api/draft/board and laid out by Board (board.js). S.board lives while step 8 is
    open with a draft: {data, mode, find, fold, sel, slots, slotsFor, fail}. The cycle mode also keeps d, the day to go back to. */
 const BD = { gen: 0 };
-const bdShowable = () => !!(S.draft && !S.draft.published);
-function bdEnsure(id) {   // called by render(): the board exists on step 8 with a draft, and nowhere else
+const bdShowable = () => !!(S.draft && !S.draft.published && !S.practice);
+const bdSig = j => JSON.stringify([j.uploaded_at, j.fixes]);   // which draft a board was fetched for
+function bdEnsure(id, opening) {   // the board exists on step 8 with a draft, and nowhere else; it is fetched again whenever it is not for the draft the page has (every place that takes a new draft ends here, through drawDraft, render, or bdSync); opening: the step is being drawn, so a failed fetch is tried again
   if (id !== "edit" || !bdShowable()) { if (S.board) { S.board = null; BD.gen++; } return; }
-  if (!S.board) { S.board = { data: null, mode: { kind: "day", d: 0 }, find: "", fold: {}, sel: null, slots: null, slotsFor: null, fail: false }; bdLoad(); }
+  if (!S.board) S.board = { data: null, mode: { kind: "day", d: 0 }, find: "", fold: {}, sel: null, slots: null, slotsFor: null, fail: false, sig: null };
+  if (S.board.sig !== bdSig(S.draft) || (opening && S.board.fail)) bdLoad();
 }
-function bdAfter() {   // a new draft answer is on the page: the board is fetched again (or made, when the draft is the first)
-  if (STEPS[S.step][0] !== "edit") return;
-  if (!bdShowable()) { if (S.board) { S.board = null; BD.gen++; } bdMount(); return; }
-  if (S.board) bdLoad(); else bdEnsure("edit");
-  bdMount();
-}
+const bdSync = () => { bdEnsure(STEPS[S.step][0], false); bdMount(); };
 function bdMount() {   // the card is there when there is a board, and gone when there is not
+  bdEnsure(STEPS[S.step][0], false);
   const box = $("#bdBox");
   if (!S.board) { if (box) box.remove(); return; }
   if (box) return;
-  const at = $("#printouts"); if (!at) return;
-  at.insertAdjacentHTML("afterend", `<div class="card" id="bdBox"></div>`); bdDraw();
+  const at = $("#imWarn"); if (!at) return;
+  at.insertAdjacentHTML("beforebegin", `<div class="card" id="bdBox"></div>`); bdDraw();
 }
 const bdCard = id => { const d = S.board && S.board.data; return d && d.cards.find(c => c.id === id) || null; };
 const bdClasses = d => [].concat(...(d.levels || []).map(lv => lv.classes));
 async function bdLoad() {
   const b = S.board; if (!b) return;
-  const gen = ++BD.gen, j = await fxGet("/api/draft/board");
+  const gen = ++BD.gen; b.sig = bdSig(S.draft); const j = await fxGet("/api/draft/board");
   if (S.board !== b || gen !== BD.gen) return;   // the step was left, or a newer fetch is out
   if (!j || !Array.isArray(j.cards)) { b.data = null; b.fail = true; bdDraw(); return; }
   b.data = j; b.fail = false;
@@ -3196,6 +3194,7 @@ async function bdLoad() {
   if (b.mode.kind === "cycle" && !bdClasses(j).includes(b.mode.cls)) b.mode = { kind: "day", d: b.mode.d };
   if (!(b.mode.d >= 0 && b.mode.d <= last)) b.mode.d = 0;   // a day past the last (or none at all) becomes the first
   if (b.sel !== null && !bdCard(b.sel)) b.sel = null;
+  if (!Board.finds(j).some(o => o.value === b.find)) b.find = "";
   bdDraw();
 }
 function bdDraw() {   // #bdBox again, the board kept where it was scrolled
