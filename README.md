@@ -93,15 +93,17 @@ is not on step 3, and a named subject the class has only in groups.
    and the typed rules and choices used that the agent reported. A warning for another school than the saved setup, and
    which configuration the timetable was made from, are shown too. Below the upload, the timetable is shown as a board
    of one day (a row per class, the periods across) or of one class's whole cycle; a lesson is dragged to another time
-   on its row, or clicked and then a place clicked, and **Undo the last timetable change** puts it back. Each place is
-   coloured: green is clean, amber bends a Prefer, red lands but clashes, grey cannot take it (a break, outside the day).
+   on its row, or clicked and then a place clicked, and **Undo the last timetable change** (at the end of the counters, or
+   Ctrl or Cmd+Z) puts it back. Each place is coloured: green is clean, amber bends a Prefer, red lands with a problem (a
+   clash or a broken rule), blue has another lesson there and asks, grey cannot take it (a break, outside the day).
    A lesson dropped where it clashes lands there and is marked on its card, and the counters above the board (Not placed,
    No teacher, In two places, In a break, No room) count what is wrong; a click on one steps through its lessons. A drop
-   on another lesson asks first: swap with it, put it beside it (when both can be there), or push it out. Held over another
+   on another lesson asks first: swap with it, put it beside it (when both can be there), or push it out; pushing out a band
+   names the band and says which other classes lose it too. Held over another
    day's tab for half a second, a dragged lesson goes to that day. **Lift out** (or Ctrl or Cmd+X) takes a lesson off the
    board, and a pushed-out lesson goes the same way: both wait in **Not placed**, a tab of the panel beside the board, until they
    are dragged or pasted (Ctrl or Cmd+V, where the pointer is) back onto their row, deleted, or undone. **Delete this
-   lesson** asks first and says when step 5 asks for the lesson; the tray's **Step 5 asks for these** lists the lessons
+   lesson** asks first and says why when it should not go (step 5 asks for the lesson, or the rule it breaks); the tray's **Step 5 asks for these** lists the lessons
    step 5 plans that the timetable lacks, to drag onto a free place. Nothing is published, printed or downloaded while a
    lesson waits in Not placed: step 9 says how many and sends you back here. The panel beside the board (under it on a
    narrow window) has three tabs: **Not placed**, **Warnings** and **Changes**; it is as tall as the board and scrolls on

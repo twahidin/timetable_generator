@@ -1754,11 +1754,13 @@ document.addEventListener("click", async e => {
   if (b.id === "saveJson") { if (!S.spec) { toast("Open or start a setup first."); return; } const blob = new Blob([JSON.stringify(S.spec, null, 1)], { type: "application/json" }); dl(blob, `${sc().name || "timetable"}_setup.json`); return; }
 });
 document.addEventListener("toggle", e => { if (e.target.classList && e.target.classList.contains("bands")) S.bandsOpen = e.target.open; }, true);
-document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / Ctrl+Y redo; inside a text box the browser's own undo applies
+document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / Ctrl+Y redo; inside a text box the browser's own undo applies. On step 8, with the board there, the keys are the timetable's: Z undoes its last change, redo does nothing
   if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
-  const k = e.key.toLowerCase(); if (k !== "z" && k !== "y") return;
+  const k = (e.key || "").toLowerCase(); if (k !== "z" && k !== "y") return;
   if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
-  e.preventDefault(); undo(k === "z" && !e.shiftKey);
+  e.preventDefault();
+  if (S.board) { if (k === "z" && !e.shiftKey) bdUndo(); return; }
+  undo(k === "z" && !e.shiftKey);
 });
 document.addEventListener("input", e => { if (VV.draft && (e.target.id === "vvKindName" || e.target.id === "vvBlockName")) VV.draft.text = e.target.value; });
 document.addEventListener("keydown", e => {   // step 1, Blocks: Enter in a small name box adds; Escape drops the box, or closes the open room
@@ -2702,7 +2704,7 @@ async function uploadDraft(replace) {
     if (r.status === 401) { location.href = "/login"; return; }
     if (r.status === 409 && j.fixes && !replace) {
       drawDraft();
-      if (confirm(`The draft has ${j.fixes} fix${j.fixes === 1 ? "" : "es"} that ${j.fixes === 1 ? "was" : "were"} never published. Replace the draft with this file?`)) { btns.forEach(x => x.disabled = false); return uploadDraft(true); }
+      if (confirm(`${j.error || "The draft has changes that were never published."} Replace the draft with this file?`)) { btns.forEach(x => x.disabled = false); return uploadDraft(true); }   // the server's sentence counts the lessons waiting in Not placed
       return;
     }
     if (!r.ok) { drawDraft(); toast(j.error || "Could not check the timetable."); return; }
@@ -2790,9 +2792,9 @@ const loadingDraft = () => !S.draft && !S.draftFailed && !!(G.st && G.st.draft);
 const LOADING = `<p class="muted" style="margin-top:10px">Loading the draft…</p>`;
 const otherSchool = j => j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.file_school)}</b>, but the setup saved in the app is for <b>${esc(j.school)}</b>. Check it is the right file.</p>` : "";
 const fixList = (fl, newest) => `<ol class="fxlist"${newest ? " reversed" : ""}>${(newest ? Draft.batches(fl).reverse() : Draft.batches(fl)).map(b => `<li>${b.items.map(x => `<div>${esc(x.text)}</div>`).join("")}<span class="muted small">${esc(b.items[b.items.length - 1].at)}</span></li>`).join("")}</ol>`;
-function warnHead(w) {   // a warning's first lines, the same on steps 8 and 9: its critical kind, the sentence, then strength, the two sides and where
-  const side = Draft.sideText(w), where = Draft.whereText(w).map(x => ` · ${esc(x)}`).join("");
-  return `<div class="wt">${w.crit ? `<span class="chip pbmark">${esc(Draft.critWord(w.crit))}</span>` : ""}${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where}</div>`;
+function warnHead(w) {   // a warning's first lines, the same on steps 8 and 9: its critical kind (unless the sentence starts with it), the sentence, then strength, the two sides and where
+  const side = Draft.sideText(w), where = Draft.whereText(w).map(x => ` · ${esc(x)}`).join(""), kind = w.crit ? Draft.critWord(w.crit) : "";
+  return `<div class="wt">${kind && String(w.text || "").indexOf(kind + ":") !== 0 ? `<span class="chip pbmark">${esc(kind)}</span>` : ""}${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where}</div>`;
 }
 function draftHead(j) { return `<h3 style="margin-top:14px">${esc(j.school)} · ${esc(j.timetable)}</h3><p class="muted small">${j.lessons} lessons · ${j.classes} classes · ${j.teachers} teachers · ${j.students} students</p>`; }
 function publishedMsg(j) {   // what both steps show once the draft is published
@@ -2813,7 +2815,7 @@ function draftHTML(j) {   // {head: the school, the counts, the configuration li
       ${k.groups.map(g => `<h4>${esc(g.name)}</h4><ul class="warnlist">${g.items.map(row).join("")}</ul>`).join("")}
       ${k.kind === "rule" && nc.length ? `<p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul>` : ""}</details>`).join("")
     + (!groups.length && nc.length ? `<details open class="warnkind"><summary class="sev">Rules</summary><p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul></details>` : "");
-  const no = Math.max(0, n - nc0);   // the open warnings that are not critical: critical and other add up to the Warnings tab's number
+  const no = Draft.others(ws);   // the open warnings that are not critical, counted on their own
   const warns = `<p class="warnsum"><span class="${nc0 ? "pbcrit" : ""}">${nc0} critical</span> · <b>${no} other warning${no === 1 ? "" : "s"} open</b> · ${n5} settled on step 5</p>
       <div class="row warnfilter">${[["open", "Open"], ["all", "All"]].map(([v, l]) => `<label class="radio"><input type="radio" name="dfilter" data-dfilter="${v}"${v === f ? " checked" : ""}> ${l}</label>`).join("")}</div>`
     + (kinds || (ws.length ? `<p class="muted">Nothing in this list.</p>` : `<div class="okmsg">No warnings: no teacher, class, room or student is double-booked, and the timetable matches the setup.</div>`))
@@ -3371,10 +3373,11 @@ function bdDraftDraw() {   // the draft changed (a fix, an answer, a filter, the
   if (old) old.remove(); if (foot) foot.remove();
   box.insertAdjacentHTML("beforeend", bdOldHTML() + `<div id="bdFoot">${parts.foot}</div>`);
 }
-const bdOpenWarnings = () => ((S.draft && S.draft.warnings) || []).filter(w => !w.decision && !w.crit).length;   // the draft's open warnings that are not critical mistakes
+const bdOpenWarnings = () => Draft.others((S.draft && S.draft.warnings) || []);   // the draft's open warnings that are not critical mistakes
 function bdCountersHTML(d) {   // above the hint: what is wrong on the board, a button a kind; a click steps through its cards
-  const n = Board.counts(d), w = bdOpenWarnings();
-  return `<div class="row bdcount">${Board.COUNTERS.map(([k, label]) => `<button data-bdcount="${k}" class="${n[k] ? (k === "noroom" ? "warn" : "crit") : ""}"${n[k] ? "" : ` aria-disabled="true"`}>${esc(label)} ${n[k]}</button>`).join("")}<button data-bdwarn="1">Other warnings ${w}</button></div>`;
+  const n = Board.counts(d), w = bdOpenWarnings(), has = !!bdLastFix();
+  const undo = `<button data-bdundo="1" class="bdundo${has ? "" : " gone"}"${has ? "" : ` aria-hidden="true" tabindex="-1"`}${FX.busy ? " disabled" : ""}>Undo the last timetable change</button>`;   // always in the row, hidden with no change: the row never changes height
+  return `<div class="row bdcount">${Board.COUNTERS.map(([k, label]) => `<button data-bdcount="${k}" class="${n[k] ? (k === "noroom" ? "warn" : "crit") : ""}"${n[k] ? "" : ` aria-disabled="true"`}>${esc(label)} ${n[k]}</button>`).join("")}<button data-bdwarn="1">Other warnings ${w}</button>${undo}</div>`;
 }
 const bdLastFix = () => { const l = S.draft && S.draft.fixes; return l && l.length ? l[l.length - 1] : null; };
 function bdLineHTML() {   // the one status line under the hint: the swap question, else the place under the pointer, else the selected card, else the last change
@@ -3385,9 +3388,10 @@ function bdLineHTML() {   // the one status line under the hint: the swap questi
     return `<span>${esc(q.text)}</span>${q.also.map(t => `<span class="muted small">${esc(t)}</span>`).join("")}${q.swap ? `<button data-bdswap="1"${dis}>${esc(q.swap)}</button>` : ""}${q.beside ? `<button data-bdbeside="1"${dis}>${esc(q.beside)}</button>` : ""}${q.push ? `<button data-bdpush="1"${dis}>${esc(q.push)}</button>` : ""}<button data-bdcancel="1">Cancel</button>`;
   }
   const k = b.del ? bdCard(b.del.id) : null;
-  if (k) {   // "Delete this lesson" asks first, saying when step 5 asks for the lesson
+  if (k) {   // "Delete this lesson" asks first, saying why when the delete is a "no": step 5 asks for the lesson, or the rule it breaks
     const no = b.del.j.state === "no", dis = FX.busy ? " disabled" : "";
-    return `<span>${esc(`Delete ${k.what}?`)}</span>${no ? `<span class="bdwhy">Step 5 asks for this lesson.</span>${b.del.j.why ? `<span class="muted small">${esc(b.del.j.why)}</span>` : ""}` : ""}<button data-bddelgo="1"${dis}>Delete</button><button data-bdcancel="1">Cancel</button>`;
+    const why = b.del.j.why ? esc(b.del.j.why) : "", said = !no ? "" : b.del.j.plan ? `<span class="bdwhy">Step 5 asks for this lesson.</span>${why ? `<span class="muted small">${why}</span>` : ""}` : why ? `<span class="bdwhy">${why}</span>` : "";   // "Step 5 asks" only when the plan is the reason
+    return `<span>${esc(`Delete ${k.what}?`)}</span>${said}<button data-bddelgo="1"${dis}>Delete</button><button data-bdcancel="1">Cancel</button>`;
   }
   if (b.pt) return `<span>${esc(b.pt)}</span>`;
   if (c) {
@@ -3407,13 +3411,13 @@ function bdLineWarnings(c) {   // the selected lesson's open warnings, a short l
   const line = w => { const k = w.crit ? Draft.critWord(w.crit) : "", t = String(w.text || ""); return k && t.indexOf(k + ":") !== 0 ? `${k}: ${t}` : t; };   // a sentence that already starts with its kind is not led twice
   return ws.slice(0, 3).map(w => `<span class="bdlw${w.crit ? " crit" : ""}">${esc(line(w))}</span>`).join("") + (ws.length > 3 ? `<span class="bdlw muted">and ${ws.length - 3} more in Warnings</span>` : "");
 }
-const BDHINT = "Drag a lesson to another time on its row, or click it and then click a place. Green is clean, amber bends a rule, red lands but clashes, grey cannot take it. Drop on another lesson to swap or push it out. Ctrl or Cmd+X lifts the selected lesson out; Ctrl or Cmd+V puts it where the pointer is.";
+const BDHINT = "Drag a lesson to another time on its row, or click it and then click a place. Green is clean, amber bends a rule, red lands with a problem, blue has another lesson there and asks, grey cannot take it. Ctrl or Cmd+X lifts the selected lesson out; Ctrl or Cmd+V puts it where the pointer is; Ctrl or Cmd+Z undoes the last change.";
 function bdLineDraw() { const el = $("#bdLine"); if (el && S.board && S.board.data) el.innerHTML = bdLineHTML(); }
 function bdBusy() {   // a post starts or ends: the board's buttons that post follow it, without a redraw
   const box = $("#bdBox"); if (!box) return;
   box.querySelectorAll("[data-bdundo], [data-bdswap], [data-bdbeside], [data-bdpush], [data-bdlift], [data-bddel], [data-bddelgo]").forEach(x => { x.disabled = FX.busy; });
 }
-const BDST = ["own", "ok", "prefer", "no", "na"];
+const BDST = ["own", "ok", "prefer", "no", "na", "ask"];
 function bdPaint() {   // the cells and the strip of every row take the state of the card selected or pressed, and the cards it can be swapped with get an outline (classes only, so a drag in the air is not cancelled); rows it cannot be dropped on are dimmed
   const b = S.board, box = $("#bdBox"); if (!b || !b.data || !box) return;
   const id = bdWanted(), c = id !== null ? bdCard(id) : null, d = b.data, slots = c && b.slotsFor === c.id ? b.slots : null;
@@ -3481,7 +3485,7 @@ function bdPeriodAt(row, x) {   // the period under a pointer's x on a row, from
 const BDWHY = { class: "A lesson stays with its class. Drop it on its own row.", classClick: "A lesson stays with its class. Click a place on its own row.", wait: "Still working out where this lesson fits.", failed: "Where this lesson fits could not be loaded. Click the lesson again.", none: "That lesson cannot go there.",
   working: "Working out where this lesson fits…", changed: "The timetable changed. Working out where this lesson fits…", gone: "The timetable changed. Try again.", busy: "Wait for the last change to finish.", lift: "Drop here to lift it out.",
   taken: "Another lesson is there. Lift it out first.", paste: "Point at a place on its row, then paste.", delWait: "Still working out…",
-  off: "Drop it on its row, or on the panel to lift it out.", offTray: "Drop it on its row." };
+  off: "Drop it on its row, or on the panel to lift it out.", offTray: "Drop it on its row.", noUndo: "There is nothing to undo on the timetable." };
 const bdLen = c => Number(c.n) > 0 ? Number(c.n) : 1;
 const bdTaken = (c, s) => S.board.data.cards.some(x => x.d === s.d && (x.classes || []).some(k => c.classes.includes(k)) && x.p < s.p + bdLen(c) && s.p < x.p + bdLen(x));   // another lesson of the classes of c is in the periods it would take
 function bdSlotAt(c, at) {   // what the board knows of a place at = {cls, d, p, over} (over: the lesson under the pointer, or null): {slot, why}; why is the sentence's key when the lesson cannot go there
@@ -3509,7 +3513,7 @@ function bdWhyText(a, drag) {
   if (a.why === "class") return drag ? BDWHY.class : BDWHY.classClick;
   if (a.why === "own") return Board.tell(a.slot, S.board.data.days);
   if (a.why === "slot") return a.slot.why || BDWHY.none;
-  if (a.why === "stuck") return `Another lesson is there, and it cannot be pushed out: ${(a.slot.push && a.slot.push.why) || a.slot.why || ""}`.trim();
+  if (a.why === "stuck") return `Another lesson is there and it cannot be moved out: ${(a.slot.push && a.slot.push.why) || a.slot.why || ""}`.trim();
   return BDWHY[a.why] || BDWHY.none;
 }
 function bdAct(c, a, drag) {   // a judged place: ask, make the change, or say why not
@@ -3536,6 +3540,11 @@ async function bdSend(url, body, c, keep) {   // the board's own sender: one pos
     } else bdLoad();
   } catch (e) { toast("Could not reach the server: " + e.message); } finally { fxBusy(false); bdLineDraw(); }
 }
+function bdUndo() {   // the Undo buttons and Ctrl or Cmd+Z on step 8: the draft's last change taken back (the line then says which), one post at a time
+  const b = S.board; if (!b || b.wait || b.drag !== null) return;
+  if (!bdLastFix()) { toast(BDWHY.noUndo); return; }
+  bdSend("/api/draft/undo", {}, null);
+}
 function bdClick(b) {   // true when the click was the board's
   const d = b.dataset, bd = S.board; if (!bd) return false;
   if (bd.wait && b.closest("#bdBox")) return true;   // a drop waits for its answer: the board takes nothing else
@@ -3544,7 +3553,7 @@ function bdClick(b) {   // true when the click was the board's
   if (d.bdall !== undefined) { bd.mode = { kind: "day", d: bd.mode.d }; bdDraw(); return true; }
   if (d.bdfold !== undefined) { if (bd.fold[d.bdfold]) delete bd.fold[d.bdfold]; else bd.fold[d.bdfold] = true; bdDraw(); return true; }
   if (d.bdclose !== undefined) { bd.sel = null; bd.ask = null; bd.del = null; bdDraw(); bdWant(); return true; }
-  if (d.bdundo !== undefined) { bdSend("/api/draft/undo", {}, null); return true; }
+  if (d.bdundo !== undefined) { bdUndo(); return true; }
   if (d.bdcancel !== undefined) { bd.ask = null; bd.del = null; bdLineDraw(); return true; }
   if (d.bddel !== undefined) {   // "Delete this lesson": the question, from the delete's judgement that came with the lesson's slots
     const c = bd.sel !== null ? bdCard(bd.sel) : null; if (!c || c.entry) return true;
@@ -3553,9 +3562,9 @@ function bdClick(b) {   // true when the click was the board's
     if (j.state === "na") { toast(j.why || BDWHY.none); return true; }
     bd.ask = null; bd.del = { id: c.id, j }; bdLineDraw(); return true;
   }
-  if (d.bddelgo !== undefined) {   // the delete is forced exactly when step 5 asks for the lesson (the server keeps it only then)
+  if (d.bddelgo !== undefined) {   // the delete is forced when its judgement was "no", with the sentence shown (the server keeps it only for that same reason)
     const x = bd.del, c = x && bdCard(x.id); if (!c) return true;
-    bdSend("/api/draft/fix", Object.assign({ kind: "delete", id: c.id }, x.j.state === "no" ? { force: true } : {}), c); return true;
+    bdSend("/api/draft/fix", Board.deleteFix(c, x.j), c); return true;
   }
   if (d.bdswap !== undefined || d.bdpush !== undefined || d.bdbeside !== undefined) {   // the question's answer: the fix of the lesson asked about, at the place asked about
     const a = bd.ask, c = a && bdCard(a.id), how = d.bdswap !== undefined ? "swap" : d.bdbeside !== undefined ? "beside" : "push";
@@ -3754,12 +3763,16 @@ document.addEventListener("dragleave", e => {   // the pointer left a day's tab 
   const b = S.board, tab = e.target.closest && e.target.closest("#bdBox .bdtab"); if (!b || b.drag === null || !tab) return;
   if (!(e.relatedTarget && tab.contains(e.relatedTarget))) bdTabHover(null);
 });
-document.addEventListener("mousemove", e => {   // where the pointer is on the board (a row and a period, by a click's maths), for a paste; a move with no button down after a drag means that drag has ended
+document.addEventListener("mousemove", e => {   // where the pointer is, for a paste (the row and period under it are read at the key press, on the board as it is drawn then); a move with no button down after a drag means that drag has ended
   const b = S.board; if (!b) return;
   if (b.drag !== null && e.buttons === 0 && Date.now() - BD.over > 300) bdLostDrag();
-  const row = e.target.closest && e.target.closest("#bdBox .bdrow"), p = row ? bdPeriodAt(row, e.clientX) : -1;
-  b.mouse = row && p >= 0 ? { cls: row.dataset.cls, d: Number(row.dataset.d), p } : null;
+  b.mouse = { x: e.clientX, y: e.clientY };
 });
+function bdPointed() {   // the place of the board under the pointer now -> {cls, d, p} or null
+  const b = S.board, m = b && b.mouse; if (!m) return null;
+  const el = document.elementFromPoint(m.x, m.y), row = el && el.closest && el.closest("#bdBox .bdrow"), p = row ? bdPeriodAt(row, m.x) : -1;
+  return row && p >= 0 ? { cls: row.dataset.cls, d: Number(row.dataset.d), p } : null;
+}
 const bdInField = e => !!(e.target.isContentEditable || (e.target.closest && e.target.closest("input, select, textarea, [contenteditable]")));
 document.addEventListener("keydown", e => {   // Escape clears the board's selection and withdraws its question; in a field, Escape is the field's
   const b0 = S.board; if (e.key === "Escape" && b0 && b0.drag !== null) bdLostDrag();
@@ -3776,7 +3789,7 @@ document.addEventListener("keydown", e => {   // Ctrl+X / Cmd+X lifts the select
   if (!bdInTray(c)) return;
   e.preventDefault();
   if (FX.busy) { toast(BDWHY.busy); return; }
-  const m = b.mouse;
+  const m = bdPointed();
   if (!m || !Board.onRow(c, { cls: m.cls }, b.data)) { toast(BDWHY.paste); return; }
   bdTry(c, { cls: m.cls, d: m.d, p: m.p, over: null }, false);
 });

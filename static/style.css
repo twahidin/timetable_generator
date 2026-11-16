@@ -448,12 +448,13 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcard.sel{outline:2px solid var(--accent);outline-offset:-1px;z-index:2}
 .bdcard.fade{opacity:.25}
 .bdcell.ok{background:#d6f1e0;cursor:pointer}.bdcell.prefer{background:#fff0c2;cursor:pointer}.bdcell.no{background:#fbdcdc;cursor:not-allowed}.bdcell.na{background:#eceef2}
+.bdcell.ask{background:#dcebfa;cursor:pointer}   /* another lesson is there and a drop asks: swap, put it beside or push it out */
 .bdcell.own{box-shadow:inset 0 0 0 2px var(--accent)}
 .bdcell.over{box-shadow:inset 0 0 0 3px var(--navy)}
 .bdrow.dim{opacity:.4}
 .bdcard[draggable=true]{cursor:grab}
 .bdmark{display:block;height:6px;border-left:1px solid var(--line);background:#fff}
-.bdmark.ok{background:#4cb87a}.bdmark.prefer{background:#f2b632}.bdmark.no{background:#e46a6a}.bdmark.na{background:#d3d7df}
+.bdmark.ok{background:#4cb87a}.bdmark.prefer{background:#f2b632}.bdmark.no{background:#e46a6a}.bdmark.na{background:#d3d7df}.bdmark.ask{background:#7fb2e5}
 .bdmark.own{background:var(--accent)}
 .bdcard.swap{outline:2px dashed #4cb87a;outline-offset:-2px}.bdcard.swap.swapprefer{outline-color:#f2b632}
 .bdcard{position:relative}
@@ -465,6 +466,7 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcount{gap:6px;flex-wrap:wrap;margin:6px 0}
 .bdcount button.crit{background:#fbdcdc;border-color:#e46a6a;color:#8a1c1c}.bdcount button.warn{background:#fff0c2;border-color:#f2b632;color:#5c4200}
 .bdcount button[aria-disabled=true]{cursor:default}
+.bdcount .bdundo{margin-left:auto}.bdcount .bdundo.gone{visibility:hidden}   /* kept in the row while there is no change, so the row keeps its height */
 .bdmain{display:flex;gap:8px;align-items:flex-start;margin-top:8px}
 .bdmain .bdwrap{flex:1 1 auto;min-width:0;margin-top:0}
 #bdTray{font-size:11px}
