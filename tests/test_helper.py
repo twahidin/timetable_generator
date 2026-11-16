@@ -56,6 +56,16 @@ def a_lesson_breaking_a_rule_gets_moves_that_stop_breaking_it():
     day = dict(key=f"rule:0:{A}|1", kind="rule", text="x", where=None); assert helper.involved(m, day) == [1, 2]   # a day-level key: that class's lessons that day
 
 @t
+def a_lesson_with_no_teacher_is_not_offered_moves():
+    T = "Michelle Goh"
+    m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [], level=LV), lesson(2, 1, 3, 1, [A], "English", ENTIRE, [T], level=LV), lesson(3, 1, 3, 1, [B], "English", ENTIRE, [T], level=LV)])
+    m["checks"] = export.check_model(m); ws = verify.clashes(m)
+    nt = next(w for w in ws if w["crit"] == "noteacher"); tc = next(w for w in ws if w["crit"] == "teacher")
+    assert nt["where"]["id"] == 1 and helper.involved(m, nt) == [1]   # the place keeps the lesson, so the Fix card selects it
+    out = helper.suggest(m, sp, DAYS, nt); assert out == dict(suggestions=[], none="This lesson has no teacher. Pick one under Change the teacher.", blocked=[]), out
+    assert helper.suggest(m, sp, DAYS, tc)["suggestions"]   # a teacher clash on the same model still has ways
+
+@t
 def a_suggestion_never_trades_one_warning_for_another():       # Review Focus 1
     right, other = "Sabrina Koh", "Jasper Wong"
     m, sp = model_with([lesson(1, 0, 2, 1, [A], "English Language", ENTIRE, [right], level=LV), lesson(2, 0, 2, 1, [B], "English Language", ENTIRE, [right], level=LV)])

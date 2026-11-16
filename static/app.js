@@ -6,7 +6,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const KEY = "ttsetup.v1";
 const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, tg: { lv: "", subj: "", t: "" }, tf: { dept: "", q: "" }, pick: { lessons: new Set(), students: new Set(), teachers: new Set(), shown: {}, last: {}, t: "", g: "", c: "", d: "", r: "", a: "", p: "" }, undo: [], redo: [], last: null };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
-  ["teachers", "4 Teachers"], ["lessons", "5 Department map"], ["rules", "6 Configuration & constraints"], ["download", "7 Download"], ["publish", "8 Publish"], ["students", "Students"]];
+  ["teachers", "4 Teachers"], ["lessons", "5 Department map"], ["rules", "6 Configuration & constraints"], ["download", "7 Download"], ["edit", "8 Upload and edit"], ["publish", "9 Publish"], ["students", "Students"]];
 
 /* ---------------- storage, server
    The setup lives on the server. SYNC.base is the copy the server last confirmed (at version SYNC.v); S.spec is the
@@ -61,7 +61,7 @@ function keepLocal() {
 function saved() {   // this browser's copy in the current format; the step is kept by name ("at")
   try {
     const x = JSON.parse(localStorage.getItem(KEY) || "null"); if (!x || !x.sync) return null;
-    const at = { generate: "publish", adjust: "publish" }[x.at] || x.at;   // steps that no longer exist: their work ends on Publish now
+    const at = { generate: "edit", adjust: "edit" }[x.at] || x.at;   // steps that no longer exist: their work ends on Upload and edit now
     x.step = at && stepAt(at) >= 0 ? stepAt(at) : 1; return x;
   } catch (e) { return null; }
 }
@@ -235,11 +235,11 @@ async function putSetup(spec, why, step = 1) {
   await openServer(srv, step); return true;
 }
 const committee = () => !!(G.st && G.st.role === "committee");
-/* what a department head sees. The server decides what a head may change; the page mirrors it: Download, Publish and
+/* what a department head sees. The server decides what a head may change; the page mirrors it: Download, Upload and edit, Publish and
    Students are not shown, every step but 4 and 5 is read-only, and on 4 only a provisional teacher's row or card can be changed (never its
    Provisional or Second department: only the committee gives a second department). A head can add teachers, tick them, and switch between Cards and Table. A practice copy is the head's own: nothing is read-only there (the hidden steps stay hidden). */
 const isHead = () => !!(G.st && G.st.role === "head");
-const HEAD_HIDDEN = ["download", "publish", "students"];
+const HEAD_HIDDEN = ["download", "edit", "publish", "students"];
 const stepShown = i => !(isHead() && STEPS[i] && HEAD_HIDDEN.includes(STEPS[i][0]));
 const locked = id => isHead() && !S.practice && !["start", "_old", "teachers", "lessons"].includes(id);   // true: nothing on this step can be changed
 const provisionalRow = t => !!t && t.provisional === "Yes";
@@ -895,7 +895,7 @@ function render() {
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
   paintPublished();
-  if (id === "publish") loadDraft();
+  if (id === "edit" || id === "publish") { const again = G.refetch; G.refetch = false; loadDraft(again); }   // again: the person opened the step
   if (id === "download") fitCheck();
 }
 const stepAt = id => STEPS.findIndex(s => s[0] === ({ blocks: "lessons", config: "rules", choices: "rules" }[id] || id));   // bands are a card on the teaching-groups step; the settings and the give-way list open step 6
@@ -916,13 +916,12 @@ function renderIssues() {
 
 
 function exportCard() {
-  return `<div class="card" id="printouts"><h2>Publish the finished timetable</h2><p class="muted">Upload the timetable the chatbot made, with its setup workbook. The timetable can be a workbook with a Lessons sheet or a timetable database (.sqlite); a database made by this app or the skill holds its setup, so it can come on its own.</p>
-    <p class="muted"><b>Make printouts</b> gives you every timetable as PDFs (one page per class, teacher, room and student), one Excel file with them all, a searchable HTML page and the database, to keep or share. <b>Check</b> keeps the file as a draft, checks it against the setup and lists what it found; decide on each warning, then publish and teachers and students see it straight away.</p>
+  return `<div class="card" id="printouts"><h2>Upload the timetable</h2><p class="muted">Upload the timetable the chatbot made, with its setup workbook. The timetable can be a workbook with a Lessons sheet or a timetable database (.sqlite); a database made by this app or the skill holds its setup, so it can come on its own.</p>
+    <p class="muted"><b>Check</b> keeps the file as a draft, checks it against the setup and lists what it found. Fix it here, then go to step 9 to publish.</p>
     <div class="row" style="margin-top:10px"><label class="filebtn">Setup workbook (.xlsx)<input type="file" id="exSetup" accept=".xlsx" hidden></label><span class="muted" id="exSetupName">none chosen</span></div>
     <div class="row" style="margin-top:8px"><label class="filebtn">Timetable (.xlsx or .sqlite)<input type="file" id="exTT" accept=".xlsx,.sqlite,.sqlite3,.db" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
-    <div class="row" style="margin-top:10px"><label><input type="checkbox" id="exSingle" checked> Also a separate PDF for every class, teacher, room and student</label></div>
-    <div class="row" style="margin-top:12px"><button class="primary" id="exGo">Make printouts (.zip)</button><button id="imCheck">Check</button><span class="muted" id="exMsg"></span></div>
-    <div id="imResult">${S.draft ? draftHTML(S.draft) : ""}</div></div>`;
+    <div class="row" style="margin-top:12px"><button class="primary" id="imCheck">Check</button></div>
+    <div id="imResult">${S.draft ? draftHTML(S.draft) : loadingDraft() ? LOADING : ""}</div></div>`;
 }
 /* step 6's third card: the second choices in their give-way order, each editable in place, and the form that adds one */
 function giveWay(out, crit, psel, weeks, days) {
@@ -1339,7 +1338,7 @@ function tkSecond(ti, dept) {
 }
 const VIEWS = {
   start() {
-    const how = `<div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher twice in a band, a lesson with no periods, a teacher over their allowance).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Publish</b>, upload the timetable it hands back, check it and publish. Teachers and students then sign in with their codes.</li></ol></div>`;
+    const how = `<div class="card"><h2>How it works</h2><ol class="howto"><li>Fill the steps on the left. The panel on the right lists anything that does not add up (a teacher twice in a band, a lesson with no periods, a teacher over their allowance).</li><li>On <b>Download</b>, get the setup workbook and the timetable skill, and give both to an AI agent: it makes the timetable.</li><li>On <b>Upload and edit</b>, upload the timetable it hands back, check it and fix what it finds; on <b>Publish</b>, publish it. Teachers and students then sign in with their codes.</li></ol></div>`;
     const samples = `<button data-begin="secondary|sample"><b>Secondary school · sample</b><span class="muted">A fictional 16-class secondary school with G1/G2/G3 banding, option bands and rules. Opens as a practice copy: nothing is saved for the school.</span></button>
         <button data-begin="primary|sample"><b>Primary school · sample</b><span class="muted">A fictional 18-class primary school, weekly timetable, Standard/Foundation banding at P5–P6. Opens as a practice copy: nothing is saved for the school.</span></button>`;
     const blanks = `<button data-begin="secondary|blank"><b>Secondary school · blank</b><span class="muted">Typical subjects and a day shape filled in; you add rooms, classes, teachers and lessons.</span></button>
@@ -1621,14 +1620,19 @@ const VIEWS = {
       <div class="card" style="margin-top:16px"><h2>How to make the timetable</h2><ol class="howto">
         <li>In Claude (or another agent that can run Python), add the skill: upload the .zip as a skill, or attach SKILL.md to the conversation.</li>
         <li>Upload your setup workbook and ask: <i>"Generate our timetable from this setup. Report anything that does not fit."</i></li>
-        <li>The agent checks the inputs, solves (a few minutes for a typical school), and hands back the timetable file. Bring that file to step 8, Publish.</li>
+        <li>The agent checks the inputs, solves (a few minutes for a typical school), and hands back the timetable file. Bring that file to step 8, Upload and edit.</li>
         <li>Change the setup here or in Excel and ask again: the agent re-solves from the new file.</li></ol></div>
       <div class="card" style="margin-top:16px"><h2>Templates to share</h2><p class="muted">Ready-made workbooks for others to fill in Excel.</p><div class="row"><a href="/download/template/secondary"><button>Sample secondary</button></a><a href="/download/template/primary"><button>Sample primary</button></a><a href="/download/blank/secondary"><button>Blank secondary</button></a><a href="/download/blank/primary"><button>Blank primary</button></a></div></div>`;
   },
+  edit() {
+    if (S.practice) return `<div class="card"><h1>Step 8 · Upload and edit</h1><p class="lead">Uploading a timetable is off in a practice copy.</p></div>`;
+    return `<div class="card"><h1>Step 8 · Upload and edit</h1><p class="lead">Bring back the timetable the AI agent made and check it. Change it here until it is right, then publish it on step 9. Nothing is visible to teachers or students until you publish.</p></div>
+      ${exportCard()}`;
+  },
   publish() {
-    if (S.practice) return `<div class="card"><h1>Step 8 · Publish</h1><p class="lead">Publishing is off in a practice copy.</p></div>`;
-    return `<div class="card"><h1>Step 8 · Publish</h1><p class="lead">Bring back the timetable the AI agent made, check it, then publish it. Nothing is visible to teachers or students until you publish.</p></div>
-      ${exportCard()}<div class="card" id="pubNow" style="margin-top:16px"></div>`;
+    if (S.practice) return `<div class="card"><h1>Step 9 · Publish</h1><p class="lead">Publishing is off in a practice copy.</p></div>`;
+    return `<div class="card"><h1>Step 9 · Publish</h1><p class="lead">Publish the timetable for teachers and students. Every warning is shown here. A critical mistake has to be settled on step 8 first.</p></div>
+      <div class="card" id="pbTimetable" style="margin-top:16px">${publishHTML(S.draft)}</div>${S.draft ? printoutsCard() : ""}<div class="card" id="pubNow" style="margin-top:16px"></div>`;
   },
 };
 
@@ -1651,7 +1655,7 @@ document.addEventListener("click", async e => {
   const tc = e.target.closest("[data-tcard]");   // a teacher card: a click on its face opens it (not on a box or button in it)
   if (tc && !e.target.closest("button, input, select, textarea, label") && !tc.classList.contains("open")) { tkOpenCard(Number(tc.dataset.tcard), tc); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c, [data-fxcell], [data-mcard]"); if (!b) return;
-  if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); save(); render(); window.scrollTo(0, 0); return; }
+  if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); G.refetch = onDraftStep(); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
   if (b.dataset.cpback !== undefined) { const i = Number(b.dataset.cpback), x = S.spec.lessons[i]; if (!x || cpBlock(x)) return; Parents.back(S.spec, i); save(); render(); poll(); return; }
@@ -1728,9 +1732,16 @@ document.addEventListener("click", async e => {
     render(); const r = document.getElementById(b.dataset.row); if (r) r.scrollIntoView({ block: "center" }); return; }
   if (b.id === "build") { buildXlsx(); return; }
   if (b.id === "fitAgain") { fitCheck(true); return; }
-  if (b.id === "exGo") { makePrintouts(); return; }
+  if (b.id === "pbPrint") { makePrintouts(); return; }
+  if (b.dataset.pbshow !== undefined) { S.step = stepAt("edit"); G.refetch = true; save(); render(); window.scrollTo(0, 0); fxClick({ dataset: { fix: b.dataset.pbshow } }); return; }   // step 8, then the Fix card on that warning as its own button opens it
+  if (b.dataset.pbfind !== undefined) {   // a critical mistake with no week to show: step 8, the list showing it, its row in view (rows are found by their data, not by a selector built from the key)
+    const key = b.dataset.pbfind, w = ((S.draft && S.draft.warnings) || []).find(x => x.key === key);
+    S.step = stepAt("edit"); G.refetch = true; if (w && !Draft.isOpen(w)) S.dfilter = "all"; else if (S.dfilter !== "all") S.dfilter = "open"; save(); render();
+    const li = [...document.querySelectorAll("#imResult li.warn")].find(x => x.dataset.wkey === key); if (li) li.scrollIntoView({ block: "center" }); else window.scrollTo(0, 0);
+    return;
+  }
   if (b.id === "imCheck") { uploadDraft(false); return; }
-  if (b.id === "imPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; publishDraft(); return; }
+  if (b.id === "pbPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; publishDraft(); return; }
   if (fxClick(b)) return;
   if (b.dataset.decide) { const i = b.dataset.decide.indexOf("|"); decide(b.dataset.decide.slice(0, i), b.dataset.decide.slice(i + 1)); return; }
   if (b.id === "copyPrompt") { const ta = $("#prompt"); const done = () => toast("Copied."); if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(done, () => { ta.select(); document.execCommand("copy"); done(); }); else { ta.select(); document.execCommand("copy"); done(); } return; }
@@ -2576,7 +2587,7 @@ async function poll() {   // every few seconds: the published timetable and the 
     const r = await fetch("/api/status");
     if (r.status === 401) { location.href = "/login"; return; }
     G.st = await r.json();
-    paintPublished();
+    paintPublished(); draftWatch();
   } catch (e) { }
   G.inflight = false;
   G.timer = setTimeout(poll, 5000);
@@ -2621,7 +2632,7 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
   const p = st.published, f = p ? p.files || {} : {};
   el.innerHTML = `<h2>Published now</h2>` + (p ? `<p class="${p.ok ? "okmsg" : "issue"}">Published ${esc(p.at)}${p.source ? ` from ${esc(p.source)}` : ""} · ${p.classes} classes · ${p.students} students${p.after ? ` · ${p.after} after school` : ""}</p>
       <div class="row"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
-      ${p.config_id ? `<p class="muted small">Made from configuration ${esc(p.config_id)}.</p>` : ""}${p.compared_v ? `<p class="muted small">Checked against the setup at ${esc(p.compared_v)}</p>` : ""}${p.compared_v ? ((p.left || []).length || p.open ? `<details><summary>${p.open} warning${p.open === 1 ? " was" : "s were"} left open</summary><ul>${(p.left || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>` : `<p class="muted small">0 warnings were left open</p>`) : ""}${p.compared_v ? ((p.fixes || []).length ? `<details><summary>${p.fixes.length} fix${p.fixes.length === 1 ? "" : "es"} made in the app</summary><ol class="fxlist">${p.fixes.map(x => `<li>${esc(x)}</li>`).join("")}</ol></details>` : `<p class="muted small">No fixes were made in the app.</p>`) : ""}${ruleReportHTML(p.rule_report || [], S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0)}${choicesUsedHTML(p.choices_used || [], p.choice_problems || [], S.spec ? validChoices() : 0)}
+      ${p.config_id ? `<p class="muted small">Made from configuration ${esc(p.config_id)}.</p>` : ""}${p.compared_v ? `<p class="muted small">Checked against the setup at ${esc(p.compared_v)}</p>` : ""}${p.compared_v ? ((p.left || []).length || p.open ? `<details><summary>${p.open || p.left.length} warning${(p.open || p.left.length) === 1 ? " was" : "s were"} open when it was published</summary><ul>${(p.left || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>` : `<p class="muted small">0 warnings were open when it was published</p>`) : ""}${p.compared_v ? ((p.fixes || []).length ? `<details><summary>${p.fixes.length} fix${p.fixes.length === 1 ? "" : "es"} made in the app</summary><ol class="fxlist">${p.fixes.map(x => `<li>${esc(x)}</li>`).join("")}</ol></details>` : `<p class="muted small">No fixes were made in the app.</p>`) : ""}${ruleReportHTML(p.rule_report || [], S.spec ? S.spec.rules.filter(r => r.rule === "In words").length : 0)}${choicesUsedHTML(p.choices_used || [], p.choice_problems || [], S.spec ? validChoices() : 0)}
       <h3>Downloads</h3><div class="links"><a href="/files/excel">Excel, every timetable</a><a href="/files/zip">PDFs, one per class, teacher, room and student (zip)</a>${f.db ? `<a href="/files/db" title="Every lesson, class, teacher and room as a SQLite database, for other systems to import. It also holds the setup, so Make printouts can rebuild everything from it.">Timetable database (.sqlite), for other systems</a>` : ""}
       ${Object.keys(f.books || {}).map(k => `<a href="/files/book/${k}">${k[0].toUpperCase() + k.slice(1)}: all in one PDF</a>`).join("")}</div>
       <h3>Personal student codes</h3>${p.students && !p.personal ? `<p class="issue">Personal codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code.</p>` : p.students ? `<div class="links"><a href="/api/code-slips.pdf">Code slips to print, by class (PDF)</a><a href="/api/codes.csv">Code list (CSV)</a></div>` : `<p class="muted small">Add students on the Students step to give each one a personal code.</p>`}`
@@ -2643,12 +2654,12 @@ function timetableForm() {
   if (!b || (!a && !isDb)) { toast(b ? "Choose the setup workbook too (a timetable database from this app can come alone)." : "Choose the timetable: a workbook or a timetable database."); return null; }
   const fd = new FormData(); if (a) fd.append("setup", a); fd.append("timetable", b); return fd;
 }
-async function makePrintouts() {
-  const msg = $("#exMsg"), fd = timetableForm(); if (!fd) return;
-  fd.append("single", $("#exSingle").checked ? "1" : "0");
-  const go = $("#exGo"); go.disabled = true; msg.textContent = "Making printouts… a school with 600 students takes about a minute.";
+async function makePrintouts() {   // step 9: the printouts of the draft, with the changes made in the app
+  const msg = $("#pbPrintMsg"), fd = new FormData();
+  fd.append("single", $("#pbSingle").checked ? "1" : "0");
+  const go = $("#pbPrint"); go.disabled = true; msg.textContent = "Making printouts… a school with 600 students takes about a minute.";
   try {
-    const r = await fetch("/api/export", { method: "POST", body: fd });
+    const r = await fetch("/api/draft/printouts", { method: "POST", body: fd });
     if (!r.ok) { const j = await r.json().catch(() => ({})); msg.textContent = ""; toast(j.error || "Could not make the printouts."); return; }
     const name = (r.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)"?/);
     dl(await r.blob(), name ? name[1] : "Timetables.zip"); msg.textContent = r.headers.get("X-Checks") || "Done.";
@@ -2665,7 +2676,7 @@ function drawDraft() {   // the box for a typed request (and the buttons that an
 async function uploadDraft(replace) {
   const fd = timetableForm(); if (!fd) return;
   if (replace) fd.append("replace", "1");
-  const box = $("#imResult"), btns = ["#imCheck", "#imPublish", "#exGo"].map(q => $(q)).filter(Boolean);
+  const box = $("#imResult"), btns = ["#imCheck"].map(q => $(q)).filter(Boolean);
   btns.forEach(x => x.disabled = true);
   box.innerHTML = `<p class="muted" style="margin-top:10px">Checking the timetable against the setup…</p>`;
   try {
@@ -2681,62 +2692,146 @@ async function uploadDraft(replace) {
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
   finally { btns.forEach(x => x.disabled = false); }
 }
-async function publishDraft() {
-  const box = $("#imResult"), btns = ["#imCheck", "#imPublish", "#exGo"].map(q => $(q)).filter(Boolean);
-  btns.forEach(x => x.disabled = true);
-  box.insertAdjacentHTML("beforeend", `<p class="muted" style="margin-top:10px">Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute for a school with 600 students)…</p>`);
+async function refreshDraft() {   // the draft again from the server, and the step drawn from it
+  try {
+    const r = await fetch("/api/draft"), j = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (r.ok && j.warnings) S.draft = j;
+  } catch (e) { }
+  if (STEPS[S.step][0] === "publish") render();
+}
+async function publishDraft() {   // step 9
+  const btn = $("#pbPublish"), msg = $("#pbMsg"), again = () => { if (STEPS[S.step][0] === "publish") render(); };
+  DR.hold = true; DR.gen++;   // no fetch of the draft, and no answer of one already sent, while the publish runs
+  if (btn) btn.disabled = true;
+  if (msg) msg.textContent = "Publishing: making the PDFs, the Excel workbook and the timetable pages (about a minute for a school with 600 students)…";
   try {
     const r = await fetch("/api/draft/publish", { method: "POST" }), j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/login"; return; }
-    if (!r.ok) { drawDraft(); toast(j.error || "Could not publish the timetable."); return; }
-    S.draft = j; S.fix = null; drawDraft(); toast("Published. Teachers and students now see this timetable."); poll();
-  } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
-  finally { btns.forEach(x => x.disabled = false); }
+    if (r.status === 409 && j.critical) { toast(j.error); await refreshDraft(); return; }   // a critical mistake arrived meanwhile: the list shows it now
+    if (!r.ok) { again(); toast(j.error || "Could not publish the timetable."); return; }
+    S.draft = j; S.fix = null; again(); toast("Published. Teachers and students now see this timetable."); poll();
+  } catch (err) { again(); toast("Could not reach the server: " + err.message); }
+  finally { DR.hold = false; DR.seen = null; }   // the next status is taken as seen, so the same summary causes no fetch
 }
-async function decide(answer, key) {   // answer is step5, left or open; the key is the warning's (it may hold a "|")
+async function decide(answer, key) {   // answer is step5, open or met; the key is the warning's (it may hold a "|")
   const j = await post("/api/draft/decide", { key, answer });
   if (!j) return;
   S.draft = j; drawDraft();   // only the result area: render() would reset the chosen file names
   poll();
 }
-/* the draft survives a reload: step 8 asks for it once when the server has one and this page does not */
-async function loadDraft() {
-  if (S.draft || S.draftTried || !G.st || !G.st.draft) return;
-  S.draftTried = true;
+/* the draft on steps 8 and 9: asked for the first time the page needs it, again each time the person opens either step, and again when
+   the status poll shows the server's draft is not the one last fetched (another tab's fix, or a change to the setup). A fetch that
+   brings the same draft back changes nothing on the page. */
+const DR = { seen: null, busy: false, again: false, hold: false, gen: 0 };   // seen: the status's summary of the draft when the page last fetched it; busy: a fetch is under way; again: the person opened a step meanwhile
+const onDraftStep = () => ["edit", "publish"].includes(STEPS[S.step][0]);
+const draftSig = () => { const d = G.st && G.st.draft; return d ? JSON.stringify([d.uploaded_at, d.open, d.critical, d.fixes]) : ""; };   // the draft summary alone: a change to the setup is picked up when the person opens the step
+async function loadDraft(again) {   // again: the person has just opened step 8 or 9
+  if (!G.st || !G.st.draft || DR.hold) return;   // hold: a publish is running
+  if (DR.busy) { if (again) DR.again = true; return; }   // never two at once; an opening meanwhile is fetched for when this one is in
+  if (!again && (S.draft || S.draftTried)) return;
+  if (again) S.draftFailed = false;
+  S.draftTried = true; DR.busy = true;
+  const sig = draftSig(), had = !!S.draft, gen = DR.gen; let j = {}, ok = false;
   try {
-    const r = await fetch("/api/draft"), j = await r.json().catch(() => ({}));
+    const r = await fetch("/api/draft"); j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/login"; return; }
-    if (r.ok && j.warnings) { S.draft = j; if (STEPS[S.step][0] === "publish") render(); }
-    else if (!r.ok && j.error) toast(j.error);
+    ok = r.ok && !!j.warnings;
+    if (!ok && !had && !r.ok && j.error) toast(j.error);
   } catch (e) { }
+  finally { DR.busy = false; }
+  if (DR.hold || gen !== DR.gen) return;   // a publish began meanwhile: this answer is older than its result
+  if (FX.busy) return;   // a fix is being made: its own answer is the newer one, and the poll after it looks again
+  if (DR.again) { DR.again = false; loadDraft(true); return; }
+  if (!ok) {
+    DR.seen = sig;   // this summary was tried: not again until it changes or the step is opened
+    if (!S.draft) { S.draftFailed = true; if (onDraftStep()) render(); }   // nothing to show: say so; a draft already on the page stays, with no error
+    return;
+  }
+  DR.seen = sig;
+  if (S.draft && JSON.stringify(S.draft) === JSON.stringify(j)) { draftWatch(); return; }   // the same draft: nothing is redrawn
+  const f = S.fix;
+  if (!onDraftStep() || !S.draft) { S.draft = j; if (onDraftStep()) render(); }
+  else if (STEPS[S.step][0] === "publish") { S.draft = j; render(); }
+  else if (f) await fxAfter(j);   // the Fix card follows the new draft as it does after its own fix
+  else { S.draft = j; drawDraft(); }
+  draftWatch();
+}
+function draftWatch() {   // after each status: a draft that is not the one last fetched is fetched again while step 8 or 9 is on screen; elsewhere the next opening does it
+  if (DR.busy || DR.hold || !G.st) return;
+  const sig = draftSig();
+  if (DR.seen === null) { if (!!S.draft === !!sig) { DR.seen = sig; return; } }   // the first status: a baseline unless the page lacks a draft the server has, or has one the server lacks
+  else if (sig === DR.seen) return;
+  if (!sig) {   // the draft has gone
+    if (S.draft) { S.draft = null; S.fix = null; if (onDraftStep()) render(); }
+    DR.seen = sig; return;
+  }
+  if (onDraftStep() && !(S.draftFailed && !S.draft)) loadDraft(true);   // a first load that failed is tried again when the person opens the step, not every poll
+}
+const loadingDraft = () => !S.draft && !S.draftFailed && !!(G.st && G.st.draft);   // the server has a draft this page has not got yet
+const LOADING = `<p class="muted" style="margin-top:10px">Loading the draft…</p>`;
+const otherSchool = j => j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.file_school)}</b>, but the setup saved in the app is for <b>${esc(j.school)}</b>. Check it is the right file.</p>` : "";
+const fixList = fl => `<ol class="fxlist">${Draft.batches(fl).map(b => `<li>${b.items.map(x => `<div>${esc(x.text)}</div>`).join("")}<span class="muted small">${esc(b.items[b.items.length - 1].at)}</span></li>`).join("")}</ol>`;
+function warnHead(w) {   // a warning's first lines, the same on steps 8 and 9: its critical kind, the sentence, then strength, the two sides and where
+  const side = Draft.sideText(w), where = Draft.whereText(w).map(x => ` · ${esc(x)}`).join("");
+  return `<div class="wt">${w.crit ? `<span class="chip pbmark">${esc(Draft.critWord(w.crit))}</span>` : ""}${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where}</div>`;
+}
+function draftHead(j) { return `<h3 style="margin-top:14px">${esc(j.school)} · ${esc(j.timetable)}</h3><p class="muted small">${j.lessons} lessons · ${j.classes} classes · ${j.teachers} teachers · ${j.students} students</p>`; }
+function publishedMsg(j) {   // what both steps show once the draft is published
+  return draftHead(j) + `<div class="okmsg">Published. Teachers and students now see this timetable.</div>
+    <div class="row" style="margin-top:8px"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>`;
 }
 function draftHTML(j) {
   const list = (xs, more) => `<ul>${xs.map(x => `<li>${esc(x)}</li>`).join("")}${more ? `<li>…and ${more} more</li>` : ""}</ul>`;
-  const head = `<h3 style="margin-top:14px">${esc(j.school)} · ${esc(j.timetable)}</h3><p class="muted small">${j.lessons} lessons · ${j.classes} classes · ${j.teachers} teachers · ${j.students} students</p>`;
-  if (j.published) return head + `<div class="okmsg">Published. Teachers and students now see this timetable.</div>
-    <div class="row" style="margin-top:8px"><a href="/timetable" target="_blank"><button class="primary">Open the timetable</button></a></div>
-    <p class="muted small">Its downloads and the personal student codes are below.</p>`;
-  const ws = j.warnings || [], c = Draft.counts(ws), f = S.dfilter || "open", pub = G.st && G.st.published, n = j.open ?? c.open, nl = j.left ?? c.left, n5 = j.step5 ?? c.step5;   // the server counts the step 5 decisions whose warning has gone
-  const where = w => Draft.whereText(w).map(x => ` · ${esc(x)}`).join("");
-  const row = w => { const d = w.decision && w.decision.answer, ans = Draft.answerText(w), side = Draft.sideText(w);
-    return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}"><div class="wt">${esc(w.text)}</div><div class="muted small">${esc(w.strength)}${side ? ` · ${esc(side)}` : ""}${where(w)}</div>
-      <div class="row warnbtns">${Draft.fixTarget(w) && d !== "step5" && d !== "fixed" && d !== "met" ? `<button data-fix="${esc(w.key)}">Fix the timetable</button>` : ""}${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "left" || d === "met" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" ? "" : `${/:again$/.test(w.key) ? `<button data-decide="met|${esc(w.key)}">Still met</button>` : ""}<button data-decide="left|${esc(w.key)}">Leave it</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div></li>`; };
+  const head = draftHead(j);
+  if (j.published) return publishedMsg(j) + `<p class="muted small">Its downloads and the personal student codes are on step 9.</p>`;
+  const ws = j.warnings || [], c = Draft.counts(ws), f = S.dfilter === "all" ? "all" : "open", n = j.open ?? c.open, nc0 = j.critical ?? c.critical, n5 = j.step5 ?? c.step5;   // the server counts the step 5 decisions whose warning has gone
+  const row = w => { const d = w.decision && w.decision.answer, ans = Draft.answerText(w);
+    return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}" data-wkey="${esc(w.key)}">${warnHead(w)}
+      <div class="row warnbtns">${Draft.fixTarget(w) && d !== "step5" && d !== "fixed" && d !== "met" ? `<button data-fix="${esc(w.key)}">Fix the timetable</button>` : ""}${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "met" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" || !/:again$/.test(w.key) ? "" : `<button data-decide="met|${esc(w.key)}">Still met</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div></li>`; };
   const groups = Draft.group(ws, f), nc = (j.not_checked || []);
   const kinds = groups.map(k => `<details open class="warnkind"><summary class="sev">${esc(k.title)} · ${k.groups.reduce((a, g) => a + g.items.length, 0)}</summary>
       ${k.groups.map(g => `<h4>${esc(g.name)}</h4><ul class="warnlist">${g.items.map(row).join("")}</ul>`).join("")}
       ${k.kind === "rule" && nc.length ? `<p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul>` : ""}</details>`).join("")
     + (!groups.length && nc.length ? `<details open class="warnkind"><summary class="sev">Rules</summary><p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul></details>` : "");
-  return head + (j.other_school ? `<p class="issue">This timetable is for <b>${esc(j.file_school)}</b>, but the setup saved in the app is for <b>${esc(j.school)}</b>. Check it is the right file.</p>` : "")
+  return head + otherSchool(j)
     + configLine(j)
-    + `<p class="warnsum"><b>${n} warning${n === 1 ? "" : "s"} open</b> · ${nl} left for now · ${n5} settled on step 5</p>
-      <div class="row warnfilter">${[["open", "Open"], ["left", "Left for now"], ["all", "All"]].map(([v, l]) => `<label class="radio"><input type="radio" name="dfilter" data-dfilter="${v}"${v === f ? " checked" : ""}> ${l}</label>`).join("")}</div>`
+    + `<p class="warnsum"><span class="${nc0 ? "pbcrit" : ""}">${nc0} critical</span> · <b>${n} warning${n === 1 ? "" : "s"} open</b> · ${n5} settled on step 5</p>
+      <div class="row warnfilter">${[["open", "Open"], ["all", "All"]].map(([v, l]) => `<label class="radio"><input type="radio" name="dfilter" data-dfilter="${v}"${v === f ? " checked" : ""}> ${l}</label>`).join("")}</div>`
     + (kinds || (ws.length ? `<p class="muted">Nothing in this list.</p>` : `<div class="okmsg">No warnings: no teacher, class, room or student is double-booked, and the timetable matches the setup.</div>`))
     + fixesHTML(j) + `<div id="fxBox">${fixHTML()}</div>`
     + (j.after && j.after.length ? `<details><summary>${j.after.length} lesson${j.after.length === 1 ? " is" : "s are"} after school</summary>${list(j.after)}</details>` : "")
     + (j.notes && j.notes.length ? `<details><summary>Notes</summary>${list(j.notes)}</details>` : "")
     + ruleReportHTML(j.rule_report || [], j.typed || 0) + choicesUsedHTML(j.choices_used || [], j.choice_problems || [], j.choices || 0)
-    + `<p class="muted small" style="margin-top:8px">${n} warning${n === 1 ? "" : "s"} open; you can still publish. ${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}</p>
-    <div class="row"><button class="primary" id="imPublish">Publish this timetable</button></div>`;
+    + `<p class="muted small" style="margin-top:8px">${esc(Draft.gateText(nc0))} Publish is on step 9.</p>
+    <div class="row"><button class="primary" data-step="${stepAt("publish")}">Go to step 9</button></div>`;
+}
+/* step 9: what will be published, read-only. Every critical mistake with a way back to step 8, every other open warning, the
+   fixes, and the Publish button (off while a critical mistake remains; the server refuses as well) */
+function publishHTML(j) {
+  if (!j && loadingDraft()) return `<h2>The timetable to publish</h2>${LOADING}`;
+  if (!j) return `<h2>The timetable to publish</h2><p class="muted">Nothing to publish yet. Upload a timetable on step 8.</p><div class="row"><button data-step="${stepAt("edit")}">Go to step 8</button></div>`;
+  if (j.published) return publishedMsg(j);
+  const ws = j.warnings || [], crit = Draft.critical(ws), nc = j.critical ?? crit.length, fl = j.fixes || [], pub = G.st && G.st.published, gate = Draft.gateText(nc);
+  const row = (w, show) => `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}">${warnHead(w)}
+      ${show ? `<div class="row warnbtns">${Draft.fixTarget(w) ? `<button data-pbshow="${esc(w.key)}">Show on step 8</button>` : `<button data-pbfind="${esc(w.key)}">Find it on step 8</button>`}</div>` : ""}</li>`;
+  const groups = Draft.group(ws.filter(w => !w.crit), "open"), nw = groups.reduce((a, k) => a + k.groups.reduce((b, g) => b + g.items.length, 0), 0);
+  const kinds = groups.map(k => { const m = k.groups.reduce((a, g) => a + g.items.length, 0);
+    return `<details ${m > 20 ? "" : "open"} class="warnkind"><summary class="sev">${esc(k.title)} · ${m}</summary>${k.groups.map(g => `<h4>${esc(g.name)}</h4><ul class="warnlist">${g.items.map(w => row(w, false)).join("")}</ul>`).join("")}</details>`; }).join("");
+  return draftHead(j) + otherSchool(j) + configLine(j)
+    + `<h3 class="sev ${nc ? "crit" : ""}" style="margin-top:14px">Critical mistakes · ${nc}</h3>`
+    + (nc ? `<ul class="warnlist">${crit.map(w => row(w, true)).join("")}</ul>` : `<p class="okmsg">Nothing critical.</p>`)
+    + `<h3 class="sev">Warnings · ${nw}</h3>` + (kinds || `<p class="muted small">No open warnings.</p>`)
+    + `<h3 class="sev">Changes made in the app · ${fl.length}</h3>` + (fl.length ? fixList(fl) : `<p class="muted small">No fixes have been made in the app.</p>`)
+    + (nc ? `<p class="issue crit" style="margin-top:12px">${esc(gate)}</p>`
+        : `<p class="muted small" style="margin-top:12px">${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}</p>`)
+    + `<div class="row"><button class="primary" id="pbPublish"${nc ? ` disabled title="${esc(gate)}"` : ""}>Publish this timetable</button></div><p class="muted small" id="pbMsg"></p>`;
+}
+function printoutsCard() {
+  return `<div class="card" style="margin-top:16px"><h2>Printouts</h2><p class="muted">Every timetable of the draft, with the changes made in the app, as PDFs (one page per class, teacher, room and student), one Excel file with them all, a searchable HTML page and the database, to keep or share.</p>
+    <div class="row" style="margin-top:10px"><label><input type="checkbox" id="pbSingle" checked> Also a separate PDF for every class, teacher, room and student</label></div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="pbPrint">Make printouts (.zip)</button><span class="muted" id="pbPrintMsg"></span></div>
+    <p class="small"><a href="/api/draft/download">Download the draft (.sqlite)</a> <span class="muted">to carry on elsewhere.</span></p></div>`;
 }
 /* ---------------- step 8: the Fix card. S.fix = {view, name, week, sel: {id, group} | null, grid, options, adding: key | null}.
    Fetches happen in the handlers (fxGet, fxRefresh); drawing only reads S.fix. */
@@ -2745,13 +2840,12 @@ const FX = { n: 0, busy: false };
 const FX_BROKE = "Something went wrong working that out. The suggestions below still work.";   // the server's own sentence for a fault (typed.BROKE)
 const fxShorts = () => { const m = {}; ((S.spec && S.spec.teachers) || []).forEach(t => { if (t.name && t.short) m[t.name] = t.short; }); return m; };
 const fxDot = st => `<i class="dot ${esc(Grid.stateClass(st))}"></i>`;
-function fixesHTML(j) {   // what was fixed in the app, newest last, with undo, anything wrong with the fixes, and the download
+function fixesHTML(j) {   // what was fixed in the app, newest last, with undo, and anything wrong with the fixes
   const fl = j.fixes || [];
   return `<h3 style="margin-top:14px">Fixes</h3>` + (fl.length
-      ? `<ol class="fxlist">${Draft.batches(fl).map(b => `<li>${b.items.map(x => `<div>${esc(x.text)}</div>`).join("")}<span class="muted small">${esc(b.items[b.items.length - 1].at)}</span></li>`).join("")}</ol><div class="row"><button id="fxUndo">${esc(Draft.undoText(fl))}</button></div>`
+      ? `${fixList(fl)}<div class="row"><button id="fxUndo">${esc(Draft.undoText(fl))}</button></div>`
       : `<p class="muted small">No fixes have been made in the app yet.</p>`)
-    + (j.fix_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("")
-    + `<p class="small"><a href="/api/draft/download">Download the draft (.sqlite)</a> <span class="muted">to carry on elsewhere; Make printouts accepts it.</span></p>`;
+    + (j.fix_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("");
 }
 function fixHTML() {
   const f = S.fix;

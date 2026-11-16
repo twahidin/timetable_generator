@@ -61,6 +61,10 @@ def teacher_room_add_delete():
     out = fixes.apply(L, [dict(kind="teacher", key=KEY, teachers=[TEACHER])], sp, DAYS)
     assert all(x["teachers"] == [TEACHER] for x in out["lessons"]) and out["touched"] == {1, 2} and L[0]["teachers"] == TEACHERS
     assert out["texts"] == [f"{SUBJ} for {CLS} is now taught by {TEACHER}, not {', '.join(TEACHERS)}."]
+    bare = copy.deepcopy(L)
+    for x in bare: x["teachers"] = []
+    out = fixes.apply(bare, [dict(kind="teacher", key=KEY, teachers=[TEACHER])], sp, DAYS)   # a lesson that had nobody
+    assert out["texts"] == [f"{SUBJ} for {CLS} is now taught by {TEACHER}; it had no teacher."], out["texts"]
     out = fixes.apply(L, [dict(kind="room", id=1, group=ENTIRE, room=ROOM)], sp, DAYS)
     assert by_id(out["lessons"], 1)["room"] == ROOM and by_id(out["lessons"], 2)["room"] == "" and out["touched"] == {1}
     assert out["texts"] == [f"{fixes.what(L[0])} on {DAYS[0]} period 2 is now in {ROOM}, not no room."]

@@ -244,7 +244,7 @@ details.warnkind h4{margin:10px 0 2px;font-size:13px;color:var(--navy)}
 ul.warnlist{list-style:none;margin:0;padding:0}
 .warn{padding:8px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.45}.warn:first-child{border-top:0}
 .warn.prefer .wt{color:var(--muted)}.warnbtns{gap:6px;margin-top:4px}.warnbtns button{padding:3px 10px;font-size:12px}
-.chip.decision{background:var(--chip);color:var(--ink)}.chip.decision.step5{background:var(--ok-bg);color:var(--ok)}.chip.decision.left{background:#fff4d6;color:#7a5a00}
+.chip.decision{background:var(--chip);color:var(--ink)}.chip.decision.step5{background:var(--ok-bg);color:var(--ok)}
 
 /* step 8: the Fix card, a week as a table with the slots coloured by what a fix there would do */
 .fxcard{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:#fff}
@@ -410,3 +410,5 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .tkfigs{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:12.5px;color:var(--muted)}
 .tkfigs b{color:var(--ink)}
 .tkmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}
+.pbcrit{color:var(--warn);font-weight:600}
+.chip.pbmark{background:var(--warn-bg);color:var(--warn);margin-right:6px;white-space:normal}

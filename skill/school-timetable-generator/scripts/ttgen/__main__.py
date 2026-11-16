@@ -54,12 +54,13 @@ def main(argv=None):
         from . import verify
         m = model_from_files(a.setup, a.timetable); r = verify.warnings(m); ws = r["warnings"]
         per = ", ".join(f"{sum(1 for w in ws if w['kind'] == kd)} {kd}" for kd in verify.KINDS if any(w["kind"] == kd for w in ws))
-        print(f"{len(ws)} warnings" + (f" ({per})" if per else ""))
+        crit = [w for w in ws if w.get("crit")]
+        print(f"{len(ws)} warnings, {len(crit)} critical" + (f" ({per})" if per else ""))
         for kd in verify.KINDS:
             for w in ws:
-                if w["kind"] == kd: print(f" - [{kd}] {w['text']}")
+                if w["kind"] == kd: print(f" - [critical: {verify.CRIT_WORDS[w['crit']]}] {w['text']}" if w.get("crit") else f" - [{kd}] {w['text']}")
         for line in r["not_checked"]: print(f" ? Not checked: {line}")
-        return 1 if any(w["strength"] == "Must" for w in ws) else 0
+        return 1 if crit or any(w["strength"] == "Must" for w in ws) else 0
     spec = read_template(a.setup)
     if a.cmd == "check":
         probs = derive(spec)

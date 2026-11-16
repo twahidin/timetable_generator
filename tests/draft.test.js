@@ -2,15 +2,14 @@
 const assert = require("assert");
 const Draft = require("../static/draft.js");
 let n = 0; const t = (name, f) => { f(); n++; };
-const W = (key, kind, group, decision, strength) => ({ key, kind, text: key, strength: strength || "Must", group, where: null, sides: null, ops: null, decision });
-const ws = () => [W("c1", "clash", "Ms X"), W("d1", "deployment", "1A"), W("d2", "deployment", "1A", { answer: "step5" }), W("d3", "deployment", "1B", { answer: "left" }), W("r1", "rule", "School", null, "Prefer")];
+const W = (key, kind, group, decision, strength, crit) => ({ key, kind, text: key, strength: strength || "Must", group, where: null, sides: null, ops: null, decision, crit: crit || "" });
+const ws = () => [W("c1", "clash", "Ms X", null, null, "teacher"), W("d1", "deployment", "1A"), W("d2", "deployment", "1A", { answer: "step5" }), W("d3", "deployment", "1B", { answer: "left" }), W("r1", "rule", "School", null, "Prefer"), W("c2", "clash", "1A", { answer: "step5" }, null, "class")];
 t("grouping by kind then group, open only", () => {
   const g = Draft.group(ws(), "open");
   assert.deepEqual(g.map(x => x.kind), ["clash", "deployment", "rule"]);
   assert.deepEqual(g[1].groups.map(x => [x.name, x.items.length]), [["1A", 1], ["1B", 1]]);
   assert.equal(g[1].title, "Differences from the deployment");
-  assert.deepEqual(Draft.group(ws(), "left").map(x => x.kind), ["deployment"]);
-  assert.deepEqual(Draft.group(ws(), "left")[0].groups[0].items.map(w => w.key), ["d3"]);
+  assert.deepEqual(Draft.group(ws(), "open").map(g => g.groups.length), [1, 2, 1]);   // an old "left" decision is open
   assert.equal(Draft.group(ws(), "all")[1].groups[0].items.length, 2);
   assert.deepEqual(Draft.group([], "all"), []);
 });
@@ -19,8 +18,9 @@ t("groups keep first-seen order", () => {
   assert.deepEqual(g[0].groups.map(x => [x.name, x.items.length]), [["Z", 2], ["A", 1]]);
 });
 t("counts", () => {
-  assert.deepEqual(Draft.counts(ws()), { open: 4 - 0, left: 1, step5: 1, met: 0, must: 3, prefer: 1 });
-  assert.deepEqual(Draft.counts(ws().concat([W("t1:again", "typed", "School", { answer: "met" })])), { open: 4, left: 1, step5: 1, met: 1, must: 3, prefer: 1 });
+  assert.deepEqual(Draft.counts(ws()), { open: 4, critical: 2, step5: 2, met: 0, must: 3, prefer: 1 });
+  assert.deepEqual(Draft.counts(ws().concat([W("t1:again", "typed", "School", { answer: "met" })])), { open: 4, critical: 2, step5: 2, met: 1, must: 3, prefer: 1 });
+  assert.deepEqual(Draft.counts([]), { open: 0, critical: 0, step5: 0, met: 0, must: 0, prefer: 0 });
 });
 t("isOpen", () => {
   assert.equal(Draft.isOpen(W("a", "clash", "g")), true);
@@ -32,11 +32,27 @@ t("isOpen", () => {
 t("texts", () => {
   assert.equal(Draft.sideText({ sides: { timetable: "Mr Tan", step5: "Mdm Lee" } }), "Timetable: Mr Tan · Step 5: Mdm Lee");
   assert.equal(Draft.sideText({ sides: null }), "");
-  assert.equal(Draft.answerText({ decision: { answer: "left" } }), "Left for now");
+  assert.equal(Draft.answerText({ decision: { answer: "left" } }), "");
   assert.equal(Draft.answerText({ decision: { answer: "step5" } }), "Step 5 updated");
   assert.equal(Draft.answerText({ decision: { answer: "fixed" } }), "Fixed");
   assert.equal(Draft.answerText({ decision: { answer: "met" } }), "Checked: still met");
   assert.equal(Draft.answerText({ decision: null }), "");
+});
+t("critical: the warnings with crit, in order", () => {
+  assert.deepEqual(Draft.critical(ws()).map(w => w.key), ["c1", "c2"]);
+  assert.deepEqual(Draft.critical([]), []);
+  assert.deepEqual(Draft.critical(undefined), []);
+});
+t("gateText", () => {
+  assert.strictEqual(Draft.gateText(0), "");
+  assert.strictEqual(Draft.gateText(1), "1 critical mistake to settle on step 8 first.");
+  assert.strictEqual(Draft.gateText(3), "3 critical mistakes to settle on step 8 first.");
+});
+t("critWord", () => {
+  assert.deepEqual(["teacher", "class", "room", "break", "noteacher"].map(Draft.critWord), ["Teacher in two places", "Class clash", "Room used twice", "In a break or outside the day", "No teacher"]);
+  assert.strictEqual(Draft.critWord(""), "");
+  assert.strictEqual(Draft.critWord("other"), "");
+  assert.strictEqual(Draft.critWord(undefined), "");
 });
 t("kinds", () => { assert.deepEqual(Draft.KINDS, ["clash", "deployment", "rule", "typed", "choice"]); assert.equal(Draft.KIND_TEXT.typed, "Rules in words"); });
 t("whereText: only the parts a warning's where has", () => {

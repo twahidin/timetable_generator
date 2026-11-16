@@ -7,6 +7,7 @@ from fixes import what, when
 from ttgen import verify
 from ttgen.export import ENTIRE
 
+NO_TEACHER = "This lesson has no teacher. Pick one under Change the teacher."   # moving a lesson never gives it one
 NOTHING = "The app has no suggestion for this one. Select a lesson on the grid to see where it can go."
 NONE_PASS = "Nothing settles this without breaking a rule or a clash."
 NO_FIX = "The app found no fix that settles this. Select a lesson on the grid to see where it can go."
@@ -368,6 +369,7 @@ def suggest(m, spec, days, w, limit=3):
     moved), the single fixes and, when fewer than three of them settle it, the pairs, ranked together; none a sentence when
     there are none; blocked, when there are none, up to three single fixes that would settle it if they were allowed, as
     dict(text, why)"""
+    if w.get("crit") == "noteacher": return dict(suggestions=[], none=NO_TEACHER, blocked=[])
     ctx, keep = fixes._ctx(m), {}; good, bad = _options(m, spec, days, w, ctx, keep)
     if not good and not bad: return dict(suggestions=[], none=NOTHING, blocked=[])
     out, seen, memo = [], set(), _before(m, spec, w)

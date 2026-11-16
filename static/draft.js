@@ -7,10 +7,11 @@ var Draft = (function () {
   var KIND_TEXT = { clash: "Clashes", deployment: "Differences from the deployment", rule: "Rules", typed: "Rules in words", choice: "Choices used" };
 
   function answer(w) { return w && w.decision ? w.decision.answer : ""; }
-  /* a warning is open until it is settled: no decision yet, or left for now */
+  /* a warning is open until it has a decision; an old "left" decision is no decision */
   function isOpen(w) { var a = answer(w); return !a || a === "left"; }
 
-  function keep(w, filter) { return filter === "all" || (filter === "left" ? answer(w) === "left" : isOpen(w)); }
+  /* filter is "open" or "all" */
+  function keep(w, filter) { return filter === "all" || isOpen(w); }
 
   /* [{kind, title, groups: [{name, items}]}]: by kind in KINDS order, then by group in first-seen order */
   function group(warnings, filter) {
@@ -27,12 +28,23 @@ var Draft = (function () {
     return out;
   }
 
-  /* open (no decision or left) with how many Must and Prefer among them, left, settled on step 5, and checked as still met */
+  /* the warnings that are critical mistakes (they have a crit), in their order */
+  function critical(warnings) { return (warnings || []).filter(function (w) { return !!w.crit; }); }
+
+  /* the line above the Publish button while critical mistakes remain */
+  function gateText(n) { return !n ? "" : n === 1 ? "1 critical mistake to settle on step 8 first." : n + " critical mistakes to settle on step 8 first."; }
+
+  /* a critical mistake's kind in words */
+  function critWord(crit) {
+    return { teacher: "Teacher in two places", "class": "Class clash", room: "Room used twice", "break": "In a break or outside the day", noteacher: "No teacher" }[crit] || "";
+  }
+
+  /* open (no decision) with how many Must and Prefer among them, how many are critical, settled on step 5, and checked as still met */
   function counts(warnings) {
-    var c = { open: 0, left: 0, step5: 0, met: 0, must: 0, prefer: 0 };
+    var c = { open: 0, critical: 0, step5: 0, met: 0, must: 0, prefer: 0 };
     (warnings || []).forEach(function (w) {
       var a = answer(w);
-      if (a === "left") c.left++;
+      if (w.crit) c.critical++;
       if (a === "step5") c.step5++;
       if (a === "met") c.met++;
       if (isOpen(w)) { c.open++; if (w.strength === "Prefer") c.prefer++; else c.must++; }
@@ -40,7 +52,7 @@ var Draft = (function () {
     return c;
   }
 
-  function answerText(w) { return { left: "Left for now", step5: "Step 5 updated", fixed: "Fixed", met: "Checked: still met" }[answer(w)] || ""; }
+  function answerText(w) { return { step5: "Step 5 updated", fixed: "Fixed", met: "Checked: still met" }[answer(w)] || ""; }
 
   function sideText(w) { var s = w && w.sides; return s ? "Timetable: " + s.timetable + " · Step 5: " + s.step5 : ""; }
 
@@ -108,6 +120,6 @@ var Draft = (function () {
   /* the word a choice question uses for the field the name was meant for */
   function choiceWord(field) { return { classes: "class", subject: "subject", teacher: "teacher", new_teacher: "teacher", new_room: "room" }[field] || "name"; }
 
-  return { askSummary: askSummary, choiceWord: choiceWord, follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, group: group, counts: counts, answerText: answerText, sideText: sideText };
+  return { askSummary: askSummary, choiceWord: choiceWord, follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, critical: critical, gateText: gateText, critWord: critWord, group: group, counts: counts, answerText: answerText, sideText: sideText };
 })();
 if (typeof module !== "undefined") module.exports = Draft;

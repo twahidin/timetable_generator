@@ -67,6 +67,8 @@ def test_draft_needs_a_saved_setup():   # runs before any test that saves a setu
     r = c.post("/api/draft", data=_draft_form(A.sample("primary"), []), content_type="multipart/form-data")
     assert r.status_code == 409 and "Save the school's setup first" in r.get_json()["error"], r.get_json()
     assert c.get("/api/draft").get_json() == {"draft": None}
+    r = c.post("/api/draft/printouts", data=dict(single="0"))   # neither a setup nor a draft: the draft is asked after first, so it is 404 (the 409 is for a draft with no setup)
+    assert r.status_code == 404 and r.get_json() == {"error": "There is no draft."}, r.get_json()
 
 def test_setup_round_trip():
     spec = c.get("/api/sample/secondary").get_json()
@@ -331,10 +333,12 @@ def test_draft_upload_check_decide_publish():
     rows = [_lesson_of(spec, row, ["Nobody"])]
     r = c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data"); j = r.get_json()
     assert r.status_code == 200 and j["open"] == len(j["warnings"]) and j["config_state"] in ("same", "older", "unknown", "unsaved"), j
-    assert len(set(_warn_keys(j))) == len(j["warnings"]) and j["left"] == 0 and j["fixes"] == [] and j["lessons"] == 1
+    assert len(set(_warn_keys(j))) == len(j["warnings"]) and "left" not in j and j["critical"] == sum(1 for w in j["warnings"] if w["crit"]) and j["fixes"] == [] and j["lessons"] == 1
+    st = c.get("/api/status").get_json()["draft"]; assert st["critical"] == j["critical"] and st["fixes"] == 0 and st["open"] == j["open"], (st, j["critical"])   # right after the upload
+    assert j == c.get("/api/draft").get_json()
     k = f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"; assert k in _warn_keys(j)
-    j2 = c.post("/api/draft/decide", json={"key": k, "answer": "left"}).get_json()
-    assert j2["left"] == 1 and j2["open"] == j["open"] and next(w for w in j2["warnings"] if w["key"] == k)["decision"]["answer"] == "left"
+    j2 = c.post("/api/draft/decide", json={"key": k, "answer": "open"}).get_json()
+    assert j2["open"] == j["open"] and "left" not in j2 and next(w for w in j2["warnings"] if w["key"] == k)["decision"] is None
     j3 = c.post("/api/draft/decide", json={"key": k, "answer": "step5"}).get_json(); assert k not in _warn_keys(j3), _warn_keys(j3)[:5]
     assert j3["step5"] == 1 and store.read_json(os.path.join(store.DATA, "draft", "decisions.json"))[k]["answer"] == "step5"
     now = c.get("/api/setup").get_json()["spec"]; assert next(x["teachers"] for x in now["lessons"] if x["_id"] == row["_id"]) == ["Nobody"]
@@ -347,25 +351,27 @@ def test_draft_upload_check_decide_publish():
     r = c.post("/api/draft/decide", json={"key": kp, "answer": "step5"}); assert r.status_code == 400 and "step 3" in r.get_json()["error"], r.get_json()
     st = c.get("/api/status").get_json()["draft"]; assert st["open"] == c.get("/api/draft").get_json()["open"] and st["source"] == "timetable.xlsx" and st["uploaded_at"]
     assert c.post("/api/draft/decide", json={"key": k, "answer": "open"}).status_code == 200
-    assert h is None or h.post("/api/draft/decide", json={"key": k, "answer": "left"}).status_code == 401
+    assert h is None or h.post("/api/draft/decide", json={"key": k, "answer": "open"}).status_code == 401
 
 def test_draft_decisions_survive_a_setup_change_and_stale_ones_go():
     spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec); other = _one_class_row(spec, skip=(row["classes"][0],))
     c.post("/api/draft", data=_draft_form(spec, [_lesson_of(spec, row, row["teachers"])]), content_type="multipart/form-data")
     k = f"dep:C:{other['classes'][0]}:{other['subject']}:missing"; j = c.get("/api/draft").get_json(); assert k in _warn_keys(j)
-    assert c.post("/api/draft/decide", json={"key": k, "answer": "left"}).get_json()["left"] >= 1
+    dp = os.path.join(store.DATA, "draft", "decisions.json"); store.write_json(dp, {k: dict(answer="met", at="now")})   # a decision as the page's "Still met" leaves it
+    assert next(w for w in c.get("/api/draft").get_json()["warnings"] if w["key"] == k)["decision"]["answer"] == "met"
     v = c.get("/api/setup").get_json()["v"]
     assert c.post("/api/setup/changes", json={"client": "t", "since": v, "ops": [["del", "lessons", other["_id"]]]}).status_code == 200
     j = c.get("/api/draft").get_json(); assert k not in _warn_keys(j) and j["setup_version"] == f"v{v + 1}"
     assert k not in store.read_json(os.path.join(store.DATA, "draft", "decisions.json"), {})
     r = c.post("/api/draft/decide", json={"key": k, "answer": "step5"}); assert r.status_code == 400 and "no longer on the list" in r.get_json()["error"]
 
-def test_a_new_upload_keeps_left_decisions():
+def test_a_new_upload_starts_with_no_decisions():
     spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec); rows = [_lesson_of(spec, row, ["Somebody"])]
     c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data")
-    k = f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"; c.post("/api/draft/decide", json={"key": k, "answer": "left"})
+    k = f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"; dp = os.path.join(store.DATA, "draft", "decisions.json")
+    store.write_json(dp, {k: dict(answer="met", at="now")}); assert next(w for w in c.get("/api/draft").get_json()["warnings"] if w["key"] == k)["decision"]["answer"] == "met"
     j = c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data").get_json()
-    assert j["left"] == 1 and next(w for w in j["warnings"] if w["key"] == k)["decision"]["answer"] == "left"
+    assert next(w for w in j["warnings"] if w["key"] == k)["decision"] is None and j["open"] == len(j["warnings"]) and store.read_json(dp) == {}
     store.write_json(os.path.join(store.DATA, "draft", "meta.json"), dict(store.read_json(os.path.join(store.DATA, "draft", "meta.json")), fixes=[{"x": 1}]))
     r = c.post("/api/draft", data=_draft_form(spec, rows), content_type="multipart/form-data")
     assert r.status_code == 409 and r.get_json() == {"error": "The draft has fixes that were never published.", "fixes": 1}, r.get_json()
@@ -385,11 +391,11 @@ def test_a_decision_made_during_a_build_is_not_lost():
     ws = c.get("/api/draft").get_json()["warnings"]; k = ws[0]["key"]; k2 = ws[1]["key"]
     orig = draft._build
     def slow(*a, **kw):
-        j = orig(*a, **kw); store.write_json(os.path.join(draft.DIR, "decisions.json"), {k2: dict(answer="left", at="now")}); return j
+        j = orig(*a, **kw); store.write_json(os.path.join(draft.DIR, "decisions.json"), {k2: dict(answer="met", at="now")}); return j
     draft._build = slow
     try: got = c.get("/api/draft").get_json()
     finally: draft._build = orig
-    assert store.read_json(os.path.join(draft.DIR, "decisions.json"))[k2]["answer"] == "left" and c.get("/api/draft").get_json()["left"] == 1
+    assert store.read_json(os.path.join(draft.DIR, "decisions.json"))[k2]["answer"] == "met" and c.get("/api/draft").get_json()["open"] == len(ws) - 1
     assert k != k2
 
 def test_the_draft_says_which_school_the_file_is_for_and_one_build_per_upload():
@@ -491,8 +497,11 @@ def test_a_fix_moves_the_lesson_and_undo_brings_it_back():
     j = c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"])).get_json(); assert len(j["fixes"]) == 1 and j["fixes"][0]["text"].startswith("Moved "), j
     g = c.get("/api/draft/grid?view=class&name=1A").get_json(); assert (s["d"], s["p"]) in {(x["d"], x["p"]) for x in g["lessons"] if x["id"] == lid}
     assert c.get("/api/status").get_json()["draft"]["open"] == j["open"]
+    st = c.get("/api/status").get_json()["draft"]; assert st["critical"] == j["critical"] and st["fixes"] == 1, (st, j["critical"])   # after a fix
+    assert j == c.get("/api/draft").get_json()   # the page compares the two: the same draft is not redrawn
     assert store.read_json(os.path.join(store.DATA, "draft", "meta.json"))["fixes"][0]["at"]
     j = c.post("/api/draft/undo").get_json(); assert j["fixes"] == [] and c.post("/api/draft/undo").status_code == 400
+    st = c.get("/api/status").get_json()["draft"]; assert st["critical"] == j["critical"] and st["fixes"] == 0 and st["open"] == j["open"], (st, j["critical"])   # after the undo
     assert c.post("/api/draft/undo").get_json() == {"error": "There is nothing to undo."}
 
 def test_a_typed_rule_is_checked_again_after_a_fix_and_the_lead_can_settle_it():
@@ -882,8 +891,8 @@ def test_a_draft_whose_fixes_are_published_is_replaced_without_the_question():
 
 def test_publish_uses_the_setup_the_draft_was_checked_against():   # finding 10
     import draft
-    spec = c.get("/api/setup").get_json()["spec"]; row = _one_class_row(spec)
-    c.post("/api/draft", data=_draft_form(spec, [_lesson_of(spec, row, row["teachers"])]), content_type="multipart/form-data")
+    spec = c.get("/api/setup").get_json()["spec"]; ds = spec["day_structure"]["P1"]; days = list(ds)   # one period at a time that is a lesson: no critical mistake
+    c.post("/api/draft", data=_draft_form(spec, [(days[0], ds[days[0]].index("L"), 1, "P1", "1A", "Art", ["Umairah Tan"])], replace="1"), content_type="multipart/form-data")
     real_rec, real_pub, calls, got = store.setup_record, store.publish, [], {}
     def rec():
         r = real_rec(); calls.append(1); r["v"] += len(calls) - 1; r["spec"]["school"]["name"] = f"Read {len(calls)}"; return r   # the setup changes between reads
@@ -896,6 +905,79 @@ def test_publish_uses_the_setup_the_draft_was_checked_against():   # finding 10
 def test_publishing_with_no_draft_is_404():
     shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"), ignore_errors=True)
     assert c.post("/api/draft/publish").status_code == 404 and c.get("/api/status").get_json()["draft"] is None
+
+def _clash_draft():   # 1A's Art and 1B's Art at the same time with one teacher: one critical mistake (a teacher in two places)
+    spec = c.get("/api/setup").get_json()["spec"]; ds = spec["day_structure"]["P1"]; days = list(ds); p = ds[days[0]].index("L"); U = "Umairah Tan"
+    rows = [(days[0], p, 1, "P1", "1A", "Art", [U]), (days[0], p, 1, "P1", "1B", "Art", [U])]
+    r = c.post("/api/draft", data=_draft_form(spec, rows, replace="1"), content_type="multipart/form-data"); assert r.status_code == 200, r.get_json()
+    return r.get_json()
+
+def _settle_clash():   # a move of 1B's Art that leaves the clash, through the fix route
+    lid = _lid("1B", "Art"); s = next(s for s in c.get(f"/api/draft/options?id={lid}").get_json()["slots"] if s["state"] == "ok" and not s["swap"])
+    r = c.post("/api/draft/fix", json=dict(kind="move", id=lid, d=s["d"], p=s["p"])); assert r.status_code == 200, r.get_json()
+    return r.get_json(), s
+
+def test_the_draft_counts_critical_mistakes():
+    j = _clash_draft(); crit = [w for w in j["warnings"] if w["crit"]]
+    assert j["critical"] == 1 and len(crit) == 1 and crit[0]["crit"] == "teacher" and "left" not in j, (j["critical"], [w["key"] for w in crit])
+    assert c.get("/api/draft").get_json()["critical"] == 1
+
+def test_publish_is_refused_while_a_critical_mistake_remains():
+    import draft
+    _clash_draft(); before = store.published(); stamp = (before or {}).get("meta", {}).get("published_at")   # None while nothing is published
+    r = c.post("/api/draft/publish"); j = r.get_json()
+    assert r.status_code == 409 and j == {"error": draft.critical_text(1), "critical": 1}, j
+    assert draft.critical_text(1) == "1 critical mistake must be settled on step 8 before the timetable can be published."
+    assert draft.critical_text(3) == "3 critical mistakes must be settled on step 8 before the timetable can be published."
+    assert (store.published() or {}).get("meta") == (before or {}).get("meta")   # the same record as before the refused attempt, or still none
+    fixed, s = _settle_clash(); assert fixed["critical"] == 0, fixed["critical"]
+    r = c.post("/api/draft/publish"); assert r.status_code == 200 and r.get_json()["published"] is True, r.get_json()
+    assert store.published()["meta"]["published_at"] != stamp and store.published()["meta"]["open"] == c.get("/api/status").get_json()["published"]["open"]
+
+def test_leave_it_is_gone():
+    import draft
+    j = _clash_draft(); k = next(w["key"] for w in j["warnings"] if not w["crit"]); assert draft.ANSWERS == ("step5", "open", "met")
+    r = c.post("/api/draft/decide", json={"key": k, "answer": "left"}); assert r.status_code == 400 and r.get_json() == {"error": "Choose what to do with the warning."}, r.get_json()
+    assert next(w for w in c.get("/api/draft").get_json()["warnings"] if w["key"] == k)["decision"] is None
+    assert c.post("/api/draft/decide", json={"key": k, "answer": "open"}).status_code == 200
+
+def test_a_draft_from_before_opens_and_its_left_warnings_are_open_again():
+    import draft
+    _clash_draft(); fixed, s = _settle_clash(); ws = [w for w in fixed["warnings"] if not w["crit"]]; kl, k5 = ws[0]["key"], ws[1]["key"]
+    dp = os.path.join(draft.DIR, "decisions.json"); store.write_json(dp, {kl: dict(answer="left", at="then"), k5: dict(answer="step5", at="then")})
+    r = c.get("/api/draft"); j = r.get_json(); assert r.status_code == 200 and len(j["fixes"]) == 1 and "left" not in j, j
+    by = {w["key"]: w for w in j["warnings"]}
+    assert by[kl]["decision"] is None and by[k5]["decision"]["answer"] == "step5" and j["open"] == len(ws) + sum(1 for w in j["warnings"] if w["crit"]) - 1, j["open"]
+    assert set(store.read_json(dp)) == {k5} and store.read_json(dp)[k5]["answer"] == "step5"
+
+def test_printouts_come_from_the_draft_with_its_fixes():
+    import io, zipfile
+    from ttgen.export import model_from_files
+    _clash_draft(); fixed, s = _settle_clash()
+    r = c.post("/api/draft/printouts", data=dict(single="0")); assert r.status_code == 200 and r.mimetype == "application/zip" and r.headers["X-Checks"], (r.status_code, r.get_data()[:200])
+    z = zipfile.ZipFile(io.BytesIO(r.data)); db = next(n for n in z.namelist() if n.endswith(".sqlite")); tmp = tempfile.mkdtemp(); path = os.path.join(tmp, "p.sqlite")
+    with open(path, "wb") as f: f.write(z.read(db))
+    m = model_from_files(None, path); __import__("shutil").rmtree(tmp, ignore_errors=True); art = [x for x in m["lessons"] if x["subject"] == "Art" and x["classes"] == ["1B"]]
+    assert len(art) == 1 and (art[0]["d"], art[0]["p"]) == (s["d"], s["p"]), [(x["d"], x["p"]) for x in art]
+    assert any(n.endswith(".xlsx") for n in z.namelist()) and any(n.endswith(".html") for n in z.namelist())
+    assert h is None or h.post("/api/draft/printouts", data=dict(single="0")).status_code == 401
+    shutil = __import__("shutil"); shutil.rmtree(os.path.join(store.DATA, "draft"))
+    r = c.post("/api/draft/printouts", data=dict(single="0")); assert r.status_code == 404 and r.get_json() == {"error": "There is no draft."}, r.get_json()
+
+def test_printouts_with_a_draft_but_no_setup_are_409():   # the order of checks: no draft is 404 first, then a draft with no setup is 409
+    _clash_draft(); real = store.setup_record
+    store.setup_record = lambda: dict(real(), spec=None)
+    try: r = c.post("/api/draft/printouts", data=dict(single="0"))
+    finally: store.setup_record = real
+    assert r.status_code == 409 and "Save the school's setup first" in r.get_json()["error"], (r.status_code, r.get_json())
+
+def test_publishing_records_the_open_warnings():
+    spec = c.get("/api/setup").get_json()["spec"]; ds = spec["day_structure"]["P1"]; days = list(ds)   # one period of Art for 1A at a time that is a lesson
+    j = c.post("/api/draft", data=_draft_form(spec, [(days[0], ds[days[0]].index("L"), 1, "P1", "1A", "Art", ["Umairah Tan"])], replace="1"), content_type="multipart/form-data").get_json()
+    assert j["critical"] == 0 and j["open"] > 0, (j["critical"], j["open"])
+    r = c.post("/api/draft/publish"); assert r.status_code == 200, r.get_json()
+    p = store.published()["meta"]; texts = [w["text"] for w in j["warnings"] if not w["decision"]]
+    assert p["open"] == j["open"] == len(texts) and p["left"] == texts, (p["open"], j["open"])
 
 def test_publish_uploaded_timetable():   # slow: solves the primary sample
     work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx")

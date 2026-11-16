@@ -284,14 +284,14 @@ def model_from_files(setup_path, timetable_path, spec=None, edit=None):
 
 # ----------------------------------------------------------------------------------------------- independent checks
 def check_model(m):
-    NP, L = m["NP"], m["lessons"]; days = m["days"]; probs = []
+    NP, L = m["NP"], m["lessons"]; days = m["days"]; probs = []; place = {}   # place: a lesson-time or room line -> its places in order (the row's first class, its day, period, id and row; one per line of that text), for the Fix the timetable button
     where = lambda d, q: f"{days[d]} period {q} ({m['times'][q][0]})"
     tb = collections.defaultdict(set)
     for x in L:
         for t in x["teachers"]:
             for q in range(x["p"], x["p"] + x["n"]): tb[(t, x["d"], q)].add(x["id"])
     def spans(keys):
-        """(who, d, q) -> [(who, d, 'Odd Mon 10.30-11.30')] with consecutive periods joined"""
+        """(who, d, q) -> [(who, d, 'Odd Mon 10.30-11.30', first period)] with consecutive periods joined"""
         by = collections.defaultdict(list)
         for w, d, q in keys: by[(w, d)].append(q)
         out = []
@@ -299,17 +299,20 @@ def check_model(m):
             qs = sorted(set(qs)); a = prev = qs[0]
             for q in qs[1:] + [None]:
                 if q is not None and q == prev + 1: prev = q; continue
-                out.append((w, d, f"{days[d]} {m['times'][a][0]}-{m['times'][prev][1]} (periods {a}-{prev})" if prev > a else where(d, a)))
+                out.append((w, d, f"{days[d]} {m['times'][a][0]}-{m['times'][prev][1]} (periods {a}-{prev})" if prev > a else where(d, a), a))
                 if q is not None: a = prev = q
         return out
-    probs += [f"Teacher double-booked: {t} on {w}." for t, d, w in spans({k for k, v in tb.items() if len(v) > 1})][:30]
+    probs += [f"Teacher double-booked: {t} on {w}." for t, d, w, _ in spans({k for k, v in tb.items() if len(v) > 1})]
     rb = collections.Counter()
     for x in L:
         if x["room"] and x["room"] != "TBC":
             for q in range(x["p"], x["p"] + x["n"]): rb[(x["room"], x["d"], q)] += 1
-    probs += [f"Room over capacity: {r} on {w} (holds {m['room_cap'].get(r, 1)} at once)." for r, d, w in spans({k for k, n in rb.items() if n > m["room_cap"].get(k[0], 1)})][:30]
+    for r, d, w, a in spans({k for k, n in rb.items() if n > m["room_cap"].get(k[0], 1)}):
+        text = f"Room over capacity: {r} on {w} (holds {m['room_cap'].get(r, 1)} at once)."; probs.append(text)
+        x = next((x for x in L if x["room"] == r and x["d"] == d and x["p"] <= a < x["p"] + x["n"] and x["classes"]), None)   # the first lesson in that room in the line's first period
+        if x: place.setdefault(text, []).append(dict(cls=x["classes"][0], day=days[d], period=x["p"], id=x["id"], row=x["group"]))
     rain = {(h, x["d"], q) for x in L for h in _split_list(x.get("rain")) if h != "TBC" for q in range(x["p"], x["p"] + x["n"])}   # home rooms kept for PE in rain
-    probs += [f"Rain room in use: {r} on {w} is the home room of a class at PE, but a lesson is in it." for r, d, w in spans({k for k in rain if rb[k]})][:30]
+    probs += [f"Rain room in use: {r} on {w} is the home room of a class at PE, but a lesson is in it." for r, d, w, _ in spans({k for k in rain if rb[k]})][:30]
     probs += [f"No rain room: {', '.join(x['classes'])} {x['subject']} on {m['days'][x['d']]} period {x['p']} (the home room is in use)." for x in L if x.get("rain") == "TBC"][:30]
     occ = collections.defaultdict(lambda: collections.defaultdict(set)); whole = collections.defaultdict(set)
     for x in L:
@@ -323,16 +326,19 @@ def check_model(m):
             if len(ids) > 1:
                 if whole.get((c, d, q)): ccl.add((c, d, q))
                 else: side += 1
-    probs += [f"Class clash: {c} on {w}." for c, d, w in spans(ccl)][:30]
+    probs += [f"Class clash: {c} on {w}." for c, d, w, _ in spans(ccl)]
+    def put(x, text):
+        probs.append(text)
+        if x["classes"]: place.setdefault(text, []).append(dict(cls=x["classes"][0], day=days[x["d"]], period=x["p"], id=x["id"], row=x["group"]))
     for x in L:
         lv = x["level"] if x["level"] in m["grid"] else m["class_ix"].get((x["classes"] or [""])[0], {}).get("level")
         k = m.get("keep", {}).get(m["days"][x["d"]])
         if k is not None and x["p"] + x["n"] > k:   # Settings 'Lessons end by': runs past the time for its day
-            probs.append(f"{x['subject']} {x['group']} ends after {m['times'][min(k, m['NP'] - 1)][0]} on {where(x['d'], x['p'])} (Settings: Lessons end by)."); continue
+            put(x, f"{x['subject']} {x['group']} ends after {m['times'][min(k, m['NP'] - 1)][0]} on {where(x['d'], x['p'])} (Settings: Lessons end by)."); continue
         if lv in m["grid"] and any(m["grid"][lv][x["d"]][q] not in "LA" for q in range(x["p"], min(m["NP"], x["p"] + x["n"]))):
-            probs.append(f"{x['subject']} {x['group']} sits in a break or outside the day on {where(x['d'], x['p'])}.")
+            put(x, f"{x['subject']} {x['group']} sits in a break or outside the day on {where(x['d'], x['p'])}.")
         elif any(m["cgrid"][c][x["d"]][q] == "R" for c in x["classes"] if c in m["cgrid"] for q in range(x["p"], min(m["NP"], x["p"] + x["n"]))):
-            probs.append(f"{x['subject']} {x['group']} sits in a class's recess on {where(x['d'], x['p'])}.")
+            put(x, f"{x['subject']} {x['group']} sits in a class's recess on {where(x['d'], x['p'])}.")
     placed = collections.Counter(); seen = set()
     for x in L:
         if x["group"] == ENTIRE:
@@ -368,7 +374,7 @@ def check_model(m):
     for lid, xs in lids.items():
         x = xs[0]; who = ", ".join(sorted({y["group"] if y["group"] != ENTIRE else ", ".join(y["classes"]) for y in xs}))
         after.append(f"{days[x['d']]} {m['times'][x['p']][0]}-{m['times'][x['p'] + x['n'] - 1][1]}: {x['block'] or x['subject']} ({who})")
-    return dict(problems=probs, after_school=after, side_by_side=side, lessons=len({x["id"] for x in L}), rows=len(L),
+    return dict(problems=probs, where=place, after_school=after, side_by_side=side, lessons=len({x["id"] for x in L}), rows=len(L),
                 students=len(m["students"]), ok=not probs)
 
 

@@ -7,9 +7,9 @@ code and download PDFs. The app does not generate timetables itself.
 
 | Code (Railway variable) | Who | What they see |
 |---|---|---|
-| `COMMITTEE_CODE` | timetable committee | the setup editor, the downloads, Publish, the personal student codes |
+| `COMMITTEE_CODE` | timetable committee | the setup editor, the downloads, Upload and edit, Publish, the personal student codes |
 | `TEACHER_CODE` | teachers | every class, teacher, room and student timetable, the lesson search, Who's free, PDFs |
-| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Publish and Students; everything on step 5 (who teaches which class and group, new groups and bands, moving rows between bands), and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
+| `HEADS_CODE` (optional) | heads of department | every step to read except Download, Upload and edit, Publish and Students; everything on step 5 (who teaches which class and group, new groups and bands, moving rows between bands), and new teachers (marked provisional until the committee confirms them) to change; a refused change is skipped and reported, and the rest of their work is kept |
 | `ANTHROPIC_API_KEY` (optional) | the committee, in Railway | with it set, the Fix card on step 8 has a box to type a request in words; only those words go to Anthropic. A server that still has `AI_PROVIDER=anthropic` and `AI_API_KEY` from an earlier version has the box too |
 | `TYPED_REQUEST_MODEL` (optional) | the committee, in Railway | the model that reads the words, `claude-opus-5-5` unless set (with the earlier `AI_API_KEY`, the model `AI_MODEL` names); `mock` is a practice reader that needs no key |
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
@@ -17,7 +17,7 @@ code and download PDFs. The app does not generate timetables itself.
 
 **The steps.** Start · School & day · 1 Venues · 2 Classes · 3 Subjects · 4 Teachers · 5 Department map ·
 6 Configuration & constraints (the school-wide settings, teacher block-outs, fixed lessons and every other rule) ·
-7 Download · 8 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
+7 Download · 8 Upload and edit · 9 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
 step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Fixed lessons and More
 rules sheets. Step 4 shows the teachers two ways, **Cards** (a column per department, a card per teacher) and **Table**; the choice is
 remembered in your browser. The **Roles** card is below the teachers: the teacher list is checked against it. A teacher can
@@ -75,7 +75,7 @@ is not on step 3, and a named subject the class has only in groups.
    first, each with a button to the step that fixes it; it runs again whenever the setup changes (`checks.py`).
 3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
-   `SKILL.md` carries a version line (`Skill version: 2026-11.5`) and the workbook's README sheet names the version it
+   `SKILL.md` carries a version line (`Skill version: 2026-11.6`) and the workbook's README sheet names the version it
    was made for. When the setup has second choices (step 6), step 7 counts them and asks **If the first choices do not
    fit:** **Fall back only when needed** (the default) or **Make one timetable for each**; the workbook carries the pick
    on its Choices sheet. Every downloaded workbook also carries a **Configuration id** row on Settings (`v14`, or `v14+`
@@ -84,7 +84,7 @@ is not on step 3, and a named subject the class has only in groups.
    workbook, fill in the rule report and the Choices used sheet.
 4. **Make the timetable outside**: give the agent both, and ask it to generate the timetable and report anything that
    does not fit. It hands back a timetable database (`.sqlite`) or a timetable workbook (a Lessons sheet).
-5. **Publish** (step 8): upload that file (a workbook comes with its setup workbook; a database made by the skill holds
+5. **Upload and edit** (step 8): upload that file (a workbook comes with its setup workbook; a database made by the skill holds
    its setup) and press **Check**. The upload becomes the **draft**, kept on the server, and the app checks it four ways
    against the setup as it is now: clashes (teacher, class, room and student double-booked, lessons outside lesson time),
    differences from the deployment (who teaches what, periods placed against periods planned, rooms; other teachers than the
@@ -93,9 +93,12 @@ is not on step 3, and a named subject the class has only in groups.
    and the typed rules and choices used that the agent reported. A warning for another school than the saved setup, and
    which configuration the timetable was made from, are shown too. The warnings are listed by kind and then by class,
    teacher or group, with the timetable's side and step 5's side. For each one, **Update step 5** changes the setup to
-   match the timetable, and **Leave it** keeps the warning on the list as left for now (**Reopen** takes it back);
-   what you left stays left when you upload the file again. A rule in words that reads **Check again** has a **Still met**
-   button for when you have looked. **Fix the timetable** (on a warning, or the Fix card below the list) shows one
+   match the timetable, and a rule in words that reads **Check again** has a **Still met** button for when you have looked
+   (**Reopen** takes it back). The summary line reads critical, warnings open and settled on step 5. A **critical
+   mistake** is a lesson with no teacher, a teacher in two places, a class clash, a room used by more lessons than it
+   takes, or a lesson in a break or outside the day; each shows its kind in words before its sentence, and every
+   one is listed. Everything else is a warning and never stops publishing. Two bands, or two groups, of one class at
+   the same time are not a clash. **Fix the timetable** (on a warning, or the Fix card below the list) shows one
    class's or one teacher's week as a table; pick a class or a teacher, and a week when the school has two, then select a
    lesson. Every slot is coloured by what a fix there would do (green is open, amber is open but less wanted, red is
    not allowed, grey is a slot the lesson cannot go to: not lesson time, outside the day, or another lesson is there
@@ -111,20 +114,24 @@ is not on step 3, and a named subject the class has only in groups.
    new lessons outlined; **Apply** makes the fixes, **Cancel** leaves everything as it was. Where one fix is not enough
    a way can be two fixes made together; they are one entry under **Fixes** and **Undo the last two fixes** takes both
    back. With `ANTHROPIC_API_KEY` set, the Fix card also has a box above the ways: type what you want in your own words ("move PE for 2A off Friday", "give 2A maths to Mdm Lee"). It takes three kinds of request: move lessons, change who teaches a lesson, change a lesson's room. A language model only reads the words into a small request; the app finds the lessons and people itself, asks which one when a name could be several, and runs the same checks as **Ways to settle this**, showing up to three ways per lesson with **Show** and **Apply**. Nothing changes until you press Apply, and anything else you ask to keep is repeated back as not checked. The whole site can send 30 requests in 10 minutes. If the words cannot be read, the box says so and the helper's own suggestions carry on; without the key the box is not there and the helper works as before. When no way settles a warning the panel says so and lists the nearest ways with what each breaks; those are
-   blocked (they would cause a clash or newly break a Must rule) and have no button. **Download the
-   draft (.sqlite)** carries the draft with its fixes elsewhere (Make printouts accepts it). **Publish this
-   timetable** then makes the draft what teachers and students see, with every download and the personal student codes
-   (about a minute), even with warnings open: **Published now** says which setup version it was checked against, how many
-   warnings were left open and what they said, and lists the fixes made in the app. The rule report and the choices used stay with the published timetable.
+   blocked (they would cause a clash or newly break a Must rule) and have no button. Below the list, **Go to step 9** goes on.
+6. **Publish** (step 9): it shows the timetable as it will be published, read-only: the critical mistakes (each with
+   **Show on step 8**, which opens the Fix card on it), every other open warning, and the changes made in the app. **Publish
+   this timetable** is off while a critical mistake remains, with the reason above it, and the server refuses as well
+   (it says how many critical mistakes are left), so a second tab cannot get round it. With none, it makes the draft what teachers and students see,
+   with every download and the personal student codes (about a minute), even with warnings open: **Published now**
+   says which setup version it was checked against, how many warnings were open when it was published and what they
+   said, and lists the fixes made in the app. **Make printouts (.zip)** on step 9 makes every timetable of the draft,
+   with the fixes made in the app, without publishing; **Download the draft (.sqlite)** carries the draft elsewhere. The rule report and the choices used stay with the published timetable.
    The published class timetable names the class's form teachers under its title (on the PDF as a line of its own), and a
    teacher's timetable says which classes they are a form teacher of; both come from the setup it was checked against.
-   **Make printouts** gives the same files without publishing. For an agent, `python -m ttgen check-timetable
+   For an agent, `python -m ttgen check-timetable
    TIMETABLE [--setup SETUP.xlsx]` prints the same check.
 
 **Timetable database.** Publishing (and every export, in the app or with `python -m ttgen export`) also writes the
 timetable as a SQLite database: every lesson with its day, times, classes, teachers and room, plus the classes,
-teachers, rooms and the setup itself, for importing into other systems. **Make printouts** on step 8 reads one back:
-upload it alone (it holds its setup) or with a setup workbook, and get every output again.
+teachers, rooms and the setup itself, for importing into other systems. **Make printouts** on step 9 makes every output again from the draft, which may be a database
+made by this app or the skill (it holds its setup).
 
 **What a timetable compromises.** An overloaded teacher still gets every lesson: allowance is not a limit the solver
 keeps, and Prefer rules bend when they must. The Excel workbook lists what was given up on a **Compromises** sheet
