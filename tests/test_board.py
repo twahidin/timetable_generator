@@ -150,6 +150,17 @@ def test_the_routes():
         r = c.get(url, headers={"Accept-Encoding": "gzip"}); assert r.status_code == 404 and "Content-Encoding" not in r.headers and r.get_json() == {"error": "There is no draft."}, url
         assert NOSE.get(url).status_code == 401
 
+def test_every_upload_has_its_own_id_and_an_old_draft_without_one_still_opens():
+    save_draft(ROWS); one = draft.summary(), draft.info()
+    save_draft(ROWS); two = draft.summary(), draft.info()   # at once: the same minute, so uploaded_at may be the same
+    assert one[0]["upload_id"] and two[0]["upload_id"] and one[0]["upload_id"] != two[0]["upload_id"], (one[0], two[0])
+    assert one[1]["upload_id"] == one[0]["upload_id"] and two[1]["upload_id"] == two[0]["upload_id"]
+    meta = store.read_json(draft._p("meta.json")); meta.pop("upload_id"); store.write_json(draft._p("meta.json"), meta)   # a draft saved before upload ids
+    assert draft.summary()["upload_id"] is None and draft.info()["upload_id"] is None
+    assert draft.summary()["upload_id"] is None   # steadily
+    placed(draft.board()); assert len(draft.board()["cards"]) == 4
+    save_draft(ROWS); assert draft.summary()["upload_id"]   # its next upload gets one
+
 def test_the_board_of_two_thousand_rows_is_quick_and_small():
     rows = [dict(id=i + 1, day=DAYS[i % len(DAYS)], p=(i // len(DAYS)) % NPD, n=1, level=LEVEL, classes=[f"T{i % 32 + 1:02d}"], subject=(SUBJ, SUBJ2)[i % 2], teachers=[TEACHERS[i % 3]]) for i in range(2000)]
     save_draft(rows); draft._now()   # the model is built once and kept: the time is the board's own

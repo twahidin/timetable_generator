@@ -2731,7 +2731,7 @@ async function decide(answer, key) {   // answer is step5, open or met; the key 
    brings the same draft back changes nothing on the page. */
 const DR = { seen: null, busy: false, again: false, hold: false, gen: 0 };   // seen: the status's summary of the draft when the page last fetched it; busy: a fetch is under way; again: the person opened a step meanwhile
 const onDraftStep = () => ["edit", "publish"].includes(STEPS[S.step][0]);
-const draftSig = () => { const d = G.st && G.st.draft; return d ? JSON.stringify([d.uploaded_at, d.open, d.critical, d.fixes]) : ""; };   // the draft summary alone: a change to the setup is picked up when the person opens the step
+const draftSig = () => { const d = G.st && G.st.draft; return d ? JSON.stringify([d.upload_id, d.uploaded_at, d.open, d.critical, d.fixes]) : ""; };   // the draft summary alone: a change to the setup is picked up when the person opens the step
 async function loadDraft(again) {   // again: the person has just opened step 8 or 9
   if (!G.st || !G.st.draft || DR.hold) return;   // hold: a publish is running
   if (DR.busy) { if (again) DR.again = true; return; }   // never two at once; an opening meanwhile is fetched for when this one is in
@@ -3171,10 +3171,10 @@ async function fxOpenFirst() {   // the Fix card with nothing chosen: the setup'
    waits in next (changed: it came during this drag; lost: it is of another upload, so the card is gone) until the drag ends. */
 const BD = { gen: 0, sp: null };   // gen: the board fetch now; sp: the slots fetched for that board, by card id (bdSlotsP)
 const bdShowable = () => !!(S.draft && !S.draft.published && !S.practice);
-const bdSig = j => JSON.stringify([j.uploaded_at, j.fixes, j.setup_version]);   // which draft a board was fetched for, and the setup it was checked against
+const bdSig = j => JSON.stringify([j.upload_id, j.uploaded_at, j.fixes, j.setup_version]);   // which draft a board was fetched for (upload_id: each upload's own; null for a draft saved before there were ids), and the setup it was checked against
 function bdEnsure(id, opening) {   // the board exists on step 8 with a draft, and nowhere else; it is fetched again whenever it is not for the draft the page has (every place that takes a new draft ends here, through drawDraft, render, or bdSync); opening: the step is being drawn, so a failed fetch is tried again
   if (id !== "edit" || !bdShowable()) { if (S.board) { S.board = null; BD.gen++; } return; }
-  if (!S.board) S.board = { data: null, mode: { kind: "day", d: 0 }, find: "", fold: {}, sel: null, slots: null, slotsFor: null, asking: null, failFor: null, held: null, drag: null, grab: 0, hv: "", ask: null, pt: "", note: "", fail: false, sig: null, up: null, loading: null, next: null, wait: null, changed: false, lost: false };
+  if (!S.board) S.board = { data: null, mode: { kind: "day", d: 0 }, find: "", fold: {}, sel: null, slots: null, slotsFor: null, asking: null, failFor: null, held: null, drag: null, grab: 0, hv: "", ask: null, pt: "", note: "", fail: false, sig: null, up: undefined, loading: null, next: null, wait: null, changed: false, lost: false };
   if (S.board.sig !== bdSig(S.draft) || (opening && S.board.fail)) bdLoad();
 }
 const bdWanted = () => { const b = S.board; return b.held !== null ? b.held : b.sel; };   // the card whose slots are wanted: the one pressed, else the one selected
@@ -3191,7 +3191,7 @@ const bdCard = id => { const d = S.board && S.board.data; return d && d.cards.fi
 const bdClasses = d => [].concat(...(d.levels || []).map(lv => lv.classes));
 async function bdLoad() {   // the board again for the draft the page has; with a card in the air the drag is kept, and the board is drawn when it ends (bdNext)
   const b = S.board; if (!b) return;
-  const gen = ++BD.gen, up = S.draft.uploaded_at, air = b.drag !== null || !!b.wait, other = b.up !== null && b.up !== up;
+  const gen = ++BD.gen, up = S.draft.upload_id || null, air = b.drag !== null || !!b.wait, other = b.up !== undefined && b.up !== up;   // up: the upload the board is for (undefined: none yet)
   b.sig = bdSig(S.draft); b.up = up;
   if (b.ask) toast("The timetable changed. Ask again.");
   if (other) { b.sel = null; b.note = ""; if (air) b.lost = true; }   // lesson ids restart with each upload: the old id may now be another lesson
@@ -3504,7 +3504,7 @@ document.addEventListener("dragend", e => {   // a release over a place that ref
   bdDragEnd(); if (!bdNext()) { bdLineDraw(); bdPaint(); } if (said) toast(said);
 });
 document.addEventListener("keydown", e => {   // Escape clears the board's selection and withdraws its Swap question; in a field, Escape is the field's
-  const b = S.board; if (e.key !== "Escape" || !b || (b.sel === null && !b.ask)) return;
+  const b = S.board; if (e.key !== "Escape" || !b || b.wait || (b.sel === null && !b.ask)) return;   // a waiting drop (a moment) is not cancelled by it
   if (e.target.closest && e.target.closest("input, select, textarea, [contenteditable]")) return;
   e.preventDefault(); b.sel = null; b.ask = null; bdDraw(); bdWant();
 });
