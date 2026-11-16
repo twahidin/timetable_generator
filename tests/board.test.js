@@ -70,6 +70,25 @@ t("groups, cycle: a row per day for one class, grouped by week", () => {
   assert.strictEqual(none[0].rows[0].codes, "......"); assert.deepStrictEqual(none[0].rows[0].cards, []);
 });
 
+t("groups, day: a card with only an unknown class is in the No class row and nowhere else; one known class keeps it in that class's row", () => {
+  const odd = card(1, 0, 1, 1, ["9Z"]), mixed = card(2, 0, 2, 1, ["9Z", "1A"]), g = Board.groups(board([odd, mixed]), { kind: "day", d: 0 });
+  assert.deepStrictEqual(g.map(x => x.name), ["Sec 1", "Sec 2", "No class"]);
+  assert.deepStrictEqual(g[0].rows[0].cards, [{ card: mixed, lane: 0 }]);
+  assert.deepStrictEqual(g[0].rows[1].cards, []); assert.deepStrictEqual(g[1].rows[0].cards, []);
+  assert.deepStrictEqual(g[2].rows[0].cards, [{ card: odd, lane: 0 }]);
+  const only = Board.groups(board([mixed]), { kind: "day", d: 0 });
+  assert.deepStrictEqual(only.map(x => x.name), ["Sec 1", "Sec 2"]);
+});
+
+t("onRow with the board: the No class row takes a card with no class in a level", () => {
+  const bd = board([]), odd = card(1, 0, 1, 1, ["9Z"]), mixed = card(2, 0, 2, 1, ["9Z", "1A"]), lone = card(3, 0, 1, 1, []), one = card(4, 0, 1, 1, ["1A"]);
+  const none = { cls: "" };
+  assert.deepStrictEqual([odd, mixed, lone, one].map(c => Board.onRow(c, none, bd)), [true, false, true, false]);
+  assert.deepStrictEqual([odd, mixed, lone, one].map(c => Board.onRow(c, none)), [false, false, true, false]);
+  assert.deepStrictEqual([odd, mixed, lone, one].map(c => Board.onRow(c, { cls: "1A" }, bd)), [false, true, false, true]);
+  assert.strictEqual(Board.onRow(odd, { cls: "9Z" }), true);
+});
+
 t("open: only L and A are open", () => {
   assert.deepStrictEqual(["L", "A", "R", ".", ""].map(Board.open), [true, true, false, false, false]);
 });
@@ -114,6 +133,7 @@ t("slot, states, can: the card's own place, a clean place, a clash, a place with
     { d: 0, p: 4, state: "na", why: "", swap: null, also: [] }, { d: 0, p: 5, state: "prefer", why: "", swap: null, also: [] },
     { d: 1, p: 2, state: "ok", why: "", swap: null, also: [] }];
   assert.deepStrictEqual(Board.states(c, slots, 0, 6), ["", "ok", "own", "no", "na", "prefer"]);
+  assert.deepStrictEqual(Board.states(c, [{ d: 0, p: 0 }], 0, 6)[0], "");
   assert.deepStrictEqual(Board.states(c, slots, 1, 6), ["", "", "ok", "", "", ""]);
   assert.deepStrictEqual(Board.slot(c, slots, 0, 2), { d: 0, p: 2, state: "own", why: "", swap: null, also: [] });
   assert.strictEqual(Board.slot(c, slots, 0, 1), slots[0]);

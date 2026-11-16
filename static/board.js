@@ -25,6 +25,16 @@ var Board = (function () {
     return cls === "" ? list.length === 0 : list.indexOf(cls) >= 0;
   }
 
+  /* the set of classes that have a row in the day mode */
+  function known(board) {
+    var set = {};
+    (board.levels || []).forEach(function (lv) { lv.classes.forEach(function (c) { set[c] = true; }); });
+    return set;
+  }
+
+  /* a card with no class in any level belongs in the "No class" row */
+  function classless(card, set) { return !(card.classes || []).some(function (c) { return set[c]; }); }
+
   function dots(NP) { return new Array(NP + 1).join("."); }
 
   function codesFor(board, cls, d) {
@@ -32,8 +42,10 @@ var Board = (function () {
     return c && c[d] != null ? c[d] : dots(board.NP);
   }
 
-  function row(board, key, label, d, cls, codes) {
-    var placed = lanes(board.cards.filter(function (c) { return c.d === d && holds(c, cls); }));
+  function row(board, key, label, d, cls, codes, set) {
+    var placed = lanes(board.cards.filter(function (c) {
+      return c.d === d && (set && cls === "" ? classless(c, set) : holds(c, cls));
+    }));
     var used = 1;
     placed.forEach(function (x) { if (x.lane + 1 > used) used = x.lane + 1; });
     return { key: key, label: label, d: d, cls: cls, codes: codes, lanes: used, cards: placed };
@@ -52,12 +64,12 @@ var Board = (function () {
         };
       });
     }
-    var d = mode.d;
+    var d = mode.d, set = known(board);
     var out = (board.levels || []).map(function (lv) {
       return { name: lv.level, rows: lv.classes.map(function (c) { return row(board, c, c, d, c, codesFor(board, c, d)); }) };
     });
-    if (board.cards.some(function (c) { return (c.classes || []).length === 0; })) {
-      out.push({ name: "No class", rows: [row(board, "", "No class", d, "", dots(board.NP).replace(/\./g, "L"))] });
+    if (board.cards.some(function (c) { return classless(c, set); })) {
+      out.push({ name: "No class", rows: [row(board, "", "No class", d, "", dots(board.NP).replace(/\./g, "L"), set)] });
     }
     return out;
   }
@@ -118,7 +130,7 @@ var Board = (function () {
 
   function states(card, slots, d, NP) {
     var out = [], p, s;
-    for (p = 0; p < NP; p++) { s = slot(card, slots, d, p); out.push(s ? s.state : ""); }
+    for (p = 0; p < NP; p++) { s = slot(card, slots, d, p); out.push(s && s.state ? s.state : ""); }
     return out;
   }
 
@@ -129,7 +141,11 @@ var Board = (function () {
     return { kind: "move", id: card.id, d: s.d, p: s.p };
   }
 
-  function onRow(card, r) { return holds(card, r.cls); }
+  /* with the board, the "No class" row (cls "") also takes a card none of whose classes is in a level */
+  function onRow(card, r, board) {
+    if (board && r.cls === "") return classless(card, known(board));
+    return holds(card, r.cls);
+  }
 
   function tell(s, days) {
     if (s.state === "own") return "This is where the lesson is now.";
