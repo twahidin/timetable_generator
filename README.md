@@ -111,7 +111,7 @@ is not on step 3, and a named subject the class has only in groups.
    first, with **Undo the last timetable change**. The warnings are listed by
    kind and then by class, teacher or group, with the timetable's side and step 5's side. For each one, **Update step
    5** changes the setup to match the timetable, and a rule in words that reads **Check again** has a **Still met**
-   button for when you have looked (**Reopen** takes it back). The summary line reads critical, warnings open and
+   button for when you have looked (**Reopen** takes it back). The summary line reads critical, other warnings open (the two add up to the Warnings tab's number) and
    settled on step 5. A **critical mistake** is a lesson with no teacher, a teacher in two places, a class clash, a room
    used by more lessons than it takes, or a lesson in a break or outside the day; each shows its kind in words before
    its sentence, and every one is listed. Everything else is a warning and never stops publishing. Two bands, or two
