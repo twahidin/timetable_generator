@@ -17,6 +17,9 @@ MAX_BLOCKED = 60     # refused fixes tried for the blocked list
 MAX_PAIRS = 40       # pairs of fixes judged per warning
 
 def _base(key): return re.sub(r"#\d+$", "", key or "")   # verify.warnings makes repeated keys unique with #2, #3
+def _pool(m):
+    """the rows of the lessons not placed, which the draft's model carries as m["pool"] (none for a model without one)"""
+    return m.get("pool") or ()
 def _first(lessons, i): return next((x for x in lessons if x["id"] == i), None)
 def _keys_of(x): return [("C", c, x["subject"]) for c in x["classes"]] if x["group"] == ENTIRE else [("G", x["group"])]
 
@@ -124,7 +127,7 @@ def chain(m, spec, days, fx, ctx=None, memo=None):
     steps, state, why = [], "ok", ""
     for i, f in enumerate(fx):
         mi, ci = (m, fixes._ctx(m, ctx)) if i == 0 else _after(m, spec, days, fx[:i], memo)
-        j = fixes.judge(mi, spec, days, f, ci)
+        j = fixes.judge(mi, spec, days, f, ci, pool=_pool(mi))
         steps.append(j)
         if j["state"] not in OK: state, why = j["state"], j["why"]; break
         if j["state"] == "prefer" and state == "ok": state, why = "prefer", j["why"]
@@ -242,8 +245,8 @@ def _about_teacher(m, spec, w):
 
 def _slots(m, spec, days, i, memo=None):
     """fixes.slots of lesson i, kept in memo (a dict) when one is given"""
-    if memo is None: return fixes.slots(m, spec, days, i)
-    if ("slots", i) not in memo: memo["slots", i] = fixes.slots(m, spec, days, i)
+    if memo is None: return fixes.slots(m, spec, days, i, _pool(m))
+    if ("slots", i) not in memo: memo["slots", i] = fixes.slots(m, spec, days, i, _pool(m))
     return memo["slots", i]
 
 def _options(m, spec, days, w, ctx=None, memo=None):
@@ -261,7 +264,7 @@ def _options(m, spec, days, w, ctx=None, memo=None):
             have, want = sum({x["id"]: x["n"] for x in rows}.values()), (e or {}).get("periods", 0)
             if part == "teachers" and e and e["teachers"]: good.append([dict(kind="teacher", key=ks, teachers=sorted(e["teachers"]))])
             elif part in ("periods", "missing") and e and have < want:
-                n = next((x["n"] for x in fixes.short(m, spec) if x["key"] == ks), 1); c = fixes._ctx(m, ctx)
+                n = next((x["n"] for x in fixes.short(m, spec, _pool(m)) if x["key"] == ks), 1); c = fixes._ctx(m, ctx)
                 for s in fixes.add_slots(m, spec, days, ks, n):
                     if s["state"] != "na": put([dict(kind="add", key=ks, d=s["d"], p=s["p"], n=n, room=fixes.add_room(m, spec, ks, s["d"], s["p"], n, c))], s)
             elif part == "extra" or (part == "periods" and have > want):
@@ -298,7 +301,7 @@ def _moves(m, spec, days, i, avoid, ctx, k=3):
     for d, p in near:
         if any((d, q) in avoid for q in range(p, p + n_)) or any(y["id"] != i for c in cls for q in range(p, p + n_) for y in b.at.get(("c", c, d, q), ())): continue
         f = dict(kind="move", id=i, d=d, p=p)
-        if fixes.judge(m, spec, days, f, ctx)["state"] == "ok":
+        if fixes.judge(m, spec, days, f, ctx, pool=_pool(m))["state"] == "ok":
             out.append(f)
             if len(out) == k: break
     return out
@@ -331,7 +334,7 @@ def pairs(m, spec, days, w, have, ctx=None, memo=None):
         elif kind == "deployment" and _dep_parts(w.get("key"))[1] == "teachers":
             for fx in _options(m, spec, days, w, c, memo)[0]:
                 f = fx[0]
-                if f["kind"] != "teacher" or fixes.judge(m, spec, days, f, c)["state"] != "no": continue
+                if f["kind"] != "teacher" or fixes.judge(m, spec, days, f, c, pool=_pool(m))["state"] != "no": continue
                 ids = {x["id"] for x in _of_key(m["lessons"], fixes._key(f["key"]))}; who = set()
                 for i in ids:   # as fixes.judge sees a teacher change: only a teacher who was not there can clash
                     rows = b.ids[i]; had = {t for y in rows for t in y["teachers"]}; x = rows[0]
