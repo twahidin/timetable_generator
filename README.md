@@ -19,8 +19,13 @@ code and download PDFs. The app does not generate timetables itself.
 6 Configuration & constraints (the school-wide settings, teacher block-outs, fixed lessons and every other rule) ·
 7 Download · 8 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
 step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Fixed lessons and More
-rules sheets. Step 4 starts with the **Roles** (fill them first: the teacher list is checked against them), then the
-teacher list, then the teachers table. Step 1 shows the rooms two ways, **Blocks** (a panel per block, a row per floor, a tile per room) and **Table**; the choice is remembered in your browser. A room can carry **Equipment** and a **Configuration**, two plain notes that are only shown (in the table, on the Blocks tile, in the workbook and on the room's page) and that no check reads. On Blocks, a click on a room opens it to change; **+ Room** on a floor, **+ Floor** on a block and **+ Block** add a room (each in one step you can undo), and **New kind…** in a room's Kind box adds a kind to the school's list.
+rules sheets. Step 4 shows the teachers two ways, **Cards** (a column per department, a card per teacher) and **Table**; the choice is
+remembered in your browser. The **Roles** card is below the teachers: the teacher list is checked against it. A teacher can
+have a **second department** beside their own (the committee gives it, and a head cannot): drag a department chip from
+the row above the columns onto a teacher's card, or pick it in the **Second department** box (in the open card or in the
+Table), or take it off with the ✕ on its chip. They then have a card in both departments' columns and are on both
+departments' pages on step 5. A click on a card opens it in place to change it. A stored Can teach list from an older setup
+stays in the file untouched; the page no longer shows or changes it. Step 1 shows the rooms two ways, **Blocks** (a panel per block, a row per floor, a tile per room) and **Table**; the choice is remembered in your browser. A room can carry **Equipment** and a **Configuration**, two plain notes that are only shown (in the table, on the Blocks tile, in the workbook and on the room's page) and that no check reads. On Blocks, a click on a room opens it to change; **+ Room** on a floor, **+ Floor** on a block and **+ Block** add a room (each in one step you can undo), and **New kind…** in a room's Kind box adds a kind to the school's list.
 
 **Form teachers.** A class can have form teachers, who take its lessons together. **School & day** has two settings for
 them: what the school calls them (**What your school calls a class's form teachers**, default "Form teachers"; a school
@@ -180,8 +185,8 @@ workbook carries it in the Lesson pattern column on the Lessons sheet.
 **Deploying in the table view.** On the same view, filter the teaching groups by level, subject or teacher, tick rows (shift-click
 for a run), pick a teacher and **Make Teacher 1**, **Add as co-teacher** or **Take off** for all of them at once. The bar shows
 the teacher's load now and with those groups; groups they are not set to teach, or two groups of one band, are flagged.
-On step 4 (Teachers), filter by department or subject, tick teachers and give them a subject they can teach (at all
-levels, one level or a band of levels), take a subject off them, or set their department, role or allowance together.
+On step 4 (Teachers), filter by department (either department of a teacher counts), tick teachers and set their department,
+role or allowance together.
 A row may name up to three teachers (co-teaching), each blocked for the lesson and counted the full periods.
 A lesson the form teachers take may hold as many as the school's most (never fewer than three). On the map its card shows
 the school's word as a badge, and the table row shows "Changed by hand" when it applies. The committee can still
@@ -211,7 +216,7 @@ asks first, saying how many lessons on step 5 name them.
 Removing a teacher takes them off the lessons they were on: those lessons lose that teacher, and a shared lesson keeps
 its other teacher. Availability rules on step 6 that name them stay, and step 6 flags them.
 
-**Teacher avatars.** Each teacher has a small face, on the table here and on the map on step 5. It is worked out from
+**Teacher avatars.** Each teacher has a small face, on step 4 and on the map on step 5. It is worked out from
 the teacher's name, so the same name has the same face wherever it is shown, and it is drawn in the browser from fixed
 parts: no picture is uploaded or stored, and nothing is sent to an outside service. **New look**, on the teacher's
 profile on step 5 (click any avatar on the map), gives the teacher another one by adding one to a number kept on the

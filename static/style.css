@@ -377,3 +377,34 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .sjfields label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted)}
 .sjwhy{margin:8px 0 0}
 .sjmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}
+/* step 4, Cards view: a column per department, a card per teacher (one in each of a teacher's two departments) */
+.tkchips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 12px}
+.tkdept[draggable=true]{cursor:grab;border:1px solid var(--line)}
+.tkcols{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-items:start}
+.tkcol{min-width:0;display:flex;flex-direction:column;gap:8px}
+.tkhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;border-bottom:2px solid var(--line);padding-bottom:4px}
+.tkhead b{color:var(--navy)}
+.tkcard{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel);cursor:pointer}
+.tkcard:hover{border-color:#c5ccd8}
+.tkcard.caution{background:#fff7e6}.tkcard.bad{background:var(--warn-bg)}
+.tkcard.picked{border-color:var(--accent)}
+.tkcard.over{border-color:var(--accent);background:#eef5ff}
+.tkcard.open{cursor:default;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.tktop{display:flex;gap:8px;align-items:center}
+.tktop input[type=checkbox]{margin:0;flex:0 0 auto}
+.tkav svg{display:block}
+.tkwho{flex:1;min-width:0;line-height:1.25}
+.tkname{border:0;background:transparent;padding:0;font-weight:600;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.tkdepts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tkx{border:0;background:transparent;padding:0 2px;font-size:11px;line-height:1;color:var(--muted);cursor:pointer}
+.tkx:hover{color:var(--warn)}
+.tkloadrow{display:flex;align-items:center;gap:8px;margin-top:6px}
+.tkload{flex:1;height:6px;background:var(--chip);border-radius:3px;overflow:hidden}
+.tkload i{display:block;height:100%;background:var(--accent)}
+.tkload.over i{background:var(--warn)}
+.tkcheck{margin-top:4px;color:var(--warn);font-size:12.5px}
+.tkfields{display:flex;flex-wrap:wrap;gap:6px 10px;margin-top:8px}
+.tkfields label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted)}
+.tkfigs{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:12.5px;color:var(--muted)}
+.tkfigs b{color:var(--ink)}
+.tkmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}
