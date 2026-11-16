@@ -542,6 +542,18 @@ def test_a_pushed_out_or_pooled_lesson_still_counts_for_the_plan():
     assert fixes.judge(m, sp, DAYS, dict(kind="delete", id=10), pool=pool)["why"] == _leave(PLAN - 1)
     m, sp = model_with(_placed(PLAN)); assert fixes.judge(m, sp, DAYS, dict(kind="delete", id=50), pool=pool) == dict(state="ok", why="", must=[], prefer=[])   # a surplus one
 
+
+@t
+def test_the_option_lists_take_the_pool():
+    m, sp = model_with(_placed(PLAN)); pool = [_of_key(KEY, 50, 0, 2)]
+    assert fixes.can_delete(m, sp, DAYS, 10) == fixes.can_delete(m, sp, DAYS, 10, pool=[]) == dict(state="no", why=_leave(PLAN - 1))   # a placed lesson step 5 asks for
+    assert fixes.can_delete(m, sp, DAYS, 10, pool=pool) == dict(state="ok", why="")   # the pooled one counts: this one is surplus
+    m, sp = model_with(_placed(PLAN - 1)); A = fixes.add_slots(m, sp, DAYS, KEY, 1)
+    assert any(x["state"] == "ok" for x in A) and A == fixes.add_slots(m, sp, DAYS, KEY, 1, pool=[])
+    A = fixes.add_slots(m, sp, DAYS, KEY, 1, pool=pool); assert not [x for x in A if x["state"] in ("ok", "prefer")]
+    assert next(x for x in A if (x["d"], x["p"]) == (4, 2)) == dict(d=4, p=2, state="no", why=_leave(PLAN + 1))
+    assert fixes.room_options(m, sp, DAYS, 10, ENTIRE, pool=pool) is not None and fixes.teacher_options(m, sp, DAYS, KEY, pool) is not None
+
 @t
 def test_a_pooled_lesson_counts_in_the_teachers_load():
     teachers = [dict(x, allowance=2) if x["name"] == TEACHER else x for x in SP["teachers"]]

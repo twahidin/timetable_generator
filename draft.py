@@ -115,9 +115,10 @@ def _own_warnings(m, pool):
     return _unique(out)
 
 WAITING = " A lesson of it is waiting in Not placed."
+WAITING_REFUSED = "A lesson of it is waiting in Not placed. Place it or delete it first."
 def _withhold(ws, pool):
     """a difference from step 5 about a lesson a pooled lesson belongs to is not offered as "update step 5": the timetable will change when it is placed"""
-    keys = {verify._kstr(fixes._row_key(x)) for x in pool}
+    keys = {verify._kstr(k) for x in pool for k in helper._keys_of(x)}   # every key verify.placed would give its rows: one per class of a whole-class row, the group's
     for w in ws:
         k = re.fullmatch(r"dep:(.+):(?:missing|periods)(?:#\d+)?", w["key"])
         if k and k[1] in keys: w["ops"] = None; w["text"] += WAITING
@@ -187,7 +188,9 @@ def decide(key, answer):
     with _lock:   # from the build to the change: a second click waits, then finds the warning gone (so a row is never added twice)
         j = _build(); w = next((w for w in j["warnings"] if w["key"] == key), None)
         if not w: raise ValueError("That warning is no longer on the list.")
-        if w["ops"] is None: raise ValueError("This difference is set on step 3 for the whole level; the app does not change it from here.")
+        if w["ops"] is None:
+            if w["kind"] != "deployment": raise ValueError("This warning cannot be settled by updating step 5.")
+            raise ValueError(WAITING_REFUSED if w["text"].endswith(WAITING) else "This difference is set on step 3 for the whole level; the app does not change it from here.")
         store.restore_point("Before updating step 5 from the timetable")
         try: store.apply_changes([_applied(op) for op in w["ops"]], client="draft", since=int(j["setup_version"][1:]))
         except store.Refused as e: raise ValueError(str(e))
@@ -203,7 +206,8 @@ def publish():
         meta = store.read_json(_p("meta.json"), {}); decisions = store.read_json(_p("decisions.json"), {}) or {}
         if j["critical"]: raise Critical(j["critical"])   # judged and written under this one lock: none can arrive in between
         left = [w["text"] for w in j["warnings"] if not w["decision"]]   # the warnings open at publishing
-        fl = meta.get("fixes") or []; texts = model_now(rec)[2]["texts"]
+        fl = meta.get("fixes") or []; fx = model_now(rec)[2]; texts = fx["texts"]
+        if fx["pool"]: raise NotPlaced(_count(fx["pool"]))   # a second guard: the critical count refuses first, but a lesson waiting is never published without
         sp, tp = paths()
         store.publish(sp, tp, source=meta.get("source"), spec=rec["spec"], log=lambda *x: None, edit=fixes.editor(fl, {}),
                       extra=dict(compared_v=j["setup_version"], open=j["open"], left=left, decisions={k: d["answer"] for k, d in decisions.items()}, fixes=list(texts)))
@@ -262,18 +266,18 @@ def grid(view, name):
 
 def options(lesson_id=None, group=None, add=None, n=None):
     """what the committee can do with one lesson (every slot, teacher, room, the delete, judged), or where a lesson of step 5 can be added"""
-    m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]   # a lesson in the pool is the board's, not the Fix card's; add_slots, teacher_options, room_options and can_delete take no pool
+    m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]   # a lesson in the pool is the board's, not the Fix card's
     if add is not None:
         try: n = int(n)
         except (TypeError, ValueError): n = None
-        return dict(slots=fixes.add_slots(m, spec, days, add, _length(n, m)))
+        return dict(slots=fixes.add_slots(m, spec, days, add, _length(n, m), fx["pool"]))
     try: lid = int(lesson_id)
     except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
     rows = fixes._rows(m["lessons"], lid); row = rows[0] if group is None else next((x for x in rows if x["group"] == group), None)
     if row is None: raise ValueError(f"There is no row of {group} in that lesson.")
     key = verify._kstr(fixes._row_key(row)); g = row["group"]
-    return dict(key=key, slots=fixes.slots(m, spec, days, lid, fx["pool"]), teachers=fixes.teacher_options(m, spec, days, key), rooms=fixes.room_options(m, spec, days, lid, g),
-                delete=fixes.can_delete(m, spec, days, lid, group))
+    return dict(key=key, slots=fixes.slots(m, spec, days, lid, fx["pool"]), teachers=fixes.teacher_options(m, spec, days, key, fx["pool"]), rooms=fixes.room_options(m, spec, days, lid, g, fx["pool"]),
+                delete=fixes.can_delete(m, spec, days, lid, group, fx["pool"]))
 
 NOT_IN_SETUP = "Not in the setup"
 
@@ -316,11 +320,11 @@ def board():
                 short=[dict(s, classes=list(_planned(m["checked_setup"], s["key"])["classes"])) for s in fixes.short(m, m["checked_setup"], pool)])
 
 def slots(lesson_id):
-    """where one lesson may go (on the timetable or waiting in Not placed): fixes.slots on the draft as it is now -> dict(id, slots)"""
+    """where one lesson may go (on the timetable or waiting in Not placed): fixes.slots on the draft as it is now -> dict(id, slots, delete); delete is the judgement of deleting the whole lesson, dict(state, why)"""
     m, rec, fx = _now()
     try: lid = int(lesson_id)
     except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
-    return dict(id=lid, slots=fixes.slots(m, m["checked_setup"], m["days"], lid, fx["pool"]))
+    return dict(id=lid, slots=fixes.slots(m, m["checked_setup"], m["days"], lid, fx["pool"]), delete=fixes.can_delete(m, m["checked_setup"], m["days"], lid, pool=fx["pool"]))
 
 def _length(n, m):
     """an add's n, a whole number from 1 to the periods in a day, or ValueError(sentence)"""

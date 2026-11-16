@@ -265,7 +265,7 @@ def _options(m, spec, days, w, ctx=None, memo=None):
             if part == "teachers" and e and e["teachers"]: good.append([dict(kind="teacher", key=ks, teachers=sorted(e["teachers"]))])
             elif part in ("periods", "missing") and e and have < want:
                 n = next((x["n"] for x in fixes.short(m, spec, _pool(m)) if x["key"] == ks), 1); c = fixes._ctx(m, ctx)
-                for s in fixes.add_slots(m, spec, days, ks, n):
+                for s in fixes.add_slots(m, spec, days, ks, n, _pool(m)):
                     if s["state"] != "na": put([dict(kind="add", key=ks, d=s["d"], p=s["p"], n=n, room=fixes.add_room(m, spec, ks, s["d"], s["p"], n, c))], s)
             elif part == "extra" or (part == "periods" and have > want):
                 for i in dict.fromkeys(x["id"] for x in rows):
@@ -274,7 +274,7 @@ def _options(m, spec, days, w, ctx=None, memo=None):
                 kind_of = lambda x: m["room_ix"].get(x["room"], {}).get("kind") if x["room"] and x["room"] != "TBC" else None
                 wrong = [x for x in rows if kind_of(x) and kind_of(x) != e["room_kind"] and not (kind_of(x) == "classroom" and verify._other_week(m["days"][x["d"]], e["room_weeks"]))]
                 for x in wrong:
-                    for o in fixes.room_options(m, spec, days, x["id"], x["group"]): put([dict(kind="room", id=x["id"], group=x["group"], room=o["room"])], o)
+                    for o in fixes.room_options(m, spec, days, x["id"], x["group"], _pool(m)): put([dict(kind="room", id=x["id"], group=x["group"], room=o["room"])], o)
         elif kind in ("rule", "clash"):
             ids, keys = involved(m, w)[:MAX_LESSONS], []
             for i in ids:
@@ -283,7 +283,7 @@ def _options(m, spec, days, w, ctx=None, memo=None):
                 keys += [verify._kstr(fixes._row_key(x)) for x in rows if who in x["teachers"]] or [verify._kstr(fixes._row_key(rows[0]))]
             if _about_teacher(m, spec, w):
                 for ks in dict.fromkeys(keys):
-                    for o in fixes.teacher_options(m, spec, days, ks): put([dict(kind="teacher", key=ks, teachers=o["teachers"])], o)
+                    for o in fixes.teacher_options(m, spec, days, ks, _pool(m)): put([dict(kind="teacher", key=ks, teachers=o["teachers"])], o)
     except ValueError: return [], []   # the warning names a lesson or key the timetable no longer has
     return good, bad
 

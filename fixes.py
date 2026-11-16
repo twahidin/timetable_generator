@@ -444,7 +444,7 @@ def _cards(spec):
         out.setdefault(str(r["subject"]).strip(), (str(r.get("dept") or "").strip(), str(r.get("code") or "").strip(), name))
     return out
 
-def teacher_options(m, spec, days, key):
+def teacher_options(m, spec, days, key, pool=()):
     """who could take the key's lesson, judged as a teacher fix (the current teachers left out) -> [dict(teachers, state, why)]:
     step 5's teachers of the key, then each teacher of the setup's list who is on a lesson row of the subject or of another
     subject of its step 3 card, then each other teacher whose departments include the subject's department; inside the last
@@ -460,11 +460,11 @@ def teacher_options(m, spec, days, key):
     opts = ([sorted(e["teachers"])] if e and e["teachers"] else []) + [[t["name"]] for t in team if t["name"] in on] \
         + ([[t["name"]] for t in team if t["name"] not in on and dept in spec_mod.teacher_depts(t)] if dept else [])
     opts = [o for o in dict.fromkeys(map(tuple, opts)) if set(o) != now and not (len(o) == 1 and o[0] in now)]
-    return [dict(teachers=list(o), **_pick(judge(m, spec, days, dict(kind="teacher", key=key, teachers=list(o)), c))) for o in opts]
+    return [dict(teachers=list(o), **_pick(judge(m, spec, days, dict(kind="teacher", key=key, teachers=list(o)), c, pool))) for o in opts]
 
 def _row_key(x): return ("C", x["classes"][0], x["subject"]) if x["group"] == ENTIRE and x["classes"] else ("G", x["group"])
 
-def room_options(m, spec, days, lesson_id, group):
+def room_options(m, spec, days, lesson_id, group, pool=()):
     """the rooms of the row's kind (step 5's, else the current room's) and its class's home room, judged as a room fix (the
     current room left out) -> [dict(room, state, why)]"""
     x = next((x for x in _rows(m["lessons"], lesson_id) if x["group"] == group), None)
@@ -472,9 +472,9 @@ def room_options(m, spec, days, lesson_id, group):
     e = verify.planned_rows(spec).get(_row_key(x)); kind = (e or {}).get("room_kind") or m["room_ix"].get(x["room"], {}).get("kind")
     rooms = [str(v["room"]) for v in spec.get("venues") or [] if kind and (v.get("kind") or "classroom") == kind] + [m["class_ix"].get(k, {}).get("home") for k in x["classes"]]
     c = _ctx(m)
-    return [dict(room=r, **_pick(judge(m, spec, days, dict(kind="room", id=lesson_id, group=group, room=r), c))) for r in dict.fromkeys(rooms) if r and r != x["room"]]
+    return [dict(room=r, **_pick(judge(m, spec, days, dict(kind="room", id=lesson_id, group=group, room=r), c, pool))) for r in dict.fromkeys(rooms) if r and r != x["room"]]
 
-def add_room(m, spec, key, d, p, n, ctx=None):
+def add_room(m, spec, key, d, p, n, ctx=None, pool=()):
     """the room an add of an n-period lesson of the key at (d, p) takes: the first room free in all its periods among the home
     rooms of its classes, in order (for a classroom lesson: a row with no room kind is one), then the other rooms of its kind;
     else no room ("", which never clashes)"""
@@ -486,15 +486,15 @@ def add_room(m, spec, key, d, p, n, ctx=None):
     free = lambda r: b.clash([dict(id=None, teachers=[], classes=[], group=ENTIRE, room=r, rain="")], d, p, n) is None
     return next((r for r in rooms if free(r)), "")
 
-def add_slots(m, spec, days, key, n):
+def add_slots(m, spec, days, key, n, pool=()):
     """every (d, p) judged as an add of an n-period lesson of the key, in the room add_room chooses -> [dict(d, p, state, why)]"""
     c = _ctx(m); add_room(m, spec, key, 0, 0, n, c)   # raises for a key step 5 does not have
-    return [dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="add", key=key, d=d, p=p, n=n, room=add_room(m, spec, key, d, p, n, c)), c)))
+    return [dict(d=d, p=p, **_pick(judge(m, spec, days, dict(kind="add", key=key, d=d, p=p, n=n, room=add_room(m, spec, key, d, p, n, c)), c, pool)))
             for d in range(len(days)) for p in range(m["NP"])]
 
-def can_delete(m, spec, days, lesson_id, group=None):
+def can_delete(m, spec, days, lesson_id, group=None, pool=()):
     """a delete of the lesson (or its row of group) judged -> dict(state, why)"""
-    return _pick(judge(m, spec, days, dict(kind="delete", id=lesson_id, group=group)))
+    return _pick(judge(m, spec, days, dict(kind="delete", id=lesson_id, group=group), pool=pool))
 
 def _length(v):
     """a lesson length in any spelling of a whole number ('2', 2.0, '2.0'), else 1"""

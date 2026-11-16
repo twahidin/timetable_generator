@@ -494,6 +494,7 @@ def draft_publish():
     try: return jsonify(draft.publish())
     except FileNotFoundError: return {"error": "There is no draft to publish."}, 404
     except draft.Critical as e: return {"error": str(e), "critical": e.count}, 409
+    except draft.NotPlaced as e: return {"error": str(e), "unplaced": e.count}, 409
     except LookupError: return {"error": NO_SETUP}, 409
     except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
 

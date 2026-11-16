@@ -119,7 +119,7 @@ def test_a_setup_class_on_a_level_the_model_lacks_is_not_lost():
     finally: draft._now = real
 
 def test_slots_are_the_editors_slots():
-    assert draft.slots(PLAIN_ID) == dict(id=PLAIN_ID, slots=draft.options(PLAIN_ID)["slots"])
+    assert draft.slots(PLAIN_ID) == dict(id=PLAIN_ID, slots=draft.options(PLAIN_ID)["slots"], delete=draft.options(PLAIN_ID)["delete"])
     assert draft.slots(str(PLAIN_ID))["id"] == PLAIN_ID
 
 def test_slots_of_an_unknown_lesson_is_a_sentence():
@@ -281,6 +281,35 @@ def test_update_step_5_is_withheld_for_a_waiting_lesson():
     assert w and all(x["ops"] is None and x["text"].endswith(suffix) for x in w), w
     raises(ValueError, lambda: draft.decide(w[0]["key"], "step5"))
     other = [x for x in draft.info()["warnings"] if x["key"].startswith("dep:") and not x["text"].endswith(suffix)]; assert other   # the rest are as they were
+
+def test_update_step_5_is_withheld_for_every_class_of_a_waiting_lesson():
+    two = [dict(id=1, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=CLASSES, subject=SUBJ, teachers=[TEACHERS[0]], room=ROOMS[0])]
+    fresh(two); draft.fix(dict(kind="lift", id=1)); suffix = " A lesson of it is waiting in Not placed."
+    keys = [f"dep:C:{k}:{SUBJ}:missing" for k in CLASSES]; ws = {w["key"]: w for w in draft.info()["warnings"]}
+    assert all(k in ws and ws[k]["ops"] is None and ws[k]["text"].endswith(suffix) for k in keys), [ws.get(k) for k in keys]
+    raises(ValueError, lambda: draft.decide(keys[1], "step5"), "A lesson of it is waiting in Not placed. Place it or delete it first.")
+    raises(ValueError, lambda: draft.decide(f"clash:notplaced:1", "step5"), "This warning cannot be settled by updating step 5.")
+    fresh(); raises(ValueError, lambda: draft.decide(f"room:none:{OTHER_ID}:{ENTIRE}", "step5"), "This warning cannot be settled by updating step 5.")
+    k = next(w["key"] for w in draft.info()["warnings"] if w["kind"] == "deployment" and w["ops"] is None and not w["text"].endswith(suffix))
+    raises(ValueError, lambda: draft.decide(k, "step5"), "This difference is set on step 3 for the whole level; the app does not change it from here.")
+
+def test_publish_refuses_on_the_pool_itself_too():
+    fresh(CLEAN); draft.fix(dict(kind="lift", id=1)); sent, real, info = [], store.publish, draft.info
+    store.publish = lambda *a, **k: sent.append(k); draft.info = lambda **kw: dict(info(**kw), critical=0)   # the critical count forced to 0
+    try:
+        raises(draft.NotPlaced, draft.publish, "1 lesson is not placed. Place it or delete it on step 8 first."); assert sent == []
+        r = c.post("/api/draft/publish"); assert r.status_code == 409 and r.get_json() == dict(error="1 lesson is not placed. Place it or delete it on step 8 first.", unplaced=1), r.get_json()
+    finally: store.publish, draft.info = real, info
+
+def test_slots_answer_the_delete_of_any_lesson():
+    from ttgen import verify
+    P = verify.planned_rows(SPEC)[("C", CLASSES[0], SUBJ)]["periods"]
+    leave = lambda k: f"That would leave {SUBJ} for {CLASSES[0]} with {k} periods; step 3 plans {P}."
+    row = lambda j: dict(id=j + 1, day=DAYS[j % len(DAYS)], p=L1 + j // len(DAYS), n=1, level=LEVEL, classes=[CLASSES[0]], subject=SUBJ, teachers=[TEACHERS[0]], room=ROOMS[0])
+    fresh([row(j) for j in range(P)]); a = draft.slots(2); assert set(a) == {"id", "slots", "delete"} and a["delete"] == dict(state="no", why=leave(P - 1))   # a placed lesson step 5 asks for
+    draft.fix(dict(kind="lift", id=1)); assert draft.slots(1)["delete"] == dict(state="no", why=leave(P - 1))   # a waiting one
+    fresh([row(j) for j in range(P + 1)]); assert draft.slots(2)["delete"] == dict(state="ok", why="")   # a surplus one
+    draft.fix(dict(kind="lift", id=1)); assert draft.slots(1)["delete"] == dict(state="ok", why="") and draft.options(lesson_id=2)["delete"] == dict(state="ok", why="")
 
 def test_the_helper_and_the_batch_never_force():
     fresh(); f = move(OTHER_ID, P0, force=True, push=True)
