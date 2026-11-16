@@ -371,4 +371,34 @@ t("tell with the card: a tray card is placed, and over another lesson it may pus
   assert.strictEqual(Board.tell(Object.assign(ev(1, 2), { swap: 5, push: { state: "ok", why: "", out: out } }), days, on), "Swap with the lesson on Tue period 2.");
 });
 
+const wn = (key, where, extra) => Object.assign({ key: key, kind: "rule", text: "Text " + key, strength: "Must", group: "1A", where: where, crit: "" }, extra || {});
+t("warned: the open warnings that name a lesson, by lesson id, critical ones first", () => {
+  const a = wn("a", { cls: "1A", id: 3 }), b = wn("b", { cls: "1A", id: 3 }, { crit: "teacher" }), c = wn("c", { cls: "1B", id: 4 });
+  const settled = wn("d", { cls: "1A", id: 3 }, { decision: { answer: "step5" } }), nowhere = wn("e", undefined), noid = wn("f", { cls: "1A", day: "Mon" });
+  assert.deepStrictEqual(Board.warned([a, settled, b, nowhere, noid, c]), { 3: [b, a], 4: [c] });
+  assert.deepStrictEqual(Board.warned([]), {}); assert.deepStrictEqual(Board.warned(undefined), {});
+});
+
+t("flag: a mark keeps its badge; else the lesson's warnings are counted; else nothing", () => {
+  const marked = card(3, 0, 1, 1, ["1A"], { marks: ["teacher"] }), plain = card(4, 0, 2, 1, ["1A"]), other = card(5, 0, 3, 1, ["1A"]);
+  const w = Board.warned([wn("a", { id: 3 }), wn("b", { id: 4 }), wn("c", { id: 4 }), wn("d", { id: 5 })]);
+  assert.deepStrictEqual(Board.flag(marked, w), { text: "In two places", crit: true });
+  assert.deepStrictEqual(Board.flag(plain, w), { text: "2 warnings", crit: false });
+  assert.deepStrictEqual(Board.flag(other, w), { text: "1 warning", crit: false });
+  assert.strictEqual(Board.flag(card(6, 0, 4, 1, ["1A"]), w), null);
+  assert.strictEqual(Board.flag(card(6, 0, 4, 1, ["1A"]), {}), null);
+});
+
+t("at: the lesson on the board or in the tray, else the class (on the warning's day), else nothing", () => {
+  const b = Object.assign(board([card(3, 1, 2, 1, ["1B", "1A"])]), { unplaced: [lifted(7, ["2A"])] });
+  assert.deepStrictEqual(Board.at(wn("a", { cls: "1A", day: "Mon", id: 3 }), b), { id: 3, d: 1, cls: "1B" });
+  assert.deepStrictEqual(Board.at(wn("b", { cls: "2A", id: 7 }), b), { id: 7, d: null, cls: "2A" });
+  assert.deepStrictEqual(Board.at(wn("c", { cls: "1A", day: "Tue", id: 99 }), b), { id: null, d: 1, cls: "1A" });
+  assert.deepStrictEqual(Board.at(wn("d", { cls: "2A" }), b), { id: null, d: null, cls: "2A" });
+  assert.deepStrictEqual(Board.at(wn("e", { cls: "1A", day: "Someday" }), b), { id: null, d: null, cls: "1A" });
+  assert.strictEqual(Board.at(wn("f", { cls: "9Z", day: "Mon" }), b), null);
+  assert.strictEqual(Board.at(wn("g", { teacher: "Mr Tan" }), b), null);
+  assert.strictEqual(Board.at(wn("h", undefined), b), null);
+});
+
 console.log(`${n} cases passed`);

@@ -80,6 +80,8 @@ input[data-pat]::placeholder{color:#9aa5b4}
 tr.picked td{background:#f2f7ff}
 .helper{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0}
 .stat{display:inline-block;margin-right:16px;color:var(--muted)}.stat b{color:var(--ink);font-size:16px}
+.layout.wide .issues{display:none}   /* steps 8 and 9: the setup's "Things to fix" is not shown, the timetable takes its width */
+@media (min-width:1101px){.layout.wide{grid-template-columns:200px 1fr}}
 @media (max-width:1100px){.layout{grid-template-columns:1fr}.steps{position:static;flex-direction:row;overflow:auto}.issues{position:static;max-height:none}}
 @media (max-width:640px){.layout{padding:12px}.top{padding:10px 12px}.sub{display:none}}
 .pop{max-width:560px}
@@ -465,11 +467,28 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcount button[aria-disabled=true]{cursor:default}
 .bdmain{display:flex;gap:8px;align-items:flex-start;margin-top:8px}
 .bdmain .bdwrap{flex:1 1 auto;min-width:0;margin-top:0}
-#bdTray{flex:0 0 150px;align-self:stretch;width:150px;box-sizing:border-box;max-height:72vh;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff;padding:6px;font-size:11px}
-#bdTray h3{margin:0 0 4px;font-size:13px}
-.bdtgrp{margin-top:6px}.bdtgrp>b{display:block;margin-bottom:2px}
+#bdTray{font-size:11px}
+.bdtgrp{margin-top:6px}.bdtgrp:first-child{margin-top:0}.bdtgrp>b{display:block;margin-bottom:2px}
 .bdcard.tray{width:100%;margin:2px 0;min-height:var(--bdh);background:var(--chip)}
 .bdwas{font-style:italic}
-.bdtdrop{display:none;margin:4px 0;padding:6px;border-radius:6px;background:#eef3fb;color:var(--navy);font-weight:600}
-#bdTray.lift{outline:2px dashed var(--navy);outline-offset:-2px}#bdTray.lift .bdtdrop{display:block}
+/* the side panel: as tall as the board (its body is laid over it, so a longer list never makes the card taller), its own scroll */
+#bdSide{flex:0 0 280px;width:280px;align-self:stretch;min-height:320px;position:relative;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:12px}
+.bdstabs{display:flex;gap:4px;height:40px;align-items:center;padding:0 6px;border-bottom:1px solid var(--line);box-sizing:border-box;overflow:hidden}
+.bdstab{flex:1 1 auto;min-width:0;padding:2px 6px;font-size:12px;line-height:1.15;white-space:normal}
+.bdstab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.bdsbody{position:absolute;top:40px;left:0;right:0;bottom:0;overflow:auto;padding:6px 8px}
+.bdsbody .warnsum{margin:0 0 4px}.bdsbody .warn{font-size:12px}.bdsbody h4{margin:8px 0 2px;font-size:12px}.bdsbody summary{font-size:13px}
+.bdsbody li.warn.on{background:#eef3fb;box-shadow:inset 3px 0 0 var(--accent);padding-left:6px}
+.bdsbody ol.fxlist{font-size:12px;margin-top:8px}
+.bdaskrow{margin-top:10px}
+.bdtdrop{display:none;position:absolute;top:44px;left:6px;right:6px;z-index:6;margin:0;padding:6px;border-radius:6px;background:#eef3fb;color:var(--navy);font-weight:600}
+#bdSide.lift{outline:2px dashed var(--navy);outline-offset:-2px}#bdSide.lift .bdtdrop{display:block}
+.bdnone{flex:1 1 auto;margin:0}
+.bdlw{flex:0 0 100%;font-size:12px}.bdlw.crit{color:#8a1c1c}
+@keyframes bdflash{0%,100%{filter:none}25%,60%{filter:brightness(1.25) drop-shadow(0 0 3px #f2b632)}}
+.bdcard.flash{animation:bdflash 1s ease-in-out 1}   /* Show me: the card's pieces flash once, nothing moves */
+#bdOld{margin-top:12px}.bdoldtop{justify-content:flex-end;margin:0}#bdOld .fxcard{margin-top:4px}
+#bdFoot{margin-top:12px}
+@media (max-width:1099px){#bdSide{flex-basis:220px;width:220px}}
+@media (max-width:899px){.bdmain{flex-direction:column;align-items:stretch}#bdSide{flex:none;width:auto;height:320px;min-height:0}}
 .bdcard.tray .bdwas{white-space:normal}

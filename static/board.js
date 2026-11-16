@@ -313,9 +313,43 @@ var Board = (function () {
     return list[at < 0 || at === list.length - 1 ? 0 : at + 1];
   }
 
+  /* the open warnings (no decision) that name a lesson (where.id a number), by lesson id, the critical ones first */
+  function warned(warnings) {
+    var out = {};
+    (warnings || []).forEach(function (w) {
+      var id = w && !w.decision && w.where ? w.where.id : null;
+      if (typeof id !== "number") return;
+      (out[id] = out[id] || []).push(w);
+    });
+    Object.keys(out).forEach(function (k) { out[k] = out[k].filter(function (w) { return !!w.crit; }).concat(out[k].filter(function (w) { return !w.crit; })); });
+    return out;
+  }
+
+  /* what a card's corner says: its mark's badge, else how many open warnings name it, else null */
+  function flag(card, warned) {
+    var b = badge(card); if (b) return b;
+    var n = ((warned || {})[card.id] || []).length;
+    return n ? { text: n === 1 ? "1 warning" : n + " warnings", crit: false } : null;
+  }
+
+  /* where a warning's "Show me" goes: its lesson on the board (d its day) or in the tray (d null); else its class, on the
+     warning's day when the board has that day; else null */
+  function at(w, board) {
+    var h = w && w.where; if (!h) return null;
+    if (typeof h.id === "number") {
+      var c = (board.cards || []).filter(function (x) { return x.id === h.id; })[0] || (board.unplaced || []).filter(function (x) { return x.id === h.id; })[0];
+      if (c) return { id: c.id, d: c.d === null || c.d === undefined ? null : c.d, cls: firstClass(c) };
+    }
+    var all = [].concat.apply([], (board.levels || []).map(function (lv) { return lv.classes; }));
+    if (!h.cls || all.indexOf(h.cls) < 0) return null;
+    var d = h.day ? (board.days || []).indexOf(h.day) : -1;
+    return { id: null, d: d < 0 ? null : d, cls: h.cls };
+  }
+
   return { lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
            start: start, slot: slot, states: states, can: can, target: target, aim: aim, fix: fix, onRow: onRow, tell: tell,
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
-           lands: lands, forced: forced, asks: asks, addFix: addFix, liftFix: liftFix, question: question };
+           lands: lands, forced: forced, asks: asks, addFix: addFix, liftFix: liftFix, question: question,
+           warned: warned, flag: flag, at: at };
 })();
 if (typeof module !== "undefined") module.exports = Board;
