@@ -54,7 +54,7 @@ var Board = (function () {
   function row(board, key, label, d, cls, codes, set) {
     var out = build(board, key, label, d, codes, function (c) { return set && cls === "" ? classless(c, set) : holds(c, cls); }, {});
     out.cls = cls;
-    if (cls !== "") { out.by = "class"; out.name = cls; }
+    out.by = "class"; out.name = cls;
     return out;
   }
 
@@ -69,6 +69,11 @@ var Board = (function () {
     });
   }
 
+  /* whether the card is in the board row: a card with no rows has no teacher and no room, so it is in the "No" rows */
+  function inRow(card, by, name) {
+    return matching(card, by, name).length > 0 || (name === "" && !(card.rows || []).length);
+  }
+
   function dayCodes(board, d) {
     var c = board.day && board.day[d] != null ? board.day[d] : null;
     return c !== null ? c : dots(board.NP).replace(/\./g, "L");
@@ -76,7 +81,7 @@ var Board = (function () {
 
   function personRow(board, by, name, d) {
     return build(board, name, name === "" ? (by === "teacher" ? "No teacher" : "No room") : name, d, dayCodes(board, d),
-      function (c) { return matching(c, by, name).length > 0; }, { by: by, name: name });
+      function (c) { return inRow(c, by, name); }, { by: by, name: name });
   }
 
   /* names of teachers (or rooms) the day's cards use, sorted */
@@ -96,7 +101,7 @@ var Board = (function () {
      names the cards use that the setup lacks */
   function peopleGroups(board, by, d) {
     var out = [], listed = {}, src = by === "teacher" ? board.teachers || [] : board.rooms || [];
-    if (board.cards.some(function (c) { return c.d === d && matching(c, by, "").length > 0; })) out.push({ name: "", rows: [personRow(board, by, "", d)] });
+    if (board.cards.some(function (c) { return c.d === d && inRow(c, by, ""); })) out.push({ name: "", rows: [personRow(board, by, "", d)] });
     src.forEach(function (g) {
       var names = by === "teacher" ? (g.teachers || []).map(function (t) { return t.name; }) : g.rooms || [];
       var title = by === "teacher" ? (g.dept === "" ? "No department" : g.dept) : g.kind;
@@ -166,7 +171,7 @@ var Board = (function () {
       return { title: title, lines: [classText(card), second], color: color };
     }
     if (card.band) return { title: card.band, lines: [rows.length === 1 ? "1 group" : rows.length + " groups"], color: color };
-    if (!first) return { title: "", lines: ["No teacher", "No room"], color: 0 };
+    if (!first) return { title: card.band || card.what || "", lines: ["No teacher", "No room"], color: 0 };
     var teachers = first.tshorts && first.tshorts.length ? first.tshorts.join(", ") : "No teacher";
     return { title: info && info[0] ? info[0] : first.subject, lines: [teachers, first.room || "No room"], color: color };
   }
