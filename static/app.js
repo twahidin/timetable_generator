@@ -1658,7 +1658,7 @@ document.addEventListener("click", async e => {
   if (tc && !e.target.closest("button, input, select, textarea, label") && !tc.classList.contains("open")) { tkOpenCard(Number(tc.dataset.tcard), tc); return; }
   if (bdCellClick(e)) return;
   if (e.target.closest("#pbDownload")) { e.preventDefault(); downloadDraft(); return; }   // fetched, so a refusal is said in words, not shown as a page
-  const b = e.target.closest("button, [data-pop], .issue, td.c, [data-fxcell], [data-mcard]"); if (!b) return;
+  const b = e.target.closest("button, [data-pop], .issue, td.c, [data-mcard]"); if (!b) return;
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); G.refetch = onDraftStep(); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
   if (b.dataset.clear) { setPath(b.dataset.clear, ""); save(); render(); return; }
@@ -2501,7 +2501,7 @@ async function tlFile(el) {   // an .xlsx goes through the server (its teachers 
   TL.text = text; tlRead();
 }
 document.addEventListener("input", e => {
-  if (e.target.id === "fxAskIn") { if (S.fix) S.fix.words = e.target.value; return; }
+  if (e.target.id === "fxAskIn") { fxHelp().words = e.target.value; return; }
   if (e.target.id === "gfStudents") { gfState().students = e.target.value; return; }
   if (e.target.id === "bfName") { const bf = bfState(); bf.name = e.target.value; bf.touched = true; const ev = $("#bfEveryone"); if (ev && !bf.evTouched) ev.checked = !/option|elective/i.test(bf.name); return; }
   if (e.target.id === "mQ") { M.q = e.target.value; const rb = $("#rbody"); if (rb) rb.innerHTML = rosterList(mapDept()); return; }   // the roster only: a full redraw would take the caret
@@ -2661,7 +2661,6 @@ document.addEventListener("change", e => {
   if (e.target.id === "exSetup" || e.target.id === "exTT") { const f = e.target.files[0]; $("#" + e.target.id + "Name").textContent = f ? f.name : "none chosen"; }
   if (e.target.id === "bdFind" && S.board) { S.board.find = e.target.value; bdDraw(); return; }
   if (e.target.dataset && e.target.dataset.dfilter) { S.dfilter = e.target.dataset.dfilter; drawDraft(); }
-  if (e.target.dataset && e.target.dataset.fxview && e.target.value) fxOpen(e.target.dataset.fxview, e.target.value, null, null);
 });
 /* the chosen setup workbook and timetable as form data, or null (with a message) when something is missing */
 function timetableForm() {
@@ -2693,12 +2692,10 @@ async function downloadDraft() {   // step 9: the draft as a database; a refusal
   } catch (err) { toast("Could not reach the server: " + err.message); }
 }
 /* a timetable made outside the app: kept on the server as the draft and checked against the setup as it is now */
-function drawDraft() {   // the box for a typed request (and the buttons that answer it) keeps the focus and the caret across the redraw; its text comes back from S.fix.words
+function drawDraft() {   // the upload card's head and the timetable card again (the typed box keeps its focus: fxKeep in bdDraw and bdSideDraw)
   const box = $("#imResult"); if (!box) return;
-  const a = document.activeElement, mine = a && a.matches && a.matches("#fxAskIn, #fxAsk, [data-fxpick]"), caret = mine && a.id === "fxAskIn" ? [a.selectionStart, a.selectionEnd] : null;
   box.innerHTML = S.draft ? draftHTML(S.draft).head : "";
   bdMount(); bdDraftDraw();
-  const inp = mine && $("#fxAskIn"); if (inp) { inp.focus(); const n = inp.value.length; try { inp.setSelectionRange(caret ? caret[0] : n, caret ? caret[1] : n); } catch (e) { } }
 }
 async function uploadDraft(replace) {
   const fd = timetableForm(); if (!fd) return;
@@ -2715,7 +2712,7 @@ async function uploadDraft(replace) {
       return;
     }
     if (!r.ok) { drawDraft(); toast(j.error || "Could not check the timetable."); return; }
-    S.draft = j; S.fix = null; drawDraft(); poll();
+    S.draft = j; S.help = null; drawDraft(); poll();
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
   finally { btns.forEach(x => x.disabled = false); }
 }
@@ -2737,7 +2734,7 @@ async function publishDraft() {   // step 9
     if (r.status === 401) { location.href = "/login"; return; }
     if (r.status === 409 && (j.critical || j.unplaced)) { toast(j.error); await refreshDraft(); return; }   // a critical mistake, or a lesson not placed, arrived meanwhile: the step shows it now
     if (!r.ok) { again(); toast(j.error || "Could not publish the timetable."); return; }
-    S.draft = j; S.fix = null; again(); toast("Published. Teachers and students now see this timetable."); poll();
+    S.draft = j; S.help = null; again(); toast("Published. Teachers and students now see this timetable."); poll();
   } catch (err) { again(); toast("Could not reach the server: " + err.message); }
   finally { DR.hold = false; DR.seen = null; }   // the next status is taken as seen, so the same summary causes no fetch
 }
@@ -2777,10 +2774,9 @@ async function loadDraft(again) {   // again: the person has just opened step 8 
   }
   DR.seen = sig;
   if (S.draft && JSON.stringify(S.draft) === JSON.stringify(j)) { bdSync(); draftWatch(); return; }   // the same draft: nothing is redrawn (the board is fetched again if it is for another one)
-  const f = S.fix;
   if (!onDraftStep() || !S.draft) { S.draft = j; if (onDraftStep()) render(); }
   else if (STEPS[S.step][0] === "publish") { S.draft = j; render(); }
-  else if (f) await fxAfter(j);   // the Fix card follows the new draft as it does after its own fix
+  else if (S.help) await fxAfter(j);   // the open ways and the typed answer follow the new draft as they do after a change made here
   else { S.draft = j; drawDraft(); }
   draftWatch();
 }
@@ -2790,7 +2786,7 @@ function draftWatch() {   // after each status: a draft that is not the one last
   if (DR.seen === null) { if (!!S.draft === !!sig) { DR.seen = sig; return; } }   // the first status: a baseline unless the page lacks a draft the server has, or has one the server lacks
   else if (sig === DR.seen) return;
   if (!sig) {   // the draft has gone
-    if (S.draft) { S.draft = null; S.fix = null; if (onDraftStep()) render(); }
+    if (S.draft) { S.draft = null; S.help = null; if (onDraftStep()) render(); }
     DR.seen = sig; return;
   }
   if (onDraftStep() && !(S.draftFailed && !S.draft)) loadDraft(true);   // a first load that failed is tried again when the person opens the step, not every poll
@@ -2813,11 +2809,12 @@ function draftHTML(j) {   // {head: the school, the counts, the configuration li
   const head = draftHead(j);
   if (j.published) return { head: publishedMsg(j) + `<p class="muted small">Its downloads and the personal student codes are on step 9.</p>`, warns: "", changes: "", foot: "" };
   const ws = j.warnings || [], c = Draft.counts(ws), f = S.dfilter === "all" ? "all" : "open", n = j.open ?? c.open, nc0 = j.critical ?? c.critical, n5 = j.step5 ?? c.step5;   // the server counts the step 5 decisions whose warning has gone
-  const bd = S.board && S.board.data, mark = S.board ? S.board.wmark : null;
+  const bd = S.board && S.board.data, mark = S.board ? S.board.wmark : null, hp = S.help;   // hp: the helper, its ways open under one warning
   const row = w => { const d = w.decision && w.decision.answer, ans = Draft.answerText(w);
     return `<li class="warn ${w.strength === "Prefer" ? "prefer" : ""}${mark === w.key ? " on" : ""}" data-wkey="${esc(w.key)}">${warnHead(w)}
-      <div class="row warnbtns">${bd && Board.at(w, bd) ? `<button data-bdshow="${esc(w.key)}">Show me</button>` : ""}${Draft.fixTarget(w) && w.crit !== "notplaced" && d !== "step5" && d !== "fixed" && d !== "met" ? `<button data-fix="${esc(w.key)}">Fix the timetable</button>` : ""}${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "met" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" || !/:again$/.test(w.key) ? "" : `<button data-decide="met|${esc(w.key)}">Still met</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div></li>`; };
-  const groups = Draft.group(ws, f), nc = (j.not_checked || []);
+      <div class="row warnbtns">${bd && bdWhere(w, bd) ? `<button data-bdshow="${esc(w.key)}">Show me</button>` : ""}${fxCan(w) ? `<button data-fxways="${esc(w.key)}"${hp && hp.warn === w.key ? ` class="on" aria-expanded="true"` : ` aria-expanded="false"`}>Ways to settle this</button>` : ""}${w.ops !== null && w.ops !== undefined && d !== "step5" ? `<button data-decide="step5|${esc(w.key)}">Update step 5</button>` : ""}${d === "met" ? `<button data-decide="open|${esc(w.key)}">Reopen</button>` : d === "step5" || d === "fixed" || !/:again$/.test(w.key) ? "" : `<button data-decide="met|${esc(w.key)}">Still met</button>`}${ans ? `<span class="chip decision ${esc(d)}">${esc(ans)}</span>` : ""}</div>${hp && hp.warn === w.key && !hp.settled ? fxWaysHTML(hp) : ""}</li>`; };
+  const groups = Draft.group(ws, f), nc = (j.not_checked || []), listed = new Set([].concat(...groups.map(k => [].concat(...k.groups.map(g => g.items.map(w => w.key))))));
+  const loose = hp && hp.warn && (hp.settled || !listed.has(hp.warn)) ? fxWaysHTML(hp) : "";   // the ways of a warning that has left the list (settled) or is not shown by the filter: at the top
   const kinds = groups.map(k => `<details open class="warnkind"><summary class="sev">${esc(k.title)} · ${k.groups.reduce((a, g) => a + g.items.length, 0)}</summary>
       ${k.groups.map(g => `<h4>${esc(g.name)}</h4><ul class="warnlist">${g.items.map(row).join("")}</ul>`).join("")}
       ${k.kind === "rule" && nc.length ? `<p class="muted small">Not checked here:</p><ul class="muted small">${nc.map(x => `<li>${esc(typeof x === "string" ? x : x.text || x.rule || JSON.stringify(x))}</li>`).join("")}</ul>` : ""}</details>`).join("")
@@ -2825,8 +2822,8 @@ function draftHTML(j) {   // {head: the school, the counts, the configuration li
   const no = Draft.others(ws);   // the open warnings that are not critical, counted on their own
   const warns = `<p class="warnsum"><span class="${nc0 ? "pbcrit" : ""}">${nc0} critical</span> · <b>${no} other warning${no === 1 ? "" : "s"} open</b> · ${n5} settled on step 5</p>
       <div class="row warnfilter">${[["open", "Open"], ["all", "All"]].map(([v, l]) => `<label class="radio"><input type="radio" name="dfilter" data-dfilter="${v}"${v === f ? " checked" : ""}> ${l}</label>`).join("")}</div>`
-    + (kinds || (ws.length ? `<p class="muted">Nothing in this list.</p>` : `<div class="okmsg">No warnings: no teacher, class, room or student is double-booked, and the timetable matches the setup.</div>`))
-    + (G.st && G.st.typed ? `<div class="row bdaskrow"><button data-bdaskwords="1">Ask in words</button></div>` : "");   // the typed box is in the old editor: this opens it without a lesson chosen
+    + loose + (kinds || (ws.length ? `<p class="muted">Nothing in this list.</p>` : `<div class="okmsg">No warnings: no teacher, class, room or student is double-booked, and the timetable matches the setup.</div>`))
+    + (G.st && G.st.typed ? fxAskHTML(fxHelp()) : "");   // the typed request, at the foot of the tab
   const foot = (j.after && j.after.length ? `<details><summary>${j.after.length} lesson${j.after.length === 1 ? " is" : "s are"} after school</summary>${list(j.after)}</details>` : "")
     + (j.notes && j.notes.length ? `<details><summary>Notes</summary>${list(j.notes)}</details>` : "")
     + ruleReportHTML(j.rule_report || [], j.typed || 0) + choicesUsedHTML(j.choices_used || [], j.choice_problems || [], j.choices || 0)
@@ -2864,14 +2861,18 @@ function printoutsCard() {   // while a lesson waits in Not placed, the printout
     <div class="row" style="margin-top:12px"><button class="primary" id="pbPrint">Make printouts (.zip)</button><span class="muted" id="pbPrintMsg"></span></div>
     <p class="small"><a href="/api/draft/download" id="pbDownload">Download the draft (.sqlite)</a> <span class="muted">to carry on elsewhere.</span></p></div>`;
 }
-/* ---------------- step 8: the Fix card. S.fix = {view, name, week, sel: {id, group} | null, grid, options, adding: key | null}.
-   Fetches happen in the handlers (fxGet, fxRefresh); drawing only reads S.fix. */
+/* ---------------- step 8: the helper ("Ways to settle this", under a warning of the board's Warnings tab) and the typed request (at the
+   foot of that tab). S.help = {warn (the key of the warning whose ways are open, or null), was ({key, kind, where, text}: that warning,
+   followed after each change with Draft.follow), changed (its new sentence when it changed), settled, ways ({key, answer}), waysFail,
+   pre ({fixes, answer}: the open preview), preWant, preId (the way it is shown under), words, ans, pick, askN, askBusy, askWords}.
+   Made when first needed (fxHelp); fetches happen in the handlers, drawing only reads it. */
 const FX_BREAK = { F: "Assembly", R: "Recess", U: "Lunch", W: "Recess window", ".": "No lesson" };
-const FX = { n: 0, busy: false };
+const FX = { busy: false };
 function fxBusy(v) { FX.busy = v; bdBusy(); }   // every sender sets it here, so the board's buttons that post follow it
 const FX_BROKE = "Something went wrong working that out. The suggestions below still work.";   // the server's own sentence for a fault (typed.BROKE)
 const fxShorts = () => { const m = {}; ((S.spec && S.spec.teachers) || []).forEach(t => { if (t.name && t.short) m[t.name] = t.short; }); return m; };
 const fxDot = st => `<i class="dot ${esc(Grid.stateClass(st))}"></i>`;
+const fxHelp = () => S.help || (S.help = { warn: null, was: null, changed: "", settled: false, ways: null, waysFail: false, pre: null, preWant: null, preId: null, words: "", ans: null, pick: {}, askN: 0, askBusy: false, askWords: "" });
 function fixesHTML(j) {   // the Changes tab: undo of the last change, the changes made in the app, newest first, and the fixes that could not be applied
   const fl = j.fixes || [], dis = FX.busy ? " disabled" : "";
   return (fl.length
@@ -2879,52 +2880,15 @@ function fixesHTML(j) {   // the Changes tab: undo of the last change, the chang
       : `<p class="muted small">No changes have been made in the app yet.</p>`)
     + (j.fix_problems || []).map(x => `<p class="issue">${esc(x)}</p>`).join("");
 }
-function fixHTML() {
-  const f = S.fix;
-  if (!f || !f.grid) return `<div class="fxcard"><h3>Fix the timetable</h3><p class="muted small">Move or swap a lesson, change its teacher or room, delete an extra lesson or add a missing one, here in the app. Each fix is checked against the timetable and the setup before it is made, and can be undone.</p><div class="row"><button id="fxOpen">Open the Fix card</button></div></div>`;
-  const g = f.grid, weeks = Grid.weeks(g.days), wk = weeks.find(w => w.name === f.week) || weeks[0], rows = Grid.table(g, wk), o = fxOpts(f), slots = o ? o.slots || [] : [];
-  const shorts = fxShorts(), lessonMode = !!(f.sel || f.adding), mk = f.pre ? Grid.marks(f.pre.answer, { view: f.view, name: f.name }) : {};
-  const picker = (view, names, label) => `<label class="f">${label} <select data-fxview="${view}"><option value="">Choose…</option>${names.map(n => `<option value="${esc(n)}"${f.view === view && f.name === n ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></label>`;
-  const cell = c => {
-    if (c.covered) return "";
-    if (c.lessons.length) {
-      const btns = c.lessons.map(r => {
-        const own = f.sel && f.sel.id === r.id && f.sel.group === r.group, sw = f.sel && !own ? slots.find(s => s.swap === r.id) : null;
-        const m = mk[r.id + "|" + r.group], mc = m ? Grid.markClass(m) : "", tip = (sw && sw.why ? `${Grid.fullLabel(r)} — ${sw.why}` : Grid.fullLabel(r)) + (mc ? ` — ${mc} in the preview` : "");
-        return `<button class="fxl ${sw ? esc(Grid.stateClass(sw.state)) : ""}${own ? " sel" : ""}${mc ? ` mk-${mc}` : ""}" data-fxsel="${esc(r.id)}|${esc(r.group)}" title="${esc(tip)}">${esc(Grid.label(r, shorts))}</button>`;
-      }).join("");
-      return `<td class="fxc has" rowspan="${c.rowspan}">${btns}</td>`;
-    }
-    const sl = lessonMode ? Grid.slotAt(slots, c.d, c.p) : null, st = sl ? Grid.stateClass(sl.state) : "";
-    return `<td class="fxc ${st}${FX_BREAK[c.code] && c.code !== "." ? " brk" : ""}"${sl ? ` data-fxcell="${Number(c.d)}|${Number(c.p)}" title="${esc(Grid.isSwap(sl) ? Grid.slotText(sl, g.days) : sl.why)}"` : ""}>${FX_BREAK[c.code] ? `<span class="muted">${esc(FX_BREAK[c.code])}</span>` : ""}</td>`;
-  };
-  const table = `<table class="fxgrid" style="min-width:${64 + wk.days.length * 100}px"><tr><th></th>${wk.days.map(d => `<th>${esc(d.label)}</th>`).join("")}</tr>${rows.map((r, p) => `<tr><th class="fxp">${p}<small>${esc(((g.times || [])[p] || [])[0] || "")}</small></th>${r.map(cell).join("")}</tr>`).join("")}</table>`;
-  const opt = (attrs, st, text, why) => `<button class="fxopt" ${attrs}>${fxDot(st)}<span>${esc(text)}${why ? ` <small class="muted">${esc(why)}</small>` : ""}</span></button>`;
-  let side;
-  if (f.sel) {
-    const r = Grid.lesson(g, f.sel.id, f.sel.group);
-    side = `<h4>Selected lesson</h4><p class="small">${esc(r ? r.what || Grid.label(r, shorts) : "")}</p>` + (!o ? (f.optFail ? `<p class="issue">Could not load the options. Select the lesson again.</p>` : `<p class="muted small">Loading the options…</p>`)
-      : `<h4>Possible moves</h4>${Grid.sorted(slots).map(s => opt(`data-fxgo="${Number(s.d)}|${Number(s.p)}"`, s.state, Grid.slotText(s, g.days), "")).join("") || `<p class="muted small">No slot is open to this lesson.</p>`}
-        <h4>Change the teacher</h4>${(o.teachers || []).map((t, i) => opt(`data-fxteacher="${i}"`, t.state, (t.teachers || []).join(", ") || "No teacher", t.why)).join("") || `<p class="muted small">No other teacher.</p>`}
-        <h4>Change the room</h4>${(o.rooms || []).map((t, i) => opt(`data-fxroom="${i}"`, t.state, t.room || "No room", t.why)).join("") || `<p class="muted small">No other room.</p>`}
-        ${o.delete && o.delete.state !== "no" ? `<h4>Delete</h4>${opt(`data-fxdelete="1"`, o.delete.state, "Delete this lesson", o.delete.why)}` : ""}`);
-  } else {
-    side = `<h4>Missing periods</h4>` + (g.short && g.short.length ? `<ul class="fxshort">${g.short.map(s => `<li><span class="small">${esc(s.name)}: ${esc(s.have)} of ${esc(s.want)} periods</span> <button data-fxadd="${esc(s.key)}">${f.adding === s.key ? "Cancel" : "Add a lesson"}</button></li>`).join("")}</ul>${f.adding ? (o ? `<p class="small">Click a green or amber slot to add a lesson there.</p>` : f.optFail ? `<p class="issue">Could not load the slots. Click Add a lesson again.</p>` : `<p class="muted small">Loading the slots…</p>`) : ""}`
-      : `<p class="muted small">${f.view === "class" ? "Nothing is missing for this class." : "Missing periods are shown for a class."}</p>`)
-      + `<p class="muted small">Click a lesson to see where it can go.</p>`;
-  }
-  side = fxAskHTML(f) + fxWaysHTML(f) + side;
-  return `<div class="fxcard"><h3>Fix the timetable</h3><div class="row fxpick">${picker("class", g.classes || [], "Class")}${picker("teacher", g.teachers || [], "Teacher")}
-      ${weeks.length > 1 ? `<span class="fxweeks">${weeks.map(w => `<button class="${w.name === wk.name ? "primary" : ""}" data-fxweek="${esc(w.name)}">${esc(w.name)} week</button>`).join("")}</span>` : ""}</div>
-    <p class="muted small">${esc(f.view === "class" ? "Class" : "Teacher")} ${esc(f.name)}. ${f.sel ? "Green is open, amber is open but less wanted, red is not allowed. Click the selected lesson again to let go of it." : "Click a lesson to select it."}</p>
-    <div class="fxlayout"><div class="fxwrap">${table}</div><div class="fxside">${side}</div></div>${fxPreHTML(f)}</div>`;
-}
-function fxSugHTML(x, id) {   // one checked suggestion: the sentence, what it disturbs, its state, Show and Apply. id finds it again in fxSuggestion
+/* a warning the helper can work on: one about a class or a teacher (Draft.fixTarget), not a lesson waiting in Not placed, not settled on step 5 or marked met */
+const fxCan = w => { const d = w.decision && w.decision.answer; return !!Draft.fixTarget(w) && w.crit !== "notplaced" && d !== "step5" && d !== "fixed" && d !== "met"; };
+function fxSugHTML(f, x, id) {   // one checked suggestion: the sentence, what it disturbs, its state, Preview and Apply, and its preview under it when open. id finds it again in fxSuggestion
   return `<div class="fxway"><div class="small"><b>${esc(x.text)}</b></div>${(x.disturbs || []).length ? `<ul class="small muted">${x.disturbs.map(d => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
-        <div class="row">${Draft.stateWord(x.state) ? `<span class="fxstate small">${fxDot(x.state)} ${esc(Draft.stateWord(x.state))}</span>` : ""}<button data-fxshow="${id}">Show</button><button class="primary" data-fxapply="${id}">Apply</button></div></div>`;
+        <div class="row">${Draft.stateWord(x.state) ? `<span class="fxstate small">${fxDot(x.state)} ${esc(Draft.stateWord(x.state))}</span>` : ""}<button data-fxshow="${id}"${f.preId === id && f.preWant ? ` class="on" aria-expanded="true"` : ""}>Preview</button><button class="primary" data-fxapply="${id}">Apply</button></div>${f.preId === id ? fxPreHTML(f) : ""}</div>`;
 }
-/* the box for a typed request, only when the server says it is on (G.st.typed). S.fix holds words (the box's text), ans (the answer), pick (choices
-   settled so far), askN (drops a late answer) and askBusy. Everything in the answer is text from the server: esc() everywhere. */
+/* the box for a typed request, at the foot of the Warnings tab, only when the server says it is on (G.st.typed). S.help holds words (the
+   box's text), ans (the answer), pick (choices settled so far), askN (drops a late answer) and askBusy. Everything in the answer is text
+   from the server: esc() everywhere. */
 function fxAskHTML(f) {
   if (!(G.st && G.st.typed)) return "";
   const a = f.ans, bad = a && a.ok === false;
@@ -2935,15 +2899,15 @@ function fxAskHTML(f) {
     out = `<p class="small">${esc(Draft.askSummary(a))}</p>`
       + (a.problems || []).map(x => `<p class="small">${esc(x)}</p>`).join("")
       + (a.choices || []).map((c, ci) => `<div class="fxchoice"><p class="small">Which ${esc(Draft.choiceWord(c.field))} did you mean by "${esc(c.said)}"?</p><div class="row">${(c.options || []).map((o, oi) => `<button data-fxpick="${ci}|${oi}">${esc(o)}</button>`).join("")}</div></div>`).join("")
-      + (a.groups || []).map((g, gi) => `<div class="fxgroup"><p class="small"><b>${esc(g.text)}</b></p>${(g.suggestions || []).map((x, si) => fxSugHTML(x, `a${gi}.${si}`)).join("")}${g.none ? `<p class="small">${esc(g.none)}</p>` : ""}</div>`).join("")
+      + (a.groups || []).map((g, gi) => `<div class="fxgroup"><p class="small"><b>${esc(g.text)}</b></p>${(g.suggestions || []).map((x, si) => fxSugHTML(f, x, `a${gi}.${si}`)).join("")}${g.none ? `<p class="small">${esc(g.none)}</p>` : ""}</div>`).join("")
       + (a.narrow ? `<p class="small">${esc(a.narrow)}</p>` : "")
       + (hasSug ? `<p class="muted small">These are suggestions from your words. Nothing changes until you press Apply.</p>` : "");
   }
-  return `<div class="fxask"><textarea id="fxAskIn" rows="3" maxlength="300" aria-label="Say what you want changed" placeholder="Or say what you want, for example: move PE for 2A off Friday">${esc(f.words)}</textarea><div class="row fxaskgo"><button id="fxAsk"${f.askBusy ? " disabled" : ""}>${f.askBusy ? "Reading…" : "Ask"}</button></div>${out}</div>`;
+  return `<div class="fxask"><h4>Ask in words</h4><textarea id="fxAskIn" rows="3" maxlength="300" aria-label="Say what you want changed" placeholder="Say what you want changed, for example: move PE for 2A off Friday">${esc(f.words)}</textarea><div class="row fxaskgo"><button id="fxAsk"${f.askBusy ? " disabled" : ""}>${f.askBusy ? "Reading…" : "Ask"}</button></div>${out}</div>`;
 }
-function fxAskClear(f) { f.ans = null; f.pick = {}; f.askN++; f.askBusy = false; }   // the answer goes (the timetable changed under it); the words stay
+function fxAskClear(f) { f.ans = null; f.pick = {}; f.askN++; f.askBusy = false; if (f.preId && f.preId[0] === "a") fxPreClear(f); }   // the answer goes (the timetable changed under it); the words stay
 async function fxAsk(choice) {   // choice: [choice index, option index] when the lead answered a question: asked again with the same ask and the picks so far
-  const f = S.fix; if (!f || f.askBusy) return;
+  const f = fxHelp(); if (f.askBusy) return;
   let body;
   if (choice) {
     const c = f.ans && f.ans.ask && (f.ans.choices || [])[choice[0]], o = c && (c.options || [])[choice[1]]; if (o === undefined) return;
@@ -2952,6 +2916,7 @@ async function fxAsk(choice) {   // choice: [choice index, option index] when th
     const w = String(f.words || "").trim(); if (!w) return;
     f.pick = {}; f.askWords = w; body = { words: w };
   }
+  if (f.preId && f.preId[0] === "a") fxPreClear(f);   // a preview of the answer that goes
   const n = ++f.askN; f.askBusy = true; f.ans = null; fxDraw();
   let ans;
   try {
@@ -2962,53 +2927,56 @@ async function fxAsk(choice) {   // choice: [choice index, option index] when th
     if (!r.ok || (ans.ok !== true && ans.ok !== false)) ans.ok = false;
     if (ans.ok === false && !ans.error) ans.error = FX_BROKE;
   } catch (e) { ans = { ok: false, error: "Could not reach the server: " + e.message }; }
-  if (S.fix !== f || f.askN !== n) return;   // closed, or asked again, meanwhile
+  if (S.help !== f || f.askN !== n) return;   // gone, or asked again, meanwhile
   f.askBusy = false; f.ans = ans; fxDraw();
 }
-function fxWaysHTML(f) {   // the helper's block: the ways to settle the warning the card was opened from, each already checked
-  if (!f.warn) return "";
-  const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === f.warn), a = fxWaysOf(f);
-  const close = `<button data-fxwaysclose="1">Close</button>`;
+function fxWaysHTML(f) {   // the helper's block under the warning it was opened on (or at the top of the tab once that warning has left the list): Close, then the ways, each already checked
+  if (!f || !f.warn) return "";
+  const a = fxWaysOf(f);
   let body;
-  if (f.settled) body = `<p class="small">This warning is no longer on the list.</p><div class="row">${close}</div>`;
-  else if (!a) body = f.waysFail ? `<p class="issue small">Could not load the ways.</p><div class="row">${close}</div>` : `<p class="muted small">Looking for ways…</p>`;
+  if (f.settled) body = `<p class="small"><b>Settled.</b></p>`;
+  else if (!a) body = f.waysFail ? `<p class="issue small">Could not load the ways.</p>` : `<p class="muted small">Looking for ways…</p>`;
   else {
     const sg = a.suggestions || [], bl = a.blocked || [];
-    body = sg.map((x, i) => fxSugHTML(x, i)).join("")
+    body = sg.map((x, i) => fxSugHTML(f, x, String(i))).join("")
       + (a.none ? `<p class="small">${esc(a.none)}</p>` : "")
-      + (!sg.length && bl.length ? `<p class="small">The nearest ways, and what each breaks:</p><ul class="small">${bl.map(x => `<li>${esc(x.text)} <span class="muted">${esc(x.why)}</span></li>`).join("")}</ul>` : "")
-      + `<div class="row">${close}</div>`;
+      + (!sg.length && bl.length ? `<p class="small">The nearest ways, and what each breaks:</p><ul class="small">${bl.map(x => `<li>${esc(x.text)} <span class="muted">${esc(x.why)}</span></li>`).join("")}</ul>` : "");
   }
-  return `<div class="fxways"><h4>Ways to settle this</h4>${f.changed && !f.settled ? `<p class="small">This warning has changed: ${esc(f.changed)}</p>` : w ? `<p class="small">${esc(w.text)}</p>` : ""}${body}</div>`;
+  const said = f.settled && f.was ? `<p class="small muted">${esc(f.was.text)}</p>` : f.changed ? `<p class="small">This warning has changed: ${esc(f.changed)}</p>` : "";
+  return `<div class="fxways" id="fxWays"><div class="row fxwaystop"><b>Ways to settle this</b><button data-fxwaysclose="1">Close</button></div>${said}${body}</div>`;
 }
-function fxSmallHTML(c) {   // one other class's week as a read-only table, the lessons the preview marks outlined
+function fxSmallHTML(c) {   // one class's week as a read-only table (about 250 px a week; it scrolls sideways inside the panel), the lessons the preview marks outlined
   const shorts = fxShorts();
   return Grid.weeks(c.days).map(wk => {
     const cell = k => {
       if (k.covered) return "";
       if (k.lessons.length) return `<td class="fxc has" rowspan="${k.rowspan}">${k.lessons.map(r => { const mc = Grid.markClass(r), was = Grid.wasText(r, c.days);
-        return `<div class="fxl${mc ? ` mk-${mc}` : ""}" title="${esc([Grid.fullLabel(r), was].filter(Boolean).join(" — "))}">${esc(Grid.label(r, shorts))}</div>`; }).join("")}</td>`;
+        return `<div class="fxl${mc ? ` mk-${mc}` : ""}" title="${esc([Grid.fullLabel(r), was].filter(Boolean).join(" · "))}">${esc(Grid.label(r, shorts))}</div>`; }).join("")}</td>`;
       return `<td class="fxc${FX_BREAK[k.code] && k.code !== "." ? " brk" : ""}"></td>`;
     };
-    return `<div class="fxsm"><h5>${esc(c.name)}${wk.name ? ` · ${esc(wk.name)} week` : ""}</h5><div class="fxwrap small"><table class="fxgrid small" style="min-width:${28 + wk.days.length * 70}px"><tr><th></th>${wk.days.map(d => `<th>${esc(d.label)}</th>`).join("")}</tr>${Grid.table(c, wk).map((r, p) => `<tr><th class="fxp">${p}</th>${r.map(cell).join("")}</tr>`).join("")}</table></div></div>`;
+    return `<div class="fxsm"><h5>${esc(c.name)}${wk.name ? ` · ${esc(wk.name)} week` : ""}</h5><div class="fxwrap"><table class="fxgrid" style="min-width:${28 + wk.days.length * 44}px"><tr><th></th>${wk.days.map(d => `<th>${esc(d.label)}</th>`).join("")}</tr>${Grid.table(c, wk).map((r, p) => `<tr><th class="fxp">${p}</th>${r.map(cell).join("")}</tr>`).join("")}</table></div></div>`;
   }).join("");
 }
-function fxPreHTML(f) {   // Before you apply: what the fixes would do, drawn from the preview answer kept in S.fix
+function fxPreHTML(f) {   // Before you apply: what the fixes would do, drawn from the preview answer kept in S.help, under the way it is for
   if (!f.preWant) return "";
   if (!f.pre) return `<div class="fxpre"><h4>Before you apply</h4><p class="muted small">Loading the preview…</p></div>`;
-  const a = f.pre.answer, ok = a.state === "ok" || a.state === "prefer", others = Grid.others(a, { view: f.view, name: f.name }), gone = a.gone || [];
+  const a = f.pre.answer, ok = a.state === "ok" || a.state === "prefer", cls = a.classes || [], gone = a.gone || [];
   return `<div class="fxpre"><h4>Before you apply</h4>
     <ul class="small">${(a.texts || []).map(t => `<li>${esc(t)}</li>`).join("")}</ul>
     <p class="small">${fxDot(ok ? a.state : "no")} ${esc(ok ? Draft.stateWord(a.state) : a.why || "These fixes are not open.")}</p>
-    ${others.length || gone.length || (a.classes || []).length ? `<p class="muted small">Outlined: lessons that move, change or are new.</p>` : ""}
-    ${others.map(fxSmallHTML).join("")}
+    ${cls.length || gone.length ? `<p class="muted small">Outlined: lessons that move, change or are new.</p>` : ""}
+    ${cls.map(fxSmallHTML).join("")}
     ${gone.length ? `<ul class="small">${gone.map(g => `<li>${esc(g.what)} is deleted from ${esc(g.cls)}.</li>`).join("")}</ul>` : ""}
     <div class="row">${ok ? `<button class="primary" data-fxpreapply="1">Apply</button>` : ""}<button data-fxprecancel="1">Cancel</button></div></div>`;
 }
-function fxDraw() {   // the draft area again with the grid kept where it was scrolled
-  const w = $(".fxwrap"), s = $(".fxside"), pos = [w ? w.scrollLeft : 0, w ? w.scrollTop : 0, s ? s.scrollTop : 0];
-  drawDraft();
-  const w2 = $(".fxwrap"), s2 = $(".fxside"); if (w2) { w2.scrollLeft = pos[0]; w2.scrollTop = pos[1]; } if (s2) s2.scrollTop = pos[2];
+const fxPreClear = f => { f.pre = null; f.preWant = null; f.preId = null; };
+function fxDraw() { if (S.board) bdSideDraw(); else drawDraft(); }   // the panel again (the Warnings tab holds the ways and the typed box); the board's rows are not touched
+function fxReveal(el) {   // el brought into view inside the panel's own scrolling body, its top first (the ways: with their warning and its buttons); the page and the board do not move for it
+  if (el && el.id === "fxWays" && el.closest("li.warn")) el = el.closest("li.warn");
+  const y = el && el.closest(".bdsbody"); if (!y) return;
+  const r = el.getBoundingClientRect(), t = y.getBoundingClientRect();
+  if (r.bottom > t.bottom) y.scrollTop += Math.min(r.bottom - t.bottom, r.top - t.top);
+  else if (r.top < t.top) y.scrollTop += r.top - t.top;
 }
 async function fxGet(url) {
   try {
@@ -3019,172 +2987,88 @@ async function fxGet(url) {
   } catch (e) { toast("Could not reach the server: " + e.message); return null; }
 }
 const fxQ = o => Object.keys(o).map(k => `${k}=${encodeURIComponent(o[k])}`).join("&");
-const fxWant = f => ({ view: f.view, name: f.name, id: f.sel ? f.sel.id : undefined, group: f.sel ? f.sel.group : undefined, key: !f.sel && f.adding ? f.adding : undefined });
-const fxWaysOf = f => f.ways && f.ways.key === f.warn ? f.ways.answer : null;   // the ways only while they are for the warning the card is open for
-async function fxWays(f) {   // the ways to settle the warning the card was opened from; an answer for another warning is dropped
+const fxWaysOf = f => f.ways && f.ways.key === f.warn ? f.ways.answer : null;   // the ways only while they are for the warning open now
+async function fxWays(f) {   // the ways to settle the open warning; an answer for another warning is dropped
   const asked = f.warn; f.ways = null; f.waysFail = false; if (!asked) return;
   const j = await fxGet("/api/draft/suggest?" + fxQ({ key: asked }));
-  if (S.fix !== f || f.warn !== asked) return;
+  if (S.help !== f || f.warn !== asked) return;
   f.ways = j ? { key: asked, answer: j } : null; f.waysFail = !j;
 }
-async function fxPreview(fixes) {   // what the fixes would do, shown under the grid; nothing is changed. An answer for other fixes is dropped
-  const f = S.fix; if (!f) return;
-  const asked = JSON.stringify(fixes); f.preWant = asked; f.pre = null; fxDraw();
+function fxShut(f) { f.warn = null; f.was = null; f.changed = ""; f.ways = null; f.waysFail = false; f.settled = false; if (f.preId && f.preId[0] !== "a") fxPreClear(f); }   // the ways closed (a preview of the typed answer stays)
+function fxOpenWays(key) {   // "Ways to settle this": the ways open under that warning and are fetched; a second click shuts them; another warning's shuts the first
+  const f = fxHelp(), w = ((S.draft && S.draft.warnings) || []).find(x => x.key === key), was = f.warn === key && !f.settled;
+  fxShut(f);
+  if (was || !w) { fxDraw(); return; }
+  f.warn = key; f.was = { key, kind: w.kind, where: w.where || null, text: w.text };
+  fxDraw(); fxReveal($("#fxWays"));
+  fxWays(f).then(() => { if (S.help === f && f.warn === key) { fxDraw(); fxReveal($("#fxWays")); } });
+}
+async function fxPreview(fixes, id) {   // what the fixes would do, shown under the way id; nothing is changed. An answer for other fixes is dropped
+  const f = fxHelp();
+  const asked = JSON.stringify(fixes); f.preWant = asked; f.preId = id; f.pre = null; fxDraw();
   let j = null; try { j = await post("/api/draft/preview", { fixes }); } catch (e) { toast("Could not reach the server: " + e.message); }
-  if (S.fix !== f || f.preWant !== asked) return;
-  if (j) f.pre = { fixes, answer: j }; else f.preWant = null;
-  fxDraw(); const box = $(".fxpre"); if (box) box.scrollIntoView({ block: "nearest" });
+  if (S.help !== f || f.preWant !== asked || f.preId !== id) return;
+  if (j) f.pre = { fixes, answer: j }; else fxPreClear(f);
+  fxDraw(); fxReveal($("#bdSide .fxpre"));
 }
 async function fxApply(fixes) {   // one or two fixes together, as received; all or nothing
-  const f = S.fix; if (!f || FX.busy) return;
+  const f = fxHelp(); if (FX.busy) return;
   fxBusy(true);
   try {
     const j = await post("/api/draft/fixes", { fixes });
-    if (j) await fxAfter(j);
-    else {   // refused: the sentence is toasted; the draft, the grid and the ways are fetched again (the list may have changed under the card)
-      f.pre = null; f.preWant = null; f.ways = null; f.waysFail = false; fxAskClear(f);   // the typed answer too: it is as stale as the ways. The old Show and Apply buttons are not live while the new ways load
-      const d = await fxGet("/api/draft"); if (S.fix !== f) return;
+    if (j) { await fxAfter(j); if (S.help === f) fxReveal($("#fxWays")); }   // the ways (or "Settled.") brought into view in the panel
+    else {   // refused: the sentence is toasted; the draft and the ways are fetched again (the list may have changed under them)
+      fxPreClear(f); f.ways = null; f.waysFail = false; fxAskClear(f);   // the typed answer too: it is as stale as the ways. The old Preview and Apply buttons are not live while the new ways load
+      const d = await fxGet("/api/draft"); if (S.help !== f) return;
       if (d && d.warnings) { S.draft = d; poll(); bdSync(); fxFollow(f, d.warnings); }
-      await fxRefresh(f); if (S.fix !== f) return; fxDraw();
-      if (f.warn && !f.settled) { await fxWays(f); if (S.fix === f) fxDraw(); }
+      drawDraft();
+      if (f.warn && !f.settled) { await fxWays(f); if (S.help === f) fxDraw(); }
     }
   } catch (e) { toast("Could not reach the server: " + e.message); } finally { fxBusy(false); }
 }
-const fxOpts = f => f.options && f.optFor && Grid.wanted(f.optFor, fxWant(f)) ? f.options : null;   // the options only while they are for what is selected now
-async function fxOptions(f) {   // the options of the selected lesson, or the slots of the lesson being added; an answer for something no longer selected is dropped
-  f.options = null; f.optFail = false;
-  const asked = fxWant(f); let url = null;
-  if (asked.id !== undefined) url = "/api/draft/options?" + fxQ({ id: asked.id, group: asked.group });
-  else if (asked.key !== undefined) { const s = ((f.grid && f.grid.short) || []).find(x => x.key === asked.key); if (s) url = "/api/draft/options?" + fxQ({ add: asked.key, n: s.n }); }
-  if (!url) return;
-  const j = await fxGet(url);
-  if (!Grid.wanted(asked, fxWant(f))) return;
-  f.options = j; f.optFor = asked; f.optFail = !j;
-}
-async function fxRefresh(f) {   // the grid again, then the options when a lesson is still selected; false when the grid could not be fetched or is no longer wanted
-  const live = () => S.fix === f || f.opening;
-  const g = await fxGet("/api/draft/grid?" + fxQ({ view: f.view, name: f.name }));
-  if (!g || !live() || g.view !== f.view || g.name !== f.name) return false;
-  f.grid = g;
-  const weeks = Grid.weeks(g.days); if (!weeks.some(w => w.name === f.week)) f.week = weeks[0].name;
-  if (f.sel && !Grid.lesson(g, f.sel.id, f.sel.group)) f.sel = null;
-  if (f.adding && !(g.short || []).some(s => s.key === f.adding)) f.adding = null;
-  await fxOptions(f);
-  return live();
-}
-async function fxOpen(view, name, day, sel, warn) {   // day: a day's name, to open on the week that holds it; warn: the warning it was opened from (the warning itself: its key, kind and where are kept)
-  const f = { view, name, week: "", sel: sel || null, grid: null, options: null, optFor: null, optFail: false, adding: null, opening: true, warn: warn ? warn.key : null, was: warn ? { key: warn.key, kind: warn.kind, where: warn.where || null } : null, changed: "", ways: null, waysFail: false, settled: false, pre: null, preWant: null, words: "", ans: null, pick: {}, askN: 0, askBusy: false, askWords: "" }, n = ++FX.n;
-  const ok = await fxRefresh(f); f.opening = false;
-  if (!ok || n !== FX.n) return;
-  if (day) { const i = f.grid.days.indexOf(day), w = Grid.weeks(f.grid.days).find(x => x.days.some(d => d.i === i)); if (w) f.week = w.name; }
-  S.fix = f; fxDraw();
-  const box = $("#bdOld"); if (box) box.scrollIntoView({ block: "start" });
-  if (f.warn) { await fxWays(f); if (S.fix === f) fxDraw(); }
-}
-function fxFollow(f, warnings) {   // the warning the card was opened on, found again in the list: its key carried on, or the changed warning taken; false when it is gone
+function fxFollow(f, warnings) {   // the warning the ways are open for, found again in the list: its key carried on, or the changed warning taken; false when it is gone (settled)
   if (!f.warn) return false;
   const r = Draft.follow(f.was, warnings); f.settled = !r;
   if (!r) return false;
   const w = warnings.find(x => x.key === r.key);
-  f.warn = r.key; f.was = { key: w.key, kind: w.kind, where: w.where || null };
+  f.warn = r.key; f.was = { key: w.key, kind: w.kind, where: w.where || null, text: w.text };
   if (r.how === "changed") f.changed = w.text;
   return true;
 }
-async function fxAfter(j) {   // the draft's answer is in: the lists, then the grid and options fetched again, then the ways when the card has a warning
-  const f = S.fix; S.draft = j; poll(); bdSync();
+async function fxAfter(j) {   // every new draft answer comes here (the helper's, the board's senders', a colleague's change): the lists and the board, then the open ways followed and fetched again
+  const f = S.help; S.draft = j; poll(); bdSync();
   if (f) {
-    f.pre = null; f.preWant = null; fxAskClear(f);
-    const still = !!f.warn && fxFollow(f, j.warnings);
-    if (f.warn) { f.ways = null; f.waysFail = false; }
-    const ok = await fxRefresh(f); if (S.fix !== f) return; if (!ok) toast("The fix was made, but the grid could not be loaded again. Pick the class again.");
-    fxDraw();
-    if (still) { await fxWays(f); if (S.fix === f) fxDraw(); }
-    return;
+    fxPreClear(f); fxAskClear(f);
+    if (f.warn) { fxFollow(f, j.warnings); f.ways = null; f.waysFail = false; }
   }
-  fxDraw();
-}
-async function fxFix(fix) {   // one fix; a refused one says why and the grid is fetched again
-  const f = S.fix; if (!f || FX.busy) return;
-  fxBusy(true);
-  try {
-    const j = await post("/api/draft/fix", fix);
-    if (j) { if (fix.kind === "add") f.adding = null; await fxAfter(j); }
-    else { await fxRefresh(f); if (S.fix === f) fxDraw(); }
-  } catch (e) { toast("Could not reach the server: " + e.message); } finally { fxBusy(false); }
-}
-async function fxSelect(sel) {
-  const f = S.fix; f.sel = sel; f.adding = null; f.options = null; f.optFail = false;
-  if (sel) { fxDraw(); await fxOptions(f); }
-  if (S.fix === f) fxDraw();
-}
-function fxGo(sl) {   // a click on a slot: a swap that moves another class's lesson too opens the preview first, any other move or swap is made at once
-  const sel = S.fix.optFor;
-  if (Grid.isSwap(sl) && (sl.also || []).length) fxPreview(Grid.previewFor(sel, sl)); else fxFix(Grid.fixFor(sel, sl));
+  drawDraft();
+  if (f && f.warn && !f.settled) { await fxWays(f); if (S.help === f) fxDraw(); }
 }
 function fxSuggestion(f, i) {   // "3": the ways' third; "a1.0": the typed answer's second lesson, first suggestion
   if (/^a\d+\.\d+$/.test(i)) { const [g, k] = i.slice(1).split(".").map(Number), a = f.ans && f.ans.ok !== false && f.ans.groups; return a && a[g] && (a[g].suggestions || [])[k] || null; }
   const a = fxWaysOf(f); return a && (a.suggestions || [])[Number(i)] || null;
 }
-function fxStateOK(x) { if (x && (x.state === "ok" || x.state === "prefer")) return true; toast((x && x.why) || "That is not open."); return false; }
-function fxClick(b) {   // true when the click was the Fix card's or a warning's Fix button
-  const d = b.dataset, f = S.fix, split = v => { const i = v.indexOf("|"); return [v.slice(0, i), v.slice(i + 1)]; };
-  if (d.fix !== undefined) {
-    const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === d.fix), to = w && Draft.fixTarget(w);
-    if (!to) { toast("This warning is not about one class or teacher, so there is no grid to show."); return true; }
-    fxOpen(to.view, to.name, to.day, to.sel, w); return true;
-  }
-  if (b.id === "fxOpen") { fxOpenFirst(); return true; }
-  if (!f || !f.grid) return false;
+function fxClick(b) {   // true when the click was the helper's or the typed request's
+  const d = b.dataset;
+  if (d.fxways !== undefined) { fxOpenWays(d.fxways); return true; }
+  const f = S.help; if (!f) return false;
   if (b.id === "fxAsk") { fxAsk(); return true; }
   if (d.fxpick !== undefined) { fxAsk(d.fxpick.split("|").map(Number)); return true; }
-  if (d.fxshow !== undefined) { const x = fxSuggestion(f, d.fxshow); if (x) fxPreview(x.fixes); return true; }
+  if (d.fxshow !== undefined) {   // Preview: opens Before you apply under that way; a second click shuts it
+    if (f.preId === d.fxshow && f.preWant) { fxPreClear(f); fxDraw(); return true; }
+    const x = fxSuggestion(f, d.fxshow); if (x) fxPreview(x.fixes, d.fxshow); return true;
+  }
   if (d.fxapply !== undefined) { const x = fxSuggestion(f, d.fxapply); if (x) fxApply(x.fixes); return true; }
-  if (d.fxwaysclose !== undefined) { f.warn = null; f.ways = null; f.settled = false; f.waysFail = false; fxDraw(); return true; }
+  if (d.fxwaysclose !== undefined) { fxShut(f); fxDraw(); return true; }
   if (d.fxpreapply !== undefined) { if (f.pre) fxApply(f.pre.fixes); return true; }
-  if (d.fxprecancel !== undefined) { f.pre = null; f.preWant = null; fxDraw(); return true; }
-  if (d.fxweek !== undefined) { f.week = d.fxweek; fxDraw(); return true; }
-  if (d.fxsel !== undefined) {
-    const [id, group] = split(d.fxsel), row = { id: Number(id), group };
-    if (f.sel && Grid.same(f.sel, row)) { fxSelect(null); return true; }
-    const o = fxOpts(f), sl = f.sel && o ? (o.slots || []).find(s => s.swap === row.id) : null;
-    if (sl && (sl.state === "ok" || sl.state === "prefer")) {
-      fxGo(sl); return true;
-    }
-    fxSelect(row); return true;
-  }
-  if (d.fxcell !== undefined && fxOpts(f)) {
-    const o = fxOpts(f), [dd, p] = split(d.fxcell), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
-    if (!fxStateOK(sl)) return true;
-    if (f.optFor.id !== undefined) fxGo(sl);
-    else if (f.optFor.key !== undefined) { const s = (f.grid.short || []).find(x => x.key === f.optFor.key); if (s) fxFix(Grid.addFor(f.optFor.key, sl, s.n)); }
-    return true;
-  }
-  if (d.fxgo !== undefined && f.sel && fxOpts(f)) {
-    const o = fxOpts(f), [dd, p] = split(d.fxgo), sl = Grid.slotAt(o.slots, Number(dd), Number(p));
-    if (!fxStateOK(sl)) return true;
-    fxGo(sl); return true;
-  }
-  if (d.fxteacher !== undefined && f.sel && fxOpts(f)) {
-    const o = fxOpts(f), t = (o.teachers || [])[Number(d.fxteacher)];
-    if (t && fxStateOK(t)) fxFix({ kind: "teacher", key: o.key, teachers: t.teachers }); return true;
-  }
-  if (d.fxroom !== undefined && f.sel && fxOpts(f)) {
-    const o = fxOpts(f), t = (o.rooms || [])[Number(d.fxroom)];
-    if (t && fxStateOK(t)) fxFix({ kind: "room", id: f.optFor.id, group: f.optFor.group, room: t.room }); return true;
-  }
-  if (d.fxdelete !== undefined && f.sel && fxOpts(f)) {
-    const o = fxOpts(f); if (!fxStateOK(o.delete)) return true;
-    fxFix(Grid.deleteFor(f.grid, f.optFor)); return true;
-  }
-  if (d.fxadd !== undefined) {
-    const key = d.fxadd; f.sel = null; f.adding = f.adding === key ? null : key; f.options = null; f.optFail = false; fxDraw();
-    fxOptions(f).then(() => { if (S.fix === f) fxDraw(); }); return true;
-  }
+  if (d.fxprecancel !== undefined) { fxPreClear(f); fxDraw(); return true; }
   return false;
 }
-async function fxOpenFirst() {   // the Fix card with nothing chosen: the setup's first class
-  const n = S.spec ? classNames()[0] : "";
-  if (n) await fxOpen("class", n, null, null); else toast("The setup has no classes to show.");
+function fxKeep(draw) {   // the typed box (and the buttons that answer it) keeps the focus and the caret across a redraw; its text comes back from S.help.words
+  const a = document.activeElement, mine = a && a.matches && a.matches("#fxAskIn, #fxAsk, [data-fxpick]"), caret = mine && a.id === "fxAskIn" ? [a.selectionStart, a.selectionEnd] : null;
+  draw();
+  const inp = mine && $("#fxAskIn");
+  if (inp && document.activeElement !== inp) { inp.focus({ preventScroll: true }); const n = inp.value.length; try { inp.setSelectionRange(caret ? caret[0] : n, caret ? caret[1] : n); } catch (e) { } }
 }
 /* step 8's board: the whole school's timetable for one day (a row per class, the periods across), or one class's whole cycle
    (a row per day), drawn from the cards of GET /api/draft/board and laid out by Board (board.js). S.board lives while step 8 is
@@ -3290,7 +3174,7 @@ function bdDraw() {   // #bdBox again, the board kept where it was scrolled
   const box = $("#bdBox"); if (!box || !S.board) return;
   const w = box.querySelector(".bdmain:not(.bdold) .bdwrap"), pos = w ? [w.scrollLeft, w.scrollTop] : null, y = window.scrollY, side = bdSideAt();
   S.board.redraw = false;
-  if (S.board.drag !== null && BD.dragEl && box.contains(BD.dragEl)) bdKeep(box); else box.innerHTML = bdHTML();
+  fxKeep(() => { if (S.board.drag !== null && BD.dragEl && box.contains(BD.dragEl)) bdKeep(box); else box.innerHTML = bdHTML(); });
   const w2 = box.querySelector(".bdmain:not(.bdold) .bdwrap"); if (w2 && pos) { w2.scrollLeft = pos[0]; w2.scrollTop = pos[1]; }
   bdSideBack(side);
   window.scrollTo(window.scrollX, y); bdPaint();
@@ -3337,9 +3221,9 @@ function bdRowHTML(row, b, cycle, hit, warned) {   // a class's row, or a teache
 const bdHitSet = b => b.step && b.data ? new Set(Board.hits(b.data, b.step).map(c => c.id)) : null;   // the ids the counter being stepped through counts
 const bdWarned = () => Board.warned((S.draft && S.draft.warnings) || []);
 const bdParts = () => S.draft ? draftHTML(S.draft) : { head: "", warns: "", changes: "", foot: "" };
-function bdHTML() {   // the timetable card: the board with its side panel, the old editor while it is open, the notes of the upload and the way to step 9
+function bdHTML() {   // the timetable card: the board with its side panel, the notes of the upload and the way to step 9
   const b = S.board, d = b.data, parts = bdParts(), head = `<div class="bdtitle"><h2>The timetable</h2></div>`;
-  const tail = bdOldHTML() + `<div id="bdFoot">${parts.foot}</div>`;
+  const tail = `<div id="bdFoot">${parts.foot}</div>`;
   if (b.sel === null) b.step = null;   // a counter's fade lasts while its card is selected
   if (!d) return head + `<div class="bdmain"><p class="muted bdnone">${b.fail ? "The timetable could not be loaded. Open the step again." : "Loading the timetable…"}</p>${bdSideHTML(b, null, parts)}</div>` + tail;
   const weeks = Grid.weeks(d.days || []), m = b.mode, cycle = m.kind === "cycle";
@@ -3382,7 +3266,7 @@ function bdSideBack(at) { const el = $("#bdSide"), y = el && el.querySelector(".
 function bdSideDraw() {   // the panel alone (a tab chosen, the draft's lists changed): the board's rows are not touched
   const b = S.board, el = $("#bdSide"); if (!b || !el) return;
   if (BD.dragEl && el.contains(BD.dragEl)) { b.redraw = true; return; }   // a card of the tray is in the air: drawn when it lands
-  const at = bdSideAt(); el.outerHTML = bdSideHTML(b, bdHitSet(b), bdParts()); bdSideBack(at); bdPaint();
+  const at = bdSideAt(); fxKeep(() => { el.outerHTML = bdSideHTML(b, bdHitSet(b), bdParts()); bdSideBack(at); }); bdPaint();
 }
 /* the Lesson tab: the selected lesson's teachers and room chosen from lists, with "None"; a band has a block per group. b.lesson = {id, back
    (the tab open before it, shown again when the selection closes), order (its groups, the row it was clicked on first in the Teachers or
@@ -3486,17 +3370,12 @@ async function bdLessonPost(c, fix, who) {
   if (why !== null && S.board === b) ok = await bdSend("/api/draft/fix", Object.assign({}, fix, { force: true, why }), c, false, { stay: true });
   if (ok && S.board === b && b.lesson && b.lesson.id === c.id) { b.lesson.all = {}; bdSideDraw(); }   // the tick box is for one change
 }
-function bdOldHTML() {   // the old one-class editor (the Fix card, the helper's ways, the typed box), under the board while it is open
-  const f = S.fix; if (!f || !f.grid) return "";
-  return `<div id="bdOld"><div class="row bdoldtop"><button data-bdoldclose="1">Close</button></div><div id="fxBox">${fixHTML()}</div></div>`;
-}
-function bdDraftDraw() {   // the draft changed (a fix, an answer, a filter, the old editor): the card again; with a card in the air only what does not hold it, the rest when it lands
+function bdDraftDraw() {   // the draft changed (a fix, an answer, a filter): the card again; with a card in the air only what does not hold it, the rest when it lands
   const b = S.board, box = $("#bdBox"); if (!b || !box) return;
   if (b.drag === null) { bdDraw(); return; }
   b.redraw = true; bdSideDraw();
-  const parts = bdParts(), old = $("#bdOld"), foot = $("#bdFoot");
-  if (old) old.remove(); if (foot) foot.remove();
-  box.insertAdjacentHTML("beforeend", bdOldHTML() + `<div id="bdFoot">${parts.foot}</div>`);
+  const foot = $("#bdFoot"); if (foot) foot.remove();
+  box.insertAdjacentHTML("beforeend", `<div id="bdFoot">${bdParts().foot}</div>`);
 }
 const bdOpenWarnings = () => Draft.others((S.draft && S.draft.warnings) || []);   // the draft's open warnings that are not critical mistakes
 function bdCountersHTML(d) {   // above the hint: what is wrong on the board, a button a kind; a click steps through its cards
@@ -3771,7 +3650,7 @@ function bdBusyFor(c, fix, pending) {   // whether the teacher or room a hand-ov
   const placed = x => x.d !== null && x.d !== undefined;   // a lesson in the tray has no time, so it is with no one then
   return mine.some(m => { const w = when(m); return placed(w) && cards.some(x => !ids.has(x.id) && placed(x) && x.d === w.d && has(x) && x.p < w.p + bdLen(m) && w.p < x.p + bdLen(x)); });
 }
-/* the board's own sender: one post at a time (with the Fix card's), the answer goes to fxAfter, which fetches the board again; keep: lesson c
+/* the board's own sender: one post at a time (with the helper's), the answer goes to fxAfter, which fetches the board again; keep: lesson c
    stays selected (a lift: it is then in the tray); o.refused(sentence): a refusal it takes up (true), else said as a toast; o.note: what the
    line says after it in place of the change's own sentence; o.stay: c stays selected (without the tray's tab). Resolves true when the change was made */
 async function bdSend(url, body, c, keep, o) {
@@ -3838,8 +3717,6 @@ function bdClick(b) {   // true when the click was the board's
   if (d.bdwarn !== undefined) { bd.side = "warn"; bdSideDraw(); const el = $("#bdSide"); if (el) el.scrollIntoView({ block: "nearest" }); return true; }   // the counter opens the panel's Warnings
   if (d.bdside !== undefined) { bd.side = d.bdside; bdSideDraw(); return true; }
   if (d.bdshow !== undefined) { bdShowWarning(d.bdshow, false); return true; }
-  if (d.bdoldclose !== undefined) { S.fix = null; FX.n++; drawDraft(); return true; }   // FX.n: an opening still on its way is dropped
-  if (d.bdaskwords !== undefined) { fxOpenFirst().then(() => { const el = $("#fxAskIn"); if (el && S.fix) el.focus({ preventScroll: true }); }); return true; }
   if (d.bdlopen !== undefined) {   // a band's group in the Lesson tab: opened (its choices fetched) or closed
     const L = bd.lesson, g = d.bdlopen; if (!L) return true;
     if (L.open[g]) delete L.open[g]; else { L.open[g] = true; bdLessonFetch(g); }
@@ -3874,25 +3751,54 @@ function bdGoTo(c) {   // the board shows card c: its day, or its class's cycle 
   bd.mode.d = c.d;   // the day shown, or the day the cycle view goes back to
   (d.levels || []).forEach(lv => { if (lv.classes.some(x => cls.includes(x))) delete bd.fold[lv.level]; });
 }
+/* where a warning's "Show me" goes: Board.at's lesson or class, else the teacher it names ({teacher, d, clash}: d the index of the day it
+   names, null with none); null when there is nowhere */
+function bdWhere(w, data) {
+  const a = Board.at(w, data); if (a) return a;
+  const h = w && w.where, t = h && h.teacher; if (!t) return null;
+  const d = h.day ? (data.days || []).indexOf(h.day) : -1;
+  return { id: null, teacher: t, d: d < 0 ? null : d, clash: w.kind === "clash" };
+}
+function bdShowTeacher(a, stay) {   // a warning about a teacher: Teachers rows on its day, the first lesson of that teacher's row marked "In two places" then selected; a clash
+  // that names no day: the day shown when that row has such a lesson on it, else the first day that has; any other warning about a teacher with no day: their whole cycle
+  const b = S.board, d = b.data, by = "teacher", row = { by, name: a.teacher };
+  const marked = x => (x.marks || []).includes("teacher") && Board.of(x, row).length > 0, shown = b.mode.d;
+  b.from = null;
+  if (a.d === null && !a.clash) { b.sel = null; b.mode = { kind: "cycle", by, name: a.teacher, d: shown }; return null; }
+  const any = d.cards.filter(marked).sort((x, y) => x.d - y.d || x.p - y.p)[0];
+  const day = a.d !== null ? a.d : d.cards.some(x => x.d === shown && marked(x)) || !any ? shown : any.d;
+  b.mode = { kind: "day", d: day, by };
+  Board.groups(d, b.mode, null).forEach(g => { if (g.rows.some(r => r.name === a.teacher)) delete b.fold[bdFoldKey(by, g.name)]; });
+  const c = d.cards.filter(x => x.d === day && marked(x)).sort((x, y) => x.p - y.p)[0] || null;
+  b.sel = c ? c.id : null;
+  if (c) { b.from = { cls: "", by, name: a.teacher, id: c.id }; bdLessonOpen(c.id, !stay); }
+  return c;
+}
 /* a warning's "Show me" (stay false), or step 9's Show on step 8 / Find it on step 8 (stay true: the panel stays on Warnings with the
-   warning marked and scrolled to): the board goes to Board.at's place, its card selected, shown and flashed once; a lesson in the tray
-   is selected there (the panel then shows Not placed, unless stay); a warning about a class and no lesson opens that class's cycle */
+   warning marked and scrolled to): the board goes to bdWhere's place, its card selected, shown and flashed once; a lesson in the tray
+   is selected there (the panel then shows Not placed, unless stay); a warning about a class and no lesson opens that class's cycle; a
+   warning about a teacher opens the Teachers rows on that teacher (bdShowTeacher) */
 function bdShowWarning(key, stay) {
   const b = S.board; if (!b) return;
   b.wmark = key; if (stay) b.side = "warn";
   if (!b.data || b.loading) { b.show = { key, stay }; return; }   // done when the board comes (bdLoad)
   b.show = null;
-  const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === key), a = w ? Board.at(w, b.data) : null, c = a && a.id !== null ? bdCard(a.id) : null;
+  const w = ((S.draft && S.draft.warnings) || []).find(x => x.key === key), a = w ? bdWhere(w, b.data) : null;
+  let c = a && a.id !== null ? bdCard(a.id) : null;
   if (a) { b.ask = null; b.del = null; b.note = ""; b.step = null; b.held = null; }
   if (c) { b.sel = c.id; if (!bdInTray(c)) bdGoTo(c); else if (!stay) b.side = "tray"; bdLessonOpen(c.id, !stay); }   // with stay the panel keeps Warnings; the Lesson tab is there to open
+  else if (a && a.teacher) c = bdShowTeacher(a, stay);
   else if (a) { b.sel = null; b.mode = { kind: "cycle", cls: a.cls, d: a.d !== null ? a.d : b.mode.d }; }
   bdDraw(); bdWant();
   const box = $("#bdBox"); if (!box) return;
+  const trow = a && a.teacher && b.mode.kind === "day" ? [...box.querySelectorAll(`.bdmain:not(.bdold) .bdrow[data-by="teacher"]`)].find(x => x.dataset.name === a.teacher) : null;
   if (c) {
-    const els = [...box.querySelectorAll(`.bdmain:not(.bdold) .bdcard[data-card="${c.id}"]`)];
-    if (els[0]) els[0].scrollIntoView({ block: "nearest", inline: "center" });
+    const els = [...box.querySelectorAll(`.bdmain:not(.bdold) .bdcard[data-card="${c.id}"]`)], first = (trow && trow.querySelector(`.bdcard[data-card="${c.id}"]`)) || els[0];   // on the teacher's own row when it is there
+    if (first) first.scrollIntoView({ block: "nearest", inline: "center" });
     els.forEach(x => x.classList.add("flash")); setTimeout(() => els.forEach(x => x.classList.remove("flash")), 1200);
-  } else if (a) { const r = a.d !== null ? box.querySelector(`.bdmain:not(.bdold) .bdrow[data-d="${a.d}"]`) : null; (r || box).scrollIntoView({ block: "nearest" }); }
+  } else if (trow) trow.scrollIntoView({ block: "nearest" });   // the teacher's row, with no lesson to select
+  else if (a && a.teacher) box.scrollIntoView({ block: "nearest" });   // a teacher's whole cycle
+  else if (a) { const r = a.d !== null ? box.querySelector(`.bdmain:not(.bdold) .bdrow[data-d="${a.d}"]`) : null; (r || box).scrollIntoView({ block: "nearest" }); }
   else if (stay) box.scrollIntoView({ block: "start" });
   const y = box.querySelector("#bdSide .bdsbody"), li = y && [...y.querySelectorAll("li.warn")].find(x => x.dataset.wkey === key);
   if (li && stay) y.scrollTop += li.getBoundingClientRect().top - y.getBoundingClientRect().top - y.clientHeight / 3;   // inside the panel: the page does not move for it
@@ -3966,7 +3872,7 @@ document.addEventListener("dragover", e => {   // over a place: the cells it wou
     return;
   }
   const p = c && row ? bdAimed(b, row, e) : -1;
-  if (c && !row && t.closest && t.closest("#bdBox")) {   // elsewhere in the timetable card (the heading, the counters, the line, the old editor): taken, so a release there says where to drop and nothing lands in a field
+  if (c && !row && t.closest && t.closest("#bdBox")) {   // elsewhere in the timetable card (the heading, the counters, the line, the notes): taken, so a release there says where to drop and nothing lands in a field
     e.preventDefault(); e.dataTransfer.dropEffect = "move";
     if (b.hv !== "off") { b.hv = "off"; b.pt = bdOffText(c); bdOver(null); bdTrayLit(false); bdLineDraw(); }
     return;

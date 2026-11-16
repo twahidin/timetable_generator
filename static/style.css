@@ -248,42 +248,26 @@ ul.warnlist{list-style:none;margin:0;padding:0}
 .warn.prefer .wt{color:var(--muted)}.warnbtns{gap:6px;margin-top:4px}.warnbtns button{padding:3px 10px;font-size:12px}
 .chip.decision{background:var(--chip);color:var(--ink)}.chip.decision.step5{background:var(--ok-bg);color:var(--ok)}
 
-/* step 8: the Fix card, a week as a table with the slots coloured by what a fix there would do */
-.fxcard{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:#fff}
-.fxcard h3{margin:0 0 6px}.fxcard h4{margin:12px 0 4px;font-size:13px;color:var(--navy)}.fxcard h4:first-child{margin-top:0}
-.fxpick{gap:12px;margin-bottom:4px}.fxweeks{display:flex;gap:6px}.fxweeks button{padding:3px 10px;font-size:12px}
-.fxlayout{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
-.fxwrap{flex:1 1 480px;min-width:0;max-width:100%;overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:8px}
-.fxside{flex:0 1 250px;min-width:220px;max-height:72vh;overflow:auto}
-@media (max-width:900px){.fxside{flex:1 1 100%;max-height:none}}
-table.fxgrid{border-collapse:collapse;table-layout:fixed;width:100%;font-size:11px}
-table.fxgrid th{background:var(--chip);font-weight:600;padding:2px 4px;border:1px solid var(--line);position:sticky;top:0;z-index:1}
-table.fxgrid th.fxp{position:sticky;left:0;top:auto;width:64px;text-align:right;z-index:1;white-space:nowrap}
-table.fxgrid th.fxp small{display:block;font-weight:400;color:var(--muted);font-size:10px}
-table.fxgrid td.fxc{border:1px solid var(--line);padding:1px;vertical-align:top;height:20px;background:#fff;overflow:hidden}
+/* step 8: the helper's ways under a warning of the Warnings tab, and Before you apply with the small weeks of the classes a change touches (read-only tables) */
+.fxwrap{max-width:100%;overflow-x:auto;overflow-y:hidden;border:1px solid var(--line);border-radius:8px}   /* sideways only: the panel itself scrolls down */
+table.fxgrid{border-collapse:collapse;table-layout:fixed;width:100%;font-size:10px}
+table.fxgrid th{background:var(--chip);font-weight:600;padding:2px 4px;border:1px solid var(--line)}
+table.fxgrid th.fxp{position:sticky;left:0;top:auto;width:28px;text-align:right;z-index:1;white-space:nowrap;font-size:10px}
+table.fxgrid td.fxc{border:1px solid var(--line);padding:0;vertical-align:top;height:14px;background:#fff;overflow:hidden}
 table.fxgrid td.brk{background:#eceef2}
-table.fxgrid td.ok{background:#d6f1e0;cursor:pointer}table.fxgrid td.prefer{background:#fff0c2;cursor:pointer}
-table.fxgrid td.no{background:#fbdcdc;cursor:not-allowed}table.fxgrid td.na{background:#eceef2}
-button.fxl{display:block;width:100%;margin:0 0 1px;padding:1px 4px;font-size:11px;line-height:1.3;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--line);border-radius:3px;background:var(--chip);color:var(--ink)}
-button.fxl:last-child{margin-bottom:0}
-button.fxl.ok{background:#d6f1e0}button.fxl.prefer{background:#fff0c2}button.fxl.no{background:#fbdcdc}button.fxl.na{background:#eceef2}
-button.fxl.sel{outline:2px solid var(--accent);outline-offset:-1px;font-weight:600}
-button.fxopt{display:flex;gap:8px;align-items:flex-start;width:100%;margin:0 0 3px;padding:4px 8px;font-size:12px;text-align:left;background:#fff}
 i.dot{display:inline-block;flex:none;width:9px;height:9px;margin-top:4px;border-radius:50%;background:#98a2b3}
 i.dot.ok{background:#12b76a}i.dot.prefer{background:#f5a524}i.dot.no{background:#d92d20}i.dot.na{background:#98a2b3}
-ol.fxlist{margin:4px 0 8px;padding-left:22px;font-size:13px}ul.fxshort{list-style:none;margin:0;padding:0}ul.fxshort li{margin:0 0 6px}
-.fxways{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 12px;background:#f8fafc}
+ol.fxlist{margin:4px 0 8px;padding-left:22px;font-size:13px}
+.fxways{border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0 4px;background:#f8fafc}
+.fxwaystop{justify-content:space-between;align-items:center;margin:0 0 4px}.fxwaystop button{padding:3px 10px;font-size:12px}
 .fxways p{margin:0 0 6px}.fxways ul{margin:2px 0 6px;padding-left:18px}
 .fxway{border-top:1px solid var(--line);padding:6px 0}.fxway .row{gap:6px;align-items:center}.fxway button{padding:3px 10px;font-size:12px}
+.fxway button.on,.warnbtns button.on{background:#eef3fb;border-color:var(--accent)}
 .fxstate{display:inline-flex;gap:5px;align-items:center;margin-right:auto}.fxstate i.dot{margin-top:0}
-.fxpre{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}.fxpre ul{margin:2px 0 6px;padding-left:20px}
+.fxpre{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}.fxpre h4{margin:0 0 4px}.fxpre ul{margin:2px 0 6px;padding-left:20px}
 .fxpre p i.dot{margin-top:0;vertical-align:middle}
 .fxsm{margin:6px 0 10px}.fxsm h5{margin:0 0 3px;font-size:12px;color:var(--navy)}
-.fxwrap.small{flex:none;max-height:340px;overflow:auto}
-table.fxgrid.small{font-size:10px;table-layout:fixed}
-table.fxgrid.small th.fxp{width:28px;font-size:10px}
-table.fxgrid.small td.fxc{height:14px;padding:0}
-table.fxgrid.small .fxl{display:block;margin:0 0 1px;padding:0 3px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--line);border-radius:3px;background:var(--chip)}
+.fxl{display:block;margin:0 0 1px;padding:0 3px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--line);border-radius:3px;background:var(--chip)}
 .fxl.mk-moved{outline:2px solid #6941c6;outline-offset:-1px}.fxl.mk-changed{outline:2px solid #1570ef;outline-offset:-1px}.fxl.mk-new{outline:2px dashed #067647;outline-offset:-1px}
 select[data-parent]{width:132px;min-width:132px}   /* a Class Parents box shows the whole name */
 .cpbadge{font-size:10px;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:0 6px;vertical-align:1px}   /* a staffed class card's badge: the school's word for form teachers */
@@ -310,7 +294,7 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .cfields .cwide{grid-column:span 2}
 .cboxes{display:flex;flex-wrap:wrap;gap:6px}
 .cmsgs{margin-top:8px;color:var(--warn);font-size:12.5px}
-.fxask{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 12px;background:#f8fafc}
+.fxask{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:12px 0 4px;background:#f8fafc}.fxask h4{margin:0 0 6px}
 .fxask>.row{gap:6px;align-items:center}
 .fxask p{margin:6px 0 0}.fxchoice .row{gap:6px;margin-top:4px}.fxchoice button{padding:3px 10px;font-size:12px}
 .fxgroup{border-top:1px solid var(--line);margin-top:8px;padding-top:2px}.fxgroup .fxway{padding:6px 0 2px}.fxgroup .fxway:first-of-type{border-top:0}.fxgroup .fxway button{padding:3px 10px;font-size:12px}
@@ -486,7 +470,6 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdsbody .warnsum{margin:0 0 4px}.bdsbody .warn{font-size:12px}.bdsbody h4{margin:8px 0 2px;font-size:12px}.bdsbody summary{font-size:13px}
 .bdsbody li.warn.on{background:#eef3fb;box-shadow:inset 3px 0 0 var(--accent);padding-left:6px}
 .bdsbody ol.fxlist{font-size:12px;margin-top:8px}
-.bdaskrow{margin-top:10px}
 .bdtdrop{display:none;position:absolute;top:44px;left:6px;right:6px;z-index:6;margin:0;padding:6px;border-radius:6px;background:#eef3fb;color:var(--navy);font-weight:600}
 #bdSide.lift{outline:2px dashed var(--navy);outline-offset:-2px}#bdSide.lift .bdtdrop{display:block}
 .bdnone{flex:1 1 auto;margin:0}
@@ -502,7 +485,6 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdlall{display:flex;gap:4px;align-items:center}
 @keyframes bdflash{0%,100%{filter:none}25%,60%{filter:brightness(1.25) drop-shadow(0 0 3px #f2b632)}}
 .bdcard.flash{animation:bdflash 1s ease-in-out 1}   /* Show me: the card's pieces flash once, nothing moves */
-#bdOld{margin-top:12px}.bdoldtop{justify-content:flex-end;margin:0}#bdOld .fxcard{margin-top:4px}
 #bdFoot{margin-top:12px}
 @media (max-width:1099px){#bdSide{flex-basis:220px;width:220px}}
 @media (max-width:899px){.bdmain{flex-direction:column;align-items:stretch}#bdSide{flex:none;width:auto;height:320px;min-height:0}}

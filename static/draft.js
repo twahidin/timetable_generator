@@ -64,8 +64,9 @@ var Draft = (function () {
     var h = (w && w.where) || {};
     return [h.teacher, h.cls, h.day, h.period === null || h.period === undefined || h.period === "" ? "" : "period " + h.period].filter(function (x) { return x !== null && x !== undefined && x !== ""; }).map(String);
   }
-  /* the week the warning's Fix the timetable button opens -> {view, name, day, sel} or null when there is none: the teacher's
-     week, else the class's (on the warning's day, its lesson selected); day "" opens the first week */
+  /* the class or teacher a warning is about -> {view, name, day, sel} or null when there is none: the teacher, else the class
+     (with the warning's day and its lesson); a warning with one is one the helper's "Ways to settle this" works on, and step 9
+     says "Show on step 8" for it */
   function fixTarget(w) {
     var h = w && w.where;
     if (!h) return null;

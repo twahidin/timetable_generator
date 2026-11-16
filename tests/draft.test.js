@@ -63,7 +63,7 @@ t("whereText: only the parts a warning's where has", () => {
   assert.deepStrictEqual(Draft.whereText({ where: null }), []);
 });
 
-t("fixTarget: the week a warning's Fix the timetable button opens", () => {
+t("fixTarget: the class or teacher a warning is about", () => {
   assert.deepStrictEqual(Draft.fixTarget({ where: { cls: "1A", day: "Mon", period: 0, id: 3, row: "Entire Class" } }), { view: "class", name: "1A", day: "Mon", sel: { id: 3, group: "Entire Class" } });
   assert.deepStrictEqual(Draft.fixTarget({ where: { cls: "1A", day: "Mon", period: 2 } }), { view: "class", name: "1A", day: "Mon", sel: null });
   assert.deepStrictEqual(Draft.fixTarget({ where: { teacher: "Ms Ong" } }), { view: "teacher", name: "Ms Ong", day: "", sel: null });
