@@ -238,4 +238,15 @@ t("a band whose groups sit at two levels has a lane in each, each group once, an
   assert.deepStrictEqual(DeptMap.cards(s, infoOf(s), "MA", "bands", "").find(b => b.title === "Mixed band").twice, ["Bo Chan"]);
   assert.deepStrictEqual(DeptMap.page(s, infoOf(s), "MA", "Sec 2").map(l => l.level), ["Sec 2"]);   // one level: its lane only
 });
+t("a band at Sec 1 whose groups are all at Sec 2 shows only under Sec 2, each group once", () => {
+  const s = pageFixture();
+  s.blocks.push({ _id: "b3", block: "Odd band", level: "Sec 1", classes: [] });
+  s.lessons.push({ level: "Sec 2", subject: "Mathematics", block: "Odd band", classes: ["2A"], teachers: ["Ann Lee"], students: 5 },    // 12
+                 { level: "Sec 2", subject: "Statistics", block: "Odd band", classes: ["2B"], teachers: ["Bo Chan"], students: 6 });    // 13
+  const P = DeptMap.page(s, infoOf(s), "MA", ""), at = l => P.find(x => x.level === l).sections.filter(x => x.kind === "band" && x.title === "Odd band");
+  assert.strictEqual(at("Sec 1").length, 0); assert.strictEqual(at("Sec 2").length, 1);
+  assert.deepStrictEqual(at("Sec 2")[0].groups.map(g => g.li), [12, 13]);
+  const all = cardsOf(P).map(key); assert.strictEqual(new Set(all).size, all.length);
+  assert.ok(all.includes("group|12|") && all.includes("group|13|"));
+});
 console.log(`${n} cases passed`);

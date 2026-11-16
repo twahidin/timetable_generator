@@ -246,9 +246,10 @@ const provisionalRow = t => !!t && t.provisional === "Yes";
 /* the options of a teacher box: with a department, its teachers (home or second) first under its name, then "Others"; without, one plain list in the teacher list's order */
 function teacherOptions(dept, cur) {
   const names = S.spec.teachers.filter(t => t && t.name);
-  if (!dept) return names.map(t => opt(t.name, cur)).join("");
+  const missing = cur && !names.some(t => t.name === cur) ? opt(cur, cur, cur + " (not on list)") : "";   // a teacher the lesson names who is not on the list
+  if (!dept) return names.map(t => opt(t.name, cur)).join("") + missing;
   const mine = names.filter(t => People.inDept(t, dept)), rest = names.filter(t => !People.inDept(t, dept));
-  return (mine.length ? `<optgroup label="${esc(dept)}">${mine.map(t => opt(t.name, cur)).join("")}</optgroup>` : "") + (rest.length ? `<optgroup label="Others">${rest.map(t => opt(t.name, cur)).join("")}</optgroup>` : "");
+  return (mine.length ? `<optgroup label="${esc(dept)}">${mine.map(t => opt(t.name, cur)).join("")}</optgroup>` : "") + (rest.length ? `<optgroup label="Others">${rest.map(t => opt(t.name, cur)).join("")}</optgroup>` : "") + missing;
 }
 function headLocks(main, id) {
   const off = (el, why) => { el.disabled = true; if (why && !el.title) el.title = why; };
@@ -374,7 +375,6 @@ function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; 
 /* ---------------- lists */
 const sc = () => S.spec.school;
 const levels = () => sc().levels || [];
-const bands = () => sc().bands || {};
 const dayNames = () => {   // the workbook's own day names (e.g. "Odd Tues") when they fit the cycle
   const def = Number(sc().weeks) === 2 ? ["Odd", "Even"].flatMap(w => ["Mon", "Tue", "Wed", "Thu", "Fri"].map(d => `${w} ${d}`)) : ["Mon", "Tue", "Wed", "Thu", "Fri"];
   const wd = ["mon", "tue", "wed", "thu", "fri"], key = d => { const w = d.split(" "); return (w[0] === "Even" ? 10 : 0) + wd.indexOf(w[w.length - 1].slice(0, 3).toLowerCase()); };
@@ -1995,7 +1995,7 @@ function cardsView(dept) {   // the department's classes and groups: each level,
     return `<div class="dpt">${t ? `<button class="avatar" data-mprofile="${esc(t._id)}" draggable="true" data-mdrag="${esc(t._id)}" title="${esc(nm)}: profile">${avatarOf(t, 24)}</button>` : ""}<span class="dpn" title="${esc(nm)}">${esc(nm)}${t ? "" : " (not on list)"}</span>${lock ? "" : `<button class="dpx" data-mx="${esc(key)}|${esc(nm)}" title="Take ${esc(nm)} off">✕</button>`}</div>`; };
   const card = (c, named) => { const key = c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`, x = S.spec.lessons[c.li], stf = c.kind === "class" && Parents.staffed(S.spec, x), lock = stf && cpBlock(x);
     const room = (stf ? Parents.cap(S.spec) : DeptMap.MAX) - c.teachers.length;
-    const fig = `${c.students === null || c.students === undefined ? "" : `${c.students} students · `}${c.periods || "?"} periods`;
+    const pl = n => n === 1 ? "" : "s", fig = `${c.students === null || c.students === undefined ? "" : `${c.students} student${pl(c.students)} · `}${c.periods ? `${c.periods} period${pl(c.periods)}` : "? periods"}`;
     return `<div class="dpcard${lock ? " locked" : ""}" data-mcard="${esc(key)}" title="${esc(lock ? cpWhy() : "Click to place the ticked teachers, or drop teachers here")}"><div><b>${esc(c.title)}</b>${stf ? ` <span class="cpbadge">${esc(Parents.label(S.spec))}</span>` : ""}</div>${named ? `<div class="small">${esc(c.subject)}</div>` : ""}
       <div class="small muted">${fig}</div>${stf ? `<div class="small">${cpHand(x, c.li, lock)}</div>` : ""}
       <div class="dpts">${c.teachers.map(nm => tline(nm, key, lock)).join("")}${room > 0 && !lock ? `<span class="plus" title="Room for ${room} more">+</span>` : ""}</div></div>`; };

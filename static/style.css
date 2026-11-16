@@ -176,12 +176,8 @@ button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .dpcard.over{border-color:var(--accent);background:#eef5ff}
 .avs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;min-height:28px}
 .avx{position:relative;display:inline-block;line-height:0}
-.avx .x{position:absolute;top:-6px;right:-8px;font-size:10px;line-height:1;padding:1px 4px;border-radius:999px;color:var(--warn);background:var(--panel);display:none}
-.avx:hover .x,.avx:focus-within .x{display:block}
-@media (hover:none){.avx .x{display:block}}
 .avx.named{display:inline-flex;flex-direction:column;align-items:center;width:62px;line-height:1.15}
 .avx.named .avatar{line-height:0}
-.avx.named .x{right:8px}
 .avn{display:block;max-width:62px;margin-top:2px;font-size:11px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .avs:has(.avx.named){align-items:flex-start;gap:6px 2px}
 .gav{display:inline-flex;align-items:center;gap:5px;line-height:0}
