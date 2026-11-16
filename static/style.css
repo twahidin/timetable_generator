@@ -419,6 +419,10 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .bdctl{align-items:center;gap:8px 14px;flex-wrap:wrap;margin:6px 0}
 .bdweek{display:inline-flex;gap:4px;align-items:center;margin-right:6px}
 .bdtab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.bdrows{align-items:center;gap:6px;margin:6px 0 0}
+.bdrows button.on{background:var(--navy);color:#fff;border-color:var(--navy)}   /* the kind of rows shown */
+.bdin.people{--bdlab:128px}   /* a teacher's or room's name is longer than a class's */
+.bdsel .bdq{font-weight:600}   /* a yes or no question's own words */
 .bdtab.hover{outline:3px solid var(--accent);outline-offset:1px}   /* a card in the air waits over this day's tab */
 #bdBox .bdold{display:none}   /* the board's rows and tray as they were when a drag began, kept (hidden) until it ends */
 #bdTray h3.bdshort{margin-top:10px}
