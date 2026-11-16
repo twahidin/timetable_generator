@@ -443,7 +443,7 @@ def slots(m, spec, days, lesson_id, pool=(), extras=True, ctx=None):
     or place is judged once they are pushed out, dict(state, why, out=[dict(id, what, classes, groups)]): what as named() says
     it (a band by its band's name), classes all its classes, groups how many rows; None where there are none. beside:
     where other lessons of its classes are, how the plain move or place (with them left there) is judged, dict(state, why);
-    None where there are none. extras=False (the Fix card, the helper, the typed request: they read only state, why, swap and also)
+    None where there are none. extras=False (draft.options, the helper, the typed request: they read only state, why, swap and also)
     leaves push and beside out, and their judgements unmade: each slot is dict(d, p, state, why, swap, also). extras="who" (the
     board's): the keys of False and there: None where no other lesson of its classes is, else those lessons as push.out lists them,
     and no push or beside judged (see place); a lesson in the pool is "na" ("Another lesson is there.") where there is one. ctx: see judge"""

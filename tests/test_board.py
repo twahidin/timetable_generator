@@ -122,7 +122,7 @@ def test_slots_are_the_editors_slots():
     b, o = draft.slots(PLAIN_ID), draft.options(PLAIN_ID); bare = lambda s: {k: v for k, v in s.items() if k != "there"}
     assert [bare(s) for s in b["slots"]] == o["slots"] and b["delete"] == o["delete"] and b["id"] == PLAIN_ID
     assert all(set(s) == {"d", "p", "state", "why", "swap", "also", "there"} for s in b["slots"])   # the board's own: who is there, no push or place beside judged
-    assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in o["slots"])   # the Fix card's: as before this stage
+    assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in o["slots"])   # without the extras (the helper's, the typed request's): as before this stage
     assert draft.slots(str(PLAIN_ID))["id"] == PLAIN_ID
 
 def test_slots_of_an_unknown_lesson_is_a_sentence():
@@ -480,8 +480,9 @@ def test_room_for_all_the_groups_lessons_is_one_undo():
     save_draft(rows); why = f"{R} is in use then."
     raises(ValueError, lambda: draft.fix(a), why); assert fixes_stored() == []   # lesson 1 would pass, lesson 6 refuses: nothing is stored
     raises(ValueError, lambda: draft.fix(dict(a, force=True, why="Another reason.")), why); raises(ValueError, lambda: draft.fix(dict(a, force=True)), why); assert fixes_stored() == []
-    draft.fix(dict(a, force=True, why=why)); assert len(fixes_stored()) == 2 and len({f["batch"] for f in fixes_stored()}) == 1 and "room" in card(6)["marks"] and "room" in card(10)["marks"]
-    assert not {"force", "why", "all"} & set(fixes_stored()[0])
+    raises(ValueError, lambda: draft.fix(dict(a, force=True, why=why)), why); assert fixes_stored() == []   # a change of room for all the group's lessons never forces
+    assert card(1)["rows"][0]["room"] == ROOMS[0] and card(6)["rows"][0]["room"] == ROOMS[1] and "room" not in card(6)["marks"]
+    draft.fix(dict(kind="room", id=6, group=ENTIRE, room=R, force=True, why=why)); assert len(fixes_stored()) == 1 and "room" in card(6)["marks"]   # one lesson may still be forced
     draft.undo(); assert fixes_stored() == []
     draft.fix(dict(kind="room", id=1, group=ENTIRE, room="1-03", all=1)); assert len(fixes_stored()) == 1 and "batch" not in fixes_stored()[0]   # all only when exactly true
     raises(ValueError, lambda: draft.fix(dict(a, id=999)), NOT_FOUND); raises(ValueError, lambda: draft.fix(dict(a, group="G9")), "There is no row of G9 in that lesson.")

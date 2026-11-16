@@ -272,7 +272,7 @@ def grid(view, name):
 
 def options(lesson_id=None, group=None, add=None, n=None):
     """what the committee can do with one lesson (every slot, teacher, room, the delete, judged), or where a lesson of step 5 can be added"""
-    m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]   # a lesson in the pool is the board's, not the Fix card's
+    m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]   # a lesson in the pool is the board's alone: draft.options never lists it
     if add is not None:
         try: n = int(n)
         except (TypeError, ValueError): n = None
@@ -376,7 +376,7 @@ def _length(n, m):
 def _whole(f, forcing=False):
     """a fix as the page posted it, cut to its kind's fields (the server adds at and text), or ValueError(sentence). forcing (the board's
     request only): force (only when exactly True) is kept on a move, place, add, delete, teacher and room with why (the sentence the page showed for
-    the place, when it is text), push on a move, place and add, all on a room (a change of room for every lesson of the group)"""
+    the place, when it is text), push on a move, place and add, all on a room (a change of room for every lesson of the group, which is never forced: see _room_all)"""
     if not isinstance(f, dict) or f.get("kind") not in FIELDS: raise ValueError("This kind of fix is not known.")
     k = f["kind"]; out = dict(kind=k, **{x: f[x] for x in FIELDS[k] if x in f})
     if len(out) != len(FIELDS[k]) + 1: raise ValueError("The fix is not complete.")
@@ -408,7 +408,7 @@ def _pushed(m, spec, f, pool):
 
 def fix(move):
     """make one fix: judged against the draft as it is now. na is refused with its sentence; no is refused with its sentence too, unless the request
-    has force (a move, place, add or delete from the board) and why, the sentence the page showed for that place, is the judgement's sentence now
+    has force (a move, place, add, delete, teacher or room from the board; never a room for all the group's lessons) and why, the sentence the page showed for that place, is the judgement's sentence now
     (a place that went wrong for another reason since is refused, with the reason as it now is); with push the lessons of the same classes in the
     way are worked out here, under the lock, and kept on the fix as out (none of push, force and why is kept). A lift needs no force. Returns info()."""
     f = _whole(move, forcing=True); force, push, why, all_ = f.pop("force", False), f.pop("push", False), f.pop("why", None), f.pop("all", False)
@@ -421,7 +421,7 @@ def fix(move):
             out = _pushed(m, spec, f, pool)
             if out: f["out"] = out
         if f["kind"] == "room" and all_:
-            return _room_all(m, spec, days, pool, f, force, why)
+            return _room_all(m, spec, days, pool, f)   # never forced: force and why are not passed on
         if f["kind"] == "room" and _has_room(next((y for y in m["lessons"] + pool if y["id"] == f["id"] and y["group"] == f["group"]), None), f["room"]): raise ValueError(NOTHING)
         j = fixes.judge(m, spec, days, f, pool=pool)
         if j["state"] == "na" or (j["state"] == "no" and not (force and why == j["why"])): raise ValueError(j["why"])
@@ -436,11 +436,11 @@ def _has_room(x, room):
     """whether the lesson row x (None: there is none) already has the room (a row with no room has "" or TBC, which is the same as none)"""
     return x is not None and (x["room"] == room or (fixes._no_room(x["room"]) and fixes._no_room(room)))
 
-def _room_all(m, spec, days, pool, f, force, why):
+def _room_all(m, spec, days, pool, f):
     """a room fix for every lesson id of the row's key that has a row of the fix's group and is not in that room yet (on the timetable and in the pool; "That changes
     nothing." when none is left), in ascending id order, each judged
-    on the timetable the earlier ones leave and all kept with one batch id (so one undo takes them back), or none. A "no" is kept only with force and why equal to
-    its reason; any other "no", and every "na", refuses the whole with its sentence. Called under the lock. Returns info()."""
+    on the timetable the earlier ones leave and all kept with one batch id (so one undo takes them back), or none. It is never forced: any "no" and every
+    "na" refuses the whole with its sentence, whatever force and why the request had (the person was asked about one lesson only). Called under the lock. Returns info()."""
     rows = [y for y in m["lessons"] + pool if y["id"] == f["id"]]
     if not rows: raise ValueError(NOT_FOUND_LESSON)
     x = next((y for y in rows if y["group"] == f["group"]), None)
@@ -451,7 +451,7 @@ def _room_all(m, spec, days, pool, f, force, why):
     lessons, pl, texts, fl = copy.deepcopy(m["lessons"]), copy.deepcopy(pool), [], []
     for i in ids:
         one = dict(kind="room", id=i, group=f["group"], room=f["room"]); j = fixes.judge(dict(m, lessons=lessons), spec, days, one, pool=pl)
-        if j["state"] == "na" or (j["state"] == "no" and not (force and why == j["why"])): raise ValueError(j["why"])
+        if j["state"] in ("na", "no"): raise ValueError(j["why"])
         texts.append(fixes.apply_one(lessons, one, spec, days, pool=pl)); fl.append(one)
     batch, at = secrets.token_hex(4), store.now(); meta = store.read_json(_p("meta.json"), {})
     store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(g, at=at, text=t, batch=batch) for g, t in zip(fl, texts)]))

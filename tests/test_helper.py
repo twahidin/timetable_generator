@@ -61,8 +61,8 @@ def a_lesson_with_no_teacher_is_not_offered_moves():
     m, sp = model_with([lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [], level=LV), lesson(2, 1, 3, 1, [A], "English", ENTIRE, [T], level=LV), lesson(3, 1, 3, 1, [B], "English", ENTIRE, [T], level=LV)])
     m["checks"] = export.check_model(m); ws = verify.clashes(m)
     nt = next(w for w in ws if w["crit"] == "noteacher"); tc = next(w for w in ws if w["crit"] == "teacher")
-    assert nt["where"]["id"] == 1 and helper.involved(m, nt) == [1]   # the place keeps the lesson, so the Fix card selects it
-    out = helper.suggest(m, sp, DAYS, nt); assert out == dict(suggestions=[], none="This lesson has no teacher. Pick one under Change the teacher.", blocked=[]), out
+    assert nt["where"]["id"] == 1 and helper.involved(m, nt) == [1]   # the place keeps the lesson, so the helper's Show me selects it
+    out = helper.suggest(m, sp, DAYS, nt); assert out == dict(suggestions=[], none="This lesson has no teacher. Pick one on its Lesson tab.", blocked=[]), out
     assert helper.suggest(m, sp, DAYS, tc)["suggestions"]   # a teacher clash on the same model still has ways
 
 @t

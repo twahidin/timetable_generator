@@ -1,4 +1,4 @@
-"""The typed request on the Fix card: the lead's words go to a language model once and come back as a small structured ask. This is the only place a model is called.
+"""The typed request in the board's Warnings tab: the lead's words go to a language model once and come back as a small structured ask. This is the only place a model is called.
 Nothing of the school's data is sent, only the words and the fixed SYSTEM text. Every way the call can fail becomes one plain sentence (read never raises)."""
 import json, os, re, threading, time
 

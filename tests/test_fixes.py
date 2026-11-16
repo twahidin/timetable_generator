@@ -495,7 +495,7 @@ def test_slots_say_what_a_push_would_take_out():
     L = [lesson(1, 0, 2, 2, [A], SUBJ, ENTIRE, [T[0]], level=LV), lesson(2, 1, 2, 2, [A], "Science", ENTIRE, [T[1]], level=LV), lesson(3, 3, 2, 2, [B], "Art", ENTIRE, [T[0]], level=LV)]
     m, sp = model_with(L); S = fixes.slots(m, sp, DAYS, 1); old = lambda s: {k: s[k] for k in ("d", "p", "state", "why", "swap", "also")}
     assert all(set(s) == {"d", "p", "state", "why", "swap", "also", "push", "beside"} for s in S)
-    plain = fixes.slots(m, sp, DAYS, 1, extras=False)   # the Fix card's, the helper's and the typed request's: no push, no beside, the rest the same
+    plain = fixes.slots(m, sp, DAYS, 1, extras=False)   # the old editor's callers (draft.options), the helper's and the typed request's: no push, no beside, the rest the same
     assert all(set(s) == {"d", "p", "state", "why", "swap", "also"} for s in plain) and plain == [old(s) for s in S]
     assert at(S, 1, 2)["push"] == dict(state="ok", why="", out=[dict(id=2, what=f"Science for {A}", classes=[A], groups=1)]) and old(at(S, 1, 2)) == dict(d=1, p=2, state="ok", why="", swap=2, also=[])
     assert at(S, 2, 2)["push"] is None and old(at(S, 2, 2)) == dict(d=2, p=2, state="ok", why="", swap=None, also=[])
@@ -551,7 +551,7 @@ def test_who_is_at_each_place_and_place_judges_the_one_dropped_on():
                 seen += 1; assert [sorted(o) for o in w["there"]] == [sorted(dict(id=x["id"], what=x["what"], classes=x["classes"], groups=x["groups"])) for x in s["push"]["out"]] and [o["id"] for o in w["there"]] == sorted(o["id"] for o in w["there"])
             if mine and w["there"] is not None: assert (w["state"], w["why"], w["swap"], w["also"]) == ("na", "Another lesson is there.", None, []), w
             elif mine: assert {k: w[k] for k in q} == q == bare(s)
-            else: assert {k: w[k] for k in q} == q   # a lesson on the timetable: exactly as the Fix card's
+            else: assert {k: w[k] for k in q} == q   # a lesson on the timetable: exactly as without the extras
             assert fixes.place(m, sp, DAYS, lid, s["d"], s["p"], pl) == s, (lid, s["d"], s["p"])
     assert seen > 100, seen   # the places with a lesson of the same classes were really there
 

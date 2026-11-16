@@ -3349,13 +3349,14 @@ function bdLessonTeacher(c, r, j, i, v) {   // a teacher list's choice: a free o
     return;
   }
   const t = j.teachers.find(x => x.name === name);
-  if (t && !t.free) { bdYesNo({ id: c.id, lesson: true, text: `${name} is teaching ${t.doing}.`, ask: BDWHY.anyway, yes: "Yes, give it", run: () => bdLessonPost(c, fix, name) }); return; }
+  if (t && !t.free) { bdYesNo({ id: c.id, lesson: true, text: `${name} is teaching ${t.doing}.${j.n_lessons > 1 ? ` ${BDWHY.otherTimes}` : ""}`, ask: BDWHY.anyway, yes: "Yes, give it", run: () => bdLessonPost(c, fix, name) }); return; }
   bdLessonPost(c, fix, "");
 }
 function bdLessonRoom(c, r, j, v, all) {   // the room list's choice ("None" asks nothing); a room in use then after the line's question
   const room = v === "none" ? "" : v.slice(2), fix = Board.roomFix(j, r, room, all), x = room ? j.rooms.find(y => y.room === room) : null;
   if (x && !x.free) {
     const h = String(x.holding || ""), text = !h || /\.$/.test(h) ? h || `${room} is in use then.` : `${room} holds ${h} then.`;   // holding is the judgement's own sentence when no lesson is in it
+    if (all) { const b = S.board; b.ask = null; b.del = null; b.note = `${text} ${BDWHY.untick}`; bdLineDraw(); bdSideDraw(); return; }   // a room for all the group's lessons is never forced: the list goes back
     bdYesNo({ id: c.id, lesson: true, text, ask: BDWHY.useAnyway, yes: "Yes, use it", run: () => bdLessonPost(c, fix, room) });
     return;
   }
@@ -3363,11 +3364,17 @@ function bdLessonRoom(c, r, j, v, all) {   // the room list's choice ("None" ask
 }
 /* a choice of the Lesson tab is posted; who: the busy teacher or room the person said yes to. The server then refuses with its own sentence
    (it knows the reason): when that names who as busy, the fix goes again forced with that sentence, without asking twice; any other
-   refusal is said, and the list goes back (the board is fetched again). The lesson stays selected and its lists are fetched again */
+   refusal is said, and the list goes back (the board is fetched again). A room for all the group's lessons is never forced: refused because
+   the room is in use, it was at another of the group's lessons (this one's was free), and the page says so. The lesson stays selected and
+   its lists are fetched again */
 async function bdLessonPost(c, fix, who) {
-  const b = S.board; let why = null;
-  const refused = s => { if (Board.busyRefusal(s, who, fix.kind)) { why = s; return true; } return false; };   // only "{who} is teaching ... then." or "{who} is in use then."
+  const b = S.board; let why = null, other = null;
+  const refused = s => {
+    if (fix.all) { if (Board.busyRefusal(s, fix.room, "room")) { other = `${s} ${BDWHY.allOther}`; return true; } return false; }
+    if (Board.busyRefusal(s, who, fix.kind)) { why = s; return true; } return false;   // only "{who} is teaching ... then." or "{who} is in use then."
+  };
   let ok = await bdSend("/api/draft/fix", fix, c, false, { stay: true, refused });
+  if (other !== null) { toast(other); if (S.board === b) bdLoad(); return; }   // the list goes back
   if (why !== null && S.board === b) ok = await bdSend("/api/draft/fix", Object.assign({}, fix, { force: true, why }), c, false, { stay: true });
   if (ok && S.board === b && b.lesson && b.lesson.id === c.id) { b.lesson.all = {}; bdSideDraw(); }   // the tick box is for one change
 }
@@ -3500,7 +3507,8 @@ const BDWHY = { class: "A lesson stays with its class. Drop it on its own row.",
   there: "Working out what can be done there…", thereTell: "Another lesson is there. Drop or click to see what can be done.", what: "Working out what changes…",
   switch: "Switch to Classes rows to place it.", nothing: "That changes nothing.", two: "Two changes were made; undo each.", anyway: "Give it anyway?",
   whatFailed: "What this changes could not be loaded. Try again.", handLost: "The timetable could not be loaded, so the lesson was not handed over.",
-  lessonFailed: "The lesson's choices could not be loaded. Click the lesson again.", useAnyway: "Use it anyway?" };
+  lessonFailed: "The lesson's choices could not be loaded. Click the lesson again.", useAnyway: "Use it anyway?",
+  untick: "Untick “all this group's lessons” to use it anyway.", allOther: "That is at another of this group's lessons.", otherTimes: "It may clash at other times too." };
 const bdLen = c => Number(c.n) > 0 ? Number(c.n) : 1;
 const bdTaken = (c, s) => S.board.data.cards.some(x => x.d === s.d && (x.classes || []).some(k => c.classes.includes(k)) && x.p < s.p + bdLen(c) && s.p < x.p + bdLen(x));   // another lesson of the classes of c is in the periods it would take
 function bdSlotAt(c, at) {   // what the board knows of a place at = {cls, d, p, over} (over: the lesson under the pointer, or null): {slot, why}; why is the sentence's key when the lesson cannot go there
@@ -3978,6 +3986,7 @@ document.addEventListener("change", e => {   // the Lesson tab: a list's choice 
   if (!bdLessonOn(b)) { if (b) bdSideDraw(); return; }   // a list of a lesson no longer selected: the panel is drawn for the selection as it is
   const L = b.lesson;
   if (ds.bdlall !== undefined) { L.all[ds.bdlall] = el.checked; return; }
+  el.blur();   // the keys (Escape, Ctrl or Cmd+Z) are the board's again at once
   const c = bdCard(L.id), g = ds.bdlt !== undefined ? ds.bdlt : ds.bdlr, r = (c.rows || []).find(x => x.group === g), j = L.got[g];
   if (FX.busy || b.wait || b.drag !== null || !r || !j || typeof j !== "object") { if (FX.busy) toast(BDWHY.busy); bdSideDraw(); return; }   // the list goes back
   if (el.value === "pick") return;
