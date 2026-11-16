@@ -117,4 +117,64 @@ t("shift counts the Group rules that name a code about to change", () => {
   assert.deepStrictEqual(Groups.shift(s, c => Groups.fromBand(c, 0)).rules, 1);
   assert.deepStrictEqual(Groups.shift(s, c => Groups.fromBand(c, 2)).rules, 0);
 });
+t("the pool: every row says its level and who teaches it", () => {
+  const s = fixture(); s.lessons[3].teachers = ["Arjun Nair", ""];
+  assert.deepStrictEqual(Groups.pool(s, "Sec 1", "").map(p => [p.li, p.level, p.teachers]), [[3, "Sec 1", ["Arjun Nair"]], [4, "Sec 1", []], [5, "Sec 1", []]]);
+});
+const wide = () => { const s = fixture();   // a second teacher the setup does not list, a Sec 2 row, a Sec 2 band with no groups
+  s.teachers.push({ _id: "tb", name: "Bala Menon", dept: "AE" });
+  s.lessons[3].teachers = ["Bala Menon"]; s.lessons[5].teachers = ["Visiting Coach"];
+  s.lessons.push({ _id: "l8", level: "Sec 2", subject: "Mathematics G3", block: null, classes: ["2A"], teachers: ["Arjun Nair"], students: 30 });
+  s.blocks.push({ _id: "b3", block: "Sec 2 Option A", level: "Sec 2", classes: ["2A"], everyone: false });
+  return s; };
+t("view: with no filter, every row and every band of the level, and what the filter can offer", () => {
+  const v = Groups.view(wide(), { level: "Sec 1", subject: "", teacher: "" });
+  assert.deepStrictEqual(v.pool.map(p => p.li), [3, 4, 5]);
+  assert.deepStrictEqual(v.lanes.map(l => [l.block, l.groups.map(g => g.match)]), [["Sec 1 Mathematics", [true, true]], ["Sec 1 Option A", [true]]]);
+  assert.deepStrictEqual(v.subjects, ["Mathematics G3", "Mathematics G2", "Art", "Music"]);   // the setup's order
+  assert.deepStrictEqual(v.teachers, ["Arjun Nair", "Bala Menon", "Visiting Coach"]);   // the setup's teachers first, then a name only a row carries
+  assert.strictEqual(v.none, true); assert.deepStrictEqual(v.f, { level: "Sec 1", subject: "", teacher: "" });
+  assert.strictEqual(v.filtered, false);
+});
+t("view: all levels", () => {
+  const v = Groups.view(wide(), { level: "", subject: "", teacher: "" });
+  assert.deepStrictEqual(v.pool.map(p => [p.li, p.level]), [[3, "Sec 1"], [4, "Sec 1"], [5, "Sec 1"], [7, "Sec 2"]]);
+  assert.deepStrictEqual(v.lanes.map(l => [l.block, l.level]), [["Sec 1 Mathematics", "Sec 1"], ["Sec 1 Option A", "Sec 1"], ["Sec 2 Option A", "Sec 2"]]);   // a band with no groups is shown while nothing is filtered
+});
+t("view: one teacher's groups, in and out of bands; a band is shown whole and says which groups match", () => {
+  const v = Groups.view(wide(), { level: "", subject: "", teacher: "Arjun Nair" });
+  assert.deepStrictEqual(v.pool.map(p => p.li), [7]);
+  assert.deepStrictEqual(v.lanes.map(l => [l.block, l.groups.map(g => [g.code, g.match])]), [["Sec 1 Mathematics", [["1MAP1", true], ["1MAA1", false]]]]);
+  assert.strictEqual(v.filtered, true);
+});
+t("view: the rows with no teacher", () => {
+  const v = Groups.view(wide(), { level: "Sec 1", subject: "", teacher: Groups.NONE });
+  assert.deepStrictEqual(v.pool.map(p => p.li), [4]);
+  assert.deepStrictEqual(v.lanes.map(l => [l.block, l.groups.map(g => g.match)]), [["Sec 1 Mathematics", [false, true]], ["Sec 1 Option A", [true]]]);
+  const s = wide(); s.lessons.forEach(x => { if (x.subject && !x.teachers.length) x.teachers = ["Arjun Nair"]; });
+  const w = Groups.view(s, { level: "", subject: "", teacher: Groups.NONE });   // nobody is without a teacher: the choice is not offered and counts as all
+  assert.strictEqual(w.none, false); assert.strictEqual(w.f.teacher, ""); assert.strictEqual(w.pool.length, 4);
+});
+t("view: one subject, with a teacher too; a band with no group that matches is not shown", () => {
+  const v = Groups.view(wide(), { level: "Sec 1", subject: "Art", teacher: "" });
+  assert.deepStrictEqual(v.pool.map(p => p.li), [3, 4]); assert.deepStrictEqual(v.lanes, []);
+  const w = Groups.view(wide(), { level: "", subject: "Mathematics G3", teacher: "Arjun Nair" });
+  assert.deepStrictEqual(w.pool.map(p => p.li), [7]); assert.deepStrictEqual(w.lanes.map(l => l.block), ["Sec 1 Mathematics"]);
+  assert.deepStrictEqual(w.lanes[0].groups.map(g => g.match), [true, false]);
+});
+t("view: a subject or a teacher that is not at the level shown counts as all, and the view says what it used", () => {
+  const v = Groups.view(wide(), { level: "Sec 2", subject: "Art", teacher: "Bala Menon" });
+  assert.deepStrictEqual(v.f, { level: "Sec 2", subject: "", teacher: "" }); assert.deepStrictEqual(v.pool.map(p => p.li), [7]);
+  assert.deepStrictEqual(v.subjects, ["Mathematics G3"]); assert.deepStrictEqual(v.teachers, ["Arjun Nair"]); assert.strictEqual(v.filtered, false);
+  const w = Groups.view(wide(), { level: "Sec 9" });   // a level the school does not have, and nothing else said
+  assert.deepStrictEqual([w.pool, w.lanes, w.subjects, w.teachers, w.none], [[], [], [], [], false]);
+  const e = Groups.view({}, {}); assert.deepStrictEqual([e.pool, e.lanes], [[], []]);
+});
+t("view: a name the setup lists twice is offered once; a teacher whose name is a dash is a teacher, not \"No teacher\"", () => {
+  const s = wide(); s.subjects.push({ subject: "Art", code: "AR2", tag: "-", dept: "AE", periods: { "Sec 1": 2 } }); s.teachers.push({ _id: "tc", name: "Bala Menon", dept: "MA" });
+  s.lessons[4].teachers = ["-"];
+  const v = Groups.view(s, { level: "Sec 1", subject: "", teacher: "-" });
+  assert.deepStrictEqual(v.subjects, ["Mathematics G3", "Mathematics G2", "Art", "Music"]); assert.deepStrictEqual(v.teachers, ["Arjun Nair", "Bala Menon", "-", "Visiting Coach"]);   // the two the setup does not list, as the rows have them
+  assert.deepStrictEqual(v.pool.map(p => p.li), [4]); assert.strictEqual(v.f.teacher, "-"); assert.notStrictEqual(Groups.NONE, "-");
+});
 console.log(`${n} cases passed`);

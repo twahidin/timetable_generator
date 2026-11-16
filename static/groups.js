@@ -175,12 +175,46 @@ var Groups = (function () {
     var C = codes(spec), out = [];
     rows(spec, "lessons").forEach(function (x, li) {
       if (!x || x.block || !x.subject || (level && x.level !== level) || (subject && x.subject !== subject)) return;
-      out.push({ li: li, kind: x.code_override ? "group" : "class", code: C[li], title: (x.classes || []).join(", ") + " · " + x.subject, subject: x.subject, classes: (x.classes || []).slice(), students: x.students == null ? null : Number(x.students) || null });
+      out.push({ li: li, kind: x.code_override ? "group" : "class", code: C[li], title: (x.classes || []).join(", ") + " · " + x.subject, subject: x.subject, level: x.level, classes: (x.classes || []).slice(), students: x.students == null ? null : Number(x.students) || null, teachers: names(x) });
     });
     return out;
   }
 
-  return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, pullOutCode: pullOutCode, lanes: lanes, pool: pool,
+  /* ---- the bands page as its filter shows it */
+  var NONE = "::no teacher::";   // the teacher filter's choice "No teacher": not a name anyone has
+  function inOrder(found, listed) {   // the listed names that were found, in the list's order, then the others as they were found
+    var out = listed.filter(function (n, i) { return found.indexOf(n) >= 0 && listed.indexOf(n) === i; });   // a name listed twice counts once
+    found.forEach(function (n) { if (out.indexOf(n) < 0) out.push(n); });
+    return out;
+  }
+  /* f = {level, subject, teacher}; "" (or missing) is all, teacher NONE is "taught by nobody". -> {f, filtered, subjects, teachers, none, pool, lanes}:
+     subjects and teachers are what the filter can offer at that level (the setup's order first), none whether a row there has no teacher; f is the
+     filter as used (a subject or teacher that is not on offer counts as all); pool is the rows not in a band that match; lanes are the bands, each
+     whole, every group saying whether it matches, and with a subject or a teacher chosen (filtered) only the bands with a group that matches */
+  function view(spec, f) {
+    f = f || {};
+    var level = f.level || "", P = pool(spec, level, ""), L = lanes(spec, level), all = P.slice(), subj = [], who = [], none = false;
+    L.forEach(function (l) { all = all.concat(l.groups); });
+    all.forEach(function (x) {
+      if (x.subject && subj.indexOf(x.subject) < 0) subj.push(x.subject);
+      if (!x.teachers.length) none = true;
+      x.teachers.forEach(function (t) { if (who.indexOf(t) < 0) who.push(t); });
+    });
+    var subjects = inOrder(subj, rows(spec, "subjects").map(function (x) { return x && x.subject; }));
+    var teachers = inOrder(who, rows(spec, "teachers").map(function (x) { return x && x.name; }));
+    var subject = subjects.indexOf(f.subject) >= 0 ? f.subject : "";
+    var teacher = f.teacher === NONE ? (none ? NONE : "") : teachers.indexOf(f.teacher) >= 0 ? f.teacher : "";
+    var filtered = !!(subject || teacher);
+    function hit(x) { return (!subject || x.subject === subject) && (!teacher || (teacher === NONE ? !x.teachers.length : x.teachers.indexOf(teacher) >= 0)); }
+    var shown = L.map(function (l) {
+      var c = {}; Object.keys(l).forEach(function (k) { c[k] = l[k]; });
+      c.groups = l.groups.map(function (g) { var d = {}; Object.keys(g).forEach(function (k) { d[k] = g[k]; }); d.match = hit(g); return d; });
+      return c;
+    }).filter(function (l) { return !filtered || l.groups.some(function (g) { return g.match; }); });
+    return { f: { level: level, subject: subject, teacher: teacher }, filtered: filtered, subjects: subjects, teachers: teachers, none: none, pool: P.filter(hit), lanes: shown };
+  }
+
+  return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, pullOutCode: pullOutCode, lanes: lanes, pool: pool, view: view, NONE: NONE,
     newGroup: newGroup, addOnePerClass: addOnePerClass, newBand: newBand, toBand: toBand, fromBand: fromBand, shift: shift };
 })();
 if (typeof module !== "undefined") module.exports = Groups;

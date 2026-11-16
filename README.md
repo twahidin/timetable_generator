@@ -198,19 +198,23 @@ name, role, department, load against allowance and **Teaches** (every class and 
 off). Details are changed on step 4.
 
 **Groups and bands (step 5).** The second view, **Groups and bands**, is where teaching groups and bands are made.
-On the left, **New teaching group**: level, G-level (filters the subjects), subject, band (none = a whole-class
+Across the top are two cards. **New teaching group**: level, G-level (filters the subjects), subject, band (none = a whole-class
 lesson), classes (empty = the band's classes) and students; the group code forms as you pick (level digit, subject
 code, G-level letter, running number, as the workbook has it) and **Add** makes the row. **Add one per class** makes a
 whole-class row for each class picked, or for every class of the level, skipping classes that have the subject already.
-Below it, **New band**: level, the subjects it covers, its classes (every class of the level unless you change them) and
+Beside it, **New band**: level, the subjects it covers, its classes (every class of the level unless you change them) and
 a name that forms from the level and subjects ("Sec 2 Mathematics"; "Sec 3 Option A" for a band of several subjects,
 the next free letter) and can be typed over; a name already used is refused. **Everyone takes one** is on unless the
 name says Option. **Add band** makes it and sets the group form's band to it.
-In the middle, **Not in a band**: the level's whole-class rows and pull-out groups, with a subject filter, **Select all
-shown** and **Deselect all**. Tick rows and **Move** them into a band, or drag a row (or every ticked row) onto a lane on
-the right. A whole class moved into a band becomes a group of it, and the band's classes widen to cover it. On the
-right, the level's bands as lanes, each with its groups (code, subject, students, teachers) and a ✕ that puts a group
-back in the pool; a teacher on two groups of one band is flagged on the lane. Moving a row changes later codes of that
+Under the two cards, one filter governs both lists below it: **Level** (one level, or **All levels**, which puts each
+list under a heading for each level), **Subject** and **Teacher** (a teacher, or **No teacher** for the rows nobody
+teaches yet). **Show all** clears the subject and the teacher.
+Below, on the left, **Not in a band**: the whole-class rows and pull-out groups the filter shows, each with who teaches
+it, with **Select all shown** and **Deselect all**. Tick rows and **Move** them into a band of their own level, or drag a
+row (or every ticked row) onto a lane on the right. A whole class moved into a band becomes a group of it, and the
+band's classes widen to cover it. On the right, the bands as lanes, each with its groups (code, subject, students,
+teachers) and a ✕ that puts a group back in the pool. With a subject or a teacher chosen, only the bands with a group
+that matches are shown, each whole, with the groups that do not match faded; a teacher on two groups of one band is flagged on the lane. Moving a row changes later codes of that
 subject (1MAP3 becomes 1MAP2): the page says which, and when a student list names the old codes it asks first and
 says how many students are affected. The table view keeps the 15-column rows for bulk edits.
 

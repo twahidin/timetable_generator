@@ -1134,7 +1134,8 @@ function classesBands() {   // a picture of one level: a column per class, a row
 }
 function openBand(block) {   // from a bar: step 5 on Groups and bands, at the level shown, with the band in view
   const lv = cvLevel(); M.view = "groups"; try { localStorage.setItem(MAPVIEW, M.view); } catch (e) { }
-  const gp = gpState(); if (levels().includes(lv) && gp.level !== lv) { gp.level = lv; gp.subject = ""; gp.ticked.clear(); M.gpTo = ""; }
+  const gp = gpState(); if (levels().includes(lv) && gp.level !== lv) { gp.level = lv; gp.ticked.clear(); M.gpTo = ""; }
+  gp.subject = ""; gp.teacher = "";   // no filter may hide the band being opened
   S.step = STEPS.findIndex(x => x[0] === "lessons"); save(); render(); window.scrollTo(0, 0);
   const lane = [...document.querySelectorAll("[data-glane]")].find(x => x.dataset.glane === block);
   if (lane) lane.scrollIntoView({ block: "center" });
@@ -1489,7 +1490,7 @@ const VIEWS = {
       <div id="rbody">${rosterList(dept)}</div>
     </section>${prof >= 0 ? profileView(T[prof], prof) : cardsView(dept)}</div>`;
   },
-  groups() {   // step 5's "Groups and bands": a new group, a new band (left); the pool of unbanded rows and the band lanes
+  groups() {   // step 5's "Groups and bands": a new group and a new band across the top; the filter; the rows not in a band and the bands
     Sync.ensureIds(S.spec);
     const gf = gfState(), bf = bfState(), tags = (sc().tags || []).map(t => t[0]).filter(t => t && t !== "-");
     const subjAt = lv => subjectNames().filter(n => ((subj(n) || {}).periods || {})[lv]);
@@ -1498,25 +1499,25 @@ const VIEWS = {
     const codeLine = !gf.subject ? `<span class="muted small">Pick a subject to see the code.</span>` : code === "Entire Class" ? `<span class="muted small">Whole class: no group code.</span>` : `<span class="small">Code</span> <span class="codeline">${esc(code)}</span>`;
     const bSubjects = subjAt(bf.level).filter(n => !bf.subjects.includes(n)), suggested = Groups.bandName(bf.level, bf.subjects, blockNames());
     const name = bf.touched ? bf.name : suggested, everyone = bf.evTouched ? bf.everyone : !/option|elective/i.test(name);
-    return `<div class="gb"><section class="gforms card">
+    const v = gpView();
+    return `<div class="gb"><section class="gform card">
       <h3 style="margin:0 0 6px">New teaching group</h3><p class="muted small" style="margin:0 0 8px">A group of a band, or a whole-class lesson with no band. The code forms as you pick.</p>
-      <label class="f">Level <select id="gfLevel">${levels().map(l => opt(l, gf.level)).join("")}</select></label>
+      <div class="gfields"><label class="f">Level <select id="gfLevel">${levels().map(l => opt(l, gf.level)).join("")}</select></label>
       <label class="f">${tagLabel()} <select id="gfTag">${opt("", gf.tag, "any")}${tags.map(t => opt(t, gf.tag)).join("")}</select></label>
       <label class="f">Subject <select id="gfSubject">${opt("", gf.subject, "")}${gSubjects.map(n => opt(n, gf.subject)).join("")}</select></label>
       <label class="f">Band <select id="gfBlock">${opt("", bandPicked ? gf.block : "", "none: whole class")}${gBands.map(b => opt(b, gf.block)).join("")}</select></label>
-      <label class="f">Classes ${chips("_gf.classes", gf.classes, "classes", `data-level="${esc(gf.level)}"`)}${bandPicked && !gf.classes.length ? `<span class="muted small">Empty: the band's classes.</span>` : ""}</label>
-      <label class="f">Students <input id="gfStudents" type="number" value="${esc(gf.students)}" placeholder="all" style="width:90px"></label>
-      <div style="margin:4px 0 8px">${codeLine}</div>
-      <div class="row"><button class="primary" data-gfadd>Add</button>${bandPicked ? "" : `<button data-gfeach title="One whole-class row for each class picked, or for every class of the level">Add one per class</button>`}</div>
-      <h3 style="margin:18px 0 6px">New band</h3><p class="muted small" style="margin:0 0 8px">Its groups have lessons at the same time. The name forms from the level and subjects; change it if you like.</p>
-      <label class="f">Level <select id="bfLevel">${levels().map(l => opt(l, bf.level)).join("")}</select></label>
-      <label class="f">Subjects <div class="chips" style="cursor:default">${bf.subjects.map(x => `<span class="chip">${esc(x)} <button class="x" data-bfsubject="${esc(x)}" title="Remove ${esc(x)}">✕</button></span>`).join("") || `<span class="muted">none yet</span>`}</div>
+      <label class="f wide">Classes ${chips("_gf.classes", gf.classes, "classes", `data-level="${esc(gf.level)}"`)}${bandPicked && !gf.classes.length ? `<span class="muted small">Empty: the band's classes.</span>` : ""}</label>
+      <label class="f narrow">Students <input id="gfStudents" type="number" value="${esc(gf.students)}" placeholder="all"></label></div>
+      <div class="row" style="margin-top:10px"><button class="primary" data-gfadd>Add</button>${bandPicked ? "" : `<button data-gfeach title="One whole-class row for each class picked, or for every class of the level">Add one per class</button>`}<span>${codeLine}</span></div>
+    </section><section class="gform card">
+      <h3 style="margin:0 0 6px">New band</h3><p class="muted small" style="margin:0 0 8px">Its groups have lessons at the same time. The name forms from the level and subjects; change it if you like.</p>
+      <div class="gfields"><label class="f">Level <select id="bfLevel">${levels().map(l => opt(l, bf.level)).join("")}</select></label>
+      <label class="f wide">Subjects <div class="chips" style="cursor:default">${bf.subjects.map(x => `<span class="chip">${esc(x)} <button class="x" data-bfsubject="${esc(x)}" title="Remove ${esc(x)}">✕</button></span>`).join("") || `<span class="muted">none yet</span>`}</div>
         <select id="bfAddSubject"><option value="">add a subject…</option>${bSubjects.map(n => opt(n, "")).join("")}</select></label>
-      <label class="f">Classes ${chips("_bf.classes", bf.classes, "classes", `data-level="${esc(bf.level)}"`)}</label>
-      <label class="f">Name <input id="bfName" value="${esc(name)}"></label>
-      <label class="f"><input type="checkbox" id="bfEveryone" ${everyone ? "checked" : ""}> Everyone takes one <span class="muted small">(untick for an option or elective band)</span></label>
-      <div class="row"><button class="primary" data-bfadd>Add band</button></div>
-    </section>${poolView()}${lanesView()}</div>`;
+      <label class="f wide">Classes ${chips("_bf.classes", bf.classes, "classes", `data-level="${esc(bf.level)}"`)}</label>
+      <label class="f wide">Name <input id="bfName" value="${esc(name)}"></label></div>
+      <div class="row" style="margin-top:10px"><button class="primary" data-bfadd>Add band</button><label><input type="checkbox" id="bfEveryone" ${everyone ? "checked" : ""}> Everyone takes one <span class="muted small">(untick for an option or elective band)</span></label></div>
+    </section>${barView(v)}${poolView(v)}${lanesView(v)}</div>`;
   },
   _bands(out, info, crit) {
     const open = S.bandsOpen ?? (!S.spec.blocks.length || Object.keys(out.blocks).length > 0);   // until the committee opens or closes it
@@ -1707,7 +1708,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.copyday) { const lv = b.dataset.copyday; const ds = S.spec.day_structure[lv]; const f = ds[dayNames()[0]]; dayNames().forEach(d => ds[d] = f); save(); render(); return; }
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
   for (const k of ["mview", "mall", "mnone", "munplaced", "madd", "mnew", "mnewcancel", "mnewgo"]) if (b.dataset[k] !== undefined) { mapAction(k, b.dataset[k]); return; }
-  for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject", "gall", "gnone", "gmove", "gout"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
+  for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject", "gall", "gnone", "gclear", "gmove", "gout"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
   if (b.dataset.mprofile) { M.profile = b.dataset.mprofile; render(); return; }
   if (b.dataset.mclose !== undefined) { M.profile = null; render(); return; }
   if (b.dataset.mx) { const [li, cls, ...nm] = b.dataset.mx.split("|"); cardRemove(`${li}|${cls}`, nm.join("|")); return; }
@@ -1807,7 +1808,8 @@ document.addEventListener("change", async e => {
   if (["pickT", "pickG", "pickC", "pickD", "pickR"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
   if (el.id === "cvLevel") { CV.level = el.value; render(); return; }
   if (el.id === "mLevel") { M.level = el.value; render(); return; }
-  if (el.id === "gpLevel") { const gp = gpState(); gp.level = el.value; gp.subject = ""; gp.ticked.clear(); M.gpTo = ""; render(); return; }
+  if (el.id === "gpLevel") { const gp = gpState(); gp.level = el.value; gp.ticked.clear(); M.gpTo = ""; render(); return; }   // the subject and the teacher stay while they are on offer at the new level
+  if (el.id === "gpTeacher") { gpState().teacher = el.value; render(); return; }
   if (el.id === "gpSubject") { gpState().subject = el.value; render(); return; }
   if (el.id === "gpTo") { M.gpTo = el.value; render(); return; }
   if (el.id === "gfLevel") { const gf = gfState(); gf.level = el.value; gf.subject = ""; gf.block = ""; gf.classes = []; render(); return; }
@@ -2106,29 +2108,46 @@ document.addEventListener("drop", e => {
 const classesAt = lv => S.spec.classes.filter(c => c.level === lv).map(c => c.class);
 function gfState() { const lv = levels()[0] || ""; if (!M.gf) M.gf = { level: lv, tag: "", subject: "", block: "", classes: [], students: "" }; if (!levels().includes(M.gf.level)) M.gf.level = lv; return M.gf; }
 function bfState() { const lv = levels()[0] || ""; if (!M.bf) M.bf = { level: lv, subjects: [], classes: classesAt(lv), name: "", everyone: true, touched: false, evTouched: false }; if (!levels().includes(M.bf.level)) M.bf.level = lv; return M.bf; }
-function gpState() { const lv = levels()[0] || ""; if (!M.gp) M.gp = { level: lv, subject: "", ticked: new Set() }; if (!levels().includes(M.gp.level)) M.gp.level = lv; return M.gp; }
+function gpState() { const lv = levels()[0] || ""; if (!M.gp) M.gp = { level: lv, subject: "", teacher: "", ticked: new Set() }; if (M.gp.level && !levels().includes(M.gp.level)) M.gp.level = lv; return M.gp; }   // level "" is every level
+function gpView() {   // what the filter shows; a choice that is no longer on offer is dropped, and so is the tick of a row that is no longer shown
+  const gp = gpState(), v = Groups.view(S.spec, gp), shown = new Set(v.pool.map(p => S.spec.lessons[p.li]._id));
+  gp.subject = v.f.subject; gp.teacher = v.f.teacher; gp.ticked = new Set([...gp.ticked].filter(id => shown.has(id))); return v; }
+function gpShow(level, row) {   // after an add: the filter must not hide what was just made (row: the new lesson row, or none for a band, which has no groups yet)
+  const gp = gpState(); if (gp.level && level && gp.level !== level) { gp.level = level; M.gpTo = ""; }
+  if (!row || (gp.subject && row.subject !== gp.subject)) gp.subject = "";
+  const who = row ? (row.teachers || []).filter(Boolean) : [];
+  if (!row || (gp.teacher && !(gp.teacher === Groups.NONE ? !who.length : who.includes(gp.teacher)))) gp.teacher = "";
+}
+const gAv = nm => { const t = S.spec.teachers.find(x => x.name === nm);   // the face with the teacher's short name beside it: a face alone does not say who it is
+  return t ? `<span class="gav" title="${esc(nm)}">${avatarOf(t, 24)}<span class="gavn">${esc(t.short || t.name || "")}</span></span>` : `<span class="chip">${esc(nm)}</span>`; };
+const byLevel = (items, draw) => gpState().level ? items.map(draw).join("") : levels().concat([...new Set(items.map(x => x.level || ""))].filter(l => !levels().includes(l))).map(lv => { const mine = items.filter(x => (x.level || "") === lv);   // under a heading for each level when every level is shown
+  return mine.length ? `<div class="glv">${esc(lv || "No level")}</div>${mine.map(draw).join("")}` : ""; }).join("");
+function barView(v) {   // one filter for both lists: the level (or all), a subject, a teacher (or the rows with none)
+  const gp = gpState(), banded = v.lanes.reduce((n, l) => n + l.groups.filter(g => g.match).length, 0), s = n => n === 1 ? "" : "s";
+  return `<section class="gbar card"><div class="row"><b>Show</b>
+    <label>Level <select id="gpLevel">${opt("", gp.level, "All levels")}${levels().map(l => opt(l, gp.level)).join("")}</select></label>
+    <label>Subject <select id="gpSubject">${opt("", gp.subject, "All subjects")}${v.subjects.map(n => opt(n, gp.subject)).join("")}</select></label>
+    <label>Teacher <select id="gpTeacher">${opt("", gp.teacher, "All teachers")}${v.none ? opt(Groups.NONE, gp.teacher, "No teacher") : ""}${v.teachers.map(n => opt(n, gp.teacher)).join("")}</select></label>
+    ${v.filtered ? `<button class="small" data-gclear>Show all</button>` : ""}<span class="muted small">${v.pool.length} not in a band · ${banded} in ${v.lanes.length} band${s(v.lanes.length)}</span>
+    <span style="flex:1"></span>${gp.level ? `<button class="small" data-cbands="${esc(gp.level)}">See how ${esc(gp.level)} is banded</button>` : `<button class="small" data-cbands="">See how the levels are banded</button>`}</div></section>`;
+}
 const gpIdx = ids => S.spec.lessons.map((x, i) => [x, i]).filter(([x]) => x && ids.includes(x._id)).map(([, i]) => i);
-function poolView() {   // rows at the level with no band: tick (or drag) them into a band
-  const gp = gpState(), all = Groups.pool(S.spec, gp.level, ""), items = gp.subject ? all.filter(p => p.subject === gp.subject) : all, lanes = Groups.lanes(S.spec, gp.level);
-  gp.ticked = new Set([...gp.ticked].filter(id => S.spec.lessons.some(x => x && x._id === id)));
-  const subjects = [...new Set(all.map(p => p.subject))];
+function poolView(v) {   // the rows with no band that the filter shows: tick (or drag) them into a band
+  const gp = gpState(), items = v.pool, lanes = Groups.lanes(S.spec, gp.level), where = gp.level || "any level";
   const row = p => { const id = S.spec.lessons[p.li]._id, on = gp.ticked.has(id);
-    return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}"><span class="handle" draggable="true" data-gdrag="${esc(id)}" title="Drag into a band">⋮⋮</span><span style="flex:1;min-width:0">${esc(p.title)}</span>${p.kind === "group" ? `<span class="codeline small">${esc(p.code)}</span>` : ""}<span class="muted small" title="Students">${p.students != null ? p.students : ""}</span></div>`; };
-  return `<section class="gpool card"><h3 style="margin:0 0 6px">Not in a band</h3><p class="muted small" style="margin:0 0 8px">Whole-class rows and groups with their own code. Tick rows and move them into a band, or drag them onto one.</p>
-    <div class="row"><select id="gpLevel">${levels().map(l => opt(l, gp.level)).join("")}</select><select id="gpSubject">${opt("", gp.subject, "All subjects")}${subjects.map(n => opt(n, gp.subject)).join("")}</select>${gp.level ? `<button class="small" data-cbands="${esc(gp.level)}">See how ${esc(gp.level)} is banded</button>` : `<button class="small" data-cbands="">See how the levels are banded</button>`}</div>
+    return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}"><span class="handle" draggable="true" data-gdrag="${esc(id)}" title="Drag into a band">⋮⋮</span><span style="flex:1;min-width:0">${esc(p.title)}</span>${p.kind === "group" ? `<span class="codeline small">${esc(p.code)}</span>` : ""}<span class="muted small" title="Students">${p.students != null ? p.students : ""}</span><span class="avs" style="margin:0;min-height:0">${p.teachers.map(gAv).join("") || `<span class="small overtxt">No teacher</span>`}</span></div>`; };
+  return `<section class="gpool card"><h3 style="margin:0 0 6px">Not in a band</h3><p class="muted small" style="margin:0 0 8px">Whole-class rows and groups with their own code, each with who teaches it. Tick rows and move them into a band, or drag them onto one.</p>
     <div class="row" style="margin:8px 0"><button class="small" data-gall>Select all shown</button><button class="small" data-gnone>Deselect all</button><span class="muted small">${items.length} row${items.length === 1 ? "" : "s"}${gp.ticked.size ? ` · ${gp.ticked.size} ticked` : ""}</span></div>
-    <div class="plist keep">${items.map(row).join("") || `<p class="muted small">Every row at ${esc(gp.level)} is in a band.</p>`}</div>
+    <div class="plist keep">${byLevel(items, row) || `<p class="muted small">${v.filtered ? `No row outside a band matches at ${esc(where)}.` : `Every row at ${esc(where)} is in a band.`}</p>`}</div>
     <div class="row" style="margin-top:10px"><span>Move into band</span><select id="gpTo">${opt("", M.gpTo || "", "")}${lanes.map(l => opt(l.block, M.gpTo || "")).join("")}</select><button data-gmove ${gp.ticked.size && lanes.length ? "" : "disabled"}>Move</button></div></section>`;
 }
-function lanesView() {   // the bands of the level as lanes, each with its groups
-  const gp = gpState(), lanes = Groups.lanes(S.spec, gp.level);
-  const av = nm => { const t = S.spec.teachers.find(x => x.name === nm);   // the face with the teacher's short name beside it: a face alone does not say who it is
-    return t ? `<span class="gav" title="${esc(nm)}">${avatarOf(t, 24)}<span class="gavn">${esc(t.short || t.name || "")}</span></span>` : `<span class="chip">${esc(nm)}</span>`; };
+function lanesView(v) {   // the bands the filter shows as lanes, each whole; a group that does not match is faded
+  const gp = gpState(), lanes = v.lanes;
   const grow = (g, l) => { const own = g.classes.join(",") !== l.classes.join(",");   // a group of fewer classes than its band says which
-    return `<div class="grow"><span class="codeline small">${esc(g.code)}</span><span style="flex:1;min-width:0">${esc(g.subject)}${own ? ` <span class="muted small">${esc(g.classes.join(", "))}</span>` : ""}</span>${g.students != null ? `<span class="muted small" title="Students">${g.students}</span>` : ""}<span class="avs" style="margin:0;min-height:0">${g.teachers.map(av).join("")}</span><button class="small danger" data-gout="${g.li}" title="Out of the band, back to the pool">✕</button></div>`; };
+    return `<div class="grow${g.match ? "" : " dim"}"><span class="codeline small">${esc(g.code)}</span><span style="flex:1;min-width:0">${esc(g.subject)}${own ? ` <span class="muted small">${esc(g.classes.join(", "))}</span>` : ""}</span>${g.students != null ? `<span class="muted small" title="Students">${g.students}</span>` : ""}<span class="avs" style="margin:0;min-height:0">${g.teachers.map(gAv).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small danger" data-gout="${g.li}" title="Out of the band, back to the pool">✕</button></div>`; };
   const lane = l => `<div class="lane" data-glane="${esc(l.block)}"><div class="row small" style="justify-content:space-between"><b>${esc(l.block)}</b><span class="muted">${esc(l.classes.join(", "))}${l.everyone ? " · everyone takes one" : ""}</span></div><div class="muted small">Its groups have lessons at the same time.</div>
     ${l.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}${l.groups.map(g => grow(g, l)).join("") || `<div class="muted small">No groups yet: tick rows on the left and move them here, or add groups above.</div>`}</div>`;
-  return `<section class="glanes card"><h3 style="margin:0 0 6px">Bands at ${esc(gp.level)}</h3><div class="llist keep">${lanes.map(lane).join("") || `<p class="muted small">No bands at ${esc(gp.level)} yet. Add one on the left.</p>`}</div></section>`;
+  return `<section class="glanes card"><h3 style="margin:0 0 6px">${gp.level ? `Bands at ${esc(gp.level)}` : "Bands at every level"}</h3><div class="llist keep">${byLevel(lanes, lane) || `<p class="muted small">${v.filtered ? "No band has a group that matches." : `No bands at ${esc(gp.level || "any level")} yet. Add one above.`}</p>`}</div></section>`;
 }
 /* a row moving into a band gets a code of its own ("Entire Class" → 1AR1): that is not a renumbering, so it is not listed */
 const renumbered = sh => sh.changes.filter(([, a]) => a !== "Entire Class");
@@ -2162,7 +2181,8 @@ function dropRows(e) {   // the lesson row indexes a drop carries ({rows: ids})
 function groupsAction(k, v) {
   const gf = gfState(), bf = bfState();
   if (k === "bfsubject") { bf.subjects = bf.subjects.filter(x => x !== v); render(); return; }
-  if (k === "gall") { const gp = gpState(); Groups.pool(S.spec, gp.level, gp.subject).forEach(p => gp.ticked.add(S.spec.lessons[p.li]._id)); render(); return; }
+  if (k === "gall") { const gp = gpState(); gpView().pool.forEach(p => gp.ticked.add(S.spec.lessons[p.li]._id)); render(); return; }
+  if (k === "gclear") { const gp = gpState(); gp.subject = ""; gp.teacher = ""; render(); return; }
   if (k === "gnone") { gpState().ticked.clear(); render(); return; }
   if (k === "gmove") { moveRows(gpIdx([...gpState().ticked]), M.gpTo || ""); return; }
   if (k === "gout") { rowOut(Number(v)); return; }
@@ -2170,19 +2190,19 @@ function groupsAction(k, v) {
     const r = Groups.newGroup(S.spec, gf); if (r.error) { toast(r.error); return; }
     const kept = Groups.pullOutCode(S.spec, r.i);   // a pull-out group (fewer students than its classes hold) keeps a code of its own
     save(); const x = S.spec.lessons[r.i], code = lessonInfo()[r.i].code;
-    gf.classes = []; gf.students = ""; render();
+    gf.classes = []; gf.students = ""; gpShow(x.level, x); render();
     toast(`Added ${code === "Entire Class" ? "" : code + " "}${x.subject} for ${listing(x.classes)}.${kept ? ` ${x.students} of the class: a group of its own, with Keep code ${kept}.` : ""}`); return;
   }
   if (k === "gfeach") {
     if (!gf.subject) { toast("Pick a subject."); return; }
     const n = Groups.addOnePerClass(S.spec, gf.level, gf.subject, gf.classes.length ? gf.classes : classesAt(gf.level));
     if (!n) { toast(`Every class has ${gf.subject} already.`); return; }
-    save(); gf.classes = []; render(); toast(`${n} row${n === 1 ? "" : "s"} added.`); return;
+    save(); gf.classes = []; gpShow(gf.level, { subject: gf.subject, teachers: [] }); render(); toast(`${n} row${n === 1 ? "" : "s"} added.`); return;
   }
   if (k === "bfadd") {
     const name = bf.touched ? bf.name : Groups.bandName(bf.level, bf.subjects, blockNames());
     const r = Groups.newBand(S.spec, { block: name, level: bf.level, classes: bf.classes, everyone: bf.evTouched ? bf.everyone : undefined }); if (r.error) { toast(r.error); return; }
-    save(); const b = S.spec.blocks[r.i]; gf.level = b.level; gf.block = b.block; gf.classes = []; M.bf = null; render();
+    save(); const b = S.spec.blocks[r.i]; gf.level = b.level; gf.block = b.block; gf.classes = []; M.bf = null; gpShow(b.level, null); render();
     toast(`Band ${b.block} added. Add its groups above, or move rows into it below.`); return;
   }
 }
