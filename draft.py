@@ -123,6 +123,12 @@ def _withhold(ws, pool):
         k = re.fullmatch(r"dep:(.+):(?:missing|periods)(?:#\d+)?", w["key"])
         if k and k[1] in keys: w["ops"] = None; w["text"] += WAITING
 
+def _no_teacher(ws):
+    """a difference from step 5 about a lesson with no teacher on the timetable says so, not "is taught by  on" with an empty name"""
+    for w in ws:
+        if re.fullmatch(r"dep:.+:teachers(?:#\d+)?", w["key"]) and (w.get("sides") or {}).get("timetable") == "":
+            w["text"] = w["text"].replace(" is taught by  on the timetable;", " has no teacher on the timetable;", 1)
+
 def _build(m=None, rec=None, fx=None):
     """the draft with its fixes applied, checked against the setup as it is now (or rec, a setup record): the fields of info()
     before decisions are laid over them. m: a model already built (by save, with no fixes yet, or with its rec and fx from model_now)."""
@@ -133,7 +139,7 @@ def _build(m=None, rec=None, fx=None):
     spec = rec["spec"]
     with _lock: meta = store.read_json(_p("meta.json"), {})
     ws = verify.warnings(m, touched=fx["touched"], was=fx.get("was") or ()); ch = m["checks"]; pool = fx.get("pool") or []
-    ws["warnings"] = ws["warnings"] + _own_warnings(m, pool); _withhold(ws["warnings"], pool)
+    ws["warnings"] = ws["warnings"] + _own_warnings(m, pool); _withhold(ws["warnings"], pool); _no_teacher(ws["warnings"])
     cid, ver = meta.get("config_id") or "", rec["v"]; got = re.fullmatch(r"v(\d+)", cid)
     state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
              "same" if int(got[1]) == ver else "older" if int(got[1]) < ver else "newer")

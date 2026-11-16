@@ -496,6 +496,14 @@ def test_none_for_a_teacher_is_critical_and_none_for_a_room_is_a_warning():
     assert [w["strength"] for w in j["warnings"] if w["kind"] == "room"] == ["Prefer"]
     draft.fix(dict(kind="teacher", key=KEY1, teachers=[ZACH])); draft.fix(dict(kind="teacher", key=KEY1, teachers=[])); assert taught(1) == [[]]   # taking away a teacher who was put there
 
+def test_a_lesson_with_no_teacher_reads_has_no_teacher_against_step_5():
+    fresh(CLEAN); j = draft.fix(dict(kind="teacher", key=KEY1, teachers=[]))
+    w = [x for x in j["warnings"] if x["key"].startswith("dep:") and x["key"].endswith(":teachers")]
+    assert len(w) == 1 and w[0]["text"].endswith(f" has no teacher on the timetable; step 5 says {w[0]['sides']['step5']}.") and w[0]["sides"]["step5"], [x["text"] for x in w]
+    assert "taught by  on" not in w[0]["text"]
+    draft.fix(dict(kind="teacher", key=KEY1, teachers=[ZACH])); w = [x for x in draft.info()["warnings"] if x["key"].startswith("dep:") and x["key"].endswith(":teachers")]
+    assert len(w) == 1 and w[0]["text"].endswith(f" is taught by {ZACH} on the timetable; step 5 says {w[0]['sides']['step5']}."), [x["text"] for x in w]   # a teacher named: the sentence as before
+
 def test_the_lesson_route():
     save_draft(TR); r = c.get(f"/api/draft/lesson?id={PLAIN_ID}"); assert r.status_code == 200 and r.get_json() == draft.lesson(PLAIN_ID) and "Content-Encoding" not in r.headers
     save_draft(PLAY); r = c.get(f"/api/draft/lesson?id={BAND_ID}&group=G2"); assert r.status_code == 200 and r.get_json() == draft.lesson(BAND_ID, "G2") and r.get_json()["group"] == "G2"
