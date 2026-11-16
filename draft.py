@@ -2,7 +2,7 @@
 setup as it is now (ttgen.verify), each difference is decided on (change step 5, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
 import copy, json, os, re, secrets, shutil, threading
-from ttgen.export import ENTIRE, model_from_files
+from ttgen.export import ENTIRE, PALETTE, block_label, model_from_files
 from ttgen.database import write_db
 from ttgen.spec import typed_rules
 from ttgen import choices, verify
@@ -220,6 +220,39 @@ def options(lesson_id=None, group=None, add=None, n=None):
     key = verify._kstr(fixes._row_key(row)); g = row["group"]
     return dict(key=key, slots=fixes.slots(m, spec, days, lid), teachers=fixes.teacher_options(m, spec, days, key), rooms=fixes.room_options(m, spec, days, lid, g),
                 delete=fixes.can_delete(m, spec, days, lid, group))
+
+NOT_IN_SETUP = "Not in the setup"
+
+def board():
+    """the whole draft as cards for the board -> dict(days, NP, times, levels, codes, subjects, palette, cards); one card per lesson id, with every row and class of it"""
+    m = _now()[0]; NP, nd = m["NP"], len(m["days"]); in_setup = {str(c["class"]) for c in m["checked_setup"]["classes"]}
+    level_of = {c["name"]: c["level"] for c in m["classes"] if c["name"] in in_setup}   # the model also lists a class only a lesson names
+    by_id = {}
+    for x in m["lessons"]: by_id.setdefault(x["id"], []).append(x)
+    levels = [dict(level=lv, classes=[c for c, l in level_of.items() if l == lv]) for lv in m["levels"]]
+    extra = [c["name"] for c in m["classes"] if c["name"] not in level_of]   # not in the setup, or on a level it does not have
+    if extra: levels.append(dict(level=NOT_IN_SETUP, classes=extra))
+    codes = {}
+    for lv in levels:
+        for c in lv["classes"]: codes[c] = list(m["cgrid"].get(c) or m["grid"].get(level_of.get(c)) or ["." * NP] * nd)
+    short = lambda s: (m["subjects"].get(s) or {}).get("short") or s
+    tshort = {t: (m["teacher_ix"].get(t) or {}).get("short") or t for x in m["lessons"] for t in x["teachers"]}
+    cards = []
+    for i in sorted(by_id):
+        rows = by_id[i]; a = rows[0]; blocked = next((x for x in rows if x["block"]), None)
+        band = block_label(blocked["block"], blocked["level"]) if blocked else " / ".join(dict.fromkeys(short(x["subject"]) for x in rows)) if len(rows) > 1 else ""
+        cards.append(dict(id=i, d=a["d"], p=a["p"], n=a["n"], classes=list(dict.fromkeys(c for x in rows for c in x["classes"])), band=band, what=fixes.what(a),
+                          rows=[dict(group=x["group"], subject=x["subject"], teachers=list(x["teachers"]), tshorts=[tshort[t] for t in x["teachers"]], room=x["room"]) for x in rows]))
+    return dict(days=list(m["days"]), NP=NP, times=m["times"], levels=levels, codes=codes,
+                subjects={k: [v.get("short") or k, v.get("color"), v.get("dept") or ""] for k, v in m["subjects"].items()},
+                palette=[list(c) for c in PALETTE], cards=cards)
+
+def slots(lesson_id):
+    """where one lesson may go: fixes.slots on the draft as it is now -> dict(id, slots)"""
+    m = _now()[0]
+    try: lid = int(lesson_id)
+    except (TypeError, ValueError): raise ValueError("There is no lesson with that id on the timetable.")
+    return dict(id=lid, slots=fixes.slots(m, m["checked_setup"], m["days"], lid))
 
 def _length(n, m):
     """an add's n, a whole number from 1 to the periods in a day, or ValueError(sentence)"""
