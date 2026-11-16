@@ -156,4 +156,14 @@ t("a room warning is grouped under No room, after clashes and before the deploym
   assert.deepEqual(g[1].groups.map(x => x.name), ["Maths 1A", "Art 1B"]);
 });
 
+t("others: the open warnings that are not critical, counted directly", () => {
+  assert.strictEqual(Draft.others(ws()), 3);   // d1, d3 (an old "left" is open) and r1; c1 is critical, d2 and c2 are settled
+  assert.strictEqual(Draft.others(ws().concat([W("c3", "clash", "1A", { answer: "met" }, null, "teacher")])), 3);   // a settled critical one never takes one off
+  assert.strictEqual(Draft.others([]), 0); assert.strictEqual(Draft.others(undefined), 0);
+});
+t("follow: a settled clash is not followed onto a lesson waiting in Not placed", () => {
+  const was = { key: "clash:Class clash: 1A", kind: "clash", where: { cls: "1A" } };
+  assert.strictEqual(Draft.follow(was, [Object.assign(K("clash:notplaced:7", "clash", { cls: "1A", id: 7 }), { crit: "notplaced" })]), null);
+  assert.deepEqual(Draft.follow(was, [Object.assign(K("clash:notplaced:7", "clash", { cls: "1A", id: 7 }), { crit: "notplaced" }), Object.assign(K("clash:Class clash: 1A on Tue", "clash", { cls: "1A" }), { crit: "class" })]), { key: "clash:Class clash: 1A on Tue", how: "changed" });
+});
 console.log(n + " checks passed");

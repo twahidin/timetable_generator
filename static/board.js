@@ -128,9 +128,22 @@ var Board = (function () {
     return found;
   }
 
+  function inTray(card) { return !!card && (card.d === null || card.d === undefined); }
+
+  /* what a drop on a place with another lesson offers this card (a lesson from the tray is never swapped), or null */
+  function offers(card, s) {
+    var a = asks(s); if (!a) return null;
+    return { swap: a.swap && !inTray(card), push: a.push, beside: a.beside };
+  }
+
+  /* the colour of each period of day d for the card: its slot's state, but "ask" where another lesson is and a drop there
+     offers a swap, a place beside or a push, and "na" where another lesson is and nothing can be done */
   function states(card, slots, d, NP) {
-    var out = [], p, s;
-    for (p = 0; p < NP; p++) { s = slot(card, slots, d, p); out.push(s && s.state ? s.state : ""); }
+    var out = [], p, s, o;
+    for (p = 0; p < NP; p++) {
+      s = slot(card, slots, d, p); o = s && s.state !== "own" ? offers(card, s) : null;
+      out.push(o ? (o.swap || o.push || o.beside ? "ask" : "na") : s && s.state ? s.state : "");
+    }
     return out;
   }
 
@@ -168,6 +181,9 @@ var Board = (function () {
     return { swap: s.swap !== null && s.swap !== undefined && fits(s), push: s.push.state !== "na", beside: fits(s.beside) };
   }
 
+  /* a forced change carries the sentence the page showed for the place, so the server keeps it only for that same reason */
+  function force(out, why) { out.force = true; out.why = why || ""; return out; }
+
   /* the fix a drop sends. how is "move" (default), "swap", "push" or "beside" (the plain move or place, never forced);
      with no how, a slot with a swap gives the swap, as before this stage. A lesson from the tray is placed, never swapped. */
   function fix(card, s, how) {
@@ -178,8 +194,8 @@ var Board = (function () {
     if (how === "beside") return out;
     if (how === "push") {
       out.push = true;
-      if (s.push && s.push.state === "no") out.force = true;
-    } else if (forced(s)) out.force = true;
+      if (s.push && s.push.state === "no") force(out, s.push.why);
+    } else if (forced(s)) force(out, s.why);
     return out;
   }
 
@@ -188,9 +204,15 @@ var Board = (function () {
     var out = { kind: "add", key: short.key, d: s.d, p: s.p, n: short.n };
     if (how === "push") {
       out.push = true;
-      if (s.push && s.push.state === "no") out.force = true;
-    } else if (forced(s)) out.force = true;
+      if (s.push && s.push.state === "no") force(out, s.push.why);
+    } else if (forced(s)) force(out, s.why);
     return out;
+  }
+
+  /* the delete of a lesson as the page posts it: forced, with the judgement's sentence, when the judgement is "no" */
+  function deleteFix(card, j) {
+    var out = { kind: "delete", id: card.id };
+    return j && j.state === "no" ? force(out, j.why) : out;
   }
 
   function liftFix(card) { return { kind: "lift", id: card.id }; }
@@ -200,9 +222,12 @@ var Board = (function () {
     return names.length >= 3 ? "Push out " + names.length + " lessons" : "Push out " + names.join(" and ");
   }
 
+  /* names in a sentence: "a", "a and b", "a, b and c" */
+  function list(xs) { return xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1]; }
+
   /* what the page asks when a lesson is dropped where another lesson is */
   function question(card, s, board) {
-    var a = asks(s) || { swap: false, push: false }, out = s.push ? s.push.out || [] : [];
+    var a = asks(s) || { swap: false, push: false }, out = s.push ? s.push.out || [] : [], mine = card.classes || [];
     var text = card.what + " on " + board.days[s.d] + " period " + s.p + ": another lesson is there.";
     var swap = null, push = null, beside = null, also = [];
     if (a.swap) {
@@ -213,7 +238,11 @@ var Board = (function () {
     }
     if (a.push && out.length) {
       push = pushWords(out);
-      if (s.push.state === "no") also.push("It will still clash: " + s.push.why);
+      out.forEach(function (o) {   // a band pushed out leaves other classes too: say which
+        var more = (o.classes || []).filter(function (c) { return mine.indexOf(c) < 0; });
+        if (more.length) also.push("This also takes it off " + list(more) + ".");
+      });
+      if (s.push.state === "no") also.push("It will still land with a problem: " + s.push.why);
     }
     if (a.beside && out.length) beside = out.length > 1 ? "Put it beside them" : "Put it beside " + out[0].what;
     return { text: text, also: also, swap: swap, push: push, beside: beside };
@@ -230,10 +259,13 @@ var Board = (function () {
     if (s.state === "own") return "This is where the lesson is now.";
     var tray = !!card && (card.d === null || card.d === undefined), go = tray ? "Place on " : "Move to ";
     var day = days[s.d], p = s.p, has = !tray && s.swap !== null && s.swap !== undefined;
-    if (s.push && tray) return "Another lesson is there. Drop to push it out or put it beside.";
-    if (s.push && !(asks(s).swap)) return "Another lesson is there. Drop to swap or push out.";
+    if (s.push) {   // another lesson is there: what a drop offers, in this order
+      var o = offers(card, s), can = [o.swap ? "swap" : "", o.beside ? "put it beside" : "", o.push ? "push it out" : ""].filter(Boolean);
+      if (!can.length) return ("Another lesson is there and it cannot be moved out: " + (s.push.why || s.why || "")).trim();
+      return "Another lesson is there. Drop to " + (can.length < 2 ? can[0] : can.slice(0, -1).join(", ") + " or " + can[can.length - 1]) + ".";
+    }
     var text = has ? "Swap with the lesson on " + day + " period " + p + "."
-      : s.state === "no" && s.why ? go + day + " period " + p + ". It will clash: " + s.why
+      : s.state === "no" && s.why ? go + day + " period " + p + ". It lands with a problem: " + s.why
       : go + day + " period " + p + ".";
     return s.why && !(s.state === "no" && !has) ? text + " " + s.why : text;
   }
@@ -349,7 +381,7 @@ var Board = (function () {
   return { lanes: lanes, groups: groups, open: open, box: box, lines: lines, finds: finds, matches: matches, grab: grab,
            start: start, slot: slot, states: states, can: can, target: target, aim: aim, fix: fix, onRow: onRow, tell: tell,
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
-           lands: lands, forced: forced, asks: asks, addFix: addFix, liftFix: liftFix, question: question,
+           lands: lands, forced: forced, asks: asks, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
            warned: warned, flag: flag, at: at };
 })();
 if (typeof module !== "undefined") module.exports = Board;

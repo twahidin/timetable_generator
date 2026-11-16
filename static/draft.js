@@ -52,6 +52,9 @@ var Draft = (function () {
     return c;
   }
 
+  /* the open warnings that are not critical mistakes, counted on their own */
+  function others(warnings) { return (warnings || []).filter(function (w) { return isOpen(w) && !w.crit; }).length; }
+
   function answerText(w) { return { step5: "Step 5 updated", fixed: "Fixed", met: "Checked: still met" }[answer(w)] || ""; }
 
   function sideText(w) { var s = w && w.sides; return s ? "Timetable: " + s.timetable + " · Step 5: " + s.step5 : ""; }
@@ -99,7 +102,7 @@ var Draft = (function () {
     if (hit) return { key: hit.key, how: "same" };
     var wh = was.where || null;
     if (was.kind === "clash" && wh && (wh.teacher || wh.cls)) {
-      hit = list.filter(function (w) { var x = w.where || {}; return w.kind === "clash" && (wh.teacher ? x.teacher === wh.teacher : x.cls === wh.cls); })[0];
+      hit = list.filter(function (w) { var x = w.where || {}; return w.kind === "clash" && w.crit !== "notplaced" && (wh.teacher ? x.teacher === wh.teacher : x.cls === wh.cls); })[0];   // a lesson waiting in Not placed is not the clash it settled
     } else if (was.kind === "rule" && wh && wh.id !== undefined && wh.id !== null) {
       var rid = function (k) { return String(k).split(":")[1]; };
       hit = list.filter(function (w) { var x = w.where || {}; return w.kind === "rule" && rid(w.key) === rid(was.key) && x.id === wh.id && x.row === wh.row; })[0];
@@ -120,6 +123,6 @@ var Draft = (function () {
   /* the word a choice question uses for the field the name was meant for */
   function choiceWord(field) { return { classes: "class", subject: "subject", teacher: "teacher", new_teacher: "teacher", new_room: "room" }[field] || "name"; }
 
-  return { askSummary: askSummary, choiceWord: choiceWord, follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, critical: critical, gateText: gateText, critWord: critWord, group: group, counts: counts, answerText: answerText, sideText: sideText };
+  return { askSummary: askSummary, choiceWord: choiceWord, follow: follow, batches: batches, undoText: undoText, stateWord: stateWord, whereText: whereText, fixTarget: fixTarget, KINDS: KINDS, KIND_TEXT: KIND_TEXT, isOpen: isOpen, critical: critical, gateText: gateText, critWord: critWord, group: group, counts: counts, others: others, answerText: answerText, sideText: sideText };
 })();
 if (typeof module !== "undefined") module.exports = Draft;
