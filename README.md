@@ -207,8 +207,9 @@ a name that forms from the level and subjects ("Sec 2 Mathematics"; "Sec 3 Optio
 the next free letter) and can be typed over; a name already used is refused. **Everyone takes one** is on unless the
 name says Option. **Add band** makes it and sets the group form's band to it.
 Under the two cards, one filter governs both lists below it: **Level** (one level, or **All levels**, which puts each
-list under a heading for each level), **Subject**, **Teacher** (a teacher, or **No teacher** for the rows nobody
-teaches yet) and **Band** (one band alone). **Show all** clears the subject, the teacher and the band.
+list under a heading for each level), **Department** (the department of the subject; the subjects and teachers on
+offer are then that department's), **Subject**, **Teacher** (a teacher, or **No teacher** for the rows nobody
+teaches yet) and **Band** (one band alone). **Show all** clears the department, the subject, the teacher and the band.
 Below the filter are two tabs, each with how many it shows.
 **Single teaching groups** are the whole-class rows and pull-out groups that are in no band, each with who teaches it,
 with **Select all shown** and **Deselect all**. Tick rows and **Move** them into a band of their own level: a whole

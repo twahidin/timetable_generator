@@ -1135,7 +1135,7 @@ function classesBands() {   // a picture of one level: a column per class, a row
 function openBand(block) {   // from a bar: step 5 on Groups and bands, at the level shown, with the band in view
   const lv = cvLevel(); M.view = "groups"; try { localStorage.setItem(MAPVIEW, M.view); } catch (e) { }
   const gp = gpState(); if (levels().includes(lv) && gp.level !== lv) { gp.level = lv; gp.ticked.clear(); M.gpTo = ""; }
-  gp.subject = ""; gp.teacher = ""; gp.band = ""; M.gtab = "bands"; M.gask = null;   // no filter and no tab may hide the band being opened
+  gp.dept = ""; gp.subject = ""; gp.teacher = ""; gp.band = ""; M.gtab = "bands"; M.gask = null;   // no filter and no tab may hide the band being opened
   S.step = STEPS.findIndex(x => x[0] === "lessons"); save(); render(); window.scrollTo(0, 0);
   const lane = [...document.querySelectorAll("[data-glane]")].find(x => x.dataset.glane === block);
   if (lane) lane.scrollIntoView({ block: "center" });
@@ -1815,6 +1815,7 @@ document.addEventListener("change", async e => {
   if (el.id === "mLevel") { M.level = el.value; render(); return; }
   if (el.id === "gpLevel") { const gp = gpState(); gp.level = el.value; gp.ticked.clear(); M.gpTo = ""; render(); return; }   // the subject and the teacher stay while they are on offer at the new level
   if (el.id === "gpTeacher") { gpState().teacher = el.value; render(); return; }
+  if (el.id === "gpDept") { gpState().dept = el.value; M.gask = null; render(); return; }   // a subject or a teacher outside the department is dropped by the view
   if (el.id === "btLevel") { btState().level = el.value; render(); return; }
   if (el.id === "btFix") { btState().fix = el.checked; render(); return; }
   if (el.id === "btQ") { btState().q = el.value; render(); return; }   // Enter or leaving the box: drawn again, so "Show all" appears
@@ -2127,18 +2128,19 @@ document.addEventListener("keydown", e => {   // in the box for a band's name: E
 const classesAt = lv => S.spec.classes.filter(c => c.level === lv).map(c => c.class);
 function gfState() { const lv = levels()[0] || ""; if (!M.gf) M.gf = { level: lv, tag: "", subject: "", block: "", classes: [], students: "" }; if (!levels().includes(M.gf.level)) M.gf.level = lv; return M.gf; }
 function bfState() { const lv = levels()[0] || ""; if (!M.bf) M.bf = { level: lv, subjects: [], classes: classesAt(lv), name: "", everyone: true, touched: false, evTouched: false }; if (!levels().includes(M.bf.level)) M.bf.level = lv; return M.bf; }
-function gpState() { const lv = levels()[0] || ""; if (!M.gp) M.gp = { level: lv, subject: "", teacher: "", band: "", ticked: new Set() }; if (M.gp.level && !levels().includes(M.gp.level)) M.gp.level = lv; return M.gp; }   // level "" is every level
+function gpState() { const lv = levels()[0] || ""; if (!M.gp) M.gp = { level: lv, dept: "", subject: "", teacher: "", band: "", ticked: new Set() }; if (M.gp.level && !levels().includes(M.gp.level)) M.gp.level = lv; return M.gp; }   // level "" is every level
 const gTab = () => M.gtab === "bands" ? "bands" : "pool";   // which of the two lists is shown: the single teaching groups (the first tab), or the banded ones
 const gpIdx = ids => S.spec.lessons.map((x, i) => [x, i]).filter(([x]) => x && ids.includes(x._id)).map(([, i]) => i);
 function gpView() {   // what the filter shows; a choice that is no longer on offer is dropped, and so is the tick of a row that is no longer shown
   const gp = gpState(), v = Groups.view(S.spec, gp), shown = new Set(v.pool.map(p => S.spec.lessons[p.li]._id));
-  gp.subject = v.f.subject; gp.teacher = v.f.teacher; gp.band = v.f.band; gp.ticked = new Set([...gp.ticked].filter(id => shown.has(id)));
+  gp.dept = v.f.dept; gp.subject = v.f.subject; gp.teacher = v.f.teacher; gp.band = v.f.band; gp.ticked = new Set([...gp.ticked].filter(id => shown.has(id)));
   if (M.gask && !v.lanes.some(l => l.block === M.gask)) M.gask = null;   // a question about a band that is not shown is withdrawn
   if (M.grename != null && (gTab() !== "bands" || !v.lanes.some(l => l.block === M.grename))) { M.grename = null; M.grenameText = null; }   // and so is a name being changed
   return v; }
 function gpShow(level, row, block) {   // after an add: the filter and the tab must not hide what was just made (row: the new lesson row, or none for a band, which has no groups yet; block: its band, if any)
   const gp = gpState(); if (gp.level && level && gp.level !== level) { gp.level = level; M.gpTo = ""; }
   if (!row || (gp.subject && row.subject !== gp.subject)) gp.subject = "";
+  if (!row || (gp.dept && String((subj(row.subject) || {}).dept || "").trim() !== gp.dept)) gp.dept = "";
   const who = row ? (row.teachers || []).filter(Boolean) : [];
   if (!row || (gp.teacher && !(gp.teacher === Groups.NONE ? !who.length : who.includes(gp.teacher)))) gp.teacher = "";
   if (gp.band && gp.band !== block) gp.band = "";
@@ -2152,6 +2154,7 @@ function barView(v) {   // one filter for both lists: the level (or all), a subj
   const gp = gpState();
   return `<section class="gbar card"><div class="row"><b>Show</b>
     <label>Level <select id="gpLevel">${opt("", gp.level, "All levels")}${levels().map(l => opt(l, gp.level)).join("")}</select></label>
+    <label title="The department of the subject">Department <select id="gpDept" title="The department of the subject">${opt("", gp.dept, "All departments")}${v.depts.map(n => opt(n, gp.dept)).join("")}</select></label>
     <label>Subject <select id="gpSubject">${opt("", gp.subject, "All subjects")}${v.subjects.map(n => opt(n, gp.subject)).join("")}</select></label>
     <label>Teacher <select id="gpTeacher">${opt("", gp.teacher, "All teachers")}${v.none ? opt(Groups.NONE, gp.teacher, "No teacher") : ""}${v.teachers.map(n => opt(n, gp.teacher)).join("")}</select></label>
     <label>Band <select id="gpBand">${opt("", gp.band, "All bands")}${v.bands.map(n => opt(n, gp.band)).join("")}</select></label>
@@ -2236,7 +2239,7 @@ function groupsAction(k, v) {
   const gf = gfState(), bf = bfState();
   if (k === "bfsubject") { bf.subjects = bf.subjects.filter(x => x !== v); render(); return; }
   if (k === "gall") { const gp = gpState(); gpView().pool.forEach(p => gp.ticked.add(S.spec.lessons[p.li]._id)); render(); return; }
-  if (k === "gclear") { const gp = gpState(); gp.subject = ""; gp.teacher = ""; gp.band = ""; M.gask = null; render(); return; }
+  if (k === "gclear") { const gp = gpState(); gp.dept = ""; gp.subject = ""; gp.teacher = ""; gp.band = ""; M.gask = null; render(); return; }
   if (k === "gtab") { M.gtab = v === "pool" ? "pool" : "bands"; M.gask = null; render(); return; }
   if (k === "gdel") { rowDelete(Number(v)); return; }
   if (k === "gbdel") { M.gask = M.gask === v ? null : v; render(); return; }   // the question opens in the band; a second press closes it
