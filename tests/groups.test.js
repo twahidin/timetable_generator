@@ -215,4 +215,23 @@ t("dropBand: the band goes; its groups go with it, or stay as rows not in a band
   const e = fixture(); e.blocks.push({ _id: "b9", block: "Sec 1 Empty", level: "Sec 1", classes: ["1A"] });
   assert.deepStrictEqual(Groups.dropBand(e, "Sec 1 Empty", false), { groups: 0, kept: 0 }); assert.strictEqual(e.blocks.length, 2); assert.strictEqual(e.lessons.length, 7);
 });
+t("renameBand: the band, its groups and the rules that name it take the new name", () => {
+  const s = fixture(); s.rules = [{ scope: "Block", target: "Sec 1 Mathematics", rule: "Fixed at" }, { scope: "Class", target: "Sec 1 Mathematics", rule: "Fixed at" }, { scope: "Block", target: "Sec 1 Option A", rule: "Fixed at" }];
+  assert.deepStrictEqual(Groups.renameBand(s, "Sec 1 Mathematics", "  Sec 1   Maths 1A-1B "), { name: "Sec 1 Maths 1A-1B", groups: 2, rules: 1 });
+  assert.deepStrictEqual(s.blocks.map(b => b.block), ["Sec 1 Maths 1A-1B", "Sec 1 Option A"]);
+  assert.deepStrictEqual(s.lessons.map(x => x.block), ["Sec 1 Maths 1A-1B", "Sec 1 Option A", "Sec 1 Maths 1A-1B", null, null, null, null]);
+  assert.deepStrictEqual(s.rules.map(r => r.target), ["Sec 1 Maths 1A-1B", "Sec 1 Mathematics", "Sec 1 Option A"]);   // a rule of another kind with the same words is left
+  assert.deepStrictEqual(Groups.codes(s).slice(0, 3), ["1MAP1", "1MAP2", "1MAA1"]);   // no code changes
+});
+t("renameBand: refused with a sentence, and nothing changed", () => {
+  const s = fixture(), was = JSON.stringify(s);
+  assert.deepStrictEqual(Groups.renameBand(s, "Sec 1 Mathematics", "   "), { error: "Give the band a name." });
+  assert.deepStrictEqual(Groups.renameBand(s, "Sec 1 Mathematics", "sec 1  option a"), { error: "Sec 1 Option A exists already." });
+  assert.deepStrictEqual(Groups.renameBand(s, "No such band", "X"), { error: "There is no band called No such band." });
+  const two = fixture(); two.blocks.push({ _id: "b9", block: "Sec 1 Mathematics", level: "Sec 1", classes: ["1C"] }); const was2 = JSON.stringify(two);   // the Table view can make two bands of one name
+  assert.deepStrictEqual(Groups.renameBand(two, "Sec 1 Mathematics", "X"), { error: "Two bands are called Sec 1 Mathematics. Rename one in the Table view first." }); assert.strictEqual(JSON.stringify(two), was2);
+  assert.strictEqual(JSON.stringify(s), was);
+  assert.deepStrictEqual(Groups.renameBand(s, "Sec 1 Mathematics", "Sec 1 Mathematics"), { name: "Sec 1 Mathematics", groups: 0, rules: 0, same: true });
+  assert.deepStrictEqual(Groups.renameBand(s, "Sec 1 Mathematics", "SEC 1 mathematics"), { name: "SEC 1 mathematics", groups: 2, rules: 0 });   // its own name in other letters is a rename
+});
 console.log(`${n} cases passed`);

@@ -214,7 +214,8 @@ Below the filter are two tabs, each with how many it shows.
 with **Select all shown** and **Deselect all**. Tick rows and **Move** them into a band of their own level: a whole
 class moved into a band becomes a group of it, and the band's classes widen to cover it. **Delete** removes a row.
 **Banded teaching groups** are the bands as lanes, side by side, each with its groups (code, subject, students,
-teachers). On a group, **Take out** makes it a single teaching group again and **Delete** removes it. **Delete band**
+teachers). A click on a band's name opens a box to change it there (Enter saves, Escape leaves it); its groups and the rules
+on step 6 that name it follow the new name. On a group, **Take out** makes it a single teaching group again and **Delete** removes it. **Delete band**
 asks in the band itself: delete the band and its groups, or delete the band and keep its groups as single teaching
 groups; it says when rules on step 6 name the band. With a subject or a teacher chosen, only the bands with a group
 that matches are shown, each whole, with the groups that do not match faded. A delete is taken back by **Undo** at the
