@@ -140,6 +140,36 @@ var Groups = (function () {
     x.block = null; return true;
   }
 
+  /* a row is deleted, in a band or not -> what it was, or null when there is no such row */
+  function dropRow(spec, li) {
+    var L = rows(spec, "lessons"), x = L[li];
+    if (!x) return null;
+    var code = codes(spec)[li]; L.splice(li, 1);
+    return { subject: x.subject, classes: (x.classes || []).slice(), block: x.block || null, code: code };
+  }
+  /* a band is deleted. keep: its groups stay, as rows not in a band (one of fewer students than its classes hold keeps a code of its own: the one it had, when free);
+     otherwise they are deleted with it -> {groups: how many it had, kept: how many got a code of their own}, or null when there is no such band */
+  function dropBand(spec, block, keep) {
+    var band = bandOf(spec, block), L = rows(spec, "lessons"), mine = [], kept = 0;
+    if (!band) return null;
+    L.forEach(function (x, i) { if (x && x.block === block) mine.push(i); });
+    if (keep) {   // all leave the band first, then each group of its own keeps the code it had when that code is still free (so a student list naming it still holds)
+      var was = codes(spec);
+      mine.forEach(function (li) { fromBand(spec, li); });
+      mine.forEach(function (li) {
+        var x = L[li], n = Number(x.students), size = sizeOf(spec, x.classes), used = {};
+        if (x.code_override || !x.subject || !(n > 0) || !size || n >= size) return;   // as pullOutCode: only a group of fewer students than its classes hold
+        codes(spec).forEach(function (c) { used[c] = true; });
+        x.code_override = was[li] && was[li] !== "Entire Class" && !used[was[li]] ? was[li] : freeCode(spec, x.level, x.subject); kept++;
+      });
+    }
+    else for (var k = mine.length - 1; k >= 0; k--) L.splice(mine[k], 1);
+    spec.blocks.splice(spec.blocks.indexOf(band), 1);
+    return { groups: mine.length, kept: kept };
+  }
+  /* how many rules on step 6 name the band */
+  function bandRules(spec, block) { return rows(spec, "rules").filter(function (r) { return r && r.scope === "Block" && r.target === block; }).length; }
+
   /* what a change would do to the codes: run it on a copy, compare by row id, count the students naming a changed code */
   function shift(spec, fn) {
     var copy = JSON.parse(JSON.stringify(spec)), was = codes(spec);
@@ -149,6 +179,11 @@ var Groups = (function () {
     rows(copy, "lessons").forEach(function (x, i) {
       if (!x || !x._id || !(x._id in before) || before[x._id] === after[i]) return;
       changes.push([x._id, before[x._id], after[i]]); old[before[x._id]] = true;
+    });
+    var left = {}; rows(copy, "lessons").forEach(function (x) { if (x && x._id) left[x._id] = true; });
+    Object.keys(before).forEach(function (id) {   // a row the change deleted: its code is gone (a whole-class row has none to lose)
+      if (left[id] || before[id] === "Entire Class") return;
+      changes.push([id, before[id], null]); old[before[id]] = true;
     });
     var students = rows(spec, "students").filter(function (s) { return s && (s.groups || []).some(function (g) { return old[g]; }); }).length;
     var rulesN = rows(spec, "rules").filter(function (r) { return r && r.scope === "Group" && old[r.target]; }).length;
@@ -187,10 +222,11 @@ var Groups = (function () {
     found.forEach(function (n) { if (out.indexOf(n) < 0) out.push(n); });
     return out;
   }
-  /* f = {level, subject, teacher}; "" (or missing) is all, teacher NONE is "taught by nobody". -> {f, filtered, subjects, teachers, none, pool, lanes}:
+  /* f = {level, subject, teacher, band}; "" (or missing) is all, teacher NONE is "taught by nobody". -> {f, filtered, subjects, teachers, bands, none, pool, lanes}:
      subjects and teachers are what the filter can offer at that level (the setup's order first), none whether a row there has no teacher; f is the
      filter as used (a subject or teacher that is not on offer counts as all); pool is the rows not in a band that match; lanes are the bands, each
-     whole, every group saying whether it matches, and with a subject or a teacher chosen (filtered) only the bands with a group that matches */
+     whole, every group saying whether it matches, and with a subject or a teacher chosen (filtered) only the bands with a group that matches;
+     bands are the names of the level's bands, and with one of them chosen (band) the lanes are that band alone (the pool is not narrowed by it) */
   function view(spec, f) {
     f = f || {};
     var level = f.level || "", P = pool(spec, level, ""), L = lanes(spec, level), all = P.slice(), subj = [], who = [], none = false;
@@ -204,17 +240,17 @@ var Groups = (function () {
     var teachers = inOrder(who, rows(spec, "teachers").map(function (x) { return x && x.name; }));
     var subject = subjects.indexOf(f.subject) >= 0 ? f.subject : "";
     var teacher = f.teacher === NONE ? (none ? NONE : "") : teachers.indexOf(f.teacher) >= 0 ? f.teacher : "";
-    var filtered = !!(subject || teacher);
+    var filtered = !!(subject || teacher), bands = L.map(function (l) { return l.block; }), band = bands.indexOf(f.band) >= 0 ? f.band : "";
     function hit(x) { return (!subject || x.subject === subject) && (!teacher || (teacher === NONE ? !x.teachers.length : x.teachers.indexOf(teacher) >= 0)); }
     var shown = L.map(function (l) {
       var c = {}; Object.keys(l).forEach(function (k) { c[k] = l[k]; });
       c.groups = l.groups.map(function (g) { var d = {}; Object.keys(g).forEach(function (k) { d[k] = g[k]; }); d.match = hit(g); return d; });
       return c;
-    }).filter(function (l) { return !filtered || l.groups.some(function (g) { return g.match; }); });
-    return { f: { level: level, subject: subject, teacher: teacher }, filtered: filtered, subjects: subjects, teachers: teachers, none: none, pool: P.filter(hit), lanes: shown };
+    }).filter(function (l) { return (!band || l.block === band) && (!filtered || l.groups.some(function (g) { return g.match; })); });
+    return { f: { level: level, subject: subject, teacher: teacher, band: band }, filtered: filtered, subjects: subjects, teachers: teachers, bands: bands, none: none, pool: P.filter(hit), lanes: shown };
   }
 
-  return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, pullOutCode: pullOutCode, lanes: lanes, pool: pool, view: view, NONE: NONE,
+  return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, pullOutCode: pullOutCode, lanes: lanes, pool: pool, view: view, NONE: NONE, dropRow: dropRow, dropBand: dropBand, bandRules: bandRules,
     newGroup: newGroup, addOnePerClass: addOnePerClass, newBand: newBand, toBand: toBand, fromBand: fromBand, shift: shift };
 })();
 if (typeof module !== "undefined") module.exports = Groups;

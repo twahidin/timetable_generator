@@ -207,16 +207,21 @@ a name that forms from the level and subjects ("Sec 2 Mathematics"; "Sec 3 Optio
 the next free letter) and can be typed over; a name already used is refused. **Everyone takes one** is on unless the
 name says Option. **Add band** makes it and sets the group form's band to it.
 Under the two cards, one filter governs both lists below it: **Level** (one level, or **All levels**, which puts each
-list under a heading for each level), **Subject** and **Teacher** (a teacher, or **No teacher** for the rows nobody
-teaches yet). **Show all** clears the subject and the teacher.
-Below, on the left, **Not in a band**: the whole-class rows and pull-out groups the filter shows, each with who teaches
-it, with **Select all shown** and **Deselect all**. Tick rows and **Move** them into a band of their own level, or drag a
-row (or every ticked row) onto a lane on the right. A whole class moved into a band becomes a group of it, and the
-band's classes widen to cover it. On the right, the bands as lanes, each with its groups (code, subject, students,
-teachers) and a ✕ that puts a group back in the pool. With a subject or a teacher chosen, only the bands with a group
-that matches are shown, each whole, with the groups that do not match faded; a teacher on two groups of one band is flagged on the lane. Moving a row changes later codes of that
+list under a heading for each level), **Subject**, **Teacher** (a teacher, or **No teacher** for the rows nobody
+teaches yet) and **Band** (one band alone). **Show all** clears the subject, the teacher and the band.
+Below the filter are two tabs, each with how many it shows.
+**Single teaching groups** are the whole-class rows and pull-out groups that are in no band, each with who teaches it,
+with **Select all shown** and **Deselect all**. Tick rows and **Move** them into a band of their own level: a whole
+class moved into a band becomes a group of it, and the band's classes widen to cover it. **Delete** removes a row.
+**Banded teaching groups** are the bands as lanes, side by side, each with its groups (code, subject, students,
+teachers). On a group, **Take out** makes it a single teaching group again and **Delete** removes it. **Delete band**
+asks in the band itself: delete the band and its groups, or delete the band and keep its groups as single teaching
+groups; it says when rules on step 6 name the band. With a subject or a teacher chosen, only the bands with a group
+that matches are shown, each whole, with the groups that do not match faded. A delete is taken back by **Undo** at the
+top. A teacher on two groups of one band is flagged on the lane. Moving a row changes later codes of that
 subject (1MAP3 becomes 1MAP2): the page says which, and when a student list names the old codes it asks first and
-says how many students are affected. The table view keeps the 15-column rows for bulk edits.
+says how many students are affected. The table view keeps the 15-column rows for bulk edits; its list of bands has a filter of its own (a level, a word of
+the name, and only the bands with something to fix).
 
 **How a group's periods split into lessons.** The Lessons column on step 5's table view shows the usual split in grey (20 periods with a
 3-period lesson: 6×3 + 1×2). Type your own, such as `5x3 + 2x2` or `4x3 + 4x2`, on one row or on all ticked rows, or clear it to
