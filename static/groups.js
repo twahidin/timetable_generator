@@ -238,16 +238,22 @@ var Groups = (function () {
     found.forEach(function (n) { if (out.indexOf(n) < 0) out.push(n); });
     return out;
   }
-  /* f = {level, subject, teacher, band}; "" (or missing) is all, teacher NONE is "taught by nobody". -> {f, filtered, subjects, teachers, bands, none, pool, lanes}:
+  /* f = {level, dept, subject, teacher, band}; "" (or missing) is all, teacher NONE is "taught by nobody"; dept is the department of a row's subject.
+     -> {f, filtered, depts, subjects, teachers, bands, none, pool, lanes}:
      subjects and teachers are what the filter can offer at that level (the setup's order first), none whether a row there has no teacher; f is the
      filter as used (a subject or teacher that is not on offer counts as all); pool is the rows not in a band that match; lanes are the bands, each
-     whole, every group saying whether it matches, and with a subject or a teacher chosen (filtered) only the bands with a group that matches;
+     whole, every group saying whether it matches, and with a department, a subject or a teacher chosen (filtered) only the bands with a group that matches;
+     depts are the departments of the subjects at the level (the school's order first);
      bands are the names of the level's bands, and with one of them chosen (band) the lanes are that band alone (the pool is not narrowed by it) */
   function view(spec, f) {
     f = f || {};
-    var level = f.level || "", P = pool(spec, level, ""), L = lanes(spec, level), all = P.slice(), subj = [], who = [], none = false;
+    var level = f.level || "", P = pool(spec, level, ""), L = lanes(spec, level), all = P.slice(), subj = [], who = [], dp = [], none = false, deptOf = Object.create(null), listed = (spec.school || {}).departments;
+    rows(spec, "subjects").forEach(function (x) { if (x && x.subject && !(x.subject in deptOf)) deptOf[x.subject] = String(x.dept || "").trim(); });
     L.forEach(function (l) { all = all.concat(l.groups); });
-    all.forEach(function (x) {
+    all.forEach(function (x) { var d = deptOf[x.subject]; if (d && dp.indexOf(d) < 0) dp.push(d); });
+    var depts = inOrder(dp, (Array.isArray(listed) ? listed : []).map(function (d) { return String(d == null ? "" : d).trim(); })), dept = depts.indexOf(f.dept) >= 0 ? f.dept : "";
+    function inDept(x) { return !dept || deptOf[x.subject] === dept; }
+    all.filter(inDept).forEach(function (x) {   // with a department chosen, the subjects and teachers on offer are that department's
       if (x.subject && subj.indexOf(x.subject) < 0) subj.push(x.subject);
       if (!x.teachers.length) none = true;
       x.teachers.forEach(function (t) { if (who.indexOf(t) < 0) who.push(t); });
@@ -256,14 +262,14 @@ var Groups = (function () {
     var teachers = inOrder(who, rows(spec, "teachers").map(function (x) { return x && x.name; }));
     var subject = subjects.indexOf(f.subject) >= 0 ? f.subject : "";
     var teacher = f.teacher === NONE ? (none ? NONE : "") : teachers.indexOf(f.teacher) >= 0 ? f.teacher : "";
-    var filtered = !!(subject || teacher), bands = L.map(function (l) { return l.block; }), band = bands.indexOf(f.band) >= 0 ? f.band : "";
-    function hit(x) { return (!subject || x.subject === subject) && (!teacher || (teacher === NONE ? !x.teachers.length : x.teachers.indexOf(teacher) >= 0)); }
+    var filtered = !!(subject || teacher || dept), bands = L.map(function (l) { return l.block; }), band = bands.indexOf(f.band) >= 0 ? f.band : "";
+    function hit(x) { return inDept(x) && (!subject || x.subject === subject) && (!teacher || (teacher === NONE ? !x.teachers.length : x.teachers.indexOf(teacher) >= 0)); }
     var shown = L.map(function (l) {
       var c = {}; Object.keys(l).forEach(function (k) { c[k] = l[k]; });
       c.groups = l.groups.map(function (g) { var d = {}; Object.keys(g).forEach(function (k) { d[k] = g[k]; }); d.match = hit(g); return d; });
       return c;
     }).filter(function (l) { return (!band || l.block === band) && (!filtered || l.groups.some(function (g) { return g.match; })); });
-    return { f: { level: level, subject: subject, teacher: teacher, band: band }, filtered: filtered, subjects: subjects, teachers: teachers, bands: bands, none: none, pool: P.filter(hit), lanes: shown };
+    return { f: { level: level, subject: subject, teacher: teacher, band: band, dept: dept }, filtered: filtered, depts: depts, subjects: subjects, teachers: teachers, bands: bands, none: none, pool: P.filter(hit), lanes: shown };
   }
 
   return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, pullOutCode: pullOutCode, lanes: lanes, pool: pool, view: view, NONE: NONE, dropRow: dropRow, dropBand: dropBand, bandRules: bandRules, renameBand: renameBand,
