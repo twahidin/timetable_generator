@@ -19,7 +19,7 @@ code and download PDFs. The app does not generate timetables itself.
 6 Configuration & constraints (the school-wide settings, teacher block-outs, fixed lessons and every other rule) ·
 7 Download · 8 Upload and edit · 9 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
 step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Fixed lessons and More
-rules sheets. Step 4 shows the teachers two ways, **Cards** (a column per department, a card per teacher) and **Table**; the choice is
+rules sheets. Step 4 shows the teachers two ways, **Cards** (a column per department, a card per teacher; with one department shown its cards go across in three columns) and **Table**; the choice is
 remembered in your browser. The **Roles** card is below the teachers: the teacher list is checked against it. A teacher can
 have a **second department** beside their own (the committee gives it, and a head cannot): drag a department chip from
 the row above the columns onto a teacher's card, or pick it in the **Second department** box (in the open card or in the

@@ -377,6 +377,12 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .tkdept[draggable=true]{cursor:grab;border:1px solid var(--line)}
 .tkcols{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-items:start}
 .tkcol{min-width:0;display:flex;flex-direction:column;gap:8px}
+/* one department shown: its cards go across the page in three columns, so the list is a third as long */
+.tkcols.one{grid-template-columns:minmax(0,1fr)}
+.tkcols.one .tkcol{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 14px;align-items:start}
+.tkcols.one .tkhead,.tkcols.one .tkcol>p{grid-column:1/-1}
+@media (max-width:1100px){.tkcols.one .tkcol{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:700px){.tkcols.one .tkcol{grid-template-columns:minmax(0,1fr)}}
 .tkhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;border-bottom:2px solid var(--line);padding-bottom:4px}
 .tkhead b{color:var(--navy)}
 .tkcard{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel);cursor:pointer}

@@ -1319,7 +1319,7 @@ function teachersCards(cols, iss) {
       <div class="tkloadrow"><div class="tkload${over ? " over" : ""}" title="${g} periods given${other ? ` + ${other} other duties` : ""}${A ? `, allowance ${A}` : ""}"><i style="width:${A ? Math.min(100, Math.round(100 * tot / A)) : 0}%"></i></div><span class="${over ? "overtxt" : "muted"} small">${A ? `${tot} / ${A}` : `${tot} periods`}</span></div>
       ${lc[c.ti] ? `<div class="tkcheck">${esc(lc[c.ti])}</div>` : ""}${t.provisional === "Yes" ? `<div class="small">${tkMark(t)}</div>` : ""}</div>`;
   };
-  return `${chipBar}<div class="tkcols">${cols.map(col => `<section class="tkcol"><div class="tkhead"><b>${col.dept === "" ? "No department yet" : esc(col.dept)}</b><span class="muted small">${col.cards.length} teacher${col.cards.length === 1 ? "" : "s"}</span></div>
+  return `${chipBar}<div class="tkcols${cols.length === 1 ? " one" : ""}">${cols.map(col => `<section class="tkcol"><div class="tkhead"><b>${col.dept === "" ? "No department yet" : esc(col.dept)}</b><span class="muted small">${col.cards.length} teacher${col.cards.length === 1 ? "" : "s"}</span></div>
     ${col.cards.length ? col.cards.map(c => card(c, col.dept)).join("") : `<p class="muted small">No teachers yet.</p>`}</section>`).join("")}</div>`;
 }
 function tkOpenCard(ti, cardEl) {   // opens the card that was clicked, in its column (from the keyboard, the name button opens it)
