@@ -167,6 +167,22 @@ var Groups = (function () {
     spec.blocks.splice(spec.blocks.indexOf(band), 1);
     return { groups: mine.length, kept: kept };
   }
+  /* a band takes a new name; its groups and the rules on step 6 that name it follow, so nothing is left pointing at the old name
+     -> {name, groups, rules} (same: true when the name is the one it has), or {error: sentence} with nothing changed */
+  function renameBand(spec, block, to) {
+    var band = bandOf(spec, block), name = String(to || "").trim().replace(/\s+/g, " ");
+    if (!band) return { error: "There is no band called " + block + "." };
+    if (rows(spec, "blocks").filter(function (b) { return b && b.block === block; }).length > 1) return { error: "Two bands are called " + block + ". Rename one in the Table view first." };   // their groups cannot be told apart by name
+    if (!name) return { error: "Give the band a name." };
+    if (name === block) return { name: name, groups: 0, rules: 0, same: true };
+    var dup = rows(spec, "blocks").find(function (b) { return b && b !== band && norm(b.block) === norm(name); });
+    if (dup) return { error: dup.block + " exists already." };
+    var groups = 0, rulesN = 0;
+    rows(spec, "lessons").forEach(function (x) { if (x && x.block === block) { x.block = name; groups++; } });
+    rows(spec, "rules").forEach(function (r) { if (r && r.scope === "Block" && r.target === block) { r.target = name; rulesN++; } });
+    band.block = name;
+    return { name: name, groups: groups, rules: rulesN };
+  }
   /* how many rules on step 6 name the band */
   function bandRules(spec, block) { return rows(spec, "rules").filter(function (r) { return r && r.scope === "Block" && r.target === block; }).length; }
 
@@ -250,7 +266,7 @@ var Groups = (function () {
     return { f: { level: level, subject: subject, teacher: teacher, band: band }, filtered: filtered, subjects: subjects, teachers: teachers, bands: bands, none: none, pool: P.filter(hit), lanes: shown };
   }
 
-  return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, pullOutCode: pullOutCode, lanes: lanes, pool: pool, view: view, NONE: NONE, dropRow: dropRow, dropBand: dropBand, bandRules: bandRules,
+  return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, pullOutCode: pullOutCode, lanes: lanes, pool: pool, view: view, NONE: NONE, dropRow: dropRow, dropBand: dropBand, bandRules: bandRules, renameBand: renameBand,
     newGroup: newGroup, addOnePerClass: addOnePerClass, newBand: newBand, toBand: toBand, fromBand: fromBand, shift: shift };
 })();
 if (typeof module !== "undefined") module.exports = Groups;

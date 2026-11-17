@@ -1713,7 +1713,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
   for (const k of ["mview", "mall", "mnone", "munplaced", "madd", "mnew", "mnewcancel", "mnewgo"]) if (b.dataset[k] !== undefined) { mapAction(k, b.dataset[k]); return; }
   if (b.dataset.gdel !== undefined && e.detail > 1) return;   // the second click of a double click would delete the row that moved up under the pointer
-  for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject", "gall", "gnone", "gclear", "gmove", "gout", "gdel", "gtab", "gbdel", "gbyes", "gbno"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
+  for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject", "gall", "gnone", "gclear", "gmove", "gout", "gdel", "gtab", "gbdel", "gbyes", "gbno", "gbname", "gbsave", "gbcancel"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
   if (b.dataset.mprofile) { M.profile = b.dataset.mprofile; render(); return; }
   if (b.dataset.mclose !== undefined) { M.profile = null; render(); return; }
   if (b.dataset.mx) { const [li, cls, ...nm] = b.dataset.mx.split("|"); cardRemove(`${li}|${cls}`, nm.join("|")); return; }
@@ -2120,6 +2120,10 @@ function btApply() {   // after a keystroke in "Name has": show and hide the row
   const el = $("#btN"); if (el) el.textContent = `${n} of ${rows.length} shown`;
 }
 /* ---- the Groups and bands view: form state and actions */
+document.addEventListener("keydown", e => {   // in the box for a band's name: Enter saves, Escape leaves the name as it was
+  if (!e.target || e.target.id !== "gbName" || e.isComposing || !(e.key === "Enter" || e.key === "Escape")) return;
+  e.preventDefault(); e.stopPropagation(); groupsAction(e.key === "Enter" ? "gbsave" : "gbcancel");
+}, true);
 const classesAt = lv => S.spec.classes.filter(c => c.level === lv).map(c => c.class);
 function gfState() { const lv = levels()[0] || ""; if (!M.gf) M.gf = { level: lv, tag: "", subject: "", block: "", classes: [], students: "" }; if (!levels().includes(M.gf.level)) M.gf.level = lv; return M.gf; }
 function bfState() { const lv = levels()[0] || ""; if (!M.bf) M.bf = { level: lv, subjects: [], classes: classesAt(lv), name: "", everyone: true, touched: false, evTouched: false }; if (!levels().includes(M.bf.level)) M.bf.level = lv; return M.bf; }
@@ -2130,6 +2134,7 @@ function gpView() {   // what the filter shows; a choice that is no longer on of
   const gp = gpState(), v = Groups.view(S.spec, gp), shown = new Set(v.pool.map(p => S.spec.lessons[p.li]._id));
   gp.subject = v.f.subject; gp.teacher = v.f.teacher; gp.band = v.f.band; gp.ticked = new Set([...gp.ticked].filter(id => shown.has(id)));
   if (M.gask && !v.lanes.some(l => l.block === M.gask)) M.gask = null;   // a question about a band that is not shown is withdrawn
+  if (M.grename != null && (gTab() !== "bands" || !v.lanes.some(l => l.block === M.grename))) { M.grename = null; M.grenameText = null; }   // and so is a name being changed
   return v; }
 function gpShow(level, row, block) {   // after an add: the filter and the tab must not hide what was just made (row: the new lesson row, or none for a band, which has no groups yet; block: its band, if any)
   const gp = gpState(); if (gp.level && level && gp.level !== level) { gp.level = level; M.gpTo = ""; }
@@ -2173,7 +2178,10 @@ function lanesView(v) {   // the bands the filter shows as lanes, each whole; a 
   const ask = l => { const n = l.groups.length, r = Groups.bandRules(S.spec, l.block);   // the question "Delete band" asks, in the band itself
     return `<div class="gask"><div>Delete ${esc(l.block)}?${n ? ` It has ${n} group${s(n)}.` : ""}${r ? ` ${r} rule${s(r)} on step 6 name${r === 1 ? "s" : ""} this band and will need another.` : ""}</div>
       <div class="row">${n ? `<button class="small danger" data-gbyes="all">Delete the band and its ${n} group${s(n)}</button><button class="small" data-gbyes="keep">Delete the band, keep the group${s(n)}</button>` : `<button class="small danger" data-gbyes="all">Delete the band</button>`}<button class="small" data-gbno>Cancel</button></div></div>`; };
-  const lane = l => `<div class="lane" data-glane="${esc(l.block)}"><div class="row small" style="justify-content:space-between"><b>${esc(l.block)}</b><span class="muted">${esc(l.classes.join(", "))}${l.everyone ? " · everyone takes one" : ""}</span><button class="small danger" data-gbdel="${esc(l.block)}">Delete band</button></div><div class="muted small">Its groups have lessons at the same time.</div>
+  const name = l => M.grename === l.block   // the band's name: a click on it opens a box to change it, there
+    ? `<span class="gbedit"><input id="gbName" value="${esc(M.grenameText ?? l.block)}" aria-label="The band's name"><button class="small primary" data-gbsave>Save</button><button class="small" data-gbcancel>Cancel</button></span>`
+    : `<button class="gbtitle" data-gbname="${esc(l.block)}" title="Change the band's name"><b>${esc(l.block) || "(no name yet)"}</b><span class="muted small">Rename</span></button>`;
+  const lane = l => `<div class="lane" data-glane="${esc(l.block)}"><div class="row small" style="justify-content:space-between">${name(l)}<span class="muted">${esc(l.classes.join(", "))}${l.everyone ? " · everyone takes one" : ""}</span><button class="small danger" data-gbdel="${esc(l.block)}">Delete band</button></div><div class="muted small">Its groups have lessons at the same time.</div>
     ${M.gask === l.block ? ask(l) : ""}${l.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}${l.groups.map(g => grow(g, l)).join("") || `<div class="muted small">No groups yet: tick rows under Single teaching groups and move them here, or add groups above.</div>`}</div>`;
   return `<section class="glanes card"><h3 style="margin:0 0 6px">Banded teaching groups${gp.level ? ` at ${esc(gp.level)}` : ""}</h3><div class="llist keep">${byLevel(lanes, lane) || `<p class="muted small">${v.filtered ? "No band has a group that matches." : `No bands at ${esc(gp.level || "any level")} yet. Add one above.`}</p>`}</div></section>`;
 }
@@ -2210,6 +2218,14 @@ function bandDelete(block, keep) {   // a band is deleted, with its groups or le
   save(); render(); const g = `${r.groups} group${r.groups === 1 ? "" : "s"}`;
   toast(`Deleted the band ${block}${!r.groups ? "." : keep ? `. Its ${g} ${r.groups === 1 ? "is a single teaching group" : "are single teaching groups"} now.` : ` and its ${g}.`}${named ? ` ${named} rule${named === 1 ? "" : "s"} on step 6 still name${named === 1 ? "s" : ""} it.` : ""}${shiftNote(sh)} Undo, at the top, brings it back.`);
 }
+function bandRename(block, to) {   // a band's new name, typed on the band itself; its groups and the rules that name it follow
+  const r = Groups.renameBand(S.spec, block, to);
+  if (r.error) { toast(r.error); const box = $("#gbName"); if (box) box.focus(); return; }
+  M.grename = null; M.grenameText = null; if (r.same) { render(); return; }
+  const gp = gpState(), gf = gfState(); if (gp.band === block) gp.band = r.name; if (M.gpTo === block) M.gpTo = r.name; if (gf.block === block) gf.block = r.name;
+  save(); render(); const s = n => n === 1 ? "" : "s";
+  toast(`${block || "The band"} is now ${r.name}.${r.groups ? ` Its ${r.groups} group${s(r.groups)} ${r.groups === 1 ? "follows" : "follow"}.` : ""}${r.rules ? ` ${r.rules} rule${s(r.rules)} on step 6 ${r.rules === 1 ? "follows" : "follow"} too.` : ""} Undo, at the top, brings it back.`);
+}
 function rowOut(li) {
   const x = S.spec.lessons[li]; if (!x || !x.block) return; const block = x.block;
   const sh = Groups.shift(S.spec, c => { Groups.fromBand(c, li); Groups.pullOutCode(c, li); }); if (!askShift(sh)) return;
@@ -2225,6 +2241,9 @@ function groupsAction(k, v) {
   if (k === "gdel") { rowDelete(Number(v)); return; }
   if (k === "gbdel") { M.gask = M.gask === v ? null : v; render(); return; }   // the question opens in the band; a second press closes it
   if (k === "gbno") { M.gask = null; render(); return; }
+  if (k === "gbname") { M.grename = v; M.grenameText = null; M.gask = null; render(); const box = $("#gbName"); if (box) { box.focus(); box.select(); } return; }
+  if (k === "gbcancel") { M.grename = null; M.grenameText = null; render(); return; }
+  if (k === "gbsave") { const box = $("#gbName"); if (M.grename != null && box) bandRename(M.grename, box.value); return; }
   if (k === "gbyes") { if (M.gask) bandDelete(M.gask, v === "keep"); return; }
   if (k === "gnone") { gpState().ticked.clear(); render(); return; }
   if (k === "gmove") { moveRows(gpIdx([...gpState().ticked]), M.gpTo || ""); return; }
@@ -2567,6 +2586,7 @@ document.addEventListener("input", e => {
   if (e.target.id === "fxAskIn") { fxHelp().words = e.target.value; return; }
   if (e.target.id === "gfStudents") { gfState().students = e.target.value; return; }
   if (e.target.id === "btQ") { btState().q = e.target.value; btApply(); return; }
+  if (e.target.id === "gbName") { M.grenameText = e.target.value; return; }   // kept, so a redraw from elsewhere does not lose what was typed
   if (e.target.id === "bfName") { const bf = bfState(); bf.name = e.target.value; bf.touched = true; const ev = $("#bfEveryone"); if (ev && !bf.evTouched) ev.checked = !/option|elective/i.test(bf.name); return; }
   if (e.target.id === "mQ") { M.q = e.target.value; const rb = $("#rbody"); if (rb) rb.innerHTML = rosterList(mapDept()); return; }   // the roster only: a full redraw would take the caret
   if (["mnName", "mnShort", "mnAllow"].includes(e.target.id) && M.nf) { M.nf[{ mnName: "name", mnShort: "short", mnAllow: "allowance" }[e.target.id]] = e.target.value; return; }
