@@ -133,7 +133,7 @@ t("view: with no filter, every row and every band of the level, and what the fil
   assert.deepStrictEqual(v.lanes.map(l => [l.block, l.groups.map(g => g.match)]), [["Sec 1 Mathematics", [true, true]], ["Sec 1 Option A", [true]]]);
   assert.deepStrictEqual(v.subjects, ["Mathematics G3", "Mathematics G2", "Art", "Music"]);   // the setup's order
   assert.deepStrictEqual(v.teachers, ["Arjun Nair", "Bala Menon", "Visiting Coach"]);   // the setup's teachers first, then a name only a row carries
-  assert.strictEqual(v.none, true); assert.deepStrictEqual(v.f, { level: "Sec 1", subject: "", teacher: "" });
+  assert.strictEqual(v.none, true); assert.deepStrictEqual(v.f, { level: "Sec 1", subject: "", teacher: "", band: "" });
   assert.strictEqual(v.filtered, false);
 });
 t("view: all levels", () => {
@@ -164,7 +164,7 @@ t("view: one subject, with a teacher too; a band with no group that matches is n
 });
 t("view: a subject or a teacher that is not at the level shown counts as all, and the view says what it used", () => {
   const v = Groups.view(wide(), { level: "Sec 2", subject: "Art", teacher: "Bala Menon" });
-  assert.deepStrictEqual(v.f, { level: "Sec 2", subject: "", teacher: "" }); assert.deepStrictEqual(v.pool.map(p => p.li), [7]);
+  assert.deepStrictEqual(v.f, { level: "Sec 2", subject: "", teacher: "", band: "" }); assert.deepStrictEqual(v.pool.map(p => p.li), [7]);
   assert.deepStrictEqual(v.subjects, ["Mathematics G3"]); assert.deepStrictEqual(v.teachers, ["Arjun Nair"]); assert.strictEqual(v.filtered, false);
   const w = Groups.view(wide(), { level: "Sec 9" });   // a level the school does not have, and nothing else said
   assert.deepStrictEqual([w.pool, w.lanes, w.subjects, w.teachers, w.none], [[], [], [], [], false]);
@@ -176,5 +176,43 @@ t("view: a name the setup lists twice is offered once; a teacher whose name is a
   const v = Groups.view(s, { level: "Sec 1", subject: "", teacher: "-" });
   assert.deepStrictEqual(v.subjects, ["Mathematics G3", "Mathematics G2", "Art", "Music"]); assert.deepStrictEqual(v.teachers, ["Arjun Nair", "Bala Menon", "-", "Visiting Coach"]);   // the two the setup does not list, as the rows have them
   assert.deepStrictEqual(v.pool.map(p => p.li), [4]); assert.strictEqual(v.f.teacher, "-"); assert.notStrictEqual(Groups.NONE, "-");
+});
+t("view: one band alone; the rows not in a band are as the other choices say", () => {
+  const v = Groups.view(wide(), { level: "Sec 1", subject: "", teacher: "", band: "Sec 1 Option A" });
+  assert.deepStrictEqual(v.bands, ["Sec 1 Mathematics", "Sec 1 Option A"]); assert.strictEqual(v.f.band, "Sec 1 Option A");
+  assert.deepStrictEqual(v.lanes.map(l => [l.block, l.groups.map(g => g.match)]), [["Sec 1 Option A", [true]]]); assert.deepStrictEqual(v.pool.map(p => p.li), [3, 4, 5]);
+  assert.strictEqual(v.filtered, false);   // a band alone does not fade a group
+  const w = Groups.view(wide(), { level: "Sec 1", subject: "", teacher: "Arjun Nair", band: "Sec 1 Option A" });   // nobody of that name in that band
+  assert.deepStrictEqual(w.lanes, []); assert.strictEqual(w.f.band, "Sec 1 Option A");
+  const x = Groups.view(wide(), { level: "Sec 2", band: "Sec 1 Option A" });   // not a band of the level shown: counts as all
+  assert.strictEqual(x.f.band, ""); assert.deepStrictEqual(x.lanes.map(l => l.block), ["Sec 2 Option A"]); assert.deepStrictEqual(x.bands, ["Sec 2 Option A"]);
+});
+t("dropRow: a row is deleted, in a band or not", () => {
+  const s = fixture(); assert.deepStrictEqual(Groups.dropRow(s, 3), { subject: "Art", classes: ["1A", "1B"], block: null, code: "Entire Class" });
+  assert.deepStrictEqual(s.lessons.map(x => x._id), ["l1", "l2", "l3", "l5", "l6", "l7"]);
+  assert.deepStrictEqual(Groups.dropRow(s, 0), { subject: "Mathematics G3", classes: ["1A", "1B"], block: "Sec 1 Mathematics", code: "1MAP1" });
+  assert.strictEqual(Groups.dropRow(s, 99), null); assert.strictEqual(Groups.dropRow({}, 0), null); assert.strictEqual(s.lessons.length, 5);
+});
+t("shift: a deleted row's code counts as changed, with the codes that renumber after it", () => {
+  const s = fixture(); s.rules = [{ scope: "Group", target: "1MAP1", rule: "Fixed at" }];
+  assert.deepStrictEqual(Groups.shift(s, c => Groups.dropRow(c, 0)), { changes: [["l2", "1MAP2", "1MAP1"], ["l1", "1MAP1", null]], students: 2, rules: 1 });
+  assert.deepStrictEqual(Groups.shift(s, c => Groups.dropRow(c, 3)), { changes: [], students: 0, rules: 0 });   // a whole-class row has no code to lose
+});
+t("dropBand: the band goes; its groups go with it, or stay as rows not in a band", () => {
+  const s = fixture(); s.rules = [{ scope: "Block", target: "Sec 1 Mathematics", rule: "Fixed at" }, { scope: "Block", target: "Sec 1 Option A", rule: "Fixed at" }, { scope: "Class", target: "Sec 1 Mathematics", rule: "Fixed at" }];
+  assert.strictEqual(Groups.bandRules(s, "Sec 1 Mathematics"), 1); assert.strictEqual(Groups.bandRules(s, "No such band"), 0);
+  assert.deepStrictEqual(Groups.dropBand(s, "Sec 1 Mathematics", true), { groups: 2, kept: 2 });   // 30 and 32 of the 62 in 1A and 1B: each a group of its own, with a kept code
+  assert.deepStrictEqual(s.blocks.map(b => b.block), ["Sec 1 Option A"]);
+  assert.deepStrictEqual(s.lessons.slice(0, 3).map(x => [x._id, x.block, !!x.code_override]), [["l1", null, true], ["l2", "Sec 1 Option A", false], ["l3", null, true]]);
+  assert.deepStrictEqual([s.lessons[0].code_override, s.lessons[2].code_override], ["1MAP2", "1MAA1"]);   // 1MAA1 is kept; 1MAP1 is now the other band's group, so the first free one
+  const k = fixture(); k.lessons[1].block = null;   // no other band has the subject: every kept group keeps the code it had
+  Groups.dropBand(k, "Sec 1 Mathematics", true); assert.deepStrictEqual([k.lessons[0].code_override, k.lessons[2].code_override], ["1MAP1", "1MAA1"]);
+  assert.deepStrictEqual(Groups.shift(fixture(), c => { c.lessons[1].block = null; }).changes.length, 1);
+  const k2 = fixture(); k2.lessons[1].block = null; assert.deepStrictEqual(Groups.shift(k2, c => Groups.dropBand(c, "Sec 1 Mathematics", true)).changes, []);   // so nothing is renumbered
+  const d = fixture(); assert.deepStrictEqual(Groups.dropBand(d, "Sec 1 Mathematics", false), { groups: 2, kept: 0 });
+  assert.deepStrictEqual(d.lessons.map(x => x._id), ["l2", "l4", "l5", "l6", "l7"]); assert.deepStrictEqual(d.blocks.map(b => b.block), ["Sec 1 Option A"]);
+  assert.strictEqual(Groups.dropBand(d, "No such band", true), null); assert.strictEqual(Groups.dropBand({}, "x", false), null);
+  const e = fixture(); e.blocks.push({ _id: "b9", block: "Sec 1 Empty", level: "Sec 1", classes: ["1A"] });
+  assert.deepStrictEqual(Groups.dropBand(e, "Sec 1 Empty", false), { groups: 0, kept: 0 }); assert.strictEqual(e.blocks.length, 2); assert.strictEqual(e.lessons.length, 7);
 });
 console.log(`${n} cases passed`);
