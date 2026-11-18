@@ -15,6 +15,8 @@ code and download PDFs. The app does not generate timetables itself.
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 
+**Preview before publishing.** On steps 8 and 9, **Preview as it will be published** opens the draft as the published timetable page would show it, in a new tab, for the committee only. A banner says it is a preview, how many lessons are waiting in Not placed (they are not on it) and whether a critical mistake still stops publishing. Nothing is published, and the preview has no PDF or file links.
+
 **The published timetable's Lessons tab.** One filter (week, day, time, level, class, department, subject, teacher, room, band, or any word) and three ways to see what it finds: **Class grids** (each class's timetable as on its own page, one under another, with the lessons that match in colour and the rest faded; a class with no match is left out), **One page** (every class at once as a small timetable of blocks; a click opens the class) and **Table** (sortable, with the CSV download). The address keeps the filter and the view, so a link can be shared.
 
 **The steps.** Start · School & day · 1 Venues · 2 Classes · 3 Subjects · 4 Teachers · 5 Department map ·

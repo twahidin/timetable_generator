@@ -63,6 +63,7 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .cell.ext{border-style:dashed}.cell.ext:after{content:"after school";font-size:9.5px;font-weight:700;color:#8A5300}
 .cell:hover{filter:brightness(.97);z-index:2;outline:2px solid color-mix(in srgb,var(--a) 50%,transparent)}
 .cell.dim{opacity:.22;filter:grayscale(1)}
+.banner{background:#FFF4D6;color:#5C4400;padding:8px 20px;font-size:13px;font-weight:600;border-bottom:1px solid #E8D9A8}
 .lsw{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.lsw button{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:5px 12px;cursor:pointer;font-size:13px;color:var(--sub)}
 .lsw button.on{background:var(--accent);border-color:var(--accent);color:var(--panel)}.lsw .count{margin:0 0 0 6px}
 .llevel{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:18px 0 8px}
@@ -108,7 +109,7 @@ html.inapp:not([data-theme="dark"]) .card,html.inapp:not([data-theme="dark"]) .b
 @media (max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:12px 16px 30px}header.top{gap:10px}.brand{flex:1 1 0}.status{font-size:11px;padding:4px 8px}.browse{position:static;max-height:300px}header.top{flex-wrap:wrap;padding:10px 16px}.search{order:3;max-width:none;flex-basis:100%}
   nav.tabs{padding:4px 16px 0}.stats{margin-left:0}.card{padding:14px}}
 @media print{@page{size:A4 landscape;margin:9mm}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
-  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw{display:none!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
+  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw,.banner{display:none!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
   .legend{grid-template-columns:repeat(3,1fr);font-size:10px}.vhead h1{font-size:20px}}
 </style>
 </head>
@@ -555,6 +556,7 @@ if (APP) {
   box.innerHTML = (APP.files || []).map(([t, h]) => `<a class="btn" href="${esc(h)}">${esc(t)}</a>`).join("") + (APP.home ? `<a class="btn" href="${esc(APP.home)}">${esc(APP.homeLabel || "Back")}</a>` : "") + (APP.logout ? `<a class="btn" href="${esc(APP.logout)}">Sign out</a>` : "");
   $("#theme").before(box);
   if (APP.placeholder) $("#q").placeholder = APP.placeholder;
+  if (APP.banner) { const b = document.createElement("div"); b.className = "banner"; b.textContent = APP.banner; document.querySelector("header.top").after(b); }   /* a preview says so, above everything */
 }
 const st = $("#status"); st.className = "status " + (D.checks.ok ? "ok" : "bad"); st.textContent = D.checks.ok ? "All checks passed" : `${D.checks.problems.length} problems`; st.style.cursor = "pointer"; st.onclick = () => show("checks", null);
 if (!TABS.some(t => t[0] === "checks")) st.style.display = "none";
