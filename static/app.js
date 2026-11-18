@@ -891,12 +891,14 @@ function render() {
   const id = S.asking ? "_old" : STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
   // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
   const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap, .keep")].map(t => [t.scrollTop, t.scrollLeft]) : [];
+  const bars = same ? [...main.querySelectorAll("[id]")].filter(e => /^h[vctbw][A-Z]/.test(e.id)).map(e => [e.id, e.value]) : [];   // the boxes of the "Add …" bars (hvPre, hcNames, htDept…): kept as they are
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && (f.id ? `#${CSS.escape(f.id)}` : f.dataset.k ? `[data-k="${CSS.escape(f.dataset.k)}"]` : "");
   document.querySelector(".layout").classList.toggle("wide", id === "edit" || id === "publish");   // the setup's "Things to fix" column is not shown on steps 8 and 9: the timetable takes its width
   G.shown = id; bdEnsure(id, true); const bw = same ? main.querySelector(".bdwrap") : null, bpos = bw ? [bw.scrollLeft, bw.scrollTop] : null;
   main.innerHTML = (S.practice && !S.asking ? `<div class="practice"><span>Practice copy: nothing here is saved for the school.</span><button id="practiceBack">Back to the school's setup</button></div>` : "") + (VIEWS[id] || (() => ""))();
   headLocks(main, id); if (S.board) bdPaint();   // the board's colours and outlines for the card selected
   main.querySelectorAll(".tablewrap, .keep").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
+  bars.forEach(([bid, v]) => { const e = document.getElementById(bid); if (e && e.value !== v && (e.tagName !== "SELECT" || [...e.options].some(o => o.value === v))) e.value = v; });
   fitAreas(main);
   const bw2 = bpos && main.querySelector(".bdwrap"); if (bw2) { bw2.scrollLeft = bpos[0]; bw2.scrollTop = bpos[1]; }
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
@@ -1757,8 +1759,8 @@ document.addEventListener("click", async e => {
   if (b.dataset.copyday) { const lv = b.dataset.copyday; const ds = S.spec.day_structure[lv]; const f = ds[dayNames()[0]]; dayNames().forEach(d => ds[d] = f); save(); render(); return; }
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
   for (const k of ["mview", "mall", "mnone", "munplaced", "madd", "mnew", "mnewcancel", "mnewgo"]) if (b.dataset[k] !== undefined) { mapAction(k, b.dataset[k]); return; }
-  if (b.dataset.gdel !== undefined && e.detail > 1) return;   // the second click of a double click would delete the row that moved up under the pointer
-  for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject", "gall", "gnone", "gclear", "gmove", "gout", "gdel", "gtab", "gbdel", "gbyes", "gbno", "gbname", "gbsave", "gbcancel"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
+  if ((b.dataset.gdel !== undefined || b.dataset.gtx !== undefined) && e.detail > 1) return;   // the second click of a double click would delete the row that moved up under the pointer
+  for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject", "gall", "gnone", "gclear", "gmove", "gout", "gdel", "gtab", "gbdel", "gbyes", "gbno", "gbname", "gbsave", "gbcancel", "gtx"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
   if (b.dataset.mprofile) { M.profile = b.dataset.mprofile; render(); return; }
   if (b.dataset.mclose !== undefined) { M.profile = null; render(); return; }
   if (b.dataset.mx) { const [li, cls, ...nm] = b.dataset.mx.split("|"); cardRemove(`${li}|${cls}`, nm.join("|")); return; }
@@ -1912,6 +1914,7 @@ document.addEventListener("change", async e => {
     if (el.dataset.sname !== undefined) sjName(e); else if (el.dataset.sset !== undefined) sjSet(e); else sjTick(e);
     return; }
   const path = el.dataset.k; if (!path) return;
+  if (path.startsWith("_h")) return;   // a list on an "Add …" bar (kind, level, department, band, subject): the bar's own, read when Add is pressed. It used to be saved as a stray value and the page drawn again, which put every box of the bar back to its default
   if (path === "spec.school.parents_name") { const t = el.value.trim(); if (t) sc().parents_name = t; else delete sc().parents_name; save(); render(); poll(); return; }   // an empty box takes the key away
   const tkp = /^spec\.teachers\.(\d+)\.(dept2?)$/.exec(path);
   if (tkp && tkp[2] === "dept2") { tkSecond(Number(tkp[1]), el.value); return; }   // the Second department box: as a dropped chip is
@@ -2015,12 +2018,22 @@ function setPattern(x, typed) {   // false (with a message) when it cannot be re
   x.pattern = p; delete x.pattern_text; return true;
 }
 function helper(k) {
-  if (k === "venues") { const pre = $("#hvPre").value, a = Number($("#hvFrom").value), b = Number($("#hvTo").value), kind = $("#hvKind").value; for (let i = a; i <= b; i++) S.spec.venues.push({ room: `${pre}${String(i).padStart(2, "0")}`, kind, capacity: 40 }); }
+  if (k === "venues") {
+    const r = VenueView.newRooms(S.spec, $("#hvPre").value, $("#hvFrom").value, $("#hvTo").value), kind = $("#hvKind").value || null;
+    if (r.error) { toast(r.error); return; }
+    if (!r.names.length) { toast(r.skipped === 1 ? "That room is there already." : "Those rooms are there already."); return; }
+    const first = S.spec.venues.length, n = r.names.length, blocks = VV.view === "blocks";
+    r.names.forEach(room => S.spec.venues.push({ room, kind, capacity: 40 })); Sync.ensureIds(S.spec);
+    if (blocks) { const t = vvTicks(); S.spec.venues.slice(first).forEach(v => t.add(v._id)); }   // ticked, so the bar can put them in a block and floor at once
+    save(); render(); const el = document.getElementById(`venues-${first}`); if (el) el.scrollIntoView({ block: "center" });
+    toast(`${n} room${n === 1 ? "" : "s"} added${r.skipped ? ` (${r.skipped} there already ${r.skipped === 1 ? "was" : "were"} left)` : ""}.${blocks ? ` ${n === 1 ? "It is" : "They are"} under No block yet, ticked: pick a block and a floor on the bar to place ${n === 1 ? "it" : "them"}.` : ""}`); return;
+  }
   if (k === "classes") {
     const lv = $("#hcLevel").value, size = Number($("#hcSize").value) || 38; const used = new Set(S.spec.classes.map(c => c.home_room)); const free = S.spec.venues.filter(v => (v.kind || "classroom") === "classroom" && !used.has(v.room)).map(v => v.room);
     $("#hcNames").value.split(",").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.classes.push({ class: `${String(lv).slice(-1)}${n}`, level: lv, size, home_room: free.shift() || null }));
+    $("#hcNames").value = "";   // added: the bar keeps its other boxes, not the names
   }
-  if (k === "teachers") { const dept = $("#htDept").value, allow = Number($("#htAllow").value) || null; $("#htNames").value.split("\n").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.teachers.push({ name: n, short: n.split(" ")[0], dept, allowance: allow, provisional: isHead() && !S.practice ? "Yes" : "No" })); }
+  if (k === "teachers") { const dept = $("#htDept").value, allow = Number($("#htAllow").value) || null; $("#htNames").value.split("\n").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.teachers.push({ name: n, short: n.split(" ")[0], dept, allowance: allow, provisional: isHead() && !S.practice ? "Yes" : "No" })); $("#htNames").value = ""; }
   if (k === "groups") { const b = S.spec.blocks.find(x => x.block === $("#hbBlock").value), s = $("#hbSubj").value, n = Number($("#hbN").value) || 1, st = Number($("#hbSt").value) || null; if (!b || !s) { toast("Pick a band and a subject."); return; } for (let i = 0; i < n; i++) S.spec.lessons.push({ level: b.level, subject: s, block: b.block, classes: [...(b.classes || [])], teachers: [], students: st }); }
   if (k === "whole") { const lv = $("#hwLevel").value, s = $("#hwSubj").value; if (!s) { toast("Pick a subject."); return; } S.spec.classes.filter(c => c.level === lv).forEach(c => S.spec.lessons.push({ level: lv, subject: s, block: null, classes: [c.class], teachers: [], students: c.size })); }
   save(); render(); toast("Added.");
@@ -2212,8 +2225,9 @@ function gpShow(level, row, block) {   // after an add: the filter and the tab m
   if (gp.band && gp.band !== block) gp.band = "";
   M.gtab = block ? "bands" : "pool"; M.gask = null;
 }
-const gAv = nm => { const t = S.spec.teachers.find(x => x.name === nm);   // the face with the teacher's short name beside it: a face alone does not say who it is
-  return t ? `<span class="gav" title="${esc(nm)}">${avatarOf(t, 24)}<span class="gavn">${esc(t.short || t.name || "")}</span></span>` : `<span class="chip">${esc(nm)}</span>`; };
+const gAv = (nm, li) => { const t = S.spec.teachers.find(x => x.name === nm);   // the face with the teacher's short name beside it: a face alone does not say who it is; with a row (li), a small ✕ takes the teacher off it
+  const off = li === undefined || cpBlock(S.spec.lessons[li]) ? "" : `<button class="gavx" data-gtx="${li}|${esc(nm)}" title="Take ${esc(nm)} off this teaching group" aria-label="Take ${esc(nm)} off this teaching group">✕</button>`;
+  return t ? `<span class="gav" title="${esc(nm)}">${avatarOf(t, 24)}<span class="gavn">${esc(t.short || t.name || "")}</span>${off}</span>` : `<span class="chip">${esc(nm)}${off}</span>`; };
 const byLevel = (items, draw) => gpState().level ? items.map(draw).join("") : levels().concat([...new Set(items.map(x => x.level || ""))].filter(l => !levels().includes(l))).map(lv => { const mine = items.filter(x => (x.level || "") === lv);   // under a heading for each level when every level is shown
   return mine.length ? `<div class="glv">${esc(lv || "No level")}</div>${mine.map(draw).join("")}` : ""; }).join("");
 function barView(v) {   // one filter for both lists: the level (or all), a subject, a teacher (or the rows with none); and one band alone
@@ -2234,7 +2248,7 @@ function tabsView(v) {   // the two lists as tabs, each with how many it shows
 function poolView(v) {   // the rows with no band that the filter shows: tick them and move them into a band, or delete one
   const gp = gpState(), items = v.pool, lanes = Groups.lanes(S.spec, gp.level), where = gp.level || "any level";
   const row = p => { const id = S.spec.lessons[p.li]._id, on = gp.ticked.has(id);
-    return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}"><span style="flex:1;min-width:0">${esc(p.title)}</span>${p.kind === "group" ? `<span class="codeline small">${esc(p.code)}</span>` : ""}<span class="muted small" title="Students">${p.students != null ? p.students : ""}</span><span class="avs" style="margin:0;min-height:0">${p.teachers.map(gAv).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small danger" data-gdel="${p.li}" title="Delete this teaching group">Delete</button></div>`; };
+    return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}"><span style="flex:1;min-width:0">${esc(p.title)}</span>${p.kind === "group" ? `<span class="codeline small">${esc(p.code)}</span>` : ""}<span class="muted small" title="Students">${p.students != null ? p.students : ""}</span><span class="avs" style="margin:0;min-height:0">${p.teachers.map(nm => gAv(nm, p.li)).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small danger" data-gdel="${p.li}" title="Delete this teaching group">Delete</button></div>`; };
   return `<section class="gpool card"><h3 style="margin:0 0 6px">Single teaching groups</h3><p class="muted small" style="margin:0 0 8px">Whole-class rows and groups with their own code, each with who teaches it: the teaching groups that are in no band. Tick rows and move them into a band.</p>
     <div class="row" style="margin:8px 0"><button class="small" data-gall>Select all shown</button><button class="small" data-gnone>Deselect all</button><span class="muted small">${items.length} row${items.length === 1 ? "" : "s"}${gp.ticked.size ? ` · ${gp.ticked.size} ticked` : ""}</span>
       <span style="flex:1"></span><span>Move into band</span><select id="gpTo">${opt("", M.gpTo || "", "")}${lanes.map(l => opt(l.block, M.gpTo || "")).join("")}</select><button data-gmove ${gp.ticked.size && lanes.length ? "" : "disabled"}>Move</button></div>
@@ -2243,7 +2257,7 @@ function poolView(v) {   // the rows with no band that the filter shows: tick th
 function lanesView(v) {   // the bands the filter shows as lanes, each whole; a group that does not match is faded; a band or a group can be deleted
   const gp = gpState(), lanes = v.lanes, s = n => n === 1 ? "" : "s";
   const grow = (g, l) => { const own = g.classes.join(",") !== l.classes.join(",");   // a group of fewer classes than its band says which
-    return `<div class="grow${g.match ? "" : " dim"}"><span class="codeline small">${esc(g.code)}</span><span style="flex:1;min-width:0">${esc(g.subject)}${own ? ` <span class="muted small">${esc(g.classes.join(", "))}</span>` : ""}</span>${g.students != null ? `<span class="muted small" title="Students">${g.students}</span>` : ""}<span class="avs" style="margin:0;min-height:0">${g.teachers.map(gAv).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small" data-gout="${g.li}" title="Out of the band: it becomes a single teaching group">Take out</button><button class="small danger" data-gdel="${g.li}" title="Delete this teaching group">Delete</button></div>`; };
+    return `<div class="grow${g.match ? "" : " dim"}"><span class="codeline small">${esc(g.code)}</span><span style="flex:1;min-width:0">${esc(g.subject)}${own ? ` <span class="muted small">${esc(g.classes.join(", "))}</span>` : ""}</span>${g.students != null ? `<span class="muted small" title="Students">${g.students}</span>` : ""}<span class="avs" style="margin:0;min-height:0">${g.teachers.map(nm => gAv(nm, g.li)).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small" data-gout="${g.li}" title="Out of the band: it becomes a single teaching group">Take out</button><button class="small danger" data-gdel="${g.li}" title="Delete this teaching group">Delete</button></div>`; };
   const ask = l => { const n = l.groups.length, r = Groups.bandRules(S.spec, l.block);   // the question "Delete band" asks, in the band itself
     return `<div class="gask"><div>Delete ${esc(l.block)}?${n ? ` It has ${n} group${s(n)}.` : ""}${r ? ` ${r} rule${s(r)} on step 6 name${r === 1 ? "s" : ""} this band and will need another.` : ""}</div>
       <div class="row">${n ? `<button class="small danger" data-gbyes="all">Delete the band and its ${n} group${s(n)}</button><button class="small" data-gbyes="keep">Delete the band, keep the group${s(n)}</button>` : `<button class="small danger" data-gbyes="all">Delete the band</button>`}<button class="small" data-gbno>Cancel</button></div></div>`; };
@@ -2272,6 +2286,13 @@ function moveRows(lis, block) {
   if (!r.moved) { toast(r.skipped ? `Those rows are of another level than ${block}.` : "Nothing moved."); return; }
   save(); gpState().ticked.clear(); render();
   toast(`Moved ${r.moved} into ${block}.${r.widened.length ? ` ${block} now also covers ${listing(r.widened)}.` : ""}${r.skipped ? ` ${r.skipped} row${r.skipped === 1 ? "" : "s"} of another level ${r.skipped === 1 ? "was" : "were"} left.` : ""}${shiftNote(sh)}`);
+}
+function teacherOff(li, name) {   // a teacher is taken off one teaching group, there in the list; the top bar's Undo puts them back
+  const x = S.spec.lessons[li]; if (!x) return;
+  if (cpBlock(x)) { toast(cpWhy()); return; }
+  if (!DeptMap.undeploy(S.spec, { kind: "group", li }, name)) return;   // the row itself, whatever classes it has
+  const code = (lessonInfo()[li] || {}).code, what = `${code && code !== "Entire Class" ? code + " " : ""}${x.subject || "the row"}${(x.classes || []).length ? ` for ${listing(x.classes)}` : ""}`;
+  save(); render(); toast(`Took ${name} off ${what}. Undo, at the top, puts them back.`);
 }
 function rowDelete(li) {   // a teaching group is deleted, in a band or not; the top bar's Undo brings it back
   if (!S.spec.lessons[li]) return;
@@ -2308,6 +2329,7 @@ function groupsAction(k, v) {
   if (k === "gclear") { const gp = gpState(); gp.dept = ""; gp.subject = ""; gp.teacher = ""; gp.band = ""; M.gask = null; render(); return; }
   if (k === "gtab") { M.gtab = v === "pool" ? "pool" : "bands"; M.gask = null; render(); return; }
   if (k === "gdel") { rowDelete(Number(v)); return; }
+  if (k === "gtx") { const [li, ...nm] = String(v).split("|"); teacherOff(Number(li), nm.join("|")); return; }
   if (k === "gbdel") { M.gask = M.gask === v ? null : v; render(); return; }   // the question opens in the band; a second press closes it
   if (k === "gbno") { M.gask = null; render(); return; }
   if (k === "gbname") { M.grename = v; M.grenameText = null; M.gask = null; render(); const box = $("#gbName"); if (box) { box.focus(); box.select(); } return; }

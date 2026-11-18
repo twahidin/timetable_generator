@@ -97,4 +97,22 @@ t("move: the rooms take the block and the floor; an empty one takes the key away
   assert.strictEqual(VenueView.move({}, [0], "A", "1"), 0); assert.strictEqual(VenueView.move(s, null, "A", "1"), 0);
   assert.deepStrictEqual([s.venues[3].room, s.venues[3].kind, s.venues[3].capacity], ["B2-10", "lab", 30]);   // nothing else of a room changes
 });
+t("newRooms: the names the Add rooms bar makes, without the ones there already", () => {
+  const s = fixture();
+  assert.deepStrictEqual(VenueView.newRooms(s, "C1-", 1, 3), { names: ["C1-01", "C1-02", "C1-03"], skipped: 0 });
+  assert.deepStrictEqual(VenueView.newRooms(s, "B1-", 1, 3), { names: ["B1-01", "B1-02", "B1-03"], skipped: 0 });   // "B1-1" is another name than "B1-01"
+  s.venues.push({ room: " c1-02 " });
+  assert.deepStrictEqual(VenueView.newRooms(s, "C1-", "1", "3"), { names: ["C1-01", "C1-03"], skipped: 1 });   // a name there already, in any letters, is passed over
+  assert.deepStrictEqual(VenueView.newRooms(s, " Lab ", 9, 11), { names: ["Lab 09", "Lab 10", "Lab 11"], skipped: 0 });   // the prefix as typed, but for spaces before it
+  assert.deepStrictEqual(VenueView.newRooms(s, "", 5, 5), { names: ["05"], skipped: 0 });
+});
+t("newRooms: refused with a sentence", () => {
+  const s = fixture();
+  assert.deepStrictEqual(VenueView.newRooms(s, "C", 5, 2), { error: "From is after To." });
+  assert.deepStrictEqual(VenueView.newRooms(s, "C", "", 2), { error: "Give From and To as whole numbers." });
+  assert.deepStrictEqual(VenueView.newRooms(s, "C", 1.5, 2), { error: "Give From and To as whole numbers." });
+  assert.deepStrictEqual(VenueView.newRooms(s, "C", -1, 2), { error: "Give From and To as whole numbers." });
+  assert.deepStrictEqual(VenueView.newRooms(s, "C", 1, 500), { error: "That is 500 rooms at once. Add at most 200 at a time." });
+  assert.deepStrictEqual(VenueView.newRooms({}, "C", 1, 1), { names: ["C01"], skipped: 0 });
+});
 console.log(n + " cases passed");

@@ -83,6 +83,13 @@ t("more than three on a card: none is placed and the card says so", () => {
   assert.deepStrictEqual(r.placed, []); assert.strictEqual(r.refused.length, 2); assert.strictEqual(r.refused[0].why, "2MA2 would have 4 teachers; three is the most.");
   assert.deepStrictEqual(s.lessons[2].teachers, ["Arjun Nair", "Wei Lin Tan"]);
 });
+t("undeploy on the row itself (a group card) takes the teacher off the whole row: no split, the other teachers stay", () => {
+  const s = fixture(), n = s.lessons.length;
+  assert.strictEqual(DeptMap.undeploy(s, { kind: "group", li: 0 }, "Arjun Nair"), true);   // a row of two classes, as the Groups and bands list shows it
+  assert.deepStrictEqual([s.lessons[0].classes, s.lessons[0].teachers, s.lessons.length], [["1A", "1B"], [], n]);
+  assert.strictEqual(DeptMap.undeploy(s, { kind: "group", li: 2 }, "Arjun Nair"), true); assert.deepStrictEqual(s.lessons[2].teachers, ["Wei Lin Tan"]);
+  assert.strictEqual(DeptMap.undeploy(s, { kind: "group", li: 2 }, "Arjun Nair"), false); assert.strictEqual(DeptMap.undeploy(s, { kind: "group", li: 99 }, "Arjun Nair"), false);
+});
 t("undeploy takes a teacher off a card, splitting a shared row first", () => {
   const s = fixture(); assert.strictEqual(DeptMap.undeploy(s, { kind: "class", li: 0, cls: "1A" }, "Arjun Nair"), true);
   assert.deepStrictEqual(s.lessons[0].classes, ["1B"]); assert.deepStrictEqual(s.lessons[0].teachers, ["Arjun Nair"]); assert.deepStrictEqual([s.lessons[4].classes, s.lessons[4].teachers], [["1A"], []]);
