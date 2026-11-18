@@ -891,12 +891,14 @@ function render() {
   const id = S.asking ? "_old" : STEPS[S.step][0]; const main = $("#main"); const y = window.scrollY;
   // on a redraw of the same step, keep where each table was scrolled to (they scroll inside their own box) and the field in use
   const same = G.shown === id, boxes = same ? [...main.querySelectorAll(".tablewrap, .keep")].map(t => [t.scrollTop, t.scrollLeft]) : [];
+  const bars = same ? [...main.querySelectorAll("[id]")].filter(e => /^h[vctbw][A-Z]/.test(e.id)).map(e => [e.id, e.value]) : [];   // the boxes of the "Add …" bars (hvPre, hcNames, htDept…): kept as they are
   const f = same && main.contains(document.activeElement) ? document.activeElement : null, fk = f && (f.id ? `#${CSS.escape(f.id)}` : f.dataset.k ? `[data-k="${CSS.escape(f.dataset.k)}"]` : "");
   document.querySelector(".layout").classList.toggle("wide", id === "edit" || id === "publish");   // the setup's "Things to fix" column is not shown on steps 8 and 9: the timetable takes its width
   G.shown = id; bdEnsure(id, true); const bw = same ? main.querySelector(".bdwrap") : null, bpos = bw ? [bw.scrollLeft, bw.scrollTop] : null;
   main.innerHTML = (S.practice && !S.asking ? `<div class="practice"><span>Practice copy: nothing here is saved for the school.</span><button id="practiceBack">Back to the school's setup</button></div>` : "") + (VIEWS[id] || (() => ""))();
   headLocks(main, id); if (S.board) bdPaint();   // the board's colours and outlines for the card selected
   main.querySelectorAll(".tablewrap, .keep").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
+  bars.forEach(([bid, v]) => { const e = document.getElementById(bid); if (e && e.value !== v && (e.tagName !== "SELECT" || [...e.options].some(o => o.value === v))) e.value = v; });
   fitAreas(main);
   const bw2 = bpos && main.querySelector(".bdwrap"); if (bw2) { bw2.scrollLeft = bpos[0]; bw2.scrollTop = bpos[1]; }
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
@@ -1912,6 +1914,7 @@ document.addEventListener("change", async e => {
     if (el.dataset.sname !== undefined) sjName(e); else if (el.dataset.sset !== undefined) sjSet(e); else sjTick(e);
     return; }
   const path = el.dataset.k; if (!path) return;
+  if (path.startsWith("_h")) return;   // a list on an "Add …" bar (kind, level, department, band, subject): the bar's own, read when Add is pressed. It used to be saved as a stray value and the page drawn again, which put every box of the bar back to its default
   if (path === "spec.school.parents_name") { const t = el.value.trim(); if (t) sc().parents_name = t; else delete sc().parents_name; save(); render(); poll(); return; }   // an empty box takes the key away
   const tkp = /^spec\.teachers\.(\d+)\.(dept2?)$/.exec(path);
   if (tkp && tkp[2] === "dept2") { tkSecond(Number(tkp[1]), el.value); return; }   // the Second department box: as a dropped chip is
@@ -2015,12 +2018,22 @@ function setPattern(x, typed) {   // false (with a message) when it cannot be re
   x.pattern = p; delete x.pattern_text; return true;
 }
 function helper(k) {
-  if (k === "venues") { const pre = $("#hvPre").value, a = Number($("#hvFrom").value), b = Number($("#hvTo").value), kind = $("#hvKind").value; for (let i = a; i <= b; i++) S.spec.venues.push({ room: `${pre}${String(i).padStart(2, "0")}`, kind, capacity: 40 }); }
+  if (k === "venues") {
+    const r = VenueView.newRooms(S.spec, $("#hvPre").value, $("#hvFrom").value, $("#hvTo").value), kind = $("#hvKind").value || null;
+    if (r.error) { toast(r.error); return; }
+    if (!r.names.length) { toast(r.skipped === 1 ? "That room is there already." : "Those rooms are there already."); return; }
+    const first = S.spec.venues.length, n = r.names.length, blocks = VV.view === "blocks";
+    r.names.forEach(room => S.spec.venues.push({ room, kind, capacity: 40 })); Sync.ensureIds(S.spec);
+    if (blocks) { const t = vvTicks(); S.spec.venues.slice(first).forEach(v => t.add(v._id)); }   // ticked, so the bar can put them in a block and floor at once
+    save(); render(); const el = document.getElementById(`venues-${first}`); if (el) el.scrollIntoView({ block: "center" });
+    toast(`${n} room${n === 1 ? "" : "s"} added${r.skipped ? ` (${r.skipped} there already ${r.skipped === 1 ? "was" : "were"} left)` : ""}.${blocks ? ` ${n === 1 ? "It is" : "They are"} under No block yet, ticked: pick a block and a floor on the bar to place ${n === 1 ? "it" : "them"}.` : ""}`); return;
+  }
   if (k === "classes") {
     const lv = $("#hcLevel").value, size = Number($("#hcSize").value) || 38; const used = new Set(S.spec.classes.map(c => c.home_room)); const free = S.spec.venues.filter(v => (v.kind || "classroom") === "classroom" && !used.has(v.room)).map(v => v.room);
     $("#hcNames").value.split(",").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.classes.push({ class: `${String(lv).slice(-1)}${n}`, level: lv, size, home_room: free.shift() || null }));
+    $("#hcNames").value = "";   // added: the bar keeps its other boxes, not the names
   }
-  if (k === "teachers") { const dept = $("#htDept").value, allow = Number($("#htAllow").value) || null; $("#htNames").value.split("\n").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.teachers.push({ name: n, short: n.split(" ")[0], dept, allowance: allow, provisional: isHead() && !S.practice ? "Yes" : "No" })); }
+  if (k === "teachers") { const dept = $("#htDept").value, allow = Number($("#htAllow").value) || null; $("#htNames").value.split("\n").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.teachers.push({ name: n, short: n.split(" ")[0], dept, allowance: allow, provisional: isHead() && !S.practice ? "Yes" : "No" })); $("#htNames").value = ""; }
   if (k === "groups") { const b = S.spec.blocks.find(x => x.block === $("#hbBlock").value), s = $("#hbSubj").value, n = Number($("#hbN").value) || 1, st = Number($("#hbSt").value) || null; if (!b || !s) { toast("Pick a band and a subject."); return; } for (let i = 0; i < n; i++) S.spec.lessons.push({ level: b.level, subject: s, block: b.block, classes: [...(b.classes || [])], teachers: [], students: st }); }
   if (k === "whole") { const lv = $("#hwLevel").value, s = $("#hwSubj").value; if (!s) { toast("Pick a subject."); return; } S.spec.classes.filter(c => c.level === lv).forEach(c => S.spec.lessons.push({ level: lv, subject: s, block: null, classes: [c.class], teachers: [], students: c.size })); }
   save(); render(); toast("Added.");

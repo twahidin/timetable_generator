@@ -125,6 +125,23 @@ var VenueView = (function () {
     return n;
   }
 
-  return { blocks: blocks, nextRoom: nextRoom, nextFloor: nextFloor, kinds: kinds, places: places, move: move };
+  /* the names the Add rooms bar makes: the prefix and each number from a to b, two digits at least ("B1-01"), without the
+     names a room has already (in any letters) -> {names, skipped}, or {error: sentence} */
+  function newRooms(spec, prefix, a, b) {
+    var pre = String(prefix == null ? "" : prefix).replace(/^\s+/, ""), sa = text(a), sb = text(b);
+    if (!/^\d+$/.test(sa) || !/^\d+$/.test(sb)) return { error: "Give From and To as whole numbers." };
+    var from = Number(sa), to = Number(sb), have = Object.create(null), names = [], skipped = 0;
+    if (from > to) return { error: "From is after To." };
+    if (to - from + 1 > 200) return { error: "That is " + (to - from + 1) + " rooms at once. Add at most 200 at a time." };
+    rows(spec, "venues").forEach(function (v) { if (v && v.room != null) have[text(v.room).toLowerCase()] = true; });
+    for (var i = from; i <= to; i++) {
+      var name = pre + (i < 10 ? "0" + i : String(i)), key = name.trim().toLowerCase();
+      if (have[key]) { skipped++; continue; }
+      have[key] = true; names.push(name);
+    }
+    return { names: names, skipped: skipped };
+  }
+
+  return { blocks: blocks, nextRoom: nextRoom, nextFloor: nextFloor, kinds: kinds, places: places, move: move, newRooms: newRooms };
 })();
 if (typeof module !== "undefined") module.exports = VenueView;
