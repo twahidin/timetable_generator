@@ -625,6 +625,16 @@ def timetable():
         pub["views"][key] = render_html(pub["model"], view, app=app_cfg)
     return Response(pub["views"][key], mimetype="text/html")
 
+@app.get("/draft/preview")
+@need("committee")
+def draft_preview_page():
+    """the draft as the published page would show it, before it is published (step 8's and step 9's Preview)"""
+    try: return Response(draft.preview_page(), mimetype="text/html")
+    except draft.NoDraft:
+        return page("Preview", "<main class='login'><h1>Nothing to preview</h1><p class='muted'>There is no draft. Upload the timetable on step 8 first.</p><p><a href='/'>Back to the committee page</a></p></main>"), 404
+    except LookupError:
+        return page("Preview", "<main class='login'><h1>Nothing to preview</h1><p class='muted'>No setup is saved yet.</p><p><a href='/'>Back to the committee page</a></p></main>"), 409
+
 @app.get("/me")
 @need("personal")
 def me():

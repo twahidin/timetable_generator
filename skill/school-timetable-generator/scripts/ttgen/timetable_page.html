@@ -62,7 +62,17 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .cell b{color:var(--ink);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cell span.m{color:var(--muted)}
 .cell.ext{border-style:dashed}.cell.ext:after{content:"after school";font-size:9.5px;font-weight:700;color:#8A5300}
 .cell:hover{filter:brightness(.97);z-index:2;outline:2px solid color-mix(in srgb,var(--a) 50%,transparent)}
-.cell.dim{opacity:.22}
+.cell.dim{opacity:.22;filter:grayscale(1)}
+.banner{background:#FFF4D6;color:#5C4400;padding:8px 20px;font-size:13px;font-weight:600;border-bottom:1px solid #E8D9A8}
+.lsw{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.lsw button{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:5px 12px;cursor:pointer;font-size:13px;color:var(--sub)}
+.lsw button.on{background:var(--accent);border-color:var(--accent);color:var(--panel)}.lsw .count{margin:0 0 0 6px}
+.llevel{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:18px 0 8px}
+.lcls{margin:0 0 22px;content-visibility:auto;contain-intrinsic-size:auto 640px;break-inside:avoid}.lcls h2{font-size:16px;margin:0 0 6px}.lcls h2 small{font-weight:400;font-size:12px;color:var(--muted);margin-left:6px}
+.wall{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.mcard{display:block;border:1px solid var(--line);border-radius:8px;padding:7px 8px 8px;color:var(--ink);background:var(--panel)}.mcard:hover,.mcard:focus-visible{text-decoration:none;border-color:var(--muted)}
+.mhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}.mhead small{color:var(--muted);font-size:11px}
+.mrow{position:relative;height:7px;margin-top:1px;background:var(--none)}.mrow.wk{margin-top:6px}
+.mrow i{position:absolute;top:0;bottom:0;border-radius:1px;background:var(--muted)}.mrow i.b{background:var(--brk);border-radius:0}.mrow i.dim{background:color-mix(in srgb,var(--muted) 30%,transparent)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .cell{background:color-mix(in srgb,var(--a) 26%,var(--panel))}}
 :root[data-theme="dark"] .cell{background:color-mix(in srgb,var(--a) 26%,var(--panel))}
 .legend{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:6px 22px;font-size:12.5px;color:var(--sub)}
@@ -99,7 +109,7 @@ html.inapp:not([data-theme="dark"]) .card,html.inapp:not([data-theme="dark"]) .b
 @media (max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:12px 16px 30px}header.top{gap:10px}.brand{flex:1 1 0}.status{font-size:11px;padding:4px 8px}.browse{position:static;max-height:300px}header.top{flex-wrap:wrap;padding:10px 16px}.search{order:3;max-width:none;flex-basis:100%}
   nav.tabs{padding:4px 16px 0}.stats{margin-left:0}.card{padding:14px}}
 @media print{@page{size:A4 landscape;margin:9mm}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
-  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.sw,.kicker{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw,.banner{display:none!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
   .legend{grid-template-columns:repeat(3,1fr);font-size:10px}.vhead h1{font-size:20px}}
 </style>
 </head>
@@ -137,6 +147,7 @@ const cIx = new Map(CLS.map(c => [c.name, c])), tIx = new Map(TCH.map(t => [t.na
 const uniq = a => [...new Set(a)];
 const short = s => (D.subjects[s] || [s])[0];
 const colorOf = s => (D.subjects[s] || [s, 0])[1];
+const deptOf = s => (D.subjects[s] || [])[2] || "";   // an older page's data has no department
 const pal = i => D.palette[i % D.palette.length];
 const untag = s => short(s).replace(/\s+(G[123]|Std|Fdn)$/, "");
 const tshort = ts => ts.map(t => (tIx.get(t) || {}).short || t).join(", ");
@@ -248,7 +259,7 @@ function gridHTML(v) {
       if (BREAK[ch] || ch === "." || ch === "A") inner += `<div class="bk ${ch === "." ? "none" : ch === "A" ? "slot" : ""}${q === p && NP > 18 ? " v" : ""}" style="left:${p / NP * 100}%;width:${(q - p + 1) / NP * 100}%"><span>${esc(BREAK[ch] || "")}</span></div>`; p = q + 1; }
     for (const c of v.cells.filter(c => c.d === d)) {
       const [i, n] = ln.get(c) || [0, 1], [t, a] = c.ext ? D.ext : pal(c.color);
-      inner += `<div class="cell${c.ext ? " ext" : ""}" data-id="${c.id}" tabindex="0" style="left:calc(${c.p / NP * 100}% + 0px);width:calc(${c.n / NP * 100}% - 2px);top:${i / n * 100}%;height:calc(${100 / n}% - 2px);--t:#${t};--a:#${a}" title="${esc([c.title, ...c.lines, when(c)].join("\n"))}"><b>${esc(c.title)}</b>${c.lines.map((l, j) => `<span class="${j ? "m" : ""}">${esc(l)}</span>`).join("")}</div>`;
+      inner += `<div class="cell${c.ext ? " ext" : ""}${c.dim ? " dim" : ""}" data-id="${c.id}" tabindex="0" style="left:calc(${c.p / NP * 100}% + 0px);width:calc(${c.n / NP * 100}% - 2px);top:${i / n * 100}%;height:calc(${100 / n}% - 2px);--t:#${t};--a:#${a}" title="${esc([c.title, ...c.lines, when(c)].join("\n"))}"><b>${esc(c.title)}</b>${c.lines.map((l, j) => `<span class="${j ? "m" : ""}">${esc(l)}</span>`).join("")}</div>`;
     }
     h += `<div class="row${WEEKS > 1 && d % PER_WEEK === 0 && d ? " wk" : ""}"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track"${most[d] > 1 ? ` style="height:calc(var(--rh) * 1.7)"` : ""}>${inner}</div></div>`;
   }
@@ -278,7 +289,8 @@ const APP_TABS = APP && APP.tabs ? APP.tabs : null;
 const TABS_ALL = [["classes", "Classes", CLS.filter(c => busyClasses.has(c.name)).length], ["teachers", "Teachers", busyTeachers.size], ["rooms", "Rooms", busyRooms.size],
   ["students", MODE === "student" ? "Build my timetable" : "Students", MODE === "student" ? "" : STU.length], ["lessons", "Lessons", lessonRows.size], ["free", "Who's free", ""], ["checks", "Checks", ""]];
 const TABS = TABS_ALL.filter(t => !APP_TABS || APP_TABS.includes(t[0]));
-const S = { tab: "classes", key: null, chip: {}, fq: "", current: null, lf: {}, sort: ["day", 1], showAll: false };
+const S = { tab: "classes", key: null, chip: {}, fq: "", current: null, lf: {}, sort: ["day", 1], showAll: false, lview: "grids" };   // lview: how the Lessons tab shows what the filter finds
+const LVIEWS = [["grids", "Class grids"], ["page", "One page"], ["table", "Table"]];
 function listItems(tab) {
   if (tab === "classes") return CLS.filter(c => busyClasses.has(c.name)).map(c => ({ key: c.name, label: c.name, small: c.home, group: c.level }));
   if (tab === "teachers") return TCH.filter(t => busyTeachers.has(t.name)).sort((a, b) => String(a.dept || "~").localeCompare(String(b.dept || "~")) || a.name.localeCompare(b.name)).map(t => ({ key: t.name, label: t.name, small: t.short !== t.name ? t.short : "", group: t.dept || "Other" }));
@@ -301,6 +313,7 @@ function renderList() {
 function setHash(h) { if (location.hash !== h) history.replaceState(null, "", h); }
 function show(tab, key, opts = {}) {
   if (MODE === "personal") return showPersonal();
+  clearTimeout(S.lt);   // a redraw of the Lessons tab that was waiting for typing to pause
   if (!TABS.some(t => t[0] === tab)) { tab = TABS[0][0]; key = null; }
   S.tab = tab; S.key = key; renderTabs(); const wide = ["lessons", "free", "checks"].includes(tab); $("#main").classList.toggle("wide", wide);
   if (!wide) renderList();
@@ -340,16 +353,18 @@ function lessonMatches(x, f) {
   if (f.day && weekDay(DAYS[x.d])[1] !== f.day) return false;
   const a = f.from === undefined || f.from === "" ? 0 : +f.from, b = f.to === undefined || f.to === "" ? NP - 1 : +f.to;
   if (x.p + x.n - 1 < a || x.p > b) return false;
-  if (f.level && x.level !== f.level) return false; if (f.subject && x.subject !== f.subject) return false; if (f.teacher && !x.teachers.includes(f.teacher)) return false;
+  if (f.level && x.level !== f.level) return false; if (f.dept && deptOf(x.subject) !== f.dept) return false; if (f.subject && x.subject !== f.subject) return false; if (f.teacher && !x.teachers.includes(f.teacher)) return false;
   if (f.room && x.room !== f.room) return false; if (f.cls && !x.classes.includes(f.cls)) return false; if (f.block && x.block !== f.block) return false;
   if (f.group && x.group !== f.group) return false; if (f.ext && !x.ext) return false;
   if (f.q) { const s = [DAYS[x.d], x.level, x.block, x.classes.join(" "), x.subject, short(x.subject), x.group, x.teachers.join(" "), tshort(x.teachers), x.room].join(" ").toLowerCase(); if (!f.q.toLowerCase().split(/\s+/).every(w => s.includes(w))) return false; }
   return true;
 }
 function opt(list, cur, all = "All") { return `<option value="">${all}</option>` + list.map(([v, t]) => `<option value="${esc(v)}" ${String(cur ?? "") === String(v) ? "selected" : ""}>${esc(t)}</option>`).join(""); }
+function lessonsHash() { const hs = Object.entries(S.lf).filter(([, v]) => v !== "" && v !== undefined && v !== false).map(([k, v]) => `${k}=${encodeURIComponent(v)}`); if (S.lview !== "grids") hs.push(`view=${S.lview}`); setHash("#lessons" + (hs.length ? "?" + hs.join("&") : "")); }
 function renderLessons() {
   const f = S.lf, weeks = uniq(DAYS.map(d => weekDay(d)[0]).filter(Boolean)), dnames = uniq(DAYS.map(d => weekDay(d)[1]));
-  const subjects = uniq(L.map(x => x.subject)).sort(), blocks = uniq(L.map(x => x.block).filter(Boolean)).sort();
+  const depts = uniq(L.map(x => deptOf(x.subject)).filter(Boolean)).sort(); if (f.dept && !depts.includes(f.dept)) delete f.dept;
+  const subjects = uniq(L.map(x => x.subject)).filter(s => !f.dept || deptOf(s) === f.dept || s === f.subject).sort(), blocks = uniq(L.map(x => x.block).filter(Boolean)).sort();
   const per = D.times.map((t, p) => [p, `${p} · ${t[0]}`]);
   $("#view").innerHTML = `<div class="card"><div class="filters">
     <label>Search<input type="search" data-f="q" value="${esc(f.q || "")}" placeholder="any word"></label>
@@ -358,15 +373,50 @@ function renderLessons() {
     <label>From<select data-f="from">${opt(per, f.from, "Start")}</select></label><label>To<select data-f="to">${opt(per, f.to, "End")}</select></label>
     <label>Level<select data-f="level">${opt(D.levels.filter(lv => L.some(x => x.level === lv)).map(l => [l, l]), f.level)}</select></label>
     <label>Class<select data-f="cls">${opt(CLS.filter(c => busyClasses.has(c.name)).map(c => [c.name, c.name]), f.cls)}</select></label>
+    ${depts.length ? `<label>Department<select data-f="dept">${opt(depts.map(d => [d, d]), f.dept)}</select></label>` : ""}
     <label>Subject<select data-f="subject">${opt(subjects.map(s => [s, s]), f.subject)}</select></label>
     <label>Teacher<select data-f="teacher">${opt([...busyTeachers].sort().map(t => [t, t]), f.teacher)}</select></label>
     <label>Room<select data-f="room">${opt([...busyRooms].sort().map(r => [r, r]), f.room)}</select></label>
     ${blocks.length ? `<label>Band<select data-f="block">${opt(blocks.map(b => [b, b]), f.block)}</select></label>` : ""}
     ${f.group ? `<label>Group<select data-f="group">${opt([[f.group, f.group]], f.group)}</select></label>` : ""}
     <label class="chk"><input type="checkbox" data-f="ext" ${f.ext ? "checked" : ""}> After school only</label>
-    <button class="btn" data-act="clear">Clear</button><button class="btn" data-act="lcsv">Download CSV</button></div><div id="ltab"></div></div>`;
-  drawLessonTable();
-  const hs = Object.entries(f).filter(([, v]) => v !== "" && v !== undefined && v !== false).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&"); setHash("#lessons" + (hs ? "?" + hs : ""));
+    <button class="btn" data-act="clear">Clear</button><button class="btn" data-act="lcsv">Download CSV</button></div>
+    <div class="lsw">${LVIEWS.map(([k, t]) => `<button class="${S.lview === k ? "on" : ""}" data-lview="${k}">${t}</button>`).join("")}</div><div id="ltab"></div></div>`;
+  drawLessons(); lessonsHash();
+}
+function drawLessons() { if (!$("#ltab")) return; return S.lview === "table" ? drawLessonTable() : S.lview === "page" ? drawLessonPage() : drawLessonGrids(); }   // not on the Lessons tab any more (a redraw that was waiting): nothing to draw
+/* the classes the filter touches, and which lesson times of each match. With nothing chosen, every class and every lesson */
+function lessonClasses() {
+  const f = S.lf, active = Object.values(f).some(v => v !== "" && v !== undefined && v !== false), hit = new Map(), times = new Set();
+  L.forEach(x => { if (!lessonMatches(x, f)) return; x.classes.forEach(c => { if (!cIx.has(c) || (f.cls && c !== f.cls)) return; times.add(x.id); let s = hit.get(c); if (!s) hit.set(c, s = new Set()); s.add(x.id); }); });   // counted only where it is drawn: in a class the page knows
+  const cls = CLS.filter(c => busyClasses.has(c.name) && hit.has(c.name) && (!f.cls || c.name === f.cls));   // a band's row names several classes: with a class chosen, only that class
+  const n = cls.length, t = times.size;
+  return { active, hit, cls, count: n ? `<p class="count">${n} class${n === 1 ? "" : "es"} · ${t} lesson time${t === 1 ? "" : "s"}${active ? (t === 1 ? " matches" : " match") : ""}</p>` : `<div class="empty">No lesson matches. Change a choice above, or press Clear.</div>` };
+}
+function byLevel(cls, one, wrap) {   // under a heading for each level, in the school's order
+  return D.levels.concat(uniq(cls.map(c => c.level)).filter(l => !D.levels.includes(l))).map(lv => { const mine = cls.filter(c => c.level === lv);
+    return mine.length ? `<h3 class="llevel">${esc(lv || "No level")}</h3>${wrap ? `<div class="${wrap}">` : ""}${mine.map(one).join("")}${wrap ? "</div>" : ""}` : ""; }).join("");
+}
+/* Class grids: each class's timetable as on its own page, one under another; a lesson that does not match is faded */
+function drawLessonGrids() {
+  const { active, hit, cls, count } = lessonClasses();
+  const one = c => { const v = classView(c.name), ids = hit.get(c.name); if (active) v.cells.forEach(k => { k.dim = !ids.has(k.id); });
+    return `<section class="lcls"><h2><a tabindex="0" data-go="classes" data-key="${esc(c.name)}" title="Open Class ${esc(c.name)}">Class ${esc(c.name)}</a><small>${active ? `${ids.size} lesson time${ids.size === 1 ? "" : "s"} ${ids.size === 1 ? "matches" : "match"}` : ""}</small></h2>${gridHTML(v)}</section>`; };
+  $("#ltab").innerHTML = count + byLevel(cls, one);
+}
+/* One page: every class at once, each a small timetable of blocks; a click opens the class */
+function drawLessonPage() {
+  const { active, hit, cls, count } = lessonClasses();
+  const one = c => { const v = classView(c.name), ids = hit.get(c.name); let h = "";
+    for (let d = 0; d < ND; d++) { const codes = v.codes ? v.codes[d] : null; let inner = "";
+      if (codes) for (let p = 0; p < NP;) { const ch = codes[p]; let q = p; while (q + 1 < NP && codes[q + 1] === ch) q++;
+        if (BREAK[ch] || ch === ".") inner += `<i class="b" style="left:${p / NP * 100}%;width:${(q - p + 1) / NP * 100}%"></i>`; p = q + 1; }
+      const on = k => !active || ids.has(k.id);
+      for (const k of v.cells.filter(k => k.d === d).sort((a, b) => on(a) - on(b))) { const [, a] = k.ext ? D.ext : pal(k.color);   // a match is drawn last, over a lesson beside it
+        inner += `<i${on(k) ? "" : ` class="dim"`} style="left:${k.p / NP * 100}%;width:calc(${k.n / NP * 100}% - 1px)${on(k) ? `;background:#${a}` : ""}" title="${esc(`${k.title} · ${when(k)}`)}"></i>`; }
+      h += `<div class="mrow${WEEKS > 1 && d % PER_WEEK === 0 && d ? " wk" : ""}">${inner}</div>`; }
+    return `<a class="mcard" tabindex="0" data-go="classes" data-key="${esc(c.name)}" title="Open Class ${esc(c.name)}"><span class="mhead"><b>${esc(c.name)}</b><small>${active ? `${ids.size} ${ids.size === 1 ? "matches" : "match"}` : ""}</small></span>${h}</a>`; };
+  $("#ltab").innerHTML = count + byLevel(cls, one, "wall");
 }
 function filteredLessons() {
   const rows = L.filter(x => lessonMatches(x, S.lf)); const [k, dir] = S.sort;
@@ -448,9 +498,10 @@ function csvDownload(rows, name) {
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + [head.join(","), ...body].join("\r\n")], { type: "text/csv" })); a.download = name.replace(/[\\/:*?"<>|]+/g, "-") + ".csv"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-tab],[data-key],[data-chip],[data-act],[data-go],[data-build],.cell,[data-sort],.results .r[data-i]"); if (!t) { if (!e.target.closest(".search")) $("#results").classList.remove("on"); return; }
+  const t = e.target.closest("[data-tab],[data-lview],[data-key],[data-chip],[data-act],[data-go],[data-build],.cell,[data-sort],.results .r[data-i]"); if (!t) { if (!e.target.closest(".search")) $("#results").classList.remove("on"); return; }
   if (t.matches(".results .r")) return pick(hits[+t.dataset.i]);
   if (t.dataset.tab) return show(t.dataset.tab, null);
+  if (t.dataset.lview) { if (LVIEWS.some(v => v[0] === t.dataset.lview)) { S.lview = t.dataset.lview; S.showAll = false; renderLessons(); } return; }
   if (t.dataset.go) { if ($("#dlg").open) $("#dlg").close(); return t.dataset.go === "lessons" ? show("lessons", null, { filters: { group: t.dataset.group } }) : show(t.dataset.go, t.dataset.key); }
   if (t.dataset.build) return show("students", "__build");
   if (t.dataset.chip !== undefined) { S.chip[S.tab] = t.dataset.chip; return renderList(); }
@@ -463,14 +514,17 @@ document.addEventListener("click", e => {
   if (act === "link") { navigator.clipboard && navigator.clipboard.writeText(location.href).then(() => { t.textContent = "Link copied"; setTimeout(() => t.textContent = "Copy link", 1500); }); }
   if (act === "clear") { S.lf = {}; renderLessons(); }
   if (act === "lcsv") csvDownload(filteredLessons(), `${D.school.name} lessons`);
-  if (act === "all") { S.showAll = true; drawLessonTable(); }
+  if (act === "all") { S.showAll = true; drawLessons(); }
 });
-document.addEventListener("keydown", e => { const c = e.target.closest && e.target.closest(".cell"); if (c && e.key === "Enter") lessonDialog(+c.dataset.id); });
+document.addEventListener("keydown", e => { const c = e.target.closest && e.target.closest(".cell"); if (c && e.key === "Enter") lessonDialog(+c.dataset.id);
+  const m = e.target.closest && e.target.closest(".mcard, .lcls h2 a"); if (m && e.key === "Enter") show("classes", m.dataset.key); });
 document.addEventListener("input", e => {
   const t = e.target;
   if (t.id === "q") return search(t.value);
   if (t.id === "fq") { S.fq = t.value; return renderList(); }
-  if (t.dataset.f) { S.lf[t.dataset.f] = t.type === "checkbox" ? t.checked : t.value; S.showAll = false; if (t.dataset.f === "q") { drawLessonTable(); const hs = Object.entries(S.lf).filter(([, v]) => v !== "" && v !== false && v !== undefined).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&"); setHash("#lessons" + (hs ? "?" + hs : "")); } else renderLessons(); }
+  if (t.dataset.f) { S.lf[t.dataset.f] = t.type === "checkbox" ? t.checked : t.value; S.showAll = false;
+    if (t.dataset.f === "dept" && t.value && S.lf.subject && deptOf(S.lf.subject) !== t.value) delete S.lf.subject;   // a subject of another department is no longer chosen
+    if (t.dataset.f === "q") { clearTimeout(S.lt); S.lt = setTimeout(drawLessons, S.lview === "table" ? 0 : 160); lessonsHash(); } else renderLessons(); }   // typing: the grids are drawn again after a short pause
   if (t.dataset.ff) { S.ff[t.dataset.ff] = +t.value; if (S.ff.to < S.ff.from) S.ff.to = S.ff.from; renderFree(); }
 });
 $("#q").addEventListener("keydown", e => {
@@ -490,7 +544,7 @@ function showPersonal() {
 function route() {
   if (MODE === "personal") return showPersonal();
   const h = decodeURIComponent(location.hash.slice(1));
-  if (h.startsWith("lessons")) { const f = {}; (location.hash.split("?")[1] || "").split("&").filter(Boolean).forEach(kv => { const [k, v] = kv.split("="); f[k] = k === "ext" ? true : decodeURIComponent(v || ""); }); return show("lessons", null, { filters: f }); }
+  if (h.startsWith("lessons")) { const f = {}; S.lview = "grids"; /* a link with no view named opens on Class grids */ (location.hash.split("?")[1] || "").split("&").filter(Boolean).forEach(kv => { const [k, v] = kv.split("="); if (k === "view") { if (LVIEWS.some(x => x[0] === v)) S.lview = v; return; } f[k] = k === "ext" ? true : decodeURIComponent(v || ""); }); return show("lessons", null, { filters: f }); }
   if (h === "free" || h === "checks") return show(h, null);
   if (h.startsWith("build/")) { const [, c, g] = location.hash.slice(1).split("/"); return show("students", "__build", { build: { cls: decodeURIComponent(c || ""), groups: (g || "").split(",").map(decodeURIComponent) } }); }
   const i = h.indexOf("/"); if (i > 0) { const t = h.slice(0, i), k = h.slice(i + 1); const ok = { classes: cIx, teachers: tIx, rooms: rIx, students: sIx }[t]; if (ok && ok.has(k)) return show(t, k); }
@@ -502,6 +556,7 @@ if (APP) {
   box.innerHTML = (APP.files || []).map(([t, h]) => `<a class="btn" href="${esc(h)}">${esc(t)}</a>`).join("") + (APP.home ? `<a class="btn" href="${esc(APP.home)}">${esc(APP.homeLabel || "Back")}</a>` : "") + (APP.logout ? `<a class="btn" href="${esc(APP.logout)}">Sign out</a>` : "");
   $("#theme").before(box);
   if (APP.placeholder) $("#q").placeholder = APP.placeholder;
+  if (APP.banner) { const b = document.createElement("div"); b.className = "banner"; b.textContent = APP.banner; document.querySelector("header.top").after(b); }   /* a preview says so, above everything */
 }
 const st = $("#status"); st.className = "status " + (D.checks.ok ? "ok" : "bad"); st.textContent = D.checks.ok ? "All checks passed" : `${D.checks.problems.length} problems`; st.style.cursor = "pointer"; st.onclick = () => show("checks", null);
 if (!TABS.some(t => t[0] === "checks")) st.style.display = "none";

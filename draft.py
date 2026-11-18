@@ -236,6 +236,19 @@ def printouts(out_dir, individual):
     export_all(m, os.path.join(out_dir, base), individual=individual, zip_individual=False, log=lambda *x: None)
     return m, base
 
+def preview_page():
+    """the draft as the published timetable page would show it, as HTML: ttgen.export.render_html on the draft's model as it is now (a lesson
+    waiting in Not placed is not on it), for the committee, with no link to the published files and a banner that says it is a preview and
+    what still stands in the way of publishing. Nothing is published or stored. NoDraft without a draft."""
+    from ttgen.export import render_html
+    if not exists(): raise NoDraft("There is no draft.")
+    m, rec, fx = model_now(); j = info(m, rec) or {}; waiting, crit = _count(fx["pool"]), j.get("critical") or 0
+    banner = "Preview: this is the draft as it stands, not the published timetable."
+    if waiting: banner += " 1 lesson waiting in Not placed is not on it." if waiting == 1 else f" {waiting} lessons waiting in Not placed are not on it."
+    if crit: banner += " " + critical_text(crit)
+    app = dict(mode="committee", tabs=None, pdf=False, files=[], home="/", homeLabel="Back to the committee page", banner=banner)
+    return render_html(m, "full", app=app, title=f"Preview · {m['school']['name']} · {m['school']['timetable']}")
+
 # ------------------------------------------------------------------------------------------------ the grid and the fixes
 
 NOT_FOUND = "There is no class or teacher of that name on the timetable."

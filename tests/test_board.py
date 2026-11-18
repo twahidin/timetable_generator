@@ -607,6 +607,23 @@ def test_the_board_of_two_thousand_rows_is_quick_and_small():
     assert size < 200000, size
     r = c.get("/api/draft/board", headers={"Accept-Encoding": "gzip"}); assert r.status_code == 200 and len(r.get_data()) < 200000
 
+def test_the_preview_is_the_draft_as_the_published_page_would_show_it():
+    import re
+    fresh()
+    r = NOSE.get("/draft/preview"); assert r.status_code == 302 and r.headers["Location"].endswith("/login")   # the committee only
+    r = c.get("/draft/preview"); html = r.get_data(as_text=True); assert r.status_code == 200 and r.mimetype == "text/html"
+    data = json.loads(re.search(r"<script>const DATA = (.*?);</script>", html, re.S).group(1).replace("<\\/", "</"))
+    m = draft._now()[0]; assert sorted({x[0] for x in data["lessons"]}) == sorted({x["id"] for x in m["lessons"]}) and data["lessons"]   # the draft's lessons, as they are now
+    app_cfg = data["app"]; assert app_cfg["pdf"] is False and app_cfg["files"] == [] and app_cfg["tabs"] is None and app_cfg["home"] == "/" and app_cfg["mode"] == "committee"   # nothing on it leads to the published files
+    assert app_cfg["banner"].startswith("Preview: this is the draft as it stands, not the published timetable.") and "Not placed" not in app_cfg["banner"]
+    assert "Preview" in re.search(r"<title>(.*?)</title>", html, re.S).group(1)
+    n = len({x[0] for x in data["lessons"]}); draft.fix(dict(kind="lift", id=PLAIN_ID))   # a lesson lifted out is not on the page, and the banner says so
+    data = json.loads(re.search(r"<script>const DATA = (.*?);</script>", c.get("/draft/preview").get_data(as_text=True), re.S).group(1).replace("<\\/", "</"))
+    assert len({x[0] for x in data["lessons"]}) == n - 1 and "1 lesson waiting in Not placed is not on it." in data["app"]["banner"] and "critical mistake" in data["app"]["banner"]
+    assert store.published() is None   # looking at the preview publishes nothing
+    shutil.rmtree(draft.DIR)
+    r = c.get("/draft/preview"); assert r.status_code == 404 and "There is no draft" in r.get_data(as_text=True)
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()

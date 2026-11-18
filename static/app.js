@@ -3007,7 +3007,7 @@ function draftHTML(j) {   // {head: the school, the counts, the configuration li
     + (j.notes && j.notes.length ? `<details><summary>Notes</summary>${list(j.notes)}</details>` : "")
     + ruleReportHTML(j.rule_report || [], j.typed || 0) + choicesUsedHTML(j.choices_used || [], j.choice_problems || [], j.choices || 0)
     + `<p class="muted small" style="margin-top:8px">${esc(Draft.gateText(nc0))} Publish is on step 9.</p>
-    <div class="row"><button class="primary" data-step="${stepAt("publish")}">Go to step 9</button></div>`;
+    <div class="row"><a href="/draft/preview" target="_blank" rel="noopener" title="Opens in a new tab: the timetable as teachers and students would see it, from the draft as it is now. Nothing is published."><button>Preview as it will be published</button></a><button class="primary" data-step="${stepAt("publish")}">Go to step 9</button></div>`;
   return { head: head + otherSchool(j) + configLine(j), warns, changes: fixesHTML(j), foot };
 }
 /* step 9: what will be published, read-only. Every critical mistake with a way back to step 8, every other open warning, the
@@ -3029,7 +3029,7 @@ function publishHTML(j) {
     + `<h3 class="sev">Changes made in the app · ${fl.length}</h3>` + (fl.length ? fixList(fl) : `<p class="muted small">No fixes have been made in the app.</p>`)
     + (nc ? `<p class="issue crit" style="margin-top:12px">${esc(gate)}</p>`
         : `<p class="muted small" style="margin-top:12px">${pub ? `Publishing replaces the timetable published ${esc(pub.at)}${pub.source ? ` (from ${esc(pub.source)})` : ""}.` : "Nothing is published yet."}</p>`)
-    + `<div class="row"><button class="primary" id="pbPublish"${nc ? ` disabled title="${esc(gate)}"` : ""}>Publish this timetable</button></div><p class="muted small" id="pbMsg"></p>`;
+    + `<div class="row"><button class="primary" id="pbPublish"${nc ? ` disabled title="${esc(gate)}"` : ""}>Publish this timetable</button><a href="/draft/preview" target="_blank" rel="noopener" title="Opens in a new tab: the timetable as teachers and students would see it, from the draft as it is now. Nothing is published."><button>Preview as it will be published</button></a></div><p class="muted small" id="pbMsg"></p>`;
 }
 const unplacedText = n => n === 1 ? "1 lesson is not placed. Place it or delete it on step 8 first." : `${n} lessons are not placed. Place them or delete them on step 8 first.`;   // the server's own sentence (draft.NotPlaced)
 function printoutsCard() {   // while a lesson waits in Not placed, the printouts and the download are refused: the sentence stands in their place
