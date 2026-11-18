@@ -42,6 +42,9 @@ td.num input{width:70px}
 /* rules: each drop-down is as wide as its longest choice, so names are never cut off (the table scrolls sideways) */
 table.ruletable td select{width:auto;min-width:100%}
 table.ruletable td.note input{min-width:220px}
+textarea.wrapbox{display:block;width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:5px 7px;background:var(--input);color:var(--ink);font:inherit;line-height:1.35;resize:none;overflow:hidden;field-sizing:content;min-height:30px}
+textarea.wrapbox:focus{outline:2px solid #bfd3fb;border-color:#93b4f7}
+table.ruletable td.note textarea{min-width:240px}table.ruletable td.note,table.ruletable td.words{vertical-align:top}
 td.calc{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12.5px}
 tr.bad td{background:var(--warn-bg)}
 tr.rowmsg td{font-size:12.5px;color:#7a4b00;background:#fff7e6;white-space:normal;padding:4px 10px 8px;border-top:0}
@@ -235,7 +238,7 @@ button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 /* step 6: the constraint tabs and typed rules */
 .tabs button{border-radius:999px}.tabs button .n{margin-left:6px;color:var(--muted);font-variant-numeric:tabular-nums}
 .tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}.tabs button.on .n{color:#fff}
-table.typed td.words input{width:100%;min-width:320px}
+table.typed td.words input{width:100%;min-width:320px}table.typed td.words textarea{min-width:320px}
 /* step 6: the give-way list of second choices; step 7: the mode */
 table.giveway td.item{min-width:260px}table.giveway td.second{white-space:nowrap}table.giveway td.second input[type=time]{width:120px}.giveway button.small{padding:1px 6px;font-size:11px;margin-left:2px}
 .giveway tr[draggable] td:first-child{cursor:grab}.giveway tr.over td{background:#eef5ff}.cend.over{outline:1px dashed var(--accent);border-radius:8px}
@@ -342,6 +345,11 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .vaddbtn{align-self:stretch;min-height:36px;border-style:dashed;color:var(--muted)}
 .vfloorbtn{margin-left:8px;vertical-align:1px}
 .vblockbar{margin-top:12px;align-items:center;gap:8px}
+/* step 1, Blocks: a tick box on each room, and the bar that moves the ticked rooms to a block and floor */
+.vtw{position:relative;display:flex}.vtw .vtick{position:absolute;top:7px;right:7px;margin:0;z-index:1;cursor:pointer}.vtw .vname{padding-right:18px}.vtw.ticked .vtile{border-color:var(--accent);background:#eef5ff}
+.vmovebar{min-height:52px;box-sizing:border-box}.vmovebar label{display:inline-flex;gap:6px;align-items:center}.vmovebar input{width:190px}
+.vmovebar.idle{position:static;background:transparent;border-color:transparent;box-shadow:none;padding-left:0}
+.vtickall{display:block;margin-top:4px;font-size:11px;padding:1px 6px;font-weight:400}
 .vopen{flex:0 0 100%;border:1px solid var(--accent);border-radius:8px;padding:10px 12px;background:var(--panel)}
 .vopen.caution{background:#fff7e6}.vopen.bad{background:var(--warn-bg)}
 .vfields{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 12px}

@@ -870,6 +870,9 @@ function ruleProblems(info) {
 const opt = (v, cur, label) => `<option value="${esc(v)}"${String(v) === String(cur ?? "") ? " selected" : ""}>${esc(label ?? v)}</option>`;
 const sel = (path, cur, list, blank = true, extra = "") => `<select data-k="${path}" ${extra}>${blank ? opt("", cur, "") : ""}${list.map(v => opt(v, cur)).join("")}${cur && !list.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}</select>`;
 const inp = (path, cur, type = "text", extra = "") => `<input data-k="${path}" type="${type}" value="${esc(cur)}" ${extra}>`;
+const area = (path, cur, extra = "") => `<textarea data-k="${path}" class="wrapbox" rows="1" ${extra}>${esc(cur)}</textarea>`;   // a one-line box that wraps and grows, so a long note is read whole; Enter leaves it (no line breaks are kept)
+const GROWS = typeof CSS !== "undefined" && CSS.supports && CSS.supports("field-sizing", "content");   // the browser sizes such a box itself; where it cannot, fitAreas does
+function fitAreas(root) { if (GROWS) return; (root || document).querySelectorAll("textarea.wrapbox").forEach(t => { if (!t.offsetParent) return; t.style.height = "auto"; t.style.height = `${t.scrollHeight + 2}px`; }); }
 const chips = (path, arr, what, extra = "") => `<div class="chips" data-pop="${what}" data-path="${path}" ${extra}>${(arr || []).length ? arr.map(a => `<span class="chip">${esc(a)}</span>`).join("") : '<span class="muted">pick…</span>'}</div>`;
 const usesNumber = rule => !!((S.meta.rule_types || []).find(t => t.rule === rule) || {}).needs_number;   // only the "Max ..." and "At most N" rules read Number
 const delBtn = (k, i, off) => `<button class="small danger" data-del="${k}.${i}" ${off ? `disabled title="${esc(off)}"` : 'title="Remove row"'}>✕</button>`;
@@ -894,6 +897,7 @@ function render() {
   main.innerHTML = (S.practice && !S.asking ? `<div class="practice"><span>Practice copy: nothing here is saved for the school.</span><button id="practiceBack">Back to the school's setup</button></div>` : "") + (VIEWS[id] || (() => ""))();
   headLocks(main, id); if (S.board) bdPaint();   // the board's colours and outlines for the card selected
   main.querySelectorAll(".tablewrap, .keep").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
+  fitAreas(main);
   const bw2 = bpos && main.querySelector(".bdwrap"); if (bw2) { bw2.scrollLeft = bpos[0]; bw2.scrollTop = bpos[1]; }
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
@@ -980,7 +984,24 @@ const VENUEVIEW = "ttsetup.view.venues";
 const VV = { view: "blocks", open: null, openId: null, draft: null };   // open: the index of the open room, found again by openId (the row's own _id) on each draw
 // draft: a small box being filled in ({ what: "kind" } the open room's new kind, { what: "block" } a new block), not saved
 const VNEWKIND = "__new_kind__";   // the last choice of an open room's Kind box
-const vvOpen = vi => { heldOpen(VV, S.spec.venues, vi); VV.draft = null; };
+const VNEW = "__new__";   // the last choice of a Block or Floor list: a new one, typed in a box
+const vvOpen = vi => { heldOpen(VV, S.spec.venues, vi); VV.draft = null; VV.typing = null; };   // typing: "building" or "floor" while the open room's new block or floor is being typed
+function vvTicks() {   // the rooms ticked to be moved together, by the rows' own ids; a room that is gone loses its tick
+  if (!VV.ticked) VV.ticked = new Set(); const have = new Set(S.spec.venues.map(v => v && v._id));
+  VV.ticked = new Set([...VV.ticked].filter(id => have.has(id))); return VV.ticked; }
+const vvMv = () => VV.mv || (VV.mv = { block: "", floor: "", nb: false, nf: false, bt: "", ft: "" });   // where the ticked rooms go: a block and floor from the lists, or new ones being typed (nb, nf with bt, ft)
+const vvFloorName = f => f === "" ? "No floor yet" : /^-?\d+(\.\d+)?$/.test(f) ? `Floor ${f}` : f;
+function vvMove() {   // the ticked rooms go to the block and floor chosen on the bar: one save, one Undo
+  if (locked("venues")) return;
+  const mv = vvMv(), ticks = vvTicks(), block = String(mv.nb ? mv.bt : mv.block).trim(), floor = String(mv.nf ? mv.ft : mv.floor).trim();
+  if (!ticks.size) { toast("Tick rooms first."); return; }
+  if (mv.nb && !block) { toast("Give the new block a name."); const i = $("#vvMvBlock"); if (i) i.focus(); return; }
+  const vis = S.spec.venues.map((v, i) => [v, i]).filter(([v]) => v && ticks.has(v._id)).map(([, i]) => i);
+  const n = VenueView.move(S.spec, vis, block, floor);
+  if (!n) { toast("Those rooms are there already."); return; }
+  ticks.clear(); Object.assign(mv, { block, floor, nb: false, nf: false, bt: "", ft: "" }); save(); render();
+  toast(`Moved ${n} room${n === 1 ? "" : "s"} to ${block || "No block yet"}, ${vvFloorName(floor)}. Undo, at the top, takes it back.`);
+}
 const vvResolve = () => heldResolve(VV, S.spec.venues);
 try { const vv = localStorage.getItem(VENUEVIEW); if (["blocks", "table"].includes(vv)) VV.view = vv; } catch (e) { }
 function venuesTable() {   // today's table, and two notes at its end
@@ -995,8 +1016,18 @@ const vkindOf = k => { const key = String(k || "").trim().toLowerCase(); return 
 const vkindMark = k => { const [m, c] = vkindOf(k); return `<i class="vmark" style="background:${c}">${esc(m)}</i>`; };
 function venuesBlocks() {   // the rooms by block and floor; a click on a tile opens the room to change it
   const { out, crit } = issues();
-  vvResolve(); if (VV.open !== null && !S.spec.venues[VV.open]) vvOpen(null);
-  const bl = VenueView.blocks(S.spec);
+  Sync.ensureIds(S.spec); vvResolve(); if (VV.open !== null && !S.spec.venues[VV.open]) vvOpen(null);
+  const bl = VenueView.blocks(S.spec), P = VenueView.places(S.spec), ticks = vvTicks(), mv = vvMv(), nT = ticks.size;
+  if (!mv.nb && mv.block !== "" && !P.some(b => b.block === mv.block)) mv.block = "";   // a block that is gone is no longer chosen
+  const mvFloors = mv.nb || mv.block === "" ? [] : (P.find(b => b.block === mv.block) || { floors: [] }).floors;
+  if (!mv.nf && mv.floor !== "" && !mvFloors.includes(mv.floor)) mv.floor = "";
+  const bar = nT ? `<div class="row bulk vmovebar"><b>${nT} room${nT === 1 ? "" : "s"} ticked.</b><span>Move to</span>
+      <label>Block ${mv.nb ? `<input id="vvMvBlock" value="${esc(mv.bt)}" placeholder="the new block's name" autocomplete="off"><button class="small" data-vmvpick="block">Pick from the list</button>`
+        : `<select id="vvMvBlockSel">${opt("", mv.block, "No block yet")}${P.map(b => opt(b.block, mv.block)).join("")}<option value="${VNEW}">New block…</option></select>`}</label>
+      <label>Floor ${mv.nf ? `<input id="vvMvFloor" value="${esc(mv.ft)}" placeholder="1, 2, G…" autocomplete="off" style="width:110px">${mv.nb ? "" : `<button class="small" data-vmvpick="floor">Pick from the list</button>`}`
+        : `<select id="vvMvFloorSel">${opt("", mv.floor, "No floor yet")}${mvFloors.map(f => opt(f, mv.floor, vvFloorName(f))).join("")}<option value="${VNEW}">New floor…</option></select>`}</label>
+      <button class="primary" data-vmove="1">Move</button><button class="small" data-vuntick="1">Untick all</button></div>`
+    : `<div class="row bulk vmovebar idle">${locked("venues") ? "" : `<span class="muted small">Tick rooms to move them to a block and a floor together.</span>`}</div>`;   // the same height as the bar, so the first tick does not push the rooms down
   const add = `<div class="row vblockbar">${VV.draft && VV.draft.what === "block"
     ? `<label>New block's name <input id="vvBlockName" value="${esc(VV.draft.text || "")}" autocomplete="off"></label> <button data-vblockadd="1">Add</button> <button data-vdraftx="1">Cancel</button><span class="muted small">It starts with one room, on floor 1.</span>`
     : `<button data-vblock="1">+ Block</button>`}</div>`;
@@ -1007,27 +1038,35 @@ function venuesBlocks() {   // the rooms by block and floor; a click on a tile o
     const line = r.home.length ? `Home of ${r.home.join(", ")}` : r.only_for.length ? `Kept for ${r.only_for.join(", ")}` : "";
     const notes = r.equipment.length || r.configuration.trim() ? `<span class="vflag" title="${esc([r.equipment.length ? "Equipment: " + r.equipment.join(", ") : "", r.configuration.trim() ? "Configuration: " + r.configuration.trim() : ""].filter(Boolean).join(". "))}">+ notes</span>` : "";
     const open = VV.open === r.vi;   // the open room's own box carries the row's id, so a message can scroll to it
-    return `<button class="vtile ${open ? "on " : ""}${rowCls(out, crit, "venues", r.vi)}" data-vroom="${r.vi}"${open ? ' aria-expanded="true"' : ' aria-expanded="false"'}${open ? "" : ` id="venues-${r.vi}"`}><span class="vname">${r.room ? esc(r.room) : "(no name yet)"}${notes}</span><span class="vkind">${vkindMark(r.kind)} ${esc(r.kind || "no kind")}${r.capacity != null ? ` · ${esc(r.capacity)} seats` : ""}</span>${line ? `<span class="vnote">${esc(line)}</span>` : ""}</button>`;
+    const id = (S.spec.venues[r.vi] || {})._id, tk = ticks.has(id);   // the tick box sits on the tile's corner; the tile itself still opens the room
+    return `<span class="vtw${tk ? " ticked" : ""}"><input type="checkbox" class="vtick" id="vtick-${esc(id)}" data-vtick="${esc(id)}" ${tk ? "checked" : ""} aria-label="Tick ${esc(r.room || "this room")} to move it"><button class="vtile ${open ? "on " : ""}${rowCls(out, crit, "venues", r.vi)}" data-vroom="${r.vi}"${open ? ' aria-expanded="true"' : ' aria-expanded="false"'}${open ? "" : ` id="venues-${r.vi}"`}><span class="vname">${r.room ? esc(r.room) : "(no name yet)"}${notes}</span><span class="vkind">${vkindMark(r.kind)} ${esc(r.kind || "no kind")}${r.capacity != null ? ` · ${esc(r.capacity)} seats` : ""}</span>${line ? `<span class="vnote">${esc(line)}</span>` : ""}</button></span>`;
   };
   const openRoom = vi => {
     const v = S.spec.venues[vi], p = f => `spec.venues.${vi}.${f}`, msgs = out.venues[vi] || [];
     const kinds = sc().room_kinds || [], cur = v.kind || "";
+    const curB = String(v.building == null ? "" : v.building).trim(), curF = String(v.floor == null ? "" : v.floor).trim(), fl = (P.find(b => b.block === curB) || { floors: [] }).floors;
+    const typeBox = (field, cur, hint) => `<input id="vvType" data-vtype="${vi}|${field}" value="${esc(cur)}" placeholder="${hint}" autocomplete="off"><button class="small" data-vtypex="1">Pick from the list</button>`;   // a new block or floor, typed
+    const blockBox = VV.typing === "building" ? typeBox("building", curB, "the new block's name")
+      : `<select data-vplace="${vi}|building">${opt("", curB, "No block yet")}${P.map(b => opt(b.block, curB)).join("")}<option value="${VNEW}">New block…</option></select>`;
+    const floorBox = VV.typing === "floor" ? typeBox("floor", curF, "1, 2, G…")
+      : `<select data-vplace="${vi}|floor">${opt("", curF, "No floor yet")}${fl.map(f => opt(f, curF, vvFloorName(f))).join("")}${curF && !fl.includes(curF) ? opt(curF, curF, vvFloorName(curF)) : ""}<option value="${VNEW}">New floor…</option></select>`;
     const kindBox = `<select id="vvKind" data-vkind="${vi}">${opt("", cur, "")}${kinds.map(k => opt(k, cur)).join("")}${cur && !kinds.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}<option value="${VNEWKIND}">New kind…</option></select>`;
     const draft = VV.draft && VV.draft.what === "kind"
       ? `<div class="row vdraft"><label>New kind's name <input id="vvKindName" value="${esc(VV.draft.text || "")}" autocomplete="off"></label> <button data-vkindadd="${vi}">Add</button> <button data-vdraftx="1">Cancel</button></div>` : "";
     return `<div class="vopen ${rowCls(out, crit, "venues", vi)}" id="venues-${vi}" data-vopen="${vi}">
       <div class="vfields"><label>Room ${inp(p("room"), v.room)}</label><label>Kind ${kindBox}</label><label>Capacity ${inp(p("capacity"), v.capacity, "number")}</label>
-        <label>Block ${inp(p("building"), v.building)}</label><label>Floor / level ${inp(p("floor"), v.floor)}</label>
+        <label>Block ${blockBox}</label><label>Floor / level ${floorBox}</label>
         <label>For <input data-names="${p("only_for")}" list="forNames" value="${esc((Array.isArray(v.only_for) ? v.only_for : []).join(", "))}" placeholder="anyone"></label>
         <label class="vwide">Equipment <input data-names="${p("equipment")}" value="${esc((Array.isArray(v.equipment) ? v.equipment : []).join(", "))}" placeholder="none"></label>
         <label class="vwide">Configuration ${inp(p("configuration"), v.configuration)}</label><label class="vwide">Note ${inp(p("note"), v.note)}</label></div>${draft}
       ${msgs.length ? `<div class="vmsgs">${msgs.map(m => `<div>${esc(m)}</div>`).join("")}</div>` : ""}
       <div class="row" style="margin-top:8px">${delBtn("venues", vi)} <button class="small" data-vclose="1">Close</button></div></div>`;
   };
-  const floorName = f => f === "" ? "No floor yet" : /^-?\d+(\.\d+)?$/.test(f) ? `Floor ${f}` : f;
+  const floorName = vvFloorName;
+  const tickAll = f => { const all = f.rooms.length && f.rooms.every(r => ticks.has((S.spec.venues[r.vi] || {})._id)); return f.rooms.length ? `<button class="small vtickall" data-vtickall="${f.rooms.map(r => r.vi).join(",")}">${all ? "Untick" : "Tick all"}</button>` : ""; };
   const at = (b, f) => `${encodeURIComponent(b)}|${encodeURIComponent(f)}`;   // "{block}|{floor}", each part encoded so a name with a bar in it still splits right
-  return `${legend}<div class="vblocks">${bl.map(b => `<section class="vpanel"><h3>${b.block === "" ? "No block yet" : esc(b.block)} <span class="muted">${b.rooms} ${b.rooms === 1 ? "room" : "rooms"} · ${b.seats} seats</span> <button class="small vfloorbtn" data-vfloor="${esc(b.block)}">+ Floor</button></h3>
-      ${b.floors.map(f => `<div class="vfloor"><div class="vflabel">${esc(floorName(f.floor))}</div><div class="vtiles">${f.rooms.map(tile).join("")}<button class="small vaddbtn" data-vadd="${esc(at(b.block, f.floor))}">+ Room</button></div>${f.rooms.some(r => r.vi === VV.open) ? openRoom(VV.open) : ""}</div>`).join("")}</section>`).join("")}</div>${add}
+  return `${bar}${legend}<div class="vblocks">${bl.map(b => `<section class="vpanel"><h3>${b.block === "" ? "No block yet" : esc(b.block)} <span class="muted">${b.rooms} ${b.rooms === 1 ? "room" : "rooms"} · ${b.seats} seats</span> <button class="small vfloorbtn" data-vfloor="${esc(b.block)}">+ Floor</button></h3>
+      ${b.floors.map(f => `<div class="vfloor"><div class="vflabel">${esc(floorName(f.floor))}${tickAll(f)}</div><div class="vtiles">${f.rooms.map(tile).join("")}<button class="small vaddbtn" data-vadd="${esc(at(b.block, f.floor))}">+ Room</button></div>${f.rooms.some(r => r.vi === VV.open) ? openRoom(VV.open) : ""}</div>`).join("")}</section>`).join("")}</div>${add}
     <datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist>`;
 }
 /* a room added from the Blocks view goes on the list the way the Add rooms bar adds one: pushed, then one save; it opens at once */
@@ -1540,18 +1579,18 @@ const VIEWS = {
     const codes = groupCodes();
     const availRow = (i) => { const r = S.spec.rules[i], [a, b] = ruleTimes(r);
       return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td style="min-width:180px">${sel(`spec.rules.${i}.target`, r.target, teacherNames())}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td>
-        <td><input data-time="${i}|0" type="time" value="${esc(a)}"></td><td><input data-time="${i}|1" type="time" value="${esc(b)}"></td><td class="calc">${r.from === r.to || r.to == null ? `period ${r.from}` : `periods ${r.from}–${r.to}`}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 8)}`; };
+        <td><input data-time="${i}|0" type="time" value="${esc(a)}"></td><td><input data-time="${i}|1" type="time" value="${esc(b)}"></td><td class="calc">${r.from === r.to || r.to == null ? `period ${r.from}` : `periods ${r.from}–${r.to}`}</td><td class="note">${area(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 8)}`; };
     const fixedRow = (i) => { const r = S.spec.rules[i], every = ["Level", "School"].includes(r.scope), lv = every ? (r.scope === "Level" ? r.target : "All") : r.level || clsLevel(r.target);
       const who = [EVERY, ...classNames().filter(c => !lv || lv === "All" || clsLevel(c) === lv), ...codes.filter(c => !lv || lv === "All" || String(lv).slice(-1) === c[0])];
-      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td><select data-fixlv="${i}">${["All", ...levels()].map(v => opt(v, lv || "All")).join("")}</select></td><td style="min-width:110px"><select data-fixwho="${i}">${opt("", every ? EVERY : r.target, "")}${who.map(v => opt(v, every ? EVERY : r.target)).join("")}${!every && r.target && !who.includes(r.target) ? opt(r.target, r.target, `${r.target} (not on list)`) : ""}</select></td><td style="min-width:180px">${sel(`spec.rules.${i}.subject`, r.subject, subjectNames())}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 8)}`; };
+      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td><select data-fixlv="${i}">${["All", ...levels()].map(v => opt(v, lv || "All")).join("")}</select></td><td style="min-width:110px"><select data-fixwho="${i}">${opt("", every ? EVERY : r.target, "")}${who.map(v => opt(v, every ? EVERY : r.target)).join("")}${!every && r.target && !who.includes(r.target) ? opt(r.target, r.target, `${r.target} (not on list)`) : ""}</select></td><td style="min-width:180px">${sel(`spec.rules.${i}.subject`, r.subject, subjectNames())}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td class="note">${area(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 8)}`; };
     const moreRow = (i, tabScopes) => { const r = S.spec.rules[i];
       const subjCell = r.rule === "Only these subjects" ? chips(`spec.rules.${i}.subject`, namesList(r.subject), "subjects") : sel(`spec.rules.${i}.subject`, r.subject, subjectNames());
       const venueCell = r.rule === "Only in venues" ? chips(`spec.rules.${i}.venues`, namesList(r.venues), "rooms") : '<span class="muted small">–</span>';
-      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td><select data-k="spec.rules.${i}.scope">${opt("", r.scope, "")}${S.meta.scopes.filter(v => tabScopes.includes(v) || v === r.scope).map(v => opt(v, r.scope, v === "Block" ? "Band" : v)).join("")}</select></td><td style="min-width:150px">${sel(`spec.rules.${i}.target`, r.target, targetOptions(r.scope))}</td><td style="min-width:180px">${subjCell}</td><td style="min-width:180px">${sel(`spec.rules.${i}.rule`, r.rule, RT.filter(t => !r.scope || scopesOf(t).includes(r.scope)).map(t => t.rule))}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td>${psel(`spec.rules.${i}.to`, r.to)}</td><td class="num">${usesNumber(r.rule) ? inp(`spec.rules.${i}.number`, r.number, "number", 'style="width:56px"') : '<span class="muted small" title="This rule does not use a number">–</span>'}</td><td style="min-width:120px">${venueCell}</td><td>${sel(`spec.rules.${i}.strength`, r.strength || "Must", ["Must", "Prefer"], false)}</td><td class="note">${inp(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 13)}`; };
+      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td><select data-k="spec.rules.${i}.scope">${opt("", r.scope, "")}${S.meta.scopes.filter(v => tabScopes.includes(v) || v === r.scope).map(v => opt(v, r.scope, v === "Block" ? "Band" : v)).join("")}</select></td><td style="min-width:150px">${sel(`spec.rules.${i}.target`, r.target, targetOptions(r.scope))}</td><td style="min-width:180px">${subjCell}</td><td style="min-width:180px">${sel(`spec.rules.${i}.rule`, r.rule, RT.filter(t => !r.scope || scopesOf(t).includes(r.scope)).map(t => t.rule))}</td><td>${sel(`spec.rules.${i}.week`, r.week || "Both", weeks, false)}</td><td>${sel(`spec.rules.${i}.day`, r.day || "All", days, false)}</td><td>${psel(`spec.rules.${i}.from`, r.from)}</td><td>${psel(`spec.rules.${i}.to`, r.to)}</td><td class="num">${usesNumber(r.rule) ? inp(`spec.rules.${i}.number`, r.number, "number", 'style="width:56px"') : '<span class="muted small" title="This rule does not use a number">–</span>'}</td><td style="min-width:120px">${venueCell}</td><td>${sel(`spec.rules.${i}.strength`, r.strength || "Must", ["Must", "Prefer"], false)}</td><td class="note">${area(`spec.rules.${i}.note`, r.note)}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 13)}`; };
     const typedNo = {}; let tn = 0; S.spec.rules.forEach((r, i) => { if (r.rule === "In words") typedNo[i] = ++tn; });
     const typedScopes = scopesOf(RT.find(t => t.rule === "In words") || { scopes: "School, Level, Class, Subject, Room, Teacher" });
     const typedRow = (i, tabScopes) => { const r = S.spec.rules[i];
-      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td class="calc">T${typedNo[i]}</td><td>${sel(`spec.rules.${i}.strength`, r.strength || "Must", ["Must", "Prefer"], false)}</td><td><select data-k="spec.rules.${i}.scope">${opt("", r.scope, "")}${S.meta.scopes.filter(v => (tabScopes.includes(v) && typedScopes.includes(v)) || v === r.scope).map(v => opt(v, r.scope, v === "Block" ? "Band" : v)).join("")}</select></td><td style="min-width:150px">${sel(`spec.rules.${i}.target`, r.target, targetOptions(r.scope))}</td><td class="words">${inp(`spec.rules.${i}.text`, r.text, "text", 'placeholder="What must, or should, happen"')}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 6)}`; };
+      return `<tr id="rules-${i}" class="${bad(i)}" title="${tip(i)}"><td class="calc">T${typedNo[i]}</td><td>${sel(`spec.rules.${i}.strength`, r.strength || "Must", ["Must", "Prefer"], false)}</td><td><select data-k="spec.rules.${i}.scope">${opt("", r.scope, "")}${S.meta.scopes.filter(v => (tabScopes.includes(v) && typedScopes.includes(v)) || v === r.scope).map(v => opt(v, r.scope, v === "Block" ? "Band" : v)).join("")}</select></td><td style="min-width:150px">${sel(`spec.rules.${i}.target`, r.target, targetOptions(r.scope))}</td><td class="words">${area(`spec.rules.${i}.text`, r.text, 'placeholder="What must, or should, happen"')}</td><td>${delBtn("rules", i)}</td></tr>${msg(i, 6)}`; };
     const tab = TABS.find(t => t[0] === R6.tab) || TABS[0], [tid, tlabel, tscopes] = tab;
     const standard = where.more.filter(i => S.spec.rules[i].rule !== "In words"), typed = where.more.filter(i => S.spec.rules[i].rule === "In words");
     const onTab = (ix, id) => ix.filter(i => tabOf(S.spec.rules[i]) === id);
@@ -1688,6 +1727,11 @@ document.addEventListener("click", async e => {
     return; }
   if (b.dataset.vclose !== undefined) { const vi = VV.open; vvOpen(null); render(); const t = vi !== null && document.querySelector(`[data-vroom="${vi}"]`); if (t) t.focus({ preventScroll: true }); return; }
   if (b.dataset.vdraftx !== undefined) { VV.draft = null; render(); return; }
+  if (b.dataset.vmove !== undefined) { vvMove(); return; }
+  if (b.dataset.vuntick !== undefined) { vvTicks().clear(); render(); return; }
+  if (b.dataset.vtickall !== undefined) { const t = vvTicks(), ids = b.dataset.vtickall.split(",").map(i => (S.spec.venues[Number(i)] || {})._id).filter(Boolean), all = ids.every(id => t.has(id)); ids.forEach(id => all ? t.delete(id) : t.add(id)); render(); return; }
+  if (b.dataset.vmvpick !== undefined) { const mv = vvMv(); if (b.dataset.vmvpick === "block") { mv.nb = false; mv.nf = false; } else mv.nf = false; render(); return; }
+  if (b.dataset.vtypex !== undefined) { VV.typing = null; render(); return; }
   if (b.dataset.vadd !== undefined) { if (locked("venues")) return; const [bk, fl] = b.dataset.vadd.split("|").map(decodeURIComponent); vvAddRoom(bk, fl); return; }
   if (b.dataset.vfloor !== undefined) { if (locked("venues")) return; vvAddRoom(b.dataset.vfloor, VenueView.nextFloor(S.spec, b.dataset.vfloor)); return; }
   if (b.dataset.vblock !== undefined) { if (locked("venues")) return; VV.draft = { what: "block", text: "" }; render(); const i = $("#vvBlockName"); if (i) i.focus(); return; }
@@ -1772,6 +1816,10 @@ document.addEventListener("keydown", e => {   // ⌘Z / Ctrl+Z undo, ⇧⌘Z / C
 document.addEventListener("input", e => { if (VV.draft && (e.target.id === "vvKindName" || e.target.id === "vvBlockName")) VV.draft.text = e.target.value; });
 document.addEventListener("keydown", e => {   // step 1, Blocks: Enter in a small name box adds; Escape drops the box, or closes the open room
   if (e.isComposing || S.asking || !S.spec || !STEPS[S.step] || STEPS[S.step][0] !== "venues" || VV.view !== "blocks") return;
+  if (e.key === "Enter" && (e.target.id === "vvMvBlock" || e.target.id === "vvMvFloor")) { e.preventDefault(); vvMove(); return; }
+  if (e.key === "Escape" && (e.target.id === "vvMvBlock" || e.target.id === "vvMvFloor")) { e.preventDefault(); const mv = vvMv(); if (e.target.id === "vvMvBlock") { mv.nb = false; mv.nf = false; } else if (!mv.nb) mv.nf = false; render(); return; }   // back to the lists; the open room stays open
+  if (e.key === "Enter" && e.target.id === "vvType") { e.preventDefault(); e.target.blur(); return; }
+  if (e.key === "Escape" && e.target.id === "vvType") { e.preventDefault(); VV.typing = null; render(); return; }
   if (e.key === "Enter" && (e.target.id === "vvKindName" || e.target.id === "vvBlockName")) { e.preventDefault(); const b = document.querySelector(e.target.id === "vvKindName" ? "[data-vkindadd]" : "[data-vblockadd]"); if (b) b.click(); return; }
   if (e.key !== "Escape" || (VV.open === null && !VV.draft)) return;
   e.preventDefault(); const a = document.activeElement; if (a && a.blur && $("#main").contains(a)) a.blur();   // a box being typed in keeps what was typed first
@@ -1846,6 +1894,15 @@ document.addEventListener("change", async e => {
     const tr = el.closest("tr"), r = S.spec.rules[Number(el.dataset.fixlv ?? el.dataset.fixwho)];
     setFixedWho(r, tr.querySelector("[data-fixlv]").value, tr.querySelector("[data-fixwho]").value); save(); render(); return;
   }
+  if (el.dataset.vtick !== undefined) { const t = vvTicks(); el.checked ? t.add(el.dataset.vtick) : t.delete(el.dataset.vtick); render(); return; }
+  if (el.id === "vvMvBlockSel") { const mv = vvMv(); if (el.value === VNEW) { Object.assign(mv, { nb: true, nf: true, bt: "", ft: "" }); render(); const i = $("#vvMvBlock"); if (i) i.focus(); return; }   // a new block has no floors to pick: its floor is typed too
+    mv.block = el.value; mv.floor = ""; render(); return; }
+  if (el.id === "vvMvFloorSel") { const mv = vvMv(); if (el.value === VNEW) { mv.nf = true; mv.ft = ""; render(); const i = $("#vvMvFloor"); if (i) i.focus(); return; } mv.floor = el.value; render(); return; }
+  if (el.id === "vvMvBlock" || el.id === "vvMvFloor") return;   // kept as typed (the input handler); Move reads them
+  if (el.dataset.vplace !== undefined || el.dataset.vtype !== undefined) {   // the open room's Block or Floor: one from the list, "New …" (a box to type it), or the typed one
+    const [vi, field] = (el.dataset.vplace || el.dataset.vtype).split("|"), v = S.spec.venues[Number(vi)]; if (!v || !["building", "floor"].includes(field) || locked("venues")) return;
+    if (el.dataset.vplace !== undefined && el.value === VNEW) { VV.typing = field; render(); const i = $("#vvType"); if (i) { i.focus(); i.select(); } return; }
+    const val = el.value.trim(); if (val === "") delete v[field]; else v[field] = val; VV.typing = null; save(); render(); return; }
   if (el.dataset.vkind !== undefined) {   // the open room's Kind box: a kind, or "New kind…" (a small box for its name)
     const v = S.spec.venues[Number(el.dataset.vkind)]; if (!v || locked("venues")) return;
     if (el.value === VNEWKIND) { VV.draft = { what: "kind", text: "" }; render(); const i = $("#vvKindName"); if (i) i.focus(); return; }
@@ -2121,6 +2178,14 @@ function btApply() {   // after a keystroke in "Name has": show and hide the row
   rows.forEach(r => { const on = btShown(r.dataset.btname, r.dataset.btok === "1", bt.q); r.hidden = !on; if (on) n++; });
   const el = $("#btN"); if (el) el.textContent = `${n} of ${rows.length} shown`;
 }
+document.addEventListener("focusout", e => {   // the open room's typed Block or Floor left as it was: back to the list
+  if (!e.target || e.target.id !== "vvType" || !VV.typing || !e.target.isConnected) return;
+  const [vi, field] = String(e.target.dataset.vtype || "").split("|"), v = S.spec && S.spec.venues[Number(vi)];
+  if (v && e.target.value.trim() === String(v[field] == null ? "" : v[field]).trim()) setTimeout(() => { if (VV.typing === field && !$("#vvType:focus")) { VV.typing = null; render(); } }, 0);
+});
+document.addEventListener("keydown", e => {   // a wrapping box is one line of words: Enter leaves it, which saves it
+  if (e.key === "Enter" && !e.isComposing && e.target.classList && e.target.classList.contains("wrapbox")) { e.preventDefault(); e.target.blur(); }
+});
 /* ---- the Groups and bands view: form state and actions */
 document.addEventListener("keydown", e => {   // in the box for a band's name: Enter saves, Escape leaves the name as it was
   if (!e.target || e.target.id !== "gbName" || e.isComposing || !(e.key === "Enter" || e.key === "Escape")) return;
@@ -2589,7 +2654,10 @@ async function tlFile(el) {   // an .xlsx goes through the server (its teachers 
 document.addEventListener("input", e => {
   if (e.target.id === "fxAskIn") { fxHelp().words = e.target.value; return; }
   if (e.target.id === "gfStudents") { gfState().students = e.target.value; return; }
+  if (e.target.classList && e.target.classList.contains("wrapbox")) { if (/[\r\n]/.test(e.target.value)) { const at = e.target.selectionStart; e.target.value = e.target.value.replace(/\s*[\r\n]+\s*/g, " "); e.target.selectionStart = e.target.selectionEnd = Math.min(at, e.target.value.length); } fitAreas(e.target.parentElement); return; }   // pasted line breaks become spaces
   if (e.target.id === "btQ") { btState().q = e.target.value; btApply(); return; }
+  if (e.target.id === "vvMvBlock") { vvMv().bt = e.target.value; return; }   // kept, so a redraw does not lose what was typed
+  if (e.target.id === "vvMvFloor") { vvMv().ft = e.target.value; return; }
   if (e.target.id === "gbName") { M.grenameText = e.target.value; return; }   // kept, so a redraw from elsewhere does not lose what was typed
   if (e.target.id === "bfName") { const bf = bfState(); bf.name = e.target.value; bf.touched = true; const ev = $("#bfEveryone"); if (ev && !bf.evTouched) ev.checked = !/option|elective/i.test(bf.name); return; }
   if (e.target.id === "mQ") { M.q = e.target.value; const rb = $("#rbody"); if (rb) rb.innerHTML = rosterList(mapDept()); return; }   // the roster only: a full redraw would take the caret

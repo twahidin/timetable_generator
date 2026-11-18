@@ -104,6 +104,27 @@ var VenueView = (function () {
     return top === null ? "1" : String(Math.floor(top) + 1);
   }
 
-  return { blocks: blocks, nextRoom: nextRoom, nextFloor: nextFloor, kinds: kinds };
+  /* the named blocks and each one's named floors, in the view's order: what a room can be moved to -> [{block, floors}] */
+  function places(spec) {
+    return blocks(spec).filter(function (b) { return b.block !== ""; }).map(function (b) {
+      return { block: b.block, floors: b.floors.map(function (f) { return f.floor; }).filter(function (f) { return f !== ""; }) };
+    });
+  }
+  /* the rooms at these indexes go to the block and the floor (either may be empty: no block yet, no floor yet); nothing else
+     of a room changes -> how many rooms changed place */
+  function move(spec, vis, block, floor) {
+    var V = rows(spec, "venues"), b = text(block), f = text(floor), n = 0;
+    (Array.isArray(vis) ? vis : []).forEach(function (vi) {
+      var v = V[vi];
+      if (!v || typeof v !== "object") return;
+      if (text(v.building) === b && text(v.floor) === f) return;
+      if (b === "") delete v.building; else v.building = b;
+      if (f === "") delete v.floor; else v.floor = f;
+      n++;
+    });
+    return n;
+  }
+
+  return { blocks: blocks, nextRoom: nextRoom, nextFloor: nextFloor, kinds: kinds, places: places, move: move };
 })();
 if (typeof module !== "undefined") module.exports = VenueView;
