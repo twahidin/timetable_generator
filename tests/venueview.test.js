@@ -80,4 +80,21 @@ t("kinds_that_are_not_a_list_count_as_none", () => {
   assert.deepStrictEqual(VenueView.kinds({ school: { room_kinds: "classroom, lab" }, venues: [{ room: "A", kind: "studio" }] }), ["studio"]);
   assert.deepStrictEqual(VenueView.nextRoom({ school: { room_kinds: "classroom" }, venues: [] }, "B", "1"), { room: "", kind: "classroom", capacity: null });
 });
+t("places: the named blocks with their floors, as the view orders them", () => {
+  assert.deepStrictEqual(VenueView.places(fixture()), [{ block: "Block A", floors: ["3", "G"] }, { block: "Block B", floors: ["2", "1"] }]);   // a room with no block is in none; a floor with no name is not a floor
+  const s = fixture(); s.venues.push({ _id: "v9", room: "A-x", building: "Block A" });
+  assert.deepStrictEqual(VenueView.places(s)[0], { block: "Block A", floors: ["3", "G"] });
+  assert.deepStrictEqual(VenueView.places({}), []);
+});
+t("move: the rooms take the block and the floor; an empty one takes the key away", () => {
+  const s = fixture();
+  assert.strictEqual(VenueView.move(s, [6, 0, 99, -1, "x"], " Block C ", " 2 "), 2);   // rooms that are not there are passed over
+  assert.deepStrictEqual([s.venues[6].building, s.venues[6].floor, s.venues[0].building, s.venues[0].floor], ["Block C", "2", "Block C", "2"]);
+  assert.strictEqual(VenueView.move(s, [0], "", ""), 1); assert.strictEqual("building" in s.venues[0], false); assert.strictEqual("floor" in s.venues[0], false);
+  assert.strictEqual(VenueView.move(s, [0], "", ""), 0);   // already there: nothing changes
+  assert.strictEqual(VenueView.move(s, [1], "Block B", 1), 0);   // the same place written another way (" Block B ", "1")
+  assert.strictEqual(VenueView.move(s, [3, 4], "Block B", "3"), 2); assert.deepStrictEqual(VenueView.places(s).find(b => b.block === "Block B").floors, ["3", "2", "1"]);
+  assert.strictEqual(VenueView.move({}, [0], "A", "1"), 0); assert.strictEqual(VenueView.move(s, null, "A", "1"), 0);
+  assert.deepStrictEqual([s.venues[3].room, s.venues[3].kind, s.venues[3].capacity], ["B2-10", "lab", 30]);   // nothing else of a room changes
+});
 console.log(n + " cases passed");
