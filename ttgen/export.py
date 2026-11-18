@@ -980,13 +980,14 @@ def html_data(m, view="full", student_id=None, app=None):
              classes=[[c["name"], c["level"], c["size"], c["home"], c.get("parents") or []] for c in m["classes"]], parents_name=m.get("parents_name") or "Form teachers",
              teachers=[[t["name"], t["short"], t["dept"], t["allowance"]] for t in m["teachers"]],
              rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1), r.get("equipment") or [], r.get("configuration") or ""] for r in m["rooms"]],   # equipment and configuration: notes only
-             subjects={k: [v["short"], v["color"]] for k, v in m["subjects"].items()}, palette=pal, ext=list(EXT),
+             subjects={k: [v["short"], v["color"], v.get("dept") or ""] for k, v in m["subjects"].items()}, palette=pal, ext=list(EXT),   # the department: the Lessons view's filter
              lessons=[[x["id"], x["d"], x["p"], x["n"], x["level"], x["block"], x["classes"], x["subject"], x["group"], x["teachers"], x["room"], int(x["ext"])] + ([x["rain"]] if x.get("rain") else [])
                       for x in m["lessons"]],
              students=[[s["id"], s["name"], s["cls"], s["groups"]] for s in m["students"]],
              checks=dict(ok=m["checks"]["ok"], problems=m["checks"]["problems"], after=m["checks"]["after_school"], notes=m["notes"]), app=app)
     if view in ("student", "personal"):
         d["teachers"] = [[t[0], t[1], "", ""] for t in d["teachers"]]
+        d["subjects"] = {k: [v[0], v[1], ""] for k, v in d["subjects"].items()}   # a student's page has no Lessons tab: the department stays behind
         d["checks"] = dict(ok=m["checks"]["ok"], problems=[], after=[], notes=[])
         d["rooms"] = []
     if view == "student":

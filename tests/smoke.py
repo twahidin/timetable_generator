@@ -1167,7 +1167,11 @@ def test_published_pages_name_the_class_parents():
     assert next(x for x in m["classes"] if x["name"] == "1B")["parents"] == []
     assert export.class_view(m, "1A")["subtitle"].endswith(line) and "Form teachers" not in export.class_view(m, "1B")["subtitle"]
     assert export.teacher_view(m, "Pastoral A")["subtitle"].endswith(" · Form teachers of 1A")
-    d = export.html_data(m); assert next(x for x in d["classes"] if x[0] == "1A")[4] == ["Pastoral A", "Pastoral B"] and d["parents_name"] == "Form teachers", d["classes"][:2]
+    d = export.html_data(m); assert next(x for x in d["classes"] if x[0] == "1A")[4] == ["Pastoral A", "Pastoral B"] and d["parents_name"] == "Form teachers", d
+    assert all(len(v) == 3 and v[2] == (m["subjects"][k].get("dept") or "") for k, v in d["subjects"].items()) and any(v[2] for v in d["subjects"].values()), d["subjects"]   # each subject's department travels to the page, for the Lessons view's Department filter
+    assert all(v[2] == "" for vw in ("student",) for v in export.html_data(m, vw)["subjects"].values())   # not to a student's page
+    src0 = open(os.path.join(ROOT, "ttgen", "timetable_page.html"), encoding="utf-8").read()
+    assert all(t in src0 for t in ('data-lview="${k}"', "function drawLessonGrids()", "function drawLessonPage()", 'data-f="dept"', "deptOf(x.subject) !== f.dept")), "the Lessons view's three views and its Department filter"["classes"][:2]
     pdf = c.get("/pdf/classes/1A"); assert pdf.status_code == 200 and pdf.data[:4] == b"%PDF"
     assert '"parents_name":"Form teachers"' in c.get("/timetable").get_data(as_text=True)
     old = pickle.loads(pickle.dumps(m)); old.pop("parents_name")                                  # a model pickled before this change
