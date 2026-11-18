@@ -1759,8 +1759,8 @@ document.addEventListener("click", async e => {
   if (b.dataset.copyday) { const lv = b.dataset.copyday; const ds = S.spec.day_structure[lv]; const f = ds[dayNames()[0]]; dayNames().forEach(d => ds[d] = f); save(); render(); return; }
   if (b.dataset.copylevel) { const src = S.spec.day_structure[b.dataset.copylevel]; levels().forEach(l => S.spec.day_structure[l] = { ...src }); save(); render(); return; }
   for (const k of ["mview", "mall", "mnone", "munplaced", "madd", "mnew", "mnewcancel", "mnewgo"]) if (b.dataset[k] !== undefined) { mapAction(k, b.dataset[k]); return; }
-  if (b.dataset.gdel !== undefined && e.detail > 1) return;   // the second click of a double click would delete the row that moved up under the pointer
-  for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject", "gall", "gnone", "gclear", "gmove", "gout", "gdel", "gtab", "gbdel", "gbyes", "gbno", "gbname", "gbsave", "gbcancel"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
+  if ((b.dataset.gdel !== undefined || b.dataset.gtx !== undefined) && e.detail > 1) return;   // the second click of a double click would delete the row that moved up under the pointer
+  for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject", "gall", "gnone", "gclear", "gmove", "gout", "gdel", "gtab", "gbdel", "gbyes", "gbno", "gbname", "gbsave", "gbcancel", "gtx"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
   if (b.dataset.mprofile) { M.profile = b.dataset.mprofile; render(); return; }
   if (b.dataset.mclose !== undefined) { M.profile = null; render(); return; }
   if (b.dataset.mx) { const [li, cls, ...nm] = b.dataset.mx.split("|"); cardRemove(`${li}|${cls}`, nm.join("|")); return; }
@@ -2225,8 +2225,9 @@ function gpShow(level, row, block) {   // after an add: the filter and the tab m
   if (gp.band && gp.band !== block) gp.band = "";
   M.gtab = block ? "bands" : "pool"; M.gask = null;
 }
-const gAv = nm => { const t = S.spec.teachers.find(x => x.name === nm);   // the face with the teacher's short name beside it: a face alone does not say who it is
-  return t ? `<span class="gav" title="${esc(nm)}">${avatarOf(t, 24)}<span class="gavn">${esc(t.short || t.name || "")}</span></span>` : `<span class="chip">${esc(nm)}</span>`; };
+const gAv = (nm, li) => { const t = S.spec.teachers.find(x => x.name === nm);   // the face with the teacher's short name beside it: a face alone does not say who it is; with a row (li), a small ✕ takes the teacher off it
+  const off = li === undefined || cpBlock(S.spec.lessons[li]) ? "" : `<button class="gavx" data-gtx="${li}|${esc(nm)}" title="Take ${esc(nm)} off this teaching group" aria-label="Take ${esc(nm)} off this teaching group">✕</button>`;
+  return t ? `<span class="gav" title="${esc(nm)}">${avatarOf(t, 24)}<span class="gavn">${esc(t.short || t.name || "")}</span>${off}</span>` : `<span class="chip">${esc(nm)}${off}</span>`; };
 const byLevel = (items, draw) => gpState().level ? items.map(draw).join("") : levels().concat([...new Set(items.map(x => x.level || ""))].filter(l => !levels().includes(l))).map(lv => { const mine = items.filter(x => (x.level || "") === lv);   // under a heading for each level when every level is shown
   return mine.length ? `<div class="glv">${esc(lv || "No level")}</div>${mine.map(draw).join("")}` : ""; }).join("");
 function barView(v) {   // one filter for both lists: the level (or all), a subject, a teacher (or the rows with none); and one band alone
@@ -2247,7 +2248,7 @@ function tabsView(v) {   // the two lists as tabs, each with how many it shows
 function poolView(v) {   // the rows with no band that the filter shows: tick them and move them into a band, or delete one
   const gp = gpState(), items = v.pool, lanes = Groups.lanes(S.spec, gp.level), where = gp.level || "any level";
   const row = p => { const id = S.spec.lessons[p.li]._id, on = gp.ticked.has(id);
-    return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}"><span style="flex:1;min-width:0">${esc(p.title)}</span>${p.kind === "group" ? `<span class="codeline small">${esc(p.code)}</span>` : ""}<span class="muted small" title="Students">${p.students != null ? p.students : ""}</span><span class="avs" style="margin:0;min-height:0">${p.teachers.map(gAv).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small danger" data-gdel="${p.li}" title="Delete this teaching group">Delete</button></div>`; };
+    return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}"><span style="flex:1;min-width:0">${esc(p.title)}</span>${p.kind === "group" ? `<span class="codeline small">${esc(p.code)}</span>` : ""}<span class="muted small" title="Students">${p.students != null ? p.students : ""}</span><span class="avs" style="margin:0;min-height:0">${p.teachers.map(nm => gAv(nm, p.li)).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small danger" data-gdel="${p.li}" title="Delete this teaching group">Delete</button></div>`; };
   return `<section class="gpool card"><h3 style="margin:0 0 6px">Single teaching groups</h3><p class="muted small" style="margin:0 0 8px">Whole-class rows and groups with their own code, each with who teaches it: the teaching groups that are in no band. Tick rows and move them into a band.</p>
     <div class="row" style="margin:8px 0"><button class="small" data-gall>Select all shown</button><button class="small" data-gnone>Deselect all</button><span class="muted small">${items.length} row${items.length === 1 ? "" : "s"}${gp.ticked.size ? ` · ${gp.ticked.size} ticked` : ""}</span>
       <span style="flex:1"></span><span>Move into band</span><select id="gpTo">${opt("", M.gpTo || "", "")}${lanes.map(l => opt(l.block, M.gpTo || "")).join("")}</select><button data-gmove ${gp.ticked.size && lanes.length ? "" : "disabled"}>Move</button></div>
@@ -2256,7 +2257,7 @@ function poolView(v) {   // the rows with no band that the filter shows: tick th
 function lanesView(v) {   // the bands the filter shows as lanes, each whole; a group that does not match is faded; a band or a group can be deleted
   const gp = gpState(), lanes = v.lanes, s = n => n === 1 ? "" : "s";
   const grow = (g, l) => { const own = g.classes.join(",") !== l.classes.join(",");   // a group of fewer classes than its band says which
-    return `<div class="grow${g.match ? "" : " dim"}"><span class="codeline small">${esc(g.code)}</span><span style="flex:1;min-width:0">${esc(g.subject)}${own ? ` <span class="muted small">${esc(g.classes.join(", "))}</span>` : ""}</span>${g.students != null ? `<span class="muted small" title="Students">${g.students}</span>` : ""}<span class="avs" style="margin:0;min-height:0">${g.teachers.map(gAv).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small" data-gout="${g.li}" title="Out of the band: it becomes a single teaching group">Take out</button><button class="small danger" data-gdel="${g.li}" title="Delete this teaching group">Delete</button></div>`; };
+    return `<div class="grow${g.match ? "" : " dim"}"><span class="codeline small">${esc(g.code)}</span><span style="flex:1;min-width:0">${esc(g.subject)}${own ? ` <span class="muted small">${esc(g.classes.join(", "))}</span>` : ""}</span>${g.students != null ? `<span class="muted small" title="Students">${g.students}</span>` : ""}<span class="avs" style="margin:0;min-height:0">${g.teachers.map(nm => gAv(nm, g.li)).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small" data-gout="${g.li}" title="Out of the band: it becomes a single teaching group">Take out</button><button class="small danger" data-gdel="${g.li}" title="Delete this teaching group">Delete</button></div>`; };
   const ask = l => { const n = l.groups.length, r = Groups.bandRules(S.spec, l.block);   // the question "Delete band" asks, in the band itself
     return `<div class="gask"><div>Delete ${esc(l.block)}?${n ? ` It has ${n} group${s(n)}.` : ""}${r ? ` ${r} rule${s(r)} on step 6 name${r === 1 ? "s" : ""} this band and will need another.` : ""}</div>
       <div class="row">${n ? `<button class="small danger" data-gbyes="all">Delete the band and its ${n} group${s(n)}</button><button class="small" data-gbyes="keep">Delete the band, keep the group${s(n)}</button>` : `<button class="small danger" data-gbyes="all">Delete the band</button>`}<button class="small" data-gbno>Cancel</button></div></div>`; };
@@ -2285,6 +2286,13 @@ function moveRows(lis, block) {
   if (!r.moved) { toast(r.skipped ? `Those rows are of another level than ${block}.` : "Nothing moved."); return; }
   save(); gpState().ticked.clear(); render();
   toast(`Moved ${r.moved} into ${block}.${r.widened.length ? ` ${block} now also covers ${listing(r.widened)}.` : ""}${r.skipped ? ` ${r.skipped} row${r.skipped === 1 ? "" : "s"} of another level ${r.skipped === 1 ? "was" : "were"} left.` : ""}${shiftNote(sh)}`);
+}
+function teacherOff(li, name) {   // a teacher is taken off one teaching group, there in the list; the top bar's Undo puts them back
+  const x = S.spec.lessons[li]; if (!x) return;
+  if (cpBlock(x)) { toast(cpWhy()); return; }
+  if (!DeptMap.undeploy(S.spec, { kind: "group", li }, name)) return;   // the row itself, whatever classes it has
+  const code = (lessonInfo()[li] || {}).code, what = `${code && code !== "Entire Class" ? code + " " : ""}${x.subject || "the row"}${(x.classes || []).length ? ` for ${listing(x.classes)}` : ""}`;
+  save(); render(); toast(`Took ${name} off ${what}. Undo, at the top, puts them back.`);
 }
 function rowDelete(li) {   // a teaching group is deleted, in a band or not; the top bar's Undo brings it back
   if (!S.spec.lessons[li]) return;
@@ -2321,6 +2329,7 @@ function groupsAction(k, v) {
   if (k === "gclear") { const gp = gpState(); gp.dept = ""; gp.subject = ""; gp.teacher = ""; gp.band = ""; M.gask = null; render(); return; }
   if (k === "gtab") { M.gtab = v === "pool" ? "pool" : "bands"; M.gask = null; render(); return; }
   if (k === "gdel") { rowDelete(Number(v)); return; }
+  if (k === "gtx") { const [li, ...nm] = String(v).split("|"); teacherOff(Number(li), nm.join("|")); return; }
   if (k === "gbdel") { M.gask = M.gask === v ? null : v; render(); return; }   // the question opens in the band; a second press closes it
   if (k === "gbno") { M.gask = null; render(); return; }
   if (k === "gbname") { M.grename = v; M.grenameText = null; M.gask = null; render(); const box = $("#gbName"); if (box) { box.focus(); box.select(); } return; }

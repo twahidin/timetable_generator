@@ -210,7 +210,8 @@ Under the two cards, one filter governs both lists below it: **Level** (one leve
 list under a heading for each level), **Department** (the department of the subject; the subjects and teachers on
 offer are then that department's), **Subject**, **Teacher** (a teacher, or **No teacher** for the rows nobody
 teaches yet) and **Band** (one band alone). **Show all** clears the department, the subject, the teacher and the band.
-Below the filter are two tabs, each with how many it shows.
+Below the filter are two tabs, each with how many it shows. On both, a small ✕ beside a teacher's name takes that teacher off that
+teaching group.
 **Single teaching groups** are the whole-class rows and pull-out groups that are in no band, each with who teaches it,
 with **Select all shown** and **Deselect all**. Tick rows and **Move** them into a band of their own level: a whole
 class moved into a band becomes a group of it, and the band's classes widen to cover it. **Delete** removes a row.
