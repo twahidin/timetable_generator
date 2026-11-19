@@ -146,5 +146,54 @@ def room_names_are_cleaned_when_the_problem_is_built():
     once = copy.deepcopy(SPEC.clean_rooms(copy.deepcopy(sp))); assert SPEC.clean_rooms(copy.deepcopy(once)) == once
 t(room_names_are_cleaned_when_the_problem_is_built)
 
+from ttgen import report  # noqa: E402
+
+def placed(P, picks):
+    """a result with the picked rows placed by hand: picks = [(row test, start, length)] -> res"""
+    L = []
+    for pred, start, ln in picks:
+        r, u = rows_of(P, pred)[0]; L.append(dict(unit=u, part=[r], start=start, ln=ln, ext=False, key=f"{u['id']}:{len(L)}"))   # ext: inside the school day
+    return dict(status="FEASIBLE", problem=P, lessons=L, recess={}, notes=[])
+
+def first_l(P, level, d=0): row = P.grid[level][d]; return d * P.NP + row.index("L")
+dt1 = lambda c: (lambda r, u: r["subject"] == "Design & Technology" and u["classes"] == [c])
+grp = lambda code: (lambda r, u: r["code"] == code)
+room_of = lambda res, i: next(iter(res["lessons"][i]["rooms"].values()))
+
+def rooms_are_handed_out_by_the_one_rule():
+    P = Problem(pair_school()); q = first_l(P, "Sec 1")
+    res = placed(P, [(grp("3DTP1"), q, 1), (grp("4DTP1"), q, 1)]); report.assign_rooms(res)   # two small groups: a studio each
+    assert {room_of(res, 0), room_of(res, 1)} == {S1, S2}
+    res = placed(P, [(dt1("1A"), q, 1), (grp("3DTP1"), q, 1)]); report.assign_rooms(res)      # a class and a group: the class has the pair, the group nothing
+    assert room_of(res, 0) == PAIR and room_of(res, 1) == "TBC"
+    res = placed(P, [(dt1("1A"), q, 1), (dt1("1B"), q, 1)]); report.assign_rooms(res)          # two classes: one pair
+    assert sorted([room_of(res, 0), room_of(res, 1)]) == sorted([PAIR, "TBC"])
+    res = placed(P, [(dt1("1A"), q, 1), (grp("3DTP1"), q + 1, 1)]); report.assign_rooms(res)  # one after the other: both served
+    assert room_of(res, 0) == PAIR and room_of(res, 1) in (S1, S2)
+t(rooms_are_handed_out_by_the_one_rule)
+
+def the_check_counts_a_pair_lesson_in_each_room():
+    P = Problem(pair_school()); q = first_l(P, "Sec 1")
+    res = placed(P, [(dt1("1A"), q, 1), (grp("3DTP1"), q, 1)]); report.assign_rooms(res)
+    r3 = res["lessons"][1]["part"][0]; res["lessons"][1]["rooms"][id(r3)] = S1   # forced into half of the pair
+    probs = report.check(res)[0]; assert any(p.startswith(f"Room over capacity: {S1} at ") for p in probs) and not any(S2 in p for p in probs if p.startswith("Room over"))
+    res["lessons"][1]["rooms"][id(r3)] = PAIR
+    probs = report.check(res)[0]; assert sum(p.startswith("Room over capacity:") for p in probs) == 2   # both studios
+t(the_check_counts_a_pair_lesson_in_each_room)
+
+def a_solve_keeps_the_rule():   # slow: only with --full
+    res = solver.solve(pair_school(), time_limit=240, workers=8, log=lambda *a: None); assert res["status"] in ("OPTIMAL", "FEASIBLE"), res["status"]
+    report.assign_rooms(res); probs = report.check(res)[0]; assert not [p for p in probs if p.startswith("Room over capacity")] and not [p for p in probs if "TBC" in p], probs[:5]
+    use = collections.defaultdict(list)
+    for L in res["lessons"]:
+        for r in L["part"]:
+            room = L["rooms"][id(r)]
+            if r["subject"] == "Design & Technology": assert room == PAIR
+            if r["code"] in ("3DTP1", "4DTP1"): assert room in (S1, S2)
+            for s in res["problem"].singles(room):
+                for k in range(L["ln"]): use[(s, L["start"] + k)].append(id(L))
+    assert all(len(set(v)) == 1 for v in use.values())
+if "--full" in sys.argv: t(a_solve_keeps_the_rule)
+
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")

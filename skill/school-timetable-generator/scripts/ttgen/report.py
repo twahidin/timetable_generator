@@ -44,21 +44,27 @@ def assign_rooms(res):
             S, _ = P.rule_positions(r)
             for q in S: occ[r["target"]][q] = 99
     home = {c["class"]: c.get("home_room") for c in P.spec["classes"]}
-    def free(x, pos): return all(occ[x][q] < cap.get(x, 1) for q in pos)
+    def free(x, pos):   # each of its single rooms has space; a combined venue also not marked not available itself
+        return all(occ[s][q] < cap.get(s, 1) for s in P.singles(x) for q in pos) and (x not in P.parts or all(occ[x][q] == 0 for q in pos))
+    def take(x, pos, k=1):   # a lesson in x is in each of its single rooms
+        for s in P.singles(x):
+            for q in pos: occ[s][q] += k
+    def give_back(x, pos): take(x, pos, -1)
+    meets = lambda x, y: bool(set(P.singles(x)) & set(P.singles(y)))   # they share a single room
     week = lambda L: "Odd" if P.odd_day[L["start"] // NP] else "Even"
     lessons = res["lessons"]
     for L in lessons: L["rooms"] = {}; L["rain"] = {}; L["pos"] = list(range(L["start"], L["start"] + L["ln"]))
     for L, c, h in rain_rooms(P, lessons):   # PE: the class's home room is kept for rain (None: taken, the checks say so)
         L["rain"][c] = h if free(h, L["pos"]) else None
         if L["rain"][c]:
-            for q in L["pos"]: occ[h][q] += cap.get(h, 1)
+            for s in P.singles(h):
+                for q in L["pos"]: occ[s][q] += cap.get(s, 1)
     for L in lessons:   # whole-class lessons in their home room
         u = L["unit"]
         if u["kind"] != "class": continue
         r = L["part"][0]; kind, E, n, ov = P.allowed_at(r, u, L["start"], L["ln"], week(L)); h = home.get(u["classes"][0])
         if kind == "classroom" and h in E and free(h, L["pos"]):
-            L["rooms"][id(r)] = h
-            for q in L["pos"]: occ[h][q] += 1
+            L["rooms"][id(r)] = h; take(h, L["pos"])
     used = {}
     biggest = lambda L: max((P.allowed(r, L["unit"], week(L))[2] or 0 for r in L["part"]), default=0)
     for L in sorted(lessons, key=lambda L: (L["start"], -biggest(L), -L["ln"])):
@@ -71,9 +77,7 @@ def assign_rooms(res):
             free_ = [x for x in E if free(x, L["pos"])]
             x = min(free_, key=lambda x: (x not in pref if pref else False, x != used.get(key), x not in homes, not P.only_for.get(x), P.seats.get(x) or 10 ** 6, x), default=None)
             L["rooms"][id(r)] = x or "TBC"
-            if x:
-                for q in L["pos"]: occ[x][q] += 1
-                used.setdefault(key, x)
+            if x: take(x, L["pos"]); used.setdefault(key, x)
     # a group left without a room (the rooms it may use were handed to groups that could have gone elsewhere): the groups
     # in one of its rooms move to other free rooms they may use, making way
     smallest = lambda x: (P.seats.get(x) or 10 ** 6, x)
@@ -81,25 +85,21 @@ def assign_rooms(res):
         for r in L["part"]:
             if L["rooms"].get(id(r)) != "TBC": continue
             for x in sorted(P.allowed_at(r, L["unit"], L["start"], L["ln"], week(L))[1], key=smallest):
-                inway = [(M, s) for M in lessons if M is not L and set(M["pos"]) & set(L["pos"]) for s in M["part"] if M["rooms"].get(id(s)) == x]
+                inway = [(M, s, M["rooms"][id(s)]) for M in lessons if M is not L and set(M["pos"]) & set(L["pos"]) for s in M["part"]
+                         if M["rooms"].get(id(s)) not in (None, "TBC") and meets(M["rooms"][id(s)], x)]
                 if not inway: continue
-                for M, s in inway:
-                    for q in M["pos"]: occ[x][q] -= 1
+                for M, s, was in inway: give_back(was, M["pos"])
                 moves = []
-                for M, s in inway:
-                    y = next((y for y in sorted(P.allowed_at(s, M["unit"], M["start"], M["ln"], week(M))[1], key=smallest) if y != x and free(y, M["pos"])), None)
+                for M, s, was in inway:
+                    y = next((y for y in sorted(P.allowed_at(s, M["unit"], M["start"], M["ln"], week(M))[1], key=smallest) if not meets(y, x) and free(y, M["pos"])), None)
                     if y is None: break
-                    moves.append((M, s, y))
-                    for q in M["pos"]: occ[y][q] += 1
+                    moves.append((M, s, y)); take(y, M["pos"])
                 if len(moves) == len(inway) and free(x, L["pos"]):
                     for M, s, y in moves: M["rooms"][id(s)] = y
-                    L["rooms"][id(r)] = x
-                    for q in L["pos"]: occ[x][q] += 1
+                    L["rooms"][id(r)] = x; take(x, L["pos"])
                     break
-                for M, s, y in moves:   # no way through this room: put everything back
-                    for q in M["pos"]: occ[y][q] -= 1
-                for M, s in inway:
-                    for q in M["pos"]: occ[x][q] += 1
+                for M, s, y in moves: give_back(y, M["pos"])   # no way through this room: put everything back
+                for M, s, was in inway: take(was, M["pos"])
 
 def _seat_checks(res):
     """rooms too small for their group, rooms used against their purpose, and groups bigger than every room they may use"""
@@ -140,7 +140,7 @@ def check(res):
     cap = {v["room"]: 1 for v in P.spec["venues"]}
     for r in P.spec.get("rules", []):
         if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and r.get("target") in cap and r.get("number"): cap[r["target"]] = int(r["number"])
-    rb = collections.Counter((room, q) for x in L for room in x["rooms"].values() for q in x["pos"])
+    rb = collections.Counter((s, q) for x in L for room in x["rooms"].values() if room != "TBC" for s in P.singles(room) for q in x["pos"])   # a combined venue: each of its rooms
     probs += [f"Room over capacity: {room} at {P.days[q // NP]} period {q % NP}." for (room, q), n in rb.items() if room != "TBC" and n > cap.get(room, 1)]
     tbc = sum(1 for x in L for room in x["rooms"].values() if room == "TBC")
     if tbc: probs.append(f"{tbc} lesson-groups have no free room (marked TBC).")
@@ -290,7 +290,7 @@ def compromises(res):
                 elif nm in ("Not available", "Not in periods", "Keep free together") and set(x["pos"]) & S: add(nm, f"{x['unit']['name']} at {at(x['start'])}, a time marked {nm.lower()} ({scope} {tg}).")
         elif nm == "Not available" and scope == "Room":
             S, _ = P.rule_positions(r)
-            hit = sorted({q for x in L if tg in x["rooms"].values() for q in x["pos"]} & S)
+            hit = sorted({q for x in L if any(tg == room or tg in P.singles(room) for room in x["rooms"].values()) for q in x["pos"]} & S)   # its combined venue uses it too
             if hit: add(nm, f"{tg} is used at {at(hit[0])}" + (f" and {len(hit) - 1} more periods" if len(hit) > 1 else "") + ", a time marked not available.")
         elif nm == "At least one recess a day":
             for t, d in _recess_missed(P, tpos, r): add(nm, f"{t}: no recess on {P.days[d]}.")

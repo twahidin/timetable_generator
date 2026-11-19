@@ -592,8 +592,8 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
         for r in b["part"]:
             for week in (("Odd", "Even") if P.week_limited(r) else (None,)):
                 kind, E, _, _ = P.allowed(r, b["u"], week)
-                at = collections.defaultdict(list)   # 'Only in venues' (Must): the rooms it may use depend on when it starts
-                if P.venue_rules_for(r, b["u"]):
+                at = collections.defaultdict(list)   # 'Only in venues' (Must), or a combined venue not available at times: the rooms it may use depend on when it starts
+                if P.venue_rules_for(r, b["u"]) or any(P.off.get(c) for c in E if c in P.parts):
                     for q in sorted(b["vals"]): at[P.allowed_at(r, b["u"], q, b["ln"], week)[1]].append(q)
                     if E and frozenset() in at and len(at) > 1:   # none of the rule's rooms suits it: it may not run into those periods
                         for q in at.pop(frozenset()): m.Add(b["st"] != q)
@@ -613,9 +613,11 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
             need[kind].append((iv, E, n, b))
     for b, c, h in rain_rooms(P, blocks):   # Settings 'In rain, PE goes to the class's home room': it stays free during PE
         need[P.room_kind[h]].append((b["iv"], frozenset([h]), 1, b))
+    combined = {}   # kind -> its need, for the kinds with a combined venue (counted below)
     for kind, lst in need.items():
         every = frozenset(x for x, k in P.room_kind.items() if k == kind)
         if not every: notes.append(f"No room of kind '{kind}' on Venues: room limits for it are not checked."); continue
+        if any(x in P.parts for x in every): combined[kind] = lst; continue
         for F in {E for _, E, _, _ in lst} | {every}:
             cap = sum(P.room_cap[x] for x in F); sub = [(iv, n, b) for iv, E, n, b in lst if E <= F]
             if not sub or not cap: continue
@@ -623,6 +625,18 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
                 too_big = sorted({b["u"]["name"] for _, n, b in sub if n > cap})
                 if too_big: notes.append(f"{', '.join(too_big)} need more '{kind}' rooms at once than the {cap} on Venues; the extra groups are given a room marked TBC.")
             runs = [(run, P.room_cap[x]) for x in F for run in busy.get(x, [])]
+            ivs = [iv for iv, _, _ in sub] + [m.NewIntervalVar(run[0], len(run), run[0] + len(run), "") for run, _ in runs]
+            dem = [min(n, cap) for _, n, _ in sub] + [c for _, c in runs]
+            if "rooms" not in skip: m.AddCumulative(ivs, dem, cap)
+    for kind, lst in combined.items():   # a kind with a combined venue: count single rooms. A lesson in a combined venue is in
+        every = frozenset(x for x, k in P.room_kind.items() if k == kind)   # each of its rooms; for each family of single rooms some
+        for G in room_families({E for _, E, _, _ in lst}, every, P.parts):   # groups are limited to, those groups fit in it
+            cap = sum(P.room_cap.get(x, 1) for x in G); sub = [(iv, n * weight(E, P.parts), b) for iv, E, n, b in lst if under(E, P.parts) <= G]
+            if not sub or not cap: continue
+            if G == under(every, P.parts):
+                too_big = sorted({b["u"]["name"] for _, n, b in sub if n > cap})
+                if too_big: notes.append(f"{', '.join(too_big)} need more '{kind}' rooms at once than the {cap} on Venues; the extra groups are given a room marked TBC.")
+            runs = [(run, P.room_cap.get(x, 1)) for x in G for run in busy.get(x, [])]   # single rooms' own runs only
             ivs = [iv for iv, _, _ in sub] + [m.NewIntervalVar(run[0], len(run), run[0] + len(run), "") for run, _ in runs]
             dem = [min(n, cap) for _, n, _ in sub] + [c for _, c in runs]
             if "rooms" not in skip: m.AddCumulative(ivs, dem, cap)
