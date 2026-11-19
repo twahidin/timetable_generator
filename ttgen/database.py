@@ -79,6 +79,8 @@ def write_db(m, path, spec=None):
         con.executemany("INSERT INTO teachers VALUES (?, ?, ?, ?, ?)", [(t["name"], t["short"], t["dept"] or None, t["allowance"] or None, t.get("other") or None) for t in m["teachers"]])
         q("CREATE TABLE rooms (name TEXT PRIMARY KEY, kind TEXT, capacity INTEGER)")
         con.executemany("INSERT INTO rooms VALUES (?, ?, ?)", [(r["name"], r["kind"], r["capacity"] or None) for r in m["rooms"]])
+        q("CREATE TABLE room_parts (venue TEXT, room TEXT)")   # the rooms each combined venue is made of
+        con.executemany("INSERT INTO room_parts VALUES (?, ?)", [(v, r) for v, rs in (m.get("room_parts") or {}).items() for r in rs])
         q("CREATE TABLE subjects (name TEXT PRIMARY KEY, short TEXT, department TEXT)")
         con.executemany("INSERT INTO subjects VALUES (?, ?, ?)", [(k, v["short"], v["dept"] or None) for k, v in m["subjects"].items()])
 

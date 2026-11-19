@@ -229,5 +229,63 @@ def a_held_pair_holds_both_studios():
     assert [r["target"] for r in run.hold_rules(S1, "Both", "Mon", dict({"from": 1, "to": 3}))] == [S1]
 t(a_held_pair_holds_both_studios)
 
+from ttgen import export, verify, database  # noqa: E402
+ENTIRE = export.ENTIRE
+
+def a_model(placed, sp=None):
+    sp = sp or pair_school(); return sp, model_for(sp, placed)
+
+def lessons_for():
+    """the pair school, a lesson period of its first day, and three made-up teachers (so only rooms can clash)"""
+    sp = pair_school(); p0 = sp["day_structure"]["Sec 1"][sp_days(sp)[0]].index("L")
+    return sp, p0, ["Teacher One"], ["Teacher Two"], ["Teacher Three"]
+def sp_days(sp): return list(sp["day_structure"]["Sec 1"].keys())
+
+def the_model_and_its_check():
+    sp, p0, t1, t2, t3 = lessons_for()
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR), (0, p0, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, S1)], sp)
+    assert m["room_parts"] == {PAIR: [S1, S2]} and m["room_ix"][PAIR]["parts"] == [S1, S2] and m["room_ix"][S1]["parts"] == []
+    over = [p for p in m["checks"]["problems"] if p.startswith("Room over capacity:")]
+    assert len(over) == 1 and over[0].startswith(f"Room over capacity: {S1} on ") and over[0].endswith(f"(holds 1 at once; in use as part of {PAIR}).")
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR), (0, p0, 1, ["1B"], "Design & Technology", ENTIRE, t2, PAIR)])
+    assert sum(p.startswith("Room over capacity:") for p in m["checks"]["problems"]) == 2
+    _, m = a_model([(0, p0, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, S1), (0, p0 + 1, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR)])
+    assert not [p for p in m["checks"]["problems"] if p.startswith("Room over capacity:")]
+t(the_model_and_its_check)
+
+def a_class_in_half_of_its_venue_is_warned_about():
+    sp, p0, t1, t2, t3 = lessons_for()
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, S1), (0, p0, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, S2)], sp)
+    texts = [w["text"] for w in verify.deployment(m, sp)]
+    assert f"Design & Technology for 1A (38 students) is in {S1} (20 seats); {PAIR} seats it." in texts
+    assert not any("3DTP1" in x and "seats it" in x for x in texts)
+t(a_class_in_half_of_its_venue_is_warned_about)
+
+def room_rules_reach_a_lesson_in_the_pair():
+    sp, p0, t1, t2, t3 = lessons_for(); day = sp_days(sp)[0].split()[-1]
+    sp["rules"].append(dict(scope="Room", target=S1, rule="Not available", strength="Must", week="Both", day=day, **{"from": p0, "to": p0}))
+    sp["rules"].append(dict(scope="Level", target="Sec 3", subject="Design & Technology G3", rule="Only in venues", venues=f"{S1} ,  {S2}", strength="Must", week="Both", day="All"))
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR), (0, p0 + 1, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, S2)], sp)
+    ws = verify.rules(m, sp)[0]; na, only = len(sp["rules"]) - 2, len(sp["rules"]) - 1   # the two rows just added
+    assert any(w["key"].startswith(f"rule:{na}:") for w in ws)          # 1A is in the pair while Studio 1 is not available
+    assert not any(w["key"].startswith(f"rule:{only}:") for w in ws)    # "D&T Studio 1 ,  D&T Studio 2" still names Studio 2
+t(room_rules_reach_a_lesson_in_the_pair)
+
+def the_database_lists_the_rooms_of_a_venue():
+    import sqlite3
+    sp, m = a_model([]); p = os.path.join(tempfile.mkdtemp(), "t.sqlite"); database.write_db(m, p, spec=sp)
+    con = sqlite3.connect(p); assert con.execute("SELECT venue, room FROM room_parts ORDER BY room").fetchall() == [(PAIR, S1), (PAIR, S2)]
+    assert [r[1] for r in con.execute("PRAGMA table_info(rooms)")] == ["name", "kind", "capacity"]; con.close()
+    m2 = export.model_from_files(None, p); assert m2["room_parts"] == {PAIR: [S1, S2]}
+t(the_database_lists_the_rooms_of_a_venue)
+
+def an_old_model_still_checks():
+    sp, p0, t1, t2, t3 = lessons_for()
+    _, new = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, "A1-01"), (0, p0 + 1, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, S1)], sp)
+    old = copy.deepcopy(new); old.pop("room_parts"); [r.pop("parts") for r in old["rooms"]]; old["room_ix"] = {r["name"]: r for r in old["rooms"]}
+    assert export.check_model(old)["problems"] == export.check_model(new)["problems"]
+    assert [w["text"] for w in verify.deployment(old, sp)] == [w["text"] for w in verify.deployment(new, sp)]
+t(an_old_model_still_checks)
+
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")
