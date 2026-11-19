@@ -17,7 +17,7 @@ from .database import is_db, read_db, write_db
 from .reader import read_template, derive
 from . import choices, parents as _parents
 from .report import LESSON_HEADERS, short_subject, clock
-from .spec import double_days, order_days, periods_by_day, resolve_row, trim_day, venue_parts, single_rooms, clean_name, clean_rooms
+from .spec import double_days, order_days, periods_by_day, resolve_row, trim_day, venue_parts, single_rooms, clean_name, clean_rooms, whole as _whole
 
 ENTIRE = "Entire Class"
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
@@ -93,7 +93,8 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
     def _cap(v):   # a combined venue holds its own number, else the sum of its rooms'
         n, own = clean_name(v["room"]), v.get("capacity") or ""
         if own or n not in parts: return own
-        return sum(int(seats.get(r) or 0) for r in parts[n]) or ""
+        ns = [_whole(seats.get(r)) for r in parts[n]]   # the sum, only when every room's seats are known
+        return sum(ns) if all(ns) else ""
     rooms = [dict(name=str(v["room"]), kind=v.get("kind") or "classroom", capacity=_cap(v), parts=list(parts.get(clean_name(v["room"]), [])),
                   equipment=[str(e).strip() for e in v.get("equipment") or [] if str(e).strip()], configuration=str(v.get("configuration") or "").strip()) for v in spec["venues"]]
     seen = {r["name"] for r in rooms}

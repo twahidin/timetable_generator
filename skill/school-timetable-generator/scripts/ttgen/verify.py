@@ -6,7 +6,7 @@ from collections import Counter
 from . import parents
 from .export import ENTIRE
 from .solver import rule_label
-from .spec import clean_name, single_rooms, floating_recess, names_list, subject_test, teacher_depts as teacher_depts_of, typed_rules
+from .spec import whole as whole_n, clean_name, single_rooms, floating_recess, names_list, subject_test, teacher_depts as teacher_depts_of, typed_rules
 
 KINDS = ("clash", "deployment", "rule", "typed", "choice")
 APPEND = "(end)"   # an add op's "after": not a row id, so sync.apply puts the row last ("" would put it first and renumber the group codes after it)
@@ -80,9 +80,9 @@ def _group_size(spec, key, p):
         held = sum(1 for s in spec.get("students") or [] if key[1] in (s.get("groups") or []))
         if held: return held
         v = next((x.get("students") for x in p["rows"] if x.get("students")), None)
-        return int(v) if v not in (None, "") else None
+        return whole_n(v)
     size = next((c.get("size") for c in spec["classes"] if str(c["class"]) == key[1]), None)
-    return int(size) if size not in (None, "") else None
+    return whole_n(size)
 
 def _half_venue(m, spec, key, p, g):
     """a sentence when a lesson of the row is in one room of a combined venue that seats the group while that room does not, else None"""
@@ -90,12 +90,13 @@ def _half_venue(m, spec, key, p, g):
     if not parts: return None
     n = _group_size(spec, key, p)
     if n is None: return None
-    seats = lambda r: int((m["room_ix"].get(r) or {}).get("capacity") or 0)
+    seats = lambda r: whole_n((m["room_ix"].get(r) or {}).get("capacity"))
     for x in g["lessons"]:
         for c, rooms in parts.items():
-            if x["room"] in rooms and seats(x["room"]) < n <= seats(c):
+            a, b = seats(x["room"]), seats(c)
+            if x["room"] in rooms and a is not None and b is not None and a < n <= b:
                 what = f"{x['subject']} for {key[1]}" if key[0] == "C" else f"group {key[1]}"
-                return f"{what} ({n} students) is in {x['room']} ({seats(x['room'])} seats); {c} seats it."
+                return f"{what} ({n} students) is in {x['room']} ({a} seats); {c} seats it."
     return None
 
 def deployment(m, spec):

@@ -111,6 +111,13 @@ def clean_rooms(spec):
         if isinstance(r, dict) and r.get("scope") == "Room" and r.get("target") is not None: r["target"] = clean_name(r["target"])
     return spec
 
+def whole(v):
+    """a positive whole number from a cell (20, "20", " 20 ", "20.0", 20.0 are 20); None for blank, text, zero, negative, booleans"""
+    if isinstance(v, bool) or v is None: return None
+    try: f = float(str(v).strip()); n = int(f)
+    except (ValueError, OverflowError): return None
+    return n if n > 0 and f == n else None
+
 def single_rooms(name, parts):
     """the single rooms a venue stands for: its rooms when it is a combined venue, else itself"""
     return list(parts[name]) if name in parts else [name]

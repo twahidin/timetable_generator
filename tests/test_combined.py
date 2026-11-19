@@ -287,5 +287,21 @@ def an_old_model_still_checks():
     assert [w["text"] for w in verify.deployment(old, sp)] == [w["text"] for w in verify.deployment(new, sp)]
 t(an_old_model_still_checks)
 
+def odd_numbers_do_not_throw():
+    sp0, p0, t1, t2, t3 = lessons_for()
+    def edit(f): sp = pair_school(); f(sp); return sp
+    def cap(room, v): return lambda sp: [x.update(capacity=v) for x in sp["venues"] if x["room"] == room]
+    def size(sp): [c.update(size="abc") for c in sp["classes"] if c["class"] == "1A"]
+    def stud(sp): [x.update(students="abc") for x in sp["lessons"] if x.get("subject") == "Design & Technology" and "1A" in x["classes"]]
+    texts = {}
+    for name, f in dict(s1_abc=cap(S1, "abc"), s1_dec=cap(S1, "20.0"), pair_abc=cap(PAIR, "abc"), pair_none=cap(PAIR, None), size=size, stud=stud).items():
+        sp = edit(f); _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, S1)], sp)
+        w = verify.deployment(m, sp); assert isinstance(w, list); export.check_model(m); texts[name] = [x["text"] for x in w]
+    assert f"Design & Technology for 1A (38 students) is in {S1} (20 seats); {PAIR} seats it." in texts["s1_dec"]
+    assert not any("seats it" in x for x in texts["s1_abc"])
+    for v in (20, "20", " 20 ", "20.0", 20.0): assert SPEC.whole(v) == 20
+    for v in (None, "", "abc", 0, -3, True): assert SPEC.whole(v) is None
+t(odd_numbers_do_not_throw)
+
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")
