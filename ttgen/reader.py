@@ -356,5 +356,5 @@ def derive(spec):
         if not p: problems.append(f"Lesson row {i + 6}: {x['subject']} has no periods for {x['level']}.")
         if not x["classes"]: problems.append(f"Lesson row {i + 6}: no class.")
         if not x["teachers"]: problems.append(f"Lesson row {i + 6}: no teacher ({x['subject']} {', '.join(x['classes'])}).")
-    problems += [f"Venue row {i + 1}: {text}" for i, text, _ in venue_problems(spec)]
+    problems += [f"Venue row {i + 6}: {text}" for i, text, _ in venue_problems(spec)]   # the sheet row: 1 Venues' data starts on row 6, as Lessons'
     return problems

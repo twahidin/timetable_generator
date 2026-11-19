@@ -83,9 +83,10 @@ def clean_name(v):
     return " ".join(str(v if v is not None else "").split())
 
 def _made_of(v):
-    """the distinct cleaned room names a venue row is made of, in the order listed"""
-    out = []
-    for x in (v.get("made_of") or []):
+    """the distinct cleaned room names a venue row is made of, in the order listed; blank ones dropped, and a made_of that
+    is not a list counts as empty (as the page's madeOf)"""
+    out, mo = [], v.get("made_of") if isinstance(v, dict) else None
+    for x in (mo if isinstance(mo, (list, tuple)) else []):
         x = clean_name(x)
         if x and x not in out: out.append(x)
     return out
@@ -104,7 +105,7 @@ def clean_rooms(spec):
     for v in spec.get("venues") or []:
         if isinstance(v, dict):
             if "room" in v: v["room"] = clean_name(v["room"]) if v["room"] is not None else v["room"]
-            if isinstance(v.get("made_of"), (list, tuple)): v["made_of"] = [clean_name(x) for x in v["made_of"]]
+            if isinstance(v.get("made_of"), (list, tuple)): v["made_of"] = [x for x in map(clean_name, v["made_of"]) if x]
     for c in spec.get("classes") or []:
         if isinstance(c, dict) and c.get("home_room"): c["home_room"] = clean_name(c["home_room"])
     for r in spec.get("rules") or []:

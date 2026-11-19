@@ -4,7 +4,7 @@ Class periods against the lesson periods of the day, lessons against the stretch
 teachers' time, floating recess, and the rule rows the solver cannot use. Students are not checked here."""
 import collections, re
 from ttgen.reader import derive
-from ttgen.spec import structure_vs_rules
+from ttgen.spec import structure_vs_rules, venue_problems
 from ttgen.solver import under, weight, room_families
 
 WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
@@ -148,7 +148,9 @@ def findings(spec, P=None):
     from ttgen.solver import Problem
     probs = derive(spec); P = P or Problem(spec); out = []
     add = lambda level, area, text: out.append(dict(level=level, area=area, text=text))
-    for p in probs: add(_input_level(p), "lessons", p)
+    for p in probs:
+        if not p.startswith("Venue row "): add(_input_level(p), "lessons", p)   # a combined venue's problem: from venue_problems, below
+    for _, t, hard in venue_problems(spec): add(CRITICAL if hard else WARNING, "venues", t)
     for t in _band_teacher_clashes(spec): add(CRITICAL, "lessons", t)
     A = {lv: sum(row.count("A") for row in rows) for lv, rows in P.grid.items()} if P.spec["school"].get("after_school", True) else {}
     for x in _class_fit(P):
@@ -258,6 +260,11 @@ def _loads_and_rooms(spec, P):
         for k, n in need.items():
             if n > kinds.get(k, 0): out.append(("venues", f"Band {u['name']} needs {n} '{k}' rooms at once; Venues has {kinds.get(k, 0)}: "
                                                           "the extra groups get a room marked TBC, for the committee to find."))
+    # a combined venue no lesson is limited to: every group that may use it fits one of its rooms, so none is given it
+    rows = [P.allowed(r, u) for u in P.units for r in u["rows"]]
+    for v in P.parts:
+        if not any(v in E and all(x in P.parts for x in E) for kind, E, _, _ in rows if kind == P.room_kind[v]):
+            out.append(("venues", f"No lesson is limited to {v}: every group that may use it also fits one of its rooms, so each will be given one room. Check the seats on step 1."))
     # groups bigger than every room they may use: the solver still gives them one of those rooms (oversize), so a person must decide
     big = collections.defaultdict(list)
     for u in P.units:

@@ -12,7 +12,7 @@ from openpyxl.formatting.rule import FormulaRule, CellIsRule
 from openpyxl.workbook.defined_name import DefinedName
 from . import choices, parents as PA
 from .reader import parents_max
-from .spec import RULE_TYPES, SCOPES, CODES, EVERY_CLASS, RECESS_ROWS, SETTING_RULES, ROLES, SKILL_VERSION, day_names, names_list, order_days, scopes_for, split_rules
+from .spec import RULE_TYPES, SCOPES, CODES, EVERY_CLASS, RECESS_ROWS, SETTING_RULES, ROLES, SKILL_VERSION, day_names, names_list, order_days, scopes_for, split_rules, _made_of
 
 NAVY, SLATE = "1F4E78", "5B6B7F"
 HF = Font(name="Arial", bold=True, color="FFFFFF", size=10)
@@ -234,7 +234,7 @@ def write_template(spec, path, extra_rows=120):
         eq = ", ".join(str(e) for e in x.get("equipment") or [] if str(e).strip())
         if eq: vw.cell(R0 + i, 9, eq)
         if x.get("configuration"): vw.cell(R0 + i, 10, x["configuration"])
-        if x.get("made_of"): vw.cell(R0 + i, 11, ", ".join(x["made_of"]))
+        if _made_of(x): vw.cell(R0 + i, 11, ", ".join(_made_of(x)))
     B.paint(vw, LAST(nV), VIN, 11)
     for r in range(R0, LAST(nV) + 1): vw.cell(r, 6, f"=IF(A{r}=\"\",\"\",COUNTIF('{C}'!$D${R0}:$D${R0 + 999},A{r}))")
     B.dv(vw, f"B{R0}:B{LAST(nV)}", "=KindList", "Pick a room kind (add kinds on the Lists sheet).")
