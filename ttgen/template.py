@@ -223,10 +223,10 @@ def write_template(spec, path, extra_rows=120):
     letter_of = lambda tag: f'IFERROR(INDEX(Lists!$G$4:$G$60,MATCH({tag},Lists!$D$4:$D$60,0)),"")'
 
     # ---------------- 1 Venues
-    VIN = {1, 2, 3, 4, 5, 7, 8, 9, 10}
+    VIN = {1, 2, 3, 4, 5, 7, 8, 9, 10, 11}
     vw = B.sheet(V, "Step 1 · Venues: every room", ["One row per room. Kind decides which subjects may use it (see Subjects). Capacity is seats: a group only goes in a room that seats it.",
-                  "For (optional): the subjects, departments or levels the room is kept for, separated by commas; blank = anyone. Equipment and Configuration are notes about the room: the timetable does not read them. Blue on yellow = type or pick. Grey = worked out for you."],
-                 [("Room", 16), ("Kind", 16), ("Capacity", 10), ("Block", 12), ("Floor / level", 9), ("Used by lessons", 12), ("Note", 34), ("For (subjects, departments or levels)", 30), ("Equipment", 34), ("Configuration", 24)], VIN)
+                  "For (optional): the subjects, departments or levels the room is kept for, separated by commas; blank = anyone. Equipment and Configuration are notes about the room: the timetable does not read them. Blue on yellow = type or pick. Grey = worked out for you. Made of: for a venue that is several rooms used together as one (a class too big for one lab), the rooms, separated by commas. A lesson there takes every one of them."],
+                 [("Room", 16), ("Kind", 16), ("Capacity", 10), ("Block", 12), ("Floor / level", 9), ("Used by lessons", 12), ("Note", 34), ("For (subjects, departments or levels)", 30), ("Equipment", 34), ("Configuration", 24), ("Made of (rooms used together)", 30)], VIN)
     for i, x in enumerate(spec["venues"]):
         for j, k in enumerate(["room", "kind", "capacity", "building", "floor", None, "note"], start=1):
             if k: vw.cell(R0 + i, j, x.get(k))
@@ -234,7 +234,8 @@ def write_template(spec, path, extra_rows=120):
         eq = ", ".join(str(e) for e in x.get("equipment") or [] if str(e).strip())
         if eq: vw.cell(R0 + i, 9, eq)
         if x.get("configuration"): vw.cell(R0 + i, 10, x["configuration"])
-    B.paint(vw, LAST(nV), VIN, 10)
+        if x.get("made_of"): vw.cell(R0 + i, 11, ", ".join(x["made_of"]))
+    B.paint(vw, LAST(nV), VIN, 11)
     for r in range(R0, LAST(nV) + 1): vw.cell(r, 6, f"=IF(A{r}=\"\",\"\",COUNTIF('{C}'!$D${R0}:$D${R0 + 999},A{r}))")
     B.dv(vw, f"B{R0}:B{LAST(nV)}", "=KindList", "Pick a room kind (add kinds on the Lists sheet).")
     B.name("RoomList", B.dyn(V, "A"))

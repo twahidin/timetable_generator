@@ -42,7 +42,7 @@ def setup():
 @t
 def equipment_and_configuration_survive_the_workbook():
     sp = setup(); p = write(sp); back = reader.read_template(p)["venues"]
-    assert headings(p, "1 Venues")[-3:] == ["For (subjects, departments or levels)", "Equipment", "Configuration"], headings(p, "1 Venues")
+    assert headings(p, "1 Venues")[-4:] == ["For (subjects, departments or levels)", "Equipment", "Configuration", "Made of (rooms used together)"], headings(p, "1 Venues")
     assert back[0]["equipment"] == ["30 keyboards", "2 amps"] and back[0]["configuration"] == "cluster seating"
     assert back[1]["equipment"] == ["PCs / laptops & chargers", 'a "smart" board'] and back[1]["configuration"] == "rows of 8"
     assert back[2]["equipment"] == [] and not back[2]["configuration"]

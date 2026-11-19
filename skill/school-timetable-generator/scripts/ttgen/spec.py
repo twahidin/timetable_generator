@@ -78,6 +78,71 @@ def is_fixed_lesson(r):
     subject; one without is flagged and skipped)"""
     return r.get("scope") in ("Class", "Group", "Level", "School")
 
+def clean_name(v):
+    """a name as typed, with runs of spaces made one and the ends trimmed"""
+    return " ".join(str(v if v is not None else "").split())
+
+def _made_of(v):
+    """the distinct cleaned room names a venue row is made of, in the order listed"""
+    out = []
+    for x in (v.get("made_of") or []):
+        x = clean_name(x)
+        if x and x not in out: out.append(x)
+    return out
+
+def venue_parts(venues):
+    """{combined venue: its rooms} for each venue row that is a sound combined venue: made of at least two distinct rooms,
+    each another row's room, none of them a combined venue itself. Any other row is an ordinary room."""
+    made = {clean_name(v.get("room")): _made_of(v) for v in venues if clean_name(v.get("room"))}
+    out = {}
+    for name, rooms in made.items():
+        if len(rooms) >= 2 and all(r != name and r in made and not made[r] for r in rooms): out[name] = rooms
+    return out
+
+def single_rooms(name, parts):
+    """the single rooms a venue stands for: its rooms when it is a combined venue, else itself"""
+    return list(parts[name]) if name in parts else [name]
+
+def venue_problems(spec):
+    """what is wrong with the combined venues on step 1: [(venue row index, text, critical)]"""
+    venues = spec.get("venues") or []
+    row = {}
+    for v in venues: row.setdefault(clean_name(v.get("room")), v)
+    made = {n: _made_of(v) for n, v in row.items()}
+    claimed = {}   # room -> the combined venues (in row order) that list it
+    out = []
+    for i, v in enumerate(venues):
+        name = clean_name(v.get("room")); rooms = _made_of(v)
+        if not rooms: continue
+        if len(rooms) < 2: out.append((i, f"{name}: a combined venue needs at least two rooms.", True))
+        for r in rooms:
+            if r not in row: out.append((i, f"{name}: made of {r}, which is not on step 1 (Venues).", True))
+            elif made.get(r): out.append((i, f"{name}: made of {r}, which is a combined venue itself.", True))
+        for r in rooms:
+            if r in claimed and name not in claimed[r]:
+                out.append((i, f"{r} is in more than one combined venue ({', '.join(claimed[r] + [name])}): a room can be in one only.", True))
+            claimed.setdefault(r, [])
+            if name not in claimed[r]: claimed[r].append(name)
+        found = [r for r in rooms if r in row]
+        kinds = sorted({str(x.get("kind") or "classroom") for x in [v] + [row[r] for r in found]})
+        if len(kinds) > 1: out.append((i, f"{name}: it and its rooms are of different kinds ({', '.join(kinds)}); they must all be one kind.", True))
+        for r in rooms + [name]:
+            for ru in spec.get("rules") or []:
+                if ru.get("scope") == "Room" and clean_name(ru.get("target")) == r and ru.get("rule") == "At most N at once" \
+                        and str(ru.get("strength") or "Must") == "Must":
+                    try: k = int(ru.get("number"))
+                    except (TypeError, ValueError): continue
+                    if k > 1: out.append((i, f'{name}: {r} takes {k} groups at once (an "At most N at once" rule); a combined venue and its rooms take one group at a time.', True))
+        def seats(x):
+            try: return int(x.get("capacity"))
+            except (TypeError, ValueError): return None
+        mine = seats(v)
+        if not mine: out.append((i, f"{name}: give its seats (seats decide which groups get it).", False))
+        elif len(found) == len(rooms) and all(seats(row[r]) for r in found):
+            total = sum(seats(row[r]) for r in found)
+            if mine > total * 1.1: out.append((i, f"{name}: {mine} seats, but its rooms seat {total} together.", False))
+    return out
+
 def names_list(v):
     """a cell that names several things (subjects, venues), separated by commas, as a list"""
     if isinstance(v, (list, tuple)): return [str(x).strip() for x in v if str(x).strip()]
