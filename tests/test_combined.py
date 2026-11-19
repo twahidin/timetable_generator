@@ -80,5 +80,61 @@ def check_reports_them_and_names_are_clean():
     assert S1 in [v["room"] for v in back["venues"]]   # runs of spaces made one, ends trimmed
 t(check_reports_them_and_names_are_clean)
 
+from ttgen import solver  # noqa: E402
+from ttgen.solver import Problem  # noqa: E402
+
+def rows_of(P, pred): return [(r, u) for u in P.units for r in u["rows"] if pred(r, u)]
+
+def the_problem_knows_the_pair():
+    P = Problem(pair_school())
+    assert P.parts == {PAIR: [S1, S2]} and P.singles(PAIR) == [S1, S2] and P.singles(S1) == [S1]
+    assert P.seats[PAIR] == 40 and P.room_kind[PAIR] == "d&t studio" and P.room_cap[PAIR] == 1
+    for r, u in rows_of(P, lambda r, u: r["subject"] == "Design & Technology"): assert P.allowed(r, u)[1] == frozenset([PAIR])   # 37 to 39 students: only the pair seats them
+    for r, u in rows_of(P, lambda r, u: r["code"] in ("3DTP1", "4DTP1")): assert P.allowed(r, u)[1] == frozenset([S1, S2, PAIR])
+    assert Problem(secondary()).parts == {}
+t(the_problem_knows_the_pair)
+
+def a_group_too_big_for_everything_gets_the_biggest():
+    P = Problem(pair_school(seats=30))   # nothing seats a class of 37 to 39
+    for r, u in rows_of(P, lambda r, u: r["subject"] == "Design & Technology"):
+        kind, E, size, over = P.allowed(r, u); assert E == frozenset([PAIR]) and over
+    sp = secondary()   # no combined venue of the kind: as today, every room of the kind
+    for v in sp["venues"]:
+        if v["room"] in (S1, S2): v["capacity"] = 20
+    P = Problem(sp)
+    for r, u in rows_of(P, lambda r, u: r["subject"] == "Design & Technology"): assert P.allowed(r, u)[1] == frozenset([S1, S2])
+t(a_group_too_big_for_everything_gets_the_biggest)
+
+def counting():
+    parts = {PAIR: [S1, S2]}; f = frozenset
+    assert solver.under(f([PAIR]), parts) == f([S1, S2]) and solver.under(f([S1, PAIR]), parts) == f([S1, S2]) and solver.under(f(["X"]), parts) == f(["X"])
+    assert solver.weight(f([PAIR]), parts) == 2 and solver.weight(f([S1, S2, PAIR]), parts) == 1 and solver.weight(f(["X"]), parts) == 1 and solver.weight(f(), parts) == 0
+    fam = lambda sets, every: set(solver.room_families(sets, f(every), parts))
+    # the kind has only the two studios and the pair
+    assert fam([f([PAIR]), f([S1, S2, PAIR])], [S1, S2, PAIR]) == {f([S1, S2])}
+    # a third studio as well
+    assert fam([f([PAIR]), f([S1, S2, "S3", PAIR])], [S1, S2, "S3", PAIR]) == {f([S1, S2]), f([S1, S2, "S3"])}
+    # a group kept to one studio by a rule
+    assert fam([f([PAIR]), f([S1])], [S1, S2, "S3", PAIR]) == {f([S1]), f([S1, S2]), f([S1, S2, "S3"])}
+    assert solver.room_families([f(["A"]), f(["A", "B"])], f(["A", "B"]), {}) == [f(["A"]), f(["A", "B"])]
+t(counting)
+
+def not_available_carries_up_but_not_down():
+    sp = pair_school(); sp["rules"].append(dict(scope="Room", target=S1, rule="Not available", strength="Must", week="Both", day="All", **{"from": 1, "to": 2}))
+    P = Problem(sp); assert P.off[PAIR] and P.off[PAIR] == P.off[S1] and not P.off.get(S2)
+    r, u = rows_of(P, lambda r, u: r["subject"] == "Design & Technology")[0]; q = min(P.off[PAIR])
+    assert P.allowed_at(r, u, q, 1)[1] == frozenset() and P.allowed_at(r, u, max(P.off[PAIR]) + 1, 1)[1] == frozenset([PAIR])
+    sp = pair_school(); sp["rules"].append(dict(scope="Room", target=PAIR, rule="Not available", strength="Must", week="Both", day="All", **{"from": 1, "to": 2}))
+    P = Problem(sp); assert P.off[PAIR] and not P.off.get(S1)
+t(not_available_carries_up_but_not_down)
+
+def a_rule_finds_a_room_typed_with_a_stray_space():
+    sp = pair_school(); next(v for v in sp["venues"] if v["room"] == S1)["room"] = S1 + " "
+    sp["venues"][-1]["made_of"] = [S1 + " ", S2]
+    sp["rules"].append(dict(scope="Level", target="Sec 3", subject="Design & Technology G3", rule="Only in venues", venues=f"{S1}, {S2}", strength="Must", week="Both", day="All"))
+    P = Problem(sp); assert len(P.venue_rules[-1]["V"]) == 2
+    assert not any("not on step 1" in x for x in map(str, solver.rule_problems(sp)))
+t(a_rule_finds_a_room_typed_with_a_stray_space)
+
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")

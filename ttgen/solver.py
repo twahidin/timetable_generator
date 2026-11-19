@@ -14,8 +14,8 @@ lessons as it can (cheaper than bending a Prefer rule or pushing a lesson after 
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
-from .spec import PE_KIND, RULE_TYPES, SCOPES, TYPED, WEEKDAYS, ampm, family as _family, floating_recess, names_list, periods_by_day, resolve_row, structure_vs_rules, \
-    subject_test, teacher_depts, trim_day, windows as _windows
+from .spec import PE_KIND, RULE_TYPES, SCOPES, TYPED, WEEKDAYS, ampm, family as _family, clean_name, floating_recess, names_list, periods_by_day, resolve_row, structure_vs_rules, \
+    subject_test, teacher_depts, trim_day, venue_parts, windows as _windows
 
 W_PREF, W_SLACK, W_MOVE = 60, 40, 10
 RECESS_KEY = "~recess"   # in a placements file: {class: [[start, length]]}, each class's floating recess
@@ -44,13 +44,19 @@ class Problem:
     # ---------------------------------------------------------------- rooms: kind, purpose, seats, weeks
     def _rooms(self):
         sp = self.spec; num = lambda v: int(v) if isinstance(v, (int, float)) and v > 0 else None
-        self.room_kind = {v["room"]: v.get("kind") or "classroom" for v in sp["venues"]}
-        self.seats = {v["room"]: num(v.get("capacity")) for v in sp["venues"]}
-        self.only_for = {v["room"]: set(v.get("only_for") or []) for v in sp["venues"]}
-        self.room_cap = {v["room"]: 1 for v in sp["venues"]}   # classes at once
+        self.room_kind = {clean_name(v["room"]): v.get("kind") or "classroom" for v in sp["venues"]}
+        self.seats = {clean_name(v["room"]): num(v.get("capacity")) for v in sp["venues"]}
+        self.only_for = {clean_name(v["room"]): set(v.get("only_for") or []) for v in sp["venues"]}
+        self.room_cap = {clean_name(v["room"]): 1 for v in sp["venues"]}   # classes at once
+        self.parts = venue_parts(sp["venues"])   # combined venue -> its rooms (only sound ones)
         for r in sp.get("rules", []):
-            if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and r.get("target") in self.room_cap and r.get("number") \
-                    and str(r.get("strength") or "Must") == "Must": self.room_cap[r["target"]] = int(r["number"])
+            tg = clean_name(r.get("target"))
+            if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and tg in self.room_cap and tg not in self.parts and r.get("number") \
+                    and str(r.get("strength") or "Must") == "Must": self.room_cap[tg] = int(r["number"])
+        for c, rooms in self.parts.items():   # a combined venue: its kind is its first room's, its seats its own or its rooms' together
+            self.room_kind[c] = self.room_kind.get(rooms[0], self.room_kind[c])
+            if self.seats[c] is None and all(self.seats.get(x) for x in rooms): self.seats[c] = sum(self.seats[x] for x in rooms)
+            self.room_cap[c] = 1
         self.two_weeks = any(d.startswith("Even") for d in self.days)
         self.odd_day = [not d.startswith("Even") for d in self.days]
         # 'Only in venues': a lesson that runs into the rule's periods uses only the rooms it lists (Must), or those rooms
@@ -58,7 +64,7 @@ class Problem:
         self.venue_rules = []
         for r in sp.get("rules", []):
             if r.get("rule") != "Only in venues": continue
-            V = frozenset(x for x in names_list(r.get("venues")) if x in self.room_kind)
+            V = frozenset(x for x in map(clean_name, names_list(r.get("venues"))) if x in self.room_kind)
             if not V: continue
             sj = r.get("target") if r.get("scope") == "Subject" else r.get("subject")
             S, _ = self.rule_positions(r)
@@ -66,6 +72,17 @@ class Problem:
         code_n = collections.Counter(g for s in sp.get("students", []) for g in s.get("groups") or [])
         self._group_size = lambda r: code_n.get(r["code"]) or (int(r["students"]) if isinstance(r.get("students"), (int, float)) and r["students"] > 0 else None)
         self._allowed = {}
+        self.off = collections.defaultdict(set)   # venue -> periods a Must 'Not available' Room rule holds it, carried up to a combined venue
+        for r in sp.get("rules", []):
+            if r.get("rule") == "Not available" and r.get("scope") == "Room" and str(r.get("strength") or "Must") == "Must" and clean_name(r.get("target")) in self.room_kind:
+                self.off[clean_name(r["target"])] |= self.rule_positions(r)[0]
+        for c, rooms in self.parts.items():
+            for x in rooms:
+                if self.off.get(x): self.off[c] |= self.off[x]
+
+    def singles(self, x):
+        """the single rooms a venue stands for"""
+        return list(self.parts[x]) if x in self.parts else [x]
 
     def size(self, r, unit):
         """students in this row's group: a whole-class lesson's class size, else the Students sheet count for its code, else
@@ -88,7 +105,9 @@ class Problem:
             n = self.size(r, unit)
             ok = [x for x, k in self.room_kind.items() if k == kind and self.for_ok(x, r)]
             fit = [x for x in ok if n is None or self.seats[x] is None or self.seats[x] >= n]
-            self._allowed[key] = (kind, frozenset(fit or ok), n, bool(ok) and not fit)
+            if not fit and any(x in self.parts for x in ok):   # nothing seats them: the biggest venue(s), the combined one among them
+                top = max(self.seats[x] or 0 for x in ok); fit = [x for x in ok if (self.seats[x] or 0) == top]; self._allowed[key] = (kind, frozenset(fit), n, True)
+            else: self._allowed[key] = (kind, frozenset(fit or ok), n, bool(ok) and not fit)
         return self._allowed[key]
 
     def week_limited(self, r):
@@ -103,6 +122,8 @@ class Problem:
         kind, E, n, ov = self.allowed(r, unit, week)
         for v in self.venue_rules_for(r, unit):
             if any(q in v["S"] for q in range(start, start + ln)): E = E & v["V"]
+        for c in self.parts:
+            if c in E and any(q in self.off.get(c, ()) for q in range(start, start + ln)): E = E - {c}
         return kind, E, n, ov
 
     def preferred_at(self, r, unit, start, ln):
@@ -752,14 +773,14 @@ def rule_problems(spec, P=None):
         if rule == "Only in venues":
             vs = names_list(r.get("venues"))
             if not vs: say("List the rooms under Venues, separated by commas. Without them this row is skipped."); continue
-            unknown = [v for v in vs if v not in P.room_kind]
+            unknown = [v for v in vs if clean_name(v) not in P.room_kind]
             if unknown: say(f"{', '.join(unknown)}: not on step 1 (Venues).")
         if rule not in UNIT_RULES or scope in ("Teacher", "Room", "Department"): continue
         us = units_for(P, dict(r, subject=None) if rule == "Only these subjects" else r)
         if rule == "Only in venues":
             sj = target if scope == "Subject" else subj
             rows_ = [(x, u) for u in us for x in u["rows"] if not sj or x["subject"] == sj]
-            V = {v for v in names_list(r.get("venues")) if v in P.room_kind}
+            V = {clean_name(v) for v in names_list(r.get("venues")) if clean_name(v) in P.room_kind}
             if rows_ and V and not any(P.allowed(x, u)[1] & V for x, u in rows_):
                 kinds = sorted({P.allowed(x, u)[0] for x, u in rows_})
                 say(f"None of {', '.join(sorted(V))} is a room these lessons may use (they need a {' or '.join(kinds)} room on step 1), so "
@@ -768,6 +789,22 @@ def rule_problems(spec, P=None):
         if not us:
             what = f"{target} {subj}" if subj and scope != "Subject" else str(target)
             say(f"No lesson on step 5 matches {what}, so this row does nothing.")
+    return out
+
+def under(E, parts):
+    """the single rooms under a set of venues"""
+    return frozenset(x for e in E for x in parts.get(e, (e,)))
+
+def weight(E, parts):
+    """how many single rooms one lesson in E takes at least: 1 when E holds an ordinary room, else the fewest rooms of any venue in it"""
+    if not E: return 0
+    return 1 if any(e not in parts for e in E) else min(len(parts[e]) for e in E)
+
+def room_families(sets, every, parts):
+    """the distinct sets of single rooms whose count must stay within their size: under(E) for each set, each combined venue's rooms, and all"""
+    out = []
+    for f in [under(E, parts) for E in sets] + [frozenset(parts[c]) for c in every if c in parts] + [under(every, parts)]:
+        if f not in out: out.append(f)
     return out
 
 def fixed_clashes(spec, P=None):
