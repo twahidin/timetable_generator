@@ -832,4 +832,35 @@ def test_the_delete_says_whether_its_no_is_the_plan():
     try: assert fixes.can_delete(m, sp, DAYS, 10) == dict(state="no", why="Rule Not available: Mr X has Art on Mon period 2.", plan=False)   # a no from a rule
     finally: fixes.judge = real
 
+@t
+def test_two_bands_on_one_class_at_once():
+    """a band every student takes a group of keeps the class busy while all its groups meet: another band's lesson then is a class clash"""
+    g = lambda i, d, code, blk, tch: lesson(i, d, 2, 1, [A], "Art", code, [tch], room="TBC", level=LV, block=blk)
+    L = [g(1, 0, "X1", "BX", T[0]), g(1, 0, "X2", "BX", T[1]), g(2, 0, "Y1", "BY", T[2]), g(3, 1, "Y2", "BY", T[3])]
+    bands = lambda **k: [dict(dict(block="BX", level=LV, classes=[A]), **k.get("x", {})), dict(dict(block="BY", level=LV, classes=[A]), **k.get("y", {}))]
+    def marks(L, blocks): m, sp = model_with(L, blocks=blocks); b = fixes.Busy(m); return b, {i: [k for k in fixes.marks(b, b.ids[i]) if k != "noroom"] for i in b.ids}
+    b, mk = marks(L, bands()); assert mk == {1: ["class"], 2: ["class"], 3: []}, mk   # all of BX meets on day 0: BY's group then clashes, both ways
+    assert b.band_clash(b.ids[2], 0, 2, 1, ignore=(2,))[0] == A and b.band_clash(b.ids[2], 0, 2, 1, ignore=(1, 2)) is None
+    why = b.clash(b.ids[2], 0, 2, 1, ignore=(2,)); assert why.startswith(f"{A} has the ") and why.endswith(f"and every student of {A} is in one of the two."), why
+    assert b.clash(b.ids[3], 0, 2, 1, ignore=(3,)) == why and b.clash(b.ids[3], 2, 2, 1, ignore=(3,)) is None   # where it fits: not onto BX, free elsewhere
+    assert marks(L, bands(x=dict(everyone=False)))[1] == {1: [], 2: [], 3: []}   # BX unticked, and BY's other group is elsewhere: nobody is known to be in both
+    assert marks(L, bands(x=dict(everyone=False), y=dict(everyone=True)))[1][2] == []
+    assert marks(L, [dict(block="Options BX", level=LV, classes=[A]), bands()[1]])[1] == {1: [], 2: [], 3: []}   # a band the setup does not name is not counted
+    half = [g(1, 0, "X1", "BX", T[0]), g(4, 3, "X2", "BX", T[1]), g(2, 0, "Y1", "BY", T[2]), g(3, 1, "Y2", "BY", T[3])]
+    assert marks(half, bands())[1] == {1: [], 2: [], 3: [], 4: []}   # one group of each: they may be different students
+    both = [g(1, 0, "X1", "BX", T[0]), g(1, 0, "X2", "BX", T[1]), g(2, 0, "Y1", "BY", T[2]), g(2, 0, "Y2", "BY", T[3])]
+    assert marks(both, bands(x=dict(everyone=False)))[1] == {1: ["class"], 2: ["class"]}   # BY takes everyone: BX's lesson then clashes though BX is an option band
+    out = [g(1, 0, "X1", "BX", T[0]), g(1, 0, "X2", "BX", T[1]), lesson(5, 0, 2, 1, [A], "Music", "P1", [T[2]], room="TBC", level=LV)]
+    assert marks(out, bands())[1] == {1: [], 5: []}   # a group outside a band (a pull-out) beside a band is left alone
+    assert fixes.everyone_bands(dict(checked_setup=dict(blocks=[dict(block="Sec 1 Options"), dict(block="E", everyone=True), dict(block="N", everyone=False), dict(block="M"), dict(block=" ")]))) == {"E", "M"}
+
+@t
+def test_outside_the_day():
+    m, sp = model_with([lesson(1, 0, RECESS, 1, [A], "Art", ENTIRE, [T[0]], level=LV)]); b = fixes.Busy(m); r = b.ids[1]
+    assert b.lesson_time(r, 0, RECESS, 1) and not b.outside(r, 0, RECESS, 1)   # a recess is a break, not the end of the day
+    assert b.outside(r, len(DAYS), 2, 1) and b.outside(r, 0, m["NP"], 1) and b.outside(r, 0, m["NP"] - 1, 2) and not b.outside(r, 0, 2, 1)
+    grid = {lv: [("." + row[1:]) if d == 1 else row for d, row in enumerate(rows)] for lv, rows in m["grid"].items()}   # no school in period 0 of day 1
+    b2 = fixes.Busy(dict(m, grid=grid)); assert b2.outside(r, 1, 0, 1) and not b2.outside(r, 0, 0, 1) or m["grid"][LV][0][0] == "."
+    b3 = fixes.Busy(dict(m, keep={DAYS[0]: 3})); assert b3.outside(r, 0, 2, 2) and not b3.outside(r, 0, 2, 1)   # past 'Lessons end by'
+
 print(f"{n} checks passed")
