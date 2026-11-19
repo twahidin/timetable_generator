@@ -208,11 +208,13 @@ def the_sums_never_count_the_pair_as_a_room():
     assert max(x["need"] for x in rows) > max(x["need"] for x in one)         # a class in the pair weighs two; the small groups one
 t(the_sums_never_count_the_pair_as_a_room)
 
-def a_band_needing_two_studios_is_not_helped_by_the_pair():
-    sp = pair_school(); out = checks._loads_and_rooms(sp, Problem(sp))
-    base = secondary(); want = [x for x in checks._loads_and_rooms(base, Problem(base)) if "rooms at once" in x[1]]
-    assert [x for x in out if "rooms at once" in x[1]] == want
-t(a_band_needing_two_studios_is_not_helped_by_the_pair)
+def a_band_needing_three_studios_is_not_helped_by_the_pair():
+    sp = pair_school(); row = next(x for x in sp["lessons"] if x.get("code") == "3DTP1")
+    for i, code in enumerate(("3DTP8", "3DTP9")):   # two more d&t studio groups in the same band: three studios at once
+        sp["lessons"].append(dict(copy.deepcopy(row), code=code, code_override=code, teachers=[f"Teacher {i + 4}"], students=15))
+    out = [x[1] for x in checks._loads_and_rooms(sp, Problem(sp)) if "rooms at once" in x[1]]
+    assert any(x.startswith("Band Sec 3 Option Y needs 3 'd&t studio' rooms at once; Venues has 2:") for x in out), out
+t(a_band_needing_three_studios_is_not_helped_by_the_pair)
 
 def an_unknown_size_is_warned_about():
     sp = pair_school()
@@ -322,12 +324,17 @@ def busy_follows_the_one_rule():
     assert all("room" in fixes.marks(b, rows) for rows in by.values())
 t(busy_follows_the_one_rule)
 
-def one_lessons_own_rows_do_not_clash():
+def one_lessons_own_rows():
     sp, p0, t1, t2, t3 = lessons_for()
     _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR)], sp)
     x = m["lessons"][0]; m["lessons"].append(dict(x, group="3DTP1", classes=["3A"], teachers=t3, room=S1))   # the same lesson id: a band's rows
-    b = fixes.Busy(m); assert "room" not in fixes.marks(b, m["lessons"])
-t(one_lessons_own_rows_do_not_clash)
+    b = fixes.Busy(m); assert "room" not in fixes.marks(b, m["lessons"])                                     # marks: other lessons only
+    why = b.clash(m["lessons"], 0, p0, 1, ignore={x["id"]}); assert why and why.endswith(" is in use then."), why   # but its own rows stand twice on Studio 1
+    assert any(p.startswith(f"Room over capacity: {S1} on ") for p in export.check_model(m)["problems"])
+    _, m = a_model([(0, p0, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, S1)], sp)
+    y = m["lessons"][0]; m["lessons"].append(dict(y, group="4DTP1", classes=["4A"], teachers=t2, room=S2))   # a band: one row in each studio
+    assert fixes.Busy(m).clash(m["lessons"], 0, p0, 1, ignore={y["id"]}) is None
+t(one_lessons_own_rows)
 
 def the_room_list_says_what_holds_a_studio():
     sp, p0, t1, t2, t3 = lessons_for()
@@ -354,6 +361,127 @@ def the_skill_explains_made_of():
     assert SPEC.SKILL_VERSION == "2026-11.9" and "Skill version: 2026-11.9" in s and "2026-11.9" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
     for words in ("Made of", "combined venue", "room_parts", "takes every one of its rooms"): assert words in s, words
 t(the_skill_explains_made_of)
+
+def lessons_sheet(path, rows):
+    """a Lessons workbook as an agent hands it over: rows = [(day, start, periods, level, classes, subject, group, teachers, room, rain)]"""
+    import openpyxl
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Lessons"
+    ws.append(["Lesson ID", "Day", "Start period", "End period", "Periods", "Starts", "Ends", "Level", "Block", "Classes", "Subject", "Group", "Teachers", "Room", "After school", "Rain room"])
+    for i, (day, p, n_, lv, cls, subj, grp_, tch, room, rain) in enumerate(rows, 1): ws.append([i, day, p, p + n_ - 1, n_, "", "", lv, "", cls, subj, grp_, ", ".join(tch), room, "", rain])
+    wb.save(path)
+
+def a_stray_space_in_the_room_column_still_clashes():
+    sp, p0, t1, t2, t3 = lessons_for(); day = sp_days(sp)[0]
+    with tempfile.TemporaryDirectory() as d:
+        setup, tt = os.path.join(d, "s.xlsx"), os.path.join(d, "t.xlsx"); template.write_template(sp, setup)
+        lessons_sheet(tt, [(day, p0, 1, "Sec 1", "1A", "Design & Technology", ENTIRE, t1, PAIR + " ", ""),
+                           (day, p0, 1, "Sec 3", "3A, 3B, 3C, 3D", "Design & Technology G3", "3DTP1", t3, S1, "")])
+        m = export.model_from_files(setup, tt)
+    over = [p for p in m["checks"]["problems"] if p.startswith("Room over capacity:")]
+    assert len(over) == 1 and over[0].startswith(f"Room over capacity: {S1} on ") and over[0].endswith(f"in use as part of {PAIR})."), over
+    assert {x["room"] for x in m["lessons"]} <= {v["room"] for v in sp["venues"]}
+    pe = [dict(id=1, d=0, p=p0, n=1, level="Sec 1", block="", classes=["1C"], subject="Physical Education", group=ENTIRE, teachers=t2, room="Field", ext=False, rain="")]
+    sp2 = pair_school(); reader.derive(sp2); fx = dict(kind="room", id=1, group=ENTIRE, room=" D&T  Studio 1")   # a stored fix with the old spacing
+    out = fixes.apply(pe, [fx], sp2, sp_days(sp2)); assert not out["problems"] and out["lessons"][0]["room"] == S1, out["problems"]
+t(a_stray_space_in_the_room_column_still_clashes)
+
+def rain_rooms_follow_the_one_rule():
+    sp, p0, t1, t2, t3 = lessons_for()
+    for rain, room in ((PAIR, S1), (S1, PAIR)):
+        _, m = a_model([(0, p0, 1, ["1C"], "Physical Education", ENTIRE, t2, "Field"), (0, p0, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, room)], sp)
+        m["lessons"][0]["rain"] = rain; probs = export.check_model(m)["problems"]
+        assert any(p.startswith("Rain room in use: ") for p in probs), (rain, probs)
+        b = fixes.Busy(m); g = [m["lessons"][1]]
+        assert b.clash(g, 0, p0, 1, ignore={g[0]["id"]}) == f"{room} is in use then."               # the lesson into the rain room's time
+        pe = [m["lessons"][0]]; assert b.clash(pe, 0, p0, 1, ignore={pe[0]["id"]}) == f"{rain} is in use then."   # PE into the lesson's time
+t(rain_rooms_follow_the_one_rule)
+
+def small(sp):
+    """the sample cut down to its D&T lessons, each with its own teacher, and only the Room rules that cap a room (a solve in about 0.4 s)"""
+    sp["lessons"] = [x for x in sp["lessons"] if str(x.get("subject", "")).startswith("Design & Technology")]
+    sp["rules"] = [r for r in sp["rules"] if r.get("rule") == "At most N at once" and r.get("scope") == "Room"]
+    for i, x in enumerate(sp["lessons"]): x["teachers"] = [f"Teacher {i + 1}"]
+    return sp
+def fixed_at(sp, scope, target, subject, p):
+    sp["rules"].append(dict(scope=scope, target=target, subject=subject, rule="Fixed at", week="Odd", day="Mon", strength="Must", **{"from": p, "to": None}))
+def with_third(sp): sp["venues"].append(dict(room="D&T Studio 3", kind="d&t studio", capacity=20)); return sp
+CA, CB, G3_, G4_ = ("Class", "1A", "Design & Technology"), ("Class", "1B", "Design & Technology"), ("Group", "3DTP1", None), ("Group", "4DTP1", None)
+def solved(sp, at):
+    for who, p in at: fixed_at(sp, *who, p)
+    return solver.solve(sp, time_limit=20, workers=4, log=lambda *a: None)
+
+def a_third_studio_is_a_known_limit():
+    res = solved(with_third(small(pair_school())), [(("Class", "1D", "Design & Technology"), 9), (G3_, 11), (G4_, 12), (CA, 14)])
+    assert res["status"] in ("OPTIMAL", "FEASIBLE"), res["status"]   # the per-period count is met (at most 3 single rooms at once) ...
+    report.assign_rooms(res); probs = report.check(res)[0]
+    assert any(p.endswith("lesson-groups have no free room (marked TBC).") for p in probs), probs   # ... but no hand-out exists: reported, not silent
+t(a_third_studio_is_a_known_limit)
+
+def the_table_holds_in_the_model():
+    def only_s1(sp): sp["rules"].append(dict(scope="Group", target="3DTP1", rule="Only in venues", venues=[S1], strength="Must", week="Both", day="All")); return sp
+    setups = dict(pair=lambda: small(pair_school()), third=lambda: with_third(small(pair_school())), rule=lambda: only_s1(with_third(small(pair_school()))))
+    ok = ("OPTIMAL", "FEASIBLE")
+    for name, make in setups.items():
+        crowd = [(CA, 1), (G3_, 1)] + ([(G4_, 1)] if name == "third" else [])   # a class in the pair and groups no other room can take
+        assert solved(make(), crowd)["status"] == "INFEASIBLE", name
+        assert solved(make(), [(CA, 1), (CB, 1)])["status"] == "INFEASIBLE", name   # two classes in the pair at once
+        assert solved(make(), [(G3_, 1), (G4_, 1)])["status"] in ok, name            # two groups at once: a studio each
+        assert solved(make(), [(CA, 1)])["status"] in ok, name                       # a class alone
+    assert solved(setups["third"](), [(CA, 1), (G3_, 1)])["status"] in ok           # the third studio takes the group
+t(the_table_holds_in_the_model)
+
+def venue_problems_reach_things_to_fix_as_critical():
+    sp = pair_school(); sp["venues"][-1]["made_of"] = [S1]; text = f"{PAIR}: a combined venue needs at least two rooms."
+    out = checks.findings(copy.deepcopy(sp))
+    hit = [f for f in out if f["text"] == text]; assert len(hit) == 1 and hit[0]["level"] == checks.CRITICAL and hit[0]["area"] == "venues", hit
+    assert not [f for f in out if f["area"] == "lessons" and "combined venue" in f["text"]]
+    assert f"Venue row {len(sp['venues']) - 1 + 6}: {text}" in reader.derive(copy.deepcopy(sp))   # the sheet row: data starts on row 6
+t(venue_problems_reach_things_to_fix_as_critical)
+
+def a_pair_nobody_needs_is_warned_about():
+    want = ("venues", f"No lesson is limited to {PAIR}: every group that may use it also fits one of its rooms, so each will be given one room. Check the seats on step 1.")
+    sp = pair_school(seats=80)
+    for v in sp["venues"]:
+        if v["room"] in (S1, S2): v["capacity"] = 40
+    assert want in checks._loads_and_rooms(sp, Problem(sp))
+    sp = pair_school(); assert want not in checks._loads_and_rooms(sp, Problem(sp))
+t(a_pair_nobody_needs_is_warned_about)
+
+def at_most_n_on_a_room_of_the_pair_is_one():
+    sp = pair_school(); sp["rules"].append(dict(scope="Room", target=S1, rule="At most N at once", number=2, strength="Must", week="Both", day="All"))
+    assert Problem(copy.deepcopy(sp)).room_cap[S1] == 1
+    p0 = sp["day_structure"]["Sec 1"][sp_days(sp)[0]].index("L")
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, ["Teacher One"], PAIR), (0, p0, 1, ["3A"], "Design & Technology G3", "3DTP1", ["Teacher Three"], S1)], sp)
+    assert m["room_cap"][S1] == 1 and any(p.startswith(f"Room over capacity: {S1} on ") for p in m["checks"]["problems"])
+    P = Problem(copy.deepcopy(sp)); q = first_l(P, "Sec 1"); res = placed(P, [(dt1("1A"), q, 1), (grp("3DTP1"), q, 1)]); report.assign_rooms(res)
+    r3 = res["lessons"][1]["part"][0]; res["lessons"][1]["rooms"][id(r3)] = S1
+    assert any(p.startswith(f"Room over capacity: {S1} at ") for p in report.check(res)[0])
+t(at_most_n_on_a_room_of_the_pair_is_one)
+
+def a_pair_with_no_kind_takes_its_rooms_kind():
+    sp, p0, t1, t2, t3 = lessons_for(); sp["venues"][-1]["kind"] = None
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR)], sp)
+    assert m["room_ix"][PAIR]["kind"] == "d&t studio"
+    assert not [w["text"] for w in verify.deployment(m, sp) if "(classroom); step 3 asks for d&t studio" in w["text"]]
+t(a_pair_with_no_kind_takes_its_rooms_kind)
+
+def odd_made_of_values_are_empty_or_cleaned():
+    for odd in ("abc", 5, [5, None, ""]):
+        sp = secondary(); sp["venues"].append(dict(room="Odd", kind="classroom", capacity=40, made_of=odd))
+        assert SPEC.venue_parts(sp["venues"]) == {}                      # an ordinary room
+        SPEC.venue_problems(sp); SPEC.clean_rooms(sp)
+        template.write_template(sp, os.path.join(tempfile.mkdtemp(), "s.xlsx"))
+        assert SPEC.venue_parts(sp["venues"]) == {} and Problem(copy.deepcopy(sp)).parts == {}
+    assert SPEC._made_of(dict(made_of="abc")) == [] and SPEC._made_of(dict(made_of=[5, None, " ", " A  1 "])) == ["5", "A 1"]
+    assert [x[1] for x in SPEC.venue_problems(dict(venues=[dict(room="Odd", made_of="abc")]))] == []
+t(odd_made_of_values_are_empty_or_cleaned)
+
+def the_skill_says_how_far_the_count_goes():
+    root = os.path.dirname(HERE); s = open(os.path.join(root, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
+    for words in ("does not guarantee a hand-out", "never leave TBC unreported", "Venues \"For\" column", "take the venue out of the allowed set E", "counts in each of its\n   rooms"): assert words in s, words
+    src = open(os.path.join(root, "ttgen", "solver.py"), encoding="utf-8").read(); assert "does not guarantee a hand-out" in src
+    assert "room_parts" in (database.__doc__ or "")
+t(the_skill_says_how_far_the_count_goes)
 
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")

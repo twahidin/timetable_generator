@@ -10,6 +10,7 @@ write_db(m, path) writes the export model (the same one the Excel, PDFs and HTML
   classes         name, level, students, home_room
   teachers        name, short, department, allowance, other_duties
   rooms           name, kind, capacity
+  room_parts      venue, room: one row per room of each combined venue (a lesson in the venue is in each of its rooms)
   subjects        name, short, department
   lessons         one row per group per lesson: id, lesson_id (shared by a band's groups meeting together), day, week,
                   weekday, day_index, start_period, end_period, periods, starts, ends, level, block, subject, group_code

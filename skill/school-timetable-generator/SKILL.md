@@ -245,8 +245,12 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
    ordinary rooms plus the rooms of its combined venues. Add a cumulative limit for the single rooms under each group's E,
    for the rooms of each combined venue, and for all single rooms of the kind. Each limit covers every group whose single
    rooms under E lie inside it, with capacity the number of single rooms in it, and demand = each group's weight (1 when no
-   combined venue is in play). A combined venue never adds capacity.
-   Room "Not available" adds fixed demand. "Only in venues" (Must): where a lesson may start decides which rooms it may
+   combined venue is in play). A combined venue never adds capacity. The count is exact only when the kind's single rooms
+   are exactly one combined venue's rooms. With a third room of the kind, or two combined venues, counting each period
+   does not guarantee a hand-out (a lesson keeps one room for its whole length): a timetable can meet every limit and still
+   leave a group with a room marked TBC, which the check in item 9 reports.
+   Room "Not available" adds fixed demand on an ordinary room. On a combined venue, take the venue out of the allowed set E
+   of every lesson running into those periods instead; do not add fixed demand, which would close its rooms. "Only in venues" (Must): where a lesson may start decides which rooms it may
    use (only the rule's rooms when it runs into the rule's periods), so give it one optional interval per set of rooms,
    exactly one present, and count it under that set. With "In rain, PE goes to the class's home room", each lesson in a `pe venue`
    also needs its class's home room (a one-room demand), so the home room is free whenever the class is at PE.
@@ -261,8 +265,11 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
    ordering identical lessons of a unit. Time limit 300 s, 8 workers.
 9. **Rooms and checks.** Assign rooms greedily by start time (a combined venue is free only when all its rooms are, and taking it takes every one of its rooms; smallest venue that seats the group first; home room for whole-class lessons; a group keeps the
    same room where possible; a PE class's home room is reserved first as its rain room, the `Rain room` column). Write the `Lessons` sheet in the hand-over format, then check independently: periods
-   placed = planned for every row, no teacher or room double-booked, no whole-class lesson overlapping anything else
-   of its class, no student (Students sheet) with two lessons at once, nothing in a break.
+   placed = planned for every row, no teacher or room double-booked (a lesson in a combined venue counts in each of its
+   rooms), no whole-class lesson overlapping anything else of its class, no student (Students sheet) with two lessons at
+   once, nothing in a break. Report every group with a room marked TBC; never leave TBC unreported. Where the kind has a
+   combined venue and another room (item 6), a group may be left without a room: keep the combined venue's rooms for its
+   subject with the Venues "For" column, so other groups do not take them, or move one of the lessons and hand rooms out again.
 10. **Outputs.** Build each timetable as a list of lesson boxes (day, start, length, title, two short lines, colour by
     department) plus the level's break pattern, then draw it three ways from the same data:
     - class: whole-class lessons show subject, teacher short name, room; a block lesson shows the block name, its
