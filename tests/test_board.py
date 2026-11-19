@@ -607,6 +607,28 @@ def test_the_board_of_two_thousand_rows_is_quick_and_small():
     assert size < 200000, size
     r = c.get("/api/draft/board", headers={"Accept-Encoding": "gzip"}); assert r.status_code == 200 and len(r.get_data()) < 200000
 
+def test_two_bands_at_once_is_one_critical_warning_and_a_mark_on_both_cards():
+    bx, by = f"{LEVEL} Band X", f"{LEVEL} Band Y"; one = [CLASSES[0]]
+    spec = dict(SPEC, blocks=list(SPEC.get("blocks") or []) + [dict(block=bx, level=LEVEL, classes=one), dict(block=by, level=LEVEL, classes=one)])
+    assert c.put("/api/setup", json=dict(spec=spec, why="two bands")).status_code == 200
+    try:
+        g = lambda i, day, blk, code, tch: dict(id=i, day=day, p=0, n=1, level=LEVEL, block=blk, classes=one, subject=SUBJ, group=code, teachers=[tch], room="TBC")
+        save_draft([g(1, DAYS[0], bx, "X1", TEACHERS[0]), g(1, DAYS[0], bx, "X2", TEACHERS[1]), g(2, DAYS[0], by, "Y1", TEACHERS[2]), g(3, DAYS[1], by, "Y2", TEACHERS[2])])
+        j = draft.info(); ws = [w for w in j["warnings"] if w["key"].startswith("clash:bands:")]
+        assert len(ws) == 1 and ws[0]["crit"] == "class" and j["critical"] >= 1, [w["text"] for w in j["warnings"]]
+        assert ws[0]["text"].startswith("Two bands at the same time: ") and f"on {DAYS[0]} period 0." in ws[0]["text"] and f"Every student of {CLASSES[0]} is in both" in ws[0]["text"], ws[0]["text"]
+        assert ws[0]["where"]["cls"] == CLASSES[0] and ws[0]["where"]["id"] in (1, 2)
+        b = board(); marks = {x["id"]: x["marks"] for x in b["cards"]}
+        assert "class" in marks[1] and "class" in marks[2] and "class" not in marks[3], marks
+        assert all("out" not in x for x in b["cards"])   # none is outside the day
+        save_draft([g(1, DAYS[0], bx, "X1", TEACHERS[0]), g(4, DAYS[3], bx, "X2", TEACHERS[1]), g(2, DAYS[0], by, "Y1", TEACHERS[2]), g(3, DAYS[1], by, "Y2", TEACHERS[2])])
+        j = draft.info(); ws = [w for w in j["warnings"] if w["key"].startswith(("clash:bands:", "bands:beside:"))]   # one group of each: perhaps different students
+        assert len(ws) == 1 and ws[0]["key"].startswith("bands:beside:") and ws[0]["crit"] == "" and ws[0]["strength"] == "Prefer", ws
+        assert "(1 of its 2 groups)" in ws[0]["text"] and ws[0]["text"].startswith("Two bands share a period: ") and f"on {DAYS[0]} period 0, for {CLASSES[0]}." in ws[0]["text"], ws[0]["text"]
+        assert all("class" not in x["marks"] for x in board()["cards"])
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
 def test_the_preview_is_the_draft_as_the_published_page_would_show_it():
     import re
     fresh()

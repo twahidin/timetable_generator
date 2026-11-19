@@ -362,7 +362,7 @@ var Board = (function () {
   var MARK = { notplaced: "Not placed", noteacher: "No teacher", "break": "In a break", teacher: "In two places",
     "class": "In two places", room: "In two places", noroom: "No room" };
   var COUNTERS = [["notplaced", "Not placed"], ["noteacher", "No teacher"], ["twoplaces", "In two places"],
-    ["inbreak", "In a break"], ["noroom", "No room"]];
+    ["inbreak", "Not lesson time"], ["noroom", "No room"]];
 
   /* a mark that stops the publish: every one but "no room" */
   function critical(card) { return marksOf(card).some(function (m) { return m !== "noroom"; }); }
@@ -370,7 +370,7 @@ var Board = (function () {
   /* the words on a card's corner: its first mark (the server lists them by weight), and whether it is critical */
   function badge(card) {
     var m = marksOf(card);
-    return m.length ? { text: MARK[m[0]] || "", crit: critical(card) } : null;
+    return m.length ? { text: m[0] === "break" && card.out ? "Outside the day" : MARK[m[0]] || "", crit: critical(card) } : null;   // out: no school then for the class, or past the day's end
   }
 
   function firstClass(card) { return (card.classes || [])[0] || ""; }

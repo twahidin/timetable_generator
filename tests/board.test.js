@@ -222,7 +222,10 @@ t("counts: lessons, a card once for two places; a missing list is empty", () => 
   assert.deepStrictEqual(Board.counts(b), { notplaced: 2, noteacher: 1, twoplaces: 1, inbreak: 1, noroom: 2 });
   assert.deepStrictEqual(Board.counts(board([card(1, 0, 0, 1, ["1A"])])), { notplaced: 0, noteacher: 0, twoplaces: 0, inbreak: 0, noroom: 0 });
   assert.deepStrictEqual(Board.COUNTERS, [["notplaced", "Not placed"], ["noteacher", "No teacher"], ["twoplaces", "In two places"],
-    ["inbreak", "In a break"], ["noroom", "No room"]]);
+    ["inbreak", "Not lesson time"], ["noroom", "No room"]]);
+  assert.strictEqual(Board.badge({ marks: ["break"] }).text, "In a break");
+  assert.strictEqual(Board.badge({ marks: ["break"], out: true }).text, "Outside the day");   // no school then, or past the day's end
+  assert.strictEqual(Board.badge({ marks: ["teacher"], out: true }).text, "In two places");
 });
 
 t("hits: the cards a counter counts, by day, period, first class, id; the tray's order for notplaced", () => {

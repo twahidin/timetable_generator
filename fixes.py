@@ -1,6 +1,6 @@
 """Fixes to the draft: each is one change the committee made to the timetable they uploaded, kept as a small record and
 applied again, in order, to the lessons read from the file. Nothing here touches files or the setup."""
-import collections, copy
+import collections, copy, re
 from ttgen.export import ENTIRE, _split_list, abbrev, block_label
 from ttgen import spec as spec_mod, verify
 
@@ -180,6 +180,16 @@ def _block(rows): return len(rows) > 1 or any(x["block"] for x in rows)
 
 def _students(k, code, y): return f"1 student of {code} has {what(y)} then." if k == 1 else f"{k} students of {code} have {what(y)} then."
 
+def everyone_bands(m):
+    """the names of the bands every student of their classes takes a group of: step 5's "Everyone takes one", which is ticked
+    unless the committee unticked it or the band's name says option or elective (as the page reads it)"""
+    out = set()
+    for b in (m.get("checked_setup") or {}).get("blocks") or []:
+        if not isinstance(b, dict) or not str(b.get("block") or "").strip(): continue
+        v = b.get("everyone")
+        if (not re.search(r"option|elective", str(b["block"]), re.I)) if v is None else (v is True or str(v).strip().lower() in ("true", "yes", "y", "1")): out.add(b["block"])
+    return out
+
 class Busy:
     """who and what is in use in each period, built once per request: teachers, classes, whole-class lessons, groups,
     rooms and rain rooms by (kind, name, day, period), each lesson's rows by id, and which groups share students"""
@@ -198,6 +208,7 @@ class Busy:
                 if not _no_room(x["room"]): self.at["r", x["room"], x["d"], q].append(x)
                 for h in _split_list(x.get("rain")):
                     if h != "TBC": self.at["h", h, x["d"], q].append(x)
+        self._full(m["lessons"] if lessons is None else lessons)
         if base: self.share, self.gcls, self.cgroups = base.share, base.gcls, base.cgroups; return
         self.share, self.gcls, self.cgroups = (collections.defaultdict(collections.Counter) for _ in range(3))   # group -> {group: students in both}; group -> {class: its students}; class -> {group: its students}
         for st in m["students"]:
@@ -206,6 +217,46 @@ class Busy:
                 self.gcls[g][st["cls"]] += 1; self.cgroups[st["cls"]][g] += 1
                 for g2 in gs:
                     if g2 != g: self.share[g][g2] += 1
+
+    def _full(self, lessons):
+        """a band every student of its classes takes a group of ("Everyone takes one" on step 5) keeps a whole class busy while all
+        its groups for that class have a lesson: at["f", class, day, period] then holds one row of it. Another band's lesson for
+        that class in that period is a clash, with or without a list of students"""
+        self.every = every = everyone_bands(self.m); self.bgroups = groups = collections.defaultdict(set); here = collections.defaultdict(dict)
+        if not every: return
+        for x in lessons:
+            if x["block"] in every and x["group"] != ENTIRE:
+                for c in x["classes"]:
+                    groups[x["block"], c].add(x["group"])
+                    for q in _span(x): here[x["block"], c, x["d"], q].setdefault(x["group"], x)
+        for (b, c, d, q), got in here.items():
+            if len(got) == len(groups[b, c]): self.at["f", c, d, q].append(next(iter(got.values())))
+
+    def band_clash(self, rows, d, p, n, ignore=()):
+        """(class, the other lesson's row) when these rows in periods p .. p+n-1 of day d put two bands on one class at once and one
+        of the two takes every student of the class then; else None. A band's own groups never clash with each other"""
+        ignore = set(ignore)
+        for x in rows:
+            if x["group"] == ENTIRE or not x["block"]: continue   # a group outside a band (a pull-out) is its own students' business
+            for c in x["classes"]:
+                whole = x["block"] in self.every and {y["group"] for y in rows if y["block"] == x["block"] and c in y["classes"]} >= self.bgroups.get((x["block"], c), {None})
+                for q in range(p, p + n):
+                    for y in self.at.get(("f", c, d, q), ()):
+                        if y["id"] not in ignore and y["block"] != x["block"]: return c, y
+                    if whole:
+                        for y in self.at.get(("c", c, d, q), ()):
+                            if y["id"] not in ignore and y["group"] != ENTIRE and y["block"] and y["block"] != x["block"]: return c, y
+        return None
+
+    def outside(self, rows, d, p, n):
+        """whether lesson_time refuses the place because it is outside the day (no school then for a class of the rows, past the
+        day's last period or the 'Lessons end by' time) and not because of a recess, a lunch or an assembly"""
+        m = self.m
+        if not 0 <= d < len(m["days"]) or p < 0 or p + n > m["NP"]: return True
+        k = m["keep"].get(m["days"][d])
+        if k is not None and p + n > k: return True
+        levels = {lv for x in rows for c in x["classes"] or [""] for lv in (x["level"], m["class_ix"].get(c, {}).get("level")) if lv in m["grid"]}
+        return any(m["grid"][lv][d][q] == "." for lv in levels for q in range(p, p + n))
 
     def _first(self, key, ignore): return next((y for y in self.at.get(key, ()) if y["id"] not in ignore), None)
 
@@ -220,6 +271,7 @@ class Busy:
             for c in x["classes"]:
                 for q in Q:
                     if y := f(("c" if x["group"] == ENTIRE else "w", c, d, q), ignore): return f"{c} has {what(y)} then.", y
+        if hit := self.band_clash(rows, d, p, n, ignore): return f"{hit[0]} has the {block_label(hit[1]['block'], hit[1]['level'])} band then, and every student of {hit[0]} is in one of the two.", hit[1]
         for x in rows:
             pairs = [(c, g, k) for c in x["classes"] for g, k in self.cgroups.get(c, {}).items()] if x["group"] == ENTIRE else \
                 [(x["group"], g, k) for g, k in self.share.get(x["group"], {}).items()]
@@ -469,7 +521,7 @@ def marks(busy, rows, pool=False):
     if busy.lesson_time(rows, d, a["p"], a["n"]): out.append("break")
     if 0 <= d < len(m["days"]) and a["p"] >= 0 and a["p"] + a["n"] <= m["NP"]:
         if any(others(("t", t, d, q)) for x in rows for t in x["teachers"] for q in Q): out.append("teacher")
-        if any(others(("c" if x["group"] == ENTIRE else "w", c, d, q)) for x in rows for c in x["classes"] for q in Q): out.append("class")
+        if any(others(("c" if x["group"] == ENTIRE else "w", c, d, q)) for x in rows for c in x["classes"] for q in Q) or busy.band_clash(rows, d, a["p"], a["n"], ignore=(own,)): out.append("class")
         rooms = {x["room"] for x in rows if not _no_room(x["room"])}
         if any(len({y["id"] for y in busy.at.get(("r", r, d, q), ())} | {own}) > m["room_cap"].get(r, 1) for r in rooms for q in Q): out.append("room")
     if any(_no_room(x["room"]) for x in rows): out.append("noroom")

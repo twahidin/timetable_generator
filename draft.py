@@ -112,6 +112,36 @@ def _own_warnings(m, pool):
         if fixes._no_room(x["room"]):
             c = first(x); out.append(verify.warning(f"room:none:{x['id']}:{x['group']}", "room", f"No room: {fixes.what(x)} on {m['days'][x['d']]} period {x['p']}.", strength="Prefer",
                                                     group=c or "School", where=dict(cls=c, day=m["days"][x["d"]], period=x["p"], id=x["id"], row=x["group"])))
+    busy, by, pairs = fixes.Busy(m), {}, {}   # two bands on one class at once, one of them taking every student of the class: one line for the two bands and the day
+    for x in m["lessons"]: by.setdefault(x["id"], []).append(x)
+    for i, rows in by.items():
+        a = rows[0]; hit = busy.band_clash(rows, a["d"], a["p"], a["n"], ignore=(i,))
+        if not hit: continue
+        mine = next(x for x in rows if x["block"] and hit[0] in x["classes"]); y = hit[1]; k = (tuple(sorted((mine["block"], y["block"]))), a["d"])
+        e = pairs.setdefault(k, dict(p=max(a["p"], y["p"]), classes=set(), id=i, row=mine["group"], level={mine["block"]: mine["level"], y["block"]: y["level"]}))
+        e["classes"] |= set(mine["classes"]) & set(y["classes"])
+    for (names, d), e in sorted(pairs.items(), key=lambda kv: (kv[0][1], kv[1]["p"], kv[0][0])):
+        cs = sorted(e["classes"]); a, b = (fixes.block_label(n, e["level"][n]) for n in names)
+        out.append(verify.warning(f"clash:bands:{d}:{names[0]}:{names[1]}", "clash", f"Two bands at the same time: {a} and {b} on {m['days'][d]} period {e['p']}. Every student of {', '.join(cs)} is in both, so one of the two has to move.",
+                                  group=cs[0] if cs else "School", where=dict(cls=cs[0] if cs else "", day=m["days"][d], period=e["p"], id=e["id"], row=e["row"]), crit="class"))
+    # two bands that every student takes, sharing a period for a class with only some groups of each meeting: perhaps different students, so a warning to check and not a mistake
+    occ, beside = {}, {}
+    for x in m["lessons"]:
+        if x["block"] in busy.every and x["group"] != ENTIRE:
+            for c in x["classes"]:
+                for q in range(x["p"], x["p"] + x["n"]): occ.setdefault((c, x["d"], q), {}).setdefault(x["block"], {})[x["group"]] = x
+    for (c, d, q), bands in sorted(occ.items(), key=lambda kv: (kv[0][1], kv[0][2], kv[0][0])):
+        names = sorted(bands)
+        for i, a in enumerate(names):
+            for b in names[i + 1:]:
+                if ((a, b), d) in pairs: continue
+                x = next(iter(bands[a].values())); e = beside.setdefault(((a, b), d), dict(p=q, classes=set(), id=x["id"], row=x["group"], level={a: x["level"], b: next(iter(bands[b].values()))["level"]}, n={a: (0, 0), b: (0, 0)}))
+                e["classes"].add(c)
+                for k in (a, b): e["n"][k] = max(e["n"][k], (len(bands[k]), len(busy.bgroups[k, c])))
+    for (names, d), e in beside.items():
+        cs = sorted(e["classes"]); part = lambda k: f"{fixes.block_label(k, e['level'][k])} ({e['n'][k][0]} of its {e['n'][k][1]} groups)"
+        out.append(verify.warning(f"bands:beside:{d}:{names[0]}:{names[1]}", "clash", f"Two bands share a period: {part(names[0])} and {part(names[1])} on {m['days'][d]} period {e['p']}, for {', '.join(cs)}. A student in a group of both would have two lessons then: check that the groups' students are different.",
+                                  strength="Prefer", group=cs[0], where=dict(cls=cs[0], day=m["days"][d], period=e["p"], id=e["id"], row=e["row"])))
     return _unique(out)
 
 WAITING = " A lesson of it is waiting in Not placed."
@@ -356,7 +386,8 @@ def board():
     cards = []
     for i in sorted(by_id):
         rows = by_id[i]; a = rows[0]
-        cards.append(dict(card(i, rows), marks=fixes.marks(busy, rows), why=busy.clash(rows, a["d"], a["p"], a["n"], ignore=(i,)) or ""))
+        mk = fixes.marks(busy, rows)
+        cards.append(dict(card(i, rows), marks=mk, why=busy.clash(rows, a["d"], a["p"], a["n"], ignore=(i,)) or "", **({"out": True} if "break" in mk and busy.outside(rows, a["d"], a["p"], a["n"]) else {})))
     unplaced = [dict(card(i, rows), d=None, p=None, was=dict(d=rows[0]["d"], p=rows[0]["p"]), marks=fixes.marks(busy, rows, pool=True), why="") for i, rows in waiting.items()]
     unplaced.sort(key=lambda x: ((x["classes"] or [""])[0], x["id"]))
     return dict(days=list(m["days"]), NP=NP, times=m["times"], levels=levels, codes=codes,
