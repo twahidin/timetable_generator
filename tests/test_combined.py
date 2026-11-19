@@ -191,7 +191,8 @@ def a_solve_keeps_the_rule():   # slow: only with --full
             if r["subject"] == "Design & Technology": assert room == PAIR
             if r["code"] in ("3DTP1", "4DTP1"): assert room in (S1, S2)
             for s in res["problem"].singles(room):
-                for k in range(L["ln"]): use[(s, L["start"] + k)].append(id(L))
+                if s in (S1, S2):   # the Field takes two classes at once by its own rule; the studios take one
+                    for k in range(L["ln"]): use[(s, L["start"] + k)].append(id(L))
     assert all(len(set(v)) == 1 for v in use.values())
 if "--full" in sys.argv: t(a_solve_keeps_the_rule)
 
@@ -347,6 +348,12 @@ def room_pages_show_the_pair_on_each_studio():
     d = export.html_data(m); row = next(r for r in d["rooms"] if r[0] == PAIR); assert row[5] == [S1, S2]
     assert next(r for r in d["rooms"] if r[0] == S1)[5] == []
 t(room_pages_show_the_pair_on_each_studio)
+
+def the_skill_explains_made_of():
+    root = os.path.dirname(HERE); s = open(os.path.join(root, "skill", "school-timetable-generator", "SKILL.md"), encoding="utf-8").read()
+    assert SPEC.SKILL_VERSION == "2026-11.9" and "Skill version: 2026-11.9" in s and "2026-11.9" in open(os.path.join(root, "README.md"), encoding="utf-8").read()
+    for words in ("Made of", "combined venue", "room_parts", "takes every one of its rooms"): assert words in s, words
+t(the_skill_explains_made_of)
 
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")

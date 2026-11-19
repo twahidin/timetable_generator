@@ -79,7 +79,7 @@ is not on step 3, and a named subject the class has only in groups.
    first, each with a button to the step that fixes it; it runs again whenever the setup changes (`checks.py`).
 3. **Download** (step 7): the configuration workbook and the timetable skill. Use the skill zip when the agent can run
    code: its scripts make a timetable file this app publishes as it is. `SKILL.md` alone is for an agent that cannot.
-   `SKILL.md` carries a version line (`Skill version: 2026-11.8`) and the workbook's README sheet names the version it
+   `SKILL.md` carries a version line (`Skill version: 2026-11.9`) and the workbook's README sheet names the version it
    was made for. When the setup has second choices (step 6), step 7 counts them and asks **If the first choices do not
    fit:** **Fall back only when needed** (the default) or **Make one timetable for each**; the workbook carries the pick
    on its Choices sheet. Every downloaded workbook also carries a **Configuration id** row on Settings (`v14`, or `v14+`
@@ -298,6 +298,12 @@ Coming from a version that generated in the app: the `AI_*` and `SOLVE_SECONDS` 
 
 These are read by the skill's solver (`ttgen`), which the outside agent runs, and checked again by the app on Publish.
 
+A venue can be **made of** two or more rooms used together (a combined venue). On step 1, in the Blocks view, tick two or
+more rooms of one kind and press **Combine**. The new venue's card shows "made of ..."; its seats start as the sum of its rooms'
+and can be changed, and its kind follows its rooms. Deleting it leaves its rooms. Rules ("Only in venues") can pick it.
+A room is in at most one combined venue, a combined venue is not made of combined venues, and it and its rooms take one group at a time.
+A lesson in it is in each of its rooms, so it clashes with any lesson in either; the timetable names the combined venue.
+
 A room holds one class at a time unless step 6 has a "Room · At most N at once" rule; a note on a Settings row such as
 "Field and Hall take 2 classes each" is read as those rules.
 
@@ -393,6 +399,7 @@ node tests/venueview.test.js            # step 1's blocks view
 node tests/subjectview.test.js          # step 3's subject cards
 node tests/teacherview.test.js          # step 4's teacher cards and the second department
 .venv/bin/python tests/test_venues.py   # equipment and configuration through the workbook
+.venv/bin/python tests/test_combined.py # venues made of two or more rooms (add --full for the solve)
 .venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, an older workbook read as before
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 ```
