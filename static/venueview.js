@@ -284,6 +284,27 @@ var VenueView = (function () {
     V.push(row);
     return V.length - 1;
   }
+  /* each sound combined venue takes its rooms' kind when they all share one (no kind is "classroom", as venue_problems
+     compares them); rooms of different kinds leave it alone, for Things to fix -> how many venues changed */
+  function syncKinds(spec) {
+    var P = parts(spec), row = Object.create(null), c = 0;
+    rows(spec, "venues").forEach(function (v) { if (!isObj(v)) return; var n = cleanName(v.room); if (!has(row, n)) row[n] = v; });
+    rows(spec, "venues").forEach(function (v) {
+      if (!isObj(v) || !isCombined(v, P)) return;
+      var ks = P[cleanName(v.room)].map(function (r) { return kindOf(row[r]); });
+      if (ks.some(function (k) { return k !== ks[0]; }) || kindOf(v) === ks[0]) return;
+      v.kind = ks[0]; c++;
+    });
+    return c;
+  }
+  /* the kind a combined venue's rooms share, or null when they differ (for the card and the table) */
+  function roomsKind(spec, vi) {
+    var V = rows(spec, "venues"), v = V[vi], P = parts(spec), row = Object.create(null);
+    if (!isObj(v) || !isCombined(v, P)) return null;
+    V.forEach(function (x) { if (!isObj(x)) return; var n = cleanName(x.room); if (!has(row, n)) row[n] = x; });
+    var ks = P[cleanName(v.room)].map(function (r) { return kindOf(row[r]); });
+    return ks.every(function (k) { return k === ks[0]; }) ? ks[0] : null;
+  }
   /* a room renamed: every venue made of it names it the new way -> how many venues changed */
   function renameRoom(spec, was, now) {
     var w = cleanName(was), n = cleanName(now), c = 0;
@@ -306,6 +327,6 @@ var VenueView = (function () {
   }
 
   return { blocks: blocks, nextRoom: nextRoom, nextFloor: nextFloor, kinds: kinds, places: places, move: move, newRooms: newRooms,
-    cleanName: cleanName, parts: parts, problems: problems, canCombine: canCombine, suggestName: suggestName, combine: combine, renameRoom: renameRoom, dropRoom: dropRoom };
+    cleanName: cleanName, parts: parts, problems: problems, canCombine: canCombine, suggestName: suggestName, combine: combine, renameRoom: renameRoom, dropRoom: dropRoom, syncKinds: syncKinds, roomsKind: roomsKind };
 })();
 if (typeof module !== "undefined") module.exports = VenueView;

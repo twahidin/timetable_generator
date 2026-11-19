@@ -188,4 +188,14 @@ t("a_name_used_twice_counts_as_python_counts_it", () => {   // venue_parts: the 
     [[1, "P: a combined venue needs at least two rooms.", true], [1, "P: give its seats (seats decide which groups get it).", false]]);
   assert.deepStrictEqual(VenueView.problems({ venues: [null, { room: "S1" }] }), []);
 });
+t("sync_kinds_a_combined_venue_takes_its_rooms_kind", () => {
+  const s = paired(); s.venues[0].kind = "lab"; s.venues[1].kind = "lab";
+  assert.ok(VenueView.problems(s).some(p => /different kinds/.test(p.text)));
+  assert.strictEqual(VenueView.syncKinds(s), 1); assert.strictEqual(s.venues[8].kind, "lab");
+  assert.ok(!VenueView.problems(s).some(p => /different kinds/.test(p.text))); assert.strictEqual(VenueView.syncKinds(s), 0);
+  const d = paired(); d.venues[0].kind = "lab"; assert.strictEqual(VenueView.syncKinds(d), 0); assert.strictEqual(d.venues[8].kind, "classroom");   // its rooms differ: left alone
+  const b = paired(); b.venues[8].made_of = ["B1-1"]; b.venues[0].kind = "lab"; assert.strictEqual(VenueView.syncKinds(b), 0); assert.strictEqual(b.venues[8].kind, "classroom");   // broken: untouched
+  assert.strictEqual(VenueView.syncKinds(fixture()), 0);
+  const m = paired(); delete m.venues[0].kind; delete m.venues[1].kind; assert.strictEqual(VenueView.syncKinds(m), 0);   // no kind is classroom
+});
 console.log(n + " cases passed");

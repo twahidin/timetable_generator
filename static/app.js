@@ -1031,9 +1031,10 @@ function vvCombine() {   // the ticked rooms make one new combined venue (the ro
 const vvResolve = () => heldResolve(VV, S.spec.venues);
 try { const vv = localStorage.getItem(VENUEVIEW); if (["blocks", "table"].includes(vv)) VV.view = vv; } catch (e) { }
 function venuesTable() {   // today's table, and two notes at its end
-  const { out, crit } = issues();
+  const { out, crit } = issues(), CB = new Set();   // the combined venues: their Kind is their rooms' kind, as text
+  VenueView.blocks(S.spec).forEach(b => b.floors.forEach(f => f.rooms.forEach(r => { if (r.made_of.length) CB.add(r.vi); })));
   return `<div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Block</th><th>Floor / level</th><th>Home room of</th><th>For</th><th>Note</th><th>Equipment</th><th>Configuration</th><th>Made of</th><th></th></tr>
-      ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${rowCls(out, crit, "venues", i)}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.only_for" list="forNames" value="${esc((v.only_for || []).join(", "))}" placeholder="anyone"></td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.equipment" value="${esc((Array.isArray(v.equipment) ? v.equipment : []).join(", "))}" placeholder="none"></td><td style="min-width:150px">${inp(`spec.venues.${i}.configuration`, v.configuration)}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.made_of" list="roomNames" value="${esc((Array.isArray(v.made_of) ? v.made_of : []).join(", "))}" placeholder=""></td><td>${delBtn("venues", i)}</td></tr>`).join("")}
+      ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${rowCls(out, crit, "venues", i)}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${CB.has(i) ? esc(VenueView.roomsKind(S.spec, i) || "its rooms are of different kinds") : sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.only_for" list="forNames" value="${esc((v.only_for || []).join(", "))}" placeholder="anyone"></td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.equipment" value="${esc((Array.isArray(v.equipment) ? v.equipment : []).join(", "))}" placeholder="none"></td><td style="min-width:150px">${inp(`spec.venues.${i}.configuration`, v.configuration)}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.made_of" list="roomNames" value="${esc((Array.isArray(v.made_of) ? v.made_of : []).join(", "))}" placeholder=""></td><td>${delBtn("venues", i)}</td></tr>`).join("")}
       </table></div><datalist id="roomNames">${vvSingles(null, -1).map(n => `<option value="${esc(n)}">`).join("")}</datalist><datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div>`;
 }
 /* the kinds the app ships with: a fixed colour and a short mark each; any other kind is neutral */
@@ -1082,7 +1083,8 @@ function venuesBlocks() {   // the rooms by block and floor; a click on a tile o
     const combo = (VM[vi] || []).length > 0;   // a sound combined venue: its kind is its rooms' kind
     const made = Array.isArray(v.made_of) ? v.made_of : [], madeBox = combo || made.length ? `<label class="vwide">Made of <input data-names="${p("made_of")}" list="roomNames" value="${esc(made.join(", "))}" placeholder="two or more rooms"></label>
         <datalist id="roomNames">${vvSingles(v.kind || "classroom", vi).map(n => `<option value="${esc(n)}">`).join("")}</datalist>` : "";
-    const kindBox = combo ? `<span>${vkindMark(cur || "classroom")} ${esc(cur || "classroom")} <span class="small">the kind of its rooms</span></span>` : `<select id="vvKind" data-vkind="${vi}">${opt("", cur, "")}${kinds.map(k => opt(k, cur)).join("")}${cur && !kinds.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}<option value="${VNEWKIND}">New kind…</option></select>`;
+    const rk = combo ? VenueView.roomsKind(S.spec, vi) : null;   // a combined venue's kind follows its rooms: shown, never picked
+    const kindBox = combo ? (rk === null ? `<span>its rooms are of different kinds</span>` : `<span>${vkindMark(rk)} ${esc(rk)} <span class="small">the kind of its rooms</span></span>`) : `<select id="vvKind" data-vkind="${vi}">${opt("", cur, "")}${kinds.map(k => opt(k, cur)).join("")}${cur && !kinds.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}<option value="${VNEWKIND}">New kind…</option></select>`;
     const draft = VV.draft && VV.draft.what === "kind"
       ? `<div class="row vdraft"><label>New kind's name <input id="vvKindName" value="${esc(VV.draft.text || "")}" autocomplete="off"></label> <button data-vkindadd="${vi}">Add</button> <button data-vdraftx="1">Cancel</button></div>` : "";
     return `<div class="vopen ${rowCls(out, crit, "venues", vi)}" id="venues-${vi}" data-vopen="${vi}">
@@ -1121,7 +1123,7 @@ function vvAddKind(vi) {   // the name goes at the end of the school's list (if 
   if (!name || !v) { if (el) el.focus(); return; }
   const list = sc().room_kinds || [], have = list.find(k => String(k).toLowerCase() === name.toLowerCase());
   if (have === undefined) sc().room_kinds = [...list, name];
-  v.kind = have === undefined ? name : have; VV.draft = null; save(); render();
+  v.kind = have === undefined ? name : have; VV.draft = null; VenueView.syncKinds(S.spec); save(); render();
 }
 /* ---------------- step 2: the Cards, Bands and Table views of the classes */
 const CLASSVIEW = "ttsetup.view.classes";
@@ -1780,7 +1782,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.cadd) { addRow("classes"); cvOpen(S.spec.classes.length - 1); render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "center" }); return; }
   if (b.dataset.add) { addRow(b.dataset.add, b.dataset.scope); return; }
   if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); if (k === "teachers" && TV.open !== null) { if (TV.open === Number(i)) tkOpen(null); else if (TV.open > Number(i) && !TV.openId) TV.open--; } if (k === "venues") { const gone = VenueView.cleanName((S.spec.venues[Number(i)] || {}).room); if (gone && !S.spec.venues.some((v, j) => j !== Number(i) && v && VenueView.cleanName(v.room) === gone)) VenueView.dropRoom(S.spec, gone); }   // it leaves any combined venue made of it
-    S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "venues") vvOpen(null); if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
+    S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "venues") { vvOpen(null); VenueView.syncKinds(S.spec); } if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
   if (b.dataset.cmove) { const [i, d] = b.dataset.cmove.split("|").map(Number); if (!Choices.move(S.spec, i, d)) return; save(); render(); const nb = $(`[data-cmove="${i}|${d}"]`); if (nb && !nb.disabled) nb.focus({ preventScroll: true }); return; }
   if (b.dataset.cfopen) { Object.assign(CF, { open: true, kind: "setting", key: "", rule: "", level: "", second: "", fallback: "", from: "", to: "" }); render(); return; }
   if (b.dataset.cfcancel) { CF.open = false; render(); return; }
@@ -1880,7 +1882,7 @@ document.addEventListener("change", async e => {
   if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; el.value = ""; let spec = null; try { spec = JSON.parse(await f.text()); } catch (err) { }
     if (!spec || !spec.school) { toast("That file is not a progress file."); return; }
     try { await adopt(spec, "Progress loaded from the file and saved for the school.", "Loaded from a file"); } catch (err) { toast("Could not reach the server: " + err.message); } return; }
-  if (el.dataset.names) { setPath(el.dataset.names, el.value.split(",").map(t => t.trim()).filter(Boolean)); save(); render(); return; }
+  if (el.dataset.names) { setPath(el.dataset.names, el.value.split(",").map(t => t.trim()).filter(Boolean)); if (/^spec\.venues\.\d+\.made_of$/.test(el.dataset.names)) VenueView.syncKinds(S.spec); save(); render(); return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
   if (el.id === "stuFile") { stuFile(el); return; }
   if (el.id === "tlFile") { tlFile(el); return; }
@@ -1940,7 +1942,7 @@ document.addEventListener("change", async e => {
   if (el.dataset.vkind !== undefined) {   // the open room's Kind box: a kind, or "New kind…" (a small box for its name)
     const v = S.spec.venues[Number(el.dataset.vkind)]; if (!v || locked("venues")) return;
     if (el.value === VNEWKIND) { VV.draft = { what: "kind", text: "" }; render(); const i = $("#vvKindName"); if (i) i.focus(); return; }
-    v.kind = el.value === "" ? null : el.value; save(); render(); return; }
+    v.kind = el.value === "" ? null : el.value; VenueView.syncKinds(S.spec); save(); render(); return; }
   if (el.dataset.sname !== undefined || el.dataset.sset !== undefined || el.dataset.stick !== undefined) {   // a box on a subject card (step 3)
     if (locked("subjects") || !el.closest("[data-scard]")) return;
     if (el.dataset.sname !== undefined) sjName(e); else if (el.dataset.sset !== undefined) sjSet(e); else sjTick(e);
@@ -1959,6 +1961,7 @@ document.addEventListener("change", async e => {
   if (vrn && v !== null) v = VenueView.cleanName(v) || null;   // a room's name: runs of spaces made one, the ends trimmed
   setPath(path, v);
   if (vrn && v && VenueView.cleanName(vwas)) VenueView.renameRoom(S.spec, vwas, v);   // a combined venue made of it follows the new name, in the same save
+  if (/^spec\.venues\.\d+\.(kind|room)$/.test(path)) VenueView.syncKinds(S.spec);   // a combined venue's kind follows its rooms
   if (tkp && !tkHead() && S.spec.teachers[Number(tkp[1])]) TeacherView.tidy(S.spec.teachers[Number(tkp[1])]);   // a home department now equal to the second takes the second off, in the same save
   const cfb = path.match(/^spec\.choices\.(\d+)\.fallback$/); if (cfb) Choices.setFallback(S.spec, Number(cfb[1]), v);
   const m = path.match(/^spec\.lessons\.(\d+)\.block$/);
