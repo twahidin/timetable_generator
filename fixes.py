@@ -263,7 +263,7 @@ class Busy:
     def _why(self, rows, d, p, n, ignore):
         """(the first reason, the lesson behind it or None for a room), or (None, None)"""
         ignore, Q, f = set(ignore), range(p, p + n), self._first
-        for x in rows:
+        for x in rows if d not in (self.m.get("double") or ()) else ():   # a day the setup lets a teacher take two lessons at once
             for t in x["teachers"]:
                 for q in Q:
                     if y := f(("t", t, d, q), ignore): return f"{t} is teaching {what(y)} then.", y
@@ -520,7 +520,7 @@ def marks(busy, rows, pool=False):
     if any(not x["teachers"] for x in rows): out.append("noteacher")
     if busy.lesson_time(rows, d, a["p"], a["n"]): out.append("break")
     if 0 <= d < len(m["days"]) and a["p"] >= 0 and a["p"] + a["n"] <= m["NP"]:
-        if any(others(("t", t, d, q)) for x in rows for t in x["teachers"] for q in Q): out.append("teacher")
+        if d not in (m.get("double") or ()) and any(others(("t", t, d, q)) for x in rows for t in x["teachers"] for q in Q): out.append("teacher")
         if any(others(("c" if x["group"] == ENTIRE else "w", c, d, q)) for x in rows for c in x["classes"] for q in Q) or busy.band_clash(rows, d, a["p"], a["n"], ignore=(own,)): out.append("class")
         rooms = {x["room"] for x in rows if not _no_room(x["room"])}
         if any(len({y["id"] for y in busy.at.get(("r", r, d, q), ())} | {own}) > m["room_cap"].get(r, 1) for r in rooms for q in Q): out.append("room")

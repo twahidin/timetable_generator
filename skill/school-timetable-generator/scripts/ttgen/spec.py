@@ -32,7 +32,7 @@ RULE_TYPES = [
     ("In words", "School, Level, Class, Subject, Room, Teacher", "N", "N", "A rule in plain words that the list cannot say. The timetable scripts do not enforce it: the agent honours a Must, tries a Prefer, and reports how each was met.", "Level · Sec 1 · No PE in the first period"),
 ]
 TYPED = "In words"             # a rule the agent honours and reports on; never enforced by the solver
-SKILL_VERSION = "2026-11.7"      # SKILL.md's version line and the one the workbook's README names
+SKILL_VERSION = "2026-11.8"      # SKILL.md's version line and the one the workbook's README names
 
 def teacher_depts(t):
     """A teacher row's departments, home first: the trimmed, non-empty, different ones of dept and dept2"""
@@ -95,6 +95,22 @@ def subject_test(names):
     return lambda subject, dept=None: bool({str(subject or "").lower(), untag(subject).lower(), str(dept or "").lower()} & want)
 
 
+
+DOUBLE = "Teachers may take two lessons at once on"   # a Settings row: the days a teacher in two lessons is allowed (a self-directed or home-based learning day)
+DOUBLE_NOTE = ("Days when a teacher may be in two lessons at once, such as a self-directed or home-based learning day: the day names as on "
+               "Day structure, separated by commas (Even Fri), or a weekday for every week (Fri). Empty: never.")
+def _day_words(s): return tuple(w[:3] for w in str(s or "").lower().split())
+def double_tokens(school):
+    """the day names typed on the Settings row 'Teachers may take two lessons at once on'"""
+    import re
+    for row in school.get("extra_settings") or []:
+        if str(row[0] or "").strip().lower().startswith(DOUBLE.lower()): return [t.strip() for t in re.split(r"[,;]", str(row[1] if len(row) > 1 and row[1] is not None else "")) if t.strip()]
+    return []
+def double_days(school, days):
+    """the days (indices of days) on which a teacher may be in two lessons at once: a name as on Day structure ('Even Fri',
+    'Even Friday'), or a weekday alone for that weekday of every week ('Fri')"""
+    want = [_day_words(t) for t in double_tokens(school)]
+    return {i for i, d in enumerate(days) if any(w and (w == _day_words(d) or (len(w) == 1 and w[0] == _day_words(d)[-1:][0])) for w in want)}
 
 def end_rows(school):
     """'Lessons end by (Monday to Thursday)' rows on Settings -> [(label, weekdays, minutes after midnight)]"""

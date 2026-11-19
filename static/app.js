@@ -551,6 +551,11 @@ function structureWarnings() {   // where the Day structure and the rules say di
   }
   return out;
 }
+const DOUBLE = "Teachers may take two lessons at once on", DOUBLE_NOTE = "Days when a teacher may be in two lessons at once, such as a self-directed or home-based learning day: the day names as on Day structure, separated by commas (Even Fri), or a weekday for every week (Fri). Empty: never.";   // as ttgen.spec.DOUBLE
+const isDouble = x => String(x[0] || "").trim().toLowerCase().startsWith(DOUBLE.toLowerCase());
+function ensureDoubleRow() { const ex = sc().extra_settings = sc().extra_settings || []; if (!ex.some(isDouble)) ex.push([DOUBLE, null, DOUBLE_NOTE]); }   // the row is always offered on step 6; it is saved with the next change
+const dayWords = s => String(s || "").toLowerCase().split(/\s+/).filter(Boolean).map(w => w.slice(0, 3));
+const doubleDay = t => { const w = dayWords(t); return w.length > 0 && dayNames().some(d => { const dw = dayWords(d); return w.join(" ") === dw.join(" ") || (w.length === 1 && w[0] === dw[dw.length - 1]); }); };   // a name of Day structure, or a weekday alone
 function ensureRecessRows() {
   if (!hasWindows()) return false;
   const ex = sc().extra_settings = sc().extra_settings || []; let added = false;
@@ -564,7 +569,8 @@ function settingRow(x, i) {   // one row of Settings below the rule rows, as a f
     : lab.startsWith("students have no free periods") ? `<select data-k="${k}">${["Yes", "Prefer", "No"].map(v => opt(v, x[1])).join("")}</select>`
     : lab.startsWith("floating recess goes by") ? `<select data-k="${k}">${opt("Level", x[1], "Level: each level together")}${opt("Class", x[1], "Class: each class on its own")}</select>`
     : lab.startsWith("floating recess length") ? inp(k, x[1], "number", 'min="1" max="12"')
-    : lab.startsWith("most classes at recess at once") ? inp(k, x[1], "number", 'min="1" placeholder="no limit"') : inp(k, x[1]);
+    : lab.startsWith("most classes at recess at once") ? inp(k, x[1], "number", 'min="1" placeholder="no limit"')
+    : isDouble(x) ? inp(k, x[1], "text", `placeholder="never (for example ${esc(dayNames()[dayNames().length - 1] || "Fri")})"`) : inp(k, x[1]);
   return `<label class="f" id="${isRecessRow(x) ? "school" : "config"}-${i}">${esc(x[0])} ${field}${x[2] ? `<span class="muted small">${esc(x[2])}</span>` : ""}</label>`;
 }
 function recessSetting(label) {   // [row index, value] of a floating recess row on Settings
@@ -612,6 +618,10 @@ function issues() {
   // hard: no timetable can be made until it is fixed (critical). The rest are warnings: a timetable can still be made, but a person should look.
   const crit = new Set(), add = (k, i, m, hard) => { (out[k][i] = out[k][i] || []).push(m); if (hard) crit.add(`${k}|${i}|${m}`); };
   Object.entries(Choices.problems(S.spec, SET())).forEach(([i, ms]) => ms.forEach(m => add("choices", i, `${Choices.itemLabel(S.spec, S.spec.choices[i], SET())}: ${m}`)));   // the give-way list: warnings
+  (sc().extra_settings || []).forEach((x, i) => {   // the days a teacher may take two lessons at once: every name is a day
+    if (!isDouble(x)) return;
+    String(x[1] ?? "").split(/[,;]/).map(t => t.trim()).filter(Boolean).filter(t => !doubleDay(t)).forEach(t => add("config", i, `${DOUBLE}: "${t}" is not a day. Write the days as on Day structure, such as ${dayNames()[dayNames().length - 1]}, separated by commas.`, true));
+  });
   (sc().extra_settings || []).forEach((x, i) => {   // 'Lessons end by (...)' rows on Settings
     if (!String(x[0]).toLowerCase().startsWith("lessons end by") || x[1] == null || x[1] === "") return;   // blank: no end time on those days
     if (!/^\d{1,2}:\d{2}$/.test(String(x[1]))) { add("config", i, `${x[0]}: give a time such as 12:40, or clear it for no end time.`, true); return; }
@@ -1619,7 +1629,7 @@ const VIEWS = {
       <div class="tablewrap"><table class="ruletable typed"><tr><th></th><th>Must / Prefer</th><th>Applies to</th><th>Which</th><th>In words</th><th></th></tr>${ty.map(i => typedRow(i, tscopes)).join("") || `<tr><td colspan="6" class="muted small">None yet.</td></tr>`}</table></div>
       <div class="row" style="margin:10px 0 4px">${add("typed", "+ Typed rule")}</div>
       <details style="margin-top:12px"><summary class="muted">Rule types for this tab</summary><div class="tablewrap" style="max-height:none"><table><tr><th>Rule</th><th>Applies to</th><th>What it means</th><th>Example</th></tr>${RT.filter(t => scopesOf(t).some(x => tscopes.includes(x))).map(t => `<tr><td><b>${esc(t.rule)}</b></td><td>${esc(t.scopes)}</td><td>${esc(t.meaning)}</td><td class="muted">${esc(t.example)}</td></tr>`).join("")}</table></div></details>`);
-    const s = sc();
+    const s = sc(); ensureDoubleRow();
     return `<div class="card"><h1>Step 6 · Configuration and constraints</h1><p class="lead">The school-wide settings first, then the constraints under five tabs: what applies to the whole school, to levels and classes, to subjects, to venues, and to teachers.</p>
       <h2>Configuration</h2><p class="muted">School-wide settings. They apply to every class and teacher.</p>
       <div class="grid2">${SET().map(x => `<label class="f">${esc(x.label)} ${x.number

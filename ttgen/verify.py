@@ -120,7 +120,7 @@ def clashes(m):
     places = {t: list(p) for t, p in (m["checks"].get("where") or {}).items()}   # a line's places in order; lines that read the same take them one each
     for text in m["checks"]["problems"]:
         if text.endswith("planned.") or text in own: continue
-        who = re.match(r"(Teacher double-booked|Class clash): (.+?) on ", text)   # whose week the Fix the timetable button opens
+        who = re.match(r"(Teacher double-booked|Teacher in two lessons \(allowed that day\)|Class clash): (.+?) on ", text)   # whose week the Fix the timetable button opens
         where = (dict(teacher=who.group(2)) if who.group(1).startswith("Teacher") else dict(cls=who.group(2))) if who else None
         at = places[text].pop(0) if places.get(text) else None   # a lesson in a break, a recess, past the day or in a full room: its first class, day, period, id and row
         if at: where = dict(at)
