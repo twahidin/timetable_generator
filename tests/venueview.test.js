@@ -28,8 +28,8 @@ t("floors_highest_first_then_the_named_ones_and_rooms_in_natural_order", () => {
 });
 t("a_room_carries_what_the_tile_and_the_editor_show", () => {
   const B = VenueView.blocks(fixture());
-  assert.deepStrictEqual(B[1].floors[0].rooms[0], { vi: 2, room: "B2-1", kind: "classroom", capacity: 40, home: ["2R1", "2R9"], only_for: ["Sec 3"], equipment: [], configuration: "", note: "" });
-  assert.deepStrictEqual(B[0].floors[0].rooms[0], { vi: 5, room: "Music Room", kind: "music room", capacity: 30, home: [], only_for: [], equipment: ["30 keyboards", "2 amps"], configuration: "cluster seating", note: "by the hall" });
+  assert.deepStrictEqual(B[1].floors[0].rooms[0], { vi: 2, room: "B2-1", kind: "classroom", capacity: 40, home: ["2R1", "2R9"], only_for: ["Sec 3"], equipment: [], configuration: "", note: "", made_of: [] });
+  assert.deepStrictEqual(B[0].floors[0].rooms[0], { vi: 5, room: "Music Room", kind: "music room", capacity: 30, home: [], only_for: [], equipment: ["30 keyboards", "2 amps"], configuration: "cluster seating", note: "by the hall", made_of: [] });
   assert.deepStrictEqual([B[1].floors[0].rooms[1].capacity, B[2].floors[0].rooms[0].capacity], [40, null]);   // "40" is 40; "" is none
 });
 t("every_room_shows_once_whatever_it_lacks", () => {
@@ -114,5 +114,78 @@ t("newRooms: refused with a sentence", () => {
   assert.deepStrictEqual(VenueView.newRooms(s, "C", -1, 2), { error: "Give From and To as whole numbers." });
   assert.deepStrictEqual(VenueView.newRooms(s, "C", 1, 500), { error: "That is 500 rooms at once. Add at most 200 at a time." });
   assert.deepStrictEqual(VenueView.newRooms({}, "C", 1, 1), { names: ["C01"], skipped: 0 });
+});
+const paired = () => { const s = fixture(); s.venues.push({ _id: "v9", room: "B1-1&2", kind: "classroom", capacity: 88, building: "Block B", floor: 1, made_of: ["B1-1", "B1-2"] }); return s; };
+t("parts_and_clean_names", () => {
+  assert.deepStrictEqual(VenueView.parts(paired()), { "B1-1&2": ["B1-1", "B1-2"] });
+  assert.deepStrictEqual(VenueView.parts(fixture()), {});
+  assert.strictEqual(VenueView.cleanName("  D&T  Lab 1 "), "D&T Lab 1");
+  const s = paired(); s.venues[8].made_of = ["B1-1"]; assert.deepStrictEqual(VenueView.parts(s), {});
+});
+t("suggested_names", () => {
+  assert.strictEqual(VenueView.suggestName(["D&T Lab 1", "D&T Lab 2"]), "D&T Lab 1&2");
+  assert.strictEqual(VenueView.suggestName(["E3-2A", "E3-2B"]), "E3-2A&B");
+  assert.strictEqual(VenueView.suggestName(["Hall", "Dance Studio"]), "Hall + Dance Studio");
+  assert.strictEqual(VenueView.suggestName(["Lab 1", "Lab 2", "Lab 3"]), "Lab 1&2&3");
+});
+t("can_combine_says_why_not", () => {
+  const s = paired(), ix = n => s.venues.findIndex(v => v.room === n);
+  assert.deepStrictEqual(VenueView.canCombine(s, [ix("B2-1"), ix("B2-9")]), { ok: true, why: "" });
+  assert.strictEqual(VenueView.canCombine(s, [ix("B2-1")]).why, "Tick two or more rooms to combine them.");
+  assert.strictEqual(VenueView.canCombine(s, [ix("B2-1"), ix("B2-10")]).why, "Rooms of different kinds cannot be combined.");
+  assert.strictEqual(VenueView.canCombine(s, [ix("B1-1"), ix("B2-1")]).why, "B1-1 is already in B1-1&2.");
+  assert.strictEqual(VenueView.canCombine(s, [ix("B1-1&2"), ix("B2-1")]).why, "B1-1&2 is a combined venue already.");
+  s.rules = [{ scope: "Room", target: "B2-9", rule: "At most N at once", number: 2, strength: "Must" }];
+  assert.strictEqual(VenueView.canCombine(s, [ix("B2-1"), ix("B2-9")]).why, "B2-9 takes 2 groups at once, so it cannot be combined.");
+});
+t("combine_makes_the_row", () => {
+  const s = fixture(), vi = VenueView.combine(s, [0, 1]), v = s.venues[vi];
+  assert.deepStrictEqual([v.room, v.kind, v.capacity, v.building, String(v.floor), v.made_of], ["B1-1&2", "classroom", 88, "Block B", "1", ["B1-1", "B1-2"]]);
+  const f = VenueView.blocks(s).find(b => b.block === "Block B").floors.find(f => f.floor === "1");
+  assert.deepStrictEqual(f.rooms.map(r => [r.room, r.made_of]), [["B1-1", []], ["B1-2", []], ["B1-1&2", ["B1-1", "B1-2"]]]);
+  assert.deepStrictEqual(VenueView.blocks(s).map(b => [b.block, b.rooms, b.seats]), [["Block A", 2, 50], ["Block B", 5, 198], ["", 1, 0]]);   // the pair adds no room and no seats
+  const t2 = fixture(); t2.venues[1].capacity = ""; assert.strictEqual(t2.venues[VenueView.combine(t2, [0, 1])].capacity, null);
+});
+t("rename_and_delete_keep_it_whole", () => {
+  const s = paired(); assert.strictEqual(VenueView.renameRoom(s, "B1-2", "B1-2x"), 1); assert.deepStrictEqual(s.venues[8].made_of, ["B1-1", "B1-2x"]);
+  assert.strictEqual(VenueView.dropRoom(s, "B1-2x"), 1); assert.deepStrictEqual(s.venues[8].made_of, ["B1-1"]);
+  assert.deepStrictEqual(VenueView.problems(s).filter(p => p.hard).map(p => [p.vi, p.text, p.hard]), [[8, "B1-1&2: a combined venue needs at least two rooms.", true]]);
+  assert.deepStrictEqual(VenueView.problems(s).filter(p => !p.hard).map(p => p.text), ["B1-1&2: 88 seats, but its rooms seat 44 together."]);   // as venue_problems says too
+  assert.deepStrictEqual(VenueView.problems(fixture()), []);
+});
+// tests/test_combined.py broken_ones_are_ordinary_rooms_and_are_reported, case by case: the same texts as ttgen/spec.py venue_problems
+const PAIR = "D&T Studio 1&2", S1 = "D&T Studio 1", S2 = "D&T Studio 2";
+const studios = () => ({ venues: [{ room: S1, kind: "d&t studio", capacity: 20 }, { room: S2, kind: "d&t studio", capacity: 20 }, { room: "Art Room 1", kind: "art room", capacity: 40 },
+  { room: PAIR, kind: "d&t studio", capacity: 40, made_of: [S1, S2] }], rules: [] });
+const probs = change => { const s = studios(); change(s, s.venues[3]); return VenueView.problems(s).map(p => [p.text, p.hard]); };
+const has = (p, x) => assert.ok(p.some(y => y[0] === x[0] && y[1] === x[1]), JSON.stringify(p));
+t("broken_ones_are_ordinary_rooms_and_are_reported", () => {
+  assert.deepStrictEqual(VenueView.problems(studios()), []); assert.deepStrictEqual(VenueView.parts(studios()), { [PAIR]: [S1, S2] });
+  has(probs((s, v) => { v.made_of = [S1]; }), [`${PAIR}: a combined venue needs at least two rooms.`, true]);
+  has(probs((s, v) => { v.made_of = [S1, "Studio 9"]; }), [`${PAIR}: made of Studio 9, which is not on step 1 (Venues).`, true]);
+  has(probs(s => s.venues.push({ room: "Other pair", kind: "d&t studio", capacity: 40, made_of: [S2, "Art Room 1"] })), [`${S2} is in more than one combined venue (${PAIR}, Other pair): a room can be in one only.`, true]);
+  has(probs(s => s.venues.push({ room: "Big", kind: "d&t studio", capacity: 80, made_of: [PAIR, "Art Room 1"] })), ["Big: made of D&T Studio 1&2, which is a combined venue itself.", true]);
+  has(probs((s, v) => { v.made_of = [S1, "Art Room 1"]; }), [`${PAIR}: it and its rooms are of different kinds (art room, d&t studio); they must all be one kind.`, true]);
+  has(probs(s => s.rules.push({ scope: "Room", target: S1, rule: "At most N at once", number: 2, strength: "Must", week: "Both", day: "All" })), [`${PAIR}: ${S1} takes 2 groups at once (an "At most N at once" rule); a combined venue and its rooms take one group at a time.`, true]);
+  has(probs((s, v) => { v.capacity = null; }), [`${PAIR}: give its seats (seats decide which groups get it).`, false]);
+  has(probs((s, v) => { v.capacity = 50; }), [`${PAIR}: 50 seats, but its rooms seat 40 together.`, false]);
+  assert.deepStrictEqual(probs((s, v) => { v.capacity = 44; }), []);   // within 10%
+});
+t("seats_are_read_as_python_int_reads_them", () => {   // int(): "40.0" and text are no seats; " 50 " and 50.9 are 50; 0 is none
+  const seats = c => probs((s, v) => { v.capacity = c; });
+  assert.deepStrictEqual(seats("40.0"), [[`${PAIR}: give its seats (seats decide which groups get it).`, false]]);
+  assert.deepStrictEqual(seats("forty"), [[`${PAIR}: give its seats (seats decide which groups get it).`, false]]);
+  assert.deepStrictEqual(seats(0), [[`${PAIR}: give its seats (seats decide which groups get it).`, false]]);
+  assert.deepStrictEqual(seats(" 50 "), [[`${PAIR}: 50 seats, but its rooms seat 40 together.`, false]]);
+  assert.deepStrictEqual(seats(50.9), [[`${PAIR}: 50 seats, but its rooms seat 40 together.`, false]]);
+  assert.deepStrictEqual(probs((s, v) => { v.capacity = 50; s.venues[0].capacity = "20.0"; }), []);   // a room's seats unreadable: no sum to compare
+  assert.deepStrictEqual(probs(s => s.rules.push({ scope: "Room", target: " D&T  Studio 1", rule: "At most N at once", number: "2", strength: null })).length, 1);   // a target as typed; no strength is Must
+  assert.deepStrictEqual(probs(s => s.rules.push({ scope: "Room", target: S1, rule: "At most N at once", number: 2, strength: "Prefer" })), []);
+});
+t("a_name_used_twice_counts_as_python_counts_it", () => {   // venue_parts: the last row of a name; venue_problems: the first
+  const s = studios(); s.venues.push({ room: PAIR + " " }); assert.deepStrictEqual(VenueView.parts(s), {});
+  assert.deepStrictEqual(VenueView.problems({ venues: [{ room: "S1" }, { room: "P", made_of: ["S1", "S1", " S1 "] }] }).map(p => [p.vi, p.text, p.hard]),
+    [[1, "P: a combined venue needs at least two rooms.", true], [1, "P: give its seats (seats decide which groups get it).", false]]);
+  assert.deepStrictEqual(VenueView.problems({ venues: [null, { room: "S1" }] }), []);
 });
 console.log(n + " cases passed");
