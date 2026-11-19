@@ -130,8 +130,8 @@ venue: the rooms are used together, as when a folding wall joins two studios. A 
 so nothing else may be in any of them at that time, and the combined venue is free only when all its rooms are. It takes one
 group at a time (no "At most N at once" above 1 on it or its rooms) and adds no room to any count. A room is in at most one
 combined venue, a combined venue is not made of combined venues, and the rooms and the combined venue are all of one kind.
-Seats decide who gets it: a class too big for one room fits only the combined venue, and where no venue of the kind seats a
-group it goes to the venue of that kind with the most seats. Room "Not available" on a room also closes the combined venue
+Seats decide who gets it: a class too big for one room fits only the combined venue, and, for a kind that has a combined venue, where no venue of the kind seats a
+group it goes to the venue of that kind with the most seats (for a kind without one nothing changes: every room of the kind is allowed and the checks flag it). Room "Not available" on a room also closes the combined venue
 that room is in; on the combined venue it leaves its rooms open. The timetable names one room per lesson: a lesson held in
 the pair names the combined venue. A room that takes several classes at once (a field, a hall) needs an "At most N
 at once" rule for the Room; a note on a Settings row such as "Field and Hall take 2 classes each" is read as those
@@ -236,13 +236,16 @@ Use OR-Tools CP-SAT. Read the workbook's input cells yourself; do not rely on ca
    Also NoOverlap(whole-class lessons of the class + all lessons of each block listing the class).
 5. **Teachers.** NoOverlap over every lesson they take part in, plus fixed intervals for Must "Not available" and
    "Keep free together" (department). A teacher with a Department 2 counts in both departments.
-6. **Rooms.** (With a combined venue, count as follows; with none, only the next sentence.) Each group keeps its set E of
-   allowed venues. Its weight is 1 if E holds an ordinary room, else the fewest rooms of any combined venue in E. The single
-   rooms under a set of venues are its ordinary rooms plus the rooms of its combined venues. Add a cumulative limit for the
-   single rooms under each group's E, for the rooms of each combined venue, and for all single rooms of the kind; each covers
-   every group whose single rooms under E lie inside it, with capacity the number of single rooms in it. A combined venue never
-   adds capacity. Per room kind, AddCumulative with capacity = number of rooms of that kind (a room's "At most N at
+6. **Rooms.** Per room kind, AddCumulative with capacity = number of rooms of that kind (a room's "At most N at
    once" rule counts it N times); demand = groups of that kind in the lesson; rows with no kind use classrooms.
+   For a kind that has a combined venue, count single rooms instead. Each group keeps its set E of allowed venues: the
+   venues of the group's room kind that are kept for it (or for anyone) and that seat it, narrowed by any Must "Only in
+   venues" rule for the lesson's periods (so a class too big for one room has only the combined venue in E). Its weight is 1 if
+   E holds an ordinary room, else the fewest rooms of any combined venue in E. The single rooms under a set of venues are its
+   ordinary rooms plus the rooms of its combined venues. Add a cumulative limit for the single rooms under each group's E,
+   for the rooms of each combined venue, and for all single rooms of the kind. Each limit covers every group whose single
+   rooms under E lie inside it, with capacity the number of single rooms in it, and demand = each group's weight (1 when no
+   combined venue is in play). A combined venue never adds capacity.
    Room "Not available" adds fixed demand. "Only in venues" (Must): where a lesson may start decides which rooms it may
    use (only the rule's rooms when it runs into the rule's periods), so give it one optional interval per set of rooms,
    exactly one present, and count it under that set. With "In rain, PE goes to the class's home room", each lesson in a `pe venue`
