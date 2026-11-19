@@ -145,6 +145,8 @@ t("combine_makes_the_row", () => {
   assert.deepStrictEqual(f.rooms.map(r => [r.room, r.made_of]), [["B1-1", []], ["B1-2", []], ["B1-1&2", ["B1-1", "B1-2"]]]);
   assert.deepStrictEqual(VenueView.blocks(s).map(b => [b.block, b.rooms, b.seats]), [["Block A", 2, 50], ["Block B", 5, 198], ["", 1, 0]]);   // the pair adds no room and no seats
   const t2 = fixture(); t2.venues[1].capacity = ""; assert.strictEqual(t2.venues[VenueView.combine(t2, [0, 1])].capacity, null);
+  const t3 = fixture(); t3.venues.push({ room: "B1-1&2", kind: "classroom", capacity: 80 });   // the suggested name is already a room (an old single room)
+  const v3 = t3.venues[VenueView.combine(t3, [0, 1])]; assert.strictEqual(v3.room, "B1-1&2 (2)"); assert.strictEqual(VenueView.suggestName(v3.made_of), "B1-1&2");
 });
 t("rename_and_delete_keep_it_whole", () => {
   const s = paired(); assert.strictEqual(VenueView.renameRoom(s, "B1-2", "B1-2x"), 1); assert.deepStrictEqual(s.venues[8].made_of, ["B1-1", "B1-2x"]);

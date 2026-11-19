@@ -221,6 +221,7 @@ async function openServer(srv, step) {
   await useKind(srv.spec);
   unpick(); SYNC.held = null; SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
   S.spec = Sync.clone(srv.spec); LIST_KEYS.forEach(k => S.spec[k] = S.spec[k] || []); defaultRoles(S.spec);
+  VenueView.syncKinds(S.spec);   // a combined venue's kind follows its rooms (a workbook may hold another): written with the next change
   if (step != null) S.step = step;
   ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
 }
@@ -326,7 +327,7 @@ async function practice(kind) {
     await holdSync(async () => {
       await useKind(spec);   // may fail: nothing has changed yet, the school's setup stays open
       S.practice = true; SYNC.held = null; unpick();
-      Sync.ensureIds(spec); LIST_KEYS.forEach(k => spec[k] = spec[k] || []); defaultRoles(spec); S.spec = spec;
+      Sync.ensureIds(spec); LIST_KEYS.forEach(k => spec[k] = spec[k] || []); defaultRoles(spec); VenueView.syncKinds(spec); S.spec = spec;
       S.step = 1; ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
     });
   } catch (e) {
@@ -1023,10 +1024,12 @@ function vvCombine() {   // the ticked rooms make one new combined venue (the ro
   if (locked("venues")) return;
   const vis = S.spec.venues.map((v, i) => [v, i]).filter(([v]) => v && vvTicks().has(v._id)).map(([, i]) => i), c = VenueView.canCombine(S.spec, vis);
   if (!c.ok) { toast(c.why); return; }
-  const vi = VenueView.combine(S.spec, vis), name = S.spec.venues[vi].room;
+  const vi = VenueView.combine(S.spec, vis), name = S.spec.venues[vi].room, suggested = VenueView.suggestName(S.spec.venues[vi].made_of);
   vvTicks().clear(); vvOpen(vi); save(); render();
   const o = document.getElementById(`venues-${vi}`); if (o) o.scrollIntoView({ block: "center" });
-  toast(`Combined into ${name}. Its rooms stay as they are. Undo, at the top, takes it back.`);
+  toast(name !== suggested   // the suggested name is already a room: often the old single room for these
+    ? `Combined into ${name}. ${suggested} is already a room: if that is the old single room for these, remove it or type the rooms into its Made of box instead. Undo, at the top, takes this back.`
+    : `Combined into ${name}. Its rooms stay as they are. Undo, at the top, takes it back.`);
 }
 const vvResolve = () => heldResolve(VV, S.spec.venues);
 try { const vv = localStorage.getItem(VENUEVIEW); if (["blocks", "table"].includes(vv)) VV.view = vv; } catch (e) { }
@@ -1084,7 +1087,7 @@ function venuesBlocks() {   // the rooms by block and floor; a click on a tile o
     const made = Array.isArray(v.made_of) ? v.made_of : [], madeBox = combo || made.length ? `<label class="vwide">Made of <input data-names="${p("made_of")}" list="roomNames" value="${esc(made.join(", "))}" placeholder="two or more rooms"></label>
         <datalist id="roomNames">${vvSingles(v.kind || "classroom", vi).map(n => `<option value="${esc(n)}">`).join("")}</datalist>` : "";
     const rk = combo ? VenueView.roomsKind(S.spec, vi) : null;   // a combined venue's kind follows its rooms: shown, never picked
-    const kindBox = combo ? (rk === null ? `<span>its rooms are of different kinds</span>` : `<span>${vkindMark(rk)} ${esc(rk)} <span class="small">the kind of its rooms</span></span>`) : `<select id="vvKind" data-vkind="${vi}">${opt("", cur, "")}${kinds.map(k => opt(k, cur)).join("")}${cur && !kinds.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}<option value="${VNEWKIND}">New kind…</option></select>`;
+    const kindBox = combo ? (rk === null ? `<span>its rooms are of different kinds</span>` : `<span>${vkindMark(rk)} ${esc(rk)} <span class="small">· the kind of its rooms</span></span>`) : `<select id="vvKind" data-vkind="${vi}">${opt("", cur, "")}${kinds.map(k => opt(k, cur)).join("")}${cur && !kinds.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}<option value="${VNEWKIND}">New kind…</option></select>`;
     const draft = VV.draft && VV.draft.what === "kind"
       ? `<div class="row vdraft"><label>New kind's name <input id="vvKindName" value="${esc(VV.draft.text || "")}" autocomplete="off"></label> <button data-vkindadd="${vi}">Add</button> <button data-vdraftx="1">Cancel</button></div>` : "";
     return `<div class="vopen ${rowCls(out, crit, "venues", vi)}" id="venues-${vi}" data-vopen="${vi}">
@@ -2067,7 +2070,7 @@ function helper(k) {
     toast(`${n} room${n === 1 ? "" : "s"} added${r.skipped ? ` (${r.skipped} there already ${r.skipped === 1 ? "was" : "were"} left)` : ""}.${blocks ? ` ${n === 1 ? "It is" : "They are"} under No block yet, ticked: pick a block and a floor on the bar to place ${n === 1 ? "it" : "them"}.` : ""}`); return;
   }
   if (k === "classes") {
-    const lv = $("#hcLevel").value, size = Number($("#hcSize").value) || 38; const used = new Set(S.spec.classes.map(c => c.home_room)); const free = S.spec.venues.filter(v => (v.kind || "classroom") === "classroom" && !used.has(v.room)).map(v => v.room);
+    const lv = $("#hcLevel").value, size = Number($("#hcSize").value) || 38; const used = new Set(S.spec.classes.map(c => c.home_room)), VP = VenueView.parts(S.spec); const free = S.spec.venues.filter(v => (v.kind || "classroom") === "classroom" && !used.has(v.room) && !Object.prototype.hasOwnProperty.call(VP, VenueView.cleanName(v.room))).map(v => v.room);   // a combined venue is no home room
     $("#hcNames").value.split(",").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.classes.push({ class: `${String(lv).slice(-1)}${n}`, level: lv, size, home_room: free.shift() || null }));
     $("#hcNames").value = "";   // added: the bar keeps its other boxes, not the names
   }

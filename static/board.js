@@ -530,7 +530,8 @@ var Board = (function () {
   /* whether venues a and b share a single room (parts: a combined venue's name -> its rooms, or undefined): a venue meets itself and, for a combined venue, each of its rooms */
   function roomsMeet(parts, a, b) {
     if (!a || !b) return false;
-    var ra = parts && parts[a] ? parts[a] : [a], rb = parts && parts[b] ? parts[b] : [b];
+    var own = function (x) { return parts && Object.prototype.hasOwnProperty.call(parts, x) && Array.isArray(parts[x]); };   // "constructor" is a room, not Object's
+    var ra = own(a) ? parts[a] : [a], rb = own(b) ? parts[b] : [b];
     return ra.some(function (x) { return rb.indexOf(x) >= 0; });
   }
 

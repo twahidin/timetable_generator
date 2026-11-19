@@ -675,6 +675,9 @@ t("roomsMeet: a venue meets its own rooms and itself, not its neighbour's", () =
   assert.strictEqual(Board.roomsMeet(undefined, "A", "A"), true);
   assert.strictEqual(Board.roomsMeet(undefined, "A", "B"), false);
   assert.strictEqual(Board.roomsMeet(parts, "", "Lab 1"), false);
+  assert.strictEqual(Board.roomsMeet(parts, "constructor", "Lab 1"), false);   // a room named as an Object property is a room
+  assert.strictEqual(Board.roomsMeet(parts, "toString", "toString"), true);
+  assert.strictEqual(Board.roomsMeet({ constructor: ["A", "B"] }, "constructor", "A"), true);
 });
 
 console.log(`${n} cases passed`);
