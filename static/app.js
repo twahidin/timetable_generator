@@ -575,6 +575,8 @@ function recessSetting(label) {   // [row index, value] of a floating recess row
 /* ---------------- derived values (same logic as the workbook formulas) */
 function split(p, L) { p = Number(p) || 0; L = Number(L) || 1; if (p <= 0) return [0, 0]; if (L <= 1) return [p, 0]; let s = ((-p % L) + L) % L; if (s * (L - 1) > p) s = 0; return [Math.floor((p - s * (L - 1)) / L), s]; }   // whole numbers always, as ttgen.spec.lesson_split: periods that cannot be cut exactly lose the remainder (the Things to fix list says so)
 const patText = p => { const n = {}; p.forEach(v => n[v] = (n[v] || 0) + 1); return Object.keys(n).map(Number).sort((a, b) => b - a).map(v => `${n[v]}×${v}`).join(" + "); };
+function wholeAuto(lv, s) { const x = subj(s) || {}, p = Number((x.periods || {})[lv]) || 0, L = Number(x.lesson_length) || Number(sc().lesson_length) || 1, [full, short] = split(p, L); return { p, auto: p ? patText([...Array(full).fill(L), ...Array(short).fill(L - 1)]) : "" }; }   // a subject's periods at a level and its usual split, as lessonInfo works them out for a row with nothing of its own
+function hwHint() { const el = document.getElementById("hwPat"); if (el) el.placeholder = wholeAuto(document.getElementById("hwLevel").value, document.getElementById("hwSubj").value).auto || "usual split"; }   // the Lessons box of "Add a whole-class subject" shows the usual split of the level and subject picked
 function parsePattern(t) {   // "5x3 + 2x2" or "3, 3, 2": the lesson lengths, longest first; null when it cannot be read (ttgen.reader.parse_pattern)
   const out = [];
   for (const part of String(t).trim().replace(/\s*[xX×*]\s*/g, "x").split(/[+,;\s]+/).filter(Boolean)) {
@@ -899,7 +901,7 @@ function render() {
   headLocks(main, id); if (S.board) bdPaint();   // the board's colours and outlines for the card selected
   main.querySelectorAll(".tablewrap, .keep").forEach((t, i) => { if (boxes[i]) [t.scrollTop, t.scrollLeft] = boxes[i]; });
   bars.forEach(([bid, v]) => { const e = document.getElementById(bid); if (e && e.value !== v && (e.tagName !== "SELECT" || [...e.options].some(o => o.value === v))) e.value = v; });
-  fitAreas(main);
+  hwHint(); fitAreas(main);
   const bw2 = bpos && main.querySelector(".bdwrap"); if (bw2) { bw2.scrollLeft = bpos[0]; bw2.scrollTop = bpos[1]; }
   if (fk) { const el = main.querySelector(fk); if (el) el.focus({ preventScroll: true }); }
   renderIssues(); saveState(); window.scrollTo(0, y);
@@ -1507,7 +1509,7 @@ const VIEWS = {
       ${VIEWS._bands(out, info, crit)}</div>
       <div class="card"><h2>Teaching groups</h2><p class="muted">One row per group, or per class for a whole-class subject. Pick level, subject and band (empty = whole class); choosing a band fills its classes. Group code and periods fill in by themselves. Lessons shows how the periods split, in grey; type your own, such as 5x3 + 2x2 (five 3-period lessons and two 2-period ones), or clear it to go back. Tick rows (shift-click for a run) to deploy a teacher or set Lessons on all of them at once.</p>
       <div class="helper row"><b>Add groups to a band</b> ${sel("_hb", "", blockNames(), true, 'id="hbBlock" data-k=""')} subject ${sel("_hbs", "", subjectNames(), true, 'id="hbSubj" data-k=""')} groups <input id="hbN" type="number" value="1" style="width:56px"> students each <input id="hbSt" type="number" style="width:64px"> <button data-helper="groups">Add</button></div>
-      <div class="helper row"><b>Add a whole-class subject</b> level ${sel("_hw", levels()[0], levels(), false, 'id="hwLevel" data-k=""')} subject ${sel("_hws", "", subjectNames(), true, 'id="hwSubj" data-k=""')} <button data-helper="whole">Add one row per class</button></div>
+      <div class="helper row"><b>Add a whole-class subject</b> level ${sel("_hw", levels()[0], levels(), false, 'id="hwLevel" data-k=""')} subject ${sel("_hws", "", subjectNames(), true, 'id="hwSubj" data-k=""')} <label style="white-space:nowrap">lessons <input id="hwPat" placeholder="usual split" title="How the periods split into lessons, for every row added: 5x3 + 2x2 is five 3-period lessons and two 2-period ones. Empty = the usual split shown in grey. Each row's own Lessons box can still be changed afterwards." style="width:128px"></label> <button data-helper="whole">Add one row per class</button></div>
       <div class="row" style="margin:12px 0 8px"><b>Show</b> <select id="tgLv">${opt("", f.lv, "All levels")}${levels().map(l => opt(l, f.lv)).join("")}</select>
         <select id="tgSubj">${opt("", f.subj, "All subjects")}${subjectNames().map(n => opt(n, f.subj)).join("")}</select>
         <select id="tgT">${opt("", f.t, "Any teacher")}${opt("-", f.t, "No teacher yet")}${T.map(t => opt(t, f.t)).join("")}</select>
@@ -1914,7 +1916,7 @@ document.addEventListener("change", async e => {
     if (el.dataset.sname !== undefined) sjName(e); else if (el.dataset.sset !== undefined) sjSet(e); else sjTick(e);
     return; }
   const path = el.dataset.k; if (!path) return;
-  if (path.startsWith("_h")) return;   // a list on an "Add …" bar (kind, level, department, band, subject): the bar's own, read when Add is pressed. It used to be saved as a stray value and the page drawn again, which put every box of the bar back to its default
+  if (path.startsWith("_h")) { hwHint(); return; }   // a list on an "Add …" bar (kind, level, department, band, subject): the bar's own, read when Add is pressed. It used to be saved as a stray value and the page drawn again, which put every box of the bar back to its default
   if (path === "spec.school.parents_name") { const t = el.value.trim(); if (t) sc().parents_name = t; else delete sc().parents_name; save(); render(); poll(); return; }   // an empty box takes the key away
   const tkp = /^spec\.teachers\.(\d+)\.(dept2?)$/.exec(path);
   if (tkp && tkp[2] === "dept2") { tkSecond(Number(tkp[1]), el.value); return; }   // the Second department box: as a dropped chip is
@@ -2035,7 +2037,16 @@ function helper(k) {
   }
   if (k === "teachers") { const dept = $("#htDept").value, allow = Number($("#htAllow").value) || null; $("#htNames").value.split("\n").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.teachers.push({ name: n, short: n.split(" ")[0], dept, allowance: allow, provisional: isHead() && !S.practice ? "Yes" : "No" })); $("#htNames").value = ""; }
   if (k === "groups") { const b = S.spec.blocks.find(x => x.block === $("#hbBlock").value), s = $("#hbSubj").value, n = Number($("#hbN").value) || 1, st = Number($("#hbSt").value) || null; if (!b || !s) { toast("Pick a band and a subject."); return; } for (let i = 0; i < n; i++) S.spec.lessons.push({ level: b.level, subject: s, block: b.block, classes: [...(b.classes || [])], teachers: [], students: st }); }
-  if (k === "whole") { const lv = $("#hwLevel").value, s = $("#hwSubj").value; if (!s) { toast("Pick a subject."); return; } S.spec.classes.filter(c => c.level === lv).forEach(c => S.spec.lessons.push({ level: lv, subject: s, block: null, classes: [c.class], teachers: [], students: c.size })); }
+  if (k === "whole") {
+    const lv = $("#hwLevel").value, s = $("#hwSubj").value, typed = $("#hwPat").value.trim(); if (!s) { toast("Pick a subject."); return; }
+    let pat = null;   // the Lessons box: the same split for every row added; empty leaves each row on the usual split
+    if (typed) {
+      pat = parsePattern(typed); if (!pat) { toast(`Could not read "${typed}". Write lessons like 5x3 + 2x2: how many, x, how many periods each.`); return; }
+      const { p } = wholeAuto(lv, s), t = pat.reduce((a, b) => a + b, 0); if (p && t !== p) { toast(`Lessons ${patText(pat)} add up to ${t} periods, but ${s} has ${p} at ${lv} (step 3). Nothing was added.`); return; }
+    }
+    S.spec.classes.filter(c => c.level === lv).forEach(c => S.spec.lessons.push({ level: lv, subject: s, block: null, classes: [c.class], teachers: [], students: c.size, ...(pat ? { pattern: [...pat] } : {}) }));
+    $("#hwPat").value = "";   // added: the bar keeps its level and subject, not the lessons typed for them
+  }
   save(); render(); toast("Added.");
 }
 
