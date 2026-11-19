@@ -17,7 +17,7 @@ from .database import is_db, read_db, write_db
 from .reader import read_template, derive
 from . import choices, parents as _parents
 from .report import LESSON_HEADERS, short_subject, clock
-from .spec import double_days, order_days, periods_by_day, resolve_row, trim_day
+from .spec import double_days, order_days, periods_by_day, resolve_row, trim_day, venue_parts, single_rooms, clean_name, clean_rooms, whole as _whole
 
 ENTIRE = "Entire Class"
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
@@ -64,6 +64,7 @@ def _week_day(name):
 # ----------------------------------------------------------------------------------------------- the model
 def _model(spec, days, lessons, notes=(), status=None, recess=None):
     """recess: {class: [[day, period, length]]}, each class's floating recess (in the recess windows, W on Day structure)"""
+    clean_rooms(spec)   # room names clean, so the combined venues and the lessons' rooms agree
     sc = spec["school"]; NP = int(sc["periods_per_day"]); ND = len(days); ds = spec["day_structure"]
     levels = [str(x) for x in sc["levels"]]
     keep = periods_by_day(sc, days)   # Settings 'Lessons end by (...)': later periods are no school on those days
@@ -87,11 +88,20 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
     for L in lessons:
         for t in L["teachers"]:
             if t not in seen: seen.add(t); teachers.append(dict(name=t, short=t, dept="", allowance="", other=""))
-    rooms = [dict(name=str(v["room"]), kind=v.get("kind") or "classroom", capacity=v.get("capacity") or "",
+    parts = venue_parts(spec["venues"])   # combined venue -> its rooms
+    seats = {clean_name(v["room"]): v.get("capacity") for v in spec["venues"]}
+    def _cap(v):   # a combined venue holds its own number, else the sum of its rooms'
+        n, own = clean_name(v["room"]), v.get("capacity") or ""
+        if own or n not in parts: return own
+        ns = [_whole(seats.get(r)) for r in parts[n]]   # the sum, only when every room's seats are known
+        return sum(ns) if all(ns) else ""
+    kinds = {clean_name(v["room"]): v.get("kind") or "classroom" for v in spec["venues"]}
+    _kind = lambda v: kinds.get(parts[clean_name(v["room"])][0], "classroom") if clean_name(v["room"]) in parts else v.get("kind") or "classroom"   # a combined venue: its first room's kind (as the solver's Problem)
+    rooms = [dict(name=str(v["room"]), kind=_kind(v), capacity=_cap(v), parts=list(parts.get(clean_name(v["room"]), [])),
                   equipment=[str(e).strip() for e in v.get("equipment") or [] if str(e).strip()], configuration=str(v.get("configuration") or "").strip()) for v in spec["venues"]]
     seen = {r["name"] for r in rooms}
     for L in lessons:
-        if L["room"] and L["room"] not in seen: seen.add(L["room"]); rooms.append(dict(name=L["room"], kind="to be confirmed" if L["room"] == "TBC" else "other", capacity="", equipment=[], configuration=""))
+        if L["room"] and L["room"] not in seen: seen.add(L["room"]); rooms.append(dict(name=L["room"], kind="to be confirmed" if L["room"] == "TBC" else "other", capacity="", parts=[], equipment=[], configuration=""))
     used_rooms = {L["room"] for L in lessons if L["room"]}
     rooms = [r for r in rooms if r["name"] in used_rooms] + [r for r in rooms if r["name"] not in used_rooms]
     depts = []
@@ -113,6 +123,7 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
     for r in spec.get("rules", []):
         if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and r.get("target") in cap and r.get("number"):
             cap[r["target"]] = int(r["number"])
+    for c, rs in parts.items(): cap.update({x: 1 for x in [c] + rs if x in cap})   # a combined venue and its rooms take one group at a time
     planned = {}
     for x in spec["lessons"]:
         if not x.get("periods") or not x.get("classes"): continue
@@ -123,7 +134,7 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
                          period_minutes=int(sc["period_minutes"]), start_time=str(sc["start_time"]), kind=sc.get("kind") or ""),
              days=list(days), NP=NP, ND=ND, times=times, grid=grid, raw_grid=raw, cgrid=cgrid, recess={c: [list(x) for x in v] for c, v in (recess or {}).items()},
              keep=keep, double=double_days(sc, days), levels=levels, classes=classes, parents_name=_parents.label(spec), teachers=teachers, rooms=rooms,
-             subjects=subjects, lessons=lessons, students=students, room_cap=cap, planned=planned, notes=list(notes or []), status=status,
+             subjects=subjects, lessons=lessons, students=students, room_cap=cap, room_parts=parts, planned=planned, notes=list(notes or []), status=status,
              generated=datetime.date.today().strftime("%d %b %Y"))
     m["setup"] = spec   # kept in the timetable database, so that file alone rebuilds every output
     m["class_ix"] = {c["name"]: c for c in classes}; m["teacher_ix"] = {t["name"]: t for t in teachers}; m["room_ix"] = {r["name"]: r for r in rooms}
@@ -248,8 +259,8 @@ def model_from_files(setup_path, timetable_path, spec=None, edit=None):
             if lid is None: lid = ids.setdefault((dix[day.lower()], p, n, block or f"{group}|{g(row, 'Classes')}"), len(ids) + 1)
             out.append(dict(id=int(lid), d=dix[day.lower()], p=p, n=n, level=str(g(row, "Level") or ""), block=block,
                             classes=_split_list(g(row, "Classes")), subject=subject, group=group, teachers=_split_list(g(row, "Teachers")),
-                            room=str(g(row, "Room") or ""), ext=str(g(row, "After school") or "").strip().lower() in ("yes", "y", "true", "1", "x"),
-                            rain=str(g(row, "Rain room") or "")))
+                            room=clean_name(g(row, "Room")), ext=str(g(row, "After school") or "").strip().lower() in ("yes", "y", "true", "1", "x"),
+                            rain=", ".join(clean_name(h) for h in _split_list(g(row, "Rain room")))))   # room names as the setup's (cleaned): "Lab 1 " is Lab 1
         notes, status = (list(db[2]), db[3]) if db else ([], None)
         report = list(db[6]) if db else []
         if wb and "Rule report" in wb.sheetnames: report = rule_report_rows(wb["Rule report"].iter_rows(values_only=True))
@@ -305,15 +316,18 @@ def check_model(m):
     ok_days = m.get("double") or ()   # Settings 'Teachers may take two lessons at once on': said, and not a mistake, on those days
     probs += [f"Teacher double-booked: {t} on {w}." for t, d, w, _ in spans({k for k, v in tb.items() if len(v) > 1 and k[1] not in ok_days})]
     probs += [f"Teacher in two lessons (allowed that day): {t} on {w}." for t, d, w, _ in spans({k for k, v in tb.items() if len(v) > 1 and k[1] in ok_days})]
-    rb = collections.Counter()
+    rb = collections.Counter(); parts = m.get("room_parts") or {}   # a lesson in a combined venue stands in each of its single rooms
     for x in L:
         if x["room"] and x["room"] != "TBC":
-            for q in range(x["p"], x["p"] + x["n"]): rb[(x["room"], x["d"], q)] += 1
+            for sr in single_rooms(x["room"], parts):
+                for q in range(x["p"], x["p"] + x["n"]): rb[(sr, x["d"], q)] += 1
     for r, d, w, a in spans({k for k, n in rb.items() if n > m["room_cap"].get(k[0], 1)}):
-        text = f"Room over capacity: {r} on {w} (holds {m['room_cap'].get(r, 1)} at once)."; probs.append(text)
-        x = next((x for x in L if x["room"] == r and x["d"] == d and x["p"] <= a < x["p"] + x["n"] and x["classes"]), None)   # the first lesson in that room in the line's first period
+        stands = [x for x in L if x["room"] and x["room"] != "TBC" and r in single_rooms(x["room"], parts) and x["d"] == d and x["p"] <= a < x["p"] + x["n"]]   # the lessons standing on that single room in the line's first period
+        via = next((x["room"] for x in stands if x["room"] != r), None)
+        text = f"Room over capacity: {r} on {w} (holds {m['room_cap'].get(r, 1)} at once" + (f"; in use as part of {via})." if via else ")."); probs.append(text)
+        x = next((x for x in stands if x["classes"]), None)
         if x: place.setdefault(text, []).append(dict(cls=x["classes"][0], day=days[d], period=x["p"], id=x["id"], row=x["group"]))
-    rain = {(h, x["d"], q) for x in L for h in _split_list(x.get("rain")) if h != "TBC" for q in range(x["p"], x["p"] + x["n"])}   # home rooms kept for PE in rain
+    rain = {(s, x["d"], q) for x in L for h in _split_list(x.get("rain")) if h != "TBC" for s in single_rooms(h, parts) for q in range(x["p"], x["p"] + x["n"])}   # home rooms kept for PE in rain (a combined venue: each of its rooms)
     probs += [f"Rain room in use: {r} on {w} is the home room of a class at PE, but a lesson is in it." for r, d, w, _ in spans({k for k in rain if rb[k]})][:30]
     probs += [f"No rain room: {', '.join(x['classes'])} {x['subject']} on {m['days'][x['d']]} period {x['p']} (the home room is in use)." for x in L if x.get("rain") == "TBC"][:30]
     occ = collections.defaultdict(lambda: collections.defaultdict(set)); whole = collections.defaultdict(set)
@@ -510,13 +524,13 @@ def teacher_view(m, t):
                 legend=legend, legend_title="Teaching", group=info["dept"] or "Other")
 
 def room_view(m, r):
-    info = m["room_ix"][r]; rows = [x for x in m["lessons"] if x["room"] == r]
+    info = m["room_ix"][r]; parts = m.get("room_parts") or {}; rows = [x for x in m["lessons"] if x["room"] == r or r in single_rooms(x["room"], parts)]   # a lesson in a combined venue is in each of its rooms
     cells, ent, used = [], collections.OrderedDict(), set()
     for lid, xs in _by_id(rows).items():
         x0 = xs[0]; used |= {(x0["d"], q) for q in range(x0["p"], x0["p"] + x0["n"])}
         who = ", ".join(dict.fromkeys(x["group"] if x["group"] != ENTIRE else ", ".join(x["classes"]) for x in xs))
         cells.append(dict(d=x0["d"], p=x0["p"], n=x0["n"], title=" + ".join(dict.fromkeys(abbrev(x["subject"]) for x in xs)),
-                          lines=[who, _tshort(m, list(dict.fromkeys(t for x in xs for t in x["teachers"])))], color=_color(m, x0["subject"]),
+                          lines=[who, _tshort(m, list(dict.fromkeys(t for x in xs for t in x["teachers"])))] + ([f"with {', '.join(o for o in parts[x0['room']] if o != r)}, as {x0['room']}"] if x0["room"] != r else []), color=_color(m, x0["subject"]),
                           ext=any(x["ext"] for x in xs), id=lid))
         for x in xs:
             k = (x["subject"], x["group"] if x["group"] != ENTIRE else ", ".join(x["classes"]))
@@ -528,7 +542,8 @@ def room_view(m, r):
     plain = f"{info['kind'].capitalize()}" + (f" · holds {info['capacity']}" if info["capacity"] else "")
     eq, cf = ", ".join(info.get("equipment") or []), info.get("configuration") or ""   # read with .get: a model published before this has neither
     more = " · ".join(x for x in (f"Equipment: {eq}" if eq else "", f"Configuration: {cf}" if cf else "") if x)
-    return dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=plain + (f" · {more}" if more else ""), pdf_subtitle=plain, extra_line=more,
+    made = f" · made of {' + '.join(info['parts'])}" if info.get("parts") else ""   # a combined venue says which rooms it is made of
+    return dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=plain + (f" · {more}" if more else "") + made, pdf_subtitle=plain + made, extra_line=more,
                 stats=stats, codes=codes, cells=cells, legend=legend, legend_title="Used by", group=info["kind"])
 
 def student_rows(m, cls, groups):
@@ -560,7 +575,7 @@ def all_views(m, kind):
         for t in sorted(m["teachers"], key=lambda t: (str(t["dept"]).lower(), t["name"].lower())):
             if t["name"] in busy: yield teacher_view(m, t["name"])
     elif kind == "rooms":
-        busy = {x["room"] for x in m["lessons"]}
+        parts = m.get("room_parts") or {}; busy = {r for x in m["lessons"] for r in [x["room"], *single_rooms(x["room"], parts)]}   # a room of a combined venue has a page though no lesson names it
         for r in m["rooms"]:
             if r["name"] in busy: yield room_view(m, r["name"])
     elif kind == "students":
@@ -981,7 +996,7 @@ def html_data(m, view="full", student_id=None, app=None):
     d = dict(school=m["school"], generated=m["generated"], days=m["days"], NP=m["NP"], times=m["times"], grid=m["grid"], cgrid=m["cgrid"], levels=m["levels"],
              classes=[[c["name"], c["level"], c["size"], c["home"], c.get("parents") or []] for c in m["classes"]], parents_name=m.get("parents_name") or "Form teachers",
              teachers=[[t["name"], t["short"], t["dept"], t["allowance"]] for t in m["teachers"]],
-             rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1), r.get("equipment") or [], r.get("configuration") or ""] for r in m["rooms"]],   # equipment and configuration: notes only
+             rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1), r.get("equipment") or [], r.get("configuration") or "", r.get("parts") or []] for r in m["rooms"]],   # equipment and configuration: notes only
              subjects={k: [v["short"], v["color"], v.get("dept") or ""] for k, v in m["subjects"].items()}, palette=pal, ext=list(EXT),   # the department: the Lessons view's filter
              lessons=[[x["id"], x["d"], x["p"], x["n"], x["level"], x["block"], x["classes"], x["subject"], x["group"], x["teachers"], x["room"], int(x["ext"])] + ([x["rain"]] if x.get("rain") else [])
                       for x in m["lessons"]],

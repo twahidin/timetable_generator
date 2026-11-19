@@ -1243,8 +1243,8 @@ def test_a_published_room_page_shows_its_equipment():
         if str(a_) not in vt["pdf_subtitle"]: assert f"{a_} {b_}" in head, (a_, b_, head)
     # the published web page: its data rows, an older model, and the served page
     rows = {r[0]: r for r in export.html_data(m)["rooms"]}
-    assert rows[used][3:] == [["30 keyboards", "2 amps"], "cluster seating"] and rows[other][3:] == [[], ""], rows[used]
-    assert all(r[3:] == [[], ""] for r in export.html_data(old)["rooms"])
+    assert rows[used][3:] == [["30 keyboards", "2 amps"], "cluster seating", []] and rows[other][3:] == [[], "", []], rows[used]
+    assert all(r[3:] == [[], "", []] for r in export.html_data(old)["rooms"])
     page = c.get("/timetable").get_data(as_text=True); assert "30 keyboards" in page and "Equipment: " in page
     xs = cp.deepcopy(m); next(r for r in xs["rooms"] if r["name"] == used)["equipment"] = ["<b>x</b>"]
     html = export.render_html(xs)                                    # the item travels as JSON in a script, its "</" escaped: no raw tag anywhere in the page text

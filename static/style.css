@@ -335,6 +335,7 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .vflabel{flex:0 0 84px;font-size:12.5px;font-weight:600;color:var(--muted);padding-top:6px}
 .vtiles{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0}
 .vtile{display:flex;flex-direction:column;gap:2px;align-items:flex-start;text-align:left;width:150px;padding:6px 8px;border-radius:8px;background:var(--panel);font-size:12.5px}
+.vtile.vcombo{border:2px dashed var(--vk,#7b8496)}   /* a combined venue: a dashed border in its kind's colour */
 .vtile:hover{border-color:var(--accent)}
 .vtile.caution{background:#fff7e6}.vtile.bad{background:var(--warn-bg)}
 .vtile .vname{font-weight:600;font-size:13px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}

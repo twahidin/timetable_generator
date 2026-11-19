@@ -221,6 +221,7 @@ async function openServer(srv, step) {
   await useKind(srv.spec);
   unpick(); SYNC.held = null; SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
   S.spec = Sync.clone(srv.spec); LIST_KEYS.forEach(k => S.spec[k] = S.spec[k] || []); defaultRoles(S.spec);
+  VenueView.syncKinds(S.spec);   // a combined venue's kind follows its rooms (a workbook may hold another): written with the next change
   if (step != null) S.step = step;
   ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
 }
@@ -326,7 +327,7 @@ async function practice(kind) {
     await holdSync(async () => {
       await useKind(spec);   // may fail: nothing has changed yet, the school's setup stays open
       S.practice = true; SYNC.held = null; unpick();
-      Sync.ensureIds(spec); LIST_KEYS.forEach(k => spec[k] = spec[k] || []); defaultRoles(spec); S.spec = spec;
+      Sync.ensureIds(spec); LIST_KEYS.forEach(k => spec[k] = spec[k] || []); defaultRoles(spec); VenueView.syncKinds(spec); S.spec = spec;
       S.step = 1; ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
     });
   } catch (e) {
@@ -703,6 +704,7 @@ function issues() {
   // rooms: 'For' names a subject, department or level; each group fits some room it may use; a home room seats its class
   const forOk = new Set(forNames());
   S.spec.venues.forEach((v, i) => { const bad = (v.only_for || []).filter(n => !forOk.has(n)); if (bad.length) add("venues", i, `${v.room}: For ${bad.join(", ")}: not a subject, department or level.`); });
+  VenueView.problems(S.spec).forEach(p => add("venues", p.vi, p.text, p.hard));   // combined venues: the same words as the server's check
   S.spec.lessons.forEach((x, i) => {
     if (!x.subject) return;
     const s = subj(x.subject) || {}, kind = s.room_kind || "classroom";
@@ -805,7 +807,7 @@ function unitsOf(rows, info) {   // what the solver places as one: a band, a gro
 }
 function ruleProblems(info) {
   const out = [], RT = S.meta.rule_types || [], sd = S.spec.subjects.filter(s => s.subject).map(s => [s.subject, s.dept]);
-  const roomKind = Object.fromEntries(S.spec.venues.filter(v => v.room).map(v => [v.room, v.kind || "classroom"])), kindOf = n => (subj(n) || {}).room_kind || "classroom";
+  const roomKind = Object.fromEntries(S.spec.venues.filter(v => v && VenueView.cleanName(v.room)).map(v => [VenueView.cleanName(v.room), v.kind || "classroom"])), kindOf = n => (subj(n) || {}).room_kind || "classroom";
   const NP = Number(sc().periods_per_day), days = dayNames(), fixedAt = new Map();   // start -> the units fixed to start there, and the rules that do it
   S.spec.rules.forEach((r, i) => {
     const say = m => out.push([i, m, false]), rt = RT.find(x => x.rule === r.rule);
@@ -813,7 +815,7 @@ function ruleProblems(info) {
     const can = scopesOf(rt), scope = String(r.scope || "").toLowerCase();
     if (!can.includes(r.scope)) { say(`${r.rule} cannot apply to ${r.scope ? `a ${scope}` : "nothing"}; it applies to ${can.join(", ")}. This row is skipped.`); return; }
     if (!r.target) { say(`Pick the ${scope}: without one this row matches nothing.`); return; }
-    if (!targetOptions(r.scope).includes(r.target)) { say(`${r.target} is not a${/^[aeiou]/.test(scope) ? "n" : ""} ${scope} on the setup, so this row matches nothing.${r.scope === "Level" ? " For every level, apply it to School." : ""}`); return; }
+    if (r.scope === "Room" ? !rooms().some(n => VenueView.cleanName(n) === VenueView.cleanName(r.target)) : !targetOptions(r.scope).includes(r.target)) { say(`${r.target} is not a${/^[aeiou]/.test(scope) ? "n" : ""} ${scope} on the setup, so this row matches nothing.${r.scope === "Level" ? " For every level, apply it to School." : ""}`); return; }
     if (r.rule === "In words") { if (!String(r.text || "").trim()) say("Write the rule in words: without them this row says nothing."); return; }
     if (r.rule === "Only these subjects") {
       const names = namesList(r.subject), bad = names.filter(n => !sd.some(([s, d]) => subjectTest(n)(s, d)));
@@ -831,7 +833,7 @@ function ruleProblems(info) {
     if (rt.needs_number && !r.number) say("Give the Number.");
     if (!["Must", "Prefer"].includes(r.strength || "Must")) say(`Must / Prefer is '${r.strength}': read as Prefer. Pick Must or Prefer.`);
     if (r.rule === "Only in venues") {
-      const vs = namesList(r.venues), unknown = vs.filter(v => !(v in roomKind));
+      const vs = namesList(r.venues).map(VenueView.cleanName), unknown = vs.filter(v => !Object.prototype.hasOwnProperty.call(roomKind, v));
       if (!vs.length) { say("Pick the rooms under Venues. Without them this row is skipped."); return; }
       if (unknown.length) say(`${unknown.join(", ")}: not on step 1 (Venues).`);
     }
@@ -839,7 +841,7 @@ function ruleProblems(info) {
     let rows = ruleRows(r, info, r.rule === "Only these subjects");
     if (r.rule === "Only in venues") {
       const sj = r.scope === "Subject" ? r.target : r.subject; rows = rows.filter(([x]) => !sj || x.subject === sj);
-      const V = namesList(r.venues).filter(v => v in roomKind), kinds = [...new Set(rows.map(([x]) => kindOf(x.subject)))];
+      const V = namesList(r.venues).map(VenueView.cleanName).filter(v => Object.prototype.hasOwnProperty.call(roomKind, v)), kinds = [...new Set(rows.map(([x]) => kindOf(x.subject)))];
       if (rows.length && V.length && !V.some(v => kinds.includes(roomKind[v])))
         say(`None of ${V.join(", ")} is a room these lessons may use (they need a ${kinds.join(" or ")} room on step 1), so ${(r.strength || "Must") === "Must" ? "they cannot run in those periods" : "this row changes nothing"}.`);
     }
@@ -1016,13 +1018,27 @@ function vvMove() {   // the ticked rooms go to the block and floor chosen on th
   ticks.clear(); Object.assign(mv, { block, floor, nb: false, nf: false, bt: "", ft: "" }); save(); render();
   toast(`Moved ${n} room${n === 1 ? "" : "s"} to ${block || "No block yet"}, ${vvFloorName(floor)}. Undo, at the top, takes it back.`);
 }
+const vvSingles = (kind, vi) => [...new Set(S.spec.venues.filter((v, i) => v && i !== vi && !(Array.isArray(v.made_of) && v.made_of.length) && (kind === null || (v.kind || "classroom") === kind))
+  .map(v => VenueView.cleanName(v.room)).filter(Boolean))];   // the ordinary rooms (of a kind), for a Made of box's list
+function vvCombine() {   // the ticked rooms make one new combined venue (the rooms stay as they are): one save, one Undo; it opens at once
+  if (locked("venues")) return;
+  const vis = S.spec.venues.map((v, i) => [v, i]).filter(([v]) => v && vvTicks().has(v._id)).map(([, i]) => i), c = VenueView.canCombine(S.spec, vis);
+  if (!c.ok) { toast(c.why); return; }
+  const vi = VenueView.combine(S.spec, vis), name = S.spec.venues[vi].room, suggested = VenueView.suggestName(S.spec.venues[vi].made_of);
+  vvTicks().clear(); vvOpen(vi); save(); render();
+  const o = document.getElementById(`venues-${vi}`); if (o) o.scrollIntoView({ block: "center" });
+  toast(name !== suggested   // the suggested name is already a room: often the old single room for these
+    ? `Combined into ${name}. ${suggested} is already a room: if that is the old single room for these, remove it or type the rooms into its Made of box instead. Undo, at the top, takes this back.`
+    : `Combined into ${name}. Its rooms stay as they are. Undo, at the top, takes it back.`);
+}
 const vvResolve = () => heldResolve(VV, S.spec.venues);
 try { const vv = localStorage.getItem(VENUEVIEW); if (["blocks", "table"].includes(vv)) VV.view = vv; } catch (e) { }
 function venuesTable() {   // today's table, and two notes at its end
-  const { out, crit } = issues();
-  return `<div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Block</th><th>Floor / level</th><th>Home room of</th><th>For</th><th>Note</th><th>Equipment</th><th>Configuration</th><th></th></tr>
-      ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${rowCls(out, crit, "venues", i)}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.only_for" list="forNames" value="${esc((v.only_for || []).join(", "))}" placeholder="anyone"></td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.equipment" value="${esc((Array.isArray(v.equipment) ? v.equipment : []).join(", "))}" placeholder="none"></td><td style="min-width:150px">${inp(`spec.venues.${i}.configuration`, v.configuration)}</td><td>${delBtn("venues", i)}</td></tr>`).join("")}
-      </table></div><datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div>`;
+  const { out, crit } = issues(), CB = new Set();   // the combined venues: their Kind is their rooms' kind, as text
+  VenueView.blocks(S.spec).forEach(b => b.floors.forEach(f => f.rooms.forEach(r => { if (r.made_of.length) CB.add(r.vi); })));
+  return `<div class="tablewrap"><table><tr><th>Room</th><th>Kind</th><th>Capacity</th><th>Block</th><th>Floor / level</th><th>Home room of</th><th>For</th><th>Note</th><th>Equipment</th><th>Configuration</th><th>Made of</th><th></th></tr>
+      ${S.spec.venues.map((v, i) => `<tr id="venues-${i}" class="${rowCls(out, crit, "venues", i)}"><td>${inp(`spec.venues.${i}.room`, v.room)}</td><td>${CB.has(i) ? esc(VenueView.roomsKind(S.spec, i) || "its rooms are of different kinds") : sel(`spec.venues.${i}.kind`, v.kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.venues.${i}.capacity`, v.capacity, "number")}</td><td>${inp(`spec.venues.${i}.building`, v.building)}</td><td class="num">${inp(`spec.venues.${i}.floor`, v.floor)}</td><td class="calc">${esc(S.spec.classes.filter(c => c.home_room === v.room).map(c => c.class).join(", "))}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.only_for" list="forNames" value="${esc((v.only_for || []).join(", "))}" placeholder="anyone"></td><td>${inp(`spec.venues.${i}.note`, v.note)}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.equipment" value="${esc((Array.isArray(v.equipment) ? v.equipment : []).join(", "))}" placeholder="none"></td><td style="min-width:150px">${inp(`spec.venues.${i}.configuration`, v.configuration)}</td><td style="min-width:170px"><input data-names="spec.venues.${i}.made_of" list="roomNames" value="${esc((Array.isArray(v.made_of) ? v.made_of : []).join(", "))}" placeholder=""></td><td>${delBtn("venues", i)}</td></tr>`).join("")}
+      </table></div><datalist id="roomNames">${vvSingles(null, -1).map(n => `<option value="${esc(n)}">`).join("")}</datalist><datalist id="forNames">${forNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist><div class="row" style="margin-top:10px"><button data-add="venues">+ Add room</button></div>`;
 }
 /* the kinds the app ships with: a fixed colour and a short mark each; any other kind is neutral */
 const VKINDS = { "classroom": ["CR", "#2563eb"], "lab": ["LB", "#7c3aed"], "science room": ["SC", "#0e7490"], "computer lab": ["CL", "#0369a1"], "art room": ["AR", "#c2410c"], "d&t studio": ["DT", "#a16207"], "food lab": ["FL", "#be185d"], "music room": ["MU", "#9333ea"], "pe venue": ["PE", "#15803d"], "hall": ["HL", "#b45309"], "special room": ["SP", "#475569"] };
@@ -1031,16 +1047,18 @@ const vkindMark = k => { const [m, c] = vkindOf(k); return `<i class="vmark" sty
 function venuesBlocks() {   // the rooms by block and floor; a click on a tile opens the room to change it
   const { out, crit } = issues();
   Sync.ensureIds(S.spec); vvResolve(); if (VV.open !== null && !S.spec.venues[VV.open]) vvOpen(null);
-  const bl = VenueView.blocks(S.spec), P = VenueView.places(S.spec), ticks = vvTicks(), mv = vvMv(), nT = ticks.size;
+  const bl = VenueView.blocks(S.spec), P = VenueView.places(S.spec), VM = {}, ticks = vvTicks(), mv = vvMv(), nT = ticks.size;
+  bl.forEach(b => b.floors.forEach(f => f.rooms.forEach(r => { VM[r.vi] = r.made_of; })));   // each row's rooms when it is a combined venue
   if (!mv.nb && mv.block !== "" && !P.some(b => b.block === mv.block)) mv.block = "";   // a block that is gone is no longer chosen
   const mvFloors = mv.nb || mv.block === "" ? [] : (P.find(b => b.block === mv.block) || { floors: [] }).floors;
   if (!mv.nf && mv.floor !== "" && !mvFloors.includes(mv.floor)) mv.floor = "";
+  const tvis = S.spec.venues.map((v, i) => [v, i]).filter(([v]) => v && ticks.has(v._id)).map(([, i]) => i), cc = nT ? VenueView.canCombine(S.spec, tvis) : null;
   const bar = nT ? `<div class="row bulk vmovebar"><b>${nT} room${nT === 1 ? "" : "s"} ticked.</b><span>Move to</span>
       <label>Block ${mv.nb ? `<input id="vvMvBlock" value="${esc(mv.bt)}" placeholder="the new block's name" autocomplete="off"><button class="small" data-vmvpick="block">Pick from the list</button>`
         : `<select id="vvMvBlockSel">${opt("", mv.block, "No block yet")}${P.map(b => opt(b.block, mv.block)).join("")}<option value="${VNEW}">New block…</option></select>`}</label>
       <label>Floor ${mv.nf ? `<input id="vvMvFloor" value="${esc(mv.ft)}" placeholder="1, 2, G…" autocomplete="off" style="width:110px">${mv.nb ? "" : `<button class="small" data-vmvpick="floor">Pick from the list</button>`}`
         : `<select id="vvMvFloorSel">${opt("", mv.floor, "No floor yet")}${mvFloors.map(f => opt(f, mv.floor, vvFloorName(f))).join("")}<option value="${VNEW}">New floor…</option></select>`}</label>
-      <button class="primary" data-vmove="1">Move</button><button class="small" data-vuntick="1">Untick all</button></div>`
+      <button class="primary" data-vmove="1">Move</button><button data-vcombine="1" ${cc.ok ? "" : "disabled"}>Combine</button>${cc.ok ? "" : `<span class="muted small">${esc(cc.why)}</span>`}<button class="small" data-vuntick="1">Untick all</button></div>`
     : `<div class="row bulk vmovebar idle">${locked("venues") ? "" : `<span class="muted small">Tick rooms to move them to a block and a floor together.</span>`}</div>`;   // the same height as the bar, so the first tick does not push the rooms down
   const add = `<div class="row vblockbar">${VV.draft && VV.draft.what === "block"
     ? `<label>New block's name <input id="vvBlockName" value="${esc(VV.draft.text || "")}" autocomplete="off"></label> <button data-vblockadd="1">Add</button> <button data-vdraftx="1">Cancel</button><span class="muted small">It starts with one room, on floor 1.</span>`
@@ -1053,7 +1071,8 @@ function venuesBlocks() {   // the rooms by block and floor; a click on a tile o
     const notes = r.equipment.length || r.configuration.trim() ? `<span class="vflag" title="${esc([r.equipment.length ? "Equipment: " + r.equipment.join(", ") : "", r.configuration.trim() ? "Configuration: " + r.configuration.trim() : ""].filter(Boolean).join(". "))}">+ notes</span>` : "";
     const open = VV.open === r.vi;   // the open room's own box carries the row's id, so a message can scroll to it
     const id = (S.spec.venues[r.vi] || {})._id, tk = ticks.has(id);   // the tick box sits on the tile's corner; the tile itself still opens the room
-    return `<span class="vtw${tk ? " ticked" : ""}"><input type="checkbox" class="vtick" id="vtick-${esc(id)}" data-vtick="${esc(id)}" ${tk ? "checked" : ""} aria-label="Tick ${esc(r.room || "this room")} to move it"><button class="vtile ${open ? "on " : ""}${rowCls(out, crit, "venues", r.vi)}" data-vroom="${r.vi}"${open ? ' aria-expanded="true"' : ' aria-expanded="false"'}${open ? "" : ` id="venues-${r.vi}"`}><span class="vname">${r.room ? esc(r.room) : "(no name yet)"}${notes}</span><span class="vkind">${vkindMark(r.kind)} ${esc(r.kind || "no kind")}${r.capacity != null ? ` · ${esc(r.capacity)} seats` : ""}</span>${line ? `<span class="vnote">${esc(line)}</span>` : ""}</button></span>`;
+    const combo = r.made_of.length ? ` vcombo" style="--vk:${vkindOf(r.kind)[1]}` : "";   // a combined venue: a dashed border in its kind's colour, and what it is made of
+    return `<span class="vtw${tk ? " ticked" : ""}"><input type="checkbox" class="vtick" id="vtick-${esc(id)}" data-vtick="${esc(id)}" ${tk ? "checked" : ""} aria-label="Tick ${esc(r.room || "this room")} to move it"><button class="vtile ${open ? "on " : ""}${rowCls(out, crit, "venues", r.vi)}${combo}" data-vroom="${r.vi}"${open ? ' aria-expanded="true"' : ' aria-expanded="false"'}${open ? "" : ` id="venues-${r.vi}"`}><span class="vname">${r.room ? esc(r.room) : "(no name yet)"}${notes}</span><span class="vkind">${vkindMark(r.kind)} ${esc(r.kind || "no kind")}${r.capacity != null ? ` · ${esc(r.capacity)} seats` : ""}</span>${r.made_of.length ? `<span class="vnote">made of ${esc(r.made_of.join(" + "))}</span>` : ""}${line ? `<span class="vnote">${esc(line)}</span>` : ""}</button></span>`;
   };
   const openRoom = vi => {
     const v = S.spec.venues[vi], p = f => `spec.venues.${vi}.${f}`, msgs = out.venues[vi] || [];
@@ -1064,15 +1083,19 @@ function venuesBlocks() {   // the rooms by block and floor; a click on a tile o
       : `<select data-vplace="${vi}|building">${opt("", curB, "No block yet")}${P.map(b => opt(b.block, curB)).join("")}<option value="${VNEW}">New block…</option></select>`;
     const floorBox = VV.typing === "floor" ? typeBox("floor", curF, "1, 2, G…")
       : `<select data-vplace="${vi}|floor">${opt("", curF, "No floor yet")}${fl.map(f => opt(f, curF, vvFloorName(f))).join("")}${curF && !fl.includes(curF) ? opt(curF, curF, vvFloorName(curF)) : ""}<option value="${VNEW}">New floor…</option></select>`;
-    const kindBox = `<select id="vvKind" data-vkind="${vi}">${opt("", cur, "")}${kinds.map(k => opt(k, cur)).join("")}${cur && !kinds.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}<option value="${VNEWKIND}">New kind…</option></select>`;
+    const combo = (VM[vi] || []).length > 0;   // a sound combined venue: its kind is its rooms' kind
+    const made = Array.isArray(v.made_of) ? v.made_of : [], madeBox = combo || made.length ? `<label class="vwide">Made of <input data-names="${p("made_of")}" list="roomNames" value="${esc(made.join(", "))}" placeholder="two or more rooms"></label>
+        <datalist id="roomNames">${vvSingles(v.kind || "classroom", vi).map(n => `<option value="${esc(n)}">`).join("")}</datalist>` : "";
+    const rk = combo ? VenueView.roomsKind(S.spec, vi) : null;   // a combined venue's kind follows its rooms: shown, never picked
+    const kindBox = combo ? (rk === null ? `<span>its rooms are of different kinds</span>` : `<span>${vkindMark(rk)} ${esc(rk)} <span class="small">· the kind of its rooms</span></span>`) : `<select id="vvKind" data-vkind="${vi}">${opt("", cur, "")}${kinds.map(k => opt(k, cur)).join("")}${cur && !kinds.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}<option value="${VNEWKIND}">New kind…</option></select>`;
     const draft = VV.draft && VV.draft.what === "kind"
       ? `<div class="row vdraft"><label>New kind's name <input id="vvKindName" value="${esc(VV.draft.text || "")}" autocomplete="off"></label> <button data-vkindadd="${vi}">Add</button> <button data-vdraftx="1">Cancel</button></div>` : "";
     return `<div class="vopen ${rowCls(out, crit, "venues", vi)}" id="venues-${vi}" data-vopen="${vi}">
-      <div class="vfields"><label>Room ${inp(p("room"), v.room)}</label><label>Kind ${kindBox}</label><label>Capacity ${inp(p("capacity"), v.capacity, "number")}</label>
+      <div class="vfields"><label>Room ${inp(p("room"), v.room)}</label><label>Kind ${kindBox}</label><label>${combo ? "Seats" : "Capacity"} ${inp(p("capacity"), v.capacity, "number")}</label>
         <label>Block ${blockBox}</label><label>Floor / level ${floorBox}</label>
         <label>For <input data-names="${p("only_for")}" list="forNames" value="${esc((Array.isArray(v.only_for) ? v.only_for : []).join(", "))}" placeholder="anyone"></label>
         <label class="vwide">Equipment <input data-names="${p("equipment")}" value="${esc((Array.isArray(v.equipment) ? v.equipment : []).join(", "))}" placeholder="none"></label>
-        <label class="vwide">Configuration ${inp(p("configuration"), v.configuration)}</label><label class="vwide">Note ${inp(p("note"), v.note)}</label></div>${draft}
+        <label class="vwide">Configuration ${inp(p("configuration"), v.configuration)}</label><label class="vwide">Note ${inp(p("note"), v.note)}</label>${madeBox}</div>${draft}
       ${msgs.length ? `<div class="vmsgs">${msgs.map(m => `<div>${esc(m)}</div>`).join("")}</div>` : ""}
       <div class="row" style="margin-top:8px">${delBtn("venues", vi)} <button class="small" data-vclose="1">Close</button></div></div>`;
   };
@@ -1103,7 +1126,7 @@ function vvAddKind(vi) {   // the name goes at the end of the school's list (if 
   if (!name || !v) { if (el) el.focus(); return; }
   const list = sc().room_kinds || [], have = list.find(k => String(k).toLowerCase() === name.toLowerCase());
   if (have === undefined) sc().room_kinds = [...list, name];
-  v.kind = have === undefined ? name : have; VV.draft = null; save(); render();
+  v.kind = have === undefined ? name : have; VV.draft = null; VenueView.syncKinds(S.spec); save(); render();
 }
 /* ---------------- step 2: the Cards, Bands and Table views of the classes */
 const CLASSVIEW = "ttsetup.view.classes";
@@ -1742,6 +1765,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.vclose !== undefined) { const vi = VV.open; vvOpen(null); render(); const t = vi !== null && document.querySelector(`[data-vroom="${vi}"]`); if (t) t.focus({ preventScroll: true }); return; }
   if (b.dataset.vdraftx !== undefined) { VV.draft = null; render(); return; }
   if (b.dataset.vmove !== undefined) { vvMove(); return; }
+  if (b.dataset.vcombine !== undefined) { vvCombine(); return; }
   if (b.dataset.vuntick !== undefined) { vvTicks().clear(); render(); return; }
   if (b.dataset.vtickall !== undefined) { const t = vvTicks(), ids = b.dataset.vtickall.split(",").map(i => (S.spec.venues[Number(i)] || {})._id).filter(Boolean), all = ids.every(id => t.has(id)); ids.forEach(id => all ? t.delete(id) : t.add(id)); render(); return; }
   if (b.dataset.vmvpick !== undefined) { const mv = vvMv(); if (b.dataset.vmvpick === "block") { mv.nb = false; mv.nf = false; } else mv.nf = false; render(); return; }
@@ -1760,7 +1784,8 @@ document.addEventListener("click", async e => {
   if (b.dataset.btclear !== undefined) { M.bt = null; render(); return; }
   if (b.dataset.cadd) { addRow("classes"); cvOpen(S.spec.classes.length - 1); render(); const o = document.getElementById(`classes-${CV.open}`); if (o) o.scrollIntoView({ block: "center" }); return; }
   if (b.dataset.add) { addRow(b.dataset.add, b.dataset.scope); return; }
-  if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); if (k === "teachers" && TV.open !== null) { if (TV.open === Number(i)) tkOpen(null); else if (TV.open > Number(i) && !TV.openId) TV.open--; } S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "venues") vvOpen(null); if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
+  if (b.dataset.del) { const [k, i] = b.dataset.del.split("."); if (k === "teachers" && TV.open !== null) { if (TV.open === Number(i)) tkOpen(null); else if (TV.open > Number(i) && !TV.openId) TV.open--; } if (k === "venues") { const gone = VenueView.cleanName((S.spec.venues[Number(i)] || {}).room); if (gone && !S.spec.venues.some((v, j) => j !== Number(i) && v && VenueView.cleanName(v.room) === gone)) VenueView.dropRoom(S.spec, gone); }   // it leaves any combined venue made of it
+    S.spec[k].splice(Number(i), 1); if (k === "classes") cvOpen(null); if (k === "venues") { vvOpen(null); VenueView.syncKinds(S.spec); } if (k === "rules") Choices.prune(S.spec); unpick(); save(); render(); return; }   // a choice on a deleted rule goes with it
   if (b.dataset.cmove) { const [i, d] = b.dataset.cmove.split("|").map(Number); if (!Choices.move(S.spec, i, d)) return; save(); render(); const nb = $(`[data-cmove="${i}|${d}"]`); if (nb && !nb.disabled) nb.focus({ preventScroll: true }); return; }
   if (b.dataset.cfopen) { Object.assign(CF, { open: true, kind: "setting", key: "", rule: "", level: "", second: "", fallback: "", from: "", to: "" }); render(); return; }
   if (b.dataset.cfcancel) { CF.open = false; render(); return; }
@@ -1860,7 +1885,7 @@ document.addEventListener("change", async e => {
   if (el.id === "loadJson") { const f = el.files[0]; if (!f) return; el.value = ""; let spec = null; try { spec = JSON.parse(await f.text()); } catch (err) { }
     if (!spec || !spec.school) { toast("That file is not a progress file."); return; }
     try { await adopt(spec, "Progress loaded from the file and saved for the school.", "Loaded from a file"); } catch (err) { toast("Could not reach the server: " + err.message); } return; }
-  if (el.dataset.names) { setPath(el.dataset.names, el.value.split(",").map(t => t.trim()).filter(Boolean)); save(); render(); return; }
+  if (el.dataset.names) { setPath(el.dataset.names, el.value.split(",").map(t => t.trim()).filter(Boolean)); if (/^spec\.venues\.\d+\.made_of$/.test(el.dataset.names)) VenueView.syncKinds(S.spec); save(); render(); return; }
   if (el.dataset.list) { sc()[el.dataset.list] = el.value.split(",").map(s => s.trim()).filter(Boolean); if (el.dataset.list === "levels") ensureDays(); save(); render(); return; }
   if (el.id === "stuFile") { stuFile(el); return; }
   if (el.id === "tlFile") { tlFile(el); return; }
@@ -1920,7 +1945,7 @@ document.addEventListener("change", async e => {
   if (el.dataset.vkind !== undefined) {   // the open room's Kind box: a kind, or "New kind…" (a small box for its name)
     const v = S.spec.venues[Number(el.dataset.vkind)]; if (!v || locked("venues")) return;
     if (el.value === VNEWKIND) { VV.draft = { what: "kind", text: "" }; render(); const i = $("#vvKindName"); if (i) i.focus(); return; }
-    v.kind = el.value === "" ? null : el.value; save(); render(); return; }
+    v.kind = el.value === "" ? null : el.value; VenueView.syncKinds(S.spec); save(); render(); return; }
   if (el.dataset.sname !== undefined || el.dataset.sset !== undefined || el.dataset.stick !== undefined) {   // a box on a subject card (step 3)
     if (locked("subjects") || !el.closest("[data-scard]")) return;
     if (el.dataset.sname !== undefined) sjName(e); else if (el.dataset.sset !== undefined) sjSet(e); else sjTick(e);
@@ -1935,7 +1960,11 @@ document.addEventListener("change", async e => {
   if (/\.(from|to)$/.test(path) && v !== null) v = Number(v);
   if (/^spec\.school\.(weeks|periods_per_day|period_minutes|lesson_length)$/.test(path)) v = Number(v);
   if (/^spec\.choices\.\d+\.second$/.test(path) && v === null) v = "no limit";   // a number setting's second choice left blank
+  const vrn = /^spec\.venues\.(\d+)\.room$/.exec(path), vwas = vrn ? (S.spec.venues[Number(vrn[1])] || {}).room : null;
+  if (vrn && v !== null) v = VenueView.cleanName(v) || null;   // a room's name: runs of spaces made one, the ends trimmed
   setPath(path, v);
+  if (vrn && v && VenueView.cleanName(vwas)) VenueView.renameRoom(S.spec, vwas, v);   // a combined venue made of it follows the new name, in the same save
+  if (/^spec\.venues\.\d+\.(kind|room)$/.test(path)) VenueView.syncKinds(S.spec);   // a combined venue's kind follows its rooms
   if (tkp && !tkHead() && S.spec.teachers[Number(tkp[1])]) TeacherView.tidy(S.spec.teachers[Number(tkp[1])]);   // a home department now equal to the second takes the second off, in the same save
   const cfb = path.match(/^spec\.choices\.(\d+)\.fallback$/); if (cfb) Choices.setFallback(S.spec, Number(cfb[1]), v);
   const m = path.match(/^spec\.lessons\.(\d+)\.block$/);
@@ -2041,7 +2070,7 @@ function helper(k) {
     toast(`${n} room${n === 1 ? "" : "s"} added${r.skipped ? ` (${r.skipped} there already ${r.skipped === 1 ? "was" : "were"} left)` : ""}.${blocks ? ` ${n === 1 ? "It is" : "They are"} under No block yet, ticked: pick a block and a floor on the bar to place ${n === 1 ? "it" : "them"}.` : ""}`); return;
   }
   if (k === "classes") {
-    const lv = $("#hcLevel").value, size = Number($("#hcSize").value) || 38; const used = new Set(S.spec.classes.map(c => c.home_room)); const free = S.spec.venues.filter(v => (v.kind || "classroom") === "classroom" && !used.has(v.room)).map(v => v.room);
+    const lv = $("#hcLevel").value, size = Number($("#hcSize").value) || 38; const used = new Set(S.spec.classes.map(c => c.home_room)), VP = VenueView.parts(S.spec); const free = S.spec.venues.filter(v => (v.kind || "classroom") === "classroom" && !used.has(v.room) && !Object.prototype.hasOwnProperty.call(VP, VenueView.cleanName(v.room))).map(v => v.room);   // a combined venue is no home room
     $("#hcNames").value.split(",").map(s => s.trim()).filter(Boolean).forEach(n => S.spec.classes.push({ class: `${String(lv).slice(-1)}${n}`, level: lv, size, home_room: free.shift() || null }));
     $("#hcNames").value = "";   // added: the bar keeps its other boxes, not the names
   }
@@ -2748,10 +2777,10 @@ function openPop(anchor) {
       + (lost.length ? `<div class="gblock"><div class="muted small">Not on step 3 (untick to remove)</div><div class="opts wide">${lost.map(n => box(n, esc(n))).join("")}</div></div>` : "")
       + `<div class="row"><button class="small" data-popnone="1">None</button><button class="small primary" data-popdone="1">Done</button></div>`;
   } else if (anchor.dataset.pop === "rooms") {   // Only in venues: the rooms, by kind
-    const cur = namesList(getPath(path)), by = new Map();
-    S.spec.venues.filter(v => v.room).forEach(v => { const k = v.kind || "classroom"; if (!by.has(k)) by.set(k, []); by.get(k).push(v.room); });
-    const order = [...by.keys()].sort((a, b) => (a === "classroom") - (b === "classroom"));
-    pop.innerHTML = `<h3>Rooms they may use then</h3>` + order.map(k => `<div class="gblock"><div class="muted small">${esc(k)}</div><div class="opts">${by.get(k).map(x => `<label><input type="checkbox" value="${esc(x)}" ${cur.includes(x) ? "checked" : ""}>${esc(x)}</label>`).join("")}</div></div>`).join("")
+    const cur = namesList(getPath(path)).map(VenueView.cleanName), by = new Map(), seen = new Set(), VP = VenueView.parts(S.spec);   // each room once, by its clean name; a combined venue with its rooms
+    S.spec.venues.forEach(v => { const n = v && VenueView.cleanName(v.room); if (!n || seen.has(n)) return; seen.add(n); const k = v.kind || "classroom"; if (!by.has(k)) by.set(k, []); by.get(k).push(n); });
+    const order = [...by.keys()].sort((a, b) => (a === "classroom") - (b === "classroom")), label = x => Object.prototype.hasOwnProperty.call(VP, x) ? `${x} (${VP[x].join(" + ")})` : x;
+    pop.innerHTML = `<h3>Rooms they may use then</h3>` + order.map(k => `<div class="gblock"><div class="muted small">${esc(k)}</div><div class="opts">${by.get(k).map(x => `<label><input type="checkbox" value="${esc(x)}" ${cur.includes(x) ? "checked" : ""}>${esc(label(x))}</label>`).join("")}</div></div>`).join("")
       + `<div class="row"><button class="small" data-popnone="1">None</button><button class="small primary" data-popdone="1">Done</button></div>`;
   }
   pop.hidden = false;
@@ -3852,7 +3881,7 @@ function bdBusyFor(c, fix, pending) {   // whether the teacher or room a hand-ov
     mine = cards.filter(x => (x.rows || []).some(y => y.key === fix.key)); has = x => (x.rows || []).some(y => (y.teachers || []).some(t => add.includes(t)));
   } else {
     if (!fix.room) return false;
-    mine = [c]; has = x => (x.rows || []).some(y => y.room === fix.room);
+    mine = [c]; has = x => (x.rows || []).some(y => Board.roomsMeet(d.room_parts, y.room, fix.room));
   }
   const ids = new Set(mine.map(x => x.id));
   const placed = x => x.d !== null && x.d !== undefined;   // a lesson in the tray has no time, so it is with no one then

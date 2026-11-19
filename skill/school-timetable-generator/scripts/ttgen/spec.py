@@ -32,7 +32,7 @@ RULE_TYPES = [
     ("In words", "School, Level, Class, Subject, Room, Teacher", "N", "N", "A rule in plain words that the list cannot say. The timetable scripts do not enforce it: the agent honours a Must, tries a Prefer, and reports how each was met.", "Level · Sec 1 · No PE in the first period"),
 ]
 TYPED = "In words"             # a rule the agent honours and reports on; never enforced by the solver
-SKILL_VERSION = "2026-11.8"      # SKILL.md's version line and the one the workbook's README names
+SKILL_VERSION = "2026-11.9"      # SKILL.md's version line and the one the workbook's README names
 
 def teacher_depts(t):
     """A teacher row's departments, home first: the trimmed, non-empty, different ones of dept and dept2"""
@@ -77,6 +77,91 @@ def is_fixed_lesson(r):
     """a 'Fixed at' rule that belongs on Fixed lessons: a class, a group, or every class of a level or the school (with a
     subject; one without is flagged and skipped)"""
     return r.get("scope") in ("Class", "Group", "Level", "School")
+
+def clean_name(v):
+    """a name as typed, with runs of spaces made one and the ends trimmed"""
+    return " ".join(str(v if v is not None else "").split())
+
+def _made_of(v):
+    """the distinct cleaned room names a venue row is made of, in the order listed; blank ones dropped, and a made_of that
+    is not a list counts as empty (as the page's madeOf)"""
+    out, mo = [], v.get("made_of") if isinstance(v, dict) else None
+    for x in (mo if isinstance(mo, (list, tuple)) else []):
+        x = clean_name(x)
+        if x and x not in out: out.append(x)
+    return out
+
+def venue_parts(venues):
+    """{combined venue: its rooms} for each venue row that is a sound combined venue: made of at least two distinct rooms,
+    each another row's room, none of them a combined venue itself. Any other row is an ordinary room."""
+    made = {clean_name(v.get("room")): _made_of(v) for v in venues if clean_name(v.get("room"))}
+    out = {}
+    for name, rooms in made.items():
+        if len(rooms) >= 2 and all(r != name and r in made and not made[r] for r in rooms): out[name] = rooms
+    return out
+
+def clean_rooms(spec):
+    """room names made clean in place (idempotent): venue rows and what they are made of, classes' home rooms, Room rules' targets"""
+    for v in spec.get("venues") or []:
+        if isinstance(v, dict):
+            if "room" in v: v["room"] = clean_name(v["room"]) if v["room"] is not None else v["room"]
+            if isinstance(v.get("made_of"), (list, tuple)): v["made_of"] = [x for x in map(clean_name, v["made_of"]) if x]
+    for c in spec.get("classes") or []:
+        if isinstance(c, dict) and c.get("home_room"): c["home_room"] = clean_name(c["home_room"])
+    for r in spec.get("rules") or []:
+        if isinstance(r, dict) and r.get("scope") == "Room" and r.get("target") is not None: r["target"] = clean_name(r["target"])
+    return spec
+
+def whole(v):
+    """a positive whole number from a cell (20, "20", " 20 ", "20.0", 20.0 are 20); None for blank, text, zero, negative, booleans"""
+    if isinstance(v, bool) or v is None: return None
+    try: f = float(str(v).strip()); n = int(f)
+    except (ValueError, OverflowError): return None
+    return n if n > 0 and f == n else None
+
+def single_rooms(name, parts):
+    """the single rooms a venue stands for: its rooms when it is a combined venue, else itself"""
+    return list(parts[name]) if name in parts else [name]
+
+def venue_problems(spec):
+    """what is wrong with the combined venues on step 1: [(venue row index, text, critical)]"""
+    venues = spec.get("venues") or []
+    row = {}
+    for v in venues: row.setdefault(clean_name(v.get("room")), v)
+    made = {n: _made_of(v) for n, v in row.items()}
+    claimed = {}   # room -> the combined venues (in row order) that list it
+    out = []
+    for i, v in enumerate(venues):
+        name = clean_name(v.get("room")); rooms = _made_of(v)
+        if not rooms: continue
+        if len(rooms) < 2: out.append((i, f"{name}: a combined venue needs at least two rooms.", True))
+        for r in rooms:
+            if r not in row: out.append((i, f"{name}: made of {r}, which is not on step 1 (Venues).", True))
+            elif made.get(r): out.append((i, f"{name}: made of {r}, which is a combined venue itself.", True))
+        for r in rooms:
+            if r in claimed and name not in claimed[r]:
+                out.append((i, f"{r} is in more than one combined venue ({', '.join(claimed[r] + [name])}): a room can be in one only.", True))
+            claimed.setdefault(r, [])
+            if name not in claimed[r]: claimed[r].append(name)
+        found = [r for r in rooms if r in row]
+        kinds = sorted({str(x.get("kind") or "classroom") for x in [v] + [row[r] for r in found]})
+        if len(kinds) > 1: out.append((i, f"{name}: it and its rooms are of different kinds ({', '.join(kinds)}); they must all be one kind.", True))
+        for r in rooms + [name]:
+            for ru in spec.get("rules") or []:
+                if ru.get("scope") == "Room" and clean_name(ru.get("target")) == r and ru.get("rule") == "At most N at once" \
+                        and str(ru.get("strength") or "Must") == "Must":
+                    try: k = int(ru.get("number"))
+                    except (TypeError, ValueError): continue
+                    if k > 1: out.append((i, f'{name}: {r} takes {k} groups at once (an "At most N at once" rule); a combined venue and its rooms take one group at a time.', True))
+        def seats(x):
+            try: return int(x.get("capacity"))
+            except (TypeError, ValueError): return None
+        mine = seats(v)
+        if not mine: out.append((i, f"{name}: give its seats (seats decide which groups get it).", False))
+        elif len(found) == len(rooms) and all(seats(row[r]) for r in found):
+            total = sum(seats(row[r]) for r in found)
+            if mine > total * 1.1: out.append((i, f"{name}: {mine} seats, but its rooms seat {total} together.", False))
+    return out
 
 def names_list(v):
     """a cell that names several things (subjects, venues), separated by commas, as a list"""

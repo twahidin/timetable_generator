@@ -10,6 +10,7 @@ write_db(m, path) writes the export model (the same one the Excel, PDFs and HTML
   classes         name, level, students, home_room
   teachers        name, short, department, allowance, other_duties
   rooms           name, kind, capacity
+  room_parts      venue, room: one row per room of each combined venue (a lesson in the venue is in each of its rooms)
   subjects        name, short, department
   lessons         one row per group per lesson: id, lesson_id (shared by a band's groups meeting together), day, week,
                   weekday, day_index, start_period, end_period, periods, starts, ends, level, block, subject, group_code
@@ -79,6 +80,8 @@ def write_db(m, path, spec=None):
         con.executemany("INSERT INTO teachers VALUES (?, ?, ?, ?, ?)", [(t["name"], t["short"], t["dept"] or None, t["allowance"] or None, t.get("other") or None) for t in m["teachers"]])
         q("CREATE TABLE rooms (name TEXT PRIMARY KEY, kind TEXT, capacity INTEGER)")
         con.executemany("INSERT INTO rooms VALUES (?, ?, ?)", [(r["name"], r["kind"], r["capacity"] or None) for r in m["rooms"]])
+        q("CREATE TABLE room_parts (venue TEXT, room TEXT)")   # the rooms each combined venue is made of
+        con.executemany("INSERT INTO room_parts VALUES (?, ?)", [(v, r) for v, rs in (m.get("room_parts") or {}).items() for r in rs])
         q("CREATE TABLE subjects (name TEXT PRIMARY KEY, short TEXT, department TEXT)")
         con.executemany("INSERT INTO subjects VALUES (?, ?, ?)", [(k, v["short"], v["dept"] or None) for k, v in m["subjects"].items()])
 

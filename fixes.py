@@ -58,6 +58,14 @@ def rows_of_key(rows, k):
     """the rows of the key k (a tuple from _key or _row_key): an entire-class row of the subject for a class of the key, or a row of the key's group"""
     return [x for x in rows if (x["group"] == ENTIRE and k[0] == "C" and k[1] in x["classes"] and x["subject"] == k[2]) or (k[0] == "G" and x["group"] == k[1])]
 
+def _room(room, spec):
+    """a fix's room as the setup names it (runs of spaces made one, ends trimmed: a fix stored before names were cleaned still
+    finds its room); ValueError when it is not on the setup's list of rooms. No room stays as it is"""
+    if not room: return room
+    r = spec_mod.clean_name(room)
+    if r not in {spec_mod.clean_name(v.get("room")) for v in spec.get("venues") or []}: raise ValueError(f"{room} is not on the setup's list of rooms.")
+    return r
+
 def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, pool=None):
     """change lessons (a list the caller owns) in place and return the sentence for the committee; ValueError(sentence) when the
     fix cannot apply (every kind checks before it changes anything). new_id: the id an add takes (default 1 + the highest in
@@ -125,19 +133,19 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
     if kind == "room":
         x = next((x for x in _rows(lessons + pool, fix["id"]) if x["group"] == fix["group"]), None)
         if x is None: raise ValueError(f"There is no row of {fix['group']} in that lesson.")
-        if fix["room"] and fix["room"] not in {v["room"] for v in spec.get("venues") or []}: raise ValueError(f"{fix['room']} is not on the setup's list of rooms.")
-        text = f"{what(x)} {'(not placed)' if pooled(fix['id']) else 'on ' + when(days, x['d'], x['p'])} is now in {fix['room'] or 'no room'}, not {x['room'] or 'no room'}."
-        keep([x]); x["room"] = fix["room"]; touched.add(x["id"])
+        room = _room(fix["room"], spec)
+        text = f"{what(x)} {'(not placed)' if pooled(fix['id']) else 'on ' + when(days, x['d'], x['p'])} is now in {room or 'no room'}, not {x['room'] or 'no room'}."
+        keep([x]); x["room"] = room; touched.add(x["id"])
         return text
     if kind == "add":
         key = _key(fix["key"]); e = verify.planned_rows(spec).get(key)
         if not e: raise ValueError(f"Step 5 has no lesson for {verify._name(key) if len(key) in (2, 3) else fix['key']}.")
         _slot(spec, days, fix["d"], fix["p"], fix["n"])
-        if fix["room"] and fix["room"] not in {v["room"] for v in spec.get("venues") or []}: raise ValueError(f"{fix['room']} is not on the setup's list of rooms.")
+        room = _room(fix["room"], spec)
         i = new_id if new_id is not None else 1 + max([y["id"] for y in lessons + pool], default=0); out = _out(fix, i)
         x = dict(id=i, d=fix["d"], p=fix["p"], n=fix["n"], level=e["level"] or "", block=str(e["rows"][0].get("block") or ""),
                  classes=list(e["classes"]), subject=e["subject"], group=ENTIRE if key[0] == "C" else key[1],
-                 teachers=list(dict.fromkeys(t for r in e["rows"] for t in r.get("teachers") or [])), room=fix["room"], ext=False, rain="")
+                 teachers=list(dict.fromkeys(t for r in e["rows"] for t in r.get("teachers") or [])), room=room, ext=False, rain="")
         x["ext"] = _after(spec, days, [x], x["d"], x["p"], x["n"]); pushed = push(out, [x], x["d"], x["p"], x["n"]); lessons.append(x); touched.add(x["id"])
         return f"Added {what(x)} on {when(days, x['d'], x['p'])} ({x['n']} period{'' if x['n'] == 1 else 's'}) {'in ' + x['room'] if x['room'] else 'with no room'}." + pushed
     if kind == "delete":
@@ -194,7 +202,7 @@ class Busy:
     """who and what is in use in each period, built once per request: teachers, classes, whole-class lessons, groups,
     rooms and rain rooms by (kind, name, day, period), each lesson's rows by id, and which groups share students"""
     def __init__(self, m, lessons=None, base=None):
-        self.m, self.at, self.ids, self.by = m, collections.defaultdict(list), collections.defaultdict(list), collections.defaultdict(set)
+        self.m, self.at, self.ids, self.by = m, collections.defaultdict(list), collections.defaultdict(list), collections.defaultdict(set); self.parts = m.get("room_parts") or {}
         for x in m["lessons"] if lessons is None else lessons:
             self.ids[x["id"]].append(x); dept = m["subjects"].get(x["subject"], {}).get("dept")
             for k in [("t", t) for t in x["teachers"]] + [("c", c) for c in x["classes"]] + [("s", x["subject"])] + ([("dept", dept)] if dept else []) + ([("g", x["group"])] if x["group"] != ENTIRE else []):
@@ -205,9 +213,11 @@ class Busy:
                     self.at["c", c, x["d"], q].append(x)
                     if x["group"] == ENTIRE: self.at["w", c, x["d"], q].append(x)
                 if x["group"] != ENTIRE: self.at["g", x["group"], x["d"], q].append(x)
-                if not _no_room(x["room"]): self.at["r", x["room"], x["d"], q].append(x)
+                if not _no_room(x["room"]):
+                    for s in self.rooms(x["room"]): self.at["r", s, x["d"], q].append(x)   # a combined venue is in each of its rooms
                 for h in _split_list(x.get("rain")):
-                    if h != "TBC": self.at["h", h, x["d"], q].append(x)
+                    if h != "TBC":
+                        for s in self.rooms(h): self.at["h", s, x["d"], q].append(x)
         self._full(m["lessons"] if lessons is None else lessons)
         if base: self.share, self.gcls, self.cgroups = base.share, base.gcls, base.cgroups; return
         self.share, self.gcls, self.cgroups = (collections.defaultdict(collections.Counter) for _ in range(3))   # group -> {group: students in both}; group -> {class: its students}; class -> {group: its students}
@@ -217,6 +227,10 @@ class Busy:
                 self.gcls[g][st["cls"]] += 1; self.cgroups[st["cls"]][g] += 1
                 for g2 in gs:
                     if g2 != g: self.share[g][g2] += 1
+
+    def rooms(self, room):
+        """the single rooms a venue stands for (a combined venue: its rooms; else itself)"""
+        return spec_mod.single_rooms(room, self.parts)
 
     def _full(self, lessons):
         """a band every student of its classes takes a group of ("Everyone takes one" on step 5) keeps a whole class busy while all
@@ -282,12 +296,16 @@ class Busy:
                     for c, k in self.gcls.get(x["group"], {}).items():
                         if y := f(("w", c, d, q), ignore): return _students(k, x["group"], y), y
         mine = collections.Counter(x["room"] for x in rows if not _no_room(x["room"]))
+        own = collections.Counter()   # a single room -> how many of the rows' own rows stand on it (a row in a combined venue stands on each of its rooms, as check_model counts)
         for room, k in mine.items():
-            for q in Q:
-                if sum(y["id"] not in ignore for y in self.at.get(("r", room, d, q), ())) + k > self.m["room_cap"].get(room, 1) or f(("h", room, d, q), ignore): return f"{room} is in use then.", None
+            for s in self.rooms(room): own[s] += k
+        for room in mine:
+            for s in self.rooms(room):
+                for q in Q:
+                    if sum(y["id"] not in ignore for y in self.at.get(("r", s, d, q), ())) + own[s] > self.m["room_cap"].get(s, 1) or f(("h", s, d, q), ignore): return f"{room} is in use then.", None
         for x in rows:
             for h in _split_list(x.get("rain")):
-                if h != "TBC" and (h in mine or any(f(("r", h, d, q), ignore) for q in Q)): return f"{h} is in use then.", None
+                if h != "TBC" and any(s in own or any(f(("r", s, d, q), ignore) for q in Q) for s in self.rooms(h)): return f"{h} is in use then.", None
         return None, None
 
     def clash(self, rows, d, p, n, ignore=()):
@@ -522,7 +540,7 @@ def marks(busy, rows, pool=False):
     if 0 <= d < len(m["days"]) and a["p"] >= 0 and a["p"] + a["n"] <= m["NP"]:
         if d not in (m.get("double") or ()) and any(others(("t", t, d, q)) for x in rows for t in x["teachers"] for q in Q): out.append("teacher")
         if any(others(("c" if x["group"] == ENTIRE else "w", c, d, q)) for x in rows for c in x["classes"] for q in Q) or busy.band_clash(rows, d, a["p"], a["n"], ignore=(own,)): out.append("class")
-        rooms = {x["room"] for x in rows if not _no_room(x["room"])}
+        rooms = {s for x in rows if not _no_room(x["room"]) for s in busy.rooms(x["room"])}
         if any(len({y["id"] for y in busy.at.get(("r", r, d, q), ())} | {own}) > m["room_cap"].get(r, 1) for r in rooms for q in Q): out.append("room")
     if any(_no_room(x["room"]) for x in rows): out.append("noroom")
     return out
@@ -655,7 +673,7 @@ def choices(m, spec, days, lesson_id, group=None, pool=()):
         if not mine:   # free: a room fix putting this row in the room would not be refused for the room (this lesson set aside)
             why = b._why([dict(row, teachers=[], classes=[], group=ENTIRE, rain="", room=room)], row["d"], row["p"], row["n"], {lesson_id})[0]
             if why:
-                held = [y for q in _span(row) for k in ("r", "h") for y in b.at.get((k, room, row["d"], q), ()) if y["id"] != lesson_id]
+                held = [y for q in _span(row) for k in ("r", "h") for s in b.rooms(room) for y in b.at.get((k, s, row["d"], q), ()) if y["id"] != lesson_id]
                 free, holding = False, what(held[0]) if held else why
         rooms.append(dict(room=room, kind=vk, right=bool(kind and vk == kind) or room in homes, free=free, holding=holding))
     rooms.sort(key=lambda r: 0 if r["free"] and r["right"] else 1 if r["free"] else 2)

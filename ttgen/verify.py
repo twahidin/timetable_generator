@@ -6,7 +6,7 @@ from collections import Counter
 from . import parents
 from .export import ENTIRE
 from .solver import rule_label
-from .spec import floating_recess, names_list, subject_test, teacher_depts as teacher_depts_of, typed_rules
+from .spec import whole as whole_n, clean_name, single_rooms, floating_recess, names_list, subject_test, teacher_depts as teacher_depts_of, typed_rules
 
 KINDS = ("clash", "deployment", "rule", "typed", "choice")
 APPEND = "(end)"   # an add op's "after": not a row id, so sync.apply puts the row last ("" would put it first and renumber the group codes after it)
@@ -74,6 +74,31 @@ def _other_week(day, weeks):
     """whether the day is in the other week of a row whose special room is on `weeks` only (Odd or Even)"""
     return weeks in ("Odd", "Even") and str(day).split()[0] in ("Odd", "Even") and not str(day).startswith(weeks)
 
+def _group_size(spec, key, p):
+    """how many students a planned row seats: the Students sheet's holders of the code, else step 5's Students, else (a whole class) the class's size; None when unknown"""
+    if key[0] == "G":
+        held = sum(1 for s in spec.get("students") or [] if key[1] in (s.get("groups") or []))
+        if held: return held
+        v = next((x.get("students") for x in p["rows"] if x.get("students")), None)
+        return whole_n(v)
+    size = next((c.get("size") for c in spec["classes"] if str(c["class"]) == key[1]), None)
+    return whole_n(size)
+
+def _half_venue(m, spec, key, p, g):
+    """a sentence when a lesson of the row is in one room of a combined venue that seats the group while that room does not, else None"""
+    parts = m.get("room_parts") or {}
+    if not parts: return None
+    n = _group_size(spec, key, p)
+    if n is None: return None
+    seats = lambda r: whole_n((m["room_ix"].get(r) or {}).get("capacity"))
+    for x in g["lessons"]:
+        for c, rooms in parts.items():
+            a, b = seats(x["room"]), seats(c)
+            if x["room"] in rooms and a is not None and b is not None and a < n <= b:
+                what = f"{x['subject']} for {key[1]}" if key[0] == "C" else f"group {key[1]}"
+                return f"{what} ({n} students) is in {x['room']} ({a} seats); {c} seats it."
+    return None
+
 def deployment(m, spec):
     """one warning per difference between the timetable and step 5 (teachers, periods, venue kind, missing, extra)"""
     plan, got, out = planned_rows(spec), placed(m), []
@@ -102,6 +127,8 @@ def deployment(m, spec):
                 if kind == "classroom" and _other_week(m["days"][x["d"]], p["room_weeks"]): continue   # as the solver: a classroom on its other week
                 if kind and kind != p["room_kind"]:
                     out.append(warning(f"dep:{k}:venue", "deployment", f"{what} is in {x['room']} ({kind}); step 3 asks for {p['room_kind']}.", group=group, where=w)); break
+        half = _half_venue(m, spec, key, p, g)
+        if half: out.append(warning(f"dep:{k}:half", "deployment", half, group=group, where=w))
     class_level = {str(c["class"]): str(c.get("level") or "") for c in spec["classes"]}
     for key, g in got.items():
         if key in plan: continue
@@ -149,9 +176,9 @@ def rule_periods(r, NP):
 def in_scope(m, spec, r):
     """a test for lessons the rule row is about, or None when its scope is not one the checks know"""
     sc, tg = r.get("scope"), r.get("target")
-    dept = lambda x: m["subjects"].get(x["subject"], {}).get("dept")
+    dept = lambda x: m["subjects"].get(x["subject"], {}).get("dept"); parts = m.get("room_parts") or {}
     level = lambda c: m["class_ix"].get(c, {}).get("level")
-    tests = {"Teacher": lambda x: tg in x["teachers"], "Class": lambda x: tg in x["classes"], "Room": lambda x: x["room"] == tg,
+    tests = {"Teacher": lambda x: tg in x["teachers"], "Class": lambda x: tg in x["classes"], "Room": lambda x: x["room"] == tg or tg in single_rooms(x["room"], parts),
              "Level": lambda x: x["level"] == tg or (bool(x["classes"]) and all(level(c) == tg for c in x["classes"])),
              "Block": lambda x: x["block"] == tg, "Subject": lambda x: subject_test(tg)(x["subject"], dept(x)),
              "Department": lambda x: dept(x) == tg, "Group": lambda x: x["group"] == tg, "School": lambda x: True}
@@ -238,7 +265,7 @@ def _only_in_venues(m, spec, i, r, days, per):
     venues, out = names_list(r.get("venues")), []
     for x in _lessons(m, spec, r, days):
         q = next(iter(_inside(x, per)), None)
-        if q is None or x["room"] in ("", "TBC", None) or x["room"] in venues: continue
+        if q is None or x["room"] in ("", "TBC", None) or clean_name(x["room"]) in {clean_name(v) for v in venues}: continue
         out.append(_hit(m, r, i, _key(x, q), f"{_what(x)} is in {x['room']} on {m['days'][x['d']]} period {q}; only {', '.join(venues)} are allowed in {_pr(per)}.", x["room"], x))
     return out
 

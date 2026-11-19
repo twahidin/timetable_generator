@@ -4,7 +4,8 @@ Class periods against the lesson periods of the day, lessons against the stretch
 teachers' time, floating recess, and the rule rows the solver cannot use. Students are not checked here."""
 import collections, re
 from ttgen.reader import derive
-from ttgen.spec import structure_vs_rules
+from ttgen.spec import structure_vs_rules, venue_problems
+from ttgen.solver import under, weight, room_families
 
 WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
 
@@ -62,11 +63,12 @@ def _class_fit(P):
             out.append(dict(row, kind="almost", text=f"Class {c} is almost full: {need} of {have} lesson periods."))
     return out
 
-def _room_fit(P):
-    """per set of rooms some groups are limited to (Problem.allowed: kind, rooms kept for them, rooms that seat them), the
+def room_sums(P):
+    """per set of single rooms some groups are limited to (Problem.allowed: kind, rooms kept for them, rooms that seat them), the
     class-periods of those groups against what the rooms hold in the lesson periods (a room holds one class at a time
-    unless a Must 'At most N at once' rule says more; a special room used on alternate weeks counts half its periods).
-    [dict(kind, rooms, need, have, kind_, text)]"""
+    unless a Must 'At most N at once' rule says more; a special room used on alternate weeks counts half its periods). A combined
+    venue is never a room here: a lesson in it counts once for each of its rooms, and the sets are of single rooms.
+    [dict(kind, rooms, need, have, all)]: rooms sorted, need class-periods a cycle, have = rooms at a time x lesson periods, all = the sum over every room of the kind"""
     use = "LAW" if P.spec["school"].get("after_school", True) else "LW"
     fam = collections.defaultdict(set); dem = []
     for u in P.units:
@@ -77,23 +79,33 @@ def _room_fit(P):
                     kind, E, _, _ = P.allowed(r, u, week); fam[kind].add(E); dem.append((kind, E, ln / len(weeks), u["level"]))
     out = []
     for kind, sets in fam.items():
-        every = frozenset(x for x, k in P.room_kind.items() if k == kind); sets.add(every)
-        for F in sorted(sets, key=len):
-            c = sum(P.room_cap[x] for x in F)
+        every = frozenset(x for x, k in P.room_kind.items() if k == kind)
+        if any(x in P.parts for x in every): fams = [(G, under(every, P.parts), lambda E, G: under(E, P.parts) <= G, lambda E: weight(E, P.parts)) for G in room_families(sets, every, P.parts)]
+        else: sets.add(every); fams = [(F, every, lambda E, F: E <= F, lambda E: 1) for F in sorted(sets, key=len)]
+        for F, allr, inside, wt in fams:
+            c = sum(P.room_cap.get(x, 1) for x in F)
             if not c: continue   # no room of this kind: the solver notes it and gives those lessons a room marked TBC
-            part = [(w, lv) for k, E, w, lv in dem if k == kind and E <= F]
+            part = [(w * wt(E), lv) for k, E, w, lv in dem if k == kind and inside(E, F)]
             if not part: continue
             n = round(sum(w for w, _ in part)); lvls = {lv for _, lv in part}
             slots = len({d * P.NP + p for lv in lvls for d, row in enumerate(P.grid.get(lv, [])) for p, ch in enumerate(row) if ch in use})
-            have = c * slots; names = ", ".join(f"{x}" + (f" ({P.room_cap[x]} classes)" if P.room_cap[x] > 1 else "") for x in sorted(F))
-            which = f"the {kind} rooms" if F == every else f"the {kind} rooms they may use (kept for them, or seating them)"
-            row = dict(kind=kind, rooms=sorted(F), need=n, have=have)
-            if n > have:
-                out.append(dict(row, kind_="impossible", text=f"Lessons that need {which} add up to {n} class-periods a cycle, but those rooms ({names}) hold at most {have} "
-                                                              f"({c} class{'es' if c != 1 else ''} at a time × {slots} lesson periods): no timetable is possible. A room holds one class at a time "
-                                                              f"unless step 6 has a 'Room · At most N at once' rule for it."))
-            elif F == every and n > 0.9 * have:
-                out.append(dict(row, kind_="tight", text=f"Lessons that need a {kind} room fill {n} of the {have} class-periods its rooms ({names}) hold: very hard to fit."))
+            out.append(dict(kind=kind, rooms=sorted(F), need=n, have=c * slots, all=F == allr))
+    return out
+
+def _room_fit(P):
+    """the sums of room_sums as findings: [dict(kind, rooms, need, have, kind_, text)] ('impossible' when the lessons need more than the rooms hold, 'tight' when all rooms of a kind are nearly full)"""
+    out = []
+    for row in room_sums(P):
+        kind, F, n, have = row["kind"], row["rooms"], row["need"], row["have"]; every = row["all"]
+        c = sum(P.room_cap.get(x, 1) for x in F); slots = have // c; names = ", ".join(f"{x}" + (f" ({P.room_cap[x]} classes)" if P.room_cap.get(x, 1) > 1 else "") for x in F)
+        which = f"the {kind} rooms" if every else f"the {kind} rooms they may use (kept for them, or seating them)"
+        row = dict(kind=kind, rooms=F, need=n, have=have)
+        if n > have:
+            out.append(dict(row, kind_="impossible", text=f"Lessons that need {which} add up to {n} class-periods a cycle, but those rooms ({names}) hold at most {have} "
+                                                          f"({c} class{'es' if c != 1 else ''} at a time × {slots} lesson periods): no timetable is possible. A room holds one class at a time "
+                                                          f"unless step 6 has a 'Room · At most N at once' rule for it."))
+        elif every and n > 0.9 * have:
+            out.append(dict(row, kind_="tight", text=f"Lessons that need a {kind} room fill {n} of the {have} class-periods its rooms ({names}) hold: very hard to fit."))
     return out
 
 # ------------------------------------------------------------------------------- critical problems and warnings
@@ -136,7 +148,9 @@ def findings(spec, P=None):
     from ttgen.solver import Problem
     probs = derive(spec); P = P or Problem(spec); out = []
     add = lambda level, area, text: out.append(dict(level=level, area=area, text=text))
-    for p in probs: add(_input_level(p), "lessons", p)
+    for p in probs:
+        if not p.startswith("Venue row "): add(_input_level(p), "lessons", p)   # a combined venue's problem: from venue_problems, below
+    for _, t, hard in venue_problems(spec): add(CRITICAL if hard else WARNING, "venues", t)
     for t in _band_teacher_clashes(spec): add(CRITICAL, "lessons", t)
     A = {lv: sum(row.count("A") for row in rows) for lv, rows in P.grid.items()} if P.spec["school"].get("after_school", True) else {}
     for x in _class_fit(P):
@@ -239,13 +253,18 @@ def _loads_and_rooms(spec, P):
         if a and n + other.get(t, 0) > a:
             out.append(("teachers", f"{t} teaches {n} periods" + (f" plus {other[t]} periods of other duties" if other.get(t) else "") + f", over their allowance of {a}."))
         if avail and n > 0.85 * avail: out.append(("teachers", f"{t} teaches {n} of the {avail} lesson periods their levels have: very hard to fit."))
-    kinds = collections.Counter(v.get("kind") or "classroom" for v in spec["venues"])
+    kinds = collections.Counter(v.get("kind") or "classroom" for v in spec["venues"] if v["room"] not in P.parts)   # a combined venue is not another room
     for u in P.units:
         if u["kind"] != "block": continue
         need = collections.Counter(r["room_kind"] for r in u["rows"] if r.get("room_kind") and r["room_kind"] != "classroom")
         for k, n in need.items():
             if n > kinds.get(k, 0): out.append(("venues", f"Band {u['name']} needs {n} '{k}' rooms at once; Venues has {kinds.get(k, 0)}: "
                                                           "the extra groups get a room marked TBC, for the committee to find."))
+    # a combined venue no lesson is limited to: every group that may use it fits one of its rooms, so none is given it
+    rows = [P.allowed(r, u) for u in P.units for r in u["rows"]]
+    for v in P.parts:
+        if not any(v in E and all(x in P.parts for x in E) for kind, E, _, _ in rows if kind == P.room_kind[v]):
+            out.append(("venues", f"No lesson is limited to {v}: every group that may use it also fits one of its rooms, so each will be given one room. Check the seats on step 1."))
     # groups bigger than every room they may use: the solver still gives them one of those rooms (oversize), so a person must decide
     big = collections.defaultdict(list)
     for u in P.units:
@@ -257,4 +276,15 @@ def _loads_and_rooms(spec, P):
         head = (f"{who[0]} has more students than the largest {kind} it may use seats ({most})" if len(who) == 1 else
                 f"{len(who)} groups have more students than the largest {kind} they may use seats ({most}): {', '.join(who[:8])}{f' and {len(who) - 8} more' if len(who) > 8 else ''}")
         out.append(("venues", head + ". The timetable still gives " + ("it one of those rooms" if len(who) == 1 else "them those rooms") + "; correct the seats on step 1, or split the group."))
+    # a group of unknown size has no seat limit, so it may be given a combined venue: say so
+    seen = set()
+    for u in P.units:
+        for r in u["rows"]:
+            kind, rooms, n, _ = P.allowed(r, u)
+            if n is not None: continue
+            for v in sorted(x for x in rooms if x in P.parts):
+                who = r["code"] if r["code"] != "Entire Class" else u["classes"][0]
+                if (r["subject"], who, v) in seen: continue
+                seen.add((r["subject"], who, v))
+                out.append(("lessons", f"{r['subject']} {who}: no group size is known, so it may be given any {kind}, {v} included. Give its Students on step 5."))
     return out

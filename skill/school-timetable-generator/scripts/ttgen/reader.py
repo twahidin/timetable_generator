@@ -6,7 +6,7 @@ template) and the older one (a 7 Rules sheet). Everything that constrains the ti
 import collections, datetime, re
 import openpyxl
 from . import parents as PA
-from .spec import defaults, lesson_split, names_list, ALL_LEVELS, EVERY_CLASS, SETTING_RULES, TYPED
+from .spec import clean_name, defaults, lesson_split, names_list, venue_problems, ALL_LEVELS, EVERY_CLASS, SETTING_RULES, TYPED
 
 FIXED_COLS = ("Level", "Class(es) or group", "Subject", "Week", "Day", "Start period", "Note")   # Fixed lessons, as the template writes it
 
@@ -162,12 +162,13 @@ def read_template(path):
         codes = "".join((str(ds.cell(r, 3 + p).value or ".").strip()[:1].upper() or ".") for p in range(NP))
         day_structure.setdefault(str(lv), {})[str(d)] = codes
     _, ven = _table(wb["1 Venues"], "Room")
-    venues = [dict(room=str(x["Room"]), kind=x.get("Kind"), capacity=x.get("Capacity"), building=x.get("Building") or x.get("Block"), floor=x.get("Floor") or x.get("Floor / level"),
+    venues = [dict(room=clean_name(x["Room"]), kind=x.get("Kind"), capacity=x.get("Capacity"), building=x.get("Building") or x.get("Block"), floor=x.get("Floor") or x.get("Floor / level"),
                    note=x.get("Note"), only_for=_names(next((v for h, v in x.items() if h.startswith("For")), None)),
-                   equipment=_names(x.get("Equipment")), configuration=str(x.get("Configuration") or "").strip() or None) for x in ven if x.get("Room")]
+                   equipment=_names(x.get("Equipment")), configuration=str(x.get("Configuration") or "").strip() or None,
+                   made_of=[clean_name(m) for m in _names(next((v for h, v in x.items() if h.startswith("Made of")), None)) if clean_name(m)]) for x in ven if x.get("Room")]
     _, cl = _table(wb["2 Classes"], "Class")
     pn = PA.label({"school": sc})   # the Class Parents columns are headed with the school's word and a number
-    classes = [dict({"class": str(x["Class"]), "level": x.get("Level"), "size": x.get("Students") or 0, "home_room": x.get("Home room"), "note": x.get("Note")},
+    classes = [dict({"class": str(x["Class"]), "level": x.get("Level"), "size": x.get("Students") or 0, "home_room": clean_name(x.get("Home room")) or None, "note": x.get("Note")},
                     **({"parents": [str(p) for p in _first_col(x, pn)]} if _first_col(x, pn) else {})) for x in cl if x.get("Class")]
     sh, su = _table(wb["3 Subjects"], "Subject")
     lvcols = [h for h in sh if h in sc["levels"]]
@@ -201,7 +202,7 @@ def read_template(path):
             r_ = {"scope": scope, "target": target, "subject": x.get("Subject (optional)"), "rule": x.get("Rule"),
                   "week": x.get("Week") or "Both", "day": x.get("Day") or "All", "from": x.get("From period"), "to": x.get("To period"),
                   "number": x.get("Number"), "strength": x.get("Must / Prefer") or "Must", "note": x.get("Note")}
-            if names_list(x.get("Venues")): r_["venues"] = names_list(x.get("Venues"))
+            if names_list(x.get("Venues")): r_["venues"] = [clean_name(v) for v in names_list(x.get("Venues"))]
             words = x.get("In words")   # the column is missing in older workbooks: a typed rule then reads with no sentence
             if r_["rule"] == TYPED or words not in (None, ""): r_["text"] = str(words or "").strip()
             rules.append(r_)
@@ -355,4 +356,5 @@ def derive(spec):
         if not p: problems.append(f"Lesson row {i + 6}: {x['subject']} has no periods for {x['level']}.")
         if not x["classes"]: problems.append(f"Lesson row {i + 6}: no class.")
         if not x["teachers"]: problems.append(f"Lesson row {i + 6}: no teacher ({x['subject']} {', '.join(x['classes'])}).")
+    problems += [f"Venue row {i + 6}: {text}" for i, text, _ in venue_problems(spec)]   # the sheet row: 1 Venues' data starts on row 6, as Lessons'
     return problems

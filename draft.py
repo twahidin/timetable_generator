@@ -392,7 +392,7 @@ def board():
     unplaced.sort(key=lambda x: ((x["classes"] or [""])[0], x["id"]))
     return dict(days=list(m["days"]), NP=NP, times=m["times"], levels=levels, codes=codes,
                 subjects={k: [v.get("short") or k, v.get("color"), v.get("dept") or ""] for k, v in m["subjects"].items()},
-                palette=[list(c) for c in PALETTE], cards=cards, unplaced=unplaced, teachers=_teacher_groups(m, pool, tshort), rooms=_room_groups(m, pool),
+                palette=[list(c) for c in PALETTE], cards=cards, unplaced=unplaced, teachers=_teacher_groups(m, pool, tshort), rooms=_room_groups(m, pool), room_parts=m.get("room_parts") or {},
                 day=["".join("L" if any(g[d][p] in "LA" for g in m["grid"].values()) else "." for p in range(NP)) for d in range(nd)],
                 short=[dict(s, classes=list(_planned(m["checked_setup"], s["key"])["classes"])) for s in fixes.short(m, m["checked_setup"], pool)])
 
