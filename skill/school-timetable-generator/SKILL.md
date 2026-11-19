@@ -5,7 +5,7 @@ description: Generate a clash-free Singapore school timetable from a filled setu
 
 # School timetable generator
 
-Skill version: 2026-11.7 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
+Skill version: 2026-11.8 (the setup workbook's README names the version it was made for; if it names a newer one, ask for that skill). The Lessons sheet may have more than three Teacher columns; the "Changed by hand" column there and the form-teacher columns on the Classes sheet are the app's own and need nothing from you.
 
 Turns a filled **timetable setup workbook** into a timetable with no teacher, room or student in two places at once,
 then delivers it in three forms that always agree with each other:
@@ -145,7 +145,7 @@ row's periods (otherwise the usual split is used and a problem is reported).
 
 **Rules** come from four places, all Must unless `More rules` says Prefer: the rule rows on `Settings` (once a day
 per group, at most N PE classes at once, a teacher's daily cap, a recess a day; and `Lessons end by (Monday to Thursday)` style rows,
-which trim the Day structure so no lesson runs past that time on those days; `Students have no free periods` is
+which trim the Day structure so no lesson runs past that time on those days; `Teachers may take two lessons at once on` names days (as on Day structure, or a weekday for every week) of self-directed or home-based learning: on those days the check lists a teacher in two lessons as `Teacher in two lessons (allowed that day)` and not as `Teacher double-booked`, so it is not a mistake to settle, though the solver itself still never puts a teacher in two lessons; `Students have no free periods` is
 counted after solving, not enforced; with `W` recess windows on Day structure, `Floating recess goes by` (Level: a level
 has its recess together; Class: each class has its own), `Floating recess length (periods)` and `Most classes at recess at
 once` (canteen space, fixed and floating recess counted)), `Teacher availability` (Not

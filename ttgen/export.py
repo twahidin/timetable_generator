@@ -17,7 +17,7 @@ from .database import is_db, read_db, write_db
 from .reader import read_template, derive
 from . import choices, parents as _parents
 from .report import LESSON_HEADERS, short_subject, clock
-from .spec import order_days, periods_by_day, resolve_row, trim_day
+from .spec import double_days, order_days, periods_by_day, resolve_row, trim_day
 
 ENTIRE = "Entire Class"
 BREAK = {"F": "Assembly", "R": "Recess", "U": "Lunch"}
@@ -122,7 +122,7 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
     m = dict(school=dict(name=sc.get("name") or "School", timetable=sc.get("timetable") or "Timetable", weeks=int(sc.get("weeks") or 1),
                          period_minutes=int(sc["period_minutes"]), start_time=str(sc["start_time"]), kind=sc.get("kind") or ""),
              days=list(days), NP=NP, ND=ND, times=times, grid=grid, raw_grid=raw, cgrid=cgrid, recess={c: [list(x) for x in v] for c, v in (recess or {}).items()},
-             keep=keep, levels=levels, classes=classes, parents_name=_parents.label(spec), teachers=teachers, rooms=rooms,
+             keep=keep, double=double_days(sc, days), levels=levels, classes=classes, parents_name=_parents.label(spec), teachers=teachers, rooms=rooms,
              subjects=subjects, lessons=lessons, students=students, room_cap=cap, planned=planned, notes=list(notes or []), status=status,
              generated=datetime.date.today().strftime("%d %b %Y"))
     m["setup"] = spec   # kept in the timetable database, so that file alone rebuilds every output
@@ -302,7 +302,9 @@ def check_model(m):
                 out.append((w, d, f"{days[d]} {m['times'][a][0]}-{m['times'][prev][1]} (periods {a}-{prev})" if prev > a else where(d, a), a))
                 if q is not None: a = prev = q
         return out
-    probs += [f"Teacher double-booked: {t} on {w}." for t, d, w, _ in spans({k for k, v in tb.items() if len(v) > 1})]
+    ok_days = m.get("double") or ()   # Settings 'Teachers may take two lessons at once on': said, and not a mistake, on those days
+    probs += [f"Teacher double-booked: {t} on {w}." for t, d, w, _ in spans({k for k, v in tb.items() if len(v) > 1 and k[1] not in ok_days})]
+    probs += [f"Teacher in two lessons (allowed that day): {t} on {w}." for t, d, w, _ in spans({k for k, v in tb.items() if len(v) > 1 and k[1] in ok_days})]
     rb = collections.Counter()
     for x in L:
         if x["room"] and x["room"] != "TBC":

@@ -863,4 +863,20 @@ def test_outside_the_day():
     b2 = fixes.Busy(dict(m, grid=grid)); assert b2.outside(r, 1, 0, 1) and not b2.outside(r, 0, 0, 1) or m["grid"][LV][0][0] == "."
     b3 = fixes.Busy(dict(m, keep={DAYS[0]: 3})); assert b3.outside(r, 0, 2, 2) and not b3.outside(r, 0, 2, 1)   # past 'Lessons end by'
 
+@t
+def test_a_day_a_teacher_may_take_two_lessons_at_once():
+    days = ["Odd Mon", "Odd Fri", "Even Mon", "Even Fri"]; dd = lambda v: spec_mod.double_days(dict(extra_settings=[[spec_mod.DOUBLE, v, ""]]), days)
+    assert dd("Even Fri") == {3} and dd("even friday") == {3} and dd("Fri") == {1, 3} and dd("Odd Mon; Even Fri") == {0, 3} and dd("") == set() and dd(None) == set() and dd("Sat, Even") == set()
+    assert spec_mod.double_days({}, days) == set() and spec_mod.double_days(dict(extra_settings=[["Lessons end by (Friday)", "Fri", ""]]), days) == set()
+    L = [lesson(1, 0, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room="TBC", level=LV), lesson(2, 0, 2, 1, [B], "Art", ENTIRE, [T[0]], room="TBC", level=LV),
+         lesson(3, 1, 2, 1, [A], SUBJ, ENTIRE, [T[0]], room="TBC", level=LV), lesson(4, 1, 2, 1, [B], "Art", ENTIRE, [T[0]], room="TBC", level=LV)]
+    school = dict(SP["school"], extra_settings=list(SP["school"].get("extra_settings") or []) + [[spec_mod.DOUBLE, DAYS[0], ""]])
+    m, sp = model_with(L, school=school); b = fixes.Busy(m); mk = lambda i: [k for k in fixes.marks(b, b.ids[i]) if k != "noroom"]
+    assert m["double"] == {0} and mk(1) == [] and mk(2) == [] and mk(3) == ["teacher"] and mk(4) == ["teacher"]   # allowed on the day named, a mistake on the next
+    assert b.clash(b.ids[3], 0, 3, 1, ignore=(3,)) is None and b.clash(b.ids[1], 1, 2, 1, ignore=(1,)).startswith(f"{T[0]} is teaching ")
+    ch = export.check_model(m)["problems"]
+    assert sum(x.startswith("Teacher in two lessons (allowed that day): ") for x in ch) == 1 and sum(x.startswith("Teacher double-booked: ") for x in ch) == 1, ch
+    allowed = next(x for x in ch if x.startswith("Teacher in two lessons")); assert verify.crit_of(allowed) == "" and verify.crit_of(next(x for x in ch if x.startswith("Teacher double"))) == "teacher"
+    m0, _ = model_with(L); assert m0["double"] == set() and sum(x.startswith("Teacher double-booked: ") for x in export.check_model(m0)["problems"]) == 2
+
 print(f"{n} checks passed")
