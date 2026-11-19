@@ -168,10 +168,14 @@ class _Run:
             week = "Odd" if self.P.odd_day[d] else "Even"
             for x in part:   # each group keeps a room it may use busy: the smallest that seats it, so bigger rooms stay free for bigger groups
                 _, E, _, _ = self.P.allowed_at(x, u, q, ln, week if self.P.week_limited(x) else None)
-                if E: sp["rules"].append(dict(scope="Room", target=min(E, key=lambda r: (self.P.seats.get(r) or 0, r)), rule="Not available", strength="Must", week=wk, day=dy, **span))
+                if E: sp["rules"] += self.hold_rules(min(E, key=lambda r: (self.P.seats.get(r) or 0, r)), wk, dy, span)
             for _, c, h in rain_rooms(self.P, [dict(part=part, unit=u)]):   # the other level's PE keeps its class's home room free
-                sp["rules"].append(dict(scope="Room", target=h, rule="Not available", strength="Must", week=wk, day=dy, **span))
+                sp["rules"] += self.hold_rules(h, wk, dy, span)
         return sp
+
+    def hold_rules(self, room, wk, dy, span):
+        """Must 'Not available' rules that keep a room busy: one per single room (a combined venue holds each of its rooms)"""
+        return [dict(scope="Room", target=x, rule="Not available", strength="Must", week=wk, day=dy, **span) for x in self.P.singles(room)]
 
     def resolve_part(self, lv, free_classes):
         """re-solve the lessons of these classes in level lv (rest of the level kept); keep it if clashes drop"""

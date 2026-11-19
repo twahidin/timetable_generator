@@ -195,5 +195,39 @@ def a_solve_keeps_the_rule():   # slow: only with --full
     assert all(len(set(v)) == 1 for v in use.values())
 if "--full" in sys.argv: t(a_solve_keeps_the_rule)
 
+import checks  # noqa: E402
+from ttgen import staged  # noqa: E402
+
+def the_sums_never_count_the_pair_as_a_room():
+    sp = pair_school(); P = Problem(sp)
+    rows = [x for x in checks.room_sums(P) if x["kind"] == "d&t studio"]
+    assert rows and all(set(x["rooms"]) <= {S1, S2} for x in rows)           # sums are over single rooms
+    one = [x for x in checks.room_sums(Problem(secondary())) if x["kind"] == "d&t studio"]
+    assert max(x["have"] for x in rows) == max(x["have"] for x in one)        # two studios' worth, as without the pair
+    assert max(x["need"] for x in rows) > max(x["need"] for x in one)         # a class in the pair weighs two; the small groups one
+t(the_sums_never_count_the_pair_as_a_room)
+
+def a_band_needing_two_studios_is_not_helped_by_the_pair():
+    sp = pair_school(); out = checks._loads_and_rooms(sp, Problem(sp))
+    base = secondary(); want = [x for x in checks._loads_and_rooms(base, Problem(base)) if "rooms at once" in x[1]]
+    assert [x for x in out if "rooms at once" in x[1]] == want
+t(a_band_needing_two_studios_is_not_helped_by_the_pair)
+
+def an_unknown_size_is_warned_about():
+    sp = pair_school()
+    for x in sp["lessons"]:
+        if x.get("code") == "3DTP1": x["students"] = None
+    for s in sp["students"]: s["groups"] = [g for g in s.get("groups") or [] if g != "3DTP1"]
+    out = checks._loads_and_rooms(sp, Problem(sp))
+    assert ("lessons", f"Design & Technology G3 3DTP1: no group size is known, so it may be given any d&t studio, {PAIR} included. Give its Students on step 5.") in out
+t(an_unknown_size_is_warned_about)
+
+def a_held_pair_holds_both_studios():
+    run = staged._Run(pair_school(), 5, 1, lambda *a: None)
+    rules = run.hold_rules(PAIR, "Both", "Mon", dict({"from": 1, "to": 3}))
+    assert sorted(r["target"] for r in rules) == [S1, S2] and all(r["rule"] == "Not available" and r["scope"] == "Room" for r in rules)
+    assert [r["target"] for r in run.hold_rules(S1, "Both", "Mon", dict({"from": 1, "to": 3}))] == [S1]
+t(a_held_pair_holds_both_studios)
+
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")
