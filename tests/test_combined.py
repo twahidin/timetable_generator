@@ -136,5 +136,15 @@ def a_rule_finds_a_room_typed_with_a_stray_space():
     assert not any("not on step 1" in x for x in map(str, solver.rule_problems(sp)))
 t(a_rule_finds_a_room_typed_with_a_stray_space)
 
+def room_names_are_cleaned_when_the_problem_is_built():
+    sp = pair_school(); next(v for v in sp["venues"] if v["room"] == S1)["room"] = S1 + " "; sp["venues"][-1]["made_of"] = [S1 + " ", S2]
+    sp["classes"][0]["home_room"] = S1 + " "
+    sp["rules"].append(dict(scope="Room", target=S1 + " ", rule="Not available", strength="Must", week="Both", day="All", **{"from": 1, "to": 2}))
+    P = Problem(sp); assert S1 in P.room_kind and P.spec["classes"][0]["home_room"] == S1 and P.off[S1]
+    assert not any("not a room" in str(x) for x in solver.rule_problems(sp))
+    assert SPEC.clean_rooms({}) == {}
+    once = copy.deepcopy(SPEC.clean_rooms(copy.deepcopy(sp))); assert SPEC.clean_rooms(copy.deepcopy(once)) == once
+t(room_names_are_cleaned_when_the_problem_is_built)
+
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")

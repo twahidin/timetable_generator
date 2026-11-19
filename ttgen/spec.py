@@ -99,6 +99,18 @@ def venue_parts(venues):
         if len(rooms) >= 2 and all(r != name and r in made and not made[r] for r in rooms): out[name] = rooms
     return out
 
+def clean_rooms(spec):
+    """room names made clean in place (idempotent): venue rows and what they are made of, classes' home rooms, Room rules' targets"""
+    for v in spec.get("venues") or []:
+        if isinstance(v, dict):
+            if "room" in v: v["room"] = clean_name(v["room"]) if v["room"] is not None else v["room"]
+            if isinstance(v.get("made_of"), (list, tuple)): v["made_of"] = [clean_name(x) for x in v["made_of"]]
+    for c in spec.get("classes") or []:
+        if isinstance(c, dict) and c.get("home_room"): c["home_room"] = clean_name(c["home_room"])
+    for r in spec.get("rules") or []:
+        if isinstance(r, dict) and r.get("scope") == "Room" and r.get("target") is not None: r["target"] = clean_name(r["target"])
+    return spec
+
 def single_rooms(name, parts):
     """the single rooms a venue stands for: its rooms when it is a combined venue, else itself"""
     return list(parts[name]) if name in parts else [name]

@@ -14,7 +14,7 @@ lessons as it can (cheaper than bending a Prefer rule or pushing a lesson after 
 import collections, math, re, time
 from ortools.sat.python import cp_model
 from .reader import derive
-from .spec import PE_KIND, RULE_TYPES, SCOPES, TYPED, WEEKDAYS, ampm, family as _family, clean_name, floating_recess, names_list, periods_by_day, resolve_row, structure_vs_rules, \
+from .spec import PE_KIND, RULE_TYPES, SCOPES, TYPED, WEEKDAYS, ampm, clean_rooms, family as _family, clean_name, floating_recess, names_list, periods_by_day, resolve_row, structure_vs_rules, \
     subject_test, teacher_depts, trim_day, venue_parts, windows as _windows
 
 W_PREF, W_SLACK, W_MOVE = 60, 40, 10
@@ -23,7 +23,7 @@ RECESS_KEY = "~recess"   # in a placements file: {class: [[start, length]]}, eac
 
 class Problem:
     def __init__(self, spec):
-        self.spec = spec; self.warn = derive(spec)
+        self.spec = clean_rooms(spec); self.warn = derive(spec)
         sc = spec["school"]; self.NP = int(sc["periods_per_day"]); self.levels = list(sc["levels"])
         ds = spec["day_structure"]
         lv0 = next((lv for lv in self.levels if lv in ds), None)
