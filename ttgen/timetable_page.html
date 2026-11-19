@@ -141,9 +141,9 @@ const CLS = D.classes.map(r => ({ name: r[0], level: r[1], size: r[2], home: r[3
 const PNAME = D.parents_name || "Form teachers";
 const parentsLine = c => { const ps = (cIx.get(c) || {}).parents || []; return ps.length ? ` · ${PNAME}: ${ps.join(", ")}` : ""; };
 const TCH = D.teachers.map(r => ({ name: r[0], short: r[1], dept: r[2], allowance: r[3] }));
-const ROOMS = D.rooms.map(r => ({ name: r[0], kind: r[1], cap: r[2], equipment: r[3] || [], config: r[4] || "" }));   // an older page's data has three elements
+const ROOMS = D.rooms.map(r => ({ name: r[0], kind: r[1], cap: r[2], equipment: r[3] || [], config: r[4] || "", parts: r[5] || [] }));   // an older page's data has three elements; a combined venue lists its rooms in the sixth
 const STU = D.students.map(r => ({ id: String(r[0]), name: r[1], cls: r[2], groups: r[3] }));
-const cIx = new Map(CLS.map(c => [c.name, c])), tIx = new Map(TCH.map(t => [t.name, t])), rIx = new Map(ROOMS.map(r => [r.name, r])), sIx = new Map(STU.map(s => [s.id, s]));
+const cIx = new Map(CLS.map(c => [c.name, c])), tIx = new Map(TCH.map(t => [t.name, t])), rIx = new Map(ROOMS.map(r => [r.name, r])), sIx = new Map(STU.map(s => [s.id, s])), singles = n => (rIx.get(n) || {}).parts && rIx.get(n).parts.length ? rIx.get(n).parts : [n];   // the single rooms a venue stands for
 const uniq = a => [...new Set(a)];
 const short = s => (D.subjects[s] || [s])[0];
 const colorOf = s => (D.subjects[s] || [s, 0])[1];
@@ -151,7 +151,7 @@ const deptOf = s => (D.subjects[s] || [])[2] || "";   // an older page's data ha
 const pal = i => D.palette[i % D.palette.length];
 const untag = s => short(s).replace(/\s+(G[123]|Std|Fdn)$/, "");
 const tshort = ts => ts.map(t => (tIx.get(t) || {}).short || t).join(", ");
-const busyTeachers = new Set(L.flatMap(x => x.teachers)), busyRooms = new Set(L.map(x => x.room).filter(Boolean)), busyClasses = new Set(L.flatMap(x => x.classes));
+const busyTeachers = new Set(L.flatMap(x => x.teachers)), busyRooms = new Set(L.flatMap(x => x.room ? [x.room, ...singles(x.room)] : [])), busyClasses = new Set(L.flatMap(x => x.classes));
 const time = p => D.times[Math.max(0, Math.min(NP - 1, p))];
 const when = x => `${DAYS[x.d]} ${time(x.p)[0]}–${time(x.p + x.n - 1)[1]}`;
 function weekDay(n) { const p = String(n).split(" "); return p.length > 1 ? [p[0], p[p.length - 1]] : ["", p[0]]; }
@@ -212,14 +212,14 @@ function teacherView(t) {
     stats: [[total, "periods a cycle"], [info.allowance || "-", "allowance"], [days.length ? Math.max(...days) : 0, "most in a day"], [days.length, "days teaching"]], codes: codesFor(rows.map(x => x.level)), cells, legend, lt: "Teaching", rows };
 }
 function roomView(r) {
-  const info = rIx.get(r) || { name: r, kind: "", cap: 1 }, rows = L.filter(x => x.room === r), cells = [], used = new Set(), ent = new Map();
+  const info = rIx.get(r) || { name: r, kind: "", cap: 1 }, rows = L.filter(x => x.room === r || singles(x.room).includes(r)), cells = [], used = new Set(), ent = new Map();   // a lesson in a combined venue is in each of its rooms
   for (const [, xs] of byId(rows)) {
     const x0 = xs[0]; for (let q = x0.p; q < x0.p + x0.n; q++) used.add(x0.d * NP + q);
-    cells.push(cellOf(xs, uniq(xs.map(x => short(x.subject))).join(" + "), [uniq(xs.map(x => x.group !== ENTIRE ? x.group : x.classes.join(", "))).join(", "), tshort(uniq(xs.flatMap(x => x.teachers)))]));
+    cells.push(cellOf(xs, uniq(xs.map(x => short(x.subject))).join(" + "), [uniq(xs.map(x => x.group !== ENTIRE ? x.group : x.classes.join(", "))).join(", "), tshort(uniq(xs.flatMap(x => x.teachers))), ...(x0.room !== r ? [`with ${singles(x0.room).filter(o => o !== r).join(", ")}, as ${x0.room}`] : [])]));
     for (const x of xs) { const k = x.subject + "|" + (x.group !== ENTIRE ? x.group : x.classes.join(", ")); let e = ent.get(k); if (!e) ent.set(k, e = { x, periods: 0 }); e.periods += x.n; }
   }
   const codes = codesFor(rows.map(x => x.level)), open = codes ? codes.join("").split("").filter(c => c === "L").length : ND * NP;
-  return { kind: "room", key: r, kicker: "Room", title: r, sub: `${info.kind || ""}${info.cap > 1 ? ` · ${info.cap} groups at once` : ""}${(info.equipment || []).length ? ` · Equipment: ${info.equipment.join(", ")}` : ""}${info.config ? ` · Configuration: ${info.config}` : ""}`,
+  return { kind: "room", key: r, kicker: "Room", title: r, sub: `${info.kind || ""}${info.cap > 1 ? ` · ${info.cap} groups at once` : ""}${(info.equipment || []).length ? ` · Equipment: ${info.equipment.join(", ")}` : ""}${info.config ? ` · Configuration: ${info.config}` : ""}${(info.parts || []).length ? ` · made of ${info.parts.join(" + ")}` : ""}`,
     stats: [[info.kind || "-", "kind"], [used.size, "periods used"], [Math.round(100 * used.size / Math.max(1, open)) + "%", "of lesson time"]], codes, cells,
     legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.group !== ENTIRE ? e.x.group : e.x.classes.join(", ")} · ${tshort(e.x.teachers)} · ${e.periods} periods` })), lt: "Used by", rows };
 }
@@ -354,7 +354,7 @@ function lessonMatches(x, f) {
   const a = f.from === undefined || f.from === "" ? 0 : +f.from, b = f.to === undefined || f.to === "" ? NP - 1 : +f.to;
   if (x.p + x.n - 1 < a || x.p > b) return false;
   if (f.level && x.level !== f.level) return false; if (f.dept && deptOf(x.subject) !== f.dept) return false; if (f.subject && x.subject !== f.subject) return false; if (f.teacher && !x.teachers.includes(f.teacher)) return false;
-  if (f.room && x.room !== f.room) return false; if (f.cls && !x.classes.includes(f.cls)) return false; if (f.block && x.block !== f.block) return false;
+  if (f.room && x.room !== f.room && !singles(x.room).includes(f.room)) return false; if (f.cls && !x.classes.includes(f.cls)) return false; if (f.block && x.block !== f.block) return false;
   if (f.group && x.group !== f.group) return false; if (f.ext && !x.ext) return false;
   if (f.q) { const s = [DAYS[x.d], x.level, x.block, x.classes.join(" "), x.subject, short(x.subject), x.group, x.teachers.join(" "), tshort(x.teachers), x.room].join(" ").toLowerCase(); if (!f.q.toLowerCase().split(/\s+/).every(w => s.includes(w))) return false; }
   return true;
@@ -439,8 +439,8 @@ function renderFree() {
   const tb = new Set(), rb = new Set(), cb = new Set(), load = {};
   const seenTL = new Set();
   L.forEach(x => { if (x.d !== +f.d) return; x.teachers.forEach(t => { const k = t + "|" + x.id; if (!seenTL.has(k)) { seenTL.add(k); load[t] = (load[t] || 0) + x.n; } });
-    if (x.p <= +f.to && x.p + x.n - 1 >= +f.from) { x.teachers.forEach(t => tb.add(t)); if (x.room) rb.add(x.room); if (x.rain) x.rain.split(", ").forEach(r => rb.add(r)); x.classes.forEach(c => cb.add(c)); } });
-  const freeT = TCH.filter(t => busyTeachers.has(t.name) && !tb.has(t.name)), freeR = ROOMS.filter(r => !rb.has(r.name) && r.name !== "TBC");
+    if (x.p <= +f.to && x.p + x.n - 1 >= +f.from) { x.teachers.forEach(t => tb.add(t)); if (x.room) singles(x.room).concat(x.room).forEach(r => rb.add(r)); if (x.rain) x.rain.split(", ").forEach(r => singles(r).concat(r).forEach(q => rb.add(q))); x.classes.forEach(c => cb.add(c)); } });
+  const freeT = TCH.filter(t => busyTeachers.has(t.name) && !tb.has(t.name)), freeR = ROOMS.filter(r => !rb.has(r.name) && !r.parts.some(q => rb.has(q)) && r.name !== "TBC");
   const grp = (arr, g) => { const m = new Map(); arr.forEach(x => { const k = g(x) || "Other"; if (!m.has(k)) m.set(k, []); m.get(k).push(x); }); return [...m].sort((a, b) => a[0].localeCompare(b[0])); };
   const inSchool = CLS.filter(c => busyClasses.has(c.name)).filter(c => { const g = D.grid[c.level]; if (!g) return false; for (let p = +f.from; p <= +f.to; p++) if (g[+f.d][p] === "L") return true; return false; });
   $("#view").innerHTML = `<div class="card"><h1 style="margin:0 0 10px;font-size:20px">Who's free</h1><div class="filters">

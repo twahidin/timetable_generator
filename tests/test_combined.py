@@ -335,5 +335,18 @@ def the_room_list_says_what_holds_a_studio():
     r = {x["room"]: x for x in out["rooms"]}; assert not r[S1]["free"] and not r[S2]["free"] and "Design & Technology" in r[S1]["holding"]
 t(the_room_list_says_what_holds_a_studio)
 
+def room_pages_show_the_pair_on_each_studio():
+    sp, p0, t1, t2, t3 = lessons_for()
+    _, m = a_model([(0, p0, 2, ["1A"], "Design & Technology", ENTIRE, t1, PAIR), (1, p0, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, S1)], sp)
+    v1, v2, vp = export.room_view(m, S1), export.room_view(m, S2), export.room_view(m, PAIR)
+    assert len(v1["cells"]) == 2 and len(v2["cells"]) == 1 and len(vp["cells"]) == 1
+    mine = next(c for c in v1["cells"] if c["d"] == 0); assert f"with {S2}, as {PAIR}" in mine["lines"]
+    assert dict((b, a) for a, b in v1["stats"])["periods used"] == "3" and dict((b, a) for a, b in v2["stats"])["periods used"] == "2"
+    assert f"made of {S1} + {S2}" in vp["subtitle"]
+    assert {S1, S2, PAIR} <= {v["key"] for v in export.all_views(m, "rooms")}   # Studio 2 is named by no lesson and still has a page
+    d = export.html_data(m); row = next(r for r in d["rooms"] if r[0] == PAIR); assert row[5] == [S1, S2]
+    assert next(r for r in d["rooms"] if r[0] == S1)[5] == []
+t(room_pages_show_the_pair_on_each_studio)
+
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")

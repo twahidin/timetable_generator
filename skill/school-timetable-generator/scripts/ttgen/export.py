@@ -521,13 +521,13 @@ def teacher_view(m, t):
                 legend=legend, legend_title="Teaching", group=info["dept"] or "Other")
 
 def room_view(m, r):
-    info = m["room_ix"][r]; rows = [x for x in m["lessons"] if x["room"] == r]
+    info = m["room_ix"][r]; parts = m.get("room_parts") or {}; rows = [x for x in m["lessons"] if x["room"] == r or r in single_rooms(x["room"], parts)]   # a lesson in a combined venue is in each of its rooms
     cells, ent, used = [], collections.OrderedDict(), set()
     for lid, xs in _by_id(rows).items():
         x0 = xs[0]; used |= {(x0["d"], q) for q in range(x0["p"], x0["p"] + x0["n"])}
         who = ", ".join(dict.fromkeys(x["group"] if x["group"] != ENTIRE else ", ".join(x["classes"]) for x in xs))
         cells.append(dict(d=x0["d"], p=x0["p"], n=x0["n"], title=" + ".join(dict.fromkeys(abbrev(x["subject"]) for x in xs)),
-                          lines=[who, _tshort(m, list(dict.fromkeys(t for x in xs for t in x["teachers"])))], color=_color(m, x0["subject"]),
+                          lines=[who, _tshort(m, list(dict.fromkeys(t for x in xs for t in x["teachers"])))] + ([f"with {', '.join(o for o in parts[x0['room']] if o != r)}, as {x0['room']}"] if x0["room"] != r else []), color=_color(m, x0["subject"]),
                           ext=any(x["ext"] for x in xs), id=lid))
         for x in xs:
             k = (x["subject"], x["group"] if x["group"] != ENTIRE else ", ".join(x["classes"]))
@@ -539,7 +539,8 @@ def room_view(m, r):
     plain = f"{info['kind'].capitalize()}" + (f" · holds {info['capacity']}" if info["capacity"] else "")
     eq, cf = ", ".join(info.get("equipment") or []), info.get("configuration") or ""   # read with .get: a model published before this has neither
     more = " · ".join(x for x in (f"Equipment: {eq}" if eq else "", f"Configuration: {cf}" if cf else "") if x)
-    return dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=plain + (f" · {more}" if more else ""), pdf_subtitle=plain, extra_line=more,
+    made = f" · made of {' + '.join(info['parts'])}" if info.get("parts") else ""   # a combined venue says which rooms it is made of
+    return dict(kind="rooms", key=r, kicker="Room", title=r, subtitle=plain + (f" · {more}" if more else "") + made, pdf_subtitle=plain + made, extra_line=more,
                 stats=stats, codes=codes, cells=cells, legend=legend, legend_title="Used by", group=info["kind"])
 
 def student_rows(m, cls, groups):
@@ -571,7 +572,7 @@ def all_views(m, kind):
         for t in sorted(m["teachers"], key=lambda t: (str(t["dept"]).lower(), t["name"].lower())):
             if t["name"] in busy: yield teacher_view(m, t["name"])
     elif kind == "rooms":
-        busy = {x["room"] for x in m["lessons"]}
+        parts = m.get("room_parts") or {}; busy = {r for x in m["lessons"] for r in [x["room"], *single_rooms(x["room"], parts)]}   # a room of a combined venue has a page though no lesson names it
         for r in m["rooms"]:
             if r["name"] in busy: yield room_view(m, r["name"])
     elif kind == "students":
@@ -992,7 +993,7 @@ def html_data(m, view="full", student_id=None, app=None):
     d = dict(school=m["school"], generated=m["generated"], days=m["days"], NP=m["NP"], times=m["times"], grid=m["grid"], cgrid=m["cgrid"], levels=m["levels"],
              classes=[[c["name"], c["level"], c["size"], c["home"], c.get("parents") or []] for c in m["classes"]], parents_name=m.get("parents_name") or "Form teachers",
              teachers=[[t["name"], t["short"], t["dept"], t["allowance"]] for t in m["teachers"]],
-             rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1), r.get("equipment") or [], r.get("configuration") or ""] for r in m["rooms"]],   # equipment and configuration: notes only
+             rooms=[[r["name"], r["kind"], m["room_cap"].get(r["name"], 1), r.get("equipment") or [], r.get("configuration") or "", r.get("parts") or []] for r in m["rooms"]],   # equipment and configuration: notes only
              subjects={k: [v["short"], v["color"], v.get("dept") or ""] for k, v in m["subjects"].items()}, palette=pal, ext=list(EXT),   # the department: the Lessons view's filter
              lessons=[[x["id"], x["d"], x["p"], x["n"], x["level"], x["block"], x["classes"], x["subject"], x["group"], x["teachers"], x["room"], int(x["ext"])] + ([x["rain"]] if x.get("rain") else [])
                       for x in m["lessons"]],
