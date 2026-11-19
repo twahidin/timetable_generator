@@ -140,6 +140,7 @@ def check(res):
     cap = {v["room"]: 1 for v in P.spec["venues"]}
     for r in P.spec.get("rules", []):
         if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and r.get("target") in cap and r.get("number"): cap[r["target"]] = int(r["number"])
+    for c, rs in P.parts.items(): cap.update({x: 1 for x in [c] + rs})   # a combined venue and its rooms take one group at a time
     rb = collections.Counter((s, q) for x in L for room in x["rooms"].values() if room != "TBC" for s in P.singles(room) for q in x["pos"])   # a combined venue: each of its rooms
     probs += [f"Room over capacity: {room} at {P.days[q // NP]} period {q % NP}." for (room, q), n in rb.items() if room != "TBC" and n > cap.get(room, 1)]
     tbc = sum(1 for x in L for room in x["rooms"].values() if room == "TBC")

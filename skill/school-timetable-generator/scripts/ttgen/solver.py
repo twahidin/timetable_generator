@@ -57,6 +57,7 @@ class Problem:
             self.room_kind[c] = self.room_kind.get(rooms[0], self.room_kind[c])
             if self.seats[c] is None and all(self.seats.get(x) for x in rooms): self.seats[c] = sum(self.seats[x] for x in rooms)
             self.room_cap[c] = 1
+            for x in rooms: self.room_cap[x] = 1   # its rooms take one group at a time too, whatever an "At most N at once" rule says
         self.two_weeks = any(d.startswith("Even") for d in self.days)
         self.odd_day = [not d.startswith("Even") for d in self.days]
         # 'Only in venues': a lesson that runs into the rule's periods uses only the rooms it lists (Must), or those rooms
@@ -628,9 +629,14 @@ def solve(spec, time_limit=300, workers=8, log=print, skip=(), stop=None, previo
             ivs = [iv for iv, _, _ in sub] + [m.NewIntervalVar(run[0], len(run), run[0] + len(run), "") for run, _ in runs]
             dem = [min(n, cap) for _, n, _ in sub] + [c for _, c in runs]
             if "rooms" not in skip: m.AddCumulative(ivs, dem, cap)
-    for kind, lst in combined.items():   # a kind with a combined venue: count single rooms. A lesson in a combined venue is in
-        every = frozenset(x for x, k in P.room_kind.items() if k == kind)   # each of its rooms; for each family of single rooms some
-        for G in room_families({E for _, E, _, _ in lst}, every, P.parts):   # groups are limited to, those groups fit in it
+    # a kind with a combined venue: count single rooms. A lesson in a combined venue is in each of its rooms; for each family of
+    # single rooms some groups are limited to, those groups fit in it at every period. That is exact only when the kind's single
+    # rooms are exactly one combined venue's rooms. Otherwise (a third room of the kind, or two combined venues) per-period
+    # counting does not guarantee a hand-out: a lesson cannot change rooms part way, so a group may be left with a room marked
+    # TBC, which the check reports
+    for kind, lst in combined.items():
+        every = frozenset(x for x, k in P.room_kind.items() if k == kind)
+        for G in room_families({E for _, E, _, _ in lst}, every, P.parts):
             cap = sum(P.room_cap.get(x, 1) for x in G); sub = [(iv, n * weight(E, P.parts), b) for iv, E, n, b in lst if under(E, P.parts) <= G]
             if not sub or not cap: continue
             if G == under(every, P.parts):

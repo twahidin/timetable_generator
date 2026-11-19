@@ -95,7 +95,9 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
         if own or n not in parts: return own
         ns = [_whole(seats.get(r)) for r in parts[n]]   # the sum, only when every room's seats are known
         return sum(ns) if all(ns) else ""
-    rooms = [dict(name=str(v["room"]), kind=v.get("kind") or "classroom", capacity=_cap(v), parts=list(parts.get(clean_name(v["room"]), [])),
+    kinds = {clean_name(v["room"]): v.get("kind") or "classroom" for v in spec["venues"]}
+    _kind = lambda v: kinds.get(parts[clean_name(v["room"])][0], "classroom") if clean_name(v["room"]) in parts else v.get("kind") or "classroom"   # a combined venue: its first room's kind (as the solver's Problem)
+    rooms = [dict(name=str(v["room"]), kind=_kind(v), capacity=_cap(v), parts=list(parts.get(clean_name(v["room"]), [])),
                   equipment=[str(e).strip() for e in v.get("equipment") or [] if str(e).strip()], configuration=str(v.get("configuration") or "").strip()) for v in spec["venues"]]
     seen = {r["name"] for r in rooms}
     for L in lessons:
@@ -121,6 +123,7 @@ def _model(spec, days, lessons, notes=(), status=None, recess=None):
     for r in spec.get("rules", []):
         if r.get("rule") == "At most N at once" and r.get("scope") == "Room" and r.get("target") in cap and r.get("number"):
             cap[r["target"]] = int(r["number"])
+    for c, rs in parts.items(): cap.update({x: 1 for x in [c] + rs if x in cap})   # a combined venue and its rooms take one group at a time
     planned = {}
     for x in spec["lessons"]:
         if not x.get("periods") or not x.get("classes"): continue
@@ -256,8 +259,8 @@ def model_from_files(setup_path, timetable_path, spec=None, edit=None):
             if lid is None: lid = ids.setdefault((dix[day.lower()], p, n, block or f"{group}|{g(row, 'Classes')}"), len(ids) + 1)
             out.append(dict(id=int(lid), d=dix[day.lower()], p=p, n=n, level=str(g(row, "Level") or ""), block=block,
                             classes=_split_list(g(row, "Classes")), subject=subject, group=group, teachers=_split_list(g(row, "Teachers")),
-                            room=str(g(row, "Room") or ""), ext=str(g(row, "After school") or "").strip().lower() in ("yes", "y", "true", "1", "x"),
-                            rain=str(g(row, "Rain room") or "")))
+                            room=clean_name(g(row, "Room")), ext=str(g(row, "After school") or "").strip().lower() in ("yes", "y", "true", "1", "x"),
+                            rain=", ".join(clean_name(h) for h in _split_list(g(row, "Rain room")))))   # room names as the setup's (cleaned): "Lab 1 " is Lab 1
         notes, status = (list(db[2]), db[3]) if db else ([], None)
         report = list(db[6]) if db else []
         if wb and "Rule report" in wb.sheetnames: report = rule_report_rows(wb["Rule report"].iter_rows(values_only=True))
@@ -324,7 +327,7 @@ def check_model(m):
         text = f"Room over capacity: {r} on {w} (holds {m['room_cap'].get(r, 1)} at once" + (f"; in use as part of {via})." if via else ")."); probs.append(text)
         x = next((x for x in stands if x["classes"]), None)
         if x: place.setdefault(text, []).append(dict(cls=x["classes"][0], day=days[d], period=x["p"], id=x["id"], row=x["group"]))
-    rain = {(h, x["d"], q) for x in L for h in _split_list(x.get("rain")) if h != "TBC" for q in range(x["p"], x["p"] + x["n"])}   # home rooms kept for PE in rain
+    rain = {(s, x["d"], q) for x in L for h in _split_list(x.get("rain")) if h != "TBC" for s in single_rooms(h, parts) for q in range(x["p"], x["p"] + x["n"])}   # home rooms kept for PE in rain (a combined venue: each of its rooms)
     probs += [f"Rain room in use: {r} on {w} is the home room of a class at PE, but a lesson is in it." for r, d, w, _ in spans({k for k in rain if rb[k]})][:30]
     probs += [f"No rain room: {', '.join(x['classes'])} {x['subject']} on {m['days'][x['d']]} period {x['p']} (the home room is in use)." for x in L if x.get("rain") == "TBC"][:30]
     occ = collections.defaultdict(lambda: collections.defaultdict(set)); whole = collections.defaultdict(set)

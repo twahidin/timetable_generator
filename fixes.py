@@ -58,6 +58,14 @@ def rows_of_key(rows, k):
     """the rows of the key k (a tuple from _key or _row_key): an entire-class row of the subject for a class of the key, or a row of the key's group"""
     return [x for x in rows if (x["group"] == ENTIRE and k[0] == "C" and k[1] in x["classes"] and x["subject"] == k[2]) or (k[0] == "G" and x["group"] == k[1])]
 
+def _room(room, spec):
+    """a fix's room as the setup names it (runs of spaces made one, ends trimmed: a fix stored before names were cleaned still
+    finds its room); ValueError when it is not on the setup's list of rooms. No room stays as it is"""
+    if not room: return room
+    r = spec_mod.clean_name(room)
+    if r not in {spec_mod.clean_name(v.get("room")) for v in spec.get("venues") or []}: raise ValueError(f"{room} is not on the setup's list of rooms.")
+    return r
+
 def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, pool=None):
     """change lessons (a list the caller owns) in place and return the sentence for the committee; ValueError(sentence) when the
     fix cannot apply (every kind checks before it changes anything). new_id: the id an add takes (default 1 + the highest in
@@ -125,19 +133,19 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
     if kind == "room":
         x = next((x for x in _rows(lessons + pool, fix["id"]) if x["group"] == fix["group"]), None)
         if x is None: raise ValueError(f"There is no row of {fix['group']} in that lesson.")
-        if fix["room"] and fix["room"] not in {v["room"] for v in spec.get("venues") or []}: raise ValueError(f"{fix['room']} is not on the setup's list of rooms.")
-        text = f"{what(x)} {'(not placed)' if pooled(fix['id']) else 'on ' + when(days, x['d'], x['p'])} is now in {fix['room'] or 'no room'}, not {x['room'] or 'no room'}."
-        keep([x]); x["room"] = fix["room"]; touched.add(x["id"])
+        room = _room(fix["room"], spec)
+        text = f"{what(x)} {'(not placed)' if pooled(fix['id']) else 'on ' + when(days, x['d'], x['p'])} is now in {room or 'no room'}, not {x['room'] or 'no room'}."
+        keep([x]); x["room"] = room; touched.add(x["id"])
         return text
     if kind == "add":
         key = _key(fix["key"]); e = verify.planned_rows(spec).get(key)
         if not e: raise ValueError(f"Step 5 has no lesson for {verify._name(key) if len(key) in (2, 3) else fix['key']}.")
         _slot(spec, days, fix["d"], fix["p"], fix["n"])
-        if fix["room"] and fix["room"] not in {v["room"] for v in spec.get("venues") or []}: raise ValueError(f"{fix['room']} is not on the setup's list of rooms.")
+        room = _room(fix["room"], spec)
         i = new_id if new_id is not None else 1 + max([y["id"] for y in lessons + pool], default=0); out = _out(fix, i)
         x = dict(id=i, d=fix["d"], p=fix["p"], n=fix["n"], level=e["level"] or "", block=str(e["rows"][0].get("block") or ""),
                  classes=list(e["classes"]), subject=e["subject"], group=ENTIRE if key[0] == "C" else key[1],
-                 teachers=list(dict.fromkeys(t for r in e["rows"] for t in r.get("teachers") or [])), room=fix["room"], ext=False, rain="")
+                 teachers=list(dict.fromkeys(t for r in e["rows"] for t in r.get("teachers") or [])), room=room, ext=False, rain="")
         x["ext"] = _after(spec, days, [x], x["d"], x["p"], x["n"]); pushed = push(out, [x], x["d"], x["p"], x["n"]); lessons.append(x); touched.add(x["id"])
         return f"Added {what(x)} on {when(days, x['d'], x['p'])} ({x['n']} period{'' if x['n'] == 1 else 's'}) {'in ' + x['room'] if x['room'] else 'with no room'}." + pushed
     if kind == "delete":
@@ -288,9 +296,9 @@ class Busy:
                     for c, k in self.gcls.get(x["group"], {}).items():
                         if y := f(("w", c, d, q), ignore): return _students(k, x["group"], y), y
         mine = collections.Counter(x["room"] for x in rows if not _no_room(x["room"]))
-        own = collections.Counter()   # a single room -> how many of the rows' own rows stand on it (the most through any one venue: a lesson's rows in the pair and in one of its rooms are not a clash)
+        own = collections.Counter()   # a single room -> how many of the rows' own rows stand on it (a row in a combined venue stands on each of its rooms, as check_model counts)
         for room, k in mine.items():
-            for s in self.rooms(room): own[s] = max(own[s], k)
+            for s in self.rooms(room): own[s] += k
         for room in mine:
             for s in self.rooms(room):
                 for q in Q:
