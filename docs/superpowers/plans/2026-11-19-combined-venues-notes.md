@@ -21,7 +21,13 @@ one review of the whole branch. Design: `docs/superpowers/specs/2026-11-19-combi
 6. **The slow solve test checks the two studios only** for "one lesson per room at a time". The sample school's Field
    and Hall take two classes at once by rule, so the plan's assertion over every room was wrong. The same test still
    asserts that the solver's own check reports no room over capacity.
-7. **Odd numbers count as unknown.** A seat count or a class size typed as text ("abc") no longer raises on step 8
+7. **The exact room model was not built.** The whole-branch review showed the solver's count is exact only where a
+   kind's rooms are one combined venue's own rooms (see Known limits). Making it exact everywhere means the solver
+   choosing a room for each lesson of such a kind. That is new solver design and was left as a follow-up.
+8. **A lesson's own rows count against a room.** A band with one row in the pair and one row in a room of the pair is
+   refused on a move, as the timetable's check already calls it a room used twice. (This reverses a note given to the
+   Task 6 builder.)
+9. **Odd numbers count as unknown.** A seat count or a class size typed as text ("abc") no longer raises on step 8
    (`spec.whole`). `spec.venue_problems` keeps its own reading, where "20.0" is unknown; `whole` reads it as 20.
 
 ## Departures from the design
@@ -36,10 +42,16 @@ one review of the whole branch. Design: `docs/superpowers/specs/2026-11-19-combi
 
 - The design's limits: a room is in at most one combined venue; no combined venue inside another; all its rooms of
   one kind; it and its rooms take one group at a time.
-- **The solver's count is exact for the usual shapes and loose for one.** When a group may use an ordinary room or
-  the pair (a class of 30, a third studio seating 30, the pair seating 40), it weighs 1. Two such classes and a small
-  group at one time pass the model; the room hand-out then leaves one of them with a room marked TBC and the check
-  reports it. It is the same "exact only when the sets nest" limit the solver had before.
+- **The solver's room count is exact only when a kind's rooms are exactly one combined venue's rooms** (two labs and
+  their pair, as the school's D&T and food labs are). Once the kind has any other room (a third studio, a second
+  pair, or a pair of classrooms among the classrooms), the solver counts rooms period by period, and that does not
+  guarantee every lesson can be given a room: with a third studio, lessons at staggered times can leave a class that
+  needs the pair with a room marked TBC. The check always reports it ("lesson-groups have no free room"); it is never
+  silent. Two ways round it today: keep the pair's rooms for their subject with the "For" box on step 1, so other
+  groups do not take them; or move one of the lessons. A test pins this case (`a_third_studio_is_a_known_limit`).
+- **Two warnings show on step 7 only** ("Will it fit?"), not in the Things to fix panel beside step 1: "No lesson is
+  limited to {venue}…" (the rooms' seats are so large that nobody needs the pair) and "no group size is known…".
+  They come from the server's sums.
 - A group whose size is not known may be given any room of its kind. Things to fix warns.
 - A setup saved with a stray space in a room name keeps the space in the saved name. Everything compares clean names,
   so it works; the space goes when the name is next typed.
@@ -94,11 +106,41 @@ seating 44, and the old "At most 2 at once" room rule dropped:
 - Things to fix: 16 warnings before, 20 after. The 4 new ones are the "no group size is known" warnings for those
   four groups. None went away.
 
+## After the whole-branch review (one fix pass, then one re-check)
+
+- A room name in the returned timetable's Room column, in a rain room and in a stored room change is cleaned like the
+  setup's, so a stray space cannot hide a clash through a pair.
+- The rain-room check on step 8 follows the one rule when a home room is a combined venue.
+- A broken combined venue shows on step 7 as critical under Venues (it showed as a warning under Lessons with a wrong
+  row number).
+- Combine says so when the suggested name is already a room, and how to convert that room.
+- The warning when no lesson is limited to a combined venue.
+- A room of a pair takes one group at a time even with an "At most N at once" rule on it; the pair's kind is read
+  from its rooms on the timetable side and on opening a setup; odd Made of values cannot raise; the "Add classes"
+  helper does not hand a combined venue out as a home room.
+- Checked in a browser after the fixes (sample school): the Combine message when the name is taken, the card's Kind
+  line, a reload, step 7 showing the new warning with "Open Venues" and the critical line for a pair with one room,
+  step 2 drawing, and an old single room turned into a combined venue by typing two room names into its Made of box
+  on the Table view (it kept its name and seats; its Kind became text). Not clicked: "Add (home rooms filled from
+  free classrooms)".
+- Left from the last re-check, both small: a department head could see "1 change could not be made" on opening the
+  page if the saved setup holds a combined venue whose kind is out of step and no committee page has opened it since
+  (any committee open corrects it); and the "No lesson is limited to…" warning also shows, oddly worded, for a
+  combined venue whose kind no lesson uses.
+- On the school's real setup loaded into a scratch server (numbers only, before the fix pass): every step drew with
+  no error, step 1 showed 74 rooms of which 2 combined, and the workbook written from it read back with both.
+
 ## For the committee, after this is live
 
-1. On step 1, add the two labs as rooms of 20 seats (D&T, and the food labs), tick each pair and press Combine. Set the
-   pair's seats (44 today).
-2. Take off the old single "D&T Lab 1&2" and "FCE Lab 1&2" rooms' "At most 2 at once" rule and the rule in words about
-   them, and point the "Only in venues" rule at the pair or the labs as wanted.
-3. Give the Students number for the four upper secondary groups that have none.
-4. Download the workbook and give the outside agent the skill 2026-11.9 with it.
+The setup today has ONE room for each pair ("D&T Lab 1&2", "FCE Lab 1&2"). Convert each; do not make a second one.
+
+1. On step 1 add the two labs as rooms of their own (D&T Lab 1, D&T Lab 2; the same for the food labs), 20 seats
+   each, the same kind as the old room.
+2. Turn the old room into the combined venue: on step 1's Table view, in the old room's Made of box, type the two
+   labs' names. It keeps its name, so the rules that name it still point at it. Set its seats (44 today).
+   (Ticking the two labs and pressing Combine works too, but then remove the old room: Combine says so.)
+3. Take off the "At most 2 at once" rule on the old room and the rule in words about the labs. The pair now does
+   what they tried to say.
+4. Give the Students number for the four upper secondary groups that have none (step 7 lists them).
+5. On step 7 press Check again and read "Will it fit?": nothing critical, and no "No lesson is limited to…" line.
+6. Download the workbook and give the outside agent the skill 2026-11.9 with it.
