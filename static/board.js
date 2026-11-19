@@ -527,6 +527,13 @@ var Board = (function () {
     return false;
   }
 
+  /* whether venues a and b share a single room (parts: a combined venue's name -> its rooms, or undefined): a venue meets itself and, for a combined venue, each of its rooms */
+  function roomsMeet(parts, a, b) {
+    if (!a || !b) return false;
+    var ra = parts && parts[a] ? parts[a] : [a], rb = parts && parts[b] ? parts[b] : [b];
+    return ra.some(function (x) { return rb.indexOf(x) >= 0; });
+  }
+
   /* a lesson's teachers split into those free then and those busy, each in the server's order */
   function people(lesson) {
     var all = (lesson && lesson.teachers) || [];
@@ -558,6 +565,6 @@ var Board = (function () {
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
            lands: lands, forced: forced, asks: asks, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
            warned: warned, flag: flag, at: at, clashPlace: clashPlace, of: of, hand: hand, handText: handText, people: people, venues: venues,
-           teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal };
+           teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, roomsMeet: roomsMeet };
 })();
 if (typeof module !== "undefined") module.exports = Board;

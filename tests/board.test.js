@@ -666,4 +666,15 @@ t("clashPlace: the day and first period a teacher clash's sentence names", () =>
   assert.strictEqual(Board.clashPlace("Teacher double-booked: Ann Ho on Odd Mon period 1 (7.50).", null), null);
 });
 
+t("roomsMeet: a venue meets its own rooms and itself, not its neighbour's", () => {
+  const parts = { "Lab 1&2": ["Lab 1", "Lab 2"] };
+  assert.strictEqual(Board.roomsMeet(parts, "Lab 1&2", "Lab 1"), true);
+  assert.strictEqual(Board.roomsMeet(parts, "Lab 2", "Lab 1&2"), true);
+  assert.strictEqual(Board.roomsMeet(parts, "Lab 1&2", "Lab 1&2"), true);
+  assert.strictEqual(Board.roomsMeet(parts, "Lab 1", "Lab 2"), false);
+  assert.strictEqual(Board.roomsMeet(undefined, "A", "A"), true);
+  assert.strictEqual(Board.roomsMeet(undefined, "A", "B"), false);
+  assert.strictEqual(Board.roomsMeet(parts, "", "Lab 1"), false);
+});
+
 console.log(`${n} cases passed`);

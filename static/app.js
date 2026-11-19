@@ -3852,7 +3852,7 @@ function bdBusyFor(c, fix, pending) {   // whether the teacher or room a hand-ov
     mine = cards.filter(x => (x.rows || []).some(y => y.key === fix.key)); has = x => (x.rows || []).some(y => (y.teachers || []).some(t => add.includes(t)));
   } else {
     if (!fix.room) return false;
-    mine = [c]; has = x => (x.rows || []).some(y => y.room === fix.room);
+    mine = [c]; has = x => (x.rows || []).some(y => Board.roomsMeet(d.room_parts, y.room, fix.room));
   }
   const ids = new Set(mine.map(x => x.id));
   const placed = x => x.d !== null && x.d !== undefined;   // a lesson in the tray has no time, so it is with no one then

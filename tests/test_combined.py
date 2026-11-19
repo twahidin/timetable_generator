@@ -303,5 +303,37 @@ def odd_numbers_do_not_throw():
     for v in (None, "", "abc", 0, -3, True): assert SPEC.whole(v) is None
 t(odd_numbers_do_not_throw)
 
+import fixes  # noqa: E402
+
+def busy_follows_the_one_rule():
+    sp, p0, t1, t2, t3 = lessons_for()
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR), (0, p0 + 1, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, S1),
+                    (0, p0 + 2, 1, ["1B"], "Design & Technology", ENTIRE, t2, PAIR)], sp)
+    b = fixes.Busy(m); L = m["lessons"]; g = [x for x in L if x["group"] == "3DTP1"]; i_g = g[0]["id"]; c2 = [x for x in L if x["classes"] == ["1B"]]; i_c2 = c2[0]["id"]
+    assert b.rooms(PAIR) == [S1, S2] and b.rooms(S1) == [S1]
+    assert b.clash(g, 0, p0, 1, ignore={i_g}) == f"{S1} is in use then."          # the group into a studio while 1A has the pair
+    assert b.clash(c2, 0, p0 + 1, 1, ignore={i_c2}) == f"{PAIR} is in use then."  # a class into the pair while the group has Studio 1
+    assert b.clash(c2, 0, p0, 1, ignore={i_c2}) == f"{PAIR} is in use then."      # two classes in the pair
+    other = [dict(g[0], room=S2)]; assert b.clash(other, 0, p0 + 1, 1, ignore={i_g}) is None
+    assert "room" not in fixes.marks(b, g)
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR), (0, p0, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, S1)], sp)
+    b = fixes.Busy(m); by = collections.defaultdict(list); [by[x["id"]].append(x) for x in m["lessons"]]
+    assert all("room" in fixes.marks(b, rows) for rows in by.values())
+t(busy_follows_the_one_rule)
+
+def one_lessons_own_rows_do_not_clash():
+    sp, p0, t1, t2, t3 = lessons_for()
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR)], sp)
+    x = m["lessons"][0]; m["lessons"].append(dict(x, group="3DTP1", classes=["3A"], teachers=t3, room=S1))   # the same lesson id: a band's rows
+    b = fixes.Busy(m); assert "room" not in fixes.marks(b, m["lessons"])
+t(one_lessons_own_rows_do_not_clash)
+
+def the_room_list_says_what_holds_a_studio():
+    sp, p0, t1, t2, t3 = lessons_for()
+    _, m = a_model([(0, p0, 1, ["1A"], "Design & Technology", ENTIRE, t1, PAIR), (0, p0, 1, ["3A"], "Design & Technology G3", "3DTP1", t3, "")], sp)
+    g = next(x for x in m["lessons"] if x["group"] == "3DTP1"); out = fixes.choices(m, sp, m["days"], g["id"], "3DTP1")
+    r = {x["room"]: x for x in out["rooms"]}; assert not r[S1]["free"] and not r[S2]["free"] and "Design & Technology" in r[S1]["holding"]
+t(the_room_list_says_what_holds_a_studio)
+
 # tests are added above this line by each task
 if __name__ == "__main__": print(f"{n} checks passed")
