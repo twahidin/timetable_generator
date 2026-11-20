@@ -516,7 +516,7 @@
     const rows = sm.days.map(d => {
       if (d.day == null) return `<tr><td><b>${esc(fmtDate(d.date))}</b></td><td class="muted" colspan="${levels.length || 1}">Not a school day</td></tr>`;
       return `<tr><td><b>${esc(fmtDate(d.date))}</b><br><span class="muted small">${esc(d.day)} · ${d.whole ? "whole day" : "part, to " + esc(d.window[1])}</span></td>${dayCells(d)}</tr>
-        <tr><td colspan="${levels.length + 1}" class="small muted dayline">Teachers: <b>${d.freed}</b> freed by the exam · <b>${d.on_duty}</b> on duty · <b>${d.teaching}</b> still teaching · <span class="${d.backups ? "amber" : ""}">${d.backups} backups</span></td></tr>`;
+        <tr><td colspan="${levels.length + 1}" class="small muted dayline">Teachers: <b>${d.freed}</b> freed by the exam · <b>${d.on_duty}</b> on duty · <b>${d.teaching}</b> still teaching · <span class="${d.backups ? "amber" : ""}">${d.backups} ${d.backups === 1 ? "backup" : "backups"}</span></td></tr>`;
     }).join("");
     const make = v.students_missing ? `<span class="msg bad">${esc(NO_STUDENTS)}</span>`
       : `<button type="button" class="primary" data-act="make" ${S.busy ? "disabled" : ""}>${made ? "Make again" : "Make"}</button>`;
@@ -525,7 +525,7 @@
       <div class="kpi">
         <div><div class="k">Papers</div><div class="big">${c.papers}</div><div class="small muted">${c.with_time} with a time</div></div>
         <div><div class="k">Students with 2 papers in a day</div><div class="big">${c.two_a_day}</div></div>
-        <div><div class="k">Invigilation duties</div><div class="big">${c.duties}</div>${c.short ? `<div class="small flag">${c.short} places not filled</div>` : ""}</div>
+        <div><div class="k">Invigilation duties</div><div class="big">${c.duties}</div>${c.short ? `<div class="small flag">${c.short} ${c.short === 1 ? "place" : "places"} not filled</div>` : ""}</div>
         <div><div class="k">Backups needed</div><div class="big ${c.backups ? "amber" : ""}">${c.backups}</div></div>
         <div><div class="k">To check</div><div class="big ${check ? "flag" : ""}">${check}</div>${c.unseated ? `<div class="small flag">${c.unseated} without a seat</div>` : ""}</div>
       </div>
@@ -553,7 +553,7 @@
       out += `<span class="seat lab">${r}</span>`;
       for (let i = 0; i < rs.cols; i++) { const sid = at2[letters(i) + r]; if (sid) placed++; out += sid ? cell(sid, letters(i) + r) : `<span class="seat empty"></span>`; }
     }
-    const stray = placed < list.length ? `<p class="flag small">${list.length - placed} seats are outside this room's layout.</p>` : "";
+    const stray = placed < list.length ? `<p class="flag small">${list.length - placed} ${list.length - placed === 1 ? "seat is" : "seats are"} outside this room's layout.</p>` : "";
     return `<p class="small muted">A seat shows the class and the Student ID. Hover to see the name. ${rs.rows} rows × ${rs.cols} columns.</p>
       <div class="seatwrap"><div class="seats" style="grid-template-columns:28px repeat(${rs.cols},minmax(46px,1fr))">${out}</div></div>${stray}`;
   }
