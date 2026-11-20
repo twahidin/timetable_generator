@@ -447,6 +447,21 @@ def a_pair_nobody_needs_is_warned_about():
     sp = pair_school(); assert want not in checks._loads_and_rooms(sp, Problem(sp))
 t(a_pair_nobody_needs_is_warned_about)
 
+def a_pair_no_lesson_can_use_is_worded_for_what_is_wrong():
+    limited = f"No lesson is limited to {PAIR}"
+    sp = pair_school()   # its rooms of a kind no lesson has
+    for v in sp["venues"]:
+        if v["room"] in (S1, S2, PAIR): v["kind"] = "spare studio"
+    out = [t_ for a, t_ in checks._loads_and_rooms(sp, Problem(sp)) if a == "venues" and PAIR in t_]
+    assert out == [f"No lesson uses {PAIR}'s kind ('spare studio'), so nobody will be given it. Check its rooms' kind on step 1, or the room kind of the subjects "
+                   "meant for it on step 3."], out
+    sp = pair_school(); sp["venues"][-1]["only_for"] = ["Sec 9"]   # kept for nobody on the setup
+    out = [t_ for a, t_ in checks._loads_and_rooms(sp, Problem(sp)) if a == "venues" and PAIR in t_]
+    assert out == [f"No lesson may use {PAIR}: no 'd&t studio' group is both kept to it and seated by it, so nobody will be given it. Check its For box and seats on "
+                   "step 1."], out
+    assert not any(limited in t_ for _, t_ in checks._loads_and_rooms(sp, Problem(sp)))
+t(a_pair_no_lesson_can_use_is_worded_for_what_is_wrong)
+
 def at_most_n_on_a_room_of_the_pair_is_one():
     sp = pair_school(); sp["rules"].append(dict(scope="Room", target=S1, rule="At most N at once", number=2, strength="Must", week="Both", day="All"))
     assert Problem(copy.deepcopy(sp)).room_cap[S1] == 1
