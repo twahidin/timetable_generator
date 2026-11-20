@@ -885,7 +885,13 @@ def _exam_view(pub, sched):
     return dict(summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=exams_make.lesson_lists(pub, cal, sched),
                 made=sched.get("made"), students={i: [by_id[i]["name"], by_id[i]["cls"]] for i in sids if i in by_id},
                 counts={p.get("id"): len(exams_papers.who_sits(p, model)) for p in papers}, periods=[list(t) for t in model.get("times") or []],
-                rooms=exams_settings.load(pub)["rooms"], students_missing=not model.get("students"))
+                rooms=exams_settings.load(pub)["rooms"], students_missing=not model.get("students"), levels=list(model.get("levels") or []),
+                rooms_by_key=_exam_rooms_by_key(pub, cal, sched))
+
+def _exam_rooms_by_key(pub, cal, sched):
+    """for each sitting, every exam room with its seats and what keeps it busy then (empty text: free)"""
+    xset = exams_settings.load(pub)
+    return {x["key"]: [[r["name"], r["seats"], r["busy"]] for r in exams_seating.rooms_free(pub, cal, sched, x, xset, set())] for x in exams_seating.sittings(sched)}
 
 @app.get("/exams")
 @need("committee", "staff")

@@ -664,6 +664,21 @@ def view_carries_counts_periods_and_the_levels_students():
         assert v["counts"] == {} and len(v["students"]) > 0, "students come from the levels even with no papers"
 
 @t
+def view_carries_levels_and_the_rooms_of_each_sitting():
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee()
+        s = _exam(c)
+        s["papers"] = [dict(p, date="2026-10-05", start="09:00") for p in s["papers"] if p["subject"] == "English"]
+        assert c.put("/api/exams/" + s["id"], json=s).status_code == 200
+        v = c.get(f"/api/exams/{s['id']}/view").get_json()
+        assert v["levels"] == _PUB["model"]["levels"] and "Sec 3" in v["levels"], v["levels"]
+        assert list(v["rooms_by_key"]) == ["2026-10-05 09:00"], list(v["rooms_by_key"])
+        rooms = {n: (seats, busy) for n, seats, busy in v["rooms_by_key"]["2026-10-05 09:00"]}
+        assert rooms["Hall"][1] == "rain room for PE with 4A" and rooms["3-01"][1] == "", rooms
+        assert rooms["Hall"][0] > 0
+
+@t
 def make_refuses_without_students():
     import copy
     _reset(); _cal()

@@ -13,13 +13,18 @@
   const S = {
     id: null, list: null, sched: null, view: null, levels: [], classes: [],
     tab: "when", timer: null, chain: Promise.resolve(), dirty: false, rev: 0, saving: false, msg: "", bad: false,
-    nf: null, mk: null, accCls: "", note: ""
+    nf: null, mk: null, accCls: "", note: "",
+    busy: false, sit: "", room: "", mvCls: "", mvStu: "", duty: null, who: null, whoTok: 0, open: {}
   };
   /* the tabs: tabs 4 to 7 are added to this list; each draw() gives the html of its tab body */
   const TABS = [
     { key: "when", name: "What and when", draw: () => tabWhen() },
     { key: "papers", name: "Papers", draw: () => tabPapers() },
-    { key: "access", name: "Access arrangements", draw: () => tabAccess() }
+    { key: "access", name: "Access arrangements", draw: () => tabAccess() },
+    { key: "schedule", name: "Schedule", draw: () => tabSchedule() },
+    { key: "venues", name: "Venues and seats", draw: () => tabVenues() },
+    { key: "invig", name: "Invigilators", draw: () => tabInvig() },
+    { key: "lessons", name: "Lessons", draw: () => tabLessons() }
   ];
 
   /* ---------------------------------------------------------------- small helpers */
@@ -148,7 +153,7 @@
       <div class="muted small"><a href="/exams">All exams</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}</div></div>
       <div class="savebar" id="saveline">${saveInner()}</div></div>
       <div class="xtabs" role="tablist">${TABS.map(t => `<button type="button" role="tab" class="${t.key === S.tab ? "on" : ""}" aria-selected="${t.key === S.tab}" data-act="tab" data-a="${t.key}">${esc(t.name)}</button>`).join("")}</div>
-      <div id="tabbody">${tab().draw()}</div>`;
+      <div id="tabbody">${tab().draw()}</div><input type="file" id="paperFile" accept=".xlsx" hidden>`;
   }
 
   /* draw the tab body again, keeping the cursor where it was */
@@ -157,17 +162,19 @@
     const a = document.activeElement, key = a && a.dataset ? a.dataset.f : null;
     let s0 = null, s1 = null;
     try { s0 = a.selectionStart; s1 = a.selectionEnd; } catch (e) { /* not a text box */ }
+    const keep = {}; body.querySelectorAll("[data-keep]").forEach(x => { keep[x.dataset.keep] = x.scrollTop; });
     body.innerHTML = tab().draw();
+    body.querySelectorAll("[data-keep]").forEach(x => { if (keep[x.dataset.keep] != null) x.scrollTop = keep[x.dataset.keep]; });
     if (key) {
       const el = Array.from(document.querySelectorAll("[data-f]")).find(x => x.dataset.f === key);
-      if (el) { el.focus(); try { if (s0 != null) el.setSelectionRange(s0, s1); } catch (e) { /* not a text box */ } }
+      if (el) { el.focus({ preventScroll: true }); try { if (s0 != null) el.setSelectionRange(s0, s1); } catch (e) { /* not a text box */ } }
     }
   }
 
   /* change the schedule, then save it after a pause */
   function edit(fn, redraw) {
     fn();
-    S.dirty = true; S.rev++; S.msg = ""; S.bad = false; paintSave();
+    S.dirty = true; S.rev++; S.msg = ""; S.bad = false; S.note = ""; paintSave();
     clearTimeout(S.timer); S.timer = setTimeout(flush, 800);
     if (redraw) paint();
   }
@@ -332,14 +339,14 @@
     const m = S.mk, v = S.view, stu = v ? v.students : {};
     const classes = uniq(Object.values(stu).map(x => x[1])).sort();
     const cur = m.cls || classes[0] || "";
-    const list = Object.entries(stu).filter(([, x]) => x[1] === cur).map(([id, x]) => `<label class="tick"><input type="checkbox" data-mk="pick" data-v="${esc(id)}" ${m.picked.includes(id) ? "checked" : ""}> ${esc(x[0])}</label>`).join("");
+    const list = Object.entries(stu).filter(([, x]) => x[1] === cur).map(([id, x]) => `<label class="tick"><input type="checkbox" data-mk="pick" data-f="mk-pick-${esc(id)}" data-v="${esc(id)}" ${m.picked.includes(id) ? "checked" : ""}> ${esc(x[0])}</label>`).join("");
     return `<div class="mk"><h3 style="margin-top:0">A make-up paper</h3>
-      <div class="line"><select data-mk="level" aria-label="Level">${paperLevels().map(l => opt(l, m.level)).join("")}</select>
-        <input type="text" data-mk="subject" value="${esc(m.subject)}" placeholder="Subject" aria-label="Subject">
-        <input type="text" data-mk="paper" value="${esc(m.paper)}" placeholder="Paper" aria-label="Paper">
-        <input type="number" min="1" step="5" data-mk="minutes" value="${esc(m.minutes)}" aria-label="Minutes"> minutes</div>
-      <div class="line">Pick students from <select data-mk="cls" aria-label="Class">${classes.map(c => opt(c, cur)).join("")}</select> <span class="muted small">${m.picked.length} picked</span></div>
-      <div class="stu">${list || `<span class="muted small">No students in this class.</span>`}</div>
+      <div class="line"><select data-mk="level" data-f="mk-level" aria-label="Level">${paperLevels().map(l => opt(l, m.level)).join("")}</select>
+        <input type="text" data-mk="subject" data-f="mk-subject" value="${esc(m.subject)}" placeholder="Subject" aria-label="Subject">
+        <input type="text" data-mk="paper" data-f="mk-paper" value="${esc(m.paper)}" placeholder="Paper" aria-label="Paper">
+        <input type="number" min="1" step="5" data-mk="minutes" data-f="mk-minutes" value="${esc(m.minutes)}" aria-label="Minutes"> minutes</div>
+      <div class="line">Pick students from <select data-mk="cls" data-f="mk-cls" aria-label="Class">${classes.map(c => opt(c, cur)).join("")}</select> <span class="muted small">${m.picked.length} picked</span></div>
+      <div class="stu" data-keep="stu">${list || `<span class="muted small">No students in this class.</span>`}</div>
       <div class="row"><button type="button" class="primary small" data-act="mkAdd">Add the paper</button><button type="button" class="small" data-act="mkCancel">Cancel</button><span class="msg bad" id="mkMsg" role="status"></span></div></div>`;
   }
 
@@ -350,7 +357,7 @@
     return `<div class="row" style="justify-content:space-between;margin-bottom:10px">
       <div class="row"><button type="button" data-act="fill">Fill from the subjects of ${esc(of)}</button><button type="button" data-act="upload">Upload a paper list (Excel)</button>
         <button type="button" data-act="download">Download the paper list</button><button type="button" data-act="addPaper">+ Add a paper</button><button type="button" data-act="addMakeup">+ Add a make-up paper</button>
-        <input type="file" id="paperFile" accept=".xlsx" hidden></div>
+        </div>
       <span class="muted small">${ps.length} ${ps.length === 1 ? "paper" : "papers"} · ${withTime} with a time${need ? ` · <span class="flag">${need} still ${need === 1 ? "needs" : "need"} one</span>` : ""}</span></div>
     ${S.note ? `<p class="msg ok" role="status">${esc(S.note)}</p>` : ""}
     ${S.mk ? makeupForm() : ""}
@@ -426,7 +433,7 @@
     }).join("");
     return `<div class="card"><h2>Access arrangements</h2>
       <p class="muted small">Students who need extra time, a room of their own, a reader or a scribe. Their extra time is added when the app checks the paper times.</p>
-      ${S.view ? `<div class="line" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Add a student from <select data-acc="cls" aria-label="Class">${classes.map(c => opt(c, cur)).join("")}</select></div>
+      ${S.view ? `<div class="line" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Add a student from <select data-acc="cls" data-f="acc-cls" aria-label="Class">${classes.map(c => opt(c, cur)).join("")}</select></div>
       <div class="chiprow" style="margin:6px 0 12px">${free || `<span class="muted small">No one left to add in this class.</span>`}</div>` : `<p class="muted">Loading…</p>`}
       <div class="tablewrap ptable"><table><thead><tr><th>Student</th><th>Class</th><th>Extra time %</th><th>Own room</th><th>Reader</th><th>Scribe</th><th>Note</th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="8" class="muted" style="padding:10px">No one yet.</td></tr>`}</tbody></table></div></div>`;
@@ -442,9 +449,262 @@
     if (k === "anote") return edit(() => { x.note = v; });
   }
 
+  /* ---------------------------------------------------------------- tabs 4 to 7: the made schedule */
+  const NO_STUDENTS = "The published timetable has no students. Add them on the Students step and publish again to seat them.";
+  const hhmm = n => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
+  const norm = t => { const m = /^(\d+):(\d+)/.exec(t || ""); return m ? `${m[1].padStart(2, "0")}:${m[2]}` : ""; };
+  const letters = i => i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + i % 26);
+  const madeOf = () => (S.view && S.view.made) || null;
+  const seatsOf = key => ((madeOf() || {}).seats || {})[key] || {};
+  const stuOf = sid => ((S.view && S.view.students) || {})[sid] || null;
+  const nameOf = sid => { const x = stuOf(sid); return x ? x[0] : sid; };
+  const sittingKeys = () => Object.keys((S.view && S.view.rooms_by_key) || {});
+  const printLink = (what, label) => `<a class="ghost filebtn small" href="/api/exams/${esc(S.id)}/print/${what}.pdf" target="_blank" rel="noopener">${esc(label)}</a>`;
+  const clsColour = (list, cls) => `s${Math.max(0, uniq(list).sort().indexOf(cls)) % 6}`;
+
+  function sitLabel(key) {
+    const [d, t] = key.split(" ");
+    const ps = S.sched.papers.filter(p => p.date === d && p.start && norm(p.start) === t);
+    const what = uniq(ps.map(p => `${p.level} ${p.subject}${p.paper ? " " + p.paper : ""}`.trim()));
+    return `${fmtDate(d)} · ${t}${what.length ? " · " + what.join(" + ") : ""}`;
+  }
+
+  /* what the page does at the server: our own edits go first, then the answer (the whole view) replaces S.view */
+  async function viewAction(path, body, ok) {
+    if (S.busy) return false;
+    await flush();
+    if (S.dirty) return false;   /* the save was refused: its sentence is on the screen */
+    S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
+    const r = await api("POST", `/api/exams/${S.id}/${path}`, body);
+    S.busy = false;
+    if (r.status === 401 || r.status === 403) return false;
+    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return false; }
+    S.view = r.j; S.msg = typeof ok === "function" ? ok(r.j) : (ok || ""); paintSave(); paint();
+    return true;
+  }
+
+  async function loadWho(keep) {
+    const d = S.duty; if (!d) return;
+    const tok = ++S.whoTok;
+    if (!keep) { S.who = null; paint(); }
+    const r = await api("GET", `/api/exams/${S.id}/who?key=${encodeURIComponent(d.key)}&room=${encodeURIComponent(d.room)}`);
+    if (tok !== S.whoTok || r.status === 401 || r.status === 403) return;
+    S.who = r.ok ? r.j : { error: r.j.error || "Could not list who could take it." };
+    paint();
+  }
+
+  const needMade = () => `<div class="card"><p class="muted">${S.view ? "Nothing is made yet. Press Make on the Schedule tab." : "Loading…"}</p></div>`;
+
+  /* ---------------------------------------------------------------- tab 4: schedule */
+  function dayCells(d) {
+    const levels = S.view.levels || [];
+    return levels.map(l => {
+      if (!(d.levels || []).includes(l)) return `<td><span class="pp norm">normal lessons</span></td>`;
+      const ps = (d.papers || {})[l] || [];
+      const blocks = ps.map(p => `<span class="pp ex"><b>${esc(p.label)}</b> ${esc(p.start)}–${esc(p.end)}</span>`).join("");
+      const after = !d.whole && d.window ? `<span class="pp norm">lessons from ${esc(d.window[1])}</span>` : "";
+      return `<td>${blocks || (d.whole ? `<span class="muted small">no paper</span>` : "")}${after}</td>`;
+    }).join("");
+  }
+
+  function tabSchedule() {
+    const v = S.view;
+    if (!v) return `<div class="card"><p class="muted">Loading…</p></div>`;
+    const sm = v.summary, c = sm.counts, levels = v.levels || [], made = v.made;
+    const check = sm.checks.errors.length + sm.checks.warnings.length + c.short + c.unseated;
+    const gone = (sm.gone || []).length ? `<div class="notice">${sm.gone.map(g => `<div>${esc(g)}</div>`).join("")}</div>` : "";
+    const rows = sm.days.map(d => {
+      if (d.day == null) return `<tr><td><b>${esc(fmtDate(d.date))}</b></td><td class="muted" colspan="${levels.length || 1}">Not a school day</td></tr>`;
+      return `<tr><td><b>${esc(fmtDate(d.date))}</b><br><span class="muted small">${esc(d.day)} · ${d.whole ? "whole day" : "part, to " + esc(d.window[1])}</span></td>${dayCells(d)}</tr>
+        <tr><td colspan="${levels.length + 1}" class="small muted dayline">Teachers: <b>${d.freed}</b> freed by the exam · <b>${d.on_duty}</b> on duty · <b>${d.teaching}</b> still teaching · <span class="${d.backups ? "amber" : ""}">${d.backups} backups</span></td></tr>`;
+    }).join("");
+    const make = v.students_missing ? `<span class="msg bad">${esc(NO_STUDENTS)}</span>`
+      : `<button type="button" class="primary" data-act="make" ${S.busy ? "disabled" : ""}>${made ? "Make again" : "Make"}</button>`;
+    const dl = made ? `<a class="ghost filebtn" href="/api/exams/${esc(S.id)}/download.xlsx" target="_blank" rel="noopener">Download (Excel)</a>` : `<button type="button" disabled>Download (Excel)</button>`;
+    return `${gone}<div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">${esc(S.sched.name)}</h2><div class="row">${make}${dl}</div></div>
+      <div class="kpi">
+        <div><div class="k">Papers</div><div class="big">${c.papers}</div><div class="small muted">${c.with_time} with a time</div></div>
+        <div><div class="k">Students with 2 papers in a day</div><div class="big">${c.two_a_day}</div></div>
+        <div><div class="k">Invigilation duties</div><div class="big">${c.duties}</div>${c.short ? `<div class="small flag">${c.short} places not filled</div>` : ""}</div>
+        <div><div class="k">Backups needed</div><div class="big ${c.backups ? "amber" : ""}">${c.backups}</div></div>
+        <div><div class="k">To check</div><div class="big ${check ? "flag" : ""}">${check}</div>${c.unseated ? `<div class="small flag">${c.unseated} without a seat</div>` : ""}</div>
+      </div>
+      <div class="tablewrap"><table class="tl"><thead><tr><th style="width:130px">Day</th>${levels.map(l => `<th>${esc(l)}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td class="muted">No days yet.</td></tr>`}</tbody></table></div>
+      <div style="margin-top:14px">${checksPanel()}</div>`;
+  }
+
+  /* ---------------------------------------------------------------- tab 5: venues and seats */
+  function curSit() {
+    const ks = sittingKeys();
+    return ks.includes(S.sit) ? S.sit : (ks[0] || "");
+  }
+
+  function seatGrid(key, room) {
+    const rs = ((S.view.rooms || {})[room]) || {}, list = seatsOf(key)[room] || [];
+    const cls = uniq(list.map(([sid]) => (stuOf(sid) || [])[1]));
+    const cell = (sid, seat) => { const x = stuOf(sid) || [sid, "?"]; return `<span class="seat ${clsColour(cls, x[1])}" title="${esc(seat + ": " + x[1] + " " + x[0])}">${esc(x[1])}<br>${esc(sid)}</span>`; };
+    if (!rs.rows || !rs.cols) {
+      const rows = list.slice().sort((a, b) => Number(a[1]) - Number(b[1])).map(([sid, seat]) => `<tr><td>${esc(seat)}</td><td>${esc((stuOf(sid) || [])[1] || "")}</td><td>${esc(sid)}</td><td>${esc(nameOf(sid))}</td></tr>`).join("");
+      return `<p class="muted small">This room has no seat layout in Exam settings, so the seats are a numbered list.</p><div class="tablewrap"><table><thead><tr><th>Seat</th><th>Class</th><th>Student ID</th><th>Name</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
+    const at2 = {}; list.forEach(([sid, seat]) => { at2[seat] = sid; });
+    let out = `<span></span>` + Array.from({ length: rs.cols }, (_, i) => `<span class="seat lab">${letters(i)}</span>`).join(""), placed = 0;
+    for (let r = 1; r <= rs.rows; r++) {
+      out += `<span class="seat lab">${r}</span>`;
+      for (let i = 0; i < rs.cols; i++) { const sid = at2[letters(i) + r]; if (sid) placed++; out += sid ? cell(sid, letters(i) + r) : `<span class="seat empty"></span>`; }
+    }
+    const stray = placed < list.length ? `<p class="flag small">${list.length - placed} seats are outside this room's layout.</p>` : "";
+    return `<p class="small muted">A seat shows the class and the Student ID. Hover to see the name. ${rs.rows} rows × ${rs.cols} columns.</p>
+      <div class="seatwrap"><div class="seats" style="grid-template-columns:28px repeat(${rs.cols},minmax(46px,1fr))">${out}</div></div>${stray}`;
+  }
+
+  /* the class and student the move boxes show: the ones picked, else the first */
+  function moveState(key) {
+    const all = {};
+    for (const list of Object.values(seatsOf(key))) for (const [sid] of list) { const x = stuOf(sid); if (x) (all[x[1]] = all[x[1]] || []).push(sid); }
+    const classes = Object.keys(all).sort();
+    const cur = classes.includes(S.mvCls) ? S.mvCls : (classes[0] || "");
+    const mine = (all[cur] || []).slice().sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+    return { classes, cur, mine, stu: mine.includes(S.mvStu) ? S.mvStu : (mine[0] || "") };
+  }
+
+  function moveBox(key, free) {
+    const { classes, cur, mine, stu } = moveState(key);
+    if (!classes.length) return "";
+    const to = (name, label) => `<select data-x="${name}" data-f="x-${name}" aria-label="${esc(label)}" ${S.busy ? "disabled" : ""}><option value="">${esc(label)}</option>${free.map(r => `<option value="${esc(r[0])}">${esc(r[0])} (${r[1]} seats)</option>`).join("")}</select>`;
+    return `<div class="mv"><b>Move students</b>
+      <div class="line">Class <select data-x="mvCls" data-f="x-mvCls" aria-label="Class to move">${classes.map(c => opt(c, cur)).join("")}</select> ${to("mvClassTo", "Move class to…")}</div>
+      <div class="line">Student <select data-x="mvStu" data-f="x-mvStu" aria-label="Student to move">${mine.map(s => opt(s, stu, nameOf(s))).join("")}</select> ${to("mvStuTo", "Move student to…")}</div></div>`;
+  }
+
+  function tabVenues() {
+    const v = S.view, made = madeOf();
+    if (!v || !made) return needMade();
+    const key = curSit();
+    if (!key) return `<div class="card"><p class="muted">No paper has a date and a start time yet.</p></div>`;
+    const seats = seatsOf(key), rooms = v.rooms_by_key[key] || [], duties = (made.duties || []).filter(d => d.key === key);
+    const seated = Object.values(seats).reduce((n, l) => n + l.length, 0), left = (made.unseated || {})[key] || [];
+    const room = seats[S.room] ? S.room : (Object.keys(seats)[0] || "");
+    const trs = rooms.map(([name, cap, busy]) => {
+      const list = seats[name] || [], d = duties.find(x => x.room === name);
+      const by = {}; list.forEach(([sid]) => { const x = stuOf(sid); if (x) by[x[1]] = (by[x[1]] || 0) + 1; });
+      const who = Object.keys(by).sort().map(c => `${esc(c)} (${by[c]})`).join(", ");
+      const rain = busy.startsWith("rain room for");
+      const first = list.length ? `<button type="button" class="linkb ${name === room ? "on" : ""}" data-act="pickRoom" data-a="${esc(name)}">${esc(name)}</button>` : esc(name);
+      if (busy && !list.length) return `<tr class="busy"><td>${first}</td><td>0 / ${cap}</td><td class="muted" colspan="2">${esc(busy)} ${rain ? `<button type="button" class="small" data-act="useAnyway" data-a="${esc(key)}" data-b="${esc(name)}" ${S.busy ? "disabled" : ""}>Use it anyway</button>` : ""}</td></tr>`;
+      if (!list.length) return `<tr class="muted"><td>${first}</td><td>0 / ${cap}</td><td class="small">Not needed for this sitting</td><td></td></tr>`;
+      return `<tr><td>${first}</td><td>${list.length} / ${cap}${list.length > cap ? ` <span class="flag">+${list.length - cap}</span>` : ""}</td><td class="small">${who}</td>
+        <td class="small">${d ? `${d.names.length}${d.chief ? " (1 chief)" : ""}` : ""}</td></tr>`;
+    }).join("");
+    const free = rooms.filter(r => !r[2]);
+    const noSeat = left.length ? `<p class="flag small">${left.length} without a seat: ${left.map(s => esc(nameOf(s))).join(", ")}</p>` : "";
+    return `<div class="panel"><div class="line"><b>Sitting</b><select data-x="sit" data-f="x-sit" aria-label="Sitting">${sittingKeys().map(k => opt(k, key, sitLabel(k))).join("")}</select>
+        <span class="chip ${left.length ? "bad" : "ok"}">${seated} seated</span></div>
+      <div class="tablewrap"><table><thead><tr><th>Venue</th><th>Seats</th><th>Who</th><th>Invigilators</th></tr></thead><tbody>${trs}</tbody></table></div>${noSeat}</div>
+      <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(room || "No room")} · seating plan</h3>
+        <div class="row">${printLink("seating", "Seating plan")}${printLink("doors", "Door list")}${printLink("attendance", "Attendance sheet")}${printLink("classes", "Class lists")}</div></div>
+        ${room ? seatGrid(key, room) : `<p class="muted">No one is seated in this sitting.</p>`}</div>
+      ${moveBox(key, free)}`;
+  }
+
+  async function onVenue(el) {
+    const x = el.dataset.x, v = el.value, key = curSit();
+    if (x === "sit") { S.sit = v; S.room = ""; paint(); return; }
+    if (x === "mvCls") { S.mvCls = v; S.mvStu = ""; paint(); return; }
+    if (x === "mvStu") { S.mvStu = v; paint(); return; }
+    if (!v || !key) return;
+    const m = moveState(key);
+    if (x === "mvClassTo" && m.mine.length) {
+      const ids = m.mine.slice();
+      if (await viewAction("move", { key, students: ids, room: v }, () => `Moved ${m.cur}, ${ids.length} ${ids.length === 1 ? "student" : "students"}, to ${v}.`)) { S.room = v; paint(); }
+      return;
+    }
+    if (x === "mvStuTo" && m.stu) {
+      const sid = m.stu;
+      if (await viewAction("move", { key, students: [sid], room: v }, () => `Moved ${nameOf(sid)} to ${v}.`)) { S.room = v; paint(); }
+    }
+  }
+
+  /* ---------------------------------------------------------------- tab 6: invigilators */
+  const dutyEq = (d, p) => p && d.key === p.key && d.room === p.room;
+
+  function dutyRow(d) {
+    const flags = [];
+    if (Object.keys(d.backup || {}).length) flags.push(`<span class="flag">Backup needed</span>`);
+    if (d.short) flags.push(`<span class="flag">Short by ${d.short}</span>`);
+    const names = d.names.map(n => `<div>${esc(n)}${d.chief === n ? ` <span class="chip">chief</span>` : ""}${(d.backup || {})[n] ? ` <span class="chip amber">backup</span>` : ""}
+      <span class="muted small">${esc((d.reasons || {})[n] || "")}</span></div>`).join("");
+    const sub = Object.keys((d.backup || {})).length ? `<div class="small muted">${Object.keys(d.backup).map(esc).join(", ")} teaches a lesson then</div>` : "";
+    const n = (seatsOf(d.key)[d.room] || []).length;
+    return `<tr class="${dutyEq(d, S.duty) ? "pick" : ""}"><td>${esc(fmtDate(d.date))}<br><span class="small muted">${hhmm(d.start)}–${hhmm(d.end)}</span></td>
+      <td><b>${esc(d.room)}</b><br><span class="small muted">${esc(sitLabel(d.key).split(" · ").slice(2).join(" · "))}${n ? " · " + n : ""}</span></td>
+      <td class="small">${names || `<span class="muted">No one yet</span>`}${d.locked ? ` <span class="chip">by hand</span>` : ""}</td>
+      <td>${flags.length ? flags.join("<br>") + sub : `<span class="okc">✓</span>`}</td>
+      <td><button type="button" class="small" data-act="duty" data-a="${esc(d.key)}" data-b="${esc(d.room)}">Who could take it</button></td></tr>`;
+  }
+
+  function whoPanel(made) {
+    const p = S.duty;
+    if (!p) return `<div class="panel"><h3>Who could take it</h3><p class="muted small">Press Who could take it on a duty.</p></div>`;
+    const d = (made.duties || []).find(x => dutyEq(x, p));
+    if (!d) return `<div class="panel"><h3>Who could take it</h3><p class="muted small">That duty is not there any more.</p></div>`;
+    const head = `<h3>Who could take it</h3><p class="small"><b>${esc(d.room)}</b> · ${esc(fmtDate(d.date))} ${hhmm(d.start)}–${hhmm(d.end)}</p>
+      <h4>Now</h4><div class="small">${d.names.map(n => `<div>${esc(n)} <button type="button" class="small danger" data-act="whoDrop" data-c="${esc(n)}" title="Take ${esc(n)} off" aria-label="Take ${esc(n)} off" ${S.busy ? "disabled" : ""}>✕</button></div>`).join("") || `<span class="muted">No one</span>`}</div>`;
+    if (!S.who) return `<div class="panel">${head}<p class="muted small">Loading…</p></div>`;
+    if (S.who.error) return `<div class="panel">${head}<p class="msg bad">${esc(S.who.error)}</p></div>`;
+    const groups = [["freed", "Freed by the exam"], ["free", "Free then"], ["backups", "Backup invigilators"], ["need_backup", "Would need a backup"]];
+    const body = groups.map(([k, title]) => {
+      const list = (S.who[k] || []).filter(c => !d.names.includes(c.name));
+      return `<h4>${title}</h4>${list.map(c => `<div class="small who"><div><b>${esc(c.name)}</b> <span class="muted">· ${c.minutes} min so far</span><br><span class="muted">${esc(c.reason)}</span></div>
+        <button type="button" class="small" data-act="whoUse" data-c="${esc(c.name)}" ${S.busy ? "disabled" : ""}>Use</button></div>`).join("") || `<div class="small muted">No one</div>`}`;
+    }).join("");
+    return `<div class="panel">${head}${body}</div>`;
+  }
+
+  function loadList(made) {
+    const mins = {};
+    for (const d of made.duties || []) for (const n of d.names) { const m = mins[n] || (mins[n] = { n: 0, t: 0 }); m.n++; m.t += d.end - d.start; }
+    const rows = Object.entries(mins).sort((a, b) => b[1].t - a[1].t || a[0].localeCompare(b[0]));
+    const top = rows.length ? rows[0][1].t || 1 : 1;
+    return `<div class="panel"><h3>Duty load · this exam</h3><table class="small">${rows.map(([n, m]) => `<tr><td>${esc(n)}</td><td style="width:40%"><div class="bar"><i style="width:${Math.round(100 * m.t / top)}%"></i></div></td><td>${m.n} · ${esc(fmtLen(m.t))}</td></tr>`).join("") || `<tr><td class="muted">No duties yet.</td></tr>`}</table></div>`;
+  }
+
+  function tabInvig() {
+    const made = madeOf();
+    if (!S.view || !made) return needMade();
+    const duties = made.duties || [];
+    return `<div class="grid2"><div><div class="row" style="margin-bottom:10px">${printLink("roster-day", "Roster by day")}${printLink("roster-teacher", "Roster by teacher")}</div>
+      <div class="tablewrap"><table><thead><tr><th>When</th><th>Venue</th><th>Invigilators</th><th>Check</th><th></th></tr></thead><tbody>${duties.map(dutyRow).join("") || `<tr><td colspan="5" class="muted" style="padding:10px">No duties.</td></tr>`}</tbody></table></div></div>
+      <div>${whoPanel(made)}${loadList(made)}</div></div>`;
+  }
+
+  async function changeNames(names) {
+    const p = S.duty; if (!p) return;
+    const ok = await viewAction("invigilators", { key: p.key, room: p.room, names }, "Saved");
+    if (ok) loadWho(true);
+  }
+
+  /* ---------------------------------------------------------------- tab 7: lessons */
+  function lessonList(title, list, cls, extra) {
+    const by = {}; list.forEach(l => { (by[l.date] = by[l.date] || []).push(l); });
+    const days = Object.keys(by).sort().map(date => `<details data-d="${esc(title + date)}" ${S.open[title + date] ? "open" : ""}><summary>${esc(fmtDate(date))} · ${by[date].length}</summary>
+      ${by[date].map(l => `<div class="small">${esc(l.start)}–${esc(l.end)} · ${esc((l.classes || []).join(", "))} ${esc(l.subject)}${(l.teachers || []).length ? " · " + esc(l.teachers.join(", ")) : ""}${l.note ? ` <span class="muted">· ${esc(l.note)}</span>` : ""}</div>`).join("")}</details>`).join("");
+    return `<div class="panel ${cls}"><h3>${esc(title)} · ${list.length} ${list.length === 1 ? "lesson" : "lessons"}</h3>${days || `<div class="small muted">None.</div>`}${extra || ""}</div>`;
+  }
+
+  function tabLessons() {
+    const L = S.view && S.view.lessons;
+    if (!L) return `<div class="card"><p class="muted">Loading…</p></div>`;
+    return `<div class="grid3">
+      ${lessonList("No relief needed", L.none || [], "okbg")}
+      ${lessonList("Backup needed", L.backup || [], "ambg", `<p class="muted small" style="margin-top:10px">Sending backups to the relief team arrives in a later stage.</p>`)}
+      ${lessonList("Runs as usual", L.runs || [], "")}</div>`;
+  }
+
   /* ---------------------------------------------------------------- events */
   function onField(e) {
     const el = e.target;
+    if (S.id && el.dataset.x) { onVenue(el); return; }
     if (S.id && el.dataset.mk) { onMakeup(el); return; }
     if (S.id && el.dataset.acc === "cls") { S.accCls = el.value; paint(); return; }
     if (!S.id && el.dataset.nf) { onNewField(el); return; }
@@ -516,15 +776,28 @@
     if (act === "mkAdd") { mkAdd(); return; }
     if (act === "delPaper") { edit(() => { s.papers.splice(Number(a), 1); }, true); return; }
     if (act === "accAdd") { edit(() => { s.access.push({ student: a, extra: 0, own_room: false, reader: false, scribe: false, note: "" }); }, true); return; }
+    if (act === "make") { viewAction("make", {}, "Made."); return; }
+    if (act === "pickRoom") { S.room = a; paint(); return; }
+    if (act === "useAnyway") { viewAction("use-anyway", { key: a, room: b.dataset.b }, "The room is in use for this sitting."); return; }
+    if (act === "duty") { S.duty = { key: a, room: b.dataset.b }; loadWho(false); return; }
+    if (act === "whoDrop" || act === "whoUse") {
+      const p = S.duty, d = p && ((madeOf() || {}).duties || []).find(x => dutyEq(x, p)), n = b.dataset.c;
+      if (!d) return;
+      changeNames(act === "whoDrop" ? d.names.filter(x => x !== n) : uniq(d.names.concat([n])));
+      return;
+    }
     if (act === "accDel") { edit(() => { s.access.splice(Number(a), 1); }, true); return; }
   }
+
+  /* the sentence kept for the editor is dropped when the editor does not open, so it does not turn up on a later visit */
+  function dropNote() { try { sessionStorage.removeItem("examsNote"); } catch (e) { /* no storage */ } }
 
   async function startOne(id) {
     links();
     S.id = id;
     const [r, v, l] = await Promise.all([api("GET", "/api/exams/" + id), api("GET", `/api/exams/${id}/view`), api("GET", "/api/exams")]);
-    for (const x of [r, v, l]) if (x.status === 401 || x.status === 403) return;
-    for (const x of [r, v, l]) if (!x.ok) { fail(x.j.error || "Something went wrong."); return; }
+    for (const x of [r, v, l]) if (x.status === 401 || x.status === 403) { dropNote(); return; }
+    for (const x of [r, v, l]) if (!x.ok) { dropNote(); fail(x.j.error || "Something went wrong."); return; }
     S.sched = r.j; S.view = v.j; S.levels = l.j.levels || []; S.classes = l.j.classes || [];
     document.title = r.j.name + " · Exams";
     render();
@@ -537,6 +810,7 @@
   document.addEventListener("click", onClick);
   document.addEventListener("input", onInput);
   document.addEventListener("change", onChange);
+  document.addEventListener("toggle", e => { const d = e.target; if (d && d.dataset && d.dataset.d) S.open[d.dataset.d] = d.open; }, true);
   window.addEventListener("beforeunload", e => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
   const m = /^\/exams\/([A-Za-z0-9]+)\/?$/.exec(location.pathname);
   if (m && m[1] !== "settings") startOne(m[1]); else startList();
