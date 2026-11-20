@@ -527,6 +527,10 @@ var Board = (function () {
     return false;
   }
 
+  /* whether the server refused a fix because a rule of step 6 would be broken: its sentence is "Rule {the rule as written}: {what breaks}"
+     (verify's rule warnings). Such a fix may be made anyway, once the page has said why and asked */
+  function ruleRefusal(sentence) { return typeof sentence === "string" && /^Rule .+?: ./.test(sentence); }
+
   /* whether venues a and b share a single room (parts: a combined venue's name -> its rooms, or undefined): a venue meets itself and, for a combined venue, each of its rooms */
   function roomsMeet(parts, a, b) {
     if (!a || !b) return false;
@@ -566,6 +570,6 @@ var Board = (function () {
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
            lands: lands, forced: forced, asks: asks, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
            warned: warned, flag: flag, at: at, clashPlace: clashPlace, of: of, hand: hand, handText: handText, people: people, venues: venues,
-           teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, roomsMeet: roomsMeet };
+           teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, ruleRefusal: ruleRefusal, roomsMeet: roomsMeet };
 })();
 if (typeof module !== "undefined") module.exports = Board;
