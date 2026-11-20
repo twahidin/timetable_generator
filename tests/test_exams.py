@@ -677,4 +677,50 @@ def client_cannot_write_made():
         assert c.put("/api/exams/" + s["id"], json=dict(kept, papers="x")).status_code == 400
         assert c.put("/api/exams/" + s["id"], json=dict(kept, days=5)).status_code == 400
 
+def _made_exam(c, mutate=None):
+    s = _exam(c)
+    times = {"English": "07:50", "Pure Chemistry": "10:00"}
+    s["papers"] = [dict(p, date="2026-10-05", start=times[p["subject"]]) for p in s["papers"] if p["subject"] in times]
+    assert c.put("/api/exams/" + s["id"], json=s).status_code == 200
+    assert c.post(f"/api/exams/{s['id']}/make", json={}).status_code == 200
+    return s
+
+@t
+def printouts_and_excel():
+    import io, openpyxl
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee()
+        s = _exam(c)
+        r = c.get(f"/api/exams/{s['id']}/print/seating.pdf")
+        assert r.status_code == 409 and r.get_json() == {"error": "Press Make first."}, r.data
+        assert c.get(f"/api/exams/{s['id']}/download.xlsx").status_code == 409
+        s = _made_exam(c)
+        for what in ("seating", "doors", "attendance", "classes", "roster-day", "roster-teacher", "timetable"):
+            r = c.get(f"/api/exams/{s['id']}/print/{what}.pdf")
+            assert r.status_code == 200 and r.data.startswith(b"%PDF"), (what, r.status_code)
+            assert f"Sec 3 Exam {what}.pdf" in r.headers["Content-Disposition"]
+        assert c.get(f"/api/exams/{s['id']}/print/nothing.pdf").status_code == 404
+        r = c.get(f"/api/exams/{s['id']}/download.xlsx"); assert r.status_code == 200 and "Sec 3 Exam.xlsx" in r.headers["Content-Disposition"]
+        wb = openpyxl.load_workbook(io.BytesIO(r.data))
+        assert wb.sheetnames == ["Papers", "Seats", "Duties", "Lessons"], wb.sheetnames
+        made = c.get(f"/api/exams/{s['id']}").get_json()["made"]
+        want = sum(len(rows) for rooms in made["seats"].values() for rows in rooms.values())
+        assert wb["Seats"].max_row == 1 + want == 1 + 30 + 20, (wb["Seats"].max_row, want)
+        assert [x.value for x in wb["Seats"][1]] == ["Date", "Start", "Room", "Seat", "Student ID", "Name", "Class", "Paper"]
+        assert [x.value for x in wb["Duties"][1]][-1] == "Needs backup" and wb["Duties"].max_row > 1
+        assert [x.value for x in wb["Lessons"][1]][0] == "List"
+        assert [x.value for x in wb["Papers"][1]][0] == "Level"
+        assert not [1 for ws in wb for row in ws.iter_rows() for x in row if isinstance(x.value, str) and x.value[:1] in "=+-@\t\r"]
+        import copy
+        pub = copy.deepcopy(_PUB); pub["model"]["students"][0]["name"] = "=SUM(1)"
+        first = pub["model"]["students"][0]["id"]
+    with published(pub):
+        c = committee()
+        assert c.post(f"/api/exams/{s['id']}/make", json={}).status_code == 200
+        wb = openpyxl.load_workbook(io.BytesIO(c.get(f"/api/exams/{s['id']}/download.xlsx").data))
+        assert "'=SUM(1)" in [x.value for row in wb["Seats"].iter_rows() for x in row], first
+        assert c.get(f"/api/exams/{s['id']}/print/seating.pdf").data.startswith(b"%PDF")
+    assert A.app.test_client().get(f"/api/exams/{s['id']}/download.xlsx").status_code in (401, 403)
+
 print(f"{COUNT} exams tests passed")

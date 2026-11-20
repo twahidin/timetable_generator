@@ -16,7 +16,7 @@ from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VE
 import access, checks, draft, store, sync, typed
 from relief import codes as relief_codes, people as relief_people, settings as relief_settings
 from ttgen import choices
-import exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating
+import exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -1089,6 +1089,33 @@ def exams_invigilators(id): return _exam_changed(id, _exam_invigilators)
 @app.post("/api/exams/<id>/use-anyway")
 @need("committee", "staff")
 def exams_use_anyway(id): return _exam_changed(id, _exam_use_anyway)
+
+@app.get("/api/exams/<id>/print/<what>.pdf")
+@need("committee", "staff")
+def exams_print(id, what):
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    if err: return err
+    if what not in exams_printouts.WHATS: abort(404)
+    if not s.get("made"): return {"error": "Press Make first."}, 409
+    from ttgen.export import safe_name
+    buf = io.BytesIO()
+    exams_printouts.pdf(what, pub, _exam_cal(pub), s, exams_settings.load(pub), buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name=safe_name(f"{s.get('name')} {what}") + ".pdf", mimetype="application/pdf")
+
+@app.get("/api/exams/<id>/download.xlsx")
+@need("committee", "staff")
+def exams_download(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    if err: return err
+    if not s.get("made"): return {"error": "Press Make first."}, 409
+    from ttgen.export import safe_name
+    return send_file(io.BytesIO(exams_printouts.xlsx(pub, _exam_cal(pub), s, exams_settings.load(pub))), as_attachment=True,
+                     download_name=safe_name(s.get("name")) + ".xlsx", mimetype=XLSX)
 
 @app.get("/api/exams/<id>/who")
 @need("committee", "staff")
