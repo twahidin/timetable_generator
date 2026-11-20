@@ -117,7 +117,10 @@
     if (nf.classes.length) {   /* the server makes a schedule from levels; the classes go in with one more save */
       const s = r.j;
       const r2 = await api("PUT", "/api/exams/" + s.id, Object.assign({}, s, { levels: nf.levels, classes: nf.classes }));
-      if (!r2.ok && r2.status === 403) return;
+      if (r2.status === 401 || r2.status === 403) return;
+      if (!r2.ok) {
+        try { sessionStorage.setItem("examsNote", "The exam was made, but its classes were not saved: " + (r2.j.error || "Check the exam and try again.")); } catch (e) { /* no storage: the editor opens without the sentence */ }
+      }
     }
     location.href = "/exams/" + r.j.id;
   }
@@ -525,6 +528,10 @@
     S.sched = r.j; S.view = v.j; S.levels = l.j.levels || []; S.classes = l.j.classes || [];
     document.title = r.j.name + " · Exams";
     render();
+    try {
+      const n = sessionStorage.getItem("examsNote");
+      if (n) { sessionStorage.removeItem("examsNote"); S.bad = true; S.msg = n; paintSave(); }
+    } catch (e) { /* no storage */ }
   }
 
   document.addEventListener("click", onClick);
