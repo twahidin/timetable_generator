@@ -674,8 +674,9 @@ def test_the_preview_shows_every_class_touched_and_changes_nothing():
     assert _marks(j, "1A") == {a: ("moved", dict(d=0, p=p))} and _marks(j, "1B") == {b: ("moved", dict(d=1, p=p)), m3: ("", None)}, j["classes"]
     g = next(k for k in j["classes"] if k["name"] == "1A")["lessons"][0]; assert (g["d"], g["p"]) == (1, p) and set(g) >= {"id", "group", "subject", "classes", "teachers", "room", "d", "p", "n", "block", "what", "tshorts", "mark"}
     assert c.get("/api/draft").get_json()["fixes"] == before and c.get(f"/api/draft/grid?view=class&name=1A").get_json()["lessons"][0]["d"] == 0
-    r = c.post("/api/draft/preview", json={"fixes": [dict(kind="move", id=a, d=2, p=p + 2)]}); j = r.get_json()   # refused: 200, and the timetable as it was
-    assert r.status_code == 200 and j["state"] == "no" and "is teaching" in j["why"] and j["classes"] == [] and j["gone"] == [], j
+    r = c.post("/api/draft/preview", json={"fixes": [dict(kind="move", id=a, d=2, p=p + 2)]}); j = r.get_json()   # judged no: 200, and the timetable with the one change made (it is only looked at)
+    assert r.status_code == 200 and j["state"] == "no" and "is teaching" in j["why"] and _marks(j, "1A")[a][0] == "moved" and j["gone"] == [], j
+    assert c.get("/api/draft").get_json()["fixes"] == before
     j = c.post("/api/draft/preview", json={"fixes": [_mv(a, _free_slot(a)), _mv(b, dict(d=2, p=p + 2))]}).get_json()   # the second refused: the first shows
     assert j["state"] == "no" and _marks(j, "1A")[a][0] == "moved" and len(j["texts"]) == 1, j
     for body in ({"fixes": []}, {"fixes": [1, 2, 3]}, {"fixes": "x"}, {}): assert c.post("/api/draft/preview", json=body).status_code == 400, body

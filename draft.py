@@ -1,7 +1,7 @@
 """The draft: the timetable the committee uploaded, kept on the server beside the saved setup. It is checked against the
 setup as it is now (ttgen.verify), each difference is decided on (change step 5, or still open), and the
 draft is published when the committee is ready. Files and decisions live in DATA_DIR/draft."""
-import copy, json, os, re, secrets, shutil, threading, uuid
+import copy, hashlib, json, os, re, secrets, shutil, threading, uuid
 from ttgen.export import ENTIRE, PALETTE, model_from_files
 from ttgen.database import write_db
 from ttgen.spec import typed_rules
@@ -29,6 +29,17 @@ def not_placed_text(n):
 class NotPlaced(Exception):
     """lessons wait in Not placed, so nothing can be printed or downloaded; count: how many lessons"""
     def __init__(self, count): super().__init__(not_placed_text(count)); self.count = count
+MOVED = "The timetable changed. Ask again."
+def stamp(meta=None, rec=None):
+    """12 hex characters that name the draft as it is now: its upload, its fixes (when made and what they said) and the setup version it is checked against.
+    Worked out from what is on disk (meta: the draft's meta.json, rec: a setup record), so an answer made for a timetable that has moved on is told apart from one made for this."""
+    meta = store.read_json(_p("meta.json"), {}) if meta is None and exists() else meta or {}; rec = rec or store.setup_record()
+    return hashlib.sha1(json.dumps([meta.get("upload_id"), meta.get("uploaded_at"), [[f.get("at"), f.get("text")] for f in meta.get("fixes") or []], rec["v"]]).encode()).hexdigest()[:12]
+def _moved(given):
+    """under the lock: ValueError(MOVED) when a stamp was given and it is not the draft's now (no stamp: any change may be made)"""
+    if given is None: return
+    if not exists(): raise NoDraft("There is no draft.")
+    if given != stamp(): raise ValueError(MOVED)
 def _count(pool): return len({x["id"] for x in pool})
 _cache = {}                 # one entry: the model of the draft with its fixes applied, (key, model, fx); one worker, so a dict under _lock
 
@@ -174,7 +185,7 @@ def _build(m=None, rec=None, fx=None):
     state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
              "same" if int(got[1]) == ver else "older" if int(got[1]) < ver else "newer")
     ours, theirs = str((spec.get("school") or {}).get("name") or "").strip(), meta.get("school") or ""
-    return dict(source=meta.get("source"), uploaded_at=meta.get("uploaded_at"), upload_id=meta.get("upload_id"), config_id=cid, setup_version=f"v{ver}", config_state=state,
+    return dict(stamp=stamp(meta, rec), source=meta.get("source"), uploaded_at=meta.get("uploaded_at"), upload_id=meta.get("upload_id"), config_id=cid, setup_version=f"v{ver}", config_state=state,
                 school=m["school"]["name"], file_school=theirs, timetable=m["school"]["timetable"], lessons=ch["lessons"], classes=len(m["classes"]), teachers=len(m["teachers"]),
                 students=len(m["students"]), after=ch["after_school"][:30], notes=m["notes"][:12], rule_report=m.get("rule_report") or [],
                 choices_used=m.get("choices_used") or [], choices=len(spec.get("choices") or []) - len({i for i, _ in choices.problems(spec)}),
@@ -451,14 +462,14 @@ def _pushed(m, spec, f, pool):
     if not classes or not isinstance(n, int): return []
     return sorted({x["id"] for x in m["lessons"] if x["id"] != own and x["d"] == d and set(x["classes"]) & classes and x["p"] < p + n and p < x["p"] + x["n"]})
 
-def fix(move):
+def fix(move, stamp=None):
     """make one fix: judged against the draft as it is now. na is refused with its sentence; no is refused with its sentence too, unless the request
     has force (a move, place, add, delete, teacher or room from the board; never a room for all the group's lessons) and why, the sentence the page showed for that place, is the judgement's sentence now
     (a place that went wrong for another reason since is refused, with the reason as it now is); with push the lessons of the same classes in the
-    way are worked out here, under the lock, and kept on the fix as out (none of push, force and why is kept). A lift needs no force. Returns info()."""
+    way are worked out here, under the lock, and kept on the fix as out (none of push, force and why is kept). A lift needs no force. stamp (the draft's, as the page last read it): when it is not the draft's now, ValueError(MOVED) before anything is judged. Returns info()."""
     f = _whole(move, forcing=True); force, push, why, all_ = f.pop("force", False), f.pop("push", False), f.pop("why", None), f.pop("all", False)
     with _lock:   # from the judgement to the write: two clicks cannot both pass the judgement on the same state
-        m, rec, fx = _now(); spec, days, pool = m["checked_setup"], m["days"], fx["pool"]
+        _moved(stamp); m, rec, fx = _now(); spec, days, pool = m["checked_setup"], m["days"], fx["pool"]
         if f["kind"] == "add":
             _length(f["n"], m)
             if not f["room"]: f["room"] = fixes.add_room(m, spec, f["key"], f["d"], f["p"], f["n"]) if isinstance(f["d"], int) and isinstance(f["p"], int) else ""
@@ -514,10 +525,10 @@ def _fixes_of(moves, m, spec, days):
         out.append(f)
     return out
 
-def fix_many(moves):
-    """make one or two fixes together: each judged on the timetable the earlier ones leave, all kept (with one batch id) or none. Returns info()."""
+def fix_many(moves, stamp=None):
+    """make one or two fixes together: each judged on the timetable the earlier ones leave, all kept (with one batch id) or none. stamp: as for fix. Returns info()."""
     with _lock:   # from the judgement to the write, as fix does
-        m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]; fl = _fixes_of(moves, m, spec, days)
+        _moved(stamp); m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]; fl = _fixes_of(moves, m, spec, days)
         c = helper.chain(m, spec, days, fl)
         if c["state"] in ("no", "na"): raise ValueError(c["why"])
         if len(c["texts"]) != len(fl): raise ValueError("That fix could not be made. Check the list again.")
@@ -531,13 +542,26 @@ def suggest(key):
     if not w: raise ValueError("That warning is no longer on the list.")
     return helper.suggest(m, m["checked_setup"], m["days"], w)
 
+def _one(m, spec, days, pool, f):
+    """one fix of any kind the board makes, judged with the pool and applied to copies, however it is judged -> dict(state, why, texts, lessons, was, touched); a fix judged na changes nothing"""
+    if f["kind"] == "add":
+        _length(f["n"], m)
+        if not f["room"]: f["room"] = fixes.add_room(m, spec, f["key"], f["d"], f["p"], f["n"]) if isinstance(f["d"], int) and isinstance(f["p"], int) else ""
+    j = fixes.judge(m, spec, days, f, pool=pool); L, was, touched = copy.deepcopy(m["lessons"]), [], set()
+    if j["state"] == "na": return dict(state="na", why=j["why"], texts=[], lessons=L, was=was, touched=touched)
+    text = fixes.apply_one(L, f, spec, days, touched=touched, was=was, pool=copy.deepcopy(pool))
+    return dict(state=j["state"], why=j["why"], texts=[text], lessons=L, was=was, touched=touched)
+
 def preview(moves):
     """what the fixes would do, written nowhere -> dict(state, why, texts, classes, gone). classes: the week of every class a changed lesson is of, before or
-    after, as grid gives it, each lesson with mark (moved, changed, new or '') and, when moved, was = dict(d, p); gone: the lessons deleted. A list that is
-    refused shows the timetable up to the fix refused."""
-    m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]; fl = _fixes_of(moves, m, spec, days)
-    c = helper.chain(m, spec, days, fl)
-    if c["state"] in ("no", "na"): c = dict(helper.chain(m, spec, days, fl[:len(c["steps"]) - 1]), state=c["state"], why=c["why"])
+    after, as grid gives it, each lesson with mark (moved, changed, new or '') and, when moved, was = dict(d, p); gone: the lessons deleted. One fix may be of any
+    kind the board makes (a place and a trade too) and is judged with the pool; when it is judged no the timetable still shows it made, and when na nothing is changed.
+    Two fixes (never a place or a lift): a list that is refused shows the timetable up to the fix refused."""
+    m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]
+    if isinstance(moves, list) and len(moves) == 1: c = _one(m, spec, days, fx["pool"], _whole(moves[0]))
+    else:
+        fl = _fixes_of(moves, m, spec, days); c = helper.chain(m, spec, days, fl)
+        if c["state"] in ("no", "na"): c = dict(helper.chain(m, spec, days, fl[:len(c["steps"]) - 1]), state=c["state"], why=c["why"])
     L, was, touched = c["lessons"], c["was"], c["touched"]; first, last = {}, {}
     for x in was: first.setdefault((x["id"], x["group"]), x); last[(x["id"], x["group"])] = x
     names = {n for x in was for n in x["classes"]} | {n for x in L if x["id"] in touched for n in x["classes"]}
