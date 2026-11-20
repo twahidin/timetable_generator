@@ -655,7 +655,7 @@
     const groups = [["freed", "Freed by the exam"], ["free", "Free then"], ["backups", "Backup invigilators"], ["need_backup", "Would need a backup"]];
     const body = groups.map(([k, title]) => {
       const list = (S.who[k] || []).filter(c => !d.names.includes(c.name));
-      return `<h4>${title}</h4>${list.map(c => `<div class="small who"><div><b>${esc(c.name)}</b> <span class="muted">· ${c.minutes} min so far</span><br><span class="muted">${esc(c.reason)}</span></div>
+      return `<h4>${title}</h4>${list.map(c => `<div class="small whorow"><div><b>${esc(c.name)}</b> <span class="muted">· ${c.minutes} min so far</span><br><span class="muted">${esc(c.reason)}</span></div>
         <button type="button" class="small" data-act="whoUse" data-c="${esc(c.name)}" ${S.busy ? "disabled" : ""}>Use</button></div>`).join("") || `<div class="small muted">No one</div>`}`;
     }).join("");
     return `<div class="panel">${head}${body}</div>`;

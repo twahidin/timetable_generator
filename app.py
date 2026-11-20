@@ -1113,7 +1113,7 @@ def exams_print(id, what):
     buf = io.BytesIO()
     exams_printouts.pdf(what, pub, _exam_cal(pub), s, exams_settings.load(pub), buf)
     buf.seek(0)
-    return send_file(buf, as_attachment=True, download_name=safe_name(f"{s.get('name')} {what}") + ".pdf", mimetype="application/pdf")
+    return send_file(buf, as_attachment=False, download_name=safe_name(f"{s.get('name')} {what}") + ".pdf", mimetype="application/pdf")
 
 @app.get("/api/exams/<id>/download.xlsx")
 @need("committee", "staff")

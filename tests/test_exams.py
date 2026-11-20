@@ -732,7 +732,7 @@ def printouts_and_excel():
         for what in ("seating", "doors", "attendance", "classes", "roster-day", "roster-teacher", "timetable"):
             r = c.get(f"/api/exams/{s['id']}/print/{what}.pdf")
             assert r.status_code == 200 and r.data.startswith(b"%PDF"), (what, r.status_code)
-            assert f"Sec 3 Exam {what}.pdf" in r.headers["Content-Disposition"]
+            assert f"Sec 3 Exam {what}.pdf" in r.headers["Content-Disposition"] and r.headers["Content-Disposition"].startswith("inline"), r.headers["Content-Disposition"]
         assert c.get(f"/api/exams/{s['id']}/print/nothing.pdf").status_code == 404
         r = c.get(f"/api/exams/{s['id']}/download.xlsx"); assert r.status_code == 200 and "Sec 3 Exam.xlsx" in r.headers["Content-Disposition"]
         wb = openpyxl.load_workbook(io.BytesIO(r.data))
