@@ -710,6 +710,7 @@ def printouts_and_excel():
         assert [x.value for x in wb["Seats"][1]] == ["Date", "Start", "Room", "Seat", "Student ID", "Name", "Class", "Paper"]
         assert [x.value for x in wb["Duties"][1]][-1] == "Needs backup" and wb["Duties"].max_row > 1
         assert [x.value for x in wb["Lessons"][1]][0] == "List"
+        assert {x.value for x in wb["Lessons"]["A"][1:]} <= {"No relief needed", "Backup needed", "Runs as usual"} and wb["Lessons"].max_row > 1
         assert [x.value for x in wb["Papers"][1]][0] == "Level"
         assert not [1 for ws in wb for row in ws.iter_rows() for x in row if isinstance(x.value, str) and x.value[:1] in "=+-@\t\r"]
         import copy

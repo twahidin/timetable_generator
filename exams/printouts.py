@@ -10,7 +10,7 @@ from exams import seating as _seat
 from relief.codes import _cell
 
 WHATS = ("seating", "doors", "attendance", "classes", "roster-day", "roster-teacher", "timetable")
-LISTS = dict(none="Lesson stopped", backup="Teacher is invigilating", runs="Lesson runs")
+LISTS = dict(none="No relief needed", backup="Backup needed", runs="Runs as usual")
 
 
 def _made(sched):
