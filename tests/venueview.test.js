@@ -200,4 +200,28 @@ t("sync_kinds_a_combined_venue_takes_its_rooms_kind", () => {
   assert.strictEqual(VenueView.syncKinds(fixture()), 0);
   const m = paired(); delete m.venues[0].kind; delete m.venues[1].kind; assert.strictEqual(VenueView.syncKinds(m), 0);   // no kind is classroom
 });
+// The page's openServer (static/app.js), run as written with the page around it stubbed: a combined venue whose kind is out of
+// step with its rooms is put right on the committee's page and in a practice copy, but never on a department head's page,
+// where the change would go to the server and be refused ("1 change could not be made")
+t("opening_the_setup_syncs_kinds_except_on_a_department_heads_page", () => {
+  const src = require("fs").readFileSync(require("path").join(__dirname, "../static/app.js"), "utf8");
+  const at = src.indexOf("async function openServer("); assert.ok(at >= 0, "openServer not found in static/app.js");
+  const body = src.slice(at, src.indexOf("\n}\n", at) + 2);
+  const open = (role, practice) => {
+    const srv = paired(); srv.venues[0].kind = "lab"; srv.venues[1].kind = "lab";   // the pair still says classroom
+    const S = { practice, spec: null, step: 1 }, saved = [];
+    const run = new Function("S", "SYNC", "Sync", "LIST_KEYS", "VenueView", "isHead", "useKind", "unpick", "defaultRoles", "ensureDays", "save",
+      body + "; return openServer;")(S, {}, { clone: x => JSON.parse(JSON.stringify(x)) }, ["venues"], VenueView, () => role === "head",
+      async () => {}, () => {}, () => false, () => {}, () => saved.push(JSON.parse(JSON.stringify(S.spec))));
+    return run({ spec: srv, v: 1 }).then(() => [S.spec.venues[8].kind, saved.length]);
+  };
+  return Promise.all([open("head", false), open("committee", false), open("head", true)]).then(([head, comm, prac]) => {
+    assert.deepStrictEqual(head, ["classroom", 1]);   // left as the server has it: nothing for the server to refuse
+    assert.deepStrictEqual(comm, ["lab", 1]);
+    assert.deepStrictEqual(prac, ["lab", 1]);         // a practice copy is never sent, so it may be put right
+    pending--;
+  });
+});
+let pending = 1;
+process.on("beforeExit", () => { assert.strictEqual(pending, 0, "the openServer test did not finish"); });
 console.log(n + " cases passed");
