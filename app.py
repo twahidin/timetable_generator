@@ -41,7 +41,8 @@ def need(*roles):
                 return redirect("/login")
             if role() == "staff" and me_staff() is None:   # dropped or renamed on a later publish: me_staff has ended the session
                 if request.path.startswith(("/api/", "/pdf/", "/files/")): return {"error": "Please sign in again."}, 401
-                return _no_longer_valid()
+                if store.published(): return _no_longer_valid()
+                # nothing published (a publish is swapping folders): the session stays; the page says "Not published yet"
             return f(*a, **k)
         return inner
     return deco
@@ -745,7 +746,8 @@ def me_staff(pub=None):
     is no longer on the published timetable or the staff list is ended"""
     if role() != "staff": return None
     pub = pub or store.published(); who = session.get("who")
-    p = next((x for x in relief_staff(pub) if x["name"] == who), None) if pub and who else None
+    if not pub: return None   # nothing published (a publish may be swapping folders): no one to find, but the session stays
+    p = next((x for x in relief_staff(pub) if x["name"] == who), None) if who else None
     if p is None: session.clear()
     return p
 

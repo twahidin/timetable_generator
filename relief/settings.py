@@ -15,7 +15,7 @@ DEFAULT_RULES = [
 _TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 UNREAD = "The settings could not be read. Reload the page and try again."
 NAMELESS = "Give each term and holiday a name."
-FORMULA = ("=", "+", "-", "@")     # what a spreadsheet reads as the start of a formula
+FORMULA = ("=", "+", "-", "@", "\t", "\r")     # what a spreadsheet reads as the start of a formula
 
 
 def _fat_role(pub):
@@ -41,7 +41,8 @@ def defaults(pub) -> dict:
 
 def _merged(pub, saved) -> dict:
     d = defaults(pub)
-    for k, v in (saved or {}).items():
+    if not isinstance(saved, dict): return d   # valid JSON of the wrong shape: start from the defaults
+    for k, v in saved.items():
         if k in ("limits", "times") and isinstance(v, dict): d[k].update(v)
         elif k in d: d[k] = v
     return d
@@ -100,7 +101,10 @@ def _check(new, pub):
         if name[0] in FORMULA: raise ValueError(f"A name cannot start with {name[0]}.")   # the codes CSV is opened in a spreadsheet
         if name in teachers: raise ValueError(f"{name} is already a teacher on the timetable.")
         if name in seen: raise ValueError(f"{name} is on the staff list twice.")
-        seen.add(name); extra.append(dict(name=name, note=_text(x.get("note"))))
+        if len(name) > 100: raise ValueError("Keep a name under 100 characters.")
+        note = _text(x.get("note"))
+        if len(note) > 200: raise ValueError("Keep a note under 200 characters.")
+        seen.add(name); extra.append(dict(name=name, note=note))
     known = {p["name"] for p in _people.people(pub, extra)}
     limits = _of(new, "limits", dict, {})
     lists = {}
@@ -120,7 +124,8 @@ def _check(new, pub):
     for k in ("fat_per_day", "other_per_day"):
         if lim[k] is not None and not _int_in(lim[k], 1, 20): raise ValueError("A daily limit is a whole number from 1 to 20, or empty.")
     times = dict(base["times"]); times.update(_of(new, "times", dict, {}))
-    for k in ("fill_at", "remind_at", "weekly_at"):
+    for k, label in (("fill_at", "Fill open lessons at"), ("remind_at", "Remind the absent teacher at"), ("weekly_at", "Weekly summary at")):
+        if times[k] is None or str(times[k]).strip() == "": raise ValueError(f"Give a time for {label}.")
         if not _TIME.match(str(times[k])): raise ValueError(f"{times[k]} is not a time like 15:00.")
     if not _int_in(times["report_every"], 5, 60): raise ValueError("Report every 5 to 60 minutes.")
     if times["weekly_day"] not in ("Mon", "Tue", "Wed", "Thu", "Fri"): raise ValueError("The weekly summary goes out on a weekday.")

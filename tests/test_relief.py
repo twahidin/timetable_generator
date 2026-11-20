@@ -323,10 +323,13 @@ def a_dropped_teacher_loses_the_teacher_routes_too():
         r = d.get("/files/book/classes"); assert r.status_code == 401 and r.get_json() == {"error": "Please sign in again."}
         for x in (a, b, d):
             with x.session_transaction() as s: assert "role" not in s and "who" not in s
-    with published(None):   # nothing published: no one has a staff code, so the session ends as well
+    with published(None):   # nothing published (a publish is swapping folders): "Not published yet", the session survives
         e = A.app.test_client()
         with e.session_transaction() as s: s["role"], s["who"] = "staff", "Mr Darren Lim"
-        assert b"Code no longer valid" in e.get("/timetable").data
+        r = e.get("/timetable"); assert r.status_code == 200 and b"Not published yet" in r.data and b"Code no longer valid" not in r.data
+        r = e.get("/pdf/classes/1A"); assert r.status_code == 401 and r.get_json() == {"error": "Please sign in again."}
+        r = e.get("/api/relief/me"); assert r.status_code == 401 and r.get_json() == {"error": "Please sign in again."}
+        with e.session_transaction() as s: assert s["role"] == "staff" and s["who"] == "Mr Darren Lim"
 
 @t
 def the_relief_home_is_the_staff_page():
@@ -508,5 +511,21 @@ def slips_are_ten_to_a_page_and_a_new_page_per_department():
     assert buf.getvalue().startswith(b"%PDF") and pages(buf.getvalue()) == 4, pages(buf.getvalue())
     buf = io.BytesIO(); RC.slips_pdf("CTSS", ppl[:10], "https://example.test", buf)
     assert pages(buf.getvalue()) == 1
+
+@t
+def settings_edge_cases():
+    fresh()
+    for k, label in (("fill_at", "Fill open lessons at"), ("remind_at", "Remind the absent teacher at"), ("weekly_at", "Weekly summary at")):
+        raises(ValueError, lambda: S.save(base(times={k: ""}), PUB, "x"), f"Give a time for {label}.")
+    raises(ValueError, lambda: S.save(base(times=dict(fill_at="25:00")), PUB, "x"), "25:00 is not a time like 15:00.")
+    for bad_json in ("[]", '"text"'):
+        open(S.PATH, "w").write(bad_json)
+        d = S.load(PUB); assert d["team"] == [] and d["times"]["fill_at"] == "15:00", bad_json
+    fresh()
+    raises(ValueError, lambda: S.save(base(extra_staff=[dict(name="N" * 101, note="")]), PUB, "x"), "Keep a name under 100 characters.")
+    raises(ValueError, lambda: S.save(base(extra_staff=[dict(name="Ms Ok", note="n" * 201)]), PUB, "x"), "Keep a note under 200 characters.")
+    S.save(base(extra_staff=[dict(name="N" * 100, note="n" * 200)]), PUB, "x"); fresh()
+    rows = list(csv.reader(io.StringIO(RC.codes_csv([dict(name="\tMs Tab", depts=["\rSci"])])[1:])))
+    assert rows[1][0] == "'\tMs Tab" and rows[1][1] == "'\rSci", rows[1][:2]
 
 print(f"{COUNT} relief tests passed")

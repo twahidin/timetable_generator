@@ -126,7 +126,7 @@
     const saved = st.saved_at ? `Saved by ${esc(st.saved_by)}, ${esc(st.saved_at)}` : S.dirty ? "" : "Not saved yet.";
     const btn = d.can_save ? `<button type="button" class="primary" data-act="save" ${S.busy ? "disabled" : ""}>${S.busy ? "Saving…" : "Save"}</button>`
       : `<span class="muted">Only the timetable committee and the relief team can change relief settings.</span>`;
-    return `${btn}${saved ? `<span class="muted small">${saved}</span>` : ""}${S.dirty && !S.bad ? `<span class="dirty">Changes not saved.</span>` : ""}${S.msg ? `<span class="msg ${S.bad ? "bad" : "ok"}" role="status">${esc(S.msg)}</span>` : ""}`;
+    return `${btn}${saved ? `<span class="muted small">${saved}</span>` : ""}${S.dirty ? `<span class="dirty">Changes not saved.</span>` : ""}${S.msg ? `<span class="msg ${S.bad ? "bad" : "ok"}" role="status">${esc(S.msg)}</span>` : ""}`;
   }
 
   function paintBars() { document.querySelectorAll("[data-bar]").forEach(b => { b.innerHTML = barInner(); }); }
@@ -171,7 +171,7 @@
   /* ---------------------------------------------------------------- changes */
   function changed() {
     S.dirty = true;
-    if (!S.bad) S.msg = "";
+    S.msg = ""; S.bad = false;
     paintBars();
   }
 
