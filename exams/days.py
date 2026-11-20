@@ -104,7 +104,7 @@ def day_view(pub, cal, sched, date):
                                 room=l["room"], rain=l.get("rain", ""), start=bnds[ps[0]][0], end=bnds[ps[-1]][1],
                                 stopped=_merge(stopped), running=_merge(running)))
         for r in model.get("setup", {}).get("rules", []):
-            if r.get("rule") != "Not available" or r.get("scope") != "Teacher" or r.get("strength") != "Must":
+            if r.get("rule") != "Not available" or r.get("scope") != "Teacher" or str(r.get("strength") or "Must") != "Must":
                 continue
             if not _day_ok(day, r):
                 continue

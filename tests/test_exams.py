@@ -145,4 +145,13 @@ def must_rule_blocks_on_mondays():
     assert v["blocked"]["Mr Ivan Lee"] == [(460, 580)], v["blocked"]
     assert "Mr Ivan Lee" not in D.day_view(pub, F.CAL, _sched(), "2026-10-06")["blocked"]
 
+@t
+def must_rule_without_strength_still_blocks():
+    pub = F.sample_pub()
+    for r in pub["model"]["setup"]["rules"]: r.pop("strength", None)
+    v = D.day_view(pub, F.CAL, _sched(days=SEC3), "2026-10-05")
+    assert v["blocked"]["Mr Ivan Lee"] == [(460, 580)], v["blocked"]
+    pub["model"]["setup"]["rules"][0]["strength"] = "Prefer"
+    assert "Mr Ivan Lee" not in D.day_view(pub, F.CAL, _sched(days=SEC3), "2026-10-05")["blocked"]
+
 print(f"{COUNT} exams tests passed")
