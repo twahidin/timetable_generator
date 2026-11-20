@@ -621,9 +621,14 @@ def create_fill_make_view():
         key = "2026-10-05 07:50"; room = next(iter(v["made"]["seats"][key]))
         r = c.post(f"/api/exams/{s['id']}/move", json=dict(key=key, students=["3A-07"], room="3-02")); assert r.status_code == 200
         assert c.get(f"/api/exams/{s['id']}").get_json()["pins"]["rooms"][key] == {"3A-07": "3-02"}
-        r = c.post(f"/api/exams/{s['id']}/make", json=dict(only=key)); assert r.status_code == 200
         assert "3A-07" in [x for x, _ in r.get_json()["made"]["seats"][key]["3-02"]]
         r = c.post(f"/api/exams/{s['id']}/invigilators", json=dict(key=key, room="3-01", names=["Mr Ivan Lee"])); assert r.status_code == 200
+        d1 = next(x for x in r.get_json()["made"]["duties"] if x["key"] == key and x["room"] == "3-01")
+        assert "Mr Ivan Lee" in d1["names"] and d1["locked"] is True, d1
+        for path, body in (("move", dict(key="bad", students=["3A-07"], room="3-02")), ("invigilators", dict(key="bad", room="3-01", names=[])),
+                           ("use-anyway", dict(key="bad", room="Hall"))):
+            r = c.post(f"/api/exams/{s['id']}/{path}", json=body)
+            assert r.status_code == 400 and r.get_json() == {"error": "That sitting is not in this exam."}, (path, r.data)
         assert c.get(f"/api/exams/{s['id']}").get_json()["pins"]["duties"][key + "|3-01"] == ["Mr Ivan Lee"]
         r = c.get(f"/api/exams/{s['id']}/who?key={key}&room=3-01"); assert r.status_code == 200 and "freed" in r.get_json(), r.data
         assert c.get(f"/api/exams/{s['id']}/who?key=nope&room=3-01").get_json() == {"error": "Press Make first."}

@@ -1046,20 +1046,33 @@ def _exam_make(pub, s, b):
     if only is not None and not isinstance(only, str): raise ValueError(exams_schedules.WRONG)
     exams_make.make(pub, cal, s, exams_settings.load(pub), only=only)
 
+def _exam_sitting(s, key):
+    if key not in {x["key"] for x in exams_seating.sittings(s)}: raise ValueError("That sitting is not in this exam.")
+
+def _exam_remake(pub, s, key):
+    """a made schedule is made again for that sitting alone, so the answer shows the change"""
+    if s.get("made"): exams_make.make(pub, _exam_cal(pub), s, exams_settings.load(pub), only=key)
+
 def _exam_move(pub, s, b):
     if not isinstance(b["students"], list) or not all(isinstance(x, str) for x in b["students"]): raise ValueError(exams_schedules.WRONG)
     if not isinstance(b["key"], str) or not isinstance(b["room"], str): raise ValueError(exams_schedules.WRONG)
+    _exam_sitting(s, b["key"])
     exams_make.move(s, b["key"], b["students"], b["room"])
+    _exam_remake(pub, s, b["key"])
 
 def _exam_invigilators(pub, s, b):
     if not isinstance(b["names"], list) or not all(isinstance(x, str) for x in b["names"]): raise ValueError(exams_schedules.WRONG)
     if not isinstance(b["key"], str) or not isinstance(b["room"], str): raise ValueError(exams_schedules.WRONG)
+    _exam_sitting(s, b["key"])
     exams_make.set_invigilators(s, b["key"], b["room"], b["names"])
+    _exam_remake(pub, s, b["key"])
 
 def _exam_use_anyway(pub, s, b):
     if not isinstance(b["key"], str) or not isinstance(b["room"], str): raise ValueError(exams_schedules.WRONG)
+    _exam_sitting(s, b["key"])
     pair = [b["key"], b["room"]]
     if pair not in s.setdefault("use_anyway", []): s["use_anyway"].append(pair)
+    _exam_remake(pub, s, b["key"])
 
 @app.post("/api/exams/<id>/make")
 @need("committee", "staff")
