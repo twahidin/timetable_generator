@@ -879,4 +879,18 @@ def test_a_day_a_teacher_may_take_two_lessons_at_once():
     allowed = next(x for x in ch if x.startswith("Teacher in two lessons")); assert verify.crit_of(allowed) == "" and verify.crit_of(next(x for x in ch if x.startswith("Teacher double"))) == "teacher"
     m0, _ = model_with(L); assert m0["double"] == set() and sum(x.startswith("Teacher double-booked: ") for x in export.check_model(m0)["problems"]) == 2
 
+@t
+def a_teacher_on_another_group_of_the_same_lesson_is_not_free():
+    sp, L = one_block(); names = [x["name"] for x in SP["teachers"]]; ta, tb, tc = names[0], names[1], names[2]
+    L[0]["teachers"], L[1]["teachers"], L[2]["teachers"] = [ta], [tb], []   # one lesson (id 7), three groups at the same time
+    L.append(lesson(8, 1, 0, 2, L[0]["classes"], L[0]["subject"], L[0]["group"], [ta], level=L[0]["level"], block=L[0]["block"]))   # the first group's other lesson
+    m, sp = model_with(L); out = fixes.choices(m, sp, DAYS, 7, L[0]["group"]); T = {x["name"]: x for x in out["teachers"]}
+    assert out["n_lessons"] == 2
+    assert T[tb]["free"] is False and L[1]["group"] in T[tb]["doing"], T[tb]   # on another group of this very lesson: not free then
+    assert T[ta]["free"] is True and T[ta]["doing"] == ""                      # the row's own teacher is not busy with the row's own lessons
+    assert T[tc]["free"] is True                                                # on no lesson at all
+    L2 = [dict(x) for x in L]; L2[1]["teachers"] = [ta, tb]                     # the row's own teacher also on the other group: busy there too
+    m2, sp2 = model_with(L2); T2 = {x["name"]: x for x in fixes.choices(m2, sp2, DAYS, 7, L2[0]["group"])["teachers"]}
+    assert T2[ta]["free"] is False and L2[1]["group"] in T2[ta]["doing"]
+
 print(f"{n} checks passed")

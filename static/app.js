@@ -3606,15 +3606,24 @@ function bdLessonRoom(c, r, j, v, all) {   // the room list's choice ("None" ask
    the room is in use, it was at another of the group's lessons (this one's was free), and the page says so. The lesson stays selected and
    its lists are fetched again */
 async function bdLessonPost(c, fix, who) {
-  const b = S.board; let why = null, other = null;
+  const b = S.board; let why = null, other = null, rule = null;
+  const ruled = s => { if (!fix.all && Board.ruleRefusal(s)) { rule = s; return true; } return false; };   // a rule of step 6 stands in the way: the line says which, and asks
   const refused = s => {
     if (fix.all) { if (Board.busyRefusal(s, fix.room, "room")) { other = `${s} ${BDWHY.allOther}`; return true; } return false; }
-    if (Board.busyRefusal(s, who, fix.kind)) { why = s; return true; } return false;   // only "{who} is teaching ... then." or "{who} is in use then."
+    if (Board.busyRefusal(s, who, fix.kind)) { why = s; return true; }   // only "{who} is teaching ... then." or "{who} is in use then."
+    return ruled(s);
   };
+  const done = ok => { if (ok && S.board === b && b.lesson && b.lesson.id === c.id) { b.lesson.all = {}; bdSideDraw(); } };   // the tick box is for one change
   let ok = await bdSend("/api/draft/fix", fix, c, false, { stay: true, refused });
   if (other !== null) { toast(other); if (S.board === b) bdLoad(); return; }   // the list goes back
-  if (why !== null && S.board === b) ok = await bdSend("/api/draft/fix", Object.assign({}, fix, { force: true, why }), c, false, { stay: true });
-  if (ok && S.board === b && b.lesson && b.lesson.id === c.id) { b.lesson.all = {}; bdSideDraw(); }   // the tick box is for one change
+  if (why !== null && S.board === b) ok = await bdSend("/api/draft/fix", Object.assign({}, fix, { force: true, why }), c, false, { stay: true, refused: ruled });
+  if (rule !== null && S.board === b) {   // not made: the rule's own sentence, then the question; Cancel puts the list back
+    const room = fix.kind === "room", s = rule;
+    bdYesNo({ id: c.id, lesson: true, text: s, ask: room ? BDWHY.useAnyway : BDWHY.anyway, yes: room ? "Yes, use it" : "Yes, give it",
+      run: async () => done(await bdSend("/api/draft/fix", Object.assign({}, fix, { force: true, why: s }), c, false, { stay: true })) });
+    return;
+  }
+  done(ok);
 }
 function bdDraftDraw() {   // the draft changed (a fix, an answer, a filter): the card again; with a card in the air only what does not hold it, the rest when it lands
   const b = S.board, box = $("#bdBox"); if (!b || !box) return;
