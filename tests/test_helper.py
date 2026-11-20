@@ -301,4 +301,19 @@ if "--full" in sys.argv:
                 assert not {v["key"] for v in verify.deployment(m2, sp)} - dep0 - {w["key"]}, (w["key"], s["text"])   # and no new step 5 difference
         print(f"  {len(ws)} warnings, {offered} suggestions ({pairs} pairs), the slowest {slow:.2f} s")
 
+@t
+def a_trade_is_worded_and_its_loads_are_told():
+    P, Q = "Michelle Goh", "Sabrina Koh"; ka, kb = "C:1A:Mathematics", "C:1B:Mathematics"; f = dict(kind="trade", a=ka, b=kb, x=P, y=Q); ok = dict(state="ok", why="", must=[], prefer=[])
+    L = [lesson(1, 0, 2, 1, [A], "Mathematics", ENTIRE, [P], level=LV), lesson(2, 1, 2, 1, [A], "Mathematics", ENTIRE, [P], level=LV)] \
+        + [lesson(i, d, 2, 1, [B], "Mathematics", ENTIRE, [Q], level=LV) for i, d in ((3, 2), (4, 3), (5, 4))]
+    m, sp = model_with(L); before = frozen(m)
+    assert helper.say(m, sp, DAYS, f) == f"Trade classes: {P} takes Mathematics for {B}, {Q} takes Mathematics for {A}."
+    assert helper.disturbs(m, sp, DAYS, [f], [ok]) == [f"{P} rises to 3 periods.", f"{Q} drops to 2 periods."]
+    assert helper.disturbs(m, sp, DAYS, [dict(f, a=kb, b=ka, x=Q, y=P)], [ok]) == [f"{Q} drops to 2 periods.", f"{P} rises to 3 periods."]
+    c = helper.chain(m, sp, DAYS, [f]); assert c["state"] == "ok" and c["touched"] == {1, 2, 3, 4, 5} and len(c["was"]) == 5 and c["texts"] == [f"{P} and {Q} traded: {P} now teaches Mathematics for {B}, {Q} Mathematics for {A}."]
+    assert all(x["teachers"] == ([Q] if x["classes"] == [A] else [P]) for x in c["lessons"]) and m["lessons"] == before   # the cached model is never changed
+    assert helper.says(m, sp, DAYS, [f]) == helper.say(m, sp, DAYS, f)
+    L2 = [dict(x, d=x["d"], teachers=list(x["teachers"])) for x in L[:2]] + [lesson(i, d, 2, 1, [B], "Mathematics", ENTIRE, [Q], level=LV) for i, d in ((3, 2), (4, 3))]
+    m2, sp2 = model_with(L2); assert helper.disturbs(m2, sp2, DAYS, [f], [ok]) == ["Nothing else moves."]   # two periods each: nobody's load changes
+
 print(f"{n} checks passed")

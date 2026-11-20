@@ -646,6 +646,23 @@ def test_the_preview_is_the_draft_as_the_published_page_would_show_it():
     shutil.rmtree(draft.DIR)
     r = c.get("/draft/preview"); assert r.status_code == 404 and "There is no draft" in r.get_data(as_text=True)
 
+def test_a_trade_is_one_fix_judged_as_a_whole_never_forced_and_undone_at_once():
+    T0, T1 = TEACHERS[0], TEACHERS[1]; ka, kb = f"C:{CLASSES[0]}:{SUBJ}", f"C:{CLASSES[1]}:{SUBJ}"
+    rows = [dict(id=1, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=[CLASSES[0]], subject=SUBJ, teachers=[T0], room=ROOMS[0]),
+            dict(id=2, day=DAYS[1], p=L1, n=1, level=LEVEL, classes=[CLASSES[1]], subject=SUBJ, teachers=[T1], room=ROOMS[1])]
+    save_draft(rows); f = dict(kind="trade", a=ka, b=kb, x=T0, y=T1)
+    sentence = f"{T0} and {T1} traded: {T0} now teaches {SUBJ} for {CLASSES[1]}, {T1} {SUBJ} for {CLASSES[0]}."
+    r = c.post("/api/draft/fix", json=f); assert r.status_code == 200, r.get_json()
+    assert [(x["kind"], x["text"]) for x in fixes_stored()] == [("trade", sentence)] and [x["kind"] for x in c.get("/api/draft").get_json()["fixes"]] == ["trade"]
+    assert set(fixes_stored()[0]) == {"kind", "a", "b", "x", "y", "at", "text"} and taught(1) == [[T1]] and taught(2) == [[T0]]
+    assert draft.model_now()[2]["texts"][-1] == sentence   # what the published timetable's record of changes is written from
+    assert c.post("/api/draft/undo").status_code == 200 and fixes_stored() == [] and taught(1) == [[T0]] and taught(2) == [[T1]]   # one undo takes it back
+    assert "trade" not in draft.FORCED and draft.FIELDS["trade"] == ("a", "b", "x", "y")
+    raises(ValueError, lambda: draft.fix(dict(f, x=5)), "The fix is not complete.")
+    save_draft(rows + [dict(id=3, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=["1C"], subject=SUBJ2, teachers=[T1], room=ROOMS[2 % len(ROOMS)])])   # T1 is with 1C when 1A meets
+    why = f"{T1} is teaching {SUBJ2} for 1C then."; raises(ValueError, lambda: draft.fix(f), why)
+    r = c.post("/api/draft/fix", json=dict(f, force=True, why=why)); assert r.status_code == 400 and r.get_json() == {"error": why} and fixes_stored() == []   # force is not heard
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()

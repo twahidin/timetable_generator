@@ -282,7 +282,7 @@ def preview_page():
 # ------------------------------------------------------------------------------------------------ the grid and the fixes
 
 NOT_FOUND = "There is no class or teacher of that name on the timetable."
-FIELDS = dict(move=("id", "d", "p"), swap=("a", "b"), teacher=("key", "teachers"), room=("id", "group", "room"), add=("key", "d", "p", "n"), delete=("id",), lift=("id",), place=("id", "d", "p"))
+FIELDS = dict(move=("id", "d", "p"), swap=("a", "b"), teacher=("key", "teachers"), trade=("a", "b", "x", "y"), room=("id", "group", "room"), add=("key", "d", "p", "n"), delete=("id",), lift=("id",), place=("id", "d", "p"))
 FORCED = ("move", "place", "add", "delete", "teacher", "room")   # the kinds a request from the board may force
 PUSHED = ("move", "place", "add")             # the kinds a request from the board may push other lessons out for
 
@@ -427,6 +427,7 @@ def _whole(f, forcing=False):
     if k == "add": out["room"] = f.get("room")
     if k == "delete" and f.get("group") is not None: out["group"] = f["group"]
     if k == "teacher" and not (isinstance(out["teachers"], list) and all(isinstance(t, str) for t in out["teachers"])): raise ValueError("The fix is not complete.")
+    if k == "trade" and not all(isinstance(out[v], str) for v in FIELDS[k]): raise ValueError("The fix is not complete.")
     if forcing:
         if k in FORCED and f.get("force") is True:
             out["force"] = True

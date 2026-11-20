@@ -879,4 +879,73 @@ def test_a_day_a_teacher_may_take_two_lessons_at_once():
     allowed = next(x for x in ch if x.startswith("Teacher in two lessons")); assert verify.crit_of(allowed) == "" and verify.crit_of(next(x for x in ch if x.startswith("Teacher double"))) == "teacher"
     m0, _ = model_with(L); assert m0["double"] == set() and sum(x.startswith("Teacher double-booked: ") for x in export.check_model(m0)["problems"]) == 2
 
+# ----------------------------------------------------------------------------------------------- the trade
+SUBJ_T = "Maths"; KA, KB = f"C:{A}:{SUBJ_T}", f"C:{B}:{SUBJ_T}"; NA, NB = f"{SUBJ_T} for {A}", f"{SUBJ_T} for {B}"
+def trade_lessons(**by):
+    """three lessons of A (ids 1 to 3, teacher T[0]) and three of B (ids 4 to 6, teacher T[1]), each pair at the same day and period"""
+    return [lesson(i + (0 if c == A else 3), d, 2, 1, [c], SUBJ_T, ENTIRE, list(by.get(c, [T[0] if c == A else T[1]])), level=LV) for c in (A, B) for d, i in ((0, 1), (1, 2), (2, 3))]
+def trade(**kw): return dict(dict(kind="trade", a=KA, b=KB, x=T[0], y=T[1]), **kw)
+
+@t
+def trade_applies():
+    L = trade_lessons(); before = copy.deepcopy(L); touched, was = set(), []
+    text = fixes.apply_one(L, trade(), SP, DAYS, touched=touched, was=was)
+    assert text == f"{T[0]} and {T[1]} traded: {T[0]} now teaches {NB}, {T[1]} {NA}." and verify._name(fixes._key(KA)) == NA
+    assert all(x["teachers"] == ([T[1]] if x["classes"] == [A] else [T[0]]) for x in L) and touched == {1, 2, 3, 4, 5, 6} and was == before
+
+@t
+def trade_end_state():
+    m, sp = model_with(trade_lessons()); assert fixes.judge(m, sp, DAYS, trade()) == dict(state="ok", why="", must=[], prefer=[])
+    import helper
+    for one, two in (((KA, T[1]), (KB, T[0])), ((KB, T[0]), (KA, T[1]))):   # either teacher fix alone puts a teacher in two classes at once
+        c = helper.chain(m, sp, DAYS, [dict(kind="teacher", key=k, teachers=[v]) for k, v in (one, two)]); assert c["state"] == "no", c["state"]
+
+@t
+def trade_clash():
+    L = trade_lessons() + [lesson(7, 1, 2, 1, [C3], "Art", ENTIRE, [T[1]], level=LV)]; L[4]["d"] = 3   # B's second lesson is elsewhere, T[1] is with C3 when A meets
+    m, sp = model_with(L); j = fixes.judge(m, sp, DAYS, trade())
+    assert j["state"] == "no" and j["why"] == f"{T[1]} is teaching Art for {C3} then.", j
+
+@t
+def trade_partial():
+    L = trade_lessons(); L[2]["teachers"] = [T[3]]; touched = set()
+    fixes.apply_one(L, trade(), SP, DAYS, touched=touched)
+    assert L[2]["teachers"] == [T[3]] and touched == {1, 2, 4, 5, 6} and L[0]["teachers"] == [T[1]]
+
+@t
+def trade_two_teachers():
+    L = trade_lessons(); L[0]["teachers"] = [T[0], T[4]]; fixes.apply_one(L, trade(), SP, DAYS)
+    assert L[0]["teachers"] == [T[1], T[4]] and L[3]["teachers"] == [T[0]]
+
+@t
+def trade_refused():
+    L = trade_lessons(); L[3]["teachers"] = [T[1], T[0]]   # B's first lesson has both: T[0] already teaches B
+    L2 = trade_lessons(); L2[0]["teachers"] = [T[0], T[1]]   # A's first lesson has both: T[1] already teaches A
+    L3 = trade_lessons()
+    cases = [(L3, trade(b=KA), "That changes nothing."), (L3, trade(y=T[0]), "That changes nothing."), (L3, trade(x=T[2]), f"{T[2]} does not teach {NA}."),
+             (L2, trade(), f"{T[1]} already teaches {NA}."), (L, trade(), f"{T[0]} already teaches {NB}."),
+             (L3, trade(y="Not A Teacher"), "Not A Teacher is not on the setup's list of teachers."), (L3, trade(x="No One", y="Not A Teacher"), "No One, Not A Teacher are not on the setup's list of teachers."),
+             (L3, trade(b=f"C:{B}:Nothing"), f"There is no lesson of Nothing for {B} on the timetable."), (L3, trade(a=f"C:{A}:Nothing"), f"There is no lesson of Nothing for {A} on the timetable.")]
+    for lessons, f, say in cases:
+        before = copy.deepcopy(lessons)
+        try: fixes.apply_one(lessons, f, SP, DAYS); assert False, f
+        except ValueError as e: assert str(e) == say, (str(e), say)
+        assert lessons == before   # nothing changed
+        m, sp = model_with(lessons); assert fixes.judge(m, sp, DAYS, f) == dict(state="na", why=say, must=[], prefer=[]), f
+    assert fixes.judge(*model_with(L3), DAYS, dict(kind="trade", a=KA, b=KB, x=T[0]))["state"] == "na"   # incomplete
+
+@t
+def trade_load():
+    teachers = [dict(x, allowance=2) if x["name"] == T[5] else x for x in SP["teachers"]]
+    L = trade_lessons()[:3] + [lesson(4, 3, 2, 1, [B], SUBJ_T, ENTIRE, [T[5]], level=LV), lesson(5, 4, 2, 1, [B], SUBJ_T, ENTIRE, [T[5]], level=LV)]   # T[5] has 2 periods, about to take A's 3
+    m, sp = model_with(L, teachers=teachers); j = fixes.judge(m, sp, DAYS, trade(y=T[5]))
+    assert j["state"] == "prefer" and j["why"] == f"{T[5]} would have 3 periods, 1 over the allowance.", j
+
+@t
+def trade_pool():
+    L = trade_lessons(); pool = [L.pop(0)]; touched = set(); m, sp = model_with(L)   # lesson 1 of A waits in the pool
+    assert fixes.judge(m, sp, DAYS, trade(), pool=copy.deepcopy(pool)) == dict(state="ok", why="", must=[], prefer=[])
+    fixes.apply_one(L, trade(), SP, DAYS, touched=touched, pool=pool)
+    assert pool[0]["teachers"] == [T[1]] and touched == {1, 2, 3, 4, 5, 6} and all(x["teachers"] == ([T[1]] if x["classes"] == [A] else [T[0]]) for x in L)
+
 print(f"{n} checks passed")
