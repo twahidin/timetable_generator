@@ -674,8 +674,9 @@ def test_the_preview_shows_every_class_touched_and_changes_nothing():
     assert _marks(j, "1A") == {a: ("moved", dict(d=0, p=p))} and _marks(j, "1B") == {b: ("moved", dict(d=1, p=p)), m3: ("", None)}, j["classes"]
     g = next(k for k in j["classes"] if k["name"] == "1A")["lessons"][0]; assert (g["d"], g["p"]) == (1, p) and set(g) >= {"id", "group", "subject", "classes", "teachers", "room", "d", "p", "n", "block", "what", "tshorts", "mark"}
     assert c.get("/api/draft").get_json()["fixes"] == before and c.get(f"/api/draft/grid?view=class&name=1A").get_json()["lessons"][0]["d"] == 0
-    r = c.post("/api/draft/preview", json={"fixes": [dict(kind="move", id=a, d=2, p=p + 2)]}); j = r.get_json()   # refused: 200, and the timetable as it was
-    assert r.status_code == 200 and j["state"] == "no" and "is teaching" in j["why"] and j["classes"] == [] and j["gone"] == [], j
+    r = c.post("/api/draft/preview", json={"fixes": [dict(kind="move", id=a, d=2, p=p + 2)]}); j = r.get_json()   # judged no: 200, and the timetable with the one change made (it is only looked at)
+    assert r.status_code == 200 and j["state"] == "no" and "is teaching" in j["why"] and _marks(j, "1A")[a][0] == "moved" and j["gone"] == [], j
+    assert c.get("/api/draft").get_json()["fixes"] == before
     j = c.post("/api/draft/preview", json={"fixes": [_mv(a, _free_slot(a)), _mv(b, dict(d=2, p=p + 2))]}).get_json()   # the second refused: the first shows
     assert j["state"] == "no" and _marks(j, "1A")[a][0] == "moved" and len(j["texts"]) == 1, j
     for body in ({"fixes": []}, {"fixes": [1, 2, 3]}, {"fixes": "x"}, {}): assert c.post("/api/draft/preview", json=body).status_code == 400, body
@@ -1008,6 +1009,21 @@ def test_publishing_records_the_open_warnings():
     p = store.published()["meta"]; texts = [w["text"] for w in j["warnings"] if not w["decision"]]
     assert p["open"] == j["open"] == len(texts) and p["left"] == texts, (p["open"], j["open"])
 
+def _ask_every_question():   # Ask about this: every look-up answers on the solved sample, and every option it offers is a change the board's preview accepts
+    import ask as lookups
+    m, rec, fx = A.draft._now(); x = m["lessons"][0]; c0 = x["classes"][0]; day = m["grid"][m["class_ix"][c0]["level"]]
+    taken = {(y["d"], q) for y in m["lessons"] if c0 in y["classes"] for q in range(y["p"], y["p"] + y["n"])}
+    d, p = next(((d, p) for d in range(len(m["days"])) for p in range(m["NP"]) if day[d][p] in "LA" and (d, p) not in taken), (0, 0))   # an empty period of that class
+    asked = 0
+    for q in lookups.QUESTIONS:
+        for sub in ([dict(kind="place", by=by, name=name, d=d, p=p) for by, name in (("class", c0), ("teacher", x["teachers"][0]), ("room", x["room"] or next(iter(m["room_ix"]))))] if q in ("fill", "free") else [])\
+                   + ([dict(kind="lesson", id=x["id"])] if q != "fill" else []):
+            r = c.get("/api/draft/about", query_string=dict(q=q, **{k: v for k, v in sub.items()})); j = r.get_json(); assert r.status_code == 200, (q, sub, j)
+            assert (j["text"] or q == "here") and j["title"] and isinstance(j["options"], list) and len(j["options"]) <= lookups.MOST + max(lookups.BUSY, lookups.USED) and j["stamp"] == c.get("/api/draft").get_json()["stamp"], (q, sub, j)
+            for o in j["options"]:
+                pv = A.draft.preview(o["fixes"]); assert pv["state"] in ("ok", "prefer", "no"), (q, o, pv); asked += 1
+    assert asked, "no option was offered by any look-up"
+
 def test_publish_uploaded_timetable():   # slow: solves the primary sample
     work = tempfile.mkdtemp(); setup, tt = os.path.join(work, "setup.xlsx"), os.path.join(work, "timetable.xlsx")
     env = dict(os.environ, PYTHONPATH=ROOT)
@@ -1034,6 +1050,7 @@ def test_publish_uploaded_timetable():   # slow: solves the primary sample
             if sl: fixed = c.post("/api/draft/fix", json=dict(kind="swap", a=x["id"], b=sl["swap"]) if sl["swap"] else dict(kind="move", id=x["id"], d=sl["d"], p=sl["p"])).get_json(); break
         if fixed: break
     assert fixed and len(fixed["fixes"]) == 1, fixed
+    _ask_every_question()
     r = c.post("/api/draft/publish"); j = r.get_json(); assert r.status_code == 200 and j["published"] is True, j
     p = c.get("/api/status").get_json()["published"]
     assert p and p["source"] == "timetable.xlsx" and p["rule_report"][0]["how"] == "Checked.", p

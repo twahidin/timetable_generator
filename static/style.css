@@ -492,6 +492,7 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdstab{flex:1 1 auto;min-width:0;padding:2px 6px;font-size:12px;line-height:1.15;white-space:normal}
 .bdstab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
 .bdsbody{position:absolute;top:40px;left:0;right:0;bottom:0;overflow:auto;padding:6px 8px}
+#bdSide.two .bdstabs{height:62px;flex-wrap:wrap;align-content:center;row-gap:4px}#bdSide.two .bdstab{flex:1 1 30%}#bdSide.two .bdsbody{top:62px}#bdSide.two .bdtdrop{top:66px}   /* four or five tabs: two rows of them */
 .bdsbody .warnsum{margin:0 0 4px}.bdsbody .warn{font-size:12px}.bdsbody h4{margin:8px 0 2px;font-size:12px}.bdsbody summary{font-size:13px}
 .bdsbody li.warn.on{background:#eef3fb;box-shadow:inset 3px 0 0 var(--accent);padding-left:6px}
 .bdsbody ol.fxlist{font-size:12px;margin-top:8px}
@@ -508,6 +509,17 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdll select{display:block;width:100%;max-width:100%;box-sizing:border-box;font-size:12px}
 .bdlnote{margin:0 0 4px}
 .bdlall{display:flex;gap:4px;align-items:center}
+/* the Ask tab: what it is about, a band's groups as chips, the starters (wrapping buttons), then each question asked and its options */
+.akabout .aktitle{margin:0 0 4px}.akabout .bdlws{margin:0 0 6px}.akabout .bdlw{display:block;margin:0 0 2px}
+.akchips{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 6px}
+.akchip{padding:2px 8px;font-size:12px;border-radius:12px}.akchip.on{background:#eef3fb;border-color:var(--accent);font-weight:600}
+.akstart{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}.akstart button{padding:3px 8px;font-size:12px;text-align:left;white-space:normal}
+.akentry{border-top:1px solid var(--line);padding:6px 0}.akentry h4{margin:0 0 4px;font-size:12px}.akentry p{margin:0 0 4px}.akentry ul{margin:2px 0 6px;padding-left:18px}
+.akopt{border-top:1px dashed var(--line);padding:5px 0}.akopt .row{gap:6px;align-items:center}.akopt button{padding:3px 10px;font-size:12px}.akopt p{margin:2px 0 0}
+.akopt .row{flex-wrap:wrap}.akopt .fxpre{margin-top:6px}   /* Show on the board, Preview and Apply wrap in the narrow panel; Before you apply under the option */
+.akentry.stale .akold{text-decoration:line-through;opacity:.6}   /* an answer for a timetable that has changed since */
+.akentry h4 .akagain{padding:2px 8px;font-size:12px;font-weight:600;text-align:left;white-space:normal}   /* a stale entry's heading: asks it again */
+.bdcell.psel{outline:2px solid var(--accent);outline-offset:-2px}   /* the empty period selected, for the line's Ask */
 @keyframes bdflash{0%,100%{filter:none}25%,60%{filter:brightness(1.25) drop-shadow(0 0 3px #f2b632)}}
 .bdcard.flash{animation:bdflash 1s ease-in-out 1}   /* Show me: the card's pieces flash once, nothing moves */
 #bdFoot{margin-top:12px}

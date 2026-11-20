@@ -4,7 +4,7 @@ import collections, copy, re
 from ttgen.export import ENTIRE, _split_list, abbrev, block_label
 from ttgen import spec as spec_mod, verify
 
-KINDS = ("move", "swap", "teacher", "room", "add", "delete", "lift", "place")
+KINDS = ("move", "swap", "teacher", "trade", "room", "add", "delete", "lift", "place")
 
 def what(x):
     """a lesson row in words: '{subject} for {class}' for an entire-class lesson, 'group {code}' otherwise"""
@@ -130,6 +130,21 @@ def apply_one(lessons, fix, spec, days, new_id=None, touched=None, was=None, poo
         touched |= {x["id"] for x in rows}
         if not fix["teachers"]: return f"{name} now has no teacher; it had {_names(old)}."
         return f"{name} is now taught by {_names(fix['teachers'])}; it had no teacher." if not old else f"{name} is now taught by {_names(fix['teachers'])}, not {_names(old)}."
+    if kind == "trade":
+        ka, kb = _key(fix["a"]), _key(fix["b"]); na, nb = verify._name(ka), verify._name(kb); x, y = fix["x"], fix["y"]
+        if ka == kb or x == y: raise ValueError("That changes nothing.")
+        ra, rb = rows_of_key(lessons + pool, ka), rows_of_key(lessons + pool, kb)
+        for name, rows in ((na, ra), (nb, rb)):
+            if not rows: raise ValueError(f"There is no lesson of {name} on the timetable.")
+        known = {v["name"] for v in spec.get("teachers") or []}; bad = [v for v in (x, y) if v not in known]
+        if bad: raise ValueError(f"{', '.join(bad)} {'is' if len(bad) == 1 else 'are'} not on the setup's list of teachers.")
+        if not any(x in r["teachers"] for r in ra): raise ValueError(f"{x} does not teach {na}.")
+        if not any(y in r["teachers"] for r in rb): raise ValueError(f"{y} does not teach {nb}.")
+        if any(y in r["teachers"] for r in ra): raise ValueError(f"{y} already teaches {na}.")
+        if any(x in r["teachers"] for r in rb): raise ValueError(f"{x} already teaches {nb}.")
+        hit = [(r, x, y) for r in ra if x in r["teachers"]] + [(r, y, x) for r in rb if y in r["teachers"]]; keep([r for r, _, _ in hit])
+        for r, out_, in_ in hit: r["teachers"] = [in_ if t == out_ else t for t in r["teachers"]]
+        touched |= {r["id"] for r, _, _ in hit}; return f"{x} and {y} traded: {x} now teaches {nb}, {y} {na}."
     if kind == "room":
         x = next((x for x in _rows(lessons + pool, fix["id"]) if x["group"] == fix["group"]), None)
         if x is None: raise ValueError(f"There is no row of {fix['group']} in that lesson.")
@@ -402,6 +417,8 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
     try:
         if kind == "teacher":
             key = _key(fix["key"]); ids = {x["id"] for x in rows_of_key(m["lessons"], key)} | {x["id"] for x in rows_of_key(pool, key)}
+        elif kind == "trade":   # both keys' lessons are changed at once, so each is checked against the other as it is after the change
+            ids = {x["id"] for k in (_key(fix["a"]), _key(fix["b"])) for x in rows_of_key(m["lessons"], k) + rows_of_key(pool, k)}
         else: ids = {fix[k] for k in {"swap": ("a", "b")}.get(kind, ("id",) if kind in ("move", "room", "delete", "lift", "place") else ())}
         gone = {i for i in fix.get("out") or () if i in b.ids} - ids if kind in ("move", "place", "add") and isinstance(fix.get("out"), (list, tuple)) else set()
         old = [x for i in ids - gone for x in b.ids.get(i, ())]; new = [dict(x, teachers=list(x["teachers"]), classes=list(x["classes"])) for x in old]
@@ -469,7 +486,7 @@ def judge(m, spec, days, fix, ctx=None, pool=()):
         L1 += [x for x in new if x["id"] not in put]
         for k, w in rule_subjects(m, sp, L1).items():
             if k not in s0: (must if w["strength"] == "Must" else prefer).append(w["text"])
-    if kind in ("teacher", "add", "delete"):
+    if kind in ("teacher", "trade", "add", "delete"):
         by = lambda rows: {i: [x for x in rows if x["id"] == i] for i in dict.fromkeys(x["id"] for x in rows)}
         b0, b1, inpool = by(old + p0), by(new + p1), by(pool)
         for t in sorted({t for x in seen + p0 + p1 for t in x["teachers"]}):

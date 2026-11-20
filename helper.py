@@ -48,6 +48,7 @@ def _own(L, f):
     """replace in L (the caller's list) the rows fix f may change with copies, so the rows of the model are never touched"""
     kind = f.get("kind")
     if kind == "teacher": ids = {x["id"] for x in _of_key(L, fixes._key(f["key"]))}
+    elif kind == "trade": ids = {x["id"] for k in (f["a"], f["b"]) for x in _of_key(L, fixes._key(k))}
     elif kind == "swap": ids = {f["a"], f["b"]}
     elif kind in ("move", "room"): ids = {f["id"]}
     else: return   # an add appends a new row; a delete builds a new list
@@ -72,6 +73,7 @@ def say(m, spec, days, fix):
         x = _first(L, fix["id"]); return f"Move {what(x)} from {when(days, x['d'], x['p'])} to {when(days, fix['d'], fix['p'])}."
     if kind == "swap": a, b = _first(L, fix["a"]), _first(L, fix["b"]); return f"Swap {what(a)} ({when(days, a['d'], a['p'])}) with {what(b)} ({when(days, b['d'], b['p'])})."
     if kind == "teacher": return f"Give {verify._name(fixes._key(fix['key']))} to {fixes._names(fix['teachers'])}."
+    if kind == "trade": return f"Trade classes: {fix['x']} takes {verify._name(fixes._key(fix['b']))}, {fix['y']} takes {verify._name(fixes._key(fix['a']))}."
     if kind == "room":
         x = next(x for x in fixes._rows(L, fix["id"]) if x["group"] == fix["group"]); return f"Put {what(x)} in {fix['room'] or 'no room'}."
     if kind == "add":
@@ -97,11 +99,15 @@ def disturbs(m, spec, days, fx, steps):
         elif kind == "swap":
             a, b = _first(L, f["a"]), _first(L, f["b"])
             if a and b: out.append(f"{what(b)} moves to {when(days, a['d'], a['p'])}.")
-        elif kind == "teacher":
-            had = list(dict.fromkeys(t for x in _of_key(L, fixes._key(f["key"])) for t in x["teachers"])); load = _load(after)
-            olds, news = [t for t in had if t not in f["teachers"]], [t for t in f["teachers"] if t not in had]
+        elif kind == "teacher":   # every teacher whose periods change: those who leave paired with those who arrive, then a kept one who gains lessons
+            had = list(dict.fromkeys(t for x in _of_key(L, fixes._key(f["key"])) for t in x["teachers"])); was, load = _load(L), _load(after)
+            order = list(dict.fromkeys([t for t in f["teachers"] if t not in had] + had))
+            olds, news = [t for t in order if load[t] < was[t]], [t for t in order if load[t] > was[t]]
             for o, w in zip_longest(olds, news):
                 out.append(f"{o} drops to {load[o]} periods, {w} rises to {load[w]}." if o and w else f"{o} drops to {load[o]} periods." if o else f"{w} rises to {load[w]} periods.")
+        elif kind == "trade":
+            was, now = _load(L), _load(after)
+            out += [f"{t} {'drops' if now[t] < was[t] else 'rises'} to {now[t]} periods." for t in (f["x"], f["y"]) if now[t] != was[t]]
         L = after
     for j in steps:
         for s in j.get("prefer") or []:

@@ -327,7 +327,8 @@ def test_the_helper_and_the_batch_never_force():
     draft.fix_many([move(OTHER_ID, (3, 3), force=True, push=True)]); assert set(fixes_stored()[0]) == {"kind", "id", "d", "p", "at", "text", "batch"}, fixes_stored()
     draft.fix(dict(kind="lift", id=PLAIN_ID)); r = draft.suggest(f"clash:notplaced:{PLAIN_ID}"); assert r["suggestions"] == [] and r["blocked"] == []
     r = c.post("/api/draft/fixes", json=dict(fixes=[dict(kind="place", id=PLAIN_ID, d=0, p=L1)])); assert r.status_code == 400 and ids(board(), "unplaced") == [PLAIN_ID]
-    r = c.post("/api/draft/preview", json=dict(fixes=[dict(kind="place", id=PLAIN_ID, d=0, p=L1)])); assert r.status_code == 400 and r.get_json() == {"error": "This kind of fix is not known."}
+    r = c.post("/api/draft/preview", json=dict(fixes=[dict(kind="place", id=PLAIN_ID, d=0, p=L1), dict(kind="move", id=OTHER_ID, d=1, p=L1)])); assert r.status_code == 400 and r.get_json() == {"error": "This kind of fix is not known."}   # a batch of two never holds a place
+    assert c.post("/api/draft/preview", json=dict(fixes=[dict(kind="place", id=PLAIN_ID, d=0, p=L1)])).status_code == 200 and ids(board(), "unplaced") == [PLAIN_ID]   # one place may be looked at, and is not made
     raises(ValueError, lambda: draft.fix_many([dict(kind="lift", id=OTHER_ID)]), "This kind of fix is not known."); assert len(fixes_stored()) == 2
 
 def test_a_draft_from_before_this_stage_opens():
@@ -664,6 +665,72 @@ def test_the_preview_is_the_draft_as_the_published_page_would_show_it():
     assert store.published() is None   # looking at the preview publishes nothing
     shutil.rmtree(draft.DIR)
     r = c.get("/draft/preview"); assert r.status_code == 404 and "There is no draft" in r.get_data(as_text=True)
+
+def test_a_trade_is_one_fix_judged_as_a_whole_never_forced_and_undone_at_once():
+    T0, T1 = TEACHERS[0], TEACHERS[1]; ka, kb = f"C:{CLASSES[0]}:{SUBJ}", f"C:{CLASSES[1]}:{SUBJ}"
+    rows = [dict(id=1, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=[CLASSES[0]], subject=SUBJ, teachers=[T0], room=ROOMS[0]),
+            dict(id=2, day=DAYS[1], p=L1, n=1, level=LEVEL, classes=[CLASSES[1]], subject=SUBJ, teachers=[T1], room=ROOMS[1])]
+    save_draft(rows); f = dict(kind="trade", a=ka, b=kb, x=T0, y=T1)
+    sentence = f"{T0} and {T1} traded: {T0} now teaches {SUBJ} for {CLASSES[1]}, {T1} {SUBJ} for {CLASSES[0]}."
+    r = c.post("/api/draft/fix", json=f); assert r.status_code == 200, r.get_json()
+    assert [(x["kind"], x["text"]) for x in fixes_stored()] == [("trade", sentence)] and [x["kind"] for x in c.get("/api/draft").get_json()["fixes"]] == ["trade"]
+    assert set(fixes_stored()[0]) == {"kind", "a", "b", "x", "y", "at", "text"} and taught(1) == [[T1]] and taught(2) == [[T0]]
+    assert draft.model_now()[2]["texts"][-1] == sentence   # what the published timetable's record of changes is written from
+    assert c.post("/api/draft/undo").status_code == 200 and fixes_stored() == [] and taught(1) == [[T0]] and taught(2) == [[T1]]   # one undo takes it back
+    assert "trade" not in draft.FORCED and draft.FIELDS["trade"] == ("a", "b", "x", "y")
+    raises(ValueError, lambda: draft.fix(dict(f, x=5)), "The fix is not complete.")
+    save_draft(rows + [dict(id=3, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=["1C"], subject=SUBJ2, teachers=[T1], room=ROOMS[2 % len(ROOMS)])])   # T1 is with 1C when 1A meets
+    why = f"{T1} is teaching {SUBJ2} for 1C then."; raises(ValueError, lambda: draft.fix(f), why)
+    r = c.post("/api/draft/fix", json=dict(f, force=True, why=why)); assert r.status_code == 400 and r.get_json() == {"error": why} and fixes_stored() == []   # force is not heard
+
+def test_the_stamp_moves_with_every_change_to_the_draft():
+    fresh(CLEAN); a = draft.info()["stamp"]; assert len(a) == 12 and int(a, 16) >= 0 and c.get("/api/draft").get_json()["stamp"] == a == draft.stamp() and draft.info()["stamp"] == a
+    draft.fix(dict(kind="lift", id=1)); b = draft.info()["stamp"]; assert b != a
+    draft.undo(); assert draft.info()["stamp"] != b   # the undo is a change too
+    fresh(CLEAN); assert draft.info()["stamp"] != a   # the same files uploaded again are a new draft
+    rec = store.setup_record(); assert draft.stamp(rec=dict(rec, v=rec["v"] + 1)) != draft.stamp()   # and a new setup version
+
+def test_a_change_asked_for_a_timetable_that_moved_on_is_refused():
+    fresh(CLEAN); old = draft.info()["stamp"]; assert draft.fix(dict(kind="lift", id=1))["stamp"] != old; n = len(fixes_stored()); sent = dict(kind="lift", id=2)
+    for r in (c.post("/api/draft/fix", json=dict(sent, stamp=old)), c.post("/api/draft/fixes", json=dict(fixes=[sent], stamp=old))): assert r.status_code == 400 and r.get_json() == {"error": draft.MOVED}, r.get_json()
+    assert draft.MOVED == "The timetable changed. Ask again." and len(fixes_stored()) == n
+    raises(ValueError, lambda: draft.fix(sent, stamp=old), draft.MOVED); raises(ValueError, lambda: draft.fix_many([sent], stamp=old), draft.MOVED)
+    now = draft.info()["stamp"]; r = c.post("/api/draft/fix", json=dict(sent, stamp=now)); assert r.status_code == 200 and len(fixes_stored()) == n + 1
+    fresh(CLEAN)
+    s = draft.info()["stamp"]; r = c.post("/api/draft/fix", json=dict(kind="lift", id=1, stamp=12)); assert r.status_code == 200 and fixes_stored()[-1]["kind"] == "lift"   # a stamp that is not text is not a stamp
+    assert s != draft.info()["stamp"]
+    r = c.post("/api/draft/fix", json=dict(kind="lift", id=2)); assert r.status_code == 200   # no stamp: as before
+    fresh(CLEAN); r = c.post("/api/draft/fixes", json=dict(fixes=[dict(kind="move", id=1, d=1, p=L1 + 1)])); assert r.status_code == 200   # no stamp: as before
+    fresh(CLEAN); r = c.post("/api/draft/fixes", json=dict(fixes=[dict(kind="move", id=1, d=1, p=L1 + 1)], stamp=draft.info()["stamp"])); assert r.status_code == 200   # the current one
+    assert c.post("/api/draft/fixes", json=dict(fixes=[dict(kind="move", id=2, d=2, p=L1)], stamp="0" * 12)).status_code == 400 and len(fixes_stored()) == 1
+
+def _week(j, cls): return next(g for g in j["classes"] if g["name"] == cls)
+def _row(j, cls, i): return next(r for r in _week(j, cls)["lessons"] if r["id"] == i)
+
+def test_a_preview_of_a_place_shows_the_lesson_back_on_its_class_week():
+    fresh(CLEAN); draft.fix(dict(kind="lift", id=1)); at = (0, L1 + 1); n = len(fixes_stored())
+    j = draft.preview([dict(kind="place", id=1, d=at[0], p=at[1])]); assert j["state"] == "ok" and j["why"] == "" and len(j["texts"]) == 1 and j["texts"][0].startswith("Placed "), j
+    r = _row(j, CLASSES[0], 1); assert (r["d"], r["p"], r["mark"]) == (at[0], at[1], "moved") and r["was"] == dict(d=0, p=L1) and j["gone"] == []
+    j2 = c.post("/api/draft/preview", json=dict(fixes=[dict(kind="place", id=1, d=at[0], p=at[1])])).get_json(); assert j2 == j
+    assert len(fixes_stored()) == n and board()["unplaced"][0]["id"] == 1   # nothing was kept, and the lesson still waits
+    j = draft.preview([dict(kind="place", id=1, d=0, p=NPD + 5)]); assert j["state"] == "na" and j["why"] and j["texts"] == [] and not any(r["mark"] for g in j["classes"] for r in g["lessons"]) and j["gone"] == []   # nothing changed
+
+def test_a_preview_of_a_change_that_lands_with_a_problem_shows_it_made():
+    T0, T1 = TEACHERS[0], TEACHERS[1]
+    fresh(CLEAN + [dict(id=3, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=["1C"], subject=SUBJ2, teachers=[CLEAN[1]["teachers"][0]], room=ROOMS[0])]); why = f"{T1} is teaching {SUBJ2} for 1C then."
+    j = draft.preview([dict(kind="move", id=2, d=0, p=L1)]); assert j["state"] == "no" and j["why"] == why, j
+    r = _row(j, CLASSES[1], 2); assert (r["d"], r["p"], r["mark"]) == (0, L1, "moved") and r["was"] == dict(d=1, p=L1) and len(j["texts"]) == 1
+    raises(ValueError, lambda: draft.fix(dict(kind="move", id=2, d=0, p=L1)), why)   # making it is still refused
+    j = draft.preview([dict(kind="move", id=2, d=0, p=L1), dict(kind="move", id=1, d=2, p=L1)]); assert j["state"] == "no" and j["why"] == why and j["texts"] == []   # two fixes: as before, the timetable up to the one refused
+    j = draft.preview([dict(kind="move", id=1, d=0, p=L1)]); assert j["state"] == "na" and j["why"] == "That changes nothing." and j["texts"] == []
+
+def test_a_preview_of_a_trade_shows_both_classes_changed():
+    T0, T1 = TEACHERS[0], TEACHERS[1]; ka, kb = f"C:{CLASSES[0]}:{SUBJ}", f"C:{CLASSES[1]}:{SUBJ}"
+    fresh([dict(id=1, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=[CLASSES[0]], subject=SUBJ, teachers=[T0], room=ROOMS[0]),
+           dict(id=2, day=DAYS[1], p=L1, n=1, level=LEVEL, classes=[CLASSES[1]], subject=SUBJ, teachers=[T1], room=ROOMS[1])])
+    j = draft.preview([dict(kind="trade", a=ka, b=kb, x=T0, y=T1)]); assert j["state"] == "ok" and len(j["texts"]) == 1 and j["texts"][0].startswith(f"{T0} and {T1} traded"), j
+    assert sorted(g["name"] for g in j["classes"]) == sorted(CLASSES) and _row(j, CLASSES[0], 1)["mark"] == "changed" and _row(j, CLASSES[1], 2)["mark"] == "changed"
+    assert _row(j, CLASSES[0], 1)["teachers"] == [T1] and _row(j, CLASSES[1], 2)["teachers"] == [T0] and fixes_stored() == [] and taught(1) == [[T0]]
 
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]

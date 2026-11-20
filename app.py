@@ -441,10 +441,19 @@ def draft_lesson():
     if request.args.get("id") is None: return {"error": "Say which lesson."}, 400
     return _checked(lambda: draft.lesson(request.args.get("id"), request.args.get("group") or None), sentences=True)
 
+@app.get("/api/draft/about")
+@need("committee")
+def draft_about():
+    """a read-only look-up about one lesson (kind=lesson&id, optionally group and teacher) or empty period (kind=place&by&name&d&p), q one of ask.QUESTIONS; other: the
+    teacher a trade is with. What the page sent is cleaned by ask.subject: a number that is not one stays text and is refused there with its sentence"""
+    a = request.args; num = lambda v: int(v) if v and re.fullmatch(r"-?\d{1,9}", v) else v
+    raw = dict(kind=a.get("kind"), id=num(a.get("id")), group=a.get("group") or None, teacher=a.get("teacher") or None, by=a.get("by"), name=a.get("name"), d=num(a.get("d")), p=num(a.get("p")))
+    return _checked(lambda: draft.about(a.get("q"), raw, a.get("other") or None), sentences=True)
+
 @app.post("/api/draft/fix")
 @need("committee")
 def draft_fix():
-    return _checked(lambda: draft.fix(request.get_json(force=True, silent=True)), sentences=True)
+    body = request.get_json(force=True, silent=True); return _checked(lambda: draft.fix(body, stamp=_stamp_of(body)), sentences=True)
 
 @app.post("/api/draft/undo")
 @need("committee")
@@ -456,13 +465,17 @@ def draft_undo():
 def draft_suggest():
     return _checked(lambda: draft.suggest(request.args.get("key") or ""), sentences=True)
 
+def _stamp_of(body):
+    """the stamp a request carries (the draft's, as the page last read it), or None when it has none or it is not text"""
+    s = body.get("stamp") if isinstance(body, dict) else None; return s if isinstance(s, str) else None
+
 def _posted_fixes():
     body = request.get_json(force=True, silent=True); return body.get("fixes") if isinstance(body, dict) else None
 
 @app.post("/api/draft/fixes")
 @need("committee")
 def draft_fixes():
-    return _checked(lambda: draft.fix_many(_posted_fixes()), sentences=True)
+    return _checked(lambda: draft.fix_many(_posted_fixes(), stamp=_stamp_of(request.get_json(force=True, silent=True))), sentences=True)
 
 @app.post("/api/draft/preview")
 @need("committee")
