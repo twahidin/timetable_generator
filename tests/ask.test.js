@@ -22,6 +22,14 @@ t("ofPlace: a class row's name is cls", () => {
   assert.deepStrictEqual(Ask.ofPlace({ cls: "", by: "teacher", name: "Mr Tan", d: 0, p: 3 }), { kind: "place", by: "teacher", name: "Mr Tan", d: 0, p: 3 });
 });
 
+t("pointable: every row's place but the No teacher and No room rows", () => {
+  assert.strictEqual(Ask.pointable({ cls: "1A", by: "class", name: "", d: 0, p: 1 }), true);
+  assert.strictEqual(Ask.pointable({ cls: "", by: "teacher", name: "Mr Tan", d: 0, p: 1 }), true);
+  assert.strictEqual(Ask.pointable({ cls: "", by: "room", name: "R1", d: 0, p: 1 }), true);
+  assert.strictEqual(Ask.pointable({ cls: "", by: "teacher", name: "", d: 0, p: 1 }), false);
+  assert.strictEqual(Ask.pointable({ cls: "", by: "room", name: "", d: 0, p: 1 }), false);
+});
+
 t("empty: nothing covers the period; a two-period card covers its second period", () => {
   const two = card(1, 0, 2, 2, ["1A"], [row("Entire Class", "Maths", ["Mr Tan"], "R1")]), b = board([two]);
   assert.strictEqual(Ask.empty(b, { cls: "1A", by: "class", name: "", d: 0, p: 2 }), false);

@@ -24,6 +24,9 @@ var Ask = (function () {
   /* the question a click on a place of the board asks (a class row's name is its cls) */
   function ofPlace(at) { return { kind: "place", by: at.by, name: at.by === "class" ? at.cls : at.name, d: at.d, p: at.p }; }
 
+  /* whether a place of that row can be asked about: a class's, a teacher's or a room's, but not on the "No teacher" or "No room" row (no name), which the server always refuses */
+  function pointable(at) { return !!(at.by === "class" ? at.cls || at.name : at.name); }
+
   /* whether no card of that row covers period p on day d */
   function empty(board, at) {
     var row = { by: at.by, name: at.name, cls: at.cls };
@@ -92,7 +95,7 @@ var Ask = (function () {
     return f.kind === "swap" ? f.a : null;
   }
 
-  return { ofCard: ofCard, ofPlace: ofPlace, empty: empty, groups: groups, starters: starters, query: query, verdict: verdict,
+  return { ofCard: ofCard, ofPlace: ofPlace, pointable: pointable, empty: empty, groups: groups, starters: starters, query: query, verdict: verdict,
            send: send, stale: stale, target: target };
 })();
 if (typeof module !== "undefined") module.exports = Ask;
