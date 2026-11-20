@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exams</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+.relief{max-width:760px;margin:0 auto;padding:20px}
+.relief .who{margin:0 0 12px}
+@media (max-width:640px){.relief{padding:12px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">⇄</span><div><div class="title" id="title">Exams</div><div class="sub">Exam and test schedules, seating and invigilation.</div></div></div>
+  <div class="top-actions">
+    <a class="ghost filebtn" href="/exams">Exams</a>
+    <a class="ghost filebtn" href="/logout">Sign out</a>
+  </div>
+</header>
+<main class="relief" id="main">
+  <div class="card"><p class="muted">Loading…</p></div>
+</main>
+<script src="/static/exams.js"></script>
+</body>
+</html>

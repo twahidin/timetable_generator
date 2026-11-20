@@ -2841,6 +2841,7 @@ async function poll() {   // every few seconds: the published timetable and the 
     if (r.status === 401) { location.href = "/login"; return; }
     G.st = await r.json();
     const rl = $("#reliefLink"); if (rl) rl.hidden = G.st.role !== "committee";   /* the relief settings are the committee's, not the heads' */
+    const xl = $("#examsLink"); if (xl) xl.hidden = G.st.role !== "committee";   /* exams are the committee's too */
     paintPublished(); draftWatch();
   } catch (e) { }
   G.inflight = false;

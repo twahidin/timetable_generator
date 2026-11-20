@@ -503,4 +503,173 @@ def lesson_lists_three_ways():
     assert b and b[0]["note"] == "Mr Daniel Koh is invigilating 3-01", r["backup"]
     assert not any(i["classes"] == ["4A"] and i["subject"] == "Mathematics" for i in r["runs"])
 
+# ---- the card, the rights and the routes
+import contextlib  # noqa: E402
+
+@contextlib.contextmanager
+def published(pub):
+    old = store.published; store.published = lambda: pub
+    try: yield
+    finally: store.published = old
+
+def signed_in(card, code):
+    c = A.app.test_client()
+    return c, c.post("/login", data={"as": card, "code": code})
+
+def committee():
+    c, r = signed_in("committee", os.environ["COMMITTEE_CODE"]); assert r.status_code == 302
+    return c
+
+def staff(name, card="exams"):
+    c, r = signed_in(card, access.staff_code(name)); assert r.status_code == 302, (name, r.status_code)
+    return c
+
+def _cal(on=True):
+    import relief.settings as RS
+    os.makedirs(os.path.dirname(RS.PATH), exist_ok=True)
+    store.write_json(RS.PATH, dict(calendar=F.CAL if on else dict(terms=[], holidays=[])))
+
+def _reset():
+    _fresh()
+    import shutil
+    shutil.rmtree(SC.DIR, ignore_errors=True)
+
+def _rooms_saved():
+    x = _xset(("3-01", "3-02", "4-01", "Hall"))
+    os.makedirs(os.path.dirname(ES.PATH), exist_ok=True)
+    store.write_json(ES.PATH, dict(committee=[], rooms=x["rooms"]))
+
+@t
+def exams_card_on_the_front_page():
+    c = A.app.test_client()
+    with published(_PUB):
+        front = c.get("/login").data
+        assert b"Exams and events" in front and b'src="/static/choice-exams.svg"' in front
+        _, r = signed_in("exams", access.staff_code("Ms Grace Yeo"))
+        assert r.status_code == 302 and r.headers["Location"] == "/exams", r.headers
+        _, r = signed_in("exams", os.environ["TEACHER_CODE"])
+        assert r.status_code == 403 and b"/login?as=teacher" in r.data, r.data
+        _, r = signed_in("relief", access.staff_code("Ms Grace Yeo"))
+        assert r.headers["Location"] == "/relief"
+    assert A.CHOICE_OF["staff"] == "relief"
+
+@t
+def only_the_committees_get_in():
+    _reset(); _cal()
+    with published(_PUB):
+        s = staff("Ms Grace Yeo")
+        r = s.get("/api/exams"); assert r.status_code == 403 and r.get_json()["error"] == A.ONLY_EXAMS, r.data
+        assert s.get("/api/exams/me").get_json() == dict(name="Ms Grace Yeo", can_use=False)
+        assert s.get("/api/exams/settings").status_code == 403
+        c = committee()
+        assert c.get("/api/exams").status_code == 200
+        assert c.get("/api/exams/me").get_json() == dict(name="Timetable committee", can_use=True)
+        d = c.get("/api/exams/settings").get_json()
+        assert d["settings"]["committee"] == [] and {"name": "Hall", "kind": "pe venue", "capacity": 400} in [dict(zip(("name", "kind", "capacity"), r)) if isinstance(r, list) else r for r in d["rooms"]], d["rooms"]
+        d["settings"]["committee"] = ["Ms Grace Yeo"]
+        r = c.put("/api/exams/settings", json=d["settings"]); assert r.status_code == 200, r.data
+        assert s.get("/api/exams").status_code == 200
+        assert s.get("/api/exams/me").get_json()["can_use"] is True
+        assert s.get("/exams").status_code == 200 and s.get("/exams/settings").status_code == 200
+        assert c.put("/api/exams/settings", json="x").status_code == 400
+        assert c.put("/api/exams/settings", data="{bad", content_type="application/json").status_code == 400
+    r = A.app.test_client().get("/api/exams"); assert r.status_code == 401
+    with published(None):
+        assert committee().get("/api/exams").status_code == 409
+
+@t
+def no_calendar_no_new_exam():
+    _reset(); _cal(False)
+    with published(_PUB):
+        c = committee()
+        assert c.get("/api/exams").get_json()["calendar_ok"] is False
+        r = c.post("/api/exams", json=dict(kind="exam", name="X", levels=["Sec 3"], start="2026-10-05", end="2026-10-06"))
+        assert r.status_code == 409 and r.get_json()["error"] == SC.NO_CALENDAR, r.data
+
+def _exam(c):
+    r = c.post("/api/exams", json=dict(kind="exam", name="Sec 3 Exam", levels=["Sec 3"], start="2026-10-05", end="2026-10-06"))
+    assert r.status_code == 200, r.data
+    s = r.get_json()
+    s["days"] = dict(SEC3)
+    r = c.put("/api/exams/" + s["id"], json=s); assert r.status_code == 200, r.data
+    r = c.post(f"/api/exams/{s['id']}/fill"); assert r.status_code == 200, r.data
+    s = r.get_json()
+    assert {p["subject"] for p in s["papers"]} >= {"English", "Pure Chemistry"}, s["papers"]
+    return s
+
+@t
+def create_fill_make_view():
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee()
+        assert c.get("/api/exams").get_json()["classes"][0] == ["3A", "Sec 3"]
+        s = _exam(c)
+        times = {"English": "07:50", "Pure Chemistry": "10:00"}
+        s["papers"] = [dict(p, date="2026-10-05", start=times[p["subject"]]) for p in s["papers"] if p["subject"] in times]
+        third = dict(s["papers"][0], id="zzzz", subject="Mathematics", start=None)
+        r = c.put("/api/exams/" + s["id"], json=dict(s, papers=s["papers"] + [third])); assert r.status_code == 200
+        r = c.post(f"/api/exams/{s['id']}/make", json={})
+        assert r.status_code == 400 and r.get_json()["error"].startswith("Fix the paper times first: "), r.data
+        r = c.put("/api/exams/" + s["id"], json=s); assert r.status_code == 200
+        r = c.post(f"/api/exams/{s['id']}/make", json={}); assert r.status_code == 200, r.data
+        v = c.get(f"/api/exams/{s['id']}/view").get_json()
+        assert v["summary"]["counts"]["papers"] == 2 and v["summary"]["counts"]["unseated"] == 0, v["summary"]["counts"]
+        assert v["made"] and v["students_missing"] is False and "Hall" in v["rooms"]
+        assert v["students"] and all(k.startswith("3") for k in v["students"]) and v["students"]["3A-01"] == ["Student 3A-01", "3A"], list(v["students"])[:3]
+        assert not any(k.startswith("4") for k in v["students"]) and 30 <= len(v["students"]) <= 60
+        assert c.get(f"/api/exams/{s['id']}").get_json()["made"] is not None
+        key = "2026-10-05 07:50"; room = next(iter(v["made"]["seats"][key]))
+        r = c.post(f"/api/exams/{s['id']}/move", json=dict(key=key, students=["3A-07"], room="3-02")); assert r.status_code == 200
+        assert c.get(f"/api/exams/{s['id']}").get_json()["pins"]["rooms"][key] == {"3A-07": "3-02"}
+        r = c.post(f"/api/exams/{s['id']}/make", json=dict(only=key)); assert r.status_code == 200
+        assert "3A-07" in [x for x, _ in r.get_json()["made"]["seats"][key]["3-02"]]
+        r = c.post(f"/api/exams/{s['id']}/invigilators", json=dict(key=key, room="3-01", names=["Mr Ivan Lee"])); assert r.status_code == 200
+        assert c.get(f"/api/exams/{s['id']}").get_json()["pins"]["duties"][key + "|3-01"] == ["Mr Ivan Lee"]
+        r = c.get(f"/api/exams/{s['id']}/who?key={key}&room=3-01"); assert r.status_code == 200 and "freed" in r.get_json(), r.data
+        assert c.get(f"/api/exams/{s['id']}/who?key=nope&room=3-01").get_json() == {"error": "Press Make first."}
+        r = c.post(f"/api/exams/{s['id']}/use-anyway", json=dict(key=key, room="Hall")); assert r.status_code == 200
+        assert [key, "Hall"] in c.get(f"/api/exams/{s['id']}").get_json()["use_anyway"]
+        r = c.get(f"/api/exams/{s['id']}/papers.xlsx"); assert r.status_code == 200 and "Sec 3 Exam papers.xlsx" in r.headers["Content-Disposition"]
+        import io
+        r2 = c.post(f"/api/exams/{s['id']}/papers.xlsx", data=dict(file=(io.BytesIO(r.data), "p.xlsx"))); assert r2.status_code == 200, r2.data
+        assert len(r2.get_json()["papers"]) == 2
+        r2 = c.post(f"/api/exams/{s['id']}/papers.xlsx", data=dict(file=(io.BytesIO(b"junk"), "p.xlsx"))); assert r2.status_code == 400
+        assert c.get("/api/exams/ffff").status_code == 404 and c.get("/api/exams/ffff").get_json()["error"] == "That exam is not there any more."
+        assert len(c.get("/api/exams").get_json()["schedules"]) == 1
+        assert c.delete(f"/api/exams/{s['id']}").status_code == 200
+        assert c.get("/api/exams").get_json()["schedules"] == []
+        assert c.get("/exams").status_code == 200 and c.get("/exams/" + s["id"]).status_code == 200
+
+@t
+def make_refuses_without_students():
+    import copy
+    _reset(); _cal()
+    pub = copy.deepcopy(_PUB); pub["model"]["students"] = []
+    with published(pub):
+        c = committee()
+        s = _exam(c)
+        r = c.post(f"/api/exams/{s['id']}/make", json={})
+        assert r.status_code == 409 and r.get_json()["error"] == A.NO_STUDENTS, r.data
+        assert c.get(f"/api/exams/{s['id']}/view").get_json()["students_missing"] is True
+
+@t
+def client_cannot_write_made():
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee()
+        s = _exam(c)
+        s["papers"] = [dict(p, date="2026-10-05", start="07:50") for p in s["papers"] if p["subject"] == "English"]
+        c.put("/api/exams/" + s["id"], json=s)
+        assert c.post(f"/api/exams/{s['id']}/make", json={}).status_code == 200
+        c.post(f"/api/exams/{s['id']}/invigilators", json=dict(key="2026-10-05 07:50", room="3-01", names=["Mr Ivan Lee"]))
+        kept = c.get(f"/api/exams/{s['id']}").get_json()
+        forged = dict(kept, made=dict(seats={}, unseated={}, duties=[], gone=[]), pins=dict(rooms={}, duties={}), use_anyway=[["x", "y"]],
+                      created_by="someone", status="final", id=s["id"])
+        r = c.put("/api/exams/" + s["id"], json=forged); assert r.status_code == 200, r.data
+        now = c.get(f"/api/exams/{s['id']}").get_json()
+        for k in ("made", "pins", "use_anyway", "created_by", "created_at", "status", "id"):
+            assert now[k] == kept[k], k
+        assert c.put("/api/exams/" + s["id"], json=dict(kept, papers="x")).status_code == 400
+        assert c.put("/api/exams/" + s["id"], json=dict(kept, days=5)).status_code == 400
+
 print(f"{COUNT} exams tests passed")
