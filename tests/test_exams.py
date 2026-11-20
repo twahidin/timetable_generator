@@ -9,7 +9,7 @@ sys.path.insert(0, ROOT)
 import app as A, access, store  # noqa: E402
 from relief import calendar as C  # noqa: E402
 from exams import settings as ES, fake as F, days as D, schedules as SC, papers as P  # noqa: E402
-from exams import seating as SE, invigilate as IV  # noqa: E402
+from exams import seating as SE, invigilate as IV, make as MK  # noqa: E402
 from datetime import date  # noqa: E402
 
 def raises(exc, f, text=None):
@@ -422,5 +422,85 @@ def locked_names_kept():
     assert "Ms Grace Yeo" in d1["names"] and "Mr Gone Away" not in d1["names"] and len(d1["names"]) == d1["need"] and d1["locked"] is True, d1
     assert len(set(d1["names"])) == 2
     assert IV.duty_minutes(d)["Ms Grace Yeo"] == 85
+
+def _made_sched(**kw):
+    s = _sit([_paper(subject="English", date="2026-10-05", start="07:50"),
+              _paper(subject="Pure Chemistry", date="2026-10-05", start="10:00")], days=dict(SEC3))
+    s.update(kw)
+    return s
+
+def _mk(s, only=None, rooms=("3-01", "3-02", "4-01", "Hall")):
+    return MK.make(_PUB, F.CAL, s, _xset(rooms), only=only)
+
+@t
+def make_seats_and_duties():
+    s = _mk(_made_sched())
+    m = s["made"]
+    assert len(m["seats"]) == 2 and all(not v for v in m["unseated"].values()) and m["gone"] == [], m
+    assert m["duties"] and all(d["short"] == 0 for d in m["duties"]), m["duties"]
+    for a in m["duties"]:
+        for b in m["duties"]:
+            if a is not b and a["date"] == b["date"] and a["start"] < b["end"] and a["end"] > b["start"]:
+                assert not set(a["names"]) & set(b["names"]), (a, b)
+
+@t
+def move_keeps_hand_changes():
+    s = _made_sched()
+    key = "2026-10-05 07:50"
+    MK.move(s, key, ["3A-07"], "3-02")
+    _mk(s, only=key)
+    assert "3A-07" in [x for x, _ in s["made"]["seats"][key]["3-02"]]
+    other = s["made"]["seats"]["2026-10-05 10:00"]
+    _mk(s)
+    assert "3A-07" in [x for x, _ in s["made"]["seats"][key]["3-02"]]
+    assert s["made"]["seats"]["2026-10-05 10:00"] == other
+    MK.set_invigilators(s, key, "3-01", ["Mr Ivan Lee"])
+    _mk(s, only=key)
+    d = next(x for x in s["made"]["duties"] if x["key"] == key and x["room"] == "3-01")
+    assert "Mr Ivan Lee" in d["names"] and d["locked"] is True, d
+
+@t
+def gone_people_are_named_once():
+    s = _made_sched()
+    key = "2026-10-05 07:50"
+    MK.move(s, key, ["ZZ-99"], "3-02")
+    MK.set_invigilators(s, key, "3-01", ["Mr Gone Away"])
+    _mk(s)
+    m = s["made"]
+    assert sorted(m["gone"]) == ["Mr Gone Away is no longer on the timetable.", "ZZ-99 is no longer on the timetable."], m["gone"]
+    d = next(x for x in m["duties"] if x["key"] == key and x["room"] == "3-01")
+    assert d["names"] and "Mr Gone Away" not in d["names"] and d["short"] == 0 and d["locked"] is False, d
+    assert s["pins"] == dict(rooms={}, duties={}), s["pins"]
+    _mk(s)
+    assert s["made"]["gone"] == []
+
+@t
+def summary_counts():
+    s = _mk(_made_sched())
+    r = MK.summary(_PUB, F.CAL, s, _xset())
+    assert [d["date"] for d in r["days"]] == ["2026-10-05", "2026-10-06"]
+    d = r["days"][0]
+    assert d["freed"] >= 4 and d["whole"] is True and d["window"] == ["07:40", "16:20"], d
+    assert d["papers"]["Sec 3"] == [dict(label="Sec 3 English Paper 1", start="07:50", end="08:50"),
+                                    dict(label="Sec 3 Pure Chemistry Paper 1", start="10:00", end="11:00")], d["papers"]
+    c = r["counts"]
+    assert c["papers"] == 2 and c["with_time"] == 2 and c["two_a_day"] == 10 and c["duties"] == len(s["made"]["duties"]), c
+    assert c["short"] == 0 and c["unseated"] == 0
+    assert MK.summary(_PUB, F.CAL, _made_sched(), _xset())["counts"]["duties"] == 0
+
+@t
+def lesson_lists_three_ways():
+    s = _made_sched()
+    r = MK.lesson_lists(_PUB, F.CAL, s)
+    subj = lambda L: sorted((i["subject"], i["date"]) for i in L if i["date"] == "2026-10-05")
+    assert subj(r["none"]) == [("Combined Science", "2026-10-05"), ("English", "2026-10-05"), ("Mathematics", "2026-10-05"),
+                               ("Pure Chemistry", "2026-10-05")], r["none"]
+    assert any(i["subject"] == "Mathematics" and i["classes"] == ["4A"] for i in r["runs"]) and r["backup"] == []
+    MK.set_invigilators(s, "2026-10-05 07:50", "3-01", ["Mr Daniel Koh"])
+    _mk(s)
+    r = MK.lesson_lists(_PUB, F.CAL, s)
+    b = [i for i in r["backup"] if i["classes"] == ["4A"] and i["subject"] == "Mathematics"]
+    assert b and b[0]["note"] == "Mr Daniel Koh is invigilating 3-01", r["backup"]
+    assert not any(i["classes"] == ["4A"] and i["subject"] == "Mathematics" for i in r["runs"])
 
 print(f"{COUNT} exams tests passed")
