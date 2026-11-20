@@ -272,7 +272,7 @@ def _plus(s, lines):
 
 def _band(m, i, rows):
     """for a move of a lesson with several rows: the other groups that move with it"""
-    others = [x for x in fixes._rows(m["lessons"], i) if x not in rows]
+    others = [x for x in (fixes._rows(m["lessons"], i) if any(x["id"] == i for x in m["lessons"]) else [x for x in helper._pool(m) if x["id"] == i]) if x not in rows]   # a lesson in the pool has its rows there
     if not others: return []
     return ["This lesson is a band: it moves for " + ", ".join(_uniq(f"{x['group']} ({', '.join(x['classes'])})" if x["group"] != ENTIRE else fixes.what(x) for x in others)) + " too."]
 

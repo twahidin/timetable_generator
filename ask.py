@@ -11,7 +11,7 @@ BUSY = 4                # busy teachers added after the free ones
 USED = 4                # rooms in use added after the free ones
 NOT_FOUND = "There is no lesson with that id on the timetable."
 POINT = "Point at a lesson for this."
-NONE_FIX = ("move", "place", "add", "teacher", "room")   # the kinds draft.FORCED lets a request force that a look-up offers (a delete is never an option)
+ANYWAY = ("move", "place", "add", "teacher", "room")   # the kinds draft.FORCED lets a request force that a look-up offers (a delete is never an option)
 
 def _int(v): return isinstance(v, int) and not isinstance(v, bool)
 def _rows_of(m, pool, i): return [x for x in m["lessons"] if x["id"] == i] or [x for x in pool if x["id"] == i]
@@ -32,7 +32,7 @@ def subject(m, pool, raw):
         if index is None: raise ValueError("Point at a lesson or a place.")
         if not (_int(d) and _int(p) and 0 <= d < len(m["days"]) and 0 <= p < m["NP"]): raise ValueError("That is outside the day.")
         name = "" if name is None else str(name)
-        if name == "" and by != "class": raise ValueError(f"Pick a {by}'s row.")
+        if name == "": raise ValueError(f"Pick a {by}'s row.")
         if name not in index: raise ValueError(f"There is no {by} called {name}.")
         return dict(kind="place", by=by, name=name, d=d, p=p)
     raise ValueError("Point at a lesson or a place.")
@@ -66,7 +66,7 @@ def check(m, spec, days, pool, fx, ctx=None, extra=()):
     step5 = ctx.get("step5") or ctx.setdefault("step5", typed._Step5(m, spec))
     lines = list(extra) + ([typed.STEP5] if K and step5(c, K) else [])
     s = typed._plus(dict(disturbs=helper.disturbs(m, spec, days, fx, c["steps"])), lines)
-    anyway = c["state"] == "no" and len(fx) == 1 and fx[0].get("kind") in NONE_FIX
+    anyway = c["state"] == "no" and len(fx) == 1 and fx[0].get("kind") in ANYWAY
     return dict(fixes=list(fx), text=" Then ".join(out), disturbs=s["disturbs"], state=c["state"], why=c["why"], apply="yes" if c["state"] in helper.OK else "anyway" if anyway else "none")
 
 # ----------------------------------------------------------------------------------------------- what the page shows above the options
@@ -94,11 +94,6 @@ def _lesson(sub):
     return dict(sub, group=sub.get("group"), teacher=sub.get("teacher"))
 
 def _plural(n, one, many): return f"{n} {one if n == 1 else many}"
-def _band_line(rows):
-    """the other groups that move with a lesson of several rows"""
-    others = list(dict.fromkeys(f"{x['group']} ({', '.join(x['classes'])})" if x["group"] != ENTIRE else fixes.what(x) for x in rows[1:]))
-    return [f"This lesson is a band: it moves for {', '.join(others)} too."] if others else []
-
 # ----------------------------------------------------------------------------------------------- swaps and moves, from one fixes.slots
 def swaps(m, spec, days, pool, sub):
     """every place with a lesson it can swap with -> answer; the lessons it clashes with are options too, but not yes: apply "none" (yes before none, then helper.rank)"""
@@ -107,14 +102,16 @@ def swaps(m, spec, days, pool, sub):
     if not any(x["id"] == i for x in m["lessons"]): return _answer(*P, sub, "A lesson that is not placed cannot be swapped. Ask where it can go.")
     ctx = fixes._ctx(m); got = [s for s in fixes.slots(m, spec, days, i, pool, extras=False, ctx=ctx) if s["swap"] and s["state"] != "na"]
     if not got: return _answer(*P, sub, "Nothing can swap with this lesson.")
+    n = sum(s["state"] in helper.OK for s in got); bad = len(got) - n
     key = lambda s: (s["state"] not in helper.OK, helper.rank(m, spec, days, dict(fixes=[dict(kind="swap", a=i, b=s["swap"])], moved=2, state=s["state"])))
+    text = (f"This lesson can swap with {_plural(n, 'lesson', 'lessons')}." + (f" {bad} more would land with a problem." if bad else "")) if n else f"No swap of this lesson is clean. {bad} would land with a problem."
     out = []
     for s in sorted(got, key=key)[:MOST]:
         o = check(*P, [dict(kind="swap", a=i, b=s["swap"])], ctx)
         if o is None: continue
         said = " ".join(o["disturbs"]); names = {fixes.what(x) for x in _rows_of(m, pool, s["swap"])}
         out.append(typed._plus(o, [a for a in s["also"] if not any(n in said for n in names)]))
-    return _answer(*P, sub, f"This lesson can swap with {len(got)} lessons." if len(got) != 1 else "This lesson can swap with 1 lesson.", out, len(got) - len(out))
+    return _answer(*P, sub, text, out, len(got) - len(out))
 
 def moves(m, spec, days, pool, sub):
     """every place it can go to without a swap, judged ok or prefer, as a move (a place for a lesson not placed); when fewer than three, up to three judged
@@ -126,7 +123,7 @@ def moves(m, spec, days, pool, sub):
     fix = lambda s: dict(kind=kind, id=i, d=s["d"], p=s["p"])
     good = sorted((s for s in got if s["state"] in helper.OK), key=lambda s: helper.rank(m, spec, days, dict(fixes=[fix(s)], moved=1, state=s["state"])))
     bad = sorted((s for s in got if s["state"] == "no"), key=lambda s: (abs(s["d"] - a["d"]), s["d"], abs(s["p"] - a["p"]), s["p"]))[:3] if len(good) < 3 else []
-    band = _band_line(rows); out = []
+    row = next((x for x in rows if x["group"] == sub["group"]), a); band = typed._band(m, i, [row]); out = []   # the other groups move too; never the one asked about
     for s in good[:MOST] + bad:
         o = check(*P, [fix(s)], ctx, band)
         if o is not None: out.append(o)

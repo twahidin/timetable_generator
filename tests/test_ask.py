@@ -89,6 +89,7 @@ def test_subject_refused():
     bad(dict(kind="place", by="class", name="Nowhere", d=0, p=0), "There is no class called Nowhere.")
     bad(dict(kind="place", by="teacher", name="Nobody At All", d=0, p=0), "There is no teacher called Nobody At All.")
     bad(dict(kind="place", by="room", name="Nowhere", d=0, p=0), "There is no room called Nowhere.")
+    bad(dict(kind="place", by="class", name="", d=0, p=0), "Pick a class's row.")
     bad(dict(kind="place", by="teacher", name="", d=0, p=0), "Pick a teacher's row.")
     bad(dict(kind="place", by="room", name="", d=0, p=0), "Pick a room's row.")
 
@@ -140,7 +141,7 @@ def test_check_is_the_board():
 def test_swaps_lists():
     m, spec, days, pool = now(); a = ask.swaps(m, spec, days, pool, lesson(LESSON))
     assert [o["fixes"][0]["b"] for o in a["options"]] == [SWAP_OK, SWAP_CLASH] and [o["apply"] for o in a["options"]] == ["yes", "none"], a
-    assert a["text"] == "This lesson can swap with 2 lessons." and a["more"] == 0 and a["stopped"] is False and a["title"].startswith(fixes.what(m["lessons"][0]) + " · ") and isinstance(a["lines"], list)
+    assert a["text"] == "This lesson can swap with 1 lesson. 1 more would land with a problem." and a["more"] == 0 and a["stopped"] is False and a["title"].startswith(fixes.what(m["lessons"][0]) + " · ") and isinstance(a["lines"], list)
     assert a["options"][0]["fixes"][0] == dict(kind="swap", a=LESSON, b=SWAP_OK)
     p = ask.swaps(m, spec, days, pool, lesson(POOLED)); assert p["options"] == [] and p["text"] == "A lesson that is not placed cannot be swapped. Ask where it can go."
     n = ask.swaps(m, spec, days, pool, lesson(BANDID)); assert n["text"] == "Nothing can swap with this lesson." and n["options"] == [], n
@@ -163,6 +164,19 @@ def test_moves_band():
     o = a["options"][0]; text = " ".join(o["disturbs"]); assert CA in text and CB in text and "G2" in text, o["disturbs"]
     assert a["title"].startswith("the Band A band · "), a["title"]; assert len(a["lines"]) == 3 and a["lines"][0].startswith("group G1: "), a["lines"]
     assert a["lines"][2] == f"group G3: {SUBJ}, {UNKNOWN}, no room", a["lines"]
+
+def test_the_band_line_names_the_other_groups():
+    m, spec, days, pool = now(); line = lambda g: " ".join(ask.moves(m, spec, days, pool, lesson(BANDID, group=g))["options"][0]["disturbs"])
+    t = line("G2"); assert "G1 (" in t and "G3 (" in t and "G2" not in t, t
+    t = line(None); assert "G2 (" in t and "G3 (" in t and "G1" not in t, t   # no group asked: the first row is the one asked about
+
+def test_the_anyway_kinds_are_the_forced_kinds_but_a_delete():
+    assert set(ask.ANYWAY) == set(draft.FORCED) - {"delete"}
+
+def test_swaps_text_counts_clean_and_problem_swaps():
+    m, spec, days, pool = now(); P = (m, spec, days, pool)
+    rows = [x for x in m["lessons"] if x["id"] != SWAP_OK]   # only the clashing swap is left
+    a = ask.swaps(dict(m, lessons=rows), spec, days, pool, lesson(LESSON)); assert a["text"] == "No swap of this lesson is clean. 1 would land with a problem.", a["text"]
 
 def test_teachers_one_group():
     m, spec, days, pool = now(); a = ask.teachers(m, spec, days, pool, lesson(BANDID, group="G2"))
