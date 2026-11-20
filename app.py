@@ -878,9 +878,13 @@ def _save_exam(sched, pub, by):
 def _exam_view(pub, sched):
     model, cal = pub["model"], _exam_cal(pub)
     by_id = {x["id"]: x for x in model.get("students") or []}
-    sids = sorted({i for p in sched.get("papers") or [] for i in exams_papers.who_sits(p, model)})
+    papers = sched.get("papers") or []
+    levels, classes = set(sched.get("levels") or []), set(sched.get("classes") or [])
+    mine = {x["id"] for x in model.get("students") or [] if exams_papers._student_level(model, x) in levels or x.get("cls") in classes}
+    sids = sorted(mine | {i for p in papers for i in exams_papers.who_sits(p, model)})
     return dict(summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=exams_make.lesson_lists(pub, cal, sched),
                 made=sched.get("made"), students={i: [by_id[i]["name"], by_id[i]["cls"]] for i in sids if i in by_id},
+                counts={p.get("id"): len(exams_papers.who_sits(p, model)) for p in papers}, periods=[list(t) for t in model.get("times") or []],
                 rooms=exams_settings.load(pub)["rooms"], students_missing=not model.get("students"))
 
 @app.get("/exams")

@@ -646,6 +646,24 @@ def create_fill_make_view():
         assert c.get("/exams").status_code == 200 and c.get("/exams/" + s["id"]).status_code == 200
 
 @t
+def view_carries_counts_periods_and_the_levels_students():
+    _reset(); _cal()
+    with published(_PUB):
+        c = committee()
+        s = _exam(c)
+        v = c.get(f"/api/exams/{s['id']}/view").get_json()
+        assert v["periods"] == _PUB["model"]["times"] and v["periods"][0] == ["07:40", "08:00"], v["periods"][:2]
+        assert set(v["counts"]) == {p["id"] for p in s["papers"]} and all(n >= 0 for n in v["counts"].values())
+        eng = next(p for p in s["papers"] if p["subject"] == "English")
+        assert v["counts"][eng["id"]] > 0
+        assert v["students"] and all(k.startswith("3") for k in v["students"]), list(v["students"])[:3]
+        assert len(v["students"]) == len([x for x in _PUB["model"]["students"] if x["level"] == "Sec 3"])
+        s["papers"] = []
+        assert c.put("/api/exams/" + s["id"], json=s).status_code == 200
+        v = c.get(f"/api/exams/{s['id']}/view").get_json()
+        assert v["counts"] == {} and len(v["students"]) > 0, "students come from the levels even with no papers"
+
+@t
 def make_refuses_without_students():
     import copy
     _reset(); _cal()
