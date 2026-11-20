@@ -316,4 +316,16 @@ def a_trade_is_worded_and_its_loads_are_told():
     L2 = [dict(x, d=x["d"], teachers=list(x["teachers"])) for x in L[:2]] + [lesson(i, d, 2, 1, [B], "Mathematics", ENTIRE, [Q], level=LV) for i, d in ((3, 2), (4, 3))]
     m2, sp2 = model_with(L2); assert helper.disturbs(m2, sp2, DAYS, [f], [ok]) == ["Nothing else moves."]   # two periods each: nobody's load changes
 
+@t
+def a_change_of_teacher_names_everyone_whose_periods_change():
+    P, Q, R = "Adeline Tan", "Darren Lim", "Sabrina Koh"; key = "C:1A:English Language"; ok = dict(state="ok", why="", must=[], prefer=[])
+    L = [lesson(1, 0, 2, 1, [A], "English Language", ENTIRE, [P], level=LV), lesson(2, 1, 2, 1, [A], "English Language", ENTIRE, [P, Q], level=LV), lesson(3, 2, 2, 1, [A], "English Language", ENTIRE, [Q], level=LV)]
+    m, sp = model_with(L)
+    f = dict(kind="teacher", key=key, teachers=[R, Q])   # Q is kept on lesson 2 and gains lesson 1
+    assert helper.disturbs(m, sp, DAYS, [f], [ok]) == [f"{P} drops to 0 periods, {R} rises to 3.", f"{Q} rises to 3 periods."], helper.disturbs(m, sp, DAYS, [f], [ok])
+    assert helper.disturbs(m, sp, DAYS, [dict(f, teachers=[Q])], [ok]) == [f"{P} drops to 0 periods, {Q} rises to 3."]   # Q is on two of them already
+    assert helper.disturbs(m, sp, DAYS, [dict(f, teachers=[P, Q])], [ok]) == [f"{P} rises to 3 periods.", f"{Q} rises to 3 periods."]   # nobody leaves, both gain
+    one = [lesson(1, 0, 2, 1, [A], "English Language", ENTIRE, [P, Q], level=LV)]; m1, sp1 = model_with(one)
+    assert helper.disturbs(m1, sp1, DAYS, [dict(f, teachers=[Q, P])], [ok]) == ["Nothing else moves."]   # the same teachers in another order: nobody's count changes
+
 print(f"{n} checks passed")

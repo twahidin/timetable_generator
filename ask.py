@@ -2,11 +2,12 @@
 Every option is judged by fixes.judge (or helper.chain, for two fixes) and worded by helper.say, helper.disturbs and typed.STEP5, so it
 reads and behaves as the helper's suggestions do. Read-only: nothing here changes the model it is given or touches files or the setup.
 m["pool"] is the pool given (draft.model_now sets both); this module does not import draft."""
-import collections, fixes, helper, typed
+import collections, time, fixes, helper, typed
 from ttgen import spec as spec_mod, verify
 
 QUESTIONS = ("here", "swaps", "moves", "teachers", "trades", "rooms", "fill", "free")   # what draft.about answers
 TRADES = 40             # trades judged for one lesson before it stops and says so
+BUDGET = 0.35           # seconds the trades of one lesson may take before it stops and says so (one is always checked)
 MOST = 8                # options an answer holds before it counts the rest in more
 BUSY = 4                # busy teachers added after the free ones
 USED = 4                # rooms in use added after the free ones
@@ -51,14 +52,15 @@ def say(m, spec, days, pool, fix):
         if rows: return f"Put {fixes.what(rows[0])} in {fix['room'] or 'no room'}."
     return helper.say(m, spec, days, fix)
 
-def check(m, spec, days, pool, fx, ctx=None, extra=()):
+def check(m, spec, days, pool, fx, ctx=None, extra=(), j=None):
     """the fixes judged (one by fixes.judge with the pool, two by helper.chain) -> dict(fixes, text, disturbs, state, why, apply), or None when the
     judgement is na, there are none or more than two, or two hold a place or a lift. apply: "yes" for ok and prefer; "anyway" for a no of one
-    move, place, add, teacher or room; else "none". disturbs: helper.disturbs, extra and typed.STEP5 for a step 5 difference the timetable lacked"""
+    move, place, add, teacher or room; else "none". disturbs: helper.disturbs, extra and typed.STEP5 for a step 5 difference the timetable lacked.
+    j: the one fix's judgement already made by fixes.judge on this m, ctx and pool (it is not made again)"""
     if not fx or len(fx) > 2 or (len(fx) == 2 and any(f.get("kind") in ("place", "lift") for f in fx)): return None
     ctx = fixes._ctx(m, ctx)
     if len(fx) == 1:
-        j = fixes.judge(m, spec, days, fx[0], ctx, pool=pool)
+        j = j or fixes.judge(m, spec, days, fx[0], ctx, pool=pool)
         if j["state"] == "na": return None
         c = dict(state=j["state"], why=j["why"], steps=[j], lessons=helper._apply(m["lessons"], fx, spec, days)["lessons"])
     else:
@@ -76,15 +78,15 @@ def check(m, spec, days, pool, fx, ctx=None, extra=()):
 
 # ----------------------------------------------------------------------------------------------- what the page shows above the options
 def here(m, spec, days, pool, sub):
-    """the lesson or place pointed at -> dict(title, lines): a lesson's "{what} · {day} period {p}" ("periods {p} to {q}"; "Not placed" in the pool),
-    a band's by its band's name with a line a group; a place's "{name} · {day} period {p} · empty" """
+    """the lesson or place pointed at -> dict(title, lines): a lesson of one row's "{what} · {day} period {p} · {teachers or 'no teacher'} · {room or 'no room'}"
+    ("periods {p} to {q}"; "Not placed" in the pool), a band's "{the band's name} · {day} period {p}" with a line a group; a place's "{name} · {day} period {p} · empty" """
     if sub["kind"] == "place": return dict(title=f"{sub['name']} · {fixes.when(days, sub['d'], sub['p'])} · empty", lines=[])
     rows = _rows_of(m, pool, sub["id"])
     if not rows: return dict(title=f"Lesson {sub['id']}", lines=[])
-    a, name = rows[0], fixes.named(rows, _short(m))
-    if not any(x is a for x in m["lessons"]) and any(x is a for x in pool): return dict(title=f"{name} · Not placed", lines=lines_of(rows, name))
-    span = f"period {a['p']}" if a["n"] == 1 else f"periods {a['p']} to {a['p'] + a['n'] - 1}"
-    return dict(title=f"{name} · {days[a['d']]} {span}", lines=lines_of(rows, name))
+    a, name = rows[0], fixes.named(rows, _short(m)); lines = lines_of(rows, name)
+    when = "Not placed" if not any(x is a for x in m["lessons"]) and any(x is a for x in pool) else f"{days[a['d']]} period {a['p']}" if a["n"] == 1 else f"{days[a['d']]} periods {a['p']} to {a['p'] + a['n'] - 1}"
+    who = "" if lines else f" · {', '.join(a['teachers']) or 'no teacher'} · {a['room'] if not fixes._no_room(a['room']) else 'no room'}"   # a band's groups are on its lines
+    return dict(title=f"{name} · {when}{who}", lines=lines)
 
 def lines_of(rows, name):
     """one line a group for a band: "group {g}: {subject}, {teachers or 'no teacher'}, {room or 'no room'}"; none for a lesson of one row"""
@@ -101,11 +103,13 @@ def _lesson(sub):
 def _plural(n, one, many): return f"{n} {one if n == 1 else many}"
 # ----------------------------------------------------------------------------------------------- swaps and moves, from one fixes.slots
 def swaps(m, spec, days, pool, sub):
-    """every place with a lesson it can swap with -> answer; the lessons it clashes with are options too, but not yes: apply "none" (yes before none, then helper.rank)"""
+    """every place with a lesson it can swap with -> answer; the lessons it clashes with are options too, but not yes: apply "none" (yes before none, then helper.rank).
+    A lesson alike in every way (typed._sig: the same classes, subject, group, teachers and room) is left out and not counted: the swap would change nothing anyone can see"""
     sub = _lesson(sub); i = sub["id"]; rows = _rows_of(m, pool, i); P = (m, spec, days, pool)
     if not rows: return dict(text=NOT_FOUND, title=f"Lesson {i}", lines=[], options=[], more=0, stopped=False)
     if not any(x["id"] == i for x in m["lessons"]): return _answer(*P, sub, "A lesson that is not placed cannot be swapped. Ask where it can go.")
-    ctx = fixes._ctx(m); got = [s for s in fixes.slots(m, spec, days, i, pool, extras=False, ctx=ctx) if s["swap"] and s["state"] != "na"]
+    ctx = fixes._ctx(m); sig = typed._sig(m, i)
+    got = [s for s in fixes.slots(m, spec, days, i, pool, extras=False, ctx=ctx) if s["swap"] and s["state"] != "na" and typed._sig(m, s["swap"]) != sig]
     if not got: return _answer(*P, sub, "Nothing can swap with this lesson.")
     n = sum(s["state"] in helper.OK for s in got); bad = len(got) - n
     key = lambda s: (s["state"] not in helper.OK, helper.rank(m, spec, days, dict(fixes=[dict(kind="swap", a=i, b=s["swap"])], moved=2, state=s["state"])))
@@ -120,11 +124,13 @@ def swaps(m, spec, days, pool, sub):
 
 def moves(m, spec, days, pool, sub):
     """every place it can go to without a swap, judged ok or prefer, as a move (a place for a lesson not placed); when fewer than three, up to three judged
-    no after them, nearest day first. Places judged na are never options -> answer"""
+    no after them, nearest day first. Places judged na are never options, and neither is a place where another lesson of its classes is (fixes.slots
+    says na there for a lesson on the timetable; for one not placed it is left out here) -> answer"""
     sub = _lesson(sub); i = sub["id"]; rows = _rows_of(m, pool, i); P = (m, spec, days, pool)
     if not rows: return dict(text=NOT_FOUND, title=f"Lesson {i}", lines=[], options=[], more=0, stopped=False)
-    ctx = fixes._ctx(m); a = rows[0]; kind = "place" if not any(x["id"] == i for x in m["lessons"]) else "move"
-    got = [s for s in fixes.slots(m, spec, days, i, pool, extras=False, ctx=ctx) if not s["swap"]]
+    ctx = fixes._ctx(m); a = rows[0]; kind = "place" if not any(x["id"] == i for x in m["lessons"]) else "move"; b = ctx["busy"]; cls = {c for x in rows for c in x["classes"]}
+    taken = lambda s: kind == "place" and any(b.at.get(("c", c, s["d"], q)) for c in cls for q in range(s["p"], min(s["p"] + a["n"], m["NP"])))
+    got = [s for s in fixes.slots(m, spec, days, i, pool, extras=False, ctx=ctx) if not s["swap"] and not taken(s)]
     fix = lambda s: dict(kind=kind, id=i, d=s["d"], p=s["p"])
     good = sorted((s for s in got if s["state"] in helper.OK), key=lambda s: helper.rank(m, spec, days, dict(fixes=[fix(s)], moved=1, state=s["state"])))
     bad = sorted((s for s in got if s["state"] == "no"), key=lambda s: (abs(s["d"] - a["d"]), s["d"], abs(s["p"] - a["p"]), s["p"]))[:3] if len(good) < 3 else []
@@ -154,7 +160,8 @@ def teachers(m, spec, days, pool, sub):
     def one(t):
         name = t["name"]; now = ctx["load"][name] + pooled[name]; cap = fixes._allowance((m["teacher_ix"].get(name) or {}).get("allowance")); depts = spec_mod.teacher_depts(team.get(name, {}))
         who = dict(name=name, depts=depts, subjects=subjects(name), free=t["free"], doing=t["doing"], rank=t["rank"], load=now, after=now + held, allowance=cap)
-        extra = [f"{', '.join(depts) or 'No department'} · {now} to {now + held}{f' of {cap:g}' if cap is not None else ''} periods."]
+        said = " ".join(([f"{name} is in {' and '.join(depts)}."] if depts else []) + ([f"Allowance {cap:g} periods."] if cap is not None else []))
+        extra = [said] if said else []   # the periods before and after are the disturbs' own line
         if ch["n_lessons"] > 1: extra.append(f"It changes all {ch['n_lessons']} lessons of {fixes.what(row)}.")
         if not t["free"]: extra.append(f"{name} is teaching {t['doing']}.")
         o = check(*P, [dict(kind="teacher", key=ks, teachers=[name if x == had[0] else x for x in row["teachers"]] if had else [name])], ctx, extra)
@@ -193,8 +200,10 @@ def trades(m, spec, days, pool, sub, other=None):
     """the lesson's row (sub["group"], default the first) and its teacher X (as teachers picks) -> answer: each trade of that key A for a key B of another teacher Y,
     X taking B and Y taking A, judged as one trade fix on the timetable it leaves. Y: step 5's teachers of the subject, teachers on a lesson of the subject or of
     another subject of its step 3 card, then teachers whose departments include the subject's, with B a key of Y of the subject or the card; other: that teacher
-    alone, with every key of theirs. ok and prefer are options (apply yes), then those judged no (apply none), at most MOST; none judged after TRADES (stopped)"""
-    sub = _lesson(sub); i = sub["id"]; rows = _rows_of(m, pool, i); P = (m, spec, days, pool)
+    alone, with every key of theirs. Each is first tested on the busy index (_clash: a teacher clash is a "no" without a judgement), else judged by fixes.judge
+    alone; ok and prefer are options (apply yes), then the no's (apply none), at most MOST, and only those shown go through check. It stops (stopped) before a
+    judgement past TRADES, or once BUDGET seconds have gone with at least one checked; the sentence then says how many were checked, judged or tested"""
+    t0 = time.perf_counter(); sub = _lesson(sub); i = sub["id"]; rows = _rows_of(m, pool, i); P = (m, spec, days, pool)
     if not rows: return dict(text=NOT_FOUND, title=f"Lesson {i}", lines=[], options=[], more=0, stopped=False)
     if other is not None and other not in m["teacher_ix"]: raise ValueError(f"There is no teacher called {other}.")
     row = next((x for x in rows if x["group"] == sub["group"]), rows[0]); key = fixes._row_key(row); ka = verify._kstr(key)
@@ -208,26 +217,43 @@ def trades(m, spec, days, pool, sub, other=None):
     for r in m["lessons"]:
         for y in r["teachers"]:
             if y in ys and (other or r["subject"].strip() in of_card): keys[y].update({k: None for k in helper._keys_of(r)})
-    both = list(m["lessons"]) + list(pool); ra = fixes.rows_of_key(both, key); name_a = verify._name(key); ctx = fixes._ctx(m)
-    good, bad, count, stopped = [], [], 0, False
+    both = list(m["lessons"]) + list(pool); ra = fixes.rows_of_key(both, key); name_a = verify._name(key); ctx = fixes._ctx(m); b = ctx["busy"]
+    known = {v.get("name") for v in spec.get("teachers") or [] if isinstance(v, dict)}   # a teacher not on the list: the trade is refused (na), never a clash
+    mine = [r for r in ra if r["id"] in b.ids and x_ in r["teachers"]]   # the rows of A on the timetable that Y would take
+    good, bad, judged, tested, stopped = [], [], 0, 0, False   # good and bad: (fix, kb, rb, its judgement or None) of each trade judged ok or prefer, and of each judged or tested no
     for y in ys:
         if any(y in r["teachers"] for r in ra): continue   # Y already teaches A: refused outright
         for kb in keys[y]:
             if kb == key: continue
             rb = fixes.rows_of_key(both, kb)
             if any(x_ in r["teachers"] for r in rb): continue
-            if count >= TRADES: stopped = True; break
-            count += 1   # every judgement counts, one that comes back refused too: the limit bounds the work
-            ids = lambda rs, t: len({r["id"] for r in rs if t in r["teachers"]})
-            extra = [f"It changes {ids(ra, x_)} {'lesson' if ids(ra, x_) == 1 else 'lessons'} of {name_a} and {ids(rb, y)} of {verify._name(kb)}."]
-            o = check(*P, [dict(kind="trade", a=ka, b=verify._kstr(kb), x=x_, y=y)], ctx, extra)
-            if o is None: continue
-            (good if o["state"] in helper.OK else bad).append(o)
+            if judged + tested and time.perf_counter() - t0 >= BUDGET: stopped = True; break
+            f = dict(kind="trade", a=ka, b=verify._kstr(kb), x=x_, y=y); ids = {r["id"] for r in ra + rb}
+            if {x_, y} <= known and (_clash(m, b, mine, y, ids) or _clash(m, b, [r for r in rb if r["id"] in b.ids and y in r["teachers"]], x_, ids)):
+                tested += 1; bad.append((f, kb, rb, None)); continue   # what fixes.judge would find first: a "no", seen without judging it
+            if judged >= TRADES: stopped = True; break
+            judged += 1   # every judgement counts, one that comes back refused too: the limit bounds the work
+            j = fixes.judge(m, spec, days, f, ctx, pool=pool)
+            if j["state"] != "na": (good if j["state"] in helper.OK else bad).append((f, kb, rb, j))
         if stopped: break
-    out = (good + bad)[:MOST]
+    def shown(f, kb, rb, j):   # worded by check, on the judgement made (a trade tested only is judged there)
+        k = lambda rs, t: len({r["id"] for r in rs if t in r["teachers"]}); na, nb = k(ra, x_), k(rb, f["y"])
+        return check(*P, [f], ctx, [f"It changes {na} {'lesson' if na == 1 else 'lessons'} of {name_a} and {nb} of {verify._name(kb)}."], j)
+    out = [o for o in (shown(*g) for g in (good + bad)[:MOST]) if o is not None]; n = judged + tested
     text = f"{_plural(len(good), 'trade is', 'trades are')} possible for {x_}." + (f" {len(bad)} more would land with a problem." if bad else "") if good else \
         f"No trade of this lesson is clean. {len(bad)} would land with a problem." if bad else "No trade of this lesson can be made."
-    return dict(_answer(*P, sub, text + (f" Only the first {TRADES} possible trades were checked." if stopped else ""), out, len(good) + len(bad) - len(out)), stopped=stopped)
+    tail = "" if not stopped else " Only the first possible trade was checked." if n == 1 else f" Only the first {n} possible trades were checked."
+    return dict(_answer(*P, sub, text + tail, out, len(good) + len(bad) - len(out)), stopped=stopped)
+
+def _clash(m, b, rows, t, ids):
+    """whether teacher t, given these rows of the timetable by a trade, is then on another lesson: one whose id is not among ids (the two keys' lessons), in a
+    period of one of the rows, on a day that does not let a teacher take two lessons at once, t not on that row's lesson already. It is the clash fixes.judge
+    finds first for a trade, read from the busy index b alone, so a trade it finds is judged "no" (when both teachers are on the setup's list)"""
+    double = m.get("double") or ()
+    for r in rows:
+        if r["d"] in double or any(t in y["teachers"] for y in b.ids.get(r["id"], ())): continue
+        if any(y["id"] not in ids for q in fixes._span(r) for y in b.at.get(("t", t, r["d"], q), ())): return True
+    return False
 
 # ----------------------------------------------------------------------------------------------- what can fill an empty period
 def _by_id(rows):
@@ -237,7 +263,7 @@ def _by_id(rows):
 
 def fill(m, spec, days, pool, sub):
     """an empty period of a class, a teacher or a room (sub, a place) -> answer: the lessons that could go there, judged ok or prefer only: those of the pool as a
-    place, the step 5 lessons below plan as an add (room from fixes.add_room), those elsewhere as a move ("Leaves {day} period {p} empty." in disturbs), each source by
+    place, the step 5 lessons below plan as an add (room from fixes.add_room, said in disturbs: "It goes in {room}.", or that none of its kind is free), those elsewhere as a move ("Leaves {day} period {p} empty." in disturbs), each source by
     helper.rank and the shown options taken in turn from each (judged by fixes.judge first, check only for those shown). By class or teacher a candidate is tried only when its periods are inside the day, lesson time and hold no lesson of its classes; by room: the
     lessons that cover the period with no room or a room of another kind than they ask (or not on the setup's list), as a room fix to this room"""
     if not isinstance(sub, dict) or sub.get("kind") != "place": raise ValueError(EMPTY)
@@ -253,7 +279,8 @@ def fill(m, spec, days, pool, sub):
         for s in fixes.short(m, spec, pool):
             e = plan.get(fixes._key(s["key"]))
             if e and name in (e["classes"] if by == "class" else e["teachers"]) and empty(e["classes"], s["n"], [dict(level=e["level"], classes=e["classes"], group="", subject="")]):
-                cand.append((dict(kind="add", key=s["key"], d=d, p=p, n=s["n"], room=fixes.add_room(m, spec, s["key"], d, p, s["n"], ctx, pool)), []))
+                room = fixes.add_room(m, spec, s["key"], d, p, s["n"], ctx, pool)   # the room Apply uses, said
+                cand.append((dict(kind="add", key=s["key"], d=d, p=p, n=s["n"], room=room), [f"It goes in {room}." if room else "No room of its kind is free then, so it has no room."]))
         for i, rs in _by_id(m["lessons"]).items():
             a, row = rs[0], next((x for x in rs if mine(x)), None)
             if row and (a["d"], a["p"]) != (d, p) and empty({c for x in rs for c in x["classes"]}, a["n"], rs, own=i):

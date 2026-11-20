@@ -99,9 +99,10 @@ def disturbs(m, spec, days, fx, steps):
         elif kind == "swap":
             a, b = _first(L, f["a"]), _first(L, f["b"])
             if a and b: out.append(f"{what(b)} moves to {when(days, a['d'], a['p'])}.")
-        elif kind == "teacher":
-            had = list(dict.fromkeys(t for x in _of_key(L, fixes._key(f["key"])) for t in x["teachers"])); load = _load(after)
-            olds, news = [t for t in had if t not in f["teachers"]], [t for t in f["teachers"] if t not in had]
+        elif kind == "teacher":   # every teacher whose periods change: those who leave paired with those who arrive, then a kept one who gains lessons
+            had = list(dict.fromkeys(t for x in _of_key(L, fixes._key(f["key"])) for t in x["teachers"])); was, load = _load(L), _load(after)
+            order = list(dict.fromkeys([t for t in f["teachers"] if t not in had] + had))
+            olds, news = [t for t in order if load[t] < was[t]], [t for t in order if load[t] > was[t]]
             for o, w in zip_longest(olds, news):
                 out.append(f"{o} drops to {load[o]} periods, {w} rises to {load[w]}." if o and w else f"{o} drops to {load[o]} periods." if o else f"{w} rises to {load[w]} periods.")
         elif kind == "trade":

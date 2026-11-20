@@ -150,7 +150,7 @@ def test_swaps_lists():
 def test_moves_pool():
     m, spec, days, pool = now(); a = ask.moves(m, spec, days, pool, lesson(POOLED))
     assert a["options"] and all(o["fixes"][0]["kind"] == "place" and o["fixes"][0]["id"] == POOLED and o["text"].startswith("Place ") for o in a["options"]), a
-    assert a["title"].endswith("Not placed"), a["title"]
+    assert " · Not placed · " in a["title"], a["title"]
 
 def test_moves_lists_ok_first_then_no_when_few():
     m, spec, days, pool = now(); a = ask.moves(m, spec, days, pool, lesson(LESSON))
@@ -201,7 +201,16 @@ def test_teachers_replace():
 
 def test_teachers_words():
     m, spec, days, pool = now(); a = ask.teachers(m, spec, days, pool, lesson(LESSON)); o = a["options"][0]; w = o["who"]
-    assert w["free"] and w["after"] >= w["load"] and any(" · " in d and f"{w['load']} to {w['after']}" in d for d in o["disturbs"]), o["disturbs"]
+    assert w["free"] and w["after"] >= w["load"] and w["depts"] and w["allowance"] is not None, w
+    assert f"{w['name']} is in {' and '.join(w['depts'])}. Allowance {w['allowance']:g} periods." in o["disturbs"] and not any(" · " in d for d in o["disturbs"]), o["disturbs"]
+    t = w["name"]; two = [dict(x, dept2="PE") if x["name"] == t else x for x in spec["teachers"]]   # a second department
+    o2 = next(o for o in ask.teachers(m, dict(spec, teachers=two), days, pool, lesson(LESSON))["options"] if o["who"]["name"] == t)
+    assert f"{t} is in {w['depts'][0]} and PE. Allowance {w['allowance']:g} periods." in o2["disturbs"], o2["disturbs"]
+    bare = [dict(x, dept="", dept2="") if x["name"] == t else x for x in spec["teachers"]]; ix = dict(m["teacher_ix"], **{t: dict(m["teacher_ix"][t], allowance=None)})
+    o3 = next(o for o in ask.teachers(dict(m, teacher_ix=ix), dict(spec, teachers=bare), days, pool, lesson(LESSON))["options"] if o["who"]["name"] == t)
+    assert not any(d.startswith(t + " is in") or "Allowance" in d for d in o3["disturbs"]), o3["disturbs"]   # no department and no allowance: no line
+    o4 = next(o for o in ask.teachers(m, dict(spec, teachers=bare), days, pool, lesson(LESSON))["options"] if o["who"]["name"] == t)
+    assert f"Allowance {w['allowance']:g} periods." in o4["disturbs"], o4["disturbs"]   # an allowance alone
     assert f"It changes all 2 lessons of {fixes.what(m['lessons'][0])}." in o["disturbs"]   # lessons 1 and 3 are of the same class and subject
     one = ask.teachers(m, spec, days, pool, lesson(BANDID, group="G2"))["options"][0]; assert not any("It changes all" in d for d in one["disturbs"])   # a group is one lesson
     busy = [o for o in a["options"] if not o["who"]["free"]]; assert len(busy) <= ask.BUSY and all(o["who"]["doing"] and o["state"] == "no" and o["apply"] == "anyway" for o in busy)
@@ -232,6 +241,14 @@ def test_here_for_a_place():
     m, spec, days, pool = now(); h = ask.here(m, spec, days, pool, dict(kind="place", by="class", name=CA, d=1, p=L1))
     assert h["title"] == f"{CA} · {days[1]} period {L1} · empty" and h["lines"] == [], h
     h = ask.here(m, spec, days, pool, lesson(BANDID)); assert h["title"] == f"the Band A band · {days[3]} periods {L1} to {L1 + 1}", h["title"]
+
+def test_here_for_a_lesson_of_one_row():
+    m, spec, days, pool = now(); w = lambda i: fixes.what(next(x for x in m["lessons"] + pool if x["id"] == i))
+    assert ask.here(m, spec, days, pool, lesson(LESSON))["title"] == f"{w(LESSON)} · {days[0]} period {L1} · {T0} · {ROOMS[0]}"
+    assert ask.here(m, spec, days, pool, lesson(NO_TEACHER))["title"] == f"{w(NO_TEACHER)} · {days[3]} period {L1 + 2} · no teacher · no room"
+    assert ask.here(m, spec, days, pool, lesson(POOLED))["title"] == f"{w(POOLED)} · Not placed · {T1} · no room"
+    two = [dict(x, n=2, teachers=[T0, T3]) if x["id"] == LESSON else x for x in m["lessons"]]
+    assert ask.here(dict(m, lessons=two), spec, days, pool, lesson(LESSON))["title"] == f"{w(LESSON)} · {days[0]} periods {L1} to {L1 + 1} · {T0}, {T3} · {ROOMS[0]}"
 
 def test_cap():
     m, spec, days, pool = now(); n = len(m["teacher_ix"]); a = ask.teachers(m, spec, days, pool, lesson(NO_TEACHER))
@@ -277,6 +294,26 @@ def recorded_judge():
     return seen, back
 def judged(seen): return [(f["kind"], f.get("id") or f.get("key")) for fx in seen for f in fx]
 
+# ----------------------------------------------------------------------------------------------- swaps alike, places of a lesson not placed
+def test_swaps_leave_out_a_lesson_alike_in_every_way():
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1], room=ROOMS[0]), lw(2, 1, L1, [CA], SUBJ, [E1], room=ROOMS[0]), lw(3, 2, L1, [CA], SUBJ2, [E2]), lw(4, 3, L1, [CA], SUBJ, [E1], room=ROOMS[1])]
+    with fresh(rows) as (m, spec, days, pool):
+        assert typed._sig(m, 1) == typed._sig(m, 2) != typed._sig(m, 4)
+        a = ask.swaps(m, spec, days, pool, lesson(1)); got = {o["fixes"][0]["b"] for o in a["options"]}
+        assert got == {3, 4} and a["more"] == 0, a   # lesson 2 changes nothing anyone can see; lesson 4 is in another room
+        assert a["text"] == "This lesson can swap with 2 lessons.", a["text"]   # and it is not counted
+        assert 1 not in {o["fixes"][0]["b"] for o in ask.swaps(m, spec, days, pool, lesson(2))["options"]}
+
+def test_moves_of_a_lesson_not_placed_leave_out_its_classes_lessons():
+    grid = SPEC["day_structure"][LEVEL]; free = (4, max(p for p, ch in enumerate(grid[DAYS[4]]) if ch == "L"))   # one period of CB's week left empty
+    week = [(d, p) for d in range(5) for p, ch in enumerate(grid[DAYS[d]]) if ch == "L" and (d, p) != free]
+    rows = [lw(i, d, p, [CB], (SUBJ, SUBJ2)[i % 2], [T0]) for i, (d, p) in enumerate(week, 1)]
+    with fresh(rows, (1,)) as (m, spec, days, pool):   # lesson 1 waits in Not placed: two places are free for CB, its own and the one left empty
+        a = ask.moves(m, spec, days, pool, lesson(1)); good = [o for o in a["options"] if o["state"] in helper.OK]
+        assert a["options"] and len(good) < 3, a   # so the nearest places judged no are offered after them
+        cb = lambda d, p: any(CB in x["classes"] and x["d"] == d and x["p"] <= p < x["p"] + x["n"] for x in m["lessons"])
+        assert not [o["fixes"][0] for o in a["options"] if cb(o["fixes"][0]["d"], o["fixes"][0]["p"])], a["options"]   # never on top of another lesson of CB
+
 # ----------------------------------------------------------------------------------------------- trades
 def test_trades_found():
     rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], SUBJ, [E2])]
@@ -317,6 +354,42 @@ def test_trades_stopped():
         finally: ask.TRADES = 40; back()
         assert len(seen) == 2 and a["stopped"] is True and len(a["options"]) == 2 and a["text"].endswith("Only the first 2 possible trades were checked."), a   # every judgement counts
 
+def test_trades_pretest_counts_a_clash_without_judging_it():
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], SUBJ, [E2]), lw(3, 0, L1, [CC], MT_SUBJ, [E2])]   # E2 teaches lesson 3 when lesson 1 meets
+    with fresh(rows) as (m, spec, days, pool):
+        assert fixes.judge(m, spec, days, trade(KA, KB, E1, E2), pool=pool)["state"] == "no"   # what the pre-test saves: a judgement of "no"
+        seen, back = recorded_judge()
+        try:
+            with most(0): a = ask.trades(m, spec, days, pool, lesson(1))
+        finally: back()
+        assert seen == [] and a["options"] == [] and a["more"] == 1 and a["text"] == "No trade of this lesson is clean. 1 would land with a problem.", (seen, a)
+        a = ask.trades(m, spec, days, pool, lesson(1)); (o,) = a["options"]   # shown, it is judged as every option is
+        assert o["fixes"] == [trade(KA, KB, E1, E2)] and o["state"] == "no" and o["apply"] == "none" and E2 in o["why"] and a["more"] == 0, a
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], SUBJ, [E2]), lw(3, 1, L1, [CC], MT_SUBJ, [E1])]   # E1 teaches lesson 3 when lesson 2 meets
+    with fresh(rows) as (m, spec, days, pool):
+        seen, back = recorded_judge()
+        try:
+            with most(0): a = ask.trades(m, spec, days, pool, lesson(1))
+        finally: back()
+        assert seen == [] and a["text"] == "No trade of this lesson is clean. 1 would land with a problem.", (seen, a)
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 0, L1, [CB], SUBJ, [E2])]   # E2 busy then with the lesson E2 gives away: no clash, so it is judged
+    with fresh(rows) as (m, spec, days, pool):
+        seen, back = recorded_judge()
+        try:
+            with most(0): a = ask.trades(m, spec, days, pool, lesson(1))
+        finally: back()
+        assert len(seen) == 1 and a["text"].startswith("1 trade is possible"), (seen, a["text"])
+
+def test_trades_time_budget():
+    E4 = [t["name"] for t in SPEC["teachers"] if t.get("dept") == "EL"][3]
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], SUBJ, [E2]), lw(3, 2, L1, [CC], SUBJ, [E3]), dict(lw(4, 3, L1, ["2A"], SUBJ, [E4]), level="P2")]
+    assert ask.BUDGET == 0.35
+    with fresh(rows) as (m, spec, days, pool):
+        ask.BUDGET = 0
+        try: a = ask.trades(m, spec, days, pool, lesson(1))
+        finally: ask.BUDGET = 0.35
+        assert a["stopped"] is True and len(a["options"]) == 1 and a["text"].endswith(" Only the first possible trade was checked."), a   # at least one is always checked
+
 def test_trades_text_and_refusals():
     rows = [lw(1, 0, L1, [CA], SUBJ, []), lw(2, 1, L1, [CB], SUBJ, [E2])]
     with fresh(rows) as (m, spec, days, pool):
@@ -336,6 +409,7 @@ def test_fill_class():
         place = [o for o in a["options"] if o["fixes"][0]["kind"] == "place"]; assert place and {o["fixes"][0]["id"] for o in place} <= {5, 6} and all(o["fixes"][0]["d"] == 4 and o["fixes"][0]["p"] == L1 for o in place)
         assert place[0]["text"].startswith("Place "), place[0]
         add = [o for o in a["options"] if o["fixes"][0]["kind"] == "add"]; assert add and all(o["fixes"][0]["room"] for o in add), a   # a room from add_room
+        assert all(f"It goes in {o['fixes'][0]['room']}." in o["disturbs"] for o in add), [o["disturbs"] for o in add]   # the room Apply uses is said
         assert all(CA in verify.planned_rows(spec)[fixes._key(o["fixes"][0]["key"])]["classes"] for o in add)
         move = [o for o in a["options"] if o["fixes"][0]["kind"] == "move"]; assert move, a
         for o in move: x = next(x for x in m["lessons"] if x["id"] == o["fixes"][0]["id"]); assert (f"Leaves {days[x['d']]} period {x['p']} empty." if x["n"] == 1 else f"Leaves {days[x['d']]} periods {x['p']} to {x['p'] + x['n'] - 1} empty.") in o["disturbs"] and CA in x["classes"], o
@@ -343,6 +417,14 @@ def test_fill_class():
         n = len(stored())
         for o in a["options"]:   # the board accepts each as it stands
             draft.fix(o["fixes"][0]); draft.undo(); assert len(stored()) == n
+
+def test_fill_add_with_no_room():
+    with fresh(FILL, (5, 6)) as (m, spec, days, pool), most(1000):
+        real = fixes.add_room; fixes.add_room = lambda *a, **k: ""   # every room of its kind in use then
+        try: a = fill(m, spec, days, pool, "class", CA, 4, L1)
+        finally: fixes.add_room = real
+        add = [o for o in a["options"] if o["fixes"][0]["kind"] == "add"]
+        assert add and all(o["fixes"][0]["room"] == "" and "No room of its kind is free then, so it has no room." in o["disturbs"] and not any(d.startswith("It goes in") for d in o["disturbs"]) for o in add), [o["disturbs"] for o in add]
 
 def test_fill_overrun():
     with fresh(FILL, (5, 6)) as (m, spec, days, pool), most(1000):
@@ -491,6 +573,34 @@ def test_about_route():
     bad("/api/draft/about?q=nope&kind=lesson&id=1", "That question is not known.")
     bad("/api/draft/about?q=fill&kind=lesson&id=1", "Point at an empty period for this.")
     bad("/api/draft/about?kind=lesson&id=1", "That question is not known.")
+
+@contextlib.contextmanager
+def saved_meanwhile():
+    """store.setup_record answers as the setup is on the first call and as a colleague's save left it on every call after (a save in between) ->
+    yields the list of the specs fixes.judge saw ("saved": the setup after the save)"""
+    real_rec, real_judge, calls, seen = store.setup_record, fixes.judge, [], []
+    def rec():
+        r = real_rec(); calls.append(1)
+        return r if len(calls) == 1 else dict(r, v=r["v"] + 1, spec=dict(r["spec"], _saved=True))
+    store.setup_record = rec; fixes.judge = lambda m, spec, *a, **k: (seen.append("saved" if spec.get("_saved") else "named"), real_judge(m, spec, *a, **k))[1]
+    try: yield seen
+    finally: store.setup_record = real_rec; fixes.judge = real_judge; draft._cache.clear()
+
+def test_a_setup_saved_meanwhile_is_not_judged_on():
+    s = draft.stamp(); n = len(stored()); f = mv(LESSON, 1, L1 + 1)
+    with saved_meanwhile() as seen:
+        try: draft.fix(f, stamp=s)
+        except ValueError as e: assert str(e) == draft.MOVED, str(e)   # refused, or judged on the setup its stamp names
+        assert seen and seen[0] == "named", seen
+    while len(stored()) > n: draft.undo()
+    with saved_meanwhile() as seen:
+        try: draft.fix_many([f], stamp=s)
+        except ValueError as e: assert str(e) == draft.MOVED, str(e)
+        assert seen and seen[0] == "named", seen
+    while len(stored()) > n: draft.undo()
+    with saved_meanwhile() as seen:
+        a = draft.about("moves", lesson(LESSON)); assert seen and set(seen) == {"named"} and a["stamp"] == s, (set(seen), a["stamp"], s)   # the answer is of the setup its stamp names
+    assert draft.stamp() == s and len(stored()) == n
 
 def test_about_writes_nothing():
     def snap(): return {os.path.join(r, f): open(os.path.join(r, f), "rb").read() for r, _, fs in os.walk(DATA) for f in fs}

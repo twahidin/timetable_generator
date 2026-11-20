@@ -36,11 +36,12 @@ def stamp(meta=None, rec=None):
     Worked out from what is on disk (meta: the draft's meta.json, rec: a setup record), so an answer made for a timetable that has moved on is told apart from one made for this."""
     meta = store.read_json(_p("meta.json"), {}) if meta is None and exists() else meta or {}; rec = rec or store.setup_record()
     return hashlib.sha1(json.dumps([meta.get("upload_id"), meta.get("uploaded_at"), [[f.get("at"), f.get("text")] for f in meta.get("fixes") or []], rec["v"]]).encode()).hexdigest()[:12]
-def _moved(given):
-    """under the lock: ValueError(MOVED) when a stamp was given and it is not the draft's now (no stamp: any change may be made)"""
+def _moved(given, rec):
+    """under the lock: ValueError(MOVED) when a stamp was given and it is not the draft's now, worked out from rec (the setup record the timetable to be judged
+    was built on) and the meta read now (no stamp: any change may be made)"""
     if given is None: return
     if not exists(): raise NoDraft("There is no draft.")
-    if given != stamp(): raise ValueError(MOVED)
+    if given != stamp(rec=rec): raise ValueError(MOVED)
 def _count(pool): return len({x["id"] for x in pool})
 _cache = {}                 # one entry: the model of the draft with its fixes applied, (key, model, fx); one worker, so a dict under _lock
 
@@ -298,9 +299,9 @@ FIELDS = dict(move=("id", "d", "p"), swap=("a", "b"), teacher=("key", "teachers"
 FORCED = ("move", "place", "add", "delete", "teacher", "room")   # the kinds a request from the board may force
 PUSHED = ("move", "place", "add")             # the kinds a request from the board may push other lessons out for
 
-def _now():
+def _now(rec=None):
     if not exists(): raise NoDraft("There is no draft.")
-    return model_now()
+    return model_now(rec)
 
 def _planned(spec, key):
     """the step 5 row (verify.planned_rows) of a key as the page and fixes.short spell it"""
@@ -371,10 +372,12 @@ def lesson(lesson_id, group=None):
 
 def about(q, raw_subject, other=None):
     """a read-only look-up about one lesson or empty period of the draft as it is now (lookups.QUESTIONS), q one of them -> the answer of ask.py with the cleaned
-    subject and the stamp of the draft it was made for. The stamp is read before the model, so a fix made in between makes the answer older, never newer. other: for
-    trades, the teacher to trade with. ValueError(sentence) for an unknown question or a subject that is not there"""
+    subject and the stamp of the draft it was made for. The stamp is of the meta read before the model, so a fix made in between makes the answer older, never newer,
+    and of the one setup record the model is built on. other: for trades, the teacher to trade with. ValueError(sentence) for an unknown question or a subject that is not there"""
     if q not in lookups.QUESTIONS: raise ValueError("That question is not known.")
-    s = stamp(); m, rec, fx = _now(); spec, days, pool = m["checked_setup"], m["days"], fx["pool"]; sub = lookups.subject(m, pool, raw_subject); P = (m, spec, days, pool)
+    rec = store.setup_record()
+    with _lock: meta = store.read_json(_p("meta.json"), {}) if exists() else {}
+    m, rec, fx = _now(rec); s = stamp(meta, rec); spec, days, pool = m["checked_setup"], m["days"], fx["pool"]; sub = lookups.subject(m, pool, raw_subject); P = (m, spec, days, pool)
     if q == "here": a = dict(text="", options=[], more=0, stopped=False, **lookups.here(*P, sub))
     else: a = getattr(lookups, q)(*P, sub, **({"other": other} if q == "trades" else {}))
     return dict(a, subject=sub, stamp=s)
@@ -477,10 +480,11 @@ def fix(move, stamp=None):
     """make one fix: judged against the draft as it is now. na is refused with its sentence; no is refused with its sentence too, unless the request
     has force (a move, place, add, delete, teacher or room from the board; never a room for all the group's lessons) and why, the sentence the page showed for that place, is the judgement's sentence now
     (a place that went wrong for another reason since is refused, with the reason as it now is); with push the lessons of the same classes in the
-    way are worked out here, under the lock, and kept on the fix as out (none of push, force and why is kept). A lift needs no force. stamp (the draft's, as the page last read it): when it is not the draft's now, ValueError(MOVED) before anything is judged. Returns info()."""
+    way are worked out here, under the lock, and kept on the fix as out (none of push, force and why is kept). A lift needs no force. stamp (the draft's, as the page last read it): when it is not the draft's now, ValueError(MOVED) before anything is judged;
+    it is compared with the stamp of the setup record the timetable was built on, so a setup saved meanwhile is never judged on under an older stamp. Returns info()."""
     f = _whole(move, forcing=True); force, push, why, all_ = f.pop("force", False), f.pop("push", False), f.pop("why", None), f.pop("all", False)
     with _lock:   # from the judgement to the write: two clicks cannot both pass the judgement on the same state
-        _moved(stamp); m, rec, fx = _now(); spec, days, pool = m["checked_setup"], m["days"], fx["pool"]
+        m, rec, fx = _now(); _moved(stamp, rec); spec, days, pool = m["checked_setup"], m["days"], fx["pool"]   # one setup record for the check and the judging
         if f["kind"] == "add":
             _length(f["n"], m)
             if not f["room"]: f["room"] = fixes.add_room(m, spec, f["key"], f["d"], f["p"], f["n"]) if isinstance(f["d"], int) and isinstance(f["p"], int) else ""
@@ -539,7 +543,7 @@ def _fixes_of(moves, m, spec, days):
 def fix_many(moves, stamp=None):
     """make one or two fixes together: each judged on the timetable the earlier ones leave, all kept (with one batch id) or none. stamp: as for fix. Returns info()."""
     with _lock:   # from the judgement to the write, as fix does
-        _moved(stamp); m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]; fl = _fixes_of(moves, m, spec, days)
+        m, rec, fx = _now(); _moved(stamp, rec); spec, days = m["checked_setup"], m["days"]; fl = _fixes_of(moves, m, spec, days)   # one setup record, as fix
         c = helper.chain(m, spec, days, fl)
         if c["state"] in ("no", "na"): raise ValueError(c["why"])
         if len(c["texts"]) != len(fl): raise ValueError("That fix could not be made. Check the list again.")
