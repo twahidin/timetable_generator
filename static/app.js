@@ -3484,7 +3484,7 @@ function bdHTML() {   // the timetable card: the board with its side panel, the 
     <div class="bdmain"><div class="bdwrap"><div class="bdin${by === "class" ? "" : " people"}" style="min-width:calc(var(--bdlab) + ${d.NP} * var(--bdw))">${hdr}${body}</div></div>${bdSideHTML(b, hit, parts)}</div>` + tail;
 }
 /* the side panel beside the board (under it on a narrow window): three tabs, and a fourth, Lesson, while a lesson is selected by a click
-   (bdLessonOpen); the one chosen kept while step 8 is open; with none chosen,
+   (bdLessonOpen), and Ask while it is about something (akOpen), four or five tabs on two rows; the one chosen kept while step 8 is open; with none chosen,
    Not placed while lessons wait, else Warnings. It is as tall as the board and scrolls inside itself, so the rows never move. The whole
    panel takes a card dragged from the board as a lift, whatever tab is showing. */
 function bdSideTab(b) {
