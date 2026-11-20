@@ -8,6 +8,9 @@ os.environ.update(DATA_DIR=DATA, SECRET_KEY=KEY, AI_PROVIDER="anthropic", AI_API
 sys.path.insert(0, ROOT)
 import app as A, access, store  # noqa: E402
 from relief import people as P  # noqa: E402
+from relief import calendar as C  # noqa: E402
+from ttgen.spec import day_names  # noqa: E402
+import datetime  # noqa: E402
 
 COUNT = 0
 def t(f):
@@ -60,5 +63,46 @@ def staff_codes_off_without_secret_key():
     del os.environ["SECRET_KEY"]
     try: assert P.staff_codes(ps) == {}
     finally: os.environ["SECRET_KEY"] = KEY
+
+CAL = dict(terms=[dict(name="Term 4", start="2026-09-07", end="2026-11-20", starts_as="Odd")],
+           holidays=[dict(start="2026-10-23", end="2026-10-23", name="Deepavali")])
+TWO = day_names(2)
+SCHOOL_TWO = ["Odd Mon", "Odd Tues", "Odd Wed", "Odd Thurs", "Odd Fri", "Even Mon", "Even Tues", "Even Wed", "Even Thurs", "Even Fri"]
+D = datetime.date
+
+@t
+def school_day_counts_odd_and_even_weeks():
+    assert C.school_day(CAL, TWO, D(2026, 9, 7)) == "Odd Mon"
+    assert C.school_day(CAL, TWO, D(2026, 9, 14)) == "Even Mon"
+    assert C.school_day(CAL, TWO, D(2026, 10, 13)) == "Even Tue"
+    assert C.school_day(CAL, TWO, D(2026, 10, 12)) == "Even Mon"
+
+@t
+def school_day_is_none_off_school():
+    assert C.school_day(CAL, TWO, D(2026, 10, 17)) is None
+    assert C.school_day(CAL, TWO, D(2026, 10, 23)) is None
+    assert C.school_day(CAL, TWO, D(2026, 11, 23)) is None
+    assert C.school_day(CAL, TWO, D(2026, 9, 4)) is None
+
+@t
+def school_day_reads_the_schools_own_labels():
+    assert C.school_day(CAL, SCHOOL_TWO, D(2026, 10, 13)) == "Even Tues"
+    assert C.school_day(CAL, SCHOOL_TWO, D(2026, 10, 15)) == "Even Thurs"
+
+@t
+def school_day_one_week_timetable():
+    assert C.school_day(CAL, ["Mon", "Tue", "Wed", "Thu", "Fri"], D(2026, 10, 13)) == "Tue"
+
+@t
+def term_starting_midweek_keeps_its_week():
+    cal = dict(terms=[dict(name="T", start="2026-09-09", end="2026-11-20", starts_as="Odd")], holidays=[])
+    assert C.school_day(cal, TWO, D(2026, 9, 11)) == "Odd Fri"
+    assert C.school_day(cal, TWO, D(2026, 9, 14)) == "Even Mon"
+
+@t
+def term_of_and_week_of():
+    assert C.term_of(CAL, D(2026, 10, 13))["name"] == "Term 4"
+    assert C.term_of(CAL, D(2026, 12, 1)) is None
+    assert C.week_of(D(2026, 10, 15)) == (D(2026, 10, 12), D(2026, 10, 16))
 
 print(f"{COUNT} relief tests passed")
