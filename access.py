@@ -22,6 +22,13 @@ def personal_code(student_id):
     for _ in range(8): out += ALPHABET[n % len(ALPHABET)]; n //= len(ALPHABET)
     return out[:4] + "-" + out[4:]
 
+def staff_code(name):
+    """a member of staff's own sign-in code, from their name; needs SECRET_KEY like personal_code"""
+    d = hmac.new(secret(), ("timetable-staff:" + str(name).strip()).encode(), hashlib.sha256).digest()
+    n = int.from_bytes(d[:8], "big"); out = ""
+    for _ in range(8): out += ALPHABET[n % len(ALPHABET)]; n //= len(ALPHABET)
+    return out[:4] + "-" + out[4:]
+
 def configured():
     """which general codes are set, and problems to show the committee"""
     have = {role: bool(norm(os.environ.get(var))) for role, var in ROLES}
@@ -33,15 +40,17 @@ def configured():
     if short: probs.append(f"{', '.join(short)} should be at least 6 letters or digits.")
     return have, probs
 
-def match(code, personal):
-    """-> (role, student_id) or (None, None). personal: {normalised code: student id}"""
+def match(code, personal, staff=None):
+    """-> (role, value) or (None, None). personal: {normalised code: student id}; staff: {normalised code: staff name}"""
     c = norm(code)
     if not c: return None, None
     for role, var in ROLES:
         v = norm(os.environ.get(var))
         if v and hmac.compare_digest(v, c): return role, None
     sid = personal.get(c)
-    return ("personal", sid) if sid is not None else (None, None)
+    if sid is not None: return "personal", sid
+    name = (staff or {}).get(c)
+    return ("staff", name) if name is not None else (None, None)
 
 class Limiter:
     """at most `n` wrong codes per `window` seconds from one address"""
