@@ -9,6 +9,7 @@ sys.path.insert(0, ROOT)
 import app as A, access, store  # noqa: E402
 from relief import calendar as C  # noqa: E402
 from exams import settings as ES, fake as F, days as D, schedules as SC, papers as P  # noqa: E402
+from exams import seating as SE  # noqa: E402
 from datetime import date  # noqa: E402
 
 def raises(exc, f, text=None):
@@ -269,5 +270,92 @@ def check_window_and_together():
     a, b = _paper(date="2026-10-05", start="08:00", together="MT2"), _paper(subject="Mathematics", date="2026-10-05", start="09:00", together="MT2")
     r = _chk([a, b])
     assert "Sec 3 English Paper 1 and Sec 3 Mathematics Paper 1 share \u201cMT2\u201d but start at different times." in r["errors"], r
+
+
+def _xset(rooms=None):
+    x = ES.defaults()
+    full = {"3-01": (40, 6, 7, False, False), "3-02": (40, 6, 7, False, False), "4-01": (40, 6, 7, False, False),
+            "Hall": (240, 24, 10, True, False), "3-11": (24, 4, 6, False, True), "LT1&2": (80, None, None, False, False),
+            "LT1": (40, None, None, False, False), "LT2": (40, None, None, False, False)}
+    x["rooms"] = {n: dict(seats=v[0], rows=v[1], cols=v[2], hall=v[3], access=v[4], note="") for n, v in full.items()
+                  if rooms is None or n in rooms}
+    return x
+
+def _sit(papers, **kw):
+    s = _new(); s.update(papers=papers, levels=["Sec 3"], start="2026-10-05", end="2026-10-06", access=[]); s.update(kw)
+    return s
+
+def _first(s):
+    return SE.sittings(s)[0]
+
+def _seated(sched, rooms=None, pins=None):
+    s = sched
+    sit = _first(s)
+    st = SE.sitting_students(sit, s, _M)
+    free = [r for r in SE.rooms_free(_PUB, F.CAL, s, sit, _xset(rooms), set()) if r["busy"] == ""]
+    return st, SE.seat(sit, st, free, s, _M, pins or {})
+
+@t
+def sittings_group_by_start():
+    s = _sit([_paper(date="2026-10-05", start="10:00"), _paper(subject="Mathematics", date="2026-10-05", start="07:50"),
+              _paper(subject="Science", date="2026-10-05", start="07:50"), _paper(subject="Art")])
+    got = SE.sittings(s)
+    assert [g["key"] for g in got] == ["2026-10-05 07:50", "2026-10-05 10:00"], got
+    assert got[0]["start"] == 470 and len(got[0]["papers"]) == 2 and len(got[1]["papers"]) == 1
+
+@t
+def rooms_busy_with_running_lessons():
+    s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
+    got = {r["name"]: r["busy"] for r in SE.rooms_free(_PUB, F.CAL, s, _first(s), _xset(), set())}
+    assert got["4-01"] == "Mathematics with 4A until 08:40", got
+    assert got["LT1"] != "" and got["LT1&2"] != "" and got["LT2"] == "", got
+    assert got["3-01"] == "" and got["Hall"] == "", got
+    assert SE.rooms_free(_PUB, F.CAL, s, _first(s), _xset(), {"3-02"})[1]["busy"] == "used by another sitting"
+    s = _sit([_paper(who="level", date="2026-10-05", start="09:00")])
+    got = {r["name"]: r["busy"] for r in SE.rooms_free(_PUB, F.CAL, s, _first(s), _xset(), set())}
+    assert got["Hall"] == "rain room for PE with 4A", got
+    s["use_anyway"] = [["2026-10-05 09:00", "Hall"]]
+    got = {r["name"]: r["busy"] for r in SE.rooms_free(_PUB, F.CAL, s, _first(s), _xset(), set())}
+    assert got["Hall"] == "", got
+
+@t
+def own_class_in_own_room():
+    s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
+    st, r = _seated(s, rooms=("3-01", "3-02", "4-01", "Hall"))
+    assert r["unseated"] == [] and len(r["rooms"]["3-01"]) == 30 and len(r["rooms"]["3-02"]) == 30, r
+    assert r["rooms"]["3-01"][0] == ["3A-01", "A1"] and r["rooms"]["3-01"][1] == ["3A-02", "A2"], r["rooms"]["3-01"][:2]
+    assert all(x[0].startswith("3B") for x in r["rooms"]["3-02"])
+
+@t
+def access_students_apart():
+    s = _sit([_paper(who="level", date="2026-10-05", start="07:50")],
+             access=[dict(student="3A-05", extra=25, own_room=True, reader=False, scribe=False, note="")])
+    st, r = _seated(s)
+    assert r["rooms"]["3-11"] == [["3A-05", "A1"]], r["rooms"]["3-11"]
+    assert len(r["rooms"]["3-01"]) == 29 and r["unseated"] == [], r
+
+@t
+def shared_hall_alternates_levels():
+    s = _sit([_paper(who="level", date="2026-10-05", start="07:50"), _paper(level="Sec 4", who="level", date="2026-10-05", start="07:50")], levels=["Sec 3", "Sec 4"])
+    s["seating"]["home_rooms"] = False
+    st, r = _seated(s, rooms=("3-01", "Hall"))
+    hall = dict((sid, seat) for sid, seat in r["rooms"]["Hall"])
+    assert len(hall) == 90 and r["unseated"] == [], r
+    assert all(hall[x].startswith("A") for x in hall if x.startswith("3A") and int(x[-2:]) <= 24)
+    assert {seat[0] for sid, seat in hall.items() if st[sid]["level"] == "Sec 4"} <= {"B", "D"}
+    assert any(seat == "B1" and st[sid]["level"] == "Sec 4" for sid, seat in hall.items())
+
+@t
+def not_enough_seats():
+    s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
+    st, r = _seated(s, rooms=("3-01",))
+    assert len(r["rooms"]["3-01"]) == 40 and len(r["unseated"]) == 20, r
+    assert sum(1 for x, _ in r["rooms"]["3-01"] if x.startswith("3A")) == 30 and all(x.startswith("3B") for x in r["unseated"])
+
+@t
+def pins_win():
+    s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
+    st, r = _seated(s, pins={"3A-07": "3-02", "9Z-01": "3-02", "3A-08": "Nowhere"})
+    assert "3A-07" in [x for x, _ in r["rooms"]["3-02"]] and "3A-07" not in [x for x, _ in r["rooms"]["3-01"]], r
 
 print(f"{COUNT} exams tests passed")
