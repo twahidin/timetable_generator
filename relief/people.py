@@ -3,7 +3,7 @@ import access
 from ttgen import spec as _spec
 
 def people(pub, extra):
-    """-> [dict(name, short, depts, role, teaches, staff_only)], by first department then name"""
+    """-> [dict(name, short, depts, role, teaches, staff_only)], by first department (people with none last) then name"""
     model = ((pub or {}).get("model") or {})
     teaching = {n for L in model.get("lessons") or [] for n in L.get("teachers") or []}
     out, seen = [], set()
@@ -24,7 +24,7 @@ def people(pub, extra):
         if not name or name in seen: continue
         seen.add(name)
         out.append(dict(name=name, short=name, depts=[], role="", teaches=False, staff_only=True))
-    out.sort(key=lambda p: ((p["depts"][0] if p["depts"] else ""), p["name"]))
+    out.sort(key=lambda p: (not p["depts"], p["depts"][0] if p["depts"] else "", p["name"]))   # no department: last
     return out
 
 def staff_codes(people):

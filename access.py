@@ -16,18 +16,19 @@ def personal_codes_on():
     """personal codes need SECRET_KEY: made with an empty key, anyone who knows a Student ID could work out the code"""
     return bool(os.environ.get("SECRET_KEY"))
 
-def personal_code(student_id):
-    d = hmac.new(secret(), ("timetable-personal:" + str(student_id)).encode(), hashlib.sha256).digest()
+def _code(material):
+    """an 8-letter code, as XXXX-XXXX, from the HMAC of the full input string"""
+    d = hmac.new(secret(), material.encode(), hashlib.sha256).digest()
     n = int.from_bytes(d[:8], "big"); out = ""
     for _ in range(8): out += ALPHABET[n % len(ALPHABET)]; n //= len(ALPHABET)
     return out[:4] + "-" + out[4:]
 
+def personal_code(student_id):
+    return _code("timetable-personal:" + str(student_id))
+
 def staff_code(name):
     """a member of staff's own sign-in code, from their name; needs SECRET_KEY like personal_code"""
-    d = hmac.new(secret(), ("timetable-staff:" + str(name).strip()).encode(), hashlib.sha256).digest()
-    n = int.from_bytes(d[:8], "big"); out = ""
-    for _ in range(8): out += ALPHABET[n % len(ALPHABET)]; n //= len(ALPHABET)
-    return out[:4] + "-" + out[4:]
+    return _code("timetable-staff:" + str(name).strip())
 
 def configured():
     """which general codes are set, and problems to show the committee"""
