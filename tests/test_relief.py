@@ -294,6 +294,7 @@ def timetable_pub(pub):
     import copy
     pub = copy.deepcopy(pub); pub["model"].update(class_ix={}, teacher_ix={}, room_ix={}, students=[])
     pub["views"][("view", "teacher")] = "the teacher page"
+    pub["views"][("view", "staff")] = "the staff page"   # the teacher's page with the way back to Relief
     return pub
 
 TPUB = timetable_pub(PUB)
@@ -307,7 +308,7 @@ def a_staff_code_opens_the_teachers_timetable_card():
         c2, r = signed_in("student", access.staff_code("Mr Darren Lim"))
         assert r.status_code == 403 and b"?as=relief" in r.data          # a staff code on another card points to the Relief card
         # treated as a teacher: the teacher's page and files, not the committee's
-        r = c.get("/timetable"); assert r.status_code == 200 and r.data == b"the teacher page"
+        r = c.get("/timetable"); assert r.status_code == 200 and r.data == b"the staff page"
         assert c.get("/pdf/custom?cls=1A").status_code == 404 and c.get("/pdf/classes/1A").status_code == 404
         assert c.get("/files/book/classes").status_code == 404 and c.get("/files/excel").status_code == 403
         with c.session_transaction() as s: assert s["who"] == "Mr Darren Lim"
@@ -326,6 +327,31 @@ def a_dropped_teacher_loses_the_teacher_routes_too():
         e = A.app.test_client()
         with e.session_transaction() as s: s["role"], s["who"] = "staff", "Mr Darren Lim"
         assert b"Code no longer valid" in e.get("/timetable").data
+
+@t
+def the_relief_home_is_the_staff_page():
+    with published(PUB):
+        c = staff("Mr Darren Lim")
+        r = c.get("/relief"); assert r.status_code == 200 and b"/static/relief.js" in r.data and b"Relief settings" in r.data, r.status_code; r.close()
+    assert all(os.path.exists(os.path.join(ROOT, "static", f)) for f in ("relief.html", "relief.js", "relief-settings.html", "relief-settings.js"))
+
+@t
+def staff_on_the_timetable_get_the_way_back_to_relief():
+    import copy
+    from ttgen import export as E
+    seen = []
+    def fake_render(model, view, app=None): seen.append(app); return f"page {len(seen)}"
+    old, E.render_html = E.render_html, fake_render
+    pub = copy.deepcopy(PUB); pub["views"] = {}
+    try:
+        with published(pub):
+            s, (tc, _) = staff("Mr Darren Lim", card="teacher"), signed_in("teacher", os.environ["TEACHER_CODE"])
+            assert s.get("/timetable").data == b"page 1" and tc.get("/timetable").data == b"page 2"
+            assert s.get("/timetable").data == b"page 1" and tc.get("/timetable").data == b"page 2" and len(seen) == 2   # each kept, apart
+    finally: E.render_html = old
+    assert seen[0]["home"] == "/relief" and seen[0]["homeLabel"] == "Relief" and seen[0]["mode"] == "teacher", seen[0]
+    assert seen[1]["home"] is None and seen[1]["mode"] == "teacher" and seen[0]["tabs"] == seen[1]["tabs"], seen[1]
+    assert set(pub["views"]) == {("view", "staff"), ("view", "teacher")}, list(pub["views"])
 
 @t
 def teacher_code_on_the_relief_card_is_refused_with_the_right_link():
@@ -381,7 +407,9 @@ def settings_rights():
             assert plain.get(url).status_code == 403 and plain.put(url, json=base()).status_code == 403
         r = plain.get("/relief/settings"); assert r.status_code == 403 and SETTINGS_DENIED.encode() in r.data
         r = mgmt.get("/relief/settings"); assert r.status_code == 403 and SETTINGS_DENIED.encode() in r.data
-        assert team.get("/relief/settings").status_code != 403 and com.get("/relief/settings").status_code != 403
+        for x in (team, com):
+            r = x.get("/relief/settings"); assert r.status_code == 200 and b"/static/relief-settings.js" in r.data, r.status_code; r.close()
+        r = team.get("/relief"); assert r.status_code == 200 and b"/static/relief.js" in r.data, r.status_code; r.close()
         tc, _ = signed_in("teacher", os.environ["TEACHER_CODE"])
         assert tc.get("/api/relief/settings").status_code == 401 and tc.put("/api/relief/settings", json=base()).status_code == 401
         assert tc.get("/relief/settings").status_code == 403 and tc.get("/api/relief/me").status_code == 401

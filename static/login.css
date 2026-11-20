@@ -7,12 +7,17 @@ body{min-height:100vh;background:var(--veil),url(/static/login-bg.jpg) center bo
 .muted{color:var(--muted)}.small{font-size:13px}a{color:var(--accent)}
 .err{color:var(--bad)}.warn{color:var(--warn);font-size:13px}
 
-/* front page: three choices across */
-.front{max-width:1000px;margin:0 auto;padding:13vh 24px 56px}
+/* front page: the choices in one row (four, or five with the heads' card), two rows on a tablet, one column on a phone */
+.front{max-width:1080px;margin:0 auto;padding:13vh 24px 56px}
+.front:has(.choice:nth-child(5)){max-width:1240px}
 .hero{text-align:center;margin-bottom:34px}
 .hero h1{font-size:34px;line-height:1.2;margin:0;letter-spacing:-.01em}
 .hero p{margin:6px 0 0;color:var(--muted);font-size:17px}
-.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px}
+.choices:has(> .choice:nth-child(4)){grid-template-columns:repeat(4,minmax(0,1fr))}
+.choices:has(> .choice:nth-child(5)){grid-template-columns:repeat(5,minmax(0,1fr));gap:16px}
+.choices:has(> .choice:nth-child(5)) .choice{padding:24px 16px 20px}
+.choices:has(> .choice:nth-child(5)) .choice img{width:96px;height:96px;border-radius:21px}
 .choice{display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;padding:28px 22px 22px;border:1px solid var(--line);border-radius:20px;
   background:var(--glass);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:0 12px 32px var(--shade);color:var(--ink);text-decoration:none;
   transition:transform .18s,box-shadow .18s,border-color .18s}
@@ -33,10 +38,15 @@ form{display:flex;flex-direction:column;gap:8px;margin:18px 0 8px}label{font-siz
 input{font:inherit;font-size:20px;letter-spacing:.12em;text-transform:uppercase;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink)}
 button{font:inherit;font-weight:600;padding:11px;border:0;border-radius:10px;background:var(--accent);color:#fff;cursor:pointer}
 
+@media (max-width:1100px) and (min-width:761px){
+  .choices:has(> .choice:nth-child(4)){grid-template-columns:repeat(2,minmax(0,1fr))}
+  .choices:has(> .choice:nth-child(5)){grid-template-columns:repeat(3,minmax(0,1fr))}
+}
 @media (max-width:760px){
   .front{padding:7vh 16px 40px}.hero{margin-bottom:22px}.hero h1{font-size:26px}
-  .choices{grid-template-columns:1fr;gap:12px}
+  .choices,.choices:has(> .choice:nth-child(4)),.choices:has(> .choice:nth-child(5)){grid-template-columns:1fr;gap:12px}
   .choice{flex-direction:row;text-align:left;align-items:center;gap:14px;padding:14px 16px;border-radius:16px}
-  .choice img{width:64px;height:64px;border-radius:14px}.choice b{font-size:16px}.choice .go{display:none}
+  .choices:has(> .choice:nth-child(5)) .choice{padding:14px 16px}
+  .choice img,.choices:has(> .choice:nth-child(5)) .choice img{width:64px;height:64px;border-radius:14px}.choice b{font-size:16px}.choice .go{display:none}
   .login{margin:7vh 16px;padding:22px 18px}
 }

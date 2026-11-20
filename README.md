@@ -14,6 +14,16 @@ code and download PDFs. The app does not generate timetables itself.
 | `TYPED_REQUEST_MODEL` (optional) | the committee, in Railway | the model that reads the words, `claude-opus-5-5` unless set (with the earlier `AI_API_KEY`, the model `AI_MODEL` names); `mock` is a practice reader that needs no key |
 | `STUDENT_CODE` | students | class timetables and **Build my timetable** (pick class and groups), PDFs of those |
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
+| personal teacher codes (made by the app) | one teacher each | the Relief module and everything the teacher code opens |
+
+**Relief.** The front page has a **Relief** card for a teacher's own personal code. Stage 1 gives each teacher a
+code and a Relief home (their name, their timetable, and for the relief team the way to the settings); asking for
+relief, planning relief and the reliefs a teacher covers come in the next stage. Relief reads the teachers from the
+published timetable, so publish first. **Relief settings** (the committee page's header link, or the Relief home for
+the relief team) hold management, the relief team, other staff who teach no lessons, the Flexi Adjunct Teachers' role,
+the relief rules in words, the limits the app checks, the times and the school calendar (terms, which week each term
+starts as, holidays). The committee downloads the personal teacher codes there as a list (CSV) or as slips to print.
+Like the personal student codes, they are made from each name and `SECRET_KEY`, and are off without it.
 
 **Preview before publishing.** On steps 8 and 9, **Preview as it will be published** opens the draft as the published timetable page would show it, in a new tab, for the committee only. A banner says it is a preview, how many lessons are waiting in Not placed (they are not on it) and whether a critical mistake still stops publishing. Nothing is published, and the preview has no PDF or file links.
 
@@ -402,6 +412,7 @@ node tests/teacherview.test.js          # step 4's teacher cards and the second 
 .venv/bin/python tests/test_combined.py # venues made of two or more rooms (add --full for the solve)
 .venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, an older workbook read as before
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
+.venv/bin/python tests/test_relief.py    # relief: personal teacher codes, people, settings, calendar, routes
 ```
 To try the **Ask in words** box without a key, start with `TYPED_REQUEST_MODEL=mock`: it understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".
 
@@ -424,6 +435,9 @@ and an earlier copy is kept. **Save to file** and **Load from file**, on step 7,
 |---|---|
 | `app.py` | routes: sign-in, the committee's editor, the downloads, check and publish, the timetable pages, PDFs |
 | `access.py` | access codes (committee, heads, teachers, students), personal codes, wrong-code limit (10 per 10 minutes per address) |
+| `relief/` | relief: the people it knows (the published teachers and other staff), personal teacher codes, the settings, the school calendar |
+| `static/relief.html`, `static/relief-settings.html` | the Relief home and the Relief settings page, with their scripts |
+| `tests/test_relief.py` | relief: codes, people, calendar, settings and the routes |
 | `checks.py` | will it fit: the sums on a setup before it is downloaded (class periods, breaks, rooms, teachers' time) |
 | `store.py` | the shared setup (version, change log, restore points) and the published timetable on the volume |
 | `sync.py` | setup changes as small operations: apply, merge, and what a head may change |

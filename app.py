@@ -644,11 +644,13 @@ def timetable():
     pub = store.published()
     if not pub:
         return page("Timetable", "<main class='login'><h1>Not published yet</h1><p class='muted'>The timetable committee has not published the timetable yet. Please check again later.</p><p><a href='/logout'>Sign out</a></p></main>")
-    r = "teacher" if role() in ("head", "staff") else role(); key = ("view", r)  # a head, and a teacher signed in with their own code, see what a teacher sees
+    r = "teacher" if role() in ("head", "staff") else role()   # a head, and a teacher signed in with their own code, see what a teacher sees
+    key = ("view", "staff" if role() == "staff" else r)          # ...but staff have their own copy, with the way back to Relief
     if key not in pub["views"]:
         view = "student" if r == "student" else "full"
+        home, label = {"committee": ("/", "Committee page"), "staff": ("/relief", "Relief")}.get(role(), (None, None))
         app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r),
-                       placeholder="Search a class" if r == "student" else None, home="/" if r == "committee" else None, homeLabel="Committee page")
+                       placeholder="Search a class" if r == "student" else None, home=home, homeLabel=label)
         pub["views"][key] = render_html(pub["model"], view, app=app_cfg)
     return Response(pub["views"][key], mimetype="text/html")
 
