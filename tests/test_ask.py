@@ -269,6 +269,12 @@ def recorded():
     ask.check = lambda *a, **k: (seen.append(a[4]), real(*a, **k))[1]
     def back(): ask.check = real
     return seen, back
+def recorded_judge():
+    """patch fixes.judge to record the fix of every candidate judged (the cheap judgement every candidate that passes the emptiness test gets) -> (list of [fix], restore)"""
+    real, seen = fixes.judge, []
+    fixes.judge = lambda m, spec, days, f, *a, **k: (seen.append([f]), real(m, spec, days, f, *a, **k))[1]
+    def back(): fixes.judge = real
+    return seen, back
 def judged(seen): return [(f["kind"], f.get("id") or f.get("key")) for fx in seen for f in fx]
 
 # ----------------------------------------------------------------------------------------------- trades
@@ -298,13 +304,18 @@ def test_trades_other():
         assert ask.trades(m, spec, days, pool, lesson(1), other=E1)["options"] == []   # the lesson's own teacher is not a partner
 
 def test_trades_stopped():
-    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], SUBJ, [E2]), lw(3, 2, L1, [CC], SUBJ, [E3])]
+    E4 = [t["name"] for t in SPEC["teachers"] if t.get("dept") == "EL"][3]
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], SUBJ, [E2]), lw(3, 2, L1, [CC], SUBJ, [E3]), dict(lw(4, 3, L1, ["2A"], SUBJ, [E4]), level="P2")]
     with fresh(rows) as (m, spec, days, pool):
-        whole = ask.trades(m, spec, days, pool, lesson(1)); assert len(whole["options"]) == 2 and whole["stopped"] is False and "were checked" not in whole["text"], whole
-        ask.TRADES = 1
+        whole = ask.trades(m, spec, days, pool, lesson(1)); assert len(whole["options"]) == 3 and whole["stopped"] is False and "were checked" not in whole["text"], whole
+        ask.TRADES = 3
         try: a = ask.trades(m, spec, days, pool, lesson(1))
         finally: ask.TRADES = 40
-        assert a["stopped"] is True and len(a["options"]) == 1 and a["text"].endswith("Only the first 1 possible trades were checked."), a
+        assert a["stopped"] is False and len(a["options"]) == 3, a   # three candidates, three judged: none left over
+        ask.TRADES = 2; seen, back = recorded()
+        try: a = ask.trades(m, spec, days, pool, lesson(1))
+        finally: ask.TRADES = 40; back()
+        assert len(seen) == 2 and a["stopped"] is True and len(a["options"]) == 2 and a["text"].endswith("Only the first 2 possible trades were checked."), a   # every judgement counts
 
 def test_trades_text_and_refusals():
     rows = [lw(1, 0, L1, [CA], SUBJ, []), lw(2, 1, L1, [CB], SUBJ, [E2])]
@@ -321,21 +332,21 @@ def fill(m, spec, days, pool, by, name, d, p): return ask.fill(m, spec, days, po
 def test_fill_class():
     with fresh(FILL, (5, 6)) as (m, spec, days, pool), most(1000):   # the cap would show only places and adds
         a = fill(m, spec, days, pool, "class", CA, 4, L1); assert a["options"] and all(o["state"] in helper.OK for o in a["options"]), a
-        kinds = [o["fixes"][0]["kind"] for o in a["options"]]; assert kinds == sorted(kinds, key=("place", "add", "move").index), kinds
+        kinds = [o["fixes"][0]["kind"] for o in a["options"]]; assert kinds[:3] == ["place", "add", "move"], kinds   # taken in turn: the pooled lesson first, then the add, then the move
         place = [o for o in a["options"] if o["fixes"][0]["kind"] == "place"]; assert place and {o["fixes"][0]["id"] for o in place} <= {5, 6} and all(o["fixes"][0]["d"] == 4 and o["fixes"][0]["p"] == L1 for o in place)
         assert place[0]["text"].startswith("Place "), place[0]
         add = [o for o in a["options"] if o["fixes"][0]["kind"] == "add"]; assert add and all(o["fixes"][0]["room"] for o in add), a   # a room from add_room
         assert all(CA in verify.planned_rows(spec)[fixes._key(o["fixes"][0]["key"])]["classes"] for o in add)
         move = [o for o in a["options"] if o["fixes"][0]["kind"] == "move"]; assert move, a
-        for o in move: x = next(x for x in m["lessons"] if x["id"] == o["fixes"][0]["id"]); assert f"Leaves {days[x['d']]} period {x['p']} empty." in o["disturbs"] and CA in x["classes"], o
+        for o in move: x = next(x for x in m["lessons"] if x["id"] == o["fixes"][0]["id"]); assert (f"Leaves {days[x['d']]} period {x['p']} empty." if x["n"] == 1 else f"Leaves {days[x['d']]} periods {x['p']} to {x['p'] + x['n'] - 1} empty.") in o["disturbs"] and CA in x["classes"], o
         assert a["text"] == f"{len(a['options']) + a['more']} lessons could go here." and a["title"] == f"{CA} · {days[4]} period {L1} · empty", a["text"]
         n = len(stored())
         for o in a["options"]:   # the board accepts each as it stands
             draft.fix(o["fixes"][0]); draft.undo(); assert len(stored()) == n
 
 def test_fill_overrun():
-    with fresh(FILL, (5, 6)) as (m, spec, days, pool):
-        seen, back = recorded()
+    with fresh(FILL, (5, 6)) as (m, spec, days, pool), most(1000):
+        seen, back = recorded_judge()
         try:
             fill(m, spec, days, pool, "class", CA, 0, L1 + 1)   # the second period of a two-period lesson would hold lesson 2
             assert ("place", 5) not in judged(seen) and ("move", 3) not in judged(seen) and ("place", 6) in judged(seen), judged(seen)
@@ -347,7 +358,7 @@ def test_fill_overrun():
             assert ("move", 7) not in judged(seen), judged(seen)
             seen.clear(); fill(m, spec, days, pool, "class", CA, 2, L1 + 4); assert ("move", 7) in judged(seen), judged(seen)   # and where it is free the band is tried
         finally: back()
-        assert a["text"] == "Nothing fits here without a clash or a broken rule." or a["text"]
+        assert a["text"] == "Nothing fits here without a clash or a broken rule.", a["text"]
 
 def test_fill_teacher():
     with fresh(FILL, (5, 6)) as (m, spec, days, pool), most(1000):
@@ -369,6 +380,29 @@ def test_fill_room():
         assert all(o["fixes"][0]["kind"] == "room" and o["fixes"][0]["room"] == ROOMS[0] and o["state"] in helper.OK for o in a["options"]), a
         assert got[1]["fixes"][0]["group"] == "Entire Class" and got[2]["fixes"][0]["group"] == g2["code"], got
         assert a["text"] == "2 lessons could go here.", a["text"]
+
+def test_fill_room_rulings():
+    art = next(r for r in SPEC["lessons"] if r["level"] == LEVEL and r.get("code") == "Entire Class" and r.get("room_kind") not in (None, "", "classroom") and r.get("teachers") and len(r["classes"]) == 1)
+    rows = [lw(1, 0, L1, art["classes"], art["subject"], art["teachers"][:1]), lw(2, 0, L1, [x for x in (CA, CB, CC) if x not in art["classes"]][:1], SUBJ, [E1], room="Mystery Room")]
+    with fresh(rows) as (m, spec, days, pool):
+        assert fixes._room_kind(m, spec, m["lessons"][0]) == art["room_kind"] != "classroom"
+        a = fill(m, spec, days, pool, "room", ROOMS[0], 0, L1); ids = {o["fixes"][0]["id"] for o in a["options"]}
+        assert 1 not in ids and 2 in ids, a   # a lesson that asks for another kind of room is not offered this classroom; one whose room is not on the setup's list is
+
+def test_fill_interleaves_and_judges_before_it_words():
+    rows = [lw(i, 1 + (i - 1) // 3, L1 + (i - 1) % 3 + (0 if (i - 1) % 3 < 2 else 1), [CA], SUBJ2, [E1], ) for i in range(1, 7)] + [lw(i, 0, L1, [CA], SUBJ, [E1]) for i in (7, 8, 9)]
+    for i, t in zip(range(1, 10), (E1, E2, E3, E1, E2, E3, E1, E2, E3)): rows[i - 1]["teachers"] = [t]
+    with fresh(rows, (7, 8, 9)) as (m, spec, days, pool):
+        seen, back = recorded()
+        try: a = fill(m, spec, days, pool, "class", CA, 4, L1)
+        finally: back()
+        kinds = [o["fixes"][0]["kind"] for o in a["options"]]
+        assert kinds == ["place", "add", "move", "place", "add", "move", "place", "add"], kinds
+        assert len(seen) == ask.MOST and a["more"] > 0 and a["text"] == f"{len(a['options']) + a['more']} lessons could go here.", (len(seen), a["more"])   # check ran for the 8 shown only
+        with most(3): assert [o["fixes"][0]["kind"] for o in fill(m, spec, days, pool, "class", CA, 4, L1)["options"]] == ["place", "add", "move"]
+    with fresh(FILL, (5, 6)) as (m, spec, days, pool), most(1000):   # a lesson of two periods leaves two
+        a = fill(m, spec, days, pool, "class", CA, 4, L1)
+        assert any(o["disturbs"][0].startswith(f"Leaves {days[1]} periods {L1} to {L1 + 1} empty.") for o in a["options"] if o["fixes"][0]["kind"] == "move" and o["fixes"][0]["id"] == 3), a
 
 def test_fill_unknown():
     rows = [lw(1, 0, L1, ["9Z"], SUBJ, [UNKNOWN], room="Mystery Room"), lw(2, 1, L1, [CA], SUBJ, [E1])]
@@ -405,7 +439,11 @@ def test_free_counts():
 
 def test_free_one_of_each():
     m, spec, days, pool = now(); rows = [x for x in m["lessons"] if x["id"] != 10]
-    one = ask.free(dict(m, lessons=rows), spec, days, pool, dict(kind="place", by="room", name=ROOMS[0], d=0, p=L1)); assert " and " in one["text"] and one["text"].endswith(f"are free on {days[0]} period {L1}.")
+    one = ask.free(dict(m, lessons=rows), spec, days, pool, dict(kind="place", by="room", name=ROOMS[0], d=0, p=L1)); bt, br = free_now(dict(m, lessons=rows), 0, L1)
+    assert one["text"] == f"{len([t for t in SPEC['teachers'] if t['name'] not in bt])} teachers and {len([v for v in SPEC['venues'] if v['room'] not in br])} rooms are free on {days[0]} period {L1}.", one["text"]
+    two = [lw(1, 0, L1, [CA], SUBJ, [E1], room=ROOMS[0])]; tiny = dict(SPEC, teachers=[t for t in SPEC["teachers"] if t["name"] in (E1, E2)], venues=[v for v in SPEC["venues"] if v["room"] in ROOMS])
+    with fresh(two) as (m2, spec2, days2, pool2):
+        o = ask.free(m2, tiny, days2, pool2, dict(kind="place", by="class", name=CA, d=0, p=L1)); assert o["text"] == f"1 teacher and 1 room are free on {days2[0]} period {L1}.", o["text"]
 
 # ----------------------------------------------------------------------------------------------- rooms: the Task 3 gaps
 def test_rooms_right_kind_before_another_kind():

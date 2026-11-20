@@ -217,11 +217,12 @@ def trades(m, spec, days, pool, sub, other=None):
             rb = fixes.rows_of_key(both, kb)
             if any(x_ in r["teachers"] for r in rb): continue
             if count >= TRADES: stopped = True; break
+            count += 1   # every judgement counts, one that comes back refused too: the limit bounds the work
             ids = lambda rs, t: len({r["id"] for r in rs if t in r["teachers"]})
             extra = [f"It changes {ids(ra, x_)} {'lesson' if ids(ra, x_) == 1 else 'lessons'} of {name_a} and {ids(rb, y)} of {verify._name(kb)}."]
             o = check(*P, [dict(kind="trade", a=ka, b=verify._kstr(kb), x=x_, y=y)], ctx, extra)
             if o is None: continue
-            count += 1; (good if o["state"] in helper.OK else bad).append(o)
+            (good if o["state"] in helper.OK else bad).append(o)
         if stopped: break
     out = (good + bad)[:MOST]
     text = f"{_plural(len(good), 'trade is', 'trades are')} possible for {x_}." + (f" {len(bad)} more would land with a problem." if bad else "") if good else \
@@ -236,8 +237,8 @@ def _by_id(rows):
 
 def fill(m, spec, days, pool, sub):
     """an empty period of a class, a teacher or a room (sub, a place) -> answer: the lessons that could go there, judged ok or prefer only: those of the pool as a
-    place, the step 5 lessons below plan as an add (room from fixes.add_room), those elsewhere as a move ("Leaves {day} period {p} empty." in disturbs), each by
-    helper.rank. By class or teacher a candidate is tried only when its periods are inside the day, lesson time and hold no lesson of its classes; by room: the
+    place, the step 5 lessons below plan as an add (room from fixes.add_room), those elsewhere as a move ("Leaves {day} period {p} empty." in disturbs), each source by
+    helper.rank and the shown options taken in turn from each (judged by fixes.judge first, check only for those shown). By class or teacher a candidate is tried only when its periods are inside the day, lesson time and hold no lesson of its classes; by room: the
     lessons that cover the period with no room or a room of another kind than they ask (or not on the setup's list), as a room fix to this room"""
     if not isinstance(sub, dict) or sub.get("kind") != "place": raise ValueError(EMPTY)
     by, name, d, p = sub["by"], sub["name"], sub["d"], sub["p"]; P = (m, spec, days, pool); ctx = fixes._ctx(m); busy = ctx["busy"]; cand = []   # (fix, what else it disturbs)
@@ -256,24 +257,32 @@ def fill(m, spec, days, pool, sub):
         for i, rs in _by_id(m["lessons"]).items():
             a, row = rs[0], next((x for x in rs if mine(x)), None)
             if row and (a["d"], a["p"]) != (d, p) and empty({c for x in rs for c in x["classes"]}, a["n"], rs, own=i):
-                cand.append((dict(kind="move", id=i, d=d, p=p), [f"Leaves {fixes.when(days, a['d'], a['p'])} empty."] + typed._band(m, i, [row])))
+                cand.append((dict(kind="move", id=i, d=d, p=p), [f"Leaves {days[a['d']]} {'period ' + str(a['p']) if a['n'] == 1 else 'periods ' + str(a['p']) + ' to ' + str(a['p'] + a['n'] - 1)} empty."] + typed._band(m, i, [row])))
     elif by == "room":
-        mine = (m["room_ix"].get(name) or {}).get("kind")
+        mine = (m["room_ix"].get(name) or {}).get("kind"); listed = {str(v.get("room")) for v in spec.get("venues") or [] if isinstance(v, dict)}   # the model also holds a room only a lesson names
         for x in m["lessons"]:
             if not (x["d"] == d and x["p"] <= p < x["p"] + x["n"]) or x["room"] == name: continue
-            asks = fixes._room_kind(m, spec, x); has = (m["room_ix"].get(x["room"]) or {}).get("kind")
-            if (fixes._no_room(x["room"]) or x["room"] not in m["room_ix"] or (asks and has != asks)) and not (asks and mine != asks): cand.append((dict(kind="room", id=x["id"], group=x["group"], room=name), []))
-    good = []
+            asks = fixes._room_kind(m, spec, x) if fixes._no_room(x["room"]) or x["room"] in listed else (verify.planned_rows(spec).get(fixes._row_key(x)) or {}).get("room_kind"); has = (m["room_ix"].get(x["room"]) or {}).get("kind")
+            if (fixes._no_room(x["room"]) or x["room"] not in listed or (asks and has != asks)) and not (asks and mine != asks): cand.append((dict(kind="room", id=x["id"], group=x["group"], room=name), []))
+    ctx_ok, lists = [], collections.defaultdict(list)   # judged by fixes.judge only (one shared index); check, which words and weighs an option, runs for the ones shown
     for f, extra in cand:
-        o = check(*P, [f], ctx, extra)
-        if o is not None and o["state"] in helper.OK: good.append((("place", "add", "move", "room").index(f["kind"]), helper.rank(m, spec, days, dict(fixes=[f], moved=1, state=o["state"])), o))
-    good.sort(key=lambda g: g[:2]); out = [g[2] for g in good[:MOST]]
-    return _answer(*P, sub, f"{_plural(len(good), 'lesson could', 'lessons could')} go here." if good else "Nothing fits here without a clash or a broken rule.", out, len(good) - len(out))
+        j = fixes.judge(m, spec, days, f, ctx, pool=pool)
+        if j["state"] in helper.OK: lists[f["kind"]].append((helper.rank(m, spec, days, dict(fixes=[f], moved=1, state=j["state"])), f, extra))
+    for k in lists: lists[k].sort(key=lambda g: g[0])
+    turns = [lists[k] for k in ("place", "add", "move", "room")]   # taken in turn: a place, an add, a move, a second place and so on, a source that has run out skipped
+    order = [t[r] for r in range(max(map(len, turns), default=0)) for t in turns if r < len(t)]
+    out, seen = [], 0
+    for _, f, extra in order:
+        if len(out) >= MOST: break
+        seen += 1; o = check(*P, [f], ctx, extra)
+        if o is not None and o["state"] in helper.OK: out.append(o)
+    more = len(order) - seen; n = len(out) + more
+    return _answer(*P, sub, f"{_plural(n, 'lesson could', 'lessons could')} go here." if n else "Nothing fits here without a clash or a broken rule.", out, more)
 
 # ----------------------------------------------------------------------------------------------- who is free
 def free(m, spec, days, pool, sub):
     """who is free in the periods of a place, or of a lesson (its day, period and length) -> answer with no options: lines one a department of the teachers
-    on no lesson then ("Mathematics: Bala Nair, Chen Wei"), then one a kind of the rooms in use by none (and none a rain room), each in the setup's order"""
+    on no lesson then ("Mathematics: Bala Nair, Chen Wei"), then one a kind of the rooms in use by none (and none a rain room): the lines sorted by department or kind, the names in each in the setup's order"""
     if not isinstance(sub, dict) or sub.get("kind") not in ("lesson", "place"): raise ValueError("Point at a lesson or a place.")
     P = (m, spec, days, pool)
     if sub["kind"] == "place": d, p, n = sub["d"], sub["p"], 1
