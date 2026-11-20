@@ -467,6 +467,25 @@ def test_a_busy_teacher_needs_force_with_the_reason():
     raises(ValueError, lambda: draft.fix(rw), rwhy); raises(ValueError, lambda: draft.fix(dict(rw, force=True, why="x")), rwhy)
     draft.fix(dict(rw, force=True, why=rwhy)); assert "room" in card(1)["marks"] and "room" in card(5)["marks"]
 
+def test_a_teacher_who_breaks_a_must_rule_needs_force_with_the_rules_sentence():
+    """the page's teacher list says why (the rule's sentence) and asks "Give it anyway?": the server makes the change only with force and that very sentence"""
+    import copy
+    sp = copy.deepcopy(SPEC); sp["rules"] = [dict(scope="School", target="Whole school", rule="Max periods in a row", number=1, strength="Must", week="Both", day="All")]
+    assert c.put("/api/setup", json=sp).status_code == 200
+    try:
+        save_draft([dict(id=1, day=DAYS[0], p=L1, n=1, level=LEVEL, classes=[C1], subject=SUBJ, teachers=[TEACHERS[0]], room=ROOMS[0]),
+                    dict(id=2, day=DAYS[0], p=L1 + 1, n=1, level=LEVEL, classes=[CLASSES[1]], subject=SUBJ2, teachers=[FREE], room=ROOMS[1])])   # FREE teaches the period after lesson 1
+        assert next(x for x in draft.lesson(1)["teachers"] if x["name"] == FREE)["free"]   # no clash: the list offers them as free
+        f = dict(kind="teacher", key=KEY1, teachers=[FREE]); why = None
+        try: draft.fix(f)
+        except ValueError as e: why = str(e)
+        assert why and why.startswith("Rule School \u00b7 Whole school \u00b7 Max periods in a row: ") and FREE in why, why
+        raises(ValueError, lambda: draft.fix(dict(f, force=True)), why); raises(ValueError, lambda: draft.fix(dict(f, force=True, why="Another reason.")), why); assert fixes_stored() == []
+        j = draft.fix(dict(f, force=True, why=why)); assert len(j["fixes"]) == 1 and taught(1) == [[FREE]] and not {"force", "why"} & set(fixes_stored()[0])
+        assert any(w["kind"] == "rule" and FREE in w["text"] for w in j["warnings"])   # the broken rule is then on the list of warnings
+    finally:
+        assert c.put("/api/setup", json=SPEC).status_code == 200; save_draft(TR)
+
 def test_room_for_all_the_groups_lessons_is_one_undo():
     save_draft(TR); R = "1-03"; a = dict(kind="room", id=1, group=ENTIRE, room=R, all=True)
     j = draft.fix(a); fl = fixes_stored(); assert len(fl) == 2 and [f["id"] for f in fl] == [1, 6] and len({f["batch"] for f in fl}) == 1 and fl[0]["batch"]

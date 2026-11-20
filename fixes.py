@@ -659,7 +659,8 @@ def choices(m, spec, days, lesson_id, group=None, pool=()):
     teachers, rooms). The row is the lesson's row of group (default its first), on the timetable or in the pool. n_lessons: the lesson ids
     the row's key has on the timetable and in the pool. teachers: every teacher of the setup once, dict(name, short, free, doing, rank), the
     free ones first, each by rank (0 step 5's teachers of the key, 1 on a lesson of the subject or its card, 2 of the subject's department,
-    3 anyone) then the setup's order; free: on no lesson but those of the key on the timetable in any period of any of them; doing: the first
+    3 anyone) then the setup's order; free: on no row but the key's own on the timetable in any period of any of its lessons (a teacher on another group of the same
+    lesson is not free); doing: the first
     lesson they are on then, '{what} on {day} period {p}', else ''. rooms: every venue once, dict(room, kind, right, free, holding): right
     is the kind step 5 asks for or a home room of the row's classes; free: a room fix putting this row there would not be refused for the room
     (Busy._why, this lesson set aside; always free for a lesson in the pool); holding: what of the first lesson in it (or having it as a rain
@@ -669,13 +670,13 @@ def choices(m, spec, days, lesson_id, group=None, pool=()):
     row = rows[0] if group is None else next((x for x in rows if x["group"] == group), None)
     if row is None: raise ValueError(f"There is no row of {group} in that lesson.")
     k = _row_key(row); b = Busy(m); e = verify.planned_rows(spec).get(k)
-    held = rows_of_key(m["lessons"], k); placed = {x["id"] for x in held}
+    held = rows_of_key(m["lessons"], k)
     n_lessons = len({x["id"] for x in rows_of_key(list(m["lessons"]) + list(pool), k)})
     order = sorted({x["id"]: x for x in held}.values(), key=lambda x: (x["d"], x["p"], x["id"]))
     def doing(t):
         for x in order:
             for q in _span(x):
-                y = next((y for y in b.at.get(("t", t, x["d"], q), ()) if y["id"] not in placed), None)
+                y = next((y for y in b.at.get(("t", t, x["d"], q), ()) if _row_key(y) != k), None)   # any row but the key's own: another group of the same lesson counts, its teacher is not free then
                 if y: return f"{what(y)} on {when(days, y['d'], y['p'])}"
         return ""
     on, dept = _on_card(spec, (e["subject"] if e else row["subject"]).strip()); step5 = set(e["teachers"]) if e else set()

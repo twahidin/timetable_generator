@@ -641,6 +641,16 @@ t("keyName: a class's subject with a colon, and a group", () => {
   assert.strictEqual(Board.keyName(null, "G:1MAA1"), "group 1MAA1");
 });
 
+t("ruleRefusal: the server's sentence for a rule that would be broken, and nothing else", () => {
+  assert.strictEqual(Board.ruleRefusal("Rule School · Whole school · Max periods in a row: Jasper Goh teaches 12 periods in a row on Even Fri, more than 9."), true);
+  assert.strictEqual(Board.ruleRefusal("Rule Room · Hall · Not available: Hall is not available."), true);
+  assert.strictEqual(Board.ruleRefusal("Jasper Goh is teaching group 2ELP1 then."), false);
+  assert.strictEqual(Board.ruleRefusal("A1-01 is in use then."), false);
+  assert.strictEqual(Board.ruleRefusal("That changes nothing."), false);
+  assert.strictEqual(Board.ruleRefusal("Rule"), false);
+  assert.strictEqual(Board.ruleRefusal(""), false);
+  assert.strictEqual(Board.ruleRefusal(null), false);
+});
 t("busyRefusal: only the server's two busy sentences, for that teacher or room", () => {
   assert.strictEqual(Board.busyRefusal("Jasper Goh is teaching Character and Citizenship Education for 3D then.", "Jasper Goh", "teacher"), true);
   assert.strictEqual(Board.busyRefusal("Jasper Goh is teaching group 2ELP1 then.", "Jasper Lim", "teacher"), false);

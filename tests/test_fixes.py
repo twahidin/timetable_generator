@@ -948,4 +948,18 @@ def trade_pool():
     fixes.apply_one(L, trade(), SP, DAYS, touched=touched, pool=pool)
     assert pool[0]["teachers"] == [T[1]] and touched == {1, 2, 3, 4, 5, 6} and all(x["teachers"] == ([T[1]] if x["classes"] == [A] else [T[0]]) for x in L)
 
+@t
+def a_teacher_on_another_group_of_the_same_lesson_is_not_free():
+    sp, L = one_block(); names = [x["name"] for x in SP["teachers"]]; ta, tb, tc = names[0], names[1], names[2]
+    L[0]["teachers"], L[1]["teachers"], L[2]["teachers"] = [ta], [tb], []   # one lesson (id 7), three groups at the same time
+    L.append(lesson(8, 1, 0, 2, L[0]["classes"], L[0]["subject"], L[0]["group"], [ta], level=L[0]["level"], block=L[0]["block"]))   # the first group's other lesson
+    m, sp = model_with(L); out = fixes.choices(m, sp, DAYS, 7, L[0]["group"]); T = {x["name"]: x for x in out["teachers"]}
+    assert out["n_lessons"] == 2
+    assert T[tb]["free"] is False and L[1]["group"] in T[tb]["doing"], T[tb]   # on another group of this very lesson: not free then
+    assert T[ta]["free"] is True and T[ta]["doing"] == ""                      # the row's own teacher is not busy with the row's own lessons
+    assert T[tc]["free"] is True                                                # on no lesson at all
+    L2 = [dict(x) for x in L]; L2[1]["teachers"] = [ta, tb]                     # the row's own teacher also on the other group: busy there too
+    m2, sp2 = model_with(L2); T2 = {x["name"]: x for x in fixes.choices(m2, sp2, DAYS, 7, L2[0]["group"])["teachers"]}
+    assert T2[ta]["free"] is False and L2[1]["group"] in T2[ta]["doing"]
+
 print(f"{n} checks passed")
