@@ -221,7 +221,7 @@ async function openServer(srv, step) {
   await useKind(srv.spec);
   unpick(); SYNC.held = null; SYNC.v = srv.v; SYNC.base = Sync.clone(srv.spec);
   S.spec = Sync.clone(srv.spec); LIST_KEYS.forEach(k => S.spec[k] = S.spec[k] || []); defaultRoles(S.spec);
-  VenueView.syncKinds(S.spec);   // a combined venue's kind follows its rooms (a workbook may hold another): written with the next change
+  if (!(isHead() && !S.practice)) VenueView.syncKinds(S.spec);   // a combined venue's kind follows its rooms (a workbook may hold another): written with the next change. Not on a department head's page: the server refuses a head's change to step 1
   if (step != null) S.step = step;
   ensureDays(); S.undo = []; S.redo = []; S.last = null; S.snap = null; save({ quiet: true });
 }

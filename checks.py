@@ -260,10 +260,16 @@ def _loads_and_rooms(spec, P):
         for k, n in need.items():
             if n > kinds.get(k, 0): out.append(("venues", f"Band {u['name']} needs {n} '{k}' rooms at once; Venues has {kinds.get(k, 0)}: "
                                                           "the extra groups get a room marked TBC, for the committee to find."))
-    # a combined venue no lesson is limited to: every group that may use it fits one of its rooms, so none is given it
+    # a combined venue no lesson is limited to: no lesson has its kind, none may use it, or every group that may use it fits one of
+    # its rooms. Either way none is given it
     rows = [P.allowed(r, u) for u in P.units for r in u["rows"]]
     for v in P.parts:
-        if not any(v in E and all(x in P.parts for x in E) for kind, E, _, _ in rows if kind == P.room_kind[v]):
+        mine = [E for kind, E, _, _ in rows if kind == P.room_kind[v]]
+        if not mine:
+            out.append(("venues", f"No lesson uses {v}'s kind ('{P.room_kind[v]}'), so nobody will be given it. Check its rooms' kind on step 1, or the room kind of the subjects meant for it on step 3."))
+        elif not any(v in E for E in mine):
+            out.append(("venues", f"No lesson may use {v}: no '{P.room_kind[v]}' group is both kept to it and seated by it, so nobody will be given it. Check its For box and seats on step 1."))
+        elif not any(v in E and all(x in P.parts for x in E) for E in mine):
             out.append(("venues", f"No lesson is limited to {v}: every group that may use it also fits one of its rooms, so each will be given one room. Check the seats on step 1."))
     # groups bigger than every room they may use: the solver still gives them one of those rooms (oversize), so a person must decide
     big = collections.defaultdict(list)
