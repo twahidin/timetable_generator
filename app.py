@@ -441,6 +441,15 @@ def draft_lesson():
     if request.args.get("id") is None: return {"error": "Say which lesson."}, 400
     return _checked(lambda: draft.lesson(request.args.get("id"), request.args.get("group") or None), sentences=True)
 
+@app.get("/api/draft/about")
+@need("committee")
+def draft_about():
+    """a read-only look-up about one lesson (kind=lesson&id, optionally group and teacher) or empty period (kind=place&by&name&d&p), q one of ask.QUESTIONS; other: the
+    teacher a trade is with. What the page sent is cleaned by ask.subject: a number that is not one stays text and is refused there with its sentence"""
+    a = request.args; num = lambda v: int(v) if v and re.fullmatch(r"-?\d{1,9}", v) else v
+    raw = dict(kind=a.get("kind"), id=num(a.get("id")), group=a.get("group") or None, teacher=a.get("teacher") or None, by=a.get("by"), name=a.get("name"), d=num(a.get("d")), p=num(a.get("p")))
+    return _checked(lambda: draft.about(a.get("q"), raw, a.get("other") or None), sentences=True)
+
 @app.post("/api/draft/fix")
 @need("committee")
 def draft_fix():

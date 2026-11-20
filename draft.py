@@ -7,6 +7,7 @@ from ttgen.database import write_db
 from ttgen.spec import typed_rules
 from ttgen import choices, verify
 import store, sync, fixes, helper, typed
+import ask as lookups   # the look-ups of Ask about this (this module has its own ask)
 
 DIR = os.path.join(store.DATA, "draft")
 ANSWERS = ("step5", "open", "met")
@@ -367,6 +368,16 @@ def lesson(lesson_id, group=None):
     try: lid = int(lesson_id)
     except (TypeError, ValueError): raise ValueError(NOT_FOUND_LESSON)
     return fixes.choices(m, m["checked_setup"], m["days"], lid, group, fx["pool"])
+
+def about(q, raw_subject, other=None):
+    """a read-only look-up about one lesson or empty period of the draft as it is now (lookups.QUESTIONS), q one of them -> the answer of ask.py with the cleaned
+    subject and the stamp of the draft it was made for. The stamp is read before the model, so a fix made in between makes the answer older, never newer. other: for
+    trades, the teacher to trade with. ValueError(sentence) for an unknown question or a subject that is not there"""
+    if q not in lookups.QUESTIONS: raise ValueError("That question is not known.")
+    s = stamp(); m, rec, fx = _now(); spec, days, pool = m["checked_setup"], m["days"], fx["pool"]; sub = lookups.subject(m, pool, raw_subject); P = (m, spec, days, pool)
+    if q == "here": a = dict(text="", options=[], more=0, stopped=False, **lookups.here(*P, sub))
+    else: a = getattr(lookups, q)(*P, sub, **({"other": other} if q == "trades" else {}))
+    return dict(a, subject=sub, stamp=s)
 
 def board():
     """the whole draft as cards for the board -> dict(days, NP, times, levels, codes, subjects, palette, cards, unplaced, short); one card per lesson id, with every row

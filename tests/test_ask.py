@@ -1,5 +1,5 @@
 """Plain-assert tests for the look-ups about one lesson (ask.py): .venv/bin/python tests/test_ask.py"""
-import io, os, secrets, sys, tempfile
+import contextlib, io, os, secrets, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODE = secrets.token_hex(4)
@@ -8,6 +8,7 @@ os.environ.update(DATA_DIR=DATA, SECRET_KEY=secrets.token_hex(16), AI_PROVIDER="
 sys.path.insert(0, ROOT)
 import openpyxl  # noqa: E402
 import app as A, ask, draft, fixes, helper, store, typed  # noqa: E402
+from ttgen import verify  # noqa: E402
 from ttgen.template import write_template  # noqa: E402
 
 c = A.app.test_client()
@@ -239,6 +240,227 @@ def test_cap():
     assert len(free) + a["more"] == len(cands), (len(free), a["more"], len(cands))
     r = ask.moves(m, spec, days, pool, lesson(POOLED)); assert len([o for o in r["options"] if o["state"] != "no"]) <= ask.MOST
     if r["more"]: assert len(r["options"]) == ask.MOST
+
+# ----------------------------------------------------------------------------------------------- a fresh draft for one test (the base draft is put back after it)
+def up(rows, lifts=()):
+    r = c.post("/api/draft", data=dict(setup=(io.BytesIO(setup_bytes(SPEC)), "setup.xlsx"), timetable=(io.BytesIO(workbook(rows)), "timetable.xlsx"), replace="1"), content_type="multipart/form-data"); assert r.status_code == 200, r.get_json()
+    for i in lifts: draft.fix(dict(kind="lift", id=i))
+
+@contextlib.contextmanager
+def fresh(rows, lifts=()):
+    up(rows, lifts)
+    try: yield now()
+    finally: up(ROWS, (POOLED,))
+
+E1, E2, E3 = [t["name"] for t in SPEC["teachers"] if t.get("dept") == "EL"][:3]
+MT_SUBJ = next(s["subject"] for s in SPEC["subjects"] if s.get("dept") == "MT")
+KA, KB = f"C:{CA}:{SUBJ}", f"C:{CB}:{SUBJ}"
+def lw(i, d, p, classes, subj, teachers, n=1, **kw): return dict(id=i, day=DAYS[d], p=p, n=n, level=LEVEL, classes=classes, subject=subj, teachers=teachers, **kw)
+def trade(a, b, x, y): return dict(kind="trade", a=a, b=b, x=x, y=y)
+def key_name(k): return verify._name(fixes._key(k))
+@contextlib.contextmanager
+def most(n):
+    old = ask.MOST; ask.MOST = n
+    try: yield
+    finally: ask.MOST = old
+def recorded():
+    """patch ask.check to record the fixes of every candidate judged -> (list the fixes are appended to, a restore function)"""
+    real, seen = ask.check, []
+    ask.check = lambda *a, **k: (seen.append(a[4]), real(*a, **k))[1]
+    def back(): ask.check = real
+    return seen, back
+def judged(seen): return [(f["kind"], f.get("id") or f.get("key")) for fx in seen for f in fx]
+
+# ----------------------------------------------------------------------------------------------- trades
+def test_trades_found():
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], SUBJ, [E2])]
+    with fresh(rows) as (m, spec, days, pool):
+        a = ask.trades(m, spec, days, pool, lesson(1)); assert ask.TRADES == 40
+        assert len(a["options"]) == 1, a; o = a["options"][0]
+        assert o["fixes"] == [trade(KA, KB, E1, E2)] and o["apply"] == "yes" and o["state"] in helper.OK and o["text"] == helper.say(m, spec, days, o["fixes"][0]), o
+        assert f"It changes 1 lesson of {key_name(KA)} and 1 of {key_name(KB)}." in o["disturbs"], o["disturbs"]
+        assert a["stopped"] is False and a["more"] == 0 and a["text"] and a["title"].startswith(fixes.what(m["lessons"][0]) + " · "), a
+        n = len(stored()); r = c.post("/api/draft/fix", json=o["fixes"][0]); assert r.status_code == 200 and len(stored()) == n + 1, r.get_json()
+        assert stored()[-1]["kind"] == "trade"; assert c.post("/api/draft/undo").status_code == 200 and len(stored()) == n
+
+def test_trades_meet_at_once():
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 0, L1, [CB], SUBJ, [E2])]   # both teach at the same time: each simply takes the other's class
+    with fresh(rows) as (m, spec, days, pool):
+        a = ask.trades(m, spec, days, pool, lesson(1)); assert [o["fixes"][0]["y"] for o in a["options"]] == [E2] and a["options"][0]["apply"] == "yes", a
+
+def test_trades_other():
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], MT_SUBJ, [T0]), lw(3, 2, L1, [CC], SUBJ2, [E2])]
+    with fresh(rows) as (m, spec, days, pool):
+        a = ask.trades(m, spec, days, pool, lesson(1), other=T0)
+        assert a["options"] and all(o["fixes"][0]["y"] == T0 and o["fixes"][0]["x"] == E1 for o in a["options"]), a
+        assert any(o["fixes"][0]["b"] == f"C:{CB}:{MT_SUBJ}" for o in a["options"]), a   # a key of any subject
+        assert not any(o["fixes"][0]["y"] == T0 for o in ask.trades(m, spec, days, pool, lesson(1))["options"])   # without other, a teacher of another department is not tried
+        assert ask.trades(m, spec, days, pool, lesson(1), other=E1)["options"] == []   # the lesson's own teacher is not a partner
+
+def test_trades_stopped():
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 1, L1, [CB], SUBJ, [E2]), lw(3, 2, L1, [CC], SUBJ, [E3])]
+    with fresh(rows) as (m, spec, days, pool):
+        whole = ask.trades(m, spec, days, pool, lesson(1)); assert len(whole["options"]) == 2 and whole["stopped"] is False and "were checked" not in whole["text"], whole
+        ask.TRADES = 1
+        try: a = ask.trades(m, spec, days, pool, lesson(1))
+        finally: ask.TRADES = 40
+        assert a["stopped"] is True and len(a["options"]) == 1 and a["text"].endswith("Only the first 1 possible trades were checked."), a
+
+def test_trades_text_and_refusals():
+    rows = [lw(1, 0, L1, [CA], SUBJ, []), lw(2, 1, L1, [CB], SUBJ, [E2])]
+    with fresh(rows) as (m, spec, days, pool):
+        a = ask.trades(m, spec, days, pool, lesson(1)); assert a["options"] == [] and a["text"], a   # nobody on the lesson to trade
+        raises(ValueError, lambda: ask.trades(m, spec, days, pool, dict(kind="place", by="class", name=CA, d=0, p=0)), "Point at a lesson for this.")
+
+# ----------------------------------------------------------------------------------------------- filling a period
+FILL = [lw(1, 0, L1, [CA], SUBJ, [E1]), lw(2, 0, L1 + 2, [CA], SUBJ2, [E2]), lw(3, 1, L1, [CA], SUBJ, [E1], n=2), lw(4, 2, L1, [CA], SUBJ2, [E2]),
+        lw(5, 0, L1, [CA], SUBJ, [E3], n=2), lw(6, 0, L1, [CA], SUBJ2, [T0]),
+        lw(7, 3, L1, [CA, CB], "Chinese Language", [T0], block=f"{LEVEL} Mother Tongue", group="1CL1"), lw(8, 2, L1 + 1, [CB], SUBJ, [E2])]   # 5 and 6 are lifted: waiting in Not placed
+def fill(m, spec, days, pool, by, name, d, p): return ask.fill(m, spec, days, pool, dict(kind="place", by=by, name=name, d=d, p=p))
+
+def test_fill_class():
+    with fresh(FILL, (5, 6)) as (m, spec, days, pool), most(1000):   # the cap would show only places and adds
+        a = fill(m, spec, days, pool, "class", CA, 4, L1); assert a["options"] and all(o["state"] in helper.OK for o in a["options"]), a
+        kinds = [o["fixes"][0]["kind"] for o in a["options"]]; assert kinds == sorted(kinds, key=("place", "add", "move").index), kinds
+        place = [o for o in a["options"] if o["fixes"][0]["kind"] == "place"]; assert place and {o["fixes"][0]["id"] for o in place} <= {5, 6} and all(o["fixes"][0]["d"] == 4 and o["fixes"][0]["p"] == L1 for o in place)
+        assert place[0]["text"].startswith("Place "), place[0]
+        add = [o for o in a["options"] if o["fixes"][0]["kind"] == "add"]; assert add and all(o["fixes"][0]["room"] for o in add), a   # a room from add_room
+        assert all(CA in verify.planned_rows(spec)[fixes._key(o["fixes"][0]["key"])]["classes"] for o in add)
+        move = [o for o in a["options"] if o["fixes"][0]["kind"] == "move"]; assert move, a
+        for o in move: x = next(x for x in m["lessons"] if x["id"] == o["fixes"][0]["id"]); assert f"Leaves {days[x['d']]} period {x['p']} empty." in o["disturbs"] and CA in x["classes"], o
+        assert a["text"] == f"{len(a['options']) + a['more']} lessons could go here." and a["title"] == f"{CA} · {days[4]} period {L1} · empty", a["text"]
+        n = len(stored())
+        for o in a["options"]:   # the board accepts each as it stands
+            draft.fix(o["fixes"][0]); draft.undo(); assert len(stored()) == n
+
+def test_fill_overrun():
+    with fresh(FILL, (5, 6)) as (m, spec, days, pool):
+        seen, back = recorded()
+        try:
+            fill(m, spec, days, pool, "class", CA, 0, L1 + 1)   # the second period of a two-period lesson would hold lesson 2
+            assert ("place", 5) not in judged(seen) and ("move", 3) not in judged(seen) and ("place", 6) in judged(seen), judged(seen)
+            assert not any(f["kind"] == "add" and f["n"] > 1 for fx in seen for f in fx), seen
+            seen.clear(); grid = m["grid"][LEVEL][0]; q = next(q for q in range(len(grid) - 1) if grid[q] == "L" and grid[q + 1] not in "LA")   # the period before a break
+            fill(m, spec, days, pool, "class", CA, 4, q); j = judged(seen); assert ("place", 6) in j and ("place", 5) not in j and not any(f["kind"] == "add" and f["n"] > 1 for fx in seen for f in fx), j
+            seen.clear(); a = fill(m, spec, days, pool, "class", CA, 4, m["NP"] - 1); assert seen == [] and a["options"] == [], seen   # the last period of the day
+            seen.clear(); fill(m, spec, days, pool, "class", CA, 2, L1 + 1)   # the band's other class has lesson 8 then
+            assert ("move", 7) not in judged(seen), judged(seen)
+            seen.clear(); fill(m, spec, days, pool, "class", CA, 2, L1 + 4); assert ("move", 7) in judged(seen), judged(seen)   # and where it is free the band is tried
+        finally: back()
+        assert a["text"] == "Nothing fits here without a clash or a broken rule." or a["text"]
+
+def test_fill_teacher():
+    with fresh(FILL, (5, 6)) as (m, spec, days, pool), most(1000):
+        a = fill(m, spec, days, pool, "teacher", T0, 4, L1); assert a["options"], a
+        kinds = {o["fixes"][0]["kind"] for o in a["options"]}; assert kinds == {"place", "add", "move"}, kinds
+        for o in a["options"]:
+            f = o["fixes"][0]
+            if f["kind"] == "place": assert f["id"] == 6   # the only pooled lesson T0 is on
+            elif f["kind"] == "add": assert T0 in verify.planned_rows(spec)[fixes._key(f["key"])]["teachers"]
+            else: assert T0 in next(x for x in m["lessons"] if x["id"] == f["id"])["teachers"] and f["id"] == 7, f
+
+def test_fill_room():
+    g2, g3 = [next(r for r in SPEC["lessons"] if r["level"] == lv and r.get("code") != "Entire Class" and r.get("block") and r.get("periods")) for lv in ("P2", "P3")]
+    cl = lambda i, g, room: dict(id=i, day=DAYS[0], p=L1, n=1, level=g["level"], block=g["block"], classes=g["classes"], subject=g["subject"], group=g["code"], teachers=g["teachers"][:1], room=room)
+    rows = [lw(1, 0, L1, [CA], SUBJ, [E1]), cl(2, g2, "Computer Lab"), cl(3, g3, ROOMS[1]), lw(4, 1, L1, [CA], SUBJ, [E1])]
+    with fresh(rows) as (m, spec, days, pool):
+        a = fill(m, spec, days, pool, "room", ROOMS[0], 0, L1)
+        got = {o["fixes"][0]["id"]: o for o in a["options"]}; assert set(got) == {1, 2}, a   # no room; a computer lab for a lesson of classrooms; not 3 (right kind already) or 4 (not then)
+        assert all(o["fixes"][0]["kind"] == "room" and o["fixes"][0]["room"] == ROOMS[0] and o["state"] in helper.OK for o in a["options"]), a
+        assert got[1]["fixes"][0]["group"] == "Entire Class" and got[2]["fixes"][0]["group"] == g2["code"], got
+        assert a["text"] == "2 lessons could go here.", a["text"]
+
+def test_fill_unknown():
+    rows = [lw(1, 0, L1, ["9Z"], SUBJ, [UNKNOWN], room="Mystery Room"), lw(2, 1, L1, [CA], SUBJ, [E1])]
+    with fresh(rows) as (m, spec, days, pool):
+        for by, name in (("class", "9Z"), ("teacher", UNKNOWN), ("room", "Mystery Room")):
+            a = fill(m, spec, days, pool, by, name, 3, L1); assert a["text"] and a["title"].startswith(name), (by, a)   # no crash; only lesson 1, which names it, can come
+            assert all(o["fixes"][0]["kind"] == "move" and o["fixes"][0]["id"] == 1 for o in a["options"]) and len(a["options"]) <= 1, (by, a)
+        a = fill(m, spec, days, pool, "room", "Mystery Room", 0, L1); assert a["options"] == [] and a["text"] == "Nothing fits here without a clash or a broken rule.", a   # the only lesson there is in it already
+        a = fill(m, spec, days, pool, "class", "9Z", 0, 0); assert a["options"] == [] and a["text"] == "Nothing fits here without a clash or a broken rule.", a   # not lesson time
+
+def test_fill_refuses_lesson():
+    m, spec, days, pool = now()
+    raises(ValueError, lambda: ask.fill(m, spec, days, pool, lesson(LESSON)), "Point at an empty period for this.")
+
+# ----------------------------------------------------------------------------------------------- who is free
+def free_now(m, d, p, n=1):
+    busy = [x for x in m["lessons"] if x["d"] == d and x["p"] < p + n and p < x["p"] + x["n"]]
+    return {t for x in busy for t in x["teachers"]}, {x["room"] for x in busy if x["room"]}
+
+def test_free_counts():
+    m, spec, days, pool = now(); d, p = 0, L1; bt, br = free_now(m, d, p)
+    a = ask.free(m, spec, days, pool, dict(kind="place", by="class", name=CA, d=d, p=p)); assert a["options"] == [] and a["more"] == 0
+    ft = [t["name"] for t in SPEC["teachers"] if t["name"] not in bt]; fr = [v["room"] for v in SPEC["venues"] if v["room"] not in br]
+    assert a["text"] == f"{len(ft)} teachers and {len(fr)} rooms are free on {days[d]} period {p}.", a["text"]
+    lines = {l.split(": ")[0]: l.split(": ")[1].split(", ") for l in a["lines"]}
+    teach = {n for k, v in lines.items() for n in v if k in {t.get("dept") for t in SPEC["teachers"]} | {"No department"}}
+    assert set(ft) <= teach and not teach & bt and T0 in bt and T3 in bt and ROOMS[0] not in sum(lines.values(), []) and ROOMS[1] not in sum(lines.values(), []), lines
+    assert lines["MT"] == [t["name"] for t in SPEC["teachers"] if t.get("dept") == "MT" and t["name"] not in bt]   # one line a department, in the setup's order
+    assert any(k.lower().startswith("classroom") for k in lines) and set(lines["Classroom"]) == {r for r in fr if next(v for v in SPEC["venues"] if v["room"] == r).get("kind") == "classroom"}, lines
+    l = ask.free(m, spec, days, pool, lesson(BANDID))   # a lesson: its day, period and length
+    bt, br = free_now(m, 3, L1, 2); assert l["text"].startswith(f"{len([t for t in SPEC['teachers'] if t['name'] not in bt])} teachers and ") and l["text"].endswith(f"are free on {days[3]} periods {L1} to {L1 + 1}."), l["text"]
+    assert T1 in bt and T1 not in sum(([n for n in v] for v in (x.split(": ")[1].split(", ") for x in l["lines"])), [])
+    n = ask.free(m, spec, days, pool, lesson(POOLED)); assert n["options"] == [] and n["lines"] == [] and "not placed" in n["text"], n
+
+def test_free_one_of_each():
+    m, spec, days, pool = now(); rows = [x for x in m["lessons"] if x["id"] != 10]
+    one = ask.free(dict(m, lessons=rows), spec, days, pool, dict(kind="place", by="room", name=ROOMS[0], d=0, p=L1)); assert " and " in one["text"] and one["text"].endswith(f"are free on {days[0]} period {L1}.")
+
+# ----------------------------------------------------------------------------------------------- rooms: the Task 3 gaps
+def test_rooms_right_kind_before_another_kind():
+    m, spec, days, pool = now(); old = ask.MOST; ask.MOST = 1000
+    try: a = ask.rooms(m, spec, days, pool, lesson(LESSON))
+    finally: ask.MOST = old
+    kinds = [m["room_ix"][o["fixes"][0]["room"]]["kind"] for o in a["options"] if o["state"] != "no"]
+    assert "classroom" in kinds and any(k != "classroom" for k in kinds), kinds
+    last = max(i for i, k in enumerate(kinds) if k == "classroom"); assert all(k != "classroom" for k in kinds[last + 1:]) and all(k == "classroom" for k in kinds[:last + 1]), kinds   # the right kind first
+
+def test_rooms_no_room_and_a_room_not_in_the_setup():
+    m, spec, days, pool = now(); a = ask.rooms(m, spec, days, pool, lesson(NO_TEACHER))   # lesson 8 has no room
+    assert a["options"] and all(o["fixes"][0]["room"] for o in a["options"]) and a["text"].endswith("free for " + fixes.what([x for x in m["lessons"] if x["id"] == NO_TEACHER][0]) + "."), a
+    a = ask.rooms(m, spec, days, pool, lesson(POOLED)); assert a["options"] and all(o["text"].startswith("Put ") and o["fixes"][0]["id"] == POOLED for o in a["options"]), a   # a lesson waiting in Not placed
+    with fresh([lw(1, 0, L1, [CA], SUBJ, [E1], room="Mystery Room")]) as (m, spec, days, pool):
+        a = ask.rooms(m, spec, days, pool, lesson(1)); assert a["options"] and all(o["fixes"][0]["room"] != "Mystery Room" for o in a["options"]), a
+
+# ----------------------------------------------------------------------------------------------- draft.about and the route
+def test_about_unknown_question():
+    assert ask.QUESTIONS == ("here", "swaps", "moves", "teachers", "trades", "rooms", "fill", "free")
+    for q in ("nothing", None, "", "HERE"): raises(ValueError, lambda: draft.about(q, lesson(LESSON)), "That question is not known.")
+
+def test_about_answers_every_question():
+    place = dict(kind="place", by="class", name=CB, d=1, p=L1 + 1)
+    for q in ask.QUESTIONS:
+        a = draft.about(q, place if q in ("fill", "free", "here") else lesson(LESSON))
+        assert set(a) >= {"subject", "title", "stamp", "text", "options", "more", "stopped", "lines"}, (q, sorted(a)); assert a["stamp"] == draft.stamp() and a["subject"]["kind"] == ("place" if q in ("fill", "free", "here") else "lesson"), q
+    assert draft.about("here", lesson(LESSON))["options"] == [] and draft.about("free", lesson(LESSON))["subject"]["id"] == LESSON
+    raises(ValueError, lambda: draft.about("moves", place), "Point at a lesson for this."); raises(ValueError, lambda: draft.about("fill", lesson(LESSON)), "Point at an empty period for this.")
+    raises(ValueError, lambda: draft.about("moves", dict(kind="lesson", id=999)), "There is no lesson with that id on the timetable.")
+    assert draft.about("trades", lesson(LESSON), other=T1)["options"] is not None
+
+def test_about_route():
+    anon = A.app.test_client(); assert anon.get(f"/api/draft/about?q=here&kind=lesson&id={LESSON}").status_code == 401
+    stamp = c.get("/api/draft").get_json()["stamp"]
+    r = c.get(f"/api/draft/about?q=swaps&kind=lesson&id={LESSON}"); j = r.get_json(); assert r.status_code == 200 and j["title"] and j["stamp"] == stamp and j["options"], j
+    r = c.get(f"/api/draft/about?q=teachers&kind=lesson&id={BANDID}&group=G2&teacher={T2}"); j = r.get_json(); assert r.status_code == 200 and j["subject"] == dict(kind="lesson", id=BANDID, group="G2", teacher=T2), j
+    r = c.get(f"/api/draft/about?q=fill&kind=place&by=class&name={CB}&d=1&p={L1 + 1}"); j = r.get_json(); assert r.status_code == 200 and j["title"] == f"{CB} · {SPEC['day_structure'] and DAYS[1]} period {L1 + 1} · empty" and j["stamp"] == stamp and "options" in j, j
+    r = c.get(f"/api/draft/about?q=trades&kind=lesson&id={LESSON}&other={T1}"); assert r.status_code == 200 and all(o["fixes"][0]["y"] == T1 for o in r.get_json()["options"]), r.get_json()
+    bad = lambda url, text: (lambda r: (r.status_code, r.get_json()) == (400, {"error": text}) or (_ for _ in ()).throw(AssertionError((url, r.status_code, r.get_json()))))(c.get(url))
+    bad("/api/draft/about?q=here&kind=lesson&id=999", "There is no lesson with that id on the timetable.")
+    bad("/api/draft/about?q=here&kind=lesson&id=abc", "There is no lesson with that id on the timetable.")
+    bad("/api/draft/about?q=fill&kind=place&by=teacher&name=&d=0&p=1", "Pick a teacher's row.")
+    bad("/api/draft/about?q=fill&kind=place&by=class&name=" + CA + "&d=x&p=1", "That is outside the day.")
+    bad("/api/draft/about?q=nope&kind=lesson&id=1", "That question is not known.")
+    bad("/api/draft/about?q=fill&kind=lesson&id=1", "Point at an empty period for this.")
+    bad("/api/draft/about?kind=lesson&id=1", "That question is not known.")
+
+def test_about_writes_nothing():
+    def snap(): return {os.path.join(r, f): open(os.path.join(r, f), "rb").read() for r, _, fs in os.walk(DATA) for f in fs}
+    before = snap(); place = dict(kind="place", by="class", name=CB, d=1, p=L1 + 1)
+    for q in ask.QUESTIONS:
+        draft.about(q, place if q in ("fill", "free", "here") else lesson(LESSON)); draft.about(q, place if q == "here" else lesson(POOLED) if q not in ("fill", "free") else dict(place, by="teacher", name=T0))
+        c.get(f"/api/draft/about?q={q}&kind=lesson&id={LESSON}")
+    assert snap() == before
 
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
