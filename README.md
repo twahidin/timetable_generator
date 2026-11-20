@@ -25,6 +25,8 @@ the relief rules in words, the limits the app checks, the times and the school c
 starts as, holidays). The committee downloads the personal teacher codes there as a list (CSV) or as slips to print.
 Like the personal student codes, they are made from each name and `SECRET_KEY`, and are off without it.
 
+**Exams and events.** The front page has an **Exams and events** card (`/exams`), for the exams committee only: the names on the exams committee list in **Exam settings**, and the timetable committee. Everyone else is refused, because it shows student names, seats and access arrangements. Stage 1 is the committee's own working: set up an exam or a test, say which levels and days it covers (a whole day or part of a day), fill in the papers (by hand or from an uploaded paper list) and their times, and check the paper times. **Make** then stops the lessons that fall inside the exam, frees their teachers, seats the students in the exam rooms, and picks invigilators (or leaves the teacher of the lesson in the room, for a test). The committee can move a class to another room, set the invigilators by hand, and print the seating plans, the roster by day and the lessons sheet, or download the Excel. It needs the Relief **school calendar** (to know which timetable day a date is) and the personal teacher codes (to know who is on the staff), and reads everything from the published timetable. Nothing is sent to students or teachers yet.
+
 **Preview before publishing.** On steps 8 and 9, **Preview as it will be published** opens the draft as the published timetable page would show it, in a new tab, for the committee only. A banner says it is a preview, how many lessons are waiting in Not placed (they are not on it) and whether a critical mistake still stops publishing. Nothing is published, and the preview has no PDF or file links.
 
 **The published timetable's Lessons tab.** One filter (week, day, time, level, class, department, subject, teacher, room, band, or any word) and three ways to see what it finds: **Class grids** (each class's timetable as on its own page, one under another, with the lessons that match in colour and the rest faded; a class with no match is left out), **One page** (every class at once as a small timetable of blocks; a click opens the class) and **Table** (sortable, with the CSV download). The address keeps the filter and the view, so a link can be shared.
@@ -413,6 +415,7 @@ node tests/teacherview.test.js          # step 4's teacher cards and the second 
 .venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, an older workbook read as before
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 .venv/bin/python tests/test_relief.py    # relief: personal teacher codes, people, settings, calendar, routes
+.venv/bin/python tests/test_exams.py     # exams and events: days, papers, seating, invigilators, routes
 ```
 To try the **Ask in words** box without a key, start with `TYPED_REQUEST_MODEL=mock`: it understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".
 
