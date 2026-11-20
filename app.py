@@ -3,7 +3,8 @@
 Committee (COMMITTEE_CODE): fill the setup step by step, download it with the timetable skill for an outside AI agent
 to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
-Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable."""
+Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable.
+Staff (a personal code each, made from their name): the Relief module and everything the teacher code opens."""
 import copy, gzip, io, os, re, shutil, sys, tempfile, traceback, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response
@@ -13,6 +14,7 @@ from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, draft, store, sync, typed
+from relief import codes as relief_codes, people as relief_people, settings as relief_settings
 from ttgen import choices
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -65,12 +67,17 @@ CHOICES = {
     "heads": dict(title="Department heads", blurb="Heads of department: who teaches which class and group, teaching groups and bands.",
                   label="Heads' code", hint="Use the code given to heads of department.", roles=("head",)),
     "teacher": dict(title="Teacher's timetable", blurb="Every class, teacher and room timetable, Who's free and PDFs.",
-                    label="Teacher code", hint="Use the teacher code the school gave you.", roles=("teacher",)),
+                    label="Teacher code", hint="Use the teacher code the school gave you.", roles=("teacher", "staff")),
+    "relief": dict(title="Relief", blurb="Ask for or plan relief, set work, see your reliefs.", label="Your personal code",
+                   hint="Use the personal code on the slip from the timetable committee.", roles=("staff",), img="/static/choice-relief.svg"),
     "student": dict(title="Student timetable", blurb="Your class timetable, or your own with a personal code.",
                     label="Student code or personal code", hint="Use the student code the school gave you. A personal code shows only your own timetable.",
                     roles=("student", "personal")),
 }
-CHOICE_OF = {r: k for k, c in CHOICES.items() for r in c["roles"]}
+CHOICE_OF = {r: k for k, c in CHOICES.items() for r in c["roles"]}   # a staff code on another card points to Relief (the later card)
+NO_PERSONAL_STAFF = "Personal codes are off until SECRET_KEY is set in Railway variables."
+
+def img_of(k): return CHOICES[k].get("img") or f"/static/choice-{k}.png"
 
 @app.get("/login")
 def login_page(msg="", choice=None, fix=None):
@@ -81,15 +88,17 @@ def login_page(msg="", choice=None, fix=None):
     choice = choice or request.args.get("as")
     c = CHOICES.get(choice or "") if choice != "heads" or os.environ.get("HEADS_CODE") else None
     if not c:
-        cards = "".join(f"""<a class="choice" href="/login?as={k}"><img src="/static/choice-{k}.png" alt="" width="112" height="112">
+        cards = "".join(f"""<a class="choice" href="/login?as={k}"><img src="{img_of(k)}" alt="" width="112" height="112">
 <span class="txt"><b>{esc(v["title"])}</b><span class="muted small">{esc(v["blurb"])}</span></span><span class="go">Enter code &rarr;</span></a>""" for k, v in CHOICES.items() if k != "heads" or os.environ.get("HEADS_CODE"))
         return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school)}</h1><p>Timetable</p></header>
 <nav class="choices">{cards}</nav>{f'<div class="notes">{err}{warn}</div>' if err or warn else ""}</main>""")
-    return page(c["title"], f"""<main class="login"><p class="small"><a class="back" href="/login">&larr; Other choices</a></p>
-<div class="picked"><img src="/static/choice-{choice}.png" alt="" width="56" height="56"><span><h1>{esc(c["title"])}</h1><p class="muted">{esc(school)}</p></span></div>
-<form method="post" action="/login"><input type="hidden" name="as" value="{choice}"><label for="code">{esc(c["label"])}</label>
+    form = f"""<form method="post" action="/login"><input type="hidden" name="as" value="{choice}"><label for="code">{esc(c["label"])}</label>
 <input id="code" name="code" autocomplete="off" autocapitalize="characters" autofocus required>
-<button type="submit">Open</button></form>{err}
+<button type="submit">Open</button></form>"""
+    if choice == "relief" and not access.personal_codes_on(): form = f"<p class='warn'>{esc(NO_PERSONAL_STAFF)}</p>"
+    return page(c["title"], f"""<main class="login"><p class="small"><a class="back" href="/login">&larr; Other choices</a></p>
+<div class="picked"><img src="{img_of(choice)}" alt="" width="56" height="56"><span><h1>{esc(c["title"])}</h1><p class="muted">{esc(school)}</p></span></div>
+{form}{err}
 <p class="muted small">{esc(c["hint"])}</p>{warn}</main>""")
 
 @app.post("/login")
@@ -99,12 +108,13 @@ def login():
     if choice not in CHOICES: return redirect("/login")
     if limiter.blocked(who): return login_page("Too many wrong codes. Wait ten minutes and try again.", choice), 429
     pub = store.published()
-    r, sid = access.match(request.form.get("code"), pub["codes"] if pub else {})
+    r, sid = access.match(request.form.get("code"), pub["codes"] if pub else {}, relief_people.staff_codes(relief_staff(pub)) if pub else {})
     if not r:
         limiter.fail(who); return login_page("That code does not work. Check it and try again.", choice), 401
     if r not in CHOICES[choice]["roles"]:   # a real code, but for another choice: not a guess, so no limiter strike
         return login_page(f"That code is not for {CHOICES[choice]['title']}.", choice, fix=CHOICE_OF[r]), 403
     session.clear(); session.permanent = True; session["role"] = r
+    if r == "staff": session["who"] = sid; return redirect("/relief" if choice == "relief" else "/timetable")
     if sid is not None: session["sid"] = sid
     return redirect({"committee": "/", "head": "/", "personal": "/me"}.get(r, "/timetable"))
 
@@ -120,6 +130,7 @@ def health(): return {"ok": True}
 def index():
     if role() in ("committee", "head"): return app.send_static_file("index.html")
     if role() == "personal": return redirect("/me")
+    if role() == "staff": return redirect("/relief")
     if role() in ("teacher", "student"): return redirect("/timetable")
     return redirect("/login")
 
@@ -624,13 +635,13 @@ def files_for(r):
     return []
 
 @app.get("/timetable")
-@need("committee", "head", "teacher", "student")
+@need("committee", "head", "teacher", "student", "staff")
 def timetable():
     from ttgen.export import render_html
     pub = store.published()
     if not pub:
         return page("Timetable", "<main class='login'><h1>Not published yet</h1><p class='muted'>The timetable committee has not published the timetable yet. Please check again later.</p><p><a href='/logout'>Sign out</a></p></main>")
-    r = "teacher" if role() == "head" else role(); key = ("view", r)  # a head sees what a teacher sees
+    r = "teacher" if role() in ("head", "staff") else role(); key = ("view", r)  # a head, and a teacher signed in with their own code, see what a teacher sees
     if key not in pub["views"]:
         view = "student" if r == "student" else "full"
         app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r),
@@ -672,7 +683,7 @@ def pdf_me():
     return _pdf(student_view(pub["model"], s), f"{s['name']} timetable")
 
 @app.get("/pdf/custom")
-@need("committee", "head", "teacher", "student")
+@need("committee", "head", "teacher", "student", "staff")
 def pdf_custom():
     from ttgen.export import custom_view, group_options
     pub = store.published()
@@ -684,7 +695,7 @@ def pdf_custom():
     return _pdf(custom_view(m, cls, groups), f"Class {cls} my timetable")
 
 @app.get("/pdf/<kind>/<path:key>")
-@need("committee", "head", "teacher", "student")
+@need("committee", "head", "teacher", "student", "staff")
 def pdf_one(kind, key):
     from ttgen.export import class_view, teacher_view, room_view, student_view
     pub = store.published()
@@ -701,11 +712,11 @@ def pdf_one(kind, key):
 
 @app.get("/files/<what>")
 @app.get("/files/<what>/<kind>")
-@need("committee", "head", "teacher")
+@need("committee", "head", "teacher", "staff")
 def files(what, kind=None):
     pub = store.published()
     if not pub: abort(404)
-    f = pub["meta"].get("files", {}); r = "teacher" if role() == "head" else role()
+    f = pub["meta"].get("files", {}); r = "teacher" if role() in ("head", "staff") else role()
     if what == "book":
         allowed = {"committee": ("classes", "teachers", "rooms", "students"), "teacher": ("classes", "teachers", "rooms")}[r]
         if kind not in allowed or kind not in f.get("books", {}): abort(404)
@@ -714,6 +725,111 @@ def files(what, kind=None):
     if what in ("excel", "zip", "html", "db") and f.get(what):
         return send_file(os.path.join(store.PUB, f[what]), as_attachment=True, download_name=f[what])
     abort(404)
+
+# ------------------------------------------------------------------------------------------------ staff: relief
+NO_RELIEF_PUB = "Publish the timetable first: relief reads the teachers from it."
+ONLY_SETTINGS = "Only the timetable committee and the relief team can change relief settings."
+ONLY_CODES = "Only the timetable committee can download the codes."
+
+def relief_staff(pub):
+    """the people relief knows: the published timetable's teachers and the staff added in the relief settings"""
+    return relief_people.people(pub, relief_settings.load(pub)["extra_staff"])
+
+def me_staff(pub=None):
+    """the person signed in with their own code (their entry in relief_staff), or None; a staff session whose person
+    is no longer on the published timetable or the staff list is ended"""
+    if role() != "staff": return None
+    pub = pub or store.published(); who = session.get("who")
+    p = next((x for x in relief_staff(pub) if x["name"] == who), None) if pub and who else None
+    if p is None: session.clear()
+    return p
+
+def _relief_rights(pub):
+    """(may read the settings, may save them, saved by) for whoever is signed in; None when a staff session has ended"""
+    if role() == "committee": return True, True, "Timetable committee"
+    p = me_staff(pub)
+    if p is None: return None
+    s = relief_settings.load(pub); team = p["name"] in s["team"]
+    return team or p["name"] in s["management"], team, p["name"]
+
+def _no_longer_valid():
+    return page("Relief", "<main class='login'><h1>Code no longer valid</h1><p class='muted'>You are not on the published timetable or the relief staff list. Ask the timetable committee for your code.</p><p><a href='/login'>Back</a></p></main>")
+
+@app.get("/relief")
+@need("staff", "committee")
+def relief_home():
+    if role() == "committee": return redirect("/relief/settings")
+    if me_staff() is None: return _no_longer_valid()
+    return app.send_static_file("relief.html")
+
+@app.get("/api/relief/me")
+@need("staff")
+def relief_me():
+    pub = store.published(); p = me_staff(pub)
+    if p is None: return {"error": "Please sign in again."}, 401
+    s = relief_settings.load(pub); team = p["name"] in s["team"]
+    return jsonify(name=p["name"], depts=p["depts"], on_team=team, on_management=p["name"] in s["management"], can_settings=team)
+
+@app.get("/relief/settings")
+def relief_settings_page():
+    if not role(): return redirect("/login")
+    if role() == "staff" and me_staff() is None: return _no_longer_valid()
+    if role() == "committee" or (role() == "staff" and (_relief_rights(store.published()) or (0, 0))[1]):
+        return app.send_static_file("relief-settings.html")
+    return page("Relief settings", f"<main class='login'><h1>Relief settings</h1><p class='muted'>{esc(ONLY_SETTINGS)}</p><p><a href='/'>Back</a></p></main>"), 403
+
+def _relief_settings_reply(pub, settings):
+    m = pub["model"]; setup = m.get("setup") or {}
+    roles = {str(r.get("role") or "").strip() for r in setup.get("roles") or []} | {str(t.get("role") or "").strip() for t in setup.get("teachers") or []}
+    rights = _relief_rights(pub) or (False, False, None)
+    return jsonify(settings=settings, people=relief_staff(pub), roles=sorted(roles - {""}), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=role() == "committee")
+
+@app.get("/api/relief/settings")
+@need("committee", "staff")
+def relief_settings_get():
+    pub = store.published()
+    if not pub: return {"error": NO_RELIEF_PUB}, 409
+    rights = _relief_rights(pub)
+    if rights is None: return {"error": "Please sign in again."}, 401
+    if not rights[0]: return {"error": ONLY_SETTINGS}, 403
+    return _relief_settings_reply(pub, relief_settings.load(pub))
+
+@app.put("/api/relief/settings")
+@need("committee", "staff")
+def relief_settings_put():
+    pub = store.published()
+    if not pub: return {"error": NO_RELIEF_PUB}, 409
+    rights = _relief_rights(pub)
+    if rights is None: return {"error": "Please sign in again."}, 401
+    if not rights[1]: return {"error": ONLY_SETTINGS}, 403
+    try: saved = relief_settings.save(request.get_json(force=True, silent=True), pub, rights[2])
+    except ValueError as e: return {"error": str(e)}, 400
+    return _relief_settings_reply(pub, saved)
+
+def _relief_codes_refused():
+    """the answer that refuses the staff codes to whoever is signed in, or None (the routes check what is published)"""
+    if role() != "committee": return {"error": ONLY_CODES}, 403
+    if not access.personal_codes_on(): return NO_PERSONAL_STAFF, 409
+    return None
+
+@app.get("/api/relief/codes.csv")
+@need("committee", "staff")
+def relief_codes_csv():
+    refused = _relief_codes_refused(); pub = store.published()
+    if refused: return refused
+    if not pub: return NO_RELIEF_PUB, 409
+    return Response(relief_codes.codes_csv(relief_staff(pub)), mimetype="text/csv", headers={"Content-Disposition": 'attachment; filename="personal relief codes.csv"'})
+
+@app.get("/api/relief/code-slips.pdf")
+@need("committee", "staff")
+def relief_code_slips():
+    refused = _relief_codes_refused(); pub = store.published()
+    if refused: return refused
+    if not pub: return NO_RELIEF_PUB, 409
+    buf = io.BytesIO()
+    relief_codes.slips_pdf(pub["model"]["school"]["name"], relief_staff(pub), request.host_url.rstrip("/"), buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="relief code slips.pdf", mimetype="application/pdf")
 
 startup_log()
 

@@ -187,7 +187,7 @@ def save_refuses_with_one_plain_sentence():
     bad("Check the dates of Term 4.", calendar=dict(terms=[dict(name="Term 4", start="2026-13-01", end="2026-11-20", starts_as="Odd")], holidays=[]))
     bad("Check the dates of Term 4.", calendar=dict(terms=[dict(name="Term 4", start="2026-11-20", end="2026-09-07", starts_as="Odd")], holidays=[]))
     bad("Check the dates of Term 4.", calendar=dict(terms=[dict(name="Term 3", start="2026-07-01", end="2026-09-10", starts_as="Odd"), dict(name="Term 4", start="2026-09-07", end="2026-11-20", starts_as="Odd")], holidays=[]))
-    bad("Check the dates of .", calendar=dict(terms=[dict(name="", start="2026-09-07", end="2026-11-20", starts_as="Odd")], holidays=[]))
+    bad("Give each term and holiday a name.", calendar=dict(terms=[dict(name="", start="2026-09-07", end="2026-11-20", starts_as="Odd")], holidays=[]))
     bad("Say whether Term 4 starts in an Odd or an Even week.", calendar=dict(terms=[dict(name="Term 4", start="2026-09-07", end="2026-11-20")], holidays=[]))
     bad("Check the dates of Deepavali.", calendar=dict(terms=[], holidays=[dict(name="Deepavali", start="2026-10-23", end="2026-10-22")]))
     bad("Check the dates of Deepavali.", calendar=dict(terms=[], holidays=[dict(name="Deepavali", start="soon", end="2026-10-22")]))
@@ -204,5 +204,235 @@ def a_name_gone_from_the_timetable_is_missing_not_fatal():
     got = S.load(pub2)
     assert got["team"] == [] and got["missing"] == ["Mr Darren Lim"]
     assert store.read_json(S.PATH)["team"] == ["Mr Darren Lim"]
+
+UNREAD = "The settings could not be read. Reload the page and try again."
+NAMELESS = "Give each term and holiday a name."
+
+@t
+def save_refuses_the_wrong_json_types():
+    fresh()
+    for new in ([], None, "settings", 5):
+        raises(ValueError, lambda: S.save(new, PUB, "x"), UNREAD)
+    cases = [dict(team=None), dict(management="Ms Grace Wong"), dict(team=[["Mr Darren Lim"]]), dict(extra_staff=dict(name="Mdm Office Staff")),
+             dict(extra_staff=["Mdm Office Staff"]), dict(extra_staff=[dict(name=["Mdm Office Staff"])]), dict(rules="Use planned relief first."),
+             dict(rules=None), dict(rules=[["x"]]), dict(limits=[["fat_per_day", 3]]), dict(limits=None), dict(limits=dict(never="Ms Grace Wong")),
+             dict(limits=dict(never=None)), dict(times=[]), dict(times=None), dict(calendar=[]), dict(calendar=None), dict(calendar=dict(terms=["Term 4"], holidays=[])),
+             dict(calendar=dict(terms=None, holidays=[])), dict(calendar=dict(terms=[], holidays=[["Deepavali"]])), dict(calendar=dict(terms=[], holidays=None)),
+             dict(fat_role=["FAJT"]), dict(calendar=dict(terms=[dict(name=["Term 4"], start="2026-09-07", end="2026-11-20", starts_as="Odd")], holidays=[]))]
+    for kw in cases:
+        raises(ValueError, lambda: S.save(base(**kw), PUB, "x"), UNREAD)
+    assert not os.path.exists(S.PATH)
+    S.save(base(fat_role=None, limits=dict(other_per_day=None)), PUB, "x")       # an empty value is not a wrong type
+    assert S.load(PUB)["fat_role"] == ""
+
+@t
+def a_term_or_holiday_needs_a_name_before_its_dates():
+    fresh()
+    for cal in (dict(terms=[dict(name=" ", start="soon", end="later", starts_as="Odd")], holidays=[]),
+                dict(terms=[dict(start="2026-09-07", end="2026-11-20", starts_as="Odd")], holidays=[]),
+                dict(terms=[], holidays=[dict(name="", start="2026-10-23", end="2026-10-23")]),
+                dict(terms=[], holidays=[dict(name=None, start="bad", end="")])):
+        raises(ValueError, lambda: S.save(base(calendar=cal), PUB, "x"), NAMELESS)
+
+# ---- signing in as a person, the Relief card and the relief routes
+import contextlib, csv, io  # noqa: E402
+from relief import codes as RC  # noqa: E402
+
+@contextlib.contextmanager
+def published(pub):
+    old = store.published; store.published = lambda: pub
+    try: yield
+    finally: store.published = old
+
+def signed_in(card, code):
+    c = A.app.test_client()
+    r = c.post("/login", data={"as": card, "code": code})
+    return c, r
+
+def committee():
+    c, r = signed_in("committee", os.environ["COMMITTEE_CODE"]); assert r.status_code == 302
+    return c
+
+def staff(name, card="relief"):
+    c, r = signed_in(card, access.staff_code(name)); assert r.status_code == 302, (name, r.status_code)
+    return c
+
+SETTINGS_DENIED = "Only the timetable committee and the relief team can change relief settings."
+NOT_PUBLISHED = "Publish the timetable first: relief reads the teachers from it."
+
+@t
+def relief_card_is_on_the_front_page():
+    c = A.app.test_client()
+    with published(PUB):
+        front = c.get("/login").data
+        assert b"Relief" in front and b'src="/static/choice-relief.svg"' in front and b'src="/static/choice-teacher.png"' in front
+        page = c.get("/login?as=relief").data
+        assert b"Your personal code" in page and b'name="code"' in page and b'src="/static/choice-relief.svg"' in page
+        assert A.CHOICES["teacher"]["roles"] == ("teacher", "staff") and A.CHOICES["relief"]["roles"] == ("staff",)
+    assert os.path.exists(os.path.join(ROOT, "static", "choice-relief.svg"))
+
+@t
+def a_staff_code_signs_in_as_that_person():
+    fresh()
+    with published(PUB):
+        c, r = signed_in("relief", access.staff_code("Mr Darren Lim"))
+        assert r.status_code == 302 and r.headers["Location"].endswith("/relief"), r.headers.get("Location")
+        with c.session_transaction() as s: assert s["role"] == "staff" and s["who"] == "Mr Darren Lim"
+        me = c.get("/api/relief/me").get_json()
+        assert me == dict(name="Mr Darren Lim", depts=["Science"], on_team=False, on_management=False, can_settings=False), me
+        r = c.get("/"); assert r.status_code == 302 and r.headers["Location"].endswith("/relief")
+        with A.app.test_request_context():
+            A.session["role"], A.session["who"] = "staff", "Mr Darren Lim"
+            p = A.me_staff(); assert p["name"] == "Mr Darren Lim" and p["depts"] == ["Science"], p
+            A.session["who"] = "Ms Nobody"
+            assert A.me_staff() is None and "role" not in A.session and "who" not in A.session
+            A.session["role"] = "teacher"; assert A.me_staff() is None and A.session["role"] == "teacher"
+    bad, r = signed_in("relief", "ZZZZ-ZZZZ"); assert r.status_code == 401
+
+@t
+def a_staff_code_opens_the_teachers_timetable_card():
+    with published(PUB):
+        c, r = signed_in("teacher", access.staff_code("Mr Darren Lim"))
+        assert r.status_code == 302 and r.headers["Location"].endswith("/timetable"), r.headers.get("Location")
+        assert c.get("/api/relief/me").get_json()["name"] == "Mr Darren Lim"
+        c2, r = signed_in("student", access.staff_code("Mr Darren Lim"))
+        assert r.status_code == 403 and b"?as=relief" in r.data          # a staff code on another card points to the Relief card
+        # treated as a teacher: the teacher's files, not the committee's
+        assert c.get("/files/book/classes").status_code == 404 and c.get("/files/excel").status_code == 403
+    with published(None):
+        r = c.get("/timetable"); assert r.status_code == 200 and b"Not published yet" in r.data
+        assert c.get("/pdf/custom?cls=1A").status_code == 404 and c.get("/pdf/classes/1A").status_code == 404
+
+@t
+def teacher_code_on_the_relief_card_is_refused_with_the_right_link():
+    with published(PUB):
+        c, r = signed_in("relief", os.environ["TEACHER_CODE"])
+        assert r.status_code == 403 and b"?as=teacher" in r.data, r.status_code
+
+@t
+def a_staff_session_cannot_reach_committee_routes():
+    with published(PUB):
+        c = staff("Mr Darren Lim")
+        assert c.get("/").headers["Location"].endswith("/relief")
+        for method, url in (("GET", "/api/setup"), ("PUT", "/api/setup"), ("GET", "/api/draft"), ("POST", "/api/draft"), ("GET", "/api/codes.csv"),
+                            ("GET", "/api/code-slips.pdf"), ("GET", "/api/status"), ("POST", "/api/setup/changes"), ("GET", "/draft/preview")):
+            r = c.open(url, method=method)
+            assert r.status_code in (302, 401), (url, r.status_code)
+            if r.status_code == 302: assert r.headers["Location"].endswith("/login"), url
+
+@t
+def a_dropped_teacher_is_signed_out():
+    fresh()
+    with published(PUB): c = staff("Mr Darren Lim")
+    with published(P.fake_pub([dict(name="Ms Evelyn Koh", dept="Science")])):
+        r = c.get("/relief")
+        assert b"Code no longer valid" in r.data and b"Ask the timetable committee for your code." in r.data
+        with c.session_transaction() as s: assert "who" not in s and "role" not in s
+        assert c.get("/api/relief/me").status_code == 401
+
+@t
+def settings_rights():
+    fresh()
+    with published(PUB):
+        com = committee()
+        r = com.get("/relief"); assert r.status_code == 302 and r.headers["Location"].endswith("/relief/settings")
+        r = com.put("/api/relief/settings", json=base(team=["Mr Darren Lim"], management=["Ms Grace Wong"]))
+        assert r.status_code == 200, r.get_json()
+        j = com.get("/api/relief/settings").get_json()
+        assert set(j) == {"settings", "people", "roles", "weeks", "can_save", "can_codes"}, list(j)
+        assert j["can_save"] is True and j["can_codes"] is True and j["roles"] == ["FAJT"] and j["weeks"] == 2
+        assert j["settings"]["team"] == ["Mr Darren Lim"] and j["settings"]["saved_by"] == "Timetable committee"
+        assert [p["name"] for p in j["people"]] == [p["name"] for p in P.people(PUB, [])]
+        team, mgmt, plain = staff("Mr Darren Lim"), staff("Ms Grace Wong"), staff("Ms Evelyn Koh")
+        assert team.get("/api/relief/me").get_json()["can_settings"] is True and team.get("/api/relief/me").get_json()["on_team"] is True
+        m = mgmt.get("/api/relief/me").get_json(); assert m["on_management"] is True and m["can_settings"] is False
+        j = team.get("/api/relief/settings").get_json(); assert j["can_save"] is True and j["can_codes"] is False
+        r = team.put("/api/relief/settings", json=base(team=["Mr Darren Lim"], management=["Ms Grace Wong"], rules=["Use planned relief first."]))
+        assert r.status_code == 200 and r.get_json()["settings"]["saved_by"] == "Mr Darren Lim", r.get_json()
+        assert S.load(PUB)["saved_by"] == "Mr Darren Lim" and S.load(PUB)["rules"] == ["Use planned relief first."]
+        j = mgmt.get("/api/relief/settings"); assert j.status_code == 200 and j.get_json()["can_save"] is False
+        r = mgmt.put("/api/relief/settings", json=base(team=["Ms Grace Wong"])); assert r.status_code == 403 and r.get_json()["error"] == SETTINGS_DENIED
+        assert S.load(PUB)["team"] == ["Mr Darren Lim"]
+        for url in ("/api/relief/settings",):
+            assert plain.get(url).status_code == 403 and plain.put(url, json=base()).status_code == 403
+        r = plain.get("/relief/settings"); assert r.status_code == 403 and SETTINGS_DENIED.encode() in r.data
+        r = mgmt.get("/relief/settings"); assert r.status_code == 403 and SETTINGS_DENIED.encode() in r.data
+        assert team.get("/relief/settings").status_code != 403 and com.get("/relief/settings").status_code != 403
+        tc, _ = signed_in("teacher", os.environ["TEACHER_CODE"])
+        assert tc.get("/api/relief/settings").status_code == 401 and tc.put("/api/relief/settings", json=base()).status_code == 401
+        assert tc.get("/relief/settings").status_code == 403 and tc.get("/api/relief/me").status_code == 401
+        # a refused save is a sentence (400), never a server error
+        r = com.put("/api/relief/settings", json=base(team=["Ms Nobody"])); assert r.status_code == 400 and r.get_json()["error"] == "Ms Nobody is not on the published timetable or the staff list."
+        for body in ([], "x", dict(team=None), dict(calendar=dict(terms=["Term 4"]))):
+            r = com.put("/api/relief/settings", json=body); assert r.status_code == 400 and r.get_json()["error"] == UNREAD, (body, r.status_code)
+        r = com.put("/api/relief/settings", data="not json", content_type="application/json"); assert r.status_code == 400 and r.get_json()["error"] == UNREAD
+        r = com.put("/api/relief/settings", json=base(calendar=dict(terms=[dict(name="", start="2026-09-07", end="2026-11-20", starts_as="Odd")], holidays=[])))
+        assert r.status_code == 400 and r.get_json()["error"] == NAMELESS
+        # a team member who takes themselves off the team can no longer save
+        r = team.put("/api/relief/settings", json=base(team=["Ms Evelyn Koh"])); assert r.status_code == 200 and r.get_json()["can_save"] is False
+        assert team.put("/api/relief/settings", json=base(team=["Mr Darren Lim"])).status_code == 403
+
+@t
+def nothing_published_says_so():
+    com = committee()
+    with published(None):
+        r = com.get("/api/relief/settings"); assert r.status_code == 409 and r.get_json() == {"error": NOT_PUBLISHED}, r.get_json()
+        r = com.put("/api/relief/settings", json=base()); assert r.status_code == 409 and r.get_json() == {"error": NOT_PUBLISHED}
+        for url in ("/api/relief/codes.csv", "/api/relief/code-slips.pdf"):
+            r = com.get(url); assert r.status_code == 409 and r.data.decode() == NOT_PUBLISHED, url
+
+@t
+def codes_off_without_secret_key():
+    com = committee()
+    with published(PUB):
+        del os.environ["SECRET_KEY"]
+        try:
+            page = A.app.test_client().get("/login?as=relief").data
+            assert A.NO_PERSONAL_STAFF.encode() in page and b'name="code"' not in page
+            assert A.NO_PERSONAL_STAFF == "Personal codes are off until SECRET_KEY is set in Railway variables."
+            assert com.get("/api/relief/codes.csv").status_code == 409 and com.get("/api/relief/code-slips.pdf").status_code == 409
+            _, r = signed_in("relief", access.staff_code("Mr Darren Lim")); assert r.status_code == 401
+        finally: os.environ["SECRET_KEY"] = KEY
+        assert b'name="code"' in A.app.test_client().get("/login?as=relief").data
+
+@t
+def codes_csv_and_slips():
+    fresh()
+    S.save(base(extra_staff=[dict(name="Mdm Office Staff", note="admin")]), PUB, "x")
+    with published(PUB):
+        com = committee()
+        r = com.get("/api/relief/codes.csv"); assert r.status_code == 200 and r.mimetype == "text/csv"
+        text = r.data.decode("utf-8")
+        assert text.startswith("﻿")
+        rows = list(csv.reader(io.StringIO(text[1:])))
+        assert rows[0] == ["Name", "Department", "Personal code"]
+        ps = P.people(PUB, S.load(PUB)["extra_staff"])
+        assert [x[0] for x in rows[1:]] == [p["name"] for p in ps]
+        office = next(x for x in rows if x[0] == "Mdm Office Staff")
+        assert office[2] == access.staff_code("Mdm Office Staff") and office[1] == ""
+        assert next(x for x in rows if x[0] == "Mr Darren Lim")[1] == "Science"
+        r = com.get("/api/relief/code-slips.pdf"); assert r.status_code == 200 and r.data.startswith(b"%PDF") and r.mimetype == "application/pdf"
+        sc = staff("Mdm Office Staff")
+        assert sc.get("/api/relief/codes.csv").status_code == 403 and sc.get("/api/relief/code-slips.pdf").status_code == 403
+        # signed in with her code, she is that person
+        assert sc.get("/api/relief/me").get_json()["name"] == "Mdm Office Staff"
+
+@t
+def codes_csv_lists_both_departments():
+    pub = P.fake_pub([dict(name="Ms Evelyn Koh", dept="Science", dept2="Mathematics")])
+    text = RC.codes_csv(P.people(pub, []))
+    rows = list(csv.reader(io.StringIO(text[1:])))
+    assert rows[1][0] == "Ms Evelyn Koh" and rows[1][1] == "Science, Mathematics" and rows[1][2] == access.staff_code("Ms Evelyn Koh")
+
+@t
+def slips_are_ten_to_a_page_and_a_new_page_per_department():
+    pages = lambda data: len(re.findall(rb"/Type\s*/Page[^s]", data))
+    ppl = [dict(name=f"Teacher {i:02d}", short="", depts=["Science"], role="", teaches=True, staff_only=False) for i in range(12)]
+    ppl += [dict(name="Ms Grace Wong", short="", depts=["Mathematics"], role="", teaches=True, staff_only=False),
+            dict(name="Mdm Office Staff", short="", depts=[], role="", teaches=False, staff_only=True)]
+    buf = io.BytesIO(); RC.slips_pdf("CTSS", ppl, "https://example.test", buf)
+    assert buf.getvalue().startswith(b"%PDF") and pages(buf.getvalue()) == 4, pages(buf.getvalue())
+    buf = io.BytesIO(); RC.slips_pdf("CTSS", ppl[:10], "https://example.test", buf)
+    assert pages(buf.getvalue()) == 1
 
 print(f"{COUNT} relief tests passed")

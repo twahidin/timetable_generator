@@ -13,6 +13,8 @@ DEFAULT_RULES = [
     "Then other teachers, lightest week first (teaching periods plus relief periods this week); if tied, whoever has had less relief this term; spread over the week.",
 ]
 _TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+UNREAD = "The settings could not be read. Reload the page and try again."
+NAMELESS = "Give each term and holiday a name."
 
 
 def _fat_role(pub):
@@ -22,14 +24,14 @@ def _fat_role(pub):
     return ""
 
 
-def defaults(pub):
+def defaults(pub) -> dict:
     return dict(management=[], team=[], extra_staff=[], fat_role=_fat_role(pub), rules=list(DEFAULT_RULES),
                 limits=dict(fat_per_day=3, other_per_day=None, never=[]),
                 times=dict(fill_at="15:00", remind_at="15:00", report_every=15, weekly_day="Fri", weekly_at="15:00"),
                 calendar=dict(terms=[], holidays=[]), saved_at=None, saved_by=None)
 
 
-def _merged(pub, saved):
+def _merged(pub, saved) -> dict:
     d = defaults(pub)
     for k, v in (saved or {}).items():
         if k in ("limits", "times") and isinstance(v, dict): d[k].update(v)
@@ -37,7 +39,7 @@ def _merged(pub, saved):
     return d
 
 
-def load(pub):
+def load(pub) -> dict:
     d = _merged(pub, store.read_json(PATH, {}))
     known = {p["name"] for p in _people.people(pub, d["extra_staff"])}
     missing = []
@@ -58,53 +60,73 @@ def _date(s):
     except ValueError: return None
 
 
+def _of(d, key, typ, default):
+    """d[key] when it is a typ, default when the key is absent; anything else (None too) is the wrong JSON type"""
+    if key not in d: return default
+    if not isinstance(d[key], typ): raise ValueError(UNREAD)
+    return d[key]
+
+
+def _text(v):
+    """a text value stripped; None is empty; a number, list or object is the wrong JSON type"""
+    if v is None: return ""
+    if not isinstance(v, str): raise ValueError(UNREAD)
+    return v.strip()
+
+
 def _int_in(v, lo, hi):
     return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
 
 
 def _check(new, pub):
-    """-> the clean dict to save; ValueError(one plain sentence) on the first problem"""
+    """-> the clean dict to save; ValueError(one plain sentence) on the first problem. A key left out takes its default;
+    a value of the wrong JSON type (a list where an object belongs, None where a list belongs) is UNREAD"""
+    if not isinstance(new, dict): raise ValueError(UNREAD)
     base = defaults(pub)
     extra, seen = [], set()
     teachers = {p["name"] for p in _people.people(pub, [])}
-    for x in new.get("extra_staff") or []:
-        name = str((x or {}).get("name") or "").strip()
+    for x in _of(new, "extra_staff", list, []):
+        if not isinstance(x, dict): raise ValueError(UNREAD)
+        name = _text(x.get("name"))
         if not name: raise ValueError("A staff member needs a name.")
         if name in teachers: raise ValueError(f"{name} is already a teacher on the timetable.")
         if name in seen: raise ValueError(f"{name} is on the staff list twice.")
-        seen.add(name); extra.append(dict(name=name, note=str((x or {}).get("note") or "").strip()))
+        seen.add(name); extra.append(dict(name=name, note=_text(x.get("note"))))
     known = {p["name"] for p in _people.people(pub, extra)}
+    limits = _of(new, "limits", dict, {})
     lists = {}
-    for key, names in (("management", new.get("management")), ("team", new.get("team")), ("never", (new.get("limits") or {}).get("never"))):
+    for key, src in (("management", new), ("team", new), ("never", limits)):
         out = []
-        for n in names or []:
-            n = str(n).strip()
+        for n in _of(src, key, list, []):
+            n = _text(n)
             if n not in known: raise ValueError(f"{n} is not on the published timetable or the staff list.")
             if n not in out: out.append(n)
         lists[key] = out
-    role = str(new.get("fat_role") or "").strip()
+    role = _text(new.get("fat_role"))
     if role:
         model = (pub or {}).get("model") or {}
         roles = {str(r.get("role") or "") for r in (model.get("setup") or {}).get("roles") or []} | {str(t.get("role") or "") for t in (model.get("setup") or {}).get("teachers") or []}
         if role not in roles: raise ValueError(f"There is no role {role} on step 4.")
-    rules = [str(r).strip() for r in (new["rules"] if "rules" in new else base["rules"])]
+    rules = [_text(r) for r in _of(new, "rules", list, base["rules"])]
     if len(rules) > 20 or any(not r or len(r) > 300 for r in rules):
         raise ValueError("Keep each rule under 300 characters, at most 20 rules, none empty.")
-    lim = dict(base["limits"]); lim.update(new.get("limits") or {})
+    lim = dict(base["limits"]); lim.update(limits)
     for k in ("fat_per_day", "other_per_day"):
         if lim[k] is not None and not _int_in(lim[k], 1, 20): raise ValueError("A daily limit is a whole number from 1 to 20, or empty.")
-    times = dict(base["times"]); times.update(new.get("times") or {})
+    times = dict(base["times"]); times.update(_of(new, "times", dict, {}))
     for k in ("fill_at", "remind_at", "weekly_at"):
         if not _TIME.match(str(times[k])): raise ValueError(f"{times[k]} is not a time like 15:00.")
     if not _int_in(times["report_every"], 5, 60): raise ValueError("Report every 5 to 60 minutes.")
     if times["weekly_day"] not in ("Mon", "Tue", "Wed", "Thu", "Fri"): raise ValueError("The weekly summary goes out on a weekday.")
-    cal = new.get("calendar") or {}
+    cal = _of(new, "calendar", dict, {})
     two = int((((pub or {}).get("model") or {}).get("school") or {}).get("weeks") or 1) == 2
     terms = []
-    for tm in cal.get("terms") or []:
-        name = str(tm.get("name") or "").strip()
+    for tm in _of(cal, "terms", list, []):
+        if not isinstance(tm, dict): raise ValueError(UNREAD)
+        name = _text(tm.get("name"))
+        if not name: raise ValueError(NAMELESS)
         a, b = _date(tm.get("start")), _date(tm.get("end"))
-        if not name or not a or not b or a > b: raise ValueError(f"Check the dates of {name}.")
+        if not a or not b or a > b: raise ValueError(f"Check the dates of {name}.")
         terms.append((a, b, name, tm))
     terms.sort(key=lambda x: x[0])
     for i in range(1, len(terms)):
@@ -114,8 +136,10 @@ def _check(new, pub):
         if two and tm.get("starts_as") not in ("Odd", "Even"): raise ValueError(f"Say whether {name} starts in an Odd or an Even week.")
         clean_terms.append(dict(name=name, start=a.isoformat(), end=b.isoformat(), starts_as=tm.get("starts_as") if tm.get("starts_as") in ("Odd", "Even") else None))
     holidays = []
-    for h in cal.get("holidays") or []:
-        name = str(h.get("name") or "").strip()
+    for h in _of(cal, "holidays", list, []):
+        if not isinstance(h, dict): raise ValueError(UNREAD)
+        name = _text(h.get("name"))
+        if not name: raise ValueError(NAMELESS)
         a, b = _date(h.get("start")), _date(h.get("end") or h.get("start"))
         if not a or not b or b < a: raise ValueError(f"Check the dates of {name}.")
         holidays.append(dict(start=a.isoformat(), end=b.isoformat(), name=name))
@@ -126,7 +150,7 @@ def _check(new, pub):
 
 
 def save(new, pub, by):
-    clean = _check(new or {}, pub)
+    clean = _check(new, pub)
     clean.update(saved_at=store.now(), saved_by=by)
     with _LOCK:
         os.makedirs(os.path.dirname(PATH), exist_ok=True)
