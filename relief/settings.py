@@ -15,13 +15,21 @@ DEFAULT_RULES = [
 _TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 UNREAD = "The settings could not be read. Reload the page and try again."
 NAMELESS = "Give each term and holiday a name."
+FORMULA = ("=", "+", "-", "@")     # what a spreadsheet reads as the start of a formula
 
 
 def _fat_role(pub):
     for r in (((pub or {}).get("model") or {}).get("setup") or {}).get("roles") or []:
-        if "adjunct" in (str(r.get("role") or "") + " " + str(r.get("what") or "")).lower() and str(r.get("role") or ""):
-            return str(r["role"])
+        name = str(r.get("role") or "").strip()
+        if name and "adjunct" in (name + " " + str(r.get("what") or "")).lower(): return name
     return ""
+
+
+def role_names(pub) -> list:
+    """the role names of the published setup (its roles and every teacher's role), stripped, sorted, none empty"""
+    setup = (((pub or {}).get("model") or {}).get("setup") or {})
+    names = {str(r.get("role") or "").strip() for r in setup.get("roles") or []} | {str(t.get("role") or "").strip() for t in setup.get("teachers") or []}
+    return sorted(names - {""})
 
 
 def defaults(pub) -> dict:
@@ -89,6 +97,7 @@ def _check(new, pub):
         if not isinstance(x, dict): raise ValueError(UNREAD)
         name = _text(x.get("name"))
         if not name: raise ValueError("A staff member needs a name.")
+        if name[0] in FORMULA: raise ValueError(f"A name cannot start with {name[0]}.")   # the codes CSV is opened in a spreadsheet
         if name in teachers: raise ValueError(f"{name} is already a teacher on the timetable.")
         if name in seen: raise ValueError(f"{name} is on the staff list twice.")
         seen.add(name); extra.append(dict(name=name, note=_text(x.get("note"))))
@@ -103,10 +112,7 @@ def _check(new, pub):
             if n not in out: out.append(n)
         lists[key] = out
     role = _text(new.get("fat_role"))
-    if role:
-        model = (pub or {}).get("model") or {}
-        roles = {str(r.get("role") or "") for r in (model.get("setup") or {}).get("roles") or []} | {str(t.get("role") or "") for t in (model.get("setup") or {}).get("teachers") or []}
-        if role not in roles: raise ValueError(f"There is no role {role} on step 4.")
+    if role and role not in role_names(pub): raise ValueError(f"There is no role {role} on step 4.")
     rules = [_text(r) for r in _of(new, "rules", list, base["rules"])]
     if len(rules) > 20 or any(not r or len(r) > 300 for r in rules):
         raise ValueError("Keep each rule under 300 characters, at most 20 rules, none empty.")

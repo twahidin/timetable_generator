@@ -2,14 +2,21 @@
 import collections, csv, io
 
 import access
+from relief.settings import FORMULA
+
+
+def _cell(v):
+    """a CSV cell a spreadsheet will not read as a formula (relief.settings refuses such names too; this is the second guard)"""
+    v = str(v)
+    return "'" + v if v[:1] in FORMULA else v
 
 
 def codes_csv(people) -> str:
     """Name, Department, Personal code: one row a person, in the order of people (BOM first, for Excel)"""
     buf = io.StringIO(); w = csv.writer(buf)
     w.writerow(["Name", "Department", "Personal code"])
-    for p in people: w.writerow([p["name"], ", ".join(p["depts"]), access.staff_code(p["name"])])
-    return "﻿" + buf.getvalue()
+    for p in people: w.writerow([_cell(p["name"]), _cell(", ".join(p["depts"])), _cell(access.staff_code(p["name"]))])
+    return "\ufeff" + buf.getvalue()
 
 
 def slips_pdf(school: str, people, url: str, out):

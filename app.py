@@ -39,6 +39,9 @@ def need(*roles):
             if role() not in roles:
                 if request.path.startswith(("/api/", "/pdf/", "/files/")): return {"error": "Please sign in again."}, 401
                 return redirect("/login")
+            if role() == "staff" and me_staff() is None:   # dropped or renamed on a later publish: me_staff has ended the session
+                if request.path.startswith(("/api/", "/pdf/", "/files/")): return {"error": "Please sign in again."}, 401
+                return _no_longer_valid()
             return f(*a, **k)
         return inner
     return deco
@@ -759,8 +762,7 @@ def _no_longer_valid():
 @need("staff", "committee")
 def relief_home():
     if role() == "committee": return redirect("/relief/settings")
-    if me_staff() is None: return _no_longer_valid()
-    return app.send_static_file("relief.html")
+    return app.send_static_file("relief.html")   # need() has checked the person is still there
 
 @app.get("/api/relief/me")
 @need("staff")
@@ -779,10 +781,8 @@ def relief_settings_page():
     return page("Relief settings", f"<main class='login'><h1>Relief settings</h1><p class='muted'>{esc(ONLY_SETTINGS)}</p><p><a href='/'>Back</a></p></main>"), 403
 
 def _relief_settings_reply(pub, settings):
-    m = pub["model"]; setup = m.get("setup") or {}
-    roles = {str(r.get("role") or "").strip() for r in setup.get("roles") or []} | {str(t.get("role") or "").strip() for t in setup.get("teachers") or []}
-    rights = _relief_rights(pub) or (False, False, None)
-    return jsonify(settings=settings, people=relief_staff(pub), roles=sorted(roles - {""}), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=role() == "committee")
+    m = pub["model"]; rights = _relief_rights(pub) or (False, False, None)
+    return jsonify(settings=settings, people=relief_staff(pub), roles=relief_settings.role_names(pub), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=role() == "committee")
 
 @app.get("/api/relief/settings")
 @need("committee", "staff")

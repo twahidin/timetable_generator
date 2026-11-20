@@ -289,19 +289,43 @@ def a_staff_code_signs_in_as_that_person():
             A.session["role"] = "teacher"; assert A.me_staff() is None and A.session["role"] == "teacher"
     bad, r = signed_in("relief", "ZZZZ-ZZZZ"); assert r.status_code == 401
 
+def timetable_pub(pub):
+    """a fake published timetable the teacher routes can answer from: no classes, and the teacher page already made"""
+    import copy
+    pub = copy.deepcopy(pub); pub["model"].update(class_ix={}, teacher_ix={}, room_ix={}, students=[])
+    pub["views"][("view", "teacher")] = "the teacher page"
+    return pub
+
+TPUB = timetable_pub(PUB)
+
 @t
 def a_staff_code_opens_the_teachers_timetable_card():
-    with published(PUB):
+    with published(TPUB):
         c, r = signed_in("teacher", access.staff_code("Mr Darren Lim"))
         assert r.status_code == 302 and r.headers["Location"].endswith("/timetable"), r.headers.get("Location")
         assert c.get("/api/relief/me").get_json()["name"] == "Mr Darren Lim"
         c2, r = signed_in("student", access.staff_code("Mr Darren Lim"))
         assert r.status_code == 403 and b"?as=relief" in r.data          # a staff code on another card points to the Relief card
-        # treated as a teacher: the teacher's files, not the committee's
-        assert c.get("/files/book/classes").status_code == 404 and c.get("/files/excel").status_code == 403
-    with published(None):
-        r = c.get("/timetable"); assert r.status_code == 200 and b"Not published yet" in r.data
+        # treated as a teacher: the teacher's page and files, not the committee's
+        r = c.get("/timetable"); assert r.status_code == 200 and r.data == b"the teacher page"
         assert c.get("/pdf/custom?cls=1A").status_code == 404 and c.get("/pdf/classes/1A").status_code == 404
+        assert c.get("/files/book/classes").status_code == 404 and c.get("/files/excel").status_code == 403
+        with c.session_transaction() as s: assert s["who"] == "Mr Darren Lim"
+
+@t
+def a_dropped_teacher_loses_the_teacher_routes_too():
+    fresh()
+    with published(TPUB): a, b, d = (staff("Mr Darren Lim", card="teacher") for _ in range(3))
+    with published(timetable_pub(P.fake_pub([dict(name="Ms Evelyn Koh", dept="Science")]))):
+        r = a.get("/timetable"); assert r.status_code == 200 and b"Code no longer valid" in r.data and b"the teacher page" not in r.data
+        r = b.get("/pdf/classes/1A"); assert r.status_code == 401 and r.get_json() == {"error": "Please sign in again."}
+        r = d.get("/files/book/classes"); assert r.status_code == 401 and r.get_json() == {"error": "Please sign in again."}
+        for x in (a, b, d):
+            with x.session_transaction() as s: assert "role" not in s and "who" not in s
+    with published(None):   # nothing published: no one has a staff code, so the session ends as well
+        e = A.app.test_client()
+        with e.session_transaction() as s: s["role"], s["who"] = "staff", "Mr Darren Lim"
+        assert b"Code no longer valid" in e.get("/timetable").data
 
 @t
 def teacher_code_on_the_relief_card_is_refused_with_the_right_link():
@@ -423,6 +447,28 @@ def codes_csv_lists_both_departments():
     text = RC.codes_csv(P.people(pub, []))
     rows = list(csv.reader(io.StringIO(text[1:])))
     assert rows[1][0] == "Ms Evelyn Koh" and rows[1][1] == "Science, Mathematics" and rows[1][2] == access.staff_code("Ms Evelyn Koh")
+
+@t
+def a_name_that_could_be_a_formula_is_refused_and_never_reaches_the_csv_as_one():
+    fresh()
+    for ch in "=+-@":
+        raises(ValueError, lambda: S.save(base(extra_staff=[dict(name=f" {ch}HYPERLINK(1)", note="")]), PUB, "x"), f"A name cannot start with {ch}.")
+    assert not os.path.exists(S.PATH)
+    S.save(base(extra_staff=[dict(name="Mdm A-Lim", note="")]), PUB, "x")      # a dash inside a name is fine
+    ppl = [dict(name="=Ms Formula", depts=["+Science", "Mathematics"]), dict(name="@Mr At", depts=["-Art"]), dict(name="Ms Plain", depts=["Science"])]
+    rows = list(csv.reader(io.StringIO(RC.codes_csv(ppl)[1:])))
+    assert rows[1][:2] == ["'=Ms Formula", "'+Science, Mathematics"] and rows[2][:2] == ["'@Mr At", "'-Art"] and rows[3][:2] == ["Ms Plain", "Science"], [r[:2] for r in rows]   # never the codes
+    assert rows[1][2] == access.staff_code("=Ms Formula") and rows[2][2] == access.staff_code("@Mr At")   # the code is still the person's own
+
+@t
+def role_names_are_read_without_their_spaces():
+    fresh()
+    pub = P.fake_pub([dict(name="Ms Evelyn Koh", dept="Science", role="HOD "), dict(name="Mr Darren Lim", dept="Science")],
+                     roles=[dict(role="FAJT ", what="Flexible Adjunct Teacher (part-time)")])
+    assert S.defaults(pub)["fat_role"] == "FAJT"
+    assert S.save(base(fat_role="FAJT"), pub, "x")["fat_role"] == "FAJT"
+    assert S.save(base(fat_role="HOD"), pub, "x")["fat_role"] == "HOD"
+    fresh()
 
 @t
 def slips_are_ten_to_a_page_and_a_new_page_per_department():
