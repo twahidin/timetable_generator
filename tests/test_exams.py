@@ -8,7 +8,7 @@ os.environ.update(DATA_DIR=DATA, SECRET_KEY=KEY, AI_PROVIDER="anthropic", AI_API
 sys.path.insert(0, ROOT)
 import app as A, access, store  # noqa: E402
 from relief import calendar as C  # noqa: E402
-from exams import settings as ES, fake as F, days as D  # noqa: E402
+from exams import settings as ES, fake as F, days as D, schedules as SC  # noqa: E402
 from datetime import date  # noqa: E402
 
 def raises(exc, f, text=None):
@@ -153,5 +153,51 @@ def must_rule_without_strength_still_blocks():
     assert v["blocked"]["Mr Ivan Lee"] == [(460, 580)], v["blocked"]
     pub["model"]["setup"]["rules"][0]["strength"] = "Prefer"
     assert "Mr Ivan Lee" not in D.day_view(pub, F.CAL, _sched(days=SEC3), "2026-10-05")["blocked"]
+
+def _new(kind="exam"):
+    return SC.new(kind, "Sec 3 End-of-Year Exam", ["Sec 3"], "2026-10-05", "2026-10-06", "Ms Grace Yeo", pub=F.sample_pub())
+
+@t
+def new_exam_has_the_defaults():
+    e = _new()
+    assert e["supervision"] == "invigilators" and e["seating"]["home_rooms"] is True and e["status"] == "draft"
+    assert _new("test")["supervision"] == "lesson"
+
+@t
+def save_load_list_delete():
+    pub, e = F.sample_pub(), _new()
+    saved = SC.save(e, pub, F.CAL, "Ms Grace Yeo")
+    assert SC.load(e["id"]) == saved and saved["saved_by"] == "Ms Grace Yeo"
+    assert SC.listing()[0]["name"] == "Sec 3 End-of-Year Exam"
+    SC.delete(e["id"])
+    assert SC.load(e["id"]) is None and not [r for r in SC.listing() if r["id"] == e["id"]]
+
+@t
+def save_refuses_bad_input():
+    pub = F.sample_pub()
+    def bad(text, **kw):
+        e = _new(); e.update(kw)
+        raises(ValueError, lambda: SC.save(e, pub, F.CAL, "x"), text)
+    bad("Give the exam a name.", name=" ")
+    bad("Pick at least one level or class.", levels=[])
+    bad("Check the dates: the last day is before the first.", start="2026-10-06", end="2026-10-05")
+    bad("An exam can cover at most 31 days.", start="2026-10-01", end="2026-11-01")
+    bad("07:50 is not the start of a period.", days={"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "07:50", "to": "09:00"})})
+    bad("10:30 is not the end of a period.", days={"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "08:00", "to": "10:30"})})
+    bad("On 2026-10-05 the end is before the start.", days={"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "09:00", "to": "08:20"})})
+    bad("Sec 9 is not a level of the published timetable.", levels=["Sec 9"])
+    bad("9Z is not a class of the published timetable.", classes=["9Z"])
+    bad("Give Sec 3 English Paper 1 a length in minutes.", papers=[dict(id="p1", level="Sec 3", subject="English", paper="Paper 1", minutes=0)])
+    bad("Extra time for 3A-05 must be 0 to 100 percent.", access=[dict(student="3A-05", extra=150)])
+    bad("ZZ-99 is not on the published timetable.", access=[dict(student="ZZ-99", extra=10)])
+    bad("Check the exam and try again.", levels="Sec 3")
+
+@t
+def access_arrangements_carry_forward():
+    old = _new()
+    old["access"] = [dict(student="3A-05", extra=25, own_room=False, reader=False, scribe=False, note=""),
+                     dict(student="ZZ-99", extra=10, own_room=False, reader=False, scribe=False, note="")]
+    store.write_json(os.path.join(SC.DIR, old["id"] + ".json"), old)
+    assert [a["student"] for a in _new()["access"]] == ["3A-05"]
 
 print(f"{COUNT} exams tests passed")
