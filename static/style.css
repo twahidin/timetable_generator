@@ -516,6 +516,9 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .akstart{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}.akstart button{padding:3px 8px;font-size:12px;text-align:left;white-space:normal}
 .akentry{border-top:1px solid var(--line);padding:6px 0}.akentry h4{margin:0 0 4px;font-size:12px}.akentry p{margin:0 0 4px}.akentry ul{margin:2px 0 6px;padding-left:18px}
 .akopt{border-top:1px dashed var(--line);padding:5px 0}.akopt .row{gap:6px;align-items:center}.akopt button{padding:3px 10px;font-size:12px}.akopt p{margin:2px 0 0}
+.akopt .row{flex-wrap:wrap}.akopt .fxpre{margin-top:6px}   /* Show on the board, Preview and Apply wrap in the narrow panel; Before you apply under the option */
+.akentry.stale .akold{text-decoration:line-through;opacity:.6}   /* an answer for a timetable that has changed since */
+.akentry h4 .akagain{padding:2px 8px;font-size:12px;font-weight:600;text-align:left;white-space:normal}   /* a stale entry's heading: asks it again */
 .bdcell.psel{outline:2px solid var(--accent);outline-offset:-2px}   /* the empty period selected, for the line's Ask */
 @keyframes bdflash{0%,100%{filter:none}25%,60%{filter:brightness(1.25) drop-shadow(0 0 3px #f2b632)}}
 .bdcard.flash{animation:bdflash 1s ease-in-out 1}   /* Show me: the card's pieces flash once, nothing moves */
