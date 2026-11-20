@@ -641,6 +641,32 @@ t("keyName: a class's subject with a colon, and a group", () => {
   assert.strictEqual(Board.keyName(null, "G:1MAA1"), "group 1MAA1");
 });
 
+t("popAt: beside the point, on its right when it fits, else its left, never past the card's edges", () => {
+  assert.deepStrictEqual(Board.popAt({ x: 100, y: 200 }, 320, 150, 1200, 900), { left: 114, top: 176, side: "right" });
+  assert.deepStrictEqual(Board.popAt({ x: 1000, y: 200 }, 320, 150, 1200, 900), { left: 666, top: 176, side: "left" });   // no room on the right
+  assert.deepStrictEqual(Board.popAt({ x: 100, y: 10 }, 320, 150, 1200, 900).top, 8);                                // not above the card
+  assert.deepStrictEqual(Board.popAt({ x: 100, y: 880 }, 320, 150, 1200, 900).top, 742);                             // not below it
+  assert.deepStrictEqual(Board.popAt({ x: 20, y: 200 }, 320, 150, 300, 900), { left: 8, top: 176, side: "left" });  // a card narrower than the pop-out: from its left edge
+  assert.deepStrictEqual(Board.popAt(null, 320, 150, 1200, 900), { left: 614, top: 8, side: "right" });              // no point yet: the middle of the top
+  assert.deepStrictEqual(Board.popAt({ x: NaN, y: 5 }, 320, 150, 1200, 900).top, 8);
+});
+t("popAt: with rows to keep clear, just under them (else over them), so the lesson's own row stays free to click", () => {
+  assert.deepStrictEqual(Board.popAt({ x: 300, y: 200, top: 180, bottom: 340 }, 320, 150, 1200, 900), { left: 276, top: 346, side: "below" });
+  assert.deepStrictEqual(Board.popAt({ x: 300, y: 700, top: 650, bottom: 800 }, 320, 150, 1200, 900), { left: 276, top: 494, side: "above" });   // no room under
+  assert.deepStrictEqual(Board.popAt({ x: 1150, y: 200, top: 180, bottom: 340 }, 320, 150, 1200, 900).left, 872);                                 // not past the right edge
+  assert.deepStrictEqual(Board.popAt({ x: 300, y: 100, top: 20, bottom: 820 }, 320, 150, 1200, 900).side, "right");                               // fits neither: beside the point
+});
+t("sideWidth: at least 220, at most 60% of the board and panel together", () => {
+  assert.strictEqual(Board.sideWidth(400, 1200), 400);
+  assert.strictEqual(Board.sideWidth(100, 1200), 220);
+  assert.strictEqual(Board.sideWidth(900, 1200), 720);
+  assert.strictEqual(Board.sideWidth(300.6, 1200), 301);
+  assert.strictEqual(Board.sideWidth(500, 300), 220);   // a narrow window: never under 220
+  assert.strictEqual(Board.sideWidth("350", 1200), 350);
+  assert.strictEqual(Board.sideWidth("wide", 1200), null);
+  assert.strictEqual(Board.sideWidth(null, 1200), null);
+  assert.strictEqual(Board.sideWidth("", 1200), null);
+});
 t("ruleRefusal: the server's sentence for a rule that would be broken, and nothing else", () => {
   assert.strictEqual(Board.ruleRefusal("Rule School · Whole school · Max periods in a row: Jasper Goh teaches 12 periods in a row on Even Fri, more than 9."), true);
   assert.strictEqual(Board.ruleRefusal("Rule Room · Hall · Not available: Hall is not available."), true);
