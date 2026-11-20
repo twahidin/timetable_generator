@@ -8,7 +8,7 @@ os.environ.update(DATA_DIR=DATA, SECRET_KEY=KEY, AI_PROVIDER="anthropic", AI_API
 sys.path.insert(0, ROOT)
 import app as A, access, store  # noqa: E402
 from relief import calendar as C  # noqa: E402
-from exams import settings as ES, fake as F, days as D, schedules as SC  # noqa: E402
+from exams import settings as ES, fake as F, days as D, schedules as SC, papers as P  # noqa: E402
 from datetime import date  # noqa: E402
 
 def raises(exc, f, text=None):
@@ -199,5 +199,74 @@ def access_arrangements_carry_forward():
                      dict(student="ZZ-99", extra=10, own_room=False, reader=False, scribe=False, note="")]
     store.write_json(os.path.join(SC.DIR, old["id"] + ".json"), old)
     assert [a["student"] for a in _new()["access"]] == ["3A-05"]
+
+_PUB = F.sample_pub()
+_M = _PUB["model"]
+
+def _paper(level="Sec 3", subject="English", paper="Paper 1", minutes=60, date=None, start=None, who="groups", students=None, together=""):
+    return dict(id=secrets.token_hex(3), level=level, subject=subject, paper=paper, minutes=minutes, date=date, start=start,
+                who=who, students=students or [], together=together)
+
+@t
+def who_sits_by_level_groups_and_list():
+    assert len(P.who_sits(_paper(who="level"), _M)) == 60
+    ids = P.who_sits(_paper(subject="Pure Chemistry"), _M)
+    assert len(ids) == 20 and ids[0] == "3A-01" and ids[-1] == "3B-10" and ids == sorted(ids)
+    assert P.who_sits(_paper(), _M) == ["3A-%02d" % k for k in range(1, 31)]
+    assert P.who_sits(_paper(who="students", students=["3B-04", "ZZ-99"]), _M) == ["3B-04"]
+
+@t
+def fill_from_subjects_once():
+    s = _new(); s["levels"] = ["Sec 3"]
+    got = P.fill_from_subjects(s, _M)
+    assert [p["subject"] for p in got] == ["Assembly", "Combined Science", "English", "Mathematics", "Pure Chemistry"]
+    assert all(p["paper"] == "Paper 1" and p["minutes"] == 60 and p["who"] == "groups" and p["date"] is None for p in got)
+    s["papers"] = got
+    assert P.fill_from_subjects(s, _M) == []
+
+@t
+def paper_list_round_trip():
+    s = _new()
+    s["papers"] = [_paper(date="2026-10-05", start="07:50", who="level", together="MT2"), _paper(subject="Pure Chemistry", paper="")]
+    back = P.read_paper_list(P.paper_list_xlsx(s))
+    keys = ("level", "subject", "paper", "minutes", "date", "start", "who", "together")
+    assert [{k: p[k] for k in keys} for p in back] == [{k: p[k] for k in keys} for p in s["papers"]]
+    import io, openpyxl
+    wb = openpyxl.Workbook(); wb.active.append(["Level", "Subject"]); b = io.BytesIO(); wb.save(b)
+    raises(ValueError, lambda: P.read_paper_list(b.getvalue()), "The first row must be: Level, Subject, Paper, Minutes, Date, Start, Who sits, Sits with.")
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["Level", "Subject", "Paper", "Minutes", "Date", "Start", "Who sits", "Sits with"]); ws.append(["Sec 3", "English", "", "abc"])
+    b = io.BytesIO(); wb.save(b)
+    raises(ValueError, lambda: P.read_paper_list(b.getvalue()), "Row 2: the minutes must be a whole number.")
+
+def _chk(papers, days=None, access=None, start="2026-10-05", end="2026-10-06"):
+    s = _new(); s.update(papers=papers, start=start, end=end, days=days or {}, access=access or [])
+    return P.check(s, _M, F.CAL)
+
+@t
+def check_finds_missing_times_and_non_school_days():
+    r = _chk([_paper(), _paper(subject="Mathematics", date="2026-10-12", start="08:00")], start="2026-10-05", end="2026-10-12")
+    assert "Sec 3 English Paper 1 needs a date and a start time." in r["errors"]
+    assert "Sec 3 Mathematics Paper 1 is on 2026-10-12, which is not a school day." in r["errors"] and len(r["errors"]) == 2, r
+    r = _chk([_paper(date="2026-10-07", start="08:00")])
+    assert r["errors"] == ["Sec 3 English Paper 1 is on 2026-10-07, which is not one of Sec 3's exam days."], r
+    assert _chk([_paper(date="2026-10-07", start="08:00", who="students", students=["3A-01"])])["errors"] == []
+
+@t
+def extra_time_makes_a_clash():
+    pcs = [_paper(subject="Pure Chemistry", date="2026-10-05", start="07:50"), _paper(who="level", date="2026-10-05", start="08:55")]
+    r = _chk(pcs)
+    assert r["errors"] == [] and any("less than 20 minutes between Sec 3 Pure Chemistry Paper 1 and Sec 3 English Paper 1 on 2026-10-05" in w for w in r["warnings"]), r
+    r = _chk(pcs, access=[dict(student="3A-02", extra=25, own_room=False, reader=False, scribe=False, note="")])
+    assert r["errors"] == ["1 student has Sec 3 Pure Chemistry Paper 1 and Sec 3 English Paper 1 at the same time on 2026-10-05."], r
+
+@t
+def check_window_and_together():
+    d = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "07:40", "to": "09:00"})}
+    r = _chk([_paper(date="2026-10-05", start="08:30")], days=d)
+    assert r["errors"] == ["Sec 3 English Paper 1 runs outside Sec 3's exam time on 2026-10-05 (07:40\u201309:00)."], r
+    a, b = _paper(date="2026-10-05", start="08:00", together="MT2"), _paper(subject="Mathematics", date="2026-10-05", start="09:00", together="MT2")
+    r = _chk([a, b])
+    assert "Sec 3 English Paper 1 and Sec 3 Mathematics Paper 1 share \u201cMT2\u201d but start at different times." in r["errors"], r
 
 print(f"{COUNT} exams tests passed")
