@@ -259,4 +259,18 @@ t("view: a subject or teacher outside the department chosen counts as all; so do
   const named = wide(); named.subjects.push({ subject: "constructor", dept: "AE" }); named.lessons[4].subject = "constructor";
   assert.deepStrictEqual(Groups.view(named, { level: "Sec 1", dept: "AE" }).pool.map(p => p.li), [3, 4, 5]);
 });
+t("view: all teaching groups in the setup's order, each saying its code (none for a whole class) and its band (none when on its own)", () => {
+  const v = Groups.view(wide(), { level: "Sec 1" });
+  assert.deepStrictEqual(v.all.map(g => [g.li, g.code, g.kind, g.block]), [[0, "1MAP1", "group", "Sec 1 Mathematics"], [1, "1MAP2", "group", "Sec 1 Option A"], [2, "1MAA1", "group", "Sec 1 Mathematics"],
+    [3, "", "class", ""], [4, "", "class", ""], [5, "1MU1", "group", ""]]);
+  assert.deepStrictEqual([v.all[0].title, v.all[0].level, v.all[0].students, v.all[0].teachers], ["1A, 1B · Mathematics G3", "Sec 1", 30, ["Arjun Nair"]]);
+  assert.deepStrictEqual([v.all[3].title, v.all[3].teachers], ["1A, 1B · Art", ["Bala Menon"]]);
+  assert.strictEqual(v.all.length, v.pool.length + v.lanes.reduce((n, l) => n + l.groups.length, 0));   // every single and every banded group, once
+  const w = Groups.view(wide(), { level: "", teacher: "Arjun Nair" });   // the filter narrows it as it narrows the other two lists
+  assert.deepStrictEqual(w.all.map(g => [g.li, g.level, g.block]), [[0, "Sec 1", "Sec 1 Mathematics"], [7, "Sec 2", ""]]);
+  const b = Groups.view(wide(), { level: "Sec 1", band: "Sec 1 Mathematics" });   // one band chosen: its groups alone
+  assert.deepStrictEqual(b.all.map(g => g.li), [0, 2]);
+  assert.deepStrictEqual(Groups.view(wide(), { level: "Sec 1", subject: "Art" }).all.map(g => g.li), [3, 4]);
+  assert.deepStrictEqual(Groups.view({}, {}).all, []);
+});
 console.log(`${n} cases passed`);

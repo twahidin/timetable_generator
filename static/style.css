@@ -234,6 +234,8 @@ button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .plist,.llist{max-height:max(360px,calc(100vh - 260px));overflow:auto}
 .gpool .prow{display:flex;gap:8px;align-items:center;padding:4px 2px;border-bottom:1px solid var(--line)}
 .gpool .prow.on{background:#eef5ff}
+.gpool .prow .gcode{flex:0 0 104px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gall .prow .gwhere{flex:0 0 190px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .gpool .prow input[type=checkbox]{margin:0;flex:0 0 auto}
 .glanes .grow{display:flex;gap:8px;align-items:center;padding:3px 0}
 /* step 6: the constraint tabs and typed rules */

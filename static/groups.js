@@ -239,12 +239,14 @@ var Groups = (function () {
     return out;
   }
   /* f = {level, dept, subject, teacher, band}; "" (or missing) is all, teacher NONE is "taught by nobody"; dept is the department of a row's subject.
-     -> {f, filtered, depts, subjects, teachers, bands, none, pool, lanes}:
+     -> {f, filtered, depts, subjects, teachers, bands, none, pool, lanes, all}:
      subjects and teachers are what the filter can offer at that level (the setup's order first), none whether a row there has no teacher; f is the
      filter as used (a subject or teacher that is not on offer counts as all); pool is the rows not in a band that match; lanes are the bands, each
      whole, every group saying whether it matches, and with a department, a subject or a teacher chosen (filtered) only the bands with a group that matches;
      depts are the departments of the subjects at the level (the school's order first);
-     bands are the names of the level's bands, and with one of them chosen (band) the lanes are that band alone (the pool is not narrowed by it) */
+     bands are the names of the level's bands, and with one of them chosen (band) the lanes are that band alone (the pool is not narrowed by it);
+     all is every teaching group that matches, single and banded, in the setup's order: a pool row with its code ("" for a whole class) and block ""
+     (in no band), a band's group with its band as block; with one band chosen, that band's groups alone */
   function view(spec, f) {
     f = f || {};
     var level = f.level || "", P = pool(spec, level, ""), L = lanes(spec, level), all = P.slice(), subj = [], who = [], dp = [], none = false, deptOf = Object.create(null), listed = (spec.school || {}).departments;
@@ -269,7 +271,14 @@ var Groups = (function () {
       c.groups = l.groups.map(function (g) { var d = {}; Object.keys(g).forEach(function (k) { d[k] = g[k]; }); d.match = hit(g); return d; });
       return c;
     }).filter(function (l) { return (!band || l.block === band) && (!filtered || l.groups.some(function (g) { return g.match; })); });
-    return { f: { level: level, subject: subject, teacher: teacher, band: band, dept: dept }, filtered: filtered, depts: depts, subjects: subjects, teachers: teachers, bands: bands, none: none, pool: P.filter(hit), lanes: shown };
+    var every = P.map(function (p) { var d = {}; Object.keys(p).forEach(function (k) { d[k] = p[k]; }); d.code = p.kind === "group" ? p.code : ""; d.block = ""; return d; });
+    L.forEach(function (l) {
+      l.groups.forEach(function (g) {
+        every.push({ li: g.li, kind: "group", code: g.code, title: g.classes.join(", ") + " · " + g.subject, subject: g.subject, level: l.level, classes: g.classes.slice(), students: g.students, teachers: g.teachers, block: l.block });
+      });
+    });
+    every = every.filter(function (g) { return hit(g) && (!band || g.block === band); }).sort(function (a, b) { return a.li - b.li; });
+    return { f: { level: level, subject: subject, teacher: teacher, band: band, dept: dept }, filtered: filtered, depts: depts, subjects: subjects, teachers: teachers, bands: bands, none: none, pool: P.filter(hit), lanes: shown, all: every };
   }
 
   return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, pullOutCode: pullOutCode, lanes: lanes, pool: pool, view: view, NONE: NONE, dropRow: dropRow, dropBand: dropBand, bandRules: bandRules, renameBand: renameBand,
