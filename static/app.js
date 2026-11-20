@@ -3317,7 +3317,7 @@ function fxKeep(draw) {   // the typed box (and the buttons that answer it) keep
    The lessons not placed are cards of their own (d and p null) in the Not placed tray beside the rows; bdCard finds them too. ask: the
    question of a click or drop where another lesson is ({id, slot, q}); step: the counter being stepped through (its fade lasts while a
    card is selected). */
-const BD = { gen: 0, sp: null, dragEl: null, tabT: 0, over: 0 };   // gen: the board fetch now; sp: the slots fetched for that board, by card id (bdSlotsP); dragEl: the element being dragged (kept in its place while the board is drawn again under it, bdKeep); tabT: the half second over a day's tab; over: when the last dragover came
+const BD = { gen: 0, sp: null, dragEl: null, tabT: 0, over: 0, popXY: null, grip: null };   // gen: the board fetch now; sp: the slots fetched for that board, by card id (bdSlotsP); dragEl: the element being dragged (kept in its place while the board is drawn again under it, bdKeep); tabT: the half second over a day's tab; over: when the last dragover came
 /* the rows of the board are by class (the default: a mode or a row with no by), by teacher or by room (mode.by); the choice lives in
    S.board.mode, so it lasts through a redraw and a fetch and goes when step 8 is left */
 const BDROWS = [["class", "Classes"], ["teacher", "Teachers"], ["room", "Rooms"]];
@@ -3480,8 +3480,11 @@ function bdHTML() {   // the timetable card: the board with its side panel, the 
       : `<div class="bdgrp"><button data-bdfold="${esc(fk)}" aria-expanded="${!folded}">${folded ? "▸" : "▾"} ${esc(g.name)}${folded ? ` (${k} ${k === 1 ? kind[0] : kind[1]} hidden)` : ""}</button></div>`;
     return gh + (folded ? "" : g.rows.map(r => bdRowHTML(r, b, cycle, hit, warned)).join(""));
   }).join("");
-  return head + controls + bdCountersHTML(d) + `<div class="bdsel" id="bdLine" aria-live="polite">${bdLineHTML()}</div>
-    <div class="bdmain"><div class="bdwrap"><div class="bdin${by === "class" ? "" : " people"}" style="min-width:calc(var(--bdlab) + ${d.NP} * var(--bdw))">${hdr}${body}</div></div>${bdSideHTML(b, hit, parts)}</div>` + tail;
+  setTimeout(bdPopDraw, 0);   // the pop-out is placed once the card is on the page
+  return head + controls + bdCountersHTML(d) + bdHowHTML() + `<div class="bdsel" id="bdLine" aria-live="polite">${bdLineHTML()}</div>
+    <div class="bdmain"><div class="bdwrap"><div class="bdin${by === "class" ? "" : " people"}" style="min-width:calc(var(--bdlab) + ${d.NP} * var(--bdw))">${hdr}${body}</div></div>`
+    + `<div class="bdgrip" id="bdGrip" role="separator" aria-orientation="vertical" aria-label="Drag to make the side panel wider or narrower" title="Drag to make the side panel wider or narrower. Double-click: back to its usual width."></div>${bdSideHTML(b, hit, parts)}</div>`
+    + `<div class="bdpop" id="bdPop" role="dialog" aria-live="polite" hidden></div>` + tail;
 }
 /* the side panel beside the board (under it on a narrow window): three tabs, and a fourth, Lesson, while a lesson is selected by a click
    (bdLessonOpen), and Ask while it is about something (akOpen), four or five tabs on two rows; the one chosen kept while step 8 is open; with none chosen,
@@ -3500,7 +3503,8 @@ function bdSideHTML(b, hit, parts) {
   const all = [["tray", "Not placed", nU], ["warn", "Warnings", nW], ["changes", "Changes", nC]].concat(b.lesson ? [["lesson", "Lesson", null]] : [], b.about ? [["ask", "Ask", null]] : []);   // Lesson only while its lesson is selected (bdSideTab); Ask while it is about something
   const tabs = all.map(([k, l, n]) => `<button role="tab" class="bdstab${k === tab ? " on" : ""}" data-bdside="${k}" aria-selected="${k === tab}">${esc(l)}${n === null ? "" : ` ${n}`}</button>`).join("");
   const body = tab === "lesson" ? bdLessonHTML(b) : tab === "ask" ? akHTML(b) : tab === "tray" ? (d ? bdTrayHTML(b, hit) : `<p class="muted small">Loading the timetable…</p>`) : tab === "warn" ? parts.warns : parts.changes;
-  return `<div id="bdSide" data-tab="${tab}"${all.length > 3 ? ` class="two"` : ""}><div class="bdstabs" role="tablist">${tabs}</div><p class="bdtdrop">Drop here to lift it out.</p><div class="bdsbody">${body}</div></div>`;
+  const w = bdSideW();
+  return `<div id="bdSide" data-tab="${tab}"${all.length > 3 ? ` class="two"` : ""}${w ? ` style="width:${w}px;flex-basis:${w}px"` : ""}><div class="bdstabs" role="tablist">${tabs}</div><p class="bdtdrop">Drop here to lift it out.</p><div class="bdsbody">${body}</div></div>`;
 }
 const bdSideAt = () => { const el = $("#bdSide"), y = el && el.querySelector(".bdsbody"); return el && y ? { tab: el.dataset.tab, top: y.scrollTop } : null; };   // the tab shown and how far it is scrolled
 function bdSideBack(at) { const el = $("#bdSide"), y = el && el.querySelector(".bdsbody"); if (at && y && el.dataset.tab === at.tab) y.scrollTop = at.top; }
@@ -3641,7 +3645,12 @@ function bdCountersHTML(d) {   // above the hint: what is wrong on the board, a 
   return `<div class="row bdcount">${Board.COUNTERS.map(([k, label]) => `<button data-bdcount="${k}" class="${n[k] ? (k === "noroom" ? "warn" : "crit") : ""}"${n[k] ? "" : ` aria-disabled="true"`}>${esc(label)} ${n[k]}</button>`).join("")}<button data-bdwarn="1">Other warnings ${w}</button>${undo}</div>`;
 }
 const bdLastFix = () => { const l = S.draft && S.draft.fixes; return l && l.length ? l[l.length - 1] : null; };
-function bdLineHTML() {   // the one status line under the hint: the swap question, else the place under the pointer, else the selected card, else the last change
+function bdLineHTML() {   // the one-line status under the green box: where a dragged lesson would land or what the board waits for, else the last change
+  const b = S.board; if (!b || !b.data) return "";
+  if (b.pt) return `<span>${esc(b.pt)}</span>`;
+  return b.note ? `<span title="${esc(b.note)}">${esc(b.note)}</span>` : "";
+}
+function bdPopHTML() {   // the pop-out beside where the pointer was last pressed: a yes or no question, else the swap question, else the delete question, else the selected lesson, else the empty period clicked; "" when there is nothing to ask or do
   const b = S.board, d = b.data; if (!d) return "";
   const c = b.sel !== null ? bdCard(b.sel) : null, day = x => (d.days || [])[x] || "";
   if (b.ask && b.ask.yes) {   // a yes or no question (bdYesNo): its sentence, small lines under it, the question itself, its Yes and Cancel
@@ -3658,30 +3667,85 @@ function bdLineHTML() {   // the one status line under the hint: the swap questi
     const why = b.del.j.why ? esc(b.del.j.why) : "", said = !no ? "" : b.del.j.plan ? `<span class="bdwhy">Step 5 asks for this lesson.</span>${why ? `<span class="muted small">${why}</span>` : ""}` : why ? `<span class="bdwhy">${why}</span>` : "";   // "Step 5 asks" only when the plan is the reason
     return `<span>${esc(`Delete ${k.what}?`)}</span>${said}<button data-bddelgo="1"${dis}>Delete</button><button data-bdcancel="1">Cancel</button>`;
   }
-  if (b.pt) return `<span>${esc(b.pt)}</span>`;
   if (c) {
-    const n = (c.rows || []).length, grp = c.band ? ` · ${n} group${n === 1 ? "" : "s"}` : "", note = b.note ? `<span class="muted small">${esc(b.note)}</span>` : "";
+    const n = (c.rows || []).length, grp = c.band ? ` · ${n} group${n === 1 ? "" : "s"}` : "";
     const why = c.why ? `<span class="bdwhy">${esc(c.why)}</span>` : "", del = `<button data-bddel="1"${FX.busy ? " disabled" : ""}>Delete this lesson</button>`;
     const sw = bdBy() === "class" ? "" : `<span class="bdwhy">${esc(BDWHY.switch)}</span>`;   // a lesson of the tray or of step 5's list is placed from the Classes rows only
-    if (c.entry) { const s = c.entry; return `${note}<span>${esc(s.name)} · ${s.n} period${s.n === 1 ? "" : "s"} · has ${s.have} of ${s.want}</span>${sw}<button data-bdclose="1">Close</button>`; }
-    if (bdInTray(c)) { const was = bdWas(d, c); return `${note}<span>${esc(c.what)} · Not placed${was ? ` (${esc(was)})` : ""}${grp}</span>${sw}<button data-bdask="1">Ask</button>${del}<button data-bdclose="1">Close</button>`; }   // its warnings are in the Lesson tab
+    if (c.entry) { const s = c.entry; return `<span>${esc(s.name)} · ${s.n} period${s.n === 1 ? "" : "s"} · has ${s.have} of ${s.want}</span>${sw}<button data-bdclose="1">Cancel</button>`; }
+    if (bdInTray(c)) { const was = bdWas(d, c); return `<span>${esc(c.what)} · Not placed${was ? ` (${esc(was)})` : ""}${grp}</span>${sw}<button data-bdask="1">Ask</button>${del}<button data-bdclose="1">Cancel</button>`; }   // its warnings are in the Lesson tab
     const time = ((d.times || [])[c.p] || [])[0];
-    return `${note}<span>${esc(c.what)} · ${esc(day(c.d))} period ${c.p}${time ? ` (${esc(time)})` : ""}${grp}</span>${why}
-      <button data-bdask="1">Ask</button><button data-bdlift="1"${FX.busy ? " disabled" : ""}>Lift out</button>${del}<button data-bdclose="1">Close</button>`;
+    return `<span>${esc(c.what)} · ${esc(day(c.d))} period ${c.p}${time ? ` (${esc(time)})` : ""}${grp}</span>${why}
+      <button data-bdask="1">Ask</button><button data-bdlift="1"${FX.busy ? " disabled" : ""}>Lift out</button>${del}<button data-bdclose="1">Cancel</button>`;
   }
   if (b.place) {   // an empty period clicked with no lesson selected: where it is, then Ask and Close
     const pl = b.place, time = ((d.times || [])[pl.p] || [])[0];
-    return `<span>${esc(akRowName(pl))} · ${esc(day(pl.d))} period ${pl.p}${time ? ` (${esc(time)})` : ""} · empty</span><button data-bdask="1">Ask</button><button data-bdclose="1">Close</button>`;
+    return `<span>${esc(akRowName(pl))} · ${esc(day(pl.d))} period ${pl.p}${time ? ` (${esc(time)})` : ""} · empty</span><button data-bdask="1">Ask</button><button data-bdclose="1">Cancel</button>`;
   }
-  return b.note ? `<span>${esc(b.note)}</span>` : `<span class="muted small">${BDHINT}</span>`;   // with nothing to say, the line holds the hint
+  return "";
 }
 function bdLineWarnings(c, most) {   // the selected lesson's open warnings, a short line each (a critical one led by its kind), at most most (3)
   const ws = bdWarned()[c.id] || [], max = most || 3;
   const line = w => { const k = w.crit ? Draft.critWord(w.crit) : "", t = String(w.text || ""); return k && t.indexOf(k + ":") !== 0 ? `${k}: ${t}` : t; };   // a sentence that already starts with its kind is not led twice
   return ws.slice(0, max).map(w => `<span class="bdlw${w.crit ? " crit" : ""}">${esc(line(w))}</span>`).join("") + (ws.length > max ? `<span class="bdlw muted">and ${ws.length - max} more in Warnings</span>` : "");
 }
-const BDHINT = "Drag a lesson to another time on its row, or click it and then click a place. Green is clean, amber bends a rule, red lands with a problem, blue has another lesson there and asks, grey cannot take it. Ctrl or Cmd+X lifts the selected lesson out; Ctrl or Cmd+V puts it where the pointer is; Ctrl or Cmd+Z undoes the last change. Click a name at the left to see its whole cycle. Right-click a lesson or an empty period, or press Ask, to see what can be done there.";
-function bdLineDraw() { const el = $("#bdLine"); if (el && S.board && S.board.data) el.innerHTML = bdLineHTML(); }
+const BDHOW = "tt.bdhow";   // this browser's choice to fold the green box on step 8 ("closed"), kept in localStorage
+function bdHowShut() { try { return localStorage.getItem(BDHOW) === "closed"; } catch (e) { return false; } }
+function bdHowHTML() {   // how to change the timetable: always in the same place above the board, folded to its title line when hidden
+  const shut = bdHowShut(), sw = c => `<i class="bdkey ${c}"></i>`;
+  return `<div class="bdhow${shut ? " shut" : ""}" id="bdHow"><button class="bdhowx" data-bdhow="1">${shut ? "Show" : "Hide"}</button><b>How to change the timetable</b><ul>
+    <li><b>Move a lesson:</b> drag it to another time on its row, or click it and then click a place.</li>
+    <li><b>Colours:</b> ${sw("ok")}green is clean, ${sw("prefer")}amber bends a rule, ${sw("no")}red lands with a problem, ${sw("ask")}blue has another lesson there and asks, ${sw("na")}grey cannot take it.</li>
+    <li><b>Ask:</b> right-click a lesson or an empty period, or press Ask, to see what can be done there.</li>
+    <li><b>Whole cycle:</b> click a name at the left.</li>
+    <li><b>Keys:</b> Ctrl or Cmd+X lifts the selected lesson out; Ctrl or Cmd+V puts it where the pointer is; Ctrl or Cmd+Z undoes the last change; Esc closes the pop-out.</li></ul></div>`;
+}
+function bdLineDraw() { const el = $("#bdLine"); if (el && S.board && S.board.data) el.innerHTML = bdLineHTML(); bdPopDraw(); }
+function bdPopDraw() {   // the pop-out again: hidden while a lesson is in the air or a drop waits, and when there is nothing in it; else placed beside where the pointer was last pressed
+  const pop = $("#bdPop"), box = $("#bdBox"), b = S.board; if (!pop || !box) return;
+  const html = b && b.data && b.drag === null && !b.wait ? bdPopHTML() : "";
+  if (!html) { pop.hidden = true; pop.innerHTML = ""; return; }
+  pop.innerHTML = html; pop.hidden = false;
+  const r = box.getBoundingClientRect(), pt = BD.popXY ? Object.assign({}, BD.popXY) : null, panel = !!(pt && pt.side && b.ask && b.ask.lesson);   // panel: a question from the side panel's lists, beside where it was asked
+  const sel = pt && !panel ? [...box.querySelectorAll(".bdmain:not(.bdold) .bdcard.sel")].map(x => x.getBoundingClientRect()).filter(q => q.height) : [];
+  if (sel.length) {   // the selected lesson's rows stay free to click
+    pt.top = Math.min(...sel.map(q => q.top)) - r.top; pt.bottom = Math.max(...sel.map(q => q.bottom)) - r.top;
+    if (pt.side) pt.x = sel[0].left - r.left + 24;   // pressed in the side panel: under the lesson itself, not under the panel
+  }
+  const at = Board.popAt(pt, pop.offsetWidth, pop.offsetHeight, box.clientWidth, box.scrollHeight);
+  pop.style.left = at.left + "px"; pop.style.top = at.top + "px"; pop.dataset.side = at.side;
+}
+document.addEventListener("pointerdown", e => {   // where the pointer was pressed in the timetable card (not in the pop-out itself): the pop-out goes beside it
+  const box = $("#bdBox"); if (!box || !e.target || !box.contains(e.target) || e.target.closest("#bdPop")) return;
+  const r = box.getBoundingClientRect(), row = e.target.closest(".bdrow"), q = row ? row.getBoundingClientRect() : null;
+  BD.popXY = Object.assign({ x: e.clientX - r.left, y: e.clientY - r.top, side: !!e.target.closest("#bdSide") }, q ? { top: q.top - r.top, bottom: q.bottom - r.top } : {});   // side: pressed in the side panel (a question from its lists goes beside the pointer)
+}, true);
+document.addEventListener("drop", e => {   // a drop: the question it asks goes beside where the lesson was let go
+  const box = $("#bdBox"); if (!box || !e.target || !box.contains(e.target)) return;
+  const r = box.getBoundingClientRect(); BD.popXY = { x: e.clientX - r.left, y: e.clientY - r.top };
+}, true);
+/* the side panel's width: dragged with the grip between the board and the panel, kept in this browser (localStorage), back to its usual width on a double-click */
+const BDSIDE = "tt.bdside";
+function bdSideW() { try { const v = localStorage.getItem(BDSIDE); return v ? Board.sideWidth(v, Infinity) : null; } catch (e) { return null; } }
+document.addEventListener("pointerdown", e => {
+  const g = e.target && e.target.closest && e.target.closest("#bdGrip"), side = $("#bdSide"), main = g && g.parentElement; if (!g || !side || !main) return;
+  e.preventDefault(); BD.grip = { x: e.clientX, w: side.offsetWidth, total: main.clientWidth }; g.classList.add("on");
+  try { g.setPointerCapture(e.pointerId); } catch (x) { }
+});
+document.addEventListener("pointermove", e => {
+  const s = BD.grip, side = $("#bdSide"); if (!s || !side) return;
+  const w = Board.sideWidth(s.w + (s.x - e.clientX), s.total); if (w === null) return;
+  side.style.width = w + "px"; side.style.flexBasis = w + "px"; s.now = w;
+});
+document.addEventListener("pointerup", () => {
+  const s = BD.grip; if (!s) return; BD.grip = null; const g = $("#bdGrip"); if (g) g.classList.remove("on");
+  if (s.now) { try { localStorage.setItem(BDSIDE, String(s.now)); } catch (e) { } }
+  bdPopDraw();
+});
+document.addEventListener("dblclick", e => {
+  if (!e.target || !e.target.closest || !e.target.closest("#bdGrip")) return;
+  try { localStorage.removeItem(BDSIDE); } catch (x) { }
+  const side = $("#bdSide"); if (side) { side.style.width = ""; side.style.flexBasis = ""; } bdPopDraw();
+});
 function bdBusy() {   // a post starts or ends: the board's buttons that post follow it, without a redraw
   const box = $("#bdBox"); if (!box) return;
   box.querySelectorAll("[data-bdundo], [data-bdswap], [data-bdbeside], [data-bdpush], [data-bdyes], [data-bdlift], [data-bddel], [data-bddelgo], [data-bdlt], [data-bdlr], [data-bdlall]").forEach(x => { x.disabled = FX.busy; });
@@ -3957,6 +4021,10 @@ function bdClick(b) {   // true when the click was the board's
   if (d.bdall !== undefined) { bd.mode = { kind: "day", d: bd.mode.d, by: bdBy() }; bd.place = null; bdDraw(); return true; }
   if (d.bdyes !== undefined) { const a = bd.ask; if (a && a.run) { if (FX.busy) toast(BDWHY.busy); else a.run(); } return true; }   // a yes or no question's Yes
   if (d.bdfold !== undefined) { if (bd.fold[d.bdfold]) delete bd.fold[d.bdfold]; else bd.fold[d.bdfold] = true; bdDraw(); return true; }
+  if (d.bdhow !== undefined) {   // the green box folded or opened: kept in this browser; nothing else is drawn again
+    const shut = !bdHowShut(); try { if (shut) localStorage.setItem(BDHOW, "closed"); else localStorage.removeItem(BDHOW); } catch (e) { }
+    const h = $("#bdHow"); if (h) { h.classList.toggle("shut", shut); b.textContent = shut ? "Show" : "Hide"; } bdPopDraw(); return true;
+  }
   if (d.bdclose !== undefined) { bd.sel = null; bd.place = null; bd.ask = null; bd.del = null; bdDraw(); bdWant(); return true; }
   if (d.bdask !== undefined) {   // the line's Ask: about the lesson selected (from the row it was clicked on), else the empty period selected
     const c = bd.sel !== null ? bdCard(bd.sel) : null;

@@ -431,13 +431,34 @@ table.classtable td:nth-child(4) select{min-width:104px}
 .bdrows{align-items:center;gap:6px;margin:6px 0 0}
 .bdrows button.on{background:var(--navy);color:#fff;border-color:var(--navy)}   /* the kind of rows shown */
 .bdin.people{--bdlab:128px}   /* a teacher's or room's name is longer than a class's */
-.bdsel .bdq{font-weight:600}   /* a yes or no question's own words */
+.bdsel .bdq,.bdpop .bdq{font-weight:600}   /* a yes or no question's own words */
 .bdtab.hover{outline:3px solid var(--accent);outline-offset:1px}   /* a card in the air waits over this day's tab */
 #bdBox .bdold{display:none}   /* the board's rows and tray as they were when a drag began, kept (hidden) until it ends */
 #bdTray h3.bdshort{margin-top:10px}
 .bdcard.tray.short b{white-space:normal}
 .bdfind select{margin-left:4px}
-.bdsel{display:flex;gap:6px 8px;align-items:center;align-content:flex-start;flex-wrap:wrap;background:var(--chip);border-radius:8px;padding:6px 10px;margin:6px 0;height:110px;overflow:auto;box-sizing:border-box}   /* a fixed height: the rows never move under the pointer when the line changes */
+.bdsel{display:flex;gap:6px 8px;align-items:center;background:var(--chip);border-radius:8px;padding:0 10px;margin:6px 0;height:30px;overflow:hidden;box-sizing:border-box;font-size:13px}   /* one line, a fixed height: the rows never move under the pointer when it changes */
+.bdsel span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+#bdBox{position:relative}
+.bdhow{position:relative;background:#e7f6ec;border:1px solid #9fd8b0;border-radius:12px;padding:10px 70px 10px 16px;margin:10px 0 4px;color:#1d5b33;font-size:14.5px;line-height:1.45}
+.bdhow>b{display:block;font-size:15px}
+.bdhow ul{margin:4px 0 0;padding-left:20px;columns:2 360px;column-gap:32px}.bdhow li{margin:2px 0;break-inside:avoid}
+.bdhow.shut ul{display:none}
+.bdhowx{position:absolute;top:8px;right:10px;border:0;background:none;color:#1d5b33;text-decoration:underline;cursor:pointer;font-size:13px;padding:2px 4px}
+.bdkey{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:3px;border:1px solid rgba(0,0,0,.08)}
+.bdkey.ok{background:#bfe8cc}.bdkey.prefer{background:#f6dca4}.bdkey.no{background:#f3b9c2}.bdkey.ask{background:#bcd3f4}.bdkey.na{background:#d6dbe2}
+.bdpop{position:absolute;z-index:30;width:340px;max-width:calc(100% - 16px);box-sizing:border-box;display:flex;flex-wrap:wrap;gap:6px 6px;align-items:center;background:#fff;border:1px solid #c9d4e3;border-radius:12px;box-shadow:0 12px 32px rgba(20,40,70,.22);padding:12px 14px;font-size:13.5px;color:var(--ink,#1d2735)}
+.bdpop[hidden]{display:none}
+.bdpop>span{flex:1 0 100%}
+.bdpop>span:first-child{font-weight:600;font-size:14px}
+.bdpop .bdwhy{background:#fff4e0;border-radius:8px;padding:6px 8px;font-size:12.5px}
+.bdpop button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 11px;font-size:13px;cursor:pointer}
+.bdpop [data-bdcancel],.bdpop [data-bdclose]{margin-left:auto}
+.bdpop [data-bddel],.bdpop [data-bddelgo]{color:#b4233b;border-color:#f0c4cc}
+.bdpop [data-bdyes],.bdpop [data-bdswap]{background:#2563eb;border-color:#2563eb;color:#fff}
+.bdgrip{flex:0 0 10px;align-self:stretch;margin:0 -4px;cursor:col-resize;border-radius:6px;position:relative;touch-action:none}
+.bdgrip:after{content:"";position:absolute;left:3px;top:50%;width:4px;height:44px;margin-top:-22px;border-radius:2px;background:#b8c4d4}
+.bdgrip:hover,.bdgrip.on{background:#e3eaf4}
 .bdsel:empty{background:none}
 .bdtitle{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;height:36px;overflow:hidden}.bdtitle h2{margin:0;flex:0 0 auto}
 .bdundo{display:inline-flex;gap:8px;align-items:center;flex-wrap:nowrap;min-width:0}.bdundo button{flex:0 0 auto}.bdundo span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -524,5 +545,5 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .bdcard.flash{animation:bdflash 1s ease-in-out 1}   /* Show me: the card's pieces flash once, nothing moves */
 #bdFoot{margin-top:12px}
 @media (max-width:1099px){#bdSide{flex-basis:220px;width:220px}}
-@media (max-width:899px){.bdmain{flex-direction:column;align-items:stretch}#bdSide{flex:none;width:auto;height:320px;min-height:0}}
+@media (max-width:899px){.bdmain{flex-direction:column;align-items:stretch}#bdSide{flex:none;width:auto!important;flex-basis:auto!important;height:320px;min-height:0}.bdgrip{display:none}}
 .bdcard.tray .bdwas{white-space:normal}

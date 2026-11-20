@@ -531,6 +531,31 @@ var Board = (function () {
      (verify's rule warnings). Such a fix may be made anyway, once the page has said why and asked */
   function ruleRefusal(sentence) { return typeof sentence === "string" && /^Rule .+?: ./.test(sentence); }
 
+  /* where step 8's pop-out goes. pt: where the pointer was last pressed in the timetable card, in the card's pixels ({x, y}), with the rows
+     to keep clear when there are some ({top, bottom}: the selected lesson's rows, or the row of the empty period clicked); none: the middle
+     of the card's top. With rows to keep clear: just under them, from near x, else just over them; without (or when neither fits): beside
+     the point, on its right when it fits, else on its left. Never past the card's edges (8 pixels in); w and h the pop-out's size, W and H
+     the card's -> {left, top, side: "below" | "above" | "right" | "left"} */
+  function popAt(pt, w, h, W, H) {
+    var gap = 14, fin = function (v) { return typeof v === "number" && isFinite(v); }, ok = pt && fin(pt.x) && fin(pt.y);
+    var x = ok ? pt.x : W / 2, y = ok ? pt.y : 0, inX = function (l) { return Math.round(Math.max(8, Math.min(l, W - w - 8))); };
+    if (ok && fin(pt.top) && fin(pt.bottom)) {
+      if (pt.bottom + 6 + h <= H - 8) return { left: inX(x - 24), top: Math.round(pt.bottom + 6), side: "below" };
+      if (pt.top - 6 - h >= 8) return { left: inX(x - 24), top: Math.round(pt.top - 6 - h), side: "above" };
+    }
+    var left = x + gap, side = "right";
+    if (left + w > W - 8) { left = x - gap - w; side = "left"; }
+    return { left: inX(left), top: Math.round(Math.max(8, Math.min(y - 24, H - h - 8))), side: side };
+  }
+
+  /* the width of step 8's side panel when it is dragged to w pixels: at least 220, at most 60% of the board and panel together (total);
+     null for a width that is not a number */
+  function sideWidth(w, total) {
+    var n = Number(w), lo = 220, hi = Math.max(lo, Math.floor((Number(total) || 0) * 0.6));
+    if (w === null || w === undefined || w === "" || !isFinite(n)) return null;
+    return Math.max(lo, Math.min(hi, Math.round(n)));
+  }
+
   /* whether venues a and b share a single room (parts: a combined venue's name -> its rooms, or undefined): a venue meets itself and, for a combined venue, each of its rooms */
   function roomsMeet(parts, a, b) {
     if (!a || !b) return false;
@@ -570,6 +595,6 @@ var Board = (function () {
            MARK: MARK, COUNTERS: COUNTERS, critical: critical, badge: badge, tray: tray, counts: counts, hits: hits, step: step,
            lands: lands, forced: forced, asks: asks, offers: offers, addFix: addFix, liftFix: liftFix, deleteFix: deleteFix, question: question,
            warned: warned, flag: flag, at: at, clashPlace: clashPlace, of: of, hand: hand, handText: handText, people: people, venues: venues,
-           teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, ruleRefusal: ruleRefusal, roomsMeet: roomsMeet };
+           teacherFix: teacherFix, roomFix: roomFix, keyName: keyName, busyRefusal: busyRefusal, ruleRefusal: ruleRefusal, popAt: popAt, sideWidth: sideWidth, roomsMeet: roomsMeet };
 })();
 if (typeof module !== "undefined") module.exports = Board;
