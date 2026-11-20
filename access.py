@@ -16,11 +16,19 @@ def personal_codes_on():
     """personal codes need SECRET_KEY: made with an empty key, anyone who knows a Student ID could work out the code"""
     return bool(os.environ.get("SECRET_KEY"))
 
-def personal_code(student_id):
-    d = hmac.new(secret(), ("timetable-personal:" + str(student_id)).encode(), hashlib.sha256).digest()
+def _code(material):
+    """an 8-letter code, as XXXX-XXXX, from the HMAC of the full input string"""
+    d = hmac.new(secret(), material.encode(), hashlib.sha256).digest()
     n = int.from_bytes(d[:8], "big"); out = ""
     for _ in range(8): out += ALPHABET[n % len(ALPHABET)]; n //= len(ALPHABET)
     return out[:4] + "-" + out[4:]
+
+def personal_code(student_id):
+    return _code("timetable-personal:" + str(student_id))
+
+def staff_code(name):
+    """a member of staff's own sign-in code, from their name; needs SECRET_KEY like personal_code"""
+    return _code("timetable-staff:" + str(name).strip())
 
 def configured():
     """which general codes are set, and problems to show the committee"""
@@ -33,15 +41,17 @@ def configured():
     if short: probs.append(f"{', '.join(short)} should be at least 6 letters or digits.")
     return have, probs
 
-def match(code, personal):
-    """-> (role, student_id) or (None, None). personal: {normalised code: student id}"""
+def match(code, personal, staff=None):
+    """-> (role, value) or (None, None). personal: {normalised code: student id}; staff: {normalised code: staff name}"""
     c = norm(code)
     if not c: return None, None
     for role, var in ROLES:
         v = norm(os.environ.get(var))
         if v and hmac.compare_digest(v, c): return role, None
     sid = personal.get(c)
-    return ("personal", sid) if sid is not None else (None, None)
+    if sid is not None: return "personal", sid
+    name = (staff or {}).get(c)
+    return ("staff", name) if name is not None else (None, None)
 
 class Limiter:
     """at most `n` wrong codes per `window` seconds from one address"""

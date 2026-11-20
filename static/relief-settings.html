@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relief settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+.rs{max-width:1060px;margin:0 auto;padding:20px}
+.rs fieldset{border:0;margin:0;padding:0;min-width:0}
+.rs .notice{max-width:none}
+.setting{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;padding:14px 0;border-bottom:1px solid var(--line)}
+.setting:last-child{border-bottom:0}
+.setting .k{font-weight:600}
+.setting .v{min-width:0}
+.setting .k .small{font-weight:400;margin-top:2px;line-height:1.4}
+.setting h3{margin:0 0 6px}
+.setting h3.next{margin-top:16px}
+.savebar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+.savebar.last{margin:0}
+.savebar .dirty{color:#7a4b00;font-size:13px}
+.savebar .msg,.dlmsg{font-size:13px}
+.msg.bad{color:var(--warn);font-weight:600}
+.msg.ok{color:var(--ok)}
+.chiprow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.pchip{display:inline-flex;align-items:center;gap:2px;padding:3px 3px 3px 10px;font-size:13px}
+.pchip button{border:0;background:transparent;padding:0 6px;border-radius:999px;line-height:1.5;color:var(--muted);box-shadow:none}
+.pchip button:hover:not(:disabled){background:rgba(27,35,48,.08);color:var(--warn);box-shadow:none}
+.picker{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px;max-width:440px}
+.picker .row{flex-wrap:nowrap}
+.picker input{flex:1;min-width:0}
+.picker ul{list-style:none;margin:6px 0 0;padding:0;max-height:240px;overflow:auto}
+.picker li button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;border:0;background:transparent;padding:6px 8px;border-radius:6px;box-shadow:none}
+.picker li button:hover:not(:disabled),.picker li button.first{background:rgba(37,99,235,.08);box-shadow:none}
+.picker li .muted{font-size:12px;white-space:nowrap}
+.picker .none{padding:6px 8px}
+.staff td input{width:100%}
+.staff td.x,.cal td.x{width:1%;white-space:nowrap}
+.rule{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:flex-start;background:#fafbfc;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px}
+.rule .num{font-weight:700;color:var(--navy);min-width:16px;padding-top:5px}
+.rule textarea{flex:1 1 240px}
+.rule .acts{display:flex;gap:4px;flex:none}
+.fixed{margin-top:10px;line-height:1.5}
+.locked{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:6px;white-space:nowrap}
+.line{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px}
+.line:last-child{margin-bottom:0}
+.line input[type=number]{width:72px}
+.cal{max-height:none}
+.cal td input,.cal td select{width:100%;min-width:120px}
+.cal td input[type=date]{min-width:140px}
+.cal td.empty{color:var(--muted);padding:8px}
+.add{margin-top:8px}
+.codes{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+@media (max-width:760px){.setting{grid-template-columns:minmax(0,1fr);gap:6px}.rs{padding:12px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">⇄</span><div><div class="title">Relief settings</div><div class="sub">The relief team, the rules relief follows, the limits, the times and the school calendar.</div></div></div>
+  <div class="top-actions" id="links">
+    <a class="ghost filebtn" href="/logout">Sign out</a>
+  </div>
+</header>
+<main class="rs" id="main">
+  <div class="card"><p class="muted">Loading…</p></div>
+</main>
+<script src="/static/relief-settings.js"></script>
+</body>
+</html>
