@@ -34,6 +34,8 @@ def who_sits(paper, model) -> list:
         have = {s["id"] for s in students}
         return sorted({i for i in paper.get("students") or [] if i in have})
     out = set()
+    sit = {s["id"]: s for s in students if _student_level(model, s) == paper.get("level")}
+    students = list(sit.values())
     for l in model.get("lessons") or []:
         if l.get("level") != paper.get("level") or l.get("subject") != paper.get("subject"):
             continue

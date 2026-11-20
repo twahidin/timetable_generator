@@ -213,6 +213,7 @@ def who_sits_by_level_groups_and_list():
     ids = P.who_sits(_paper(subject="Pure Chemistry"), _M)
     assert len(ids) == 20 and ids[0] == "3A-01" and ids[-1] == "3B-10" and ids == sorted(ids)
     assert P.who_sits(_paper(), _M) == ["3A-%02d" % k for k in range(1, 31)]
+    assert P.who_sits(_paper(subject="Assembly"), _M) == ["3A-%02d" % k for k in range(1, 31)]
     assert P.who_sits(_paper(who="students", students=["3B-04", "ZZ-99"]), _M) == ["3B-04"]
 
 @t
