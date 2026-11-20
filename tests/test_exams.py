@@ -8,7 +8,7 @@ os.environ.update(DATA_DIR=DATA, SECRET_KEY=KEY, AI_PROVIDER="anthropic", AI_API
 sys.path.insert(0, ROOT)
 import app as A, access, store  # noqa: E402
 from relief import calendar as C  # noqa: E402
-from exams import settings as ES, fake as F  # noqa: E402
+from exams import settings as ES, fake as F, days as D  # noqa: E402
 from datetime import date  # noqa: E402
 
 def raises(exc, f, text=None):
@@ -68,5 +68,81 @@ def settings_drop_people_no_longer_there():
     d = ES.load(pub)
     assert d["backups"] == ["Mr Ivan Lee"] and d["missing"] == ["Mr Gone Away"]
     assert d["rooms"] == {} and d["missing_rooms"] == ["Old Hall"]
+
+def _sched(**kw):
+    s = dict(levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-06", days={})
+    s.update(kw)
+    return s
+
+SEC3 = {"2026-10-05": dict(levels=["Sec 3"], whole=True)}
+
+def _rows(view):
+    return {r["row"]: r for r in view["lessons"]}
+
+@t
+def times_round_trip():
+    assert D.minutes("07:40") == 460 and D.hhmm(460) == "07:40"
+    raises(ValueError, lambda: D.minutes("7.40"), "7.40 is not a time.")
+
+@t
+def whole_day_stops_every_sec3_lesson():
+    pub = F.sample_pub()
+    v = D.day_view(pub, F.CAL, _sched(days=SEC3), "2026-10-05")
+    r = _rows(v)
+    for i in (0, 1, 3, 4): assert r[i]["stopped"] and not r[i]["running"], i
+    for i in (2, 5, 6, 7): assert r[i]["running"] and not r[i]["stopped"], i
+    assert v["day"] == "Odd Mon" and set(v["window"]) == {"3A", "3B"}
+    assert v["window"]["3A"] == (460, 460 + 26 * 20)
+
+@t
+def part_day_edge_shortens_a_lesson():
+    pub = F.sample_pub()
+    pub["model"]["lessons"][0]["n"] = 8
+    s = _sched(days={"2026-10-05": {"levels": ["Sec 3"], "whole": False, "from": "07:40", "to": "09:00"}})
+    v = D.day_view(pub, F.CAL, s, "2026-10-05")
+    r0 = _rows(v)[0]
+    assert r0["stopped"] == [(460, 540)] and r0["running"] == [(540, 620)], r0
+    assert r0["start"] == 460 and r0["end"] == 620
+    assert D.edge_cuts(v) == 1
+
+@t
+def mixed_level_lesson_runs():
+    v = D.day_view(F.sample_pub(), F.CAL, _sched(days=SEC3), "2026-10-05")
+    r8 = _rows(v)[8]
+    assert r8["running"] and not r8["stopped"]
+
+@t
+def chosen_classes_only():
+    v = D.day_view(F.sample_pub(), F.CAL, _sched(classes=["3A"], days=SEC3), "2026-10-05")
+    assert set(v["window"]) == {"3A"}
+    assert _rows(v)[0]["stopped"] and not _rows(v)[1]["stopped"] and _rows(v)[1]["running"]
+
+@t
+def not_a_school_day_has_no_lessons():
+    pub = F.sample_pub()
+    s = _sched(start="2026-10-12", end="2026-10-12")
+    ds = D.dates(s, F.CAL, pub["model"])
+    assert len(ds) == 1 and ds[0]["day"] is None and ds[0]["date"] == "2026-10-12"
+    assert D.day_view(pub, F.CAL, s, "2026-10-12")["lessons"] == []
+
+@t
+def dates_lists_each_day_with_window():
+    pub = F.sample_pub()
+    ds = D.dates(_sched(days={"2026-10-06": dict(levels=["Sec 4"], whole=False, **{"from": "08:00", "to": "09:00"})}), F.CAL, pub["model"])
+    assert [d["date"] for d in ds] == ["2026-10-05", "2026-10-06"]
+    assert ds[0]["levels"] == ["Sec 3"] and (ds[0]["start"], ds[0]["end"]) == (460, 980)
+    assert ds[1]["levels"] == ["Sec 4"] and (ds[1]["start"], ds[1]["end"]) == (480, 540) and ds[1]["day"] == "Odd Tue"
+
+@t
+def make_up_date_outside_has_no_window():
+    v = D.day_view(F.sample_pub(), F.CAL, _sched(), "2026-10-07")
+    assert v["window"] == {} and not any(r["stopped"] for r in v["lessons"])
+
+@t
+def must_rule_blocks_on_mondays():
+    pub = F.sample_pub()
+    v = D.day_view(pub, F.CAL, _sched(days=SEC3), "2026-10-05")
+    assert v["blocked"]["Mr Ivan Lee"] == [(460, 580)], v["blocked"]
+    assert "Mr Ivan Lee" not in D.day_view(pub, F.CAL, _sched(), "2026-10-06")["blocked"]
 
 print(f"{COUNT} exams tests passed")
