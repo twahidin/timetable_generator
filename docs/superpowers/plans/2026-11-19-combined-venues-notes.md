@@ -126,7 +126,16 @@ seating 44, and the old "At most 2 at once" room rule dropped:
 - Left from the last re-check, both small: a department head could see "1 change could not be made" on opening the
   page if the saved setup holds a combined venue whose kind is out of step and no committee page has opened it since
   (any committee open corrects it); and the "No lesson is limited to…" warning also shows, oddly worded, for a
-  combined venue whose kind no lesson uses.
+  combined venue whose kind no lesson uses. **Both done 2026-11-20** on branch `combined-venues-exact`: a department
+  head's page no longer puts a combined venue's kind right on opening (as `save()` leaves Class Parents alone there),
+  so there is nothing for the server to refuse; the committee's page and a practice copy still put it right. The warning
+  now says what is wrong: "No lesson uses {venue}'s kind…" when no lesson has its kind, "No lesson may use {venue}…"
+  when its For box or seats leave every group of the kind out, and the old sentence only when every group that may
+  use it fits one of its rooms. Tests: `opening_the_setup_syncs_kinds_except_on_a_department_heads_page`
+  (`tests/venueview.test.js`, runs the page's own `openServer`) and `a_pair_no_lesson_can_use_is_worded_for_what_is_wrong`.
+- **The exact room count was not built (2026-11-20, the committee lead's choice).** The school's two pairs are each
+  the only rooms of their kind, so the count is exact for them; the limit under Known limits stands until a kind gains
+  a third room or a second pair.
 - On the school's real setup loaded into a scratch server (numbers only, before the fix pass): every step drew with
   no error, step 1 showed 74 rooms of which 2 combined, and the workbook written from it read back with both.
 
@@ -142,5 +151,6 @@ The setup today has ONE room for each pair ("D&T Lab 1&2", "FCE Lab 1&2"). Conve
 3. Take off the "At most 2 at once" rule on the old room and the rule in words about the labs. The pair now does
    what they tried to say.
 4. Give the Students number for the four upper secondary groups that have none (step 7 lists them).
-5. On step 7 press Check again and read "Will it fit?": nothing critical, and no "No lesson is limited to…" line.
+5. On step 7 press Check again and read "Will it fit?": nothing critical, and no "No lesson is limited to…" line
+   (nor "No lesson uses…" or "No lesson may use…" for a pair).
 6. Download the workbook and give the outside agent the skill 2026-11.9 with it.
