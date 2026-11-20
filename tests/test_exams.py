@@ -9,7 +9,7 @@ sys.path.insert(0, ROOT)
 import app as A, access, store  # noqa: E402
 from relief import calendar as C  # noqa: E402
 from exams import settings as ES, fake as F, days as D, schedules as SC, papers as P  # noqa: E402
-from exams import seating as SE  # noqa: E402
+from exams import seating as SE, invigilate as IV  # noqa: E402
 from datetime import date  # noqa: E402
 
 def raises(exc, f, text=None):
@@ -357,5 +357,70 @@ def pins_win():
     s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
     st, r = _seated(s, pins={"3A-07": "3-02", "9Z-01": "3-02", "3A-08": "Nowhere"})
     assert "3A-07" in [x for x, _ in r["rooms"]["3-02"]] and "3A-07" not in [x for x, _ in r["rooms"]["3-01"]], r
+
+def _duties(s, rooms=("3-01", "3-02"), xset=None, **kw):
+    x = xset or _xset()
+    seats = {}
+    for sit in SE.sittings(s):
+        st = SE.sitting_students(sit, s, _M)
+        free = [r for r in SE.rooms_free(_PUB, F.CAL, s, sit, _xset(rooms), set()) if r["busy"] == ""]
+        seats[sit["key"]] = SE.seat(sit, st, free, s, _M, {})["rooms"]
+    return IV.assign(_PUB, F.CAL, s, x, seats), x
+
+@t
+def need_per_room():
+    r = ES.defaults()["rules"]
+    assert IV.need(dict(hall=False, access=False), 30, [], r) == 2
+    assert IV.need(dict(hall=True, access=False), 100, [], r) == 4
+    assert IV.need(dict(hall=False, access=True), 3, [None, dict(reader=True, scribe=False), dict(reader=False, scribe=False)], r) == 2
+    assert IV.need(dict(hall=False, access=False), 0, [], r) == 0
+
+@t
+def freed_teachers_first():
+    s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
+    x = _xset(); x["backups"] = ["Mr Ivan Lee"]
+    d, _ = _duties(s, xset=x)
+    d1 = d[0]
+    assert d1["room"] == "3-01" and d1["start"] == 455 and d1["end"] == 540 and d1["need"] == 2, d1
+    assert d1["names"] == ["Ms Aisha Rahman", "Ms Chloe Tan"], d1
+    assert d1["reasons"] == {"Ms Aisha Rahman": "freed: 3A on the exam then", "Ms Chloe Tan": "freed: 3B on the exam then"}, d1
+    assert d1["short"] == 0 and d1["locked"] is False and d1["chief"] is None
+
+@t
+def busy_teacher_needs_a_backup():
+    s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
+    x = _xset(); x["backups"] = ["Mr Ivan Lee"]
+    x["never"] = ["Ms Aisha Rahman", "Mr Ben Ong", "Ms Chloe Tan", "Ms Grace Yeo", "Mr Hafiz Rahman"]
+    d, _ = _duties(s, xset=x)
+    assert d[0]["names"] == ["Mr Daniel Koh"] and d[0]["backup"] == {"Mr Daniel Koh": [2]} and d[0]["short"] == 1, d[0]
+    assert "needs a backup" in d[0]["reasons"]["Mr Daniel Koh"] and d[1]["names"] == [] and d[1]["short"] == 2
+
+@t
+def backups_kept_for_later():
+    s = _sit([_paper(who="level", date="2026-10-06", start="07:50")])
+    x = _xset(); x["backups"] = ["Mr Ivan Lee"]
+    d, _ = _duties(s, xset=x)
+    picked = d[0]["names"] + d[1]["names"]
+    assert len(picked) == 4 and len(set(picked)) == 4 and "Mr Ivan Lee" not in picked, picked
+    got = IV.candidates(_PUB, F.CAL, s, x, "2026-10-06", d[0]["start"], d[0]["end"], [d[1]])
+    assert got["backups"][0]["name"] == "Mr Ivan Lee" and got["backups"][0]["reason"] == "backup invigilator", got
+    assert "Mr Ivan Lee" not in [c["name"] for c in got["freed"] + got["free"]]
+
+@t
+def common_test_supervised_by_lesson_teacher():
+    s = _sit([_paper(subject="Mathematics", minutes=30, date="2026-10-05", start="07:50")], kind="test", supervision="lesson")
+    d, _ = _duties(s)
+    duty = next(x for x in d if x["room"] == "3-02")
+    assert duty["names"] == ["Ms Chloe Tan"] and duty["reasons"] == {"Ms Chloe Tan": "supervises their own lesson"} and duty["need"] == 1
+
+@t
+def locked_names_kept():
+    s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
+    s["pins"]["duties"] = {"2026-10-05 07:50|3-01": ["Ms Grace Yeo", "Mr Gone Away"]}
+    d, _ = _duties(s)
+    d1 = d[0]
+    assert "Ms Grace Yeo" in d1["names"] and "Mr Gone Away" not in d1["names"] and len(d1["names"]) == d1["need"] and d1["locked"] is True, d1
+    assert len(set(d1["names"])) == 2
+    assert IV.duty_minutes(d)["Ms Grace Yeo"] == 85
 
 print(f"{COUNT} exams tests passed")
