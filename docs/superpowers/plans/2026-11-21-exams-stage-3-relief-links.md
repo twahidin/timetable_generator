@@ -357,8 +357,8 @@ merged in (2a8acef). If `relief-stage-2` gains commits, merge it again; never re
     `relief.lessons.today` set after the date → the record stays uncancelled.
   - `own_absence_takes_over` (Review Focus 1): after approval and a chosen relief, the invigilator asks for relief for
     the whole day → the lesson is in the new absence, needed, with the chosen relief; the backup record is cancelled
-    `"Moved to {name}'s own absence."`; replacing them with someone away from no lesson then sends no new backup for
-    them and the next sync sends none for the away person.
+    `"Moved to {name}'s own absence."`; then replacing them under "Someone is away" with a person who has no lesson
+    then sends no backup for the replacement, and the sync after it sends none for the away person.
   - `republish_drops_a_vanished_backup` (Review Focus 4): publish a timetable without that lesson, run an approval
     action → the record is cancelled, no error; a `handled` key that vanished is ignored.
   - `class_on_another_schedule_needs_no_backup` (Review Focus 5).
