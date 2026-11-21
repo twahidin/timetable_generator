@@ -127,7 +127,7 @@
   /* ---------------------------------------------------------------- entries */
   function link(e) {
     const where = String(e.where || "");
-    if (e.link && typeof e.link === "string" && e.link.startsWith("/")) return [e.link, "Open " + where.replace(/^Exams and events$/, "exams and events")];
+    if (typeof e.link === "string" && /^\/(?![\/\\])/.test(e.link)) return [e.link, "Open " + where.replace(/^Exams and events$/, "exams and events")];
     if (e.kind === "exams") return ["/exams", "Open exams and events"];
     if (where.startsWith("Step 8")) return ["/", "Open the committee page (step 8)"];
     if (where.startsWith("Step 9")) return ["/", "Open the committee page (step 9)"];

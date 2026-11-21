@@ -127,10 +127,14 @@ def _lines(name):
         return []
 
 
-def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, signins=False, before=None, limit=200):
+def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, signins=False, before=None, limit=200,
+         who_contains=None):
     out = []
+    needle = who_contains.strip().lower() if isinstance(who_contains, str) and who_contains.strip() else None
     for name in _files():
         for line in reversed(_lines(name)):
+            if needle and needle not in line.lower():   # cheap: the name is in the raw line or the entry cannot match
+                continue
             try:
                 e = json.loads(line)
             except ValueError:
@@ -138,6 +142,8 @@ def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, si
             if not isinstance(e, dict) or not isinstance(e.get("id"), str):
                 continue
             if before is not None and e["id"] >= before:
+                continue
+            if needle and needle not in str(e.get("as") or "").lower():
                 continue
             if e.get("kind") == "signin" and not signins and not (kinds and "signin" in kinds):
                 continue

@@ -336,4 +336,31 @@ def history_page_is_served():
     r = committee().get("/history")
     assert r.status_code == 200 and b"history.js" in r.data
 
+@t
+def who_filter_is_one_read_and_pages_cleanly():
+    fresh()
+    for i in range(1200):
+        H.add({"kind": "setup", "as": "Rare Person" if i % 400 == 0 else "Bulk Bob", "text": f"n{i}"})
+    calls = []
+    real = H.read
+    def spy(*a, **k): calls.append(1); return real(*a, **k)
+    A.history.read = spy
+    try:
+        c = committee()
+        d = api(c, "?who=rare&limit=2")[1]
+    finally:
+        A.history.read = real
+    assert len(calls) == 1 and [e["text"] for e in d["entries"]] == ["n1200"[:0] or "n800", "n400"] and d["more"] is True, (calls, d["entries"])
+    d2 = api(c, "?who=RARE&limit=2&before=" + d["entries"][-1]["id"])[1]
+    assert [e["text"] for e in d2["entries"]] == ["n0"] and d2["more"] is False
+    assert [e["text"] for e in api(c, "?who=rare&limit=3")[1]["entries"]] == ["n800", "n400", "n0"]
+
+@t
+def unsafe_links_are_dropped():
+    fresh()
+    for l in ("//evil.example", "/\\evil.example", "http://x.example", "/exams"):
+        H.add({"kind": "exams", "as": "A", "text": l, "link": l})
+    got = {e["text"]: e.get("link") for e in api(committee())[1]["entries"]}
+    assert got == {"//evil.example": None, "/\\evil.example": None, "http://x.example": None, "/exams": "/exams"}, got
+
 print(f"{COUNT} history tests passed")

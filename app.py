@@ -1512,6 +1512,7 @@ def _ways():
 
 # ------------------------------------------------------------------------------------------------ the history page
 HISTORY_MAX = 500
+_SAFE_LINK = re.compile(r"^/(?![/\\])")   # a link inside this app: one leading slash, not // or /\
 HISTORY_TOP = "Pick a day as year-month-day, like 2026-11-19."
 
 def _history_day(text):
@@ -1548,13 +1549,10 @@ def api_history():
     dept = q.get("dept") or None
     signins = q.get("signins") == "1"
     before = q.get("before") or None
-    found = []
-    while len(found) <= limit:
-        got = history.read(where=where, dept=dept, since=since, until=until, signins=signins, before=before, limit=HISTORY_MAX + 1)
-        if not got: break
-        found += [e for e in got if not who_ or who_ in str(e.get("as") or "").lower()]
-        if len(got) <= HISTORY_MAX: break
-        before = got[-1]["id"]
+    found = history.read(where=where, dept=dept, since=since, until=until, signins=signins, before=before, limit=limit + 1,
+                         who_contains=who_ or None)
+    for e in found:
+        if "link" in e and not _SAFE_LINK.match(e["link"] if isinstance(e["link"], str) else ""): del e["link"]
     try: depts = [str(d) for d in store.setup_record()["spec"]["school"]["departments"]]
     except Exception: depts = []
     return jsonify(entries=found[:limit], more=len(found) > limit, admin=has("admin"), depts=depts)
