@@ -12,11 +12,27 @@
   const RF = window.ReliefForm, esc = RF.esc, day = RF.day, enc = encodeURIComponent;
   const $ = (s, el = document) => el.querySelector(s);
   const TABS = [["mine", () => true], ["ask", () => true], ["covering", () => true], ["plan", me => !!me.can_plan], ["inbox", me => !!me.can_team],
-                ["today", me => !!me.can_team]];
+                ["today", me => !!me.can_team], ["load", me => !!me.can_team]];
   const UNREACHABLE = "Could not reach the server. Check the connection and try again.";
   const mods = {};
   const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
-  const R = window.Relief = { me: null, cur: null, tab, go, api, json, people, say, dirtyAny, absences, attach, span, reason, plural };
+  const R = window.Relief = { me: null, cur: null, tab, go, api, json, people, say, dirtyAny, absences, attach, span, reason, plural, reliefLines, approvedOf };
+
+  /* The relief line of a lesson to cover, read cover by cover (x.covers, in time order, never x.parts[i]): the relief teacher
+     once approved (approved, acknowledged or asked to change), the planner's own choice still waiting ("Planned: name,
+     waiting for the relief team"), else "The relief team will assign". The app's own pick is never shown as a relief. */
+  const SENT = ["approved", "acknowledged", "change"];
+  function approvedOf(x) { return (x.covers || []).filter(c => SENT.includes(c.state) && c.relief); }
+  function reliefLines(x) {
+    const covers = Array.isArray(x.covers) && x.covers.length ? x.covers : [{ state: "open", relief: x.relief || null, planned: x.planned || null }];
+    const split = covers.length > 1;
+    return covers.map(c => {
+      const at = split ? `<span class="muted">P${Number(c.p) + 1}${Number(c.n) > 1 ? `–P${Number(c.p) + Number(c.n)}` : ""}</span> ` : "";
+      if (SENT.includes(c.state) && c.relief) return `<div>${at}Relief: <b>${esc(c.relief)}</b></div>`;
+      if (c.planned) return `<div>${at}Planned: <b>${esc(c.planned)}</b>, waiting for the relief team</div>`;
+      return `<div>${at}<span class="muted">The relief team will assign</span></div>`;
+    }).join("");
+  }
 
   /* ---------------------------------------------------------------- the server */
   async function api(url, opts) {
@@ -69,7 +85,7 @@
     if (!allowed(k)) k = "mine";
     R.cur = k;
     for (const [n] of TABS) { const p = $(`#pane-${n}`); if (p) p.hidden = n !== k; }
-    $("#main").classList.toggle("wide", k === "inbox" || k === "today");   /* What's in and Today are wide tables */
+    $("#main").classList.toggle("wide", k === "inbox" || k === "today" || k === "load");   /* What's in, Today and Load are wide tables */
     const m = mods[k], pane = $(`#pane-${k}`);
     if (!m.started) { m.started = true; m.init(pane, R.me); }
     else if (m.shown) m.shown(pane);
@@ -179,7 +195,7 @@
     function lessonRow(r, x, i, editable) {
       const cover = x.needed && !r.cancelled, now = editable && x.date >= RF.today();   /* a past lesson keeps what it has */
       const side = !cover ? "" : opts.side ? opts.side(r, x) || ""
-        : x.relief ? `Relief: <b>${esc(x.relief)}</b>` : `Relief: <span class="muted">the relief team will assign</span>`;
+        : reliefLines(x);
       const changed = x.changed && !r.cancelled && x.date >= RF.today() ? `<div class="ab-changed">The lesson has changed since this was planned</div>` : "";
       const head = `<div class="rf-head"><div><b>${esc(RF.title(x))}</b> <span class="muted">· ${esc(RF.when(x))}</span></div>${side ? `<div class="rf-side small">${side}</div>` : ""}</div>`;
       let body;

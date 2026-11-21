@@ -1144,10 +1144,10 @@ def a_past_lesson_cannot_be_changed_but_can_be_acknowledged():
 @t
 def the_pages_copy():
     inbox, page = (open(os.path.join(ROOT, "static", f)).read() for f in ("relief-inbox.js", "relief.js"))
-    assert "The app's picks for open lessons, and approving them, come in the next stage." in inbox
+    assert "come in the next stage" not in inbox and '"Needs a nudge"' in inbox and "Relief status" in inbox
     assert '"Earlier"' in inbox
     assert '"relief.ro:" + R.me.name' in page and 'getItem("relief.ro")' not in page
-    assert "The app's picks for open lessons, and approving them, come in the next stage" in " ".join(open(os.path.join(ROOT, "README.md")).read().split())
+    assert "come in the next stage" not in " ".join(open(os.path.join(ROOT, "README.md")).read().split())
 
 @t
 def the_old_name_of_rule_on_day_still_works():

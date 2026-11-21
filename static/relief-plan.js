@@ -32,13 +32,14 @@
     load: () => R.api("/api/relief/absences/planned").then(r => r.ok ? { ok: true, status: r.status, data: r.data.absences || [] } : r),
     show: r => r.id === Pl.open,
     empty: "",
-    side: (r, x) => mayChoose(x) ? sideHTML(cardCtx(r.id, x.key), x.relief || "") : plainSide(x),
+    side: (r, x) => mayChoose(x) ? sideHTML(cardCtx(r.id, x.key), x.planned || "") : plainSide(x),
     extra: (r, x) => mayChoose(x) ? `<div class="pl-free">${freeArea(cardCtx(r.id, x.key))}</div>` : "",
     painted: paintPlanned,
   });
 
-  const mayChoose = x => !x.changed && x.date >= RF.today();   /* a lesson gone from the timetable, or past, keeps what it has */
-  const plainSide = x => x.relief ? `Relief: <b>${esc(x.relief)}</b>` : `Relief: <span class="muted">the relief team will assign</span>`;
+  /* a lesson gone from the timetable, or past, keeps what it has; a lesson with a cover approved, or split, is the relief team's */
+  const mayChoose = x => !x.changed && x.date >= RF.today() && !R.approvedOf(x).length && (x.covers || []).length < 2;
+  const plainSide = x => R.reliefLines(x);
 
   /* ---------------------------------------------------------------- the "free then" list */
   function info(ctx) {   /* -> {x: the lesson, absent, chosen (a name or ""), r: the absence when it is saved} or null */
@@ -49,7 +50,7 @@
       return x ? { x, absent: P.teacher, chosen: P.chosen.get(chosenKey(key)) || "", r: null } : null;
     }
     const r = view.find(parts[0]), key = parts.slice(1).join("\n"), x = r && (r.lessons || []).find(l => l.key === key);
-    return x ? { x, absent: r.teacher, chosen: x.relief || "", r } : null;
+    return x ? { x, absent: r.teacher, chosen: x.planned || "", r } : null;
   }
 
   function ctxOf(el) {   /* the list an element belongs to: by its lesson row, and the absence card around it */
@@ -64,7 +65,8 @@
     const on = F.open === ctx, busy = !!(F.st.get(ctx) || {}).busy;
     const toggle = `<button type="button" class="small" data-pl="${on ? "close" : "free"}" aria-expanded="${on ? "true" : "false"}">${on ? "Close the list" : chosen ? "Change" : "Choose a relief teacher"}</button>`;
     if (!chosen) return toggle;
-    return `Relief: <span class="chip st-ok pl-chosen">${esc(chosen)}<button type="button" data-pl="clear" title="Take ${esc(chosen)} off" aria-label="Take ${esc(chosen)} off" ${busy ? "disabled" : ""}>✕</button></span> ${toggle}`;
+    const lead = ctx.startsWith("new\n") ? "Relief:" : "Planned:";   /* on a saved absence it waits for the relief team */
+    return `${lead} <span class="chip st-ok pl-chosen">${esc(chosen)}<button type="button" data-pl="clear" title="Take ${esc(chosen)} off" aria-label="Take ${esc(chosen)} off" ${busy ? "disabled" : ""}>✕</button></span>${lead === "Planned:" ? ` <span class="small muted">waiting for the relief team</span>` : ""} ${toggle}`;
   }
 
   function alsoChosen(x) {   /* in the form: who is chosen for another lesson that day -> that lesson's name */
@@ -351,7 +353,7 @@
 
   /* ---------------------------------------------------------------- Planned by me */
   function plannedRow(r) {
-    const cover = (r.lessons || []).filter(x => x.needed), k = cover.filter(x => x.relief).length;
+    const cover = (r.lessons || []).filter(x => x.needed), k = cover.filter(x => R.approvedOf(x).length || (x.covers || []).some(c => c.planned)).length;
     const changedNow = !r.cancelled && (r.lessons || []).some(x => x.changed && x.date >= RF.today());
     let chip;
     if (r.cancelled) chip = `<span class="chip st-off">Cancelled by ${esc(who(r.cancelled.by))}: ${esc(r.cancelled.why)}</span>`;

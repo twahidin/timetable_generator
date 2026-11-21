@@ -34,8 +34,8 @@ relief requests on the Relief home, in tabs that show only to those who may use 
   the relief chosen or open, cancellations, and what is new since they last looked.
 
 The reason for an absence is seen only by the absent teacher, whoever planned it, management and the relief team; each
-relief save is one line in the **History**, never with the reason. The app's picks for open lessons, and approving them, come in the next stage, with the reliefs a teacher covers; nobody is
-told on Telegram yet. Relief reads the teachers from the published timetable, so publish first. **Relief settings**
+relief save is one line in the **History**, never with the reason. The relief team has **Today** (the app's picks for open lessons, approving them, changing them) and **Load**; a relief teacher
+sees **Reliefs I'm covering**. Nobody is told on Telegram yet. Relief reads the teachers from the published timetable, so publish first. **Relief settings**
 (the committee page's header link, or the Relief home for the relief team) hold the Flexi Adjunct Teachers' role, the
 relief rules in words, the limits the app checks, the times and the school calendar (terms, which week each term
 starts as, holidays); they show management, the relief team and the other staff who teach no lessons, which are set

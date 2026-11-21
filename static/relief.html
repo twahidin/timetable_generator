@@ -133,6 +133,16 @@ table.inbox{min-width:860px}
 .td-by{display:inline-block;font-size:11px;font-weight:700;color:#1d4ed8;background:#e6efff;border-radius:4px;padding:0 5px}
 .td-warn{font-size:12.5px;color:var(--warn);margin-top:4px}
 .td-busy{color:var(--navy);font-style:italic}
+/* Load (the relief team) */
+.ld-filters{margin:0 0 10px}
+.ld-filters select{max-width:100%}
+.ld-dept{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ld-table .linkish{text-align:left}
+table.ld-table{min-width:640px}
+table.rtable th.num,table.rtable td.num{text-align:right;white-space:nowrap}
+.ld-one{margin-top:14px}
+.ld-one h3{margin:0 0 2px}
+tr.ld-wait td{background:#fffaf0}
 .td-new{margin-top:6px}
 .td-yes{color:var(--ok)}.td-no{color:var(--warn)}
 .chip.td-chip{white-space:normal;display:inline-block}
@@ -171,6 +181,7 @@ table.inbox{min-width:860px}
     <button type="button" role="tab" id="tab-plan" data-tab="plan" aria-controls="pane-plan" hidden>Plan relief</button>
     <button type="button" role="tab" id="tab-inbox" data-tab="inbox" aria-controls="pane-inbox" hidden>What's in</button>
     <button type="button" role="tab" id="tab-today" data-tab="today" aria-controls="pane-today" hidden>Today</button>
+    <button type="button" role="tab" id="tab-load" data-tab="load" aria-controls="pane-load" hidden>Load</button>
   </nav>
   <div id="loading" class="card"><p class="muted">Loading…</p></div>
   <section class="pane" id="pane-mine" role="tabpanel" aria-labelledby="tab-mine" hidden></section>
@@ -179,12 +190,14 @@ table.inbox{min-width:860px}
   <section class="pane" id="pane-plan" role="tabpanel" aria-labelledby="tab-plan" hidden></section>
   <section class="pane" id="pane-inbox" role="tabpanel" aria-labelledby="tab-inbox" hidden></section>
   <section class="pane" id="pane-today" role="tabpanel" aria-labelledby="tab-today" hidden></section>
+  <section class="pane" id="pane-load" role="tabpanel" aria-labelledby="tab-load" hidden></section>
 </main>
 <script src="/static/relief-form.js"></script>
 <script src="/static/relief.js"></script>
 <script src="/static/relief-plan.js"></script>
 <script src="/static/relief-inbox.js"></script>
 <script src="/static/relief-today.js"></script>
+<script src="/static/relief-load.js"></script>
 <script src="/static/relief-covering.js"></script>
 </body>
 </html>
