@@ -50,6 +50,15 @@ def _find(spec, section, rid):
     return None
 
 
+def lesson_dept(spec, row):
+    """The department of a lesson row: that of its subject on the subjects table (first match by name), trimmed; "" if none."""
+    name = row.get("subject") if isinstance(row, dict) else None
+    for s in _rows(spec, "subjects"):
+        if isinstance(s, dict) and name and s.get("subject") == name:
+            return str(s.get("dept") or "").strip()
+    return ""
+
+
 def ensure_ids(spec):
     """Give every list row lacking an `_id` one. True if any was added."""
     added = False
