@@ -87,7 +87,7 @@
     const s = F.st.get(ctx) || {}, x = inf.x, close = `<button type="button" class="small" data-pl="close">Close the list</button>`;
     if (s.loading) return `<div class="pl-list"><p class="small muted">Finding who is free…</p></div>`;
     if (s.err) return `<div class="pl-list"><p>${say(s.err)}</p><div class="bar"><button type="button" class="small" data-pl="free">Try again</button>${close}</div></div>`;
-    const d = s.data || {}, groups = Array.isArray(d.groups) ? d.groups : [], teaching = Array.isArray(d.teaching) ? d.teaching : [];
+    const d = s.data || {}, groups = Array.isArray(d.groups) ? d.groups : [], teaching = Array.isArray(d.teaching) ? d.teaching : [], busy = Array.isArray(d.busy) ? d.busy : [];
     const n = groups.reduce((a, g) => a + (g.people || []).length, 0), also = inf.r ? new Map() : alsoChosen(x);
     const lead = groups.length && (groups[0].people || []).length && !groups[0].people[0].over ? groups[0].people[0].name : "";
     const person = p => {
@@ -100,9 +100,11 @@
         <span class="small cand-n">week ${esc(p.week)}</span><span class="small muted cand-n">${esc(p.today)} relief today</span>${pick}</div>`;
     };
     const fold = teaching.length ? ` · <button type="button" class="linkish" data-pl="teaching" aria-expanded="${s.teaching ? "true" : "false"}">${s.teaching ? "Hide" : "Show"} the ${teaching.length} teaching then</button>` : "";
+    const busyFold = busy.length ? ` · <button type="button" class="linkish" data-pl="busy" aria-expanded="${s.busy_open ? "true" : "false"}">${s.busy_open ? "Hide" : "Show"} the ${busy.length} on an exam duty or at an event then</button>` : "";
     return `<div class="pl-list" role="group" aria-label="${esc(`Who is free for ${RF.title(x)}`)}">
-      <div class="small muted">Free at ${esc(RF.periods(x))} on ${esc(day(x.date))}: ${esc(R.plural(n, "teacher"))}${fold}</div>
+      <div class="small muted">Free at ${esc(RF.periods(x))} on ${esc(day(x.date))}: ${esc(R.plural(n, "teacher"))}${fold}${busyFold}</div>
       ${s.teaching && teaching.length ? `<div class="small pl-teaching">${esc(teaching.join(", "))}</div>` : ""}
+      ${s.busy_open && busy.length ? `<div class="small pl-teaching">${esc(busy.map(b => `${b.name} (${b.why})`).join(", "))}</div>` : ""}
       ${n ? groups.map(g => `<div class="tier">${esc(g.title)}</div>${(g.people || []).map(person).join("")}`).join("") : `<p class="small muted">No one is free then.</p>`}
       <div class="small muted pl-foot">"week" = teaching periods plus relief periods so far this week, lightest first in each group. A dimmed teacher is over a limit and can still be chosen.</div>
       <div class="bar">${close}</div></div>`;
@@ -438,6 +440,11 @@
       case "teaching": {
         const c = ctxOf(b), s = c && F.st.get(c);
         if (s) { s.teaching = !s.teaching; repaint(c, false); focusIn(c, '[data-pl="teaching"]'); }
+        return;
+      }
+      case "busy": {
+        const c = ctxOf(b), s = c && F.st.get(c);
+        if (s) { s.busy_open = !s.busy_open; repaint(c, false); focusIn(c, '[data-pl="busy"]'); }
         return;
       }
       case "choose": { const c = ctxOf(b); if (c) choose(c, b.dataset.name || ""); return; }

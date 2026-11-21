@@ -40,10 +40,13 @@ def _week_dates(cal, days, date):
     return [d for d in out if school_day(cal, days, d) is not None]
 
 
-def week_so_far(pub, cal, records, name, date, skip=None):
-    """teaching periods plus relief periods in the school dates of the week holding date"""
+def week_so_far(pub, cal, records, name, date, skip=None, links=None):
+    """teaching periods plus relief periods in the school dates of the week holding date; links (exams.relief_links.Links)
+    adds exam duties and event periods and takes off lessons that stop"""
     days = ((pub or {}).get("model") or {}).get("days") or []
-    return _lessons.teaching_periods(pub, cal, name, date) + relief_periods(records, name, _week_dates(cal, days, date), skip)
+    dates = _week_dates(cal, days, date)
+    total = _lessons.teaching_periods(pub, cal, name, date) + relief_periods(records, name, dates, skip)
+    return total + links.week_change(name, dates) if links is not None else total
 
 
 def _absent_then(records, name, iso, p, n):
@@ -55,10 +58,12 @@ def _absent_then(records, name, iso, p, n):
     return False
 
 
-def there_then(records, names, date, p, n):
-    """the names (a lesson's other teachers) not away on date (a date or an ISO string) at any of the periods p..p+n-1"""
+def there_then(records, names, date, p, n, links=None):
+    """the names (a lesson's other teachers) not away on date (a date or an ISO string) at any of the periods p..p+n-1,
+    and (with links) not on an exam duty or at an event then"""
     iso = _iso(date)
-    return [x for x in names if not _absent_then(records, x, iso, int(p), int(n or 1))]
+    return [x for x in names if not _absent_then(records, x, iso, int(p), int(n or 1))
+            and not (links is not None and links.busy(x, iso, int(p), int(n or 1)))]
 
 
 def _chosen_then(records, name, iso, p, n, key, absent):
@@ -80,10 +85,12 @@ def _rule_hits(rule, day, p, n):
     return _overlap(a, b - a + 1, p, n)
 
 
-def free_then(pub, settings, records, lesson, absent):
+def free_then(pub, settings, records, lesson, absent, links=None):
     """the people free for the lesson (a dict from lessons.on_date) of the absent teacher; "teaches {subject}" compares
     subject families (ttgen.spec.family: Mathematics G2 teaches a Mathematics G3 lesson), the title keeps the lesson's own subject:
-    -> dict(groups=[dict(title, people=[dict(name, depts, subjects, fat, week, today, term, marks, over)])], teaching=[names])"""
+    -> dict(groups=[dict(title, people=[dict(name, depts, subjects, fat, week, today, term, marks, over)])], teaching=[names],
+    busy=[dict(name, why)]); links (exams.relief_links.Links) lets a lesson that stops free its teacher and keeps out
+    people on an exam duty or at an event then (busy)"""
     cal = settings.get("calendar") or {}
     lim = settings.get("limits") or {}
     fat_role = settings.get("fat_role") or ""
@@ -103,12 +110,15 @@ def free_then(pub, settings, records, lesson, absent):
         for t in L.get("teachers") or []: taught.setdefault(t, set()).add(L.get("subject") or "")
     absent_depts = next((x["depts"] for x in _people(pub, settings.get("extra_staff")) if x["name"] == absent), [])
     never = set(lim.get("never") or [])
-    teaching, free = [], []
+    teaching, free, busy = [], [], []
     for who in _people(pub, settings.get("extra_staff")):
         name = who["name"]
         if who["staff_only"] or name == absent: continue
-        if _lessons.on_date(pub, cal, name, date, periods=(p, p + n - 1)):
+        if any(links is None or not links.stopped(x) for x in _lessons.on_date(pub, cal, name, date, periods=(p, p + n - 1))):
             teaching.append(name); continue
+        why = links.busy(name, date, p, n) if links is not None else ""
+        if why:
+            busy.append(dict(name=name, why=why)); continue
         if _absent_then(records, name, iso, p, n) or _chosen_then(records, name, iso, p, n, lesson.get("key"), absent) or name in never: continue
         marks, blocked = [], False
         for r in rules:
@@ -125,7 +135,7 @@ def free_then(pub, settings, records, lesson, absent):
         over = limit is not None and today + n > limit
         if over: marks.append(f"at {today} relief periods today (the limit is {limit})")
         free.append(dict(name=name, depts=list(who["depts"]), subjects=sorted(taught.get(name, ())), fat=fat,
-                         week=week_so_far(pub, cal, records, name, date, skip=skip), today=today, term=relief_periods(records, name, term_dates, skip=skip),
+                         week=week_so_far(pub, cal, records, name, date, skip=skip, links=links), today=today, term=relief_periods(records, name, term_dates, skip=skip),
                          marks=marks, over=over))
     free.sort(key=lambda x: (bool(x["marks"]), x["week"], x["term"], x["name"]))
     titles, buckets = [], {}
@@ -139,4 +149,4 @@ def free_then(pub, settings, records, lesson, absent):
             same = family(subject) in {family(s) for s in x["subjects"]}
             title = f"{mine[0]} · teaches {subject}" if same else f"{mine[0]} · other subjects"
         buckets.setdefault(title, []).append(x)
-    return dict(groups=[dict(title=t, people=buckets[t]) for t in titles if buckets.get(t)], teaching=sorted(teaching))
+    return dict(groups=[dict(title=t, people=buckets[t]) for t in titles if buckets.get(t)], teaching=sorted(teaching), busy=sorted(busy, key=lambda x: x["name"]))

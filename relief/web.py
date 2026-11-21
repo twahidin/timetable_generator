@@ -97,6 +97,12 @@ def _cal(pub):
     return _settings.load(pub)["calendar"]
 
 
+def _links(pub, cal):
+    """what approved exams and events mean for relief (exams.relief_links), imported here to keep the modules apart"""
+    from exams.relief_links import Links
+    return Links.load(pub, cal)
+
+
 def _out(r, pub, me, cal=None):
     """the record as it is sent: lessons marked changed (matches_now), the remarks left out for someone who is only its absent teacher"""
     v = _absences.matches_now(r, pub, cal if cal is not None else _cal(pub))
@@ -192,7 +198,7 @@ def free():
         except ValueError: raise ValueError(_absences.CHANGED)
         lesson = next((x for x in _lessons.on_date(pub, settings["calendar"], absent, date) if x["key"] == key), None)
         if lesson is None: raise ValueError(_absences.CHANGED)
-        got = _free.free_then(pub, settings, _absences.all_records(), lesson, absent)
+        got = _free.free_then(pub, settings, _absences.all_records(), lesson, absent, links=_links(pub, settings["calendar"]))
     except ValueError as e: return _refusal(e)
     return jsonify(got)
 

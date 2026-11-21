@@ -171,5 +171,98 @@ def links_two_schedules_one_day():
     finally:
         PUB["model"]["lessons"].pop()
 
+# ---- Task 2: relief's free list and week count know exams and events
+import contextlib, json, urllib.parse  # noqa: E402
+import access  # noqa: E402
+from relief import free as FR, settings as RS  # noqa: E402
+from relief.calendar import school_day  # noqa: E402
+
+DANIEL, GRACE = "Mr Daniel Koh", "Ms Grace Yeo"
+os.makedirs(os.path.dirname(RS.PATH), exist_ok=True)
+store.write_json(RS.PATH, dict(calendar=CAL, team=[], management=[GRACE], limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=""))
+SETTINGS = dict(fat_role="", limits=dict(fat_per_day=3, other_per_day=None, never=[]), calendar=CAL, extra_staff=[])
+
+def _need(p, n=1, absent=DANIEL):
+    """a 4A lesson of the absent teacher at periods p.., as relief.lessons.on_date gives it"""
+    return dict(date=MON, day="Odd Mon", p=p, n=n, subject="Mathematics", classes=["4A"], key="k%d" % p)
+
+def _free_names(got):
+    return [x["name"] for g in got["groups"] for x in g["people"]]
+
+@t
+def free_then_leaves_out_the_invigilator():
+    _clear(); _exam()
+    L = _links()
+    got = FR.free_then(PUB, SETTINGS, [], _need(3), DANIEL, links=L)
+    assert AISHA not in _free_names(got), got
+    assert dict(name=AISHA, why="Invigilating: " + EXAM) in got["busy"], got["busy"]
+    assert AISHA not in got["teaching"]
+    plain = FR.free_then(PUB, SETTINGS, [], _need(3), DANIEL)
+    assert AISHA in _free_names(plain) and plain["busy"] == [], plain
+
+@t
+def free_then_offers_a_freed_teacher():
+    _clear(); _exam()
+    BEN_LESSON = _need(6)
+    plain = FR.free_then(PUB, SETTINGS, [], BEN_LESSON, DANIEL)
+    assert BEN in plain["teaching"] and BEN not in _free_names(plain), plain
+    got = FR.free_then(PUB, SETTINGS, [], BEN_LESSON, DANIEL, links=_links())
+    assert BEN in _free_names(got) and BEN not in got["teaching"], got
+    assert all(x["name"] != BEN for x in got["busy"])
+
+@t
+def week_so_far_counts_duties():
+    _clear(); _exam(duty_names=(BEN,))
+    L = _links()
+    week = FR._week_dates(CAL, M["days"], MON)
+    base = FR.week_so_far(PUB, CAL, [], BEN, MON)
+    with_links = FR.week_so_far(PUB, CAL, [], BEN, MON, links=L)
+    assert with_links - base == L.week_change(BEN, week) == 5 - 3, (with_links, base)
+    assert FR.week_so_far(PUB, CAL, [], BEN, MON, links=None) == base
+
+@t
+def there_then_leaves_out_someone_on_duty():
+    _clear(); _exam()
+    L = _links()
+    assert FR.there_then([], [AISHA, BEN], MON, 0, 1) == [AISHA, BEN]
+    assert FR.there_then([], [AISHA, BEN], MON, 0, 1, links=L) == [BEN]
+    assert FR.there_then([], [AISHA, BEN], ISO, 9, 1, links=L) == [AISHA, BEN]
+
+@contextlib.contextmanager
+def published(pub):
+    old = store.published; store.published = lambda: pub
+    try: yield
+    finally: store.published = old
+
+def staff(name):
+    c = A.app.test_client()
+    r = c.post("/login", data={"as": "relief", "code": access.staff_code(name)})
+    assert r.status_code == 302, (name, r.status_code)
+    return c
+
+@t
+def free_route_uses_links():
+    _clear(); _exam()
+    old = LS.today
+    key = RL.key_of(M, 2, MON, "Odd Mon")
+    try:
+        with published(PUB):
+            c = staff(GRACE)
+            r = c.get("/api/relief/free?absent=%s&key=%s" % (urllib.parse.quote(DANIEL), urllib.parse.quote(key)))
+            assert r.status_code == 200, r.get_data(as_text=True)[:300]
+            j = r.get_json()
+            assert dict(name=AISHA, why="Invigilating: " + EXAM) in j["busy"], j
+            assert AISHA not in _free_names(j)
+            _clear()
+            j = c.get("/api/relief/free?absent=%s&key=%s" % (urllib.parse.quote(DANIEL), urllib.parse.quote(key))).get_json()
+            assert j["busy"] == [], j
+    finally:
+        LS.today = old
+
+@t
+def relief_plan_page_shows_the_busy_fold():
+    js = open(os.path.join(ROOT, "static", "relief-plan.js"), encoding="utf-8").read()
+    assert "on an exam duty or at an event then" in js
+
 _clear()
 print(f"{COUNT} exams and relief tests passed")
