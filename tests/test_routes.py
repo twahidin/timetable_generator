@@ -145,6 +145,113 @@ def every_route_has_a_guard_and_the_guard_decides():
     try: walk(rules)
     finally: E.render_html, E.student_view, E.pdf_bytes = real
 
+# every guarded endpoint and the rights that open it, written out: a new or changed route must be listed here on purpose
+GUARDS = {
+    "admin_bulk": ('admin',),
+    "admin_first": ('committee',),
+    "admin_page": ('admin',),
+    "admin_people": ('admin',),
+    "admin_person": ('admin',),
+    "admin_reset": ('admin',),
+    "admin_shared_off": ('admin',),
+    "admin_students": ('admin',),
+    "admin_ways": ('admin',),
+    "api_blank": ('committee',),
+    "api_history": ('history',),
+    "api_sample": ('setup',),
+    "build": ('committee',),
+    "check_setup": ('committee',),
+    "code_slips": ('committee',),
+    "codes_csv": ('committee',),
+    "dl_blank": ('committee',),
+    "dl_sample": ('committee',),
+    "dl_skill_md": ('committee',),
+    "dl_skill_zip": ('committee',),
+    "draft_about": ('committee',),
+    "draft_ask": ('committee',),
+    "draft_board": ('committee',),
+    "draft_decide": ('committee',),
+    "draft_download": ('committee',),
+    "draft_fix": ('committee',),
+    "draft_fixes": ('committee',),
+    "draft_get": ('committee',),
+    "draft_grid": ('committee',),
+    "draft_lesson": ('committee',),
+    "draft_options": ('committee',),
+    "draft_place": ('committee',),
+    "draft_preview": ('committee',),
+    "draft_preview_page": ('committee',),
+    "draft_printouts": ('committee',),
+    "draft_publish": ('committee',),
+    "draft_slots": ('committee',),
+    "draft_suggest": ('committee',),
+    "draft_undo": ('committee',),
+    "draft_upload": ('committee',),
+    "exams_create": ('exams', 'committee'),
+    "exams_delete": ('exams', 'committee'),
+    "exams_download": ('exams', 'committee'),
+    "exams_fill": ('exams', 'committee'),
+    "exams_get": ('exams', 'committee'),
+    "exams_home": ('exams', 'committee'),
+    "exams_invigilators": ('exams', 'committee'),
+    "exams_list": ('exams', 'committee'),
+    "exams_make_route": ('exams', 'committee'),
+    "exams_me": ('exams', 'committee'),
+    "exams_move": ('exams', 'committee'),
+    "exams_one_page": ('exams', 'committee'),
+    "exams_papers_download": ('exams', 'committee'),
+    "exams_papers_upload": ('exams', 'committee'),
+    "exams_print": ('exams', 'committee'),
+    "exams_put": ('exams', 'committee'),
+    "exams_settings_get": ('exams', 'committee'),
+    "exams_settings_page": ('exams', 'committee'),
+    "exams_settings_put": ('exams', 'committee'),
+    "exams_use_anyway": ('exams', 'committee'),
+    "exams_view": ('exams', 'committee'),
+    "exams_who": ('exams', 'committee'),
+    "export_printouts": ('committee',),
+    "files": ('files',),
+    "files": ('files',),
+    "get_setup": ('setup',),
+    "get_setup_changes": ('setup',),
+    "get_setup_copies": ('committee',),
+    "history_page": ('history',),
+    "home": ('timetable',),
+    "import_xlsx": ('committee',),
+    "index": ('setup', 'timetable', 'own'),
+    "me": ('own',),
+    "meta": ('setup',),
+    "past_setups": ('committee',),
+    "pdf_custom": ('timetable',),
+    "pdf_me": ('own',),
+    "pdf_one": ('timetable',),
+    "post_setup_changes": ('setup',),
+    "put_setup": ('committee',),
+    "read_table": ('committee',),
+    "relief_code_slips": ('codes',),
+    "relief_codes_csv": ('codes',),
+    "relief_home": ('relief', 'relief.settings'),
+    "relief_me": ('relief',),
+    "relief_settings_get": ('relief.settings',),
+    "relief_settings_page": ('relief.settings',),
+    "relief_settings_put": ('relief.save',),
+    "restore_setup": ('committee',),
+    "status": ('setup',),
+    "timetable": ('timetable',),
+}
+
+@t
+def the_whole_endpoint_map_is_pinned():
+    got = {r.endpoint: tuple(A.app.view_functions[r.endpoint]._need) for r in A.app.url_map.iter_rules()
+           if getattr(A.app.view_functions[r.endpoint], "_need", None)}
+    assert got == GUARDS, ({k: (got.get(k), GUARDS.get(k)) for k in set(got) | set(GUARDS) if got.get(k) != GUARDS.get(k)})
+
+@t
+def a_shared_code_session_is_sent_from_the_password_page_to_login():
+    for role in ("teacher", "committee"):
+        r = client(dict(role=role)).get("/account/password")
+        assert to_login(r), (role, r.status_code, r.headers.get("Location"))
+
 # every exams page and API route: the Exams and events extra (until its end date) or the timetable committee
 EXAMS_ENDPOINTS = ("exams_home", "exams_settings_page", "exams_one_page", "exams_me", "exams_settings_get", "exams_settings_put", "exams_list",
                    "exams_create", "exams_get", "exams_put", "exams_delete", "exams_fill", "exams_papers_download", "exams_papers_upload",
@@ -217,8 +324,9 @@ def home_shows_exactly_the_tiles_of_the_table():
     assert shown == [("Timetables", "/timetable"), ("Relief", "/relief")] and greyed == [], (shown, greyed)
     assert f"Hello, {TINA}" in page and "Signed in with your code" in page and 'href="/logout"' in page and "Sign out" in page
     shown, greyed, page = tiles(client(person(ADA, "password")))
-    assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Admin", "/admin"), ("History", "/history")], shown
+    assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams"), ("Admin", "/admin"), ("History", "/history")], shown
     assert greyed == [] and "Signed in with your password" in page
+    assert "Until" not in page.split("Exams and events")[1].split("</a>")[0], "the committee's tile has no end date"
     shown, greyed, _ = tiles(client(person(ADA, "code")))           # the committee's code: all but the setup and the admin page
     assert shown == [("Timetables", "/timetable"), ("Relief", "/relief")], shown
     assert greyed == [("Committee page", "/login/password"), ("Admin", "/login/password")], greyed

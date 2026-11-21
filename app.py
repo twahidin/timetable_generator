@@ -418,7 +418,7 @@ def logout():
 TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("setup",)),
          ("Timetables", "Classes, teachers, rooms, Who's free", "/timetable", ("timetable",)),
          ("Relief", "Ask for relief, your reliefs", "/relief", ("relief", "relief.settings")),
-         ("Exams and events", "", "/exams", ("exams",)),
+         ("Exams and events", "", "/exams", ("exams", "committee")),
          ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
          ("History", "Who changed what, and when", "/history", ("history",)))
 GREYED = ("Committee page", "Admin")   # signed in with a code, these wait for the password
@@ -436,7 +436,8 @@ def _tiles(p):
     for title, line, link, need_ in TILES:
         if link == "/exams" and not _route_exists("/exams"): continue
         if mine & set(need_):
-            out.append((title, f"Until {_day(p['extras'].get('exams'))}" if link == "/exams" else line, link, False))
+            until = p["extras"].get("exams") if link == "/exams" else None
+            out.append((title, f"Until {_day(until)}" if until else line, link, False))
         elif title in GREYED and strong & set(need_): out.append((title, TO_PASSWORD, "/login/password", True))
     return out
 
@@ -1542,7 +1543,7 @@ def _ways():
 
 # ------------------------------------------------------------------------------------------------ the history page
 HISTORY_MAX = 500
-_SAFE_LINK = re.compile(r"^/(?![/\\])")   # a link inside this app: one leading slash, not // or /\
+_SAFE_LINK = re.compile(r"^/(?![/\\\s])")   # a link inside this app: one leading slash, not followed by /, \ or whitespace
 HISTORY_TOP = "Pick a day as year-month-day, like 2026-11-19."
 
 def _history_day(text):

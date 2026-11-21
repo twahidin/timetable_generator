@@ -358,9 +358,9 @@ def who_filter_is_one_read_and_pages_cleanly():
 @t
 def unsafe_links_are_dropped():
     fresh()
-    for l in ("//evil.example", "/\\evil.example", "http://x.example", "/exams"):
+    for l in ("//evil.example", "/\\evil.example", "/\t/evil.example", "http://x.example", "/exams"):
         H.add({"kind": "exams", "as": "A", "text": l, "link": l})
     got = {e["text"]: e.get("link") for e in api(committee())[1]["entries"]}
-    assert got == {"//evil.example": None, "/\\evil.example": None, "http://x.example": None, "/exams": "/exams"}, got
+    assert got == {"//evil.example": None, "/\\evil.example": None, "/\t/evil.example": None, "http://x.example": None, "/exams": "/exams"}, got
 
 print(f"{COUNT} history tests passed")
