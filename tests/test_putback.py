@@ -577,6 +577,20 @@ def the_shared_heads_code_never_puts_back():
     assert field("lessons", 0, "periods") == 9 and entries()[-1]["id"] == mine["id"]
 
 @t
+def a_head_sees_step_3_changes_to_their_subjects():
+    sp = start(); sub = next(x for x in sp["subjects"] if x["dept"] == "EL"); other = next(x for x in sp["subjects"] if x["dept"] not in ("EL", "MA"))
+    change(as_person(CORA), ["set", "subjects", sub["_id"], "lesson_length", 2], ["set", "subjects", other["_id"], "lesson_length", 2])
+    mine, theirs = entries()[-2:]
+    assert (mine["depts"], theirs["depts"]) == (["EL"], [other["dept"]]), (mine, theirs)
+    change(as_person(CORA), ["set", "subjects", sub["_id"], "dept", " MA "]); moved = entries()[-1]
+    assert moved["depts"] == ["EL", "MA"], moved                                  # as it was and as it is now
+    seen = {e["id"] for e in as_person(HAL).get("/api/history").get_json()["entries"]}
+    assert {mine["id"], moved["id"]} <= seen and theirs["id"] not in seen, seen
+    PP.update(lambda d: d["people"][HAL].update(signins=[mine["ts"] - 1, time.time()]))
+    html = as_person(HAL).get("/home").data.decode()
+    assert "Since you last signed in" in html and "2 changes by 1 person" in html and f"{CORA} · Step 3 · Subjects" in html, html
+
+@t
 def teacher_cannot_post():
     start()
     r = as_person(TEA, "code").post("/api/history/back", json={"id": "x"}); assert r.status_code == 401, r.status_code

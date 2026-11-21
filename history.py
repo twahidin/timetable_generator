@@ -314,9 +314,12 @@ def row_label(section, row):
 
 
 def _depts(spec, section, row):
-    """The departments a row belongs to: a lesson's by its subject, a band's by its lessons, a teacher's own."""
+    """The departments a row belongs to: a lesson's by its subject, a band's by its lessons, a teacher's and a subject's own."""
     if not isinstance(row, dict):
         return []
+    if section == "subjects":
+        d = str(row.get("dept") or "").strip()
+        return [d] if d else []
     if section == "lessons":
         d = sync.lesson_dept(spec, row)
         return [d] if d else []
