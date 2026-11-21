@@ -206,6 +206,26 @@ def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, si
     return out
 
 
+def find(entry_id):
+    """the entry with this id (sign-ins too), or None. Ids grow in the order entries are written, so the newest files and
+    lines are read first and the search stops once it reads an id older than the one it looks for"""
+    if not isinstance(entry_id, str) or not entry_id:
+        return None
+    for name in _files():
+        for line in reversed(_lines(name)):
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict) or not isinstance(e.get("id"), str):
+                continue
+            if e["id"] == entry_id:
+                return e
+            if e["id"] < entry_id:
+                return None
+    return None
+
+
 def prune(today=None):
     today = today or datetime.date.today()
     oldest = today.year * 12 + today.month - KEEP_MONTHS
@@ -291,6 +311,12 @@ def _row_entry(work, op):
     was_row = copy.deepcopy(None if name == "add" else sync._find(work, section, rid))
     d0 = _depts(work, section, was_row)
     was = was_row if name == "del" else (was_row.get(field) if was_row and field else None)
+    extra = {}
+    if name == "del":   # the row before it, so a put back can set it where it was ("" when it was first)
+        rows = sync._rows(work, section)
+        i = next((n for n, r in enumerate(rows) if isinstance(r, dict) and r.get("_id") == rid), None)
+        if i is not None:
+            extra["after"] = (rows[i - 1].get("_id") or "") if i and isinstance(rows[i - 1], dict) else ""
 
     def finish(e):
         r = sync._find(work, section, rid)
@@ -309,7 +335,7 @@ def _row_entry(work, op):
                 e["text"] = _cut(f"{lab}: {field} {_show(e['was'])} → {_show(e['now'])}")
             else:
                 e["text"] = _cut(f"{lab}: {field} + {_show(op[4])} − {_show(op[5])}")
-    return dict(section=section, row=rid, field=field, was=copy.deepcopy(was), where=WHERE.get(section, "Setup")), finish
+    return dict(section=section, row=rid, field=field, was=copy.deepcopy(was), where=WHERE.get(section, "Setup"), **extra), finish
 
 
 def _plain_entry(work, op):
@@ -326,6 +352,8 @@ def _plain_entry(work, op):
         sec, field, label, now, was = "top", op[1], op[1], op[2], work.get(op[1])
     e = dict(section=sec, row=None, field=field, was=copy.deepcopy(was), now=copy.deepcopy(now), label=label, depts=[],
              where=_SCHOOL_DAY, text=_cut(f"{label}: {_show(was)} → {_show(now)}"))
+    if name == "day":
+        e["level"] = op[1]
     return e, None
 
 
