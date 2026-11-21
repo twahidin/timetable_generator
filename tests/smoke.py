@@ -29,8 +29,10 @@ def test_removed_routes():
 
 def test_status_shape():
     j = c.get("/api/status").get_json()
-    assert set(j) == {"role", "codes", "code_problems", "volume", "setup_saved_at", "published", "draft", "typed"}, sorted(j)
+    assert set(j) == {"role", "codes", "code_problems", "volume", "setup_saved_at", "published", "draft", "typed",
+                      "who", "group", "via", "depts", "rights", "shared", "admin_exists"}, sorted(j)   # who is signed in (accounts)
     assert j["published"] is None and j["role"] == "committee" and j["draft"] is None
+    assert (j["who"], j["group"], j["via"], j["depts"], j["shared"], j["admin_exists"]) == (None, None, "shared", None, "committee", False) and "committee" in j["rights"], j
 
 def test_old_runs_folder_is_harmless():
     assert c.get("/api/past-setups").status_code == 200
@@ -179,9 +181,11 @@ def test_ids_do_not_reach_the_workbook():
     wb = openpyxl.load_workbook(io.BytesIO(r.data), read_only=True)
     assert not any("_id" in str(cell) for ws in wb.worksheets for row in ws.iter_rows(max_row=8, values_only=True) for cell in row if cell)
 
-def test_the_heads_choice_shows_only_when_the_code_is_set():
-    assert (b"Department heads" in c.get("/login").data) == bool(h)
-    if not h: assert b"Department heads" not in c.get("/login?as=heads").data
+def test_the_heads_code_goes_in_the_one_box():   # the sign-in page is one box for every code: no card for the heads
+    page = c.get("/login").data
+    assert b"Department heads" not in page and page.count(b'name="code"') == 1 and c.get("/login?as=heads").data == page
+    if h:
+        with h.session_transaction() as s: assert s["role"] == "head"
 
 def test_a_head_can_change_groups_but_not_classes():
     rec = c.get("/api/setup").get_json(); v = rec["v"]; sp = rec["spec"]

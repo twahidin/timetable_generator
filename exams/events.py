@@ -1,7 +1,6 @@
 """Events: who goes, the lessons an event stops, the rooms it frees and what it clashes with. Pure: reads no files except
-relief's settings (as invigilate.candidates does)."""
-import relief.people
-import relief.settings
+the accounts' staff list (as invigilate.candidates does)."""
+from accounts import people as _accounts
 from exams import approval as _approval
 from exams import days as _days
 from exams import invigilate as _inv
@@ -12,7 +11,8 @@ FREE = dict(never=[], backups=[], rules=dict(max_per_day=None))
 
 
 def _people(pub):
-    return relief.people.people(pub, relief.settings.load(pub)["extra_staff"])
+    """the published teachers and the staff added in the accounts, with step 4's departments (as the pages see them)"""
+    return _accounts.listing(pub)
 
 
 def on_dates(pub, cal, s) -> list:

@@ -1,6 +1,6 @@
 """Where things live: the committee's saved setup, its earlier copies and the published timetable, all under DATA_DIR
 (a Railway volume, so they survive redeploys)."""
-import collections, copy, csv, datetime, io, json, os, pickle, shutil, threading, time
+import collections, copy, csv, datetime, io, json, os, pickle, shutil, sys, threading, time
 from ttgen.export import model_from_files, export_all
 import sync
 from ttgen import parents
@@ -79,7 +79,7 @@ def _load():
 def _points():
     return sorted((f for f in os.listdir(HIST) if f.endswith(".json")), key=lambda f: int(f[:-5]) if f[:-5].isdigit() else 0) if os.path.isdir(HIST) else []
 
-def restore_point(why):
+def restore_point(why, by=None):
     """keep a copy of the setup as it is now, to go back to (the last KEEP_SAVES of them)"""
     with _setup_lock:
         cur = _load()
@@ -87,7 +87,7 @@ def restore_point(why):
         os.makedirs(HIST, exist_ok=True)
         t = datetime.datetime.now().timestamp(); name = int(t * 1000)
         while os.path.exists(os.path.join(HIST, f"{name}.json")): name += 1
-        write_json(os.path.join(HIST, f"{name}.json"), dict(what=why, saved_at=now(), ts=t, v=cur["v"], spec=cur["spec"]))
+        write_json(os.path.join(HIST, f"{name}.json"), dict(what=why, saved_at=now(), ts=t, v=cur["v"], spec=cur["spec"], who=(by or {}).get("as") or "Unknown"))
         _last_point[0] = t
         for f in _points()[:-KEEP_SAVES]: os.remove(os.path.join(HIST, f))
 
@@ -111,18 +111,46 @@ def load_setup():
     r = setup_record()
     return (r["spec"], r["saved_at"]) if r["spec"] else (None, None)
 
-def replace_setup(spec, why):
+def replace_setup(spec, why, by=None):
     """the whole setup replaced (a save of everything, an imported workbook, a restore): everyone fetches it again"""
     with _setup_lock:
-        if _load(): restore_point("Before: " + why)
+        if _load(): restore_point("Before: " + why, by)
         sync.ensure_ids(spec); parents.derive(spec)
         _setup.update(spec=spec, v=_setup.get("v", 0) + 1)
         _setup["replaced_v"] = _setup["v"]
         _stamp(); _log.clear(); _write_setup()
+        _record([dict(kind="setup-replaced", v=_setup["v"], text=why, where="Setup", **_by(by))])
         return dict(v=_setup["v"], saved_at=_setup["saved_at"])
+
+def _by(by):
+    import history
+    return by or history.by_of(None, "?")
+
+def _warn(e):
+    print("warning: the history could not be written (" + type(e).__name__ + ")", file=sys.stderr)
+
+def _record(entries):
+    """write history entries; a failure here never stops the setup change that is already made"""
+    try:
+        import history
+        history.add_many(entries)
+    except Exception as e:
+        _warn(e)
 
 def save_setup(spec):
     return replace_setup(spec, "Saved")
+
+def _refused_entries(spec, ops, refused, by, v):
+    """one kind-"setup-refused" entry per refused operation, with the sentence shown and what it was about (its row's
+    label, departments and a line of text, judged on spec: the setup as it was, before anything of this change)"""
+    import history
+    out = []
+    for i, why in refused:
+        try: op = ops[i]
+        except (IndexError, TypeError): continue
+        about = history.refused_about(spec, op) if isinstance(op, list) and op else dict(label=None, depts=[], text="Refused", where="Setup")
+        out.append(dict(kind="setup-refused", v=v, op=copy.deepcopy(op), why=why, **about, **by))
+    return out
 
 def _risky(ops):
     dels = [o for o in ops if isinstance(o, list) and o and o[0] == "del"]
@@ -135,7 +163,7 @@ class Refused(Exception):
 class Replaced(Exception):
     """the whole setup was replaced after the version the change was made on: it is not applied"""
 
-def apply_changes(ops, client, check=None, since=None, filter=None):
+def apply_changes(ops, client, check=None, since=None, filter=None, by=None):
     """apply a change to the current setup; returns (the new version, refused).
     check(spec, ops) runs on the setup held under the lock: a sentence back raises Refused and nothing is applied.
     filter(spec, ops) -> (allowed, refused) also runs under the lock: only the allowed operations are applied (one
@@ -150,10 +178,18 @@ def apply_changes(ops, client, check=None, since=None, filter=None):
         if check:
             why = check(cur["spec"], ops)
             if why: raise Refused(why)
-        refused = []
+        refused = []; all_ops = ops
         if filter: ops, refused = filter(cur["spec"], ops)
-        if not ops: return cur["v"], refused, None
-        if datetime.datetime.now().timestamp() - _last_point[0] > POINT_EVERY or _risky(ops): restore_point("While working")
+        by = _by(by)
+        if not ops:
+            _record(_refused_entries(cur["spec"], all_ops, refused, by, cur["v"]))
+            return cur["v"], refused, None
+        import history
+        if datetime.datetime.now().timestamp() - _last_point[0] > POINT_EVERY or _risky(ops): restore_point("While working", history.by_of(None, "app"))   # taken by the app itself
+        batch = "b" + os.urandom(4).hex()
+        try: entries = history.setup_entries(copy.deepcopy(cur["spec"]), ops, by, batch, cur["v"] + 1)
+        except Exception as e: entries = []; _warn(e)
+        entries += _refused_entries(cur["spec"], all_ops, refused, by, cur["v"] + 1)   # before the change is applied
         sync.apply(cur["spec"], ops)
         cur["v"] += 1
         _log.append(dict(v=cur["v"], client=client, ops=ops))
@@ -165,8 +201,14 @@ def apply_changes(ops, client, check=None, since=None, filter=None):
             before = copy.deepcopy(sp)
             if parents.derive(sp):
                 cur["v"] += 1
-                _log.append(dict(v=cur["v"], client="parents", ops=sync.diff(before, sp)))
+                pops = sync.diff(before, sp)
+                _log.append(dict(v=cur["v"], client="parents", ops=pops))
+                try:
+                    for e in history.setup_entries(before, pops, history.by_of(None, "app"), batch, cur["v"]):
+                        entries.append(dict(e, kind="app", **{"as": "The app"}, via="app", follows=batch))
+                except Exception as e: _warn(e)
         _stamp(); _write_setup()
+        _record(entries)
         return cur["v"], refused, mine
 
 def changes_since(since, client, upto=None):
@@ -185,15 +227,15 @@ def copies():
         out = []
         for f in reversed(_points()):
             x = read_json(os.path.join(HIST, f)) or {}
-            if x.get("spec"): out.append(dict(id=f"save-{f[:-5]}", what=x.get("what") or "Saved", when=x.get("saved_at")))
+            if x.get("spec"): out.append(dict(id=f"save-{f[:-5]}", what=x.get("what") or "Saved", when=x.get("saved_at"), who=x.get("who") or "Unknown"))
         return out
 
-def restore(copy_id):
+def restore(copy_id, by=None):
     with _setup_lock:
         f = os.path.join(HIST, copy_id[5:] + ".json") if copy_id.startswith("save-") and copy_id[5:].isdigit() else None
         x = read_json(f) if f else None
         if not x or not x.get("spec"): raise KeyError(copy_id)
-        return replace_setup(x["spec"], "Restored " + (x.get("saved_at") or "an earlier copy"))
+        return replace_setup(x["spec"], "Restored " + (x.get("saved_at") or "an earlier copy"), by)
 
 def seen(client):
     """note this client as here now; how many others were seen in the last 20 seconds"""

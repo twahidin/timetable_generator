@@ -60,8 +60,8 @@
 
   /* ---------------------------------------------------------------- the server */
   async function homeLink() {
-    let to = "/relief";
-    try { const r = await fetch("/api/exams/me", { cache: "no-store" }), j = await r.json(); if (j && j.name === "Timetable committee") to = "/"; } catch (e) { /* keep the staff link */ }
+    let to = "/home";
+    try { const r = await fetch("/api/exams/me", { cache: "no-store" }), j = await r.json(); if (j && j.home) to = j.home; } catch (e) { /* keep the person's home */ }
     return to;
   }
 
@@ -149,7 +149,7 @@
     $("#main").innerHTML = `<div class="head"><h1>${use ? "Exams, tests and events" : "Exams and events"}</h1>
       <div class="row">${use ? `<button type="button" class="primary" data-act="newOpen" ${L.calendar_ok && !nf.open ? "" : "disabled"}>+ New exam or test</button>` : ""}<button type="button" ${use ? "" : `class="primary"`} data-act="evOpen" ${E.calendar_ok && !ne.open ? "" : "disabled"}>+ New event</button></div></div>
       ${cal}${nf.open ? newForm() : ""}${ne.open ? newEvForm() : ""}${dutiesCard()}
-      ${rows || `<div class="card"><p class="muted">${use ? "No exams, tests or events yet." : "You are not in charge of an event yet."}</p></div>`}${use ? "" : `<p><a href="/relief">Back to Relief</a></p>`}`;
+      ${rows || `<div class="card"><p class="muted">${use ? "No exams, tests or events yet." : "You are not in charge of an event yet."}</p></div>`}${use ? "" : `<p><a href="${esc(S.home || "/home")}">Back to Home</a></p>`}`;
   }
 
   function blankEv() { return { open: false, name: "", levels: [], classes: [], start: "", end: "", in_charge: "" }; }
@@ -243,9 +243,10 @@
     links(me.j.can_use);
     const du = await api("GET", "/api/exams/my-duties");
     S.duties = du.ok ? du.j : null;
+    S.home = me.j.home || "/home";   /* a person's way back is their home page */
     const ev = await api("GET", "/api/events");
     if (ev.status === 401 || ev.status === 403) return;
-    if (!ev.ok) { fail(ev.j.error || "Something went wrong.", me.j.can_use ? "" : "/relief"); return; }
+    if (!ev.ok) { fail(ev.j.error || "Something went wrong.", me.j.can_use ? "" : S.home); return; }
     S.evl = ev.j; S.ne = blankEv(); S.nf = blankForm(); S.list = null;
     if (me.j.can_use) {
       const r = await api("GET", "/api/exams");
