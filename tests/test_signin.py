@@ -45,7 +45,10 @@ def publish(teachers=TEACHERS):
     store.write_json(os.path.join(store.PUB, "meta.json"), pub["meta"])
     store._cache.update(stamp=None, value=None)
     views = store.published()["views"]
-    for k in ("committee", "teacher", "staff", "student"): views[("view", k)] = f"the {k} page"
+    for key, text in ((("view", "committee", "/"), "the committee page"), (("view", "teacher", None), "the teacher page"),
+                      (("view", "teacher", "/home"), "the person page"), (("view", "teacher", "/relief"), "the staff page"),
+                      (("view", "student", None), "the student page")):
+        views[key] = text   # by mode and the way back: a person to their tiles, a relief stage 1 session to Relief
 
 def unpublish():
     p = os.path.join(store.PUB, "meta.json")
@@ -117,7 +120,7 @@ def a_published_teacher_signs_in_with_their_code_and_lands_on_home():
     assert (e["ok"], e["via"], e["who"], e["as"], e["shared"], e["reason"], e["addr"]) == (True, "code", ALICE, ALICE, None, None, "127.0.0.1"), e
     for _ in range(2): code_in(code.lower().replace("-", " "))      # codes are read ignoring case, spaces and dashes
     assert len(rec(ALICE)["signins"]) == 2                           # the last two are kept
-    assert c.get("/timetable").data == b"the staff page"
+    assert c.get("/timetable").data == b"the person page"
 
 @t
 def shared_codes_still_work():
@@ -242,7 +245,7 @@ def changing_the_password_ends_the_persons_other_sessions():
     assert a.get("/timetable").status_code == 200 and b.get("/timetable").status_code == 200
     new = secret()
     r = a.post("/account/password", data=dict(current=pw, new=new, again=new)); assert went(r, "/home")
-    assert a.get("/timetable").data == b"the staff page"              # this session is kept, with the new number
+    assert a.get("/timetable").data == b"the person page"             # this session is kept, with the new number
     assert went(b.get("/timetable"), "/login") and "who" not in kept(b)
     _, r = pw_in(user, pw); assert r.status_code == 401
     _, r = pw_in(user, new); assert went(r, "/home")
@@ -271,7 +274,7 @@ def a_code_session_lives_through_a_publish_and_ends_when_the_teacher_is_dropped(
     r = c.get("/api/relief/me"); assert r.status_code == 401 and r.get_json() == {"error": AGAIN}
     s = kept(c); assert s["who"] == BEN and s["via"] == "code", s
     publish([x for x in TEACHERS if x["name"] != BEN])
-    r = c.get("/timetable"); assert r.status_code == 200 and b"Code no longer valid" in r.data and b"the staff page" not in r.data, (r.status_code, r.data[:300])
+    r = c.get("/timetable"); assert r.status_code == 200 and b"Code no longer valid" in r.data and b"the person page" not in r.data, (r.status_code, r.data[:300])
     assert "who" not in kept(c)
     r = d.get("/api/relief/me"); assert r.status_code == 401 and r.get_json() == {"error": AGAIN} and "who" not in kept(d)
     _, r = code_in(staff_code(BEN)); assert r.status_code == 401
@@ -319,7 +322,7 @@ def a_relief_stage_1_session_counts_as_a_code_session():
 def the_session_model():
     with A.app.test_request_context():
         A.session["role"] = "committee"
-        assert A.via() == "shared" and A.shared() == "committee" and A.who() is None and A.has("codes") and A.role() == "committee"
+        assert A.via() == "shared" and A.shared() == "committee" and A.who() is None and A.has("codes") and not A.is_head()
         assert A.by() == {"who": None, "as": "Shared committee code", "via": "shared"}
     with A.app.test_request_context():
         A.session.update(role="personal", sid="S001")
@@ -328,10 +331,10 @@ def the_session_model():
         A.session.update(who=ALICE, via="code", n=0)
         p = A.who()
         assert p["name"] == ALICE and p["depts"] == ["Science"] and "pw" not in p and A.via() == "code" and A.shared() is None
-        assert A.has("relief") and not A.has("setup") and A.role() == "staff"
+        assert A.has("relief") and not A.has("setup") and not A.is_head() and A.head_depts() is None
         assert A.by() == {"who": ALICE, "as": ALICE, "via": "code"}
     with A.app.test_request_context():
-        assert A.via() is None and A.who() is None and A.rights() == frozenset() and A.by()["as"] == "Unknown" and A.role() is None
+        assert A.via() is None and A.who() is None and A.rights() == frozenset() and A.by()["as"] == "Unknown" and not A.is_head()
     calls = []
     real = A.rights_table.rights
     A.rights_table.rights = lambda *a, **k: calls.append(1) or real(*a, **k)
@@ -341,8 +344,8 @@ def the_session_model():
             A.rights(); A.has("relief"); A.rights()
             assert len(calls) == 1                                    # worked out once a request, kept on flask.g
     finally: A.rights_table.rights = real
-    assert A.app.view_functions["post_setup_changes"]._need == ("committee", "head")
-    assert A.app.view_functions["timetable"]._need == ("committee", "head", "teacher", "student", "staff")
+    assert A.app.view_functions["post_setup_changes"]._need == ("setup",)
+    assert A.app.view_functions["timetable"]._need == ("timetable",)
 
 @t
 def recovery_works_once_per_value_and_only_with_the_variable():

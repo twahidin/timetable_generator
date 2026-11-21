@@ -111,20 +111,20 @@ def by():
     if st["via"] == "personal": return history.by_of(None, "personal", "A student")
     return history.by_of(None, "?")
 
-def role():
-    """(bridge until Task 6) the old role name: a person is "staff", or "committee" / "head" when signed in with a
-    password and holding those rights"""
-    st = _state()[1]
-    if st["via"] == "shared": return st["shared"]
-    if st["via"] == "personal": return "personal"
-    if st["person"] is None: return None
-    return "committee" if has("committee") else "head" if has("setup") else "staff"
+def is_head():
+    """a head of department at the setup: the shared heads' code, or an HOD or SH signed in with their password"""
+    return has("setup") and not has("committee")
 
-def _legacy():
-    """(bridge until Task 6) the old role names this session passes as: a person also counts as "staff\""""
-    r = role()
-    if r is None: return set()
-    return {r, "staff"} if who() is not None else {r}
+def head_depts():
+    """the departments a head signed in by name may change: their record's, as a list in its order ([] when none, and then
+    every lesson change is refused); None for anyone else (the shared heads' code changes every department, as today)"""
+    p = who()
+    if p is None or not is_head(): return None
+    return list(people.record(people.load(), p["name"])["depts"])
+
+def _relief_stage_1():
+    """a session started before accounts (relief stage 1: `role` "staff" and `who`)"""
+    return session.get("role") == "staff" and who() is not None
 
 def _must_change_first():
     """a person signed in with a one-time password chooses their own before anything else (their code sessions are not
@@ -134,19 +134,24 @@ def _must_change_first():
     if _api(): return {"error": "Choose a new password first."}, 403
     return redirect("/account/password")
 
+# every right a session can hold (accounts/rights.py gives them); need() refuses any other name when the app starts
+RIGHTS = frozenset({"committee", "setup", "timetable", "files", "history", "codes", "admin", "own", "exams",
+                    "relief", "relief.plan", "relief.settings", "relief.save"})
+
 def need(*names):
-    """the route needs one of these rights (until Task 6 also one of the old role names: committee, head, teacher,
-    student, staff, personal)"""
+    """the route needs one of these rights: the server decides, from the records, on every request. Without one, the
+    API answers 401 "Please sign in again." and a page goes to the sign-in page ("Code no longer valid" for a code
+    session whose person has left the published timetable)"""
+    wrong = sorted(set(names) - RIGHTS)
+    if not names or wrong: raise ValueError(f"need() takes right names only, not {wrong or 'nothing'}")
     def deco(f):
         @wraps(f)
         def inner(*a, **k):
             stop = _must_change_first()
             if stop: return stop
-            if not (rights() & set(names) or _legacy() & set(names)):
+            if not rights() & set(names):
                 if _api(): return {"error": "Please sign in again."}, 401
                 return _no_longer_valid() if g.get("_gone") else redirect("/login")
-            if role() == "staff" and via() == "code" and _api() and not store.published():
-                return {"error": "Please sign in again."}, 401   # (bridge, as relief stage 1) nothing published: the session stays
             return f(*a, **k)
         inner._need = names
         return inner
@@ -407,11 +412,46 @@ def login_recover():
 def logout():
     session.clear(); return redirect("/login")
 
+# the tiles of the home page, in order: (title, what it opens, link, the rights that show it)
+TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("setup",)),
+         ("Timetables", "Classes, teachers, rooms, Who's free", "/timetable", ("timetable",)),
+         ("Relief", "Ask for relief, your reliefs", "/relief", ("relief", "relief.settings")),
+         ("Exams and events", "", "/exams", ("exams",)),
+         ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
+         ("History", "Who changed what, and when", "/history", ("history",)))
+GREYED = ("Committee page", "Admin")   # signed in with a code, these wait for the password
+TO_PASSWORD = "Sign in with your password to open this."
+_HOW = {"code": "Signed in with your code", "password": "Signed in with your password"}
+
+def _route_exists(path):
+    return any(r.rule == path for r in app.url_map.iter_rules())
+
+def _tiles(p):
+    """the tiles for the person p, in order, as (title, line, link, greyed): those they may open, and greyed those only
+    their password opens (a committee member's or a head's code opens all but the setup and the admin page)"""
+    mine, strong = rights(), (rights_table.rights(p, "password") if via() == "code" else frozenset())
+    out = []
+    for title, line, link, need_ in TILES:
+        if link == "/exams" and not _route_exists("/exams"): continue
+        if mine & set(need_):
+            out.append((title, f"Until {_day(p['extras'].get('exams'))}" if link == "/exams" else line, link, False))
+        elif title in GREYED and strong & set(need_): out.append((title, TO_PASSWORD, "/login/password", True))
+    return out
+
 @app.get("/home")
 @need("timetable")
 def home():
-    """(bridge until Task 6 makes it the tiles page) a person opens what / opens for them"""
-    return redirect("/")
+    """a person's tiles: only what they may open; with one tile (and nothing waiting for the password) it opens at once"""
+    p = who()
+    if p is None: return redirect("/")   # a shared code is nobody's: its own page
+    got = _tiles(p)
+    if len(got) == 1 and not got[0][3]: return redirect(got[0][2])
+    tiles = "".join(f'<a class="tile{" off" if off else ""}" href="{link}"><b>{esc(title)}</b><span class="muted small">{esc(line)}</span></a>'
+                    for title, line, link, off in got)
+    change = ' · <a href="/account/password">Change password</a>' if via() == "password" else ""
+    return page("Home", f"""<main class="home"><header class="hello"><h1>Hello, {esc(p["name"])}</h1>
+<p class="muted small">{esc(_HOW.get(via(), "Signed in"))}{change} · <a href="/logout">Sign out</a></p></header>
+<nav class="tiles">{tiles}</nav><p class="muted small foot">{esc(school_name())}</p></main>""")
 
 # ------------------------------------------------------------------------------------------------ every request
 @app.before_request
@@ -469,12 +509,13 @@ def health(): return {"ok": True}
 
 # ------------------------------------------------------------------------------------------------ committee: setup editor
 @app.get("/")
+@need("setup", "timetable", "own")
 def index():
-    if role() in ("committee", "head"): return app.send_static_file("index.html")
-    if role() == "personal": return redirect("/me")
-    if role() == "staff": return redirect("/relief")
-    if role() in ("teacher", "student"): return redirect("/timetable")
-    return redirect("/login")
+    """the committee page for whoever may see the setup; everyone else to their own page"""
+    if has("setup"): return app.send_static_file("index.html")
+    if who() is not None: return redirect("/home")
+    if has("own"): return redirect("/me")
+    return redirect("/timetable")
 
 def kind_ok(kind):
     if kind not in ("primary", "secondary"): abort(404)
@@ -495,7 +536,7 @@ def xlsx_bytes(spec):
     buf = io.BytesIO(); write_template(spec, buf); buf.seek(0); return buf
 
 @app.get("/api/meta/<kind>")
-@need("committee", "head")
+@need("setup")
 def meta(kind):
     sc = defaults(kind_ok(kind))
     return jsonify(rule_types=[dict(rule=a, scopes=b, needs_time=c == "Y", needs_number=d == "Y", meaning=e, example=f) for a, b, c, d, e, f in RULE_TYPES],
@@ -503,7 +544,7 @@ def meta(kind):
                    roles=[dict(role=a, what=b, allowance=c, group=d) for a, b, c, d in ROLES], skill_version=SKILL_VERSION)
 
 @app.get("/api/sample/<kind>")
-@need("committee", "head")
+@need("setup")
 def api_sample(kind): return jsonify(sample(kind_ok(kind)))
 
 @app.get("/api/blank/<kind>")
@@ -582,7 +623,7 @@ def read_table():
     return {"rows": [r for r in rows if any(r)]}
 
 @app.get("/api/setup")
-@need("committee", "head")
+@need("setup")
 def get_setup():
     r = store.setup_record()
     return jsonify(spec=r["spec"], v=r["v"], saved_at=r["saved_at"])
@@ -595,7 +636,7 @@ def put_setup():
     body = body if isinstance(body, dict) else {}
     spec, why = (body, "Saved") if "school" in body else (body.get("spec"), str(body.get("why") or "Saved")[:80])
     if not isinstance(spec, dict) or "school" not in spec: return {"error": "No setup data sent."}, 400
-    return store.replace_setup(spec, why)
+    return store.replace_setup(spec, why, by=by())
 
 def _changes_reply(since, client, upto=None):
     return {**store.changes_since(since, client, upto), "others": store.seen(client)}
@@ -605,12 +646,12 @@ def _int(x):
     except (TypeError, ValueError): return 0
 
 @app.get("/api/setup/changes")
-@need("committee", "head")
+@need("setup")
 def get_setup_changes():
     return _changes_reply(_int(request.args.get("since")), str(request.args.get("client") or "")[:40])
 
 @app.post("/api/setup/changes")
-@need("committee", "head")
+@need("setup")
 def post_setup_changes():
     """a change as operations; the answer carries what others changed meanwhile, so the caller catches up in the same call"""
     body = request.get_json(force=True, silent=True)
@@ -618,14 +659,15 @@ def post_setup_changes():
     client, ops = str(body.get("client") or "")[:40], body.get("ops")
     if not isinstance(ops, list): return {"error": "No changes sent."}, 400
     split = None
-    if role() == "head":
-        # judged one operation at a time on the setup as it is under the store's lock, when the change is applied: what a
-        # head may not make is skipped and named in the answer, the rest of their work is applied
-        split = sync.head_split
-        for op in ops:      # a teacher added by a head is provisional until the committee confirms
-            if isinstance(op, list) and len(op) == 4 and op[0] == "add" and op[1] == "teachers" and isinstance(op[2], dict): op[2]["provisional"] = "Yes"; op[2].pop("dept2", None)
+    if is_head():
+        # judged on the setup as it is under the store's lock, when the change is applied: what a head may not make is
+        # skipped and named in the answer, the rest of their work is applied. A head signed in by name changes only their
+        # departments (their record's; the shared heads' code: every department, as today)
+        depts = head_depts()
+        sync.head_prepare(ops, depts)    # a teacher a head adds is provisional, in one of their departments
+        split = lambda spec, o: sync.head_split(spec, o, depts)
     since = _int(body.get("since"))
-    try: v, refused, mine = store.apply_changes(ops, client, since=since, filter=split)
+    try: v, refused, mine = store.apply_changes(ops, client, since=since, filter=split, by=by())
     except store.Replaced: return _changes_reply(since, client)
     except store.Refused as e: return {"error": str(e)}, 403
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
@@ -643,7 +685,7 @@ def get_setup_copies():
 @need("committee")
 def restore_setup():
     body = request.get_json(force=True, silent=True)
-    try: return store.restore(str((body or {}).get("id") or ""))
+    try: return store.restore(str((body or {}).get("id") or ""), by=by())
     except KeyError: return {"error": "That copy is not there any more."}, 404
 
 @app.get("/api/past-setups")
@@ -939,12 +981,17 @@ def pub_info():
                 compared_v=m.get("compared_v", ""), open=m.get("open", 0), left=m.get("left", []), fixes=m.get("fixes", []))
 
 @app.get("/api/status")
-@need("committee", "head")
+@need("setup")
 def status():
+    """what the committee page shows. who: the person signed in (None for a shared code); depts: a head's departments
+    when signed in by name (None otherwise); shared: the shared code's role; admin_exists: an admin has been named"""
     have, probs = access.configured()
     _, at = store.load_setup()
-    if role() == "head": return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info())
-    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), typed=typed.enabled())
+    p = who()
+    mine = dict(who=p["name"] if p else None, via=via(), depts=head_depts(), rights=sorted(rights()), shared=shared(),
+                admin_exists=bool(people.admins(people.load())))
+    if not has("committee"): return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info(), **mine)
+    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), typed=typed.enabled(), **mine)
 
 NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
 
@@ -977,17 +1024,22 @@ def files_for(r):
     return []
 
 @app.get("/timetable")
-@need("committee", "head", "teacher", "student", "staff")
+@need("timetable")
 def timetable():
     from ttgen.export import render_html
     pub = store.published()
     if not pub:
         return page("Timetable", "<main class='login'><h1>Not published yet</h1><p class='muted'>The timetable committee has not published the timetable yet. Please check again later.</p><p><a href='/logout'>Sign out</a></p></main>")
-    r = "teacher" if role() in ("head", "staff") else role()   # a head, and a teacher signed in with their own code, see what a teacher sees
-    key = ("view", "staff" if role() == "staff" else r)          # ...but staff have their own copy, with the way back to Relief
+    # the committee sees every tab; the shared student code what a student sees; everyone else what a teacher sees, a
+    # person with the way back to their tiles (a relief stage 1 session: to Relief). Each kept apart, by mode and way back
+    if has("committee"): r, home, label = "committee", "/", "Committee page"
+    elif shared() == "student": r, home, label = "student", None, None
+    elif who() is None: r, home, label = "teacher", None, None
+    elif _relief_stage_1() and has("relief"): r, home, label = "teacher", "/relief", "Relief"
+    else: r, home, label = "teacher", "/home", "Home"
+    key = ("view", r, home)
     if key not in pub["views"]:
         view = "student" if r == "student" else "full"
-        home, label = {"committee": ("/", "Committee page"), "staff": ("/relief", "Relief")}.get(role(), (None, None))
         app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r),
                        placeholder="Search a class" if r == "student" else None, home=home, homeLabel=label)
         pub["views"][key] = render_html(pub["model"], view, app=app_cfg)
@@ -1004,7 +1056,7 @@ def draft_preview_page():
         return page("Preview", "<main class='login'><h1>Nothing to preview</h1><p class='muted'>No setup is saved yet.</p><p><a href='/'>Back to the committee page</a></p></main>"), 409
 
 @app.get("/me")
-@need("personal")
+@need("own")
 def me():
     from ttgen.export import render_html
     pub = store.published(); sid = session.get("sid")
@@ -1018,7 +1070,7 @@ def _pdf(v, name):
     return send_file(io.BytesIO(pdf_bytes(store.published()["model"], v)), as_attachment=True, download_name=safe_name(name) + ".pdf", mimetype="application/pdf")
 
 @app.get("/pdf/me")
-@need("personal")
+@need("own")
 def pdf_me():
     from ttgen.export import student_view
     pub = store.published(); sid = session.get("sid")
@@ -1027,7 +1079,7 @@ def pdf_me():
     return _pdf(student_view(pub["model"], s), f"{s['name']} timetable")
 
 @app.get("/pdf/custom")
-@need("committee", "head", "teacher", "student", "staff")
+@need("timetable")
 def pdf_custom():
     from ttgen.export import custom_view, group_options
     pub = store.published()
@@ -1039,13 +1091,13 @@ def pdf_custom():
     return _pdf(custom_view(m, cls, groups), f"Class {cls} my timetable")
 
 @app.get("/pdf/<kind>/<path:key>")
-@need("committee", "head", "teacher", "student", "staff")
+@need("timetable")
 def pdf_one(kind, key):
     from ttgen.export import class_view, teacher_view, room_view, student_view
     pub = store.published()
     if not pub: abort(404)
-    m = pub["model"]; r = role()
-    if r == "student" and kind != "classes": abort(403)
+    m = pub["model"]
+    if shared() == "student" and kind != "classes": abort(403)   # the shared student code: class timetables only
     if kind == "classes" and key in m["class_ix"]: return _pdf(class_view(m, key), f"Class {key}")
     if kind == "teachers" and key in m["teacher_ix"]: return _pdf(teacher_view(m, key), key)
     if kind == "rooms" and key in m["room_ix"]: return _pdf(room_view(m, key), f"Room {key}")
@@ -1056,11 +1108,11 @@ def pdf_one(kind, key):
 
 @app.get("/files/<what>")
 @app.get("/files/<what>/<kind>")
-@need("committee", "head", "teacher", "staff")
+@need("files")
 def files(what, kind=None):
     pub = store.published()
     if not pub: abort(404)
-    f = pub["meta"].get("files", {}); r = "teacher" if role() in ("head", "staff") else role()
+    f = pub["meta"].get("files", {}); r = "committee" if has("committee") else "teacher"
     if what == "book":
         allowed = {"committee": ("classes", "teachers", "rooms", "students"), "teacher": ("classes", "teachers", "rooms")}[r]
         if kind not in allowed or kind not in f.get("books", {}): abort(404)
@@ -1080,15 +1132,16 @@ def relief_staff(pub):
     return relief_people.people(pub, relief_settings.load(pub)["extra_staff"])
 
 def me_staff(pub=None):
-    """(bridge until Task 7, which uses who()) the person signed in by name while the timetable is published, else None.
+    """(until Task 7, which uses who()) the person signed in by name while the timetable is published, else None.
     who() has already ended a code session whose person is no longer on the published timetable; with nothing published
     (a publish may be swapping folders) there is no one to find, but the session stays"""
-    if role() != "staff" or not (pub or store.published()): return None
+    if not (pub or store.published()): return None
     return who()
 
 def _relief_rights(pub):
-    """(may read the settings, may save them, saved by) for whoever is signed in; None when a staff session has ended"""
-    if role() == "committee": return True, True, "Timetable committee"
+    """(may read the settings, may save them, saved by) for whoever is signed in; None for a person while nothing is
+    published. (Until Task 7) the committee's own right, else relief's lists"""
+    if has("committee"): return True, True, "Timetable committee"
     p = me_staff(pub)
     if p is None: return None
     s = relief_settings.load(pub); team = p["name"] in s["team"]
@@ -1098,13 +1151,13 @@ def _no_longer_valid():
     return page("Relief", "<main class='login'><h1>Code no longer valid</h1><p class='muted'>You are not on the published timetable or the relief staff list. Ask the timetable committee for your code.</p><p><a href='/login'>Back</a></p></main>")
 
 @app.get("/relief")
-@need("staff", "committee")
+@need("relief", "relief.settings")
 def relief_home():
-    if role() == "committee": return redirect("/relief/settings")
+    if not has("relief"): return redirect("/relief/settings")   # the shared committee code: nobody's relief, its settings
     return app.send_static_file("relief.html")   # need() has checked the person is still there
 
 @app.get("/api/relief/me")
-@need("staff")
+@need("relief")
 def relief_me():
     pub = store.published(); p = me_staff(pub)
     if p is None: return {"error": "Please sign in again."}, 401
@@ -1112,19 +1165,19 @@ def relief_me():
     return jsonify(name=p["name"], depts=p["depts"], on_team=team, on_management=p["name"] in s["management"], can_settings=team)
 
 @app.get("/relief/settings")
+@need("relief.settings")
 def relief_settings_page():
-    if not role(): return _no_longer_valid() if g.get("_gone") else redirect("/login")
-    if role() == "staff" and me_staff() is None: return _no_longer_valid()
-    if role() == "committee" or (role() == "staff" and (_relief_rights(store.published()) or (0, 0))[1]):
-        return app.send_static_file("relief-settings.html")
+    r = _relief_rights(store.published())
+    if r is None: return _no_longer_valid()
+    if r[1]: return app.send_static_file("relief-settings.html")
     return page("Relief settings", f"<main class='login'><h1>Relief settings</h1><p class='muted'>{esc(ONLY_SETTINGS)}</p><p><a href='/'>Back</a></p></main>"), 403
 
 def _relief_settings_reply(pub, settings):
     m = pub["model"]; rights = _relief_rights(pub) or (False, False, None)
-    return jsonify(settings=settings, people=relief_staff(pub), roles=relief_settings.role_names(pub), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=role() == "committee")
+    return jsonify(settings=settings, people=relief_staff(pub), roles=relief_settings.role_names(pub), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=has("codes"))
 
 @app.get("/api/relief/settings")
-@need("committee", "staff")
+@need("relief.settings")
 def relief_settings_get():
     pub = store.published()
     if not pub: return {"error": NO_RELIEF_PUB}, 409
@@ -1134,7 +1187,7 @@ def relief_settings_get():
     return _relief_settings_reply(pub, relief_settings.load(pub))
 
 @app.put("/api/relief/settings")
-@need("committee", "staff")
+@need("relief.save")
 def relief_settings_put():
     pub = store.published()
     if not pub: return {"error": NO_RELIEF_PUB}, 409
@@ -1147,12 +1200,12 @@ def relief_settings_put():
 
 def _relief_codes_refused():
     """the answer that refuses the staff codes to whoever is signed in, or None (the routes check what is published)"""
-    if role() != "committee": return {"error": ONLY_CODES}, 403
+    if not has("codes"): return {"error": ONLY_CODES}, 403
     if not access.personal_codes_on(): return NO_PERSONAL_STAFF, 409
     return None
 
 @app.get("/api/relief/codes.csv")
-@need("committee", "staff")
+@need("codes")
 def relief_codes_csv():
     refused = _relief_codes_refused(); pub = store.published()
     if refused: return refused
@@ -1160,7 +1213,7 @@ def relief_codes_csv():
     return Response(relief_codes.codes_csv(relief_staff(pub)), mimetype="text/csv", headers={"Content-Disposition": 'attachment; filename="personal relief codes.csv"'})
 
 @app.get("/api/relief/code-slips.pdf")
-@need("committee", "staff")
+@need("codes")
 def relief_code_slips():
     refused = _relief_codes_refused(); pub = store.published()
     if refused: return refused
