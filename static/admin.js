@@ -28,7 +28,14 @@
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   const person = name => S.people.find(p => p.name === name);
   const ticks = () => [...S.ticked];
-  const slipsUrl = names => "/api/relief/code-slips.pdf?names=" + names.map(encodeURIComponent).join(",");
+  const slipsUrl = names => "/api/relief/code-slips.pdf" + (names ? "?names=" + names.map(encodeURIComponent).join(",") : "");
+  const MOST_SLIPS = 200;
+  function focusKey() {   /* the table or bar control that has focus, so a redraw can give it back */
+    const a = document.activeElement; if (!a || !a.closest || !a.closest("#tbl,#bar")) return null;
+    const d = a.dataset, q = v => String(v).replace(/["\\]/g, "\\$&");
+    return d.tick != null ? `[data-tick="${q(d.tick)}"]` : d.act === "pick" ? `[data-act="pick"][data-name="${q(d.name)}"]` : d.act === "menu" ? `[data-act="menu"][data-kind="${q(d.kind)}"]` : d.act ? `[data-act="${q(d.act)}"]` : null;
+  }
+  function keepFocus(draw) { const k = focusKey(); draw(); if (k) { const el = $(k); if (el) el.focus(); } }
 
   async function api(path, body) {
     let r, d = null;
@@ -38,6 +45,23 @@
     if (r.status === 401) { S.out = true; S.once = null; drawMsg(); throw new Error(AGAIN); }
     if (!r.ok) throw new Error((d && d.error) || "Something went wrong. Reload the page and try again.");
     return d;
+  }
+
+  async function printSlips(url, n) {
+    if (n > MOST_SLIPS) { note(`Print slips for at most ${MOST_SLIPS} people at a time.`, true); return; }
+    try {
+      const r = await fetch(url, { credentials: "same-origin" });
+      if (r.status === 401) { S.out = true; S.once = null; drawMsg(); return; }
+      if (!r.ok) {
+        let d = null; try { d = await r.json(); } catch (e) { d = null; }
+        note((d && d.error) || "The slips could not be made. Try again.", true); return;
+      }
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(await r.blob()); a.download = "code-slips.pdf"; a.rel = "noopener";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      note(null);
+    } catch (e) { note("The server could not be reached. Try again.", true); }
   }
 
   function note(text, bad) { S.msg = text ? { text, bad: !!bad } : null; drawMsg(); }
@@ -97,7 +121,7 @@
     const opt = (v, cur, text) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(text)}</option>`;
     const depts = [...new Set([...S.depts, ...S.people.flatMap(p => p.depts || [])])].sort();
     $("#view").innerHTML = `<div id="hint"></div>
-      <div class="row" style="justify-content:flex-end;margin:0 0 8px"><a class="filebtn" id="slipsAll" href="/api/relief/code-slips.pdf" target="_blank" rel="noopener">Print code slips</a><button type="button" class="primary" data-act="addopen">Add a person</button></div>
+      <div class="row" style="justify-content:flex-end;margin:0 0 8px"><button type="button" class="filebtn" id="slipsAll" data-act="slipsall">Print code slips</button><button type="button" class="primary" data-act="addopen">Add a person</button></div>
       <div id="addbox"></div>
       <div class="filters">
         <input type="search" id="q" placeholder="Search a name" aria-label="Search a name" value="${esc(S.q)}" autocomplete="off">
@@ -127,7 +151,8 @@
     return out;
   }
 
-  function drawTable() {
+  function drawTable() { keepFocus(drawTableNow); }
+  function drawTableNow() {
     const list = shown(), all = list.length && list.every(p => S.ticked.has(p.name));
     $("#tickall").textContent = `Tick all shown (${list.length})`;
     $("#slipsAll").hidden = !!S.ticked.size;
@@ -143,7 +168,8 @@
   }
 
   /* ---- the dark bar and its menus (every action previews first) */
-  function drawBar() {
+  function drawBar() { keepFocus(drawBarNow); }
+  function drawBarNow() {
     const n = S.ticked.size, bar = $("#bar");
     if (!n) { bar.innerHTML = ""; $("#menu").innerHTML = ""; return; }
     const k = S.menu && S.menu.kind, b = (kind, text, cls) => `<button type="button" data-act="menu" data-kind="${kind}" class="${k === kind ? "on " : ""}${cls || ""}">${text}</button>`;
@@ -159,7 +185,8 @@
 
   function menuSum() {
     const m = S.menu;
-    const sum = m.err ? `<div class="sum bad">${esc(m.err)}</div>` : m.lines ? `<div class="sum">${m.lines.map(l => `<p>${esc(l)}</p>`).join("")}</div>` : m.hold ? `<div class="sum">${esc(m.hold)}</div>` : `<div class="sum">Reading what it would do…</div>`;
+    const fail = m.fail ? `<div class="sum bad">${esc(m.fail)}</div>` : "";
+    const sum = fail + (m.err ? `<div class="sum bad">${esc(m.err)}</div>` : m.lines ? `<div class="sum">${m.lines.map(l => `<p>${esc(l)}</p>`).join("")}</div>` : m.hold ? `<div class="sum">${esc(m.hold)}</div>` : `<div class="sum">Reading what it would do…</div>`);
     return `${sum}<div class="go"><button type="button" class="primary" data-act="apply" ${m.lines && !m.busy ? "" : "disabled"}>${esc(VERB[m.kind](S.ticked.size))}</button><button type="button" data-act="cancelmenu">Cancel</button></div>`;
   }
 
@@ -172,6 +199,8 @@
     if (m.kind === "give" || m.kind === "take") {
       opts = EXTRAS.map(([k, t]) => `<div class="it"><label><input type="radio" name="bx" data-bx="${k}" ${m.extra === k ? "checked" : ""}> ${esc(t)}</label>
         ${m.kind === "give" && k === "exams" && m.extra === "exams" ? `until <input type="date" data-until="1" value="${esc(m.until)}" aria-label="Last day of the exams and events access">` : ""}</div>`).join("");
+    } else if (m.kind === "group" && m.mgmt) {
+      opts = `<div class="w">Each person gets the group their role on step 4 names: HOD or SH.</div>`;
     } else if (m.kind === "group") {
       opts = `<div class="it"><label>Group <select data-bgroup="1">${S.groups.map(g => `<option value="${esc(g[0])}"${g[0] === m.group ? " selected" : ""}>${esc(g[1])}</option>`).join("")}</select></label></div>`;
     } else {
@@ -180,12 +209,15 @@
     el.innerHTML = `<div class="menu">${opts}<div id="msum">${menuSum()}</div></div>`;
   }
 
-  function bulkBody(preview) {
+  function bulkBodies(preview) {
     const m = S.menu, b = { names: ticks(), action: m.kind, preview };
     if (m.kind === "give" || m.kind === "take") b.extra = m.extra;
     if (m.kind === "give" && m.extra === "exams") b.until = m.until;
-    if (m.kind === "group") b.group = m.group;
-    return b;
+    if (m.kind === "group" && !m.mgmt) b.group = m.group;
+    if (!(m.kind === "group" && m.mgmt)) return [b];
+    const by = { hod: [], sh: [] };   /* "Make them management": each one's own role, one call for HOD and one for SH */
+    for (const n of b.names) { const r = String((person(n) || {}).role || "").trim().toLowerCase(); if (by[r]) by[r].push(n); }
+    return Object.keys(by).filter(g => by[g].length).map(g => ({ names: by[g], action: "group", group: g, preview }));
   }
 
   async function previewMenu() {
@@ -195,30 +227,46 @@
     if (m.kind === "give" && m.extra === "exams" && !m.until) { m.hold = "Pick the last day first."; drawMenu(false); return; }
     drawMenu(false);
     try {
-      const d = await api("/api/admin/bulk", bulkBody(true));
-      if (my !== S.token || S.menu !== m) return;
-      m.lines = d.lines;
+      const lines = [];
+      for (const b of bulkBodies(true)) {
+        const d = await api("/api/admin/bulk", b);
+        if (my !== S.token || S.menu !== m) return;
+        if (m.mgmt) lines.push(`${label(b.group)}: ${b.names.join(", ")}.`);
+        lines.push(...d.lines);
+      }
+      m.lines = lines;
     } catch (e) { if (my !== S.token || S.menu !== m) return; m.err = e.message; }
     drawMenu(false);
   }
 
-  function openMenu(kind) {
-    if (S.menu && S.menu.kind === kind) { S.menu = null; drawBar(); return; }
+  function openMenu(kind, mgmt) {
+    if (S.menu && S.menu.kind === kind && !mgmt) { S.menu = null; drawBar(); return; }
     const first = ticks().map(person).filter(Boolean)[0], r = first && String(first.role || "").trim().toLowerCase();
-    S.menu = { kind, extra: "relief", until: "", group: r === "sh" ? "sh" : r === "hod" ? "hod" : "teacher", lines: null, err: null, hold: null, busy: false };
+    S.menu = { kind, extra: "relief", until: "", group: r === "sh" ? "sh" : r === "hod" ? "hod" : "teacher", lines: null, err: null, hold: null, busy: false, fail: null, mgmt: !!mgmt };
     drawBar(); previewMenu();
   }
 
   async function applyMenu() {
     const m = S.menu; if (!m || !m.lines || m.busy) return;
-    m.busy = true; drawMenu(false);
+    m.busy = true; m.fail = null; drawMenu(false);
+    const said = []; let did = false;
     try {
-      const d = await api("/api/admin/bulk", bulkBody(false));
-      S.menu = null; S.ticked.clear(); S.token++;
-      note(d.applied ? d.lines.join(" ") : "Nothing changed: " + d.lines.join(" "), false);
-      await loadPeople();
-      drawAll();
-    } catch (e) { m.busy = false; m.err = e.message; m.lines = null; drawMenu(false); }
+      for (const b of bulkBodies(false)) {
+        const d = await api("/api/admin/bulk", b);
+        did = did || d.applied; said.push(...d.lines);
+      }
+    } catch (e) {
+      if (S.out) return;
+      m.busy = false; m.fail = e.message;
+      if (did) { try { await loadPeople(); } catch (x) { /* the preview below reports it */ } drawTable(); }
+      previewMenu();   /* the buttons live again once the preview is read */
+      return;
+    }
+    S.menu = null; S.ticked.clear(); S.token++;
+    note(did ? said.join(" ") : "Nothing changed: " + said.join(" "), false);
+    try { await loadPeople(); }
+    catch (e) { if (!S.out) note((did ? said.join(" ") + " " : "") + "The list could not be refreshed. Reload the page.", true); }
+    drawAll();
   }
 
   /* ---- one person's panel */
@@ -307,7 +355,7 @@
     const q = S.sq.trim().toLowerCase(), all = S.students || [];
     const list = all.filter(s => !q || `${s.id} ${s.name} ${s.class}`.toLowerCase().includes(q));
     $("#view").innerHTML = `<div class="row" style="margin:0 0 10px"><input type="search" id="sq" placeholder="Search an ID, name or class" aria-label="Search students" value="${esc(S.sq)}" autocomplete="off" style="min-width:220px">
-      <span class="w" id="sn"></span><span style="margin-left:auto"></span><a class="filebtn" href="/api/code-slips.pdf" target="_blank" rel="noopener">Print code slips</a></div>
+      <span class="w" id="sn"></span><span style="margin-left:auto"></span><button type="button" class="filebtn" data-act="slipsstu">Print code slips</button></div>
       <div class="tw"><div id="stbl"></div></div>`;
     drawStudentRows(list, all.length);
   }
@@ -331,7 +379,7 @@
     }).join("");
     $("#view").innerHTML = `${w.secret_key ? "" : `<div class="hint">Accounts need SECRET_KEY in Railway variables.</div>`}
       <div class="tw ways"><table><thead><tr><th style="width:34%">Way in</th><th>State</th><th></th></tr></thead><tbody>
-      <tr><td><b>Personal codes</b> (staff and students)</td><td>${w.personal_codes ? "On" : "Off"}</td><td><a class="filebtn small" href="/api/relief/code-slips.pdf" target="_blank" rel="noopener">Print slips</a></td></tr>
+      <tr><td><b>Personal codes</b> (staff and students)</td><td>${w.personal_codes ? "On" : "Off"}</td><td><button type="button" class="small" data-act="slipsall">Print slips</button></td></tr>
       <tr><td><b>Username and password</b></td><td>${w.secret_key ? "On" : "Off"} · ${esc(plural(w.password_accounts, "account", "accounts"))}</td><td></td></tr>
       <tr><td><b>Recovery code</b></td><td>${w.recovery_set ? "Set in Railway variables" : "Not set"}</td><td></td></tr>
       ${sh}</tbody></table></div>
@@ -355,7 +403,7 @@
 
   async function showTab(tab) {
     if (tab === S.tab) return;
-    S.tab = tab; S.menu = null; note(null);
+    S.tab = tab; S.menu = null; S.once = null; S.confirmReset = null; note(null);
     if (tab === "staff") skeleton();
     if (tab === "ways") { S.ways = null; }
     drawAll();
@@ -380,11 +428,13 @@
     else if (a === "dismiss") { try { localStorage.setItem(SEEN, JSON.stringify(S.moved)); } catch (x) { /* kept for this visit only */ } $("#moved").innerHTML = ""; }
     else if (a === "tickall") { const l = shown(); const all = l.every(x => S.ticked.has(x.name)); l.forEach(x => all ? S.ticked.delete(x.name) : S.ticked.add(x.name)); S.menu = null; drawTable(); drawBar(); }
     else if (a === "clear") { S.ticked.clear(); S.menu = null; drawTable(); drawBar(); }
-    else if (a === "makemgmt") { (S.hints.heads_on_step4 || []).forEach(n => person(n) && S.ticked.add(n)); S.menu = null; drawTable(); openMenu("group"); }
+    else if (a === "makemgmt") { S.ticked.clear(); (S.hints.heads_on_step4 || []).forEach(n => person(n) && S.ticked.add(n)); S.menu = null; drawTable(); openMenu("group", true); }
     else if (a === "menu") openMenu(t.dataset.kind);
     else if (a === "cancelmenu") { S.menu = null; S.token++; drawBar(); }
     else if (a === "apply") applyMenu();
-    else if (a === "slips") window.open(slipsUrl(ticks()), "_blank", "noopener");
+    else if (a === "slips") printSlips(slipsUrl(ticks()), ticks().length);
+    else if (a === "slipsall") printSlips(slipsUrl(null), 0);
+    else if (a === "slipsstu") printSlips("/api/code-slips.pdf", 0);
     else if (a === "addopen") drawAdd(true);
     else if (a === "addno") drawAdd(false);
     else if (a === "addgo") addPerson();
@@ -404,9 +454,9 @@
     else if (t.id === "fe") { S.fe = t.value; drawTable(); }
     else if (d.tick != null) { t.checked ? S.ticked.add(d.tick) : S.ticked.delete(d.tick); S.menu = null; drawTable(); drawBar(); }
     else if (d.act === "tickhead") { shown().forEach(x => t.checked ? S.ticked.add(x.name) : S.ticked.delete(x.name)); S.menu = null; drawTable(); drawBar(); }
-    else if (d.bx) { S.menu.extra = d.bx; drawMenu(); previewMenu(); }
-    else if (d.until) { S.menu.until = t.value; S.menu.lines = null; S.menu.err = null; S.menu.hold = "Reading what it would do…"; drawMenu(false); clearTimeout(S.wait); S.wait = setTimeout(previewMenu, 350); }
-    else if (d.bgroup) { S.menu.group = t.value; previewMenu(); }
+    else if (d.bx) { S.menu.extra = d.bx; S.menu.fail = null; drawMenu(); previewMenu(); }
+    else if (d.until) { S.menu.until = t.value; S.menu.fail = null; S.menu.lines = null; S.menu.err = null; S.menu.hold = "Reading what it would do…"; drawMenu(false); clearTimeout(S.wait); S.wait = setTimeout(previewMenu, 350); }
+    else if (d.bgroup) { S.menu.group = t.value; S.menu.fail = null; previewMenu(); }
     else if (!p) return;
     else if (d.pgroup) savePerson({ name: p.name, group: t.value });
     else if (d.dept != null) savePerson({ name: p.name, depts: [...document.querySelectorAll("[data-dept]")].filter(c => c.checked).map(c => c.dataset.dept) });
