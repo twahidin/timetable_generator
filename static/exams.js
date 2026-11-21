@@ -10,6 +10,7 @@
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const KINDS = { exam: "Exam", test: "Common test" };
+  const NO_STUDENTS_YET = "The published timetable has no students yet: add them on the Students step and publish again to check clashes and seat students.";
   const S = {
     id: null, list: null, sched: null, view: null, levels: [], classes: [],
     tab: "when", timer: null, chain: Promise.resolve(), dirty: false, rev: 0, saving: false, msg: "", bad: false,
@@ -331,7 +332,8 @@
     const c = S.view && S.view.summary.checks;
     if (!c) return "";
     const lines = c.errors.map(t => `<div><span class="flag">●</span> ${esc(t)}</div>`).concat(c.warnings.map(t => `<div><span class="amber">●</span> ${esc(t)} <span class="muted">A warning, not a stop.</span></div>`));
-    if (!lines.length) lines.push(S.sched.papers.length ? `<div><span class="okc">✓</span> No problems with the paper times.</div>` : `<div class="muted">Add papers to see the checks.</div>`);
+    if (S.view.students_missing) lines.unshift(`<div><span class="amber">●</span> ${esc(NO_STUDENTS_YET)}</div>`);   /* no clash can be found */
+    else if (!lines.length) lines.push(S.sched.papers.length ? `<div><span class="okc">✓</span> No problems with the paper times.</div>` : `<div class="muted">Add papers to see the checks.</div>`);
     return `<div class="card checks"><h2>Checks on your times</h2>${lines.join("")}</div>`;
   }
 
@@ -433,7 +435,7 @@
     }).join("");
     return `<div class="card"><h2>Access arrangements</h2>
       <p class="muted small">Students who need extra time, a room of their own, a reader or a scribe. Their extra time is added when the app checks the paper times.</p>
-      ${S.view ? `<div class="line" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Add a student from <select data-acc="cls" data-f="acc-cls" aria-label="Class">${classes.map(c => opt(c, cur)).join("")}</select></div>
+      ${S.view && S.view.students_missing ? `<p class="notice">${esc(NO_STUDENTS_YET)}</p>` : S.view ? `<div class="line" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Add a student from <select data-acc="cls" data-f="acc-cls" aria-label="Class">${classes.map(c => opt(c, cur)).join("")}</select></div>
       <div class="chiprow" style="margin:6px 0 12px">${free || `<span class="muted small">No one left to add in this class.</span>`}</div>` : `<p class="muted">Loading…</p>`}
       <div class="tablewrap ptable"><table><thead><tr><th>Student</th><th>Class</th><th>Extra time %</th><th>Own room</th><th>Reader</th><th>Scribe</th><th>Note</th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="8" class="muted" style="padding:10px">No one yet.</td></tr>`}</tbody></table></div></div>`;

@@ -1100,7 +1100,8 @@ def the_pages_carry_the_words():
     js = _page("exams.js")
     for words in ("How to seat", "Own class in own home room", "Mix classes", "Alternate levels by column", "Alternate papers",
                   "One level per block", "Class, then Student ID", "Every seat", "A seat left between", "Let the app choose",
-                  "Not free: ", "The exam changed since Make: press Make again."):
+                  "Not free: ", "The exam changed since Make: press Make again.",
+                  "The published timetable has no students yet: add them on the Students step and publish again to check clashes and seat students."):
         assert words in js, words
 
 print(f"{COUNT} exams tests passed")
