@@ -274,7 +274,7 @@ def a_staff_code_signs_in_as_that_person():
         assert r.status_code == 302 and r.headers["Location"].endswith("/home"), r.headers.get("Location")
         with c.session_transaction() as s: assert s["who"] == "Mr Darren Lim" and s["via"] == "code" and "role" not in s
         me = c.get("/api/relief/me").get_json()
-        assert me == dict(name="Mr Darren Lim", depts=["Science"], on_team=False, on_management=False, can_settings=False), me
+        assert me == dict(name="Mr Darren Lim", depts=["Science"], published=True, on_team=False, on_management=False, can_settings=False), me
         r = c.get("/"); assert r.status_code == 302 and r.headers["Location"].endswith("/home")   # a person's front door: their tiles
         with A.app.test_request_context():
             A.session["role"], A.session["who"] = "staff", "Mr Darren Lim"
@@ -325,7 +325,7 @@ def a_dropped_teacher_loses_the_teacher_routes_too():
         with e.session_transaction() as s: s["role"], s["who"] = "staff", "Mr Darren Lim"
         r = e.get("/timetable"); assert r.status_code == 200 and b"Not published yet" in r.data and b"Code no longer valid" not in r.data
         r = e.get("/pdf/classes/1A"); assert r.status_code == 404                      # nothing to print yet
-        r = e.get("/api/relief/me"); assert r.status_code == 401 and r.get_json() == {"error": "Please sign in again."}
+        r = e.get("/api/relief/me"); assert r.status_code == 200 and r.get_json()["name"] == "Mr Darren Lim" and r.get_json()["published"] is False and r.get_json()["depts"] == []
         with e.session_transaction() as s: assert s["role"] == "staff" and s["who"] == "Mr Darren Lim"
 
 @t
@@ -448,8 +448,8 @@ def a_relief_team_extra_alone_may_save_and_a_leader_only_read():
             assert S.load(PUB)["rules"] == ["A rule."]
             assert lead.get("/api/relief/settings").status_code == 200
             assert lead.put("/api/relief/settings", json=base()).status_code == 401
-            assert team.get("/api/relief/me").get_json() == dict(name="Ms Evelyn Koh", depts=["Science"], on_team=True, on_management=False, can_settings=True)
-            assert lead.get("/api/relief/me").get_json() == dict(name="Mr Darren Lim", depts=["Science"], on_team=False, on_management=True, can_settings=False)
+            assert team.get("/api/relief/me").get_json() == dict(name="Ms Evelyn Koh", depts=["Science"], published=True, on_team=True, on_management=False, can_settings=True)
+            assert lead.get("/api/relief/me").get_json() == dict(name="Mr Darren Lim", depts=["Science"], published=True, on_team=False, on_management=True, can_settings=False)
     finally: AP.update(lambda d: (d["people"].pop("Ms Evelyn Koh"), d["people"].pop("Mr Darren Lim")))
     fresh()
 

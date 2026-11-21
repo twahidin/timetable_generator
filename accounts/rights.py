@@ -19,7 +19,7 @@ def rights(person, via, shared=None, today=None):
     if g in ("teacher", "leader", "hod", "sh", "committee"): r.add("relief")
     if g in ("leader", "hod", "sh"): r |= {"relief.plan", "relief.settings"}
     if g == "committee": r |= {"relief.settings", "relief.save"}
-    if ex.get("relief"): r |= {"relief", "relief.settings", "relief.save", "relief.team"}
+    if ex.get("relief"): r |= {"relief", "relief.plan", "relief.settings", "relief.save", "relief.team"}
     until = ex.get("exams")
     if until and until >= (today or datetime.date.today()).isoformat(): r.add("exams")
     if via in STRONG:

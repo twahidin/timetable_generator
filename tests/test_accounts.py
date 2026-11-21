@@ -64,7 +64,7 @@ def rights_table():
     c = R.rights(person("committee"), "code")
     assert c == base | {"relief", "relief.settings", "relief.save"} and not c & {"committee", "setup", "admin", "history", "codes"}
     assert "relief.plan" in R.rights(person("hod"), "code") and "setup" not in R.rights(person("hod"), "code")
-    assert R.rights(person("executive", relief=True) if False else dict(person("executive"), extras=dict(relief=True, exams=None, admin=False)), "code") == base | {"relief", "relief.settings", "relief.save", "relief.team"}
+    assert R.rights(person("executive", relief=True) if False else dict(person("executive"), extras=dict(relief=True, exams=None, admin=False)), "code") == base | {"relief", "relief.plan", "relief.settings", "relief.save", "relief.team"}
     cs = R.rights(person("committee"), "password")
     assert cs == base | {"relief", "relief.settings", "relief.save", "committee", "setup", "history", "codes"}
     assert "admin" in R.rights(dict(person("committee"), extras=dict(relief=False, exams=None, admin=True)), "password")

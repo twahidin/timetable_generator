@@ -1160,8 +1160,9 @@ def relief_home():
 @need("relief")
 def relief_me():
     p = who()
-    if p is None or not store.published(): return {"error": "Please sign in again."}, 401   # nothing published: a publish is swapping folders
-    return jsonify(name=p["name"], depts=p["depts"], on_team=bool(p["extras"].get("relief")), on_management=p["group"] in people.MANAGEMENT,
+    if p is None: return {"error": "Please sign in again."}, 401
+    pub = bool(store.published())   # nothing published: a publish may be swapping folders, so no departments, but the person still answers
+    return jsonify(name=p["name"], depts=p["depts"] if pub else [], published=pub, on_team=bool(p["extras"].get("relief")), on_management=p["group"] in people.MANAGEMENT,
                    can_settings=has("relief.save"))
 
 @app.get("/relief/settings")

@@ -66,7 +66,7 @@ KINDS = {
     "leader by password": (person(LEE, "password"), BASE | {"relief.plan", "relief.settings"}),
     "teacher by code": (person(TINA, "code"), BASE),
     "executive by code": (person(EVE, "code"), {"timetable", "files"}),
-    "teacher on the relief team": (person(RIA, "code"), BASE | {"relief.settings", "relief.save", "relief.team"}),
+    "teacher on the relief team": (person(RIA, "code"), BASE | {"relief.plan", "relief.settings", "relief.save", "relief.team"}),
     "teacher on exams until tomorrow": (person(ELI, "code"), BASE | {"exams"}),
     "admin by password": (person(ADA, "password"), BASE | {"relief.settings", "relief.save", "committee", "setup", "history", "codes", "admin"}),
     "admin by code": (person(ADA, "code"), BASE | {"relief.settings", "relief.save"}),

@@ -271,7 +271,8 @@ def a_code_session_lives_through_a_publish_and_ends_when_the_teacher_is_dropped(
     c, _ = code_in(staff_code(BEN)); d, _ = code_in(staff_code(BEN))
     unpublish()                                                       # a publish swaps folders: for a moment nothing is published
     r = c.get("/timetable"); assert r.status_code == 200 and b"Not published yet" in r.data and b"Code no longer valid" not in r.data
-    r = c.get("/api/relief/me"); assert r.status_code == 401 and r.get_json() == {"error": AGAIN}
+    r = c.get("/api/relief/me"); j = r.get_json()
+    assert r.status_code == 200 and j["name"] == BEN and j["depts"] == [] and j["published"] is False, (r.status_code, j)
     s = kept(c); assert s["who"] == BEN and s["via"] == "code", s
     publish([x for x in TEACHERS if x["name"] != BEN])
     r = c.get("/timetable"); assert r.status_code == 200 and b"Code no longer valid" in r.data and b"the person page" not in r.data, (r.status_code, r.data[:300])
