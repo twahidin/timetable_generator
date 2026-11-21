@@ -17,7 +17,7 @@ import access, checks, draft, store, sync, typed
 from relief import codes as relief_codes, people as relief_people, settings as relief_settings
 from ttgen import choices
 import datetime
-import exams.approval as exams_approval, exams.review as exams_review, exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts
+import exams.approval as exams_approval, exams.review as exams_review, exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts, exams.published as exams_published
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -636,7 +636,7 @@ def code_slips():
     return send_file(buf, as_attachment=True, download_name="timetable code slips.pdf", mimetype="application/pdf")
 
 # ------------------------------------------------------------------------------------------------ everyone: the published timetable
-TABS = dict(committee=None, teacher=["classes", "teachers", "rooms", "students", "lessons", "free"], student=["classes", "students"])
+TABS = dict(committee=None, teacher=["classes", "teachers", "rooms", "students", "lessons", "free", "exams"], student=["classes", "students", "exams"])
 
 def files_for(r):
     if r == "committee": return [["Excel (all)", "/files/excel"], ["PDFs (zip)", "/files/zip"]]
@@ -655,7 +655,7 @@ def timetable():
     if key not in pub["views"]:
         view = "student" if r == "student" else "full"
         home, label = {"committee": ("/", "Committee page"), "staff": ("/relief", "Relief")}.get(role(), (None, None))
-        app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r),
+        app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r), dates=True, exams=True,
                        placeholder="Search a class" if r == "student" else None, home=home, homeLabel=label)
         pub["views"][key] = render_html(pub["model"], view, app=app_cfg)
     return Response(pub["views"][key], mimetype="text/html")
@@ -678,7 +678,7 @@ def me():
     if not pub or sid not in {s["id"] for s in pub["model"]["students"]}:
         session.clear()
         return page("Timetable", "<main class='login'><h1>Code no longer valid</h1><p class='muted'>Your timetable is not in the published timetable. Ask your form teacher for a new code.</p><p><a href='/login'>Back</a></p></main>")
-    return Response(render_html(pub["model"], "personal", student_id=sid, app=dict(mode="personal", tabs=[], pdf=True, logout="/logout")), mimetype="text/html")
+    return Response(render_html(pub["model"], "personal", student_id=sid, app=dict(mode="personal", tabs=[], pdf=True, logout="/logout", exams=True)), mimetype="text/html")
 
 def _pdf(v, name):
     from ttgen.export import pdf_bytes, safe_name
@@ -863,6 +863,18 @@ def _exams_can_approve():
     return role() == "committee"
 
 def _exams_today(): return datetime.date.today()
+
+def _published_reader():
+    """who may read the published exams data, and how much: "full" (teacher names, duty rooms, roster, prints) for the
+    committee, a head, a teacher and staff; "student" (classes, rooms and times only) for the shared student code"""
+    r = role()
+    if r in ("committee", "head", "teacher", "staff"): return "full"
+    if r == "student": return "student"
+    return None
+
+BAD_DATE = "Give a date such as 2026-10-05."
+NO_DAY_CAL = "The school calendar is not set yet, so the timetable cannot be shown on a date."
+ONLY_STAFF_PRINTS = "Only staff can open the seating plans and rosters."
 
 def _exams_gate():
     """-> (pub, who, None) when the person may use exams, else (None, None, the refusing answer)"""
@@ -1142,6 +1154,58 @@ def exams_print(id, what):
     exams_printouts.pdf(what, pub, _exam_cal(pub), s, exams_settings.load(pub), buf)
     buf.seek(0)
     return send_file(buf, as_attachment=False, download_name=safe_name(f"{s.get('name')} {exams_printouts.TITLES[what]}") + ".pdf", mimetype="application/pdf")
+
+@app.get("/api/day")
+@need("committee", "head", "teacher", "student", "staff")
+def exams_day():
+    pub = store.published()
+    if not pub: return {"error": NO_EXAMS_PUB}, 409
+    raw = request.args.get("date") or ""
+    try:
+        if len(raw) != 10: raise ValueError(raw)
+        datetime.date.fromisoformat(raw)
+    except ValueError: return {"error": BAD_DATE}, 400
+    cal = _exam_cal(pub)
+    if not cal.get("terms"): return {"error": NO_DAY_CAL}, 409
+    return jsonify(exams_published.day(pub, cal, exams_schedules.on_site(), raw, _published_reader() == "full"))
+
+@app.get("/api/published/exams")
+@need("committee", "head", "teacher", "student", "staff")
+def exams_published_list():
+    pub = store.published()
+    if not pub: return {"error": NO_EXAMS_PUB}, 409
+    return jsonify(exams_published.listing(pub, exams_schedules.on_site(), _exams_today(), _published_reader() == "full"))
+
+@app.get("/api/published/exams/<id>/print/<what>.pdf")
+@need("committee", "head", "teacher", "student", "staff")
+def exams_published_print(id, what):
+    pub = store.published()
+    if not pub: return {"error": NO_EXAMS_PUB}, 409
+    if _published_reader() != "full": return {"error": ONLY_STAFF_PRINTS}, 403
+    if what not in exams_published.PRINTS: abort(404)
+    site = next((x for x in exams_schedules.on_site() if x["id"] == id), None)
+    if site is None: abort(404)
+    from ttgen.export import safe_name
+    buf = io.BytesIO()
+    exams_printouts.pdf(what, pub, _exam_cal(pub), site, exams_settings.load(pub), buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=False, download_name=safe_name(f"{site.get('name')} {exams_printouts.TITLES[what]}") + ".pdf", mimetype="application/pdf")
+
+@app.get("/api/exams/my-duties")
+@need("committee", "staff")
+def exams_my_duties():
+    pub = store.published()
+    if not pub: return {"error": NO_EXAMS_PUB}, 409
+    rights = _exams_rights(pub)
+    if rights is None: return {"error": "Please sign in again."}, 401
+    return jsonify(exams_published.my_duties(pub, _exam_cal(pub), exams_schedules.on_site(), rights[1], _exams_today()))
+
+@app.get("/api/me/exams")
+@need("personal")
+def exams_my_exams():
+    pub = store.published(); sid = session.get("sid")
+    if not pub or sid not in {x["id"] for x in pub["model"].get("students") or []}: return {"error": "Please sign in again."}, 401
+    return jsonify(exams_published.my_exams(pub, _exam_cal(pub), exams_schedules.on_site(), sid, _exams_today()))
 
 @app.get("/api/exams/<id>/download.xlsx")
 @need("committee", "staff")

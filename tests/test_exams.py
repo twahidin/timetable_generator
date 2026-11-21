@@ -1750,4 +1750,105 @@ def a_students_papers():
     assert p["report"] == "07:30" and p["note"] == "then lessons from 09:00", p
 
 
+# ---- the main site's routes
+def as_role(role, **sess):
+    c = A.app.test_client()
+    with c.session_transaction() as s:
+        s["role"] = role
+        s.update(sess)
+    return c
+
+def _site_setup():
+    _setup()
+    c = committee()
+    s = _approved_exam(c)
+    return c, s
+
+@t
+def day_for_staff_and_for_the_student_code():
+    with published(_PUB):
+        c, s = _site_setup()
+        with _today(date(2026, 10, 1)):
+            d = c.get("/api/day?date=2026-10-05").get_json()
+            assert d["day"] == "Odd Mon" and d["exams"]["stopped"] == [0, 1, 3, 4], d["exams"]["stopped"]
+            assert "Ms Aisha Rahman" in d["exams"]["teachers"], list(d["exams"]["teachers"])
+            r = as_role("student").get("/api/day?date=2026-10-05"); assert r.status_code == 200
+            st = r.get_json()
+            assert st["exams"]["classes"] == d["exams"]["classes"] and st["exams"]["stopped"] == d["exams"]["stopped"]
+            assert st["exams"]["teachers"] == {} and st["exams"]["rooms"] == {}
+            assert as_role("personal", sid="3A-07").get("/api/day?date=2026-10-05").status_code == 401
+            assert as_role("teacher").get("/api/day?date=2026-10-05").get_json()["exams"]["teachers"]
+
+@t
+def day_refuses_bad_dates():
+    with published(_PUB):
+        c, s = _site_setup()
+        with _today(date(2026, 10, 1)):
+            r = c.get("/api/day?date=2026-10-12"); assert r.status_code == 200
+            d = r.get_json(); assert d["day"] is None and d["exams"]["classes"] == {} and d["exams"]["teachers"] == {}, d
+            for q in ("?date=05-10-2026", "", "?date=2026-13-45", "?date=%20", "?date=20261005"):
+                r = c.get("/api/day" + q); assert r.status_code == 400 and r.get_json() == {"error": A.BAD_DATE}, (q, r.status_code, r.data)
+        _cal(False)
+        r = c.get("/api/day?date=2026-10-05"); assert r.status_code == 409 and r.get_json() == {"error": A.NO_DAY_CAL}, r.data
+    r = committee().get("/api/day?date=2026-10-05"); assert r.status_code in (409, 200)
+
+@t
+def published_exams_and_prints():
+    with published(_PUB):
+        c, s = _site_setup(); id = s["id"]
+        with _today(date(2026, 10, 1)):
+            t_ = as_role("teacher"); st = as_role("student")
+            d = t_.get("/api/published/exams").get_json()
+            assert d["banner"] == "Sec 3 Exam: Mon 5 Oct\u2013Tue 6 Oct." and d["schedules"][0]["roster"] and d["schedules"][0]["prints"], d
+            d2 = st.get("/api/published/exams").get_json()
+            assert "roster" not in d2["schedules"][0] and "prints" not in d2["schedules"][0]
+            assert as_role("personal", sid="3A-07").get("/api/published/exams").status_code == 401
+            r = t_.get(f"/api/published/exams/{id}/print/seating.pdf"); assert r.status_code == 200 and r.data[:4] == b"%PDF", r.status_code
+            assert "inline" in r.headers["Content-Disposition"]
+            r = st.get(f"/api/published/exams/{id}/print/seating.pdf"); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_STAFF_PRINTS}, r.data
+            assert st.get(f"/api/published/exams/{id}/print/doors.pdf").status_code == 403
+            assert t_.get(f"/api/published/exams/{id}/print/doors.pdf").status_code == 404
+            assert t_.get("/api/published/exams/nope/print/seating.pdf").status_code == 404
+            before = t_.get("/api/published/exams").get_json()["schedules"][0]["roster"]
+            w = SC.load(id)
+            eng = next(p for p in w["papers"] if p["subject"] == "English"); eng["start"] = "08:00"
+            assert c.put("/api/exams/" + id, json=w).status_code == 200
+            assert c.post(f"/api/exams/{id}/make", json={}).status_code == 200
+            assert t_.get("/api/published/exams").get_json()["schedules"][0]["roster"] == before
+            assert t_.get("/api/day?date=2026-10-05").get_json()["exams"]["classes"]["3A"][0]["start"] == "07:50"
+
+@t
+def my_duties_and_my_exams():
+    with published(_PUB):
+        c, s = _site_setup()
+        with _today(date(2026, 10, 1)):
+            r = as_role("staff", who="Ms Aisha Rahman").get("/api/exams/my-duties"); assert r.status_code == 200, r.data
+            assert any(d["room"] == "3-01" for x in r.get_json()["schedules"] for d in x["duties"]), r.get_json()
+            assert c.get("/api/exams/my-duties").get_json()["schedules"] == []
+            assert as_role("teacher").get("/api/exams/my-duties").status_code == 401
+            r = as_role("personal", sid="3A-07").get("/api/me/exams"); assert r.status_code == 200
+            assert r.get_json()["schedules"][0]["papers"][0]["seat"] == "B1", r.get_json()
+            assert as_role("personal", sid="nobody").get("/api/me/exams").status_code == 401
+            assert as_role("student").get("/api/me/exams").status_code == 401
+            r = as_role("personal", sid="3A-07").get("/api/me/exams?sid=3B-15"); assert r.get_json()["schedules"][0]["papers"]
+
+@t
+def timetable_and_me_ask_for_exams():
+    from ttgen import export as E
+    seen = []
+    def fake_render(model, view, app=None, student_id=None): seen.append(app); return "page"
+    old, E.render_html = E.render_html, fake_render
+    pub = copy.deepcopy(_PUB); pub["views"] = {}
+    try:
+        with published(pub):
+            tc, _ = signed_in("teacher", os.environ["TEACHER_CODE"])
+            assert tc.get("/timetable").status_code == 200
+            assert seen[0]["dates"] is True and seen[0]["exams"] is True and "exams" in seen[0]["tabs"], seen[0]
+            sc, _ = signed_in("student", os.environ["STUDENT_CODE"])
+            assert sc.get("/timetable").status_code == 200 and "exams" in seen[1]["tabs"] and seen[1]["exams"] is True
+            r = as_role("personal", sid="3A-07").get("/me"); assert r.status_code == 200
+            assert seen[2]["exams"] is True and seen[2]["mode"] == "personal", seen[2]
+    finally: E.render_html = old
+
+
 print(f"{COUNT} exams tests passed")
