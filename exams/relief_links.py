@@ -1,8 +1,8 @@
 """What approved exams and events mean for relief on a date: which lessons do not run, who is busy and when. Only approved
 copies count (as on the main site). Every answer is "", [] or 0 when the date is not a school day or there are no periods.
 And the backups: the lessons of the people on an approved schedule's duties (or going with the event) that still run, sent
-to relief as planned absences (backups, sync) and marked on the exams page (mark)."""
-import datetime
+to relief as planned absences (backups, sync, sync_all) and marked on the exams page (mark)."""
+import datetime, logging
 
 from exams import days as _days
 from exams import approval as _approval
@@ -17,6 +17,8 @@ EXAMS_BY = "Exams committee"
 EXAMS_COMMITTEE = "the exams committee"
 DUTY_CHANGED = "The duty changed."
 WITHDRAWN = "The schedule was withdrawn."
+SYNC_FAILED = "exams: relief sync failed"
+logger = logging.getLogger(__name__)
 
 
 def _iso(date) -> str:
@@ -435,6 +437,35 @@ def to_sync(sid, scheds, records, today) -> list:
         if s["id"] in held or (isinstance(ap, dict) and _approval.last_date(ap) >= iso):
             out.append(s)
     return out
+
+
+def sync_all(pub, cal, today, first=None) -> None:
+    """relief's backups in step with every approved schedule: first (the schedule acted on) when given, then every other one
+    a sync may change (to_sync), so a lesson one schedule gives up or stops goes to (or leaves) another at once. Called after
+    every approval action and "Handled ourselves" change that saved, after relief's own create and cancel (once their call has
+    returned and relief's lock is released) and after a publish. Each sync is idempotent; one failing never stops the others
+    and this never raises: each failure is one log line (SYNC_FAILED) and the next sync puts it right. The caller holds
+    exams.schedules.editing() (two syncs of one schedule never run at once); relief.absences takes its own lock inside."""
+    try:
+        copies = _schedules.on_site()
+    except Exception:
+        logger.exception(SYNC_FAILED)
+        return
+    if first is not None:
+        try:
+            sync(first, pub, cal, today, copies=copies)
+        except Exception:
+            logger.exception(SYNC_FAILED)
+    try:
+        others = to_sync((first or {}).get("id"), _schedules.all_saved(), _absences.all_records(), today)
+    except Exception:
+        logger.exception(SYNC_FAILED)
+        return
+    for o in others:
+        try:
+            sync(o, pub, cal, today, copies=copies)
+        except Exception:
+            logger.exception(SYNC_FAILED)
 
 
 def mark(items, sched, records, links, today):

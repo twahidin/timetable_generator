@@ -542,12 +542,16 @@ def draft_download():
 @app.post("/api/draft/publish")
 @need("committee")
 def draft_publish():
-    try: return jsonify(draft.publish())
+    try: got = draft.publish()
     except FileNotFoundError: return {"error": "There is no draft to publish."}, 404
     except draft.Critical as e: return {"error": str(e), "critical": e.count}, 409
     except draft.NotPlaced as e: return {"error": str(e), "unplaced": e.count}, 409
     except LookupError: return {"error": NO_SETUP}, 409
     except ValueError as e: return {"error": f"Could not read the files: {e}"}, 400
+    pub = store.published()
+    if pub:      # a lesson that moved into (or out of) a duty or an event window goes to (or leaves) relief at once
+        with exams_schedules.editing(): _relief_sync(pub)
+    return jsonify(got)
 
 @app.post("/api/draft/printouts")
 @need("committee")
@@ -975,21 +979,15 @@ def _backups_left(rv, lists, s, pub):
             app.logger.exception("exams: backup count failed")
     return rv
 
-def _relief_sync(pub, s):
-    """relief's backups in step (exams.relief_links.sync) after every approval action and Handled ourselves change that saved:
-    the schedule acted on first, then every other one a sync may change (to_sync), so a lesson one schedule gives up or stops
-    goes to (or leaves) another at once. Each sync is idempotent; one failing never stops the others and never fails the
-    action: each error is logged and the next action syncs again"""
-    say = lambda: app.logger.exception("exams: relief sync failed")
-    try: cal, today, copies = _exam_cal(pub), _exams_today(), exams_schedules.on_site()
-    except Exception: return say()
-    try: exams_relief_links.sync(s, pub, cal, today, copies=copies)
-    except Exception: say()
-    try: others = exams_relief_links.to_sync(s.get("id"), exams_schedules.all_saved(), relief_absences.all_records(), today)
-    except Exception: return say()
-    for o in others:
-        try: exams_relief_links.sync(o, pub, cal, today, copies=copies)
-        except Exception: say()
+def _relief_sync(pub, s=None):
+    """relief's backups in step (exams.relief_links.sync_all) after every approval action and Handled ourselves change that
+    saved, and after a publish (s None): the schedule acted on first, then every other one a sync may change (to_sync), so a
+    lesson one schedule gives up or stops goes to (or leaves) another at once. Each sync is idempotent; one failing never stops
+    the others and never fails the action: each error is logged and the next action syncs again. The caller holds
+    exams_schedules.editing()"""
+    try: cal, today = _exam_cal(pub), _exams_today()
+    except Exception: return app.logger.exception(exams_relief_links.SYNC_FAILED)
+    exams_relief_links.sync_all(pub, cal, today, first=s)
 
 def _exam_view(pub, sched):
     model, cal = pub["model"], _exam_cal(pub)

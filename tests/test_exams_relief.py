@@ -716,7 +716,7 @@ def class_on_another_schedule_needs_no_backup():
 @t
 def sync_failure_does_not_fail_approve():
     _fresh()
-    old, lg = RL.sync, A.app.logger
+    old, lg = RL.sync, RL.logger
     old_exc, seen = lg.exception, []
     def boom(*a, **k): raise RuntimeError("test")
     RL.sync, lg.exception = boom, lambda msg, *a, **k: seen.append(msg)
@@ -920,6 +920,66 @@ def event_review_counts_and_a_failing_count_keeps_the_answer():
         assert r["review"]["what"]["backups"] == 0, "approve still answers, with the review's own (unmarked) count: the hand-made duty lists no backup name"
         ok(c.post(f"/api/events/{id}/withdraw"))      # 4A was on the event: its lessons stop, so Mr Koh needs none
         assert ok(c.get(f"/api/exams/{e}/review"))["review"]["what"]["backups"] == 1, "and the marked count is back once it works"
+
+
+# ---- the final review's fix wave
+@t
+def cancelled_own_absence_gives_the_lesson_back():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        id = _made_exam([_duty([DANIEL])])["id"]
+        _send_approve(c, id)
+        b = _backups(id)[0]
+        d = staff(DANIEL)
+        j = ok(d.post("/api/relief/absences", json=dict(dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[])))
+        assert _backups(id) == [] and AB.load(b["id"])["cancelled"]["why"] == "Moved to %s's own absence." % DANIEL
+        ok(d.post("/api/relief/absences/%s/cancel" % j["id"], json=dict(why="Better now")))
+        got = _backups(id)
+        assert len(got) == 1 and got[0]["teacher"] == DANIEL and [(x["key"], x["needed"]) for x in got[0]["lessons"]] == [(DKEY, True)], got
+        item = next(x for x in ok(c.get(f"/api/exams/{id}/view"))["lessons"]["backup"] if x["key"] == DKEY)
+        assert item["state"] == "sent", item
+
+@t
+def a_republish_sends_a_lesson_that_moved_into_a_duty():
+    _fresh()
+    cur, pub2 = [PUB], copy.deepcopy(PUB)
+    pub2["model"]["lessons"][2]["teachers"] = [CHLOE]       # 4A Mathematics (08:00-08:40, during the duty) is Chloe's now
+    def publish():
+        cur[0] = pub2
+        return dict(published=True)
+    old_pub, old_publish = store.published, A.draft.publish
+    store.published, A.draft.publish = (lambda: cur[0]), publish
+    try:
+        c = committee()
+        id = _made_exam([_duty([CHLOE])])["id"]
+        _send_approve(c, id)
+        assert _backups(id) == [], "her only lesson then (3B) stops for the exam"
+        assert ok(c.post("/api/draft/publish")) == dict(published=True)
+        got = _backups(id)
+        assert len(got) == 1 and got[0]["teacher"] == CHLOE and [x["key"] for x in got[0]["lessons"]] == [DKEY], got
+    finally:
+        store.published, A.draft.publish = old_pub, old_publish
+
+@t
+def one_failing_sync_does_not_stop_the_others():
+    _fresh()
+    a, b = _exam(duty_names=(DANIEL,))["id"], _exam(duty_names=(HAFIZ,))["id"]
+    real, lg, bad, seen = RL.sync, RL.logger, [a], []
+    old_exc = lg.exception
+    def flaky(s, *x, **k):
+        if s["id"] == bad[0]: raise RuntimeError("test")
+        return real(s, *x, **k)
+    RL.sync, lg.exception = flaky, lambda msg, *x, **k: seen.append(msg)
+    try:
+        RL.sync_all(PUB, CAL, SOON, first=SC.load(a))
+        assert _backups(a) == [] and [r["teacher"] for r in _backups(b)] == [HAFIZ] and seen == [RL.SYNC_FAILED], seen
+        shutil.rmtree(AB.DIR, ignore_errors=True)
+        bad[0], seen[:] = b, []
+        RL.sync_all(PUB, CAL, SOON)          # both from to_sync, in whatever order the folder lists them
+        assert [r["teacher"] for r in _backups(a)] == [DANIEL] and _backups(b) == [] and seen == [RL.SYNC_FAILED], seen
+    finally:
+        RL.sync, lg.exception = real, old_exc
 
 
 _clear()

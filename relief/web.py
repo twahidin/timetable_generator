@@ -103,6 +103,20 @@ def _links(pub, cal):
     return Links.load(pub, cal)
 
 
+def _sync_exams(pub):
+    """after an absence is sent or cancelled: relief's backups in step with the approved exams and events
+    (exams.relief_links.sync_all), so a lesson a cancelled own absence gives back goes to a backup again at once. Called once
+    relief's own call has returned (its lock is released), inside the exams lock, imported here to keep the modules apart;
+    it never fails the answer (an error is logged and the next sync puts it right)"""
+    try:
+        from exams import schedules
+        from exams.relief_links import sync_all
+        with schedules.editing():
+            sync_all(pub, _cal(pub), _lessons.today())
+    except Exception:
+        current_app.logger.exception("relief: exams sync failed")
+
+
 def _out(r, pub, me, cal=None):
     """the record as it is sent: lessons marked changed (matches_now), the remarks left out for someone who is only its absent teacher"""
     v = _absences.matches_now(r, pub, cal if cal is not None else _cal(pub))
@@ -229,6 +243,7 @@ def create():
     try: r = _absences.new(dict(data, teacher=teacher), pub, me, how, may_choose=plan, links=_links(pub, _cal(pub)))
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "sending an absence")
+    _sync_exams(pub)
     return jsonify(_out(r, pub, me))
 
 
@@ -292,8 +307,9 @@ def one(id):
     return jsonify(_out(r, pub, me))
 
 
-def _change(id, do, right=None, refused=None):
-    """open the absence (403/404 as _record), check the right, do(record, me, pub, body) -> the saved record"""
+def _change(id, do, right=None, refused=None, after=None):
+    """open the absence (403/404 as _record), check the right, do(record, me, pub, body) -> the saved record; after(pub) runs
+    once do has saved and returned"""
     pub, me, err = _gate()
     if err: return err
     r, err = _record(id, me)
@@ -302,6 +318,7 @@ def _change(id, do, right=None, refused=None):
     try: r = do(r, me, pub, _body())
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "changing an absence")
+    if after: after(pub)
     return jsonify(_out(r, pub, me))
 
 
@@ -339,7 +356,7 @@ def relief(id, key):
 
 @bp.post("/api/relief/absences/<id>/cancel")
 def cancel(id):
-    return _change(id, lambda r, me, pub, b: _absences.cancel(r["id"], b.get("why"), me, team=_has("relief.team")))
+    return _change(id, lambda r, me, pub, b: _absences.cancel(r["id"], b.get("why"), me, team=_has("relief.team")), after=_sync_exams)
 
 
 # ---- work files
