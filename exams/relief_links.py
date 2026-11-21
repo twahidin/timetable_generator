@@ -405,9 +405,9 @@ def sync(sched, pub, cal, today, copies=None) -> dict:
     (backups) against the keys of their backup's lessons dated today or later: the same (and the same by and reason) changes
     nothing; else the backup is brought up to date (lessons no longer wanted go, new ones come in, cancelled only once it has
     no lesson at all: "Handled by the exams committee." (or "...the teacher in charge." for an event) when every lesson that
-    left went because it is now "Handled ourselves", else "The duty changed."); no backup yet: a new one (from_exams). A schedule without an approved copy
-    (withdrawn): every lesson dated today or later goes, and a backup left with none is cancelled "The schedule was
-    withdrawn." (P12 as amended). A timetable with no periods or a calendar with no terms changes nothing. copies: the
+    left went because it is now "Handled ourselves", else "The duty changed."); no backup yet: a new one (from_exams). A
+    schedule without an approved copy (withdrawn): every lesson dated today or later goes, and a backup left with none is
+    cancelled "The schedule was withdrawn." (P12 as amended). A timetable with no periods or a calendar with no terms changes nothing. copies: the
     approved copies (schedules.on_site()), read here when None. Runs inside exams.schedules.editing(); relief.absences takes
     its own lock. -> dict(sent: backups made or given a lesson, cancelled)"""
     out = dict(sent=0, cancelled=0)

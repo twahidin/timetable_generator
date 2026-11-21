@@ -129,16 +129,19 @@ def _out(r, pub, me, cal=None, links=None):
     v = _absences.matches_now(r, pub, cal)
     today = _lessons.today().isoformat()
     ahead = not v.get("cancelled") and any(str(d) >= today for d in v.get("dates") or [])
-    if ahead and links is None: links = _links(pub, cal)
-    v["lessons"] = [dict(x, stopped=links.stopped(x) if ahead and str(x.get("date") or "") >= today else "") for x in v["lessons"]]
+    try:
+        if ahead and links is None: links = _links(pub, cal)
+        v["lessons"] = [dict(x, stopped=links.stopped(x) if ahead and str(x.get("date") or "") >= today else "") for x in v["lessons"]]
+    except Exception:          # the exams side never stops relief's own pages
+        current_app.logger.exception("relief: the exams and events could not be read")
+        v["lessons"] = [dict(x, stopped="") for x in v["lessons"]]
     if me == r.get("teacher") and me != r.get("by") and not _sees_all(): v.pop("remarks", None)
     return v
 
 
 def _views(records, pub, me):
     cal = _cal(pub)
-    links = _links(pub, cal)
-    return [_out(r, pub, me, cal, links) for r in records]
+    return [_out(r, pub, me, cal) for r in records]          # _links keeps one Links for the request
 
 
 def _on_staff(pub, settings, name):

@@ -1022,6 +1022,22 @@ def an_absence_sent_before_approval_marks_its_stopped_lesson():
     _clear()
 
 @t
+def relief_pages_work_when_the_exams_cannot_be_read():
+    _fresh()
+    with published(PUB):
+        d = staff(DANIEL)
+        j = ok(d.post("/api/relief/absences", json=dict(dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[])))
+        real = RL.Links.__dict__["load"]          # the classmethod itself, put back as it was
+        def boom(*a, **k): raise KeyError("test")
+        RL.Links.load = boom
+        try:
+            got = ok(d.get("/api/relief/absences/mine"))["absences"]
+        finally:
+            RL.Links.load = real
+        assert [x["stopped"] for r in got for x in r["lessons"]] == [""], got
+        AB.cancel(j["id"], "test", DANIEL)
+
+@t
 def the_absence_page_shows_not_happening():
     js = open(os.path.join(ROOT, "static", "relief.js"), encoding="utf-8").read()
     row = js[js.index("function lessonRow("):js.index("function fileLink(")]
