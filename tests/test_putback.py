@@ -509,6 +509,19 @@ def put_back_refuses_when_the_value_moved_under_it():
     assert field("teachers", 0, "short") == "NEW"
 
 @t
+def put_back_refuses_when_the_whole_setup_was_replaced_meanwhile():
+    sp = start(); T = sp["teachers"][0]
+    change(as_person(CORA), ["set", "teachers", T["_id"], "short", "ZZ"]); e = entries()[-1]
+    real = P.gather
+    def gather_then_replace(eid):     # the setup replaced after the history was read, before the lock: by a copy with the same values
+        got = real(eid); store.replace_setup(copy.deepcopy(store.setup_record()["spec"]), "replaced in between"); return got
+    P.gather = gather_then_replace
+    try: got = back(as_person(DEV), e["id"])
+    finally: P.gather = real
+    assert got == (409, {"error": "Can't put back: the whole setup was replaced meanwhile. Use a saved copy on the committee page."}), got
+    assert field("teachers", 0, "short") == "ZZ"
+
+@t
 def head_puts_back_only_their_own():
     sp = start(); L = sp["lessons"][0]; assert L["dept"] == "EL"
     h = as_person(HAL)

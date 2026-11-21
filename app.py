@@ -1648,10 +1648,6 @@ def _history_query(args):
         if after != after or after in (float("inf"), float("-inf")): return {"error": "Pick a time as a number of seconds."}, 400
         since = after if since is None else max(since, after)
     if since is not None and until is not None and since > until: return {"error": "The first day is after the last day."}, 400
-    who_ = (q.get("who") or "").strip().lower()
-    where = q.get("where") or None
-    dept = q.get("dept") or None
-    signins = q.get("signins") == "1"
     return dict(where=q.get("where") or None, dept=q.get("dept") or None, since=since, until=until,
                 signins=q.get("signins") == "1", who_contains=(q.get("who") or "").strip().lower() or None)
 
@@ -1733,6 +1729,7 @@ def may_put_back(es):
     return is_head() and p is not None and all(e.get("who") == p["name"] for e in es)
 
 AGAIN_SINCE = "Can't put back: this was changed again since."
+REPLACED_MEANWHILE = "Can't put back: the whole setup was replaced meanwhile. Use a saved copy on the committee page."
 
 def _field_now(d, item, name, field):
     """what the admin page's _change compares against for one field of one person"""
@@ -1782,6 +1779,7 @@ def history_back():
     e = history.find(eid)
     if e is None: return {"error": "That entry is not in the history."}, 404
     if putback.unit_of(e) is None: return {"error": CANT_BACK}, 409
+    v0 = store.setup_record()["v"]    # the setup the history is read against: a whole replacement after it refuses the put back
     got = putback.gather(eid)
     if got is None: return {"error": CANT_BACK}, 409
     unit, es, newer = got
@@ -1797,7 +1795,8 @@ def history_back():
         refused = sync.head_split(spec, o, depts)[1]
         return refused[0][1] if refused else None
     tag = {"putback": unit, "putback_of": es[0].get("as"), "putback_ts": es[0].get("ts")}
-    try: store.apply_changes(ops, "history", check=check, by=by(), tag=tag)
+    try: store.apply_changes(ops, "history", check=check, since=v0, by=by(), tag=tag)
+    except store.Replaced: return {"error": REPLACED_MEANWHILE}, 409
     except store.Refused as x: return {"error": str(x)}, 409
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
     return {"done": True, "text": "Put back."}
