@@ -261,3 +261,16 @@ second run alone passed). All 17 node test files pass (`exams.test.js` 7 cases p
 14083f3..HEAD`, the newest setup's teacher sheet, counts only): 111 teachers, 332 names and short forms searched, no full
 name matched; 6 words matched, each a made-up test name shared with a common name (2) or an ordinary English word (4); the
 school's full name (its first word, lower case): 0.
+
+## After the fix wave (the re-review, 21 November 2026)
+
+Every fix-wave item was verified addressed, with no new breakage. Left as they are (Ruling: wording and failure-path logging only):
+- The notes say no page lists backups for choosing yet; an event's backup has the teacher in charge as `by`, so a teacher in
+  charge who also plans relief sees it under Planned by me, with Choose.
+- When `Links.load` fails, relief's `_links` tries again for each record of the request (more log lines; the page works).
+- The publish route reads `store.published()` after a successful publish without a guard (very unlikely to fail).
+
+Follow-up for the lead (Ruling: not fixed here, no second fix wave): `app._exams_today()` is the server's date (UTC on
+the live site), while relief uses the school's date. Between 00:00 and 08:00 Singapore time an approval or publish sync
+treats yesterday as today and may change yesterday's backup lessons. The fix is one line: make `_exams_today()` the
+school's date (as `relief.lessons.today()`); it also affects stage 2's banner and "today" on the main site.
