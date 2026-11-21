@@ -15,10 +15,12 @@ from ttgen.samples import secondary  # noqa: E402
 AGAIN = {"error": "Please sign in again."}
 GREY = "Sign in with your password to open this."
 TOMORROW = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+YESTERDAY = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 
 # made-up people: four on the published timetable, four added by name
 TINA, HAL, RIA, ELI = "Ms Tina Teo", "Mr Hal Ong", "Ms Ria Tan", "Mr Eli Ng"
 CORA, ADA, LEE, EVE = "Ms Cora Lim", "Ms Ada Koh", "Mr Lee Chua", "Mdm Eve Sim"
+MAX = "Mr Max Ho"   # a teacher added by name whose Exams and events extra ended yesterday
 TEACHERS = [dict(name=TINA, dept="SC"), dict(name=HAL, dept="SC", role="HOD"), dict(name=RIA, dept="MA"), dict(name=ELI, dept="EL")]
 RECORDS = {HAL: dict(group="hod", depts=["SC", "MA"], username="hal.ong"),
            RIA: dict(extras=dict(relief=True, exams=None, admin=False)),
@@ -26,7 +28,8 @@ RECORDS = {HAL: dict(group="hod", depts=["SC", "MA"], username="hal.ong"),
            CORA: dict(group="committee", added=True, username="cora.lim"),
            ADA: dict(group="committee", added=True, username="ada.koh", extras=dict(relief=False, exams=None, admin=True)),
            LEE: dict(group="leader", added=True, username="lee.chua"),
-           EVE: dict(group="executive", added=True)}
+           EVE: dict(group="executive", added=True),
+           MAX: dict(group="teacher", added=True, extras=dict(relief=False, exams=YESTERDAY, admin=False))}
 
 def publish():
     """what store.published() reads: a fake school with the teachers, one class and one student"""
@@ -68,6 +71,7 @@ KINDS = {
     "executive by code": (person(EVE, "code"), {"timetable", "files"}),
     "teacher on the relief team": (person(RIA, "code"), BASE | {"relief.plan", "relief.settings", "relief.save", "relief.team"}),
     "teacher on exams until tomorrow": (person(ELI, "code"), BASE | {"exams"}),
+    "teacher whose exams ended yesterday": (person(MAX, "code"), BASE),
     "admin by password": (person(ADA, "password"), BASE | {"relief.settings", "relief.save", "committee", "setup", "history", "codes", "admin"}),
     "admin by code": (person(ADA, "code"), BASE | {"relief.settings", "relief.save"}),
     "relief stage 1 session": (dict(role="staff", who=TINA), BASE),
@@ -229,6 +233,19 @@ def home_shows_exactly_the_tiles_of_the_table():
     A._route_exists = lambda path: path != "/exams" and real(path)
     try: shown, _, _ = tiles(client(person(ELI, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief"], shown
     finally: A._route_exists = real
+
+@t
+def an_exams_extra_opens_exams_until_its_end_date():
+    eli, max_ = client(person(ELI, "code")), client(person(MAX, "code"))
+    assert eli.get("/exams").status_code == 200 and eli.get("/exams/settings").status_code == 200
+    assert eli.get("/api/exams/me").get_json() == dict(name=ELI, can_use=True, home="/home")
+    j = eli.get("/api/exams/settings").get_json()
+    assert [ELI, TOMORROW] in j["lists"]["committee"] and j["can_admin"] is False, j["lists"]
+    assert client(person(ADA, "password")).get("/api/exams/settings").get_json()["can_admin"] is True
+    assert to_login(max_.get("/exams")) and max_.get("/api/exams/me").get_json() == AGAIN and max_.get("/api/exams").status_code == 401
+    assert MAX not in [n for n, _ in j["lists"]["committee"]]
+    assert "Exams and events" not in max_.get("/home").get_data(as_text=True)
+    assert kept(max_)["who"] == MAX, "an ended extra ends no session"
 
 @t
 def a_name_on_home_is_escaped():

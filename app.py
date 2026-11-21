@@ -1133,11 +1133,11 @@ def relief_staff(pub):
     return people.staff(pub)
 
 def move_relief_lists():
-    """relief's own Management, Relief team and extra staff lists move into the accounts, once (a no-op after); never raises:
-    a failure only prints one line"""
-    try: return people.migrate(store.published(), store.read_json(relief_settings.PATH, {}))
+    """relief's own Management, Relief team and extra staff lists, and exams' committee list, move into the accounts, once
+    each (a no-op after); never raises: a failure only prints one line"""
+    try: return people.migrate(store.published(), store.read_json(relief_settings.PATH, {}), store.read_json(exams_settings.PATH, None))
     except Exception as e:
-        print(f"WARNING: relief's lists could not be moved into the accounts ({type(e).__name__})", file=sys.stderr, flush=True)
+        print(f"WARNING: relief's lists or exams' committee list could not be moved into the accounts ({type(e).__name__})", file=sys.stderr, flush=True)
         return None
 
 def _relief_rights(pub):
@@ -1266,11 +1266,22 @@ def _exam_json():
     d = request.get_json(force=True, silent=True)
     return d if isinstance(d, dict) else {}
 
-def _save_exam(sched, pub, by):
-    """save a schedule; (the saved schedule, None) or (None, the 400 answer): malformed JSON never gives a 500"""
-    try: return exams_schedules.save(sched, pub, _exam_cal(pub), by), None
+def _exams_entry(what, text, exam=None):
+    """one history entry for an exams save: who, what, which, a link (not field by field; exams keeps its own record). A
+    failure to write it never fails the save"""
+    e = {"kind": "exams", "what": what, "where": "Exams and events", "text": text, "link": "/exams", **by()}
+    if exam: e["exam"] = exam
+    try: history.add(e)
+    except Exception as x: print(f"WARNING: an exams change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
+
+def _save_exam(sched, pub, saved_by, what, words):
+    """save a schedule and record it in the history as "<its name>: <words>"; (the saved schedule, None) or (None, the
+    400 answer): malformed JSON never gives a 500"""
+    try: saved = exams_schedules.save(sched, pub, _exam_cal(pub), saved_by)
     except ValueError as e: return None, ({"error": str(e)}, 400)
     except BAD_INPUT: return None, ({"error": exams_schedules.WRONG}, 400)
+    _exams_entry(what, f"{saved['name']}: {words}", saved.get("id"))
+    return saved, None
 
 def _exam_view(pub, sched):
     model, cal = pub["model"], _exam_cal(pub)
@@ -1299,7 +1310,9 @@ def exams_home(): return app.send_static_file("exams.html")
 
 @app.get("/exams/settings")
 @need("exams", "committee")
-def exams_settings_page(): return app.send_static_file("exams-settings.html")
+def exams_settings_page():
+    move_relief_lists()
+    return app.send_static_file("exams-settings.html")
 
 @app.get("/exams/<id>")
 @need("exams", "committee")
@@ -1314,15 +1327,22 @@ def exams_me():
     if rights is None: return {"error": "Please sign in again."}, 401
     return jsonify(name=rights[1], can_use=rights[0], home="/home" if who() else "/")   # a person's way back is their home page
 
+def _exams_committee(pub):
+    """the exams committee as the accounts hold it: [name, last day] of each person whose Exams and events extra has not
+    ended (only an admin changes it, on the admin page)"""
+    today = datetime.date.today().isoformat()
+    return [[p["name"], p["extras"]["exams"]] for p in people.staff(pub) if (p["extras"].get("exams") or "") >= today and not p["off"]]
+
 def _exam_settings_reply(pub, settings):
-    """committee_ok: only the timetable committee changes the exams committee list"""
+    """lists: the exams committee from the accounts, shown and never changed here; can_admin: the line links to the admin page"""
     m = pub["model"]
-    return jsonify(settings=settings, people=relief_staff(pub), rooms=[[r["name"], r.get("kind"), r.get("capacity")] for r in m.get("rooms") or []],
-                   committee_ok=has("committee"))
+    return jsonify(settings=settings, lists=dict(committee=_exams_committee(pub)), can_admin=has("admin"), people=relief_staff(pub),
+                   rooms=[[r["name"], r.get("kind"), r.get("capacity")] for r in m.get("rooms") or []])
 
 @app.get("/api/exams/settings")
 @need("exams", "committee")
 def exams_settings_get():
+    move_relief_lists()
     pub, who, err = _exams_gate()
     if err: return err
     return _exam_settings_reply(pub, exams_settings.load(pub))
@@ -1330,13 +1350,13 @@ def exams_settings_get():
 @app.put("/api/exams/settings")
 @need("exams", "committee")
 def exams_settings_put():
+    move_relief_lists()
     pub, who, err = _exams_gate()
     if err: return err
-    body = request.get_json(force=True, silent=True)
-    if not has("committee") and isinstance(body, dict): body = dict(body, committee=exams_settings.load(pub)["committee"])   # kept as it is
-    try: saved = exams_settings.save(body, pub, who)
+    try: saved = exams_settings.save(request.get_json(force=True, silent=True), pub, who)   # a committee list sent is ignored
     except ValueError as e: return {"error": str(e)}, 400
     except BAD_INPUT: return {"error": exams_settings.WRONG}, 400
+    _exams_entry("settings", "Exam settings saved")
     return _exam_settings_reply(pub, saved)
 
 @app.get("/api/exams")
@@ -1360,7 +1380,7 @@ def exams_create():
         sched = exams_schedules.new(b["kind"], b.get("name"), b.get("levels"), b.get("start"), b.get("end"), who, pub=pub)
     except ValueError as e: return {"error": str(e)}, 400
     except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
-    saved, bad = _save_exam(sched, pub, who)
+    saved, bad = _save_exam(sched, pub, who, "create", "created")
     return bad or jsonify(saved)
 
 def _exam_or_404(id):
@@ -1383,7 +1403,7 @@ def exams_put(id):
     old, err = _exam_or_404(id)
     if err: return err
     new = dict(_exam_json(), **{k: old.get(k) for k in EXAM_KEEPS})
-    saved, bad = _save_exam(new, pub, who)
+    saved, bad = _save_exam(new, pub, who, "edit", "changed")
     return bad or jsonify(saved)
 
 @app.delete("/api/exams/<id>")
@@ -1391,7 +1411,9 @@ def exams_put(id):
 def exams_delete(id):
     pub, who, err = _exams_gate()
     if err: return err
+    s = exams_schedules.load(id)
     exams_schedules.delete(id)
+    if s: _exams_entry("delete", f"{s.get('name')}: deleted", s.get("id"))   # nothing there, nothing deleted: no entry
     return {"ok": True}
 
 @app.post("/api/exams/<id>/fill")
@@ -1402,7 +1424,7 @@ def exams_fill(id):
     s, err = _exam_or_404(id)
     if err: return err
     s["papers"] = list(s.get("papers") or []) + exams_papers.fill_from_subjects(s, pub["model"])
-    saved, bad = _save_exam(s, pub, who)
+    saved, bad = _save_exam(s, pub, who, "fill", "papers added from the subjects")
     return bad or jsonify(saved)
 
 @app.get("/api/exams/<id>/papers.xlsx")
@@ -1427,7 +1449,7 @@ def exams_papers_upload(id):
     try: rows = exams_papers.read_paper_list(f.read())
     except ValueError as e: return {"error": str(e)}, 400
     s["papers"] = [p for p in s.get("papers") or [] if p.get("who") == "students"] + rows
-    saved, bad = _save_exam(s, pub, who)
+    saved, bad = _save_exam(s, pub, who, "papers", "paper list uploaded")
     return bad or jsonify(saved)
 
 def _exam_view_reply(pub, sched):
@@ -1444,17 +1466,19 @@ def exams_view(id):
     s, err = _exam_or_404(id)
     return err or _exam_view_reply(pub, s)
 
-def _exam_changed(id, change):
-    """run change(pub, sched, body) on the stored schedule, save it and answer as the view does"""
+def _exam_changed(id, change, what, words):
+    """run change(pub, sched, body) on the stored schedule, save it (words(body): what the history says) and answer as the
+    view does"""
     pub, who, err = _exams_gate()
     if err: return err
     s, err = _exam_or_404(id)
     if err: return err
-    try: err = change(pub, s, _exam_json())
+    b = _exam_json()
+    try: err = change(pub, s, b)
     except ValueError as e: return {"error": str(e)}, 400
     except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
     if err: return err
-    saved, bad = _save_exam(s, pub, who)
+    saved, bad = _save_exam(s, pub, who, what, words(b))
     return bad or _exam_view_reply(pub, saved)
 
 def _exam_make(pub, s, b):
@@ -1497,19 +1521,19 @@ def _exam_use_anyway(pub, s, b):
 
 @app.post("/api/exams/<id>/make")
 @need("exams", "committee")
-def exams_make_route(id): return _exam_changed(id, _exam_make)
+def exams_make_route(id): return _exam_changed(id, _exam_make, "make", lambda b: "seats and duties made")
 
 @app.post("/api/exams/<id>/move")
 @need("exams", "committee")
-def exams_move(id): return _exam_changed(id, _exam_move)
+def exams_move(id): return _exam_changed(id, _exam_move, "move", lambda b: "students moved")
 
 @app.post("/api/exams/<id>/invigilators")
 @need("exams", "committee")
-def exams_invigilators(id): return _exam_changed(id, _exam_invigilators)
+def exams_invigilators(id): return _exam_changed(id, _exam_invigilators, "invigilators", lambda b: "invigilators changed")
 
 @app.post("/api/exams/<id>/use-anyway")
 @need("exams", "committee")
-def exams_use_anyway(id): return _exam_changed(id, _exam_use_anyway)
+def exams_use_anyway(id): return _exam_changed(id, _exam_use_anyway, "use-anyway", lambda b: f"{b['room']} used anyway")
 
 @app.get("/api/exams/<id>/print/<what>.pdf")
 @need("exams", "committee")

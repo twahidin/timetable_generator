@@ -12,7 +12,8 @@ SHARED = ("committee", "head", "teacher", "student")
 _lock = threading.RLock()
 
 def blank():
-    return {"people": {}, "ways": {"off": {r: None for r in SHARED}, "recovery_used": []}, "moved": None, "migrated": False}
+    return {"people": {}, "ways": {"off": {r: None for r in SHARED}, "recovery_used": []}, "moved": None, "migrated": False,
+            "migrated_exams": False}
 
 def _defaults():
     return {"group": None, "depts": [], "extras": {"relief": False, "exams": None, "admin": False}, "username": None, "pw": None,
@@ -75,6 +76,7 @@ def _fill(d):
         if isinstance(w.get("recovery_used"), list): b["ways"]["recovery_used"] = w["recovery_used"]
     b["moved"] = d.get("moved")
     b["migrated"] = d.get("migrated") is True
+    b["migrated_exams"] = d.get("migrated_exams") is True
     return b
 
 def update(fn):
@@ -141,55 +143,78 @@ def _names(v):
         if n and n not in out: out.append(n)
     return out
 
-def migrate(pub, relief_raw):
-    """once: relief's own three lists (as stored) become groups and extras here. -> the lines it did, or None when nothing
-    moved (already done, nothing stored, or a Management name that needs the published timetable while none is published)"""
+def _day(iso):
+    d = datetime.date.fromisoformat(iso)
+    return f"{d.day} {d.strftime('%b %Y')}"
+
+def _moved_entry(people, text):
+    import history
+    try: history.add({"kind": "account", "what": "moved", "people": people, "changes": [], "text": text, "who": None, "as": "The app", "via": "app"})
+    except Exception as e: print(f"WARNING: a move into the accounts could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+
+def migrate(pub, relief_raw, exams_raw=None):
+    """once each: relief's own three lists (as stored) become groups and extras here (`migrated`), and exams' committee list
+    (exams' settings as stored; None when that file is absent or unreadable) becomes the Exams and events extra until
+    31 December of this year (`migrated_exams`: its own flag, as an install may have moved relief's lists before exams
+    came). -> the lines this call did (kept, after any earlier ones, in `moved`), or None when nothing moved: already
+    done, nothing stored, or (relief's part only) a Management name that needs the published timetable while none is"""
     raw = relief_raw if isinstance(relief_raw, dict) else {}
     mgmt, team = _names(raw.get("management")), _names(raw.get("team"))
     extra = []
     for x in raw.get("extra_staff") if isinstance(raw.get("extra_staff"), list) else []:
         n = str(x.get("name") or "").strip() if isinstance(x, dict) else ""
         if n and all(n != e[0] for e in extra): extra.append((n, x["note"] if isinstance(x.get("note"), str) else ""))
-    if not (mgmt or team or extra) and not os.path.exists(PATH): return None   # nothing to move, and no file to mark
-    if mgmt and not pub: return None                                            # their roles are on the published timetable: try again later
+    exists = os.path.exists(PATH)
+    do_relief = (bool(mgmt or team or extra) or exists) and not (mgmt and not pub)   # roles are on the published timetable: later
+    committee = _names(exams_raw.get("committee")) if isinstance(exams_raw, dict) else []
+    do_exams = isinstance(exams_raw, dict) and (bool(committee) or exists)          # absent or unreadable: try again later
+    if not (do_relief or do_exams): return None                                    # nothing to move, and no file to mark
+    now = load()
+    if (not do_relief or now["migrated"]) and (not do_exams or now["migrated_exams"]): return None   # done before: nothing is written
     rows = {}
     for t in (((pub or {}).get("model") or {}).get("setup") or {}).get("teachers") or []:
         n = str(t.get("name") or "").strip()
         if n and n not in rows: rows[n] = t
     from ttgen import spec
-    lines, touched = [], []
+    until = f"{datetime.date.today().year}-12-31"
+    done = {"relief": ([], []), "exams": ([], [])}   # (lines, people touched) of each part done here
+    ran = []
     def run(d):
-        if d.get("migrated"): return None
-        d["moved"] = lines
-        mine = set()
-        def rec(n):
+        def rec(n, part):
             r = record(d, n); d["people"][n] = r
-            if n not in touched: touched.append(n)
+            if n not in done[part][1]: done[part][1].append(n)
             return r
-        for n, note in extra:
-            r = rec(n); r["added"] = True; r["note"] = note or r["note"]
-            if r["group"] is None: r["group"] = "executive"; mine.add(n)
-            lines.append(f"{n}: Executive, added (from relief's extra staff)")
-        for n in mgmt:
-            r = rec(n)
-            if r["group"] is not None and n not in mine:
-                lines.append(f"{n}: stays {LABELS[r['group']]} (relief's Management list)"); continue
-            row, role = rows.get(n), ""
-            if row: role = str(row.get("role") or "").strip().upper()
-            if role in ("HOD", "SH"):
-                r["group"] = role.lower(); r["depts"] = spec.teacher_depts(row)
-                lines.append(f"{n}: {role} (from relief's Management list)")
-            else:
-                r["group"] = "leader"; lines.append(f"{n}: School leader (from relief's Management list)")
-        for n in team:
-            rec(n)["extras"]["relief"] = True
-            lines.append(f"{n}: Relief team (from relief's Team list)")
-        d["migrated"] = True
-        return list(lines)
+        if do_relief and not d.get("migrated"):
+            lines, mine = done["relief"][0], set()
+            for n, note in extra:
+                r = rec(n, "relief"); r["added"] = True; r["note"] = note or r["note"]
+                if r["group"] is None: r["group"] = "executive"; mine.add(n)
+                lines.append(f"{n}: Executive, added (from relief's extra staff)")
+            for n in mgmt:
+                r = rec(n, "relief")
+                if r["group"] is not None and n not in mine:
+                    lines.append(f"{n}: stays {LABELS[r['group']]} (relief's Management list)"); continue
+                row, role = rows.get(n), ""
+                if row: role = str(row.get("role") or "").strip().upper()
+                if role in ("HOD", "SH"):
+                    r["group"] = role.lower(); r["depts"] = spec.teacher_depts(row)
+                    lines.append(f"{n}: {role} (from relief's Management list)")
+                else:
+                    r["group"] = "leader"; lines.append(f"{n}: School leader (from relief's Management list)")
+            for n in team:
+                rec(n, "relief")["extras"]["relief"] = True
+                lines.append(f"{n}: Relief team (from relief's Team list)")
+            d["migrated"] = True; ran.append("relief")
+        if do_exams and not d.get("migrated_exams"):
+            for n in committee:
+                ex = rec(n, "exams")["extras"]
+                ex["exams"] = max(ex["exams"] or until, until)   # a later end date already given stays
+                done["exams"][0].append(f"{n}: Exams and events until {_day(ex['exams'])} (from the exams committee list: check the end date)")
+            d["migrated_exams"] = True; ran.append("exams")
+        new = done["relief"][0] + done["exams"][0]
+        if ran: d["moved"] = (d["moved"] if isinstance(d.get("moved"), list) else []) + new
+        return new
     out = update(run)
-    if out:
-        import history
-        try: history.add({"kind": "account", "what": "moved", "people": touched, "changes": [], "text": "Moved from relief's lists",
-                          "who": None, "as": "The app", "via": "app"})
-        except Exception as e: print(f"WARNING: the move of relief's lists could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+    if done["relief"][0]: _moved_entry(done["relief"][1], "Moved from relief's lists")
+    if done["exams"][0]: _moved_entry(done["exams"][1], "Moved from the exams committee list")
     return out or None
