@@ -613,4 +613,329 @@ def the_planners_pick_stays_in_history():
     CV.split(i, K2, 3, TEAMER)
     assert whats(AB._lesson(AB.load(i), K2)) == [planned, ("split", SAM, TEAMER)]
 
+# ---- Task 2: the pick: the app's own order and the AI's, checked ----
+import re, time, typed  # noqa: E402
+from relief import pick as PK  # noqa: E402
+for _k in ("ANTHROPIC_API_KEY", "TYPED_REQUEST_MODEL", "AI_MODEL"): os.environ.pop(_k, None)   # no key and no practice picker unless a test says so
+REAL = []                                                                        # every time a test reached the real call
+REAL_CALL = PK._call
+def _never(data):
+    REAL.append(1); raise AssertionError("the real client")
+PK._call = _never                                                                # never the real client (as tests/smoke.py does for typed)
+
+class env:
+    """patch os.environ for a block: env(A="1", B=None) (None removes)"""
+    def __init__(s, **kw): s.kw = kw
+    def __enter__(s):
+        s.old = {k: os.environ.get(k) for k in s.kw}
+        for k, v in s.kw.items(): os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    def __exit__(s, *a):
+        for k, v in s.old.items(): os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+def pt(f):
+    """a pick test: no hook, an empty guard"""
+    PK.CALL = None; PK._seen.clear()
+    try: return t(f)
+    finally: PK.CALL = None; PK._seen.clear()
+
+SAYS = []
+def says(label, reason):
+    """a stand-in for the model: records the data it is sent and answers label and reason"""
+    def call(data):
+        SAYS.append(data); return dict(label=label, reason=reason)
+    return call
+
+APP = dict(who=FLEX, by="app", reason="Picked by the app's own order: the AI was not available.", at=NOW)
+ORDER5 = [FLEX, SAM, TEAMER, GRACE, MAYA]                                       # K5 with nobody given relief yet
+WEEK0 = dict(Mon=0, Tue=0, Wed=0, Thu=0, Fri=0)
+SHORTS = {EVE: "EKH", SAM: "STN", RUTH: "RGH", MAYA: "Lee", BUSY: "Mr Busy", FLEX: "FNG", NEVER: "NYP", GRACE: "GWG", TEAMER: "TLE"}   # Lee: inside Mr Team Lee's name; Mr Busy: the start of his
+
+def shorts_pub():
+    pub = world()
+    for x in pub["model"]["setup"]["teachers"]: x["short"] = SHORTS[x["name"]]
+    return pub
+
+def choose(i, ckey, call=None, st=None, pub=None, **kw):
+    r, x, c = cov(i, ckey)
+    return PK.choose_for(pub or PUB, st or ST, AB.all_records(), r, x, c, call=call, **kw)
+
+def by_label(data, lab): return next(x for x in data["teachers"] if x["label"] == lab)
+
+@pt
+def app_order_puts_flexi_adjunct_first_then_lightest_week():
+    def row(name, fat=False, g=2, marks=(), week=0, term=0): return dict(name=name, fat=fat, g=g, marks=list(marks), week=week, term=term)
+    rows = [row("A", week=1), row("B", fat=True, week=5), row("C", fat=True, g=0, week=9), row("D", g=0, marks=["prefers not"]),
+            row("E", g=0, week=3), row("F", g=1, week=7), row("H", week=1, term=2), row("G", week=1),
+            row("I", fat=True, g=0, week=1, marks=["department meeting time"])]
+    assert [x["name"] for x in PK.app_order(rows)] == ["C", "I", "B", "E", "D", "F", "A", "G", "H"], [x["name"] for x in PK.app_order(rows)]
+    assert [x["name"] for x in rows][:2] == ["A", "B"], "the list given is not reordered"
+    fresh()
+    i = absent(by=GRACE, dates=["2026-10-13", "2026-10-16"])["id"]
+    r, x, c = cov(i, K5)
+    short = PK.shortlist(PUB, ST, AB.all_records(), r, x, c)
+    assert [y["name"] for y in PK.app_order(short)] == ORDER5, [y["name"] for y in PK.app_order(short)]
+    assert {y["name"]: y["g"] for y in short} == {SAM: 0, FLEX: 2, TEAMER: 2, GRACE: 2, MAYA: 2}
+    # Friday's Art: the Science teachers teach other subjects (group 1); Ruth and Sam tie on the week, so by name
+    r, x, c = cov(i, KF)
+    short = PK.shortlist(PUB, ST, AB.all_records(), r, x, c)
+    assert {y["name"]: y["g"] for y in short} == {SAM: 1, RUTH: 1, FLEX: 2, BUSY: 2, TEAMER: 2, GRACE: 2}, {y["name"]: y["g"] for y in short}
+    assert [y["name"] for y in PK.app_order(short)] == [FLEX, SAM, RUTH, TEAMER, GRACE, BUSY]
+
+@pt
+def over_the_limit_is_not_on_the_shortlist():
+    fresh()
+    absent(teacher=SAM, by=GRACE, lessons=[dict(key=key(SAM, 0), relief=FLEX), dict(key=key(SAM, 9), relief=FLEX)])   # Flex has 2 periods that day
+    i = absent(by=GRACE)["id"]
+    j = absent(teacher=RUTH)["id"]
+    r, x, c = cov(i, K5)
+    recs = AB.all_records()
+    f = [y for g in FR.free_then(PUB, ST, recs, dict(x, key=K5), EVE)["groups"] for y in g["people"] if y["name"] == FLEX]
+    assert f and f[0]["over"] is True, "free then, but 2 + 2 is over the 3 a day"
+    short = PK.shortlist(PUB, ST, recs, r, x, c)
+    assert sorted(y["name"] for y in short) == sorted([TEAMER, GRACE, MAYA]) and not any(y["over"] for y in short), short
+    assert choose(i, K5) == dict(APP, who=TEAMER)
+    r, x, c = cov(j, KR2)                                                        # one period: 2 + 1 is the limit, not over it
+    assert PK.app_order(PK.shortlist(PUB, ST, recs, r, x, c))[0]["name"] == FLEX
+
+@pt
+def nothing_sent_carries_a_name_or_a_reason():
+    fresh()
+    pub = shorts_pub()
+    staff = P.people(pub, ST.get("extra_staff"))
+    assert {p["name"]: p["short"] for p in staff} == SHORTS
+    i = absent(by=GRACE, reason="Child sick", reason_text="Zebracrossing appendix", remarks="Quokka marmalade remark")["id"]
+    rec = AB.load(i)
+    assert rec["reporting_officer"] == GRACE and rec["remarks"] == "Quokka marmalade remark"
+    AB._lesson(rec, K5)["work"] = dict(text="Photosynthesis worksheet xylophone", link="https://example.com/kumquat-folder",
+                                       files=[dict(id="kiwifile9", name="narwhal-notes.pdf", size=10)])
+    AB._save(rec)
+    rules = ["Use planned relief first.", f"Ask {SAM} before {MAYA}; never {EVE}, ms evelyn koh or her friend RGH.",
+             f"Then {TEAMER} or Lee, then STN, then FNG's colleagues; never {BUSY}; Leeds is a city."]
+    st = dict(ST, rules=rules)
+    r, x, c = cov(i, K5)
+    assert x["work"]["text"].startswith("Photosynthesis")
+    data, names = PK.labelled(PK.shortlist(pub, st, AB.all_records(), r, x, c), r, x, c, st, staff)
+    sent = json.dumps(data, ensure_ascii=False)
+    for name in SHORTS: assert name.lower() not in sent.lower(), name
+    for s in SHORTS.values(): assert not re.search(rf"(?<!\w){re.escape(s)}(?!\w)", sent), s
+    for word in ("child sick", "zebracrossing", "appendix", "quokka", "marmalade", "photosynthesis", "worksheet", "xylophone", "kumquat",
+                 "example.com", "narwhal", "kiwifile9", "1A", "R1"):
+        assert word.lower() not in sent.lower(), word
+    assert names == {f"Teacher {n}": who for n, who in enumerate(ORDER5, 1)}, names
+    assert data["rules"] == ["Use planned relief first.",
+                             "Ask Teacher 2 before Teacher 5; never another teacher, another teacher or her friend another teacher.",
+                             "Then Teacher 3 or Teacher 5, then Teacher 2, then Teacher 1's colleagues; never another teacher; Leeds is a city."], data["rules"]
+    # the exact shape
+    assert set(data) == {"lesson", "teachers", "rules", "limits"}
+    assert data["lesson"] == dict(subject="Science", level="Sec 1", periods="P6–P7", weekday="Tue", date="2026-10-13"), data["lesson"]
+    assert data["limits"] == dict(flexi_adjunct_per_day=3, others_per_day=None)
+    assert [x["label"] for x in data["teachers"]] == [f"Teacher {n}" for n in range(1, 6)]
+    keys = {"label", "departments", "subjects", "teaches_this_subject", "flexi_adjunct", "teaching_this_week", "relief_this_week", "relief_today",
+            "relief_this_term", "relief_today_at", "relief_by_day", "marks"}
+    assert all(set(x) == keys for x in data["teachers"]), data["teachers"]
+    assert by_label(data, "Teacher 2") == dict(label="Teacher 2", departments=["Science"], subjects=["Science"], teaches_this_subject=True,
+                                               flexi_adjunct=False, teaching_this_week=2, relief_this_week=0, relief_today=0, relief_this_term=0,
+                                               relief_today_at=[], relief_by_day=WEEK0, marks=[]), by_label(data, "Teacher 2")
+    t1, t5 = by_label(data, "Teacher 1"), by_label(data, "Teacher 5")
+    assert t1["flexi_adjunct"] is True and t1["departments"] == [] and t1["teaches_this_subject"] is False and t1["teaching_this_week"] == 0
+    assert t5["departments"] == ["Mathematics"] and t5["subjects"] == ["Maths"] and t5["teaching_this_week"] == 2
+    # what the model gets is exactly this
+    del SAYS[:]
+    choose(i, K5, call=says("Teacher 1", "Teacher 1 is free."), st=st, pub=pub)
+    assert len(SAYS) == 1 and json.dumps(SAYS[0], ensure_ascii=False) == sent
+
+@pt
+def the_numbers_sent_are_the_relief_already_given():
+    fresh()
+    k27 = key(EVE, 5, D(2026, 10, 27))
+    i = absent(by=GRACE, dates=["2026-10-13", "2026-10-16", "2026-10-27"])["id"]
+    CV.split(i, K2, 3, TEAMER)                                                   # P3, and P4-P5
+    CV.set_pick(i, K2 + "#0", pk(SAM), PUB, ST)
+    CV.set_pick(i, k27, pk(SAM), PUB, ST)                                        # the same term, another week
+    # the part P4-P5 is picked for on its own periods and key: Ruth (Physics at P3 and P7) is free for it
+    r, x, c = cov(i, K2 + "#1")
+    short = PK.shortlist(PUB, ST, AB.all_records(), r, x, c)
+    assert {y["name"]: y["g"] for y in short}.get(RUTH) == 1, short
+    data, names = PK.labelled(short, r, x, c, ST, P.people(PUB, []))
+    assert data["lesson"]["periods"] == "P4–P5"
+    sam = by_label(data, next(k for k, v in names.items() if v == SAM))
+    assert sam["relief_today_at"] == ["P3"] and sam["relief_today"] == 1, sam
+    CV.set_pick(i, K2 + "#1", pk(MAYA), PUB, ST)
+    data, names = PK.labelled(PK.shortlist(PUB, ST, AB.all_records(), r, x, c), r, x, c, ST, P.people(PUB, []))
+    maya = by_label(data, next(k for k, v in names.items() if v == MAYA))
+    assert maya["relief_today_at"] == [] and maya["relief_today"] == 0 and maya["relief_this_week"] == 0, "this cover is not counted against itself"
+    # Tuesday P6-P7: Sam has P3 that day, Maya P4-P5
+    r, x, c = cov(i, K5)
+    data, names = PK.labelled(PK.shortlist(PUB, ST, AB.all_records(), r, x, c), r, x, c, ST, P.people(PUB, []))
+    assert names == {f"Teacher {n}": who for n, who in enumerate(ORDER5, 1)}, names
+    assert {k: v for k, v in by_label(data, "Teacher 2").items() if k.startswith(("relief", "teaching"))} == dict(
+        teaching_this_week=2, relief_this_week=1, relief_today=1, relief_this_term=3, relief_today_at=["P3"], relief_by_day=dict(WEEK0, Tue=1))
+    assert {k: v for k, v in by_label(data, "Teacher 5").items() if k.startswith(("relief", "teaching"))} == dict(
+        teaching_this_week=2, relief_this_week=2, relief_today=2, relief_this_term=2, relief_today_at=["P4–P5"], relief_by_day=dict(WEEK0, Tue=2))
+    # Friday: none of it is today's, all of it is this week's
+    r, x, c = cov(i, KF)
+    data, names = PK.labelled(PK.shortlist(PUB, ST, AB.all_records(), r, x, c), r, x, c, ST, P.people(PUB, []))
+    sam = by_label(data, next(k for k, v in names.items() if v == SAM))
+    assert (sam["relief_today"], sam["relief_today_at"], sam["relief_this_week"], sam["relief_by_day"]) == (0, [], 1, dict(WEEK0, Tue=1)), sam
+    assert data["lesson"] == dict(subject="Art", level="Sec 1", periods="P1–P2", weekday="Fri", date="2026-10-16")
+    assert MAYA not in names.values(), "teaching then"
+
+@pt
+def a_good_answer_is_used_with_names_put_back():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    before = snap()
+    del SAYS[:]
+    got = choose(i, K5, call=says("Teacher 2", "Rule 2 matches the subject: Teacher 2 teaches Science, and Teacher 1 does not."))
+    assert got == dict(who=SAM, by="ai", reason=f"Rule 2 matches the subject: {SAM} teaches Science, and {FLEX} does not.", at=NOW), got
+    assert len(SAYS) == 1 and [x["label"] for x in SAYS[0]["teachers"]] == [f"Teacher {n}" for n in range(1, 6)]
+    assert snap() == before, "choosing saves nothing"
+    # spaces round the label; a real name of someone on the shortlist; exactly 300 characters once the names are back
+    pad = "a" * (300 - len(f"{MAYA} is free , unlike {TEAMER}."))
+    got = choose(i, K5, call=says(" Teacher 5 ", f"Teacher 5 is free {pad}, unlike {TEAMER}."))
+    assert got["who"] == MAYA and got["by"] == "ai" and len(got["reason"]) == 300 and got["reason"].startswith(MAYA), got
+    # the hook is used when no call is given; a call given comes first
+    PK.CALL = says("Teacher 3", "Rule 3, lightest week first: Teacher 3 has no lessons this week.")
+    assert choose(i, K5) == dict(who=TEAMER, by="ai", reason=f"Rule 3, lightest week first: {TEAMER} has no lessons this week.", at=NOW)
+    assert choose(i, K5, call=says("Teacher 4", "Teacher 4 is free."))["who"] == GRACE
+    PK.CALL = None
+    # the teacher who asked to change is not on the list
+    got = choose(i, K5, call=says("Teacher 1", "Teacher 1 teaches Science."), without=(FLEX,))
+    assert got["who"] == SAM and len(SAYS[-1]["teachers"]) == 4 and got["reason"] == f"{SAM} teaches Science.", got
+    assert choose(i, K5, without=[FLEX, SAM]) == dict(APP, who=TEAMER)
+    assert choose(i, K5, without=FLEX) == dict(APP, who=SAM), "one name alone"
+
+@pt
+def a_bad_label_an_empty_reason_or_a_failure_falls_back_to_the_app_order():
+    assert PK.APP_ORDER == "Picked by the app's own order: the AI was not available."
+    fresh()
+    i = absent(by=GRACE)["id"]
+    def boom(e):
+        def call(data): raise e
+        return call
+    long_after = "Teacher 2 is free. " + "a" * (300 - len("Teacher 2 is free. "))          # 300 as sent, 301 with the name back
+    bad = [says("Teacher 9", "Teacher 9 is free."), says("Teacher 0", "Teacher 0 is free."), says(SAM, "He is free."), says("teacher 2", "Free."),
+           says("Teacher 2", ""), says("Teacher 2", "   "), says("Teacher 2", "x" * 401), says("Teacher 2", "x" * 301), says("Teacher 2", long_after),
+           says("Teacher 2", "Teacher 2 is free, unlike Teacher 7."), says("Teacher 2", "Teacher 2 is free, unlike Teacher 05."),
+           says("Teacher 2", f"Teacher 2 is free; {RUTH} teaches then."), says("Teacher 2", f"Teacher 2 covers for {EVE}."),
+           says("Teacher 2", "Teacher 2 covers for ms evelyn koh."), says("", "Teacher 2 is free."),
+           boom(TimeoutError("t")), boom(RuntimeError("401 invalid x-api-key sk-ant-test-not-a-key")), boom(KeyError("label")), boom(RecursionError()),
+           lambda d: None, lambda d: "Teacher 2", lambda d: ["Teacher 2", "x"], lambda d: {}, lambda d: dict(label="Teacher 2"),
+           lambda d: dict(label=2, reason="x"), lambda d: dict(label="Teacher 2", reason=None), lambda d: dict(label=["Teacher 2"], reason="x")]
+    for n, call in enumerate(bad):
+        PK._seen.clear()
+        got = choose(i, K5, call=call)
+        assert got == APP, (n, got)
+    assert choose(i, K5, call=says("Teacher 2", "Teacher 2, not RGH."), pub=shorts_pub()) == APP, "a short name off the shortlist"
+    assert choose(i, K5, call=says("Teacher 2", "Teacher 2, not Lee."), pub=shorts_pub())["by"] == "ai", "Lee is Maya, on the shortlist"
+    # the guard full: no call
+    made = []
+    PK._seen[:] = [PK._now()] * PK.GUARD_N
+    assert choose(i, K5, call=lambda d: made.append(d) or dict(label="Teacher 2", reason="x")) == APP and made == []
+    PK._seen.clear()
+    # no model at all (no key, no practice picker, no hook): the app's order, and nothing called
+    assert not typed.enabled() and choose(i, K5) == APP and PK._seen == []
+    assert PK.ask(dict(teachers=[dict(label="Teacher 1")])) == dict(ok=False, error=PK.OFF)
+
+@pt
+def the_guard_counts_only_calls_made():
+    assert (PK.GUARD_N, PK.GUARD_S) == (60, 600)
+    clock = [5000.0]; PK._now = lambda: clock[0]; made = []
+    def call(data): made.append(1); return dict(label="Teacher 1", reason="Rule 2.")
+    def fails(data): made.append(1); raise TimeoutError("t")
+    d1 = dict(lesson={}, teachers=[dict(label="Teacher 1")], rules=[], limits={})
+    typed_before = list(typed._seen)
+    try:
+        assert PK.ask(d1)["ok"] is False and PK._seen == [], "no model: nothing called, nothing counted"
+        for bad in (None, "x", {}, dict(d1, teachers=[]), dict(d1, teachers="Teacher 1")):
+            assert PK.ask(bad, call=call)["ok"] is False, bad
+        assert made == [] and PK._seen == [], "nothing to choose from: no call"
+        for n in range(59):
+            clock[0] += 1; assert PK.ask(d1, call=call) == dict(ok=True, label="Teacher 1", reason="Rule 2."), n
+        clock[0] += 1; assert PK.ask(d1, call=fails) == dict(ok=False, error=PK.FAILED)       # a call that failed was still made
+        assert len(made) == 60 and len(PK._seen) == 60
+        assert PK.ask(d1, call=call) == dict(ok=False, error=PK.BUSY) and len(made) == 60
+        fresh(); i = absent(by=GRACE)["id"]
+        assert choose(i, K5, call=call) == APP and len(made) == 60 and len(PK._seen) == 60, "refused calls are not counted"
+        clock[0] += 541                                                          # the first call is 10 minutes old
+        assert PK.ask(d1, call=call)["ok"] and len(made) == 61 and PK.ask(d1, call=call)["error"] == PK.BUSY
+        clock[0] += 600                                                          # every call so far is over 10 minutes old
+        with env(TYPED_REQUEST_MODEL="mock"):
+            assert PK.ask(d1)["ok"] and PK._seen == [clock[0]], "the practice picker stands for a call: it counts"
+        assert typed._seen == typed_before, "the typed requests' guard is another one"
+    finally: PK._now = time.monotonic
+
+@pt
+def an_empty_shortlist_gives_none_and_no_call():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    r, x, c = cov(i, K5)
+    made = []
+    def call(data): made.append(data); return dict(label="Teacher 1", reason="Teacher 1 is free.")
+    tight = dict(ST, limits=dict(ST["limits"], other_per_day=1, fat_per_day=1))   # two periods are over either limit
+    assert names(FR.free_then(PUB, tight, AB.all_records(), dict(x, key=K5), EVE)), "free then, but all over a limit"
+    assert PK.shortlist(PUB, tight, AB.all_records(), r, x, c) == []
+    assert choose(i, K5, call=call, st=tight) is None
+    assert choose(i, K5, call=call, without=ORDER5) is None
+    PK.CALL = call
+    with env(TYPED_REQUEST_MODEL="mock"): assert choose(i, K5, st=tight) is None
+    assert made == [] and PK._seen == []
+
+@pt
+def mock_model_picks_the_first_label():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    r, x, c = cov(i, K5)
+    practice = "Practice pick: the first teacher in the app's order."
+    with env(TYPED_REQUEST_MODEL="mock"):
+        assert typed.enabled() and typed.model() == "mock"
+        assert choose(i, K5) == dict(who=FLEX, by="ai", reason=practice, at=NOW)
+        data, _ = PK.labelled(PK.shortlist(PUB, ST, AB.all_records(), r, x, c), r, x, c, ST, P.people(PUB, []))
+        assert PK.ask(data) == dict(ok=True, label="Teacher 1", reason=practice)
+        assert choose(i, K5, without=(FLEX,)) == dict(who=SAM, by="ai", reason=practice, at=NOW)
+        PK.CALL = says("Teacher 2", "Teacher 2 teaches Science.")
+        assert choose(i, K5)["who"] == SAM, "the hook comes before the practice picker"
+    PK.CALL = None
+    # with a key (a made-up one) and no practice picker, the model is called: here a stand-in for it
+    seen = []
+    PK._call = lambda d: seen.append(d) or dict(label="Teacher 3", reason="Teacher 3 has the lightest week.")
+    try:
+        with env(ANTHROPIC_API_KEY="sk-ant-test-not-a-key"):
+            assert typed.enabled() and typed.model() == "claude-opus-5-5"
+            assert choose(i, K5) == dict(who=TEAMER, by="ai", reason=f"{TEAMER} has the lightest week.", at=NOW) and len(seen) == 1
+        assert not typed.enabled() and choose(i, K5) == APP and len(seen) == 1, "no key: no call"
+    finally: PK._call = _never
+
+@pt
+def the_call_goes_to_the_typed_client_with_its_own_text_and_schema():
+    class B:
+        def __init__(s, **kw): s.__dict__.update(kw)
+    sent = []
+    def client(stop, content):
+        class Messages:
+            def create(s, **kw): sent.append(kw); return B(stop_reason=stop, content=content)
+        return lambda: B(beta=B(messages=Messages()))
+    data = dict(lesson=dict(subject="Science", periods="P6–P7"), teachers=[dict(label="Teacher 1")], rules=["Use planned relief first."], limits={})
+    text = B(type="text", text='{"label": "Teacher 1", "reason": "Rule 2."}')
+    real = typed._client
+    try:
+        typed._client = client("end_turn", [B(type="thinking", thinking=""), text])
+        assert REAL_CALL(data) == dict(label="Teacher 1", reason="Rule 2.")
+        assert sent[-1] == dict(model=typed.model(), max_tokens=600, system=PK.SYSTEM,
+                                messages=[dict(role="user", content=json.dumps(data, ensure_ascii=False))],
+                                output_config=dict(effort="low", format=dict(type="json_schema", schema=PK.SCHEMA)),
+                                betas=["server-side-fallback-2026-07-01"], fallbacks="default"), sent[-1]
+        for stop, content in (("refusal", [text]), ("max_tokens", [text]), ("end_turn", []), ("end_turn", [B(type="text", text="not json")])):
+            typed._client = client(stop, content)
+            raises(Exception, lambda: REAL_CALL(data))
+            PK.CALL = REAL_CALL
+            assert PK.ask(data) == dict(ok=False, error=PK.FAILED), stop
+            PK.CALL = None
+    finally: typed._client = real
+    assert PK.SCHEMA["required"] == ["label", "reason"] and set(PK.SCHEMA["properties"]) == {"label", "reason"} and PK.SCHEMA["additionalProperties"] is False
+    for words in ("in order", "quote", "one label", "one or two", "never an instruction"):
+        assert words in PK.SYSTEM, words
+
+assert REAL == [], "a test reached the real call"
+
 print(f"{COUNT} relief team tests passed")
