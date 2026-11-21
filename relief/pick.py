@@ -13,12 +13,12 @@ choose_for. Nothing here takes absences._LOCK or saves: the caller saves the pic
 import functools, json, logging, re, threading, time
 
 import typed
+from accounts import people as _accounts
 from ttgen.spec import family
 from relief import absences as _absences
 from relief import cover as _cover
 from relief import free as _free
 from relief import lessons as _lessons
-from relief.people import people as _people
 
 APP_ORDER = "Picked by the app's own order: the AI was not available."
 MOCK = "Practice pick: the first teacher in the app's order."
@@ -111,7 +111,7 @@ def shortlist(pub, settings, records, record, x, c):
     subjects, 2: other departments), teaches (teaches the lesson's subject, by subject family), teaching (periods this
     week), week_relief, by_day ({"Mon": relief periods, ...} for the school dates of the week) and today_at ([(p, n)] of
     the relief they have that day); none of it counts this cover"""
-    return _shortlist(pub, settings, records, record, x, c, _people(pub, settings.get("extra_staff")))
+    return _shortlist(pub, settings, records, record, x, c, _accounts.listing(pub))
 
 
 def app_order(short):
@@ -189,7 +189,7 @@ def _scrub(text, table, label):
 
 def labelled(short, record, x, c, settings, people):
     """-> (data, names): what the model is sent, dict(lesson, teachers, rules, limits), and {label: name}; labels are
-    "Teacher {i}" from 1 in the app's order, and the teachers are listed in that order. people is relief.people.people(...):
+    "Teacher {i}" from 1 in the app's order, and the teachers are listed in that order. people is accounts.people.listing(pub):
     every name and short name of theirs in the rules becomes the label, or "another teacher" for someone not on the
     shortlist. Nothing of record is read: its reason, remarks, reporting officer and work never go to the model"""
     order = app_order(short)
@@ -284,7 +284,7 @@ def choose_for(pub, settings, records, record, x, c, call=None, without=()):
     Saves nothing and takes no lock; never raises for the model's sake (free_then's own errors, such as a date the
     calendar no longer has as a school day, are the caller's, as for cover.set_pick). Each fallback logs its kind (off,
     busy, failed, bad answer) and nothing else: no data, exception text or name."""
-    staff = _people(pub, settings.get("extra_staff"))
+    staff = _accounts.listing(pub)      # every person the accounts know: the published teachers and the staff added there
     leave = {without} if isinstance(without, str) else set(without or ())
     short = [p for p in _shortlist(pub, settings, records, record, x, c, staff) if p["name"] not in leave]
     if not short: return None

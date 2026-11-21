@@ -1,12 +1,14 @@
 "use strict";
-/* Exam settings (/exams/settings): the exams committee, the exam rooms, the invigilator lists and the rules.
-   One form, one Save (top and bottom). The form is kept in S.f; a refused save shows the server's sentence and keeps
+/* Exam settings (/exams/settings): the exams committee (shown only: it is kept on the admin page), the exam rooms, the
+   invigilator lists and the rules. One form, one Save (top and bottom). The form is kept in S.f; a refused save shows the server's sentence and keeps
    everything typed. */
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const S = { d: null, f: null, dirty: false, busy: false, msg: "", bad: false, open: null, q: "" };
-  const LISTS = { committee: "the exams committee", backups: "the backup invigilators", chiefs: "the chief invigilators", never: "the never list" };
+  const LISTS = { backups: "the backup invigilators", chiefs: "the chief invigilators", never: "the never list" };
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const day = iso => { const [y, m, d] = String(iso || "").split("-").map(Number); return y && m && d ? `${d} ${MONTHS[m - 1]} ${y}` : ""; };
 
   const clone = x => JSON.parse(JSON.stringify(x));
   const numOrNull = v => v === "" ? null : Number(v);
@@ -26,11 +28,13 @@
     return `<div class="setting"><div class="k">${k}${sub ? `<div class="small muted">${sub}</div>` : ""}</div><div class="v">${body}</div></div>`;
   }
 
+  function committee() {   /* the people with the Exams and events extra: kept on the admin page, shown here, never edited */
+    const names = (S.d.lists.committee || []).map(([n, until]) => `<span class="pchip" style="padding-right:10px">${esc(n)}${until ? `<span class="muted small">&nbsp;until ${esc(day(until))}</span>` : ""}</span>`).join("");
+    const line = S.d.can_admin ? `<a href="/admin">Change these on the admin page.</a>` : "Ask an admin to change these.";
+    return `<div class="chiprow" aria-label="The exams committee">${names || `<span class="muted small">No one yet.</span>`}</div><div class="small muted" style="margin-top:6px">${line}</div>`;
+  }
+
   function chips(key) {
-    if (key === "committee" && !S.d.committee_ok) {   /* staff see the exams committee but cannot change it */
-      const names = S.f[key].map(n => `<span class="pchip">${esc(n)}</span>`).join("");
-      return `<div class="chiprow">${names || `<span class="muted small">No one yet.</span>`}</div><div class="small muted">Only the timetable committee can change this list.</div>`;
-    }
     const list = S.f[key].map((n, i) => `<span class="pchip">${esc(n)}<button type="button" data-unchip="${key}" data-i="${i}" title="Take ${esc(n)} off" aria-label="Take ${esc(n)} off ${LISTS[key]}">✕</button></span>`).join("");
     return `<div class="chiprow">${list || `<span class="muted small">No one yet.</span>`}<button type="button" class="small" data-pick="${key}">+ Add</button></div>${S.open === key ? picker(key) : ""}`;
   }
@@ -92,7 +96,7 @@
     $("#main").innerHTML = `<div class="card"><h1>Exam settings</h1>
       ${gone.length ? `<p class="notice">No longer on the timetable: ${esc(gone.join(", "))}. Saving removes them.</p>` : ""}
       ${bar("first")}
-      ${setting("Exams committee", "<span>They can open Exams and change everything in it. The timetable committee always can.</span>", chips("committee"))}
+      ${setting("Exams committee", "<span>They can open Exams and change everything in it. The timetable committee always can.</span>", committee())}
       ${setting("Exam rooms", "<span>Picked from the rooms of the published timetable.</span>", roomRows())}
       ${setting("Backup invigilators", "<span>Used first when someone has to be replaced. They can include staff who do not teach.</span>", chips("backups"))}
       ${setting("Chief invigilators", "<span>Who may lead a hall.</span>", chips("chiefs"))}
@@ -102,8 +106,8 @@
   }
 
   async function homeLink() {
-    let to = "/relief";
-    try { const r = await fetch("/api/exams/me", { cache: "no-store" }), j = await r.json(); if (j && j.name === "Timetable committee") to = "/"; } catch (e) { /* keep the staff link */ }
+    let to = "/home";
+    try { const r = await fetch("/api/exams/me", { cache: "no-store" }), j = await r.json(); if (j && j.home) to = j.home; } catch (e) { /* keep the person's home */ }
     return to;
   }
 

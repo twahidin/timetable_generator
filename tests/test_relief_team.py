@@ -13,6 +13,7 @@ from relief import lessons as LS  # noqa: E402
 from relief import free as FR  # noqa: E402
 from relief import absences as AB  # noqa: E402
 from relief import settings as RS  # noqa: E402
+from accounts import people as AP  # noqa: E402
 from ttgen.spec import day_names  # noqa: E402
 import datetime, json, shutil  # noqa: E402
 
@@ -65,7 +66,7 @@ def world(extra=()):
 
 PUB = world()
 os.makedirs(os.path.dirname(RS.PATH), exist_ok=True)
-store.write_json(RS.PATH, dict(calendar=CAL, team=[TEAMER], management=[GRACE], limits=dict(fat_per_day=3, other_per_day=None, never=[NEVER]), fat_role=FAT))
+store.write_json(RS.PATH, dict(calendar=CAL, limits=dict(fat_per_day=3, other_per_day=None, never=[NEVER]), fat_role=FAT))   # who plans and who is on the team: the accounts
 ST = RS.load(PUB)
 ADIR = os.path.join(DATA, "relief", "absences")
 
@@ -706,7 +707,7 @@ def over_the_limit_is_not_on_the_shortlist():
 def nothing_sent_carries_a_name_or_a_reason():
     fresh()
     pub = shorts_pub()
-    staff = P.people(pub, ST.get("extra_staff"))
+    staff = AP.listing(pub)                               # the people choose_for reads the rules against
     assert {p["name"]: p["short"] for p in staff} == SHORTS
     i = absent(by=GRACE, reason="Child sick", reason_text="Zebracrossing appendix", remarks="Quokka marmalade remark")["id"]
     rec = AB.load(i)
@@ -1446,5 +1447,20 @@ def a_stale_new_pick_for_a_change_is_dropped_and_picked_again():
         assert not CV.stale(PUB, s, AB.all_records(), *cov(i, K2), into="change")
 
 assert REAL == [], "a test reached the real call"
+
+# ---- merged with relief stage 2 and the accounts: the rules are read against everyone the accounts know ----
+@pt
+def the_rules_are_read_against_everyone_the_accounts_know():
+    fresh()
+    OLIVE = "Mdm Olive Quek"                    # added on the admin page: on no timetable, so never on the shortlist
+    AP.update(lambda d: d["people"].setdefault(OLIVE, {}).update(added=True, group="executive"))
+    try:
+        assert OLIVE in [p["name"] for p in AP.listing(PUB)] and OLIVE not in [p["name"] for p in P.people(PUB, [])]
+        i = absent(by=GRACE)["id"]
+        del SAYS[:]
+        assert choose(i, K5, call=says("Teacher 1", "Teacher 1 is free."), st=dict(ST, rules=[f"Ask {OLIVE} first."]))["by"] == "ai"
+        assert len(SAYS) == 1 and SAYS[0]["rules"] == ["Ask another teacher first."], SAYS
+        assert choose(i, K5, call=says("Teacher 1", f"Teacher 1 is free, unlike {OLIVE}.")) == APP, "an answer naming her is refused"
+    finally: AP.update(lambda d: d["people"].pop(OLIVE, None))
 
 print(f"{COUNT} relief team tests passed")

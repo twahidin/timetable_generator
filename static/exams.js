@@ -48,8 +48,8 @@
 
   /* ---------------------------------------------------------------- the server */
   async function homeLink() {
-    let to = "/relief";
-    try { const r = await fetch("/api/exams/me", { cache: "no-store" }), j = await r.json(); if (j && j.name === "Timetable committee") to = "/"; } catch (e) { /* keep the staff link */ }
+    let to = "/home";
+    try { const r = await fetch("/api/exams/me", { cache: "no-store" }), j = await r.json(); if (j && j.home) to = j.home; } catch (e) { /* keep the person's home */ }
     return to;
   }
 

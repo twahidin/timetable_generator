@@ -1,8 +1,7 @@
 """Invigilators: how many a room needs, who is free, and who is put on each duty. Reads the saved schedules only for minutes."""
 import math
 
-import relief.people
-import relief.settings
+from accounts import people as _accounts
 from exams import days as _days
 from exams import schedules as _schedules
 from exams import seating as _seating
@@ -84,7 +83,7 @@ def _teaches(running):
 def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exclude=(), _other=None) -> dict:
     model = pub["model"]
     rules = xset["rules"]
-    pool = [p["name"] for p in relief.people.people(pub, relief.settings.load(pub)["extra_staff"])
+    pool = [p["name"] for p in _accounts.staff(pub)
             if p["teaches"] or p["name"] in xset["backups"]]
     view = _days.day_view(pub, cal, sched, date)
     mine = duty_minutes(duties)
@@ -168,7 +167,7 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
     reason). `fixed` duties (sittings kept as they are) are returned unchanged and count as other duties."""
     model = pub["model"]
     rules = xset["rules"]
-    people = {p["name"] for p in relief.people.people(pub, relief.settings.load(pub)["extra_staff"])}
+    people = {p["name"] for p in _accounts.staff(pub)}
     pins = (sched.get("pins") or {}).get("duties") or {}
     common = sched.get("supervision") == "lesson"
     duties, subjects_of, places, views, ids_of, by_sit = [], {}, {}, {}, {}, []

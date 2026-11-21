@@ -1,0 +1,330 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Accounts mockups</title><style>
+body{margin:0;background:#f4f6f9;color:#1b2330;font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+header{padding:16px 20px 0}header h1{font-size:18px;margin:0 0 4px}header p{margin:0 0 10px;color:#5d6678;font-size:13px}
+nav{display:flex;gap:6px;flex-wrap:wrap;padding:0 20px 10px;border-bottom:1px solid #dde2ea}
+nav button{font:inherit;border:1px solid #c9d1dc;background:#fff;border-radius:8px;padding:5px 12px;cursor:pointer}nav button.on{background:#2563eb;color:#fff;border-color:#2563eb}
+.tab{padding:16px 20px 40px;max-width:1150px}h2{font-size:20px;margin:0 0 4px}.subtitle{color:#5d6678;margin:0 0 14px}h3{font-size:15px}
+.mockup{border:1px solid #dde2ea;border-radius:12px;background:#fff;overflow:hidden}.mockup-header{background:#f6f8fb;border-bottom:1px solid #dde2ea;padding:7px 12px;font-size:12.5px;color:#5d6678;font-weight:600}.mockup-body{padding:12px}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px}.option{display:block}.section{margin-bottom:12px}
+@media (max-width:800px){.split{grid-template-columns:1fr}}
+</style></head><body><header><h1>Accounts, rights and the history: mockups</h1><p>All names, the school and the classes are made up. Design: 2026-11-21-accounts-and-history-design.md. The lead chose sign-in layout A.</p></header>
+<nav><button data-t="t0" class=on>1 Sign-in</button><button data-t="t1">2 Admin page</button><button data-t="t2">3 Ticking several</button><button data-t="t3">4 History</button></nav><section id="t0" class="tab"><style>
+  .m-page{background:#eef3f8;border-radius:12px;padding:22px 14px;color:#1b2330;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+  .m-hero{text-align:center;margin-bottom:14px}.m-hero b{font-size:20px;display:block}.m-hero span{color:#5d6678}
+  .m-card{background:#fff;border:1px solid rgba(27,35,48,.10);border-radius:16px;padding:16px;box-shadow:0 8px 20px rgba(30,50,90,.10);max-width:330px;margin:0 auto}
+  .m-g{display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid #c9d1dc;border-radius:10px;padding:9px;font-weight:600;background:#fff}
+  .m-g i{font-style:normal;font-weight:800;color:#4285f4}
+  .m-or{text-align:center;color:#5d6678;font-size:12px;margin:10px 0}
+  .m-lab{font-size:12px;color:#5d6678;margin:6px 0 3px}
+  .m-in{border:1px solid rgba(27,35,48,.15);border-radius:9px;padding:8px 10px;color:#9aa4b2;background:#fff;letter-spacing:.08em}
+  .m-btn{margin-top:8px;background:#2563eb;color:#fff;border-radius:9px;padding:8px;text-align:center;font-weight:600}
+  .m-link{display:block;text-align:center;margin-top:12px;font-size:12.5px;color:#2563eb}
+  .m-tiles{display:grid;grid-template-columns:1fr;gap:8px}
+  .m-tile{display:flex;gap:10px;align-items:center;background:#fff;border:1px solid rgba(27,35,48,.10);border-radius:12px;padding:9px 11px}
+  .m-ico{width:30px;height:30px;border-radius:8px;background:#dbe6fb;flex:none}
+  .m-tile b{display:block;font-size:13.5px}.m-tile small{color:#5d6678;font-size:12px}
+  .m-tile .go{margin-left:auto;color:#2563eb;font-size:12px;font-weight:600;white-space:nowrap}
+  .m-note{font-size:12px;color:#5d6678;margin-top:8px;text-align:center}
+</style>
+
+<h2>The sign-in page</h2>
+<p class="subtitle">Two ways to lay it out. Made-up school and names. Click the one that feels right, or tell me what to change.</p>
+
+<div class="split">
+  <div class="option" data-choice="one-page" style="display:block">
+    <div class="mockup">
+      <div class="mockup-header">A · One sign-in for everyone</div>
+      <div class="mockup-body">
+        <div class="m-page">
+          <div class="m-hero"><b>Sample Secondary School</b><span>Timetable</span></div>
+          <div class="m-card">
+            <div class="m-g"><i>G</i> Sign in with Google</div>
+            <div class="m-or">or</div>
+            <div class="m-lab">Your personal code (on the slip from the school)</div>
+            <div class="m-in">XXXX-XXXX</div>
+            <div class="m-btn">Open</div>
+            <span class="m-link">Committee and management: sign in with your username &rarr;</span>
+          </div>
+          <div class="m-note">The Google button shows only once you have set it up.<br>The app then opens what <i>you</i> may use.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="cards" style="display:block">
+    <div class="mockup">
+      <div class="mockup-header">B · Cards, as today, each with its own way in</div>
+      <div class="mockup-body">
+        <div class="m-page">
+          <div class="m-hero"><b>Sample Secondary School</b><span>Timetable</span></div>
+          <div class="m-tiles">
+            <div class="m-tile"><span class="m-ico"></span><span><b>Build and publish</b><small>Timetable committee</small></span><span class="go">Username &rarr;</span></div>
+            <div class="m-tile"><span class="m-ico"></span><span><b>Management</b><small>School leaders, HODs and SHs</small></span><span class="go">Username &rarr;</span></div>
+            <div class="m-tile"><span class="m-ico"></span><span><b>Staff</b><small>Timetables, Who's free, Relief, Exams</small></span><span class="go">Google or code &rarr;</span></div>
+            <div class="m-tile"><span class="m-ico"></span><span><b>Students</b><small>Your own timetable</small></span><span class="go">Google or code &rarr;</span></div>
+          </div>
+          <div class="m-note">Each card opens a small page with only its own ways in.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>After signing in (either layout)</h3>
+  <div class="mockup">
+    <div class="mockup-header">What a teacher on the exams committee sees, e.g. "Ravi Kumar"</div>
+    <div class="mockup-body">
+      <div class="m-page">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b>Hello, Ravi Kumar</b><span style="font-size:12px;color:#5d6678">Signed in with Google · <u>Sign out</u></span></div>
+        <div class="m-tiles" style="grid-template-columns:repeat(3,1fr)">
+          <div class="m-tile"><span class="m-ico"></span><span><b>Timetables</b><small>Classes, teachers, rooms, Who's free</small></span></div>
+          <div class="m-tile"><span class="m-ico"></span><span><b>Relief</b><small>Ask for relief, your reliefs</small></span></div>
+          <div class="m-tile"><span class="m-ico"></span><span><b>Exams and events</b><small>Until 14 Nov 2027</small></span></div>
+        </div>
+        <div class="m-note">Only the tiles this person may open are shown. With one tile, it opens straight away.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</section><section id="t1" class="tab" hidden><style>
+  .a{background:#eef3f8;border-radius:12px;padding:16px;color:#1b2330;font:13.5px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+  .a-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}.a-top b{font-size:17px}
+  .a-tabs{display:flex;gap:4px;margin-left:16px}.a-tab{padding:5px 11px;border-radius:8px;color:#5d6678}.a-tab.on{background:#fff;color:#1b2330;font-weight:600;box-shadow:0 1px 4px rgba(30,50,90,.12)}
+  .a-acts{margin-left:auto;display:flex;gap:6px}.a-b{border:1px solid #c9d1dc;background:#fff;border-radius:8px;padding:5px 10px;font-weight:600;font-size:12.5px}.a-b.p{background:#2563eb;border-color:#2563eb;color:#fff}.a-b.r{color:#b3261e}
+  .a-hint{background:#fff7e0;border:1px solid #f0d58a;border-radius:10px;padding:8px 11px;margin-bottom:10px;font-size:12.5px}
+  .a-hint u{color:#2563eb;text-decoration:none;font-weight:600}
+  .a-filter{display:flex;gap:6px;margin-bottom:8px}.a-f{background:#fff;border:1px solid rgba(27,35,48,.12);border-radius:8px;padding:4px 9px;color:#5d6678;font-size:12.5px}
+  .a-wrap{display:grid;grid-template-columns:1.7fr 1fr;gap:12px}
+  table.a-t{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;font-size:12.5px}
+  .a-t th{text-align:left;color:#5d6678;font-weight:600;padding:7px 8px;border-bottom:1px solid rgba(27,35,48,.10);background:#f6f8fb}
+  .a-t td{padding:7px 8px;border-bottom:1px solid rgba(27,35,48,.06);vertical-align:top}
+  .a-t tr.sel td{background:#eaf1fe}
+  .g{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11.5px;font-weight:600}
+  .g.c{background:#e4ddfb;color:#4b2ea8}.g.m{background:#dbeafe;color:#1d4ed8}.g.t{background:#e7f6ec;color:#1e6b3a}.g.e{background:#eceff3;color:#475163}
+  .x{display:inline-block;padding:1px 6px;border-radius:6px;font-size:11px;background:#fdf0dc;color:#7a4b00;margin:1px 2px 1px 0}
+  .w{color:#5d6678;font-size:11.5px}.off td{color:#9aa4b2}
+  .a-side{background:#fff;border-radius:10px;padding:12px;border:1px solid rgba(27,35,48,.10)}
+  .a-side h4{margin:0 0 2px;font-size:15px}.a-side .sub{color:#5d6678;font-size:12px;margin-bottom:8px}
+  .a-row{margin:8px 0}.a-l{font-size:11.5px;color:#5d6678;margin-bottom:3px}
+  .a-sel{border:1px solid rgba(27,35,48,.15);border-radius:8px;padding:5px 8px;background:#fff}
+  .a-ck{display:flex;align-items:center;gap:6px;margin:3px 0}.a-ck i{width:13px;height:13px;border:1.5px solid #8a94a6;border-radius:3px;display:inline-block}.a-ck i.on{background:#2563eb;border-color:#2563eb}
+  .a-ways div{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed rgba(27,35,48,.08)}
+  .a-ways span{color:#5d6678}
+  .a-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .a-once{margin-top:10px;background:#eef6ff;border:1px solid #bcd3fb;border-radius:8px;padding:8px;font-size:12px}
+  .a-once code{font-size:15px;letter-spacing:.08em;font-weight:700}
+</style>
+
+<h2>The admin page: people and access</h2>
+<p class="subtitle">Only the named admins open it. Made-up names. Tell me what's missing or wrong; the second screen below is "Ways in".</p>
+
+<div class="mockup">
+  <div class="mockup-header">Admin · People</div>
+  <div class="mockup-body">
+    <div class="a">
+      <div class="a-top"><b>People and access</b>
+        <div class="a-tabs"><span class="a-tab on">Staff (112)</span><span class="a-tab">Students (1,284)</span><span class="a-tab">Ways in</span><span class="a-tab">History</span></div>
+        <div class="a-acts"><span class="a-b">Upload emails</span><span class="a-b">Print code slips</span><span class="a-b p">Add a person</span></div>
+      </div>
+      <div class="a-hint">Step 4 lists <b>5 teachers as HOD or SH</b> who are still in the Teacher group. <u>Make them management</u> &nbsp;·&nbsp; <b>3 staff</b> have no Google email yet. <u>Show them</u></div>
+      <div class="a-filter"><span class="a-f">Search a name</span><span class="a-f">Group: all ▾</span><span class="a-f">Department: all ▾</span><span class="a-f">Extra: any ▾</span></div>
+      <div class="a-wrap">
+        <table class="a-t">
+          <tr><th>Name</th><th>Group</th><th>Department</th><th>Extra</th><th>Last signed in</th></tr>
+          <tr><td>Alicia Tan</td><td><span class="g c">Committee</span></td><td>Mathematics</td><td><span class="x">Admin</span></td><td class="w">Today 8:02 am</td></tr>
+          <tr><td>Lee Kok Hwa</td><td><span class="g m">School leader</span></td><td class="w">–</td><td></td><td class="w">Yesterday</td></tr>
+          <tr class="sel"><td><b>Daniel Wong</b></td><td><span class="g m">HOD</span></td><td>Science</td><td><span class="x">Relief team</span></td><td class="w">18 Nov 4:12 pm</td></tr>
+          <tr><td>Siti Rahmah</td><td><span class="g m">SH</span></td><td>Mathematics</td><td></td><td class="w">12 Nov</td></tr>
+          <tr><td>Ravi Kumar</td><td><span class="g t">Teacher</span></td><td>Humanities</td><td><span class="x">Exams and events · to 14 Nov 2027</span></td><td class="w">Today 7:41 am</td></tr>
+          <tr><td>Priya Nair</td><td><span class="g e">Executive</span></td><td class="w">–</td><td><span class="x">Relief team</span></td><td class="w">Never</td></tr>
+          <tr class="off"><td>Marcus Goh</td><td><span class="g t">Teacher</span></td><td>English</td><td>Switched off</td><td>3 Oct</td></tr>
+        </table>
+        <div class="a-side">
+          <h4>Daniel Wong</h4>
+          <div class="sub">On step 4: Science, role HOD · added from the published timetable</div>
+          <div class="a-row"><div class="a-l">Group</div><span class="a-sel">Management · HOD ▾</span></div>
+          <div class="a-row"><div class="a-l">Changes the map for</div><div class="a-ck"><i class="on"></i>Science</div><div class="a-ck"><i></i>Mathematics</div><div class="w">From step 4; tick more if they look after two.</div></div>
+          <div class="a-row"><div class="a-l">Extra</div>
+            <div class="a-ck"><i class="on"></i>Relief team</div>
+            <div class="a-ck"><i></i>Exams and events committee &nbsp;<span class="w">until</span> <span class="a-sel" style="padding:1px 6px">date</span></div>
+            <div class="a-ck"><i></i>Admin</div></div>
+          <div class="a-row a-ways"><div class="a-l" style="border:0">Ways in</div>
+            <div>Google <span>dwong@&lt;school domain&gt;</span></div>
+            <div>Username <span>daniel.wong · password set</span></div></div>
+          <div class="a-btns"><span class="a-b">Reset password</span><span class="a-b">His changes</span><span class="a-b r">Switch off</span></div>
+          <div class="a-once">After <b>Reset password</b>: <code>KQ7M-4TRV-9HXA</code><br>Shown once. Give it to Daniel; he picks his own when he next signs in. He is signed out everywhere now.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:16px">
+  <div class="mockup-header">Admin · Ways in</div>
+  <div class="mockup-body">
+    <div class="a">
+      <table class="a-t">
+        <tr><th style="width:34%">Way in</th><th>State</th><th></th></tr>
+        <tr><td><b>Sign in with Google</b></td><td>Set up · accounts allowed from 2 domains (staff, students)</td><td class="w">Set in Railway variables</td></tr>
+        <tr><td><b>Personal codes</b> (staff and students)</td><td>On · 112 staff, 1,284 students</td><td><span class="a-b">Print slips</span></td></tr>
+        <tr><td><b>Username and password</b></td><td>On for committee and management · 18 accounts</td><td></td></tr>
+        <tr><td>Shared committee code</td><td style="color:#1e6b3a">Off since the first admin account (5 Nov)</td><td></td></tr>
+        <tr><td>Shared heads' code</td><td style="color:#1e6b3a">Off</td><td></td></tr>
+        <tr><td>Shared teacher code</td><td style="color:#7a4b00">Still on · used 14 times this week</td><td><span class="a-b r">Turn off</span></td></tr>
+        <tr><td>Shared student code</td><td style="color:#7a4b00">Still on · used 230 times this week</td><td><span class="a-b r">Turn off</span></td></tr>
+      </table>
+      <div class="w" style="margin-top:8px">"Used … times" counts sign-ins with the shared code, so you can see when it is safe to turn off.</div>
+    </div>
+  </div>
+</div>
+</section><section id="t2" class="tab" hidden><style>
+  .a{background:#eef3f8;border-radius:12px;padding:16px;color:#1b2330;font:13.5px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+  .a-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}.a-top b{font-size:17px}
+  .a-tabs{display:flex;gap:4px;margin-left:16px}.a-tab{padding:5px 11px;border-radius:8px;color:#5d6678}.a-tab.on{background:#fff;color:#1b2330;font-weight:600;box-shadow:0 1px 4px rgba(30,50,90,.12)}
+  .a-acts{margin-left:auto;display:flex;gap:6px}.a-b{border:1px solid #c9d1dc;background:#fff;border-radius:8px;padding:5px 10px;font-weight:600;font-size:12.5px;white-space:nowrap}.a-b.p{background:#2563eb;border-color:#2563eb;color:#fff}.a-b.r{color:#b3261e}
+  .a-filter{display:flex;gap:6px;margin-bottom:8px}.a-f{background:#fff;border:1px solid rgba(27,35,48,.12);border-radius:8px;padding:4px 9px;color:#5d6678;font-size:12.5px}.a-f.on{border-color:#2563eb;color:#1d4ed8;font-weight:600}
+  table.a-t{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;font-size:12.5px}
+  .a-t th{text-align:left;color:#5d6678;font-weight:600;padding:7px 8px;border-bottom:1px solid rgba(27,35,48,.10);background:#f6f8fb}
+  .a-t td{padding:7px 8px;border-bottom:1px solid rgba(27,35,48,.06);vertical-align:top}
+  .a-t tr.sel td{background:#eaf1fe}
+  .ck{width:14px;height:14px;border:1.5px solid #8a94a6;border-radius:3px;display:inline-block;vertical-align:-2px}.ck.on{background:#2563eb;border-color:#2563eb;box-shadow:inset 0 0 0 2px #fff}
+  .g{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11.5px;font-weight:600}
+  .g.m{background:#dbeafe;color:#1d4ed8}.g.t{background:#e7f6ec;color:#1e6b3a}
+  .x{display:inline-block;padding:1px 6px;border-radius:6px;font-size:11px;background:#fdf0dc;color:#7a4b00;margin:1px 2px 1px 0}
+  .w{color:#5d6678;font-size:11.5px}
+  .bar{display:flex;align-items:center;gap:8px;background:#1b2330;color:#fff;border-radius:10px;padding:8px 12px;margin-bottom:8px}
+  .bar b{margin-right:6px}.bar .a-b{background:#2b3546;border-color:#3b475b;color:#fff}.bar .clr{margin-left:auto;color:#c7cfdb;font-size:12px}
+  .menu{position:relative;display:inline-block}
+  .drop{position:absolute;top:30px;left:0;z-index:2;width:290px;background:#fff;color:#1b2330;border:1px solid rgba(27,35,48,.15);border-radius:10px;box-shadow:0 10px 24px rgba(30,50,90,.18);padding:10px}
+  .drop .it{display:flex;gap:7px;align-items:center;margin:5px 0}
+  .drop .sum{margin-top:8px;padding-top:8px;border-top:1px solid rgba(27,35,48,.10);font-size:12px;color:#5d6678}
+  .drop .go{margin-top:8px;display:flex;gap:6px}
+</style>
+
+<h2>Picking several people at once</h2>
+<p class="subtitle">Tick people (or "Tick all shown" after a filter), then one change for all of them. Made-up names.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Admin · People · four teachers ticked for the exams committee</div>
+  <div class="mockup-body">
+    <div class="a">
+      <div class="a-top"><b>People and access</b>
+        <div class="a-tabs"><span class="a-tab on">Staff (112)</span><span class="a-tab">Students (1,284)</span><span class="a-tab">Ways in</span><span class="a-tab">History</span></div>
+      </div>
+      <div class="a-filter"><span class="a-f">Search a name</span><span class="a-f">Group: Teacher ▾</span><span class="a-f on">Department: Humanities ▾</span><span class="a-f">Extra: any ▾</span><span class="a-f">Tick all shown (9)</span></div>
+      <div class="bar"><b>4 ticked</b>
+        <span class="menu"><span class="a-b">Give extra access ▾</span>
+          <div class="drop">
+            <div class="it"><span class="ck"></span>Relief team</div>
+            <div class="it"><span class="ck on"></span>Exams and events committee, until <span class="a-f" style="padding:1px 6px;color:#1b2330">14 Nov 2027</span></div>
+            <div class="it"><span class="ck"></span>Admin</div>
+            <div class="sum">Ravi Kumar, Nur Aisyah, Tan Wei Jie and Grace Ong get the exams and events pages until 14 Nov 2027. Ravi Kumar has it already: his end date moves to 14 Nov 2027.</div>
+            <div class="go"><span class="a-b p">Give it to 4 people</span><span class="a-b">Cancel</span></div>
+          </div>
+        </span>
+        <span class="a-b">Take away extra access ▾</span><span class="a-b">Set group ▾</span><span class="a-b">Print their code slips</span><span class="a-b">Switch off</span>
+        <span class="clr">Clear ticks</span></div>
+      <table class="a-t" style="margin-top:150px">
+        <tr><th style="width:26px"><span class="ck"></span></th><th>Name</th><th>Group</th><th>Department</th><th>Extra</th><th>Last signed in</th></tr>
+        <tr class="sel"><td><span class="ck on"></span></td><td>Ravi Kumar</td><td><span class="g t">Teacher</span></td><td>Humanities</td><td><span class="x">Exams and events · to 31 Dec 2026</span></td><td class="w">Today 7:41 am</td></tr>
+        <tr class="sel"><td><span class="ck on"></span></td><td>Nur Aisyah</td><td><span class="g t">Teacher</span></td><td>Humanities</td><td></td><td class="w">Yesterday</td></tr>
+        <tr><td><span class="ck"></span></td><td>Farid Ismail</td><td><span class="g t">Teacher</span></td><td>Humanities</td><td><span class="x">Relief team</span></td><td class="w">17 Nov</td></tr>
+        <tr class="sel"><td><span class="ck on"></span></td><td>Tan Wei Jie</td><td><span class="g t">Teacher</span></td><td>Humanities</td><td></td><td class="w">Never</td></tr>
+        <tr class="sel"><td><span class="ck on"></span></td><td>Grace Ong</td><td><span class="g t">Teacher</span></td><td>Humanities</td><td></td><td class="w">12 Nov</td></tr>
+        <tr><td><span class="ck"></span></td><td>Joseph Lim</td><td><span class="g t">Teacher</span></td><td>Humanities</td><td></td><td class="w">9 Nov</td></tr>
+      </table>
+      <div class="w" style="margin-top:8px">One change for all four goes in the history as one entry naming each person, with "Put back" for the lot.</div>
+    </div>
+  </div>
+</div>
+</section><section id="t3" class="tab" hidden><style>
+  .h{background:#eef3f8;border-radius:12px;padding:16px;color:#1b2330;font:13.5px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+  .b{border:1px solid #c9d1dc;background:#fff;border-radius:8px;padding:4px 10px;font-weight:600;font-size:12.5px;white-space:nowrap;display:inline-block}.b.p{background:#2563eb;border-color:#2563eb;color:#fff}.b.dis{color:#9aa4b2;border-color:#e1e5eb}
+  .w{color:#5d6678;font-size:12px}
+  .since{background:#fff;border:1px solid #bcd3fb;border-radius:12px;padding:12px 14px;box-shadow:0 6px 18px rgba(30,50,90,.10)}
+  .since h4{margin:0 0 2px;font-size:15px}
+  .grp{display:grid;grid-template-columns:1fr auto;gap:2px 12px;margin-top:8px;font-size:13px}
+  .grp div:nth-child(even){text-align:right;color:#5d6678}
+  .f{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.fi{background:#fff;border:1px solid rgba(27,35,48,.12);border-radius:8px;padding:4px 9px;color:#5d6678;font-size:12.5px}.fi.on{border-color:#2563eb;color:#1d4ed8;font-weight:600}
+  .day{font-size:12px;font-weight:700;color:#5d6678;margin:12px 0 4px;text-transform:uppercase;letter-spacing:.04em}
+  .e{display:grid;grid-template-columns:64px 130px 1fr auto;gap:10px;align-items:start;background:#fff;border:1px solid rgba(27,35,48,.08);border-radius:10px;padding:8px 10px;margin-bottom:5px;font-size:12.8px}
+  .e .t{color:#5d6678}.e .who b{display:block}.e .who span{color:#5d6678;font-size:11.5px}
+  .e .what .was{color:#b3261e;text-decoration:line-through}.e .what .now{color:#1e6b3a;font-weight:600}
+  .e .what .where{display:inline-block;font-size:11px;padding:0 6px;border-radius:6px;background:#eef2f7;color:#475163;margin-right:4px}
+  .e .why{color:#5d6678;font-size:11.5px;margin-top:2px}
+  .e.app{background:#f8f9fb}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+</style>
+
+<h2>The history</h2>
+<p class="subtitle">Top: what you see straight after signing in. Below: the full history (committee). Made-up names and classes.</p>
+
+<div class="two">
+  <div class="mockup">
+    <div class="mockup-header">After signing in · committee member</div>
+    <div class="mockup-body"><div class="h">
+      <div class="since">
+        <h4>Since you last signed in</h4>
+        <div class="w">Tuesday 18 Nov, 4:12 pm · 41 changes by 4 people</div>
+        <div class="grp">
+          <div>Daniel Wong · Department map, Science</div><div>23 changes</div>
+          <div>Siti Rahmah · Department map, Mathematics</div><div>12 changes</div>
+          <div>Alicia Tan · Upload and edit (4 fixes), then <b>published</b> Thu 3:30 pm</div><div>5</div>
+          <div>Alicia Tan · Admin: 4 people given Exams and events</div><div>1</div>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:6px"><span class="b p">See them</span><span class="b">Later</span></div>
+      </div>
+    </div></div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">After signing in · head of department (Science)</div>
+    <div class="mockup-body"><div class="h">
+      <div class="since">
+        <h4>Since you last signed in</h4>
+        <div class="w">Monday 17 Nov, 9:30 am · Science only</div>
+        <div class="grp">
+          <div>Your own changes</div><div>23</div>
+          <div>Alicia Tan (committee) · Science rows</div><div>2</div>
+          <div>The timetable was published</div><div>Thu</div>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:6px"><span class="b p">See them</span><span class="b">Later</span></div>
+      </div>
+      <div class="w" style="margin-top:8px">A head sees the changes to their own department, whoever made them, and their own changes. They cannot put back someone else's change.</div>
+    </div></div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:16px">
+  <div class="mockup-header">History (committee)</div>
+  <div class="mockup-body"><div class="h">
+    <div class="f"><span class="fi">Who: anyone ▾</span><span class="fi">Where: all steps ▾</span><span class="fi on">Department: Science ▾</span><span class="fi">From 18 Nov to today</span><span class="fi">Sign-ins: hidden</span><span class="b" style="margin-left:auto">Download (Excel)</span></div>
+
+    <div class="day">Wednesday 19 Nov</div>
+    <div class="e"><span class="t">10:02 am</span><span class="who"><b>Daniel Wong</b><span>HOD · Google</span></span>
+      <span class="what"><span class="where">Step 5 · Department map</span>Sec 3 Physics, 3B: teacher <span class="was">Joseph Lim</span> → <span class="now">Farid Ismail</span></span>
+      <span class="b">Put back</span></div>
+    <div class="e"><span class="t">9:47 am</span><span class="who"><b>Daniel Wong</b><span>HOD · Google</span></span>
+      <span class="what"><span class="where">Step 5 · Groups and bands</span>Sec 3 Science band: added class <span class="now">3E</span>
+        </span>
+      <span class="b">Put back</span></div>
+    <div class="e app"><span class="t">9:47 am</span><span class="who"><b>The app</b><span>by itself</span></span>
+      <span class="what"><span class="where">Step 5 · Department map</span>3E CP Time: teachers set from 3E's Class Parents <div class="why">Follows Daniel Wong's change above</div></span>
+      <span></span></div>
+
+    <div class="day">Tuesday 18 Nov</div>
+    <div class="e"><span class="t">4:40 pm</span><span class="who"><b>Daniel Wong</b><span>HOD · Google</span></span>
+      <span class="what"><span class="where">Step 5 · Department map</span>Sec 3 Physics, 3B: teacher <span class="was">Grace Ong</span> → <span class="now">Joseph Lim</span>
+        <div class="why">Can't put back: Daniel Wong changed this again on 19 Nov, 10:02 am (above)</div></span>
+      <span class="b dis">Put back</span></div>
+    <div class="e"><span class="t">4:21 pm</span><span class="who"><b>Alicia Tan</b><span>Committee · password</span></span>
+      <span class="what"><span class="where">Step 8 · Upload and edit</span>Moved 3B Physics from Mon P3 to Tue P5 <div class="why">Undo it on step 8 · <u>Open step 8</u></div></span>
+      <span></span></div>
+    <div class="e"><span class="t">4:15 pm</span><span class="who"><b>Alicia Tan</b><span>Committee · password</span></span>
+      <span class="what"><span class="where">Admin</span>Gave <b>Exams and events</b> until 14 Nov 2027 to Ravi Kumar, Nur Aisyah, Tan Wei Jie, Grace Ong</span>
+      <span class="b">Put back</span></div>
+  </div></div>
+</div>
+</section>
+<script>document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));document.querySelectorAll(".tab").forEach(s=>s.hidden=s.id!==b.dataset.t)})</script></body></html>

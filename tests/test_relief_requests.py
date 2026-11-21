@@ -136,7 +136,7 @@ def world(rules=(), extra=(), rows=None):
     return pub
 
 def settings(never=(), fat=3, other=None):
-    return dict(fat_role=FAT, limits=dict(fat_per_day=fat, other_per_day=other, never=list(never)), calendar=CAL, extra_staff=[])
+    return dict(fat_role=FAT, limits=dict(fat_per_day=fat, other_per_day=other, never=list(never)), calendar=CAL)
 
 def rec(teacher, lessons=(), dates=("2026-10-13",), periods=None, cancelled=None):
     return dict(teacher=teacher, dates=list(dates), periods=periods, cancelled=cancelled, lessons=list(lessons))
@@ -285,11 +285,14 @@ import json  # noqa: E402
 from relief import absences as AB  # noqa: E402
 from relief import files as FL  # noqa: E402
 from relief import settings as RS  # noqa: E402
+from accounts import people as AP  # noqa: E402
 
 LS.today = lambda: D(2026, 10, 12)
 GRACE, TEAMER = "Ms Grace Wong", "Mr Team Lee"
 os.makedirs(os.path.dirname(RS.PATH), exist_ok=True)
-store.write_json(RS.PATH, dict(calendar=CAL, team=[TEAMER], management=[GRACE], limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=FAT))
+store.write_json(RS.PATH, dict(calendar=CAL, limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=FAT))
+# management and the relief team come from the accounts: Grace a school leader (relief.plan), Team Lee the Relief team extra
+AP.update(lambda d: d["people"].update({GRACE: dict(group="leader"), TEAMER: dict(extras=dict(relief=True, exams=None, admin=False))}))
 
 def awf(rows_extra=()):
     pub = world(rows=people_rows() + [dict(name=GRACE, dept="Mathematics"), dict(name=TEAMER, dept="Mathematics")] + list(rows_extra),
@@ -567,17 +570,19 @@ def published(pub):
     try: yield
     finally: store.published = old
 
-def signed_in(card, code):
+def signed_in(code):
+    """the one sign-in page (accounts): a shared code, or a person's own code, which signs them in by name"""
     c = A.app.test_client()
-    r = c.post("/login", data={"as": card, "code": code})
+    r = c.post("/login", data={"code": code})
     return c, r
 
 def committee():
-    c, r = signed_in("committee", os.environ["COMMITTEE_CODE"]); assert r.status_code == 302
+    c, r = signed_in(os.environ["COMMITTEE_CODE"]); assert r.status_code == 302
     return c
 
 def staff(name):
-    c, r = signed_in("relief", access.staff_code(name)); assert r.status_code == 302, (name, r.status_code)
+    c, r = signed_in(access.staff_code(name)); assert r.status_code == 302, (name, r.status_code)
+    with c.session_transaction() as s: assert s["who"] == name and s["via"] == "code", dict(s)
     return c
 
 PLAN_ONLY = "Only management and the relief team plan relief for a colleague."
@@ -898,7 +903,7 @@ def nothing_published_and_signed_out_answers():
     with published(APUB):
         team = staff(TEAMER)
         cm = committee()
-        tc, r = signed_in("teacher", os.environ["TEACHER_CODE"]); assert r.status_code == 302
+        tc, r = signed_in(os.environ["TEACHER_CODE"]); assert r.status_code == 302
         left = A.app.test_client()
         with left.session_transaction() as s: s["role"], s["who"] = "staff", "Mr Left Lee"
         for method, url in routes:
@@ -921,21 +926,21 @@ def me_has_can_plan_and_can_team():
             me = ok(staff(name).get("/api/relief/me"))
             assert (me["can_plan"], me["can_team"]) == (plan, team), (name, me)
         me = ok(staff(EVE).get("/api/relief/me"))
-        assert set(me) == {"name", "depts", "on_team", "on_management", "can_settings", "can_plan", "can_team", "today"}, me
+        assert set(me) == {"name", "depts", "published", "on_team", "on_management", "can_settings", "can_plan", "can_team", "today"}, me
         assert me["today"] == "2026-10-12", "the school's date, from relief.lessons.today()"
         with A.app.test_request_context():
             _session["role"], _session["who"] = "staff", GRACE
-            assert A.relief_has("relief") and A.relief_has("relief.plan") and not A.relief_has("relief.team")
-            assert A.relief_has("relief.settings") and not A.relief_has("relief.save") and not A.relief_has("relief.nope")
+            assert A.has("relief") and A.has("relief.plan") and not A.has("relief.team")
+            assert A.has("relief.settings") and not A.has("relief.save") and not A.has("relief.nope")
             _session["who"] = TEAMER
-            assert all(A.relief_has(r) for r in ("relief", "relief.plan", "relief.team", "relief.settings", "relief.save"))
+            assert all(A.has(r) for r in ("relief", "relief.plan", "relief.team", "relief.settings", "relief.save"))
             _session.clear(); _session["role"] = "committee"
-            assert A.relief_has("relief.settings") and A.relief_has("relief.save")
-            assert not any(A.relief_has(r) for r in ("relief", "relief.plan", "relief.team"))
+            assert A.has("relief.settings") and A.has("relief.save")
+            assert not any(A.has(r) for r in ("relief", "relief.plan", "relief.team"))
             _session.clear()
-            assert not any(A.relief_has(r) for r in ("relief", "relief.plan", "relief.team", "relief.settings", "relief.save"))
+            assert not any(A.has(r) for r in ("relief", "relief.plan", "relief.team", "relief.settings", "relief.save"))
     from relief import web as W
-    assert W._has is A.relief_has and W._me is A.me_staff and W._role is A.role
+    assert W._has is A.has and W._me is A.who and W._need is A.need
     assert "relief_web" in A.app.blueprints
 
 # ---- final review fixes ----
@@ -1148,5 +1153,36 @@ def the_pages_copy():
 def the_old_name_of_rule_on_day_still_works():
     from exams import days                # exams stage 2 (PR #81) still calls it by its old name
     assert days._day_ok is days.rule_on_day
+
+# ---- the accounts work: each relief save is one history entry (the accounts design: who, what, which, a link) ----
+import history as H  # noqa: E402
+
+@t
+def every_relief_save_is_one_history_entry_without_the_reason():
+    def entries(): return [e for e in H.read(kinds=["relief"], limit=500) if e.get("where") == "Relief"]
+    with published(APUB):
+        eve, grace, team = staff(EVE), staff(GRACE), staff(TEAMER)
+        n = len(entries())
+        no(ask(eve, lessons=[dict(key=K5, relief=SAM)]), 400, CHOOSE_ONLY)
+        assert len(entries()) == n, "a refused save writes none"
+        i = ok(ask(grace, reason="Other", reason_text="A private matter", reporting_officer="", lessons=[dict(key=K5, relief=SAM)]))["id"]
+        ok(eve.post(f"/api/relief/absences/{i}/acknowledge"))
+        ok(eve.put(lesson_url(i, K5, "work"), json=wk("Read p.5")))
+        ok(team.put(lesson_url(i, K5, "relief"), json=dict(relief=None)))
+        ok(team.put(lesson_url(i, K5, "relief"), json=dict(relief=FLEX)))
+        ok(eve.post(lesson_url(i, K8, "needed")))
+        ok(eve.post(lesson_url(i, K8, "not-needed"), json=dict(why="Covered by Mr Busy Chan")))
+        no(eve.post(f"/api/relief/absences/{i}/cancel", json=dict(why=" ")), 400, "Say why in a line.")
+        ok(team.post(f"/api/relief/absences/{i}/cancel", json=dict(why="Better now")))
+        got = list(reversed(entries()[:len(entries()) - n]))
+    head = f"Relief for {EVE} on Tue 13 Oct: "
+    five, eight = "1A Science on Tue 13 Oct", "5A Art on Tue 13 Oct"
+    want = [("planned", GRACE, "planned"), ("acknowledged", EVE, "acknowledged"), ("work", EVE, f"work set for {five}"),
+            ("relief", TEAMER, f"no relief teacher chosen for {five}"), ("relief", TEAMER, f"{FLEX} chosen for {five}"),
+            ("needed", EVE, f"{eight} needed again"), ("not-needed", EVE, f"{eight} not needed"), ("cancelled", TEAMER, "cancelled")]
+    assert [(e["what"], e["who"], e["text"]) for e in got] == [(w, who, head + x) for w, who, x in want], [(e["what"], e["who"], e["text"]) for e in got]
+    assert all(e["kind"] == "relief" and e["link"] == "/relief" and e["absence"] == i and e["via"] == "code" and e["as"] == e["who"] for e in got), got
+    seen = json.dumps(got)
+    assert "A private matter" not in seen and "Other" not in seen and "Covered by" not in seen and "Better now" not in seen, "never the reason, nor a why"
 
 print(f"{COUNT} relief request tests passed")

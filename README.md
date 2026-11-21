@@ -2,8 +2,10 @@
 
 One deployment per school. The timetable committee builds the setup step by step and downloads it with the timetable
 skill; an AI agent outside the app (Claude with the skill, say) makes the timetable from them; the committee uploads
-the result, checks it and **publishes**. Teachers and students then open the published timetable with their access
-code and download PDFs. The app does not generate timetables itself.
+the result, checks it and **publishes**. Teachers and students then open the published timetable and download PDFs.
+Everyone signs in on one page: staff with their own name (a username and password, or their personal code), students
+with their personal or the shared student code. The **Admin page** (below) decides who is who. The shared codes in the
+table keep working until an admin turns them off on the admin page's **Ways in**. The app does not generate timetables itself.
 
 | Code (Railway variable) | Who | What they see |
 |---|---|---|
@@ -16,14 +18,14 @@ code and download PDFs. The app does not generate timetables itself.
 | personal codes (made by the app) | one student each | only that student's own timetable and its PDF |
 | personal teacher codes (made by the app) | one teacher each | the Relief module and everything the teacher code opens |
 
-**Relief.** The front page has a **Relief** card for a teacher's own personal code. Stage 1 gives each teacher a
+**Relief.** The home page has a **Relief** tile for a teacher signed in with their own personal code or password. Stage 1 gives each teacher a
 code and a Relief home (their name, their timetable, and for the relief team the way to the settings). Stage 2 adds
 relief requests on the Relief home, in tabs that show only to those who may use them:
 - **Every teacher:** **Ask for relief** (today, tomorrow or up to 10 dates; the whole day or some periods; a reason;
   their lessons then, read from the published timetable, each with work: text, a link or files; the reporting
   officer), and **My absences**: everything asked or planned for them, where they acknowledge relief someone else
   planned, set or change the work, mark a lesson not needed, or cancel with a line saying why.
-- **Management and the relief team** (the two lists in Relief settings): **Plan relief** for a colleague, choosing a
+- **Management and the relief team** (school leaders, HODs and SHs, and the **Relief team** extra on the admin page): **Plan relief** for a colleague, choosing a
   relief teacher for each lesson from its "free then" list (same department and subject first, lightest week first,
   Flexi Adjunct Teachers marked, anyone over a checked limit dimmed but still choosable) or leaving it for the relief
   team; **Planned by me**, where each absence opens with Choose on its open lessons; and **Download** of the relief
@@ -31,16 +33,17 @@ relief requests on the Relief home, in tabs that show only to those who may use 
 - **The relief team:** **What's in**, read-only: every absence, who sent it and how, the acknowledgement, the work,
   the relief chosen or open, cancellations, and what is new since they last looked.
 
-The reason for an absence is seen only by the absent teacher, whoever planned it, management and the relief team. The
-app's picks for open lessons, and approving them, come in the next stage, with the reliefs a teacher covers; nobody is
+The reason for an absence is seen only by the absent teacher, whoever planned it, management and the relief team; each
+relief save is one line in the **History**, never with the reason. The app's picks for open lessons, and approving them, come in the next stage, with the reliefs a teacher covers; nobody is
 told on Telegram yet. Relief reads the teachers from the published timetable, so publish first. **Relief settings**
-(the committee page's header link, or the Relief home for the relief team) hold management, the relief team, other
-staff who teach no lessons, the Flexi Adjunct Teachers' role, the relief rules in words, the limits the app checks,
-the times and the school calendar (terms, which week each term starts as, holidays). The committee downloads the
+(the committee page's header link, or the Relief home for the relief team) hold the Flexi Adjunct Teachers' role, the
+relief rules in words, the limits the app checks, the times and the school calendar (terms, which week each term
+starts as, holidays); they show management, the relief team and the other staff who teach no lessons, which are set
+on the admin page (groups, the **Relief team** extra, and the staff added there). The committee downloads the
 personal teacher codes there as a list (CSV) or as slips to print. Like the personal student codes, they are made from
 each name and `SECRET_KEY`, and are off without it.
 
-**Exams and events.** The front page has an **Exams and events** card (`/exams`), for the exams committee only: the names on the exams committee list in **Exam settings**, and the timetable committee. Everyone else is refused, because it shows student names, seats and access arrangements. Stage 1 is the committee's own working: set up an exam or a test, say which levels and days it covers (a whole day or part of a day), fill in the papers (by hand or from an uploaded paper list) and their times, and check the paper times. **Make** then stops the lessons that fall inside the exam, frees their teachers, seats the students in the exam rooms, and picks invigilators (or leaves the teacher of the lesson in the room, for a test). The committee can move a class to another room, set the invigilators by hand, and print the seating plans, the roster by day and the lessons sheet, or download the Excel. It needs the Relief **school calendar** (to know which timetable day a date is) and the personal teacher codes (to know who is on the staff), and reads everything from the published timetable. Nothing is sent to students or teachers yet.
+**Exams and events.** The home page has an **Exams and events** tile (`/exams`), for the exams committee and the timetable committee only. The exams committee is given on the admin page: on Staff, give a person the **Exams and events** extra with an end date, and it stops by itself after that day (the tile then says "Until" and the date). Everyone else is refused, because it shows student names, seats and access arrangements. The exam settings page shows that list but does not change it. Stage 1 is the committee's own working: set up an exam or a test, say which levels and days it covers (a whole day or part of a day), fill in the papers (by hand or from an uploaded paper list) and their times, and check the paper times. **Make** then stops the lessons that fall inside the exam, frees their teachers, seats the students in the exam rooms, and picks invigilators (or leaves the teacher of the lesson in the room, for a test). The committee can move a class to another room, set the invigilators by hand, and print the seating plans, the roster by day and the lessons sheet, or download the Excel. It needs the Relief **school calendar** (to know which timetable day a date is) and the personal teacher codes (to know who is on the staff), and reads everything from the published timetable. Nothing is sent to students or teachers yet.
 
 **Preview before publishing.** On steps 8 and 9, **Preview as it will be published** opens the draft as the published timetable page would show it, in a new tab, for the committee only. A banner says it is a preview, how many lessons are waiting in Not placed (they are not on it) and whether a critical mistake still stops publishing. Nothing is published, and the preview has no PDF or file links.
 
@@ -319,8 +322,22 @@ and loading the setup. In short:
    without a volume they are lost on every deploy.
 3. **Variables:** `SECRET_KEY` (a long random string; keep it), `COMMITTEE_CODE`, `TEACHER_CODE` and `STUDENT_CODE` (at
    least 6 letters or digits each, all different).
-4. **Settings → Networking → Generate Domain**, open it and sign in with the committee code. The sign-in page and the
+4. **Settings → Networking → Generate Domain**, open it and sign in with the committee code, then press "Make the first admin" on the committee page (or open `/admin/first`; see Admin page below). The sign-in page and the
    deploy logs list anything still missing (a code, `SECRET_KEY` or the volume).
+
+### Admin page
+
+`/admin` is for the named admins (the timetable committee with the Admin extra, signed in with a username and
+password). It has **Staff**, **Students**, **Ways in** and a link to the **History**. On Staff you search and filter,
+pick one person to set their group, the departments a head changes the map for, the extras (Relief team, Exams and
+events until a date, Admin), their username and a one-time password, or switch them off; or tick several people and
+give or take an extra, set a group, print their code slips or switch them off, reading a preview of what it will do
+before pressing the button. **Ways in** shows each way to sign in and lets you turn a shared code off or on, with its
+week's use. It needs `SECRET_KEY`. To make the first admin, sign in with the committee code: until an admin exists the
+committee page says "No admin account yet. Make the first admin" (and `/admin` goes there too); you give your name, a
+username and a password, and you are signed in as the first admin. If every admin forgets their password, set
+`ADMIN_RECOVERY_CODE` in Railway variables (at least 16 letters or digits; a shorter one is ignored) and use
+`/login/recover` once with an admin's username; then remove the variable.
 
 Coming from a version that generated in the app: the `AI_*` and `SOLVE_SECONDS` variables are no longer read
 ([details](docs/DEPLOY.md#coming-from-an-earlier-version)).
