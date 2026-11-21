@@ -1592,16 +1592,9 @@ def history_scope():
 def history_page():
     return app.send_static_file("history.html")
 
-@app.get("/api/history")
-@need("history", "history.dept", "history.own")
-def api_history():
-    """the history, newest first, filtered: who (part of the name it shows), where, dept, from and to (school days, `to`
-    included), since (seconds since 1970), signins=1, before (an entry id: the entries after it), limit (up to 500). `more`: older ones exist"""
-    q = request.args
-    try: limit = int(q.get("limit") or 200)
-    except ValueError: return {"error": "The number of entries must be a number."}, 400
-    if limit < 1: return {"error": "The number of entries must be at least 1."}, 400
-    limit = min(limit, HISTORY_MAX)
+def _history_query(args):
+    """the filters of /api/history as keyword arguments for history.read, or ({"error": …}, 400)"""
+    q = args
     since = until = None
     if q.get("from"):
         since = history.day_start(q["from"])
@@ -1620,11 +1613,60 @@ def api_history():
     where = q.get("where") or None
     dept = q.get("dept") or None
     signins = q.get("signins") == "1"
+    return dict(where=q.get("where") or None, dept=q.get("dept") or None, since=since, until=until,
+                signins=q.get("signins") == "1", who_contains=(q.get("who") or "").strip().lower() or None)
+
+HISTORY_DOWNLOAD_MAX = 20000
+HISTORY_MORE = "There are more entries than one download holds: pick fewer days."
+_VIA = {"password": "password", "code": "code", "shared": "shared code", "personal": "personal code", "app": "by itself", "google": "Google"}
+
+@app.get("/api/history/download")
+@need("history")
+def history_download():
+    """the history with the page's filters as an Excel file, newest first, up to HISTORY_DOWNLOAD_MAX entries"""
+    import openpyxl
+    f = _history_query(request.args)
+    if isinstance(f, tuple): return f
+    found = history.read(limit=HISTORY_DOWNLOAD_MAX + 1, **f)
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "History"
+    def put(cells):
+        ws.append(cells)
+        for c in ws[ws.max_row]: c.data_type = "s"        # text is never read as a formula
+    put(["Day", "Time", "Who", "Signed in with", "Where", "What", "Was", "Became", "Departments"])
+    for e in found[:HISTORY_DOWNLOAD_MAX]:
+        day = clock = ""
+        try:
+            d = datetime.datetime.fromtimestamp(float(e["ts"]), history.SCHOOL_TZ)
+            day, clock = d.strftime("%Y-%m-%d"), f"{d.hour % 12 or 12}:{d.minute:02d} {'am' if d.hour < 12 else 'pm'}"
+        except (KeyError, TypeError, ValueError, OverflowError, OSError): pass
+        via = e.get("via")
+        setup = e.get("kind") == "setup"
+        depts = e.get("depts")
+        put([day, clock, str(e.get("as") or e.get("who") or ""), _VIA.get(via) or (str(via) if via else ""), str(e.get("where") or ""),
+             str(e.get("text") or ""), history._show(e.get("was")) if setup else "", history._show(e.get("now")) if setup else "",
+             ", ".join(str(x) for x in depts) if isinstance(depts, list) else ""])
+    if len(found) > HISTORY_DOWNLOAD_MAX: put([HISTORY_MORE])
+    out = io.BytesIO(); wb.save(out); out.seek(0)
+    name = datetime.datetime.now(history.SCHOOL_TZ).strftime("history-%Y-%m-%d.xlsx")
+    return send_file(out, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=name)
+
+@app.get("/api/history")
+@need("history", "history.dept", "history.own")
+def api_history():
+    """the history, newest first, filtered: who (part of the name it shows), where, dept, from and to (school days, `to`
+    included), since (seconds since 1970), signins=1, before (an entry id: the entries after it), limit (up to 500). `more`: older ones exist"""
+    q = request.args
+    try: limit = int(q.get("limit") or 200)
+    except ValueError: return {"error": "The number of entries must be a number."}, 400
+    if limit < 1: return {"error": "The number of entries must be at least 1."}, 400
+    limit = min(limit, HISTORY_MAX)
+    f = _history_query(q)
+    if isinstance(f, tuple): return f
+    dept = f["dept"]
     before = q.get("before") or None
     scope, allow, mine = history_scope()
     if scope == "dept" and dept is not None and dept not in mine: return jsonify(entries=[], more=False, admin=has("admin"), depts=mine, scope=scope, download=False)
-    found = history.read(where=where, dept=dept, since=since, until=until, signins=signins, before=before, limit=limit + 1,
-                         who_contains=who_ or None, allow=allow)
+    found = history.read(before=before, limit=limit + 1, allow=allow, **f)
     shown = found[:limit]
     if shown and (has("setup") or has("admin")):
         oldest = min(e.get("ts") or 0 for e in shown)

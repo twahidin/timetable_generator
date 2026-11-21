@@ -538,4 +538,62 @@ def allow_filters_last_and_when_text_is_school_time():
     assert H.short_when(datetime.datetime(2026, 11, 19, 4, 0, tzinfo=datetime.timezone.utc).timestamp()) == "19 Nov, 12:00 pm"
     assert H.short_when(datetime.datetime(2026, 11, 19, 16, 5, tzinfo=datetime.timezone.utc).timestamp()) == "20 Nov, 12:05 am"
 
+def _sheet(r):
+    import openpyxl
+    return openpyxl.load_workbook(io.BytesIO(r.data))["History"]
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+HEAD_ROW = ["Day", "Time", "Who", "Signed in with", "Where", "What", "Was", "Became", "Departments"]
+
+@t
+def download_is_the_committees():
+    fresh()
+    H.add({"kind": "setup", "who": ANN, "as": ANN, "where": "Step 4 · Teachers", "depts": ["Maths"], "text": "maths"})
+    assert as_person(HANA, "password").get("/api/history/download").status_code == 401
+    r = committee().get("/api/history/download")
+    today = datetime.datetime.now(H.SCHOOL_TZ).strftime("%Y-%m-%d")
+    assert r.status_code == 200 and r.mimetype == XLSX, (r.status_code, r.mimetype)
+    assert r.headers["Content-Disposition"] == f"attachment; filename=history-{today}.xlsx", r.headers["Content-Disposition"]
+    rows = [[c.value for c in row] for row in _sheet(r).iter_rows()]
+    assert rows[0] == HEAD_ROW and len(rows) == 2 and rows[1][2] == ANN and rows[1][5] == "maths" and rows[1][8] == "Maths", rows
+    assert committee().get("/api/history/download?from=nope").status_code == 400
+
+@t
+def download_keeps_the_filters():
+    fresh()
+    H.add({"kind": "setup", "who": ANN, "as": ANN, "where": "Step 4 · Teachers", "depts": ["Maths"], "text": "maths"})
+    H.add({"kind": "setup", "who": BOB, "as": BOB, "where": "Step 4 · Teachers", "depts": ["Science"], "text": "science"})
+    H.add({"kind": "signin", "who": BOB, "as": BOB, "via": "shared", "text": "in"})
+    rows = [[c.value for c in row] for row in _sheet(committee().get("/api/history/download?dept=Maths")).iter_rows()]
+    assert [r[5] for r in rows] == ["What", "maths"], rows
+    rows = [[c.value for c in row] for row in _sheet(committee().get("/api/history/download?signins=1&who=bob")).iter_rows()]
+    assert [(r[5], r[3]) for r in rows[1:]] == [("in", "shared code"), ("science", None)], rows
+
+@t
+def download_cells_are_never_formulas():
+    fresh()
+    for ch in "=+-@":
+        H.add({"kind": "setup", "who": ANN, "as": ch + "as", "where": "Step 4 · Teachers", "depts": [ch + "d"], "text": ch + "text",
+               "was": ch + "was", "now": ch + "now"})
+    ws = _sheet(committee().get("/api/history/download"))
+    seen = set()
+    for row in list(ws.iter_rows())[1:]:
+        assert row[2].value[1:] == "as" and row[5].value[1:] == "text" and row[6].value[1:] == "was" and row[7].value[1:] == "now" and row[8].value[1:] == "d", [c.value for c in row]
+        for c in row:
+            if c.value is not None: assert c.data_type == "s", (c.coordinate, c.data_type, c.value)   # an empty cell has no value to misread
+        seen.add(row[5].value[0])
+    assert seen == set("=+-@"), seen
+
+@t
+def download_says_when_there_are_more():
+    fresh()
+    for i in range(5): H.add({"kind": "app", "text": f"e{i}"})
+    real = A.HISTORY_DOWNLOAD_MAX; A.HISTORY_DOWNLOAD_MAX = 3
+    try: rows = [[c.value for c in row] for row in _sheet(committee().get("/api/history/download")).iter_rows()]
+    finally: A.HISTORY_DOWNLOAD_MAX = real
+    assert [r[5] for r in rows[1:4]] == ["e4", "e3", "e2"] and len(rows) == 5, rows
+    assert rows[4][0] == "There are more entries than one download holds: pick fewer days.", rows[4]
+    assert len(_sheet(committee().get("/api/history/download"))["A"]) == 6
+
+
 print(f"{COUNT} history tests passed")

@@ -159,6 +159,7 @@ GUARDS = {
     "api_blank": ('committee',),
     "api_history": ('history', 'history.dept', 'history.own'),
     "history_back": ('setup', 'admin'),
+    "history_download": ('history',),
     "api_sample": ('setup',),
     "build": ('committee',),
     "check_setup": ('committee',),
