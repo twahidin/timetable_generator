@@ -23,19 +23,19 @@ def _overlap(p, n, q, m):
 
 
 def relief_periods(records, name, dates, skip=None):
-    """periods of covers (a whole lesson, or each part of a split one by its own n) where relief is name, of lessons still
-    needed, in an absence not cancelled, on one of dates (dates or ISO strings); skip = (absent teacher, cover key) leaves
-    that one cover out"""
+    """periods of covers (a whole lesson, or each part of a split one by its own n) that book name (cover.booked: its relief,
+    or the new pick of a request to change waiting for the team), of lessons still needed, in an absence not cancelled, on
+    one of dates (dates or ISO strings); skip = (absent teacher, cover key) leaves that one cover out"""
     want = {_iso(d) for d in dates}
     total = 0
     for r in records:
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
             parts = x.get("parts")         # the name first, and cheaply: almost every lesson is ruled out here
-            if (x.get("relief") != name if not parts else all(c.get("relief") != name for c in parts)): continue
+            if (x.get("relief") != name and not x.get("change") if not parts else all(c.get("relief") != name and not c.get("change") for c in parts)): continue
             if not x.get("needed") or _iso(x["date"]) not in want: continue
             for i, c in enumerate(_cover.covers(x)):
-                if c.get("relief") != name: continue
+                if name not in _cover.booked(c): continue
                 if skip and r.get("teacher") == skip[0] and _cover.cover_key(x, i) == skip[1]: continue
                 total += int(c.get("n") or 1)
     return total
@@ -69,16 +69,16 @@ def there_then(records, names, date, p, n):
 
 
 def _chosen_then(records, name, iso, p, n, key, absent):
-    """relief already given to name on another cover overlapping this one (the same cover key of the same absent teacher
-    does not count: a whole lesson's key, or a part's)"""
+    """relief already given to name on another cover overlapping this one, or name the new pick of another's request to
+    change (cover.booked); the same cover key of the same absent teacher does not count: a whole lesson's key, or a part's"""
     for r in records:
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
             parts = x.get("parts")         # the name first, as in relief_periods
-            if (x.get("relief") != name if not parts else all(c.get("relief") != name for c in parts)): continue
+            if (x.get("relief") != name and not x.get("change") if not parts else all(c.get("relief") != name and not c.get("change") for c in parts)): continue
             if not x.get("needed") or _iso(x["date"]) != iso: continue
             for i, c in enumerate(_cover.covers(x)):
-                if c.get("relief") != name: continue
+                if name not in _cover.booked(c): continue
                 if _cover.cover_key(x, i) == key and r.get("teacher") == absent: continue
                 if _overlap(int(c["p"]), int(c.get("n") or 1), p, n): return True
     return False

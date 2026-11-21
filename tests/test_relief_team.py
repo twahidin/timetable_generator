@@ -383,7 +383,7 @@ def cancel_and_not_needed_end_the_cover_and_its_load():
     CV.change(i, K2 + "#0", MAYA, TEAMER, PUB, ST)
     CV.set_pick(i, K2 + "#1", pk(FLEX), PUB, ST)
     recs = AB.all_records()
-    assert [FR.relief_periods(recs, n, {D13}) for n in (SAM, MAYA, FLEX)] == [2, 1, 2]
+    assert [FR.relief_periods(recs, n, {D13}) for n in (SAM, MAYA, FLEX)] == [2, 1, 4], "the new pick of a change request books its teacher too"
     same(AB.not_needed(i, K5, "The class is on a trip", EVE), i)
     r, x, c = cov(i, K5)
     assert CV.state(r, x, c) == "cancelled" and CV.pick_of(r, c) is None
@@ -1311,8 +1311,8 @@ def a_stale_waiting_pick_is_dropped_and_picked_again():
     AB.choose(i, K5, SAM, GRACE, PUB)
     absent(teacher=SAM)
     real = CV.stale
-    def stale_then_choose(*a):
-        got = real(*a)
+    def stale_then_choose(*a, **kw):
+        got = real(*a, **kw)
         if a[4]["key"] == K5 and AB._lesson(AB.load(i), K5)["relief"] == SAM: AB.choose(i, K5, MAYA, GRACE, PUB)
         return got
     CV.stale = stale_then_choose
@@ -1362,6 +1362,88 @@ def the_ticker_is_not_started_in_tests():
     said = " ".join(x.getMessage() for x in got)
     for bad in (EVE, "Child sick", "sk-ant"): assert bad not in said, bad
     assert not FL._busy.locked()
+
+# ---- Task 3 fix round 1 ----
+@ft
+def filling_is_true_from_fill_now_until_its_run_ends():
+    fresh()
+    i = absent(by=GRACE, dates=["2026-10-16"])["id"]
+    inside, go = threading.Event(), threading.Event()
+    def slow_pub():                                                              # a run that takes a moment before its first pick
+        inside.set(); go.wait(10); return PUB
+    store.published = slow_pub
+    FL.SYNC = False
+    try:
+        assert FL.filling() is False
+        assert FL.soon(date=D16, force=True) is True and FL.filling() is True, "at once after Fill now"
+        assert inside.wait(10) and FL._busy.locked()
+        assert FL.filling() is True, "while the run reads the timetable, before any pick"
+    finally:
+        go.set(); wait_fill(); FL.SYNC = True
+    assert FL.filling() is False and st(i, KF) == "waiting"
+
+@ft
+def a_change_requests_new_pick_books_its_teacher():
+    with saved_settings(limits=dict(ONLY_SAM, never=[NEVER, MAYA, GRACE, FLEX])) as s:     # for Tue P6-P7 and P7: Sam and Mr Team Lee
+        def asked():
+            i = absent(periods=[5, 6])["id"]                                     # Tue P6-P7, approved to Sam, who asks to change
+            CV.change(i, K5, SAM, TEAMER, PUB, s); CV.ask_change(i, K5, "A meeting", SAM)
+            return i
+        fresh()
+        i = asked()
+        j = absent(teacher=RUTH, periods=[6, 6])["id"]                           # Tue P7, at the same time: open
+        assert FL.run(call=first, now=mon("15:00")) == dict(picked=1, nobody=1)
+        assert cov(i, K5)[2]["change"]["pick"]["who"] == TEAMER and st(j, KR6) == "open"
+        recs = AB.all_records()
+        assert FR.relief_periods(recs, TEAMER, {D13}) == 2 and FR.relief_periods(recs, TEAMER, {D13}, skip=(EVE, K5)) == 0
+        assert FR.relief_periods(recs, SAM, {D13}) == 2, "the teacher who asked still counts until the team acts"
+        assert TEAMER not in names(FR.free_then(PUB, s, recs, dict(cov(j, KR6)[1], key=KR6), RUTH))
+        refuses(nf(TEAMER), lambda: CV.set_pick(j, KR6, pk(TEAMER), PUB, s))
+        r, x, c = cov(i, K5)
+        assert CV.still_free(PUB, s, recs, r, x, c, TEAMER), "the cover's own new pick takes nobody's time"
+        e = absent(periods=[2, 4])["id"]                                         # the same teacher's Tue P3-P5: Mr Team Lee is free for it
+        r, x, c = cov(e, K2)
+        tl = next(y for y in PK.shortlist(PUB, s, AB.all_records(), r, x, c) if y["name"] == TEAMER)
+        assert (tl["today"], tl["today_at"], tl["week_relief"], tl["by_day"]["Tue"]) == (2, [(5, 2)], 2, 2), "what the model is told counts it too"
+        # across runs: the new pick first, the other absence after it
+        fresh()
+        i = asked()
+        assert FL.run(call=first, now=mon("09:00")) == dict(picked=1, nobody=0)
+        j = absent(teacher=RUTH, periods=[6, 6])["id"]
+        assert FL.run(call=first, now=mon("15:00")) == dict(picked=0, nobody=1) and st(j, KR6) == "open"
+        CV.approve(i, K5, TEAMER, PUB, s)
+        recs = AB.all_records()
+        assert relief_of(i, K5) == TEAMER and FR.relief_periods(recs, TEAMER, {D13}) == 2 and FR.relief_periods(recs, SAM, {D13}) == 0
+
+@ft
+def a_stale_new_pick_for_a_change_is_dropped_and_picked_again():
+    def busiest(data):
+        """a stand-in for the model: the teacher with the most teaching this week"""
+        lab = max(data["teachers"], key=lambda x: x["teaching_this_week"])["label"]
+        return dict(label=lab, reason=f"{lab} is free.")
+    with saved_settings(limits=dict(ONLY_SAM, never=[NEVER, MAYA, GRACE, FLEX])) as s:     # for Tue P3-P5: Sam, Mr Busy Chan, Mr Team Lee
+        fresh()
+        i = absent(by=GRACE)["id"]
+        CV.change(i, K2, SAM, TEAMER, PUB, s); CV.ask_change(i, K2, "A meeting", SAM)
+        assert FL.run(call=busiest, now=mon("09:00")) == dict(picked=1, nobody=0)
+        r, x, c = cov(i, K2)
+        assert c["change"]["pick"]["who"] == BUSY and not CV.stale(PUB, s, AB.all_records(), r, x, c, into="change")
+        absent(teacher=BUSY)                                                     # then Mr Busy Chan's own absence for that day
+        r, x, c = cov(i, K2)
+        assert CV.stale(PUB, s, AB.all_records(), r, x, c, into="change") and not CV.stale(PUB, s, AB.all_records(), r, x, c)
+        assert FL.run(call=first, now=mon("09:00")) == dict(picked=1, nobody=0)
+        r, x, c = cov(i, K2)
+        assert CV.state(r, x, c) == "change" and c["relief"] == SAM and c["change"]["pick"]["who"] == TEAMER
+        assert whats(c)[-3:] == [("pick", BUSY, "ai"), ("dropped", BUSY, "app"), ("pick", TEAMER, "ai")], whats(c)
+        assert c["history"][-2]["why"] == nf(BUSY)
+        # drop(into="change"): only the new pick it names, only while a request waits
+        before = snap()
+        same(CV.drop(i, K2, nf(BUSY), who=BUSY, into="change"), i)
+        assert snap() == before and cov(i, K2)[2]["change"]["pick"]["who"] == TEAMER
+        refuses(AB.WRONG, lambda: CV.drop(i, K2, "x", into="later"))
+        CV.keep(i, K2, TEAMER)
+        refuses(CV.NOT_WAITING, lambda: CV.drop(i, K2, nf(TEAMER), into="change"))
+        assert not CV.stale(PUB, s, AB.all_records(), *cov(i, K2), into="change")
 
 assert REAL == [], "a test reached the real call"
 

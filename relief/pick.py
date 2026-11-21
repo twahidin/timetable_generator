@@ -59,22 +59,22 @@ def _span(p, n):
 
 
 def _given(records, names, dates, skip):
-    """{name: [(ISO date, p, n)]}: the covers each of names relieves on dates, of lessons still needed in absences not
-    cancelled, less the cover skip = (absent teacher, cover key); counted as free.relief_periods counts them"""
+    """{name: [(ISO date, p, n)]}: the covers that book each of names (cover.booked) on dates, of lessons still needed in
+    absences not cancelled, less the cover skip = (absent teacher, cover key); counted as free.relief_periods counts them"""
     want = {_free._iso(d) for d in dates}
     out = {n: [] for n in names}
     for r in records:
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
             parts = x.get("parts")         # the names first, and cheaply, as in free.relief_periods
-            if (x.get("relief") not in out if not parts else all(c.get("relief") not in out for c in parts)): continue
+            if (x.get("relief") not in out and not x.get("change") if not parts else all(c.get("relief") not in out and not c.get("change") for c in parts)): continue
             if not x.get("needed"): continue
             iso = _free._iso(x["date"])
             if iso not in want: continue
             for i, c in enumerate(_cover.covers(x)):
-                if c.get("relief") not in out: continue
-                if r.get("teacher") == skip[0] and _cover.cover_key(x, i) == skip[1]: continue
-                out[c["relief"]].append((iso, int(c["p"]), int(c.get("n") or 1)))
+                held = [w for w in _cover.booked(c) if w in out]
+                if not held or (r.get("teacher") == skip[0] and _cover.cover_key(x, i) == skip[1]): continue
+                for w in held: out[w].append((iso, int(c["p"]), int(c.get("n") or 1)))
     return out
 
 

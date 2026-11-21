@@ -104,8 +104,25 @@ def still_free(pub, settings, records, record, x, c, who):
     return who in [p["name"] for g in got["groups"] for p in g["people"]]
 
 
-def stale(pub, settings, records, record, x, c):
-    """the cover has a relief teacher who is no longer free then: teaching, away, given an overlapping relief, or never"""
+def new_pick(c):
+    """the new pick of a request to change waiting for the team (dict(who, by, reason, at)), or None"""
+    return (c.get("change") or {}).get("pick") or None
+
+
+def booked(c):
+    """the people the cover takes the time of: its relief (the teacher who asked to change, until the team acts) and the
+    new pick of a request to change"""
+    out = [c["relief"]] if c.get("relief") else []
+    new = (new_pick(c) or {}).get("who")
+    return out + [new] if new and new not in out else out
+
+
+def stale(pub, settings, records, record, x, c, into="pick"):
+    """the cover has a relief teacher who is no longer free then: teaching, away, given an overlapping relief, or never;
+    into="change": the new pick of its request to change is no longer free then"""
+    if into == "change":
+        new = new_pick(c) if state(record, x, c) == "change" else None
+        return bool(new) and not still_free(pub, settings, records, record, x, c, new["who"])
     return state(record, x, c) not in ("cancelled", "open") and not still_free(pub, settings, records, record, x, c, c["relief"])
 
 
@@ -145,12 +162,24 @@ def set_pick(id, ckey, pick, pub, settings, *, into="pick"):
     return r
 
 
-def drop(id, ckey, why, who=None):
+def drop(id, ckey, why, who=None, *, into="pick"):
     """a waiting pick back to open (its person is no longer free; the caller checked stale); an approved one is never dropped.
     who: the relief the caller found no longer free; when the cover's relief is not who by now (a planner chose again since,
-    or it was dropped already), nothing is dropped or saved and the record is returned as it is"""
+    or it was dropped already), nothing is dropped or saved and the record is returned as it is. into="change": the new
+    pick of a request to change back to None, to be picked again (the request and its relief stay); NOT_WAITING when the
+    cover has none; who as above, for the new pick"""
+    if into not in ("pick", "change"): raise ValueError(_absences.WRONG)
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
+        if into == "change":
+            new = new_pick(c) if state(r, x, c) == "change" else None
+            if who is not None and (new or {}).get("who") != who: return r
+            if not new: raise ValueError(NOT_WAITING)
+            _settle(r, c)
+            _log(c, "dropped", new["who"], "app", _absences._now(), why if isinstance(why, str) else None)
+            c["change"]["pick"] = None
+            _absences._save(r)
+            return r
         if who is not None and c.get("relief") != who: return r
         if state(r, x, c) != "waiting": raise ValueError(NOT_WAITING)
         _settle(r, c)

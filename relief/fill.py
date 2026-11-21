@@ -28,6 +28,7 @@ EVERY = 60                                      # seconds between the ticker's r
 FILL_AT = (15, 0)                               # when times.fill_at cannot be read
 _busy = threading.Lock()                        # one run at a time
 _asked, _asked_lock = set(), threading.Lock()   # the runs soon() asked for that have not started: (ids, date)
+_going = [0]                                    # the runs soon() asked for that have started and not ended (under _asked_lock)
 _picking = threading.Event()                    # a run is making picks
 _stop = threading.Event()                       # ends the ticker (tests)
 _ticker = None
@@ -105,7 +106,14 @@ def _find(records, id, ckey):
 
 
 def _asks_change(r, x, c):
-    return _cover.state(r, x, c) == "change" and not (c.get("change") or {}).get("pick")
+    """a request to change with no new pick yet"""
+    return _cover.state(r, x, c) == "change" and not _cover.new_pick(c)
+
+
+def _waits(r, x, c):
+    """a pick waiting for the team: a waiting cover, or the new pick of a request to change"""
+    s = _cover.state(r, x, c)
+    return s == "waiting" or (s == "change" and bool(_cover.new_pick(c)))
 
 
 def _one(pub, settings, id, ckey, call, clock, bnds):
@@ -144,16 +152,18 @@ def _run(ids, date, call, now):
     ids = None if ids is None else {ids} if isinstance(ids, str) else {str(i) for i in ids}
     date = None if date is None else _date(date).isoformat()
     def clock(): return _when(now)              # the time given, else the time now at each step
-    # 1. a waiting pick whose person is no longer free goes back to open, due or not (an approved one: the team changes it)
+    # 1. a waiting pick whose person is no longer free goes back to open, and so does the new pick of a request to change
+    #    (picked again below), due or not; an approved relief stays (the team changes it)
     records = _absences.all_records()
-    for id, ckey in [(r["id"], k) for r, x, c, k in _covers(records, ids, date, clock(), bnds) if _cover.state(r, x, c) == "waiting"]:
+    for id, ckey in [(r["id"], k) for r, x, c, k in _covers(records, ids, date, clock(), bnds) if _waits(r, x, c)]:
         got = _find(records, id, ckey)
-        if got is None or _cover.state(*got) != "waiting": continue
+        if got is None or not _waits(*got): continue
         r, x, c = got
-        who = c["relief"]
+        into = "pick" if _cover.state(r, x, c) == "waiting" else "change"
+        who = c["relief"] if into == "pick" else _cover.new_pick(c)["who"]
         try:
-            if not _cover.stale(pub, settings, records, r, x, c): continue
-            _cover.drop(id, ckey, _cover.NOT_FREE.format(name=who), who=who)        # not if a planner chose again meanwhile
+            if not _cover.stale(pub, settings, records, r, x, c, into=into): continue
+            _cover.drop(id, ckey, _cover.NOT_FREE.format(name=who), who=who, into=into)     # not if a planner chose again meanwhile
         except Exception as e:
             _log.warning("a waiting pick was not checked: %s", type(e).__name__); continue
         records = _absences.all_records()
@@ -190,10 +200,14 @@ def run(ids=None, date=None, call=None, now=None):
 
 def _queued(key):
     with _busy:                                 # waits for a run that is going (the ticker's, or another): nothing asked for is lost
-        with _asked_lock: _asked.discard(key)
-        if SYNC: return _run(key[0], key[1], None, None)
-        try: _run(key[0], key[1], None, None)
-        except Exception as e: _log.error("the relief run failed: %s", type(e).__name__)
+        with _asked_lock:                       # going before it stops being asked for: filling() stays True throughout
+            _going[0] += 1; _asked.discard(key)
+        try:
+            if SYNC: return _run(key[0], key[1], None, None)
+            try: _run(key[0], key[1], None, None)
+            except Exception as e: _log.error("the relief run failed: %s", type(e).__name__)
+        finally:
+            with _asked_lock: _going[0] -= 1
 
 
 def soon(ids=None, date=None, force=False):
@@ -217,8 +231,10 @@ def soon(ids=None, date=None, force=False):
 
 
 def filling():
-    """a run is making picks, or one asked for has not started yet: the Today page says "Being picked" and fetches again"""
-    return _picking.is_set() or bool(_asked)
+    """a run asked for (Fill now, a new absence, a request to change) has not ended, from the moment it is asked, or the
+    ticker's run is making picks: the Today page says "Being picked" and fetches again"""
+    with _asked_lock: asked = bool(_asked) or _going[0] > 0
+    return asked or _picking.is_set()
 
 
 def tick(now=None):
