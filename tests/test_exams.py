@@ -2162,8 +2162,10 @@ import exams.events as EV  # noqa: E402
 
 def _ev(**kw):
     e = SC.new_event("Sec 3 Learning Journey", ["Sec 3"], [], "2026-10-05", "2026-10-05", "Ms Aisha Rahman", "Ms Aisha Rahman")
-    e["days"] = {"2026-10-05": dict(levels=None, whole=False, **{"from": "07:40", "to": "10:40"})}
+    e["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "07:40", "to": "10:40"})}
+    e["where"] = "Off site (museum)"
     e["going"] = ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman"]
+    e["duties"] = [dict(duty="Bus marshal", who="Mr Hafiz Rahman", time="07:45")]
     e.update(kw)
     return e
 
@@ -2190,7 +2192,7 @@ def event_record_and_its_check():
     assert ok["going"] == ["Ms Grace Yeo"]
     d = _ev(duties=[dict(duty="gate", who=None, time=None)]); SC._check(d, _PUB)
     assert d["duties"] == [dict(duty="gate", who="", time="")]
-    assert SC.place(_ev(where="", venues=["LT1&2", "Hall"])) == "LT1&2, Hall" and SC.place(_ev(where=" Field ")) == "Field" and SC.place(_ev()) == ""
+    assert SC.place(_ev(where="", venues=["LT1&2", "Hall"])) == "LT1&2, Hall" and SC.place(_ev(where=" Field ")) == "Field" and SC.place(_ev(where="")) == ""
 
 @t
 def a_forged_event_carries_no_exam_items():
@@ -2327,6 +2329,86 @@ def a_multi_date_event_names_each_date():
     assert len(EV.on_dates(_PUB, F.CAL, e)) == 2, EV.on_dates(_PUB, F.CAL, e)
     assert got[0]["status"] == "backup" and "(Mon 5 Oct)" in got[0]["text"], got
     assert got[1]["status"] == "not_free" and got[1]["text"].endswith("(Mon 5 Oct)"), got
+
+def _ev_ok(**kw):
+    e = _ev(**kw)
+    AP.send(e, _M, "Ms Aisha Rahman", NOW, False, [])
+    AP.approve(e, "Timetable committee", NOW)
+    return e
+
+E1 = AP.as_schedule(_ev_ok(venues=["Hall"]))
+
+@t
+def event_states_and_copy():
+    e = _ev()
+    assert AP.blocked(e, _M, False, []) == ""
+    assert AP.blocked(e, _M, False, ["Add at least one person going with the classes."]) == "Add at least one person going with the classes."
+    e = _ev_ok()
+    assert e["approved"]["going"] == e["going"] and set(AP.public(e)) == set(AP.SNAP + AP.EVENT_KEYS)
+    assert AP.blocked(e, _M, False, []) == "Nothing on the main site changes."
+    assert AP.label(e, date(2026, 10, 5)) == "Approved · on the main site" and AP.label(e, date(2026, 10, 6)) == "Ended"
+    assert set(AP.public(_made_sched())) == set(AP.SNAP)
+    w = _ev(); AP.send(w, _M, "Ms Aisha Rahman", NOW, False, [])
+    try: AP.send_back(w, "  ", "Timetable committee", NOW)
+    except ValueError as x: assert str(x) == "Write a note for the teacher in charge.", x
+    else: raise AssertionError
+    w["where"] = "Elsewhere"
+    try: AP.approve(w, "Timetable committee", NOW)
+    except ValueError as x: assert str(x) == "This schedule changed after it was sent. Ask the teacher in charge to send it again.", x
+    else: raise AssertionError
+
+@t
+def event_changes_list():
+    e = _ev_ok()
+    e.update(where="Science Centre", venues=["Hall"], going=["Ms Aisha Rahman", "Mr Hafiz Rahman", "Mr Daniel Koh"], duties=[])
+    assert [c["text"] for c in AP.changes(e, _M)] == ["Where: Off site (museum) → Science Centre.", "Venues taken: none → Hall.",
+        "Mr Daniel Koh now goes with the classes.", "Ms Grace Yeo no longer goes with the classes.", "Duties at the event changed."]
+    AP.send(e, _M, "Ms Aisha Rahman", NOW, False, [])
+    assert e["status"] == "changes" and e["log"][-1]["detail"] == "5 changes"
+    f = _ev_ok(); f["days"]["2026-10-05"]["to"] = "11:00"
+    assert [c["text"] for c in AP.changes(f, _M)] == ["Mon 5 Oct: part of the day 07:40–10:40 (Sec 3) → part of the day 07:40–11:00 (Sec 3)."]
+    g = _ev_ok(); g["days"] = {}
+    assert [c["text"] for c in AP.changes(g, _M)] == ["Mon 5 Oct: part of the day 07:40–10:40 (Sec 3) → as the event."]
+
+@t
+def someone_away_from_an_event():
+    e = _ev_ok()
+    assert AP.replace_going(e, "Mr Hafiz Rahman", "Mr Ben Ong", "Ms Aisha Rahman", NOW) == "Mon 5 Oct, going: Mr Hafiz Rahman (away) → Mr Ben Ong"
+    for c in (e, e["approved"]):
+        assert c["going"] == ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Ben Ong"] and c["duties"][0]["who"] == "Mr Ben Ong", c
+    assert e["status"] == "approved" and AP.changes(e, _M) == [] and AP.done_without(e)[0]["by"] == "Ms Aisha Rahman"
+    for away, name, said in (("Mr Daniel Koh", "Mr Ben Ong", "Mr Daniel Koh is not going."), ("Ms Aisha Rahman", "Ms Grace Yeo", "Ms Grace Yeo is going already.")):
+        try: AP.replace_going(_ev_ok(), away, name, "x", NOW)
+        except ValueError as x: assert str(x) == said, x
+        else: raise AssertionError
+    try: AP.replace_going(_ev(), "Mr Hafiz Rahman", "Mr Ben Ong", "x", NOW)
+    except ValueError as x: assert str(x) == "This schedule is not on the main site."
+    else: raise AssertionError
+    w = _ev_ok(); w["going"] = ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Ben Ong"]
+    AP.replace_going(w, "Mr Hafiz Rahman", "Mr Ben Ong", "x", NOW)
+    assert w["going"] == ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Ben Ong"]
+    ev9 = dict(_ev_ok(), id="ev9")
+    SC.save(ev9, _PUB, F.CAL, "t")
+    got = [b for b in SC.elsewhere("zzzz", _M) if b["id"] == "ev9"]
+    assert any(b["names"] == ev9["going"] and b["status"] == "approved" for b in got), got
+
+@t
+def event_review():
+    e = _ev(venues=["LT1&2", "Hall"]); AP.send(e, _M, "Ms Aisha Rahman", NOW, False, [])
+    r = EV.review(_PUB, F.CAL, e, [], [])
+    assert r["copy"] == "working" and r["changes"] == [] and r["done_without"] == []
+    assert r["what"] == dict(kind="event", classes=["3A", "3B"], levels=["Sec 3"], start="2026-10-05", end="2026-10-05",
+        days=[dict(date="2026-10-05", whole=False, window=["07:40", "10:40"])], where="Off site (museum)", in_charge="Ms Aisha Rahman",
+        stopped=4, going=3, backups=2, venues=[dict(room="Hall", dates=1, start="07:40", end="10:40"), dict(room="LT1&2", dates=1, start="07:40", end="10:40")],
+        flagged=2), r["what"]
+    assert [c["key"] for c in r["checks"]] == ["going", "venues", "others"]
+    c = {x["key"]: x for x in r["checks"]}
+    assert c["going"]["ok"] and c["going"]["lines"] == ["Everyone going is free then."]
+    assert not c["venues"]["ok"] and c["venues"]["lines"] == EV.flags(_PUB, F.CAL, e) and len(c["venues"]["lines"]) == 2
+    assert c["others"]["ok"] and c["others"]["lines"] == ["No clash with other schedules."]
+    v = _ev(going=["Mr Ivan Lee"]); AP.send(v, _M, "Ms Aisha Rahman", NOW, False, [])
+    assert EV.review(_PUB, F.CAL, v, [], [])["checks"][0]["lines"] == ["Mr Ivan Lee, Mon 5 Oct 07:40–10:40: is not available then (a Must rule)."]
+    assert not EV.review(_PUB, F.CAL, v, [], [])["checks"][0]["ok"]
 
 
 print(f"{COUNT} exams tests passed")

@@ -2,6 +2,7 @@
 relief's settings (as invigilate.candidates does)."""
 import relief.people
 import relief.settings
+from exams import approval as _approval
 from exams import days as _days
 from exams import invigilate as _inv
 from exams import schedules as _sched
@@ -261,3 +262,34 @@ def who_free(pub, cal, s, elsewhere) -> dict:
         else:
             free.append(dict(name=name, reason="free then"))
     return dict(freed=freed, free=free)
+
+
+def _what(pub, cal, s) -> dict:
+    model = pub["model"]
+    dts = on_dates(pub, cal, s)
+    inside = {c for e in dts for c in e["classes"]}
+    entry = lambda date: (s.get("days") or {}).get(date) or {}
+    venues = [dict(room=v, dates=len(dts), start=_days.hhmm(min(e["start"] for e in dts)), end=_days.hhmm(max(e["end"] for e in dts)))
+              for v in sorted(s.get("venues") or []) if dts]
+    ll = lesson_lists(pub, cal, s)
+    return dict(kind="event", classes=[c["name"] for c in model.get("classes") or [] if c["name"] in inside],
+                levels=_days.levels_of(s, model), start=s.get("start"), end=s.get("end"),
+                days=[dict(date=e["date"], whole=bool(entry(e["date"]).get("whole", True)),
+                           window=[_days.hhmm(e["start"]), _days.hhmm(e["end"])]) for e in dts],
+                where=_sched.place(s), in_charge=s.get("in_charge"), stopped=len(ll["none"]), going=len(s.get("going") or []),
+                backups=len(ll["backup"]), venues=venues, flagged=len(flags(pub, cal, s)))
+
+
+def review(pub, cal, sched, elsewhere, others) -> dict:
+    """what the timetable committee sees before approving an event: the copy reviewed (the approved one when approved, else
+    the working copy), a summary, three checks, the change list and the replacements done without a new approval"""
+    ap = _approval.as_schedule(sched) if sched.get("status") == "approved" else None
+    s = ap or sched
+    lines = lambda found, ok: found or [ok]
+    going, vs, oth = people_lines(pub, cal, s, elsewhere), flags(pub, cal, s), other_lines(pub, cal, s, elsewhere, others)
+    checks = [dict(key="going", ok=not going, lines=lines(going, "Everyone going is free then.")),
+              dict(key="venues", ok=not vs, lines=lines(vs, "No running lesson uses the venues taken.")),
+              dict(key="others", ok=not oth, lines=lines(oth, "No clash with other schedules."))]
+    return dict(copy="approved" if ap else "working", what=_what(pub, cal, s), checks=checks,
+                changes=_approval.changes(sched, pub["model"]) if sched.get("status") == "changes" else [],
+                done_without=_approval.done_without(sched))
