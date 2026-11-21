@@ -56,13 +56,13 @@ def half_line_skipped():
 def filters():
     fresh()
     H.add({"kind": "setup", "who": "Ann", "where": "Step 4 · Teachers", "depts": ["Maths"], "text": "a"})
-    H.add({"kind": "setup", "who": "Bob", "where": "Step 5 · Department map", "depts": ["Science", "Maths"], "text": "b"})
+    H.add({"kind": "setup", "who": "Bob", "where": "Step 5 · Teacher Deployment Editor", "depts": ["Science", "Maths"], "text": "b"})
     H.add({"kind": "signin", "who": "Ann", "text": "in"})
     H.add({"kind": "relief", "who": "Bob", "text": "c"})
     assert [e["text"] for e in H.read()] == ["c", "b", "a"]
     assert len(H.read(signins=True)) == 4
     assert [e["text"] for e in H.read(who="Ann")] == ["a"]
-    assert [e["text"] for e in H.read(where="Step 5 · Department map")] == ["b"]
+    assert [e["text"] for e in H.read(where="Step 5 · Teacher Deployment Editor")] == ["b"]
     assert [e["text"] for e in H.read(dept="Maths")] == ["b", "a"]
     assert [e["text"] for e in H.read(kinds=["relief"])] == ["c"]
     allr = H.read()
@@ -112,7 +112,7 @@ def setup_entries_values():
     assert len(es) == 4 and all(e["kind"] == "setup" and e["batch"] == "b1" and e["v"] == 7 and e["as"] == "Ann Lee" for e in es)
     e = es[0]
     assert (e["was"], e["now"], e["section"], e["field"]) == (old, new, "lessons", "teachers") and e["row"] == L["_id"]
-    assert dept in e["depts"] and e["where"] == "Step 5 · Department map" and e["op"] == "set"
+    assert dept in e["depts"] and e["where"] == "Step 5 · Teacher Deployment Editor" and e["op"] == "set"
     assert e["text"] == f"{H.row_label('lessons', L)}: teachers {', '.join(old)} → Joseph Lim", e["text"]
     assert e["label"].startswith("Sec 3 ")
     assert es[1]["was"] is None and es[1]["now"]["name"] == "Zed Ng" and es[1]["text"] == "Added Zed Ng"
@@ -274,5 +274,66 @@ def entry_building_failure_is_not_silent():
         H.setup_entries = real
     assert v == v0 + 1 and store.setup_record()["spec"]["school"]["timetable"] == "Term 4"
     assert err.getvalue() == "warning: the history could not be written (ValueError)\n", err.getvalue()
+
+# ------------------------------------------------------------------------------------------------ the history API
+import json, secrets  # noqa: E402
+os.environ.update(SECRET_KEY=secrets.token_hex(16), COMMITTEE_CODE=secrets.token_hex(8))
+import app as A  # noqa: E402
+
+def committee():
+    c = A.app.test_client()
+    with c.session_transaction() as s: s["role"] = "committee"
+    return c
+
+def api(c, q=""):
+    r = c.get("/api/history" + q); return r.status_code, r.get_json()
+
+@t
+def api_needs_the_history_right():
+    fresh()
+    c = A.app.test_client()
+    with c.session_transaction() as s: s["role"] = "teacher"
+    assert c.get("/api/history").status_code in (401, 403) and c.get("/history").status_code in (302, 401, 403)
+    assert A.app.test_client().get("/api/history").status_code == 401
+
+@t
+def api_filters_pages_and_caps():
+    fresh()
+    day = datetime.datetime(2026, 11, 18, 12, 0).timestamp()
+    H.add({"kind": "setup", "who": "Ann Lee", "as": "Ann Lee", "where": "Step 4 · Teachers", "depts": ["MA"], "text": "a", "ts": day})
+    H.add({"kind": "setup", "who": "Bob Tan", "as": "Bob Tan", "where": "Step 6 · Configuration & constraints", "depts": ["SC"], "text": "b", "ts": day + 86400})
+    H.add({"kind": "signin", "who": "Ann Lee", "as": "Ann Lee", "text": "in", "ts": day + 86400})
+    c = committee()
+    s, d = api(c)
+    assert s == 200 and [e["text"] for e in d["entries"]] == ["b", "a"] and d["more"] is False and d["admin"] is False, d
+    assert [e["text"] for e in api(c, "?signins=1")[1]["entries"]] == ["in", "b", "a"]
+    assert [e["text"] for e in api(c, "?who=ann")[1]["entries"]] == ["a"]
+    assert [e["text"] for e in api(c, "?who=ann&signins=1")[1]["entries"]] == ["in", "a"]
+    assert [e["text"] for e in api(c, "?where=Step 4 · Teachers")[1]["entries"]] == ["a"]
+    assert [e["text"] for e in api(c, "?dept=SC")[1]["entries"]] == ["b"]
+    assert [e["text"] for e in api(c, "?from=2026-11-19")[1]["entries"]] == ["b"]
+    assert [e["text"] for e in api(c, "?to=2026-11-18")[1]["entries"]] == ["a"]
+    assert [e["text"] for e in api(c, "?from=2026-11-18&to=2026-11-19")[1]["entries"]] == ["b", "a"]
+    d = api(c, "?limit=1")[1]
+    assert [e["text"] for e in d["entries"]] == ["b"] and d["more"] is True
+    d2 = api(c, "?limit=1&before=" + d["entries"][-1]["id"])[1]
+    assert [e["text"] for e in d2["entries"]] == ["a"] and d2["more"] is False
+    for q in ("?from=yesterday", "?to=2026-13-40", "?limit=abc", "?limit=0", "?from=2026-11-19&to=2026-11-18"):
+        s, d = api(c, q); assert s == 400 and isinstance(d["error"], str) and d["error"].endswith("."), (q, s, d)
+    for i in range(3): H.add({"kind": "app", "text": f"x{i}"})
+    assert len(api(c, "?limit=100000")[1]["entries"]) == 5   # capped at 500, never an error
+    assert A.HISTORY_MAX == 500
+
+@t
+def api_says_whether_the_viewer_is_admin():
+    fresh()
+    c = committee()
+    with c.session_transaction() as s: s["role"] = "committee"
+    assert api(c)[1]["admin"] is False
+
+@t
+def history_page_is_served():
+    r = committee().get("/history")
+    assert r.status_code == 200 and b"history.js" in r.data
 
 print(f"{COUNT} history tests passed")

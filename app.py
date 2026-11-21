@@ -1510,6 +1510,55 @@ def _ways():
                         for x in people.SHARED],
                 recovery_set=bool((os.environ.get("ADMIN_RECOVERY_CODE") or "").strip()))
 
+# ------------------------------------------------------------------------------------------------ the history page
+HISTORY_MAX = 500
+HISTORY_TOP = "Pick a day as year-month-day, like 2026-11-19."
+
+def _history_day(text):
+    try: return datetime.datetime.strptime(text, "%Y-%m-%d")
+    except ValueError: return None
+
+@app.get("/history")
+@need("history")
+def history_page():
+    return app.send_static_file("history.html")
+
+@app.get("/api/history")
+@need("history")
+def api_history():
+    """the history, newest first, filtered: who (part of the name it shows), where, dept, from and to (local days, `to`
+    included), signins=1, before (an entry id: the entries after it), limit (up to 500). `more`: older ones exist"""
+    q = request.args
+    try: limit = int(q.get("limit") or 200)
+    except ValueError: return {"error": "The number of entries must be a number."}, 400
+    if limit < 1: return {"error": "The number of entries must be at least 1."}, 400
+    limit = min(limit, HISTORY_MAX)
+    since = until = None
+    if q.get("from"):
+        d = _history_day(q["from"])
+        if not d: return {"error": HISTORY_TOP}, 400
+        since = d.timestamp()
+    if q.get("to"):
+        d = _history_day(q["to"])
+        if not d: return {"error": HISTORY_TOP}, 400
+        until = (d + datetime.timedelta(days=1)).timestamp() - 0.001
+    if since is not None and until is not None and since > until: return {"error": "The first day is after the last day."}, 400
+    who_ = (q.get("who") or "").strip().lower()
+    where = q.get("where") or None
+    dept = q.get("dept") or None
+    signins = q.get("signins") == "1"
+    before = q.get("before") or None
+    found = []
+    while len(found) <= limit:
+        got = history.read(where=where, dept=dept, since=since, until=until, signins=signins, before=before, limit=HISTORY_MAX + 1)
+        if not got: break
+        found += [e for e in got if not who_ or who_ in str(e.get("as") or "").lower()]
+        if len(got) <= HISTORY_MAX: break
+        before = got[-1]["id"]
+    try: depts = [str(d) for d in store.setup_record()["spec"]["school"]["departments"]]
+    except Exception: depts = []
+    return jsonify(entries=found[:limit], more=len(found) > limit, admin=has("admin"), depts=depts)
+
 @app.get("/admin")
 @need("admin")
 def admin_page():

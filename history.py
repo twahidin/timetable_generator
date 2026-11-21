@@ -19,8 +19,8 @@ DIR = os.path.join(store.DATA, "history")
 KEEP_MONTHS = 24
 FORBIDDEN = {"password", "pw", "code", "once", "token", "secret"}
 WHERE = {"venues": "Step 1 · Venues", "classes": "Step 2 · Classes", "subjects": "Step 3 · Subjects",
-         "teachers": "Step 4 · Teachers", "roles": "Step 4 · Teachers", "lessons": "Step 5 · Department map",
-         "blocks": "Step 5 · Groups and bands", "rules": "Step 6 · Configuration & constraints",
+         "teachers": "Step 4 · Teachers", "roles": "Step 4 · Teachers", "lessons": "Step 5 · Teacher Deployment Editor",
+         "blocks": "Step 5 · Banding & TG Group Editor", "rules": "Step 6 · Configuration & constraints",
          "students": "Students", "combinations": "Students", "choices": "Students"}
 _SCHOOL_DAY = "School & day"
 _NAME_FIELD = {"venues": "room", "classes": "class", "subjects": "subject", "teachers": "name", "blocks": "block",
