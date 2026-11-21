@@ -55,6 +55,19 @@ def bounds(model):
     return out
 
 
+_WEEK = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def nice(iso) -> str:
+    """a date as the page writes it: "Mon 5 Oct", from the first ten characters; anything else comes back as given"""
+    try:
+        d = datetime.date.fromisoformat(str(iso)[:10])
+    except ValueError:
+        return str(iso or "")
+    return "%s %d %s" % (_WEEK[d.weekday()], d.day, _MONTHS[d.month - 1])
+
+
 def _date(s):
     return datetime.date.fromisoformat(s)
 

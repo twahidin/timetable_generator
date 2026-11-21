@@ -68,7 +68,7 @@ def new(kind, name, levels, start, end, by, pub=None) -> dict:
                 times=dict(report="07:30", min_break=20, max_papers=2), papers=[], access=access,
                 seating=dict(order="class", shared="levels", spacing="every", home_rooms=True),
                 supervision="lesson" if test else "invigilators", pins=dict(rooms={}, duties={}), use_anyway=[], made=None,
-                status="draft", created_at=_now(), created_by=by, saved_at=None, saved_by=None)
+                status="draft", log=[], approved=None, note="", created_at=_now(), created_by=by, saved_at=None, saved_by=None)
 
 
 def _check(s, pub):

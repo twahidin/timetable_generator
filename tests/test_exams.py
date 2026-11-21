@@ -9,7 +9,7 @@ sys.path.insert(0, ROOT)
 import app as A, access, store  # noqa: E402
 from relief import calendar as C  # noqa: E402
 from exams import settings as ES, fake as F, days as D, schedules as SC, papers as P  # noqa: E402
-from exams import seating as SE, invigilate as IV, make as MK  # noqa: E402
+from exams import seating as SE, invigilate as IV, make as MK, approval as AP, printouts as PR  # noqa: E402
 from datetime import date  # noqa: E402
 
 def raises(exc, f, text=None):
@@ -1135,5 +1135,127 @@ def the_pages_carry_the_words():
                   "The published timetable has no students yet: add them on the Students step and publish again to check clashes and seat students.",
                   "lessons outside "):
         assert words in js, words
+
+NOW = "2026-10-01T09:00:00"
+
+def _approved(access=None):
+    s = _mk(_made_sched())
+    if access is not None: s["access"] = list(access)
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
+    AP.approve(s, "Timetable committee", NOW)
+    return s
+
+@t
+def dates_read_as_on_the_page():
+    assert D.nice("2026-10-05") == "Mon 5 Oct" and D.nice("2026-10-02T09:30:00") == "Fri 2 Oct"
+    assert PR._day("2026-11-01") == "Sun 1 Nov" and D.nice("soon") == "soon"
+
+@t
+def states_and_labels():
+    s = _mk(_made_sched())
+    assert AP.label(s, date(2026, 10, 1)) == "Draft"
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
+    assert s["status"] == "waiting" and s["sent_by"] == "Ms Grace Yeo" and s["log"][-1]["what"] == "sent"
+    assert AP.label(s, date(2026, 10, 1)) == "Waiting for the timetable committee"
+    AP.approve(s, "Timetable committee", NOW)
+    assert s["status"] == "approved" and s["approved"]["papers"] == s["papers"]
+    assert s["approved"]["made"]["duties"] == s["made"]["duties"]
+    assert set(s["approved"]["made"]) == {"seats", "unseated", "duties", "published_at"}
+    assert AP.as_schedule(s)["id"] == s["id"] and AP.as_schedule(s)["status"] == "approved"
+    assert AP.label(s, date(2026, 10, 6)) == "Approved · on the main site"
+    assert AP.label(s, date(2026, 10, 7)) == "Ended"
+    assert AP.as_schedule(_made_sched()) is None
+
+@t
+def send_needs_make_fresh_and_no_errors():
+    assert AP.blocked(_made_sched(), _M, False, []) == "Press Make first."
+    s = _mk(_made_sched())
+    assert AP.blocked(s, _M, True, []) == "The exam changed since Make: press Make again."
+    assert AP.blocked(s, _M, False, ["X."]) == "Fix the paper times first: X."
+    raises(ValueError, lambda: AP.send(s, _M, "x", NOW, False, ["X."]), "Fix the paper times first: X.")
+    raises(ValueError, lambda: AP.send(s, _M, "x", NOW, True, []), "The exam changed since Make: press Make again.")
+    assert s["status"] == "draft"
+    a = _approved()
+    assert AP.blocked(a, _M, False, []) == "Nothing on the main site changes."
+    raises(ValueError, lambda: AP.send(a, _M, "x", NOW, False, []), "Nothing on the main site changes.")
+
+@t
+def send_back_and_withdraw():
+    s = _mk(_made_sched())
+    raises(ValueError, lambda: AP.approve(s, "x", NOW), "There is nothing waiting for approval.")
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
+    assert s["log"][-1]["what"] == "sent again"
+    raises(ValueError, lambda: AP.send_back(s, "  ", "x", NOW), "Write a note for the exams committee.")
+    AP.send_back(s, " 2C has a WA then ", "Timetable committee", NOW)
+    assert s["status"] == "draft" and AP.label(s, date(2026, 10, 1)) == "Sent back" and s["note"] == "2C has a WA then"
+    assert s["log"][-1]["detail"] == "2C has a WA then"
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
+    assert s["note"] == ""
+    AP.approve(s, "Timetable committee", NOW)
+    AP.withdraw(s, "Timetable committee", NOW)
+    assert s["approved"] is None and s["status"] == "withdrawn" and AP.label(s, date(2026, 10, 1)) == "Withdrawn"
+    raises(ValueError, lambda: AP.withdraw(s, "x", NOW), "This schedule is not on the main site.")
+
+@t
+def approve_refuses_a_change_after_sending():
+    s = _mk(_made_sched())
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
+    s["papers"][0]["minutes"] = 50
+    raises(ValueError, lambda: AP.approve(s, "x", NOW), "This schedule changed after it was sent. Ask the exams committee to send it again.")
+
+KEY1 = "2026-10-05 07:50"
+
+@t
+def changes_list_what_shows():
+    s = _approved()
+    MK.set_invigilators(s, KEY1, "3-01", ["Ms Aisha Rahman", "Mr Hafiz Rahman"])
+    _mk(s, only=KEY1)
+    s["name"] = "Sec 3 EOY Exam"
+    s["times"]["report"] = "07:20"
+    next(p for p in s["papers"] if p["subject"] == "Pure Chemistry")["start"] = "10:20"
+    assert [c["text"] for c in AP.changes(s, _M)] == [
+        "Name: Sec 3 End-of-Year Exam → Sec 3 EOY Exam.", "Report time: 07:30 → 07:20.",
+        "Sec 3 Pure Chemistry Paper 1: Mon 5 Oct 10:00–11:00 → Mon 5 Oct 10:20–11:20.",
+        "Mon 5 Oct 07:50, 3-01: Ms Chloe Tan → Mr Hafiz Rahman (invigilator)."], [c["text"] for c in AP.changes(s, _M)]
+
+@t
+def changes_list_a_moved_student():
+    s = _approved()
+    MK.move(s, KEY1, ["3A-07"], "3-02")
+    _mk(s, only=KEY1)
+    assert [c["text"] for c in AP.changes(s, _M)] == [
+        "Mon 5 Oct 07:50, 3-02: no one → Mr Ben Ong, Mr Hafiz Rahman (invigilators).",
+        "Mon 5 Oct 07:50, 3A: 3-01 → 3-01 (29), 3-02 (1).", "Mon 5 Oct 07:50: 23 students have a new seat."], [c["text"] for c in AP.changes(s, _M)]
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
+    assert s["status"] == "changes" and s["log"][-1] == dict(at=NOW, by="Ms Grace Yeo", what="changes sent", detail="3 changes")
+
+@t
+def someone_away_goes_on_at_once():
+    s = _approved()
+    got = AP.replace(s, KEY1, "3-01", "Ms Chloe Tan", "Mr Hafiz Rahman", "Ms Grace Yeo", NOW)
+    assert got == "Mon 5 Oct 07:35–09:00, 3-01: Ms Chloe Tan (away) → Mr Hafiz Rahman", got
+    for d in (_duty(s, KEY1, "3-01"), next(x for x in s["approved"]["made"]["duties"] if x["key"] == KEY1 and x["room"] == "3-01")):
+        assert d["names"] == ["Ms Aisha Rahman", "Mr Hafiz Rahman"] and d["reasons"]["Mr Hafiz Rahman"] == "replaces Ms Chloe Tan, who is away", d
+        assert "Ms Chloe Tan" not in d["reasons"]
+    assert s["pins"]["duties"][KEY1 + "|3-01"] == ["Ms Aisha Rahman", "Mr Hafiz Rahman"] == s["approved"]["pins"]["duties"][KEY1 + "|3-01"]
+    assert s["status"] == "approved" and AP.changes(s, _M) == [] and AP.done_without(s)[0]["by"] == "Ms Grace Yeo"
+    raises(ValueError, lambda: AP.replace(s, KEY1, "3-01", "Mr Ben Ong", "Mr Ivan Lee", "x", NOW), "Mr Ben Ong is not on that duty.")
+    raises(ValueError, lambda: AP.replace(s, KEY1, "3-01", "Ms Aisha Rahman", "Mr Hafiz Rahman", "x", NOW), "Mr Hafiz Rahman is on that duty already.")
+    raises(ValueError, lambda: AP.replace(s, KEY1, "Hall", "Ms Aisha Rahman", "Mr Ivan Lee", "x", NOW), "That duty is not on the main site.")
+    raises(ValueError, lambda: AP.replace(_mk(_made_sched()), KEY1, "3-01", "Ms Chloe Tan", "Mr Ivan Lee", "x", NOW), "This schedule is not on the main site.")
+
+@t
+def an_away_replacement_keeps_a_sent_schedule_approvable():
+    s = _approved()
+    s["papers"][1]["start"] = "10:20"
+    _mk(s, only="2026-10-05 10:00")
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
+    sent = s["sent_fp"]
+    AP.replace(s, KEY1, "3-01", "Ms Chloe Tan", "Mr Hafiz Rahman", "Ms Grace Yeo", NOW)
+    assert s["sent_fp"] == AP.fp(s) != sent
+    AP.approve(s, "Timetable committee", NOW)
+    assert s["status"] == "approved"
+
 
 print(f"{COUNT} exams tests passed")

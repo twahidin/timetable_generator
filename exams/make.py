@@ -6,13 +6,14 @@ import json
 
 import relief.people
 import relief.settings
+from exams import approval as _approval
 from exams import days as _days
 from exams import invigilate as _inv
 from exams import papers as _papers
 from exams import seating as _seat
 
 
-STALE = "The exam changed since Make: press Make again."
+STALE = _approval.STALE
 _USED = ("papers", "days", "levels", "classes", "start", "end", "access", "seating", "supervision")
 
 
