@@ -122,6 +122,8 @@ def the_sentences_are_exact():
     assert CV.NOT_YOURS_COVER == "This relief is not yours."
     assert CV.NOT_WAITING == "This relief is not waiting for approval."
     assert CV.NO_SPLIT == "A lesson of one period cannot be split."
+    assert CV.SPLIT_APPROVED == "This lesson's relief is approved already, so it cannot be split."
+    assert CV.NO_CHANGE_ASKED == "Nobody has asked to change this relief."
     assert CV.SPLIT_SENT == "Part of this lesson is approved already, so it cannot be joined again."
     assert CV.CHANGE_WHY == "Say in a line why you cannot take it."
     assert AB.PAST_LESSON == "This lesson is in the past." and AB.CHANGED.startswith("Your timetable has changed")
@@ -279,15 +281,18 @@ def split_at_a_boundary_gives_two_open_parts_and_join_undoes_it():
     refuses(AB.CHANGED, lambda: CV.find(r, K2))
     assert CV.find(r, K2 + "#1") == (x, parts[1])
     refuses(AB.CHANGED, lambda: CV.find(r, K2 + "#2"))
-    refuses(AB.CHANGED, lambda: CV.split(i, K2, 4, TEAMER))                          # split already: join it again first
+    refuses(AB.WRONG, lambda: CV.split(i, K2, 3, TEAMER))                            # a boundary already
+    refuses(CV.NO_SPLIT, lambda: CV.split(i, K2, 2, TEAMER))                         # P3 is a part of one period
+    refuses(AB.WRONG, lambda: CV.split(i, K2, 5, TEAMER))
+    refuses(AB.WRONG, lambda: CV.split(i, K2, "4", TEAMER))
     refuses(AB.CHANGED, lambda: AB.choose(i, K2, SAM, GRACE, PUB))                   # a split lesson is chosen part by part
     CV.set_pick(i, K2 + "#1", pk(FLEX), PUB, ST)
     assert st(i, K2 + "#1") == "waiting" and st(i, K2 + "#0") == "open"
     same(CV.join(i, K2, TEAMER), i)
     r = AB.load(i); x = AB._lesson(r, K2)
     assert not x.get("parts") and CV.covers(x) == [x] and CV.state(r, x, x) == "open" and x["relief"] is None
-    assert [h["what"] for h in x["history"]] == ["pick", "split", "pick", "joined"], x["history"]
-    assert x["history"][2]["who"] == FLEX and x["history"][-1]["by"] == TEAMER
+    assert [h["what"] for h in x["history"]] == ["pick", "split", "pick", "dropped", "joined"], x["history"]
+    assert x["history"][2]["who"] == FLEX and x["history"][3]["who"] == FLEX and x["history"][-1]["by"] == TEAMER
     refuses(AB.CHANGED, lambda: CV.find(r, K2 + "#0"))
     refuses(AB.CHANGED, lambda: CV.join(i, K2, TEAMER))                               # not split
 
@@ -297,7 +302,8 @@ def split_refused_for_one_period_and_after_approval():
     r = absent(by=GRACE, lessons=[dict(key=K8, needed=True)]); i = r["id"]
     refuses(CV.NO_SPLIT, lambda: CV.split(i, K8, 9, TEAMER))
     CV.change(i, K5, FLEX, TEAMER, PUB, ST)
-    refuses(CV.NO_SPLIT, lambda: CV.split(i, K5, 6, TEAMER))
+    refuses(CV.SPLIT_APPROVED, lambda: CV.split(i, K5, 6, TEAMER))
+    refuses(CV.SPLIT_APPROVED, lambda: CV.split(i, K5, 9, TEAMER)), "approved is said before a period outside"
     CV.split(i, K2, 4, TEAMER)
     CV.change(i, K2 + "#0", MAYA, TEAMER, PUB, ST)
     refuses(CV.SPLIT_SENT, lambda: CV.join(i, K2, TEAMER))
@@ -358,13 +364,13 @@ def approving_a_change_request_moves_it_and_keep_leaves_it():
     CV.ask_change(i, K5, "Not today", FLEX)
     CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change")
     refuses(nf(MAYA), lambda: CV.approve(i, K5, TEAMER, PUB, dict(ST, limits=dict(ST["limits"], never=[MAYA]))))
-    refuses(CV.NOT_WAITING, lambda: CV.keep(i, K2, TEAMER))
+    refuses(CV.NO_CHANGE_ASKED, lambda: CV.keep(i, K2, TEAMER))
     same(CV.keep(i, K5, TEAMER), i)
     r, x, c = cov(i, K5)
     assert CV.state(r, x, c) == "approved" and c["relief"] == FLEX and c["change"] is None
     assert c["history"][-1] == dict(what="kept", who=FLEX, by=TEAMER, at=NOW, why=None)
     assert "asked to change" in [h["what"] for h in c["history"]] and [h["who"] for h in c["history"] if h["what"] == "pick"][-1] == MAYA
-    refuses(CV.NOT_WAITING, lambda: CV.keep(i, K5, TEAMER))
+    refuses(CV.NO_CHANGE_ASKED, lambda: CV.keep(i, K5, TEAMER))
 
 @t
 def cancel_and_not_needed_end_the_cover_and_its_load():
@@ -485,5 +491,126 @@ def actions_on_an_ended_lesson_are_refused():
     CV.approve(i, K5, TEAMER, PUB, ST)
     CV.acknowledge(i, K2, MAYA)
     assert (st(i, K5), st(i, K2)) == ("approved", "acknowledged")
+
+# ---- Task 1 fix round 1 ----
+def whats(c): return [(h["what"], h["who"], h["by"]) for h in c.get("history") or []]
+
+@t
+def approve_all_approves_a_waiting_split_part():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    CV.split(i, K2, 3, TEAMER)
+    CV.set_pick(i, K2 + "#1", pk(FLEX), PUB, ST)
+    assert CV.approve_all(D13, TEAMER, PUB, ST) == dict(approved=1, skipped=[])
+    assert (st(i, K2 + "#0"), st(i, K2 + "#1")) == ("open", "approved")
+    assert cov(i, K2 + "#1")[2]["approved"] == dict(by=TEAMER, at=NOW)
+    absent(teacher=SAM)
+    CV.set_pick(i, K2 + "#0", pk(MAYA), PUB, ST)
+    r = AB.load(i); x = AB._lesson(r, K2); x["parts"][0]["relief"] = SAM; x["parts"][0]["pick"] = pk(SAM)   # SAM is away now
+    AB._save(r)
+    assert CV.approve_all(D13, TEAMER, PUB, ST) == dict(approved=0, skipped=[dict(ckey=K2 + "#0", name=SAM, why=nf(SAM))])
+
+@t
+def cancel_across_a_past_and_a_future_date_keeps_the_past_relief():
+    fresh()
+    k27 = key(EVE, 5, D(2026, 10, 27))
+    i = absent(by=GRACE, dates=["2026-10-13", "2026-10-27"], lessons=[dict(key=K5, relief=SAM), dict(key=k27, relief=SAM)])["id"]
+    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, k27, TEAMER, PUB, ST)
+    old = LS.today
+    try:
+        LS.today = lambda: D(2026, 10, 14)
+        AB.cancel(i, "Back early", GRACE)
+    finally: LS.today = old
+    r = AB.load(i)
+    x, c = CV.find(r, K5)
+    assert c["relief"] == SAM and c["approved"] == dict(by=TEAMER, at=NOW) and c["pick"]["who"] == SAM, "the lesson before today keeps what it had"
+    assert whats(c)[-1] == ("approved", SAM, TEAMER) and CV.state(r, x, c) == "cancelled"
+    x, c = CV.find(r, k27)
+    assert c["relief"] is None and c["approved"] is None and c["pick"] is None
+    assert whats(c)[-1] == ("dropped", SAM, GRACE) and c["history"][-1]["why"] == "Back early"
+
+@t
+def acknowledging_during_a_change_request_drops_its_new_pick():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    CV.change(i, K5, SAM, TEAMER, PUB, ST)
+    CV.ask_change(i, K5, "A meeting", SAM)
+    CV.set_pick(i, K5, pk(FLEX), PUB, ST, into="change")
+    same(CV.acknowledge(i, K5, SAM), i)
+    r, x, c = cov(i, K5)
+    assert CV.state(r, x, c) == "acknowledged" and c["relief"] == SAM and c["change"] is None
+    assert whats(c)[-3:] == [("pick", FLEX, "ai"), ("dropped", FLEX, SAM), ("acknowledged", SAM, SAM)], whats(c)
+
+@t
+def a_lesson_splits_into_three_parts_and_keys_keep_their_part():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    CV.split(i, K2, 4, TEAMER)                                                       # P3-P4 and P5
+    CV.set_pick(i, K2 + "#0", pk(SAM), PUB, ST)
+    CV.change(i, K2 + "#1", MAYA, TEAMER, PUB, ST)
+    same(CV.split(i, K2, 3, TEAMER), i)                                              # the waiting part P3-P4 splits; P5 keeps its key
+    r = AB.load(i); x = AB._lesson(r, K2)
+    assert [(c["p"], c["n"]) for c in CV.covers(x)] == [(2, 1), (4, 1), (3, 1)], CV.covers(x)
+    assert [CV.state(r, x, c) for c in CV.covers(x)] == ["open", "approved", "open"]
+    assert CV.find(r, K2 + "#1")[1]["relief"] == MAYA and CV.find(r, K2 + "#2")[1]["p"] == 3
+    assert whats(x)[-1] == ("split", SAM, TEAMER) and whats(CV.find(r, K2 + "#0")[1])[0] == ("pick", SAM, "ai")
+    for at in (2, 3, 4):                                                             # every part is one period now (P5 approved too:
+        refuses(CV.NO_SPLIT, lambda: CV.split(i, K2, at, TEAMER))                    # one period is what stops it)
+    CV.set_pick(i, K2 + "#2", pk(FLEX), PUB, ST)
+    recs = AB.all_records()
+    assert [FR.relief_periods(recs, n, {D13}) for n in (MAYA, FLEX, SAM)] == [1, 1, 0]
+    refuses(CV.SPLIT_SENT, lambda: CV.join(i, K2, TEAMER))
+    # three parts of a longer lesson, none approved, joined again
+    fresh()
+    j = absent(by=GRACE)["id"]
+    CV.split(j, K2, 3, TEAMER); CV.split(j, K2, 4, TEAMER)
+    r = AB.load(j); x = AB._lesson(r, K2)
+    assert sorted((c["p"], c["n"]) for c in CV.covers(x)) == [(2, 1), (3, 1), (4, 1)] and len(CV.covers(x)) == 3
+    CV.join(j, K2, TEAMER)
+    assert st(j, K2) == "open" and [h["what"] for h in AB._lesson(AB.load(j), K2)["history"]] == ["split", "split", "joined"]
+    # only the part holding the period is asked: an approved part of two periods is not split, an open one beside it is
+    CV.split(j, K2, 3, TEAMER)
+    CV.change(j, K2 + "#1", MAYA, TEAMER, PUB, ST)                                   # P4-P5 approved
+    refuses(CV.SPLIT_APPROVED, lambda: CV.split(j, K2, 4, TEAMER))
+    refuses(CV.NO_SPLIT, lambda: CV.split(j, K2, 2, TEAMER))
+
+@t
+def the_planners_pick_stays_in_history():
+    fresh()
+    planned = ("pick", SAM, "planner")
+    reason = f"Planned by {GRACE} on Mon 12 Oct."
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM), dict(key=K2, relief=SAM)])["id"]  # stage 2's new: no pick, no history
+    assert "history" not in cov(i, K5)[2]
+    CV.approve(i, K5, TEAMER, PUB, ST)
+    c = cov(i, K5)[2]
+    assert whats(c) == [planned, ("approved", SAM, TEAMER)] and c["history"][0]["why"] == reason and c["history"][0]["at"] == NOW
+    CV.ask_change(i, K5, "A meeting", SAM)
+    CV.set_pick(i, K5, pk(FLEX), PUB, ST, into="change")
+    CV.approve(i, K5, TEAMER, PUB, ST)
+    c = cov(i, K5)[2]
+    assert c["pick"] == pk(FLEX) and whats(c)[0] == planned and c["history"][0]["why"] == reason, "the planner's pick outlives the new one"
+    assert whats(c) == [planned, ("approved", SAM, TEAMER), ("asked to change", SAM, SAM), ("pick", FLEX, "ai"), ("approved", FLEX, TEAMER)], whats(c)
+    # change, choose, drop, not needed and cancel each write the planner's pick down before they end it
+    CV.change(i, K2, MAYA, TEAMER, PUB, ST)
+    assert whats(cov(i, K2)[2]) == [planned, ("pick", MAYA, "team"), ("changed", MAYA, TEAMER)]
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM), dict(key=K2, relief=SAM)])["id"]
+    AB.choose(i, K5, MAYA, GRACE, PUB)
+    assert whats(cov(i, K5)[2]) == [planned, ("dropped", SAM, GRACE), ("pick", MAYA, "planner")]
+    AB.choose(i, K5, MAYA, GRACE, PUB)                                               # the same person again is not a drop
+    assert [w for w, _, _ in whats(cov(i, K5)[2])] == ["pick", "dropped", "pick", "pick"]
+    CV.drop(i, K2, nf(SAM))
+    assert whats(cov(i, K2)[2]) == [planned, ("dropped", SAM, "app")]
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM), dict(key=K2, relief=MAYA)])["id"]
+    AB.not_needed(i, K5, "On a trip", EVE)
+    assert whats(cov(i, K5)[2]) == [planned, ("dropped", SAM, EVE)]
+    AB.cancel(i, "Better now", EVE)
+    assert whats(cov(i, K2)[2]) == [("pick", MAYA, "planner"), ("dropped", MAYA, EVE)]
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K2, relief=SAM)])["id"]
+    CV.split(i, K2, 3, TEAMER)
+    assert whats(AB._lesson(AB.load(i), K2)) == [planned, ("split", SAM, TEAMER)]
 
 print(f"{COUNT} relief team tests passed")

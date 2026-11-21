@@ -31,10 +31,13 @@ def relief_periods(records, name, dates, skip=None):
     for r in records:
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
+            parts = x.get("parts")         # the name first, and cheaply: almost every lesson is ruled out here
+            if (x.get("relief") != name if not parts else all(c.get("relief") != name for c in parts)): continue
             if not x.get("needed") or _iso(x["date"]) not in want: continue
             for i, c in enumerate(_cover.covers(x)):
+                if c.get("relief") != name: continue
                 if skip and r.get("teacher") == skip[0] and _cover.cover_key(x, i) == skip[1]: continue
-                if c.get("relief") == name: total += int(c.get("n") or 1)
+                total += int(c.get("n") or 1)
     return total
 
 
@@ -71,6 +74,8 @@ def _chosen_then(records, name, iso, p, n, key, absent):
     for r in records:
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
+            parts = x.get("parts")         # the name first, as in relief_periods
+            if (x.get("relief") != name if not parts else all(c.get("relief") != name for c in parts)): continue
             if not x.get("needed") or _iso(x["date"]) != iso: continue
             for i, c in enumerate(_cover.covers(x)):
                 if c.get("relief") != name: continue

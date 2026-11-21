@@ -19,9 +19,11 @@ CHOSEN = "Chosen by {by} on {date}."
 NOT_YOURS_COVER = "This relief is not yours."
 NOT_WAITING = "This relief is not waiting for approval."
 NO_SPLIT = "A lesson of one period cannot be split."
+SPLIT_APPROVED = "This lesson's relief is approved already, so it cannot be split."
 SPLIT_SENT = "Part of this lesson is approved already, so it cannot be joined again."
 CHANGE_WHY = "Say in a line why you cannot take it."
 ASKED_ALREADY = "You asked to change this relief already."
+NO_CHANGE_ASKED = "Nobody has asked to change this relief."
 BY = ("planner", "ai", "app", "team")
 OPEN = dict(relief=None, relief_by=None, pick=None, approved=None, ack=None, change=None)
 
@@ -77,11 +79,21 @@ def _log(c, what, who, by, at, why=None):
     c.setdefault("history", []).append(dict(what=what, who=who, by=by, at=at, why=why))
 
 
-def clear(x, by, why, at):
+def _settle(record, c):
+    """a relief set with no pick of its own (a planner's choice from stage 2's absences.new) is written down as its pick, with
+    its history line, by the first change that touches the cover: so the history keeps every pick ever made"""
+    if not c.get("relief") or pick_of(record, c) is c.get("pick"): return
+    p = c["pick"] = pick_of(record, c)
+    _log(c, "pick", p["who"], "planner", p["at"], p["reason"])
+
+
+def clear(record, x, by, why, at):
     """every cover of x back to nothing (absences.cancel and not_needed): a relief there was is kept in history as dropped,
     a request to change closes"""
     for c in covers(x):
-        if c.get("relief"): _log(c, "dropped", c["relief"], by, at, why)
+        if c.get("relief"):
+            _settle(record, c)
+            _log(c, "dropped", c["relief"], by, at, why)
         c.update(OPEN)
 
 
@@ -124,6 +136,7 @@ def set_pick(id, ckey, pick, pub, settings, *, into="pick"):
         s = state(r, x, c)
         ok = s == "open" if into == "pick" else s == "change" and not c["change"].get("pick")
         if not ok or not still_free(pub, settings, _absences.all_records(), r, x, c, pick["who"]): raise ValueError(NOT_FREE.format(name=pick["who"]))
+        _settle(r, c)
         if into == "pick": c.update(relief=pick["who"], relief_by=None, pick=pick)
         else: c["change"]["pick"] = pick
         _log(c, "pick", pick["who"], pick["by"], pick["at"], pick["reason"])
@@ -136,6 +149,7 @@ def drop(id, ckey, why):
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
         if state(r, x, c) != "waiting": raise ValueError(NOT_WAITING)
+        _settle(r, c)
         _log(c, "dropped", c["relief"], "app", _absences._now(), why if isinstance(why, str) else None)
         c.update(relief=None, relief_by=None, pick=None)
         _absences._save(r)
@@ -149,6 +163,7 @@ def _approve(r, x, c, by, pub, settings, records, now):
     elif s == "change" and c["change"].get("pick"): pick = c["change"]["pick"]
     else: raise ValueError(NOT_WAITING)
     if not still_free(pub, settings, records, r, x, c, pick["who"]): raise ValueError(NOT_FREE.format(name=pick["who"]))
+    _settle(r, c)
     if s == "change": c.update(relief=pick["who"], relief_by=None)
     c.update(pick=pick, approved=dict(by=by, at=now), ack=None, change=None)
     _log(c, "approved", pick["who"], by, now)
@@ -195,6 +210,7 @@ def change(id, ckey, who, by, pub, settings):
         r, x, c = _open(id, ckey)
         if not x.get("needed"): raise ValueError(_absences.NO_NEED)
         if not still_free(pub, settings, _absences.all_records(), r, x, c, who): raise ValueError(NOT_FREE.format(name=who))
+        _settle(r, c)
         now = _absences._now()
         pick = dict(who=who, by="team", reason=CHOSEN.format(by=by, date=_day(now)), at=now)
         c.update(relief=who, relief_by=by, pick=pick, approved=dict(by=by, at=now), ack=None, change=None)
@@ -205,20 +221,33 @@ def change(id, ckey, who, by, pub, settings):
 
 
 def split(id, key, at, by):
-    """split a lesson (by its key) at period at, strictly inside it, into two open parts; refused for a lesson of one period
-    or one approved already, and for a lesson split already (join it first: part keys go by their place)"""
+    """split a lesson (by its key) at period at into two open parts; on a lesson split already, the part holding at is split
+    the same way, so a lesson can have three parts or more. The part split keeps its place and the new part goes last, so a
+    part's key never comes to mean another part (covers of a split lesson are not always in time order). Refused with
+    NO_SPLIT for one period, SPLIT_APPROVED when that lesson or part is approved, WRONG when at is not strictly inside it."""
     with _absences._LOCK:
         r = _absences._editable(id)
         x = _absences._lesson(r, key)
         _absences._past(x)
         if not x.get("needed"): raise ValueError(_absences.NO_NEED)
-        if x.get("parts"): raise ValueError(_absences.CHANGED)
-        p, n = int(x["p"]), int(x.get("n") or 1)
-        if n == 1 or x.get("approved"): raise ValueError(NO_SPLIT)
+        parts = x.get("parts")
+        if parts:
+            if not _absences._int(at): raise ValueError(_absences.WRONG)
+            c = next((y for y in parts if int(y["p"]) <= at < int(y["p"]) + int(y.get("n") or 1)), None)
+            if c is None: raise ValueError(_absences.WRONG)
+        else: c = x
+        p, n = int(c["p"]), int(c.get("n") or 1)
+        if n == 1: raise ValueError(NO_SPLIT)
+        if c.get("approved"): raise ValueError(SPLIT_APPROVED)
         if not _absences._int(at) or not p < at < p + n: raise ValueError(_absences.WRONG)
-        _log(x, "split", x.get("relief"), by, _absences._now())
-        x.update(OPEN)
-        x["parts"] = [dict(OPEN, p=p, n=at - p, history=[]), dict(OPEN, p=at, n=p + n - at, history=[])]
+        _settle(r, c)
+        _log(x, "split", c.get("relief"), by, _absences._now())
+        if parts:
+            c.update(OPEN, n=at - p)
+            parts.append(dict(OPEN, p=at, n=p + n - at, history=[]))
+        else:
+            x.update(OPEN)
+            x["parts"] = [dict(OPEN, p=p, n=at - p, history=[]), dict(OPEN, p=at, n=p + n - at, history=[])]
         _absences._save(r)
     return r
 
@@ -232,8 +261,12 @@ def join(id, key, by):
         parts = x.get("parts")
         if not parts: raise ValueError(_absences.CHANGED)
         if any(c.get("approved") for c in parts): raise ValueError(SPLIT_SENT)
+        now = _absences._now()
+        for c in parts: _settle(r, c)
         x["history"] = sorted(list(x.get("history") or []) + [h for c in parts for h in c.get("history") or []], key=lambda h: h.get("at") or "")
-        _log(x, "joined", None, by, _absences._now())
+        for c in sorted(parts, key=lambda c: int(c["p"])):
+            if c.get("relief"): _log(x, "dropped", c["relief"], by, now)     # a waiting pick on a part ends with the parts
+        _log(x, "joined", None, by, now)
         x.pop("parts")
         x.update(OPEN)
         _absences._save(r)
@@ -244,7 +277,7 @@ def keep(id, ckey, by):
     """the team closes a request to change: the relief stays with the teacher who asked"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
-        if state(r, x, c) != "change": raise ValueError(NOT_WAITING)
+        if state(r, x, c) != "change": raise ValueError(NO_CHANGE_ASKED)
         c["change"] = None
         _log(c, "kept", c["relief"], by, _absences._now())
         _absences._save(r)
@@ -262,6 +295,8 @@ def acknowledge(id, ckey, me):
         _mine(r, x, c, me)
         if state(r, x, c) == "acknowledged": return r
         now = _absences._now()
+        new = (c.get("change") or {}).get("pick")
+        if new: _log(c, "dropped", new["who"], me, now)                     # the request's new pick is not needed now
         c.update(ack=dict(at=now), change=None)
         _log(c, "acknowledged", me, me, now)
         _absences._save(r)
