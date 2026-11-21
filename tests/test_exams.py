@@ -2105,4 +2105,57 @@ def a_combined_venue_and_its_rooms_clash_in_the_review():
     assert c["lines"] == ["Sec 4 Exam (approved) uses LT1 on Mon 5 Oct too."], c
 
 
+# ---- tests the final review recommended
+@t
+def reader_and_scribe_students_are_left_out_of_the_class_room_line():
+    _reset()
+    for kind in ("reader", "scribe"):
+        acc = [dict(student="3A-05", extra=0, own_room=False, reader=kind == "reader", scribe=kind == "scribe", note="")]
+        s = AP.as_schedule(_approved(access=acc, rooms=("3-01", "3-02", "4-01", "Hall", "3-11")))
+        assert "3A-05" in [x for x, _ in s["made"]["seats"][KEY1]["3-11"]], kind
+        out = PB.day(_PUB, F.CAL, [s], D5, False)
+        a = out["exams"]["classes"]["3A"][0]
+        assert (a["room"], a["seat_note"]) == ("3-01", "") and "3-11" not in json.dumps(out), (kind, a)
+    _reset()
+
+@t
+def make_treats_a_stored_neighbours_rooms_and_invigilators_as_taken():
+    _reset()
+    nb = _sit([_paper(level="Sec 4", subject="English", date=D5, start="07:50", who="level")], levels=["Sec 4"], days={D5: dict(levels=["Sec 4"], whole=True)})
+    nb.update(id="nbnb", name="Sec 4 Exam")
+    nb["pins"]["duties"][KEY1 + "|Hall"] = ["Ms Aisha Rahman", "Ms Chloe Tan"]   # the two the Sec 3 sitting would pick first
+    nb = MK.make(_PUB, F.CAL, nb, _xset(("Hall",)), elsewhere=[])
+    AP.send(nb, _M, "Ms Grace Yeo", NOW, False, []); AP.approve(nb, "Timetable committee", NOW)
+    SC.save(nb, _PUB, F.CAL, "Timetable committee", check=False)
+    hall = next(d for d in nb["approved"]["made"]["duties"] if d["room"] == "Hall")
+    def made(rooms, elsewhere):
+        s = _made_sched()
+        MK.make(_PUB, F.CAL, s, _xset(rooms), **({} if elsewhere is None else dict(elsewhere=elsewhere)))
+        return s["made"]
+    over = lambda m: {n for d in m["duties"] if d["date"] == D5 and d["start"] < hall["end"] and d["end"] > hall["start"] for n in d["names"]}
+    assert made(("Hall",), [])["seats"][KEY1].get("Hall"), "with nothing else saved, the Hall is free"
+    assert set(hall["names"]) & over(made(("3-01", "3-02"), [])), "and the neighbour's invigilators would be picked"
+    m = made(("Hall",), None)   # elsewhere read from the saved schedules
+    assert not m["seats"][KEY1].get("Hall") and len(m["unseated"][KEY1]) == 30, m["seats"][KEY1]
+    m = made(("3-01", "3-02"), None)
+    assert not set(hall["names"]) & over(m) and all(d["short"] == 0 for d in m["duties"]), (hall["names"], over(m))
+    _reset()
+
+@t
+def changes_list_the_other_kinds():
+    s = _approved()
+    s.update(levels=[], classes=["3A"], end="2026-10-07", scripts="the general office")
+    s["access"] = [dict(student="3A-05", extra=25, own_room=False, reader=False, scribe=False, note="")]
+    s["days"]["2026-10-06"] = dict(levels=["Sec 3"], whole=False, **{"from": "07:40", "to": "09:00"})
+    s["papers"] = [p for p in s["papers"] if p["subject"] != "Pure Chemistry"] + [
+        _paper(subject="Mathematics", date="2026-10-06", start="08:00"), _paper(subject="Art")]
+    s["made"]["published_at"] = "2026-10-02T09:30:00"
+    assert [c["kind"] for c in AP.changes(s, _M)] == ["dates", "levels", "day", "scripts", "access", "paper", "paper", "paper", "timetable"], AP.changes(s, _M)
+    assert [c["text"] for c in AP.changes(s, _M)] == [
+        "Dates: Mon 5 Oct–Tue 6 Oct → Mon 5 Oct–Wed 7 Oct.", "Levels and classes: Sec 3 → 3A.",
+        "Tue 6 Oct: as the exam → part of the day 07:40–09:00 (Sec 3).", "Scripts go to: not set → the general office.",
+        "Access arrangements changed for 1 student.", "Added Sec 3 Mathematics Paper 1: Tue 6 Oct 08:00–09:00.", "Added Sec 3 Art Paper 1 with no time.",
+        "Removed Sec 3 Pure Chemistry Paper 1.", "Made again for the timetable published on Fri 2 Oct."], [c["text"] for c in AP.changes(s, _M)]
+
+
 print(f"{COUNT} exams tests passed")
