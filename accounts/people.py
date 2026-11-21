@@ -62,6 +62,10 @@ def _read():
 def load():
     return _read()[0]
 
+def readable():
+    """False when the file exists but could not be read (or does not hold a dict); a missing file is readable"""
+    return _read()[1]
+
 def _fill(d):
     b = blank()
     if isinstance(d.get("people"), dict): b["people"] = d["people"]

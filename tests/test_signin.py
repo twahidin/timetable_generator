@@ -27,10 +27,13 @@ NO_SECRET = "Accounts need SECRET_KEY in Railway variables."
 FIRST = "Choose a new password first."
 AGAIN = "Please sign in again."
 CROSS = "That request did not come from this site."
+PERSON_OFF = "Signing in as a person is off for now. Use the code the school gave your group, or ask the timetable committee."
+UNREADABLE = "The accounts file could not be read: signing in as a person is off until it is fixed."
 
 # made-up people: three published teachers, and a committee member who is not on the timetable
-ALICE, BEN, ERIC, DANA = "Ms Alice Tan", "Mr Ben Ong", "Mr Eric Goh", "Ms Dana Yeo"
-TEACHERS = [dict(name=ALICE, dept="Science"), dict(name=BEN, dept="Mathematics"), dict(name=ERIC, dept="Science", role="HOD")]
+ALICE, BEN, ERIC, DANA, CARA = "Ms Alice Tan", "Mr Ben Ong", "Mr Eric Goh", "Ms Dana Yeo", "Ms Cara Wee"
+TEACHERS = [dict(name=ALICE, dept="Science"), dict(name=BEN, dept="Mathematics"), dict(name=ERIC, dept="Science", role="HOD"),
+            dict(name=CARA, dept="Mathematics")]
 
 def publish(teachers=TEACHERS):
     """write what store.published() reads: a fake school with the teachers, one student, and the pages already made"""
@@ -219,12 +222,18 @@ def must_change_sends_every_page_to_the_password_page():
                        (dict(current=secret(), new=x, again=x), "Your current password is not right.")):
         r = k.post("/account/password", data=data); assert r.status_code in (400, 403) and text in r.data.decode(), (text, r.status_code)
     assert PW.check_pw(rec("Mr Gus Lee")["pw"], new) and k.get("/timetable").status_code == 200
-    person("Mr Gus Lee", must_change=True)                            # a new one-time password: every way in goes there first
+    person("Mr Gus Lee", must_change=True)                            # a new one-time password: his password session goes there first
     assert went(k.get("/timetable"), "/account/password")
-    g, r = code_in(staff_code("Mr Gus Lee")); assert went(g.get("/timetable"), "/account/password")
+    g, r = code_in(staff_code("Mr Gus Lee")); assert g.get("/timetable").status_code == 200   # his code is not the password: not stopped
     a, _ = code_in(staff_code(ALICE))                                  # no username: no password to change
     assert a.get("/account/password").status_code == 403 and a.get("/timetable").status_code == 200
     assert went(A.app.test_client().get("/account/password"), "/login")
+    user, otp = account(CARA, group="teacher", must_change=True)     # a teacher given a username and a one-time password
+    c, r = code_in(staff_code(CARA)); assert went(r, "/home")
+    r = c.get("/relief"); assert r.status_code == 200 and b"/static/relief.js" in r.data, r.status_code; r.close()
+    assert c.get("/api/relief/me").get_json()["name"] == CARA
+    k, r = pw_in(user, otp); assert went(r, "/account/password") and went(k.get("/relief"), "/account/password")
+    assert k.get("/api/relief/me").get_json() == {"error": FIRST}
 
 @t
 def changing_the_password_ends_the_persons_other_sessions():
@@ -237,7 +246,9 @@ def changing_the_password_ends_the_persons_other_sessions():
     assert went(b.get("/timetable"), "/login") and "who" not in kept(b)
     _, r = pw_in(user, pw); assert r.status_code == 401
     _, r = pw_in(user, new); assert went(r, "/home")
-    e = last("account"); assert (e["what"], e["who"], e["people"]) == ("password", "Ms Hana Lim", ["Ms Hana Lim"]), e
+    e = last("account")
+    assert (e["what"], e["who"], e["people"], e["text"]) == ("password", "Ms Hana Lim", ["Ms Hana Lim"], "Changed their password"), e
+    assert not any(x in json.dumps(e) for x in (pw, new)) and "pw" not in e
 
 @t
 def a_password_session_ends_after_14_days():
@@ -349,8 +360,12 @@ def recovery_works_once_per_value_and_only_with_the_variable():
         s = kept(k); assert s["who"] == "Ms Jo Tan" and s["via"] == "password" and s["n"] == 1, s
         assert PW.check_pw(rec("Ms Jo Tan")["pw"], new) and user not in A.lockout.fails and k.get("/api/status").status_code == 200
         e = last(); assert (e["ok"], e["via"], e["who"]) == (True, "recovery", "Ms Jo Tan"), e
+        e = last("account")
+        assert (e["what"], e["people"], e["text"], e["who"]) == ("recovery", ["Ms Jo Tan"], "Password set with the recovery code", "Ms Jo Tan"), e
+        assert not any(x in json.dumps(e) for x in (rc, new, access.norm(rc)))
         _, r = pw_in(user, new); assert went(r, "/home")
-        _, r = recover(user, rc, secret()); assert r.status_code in (401, 403) and PW.check_pw(rec("Ms Jo Tan")["pw"], new)   # once per value
+        _, r = recover(user, rc, secret()); assert r.status_code == 403 and PW.check_pw(rec("Ms Jo Tan")["pw"], new)   # once per value
+        e = last(); assert (e["ok"], e["reason"], e["via"]) == (False, "recovery code already used", "recovery"), e
         _, r = recover(user, secret(), secret()); assert r.status_code == 401
         rc2 = secret(); os.environ["ADMIN_RECOVERY_CODE"] = rc2
         _, r = recover(other, rc2, secret()); assert r.status_code == 401   # only an admin's username
@@ -411,6 +426,49 @@ def the_daily_tidy():
         with contextlib.redirect_stderr(err): r = A.app.test_client().get("/healthz")
     finally: H.prune = real
     assert r.status_code == 200 and "RuntimeError" in err.getvalue() and "never shown" not in err.getvalue() and err.getvalue().count("\n") == 1, err.getvalue()
+
+@t
+def a_padded_username_shares_the_accounts_lockout():
+    user, pw = account("Ms Pia Sim", group="leader", added=True)
+    pads = [" ", "\t", "\u3000", "\u00a0", " \t"]
+    for i, ws in enumerate(pads):                                     # padding past the 200 letters kept, each try different
+        variant = (ws * 200)[:193 + i] + "Z"
+        _, r = pw_in(user.upper() if i % 2 else "  " + user + variant, secret()); assert r.status_code == 401, i
+    assert list(A.lockout.fails) == [user]                            # one lockout, on the account
+    for u in (user, user.upper(), "  " + user + " " * 193 + "Z", user + "\u3000" * 196 + "Q"):
+        _, r = pw_in(u, pw); assert r.status_code == 429 and LOCKED in r.data.decode(), repr(u[:12])
+    assert strikes() == 5
+
+@t
+def an_unreadable_accounts_file_shuts_signing_in_by_name_and_keeps_the_shared_codes():
+    alice, eric = staff_code(ALICE), staff_code(ERIC)
+    c, r = code_in(alice); assert went(r, "/home") and c.get("/timetable").status_code == 200
+    user, pw = account(DANA)
+    person(ERIC, off=True, n=1)                                       # switched off, his number raised
+    _, r = code_in(eric); assert r.status_code == 403 and OFF in r.data.decode()
+    raw = open(P.PATH, encoding="utf-8").read()
+    with open(P.PATH, "w", encoding="utf-8") as f: f.write("{not json")
+    rc = secret(); os.environ["ADMIN_RECOVERY_CODE"] = rc
+    try:
+        assert not P.readable()
+        k, r = code_in(eric)
+        assert r.status_code == 403 and PERSON_OFF in r.data.decode() and "who" not in kept(k) and strikes() == 0
+        e = last(); assert (e["ok"], e["who"], e["reason"]) == (False, ERIC, "accounts file unreadable"), e
+        assert went(c.get("/timetable"), "/login") and "who" not in kept(c)   # an open session ends at its next request
+        with c.session_transaction() as s: s.update(role="staff", who=ALICE)   # a relief stage 1 session too
+        assert went(c.get("/timetable"), "/login")
+        _, r = pw_in(user, pw); assert r.status_code == 403 and PERSON_OFF in r.data.decode()
+        assert PERSON_OFF in A.app.test_client().get("/login/password").data.decode()
+        _, r = recover(user, rc, secret()); assert r.status_code == 403 and PERSON_OFF in r.data.decode()
+        t, r = code_in(CODES["TEACHER_CODE"]); assert went(r, "/timetable") and t.get("/timetable").data == b"the teacher page"   # the fallback
+        m, r = code_in(CODES["COMMITTEE_CODE"]); assert m.get("/api/status").status_code == 200
+        assert UNREADABLE in A.setup_problems() and UNREADABLE in A.app.test_client().get("/login").data.decode()
+    finally:
+        os.environ.pop("ADMIN_RECOVERY_CODE", None)
+        with open(P.PATH, "w", encoding="utf-8") as f: f.write(raw)
+    person(ERIC, off=False, n=0)
+    assert P.readable() and UNREADABLE not in A.setup_problems()
+    _, r = code_in(alice); assert went(r, "/home")
 
 @t
 def nothing_typed_reaches_the_history():

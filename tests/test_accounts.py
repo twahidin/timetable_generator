@@ -118,9 +118,11 @@ def sweep_ends_exams():
 @t
 def unreadable_file_is_never_overwritten():
     shutil_rm = lambda: os.path.exists(P.PATH) and os.remove(P.PATH)
-    shutil_rm(); P.update(lambda d: d["people"].update(X=P.record(d, "X"))); assert "X" in P.load()["people"]
+    shutil_rm(); assert P.readable()
+    P.update(lambda d: d["people"].update(X=P.record(d, "X"))); assert "X" in P.load()["people"] and P.readable()
     for junk in (b"not json", b"[1, 2]"):
         open(P.PATH, "wb").write(junk)
+        assert not P.readable()
         try: P.update(lambda d: d["people"].update(Y={}))
         except P.Unreadable as e: assert str(e) == "The accounts file could not be read, so nothing was changed. Ask whoever looks after the app to check it."
         else: raise AssertionError("did not raise")

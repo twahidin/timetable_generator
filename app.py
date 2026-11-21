@@ -66,6 +66,7 @@ def _check():
         if not isinstance(name, str) or v not in ("code", "password") or r not in (None, "staff"): return _end()
         exp = session.get("exp")
         if v == "password" and not (isinstance(exp, (int, float)) and time.time() < exp): return _end()
+        if not people.readable(): return _end()    # the records cannot be read: no one is let in by name (shared codes still work)
         data, pub = people.load(), store.published()
         p = people.find(name, pub, data)
         if p is None:
@@ -126,9 +127,10 @@ def _legacy():
     return {r, "staff"} if who() is not None else {r}
 
 def _must_change_first():
-    """a person whose password is a one-time one chooses their own before anything else"""
+    """a person signed in with a one-time password chooses their own before anything else (their code sessions are not
+    stopped: the code is not the password)"""
     p = who()
-    if p is None or not (p.get("must_change") and p.get("username") and p.get("has_password")): return None
+    if p is None or via() != "password" or not (p.get("must_change") and p.get("username") and p.get("has_password")): return None
     if _api(): return {"error": "Choose a new password first."}, 403
     return redirect("/account/password")
 
@@ -156,6 +158,7 @@ def esc(s):
 def setup_problems():
     """what this deployment is missing (Railway variables, a volume): on the sign-in page and in the logs at startup"""
     _, probs = access.configured()
+    if not people.readable(): probs.append(ACCOUNTS_UNREADABLE)
     if people.admins(people.load()):   # people sign in as themselves now: a shared code left unset is not a problem
         unset = {f"{var} is not set in Railway variables." for _, var in access.ROLES}
         probs = [p for p in probs if p not in unset]
@@ -186,6 +189,8 @@ NO_PASSWORD = "You sign in with your personal code, so you have no password to c
 NO_RECOVERY = "That username and recovery code do not match."
 RECOVERY_USED = "That recovery code has been used. Set a new ADMIN_RECOVERY_CODE in Railway variables."
 CROSS_SITE = "That request did not come from this site."
+PERSON_OFF = "Signing in as a person is off for now. Use the code the school gave your group, or ask the timetable committee."
+ACCOUNTS_UNREADABLE = "The accounts file could not be read: signing in as a person is off until it is fixed."
 NO_PERSONAL_STAFF = "Personal codes are off until SECRET_KEY is set in Railway variables."
 _SIGNED_IN = {"code": "Signed in with their code", "password": "Signed in with their password", "shared": "Signed in with a shared code",
               "personal": "Signed in with a personal code", "recovery": "Signed in with the recovery code and set a new password"}
@@ -221,7 +226,7 @@ def _field(name, label, kind="password", auto="off", focus=False):
 
 def _password_page(msg=""):
     form = f"""<form method="post" action="/login/password">{_field("username", "Username", "text", "username", True)}
-{_field("password", "Password", auto="current-password")}<button type="submit">Sign in</button></form>""" if accounts_on() else ""
+{_field("password", "Password", auto="current-password")}<button type="submit">Sign in</button></form>""" if accounts_on() and people.readable() else ""
     return _form_page("Sign in with your username", form, msg, "Forgotten your password? Ask an admin to give you a new one.")
 
 def _change_page(p, msg="", form=True):
@@ -232,9 +237,9 @@ def _change_page(p, msg="", form=True):
     return _form_page("Change your password", f, msg, f"Signed in as {p['name']}.", back=("/home", "Back"), tail='<p class="small"><a href="/logout">Sign out</a></p>')
 
 def _recover_page(msg=""):
-    form = f"""<form method="post" action="/login/recover">{_field("username", "Admin username", "text", "username", True)}
+    form = "" if not (accounts_on() and people.readable()) else f"""<form method="post" action="/login/recover">{_field("username", "Admin username", "text", "username", True)}
 {_field("code", "Recovery code (ADMIN_RECOVERY_CODE)")}{_field("new", "New password (at least 10 characters)", auto="new-password")}
-{_field("again", "New password again", auto="new-password")}<button type="submit">Set the password and sign in</button></form>""" if accounts_on() else ""
+{_field("again", "New password again", auto="new-password")}<button type="submit">Set the password and sign in</button></form>"""
     return _form_page("Admin recovery", form, msg, "The recovery code works once. Remove ADMIN_RECOVERY_CODE from Railway variables once you are back in.")
 
 def _record_signin(ok, how, name=None, shared_=None, reason=None):
@@ -268,6 +273,10 @@ def _note_signin(name):
     try: people.update(change)
     except Exception as e: print(f"WARNING: a sign-in time could not be kept ({type(e).__name__})", file=sys.stderr, flush=True)
 
+def _lock_key(data, name, typed):
+    """the lockout's key: the account's own username when the typed one finds it (however it was typed), else what was typed"""
+    return (people.record(data, name)["username"] or typed).lower() if name else typed.lower()
+
 def _start(**keys):
     session.clear(); session.permanent = True; session.update(keys)
 
@@ -287,6 +296,8 @@ def login():
     if not r:
         limiter.fail(addr); _record_signin(False, "code", reason="wrong code"); return _code_page(WRONG_CODE), 401
     if r == "staff":
+        if not people.readable():   # the right code, but the records cannot be read: refused, and no strike
+            _record_signin(False, "code", val, reason="accounts file unreadable"); return _code_page(PERSON_OFF), 403
         rec = people.record(data, val)
         if rec["off"]:   # the right code: not a guess, so no strike
             _record_signin(False, "code", val, reason="switched off"); return _code_page(SWITCHED_OFF), 403
@@ -300,11 +311,12 @@ def login():
 @app.route("/login/password", methods=["GET", "POST"])
 def login_password():
     if not accounts_on(): return _password_page(NO_ACCOUNTS), 403 if request.method == "POST" else 200
+    if not people.readable(): return _password_page(PERSON_OFF), 403 if request.method == "POST" else 200
     if request.method == "GET": return _password_page()
-    addr = request.remote_addr or "?"
-    username = str(request.form.get("username") or "").strip()[:200]
-    key, data = username.lower(), people.load()
+    addr, data = request.remote_addr or "?", people.load()
+    username = str(request.form.get("username") or "").strip()[:200].strip()   # as by_username reads it
     name, _ = people.by_username(data, username)
+    key = _lock_key(data, name, username)
     if limiter.blocked(addr):
         _record_locked(("addr", addr), "password", name); return _password_page(TOO_MANY), 429
     if lockout.blocked(key):   # an unknown username locks the same way, so the answer never shows which usernames exist
@@ -346,7 +358,7 @@ def account_password():
     try: n = people.update(change)
     except people.Unreadable: return _change_page(p, people.UNREADABLE), 503
     session["n"] = n   # this session stays; every other one of this person's ends (its number is old)
-    _record_account("password", p["name"], "Changed their own password")
+    _record_account("password", p["name"], "Changed their password")
     return redirect("/home")
 
 def _recovery_used(data, code):
@@ -358,16 +370,17 @@ def login_recover():
     code = (os.environ.get("ADMIN_RECOVERY_CODE") or "").strip()
     if not code: abort(404)
     if not accounts_on(): return _recover_page(NO_ACCOUNTS), 403 if request.method == "POST" else 200
+    if not people.readable(): return _recover_page(PERSON_OFF), 403 if request.method == "POST" else 200
     if request.method == "GET": return _recover_page()
     addr = request.remote_addr or "?"
     if limiter.blocked(addr):
         _record_locked(("addr", addr), "recovery"); return _recover_page(TOO_MANY), 429
-    username = str(request.form.get("username") or "").strip()[:200]
+    username = str(request.form.get("username") or "").strip()[:200].strip()
     given, new, again = (str(request.form.get(k) or "") for k in ("code", "new", "again"))
     data = people.load(); name, _ = people.by_username(data, username)
     right = hmac.compare_digest(given.strip().encode(), code.encode())
     if right and _recovery_used(data, code):
-        limiter.fail(addr); _record_signin(False, "recovery", name, reason="wrong code"); return _recover_page(RECOVERY_USED), 403
+        limiter.fail(addr); _record_signin(False, "recovery", name, reason="recovery code already used"); return _recover_page(RECOVERY_USED), 403
     if not right or name not in people.admins(data):
         limiter.fail(addr); _record_signin(False, "recovery", name, reason="wrong code"); return _recover_page(NO_RECOVERY), 401
     why = passwords.problem(new, username, name)
@@ -385,8 +398,9 @@ def login_recover():
     try: n = people.update(change)
     except people.Unreadable: return _recover_page(people.UNREADABLE), 503
     if n is None: return _recover_page(RECOVERY_USED), 403
-    lockout.clear(username.lower())
+    lockout.clear(_lock_key(data, name, username))
     _start(who=name, via="password", n=n, exp=time.time() + FORTNIGHT); _record_signin(True, "recovery", name)
+    _record_account("recovery", name, "Password set with the recovery code")
     return redirect("/home")
 
 @app.get("/logout")
