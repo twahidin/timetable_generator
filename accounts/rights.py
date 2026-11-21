@@ -8,6 +8,8 @@ _SHARED = {
     "teacher": {"timetable", "files"},
     "student": {"timetable"},
 }
+# a named person with any of these can change something, so sees their own history
+_CHANGES = {"setup", "relief.plan", "relief.settings", "relief.save", "relief.team", "exams", "admin", "committee"}
 
 def rights(person, via, shared=None, today=None):
     if via == "personal": return frozenset({"own"})
@@ -26,5 +28,6 @@ def rights(person, via, shared=None, today=None):
         if g == "committee":
             r |= {"committee", "setup", "history", "codes"}
             if ex.get("admin"): r.add("admin")
-        if g in ("hod", "sh"): r.add("setup")
+        if g in ("hod", "sh"): r |= {"setup", "history.dept"}
+    if r & _CHANGES: r.add("history.own")
     return frozenset(r)

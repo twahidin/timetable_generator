@@ -25,6 +25,9 @@ WHERE = {"venues": "Step 1 · Venues", "classes": "Step 2 · Classes", "subjects
 _SCHOOL_DAY = "School & day"
 _NAME_FIELD = {"venues": "room", "classes": "class", "subjects": "subject", "teachers": "name", "blocks": "block",
                "roles": "role", "students": "name"}
+SCHOOL_TZ = datetime.timezone(datetime.timedelta(hours=8))   # school time, whatever the server's clock zone
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 _lock = threading.Lock()
 _last = [0, -1]   # ms and counter of the last id given out
 
@@ -74,8 +77,30 @@ def _make(entry):
     ts = e["ts"] if isinstance(e.get("ts"), (int, float)) else time.time()
     e["id"] = _new_id()
     e["ts"] = float(ts)
-    e["at"] = datetime.datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds")
+    e["at"] = datetime.datetime.fromtimestamp(ts, SCHOOL_TZ).isoformat(timespec="seconds")
     return e
+
+
+def day_start(text):
+    """the timestamp of 00:00 school time on a day written YYYY-MM-DD; None when it cannot be read"""
+    try: return datetime.datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=SCHOOL_TZ).timestamp()
+    except (ValueError, TypeError): return None
+
+
+def _clock(d):
+    h = d.hour % 12 or 12
+    return f"{d.day} {_MONTHS[d.month - 1]}, {h}:{d.minute:02d} {'am' if d.hour < 12 else 'pm'}"
+
+
+def when_text(ts):
+    """"Tuesday 18 Nov, 4:12 pm": school time"""
+    d = datetime.datetime.fromtimestamp(ts, SCHOOL_TZ)
+    return f"{_DAYS[d.weekday()]} {_clock(d)}"
+
+
+def short_when(ts):
+    """"19 Nov, 10:02 am": school time"""
+    return _clock(datetime.datetime.fromtimestamp(ts, SCHOOL_TZ))
 
 
 def _write(entries):
@@ -132,14 +157,25 @@ def _lines(name):
         return []
 
 
+def _month_end(name):
+    """the first instant after the month a file holds, in school time"""
+    y, m = int(name[:4]), int(name[5:7])
+    y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return datetime.datetime(y, m, 1, tzinfo=SCHOOL_TZ).timestamp()
+
+
 def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, signins=False, before=None, limit=200,
-         who_contains=None):
+         who_contains=None, allow=None):
     """the entries, newest first, that match every filter given. where "Sign-in" shows the sign-ins without signins;
-    where "Admin" or "Sign-in" also finds the account or sign-in entries that carry no `where`"""
+    where "Admin" or "Sign-in" also finds the account or sign-in entries that carry no `where`.
+    allow(entry) -> bool is applied after every other filter (sign-ins too); month files wholly before `since` are not opened"""
     out = []
     needle = who_contains.strip().lower() if isinstance(who_contains, str) and who_contains.strip() else None
     where_kind = _WHERE_KIND.get(where)
+    this_month = datetime.datetime.now(SCHOOL_TZ).strftime("%Y-%m") + ".jsonl"
     for name in _files():
+        if since is not None and name != this_month and _month_end(name) <= since:
+            break   # newest first: every later file is older still
         for line in reversed(_lines(name)):
             if needle and needle not in line.lower():   # cheap: the name is in the raw line or the entry cannot match
                 continue
@@ -161,6 +197,8 @@ def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, si
             if (who is not None and e.get("who") != who) \
                     or (kinds and e.get("kind") not in kinds) or (since is not None and ts < since) \
                     or (until is not None and ts > until) or (dept is not None and dept not in (e.get("depts") or [])):
+                continue
+            if allow is not None and not allow(e):
                 continue
             out.append(e)
             if len(out) >= limit:

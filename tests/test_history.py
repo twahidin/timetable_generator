@@ -434,4 +434,106 @@ def unsafe_links_are_dropped():
     got = {e["text"]: e.get("link") for e in api(committee())[1]["entries"]}
     assert got == {"//evil.example": None, "/\\evil.example": None, "/\t/evil.example": None, "http://x.example": None, "/exams": "/exams"}, got
 
+# ------------------------------------------------------------------------------------------------ who sees which history
+from accounts import passwords as PW, people as P  # noqa: E402
+HANA, ANN, BOB, EVA, TOM = "Hana Test", "Ann Test", "Bob Test", "Eva Test", "Tom Test"
+P.update(lambda d: d["people"].update({
+    HANA: dict(group="hod", added=True, depts=["Maths"], username="hana.t", pw=PW.hash_pw(secrets.token_hex(8))),
+    EVA: dict(group="executive", added=True, extras=dict(exams="2999-12-31")),
+    TOM: dict(group="teacher", added=True)}))
+
+def as_person(name, via="code"):
+    c = A.app.test_client()
+    with c.session_transaction() as s:
+        s.update(who=name, via=via, n=P.record(P.load(), name)["n"])
+        if via == "password": s["exp"] = time.time() + 3600
+    return c
+
+def texts(c, q=""): return [e["text"] for e in api(c, q)[1]["entries"]]
+
+@t
+def a_head_sees_their_departments_and_their_own():
+    fresh()
+    H.add({"kind": "setup", "who": ANN, "as": ANN, "where": "Step 4 · Teachers", "depts": ["Maths"], "text": "maths"})
+    H.add({"kind": "setup", "who": BOB, "as": BOB, "where": "Step 4 · Teachers", "depts": ["Science"], "text": "science"})
+    H.add({"kind": "setup", "who": HANA, "as": HANA, "where": "Step 6 · Configuration & constraints", "depts": [], "text": "hana's own"})
+    H.add({"kind": "account", "who": ANN, "as": ANN, "where": "Admin", "text": "account by Ann"})
+    H.add({"kind": "signin", "who": BOB, "as": BOB, "text": "Bob in"})
+    c = as_person(HANA, "password")
+    s, d = api(c)
+    assert s == 200 and [e["text"] for e in d["entries"]] == ["hana's own", "maths"], d
+    assert d["scope"] == "dept" and d["depts"] == ["Maths"] and d["download"] is False, d
+    assert texts(c, "?signins=1") == ["hana's own", "maths"]
+    assert texts(c, "?dept=Science") == [] and texts(c, "?dept=Maths") == ["maths"]
+    H.add({"kind": "signin", "who": HANA, "as": HANA, "text": "Hana in"})
+    assert texts(c, "?signins=1") == ["Hana in", "hana's own", "maths"]
+    k = api(committee())[1]; assert k["scope"] == "all" and k["download"] is True and len(k["entries"]) == 4, k
+
+@t
+def own_scope_sees_only_own():
+    fresh()
+    H.add({"kind": "exams", "who": EVA, "as": EVA, "text": "mine"})
+    H.add({"kind": "exams", "who": ANN, "as": ANN, "text": "not mine"})
+    H.add({"kind": "signin", "who": EVA, "as": EVA, "text": "Eva in"})
+    H.add({"kind": "signin", "who": ANN, "as": ANN, "text": "Ann in"})
+    c = as_person(EVA)
+    s, d = api(c)
+    assert s == 200 and [e["text"] for e in d["entries"]] == ["mine"] and d["scope"] == "own" and d["download"] is False, d
+    assert texts(c, "?signins=1") == ["Eva in", "mine"]
+    assert c.get("/history").status_code == 200
+
+@t
+def no_history_right_is_401():
+    fresh()
+    c = as_person(TOM)
+    assert c.get("/api/history").status_code == 401
+    r = c.get("/history"); assert r.status_code == 302 and r.headers["Location"].endswith("/login"), r.headers
+
+@t
+def days_are_school_days():
+    fresh()
+    os.environ["TZ"] = "UTC"; time.tzset()
+    ev = lambda *a: datetime.datetime(*a, tzinfo=H.SCHOOL_TZ).timestamp()
+    a = H.add({"kind": "app", "text": "late", "ts": ev(2026, 11, 18, 23, 30)})
+    b = H.add({"kind": "app", "text": "early", "ts": ev(2026, 11, 19, 0, 30)})
+    assert a["at"].endswith("+08:00") and a["at"].startswith("2026-11-18T23:30"), a["at"]
+    c = committee()
+    assert texts(c, "?from=2026-11-19&to=2026-11-19") == ["early"]
+    assert texts(c, "?from=2026-11-18&to=2026-11-18") == ["late"]
+    assert H.day_start("2026-11-19") == ev(2026, 11, 19) and H.day_start("nope") is None and H.day_start(None) is None
+
+@t
+def since_param():
+    fresh()
+    for i in range(3): H.add({"kind": "app", "text": f"e{i}", "ts": 1800000000 + i * 10})
+    c = committee()
+    assert texts(c, "?since=1800000010") == ["e2", "e1"]
+    s, d = api(c, "?since=abc"); assert s == 400 and d == {"error": "Pick a time as a number of seconds."}, d
+
+@t
+def months_before_since_are_not_read():
+    fresh()
+    ev = lambda m, d=10: datetime.datetime(2026, m, d, 12, tzinfo=H.SCHOOL_TZ).timestamp()
+    for m in (8, 9, 10): H.add({"kind": "app", "text": f"m{m}", "ts": ev(m)})
+    calls = []
+    real = H._lines
+    def spy(name): calls.append(name); return real(name)
+    H._lines = spy
+    try: got = H.read(since=ev(10, 1))
+    finally: H._lines = real
+    assert [e["text"] for e in got] == ["m10"] and calls == ["2026-10.jsonl"], calls
+    assert [e["text"] for e in H.read(since=ev(9, 1))] == ["m10", "m9"]
+    # an entry at the very start of a month is in that month's file, and a `since` after the month ends skips it
+    assert H.read(since=ev(11, 1), allow=lambda e: True) == []
+
+@t
+def allow_filters_last_and_when_text_is_school_time():
+    fresh()
+    H.add({"kind": "signin", "who": "A", "as": "A", "text": "in"}); H.add({"kind": "app", "text": "x"})
+    assert [e["text"] for e in H.read(signins=True, allow=lambda e: e.get("who") == "A")] == ["in"]
+    assert H.when_text(datetime.datetime(2026, 11, 18, 8, 12, tzinfo=datetime.timezone.utc).timestamp()) == "Wednesday 18 Nov, 4:12 pm"   # 18 Nov 2026 is a Wednesday (the plan says Tuesday)
+    assert H.short_when(datetime.datetime(2026, 11, 19, 2, 2, tzinfo=datetime.timezone.utc).timestamp()) == "19 Nov, 10:02 am"
+    assert H.short_when(datetime.datetime(2026, 11, 19, 4, 0, tzinfo=datetime.timezone.utc).timestamp()) == "19 Nov, 12:00 pm"
+    assert H.short_when(datetime.datetime(2026, 11, 19, 16, 5, tzinfo=datetime.timezone.utc).timestamp()) == "20 Nov, 12:05 am"
+
 print(f"{COUNT} history tests passed")

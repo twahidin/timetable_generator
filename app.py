@@ -137,7 +137,7 @@ def _must_change_first():
     return redirect("/account/password")
 
 # every right a session can hold (accounts/rights.py gives them); need() refuses any other name when the app starts
-RIGHTS = frozenset({"committee", "setup", "timetable", "files", "history", "codes", "admin", "own", "exams",
+RIGHTS = frozenset({"committee", "setup", "timetable", "files", "history", "history.dept", "history.own", "codes", "admin", "own", "exams",
                     "relief", "relief.plan", "relief.settings", "relief.save", "relief.team"})
 
 def need(*names):
@@ -438,7 +438,7 @@ TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("se
          ("Relief", "Ask for relief, your reliefs", "/relief", ("relief", "relief.settings")),
          ("Exams and events", "", "/exams", ("exams", "committee")),
          ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
-         ("History", "Who changed what, and when", "/history", ("history",)))
+         ("History", "Who changed what, and when", "/history", ("history", "history.dept", "history.own")))
 GREYED = ("Committee page", "Admin")   # signed in with a code, these wait for the password
 TO_PASSWORD = "Sign in with your password to open this."
 _HOW = {"code": "Signed in with your code", "password": "Signed in with your password"}
@@ -1576,20 +1576,27 @@ HISTORY_MAX = 500
 _SAFE_LINK = re.compile(r"^/(?![/\\\s])")   # a link inside this app: one leading slash, not followed by /, \ or whitespace
 HISTORY_TOP = "Pick a day as year-month-day, like 2026-11-19."
 
-def _history_day(text):
-    try: return datetime.datetime.strptime(text, "%Y-%m-%d")
-    except ValueError: return None
+def history_scope():
+    """(scope, allow, depts) of the signed-in person's history: "all" with right history; "dept" with history.dept (entries by
+    them, or about a department of theirs); "own" with history.own (entries by them); (None, None, []) otherwise"""
+    if has("history"): return "all", None, []
+    p = who(); me = p["name"] if p else None
+    if has("history.dept") and p:
+        mine = list(people.record(people.load(), me)["depts"])
+        return "dept", (lambda e: e.get("who") == me or bool(set(e.get("depts") or []) & set(mine))), mine
+    if has("history.own") and p: return "own", (lambda e: e.get("who") == me), []
+    return None, None, []
 
 @app.get("/history")
-@need("history")
+@need("history", "history.dept", "history.own")
 def history_page():
     return app.send_static_file("history.html")
 
 @app.get("/api/history")
-@need("history")
+@need("history", "history.dept", "history.own")
 def api_history():
-    """the history, newest first, filtered: who (part of the name it shows), where, dept, from and to (local days, `to`
-    included), signins=1, before (an entry id: the entries after it), limit (up to 500). `more`: older ones exist"""
+    """the history, newest first, filtered: who (part of the name it shows), where, dept, from and to (school days, `to`
+    included), since (seconds since 1970), signins=1, before (an entry id: the entries after it), limit (up to 500). `more`: older ones exist"""
     q = request.args
     try: limit = int(q.get("limit") or 200)
     except ValueError: return {"error": "The number of entries must be a number."}, 400
@@ -1597,26 +1604,33 @@ def api_history():
     limit = min(limit, HISTORY_MAX)
     since = until = None
     if q.get("from"):
-        d = _history_day(q["from"])
-        if not d: return {"error": HISTORY_TOP}, 400
-        since = d.timestamp()
+        since = history.day_start(q["from"])
+        if since is None: return {"error": HISTORY_TOP}, 400
     if q.get("to"):
-        d = _history_day(q["to"])
-        if not d: return {"error": HISTORY_TOP}, 400
-        until = (d + datetime.timedelta(days=1)).timestamp() - 0.001
+        d = history.day_start(q["to"])
+        if d is None: return {"error": HISTORY_TOP}, 400
+        until = d + 86400 - 0.001
+    if q.get("since"):
+        try: after = float(q["since"])
+        except ValueError: return {"error": "Pick a time as a number of seconds."}, 400
+        if after != after or after in (float("inf"), float("-inf")): return {"error": "Pick a time as a number of seconds."}, 400
+        since = after if since is None else max(since, after)
     if since is not None and until is not None and since > until: return {"error": "The first day is after the last day."}, 400
     who_ = (q.get("who") or "").strip().lower()
     where = q.get("where") or None
     dept = q.get("dept") or None
     signins = q.get("signins") == "1"
     before = q.get("before") or None
+    scope, allow, mine = history_scope()
+    if scope == "dept" and dept is not None and dept not in mine: return jsonify(entries=[], more=False, admin=has("admin"), depts=mine, scope=scope, download=False)
     found = history.read(where=where, dept=dept, since=since, until=until, signins=signins, before=before, limit=limit + 1,
-                         who_contains=who_ or None)
+                         who_contains=who_ or None, allow=allow)
     for e in found:
         if "link" in e and not _SAFE_LINK.match(e["link"] if isinstance(e["link"], str) else ""): del e["link"]
     try: depts = [str(d) for d in store.setup_record()["spec"]["school"]["departments"]]
     except Exception: depts = []
-    return jsonify(entries=found[:limit], more=len(found) > limit, admin=has("admin"), depts=depts)
+    if scope == "dept": depts = mine
+    return jsonify(entries=found[:limit], more=len(found) > limit, admin=has("admin"), depts=depts, scope=scope, download=has("history"))
 
 ONLY_ADMIN = "Only an admin can open this page."
 
