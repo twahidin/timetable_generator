@@ -1647,6 +1647,40 @@ def may_put_back(es):
     p = who()
     return is_head() and p is not None and all(e.get("who") == p["name"] for e in es)
 
+AGAIN_SINCE = "Can't put back: this was changed again since."
+
+def _field_now(d, item, name, field):
+    """what the admin page's _change compares against for one field of one person"""
+    r = people.record(d, name)
+    if field == "group": return item["group"]
+    if field in ("relief", "exams", "admin"): return r["extras"][field]
+    return r[field]                                   # depts, note, off
+
+def _put_back_account(unit, e):
+    """put back an admin-page change: every field of every person goes back to what the entry says it was, all in one
+    people.update and only while each is still as the entry left it; nothing is written when any check refuses"""
+    me, by_, pub = who()["name"], by(), store.published()
+    per = {}
+    for c in e.get("changes") or []:
+        per.setdefault(c["name"], {})[c["field"]] = (c.get("was"), c.get("now"))
+    def go(d):
+        items = {p["name"]: p for p in people.staff(pub, d)}
+        for n in per:
+            if n not in items: raise Refused(f"Can't put back: {n} is no longer on the staff list.")
+        for n, fs in per.items():
+            if any(_field_now(d, items[n], n, f) != now for f, (was, now) in fs.items()): raise Refused(AGAIN_SINCE)
+        before = people.usable_admins(d)
+        done = {n: _change(d, n, items[n], {f: was for f, (was, now) in fs.items()}) for n, fs in per.items()}
+        touched = [n for n in per if done[n]]
+        if not touched: raise Refused(AGAIN_SINCE)
+        _whole(d, touched, before)
+        return touched, [c for n in touched for c in done[n]]
+    try: touched, changes = _update_as(me, go)
+    except Refused as x: return {"error": str(x)}, 409
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    _account_entry("putback", touched, changes, "Put back: " + e.get("text", ""), by_=by_, putback=unit, putback_of=e.get("as"), putback_ts=e.get("ts"))
+    return {"done": True, "text": "Put back."}
+
 @app.post("/api/history/back")
 @need("setup", "admin")
 def history_back():
@@ -1660,12 +1694,10 @@ def history_back():
     got = putback.gather(eid)
     if got is None: return {"error": CANT_BACK}, 409
     unit, es, newer = got
-    if unit.startswith("a:"):
-        if not may_put_back(es): return {"error": "Only the timetable committee can put back someone else's change."}, 403
-        return {"error": CANT_BACK}, 409    # account changes are put back by a later step
     if not may_put_back(es): return {"error": "Only the timetable committee can put back someone else's change."}, 403
     why = putback.why_not(es, newer)
     if why: return {"error": why}, 409
+    if unit.startswith("a:"): return _put_back_account(unit, es[0])
     ops = putback.reverse(es)
     depts = head_depts() if is_head() else None
     def check(spec, o):
