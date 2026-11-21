@@ -1463,4 +1463,493 @@ def the_rules_are_read_against_everyone_the_accounts_know():
         assert choose(i, K5, call=says("Teacher 1", f"Teacher 1 is free, unlike {OLIVE}.")) == APP, "an answer naming her is refused"
     finally: AP.update(lambda d: d["people"].pop(OLIVE, None))
 
+# ---- Task 4: routes for the team and the relief teacher ----
+import csv, io, urllib.parse  # noqa: E402
+import access, history as H  # noqa: E402
+from relief import files as RF  # noqa: E402
+# who plans and who is on the team: the accounts. Grace is a school leader (relief.plan); Mr Team Lee has the Relief team extra
+AP.update(lambda d: d["people"].update({GRACE: dict(group="leader"), TEAMER: dict(extras=dict(relief=True, exams=None, admin=False))}))
+TEAM_ONLY = "Only the relief team can open What's in."
+NOT_YOURS = "This absence is not yours to open."
+GONE_ABS = "That absence is not there any more."
+SIGN_IN = "Please sign in again."
+NO_PUB = "Publish the timetable first: relief reads the teachers from it."
+STALE = "{name} is no longer free then: change it"
+D2, D27 = D(2026, 10, 2), D(2026, 10, 27)
+K5_27, K2_27 = K5.replace("2026-10-13", "2026-10-27"), K2.replace("2026-10-13", "2026-10-27")
+HEAD = f"Relief for {EVE} on Tue 13 Oct: "
+
+def q(s): return urllib.parse.quote(s, safe="")
+def cover_url(i, ckey, what): return f"/api/relief/absences/{i}/covers/{q(ckey)}/{what}"
+def lesson_url(i, key, what): return f"/api/relief/absences/{i}/lessons/{q(key)}/{what}"
+
+def ok(r, code=200):
+    assert r.status_code == code, (r.status_code, r.get_data(as_text=True)[:400])
+    return r.get_json()
+
+def no(r, code, text):
+    assert r.status_code == code, (code, r.status_code, r.get_data(as_text=True)[:400])
+    assert r.get_json() == {"error": text}, r.get_json()
+
+def staff(name):
+    """a client signed in by name with the person's own code"""
+    c = A.app.test_client()
+    r = c.post("/login", data={"code": access.staff_code(name)}); assert r.status_code == 302, (name, r.status_code)
+    return c
+
+def notes():
+    """every relief history entry so far, oldest first: (what, who, text)"""
+    return [(e["what"], e["who"], e["text"]) for e in reversed(H.read(kinds=["relief"], limit=2000)) if e.get("where") == "Relief"]
+
+def body(teacher=EVE, **kw):
+    """the body of POST /api/relief/absences: teacher's whole day on Tue 13 Oct"""
+    d = dict(teacher=teacher, dates=["2026-10-13"], periods=None, reason="Medical", reason_text="", remarks="", reporting_officer=GRACE, lessons=[])
+    d.update(kw); return d
+
+def rt(f):
+    """a route test: the published timetable is PUB, fill runs inline, no hook, an empty guard, automatic triggers off"""
+    old = store.published; store.published = lambda: PUB
+    FL.SYNC = True; FL.ON = False; PK.CALL = None; PK._seen.clear(); del CALLS[:]
+    try: return t(f)
+    finally:
+        store.published = old; FL.SYNC = False; FL.ON = False; PK.CALL = None; PK._seen.clear()
+
+ROW = {"id", "ckey", "key", "split", "absent", "classes", "subject", "group", "room", "p", "n", "start", "end", "work_set", "state", "pick",
+       "approved", "ack", "change", "stale", "over_now", "nobody", "warn"}
+
+@rt
+def today_lists_covers_in_time_order_with_counts_and_no_reason():
+    fresh()
+    team = staff(TEAMER)
+    i = absent(by=GRACE, reason="Other", reason_text="A private matter", remarks="Quiet please", lessons=[dict(key=K5, relief=SAM)])["id"]
+    j = absent(teacher=RUTH, by=GRACE, reason="Child sick", lessons=[dict(key=KR6, relief=FLEX)])["id"]
+    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.change(i, K2, FLEX, TEAMER, PUB, ST)                          # P3-P5 to Mr Flex Ng, approved: with P7 too he goes over his 3
+    AB.set_work(i, K5, dict(text="Read p.4", link="", files=[], known=[]), EVE)
+    s = absent(teacher=SAM)["id"]                                     # Mr Sam Tan away too: his approved P6-P7 is stale now
+    got = ok(team.get("/api/relief/today?date=2026-10-13"))
+    assert got["date"] == "2026-10-13" and got["filling"] is False
+    rows = got["rows"]
+    assert [(r["p"], r["absent"]) for r in rows] == [(0, SAM), (2, EVE), (2, RUTH), (5, EVE), (6, RUTH), (9, SAM)], rows
+    assert all(set(r) == ROW for r in rows), [set(r) ^ ROW for r in rows]
+    assert got["counts"] == dict(need=6, waiting=1, approved=2, acknowledged=0, change=0, nobody=0, open=3), got["counts"]
+    r5 = rows[3]
+    assert r5 == dict(id=i, ckey=K5, key=K5, split=False, absent=EVE, classes=["1A"], subject="Science", group="", room="R1", p=5, n=2,
+                      start="10:30", end="11:30", work_set=True, state="approved",
+                      pick=dict(who=SAM, by="planner", reason=f"Planned by {GRACE} on Mon 12 Oct."), approved=dict(by=TEAMER, at=NOW),
+                      ack=None, change=None, stale=True, over_now=False, nobody=False, warn=STALE.format(name=SAM)), r5
+    r2, r6 = rows[1], rows[4]
+    assert (r2["state"], r2["pick"]["who"], r2["pick"]["by"], r2["stale"], r2["over_now"], r2["work_set"]) == ("approved", FLEX, "team", False, True, False), r2
+    assert (r6["id"], r6["state"], r6["pick"], r6["approved"], r6["over_now"], r6["warn"]) == (
+        j, "waiting", dict(who=FLEX, by="planner", reason=f"Planned by {GRACE} on Mon 12 Oct."), None, True, None), r6
+    assert rows[0]["id"] == s and rows[0]["state"] == "open" and rows[0]["pick"] is None and rows[0]["nobody"] is False
+    text = json.dumps(got)
+    for secret in ("A private matter", "Other", "Child sick", "Medical", "Quiet please", "reason_text", "remarks", "reporting_officer"):
+        assert secret not in text, secret
+    # a request to change shows its new pick
+    CV.ask_change(i, K5, "A parents' meeting", SAM)
+    CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change")
+    rows = ok(team.get("/api/relief/today?date=2026-10-13"))["rows"]
+    c5 = rows[3]["change"]
+    assert rows[3]["state"] == "change" and c5 == dict(why="A parents' meeting", at=NOW, pick=dict(who=MAYA, by="ai", reason=pk(MAYA)["reason"]), stale=False), c5
+    # nobody free then at all (everyone on the "never" list): the open lessons say so, and so do the picks no longer free
+    with saved_settings(limits=dict(fat_per_day=3, other_per_day=None, never=[x["name"] for x in ROWS])):
+        got = ok(team.get("/api/relief/today?date=2026-10-13"))
+    opened = [r for r in got["rows"] if r["state"] == "open"]
+    assert opened and all(r["nobody"] and r["warn"] == "Nobody is free then." for r in opened) and got["counts"]["nobody"] == len(opened)
+    rows = got["rows"]
+    assert (rows[4]["state"], rows[4]["stale"], rows[4]["warn"]) == ("waiting", True, nf(FLEX)), rows[4]
+    assert (rows[1]["state"], rows[1]["stale"], rows[1]["warn"]) == ("approved", True, STALE.format(name=FLEX)), rows[1]
+    assert rows[3]["change"]["stale"] is True and rows[3]["warn"] == STALE.format(name=SAM), rows[3]
+    # a cancelled absence stays on the day as cancelled, out of the counts; the default date is today; a bad date is refused
+    AB.cancel(j, "Better", GRACE)
+    got = ok(team.get("/api/relief/today?date=2026-10-13"))
+    assert [r["state"] for r in got["rows"] if r["id"] == j] == ["cancelled", "cancelled"] and got["counts"]["need"] == 4, got["counts"]
+    assert ok(team.get("/api/relief/today")) == dict(date="2026-10-12", filling=False, rows=[],
+                                                    counts=dict(need=0, waiting=0, approved=0, acknowledged=0, change=0, nobody=0, open=0))
+    no(team.get("/api/relief/today?date=13/10/2026"), 400, "Choose the dates again.")
+
+TEAM_ROUTES = lambda i: [("GET", "/api/relief/today?date=2026-10-13", None), ("POST", cover_url(i, K5, "approve"), None),
+                         ("POST", "/api/relief/today/approve-all", dict(date="2026-10-13")), ("PUT", cover_url(i, K5, "relief"), dict(relief=MAYA)),
+                         ("GET", cover_url(i, K5, "free"), None), ("POST", lesson_url(i, K2, "split"), dict(at=3)), ("POST", lesson_url(i, K2, "join"), None),
+                         ("POST", cover_url(i, K5, "keep"), None), ("POST", "/api/relief/today/fill", dict(date="2026-10-13")),
+                         ("GET", "/api/relief/load", None), ("GET", f"/api/relief/load/{q(SAM)}", None), ("GET", "/api/relief/load.csv", None)]
+
+@rt
+def approve_routes_need_the_team():
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+    PK.CALL = first
+    before, n = snap(), len(notes())
+    for c in (staff(SAM), staff(GRACE), staff(EVE)):         # an ordinary teacher, a planner not on the team (her own absence), the absent teacher
+        for method, url, b in TEAM_ROUTES(i) + TEAM_ROUTES("abcdef123456"):
+            no(c.open(url, method=method, json=b), 403, TEAM_ONLY)
+    assert snap() == before and len(notes()) == n and CALLS == [], "nothing written, nothing picked"
+
+@rt
+def the_team_approves_changes_splits_and_keeps_through_the_api():
+    fresh()
+    team = staff(TEAMER)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]           # P3-P5 open, P6-P7 waiting for Mr Sam Tan
+    j = absent(teacher=RUTH, by=GRACE, lessons=[dict(key=KR6, relief=FLEX)])["id"]
+    n = len(notes())
+    got = ok(team.post(cover_url(i, K5, "approve")))
+    assert [x["covers"] for x in got["lessons"] if x["key"] == K5] == [[dict(ckey=K5, p=5, n=2, start="10:30", end="11:30", state="approved", relief=SAM, planned=None)]]
+    assert got["reason"] == "Medical", "the team sees the whole record"
+    no(team.post(cover_url(i, K5, "approve")), 400, CV.NOT_WAITING)
+    no(team.post(cover_url(i, "nokey", "approve")), 400, AB.CHANGED)
+    no(team.post(cover_url("abcdef123456", K5, "approve")), 404, GONE_ABS)
+    # approve all: the waiting ones of the day in time order, a stale one skipped and named
+    CV.set_pick(i, K2, pk(BUSY), PUB, ST)
+    absent(teacher=BUSY)                                                       # then Mr Busy Chan asks for relief himself
+    for bad in ("13/10/2026", 5, None, "", "2026-13-40"):
+        no(team.post("/api/relief/today/approve-all", json=dict(date=bad)), 400, AB.WRONG)
+    no(team.post("/api/relief/today/approve-all", json=dict(date="2026-10-09")), 400, AB.PAST_LESSON)
+    got = ok(team.post("/api/relief/today/approve-all", json=dict(date="2026-10-13")))
+    assert got == dict(approved=1, skipped=[dict(ckey=K2, name=BUSY, why=nf(BUSY))]), got
+    assert (st(j, KR6), st(i, K2)) == ("approved", "waiting")
+    # Change: the free-then list for the cover, then chosen and approved in one
+    free = ok(team.get(cover_url(i, K2, "free")))
+    assert BUSY not in names(free) and MAYA in names(free) and set(free) == {"groups", "teaching"}, free
+    no(team.get(cover_url(i, "nokey", "free")), 400, AB.CHANGED)
+    no(team.get(cover_url(i, K8, "free")), 400, AB.NO_NEED)
+    no(team.put(cover_url(i, K2, "relief"), json=dict(relief=BUSY)), 400, nf(BUSY))
+    for bad in ({}, dict(relief=None), dict(relief=["x"])):
+        no(team.put(cover_url(i, K2, "relief"), json=bad), 400, AB.WRONG)
+    ok(team.put(cover_url(i, K2, "relief"), json=dict(relief=MAYA)))
+    assert st(i, K2) == "approved" and relief_of(i, K2) == MAYA
+    # Split and Join again
+    l = absent(by=GRACE, dates=["2026-10-16"])["id"]                          # Fri P1-P2
+    no(team.post(lesson_url(j, KR6, "split"), json=dict(at=6)), 400, CV.NO_SPLIT)
+    no(team.post(lesson_url(l, KF, "split"), json=dict(at="1")), 400, AB.WRONG)
+    got = ok(team.post(lesson_url(l, KF, "split"), json=dict(at=1)))
+    assert [c["ckey"] for x in got["lessons"] for c in x["covers"]] == [KF + "#0", KF + "#1"]
+    ok(team.post(lesson_url(l, KF, "join")))
+    no(team.post(lesson_url(l, KF, "join")), 400, AB.CHANGED)
+    # Keep: a request to change closed, the relief stays
+    CV.ask_change(i, K5, "A meeting", SAM)
+    no(team.post(cover_url(i, K2, "keep")), 400, CV.NO_CHANGE_ASKED)
+    ok(team.post(cover_url(i, K5, "keep")))
+    assert st(i, K5) == "approved" and relief_of(i, K5) == SAM
+    # Fill now: every open cover of the date, due or not
+    PK.CALL = first
+    for bad in (dict(date="nope"), dict(date=7)):
+        no(team.post("/api/relief/today/fill", json=bad), 400, AB.WRONG)
+    assert st(l, KF) == "open"
+    assert ok(team.post("/api/relief/today/fill", json=dict(date="2026-10-16"))) == dict(date="2026-10-16", started=True, filling=False)
+    assert st(l, KF) == "waiting" and len(CALLS) == 1
+    # one history entry a save, by whoever made it; a refusal and the app's own picks write none
+    got = notes()[n:]
+    fri = f"Relief for {EVE} on Fri 16 Oct: "
+    assert got == [("approved", TEAMER, HEAD + f"{SAM} approved for 1A Science P6–P7 on Tue 13 Oct"),
+                   ("approved", TEAMER, f"Relief for {RUTH} on Tue 13 Oct: {FLEX} approved for 3B Physics P7 on Tue 13 Oct"),
+                   ("changed", TEAMER, HEAD + f"{MAYA} chosen and approved for 1C Science P3–P5 on Tue 13 Oct"),
+                   ("split", TEAMER, fri + "1A Art on Fri 16 Oct split before P2"),
+                   ("joined", TEAMER, fri + "1A Art on Fri 16 Oct joined again"),
+                   ("kept", TEAMER, HEAD + f"{SAM} kept for 1A Science P6–P7 on Tue 13 Oct")], got
+
+COVER = {"id", "ckey", "date", "start", "end", "p", "n", "classes", "subject", "group", "room", "absent", "work", "state", "ack", "change"}
+
+@rt
+def covering_lists_only_approved_and_never_the_reason():
+    fresh()
+    k2 = key(EVE, 0, D2)
+    with at("2026-10-02T07:00:00+08:00"):                                     # Fri 2 Oct, last week's: approved to Mr Sam Tan
+        old = absent(by=GRACE, dates=["2026-10-02"], lessons=[dict(key=k2, relief=SAM)])["id"]
+        CV.approve(old, k2, TEAMER, PUB, ST)
+    i = absent(by=GRACE, dates=["2026-10-13", "2026-10-16"], reason="Other", reason_text="A private matter", remarks="Quiet please",
+               lessons=[dict(key=K5, relief=SAM), dict(key=K2, relief=SAM), dict(key=KF, relief=SAM)])["id"]
+    j = absent(teacher=RUTH, by=GRACE, lessons=[dict(key=KR6, relief=MAYA)])["id"]
+    f = RF.save(i, "notes.pdf", b"%PDF-1 notes")
+    AB.set_work(i, K5, dict(text="Read p.4", link="https://x.test/a", files=[f], known=[]), EVE)
+    for ckey in (K5, KF): CV.approve(i, ckey, TEAMER, PUB, ST)
+    CV.approve(j, KR6, TEAMER, PUB, ST)
+    sam = staff(SAM)
+    with at("2026-10-14T08:00:00+08:00"):                                     # Wednesday: Tuesday's is earlier this week
+        r = sam.get("/api/relief/covering"); got = ok(r)
+    assert [(c["date"], c["ckey"]) for c in got["covers"]] == [("2026-10-13", K5), ("2026-10-16", KF)], got
+    assert all(set(c) == COVER for c in got["covers"]), [set(c) ^ COVER for c in got["covers"]]
+    assert got["covers"][0] == dict(id=i, ckey=K5, date="2026-10-13", start="10:30", end="11:30", p=5, n=2, classes=["1A"], subject="Science",
+                                    group="", room="R1", absent=EVE, work=dict(text="Read p.4", link="https://x.test/a", files=[f]),
+                                    state="approved", ack=None, change=None), got["covers"][0]
+    text = r.get_data(as_text=True)
+    for secret in ("A private matter", "Other", "Quiet please", "Medical", GRACE, "Planned by", "history", "reason", "remarks", "reporting_officer", "pick"):
+        assert secret not in text, secret
+    assert ok(staff(MAYA).get("/api/relief/covering"))["covers"][0]["ckey"] == KR6
+    assert ok(staff(RUTH).get("/api/relief/covering"))["covers"] == []
+    # not needed, or cancelled: it leaves the list
+    AB.not_needed(i, KF, "Covered", EVE)
+    assert [c["ckey"] for c in ok(sam.get("/api/relief/covering"))["covers"]] == [K5]
+    AB.cancel(i, "Better", GRACE)
+    assert ok(sam.get("/api/relief/covering"))["covers"] == []
+
+NOT_YOURS_COVER = "This relief is not yours."
+
+@rt
+def acknowledge_and_ask_change_are_the_relief_teachers_alone():
+    fresh()
+    sam, ruth, team, eve, grace = staff(SAM), staff(RUTH), staff(TEAMER), staff(EVE), staff(GRACE)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM), dict(key=K2, relief=FLEX)])["id"]
+    PK.CALL = first
+    before = snap()
+    for c in (sam, ruth, team, eve, grace):                                   # waiting: nobody's yet, not even Mr Sam Tan's
+        no(c.post(cover_url(i, K5, "acknowledge")), 403, NOT_YOURS_COVER)
+        no(c.post(cover_url(i, K5, "ask-change"), json=dict(why="A meeting")), 403, NOT_YOURS_COVER)
+    assert snap() == before
+    CV.approve(i, K5, TEAMER, PUB, ST)
+    before, n = snap(), len(notes())
+    for c in (ruth, team, eve, grace):
+        no(c.post(cover_url(i, K5, "acknowledge")), 403, NOT_YOURS_COVER)
+        no(c.post(cover_url(i, K5, "ask-change"), json=dict(why="A meeting")), 403, NOT_YOURS_COVER)
+    for url in (cover_url("abcdef123456", K5, "acknowledge"), cover_url("nope", K5, "acknowledge"), cover_url(i, "nokey", "acknowledge"), cover_url(i, K2, "acknowledge")):
+        no(sam.post(url), 403, NOT_YOURS_COVER)
+    assert snap() == before and len(notes()) == n and CALLS == []
+    got = ok(sam.post(cover_url(i, K5, "acknowledge")))
+    assert set(got) == COVER and (got["state"], got["ack"], got["change"]) == ("acknowledged", dict(at=NOW), None), got
+    ok(sam.post(cover_url(i, K5, "acknowledge")))                             # twice is once: one entry
+    for bad in (dict(why=" "), dict(why="x" * 201), {}):
+        no(sam.post(cover_url(i, K5, "ask-change"), json=bad), 400, CV.CHANGE_WHY)
+    assert CALLS == []
+    r = sam.post(cover_url(i, K5, "ask-change"), json=dict(why="A parents' meeting then"))
+    got = ok(r)
+    assert (got["state"], got["ack"], got["change"]) == ("change", None, dict(why="A parents' meeting then", at=NOW)), got
+    assert "pick" not in r.get_data(as_text=True) and "reason" not in r.get_data(as_text=True)
+    new = cov(i, K5)[2]["change"]["pick"]
+    assert len(CALLS) == 1 and new and new["who"] not in (SAM, None), "a request to change gets a new pick at once (Fill now's force)"
+    assert ok(sam.get("/api/relief/covering"))["covers"][0]["change"] == dict(why="A parents' meeting then", at=NOW)
+    no(sam.post(cover_url(i, K5, "ask-change"), json=dict(why="Again")), 400, CV.ASKED_ALREADY)
+    got = notes()[n:]
+    assert got == [("relief acknowledged", SAM, HEAD + f"{SAM} acknowledged 1A Science P6–P7 on Tue 13 Oct"),
+                   ("asked to change", SAM, HEAD + f"{SAM} asked to change 1A Science P6–P7 on Tue 13 Oct")], got
+    assert "parents" not in json.dumps(got), "never the why"
+
+@rt
+def the_relief_teacher_can_open_the_work_file():
+    fresh()
+    sam, ruth, maya = staff(SAM), staff(RUTH), staff(MAYA)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+    f, g = RF.save(i, "notes.pdf", b"%PDF-1 notes"), RF.save(i, "other.pdf", b"%PDF-1 other")
+    AB.set_work(i, K5, dict(text="", link="", files=[f], known=[]), EVE)
+    AB.set_work(i, K2, dict(text="", link="", files=[g], known=[]), EVE)
+    url = lambda x: f"/api/relief/files/{i}/{x['id']}"
+    no(sam.get(url(f)), 403, NOT_YOURS)                                       # waiting: not his yet
+    CV.approve(i, K5, TEAMER, PUB, ST)
+    r = sam.get(url(f))
+    assert r.status_code == 200 and r.data == b"%PDF-1 notes" and "notes.pdf" in r.headers["Content-Disposition"] and "no-store" in r.headers["Cache-Control"]
+    r.close()
+    no(sam.get(url(g)), 403, NOT_YOURS)                                       # another lesson's file
+    no(sam.get(f"/api/relief/files/{i}/abcdef123456"), 403, NOT_YOURS)
+    no(ruth.get(url(f)), 403, NOT_YOURS)
+    no(sam.get(f"/api/relief/files/abcdef123456/{f['id']}"), 403, NOT_YOURS)
+    # a part of a split lesson: its relief teacher opens the lesson's files
+    CV.split(i, K2, 3, TEAMER); CV.change(i, K2 + "#1", MAYA, TEAMER, PUB, ST)
+    r = maya.get(url(g)); assert r.status_code == 200 and r.data == b"%PDF-1 other"; r.close()
+    no(maya.get(url(f)), 403, NOT_YOURS)
+    AB.cancel(i, "Better", GRACE)
+    no(sam.get(url(f)), 403, NOT_YOURS)
+    no(maya.get(url(g)), 403, NOT_YOURS)
+
+@rt
+def the_absent_teacher_sees_the_name_only_once_approved():
+    fresh()
+    eve, grace, team = staff(EVE), staff(GRACE), staff(TEAMER)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]           # the planner's choice, waiting
+    CV.set_pick(i, K2, pk(FLEX), PUB, ST)                                     # the AI's pick, waiting
+    def lesson(c, k, url=None):
+        got = ok(c.get(url or f"/api/relief/absences/{i}"))
+        rec = got if url is None else next(x for x in got["absences"] if x["id"] == i)
+        return next(x for x in rec["lessons"] if x["key"] == k)
+    for url in (None, "/api/relief/absences/mine"):
+        e5, e2 = lesson(eve, K5, url), lesson(eve, K2, url)
+        assert (e5["relief"], e5["relief_by"], e2["relief"]) == (None, None, None), (e5, e2)
+        assert not {"pick", "history", "change", "planned"} & (set(e5) | set(e2)), (set(e5), set(e2))
+        assert e5["covers"] == [dict(ckey=K5, p=5, n=2, start="10:30", end="11:30", state="waiting", relief=None)], e5["covers"]
+    text = eve.get(f"/api/relief/absences/{i}").get_data(as_text=True) + eve.get("/api/relief/absences/mine").get_data(as_text=True)
+    assert SAM not in text and FLEX not in text and "Teacher 1 is free" not in text and "Planned by" not in text
+    for c in (grace, team):                                                   # the planner and the team: the name, and the planner's own choice
+        g5, g2 = lesson(c, K5), lesson(c, K2)
+        assert (g5["relief"], g5["planned"], g5["covers"][0]["planned"], g2["relief"], g2["planned"]) == (SAM, SAM, SAM, FLEX, None), (g5, g2)
+        assert g2["pick"]["by"] == "ai" and g2["history"], g2
+    CV.approve(i, K5, TEAMER, PUB, ST)
+    e5 = lesson(eve, K5)
+    assert e5["relief"] == SAM and e5["covers"][0]["state"] == "approved" and e5["covers"][0]["relief"] == SAM and "pick" not in e5, e5
+    assert lesson(grace, K5)["planned"] is None
+    no(grace.put(lesson_url(i, K5, "relief"), json=dict(relief=MAYA)), 400, CV.NOT_WAITING)     # the planner no longer changes it (Ruling 11)
+    CV.ask_change(i, K5, "A parents' meeting", SAM); CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change")
+    e5 = lesson(eve, K5)
+    assert e5["relief"] == SAM and e5["covers"][0]["state"] == "change" and "change" not in e5, e5
+    assert MAYA not in eve.get(f"/api/relief/absences/{i}").get_data(as_text=True) and "parents" not in eve.get("/api/relief/absences/mine").get_data(as_text=True)
+    # an absence the teacher asked for herself: the same
+    j = absent(teacher=RUTH)["id"]
+    CV.set_pick(j, KR6, pk(TEAMER), PUB, ST)
+    got = ok(staff(RUTH).get(f"/api/relief/absences/{j}"))
+    assert [(x["relief"], x["covers"][0]["state"]) for x in got["lessons"]] == [(None, "open"), (None, "waiting")] and TEAMER not in json.dumps(got["lessons"])
+    # a split lesson's parts are hidden the same way
+    CV.split(i, K2, 3, TEAMER); CV.set_pick(i, K2 + "#1", pk(GRACE), PUB, ST)
+    e2 = lesson(eve, K2)
+    assert [p.get("relief") for p in e2["parts"]] == [None, None] and not any({"pick", "history", "change"} & set(p) for p in e2["parts"]), e2["parts"]
+    assert "history" not in e2 and [c["state"] for c in e2["covers"]] == ["open", "waiting"]
+
+LOAD = {"name", "depts", "fat", "teaching", "relief", "week", "term", "changes"}
+
+@rt
+def load_counts_teaching_and_relief_for_the_week_and_term():
+    fresh()
+    team = staff(TEAMER)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.set_pick(i, K2, pk(FLEX), PUB, ST)                                     # waiting: counted, as the free-then counts do
+    absent(by=GRACE, dates=["2026-10-27"], lessons=[dict(key=K5_27, relief=SAM)])   # later in the term
+    CV.ask_change(i, K5, "A meeting", SAM); CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change")   # the new pick books Ms Maya Lee too
+    got = ok(team.get("/api/relief/load"))
+    assert got["week"] == dict(start="2026-10-12", end="2026-10-16") and got["term"] == dict(name="Term 4", start="2026-09-07", end="2026-11-20"), got
+    rows = {r["name"]: r for r in got["rows"]}
+    assert all(set(r) == LOAD for r in got["rows"])
+    assert [r["name"] for r in got["rows"]] == [BUSY, MAYA, SAM, EVE, RUTH, FLEX], "by first department then name, none last; nobody with no teaching and no relief"
+    assert rows[SAM] == dict(name=SAM, depts=["Science"], fat=False, teaching=2, relief=2, week=4, term=4, changes=1), rows[SAM]
+    assert rows[FLEX] == dict(name=FLEX, depts=[], fat=True, teaching=0, relief=3, week=3, term=3, changes=0), rows[FLEX]
+    assert rows[MAYA] == dict(name=MAYA, depts=["Mathematics"], fat=False, teaching=2, relief=2, week=4, term=2, changes=0), rows[MAYA]
+    assert (rows[EVE]["teaching"], rows[EVE]["relief"], rows[BUSY]["teaching"]) == (8, 0, 2)
+    for want in (BUSY, MAYA, SAM, EVE, RUTH, FLEX):
+        assert FR.week_so_far(PUB, CAL, AB.all_records(), want, D13) == rows[want]["week"], want
+    later = {r["name"]: r for r in ok(team.get("/api/relief/load?week=2026-10-27"))["rows"]}
+    assert (later[SAM]["relief"], later[SAM]["term"], later[FLEX]["relief"], later[FLEX]["term"]) == (2, 4, 0, 3), later
+    assert ok(team.get("/api/relief/load?term=Term%204"))["rows"] == got["rows"]
+    no(team.get("/api/relief/load?term=Term%209"), 400, "Choose the term again.")
+    no(team.get("/api/relief/load?week=nope"), 400, "Choose the dates again.")
+    # a name: every relief they took this term, with the pick's reason and who approved it
+    one = ok(team.get(f"/api/relief/load/{q(SAM)}"))
+    assert one["name"] == SAM and one["term"]["name"] == "Term 4"
+    assert [(x["date"], x["lesson"], x["absent"], x["state"], x["reason"], x["approved_by"]) for x in one["reliefs"]] == [
+        ("2026-10-13", "1A Science P6–P7", EVE, "change", f"Planned by {GRACE} on Mon 12 Oct.", TEAMER),
+        ("2026-10-27", "1A Science P6–P7", EVE, "waiting", f"Planned by {GRACE} on Mon 12 Oct.", None)], one["reliefs"]
+    m = ok(team.get(f"/api/relief/load/{q(MAYA)}"))["reliefs"]
+    assert [(x["date"], x["state"], x["reason"], x["approved_by"]) for x in m] == [("2026-10-13", "new pick", pk(MAYA)["reason"], None)], m
+    no(team.get(f"/api/relief/load/{q('Mr Nobody')}"), 400, "Mr Nobody is not on the published timetable or the staff list.")
+    with saved_settings(calendar=dict(terms=[], holidays=[])):
+        no(team.get("/api/relief/load"), 400, LS.NO_CALENDAR)
+
+@rt
+def load_csv_neutralises_formulas():
+    fresh()
+    odd = "=HYPERLINK(1)"
+    pub = world(extra=[L(TUE, 0, 1, ["9Z"], "Art", [odd])])
+    pub["model"]["setup"]["teachers"].append(dict(name=odd, dept="+Dept", dept2=None, role=None, short=None))
+    store.published = lambda: pub
+    team = staff(TEAMER)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+    CV.approve(i, K5, TEAMER, pub, ST)
+    r = team.get("/api/relief/load.csv?week=2026-10-13")
+    assert r.status_code == 200 and r.mimetype == "text/csv" and r.headers["Content-Disposition"] == 'attachment; filename="relief load 2026-10-12.csv"', r.headers
+    text = r.data.decode("utf-8")
+    assert text.startswith("﻿")
+    rows = list(csv.reader(io.StringIO(text.lstrip("﻿"))))
+    assert rows[0] == ["Name", "Departments", "Flexi Adjunct", "Teaching this week", "Relief this week", "Week so far", "Relief this term",
+                       "Requests to change this term"], rows[0]
+    assert ["'=HYPERLINK(1)", "'+Dept", "", "1", "0", "1", "0", "0"] in rows, rows
+    assert [SAM, "Science", "", "2", "2", "4", "2", "0"] in rows and [FLEX, "", "Yes", "0", "0", "0", "0", "0"] not in rows, rows
+    names_ = [x["name"] for x in ok(team.get("/api/relief/load?week=2026-10-13"))["rows"]]
+    assert [x[0] for x in rows[1:]] == ["'" + n if n.startswith("=") else n for n in names_] and names_[0] == odd, (rows, names_)
+    no(team.get("/api/relief/load.csv?week=nope"), 400, "Choose the dates again.")
+
+@rt
+def whats_in_counts_covers_and_marks_the_nudge():
+    fresh()
+    team = staff(TEAMER)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]           # Tue 13: P3-P5 open, P6-P7 waiting, P9 not needed
+    j = absent(teacher=RUTH)["id"]                                             # asked by Ms Ruth Goh herself: never a nudge
+    k = absent(by=GRACE, dates=["2026-10-16"])["id"]                           # Fri 16: a nudge from Thu 15 at 15:00
+    def got():
+        rows = {x["id"]: x for x in ok(team.get("/api/relief/absences"))["absences"]}
+        return {x: (rows[x]["cover"], rows[x]["nudge"]) for x in (i, j, k)}
+    g = got()
+    assert g[i] == (dict(total=2, approved=0, waiting=1, open=1), False) and g[j] == (dict(total=2, approved=0, waiting=0, open=2), False), g
+    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.split(i, K2, 3, TEAMER); CV.set_pick(i, K2 + "#1", pk(FLEX), PUB, ST)
+    assert got()[i][0] == dict(total=3, approved=1, waiting=1, open=1), got()[i]
+    with at("2026-10-12T14:59:00+08:00"): assert [v[1] for v in got().values()] == [False, False, False]
+    with at("2026-10-12T15:00:00+08:00"): assert [v[1] for v in got().values()] == [True, False, False]
+    with at("2026-10-15T15:00:00+08:00"): assert [v[1] for v in got().values()] == [False, False, True], "Tuesday's is past"
+    with saved_settings(times=dict(fill_at="15:00", remind_at="16:30", report_every=15, weekly_day="Fri", weekly_at="15:00")):
+        with at("2026-10-15T16:00:00+08:00"): assert got()[k][1] is False
+        with at("2026-10-15T16:30:00+08:00"): assert got()[k][1] is True
+    AB.acknowledge(k, EVE)
+    with at("2026-10-15T15:00:00+08:00"): assert got()[k][1] is False, "acknowledged"
+    AB.cancel(i, "Better", GRACE)
+    with at("2026-10-12T15:00:00+08:00"): assert got()[i] == (dict(total=0, approved=0, waiting=0, open=0), False), "cancelled"
+
+@rt
+def an_absence_for_today_gets_its_picks_at_once():
+    fresh()
+    calls, real = [], FL.soon
+    def spy(*a, **kw):
+        calls.append((a, kw, AB._LOCK.locked())); return real(*a, **kw)
+    FL.soon = spy
+    try:
+        with at("2026-10-13T08:00:00+08:00"):
+            eve, sam = staff(EVE), staff(SAM)
+            PK.CALL = first
+            i = ok(eve.post("/api/relief/absences", json=body(EVE)))["id"]
+            assert (st(i, K2), st(i, K5)) == ("open", "open") and CALLS == [], "RELIEF_JOBS is not on: an automatic trigger does nothing"
+            ok(eve.post(f"/api/relief/absences/{i}/cancel", json=dict(why="Better")))
+            FL.ON = True
+            j = ok(eve.post("/api/relief/absences", json=body(EVE)))["id"]
+            assert (st(j, K2), st(j, K5), st(j, K8)) == ("waiting", "waiting", "cancelled"), "with RELIEF_JOBS on, picked at once"
+            ok(eve.post(lesson_url(j, K8, "needed")))
+            assert st(j, K8) == "waiting", "needed again: picked at once"
+            assert relief_of(j, K5) == SAM
+            ok(sam.post("/api/relief/absences", json=body(SAM)))   # Mr Sam Tan away too: no longer anyone's waiting pick
+            assert relief_of(j, K5) not in (None, SAM) and st(j, K5) == "waiting", relief_of(j, K5)
+        assert [(a, kw, locked) for a, kw, locked in calls] == [((), {}, False)] * 5, calls
+    finally: FL.soon = real
+
+@rt
+def soon_logs_and_returns_when_no_thread_can_start():
+    team = staff(TEAMER)
+    FL.SYNC = False
+    old = threading.Thread.start
+    def refuse(self): raise RuntimeError("can't start new thread")
+    try:
+        with logged() as got:
+            threading.Thread.start = refuse
+            try:
+                assert FL.soon(date=D16, force=True) is False and FL.filling() is False and not FL._asked
+                assert ok(team.post("/api/relief/today/fill", json=dict(date="2026-10-16"))) == dict(date="2026-10-16", started=False, filling=False)
+            finally: threading.Thread.start = old
+        assert [(x.args, x.levelno) for x in got] == [(("RuntimeError",), logging.ERROR)] * 2, [(x.args, x.levelno) for x in got]
+    finally: FL.SYNC = True
+
+@rt
+def a_split_lesson_reads_its_parts_in_the_record_and_the_sheet():
+    fresh()
+    team, grace = staff(TEAMER), staff(GRACE)
+    i = absent(by=GRACE)["id"]
+    CV.split(i, K2, 4, TEAMER); CV.split(i, K2, 3, TEAMER)                    # parts P3, P5, P4: the newest part is last
+    CV.change(i, K2 + "#1", FLEX, TEAMER, PUB, ST); CV.set_pick(i, K2 + "#2", pk(SAM), PUB, ST)
+    x = next(x for x in ok(team.get(f"/api/relief/absences/{i}"))["lessons"] if x["key"] == K2)
+    assert x["covers"] == [dict(ckey=K2 + "#0", p=2, n=1, start="09:00", end="09:30", state="open", relief=None, planned=None),
+                           dict(ckey=K2 + "#2", p=3, n=1, start="09:30", end="10:00", state="waiting", relief=SAM, planned=None),
+                           dict(ckey=K2 + "#1", p=4, n=1, start="10:00", end="10:30", state="approved", relief=FLEX, planned=None)], x["covers"]
+    assert next(v for v in ok(team.get("/api/relief/absences"))["absences"] if v["id"] == i)["cover"] == dict(total=4, approved=1, waiting=1, open=2)
+    rows = list(csv.reader(io.StringIO(grace.get("/api/relief/planned.csv?start=2026-10-13").data.decode("utf-8").lstrip("﻿"))))
+    assert [r[2:6] for r in rows[1:]] == [["1C Science", "P3", "09:00–09:30", "Not chosen yet"], ["1C Science", "P4", "09:30–10:00", SAM],
+                                          ["1C Science", "P5", "10:00–10:30", FLEX], ["1A Science", "P6–P7", "10:30–11:30", "Not chosen yet"]], rows
+    rows = ok(team.get("/api/relief/today?date=2026-10-13"))["rows"]
+    assert [(r["ckey"], r["key"], r["split"], r["p"], r["start"]) for r in rows] == [(K2 + "#0", K2, True, 2, "09:00"), (K2 + "#2", K2, True, 3, "09:30"),
+                                                                                    (K2 + "#1", K2, True, 4, "10:00"), (K5, K5, False, 5, "10:30")], rows
+
+@rt
+def the_new_routes_answer_signed_out_and_unpublished():
+    x = "abcdef123456"
+    routes = [(m, u) for m, u, b in TEAM_ROUTES(x)] + [("GET", "/api/relief/covering"), ("POST", cover_url(x, K5, "acknowledge")),
+                                                       ("POST", cover_url(x, K5, "ask-change"))]
+    team = staff(TEAMER)
+    for method, url in routes:
+        no(A.app.test_client().open(url, method=method, json={}), 401, SIGN_IN)
+    store.published = lambda: None
+    for method, url in routes:
+        no(team.open(url, method=method, json={}), 409, NO_PUB)
+
+assert REAL == [], "a test reached the real call"
+
 print(f"{COUNT} relief team tests passed")

@@ -214,7 +214,9 @@ def soon(ids=None, date=None, force=False):
     """ask for a run (ids, date as for run) -> True, or False when it does nothing: an automatic trigger (a new absence,
     needed again, cancel) runs only when RELIEF_JOBS is on (ON); an action a person takes (Fill now, a request to change)
     passes force=True. In a daemon thread named relief-fill that waits for a run already going; inline when SYNC (tests).
-    The same run asked for again before it starts is that one run. Never call it holding absences._LOCK."""
+    The same run asked for again before it starts is that one run. When no thread can be started, the kind of error is
+    logged and False returned (the ticker's next run picks what is due): the save that asked for it has happened, so the
+    route answers as it would. Never call it holding absences._LOCK."""
     if not (ON or force): return False
     key = (None if ids is None else frozenset({ids} if isinstance(ids, str) else {str(i) for i in ids}),
            None if date is None else _date(date).isoformat())
@@ -224,9 +226,10 @@ def soon(ids=None, date=None, force=False):
     if SYNC: _queued(key)
     else:
         try: threading.Thread(target=_queued, args=(key,), name="relief-fill", daemon=True).start()
-        except RuntimeError:                    # no thread to be had: the ticker's next run picks what is due
+        except RuntimeError as e:               # no thread to be had: the ticker's next run picks what is due
             with _asked_lock: _asked.discard(key)
-            raise
+            _log.error("a relief run could not be started: %s", type(e).__name__)
+            return False
     return True
 
 
