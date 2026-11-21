@@ -33,9 +33,21 @@ relief requests on the Relief home, in tabs that show only to those who may use 
 - **The relief team:** **What's in**, read-only: every absence, who sent it and how, the acknowledgement, the work,
   the relief chosen or open, cancellations, and what is new since they last looked.
 
+Stage 3 is the relief team's module and everyone's cover list:
+- **Today** (the relief team): the page for a date. Every lesson needing cover, with its pick: the planner's choice, the
+  AI's pick by the school's rules, or the app's own order when there is no AI. The team can **Approve**, **Approve all
+  waiting**, **Change** the pick, **Split** a lesson into parts (each with its own relief teacher) and **Join again**,
+  **Keep** the relief when a teacher asks to change it, or **Fill now** to pick at once.
+- **Reliefs I'm covering** (every teacher): the reliefs approved for them, with **Acknowledge** or **Request to change**.
+- **Load** (the relief team): how many relief periods each teacher has this week and this term, by department, with a
+  Download; a name opens that teacher's reliefs.
+- **What's in** also shows "Needs a nudge" and each absence's relief status.
+
+Nothing reaches a relief teacher before the relief team approves it. There is no Telegram yet (stage 4), and the
+published timetable on a date, with the relief in it, comes later.
+
 The reason for an absence is seen only by the absent teacher, whoever planned it, management and the relief team; each
-relief save is one line in the **History**, never with the reason. The relief team has **Today** (the app's picks for open lessons, approving them, changing them) and **Load**; a relief teacher
-sees **Reliefs I'm covering**. Nobody is told on Telegram yet. Relief reads the teachers from the published timetable, so publish first. **Relief settings**
+relief save is one line in the **History**, never with the reason. Relief reads the teachers from the published timetable, so publish first. **Relief settings**
 (the committee page's header link, or the Relief home for the relief team) hold the Flexi Adjunct Teachers' role, the
 relief rules in words, the limits the app checks, the times and the school calendar (terms, which week each term
 starts as, holidays); they show management, the relief team and the other staff who teach no lessons, which are set
