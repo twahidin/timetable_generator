@@ -761,6 +761,15 @@ def _checked(build, sentences=False):
         app.logger.exception("checking the draft")
         return {"error": f"Could not check the timetable against the setup: {e}"}, 400
 
+def _draft_entry(what, text, where="Step 8 · Upload and edit", kind="draft"):
+    """one history entry for step 8 or 9 (call after the action worked). A failure to write it never fails the action"""
+    e = {"kind": kind, "what": what, "where": where, "text": text, "link": "/", **by()}
+    try: history.add(e)
+    except Exception as x: print(f"WARNING: a timetable change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
+
+def _worked(r):
+    return not isinstance(r, tuple) and getattr(r, "status_code", 200) == 200
+
 @app.post("/api/draft")
 @need("committee")
 def draft_upload():
@@ -772,11 +781,14 @@ def draft_upload():
     try:
         try:
             sp, tp = _save_uploads(work)
-            m = draft.save(sp, tp, os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file", spec,
+            name = os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file"
+            m = draft.save(sp, tp, name, spec,
                            replace=request.form.get("replace") == "1")
         except draft.UnpublishedFixes as e: return {"error": str(e), "fixes": e.count}, 409
         except ValueError as e: return {"error": str(e)}, 400
-        return _checked(lambda: draft.info(model=m))
+        r = _checked(lambda: draft.info(model=m))
+        if _worked(r): _draft_entry("upload", f"Uploaded {name}")
+        return r
     finally: shutil.rmtree(work, ignore_errors=True)
 
 @app.get("/api/draft")
@@ -788,7 +800,13 @@ def draft_get():
 @need("committee")
 def draft_decide():
     body = request.get_json(force=True, silent=True); body = body if isinstance(body, dict) else {}
-    try: return jsonify(draft.decide(str(body.get("key") or ""), body.get("answer")))
+    key = str(body.get("key") or "")
+    try:
+        try: w = next((w for w in (draft.info() or {}).get("warnings", []) if w.get("key") == key), None)
+        except Exception: w = None
+        out = jsonify(draft.decide(key, body.get("answer"), by=by()))
+        _draft_entry("decide", f"Decided: {body.get('answer')} — {w['text'] if w else key}")
+        return out
     except ValueError as e: return {"error": str(e)}, 400
     except LookupError: return {"error": NO_SETUP}, 409
 
@@ -850,12 +868,16 @@ def draft_about():
 @app.post("/api/draft/fix")
 @need("committee")
 def draft_fix():
-    body = request.get_json(force=True, silent=True); return _checked(lambda: draft.fix(body, stamp=_stamp_of(body)), sentences=True)
+    body = request.get_json(force=True, silent=True); r = _checked(lambda: draft.fix(body, stamp=_stamp_of(body)), sentences=True)
+    if _worked(r): _draft_entry("fix", draft.last_fix_text() or "A fix")
+    return r
 
 @app.post("/api/draft/undo")
 @need("committee")
 def draft_undo():
-    return _checked(draft.undo, sentences=True)
+    was = draft.last_fix_text(); r = _checked(draft.undo, sentences=True)
+    if _worked(r): _draft_entry("undo", f"Undid: {was}")
+    return r
 
 @app.get("/api/draft/suggest")
 @need("committee")
@@ -872,7 +894,10 @@ def _posted_fixes():
 @app.post("/api/draft/fixes")
 @need("committee")
 def draft_fixes():
-    return _checked(lambda: draft.fix_many(_posted_fixes(), stamp=_stamp_of(request.get_json(force=True, silent=True))), sentences=True)
+    r = _checked(lambda: draft.fix_many(_posted_fixes(), stamp=_stamp_of(request.get_json(force=True, silent=True))), sentences=True)
+    if _worked(r):
+        ts = draft.last_batch_texts(); _draft_entry("fix", f"{len(ts)} fixes: " + "; ".join(t or "" for t in ts))
+    return r
 
 @app.post("/api/draft/preview")
 @need("committee")
@@ -917,7 +942,10 @@ def draft_download():
 @app.post("/api/draft/publish")
 @need("committee")
 def draft_publish():
-    try: return jsonify(draft.publish())
+    try:
+        out = jsonify(draft.publish())
+        _draft_entry("publish", "Published the timetable", "Step 9 · Publish")
+        return out
     except FileNotFoundError: return {"error": "There is no draft to publish."}, 404
     except draft.Critical as e: return {"error": str(e), "critical": e.count}, 409
     except draft.NotPlaced as e: return {"error": str(e), "unplaced": e.count}, 409
@@ -1209,6 +1237,8 @@ def relief_settings_put():
     if not rights[1]: return {"error": ONLY_SETTINGS}, 403
     try: saved = relief_settings.save(request.get_json(force=True, silent=True), pub, rights[2])
     except ValueError as e: return {"error": str(e)}, 400
+    try: history.add({"kind": "relief", "what": "settings", "where": "Relief settings", "text": "Relief settings saved", "link": "/relief", **by()})
+    except Exception as x: print(f"WARNING: relief settings could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
     return _relief_settings_reply(pub, saved)
 
 def _relief_codes_refused():
