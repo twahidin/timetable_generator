@@ -193,6 +193,12 @@ def annotate(shown, newer_all, may):
         u = unit_of(e)
         if u:
             units.setdefault(u, []).append(e)
+    by_key, replaced = {}, []   # newer_all indexed once: by what each entry touches, and the whole-setup replacements
+    for x in newer_all:
+        if x.get("kind") == "setup-replaced":
+            replaced.append(x)
+        for k in _touches(x)[0]:
+            by_key.setdefault(k, []).append(x)
     done = {}
     for e in shown:
         u = unit_of(e)
@@ -204,7 +210,14 @@ def annotate(shown, newer_all, may):
                 done[u] = None
             else:
                 last = ents[-1]["id"]
-                why = why_not(ents, [x for x in newer_all if x.get("id") > last])
+                need = set()
+                for x in ents:
+                    need |= _touches(x)[1]
+                hits = {}   # only the entries that could block this unit, newest first: why_not skips all the others anyway
+                for x in replaced + [y for k in need for y in by_key.get(k, ())]:
+                    if x.get("id") > last:
+                        hits[x["id"]] = x
+                why = why_not(ents, sorted(hits.values(), key=lambda x: x["id"], reverse=True))
                 done[u] = {"unit": u, "n": len(ents), "ok": why is None, "why": why}
         if done[u] is not None:
             e["back"] = dict(done[u])

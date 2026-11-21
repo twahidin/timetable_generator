@@ -226,6 +226,51 @@ def annotate_marks_each_unit():
     assert by_id[c[0]["id"]]["back"] == {"unit": "b:bcc", "n": 1, "ok": True, "why": None}
     assert P.PUTTABLE == {"group", "depts", "relief", "exams", "admin", "note", "off"}
 
+def _fake(i, **k):
+    return dict({"kind": "setup", "id": "h%016d" % i, "ts": T0 + i, "batch": "bf%d" % i, "op": "set", "section": "lessons",
+                 "row": "other%d" % (i % 50), "field": "periods", "as": "Bob Tan", "was": 1, "now": 2}, **k)
+
+@t
+def annotate_is_quick_on_a_long_history():
+    shown = [_fake(i, row="r%d" % i, field="short", batch="bs%d" % i) for i in range(1, 201)]
+    newer = [_fake(i) for i in range(30000, 10000, -1)]
+    t0 = time.time()
+    P.annotate(shown, newer, lambda ents: True)
+    took = time.time() - t0
+    print(f"annotate: 200 units against 20000 newer entries in {took:.3f}s")
+    assert took < 0.5, took
+    assert all(e["back"]["ok"] for e in shown)
+
+@t
+def annotate_gives_the_same_answers_as_why_not():
+    fresh(); sp = spec(); T = sp["teachers"][0]; L = sp["lessons"]
+    units = [
+        save(sp, [["set", "teachers", T["_id"], "short", "AA"]], ANN, "b1", T0),
+        save(sp, [["set", "teachers", sp["teachers"][1]["_id"], "short", "AA"]], ANN, "b2", T0 + 1),
+        save(sp, [["set", "lessons", L[0]["_id"], "periods", 5]], ANN, "b3", T0 + 2),
+        save(sp, [["set", "lessons", L[1]["_id"], "periods", 5]], ANN, "b4", T0 + 3),
+        save(sp, [["set", "lessons", L[2]["_id"], "periods", 5]], ANN, "b5", T0 + 4),
+    ]
+    save(sp, [["set", "teachers", T["_id"], "short", "BB"]], BOB, "b6", T0 + 10)           # same field again: blocks b1
+    save(sp, [["set", "teachers", sp["teachers"][1]["_id"], "dept", "Zed"]], BOB, "b7", T0 + 11)   # another field: b2 free
+    save(sp, [["del", "lessons", L[0]["_id"]]], CARA, "b8", T0 + 12)                          # row deleted: blocks b3
+    A_ = [{"kind": "account", "id": "hacc", "ts": T0 + 20, "as": CARA, "who": CARA, "changes": [{"name": "Zed", "field": "group"}]}]
+    H.add_many(A_)
+    H.add({"kind": "setup-replaced", "ts": T0 + 30, "text": "x", "as": CARA})      # blocks b4 and b5
+    save(sp, [["set", "teachers", sp["teachers"][2]["_id"], "short", "CC"]], ANN, "b9", T0 + 40)   # after everything: free
+    newer_all = H.read(kinds=P.TOUCH_KINDS, limit=10**7)
+    shown = [dict(e) for e in newer_all if e.get("batch") in {"b1", "b2", "b3", "b4", "b5", "b9"}]
+    P.annotate(shown, newer_all, lambda ents: True)
+    assert len(shown) == 6
+    for e in shown:
+        es = sorted((x for x in newer_all if x.get("batch") == e["batch"]), key=lambda x: x["id"])
+        want = P.why_not(es, [x for x in newer_all if x["id"] > es[-1]["id"]])
+        assert e["back"]["why"] == want and e["back"]["ok"] == (want is None), (e["batch"], e["back"], want)
+    whys = {e["batch"]: e["back"]["why"] for e in shown}
+    assert whys["b9"] is None and whys["b1"].endswith("changed this again on " + H.short_when(T0 + 10)) and whys["b3"].startswith("Can't put back: Cara Ng")
+    assert all(whys[b].startswith("Can't put back: the whole setup") for b in ("b2", "b4", "b5"))
+
+
 # ------------------------------------------------------------------------------------------------ the app
 import secrets  # noqa: E402
 os.environ.update(SECRET_KEY=secrets.token_hex(16), COMMITTEE_CODE=secrets.token_hex(8))
