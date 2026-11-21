@@ -14,7 +14,7 @@
   const S = { who: "", where: "", dept: "", from: "", to: "", signins: false, entries: [], more: false, admin: false, depts: [], token: 0, busy: false,
     scope: "", download: false, since: "", keep: "", posting: false };
   try { S.who = new URLSearchParams(location.search).get("who") || ""; } catch (e) { S.who = ""; }
-  try { S.since = new URLSearchParams(location.search).get("since") || ""; } catch (e) { S.since = ""; }
+  try { const sv = new URLSearchParams(location.search).get("since") || ""; S.since = /^\d+(\.\d+)?$/.test(sv) ? sv : ""; } catch (e) { S.since = ""; }
 
   /* ---------------------------------------------------------------- small helpers */
   function h(tag, attrs, ...kids) {
@@ -141,7 +141,11 @@
     if (S.since && Number.isFinite(secs)) {
       const d = new Date(secs * 1000);
       kids.push(h("p", { class: "muted" }, h("span", { text: `Since ${dayName(d)}, ${clock(d)} ` }),
-        h("button", { type: "button", id: "showAll", text: "Show all", onclick: () => { S.since = ""; load(false); } })));
+        h("button", { type: "button", id: "showAll", text: "Show all", onclick: () => {
+          S.since = "";
+          try { const u = new URL(location.href); u.searchParams.delete("since"); history.replaceState(null, "", u); } catch (e) { /* the address stays as it is */ }
+          load(false);
+        } })));
     }
     box.replaceChildren(...kids);
   }
