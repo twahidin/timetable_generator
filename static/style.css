@@ -555,3 +555,14 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 @media (max-width:1099px){#bdSide{flex-basis:220px;width:220px}}
 @media (max-width:899px){.bdmain{flex-direction:column;align-items:stretch}#bdSide{flex:none;width:auto!important;flex-basis:auto!important;height:320px;min-height:0}.bdgrip{display:none}}
 .bdcard.tray .bdwas{white-space:normal}
+/* step 8's upload: two numbered boxes, each opened by a click or a dropped file */
+.upboxes{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px}
+.upbox{display:flex;align-items:center;flex-wrap:wrap;gap:10px 12px;border:2px dashed #b9c6da;border-radius:12px;padding:14px 16px;cursor:pointer;background:rgba(255,255,255,.6);transition:background .15s,border-color .15s}
+.upbox:hover,.upbox.over{border-color:var(--accent);background:#eef4ff}
+.upbox.has{border-style:solid;border-color:#9fd8b0;background:#eef9f1}
+.upbox.dim:not(:hover){opacity:.65}
+.upn{flex:0 0 28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center}
+.upt{flex:1;display:flex;flex-direction:column;min-width:150px}
+.upgo{border:1px solid var(--line);border-radius:8px;padding:6px 12px;background:#fff;font-size:13px}
+.upname{margin:6px 4px 0;min-height:22px;font-size:13px}
+.upok{color:#1d5b33;font-weight:600;word-break:break-all}
