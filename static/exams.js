@@ -50,8 +50,8 @@
 
   /* ---------------------------------------------------------------- the server */
   async function homeLink() {
-    let to = "/relief";
-    try { const r = await fetch("/api/exams/me", { cache: "no-store" }), j = await r.json(); if (j && j.name === "Timetable committee") to = "/"; } catch (e) { /* keep the staff link */ }
+    let to = "/home";
+    try { const r = await fetch("/api/exams/me", { cache: "no-store" }), j = await r.json(); if (j && j.home) to = j.home; } catch (e) { /* keep the person's home */ }
     return to;
   }
 
@@ -183,8 +183,9 @@
     const du = await api("GET", "/api/exams/my-duties");
     S.duties = du.ok ? du.j : null;
     if (!me.j.can_use) {
-      if (!S.duties) { fail(du.j.error || "Something went wrong.", "/relief"); return; }
-      $("#main").innerHTML = `<div class="head"><h1>My exam duties</h1></div>${dutiesCard(true)}<p><a href="/relief">Back to Relief</a></p>`;
+      const home = me.j.home || "/home";   /* a person's way back is their home page */
+      if (!S.duties) { fail(du.j.error || "Something went wrong.", home); return; }
+      $("#main").innerHTML = `<div class="head"><h1>My exam duties</h1></div>${dutiesCard(true)}<p><a href="${esc(home)}">Back to Home</a></p>`;
       return;
     }
     const r = await api("GET", "/api/exams");

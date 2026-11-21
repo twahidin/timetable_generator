@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>History</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+.hp{max-width:1100px;margin:0 auto;padding:20px}
+.hp .msg{border-radius:10px;padding:9px 14px;margin:0 0 12px;font-size:13.5px;line-height:1.5;background:var(--warn-bg);color:var(--warn);font-weight:600}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 14px}
+.filters label{display:inline-flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)}
+.filters input[type=search]{min-width:170px}
+.filters button.on{border-color:var(--accent);color:#1d4ed8;font-weight:600}
+.day{font-weight:700;font-size:13px;color:var(--muted);margin:18px 0 6px;text-transform:none}
+.e{display:grid;grid-template-columns:72px 190px minmax(0,1fr);gap:10px;align-items:start;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin:0 0 6px}
+.e .t{color:var(--muted);font-size:12.5px;white-space:nowrap;padding-top:1px}
+.e .who{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}
+.e .who span{color:var(--muted);font-size:12px}
+.e .what{min-width:0;overflow-wrap:anywhere;line-height:1.5}
+.e .where{display:inline-block;background:var(--chip);color:var(--navy);border-radius:6px;padding:0 7px;font-size:11.5px;font-weight:600;margin-right:7px}
+.e .was{text-decoration:line-through;color:#8a93a3}
+.e .now{color:var(--ok);font-weight:600}
+.e .why{color:var(--muted);font-size:12.5px;margin-top:2px}
+.e.app{background:#f1f3f6;margin-left:26px;color:#5d6678}
+.e.refused{background:#f7f7f8;color:var(--muted)}
+.e.refused .what{font-style:italic}
+.e a{color:var(--accent)}
+.more{margin:14px 0}
+@media (max-width:700px){.hp{padding:12px}.e{grid-template-columns:minmax(0,1fr);gap:2px}.e.app{margin-left:12px}.filters input[type=search],.filters select{flex:1 1 140px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">⇄</span><div><div class="title">History</div><div class="sub">Who changed what, and when.</div></div></div>
+  <div class="top-actions">
+    <a class="ghost filebtn" href="/home">Home</a>
+    <a class="ghost filebtn" href="/logout">Sign out</a>
+  </div>
+</header>
+<main class="hp">
+  <div id="msg" role="status"></div>
+  <div class="filters" id="filters"></div>
+  <div id="list"><p class="muted">Loading…</p></div>
+  <div class="more" id="more"></div>
+</main>
+<script src="/static/history.js"></script>
+</body>
+</html>
