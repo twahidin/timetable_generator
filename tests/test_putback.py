@@ -226,4 +226,135 @@ def annotate_marks_each_unit():
     assert by_id[c[0]["id"]]["back"] == {"unit": "b:bcc", "n": 1, "ok": True, "why": None}
     assert P.PUTTABLE == {"group", "depts", "relief", "exams", "admin", "note", "off"}
 
+# ------------------------------------------------------------------------------------------------ the app
+import secrets  # noqa: E402
+os.environ.update(SECRET_KEY=secrets.token_hex(16), COMMITTEE_CODE=secrets.token_hex(8))
+import app as A  # noqa: E402
+from accounts import passwords as PW, people as PP  # noqa: E402
+
+CORA, DEV, HAL, HIA, TEA = "Cora Chen", "Dev Rao", "Hal Soh", "Hia Lim", "Tess Ong"
+NOT_HERE = "This change cannot be put back here."
+ONLY_COMMITTEE = "Only the timetable committee can put back someone else's change."
+PP.update(lambda d: d["people"].update({
+    CORA: dict(group="committee", added=True, username="cora.c", pw=PW.hash_pw(secrets.token_hex(8))),
+    DEV: dict(group="committee", added=True, username="dev.r", pw=PW.hash_pw(secrets.token_hex(8))),
+    HAL: dict(group="hod", added=True, depts=["EL"], username="hal.s", pw=PW.hash_pw(secrets.token_hex(8))),
+    TEA: dict(group="teacher", added=True)}))
+
+def as_person(name, via="password"):
+    c = A.app.test_client()
+    with c.session_transaction() as s:
+        s.update(who=name, via=via, n=PP.record(PP.load(), name)["n"])
+        if via == "password": s["exp"] = time.time() + 3600
+    return c
+
+def start():
+    fresh(); sp = spec(); store.replace_setup(sp, "test"); return store.setup_record()["spec"]
+
+def change(c, *ops):
+    r = c.post("/api/setup/changes", json={"client": "x", "since": store.setup_record()["v"], "ops": [list(o) for o in ops]}); assert r.status_code == 200, r.get_json()
+    return r.get_json()
+
+def entries(kind="setup"): return sorted(H.read(kinds=[kind], limit=10 ** 6), key=lambda e: e["id"])
+
+def back(c, eid):
+    r = c.post("/api/history/back", json={"id": eid}); return r.status_code, r.get_json()
+
+def field(sec, i, f): return store.setup_record()["spec"][sec][i][f]
+
+@t
+def committee_puts_back_a_save():
+    sp = start(); T = sp["teachers"][0]; was = T["short"]
+    v0 = store.setup_record()["v"]
+    change(as_person(CORA), ["set", "teachers", T["_id"], "short", "ZZ"])
+    first = entries()[-1]; assert field("teachers", 0, "short") == "ZZ"
+    s, j = back(as_person(DEV), first["id"])
+    assert (s, j) == (200, {"done": True, "text": "Put back."}), (s, j)
+    assert field("teachers", 0, "short") == was
+    e = entries()[-1]
+    assert e["putback"] == "b:" + first["batch"], e
+    assert e["putback_of"] == CORA and e["putback_ts"] == first["ts"] and e["as"] == DEV, e
+    r = as_person(DEV).get(f"/api/setup/changes?since={v0}&client=y").get_json()
+    assert any(o == ["set", "teachers", T["_id"], "short", was] for p in r["patches"] for o in p["ops"]), r
+
+@t
+def a_save_of_three_goes_back_whole():
+    sp = start(); T = sp["teachers"][:3]; was = [x["short"] for x in T]
+    c = as_person(CORA)
+    change(c, *[["set", "teachers", x["_id"], "short", "Q%d" % i] for i, x in enumerate(T)])
+    es = entries(); assert len(es) == 3
+    j = as_person(DEV).get("/api/history").get_json()
+    assert [e["back"]["n"] for e in j["entries"] if e["id"] in {x["id"] for x in es}] == [3, 3, 3], j
+    assert back(c, es[1]["id"])[0] == 200
+    assert [field("teachers", i, "short") for i in range(3)] == was
+
+@t
+def put_back_twice_is_refused():
+    sp = start(); T = sp["teachers"][0]; c = as_person(CORA)
+    change(c, ["set", "teachers", T["_id"], "short", "ZZ"]); e = entries()[-1]
+    assert back(c, e["id"])[0] == 200
+    s, j = back(c, e["id"]); assert s == 409 and j["error"].startswith("Already put back by " + CORA + " on "), j
+
+@t
+def put_back_refuses_when_the_value_moved_under_it():
+    sp = start(); T = sp["teachers"][0]; c = as_person(CORA)
+    change(c, ["set", "teachers", T["_id"], "short", "ZZ"]); e = entries()[-1]
+    real = store._record
+    store._record = lambda es: None
+    try: store.apply_changes([["set", "teachers", T["_id"], "short", "NEW"]], "z")
+    finally: store._record = real
+    s, j = back(c, e["id"])
+    assert (s, j) == (409, {"error": "Can't put back: this was changed again since."}), (s, j)
+    assert field("teachers", 0, "short") == "NEW"
+
+@t
+def head_puts_back_only_their_own():
+    sp = start(); L = sp["lessons"][0]; assert L["dept"] == "EL"
+    h = as_person(HAL)
+    change(h, ["set", "lessons", L["_id"], "periods", 9]); mine = entries()[-1]
+    change(as_person(CORA), ["set", "lessons", sp["lessons"][1]["_id"], "periods", 7]); theirs = entries()[-1]
+    j = h.get("/api/history").get_json()
+    by_id = {e["id"]: e for e in j["entries"]}
+    assert by_id[mine["id"]]["back"]["ok"] is True and "back" not in by_id[theirs["id"]], j
+    assert back(h, theirs["id"]) == (403, {"error": ONLY_COMMITTEE})
+    assert field("lessons", 1, "periods") == 7
+    assert back(h, mine["id"])[0] == 200 and field("lessons", 0, "periods") == L["periods"]
+
+@t
+def head_put_back_judged_on_the_setup_now():
+    sp = start(); L = sp["lessons"][0]; h = as_person(HAL)
+    change(h, ["set", "lessons", L["_id"], "periods", 9]); mine = entries()[-1]
+    sub = next(x for x in sp["subjects"] if x["subject"] == L["subject"])
+    change(as_person(CORA), ["set", "subjects", sub["_id"], "dept", "MA"])   # the lesson's department follows its subject
+    s, j = back(h, mine["id"]); assert s == 409 and j["error"] and "changed again" not in j["error"], (s, j)
+    assert field("lessons", 0, "periods") == 9
+
+@t
+def cannot_put_back_kinds():
+    sp = start(); L = sp["lessons"][0]
+    h = as_person(HAL); change(h, ["set", "lessons", sp["lessons"][5]["_id"], "periods", 3])   # another department: refused
+    refused = entries("setup-refused")[-1]
+    ids = [refused["id"]]
+    for k in ("signin", "board", "relief"): ids.append(H.add({"kind": k, "who": CORA, "as": CORA, "text": k})["id"])
+    store.replace_setup(spec(), "again"); ids.append(entries("setup-replaced")[-1]["id"])
+    j = as_person(CORA).get("/api/history?signins=1").get_json()
+    assert j["entries"] and all("back" not in e for e in j["entries"] if e["id"] in ids), j
+    c = as_person(CORA)
+    for i in ids: assert back(c, i) == (409, {"error": NOT_HERE}), i
+    assert back(c, "h-none")[0] == 404 and back(c, "h-none")[1] == {"error": "That entry is not in the history."}
+
+@t
+def a_broken_line_is_skipped():
+    sp = start(); T = sp["teachers"][0]; c = as_person(CORA)
+    change(c, ["set", "teachers", T["_id"], "short", "ZZ"]); e = entries()[-1]
+    with open(os.path.join(H.DIR, e["at"][:7] + ".jsonl"), "a") as f: f.write('{"kind": "set')
+    r = c.get("/api/history"); assert r.status_code == 200
+    assert any("back" in x for x in r.get_json()["entries"]), r.get_json()
+
+@t
+def teacher_cannot_post():
+    start()
+    r = as_person(TEA, "code").post("/api/history/back", json={"id": "x"}); assert r.status_code == 401, r.status_code
+    assert A.app.test_client().post("/api/history/back", json={"id": "x"}).status_code == 401
+
 print(f"test_putback: {COUNT} tests passed")

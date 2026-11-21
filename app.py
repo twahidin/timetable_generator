@@ -13,7 +13,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, draft, history, store, sync, typed
+import access, checks, draft, history, putback, store, sync, typed
 from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, people as relief_people, settings as relief_settings
 from ttgen import choices
@@ -1625,12 +1625,59 @@ def api_history():
     if scope == "dept" and dept is not None and dept not in mine: return jsonify(entries=[], more=False, admin=has("admin"), depts=mine, scope=scope, download=False)
     found = history.read(where=where, dept=dept, since=since, until=until, signins=signins, before=before, limit=limit + 1,
                          who_contains=who_ or None, allow=allow)
+    shown = found[:limit]
+    if shown and (has("setup") or has("admin")):
+        oldest = min(e.get("ts") or 0 for e in shown)
+        putback.annotate(shown, history.read(since=oldest - 60, kinds=putback.TOUCH_KINDS, limit=10 ** 7), may_put_back)
     for e in found:
         if "link" in e and not _SAFE_LINK.match(e["link"] if isinstance(e["link"], str) else ""): del e["link"]
     try: depts = [str(d) for d in store.setup_record()["spec"]["school"]["departments"]]
     except Exception: depts = []
     if scope == "dept": depts = mine
     return jsonify(entries=found[:limit], more=len(found) > limit, admin=has("admin"), depts=depts, scope=scope, download=has("history"))
+
+CANT_BACK = "This change cannot be put back here."
+
+def may_put_back(es):
+    """may the signed-in person put back this unit (its entries, oldest first)? The committee any setup change, a head
+    signed in by name their own; an admin an account change. The shared heads' code never puts back"""
+    if not es: return False
+    if putback.unit_of(es[0]).startswith("a:"): return has("admin")
+    if has("committee"): return True
+    p = who()
+    return is_head() and p is not None and all(e.get("who") == p["name"] for e in es)
+
+@app.post("/api/history/back")
+@need("setup", "admin")
+def history_back():
+    """put back one setup change (the whole save it was made in): the reverse operations are applied under the store's
+    lock, only when every row and field is still as the save left it"""
+    body = request.get_json(force=True, silent=True)
+    eid = body.get("id") if isinstance(body, dict) else None
+    e = history.find(eid)
+    if e is None: return {"error": "That entry is not in the history."}, 404
+    if putback.unit_of(e) is None: return {"error": CANT_BACK}, 409
+    got = putback.gather(eid)
+    if got is None: return {"error": CANT_BACK}, 409
+    unit, es, newer = got
+    if unit.startswith("a:"):
+        if not may_put_back(es): return {"error": "Only the timetable committee can put back someone else's change."}, 403
+        return {"error": CANT_BACK}, 409    # account changes are put back by a later step
+    if not may_put_back(es): return {"error": "Only the timetable committee can put back someone else's change."}, 403
+    why = putback.why_not(es, newer)
+    if why: return {"error": why}, 409
+    ops = putback.reverse(es)
+    depts = head_depts() if is_head() else None
+    def check(spec, o):
+        sentence = putback.changed_since(spec, es)
+        if sentence or not is_head(): return sentence
+        refused = sync.head_split(spec, o, depts)[1]
+        return refused[0][1] if refused else None
+    tag = {"putback": unit, "putback_of": es[0].get("as"), "putback_ts": es[0].get("ts")}
+    try: store.apply_changes(ops, "history", check=check, by=by(), tag=tag)
+    except store.Refused as x: return {"error": str(x)}, 409
+    except LookupError: return {"error": "There is no saved setup to change yet."}, 409
+    return {"done": True, "text": "Put back."}
 
 ONLY_ADMIN = "Only an admin can open this page."
 
