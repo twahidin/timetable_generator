@@ -67,7 +67,7 @@ def rooms_free(pub, cal, sched, sitting, xset, taken) -> list:
                 if span[0] >= hi - rules["stay"]:   # busy only for the minutes they stay after the last finish
                     return f"{l['subject']} with {who} from {_days.hhmm(span[0])} (invigilators stay until {_days.hhmm(hi)})"
                 return f"{l['subject']} with {who} until {_days.hhmm(span[1])}"
-            if l.get("rain") == name and (sitting["key"], name) not in anyway:
+            if name in [x.strip() for x in str(l.get("rain") or "").split(",")] and (sitting["key"], name) not in anyway:   # "Hall, LT2"
                 return f"rain room for {l['subject']} with {who}"
         if name in taken:
             return "used by another sitting"

@@ -501,13 +501,17 @@
   const needMade = () => `<div class="card"><p class="muted">${S.view ? "Nothing is made yet. Press Make on the Schedule tab." : "Loading…"}</p></div>`;
 
   /* ---------------------------------------------------------------- tab 4: schedule */
+  /* a part day that starts with the school day: "lessons from 09:00"; one in the middle of the day: "lessons outside 09:40–10:40" */
+  const fromFirst = d => { const p = periods(); return !p.length || d.window[0] === p[0][0]; };
+  const partWords = d => fromFirst(d) ? `lessons from ${esc(d.window[1])}` : `lessons outside ${esc(d.window[0])}–${esc(d.window[1])}`;
+
   function dayCells(d) {
     const levels = S.view.levels || [];
     return levels.map(l => {
       if (!(d.levels || []).includes(l)) return `<td><span class="pp norm">normal lessons</span></td>`;
       const ps = (d.papers || {})[l] || [];
       const blocks = ps.map(p => `<span class="pp ex"><b>${esc(p.label)}</b> ${esc(p.start)}–${esc(p.end)}</span>`).join("");
-      const after = !d.whole && d.window ? `<span class="pp norm">lessons from ${esc(d.window[1])}</span>` : "";
+      const after = !d.whole && d.window ? `<span class="pp norm">${partWords(d)}</span>` : "";
       return `<td>${blocks || (d.whole ? `<span class="muted small">no paper</span>` : "")}${after}</td>`;
     }).join("");
   }
@@ -520,7 +524,7 @@
     const gone = (sm.gone || []).length ? `<div class="notice">${sm.gone.map(g => `<div>${esc(g)}</div>`).join("")}</div>` : "";
     const rows = sm.days.map(d => {
       if (d.day == null) return `<tr><td><b>${esc(fmtDate(d.date))}</b></td><td class="muted" colspan="${levels.length || 1}">Not a school day</td></tr>`;
-      return `<tr><td><b>${esc(fmtDate(d.date))}</b><br><span class="muted small">${esc(d.day)} · ${d.whole ? "whole day" : "part, to " + esc(d.window[1])}</span></td>${dayCells(d)}</tr>
+      return `<tr><td><b>${esc(fmtDate(d.date))}</b><br><span class="muted small">${esc(d.day)} · ${d.whole ? "whole day" : fromFirst(d) ? "part, to " + esc(d.window[1]) : `part, ${esc(d.window[0])}–${esc(d.window[1])}`}</span></td>${dayCells(d)}</tr>
         <tr><td colspan="${levels.length + 1}" class="small muted dayline">Teachers: <b>${d.freed}</b> freed by the exam · <b>${d.on_duty}</b> on duty · <b>${d.teaching}</b> still teaching · <span class="${d.backups ? "amber" : ""}">${d.backups} ${d.backups === 1 ? "backup" : "backups"}</span></td></tr>`;
     }).join("");
     const make = v.students_missing ? `<span class="msg bad">${esc(NO_STUDENTS)}</span>`

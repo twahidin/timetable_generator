@@ -221,15 +221,20 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
             hall = (xset["rooms"].get(d["room"]) or {}).get("hall")
             got = candidates(pub, cal, sched, xset, d["date"], d["start"], d["end"], others, subjects_of[d["key"]],
                              exclude=d["names"], _other=other[year])
-            for group in ("freed", "free", "backups", "need_backup"):
-                for c in got[group]:
-                    if left <= 0:
-                        break
-                    d["names"].append(c["name"])
-                    d["reasons"][c["name"]] = c["reason"]
-                    if group == "need_backup":
-                        d["backup"][c["name"]] = c["rows"]
-                    left -= 1
+            order = [(group, c) for group in ("freed", "free", "backups", "need_backup") for c in got[group]]
+            if hall and not any(n in xset["chiefs"] for n in d["names"]):   # a hall: a free chief invigilator first, if any
+                chief = next(((g, c) for g, c in order if c["name"] in xset["chiefs"] and g != "need_backup"), None)
+                if chief:
+                    order.remove(chief)
+                    order.insert(0, chief)
+            for group, c in order:
+                if left <= 0:
+                    break
+                d["names"].append(c["name"])
+                d["reasons"][c["name"]] = c["reason"]
+                if group == "need_backup":
+                    d["backup"][c["name"]] = c["rows"]
+                left -= 1
         d["short"] = max(0, d["need"] - len(d["names"]))
         if (xset["rooms"].get(d["room"]) or {}).get("hall") and d["names"]:
             d["chief"] = next((n for n in xset["chiefs"] if n in d["names"]), d["names"][0])

@@ -440,6 +440,14 @@ def rooms_busy_with_running_lessons():
     assert got["Hall"] == "", got
 
 @t
+def a_lesson_with_two_rain_rooms_keeps_both():
+    import copy
+    pub = copy.deepcopy(_PUB); pub["model"]["lessons"][5]["rain"] = "Hall, LT2"
+    s = _sit([_paper(who="level", date="2026-10-05", start="09:00")])
+    got = {r["name"]: r["busy"] for r in SE.rooms_free(pub, F.CAL, s, _first(s), _xset(), set())}
+    assert got["Hall"] == "rain room for PE with 4A" and got["LT2"] == "rain room for PE with 4A", got
+
+@t
 def own_class_in_own_room():
     s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
     st, r = _seated(s, rooms=("3-01", "3-02", "4-01", "Hall"))
@@ -584,6 +592,16 @@ def common_test_teacher_not_free_is_not_used_and_halls_get_invigilators():
     s["seating"]["home_rooms"] = False
     d, _ = _duties(s, rooms=("Hall",))
     assert d[0]["room"] == "Hall" and d[0]["need"] == 2 and "supervises their own lesson" not in d[0]["reasons"].values(), d[0]
+
+@t
+def hall_chief_comes_from_the_chiefs_list():
+    s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
+    s["seating"]["home_rooms"] = False
+    x = _xset(); x["chiefs"] = ["Mr Hafiz Rahman"]
+    d, _ = _duties(s, rooms=("Hall",), xset=x)
+    assert d[0]["room"] == "Hall" and d[0]["need"] == 3 and d[0]["chief"] == "Mr Hafiz Rahman" and "Mr Hafiz Rahman" in d[0]["names"], d[0]
+    d, _ = _duties(s, rooms=("Hall",))
+    assert d[0]["chief"] == d[0]["names"][0] and "Mr Hafiz Rahman" not in d[0]["names"], d[0]
 
 @t
 def locked_names_kept():
@@ -1114,7 +1132,8 @@ def the_pages_carry_the_words():
     for words in ("How to seat", "Own class in own home room", "Mix classes", "Alternate levels by column", "Alternate papers",
                   "One level per block", "Class, then Student ID", "Every seat", "A seat left between", "Let the app choose",
                   "Not free: ", "The exam changed since Make: press Make again.",
-                  "The published timetable has no students yet: add them on the Students step and publish again to check clashes and seat students."):
+                  "The published timetable has no students yet: add them on the Students step and publish again to check clashes and seat students.",
+                  "lessons outside "):
         assert words in js, words
 
 print(f"{COUNT} exams tests passed")
