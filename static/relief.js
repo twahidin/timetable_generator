@@ -648,8 +648,10 @@
     $("#title").textContent = `Relief · ${me.name}`;
     $("#ttLink").href = `/timetable#teachers/${enc(me.name)}`;
     $("#settingsLink").hidden = !me.can_settings;
+    const note = me.published === false ? `<p class="muted small">The timetable is not published yet.</p>` : "";
     const about = [(me.depts || []).join(", "), me.on_management ? "Management" : "", me.on_team ? "Relief team" : ""].filter(Boolean).join(" · ");
     const w = $("#who"); w.textContent = about; w.hidden = !about;
+    if (note) w.insertAdjacentHTML("afterend", note);
     $("#loading").remove();
     const want = (location.hash || "").slice(1);
     go(allowed(want) ? want : "mine");

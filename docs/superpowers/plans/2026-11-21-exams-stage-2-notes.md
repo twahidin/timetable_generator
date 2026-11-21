@@ -39,9 +39,9 @@ Design: `../specs/2026-11-20-exams-and-events-design.md`. Stage 1: `2026-11-21-e
   card; `GET /api/exams/my-duties`) and **My exam timetable** (a student's own papers with report time, venue and seat,
   and their access arrangement's room and times only for them; `GET /api/me/exams`, personal code, used by parents too).
 - A full Make now clears a pin of a vanished sitting (stage 1's follow-up). "Scripts go to" is a new field on an exam.
-- Rights live in six helpers in `app.py` (`_exams_gate`, `_exams_rights`, `_exams_can_approve`, `_exams_can_keep_list`,
-  `_published_reader`, `_exams_student`) and `@need(...)` uses only today's role names: no other exams line reads the
-  role or the session, so the personal-accounts work rewrites them in one place.
+- Rights live in five helpers in `app.py` (`_exams_gate`, `_exams_rights`, `_exams_can_approve`, `_published_reader`,
+  `_exams_student`), which read the accounts' rights since the merge with accounts (see "Merged with accounts" below);
+  every route names its right with `@need(...)`, and no other exams line reads the session.
 - No model, Telegram or network call anywhere; nobody is messaged yet.
 
 ## The controller's brief: decisions (B1 to B13)
@@ -49,7 +49,7 @@ Design: `../specs/2026-11-20-exams-and-events-design.md`. Stage 1: `2026-11-21-e
 1. States: draft, waiting, approved, sent back, approved with changes waiting, withdrawn, "ended" computed. Kept in the
    schedule JSON: `status`, `approved` (a frozen copy), `approved_at`, `approved_by`, `sent_at`, `sent_by`, `note`, `log`.
 2. Send needs Make done, not stale, no check error; Approve, Send back, Withdraw and the same for changes are the timetable
-   committee's (`_exams_can_approve`, role committee today). Approving copies the working copy; Withdraw removes the copy
+   committee's (`_exams_can_approve`: the `committee` right since the merge with accounts). Approving copies the working copy; Withdraw removes the copy
    and the main site stops showing it.
 3. After approval, any edit and Make leave the copy live; "Send the changes" computes the difference list and puts the
    schedule in "changes waiting".
@@ -124,8 +124,9 @@ every change below, each with a test (the made-up school only).
 5. `/api/day` takes only YYYY-MM-DD (`fromisoformat(raw).isoformat() == raw`): no week dates or short forms.
 6. A schedule with changes waiting holds both copies for the other schedules (the working duties that differ are
    "waiting").
-7. Who keeps the exams committee list (`_exams_can_keep_list`) and the student of `/api/me/exams` (`_exams_student`) are
-   named helpers; no other exams line reads the role or the session (a test reads `app.py` for it).
+7. The student of `/api/me/exams` (`_exams_student`) is a named helper; no other exams line reads the session (a test
+   reads `app.py` for it). (Who kept the exams committee list, `_exams_can_keep_list`, went with the merge with accounts:
+   the list is the people file's.)
 8. The "Someone is away" panel lists every duty of the approved copy ("Duty on the main site").
 9. My exam duties lists the lessons that don't happen for a teacher with no duty too (the card shows for them).
 10. The timetable check without a publish date reads "a new timetable was published." (never "published on .").
@@ -270,14 +271,39 @@ What the fix wave below closed is gone from this list.
   is away. Relief's absences should feed "Someone is away" (today the exams committee says who is away). Relief stage 3
   adds its own layer to the same `/api/day` answer: the `exams` key is a small object so another key can sit beside it.
   Nothing tells a teacher or student yet (no Telegram, no page notice beyond the banner).
-- **Stage 4 and accounts.** `_exams_gate`, `_exams_rights`, `_exams_can_approve`, `_exams_can_keep_list`,
-  `_published_reader` and `_exams_student` are the only places that read the role or the session; personal accounts
-  rewrite them. A history page with "Put back" can read `log` and the
-  approved copy; no history page exists yet. The staff code in the pane could not be tried, so My exam duties needs a
-  browser check once accounts exist.
+- **Stage 4 and accounts.** Accounts are merged in (see below): `_exams_gate`, `_exams_rights`, `_exams_can_approve`,
+  `_published_reader` and `_exams_student` read the accounts' rights. Every approval step is in the History; a "Put
+  back" can read `log` and the approved copy. My exam duties still needs a browser check with a person signed in by name.
 - The real timetable has no student list: real seating needs the students uploaded or added to the setup and published.
 - Real rooms were not scarce at 08:00 (the stage 1 time-reading error stays fixed); the common-test margin warning is
   unchanged.
+
+## Merged with accounts (PR #83)
+
+Main 6ba7101 (accounts stage 1) was merged into this branch on 21 November 2026 (merge dd1ebaf, then one follow-up
+commit). What the merge chose where the two meet:
+
+- **Every route names an accounts right** (all pinned in `tests/test_routes.py`): `/api/day`, `/api/published/exams`
+  and its prints `need("timetable")` (who held the old roles committee, head, teacher, student and staff);
+  `/api/me/exams` `need("own")` (a student's personal code); review, send, approve, send back, withdraw and someone
+  away `need("exams", "committee")`, as every other exams route; `/api/exams/my-duties` `need("timetable")`.
+- **The helpers read rights.** `_exams_can_approve` is `has("committee")`: the shared committee code or a committee
+  member signed in with their password (a committee member by code, or the Exams and events extra alone, cannot
+  approve, send back or withdraw). `_published_reader` is "student" for the shared student code, "full" for anyone
+  else holding `timetable`. `_exams_student` reads the student only with `own`. `_exams_rights` is main's (the extra or
+  the committee; "Timetable committee" for the shared code).
+- **My exam duties for everyone signed in by name.** `/exams` and `/api/exams/me` take `need("exams", "committee",
+  "timetable")`: a person without the exams rights opens the page for their own duties only (`can_use: false`), the
+  shared heads', teacher and student codes are sent to `/` (page) or refused with 403 `ONLY_EXAMS` (API); every other
+  exams page and API stays the committees'. Such a person's home page has a **My exam duties** tile where the exams
+  committee has Exams and events (an executive therefore has two tiles and is no longer sent straight to Timetables).
+  `/api/exams/my-duties` answers the shared heads', teacher and student codes 403 `ONLY_OWN_DUTIES`. The page's way
+  back is `/api/exams/me`'s `home`.
+- **History.** Send, approve, send back, withdraw and someone away each write one history entry (kind `exams`, what
+  send / approve / send-back / withdraw / away, text "<schedule>: <step>" from the schedule's newest `log` entry; the
+  send-back note stays in the log only). Main's entries for the other exams saves and stage 2's save lock are both kept.
+- **The exams committee** is the people file's Exams and events extra (until its end date), given on the admin page;
+  `_exams_can_keep_list` and `committee_ok` are gone, and no exams code reads the old settings list.
 
 ## Found by the fix wave's re-review (parked, small follow-ups)
 

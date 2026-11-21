@@ -4,8 +4,7 @@ import datetime
 import hashlib
 import json
 
-import relief.people
-import relief.settings
+from accounts import people as _accounts
 from exams import approval as _approval
 from exams import days as _days
 from exams import invigilate as _inv
@@ -74,7 +73,7 @@ def _gone(pub, sched, model, keys=None):
     """sentences for pinned students and invigilators no longer there, and per pinned duty how many names were dropped
     {pin key: n}; those pins are dropped. With keys, only the pins of those sittings (the others are kept as they are)."""
     known_s = {s["id"] for s in model.get("students") or []}
-    known_p = {p["name"] for p in relief.people.people(pub, relief.settings.load(pub)["extra_staff"])}
+    known_p = {p["name"] for p in _accounts.staff(pub)}
     pins = sched.setdefault("pins", dict(rooms={}, duties={}))
     pins.setdefault("rooms", {})
     pins.setdefault("duties", {})
@@ -115,7 +114,7 @@ def gone_now(pub, sched) -> list:
     and invigilators, and the invigilators and students of the made duties and seats (picked by hand or by the app)"""
     model = pub["model"]
     known_s = {s["id"] for s in model.get("students") or []}
-    known_p = {p["name"] for p in relief.people.people(pub, relief.settings.load(pub)["extra_staff"])}
+    known_p = {p["name"] for p in _accounts.staff(pub)}
     pins = sched.get("pins") or {}
     made = sched.get("made") or {}
     out = []

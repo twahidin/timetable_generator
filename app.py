@@ -5,20 +5,20 @@ to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable.
 Staff (a personal code each, made from their name): the Relief module and everything the teacher code opens."""
-import copy, gzip, io, os, re, shutil, sys, tempfile, traceback, zipfile
+import copy, datetime, gzip, hmac, io, os, re, shutil, sys, tempfile, time, traceback, urllib.parse, zipfile
 from functools import wraps
-from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response
+from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response, g
 from werkzeug.middleware.proxy_fix import ProxyFix
 from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, draft, store, sync, typed
+import access, checks, draft, history, store, sync, typed
+from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
 from relief import absences as relief_absences
 import exams.relief_links as exams_relief_links
 from ttgen import choices
-import datetime
 import exams.approval as exams_approval, exams.review as exams_review, exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts, exams.published as exams_published, exams.events as exams_events
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -29,25 +29,135 @@ app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
 app.json.sort_keys = False   # the setup's days (Mon..Fri) and levels keep their order through the API; the grid lists days in it
 app.config.update(MAX_CONTENT_LENGTH=40 * 1024 * 1024, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=store.on_railway(), PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 120)
-limiter = access.Limiter()
+limiter = access.Limiter()        # 10 wrong codes or passwords from one address in 10 minutes
+lockout = passwords.Lockout()     # 5 wrong passwords for one username in 15 minutes
 _cache = {}
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # ------------------------------------------------------------------------------------------------ access
-def role(): return session.get("role")
+# Who is signed in. Session keys: a shared code `role` (committee, head, teacher, student); a student's personal code
+# `role` "personal" and `sid`; a person (staff, by name) `who`, `via` ("code" or "password"), `n` (the sign-in number on
+# their record: raising it ends every older session) and, signed in with a password, `exp` (14 days). Relief stage 1's
+# sessions (`role` "staff" and `who`) count as code sessions with `n` 0. Rights come from the records on each request,
+# never from the cookie.
+API = ("/api/", "/pdf/", "/files/")
+FORTNIGHT = 14 * 24 * 3600
+SHARED_AS = {"committee": "Shared committee code", "head": "Shared heads' code", "teacher": "Shared teacher code", "student": "Shared student code"}
+_KEYS = ("role", "who", "via", "n", "exp", "sid")
+_NOBODY = dict(person=None, via=None, shared=None)
 
-def need(*roles):
+def _api(): return request.path.startswith(API)
+
+def _end(gone=False):
+    """end the session; gone: a code session whose person is no longer on the published timetable ("Code no longer valid")"""
+    session.clear(); g._gone = gone
+    return _NOBODY
+
+def _stand_in(name, data):
+    """a code session's person while nothing is published (a publish swaps folders): from their record, so the session
+    stays, as relief's did"""
+    r = people.record(data, name)
+    return dict(name=name, short=name, depts=list(r["depts"]), role="", teaches=False, staff_only=False, group=r["group"] or "teacher",
+                extras=r["extras"], username=r["username"], off=r["off"], has_password=bool(r["pw"]), last=max(r["signins"], default=None),
+                n=r["n"], must_change=r["must_change"])
+
+def _check():
+    """the session held against the records: dict(person, via, shared); a session that no longer holds is cleared"""
+    name, r = session.get("who"), session.get("role")
+    if name is not None:
+        v = session.get("via", "code")
+        if not isinstance(name, str) or v not in ("code", "password") or r not in (None, "staff"): return _end()
+        exp = session.get("exp")
+        if v == "password" and not (isinstance(exp, (int, float)) and time.time() < exp): return _end()
+        if not people.readable(): return _end()    # the records cannot be read: no one is let in by name (shared codes still work)
+        data, pub = people.load(), store.published()
+        p = people.find(name, pub, data)
+        if p is None:
+            if v == "password": return _end()       # a password session never depends on the published timetable
+            if pub: return _end(gone=True)          # dropped or renamed on a later publish
+            p = _stand_in(name, data)
+        if p["off"] or p["n"] != session.get("n", 0): return _end()
+        if v == "password" and not p.get("pw"): return _end()   # no password on the record (removed, or never set): no password session
+        p.pop("pw", None)
+        return dict(person=p, via=v, shared=None)
+    if r in people.SHARED:
+        if people.load()["ways"]["off"].get(r) is not None: return _end()   # turned off on the admin page
+        return dict(person=None, via="shared", shared=r)
+    if r == "personal": return dict(person=None, via="personal", shared=None)
+    return _NOBODY
+
+def _state():
+    """(session key, checked session, rights), worked out once a request and again only when the session changes"""
+    key = tuple(session.get(k) for k in _KEYS)
+    got = g.get("_signed")
+    if got is None or got[0] != key:
+        st = _check()
+        got = g._signed = (tuple(session.get(k) for k in _KEYS), st, rights_table.rights(st["person"], st["via"], st["shared"]))
+    return got
+
+def who():
+    """the person signed in by name (people.find, without the password hash), or None"""
+    return _state()[1]["person"]
+
+def via(): return _state()[1]["via"]
+
+def shared(): return _state()[1]["shared"]
+
+def rights(): return _state()[2]
+
+def has(right): return right in rights()
+
+def by():
+    """who the history records for this session"""
+    st = _state()[1]
+    if st["person"]: return history.by_of(st["person"]["name"], st["via"])
+    if st["via"] == "shared": return history.by_of(None, "shared", SHARED_AS[st["shared"]])
+    if st["via"] == "personal": return history.by_of(None, "personal", "A student")
+    return history.by_of(None, "?")
+
+def is_head():
+    """a head of department at the setup: the shared heads' code, or an HOD or SH signed in with their password"""
+    return has("setup") and not has("committee")
+
+def head_depts():
+    """the departments a head signed in by name may change: their record's, as a list in its order ([] when none, and then
+    every lesson change is refused); None for anyone else (the shared heads' code changes every department, as today)"""
+    p = who()
+    if p is None or not is_head(): return None
+    return list(people.record(people.load(), p["name"])["depts"])
+
+def _relief_stage_1():
+    """a session started before accounts (relief stage 1: `role` "staff" and `who`)"""
+    return session.get("role") == "staff" and who() is not None
+
+def _must_change_first():
+    """a person signed in with a one-time password chooses their own before anything else (their code sessions are not
+    stopped: the code is not the password)"""
+    p = who()
+    if p is None or via() != "password" or not (p.get("must_change") and p.get("username") and p.get("has_password")): return None
+    if _api(): return {"error": "Choose a new password first."}, 403
+    return redirect("/account/password")
+
+# every right a session can hold (accounts/rights.py gives them); need() refuses any other name when the app starts
+RIGHTS = frozenset({"committee", "setup", "timetable", "files", "history", "codes", "admin", "own", "exams",
+                    "relief", "relief.plan", "relief.settings", "relief.save", "relief.team"})
+
+def need(*names):
+    """the route needs one of these rights: the server decides, from the records, on every request. Without one, the
+    API answers 401 "Please sign in again." and a page goes to the sign-in page ("Code no longer valid" for a code
+    session whose person has left the published timetable)"""
+    wrong = sorted(set(names) - RIGHTS)
+    if not names or wrong: raise ValueError(f"need() takes right names only, not {wrong or 'nothing'}")
     def deco(f):
         @wraps(f)
         def inner(*a, **k):
-            if role() not in roles:
-                if request.path.startswith(("/api/", "/pdf/", "/files/")): return {"error": "Please sign in again."}, 401
-                return redirect("/login")
-            if role() == "staff" and me_staff() is None:   # dropped or renamed on a later publish: me_staff has ended the session
-                if request.path.startswith(("/api/", "/pdf/", "/files/")): return {"error": "Please sign in again."}, 401
-                if store.published(): return _no_longer_valid()
-                # nothing published (a publish is swapping folders): the session stays; the page says "Not published yet"
+            stop = _must_change_first()
+            if stop: return stop
+            if not rights() & set(names):
+                if _api(): return {"error": "Please sign in again."}, 401
+                return _no_longer_valid() if g.get("_gone") else redirect("/login")
             return f(*a, **k)
+        inner._need = names
         return inner
     return deco
 
@@ -57,8 +167,30 @@ def esc(s):
 def setup_problems():
     """what this deployment is missing (Railway variables, a volume): on the sign-in page and in the logs at startup"""
     _, probs = access.configured()
+    if not people.readable(): probs.append(ACCOUNTS_UNREADABLE)
+    if people.usable_admins(people.load()):   # people sign in as themselves now: a shared code left unset is not a problem
+        unset = {f"{var} is not set in Railway variables." for _, var in access.ROLES}
+        probs = [p for p in probs if p not in unset]
+    if recovery_too_short(): probs.append(RECOVERY_SHORT)
     if not store.on_volume(): probs.append("No Railway volume: the setup and the published timetable are lost on the next deploy. Add a volume mounted at /data.")
     return probs
+
+RECOVERY_MIN = 16
+RECOVERY_SHORT = "ADMIN_RECOVERY_CODE is too short (use at least 16 letters or digits); recovery is off."
+RECOVERY_ON = "A recovery code is set in Railway variables: remove it once you are back in."
+
+def _recovery_raw():
+    return (os.environ.get("ADMIN_RECOVERY_CODE") or "").strip()
+
+def recovery_code():
+    """ADMIN_RECOVERY_CODE (trimmed) when it is long enough to use: 16 characters or more. A shorter one counts as not
+    set (/login/recover is not there), so a weak value can never open an admin account"""
+    c = _recovery_raw()
+    return c if len(c) >= RECOVERY_MIN else None
+
+def recovery_too_short():
+    """ADMIN_RECOVERY_CODE is set but too short to use (the Ways in tab and the warnings say so)"""
+    return 0 < len(_recovery_raw()) < RECOVERY_MIN
 
 def startup_log():
     print(f"Timetable app: data in {store.DATA}", file=sys.stderr, flush=True)
@@ -68,82 +200,349 @@ def page(title, body):
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)}</title>
 <link rel="stylesheet" href="/static/login.css"></head><body>{body}</body></html>"""
 
-# the choices on the front page; each one accepts only its own kind of code
-CHOICES = {
-    "committee": dict(title="Build and publish the timetable", blurb="Timetable committee: build the setup, download it, publish the timetable.",
-                      label="Committee code", hint="Use the code given to the timetable committee.", roles=("committee",)),
-    "heads": dict(title="Department heads", blurb="Heads of department: who teaches which class and group, teaching groups and bands.",
-                  label="Heads' code", hint="Use the code given to heads of department.", roles=("head",)),
-    "teacher": dict(title="Teacher's timetable", blurb="Every class, teacher and room timetable, Who's free and PDFs.",
-                    label="Teacher code", hint="Use the teacher code the school gave you.", roles=("teacher", "staff")),
-    "relief": dict(title="Relief", blurb="Ask for or plan relief, set work, see your reliefs.", label="Your personal code",
-                   hint="Use the personal code on the slip from the timetable committee.", roles=("staff",), img="/static/choice-relief.svg"),
-    "exams": dict(title="Exams and events", blurb="Exam and test schedules, seating and invigilation; school events.", label="Your personal code",
-                  hint="Use the personal code on the slip from the timetable committee.", roles=("staff",), img="/static/choice-exams.svg"),
-    "student": dict(title="Student timetable", blurb="Your class timetable, or your own with a personal code.",
-                    label="Student code or personal code", hint="Use the student code the school gave you. A personal code shows only your own timetable.",
-                    roles=("student", "personal")),
-}
-CHOICE_OF = {r: k for k, c in CHOICES.items() for r in c["roles"]}   # a staff code on another card points to Relief (the later card)
-CHOICE_OF["staff"] = "relief"
+# ------------------------------------------------------------------------------------------------ signing in
+CODE_LABEL = "Your personal code (on the slip from the school)"
+TO_USERNAME = "Committee and management: sign in with your username"
+WRONG_CODE = "That code does not work. Check it and try again."
+TOO_MANY_CODES = "Too many wrong codes. Wait ten minutes and try again."
+SWITCHED_OFF = "This account is switched off. Ask the timetable committee."
+NO_ACCOUNTS = "Accounts need SECRET_KEY in Railway variables."
+NO_MATCH = "That username and password do not match."
+LOCKED = "Too many wrong tries. Wait 15 minutes and try again."
+TOO_MANY = "Too many wrong tries. Wait ten minutes and try again."
+NOT_SAME = "The two new passwords are not the same."
+NOT_CURRENT = "Your current password is not right."
+NO_PASSWORD = "You sign in with your personal code, so you have no password to change. Ask an admin if you need a username."
+NO_RECOVERY = "That username and recovery code do not match."
+RECOVERY_USED = "That recovery code has been used. Set a new ADMIN_RECOVERY_CODE in Railway variables."
+CROSS_SITE = "That request did not come from this site."
+PERSON_OFF = "Signing in as a person is off for now. Use the code the school gave your group, or ask the timetable committee."
+ACCOUNTS_UNREADABLE = "The accounts file could not be read: signing in as a person is off until it is fixed."
 NO_PERSONAL_STAFF = "Personal codes are off until SECRET_KEY is set in Railway variables."
+_SIGNED_IN = {"code": "Signed in with their code", "password": "Signed in with their password", "shared": "Signed in with a shared code",
+              "personal": "Signed in with a personal code", "recovery": "Signed in with the recovery code and set a new password"}
 
-def img_of(k): return CHOICES[k].get("img") or f"/static/choice-{k}.png"
+def accounts_on():
+    """accounts (passwords) need SECRET_KEY: without it the sessions are signed with a key that changes at every restart"""
+    return bool(os.environ.get("SECRET_KEY"))
+
+def school_name():
+    pub = store.published()
+    return ((pub or {}).get("meta") or {}).get("school") or os.environ.get("SCHOOL_NAME") or "School timetable"
+
+def _warnings():
+    return "".join(f"<p class='warn'>{esc(p)}</p>" for p in setup_problems())
+
+def _code_page(msg=""):
+    err, warn = (f"<p class='err'>{esc(msg)}</p>" if msg else ""), _warnings()
+    return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school_name())}</h1><p>Timetable</p></header>
+<div class="login one"><form method="post" action="/login"><label for="code">{esc(CODE_LABEL)}</label>
+<input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" autofocus required>
+<button type="submit">Open</button></form>{err}
+<p class="way"><a href="/login/password">{esc(TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
+
+def _form_page(title, form, msg="", hint="", back=("/login", "Sign in with a code"), tail=None):
+    """a small page with one form; tail: the HTML at its foot (the setup warnings unless given)"""
+    err = f"<p class='err'>{esc(msg)}</p>" if msg else ""
+    return page(title, f"""<main class="login"><p class="small"><a class="back" href="{back[0]}">&larr; {esc(back[1])}</a></p>
+<h1>{esc(title)}</h1><p class="muted">{esc(school_name())}</p>{form}{err}{f'<p class="muted small">{esc(hint)}</p>' if hint else ""}{_warnings() if tail is None else tail}</main>""")
+
+def _field(name, label, kind="password", auto="off", focus=False):
+    t = ' type="password"' if kind == "password" else ' autocapitalize="none" spellcheck="false"'
+    return f"""<label for="{name}">{esc(label)}</label><input id="{name}" name="{name}" class="plain"{t} autocomplete="{auto}"{" autofocus" if focus else ""} required>"""
+
+def _password_page(msg=""):
+    form = f"""<form method="post" action="/login/password">{_field("username", "Username", "text", "username", True)}
+{_field("password", "Password", auto="current-password")}<button type="submit">Sign in</button></form>""" if accounts_on() and people.readable() else ""
+    return _form_page("Sign in with your username", form, msg, "Forgotten your password? Ask an admin to give you a new one.")
+
+def _change_page(p, msg="", form=True):
+    first = "<p>Choose your own password before you go on.</p>" if p.get("must_change") else ""
+    f = f"""{first}<form method="post" action="/account/password">{_field("current", "Your current password", auto="current-password", focus=True)}
+{_field("new", "New password (at least 10 characters)", auto="new-password")}{_field("again", "New password again", auto="new-password")}
+<button type="submit">Change password</button></form>""" if form else ""
+    return _form_page("Change your password", f, msg, f"Signed in as {p['name']}.", back=("/home", "Back"), tail='<p class="small"><a href="/logout">Sign out</a></p>')
+
+def _recover_page(msg=""):
+    form = "" if not (accounts_on() and people.readable()) else f"""<form method="post" action="/login/recover">{_field("username", "Admin username", "text", "username", True)}
+{_field("code", "Recovery code (ADMIN_RECOVERY_CODE)")}{_field("new", "New password (at least 10 characters)", auto="new-password")}
+{_field("again", "New password again", auto="new-password")}<button type="submit">Set the password and sign in</button></form>"""
+    return _form_page("Admin recovery", form, msg, "The recovery code works once. Remove ADMIN_RECOVERY_CODE from Railway variables once you are back in.")
+
+def _record_signin(ok, how, name=None, shared_=None, reason=None):
+    """one history entry for a sign-in or a refused try. Never what was typed: a name only when it is a person's"""
+    as_ = name or (SHARED_AS.get(shared_) if shared_ else None) or ("A student" if how == "personal" else "Unknown")
+    entry = {"kind": "signin", "where": "Sign-in", "ok": ok, "via": how, "shared": shared_, "who": name, "as": as_, "reason": reason,
+             "addr": request.remote_addr or "?", "text": _SIGNED_IN.get(how, "Signed in") if ok else f"Sign-in refused: {reason}"}
+    try: history.add(entry)
+    except Exception as e: print(f"WARNING: a sign-in could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+
+_quiet = {}   # (what, address or username) -> when its last locked try was recorded: one line per ten minutes, however many tries
+
+def _record_locked(key, how, name=None):
+    now = time.time()
+    if now - _quiet.get(key, 0) < 600: return
+    if len(_quiet) > 5000: _quiet.clear()
+    _quiet[key] = now
+    _record_signin(False, how, name, reason="locked")
+
+def _record_account(what, name, text):
+    try: history.add({"kind": "account", "what": what, "where": "Admin", "people": [name], "changes": [], "text": text, **by()})
+    except Exception as e: print(f"WARNING: an account change could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+
+def _note_signin(name):
+    """the time on the person's record (the last two are kept); a sign-in never fails for want of it"""
+    def change(d):
+        r = d["people"].get(name)
+        if not isinstance(r, dict): r = d["people"][name] = {}
+        s = r.get("signins") if isinstance(r.get("signins"), list) else []
+        r["signins"] = [x for x in s if isinstance(x, (int, float)) and not isinstance(x, bool)][-1:] + [time.time()]
+    try: people.update(change)
+    except Exception as e: print(f"WARNING: a sign-in time could not be kept ({type(e).__name__})", file=sys.stderr, flush=True)
+
+def _lock_key(data, name, typed):
+    """the lockout's key: the account's own username when the typed one finds it (however it was typed), else what was typed"""
+    return (people.record(data, name)["username"] or typed).lower() if name else typed.lower()
+
+def _start(**keys):
+    session.clear(); session.permanent = True; session.update(keys)
 
 @app.get("/login")
-def login_page(msg="", choice=None, fix=None):
-    pub = store.published(); school = (pub["meta"]["school"] if pub else None) or os.environ.get("SCHOOL_NAME") or "School timetable"
-    warn = "".join(f"<p class='warn'>{esc(p)}</p>" for p in setup_problems())
-    link = f' <a href="/login?as={fix}">Open {esc(CHOICES[fix]["title"])}</a>' if fix else ""
-    err = f"<p class='err'>{esc(msg)}{link}</p>" if msg else ""
-    choice = choice or request.args.get("as")
-    c = CHOICES.get(choice or "") if choice != "heads" or os.environ.get("HEADS_CODE") else None
-    if not c:
-        cards = "".join(f"""<a class="choice" href="/login?as={k}"><img src="{img_of(k)}" alt="" width="112" height="112">
-<span class="txt"><b>{esc(v["title"])}</b><span class="muted small">{esc(v["blurb"])}</span></span><span class="go">Enter code &rarr;</span></a>""" for k, v in CHOICES.items() if k != "heads" or os.environ.get("HEADS_CODE"))
-        return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school)}</h1><p>Timetable</p></header>
-<nav class="choices">{cards}</nav>{f'<div class="notes">{err}{warn}</div>' if err or warn else ""}</main>""")
-    form = f"""<form method="post" action="/login"><input type="hidden" name="as" value="{choice}"><label for="code">{esc(c["label"])}</label>
-<input id="code" name="code" autocomplete="off" autocapitalize="characters" autofocus required>
-<button type="submit">Open</button></form>"""
-    if choice == "relief" and not access.personal_codes_on(): form = f"<p class='warn'>{esc(NO_PERSONAL_STAFF)}</p>"
-    return page(c["title"], f"""<main class="login"><p class="small"><a class="back" href="/login">&larr; Other choices</a></p>
-<div class="picked"><img src="{img_of(choice)}" alt="" width="56" height="56"><span><h1>{esc(c["title"])}</h1><p class="muted">{esc(school)}</p></span></div>
-{form}{err}
-<p class="muted small">{esc(c["hint"])}</p>{warn}</main>""")
+def login_page():
+    return _code_page()   # ?as= (the old cards) is accepted and ignored
 
 @app.post("/login")
 def login():
-    who = request.remote_addr or "?"
-    choice = request.form.get("as")
-    if choice not in CHOICES: return redirect("/login")
-    if limiter.blocked(who): return login_page("Too many wrong codes. Wait ten minutes and try again.", choice), 429
-    pub = store.published()
-    r, sid = access.match(request.form.get("code"), pub["codes"] if pub else {}, relief_people.staff_codes(relief_staff(pub)) if pub else {})
+    addr = request.remote_addr or "?"
+    if limiter.blocked(addr):
+        _record_locked(("addr", addr), "code"); return _code_page(TOO_MANY_CODES), 429
+    pub, data = store.published(), people.load()
+    r, val = access.match(request.form.get("code"), pub["codes"] if pub else {}, relief_people.staff_codes(people.staff(pub, data)))
+    if r in people.SHARED and data["ways"]["off"].get(r) is not None:   # a shared code turned off is a wrong code
+        limiter.fail(addr); _record_signin(False, "shared", shared_=r, reason="code turned off"); return _code_page(WRONG_CODE), 401
     if not r:
-        limiter.fail(who); return login_page("That code does not work. Check it and try again.", choice), 401
-    if r not in CHOICES[choice]["roles"]:   # a real code, but for another choice: not a guess, so no limiter strike
-        return login_page(f"That code is not for {CHOICES[choice]['title']}.", choice, fix=CHOICE_OF[r]), 403
-    session.clear(); session.permanent = True; session["role"] = r
-    if r == "staff": session["who"] = sid; return redirect({"relief": "/relief", "exams": "/exams"}.get(choice, "/timetable"))
-    if sid is not None: session["sid"] = sid
-    return redirect({"committee": "/", "head": "/", "personal": "/me"}.get(r, "/timetable"))
+        limiter.fail(addr); _record_signin(False, "code", reason="wrong code"); return _code_page(WRONG_CODE), 401
+    if r == "staff":
+        if not people.readable():   # the right code, but the records cannot be read: refused, and no strike
+            _record_signin(False, "code", val, reason="accounts file unreadable"); return _code_page(PERSON_OFF), 403
+        rec = people.record(data, val)
+        if rec["off"]:   # the right code: not a guess, so no strike
+            _record_signin(False, "code", val, reason="switched off"); return _code_page(SWITCHED_OFF), 403
+        _note_signin(val); _start(who=val, via="code", n=rec["n"]); _record_signin(True, "code", val)
+        return redirect("/home")
+    if r == "personal":
+        _start(role="personal", sid=val); _record_signin(True, "personal"); return redirect("/me")
+    _start(role=r); _record_signin(True, "shared", shared_=r)
+    return redirect("/" if r in ("committee", "head") else "/timetable")
+
+@app.route("/login/password", methods=["GET", "POST"])
+def login_password():
+    if not accounts_on(): return _password_page(NO_ACCOUNTS), 403 if request.method == "POST" else 200
+    if not people.readable(): return _password_page(PERSON_OFF), 403 if request.method == "POST" else 200
+    if request.method == "GET": return _password_page()
+    addr, data = request.remote_addr or "?", people.load()
+    username = str(request.form.get("username") or "").strip()[:200].strip()   # as by_username reads it
+    name, _ = people.by_username(data, username)
+    key = _lock_key(data, name, username)
+    if limiter.blocked(addr):
+        _record_locked(("addr", addr), "password", name); return _password_page(TOO_MANY), 429
+    if lockout.blocked(key):   # an unknown username locks the same way, so the answer never shows which usernames exist
+        _record_locked(("user", key), "password", name); return _password_page(LOCKED), 429
+    rec = people.record(data, name) if name else None
+    if not passwords.check_pw(rec["pw"] if rec else None, request.form.get("password")):
+        limiter.fail(addr); lockout.fail(key)
+        _record_signin(False, "password", name, reason="wrong password" if name else "unknown username")
+        return _password_page(NO_MATCH), 401
+    if rec["off"]:
+        _record_signin(False, "password", name, reason="switched off"); return _password_page(SWITCHED_OFF), 403
+    lockout.clear(key); _note_signin(name)
+    _start(who=name, via="password", n=rec["n"], exp=time.time() + FORTNIGHT); _record_signin(True, "password", name)
+    return redirect("/account/password" if rec["must_change"] else "/home")
+
+@app.route("/account/password", methods=["GET", "POST"])
+def account_password():
+    p = who()
+    if p is None: return redirect("/login")
+    if not accounts_on(): return _change_page(p, NO_ACCOUNTS, form=False), 403
+    if not p.get("username"): return _change_page(p, NO_PASSWORD, form=False), 403
+    if request.method == "GET": return _change_page(p)
+    addr, key = request.remote_addr or "?", p["username"].lower()
+    if limiter.blocked(addr): return _change_page(p, TOO_MANY), 429
+    if lockout.blocked(key): return _change_page(p, LOCKED), 429
+    cur, new, again = (str(request.form.get(k) or "") for k in ("current", "new", "again"))
+    rec = people.record(people.load(), p["name"])
+    if not passwords.check_pw(rec["pw"], cur):
+        limiter.fail(addr); lockout.fail(key); return _change_page(p, NOT_CURRENT), 403
+    why = passwords.problem(new, rec["username"] or "", p["name"])
+    if why: return _change_page(p, why), 400
+    if new != again: return _change_page(p, NOT_SAME), 400
+    h = passwords.hash_pw(new)
+    def change(d):
+        x = d["people"].setdefault(p["name"], {})
+        n = people.record(d, p["name"])["n"] + 1
+        x.update(pw=h, must_change=False, n=n)
+        return n
+    try: n = people.update(change)
+    except people.Unreadable: return _change_page(p, people.UNREADABLE), 503
+    session["n"] = n   # this session stays; every other one of this person's ends (its number is old)
+    _record_account("password", p["name"], "Changed their password")
+    return redirect("/home")
+
+def _recovery_used(data, code):
+    return any(passwords.check_pw(h, code) for h in data["ways"]["recovery_used"] if isinstance(h, str))
+
+@app.route("/login/recover", methods=["GET", "POST"])
+def login_recover():
+    """while ADMIN_RECOVERY_CODE is set: an admin's username and that code (accepted once per value) set a new password"""
+    code = recovery_code()
+    if not code: abort(404)   # not set, or too short to use
+    if not accounts_on(): return _recover_page(NO_ACCOUNTS), 403 if request.method == "POST" else 200
+    if not people.readable(): return _recover_page(PERSON_OFF), 403 if request.method == "POST" else 200
+    if request.method == "GET": return _recover_page()
+    addr = request.remote_addr or "?"
+    if limiter.blocked(addr):
+        _record_locked(("addr", addr), "recovery"); return _recover_page(TOO_MANY), 429
+    username = str(request.form.get("username") or "").strip()[:200].strip()
+    given, new, again = (str(request.form.get(k) or "") for k in ("code", "new", "again"))
+    data = people.load(); name, _ = people.by_username(data, username)
+    right = hmac.compare_digest(given.strip().encode(), code.encode())
+    if right and _recovery_used(data, code):
+        limiter.fail(addr); _record_signin(False, "recovery", name, reason="recovery code already used"); return _recover_page(RECOVERY_USED), 403
+    if not right or name not in people.admins(data):   # any admin found by their username, with a password or without one
+        limiter.fail(addr); _record_signin(False, "recovery", name, reason="wrong code"); return _recover_page(NO_RECOVERY), 401
+    why = passwords.problem(new, username, name)
+    if why: return _recover_page(why), 400
+    if new != again: return _recover_page(NOT_SAME), 400
+    h, used = passwords.hash_pw(new), passwords.hash_pw(code)
+    def change(d):
+        if _recovery_used(d, code) or name not in people.admins(d): return None   # used meanwhile
+        x = d["people"][name]
+        s = x.get("signins") if isinstance(x.get("signins"), list) else []
+        n = people.record(d, name)["n"] + 1
+        x.update(pw=h, must_change=False, n=n, signins=[t for t in s if isinstance(t, (int, float)) and not isinstance(t, bool)][-1:] + [time.time()])
+        d["ways"]["recovery_used"].append(used)
+        return n
+    try: n = people.update(change)
+    except people.Unreadable: return _recover_page(people.UNREADABLE), 503
+    if n is None: return _recover_page(RECOVERY_USED), 403
+    lockout.clear(_lock_key(data, name, username))
+    _start(who=name, via="password", n=n, exp=time.time() + FORTNIGHT); _record_signin(True, "recovery", name)
+    _record_account("recovery", name, "Password set with the recovery code")
+    return redirect("/home")
 
 @app.get("/logout")
 def logout():
     session.clear(); return redirect("/login")
+
+# the tiles of the home page, in order: (title, what it opens, link, the rights that show it)
+TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("setup",)),
+         ("Timetables", "Classes, teachers, rooms, Who's free", "/timetable", ("timetable",)),
+         ("Relief", "Ask for relief, your reliefs", "/relief", ("relief", "relief.settings")),
+         ("Exams and events", "", "/exams", ("exams", "committee")),
+         ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
+         ("History", "Who changed what, and when", "/history", ("history",)))
+GREYED = ("Committee page", "Admin")   # signed in with a code, these wait for the password
+DUTIES_TILE = ("My exam and event duties", "Your duties, your events and the lessons that don't happen")   # in place of Exams and events for everyone else
+TO_PASSWORD = "Sign in with your password to open this."
+_HOW = {"code": "Signed in with your code", "password": "Signed in with your password"}
+
+def _route_exists(path):
+    return any(r.rule == path for r in app.url_map.iter_rules())
+
+def _tiles(p):
+    """the tiles for the person p, in order, as (title, line, link, greyed): those they may open, and greyed those only
+    their password opens (a committee member's or a head's code opens all but the setup and the admin page). Without the
+    exams rights, Exams and events is My exam and event duties: the same page shows them only their own duties (exams stage
+    2) and the events they are in charge of, where they may start one (stage 4)"""
+    mine, strong = rights(), (rights_table.rights(p, "password") if via() == "code" else frozenset())
+    out = []
+    for title, line, link, need_ in TILES:
+        if link == "/exams" and not _route_exists("/exams"): continue
+        if mine & set(need_):
+            until = p["extras"].get("exams") if link == "/exams" else None
+            out.append((title, f"Until {_day(until)}" if until else line, link, False))
+        elif title in GREYED and strong & set(need_): out.append((title, TO_PASSWORD, "/login/password", True))
+        elif link == "/exams": out.append((*DUTIES_TILE, link, False))   # anyone else signed in by name: their own exam duties there
+    return out
+
+@app.get("/home")
+@need("timetable")
+def home():
+    """a person's tiles: only what they may open; with one tile (and nothing waiting for the password) it opens at once"""
+    p = who()
+    if p is None: return redirect("/")   # a shared code is nobody's: its own page
+    got = _tiles(p)
+    if len(got) == 1 and not got[0][3]: return redirect(got[0][2])
+    tiles = "".join(f'<a class="tile{" off" if off else ""}" href="{link}"><b>{esc(title)}</b><span class="muted small">{esc(line)}</span></a>'
+                    for title, line, link, off in got)
+    change = ' · <a href="/account/password">Change password</a>' if via() == "password" else ""
+    return page("Home", f"""<main class="home"><header class="hello"><h1>Hello, {esc(p["name"])}</h1>
+<p class="muted small">{esc(_HOW.get(via(), "Signed in"))}{change} · <a href="/logout">Sign out</a></p></header>
+<nav class="tiles">{tiles}</nav><p class="muted small foot">{esc(school_name())}</p></main>""")
+
+# ------------------------------------------------------------------------------------------------ every request
+@app.before_request
+def same_site_only():
+    """a change (POST, PUT, PATCH, DELETE) whose Origin, else Referer, names another site is refused, so another site
+    cannot make a signed-in person's browser send one; a request with neither header is allowed"""
+    if request.method not in ("POST", "PUT", "PATCH", "DELETE"): return None
+    src = request.headers.get("Origin") or request.headers.get("Referer")
+    if not src: return None
+    try: host = urllib.parse.urlsplit(src).netloc
+    except ValueError: host = ""
+    return ({"error": CROSS_SITE}, 403) if host.lower() != request.host.lower() else None
+
+_tidied_on = None   # the day the accounts and the history were last tidied: kept in memory (once a day, and after a restart)
+
+def _day(iso):
+    try: d = datetime.date.fromisoformat(iso)
+    except (TypeError, ValueError): return str(iso)
+    return f"{d.day} {d.strftime('%b %Y')}"
+
+@app.before_request
+def tidy_once_a_day():
+    """the first request of each day ends the Exams and events extras whose date has passed, and removes history files
+    over two years old. A failure here never breaks the request"""
+    global _tidied_on
+    today = datetime.date.today()
+    if _tidied_on == today: return None
+    _tidied_on = today
+    try:
+        ended = []
+        if people.sweep(copy.deepcopy(people.load()), today):   # write the accounts only when an end date has passed
+            def sweep(d):
+                was = {n: r["extras"].get("exams") for n, r in d["people"].items() if isinstance(r, dict) and isinstance(r.get("extras"), dict)}
+                return [(n, was.get(n)) for n in people.sweep(d, today)]
+            ended = people.update(sweep)
+        if ended:
+            history.add_many([{"kind": "account", "what": "ended", "where": "Admin", "who": None, "as": "The app", "via": "app", "people": [n],
+                               "changes": [{"name": n, "field": "exams", "was": until, "now": None}],
+                               "text": f"Exams and events access ended (until {_day(until)})"} for n, until in ended])
+        history.prune(today)
+    except Exception as e:
+        print(f"WARNING: the daily tidy of the accounts and the history failed ({type(e).__name__})", file=sys.stderr, flush=True)
+    return None
+
+_OPEN = {"/login", "/login/password", "/login/recover", "/logout", "/account/password", "/healthz"}
+
+@app.before_request
+def password_first():
+    """a one-time password is changed before any page or call"""
+    if request.path in _OPEN or request.path.startswith("/static/"): return None
+    return _must_change_first()
 
 @app.get("/healthz")
 def health(): return {"ok": True}
 
 # ------------------------------------------------------------------------------------------------ committee: setup editor
 @app.get("/")
+@need("setup", "timetable", "own")
 def index():
-    if role() in ("committee", "head"): return app.send_static_file("index.html")
-    if role() == "personal": return redirect("/me")
-    if role() == "staff": return redirect("/relief")
-    if role() in ("teacher", "student"): return redirect("/timetable")
-    return redirect("/login")
+    """the committee page for whoever may see the setup; everyone else to their own page"""
+    if has("setup"): return app.send_static_file("index.html")
+    if who() is not None: return redirect("/home")
+    if has("own"): return redirect("/me")
+    return redirect("/timetable")
 
 def kind_ok(kind):
     if kind not in ("primary", "secondary"): abort(404)
@@ -164,7 +563,7 @@ def xlsx_bytes(spec):
     buf = io.BytesIO(); write_template(spec, buf); buf.seek(0); return buf
 
 @app.get("/api/meta/<kind>")
-@need("committee", "head")
+@need("setup")
 def meta(kind):
     sc = defaults(kind_ok(kind))
     return jsonify(rule_types=[dict(rule=a, scopes=b, needs_time=c == "Y", needs_number=d == "Y", meaning=e, example=f) for a, b, c, d, e, f in RULE_TYPES],
@@ -172,7 +571,7 @@ def meta(kind):
                    roles=[dict(role=a, what=b, allowance=c, group=d) for a, b, c, d in ROLES], skill_version=SKILL_VERSION)
 
 @app.get("/api/sample/<kind>")
-@need("committee", "head")
+@need("setup")
 def api_sample(kind): return jsonify(sample(kind_ok(kind)))
 
 @app.get("/api/blank/<kind>")
@@ -251,7 +650,7 @@ def read_table():
     return {"rows": [r for r in rows if any(r)]}
 
 @app.get("/api/setup")
-@need("committee", "head")
+@need("setup")
 def get_setup():
     r = store.setup_record()
     return jsonify(spec=r["spec"], v=r["v"], saved_at=r["saved_at"])
@@ -264,7 +663,7 @@ def put_setup():
     body = body if isinstance(body, dict) else {}
     spec, why = (body, "Saved") if "school" in body else (body.get("spec"), str(body.get("why") or "Saved")[:80])
     if not isinstance(spec, dict) or "school" not in spec: return {"error": "No setup data sent."}, 400
-    return store.replace_setup(spec, why)
+    return store.replace_setup(spec, why, by=by())
 
 def _changes_reply(since, client, upto=None):
     return {**store.changes_since(since, client, upto), "others": store.seen(client)}
@@ -274,12 +673,12 @@ def _int(x):
     except (TypeError, ValueError): return 0
 
 @app.get("/api/setup/changes")
-@need("committee", "head")
+@need("setup")
 def get_setup_changes():
     return _changes_reply(_int(request.args.get("since")), str(request.args.get("client") or "")[:40])
 
 @app.post("/api/setup/changes")
-@need("committee", "head")
+@need("setup")
 def post_setup_changes():
     """a change as operations; the answer carries what others changed meanwhile, so the caller catches up in the same call"""
     body = request.get_json(force=True, silent=True)
@@ -287,14 +686,15 @@ def post_setup_changes():
     client, ops = str(body.get("client") or "")[:40], body.get("ops")
     if not isinstance(ops, list): return {"error": "No changes sent."}, 400
     split = None
-    if role() == "head":
-        # judged one operation at a time on the setup as it is under the store's lock, when the change is applied: what a
-        # head may not make is skipped and named in the answer, the rest of their work is applied
-        split = sync.head_split
-        for op in ops:      # a teacher added by a head is provisional until the committee confirms
-            if isinstance(op, list) and len(op) == 4 and op[0] == "add" and op[1] == "teachers" and isinstance(op[2], dict): op[2]["provisional"] = "Yes"; op[2].pop("dept2", None)
+    if is_head():
+        # judged on the setup as it is under the store's lock, when the change is applied: what a head may not make is
+        # skipped and named in the answer, the rest of their work is applied. A head signed in by name changes only their
+        # departments (their record's; the shared heads' code: every department, as today)
+        depts = head_depts()
+        sync.head_prepare(ops, depts)    # a teacher a head adds is provisional, in one of their departments
+        split = lambda spec, o: sync.head_split(spec, o, depts)
     since = _int(body.get("since"))
-    try: v, refused, mine = store.apply_changes(ops, client, since=since, filter=split)
+    try: v, refused, mine = store.apply_changes(ops, client, since=since, filter=split, by=by())
     except store.Replaced: return _changes_reply(since, client)
     except store.Refused as e: return {"error": str(e)}, 403
     except LookupError: return {"error": "There is no saved setup to change yet."}, 409
@@ -312,7 +712,7 @@ def get_setup_copies():
 @need("committee")
 def restore_setup():
     body = request.get_json(force=True, silent=True)
-    try: return store.restore(str((body or {}).get("id") or ""))
+    try: return store.restore(str((body or {}).get("id") or ""), by=by())
     except KeyError: return {"error": "That copy is not there any more."}, 404
 
 @app.get("/api/past-setups")
@@ -386,6 +786,15 @@ def _checked(build, sentences=False):
         app.logger.exception("checking the draft")
         return {"error": f"Could not check the timetable against the setup: {e}"}, 400
 
+def _draft_entry(what, text, where="Step 8 · Upload and edit", kind="draft"):
+    """one history entry for step 8 or 9 (call after the action worked). A failure to write it never fails the action"""
+    e = {"kind": kind, "what": what, "where": where, "text": text, "link": "/", **by()}
+    try: history.add(e)
+    except Exception as x: print(f"WARNING: a timetable change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
+
+def _worked(r):
+    return not isinstance(r, tuple) and getattr(r, "status_code", 200) == 200
+
 @app.post("/api/draft")
 @need("committee")
 def draft_upload():
@@ -397,11 +806,14 @@ def draft_upload():
     try:
         try:
             sp, tp = _save_uploads(work)
-            m = draft.save(sp, tp, os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file", spec,
+            name = os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file"
+            m = draft.save(sp, tp, name, spec,
                            replace=request.form.get("replace") == "1")
         except draft.UnpublishedFixes as e: return {"error": str(e), "fixes": e.count}, 409
         except ValueError as e: return {"error": str(e)}, 400
-        return _checked(lambda: draft.info(model=m))
+        r = _checked(lambda: draft.info(model=m))
+        if _worked(r): _draft_entry("upload", f"Uploaded {name}")
+        return r
     finally: shutil.rmtree(work, ignore_errors=True)
 
 @app.get("/api/draft")
@@ -413,7 +825,13 @@ def draft_get():
 @need("committee")
 def draft_decide():
     body = request.get_json(force=True, silent=True); body = body if isinstance(body, dict) else {}
-    try: return jsonify(draft.decide(str(body.get("key") or ""), body.get("answer")))
+    key = str(body.get("key") or "")
+    try:
+        try: w = next((w for w in (draft.info() or {}).get("warnings", []) if w.get("key") == key), None)
+        except Exception: w = None
+        out = jsonify(draft.decide(key, body.get("answer"), by=by()))
+        _draft_entry("decide", f"Decided: {body.get('answer')} — {w['text'] if w else key}")
+        return out
     except ValueError as e: return {"error": str(e)}, 400
     except LookupError: return {"error": NO_SETUP}, 409
 
@@ -475,12 +893,16 @@ def draft_about():
 @app.post("/api/draft/fix")
 @need("committee")
 def draft_fix():
-    body = request.get_json(force=True, silent=True); return _checked(lambda: draft.fix(body, stamp=_stamp_of(body)), sentences=True)
+    body = request.get_json(force=True, silent=True); r = _checked(lambda: draft.fix(body, stamp=_stamp_of(body)), sentences=True)
+    if _worked(r): _draft_entry("fix", draft.last_fix_text() or "A fix")
+    return r
 
 @app.post("/api/draft/undo")
 @need("committee")
 def draft_undo():
-    return _checked(draft.undo, sentences=True)
+    was = draft.last_batch_texts(); r = _checked(draft.undo, sentences=True)   # read before: the undo drops the newest fix and its batch
+    if _worked(r): _draft_entry("undo", f"Undid: {(was or [None])[0]}" if len(was) <= 1 else f"Undid {len(was)} fixes: " + "; ".join(t or "" for t in was))
+    return r
 
 @app.get("/api/draft/suggest")
 @need("committee")
@@ -497,7 +919,10 @@ def _posted_fixes():
 @app.post("/api/draft/fixes")
 @need("committee")
 def draft_fixes():
-    return _checked(lambda: draft.fix_many(_posted_fixes(), stamp=_stamp_of(request.get_json(force=True, silent=True))), sentences=True)
+    r = _checked(lambda: draft.fix_many(_posted_fixes(), stamp=_stamp_of(request.get_json(force=True, silent=True))), sentences=True)
+    if _worked(r):
+        ts = draft.last_batch_texts(); _draft_entry("fix", (f"{len(ts)} fixes: " if len(ts) != 1 else "1 fix: ") + "; ".join(t or "" for t in ts))
+    return r
 
 @app.post("/api/draft/preview")
 @need("committee")
@@ -542,7 +967,9 @@ def draft_download():
 @app.post("/api/draft/publish")
 @need("committee")
 def draft_publish():
-    try: got = draft.publish()
+    try:
+        got = draft.publish()
+        _draft_entry("publish", "Published the timetable", "Step 9 · Publish")
     except FileNotFoundError: return {"error": "There is no draft to publish."}, 404
     except draft.Critical as e: return {"error": str(e), "critical": e.count}, 409
     except draft.NotPlaced as e: return {"error": str(e), "unplaced": e.count}, 409
@@ -612,12 +1039,17 @@ def pub_info():
                 compared_v=m.get("compared_v", ""), open=m.get("open", 0), left=m.get("left", []), fixes=m.get("fixes", []))
 
 @app.get("/api/status")
-@need("committee", "head")
+@need("setup")
 def status():
+    """what the committee page shows. who: the person signed in (None for a shared code), group: their group's label; depts: a head's departments
+    when signed in by name (None otherwise); shared: the shared code's role; admin_exists: an admin who can sign in has been named (else the first admin is offered)"""
     have, probs = access.configured()
     _, at = store.load_setup()
-    if role() == "head": return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info())
-    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), typed=typed.enabled())
+    p = who()
+    mine = dict(who=p["name"] if p else None, group=people.LABELS.get(p["group"]) if p else None, via=via(), depts=head_depts(), rights=sorted(rights()), shared=shared(),
+                admin_exists=bool(people.usable_admins(people.load())))
+    if not has("committee"): return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info(), **mine)
+    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), typed=typed.enabled(), **mine)
 
 NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
 
@@ -650,17 +1082,22 @@ def files_for(r):
     return []
 
 @app.get("/timetable")
-@need("committee", "head", "teacher", "student", "staff")
+@need("timetable")
 def timetable():
     from ttgen.export import render_html
     pub = store.published()
     if not pub:
         return page("Timetable", "<main class='login'><h1>Not published yet</h1><p class='muted'>The timetable committee has not published the timetable yet. Please check again later.</p><p><a href='/logout'>Sign out</a></p></main>")
-    r = "teacher" if role() in ("head", "staff") else role()   # a head, and a teacher signed in with their own code, see what a teacher sees
-    key = ("view", "staff" if role() == "staff" else r)          # ...but staff have their own copy, with the way back to Relief
+    # the committee sees every tab; the shared student code what a student sees; everyone else what a teacher sees, a
+    # person with the way back to their tiles (a relief stage 1 session: to Relief). Each kept apart, by mode and way back
+    if has("committee"): r, home, label = "committee", "/", "Committee page"
+    elif shared() == "student": r, home, label = "student", None, None
+    elif who() is None: r, home, label = "teacher", None, None
+    elif _relief_stage_1() and has("relief"): r, home, label = "teacher", "/relief", "Relief"
+    else: r, home, label = "teacher", "/home", "Home"
+    key = ("view", r, home)
     if key not in pub["views"]:
         view = "student" if r == "student" else "full"
-        home, label = {"committee": ("/", "Committee page"), "staff": ("/relief", "Relief")}.get(role(), (None, None))
         app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r), dates=True, exams=True, published_at=(pub.get("meta") or {}).get("published_at"),
                        placeholder="Search a class" if r == "student" else None, home=home, homeLabel=label)
         pub["views"][key] = render_html(pub["model"], view, app=app_cfg)
@@ -677,7 +1114,7 @@ def draft_preview_page():
         return page("Preview", "<main class='login'><h1>Nothing to preview</h1><p class='muted'>No setup is saved yet.</p><p><a href='/'>Back to the committee page</a></p></main>"), 409
 
 @app.get("/me")
-@need("personal")
+@need("own")
 def me():
     from ttgen.export import render_html
     pub = store.published(); sid = session.get("sid")
@@ -691,7 +1128,7 @@ def _pdf(v, name):
     return send_file(io.BytesIO(pdf_bytes(store.published()["model"], v)), as_attachment=True, download_name=safe_name(name) + ".pdf", mimetype="application/pdf")
 
 @app.get("/pdf/me")
-@need("personal")
+@need("own")
 def pdf_me():
     from ttgen.export import student_view
     pub = store.published(); sid = session.get("sid")
@@ -700,7 +1137,7 @@ def pdf_me():
     return _pdf(student_view(pub["model"], s), f"{s['name']} timetable")
 
 @app.get("/pdf/custom")
-@need("committee", "head", "teacher", "student", "staff")
+@need("timetable")
 def pdf_custom():
     from ttgen.export import custom_view, group_options
     pub = store.published()
@@ -712,13 +1149,13 @@ def pdf_custom():
     return _pdf(custom_view(m, cls, groups), f"Class {cls} my timetable")
 
 @app.get("/pdf/<kind>/<path:key>")
-@need("committee", "head", "teacher", "student", "staff")
+@need("timetable")
 def pdf_one(kind, key):
     from ttgen.export import class_view, teacher_view, room_view, student_view
     pub = store.published()
     if not pub: abort(404)
-    m = pub["model"]; r = role()
-    if r == "student" and kind != "classes": abort(403)
+    m = pub["model"]
+    if shared() == "student" and kind != "classes": abort(403)   # the shared student code: class timetables only
     if kind == "classes" and key in m["class_ix"]: return _pdf(class_view(m, key), f"Class {key}")
     if kind == "teachers" and key in m["teacher_ix"]: return _pdf(teacher_view(m, key), key)
     if kind == "rooms" and key in m["room_ix"]: return _pdf(room_view(m, key), f"Room {key}")
@@ -729,11 +1166,11 @@ def pdf_one(kind, key):
 
 @app.get("/files/<what>")
 @app.get("/files/<what>/<kind>")
-@need("committee", "head", "teacher", "staff")
+@need("files")
 def files(what, kind=None):
     pub = store.published()
     if not pub: abort(404)
-    f = pub["meta"].get("files", {}); r = "teacher" if role() in ("head", "staff") else role()
+    f = pub["meta"].get("files", {}); r = "committee" if has("committee") else "teacher"
     if what == "book":
         allowed = {"committee": ("classes", "teachers", "rooms", "students"), "teacher": ("classes", "teachers", "rooms")}[r]
         if kind not in allowed or kind not in f.get("books", {}): abort(404)
@@ -749,76 +1186,78 @@ ONLY_SETTINGS = "Only the timetable committee and the relief team can change rel
 ONLY_CODES = "Only the timetable committee can download the codes."
 
 def relief_staff(pub):
-    """the people relief knows: the published timetable's teachers and the staff added in the relief settings"""
-    return relief_people.people(pub, relief_settings.load(pub)["extra_staff"])
+    """the people relief and exams know: the published timetable's teachers and the staff added in the accounts, as
+    name, short, depts (step 4's), role, teaches and staff_only only. Every reply to a page that is not the admin page
+    uses this, never people.staff (which carries usernames, groups, extras and sign-ins)"""
+    return people.listing(pub)
 
-def me_staff(pub=None):
-    """the person signed in with their own code (their entry in relief_staff), or None; a staff session whose person
-    is no longer on the published timetable or the staff list is ended"""
-    if role() != "staff": return None
-    pub = pub or store.published(); who = session.get("who")
-    if not pub: return None   # nothing published (a publish may be swapping folders): no one to find, but the session stays
-    p = next((x for x in relief_staff(pub) if x["name"] == who), None) if who else None
-    if p is None: session.clear()
-    return p
+def _relief_depts(pub, p):
+    """the departments relief shows for the person p (a staff item): a head's ticked ones, else step 4's. Relief keeps
+    step 4's for a head with none ticked (the admin page shows them none, and they change no rows)"""
+    if p["group"] in people.HEADS and p["depts"]: return list(p["depts"])
+    return next((list(x["depts"]) for x in relief_staff(pub) if x["name"] == p["name"]), list(p["depts"]))
+
+def move_relief_lists():
+    """relief's own Management, Relief team and extra staff lists, and exams' committee list, move into the accounts, once
+    each (a no-op after); never raises: a failure only prints one line"""
+    try: return people.migrate(store.published(), store.read_json(relief_settings.PATH, {}), store.read_json(exams_settings.PATH, None))
+    except Exception as e:
+        print(f"WARNING: relief's lists or exams' committee list could not be moved into the accounts ({type(e).__name__})", file=sys.stderr, flush=True)
+        return None
 
 def _relief_rights(pub):
-    """(may read the settings, may save them, saved by) for whoever is signed in; None when a staff session has ended"""
-    if role() == "committee": return True, True, "Timetable committee"
-    p = me_staff(pub)
-    if p is None: return None
-    s = relief_settings.load(pub); team = p["name"] in s["team"]
-    return team or p["name"] in s["management"], team, p["name"]
-
-def relief_has(right):
-    """the one place relief asks what the person signed in may do (the accounts work's `has` takes over here, same names):
-    relief = signed in with their own code; relief.plan = on the Management list or the Relief team; relief.team = on the
-    Relief team; relief.settings / relief.save = may read / save the relief settings (the timetable committee too).
-    Any other name is refused."""
-    pub = store.published()
-    if right in ("relief.settings", "relief.save"):
-        rights = _relief_rights(pub)
-        return bool(rights and rights[0 if right == "relief.settings" else 1])
-    if right not in ("relief", "relief.plan", "relief.team"): return False
-    p = me_staff(pub)
-    if p is None: return False
-    if right == "relief": return True
-    s = relief_settings.load(pub)
-    return p["name"] in s["team"] or (right == "relief.plan" and p["name"] in s["management"])
+    """(may read the settings, may save them, saved by) for whoever is signed in; None for a person while nothing is
+    published"""
+    if has("committee"): return True, True, "Timetable committee"
+    p = who()
+    if p is None or not pub: return None
+    return has("relief.settings"), has("relief.save"), by()["as"]
 
 def _no_longer_valid():
     return page("Relief", "<main class='login'><h1>Code no longer valid</h1><p class='muted'>You are not on the published timetable or the relief staff list. Ask the timetable committee for your code.</p><p><a href='/login'>Back</a></p></main>")
 
 @app.get("/relief")
-@need("staff", "committee")
+@need("relief", "relief.settings")
 def relief_home():
-    if role() == "committee": return redirect("/relief/settings")
+    if not has("relief"): return redirect("/relief/settings")   # the shared committee code: nobody's relief, its settings
     return app.send_static_file("relief.html")   # need() has checked the person is still there
 
 @app.get("/api/relief/me")
-@need("staff")
+@need("relief")
 def relief_me():
-    pub = store.published(); p = me_staff(pub)
+    # relief's old lists move into the accounts here too (a no-op after the first run), so a relief team member has their
+    # tabs on the first open; when they moved just now, the rights are worked out again from the records in this request
+    if move_relief_lists(): g.pop("_signed", None)
+    p = who()
     if p is None: return {"error": "Please sign in again."}, 401
-    s = relief_settings.load(pub); team = p["name"] in s["team"]
-    return jsonify(name=p["name"], depts=p["depts"], on_team=team, on_management=p["name"] in s["management"], can_settings=team,
-                   can_plan=relief_has("relief.plan"), can_team=relief_has("relief.team"), today=relief_lessons.today().isoformat())
+    pub_ = store.published(); pub = bool(pub_)   # nothing published: a publish may be swapping folders, so no departments, but the person still answers
+    return jsonify(name=p["name"], depts=_relief_depts(pub_, p) if pub else [], published=pub, on_team=bool(p["extras"].get("relief")), on_management=p["group"] in people.MANAGEMENT,
+                   can_settings=has("relief.save"), can_plan=has("relief.plan"), can_team=has("relief.team"), today=relief_lessons.today().isoformat())
 
 @app.get("/relief/settings")
+@need("relief.settings")
 def relief_settings_page():
-    if not role(): return redirect("/login")
-    if role() == "staff" and me_staff() is None: return _no_longer_valid()
-    if role() == "committee" or (role() == "staff" and (_relief_rights(store.published()) or (0, 0))[1]):
-        return app.send_static_file("relief-settings.html")
+    move_relief_lists()
+    r = _relief_rights(store.published())
+    if r is None: return _no_longer_valid()
+    if r[1]: return app.send_static_file("relief-settings.html")
     return page("Relief settings", f"<main class='login'><h1>Relief settings</h1><p class='muted'>{esc(ONLY_SETTINGS)}</p><p><a href='/'>Back</a></p></main>"), 403
+
+def _relief_lists(pub):
+    """who is on management, on the relief team and added as extra staff, as the accounts say"""
+    ps = people.staff(pub)
+    return dict(management=[p["name"] for p in ps if p["group"] in people.MANAGEMENT], team=[p["name"] for p in ps if p["extras"].get("relief")],
+                added=[p["name"] for p in ps if p["staff_only"]])
 
 def _relief_settings_reply(pub, settings):
     m = pub["model"]; rights = _relief_rights(pub) or (False, False, None)
-    return jsonify(settings=settings, people=relief_staff(pub), roles=relief_settings.role_names(pub), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=role() == "committee")
+    lists = _relief_lists(pub)
+    return jsonify(settings=settings, lists=lists, can_admin=has("admin"), people=relief_staff(pub), roles=relief_settings.role_names(pub), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=has("codes"))
 
 @app.get("/api/relief/settings")
-@need("committee", "staff")
+@need("relief.settings")
 def relief_settings_get():
+    move_relief_lists()
     pub = store.published()
     if not pub: return {"error": NO_RELIEF_PUB}, 409
     rights = _relief_rights(pub)
@@ -827,8 +1266,9 @@ def relief_settings_get():
     return _relief_settings_reply(pub, relief_settings.load(pub))
 
 @app.put("/api/relief/settings")
-@need("committee", "staff")
+@need("relief.save")
 def relief_settings_put():
+    move_relief_lists()
     pub = store.published()
     if not pub: return {"error": NO_RELIEF_PUB}, 409
     rights = _relief_rights(pub)
@@ -836,16 +1276,18 @@ def relief_settings_put():
     if not rights[1]: return {"error": ONLY_SETTINGS}, 403
     try: saved = relief_settings.save(request.get_json(force=True, silent=True), pub, rights[2])
     except ValueError as e: return {"error": str(e)}, 400
+    try: history.add({"kind": "relief", "what": "settings", "where": "Relief settings", "text": "Relief settings saved", "link": "/relief", **by()})
+    except Exception as x: print(f"WARNING: relief settings could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
     return _relief_settings_reply(pub, saved)
 
 def _relief_codes_refused():
     """the answer that refuses the staff codes to whoever is signed in, or None (the routes check what is published)"""
-    if role() != "committee": return {"error": ONLY_CODES}, 403
+    if not has("codes"): return {"error": ONLY_CODES}, 403
     if not access.personal_codes_on(): return NO_PERSONAL_STAFF, 409
     return None
 
 @app.get("/api/relief/codes.csv")
-@need("committee", "staff")
+@need("codes")
 def relief_codes_csv():
     refused = _relief_codes_refused(); pub = store.published()
     if refused: return refused
@@ -853,18 +1295,559 @@ def relief_codes_csv():
     return Response(relief_codes.codes_csv(relief_staff(pub)), mimetype="text/csv", headers={"Content-Disposition": 'attachment; filename="personal relief codes.csv"'})
 
 @app.get("/api/relief/code-slips.pdf")
-@need("committee", "staff")
+@need("codes")
 def relief_code_slips():
+    """everyone's slips; ?names=a,b only those people's (the admin page's "Print their code slips")"""
     refused = _relief_codes_refused(); pub = store.published()
     if refused: return refused
     if not pub: return NO_RELIEF_PUB, 409
+    ps = relief_staff(pub)
+    if request.args.get("names") is not None:
+        mine = {n.strip() for n in request.args["names"].split(",") if n.strip()}
+        ps = [p for p in ps if p["name"] in mine]
+        if not ps: return {"error": NO_ONE}, 400
     buf = io.BytesIO()
-    relief_codes.slips_pdf(pub["model"]["school"]["name"], relief_staff(pub), request.host_url.rstrip("/"), buf)
+    relief_codes.slips_pdf(pub["model"]["school"]["name"], ps, request.host_url.rstrip("/"), buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="relief code slips.pdf", mimetype="application/pdf")
 
-relief_web.init(has=relief_has, me=me_staff, role=role)     # relief requests: relief/web.py, every right through relief_has
+def _relief_entry(what, text, absence=None):
+    """one history entry for a relief request's save (relief/web.py): who, what, which, a link (not field by field; relief
+    keeps its own record, and the entry never holds the reason). A failure to write it never fails the save"""
+    e = {"kind": "relief", "what": what, "where": "Relief", "text": text, "link": "/relief", **by()}
+    if absence: e["absence"] = absence
+    try: history.add(e)
+    except Exception as x: print(f"WARNING: a relief change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
+
+# relief requests: relief/web.py, every route through need(), every right through has(), every save in the history
+relief_web.init(has=has, me=who, need=need, note=_relief_entry)
 app.register_blueprint(relief_web.bp)
+
+# ------------------------------------------------------------------------------------------------ admins: people and the ways in
+# The named admins (committee group, Admin extra, signed in with their password) manage people here; every check is the
+# server's. A change is judged whole inside one people.update, so two admins at once cannot both remove the other, and a
+# refused change writes nothing. Any change to a person's rights (their group, the departments they change, an extra
+# given or taken away), switching them off or on, a username changed or removed, and a password reset raise their
+# sign-in number `n`, so they are signed out everywhere (the design: "changing their rights signs them out everywhere at
+# once", a gain as well as a loss); a note or a first username does not. Each change is one history entry, `changes`
+# [{name, field, was, now}], never a password, recorded under who made it as they were before it (their own change may
+# end their session).
+PICK_GROUP = "Pick a group."
+ONLY_COMMITTEE_ADMIN = "Only the timetable committee can be admins."
+LAST_ADMIN = "{} is the last admin: make another admin first."
+EXAMS_UNTIL = "Give the last day of the exams and events access."
+BAD_USERNAME = "A username is 3 to 40 letters, digits, dots, dashes or underscores."
+TAKEN = "That username is taken."
+NOT_A_DEPT = "{} is not one of the school's departments."
+NOT_STAFF = "{} is not on the published timetable or the staff list."
+NAMELESS = "A staff member needs a name."
+FORMULA_NAME = "A name cannot start with {}."
+LONG_NAME = "Keep a name under 100 characters."
+ON_TIMETABLE = "{} is already a teacher on the timetable."
+ON_STAFF = "{} is already on the staff list."
+LONG_NOTE = "Keep a note under 200 characters."
+NO_ONE = "Tick at least one person."
+PICK_ACTION = "Pick what to do."
+PICK_EXTRA = "Pick an extra."
+NO_USERNAME = "Give them a username first."
+PICK_SHARED = "Pick a shared code."
+UNREAD_CHANGE = "The change could not be read. Reload the page and try again."
+FIRST_ADMIN = "Make the first admin"
+HAS_PASSWORD = "{} has a password already: they make themselves the first admin, signed in with it."
+EXTRA_LABELS = {"relief": "Relief team", "exams": "Exams and events", "admin": "Admin"}
+SIGNS_OUT = {"group", "depts", "relief", "exams", "admin", "off"}   # and a username changed or removed
+_USERNAME = re.compile(r"[a-z0-9._-]{3,40}")
+_ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+class Refused(Exception):
+    """one check's sentence: the whole change is refused and nothing is written"""
+
+def _admin_off():
+    """the admin calls are refused while SECRET_KEY is not set (accounts are off)"""
+    return ({"error": NO_ACCOUNTS}, 403) if not accounts_on() else None
+
+def _body():
+    b = request.get_json(force=True, silent=True)
+    if not isinstance(b, dict): raise Refused(UNREAD_CHANGE)
+    return b
+
+def school_depts():
+    """the departments of the school in the setup being edited; [] with no setup"""
+    spec = store.setup_record()["spec"]
+    school = spec.get("school") if isinstance(spec, dict) else None
+    d = school.get("departments") if isinstance(school, dict) else None
+    return [x.strip() for x in d if isinstance(x, str) and x.strip()] if isinstance(d, list) else []
+
+def _name_problem(name):
+    """relief's checks of a typed name (the codes CSV is opened in a spreadsheet): the sentence, or None"""
+    if not name: return NAMELESS
+    if name[0] in relief_settings.FORMULA: return FORMULA_NAME.format(name[0])
+    if len(name) > 100: return LONG_NAME
+    return None
+
+def _username(v):
+    """a username as typed -> as kept (lower case); None when none is given"""
+    if v is None or (isinstance(v, str) and not v.strip()): return None
+    u = v.strip().lower() if isinstance(v, str) else ""
+    if not _USERNAME.fullmatch(u): raise Refused(BAD_USERNAME)
+    return u
+
+def _taken(d, u, name):
+    """another person's record holds this username (compared ignoring case)"""
+    return bool(u) and any(n != name and isinstance(r, dict) and str(r.get("username") or "").lower() == u for n, r in d["people"].items())
+
+def _until(v, today):
+    """an Exams and events end date: an ISO date, today or later; None or False takes the extra away"""
+    if v is None or v is False: return None
+    try: d = datetime.date.fromisoformat(v.strip()) if isinstance(v, str) and _ISO_DAY.fullmatch(v.strip()) else None
+    except ValueError: d = None
+    if d is None or d < today: raise Refused(EXAMS_UNTIL)
+    return d.isoformat()
+
+def _wanted(b, today):
+    """the fields of one person the body sets, each checked on its own -> {field: value}"""
+    want = {}
+    if "group" in b:
+        if b["group"] not in people.GROUPS: raise Refused(PICK_GROUP)
+        want["group"] = b["group"]
+    if "depts" in b:
+        if not isinstance(b["depts"], list) or not all(isinstance(x, str) for x in b["depts"]): raise Refused(UNREAD_CHANGE)
+        school, got = school_depts(), []
+        for x in (x.strip() for x in b["depts"]):
+            if x and x not in got:
+                if x not in school: raise Refused(NOT_A_DEPT.format(x))
+                got.append(x)
+        want["depts"] = got
+    if "extras" in b:
+        ex = b["extras"]
+        if not isinstance(ex, dict) or any(not isinstance(ex[k], bool) for k in ("relief", "admin") if k in ex): raise Refused(UNREAD_CHANGE)
+        want.update({k: ex[k] for k in ("relief", "admin") if k in ex})
+        if "exams" in ex: want["exams"] = _until(ex["exams"], today)
+    if "username" in b: want["username"] = _username(b["username"])
+    if "note" in b:
+        if b["note"] is not None and not isinstance(b["note"], str): raise Refused(UNREAD_CHANGE)
+        want["note"] = (b["note"] or "").strip()
+        if len(want["note"]) > 200: raise Refused(LONG_NOTE)
+    if "off" in b:
+        if not isinstance(b["off"], bool): raise Refused(UNREAD_CHANGE)
+        want["off"] = b["off"]
+    return want
+
+def _change(d, name, item, want):
+    """make `want` true of name's record in d. item: their staff item before the change (None: they are being added).
+    -> the changes [{name, field, was, now}] against what they have now; nothing that is so already"""
+    r, out, want = people.record(d, name), [], dict(want)
+    def put(field, was, now): out.append(dict(name=name, field=field, was=copy.deepcopy(was), now=copy.deepcopy(now)))
+    if item is None and not r["added"]: r["added"] = True; put("added", False, True)
+    group = item["group"] if item else (r["group"] or "executive")
+    if "group" in want and want["group"] != group:
+        put("group", group, want["group"]); r["group"] = want["group"]
+        if want["group"] in people.HEADS and not r["depts"] and "depts" not in want and item and item["depts"]:
+            want["depts"] = list(item["depts"])                      # a new head changes the map for their step-4 departments
+        if want["group"] != "committee" and "admin" not in want: want["admin"] = False   # the Admin extra is the committee's
+    if "depts" in want and want["depts"] != r["depts"]: put("depts", r["depts"], want["depts"]); r["depts"] = list(want["depts"])
+    for k in ("relief", "exams", "admin"):
+        if k in want and want[k] != r["extras"][k]: put(k, r["extras"][k], want[k]); r["extras"][k] = want[k]
+    if "username" in want and want["username"] != r["username"]:
+        put("username", r["username"], want["username"]); r["username"] = want["username"]
+        if not r["username"]: r.update(pw=None, must_change=False)   # no username, no password: a later username starts without one
+    if "note" in want and want["note"] != r["note"]: put("note", r["note"], want["note"]); r["note"] = want["note"]
+    if "off" in want and want["off"] != r["off"]: put("off", r["off"], want["off"]); r["off"] = want["off"]
+    if any(c["field"] in SIGNS_OUT or (c["field"] == "username" and c["was"]) for c in out): r["n"] += 1
+    if out: d["people"][name] = r
+    return out
+
+def _whole(d, touched, before):
+    """the checks of a change as a whole, on d as it leaves it: Admin only in the committee, and an admin left who can
+    sign in (an Admin with no username or password, or switched off, keeps no one in). before: people.usable_admins
+    before the change"""
+    for n in touched:
+        r = people.record(d, n)
+        if r["extras"]["admin"] and r["group"] != "committee": raise Refused(ONLY_COMMITTEE_ADMIN)
+    if not people.usable_admins(d):
+        raise Refused(LAST_ADMIN.format(next((n for n in touched if n in before), before[0] if before else touched[0])))
+
+def _admin_item(pub, data, name):
+    """one person as the admin page shows them: their staff item and their note; None when not on the staff list"""
+    p = next((p for p in people.staff(pub, data) if p["name"] == name), None)
+    return dict(p, note=people.record(data, name)["note"]) if p else None
+
+def _said(c):
+    f, was, now = c["field"], c["was"], c["now"]
+    if f == "added": return "added to the staff list"
+    if f == "group": return f"group {people.LABELS.get(was, was)} → {people.LABELS.get(now, now)}"
+    if f == "depts": return "changes the map for " + (", ".join(now) or "no department")
+    if f == "exams": return f"Exams and events until {_day(now)}" if now else "Exams and events taken away"
+    if f in ("relief", "admin"): return f"{EXTRA_LABELS[f]} {'given' if now else 'taken away'}"
+    if f == "username": return f"username {now}" if now else "username and password removed"
+    if f == "note": return "note changed"
+    return "switched off" if now else "switched on"
+
+def _what(out):
+    """the kind of a change to one person, by its weightiest field"""
+    fields = [c["field"] for c in out]
+    if "added" in fields: return "add"
+    if "off" in fields: return "off" if next(c for c in out if c["field"] == "off")["now"] else "on"
+    for f, what in (("group", "group"), ("relief", "extras"), ("exams", "extras"), ("admin", "extras"), ("depts", "depts"), ("username", "username")):
+        if f in fields: return what
+    return "note"
+
+def _account_entry(what, names, changes, text, by_=None, **more):
+    """one kind-account entry; a change is never undone for want of its entry"""
+    try: history.add({"kind": "account", "what": what, "where": "Admin", "people": names, "changes": changes, "text": text, **more, **(by_ or by())})
+    except Exception as e: print(f"WARNING: an account change could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+
+def _update_as(me, fn):
+    """people.update(fn) for the admin `me` -> fn's result. Their own change signs out their other sessions, not this
+    one: the new number is read inside the update, and kept only when this session's number was still theirs as the
+    update began (so a sign-out by another admin at the same moment is never undone) and they are not switched off"""
+    held = session.get("n", 0)
+    def run(d):
+        n0 = people.record(d, me)["n"]
+        out = fn(d)
+        r = people.record(d, me)
+        return out, (r["n"] if n0 == held and r["n"] != n0 and not r["off"] else None)
+    out, keep = people.update(run)
+    if keep is not None: session["n"] = keep
+    return out
+
+def _and(names):
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+_BULK_SAY = {("give", "relief"): (("joins", "join"), "the relief team", "{} is on the relief team already."),
+             ("give", "admin"): (("gets", "get"), "the admin page", "{} is an admin already."),
+             ("take", "relief"): (("leaves", "leave"), "the relief team", "{} is not on the relief team."),
+             ("take", "exams"): (("loses", "lose"), "the exams and events pages", "{} does not have the exams and events pages."),
+             ("take", "admin"): (("loses", "lose"), "the admin page", "{} is not an admin.")}
+
+def _bulk_lines(act, key, val, names, done, d):
+    """what a change to several people does, naming each person and anything already so ("their" for everyone)"""
+    moved, same = [n for n in names if done[n]], [n for n in names if not done[n]]
+    def verb(one, many): return one if len(moved) == 1 else many
+    def had(n, f): return next((c["was"] for c in done[n] if c["field"] == f), None)
+    lines = []
+    if act == "give" and key == "exams":
+        if moved: lines.append(f"{_and(moved)} {verb('gets', 'get')} the exams and events pages until {_day(val)}.")
+        lines += [f"{n} has it already: their end date moves to {_day(val)}." for n in moved if had(n, "exams")]
+        lines += [f"{n} has it already, until {_day(val)}: nothing changes for them." for n in same]
+    elif act in ("give", "take"):
+        verbs, what, already = _BULK_SAY[(act, key)]
+        if moved: lines.append(f"{_and(moved)} {verb(*verbs)} {what}.")
+        lines += [already.format(n) for n in same]
+    elif act == "group":
+        label = people.LABELS[val]
+        if moved: lines.append(f"{_and(moved)} {verb('moves', 'move')} to the {label} group.")
+        for n in moved:
+            if had(n, "admin"): lines.append(f"{n} stops being an admin: only the timetable committee can be admins.")
+            if val in people.HEADS:
+                ds = people.record(d, n)["depts"]
+                if not ds: lines.append(f"{n} has no department on step 4: tick their departments on their panel, or they can change no rows.")
+                else: lines.append(f"{n} changes the map for {', '.join(ds)}{' (from step 4)' if any(c['field'] == 'depts' for c in done[n]) else ''}.")
+        lines += [f"{n} is in the {label} group already." for n in same]
+    elif act == "off":
+        if moved: lines.append(f"{_and(moved)} {verb('is', 'are')} switched off and signed out everywhere.")
+        lines += [f"{n} is switched off already." for n in same]
+    else:
+        if moved: lines.append(f"{_and(moved)} can sign in again.")
+        lines += [f"{n} is not switched off." for n in same]
+    return lines
+
+def _bulk(d, pub, b, today):
+    """one change for every ticked person, made on d -> dict(lines, touched, changes, what, text). The preview runs it
+    on a copy of the records and the apply inside people.update, so the preview's lines are what the apply does"""
+    names = b.get("names")
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names): raise Refused(UNREAD_CHANGE)
+    names = list(dict.fromkeys(names))
+    if not names: raise Refused(NO_ONE)
+    act = b.get("action")
+    if act not in ("give", "take", "group", "off", "on"): raise Refused(PICK_ACTION)
+    if act in ("give", "take"):
+        key = b.get("extra")
+        if not isinstance(key, str) or key not in EXTRA_LABELS: raise Refused(PICK_EXTRA)
+        if key != "exams": val = act == "give"
+        elif act == "take": val = None
+        elif b.get("until") is None or b.get("until") is False: raise Refused(EXAMS_UNTIL)
+        else: val = _until(b["until"], today)
+    elif act == "group":
+        if b.get("group") not in people.GROUPS: raise Refused(PICK_GROUP)
+        key, val = "group", b["group"]
+    else: key, val = "off", act == "off"
+    items = {p["name"]: p for p in people.staff(pub, d)}
+    for n in names:
+        if n not in items: raise Refused(NOT_STAFF.format(n))
+    before = people.usable_admins(d)
+    done = {n: _change(d, n, items[n], {key: val}) for n in names}
+    touched = [n for n in names if done[n]]
+    if touched: _whole(d, touched, before)
+    them = ", ".join(touched)
+    text = {"give": lambda: f"Gave {EXTRA_LABELS[key]}{' until ' + _day(val) if key == 'exams' else ''} to {them}",
+            "take": lambda: f"Took away {EXTRA_LABELS[key]} from {them}", "group": lambda: f"Moved {them} to the {people.LABELS[val]} group",
+            "off": lambda: f"Switched off {them}", "on": lambda: f"Switched on {them}"}[act]()
+    return dict(lines=_bulk_lines(act, key, val, names, done, d), touched=touched, changes=[c for n in touched for c in done[n]],
+                what="extras" if act in ("give", "take") else act, text=text)
+
+def _ways():
+    data, (have, _) = people.load(), access.configured()
+    recs = [people.record(data, n) for n in data["people"]]
+    return dict(secret_key=accounts_on(), personal_codes=access.personal_codes_on(), password_accounts=sum(1 for r in recs if r["username"] and r["pw"]),
+                shared=[dict(code=x, set=bool(have.get(x)), off=data["ways"]["off"].get(x), used_week=history.uses(kind="signin", via="shared", shared=x, ok=True))
+                        for x in people.SHARED],
+                recovery_set=bool(recovery_code()), recovery_short=recovery_too_short(),
+                recovery_warn=RECOVERY_SHORT if recovery_too_short() else RECOVERY_ON if recovery_code() else None)
+
+# ------------------------------------------------------------------------------------------------ the history page
+HISTORY_MAX = 500
+_SAFE_LINK = re.compile(r"^/(?![/\\\s])")   # a link inside this app: one leading slash, not followed by /, \ or whitespace
+HISTORY_TOP = "Pick a day as year-month-day, like 2026-11-19."
+
+def _history_day(text):
+    try: return datetime.datetime.strptime(text, "%Y-%m-%d")
+    except ValueError: return None
+
+@app.get("/history")
+@need("history")
+def history_page():
+    return app.send_static_file("history.html")
+
+@app.get("/api/history")
+@need("history")
+def api_history():
+    """the history, newest first, filtered: who (part of the name it shows), where, dept, from and to (local days, `to`
+    included), signins=1, before (an entry id: the entries after it), limit (up to 500). `more`: older ones exist"""
+    q = request.args
+    try: limit = int(q.get("limit") or 200)
+    except ValueError: return {"error": "The number of entries must be a number."}, 400
+    if limit < 1: return {"error": "The number of entries must be at least 1."}, 400
+    limit = min(limit, HISTORY_MAX)
+    since = until = None
+    if q.get("from"):
+        d = _history_day(q["from"])
+        if not d: return {"error": HISTORY_TOP}, 400
+        since = d.timestamp()
+    if q.get("to"):
+        d = _history_day(q["to"])
+        if not d: return {"error": HISTORY_TOP}, 400
+        until = (d + datetime.timedelta(days=1)).timestamp() - 0.001
+    if since is not None and until is not None and since > until: return {"error": "The first day is after the last day."}, 400
+    who_ = (q.get("who") or "").strip().lower()
+    where = q.get("where") or None
+    dept = q.get("dept") or None
+    signins = q.get("signins") == "1"
+    before = q.get("before") or None
+    found = history.read(where=where, dept=dept, since=since, until=until, signins=signins, before=before, limit=limit + 1,
+                         who_contains=who_ or None)
+    for e in found:
+        if "link" in e and not _SAFE_LINK.match(e["link"] if isinstance(e["link"], str) else ""): del e["link"]
+    try: depts = [str(d) for d in store.setup_record()["spec"]["school"]["departments"]]
+    except Exception: depts = []
+    return jsonify(entries=found[:limit], more=len(found) > limit, admin=has("admin"), depts=depts)
+
+ONLY_ADMIN = "Only an admin can open this page."
+
+@app.get("/admin")
+@need("admin", "committee")
+def admin_page():
+    """the admin page for an admin. The committee without the Admin extra (the committee code on deploy day, or a
+    committee member) is sent to "Make the first admin" while no admin can sign in, and is told the page is an admin's
+    once one can"""
+    move_relief_lists()
+    if not has("admin"):
+        if not people.usable_admins(people.load()): return redirect("/admin/first")
+        return page("Admin", f"<main class='login'><h1>Admin</h1><p class='muted'>{esc(ONLY_ADMIN)}</p><p><a href='/'>Back</a></p></main>"), 403
+    if not accounts_on(): return page("Admin", f"<main class='login'><h1>Admin</h1><p class='muted'>{esc(NO_ACCOUNTS)}</p></main>"), 403
+    return app.send_static_file("admin.html")
+
+@app.get("/api/admin/people")
+@need("admin")
+def admin_people():
+    """the staff list with its hints and, once, what moved from relief's and exams' own lists"""
+    stop = _admin_off()
+    if stop: return stop
+    move_relief_lists()
+    pub, data = store.published(), people.load()
+    ps = [dict(p, note=people.record(data, p["name"])["note"]) for p in people.staff(pub, data)]
+    group, heads = {p["name"]: p["group"] for p in ps}, []
+    spec = store.setup_record()["spec"]   # step 4 of the setup being edited; the published one's while no setup is saved
+    rows = spec.get("teachers") if isinstance(spec, dict) else (((pub or {}).get("model") or {}).get("setup") or {}).get("teachers")
+    for x in rows if isinstance(rows, list) else []:
+        if not isinstance(x, dict): continue
+        n = str(x.get("name") or "").strip()
+        if str(x.get("role") or "").strip().upper() in ("HOD", "SH") and group.get(n) == "teacher" and n not in heads: heads.append(n)
+    no_dept = [p["name"] for p in ps if p["group"] in people.HEADS and not people.record(data, p["name"])["depts"]]   # they change no rows (R8)
+    return jsonify(people=ps, departments=school_depts(), groups=[[k, people.LABELS[k]] for k in people.GROUPS],
+                   hints=dict(heads_on_step4=heads, no_google=[], heads_no_dept=no_dept), moved=data["moved"] if isinstance(data["moved"], list) else [],
+                   me=who()["name"])
+
+@app.post("/api/admin/person")
+@need("admin")
+def admin_person():
+    """change one person, or add one by name (added: true) -> their staff item"""
+    stop = _admin_off()
+    if stop: return stop
+    me, by_, pub, today = who()["name"], by(), store.published(), datetime.date.today()   # by_ before: their own change may end this session
+    try:
+        b = _body()
+        if not isinstance(b.get("name"), str): raise Refused(UNREAD_CHANGE)
+        adding = b.get("added") is True
+        name = b["name"].strip() if adding else b["name"]
+        if adding and _name_problem(name): raise Refused(_name_problem(name))
+        want = _wanted(b, today)
+        def change(d):
+            item = next((p for p in people.staff(pub, d) if p["name"] == name), None)
+            if adding and item: raise Refused((ON_STAFF if item["staff_only"] else ON_TIMETABLE).format(name))
+            if not adding and item is None: raise Refused(NOT_STAFF.format(name))
+            if want.get("username") and _taken(d, want["username"], name): raise Refused(TAKEN)
+            before = people.usable_admins(d)
+            out = _change(d, name, item, want)
+            if out: _whole(d, [name], before)
+            return out
+        out = _update_as(me, change)
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    if out: _account_entry(_what(out), [name], out, f"{name}: " + "; ".join(_said(c) for c in out), by_=by_)
+    return jsonify(_admin_item(pub, people.load(), name))
+
+@app.post("/api/admin/bulk")
+@need("admin")
+def admin_bulk():
+    """one change for several people: the preview's lines, then (preview: false) all of it or none of it"""
+    stop = _admin_off()
+    if stop: return stop
+    me, by_, pub, today = who()["name"], by(), store.published(), datetime.date.today()
+    try:
+        b = _body()
+        if b.get("preview", True) is not False:   # only an explicit preview: false changes anything
+            if not people.readable(): raise people.Unreadable(people.UNREADABLE)
+            return jsonify(lines=_bulk(people.load(), pub, b, today)["lines"], applied=False)
+        got = _update_as(me, lambda d: _bulk(d, pub, b, today))
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    if got["touched"]: _account_entry(got["what"], got["touched"], got["changes"], got["text"], by_=by_)
+    return jsonify(lines=got["lines"], applied=bool(got["touched"]))
+
+@app.post("/api/admin/reset")
+@need("admin")
+def admin_reset():
+    """a one-time password (and the username, when given): the answer is the only place it ever appears"""
+    stop = _admin_off()
+    if stop: return stop
+    me, by_, pub = who()["name"], by(), store.published()
+    try:
+        b = _body()
+        name = b.get("name")
+        if not isinstance(name, str): raise Refused(UNREAD_CHANGE)
+        given = _username(b.get("username"))
+        if not any(p["name"] == name for p in people.staff(pub)): raise Refused(NOT_STAFF.format(name))
+        once = passwords.one_time(); h = passwords.hash_pw(once)
+        def change(d):
+            if not any(p["name"] == name for p in people.staff(pub, d)): raise Refused(NOT_STAFF.format(name))
+            r = people.record(d, name)
+            u = given or r["username"]
+            if not u: raise Refused(NO_USERNAME)
+            if _taken(d, u, name): raise Refused(TAKEN)
+            out = [dict(name=name, field="username", was=r["username"], now=u)] if u != r["username"] else []
+            r.update(username=u, pw=h, must_change=True, n=r["n"] + 1)
+            d["people"][name] = r
+            return out, u
+        out, u = _update_as(me, change)
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    lockout.clear(u)
+    _account_entry("reset", [name], out, f"{name}: a new one-time password" + (f"; username {u}" if out else ""), by_=by_)
+    r = jsonify(once=once); r.headers["Cache-Control"] = "no-store"
+    return r
+
+@app.get("/api/admin/ways")
+@need("admin")
+def admin_ways():
+    stop = _admin_off()
+    return stop or jsonify(_ways())
+
+@app.post("/api/admin/shared-off")
+@need("admin")
+def admin_shared_off():
+    """turn a shared code off (its open sessions end at their next request) or on again -> the ways in"""
+    stop = _admin_off()
+    if stop: return stop
+    by_ = by()
+    try:
+        b = _body()
+        r, off = b.get("code"), b.get("off")
+        if r not in people.SHARED: raise Refused(PICK_SHARED)
+        if not isinstance(off, bool): raise Refused(UNREAD_CHANGE)
+        at = time.time()
+        def change(d):
+            was = d["ways"]["off"].get(r)
+            d["ways"]["off"][r] = now = (was if was is not None else at) if off else None
+            return was, now
+        was, now = people.update(change)
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    if (was is None) != (now is None):
+        label = SHARED_AS[r]
+        _account_entry("shared-off", [], [dict(name=label, field="off", was=was, now=now)],
+                       f"Turned {'off' if off else 'on'} the {label[0].lower() + label[1:]}", by_=by_, shared=r)
+    return jsonify(_ways())
+
+@app.get("/api/admin/students")
+@need("admin")
+def admin_students():
+    stop = _admin_off()
+    if stop: return stop
+    pub = store.published()
+    return jsonify([{"id": s.get("id"), "name": s.get("name"), "class": s.get("cls")} for s in ((pub or {}).get("model") or {}).get("students") or []])
+
+def _first_page(msg="", form=True, name="", username=""):
+    f = ""
+    if form:
+        opts = "".join(f'<option value="{esc(p["name"])}"></option>' for p in people.staff(store.published()))
+        f = f"""<p>No one is an admin yet. Make yourself the first: you then sign in with this username and password, and give everyone else their access on the admin page.</p>
+<form method="post" action="/admin/first"><label for="name">Your name (pick it from the list, or type it)</label>
+<input id="name" name="name" class="plain" list="staff" value="{esc(name)}" autocomplete="off" required><datalist id="staff">{opts}</datalist>
+<label for="username">Username (for example daniel.wong)</label><input id="username" name="username" class="plain" value="{esc(username)}" autocapitalize="none" spellcheck="false" autocomplete="username" required>
+{_field("new", "Password (at least 10 characters)", auto="new-password")}{_field("again", "Password again", auto="new-password")}
+<button type="submit">Make me the first admin</button></form>"""
+    return _form_page(FIRST_ADMIN, f, msg, back=("/", "Committee page"))
+
+@app.route("/admin/first", methods=["GET", "POST"])
+@need("committee")
+def admin_first():
+    """while no admin can sign in: whoever holds the committee's rights makes themselves the first admin, with a password,
+    and is signed in as them. Once an admin who can sign in exists this page is not there"""
+    if not people.readable(): return _first_page(ACCOUNTS_UNREADABLE, form=False), 503
+    if people.usable_admins(people.load()): abort(404)
+    if not accounts_on(): return _first_page(NO_ACCOUNTS, form=False), 403
+    if request.method == "GET": return _first_page()
+    name, typed = (str(request.form.get(k) or "").strip() for k in ("name", "username"))
+    new, again = (str(request.form.get(k) or "") for k in ("new", "again"))
+    pub = store.published()
+    def back(msg): return _first_page(msg, name=name, username=typed), 400
+    if not any(p["name"] == name for p in people.staff(pub)) and _name_problem(name): return back(_name_problem(name))
+    try: u = _username(typed)
+    except Refused as e: return back(str(e))
+    if not u: return back(BAD_USERNAME)
+    why = passwords.problem(new, u, name)
+    if why: return back(why)
+    if new != again: return back(NOT_SAME)
+    h, by_, me = passwords.hash_pw(new), by(), (who() or {}).get("name")
+    def change(d):
+        if people.usable_admins(d): return None                   # someone was quicker
+        if _taken(d, u, name): raise Refused(TAKEN)
+        if people.record(d, name)["pw"] and name != me: raise Refused(HAS_PASSWORD.format(name))   # no one else's password is replaced
+        item = next((p for p in people.staff(pub, d) if p["name"] == name), None)
+        out = _change(d, name, item, dict(group="committee", admin=True, username=u, off=False))
+        r = people.record(d, name)
+        r.update(pw=h, must_change=False, n=r["n"] + 1)
+        d["people"][name] = r
+        return out, r["n"]
+    try: got = people.update(change)
+    except Refused as e: return back(str(e))
+    except people.Unreadable: return _first_page(people.UNREADABLE, form=False), 503
+    if got is None: abort(404)
+    out, n = got
+    _account_entry("first-admin", [name], out, f"{name}: made the first admin", by_=by_)
+    _start(who=name, via="password", n=n, exp=time.time() + FORTNIGHT); _note_signin(name)
+    return redirect("/admin")
 
 # ------------------------------------------------------------------------------------------------ staff: exams and events
 NO_EXAMS_PUB = "Publish the timetable first: exams read the classes, students and lessons from it."
@@ -884,46 +1867,49 @@ BAD_INPUT = (TypeError, KeyError, AttributeError)
 NO_BACKUP = "That lesson no longer needs a backup."
 
 def _exams_rights(pub):
-    """(may use exams, saved by) for whoever is signed in; None when a staff session has ended"""
-    if role() == "committee": return True, "Timetable committee"
-    p = me_staff(pub)
-    if p is None: return None
-    return p["name"] in exams_settings.load(pub)["committee"], p["name"]
+    """(may use exams, saved by) for whoever is signed in, from the accounts: the Exams and events extra (until its end
+    date) or the timetable committee; saved by the person's name, or "Timetable committee" for the shared committee code.
+    None when nobody is signed in by name or with the committee code"""
+    p = who()
+    if p is None: return (True, "Timetable committee") if has("committee") else None
+    return has("exams") or has("committee"), p["name"]
 
 def _exams_can_approve():
-    """the timetable committee approves, sends back and withdraws"""
-    return role() == "committee"
-
-def _exams_can_keep_list():
-    """the timetable committee keeps the exams committee list in Exam settings (an exams committee member cannot change it)"""
-    return role() == "committee"
+    """the timetable committee approves, sends back and withdraws: the committee right (the shared committee code, or a
+    committee member signed in with their password)"""
+    return has("committee")
 
 def _event_rights(sched):
-    """(may open this event, saved by, may see every event) for whoever is signed in; None when a staff session has ended.
-    The committee may open any event; a teacher only the one they are in charge of (sched None: any, to start one)"""
-    if role() == "committee": return True, "Timetable committee", True
-    p = me_staff()
+    """(may open this event, saved by, sees every event) for whoever is signed in, from the accounts: the timetable
+    committee (the committee right: the shared committee code, or a committee member signed in with their password) opens
+    every event; anyone else signed in by name (any way in) only an event they are in charge of (sched None: the list, and
+    starting one, as its teacher in charge). Saved by the person's name, or "Timetable committee" for the shared committee
+    code. None for the shared heads', teacher and student codes: they are nobody's, so no event is theirs. The Exams and
+    events extra gives nothing here: the exams committee does not manage events"""
+    p = who()
+    if has("committee"): return True, p["name"] if p else "Timetable committee", True
     if p is None: return None
     return (sched is None or sched.get("in_charge") == p["name"]), p["name"], False
 
 def _exams_today(): return datetime.date.today()
 
 def _published_reader():
-    """who may read the published exams data, and how much: "full" (teacher names, duty rooms, roster, prints) for the
-    committee, a head, a teacher and staff; "student" (classes, rooms and times only) for the shared student code"""
-    r = role()
-    if r in ("committee", "head", "teacher", "staff"): return "full"
-    if r == "student": return "student"
-    return None
+    """who may read the published exams data, and how much: "full" (teacher names, duty rooms, roster, prints) for everyone
+    who sees the published timetable as staff (the committee, the heads' and teachers' codes, a person signed in by name);
+    "student" (classes, rooms and times only) for the shared student code"""
+    if not has("timetable"): return None
+    return "student" if shared() == "student" else "full"
 
 def _exams_student():
     """the student a personal code is signed in as, whose own exam timetable /api/me/exams shows; None for anyone else"""
-    return session.get("sid") if role() == "personal" else None
+    return session.get("sid") if has("own") else None
 
 BAD_DATE = "Give a date such as 2026-10-05."
 REPUBLISHED = "The timetable was published again: reload the page."
 NO_DAY_CAL = "The school calendar is not set yet, so the timetable cannot be shown on a date."
 ONLY_STAFF_PRINTS = "Only staff can open the seating plans and rosters."
+ONLY_OWN_DUTIES = "Sign in with your own code or password to see your exam and event duties."
+ONLY_OWN_EVENTS = "Sign in with your own code or password to start or open an event."
 
 def _exams_gate():
     """-> (pub, who, None) when the person may use exams, else (None, None, the refusing answer)"""
@@ -940,12 +1926,12 @@ def _event_gate(id=None):
     no = lambda ans: (None, None, None, None, ans)
     pub = store.published()
     if not pub: return no(({"error": NO_EXAMS_PUB}, 409))
+    if _event_rights(None) is None: return no(({"error": ONLY_OWN_EVENTS}, 403))   # a shared code other than the committee's: before any event is read
     sched = None
     if id is not None:
         sched = exams_schedules.load(id)
         if not sched or sched.get("kind") != "event": return no(({"error": NO_EVENT}, 404))
     rights = _event_rights(sched)
-    if rights is None: return no(({"error": "Please sign in again."}, 401))
     if not rights[0]: return no(({"error": ONLY_IN_CHARGE}, 403))
     return pub, rights[1], sched, rights[2], None
 
@@ -955,11 +1941,23 @@ def _exam_json():
     d = request.get_json(force=True, silent=True)
     return d if isinstance(d, dict) else {}
 
-def _save_exam(sched, pub, by, check=True, event=False):
-    """save a schedule; (the saved schedule, None) or (None, the 400 answer): malformed JSON never gives a 500"""
-    try: return exams_schedules.save(sched, pub, _exam_cal(pub), by, check=check), None
+def _exams_entry(what, text, exam=None, link="/exams"):
+    """one history entry for an exams or events save: who, what, which, a link (not field by field; exams keeps its own
+    record). An event's entry links to the event itself (/events/<id>). A failure to write it never fails the save"""
+    e = {"kind": "exams", "what": what, "where": "Exams and events", "text": text, "link": link, **by()}
+    if exam: e["exam"] = exam
+    try: history.add(e)
+    except Exception as x: print(f"WARNING: an exams change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
+
+def _save_exam(sched, pub, saved_by, what, words, check=True, event=False):
+    """save a schedule and record it in the history as "<its name>: <words>"; (the saved schedule, None) or (None, the
+    400 answer): malformed JSON never gives a 500. check=False: saved without the timetable check (approve, send back,
+    withdraw and someone is away still work after a new publish). event=True: an event's wording and its own link"""
+    try: saved = exams_schedules.save(sched, pub, _exam_cal(pub), saved_by, check=check)
     except ValueError as e: return None, ({"error": str(e)}, 400)
     except BAD_INPUT: return None, ({"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400)
+    _exams_entry(what, f"{saved['name']}: {words}", saved.get("id"), f"/events/{saved.get('id')}" if event else "/exams")
+    return saved, None
 
 def _marked(lists, sched, pub, cal):
     """the lessons lists with each backup's state in relief, its relief teacher and why it stops (exams.relief_links.mark,
@@ -1011,53 +2009,67 @@ def _exam_rooms_by_key(pub, cal, sched):
             for x in exams_seating.sittings(sched)}
 
 @app.get("/exams")
-@need("committee", "staff")
-def exams_home(): return app.send_static_file("exams.html")
+@need("exams", "committee", "timetable")
+def exams_home():
+    """the exams committee and the timetable committee use exams here; anyone else signed in by name sees only their own
+    exam duties (My exam duties); the shared heads', teacher and student codes are nobody's: their own page"""
+    if _exams_rights(store.published()) is None: return redirect("/")
+    return app.send_static_file("exams.html")
 
 @app.get("/exams/settings")
-@need("committee", "staff")
-def exams_settings_page(): return app.send_static_file("exams-settings.html")
+@need("exams", "committee")
+def exams_settings_page():
+    move_relief_lists()
+    return app.send_static_file("exams-settings.html")
 
 @app.get("/exams/<id>")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_one_page(id): return app.send_static_file("exams.html")
 
 @app.get("/api/exams/me")
-@need("committee", "staff")
+@need("exams", "committee", "timetable")
 def exams_me():
+    """who is asking: can_use false for a person who only sees their own exam duties"""
     pub = store.published()
     if not pub: return {"error": NO_EXAMS_PUB}, 409
     rights = _exams_rights(pub)
-    if rights is None: return {"error": "Please sign in again."}, 401
-    return jsonify(name=rights[1], can_use=rights[0], can_approve=_exams_can_approve())
+    if rights is None: return {"error": ONLY_EXAMS}, 403   # a shared code other than the committee's
+    return jsonify(name=rights[1], can_use=rights[0], can_approve=_exams_can_approve(), home="/home" if who() else "/")   # a person's way back is their home page
+
+def _exams_committee(pub):
+    """the exams committee as the accounts hold it: [name, last day] of each person whose Exams and events extra has not
+    ended (only an admin changes it, on the admin page)"""
+    today = datetime.date.today().isoformat()
+    return [[p["name"], p["extras"]["exams"]] for p in people.staff(pub) if (p["extras"].get("exams") or "") >= today and not p["off"]]
 
 def _exam_settings_reply(pub, settings):
-    """committee_ok: only the timetable committee changes the exams committee list"""
+    """lists: the exams committee from the accounts, shown and never changed here; can_admin: the line links to the admin page"""
     m = pub["model"]
-    return jsonify(settings=settings, people=relief_staff(pub), rooms=[[r["name"], r.get("kind"), r.get("capacity")] for r in m.get("rooms") or []],
-                   committee_ok=_exams_can_keep_list())
+    return jsonify(settings=settings, lists=dict(committee=_exams_committee(pub)), can_admin=has("admin"), people=relief_staff(pub),
+                   rooms=[[r["name"], r.get("kind"), r.get("capacity")] for r in m.get("rooms") or []])
 
 @app.get("/api/exams/settings")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_settings_get():
+    move_relief_lists()
     pub, who, err = _exams_gate()
     if err: return err
     return _exam_settings_reply(pub, exams_settings.load(pub))
 
 @app.put("/api/exams/settings")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_settings_put():
+    move_relief_lists()
     pub, who, err = _exams_gate()
     if err: return err
-    body = request.get_json(force=True, silent=True)
-    if not _exams_can_keep_list() and isinstance(body, dict): body = dict(body, committee=exams_settings.load(pub)["committee"])   # kept as it is
-    try: saved = exams_settings.save(body, pub, who)
+    try: saved = exams_settings.save(request.get_json(force=True, silent=True), pub, who)   # a committee list sent is ignored
     except ValueError as e: return {"error": str(e)}, 400
     except BAD_INPUT: return {"error": exams_settings.WRONG}, 400
+    _exams_entry("settings", "Exam settings saved")
     return _exam_settings_reply(pub, saved)
 
 @app.get("/api/exams")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_list():
     pub, who, err = _exams_gate()
     if err: return err
@@ -1066,7 +2078,7 @@ def exams_list():
                    calendar_ok=bool(_exam_cal(pub).get("terms")))
 
 @app.post("/api/exams")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_create():
     pub, who, err = _exams_gate()
     if err: return err
@@ -1077,7 +2089,7 @@ def exams_create():
         sched = exams_schedules.new(b["kind"], b.get("name"), b.get("levels"), b.get("start"), b.get("end"), who, pub=pub)
     except ValueError as e: return {"error": str(e)}, 400
     except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
-    saved, bad = _save_exam(sched, pub, who)
+    saved, bad = _save_exam(sched, pub, who, "create", "created")
     return bad or jsonify(saved)
 
 def _exam_or_404(id):
@@ -1085,7 +2097,7 @@ def _exam_or_404(id):
     return (s, None) if s and s.get("kind") != "event" else (None, ({"error": NO_EXAM}, 404))   # an event has its own routes
 
 @app.get("/api/exams/<id>")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_get(id):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1093,7 +2105,7 @@ def exams_get(id):
     return err or jsonify(s)
 
 @app.put("/api/exams/<id>")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_put(id):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1103,11 +2115,11 @@ def exams_put(id):
         new = dict(_exam_json(), **{k: old.get(k) for k in EXAM_KEEPS})
         new["log"] = old.get("log") or []
         if new.get("kind") not in exams_schedules.KINDS: return {"error": exams_schedules.WRONG}, 400   # an exam never becomes an event
-        saved, bad = _save_exam(new, pub, who)
+        saved, bad = _save_exam(new, pub, who, "edit", "changed")
     return bad or jsonify(saved)
 
 @app.delete("/api/exams/<id>")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_delete(id):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1116,10 +2128,11 @@ def exams_delete(id):
         if err: return err
         if s.get("approved"): return {"error": ON_SITE}, 409
         exams_schedules.delete(id)
+    if s: _exams_entry("delete", f"{s.get('name')}: deleted", s.get("id"))   # nothing there, nothing deleted: no entry
     return {"ok": True}
 
 @app.post("/api/exams/<id>/fill")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_fill(id):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1127,11 +2140,11 @@ def exams_fill(id):
         s, err = _exam_or_404(id)
         if err: return err
         s["papers"] = list(s.get("papers") or []) + exams_papers.fill_from_subjects(s, pub["model"])
-        saved, bad = _save_exam(s, pub, who)
+        saved, bad = _save_exam(s, pub, who, "fill", "papers added from the subjects")
     return bad or jsonify(saved)
 
 @app.get("/api/exams/<id>/papers.xlsx")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_papers_download(id):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1141,7 +2154,7 @@ def exams_papers_download(id):
     return send_file(io.BytesIO(exams_papers.paper_list_xlsx(s)), as_attachment=True, download_name=safe_name(f"{s.get('name')} papers") + ".xlsx", mimetype=XLSX)
 
 @app.post("/api/exams/<id>/papers.xlsx")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_papers_upload(id):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1153,7 +2166,7 @@ def exams_papers_upload(id):
         s, err = _exam_or_404(id)
         if err: return err
         s["papers"] = [p for p in s.get("papers") or [] if p.get("who") == "students"] + rows
-        saved, bad = _save_exam(s, pub, who)
+        saved, bad = _save_exam(s, pub, who, "papers", "paper list uploaded")
     return bad or jsonify(saved)
 
 def _exam_view_reply(pub, sched):
@@ -1163,26 +2176,28 @@ def _exam_view_reply(pub, sched):
     except BAD_INPUT + (IndexError,): return {"error": exams_schedules.WRONG}, 400
 
 @app.get("/api/exams/<id>/view")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_view(id):
     pub, who, err = _exams_gate()
     if err: return err
     s, err = _exam_or_404(id)
     return err or _exam_view_reply(pub, s)
 
-def _exam_changed(id, change):
-    """run change(pub, sched, body) on the stored schedule, save it and answer as the view does. The schedule is locked from
-    loading to saving (a Make takes a while), so an approve or an edit meanwhile waits and is not undone by it"""
+def _exam_changed(id, change, what, words):
+    """run change(pub, sched, body) on the stored schedule, save it (words(body): what the history says) and answer as the
+    view does. The schedule is locked from loading to saving (a Make takes a while), so an approve or an edit meanwhile
+    waits and is not undone by it"""
     pub, who, err = _exams_gate()
     if err: return err
     with exams_schedules.editing():
         s, err = _exam_or_404(id)
         if err: return err
-        try: err = change(pub, s, _exam_json())
+        b = _exam_json()
+        try: err = change(pub, s, b)
         except ValueError as e: return {"error": str(e)}, 400
         except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
         if err: return err
-        saved, bad = _save_exam(s, pub, who)
+        saved, bad = _save_exam(s, pub, who, what, words(b))
     return bad or _exam_view_reply(pub, saved)
 
 def _exam_make(pub, s, b):
@@ -1224,23 +2239,27 @@ def _exam_use_anyway(pub, s, b):
     _exam_remake(pub, s, b["key"])
 
 @app.post("/api/exams/<id>/make")
-@need("committee", "staff")
-def exams_make_route(id): return _exam_changed(id, _exam_make)
+@need("exams", "committee")
+def exams_make_route(id): return _exam_changed(id, _exam_make, "make", lambda b: "seats and duties made")
 
 @app.post("/api/exams/<id>/move")
-@need("committee", "staff")
-def exams_move(id): return _exam_changed(id, _exam_move)
+@need("exams", "committee")
+def exams_move(id): return _exam_changed(id, _exam_move, "move", lambda b: "students moved")
 
 @app.post("/api/exams/<id>/invigilators")
-@need("committee", "staff")
-def exams_invigilators(id): return _exam_changed(id, _exam_invigilators)
+@need("exams", "committee")
+def exams_invigilators(id): return _exam_changed(id, _exam_invigilators, "invigilators", lambda b: "invigilators changed")
 
 @app.post("/api/exams/<id>/use-anyway")
-@need("committee", "staff")
-def exams_use_anyway(id): return _exam_changed(id, _exam_use_anyway)
+@need("exams", "committee")
+def exams_use_anyway(id): return _exam_changed(id, _exam_use_anyway, "use-anyway", lambda b: f"{_short(b['room'], 60)} used anyway")
+
+def _short(text, n):
+    """text cut to n characters (the last one an ellipsis) for the history: a room name sent by the page is not trusted to be short"""
+    return text if len(text) <= n else text[:n - 1] + "…"
 
 @app.get("/api/exams/<id>/print/<what>.pdf")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_print(id, what):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1256,7 +2275,7 @@ def exams_print(id, what):
     return send_file(buf, as_attachment=False, download_name=safe_name(f"{s.get('name')} {exams_printouts.TITLES[what]}") + ".pdf", mimetype="application/pdf")
 
 @app.get("/api/day")
-@need("committee", "head", "teacher", "student", "staff")
+@need("timetable")
 def exams_day():
     pub = store.published()
     if not pub: return {"error": NO_EXAMS_PUB}, 409
@@ -1272,14 +2291,14 @@ def exams_day():
     return jsonify(dict(exams_published.day(pub, cal, exams_schedules.on_site(), raw, _published_reader() == "full"), published_at=stamp))
 
 @app.get("/api/published/exams")
-@need("committee", "head", "teacher", "student", "staff")
+@need("timetable")
 def exams_published_list():
     pub = store.published()
     if not pub: return {"error": NO_EXAMS_PUB}, 409
     return jsonify(exams_published.listing(pub, exams_schedules.on_site(), _exams_today(), _published_reader() == "full", cal=_exam_cal(pub)))
 
 @app.get("/api/published/exams/<id>/print/<what>.pdf")
-@need("committee", "head", "teacher", "student", "staff")
+@need("timetable")
 def exams_published_print(id, what):
     pub = store.published()
     if not pub: return {"error": NO_EXAMS_PUB}, 409
@@ -1294,23 +2313,24 @@ def exams_published_print(id, what):
     return send_file(buf, as_attachment=False, download_name=safe_name(f"{site.get('name')} {exams_printouts.TITLES[what]}") + ".pdf", mimetype="application/pdf")
 
 @app.get("/api/exams/my-duties")
-@need("committee", "staff")
+@need("timetable")
 def exams_my_duties():
+    """a person's own exam duties, signed in by name any way (the shared committee code: no one's, so none)"""
     pub = store.published()
     if not pub: return {"error": NO_EXAMS_PUB}, 409
     rights = _exams_rights(pub)
-    if rights is None: return {"error": "Please sign in again."}, 401
+    if rights is None: return {"error": ONLY_OWN_DUTIES}, 403   # the shared heads', teacher and student codes are nobody's
     return jsonify(exams_published.my_duties(pub, _exam_cal(pub), exams_schedules.on_site(), rights[1], _exams_today()))
 
 @app.get("/api/me/exams")
-@need("personal")
+@need("own")
 def exams_my_exams():
     pub = store.published(); sid = _exams_student()
     if not pub or sid not in {x["id"] for x in pub["model"].get("students") or []}: return {"error": "Please sign in again."}, 401
     return jsonify(exams_published.my_exams(pub, _exam_cal(pub), exams_schedules.on_site(), sid, _exams_today()))
 
 @app.get("/api/exams/<id>/download.xlsx")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_download(id):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1335,7 +2355,7 @@ def _exam_candidates(pub, s, key, room, approved=False):
                                           exclude=d["names"] if approved else (), elsewhere=exams_schedules.elsewhere(s.get("id"), pub["model"]))
 
 @app.get("/api/exams/<id>/who")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_who(id):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1381,10 +2401,25 @@ def _exam_review_reply(pub, s):
                    can_send=exams_approval.blocked(s, model, stale, errors), can_approve=_exams_can_approve(),
                    unsent=exams_approval.changes(s, model) if st == "approved" else [], review=rv, away=_away_texts(pub, s))
 
-def _exam_approval(id, act, approver=False, check=False, event=False):
-    """run act(pub, sched, who, now, body) on the stored schedule, save and answer with the review; locked from loading to
-    saving, as _exam_changed is. Only Send checks the schedule against the timetable (check=True): approve, send back,
-    withdraw and someone is away still work after a new publish. event=True: the same for an event (its rights and reply)"""
+# what the history says for each step the schedule's own log records (the log keeps the note and the details); "sent back"
+# names who it goes back to: the exams committee, or an event's teacher in charge
+EXAM_STEPS = {"sent": "sent to the timetable committee", "sent again": "sent to the timetable committee again",
+              "changes sent": "changes sent to the timetable committee", "approved": "approved: on the main site",
+              "changes approved": "changes approved: on the main site", "sent back": "sent back to {who}",
+              "changes sent back": "changes sent back to {who}", "withdrawn": "withdrawn from the main site",
+              "replaced": "someone away replaced at once"}
+
+def _exam_step_words(s):
+    """the history's words for the step act() has just logged on s: its log's newest entry"""
+    e = (s.get("log") or [{}])[-1]
+    words = EXAM_STEPS.get(e.get("what"), str(e.get("what") or "changed")).replace("{who}", exams_approval.WHO.get(s.get("kind"), "the exams committee"))
+    return f"{words} ({e['detail']})" if e.get("what") in ("changes sent", "replaced") and e.get("detail") else words
+
+def _exam_approval(id, act, what, approver=False, check=False, event=False):
+    """run act(pub, sched, who, now, body) on the stored schedule, save, record it in the history (what: the entry's kind
+    of step) and answer with the review; locked from loading to saving, as _exam_changed is. Only Send checks the schedule
+    against the timetable (check=True): approve, send back, withdraw and someone is away still work after a new publish.
+    event=True: the same for an event (its rights, wording and reply)"""
     with exams_schedules.editing():
         if event: pub, who, s, _, err = _event_gate(id)
         else: (pub, who, err), s = _exams_gate(), None
@@ -1396,12 +2431,12 @@ def _exam_approval(id, act, approver=False, check=False, event=False):
         try: act(pub, s, who, exams_schedules._now(), _exam_json())
         except ValueError as e: return {"error": str(e)}, 400
         except BAD_INPUT: return {"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400
-        saved, bad = _save_exam(s, pub, who, check=check, event=event)
+        saved, bad = _save_exam(s, pub, who, what, _exam_step_words(s), check=check, event=event)
         if not bad: _relief_sync(pub, saved)     # inside the lock: two syncs of one schedule never run at once
     return bad or (_event_review_reply if event else _exam_review_reply)(pub, saved)
 
 @app.get("/api/exams/<id>/review")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_review_get(id):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1415,24 +2450,24 @@ def _exam_send(pub, s, by, now, b):
     exams_approval.send(s, model, by, now, exams_make.stale(s, xset, model), exams_papers.check(s, model, _exam_cal(pub), xset["rules"])["errors"])
 
 @app.post("/api/exams/<id>/send")
-@need("committee", "staff")
-def exams_send(id): return _exam_approval(id, _exam_send, check=True)
+@need("exams", "committee")
+def exams_send(id): return _exam_approval(id, _exam_send, "send", check=True)
 
 def _act_approve(pub, s, by, now, b): exams_approval.approve(s, by, now)
 def _act_send_back(pub, s, by, now, b): exams_approval.send_back(s, b.get("note"), by, now)
 def _act_withdraw(pub, s, by, now, b): exams_approval.withdraw(s, by, now)
 
 @app.post("/api/exams/<id>/approve")
-@need("committee", "staff")
-def exams_approve(id): return _exam_approval(id, _act_approve, approver=True)
+@need("exams", "committee")
+def exams_approve(id): return _exam_approval(id, _act_approve, "approve", approver=True)
 
 @app.post("/api/exams/<id>/send-back")
-@need("committee", "staff")
-def exams_send_back(id): return _exam_approval(id, _act_send_back, approver=True)
+@need("exams", "committee")
+def exams_send_back(id): return _exam_approval(id, _act_send_back, "send-back", approver=True)
 
 @app.post("/api/exams/<id>/withdraw")
-@need("committee", "staff")
-def exams_withdraw(id): return _exam_approval(id, _act_withdraw, approver=True)
+@need("exams", "committee")
+def exams_withdraw(id): return _exam_approval(id, _act_withdraw, "withdraw", approver=True)
 
 def _exam_away(pub, s, by, now, b):
     key, room, away, name = b["key"], b["room"], b["away"], b["name"]
@@ -1445,32 +2480,38 @@ def _exam_away(pub, s, by, now, b):
     exams_approval.replace(s, key, room, away, name, by, now)
 
 @app.post("/api/exams/<id>/away")
-@need("committee", "staff")
-def exams_away(id): return _exam_approval(id, _exam_away)
+@need("exams", "committee")
+def exams_away(id): return _exam_approval(id, _exam_away, "away")
 
 def _set_handled(pub, s, b, event):
     """Handled ourselves on (handled true) or off for one backup lesson: body {teacher, key, handled}; refused unless it is a
-    backup of the working copy now. The list stays out of the approved copy and the fingerprint"""
+    backup of the working copy now. The list stays out of the approved copy and the fingerprint. -> the history's words
+    for the change"""
     teacher, key, on = b.get("teacher"), b.get("key"), b.get("handled")
     if not isinstance(teacher, str) or not isinstance(key, str) or not isinstance(on, bool):
         raise ValueError(exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG)
     items = (exams_events if event else exams_make).lesson_lists(pub, _exam_cal(pub), s)["backup"]
-    if not any(x["teacher"] == teacher and x["key"] == key for x in items): raise ValueError(NO_BACKUP)
+    item = next((x for x in items if x["teacher"] == teacher and x["key"] == key), None)
+    if item is None: raise ValueError(NO_BACKUP)
     tag = "%s|%s" % (teacher, key)
     s["handled"] = [x for x in s.get("handled") or [] if isinstance(x, str) and x != tag] + ([tag] if on else [])
+    d = datetime.date.fromisoformat(item["date"])
+    lesson = f"{teacher}'s {', '.join(item.get('classes') or [])} {item.get('subject') or ''} on {d:%a} {d.day} {d:%b} {item['start']}–{item['end']}"
+    return f"{lesson} handled ourselves" if on else f"{lesson} no longer handled ourselves"
 
 def _handled(pub, who, s, event):
-    """save a Handled ourselves change (no check: it works after a new publish too), sync relief and answer as the view"""
-    try: _set_handled(pub, s, _exam_json(), event)
+    """save a Handled ourselves change (no check: it works after a new publish too), record it in the history (what
+    "handled"), sync relief and answer as the view"""
+    try: words = _set_handled(pub, s, _exam_json(), event)
     except ValueError as e: return {"error": str(e)}, 400
     except BAD_INPUT + (IndexError,): return {"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400
-    saved, bad = _save_exam(s, pub, who, check=False, event=event)
+    saved, bad = _save_exam(s, pub, who, "handled", words, check=False, event=event)
     if bad: return bad
     _relief_sync(pub, saved)
     return (_event_view_reply if event else _exam_view_reply)(pub, saved)
 
 @app.post("/api/exams/<id>/handled")
-@need("committee", "staff")
+@need("exams", "committee")
 def exams_handled(id):
     pub, who, err = _exams_gate()
     if err: return err
@@ -1516,11 +2557,15 @@ def _event_view(pub, s):
                 depts=sorted({d for p in people for d in p["depts"]}), people=[p["name"] for p in people])
 
 @app.get("/events/<id>")
-@need("committee", "staff")
-def events_one_page(id): return app.send_static_file("exams.html")
+@need("committee", "timetable")
+def events_one_page(id):
+    """the event editor, for the timetable committee and anyone signed in by name (the event then says whether they may
+    open it: its teacher in charge); the shared heads', teacher and student codes are nobody's: their own page"""
+    if _event_rights(None) is None: return redirect("/")
+    return app.send_static_file("exams.html")
 
 @app.get("/api/events")
-@need("committee", "staff")
+@need("committee", "timetable")
 def events_list():
     pub, who, _, every, err = _event_gate()
     if err: return err
@@ -1530,7 +2575,7 @@ def events_list():
                    calendar_ok=bool(_exam_cal(pub).get("terms")), people=[p["name"] for p in relief_staff(pub)] if every else [])
 
 @app.post("/api/events")
-@need("committee", "staff")
+@need("committee", "timetable")
 def events_create():
     pub, who, _, every, err = _event_gate()
     if err: return err
@@ -1545,34 +2590,35 @@ def events_create():
     except ValueError as e: return {"error": str(e)}, 400
     except BAD_INPUT: return {"error": exams_schedules.EVENT_WRONG}, 400
     with exams_schedules.editing():
-        saved, bad = _save_exam(sched, pub, who, event=True)
+        saved, bad = _save_exam(sched, pub, who, "create", "created", event=True)
     return bad or jsonify(saved)
 
 @app.get("/api/events/<id>")
-@need("committee", "staff")
+@need("committee", "timetable")
 def events_get(id):
     pub, who, s, _, err = _event_gate(id)
     return err or jsonify(s)
 
 @app.put("/api/events/<id>")
-@need("committee", "staff")
+@need("committee", "timetable")
 def events_put(id):
     with exams_schedules.editing():   # from loading to saving: what is kept is what is stored now
         pub, who, old, _, err = _event_gate(id)
         if err: return err
         new = dict(_exam_json(), **{k: old.get(k) for k in EVENT_KEEPS})
         new["log"] = old.get("log") or []
-        saved, bad = _save_exam(new, pub, who, event=True)
+        saved, bad = _save_exam(new, pub, who, "edit", "changed", event=True)
     return bad or jsonify(saved)
 
 @app.delete("/api/events/<id>")
-@need("committee", "staff")
+@need("committee", "timetable")
 def events_delete(id):
     with exams_schedules.editing():
         pub, who, s, _, err = _event_gate(id)
         if err: return err
         if s.get("approved"): return {"error": ON_SITE}, 409
         exams_schedules.delete(id)
+    _exams_entry("delete", f"{s.get('name')}: deleted", s.get("id"), "/exams")   # the event is gone: the entry links to the list
     return {"ok": True}
 
 def _event_view_reply(pub, s):
@@ -1581,13 +2627,13 @@ def _event_view_reply(pub, s):
     except BAD_INPUT + (IndexError,): return {"error": exams_schedules.EVENT_WRONG}, 400
 
 @app.get("/api/events/<id>/view")
-@need("committee", "staff")
+@need("committee", "timetable")
 def events_view(id):
     pub, who, s, _, err = _event_gate(id)
     return err or _event_view_reply(pub, s)
 
 @app.post("/api/events/<id>/fill")
-@need("committee", "staff")
+@need("committee", "timetable")
 def events_fill(id):
     with exams_schedules.editing():
         pub, who, s, _, err = _event_gate(id)
@@ -1602,8 +2648,12 @@ def events_fill(id):
             s["going_by"] = b["way"]
         except ValueError as e: return {"error": str(e)}, 400
         except BAD_INPUT: return {"error": exams_schedules.EVENT_WRONG}, 400
-        saved, bad = _save_exam(s, pub, who, event=True)
+        saved, bad = _save_exam(s, pub, who, "fill", f"{len(added)} added to the people going ({EVENT_FILLS[b['way']]})", event=True)
     return bad or jsonify(saved)
+
+# how the history names each way of filling the going list
+EVENT_FILLS = {"form teachers": "the form teachers", "teachers then": "the teachers who would teach them then",
+               "department": "a department", "people": "picked people"}
 
 def _event_send(pub, s, by, now, b):
     others, busy = _event_others(pub, s)
@@ -1622,40 +2672,40 @@ def _event_away(pub, s, by, now, b):
     exams_approval.replace_going(s, away, name, by, now)
 
 @app.get("/api/events/<id>/review")
-@need("committee", "staff")
+@need("committee", "timetable")
 def events_review_get(id):
     pub, who, s, _, err = _event_gate(id)
     return err or _event_review_reply(pub, s)
 
 @app.post("/api/events/<id>/send")
-@need("committee", "staff")
-def events_send(id): return _exam_approval(id, _event_send, check=True, event=True)
+@need("committee", "timetable")
+def events_send(id): return _exam_approval(id, _event_send, "send", check=True, event=True)
 
 @app.post("/api/events/<id>/approve")
-@need("committee", "staff")
-def events_approve(id): return _exam_approval(id, _act_approve, approver=True, event=True)
+@need("committee", "timetable")
+def events_approve(id): return _exam_approval(id, _act_approve, "approve", approver=True, event=True)
 
 @app.post("/api/events/<id>/send-back")
-@need("committee", "staff")
-def events_send_back(id): return _exam_approval(id, _act_send_back, approver=True, event=True)
+@need("committee", "timetable")
+def events_send_back(id): return _exam_approval(id, _act_send_back, "send-back", approver=True, event=True)
 
 @app.post("/api/events/<id>/withdraw")
-@need("committee", "staff")
-def events_withdraw(id): return _exam_approval(id, _act_withdraw, approver=True, event=True)
+@need("committee", "timetable")
+def events_withdraw(id): return _exam_approval(id, _act_withdraw, "withdraw", approver=True, event=True)
 
 @app.post("/api/events/<id>/away")
-@need("committee", "staff")
-def events_away(id): return _exam_approval(id, _event_away, event=True)
+@need("committee", "timetable")
+def events_away(id): return _exam_approval(id, _event_away, "away", event=True)
 
 @app.post("/api/events/<id>/handled")
-@need("committee", "staff")
+@need("committee", "timetable")
 def events_handled(id):
     with exams_schedules.editing():
         pub, who, s, _, err = _event_gate(id)
         return err or _handled(pub, who, s, True)
 
 @app.get("/api/events/<id>/who")
-@need("committee", "staff")
+@need("committee", "timetable")
 def events_who(id):
     pub, who, s, _, err = _event_gate(id)
     if err: return err
@@ -1663,6 +2713,7 @@ def events_who(id):
     except ValueError as e: return {"error": str(e)}, 400
 
 startup_log()
+move_relief_lists()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)

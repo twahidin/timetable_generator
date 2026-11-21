@@ -1,9 +1,8 @@
 """Exam and test schedules: make, check, save, list. One JSON file each under DATA/exams/schedules."""
 import datetime, os, secrets, threading
 
-import relief.people
-import relief.settings
 import store
+from accounts import people as _accounts
 from exams import approval as _approval
 from exams import days as _days
 from exams import papers as _papers
@@ -167,7 +166,7 @@ def _check_event_body(s, pub):
     rooms = {r["name"] for r in model.get("rooms") or []}
     for v in s["venues"]:
         if v not in rooms: raise ValueError(f"{v} is not a room of the published timetable.")
-    known = {p["name"] for p in relief.people.people(pub, relief.settings.load(pub)["extra_staff"])}
+    known = {p["name"] for p in _accounts.listing(pub)}   # the published teachers and the staff added in the accounts
     for n in s["going"]:
         if n not in known: raise ValueError(f"{n} is not on the published timetable or the staff list.")
     s["going"] = list(dict.fromkeys(s["going"]))

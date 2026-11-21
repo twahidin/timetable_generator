@@ -9,17 +9,11 @@
   const S = { data: null, f: null, dirty: false, busy: false, msg: "", bad: false, open: null, q: "" };
 
   const clone = x => JSON.parse(JSON.stringify(x));
-  const listOf = key => key === "never" ? S.f.limits.never : S.f[key];
+  const listOf = key => S.f.limits.never;   /* the only list kept on this page: the never list */
   const opt = (v, cur, label) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(label ?? v)}</option>`;
 
-  function everyone() {   /* who the pickers offer: the published timetable's teachers, then the other staff as typed now */
-    const out = S.data.people.filter(p => !p.staff_only).map(p => ({ name: p.name, about: (p.depts || []).join(", ") }));
-    const seen = new Set(out.map(p => p.name));
-    for (const x of S.f.extra_staff) {
-      const n = String(x.name || "").trim();
-      if (n && !seen.has(n)) { seen.add(n); out.push({ name: n, about: "Other staff" }); }
-    }
-    return out;
+  function everyone() {   /* who the pickers offer: the published timetable's teachers, then the other staff from the accounts */
+    return S.data.people.map(p => ({ name: p.name, about: p.staff_only ? "Other staff" : (p.depts || []).join(", ") }));
   }
 
   function matches(key) {
@@ -49,12 +43,13 @@
     return m.map((p, i) => `<li><button type="button" class="${i === 0 && S.q.trim() ? "first" : ""}" data-add="${key}" data-name="${esc(p.name)}"><span>${esc(p.name)}</span><span class="muted">${esc(p.about)}</span></button></li>`).join("");
   }
 
-  function staffRows() {
-    const rows = S.f.extra_staff.map((x, i) => `<tr><td><input data-staff="name" data-i="${i}" value="${esc(x.name)}" placeholder="Name" aria-label="Name"></td>
-      <td><input data-staff="note" data-i="${i}" value="${esc(x.note)}" placeholder="What they do (optional)" aria-label="Note"></td>
-      <td class="x"><button type="button" class="small danger" data-unstaff="${i}" title="Take this staff member off" aria-label="Take this staff member off">✕</button></td></tr>`).join("");
-    return (rows ? `<div class="tablewrap cal staff"><table><thead><tr><th>Name</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : "")
-      + `<button type="button" class="small add" data-act="addStaff">+ Add a staff member</button>`;
+  function readOnly(names, what) {   /* a list kept on the admin page: shown here, never edited */
+    const list = names.length ? names.map(n => `<span class="chip pchip" style="padding-right:10px">${esc(n)}</span>`).join("") : `<span class="muted small">No one yet.</span>`;
+    return `<div class="chiprow" aria-label="${esc(what)}">${list}</div>`;
+  }
+
+  function changeNote() {
+    return `<div class="small muted" style="margin-top:6px">${S.data.can_admin ? `<a href="/admin">Change these on the admin page.</a>` : "Ask an admin to change these."}</div>`;
   }
 
   function fatRole() {
@@ -116,7 +111,7 @@
   function codes() {
     return `<div class="codes"><a class="filebtn" href="/api/relief/codes.csv" data-dl="personal relief codes.csv">Download codes (.csv)</a>
       <a class="filebtn" href="/api/relief/code-slips.pdf" data-dl="relief code slips.pdf">Print code slips (PDF)</a><span class="dlmsg" id="dlMsg"></span></div>
-      <div class="small muted" style="margin-top:6px">A code for each teacher on the published timetable and each staff member above, as last saved.</div>`;
+      <div class="small muted" style="margin-top:6px">A code for each teacher on the published timetable and each other staff member, as last saved.</div>`;
   }
 
   function bar(where) { return `<div class="savebar ${where}" data-bar="1">${barInner()}</div>`; }
@@ -144,9 +139,9 @@
       ${missing.length ? `<p class="notice">No longer on the timetable: ${esc(missing.join(", "))}. Saving removes them.</p>` : ""}
       ${bar("first")}
       <fieldset id="form" ${d.can_save ? "" : "disabled"}>
-      ${setting("Management", "", chips("management", "management") + `<div class="small muted" style="margin-top:6px">Picked from the teachers on the published timetable and the other staff below.</div>`)}
-      ${setting("Relief team", `<span>They can change these settings.</span>`, chips("team", "the relief team"))}
-      ${setting("Other staff (no lessons)", `<span>Staff who are not on the timetable but take part in relief. Each gets a personal code.</span>`, staffRows())}
+      ${setting("Management", "", readOnly(d.lists.management, "Management") + changeNote())}
+      ${setting("Relief team", `<span>They can change these settings.</span>`, readOnly(d.lists.team, "Relief team") + changeNote())}
+      ${setting("Other staff (no lessons)", `<span>Staff who are not on the timetable but take part in relief. Each gets a personal code.</span>`, readOnly(d.lists.added, "Other staff") + changeNote())}
       ${setting("Flexi Adjunct Teachers", "", fatRole())}
       ${setting("Relief rules", `<span>The AI follows these in order and quotes them in its reasons.</span>`, rules())}
       ${setting("Checked limits", `<span>The app checks these itself.</span>`, limits())}
@@ -200,8 +195,6 @@
     if (ds.pickdone) { S.open = null; S.q = ""; render(); return; }
     if (ds.add) { pickName(ds.add, ds.name); return; }
     if (ds.unchip) { listOf(ds.unchip).splice(i, 1); redraw(); return; }
-    if (ds.act === "addStaff") { f.extra_staff.push({ name: "", note: "" }); redraw(`[data-staff="name"][data-i="${f.extra_staff.length - 1}"]`); return; }
-    if (ds.unstaff !== undefined) { f.extra_staff.splice(Number(ds.unstaff), 1); redraw(); return; }
     if (ds.act === "addRule") { f.rules.push(""); redraw(`[data-rule="${f.rules.length - 1}"]`); return; }
     if (ds.up !== undefined) { move(f.rules, Number(ds.up), -1); redraw(`[data-up="${Number(ds.up) - 1}"]`); return; }
     if (ds.down !== undefined) { move(f.rules, Number(ds.down), 1); redraw(`[data-down="${Number(ds.down) + 1}"]`); return; }
@@ -217,7 +210,6 @@
     if (!f) return;
     if (el.id === "pickQ") { S.q = v; const ul = $("#pickList"); if (ul && S.open) ul.innerHTML = pickItems(S.open); return; }
     const num = x => x === "" ? null : Number(x);
-    if (ds.staff) { f.extra_staff[i][ds.staff] = v; changed(); return; }
     if (ds.fat) { f.fat_role = v; $("#fatCount").innerHTML = fatCount(); changed(); return; }
     if (ds.rule !== undefined) { f.rules[Number(ds.rule)] = v; fit(el); changed(); return; }
     if (ds.lim) { f.limits[ds.lim] = num(v); changed(); return; }

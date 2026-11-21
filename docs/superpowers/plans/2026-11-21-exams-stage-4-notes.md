@@ -11,11 +11,12 @@ and a reviewer per task (seven tasks, every review clean), then a finishing task
   rule (only the approved copy is read) and the same "other schedules count" busy logic. It has no papers, seats or
   invigilators; its own fields are the teacher in charge, "where" (free words), the school rooms it takes (venues), the
   people going and how that list was filled, and optional duties.
-- **Who starts one.** Any staff member signed in with a personal code starts an event with **+ New event** and becomes its
-  teacher in charge; they and the timetable committee may change it, nobody else may open it. The timetable committee may
-  also start one but must name the teacher in charge (P1). The exams committee does not manage events. Events have their
-  own `/api/events` routes; the exam routes answer 404 for an event (P2). Every rights decision is in `app.py`'s helpers
-  (`_event_rights` is new), so the accounts work still rewrites one place.
+- **Who starts one.** Any staff member signed in with a personal code (since the merge with accounts: anyone signed in by
+  name, with their code or their password; see "Merged with accounts" below) starts an event with **+ New event** and
+  becomes its teacher in charge; they and the timetable committee may change it, nobody else may open it. The timetable
+  committee may also start one but must name the teacher in charge (P1). The exams committee does not manage events. Events
+  have their own `/api/events` routes; the exam routes answer 404 for an event (P2). Every rights decision is in `app.py`'s
+  helpers (`_event_rights` is new; it reads the accounts' rights since the merge).
 - **Who goes.** Four ways to fill the list: the form teachers of the chosen classes (`classes[].parents`), the teachers who
   would teach those classes during the event's windows, everyone in a department, or picked people; the teacher in charge
   adds or removes names. For each person the page says "free then" (their lessons with the event's classes stop) or that
@@ -194,11 +195,12 @@ made-up day, Tue 24 Nov (Even Tues).
   review); relief's backup sending reads them from the approved copy, as exam duties are read. Relief's absences should
   also feed "Someone is away" on events as on exams. Events add `event` blocks to the same `/api/day` `exams` key; relief's
   layer must spread combined venues, as stage 2 noted.
-- **Accounts.** `_event_rights`, `_event_gate` and the five stage 2 helpers are the places that read the role or the
-  session; personal accounts rewrite them. The "teacher in charge" is a name (`in_charge`), matched to the signed-in
-  person's name; an account id would be firmer. Open point (K10): the committee cannot reassign the teacher in charge once an
-  event exists; add it when accounts land.
-- **History.** The event's `log` and approved copy are ready for a history page with "Put back".
+- **Accounts.** Merged (see "Merged with accounts" below): `_event_rights` and `_event_gate` read the accounts' rights, as
+  the stage 2 helpers do. The "teacher in charge" is a name (`in_charge`), matched to the signed-in person's name; an
+  account id would be firmer. Open point (K10): the committee cannot reassign the teacher in charge once an event exists;
+  still open after the merge (no route sets it).
+- **History.** Every event save and approval step is in the History since the merge; the event's `log` and approved copy
+  are ready for "Put back".
 - Not built: a Preview on the main site for events (as for exams, P10), a typed multi-day event test, an event in the print
   pages, and a message to people going (nothing tells anyone yet).
 - Date rule to keep in mind (K12): `event_busy` covers non-school dates; `on_dates` and `day` do not.
@@ -225,3 +227,46 @@ Rulings (accepted as the review describes):
 - No "timetable changed" warning for events after a republish (plan P5); a forged day entry naming another level is as
   stage 2; the teacher in charge cannot be reassigned (K10, open point: let the committee set it when accounts land);
   `event_busy` covers non-school dates (K12); a lesson shared with a class not on the event still runs (spec rule).
+
+## Merged with accounts (through stage 2)
+
+`exams-stage-2` 7523b72 (stage 2 with main's accounts, PR #83, merged in) was merged into this branch on 21 November 2026
+with `git merge` (no rebase). Conflicts: README.md, app.py, static/exams.js, tests/test_exams.py. What the merge chose where
+accounts and events meet:
+
+- **Every events route names its right.** `/events/<id>` and all fifteen `/api/events` routes `need("committee",
+  "timetable")` (stage 4 had `need("committee", "staff")`): the timetable committee and everyone signed in by name. All are
+  pinned in `tests/test_routes.py` (`EVENTS_ENDPOINTS`; every rule with "/events" must be in it).
+- **Who.** `_event_rights` reads the accounts, no role names: `has("committee")` (the shared committee code, or a committee
+  member signed in with their password) opens every event and must name the teacher in charge to start one; anyone else
+  signed in by name, any way in (`who()`), opens only an event they are in charge of and starts one as its teacher in
+  charge; the Exams and events extra is not read (the exams committee does not manage events; its members may start their
+  own, as anyone). A committee member signed in by code is a person here, not the committee (as `_exams_can_approve`).
+- **The shared heads', teacher and student codes** pass the guard (they hold `timetable`) but are nobody's: `_event_gate`
+  answers 403 `ONLY_OWN_EVENTS` ("Sign in with your own code or password to start or open an event.") before any event is
+  read, and `/events/<id>` sends them to `/`. A student's personal code has only `own`: the guard refuses it.
+- **History.** Each event save and step writes one entry as exams do (kind `exams`, Where "Exams and events", `exam` = the
+  event's id) linked to `/events/<id>` (`/exams` for a delete): create "created", edit "changed", fill "N added to the
+  people going (the form teachers | the teachers who would teach them then | a department | picked people)", delete
+  "deleted", and send, approve, send back, withdraw and someone away with stage 2's words, "sent back to the teacher in
+  charge" for an event. A refusal, or a fill that adds no one, writes nothing.
+- **`_exam_approval`** keeps stage 4's shape (the gate and the approver check inside the lock, since an event is loaded
+  there) with stage 2's history step; `_save_exam` is main's `(sched, pub, saved_by, what, words, check)` plus `event`.
+- **The staff list.** `exams/events.py` and `exams/schedules.py` read `accounts.people.listing(pub)` (the published
+  teachers and the staff added in the accounts, step 4's departments), not relief's old `extra_staff` list, which main no
+  longer reads.
+- **The page and the tile.** A person without the exams rights sees stage 4's list on `/exams` (their duties card, their
+  events and + New event) instead of stage 2's duties-only page; the way back is `/api/exams/me`'s `home` ("Back to Home",
+  not "Back to Relief"). Their home tile is renamed **My exam and event duties** ("Your duties, your events and the
+  lessons that don't happen"), as stage 4 renamed the card; `ONLY_OWN_DUTIES` says "exam and event duties".
+- **The front page card blurb** ("; school events") went with main's cards (one sign-in box and home tiles).
+- **Kept from stage 4:** a DELETE of a missing exam id answers 404 (main's history test now expects 404, still no entry).
+- **Kept from accounts:** a person without the exams rights gets main's 401 on `/api/exams` (stage 4's test expected 403
+  `ONLY_EXAMS`).
+- **The shared student code** still sees an event's name, where and time only: the main-site routes read stage 2's
+  `_published_reader()`.
+
+New tests: `event_rights_by_the_accounts` (the shared codes, a personal student code, the exams committee, a committee
+member by code, a leader by password, the committee by password), `each_event_save_and_step_writes_one_history_entry`,
+and `event_rights_stay_inside_helpers` now reads `_event_rights` for `has("committee")` and `who()` and no role, session,
+`shared()` or exams right.
