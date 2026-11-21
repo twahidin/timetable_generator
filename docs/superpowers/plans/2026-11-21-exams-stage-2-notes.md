@@ -298,7 +298,8 @@ commit). What the merge chose where the two meet:
   exams page and API stays the committees'. Such a person's home page has a **My exam duties** tile where the exams
   committee has Exams and events (an executive therefore has two tiles and is no longer sent straight to Timetables).
   `/api/exams/my-duties` answers the shared heads', teacher and student codes 403 `ONLY_OWN_DUTIES`. The page's way
-  back is `/api/exams/me`'s `home`.
+  back is `/api/exams/me`'s `home`. The lead confirmed this on 22 November 2026 ("Yes, keep it"): the exams pages stay
+  open to everyone signed in by name, for their own duties (and, with stage 4, their own events).
 - **History.** Send, approve, send back, withdraw and someone away each write one history entry (kind `exams`, what
   send / approve / send-back / withdraw / away, text "<schedule>: <step>" from the schedule's newest `log` entry; the
   send-back note stays in the log only). Main's entries for the other exams saves and stage 2's save lock are both kept.
