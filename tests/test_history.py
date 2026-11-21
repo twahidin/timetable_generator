@@ -177,4 +177,83 @@ def stray_files_and_non_dict():
     else: raise AssertionError("no TypeError")
     assert len(H.read()) == 1
 
+def _setup_in_store(parents=False):
+    fresh()
+    spec = samples.secondary()
+    if parents:
+        spec["subjects"].append({"subject": "Pastoral Care", "code": "PC", "periods": {"Sec 1": 2}})
+        spec["school"]["parents_subjects"] = ["Pastoral Care"]
+        next(x for x in spec["classes"] if x["class"] == "1A")["parents"] = ["Pastoral A"]
+    store._setup.clear()
+    store.replace_setup(spec, "Test start")
+    fresh()
+    return store.setup_record()["spec"]
+
+@t
+def apply_changes_writes_who():
+    spec = _setup_in_store()
+    cid = spec["classes"][0]["_id"]; cid2 = spec["classes"][1]["_id"]
+    by = H.by_of("Ann Lee", "password")
+    ops = [["set", "classes", cid, "class", "Zeta"], ["school", "timetable", "Term 9"]]
+    v, refused, mine = store.apply_changes(ops, "c1", by=by)
+    es = H.read(kinds=["setup"])
+    assert len(es) == 2 and {e["as"] for e in es} == {"Ann Lee"} and {e["v"] for e in es} == {v}, es
+    assert len({e["batch"] for e in es}) == 1 and es[0]["batch"].startswith("b")
+    store.apply_changes([["school", "timetable", "Term 8"]], "c1")
+    assert H.read(limit=1)[0]["as"] == "Unknown"
+    def flt(sp, ops):
+        return [ops[1]], [(0, "Not your department.")]
+    fresh()
+    store.apply_changes([["set", "classes", cid2, "class", "Eta"], ["school", "timetable", "Term 7"]], "c1", filter=flt, by=by)
+    es = H.read()
+    ref = [e for e in es if e["kind"] == "setup-refused"]; ok = [e for e in es if e["kind"] == "setup"]
+    assert len(ref) == 1 and len(ok) == 1, es
+    r = ref[0]
+    assert r["why"] == "Not your department." and r["op"] == ["set", "classes", cid2, "class", "Eta"]
+    assert r["as"] == "Ann Lee" and r["via"] == "password" and r["where"] == "Step 2 · Classes", r
+
+@t
+def class_parents_ops_are_app_entries():
+    spec = _setup_in_store(parents=True)
+    cid = next(x["_id"] for x in spec["classes"] if x["class"] == "1A")
+    by = H.by_of("Ann Lee", "password")
+    store.apply_changes([["set", "classes", cid, "parents", ["Pastoral B"]]], "c1", by=by)
+    es = H.read()
+    mine = [e for e in es if e["kind"] == "setup" and e["as"] == "Ann Lee"]; app = [e for e in es if e["kind"] == "app"]
+    assert len(mine) == 1 and app, es
+    assert all(e["as"] == "The app" and e["via"] == "app" and e["follows"] == mine[0]["batch"] for e in app), app
+    assert all(e["v"] == mine[0]["v"] + 1 for e in app)
+
+@t
+def replace_and_restore_record_who():
+    spec = _setup_in_store()
+    by = H.by_of("Ann Lee", "password")
+    spec2 = copy.deepcopy(spec); spec2["school"]["timetable"] = "Whole"
+    store.replace_setup(spec2, "Saved", by=by)
+    e = H.read(limit=1)[0]
+    assert e["kind"] == "setup-replaced" and e["text"] == "Saved" and e["where"] == "Setup" and e["as"] == "Ann Lee", e
+    cp = store.copies()
+    assert cp[0]["who"] == "Ann Lee" and "Before: Saved" in cp[0]["what"], cp   # the point taken before the save
+    store.replace_setup(spec2, "Second", by=by)
+    assert store.copies()[0]["who"] == "Ann Lee", store.copies()
+    store.restore(store.copies()[0]["id"], by=H.by_of("Bo Tan", "password"))
+    e = H.read(limit=1)[0]
+    assert e["kind"] == "setup-replaced" and e["as"] == "Bo Tan" and e["text"].startswith("Restored "), e
+    assert store.copies()[0]["who"] == "Bo Tan"
+    f = os.path.join(store.HIST, store._points()[0]); x = store.read_json(f); x.pop("who", None); store.write_json(f, x)
+    assert store.copies()[-1]["who"] == "Unknown"
+
+@t
+def history_failure_does_not_stop_the_change():
+    _setup_in_store()
+    real = H.add_many
+    def boom(es): raise OSError("disk")
+    H.add_many = boom
+    try:
+        v0 = store.setup_record()["v"]
+        v, _, _ = store.apply_changes([["school", "timetable", "Term 5"]], "c1")
+    finally:
+        H.add_many = real
+    assert v == v0 + 1 and store.setup_record()["spec"]["school"]["timetable"] == "Term 5"
+
 print(f"{COUNT} history tests passed")
