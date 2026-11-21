@@ -6,7 +6,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const KEY = "ttsetup.v1";
 const S = { kind: null, spec: null, meta: null, step: 0, brush: "L", stu: { cls: "", q: "" }, tg: { lv: "", subj: "", t: "" }, tf: { dept: "", q: "" }, pick: { lessons: new Set(), students: new Set(), teachers: new Set(), shown: {}, last: {}, t: "", g: "", c: "", d: "", r: "", a: "", p: "" }, undo: [], redo: [], last: null };
 const STEPS = [["start", "Start"], ["school", "School & day"], ["venues", "1 Venues"], ["classes", "2 Classes"], ["subjects", "3 Subjects"],
-  ["teachers", "4 Teachers"], ["lessons", "5 Department map"], ["rules", "6 Configuration & constraints"], ["download", "7 Download"], ["edit", "8 Upload and edit"], ["publish", "9 Publish"], ["students", "Students"]];
+  ["teachers", "4 Teachers"], ["lessons", "5 Teacher & TG deployment"], ["rules", "6 Configuration & constraints"], ["download", "7 Download"], ["edit", "8 Upload and edit"], ["publish", "9 Publish"], ["students", "Students"]];
 
 /* ---------------- storage, server
    The setup lives on the server. SYNC.base is the copy the server last confirmed (at version SYNC.v); S.spec is the
@@ -1226,7 +1226,7 @@ const SV = { view: "cards" };   // "cards" or "table"; kept for each person in t
 try { const sv = localStorage.getItem(SUBJECTVIEW); if (["cards", "table"].includes(sv)) SV.view = sv; } catch (e) { }
 function subjectsTable() {   // today's table and its Add button
   const { out, crit } = issues(); const tags = (sc().tags || []).map(t => t[0]);
-  return `<div class="tablewrap"><table><tr><th>Subject</th><th>Code</th><th>${tagLabel()}</th><th>Department</th><th>Room kind</th><th>Lesson length</th>${levels().map(l => `<th>${esc(l)}</th>`).join("")}<th title="How many groups or classes have this subject on step 5 (Teaching groups & deployment): a banded group counts once, a whole-class subject once per class. 0: none yet, so it is not timetabled.">Teaching groups</th><th></th></tr>
+  return `<div class="tablewrap"><table><tr><th>Subject</th><th>Code</th><th>${tagLabel()}</th><th>Department</th><th>Room kind</th><th>Lesson length</th>${levels().map(l => `<th>${esc(l)}</th>`).join("")}<th title="How many groups or classes have this subject on step 5 (Teacher & TG deployment): a banded group counts once, a whole-class subject once per class. 0: none yet, so it is not timetabled.">Teaching groups</th><th></th></tr>
       ${S.spec.subjects.map((s, i) => `<tr id="subjects-${i}" class="${rowCls(out, crit, "subjects", i)}"><td style="min-width:220px">${inp(`spec.subjects.${i}.subject`, s.subject)}</td><td class="num">${inp(`spec.subjects.${i}.code`, s.code, "text", 'style="width:54px"')}</td><td>${sel(`spec.subjects.${i}.tag`, s.tag, tags, false)}</td><td>${sel(`spec.subjects.${i}.dept`, s.dept, sc().departments || [])}</td><td>${sel(`spec.subjects.${i}.room_kind`, s.room_kind, sc().room_kinds || [])}</td><td class="num">${inp(`spec.subjects.${i}.lesson_length`, s.lesson_length, "number", 'style="width:56px"')}</td>${levels().map(l => `<td class="num">${inp(`spec.subjects.${i}.periods.${l}`, (s.periods || {})[l], "number", 'style="width:56px"')}</td>`).join("")}<td class="calc">${teachingGroups(s.subject)}</td><td>${delBtn("subjects", i)}</td></tr>`).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="subjects">+ Add subject</button></div>`;
 }
@@ -1237,7 +1237,7 @@ function subjectsCards() {
   const kinds = sc().room_kinds || [], depts = sc().departments || [], allTags = (sc().tags || []).map(t => t[0]);
   const addBtn = d => `<button class="small" data-sadd="${encodeURIComponent(d)}">+ Add a subject</button>`;
   if (!cols.length) return `<p class="muted">No subjects yet. Add one here, or switch to Table.</p><div class="row" style="margin-top:10px">${addBtn("")}</div>`;
-  const TG = `title="How many groups or classes have this subject on step 5 (Teaching groups & deployment): a banded group counts once, a whole-class subject once per class. 0: none yet, so it is not timetabled."`;
+  const TG = `title="How many groups or classes have this subject on step 5 (Teacher & TG deployment): a banded group counts once, a whole-class subject once per class. 0: none yet, so it is not timetabled."`;
   const sjSel = (id, what, cur, list) => `<select id="${id}" data-sset="${what}">${opt("", cur, "")}${list.map(v => opt(v, cur)).join("")}${cur && !list.includes(cur) ? opt(cur, cur, cur + " (not on list)") : ""}</select>`;
   const mark = ris => ris.some(ri => (out.subjects[ri] || []).some(m => isCrit(crit, "subjects", ri, m))) ? "bad" : ris.some(ri => (out.subjects[ri] || []).length) ? "caution" : "";
   const periods = ri => L.map(l => `<td class="num">${inp(`spec.subjects.${ri}.periods.${l}`, ((subs[ri] || {}).periods || {})[l], "number", 'style="width:56px"')}</td>`).join("");
@@ -1522,9 +1522,9 @@ const VIEWS = {
         return `<tr><td>${inp(`spec.roles.${i}.role`, r.role, "text", 'style="width:80px"')}</td><td style="min-width:240px">${inp(`spec.roles.${i}.what`, r.what)}</td><td class="num">${inp(`spec.roles.${i}.allowance`, r.allowance, "number", 'style="width:64px"')}</td><td>${inp(`spec.roles.${i}.group`, r.group)}</td><td class="calc">${ts.length}</td><td class="calc">${avg(ts.map(tot))}</td><td>${delBtn("roles", i)}</td></tr>`; }).join("")}
       </table></div><div class="row" style="margin-top:10px"><button data-add="roles">+ Add role</button></div></div>`;
   },
-  lessons() {   // step 5: the department map, or the table view of the same rows
-    const sw = v => `<button class="${M.view === v ? "on" : ""}" data-mview="${v}">${{ map: "Map", groups: "Groups and bands", table: "Table" }[v]}</button>`;
-    return `<div class="card"><div class="row" style="justify-content:space-between"><div><h1 style="margin:0">Step 5 · Department map</h1><p class="lead" style="margin:6px 0 0">Tick teachers at the top, then click a class or group card to place them there. Dragging works too. Click an avatar for the teacher's profile. The table view shows the same rows for bulk edits, bands and new groups.</p></div><div class="row switch">${sw("map")}${sw("groups")}${sw("table")}</div></div></div>`
+  lessons() {   // step 5, Teacher & TG deployment: the Teacher Deployment Editor (the department map), the Banding & TG Group Editor, or the table view of the same rows
+    const sw = v => `<button class="${M.view === v ? "on" : ""}" data-mview="${v}">${{ map: "Teacher Deployment Editor", groups: "Banding & TG Group Editor", table: "Table" }[v]}</button>`;
+    return `<div class="card"><div class="row" style="justify-content:space-between"><div><h1 style="margin:0">Step 5 · Teacher &amp; TG deployment</h1><p class="lead" style="margin:6px 0 0">${M.view === "groups" ? "Make the teaching groups (TG) and put them into bands here. Teachers are shown but not changed: deploy them in the Teacher Deployment Editor." : M.view === "table" ? "Every teaching group as a row, for bulk edits, bands and new groups." : "Tick teachers at the top, then click a class or group card to place them there. Dragging works too. Click an avatar for the teacher's profile."}</p></div><div class="row switch">${sw("map")}${sw("groups")}${sw("table")}</div></div></div>`
       + (M.view === "map" ? VIEWS.map() : M.view === "groups" ? VIEWS.groups() : VIEWS.table());
   },
   table() {
@@ -1567,7 +1567,7 @@ const VIEWS = {
       <div id="rbody">${rosterList(dept)}</div>
     </section>${prof >= 0 ? profileView(T[prof], prof) : cardsView(dept)}</div>`;
   },
-  groups() {   // step 5's "Groups and bands": a new group and a new band across the top; the filter; then, as two tabs, the single teaching groups and the banded ones
+  groups() {   // step 5's "Banding & TG Group Editor" (it was "Groups and bands"): a new group and a new band across the top; the filter; then, as two tabs, the single teaching groups and the banded ones
     Sync.ensureIds(S.spec);
     const gf = gfState(), bf = bfState(), tags = (sc().tags || []).map(t => t[0]).filter(t => t && t !== "-");
     const subjAt = lv => subjectNames().filter(n => ((subj(n) || {}).periods || {})[lv]);
@@ -1798,6 +1798,7 @@ document.addEventListener("click", async e => {
   for (const k of ["mview", "mall", "mnone", "munplaced", "madd", "mnew", "mnewcancel", "mnewgo"]) if (b.dataset[k] !== undefined) { mapAction(k, b.dataset[k]); return; }
   if ((b.dataset.gdel !== undefined || b.dataset.gtx !== undefined) && e.detail > 1) return;   // the second click of a double click would delete the row that moved up under the pointer
   for (const k of ["gfadd", "gfeach", "bfadd", "bfsubject", "gall", "gnone", "gclear", "gmove", "gout", "gdel", "gtab", "gband", "gbdel", "gbyes", "gbno", "gbname", "gbsave", "gbcancel", "gtx"]) if (b.dataset[k] !== undefined) { groupsAction(k, b.dataset[k]); return; }
+  if (b.dataset.mclear !== undefined) { Object.assign(M, { find: "", fT: "", fG: "", fC: "" }); render(); return; }
   if (b.dataset.mprofile) { M.profile = b.dataset.mprofile; render(); return; }
   if (b.dataset.mclose !== undefined) { M.profile = null; render(); return; }
   if (b.dataset.mx) { const [li, cls, ...nm] = b.dataset.mx.split("|"); cardRemove(`${li}|${cls}`, nm.join("|")); return; }
@@ -1901,6 +1902,7 @@ document.addEventListener("change", async e => {
   if (["pickT", "pickG", "pickC", "pickD", "pickR"].includes(el.id)) { S.pick[el.id.slice(4).toLowerCase()] = el.value; render(); return; }
   if (el.id === "cvLevel") { CV.level = el.value; render(); return; }
   if (el.id === "mLevel") { M.level = el.value; render(); return; }
+  if (["mfT", "mfG", "mfC"].includes(el.id)) { M[el.id.slice(1)] = el.value; render(); return; }   // the Teacher, TG and Class filters on the cards
   if (el.id === "gpLevel") { const gp = gpState(); gp.level = el.value; gp.ticked.clear(); M.gpTo = ""; render(); return; }   // the subject and the teacher stay while they are on offer at the new level
   if (el.id === "gpTeacher") { gpState().teacher = el.value; render(); return; }
   if (el.id === "gpDept") { gpState().dept = el.value; M.gask = null; render(); return; }   // a subject or a teacher outside the department is dropped by the view
@@ -2116,7 +2118,7 @@ function tgBar(load, info) {
 }
 /* ---------------- step 5: the department map. Teachers are held by _id, so another browser's change cannot move a tick */
 const MAPVIEW = "ttsetup.mapview";
-const M = { view: "map", dept: "", level: "", ticked: new Set(), lastTick: null, extra: [], q: "", profile: null, adding: false, nf: null };
+const M = { view: "map", dept: "", level: "", ticked: new Set(), lastTick: null, extra: [], q: "", find: "", fT: "", fG: "", fC: "", profile: null, adding: false, nf: null };   // find: the cards' search (a TG code, a teacher or a class); fT, fG, fC: the Teacher, TG and Class filters
 try { const mv = localStorage.getItem(MAPVIEW); if (["table", "groups"].includes(mv)) M.view = mv; } catch (e) { }
 function mapDept() { const D = sc().departments || []; if (!D.includes(M.dept)) M.dept = D[0] || ""; return M.dept; }
 function tickedIdx() {   // indexes of the ticked teachers, in setup order, dropping any removed meanwhile
@@ -2147,23 +2149,52 @@ function newTeacherForm(dept) {   // + New teacher: a hire, or a post still to b
     <label class="f">Allowance <input id="mnAllow" type="number" value="${esc(f.allowance)}" placeholder="${esc(guide(f.role))}" title="Empty: the role's guide allowance"></label></div>
     <div class="row" style="margin-top:8px"><button class="primary" data-mnewgo>Add</button><button class="ghost" data-mnewcancel>Cancel</button>${isHead() && !S.practice ? `<span class="muted small">The committee confirms new teachers on step 4.</span>` : ""}</div></div>`;
 }
-function cardsView(dept) {   // the department's classes and groups: each level, then each subject, a band as a lane
-  const info = lessonInfo(), pg = DeptMap.page(S.spec, info, dept, M.level);
+const cardClasses = c => c.kind === "class" ? [c.cls] : ((S.spec.lessons[c.li] || {}).classes || []);   // a whole-class card's class; a group's classes, from its lesson
+function cardOpts(pg) {   // what the Teacher, TG and Class filters offer: the teachers, group codes and classes on this page's cards
+  const T = new Set(), G = new Set(), C = new Set(), nat = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true });
+  pg.forEach(l => l.sections.forEach(sec => (sec.kind === "band" ? sec.groups : sec.cards).forEach(c => {
+    c.teachers.forEach(nm => { if (nm) T.add(nm); });
+    if (c.kind !== "class" && c.title) G.add(c.title);
+    cardClasses(c).forEach(x => { if (x) C.add(x); });
+  })));
+  return { T: [...T].sort(nat), G: [...G].sort(nat), C: [...C].sort(nat) };
+}
+const mFiltered = () => !!(M.find || M.fT || M.fG || M.fC);
+function cardsView(dept) {   // the department's classes and groups: each level, then each subject, a band as a lane; light blue for a band's groups, green for a whole class on its own
+  const legend = `<span class="dplegend"><span class="dpkey"><i class="band"></i>banded together</span><span class="dpkey"><i class="whole"></i>whole class on its own</span><span class="dpkey"><i class="own"></i>group on its own</span></span>`;   // one piece, so it wraps whole
+  const pg = DeptMap.page(S.spec, lessonInfo(), dept, M.level), o = cardOpts(pg);
+  if (!o.T.includes(M.fT)) M.fT = ""; if (!o.G.includes(M.fG)) M.fG = ""; if (!o.C.includes(M.fC)) M.fC = "";   // a choice this department or level does not have is dropped
+  const sel = (id, v, all, xs, tip) => `<select id="${id}" title="${tip}"${v ? ` class="dpon"` : ""}>${opt("", v, all)}${xs.map(x => opt(x, v)).join("")}</select>`;
+  return `<section class="dpcards card"><div class="row dpctl"><select id="mLevel" title="Level">${opt("", M.level, "All levels")}${levels().map(l => opt(l, M.level)).join("")}</select>
+    ${sel("mfT", M.fT, "All teachers", o.T, "Teacher")}${sel("mfG", M.fG, "All TGs", o.G, "Teaching group (TG)")}${sel("mfC", M.fC, "All classes", o.C, "Class")}
+    <input id="mFind" type="search" placeholder="Find a TG, teacher or class" value="${esc(M.find)}" class="dpfind" autocomplete="off"><button class="small ghost" data-mclear title="Show every card again"${mFiltered() ? "" : ` style="display:none"`}>Clear</button>${legend}</div><div id="mCards">${cardsBody(dept, pg)}</div></section>`;
+}
+const cardHit = (c, q) => !q || [c.title, c.subject, ...cardClasses(c), ...(c.teachers || [])].some(v => People.key(String(v || "")).includes(q));   // the search: a TG code or class, its subject, or a teacher on it
+const cardPick = c => (!M.fT || c.teachers.includes(M.fT)) && (!M.fG || (c.kind !== "class" && c.title === M.fG)) && (!M.fC || cardClasses(c).includes(M.fC));   // the Teacher, TG and Class filters
+function cardsBody(dept, pg) {   // the cards the search and the filters leave, by level
+  const q = People.key(M.find || "");
+  pg = pg || DeptMap.page(S.spec, lessonInfo(), dept, M.level);
   const tline = (nm, key, lock) => { const t = S.spec.teachers.find(x => x.name === nm);
     return `<div class="dpt">${t ? `<button class="avatar" data-mprofile="${esc(t._id)}" draggable="true" data-mdrag="${esc(t._id)}" title="${esc(nm)}: profile">${avatarOf(t, 24)}</button>` : ""}<span class="dpn" title="${esc(nm)}">${esc(nm)}${t ? "" : " (not on list)"}</span>${lock ? "" : `<button class="dpx" data-mx="${esc(key)}|${esc(nm)}" title="Take ${esc(nm)} off">✕</button>`}</div>`; };
-  const card = (c, named) => { const key = c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`, x = S.spec.lessons[c.li], stf = c.kind === "class" && Parents.staffed(S.spec, x), lock = stf && cpBlock(x);
+  const card = (c, named, kind) => { const key = c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`, x = S.spec.lessons[c.li], stf = c.kind === "class" && Parents.staffed(S.spec, x), lock = stf && cpBlock(x);
     const room = (stf ? Parents.cap(S.spec) : DeptMap.MAX) - c.teachers.length;
     const pl = n => n === 1 ? "" : "s", fig = `${c.students === null || c.students === undefined ? "" : `${c.students} student${pl(c.students)} · `}${c.periods ? `${c.periods} period${pl(c.periods)}` : "? periods"}`;
-    return `<div class="dpcard${lock ? " locked" : ""}" data-mcard="${esc(key)}" title="${esc(lock ? cpWhy() : "Click to place the ticked teachers, or drop teachers here")}"><div><b>${esc(c.title)}</b>${stf ? ` <span class="cpbadge">${esc(Parents.label(S.spec))}</span>` : ""}</div>${named ? `<div class="small">${esc(c.subject)}</div>` : ""}
+    return `<div class="dpcard ${kind}${lock ? " locked" : ""}" data-mcard="${esc(key)}" title="${esc(lock ? cpWhy() : "Click to place the ticked teachers, or drop teachers here")}"><div><b>${esc(c.title)}</b>${stf ? ` <span class="cpbadge">${esc(Parents.label(S.spec))}</span>` : ""}</div>${named ? `<div class="small">${esc(c.subject)}</div>` : ""}
       <div class="small muted">${fig}</div>${stf ? `<div class="small">${cpHand(x, c.li, lock)}</div>` : ""}
       <div class="dpts">${c.teachers.map(nm => tline(nm, key, lock)).join("")}${room > 0 && !lock ? `<span class="plus" title="Room for ${room} more">+</span>` : ""}</div></div>`; };
-  const section = sec => sec.kind === "band"
-    ? `<div class="lane dplane"><div class="row small" style="justify-content:space-between"><b>${esc(sec.title)}</b><span class="muted">${sec.groups.length} group${sec.groups.length === 1 ? "" : "s"}</span></div>
-      ${sec.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}<div class="dpgrid">${sec.groups.map(g => card(g, true)).join("")}</div></div>`
-    : `<div class="dpsub"><h4>${esc(sec.subject)}</h4><div class="dpgrid">${sec.cards.map(c => card(c, false)).join("")}</div></div>`;
-  const body = pg.length ? pg.map(l => `<div class="dplevel"><h3>${esc(l.level || "No level")}</h3>${l.sections.map(section).join("")}</div>`).join("")
-    : `<p class="muted small">No lessons for ${esc(dept)}${M.level ? ` at ${esc(M.level)}` : ""} yet. Add them in Groups and bands or the table view.</p>`;
-  return `<section class="dpcards card"><div class="row"><select id="mLevel" title="Level">${opt("", M.level, "All levels")}${levels().map(l => opt(l, M.level)).join("")}</select></div>${body}</section>`;
+  const section = sec => {
+    if (sec.kind === "band") {
+      const bandHit = q && People.key(sec.title || "").includes(q), gs = sec.groups.filter(g => (bandHit || cardHit(g, q)) && cardPick(g));
+      return gs.length ? `<div class="lane dplane"><div class="row small" style="justify-content:space-between"><b>${esc(sec.title)}</b><span class="muted">${sec.groups.length} group${sec.groups.length === 1 ? "" : "s"}${gs.length < sec.groups.length ? ` · ${gs.length} shown` : ""}</span></div>
+        ${sec.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}<div class="dpgrid">${gs.map(g => card(g, true, "band")).join("")}</div></div>` : "";
+    }
+    const cs = sec.cards.filter(c => cardHit(c, q) && cardPick(c));
+    return cs.length ? `<div class="dpsub"><h4>${esc(sec.subject)}</h4><div class="dpgrid">${cs.map(c => card(c, false, c.kind === "class" ? "whole" : "own")).join("")}</div></div>` : "";
+  };
+  const shown = pg.map(l => { const inner = l.sections.map(section).join(""); return inner ? `<div class="dplevel"><h3>${esc(l.level || "No level")}</h3>${inner}</div>` : ""; }).join("");
+  if (shown) return shown;
+  return pg.length && mFiltered() ? `<p class="muted small">Nothing here matches${M.find ? ` “${esc(M.find)}”` : ""}${M.fT || M.fG || M.fC ? `${M.find ? " with" : ""} the filters chosen` : ""}.</p>`
+    : `<p class="muted small">No lessons for ${esc(dept)}${M.level ? ` at ${esc(M.level)}` : ""} yet. Add them in the Banding &amp; TG Group Editor or the table view.</p>`;
 }
 function profileView(t, i) {   // a teacher's profile, in place of the cards while open
   const info = lessonInfo(), ld = DeptMap.loads(S.spec, info)[t.name] || {}, key = c => c.kind === "class" ? `${c.li}|${c.cls}` : `${c.li}|`;
@@ -2307,7 +2338,7 @@ function allView(v) {   // every teaching group the filter shows, single and ban
 function poolView(v) {   // the rows with no band that the filter shows: tick them and move them into a band, or delete one
   const gp = gpState(), items = v.pool, lanes = Groups.lanes(S.spec, gp.level), where = gp.level || "any level";
   const row = p => { const id = S.spec.lessons[p.li]._id, on = gp.ticked.has(id);
-    return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}">${gCode(p.kind === "group" ? p.code : "")}<span style="flex:1;min-width:0">${esc(p.title)}</span><span class="muted small" title="Students">${p.students != null ? p.students : ""}</span><span class="avs" style="margin:0;min-height:0">${p.teachers.map(nm => gAv(nm, p.li)).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small danger" data-gdel="${p.li}" title="Delete this teaching group">Delete</button></div>`; };
+    return `<div class="prow${on ? " on" : ""}"><input type="checkbox" data-gtick="${esc(id)}" ${on ? "checked" : ""} aria-label="Tick ${esc(p.title)}">${gCode(p.kind === "group" ? p.code : "")}<span style="flex:1;min-width:0">${esc(p.title)}</span><span class="muted small" title="Students">${p.students != null ? p.students : ""}</span><span class="avs" style="margin:0;min-height:0">${p.teachers.map(nm => gAv(nm)).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small danger" data-gdel="${p.li}" title="Delete this teaching group">Delete</button></div>`; };
   return `<section class="gpool card"><h3 style="margin:0 0 6px">Single teaching groups</h3><p class="muted small" style="margin:0 0 8px">Whole-class rows and groups with their own code, each with who teaches it: the teaching groups that are in no band. Tick rows and move them into a band.</p>
     <div class="row" style="margin:8px 0"><button class="small" data-gall>Select all shown</button><button class="small" data-gnone>Deselect all</button><span class="muted small">${items.length} row${items.length === 1 ? "" : "s"}${gp.ticked.size ? ` · ${gp.ticked.size} ticked` : ""}</span>
       <span style="flex:1"></span><span>Move into band</span><select id="gpTo">${opt("", M.gpTo || "", "")}${lanes.map(l => opt(l.block, M.gpTo || "")).join("")}</select><button data-gmove ${gp.ticked.size && lanes.length ? "" : "disabled"}>Move</button></div>
@@ -2316,7 +2347,7 @@ function poolView(v) {   // the rows with no band that the filter shows: tick th
 function lanesView(v) {   // the bands the filter shows as lanes, each whole; a group that does not match is faded; a band or a group can be deleted
   const gp = gpState(), lanes = v.lanes, s = n => n === 1 ? "" : "s";
   const grow = (g, l) => { const own = g.classes.join(",") !== l.classes.join(",");   // a group of fewer classes than its band says which
-    return `<div class="grow${g.match ? "" : " dim"}"><span class="codeline small">${esc(g.code)}</span><span style="flex:1;min-width:0">${esc(g.subject)}${own ? ` <span class="muted small">${esc(g.classes.join(", "))}</span>` : ""}</span>${g.students != null ? `<span class="muted small" title="Students">${g.students}</span>` : ""}<span class="avs" style="margin:0;min-height:0">${g.teachers.map(nm => gAv(nm, g.li)).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small" data-gout="${g.li}" title="Out of the band: it becomes a single teaching group">Take out</button><button class="small danger" data-gdel="${g.li}" title="Delete this teaching group">Delete</button></div>`; };
+    return `<div class="grow${g.match ? "" : " dim"}"><span class="codeline small">${esc(g.code)}</span><span style="flex:1;min-width:0">${esc(g.subject)}${own ? ` <span class="muted small">${esc(g.classes.join(", "))}</span>` : ""}</span>${g.students != null ? `<span class="muted small" title="Students">${g.students}</span>` : ""}<span class="avs" style="margin:0;min-height:0">${g.teachers.map(nm => gAv(nm)).join("") || `<span class="small overtxt">No teacher</span>`}</span><button class="small" data-gout="${g.li}" title="Out of the band: it becomes a single teaching group">Take out</button><button class="small danger" data-gdel="${g.li}" title="Delete this teaching group">Delete</button></div>`; };
   const ask = l => { const n = l.groups.length, r = Groups.bandRules(S.spec, l.block);   // the question "Delete band" asks, in the band itself
     return `<div class="gask"><div>Delete ${esc(l.block)}?${n ? ` It has ${n} group${s(n)}.` : ""}${r ? ` ${r} rule${s(r)} on step 6 name${r === 1 ? "s" : ""} this band and will need another.` : ""}</div>
       <div class="row">${n ? `<button class="small danger" data-gbyes="all">Delete the band and its ${n} group${s(n)}</button><button class="small" data-gbyes="keep">Delete the band, keep the group${s(n)}</button>` : `<button class="small danger" data-gbyes="all">Delete the band</button>`}<button class="small" data-gbno>Cancel</button></div></div>`; };
@@ -2742,7 +2773,8 @@ document.addEventListener("input", e => {
   if (e.target.id === "vvMvFloor") { vvMv().ft = e.target.value; return; }
   if (e.target.id === "gbName") { M.grenameText = e.target.value; return; }   // kept, so a redraw from elsewhere does not lose what was typed
   if (e.target.id === "bfName") { const bf = bfState(); bf.name = e.target.value; bf.touched = true; const ev = $("#bfEveryone"); if (ev && !bf.evTouched) ev.checked = !/option|elective/i.test(bf.name); return; }
-  if (e.target.id === "mQ") { M.q = e.target.value; const rb = $("#rbody"); if (rb) rb.innerHTML = rosterList(mapDept()); return; }   // the roster only: a full redraw would take the caret
+  if (e.target.id === "mQ") { M.q = e.target.value; const rb = $("#rbody"); if (rb) rb.innerHTML = rosterList(mapDept()); return; }
+  if (e.target.id === "mFind") { M.find = e.target.value; const cb = $("#mCards"); if (cb) cb.innerHTML = cardsBody(mapDept()); const cl = $("[data-mclear]"); if (cl) cl.style.display = mFiltered() ? "" : "none"; return; }   // the cards only: a full redraw would take the caret
   if (["mnName", "mnShort", "mnAllow"].includes(e.target.id) && M.nf) { M.nf[{ mnName: "name", mnShort: "short", mnAllow: "allowance" }[e.target.id]] = e.target.value; return; }
   if (e.target.id !== "tlPaste") return;
   TL.text = e.target.value;
