@@ -7,6 +7,7 @@ import copy
 import datetime
 import json
 import os
+import re
 import threading
 import time
 
@@ -23,7 +24,7 @@ WHERE = {"venues": "Step 1 · Venues", "classes": "Step 2 · Classes", "subjects
          "students": "Students", "combinations": "Students", "choices": "Students"}
 _SCHOOL_DAY = "School & day"
 _NAME_FIELD = {"venues": "room", "classes": "class", "subjects": "subject", "teachers": "name", "blocks": "block",
-               "roles": "role", "students": "name", "combinations": "code"}
+               "roles": "role", "students": "name"}
 _lock = threading.Lock()
 _last = [0, -1]   # ms and counter of the last id given out
 
@@ -32,12 +33,23 @@ def by_of(who, via, shared=None):
     return {"who": who, "as": who or shared or "Unknown", "via": via}
 
 
+# the school's own setup rows keep their group `code` in these fields of these kinds (ruling R6)
+_KEEP_KINDS = {"setup", "setup-refused", "app"}
+_KEEP_FIELDS = {"was", "now", "op"}
+
+
 def _clean(x):
     if isinstance(x, dict):
         return {k: _clean(v) for k, v in x.items() if k not in FORBIDDEN}
     if isinstance(x, list):
         return [_clean(v) for v in x]
     return x
+
+
+def _clean_entry(entry):
+    keep = entry.get("kind") in _KEEP_KINDS
+    return {k: (copy.deepcopy(v) if keep and k in _KEEP_FIELDS else _clean(v))
+            for k, v in entry.items() if k not in FORBIDDEN}
 
 
 def _new_id():
@@ -55,7 +67,7 @@ def _new_id():
 
 
 def _make(entry):
-    e = _clean(entry)
+    e = _clean_entry(entry)
     ts = e["ts"] if isinstance(e.get("ts"), (int, float)) else time.time()
     e["id"] = _new_id()
     e["ts"] = float(ts)
@@ -80,6 +92,9 @@ def _write(entries):
 
 
 def add_many(entries):
+    for e in entries:
+        if not isinstance(e, dict):
+            raise TypeError("a history entry must be a dict")
     with _lock:
         made = [_make(e) for e in entries]
         if made:
@@ -88,12 +103,17 @@ def add_many(entries):
 
 
 def add(entry):
+    if not isinstance(entry, dict):
+        raise TypeError("a history entry must be a dict")
     return add_many([entry])[0]
+
+
+_MONTH_FILE = re.compile(r"^\d{4}-\d{2}\.jsonl$")
 
 
 def _files():
     try:
-        names = [n for n in os.listdir(DIR) if len(n) == 13 and n.endswith(".jsonl") and n[:4].isdigit()]
+        names = [n for n in os.listdir(DIR) if _MONTH_FILE.match(n)]
     except OSError:
         return []
     return sorted(names, reverse=True)
@@ -177,8 +197,12 @@ def row_label(section, row):
     if section == "rules":
         parts = [str(row.get("target") or "").strip(), str(row.get("rule") or row.get("text") or "").strip()]
         return _cut(" · ".join(p for p in parts if p) or "(rule)")
-    if section == "choices":
-        return _cut(str(row.get("student") or row.get("name") or row.get("kind") or "(choice)"))
+    if section == "combinations":   # a combination has a name and a code: the name, else the code
+        return str(row.get("name") or row.get("code") or "").strip() or "(unnamed)"
+    if section == "choices":   # kind setting (key), rule (its rule id) or recess (level)
+        kind = str(row.get("kind") or "choice")
+        what = row.get("key") or row.get("level") or row.get("rule_id") or ""
+        return _cut(f"{kind} {what}".strip())
     return str(row.get(_NAME_FIELD.get(section, "name")) or "").strip() or "(unnamed)"
 
 
@@ -206,6 +230,8 @@ def _row_entry(work, op):
     """(entry, finish): what a row operation is about, judged on `work` before it applies; finish(entry) completes the
     entry once the operation has been applied to `work`."""
     name, section = op[0], op[1]
+    if name == "add" and not (isinstance(op[2], dict) and op[2].get("_id")):
+        raise TypeError("an add needs a row with an _id")
     rid = op[2].get("_id") if name == "add" and isinstance(op[2], dict) else op[2]
     field = op[3] if name in ("set", "merge") else None
     was_row = copy.deepcopy(None if name == "add" else sync._find(work, section, rid))
@@ -265,10 +291,10 @@ def setup_entries(spec_before, ops, by, batch, v):
                 e, finish = _plain_entry(work, op)
             else:
                 continue
-        except (IndexError, TypeError, AttributeError):
+            sync.apply(work, [copy.deepcopy(op)])
+            if finish:
+                finish(e)
+            out.append(dict(kind="setup", batch=batch, v=v, op=op[0], **by, **e))
+        except Exception:   # a malformed operation gives no entry; the save path must never fail here
             continue
-        sync.apply(work, [copy.deepcopy(op)])
-        if finish:
-            finish(e)
-        out.append(dict(kind="setup", batch=batch, v=v, op=op[0], **by, **e))
     return out

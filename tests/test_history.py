@@ -122,4 +122,59 @@ def setup_entries_values():
     s2 = H.setup_entries(spec, [["school", "name", "X"], ["day", "Sec 1", "Mon", None], ["top", "k", 1]], by, "b2", 8)
     assert [e["where"] for e in s2] == ["School & day"] * 3 and s2[0]["text"].startswith("name: ")
 
+@t
+def code_kept_in_setup_rows_only():
+    fresh()
+    spec = samples.secondary(); sync.ensure_ids(spec)
+    L = spec["lessons"][0]
+    assert L.get("code")
+    [e] = H.setup_entries(spec, [["del", "lessons", L["_id"]]], H.by_of("Ann", "password"), "b", 1)
+    w = H.add(e)["was"]
+    assert w["code"] == L["code"] and H.read()[0]["was"]["code"] == L["code"]
+    a = H.add({"kind": "account", "password": "p", "changes": [{"field": "pw", "code": "x"}], "now": {"code": "y"}})
+    assert a["changes"] == [{"field": "pw"}] and "password" not in a and a["now"] == {}
+
+@t
+def setup_entries_never_raises():
+    spec = samples.secondary(); sync.ensure_ids(spec)
+    T = spec["teachers"][0]
+    ops = [["merge", "teachers", T["_id"], "can_teach", ["X"]], ["set", "nosuch", "a", "f", 1],
+           ["set", "teachers", T["_id"], "note", "hi"], 5, [], ["merge"], ["add", "teachers", "notadict", ""]]
+    es = H.setup_entries(spec, ops, H.by_of("Ann", "password"), "b", 1)
+    assert [e["op"] for e in es] == ["set"] and es[0]["now"] == "hi", es
+
+@t
+def row_label_every_section():
+    spec = samples.secondary(); sync.ensure_ids(spec)
+    spec["roles"] = [{"role": "Head of Department", "_id": "r1"}]
+    for sec, f in (("venues", "room"), ("classes", "class"), ("subjects", "subject"), ("teachers", "name"),
+                   ("blocks", "block"), ("students", "name"), ("roles", "role")):
+        row = spec[sec][0]
+        assert H.row_label(sec, row) == row[f], (sec, H.row_label(sec, row))
+    c = spec["combinations"][0]
+    assert H.row_label("combinations", c) == (c.get("name") or c["code"])
+    assert H.row_label("combinations", {"code": "S1"}) == "S1"
+    r = spec["rules"][0]
+    assert H.row_label("rules", r) == f"{r['target']} · {r['rule']}"
+    assert H.row_label("choices", {"kind": "recess", "level": "Sec 1"}) == "recess Sec 1"
+    assert H.row_label("choices", {"kind": "setting", "key": "k"}) == "setting k"
+    assert H.row_label("lessons", {"level": "Sec 3", "subject": "Physics", "classes": ["3B"]}) == "Sec 3 Physics 3B"
+
+@t
+def stray_files_and_non_dict():
+    fresh()
+    H.add({"kind": "app", "text": "a"})
+    for n in ("2024-xx.jsonl", "notes.txt"):
+        open(os.path.join(H.DIR, n), "w").write("junk\n")
+    assert H.prune(datetime.date(2026, 11, 21)) == 0 and len(H.read()) == 1
+    assert {"2024-xx.jsonl", "notes.txt"} <= set(os.listdir(H.DIR))
+    for bad in ("x", None, [1]):
+        try: H.add(bad)
+        except TypeError: pass
+        else: raise AssertionError("no TypeError")
+    try: H.add_many([{"kind": "app"}, 3])
+    except TypeError: pass
+    else: raise AssertionError("no TypeError")
+    assert len(H.read()) == 1
+
 print(f"{COUNT} history tests passed")
