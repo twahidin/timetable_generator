@@ -2561,4 +2561,101 @@ def event_rights_stay_inside_helpers():
     assert "def _event_rights(" in src and "def _event_gate(" in src
 
 
+# ---- events on the main site (stage 4, task 5)
+_EVK = {"start", "end", "label", "room", "seat_note", "exam", "kind", "p", "n"}
+
+@t
+def event_on_a_date():
+    e = PB.day(_PUB, F.CAL, [E1], "2026-10-05", True)["exams"]
+    assert e["stopped"] == [0, 1, 3, 4], e["stopped"]
+    assert e["classes"]["3A"] == [dict(start="07:40", end="10:40", label="Sec 3 Learning Journey", room="Off site (museum)",
+                                       seat_note="", exam="Sec 3 Learning Journey", kind="event", p=0.0, n=9.0)], e["classes"]
+    assert "4A" not in e["classes"]
+    assert e["teachers"]["Mr Hafiz Rahman"] == [dict(start="07:40", end="10:40", label="Sec 3 Learning Journey", room="Off site (museum)",
+                                                     role="At event", duty="Bus marshal 07:45", exam="Sec 3 Learning Journey", kind="event", p=0.0, n=9.0)]
+    assert e["teachers"]["Ms Grace Yeo"][0]["duty"] == "", e["teachers"]["Ms Grace Yeo"]
+    assert set(e["rooms"]) == {"Hall"}, e["rooms"]
+    assert e["banner"] == "Sec 3 Learning Journey"
+
+@t
+def student_code_sees_name_where_time_only():
+    d = PB.day(_PUB, F.CAL, [E1], "2026-10-05", False)
+    assert d["exams"]["teachers"] == {} and d["exams"]["rooms"] == {}
+    assert d["exams"]["classes"] == PB.day(_PUB, F.CAL, [E1], "2026-10-05", True)["exams"]["classes"]
+    blob = json.dumps(d) + json.dumps(PB.listing(_PUB, [E1], date(2026, 10, 1), False, cal=F.CAL))
+    for w in ("Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman", "Bus marshal"):
+        assert w not in blob, w
+    r = PB.listing(_PUB, [E1], date(2026, 10, 1), False, cal=F.CAL)["schedules"][0]
+    assert set(r) == {"id", "name", "kind", "start", "end", "classes", "where", "days"}, set(r)
+    out = PB.listing(_PUB, [E1], date(2026, 10, 1), True, cal=F.CAL)
+    f = out["schedules"][0]
+    assert f["in_charge"] == "Ms Aisha Rahman" and f["going"] == _ev()["going"], f
+    assert f["duties"] == [dict(duty="Bus marshal", who="Mr Hafiz Rahman", time="07:45")], f["duties"]
+    assert f["days"] == [dict(date="2026-10-05", start="07:40", end="10:40")], f["days"]
+    assert out["banner"] == "Sec 3 Learning Journey: Mon 5 Oct.", out["banner"]
+
+@t
+def event_and_exam_on_one_date():
+    e = PB.day(_PUB, F.CAL, [A1, E1], "2026-10-05", True)["exams"]
+    assert [(x["start"], x["label"]) for x in e["classes"]["3A"]] == [
+        ("07:40", "Sec 3 Learning Journey"), ("07:50", "Sec 3 English Paper 1"), ("10:00", "Sec 3 Pure Chemistry Paper 1")], e["classes"]["3A"]
+    assert [(x["start"], x["role"]) for x in e["teachers"]["Ms Aisha Rahman"]] == [("07:35", "Invigilate"), ("07:40", "At event")], e["teachers"]["Ms Aisha Rahman"]
+    assert e["banner"] == "Sec 3 End-of-Year Exam · Sec 3 Learning Journey", e["banner"]
+    assert 7 not in e["stopped"]
+
+@t
+def my_event_duties_and_timetable():
+    d = date(2026, 10, 1)
+    out = PB.my_duties(_PUB, F.CAL, [E1], "Mr Hafiz Rahman", d)
+    assert out == dict(schedules=[dict(id=E1["id"], name="Sec 3 Learning Journey", kind="event", where="Off site (museum)", in_charge="Ms Aisha Rahman",
+                                       minutes=180, duties=[dict(date="2026-10-05", start="07:40", end="10:40", duty="Bus marshal 07:45")])], lessons=[]), out
+    g = PB.my_duties(_PUB, F.CAL, [E1], "Ms Grace Yeo", d)
+    assert g["lessons"] == [dict(date="2026-10-05", start="09:40", end="10:40", classes=["3A", "3B"], subject="Combined Science")], g["lessons"]
+    b = PB.my_duties(_PUB, F.CAL, [E1], "Mr Ben Ong", d)
+    assert b["schedules"] == [] and [(x["start"], x["end"], x["subject"]) for x in b["lessons"]] == [("09:40", "10:40", "Pure Chemistry")], b["lessons"]
+    ev = dict(id=E1["id"], name="Sec 3 Learning Journey", kind="event", where="Off site (museum)", papers=[],
+              days=[dict(date="2026-10-05", start="07:40", end="10:40", note="then lessons from 10:40")])
+    assert PB.my_exams(_PUB, F.CAL, [E1], "3A-07", d)["schedules"] == [ev]
+    assert PB.my_exams(_PUB, F.CAL, [E1], "4A-01", d)["schedules"] == []
+    both = PB.my_exams(_PUB, F.CAL, [A1, E1], "3A-07", d)["schedules"]
+    assert [x["name"] for x in both] == ["Sec 3 End-of-Year Exam", "Sec 3 Learning Journey"] and both[0]["kind"] == "exam" and both[1] == ev, both
+
+@t
+def event_routes_on_the_main_site():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _approved_event(a, c); id = e["id"]
+        with _today(date(2026, 10, 1)):
+            r = as_role("student").get("/api/day?date=2026-10-05"); assert r.status_code == 200, r.data
+            it = r.get_json()["exams"]["classes"]["3A"][0]
+            assert set(it) == _EVK and it["kind"] == "event", it
+            assert r.get_json()["exams"]["teachers"] == {}
+            for n in ("Ms Aisha Rahman", "Ms Chloe Tan", "Mr Hafiz Rahman", "Bus marshal"):
+                assert n not in r.get_data(as_text=True), n
+            s = [x for x in as_role("student").get("/api/published/exams").get_json()["schedules"] if x["id"] == id][0]
+            assert "going" not in s and "in_charge" not in s, s
+            t_ = [x for x in as_role("teacher").get("/api/published/exams").get_json()["schedules"] if x["id"] == id][0]
+            assert t_["going"] == ["Ms Aisha Rahman", "Ms Chloe Tan", "Mr Hafiz Rahman"], t_["going"]
+            assert c.get(f"/api/published/exams/{id}/print/seating.pdf").status_code == 404
+            md = as_role("staff", who="Mr Hafiz Rahman").get("/api/exams/my-duties").get_json()
+            assert [x["id"] for x in md["schedules"]] == [id] and md["schedules"][0]["kind"] == "event", md
+            me = as_role("personal", sid="3A-07").get("/api/me/exams").get_json()
+            assert [x["id"] for x in me["schedules"]] == [id] and me["schedules"][0]["days"][0]["date"] == "2026-10-05", me
+
+@t
+def event_cannot_be_forged_or_decided_by_its_teacher():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _event(a); id = e["id"]
+        e["kind"] = "exam"
+        assert a.put("/api/events/" + id, json=e).status_code == 200
+        assert SC.load(id)["kind"] == "event"
+        a.post(f"/api/events/{id}/fill", json=dict(way="form teachers"))
+        assert a.post(f"/api/events/{id}/send").status_code == 200
+        assert a.post(f"/api/events/{id}/send-back").status_code != 200 and SC.load(id)["status"] == "waiting", SC.load(id)["status"]
+        assert c.post(f"/api/events/{id}/approve").status_code == 200
+        assert a.post(f"/api/events/{id}/withdraw").status_code != 200 and SC.load(id)["status"] == "approved"
+
 print(f"{COUNT} exams tests passed")

@@ -1221,7 +1221,7 @@ def exams_day():
 def exams_published_list():
     pub = store.published()
     if not pub: return {"error": NO_EXAMS_PUB}, 409
-    return jsonify(exams_published.listing(pub, exams_schedules.on_site(), _exams_today(), _published_reader() == "full"))
+    return jsonify(exams_published.listing(pub, exams_schedules.on_site(), _exams_today(), _published_reader() == "full", cal=_exam_cal(pub)))
 
 @app.get("/api/published/exams/<id>/print/<what>.pdf")
 @need("committee", "head", "teacher", "student", "staff")
@@ -1231,7 +1231,7 @@ def exams_published_print(id, what):
     if _published_reader() != "full": return {"error": ONLY_STAFF_PRINTS}, 403
     if what not in exams_published.PRINTS: abort(404)
     site = next((x for x in exams_schedules.on_site() if x["id"] == id), None)
-    if site is None: abort(404)
+    if site is None or site.get("kind") == "event": abort(404)
     from ttgen.export import safe_name
     buf = io.BytesIO()
     exams_printouts.pdf(what, pub, _exam_cal(pub), site, exams_settings.load(pub), buf)
