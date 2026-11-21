@@ -534,6 +534,26 @@
   }
 
   /* ---------------------------------------------------------------- tab 5: venues and seats */
+  /* the four "How to seat" choices: [key in sched.seating, label, [[value, words]]] */
+  const SEAT_CHOICES = [
+    ["home_rooms", "Classes", [[true, "Own class in own home room"], [false, "Mix classes"]]],
+    ["shared", "A shared room", [["levels", "Alternate levels by column"], ["papers", "Alternate papers"], ["blocks", "One level per block"]]],
+    ["order", "In a room", [["class", "Class, then Student ID"], ["name", "Name"]]],
+    ["spacing", "Spacing", [["every", "Every seat"], ["gap", "A seat left between"]]]
+  ];
+
+  function seatChoices() {
+    const st = S.sched.seating || {};
+    const rows = SEAT_CHOICES.map(([k, label, opts]) => {
+      const btns = opts.map(([v, words]) => {
+        const on = String(st[k]) === String(v);
+        return `<button type="button" class="${on ? "on" : ""}" aria-pressed="${on}" data-act="seatOpt" data-a="${esc(k)}" data-b="${esc(String(v))}">${esc(words)}</button>`;
+      }).join("");
+      return `<div class="line"><b>${esc(label)}</b><span class="seg wrap" role="group" aria-label="${esc(label)}">${btns}</span></div>`;
+    }).join("");
+    return `<div class="panel form"><h3 style="margin-top:0">How to seat</h3>${rows}<p class="muted small" style="margin:0">A change is used when you press Make again.</p></div>`;
+  }
+
   function curSit() {
     const ks = sittingKeys();
     return ks.includes(S.sit) ? S.sit : (ks[0] || "");
@@ -579,9 +599,9 @@
 
   function tabVenues() {
     const v = S.view, made = madeOf();
-    if (!v || !made) return needMade();
+    if (!v || !made) return seatChoices() + needMade();
     const key = curSit();
-    if (!key) return `<div class="card"><p class="muted">No paper has a date and a start time yet.</p></div>`;
+    if (!key) return `${seatChoices()}<div class="card"><p class="muted">No paper has a date and a start time yet.</p></div>`;
     const seats = seatsOf(key), rooms = v.rooms_by_key[key] || [], duties = (made.duties || []).filter(d => d.key === key);
     const seated = Object.values(seats).reduce((n, l) => n + l.length, 0), left = (made.unseated || {})[key] || [];
     const room = seats[S.room] ? S.room : (Object.keys(seats)[0] || "");
@@ -598,7 +618,7 @@
     }).join("");
     const free = rooms.filter(r => !r[2]);
     const noSeat = left.length ? `<p class="flag small">${left.length} without a seat: ${left.map(s => esc(nameOf(s))).join(", ")}</p>` : "";
-    return `<div class="panel"><div class="line"><b>Sitting</b><select data-x="sit" data-f="x-sit" aria-label="Sitting">${sittingKeys().map(k => opt(k, key, sitLabel(k))).join("")}</select>
+    return `${seatChoices()}<div class="panel"><div class="line"><b>Sitting</b><select data-x="sit" data-f="x-sit" aria-label="Sitting">${sittingKeys().map(k => opt(k, key, sitLabel(k))).join("")}</select>
         <span class="chip ${left.length ? "bad" : "ok"}">${seated} seated</span></div>
       <div class="tablewrap"><table><thead><tr><th>Venue</th><th>Seats</th><th>Who</th><th>Invigilators</th></tr></thead><tbody>${trs}</tbody></table></div>${noSeat}</div>
       <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(room || "No room")} · seating plan</h3>
@@ -781,6 +801,11 @@
     if (act === "accAdd") { edit(() => { s.access.push({ student: a, extra: 0, own_room: false, reader: false, scribe: false, note: "" }); }, true); return; }
     if (act === "make") { viewAction("make", {}, "Made."); return; }
     if (act === "pickRoom") { S.room = a; paint(); return; }
+    if (act === "seatOpt") {
+      const v = a === "home_rooms" ? b.dataset.b === "true" : b.dataset.b;
+      edit(() => { s.seating = Object.assign({}, s.seating, { [a]: v }); }, true);
+      return;
+    }
     if (act === "useAnyway") { viewAction("use-anyway", { key: a, room: b.dataset.b }, "The room is in use for this sitting."); return; }
     if (act === "duty") { S.duty = { key: a, room: b.dataset.b }; loadWho(false); return; }
     if (act === "whoAuto") { changeNames(null); return; }

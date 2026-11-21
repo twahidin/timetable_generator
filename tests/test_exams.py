@@ -222,6 +222,31 @@ def save_refuses_bad_input():
     bad("Extra time for 3A-05 must be 0 to 100 percent.", access=[dict(student="3A-05", extra=150)])
     bad("ZZ-99 is not on the published timetable.", access=[dict(student="ZZ-99", extra=10)])
     bad("Check the exam and try again.", levels="Sec 3")
+    bad("Check the exam and try again.", kind="party")
+    bad("Check the exam and try again.", supervision="nobody")
+    bad("Check the exam and try again.", levels=[5])
+    bad("Check the exam and try again.", days={"2026-10-05": dict(levels="Sec 3", whole=True)})
+    bad("Check the exam and try again.", days={"not a date": dict(whole=True)})
+    bad("Check the exam and try again.", times=dict(report="07:30", min_break="abc", max_papers=2))
+    bad("Give a whole number of minutes between two papers.", times=dict(report="07:30", min_break=-1, max_papers=2))
+    bad("Give a whole number for the most papers a day.", times=dict(report="07:30", min_break=20, max_papers=0))
+    bad("Give the report time as a time such as 07:30.", times=dict(report="7.30", min_break=20, max_papers=2))
+    for k, v in (("order", 5), ("shared", "x"), ("spacing", "wide"), ("home_rooms", "yes")):
+        e = _new(); e["seating"][k] = v
+        raises(ValueError, lambda: SC.save(e, pub, F.CAL, "x"), "Check the exam and try again.")
+    good = dict(id="p1", level="Sec 3", subject="English", paper="Paper 1", minutes=60, date="2026-10-05", start="07:50", who="level",
+                students=[], together="")
+    for k, v in (("together", 5), ("date", "2026-13-40"), ("who", "all"), ("students", "3A-01"), ("students", [5]), ("level", 5),
+                 ("subject", None), ("id", "")):
+        bad("Check the exam and try again.", papers=[dict(good, **{k: v})])
+    bad("Give Sec 3 English Paper 1 a start time such as 08:00.", papers=[dict(good, start="8.00")])
+    bad("Check the exam and try again.", papers=[good, dict(good)])
+    e = _new(); e["seating"] = dict(order="name", shared="blocks", spacing="gap", home_rooms=False)
+    e["papers"] = [dict(good, date=None, start=None, paper=None, together=None)]
+    saved = SC.save(e, pub, F.CAL, "x")
+    assert saved["seating"] == dict(order="name", shared="blocks", spacing="gap", home_rooms=False)
+    assert saved["papers"][0]["paper"] == "" and saved["papers"][0]["together"] == "" and saved["times"]["report"] == "07:30"
+    SC.delete(e["id"])
 
 @t
 def saved_times_are_24_hour_hhmm():
@@ -957,6 +982,11 @@ def client_cannot_write_made():
             assert now[k] == kept[k], k
         assert c.put("/api/exams/" + s["id"], json=dict(kept, papers="x")).status_code == 400
         assert c.put("/api/exams/" + s["id"], json=dict(kept, days=5)).status_code == 400
+        assert c.put("/api/exams/" + s["id"], json=dict(kept, kind="party")).status_code == 400 and SC.load(s["id"])["kind"] == "exam"
+        broken = dict(SC.load(s["id"]), papers=[dict(kept["papers"][0], minutes="sixty")])
+        store.write_json(os.path.join(SC.DIR, s["id"] + ".json"), broken)
+        r = c.get(f"/api/exams/{s['id']}/view")
+        assert r.status_code == 400 and r.get_json() == {"error": "Check the exam and try again."}, (r.status_code, r.data[:200])
 
 def _made_exam(c, mutate=None):
     s = _exam(c)
@@ -1004,5 +1034,17 @@ def printouts_and_excel():
         assert "'=SUM(1)" in [x.value for row in wb["Seats"].iter_rows() for x in row], first
         assert c.get(f"/api/exams/{s['id']}/print/seating.pdf").data.startswith(b"%PDF")
     assert A.app.test_client().get(f"/api/exams/{s['id']}/download.xlsx").status_code in (401, 403)
+
+def _page(name):
+    with open(os.path.join(ROOT, "static", name), encoding="utf-8") as f:
+        return f.read()
+
+@t
+def the_pages_carry_the_words():
+    js = _page("exams.js")
+    for words in ("How to seat", "Own class in own home room", "Mix classes", "Alternate levels by column", "Alternate papers",
+                  "One level per block", "Class, then Student ID", "Every seat", "A seat left between", "Let the app choose",
+                  "Not free: "):
+        assert words in js, words
 
 print(f"{COUNT} exams tests passed")

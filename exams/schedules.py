@@ -25,6 +25,26 @@ def _int(v):
     return isinstance(v, int) and not isinstance(v, bool)
 
 
+def _texts(v):
+    return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+
+KINDS = ("exam", "test")
+SUPERVISION = ("invigilators", "lesson")
+WHO = ("level", "groups", "students")
+SEATING = dict(order=("class", "name"), shared=("levels", "papers", "blocks"), spacing=("every", "gap"), home_rooms=(True, False))
+
+
+def _time_or_none(v, sentence):
+    """a stored time: None, or 24-hour HH:MM"""
+    if v in (None, ""):
+        return None
+    try:
+        return _days.hhmm(_days.minutes(v))
+    except ValueError:
+        raise ValueError(sentence)
+
+
 def _all():
     out = []
     if os.path.isdir(DIR):
@@ -58,7 +78,21 @@ def _check(s, pub):
                    ("start", str), ("end", str)):
         if not isinstance(s.get(k), typ): raise ValueError(WRONG)
     if not s["name"].strip(): raise ValueError("Give the exam a name.")
+    if s.get("kind") not in KINDS or s.get("supervision") not in SUPERVISION: raise ValueError(WRONG)
+    if not _texts(s["levels"]) or not _texts(s["classes"]): raise ValueError(WRONG)
     if not s["levels"] and not s["classes"]: raise ValueError("Pick at least one level or class.")
+    seating = s.get("seating")
+    if not isinstance(seating, dict): raise ValueError(WRONG)
+    for k, allowed in SEATING.items():
+        v = seating.get(k)
+        if (k == "home_rooms" and not isinstance(v, bool)) or v not in allowed: raise ValueError(WRONG)
+    times = s.get("times")
+    if not isinstance(times, dict): raise ValueError(WRONG)
+    times["report"] = _time_or_none(times.get("report"), "Give the report time as a time such as 07:30.")
+    for k, lo, sentence in (("min_break", 0, "Give a whole number of minutes between two papers."),
+                            ("max_papers", 1, "Give a whole number for the most papers a day.")):
+        if not _int(times.get(k)): raise ValueError(WRONG)
+        if times[k] < lo: raise ValueError(sentence)
     try:
         a, b = datetime.date.fromisoformat(s["start"]), datetime.date.fromisoformat(s["end"])
     except ValueError: raise ValueError(WRONG)
@@ -68,6 +102,10 @@ def _check(s, pub):
     starts, ends = {x for x, _ in bnds}, {y for _, y in bnds}
     for date, e in s["days"].items():
         if not isinstance(e, dict): raise ValueError(WRONG)
+        try: datetime.date.fromisoformat(date)
+        except (TypeError, ValueError): raise ValueError(WRONG)
+        if e.get("levels") is not None and not _texts(e["levels"]): raise ValueError(WRONG)
+        if not isinstance(e.get("whole", True), bool): raise ValueError(WRONG)
         if e.get("whole", True):
             for k in ("from", "to"):   # not used on a whole day; kept only as a 24-hour time
                 try: e[k] = _days.hhmm(_days.minutes(e[k])) if e.get(k) not in (None, "") else None
@@ -85,13 +123,21 @@ def _check(s, pub):
     classes = {c["name"] for c in model.get("classes") or []}
     for c in s["classes"]:
         if c not in classes: raise ValueError(f"{c} is not a class of the published timetable.")
+    ids = set()
     for p in s["papers"]:
         if not isinstance(p, dict): raise ValueError(WRONG)
+        for k in ("paper", "together"):   # an empty paper name or "sits with" may come as null
+            if p.get(k) is None: p[k] = ""
+        if not (isinstance(p.get("id"), str) and p["id"] and p["id"] not in ids): raise ValueError(WRONG)
+        ids.add(p["id"])
         if not _int(p.get("minutes")) or p["minutes"] < 1: raise ValueError(f"Give {_papers.label(p)} a length in minutes.")
-        if p.get("start") in (None, ""): p["start"] = None
+        if not all(isinstance(p.get(k), str) for k in ("level", "subject", "paper", "together")): raise ValueError(WRONG)
+        if p.get("who") not in WHO or not _texts(p.get("students")): raise ValueError(WRONG)
+        if p.get("date") in (None, ""): p["date"] = None
         else:
-            try: p["start"] = _days.hhmm(_days.minutes(p["start"]))
-            except ValueError: raise ValueError(f"Give {_papers.label(p)} a start time such as 08:00.")
+            try: datetime.date.fromisoformat(p["date"])
+            except (TypeError, ValueError): raise ValueError(WRONG)
+        p["start"] = _time_or_none(p.get("start"), f"Give {_papers.label(p)} a start time such as 08:00.")
     students = {x["id"] for x in model.get("students") or []}
     for x in s["access"]:
         if not isinstance(x, dict): raise ValueError(WRONG)

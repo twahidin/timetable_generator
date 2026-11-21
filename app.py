@@ -1029,13 +1029,19 @@ def exams_papers_upload(id):
     saved, bad = _save_exam(s, pub, who)
     return bad or jsonify(saved)
 
+def _exam_view_reply(pub, sched):
+    """the view as JSON; a schedule the code cannot read answers 400 with a sentence, never 500"""
+    try: return jsonify(_exam_view(pub, sched))
+    except ValueError as e: return {"error": str(e)}, 400
+    except BAD_INPUT + (IndexError,): return {"error": exams_schedules.WRONG}, 400
+
 @app.get("/api/exams/<id>/view")
 @need("committee", "staff")
 def exams_view(id):
     pub, who, err = _exams_gate()
     if err: return err
     s, err = _exam_or_404(id)
-    return err or jsonify(_exam_view(pub, s))
+    return err or _exam_view_reply(pub, s)
 
 def _exam_changed(id, change):
     """run change(pub, sched, body) on the stored schedule, save it and answer as the view does"""
@@ -1048,7 +1054,7 @@ def _exam_changed(id, change):
     except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
     if err: return err
     saved, bad = _save_exam(s, pub, who)
-    return bad or jsonify(_exam_view(pub, saved))
+    return bad or _exam_view_reply(pub, saved)
 
 def _exam_make(pub, s, b):
     model, cal = pub["model"], _exam_cal(pub)
