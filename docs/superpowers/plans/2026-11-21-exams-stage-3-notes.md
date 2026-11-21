@@ -183,3 +183,81 @@ Task 6: minor (deferred): _held_elsewhere reads all_saved() each call and a stal
 - **Choosing relief for a backup** comes with relief stage 3's picks: no page lists backups for choosing now (What's in is
   read-only, and "Planned by me" lists the planner's own).
 - Not built: messages to people on duty, the relief team's approval of a backup, a Preview of relief for a date.
+
+## Final review fix wave
+
+From the final whole-branch review (opus) of `f49ddad..14083f3`, the Task 7 review and the controller's browser check: one
+fix wave (opus), FIX_BASE `14083f3`, commits `0d84374..HEAD`. Each item has a test that fails without it where one can
+show it (in `tests/test_exams_relief.py` unless named).
+
+1. **A cancelled own absence left a backup lesson covered by nobody.** `exams.relief_links.sync_all(pub, cal, today,
+   first=None)` now holds the loop `app._relief_sync` had (the acted schedule first, then every schedule `to_sync` names,
+   each failure one log line, `SYNC_FAILED`, through the module's logger). It runs from `app._relief_sync` (unchanged
+   behaviour), from relief's create and cancel routes once relief's own call has returned (`relief.web._sync_exams`:
+   inside `exams.schedules.editing()`, imported inside the function, logged and never failing the answer), and from the
+   publish route after a publish succeeds (a lesson that moves into or out of a duty window goes to or leaves relief at
+   once: P9 amended). Tests: `cancelled_own_absence_gives_the_lesson_back`, `a_republish_sends_a_lesson_that_moved_into_a_duty`,
+   `one_failing_sync_does_not_stop_the_others`.
+2. **Notes**: P1 to P13 in full from the plan (P9 and P6 noted against this wave, P12 as amended, P13 reworded), the clock
+   line moved to a constraint line, the controller's browser check recorded, the grammar slip fixed, a "Not built" line.
+3. **A lesson added to a backup shows new in What's in**: `update_exams` stamps `changed_at` (relief's `_now()`) when a
+   lesson came in; What's in counts new as sent or changed at or after the time last seen. Test:
+   `a_lesson_added_to_a_backup_is_new_in_whats_in`.
+4. **An absence sent before a schedule is approved**: relief's `_out` adds `stopped` (the `Links` text or "") to each lesson
+   dated today or later of a record still to come (one `Links` per request, kept on `flask.g`; a failure to read the exams
+   side logs a line and leaves `stopped` ""), `absences.choose` refuses a stopped lesson "This lesson is not happening:
+   {text}." (choosing a teacher only: taking one off still works), and `static/relief.js`'s absence lesson line shows "Not
+   happening: {stopped}" (escaped). Tests: `an_absence_sent_before_approval_marks_its_stopped_lesson`,
+   `relief_pages_work_when_the_exams_cannot_be_read`, `the_absence_page_shows_not_happening`.
+5. **A stale "Handled ourselves" tag** on another schedule counts only while that schedule's approved copy still has the
+   person over the lesson (`_handled_elsewhere(sid, links)`, reading the lesson through `links.pub` and `links.cal`); such a
+   lesson gets the `mark` state `handled_elsewhere`, "Handled by another schedule", with no tick. Tests:
+   `a_stale_handled_tag_counts_for_nothing`, `handled_on_one_schedule_covers_every_schedule` (now `handled_elsewhere`),
+   and the state case in `tests/exams.test.js`.
+6. **`absences.cancel_exams` removed** (unused; it would cancel past lessons); `exams_records` stays; its test now checks it
+   is gone.
+7. **The reason when "Handled ourselves" empties a backup**: "Handled by the exams committee." (exam) or "Handled by the
+   teacher in charge." (event) when every lesson that left went because it is now handled on this schedule; else "The duty
+   changed.". Tests in `handled_ourselves_sends_nothing`, `event_backup_by_the_teacher_in_charge` and
+   `a_backup_emptied_partly_by_a_duty_change_says_the_duty_changed`.
+8. **Silent catches logged**: `Links._day` logs one line a date, `Links._by_name` one line a schedule (it now reads each
+   schedule's busies on its own, so one that cannot be read gives no duties and the others still count). Test:
+   `links_log_what_they_cannot_read_once`.
+9. **The stopped text** names each class whose window overlaps the stopped time, so it is never " are on ". Today's
+   `merged_view` needs one window to hold a whole period, so the case arises only if it ever joins windows that meet
+   mid-period; the test (`links_name_the_classes_when_two_windows_meet_mid_period`) wraps `merged_view` to give such a view.
+10. **`_with_away`** reads relief's records once per list answer and the schedules through `schedules.all_saved()`. Test:
+    `the_lists_read_relief_once`.
+11. **README and notes** no longer say choosing relief works on backups "as on any planned absence": backups show in What's
+    in and to the person on duty; choosing relief for them comes with relief stage 3's picks. Both say the committee stops a
+    backup with "Handled ourselves" and a backup cancelled inside relief comes back at the next sync.
+
+Rulings recorded here (accepted, not changed now):
+
+- `week_change` counts a duty in the stopped part of a shortened lesson twice (+1 period): rare, noted.
+- A duty-only absence (P11) can be sent twice for the same teacher and day: `_no_overlap` checks needed lessons only.
+- `from_exams` makes nothing when every lesson has a co-teacher there, so that item stays "later".
+- Privacy: a teacher in charge who adds a colleague to the going list learns they are away then ("is away then (relief)"),
+  never the reason. It fits the spec's "told at once"; the lead may want to know.
+- P13 reworded: relief code never takes the exams lock while it holds its own.
+- Re-marking "not needed" the stopped lessons of an absence sent before approval is left to relief stage 3 (named there).
+
+The fixer's own calls (for the lead to know):
+
+- Relief's cancel route syncs after every cancel, so a backup cancelled inside relief comes back at once (the next sync
+  runs straight after the cancel), not at some later approval action.
+- `choose` refuses only choosing a teacher for a stopped lesson; taking a chosen one off still works.
+- The "Handled by …" reason reads only the schedule's own tags; a lesson that left because another schedule handled it
+  gives "The duty changed.".
+
+Checked after the wave, every suite alone one after another: all 17 python suites pass (`test_exams_relief` 57,
+`test_exams` 179, `test_relief` 37, `test_relief_requests` 58, `test_typed` 33, `test_helper` 20, `test_fixes` 65,
+`test_combined` 38, `test_verify` 56, `test_rules` 11, `test_choices` 16, `test_parents` 35, `test_sync` 18, `test_board` 58,
+`test_ask` 49, `test_teachers` 9, `test_venues` 4) and `smoke` (102); then `--full`: `test_typed` 34, `test_fixes` 67,
+`test_combined` 39, `smoke` 103, and `test_helper` 21 on its second run (the first failed one check on the solved sample,
+whose 30-second solve is not the same each time; nothing in the wave touches the helper, the check or the solver, and the
+second run alone passed). All 17 node test files pass (`exams.test.js` 7 cases plus the `onHandled` cases), and `node
+--check` passes on `static/exams.js` and `static/relief.js`. The names check on the wave's commits (`git log -p
+14083f3..HEAD`, the newest setup's teacher sheet, counts only): 111 teachers, 332 names and short forms searched, no full
+name matched; 6 words matched, each a made-up test name shared with a common name (2) or an ordinary English word (4); the
+school's full name (its first word, lower case): 0.
