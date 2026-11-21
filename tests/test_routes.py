@@ -289,11 +289,13 @@ def the_timetable_page_each_kind_sees():
 def status_says_who_is_signed_in():
     j = client(person(HAL, "password")).get("/api/status").get_json()
     assert (j["role"], j["who"], j["via"], j["depts"], j["shared"], j["admin_exists"]) == ("head", HAL, "password", ["SC", "MA"], None, True), j
+    assert j["group"] == "HOD", j
     assert j["rights"] == sorted(KINDS["hod by password"][1]) and "codes" not in j and "volume" in j and "published" in j
     j = client(dict(role="head")).get("/api/status").get_json()
-    assert (j["role"], j["who"], j["via"], j["depts"], j["shared"]) == ("head", None, "shared", None, "head"), j
+    assert (j["role"], j["who"], j["via"], j["depts"], j["shared"]) == ("head", None, "shared", None, "head") and j["group"] is None, j
     j = client(person(ADA, "password")).get("/api/status").get_json()
     assert (j["role"], j["who"], j["via"], j["depts"], j["shared"]) == ("committee", ADA, "password", None, None) and "codes" in j and "draft" in j, j
+    assert j["group"] == "Timetable committee", j
     j = client(dict(role="committee")).get("/api/status").get_json()
     assert (j["role"], j["who"], j["shared"], j["admin_exists"]) == ("committee", None, "committee", True) and j["rights"] == sorted(KINDS["shared committee"][1]), j
     P.update(lambda d: d["people"][ADA]["extras"].update(admin=False))

@@ -30,9 +30,9 @@ def test_removed_routes():
 def test_status_shape():
     j = c.get("/api/status").get_json()
     assert set(j) == {"role", "codes", "code_problems", "volume", "setup_saved_at", "published", "draft", "typed",
-                      "who", "via", "depts", "rights", "shared", "admin_exists"}, sorted(j)   # who is signed in (accounts)
+                      "who", "group", "via", "depts", "rights", "shared", "admin_exists"}, sorted(j)   # who is signed in (accounts)
     assert j["published"] is None and j["role"] == "committee" and j["draft"] is None
-    assert (j["who"], j["via"], j["depts"], j["shared"], j["admin_exists"]) == (None, "shared", None, "committee", False) and "committee" in j["rights"], j
+    assert (j["who"], j["group"], j["via"], j["depts"], j["shared"], j["admin_exists"]) == (None, None, "shared", None, "committee", False) and "committee" in j["rights"], j
 
 def test_old_runs_folder_is_harmless():
     assert c.get("/api/past-setups").status_code == 200

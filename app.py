@@ -985,12 +985,12 @@ def pub_info():
 @app.get("/api/status")
 @need("setup")
 def status():
-    """what the committee page shows. who: the person signed in (None for a shared code); depts: a head's departments
+    """what the committee page shows. who: the person signed in (None for a shared code), group: their group's label; depts: a head's departments
     when signed in by name (None otherwise); shared: the shared code's role; admin_exists: an admin who can sign in has been named (else the first admin is offered)"""
     have, probs = access.configured()
     _, at = store.load_setup()
     p = who()
-    mine = dict(who=p["name"] if p else None, via=via(), depts=head_depts(), rights=sorted(rights()), shared=shared(),
+    mine = dict(who=p["name"] if p else None, group=people.LABELS.get(p["group"]) if p else None, via=via(), depts=head_depts(), rights=sorted(rights()), shared=shared(),
                 admin_exists=bool(people.usable_admins(people.load())))
     if not has("committee"): return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info(), **mine)
     return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), typed=typed.enabled(), **mine)
