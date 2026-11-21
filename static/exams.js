@@ -451,6 +451,8 @@
 
   /* ---------------------------------------------------------------- tabs 4 to 7: the made schedule */
   const NO_STUDENTS = "The published timetable has no students. Add them on the Students step and publish again to seat them.";
+  const STALE = "The exam changed since Make: press Make again.";
+  const staleLine = () => (S.view && S.view.made && S.view.stale) ? `<p class="notice" role="status">${esc(STALE)}</p>` : "";
   const hhmm = n => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
   const norm = t => { const m = /^(\d+):(\d+)/.exec(t || ""); return m ? `${m[1].padStart(2, "0")}:${m[2]}` : ""; };
   const letters = i => i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + i % 26);
@@ -459,7 +461,8 @@
   const stuOf = sid => ((S.view && S.view.students) || {})[sid] || null;
   const nameOf = sid => { const x = stuOf(sid); return x ? x[0] : sid; };
   const sittingKeys = () => Object.keys((S.view && S.view.rooms_by_key) || {});
-  const printLink = (what, label) => `<a class="ghost filebtn small" href="/api/exams/${esc(S.id)}/print/${what}.pdf" target="_blank" rel="noopener">${esc(label)}</a>`;
+  const printLink = (what, label) => (S.view && S.view.stale) ? `<button type="button" class="small" disabled title="Press Make again first">${esc(label)}</button>`
+    : `<a class="ghost filebtn small" href="/api/exams/${esc(S.id)}/print/${what}.pdf" target="_blank" rel="noopener">${esc(label)}</a>`;
   const clsColour = (list, cls) => `s${Math.max(0, uniq(list).sort().indexOf(cls)) % 6}`;
 
   function sitLabel(key) {
@@ -520,9 +523,9 @@
     }).join("");
     const make = v.students_missing ? `<span class="msg bad">${esc(NO_STUDENTS)}</span>`
       : `<button type="button" class="primary" data-act="make" ${S.busy ? "disabled" : ""}>${made ? "Make again" : "Make"}</button>`;
-    const dl = made ? `<a class="ghost filebtn" href="/api/exams/${esc(S.id)}/download.xlsx" target="_blank" rel="noopener">Download (Excel)</a>` : `<button type="button" disabled>Download (Excel)</button>`;
+    const dl = made && !v.stale ? `<a class="ghost filebtn" href="/api/exams/${esc(S.id)}/download.xlsx" target="_blank" rel="noopener">Download (Excel)</a>` : `<button type="button" disabled>Download (Excel)</button>`;
     return `${gone}<div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">${esc(S.sched.name)}</h2><div class="row">${make}${dl}</div></div>
-      <div class="kpi">
+      ${staleLine()}<div class="kpi">
         <div><div class="k">Papers</div><div class="big">${c.papers}</div><div class="small muted">${c.with_time} with a time</div></div>
         <div><div class="k">Students with 2 papers in a day</div><div class="big">${c.two_a_day}</div></div>
         <div><div class="k">Invigilation duties</div><div class="big">${c.duties}</div>${c.short ? `<div class="small flag">${c.short} ${c.short === 1 ? "place" : "places"} not filled</div>` : ""}</div>
@@ -618,7 +621,7 @@
     }).join("");
     const free = rooms.filter(r => !r[2]);
     const noSeat = left.length ? `<p class="flag small">${left.length} without a seat: ${left.map(s => esc(nameOf(s))).join(", ")}</p>` : "";
-    return `${seatChoices()}<div class="panel"><div class="line"><b>Sitting</b><select data-x="sit" data-f="x-sit" aria-label="Sitting">${sittingKeys().map(k => opt(k, key, sitLabel(k))).join("")}</select>
+    return `${staleLine()}${seatChoices()}<div class="panel"><div class="line"><b>Sitting</b><select data-x="sit" data-f="x-sit" aria-label="Sitting">${sittingKeys().map(k => opt(k, key, sitLabel(k))).join("")}</select>
         <span class="chip ${left.length ? "bad" : "ok"}">${seated} seated</span></div>
       <div class="tablewrap"><table><thead><tr><th>Venue</th><th>Seats</th><th>Who</th><th>Invigilators</th></tr></thead><tbody>${trs}</tbody></table></div>${noSeat}</div>
       <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(room || "No room")} · seating plan</h3>
@@ -695,7 +698,7 @@
     const made = madeOf();
     if (!S.view || !made) return needMade();
     const duties = made.duties || [];
-    return `<div class="grid2"><div><div class="row" style="margin-bottom:10px">${printLink("roster-day", "Roster by day")}${printLink("roster-teacher", "Roster by teacher")}</div>
+    return `${staleLine()}<div class="grid2"><div><div class="row" style="margin-bottom:10px">${printLink("roster-day", "Roster by day")}${printLink("roster-teacher", "Roster by teacher")}</div>
       <div class="tablewrap"><table><thead><tr><th>When</th><th>Venue</th><th>Invigilators</th><th>Check</th><th></th></tr></thead><tbody>${duties.map(dutyRow).join("") || `<tr><td colspan="5" class="muted" style="padding:10px">No duties.</td></tr>`}</tbody></table></div></div>
       <div>${whoPanel(made)}${loadList(made)}</div></div>`;
   }

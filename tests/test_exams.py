@@ -720,6 +720,24 @@ def remaking_one_sitting_leaves_a_later_sittings_room():
     assert list(s["made"]["seats"][first]) == ["Hall"] and list(s["made"]["seats"][later]) == ["Lab 3-08"], s["made"]["seats"]
 
 @t
+def a_change_after_make_is_stale():
+    x = _xset(("3-01", "3-02", "4-01", "Hall"))
+    s = _mk(_made_sched())
+    assert MK.stale(s, x) is False and s["made"]["fingerprint"] == MK.fingerprint(s, x)
+    s["papers"][0]["minutes"] = 70
+    assert MK.stale(s, x) is True
+    _mk(s, only="2026-10-05 07:50")
+    assert MK.stale(s, x) is True, "a one-sitting Make keeps the other sitting as it was"
+    _mk(s)
+    assert MK.stale(s, x) is False
+    for k, v in (("seating", dict(s["seating"], spacing="gap")), ("access", [dict(student="3A-01", extra=25)]), ("supervision", "lesson"),
+                 ("days", {}), ("classes", ["3A"]), ("levels", ["Sec 3", "Sec 4"])):
+        assert MK.stale(dict(s, **{k: v}), x) is True, k
+    x2 = _xset(("3-01", "3-02", "4-01")); assert MK.stale(s, x2) is True
+    assert MK.stale(dict(s, name="Another name", times=dict(s["times"], report="07:00")), x) is False
+    assert MK.stale(dict(s, made=None), x) is False
+
+@t
 def gone_people_are_named_once():
     s = _made_sched()
     key = "2026-10-05 07:50"
@@ -1012,6 +1030,15 @@ def printouts_and_excel():
             assert r.status_code == 200 and r.data.startswith(b"%PDF"), (what, r.status_code)
             assert f"Sec 3 Exam {what}.pdf" in r.headers["Content-Disposition"] and r.headers["Content-Disposition"].startswith("inline"), r.headers["Content-Disposition"]
         assert c.get(f"/api/exams/{s['id']}/print/nothing.pdf").status_code == 404
+        assert c.get(f"/api/exams/{s['id']}/view").get_json()["stale"] is False
+        now = c.get(f"/api/exams/{s['id']}").get_json()
+        assert c.put("/api/exams/" + s["id"], json=dict(now, papers=[dict(now["papers"][0], minutes=50)] + now["papers"][1:])).status_code == 200
+        assert c.get(f"/api/exams/{s['id']}/view").get_json()["stale"] is True
+        for url in ("print/seating.pdf", "download.xlsx"):
+            r = c.get(f"/api/exams/{s['id']}/{url}")
+            assert r.status_code == 409 and r.get_json() == {"error": "The exam changed since Make: press Make again."}, (url, r.data[:100])
+        assert c.post(f"/api/exams/{s['id']}/make", json={}).status_code == 200
+        assert c.get(f"/api/exams/{s['id']}/view").get_json()["stale"] is False
         r = c.get(f"/api/exams/{s['id']}/download.xlsx"); assert r.status_code == 200 and "Sec 3 Exam.xlsx" in r.headers["Content-Disposition"]
         wb = openpyxl.load_workbook(io.BytesIO(r.data))
         assert wb.sheetnames == ["Papers", "Seats", "Duties", "Lessons"], wb.sheetnames
@@ -1044,7 +1071,7 @@ def the_pages_carry_the_words():
     js = _page("exams.js")
     for words in ("How to seat", "Own class in own home room", "Mix classes", "Alternate levels by column", "Alternate papers",
                   "One level per block", "Class, then Student ID", "Every seat", "A seat left between", "Let the app choose",
-                  "Not free: "):
+                  "Not free: ", "The exam changed since Make: press Make again."):
         assert words in js, words
 
 print(f"{COUNT} exams tests passed")

@@ -1,6 +1,8 @@
 """Make an exam schedule's seats and duties, keep hand changes, and the figures the pages show."""
 import copy
 import datetime
+import hashlib
+import json
 
 import relief.people
 import relief.settings
@@ -10,8 +12,26 @@ from exams import papers as _papers
 from exams import seating as _seat
 
 
+STALE = "The exam changed since Make: press Make again."
+_USED = ("papers", "days", "levels", "classes", "start", "end", "access", "seating", "supervision")
+
+
 def _now():
     return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def fingerprint(sched, xset) -> str:
+    """what Make uses (papers, days, levels and classes, access arrangements, seating, supervision, the exam rooms), as a
+    short hash kept in made: a change to any of it makes the made seats and duties stale"""
+    used = {k: sched.get(k) for k in _USED}
+    used["rooms"] = xset.get("rooms")
+    return hashlib.sha256(json.dumps(used, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def stale(sched, xset) -> bool:
+    """the schedule was made, and what Make used has changed since"""
+    made = sched.get("made")
+    return bool(made) and made.get("fingerprint") != fingerprint(sched, xset)
 
 
 def _split(k):
@@ -126,7 +146,10 @@ def make(pub, cal, sched, xset, only=None) -> dict:
         if d["key"] in redo and pk in hand and hand[pk] != d["names"]:
             hand[pk] = list(d["names"])   # a replacement for a name that left is kept by the next Make
         d["locked"] = pk in hand
-    sched["made"] = dict(seats=seats, unseated=unseated, duties=duties, gone=gone, made_at=_now())
+    fp = fingerprint(sched, xset)
+    if only and keys - redo and old.get("fingerprint") != fp:
+        fp = old.get("fingerprint")   # the kept sittings were made from what was there before: still stale
+    sched["made"] = dict(seats=seats, unseated=unseated, duties=duties, gone=gone, made_at=_now(), fingerprint=fp)
     return sched
 
 
