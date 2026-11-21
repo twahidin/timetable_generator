@@ -496,7 +496,7 @@ function renderFree() {
   const on = S.on && S.on.day ? S.on : null, ex = on ? on.exams || {} : {}, day = on ? DAYS.indexOf(on.day) : +f.d;
   const stop = new Set(ex.stopped || []), runs = new Map();
   (ex.shortened || []).forEach(([i, a, b]) => { if (!runs.has(i)) runs.set(i, []); runs.get(i).push([mins(a), mins(b)]); });
-  const ran = x => { const ps = []; for (let q = x.p; q < x.p + x.n; q++) if (!stop.has(x.i) || (runs.get(x.i) || []).some(([a, b]) => PB[q] && a <= PB[q][0] && PB[q][1] <= b)) ps.push(q); return ps; };
+  const ran = x => { const ps = []; for (let q = x.p; q < x.p + x.n; q++) if (!stop.has(x.i) || (runs.get(x.i) || []).some(([a, b]) => PB[q] && a < PB[q][1] && b > PB[q][0])) ps.push(q); return ps; };   /* a period where any part of the lesson still runs is busy */
   const tb = new Set(), rb = new Set(), cb = new Set(), load = {};
   const seenTL = new Set();
   L.forEach(x => { if (x.d !== day) return; const ps = ran(x); if (!ps.length) return; x.teachers.forEach(t => { const k = t + "|" + x.id; if (!seenTL.has(k)) { seenTL.add(k); load[t] = (load[t] || 0) + ps.length; } });
