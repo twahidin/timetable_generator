@@ -69,4 +69,31 @@ t("the Lessons tab says where each backup stands and offers Handled ourselves on
 t("the exams page no longer says that sending comes in a later stage", () => {
   assert(!SRC.includes("arrives in a later stage") && !SRC.includes("comes in a later stage"));
 });
+/* onHandled: the click path with a stubbed api */
+const runHandled = async (S, reply) => {
+  const calls = [];
+  const f = new Function("S", "api", "paint", "paintSave", `async ${cut("onHandled")}; return onHandled;`)(S, async (m, u, b) => { calls.push([m, u, b]); return reply; }, () => {}, () => {});
+  return [f, calls];
+};
+const box = (checked, teacher = "Ms Z", key = "k1") => ({ checked, dataset: { t: teacher, k: key } });
+(async () => {
+  let S = { base: "/api/exams", id: "x1", busy: false, view: { old: 1 }, rv: {}, hpend: {} };
+  let [f, calls] = await runHandled(S, { ok: true, status: 200, j: { lessons: { backup: [] } } });
+  const el = box(true), p = f(el);
+  assert.deepStrictEqual(S.hpend, { "Ms Z|k1": true }, "the chosen value shows while in flight");
+  assert.strictEqual(S.busy, true);
+  const el2 = box(true); await f(el2);
+  assert.strictEqual(el2.checked, false, "a second click while busy is put back");
+  assert.strictEqual(calls.length, 1, "and posts nothing");
+  await p;
+  assert.deepStrictEqual(calls[0], ["POST", "/api/exams/x1/handled", { teacher: "Ms Z", key: "k1", handled: true }]);
+  assert.deepStrictEqual(S.view, { lessons: { backup: [] } }); assert.strictEqual(S.rv, null); assert.deepStrictEqual(S.hpend, {}); assert.strictEqual(S.busy, false);
+  S = { base: "/api/events", id: "e1", busy: false, view: { old: 1 }, rv: { keep: 1 }, hpend: {}, msg: "", bad: false };
+  [f, calls] = await runHandled(S, { ok: false, status: 400, j: { error: "That lesson no longer needs a backup." } });
+  await f(box(true));
+  assert.strictEqual(calls[0][1], "/api/events/e1/handled");
+  assert.strictEqual(S.msg, "That lesson no longer needs a backup."); assert.strictEqual(S.bad, true);
+  assert.deepStrictEqual(S.view, { old: 1 }); assert.deepStrictEqual(S.hpend, {});
+  console.log("onHandled cases passed");
+})().catch(e => { console.error(e); process.exit(1); });
 console.log(`${n} exams page tests passed`);

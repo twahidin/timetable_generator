@@ -891,5 +891,36 @@ def handled_on_one_schedule_covers_every_schedule():
         assert ok(c.get(f"/api/exams/{a}/review"))["review"]["what"]["backups"] == 0, "handled ourselves is not counted"
 
 
+@t
+def event_review_counts_and_a_failing_count_keeps_the_answer():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        ev = SC.new_event(EVENT, ["Sec 4"], [], ISO, ISO, GRACE, GRACE)
+        ev["days"] = {ISO: dict(levels=["Sec 4"], whole=False, **{"from": "07:40", "to": "09:00"})}
+        ev["going"] = [AISHA]
+        id = SC.save(ev, PUB, CAL, GRACE)["id"]
+        _send_approve(c, id, "/api/events")
+        key = _backups(id)[0]["lessons"][0]["key"]
+        assert ok(c.get(f"/api/events/{id}/review"))["review"]["what"]["backups"] == 1
+        ok(c.post(f"/api/events/{id}/handled", json=dict(teacher=AISHA, key=key, handled=True)))
+        assert ok(c.get(f"/api/events/{id}/review"))["review"]["what"]["backups"] == 0, "handled is not counted"
+        ok(c.post(f"/api/events/{id}/handled", json=dict(teacher=AISHA, key=key, handled=False)))
+        old = A._marked
+        def boom(*a, **k): raise RuntimeError("test")
+        A._marked = boom
+        try:
+            raw = ok(c.get(f"/api/events/{id}/review"))["review"]["what"]["backups"]
+            e = _made_exam([_duty([DANIEL])])["id"]
+            ok(c.post(f"/api/exams/{e}/send"))
+            r = ok(c.post(f"/api/exams/{e}/approve"))
+        finally:
+            A._marked = old
+        assert raw == 1, "the unmarked count stays"
+        assert r["review"]["what"]["backups"] == 0, "approve still answers, with the review's own (unmarked) count: the hand-made duty lists no backup name"
+        ok(c.post(f"/api/events/{id}/withdraw"))      # 4A was on the event: its lessons stop, so Mr Koh needs none
+        assert ok(c.get(f"/api/exams/{e}/review"))["review"]["what"]["backups"] == 1, "and the marked count is back once it works"
+
+
 _clear()
 print(f"{COUNT} exams and relief tests passed")

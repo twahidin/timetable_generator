@@ -892,7 +892,7 @@
   const CAN_HANDLE = { later: 1, sent: 1, relief: 1, handled: 1 };
   function backupState(l) {
     const f = BACKUP_STATE[l.state]; if (!f) return "";
-    const box = CAN_HANDLE[l.state] ? ` <label class="tick"><input type="checkbox" data-h="1" data-t="${esc(l.teacher)}" data-k="${esc(l.key)}" ${l.state === "handled" ? "checked" : ""} ${S.busy ? "disabled" : ""}> Handled ourselves</label>` : "";
+    const box = CAN_HANDLE[l.state] ? ` <label class="tick"><input type="checkbox" data-h="1" data-f="h:${esc(l.teacher)}|${esc(l.key)}" data-t="${esc(l.teacher)}" data-k="${esc(l.key)}" ${((S.hpend || {})[l.teacher + "|" + l.key] ?? l.state === "handled") ? "checked" : ""}> Handled ourselves</label>` : "";
     return `<div class="small muted">${esc(f(l))}${box}</div>`;
   }
 
@@ -1185,10 +1185,11 @@
   /* "Handled ourselves": the answer is the schedule's view again (the Lessons tab reads it); the Approval counts are read again */
   async function onHandled(el) {
     if (S.busy) { el.checked = !el.checked; return; }
-    S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
+    const tag = el.dataset.t + "|" + el.dataset.k;
+    S.busy = true; S.msg = ""; S.bad = false; S.hpend = { [tag]: !!el.checked }; paintSave();
     const r = await api("POST", `${S.base}/${S.id}/handled`, { teacher: el.dataset.t, key: el.dataset.k, handled: !!el.checked });
-    S.busy = false;
-    if (r.status === 401 || r.status === 403) return;
+    S.busy = false; S.hpend = {};
+    if (r.status === 401 || r.status === 403) { paint(); return; }
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return; }
     S.view = r.j; S.rv = null; paintSave(); paint();
   }

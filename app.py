@@ -965,11 +965,14 @@ def _marked(lists, sched, pub, cal):
     return lists
 
 def _backups_left(rv, lists, s, pub):
-    """the review's backup count (what.backups) read again as the backup items of the reviewed copy that still go to the relief
+    """the review's backup count (what.backups; lists: a function giving the lessons lists) read again as the backup items of the reviewed copy that still go to the relief
     team: not handled, stopped, past or elsewhere"""
     if rv and isinstance(rv.get("what"), dict):
-        items = _marked(lists, s, pub, _exam_cal(pub))["backup"]
-        rv["what"]["backups"] = sum(1 for x in items if x.get("state") in ("later", "sent", "relief"))
+        try:
+            items = _marked(lists(), s, pub, _exam_cal(pub))["backup"]
+            rv["what"]["backups"] = sum(1 for x in items if x.get("state") in ("later", "sent", "relief"))
+        except Exception:     # the state is saved already: keep the unmarked count
+            app.logger.exception("exams: backup count failed")
     return rv
 
 def _relief_sync(pub, s):
@@ -1369,7 +1372,7 @@ def _exam_review_reply(pub, s):
     errors = exams_papers.check(s, model, _exam_cal(pub), xset["rules"])["errors"]
     st = s.get("status") or "draft"
     rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"), pub["model"])) if s.get("made") else None
-    if rv: _backups_left(rv, exams_make.lesson_lists(pub, _exam_cal(pub), exams_approval.as_schedule(s) if rv.get("copy") == "approved" else s), s, pub)
+    if rv: _backups_left(rv, lambda: exams_make.lesson_lists(pub, _exam_cal(pub), exams_approval.as_schedule(s) if rv.get("copy") == "approved" else s), s, pub)
     return jsonify(status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
                    changed=s.get("sent_fp") is not None and s.get("sent_fp") != exams_approval.fp(s),
@@ -1481,8 +1484,8 @@ def _event_others(pub, s):
 
 def _event_review(pub, cal, s, busy, others):
     rv = exams_events.review(pub, cal, s, busy, others)
-    copy = exams_approval.as_schedule(s) if rv.get("copy") == "approved" else s
-    return _backups_left(rv, exams_events.lesson_lists(pub, cal, copy), s, pub)
+    copy = lambda: exams_approval.as_schedule(s) if rv.get("copy") == "approved" else s
+    return _backups_left(rv, lambda: exams_events.lesson_lists(pub, cal, copy()), s, pub)
 
 def _event_review_reply(pub, s):
     """the Approval tab of an event: as an exam's, with the event's own review and what stops Send"""
