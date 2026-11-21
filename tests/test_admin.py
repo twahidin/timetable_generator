@@ -682,4 +682,14 @@ def put_back_of_a_line_with_no_text_is_still_recorded():
     got = back(c, e["id"]); assert got == (200, dict(done=True, text="Put back.")) and rec(PRIYA)["note"] == "before", got
     p = accounts()[0]; assert (p["what"], p["text"], p["putback"]) == ("putback", "Put back: ", "a:" + e["id"]), p
 
+@t
+def shared_codes_and_an_admin_s_code_never_put_back_accounts():
+    c = admin()
+    assert post(c, "/api/admin/person", name=PRIYA, note="not by a code")[0] == 200
+    e = accounts()[0]; before, n = raw(), len(accounts())
+    assert back(shared("committee"), e["id"]) == (403, {"error": "Only the timetable committee can put back someone else's change."})
+    assert back(shared("head"), e["id"]) == (403, {"error": "Only the timetable committee can put back someone else's change."})
+    assert back(as_person(ALICIA, "code"), e["id"]) == (401, AGAIN)        # an admin's personal code opens neither the setup nor the admin page
+    assert raw() == before and len(accounts()) == n and rec(PRIYA)["note"] == "not by a code"
+
 print(f"{COUNT} admin tests passed")

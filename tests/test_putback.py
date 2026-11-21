@@ -553,6 +553,17 @@ def a_broken_line_is_skipped():
     assert any("back" in x for x in r.get_json()["entries"]), r.get_json()
 
 @t
+def the_shared_heads_code_never_puts_back():
+    sp = start(); L = sp["lessons"][0]
+    heads = A.app.test_client()
+    with heads.session_transaction() as s: s["role"] = "head"
+    change(heads, ["set", "lessons", L["_id"], "periods", 9]); mine = entries()[-1]        # its own change, made with the shared code
+    assert mine["as"] != CORA and field("lessons", 0, "periods") == 9
+    assert heads.get("/api/history").status_code == 401                                      # no history to see, so no button
+    assert back(heads, mine["id"]) == (403, {"error": ONLY_COMMITTEE})
+    assert field("lessons", 0, "periods") == 9 and entries()[-1]["id"] == mine["id"]
+
+@t
 def teacher_cannot_post():
     start()
     r = as_person(TEA, "code").post("/api/history/back", json={"id": "x"}); assert r.status_code == 401, r.status_code
