@@ -352,12 +352,17 @@ def band_lessons(spec, block_row):
     return [x for x in _rows(spec, "lessons") if isinstance(x, dict) and x.get("block") == name and x.get("level") == level]
 
 
+def _trim(v):
+    return v.strip() if isinstance(v, str) else v
+
+
 def _name_taken(spec, row, but=None):
-    """True when another band than `but` on `spec` has the name and level of the band row `row` (a blank name is none)."""
+    """True when another band than `but` on `spec` has the name of the band row `row`, trimmed, at any level (the page
+    and the solver find a band by its name alone; a blank name is none)."""
     if not isinstance(row, dict) or _blank(row.get("block")):
         return False
-    return any(isinstance(b, dict) and b is not but and b.get("block") == row.get("block") and b.get("level") == row.get("level")
-               for b in _rows(spec, "blocks"))
+    name = _trim(row.get("block"))
+    return any(isinstance(b, dict) and b is not but and _trim(b.get("block")) == name for b in _rows(spec, "blocks"))
 
 
 def _band_after(band, op):
@@ -449,8 +454,9 @@ def _dept_why(spec, op, mine, dept):
         groups = band_lessons(spec, row) if row is not None else []
         return None if not groups or any(dept(x) in mine for x in groups) else BAND_NOT_YOURS
     if section == "teachers":
-        def theirs(t):
-            return all(d in mine for d in teacher_depts(t))
+        def theirs(t):    # a teacher with no department is the committee's to place
+            ds = teacher_depts(t)
+            return bool(ds) and all(d in mine for d in ds)
         if name == "add":
             t = op[2] if isinstance(op[2], dict) else {}
             return None if _dept_of(t.get("dept")) in mine and theirs(t) else TEACHER_DEPT
@@ -520,8 +526,9 @@ def head_split(spec, ops, depts=None):
 
     `depts`: None for the shared heads' code (every department, as above); else the head's own departments, and then,
     after the rules above: a lesson row only when its department is theirs both as it is and as the op leaves it; a band
-    when it holds one of their groups (or none), and never under the name of another band at its level; a teacher only
-    one of their departments' (as it is and as the op leaves it), a new one only in them. A band's rename or delete is
+    when it holds one of their groups (or none), and never under the name of another band (at any level); a teacher only
+    one of their departments' (as it is and as the op leaves it, a teacher with none being the committee's), a new one
+    only in them. A band's rename or delete is
     judged with the operations carrying its groups along, as one: all of it when every group in the band is theirs,
     else none (and none when today's rules refuse any of it). Everything else is judged one operation at a time."""
     mine, forced, rest = _dept_list(depts), {}, None

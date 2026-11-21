@@ -560,8 +560,8 @@ assert split(base, [["set", "lessons", "nope", "subject", "X"]], ["SC"]) == ([["
 assert split(base, [["add", "lessons", "row", ""]], ["SC"]) == ([], [(0, NOSUB)])
 passed += 1
 
-# R9: a head's band may not take the name of another band at its level (the page reads the first band of a name, the
-# solver the last), judged on the batch as the ops before leave it; the shared heads' code as today
+# R9: a head's band may not take the name of another band, at any level (the page and the solver find a band by its
+# name alone), judged on the batch as the ops before leave it; the shared heads' code as today
 TAKEN = "Another band already has that name."
 assert sync.BAND_NAME_TAKEN == TAKEN
 add_taken = sent(base, new_band("Sec 3 Option X", "Sec 3", ["3A"]))         # the page's own check bypassed
@@ -574,8 +574,12 @@ lvl = copy.deepcopy(base)
 lvl["blocks"].append({"_id": "lvlband001", "block": "Sec 1 Science", "level": "Sec 2", "classes": ["2A"]})
 assert split(lvl, [["set", "blocks", sci_band["_id"], "level", "Sec 2"]], ["SC"]) == ([], [(0, TAKEN)])   # onto that name at that level
 assert split(base, [["set", "blocks", sci_band["_id"], "level", "Sec 2"]], ["SC"])[1] == []
-for ops in (sent(base, new_band("Sec 3 Option Q", "Sec 3", ["3A"])), sent(base, new_band("Sec 3 Option X", "Sec 4", ["4A"])),
-            sent(base, rename_band("Sec 1 Science", "Sec 1 Sciences"))):    # a fresh name, or the name at another level
+for ops in (sent(base, new_band("Sec 3 Option X", "Sec 4", ["4A"])), sent(base, new_band(" Sec 3 Option X ", "Sec 3", ["3A"])),
+            sent(base, rename_band("Sec 1 Science", "Sec 3 Option X")), sent(base, rename_band("Sec 1 Science", "Sec 4 Science "))):
+    assert split(base, ops, ["SC"]) == ([], [(i, TAKEN) for i in range(len(ops))]), ops      # the name at another level, or with spaces round it
+    assert sync.head_split(base, ops) == (ops, [])
+for ops in (sent(base, new_band("Sec 3 Option Q", "Sec 3", ["3A"])),
+            sent(base, rename_band("Sec 1 Science", "Sec 1 Sciences"))):    # a fresh name
     assert split(base, ops, ["SC"]) == (ops, []), ops
 freed = copy.deepcopy(base)
 rename_band("Sec 1 Science", "Sec 1 Sciences")(freed)
@@ -593,12 +597,17 @@ OTEACH = "This teacher is another department's: only its head or the committee c
 assert sync.OTHER_TEACHER == OTEACH
 prov2 = copy.deepcopy(prov)
 prov2["teachers"] += [{"_id": "provt00002", "name": "Typed Other", "dept": "MA", "provisional": "Yes"},
-                      {"_id": "provt00003", "name": "Typed Both", "dept": "SC", "dept2": "MA", "provisional": "Yes"}]
+                      {"_id": "provt00003", "name": "Typed Both", "dept": "SC", "dept2": "MA", "provisional": "Yes"},
+                      {"_id": "provt00004", "name": "Typed Nowhere", "dept": " ", "provisional": "Yes"}]   # no department: the committee places them
 for op in (["set", "teachers", "provt00002", "name", "Typed X"], ["del", "teachers", "provt00002"], ["set", "teachers", "provt00002", "dept", "SC"],
            ["set", "teachers", "provt00002", "allowance", 3], ["set", "teachers", "provt00003", "name", "Typed X"], ["del", "teachers", "provt00003"]):
     assert split(prov2, [op], ["SC"]) == ([], [(0, OTEACH)]), op
     assert sync.head_split(prov2, [op]) == ([op], []), op
     assert split(prov2, [op], ["MA", "SC"]) == ([op], []), op
+for op in (["set", "teachers", "provt00004", "name", "Typed X"], ["del", "teachers", "provt00004"], ["set", "teachers", "provt00004", "dept", "SC"]):
+    assert split(prov2, [op], ["SC"]) == ([], [(0, OTEACH)]), op
+    assert split(prov2, [op], ["MA", "SC", "EL"]) == ([], [(0, OTEACH)]), op
+    assert sync.head_split(prov2, [op]) == ([op], []), op
 assert split(prov2, [["set", "teachers", "provt00002", "name", "Typed X"]], ["MA"])[1] == []
 assert split(prov2, [["set", "teachers", "provt00001", "name", "Typed X"]], ["SC"])[1] == []          # their own
 assert split(prov2, [["del", "teachers", "provt00001"]], ["SC"])[1] == []
