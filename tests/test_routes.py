@@ -219,6 +219,7 @@ GUARDS = {
     "get_setup_copies": ('committee',),
     "history_page": ('history', 'history.dept', 'history.own'),
     "home": ('timetable',),
+    "home_later": ('timetable',),
     "import_xlsx": ('committee',),
     "index": ('setup', 'timetable', 'own'),
     "me": ('own',),

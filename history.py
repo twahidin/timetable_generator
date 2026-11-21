@@ -206,6 +206,30 @@ def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, si
     return out
 
 
+CHANGE_KINDS = ("setup", "setup-replaced", "draft", "relief", "exams", "account")   # not sign-ins, refusals or the app's follow-ups
+
+
+def summary(since, allow, me, top=8):
+    """what changed since `since` for the home page's "Since you last signed in": n (changes allow lets through), people
+    (distinct names), rows [(who, where, count)] most first (who is "Your own changes" for `me`; at most `top`), more (rows
+    left out) and published (the newest publish time, whatever allow says, or None). One read, so one month file for a recent `since`"""
+    def is_publish(e): return e.get("kind") == "draft" and e.get("what") == "publish"
+    ok = (lambda e: True) if allow is None else allow
+    found = read(since=since, kinds=CHANGE_KINDS, allow=lambda e: is_publish(e) or bool(ok(e)), limit=10 ** 6)
+    published, counts, people = None, {}, set()
+    for e in found:
+        ts = e.get("ts")
+        if is_publish(e) and isinstance(ts, (int, float)) and (published is None or ts > published): published = float(ts)
+        if not ok(e): continue
+        name = str(e.get("as") or e.get("who") or "Someone")
+        people.add(name)
+        who = "Your own changes" if me is not None and e.get("who") == me else name
+        key = (who, str(e.get("where") or ""))
+        counts[key] = counts.get(key, 0) + 1
+    rows = sorted(((w, wh, n) for (w, wh), n in counts.items()), key=lambda r: (-r[2], r[0], r[1]))
+    return dict(n=sum(counts.values()), people=len(people), rows=rows[:top], more=max(0, len(rows) - top), published=published)
+
+
 def find(entry_id):
     """the entry with this id (sign-ins too), or None. Ids grow in the order entries are written, so the newest files and
     lines are read first and the search stops once it reads an id older than the one it looks for"""

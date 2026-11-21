@@ -323,6 +323,13 @@ username and a password, and you are signed in as the first admin. If every admi
 `ADMIN_RECOVERY_CODE` in Railway variables (at least 16 letters or digits; a shorter one is ignored) and use
 `/login/recover` once with an admin's username; then remove the variable.
 
+### History
+
+The history page keeps who changed what, and when, for two years. A change to the setup can be put back from there. The
+committee sees everything; a head of department sees changes to their departments and their own; everyone else who can
+change something sees their own. After signing in, the home page shows "Since you last signed in", a short summary of
+what changed since the person's previous sign-in. The committee can download the history as an Excel file.
+
 Coming from a version that generated in the app: the `AI_*` and `SOLVE_SECONDS` variables are no longer read
 ([details](docs/DEPLOY.md#coming-from-an-earlier-version)).
 

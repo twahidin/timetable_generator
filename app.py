@@ -459,6 +459,41 @@ def _tiles(p):
         elif title in GREYED and strong & set(need_): out.append((title, TO_PASSWORD, "/login/password", True))
     return out
 
+def _since_box(p):
+    """the "Since you last signed in" box for the person p, or "" (no previous sign-in, hidden with Later, or nothing to say)"""
+    s = people.record(people.load(), p["name"])["signins"]
+    if len(s) < 2 or session.get("later") == s[-1]: return ""
+    previous = s[-2]
+    scope, allow, _ = history_scope()
+    try: got = history.summary(previous, allow if scope else (lambda e: False), p["name"])
+    except Exception as e:
+        print(f"WARNING: the summary since the last sign-in could not be made ({type(e).__name__})", file=sys.stderr, flush=True)
+        return ""
+    if not got["n"] and not got["published"]: return ""
+    out = ['<section class="since"><h2>Since you last signed in</h2>']
+    if got["n"]:
+        n, pe = got["n"], got["people"]
+        out.append(f'<p class="muted small">{esc(history.when_text(previous))} · {n} change{"" if n == 1 else "s"} by {pe} {"person" if pe == 1 else "people"}</p><ul>')
+        out += [f'<li><span>{esc(who)} · {esc(where)}</span><b>{c}</b></li>' for who, where, c in got["rows"]]
+        if got["more"]: out.append(f'<li class="muted">and {got["more"]} more</li>')
+        out.append("</ul>")
+    if got["published"]:
+        out.append(f'<p>{esc("The timetable was published again on " + history.when_text(got["published"]) + ".")}</p>')
+    out.append('<div class="row">')
+    if scope and got["n"]: out.append(f'<a href="/history?since={int(previous)}">See them</a>')
+    out.append('<form method="post" action="/home/later"><button type="submit">Later</button></form></div></section>')
+    return "".join(out)
+
+@app.post("/home/later")
+@need("timetable")
+def home_later():
+    """hides the box until the next sign-in"""
+    p = who()
+    if p is None: return redirect("/")
+    s = people.record(people.load(), p["name"])["signins"]
+    if s: session["later"] = s[-1]
+    return redirect("/home")
+
 @app.get("/home")
 @need("timetable")
 def home():
@@ -466,13 +501,14 @@ def home():
     p = who()
     if p is None: return redirect("/")   # a shared code is nobody's: its own page
     got = _tiles(p)
-    if len(got) == 1 and not got[0][3]: return redirect(got[0][2])
+    since_box = _since_box(p)
+    if len(got) == 1 and not got[0][3] and not since_box: return redirect(got[0][2])
     tiles = "".join(f'<a class="tile{" off" if off else ""}" href="{link}"><b>{esc(title)}</b><span class="muted small">{esc(line)}</span></a>'
                     for title, line, link, off in got)
     change = ' · <a href="/account/password">Change password</a>' if via() == "password" else ""
     return page("Home", f"""<main class="home"><header class="hello"><h1>Hello, {esc(p["name"])}</h1>
 <p class="muted small">{esc(_HOW.get(via(), "Signed in"))}{change} · <a href="/logout">Sign out</a></p></header>
-<nav class="tiles">{tiles}</nav><p class="muted small foot">{esc(school_name())}</p></main>""")
+{since_box}<nav class="tiles">{tiles}</nav><p class="muted small foot">{esc(school_name())}</p></main>""")
 
 # ------------------------------------------------------------------------------------------------ every request
 @app.before_request

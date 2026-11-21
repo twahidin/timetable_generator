@@ -502,6 +502,96 @@ def an_unreadable_accounts_file_shuts_signing_in_by_name_and_keeps_the_shared_co
     assert P.readable() and UNREADABLE not in A.setup_problems()
     _, r = code_in(alice); assert went(r, "/home")
 
+# ---- "Since you last signed in" on the home page
+SINCE = "Since you last signed in"
+
+def change(who, where="Step 4 · Teachers", kind="setup", depts=None, **more):
+    """a change made by a made-up person, now"""
+    H.add(dict(kind=kind, who=who, **{"as": who}, via="password", where=where, text=f"{who} changed something", depts=depts or [], **more))
+
+def twice(user, pw, between):
+    """sign in, run `between`, sign in again: the client of the second sign-in"""
+    pw_in(user, pw); between(); c, r = pw_in(user, pw); assert went(r, "/home"), r.status_code
+    return c
+
+@t
+def summary_after_a_second_sign_in():
+    user, pw = account("Ms Una Koh", group="committee")
+    def between():
+        for _ in range(2): change("Ann")
+        change("Bob")
+        H.add(dict(kind="signin", ok=True, who="Bob", **{"as": "Bob"}, via="password", where="Sign-in", text="Bob signed in"))
+    c = twice(user, pw, between)
+    html = c.get("/home").data.decode()
+    assert SINCE in html and "3 changes by 2 people" in html and "Ann · Step 4 · Teachers" in html and 'href="/history?since=' in html, html
+    assert "See them" in html and ">Later<" in html and 'action="/home/later"' in html
+
+@t
+def head_summary_is_their_departments_and_own():
+    user, pw = account(ERIC, group="hod", depts=["Science"])
+    def between():
+        change("Ann", "Step 4 · Teachers", depts=["Science"]); change("Bob", "Step 3 · Subjects", depts=["Mathematics"])
+        change(ERIC, "Step 5 · Groups and bands", depts=["Mathematics"])
+    html = twice(user, pw, between).get("/home").data.decode()
+    assert SINCE in html and "Your own changes · Step 5 · Groups and bands" in html and "Ann · Step 4 · Teachers" in html, html
+    assert "Bob" not in html and "2 changes by 2 people" in html, html
+
+@t
+def published_line_for_everyone():
+    c, r = code_in(staff_code(BEN)); assert went(r, "/home")
+    H.add(dict(kind="draft", what="publish", who="Mr Zed", **{"as": "Mr Zed"}, via="password", where="Step 9 · Publish", text="Published the timetable"))
+    change("Ann")
+    c, r = code_in(staff_code(BEN)); assert went(r, "/home")
+    html = c.get("/home").data.decode()
+    assert "The timetable was published again on" in html and SINCE in html, html
+    assert "See them" not in html and "Ann" not in html
+    assert "by 1 person" not in html and "Ann · " not in html and ">Later<" in html
+
+@t
+def no_box_on_first_sign_in_or_after_later():
+    user, pw = account("Ms Vee Lim", group="committee")
+    c, r = pw_in(user, pw); change("Ann")
+    assert SINCE not in c.get("/home").data.decode()               # the first sign-in: nothing to compare with
+    c, r = pw_in(user, pw)
+    assert SINCE in c.get("/home").data.decode()
+    r = c.post("/home/later"); assert went(r, "/home")
+    assert SINCE not in c.get("/home").data.decode()
+    change("Bob"); c2, r = pw_in(user, pw, c)                       # the next sign-in shows it again
+    assert SINCE in c.get("/home").data.decode()
+
+@t
+def summary_times_are_school_time():
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "UTC"; time.tzset()
+    try:
+        user, pw = account("Ms Wen Foo", group="committee")
+        c = twice(user, pw, lambda: change("Ann"))
+        previous = rec("Ms Wen Foo")["signins"][-2]
+        assert f"{H.when_text(previous)} · 1 change by 1 person" in c.get("/home").data.decode()
+    finally:
+        if old is None: os.environ.pop("TZ", None)
+        else: os.environ["TZ"] = old
+        time.tzset()
+
+@t
+def summary_reads_little():
+    user, pw = account("Ms Xia Lau", group="committee")
+    c = twice(user, pw, lambda: change("Ann"))
+    real, calls = H._lines, []
+    H._lines = lambda name: (calls.append(name), real(name))[1]
+    try: assert SINCE in c.get("/home").data.decode()
+    finally: H._lines = real
+    assert len(calls) == 1, calls
+
+@t
+def summary_function_groups_and_limits():
+    me = "Ms Yan Ko"; t0 = time.time()
+    for i in range(10): change(f"P{i}", f"Step {i}", ts=time.time())
+    got = H.summary(t0, None, me, top=3)
+    assert got["n"] == 10 and got["people"] == 10 and len(got["rows"]) == 3 and got["more"] == 7, got
+    assert H.summary(t0, lambda e: False, me)["n"] == 0
+    assert H.summary(time.time() + 100, None, me) == dict(n=0, people=0, rows=[], more=0, published=None)
+
 @t
 def nothing_typed_reaches_the_history():
     text = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(H.DIR, "*.jsonl")))
