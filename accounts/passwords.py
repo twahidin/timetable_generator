@@ -48,7 +48,8 @@ _DUMMY = generate_password_hash(secrets.token_hex(16))
 
 def check_pw(hashed, pw):
     """with no stored hash it still does the same work, so timing does not show who has an account"""
-    ok = check_password_hash(hashed or _DUMMY, str(pw or ""))
+    try: ok = check_password_hash(hashed if isinstance(hashed, str) and hashed else _DUMMY, str(pw or ""))
+    except ValueError: return False
     return bool(ok and hashed)
 
 def one_time():

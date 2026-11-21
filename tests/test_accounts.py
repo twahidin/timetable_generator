@@ -115,4 +115,31 @@ def sweep_ends_exams():
         d["people"][n] = dict(P.record(d, n)); d["people"][n]["extras"]["exams"] = e
     assert P.sweep(d, today) == ["A"] and d["people"]["A"]["extras"]["exams"] is None and d["people"]["B"]["extras"]["exams"] == "2026-11-21"
 
+@t
+def unreadable_file_is_never_overwritten():
+    shutil_rm = lambda: os.path.exists(P.PATH) and os.remove(P.PATH)
+    shutil_rm(); P.update(lambda d: d["people"].update(X=P.record(d, "X"))); assert "X" in P.load()["people"]
+    for junk in (b"not json", b"[1, 2]"):
+        open(P.PATH, "wb").write(junk)
+        try: P.update(lambda d: d["people"].update(Y={}))
+        except P.Unreadable as e: assert str(e) == "The accounts file could not be read, so nothing was changed. Ask whoever looks after the app to check it."
+        else: raise AssertionError("did not raise")
+        assert open(P.PATH, "rb").read() == junk
+    os.remove(P.PATH); P.update(lambda d: None); assert os.path.exists(P.PATH)
+
+@t
+def corrupt_record_does_not_break_helpers():
+    d = P.blank()
+    d["people"]["Ms Bad"] = dict(group="hod", extras="x", depts=None, signins="y", pw="garbage", username="ms.bad", added=True)
+    d["people"]["Mr Bad"] = dict(group=7, extras=dict(exams=5, admin="yes"), depts=[3, " Sci ", ""], signins=[1, "a", None], n="x")
+    d["people"]["Mr Odd"] = "text"
+    s = {x["name"]: x for x in P.staff(pub(), d)}
+    assert s["Ms Bad"]["last"] is None and s["Ms Bad"]["extras"] == dict(relief=False, exams=None, admin=False)
+    f = P.find("Ms Bad", pub(), d); assert f["pw"] == "garbage"
+    assert not PW.check_pw(f["pw"], "anything") and not PW.check_pw("pbkdf2:sha256:bad", "x")
+    assert P.sweep(d, datetime.date(2026, 11, 21)) == []
+    assert R.rights(f, "password") >= {"setup"}
+    assert P.record(d, "Mr Bad")["depts"] == ["Sci"] and P.record(d, "Mr Bad")["signins"] == [1] and P.record(d, "Mr Bad")["group"] is None
+    assert P.admins(d) == []
+
 print(f"{COUNT} accounts tests passed")
