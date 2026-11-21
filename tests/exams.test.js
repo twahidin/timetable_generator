@@ -40,4 +40,10 @@ t("other checks pass through as they are", () => {
   assert.deepStrictEqual(checkLines(all[0], all), all[0].lines);
   assert.deepStrictEqual(checkLines(all[1], all), []);
 });
+t("an event's free line has no room in brackets", () => {
+  const ev = who => `${who}, 3-01 on Mon 5 Oct 07:35–09:00: is on Sec 3 Learning Journey then.`;
+  const TAKES = "Sec 3 Learning Journey (waiting) takes 2 of these invigilators on Mon 5 Oct.";
+  const all = [free([ev("Ms A"), ev("Mr B")]), others([TAKES])];
+  assert.deepStrictEqual(checkLines(all[1], all), []);
+});
 console.log(`${n} exams page tests passed`);
