@@ -1930,6 +1930,21 @@ def a_split_lesson_reads_its_parts_in_the_record_and_the_sheet():
     assert x["covers"] == [dict(ckey=K2 + "#0", p=2, n=1, start="09:00", end="09:30", state="open", relief=None, planned=None),
                            dict(ckey=K2 + "#2", p=3, n=1, start="09:30", end="10:00", state="waiting", relief=SAM, planned=None),
                            dict(ckey=K2 + "#1", p=4, n=1, start="10:00", end="10:30", state="approved", relief=FLEX, planned=None)], x["covers"]
+    # the parts themselves are sent in time order too, each with its own key: parts[i] is never key#i (Ruling 22)
+    stored = AB._lesson(AB.load(i), K2)["parts"]
+    assert [(c["p"], c["relief"]) for c in stored] == [(2, None), (4, FLEX), (3, SAM)], "stored: the newest part last"
+    want = [(K2 + "#0", 2, None), (K2 + "#2", 3, SAM), (K2 + "#1", 4, FLEX)]
+    for c, who in ((team, TEAMER), (grace, GRACE)):
+        parts = next(x for x in ok(c.get(f"/api/relief/absences/{i}"))["lessons"] if x["key"] == K2)["parts"]
+        assert [(p["ckey"], p["p"], p["relief"]) for p in parts] == want, (who, parts)
+        assert parts[1]["pick"]["who"] == SAM and parts[2]["approved"]["by"] == TEAMER, (who, parts)
+    for url in (f"/api/relief/absences/{i}", "/api/relief/absences/mine"):     # the absent teacher's view: hidden, in the same order
+        got = ok(staff(EVE).get(url))
+        rec = got if "lessons" in got else next(v for v in got["absences"] if v["id"] == i)
+        parts = next(x for x in rec["lessons"] if x["key"] == K2)["parts"]
+        assert [(p["ckey"], p["p"], p["relief"]) for p in parts] == [(K2 + "#0", 2, None), (K2 + "#2", 3, None), (K2 + "#1", 4, FLEX)], (url, parts)
+        assert not any({"pick", "history", "change"} & set(p) for p in parts), parts
+    assert AB._lesson(AB.load(i), K2)["parts"] == stored and "ckey" not in stored[0], "sending never changes the record"
     assert next(v for v in ok(team.get("/api/relief/absences"))["absences"] if v["id"] == i)["cover"] == dict(total=4, approved=1, waiting=1, open=2)
     rows = list(csv.reader(io.StringIO(grace.get("/api/relief/planned.csv?start=2026-10-13").data.decode("utf-8").lstrip("﻿"))))
     assert [r[2:6] for r in rows[1:]] == [["1C Science", "P3", "09:00–09:30", "Not chosen yet"], ["1C Science", "P4", "09:30–10:00", SAM],

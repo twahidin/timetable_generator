@@ -184,12 +184,17 @@ def _lesson_out(r, x, pub, hide):
         if not hide: v["planned"] = _planned(r, c, s)
         covers.append(v)
     covers.sort(key=lambda v: v["p"])
+    # a split lesson's parts are sent in time order, each with its own ckey (cover.split puts the newest part last, so
+    # outside cover.py parts[i] is never read as key#i)
+    parts = sorted(({**(_hidden(c, _cover.state(r, x, c)) if hide else c), "ckey": _cover.cover_key(x, i)} for i, c in enumerate(x.get("parts") or [])),
+                   key=lambda c: int(c["p"]))
     if not hide:
         out = dict(x, covers=covers)
-        if not x.get("parts"): out["planned"] = covers[0]["planned"]
+        if parts: out["parts"] = parts
+        else: out["planned"] = covers[0]["planned"]
         return out
     out = dict(_hidden(x, _cover.state(r, x, x) if not x.get("parts") else "open"), covers=covers)
-    if x.get("parts"): out["parts"] = [_hidden(c, _cover.state(r, x, c)) for c in x["parts"]]
+    if parts: out["parts"] = parts
     return out
 
 
