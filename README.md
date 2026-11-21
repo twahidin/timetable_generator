@@ -31,7 +31,7 @@ Like the personal student codes, they are made from each name and `SECRET_KEY`, 
 
 **The published timetable's Lessons tab.** One filter (week, day, time, level, class, department, subject, teacher, room, band, or any word) and three ways to see what it finds: **Class grids** (each class's timetable as on its own page, one under another, with the lessons that match in colour and the rest faded; a class with no match is left out), **One page** (every class at once as a small timetable of blocks; a click opens the class) and **Table** (sortable, with the CSV download). The address keeps the filter and the view, so a link can be shared.
 
-**The steps.** Start · School & day · 1 Venues · 2 Classes · 3 Subjects · 4 Teachers · 5 Department map ·
+**The steps.** Start · School & day · 1 Venues · 2 Classes · 3 Subjects · 4 Teachers · 5 Teacher & TG deployment ·
 6 Configuration & constraints (the school-wide settings, teacher block-outs, fixed lessons and every other rule) ·
 7 Download · 8 Upload and edit · 9 Publish · Students. Steps 1 to 4 have the same numbers as the workbook's sheets (1 Venues to 4 Teachers);
 step 5 fills its 5 Blocks and 6 Lessons sheets, and step 6 its Settings, Teacher availability, Fixed lessons and More
@@ -52,7 +52,7 @@ the classes that have none from the teachers already on their lessons of the sub
 table counts the lessons changed by hand and offers **Put the Form teachers on all of them** (it asks first). Only the
 committee changes any of this.
 
-**Step 2's three views.** Step 2 shows the classes as **Cards** (one card per class under its level, with its home room, its form teachers and its subjects; a click opens the card to change it), as **Bands** (a picture of how each level's subjects are banded) or as the **Table** (every field in a row). On Bands, pick a level: whole-class subjects are filled cells, and each band is a bar across its classes with its groups and sizes; a click on a bar opens it on step 5's **Groups and bands**, which has a button back to the picture. The choice is remembered in your browser; department heads see all three and can change nothing.
+**Step 2's three views.** Step 2 shows the classes as **Cards** (one card per class under its level, with its home room, its form teachers and its subjects; a click opens the card to change it), as **Bands** (a picture of how each level's subjects are banded) or as the **Table** (every field in a row). On Bands, pick a level: whole-class subjects are filled cells, and each band is a bar across its classes with its groups and sizes; a click on a bar opens it on step 5's **Banding & TG Group Editor**, which has a button back to the picture. The choice is remembered in your browser; department heads see all three and can change nothing.
 
 **Step 3's two views.** Step 3 shows the subjects as **Cards** (a subject and its G-levels are one card: the name is typed once, the G-levels are ticked, and one periods grid has a row per G-level) or as the **Table** (a row per subject and G-level). To make a subject with its G-levels, press **+ Add a subject** in a department, type the name and code, and tick the G-levels; unticking one, or Delete, asks first when step 5 uses it, and Undo takes any of these back. The choice is remembered in your browser; department heads see both and can change nothing.
 
@@ -213,7 +213,11 @@ Clicking any avatar (not its tick box) opens the teacher's **profile** in place 
 name, role, department, load against allowance and **Teaches** (every class and group they are on, ✕ to take them
 off). Details are changed on step 4.
 
-**Groups and bands (step 5).** The second view, **Groups and bands**, is where teaching groups and bands are made.
+**Banding & TG Group Editor (step 5).** The second view, **Banding & TG Group Editor** (it was called Groups and bands), is where teaching
+groups and bands are made. It shows each group's teachers but does not change them: teachers are deployed in the first view, the
+**Teacher Deployment Editor** (it was called Map), where a band's groups are light blue cards in a light blue lane, a whole class on
+its own is a green card. Beside Level are three filters, **Teacher**, **TG** and **Class** (each lists only what this department's
+cards at that level have), and a search box that finds a TG code, a teacher or a class; they work together, and **Clear** shows every card again.
 Across the top are two cards. **New teaching group**: level, G-level (filters the subjects), subject, band (none = a whole-class
 lesson), classes (empty = the band's classes) and students; the group code forms as you pick (level digit, subject
 code, G-level letter, running number, as the workbook has it) and **Add** makes the row. **Add one per class** makes a
