@@ -2,6 +2,7 @@
 import datetime, os, secrets, threading
 
 import store
+from exams import approval as _approval
 from exams import days as _days
 from exams import papers as _papers
 
@@ -67,7 +68,7 @@ def new(kind, name, levels, start, end, by, pub=None) -> dict:
     return dict(id=secrets.token_hex(4), kind=kind, name=name, levels=list(levels), classes=[], start=start, end=end, days={},
                 times=dict(report="07:30", min_break=20, max_papers=2), papers=[], access=access,
                 seating=dict(order="class", shared="levels", spacing="every", home_rooms=True),
-                supervision="lesson" if test else "invigilators", pins=dict(rooms={}, duties={}), use_anyway=[], made=None,
+                supervision="lesson" if test else "invigilators", scripts="", pins=dict(rooms={}, duties={}), use_anyway=[], made=None,
                 status="draft", log=[], approved=None, note="", created_at=_now(), created_by=by, saved_at=None, saved_by=None)
 
 
@@ -77,6 +78,7 @@ def _check(s, pub):
     for k, typ in (("name", str), ("levels", list), ("classes", list), ("days", dict), ("papers", list), ("access", list),
                    ("start", str), ("end", str)):
         if not isinstance(s.get(k), typ): raise ValueError(WRONG)
+    if not isinstance(s.get("scripts", ""), str): raise ValueError(WRONG)
     if not s["name"].strip(): raise ValueError("Give the exam a name.")
     if s.get("kind") not in KINDS or s.get("supervision") not in SUPERVISION: raise ValueError(WRONG)
     if not _texts(s["levels"]) or not _texts(s["classes"]): raise ValueError(WRONG)
@@ -175,3 +177,28 @@ def delete(id):
     with _LOCK:
         try: os.remove(_path(id))
         except (FileNotFoundError, ValueError): pass
+
+
+def on_site() -> list:
+    """the approved copy (as a schedule) of every schedule that has one"""
+    return [a for a in (_approval.as_schedule(s) for s in _all()) if a]
+
+
+def elsewhere(id) -> list:
+    """what the other schedules hold: one busy per duty (dict(id, name, status, date, start, end, room, names)). Waiting: the
+    working duties; approved or changes: the approved copy's; draft and withdrawn hold nothing."""
+    out = []
+    for s in _all():
+        if s["id"] == id:
+            continue
+        st = s.get("status") or "draft"
+        if st == "waiting":
+            src, name = s.get("made"), s.get("name")
+        elif st in ("approved", "changes") and s.get("approved"):
+            src, name = s["approved"].get("made"), s["approved"].get("name")
+        else:
+            continue
+        for d in (src or {}).get("duties") or []:
+            out.append(dict(id=s["id"], name=name, status="waiting" if st == "waiting" else "approved", date=d["date"],
+                            start=d["start"], end=d["end"], room=d["room"], names=list(d.get("names") or [])))
+    return out

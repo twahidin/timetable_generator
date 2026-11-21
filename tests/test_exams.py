@@ -623,7 +623,7 @@ def _made_sched(**kw):
     return s
 
 def _mk(s, only=None, rooms=("3-01", "3-02", "4-01", "Hall")):
-    return MK.make(_PUB, F.CAL, s, _xset(rooms), only=only)
+    return MK.make(_PUB, F.CAL, s, _xset(rooms), only=only, elsewhere=[])
 
 @t
 def make_seats_and_duties():
@@ -1256,6 +1256,124 @@ def an_away_replacement_keeps_a_sent_schedule_approvable():
     assert s["sent_fp"] == AP.fp(s) != sent
     AP.approve(s, "Timetable committee", NOW)
     assert s["status"] == "approved"
+
+
+import copy  # noqa: E402
+
+def _days_view(s):
+    return D.day_view(_PUB, F.CAL, s, "2026-10-05")
+
+@t
+def other_schedules_take_rooms_and_people():
+    s = _sit([_paper(date="2026-10-05", start="07:50")], days=dict(SEC3))
+    busy = [dict(id="b", name="Sec 4 Exam", status="approved", date="2026-10-05", start=455, end=540, room="Hall", names=["Mr Hafiz Rahman"])]
+    sit = _first(s)
+    r = SE.rooms_free(_PUB, F.CAL, s, sit, _xset(("Hall",)), set(), elsewhere=busy)
+    assert r[0]["busy"] == "taken by Sec 4 Exam until 09:00", r
+    assert SE.rooms_free(_PUB, F.CAL, s, sit, _xset(("Hall",)), set())[0]["busy"] == ""
+    got = IV.candidates(_PUB, F.CAL, s, _xset(), "2026-10-05", 455, 540, [])
+    assert "Mr Hafiz Rahman" in [c["name"] for g in got.values() for c in g] and "Mr Hafiz Rahman" in [c["name"] for c in got["free"]], got
+    got = IV.candidates(_PUB, F.CAL, s, _xset(), "2026-10-05", 455, 540, [], elsewhere=busy)
+    assert "Mr Hafiz Rahman" not in [c["name"] for g in got.values() for c in g], got
+    assert IV._free("Mr Hafiz Rahman", _days_view(s), 455, 540, [], _xset(), elsewhere=busy)[0] == "is on Sec 4 Exam then (Hall)"
+    m = MK.make(_PUB, F.CAL, s, _xset(("Hall",)), elsewhere=busy)["made"]
+    assert len(m["unseated"][sit["key"]]) == 30 and not m["seats"][sit["key"]], m
+
+def _stored(id, status, names, approved=None):
+    s = _sit([_paper(date="2026-10-05", start="07:50")], days=dict(SEC3))
+    s.update(id=id, name="Exam " + id, status=status)
+    duty = lambda n: dict(key="2026-10-05 07:50", room="Hall", date="2026-10-05", start=455, end=540, names=n)
+    s["made"] = dict(duties=[duty(names)],seats={}, unseated={})
+    if approved:
+        s["approved"] = dict(name="Exam " + id, made=dict(duties=[duty(approved)], seats={}, unseated={}))
+    SC.save(s, _PUB, F.CAL, "t")
+
+@t
+def elsewhere_reads_waiting_and_approved_copies():
+    for f in os.listdir(SC.DIR) if os.path.isdir(SC.DIR) else []: os.remove(os.path.join(SC.DIR, f))
+    _stored("aaaa", "approved", ["X"], approved=["Ms Grace Yeo"])
+    _stored("bbbb", "waiting", ["Mr Ben Ong"])
+    _stored("cccc", "draft", ["Z"])
+    _stored("dddd", "withdrawn", ["Z"])
+    _stored("eeee", "changes", ["Y"], approved=["Mr Ivan Lee"])
+    got = {b["id"]: b for b in SC.elsewhere("zzzz")}
+    assert sorted(got) == ["aaaa", "bbbb", "eeee"], got
+    assert got["aaaa"]["names"] == ["Ms Grace Yeo"] and got["aaaa"]["status"] == "approved" and got["aaaa"]["name"] == "Exam aaaa"
+    assert got["bbbb"]["status"] == "waiting" and got["bbbb"]["names"] == ["Mr Ben Ong"] and got["bbbb"]["room"] == "Hall"
+    assert got["eeee"]["status"] == "approved"
+    assert got["eeee"]["names"] == ["Mr Ivan Lee"] and (got["bbbb"]["start"], got["bbbb"]["end"]) == (455, 540)
+    assert "aaaa" not in {b["id"] for b in SC.elsewhere("aaaa")}
+    assert sorted(x["id"] for x in SC.on_site()) == ["aaaa", "eeee"]
+    assert SC.new("exam", "n", ["Sec 3"], "2026-10-05", "2026-10-06", "t", pub=_PUB)["scripts"] == ""
+    bad = SC.new("exam", "n", ["Sec 3"], "2026-10-05", "2026-10-06", "t", pub=_PUB); bad["scripts"] = 5
+    raises(ValueError, lambda: SC._check(bad, _PUB), SC.WRONG)
+    ok = SC.new("exam", "n", ["Sec 3"], "2026-10-05", "2026-10-06", "t", pub=_PUB); del ok["scripts"]
+    SC._check(ok, _PUB)
+    for f in os.listdir(SC.DIR): os.remove(os.path.join(SC.DIR, f))
+
+@t
+def make_keeps_the_published_at():
+    pub = copy.deepcopy(_PUB); pub["meta"]["published_at"] = "2026-10-01T08:00:00"
+    s = MK.make(pub, F.CAL, _made_sched(), _xset(("3-01", "3-02", "4-01", "Hall")), elsewhere=[])
+    assert s["made"]["published_at"] == "2026-10-01T08:00:00"
+    assert _mk(_made_sched())["made"]["published_at"] is None
+
+@t
+def a_full_make_clears_a_pin_of_a_vanished_sitting():
+    s = _mk(_made_sched())
+    s["pins"]["duties"]["2026-10-05 09:00|3-01"] = ["Mr Gone Away"]
+    _mk(s)
+    assert "2026-10-05 09:00|3-01" not in s["pins"]["duties"] and MK.gone_now(_PUB, s) == [], s["pins"]
+
+@t
+def approved_make_keeps_unchanged_sittings():
+    s = _approved()
+    x = _xset(("3-01", "3-02", "4-01", "Hall")); x["never"] = ["Ms Aisha Rahman"]
+    was = copy.deepcopy(s["approved"]["made"])
+    s["papers"][1]["minutes"] = 50
+    MK.make(_PUB, F.CAL, s, x, elsewhere=[])
+    d = _duty(s, KEY1, "3-01")
+    assert d["names"] == ["Ms Aisha Rahman", "Ms Chloe Tan"] and d["not_free"] == {"Ms Aisha Rahman": "is on the never list"}, d
+    assert s["made"]["seats"][KEY1] == was["seats"][KEY1] and s["made"]["unseated"][KEY1] == was["unseated"][KEY1]
+    assert _duty(s, "2026-10-05 10:00", "3-01")["end"] == 660
+    assert s["approved"]["made"] == was
+    t2 = _mk(_made_sched()); t2["papers"][1]["minutes"] = 50
+    MK.make(_PUB, F.CAL, t2, x, elsewhere=[])
+    assert "Ms Aisha Rahman" not in _duty(t2, KEY1, "3-01")["names"]
+
+@t
+def approved_make_keeps_the_names_of_a_changed_sitting():
+    s = _approved()
+    key2 = "2026-10-05 10:00"
+    was = {d["room"]: list(d["names"]) for d in s["approved"]["made"]["duties"] if d["key"] == key2}
+    s["papers"][1]["minutes"] = 50
+    MK.make(_PUB, F.CAL, s, _xset(("3-01", "3-02", "4-01", "Hall")), elsewhere=[])
+    now = {d["room"]: list(d["names"]) for d in s["made"]["duties"] if d["key"] == key2}
+    assert now == was, (now, was)
+    assert not s["pins"]["duties"], s["pins"]
+
+@t
+def approved_make_after_a_new_timetable_flags_the_clash():
+    s = _approved()
+    pub2 = copy.deepcopy(_PUB)
+    pub2["model"]["lessons"].append(F._lesson(10, 0, 2, 2, "Sec 4", ["4A"], "Science", "Entire Class", ["Ms Aisha Rahman"], "LT2"))
+    MK.make(pub2, F.CAL, s, _xset(("3-01", "3-02", "4-01", "Hall")), elsewhere=[])
+    d = _duty(s, KEY1, "3-01")
+    assert d["names"] == ["Ms Aisha Rahman", "Ms Chloe Tan"] and d["backup"] == {"Ms Aisha Rahman": [10]}, d
+
+@t
+def a_schedule_with_nothing_approved_is_made_whole():
+    s = _mk(_made_sched()); s["approved"] = None
+    assert _mk(s)["made"]["duties"]
+
+@t
+def a_never_list_clash_in_a_kept_duty_is_flagged_without_mk():
+    s = _approved()
+    s["made"] = copy.deepcopy(s["approved"]["made"])
+    for d in s["made"]["duties"]: d["not_free"] = {}
+    x = _xset(("3-01", "3-02", "4-01", "Hall")); x["never"] = ["Ms Chloe Tan"]
+    IV.recheck(_PUB, F.CAL, s, x, s["made"]["duties"], s["made"]["duties"], elsewhere=[])
+    assert _duty(s, KEY1, "3-01")["not_free"] == {"Ms Chloe Tan": "is on the never list"}
 
 
 print(f"{COUNT} exams tests passed")

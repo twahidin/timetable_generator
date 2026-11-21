@@ -45,7 +45,7 @@ def _related(name, parts) -> list:
     return out
 
 
-def rooms_free(pub, cal, sched, sitting, xset, taken) -> list:
+def rooms_free(pub, cal, sched, sitting, xset, taken, elsewhere=()) -> list:
     model = pub["model"]
     parts = model.get("room_parts") or {}
     rules = xset["rules"]
@@ -71,6 +71,9 @@ def rooms_free(pub, cal, sched, sitting, xset, taken) -> list:
                 return f"rain room for {l['subject']} with {who}"
         if name in taken:
             return "used by another sitting"
+        b = next((b for b in elsewhere if b["room"] == name and b["date"] == sitting["date"] and b["start"] < hi and b["end"] > lo), None)
+        if b:
+            return f"taken by {b['name']} until {_days.hhmm(b['end'])}"
         return ""
 
     out = []
