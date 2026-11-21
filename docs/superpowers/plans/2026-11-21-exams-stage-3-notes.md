@@ -17,34 +17,64 @@ re-review clean), then a finishing task. Plan: `2026-11-21-exams-stage-3-relief-
   "week so far". The forms list a teacher's duties on each date, and an absence on a day the teacher has a duty may be sent
   even when every lesson stops, because the duty must be replaced.
 - **Someone away, or covering relief, is not free for an exam or event.** The exam and event pages show away notices, and a
-  person covering a relief lesson is a busy for invigilation and for who goes.
+  person covering a relief lesson is busy for invigilation and for who goes.
 - **Backups go to relief when a schedule is approved.** The lessons of each person on duty or going that still run during
   their duty become one planned absence per person ("Invigilating: {name}" or "At event: {name}", by the exams committee or
-  the teacher in charge) in relief, so What's in, acknowledging, setting work and choosing relief all work on them. Records
-  are kept in step in place after every approval action and every "Handled ourselves" change.
+  the teacher in charge) in relief. They show in What's in and to the person on duty, who acknowledges them and sets work;
+  choosing relief for them comes with relief stage 3's picks. Records are kept in step in place after every approval action,
+  every "Handled ourselves" change, every absence sent or cancelled in relief and every publish. The committee stops a
+  backup with "Handled ourselves"; a backup cancelled inside relief comes back at the next sync (which runs straight after
+  the cancel).
 - **Where each backup stands.** The Lessons tab shows, per person on duty, one item with a state line (handled, relief,
   sent, stopped, past, elsewhere, later) and a **Handled ourselves** tick for cover the committee arranges itself.
 - **A person's own absence wins** over their backup: the lessons move into the own absence with the relief chosen and the
   work.
 - No model, Telegram or network call anywhere; nobody is messaged. Relief's own approval of picks and Telegram are relief
   stages 3 and 4.
+- **Not built** (P1; they need relief stages 3 and 4): the relief layer on the published timetable on a date, the relief
+  team's approval of picks (and of a backup), choosing relief for a backup, Telegram and any message to people on duty, a
+  Preview of relief for a date.
 
 ## Decisions (the plan's P1 to P13)
 
 - P1 **Not built here** (they need relief stages 3 and 4): the relief layer on the published timetable on a date, the
+  relief team's approval of picks, Telegram messages. Nobody is messaged.
 - P2 Only **approved** copies count (`schedules.on_site()`), as for the main site. A waiting change counts only once
+  approved.
 - P3 A lesson is "not happening" only when **every** period of it stops (`merged_view` running empty). A lesson only
+  shortened still needs relief: relief covers lessons whole.
 - P4 Busy for relief: an exam's made duties (names, room, minutes) and an event's people going over the event's window
+  (`schedules.event_busy`). An event's free-text duties (`who`, `time`) are not busy: their time is words, not minutes.
 - P5 Duty and event minutes count as **periods** for "week so far": every period whose bounds overlap a duty or event
+  window, once a date, leaving out periods of the person's own lessons that still run (counted already).
 - P6 **Backups are planned absences**: `how="planned"`, `reason="Other"`, `reason_text` "Invigilating: {name}" or "At
+  event: {name}", `by` "Exams committee" (exam) or the teacher in charge's name (event), plus `exams=dict(id, kind)`.
+  So relief's pages, What's in, acknowledging, setting work and choosing relief work on them unchanged. The person on
+  duty acknowledges and sets work, as any planned absence. (Read with the final review fix wave: no page lists a backup
+  for choosing relief yet; that comes with relief stage 3's picks.)
 - P7 A backup is one lesson of one person on duty (or going) that runs during their window, dated today or later, that
+  is not "Handled ourselves", for a person not away then. One record per person per schedule.
 - P8 **"Handled ourselves"** is the exams committee's own business (the lead: "Exam committee only needs approval to
+  change publish website other than that they can do what they need to do within the committee"): stored on the
+  schedule as `handled` (["{teacher}|{key}"]), outside the approved copy and the fingerprint, applied to relief at once.
 - P9 `sync` runs after every approval action that saves (send, approve, send back, withdraw, someone away) and after a
+  "Handled ourselves" change. It is idempotent. It never fails the action: an error is logged and the next action syncs
+  again. A new publish does not sync (relief's own `matches_now` marks lessons that changed). (Amended by the final review
+  fix wave: relief's create and cancel routes and a publish now sync too, through `relief_links.sync_all`.)
 - P10 A person's **own absence wins**: when a teacher with a backup record is absent over its lessons, `absences.new`
+  moves those lessons into the new absence (with the relief already chosen and the work), and the backup record drops
+  them (cancelled when none is left). `sync` sends no backup for someone away then.
 - P11 An absence whose lessons all stop, or that has only duties, may still be sent when the teacher has a duty or event
-- P12 Withdraw, and a changed duty, remove only the lessons of a backup still to come (dated today or later); lessons before today always stay (history). A backup record is cancelled only when it is empty. (Amended by the Task 5 ruling I2+I4: the first plan cancelled the record on withdraw, except past ones.)
+  then: the duty must be replaced. Without exams (links None) the old refusal stands.
+- P12 Withdraw, and a changed duty, remove only the lessons of a backup still to come (dated today or later); lessons before
+  today always stay (history). A backup record is cancelled only when it is empty. (Amended by the Task 5 ruling I2+I4:
+  the first plan cancelled the record on withdraw, except past ones.)
 - P13 Locks: `schedules.editing()` may be held while `relief.absences` takes its own lock (sync), never the other way
-- Pure modules take `today` as a parameter; only `app._exams_today()`, `relief.lessons.today()` and the existing `_now()`
+  round: relief code never takes the exams lock while it holds its own. (Reworded by the final review fix wave: relief's
+  create and cancel routes now take the exams lock for a sync, once relief's own call has returned.)
+
+A constraint, not a decision (from the plan's Global Constraints): pure modules take `today` as a parameter; only
+`app._exams_today()`, `relief.lessons.today()` and the existing `_now()` functions read the clock.
 
 ## Rulings
 
@@ -101,14 +131,20 @@ student list (so made-up students by class size, as before), a made-up term (Jan
 
 ### Browser
 
-The controller will add the browser check (see below).
+Done by the controller on the made-up school, in a local test copy (a made-up committee code; the launch file restored
+afterwards and compared equal): the Lessons tab showed "Goes to the relief team when approved" with the tick; the Approval
+tab "Backups for the relief team: 1 (sent when approved)"; Approve made the relief record (planned, reason Other,
+"Invigilating: Sec 3 Common Test", by "Exams committee", the `exams` marker, one 4A lesson needed); the Lessons tab then read
+"Sent to the relief team"; ticking "Handled ourselves" kept focus on the box, emptied and cancelled the record; unticking with
+the keyboard sent it again; an absence planned for the other invigilator marked their stopped lesson "Not happening: 3A is on
+Sec 3 Common Test" and the exams list showed "Away (from relief): ... on duty in 3-01 07:40–09:20. Replace them under Someone
+is away."; no server or console errors.
 
 ## Not tried in a browser
 
-The controller will add the browser check. Until then, nothing in this stage has been looked at in a browser: the Lessons tab
-state lines and the "Handled ourselves" tick (covered by node tests that run the click path and by source-word tests), the
-fold of busy people and the "Not happening" lines on the relief forms, the duties lines, the away notices on the exam and
-event pages, a backup record in What's in, and phone width.
+The relief pages (staff sign-in needs a personal code), events, and phone width. From the final review fix wave (covered by
+tests only): the "Handled by another schedule" line, the "Not happening" line on an absence's lesson, and a backup coming
+back after an own absence is cancelled.
 
 ## Deferred minors
 
@@ -138,5 +174,12 @@ Task 6: minor (deferred): _held_elsewhere reads all_saved() each call and a stal
   as any planned absence; `_no_overlap` skips them; `absences.exams_records(id)` lists a schedule's live ones.
 - **The relief layer on a date can read `Links`** (`stopped(lesson)`, `busy(name, date, p, n)`, `duties(name, date)`,
   `week_change`), built from `schedules.on_site()`: that is the one place that says what the main site shows for a date.
-- Locks: `schedules.editing()` may be held while `relief.absences` takes its own lock (sync), never the other way round.
+- Locks: `schedules.editing()` may be held while `relief.absences` takes its own lock (sync), never the other way round:
+  relief code never takes the exams lock while it holds its own. Relief's create and cancel routes sync
+  (`relief_links.sync_all`) once relief's call has returned; a new relief route that changes who is away should do the same.
+- **An absence sent before a schedule was approved** keeps its stopped lessons needed: relief's `_out` marks them `stopped`
+  ("Not happening: ..." on the page) and `choose` refuses them, but re-marking them not needed (and taking a chosen relief
+  off) is left to relief stage 3.
+- **Choosing relief for a backup** comes with relief stage 3's picks: no page lists backups for choosing now (What's in is
+  read-only, and "Planned by me" lists the planner's own).
 - Not built: messages to people on duty, the relief team's approval of a backup, a Preview of relief for a date.
