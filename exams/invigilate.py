@@ -84,6 +84,22 @@ def _teaches(running):
                                                              _days.hhmm(l["end"])) for l in running)
 
 
+def _taught(model) -> dict:
+    out = {}
+    for l in model.get("lessons") or []:
+        for n in l.get("teachers") or []:
+            out.setdefault(n, set()).add(l["subject"])
+    return out
+
+
+def _barred(name, running, subjects, taught, xset) -> bool:
+    """left out whoever the rules keep off a paper: someone who teaches its subject (when that rule is on), and a backup
+    invigilator whose lesson still runs. The one filter behind the candidates and the approved names kept by Make."""
+    if xset["rules"].get("not_own_subject") and set(subjects) & taught.get(name, set()):
+        return True
+    return bool(running) and name in xset["backups"]
+
+
 def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exclude=(), _other=None, elsewhere=()) -> dict:
     model = pub["model"]
     rules = xset["rules"]
@@ -93,10 +109,7 @@ def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exc
     mine = duty_minutes(duties)
     other = _other if _other is not None else _other_minutes(sched, date[:4])
     subjects = set(subjects)
-    taught = {}
-    for l in model.get("lessons") or []:
-        for n in l.get("teachers") or []:
-            taught.setdefault(n, set()).add(l["subject"])
+    taught = _taught(model)
     groups = dict(freed=[], free=[], backups=[], need_backup=[])
     for name in pool:
         if name in exclude:
@@ -104,13 +117,11 @@ def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exc
         why, running = _free(name, view, start, end, duties, xset, elsewhere=elsewhere)
         if why:
             continue
-        if rules.get("not_own_subject") and subjects & taught.get(name, set()):
+        if _barred(name, running, subjects, taught, xset):
             continue
         stopped = [l for l in view["lessons"] if name in l["teachers"] and _hit(l["stopped"], start, end)]
         c = dict(name=name, minutes=mine.get(name, 0), other=other.get(name, 0), reason="", rows=[])
         if running:
-            if name in xset["backups"]:
-                continue
             c["rows"] = [l["row"] for l in running]
             c["reason"] = _teaches(running)
             groups["need_backup"].append(c)
@@ -241,7 +252,7 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=(), elsewhere
         for sit, students, mine in by_sit:
             _lesson_teachers(model, views[sit["key"]], sit, mine, ids_of, students, every, xset, elsewhere)
     duties.sort(key=lambda d: (d["date"], d["start"], d["room"]))
-    other = {}
+    other, taught = {}, _taught(model)
     for d in duties:
         year = d["date"][:4]
         if year not in other:
@@ -251,7 +262,7 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=(), elsewhere
                 if len(d["names"]) >= d["need"] or n in d["names"] or n not in people:
                     continue
                 why, running = _free(n, views[d["key"]], d["start"], d["end"], every, xset, skip=d, elsewhere=elsewhere)
-                if why:
+                if why or _barred(n, running, subjects_of[d["key"]], taught, xset):
                     continue
                 d["names"].append(n)
                 d["reasons"][n] = "as approved" + ("; " + _teaches(running) if running else "")

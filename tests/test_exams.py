@@ -1376,4 +1376,16 @@ def a_never_list_clash_in_a_kept_duty_is_flagged_without_mk():
     assert _duty(s, KEY1, "3-01")["not_free"] == {"Ms Chloe Tan": "is on the never list"}
 
 
+@t
+def approved_make_does_not_keep_someone_who_teaches_the_new_subject():
+    key2 = "2026-10-05 10:00"
+    def names(rule):
+        s = _approved()
+        assert "Mr Ivan Lee" in [n for d in s["approved"]["made"]["duties"] if d["key"] == key2 for n in d["names"]]
+        x = _xset(("3-01", "3-02", "4-01", "Hall")); x["rules"]["not_own_subject"] = rule
+        s["papers"][1]["subject"] = "English"   # Mr Ivan Lee teaches English
+        MK.make(_PUB, F.CAL, s, x, elsewhere=[])
+        return [n for d in s["made"]["duties"] if d["key"] == key2 for n in d["names"]]
+    assert "Mr Ivan Lee" in names(False) and "Mr Ivan Lee" not in names(True)
+
 print(f"{COUNT} exams tests passed")
