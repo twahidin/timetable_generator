@@ -76,7 +76,7 @@ CHOICES = {
                     label="Teacher code", hint="Use the teacher code the school gave you.", roles=("teacher", "staff")),
     "relief": dict(title="Relief", blurb="Ask for or plan relief, set work, see your reliefs.", label="Your personal code",
                    hint="Use the personal code on the slip from the timetable committee.", roles=("staff",), img="/static/choice-relief.svg"),
-    "exams": dict(title="Exams and events", blurb="Exam and test schedules, seating and invigilation.", label="Your personal code",
+    "exams": dict(title="Exams and events", blurb="Exam and test schedules, seating and invigilation; school events.", label="Your personal code",
                   hint="Use the personal code on the slip from the timetable committee.", roles=("staff",), img="/static/choice-exams.svg"),
     "student": dict(title="Student timetable", blurb="Your class timetable, or your own with a personal code.",
                     label="Student code or personal code", hint="Use the student code the school gave you. A personal code shows only your own timetable.",
@@ -928,11 +928,11 @@ def _exam_json():
     d = request.get_json(force=True, silent=True)
     return d if isinstance(d, dict) else {}
 
-def _save_exam(sched, pub, by, check=True):
+def _save_exam(sched, pub, by, check=True, event=False):
     """save a schedule; (the saved schedule, None) or (None, the 400 answer): malformed JSON never gives a 500"""
     try: return exams_schedules.save(sched, pub, _exam_cal(pub), by, check=check), None
     except ValueError as e: return None, ({"error": str(e)}, 400)
-    except BAD_INPUT: return None, ({"error": exams_schedules.WRONG}, 400)
+    except BAD_INPUT: return None, ({"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400)
 
 def _exam_view(pub, sched):
     model, cal = pub["model"], _exam_cal(pub)
@@ -1322,8 +1322,8 @@ def _exam_approval(id, act, approver=False, check=False, event=False):
             if err: return err
         try: act(pub, s, who, exams_schedules._now(), _exam_json())
         except ValueError as e: return {"error": str(e)}, 400
-        except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
-        saved, bad = _save_exam(s, pub, who, check=check)
+        except BAD_INPUT: return {"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400
+        saved, bad = _save_exam(s, pub, who, check=check, event=event)
     return bad or (_event_review_reply if event else _exam_review_reply)(pub, saved)
 
 @app.get("/api/exams/<id>/review")
@@ -1401,7 +1401,7 @@ def _event_view(pub, s):
     return dict(summary=dict(days=[dict(date=e["date"], day=e["day"], levels=e["levels"], whole=bool(entry(e["date"]).get("whole", True)),
                                         window=[exams_days.hhmm(e["start"]), exams_days.hhmm(e["end"])]) for e in exams_days.dates(s, cal, model)]),
                 classes=[c["name"] for c in model.get("classes") or [] if c["name"] in inside], going=exams_events.going(pub, cal, s, busy),
-                lessons=exams_events.lesson_lists(pub, cal, s), freed=exams_events.freed(pub, cal, s), flags=exams_events.flags(pub, cal, s),
+                lessons=exams_events.lesson_lists(pub, cal, s), freed=exams_events.freed(pub, cal, s, busy), flags=exams_events.flags(pub, cal, s),
                 cuts=exams_events.cuts(pub, cal, s), clashes=exams_events.clashes(pub, cal, s, busy, others),
                 periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)], rooms=[r["name"] for r in model.get("rooms") or []],
                 depts=sorted({d for p in people for d in p["depts"]}), people=[p["name"] for p in people])
@@ -1434,9 +1434,9 @@ def events_create():
     else: in_charge = who
     try: sched = exams_schedules.new_event(b["name"], b["levels"], b.get("classes") or [], b["start"], b["end"], who, in_charge)
     except ValueError as e: return {"error": str(e)}, 400
-    except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
+    except BAD_INPUT: return {"error": exams_schedules.EVENT_WRONG}, 400
     with exams_schedules.editing():
-        saved, bad = _save_exam(sched, pub, who)
+        saved, bad = _save_exam(sched, pub, who, event=True)
     return bad or jsonify(saved)
 
 @app.get("/api/events/<id>")
@@ -1453,7 +1453,7 @@ def events_put(id):
         if err: return err
         new = dict(_exam_json(), **{k: old.get(k) for k in EVENT_KEEPS})
         new["log"] = old.get("log") or []
-        saved, bad = _save_exam(new, pub, who)
+        saved, bad = _save_exam(new, pub, who, event=True)
     return bad or jsonify(saved)
 
 @app.delete("/api/events/<id>")
@@ -1473,7 +1473,7 @@ def events_view(id):
     if err: return err
     try: return jsonify(_event_view(pub, s))
     except ValueError as e: return {"error": str(e)}, 400
-    except BAD_INPUT + (IndexError,): return {"error": exams_schedules.WRONG}, 400
+    except BAD_INPUT + (IndexError,): return {"error": exams_schedules.EVENT_WRONG}, 400
 
 @app.post("/api/events/<id>/fill")
 @need("committee", "staff")
@@ -1484,12 +1484,14 @@ def events_fill(id):
         b = _exam_json()
         try:
             names = b.get("names") or []
-            if not isinstance(names, list) or not all(isinstance(x, str) for x in names) or not isinstance(b.get("dept") or "", str): raise ValueError(exams_schedules.WRONG)
-            s["going"] = list(s.get("going") or []) + exams_events.fill(pub, _exam_cal(pub), s, b.get("way"), b.get("dept") or "", names)
+            if not isinstance(names, list) or not all(isinstance(x, str) for x in names) or not isinstance(b.get("dept") or "", str): raise ValueError(exams_schedules.EVENT_WRONG)
+            added = exams_events.fill(pub, _exam_cal(pub), s, b.get("way"), b.get("dept") or "", names)
+            if not added: return jsonify(s)   # nobody to add: nothing changes, so a sent event keeps its fingerprint
+            s["going"] = list(s.get("going") or []) + added
             s["going_by"] = b["way"]
         except ValueError as e: return {"error": str(e)}, 400
-        except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
-        saved, bad = _save_exam(s, pub, who)
+        except BAD_INPUT: return {"error": exams_schedules.EVENT_WRONG}, 400
+        saved, bad = _save_exam(s, pub, who, event=True)
     return bad or jsonify(saved)
 
 def _event_send(pub, s, by, now, b):
@@ -1504,7 +1506,7 @@ def _event_free(pub, s):
 
 def _event_away(pub, s, by, now, b):
     away, name = b["away"], b["name"]
-    if not all(isinstance(x, str) for x in (away, name)): raise ValueError(exams_schedules.WRONG)
+    if not all(isinstance(x, str) for x in (away, name)): raise ValueError(exams_schedules.EVENT_WRONG)
     if name not in {c["name"] for g in ("freed", "free") for c in _event_free(pub, s)[g]}: raise ValueError("%s is not free then." % name)
     exams_approval.replace_going(s, away, name, by, now)
 

@@ -11,6 +11,7 @@ from exams import papers as _papers
 DIR = os.path.join(store.DATA, "exams", "schedules")
 _LOCK = threading.RLock()   # one process (gunicorn: one worker, threads): held by a route from loading a schedule to saving it
 WRONG = "Check the exam and try again."
+EVENT_WRONG = "Check the event and try again."
 NO_CALENDAR = "Set the school calendar in Relief settings first: exams need it to know which timetable day a date is."
 
 
@@ -139,6 +140,14 @@ def _when(s, model, noun):
 
 
 def _check_event(s, pub):
+    """an event's check: the exam sentence for a malformed request is worded for an event"""
+    try: _check_event_body(s, pub)
+    except ValueError as e:
+        if str(e) == WRONG: raise ValueError(EVENT_WRONG) from None
+        raise
+
+
+def _check_event_body(s, pub):
     model = ((pub or {}).get("model") or {})
     for k, typ in (("name", str), ("levels", list), ("classes", list), ("days", dict), ("start", str), ("end", str),
                    ("in_charge", str), ("where", str), ("venues", list), ("going", list), ("duties", list)):
@@ -152,6 +161,8 @@ def _check_event(s, pub):
         for k in ("duty", "who", "time"):
             if d.get(k) is None: d[k] = ""
             if not isinstance(d[k], str): raise ValueError(WRONG)
+        if len(d["duty"]) > 120 or len(d["time"]) > 60: raise ValueError("A duty can be at most 120 characters and its time at most 60.")
+    if len(s["where"]) > 120: raise ValueError("Where can be at most 120 characters.")
     _when(s, model, "event")
     rooms = {r["name"] for r in model.get("rooms") or []}
     for v in s["venues"]:
@@ -321,7 +332,7 @@ def _duty_busy(copy):
 def busies(copies, model) -> list:
     """the busy list of some copies: an exam gives one per made duty, an event what event_busy gives. A waiting copy leaves
     out the busies equal (date, start, end, room, names) to one of the approved copy of the same schedule."""
-    key = lambda b: (b["date"], b["start"], b["end"], b["room"], tuple(b["names"]))
+    key = lambda b: (b["date"], b["start"], b["end"], b["room"], tuple(b["names"]), tuple(b.get("classes") or []))
     mine = [(c, event_busy(c, model) if c.get("kind") == EVENT else _duty_busy(c)) for c in copies]
     held = {c["id"]: {key(b) for b in bs} for c, bs in mine if c["status"] == "approved"}
     return [b for c, bs in mine for b in bs if not (c["status"] == "waiting" and key(b) in held.get(c["id"], ()))]

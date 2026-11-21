@@ -1120,7 +1120,7 @@
     out.push(whatBlock(rv.review.what), checksBlock(rv.review));
     if (me && (st === "waiting" || st === "changes")) {
       out.push(`<div class="card"><h2>${st === "waiting" ? "Approve: show on the main site" : "Approve the changes"}</h2><div class="row"><button type="button" class="primary" data-act="approval" data-a="approve" ${S.busy ? "disabled" : ""}>${st === "waiting" ? "Approve: show on the main site" : "Approve the changes"}</button></div></div>
-        <div class="card"><h2>Send back with a note</h2><div class="line"><input type="text" data-sb="1" data-f="sb" value="${esc(S.sbNote)}" maxlength="300" placeholder="What the exams committee should change" aria-label="Note for the exams committee"></div>
+        <div class="card"><h2>Send back with a note</h2><div class="line"><input type="text" data-sb="1" data-f="sb" value="${esc(S.sbNote)}" maxlength="300" placeholder="What ${isEv() ? "the teacher in charge" : "the exams committee"} should change" aria-label="Note for ${isEv() ? "the teacher in charge" : "the exams committee"}"></div>
         <div class="row"><button type="button" data-act="approval" data-a="send-back" ${S.busy ? "disabled" : ""}>Send back</button></div></div>`);
     }
     if (me && (st === "approved" || st === "changes")) out.push(`<div class="card"><h2>Withdraw from the main site</h2><div class="row"><button type="button" class="danger" data-act="approval" data-a="withdraw" ${S.busy ? "disabled" : ""}>Withdraw from the main site</button></div></div>`);
@@ -1273,7 +1273,7 @@
     const [r, v, l, me] = await Promise.all([api("GET", `${S.base}/${id}`), api("GET", `${S.base}/${id}/view`), api("GET", ev ? "/api/events" : "/api/exams"), api("GET", "/api/exams/me")]);
     for (const x of [r, v, l, me]) if (x.status === 401 || x.status === 403) { dropNote(); return; }
     for (const x of [r, v, l, me]) if (!x.ok) { dropNote(); fail(x.j.error || "Something went wrong."); return; }
-    S.me = me.j; S.label = ((l.j.schedules || []).find(x => x.id === id) || {}).label || "Draft";
+    S.me = me.j; links(S.me.can_use); S.label = ((l.j.schedules || []).find(x => x.id === id) || {}).label || "Draft";
     S.sched = r.j; S.view = v.j; S.levels = l.j.levels || []; S.classes = l.j.classes || [];
     document.title = r.j.name + (ev ? " · Events" : " · Exams");
     render();

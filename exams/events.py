@@ -42,7 +42,7 @@ def _event_classes(pub, s):
 def fill(pub, cal, s, way, dept="", names=()) -> list:
     """the names a way of filling the going list gives that are not going yet and are on the timetable or staff list"""
     if way not in _sched.GOING_BY:
-        raise ValueError(_sched.WRONG)
+        raise ValueError(_sched.EVENT_WRONG)
     people = _people(pub)
     known = [p["name"] for p in people]
     if way == "form teachers":
@@ -89,7 +89,7 @@ def going(pub, cal, s, elsewhere) -> list:
             if reason:
                 why.append(reason + suffix)
                 continue
-            for l, sp in _spans(view, name, e["start"], e["end"]):
+            for l, sp in sorted(_spans(view, name, e["start"], e["end"]), key=lambda x: x[1][0]):
                 lessons.append("teaches %s %s %s–%s%s" % (", ".join(l["classes"]), l["subject"], _days.hhmm(sp[0]), _days.hhmm(sp[1]), suffix))
             for l in view["lessons"]:
                 if name in l["teachers"] and l["stopped"]:
@@ -133,15 +133,23 @@ def _taken(pub, s):
     return out
 
 
-def freed(pub, cal, s) -> list:
+def _rains(l) -> list:
+    """the wet-weather rooms of a lesson: the published model joins several with ", " """
+    return [x.strip() for x in str(l.get("rain") or "").split(",") if x.strip()]
+
+
+def freed(pub, cal, s, elsewhere=()) -> list:
     parts = pub["model"].get("room_parts") or {}
     taken = _taken(pub, s)
     out = []
     for e, view in _views(pub, cal, s):
         used = set(taken)
+        for b in elsewhere:   # a room another schedule's duty or venue uses then
+            if b.get("room") and b["date"] == e["date"] and b["start"] < e["end"] and b["end"] > e["start"]:
+                used.update(_seat._related(b["room"], parts))
         for l in view["lessons"]:
             if any(sp[0] < e["end"] and sp[1] > e["start"] for sp in l["running"]):
-                for r in (l["room"], l.get("rain")):
+                for r in [l["room"]] + _rains(l):
                     if r:
                         used.update(_seat._related(r, parts))
         rooms = sorted({l["room"] for l in view["lessons"] if l["stopped"] and l["room"] and l["room"] not in used})
@@ -161,8 +169,8 @@ def flags(pub, cal, s) -> list:
                     continue
                 if l["room"] and l["room"] in taken:
                     room, wet = l["room"], ""
-                elif l.get("rain") and l["rain"] in taken:
-                    room, wet = l["rain"], " in wet weather"
+                elif any(x in taken for x in _rains(l)):
+                    room, wet = next(x for x in _rains(l) if x in taken), " in wet weather"
                 else:
                     continue
                 rows.append((e["date"], sp[0], room, "%s %s–%s: %s with %s uses %s%s then." % (
