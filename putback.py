@@ -2,6 +2,7 @@
 A save (one batch of setup entries) or one account entry is a unit; a unit is put back whole or not at all. A save's
 unit also holds the app's follow-ups to it (kind "app", `follows` its batch: the Class Parents' lessons the app put
 right after it): they are put back first, and they too must be untouched since."""
+import copy
 import datetime
 
 import history
@@ -13,6 +14,8 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 _ADMIN = "Can't put back a new person, a username or a password here: change it on the admin page."
 _OLD = "Can't put back: this change was recorded before Put back existed. Change it on its step."
 _SINCE = "Can't put back: this was changed again since."
+_TAKEN = "Can't put back: another band is called {} now."
+_JOINED = "Can't put back: lessons or rules joined {} after this change."
 
 
 def unit_of(e):
@@ -191,6 +194,42 @@ def changed_since(spec, unit_entries):
             ok = True
         if not ok:
             return _SINCE
+    return None
+
+
+def _band_key(v):
+    """a band name as the page's renameBand compares names: trimmed, spaces squeezed, in any case ("" for none)"""
+    return "" if v is None else " ".join(str(v).split()).lower()
+
+
+def band_clash(spec, ops):
+    """None, or the sentence when the put back's operations, applied to `spec`, would leave a band they rename or bring
+    back under another band's name, or lessons or Block rules naming a band name they take away (lessons and rules name
+    a band by its name, so a later change to them is not a change to the band's row; the page refuses both)"""
+    mine = [o for o in ops if isinstance(o, list) and len(o) > 2 and o[0] in ("set", "merge", "add", "del")
+            and o[1] in ("blocks", "lessons", "rules")]
+    if not any(o[1] == "blocks" for o in mine):
+        return None
+    work = {k: copy.deepcopy(sync._rows(spec, k)) for k in ("blocks", "lessons", "rules")}
+    sync.apply(work, copy.deepcopy(mine))
+    touched = {o[2] for o in mine if o[1] == "blocks" and o[0] in ("set", "merge") and isinstance(o[2], str) and len(o) > 3 and o[3] == "block"}
+    touched |= {o[2].get("_id") for o in mine if o[1] == "blocks" and o[0] == "add" and isinstance(o[2], dict) and isinstance(o[2].get("_id"), str)}
+    bands = [b for b in work["blocks"] if isinstance(b, dict) and _band_key(b.get("block"))]
+    for b in bands:
+        if b.get("_id") in touched and any(x is not b and _band_key(x.get("block")) == _band_key(b.get("block")) for x in bands):
+            return _TAKEN.format(str(b.get("block")).strip())
+    left = {_band_key(b.get("block")) for b in bands}
+    gone = {}
+    for b in sync._rows(spec, "blocks"):
+        k = _band_key(b.get("block")) if isinstance(b, dict) else ""
+        if k and k not in left:
+            gone.setdefault(k, str(b.get("block")).strip())
+    for x in work["lessons"] if gone else ():
+        if isinstance(x, dict) and _band_key(x.get("block")) in gone:
+            return _JOINED.format(gone[_band_key(x.get("block"))])
+    for r in work["rules"] if gone else ():
+        if isinstance(r, dict) and r.get("scope") == "Block" and _band_key(r.get("target")) in gone:
+            return _JOINED.format(gone[_band_key(r.get("target"))])
     return None
 
 

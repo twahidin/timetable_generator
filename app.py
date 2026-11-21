@@ -1767,7 +1767,8 @@ def _put_back_account(unit, e):
 @need("setup", "admin")
 def history_back():
     """put back one setup change (the whole save it was made in): the reverse operations are applied under the store's
-    lock, only when every row and field is still as the save left it"""
+    lock, only when every row and field is still as the save left it and no band is left under another's name or
+    named by lessons or rules once it is gone"""
     body = request.get_json(force=True, silent=True)
     eid = body.get("id") if isinstance(body, dict) else None
     e = history.find(eid)
@@ -1783,7 +1784,7 @@ def history_back():
     ops = putback.reverse(es)
     depts = head_depts() if is_head() else None
     def check(spec, o):
-        sentence = putback.changed_since(spec, es)
+        sentence = putback.changed_since(spec, es) or putback.band_clash(spec, o)
         if sentence or not is_head(): return sentence
         refused = sync.head_split(spec, o, depts)[1]
         return refused[0][1] if refused else None

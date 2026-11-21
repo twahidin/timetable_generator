@@ -240,6 +240,19 @@ def skipped_and_unchanged_ops_give_no_entry():
     es = H.setup_entries(sp, same + [["set", "teachers", T["_id"], "short", "ZZ"]], ANN, "bx", 1)
     assert [(e["op"], e["was"], e["now"]) for e in es] == [("set", T["short"], "ZZ")], es
 
+@t
+def band_clash_judges_the_names_the_put_back_leaves():
+    sp = spec(); band = copy.deepcopy(sp["blocks"][0]); L = sp["lessons"][0]
+    assert P.band_clash(sp, [["set", "lessons", L["_id"], "periods", 1]]) is None            # no band in it: nothing to judge
+    sp["blocks"] = [b for b in sp["blocks"] if b["_id"] != band["_id"]] + [dict(band, _id="newband001")]
+    assert P.band_clash(sp, [["add", "blocks", band, ""]]) == f"Can't put back: another band is called {band['block']} now."   # a deleted band brought back
+    sp = spec(); sp["blocks"].append({"_id": "newband002", "block": "New Band", "level": "Sec 1"}); L = sp["lessons"][0]
+    assert P.band_clash(sp, [["del", "blocks", "newband002"]]) is None
+    L["block"] = "New Band"
+    assert P.band_clash(sp, [["del", "blocks", "newband002"]]) == "Can't put back: lessons or rules joined New Band after this change."   # an added band taken away
+    assert P.band_clash(sp, [["set", "lessons", L["_id"], "block", "Sec 1 English"], ["del", "blocks", "newband002"]]) is None   # the lesson goes back with it
+    assert P.band_clash(sp, [["set", "blocks", "newband002", "level", "Sec 2"]]) is None and P.band_clash(sp, [["set", "blocks", 5, "block", "x"], 7]) is None
+
 def _fake(i, **k):
     return dict({"kind": "setup", "id": "h%016d" % i, "ts": T0 + i, "batch": "bf%d" % i, "op": "set", "section": "lessons",
                  "row": "other%d" % (i % 50), "field": "periods", "as": "Bob Tan", "was": 1, "now": 2}, **k)
@@ -422,6 +435,45 @@ def a_later_change_to_a_follow_up_blocks_the_save():
     try: store.apply_changes([["del", "lessons", made["row"]], ["add", "lessons", dict(made["now"], _id="otherform1"), ""]], "z")
     finally: store._record = real
     assert back(as_person(DEV), mine["id"]) == (409, {"error": "Can't put back: this was changed again since."})
+
+def rename_band(sp, to="Renamed", rules=()):
+    """the page's band rename as one save: the band, its lessons and the Block rules that name it; -> (band, old name, the save's first entry)"""
+    band = sp["blocks"][0]; old = band["block"]
+    change(as_person(CORA), ["set", "blocks", band["_id"], "block", to], *[["set", "lessons", x["_id"], "block", to] for x in sp["lessons"] if x.get("block") == old],
+           *[["set", "rules", r["_id"], "target", to] for r in rules])
+    return band, old, entries()[-1]
+
+BLOCK_RULE = {"_id": "rule000001", "scope": "Block", "rule": "Not available", "strength": "Must", "note": "made up"}
+
+@t
+def a_band_rename_goes_back_with_its_lessons_and_rules():
+    sp = start(); rule = dict(BLOCK_RULE, target=sp["blocks"][0]["block"])
+    change(as_person(CORA), ["add", "rules", rule, ""]); before = store.setup_record()["spec"]
+    band, old, e = rename_band(store.setup_record()["spec"], rules=[rule])
+    assert back(as_person(DEV), e["id"]) == (200, {"done": True, "text": "Put back."})
+    assert sync._canon(store.setup_record()["spec"]) == sync._canon(before)
+
+@t
+def a_band_rename_is_not_put_back_onto_a_name_taken_since():
+    for taken in (None, "  sec 1   ENGLISH "):     # the page compares band names trimmed, spaces squeezed, in any case
+        sp = start(); band, old, e = rename_band(sp)
+        change(as_person(CORA), ["add", "blocks", dict(band, _id="newband001", block=taken or old), ""])
+        before = store.setup_record()["spec"]
+        assert back(as_person(DEV), e["id"]) == (409, {"error": f"Can't put back: another band is called {old} now."}), taken
+        assert sync._canon(store.setup_record()["spec"]) == sync._canon(before)
+
+@t
+def a_band_rename_is_not_put_back_when_lessons_or_rules_joined_it():
+    sp = start(); band, old, e = rename_band(sp)
+    outside = next(x for x in sp["lessons"] if x.get("block") and x["block"] not in (old, "Renamed"))
+    change(as_person(CORA), ["set", "lessons", outside["_id"], "block", "Renamed"])
+    before = store.setup_record()["spec"]
+    assert back(as_person(DEV), e["id"]) == (409, {"error": "Can't put back: lessons or rules joined Renamed after this change."})
+    assert sync._canon(store.setup_record()["spec"]) == sync._canon(before)
+    sp = start(); band, old, e = rename_band(sp)
+    change(as_person(CORA), ["add", "rules", dict(BLOCK_RULE, target="Renamed"), ""])
+    assert back(as_person(DEV), e["id"]) == (409, {"error": "Can't put back: lessons or rules joined Renamed after this change."})
+    assert sync._find(store.setup_record()["spec"], "blocks", band["_id"])["block"] == "Renamed"
 
 @t
 def put_back_twice_is_refused():
