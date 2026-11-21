@@ -174,9 +174,14 @@ def load(id):
     return s if isinstance(s, dict) else None
 
 
-def listing(today=None, published_at=None) -> list:
-    """one row per schedule, newest first; today gives the label's 'Ended', published_at the 'retimed' flag"""
-    today = today or datetime.date.today()
+def all_saved() -> list:
+    """every saved schedule, as stored"""
+    return _all()
+
+
+def listing(today, published_at=None) -> list:
+    """one row per schedule, newest first; today (the caller's: app._exams_today) gives the label's 'Ended', published_at
+    the 'retimed' flag"""
     rows = []
     for s in _all():
         st = s.get("status") or "draft"
@@ -205,19 +210,26 @@ def on_site() -> list:
 
 def elsewhere(id) -> list:
     """what the other schedules hold: one busy per duty (dict(id, name, status, date, start, end, room, names)). Waiting: the
-    working duties; approved or changes: the approved copy's; draft and withdrawn hold nothing."""
+    working duties; approved: the approved copy's; changes waiting: the approved copy's, and the working duties that differ
+    from them (either may be what the main site shows soon); draft and withdrawn hold nothing."""
     out = []
+
+    def add(s, src, name, status, skip=()):
+        for d in (src or {}).get("duties") or []:
+            b = dict(id=s["id"], name=name, status=status, date=d["date"], start=d["start"], end=d["end"], room=d["room"],
+                     names=list(d.get("names") or []))
+            if (b["date"], b["start"], b["end"], b["room"], b["names"]) not in skip:
+                out.append(b)
     for s in _all():
         if s["id"] == id:
             continue
         st = s.get("status") or "draft"
         if st == "waiting":
-            src, name = s.get("made"), s.get("name")
+            add(s, s.get("made"), s.get("name"), "waiting")
         elif st in ("approved", "changes") and s.get("approved"):
-            src, name = s["approved"].get("made"), s["approved"].get("name")
-        else:
-            continue
-        for d in (src or {}).get("duties") or []:
-            out.append(dict(id=s["id"], name=name, status="waiting" if st == "waiting" else "approved", date=d["date"],
-                            start=d["start"], end=d["end"], room=d["room"], names=list(d.get("names") or [])))
+            ap = s["approved"]
+            add(s, ap.get("made"), ap.get("name"), "approved")
+            if st == "changes":
+                held = [(d["date"], d["start"], d["end"], d["room"], list(d.get("names") or [])) for d in (ap.get("made") or {}).get("duties") or []]
+                add(s, s.get("made"), s.get("name"), "waiting", skip=held)
     return out

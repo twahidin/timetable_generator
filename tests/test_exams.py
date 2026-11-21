@@ -200,9 +200,9 @@ def save_load_list_delete():
     pub, e = F.sample_pub(), _new()
     saved = SC.save(e, pub, F.CAL, "Ms Grace Yeo")
     assert SC.load(e["id"]) == saved and saved["saved_by"] == "Ms Grace Yeo"
-    assert SC.listing()[0]["name"] == "Sec 3 End-of-Year Exam"
+    assert SC.listing(date(2026, 10, 1))[0]["name"] == "Sec 3 End-of-Year Exam"
     SC.delete(e["id"])
-    assert SC.load(e["id"]) is None and not [r for r in SC.listing() if r["id"] == e["id"]]
+    assert SC.load(e["id"]) is None and not [r for r in SC.listing(date(2026, 10, 1)) if r["id"] == e["id"]]
 
 @t
 def save_refuses_bad_input():
@@ -1298,8 +1298,10 @@ def elsewhere_reads_waiting_and_approved_copies():
     _stored("cccc", "draft", ["Z"])
     _stored("dddd", "withdrawn", ["Z"])
     _stored("eeee", "changes", ["Y"], approved=["Mr Ivan Lee"])
-    got = {b["id"]: b for b in SC.elsewhere("zzzz")}
+    every = SC.elsewhere("zzzz")
+    got = {b["id"]: b for b in every if b["status"] == "approved" or b["id"] != "eeee"}   # changes waiting: both copies (the fix wave)
     assert sorted(got) == ["aaaa", "bbbb", "eeee"], got
+    assert [b["names"] for b in every if b["id"] == "eeee" and b["status"] == "waiting"] == [["Y"]], every
     assert got["aaaa"]["names"] == ["Ms Grace Yeo"] and got["aaaa"]["status"] == "approved" and got["aaaa"]["name"] == "Exam aaaa"
     assert got["bbbb"]["status"] == "waiting" and got["bbbb"]["names"] == ["Mr Ben Ong"] and got["bbbb"]["room"] == "Hall"
     assert got["eeee"]["status"] == "approved"
@@ -1994,6 +1996,113 @@ def make_again_seats_a_student_who_joins_after_approval():
     texts = [c["text"] for c in AP.changes(s, m2)]
     assert "Mon 5 Oct 07:50, 3A: 3-01 (30) → 3-01 (31)." in texts, texts
     assert "3A-31" not in _placed(s["approved"]["made"], KEY1), "the main site waits for the change to be approved"
+
+# ---- the fix wave's minor items
+@t
+def day_refuses_any_date_not_written_as_yyyy_mm_dd():
+    with published(_PUB):
+        c, s = _site_setup()
+        for q in ("2026-W41-1", "2026W411", "20261005", "2026-10-5", " 2026-10-05"):
+            r = c.get("/api/day?date=" + q); assert r.status_code == 400 and r.get_json() == {"error": A.BAD_DATE}, (q, r.status_code, r.data)
+        assert c.get("/api/day?date=2026-10-05").status_code == 200
+
+@t
+def changes_waiting_hold_both_copies_for_other_schedules():
+    _reset()
+    s = _sit([_paper(date="2026-10-05", start="07:50")], days=dict(SEC3))
+    s.update(id="ffff", name="Exam ffff", status="changes")
+    duty = lambda room, names, start=455: dict(key="2026-10-05 07:50", room=room, date="2026-10-05", start=start, end=540, names=names)
+    s["made"] = dict(duties=[duty("Hall", ["Ms Grace Yeo"]), duty("3-01", ["Mr Ben Ong"])], seats={}, unseated={})
+    s["approved"] = dict(name="Exam ffff", made=dict(duties=[duty("Hall", ["Ms Grace Yeo"]), duty("3-02", ["Mr Ivan Lee"])], seats={}, unseated={}))
+    SC.save(s, _PUB, F.CAL, "t")
+    got = sorted((b["room"], b["status"], tuple(b["names"])) for b in SC.elsewhere("zzzz"))
+    assert got == [("3-01", "waiting", ("Mr Ben Ong",)), ("3-02", "approved", ("Mr Ivan Lee",)), ("Hall", "approved", ("Ms Grace Yeo",))], got
+    _reset()
+
+@t
+def rights_reads_go_through_named_helpers():
+    import re
+    src = open(os.path.join(ROOT, "app.py"), encoding="utf-8").read()
+    part = src.split("# ------------------------------------------------------------------------------------------------ staff: exams and events")[1]
+    helpers = ("_exams_rights", "_exams_can_approve", "_exams_can_keep_list", "_published_reader", "_exams_student")
+    for name, body in re.findall(r"\ndef (\w+)\(.*?\):(.*?)(?=\n(?:def |@app|# -{20}))", part, re.S):
+        if name not in helpers:
+            assert "role()" not in body and 'session.get("sid")' not in body and "session[" not in body, name
+    with published(_PUB):
+        _setup()
+        c, g = committee(), staff("Ms Grace Yeo")
+        assert c.get("/api/exams/settings").get_json()["committee_ok"] is True and g.get("/api/exams/settings").get_json()["committee_ok"] is False
+
+@t
+def the_away_panel_lists_every_duty_of_the_approved_copy():
+    js = _page("exams.js")
+    for words in ('data-aw="duty"', "Duty on the main site", "Choose the duty on the main site that someone cannot do.", "S.aw.duty || S.duty"):
+        assert words in js, words
+
+@t
+def my_exam_duties_lists_lessons_that_stop_with_no_duties():
+    assert not any("Ms Grace Yeo" in d["names"] for d in A1["made"]["duties"]), "Ms Grace Yeo has no duty"
+    out = PB.my_duties(_PUB, F.CAL, [A1], "Ms Grace Yeo", date(2026, 10, 1))
+    assert out == dict(schedules=[], lessons=[dict(date=D5, start="09:40", end="10:40", classes=["3A", "3B"], subject="Combined Science")]), out
+    assert PB.my_duties(_PUB, F.CAL, [A1], "Mr Daniel Koh", date(2026, 10, 1))["lessons"] == [], "his Sec 4 lesson runs"
+    assert "!(D.lessons || []).length && !alone" in _page("exams.js")
+
+@t
+def the_timetable_check_reads_well_without_a_date():
+    s = MK.make(dict(_PUB, meta=dict(published_at="2026-10-01T08:00:00")), F.CAL, _made_sched(), _xset(_X4), elsewhere=[])
+    c = RV.review(dict(_PUB, meta={}), F.CAL, s, _xset(_X4), [])["checks"][4]
+    assert c["lines"] == ["The timetable changed since this was made: a new timetable was published. Ask the exams committee to make it again."], c
+
+@t
+def the_schedule_list_needs_today():
+    import inspect, glob
+    assert inspect.signature(SC.listing).parameters["today"].default is inspect.Parameter.empty
+    for f in glob.glob(os.path.join(ROOT, "exams", "*.py")):
+        assert "date.today()" not in open(f, encoding="utf-8").read(), f
+    _reset()
+    _stored("gggg", "approved", ["Ms Grace Yeo"], approved=["Ms Grace Yeo"])
+    assert IV._other_minutes(dict(id="zzzz"), "2026") == {"Ms Grace Yeo": 85} and IV._other_minutes(dict(id="gggg"), "2026") == {}
+    _reset()
+
+@t
+def who_on_the_main_site_names_a_missing_duty():
+    with published(_PUB):
+        c, s = _site_setup()
+        r = c.get(f"/api/exams/{s['id']}/who?key=2026-10-05 07:50&room=Hall&copy=approved")
+        assert r.status_code == 404 and r.get_json() == {"error": "That duty is not on the main site."}, r.data
+
+@t
+def the_readme_says_what_send_needs():
+    txt = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
+    assert "every check is clear" not in txt and "once Make is done, nothing has changed since Make, and the paper times have no errors" in txt
+
+@t
+def a_page_from_an_older_publish_is_told_to_reload():
+    from ttgen import export as E
+    pub = copy.deepcopy(_PUB); pub["views"] = {}; pub["meta"]["published_at"] = "2026-10-01T08:00:00"
+    seen = []
+    old, E.render_html = E.render_html, lambda model, view, app=None, student_id=None: seen.append(app) or "page"
+    try:
+        with published(pub):
+            c, s = _site_setup()
+            tc, _ = signed_in("teacher", os.environ["TEACHER_CODE"])
+            assert tc.get("/timetable").status_code == 200 and seen[-1]["published_at"] == "2026-10-01T08:00:00", seen
+            r = tc.get("/api/day?date=2026-10-05&published_at=2026-10-01T08:00:00"); assert r.status_code == 200
+            assert r.get_json()["published_at"] == "2026-10-01T08:00:00"
+            r = tc.get("/api/day?date=2026-10-05&published_at=2026-09-01T08:00:00")
+            assert r.status_code == 409 and r.get_json() == dict(error=A.REPUBLISHED, published_at="2026-10-01T08:00:00"), r.data
+            assert A.REPUBLISHED == "The timetable was published again: reload the page."
+            assert tc.get("/api/day?date=2026-10-05").status_code == 200, "no stamp sent: answered"
+    finally: E.render_html = old
+
+@t
+def a_combined_venue_and_its_rooms_clash_in_the_review():
+    s = _waiting()
+    for d in s["made"]["duties"]:
+        if d["key"] == KEY1: d["room"] = "LT1&2"
+    other = [dict(id="b", name="Sec 4 Exam", status="approved", date="2026-10-05", start=500, end=560, room="LT1", names=[])]
+    c = RV.review(_PUB, F.CAL, s, _xset(_X4), other)["checks"][3]
+    assert c["lines"] == ["Sec 4 Exam (approved) uses LT1 on Mon 5 Oct too."], c
 
 
 print(f"{COUNT} exams tests passed")

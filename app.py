@@ -655,7 +655,7 @@ def timetable():
     if key not in pub["views"]:
         view = "student" if r == "student" else "full"
         home, label = {"committee": ("/", "Committee page"), "staff": ("/relief", "Relief")}.get(role(), (None, None))
-        app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r), dates=True, exams=True,
+        app_cfg = dict(mode=r, tabs=TABS[r], pdf=True, logout="/logout", files=files_for(r), dates=True, exams=True, published_at=(pub.get("meta") or {}).get("published_at"),
                        placeholder="Search a class" if r == "student" else None, home=home, homeLabel=label)
         pub["views"][key] = render_html(pub["model"], view, app=app_cfg)
     return Response(pub["views"][key], mimetype="text/html")
@@ -862,6 +862,10 @@ def _exams_can_approve():
     """the timetable committee approves, sends back and withdraws"""
     return role() == "committee"
 
+def _exams_can_keep_list():
+    """the timetable committee keeps the exams committee list in Exam settings (an exams committee member cannot change it)"""
+    return role() == "committee"
+
 def _exams_today(): return datetime.date.today()
 
 def _published_reader():
@@ -872,7 +876,12 @@ def _published_reader():
     if r == "student": return "student"
     return None
 
+def _exams_student():
+    """the student a personal code is signed in as, whose own exam timetable /api/me/exams shows; None for anyone else"""
+    return session.get("sid") if role() == "personal" else None
+
 BAD_DATE = "Give a date such as 2026-10-05."
+REPUBLISHED = "The timetable was published again: reload the page."
 NO_DAY_CAL = "The school calendar is not set yet, so the timetable cannot be shown on a date."
 ONLY_STAFF_PRINTS = "Only staff can open the seating plans and rosters."
 
@@ -943,7 +952,7 @@ def _exam_settings_reply(pub, settings):
     """committee_ok: only the timetable committee changes the exams committee list"""
     m = pub["model"]
     return jsonify(settings=settings, people=relief_staff(pub), rooms=[[r["name"], r.get("kind"), r.get("capacity")] for r in m.get("rooms") or []],
-                   committee_ok=role() == "committee")
+                   committee_ok=_exams_can_keep_list())
 
 @app.get("/api/exams/settings")
 @need("committee", "staff")
@@ -958,7 +967,7 @@ def exams_settings_put():
     pub, who, err = _exams_gate()
     if err: return err
     body = request.get_json(force=True, silent=True)
-    if role() != "committee" and isinstance(body, dict): body = dict(body, committee=exams_settings.load(pub)["committee"])   # kept as it is
+    if not _exams_can_keep_list() and isinstance(body, dict): body = dict(body, committee=exams_settings.load(pub)["committee"])   # kept as it is
     try: saved = exams_settings.save(body, pub, who)
     except ValueError as e: return {"error": str(e)}, 400
     except BAD_INPUT: return {"error": exams_settings.WRONG}, 400
@@ -1166,14 +1175,16 @@ def exams_print(id, what):
 def exams_day():
     pub = store.published()
     if not pub: return {"error": NO_EXAMS_PUB}, 409
+    stamp = exams_make.published_at(pub)
+    seen = request.args.get("published_at")   # the publish the asking page was drawn from: another one would draw wrong cells
+    if seen is not None and seen != (stamp or ""): return {"error": REPUBLISHED, "published_at": stamp}, 409
     raw = request.args.get("date") or ""
     try:
-        if len(raw) != 10: raise ValueError(raw)
-        datetime.date.fromisoformat(raw)
+        if datetime.date.fromisoformat(raw).isoformat() != raw: raise ValueError(raw)   # only YYYY-MM-DD: no week or short forms
     except ValueError: return {"error": BAD_DATE}, 400
     cal = _exam_cal(pub)
     if not cal.get("terms"): return {"error": NO_DAY_CAL}, 409
-    return jsonify(exams_published.day(pub, cal, exams_schedules.on_site(), raw, _published_reader() == "full"))
+    return jsonify(dict(exams_published.day(pub, cal, exams_schedules.on_site(), raw, _published_reader() == "full"), published_at=stamp))
 
 @app.get("/api/published/exams")
 @need("committee", "head", "teacher", "student", "staff")
@@ -1209,7 +1220,7 @@ def exams_my_duties():
 @app.get("/api/me/exams")
 @need("personal")
 def exams_my_exams():
-    pub = store.published(); sid = session.get("sid")
+    pub = store.published(); sid = _exams_student()
     if not pub or sid not in {x["id"] for x in pub["model"].get("students") or []}: return {"error": "Please sign in again."}, 401
     return jsonify(exams_published.my_exams(pub, _exam_cal(pub), exams_schedules.on_site(), sid, _exams_today()))
 
@@ -1245,11 +1256,12 @@ def exams_who(id):
     if err: return err
     s, err = _exam_or_404(id)
     if err: return err
-    if request.args.get("copy") == "approved":
+    approved = request.args.get("copy") == "approved"
+    if approved:
         s = exams_approval.as_schedule(s)
         if s is None: return {"error": exams_approval.NOT_ON_SITE}, 400
-    d, got = _exam_candidates(pub, s, request.args.get("key", ""), request.args.get("room", ""), approved=request.args.get("copy") == "approved")
-    if d is None: return {"error": "Press Make first."}, 404
+    d, got = _exam_candidates(pub, s, request.args.get("key", ""), request.args.get("room", ""), approved=approved)
+    if d is None: return {"error": "That duty is not on the main site." if approved else "Press Make first."}, 404
     return jsonify(got)
 
 # ------------------------------------------------------------------------------------------------ staff: exams, approval

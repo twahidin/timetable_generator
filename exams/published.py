@@ -172,8 +172,14 @@ def listing(pub, scheds, today, full) -> dict:
 
 
 def my_duties(pub, cal, scheds, name, today) -> dict:
+    """a teacher's duties on the approved copies, and the lessons of theirs that don't happen on those exams' dates (with
+    or without a duty)"""
     out, dates = [], set()
     for s in _active(scheds, today):
+        d0, d1 = _days._date(s["start"]), _days._date(s["end"])
+        while d0 <= d1:
+            dates.add(d0.isoformat())
+            d0 += _datetime.timedelta(days=1)
         mine = [(d, ps) for d, ps in _all_duties(s) if name in (d.get("names") or [])]
         if not mine:
             continue
@@ -186,16 +192,11 @@ def my_duties(pub, cal, scheds, name, today) -> dict:
                              others=[n for n in d.get("names") or [] if n != name], chief=chief if chief and chief != name else None,
                              role="Chief invigilator" if chief == name else "Invigilate"))
         out.append(dict(id=s["id"], name=s["name"], scripts=s.get("scripts") or "", minutes=sum(d["end"] - d["start"] for d, _ in mine), duties=rows))
-        d0, d1 = _days._date(s["start"]), _days._date(s["end"])
-        while d0 <= d1:
-            dates.add(d0.isoformat())
-            d0 += _datetime.timedelta(days=1)
     lessons = []
-    if out:
-        for iso in sorted(dates):
-            for r in _days.merged_view(pub, cal, scheds, iso)["lessons"]:
-                if name in r["teachers"]:
-                    lessons += [dict(date=iso, start=_hm(a), end=_hm(b), classes=list(r["classes"]), subject=r["subject"]) for a, b in r["stopped"]]
+    for iso in sorted(dates):
+        for r in _days.merged_view(pub, cal, scheds, iso)["lessons"]:
+            if name in r["teachers"]:
+                lessons += [dict(date=iso, start=_hm(a), end=_hm(b), classes=list(r["classes"]), subject=r["subject"]) for a, b in r["stopped"]]
     lessons.sort(key=lambda x: (x["date"], x["start"]))
     return dict(schedules=out, lessons=lessons)
 

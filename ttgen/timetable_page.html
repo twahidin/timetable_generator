@@ -257,6 +257,8 @@ function personalView(cls, groups, head) {
     legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.group !== ENTIRE ? e.x.group : "with the class"} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"} · ${e.periods} periods` })) }, head);
 }
 const studentView = id => { const s = sIx.get(id); return personalView(s.cls, s.groups, { key: id, kicker: "Student", title: s.name, sub: `${s.id} · Class ${s.cls} · ${(cIx.get(s.cls) || {}).level || ""}${parentsLine(s.cls)}` }); };
+/* a room, the combined venues made with it and its own rooms, as exams/seating.py _related reads them: one space for exams */
+const relatedRooms = r => uniq([r, ...ROOMS.filter(x => x.parts.includes(r)).map(x => x.name), ...((rIx.get(r) || {}).parts || [])]);
 /* a view on the chosen date (S.on, from /api/day): only that day's row, a lesson that does not happen crossed out, a shortened one with the
    times it still runs, and the exams of the class (a student: their class), the teacher or the room. The PDF, CSV and legend stay the usual timetable */
 function dated(v) {
@@ -272,11 +274,12 @@ function dated(v) {
     else if (ix.length && ix.every(i => stop.has(i))) c.x = true;
   });
   const cls = v.kind === "class" ? v.key : v.kind === "student" ? (v.cls || (sIx.get(v.key) || {}).cls) : null;
-  const items = cls ? (ex.classes || {})[cls] : v.kind === "teacher" ? (ex.teachers || {})[v.key] : v.kind === "room" ? (ex.rooms || {})[v.key] : null;
+  const inRoom = r => relatedRooms(r).flatMap(q => ((ex.rooms || {})[q] || []).map(it => q === r ? it : Object.assign({}, it, { via: q })));   /* a combined venue and its rooms count as one room */
+  const items = cls ? (ex.classes || {})[cls] : v.kind === "teacher" ? (ex.teachers || {})[v.key] : v.kind === "room" ? inRoom(v.key) : null;
   const tm = it => `${it.start}–${it.end}`;
   (items || []).forEach(it => {
     const title = cls ? it.label : v.kind === "teacher" ? `${it.role} · ${it.room}` : "Exam";
-    const lines = cls ? [it.room, tm(it), it.seat_note] : [it.label, tm(it)];
+    const lines = cls ? [it.room, tm(it), it.seat_note] : [it.label, tm(it), it.via ? `in ${it.via}` : ""];
     v.cells.push({ d: only, p: +it.p || 0, n: +it.n || 0, title, lines: lines.filter(Boolean), exam: true, when: `${nd} (${on.day})` });
   });
   v.onLine = ex.banner ? `On ${nd} (${on.day}): ${ex.banner}. Lessons that don't happen are crossed out.` : `On ${nd} (${on.day}): no exams or tests. This is the usual ${on.day} timetable.`;
@@ -561,19 +564,21 @@ function loadExams() {
 }
 
 // ------------------------------------------------------------------ the timetable on a date (/api/day)
-const DAYFAIL = "The timetable on that date could not be loaded. Try again.";
+const DAYFAIL = "The timetable on that date could not be loaded. Try again.", REPUB = "The timetable was published again: reload the page.";
 function onMsg(t) { const m = $("#onmsg"); if (m) { m.textContent = t || ""; m.hidden = !t; } }
 function pickDate(iso) {
   S.onWant = iso || ""; onMsg("");
   const u = $("#onUsual"); if (u) u.hidden = !S.onWant;
   if (!iso) { S.on = null; return show(S.tab, S.key); }
+  const stamp = APP && APP.published_at;   /* the timetable this page was drawn from: an answer for another publish would draw wrong cells */
   const done = j => {
     if (S.onWant !== iso) return;   /* a later choice is on its way */
+    if (j && !j.error && j.exams && stamp && j.published_at !== stamp) j = { error: REPUB };
     if (j && !j.error && j.exams) S.on = j;
     else { S.on = null; onMsg((j && j.error) || DAYFAIL); }
     show(S.tab, S.key);
   };
-  fetch("/api/day?date=" + encodeURIComponent(iso), { credentials: "same-origin" }).then(r => r.json()).then(done, () => done(null));
+  fetch("/api/day?date=" + encodeURIComponent(iso) + (stamp ? "&published_at=" + encodeURIComponent(stamp) : ""), { credentials: "same-origin" }).then(r => r.json()).then(done, () => done(null));
 }
 
 // ------------------------------------------------------------------ personal mode: my exam timetable (/api/me/exams only)

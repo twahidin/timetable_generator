@@ -83,7 +83,9 @@ def _free_check(pub, cal, s, xset, elsewhere) -> dict:
     return dict(key="free", ok=not lines, lines=lines or ["Every invigilator is free then."])
 
 
-def _others_check(s, elsewhere) -> dict:
+def _others_check(s, elsewhere, model) -> dict:
+    """another schedule's invigilators and rooms at the same time; a combined venue and its own rooms are one room"""
+    parts = model.get("room_parts") or {}
     duties = (s.get("made") or {}).get("duties") or []
     takes, uses = [], []
     for other in sorted({(b["name"], b["status"]) for b in elsewhere}):
@@ -93,7 +95,7 @@ def _others_check(s, elsewhere) -> dict:
             for b in (b for b in mine if b["date"] == date):
                 for d in (d for d in duties if d["date"] == date and d["start"] < b["end"] and d["end"] > b["start"]):
                     names |= set(b["names"]) & set(d["names"])
-                    if d["room"] == b["room"] and b["room"] not in rooms:
+                    if b["room"] in _seating._related(d["room"], parts) and b["room"] not in rooms:
                         rooms.append(b["room"])
             tag = "%s (%s)" % other
             if names:
@@ -107,8 +109,9 @@ def _timetable_check(pub, s) -> dict:
     now = _make.published_at(pub)
     if (s.get("made") or {}).get("published_at") == now:
         return dict(key="timetable", ok=True, lines=["Made from the timetable on the main site now."])
-    return dict(key="timetable", ok=False, lines=["The timetable changed since this was made: a new timetable was published on %s. "
-                                                   "Ask the exams committee to make it again." % _days.nice(now)])
+    when = " on %s" % _days.nice(now) if now else ""
+    return dict(key="timetable", ok=False, lines=["The timetable changed since this was made: a new timetable was published%s. "
+                                                   "Ask the exams committee to make it again." % when])
 
 
 def review(pub, cal, sched, xset, elsewhere) -> dict:
@@ -118,7 +121,7 @@ def review(pub, cal, sched, xset, elsewhere) -> dict:
     s = ap or sched
     model = pub["model"]
     checks = [_papers_check(model, cal, s, xset), _seats_check(s, model), _free_check(pub, cal, s, xset, elsewhere),
-              _others_check(s, elsewhere), _timetable_check(pub, s)]
+              _others_check(s, elsewhere, model), _timetable_check(pub, s)]
     return dict(copy="approved" if ap else "working", what=_what(pub, cal, s), checks=checks,
                 changes=_approval.changes(sched, model) if sched.get("status") == "changes" else [],
                 done_without=_approval.done_without(sched))

@@ -30,11 +30,8 @@ def duty_minutes(duties) -> dict:
 def _other_minutes(sched, year) -> dict:
     """minutes per name in the other saved schedules, for duties dated in the same calendar year"""
     out = {}
-    for row in _schedules.listing():
-        if row["id"] == sched.get("id"):
-            continue
-        s = _schedules.load(row["id"])
-        if not s or not s.get("made"):
+    for s in _schedules.all_saved():
+        if s["id"] == sched.get("id") or not s.get("made"):
             continue
         for d in s["made"].get("duties") or []:
             if str(d.get("date", ""))[:4] != year:

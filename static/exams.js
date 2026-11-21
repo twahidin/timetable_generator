@@ -16,7 +16,7 @@
     tab: "when", timer: null, chain: Promise.resolve(), dirty: false, rev: 0, saving: false, msg: "", bad: false,
     nf: null, mk: null, duties: null, accCls: "", note: "",
     busy: false, sit: "", room: "", mvCls: "", mvStu: "", duty: null, who: null, whoTok: 0, open: {},
-    me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, abMsg: "", sbNote: "", aw: { away: "", who: "", data: null, err: "", say: "", tok: 0 }
+    me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, abMsg: "", sbNote: "", aw: { duty: null, away: "", who: "", data: null, err: "", say: "", tok: 0 }
   };
   /* the tabs: tabs 4 to 7 are added to this list; each draw() gives the html of its tab body */
   const TABS = [
@@ -166,10 +166,11 @@
       <p class="muted small">${nTimes(sc.duties.length, "duty", "duties")} · ${esc(fmtLen(sc.minutes))} this exam</p>`;
   }
 
-  /* S.duties is null until /api/exams/my-duties answers; a member with no duties sees no card, someone else sees the sentence */
+  /* S.duties is null until /api/exams/my-duties answers; a member with no duties and no lesson that doesn't happen sees no
+     card, someone else sees the sentence (and the lessons, when there are some) */
   function dutiesCard(alone) {
     const D = S.duties; if (!D) return "";
-    if (!D.schedules.length && !alone) return "";
+    if (!D.schedules.length && !(D.lessons || []).length && !alone) return "";
     const lessons = (D.lessons || []).length ? `<p class="small">Lessons that don't happen: ${D.lessons.map(l => `${esc(fmtDate(l.date))} ${esc(l.start)} ${esc((l.classes || []).join(", "))} ${esc(l.subject)}`).join(" · ")}</p>` : "";
     return `<div class="card"><h2>My exam duties</h2>${D.schedules.map(dutyBlock).join("") || `<p class="muted">You have no exam duties on the main site.</p>`}${lessons}</div>`;
   }
@@ -748,8 +749,11 @@
     return `<div class="panel">${head}${body}</div>`;
   }
 
-  /* someone is away: the duty as it is on the main site, and who could take it (the approved copy, not the working one) */
-  const approvedDuty = () => { const p = S.duty, ap = onSite() ? S.sched.approved : null; return p && ap ? ((ap.made || {}).duties || []).find(x => dutyEq(x, p)) || null : null; };
+  /* someone is away: the duty as it is on the main site, and who could take it (the approved copy, not the working one).
+     The panel lists every duty of the approved copy, so a duty is reachable even when a change waiting for approval moved
+     its sitting: the one picked here (S.aw.duty), else the approved duty of the duty picked in the table */
+  const approvedDuties = () => onSite() ? ((S.sched.approved.made || {}).duties || []) : [];
+  const approvedDuty = () => { const p = S.aw.duty || S.duty; return p ? approvedDuties().find(x => dutyEq(x, p)) || null : null; };
 
   async function loadAway(keep) {
     const d = approvedDuty(), tok = ++S.aw.tok;
@@ -762,16 +766,18 @@
   }
 
   function awayPanel() {
-    const d = approvedDuty(); if (!d) return "";
-    const A = S.aw, G = A.data;
+    const list = approvedDuties(); if (!list.length) return "";
+    const d = approvedDuty(), A = S.aw, G = A.data;
     const say = A.say ? `<p class="msg ok" role="status">${esc(A.say)}</p>` : "";
-    if (A.err) return `<div class="panel"><h3>Someone is away</h3><p class="msg bad">${esc(A.err)}</p>${say}</div>`;
-    if (!G) return `<div class="panel"><h3>Someone is away</h3><p class="muted small">Loading…</p>${say}</div>`;
+    const pick = `<div class="line"><b>Duty on the main site</b><select data-aw="duty" aria-label="Duty on the main site"><option value="">Choose a duty</option>${list.map(x => opt(`${x.key}|${x.room}`, d ? `${d.key}|${d.room}` : "", `${fmtDate(x.date)} ${hhmm(x.start)}–${hhmm(x.end)} · ${x.room}`)).join("")}</select></div>`;
+    if (!d) return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">Choose the duty on the main site that someone cannot do.</p>${say}</div>`;
+    if (A.err) return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="msg bad">${esc(A.err)}</p>${say}</div>`;
+    if (!G) return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">Loading…</p>${say}</div>`;
     const groups = [["freed", "Freed by the exam"], ["free", "Free then"], ["backups", "Backup invigilators"]];
     const names = groups.flatMap(([k]) => (G[k] || []).map(c => c.name));
     const who = names.includes(A.who) ? A.who : "";
     const sel = groups.map(([k, title]) => (G[k] || []).length ? `<optgroup label="${esc(title)}">${G[k].map(c => opt(c.name, who, `${c.name} · ${c.minutes} min so far`)).join("")}</optgroup>` : "").join("");
-    return `<div class="panel"><h3>Someone is away</h3><p class="muted small">This changes the duty on the main site now, without a new approval.</p>
+    return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">This changes the duty on the main site now, without a new approval.</p>
       <div class="line"><b>Who is away</b><select data-aw="away" aria-label="Who is away">${d.names.map(n => opt(n, A.away)).join("")}</select></div>
       <div class="line"><b>Who takes it</b><select data-aw="who" aria-label="Who takes it"><option value="">Choose a name</option>${sel}</select></div>
       <div class="row"><button type="button" data-act="replace" ${S.busy ? "disabled" : ""}>Replace now</button></div>${say}</div>`;
@@ -869,12 +875,17 @@
   }
 
   /* the same clash can be in both Invigilators free ("is on {schedule} then") and Other schedules ("takes {n} of these
-     invigilators"): a "takes" line goes only when a free line names that same schedule (not the own-duty "is on another duty then") */
+     invigilators on {date}"): a "takes" line goes only when the free lines name that same schedule on that date for at least
+     n people (not the own-duty "is on another duty then"), so a second person's clash never drops out of sight */
   function checkLines(c, all) {
     let lines = c.lines;
     if (c.key === "others" && !c.ok) {
       const free = (all.find(x => x.key === "free") || { lines: [] }).lines;
-      lines = lines.filter(l => { const m = /^(.*) \([^()]*\) takes \d+ of these invigilators on /.exec(l); return !(m && free.some(f => f.includes(` is on ${m[1]} then (`))); });
+      lines = lines.filter(l => {
+        const m = /^(.*) \([^()]*\) takes (\d+) of these invigilators on (.*)\.$/.exec(l); if (!m) return true;
+        const named = uniq(free.filter(f => f.includes(` is on ${m[1]} then (`) && f.includes(` on ${m[3]} `)).map(f => f.split(", ")[0]));
+        return named.length < +m[2];
+      });
     }
     return lines;
   }
@@ -944,6 +955,7 @@
     const el = e.target;
     if (S.id && el.dataset.x) { onVenue(el); return; }
     if (S.id && el.dataset.mk) { onMakeup(el); return; }
+    if (S.id && el.dataset.aw === "duty") { const v = el.value, i = v.indexOf("|"); S.aw.duty = v ? { key: v.slice(0, i), room: v.slice(i + 1) } : null; loadAway(false); paint(); return; }
     if (S.id && el.dataset.aw) { S.aw[el.dataset.aw] = el.value; return; }
     if (S.id && el.dataset.sb) { S.sbNote = el.value; return; }
     if (S.id && el.dataset.acc === "cls") { S.accCls = el.value; paint(); return; }
@@ -1024,7 +1036,7 @@
       return;
     }
     if (act === "useAnyway") { viewAction("use-anyway", { key: a, room: b.dataset.b }, "The room is in use for this sitting."); return; }
-    if (act === "duty") { S.duty = { key: a, room: b.dataset.b }; loadWho(false); loadAway(false); return; }
+    if (act === "duty") { S.duty = { key: a, room: b.dataset.b }; S.aw.duty = null; loadWho(false); loadAway(false); return; }
     if (act === "approval") { onApproval(a); return; }
     if (act === "replace") { replaceNow(); return; }
     if (act === "whoAuto") { changeNames(null); return; }
