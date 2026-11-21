@@ -1930,7 +1930,7 @@ def _exam_rooms_by_key(pub, cal, sched):
 def exams_home():
     """the exams committee and the timetable committee use exams here; anyone else signed in by name sees only their own
     exam duties (My exam duties); the shared heads', teacher and student codes are nobody's: their own page"""
-    if _exams_rights(None) is None: return redirect("/")
+    if _exams_rights(store.published()) is None: return redirect("/")
     return app.send_static_file("exams.html")
 
 @app.get("/exams/settings")

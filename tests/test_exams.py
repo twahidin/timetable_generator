@@ -1711,6 +1711,31 @@ def send_and_approve_by_the_right_people():
         assert next(x for x in committee().get("/api/exams").get_json()["schedules"] if x["id"] == id)["retimed"] is True
 
 @t
+def approve_by_the_committee_right_only():
+    """a committee member signed in with their password approves; signed in by code, even with the Exams and events extra,
+    they use exams but do not approve"""
+    from werkzeug.security import generate_password_hash
+    _setup()
+    pw, code = "Ms Cora Lim", "Mr Leo Tan"
+    ACC.update(lambda d: (d["people"].setdefault(pw, {}).update(group="committee", added=True, username="cora.lim",
+                                                                pw=generate_password_hash(secrets.token_hex(8))),
+                          d["people"].setdefault(code, {}).update(group="committee", added=True, extras=dict(relief=False, exams=LATER, admin=False))))
+    try:
+        with published(_PUB):
+            p, k = staff(pw, via="password"), staff(code)
+            s = _made_exam(committee()); id = s["id"]
+            assert k.post(f"/api/exams/{id}/send").status_code == 200, "the extra uses exams"
+            assert k.get("/api/exams/me").get_json()["can_approve"] is False and p.get("/api/exams/me").get_json()["can_approve"] is True
+            for step, body in (("approve", None), ("send-back", dict(note="x")), ("withdraw", None)):
+                r = k.post(f"/api/exams/{id}/{step}", json=body); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_APPROVE}, (step, r.data)
+            assert SC.load(id)["status"] == "waiting"
+            r = p.post(f"/api/exams/{id}/approve"); assert r.status_code == 200 and r.get_json()["status"] == "approved", r.data
+            assert SC.load(id)["approved_by"] == pw and H.read(kinds=["exams"], limit=1)[0]["who"] == pw
+    finally:
+        ACC.update(lambda d: [d["people"].pop(n, None) for n in (pw, code)])
+        _reset()
+
+@t
 def send_refused_until_made_and_fresh():
     _setup()
     with published(_PUB):
@@ -2053,7 +2078,12 @@ def my_duties_and_my_exams():
             r = as_role("staff", who="Ms Aisha Rahman").get("/api/exams/my-duties"); assert r.status_code == 200, r.data
             assert any(d["room"] == "3-01" for x in r.get_json()["schedules"] for d in x["duties"]), r.get_json()
             assert c.get("/api/exams/my-duties").get_json()["schedules"] == []
-            r = as_role("teacher").get("/api/exams/my-duties"); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_OWN_DUTIES}, r.data
+            for code in ("head", "teacher", "student"):                  # shared codes are nobody's: no exams page, no duties
+                k = as_role(code)
+                r = k.get("/exams"); assert r.status_code == 302 and r.headers["Location"] in ("/", "http://localhost/"), (code, r.status_code, r.headers.get("Location"))
+                r = k.get("/api/exams/me"); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_EXAMS}, (code, r.data)
+                r = k.get("/api/exams/my-duties"); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_OWN_DUTIES}, (code, r.data)
+                assert k.get("/api/exams").status_code == 401 and k.get("/exams/settings").status_code == 302, code
             r = staff("Ms Aisha Rahman").get("/api/exams/my-duties"); assert r.status_code == 200, r.data   # her own code, no Exams extra
             assert any(d["room"] == "3-01" for x in r.get_json()["schedules"] for d in x["duties"]), r.get_json()
             r = as_role("personal", sid="3A-07").get("/api/me/exams"); assert r.status_code == 200
