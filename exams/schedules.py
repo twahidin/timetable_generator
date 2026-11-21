@@ -164,10 +164,19 @@ def load(id):
     return s if isinstance(s, dict) else None
 
 
-def listing() -> list:
-    rows = [dict(id=s["id"], kind=s.get("kind"), name=s.get("name"), levels=s.get("levels"), start=s.get("start"), end=s.get("end"),
-                 papers=len(s.get("papers") or []), status=s.get("status"), saved_at=s.get("saved_at"), _c=s.get("created_at") or "")
-            for s in _all()]
+def listing(today=None, published_at=None) -> list:
+    """one row per schedule, newest first; today gives the label's 'Ended', published_at the 'retimed' flag"""
+    today = today or datetime.date.today()
+    rows = []
+    for s in _all():
+        st = s.get("status") or "draft"
+        ap = s.get("approved")
+        read = ap if st in ("approved", "changes") and ap else s
+        rows.append(dict(id=s["id"], kind=s.get("kind"), name=s.get("name"), levels=s.get("levels"), start=s.get("start"), end=s.get("end"),
+                         papers=len(s.get("papers") or []), status=s.get("status"), saved_at=s.get("saved_at"), label=_approval.label(s, today),
+                         note=s.get("note") or "", sent_by=s.get("sent_by"), sent_at=s.get("sent_at"), approved_at=s.get("approved_at"),
+                         on_site=[ap["start"], ap["end"]] if ap else None,
+                         retimed=st in ("waiting", "approved", "changes") and _approval.retimed(read, published_at), _c=s.get("created_at") or ""))
     rows.sort(key=lambda r: r["saved_at"] or r["_c"], reverse=True)
     for r in rows: r.pop("_c")
     return rows

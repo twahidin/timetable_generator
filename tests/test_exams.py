@@ -875,11 +875,11 @@ def only_the_committees_get_in():
     with published(_PUB):
         s = staff("Ms Grace Yeo")
         r = s.get("/api/exams"); assert r.status_code == 403 and r.get_json()["error"] == A.ONLY_EXAMS, r.data
-        assert s.get("/api/exams/me").get_json() == dict(name="Ms Grace Yeo", can_use=False)
+        assert s.get("/api/exams/me").get_json() == dict(name="Ms Grace Yeo", can_use=False, can_approve=False)
         assert s.get("/api/exams/settings").status_code == 403
         c = committee()
         assert c.get("/api/exams").status_code == 200
-        assert c.get("/api/exams/me").get_json() == dict(name="Timetable committee", can_use=True)
+        assert c.get("/api/exams/me").get_json() == dict(name="Timetable committee", can_use=True, can_approve=True)
         d = c.get("/api/exams/settings").get_json()
         assert d["settings"]["committee"] == [] and {"name": "Hall", "kind": "pe venue", "capacity": 400} in [dict(zip(("name", "kind", "capacity"), r)) if isinstance(r, list) else r for r in d["rooms"]], d["rooms"]
         d["settings"]["committee"] = ["Ms Grace Yeo"]
@@ -1469,5 +1469,156 @@ def review_and_gone_list_agree_for_kept_sittings():
         got = RV.review(pub2, F.CAL, sch, _xset(_X4), [])["checks"][2]
         assert line in got["lines"] and not got["ok"], got
     assert line in MK.summary(pub2, F.CAL, s, _xset(_X4))["gone"]
+
+# ---- the approval routes
+@contextlib.contextmanager
+def _today(d):
+    old = A._exams_today; A._exams_today = lambda: d
+    try: yield
+    finally: A._exams_today = old
+
+def _committee_of(*names):
+    x = _xset(("3-01", "3-02", "4-01", "Hall"))
+    os.makedirs(os.path.dirname(ES.PATH), exist_ok=True)
+    store.write_json(ES.PATH, dict(committee=list(names), rooms=x["rooms"]))
+
+def _approved_exam(c):
+    s = _made_exam(c)
+    r = c.post(f"/api/exams/{s['id']}/send"); assert r.status_code == 200, r.data
+    r = c.post(f"/api/exams/{s['id']}/approve"); assert r.status_code == 200, r.data
+    return s
+
+def _setup():
+    _reset(); _cal(); _committee_of("Ms Grace Yeo")
+
+@t
+def send_and_approve_by_the_right_people():
+    _setup()
+    with published(_PUB):
+        c = committee(); g = staff("Ms Grace Yeo")
+        s = _made_exam(g); id = s["id"]
+        r = g.post(f"/api/exams/{id}/send"); assert r.status_code == 200, r.data
+        assert r.get_json()["label"] == "Waiting for the timetable committee" and r.get_json()["status"] == "waiting"
+        r = g.post(f"/api/exams/{id}/approve"); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_APPROVE}, r.data
+        assert g.post(f"/api/exams/{id}/withdraw").status_code == 403 and g.post(f"/api/exams/{id}/send-back", json=dict(note="x")).status_code == 403
+        r = c.post(f"/api/exams/{id}/approve"); assert r.status_code == 200, r.data
+        assert SC.load(id)["approved"]["made"]["duties"] == SC.load(id)["made"]["duties"]
+        with _today(date(2026, 10, 1)):
+            row = next(x for x in c.get("/api/exams").get_json()["schedules"] if x["id"] == id)
+            assert row["label"] == "Approved · on the main site" and row["on_site"] == ["2026-10-05", "2026-10-06"] and row["retimed"] is False, row
+            assert row["approved_at"] and row["sent_by"] == "Ms Grace Yeo"
+        with _today(date(2026, 10, 7)):
+            assert next(x for x in c.get("/api/exams").get_json()["schedules"] if x["id"] == id)["label"] == "Ended"
+        pub2 = dict(_PUB, meta=dict(_PUB.get("meta") or {}, published_at="2026-10-09T10:00:00"))
+    with published(pub2), _today(date(2026, 10, 1)):
+        assert next(x for x in committee().get("/api/exams").get_json()["schedules"] if x["id"] == id)["retimed"] is True
+
+@t
+def send_refused_until_made_and_fresh():
+    _setup()
+    with published(_PUB):
+        c = committee()
+        s = _exam(c); id = s["id"]
+        r = c.post(f"/api/exams/{id}/send"); assert r.status_code == 400 and r.get_json() == {"error": "Press Make first."}, r.data
+        assert c.get(f"/api/exams/{id}/review").status_code == 409
+        s = _made_exam(c); id = s["id"]
+        s = SC.load(id); s["papers"][0]["minutes"] = 55
+        assert c.put("/api/exams/" + id, json=s).status_code == 200
+        r = c.post(f"/api/exams/{id}/send"); assert r.status_code == 400 and r.get_json() == {"error": "The exam changed since Make: press Make again."}, r.data
+        assert c.post("/api/exams/nope/send").status_code == 404
+
+@t
+def approve_refuses_a_schedule_changed_after_sending():
+    _setup()
+    with published(_PUB):
+        c = committee()
+        s = _made_exam(c); id = s["id"]
+        assert c.post(f"/api/exams/{id}/send").status_code == 200
+        s = SC.load(id); s["papers"][0]["minutes"] = 55
+        assert c.put("/api/exams/" + id, json=s).status_code == 200
+        assert c.post(f"/api/exams/{id}/make", json={}).status_code == 200
+        r = c.post(f"/api/exams/{id}/approve")
+        assert r.status_code == 400 and r.get_json() == {"error": "This schedule changed after it was sent. Ask the exams committee to send it again."}, r.data
+
+@t
+def changes_wait_for_approval():
+    _setup()
+    with published(_PUB):
+        c = committee()
+        s = _approved_exam(c); id = s["id"]
+        s = SC.load(id)
+        eng = next(p for p in s["papers"] if p["subject"] == "English"); eng["start"] = "08:00"
+        assert c.put("/api/exams/" + id, json=s).status_code == 200
+        assert c.post(f"/api/exams/{id}/make", json={}).status_code == 200
+        r = c.get(f"/api/exams/{id}/review"); assert r.status_code == 200, r.data
+        d = r.get_json()
+        assert "Sec 3 English Paper 1: Mon 5 Oct 07:50–08:50 → Mon 5 Oct 08:00–09:00." in [u["text"] for u in d["unsent"]], d["unsent"]
+        eng_on_site = next(p for p in SC.on_site()[0]["papers"] if p["subject"] == "English")
+        assert eng_on_site["start"] == "07:50"
+        r = c.post(f"/api/exams/{id}/send"); assert r.status_code == 200, r.data
+        d = r.get_json(); assert d["status"] == "changes" and any("08:00" in x["text"] for x in d["review"]["changes"]), d
+        r = c.post(f"/api/exams/{id}/send-back", json=dict(note="Not that day")); assert r.status_code == 200, r.data
+        d = r.get_json(); assert d["status"] == "approved" and d["note"] == "Not that day"
+        assert next(p for p in SC.on_site()[0]["papers"] if p["subject"] == "English")["start"] == "07:50"
+        assert c.post(f"/api/exams/{id}/send-back", json=dict(note="x")).status_code == 400
+        assert c.post(f"/api/exams/{id}/send").status_code == 200
+        assert c.post(f"/api/exams/{id}/approve").status_code == 200
+        assert next(p for p in SC.on_site()[0]["papers"] if p["subject"] == "English")["start"] == "08:00"
+
+@t
+def withdraw_and_delete():
+    _setup()
+    with published(_PUB):
+        c = committee()
+        s = _approved_exam(c); id = s["id"]
+        r = c.delete("/api/exams/" + id); assert r.status_code == 409 and r.get_json() == {"error": A.ON_SITE}, r.data
+        r = c.post(f"/api/exams/{id}/withdraw"); assert r.status_code == 200 and r.get_json()["label"] == "Withdrawn", r.data
+        assert SC.on_site() == []
+        assert c.delete("/api/exams/" + id).status_code == 200 and SC.load(id) is None
+
+@t
+def put_cannot_forge_an_approval():
+    _setup()
+    with published(_PUB):
+        c = committee()
+        s = _exam(c); id = s["id"]
+        forged = dict(SC.load(id), status="approved", approved=dict(SC.load(id)), approved_by="Me", approved_at="x", sent_by="Me", sent_at="x", sent_fp="x", note="n", log=[dict(what="x")])
+        assert c.put("/api/exams/" + id, json=forged).status_code == 200
+        now = SC.load(id)
+        assert now["status"] == "draft" and now["approved"] is None and now["approved_by"] is None and now["note"] == "" and now["log"] == [] and now.get("sent_by") is None, now
+        assert SC.on_site() == []
+        assert c.put("/api/exams/" + id, json=dict(SC.load(id))).status_code == 200 and c.post(f"/api/exams/{id}/send").status_code == 400
+
+@t
+def away_on_the_main_site():
+    _setup()
+    with published(_PUB):
+        c = committee()
+        s = _made_exam(c); id = s["id"]
+        body = dict(key=KEY1, room="3-01", away="Ms Chloe Tan", name="Mr Hafiz Rahman")
+        r = c.post(f"/api/exams/{id}/away", json=body); assert r.status_code == 400 and r.get_json() == {"error": "This schedule is not on the main site."}, r.data
+        assert c.post(f"/api/exams/{id}/send").status_code == 200 and c.post(f"/api/exams/{id}/approve").status_code == 200
+        r = c.post(f"/api/exams/{id}/away", json=dict(body, name="Mr Daniel Koh"))
+        assert r.status_code == 400 and r.get_json() == {"error": "Mr Daniel Koh is not free then."}, r.data
+        assert c.post(f"/api/exams/{id}/away", json=dict(body, key=3)).status_code == 400
+        r = c.post(f"/api/exams/{id}/away", json=body); assert r.status_code == 200, r.data
+        d = next(x for x in SC.on_site()[0]["made"]["duties"] if x["key"] == KEY1 and x["room"] == "3-01")
+        assert d["names"] == ["Ms Aisha Rahman", "Mr Hafiz Rahman"], d
+        assert r.get_json()["review"]["done_without"][0]["detail"] == "Mon 5 Oct 07:35–09:00, 3-01: Ms Chloe Tan (away) → Mr Hafiz Rahman"
+        who = c.get(f"/api/exams/{id}/who?key={KEY1}&room=3-01&copy=approved"); assert who.status_code == 200
+        assert "Mr Hafiz Rahman" not in [x["name"] for g in ("freed", "free", "backups") for x in who.get_json()[g]]
+
+@t
+def a_draft_with_a_null_log_still_sends():
+    _setup()
+    with published(_PUB):
+        c = committee()
+        s = _made_exam(c); id = s["id"]
+        raw = SC.load(id); raw["log"] = None
+        store.write_json(os.path.join(SC.DIR, id + ".json"), raw)
+        assert c.put("/api/exams/" + id, json=SC.load(id)).status_code == 200
+        assert SC.load(id)["log"] == []
+        assert c.post(f"/api/exams/{id}/send").status_code == 200
+
 
 print(f"{COUNT} exams tests passed")

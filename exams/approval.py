@@ -40,6 +40,11 @@ def last_date(s) -> str:
     return max([s.get("end") or ""] + [p["date"] for p in s.get("papers") or [] if p.get("date")])
 
 
+def retimed(copy_, published_at) -> bool:
+    """the copy was made for another publish of the timetable than the one on the main site now"""
+    return (copy_.get("made") or {}).get("published_at") != published_at
+
+
 def label(sched, today) -> str:
     st = sched.get("status") or "draft"
     ap = sched.get("approved")
