@@ -2864,6 +2864,19 @@ async function postTry(url, body) {   // as post, but a refusal is not said: {j}
   if (!r.ok) return { error: j.error || "Something went wrong." };
   return { j };
 }
+/* "Exams · 2 waiting": the exams and tests the timetable committee has still to approve (looked up about every half minute) */
+const XW = { n: null, at: 0 };
+async function examsWaiting() {
+  const xl = $("#examsLink"); if (!xl || xl.hidden) return;
+  if (Date.now() - XW.at > 30000) {
+    XW.at = Date.now();
+    try {
+      const r = await fetch("/api/exams", { cache: "no-store" });
+      if (r.ok) { const j = await r.json(); XW.n = (j.schedules || []).filter(x => x.status === "waiting" || x.status === "changes").length; }
+    } catch (e) { }
+  }
+  xl.textContent = XW.n ? `Exams · ${XW.n} waiting` : "Exams";
+}
 async function poll() {   // every few seconds: the published timetable and the deployment's state (G.st)
   clearTimeout(G.timer);
   if (G.inflight) { G.timer = setTimeout(poll, 500); return; }
@@ -2874,6 +2887,7 @@ async function poll() {   // every few seconds: the published timetable and the 
     G.st = await r.json();
     const rl = $("#reliefLink"); if (rl) rl.hidden = G.st.role !== "committee";   /* the relief settings are the committee's, not the heads' */
     const xl = $("#examsLink"); if (xl) xl.hidden = G.st.role !== "committee";   /* exams are the committee's too */
+    examsWaiting();
     paintPublished(); draftWatch();
   } catch (e) { }
   G.inflight = false;

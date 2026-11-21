@@ -1863,4 +1863,18 @@ def the_published_page_has_the_date_choice():
     assert src == skill, "the skill's copy of the page is the same"
 
 
+@t
+def the_exams_pages_carry_the_approval_words():
+    js = _page("exams.js")
+    for words in ("Approval", "Send to the timetable committee", "Send again", "Send the changes", "Approve: show on the main site",
+                  "Approve the changes", "Send back with a note", "Withdraw from the main site", "Done without approval", "Someone is away",
+                  "Replace now", "My exam duties", "You have no exam duties on the main site.", "Scripts go to",
+                  "On the main site. Changes you make here wait for the timetable committee: send them from the Approval tab.",
+                  "Changes not sent yet", "Nothing on the main site has changed since it was approved.", "What changes on the main site",
+                  "Lessons that won't happen: ", "Rain rooms used anyway: ", "Take ${S.sched.name} off the main site now?", "/api/exams/my-duties",
+                  "&copy=approved", "Lessons that don't happen: "):
+        assert words in js, words
+    assert "Exams · " in _page("app.js"), "the committee page counts the schedules waiting"
+
+
 print(f"{COUNT} exams tests passed")
