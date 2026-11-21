@@ -2024,7 +2024,7 @@ def rights_reads_go_through_named_helpers():
     import re
     src = open(os.path.join(ROOT, "app.py"), encoding="utf-8").read()
     part = src.split("# ------------------------------------------------------------------------------------------------ staff: exams and events")[1]
-    helpers = ("_exams_rights", "_exams_can_approve", "_exams_can_keep_list", "_published_reader", "_exams_student")
+    helpers = ("_exams_rights", "_exams_can_approve", "_exams_can_keep_list", "_published_reader", "_exams_student", "_event_rights")
     for name, body in re.findall(r"\ndef (\w+)\(.*?\):(.*?)(?=\n(?:def |@app|# -{20}))", part, re.S):
         if name not in helpers:
             assert "role()" not in body and 'session.get("sid")' not in body and "session[" not in body, name
@@ -2409,6 +2409,156 @@ def event_review():
     v = _ev(going=["Mr Ivan Lee"]); AP.send(v, _M, "Ms Aisha Rahman", NOW, False, [])
     assert EV.review(_PUB, F.CAL, v, [], [])["checks"][0]["lines"] == ["Mr Ivan Lee, Mon 5 Oct 07:40–10:40: is not available then (a Must rule)."]
     assert not EV.review(_PUB, F.CAL, v, [], [])["checks"][0]["ok"]
+
+
+def _event(a):
+    r = a.post("/api/events", json=dict(name="Sec 3 Learning Journey", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05"))
+    assert r.status_code == 200, r.data
+    id = r.get_json()["id"]
+    e = a.get("/api/events/" + id).get_json()
+    e["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "07:40", "to": "10:40"})}
+    e["where"] = "Off site (museum)"
+    r = a.put("/api/events/" + id, json=e); assert r.status_code == 200, r.data
+    return r.get_json()
+
+def _approved_event(a, c):
+    e = _event(a); id = e["id"]
+    r = a.post(f"/api/events/{id}/fill", json=dict(way="form teachers")); assert r.status_code == 200, r.data
+    r = a.post(f"/api/events/{id}/fill", json=dict(way="department", dept="PE")); assert r.status_code == 200, r.data
+    r = a.post(f"/api/events/{id}/send"); assert r.status_code == 200, r.data
+    r = c.post(f"/api/events/{id}/approve"); assert r.status_code == 200, r.data
+    return e
+
+@t
+def any_teacher_may_start_an_event():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        r = a.post("/api/events", json=dict(name="Sec 3 Learning Journey", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05", in_charge="Mr Ben Ong"))
+        assert r.status_code == 200 and r.get_json()["in_charge"] == "Ms Aisha Rahman" and r.get_json()["kind"] == "event", r.data
+        id = r.get_json()["id"]
+        rows = a.get("/api/events").get_json()["schedules"]
+        assert len(rows) == 1 and rows[0]["label"] == "Draft" and rows[0]["in_charge"] == "Ms Aisha Rahman" and rows[0]["n_going"] == 0, rows
+        r = a.get("/api/exams"); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_EXAMS}, r.data
+        assert a.get("/api/events").get_json()["people"] == []
+        assert a.get(f"/events/{id}").status_code == 200
+        body = dict(name="Sec 3 Sports", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05")
+        r = c.post("/api/events", json=body); assert r.status_code == 400 and r.get_json() == {"error": A.PICK_IN_CHARGE}, r.data
+        r = c.post("/api/events", json=dict(body, in_charge="Mr Nobody")); assert r.status_code == 400 and r.get_json() == {"error": "Mr Nobody is not on the published timetable or the staff list."}, r.data
+        r = c.post("/api/events", json=dict(body, in_charge="Mr Ben Ong")); assert r.status_code == 200 and r.get_json()["in_charge"] == "Mr Ben Ong", r.data
+        d = c.get("/api/events").get_json()
+        assert len(d["schedules"]) == 2 and "Mr Ben Ong" in d["people"], d
+        assert not any(x["kind"] == "event" for x in c.get("/api/exams").get_json()["schedules"])
+        _cal(False)
+        r = a.post("/api/events", json=body); assert r.status_code == 409 and r.get_json() == {"error": SC.NO_CALENDAR}, r.data
+
+@t
+def only_the_teacher_in_charge_and_the_committee():
+    _setup()
+    with published(_PUB):
+        a, b, g, c = staff("Ms Aisha Rahman"), staff("Mr Ben Ong"), staff("Ms Grace Yeo"), committee()
+        e = _event(a); id = e["id"]
+        no = dict(error=A.ONLY_IN_CHARGE)
+        for r in (b.get(f"/api/events/{id}"), b.put(f"/api/events/{id}", json=e), b.delete(f"/api/events/{id}"), b.post(f"/api/events/{id}/send"),
+                  b.post(f"/api/events/{id}/fill", json=dict(way="form teachers")), b.post(f"/api/events/{id}/away", json=dict(away="x", name="y")),
+                  b.get(f"/api/events/{id}/view"), b.get(f"/api/events/{id}/who")):
+            assert r.status_code == 403 and r.get_json() == no, (r.status_code, r.data)
+        assert b.get("/api/events").get_json()["schedules"] == []
+        for r in (g.get(f"/api/exams/{id}"), g.put(f"/api/exams/{id}", json=e), g.delete(f"/api/exams/{id}")):
+            assert r.status_code == 404 and r.get_json() == {"error": A.NO_EXAM}, (r.status_code, r.data)
+        assert a.get(f"/api/events/{id}").status_code == 200, "the delete did not remove it"
+        assert not any(x["id"] == id for x in g.get("/api/exams").get_json()["schedules"])
+        x = _exam(g); x["kind"] = "event"
+        r = g.put("/api/exams/" + x["id"], json=x); assert r.status_code == 400 and r.get_json() == {"error": SC.WRONG}, r.data
+        assert g.get("/api/exams/" + x["id"]).get_json()["kind"] == "exam"
+        assert c.get(f"/api/events/{id}").status_code == 200 and any(r_["id"] == id for r_ in c.get("/api/events").get_json()["schedules"])
+        e = a.get(f"/api/events/{id}").get_json()
+        r = a.put(f"/api/events/{id}", json=dict(e, in_charge="Mr Ben Ong", status="approved", approved=dict(start="2026-10-05"), approved_by="x")); assert r.status_code == 200, r.data
+        got = a.get(f"/api/events/{id}").get_json()
+        assert got["in_charge"] == "Ms Aisha Rahman" and got["status"] == "draft" and not got["approved"] and got["approved_by"] is None, got
+        r = a.post(f"/api/events/{id}/approve"); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_APPROVE}, r.data
+        r = g.get(f"/api/events/{x['id']}"); assert r.status_code == 404 and r.get_json() == {"error": A.NO_EVENT}, r.data
+        assert c.get(f"/api/events/{x['id']}").status_code == 404
+
+@t
+def a_forged_event_put_puts_no_exam_items_on_the_site():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        id = _event(a)["id"]
+        a.post(f"/api/events/{id}/fill", json=dict(way="form teachers"))
+        got = a.get(f"/api/events/{id}").get_json()
+        forged = dict(got, papers=[_paper()], access=[dict(student="3A-01", extra=25)], times=dict(report="07:30", min_break=20, max_papers=2),
+                      made=dict(duties=[dict(key="k", room="3-01", date="2026-10-05", start=460, end=540, names=["Mr Ben Ong"], backup=[], short=0)], seats={}, unseated={}),
+                      supervision="lesson", scripts="x", pins=dict(rooms={"a": 1}, duties={}), use_anyway=["x"])
+        r = a.put(f"/api/events/{id}", json=forged); assert r.status_code == 200, r.data
+        s = SC.load(id)
+        assert s["papers"] == [] and s["access"] == [] and s["made"] is None and s["use_anyway"] == [] and s["scripts"] == "", s
+        r = a.post(f"/api/events/{id}/send"); assert r.status_code == 200, r.data
+        assert c.post(f"/api/events/{id}/approve").status_code == 200
+        site = [x for x in SC.on_site() if x["id"] == id][0]
+        assert site["papers"] == [] and not (site.get("made") or {}).get("duties") and not (site.get("made") or {}).get("seats") and site["access"] == [], site
+
+@t
+def fill_view_send_approve():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _event(a); id = e["id"]
+        r = a.post(f"/api/events/{id}/send"); assert r.status_code == 400 and r.get_json() == {"error": "Add at least one person going with the classes."}, r.data
+        r = a.post(f"/api/events/{id}/fill", json=dict(way="form teachers")); assert r.status_code == 200, r.data
+        assert r.get_json()["going"] == ["Ms Aisha Rahman", "Ms Chloe Tan"] and r.get_json()["going_by"] == "form teachers", r.get_json()
+        r = a.post(f"/api/events/{id}/fill", json=dict(way="department", dept="PE")); assert r.status_code == 200, r.data
+        assert r.get_json()["going"] == ["Ms Aisha Rahman", "Ms Chloe Tan", "Mr Hafiz Rahman"] and r.get_json()["going_by"] == "department"
+        r = a.post(f"/api/events/{id}/fill", json=dict(way="people", names="x")); assert r.status_code == 400, r.data
+        v = a.get(f"/api/events/{id}/view").get_json()
+        assert [x["status"] for x in v["going"]] == ["free", "free", "backup"], v["going"]
+        assert len(v["lessons"]["none"]) == 4 and v["freed"][0]["rooms"] == ["3-01", "3-02", "Lab 3-08"], (v["lessons"]["none"], v["freed"])
+        assert v["summary"]["days"][0]["date"] == "2026-10-05" and v["summary"]["days"][0]["whole"] is False and v["summary"]["days"][0]["window"] == ["07:40", "10:40"], v["summary"]
+        assert v["classes"] == ["3A", "3B"] and "PE" in v["depts"] and "Ms Aisha Rahman" in v["people"] and "Hall" in v["rooms"], v
+        for k in ("flags", "cuts", "clashes", "periods"): assert k in v, k
+        r = a.post(f"/api/events/{id}/send"); assert r.status_code == 200, r.data
+        assert r.get_json()["label"] == "Waiting for the timetable committee" and r.get_json()["review"]["what"]["kind"] == "event", r.data
+        assert a.get(f"/api/events/{id}/review").status_code == 200
+        r = c.post(f"/api/events/{id}/approve"); assert r.status_code == 200, r.data
+        site = [x for x in SC.on_site() if x["id"] == id][0]
+        assert site["going"] == ["Ms Aisha Rahman", "Ms Chloe Tan", "Mr Hafiz Rahman"], site
+        assert a.get(f"/api/events/{id}/who").status_code == 200
+
+@t
+def event_send_refused_on_a_clash():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        _approved_exam(c)
+        e = _event(a); id = e["id"]
+        a.post(f"/api/events/{id}/fill", json=dict(way="form teachers"))
+        r = a.post(f"/api/events/{id}/send"); assert r.status_code == 400 and r.get_json()["error"].startswith("Fix the clashes first: "), r.data
+        rv = a.get(f"/api/events/{id}/review").get_json()
+        others = [x for x in rv["review"]["checks"] if x["key"] == "others"][0]["lines"]
+        assert "Sec 3 Exam (approved) has 3A, 3B on Mon 5 Oct too." in others, others
+
+@t
+def away_on_an_approved_event():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _approved_event(a, c); id = e["id"]
+        w = a.get(f"/api/events/{id}/who").get_json()
+        assert [x["name"] for x in w["freed"]] == ["Mr Ben Ong"], w
+        r = a.post(f"/api/events/{id}/away", json=dict(away="Mr Hafiz Rahman", name="Mr Daniel Koh")); assert r.status_code == 400 and r.get_json() == {"error": "Mr Daniel Koh is not free then."}, r.data
+        r = a.post(f"/api/events/{id}/away", json=dict(away="Mr Hafiz Rahman", name="Mr Ben Ong")); assert r.status_code == 200, r.data
+        site = [x for x in SC.on_site() if x["id"] == id][0]
+        assert site["going"] == ["Ms Aisha Rahman", "Ms Chloe Tan", "Mr Ben Ong"], site["going"]
+        assert r.get_json()["review"]["done_without"][0]["detail"] == "Mon 5 Oct, going: Mr Hafiz Rahman (away) \u2192 Mr Ben Ong", r.get_json()["review"]["done_without"]
+        r = a.delete(f"/api/events/{id}"); assert r.status_code == 409 and r.get_json() == {"error": A.ON_SITE}, r.data
+        assert c.post(f"/api/events/{id}/withdraw").status_code == 200 and SC.on_site() == []
+        assert a.delete(f"/api/events/{id}").status_code == 200 and SC.load(id) is None
+
+@t
+def event_rights_stay_inside_helpers():
+    src = open(os.path.join(ROOT, "app.py"), encoding="utf-8").read()
+    assert "def _event_rights(" in src and "def _event_gate(" in src
 
 
 print(f"{COUNT} exams tests passed")

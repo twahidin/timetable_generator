@@ -236,19 +236,26 @@ def all_saved() -> list:
     return _all()
 
 
-def listing(today, published_at=None) -> list:
+def listing(today, published_at=None, kinds=None, in_charge=None) -> list:
     """one row per schedule, newest first; today (the caller's: app._exams_today) gives the label's 'Ended', published_at
-    the 'retimed' flag"""
+    the 'retimed' flag; kinds keeps only those kinds, in_charge only the events whose teacher in charge that is. An event
+    row adds in_charge, where, classes and n_going, and is never 'retimed' (it has no times of its own)"""
     rows = []
     for s in _all():
+        if kinds is not None and s.get("kind") not in kinds:
+            continue
+        if in_charge is not None and (s.get("kind") != EVENT or s.get("in_charge") != in_charge):
+            continue
         st = s.get("status") or "draft"
         ap = s.get("approved")
         read = ap if st in ("approved", "changes") and ap else s
-        rows.append(dict(id=s["id"], kind=s.get("kind"), name=s.get("name"), levels=s.get("levels"), start=s.get("start"), end=s.get("end"),
+        event = s.get("kind") == EVENT
+        more = dict(in_charge=s.get("in_charge"), where=place(s), classes=list(s.get("classes") or []), n_going=len(s.get("going") or [])) if event else {}
+        rows.append(dict(more, id=s["id"], kind=s.get("kind"), name=s.get("name"), levels=s.get("levels"), start=s.get("start"), end=s.get("end"),
                          papers=len(s.get("papers") or []), status=s.get("status"), saved_at=s.get("saved_at"), label=_approval.label(s, today),
                          note=s.get("note") or "", sent_by=s.get("sent_by"), sent_at=s.get("sent_at"), approved_at=s.get("approved_at"),
                          on_site=[ap["start"], ap["end"]] if ap else None,
-                         retimed=st in ("waiting", "approved", "changes") and _approval.retimed(read, published_at), _c=s.get("created_at") or ""))
+                         retimed=not event and st in ("waiting", "approved", "changes") and _approval.retimed(read, published_at), _c=s.get("created_at") or ""))
     rows.sort(key=lambda r: r["saved_at"] or r["_c"], reverse=True)
     for r in rows: r.pop("_c")
     return rows
