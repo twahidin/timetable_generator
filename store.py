@@ -126,13 +126,16 @@ def _by(by):
     import history
     return by or history.by_of(None, "?")
 
+def _warn(e):
+    print("warning: the history could not be written (" + type(e).__name__ + ")", file=sys.stderr)
+
 def _record(entries):
     """write history entries; a failure here never stops the setup change that is already made"""
     try:
         import history
         history.add_many(entries)
     except Exception as e:
-        print("warning: the history could not be written (" + type(e).__name__ + ")", file=sys.stderr)
+        _warn(e)
 
 def save_setup(spec):
     return replace_setup(spec, "Saved")
@@ -183,7 +186,7 @@ def apply_changes(ops, client, check=None, since=None, filter=None, by=None):
         import history
         batch = "b" + os.urandom(4).hex()
         try: entries = history.setup_entries(copy.deepcopy(cur["spec"]), ops, by, batch, cur["v"] + 1)
-        except Exception: entries = []
+        except Exception as e: entries = []; _warn(e)
         entries += _refused_entries(all_ops, refused, by, cur["v"] + 1)
         sync.apply(cur["spec"], ops)
         cur["v"] += 1
@@ -201,7 +204,7 @@ def apply_changes(ops, client, check=None, since=None, filter=None, by=None):
                 try:
                     for e in history.setup_entries(before, pops, history.by_of(None, "app"), batch, cur["v"]):
                         entries.append(dict(e, kind="app", **{"as": "The app"}, via="app", follows=batch))
-                except Exception: pass
+                except Exception as e: _warn(e)
         _stamp(); _write_setup()
         _record(entries)
         return cur["v"], refused, mine

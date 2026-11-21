@@ -1,5 +1,5 @@
 """Plain-assert tests for the history file: .venv/bin/python tests/test_history.py"""
-import copy, datetime, os, sys, tempfile, time
+import contextlib, copy, datetime, io, os, sys, tempfile, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 os.environ.update(DATA_DIR=DATA, AI_API_KEY="")
@@ -249,11 +249,30 @@ def history_failure_does_not_stop_the_change():
     real = H.add_many
     def boom(es): raise OSError("disk")
     H.add_many = boom
+    err = io.StringIO()
     try:
         v0 = store.setup_record()["v"]
-        v, _, _ = store.apply_changes([["school", "timetable", "Term 5"]], "c1")
+        with contextlib.redirect_stderr(err):
+            v, _, _ = store.apply_changes([["school", "timetable", "Term 5"]], "c1")
     finally:
         H.add_many = real
     assert v == v0 + 1 and store.setup_record()["spec"]["school"]["timetable"] == "Term 5"
+    assert err.getvalue() == "warning: the history could not be written (OSError)\n", err.getvalue()
+
+@t
+def entry_building_failure_is_not_silent():
+    _setup_in_store()
+    real = H.setup_entries
+    def boom(*a, **k): raise ValueError("secret-ish contents")
+    H.setup_entries = boom
+    err = io.StringIO()
+    try:
+        v0 = store.setup_record()["v"]
+        with contextlib.redirect_stderr(err):
+            v, _, _ = store.apply_changes([["school", "timetable", "Term 4"]], "c1")
+    finally:
+        H.setup_entries = real
+    assert v == v0 + 1 and store.setup_record()["spec"]["school"]["timetable"] == "Term 4"
+    assert err.getvalue() == "warning: the history could not be written (ValueError)\n", err.getvalue()
 
 print(f"{COUNT} history tests passed")
