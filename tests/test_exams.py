@@ -10,6 +10,7 @@ import app as A, access, store  # noqa: E402
 from relief import calendar as C  # noqa: E402
 from exams import settings as ES, fake as F, days as D, schedules as SC, papers as P  # noqa: E402
 from exams import seating as SE, invigilate as IV, make as MK, approval as AP, printouts as PR  # noqa: E402
+import exams.published as PB  # noqa: E402
 from datetime import date  # noqa: E402
 
 def raises(exc, f, text=None):
@@ -1138,9 +1139,10 @@ def the_pages_carry_the_words():
 
 NOW = "2026-10-01T09:00:00"
 
-def _approved(access=None):
-    s = _mk(_made_sched())
+def _approved(access=None, rooms=None):
+    s = _made_sched()
     if access is not None: s["access"] = list(access)
+    s = _mk(s) if rooms is None else _mk(s, rooms=rooms)
     AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
     AP.approve(s, "Timetable committee", NOW)
     return s
@@ -1619,6 +1621,133 @@ def a_draft_with_a_null_log_still_sends():
         assert c.put("/api/exams/" + id, json=SC.load(id)).status_code == 200
         assert SC.load(id)["log"] == []
         assert c.post(f"/api/exams/{id}/send").status_code == 200
+
+
+import json  # noqa: E402
+A1 = AP.as_schedule(_approved())
+D5 = "2026-10-05"
+
+@t
+def merged_view_matches_day_view():
+    s = _made_sched()
+    d = date(2026, 10, 5).isoformat()
+    assert D.merged_view(_PUB, F.CAL, [s], d)["lessons"] == D.day_view(_PUB, F.CAL, s, d)["lessons"]
+    m = D.merged_view(_PUB, F.CAL, [s], d)
+    assert m["date"] == d and m["day"] == "Odd Mon"
+
+@t
+def day_layer_from_the_approved_copy():
+    e = PB.day(_PUB, F.CAL, [A1], D5, True)
+    assert e["day"] == "Odd Mon"
+    e = e["exams"]
+    assert e["stopped"] == [0, 1, 3, 4] and e["shortened"] == [], e
+    a = e["classes"]["3A"]
+    assert [(x["start"], x["end"], x["label"], x["room"], x["seat_note"]) for x in a] == [
+        ("07:50", "08:50", "Sec 3 English Paper 1", "3-01", ""), ("10:00", "11:00", "Sec 3 Pure Chemistry Paper 1", "3-01", "")], a
+    assert a[0]["p"] == 0.5 and a[0]["n"] == 3.0 and a[0]["exam"] == "Sec 3 End-of-Year Exam", a[0]
+    assert len(e["classes"]["3B"]) == 1 and e["classes"]["3B"][0]["room"] == "3-02" and "4A" not in e["classes"]
+    assert e["teachers"]["Ms Aisha Rahman"] == [dict(start="07:35", end="09:00", label="Sec 3 English Paper 1", room="3-01",
+                                                      role="Invigilate", exam="Sec 3 End-of-Year Exam", p=0.0, n=4.0)], e["teachers"]["Ms Aisha Rahman"]
+    assert set(e["rooms"]) == {"3-01", "3-02"} and e["banner"] == "Sec 3 End-of-Year Exam"
+    assert e["rooms"]["3-02"][0]["exam"] == "Sec 3 End-of-Year Exam" and "room" not in e["rooms"]["3-02"][0]
+
+@t
+def student_code_sees_no_names_or_duty_rooms():
+    acc = [dict(student="3A-05", extra=25, own_room=True, reader=False, scribe=False, note="")]
+    s = AP.as_schedule(_approved(access=acc, rooms=("3-01", "3-02", "4-01", "Hall", "3-11")))
+    full = PB.day(_PUB, F.CAL, [s], D5, True)["exams"]
+    assert "3-11" in json.dumps(full["rooms"]), "the access room is a duty room for staff"
+    out = PB.day(_PUB, F.CAL, [s], D5, False)
+    e = out["exams"]
+    assert e["teachers"] == {} and e["rooms"] == {}, e
+    a = e["classes"]["3A"][0]
+    assert a["room"] == "3-01" and a["seat_note"] == "", a
+    text = json.dumps(out)
+    assert "3-11" not in text and "Aisha" not in text and "Chloe" not in text, text
+    lst = PB.listing(_PUB, [s], date(2026, 10, 1), False)
+    assert "roster" not in lst["schedules"][0] and "prints" not in lst["schedules"][0] and "3-11" not in json.dumps(lst)
+
+@t
+def not_a_school_day_is_empty():
+    for d in ("2026-10-12", "2026-12-01"):
+        out = PB.day(_PUB, F.CAL, [A1], d, True)
+        assert out["day"] is None and out["exams"] == dict(classes={}, stopped=[], shortened=[], teachers={}, rooms={}, banner=""), out
+
+@t
+def two_approved_schedules_on_one_date():
+    b = SC.new("exam", "Sec 4 Exam", ["Sec 4"], D5, D5, "Ms Grace Yeo", pub=_PUB)
+    b.update(papers=[_paper(level="Sec 4", subject="English", date=D5, start="07:50", who="level")], days={D5: dict(levels=["Sec 4"], whole=True)},
+             access=[])
+    b = MK.make(_PUB, F.CAL, b, _xset(("3-01", "3-02", "4-01", "Hall")), elsewhere=[])
+    AP.send(b, _M, "Ms Grace Yeo", NOW, False, [])
+    AP.approve(b, "Timetable committee", NOW)
+    e = PB.day(_PUB, F.CAL, [A1, AP.as_schedule(b)], D5, True)["exams"]
+    assert e["stopped"] == [0, 1, 2, 3, 4, 5, 6, 7, 8], e["stopped"]
+    assert set(e["classes"]) == {"3A", "3B", "4A"} and e["banner"] == "Sec 3 End-of-Year Exam · Sec 4 Exam", e["banner"]
+    e = PB.day(_PUB, F.CAL, [A1], D5, True)["exams"]
+    assert 8 not in e["stopped"]
+
+@t
+def unsent_changes_stay_off_the_main_site():
+    s = _approved()
+    for p in s["papers"]:
+        if p["subject"] == "English": p["start"] = "08:00"
+    s = _mk(s)
+    site = [AP.as_schedule(s)]
+    assert s["papers"][0]["start"] == "08:00" and site[0]["papers"][0]["start"] == "07:50"
+    e = PB.day(_PUB, F.CAL, site, D5, True)["exams"]
+    assert e["classes"]["3A"][0]["start"] == "07:50"
+    lst = PB.listing(_PUB, site, date(2026, 10, 1), True)
+    assert lst["schedules"][0]["levels"]["Sec 3"][0]["start"] == "07:50"
+    assert PB.my_exams(_PUB, F.CAL, site, "3A-07", date(2026, 10, 1))["schedules"][0]["papers"][0]["start"] == "07:50"
+
+@t
+def published_listing_and_banner():
+    out = PB.listing(_PUB, [A1], date(2026, 10, 1), True)
+    sc = out["schedules"][0]
+    assert sc["levels"]["Sec 3"] == [dict(date=D5, start="07:50", end="08:50", label="Sec 3 English Paper 1"),
+                                     dict(date=D5, start="10:00", end="11:00", label="Sec 3 Pure Chemistry Paper 1")], sc["levels"]
+    assert sc["roster"][0] == dict(date=D5, start="07:35", end="09:00", room="3-01", label="Sec 3 English Paper 1",
+                                   names=["Ms Aisha Rahman", "Ms Chloe Tan"], chief=None), sc["roster"][0]
+    assert len(sc["roster"]) == 3
+    assert sc["prints"][0] == ["Seating plan", f"/api/published/exams/{A1['id']}/print/seating.pdf"]
+    assert [x[1].split("/")[-1][:-4] for x in sc["prints"]] == list(PB.PRINTS)
+    assert out["banner"] == "Sec 3 End-of-Year Exam: Mon 5 Oct\u2013Tue 6 Oct.", out["banner"]
+    r = PB.listing(_PUB, [A1], date(2026, 10, 1), False)["schedules"][0]
+    assert "roster" not in r and "prints" not in r
+    assert PB.listing(_PUB, [A1], date(2026, 9, 27), True)["banner"] is None
+    assert PB.listing(_PUB, [A1], date(2026, 10, 7), True)["schedules"] == []
+
+@t
+def a_teachers_duties():
+    out = PB.my_duties(_PUB, F.CAL, [A1], "Ms Aisha Rahman", date(2026, 10, 1))
+    assert len(out["schedules"]) == 1 and out["schedules"][0]["minutes"] == 85, out["schedules"]
+    assert out["schedules"][0]["duties"] == [dict(date=D5, start="07:35", end="09:00", room="3-01", label="Sec 3 English Paper 1",
+                                                  students=30, others=["Ms Chloe Tan"], chief=None, role="Invigilate")], out["schedules"][0]["duties"]
+    assert out["lessons"] == [dict(date=D5, start="07:40", end="08:20", classes=["3A"], subject="English")], out["lessons"]
+    iv = PB.my_duties(_PUB, F.CAL, [A1], "Mr Ivan Lee", date(2026, 10, 1))
+    assert iv["lessons"] == [dict(date="2026-10-06", start="07:40", end="08:20", classes=["3A"], subject="English")], iv
+    assert PB.my_duties(_PUB, F.CAL, [A1], "Mr Nobody", date(2026, 10, 1)) == dict(schedules=[], lessons=[])
+
+@t
+def a_students_papers():
+    out = PB.my_exams(_PUB, F.CAL, [A1], "3A-07", date(2026, 10, 1))
+    assert out["schedules"][0]["papers"] == [
+        dict(date=D5, report="07:30", start="07:50", end="08:50", label="Sec 3 English Paper 1", room="3-01", seat="B1", note=""),
+        dict(date=D5, report=None, start="10:00", end="11:00", label="Sec 3 Pure Chemistry Paper 1", room="3-01", seat="B1", note="")], out
+    assert PB.my_exams(_PUB, F.CAL, [A1], "3B-15", date(2026, 10, 1))["schedules"] == []
+    acc = [dict(student="3A-05", extra=25, own_room=True, reader=False, scribe=False, note="")]
+    s = AP.as_schedule(_approved(access=acc, rooms=("3-01", "3-02", "4-01", "Hall", "3-11")))
+    p = PB.my_exams(_PUB, F.CAL, [s], "3A-05", date(2026, 10, 1))["schedules"][0]["papers"][0]
+    assert (p["room"], p["seat"], p["end"]) == ("3-11", "A1", "09:05"), p
+    q = _made_sched()
+    q["papers"] = [q["papers"][0]]
+    q["days"] = {D5: dict(levels=["Sec 3"], whole=False, **{"from": "07:40", "to": "09:00"})}
+    q = _mk(q)
+    AP.send(q, _M, "x", NOW, False, [])
+    AP.approve(q, "x", NOW)
+    p = PB.my_exams(_PUB, F.CAL, [AP.as_schedule(q)], "3A-07", date(2026, 10, 1))["schedules"][0]["papers"][0]
+    assert p["report"] == "07:30" and p["note"] == "then lessons from 09:00", p
 
 
 print(f"{COUNT} exams tests passed")
