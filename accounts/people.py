@@ -1,5 +1,5 @@
 """The accounts file: one record per person, keyed by name. update() is the only write path."""
-import copy, datetime, os, threading
+import copy, datetime, os, sys, threading
 import store
 from relief import people as _relief
 
@@ -12,7 +12,7 @@ SHARED = ("committee", "head", "teacher", "student")
 _lock = threading.RLock()
 
 def blank():
-    return {"people": {}, "ways": {"off": {r: None for r in SHARED}, "recovery_used": []}, "moved": None}
+    return {"people": {}, "ways": {"off": {r: None for r in SHARED}, "recovery_used": []}, "moved": None, "migrated": False}
 
 def _defaults():
     return {"group": None, "depts": [], "extras": {"relief": False, "exams": None, "admin": False}, "username": None, "pw": None,
@@ -74,6 +74,7 @@ def _fill(d):
         if isinstance(w.get("off"), dict): b["ways"]["off"].update(w["off"])
         if isinstance(w.get("recovery_used"), list): b["ways"]["recovery_used"] = w["recovery_used"]
     b["moved"] = d.get("moved")
+    b["migrated"] = d.get("migrated") is True
     return b
 
 def update(fn):
@@ -131,3 +132,64 @@ def sweep(data, today):
         if isinstance(ex, dict) and isinstance(ex.get("exams"), str) and ex["exams"] < iso:
             ex["exams"] = None; out.append(n)
     return out
+
+
+def _names(v):
+    out = []
+    for n in v if isinstance(v, list) else []:
+        n = n.strip() if isinstance(n, str) else ""
+        if n and n not in out: out.append(n)
+    return out
+
+def migrate(pub, relief_raw):
+    """once: relief's own three lists (as stored) become groups and extras here. -> the lines it did, or None when nothing
+    moved (already done, nothing stored, or a Management name that needs the published timetable while none is published)"""
+    raw = relief_raw if isinstance(relief_raw, dict) else {}
+    mgmt, team = _names(raw.get("management")), _names(raw.get("team"))
+    extra = []
+    for x in raw.get("extra_staff") if isinstance(raw.get("extra_staff"), list) else []:
+        n = str(x.get("name") or "").strip() if isinstance(x, dict) else ""
+        if n and all(n != e[0] for e in extra): extra.append((n, x["note"] if isinstance(x.get("note"), str) else ""))
+    if not (mgmt or team or extra) and not os.path.exists(PATH): return None   # nothing to move, and no file to mark
+    if mgmt and not pub: return None                                            # their roles are on the published timetable: try again later
+    rows = {}
+    for t in (((pub or {}).get("model") or {}).get("setup") or {}).get("teachers") or []:
+        n = str(t.get("name") or "").strip()
+        if n and n not in rows: rows[n] = t
+    from ttgen import spec
+    lines, touched = [], []
+    def run(d):
+        if d.get("migrated"): return None
+        d["moved"] = lines
+        mine = set()
+        def rec(n):
+            r = record(d, n); d["people"][n] = r
+            if n not in touched: touched.append(n)
+            return r
+        for n, note in extra:
+            r = rec(n); r["added"] = True; r["note"] = note or r["note"]
+            if r["group"] is None: r["group"] = "executive"; mine.add(n)
+            lines.append(f"{n}: Executive, added (from relief's extra staff)")
+        for n in mgmt:
+            r = rec(n)
+            if r["group"] is not None and n not in mine:
+                lines.append(f"{n}: stays {LABELS[r['group']]} (relief's Management list)"); continue
+            row, role = rows.get(n), ""
+            if row: role = str(row.get("role") or "").strip().upper()
+            if role in ("HOD", "SH"):
+                r["group"] = role.lower(); r["depts"] = spec.teacher_depts(row)
+                lines.append(f"{n}: {role} (from relief's Management list)")
+            else:
+                r["group"] = "leader"; lines.append(f"{n}: School leader (from relief's Management list)")
+        for n in team:
+            rec(n)["extras"]["relief"] = True
+            lines.append(f"{n}: Relief team (from relief's Team list)")
+        d["migrated"] = True
+        return list(lines)
+    out = update(run)
+    if out:
+        import history
+        try: history.add({"kind": "account", "what": "moved", "people": touched, "changes": [], "text": "Moved from relief's lists",
+                          "who": None, "as": "The app", "via": "app"})
+        except Exception as e: print(f"WARNING: the move of relief's lists could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+    return out or None

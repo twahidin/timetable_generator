@@ -139,7 +139,7 @@ def fresh():
     if os.path.exists(S.PATH): os.remove(S.PATH)
 
 def base(**kw):
-    d = dict(management=[], team=[], extra_staff=[], calendar=TERM4)
+    d = dict(calendar=TERM4)
     d.update(kw); return d
 
 @t
@@ -155,8 +155,8 @@ def defaults_pick_the_adjunct_role_and_the_schools_rules():
 @t
 def save_and_load_round_trip():
     fresh()
-    out = S.save(base(management=["Ms Grace Wong"], team=["Mr Darren Lim", "Mdm Office Staff"], extra_staff=[dict(name="Mdm Office Staff", note="")]), PUB, "Timetable committee")
-    assert out["management"] == ["Ms Grace Wong"] and out["team"] == ["Mr Darren Lim", "Mdm Office Staff"]
+    out = S.save(base(limits=dict(never=["Ms Grace Wong"])), PUB, "Timetable committee")
+    assert out["limits"]["never"] == ["Ms Grace Wong"] and not {"management", "team", "extra_staff"} & set(out)
     assert out["calendar"] == TERM4 and out["saved_by"] == "Timetable committee" and out["saved_at"] and out["missing"] == []
     assert S.load(PUB) == out
     assert S.PATH.startswith(os.path.join(DATA, "relief"))
@@ -167,12 +167,7 @@ def save_refuses_with_one_plain_sentence():
     fresh()
     def bad(text, **kw):
         raises(ValueError, lambda: S.save(base(**kw), PUB, "x"), text)
-    bad("Ms Nobody is not on the published timetable or the staff list.", team=["Ms Nobody"])
-    bad("Ms Nobody is not on the published timetable or the staff list.", management=["Ms Nobody"])
     bad("Ms Nobody is not on the published timetable or the staff list.", limits=dict(never=["Ms Nobody"]))
-    bad("A staff member needs a name.", extra_staff=[dict(name=" ", note="")])
-    bad("Mdm Office Staff is on the staff list twice.", extra_staff=[dict(name="Mdm Office Staff"), dict(name="Mdm Office Staff")])
-    bad("Ms Grace Wong is already a teacher on the timetable.", extra_staff=[dict(name="Ms Grace Wong")])
     bad("There is no role Boss on step 4.", fat_role="Boss")
     long_rule = "Keep each rule under 300 characters, at most 20 rules, none empty."
     bad(long_rule, rules=["x"] * 21)
@@ -192,18 +187,18 @@ def save_refuses_with_one_plain_sentence():
     bad("Check the dates of Deepavali.", calendar=dict(terms=[], holidays=[dict(name="Deepavali", start="2026-10-23", end="2026-10-22")]))
     bad("Check the dates of Deepavali.", calendar=dict(terms=[], holidays=[dict(name="Deepavali", start="soon", end="2026-10-22")]))
     assert not os.path.exists(S.PATH)
-    S.save(base(limits=dict(fat_per_day=None, other_per_day=5), fat_role="", extra_staff=[dict(name="Mdm Office Staff")], team=["Mdm Office Staff"], bogus=1), PUB, "x")
+    S.save(base(limits=dict(fat_per_day=None, other_per_day=5), fat_role="", bogus=1), PUB, "x")
     got = S.load(PUB)
     assert got["limits"]["fat_per_day"] is None and got["limits"]["other_per_day"] == 5 and "bogus" not in got
 
 @t
 def a_name_gone_from_the_timetable_is_missing_not_fatal():
     fresh()
-    S.save(base(team=["Mr Darren Lim"]), PUB, "x")
+    S.save(base(limits=dict(never=["Mr Darren Lim"])), PUB, "x")
     pub2 = P.fake_pub([dict(name="Ms Evelyn Koh", dept="Science")])
     got = S.load(pub2)
-    assert got["team"] == [] and got["missing"] == ["Mr Darren Lim"]
-    assert store.read_json(S.PATH)["team"] == ["Mr Darren Lim"]
+    assert got["limits"]["never"] == [] and got["missing"] == ["Mr Darren Lim"]
+    assert store.read_json(S.PATH)["limits"]["never"] == ["Mr Darren Lim"]
 
 UNREAD = "The settings could not be read. Reload the page and try again."
 NAMELESS = "Give each term and holiday a name."
@@ -213,8 +208,7 @@ def save_refuses_the_wrong_json_types():
     fresh()
     for new in ([], None, "settings", 5):
         raises(ValueError, lambda: S.save(new, PUB, "x"), UNREAD)
-    cases = [dict(team=None), dict(management="Ms Grace Wong"), dict(team=[["Mr Darren Lim"]]), dict(extra_staff=dict(name="Mdm Office Staff")),
-             dict(extra_staff=["Mdm Office Staff"]), dict(extra_staff=[dict(name=["Mdm Office Staff"])]), dict(rules="Use planned relief first."),
+    cases = [dict(rules="Use planned relief first."),
              dict(rules=None), dict(rules=[["x"]]), dict(limits=[["fat_per_day", 3]]), dict(limits=None), dict(limits=dict(never="Ms Grace Wong")),
              dict(limits=dict(never=None)), dict(times=[]), dict(times=None), dict(calendar=[]), dict(calendar=None), dict(calendar=dict(terms=["Term 4"], holidays=[])),
              dict(calendar=dict(terms=None, holidays=[])), dict(calendar=dict(terms=[], holidays=[["Deepavali"]])), dict(calendar=dict(terms=[], holidays=None)),
@@ -224,6 +218,7 @@ def save_refuses_the_wrong_json_types():
     assert not os.path.exists(S.PATH)
     S.save(base(fat_role=None, limits=dict(other_per_day=None)), PUB, "x")       # an empty value is not a wrong type
     assert S.load(PUB)["fat_role"] == ""
+    S.save(base(team=None, management="Ms Grace Wong", extra_staff=["junk"]), PUB, "x")       # the old lists are ignored, whatever they hold
 
 @t
 def a_term_or_holiday_needs_a_name_before_its_dates():
@@ -283,10 +278,10 @@ def a_staff_code_signs_in_as_that_person():
         r = c.get("/"); assert r.status_code == 302 and r.headers["Location"].endswith("/home")   # a person's front door: their tiles
         with A.app.test_request_context():
             A.session["role"], A.session["who"] = "staff", "Mr Darren Lim"
-            p = A.me_staff(); assert p["name"] == "Mr Darren Lim" and p["depts"] == ["Science"], p
-            A.session["who"] = "Ms Nobody"
-            assert A.me_staff() is None and "role" not in A.session and "who" not in A.session
-            A.session["role"] = "teacher"; assert A.me_staff() is None and A.session["role"] == "teacher"
+            p = A.who(); assert p["name"] == "Mr Darren Lim" and p["depts"] == ["Science"], p
+            A.session["who"] = "Ms Nobody"; A.g.pop("_signed", None)
+            assert A.who() is None and "role" not in A.session and "who" not in A.session
+            A.session["role"] = "teacher"; A.g.pop("_signed", None); assert A.who() is None and A.session["role"] == "teacher"
     bad, r = signed_in("ZZZZ-ZZZZ"); assert r.status_code == 401
 
 def timetable_pub(pub):
@@ -395,23 +390,25 @@ def settings_rights_by_the_accounts():
     with published(PUB):
         com = committee()
         r = com.get("/relief"); assert r.status_code == 302 and r.headers["Location"].endswith("/relief/settings")
-        r = com.put("/api/relief/settings", json=base(team=["Mr Darren Lim"], management=["Ms Grace Wong"]))
+        r = com.put("/api/relief/settings", json=base(team=["Ms Evelyn Koh"], management=["Ms Evelyn Koh"], extra_staff=[dict(name="Mr Sent Anyway")]))
         assert r.status_code == 200, r.get_json()
         j = com.get("/api/relief/settings").get_json()
-        assert set(j) == {"settings", "people", "roles", "weeks", "can_save", "can_codes"}, list(j)
+        assert set(j) == {"settings", "lists", "can_admin", "people", "roles", "weeks", "can_save", "can_codes"}, list(j)
+        assert j["lists"] == dict(management=["Ms Grace Wong"], team=["Mr Darren Lim"], added=[]) and j["can_admin"] is False, j["lists"]
+        assert not {"management", "team", "extra_staff"} & set(j["settings"]) and "Mr Sent Anyway" not in str(j["people"])
         assert j["can_save"] is True and j["can_codes"] is True and j["roles"] == ["FAJT"] and j["weeks"] == 2
-        assert j["settings"]["team"] == ["Mr Darren Lim"] and j["settings"]["saved_by"] == "Timetable committee"
+        assert j["settings"]["saved_by"] == "Timetable committee"
         assert [p["name"] for p in j["people"]] == [p["name"] for p in P.people(PUB, [])]
         team, mgmt, plain = staff("Mr Darren Lim"), staff("Ms Grace Wong"), staff("Ms Evelyn Koh")
         assert team.get("/api/relief/me").get_json()["can_settings"] is True and team.get("/api/relief/me").get_json()["on_team"] is True
         m = mgmt.get("/api/relief/me").get_json(); assert m["on_management"] is True and m["can_settings"] is False
         j = team.get("/api/relief/settings").get_json(); assert j["can_save"] is True and j["can_codes"] is False
-        r = team.put("/api/relief/settings", json=base(team=["Mr Darren Lim"], management=["Ms Grace Wong"], rules=["Use planned relief first."]))
+        r = team.put("/api/relief/settings", json=base(rules=["Use planned relief first."]))
         assert r.status_code == 200 and r.get_json()["settings"]["saved_by"] == "Mr Darren Lim", r.get_json()
         assert S.load(PUB)["saved_by"] == "Mr Darren Lim" and S.load(PUB)["rules"] == ["Use planned relief first."]
         j = mgmt.get("/api/relief/settings"); assert j.status_code == 200 and j.get_json()["can_save"] is False
-        r = mgmt.put("/api/relief/settings", json=base(team=["Ms Grace Wong"])); assert r.status_code == 401 and r.get_json() == AGAIN   # a leader may read, not save
-        assert S.load(PUB)["team"] == ["Mr Darren Lim"]
+        r = mgmt.put("/api/relief/settings", json=base(rules=["x"])); assert r.status_code == 401 and r.get_json() == AGAIN   # a leader may read, not save
+        assert S.load(PUB)["rules"] == ["Use planned relief first."]
         for url in ("/api/relief/settings",):                               # a teacher without the Relief team extra: refused by the guard
             assert plain.get(url).status_code == 401 and plain.put(url, json=base()).status_code == 401 and plain.get(url).get_json() == AGAIN
         r = plain.get("/relief/settings"); assert r.status_code == 302 and r.headers["Location"].endswith("/login")
@@ -423,25 +420,105 @@ def settings_rights_by_the_accounts():
         assert tc.get("/api/relief/settings").status_code == 401 and tc.put("/api/relief/settings", json=base()).status_code == 401
         assert tc.get("/relief/settings").headers["Location"].endswith("/login") and tc.get("/api/relief/me").status_code == 401
         # a refused save is a sentence (400), never a server error
-        r = com.put("/api/relief/settings", json=base(team=["Ms Nobody"])); assert r.status_code == 400 and r.get_json()["error"] == "Ms Nobody is not on the published timetable or the staff list."
-        for body in ([], "x", dict(team=None), dict(calendar=dict(terms=["Term 4"]))):
+        r = com.put("/api/relief/settings", json=base(limits=dict(never=["Ms Nobody"]))); assert r.status_code == 400 and r.get_json()["error"] == "Ms Nobody is not on the published timetable or the staff list."
+        for body in ([], "x", dict(limits=None), dict(calendar=dict(terms=["Term 4"]))):
             r = com.put("/api/relief/settings", json=body); assert r.status_code == 400 and r.get_json()["error"] == UNREAD, (body, r.status_code)
         r = com.put("/api/relief/settings", data="not json", content_type="application/json"); assert r.status_code == 400 and r.get_json()["error"] == UNREAD
         r = com.put("/api/relief/settings", json=base(calendar=dict(terms=[dict(name="", start="2026-09-07", end="2026-11-20", starts_as="Odd")], holidays=[])))
         assert r.status_code == 400 and r.get_json()["error"] == NAMELESS
-        # a team member who takes themselves off the team can no longer save
-        r = team.put("/api/relief/settings", json=base(team=["Ms Evelyn Koh"])); assert r.status_code == 200 and r.get_json()["can_save"] is False
-        assert team.put("/api/relief/settings", json=base(team=["Mr Darren Lim"])).status_code == 403
 
 @t
 def settings_rights():
     fresh()
-    # the rights come from the accounts: until relief's lists move there (accounts Task 7), the team member has the Relief
-    # team extra and the management member is a school leader, as the move will make them
-    AP.update(lambda d: (d["people"].setdefault("Mr Darren Lim", {}).update(extras=dict(relief=True, exams=None, admin=False)),
-                         d["people"].setdefault("Ms Grace Wong", {}).update(group="leader")))
+    # the lists come from the accounts: relief's old lists move there (Management a school leader, the team the Relief team extra)
+    AP.update(lambda d: d.update(migrated=False, moved=None))
+    store.write_json(S.PATH, dict(management=["Ms Grace Wong"], team=["Mr Darren Lim"], extra_staff=[]))
+    assert AP.migrate(PUB, store.read_json(S.PATH)) is not None
     try: settings_rights_by_the_accounts()
     finally: AP.update(lambda d: (d["people"].pop("Mr Darren Lim"), d["people"].pop("Ms Grace Wong")))
+
+@t
+def a_relief_team_extra_alone_may_save_and_a_leader_only_read():
+    fresh()
+    AP.update(lambda d: (d["people"].update({"Ms Evelyn Koh": dict(extras=dict(relief=True, exams=None, admin=False))}), d["people"].update({"Mr Darren Lim": dict(group="leader")})))
+    try:
+        with published(PUB):
+            team, lead = staff("Ms Evelyn Koh"), staff("Mr Darren Lim")           # no entry in relief's own lists
+            assert team.put("/api/relief/settings", json=base(rules=["A rule."])).status_code == 200
+            assert S.load(PUB)["rules"] == ["A rule."]
+            assert lead.get("/api/relief/settings").status_code == 200
+            assert lead.put("/api/relief/settings", json=base()).status_code == 401
+            assert team.get("/api/relief/me").get_json() == dict(name="Ms Evelyn Koh", depts=["Science"], on_team=True, on_management=False, can_settings=True)
+            assert lead.get("/api/relief/me").get_json() == dict(name="Mr Darren Lim", depts=["Science"], on_team=False, on_management=True, can_settings=False)
+    finally: AP.update(lambda d: (d["people"].pop("Ms Evelyn Koh"), d["people"].pop("Mr Darren Lim")))
+    fresh()
+
+@t
+def relief_me_answers_a_strong_person():
+    from werkzeug.security import generate_password_hash  # noqa: F401
+    fresh()
+    AP.update(lambda d: d["people"].update({"Mr Hod One": dict(group="hod", depts=["Science"], username="hod.one"), "Ms Com One": dict(group="committee", username="com.one")}))
+    try:
+        for name, group in (("Mr Hod One", "hod"), ("Ms Com One", "committee")):
+            c = A.app.test_client()
+            with published(PUB):
+                with c.session_transaction() as x: x.update(who=name, via="password", exp=9e9, n=0)
+                r = c.get("/api/relief/me"); j = r.get_json()
+                assert r.status_code == 200 and j["name"] == name and j["on_team"] is False and j["on_management"] is (group == "hod"), (name, r.status_code, j)
+                assert j["can_settings"] is (group == "committee")
+    finally: AP.update(lambda d: (d["people"].pop("Mr Hod One"), d["people"].pop("Ms Com One")))
+
+# ---- relief's own lists move into the accounts, once
+def _reset():
+    AP.update(lambda d: d.update(people={}, migrated=False, moved=None))
+
+@t
+def migrate_from_relief():
+    import history
+    pub = P.fake_pub([dict(name="Mr Hod Wong", dept="Science", dept2="Mathematics", role="HOD"), dict(name="Ms Sh Tan", dept="Art", role="sh "),
+                      dict(name="Ms Plain Lee", dept="Art", role="Teacher"), dict(name="Mr Team Ong", dept="Art")])
+    _reset()
+    raw = dict(management=["Mr Hod Wong", "Ms Sh Tan", "Ms Plain Lee", "Mdm Office Staff"], team=["Mr Team Ong", "Mr Hod Wong"],
+               extra_staff=[dict(name="Mdm Office Staff", note="front desk"), dict(name="Mr Driver", note="")])
+    n0 = len(history.read(kinds=['account']))
+    lines = AP.migrate(pub, raw)
+    assert "Mr Hod Wong: HOD (from relief's Management list)" in lines, lines
+    d = AP.load()
+    r = lambda n: AP.record(d, n)
+    assert r("Mr Hod Wong")["group"] == "hod" and r("Mr Hod Wong")["depts"] == ["Science", "Mathematics"] and r("Mr Hod Wong")["extras"]["relief"] is True
+    assert r("Ms Sh Tan")["group"] == "sh" and r("Ms Sh Tan")["depts"] == ["Art"]
+    assert r("Ms Plain Lee")["group"] == "leader" and r("Ms Plain Lee")["depts"] == []
+    assert r("Mdm Office Staff")["group"] == "leader" and r("Mdm Office Staff")["added"] is True and r("Mdm Office Staff")["note"] == "front desk"
+    assert r("Mr Driver")["group"] == "executive" and r("Mr Driver")["added"] is True
+    assert r("Mr Team Ong")["extras"]["relief"] is True and r("Mr Team Ong")["group"] is None
+    assert d["migrated"] is True and d["moved"] == lines and len(lines) == 8, lines
+    assert AP.migrate(pub, raw) is None and AP.load()["moved"] == lines                    # a second call does nothing
+    got = history.read(kinds=["account"]); assert len(got) == n0 + 1, (n0, len(got))
+    e = got[0]; assert e["what"] == "moved" and e["text"] == "Moved from relief's lists" and (e["who"], e["as"], e["via"]) == (None, "The app", "app")
+    assert set(e["people"]) == {"Mr Hod Wong", "Ms Sh Tan", "Ms Plain Lee", "Mdm Office Staff", "Mr Driver", "Mr Team Ong"}
+    _reset()
+    assert AP.migrate(pub, dict(management=[], team=[], extra_staff=[])) is None and AP.load()["migrated"] is True and AP.load()["moved"] == []
+    _reset()
+    assert AP.migrate(None, dict(management=["Mr Hod Wong"])) is None and AP.load()["migrated"] is False      # no published timetable yet: later
+    assert AP.migrate(None, dict(team=["Mr Team Ong"])) == ["Mr Team Ong: Relief team (from relief's Team list)"]
+    _reset()
+
+@t
+def the_routes_move_the_lists_once_and_keep_the_old_file():
+    fresh(); _reset()
+    store.write_json(S.PATH, dict(management=["Ms Grace Wong"], team=["Mr Darren Lim"], extra_staff=[dict(name="Mdm Office Staff", note="")], rules=["Old rule."]))
+    with published(PUB):
+        com = committee()
+        j = com.get("/api/relief/settings").get_json()
+        assert j["lists"] == dict(management=["Ms Grace Wong"], team=["Mr Darren Lim"], added=["Mdm Office Staff"]), j["lists"]
+        assert [p["name"] for p in j["people"]][-1] == "Mdm Office Staff"
+        assert com.put("/api/relief/settings", json=base(rules=["New rule."])).status_code == 200
+        kept = store.read_json(S.PATH)
+        assert kept["management"] == ["Ms Grace Wong"] and kept["team"] == ["Mr Darren Lim"] and kept["extra_staff"] == [dict(name="Mdm Office Staff", note="")] and kept["rules"] == ["New rule."]
+        AP.update(lambda d: d["people"].pop("Mdm Office Staff"))
+        assert A.move_relief_lists() is None                                                     # done once; not done again
+        assert com.get("/api/relief/settings").get_json()["lists"]["added"] == []
+    _reset(); fresh()
 
 @t
 def nothing_published_says_so():
@@ -471,7 +548,7 @@ def codes_off_without_secret_key():
 @t
 def codes_csv_and_slips():
     fresh()
-    S.save(base(extra_staff=[dict(name="Mdm Office Staff", note="admin")]), PUB, "x")
+    AP.update(lambda d: d["people"].setdefault("Mdm Office Staff", {}).update(added=True, group="executive", note="admin"))
     with published(PUB):
         com = committee()
         r = com.get("/api/relief/codes.csv"); assert r.status_code == 200 and r.mimetype == "text/csv"
@@ -479,14 +556,12 @@ def codes_csv_and_slips():
         assert text.startswith("﻿")
         rows = list(csv.reader(io.StringIO(text[1:])))
         assert rows[0] == ["Name", "Department", "Personal code"]
-        ps = P.people(PUB, S.load(PUB)["extra_staff"])
+        ps = AP.staff(PUB)
         assert [x[0] for x in rows[1:]] == [p["name"] for p in ps]
         office = next(x for x in rows if x[0] == "Mdm Office Staff")
         assert office[2] == access.staff_code("Mdm Office Staff") and office[1] == ""
         assert next(x for x in rows if x[0] == "Mr Darren Lim")[1] == "Science"
         r = com.get("/api/relief/code-slips.pdf"); assert r.status_code == 200 and r.data.startswith(b"%PDF") and r.mimetype == "application/pdf"
-        # signing in reads the accounts: until relief's extra staff move there (accounts Task 7), she is added to both
-        AP.update(lambda d: d["people"].setdefault("Mdm Office Staff", {}).update(added=True, group="executive", note="admin"))
         sc = staff("Mdm Office Staff")
         assert sc.get("/api/relief/codes.csv").status_code == 401 and sc.get("/api/relief/code-slips.pdf").status_code == 401
         # signed in with her code, she is that person: an executive, who sees the timetable and has no relief of her own
@@ -505,10 +580,7 @@ def codes_csv_lists_both_departments():
 @t
 def a_name_that_could_be_a_formula_is_refused_and_never_reaches_the_csv_as_one():
     fresh()
-    for ch in "=+-@":
-        raises(ValueError, lambda: S.save(base(extra_staff=[dict(name=f" {ch}HYPERLINK(1)", note="")]), PUB, "x"), f"A name cannot start with {ch}.")
-    assert not os.path.exists(S.PATH)
-    S.save(base(extra_staff=[dict(name="Mdm A-Lim", note="")]), PUB, "x")      # a dash inside a name is fine
+    assert S.FORMULA == ("=", "+", "-", "@", "\t", "\r")     # the admin page refuses these at the start of a name (accounts Task 8)
     ppl = [dict(name="=Ms Formula", depts=["+Science", "Mathematics"]), dict(name="@Mr At", depts=["-Art"]), dict(name="Ms Plain", depts=["Science"])]
     rows = list(csv.reader(io.StringIO(RC.codes_csv(ppl)[1:])))
     assert rows[1][:2] == ["'=Ms Formula", "'+Science, Mathematics"] and rows[2][:2] == ["'@Mr At", "'-Art"] and rows[3][:2] == ["Ms Plain", "Science"], [r[:2] for r in rows]   # never the codes
@@ -543,11 +615,8 @@ def settings_edge_cases():
     raises(ValueError, lambda: S.save(base(times=dict(fill_at="25:00")), PUB, "x"), "25:00 is not a time like 15:00.")
     for bad_json in ("[]", '"text"'):
         open(S.PATH, "w").write(bad_json)
-        d = S.load(PUB); assert d["team"] == [] and d["times"]["fill_at"] == "15:00", bad_json
+        d = S.load(PUB); assert d["limits"]["never"] == [] and d["times"]["fill_at"] == "15:00", bad_json
     fresh()
-    raises(ValueError, lambda: S.save(base(extra_staff=[dict(name="N" * 101, note="")]), PUB, "x"), "Keep a name under 100 characters.")
-    raises(ValueError, lambda: S.save(base(extra_staff=[dict(name="Ms Ok", note="n" * 201)]), PUB, "x"), "Keep a note under 200 characters.")
-    S.save(base(extra_staff=[dict(name="N" * 100, note="n" * 200)]), PUB, "x"); fresh()
     rows = list(csv.reader(io.StringIO(RC.codes_csv([dict(name="\tMs Tab", depts=["\rSci"])])[1:])))
     assert rows[1][0] == "'\tMs Tab" and rows[1][1] == "'\rSci", rows[1][:2]
 

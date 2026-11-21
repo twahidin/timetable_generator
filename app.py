@@ -136,7 +136,7 @@ def _must_change_first():
 
 # every right a session can hold (accounts/rights.py gives them); need() refuses any other name when the app starts
 RIGHTS = frozenset({"committee", "setup", "timetable", "files", "history", "codes", "admin", "own", "exams",
-                    "relief", "relief.plan", "relief.settings", "relief.save"})
+                    "relief", "relief.plan", "relief.settings", "relief.save", "relief.team"})
 
 def need(*names):
     """the route needs one of these rights: the server decides, from the records, on every request. Without one, the
@@ -1128,24 +1128,24 @@ ONLY_SETTINGS = "Only the timetable committee and the relief team can change rel
 ONLY_CODES = "Only the timetable committee can download the codes."
 
 def relief_staff(pub):
-    """the people relief knows: the published timetable's teachers and the staff added in the relief settings"""
-    return relief_people.people(pub, relief_settings.load(pub)["extra_staff"])
+    """the people relief knows: the published timetable's teachers and the staff added in the accounts"""
+    return people.staff(pub)
 
-def me_staff(pub=None):
-    """(until Task 7, which uses who()) the person signed in by name while the timetable is published, else None.
-    who() has already ended a code session whose person is no longer on the published timetable; with nothing published
-    (a publish may be swapping folders) there is no one to find, but the session stays"""
-    if not (pub or store.published()): return None
-    return who()
+def move_relief_lists():
+    """relief's own Management, Relief team and extra staff lists move into the accounts, once (a no-op after); never raises:
+    a failure only prints one line"""
+    try: return people.migrate(store.published(), store.read_json(relief_settings.PATH, {}))
+    except Exception as e:
+        print(f"WARNING: relief's lists could not be moved into the accounts ({type(e).__name__})", file=sys.stderr, flush=True)
+        return None
 
 def _relief_rights(pub):
     """(may read the settings, may save them, saved by) for whoever is signed in; None for a person while nothing is
-    published. (Until Task 7) the committee's own right, else relief's lists"""
+    published"""
     if has("committee"): return True, True, "Timetable committee"
-    p = me_staff(pub)
-    if p is None: return None
-    s = relief_settings.load(pub); team = p["name"] in s["team"]
-    return team or p["name"] in s["management"], team, p["name"]
+    p = who()
+    if p is None or not pub: return None
+    return has("relief.settings"), has("relief.save"), by()["as"]
 
 def _no_longer_valid():
     return page("Relief", "<main class='login'><h1>Code no longer valid</h1><p class='muted'>You are not on the published timetable or the relief staff list. Ask the timetable committee for your code.</p><p><a href='/login'>Back</a></p></main>")
@@ -1159,26 +1159,35 @@ def relief_home():
 @app.get("/api/relief/me")
 @need("relief")
 def relief_me():
-    pub = store.published(); p = me_staff(pub)
-    if p is None: return {"error": "Please sign in again."}, 401
-    s = relief_settings.load(pub); team = p["name"] in s["team"]
-    return jsonify(name=p["name"], depts=p["depts"], on_team=team, on_management=p["name"] in s["management"], can_settings=team)
+    p = who()
+    if p is None or not store.published(): return {"error": "Please sign in again."}, 401   # nothing published: a publish is swapping folders
+    return jsonify(name=p["name"], depts=p["depts"], on_team=bool(p["extras"].get("relief")), on_management=p["group"] in people.MANAGEMENT,
+                   can_settings=has("relief.save"))
 
 @app.get("/relief/settings")
 @need("relief.settings")
 def relief_settings_page():
+    move_relief_lists()
     r = _relief_rights(store.published())
     if r is None: return _no_longer_valid()
     if r[1]: return app.send_static_file("relief-settings.html")
     return page("Relief settings", f"<main class='login'><h1>Relief settings</h1><p class='muted'>{esc(ONLY_SETTINGS)}</p><p><a href='/'>Back</a></p></main>"), 403
 
+def _relief_lists(pub):
+    """who is on management, on the relief team and added as extra staff, as the accounts say"""
+    ps = people.staff(pub)
+    return dict(management=[p["name"] for p in ps if p["group"] in people.MANAGEMENT], team=[p["name"] for p in ps if p["extras"].get("relief")],
+                added=[p["name"] for p in ps if p["staff_only"]])
+
 def _relief_settings_reply(pub, settings):
     m = pub["model"]; rights = _relief_rights(pub) or (False, False, None)
-    return jsonify(settings=settings, people=relief_staff(pub), roles=relief_settings.role_names(pub), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=has("codes"))
+    lists = _relief_lists(pub)
+    return jsonify(settings=settings, lists=lists, can_admin=has("admin"), people=relief_people.people(pub, [dict(name=n) for n in lists["added"]]), roles=relief_settings.role_names(pub), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=has("codes"))
 
 @app.get("/api/relief/settings")
 @need("relief.settings")
 def relief_settings_get():
+    move_relief_lists()
     pub = store.published()
     if not pub: return {"error": NO_RELIEF_PUB}, 409
     rights = _relief_rights(pub)
@@ -1189,6 +1198,7 @@ def relief_settings_get():
 @app.put("/api/relief/settings")
 @need("relief.save")
 def relief_settings_put():
+    move_relief_lists()
     pub = store.published()
     if not pub: return {"error": NO_RELIEF_PUB}, 409
     rights = _relief_rights(pub)
@@ -1224,6 +1234,7 @@ def relief_code_slips():
     return send_file(buf, as_attachment=True, download_name="relief code slips.pdf", mimetype="application/pdf")
 
 startup_log()
+move_relief_lists()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=False)

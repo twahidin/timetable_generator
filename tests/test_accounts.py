@@ -64,7 +64,7 @@ def rights_table():
     c = R.rights(person("committee"), "code")
     assert c == base | {"relief", "relief.settings", "relief.save"} and not c & {"committee", "setup", "admin", "history", "codes"}
     assert "relief.plan" in R.rights(person("hod"), "code") and "setup" not in R.rights(person("hod"), "code")
-    assert R.rights(person("executive", relief=True) if False else dict(person("executive"), extras=dict(relief=True, exams=None, admin=False)), "code") == base | {"relief", "relief.settings", "relief.save"}
+    assert R.rights(person("executive", relief=True) if False else dict(person("executive"), extras=dict(relief=True, exams=None, admin=False)), "code") == base | {"relief", "relief.settings", "relief.save", "relief.team"}
     cs = R.rights(person("committee"), "password")
     assert cs == base | {"relief", "relief.settings", "relief.save", "committee", "setup", "history", "codes"}
     assert "admin" in R.rights(dict(person("committee"), extras=dict(relief=False, exams=None, admin=True)), "password")
@@ -143,5 +143,9 @@ def corrupt_record_does_not_break_helpers():
     assert R.rights(f, "password") >= {"setup"}
     assert P.record(d, "Mr Bad")["depts"] == ["Sci"] and P.record(d, "Mr Bad")["signins"] == [1] and P.record(d, "Mr Bad")["group"] is None
     assert P.admins(d) == []
+
+@t
+def the_moved_flag_is_a_real_boolean():
+    assert P.blank()["migrated"] is False and P._fill({"migrated": "yes"})["migrated"] is False and P._fill({"migrated": True, "moved": ["x"]})["moved"] == ["x"]
 
 print(f"{COUNT} accounts tests passed")
