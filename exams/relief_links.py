@@ -303,18 +303,50 @@ def _live_backups(records):
             and isinstance(r.get("teacher"), str)]
 
 
-def _held_elsewhere(records, sid) -> set:
-    """{(teacher, lesson key)} held by a live backup of another schedule (needed or marked not needed), or put in another
-    approved schedule's "Handled ourselves" ({teacher}|{key}): handled on one schedule covers that lesson for every schedule"""
-    out = {(r["teacher"], x["key"]) for r in _live_backups(records) if r["exams"].get("id") != sid
-           for x in r.get("lessons") or [] if isinstance(x, dict) and isinstance(x.get("key"), str)}
+def _sent_elsewhere(records, sid) -> set:
+    """{(teacher, lesson key)} held by a live backup of another schedule (needed or marked not needed)"""
+    return {(r["teacher"], x["key"]) for r in _live_backups(records) if r["exams"].get("id") != sid
+            for x in r.get("lessons") or [] if isinstance(x, dict) and isinstance(x.get("key"), str)}
+
+
+def _handled_elsewhere(sid, links) -> set:
+    """{(teacher, lesson key)} put in another approved schedule's "Handled ourselves" ({teacher}|{key}) while that
+    schedule's approved copy still holds the teacher over the lesson (a duty, or going with the event, overlapping it):
+    handled on one schedule covers that lesson for every schedule. A stale tag (the duty moved, the person replaced, the
+    lesson gone) counts for nothing. links: the published timetable and calendar to read the lesson from (None: none)"""
+    out = set()
+    if links is None or not links.bnds:
+        return out
+    lessons = {}
     for o in _schedules.all_saved():
-        if o.get("id") == sid or not o.get("approved"):
+        if not isinstance(o, dict) or o.get("id") == sid or not o.get("approved"):
             continue
-        for tag in o.get("handled") or []:
-            if isinstance(tag, str) and "|" in tag:
-                out.add(tuple(tag.split("|", 1)))
+        tags = [tuple(t.split("|", 1)) for t in o.get("handled") or [] if isinstance(t, str) and "|" in t]
+        ap = _approval.as_schedule(o) if tags else None
+        if ap is None:
+            continue
+        wins = {}
+        for name, iso, a, z in _windows_of(ap, links.model):
+            wins.setdefault((name, iso), []).append((a, z))
+        for name, key in tags:
+            at = (name, key.split("/", 1)[0])
+            if at not in wins:
+                continue
+            if at not in lessons:
+                try:
+                    lessons[at] = {x["key"]: x for x in _lessons.on_date(links.pub, links.cal, name, datetime.date.fromisoformat(at[1]))}
+                except (ValueError, TypeError, KeyError):
+                    lessons[at] = {}
+            x = lessons[at].get(key)
+            span = links._span(x["p"], x["n"]) if x else None
+            if span and any(a < span[1] and span[0] < z for a, z in wins[at]):
+                out.add((name, key))
     return out
+
+
+def _held_elsewhere(records, sid, links) -> set:
+    """{(teacher, lesson key)} another schedule holds: in its live backup, or handled by it (_handled_elsewhere)"""
+    return _sent_elsewhere(records, sid) | _handled_elsewhere(sid, links)
 
 
 def backups(pub, cal, sched, links, records, today) -> dict:
@@ -332,7 +364,7 @@ def backups(pub, cal, sched, links, records, today) -> dict:
     iso_today = _iso(today)
     handled = {x for x in sched.get("handled") or [] if isinstance(x, str)}
     away = _away_spans(bnds, records)
-    elsewhere = _held_elsewhere(records, sched.get("id"))
+    elsewhere = _held_elsewhere(records, sched.get("id"), links)
     out, seen = {}, set()
     for name, iso, a, z in _windows_of(ap, model):
         if iso < iso_today:
@@ -473,12 +505,12 @@ def mark(items, sched, records, links, today):
     that holds: "handled" (Handled ourselves); "relief" (relief: the name) or "sent" when relief holds it (in a backup of this
     schedule, or as a needed lesson of an absence of the teacher's own: that absence covers it); "stopped" (stopped: why)
     when another approved schedule stops it (links: the other schedules' approved copies, or None); "past" when dated before
-    today; "elsewhere" when another schedule's backup of that person holds it; else "later" (it goes to relief when the
-    schedule is approved). -> items"""
+    today; "handled_elsewhere" when another schedule handled it (_handled_elsewhere); "elsewhere" when another schedule's
+    backup of that person holds it; else "later" (it goes to relief when the schedule is approved). -> items"""
     sid = (sched or {}).get("id")
     iso_today = _iso(today)
     handled = {x for x in (sched or {}).get("handled") or [] if isinstance(x, str)}
-    elsewhere = _held_elsewhere(records, sid)
+    handled_else, elsewhere = _handled_elsewhere(sid, links), _sent_elsewhere(records, sid)
     held = {}
     for r in records or []:
         if not isinstance(r, dict) or r.get("cancelled") or not isinstance(r.get("teacher"), str):
@@ -505,6 +537,8 @@ def mark(items, sched, records, links, today):
             it["state"], it["stopped"] = "stopped", why
         elif str(it.get("date") or "") < iso_today:
             it["state"] = "past"
+        elif k in handled_else:
+            it["state"] = "handled_elsewhere"
         elif k in elsewhere:
             it["state"] = "elsewhere"
         else:

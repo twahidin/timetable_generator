@@ -884,10 +884,11 @@
   }
 
   /* ---------------------------------------------------------------- tab 7: lessons */
-  /* where one backup stands: the sentence for its state, and whether "Handled ourselves" can be ticked (not once it is stopped, past or sent by another schedule) */
+  /* where one backup stands: the sentence for its state, and whether "Handled ourselves" can be ticked (not once it is stopped, past, or sent or handled by another schedule) */
   const BACKUP_STATE = {
     later: () => "Goes to the relief team when approved", sent: () => "Sent to the relief team", relief: l => `Relief: ${l.relief}`,
-    handled: () => "Handled ourselves", stopped: l => `Not happening: ${l.stopped}`, past: () => "In the past", elsewhere: () => "Sent by another schedule"
+    handled: () => "Handled ourselves", stopped: l => `Not happening: ${l.stopped}`, past: () => "In the past", elsewhere: () => "Sent by another schedule",
+    handled_elsewhere: () => "Handled by another schedule"
   };
   const CAN_HANDLE = { later: 1, sent: 1, relief: 1, handled: 1 };
   function backupState(l) {

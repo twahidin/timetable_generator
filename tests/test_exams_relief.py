@@ -882,7 +882,7 @@ def handled_on_one_schedule_covers_every_schedule():
         ok(c.post(f"/api/exams/{a}/handled", json=dict(teacher=DANIEL, key=DKEY, handled=True)))
         assert [len(_backups(a)), len(_backups(b))] == [0, 0], "the other schedule sends nothing for it either"
         item = next(x for x in ok(c.get(f"/api/exams/{b}/view"))["lessons"]["backup"] if x["key"] == DKEY)
-        assert item["state"] == "elsewhere", item
+        assert item["state"] == "handled_elsewhere", item
         assert ok(c.get(f"/api/exams/{b}/review"))["review"]["what"]["backups"] == 0, "not counted on the Approval tab"
         ok(c.post(f"/api/exams/{a}/handled", json=dict(teacher=DANIEL, key=DKEY, handled=False)))
         assert [len(_backups(a)), len(_backups(b))] == [1, 0]
@@ -1026,6 +1026,23 @@ def the_absence_page_shows_not_happening():
     js = open(os.path.join(ROOT, "static", "relief.js"), encoding="utf-8").read()
     row = js[js.index("function lessonRow("):js.index("function fileLink(")]
     assert 'esc("Not happening: " + x.stopped)' in row and "${stop}" in row, "the absence's lesson line says why it is not happening"
+
+@t
+def a_stale_handled_tag_counts_for_nothing():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        a = _made_exam([_duty([DANIEL])])["id"]; _send_approve(c, a)
+        b = _made_exam([_duty([DANIEL])])["id"]; _send_approve(c, b)
+        ok(c.post(f"/api/exams/{a}/handled", json=dict(teacher=DANIEL, key=DKEY, handled=True)))
+        assert [len(_backups(a)), len(_backups(b))] == [0, 0]
+        ok(c.post(f"/api/exams/{a}/away", json=dict(key=DUTY_KEY, room="3-01", away=DANIEL, name=BEN)))
+        assert SC.load(a)["handled"] == [DANIEL + "|" + DKEY], "the tag stays on the first schedule"
+        got = _backups(b)
+        assert len(got) == 1 and got[0]["teacher"] == DANIEL and [x["key"] for x in got[0]["lessons"]] == [DKEY], \
+            "Daniel is off the first schedule's duty: its tag no longer covers his lesson"
+        item = next(x for x in ok(c.get(f"/api/exams/{b}/view"))["lessons"]["backup"] if x["key"] == DKEY)
+        assert item["state"] == "sent", item
 
 
 _clear()
