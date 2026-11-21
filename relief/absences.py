@@ -444,13 +444,16 @@ def needed_again(id, key, by, *, team=False):
 
 
 def choose(id, key, relief_name, by, pub, links=None):
-    """relief_name None or "" takes the choice off; the caller checks the relief.plan right"""
+    """relief_name None or "" takes the choice off; the caller checks the relief.plan right. A lesson an approved exam or
+    event stops (links.stopped) gets no relief teacher (taking one off still works)"""
     pub = _pub(pub)
     with _LOCK:
         r = _editable(id)
         x = _lesson(r, key)
         _past(x)
         if not x["needed"]: raise ValueError("This lesson does not need relief.")
+        stopped = links.stopped(x) if links is not None and relief_name else ""
+        if stopped: raise ValueError(f"This lesson is not happening: {stopped}.")
         if not relief_name:
             x["relief"], x["relief_by"] = None, None
         else:

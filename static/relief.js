@@ -178,6 +178,7 @@
       const side = !cover ? "" : opts.side ? opts.side(r, x) || ""
         : x.relief ? `Relief: <b>${esc(x.relief)}</b>` : `Relief: <span class="muted">the relief team will assign</span>`;
       const changed = x.changed && !r.cancelled && x.date >= RF.today() ? `<div class="ab-changed">The lesson has changed since this was planned</div>` : "";
+      const stop = x.stopped && !r.cancelled ? `<div class="ab-changed">${esc("Not happening: " + x.stopped)}</div>` : "";   /* an approved exam or event stops it */
       const head = `<div class="rf-head"><div><b>${esc(RF.title(x))}</b> <span class="muted">· ${esc(RF.when(x))}</span></div>${side ? `<div class="rf-side small">${side}</div>` : ""}</div>`;
       let body;
       if (!x.needed) {
@@ -185,7 +186,7 @@
         body = `<div class="ab-nn"><span class="muted">${esc(line)}</span>${now && !r.cancelled ? `<button type="button" class="small" data-act="needed" ${M.busy.has(r.id) ? "disabled" : ""}>Needed after all</button>` : ""}</div>`;
       } else body = now ? workEdit(r, x, i) : workRead(r, x);
       const extra = cover && opts.extra ? opts.extra(r, x) || "" : "";
-      return `<div class="rl" data-key="${esc(x.key)}">${head}${changed}${body}${extra}</div>`;
+      return `<div class="rl" data-key="${esc(x.key)}">${head}${changed}${stop}${body}${extra}</div>`;
     }
 
     function fileLink(r, f) {

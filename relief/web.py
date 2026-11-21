@@ -24,7 +24,7 @@ takes {at}: the as_of the What's in list answered (now when left out). Periods a
 import csv, datetime, io, os, threading
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, Response, current_app, jsonify, request, send_file
+from flask import Blueprint, Response, current_app, g as _g, jsonify, request, send_file
 
 import store
 from exams.days import bounds, hhmm
@@ -98,9 +98,13 @@ def _cal(pub):
 
 
 def _links(pub, cal):
-    """what approved exams and events mean for relief (exams.relief_links), imported here to keep the modules apart"""
+    """what approved exams and events mean for relief (exams.relief_links), imported here to keep the modules apart; one per
+    request (relief's routes never change a schedule)"""
     from exams.relief_links import Links
-    return Links.load(pub, cal)
+    got = _g.get("relief_links")
+    if got is None or got.pub is not pub:
+        got = _g.relief_links = Links.load(pub, cal)
+    return got
 
 
 def _sync_exams(pub):
@@ -117,16 +121,24 @@ def _sync_exams(pub):
         current_app.logger.exception("relief: exams sync failed")
 
 
-def _out(r, pub, me, cal=None):
-    """the record as it is sent: lessons marked changed (matches_now), the remarks left out for someone who is only its absent teacher"""
-    v = _absences.matches_now(r, pub, cal if cal is not None else _cal(pub))
+def _out(r, pub, me, cal=None, links=None):
+    """the record as it is sent: lessons marked changed (matches_now) and stopped (why an approved exam or event stops a
+    lesson dated today or later of a record still to come, else ""; links: one per request, built here when None), the
+    remarks left out for someone who is only its absent teacher"""
+    cal = cal if cal is not None else _cal(pub)
+    v = _absences.matches_now(r, pub, cal)
+    today = _lessons.today().isoformat()
+    ahead = not v.get("cancelled") and any(str(d) >= today for d in v.get("dates") or [])
+    if ahead and links is None: links = _links(pub, cal)
+    v["lessons"] = [dict(x, stopped=links.stopped(x) if ahead and str(x.get("date") or "") >= today else "") for x in v["lessons"]]
     if me == r.get("teacher") and me != r.get("by") and not _sees_all(): v.pop("remarks", None)
     return v
 
 
 def _views(records, pub, me):
     cal = _cal(pub)
-    return [_out(r, pub, me, cal) for r in records]
+    links = _links(pub, cal)
+    return [_out(r, pub, me, cal, links) for r in records]
 
 
 def _on_staff(pub, settings, name):

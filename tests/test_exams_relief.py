@@ -998,6 +998,35 @@ def a_lesson_added_to_a_backup_is_new_in_whats_in():
         AB.update_exams(r["id"], {mine[0]["key"]}, mine[1:], None, None, SOON)
         assert AB.load(r["id"])["changed_at"] and new() is True, "a lesson came in: new again"
 
+@t
+def an_absence_sent_before_approval_marks_its_stopped_lesson():
+    _fresh()
+    with published(PUB):
+        d, g = staff(DANIEL), staff(GRACE)
+        j = ok(d.post("/api/relief/absences", json=dict(dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[])))
+        assert [(x["key"], x["needed"], x["stopped"]) for x in j["lessons"]] == [(DKEY, True, "")], j["lessons"]
+        _event()                                            # approved afterwards: 4A is on it 07:40-09:00
+        why = "4A is on " + EVENT
+        x = ok(d.get("/api/relief/absences/" + j["id"]))["lessons"][0]
+        assert x["stopped"] == why and x["needed"] is True, x
+        mine = next(r for r in ok(g.get("/api/relief/absences"))["absences"] if r["id"] == j["id"])
+        assert mine["lessons"][0]["stopped"] == why, "What's in marks it too"
+        url = "/api/relief/absences/%s/lessons/%s/relief" % (j["id"], urllib.parse.quote(DKEY))
+        r = g.put(url, json=dict(relief=CHLOE))
+        assert r.status_code == 400 and r.get_json() == {"error": "This lesson is not happening: %s." % why}, r.get_data(as_text=True)
+        raises(ValueError, lambda: AB.choose(j["id"], DKEY, CHLOE, GRACE, PUB, links=_links()), "This lesson is not happening: %s." % why)
+        assert AB.choose(j["id"], DKEY, BEN, GRACE, PUB)["lessons"][0]["relief"] == BEN, "without links, as before"
+        assert ok(g.put(url, json=dict(relief=None)))["lessons"][0]["relief"] is None, "taking the choice off still works"
+        ok(d.post("/api/relief/absences/%s/cancel" % j["id"], json=dict(why="Better now")))
+        assert ok(d.get("/api/relief/absences/" + j["id"]))["lessons"][0]["stopped"] == "", "a cancelled absence is not marked"
+    _clear()
+
+@t
+def the_absence_page_shows_not_happening():
+    js = open(os.path.join(ROOT, "static", "relief.js"), encoding="utf-8").read()
+    row = js[js.index("function lessonRow("):js.index("function fileLink(")]
+    assert 'esc("Not happening: " + x.stopped)' in row and "${stop}" in row, "the absence's lesson line says why it is not happening"
+
 
 _clear()
 print(f"{COUNT} exams and relief tests passed")
