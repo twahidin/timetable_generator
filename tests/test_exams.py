@@ -1850,5 +1850,17 @@ def timetable_and_me_ask_for_exams():
             assert seen[2]["exams"] is True and seen[2]["mode"] == "personal", seen[2]
     finally: E.render_html = old
 
+@t
+def the_published_page_has_the_date_choice():
+    src = open(os.path.join(ROOT, "ttgen", "timetable_page.html"), encoding="utf-8").read()
+    for words in ("Usual timetable", 'id="onDate"', 'aria-label="Show the timetable on a date"', "Not a school day.",
+                  " is outside the terms or a holiday in the school calendar.", "Lessons that don't happen are crossed out.",
+                  ": no exams or tests. This is the usual ", "See Exams", "No exams or tests on the main site now.", "My exam timetable",
+                  "Roster by day", " (chief)", "/api/day?date=", "/api/published/exams", "/api/me/exams", ".cell.x", ".cell.exam", ".datepick",
+                  "runs ", "Duties and exam rooms count as busy; lessons that don't happen do not."):
+        assert words in src, words
+    skill = open(os.path.join(ROOT, "skill", "school-timetable-generator", "scripts", "ttgen", "timetable_page.html"), encoding="utf-8").read()
+    assert src == skill, "the skill's copy of the page is the same"
+
 
 print(f"{COUNT} exams tests passed")
