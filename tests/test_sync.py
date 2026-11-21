@@ -3,6 +3,7 @@ import copy
 import json
 import os
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -557,6 +558,88 @@ next(x for x in odd["lessons"] if x.get("block") == "Sec 1 Science")["_id"] = ["
 assert split(odd, [["del", "blocks", sci_band["_id"]]], ["SC"]) == ([["del", "blocks", sci_band["_id"]]], [])
 assert split(base, [["set", "lessons", "nope", "subject", "X"]], ["SC"]) == ([["set", "lessons", "nope", "subject", "X"]], [])   # no such row: apply skips it
 assert split(base, [["add", "lessons", "row", ""]], ["SC"]) == ([], [(0, NOSUB)])
+passed += 1
+
+# R9: a head's band may not take the name of another band at its level (the page reads the first band of a name, the
+# solver the last), judged on the batch as the ops before leave it; the shared heads' code as today
+TAKEN = "Another band already has that name."
+assert sync.BAND_NAME_TAKEN == TAKEN
+add_taken = sent(base, new_band("Sec 3 Option X", "Sec 3", ["3A"]))         # the page's own check bypassed
+assert split(base, add_taken, ["MA"]) == ([], [(0, TAKEN)]) and split(base, add_taken, ["SC"]) == ([], [(0, TAKEN)])
+assert sync.head_split(base, add_taken) == (add_taken, [])
+ren_taken = sent(base, rename_band("Sec 1 Science", "Sec 1 Mathematics"))   # an own-only band onto another's name: all of it refused
+assert len(ren_taken) > 1 and split(base, ren_taken, ["SC"]) == ([], [(i, TAKEN) for i in range(len(ren_taken))])
+assert sync.head_split(base, ren_taken) == (ren_taken, [])
+lvl = copy.deepcopy(base)
+lvl["blocks"].append({"_id": "lvlband001", "block": "Sec 1 Science", "level": "Sec 2", "classes": ["2A"]})
+assert split(lvl, [["set", "blocks", sci_band["_id"], "level", "Sec 2"]], ["SC"]) == ([], [(0, TAKEN)])   # onto that name at that level
+assert split(base, [["set", "blocks", sci_band["_id"], "level", "Sec 2"]], ["SC"])[1] == []
+for ops in (sent(base, new_band("Sec 3 Option Q", "Sec 3", ["3A"])), sent(base, new_band("Sec 3 Option X", "Sec 4", ["4A"])),
+            sent(base, rename_band("Sec 1 Science", "Sec 1 Sciences"))):    # a fresh name, or the name at another level
+    assert split(base, ops, ["SC"]) == (ops, []), ops
+freed = copy.deepcopy(base)
+rename_band("Sec 1 Science", "Sec 1 Sciences")(freed)
+batch = sync.diff(base, freed) + sent(freed, new_band("Sec 1 Science", "Sec 1", ["1A"]))      # the name freed earlier in the batch
+assert split(base, batch, ["SC"]) == (batch, [])
+blank2 = copy.deepcopy(base)
+table_band("Sec 2")(blank2)
+sync.ensure_ids(blank2)
+batch = sync.diff(base, blank2) + sent(blank2, table_band("Sec 2"))         # two blank bands: no name to take
+assert split(base, batch, ["SC"]) == (batch, [])
+passed += 1
+
+# R10: another department's provisional teacher is its head's or the committee's (their departments before and after)
+OTEACH = "This teacher is another department's: only its head or the committee can change them."
+assert sync.OTHER_TEACHER == OTEACH
+prov2 = copy.deepcopy(prov)
+prov2["teachers"] += [{"_id": "provt00002", "name": "Typed Other", "dept": "MA", "provisional": "Yes"},
+                      {"_id": "provt00003", "name": "Typed Both", "dept": "SC", "dept2": "MA", "provisional": "Yes"}]
+for op in (["set", "teachers", "provt00002", "name", "Typed X"], ["del", "teachers", "provt00002"], ["set", "teachers", "provt00002", "dept", "SC"],
+           ["set", "teachers", "provt00002", "allowance", 3], ["set", "teachers", "provt00003", "name", "Typed X"], ["del", "teachers", "provt00003"]):
+    assert split(prov2, [op], ["SC"]) == ([], [(0, OTEACH)]), op
+    assert sync.head_split(prov2, [op]) == ([op], []), op
+    assert split(prov2, [op], ["MA", "SC"]) == ([op], []), op
+assert split(prov2, [["set", "teachers", "provt00002", "name", "Typed X"]], ["MA"])[1] == []
+assert split(prov2, [["set", "teachers", "provt00001", "name", "Typed X"]], ["SC"])[1] == []          # their own
+assert split(prov2, [["del", "teachers", "provt00001"]], ["SC"])[1] == []
+assert split(prov2, [["set", "teachers", "provt00001", "dept", "MA"]], ["SC"]) == ([], [(0, TDEPT)])   # out of their department
+added = sent(prov2, new_teacher("Typed Fresh", "MA"))
+sync.head_prepare(added, ["SC"])
+tid = added[0][2]["_id"]
+batch = added + [["set", "teachers", tid, "name", "Typed Fresher"], ["set", "teachers", tid, "allowance", 2], ["del", "teachers", tid]]
+assert split(prov2, batch, ["SC"]) == (batch, [])                  # added earlier in the batch, in their department: theirs to edit
+passed += 1
+
+# a crafted batch cannot keep the judging busy (it runs under the setup's lock): a band change refused whole is judged
+# again at most a few times, then every band change still open is refused whole
+cpm = sample()
+cpm["school"]["parents_subjects"] = ["Mathematics G3"]
+R = next(b for b in cpm["blocks"] if b["block"] == "Sec 1 Mathematics")
+def chain(k, band=R):    # each stage: an own group added to the band, the band deleted, the group released (which today's rules refuse)
+    ops = []
+    for n in range(k):
+        rid = f"chain{n:05d}"
+        ops += [["add", "lessons", dict(_id=rid, level="Sec 1", subject="Mathematics G3", block="Sec 1 Mathematics", classes=["1A"], teachers=[]), ""],
+                ["del", "blocks", band["_id"]], ["set", "lessons", rid, "block", None]]
+    return ops
+ops = chain(400)
+assert len(ops) == 1200
+t0 = time.time()
+ok, refused = sync.head_split(cpm, ops, ["MA"])
+took = time.time() - t0
+assert took < 1, took
+assert ok == ops[0::3] and refused == [(i, WHY) for i in range(len(ops)) if i % 3], (len(ok), refused[:4])
+spec = copy.deepcopy(cpm)
+assert sync.apply(spec, ok) == 0 and sync._find(spec, "blocks", R["_id"]) is not None
+emptycp = copy.deepcopy(empty)
+emptycp["school"]["parents_subjects"] = ["Mathematics G3"]
+R2 = next(b for b in emptycp["blocks"] if b["block"] == "Sec 1 Mathematics")
+clean = [["del", "blocks", eb["_id"]]]                               # an empty band, deleted at the end: a clean band change
+assert split(emptycp, chain(2, R2) + clean, ["MA"]) == (chain(2, R2)[0::3] + clean, [(i, WHY) for i in range(6) if i % 3])   # settled one by one
+assert split(emptycp, chain(3, R2) + clean, ["MA"]) == (chain(3, R2)[0::3], [(i, WHY) for i in range(9) if i % 3] + [(9, WHY)])        # past the cap: refused too
+sci_cpm = next(b for b in cpm["blocks"] if b["block"] == "Sec 1 Science")
+ok, refused = sync.head_split(cpm, ops + [["set", "blocks", sci_cpm["_id"], "note", "x"]], ["MA"])
+assert refused[-1] == (1200, BNOT)                                   # not a band change: judged as ever
 passed += 1
 
 print(f"{passed} cases passed")

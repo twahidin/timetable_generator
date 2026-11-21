@@ -14,6 +14,7 @@ import copy
 import json
 import secrets
 from ttgen import parents
+from ttgen.spec import teacher_depts
 
 LISTS = ("venues", "classes", "subjects", "teachers", "blocks", "lessons",
          "rules", "students", "combinations", "roles", "choices")
@@ -309,6 +310,8 @@ NO_SUBJECT = "Choose a subject of your department for this row first."
 BAND_OTHERS = "This band holds another department's groups: only the committee can rename or delete it."
 BAND_NOT_YOURS = "This band holds none of your department's groups."
 TEACHER_DEPT = "You can put a new teacher only in your own department."
+BAND_NAME_TAKEN = "Another band already has that name."
+OTHER_TEACHER = "This teacher is another department's: only its head or the committee can change them."
 
 
 def _well_formed(op):
@@ -347,6 +350,21 @@ def band_lessons(spec, block_row):
         return []
     name, level = block_row.get("block"), block_row.get("level")
     return [x for x in _rows(spec, "lessons") if isinstance(x, dict) and x.get("block") == name and x.get("level") == level]
+
+
+def _name_taken(spec, row, but=None):
+    """True when another band than `but` on `spec` has the name and level of the band row `row` (a blank name is none)."""
+    if not isinstance(row, dict) or _blank(row.get("block")):
+        return False
+    return any(isinstance(b, dict) and b is not but and b.get("block") == row.get("block") and b.get("level") == row.get("level")
+               for b in _rows(spec, "blocks"))
+
+
+def _band_after(band, op):
+    """The band row as the set or merge `op` would leave it."""
+    one = {"blocks": [copy.deepcopy(band)]}
+    _apply_one(one, op)
+    return one["blocks"][0]
 
 
 def _band_change(spec, op):
@@ -426,24 +444,37 @@ def _dept_why(spec, op, mine, dept):
         return None if dept(row) in mine and dept(after) in mine else OTHER_DEPT
     if section == "blocks":
         if name == "add":
-            return None
+            return BAND_NAME_TAKEN if _name_taken(spec, op[2]) else None
         row = _find(spec, "blocks", op[2])
         groups = band_lessons(spec, row) if row is not None else []
         return None if not groups or any(dept(x) in mine for x in groups) else BAND_NOT_YOURS
     if section == "teachers":
+        def theirs(t):
+            return all(d in mine for d in teacher_depts(t))
         if name == "add":
-            d = op[2].get("dept") if isinstance(op[2], dict) else None
-        elif name == "set" and op[3] == "dept":
-            d = op[4]
-        else:
-            return None
-        return None if _dept_of(d) in mine else TEACHER_DEPT
+            t = op[2] if isinstance(op[2], dict) else {}
+            return None if _dept_of(t.get("dept")) in mine and theirs(t) else TEACHER_DEPT
+        row = _find(spec, "teachers", op[2]) if name in ("set", "del") else None
+        if row is not None and not theirs(row):
+            return OTHER_TEACHER
+        if name == "set" and op[3] == "dept" and _dept_of(op[4]) not in mine:
+            return TEACHER_DEPT
+        if row is not None and name == "set":
+            after = dict(row)
+            if op[4] is None:
+                after.pop(op[3], None)
+            else:
+                after[op[3]] = op[4]
+            if not theirs(after):
+                return OTHER_TEACHER
+        return None    # theirs; or not on the setup: one added earlier in this batch (in their department, as its add is judged), or none (apply skips it)
     return None
 
 
-def _head_pass(spec, ops, mine, forced):
+def _head_pass(spec, ops, mine, forced, rest=None):
     """One pass of head_split: (allowed, refused, mixed). `forced`: band change index -> the sentence its whole group is
-    refused with; `mixed`: the band changes allowed in this pass part of whose group today's rules refused."""
+    refused with; `rest`: the sentence every other band change's whole group is refused with (None: judged as usual);
+    `mixed`: the band changes allowed in this pass part of whose group today's rules refused."""
     allowed, refused, mixed = [], [], {}
     work, copied = spec, set()   # each op is judged on the setup as the allowed ones before it in this batch leave it (a row added, then changed, in one batch)
     group, verdict = {}, {}      # op index -> index of the band change it is judged with; band change index -> its sentence (None: allowed)
@@ -457,7 +488,9 @@ def _head_pass(spec, ops, mine, forced):
                 group[i] = i
                 for j in _carried(ops, i, groups, at, group):
                     group[j] = i
-                verdict[i] = forced.get(i) or (None if all(dept(x) in mine for x in groups) else BAND_OTHERS)
+                verdict[i] = (forced.get(i) or (None if all(dept(x) in mine for x in groups) else BAND_OTHERS)
+                              or (BAND_NAME_TAKEN if op[0] != "del" and _name_taken(work, _band_after(band, op), band) else None)
+                              or rest)
         if mine is not None:
             if why is None:
                 why = verdict[group[i]] if i in group else _dept_why(work, op, mine, dept)
@@ -477,6 +510,9 @@ def _head_pass(spec, ops, mine, forced):
     return allowed, refused, mixed
 
 
+_HEAD_RETRIES = 3
+
+
 def head_split(spec, ops, depts=None):
     """(allowed, refused): the operations in `ops` a head of department may make on `spec`, in order, and the others as
     (index in ops, sentence). Heads may change lessons and blocks, add a teacher, and the details of a teacher who is
@@ -484,15 +520,22 @@ def head_split(spec, ops, depts=None):
 
     `depts`: None for the shared heads' code (every department, as above); else the head's own departments, and then,
     after the rules above: a lesson row only when its department is theirs both as it is and as the op leaves it; a band
-    when it holds one of their groups (or none); a teacher only into their department. A band's rename or delete is
+    when it holds one of their groups (or none), and never under the name of another band at its level; a teacher only
+    one of their departments' (as it is and as the op leaves it), a new one only in them. A band's rename or delete is
     judged with the operations carrying its groups along, as one: all of it when every group in the band is theirs,
     else none (and none when today's rules refuse any of it). Everything else is judged one operation at a time."""
-    mine, forced = _dept_list(depts), {}
-    while True:    # a band change refused whole is judged again from the start: what follows it sees the setup without it
-        allowed, refused, mixed = _head_pass(spec, ops, mine, forced)
+    mine, forced, rest = _dept_list(depts), {}, None
+    for tries in range(_HEAD_RETRIES + 1):
+        # a band change refused whole is judged again from the start, so what follows it sees the setup without it; the
+        # last try refuses every band change still open whole (with the sentence that refused the last), so a crafted
+        # batch costs a few passes, not one per band change (it is judged under the setup's lock)
+        allowed, refused, mixed = _head_pass(spec, ops, mine, forced, rest)
         if not mixed:
-            return allowed, refused
+            break
         forced.update(mixed)
+        if tries == _HEAD_RETRIES - 1:
+            rest = next(iter(mixed.values()))
+    return allowed, refused
 
 
 def head_may(spec, ops, depts=None):
