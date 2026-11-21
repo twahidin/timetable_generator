@@ -136,17 +136,25 @@ def ends(paper, sid, access_by_sid) -> int:
     return _days.minutes(paper["start"]) + math.ceil(round(paper["minutes"] * (1 + extra / 100), 6))
 
 
-def _n(n, one, many):
-    return f"1 {one[0]}" if n == 1 else f"{n} {many[0]}"
+def _students(n, one, many):
+    """'1 student has' / '3 students have': the number once, the noun and verb by number"""
+    return f"1 student {one}" if n == 1 else f"{n} students {many}"
 
 
-def check(sched, model, cal) -> dict:
+def check(sched, model, cal, rules=None) -> dict:
+    """errors and warnings on the paper times; rules: the exams settings' rules (arrive, stay), the defaults when None"""
+    if rules is None:
+        from exams import settings as _settings
+        rules = _settings.defaults()["rules"]
+    arrive, stay = rules.get("arrive") or 0, rules.get("stay") or 0
     errors, warnings = [], []
     dts = {d["date"]: d for d in _days.dates(sched, cal, model)}
+    bnds = _days.bounds(model)
+    day0, day1 = (bnds[0][0], bnds[-1][1]) if bnds else (0, 24 * 60)
     access = {a["student"]: a for a in sched.get("access") or [] if isinstance(a, dict) and a.get("student")}
     times = sched.get("times") or {}
     min_break, max_papers = times.get("min_break", 20), times.get("max_papers", 2)
-    ok = []
+    ok, edges = [], []
     for p in sched.get("papers") or []:
         lb = label(p)
         try:
@@ -166,6 +174,15 @@ def check(sched, model, cal) -> dict:
             if st < e["start"] or st + p["minutes"] > e["end"]:
                 errors.append(f"{lb} runs outside {p.get('level')}'s exam time on {p['date']} "
                               f"({_days.hhmm(e['start'])}–{_days.hhmm(e['end'])}).")
+            else:
+                if e["start"] > day0 and st - e["start"] < arrive:
+                    warnings.append(f"{lb} starts at {_days.hhmm(st)}, less than {arrive} minutes after the exam time begins: "
+                                    f"rooms of lessons just before may be busy.")
+                if e["end"] < day1 and e["end"] - (st + p["minutes"]) < stay:
+                    warnings.append(f"{lb} ends at {_days.hhmm(st + p['minutes'])}, less than {stay} minutes before the exam time "
+                                    f"ends: rooms of lessons just after may be busy.")
+                if e["end"] < day1:
+                    edges.append((p, e["end"]))
         ok.append(p)
     groups = {}
     for p in sched.get("papers") or []:
@@ -176,6 +193,11 @@ def check(sched, model, cal) -> dict:
             if (q["date"], q["start"]) != (ps[0]["date"], ps[0]["start"]):
                 errors.append(f"{label(ps[0])} and {label(q)} share “{name}” but start at different times.")
     sits = {id(p): set(who_sits(p, model)) for p in ok}
+    for p, end in edges:
+        late = sum(1 for sid in sits[id(p)] if sid in access and ends(p, sid, access) > end)
+        if late:
+            warnings.append(f"{_students(late, 'with extra time finishes', 'with extra time finish')} {label(p)} after the exam time "
+                            f"ends on {p['date']}.")
     for date in sorted({p["date"] for p in ok}):
         ps = sorted((p for p in ok if p["date"] == date), key=lambda p: _days.minutes(p["start"]))
         count = {}
@@ -188,7 +210,7 @@ def check(sched, model, cal) -> dict:
                 by_k.setdefault(k, []).append(sid)
         for k in sorted(by_k):
             n = len(by_k[k])
-            warnings.append(f"{_n(n, ('student has',), (f'{n} students have',))} {k} papers on {date}.")
+            warnings.append(f"{_students(n, 'has', 'have')} {k} papers on {date}.")
         for i, a in enumerate(ps):
             for b in ps[i + 1:]:
                 sa, sb = _days.minutes(a["start"]), _days.minutes(b["start"])
@@ -200,10 +222,10 @@ def check(sched, model, cal) -> dict:
                     elif 0 <= sb - ea < min_break:
                         close += 1
                 if clash:
-                    errors.append(f"{_n(clash, ('student has',), (f'{clash} students have',))} {label(a)} and {label(b)} "
+                    errors.append(f"{_students(clash, 'has', 'have')} {label(a)} and {label(b)} "
                                   f"at the same time on {date}.")
                 if close:
-                    warnings.append(f"{_n(close, ('student has',), (f'{close} students have',))} less than {min_break} minutes "
+                    warnings.append(f"{_students(close, 'has', 'have')} less than {min_break} minutes "
                                     f"between {label(a)} and {label(b)} on {date}.")
     pub = dict(model=model)
     for date, e in dts.items():

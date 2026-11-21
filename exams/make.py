@@ -184,7 +184,7 @@ def summary(pub, cal, sched, xset) -> dict:
                   two_a_day=len({sid for (_, sid), n in per_day.items() if n >= 2}), duties=len(duties),
                   backups=sum(len(d["backup"]) for d in duties), short=sum(d["short"] for d in duties),
                   unseated=sum(len(v) for v in (made.get("unseated") or {}).values()))
-    return dict(days=out, counts=counts, checks=_papers.check(sched, model, cal), gone=list(made.get("gone") or []))
+    return dict(days=out, counts=counts, checks=_papers.check(sched, model, cal, xset["rules"]), gone=list(made.get("gone") or []))
 
 
 def lesson_lists(pub, cal, sched) -> dict:

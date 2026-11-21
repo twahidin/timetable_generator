@@ -314,6 +314,42 @@ def check_window_and_together():
     assert "Sec 3 English Paper 1 and Sec 3 Mathematics Paper 1 share \u201cMT2\u201d but start at different times." in r["errors"], r
 
 
+@t
+def count_sentences_say_the_number_once():
+    r = _chk([_paper(who="level", date="2026-10-05", start="07:50"), _paper(subject="Mathematics", who="level", date="2026-10-05", start="09:00"),
+              _paper(subject="Science", who="level", date="2026-10-05", start="10:30")])
+    assert "60 students have 3 papers on 2026-10-05." in r["warnings"], r["warnings"]
+    pcs = [_paper(subject="Pure Chemistry", date="2026-10-05", start="07:50"), _paper(who="level", date="2026-10-05", start="08:55")]
+    aa = [dict(student=x, extra=25, own_room=False, reader=False, scribe=False, note="") for x in ("3A-02", "3A-03")]
+    assert _chk(pcs, access=aa)["errors"] == ["2 students have Sec 3 Pure Chemistry Paper 1 and Sec 3 English Paper 1 at the same time on 2026-10-05."]
+
+@t
+def a_paper_at_the_edge_of_a_part_day_is_warned():
+    d = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "09:40", "to": "10:40"})}
+    r = _chk([_paper(minutes=30, date="2026-10-05", start="09:40")], days=d)
+    assert r["errors"] == [] and r["warnings"] == ["Sec 3 English Paper 1 starts at 09:40, less than 15 minutes after the exam time begins: "
+                                                   "rooms of lessons just before may be busy."], r
+    r = _chk([_paper(minutes=30, date="2026-10-05", start="10:05")], days=d)
+    assert r["warnings"] == ["Sec 3 English Paper 1 ends at 10:35, less than 10 minutes before the exam time ends: "
+                             "rooms of lessons just after may be busy."], r
+    s = _new(); s.update(papers=[_paper(minutes=30, date="2026-10-05", start="10:05")], days=d, access=[])
+    assert P.check(s, _M, F.CAL, dict(arrive=0, stay=0))["warnings"] == []
+    assert _chk([_paper(minutes=30, date="2026-10-05", start="07:40")])["warnings"] == [], "a whole day has no lessons before it"
+    aa = [dict(student=x, extra=50, own_room=False, reader=False, scribe=False, note="") for x in ("3A-02",)]
+    r = _chk([_paper(minutes=40, date="2026-10-05", start="09:50")], days=d, access=aa)
+    assert "1 student with extra time finishes Sec 3 English Paper 1 after the exam time ends on 2026-10-05." in r["warnings"], r
+    aa.append(dict(aa[0], student="3A-03"))
+    r = _chk([_paper(minutes=40, date="2026-10-05", start="09:50")], days=d, access=aa)
+    assert "2 students with extra time finish Sec 3 English Paper 1 after the exam time ends on 2026-10-05." in r["warnings"], r
+
+@t
+def edge_cut_is_warned():
+    import copy
+    m = copy.deepcopy(_M); m["lessons"][0]["n"] = 8
+    s = _new(); s.update(papers=[], access=[], days={"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "07:40", "to": "09:00"})})
+    assert P.check(s, m, F.CAL)["warnings"] == ["On 2026-10-05 the exam time ends in the middle of 1 lesson."]
+    assert P.check(s, _M, F.CAL)["warnings"] == []
+
 def _xset(rooms=None):
     x = ES.defaults()
     full = {"3-01": (40, 6, 7, False, False), "3-02": (40, 6, 7, False, False), "4-01": (40, 6, 7, False, False),
@@ -353,6 +389,12 @@ def rooms_busy_with_running_lessons():
     assert got["LT1"] != "" and got["LT1&2"] != "" and got["LT2"] == "", got
     assert got["3-01"] == "" and got["Hall"] == "", got
     assert SE.rooms_free(_PUB, F.CAL, s, _first(s), _xset(), {"3-02"})[1]["busy"] == "used by another sitting"
+    s9 = _sit([_paper(date="2026-10-05", start="09:00")])
+    got = {r["name"]: r["busy"] for r in SE.rooms_free(_PUB, F.CAL, s9, _first(s9), _xset(), set())}
+    assert got["LT1"] == "Literature with 4A until 09:00 (invigilators arrive 08:45)", got
+    s9 = _sit([_paper(date="2026-10-05", start="09:45", minutes=50)])
+    got = {r["name"]: r["busy"] for r in SE.rooms_free(_PUB, F.CAL, s9, _first(s9), _xset(), set())}
+    assert got["4-01"] == "English with 4A from 10:40 (invigilators stay until 10:45)", got
     s = _sit([_paper(who="level", date="2026-10-05", start="09:00")])
     got = {r["name"]: r["busy"] for r in SE.rooms_free(_PUB, F.CAL, s, _first(s), _xset(), set())}
     assert got["Hall"] == "rain room for PE with 4A", got

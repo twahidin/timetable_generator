@@ -1053,7 +1053,7 @@ def _exam_changed(id, change):
 def _exam_make(pub, s, b):
     model, cal = pub["model"], _exam_cal(pub)
     if not model.get("students"): return {"error": NO_STUDENTS}, 409
-    errors = exams_papers.check(s, model, cal)["errors"]
+    errors = exams_papers.check(s, model, cal, exams_settings.load(pub)["rules"])["errors"]
     if errors: return {"error": f"Fix the paper times first: {errors[0]}"}, 400
     only = b.get("only")
     if only is not None and not isinstance(only, str): raise ValueError(exams_schedules.WRONG)

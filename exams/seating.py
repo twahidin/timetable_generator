@@ -62,6 +62,10 @@ def rooms_free(pub, cal, sched, sitting, xset, taken) -> list:
                 continue
             who = ", ".join(l["classes"])
             if l["room"] == name:
+                if span[1] <= sitting["start"]:   # busy only for the minutes before the paper the invigilators come early
+                    return f"{l['subject']} with {who} until {_days.hhmm(span[1])} (invigilators arrive {_days.hhmm(lo)})"
+                if span[0] >= hi - rules["stay"]:   # busy only for the minutes they stay after the last finish
+                    return f"{l['subject']} with {who} from {_days.hhmm(span[0])} (invigilators stay until {_days.hhmm(hi)})"
                 return f"{l['subject']} with {who} until {_days.hhmm(span[1])}"
             if l.get("rain") == name and (sitting["key"], name) not in anyway:
                 return f"rain room for {l['subject']} with {who}"
