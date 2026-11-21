@@ -1629,9 +1629,9 @@ def history_download():
     if isinstance(f, tuple): return f
     found = history.read(limit=HISTORY_DOWNLOAD_MAX + 1, **f)
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "History"
-    def put(cells):
-        ws.append(cells)
-        for c in ws[ws.max_row]: c.data_type = "s"        # text is never read as a formula
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+    txt = lambda v: ILLEGAL_CHARACTERS_RE.sub("", v)       # Excel refuses control characters
+    def put(cells): ws.append([txt(c) for c in cells])
     put(["Day", "Time", "Who", "Signed in with", "Where", "What", "Was", "Became", "Departments"])
     for e in found[:HISTORY_DOWNLOAD_MAX]:
         day = clock = ""
@@ -1646,6 +1646,8 @@ def history_download():
              str(e.get("text") or ""), history._show(e.get("was")) if setup else "", history._show(e.get("now")) if setup else "",
              ", ".join(str(x) for x in depts) if isinstance(depts, list) else ""])
     if len(found) > HISTORY_DOWNLOAD_MAX: put([HISTORY_MORE])
+    for row in ws.iter_rows():
+        for c in row: c.data_type = "s"                    # text is never read as a formula
     out = io.BytesIO(); wb.save(out); out.seek(0)
     name = datetime.datetime.now(history.SCHOOL_TZ).strftime("history-%Y-%m-%d.xlsx")
     return send_file(out, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=name)

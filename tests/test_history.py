@@ -596,4 +596,25 @@ def download_says_when_there_are_more():
     assert len(_sheet(committee().get("/api/history/download"))["A"]) == 6
 
 
+@t
+def download_of_many_rows_is_quick():
+    fresh()
+    H.add_many([{"kind": "app", "text": f"e{i}"} for i in range(3000)])
+    real = A.HISTORY_DOWNLOAD_MAX; A.HISTORY_DOWNLOAD_MAX = 5000
+    try:
+        t0 = time.time(); r = committee().get("/api/history/download"); took = time.time() - t0
+    finally: A.HISTORY_DOWNLOAD_MAX = real
+    print(f"3000-row download took {took:.2f}s")
+    assert r.status_code == 200 and took < 5, (r.status_code, took)
+    assert len(list(_sheet(r).iter_rows())) == 3001
+
+@t
+def download_drops_characters_excel_refuses():
+    fresh()
+    H.add({"kind": "setup", "who": ANN, "as": "An\x0bn", "where": "Step 4 · Teachers", "text": "te\x01xt", "was": "w\x01", "now": "n\x02"})
+    r = committee().get("/api/history/download")
+    assert r.status_code == 200, r.status_code
+    row = [c.value for c in list(_sheet(r).iter_rows())[1]]
+    assert row[2] == "Ann" and row[5] == "text" and row[6] == "w" and row[7] == "n", row
+
 print(f"{COUNT} history tests passed")
