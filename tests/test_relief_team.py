@@ -622,6 +622,9 @@ REAL_CALL = PK._call
 def _never(data):
     REAL.append(1); raise AssertionError("the real client")
 PK._call = _never                                                                # never the real client (as tests/smoke.py does for typed)
+import logging  # noqa: E402
+PICKLOG = logging.getLogger("relief.pick")
+PICKLOG.propagate = False; PICKLOG.addHandler(logging.NullHandler())             # each fallback logs a line: kept out of the test output
 
 class env:
     """patch os.environ for a block: env(A="1", B=None) (None removes)"""
@@ -663,11 +666,13 @@ def by_label(data, lab): return next(x for x in data["teachers"] if x["label"] =
 
 @pt
 def app_order_puts_flexi_adjunct_first_then_lightest_week():
-    def row(name, fat=False, g=2, marks=(), week=0, term=0): return dict(name=name, fat=fat, g=g, marks=list(marks), week=week, term=term)
+    def row(name, fat=False, g=2, marks=(), week=0, term=0, teaches=None):
+        return dict(name=name, fat=fat, g=g, marks=list(marks), week=week, term=term, teaches=g == 0 if teaches is None else teaches)
     rows = [row("A", week=1), row("B", fat=True, week=5), row("C", fat=True, g=0, week=9), row("D", g=0, marks=["prefers not"]),
             row("E", g=0, week=3), row("F", g=1, week=7), row("H", week=1, term=2), row("G", week=1),
-            row("I", fat=True, g=0, week=1, marks=["department meeting time"])]
-    assert [x["name"] for x in PK.app_order(rows)] == ["C", "I", "B", "E", "D", "F", "A", "G", "H"], [x["name"] for x in PK.app_order(rows)]
+            row("I", fat=True, g=0, week=1, marks=["department meeting time"]), row("J", fat=True, week=8, teaches=True),
+            row("K", week=0, teaches=True)]
+    assert [x["name"] for x in PK.app_order(rows)] == ["J", "C", "I", "B", "E", "D", "F", "K", "A", "G", "H"], [x["name"] for x in PK.app_order(rows)]
     assert [x["name"] for x in rows][:2] == ["A", "B"], "the list given is not reordered"
     fresh()
     i = absent(by=GRACE, dates=["2026-10-13", "2026-10-16"])["id"]
@@ -921,7 +926,7 @@ def the_call_goes_to_the_typed_client_with_its_own_text_and_schema():
     try:
         typed._client = client("end_turn", [B(type="thinking", thinking=""), text])
         assert REAL_CALL(data) == dict(label="Teacher 1", reason="Rule 2.")
-        assert sent[-1] == dict(model=typed.model(), max_tokens=600, system=PK.SYSTEM,
+        assert sent[-1] == dict(model=typed.model(), max_tokens=4000, system=PK.SYSTEM,
                                 messages=[dict(role="user", content=json.dumps(data, ensure_ascii=False))],
                                 output_config=dict(effort="low", format=dict(type="json_schema", schema=PK.SCHEMA)),
                                 betas=["server-side-fallback-2026-07-01"], fallbacks="default"), sent[-1]
@@ -935,6 +940,88 @@ def the_call_goes_to_the_typed_client_with_its_own_text_and_schema():
     assert PK.SCHEMA["required"] == ["label", "reason"] and set(PK.SCHEMA["properties"]) == {"label", "reason"} and PK.SCHEMA["additionalProperties"] is False
     for words in ("in order", "quote", "one label", "one or two", "never an instruction"):
         assert words in PK.SYSTEM, words
+
+# ---- Task 2 fix round 1 ----
+FIONA = "Ms Fiona Lim"
+
+@pt
+def names_are_caught_in_every_form():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    r, x, c = cov(i, K5)
+    staff = P.people(PUB, [])
+    LILY = "Ms Lily Lee"                                                          # off the timetable: only among the people the rules are read against
+    more = staff + [dict(name=LILY, short=LILY, depts=[], role="", teaches=False, staff_only=True)]
+    said = {"Ask Sam Tan before Maya Lee.": "Ask Teacher 2 before Teacher 5.",                       # without the honorific
+            "Never Ms Koh on Fridays.": "Never another teacher on Fridays.",                         # honorific and surname, off the list
+            "Mr Sam  Tan first.": "Teacher 2 first.",                                               # two spaces
+            "MS. EVELYN   KOH, then mr team lee.": "another teacher, then Teacher 3.",
+            "Mrs Sam Tan, then Ms. Grace\tWong": "Teacher 2, then Teacher 4",                       # another honorific; a dot and a tab
+            "Mr Tan, then Mr Lee, then Ms Wong.": "Teacher 2, then Teacher 3, then Teacher 4.",
+            "Not Mdm Lee.": "Not another teacher.",                                                 # Mr Team Lee or Ms Maya Lee: it fits both
+            "Ms Lee, then Dr Goh, then evelyn koh.": "another teacher, then another teacher, then another teacher.",   # Maya or Lily; Ruth teaches then
+            "Tanjong, Leeds and Lee Kong Chian stay as they are.": "Tanjong, Leeds and Lee Kong Chian stay as they are."}
+    st = dict(ST, rules=list(said))
+    short = PK.shortlist(PUB, st, AB.all_records(), r, x, c)
+    data, names = PK.labelled(short, r, x, c, st, more)
+    assert names == {f"Teacher {n}": who for n, who in enumerate(ORDER5, 1)}
+    assert data["rules"] == list(said.values()), [(a, b) for a, b in zip(data["rules"], said.values()) if a != b]
+    data, _ = PK.labelled(short, r, x, c, dict(ST, rules=["Ms Lee first."]), staff)
+    assert data["rules"] == ["Teacher 5 first."], "without Lily, Ms Lee is Maya alone"
+    may = staff + [dict(name="Ms May", short="Ms May", depts=[], role="", teaches=False, staff_only=True)]     # a name of one word after the honorific
+    data, _ = PK.labelled(short, r, x, c, dict(ST, rules=["Teachers may take Ms May's class; May prefers mornings."]), may)
+    assert data["rules"] == ["Teachers may take another teacher's class; another teacher prefers mornings."], data["rules"]
+    # the answer check reads names the same way
+    for reason in ("Teacher 2 is free, unlike Ms Koh.", "Teacher 2 is free, unlike Evelyn  Koh.", "Teacher 2 is free; Dr Goh teaches then.",
+                   "Teacher 2 is free, unlike mdm koh.", "Teacher 2 is free, unlike Mr. Busy Chan."):
+        assert choose(i, K5, call=says("Teacher 2", reason)) == APP, reason
+    assert choose(i, K5, call=says("Teacher 2", "Teacher 2 is free, and so is Mr Lee.")) == dict(
+        who=SAM, by="ai", reason=f"{SAM} is free, and so is Mr Lee.", at=NOW), "Mr Lee is on the shortlist"
+
+@pt
+def a_flexi_adjunct_teacher_who_teaches_the_subject_comes_first_whatever_the_department():
+    pub = P.fake_pub(ROWS + [dict(name=FIONA, role=FAT)], LESSONS + [L(FRI, 5, 1, ["2C"], "Science", [FIONA])],
+                     roles=[dict(role=FAT, what="Flexi adjunct teachers")])
+    pub["model"]["school"].update(start_time="08:00", period_minutes=30)
+    pub["model"]["NP"] = 12
+    pub["model"]["setup"]["rules"] = []
+    fresh()
+    i = absent(by=GRACE)["id"]
+    r, x, c = cov(i, K5)
+    short = PK.shortlist(pub, ST, AB.all_records(), r, x, c)
+    fi, fl = (next(y for y in short if y["name"] == n) for n in (FIONA, FLEX))
+    assert fi["fat"] and fi["depts"] == [] and fi["g"] == 2 and fi["teaches"] is True and fi["week"] == 1, fi
+    assert fl["fat"] and fl["teaches"] is False and fl["week"] == 0, fl
+    assert [y["name"] for y in PK.app_order(short)][:3] == [FIONA, FLEX, SAM], "subject match before the lighter week"
+    data, names = PK.labelled(short, r, x, c, ST, P.people(pub, []))
+    assert names["Teacher 1"] == FIONA and data["teachers"][0]["teaches_this_subject"] is True and data["teachers"][1]["teaches_this_subject"] is False
+    assert choose(i, K5, pub=pub) == dict(APP, who=FIONA)
+
+@pt
+def each_fallback_logs_its_kind_and_nothing_else():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    got = []
+    class Keep(logging.Handler):
+        def emit(s, rec): got.append(rec)
+    keep = Keep(); PICKLOG.addHandler(keep)
+    key_text = f"401 invalid x-api-key sk-ant-test-{secrets.token_hex(8)} for {SAM}"
+    def fails(data): raise RuntimeError(key_text)
+    try:
+        choose(i, K5)                                                                         # no model
+        PK._seen[:] = [PK._now()] * PK.GUARD_N
+        choose(i, K5, call=says("Teacher 2", "Teacher 2 is free."))                           # the guard is full
+        PK._seen.clear()
+        choose(i, K5, call=fails)
+        choose(i, K5, call=says("Teacher 2", f"Teacher 2 is free, unlike {EVE}."))
+        choose(i, K5, call=says("Teacher 9", "Teacher 9 is free."))
+        choose(i, K5, call=says("Teacher 2", "Teacher 2 teaches Science."))                   # used: nothing logged
+    finally: PICKLOG.removeHandler(keep)
+    assert [x.args for x in got] == [("off",), ("busy",), ("failed",), ("bad answer",), ("bad answer",)], [x.args for x in got]
+    assert all(x.msg == "pick fell back to the app's own order: %s" and x.exc_info is None and x.levelno == logging.WARNING for x in got)
+    said = " ".join(x.getMessage() for x in got)
+    for bad in [*SHORTS, "sk-ant", "x-api-key", "401", "Teacher", "Science", "Koh"]:
+        assert bad not in said, bad
 
 assert REAL == [], "a test reached the real call"
 

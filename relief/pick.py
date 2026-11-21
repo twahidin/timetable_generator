@@ -1,14 +1,16 @@
 """The pick for a cover that needs a relief teacher: the app's own order, and the AI's pick from a labelled shortlist, checked.
 
 shortlist: the people free then (free.free_then for the cover's own periods and key) less anyone over a checked limit, with
-the group each is in and the relief they already have that week. labelled: what the model is sent, every teacher as
-"Teacher {n}" (n in the app's order) and every name in the school's rules made the same label, or "another teacher": no
-name, absence reason, remark, reporting officer, work, link or file is in it. ask: one call to the model typed.py uses (the
-same key, model and client) with this module's own SYSTEM, SCHEMA and usage guard. choose_for: the model's label when it is
-on the shortlist and its reason, with the names put back, is 1-300 characters and names nobody off the shortlist; else the
-first teacher in the app's order with APP_ORDER. A model that is off, busy, wrong or failing never raises out of ask or
+the group each is in, whether they teach the subject and the relief they already have that week. labelled: what the model is
+sent, every teacher as "Teacher {n}" (n in the app's order) and every name in the school's rules made the same label, or
+"another teacher": no name, absence reason, remark, reporting officer, work, link or file is in it. Names are caught as
+stored, without the honorific, with another honorific, as honorific and surname ("Ms Koh"), with any spaces between words.
+ask: one call to the model typed.py uses (the same key, model and client) with this module's own SYSTEM, SCHEMA and usage
+guard. choose_for: the model's label when it is on the shortlist and its reason, with the names put back, is 1-300
+characters and names nobody off the shortlist; else the first teacher in the app's order with APP_ORDER, and the kind of
+fallback (only that) is logged to "relief.pick". A model that is off, busy, wrong or failing never raises out of ask or
 choose_for. Nothing here takes absences._LOCK or saves: the caller saves the pick with cover.set_pick."""
-import json, re, threading, time
+import functools, json, logging, re, threading, time
 
 import typed
 from ttgen.spec import family
@@ -24,8 +26,11 @@ OTHER = "another teacher"
 GUARD_N, GUARD_S = 60, 600          # at most 60 picks that reach the model in any 10 minutes, for the whole server
 MAX_REASON = 300
 OFF, BUSY, FAILED = "off", "busy", "failed"     # why ask gave no answer; choose_for says APP_ORDER for each
+BAD = "bad answer"                   # an answer that failed choose_for's check
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+HONORIFICS = ("mr", "mrs", "ms", "miss", "mdm", "dr", "mx")
 CALL = None                          # a stand-in for the model, set by tests (ask's call= comes first)
+_log = logging.getLogger("relief.pick")
 
 SCHEMA = dict(type="object", additionalProperties=False, properties=dict(
     label=dict(type="string", description='exactly one label from the list of teachers, such as "Teacher 2"'),
@@ -82,7 +87,9 @@ def _shortlist(pub, settings, records, record, x, c, staff):
     for d in next((p["depts"] for p in staff if p["name"] == absent), []):              # free_then's titles, in its order
         group.setdefault(f"{d} · teaches {subject}", 0)
         group.setdefault(f"{d} · other subjects", 1)
-    short = [dict(p, g=group.get(g["title"], 2)) for g in got["groups"] for p in g["people"] if not p["over"]]
+    fam = family(subject)
+    short = [dict(p, g=group.get(g["title"], 2), teaches=fam in {family(s) for s in p["subjects"]})
+             for g in got["groups"] for p in g["people"] if not p["over"]]
     if not short: return short
     cal = settings.get("calendar") or {}
     date = _free._date(lesson["date"])
@@ -101,43 +108,83 @@ def _shortlist(pub, settings, records, record, x, c, staff):
 def shortlist(pub, settings, records, record, x, c):
     """the people free for cover c of lesson x in record (free.free_then for the cover's periods and key) less anyone over a
     checked limit; each with g (0: the absent teacher's department and teaches the subject, 1: that department, other
-    subjects, 2: other departments), teaching (periods this week), week_relief, by_day ({"Mon": relief periods, ...} for
-    the school dates of the week) and today_at ([(p, n)] of the relief they have that day); none of it counts this cover"""
+    subjects, 2: other departments), teaches (teaches the lesson's subject, by subject family), teaching (periods this
+    week), week_relief, by_day ({"Mon": relief periods, ...} for the school dates of the week) and today_at ([(p, n)] of
+    the relief they have that day); none of it counts this cover"""
     return _shortlist(pub, settings, records, record, x, c, _people(pub, settings.get("extra_staff")))
 
 
 def app_order(short):
-    """Flexi Adjunct Teachers first, then everyone else; in each, by group, unmarked first, lightest week, least relief this
-    term, then name"""
-    return sorted(short, key=lambda p: (not p["fat"], p["g"], bool(p["marks"]), p["week"], p["term"], p["name"]))
+    """Flexi Adjunct Teachers first, those who teach the subject before those who do not (whatever their department), then
+    everyone else by group; in each, unmarked first, lightest week, least relief this term, then name"""
+    return sorted(short, key=lambda p: (not p["fat"], (not p["teaches"]) if p["fat"] else p["g"], bool(p["marks"]),
+                                        p["week"], p["term"], p["name"]))
+
+
+_TOK = re.compile(r"\w+|[^\w\s.]")       # words and marks; spaces and dots are left out, so any run of them matches
+_WORD = re.compile(r"\w+")
+
+
+@functools.lru_cache(maxsize=16)
+def _table(pairs):
+    """the forms of each (name, short) in pairs -> (folded, exact, longest): folded and exact map a tuple of tokens (folded:
+    in any case, exact: as written) to {level: names}; where a form fits people at several levels, the lowest wins.
+    0: the name as stored (honorific and all), the short name; 1: the name without its honorific; 2: another honorific
+    before it; 3: its honorific and last word ("Ms Koh"); 4: any honorific and the last word. A form of one word (a name
+    without its honorific that is one word) is matched as written, so it does not catch an ordinary word"""
+    folded, exact = {}, {}
+    def put(table, toks, level, name): table.setdefault(tuple(toks), {}).setdefault(level, set()).add(name)
+    for name, short in pairs:
+        toks = _TOK.findall(name)
+        hon = toks[0].casefold() if toks and toks[0].casefold() in HONORIFICS else None
+        rest = toks[1:] if hon else toks
+        if rest:
+            low = [t.casefold() for t in rest]
+            last = next((t for t in reversed(low) if _WORD.fullmatch(t)), None)
+            if hon: put(folded, [hon] + low, 0, name)
+            if len(rest) == 1: put(exact, rest, 1 if hon else 0, name)
+            else:
+                put(folded, low, 1 if hon else 0, name)
+                for h in HONORIFICS: put(folded, [h] + low, 2, name)
+            if last:
+                if hon: put(folded, [hon, last], 3, name)
+                for h in HONORIFICS: put(folded, [h, last], 4, name)
+        s = _TOK.findall(short)
+        if s and short != name: put(exact, s, 0, name)
+    return folded, exact, max((len(k) for t in (folded, exact) for k in t), default=0)
 
 
 def _matcher(staff):
-    """(regex or None, owners): every person's name (in any case) and short name (as written) as whole words, longest
-    first, so a short name inside a longer name is never half-replaced; owners(text) is the set of names it stands for"""
-    folded, exact, pats = {}, {}, {}
-    for p in staff:
-        name, short = str(p.get("name") or "").strip(), str(p.get("short") or "").strip()
-        if name:
-            folded.setdefault(name.casefold(), set()).add(name)
-            pats[f"(?i:{re.escape(name)})"] = len(name)
-        if short and short != name:
-            exact.setdefault(short, set()).add(name)
-            pats[re.escape(short)] = len(short)
-    if not pats: return None, lambda text: set()
-    rx = re.compile(r"(?<!\w)(?:" + "|".join(sorted(pats, key=lambda k: -pats[k])) + r")(?!\w)")
-    return rx, lambda text: exact.get(text, set()) | folded.get(text.casefold(), set())
+    return _table(tuple((str(p.get("name") or "").strip(), str(p.get("short") or "").strip()) for p in staff))
 
 
-def _scrub(text, rx, owners, label):
+def _named(text, table):
+    """[(start, end, names)]: each place text names someone, leftmost and longest first, never overlapping; names is the
+    set of people that form stands for (more than one: it fits several)"""
+    folded, exact, longest = table
+    toks, out, i = list(_TOK.finditer(text)), [], 0
+    while i < len(toks):
+        for n in range(min(longest, len(toks) - i), 0, -1):
+            span = toks[i:i + n]
+            found = {}
+            for table, key in ((folded, tuple(m.group().casefold() for m in span)), (exact, tuple(m.group() for m in span))):
+                for level, who in table.get(key, {}).items(): found.setdefault(level, set()).update(who)
+            if found:
+                out.append((span[0].start(), span[-1].end(), found[min(found)])); i += n
+                break
+        else: i += 1
+    return out
+
+
+def _scrub(text, table, label):
     """every name in text made its label (label = {name: "Teacher n"}) when it stands for one person on the shortlist, else
     "another teacher\""""
-    if rx is None: return text
-    def put(m):
-        who = owners(m.group(0))
+    out, at = [], 0
+    for a, b, who in _named(text, table):
         one = next(iter(who)) if len(who) == 1 else None
-        return label[one] if one in label else OTHER
-    return rx.sub(put, text)
+        out += [text[at:a], label[one] if one in label else OTHER]
+        at = b
+    return "".join(out) + text[at:]
 
 
 def labelled(short, record, x, c, settings, people):
@@ -148,19 +195,19 @@ def labelled(short, record, x, c, settings, people):
     order = app_order(short)
     names = {f"Teacher {i}": p["name"] for i, p in enumerate(order, 1)}
     label = {who: lab for lab, who in names.items()}
-    rx, owners = _matcher(people)
+    table = _matcher(people)
     lim = settings.get("limits") or {}
     date = _free._date(x["date"])
     subject = x.get("subject") or ""
     teachers = [dict(label=label[p["name"]], departments=list(p["depts"]), subjects=list(p["subjects"]),
-                     teaches_this_subject=family(subject) in {family(s) for s in p["subjects"]}, flexi_adjunct=bool(p["fat"]),
+                     teaches_this_subject=bool(p["teaches"]), flexi_adjunct=bool(p["fat"]),
                      teaching_this_week=p["teaching"], relief_this_week=p["week_relief"], relief_today=p["today"],
                      relief_this_term=p["term"], relief_today_at=[_span(q, n) for q, n in p["today_at"]],
                      relief_by_day=dict(p["by_day"]), marks=list(p["marks"])) for p in order]
     data = dict(lesson=dict(subject=subject, level=x.get("level") or "", periods=_span(int(c["p"]), int(c.get("n") or 1)),
                             weekday=WEEKDAYS[date.weekday()], date=date.isoformat()),
                 teachers=teachers,
-                rules=[_scrub(str(r), rx, owners, label) for r in settings.get("rules") or []],
+                rules=[_scrub(str(r), table, label) for r in settings.get("rules") or []],
                 limits=dict(flexi_adjunct_per_day=lim.get("fat_per_day"), others_per_day=lim.get("other_per_day")))
     return data, names
 
@@ -173,7 +220,7 @@ def _mock(data):
 def _call(data):
     """one request to the model, shaped as typed._call: returns the parsed answer, raises on any problem (ask turns that
     into FAILED)"""
-    r = typed._client().beta.messages.create(model=typed.model(), max_tokens=600, system=SYSTEM,
+    r = typed._client().beta.messages.create(model=typed.model(), max_tokens=4000, system=SYSTEM,
                                              messages=[dict(role="user", content=json.dumps(data, ensure_ascii=False))],
                                              output_config=dict(effort="low", format=dict(type="json_schema", schema=SCHEMA)),
                                              betas=["server-side-fallback-2026-07-01"], fallbacks="default")
@@ -212,7 +259,7 @@ def ask(data, call=None):
 _LABEL = re.compile(r"\bTeacher (\d+)\b")
 
 
-def _checked(answer, names, rx, owners):
+def _checked(answer, names, table):
     """-> (name, reason with the names put back) or None: the label is on the map, so is every label in the reason, and the
     reason is 1-300 characters with the names back and names nobody off the shortlist"""
     who = names.get(answer["label"].strip())
@@ -225,7 +272,7 @@ def _checked(answer, names, rx, owners):
     reason = _LABEL.sub(put, answer["reason"].strip()).strip()
     if unknown or not 1 <= len(reason) <= MAX_REASON: return None
     on = set(names.values())
-    if rx is not None and any(not (owners(m.group(0)) & on) for m in rx.finditer(reason)): return None
+    if any(them - on for _, _, them in _named(reason, table)): return None      # someone off the shortlist, in any form
     return who, reason
 
 
@@ -235,7 +282,8 @@ def choose_for(pub, settings, records, record, x, c, call=None, without=()):
     or None when nobody is on the shortlist (less without: a name or names, such as the teacher who asked to change), and
     then no call is made. For an open cover (a planner's choice is already its pick) or a change request's new pick.
     Saves nothing and takes no lock; never raises for the model's sake (free_then's own errors, such as a date the
-    calendar no longer has as a school day, are the caller's, as for cover.set_pick)."""
+    calendar no longer has as a school day, are the caller's, as for cover.set_pick). Each fallback logs its kind (off,
+    busy, failed, bad answer) and nothing else: no data, exception text or name."""
     staff = _people(pub, settings.get("extra_staff"))
     leave = {without} if isinstance(without, str) else set(without or ())
     short = [p for p in _shortlist(pub, settings, records, record, x, c, staff) if p["name"] not in leave]
@@ -244,7 +292,9 @@ def choose_for(pub, settings, records, record, x, c, call=None, without=()):
     try:
         data, names = labelled(short, record, x, c, settings, staff)
         a = ask(data, call)
-        got = _checked(a, names, *_matcher(staff)) if a.get("ok") else None
-    except Exception: got = None
+        got = _checked(a, names, _matcher(staff)) if a.get("ok") else None
+        kind = BAD if a.get("ok") else a.get("error") or FAILED
+    except Exception: got, kind = None, FAILED
     if got: return dict(who=got[0], by="ai", reason=got[1], at=_absences._now())
+    _log.warning("pick fell back to the app's own order: %s", kind)
     return dict(who=first, by="app", reason=APP_ORDER, at=_absences._now())
