@@ -51,7 +51,7 @@ def still_there(pub, cal, teacher, stored):
 
 
 def teaching_periods(pub, cal, teacher, date):
-    """the teacher's periods on every school date of the week holding date"""
+    """the teacher's periods on every school date of the week holding date; 0 when the calendar has no terms (no date is a school day)"""
     mon, _ = week_of(date)
     total = 0
     for i in range(5):
