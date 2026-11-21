@@ -1879,4 +1879,29 @@ def the_exams_pages_carry_the_approval_words():
     assert "Exams · " in _page("app.js"), "the committee page counts the schedules waiting"
 
 
+# ---- the final review's fix wave
+@t
+def an_approve_during_a_make_is_kept():
+    import threading, time
+    _setup()
+    with published(_PUB):
+        c, c2 = committee(), committee()
+        s = _made_exam(c); id = s["id"]
+        assert c.post(f"/api/exams/{id}/send").status_code == 200
+        started, real, got = threading.Event(), A.exams_make.make, {}
+        def slow(*a, **k):
+            started.set(); time.sleep(0.4)
+            return real(*a, **k)
+        A.exams_make.make = slow
+        try:
+            th = threading.Thread(target=lambda: got.setdefault("make", c.post(f"/api/exams/{id}/make", json={}).status_code))
+            th.start(); assert started.wait(5)
+            got["approve"] = c2.post(f"/api/exams/{id}/approve").status_code
+            th.join(10)
+        finally: A.exams_make.make = real
+        assert got == dict(make=200, approve=200), got
+        now = SC.load(id)
+        assert now["status"] == "approved" and now["approved"] and now["log"][-1]["what"] == "approved", (now["status"], now["log"])
+
+
 print(f"{COUNT} exams tests passed")

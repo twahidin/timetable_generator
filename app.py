@@ -1005,11 +1005,12 @@ def exams_get(id):
 def exams_put(id):
     pub, who, err = _exams_gate()
     if err: return err
-    old, err = _exam_or_404(id)
-    if err: return err
-    new = dict(_exam_json(), **{k: old.get(k) for k in EXAM_KEEPS})
-    new["log"] = old.get("log") or []
-    saved, bad = _save_exam(new, pub, who)
+    with exams_schedules.editing():   # from loading to saving: what is kept is what is stored now
+        old, err = _exam_or_404(id)
+        if err: return err
+        new = dict(_exam_json(), **{k: old.get(k) for k in EXAM_KEEPS})
+        new["log"] = old.get("log") or []
+        saved, bad = _save_exam(new, pub, who)
     return bad or jsonify(saved)
 
 @app.delete("/api/exams/<id>")
@@ -1017,9 +1018,10 @@ def exams_put(id):
 def exams_delete(id):
     pub, who, err = _exams_gate()
     if err: return err
-    s = exams_schedules.load(id)
-    if s and s.get("approved"): return {"error": ON_SITE}, 409
-    exams_schedules.delete(id)
+    with exams_schedules.editing():   # an approve cannot land between the check and the delete
+        s = exams_schedules.load(id)
+        if s and s.get("approved"): return {"error": ON_SITE}, 409
+        exams_schedules.delete(id)
     return {"ok": True}
 
 @app.post("/api/exams/<id>/fill")
@@ -1027,10 +1029,11 @@ def exams_delete(id):
 def exams_fill(id):
     pub, who, err = _exams_gate()
     if err: return err
-    s, err = _exam_or_404(id)
-    if err: return err
-    s["papers"] = list(s.get("papers") or []) + exams_papers.fill_from_subjects(s, pub["model"])
-    saved, bad = _save_exam(s, pub, who)
+    with exams_schedules.editing():
+        s, err = _exam_or_404(id)
+        if err: return err
+        s["papers"] = list(s.get("papers") or []) + exams_papers.fill_from_subjects(s, pub["model"])
+        saved, bad = _save_exam(s, pub, who)
     return bad or jsonify(saved)
 
 @app.get("/api/exams/<id>/papers.xlsx")
@@ -1048,14 +1051,15 @@ def exams_papers_download(id):
 def exams_papers_upload(id):
     pub, who, err = _exams_gate()
     if err: return err
-    s, err = _exam_or_404(id)
-    if err: return err
     f = request.files.get("file")
     if not f: return {"error": "Choose the paper list to upload."}, 400
     try: rows = exams_papers.read_paper_list(f.read())
     except ValueError as e: return {"error": str(e)}, 400
-    s["papers"] = [p for p in s.get("papers") or [] if p.get("who") == "students"] + rows
-    saved, bad = _save_exam(s, pub, who)
+    with exams_schedules.editing():
+        s, err = _exam_or_404(id)
+        if err: return err
+        s["papers"] = [p for p in s.get("papers") or [] if p.get("who") == "students"] + rows
+        saved, bad = _save_exam(s, pub, who)
     return bad or jsonify(saved)
 
 def _exam_view_reply(pub, sched):
@@ -1073,16 +1077,18 @@ def exams_view(id):
     return err or _exam_view_reply(pub, s)
 
 def _exam_changed(id, change):
-    """run change(pub, sched, body) on the stored schedule, save it and answer as the view does"""
+    """run change(pub, sched, body) on the stored schedule, save it and answer as the view does. The schedule is locked from
+    loading to saving (a Make takes a while), so an approve or an edit meanwhile waits and is not undone by it"""
     pub, who, err = _exams_gate()
     if err: return err
-    s, err = _exam_or_404(id)
-    if err: return err
-    try: err = change(pub, s, _exam_json())
-    except ValueError as e: return {"error": str(e)}, 400
-    except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
-    if err: return err
-    saved, bad = _save_exam(s, pub, who)
+    with exams_schedules.editing():
+        s, err = _exam_or_404(id)
+        if err: return err
+        try: err = change(pub, s, _exam_json())
+        except ValueError as e: return {"error": str(e)}, 400
+        except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
+        if err: return err
+        saved, bad = _save_exam(s, pub, who)
     return bad or _exam_view_reply(pub, saved)
 
 def _exam_make(pub, s, b):
@@ -1261,16 +1267,18 @@ def _exam_review_reply(pub, s):
                    unsent=exams_approval.changes(s, model) if st == "approved" else [], review=rv)
 
 def _exam_approval(id, act, approver=False):
-    """run act(pub, sched, who, now, body) on the stored schedule, save and answer with the review"""
+    """run act(pub, sched, who, now, body) on the stored schedule, save and answer with the review; locked from loading to
+    saving, as _exam_changed is"""
     pub, who, err = _exams_gate()
     if err: return err
     if approver and not _exams_can_approve(): return {"error": ONLY_APPROVE}, 403
-    s, err = _exam_or_404(id)
-    if err: return err
-    try: act(pub, s, who, exams_schedules._now(), _exam_json())
-    except ValueError as e: return {"error": str(e)}, 400
-    except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
-    saved, bad = _save_exam(s, pub, who)
+    with exams_schedules.editing():
+        s, err = _exam_or_404(id)
+        if err: return err
+        try: act(pub, s, who, exams_schedules._now(), _exam_json())
+        except ValueError as e: return {"error": str(e)}, 400
+        except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
+        saved, bad = _save_exam(s, pub, who)
     return bad or _exam_review_reply(pub, saved)
 
 @app.get("/api/exams/<id>/review")

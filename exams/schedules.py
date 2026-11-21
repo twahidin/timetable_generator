@@ -7,9 +7,15 @@ from exams import days as _days
 from exams import papers as _papers
 
 DIR = os.path.join(store.DATA, "exams", "schedules")
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()   # one process (gunicorn: one worker, threads): held by a route from loading a schedule to saving it
 WRONG = "Check the exam and try again."
 NO_CALENDAR = "Set the school calendar in Relief settings first: exams need it to know which timetable day a date is."
+
+
+def editing():
+    """the lock a route holds from loading a schedule to saving it (and the delete), so two saves at once never undo each
+    other: an approve during a Make is not lost when the Make saves the copy it loaded before"""
+    return _LOCK
 
 
 def _path(id):
