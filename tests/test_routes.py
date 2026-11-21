@@ -235,6 +235,8 @@ GUARDS = {
     "relief_settings_get": ('relief.settings',),
     "relief_settings_page": ('relief.settings',),
     "relief_settings_put": ('relief.save',),
+    # relief requests (relief/web.py): the guard is relief on every route; the narrower rights (relief.plan, relief.team)
+    # are checked inside the routes, with their own sentences, and pinned in RELIEF_INSIDE further down
     "relief_web.acknowledge": ('relief',),
     "relief_web.cancel": ('relief',),
     "relief_web.create": ('relief',),

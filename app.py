@@ -1216,6 +1216,9 @@ def relief_home():
 @app.get("/api/relief/me")
 @need("relief")
 def relief_me():
+    # relief's old lists move into the accounts here too (a no-op after the first run), so a relief team member has their
+    # tabs on the first open; when they moved just now, the rights are worked out again from the records in this request
+    if move_relief_lists(): g.pop("_signed", None)
     p = who()
     if p is None: return {"error": "Please sign in again."}, 401
     pub_ = store.published(); pub = bool(pub_)   # nothing published: a publish may be swapping folders, so no departments, but the person still answers

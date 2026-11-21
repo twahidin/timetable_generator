@@ -11,8 +11,9 @@ or (relief.team) everything. The remarks are for the relief team: a record sent 
 teacher (not its sender, not relief.plan, not relief.team) leaves them out (_out).
 
 Rights come from the accounts (accounts/rights.py): every permission question here goes through has(right), app.py's
-`has`, passed in with init(has=..., me=..., need=...). Any signed-in staff person has relief; school leaders, HODs and
-SHs have relief.plan; the Relief team extra gives relief.plan and relief.team. The relief team's right to change any
+`has`, passed in with init(has=..., me=..., need=...). Any teacher, school leader, HOD/SH or committee member signed in
+by name has relief (an executive only with the Relief team extra); school leaders, HODs and SHs have relief.plan; the
+Relief team extra gives relief, relief.plan and relief.team. The relief team's right to change any
 absence (not needed, needed again, cancel) is asked here too, has("relief.team"), and passed into relief.absences as
 team=...; relief.absences never reads who is on the team itself.
 

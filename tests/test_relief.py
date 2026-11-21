@@ -525,6 +525,19 @@ def the_routes_move_the_lists_once_and_keep_the_old_file():
     _reset(); fresh()
 
 @t
+def the_relief_home_moves_the_lists_too():
+    fresh(); _reset()
+    store.write_json(S.PATH, dict(team=["Mr Darren Lim"]))     # relief's old team list, not moved yet: no other page has run
+    with published(PUB):
+        c = staff("Mr Darren Lim")
+        assert AP.load()["migrated"] is False
+        j = c.get("/api/relief/me").get_json()
+        assert (j["can_team"], j["can_plan"], j["on_team"]) == (True, True, True), j     # the What's in tab, on the first open
+        assert AP.load()["migrated"] is True and AP.record(AP.load(), "Mr Darren Lim")["extras"]["relief"] is True
+        assert A.move_relief_lists() is None and c.get("/api/relief/me").get_json()["can_team"] is True   # once only
+    _reset(); fresh()
+
+@t
 def nothing_published_says_so():
     com = committee()
     with published(None):
