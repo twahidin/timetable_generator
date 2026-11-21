@@ -450,7 +450,8 @@ def work_choosing_and_cancelling():
     refuses(gone, lambda: AB.not_needed(i, k, "x", EVE))
     refuses(gone, lambda: AB.needed_again(i, k, EVE))
     refuses(gone, lambda: AB.acknowledge(i, EVE))
-    assert AB.load(i)["lessons"][0]["relief"] == FLEX
+    a = AB.load(i)["lessons"][0]           # stage 3: cancelling ends the relief, and its history keeps who had it
+    assert a["relief"] is None and (a["history"][-1]["what"], a["history"][-1]["who"]) == ("dropped", FLEX), a
 
 @t
 def a_changed_lesson_is_marked_not_fatal():

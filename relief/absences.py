@@ -4,6 +4,7 @@ import datetime, os, secrets, threading
 from zoneinfo import ZoneInfo
 
 import store
+from relief import cover as _cover        # cover imports this module too: neither reads the other's names at import
 from relief import files as _files
 from relief import free as _free
 from relief import lessons as _lessons
@@ -21,6 +22,7 @@ NO_FILES_YET = "Add files after the absence is sent."
 SAY_WHY = "Say why in a line."
 PAST_LESSON = "This lesson is in the past."
 PAST_ABSENCE = "This absence is in the past."
+NO_NEED = "This lesson does not need relief."
 MAX_DATES, MAX_TEXT, MAX_LINK = 10, 2000, 500
 
 
@@ -276,6 +278,7 @@ def not_needed(id, key, why, by, *, team=False):
         x = _lesson(r, key)
         _past(x)
         if not 1 <= len(why) <= 200: raise ValueError(SAY_WHY)
+        _cover.clear(x, by, why, _now())          # its relief, pick, approval, acknowledgement and request to change end
         x["needed"], x["not_needed"], x["relief"], x["relief_by"] = False, dict(by=by, why=why), None, None
         _save(r)
     return r
@@ -294,20 +297,27 @@ def needed_again(id, key, by, *, team=False):
 
 
 def choose(id, key, relief_name, by, pub):
-    """relief_name None or "" takes the choice off; the caller checks the relief.plan right"""
+    """the planner's choice, its pick (waiting for the relief team); relief_name None or "" takes it off; the caller checks
+    the relief.plan right. Once approved, or once the team has split the lesson, it is changed on the team's Today page."""
     pub = _pub(pub)
     with _LOCK:
         r = _editable(id)
         x = _lesson(r, key)
         _past(x)
-        if not x["needed"]: raise ValueError("This lesson does not need relief.")
+        if not x["needed"]: raise ValueError(NO_NEED)
+        if x.get("parts"): raise ValueError(CHANGED)
+        if _cover.state(r, x, x) not in ("open", "waiting"): raise ValueError(_cover.NOT_WAITING)
+        now = _now()
         if not relief_name:
-            x["relief"], x["relief_by"] = None, None
+            if x.get("relief"): _cover._log(x, "dropped", x["relief"], by, now)
+            x["relief"], x["relief_by"], x["pick"] = None, None, None
         else:
             free = _free.free_then(pub, _settings.load(pub), all_records(), dict(x, date=datetime.date.fromisoformat(x["date"])), r["teacher"])
             if relief_name not in [p["name"] for g in free["groups"] for p in g["people"]]:
                 raise ValueError(f"{relief_name} is not free for {' and '.join(x['classes'])} {x['subject']} then.")
-            x["relief"], x["relief_by"] = relief_name, by
+            pick = dict(who=relief_name, by="planner", reason=_cover.PLANNED.format(by=by, date=_say(datetime.date.fromisoformat(now[:10]))), at=now)
+            x["relief"], x["relief_by"], x["pick"] = relief_name, by, pick
+            _cover._log(x, "pick", relief_name, "planner", now, pick["reason"])
         _save(r)
     return r
 
@@ -320,7 +330,10 @@ def cancel(id, why, by, *, team=False):
         _may_change(r, by, team)
         if all(datetime.date.fromisoformat(d) < _lessons.today() for d in r["dates"]): raise ValueError(PAST_ABSENCE)
         if not 1 <= len(why) <= 200: raise ValueError(SAY_WHY)
-        r["cancelled"] = dict(at=_now(), by=by, why=why)
+        now, today = _now(), _lessons.today()
+        r["cancelled"] = dict(at=now, by=by, why=why)
+        for x in r["lessons"]:                   # the reliefs still to come end; a lesson before today keeps what it had
+            if datetime.date.fromisoformat(x["date"]) >= today: _cover.clear(x, by, why, now)
         _save(r)
     return r
 
