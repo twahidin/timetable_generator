@@ -113,11 +113,14 @@ def _merge(spans):
     return out
 
 
-def _day_ok(dname, r):
+def rule_on_day(dname, r):
     wk, dy = str(r.get("week") or "Both"), str(r.get("day") or "All")
     if wk in ("Odd", "Even") and not dname.startswith(wk):
         return False
     return dy == "All" or dname.split()[-1][:3] == dy[:3]
+
+
+_day_ok = rule_on_day   # the old name, still called by code written before the rename
 
 
 def day_view(pub, cal, sched, date):
@@ -153,7 +156,7 @@ def day_view(pub, cal, sched, date):
         for r in model.get("setup", {}).get("rules", []):
             if r.get("rule") != "Not available" or r.get("scope") != "Teacher" or str(r.get("strength") or "Must") != "Must":
                 continue
-            if not _day_ok(day, r):
+            if not rule_on_day(day, r):
                 continue
             a, b = r.get("from"), r.get("to")
             a = int(a) if a not in (None, "") else 0

@@ -17,13 +17,28 @@ code and download PDFs. The app does not generate timetables itself.
 | personal teacher codes (made by the app) | one teacher each | the Relief module and everything the teacher code opens |
 
 **Relief.** The front page has a **Relief** card for a teacher's own personal code. Stage 1 gives each teacher a
-code and a Relief home (their name, their timetable, and for the relief team the way to the settings); asking for
-relief, planning relief and the reliefs a teacher covers come in the next stage. Relief reads the teachers from the
-published timetable, so publish first. **Relief settings** (the committee page's header link, or the Relief home for
-the relief team) hold management, the relief team, other staff who teach no lessons, the Flexi Adjunct Teachers' role,
-the relief rules in words, the limits the app checks, the times and the school calendar (terms, which week each term
-starts as, holidays). The committee downloads the personal teacher codes there as a list (CSV) or as slips to print.
-Like the personal student codes, they are made from each name and `SECRET_KEY`, and are off without it.
+code and a Relief home (their name, their timetable, and for the relief team the way to the settings). Stage 2 adds
+relief requests on the Relief home, in tabs that show only to those who may use them:
+- **Every teacher:** **Ask for relief** (today, tomorrow or up to 10 dates; the whole day or some periods; a reason;
+  their lessons then, read from the published timetable, each with work: text, a link or files; the reporting
+  officer), and **My absences**: everything asked or planned for them, where they acknowledge relief someone else
+  planned, set or change the work, mark a lesson not needed, or cancel with a line saying why.
+- **Management and the relief team** (the two lists in Relief settings): **Plan relief** for a colleague, choosing a
+  relief teacher for each lesson from its "free then" list (same department and subject first, lightest week first,
+  Flexi Adjunct Teachers marked, anyone over a checked limit dimmed but still choosable) or leaving it for the relief
+  team; **Planned by me**, where each absence opens with Choose on its open lessons; and **Download** of the relief
+  sheet for a range of dates (every absence with lessons then; never the reason).
+- **The relief team:** **What's in**, read-only: every absence, who sent it and how, the acknowledgement, the work,
+  the relief chosen or open, cancellations, and what is new since they last looked.
+
+The reason for an absence is seen only by the absent teacher, whoever planned it, management and the relief team. The
+app's picks for open lessons, and approving them, come in the next stage, with the reliefs a teacher covers; nobody is
+told on Telegram yet. Relief reads the teachers from the published timetable, so publish first. **Relief settings**
+(the committee page's header link, or the Relief home for the relief team) hold management, the relief team, other
+staff who teach no lessons, the Flexi Adjunct Teachers' role, the relief rules in words, the limits the app checks,
+the times and the school calendar (terms, which week each term starts as, holidays). The committee downloads the
+personal teacher codes there as a list (CSV) or as slips to print. Like the personal student codes, they are made from
+each name and `SECRET_KEY`, and are off without it.
 
 **Exams and events.** The front page has an **Exams and events** card (`/exams`), for the exams committee only: the names on the exams committee list in **Exam settings**, and the timetable committee. Everyone else is refused, because it shows student names, seats and access arrangements. Stage 1 is the committee's own working: set up an exam or a test, say which levels and days it covers (a whole day or part of a day), fill in the papers (by hand or from an uploaded paper list) and their times, and check the paper times. **Make** then stops the lessons that fall inside the exam, frees their teachers, seats the students in the exam rooms, and picks invigilators (or leaves the teacher of the lesson in the room, for a test). The committee can move a class to another room, set the invigilators by hand, and print the seating plans, the roster by day and the lessons sheet, or download the Excel. It needs the Relief **school calendar** (to know which timetable day a date is) and the personal teacher codes (to know who is on the staff), and reads everything from the published timetable. Nothing is sent to students or teachers yet.
 
@@ -419,6 +434,7 @@ node tests/teacherview.test.js          # step 4's teacher cards and the second 
 .venv/bin/python tests/test_teachers.py # the Teachers sheet: Department 2, an older workbook read as before
 .venv/bin/python tests/test_typed.py     # the typed request: reading the words, matching names, the ways
 .venv/bin/python tests/test_relief.py    # relief: personal teacher codes, people, settings, calendar, routes
+.venv/bin/python tests/test_relief_requests.py  # relief requests: lessons, the free-then list, absences, work files, routes
 .venv/bin/python tests/test_exams.py     # exams and events: days, papers, seating, invigilators, routes
 ```
 To try the **Ask in words** box without a key, start with `TYPED_REQUEST_MODEL=mock`: it understands "move <subject> for <class> off <day>" and "give <class> <subject> to <teacher>".
@@ -442,9 +458,10 @@ and an earlier copy is kept. **Save to file** and **Load from file**, on step 7,
 |---|---|
 | `app.py` | routes: sign-in, the committee's editor, the downloads, check and publish, the timetable pages, PDFs |
 | `access.py` | access codes (committee, heads, teachers, students), personal codes, wrong-code limit (10 per 10 minutes per address) |
-| `relief/` | relief: the people it knows (the published teachers and other staff), personal teacher codes, the settings, the school calendar |
-| `static/relief.html`, `static/relief-settings.html` | the Relief home and the Relief settings page, with their scripts |
+| `relief/` | relief: the people it knows (the published teachers and other staff), personal teacher codes, the settings, the school calendar; a teacher's lessons on a date, the free-then list, absence records, work files and the request routes (`web.py`) |
+| `static/relief.html`, `static/relief-settings.html` | the Relief home (`relief.js`: My absences, Ask for relief; `relief-plan.js`: Plan relief, Planned by me; `relief-inbox.js`: What's in; `relief-form.js`: shared) and the Relief settings page, with their scripts |
 | `tests/test_relief.py` | relief: codes, people, calendar, settings and the routes |
+| `tests/test_relief_requests.py` | relief requests: lessons, the free-then list, absences, files and their routes |
 | `checks.py` | will it fit: the sums on a setup before it is downloaded (class periods, breaks, rooms, teachers' time) |
 | `store.py` | the shared setup (version, change log, restore points) and the published timetable on the volume |
 | `sync.py` | setup changes as small operations: apply, merge, and what a head may change |

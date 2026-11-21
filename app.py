@@ -14,7 +14,7 @@ from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, draft, store, sync, typed
-from relief import codes as relief_codes, people as relief_people, settings as relief_settings
+from relief import codes as relief_codes, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
 from ttgen import choices
 import exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts
 
@@ -737,7 +737,7 @@ def files(what, kind=None):
     abort(404)
 
 # ------------------------------------------------------------------------------------------------ staff: relief
-NO_RELIEF_PUB = "Publish the timetable first: relief reads the teachers from it."
+NO_RELIEF_PUB = relief_web.NO_PUB          # "Publish the timetable first: relief reads the teachers from it."
 ONLY_SETTINGS = "Only the timetable committee and the relief team can change relief settings."
 ONLY_CODES = "Only the timetable committee can download the codes."
 
@@ -763,6 +763,22 @@ def _relief_rights(pub):
     s = relief_settings.load(pub); team = p["name"] in s["team"]
     return team or p["name"] in s["management"], team, p["name"]
 
+def relief_has(right):
+    """the one place relief asks what the person signed in may do (the accounts work's `has` takes over here, same names):
+    relief = signed in with their own code; relief.plan = on the Management list or the Relief team; relief.team = on the
+    Relief team; relief.settings / relief.save = may read / save the relief settings (the timetable committee too).
+    Any other name is refused."""
+    pub = store.published()
+    if right in ("relief.settings", "relief.save"):
+        rights = _relief_rights(pub)
+        return bool(rights and rights[0 if right == "relief.settings" else 1])
+    if right not in ("relief", "relief.plan", "relief.team"): return False
+    p = me_staff(pub)
+    if p is None: return False
+    if right == "relief": return True
+    s = relief_settings.load(pub)
+    return p["name"] in s["team"] or (right == "relief.plan" and p["name"] in s["management"])
+
 def _no_longer_valid():
     return page("Relief", "<main class='login'><h1>Code no longer valid</h1><p class='muted'>You are not on the published timetable or the relief staff list. Ask the timetable committee for your code.</p><p><a href='/login'>Back</a></p></main>")
 
@@ -778,7 +794,8 @@ def relief_me():
     pub = store.published(); p = me_staff(pub)
     if p is None: return {"error": "Please sign in again."}, 401
     s = relief_settings.load(pub); team = p["name"] in s["team"]
-    return jsonify(name=p["name"], depts=p["depts"], on_team=team, on_management=p["name"] in s["management"], can_settings=team)
+    return jsonify(name=p["name"], depts=p["depts"], on_team=team, on_management=p["name"] in s["management"], can_settings=team,
+                   can_plan=relief_has("relief.plan"), can_team=relief_has("relief.team"), today=relief_lessons.today().isoformat())
 
 @app.get("/relief/settings")
 def relief_settings_page():
@@ -838,6 +855,9 @@ def relief_code_slips():
     relief_codes.slips_pdf(pub["model"]["school"]["name"], relief_staff(pub), request.host_url.rstrip("/"), buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="relief code slips.pdf", mimetype="application/pdf")
+
+relief_web.init(has=relief_has, me=me_staff, role=role)     # relief requests: relief/web.py, every right through relief_has
+app.register_blueprint(relief_web.bp)
 
 # ------------------------------------------------------------------------------------------------ staff: exams and events
 NO_EXAMS_PUB = "Publish the timetable first: exams read the classes, students and lessons from it."
