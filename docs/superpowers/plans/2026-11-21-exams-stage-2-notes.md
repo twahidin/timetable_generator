@@ -278,3 +278,14 @@ What the fix wave below closed is gone from this list.
 - The real timetable has no student list: real seating needs the students uploaded or added to the setup and published.
 - Real rooms were not scarce at 08:00 (the stage 1 time-reading error stays fixed); the common-test margin warning is
   unchanged.
+
+## Found by the fix wave's re-review (parked, small follow-ups)
+
+- A working duty whose names are only reordered counts as "waiting" too, so the Other schedules check can show both an
+  "(approved) takes N" and a "(waiting) takes N" line for the same people (cosmetic).
+- The stale-page guard compares the timetable's `published_at`, written to the minute: two publishes within one minute
+  cannot be told apart.
+- With one lock for every schedule, creating or saving one schedule waits for another schedule's Make (about a second
+  on the school's real data).
+- `/api/day`'s `rooms` stays per room; the page spreads combined venues (`relatedRooms` mirrors `seating._related`), so
+  the two copies of that rule must be kept in step, and relief stage 3's layer must spread them too.
