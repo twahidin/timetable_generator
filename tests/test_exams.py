@@ -2158,4 +2158,91 @@ def changes_list_the_other_kinds():
         "Removed Sec 3 Pure Chemistry Paper 1.", "Made again for the timetable published on Fri 2 Oct."], [c["text"] for c in AP.changes(s, _M)]
 
 
+import exams.events as EV  # noqa: E402
+
+def _ev(**kw):
+    e = SC.new_event("Sec 3 Learning Journey", ["Sec 3"], [], "2026-10-05", "2026-10-05", "Ms Aisha Rahman", "Ms Aisha Rahman")
+    e["days"] = {"2026-10-05": dict(levels=None, whole=False, **{"from": "07:40", "to": "10:40"})}
+    e.update(kw)
+    return e
+
+def _ev_bad(sentence, **kw):
+    try: SC._check(_ev(**kw), _PUB)
+    except ValueError as x: assert str(x) == sentence, (str(x), sentence); return
+    raise AssertionError("passed: " + sentence)
+
+@t
+def event_record_and_its_check():
+    e = _ev()
+    assert e["kind"] == "event" and e["in_charge"] == "Ms Aisha Rahman" and e["going"] == [] and e["going_by"] == "people"
+    assert e["status"] == "draft" and e["approved"] is None and e["made"] is None and e["created_by"] == "Ms Aisha Rahman"
+    SC._check(_ev(), _PUB)
+    _ev_bad("Give the event a name.", name=" ")
+    _ev_bad("Pick at least one level or class.", levels=[])
+    _ev_bad("An event can cover at most 31 days.", end="2026-11-30")
+    _ev_bad("Gym is not a room of the published timetable.", venues=["Gym"])
+    _ev_bad("Mr Nobody is not on the published timetable or the staff list.", going=["Mr Nobody"])
+    _ev_bad(SC.WRONG, going_by="friends")
+    _ev_bad(SC.WRONG, duties=[dict(duty="x", who=5, time="")])
+    _ev_bad("07:50 is not the start of a period.", days={"2026-10-05": dict(whole=False, **{"from": "07:50", "to": "10:40"})})
+    ok = _ev(going=["Ms Grace Yeo", "Ms Grace Yeo"]); SC._check(ok, _PUB)
+    assert ok["going"] == ["Ms Grace Yeo"]
+    d = _ev(duties=[dict(duty="gate", who=None, time=None)]); SC._check(d, _PUB)
+    assert d["duties"] == [dict(duty="gate", who="", time="")]
+    assert SC.place(_ev(where="", venues=["LT1&2", "Hall"])) == "LT1&2, Hall" and SC.place(_ev(where=" Field ")) == "Field" and SC.place(_ev()) == ""
+
+@t
+def a_forged_event_carries_no_exam_items():
+    e = _ev(made=dict(duties=[1]), papers=[_paper()], access=[dict(student="3A-01")], times=dict(report="x"), seating=dict(order="x"),
+            supervision="lesson", scripts="the office", pins=dict(rooms={"k": {}}, duties={}), use_anyway=[["k", "r"]])
+    SC._check(e, _PUB)
+    assert (e["made"], e["papers"], e["access"], e["times"], e["seating"], e["supervision"], e["scripts"], e["use_anyway"]) == (
+        None, [], [], {}, {}, "", "", []) and e["pins"] == dict(rooms={}, duties={})
+
+@t
+def fill_the_going_list():
+    e = _ev(going=[])
+    assert EV.fill(_PUB, F.CAL, e, "form teachers") == ["Ms Aisha Rahman", "Ms Chloe Tan"]
+    assert EV.fill(_PUB, F.CAL, e, "teachers then") == ["Ms Aisha Rahman", "Ms Chloe Tan", "Mr Ben Ong", "Ms Grace Yeo"]
+    assert EV.fill(_PUB, F.CAL, e, "department", dept="English") == ["Mr Ivan Lee", "Ms Aisha Rahman", "Ms Grace Yeo"]
+    try: EV.fill(_PUB, F.CAL, e, "department", dept="")
+    except ValueError as x: assert str(x) == "Pick a department."
+    else: raise AssertionError
+    assert EV.fill(_PUB, F.CAL, e, "people", names=["Mr Daniel Koh", "Mr Nobody"]) == ["Mr Daniel Koh"]
+    try: EV.fill(_PUB, F.CAL, e, "friends")
+    except ValueError as x: assert str(x) == SC.WRONG
+    else: raise AssertionError
+    assert EV.fill(_PUB, F.CAL, _ev(going=["Ms Aisha Rahman"]), "form teachers") == ["Ms Chloe Tan"]
+
+@t
+def who_goes_free_or_backup():
+    e = _ev(going=["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman", "Mr Ivan Lee"])
+    assert EV.going(_PUB, F.CAL, e, []) == [
+        dict(name="Ms Aisha Rahman", tag="teacher in charge · 3A form teacher", status="free", text="free then: lessons with 3A stop"),
+        dict(name="Ms Grace Yeo", tag="", status="backup", text="teaches 4A Literature 08:40–09:00 → backup"),
+        dict(name="Mr Hafiz Rahman", tag="", status="backup", text="teaches 4A PE 09:00–09:40 → backup"),
+        dict(name="Mr Ivan Lee", tag="", status="not_free", text="is not available then (a Must rule)")]
+
+@t
+def event_lesson_lists():
+    L = EV.lesson_lists(_PUB, F.CAL, _ev(going=["Mr Hafiz Rahman", "Ms Grace Yeo"]))
+    assert [(i["subject"], i["classes"]) for i in L["none"]] == [("English", ["3A"]), ("Mathematics", ["3B"]),
+                                                                  ("Pure Chemistry", ["3A", "3B"]), ("Combined Science", ["3A", "3B"])]
+    assert [(i["subject"], i["start"], i["note"]) for i in L["backup"]] == [
+        ("PE", "09:00", "Mr Hafiz Rahman is at Sec 3 Learning Journey"), ("Literature", "08:40", "Ms Grace Yeo is at Sec 3 Learning Journey")]
+    assert [i["subject"] for i in L["runs"]] == ["Mathematics", "English", "Assembly"]
+    assert EV.freed(_PUB, F.CAL, _ev()) == [dict(date="2026-10-05", start="07:40", end="10:40", rooms=["3-01", "3-02", "Lab 3-08"])]
+    assert EV.freed(_PUB, F.CAL, _ev(venues=["3-01"]))[0]["rooms"] == ["3-02", "Lab 3-08"]
+
+@t
+def venues_taken_flag_running_lessons():
+    assert EV.flags(_PUB, F.CAL, _ev(venues=["LT1&2", "Hall"])) == [
+        "Mon 5 Oct 08:40–09:00: Literature with 4A uses LT1 then.", "Mon 5 Oct 09:00–09:40: PE with 4A uses Hall in wet weather then."]
+    assert EV.flags(_PUB, F.CAL, _ev()) == []
+    cut = _ev(days={"2026-10-05": dict(whole=False, **{"from": "07:40", "to": "08:00"})})
+    assert EV.cuts(_PUB, F.CAL, cut) == ["On Mon 5 Oct the event time ends in the middle of 2 lessons."]
+    assert EV.on_dates(_PUB, F.CAL, _ev(start="2026-10-12", end="2026-10-12", days={})) == []
+    assert EV.on_dates(_PUB, F.CAL, _ev())[0]["classes"] == ["3A", "3B"]
+
+
 print(f"{COUNT} exams tests passed")

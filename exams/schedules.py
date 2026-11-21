@@ -1,6 +1,8 @@
 """Exam and test schedules: make, check, save, list. One JSON file each under DATA/exams/schedules."""
 import datetime, os, secrets, threading
 
+import relief.people
+import relief.settings
 import store
 from exams import approval as _approval
 from exams import days as _days
@@ -37,6 +39,8 @@ def _texts(v):
 
 
 KINDS = ("exam", "test")
+EVENT = "event"
+GOING_BY = ("form teachers", "teachers then", "department", "people")
 SUPERVISION = ("invigilators", "lesson")
 WHO = ("level", "groups", "students")
 SEATING = dict(order=("class", "name"), shared=("levels", "papers", "blocks"), spacing=("every", "gap"), home_rooms=(True, False))
@@ -78,34 +82,35 @@ def new(kind, name, levels, start, end, by, pub=None) -> dict:
                 status="draft", log=[], approved=None, note="", created_at=_now(), created_by=by, saved_at=None, saved_by=None)
 
 
-def _check(s, pub):
-    if not isinstance(s, dict): raise ValueError(WRONG)
-    model = ((pub or {}).get("model") or {})
-    for k, typ in (("name", str), ("levels", list), ("classes", list), ("days", dict), ("papers", list), ("access", list),
-                   ("start", str), ("end", str)):
-        if not isinstance(s.get(k), typ): raise ValueError(WRONG)
-    if not isinstance(s.get("scripts", ""), str): raise ValueError(WRONG)
-    if not s["name"].strip(): raise ValueError("Give the exam a name.")
-    if s.get("kind") not in KINDS or s.get("supervision") not in SUPERVISION: raise ValueError(WRONG)
+def new_event(name, levels, classes, start, end, by, in_charge) -> dict:
+    """a new event: a schedule of kind "event" (no papers, seats or duties of its own); reads no file"""
+    return dict(id=secrets.token_hex(4), kind=EVENT, name=name, levels=list(levels), classes=list(classes), start=start, end=end,
+                days={}, in_charge=in_charge, where="", venues=[], going=[], going_by="people", duties=[], made=None,
+                status="draft", log=[], approved=None, note="", created_at=_now(), created_by=by, saved_at=None, saved_by=None)
+
+
+def place(s) -> str:
+    """where an event is: the words typed, else its venues, else nothing"""
+    return str(s.get("where") or "").strip() or ", ".join(s.get("venues") or [])
+
+
+def _named(s, noun):
+    """the name must not be empty"""
+    if not s["name"].strip(): raise ValueError("Give the %s a name." % noun)
+
+
+def _lists_and_pick(s):
     if not _texts(s["levels"]) or not _texts(s["classes"]): raise ValueError(WRONG)
     if not s["levels"] and not s["classes"]: raise ValueError("Pick at least one level or class.")
-    seating = s.get("seating")
-    if not isinstance(seating, dict): raise ValueError(WRONG)
-    for k, allowed in SEATING.items():
-        v = seating.get(k)
-        if (k == "home_rooms" and not isinstance(v, bool)) or v not in allowed: raise ValueError(WRONG)
-    times = s.get("times")
-    if not isinstance(times, dict): raise ValueError(WRONG)
-    times["report"] = _time_or_none(times.get("report"), "Give the report time as a time such as 07:30.")
-    for k, lo, sentence in (("min_break", 0, "Give a whole number of minutes between two papers."),
-                            ("max_papers", 1, "Give a whole number for the most papers a day.")):
-        if not _int(times.get(k)): raise ValueError(WRONG)
-        if times[k] < lo: raise ValueError(sentence)
+
+
+def _when(s, model, noun):
+    """the dates, the days and the levels and classes against the published timetable: shared by exams and events"""
     try:
         a, b = datetime.date.fromisoformat(s["start"]), datetime.date.fromisoformat(s["end"])
     except ValueError: raise ValueError(WRONG)
     if b < a: raise ValueError("Check the dates: the last day is before the first.")
-    if (b - a).days + 1 > 31: raise ValueError("An exam can cover at most 31 days.")
+    if (b - a).days + 1 > 31: raise ValueError("An %s can cover at most 31 days." % noun)
     bnds = _days.bounds(model)
     starts, ends = {x for x, _ in bnds}, {y for _, y in bnds}
     for date, e in s["days"].items():
@@ -131,6 +136,58 @@ def _check(s, pub):
     classes = {c["name"] for c in model.get("classes") or []}
     for c in s["classes"]:
         if c not in classes: raise ValueError(f"{c} is not a class of the published timetable.")
+
+
+def _check_event(s, pub):
+    model = ((pub or {}).get("model") or {})
+    for k, typ in (("name", str), ("levels", list), ("classes", list), ("days", dict), ("start", str), ("end", str),
+                   ("in_charge", str), ("where", str), ("venues", list), ("going", list), ("duties", list)):
+        if not isinstance(s.get(k), typ): raise ValueError(WRONG)
+    if not s["name"].strip(): raise ValueError("Give the event a name.")
+    if s.get("going_by") not in GOING_BY: raise ValueError(WRONG)
+    _lists_and_pick(s)
+    if not _texts(s["venues"]) or not _texts(s["going"]): raise ValueError(WRONG)
+    for d in s["duties"]:
+        if not isinstance(d, dict): raise ValueError(WRONG)
+        for k in ("duty", "who", "time"):
+            if d.get(k) is None: d[k] = ""
+            if not isinstance(d[k], str): raise ValueError(WRONG)
+    _when(s, model, "event")
+    rooms = {r["name"] for r in model.get("rooms") or []}
+    for v in s["venues"]:
+        if v not in rooms: raise ValueError(f"{v} is not a room of the published timetable.")
+    known = {p["name"] for p in relief.people.people(pub, relief.settings.load(pub)["extra_staff"])}
+    for n in s["going"]:
+        if n not in known: raise ValueError(f"{n} is not on the published timetable or the staff list.")
+    s["going"] = list(dict.fromkeys(s["going"]))
+    # an event holds no exam items: whatever came with it is emptied, so a forged copy puts none on the main site
+    s.update(made=None, papers=[], access=[], times={}, seating={}, supervision="", scripts="", pins=dict(rooms={}, duties={}), use_anyway=[])
+
+
+def _check(s, pub):
+    if not isinstance(s, dict): raise ValueError(WRONG)
+    if s.get("kind") == EVENT: return _check_event(s, pub)
+    model = ((pub or {}).get("model") or {})
+    for k, typ in (("name", str), ("levels", list), ("classes", list), ("days", dict), ("papers", list), ("access", list),
+                   ("start", str), ("end", str)):
+        if not isinstance(s.get(k), typ): raise ValueError(WRONG)
+    if not isinstance(s.get("scripts", ""), str): raise ValueError(WRONG)
+    _named(s, "exam")
+    if s.get("kind") not in KINDS or s.get("supervision") not in SUPERVISION: raise ValueError(WRONG)
+    _lists_and_pick(s)
+    seating = s.get("seating")
+    if not isinstance(seating, dict): raise ValueError(WRONG)
+    for k, allowed in SEATING.items():
+        v = seating.get(k)
+        if (k == "home_rooms" and not isinstance(v, bool)) or v not in allowed: raise ValueError(WRONG)
+    times = s.get("times")
+    if not isinstance(times, dict): raise ValueError(WRONG)
+    times["report"] = _time_or_none(times.get("report"), "Give the report time as a time such as 07:30.")
+    for k, lo, sentence in (("min_break", 0, "Give a whole number of minutes between two papers."),
+                            ("max_papers", 1, "Give a whole number for the most papers a day.")):
+        if not _int(times.get(k)): raise ValueError(WRONG)
+        if times[k] < lo: raise ValueError(sentence)
+    _when(s, model, "exam")
     ids = set()
     for p in s["papers"]:
         if not isinstance(p, dict): raise ValueError(WRONG)

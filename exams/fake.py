@@ -18,9 +18,9 @@ def sample_pub() -> dict:
     NP = 26
     sc = dict(start_time="07:40", period_minutes=20)
     times = [[clock(sc, p), clock(sc, p + 1)] for p in range(NP)]   # the real model's dotted 12-hour clock: "12.40", "1.00"
-    classes = [dict(name="3A", level="Sec 3", size=30, home="3-01", parents=[]),
-               dict(name="3B", level="Sec 3", size=30, home="3-02", parents=[]),
-               dict(name="4A", level="Sec 4", size=30, home="4-01", parents=[])]
+    classes = [dict(name="3A", level="Sec 3", size=30, home="3-01", parents=["Ms Aisha Rahman"]),
+               dict(name="3B", level="Sec 3", size=30, home="3-02", parents=["Ms Chloe Tan"]),
+               dict(name="4A", level="Sec 4", size=30, home="4-01", parents=["Mr Daniel Koh"])]
     students = []
     for c in classes:
         for k in range(1, 31):
