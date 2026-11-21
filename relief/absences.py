@@ -327,20 +327,6 @@ def exams_records(source_id) -> list:
     return [r for r in all_records() if not r.get("cancelled") and isinstance(r.get("exams"), dict) and r["exams"].get("id") == source_id]
 
 
-def cancel_exams(id, why, today) -> dict:
-    """cancel a whole backup for the app (cancelled dict(at, by="app", why)); left as it is when cancelled already, or when
-    every date of it is before today (the caller's: one clock). {} when it is not there. Sync changes backups in place
-    (update_exams) and does not call this"""
-    iso = _free._iso(today)
-    with _LOCK:
-        r = load(id)
-        if r is None: return {}
-        if r.get("cancelled") or all(str(d) < iso for d in r.get("dates") or []): return r
-        r["cancelled"] = dict(at=_now(), by="app", why=why)
-        _save(r)
-    return r
-
-
 def _editable(id):
     r = load(id)
     if r is None: raise ValueError(WRONG)

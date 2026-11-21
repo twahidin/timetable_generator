@@ -760,8 +760,7 @@ def backup_periods_hide_nobody_and_update_in_place():
     r3 = AB.from_exams(HAFIZ, mine, src, "Exams committee", "x", None)
     assert [x["key"] for x in r3["lessons"]] == [asm], "a lesson while away in an absence of their own is left to it"
     _drop(away)
-    assert AB.cancel_exams(r3["id"], "x", date(2027, 1, 5))["cancelled"] is None, "every date past: left (the caller's today)"
-    assert AB.cancel_exams(r3["id"], "x", SOON)["cancelled"]["why"] == "x"
+    assert not hasattr(AB, "cancel_exams"), "sync changes backups in place: nothing cancels a whole backup (past lessons included)"
 
 def _two_duties():
     """Hafiz on two duties: his 4A PE and the Assembly both need a backup"""
