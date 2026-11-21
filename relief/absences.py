@@ -4,11 +4,11 @@ import datetime, os, secrets, shutil, threading
 from zoneinfo import ZoneInfo
 
 import store
+from accounts import people as _accounts
 from relief import files as _files
 from relief import free as _free
 from relief import lessons as _lessons
 from relief import settings as _settings
-from relief.people import people as _people
 
 DIR = os.path.join(store.DATA, "relief", "absences")
 _LOCK = threading.Lock()
@@ -120,7 +120,7 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
     if how not in ("asked", "planned") or not isinstance(data, dict): raise ValueError(WRONG)
     settings = _settings.load(pub)
     cal = settings["calendar"]
-    staff = {p["name"] for p in _people(pub, settings["extra_staff"])}
+    staff = {p["name"] for p in _accounts.listing(pub)}     # the published teachers and the staff added in the accounts
     teacher = data.get("teacher")
     if not isinstance(teacher, str) or teacher not in staff:
         raise ValueError(f"{teacher if isinstance(teacher, str) and teacher else 'That person'} is not on the published timetable or the staff list.")

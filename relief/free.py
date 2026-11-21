@@ -111,10 +111,11 @@ def free_then(pub, settings, records, lesson, absent, links=None):
     taught = {}
     for L in model.get("lessons") or []:
         for t in L.get("teachers") or []: taught.setdefault(t, set()).add(L.get("subject") or "")
-    absent_depts = next((x["depts"] for x in _people(pub, settings.get("extra_staff")) if x["name"] == absent), [])
+    everyone = _people(pub, [])     # the published teachers: staff who teach no lessons (added in the accounts) are never free then
+    absent_depts = next((x["depts"] for x in everyone if x["name"] == absent), [])
     never = set(lim.get("never") or [])
     teaching, free, busy = [], [], []
-    for who in _people(pub, settings.get("extra_staff")):
+    for who in everyone:
         name = who["name"]
         if who["staff_only"] or name == absent: continue
         if any(links is None or not links.stopped(x) for x in _lessons.on_date(pub, cal, name, date, periods=(p, p + n - 1))):

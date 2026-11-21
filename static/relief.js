@@ -1,5 +1,5 @@
 "use strict";
-/* The Relief home (/relief) for a member of staff signed in with their own code. Tabs: My absences and Ask for relief
+/* The Relief home (/relief) for a member of staff signed in by name (their own code or password). Tabs: My absences and Ask for relief
    (this file); Plan relief and What's in come from relief-plan.js and relief-inbox.js, which call
    Relief.tab(name, {init(pane, me), shown(pane), dirty()}). A tab shows only when the person may open it and its code is
    loaded. Each tab keeps its own part of the page, so moving between tabs loses nothing typed; leaving the page with

@@ -59,14 +59,25 @@ Design: `../specs/2026-11-20-relief-module-design.md`.
   largest free-then list 79 people, the slowest whole day 0.20 s, no errors.
 - No real staff name (96 checked) and not the school's full name in the branch.
 
-## For the accounts work (project 3)
+## For the accounts work (project 3): done when main (PR #83, accounts) was merged in
 
-- Every relief permission goes through `app.relief_has(right)`, passed into `relief/web.py` with
-  `init(has=..., me=..., role=...)`. Right names: `relief`, `relief.plan`, `relief.team`, `relief.settings`,
-  `relief.save`. The team right reaches `absences._may_change` from the routes (`team=has("relief.team")`).
-- `_gate` in `relief/web.py` accepts only the `staff` session role today; with accounts it should accept any signed-in
-  person.
-- The Relief team extra needs `relief.plan` and `relief.team`; the HODs, SHs and school leaders need `relief.plan`.
+- Every relief permission is the accounts' `app.has(right)` (rights from `accounts/rights.py`), passed into
+  `relief/web.py` with `init(has=has, me=who, need=need, note=_relief_entry)`; `app.relief_has` is gone. Any teacher,
+  school leader, HOD/SH or committee member signed in by name has `relief` (an executive only with the Relief team
+  extra); school leaders, HODs and SHs have `relief.plan`; the Relief team extra gives `relief`, `relief.plan` and
+  `relief.team` (R16). The team right still reaches `absences._may_change` from the routes (`team=has("relief.team")`).
+- Every route in `relief/web.py` goes through app.py's `need("relief")` (pinned in `tests/test_routes.py`); the narrower
+  `relief.plan` and `relief.team` are asked inside with stage 2's own 403 sentences. `_gate` accepts any person signed
+  in by name with `relief` (`who()`, which ends the session of someone no longer on the published timetable).
+- `/api/relief/me` also moves relief's old lists into the accounts (`move_relief_lists()`, a no-op after its first run)
+  and then works the rights out again, so a relief team member has What's in on the first open.
+- The people relief knows (absent teacher, reporting officer, the people picker) are `accounts.people.listing(pub)`:
+  the published teachers and the staff added in the accounts. The free-then list reads the published teachers only, as
+  before (staff who teach no lessons were never free then).
+- Each save (asked, planned, acknowledged, work, not needed, needed again, a relief teacher chosen or taken off,
+  cancelled) is one history entry (kind `relief`, Where "Relief", link `/relief`), as the accounts design asks for
+  relief's requests, picks and cancellations; never the reason or a why. Uploading a file and marking What's in seen
+  write none (the work save that attaches a file does).
 
 ## For stage 3 and later
 

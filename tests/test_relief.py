@@ -449,8 +449,10 @@ def a_relief_team_extra_alone_may_save_and_a_leader_only_read():
             assert S.load(PUB)["rules"] == ["A rule."]
             assert lead.get("/api/relief/settings").status_code == 200
             assert lead.put("/api/relief/settings", json=base()).status_code == 401
-            assert team.get("/api/relief/me").get_json() == dict(name="Ms Evelyn Koh", depts=["Science"], published=True, on_team=True, on_management=False, can_settings=True)
-            assert lead.get("/api/relief/me").get_json() == dict(name="Mr Darren Lim", depts=["Science"], published=True, on_team=False, on_management=True, can_settings=False)
+            assert team.get("/api/relief/me").get_json() == dict(name="Ms Evelyn Koh", depts=["Science"], published=True, on_team=True, on_management=False, can_settings=True,
+                                                                     can_plan=True, can_team=True, today=A.relief_lessons.today().isoformat())   # R16: the Relief team extra plans too
+            assert lead.get("/api/relief/me").get_json() == dict(name="Mr Darren Lim", depts=["Science"], published=True, on_team=False, on_management=True, can_settings=False,
+                                                                     can_plan=True, can_team=False, today=A.relief_lessons.today().isoformat())
     finally: AP.update(lambda d: (d["people"].pop("Ms Evelyn Koh"), d["people"].pop("Mr Darren Lim")))
     fresh()
 
@@ -520,6 +522,19 @@ def the_routes_move_the_lists_once_and_keep_the_old_file():
         AP.update(lambda d: d["people"].pop("Mdm Office Staff"))
         assert A.move_relief_lists() is None                                                     # done once; not done again
         assert com.get("/api/relief/settings").get_json()["lists"]["added"] == []
+    _reset(); fresh()
+
+@t
+def the_relief_home_moves_the_lists_too():
+    fresh(); _reset()
+    store.write_json(S.PATH, dict(team=["Mr Darren Lim"]))     # relief's old team list, not moved yet: no other page has run
+    with published(PUB):
+        c = staff("Mr Darren Lim")
+        assert AP.load()["migrated"] is False
+        j = c.get("/api/relief/me").get_json()
+        assert (j["can_team"], j["can_plan"], j["on_team"]) == (True, True, True), j     # the What's in tab, on the first open
+        assert AP.load()["migrated"] is True and AP.record(AP.load(), "Mr Darren Lim")["extras"]["relief"] is True
+        assert A.move_relief_lists() is None and c.get("/api/relief/me").get_json()["can_team"] is True   # once only
     _reset(); fresh()
 
 @t

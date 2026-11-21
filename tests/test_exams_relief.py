@@ -176,11 +176,14 @@ import contextlib, json, urllib.parse  # noqa: E402
 import access  # noqa: E402
 from relief import free as FR, settings as RS  # noqa: E402
 from relief.calendar import school_day  # noqa: E402
+from accounts import people as ACC  # noqa: E402    (AP is exams.approval here)
 
 DANIEL, GRACE = "Mr Daniel Koh", "Ms Grace Yeo"
 os.makedirs(os.path.dirname(RS.PATH), exist_ok=True)
-store.write_json(RS.PATH, dict(calendar=CAL, team=[], management=[GRACE], limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=""))
-SETTINGS = dict(fat_role="", limits=dict(fat_per_day=3, other_per_day=None, never=[]), calendar=CAL, extra_staff=[])
+store.write_json(RS.PATH, dict(calendar=CAL, limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=""))
+# management comes from the accounts (as tests/test_relief_requests.py): Grace a school leader, who plans relief (relief.plan)
+ACC.update(lambda d: d["people"].update({GRACE: dict(group="leader")}))
+SETTINGS = dict(fat_role="", limits=dict(fat_per_day=3, other_per_day=None, never=[]), calendar=CAL)
 
 def _need(p, n=1, absent=DANIEL):
     """a 4A lesson of the absent teacher at periods p.., as relief.lessons.on_date gives it"""
@@ -235,9 +238,11 @@ def published(pub):
     finally: store.published = old
 
 def staff(name):
+    """a person signed in by name with their own code, on the accounts' one sign-in page"""
     c = A.app.test_client()
-    r = c.post("/login", data={"as": "relief", "code": access.staff_code(name)})
+    r = c.post("/login", data={"code": access.staff_code(name)})
     assert r.status_code == 302, (name, r.status_code)
+    with c.session_transaction() as s: assert s["who"] == name and s["via"] == "code", dict(s)
     return c
 
 @t
@@ -464,7 +469,7 @@ def lists_and_reviews_carry_away():
         with A.app.test_request_context():
             pass
         c = staff(GRACE)
-        c.post("/login", data={"as": "committee", "code": os.environ["COMMITTEE_CODE"]})
+        c.post("/login", data={"code": os.environ["COMMITTEE_CODE"]})
         j = c.get("/api/exams").get_json()
         row = next(x for x in j["schedules"] if x["id"] == e["id"])
         assert row["away"] and row["away"][0].startswith("Away (from relief): " + AISHA), row
@@ -488,7 +493,9 @@ import copy, shutil  # noqa: E402
 from exams import make as MK  # noqa: E402
 
 CHLOE, HAFIZ = "Ms Chloe Tan", "Mr Hafiz Rahman"
-store.write_json(RS.PATH, dict(calendar=CAL, team=[GRACE], management=[GRACE], limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=""))
+store.write_json(RS.PATH, dict(calendar=CAL, limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=""))
+# and now on the relief team too: the Relief team extra (relief.team, for What's in)
+ACC.update(lambda d: d["people"][GRACE].update(extras=dict(relief=True, exams=None, admin=False)))
 DKEY = RL.key_of(M, 2, MON, "Odd Mon")      # Daniel's 4A Mathematics, periods 2-3 (08:00-08:40): 4A is not on a Sec 3 exam
 DUTY_KEY = ISO + " 07:50"
 SOON = date(2026, 12, 1)
@@ -511,7 +518,7 @@ def _made_exam(duties):
 
 def committee():
     c = A.app.test_client()
-    assert c.post("/login", data={"as": "committee", "code": os.environ["COMMITTEE_CODE"]}).status_code == 302
+    assert c.post("/login", data={"code": os.environ["COMMITTEE_CODE"]}).status_code == 302
     return c
 
 def ok(r):

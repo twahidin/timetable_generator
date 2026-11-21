@@ -411,13 +411,13 @@ def offered():
 
 @t
 def the_page_offers_every_where_the_app_writes():
-    written = set(H.WHERE.values()) | {"School & day", "Setup", "Step 8 · Upload and edit", "Step 9 · Publish", "Relief settings", "Exams and events", "Admin", "Sign-in"}
+    written = set(H.WHERE.values()) | {"School & day", "Setup", "Step 8 · Upload and edit", "Step 9 · Publish", "Relief", "Relief settings", "Exams and events", "Admin", "Sign-in"}
     assert written <= set(offered()), written - set(offered())
 
 @t
 def api_each_where_returns_its_entries():
     fresh()
-    kind = {"Admin": "account", "Sign-in": "signin", "Setup": "setup-replaced", "Relief settings": "relief", "Exams and events": "exams"}
+    kind = {"Admin": "account", "Sign-in": "signin", "Setup": "setup-replaced", "Relief": "relief", "Relief settings": "relief", "Exams and events": "exams"}
     for w in offered(): H.add({"kind": kind.get(w, "draft" if w.startswith(("Step 8", "Step 9")) else "setup"), "as": "A", "where": w, "text": "in " + w})
     H.add({"kind": "account", "as": "A", "text": "an older account entry"}); H.add({"kind": "signin", "as": "A", "text": "an older sign-in"})
     c = committee()

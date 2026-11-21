@@ -263,6 +263,26 @@ GUARDS = {
     "relief_settings_get": ('relief.settings',),
     "relief_settings_page": ('relief.settings',),
     "relief_settings_put": ('relief.save',),
+    # relief requests (relief/web.py): the guard is relief on every route; the narrower rights (relief.plan, relief.team)
+    # are checked inside the routes, with their own sentences, and pinned in RELIEF_INSIDE further down
+    "relief_web.acknowledge": ('relief',),
+    "relief_web.cancel": ('relief',),
+    "relief_web.create": ('relief',),
+    "relief_web.download": ('relief',),
+    "relief_web.free": ('relief',),
+    "relief_web.lessons": ('relief',),
+    "relief_web.mine": ('relief',),
+    "relief_web.needed": ('relief',),
+    "relief_web.not_needed": ('relief',),
+    "relief_web.one": ('relief',),
+    "relief_web.people": ('relief',),
+    "relief_web.planned": ('relief',),
+    "relief_web.planned_csv": ('relief',),
+    "relief_web.relief": ('relief',),
+    "relief_web.seen": ('relief',),
+    "relief_web.upload": ('relief',),
+    "relief_web.whats_in": ('relief',),
+    "relief_web.work": ('relief',),
     "restore_setup": ('committee',),
     "status": ('setup',),
     "timetable": ('timetable',),
@@ -484,6 +504,31 @@ def no_account_field_reaches_a_page_that_is_not_the_admin_page():
     P.update(lambda d: d["people"][HAL].update(depts=[]))
     try: assert client(person(HAL, "code")).get("/api/relief/me").get_json()["depts"] == ["SC"]   # none ticked: relief keeps step 4's
     finally: P.update(lambda d: d["people"][HAL].update(depts=["SC", "MA"]))
+
+# relief requests (relief stage 2, relief/web.py): every route needs relief (the map above); these also ask a narrower
+# right inside, answered with their own sentence (a 403 that is not the guard's): relief.plan to see who is free, the
+# planned list and the relief sheet; relief.team for What's in. School leaders, HODs and SHs plan; the Relief team extra
+# plans and is the relief team (R16)
+PLAN_ONLY = "Only management and the relief team plan relief for a colleague."
+CHOOSE_ONLY = "Only management and the relief team choose relief teachers."
+TEAM_ONLY = "Only the relief team can open What's in."
+RELIEF_INSIDE = {("GET", "/api/relief/free"): ("relief.plan", CHOOSE_ONLY), ("GET", "/api/relief/absences/planned"): ("relief.plan", PLAN_ONLY),
+                 ("GET", "/api/relief/planned.csv"): ("relief.plan", PLAN_ONLY), ("GET", "/api/relief/absences"): ("relief.team", TEAM_ONLY),
+                 ("POST", "/api/relief/absences/seen"): ("relief.team", TEAM_ONLY)}
+
+@t
+def relief_requests_ask_the_narrower_right_inside():
+    for kind, (keys, have) in KINDS.items():
+        if "relief" not in have: continue
+        c = client(keys)
+        j = c.get("/api/relief/me").get_json()
+        assert (j["can_plan"], j["can_team"]) == ("relief.plan" in have, "relief.team" in have), (kind, j)
+        for (method, url), (right, sentence) in RELIEF_INSIDE.items():
+            r = c.open(url, method=method, json={})
+            if right in have: assert r.status_code not in (401, 403, 500), (kind, method, url, r.status_code, r.get_data(as_text=True)[:200])
+            else: assert r.status_code == 403 and r.get_json() == {"error": sentence}, (kind, method, url, r.status_code, r.get_data(as_text=True)[:200])
+            r.close()
+        assert kept(c) == keys, (kind, kept(c))
 
 ONLY_ADMIN = "Only an admin can open this page."
 
