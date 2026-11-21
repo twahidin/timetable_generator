@@ -70,7 +70,7 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .datepick{display:flex;align-items:center;gap:6px}.datepick input{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
 .onmsg{padding:8px 20px;font-size:13px;color:var(--bad);background:var(--panel);border-bottom:1px solid var(--line)}
 .onday{margin:0 0 12px;padding:7px 10px;border-radius:8px;font-size:13px;background:color-mix(in srgb,#6b3fa0 12%,transparent);border-left:3px solid #6b3fa0}
-.myexams{margin-bottom:14px}.myexams h2{font-size:18px;margin:0 0 6px}.myexams h3,.exams h3{font-size:14px;margin:14px 0 6px}.exams h2{font-size:17px;margin:18px 0 2px}.exams h2 small{font-weight:400;font-size:12.5px;color:var(--muted);margin-left:8px}
+.myexams{margin-bottom:14px}.myexams h2{font-size:18px;margin:0 0 6px}.myexams h3,.exams h3{font-size:14px;margin:14px 0 6px}.exams h2{font-size:17px;margin:18px 0 2px}.exams h2 small{font-weight:400;font-size:12.5px;color:var(--muted);margin-left:8px}.exams .evl{margin:4px 0 6px;font-size:13px}
 .banner{background:#FFF4D6;color:#5C4400;padding:8px 20px;font-size:13px;font-weight:600;border-bottom:1px solid #E8D9A8}
 .lsw{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.lsw button{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:5px 12px;cursor:pointer;font-size:13px;color:var(--sub)}
 .lsw button.on{background:var(--accent);border-color:var(--accent);color:var(--panel)}.lsw .count{margin:0 0 0 6px}
@@ -260,7 +260,7 @@ const studentView = id => { const s = sIx.get(id); return personalView(s.cls, s.
 /* a room, the combined venues made with it and its own rooms, as exams/seating.py _related reads them: one space for exams */
 const relatedRooms = r => uniq([r, ...ROOMS.filter(x => x.parts.includes(r)).map(x => x.name), ...((rIx.get(r) || {}).parts || [])]);
 /* a view on the chosen date (S.on, from /api/day): only that day's row, a lesson that does not happen crossed out, a shortened one with the
-   times it still runs, and the exams of the class (a student: their class), the teacher or the room. The PDF, CSV and legend stay the usual timetable */
+   times it still runs, and the exams and events of the class (a student: their class), the teacher (with an event duty) or the room. The PDF, CSV and legend stay the usual timetable */
 function dated(v) {
   const on = S.on, ex = on.exams || {}, nd = niceDate(on.date);
   if (!on.day) { v.noday = `${nd} is outside the terms or a holiday in the school calendar.`; v.cells = []; return v; }
@@ -278,11 +278,11 @@ function dated(v) {
   const items = cls ? (ex.classes || {})[cls] : v.kind === "teacher" ? (ex.teachers || {})[v.key] : v.kind === "room" ? inRoom(v.key) : null;
   const tm = it => `${it.start}–${it.end}`;
   (items || []).forEach(it => {
-    const title = cls ? it.label : v.kind === "teacher" ? `${it.role} · ${it.room}` : "Exam";
-    const lines = cls ? [it.room, tm(it), it.seat_note] : [it.label, tm(it), it.via ? `in ${it.via}` : ""];
+    const title = cls ? it.label : v.kind === "teacher" ? `${it.role} · ${it.room}` : it.kind === "event" ? "Event" : "Exam";
+    const lines = cls ? [it.room, tm(it), it.seat_note] : [it.label, tm(it), v.kind === "teacher" ? it.duty : "", it.via ? `in ${it.via}` : ""];
     v.cells.push({ d: only, p: +it.p || 0, n: +it.n || 0, title, lines: lines.filter(Boolean), exam: true, when: `${nd} (${on.day})` });
   });
-  v.onLine = ex.banner ? `On ${nd} (${on.day}): ${ex.banner}. Lessons that don't happen are crossed out.` : `On ${nd} (${on.day}): no exams or tests. This is the usual ${on.day} timetable.`;
+  v.onLine = ex.banner ? `On ${nd} (${on.day}): ${ex.banner}. Lessons that don't happen are crossed out.` : `On ${nd} (${on.day}): no exams, tests or events. This is the usual ${on.day} timetable.`;
   return v;
 }
 
@@ -338,7 +338,7 @@ function pdfLink(v) {
 // ------------------------------------------------------------------ state, tabs, lists
 const APP_TABS = APP && APP.tabs ? APP.tabs : null;
 const TABS_ALL = [["classes", "Classes", CLS.filter(c => busyClasses.has(c.name)).length], ["teachers", "Teachers", busyTeachers.size], ["rooms", "Rooms", busyRooms.size],
-  ["students", MODE === "student" ? "Build my timetable" : "Students", MODE === "student" ? "" : STU.length], ["lessons", "Lessons", lessonRows.size], ["free", "Who's free", ""], ...(EXAMS ? [["exams", "Exams", ""]] : []), ["checks", "Checks", ""]];
+  ["students", MODE === "student" ? "Build my timetable" : "Students", MODE === "student" ? "" : STU.length], ["lessons", "Lessons", lessonRows.size], ["free", "Who's free", ""], ...(EXAMS ? [["exams", "Exams and events", ""]] : []), ["checks", "Checks", ""]];
 const TABS = TABS_ALL.filter(t => !APP_TABS || APP_TABS.includes(t[0]));
 const S = { tab: "classes", key: null, chip: {}, fq: "", current: null, lf: {}, sort: ["day", 1], showAll: false, lview: "grids", on: null, onWant: "" };   // lview: how the Lessons tab shows what the filter finds; on: /api/day's answer for the chosen date (null: the usual timetable)
 const LVIEWS = [["grids", "Class grids"], ["page", "One page"], ["table", "Table"]];
@@ -495,7 +495,7 @@ function renderFree() {
     $("#view").innerHTML = `<div class="card"><h1 style="margin:0 0 10px;font-size:20px">Who's free</h1><div class="empty"><b>Not a school day.</b><br>${esc(niceDate(S.on.date))} is outside the terms or a holiday in the school calendar.</div></div>`;
     return setHash("#free");
   }
-  /* on a date: that day, a lesson that does not happen leaves its teacher, room and class free (a shortened one only where it still runs), and exam duties, exam rooms and sittings are busy */
+  /* on a date: that day, a lesson that does not happen leaves its teacher, room and class free (a shortened one only where it still runs), and exam duties, exam rooms, sittings, the people at an event and the rooms it takes are busy */
   const on = S.on && S.on.day ? S.on : null, ex = on ? on.exams || {} : {}, day = on ? DAYS.indexOf(on.day) : +f.d;
   const stop = new Set(ex.stopped || []), runs = new Map();
   (ex.shortened || []).forEach(([i, a, b]) => { if (!runs.has(i)) runs.set(i, []); runs.get(i).push([mins(a), mins(b)]); });
@@ -513,11 +513,11 @@ function renderFree() {
   const inSchool = CLS.filter(c => busyClasses.has(c.name)).filter(c => { const g = D.grid[c.level]; if (!g || !g[day]) return false; for (let p = +f.from; p <= +f.to; p++) if (g[day][p] === "L") return true; return false; });
   const dayPick = on ? `<label>Date<b class="count" style="margin:0;padding:6px 0">${esc(niceDate(on.date))} (${esc(on.day)})</b></label>` : `<label>Day<select data-ff="d">${DAYS.map((d, i) => `<option value="${i}" ${+f.d === i ? "selected" : ""}>${esc(d)}</option>`).join("")}</select></label>`;
   const dayName = on ? `${niceDate(on.date)} (${on.day})` : DAYS[f.d];
-  $("#view").innerHTML = `<div class="card"><h1 style="margin:0 0 10px;font-size:20px">Who's free</h1>${on ? `<p class="onday">On ${esc(niceDate(on.date))} (${esc(on.day)}): ${esc(ex.banner || "no exams or tests")}.</p>` : ""}<div class="filters">
+  $("#view").innerHTML = `<div class="card"><h1 style="margin:0 0 10px;font-size:20px">Who's free</h1>${on ? `<p class="onday">On ${esc(niceDate(on.date))} (${esc(on.day)}): ${esc(ex.banner || "no exams, tests or events")}.</p>` : ""}<div class="filters">
     ${dayPick}
     <label>From<select data-ff="from">${per.map(([v, t]) => `<option value="${v}" ${+f.from === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
     <label>To<select data-ff="to">${per.map(([v, t]) => `<option value="${v}" ${+f.to === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label></div>
-    <p class="count">${esc(dayName)}, ${esc(time(+f.from)[0])}–${esc(time(+f.to)[1])}: ${freeT.length} teachers and ${freeR.length} rooms free. Teachers show how many periods they teach that day.${on ? " Duties and exam rooms count as busy; lessons that don't happen do not." : ""}</p>
+    <p class="count">${esc(dayName)}, ${esc(time(+f.from)[0])}–${esc(time(+f.to)[1])}: ${freeT.length} teachers and ${freeR.length} rooms free. Teachers show how many periods they teach that day.${on ? " Duties, events and the rooms they take count as busy; lessons that don't happen do not." : ""}</p>
     <h3 style="font-size:14px;margin:14px 0 8px">Teachers free</h3><div class="cols">${grp(freeT, t => t.dept).map(([g, ts]) => `<div><h4>${esc(g)}</h4>${ts.map(t => `<span class="pill"><a data-go="teachers" data-key="${esc(t.name)}">${esc(t.name)}</a> <small>${load[t.name] || 0}</small></span>`).join("")}</div>`).join("") || "<div class='empty'>None</div>"}</div>
     <h3 style="font-size:14px;margin:18px 0 8px">Rooms free</h3><div class="cols">${grp(freeR, r => r.kind).map(([g, rs]) => `<div><h4>${esc(g)}</h4>${rs.map(r => `<span class="pill"><a data-go="rooms" data-key="${esc(r.name)}">${esc(r.name)}</a></span>`).join("")}</div>`).join("") || "<div class='empty'>None</div>"}</div>
     <h3 style="font-size:14px;margin:18px 0 8px">Classes with no lesson then</h3><div>${inSchool.filter(c => !cb.has(c.name)).map(c => `<span class="pill"><a data-go="classes" data-key="${esc(c.name)}">${esc(c.name)}</a></span>`).join("") || "<span class='count'>Every class in school then has a lesson.</span>"}</div></div>`;
@@ -535,7 +535,7 @@ function renderChecks() {
 
 // ------------------------------------------------------------------ exams (read at runtime: the page is kept per role until the next publish)
 const EXFAIL = "The exams could not be loaded. Try again later.";
-const KINDS = { exam: "Exam", test: "Common test" };
+const KINDS = { exam: "Exam", test: "Common test", event: "Event" };
 const span2 = (a, b) => a === b ? niceDate(a) : `${niceDate(a)}–${niceDate(b)}`;
 const tbl = (head, rows) => `<div class="tablebox"><table class="lt"><thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 function examHTML(s) {
@@ -544,10 +544,17 @@ function examHTML(s) {
   const pr = (s.prints || []).length ? `<div class="tools" style="margin-top:12px">${s.prints.map(([t, h]) => `<a class="btn" href="${esc(h)}" target="_blank" rel="noopener">${esc(t)}</a>`).join("")}</div>` : "";
   return `<h2>${esc(s.name)}<small>${esc(KINDS[s.kind] || s.kind || "")} · ${esc(span2(s.start, s.end))}</small></h2>${lv}${ro}${pr}`;
 }
+/* an event: its classes, where and days; staff answers add the teacher in charge, who goes and the duties (a student's answer has none of them) */
+function eventHTML(s) {
+  const line = [(s.classes || []).length ? `Classes ${s.classes.join(", ")}` : "", s.where || ""].filter(Boolean).join(" · ");
+  const dy = (s.days || []).length ? tbl(["Date", "Time"], s.days.map(d => [niceDate(d.date), `${d.start}–${d.end}`])) : "";
+  const staff = s.in_charge ? `<p class="evl">Teacher in charge: ${esc(s.in_charge)}</p>${(s.going || []).length ? `<p class="evl">Going: ${esc(s.going.join(", "))}</p>` : ""}${(s.duties || []).length ? tbl(["Duty", "Who", "Time"], s.duties.map(d => [d.duty, d.who, d.time])) : ""}` : "";
+  return `<h2>${esc(s.name)}<small>${esc(KINDS.event)} · ${esc(span2(s.start, s.end))}</small></h2>${line ? `<p class="evl">${esc(line)}</p>` : ""}${dy}${staff}`;
+}
 function renderExams() {
   const ex = S.ex;
-  const body = !ex ? `<p class="count">Loading the exams…</p>` : ex.error ? `<p class="badline">${esc(ex.error)}</p>` : !(ex.schedules || []).length ? `<div class="empty">No exams or tests on the main site now.</div>` : ex.schedules.map(examHTML).join("");
-  $("#view").innerHTML = `<div class="card exams"><h1 style="margin:0 0 4px;font-size:20px">Exams</h1>${body}</div>`;
+  const body = !ex ? `<p class="count">Loading the exams…</p>` : ex.error ? `<p class="badline">${esc(ex.error)}</p>` : !(ex.schedules || []).length ? `<div class="empty">No exams, tests or events on the main site now.</div>` : ex.schedules.map(s => s.kind === "event" ? eventHTML(s) : examHTML(s)).join("");
+  $("#view").innerHTML = `<div class="card exams"><h1 style="margin:0 0 4px;font-size:20px">Exams and events</h1>${body}</div>`;
   setHash("#exams");
 }
 function loadExams() {
@@ -555,7 +562,7 @@ function loadExams() {
     S.ex = j && !j.error && Array.isArray(j.schedules) ? j : { error: (j && j.error) || EXFAIL };
     if (S.ex.banner && !$("#exbanner")) {
       const b = document.createElement("div"); b.className = "banner"; b.id = "exbanner";
-      b.innerHTML = `${esc(S.ex.banner)}${TABS.some(t => t[0] === "exams") ? ` <a href="#exams" data-tab="exams">See Exams</a>` : ""}`;
+      b.innerHTML = `${esc(S.ex.banner)}${TABS.some(t => t[0] === "exams") ? ` <a href="#exams" data-tab="exams">See Exams and events</a>` : ""}`;
       document.querySelector("header.top").after(b);
     }
     if (S.tab === "exams") renderExams();
@@ -591,10 +598,11 @@ function myExams() {
   }
   if (!S.me || $("#myexams") || !$("#view")) return;
   if (S.me.error) return $("#view").insertAdjacentHTML("afterbegin", `<p class="note" id="myexams">${esc(S.me.error)}</p>`);
-  const ss = S.me.schedules.filter(s => (s.papers || []).length);
-  if (!ss.length) return;   /* no papers: nothing shows */
+  const ss = S.me.schedules.filter(s => (s.papers || []).length || (s.days || []).length);
+  if (!ss.length) return;   /* no papers and no event days: nothing shows */
   const row = p => `<tr><td>${esc(niceDate(p.date))}${p.report ? ` · report ${esc(p.report)}` : ""}</td><td>${esc(p.label)}</td><td>${esc(p.start)}–${esc(p.end)}</td><td>${esc(p.room || "")}</td><td>${p.seat ? `Seat ${esc(p.seat)}` : ""}</td><td>${esc(p.note || "")}</td></tr>`;
-  $("#view").insertAdjacentHTML("afterbegin", `<div class="card myexams" id="myexams"><h2>My exam timetable</h2>${ss.map(s => `<h3>${esc(s.name)}</h3><div class="tablebox"><table class="lt"><tbody>${s.papers.map(row).join("")}</tbody></table></div>`).join("")}</div>`);
+  const evRow = s => d => `<tr><td>${esc(niceDate(d.date))}</td><td>${esc([s.name, s.where, `${d.start}–${d.end}`].filter(Boolean).join(" · "))}</td><td>${esc(d.note || "")}</td></tr>`;   /* an event's day: its name, where and times */
+  $("#view").insertAdjacentHTML("afterbegin", `<div class="card myexams" id="myexams"><h2>My exam timetable</h2>${ss.map(s => `<h3>${esc(s.name)}</h3><div class="tablebox"><table class="lt"><tbody>${(s.papers || []).map(row).join("")}${(s.days || []).map(evRow(s)).join("")}</tbody></table></div>`).join("")}</div>`);
 }
 
 // ------------------------------------------------------------------ lesson details, search, events

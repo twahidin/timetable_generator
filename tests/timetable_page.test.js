@@ -49,6 +49,23 @@ const DAY = {
   }
 };
 const HOLIDAY = { date: "2026-10-12", day: null, published_at: STAMP, exams: { classes: {}, stopped: [], shortened: [], teachers: {}, rooms: {}, banner: "" } };
+/* an event on Mon 5 Oct, as /api/day gives it to staff: 3A goes out, Ms Grace Yeo goes with a duty, LT2 is a venue it takes */
+const TRIP = "Sec 3 Learning Journey", ev = o => Object.assign({ exam: TRIP, kind: "event", p: 0, n: 9, start: "07:40", end: "10:40", label: TRIP }, o);
+const EVDAY = {
+  date: "2026-10-05", day: "Odd Mon", published_at: STAMP,
+  exams: {
+    classes: { "3A": [ev({ room: "Off site (museum)", seat_note: "" })] }, stopped: [0], shortened: [],
+    teachers: { "Ms Grace Yeo": [ev({ room: "Off site (museum)", role: "At event", duty: "Bus marshal 07:45" })] },
+    rooms: { LT2: [ev({})] }, banner: TRIP
+  }
+};
+const QUIET = { date: "2026-10-06", day: "Odd Tue", published_at: STAMP, exams: { classes: {}, stopped: [], shortened: [], teachers: {}, rooms: {}, banner: "" } };
+/* /api/published/exams with an event: the staff row has the teacher in charge, who goes and the duties; a student's row has none of them */
+const EVROW = { id: "ev1", name: TRIP, kind: "event", start: "2026-10-05", end: "2026-10-05", classes: ["3A", "3B"], where: "Off site (museum)",
+  days: [{ date: "2026-10-05", start: "07:40", end: "10:40" }], in_charge: "Ms Grace Yeo", going: ["Ms Grace Yeo", "Mr Ben Ong"],
+  duties: [{ duty: "Bus marshal", who: "Ms Grace Yeo", time: "07:45" }] };
+const STUROW = { id: "ev2", name: "Sec 3 <i>Trip</i>", kind: "event", start: "2026-10-06", end: "2026-10-07", classes: ["3B"], where: "Science Centre & museum",
+  days: [{ date: "2026-10-06", start: "07:40", end: "13:00" }, { date: "2026-10-07", start: "07:40", end: "10:40" }] };
 
 function boot(answers, app) {
   const reg = new Map(), fetched = [];
@@ -133,7 +150,7 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     await P.tick(); await P.pick("2026-10-05");
     P.run("S.ff = { d: 0, from: 1, to: 3 }; show('free', null)");
     let v = P.view();
-    assert(v.includes("Duties and exam rooms count as busy; lessons that don't happen do not.") && !v.includes('data-ff="d"'), v);
+    assert(v.includes("Duties, events and the rooms they take count as busy; lessons that don't happen do not.") && !v.includes('data-ff="d"'), v);
     let tf = names(v, "Teachers free", "Rooms free");
     assert(!tf.includes("Ms Aisha Rahman") && !tf.includes("Mr Daniel Koh"), "a duty; maths still runs 08:20–08:40: " + tf);
     P.run("S.ff = { d: 0, from: 6, to: 8 }; show('free', null)");
@@ -168,5 +185,64 @@ let n = 0; const t = async (name, f) => { await f(); n++; };
     const Q = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, DAY] }, Object.assign({}, APP, { published_at: null }));
     await Q.tick(); await Q.pick("2026-10-05");
     assert.strictEqual(Q.fetched.pop(), "/api/day?date=2026-10-05", "a page with no stamp (a sample) sends none");
+  });
+
+  await t("an event on a date: the class's block, the teacher's duty, the venue, and who's free", async () => {
+    const P = boot({ "/api/published/exams": LIST, "/api/day?date=2026-10-05": [200, EVDAY], "/api/day?date=2026-10-06": [200, QUIET] }, APP);
+    await P.tick(); await P.pick("2026-10-05");
+    P.run('show("classes", "3A")');
+    let v = P.view();
+    assert(v.includes('<b>Sec 3 Learning Journey</b><span class="">Off site (museum)</span><span class="m">07:40–10:40</span>'), v);
+    assert(v.includes('<p class="onday">On Mon 5 Oct (Odd Mon): Sec 3 Learning Journey. Lessons that don&#39;t happen are crossed out.</p>') && count(v, 'class="cell x"') === 1, v);
+    P.run('show("teachers", "Ms Grace Yeo")');
+    v = P.view();
+    assert(v.includes('<b>At event · Off site (museum)</b><span class="">Sec 3 Learning Journey</span><span class="m">07:40–10:40</span><span class="m">Bus marshal 07:45</span>'), v);
+    P.run('show("rooms", "LT2")');
+    assert(P.view().includes('<b>Event</b><span class="">Sec 3 Learning Journey</span><span class="m">07:40–10:40</span>') && !P.view().includes("<b>Exam</b>"), P.view());
+    P.run('show("rooms", "LT1&2")');
+    assert(P.view().includes('<b>Event</b><span class="">Sec 3 Learning Journey</span><span class="m">07:40–10:40</span><span class="m">in LT2</span>'), "a combined venue holds its room's event: " + P.view());
+    P.run("S.ff = { d: 0, from: 0, to: 3 }; show('free', null)");
+    v = P.view();
+    assert(v.includes("Duties, events and the rooms they take count as busy; lessons that don't happen do not."), v);
+    const tf = names(v, "Teachers free", "Rooms free"), rf = names(v, "Rooms free", "Classes with no lesson");
+    assert(!tf.includes("Ms Grace Yeo") && tf.includes("Ms Aisha Rahman") && tf.includes("Mr Ben Ong"), "she is at the event; 3A's English does not happen: " + tf);
+    assert(!rf.includes("LT2") && !rf.includes("LT1&2") && rf.includes("LT1") && rf.includes("3-01"), "the event takes LT2: " + rf);
+    await P.pick("2026-10-06");
+    P.run('show("classes", "3A")');
+    assert(P.view().includes('<p class="onday">On Tue 6 Oct (Odd Tue): no exams, tests or events. This is the usual Odd Tue timetable.</p>'), P.view());
+    P.run("show('free', null)");
+    assert(P.view().includes('<p class="onday">On Tue 6 Oct (Odd Tue): no exams, tests or events.</p>'), P.view());
+  });
+
+  await t("the Exams and events tab draws an event; a student's row has no one going; My exam timetable lists the event's day", async () => {
+    const P = boot({ "/api/published/exams": [200, { schedules: [EVROW, STUROW], banner: "Sec 3 Learning Journey: Mon 5 Oct." }] }, APP);
+    await P.tick();
+    assert(P.el("tabs").innerHTML.includes('data-tab="exams">Exams and events</button>'), P.el("tabs").innerHTML);
+    assert(P.el("exbanner").innerHTML === 'Sec 3 Learning Journey: Mon 5 Oct. <a href="#exams" data-tab="exams">See Exams and events</a>', P.el("exbanner").innerHTML);
+    P.run("show('exams', null)");
+    const v = P.view(), [one, two] = v.split("<h2>").slice(1);
+    assert(v.includes('<h1 style="margin:0 0 4px;font-size:20px">Exams and events</h1>'), v);
+    assert(one.startsWith("Sec 3 Learning Journey<small>Event · Mon 5 Oct</small></h2>") && one.includes("Classes 3A, 3B · Off site (museum)"), one);
+    assert(one.includes("<th>Date</th><th>Time</th>") && one.includes("<tr><td>Mon 5 Oct</td><td>07:40–10:40</td></tr>"), one);
+    assert(one.includes("Teacher in charge: Ms Grace Yeo") && one.includes("Going: Ms Grace Yeo, Mr Ben Ong"), one);
+    assert(one.includes("<th>Duty</th><th>Who</th><th>Time</th>") && one.includes("<tr><td>Bus marshal</td><td>Ms Grace Yeo</td><td>07:45</td></tr>"), one);
+    assert(two.startsWith("Sec 3 &lt;i&gt;Trip&lt;/i&gt;<small>Event · Tue 6 Oct–Wed 7 Oct</small></h2>") && two.includes("Classes 3B · Science Centre &amp; museum"), "names are escaped: " + two);
+    assert(two.includes("<tr><td>Tue 6 Oct</td><td>07:40–13:00</td></tr><tr><td>Wed 7 Oct</td><td>07:40–10:40</td></tr>"), two);
+    assert(!two.includes("Teacher in charge") && !two.includes("Going") && !two.includes("<th>Duty</th>") && !v.includes("<i>"), "a student's row: no one going: " + two);
+    const Q = boot({ "/api/published/exams": [200, { schedules: [], banner: null }] }, APP);
+    await Q.tick(); Q.run("show('exams', null)");
+    assert(Q.view().includes('<div class="empty">No exams, tests or events on the main site now.</div>'), Q.view());
+    const ME = { mode: "personal", exams: true, pdf: true, logout: "/logout", files: [] };
+    const trip = { id: "ev1", name: TRIP, kind: "event", where: "Off site (museum)", papers: [], days: [{ date: "2026-10-05", start: "07:40", end: "10:40", note: "then lessons from 10:40" }] };
+    const R = boot({ "/api/me/exams": [200, { schedules: [trip, { id: "x9", name: "Sec 4 Exam", kind: "exam", papers: [] }] }] }, ME);
+    await R.tick();
+    const m = R.view();
+    assert(R.fetched.includes("/api/me/exams") && !R.fetched.includes("/api/published/exams"), R.fetched.join(", "));
+    assert(m.startsWith('<div class="card myexams" id="myexams"><h2>My exam timetable</h2><h3>Sec 3 Learning Journey</h3>'), m);
+    assert(m.includes("<tr><td>Mon 5 Oct</td><td>Sec 3 Learning Journey · Off site (museum) · 07:40–10:40</td><td>then lessons from 10:40</td></tr>"), m);
+    assert(!m.includes("Sec 4 Exam"), "a schedule with no papers and no days does not show");
+    const N = boot({ "/api/me/exams": [200, { schedules: [Object.assign({}, trip, { days: [] })] }] }, ME);
+    await N.tick();
+    assert(!N.view().includes("myexams"), "an event with no day for this class shows nothing");
   });
 })().then(() => console.log(`${n} published page tests passed`), e => { console.error(e); process.exit(1); });
