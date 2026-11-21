@@ -14,7 +14,7 @@ from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, draft, store, sync, typed
-from relief import codes as relief_codes, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
+from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
 from ttgen import choices
 import exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts
 
@@ -858,6 +858,7 @@ def relief_code_slips():
 
 relief_web.init(has=relief_has, me=me_staff, role=role)     # relief requests: relief/web.py, every right through relief_has
 app.register_blueprint(relief_web.bp)
+if os.environ.get("RELIEF_JOBS") == "on": relief_fill.start()     # relief picks when due, every minute (the Dockerfile sets it; tests and local runs never do)
 
 # ------------------------------------------------------------------------------------------------ staff: exams and events
 NO_EXAMS_PUB = "Publish the timetable first: exams read the classes, students and lessons from it."

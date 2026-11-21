@@ -125,7 +125,8 @@ def _check_pick(pick):
 
 def set_pick(id, ckey, pick, pub, settings, *, into="pick"):
     """save a pick worked out outside the lock (the relief, waiting for approval; into="change": a change request's new pick),
-    only while the cover is still open (or still asked to change with no new pick) and the person still free, else NOT_FREE"""
+    only while the cover is still open (or still asked to change with no new pick, and the pick is not the teacher who
+    asked) and the person still free, else NOT_FREE"""
     if into not in ("pick", "change"): raise ValueError(_absences.WRONG)
     pick, pub = _check_pick(pick), _absences._pub(pub)
     with _absences._LOCK:
@@ -134,7 +135,7 @@ def set_pick(id, ckey, pick, pub, settings, *, into="pick"):
         x, c = find(r, ckey)
         _absences._past(x)
         s = state(r, x, c)
-        ok = s == "open" if into == "pick" else s == "change" and not c["change"].get("pick")
+        ok = s == "open" if into == "pick" else s == "change" and not c["change"].get("pick") and pick["who"] != c["relief"]
         if not ok or not still_free(pub, settings, _absences.all_records(), r, x, c, pick["who"]): raise ValueError(NOT_FREE.format(name=pick["who"]))
         _settle(r, c)
         if into == "pick": c.update(relief=pick["who"], relief_by=None, pick=pick)
@@ -144,10 +145,13 @@ def set_pick(id, ckey, pick, pub, settings, *, into="pick"):
     return r
 
 
-def drop(id, ckey, why):
-    """a waiting pick back to open (its person is no longer free; the caller checked stale); an approved one is never dropped"""
+def drop(id, ckey, why, who=None):
+    """a waiting pick back to open (its person is no longer free; the caller checked stale); an approved one is never dropped.
+    who: the relief the caller found no longer free; when the cover's relief is not who by now (a planner chose again since,
+    or it was dropped already), nothing is dropped or saved and the record is returned as it is"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
+        if who is not None and c.get("relief") != who: return r
         if state(r, x, c) != "waiting": raise ValueError(NOT_WAITING)
         _settle(r, c)
         _log(c, "dropped", c["relief"], "app", _absences._now(), why if isinstance(why, str) else None)

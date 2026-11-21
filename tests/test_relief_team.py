@@ -1023,6 +1023,346 @@ def each_fallback_logs_its_kind_and_nothing_else():
     for bad in [*SHORTS, "sk-ant", "x-api-key", "401", "Teacher", "Science", "Koh"]:
         assert bad not in said, bad
 
+# ---- Task 3: filling picks when they are due ----
+import subprocess, threading  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+from relief import fill as FL  # noqa: E402
+FILLLOG = logging.getLogger("relief.fill")
+FILLLOG.propagate = False; FILLLOG.addHandler(logging.NullHandler())             # a cover skipped logs a line: kept out of the test output
+SG = ZoneInfo("Asia/Singapore")
+
+def mon(hm): return f"2026-10-12T{hm}:00+08:00"                                 # today, Mon 12 Oct, at hm
+
+class at:
+    """school time is iso for a block: lessons.today() and absences._now()"""
+    def __init__(s, iso): s.iso = iso
+    def __enter__(s):
+        s.old = LS.today, AB._now
+        LS.today = lambda: datetime.date.fromisoformat(s.iso[:10]); AB._now = lambda: s.iso
+    def __exit__(s, *a): LS.today, AB._now = s.old
+
+class saved_settings:
+    """the relief settings file with some keys changed for a block (run reads the settings itself)"""
+    def __init__(s, **kw): s.kw = kw
+    def __enter__(s):
+        s.old = store.read_json(RS.PATH); store.write_json(RS.PATH, dict(s.old, **s.kw))
+        return RS.load(PUB)
+    def __exit__(s, *a): store.write_json(RS.PATH, s.old)
+
+class logged:
+    """the records "relief.fill" logs in a block"""
+    def __enter__(s):
+        s.got = []
+        class Keep(logging.Handler):
+            def emit(h, rec): s.got.append(rec)
+        s.keep = Keep(); FILLLOG.addHandler(s.keep)
+        return s.got
+    def __exit__(s, *a): FILLLOG.removeHandler(s.keep)
+
+CALLS = []
+def first(data):
+    """a stand-in for the model: notes the lesson, how many teachers it was sent, whether absences._LOCK is held and
+    whether fill says it is filling; picks Teacher 1"""
+    CALLS.append(dict(periods=data["lesson"]["periods"], date=data["lesson"]["date"], n=len(data["teachers"]),
+                      locked=AB._LOCK.locked(), filling=FL.filling()))
+    return dict(label="Teacher 1", reason="Teacher 1 is free.")
+
+def wait_fill():
+    """every run soon() started in a thread has ended"""
+    for th in [x for x in threading.enumerate() if x.name == "relief-fill"]: th.join(10)
+    assert not any(x.name == "relief-fill" for x in threading.enumerate()), "a run is still going"
+
+def ft(f):
+    """a fill test: the published timetable is PUB, soon() runs inline, no hook, an empty guard"""
+    old = store.published; store.published = lambda: PUB
+    FL.SYNC = True; PK.CALL = None; PK._seen.clear(); del CALLS[:]
+    try: return t(f)
+    finally:
+        store.published = old; FL.SYNC = False; FL.ON = False; PK.CALL = None; PK._seen.clear()
+
+def relief_of(i, ckey): return cov(i, ckey)[2]["relief"]
+
+ONLY_SAM = dict(fat_per_day=3, other_per_day=None, never=[NEVER, MAYA, GRACE, TEAMER, FLEX])     # for Tue P6-P7 and P7: Sam alone is free
+
+@ft
+def due_at_today_is_now_and_monday_is_friday_at_fill_time():
+    def dt(y, m, d, h=0, mi=0): return datetime.datetime(y, m, d, h, mi, tzinfo=SG)
+    assert FL.due_at(CAL, DAYS, D(2026, 10, 12), "15:00") == dt(2026, 10, 12), "today: at once"
+    assert FL.due_at(CAL, DAYS, "2026-10-12", "15:00") == dt(2026, 10, 12)
+    assert FL.due_at(CAL, DAYS, D(2026, 10, 9), "15:00") == dt(2026, 10, 9), "earlier: at once"
+    assert FL.due_at(CAL, DAYS, D13, "15:00") == dt(2026, 10, 12, 15), "tomorrow: today at the fill time"
+    assert FL.due_at(CAL, DAYS, D16, "07:30") == dt(2026, 10, 15, 7, 30)
+    assert FL.due_at(CAL, DAYS, D(2026, 10, 19), "15:00") == dt(2026, 10, 16, 15), "a Monday: the Friday before"
+    assert FL.due_at(CAL, DAYS, D(2026, 10, 26), "15:00") == dt(2026, 10, 22, 15), "Fri 23 Oct is Deepavali: the Thursday"
+    assert FL.due_at(CAL, DAYS, D(2026, 10, 26), "15:00", today=D(2026, 10, 26)) == dt(2026, 10, 26)
+    assert FL.due_at(CAL, DAYS, D(2026, 10, 26), "15:00").isoformat() == "2026-10-22T15:00:00+08:00"
+    # after the holidays between terms: the last day of the term before; the first day of the calendar: the day before
+    cal = dict(CAL, terms=CAL["terms"] + [dict(name="Term 1", start="2027-01-04", end="2027-03-12", starts_as="Odd")])
+    assert FL.due_at(cal, DAYS, D(2027, 1, 4), "15:00") == dt(2026, 11, 20, 15)
+    assert FL.due_at(CAL, DAYS, D(2026, 9, 7), "15:00", today=D(2026, 9, 1)) == dt(2026, 9, 6, 15)
+
+@ft
+def run_fills_only_what_is_due():
+    assert FL.SYNC is True and FL.ON is False
+    fresh()
+    i = absent(by=GRACE, dates=["2026-10-13", "2026-10-16"])["id"]              # Tue P3-P5 and P6-P7, Fri P1-P2 open; Tue P9 not needed
+    j = absent(teacher=RUTH, by=GRACE, periods=[6, 6], lessons=[dict(key=KR6, relief=MAYA)])["id"]   # a planner's choice: waiting
+    before = snap()
+    assert FL.run(call=first, now=mon("14:59")) == dict(picked=0, nobody=0)
+    assert CALLS == [] and snap() == before, "nothing is due before the fill time on the school day before"
+    assert FL.run(call=first, now=mon("15:00")) == dict(picked=2, nobody=0)
+    assert [(c["date"], c["periods"]) for c in CALLS] == [("2026-10-13", "P3–P5"), ("2026-10-13", "P6–P7")], CALLS
+    assert (st(i, K2), st(i, K5), st(i, KF), st(i, K8), st(j, KR6)) == ("waiting", "waiting", "open", "cancelled", "waiting")
+    assert relief_of(j, KR6) == MAYA, "a planner's choice is its pick: nothing is picked over it"
+    r, x, c = cov(i, K2)
+    assert c["pick"] == dict(who=FLEX, by="ai", reason=f"{FLEX} is free.", at=NOW) and c["relief_by"] is None, c["pick"]
+    assert relief_of(i, K5) == SAM, "P6-P7 saw the pick before it: three periods today already put Mr Flex Ng at his limit"
+    del CALLS[:]
+    assert FL.run(call=first, now=mon("15:00")) == dict(picked=0, nobody=0) and CALLS == [], "picked once"
+    # Fill now: every open cover of the absences, or of the date, due or not
+    m = absent(teacher=MAYA, dates=["2026-10-16"])["id"]
+    km = key(MAYA, 0, D16)
+    assert FL.run(date="2026-10-15", call=first, now=mon("15:00")) == dict(picked=0, nobody=0)
+    assert FL.run(ids=[j], call=first, now=mon("15:00")) == dict(picked=0, nobody=0)
+    assert FL.run(ids=m, call=first, now=mon("15:00")) == dict(picked=1, nobody=0)
+    assert (st(m, km), st(i, KF)) == ("waiting", "open")
+    assert FL.run(date=D16, call=first, now=mon("15:00")) == dict(picked=1, nobody=0) and st(i, KF) == "waiting"
+    assert len(CALLS) == 2
+    # a lesson that is over is never picked for, Fill now or not
+    fresh(); del CALLS[:]
+    i = absent(dates=["2026-10-13"])["id"]                                       # asked by Ms Evelyn Koh herself
+    with at("2026-10-13T10:30:00+08:00"):                                        # Tuesday: P3-P5 ended at 10:30; P6-P7 starts now
+        assert FL.run(call=first) == dict(picked=1, nobody=0)
+        assert FL.run(date=D13, call=first) == dict(picked=0, nobody=0)
+        assert FL.run(ids=[i], call=first, now="2026-10-13T11:30:00+08:00") == dict(picked=0, nobody=0)
+    assert [c["periods"] for c in CALLS] == ["P6–P7"] and (st(i, K2), st(i, K5)) == ("open", "waiting")
+    with at("2026-10-14T07:00:00+08:00"):                                        # the day after: all of Tuesday is over
+        assert FL.run(ids=[i], call=first) == dict(picked=0, nobody=0)
+    assert len(CALLS) == 1
+    # a lesson that ends while the run is going (a slow model) is not picked for either
+    fresh(); del CALLS[:]
+    i = absent(dates=["2026-10-13"])["id"]
+    clock = ["2026-10-13T09:00:00+08:00"]
+    def slow(data):
+        clock[0] = "2026-10-13T11:30:00+08:00"; return first(data)                # P6-P7 has ended by the time this answers
+    old = LS.today, AB._now
+    LS.today, AB._now = (lambda: D13), (lambda: clock[0])
+    try: assert FL.run(call=slow) == dict(picked=1, nobody=0)
+    finally: LS.today, AB._now = old
+    assert [c["periods"] for c in CALLS] == ["P3–P5"] and (st(i, K2), st(i, K5)) == ("waiting", "open")
+    # no published timetable: nothing to do
+    store.published = lambda: None
+    assert FL.run(call=first, now=mon("15:00")) == dict(picked=0, nobody=0)
+
+@ft
+def soon_runs_only_when_on_or_asked():
+    fresh()
+    with at("2026-10-13T08:00:00+08:00"):                                        # an absence for today
+        i = absent(dates=["2026-10-13"])["id"]
+        PK.CALL = first
+        assert FL.soon() is False and st(i, K2) == "open", "RELIEF_JOBS is not on: an automatic trigger does nothing"
+        assert FL.soon(force=True) is True and (st(i, K2), st(i, K5)) == ("waiting", "waiting"), "Fill now and a request to change run at once"
+        j = absent(teacher=RUTH, dates=["2026-10-13"])["id"]
+        FL.ON = True
+        assert FL.soon() is True and (st(j, KR2), st(j, KR6)) == ("waiting", "waiting"), "with RELIEF_JOBS on, a new absence for today is picked at once"
+    assert len(CALLS) == 4 and FL.filling() is False
+
+@ft
+def two_absences_at_once_never_give_one_teacher_two_places():
+    def two():
+        fresh()
+        return absent(periods=[5, 6])["id"], absent(teacher=RUTH, periods=[6, 6])["id"]       # Tue P6-P7 and Tue P7
+    def sams(): return FR.relief_periods(AB.all_records(), SAM, {D13})
+    with saved_settings(limits=ONLY_SAM):
+        i, j = two()
+        assert FL.run(call=first, now=mon("15:00")) == dict(picked=1, nobody=1)
+        assert (relief_of(i, K5), st(j, KR6), sams()) == (SAM, "open", 2)
+        # two runs asked for at once, each in its own thread: the second waits for the first and sees its pick
+        i, j = two()
+        FL.SYNC = False; PK.CALL = first
+        try:
+            assert FL.soon(ids=[j], force=True) is True and FL.soon(ids=[i], force=True) is True
+            wait_fill()
+        finally: FL.SYNC = True; PK.CALL = None
+        assert sorted([relief_of(i, K5) or "", relief_of(j, KR6) or ""]) == ["", SAM] and sams() in (1, 2), (relief_of(i, K5), relief_of(j, KR6))
+        # someone else gives Sam a relief between the choice and the save: worked out once more, then left open
+        i, j = two()
+        def sneak(data):
+            if not sneak.done:
+                sneak.done = True; CV.set_pick(j, KR6, pk(SAM), PUB, RS.load(PUB))
+            return first(data)
+        sneak.done = False
+        assert FL.run(call=sneak, now=mon("15:00")) == dict(picked=0, nobody=1)
+        assert (relief_of(i, K5), relief_of(j, KR6)) == (None, SAM) and cov(i, K5)[2].get("history") in (None, []), "the refused pick was never saved"
+    with saved_settings(limits=dict(ONLY_SAM, never=[NEVER, MAYA, GRACE, FLEX])):     # Sam and Mr Team Lee
+        i, j = two()
+        assert FL.run(call=first, now=mon("15:00")) == dict(picked=2, nobody=0)
+        assert (relief_of(i, K5), relief_of(j, KR6)) == (SAM, TEAMER)
+        i, j = two()
+        sneak.done = False; del CALLS[:]
+        assert FL.run(call=sneak, now=mon("15:00")) == dict(picked=1, nobody=0)
+        assert (relief_of(i, K5), relief_of(j, KR6)) == (TEAMER, SAM)
+        assert [h["who"] for h in cov(i, K5)[2]["history"]] == [TEAMER], "the refused pick was never saved"
+        assert [c["n"] for c in CALLS] == [2, 1], "the second choice was made from fresh records"
+
+@ft
+def a_run_while_another_runs_returns_busy():
+    fresh()
+    i = absent(by=GRACE, dates=["2026-10-13", "2026-10-16"])["id"]
+    inside, go, out = threading.Event(), threading.Event(), []
+    def slow(data):
+        inside.set(); go.wait(10)
+        return first(data)
+    th = threading.Thread(target=lambda: out.append(FL.run(call=slow, now=mon("15:00"))))
+    th.start()
+    try:
+        assert inside.wait(10)
+        assert FL.filling() is True
+        assert FL.run(call=first, now=mon("15:00")) == dict(picked=0, nobody=0, busy=True)
+        # a run asked for meanwhile waits for this one: it is not lost
+        FL.SYNC = False
+        assert FL.soon(date=D16, force=True) is True and FL.soon(date=D16, force=True) is True
+        assert len([x for x in threading.enumerate() if x.name == "relief-fill"]) == 1, "the same run asked for twice is one run"
+        assert st(i, KF) == "open" and FL.filling() is True
+    finally:
+        go.set(); th.join(10); wait_fill(); FL.SYNC = True
+    assert out == [dict(picked=2, nobody=0)], out
+    assert st(i, KF) == "waiting" and cov(i, KF)[2]["pick"]["by"] == "app", "no hook in that run: the app's own order"
+    assert FL.filling() is False and not FL._busy.locked()
+
+@ft
+def no_model_call_is_made_while_the_lock_is_held():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    CV.change(i, K5, SAM, TEAMER, PUB, ST); CV.ask_change(i, K5, "A meeting", SAM)          # a request to change as well
+    assert FL.run(call=first, now=mon("15:00")) == dict(picked=2, nobody=0)
+    assert len(CALLS) == 2 and not any(c["locked"] for c in CALLS) and all(c["filling"] for c in CALLS), CALLS
+    fresh(); del CALLS[:]
+    i = absent(by=GRACE)["id"]
+    FL.SYNC = False; PK.CALL = first
+    try:
+        FL.soon(force=True, date=D13); wait_fill()
+    finally: FL.SYNC = True; PK.CALL = None
+    assert len(CALLS) == 2 and not any(c["locked"] for c in CALLS) and (st(i, K2), st(i, K5)) == ("waiting", "waiting")
+    assert FL.filling() is False and not AB._LOCK.locked()
+
+@ft
+def a_change_request_gets_a_new_pick_without_the_teacher_who_asked():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    CV.change(i, K5, SAM, TEAMER, PUB, ST)
+    CV.ask_change(i, K5, "A meeting", SAM)
+    assert FL.run(call=first, now=mon("09:00")) == dict(picked=1, nobody=0), "at once: Tuesday's open lessons are not due yet, the request is"
+    assert len(CALLS) == 1 and CALLS[0]["periods"] == "P6–P7" and CALLS[0]["n"] == len(ORDER5) - 1, CALLS
+    r, x, c = cov(i, K5)
+    assert CV.state(r, x, c) == "change" and c["relief"] == SAM, "the relief stays with the teacher who asked until the team acts"
+    assert c["change"]["pick"] == dict(who=FLEX, by="ai", reason=f"{FLEX} is free.", at=NOW), c["change"]
+    assert c["history"][-1] == dict(what="pick", who=FLEX, by="ai", at=NOW, why=f"{FLEX} is free.")
+    assert st(i, K2) == "open"
+    assert FL.run(call=first, now=mon("09:00")) == dict(picked=0, nobody=0) and len(CALLS) == 1, "it has its new pick"
+    # set_pick never saves the teacher who asked as the new pick
+    CV.keep(i, K5, TEAMER); CV.ask_change(i, K5, "Still a meeting", SAM)
+    refuses(nf(SAM), lambda: CV.set_pick(i, K5, pk(SAM), PUB, ST, into="change"))
+    # nobody else free: the request waits, open to the team
+    with saved_settings(limits=dict(ONLY_SAM, never=ONLY_SAM["never"] + [BUSY])):
+        assert FL.run(call=first, now=mon("09:00")) == dict(picked=0, nobody=1)
+    assert cov(i, K5)[2]["change"]["pick"] is None and len(CALLS) == 1
+    assert FL.run(call=first, now=mon("09:00")) == dict(picked=1, nobody=0)
+
+@ft
+def a_stale_waiting_pick_is_dropped_and_picked_again():
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]              # the planner's choice, waiting for the team
+    s = absent(teacher=SAM)["id"]                                                # then Mr Sam Tan's own absence for that day
+    planned = ("pick", SAM, "planner")
+    assert FL.run(call=first, now=mon("09:00")) == dict(picked=0, nobody=0), "dropped at once, picked when due"
+    assert CALLS == [] and st(i, K5) == "open" and whats(cov(i, K5)[2]) == [planned, ("dropped", SAM, "app")]
+    assert cov(i, K5)[2]["history"][-1]["why"] == nf(SAM)
+    assert FL.run(call=first, now=mon("15:00")) == dict(picked=4, nobody=0)    # with Tue P3-P5 and Mr Sam Tan's two lessons
+    assert [c["periods"] for c in CALLS] == ["P1", "P3–P5", "P6–P7", "P10"], CALLS
+    assert whats(cov(i, K5)[2]) == [planned, ("dropped", SAM, "app"), ("pick", relief_of(i, K5), "ai")] and relief_of(i, K5) not in (SAM, None)
+    assert st(s, key(SAM, 0)) == "waiting"
+    # a lesson that is over keeps what it had: nothing dropped, nothing picked
+    fresh(); del CALLS[:]
+    i = absent(by=GRACE, lessons=[dict(key=K2, relief=SAM)])["id"]
+    absent(teacher=SAM)
+    with at("2026-10-13T10:30:00+08:00"), logged() as got:                     # Tue P3-P5 has just ended
+        FL.run(ids=[i], call=first)
+        assert st(i, K2) == "waiting" and relief_of(i, K2) == SAM and got == [], got
+        assert [c["periods"] for c in CALLS] == ["P6–P7"]
+    # an approved relief is never dropped by the app: the team sees it is no longer free and changes it
+    fresh()
+    i = absent(by=GRACE)["id"]
+    CV.change(i, K5, SAM, TEAMER, PUB, ST)
+    absent(teacher=SAM)
+    FL.run(call=first, now=mon("09:00"))
+    assert st(i, K5) == "approved" and relief_of(i, K5) == SAM
+    # drop(who=): a relief that is someone else's by now is not dropped
+    fresh()
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+    before = snap()
+    same(CV.drop(i, K5, nf(MAYA), who=MAYA), i)
+    assert snap() == before and st(i, K5) == "waiting" and relief_of(i, K5) == SAM
+    CV.drop(i, K5, nf(SAM), who=SAM)
+    assert st(i, K5) == "open"
+    same(CV.drop(i, K5, nf(SAM), who=SAM), i)                                    # open now: nothing to drop
+    refuses(CV.NOT_WAITING, lambda: CV.drop(i, K5, nf(SAM)))
+    # the planner chooses again between the run's check and its drop: the fresh choice stays
+    AB.choose(i, K5, SAM, GRACE, PUB)
+    absent(teacher=SAM)
+    real = CV.stale
+    def stale_then_choose(*a):
+        got = real(*a)
+        if a[4]["key"] == K5 and AB._lesson(AB.load(i), K5)["relief"] == SAM: AB.choose(i, K5, MAYA, GRACE, PUB)
+        return got
+    CV.stale = stale_then_choose
+    try: FL.run(call=first, now=mon("09:00"))
+    finally: CV.stale = real
+    assert st(i, K5) == "waiting" and relief_of(i, K5) == MAYA and cov(i, K5)[2]["pick"]["by"] == "planner"
+    assert whats(cov(i, K5)[2])[-2:] == [("dropped", SAM, GRACE), ("pick", MAYA, "planner")], "the app dropped nothing"
+
+@ft
+def a_cover_that_cannot_be_picked_is_left_open_and_the_rest_go_on():
+    fresh()
+    i = absent(by=GRACE, dates=["2026-10-13", "2026-10-16"], lessons=[dict(key=K5, relief=SAM)])["id"]
+    closed = dict(CAL, holidays=CAL["holidays"] + [dict(start="2026-10-13", end="2026-10-13", name="A sudden closure")])
+    with saved_settings(calendar=closed), logged() as got:                       # Tuesday is no longer a school day
+        assert FL.run(ids=[i], call=first, now=mon("15:00")) == dict(picked=1, nobody=0)
+    assert (st(i, K2), st(i, K5), st(i, KF)) == ("open", "waiting", "waiting") and [c["periods"] for c in CALLS] == ["P1–P2"]
+    assert [x.args for x in got] == [("ValueError",), ("ValueError",)], [x.args for x in got]
+    said = " ".join(x.getMessage() for x in got)
+    for bad in ("13 Oct", "school day", EVE, SAM, "Science"): assert bad not in said, bad
+    assert all(x.exc_info is None for x in got)
+
+@ft
+def the_ticker_is_not_started_in_tests():
+    assert "RELIEF_JOBS" not in os.environ and FL.ON is False and FL.EVERY == 60
+    assert not any(x.name == "relief-ticker" for x in threading.enumerate()), "RELIEF_JOBS is unset: app.py starts no ticker"
+    # with RELIEF_JOBS=on, importing the app starts it (in another process, with its own empty data folder)
+    env = dict(os.environ, DATA_DIR=tempfile.mkdtemp(), RELIEF_JOBS="on")
+    code = "import threading, app; from relief import fill; print(fill.ON, sorted(x.name for x in threading.enumerate() if x.name.startswith('relief')))"
+    done = subprocess.run([sys.executable, "-c", code], env=env, cwd=ROOT, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0 and done.stdout.strip().splitlines()[-1] == "True ['relief-ticker']", (done.stdout[-300:], done.stderr[-300:])
+    docker = open(os.path.join(ROOT, "Dockerfile")).read().splitlines()
+    assert "ENV RELIEF_JOBS=on" in docker and docker.index("ENV RELIEF_JOBS=on") < [n for n, x in enumerate(docker) if x.startswith("CMD")][0]
+    # a tick catches every error, logs its kind alone, and the ticker keeps going
+    def boom(): raise RuntimeError(f"{EVE} Child sick sk-ant-test-{secrets.token_hex(4)}")
+    store.published = boom
+    with logged() as got:
+        assert FL.tick() is None
+        th = FL.start(every=0.01)
+        try:
+            assert th.name == "relief-ticker" and th.daemon and FL.start(every=0.01) is th, "started once"
+            for _ in range(500):
+                if len(got) >= 4: break
+                time.sleep(0.01)
+        finally: FL._stop.set(); th.join(5)
+    assert not th.is_alive() and len(got) >= 4, len(got)
+    assert {x.args for x in got} == {("RuntimeError",)} and all(x.exc_info is None and x.levelno == logging.ERROR for x in got)
+    said = " ".join(x.getMessage() for x in got)
+    for bad in (EVE, "Child sick", "sk-ant"): assert bad not in said, bad
+    assert not FL._busy.locked()
+
 assert REAL == [], "a test reached the real call"
 
 print(f"{COUNT} relief team tests passed")
