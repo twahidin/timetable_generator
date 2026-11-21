@@ -3,7 +3,7 @@ import contextlib, datetime, glob, io, json, os, pickle, secrets, sys, tempfile,
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 KEY = secrets.token_hex(16)
-CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
+CODES = {k: secrets.token_hex(8) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
 os.environ.pop("ADMIN_RECOVERY_CODE", None)
 os.environ.update(DATA_DIR=DATA, SECRET_KEY=KEY, AI_PROVIDER="anthropic", AI_API_KEY="", **CODES)
 sys.path.insert(0, ROOT)
@@ -14,6 +14,9 @@ from relief import people as RP  # noqa: E402
 SECRETS = [KEY, *CODES.values()]          # every password, code and recovery value used here: none may reach the history
 
 def secret(n=8):
+    """a random value the suite later looks for in the history and the accounts file: 16 hex characters or more, so it
+    never turns up by chance inside a password hash, an id or a time"""
+    assert n >= 8
     s = secrets.token_hex(n); SECRETS.append(s); return s
 
 def staff_code(name):
@@ -105,7 +108,9 @@ def the_page_is_one_box_and_a_link():
         unset = "STUDENT_CODE is not set in Railway variables."
         assert unset in A.setup_problems() and unset in c.get("/login").data.decode()
         person("Ms Kim Ho", group="committee", added=True, extras=dict(relief=False, exams=None, admin=True))
-        assert unset not in A.setup_problems() and unset not in c.get("/login").data.decode()   # once an admin exists
+        assert unset in A.setup_problems(), "an admin who cannot sign in (no username or password) is not one yet"
+        person("Ms Kim Ho", username="kim.ho", pw=PW.hash_pw(secret()))
+        assert unset not in A.setup_problems() and unset not in c.get("/login").data.decode()   # once an admin who can sign in exists
         assert not any("not set in Railway variables" in p for p in A.setup_problems())
     finally:
         os.environ["STUDENT_CODE"] = old; P.update(lambda d: d["people"].pop("Ms Kim Ho"))
@@ -157,10 +162,10 @@ def a_turned_off_shared_code_is_refused_and_its_open_sessions_end():
 
 @t
 def a_wrong_code_is_a_strike_and_ten_block_the_address():
-    c, r = code_in(secret(4))
+    c, r = code_in(secret())
     assert r.status_code == 401 and WRONG in r.data.decode() and strikes() == 1 and "role" not in kept(c)
     e = last(); assert (e["ok"], e["reason"], e["via"], e["who"]) == (False, "wrong code", "code", None), e
-    for _ in range(9): code_in(secret(4))
+    for _ in range(9): code_in(secret())
     c, r = code_in(CODES["TEACHER_CODE"]); assert r.status_code == 429 and "role" not in kept(c)
     assert last()["reason"] == "locked"
 
@@ -219,7 +224,8 @@ def must_change_sends_every_page_to_the_password_page():
     assert rec("Mr Gus Lee")["must_change"] is False and rec("Mr Gus Lee")["n"] == 1 and kept(c)["n"] == 1
     assert PW.check_pw(rec("Mr Gus Lee")["pw"], new) and c.get("/timetable").status_code == 200
     k, _ = pw_in(user, new)
-    x, y, short = secret(), secret(), secret(2)
+    x, y = secret(), secret()
+    short = secrets.token_hex(4)   # under 10 characters: refused before anything keeps it; too short to look for in the files
     for data, text in ((dict(current=new, new=short, again=short), "Use at least 10 characters."),
                        (dict(current=new, new=x, again=y), "The two new passwords are not the same."),
                        (dict(current=secret(), new=x, again=x), "Your current password is not right.")):

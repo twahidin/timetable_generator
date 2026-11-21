@@ -166,7 +166,7 @@ def setup_problems():
     """what this deployment is missing (Railway variables, a volume): on the sign-in page and in the logs at startup"""
     _, probs = access.configured()
     if not people.readable(): probs.append(ACCOUNTS_UNREADABLE)
-    if people.admins(people.load()):   # people sign in as themselves now: a shared code left unset is not a problem
+    if people.usable_admins(people.load()):   # people sign in as themselves now: a shared code left unset is not a problem
         unset = {f"{var} is not set in Railway variables." for _, var in access.ROLES}
         probs = [p for p in probs if p not in unset]
     if not store.on_volume(): probs.append("No Railway volume: the setup and the published timetable are lost on the next deploy. Add a volume mounted at /data.")
@@ -388,7 +388,7 @@ def login_recover():
     right = hmac.compare_digest(given.strip().encode(), code.encode())
     if right and _recovery_used(data, code):
         limiter.fail(addr); _record_signin(False, "recovery", name, reason="recovery code already used"); return _recover_page(RECOVERY_USED), 403
-    if not right or name not in people.admins(data):
+    if not right or name not in people.admins(data):   # any admin found by their username, with a password or without one
         limiter.fail(addr); _record_signin(False, "recovery", name, reason="wrong code"); return _recover_page(NO_RECOVERY), 401
     why = passwords.problem(new, username, name)
     if why: return _recover_page(why), 400
@@ -986,12 +986,12 @@ def pub_info():
 @need("setup")
 def status():
     """what the committee page shows. who: the person signed in (None for a shared code); depts: a head's departments
-    when signed in by name (None otherwise); shared: the shared code's role; admin_exists: an admin has been named"""
+    when signed in by name (None otherwise); shared: the shared code's role; admin_exists: an admin who can sign in has been named (else the first admin is offered)"""
     have, probs = access.configured()
     _, at = store.load_setup()
     p = who()
     mine = dict(who=p["name"] if p else None, via=via(), depts=head_depts(), rights=sorted(rights()), shared=shared(),
-                admin_exists=bool(people.admins(people.load())))
+                admin_exists=bool(people.usable_admins(people.load())))
     if not has("committee"): return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info(), **mine)
     return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), typed=typed.enabled(), **mine)
 
@@ -1374,11 +1374,14 @@ def _change(d, name, item, want):
     return out
 
 def _whole(d, touched, before):
-    """the checks of a change as a whole, on d as it leaves it: Admin only in the committee, and an admin left"""
+    """the checks of a change as a whole, on d as it leaves it: Admin only in the committee, and an admin left who can
+    sign in (an Admin with no username or password, or switched off, keeps no one in). before: people.usable_admins
+    before the change"""
     for n in touched:
         r = people.record(d, n)
         if r["extras"]["admin"] and r["group"] != "committee": raise Refused(ONLY_COMMITTEE_ADMIN)
-    if not people.admins(d): raise Refused(LAST_ADMIN.format(next((n for n in touched if n in before), touched[0])))
+    if not people.usable_admins(d):
+        raise Refused(LAST_ADMIN.format(next((n for n in touched if n in before), before[0] if before else touched[0])))
 
 def _admin_item(pub, data, name):
     """one person as the admin page shows them: their staff item and their note; None when not on the staff list"""
@@ -1410,11 +1413,19 @@ def _account_entry(what, names, changes, text, by_=None, **more):
     try: history.add({"kind": "account", "what": what, "people": names, "changes": changes, "text": text, **more, **(by_ or by())})
     except Exception as e: print(f"WARNING: an account change could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
 
-def _keep_me(me, names):
-    """an admin's change to themselves signs out their other sessions, not this one"""
-    if me in names:
-        r = people.record(people.load(), me)
-        if not r["off"]: session["n"] = r["n"]
+def _update_as(me, fn):
+    """people.update(fn) for the admin `me` -> fn's result. Their own change signs out their other sessions, not this
+    one: the new number is read inside the update, and kept only when this session's number was still theirs as the
+    update began (so a sign-out by another admin at the same moment is never undone) and they are not switched off"""
+    held = session.get("n", 0)
+    def run(d):
+        n0 = people.record(d, me)["n"]
+        out = fn(d)
+        r = people.record(d, me)
+        return out, (r["n"] if n0 == held and r["n"] != n0 and not r["off"] else None)
+    out, keep = people.update(run)
+    if keep is not None: session["n"] = keep
+    return out
 
 def _and(names):
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
@@ -1480,7 +1491,7 @@ def _bulk(d, pub, b, today):
     items = {p["name"]: p for p in people.staff(pub, d)}
     for n in names:
         if n not in items: raise Refused(NOT_STAFF.format(n))
-    before = people.admins(d)
+    before = people.usable_admins(d)
     done = {n: _change(d, n, items[n], {key: val}) for n in names}
     touched = [n for n in names if done[n]]
     if touched: _whole(d, touched, before)
@@ -1516,7 +1527,10 @@ def admin_people():
     pub, data = store.published(), people.load()
     ps = [dict(p, note=people.record(data, p["name"])["note"]) for p in people.staff(pub, data)]
     group, heads = {p["name"]: p["group"] for p in ps}, []
-    for x in (((pub or {}).get("model") or {}).get("setup") or {}).get("teachers") or []:
+    spec = store.setup_record()["spec"]   # step 4 of the setup being edited; the published one's while no setup is saved
+    rows = spec.get("teachers") if isinstance(spec, dict) else (((pub or {}).get("model") or {}).get("setup") or {}).get("teachers")
+    for x in rows if isinstance(rows, list) else []:
+        if not isinstance(x, dict): continue
         n = str(x.get("name") or "").strip()
         if str(x.get("role") or "").strip().upper() in ("HOD", "SH") and group.get(n) == "teacher" and n not in heads: heads.append(n)
     no_dept = [p["name"] for p in ps if p["group"] in people.HEADS and not people.record(data, p["name"])["depts"]]   # they change no rows (R8)
@@ -1543,16 +1557,14 @@ def admin_person():
             if adding and item: raise Refused((ON_STAFF if item["staff_only"] else ON_TIMETABLE).format(name))
             if not adding and item is None: raise Refused(NOT_STAFF.format(name))
             if want.get("username") and _taken(d, want["username"], name): raise Refused(TAKEN)
-            before = people.admins(d)
+            before = people.usable_admins(d)
             out = _change(d, name, item, want)
             if out: _whole(d, [name], before)
             return out
-        out = people.update(change)
+        out = _update_as(me, change)
     except Refused as e: return {"error": str(e)}, 400
     except people.Unreadable: return {"error": people.UNREADABLE}, 503
-    if out:
-        _account_entry(_what(out), [name], out, f"{name}: " + "; ".join(_said(c) for c in out))
-        _keep_me(me, [name])
+    if out: _account_entry(_what(out), [name], out, f"{name}: " + "; ".join(_said(c) for c in out))
     return jsonify(_admin_item(pub, people.load(), name))
 
 @app.post("/api/admin/bulk")
@@ -1567,12 +1579,10 @@ def admin_bulk():
         if b.get("preview", True) is not False:   # only an explicit preview: false changes anything
             if not people.readable(): raise people.Unreadable(people.UNREADABLE)
             return jsonify(lines=_bulk(people.load(), pub, b, today)["lines"], applied=False)
-        got = people.update(lambda d: _bulk(d, pub, b, today))
+        got = _update_as(me, lambda d: _bulk(d, pub, b, today))
     except Refused as e: return {"error": str(e)}, 400
     except people.Unreadable: return {"error": people.UNREADABLE}, 503
-    if got["touched"]:
-        _account_entry(got["what"], got["touched"], got["changes"], got["text"])
-        _keep_me(me, got["touched"])
+    if got["touched"]: _account_entry(got["what"], got["touched"], got["changes"], got["text"])
     return jsonify(lines=got["lines"], applied=bool(got["touched"]))
 
 @app.post("/api/admin/reset")
@@ -1599,12 +1609,11 @@ def admin_reset():
             r.update(username=u, pw=h, must_change=True, n=r["n"] + 1)
             d["people"][name] = r
             return out, u
-        out, u = people.update(change)
+        out, u = _update_as(me, change)
     except Refused as e: return {"error": str(e)}, 400
     except people.Unreadable: return {"error": people.UNREADABLE}, 503
     lockout.clear(u)
     _account_entry("reset", [name], out, f"{name}: a new one-time password" + (f"; username {u}" if out else ""))
-    _keep_me(me, [name])
     r = jsonify(once=once); r.headers["Cache-Control"] = "no-store"
     return r
 
@@ -1662,10 +1671,10 @@ def _first_page(msg="", form=True, name="", username=""):
 @app.route("/admin/first", methods=["GET", "POST"])
 @need("committee")
 def admin_first():
-    """while no one is an admin: whoever holds the committee's rights makes themselves the first admin, with a password,
-    and is signed in as them. Once an admin exists this page is not there"""
+    """while no admin can sign in: whoever holds the committee's rights makes themselves the first admin, with a password,
+    and is signed in as them. Once an admin who can sign in exists this page is not there"""
     if not people.readable(): return _first_page(ACCOUNTS_UNREADABLE, form=False), 503
-    if people.admins(people.load()): abort(404)
+    if people.usable_admins(people.load()): abort(404)
     if not accounts_on(): return _first_page(NO_ACCOUNTS, form=False), 403
     if request.method == "GET": return _first_page()
     name, typed = (str(request.form.get(k) or "").strip() for k in ("name", "username"))
@@ -1681,7 +1690,7 @@ def admin_first():
     if new != again: return back(NOT_SAME)
     h, by_, me = passwords.hash_pw(new), by(), (who() or {}).get("name")
     def change(d):
-        if people.admins(d): return None                          # someone was quicker
+        if people.usable_admins(d): return None                   # someone was quicker
         if _taken(d, u, name): raise Refused(TAKEN)
         if people.record(d, name)["pw"] and name != me: raise Refused(HAS_PASSWORD.format(name))   # no one else's password is replaced
         item = next((p for p in people.staff(pub, d) if p["name"] == name), None)

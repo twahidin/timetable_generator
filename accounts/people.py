@@ -127,6 +127,11 @@ def admins(data):
         if r["group"] == "committee" and r["extras"].get("admin") and not r["off"]: out.append(n)
     return out
 
+def usable_admins(data):
+    """the admins who can sign in (a username and a password on their record): the app always keeps one, and the first
+    admin is offered while there is none"""
+    return [n for n in admins(data) if record(data, n)["username"] and record(data, n)["pw"]]
+
 def sweep(data, today):
     iso, out = today.isoformat(), []
     for n, r in data["people"].items():
