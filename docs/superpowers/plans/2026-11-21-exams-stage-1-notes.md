@@ -172,7 +172,10 @@ Each item has a test on the made-up school (`tests/test_exams.py`).
   gap spacing, shared papers/blocks, order by name, numbered seats, reader/scribe, ignored pins.
 - Invigilators: `day_view` computed per sitting even when not a common test; untested: max_per_day, not_own_subject.
 - Make: a dead try/except in `summary`; a non-school date untested; `_exam_remake` skips the NO_STUDENTS and paper-time
-  guards that Make has (a failure answers 400, nothing lost).
+  guards that Make has (a failure answers 400, nothing lost); found by the fix wave's re-review: a hand pin left for a
+  sitting that no longer exists (a paper's time changed after the pin) is never cleared by Make, so if that person or
+  student leaves the timetable a "no longer on the timetable" line stays on the page (`make.py:155`; one-line fix: a
+  full Make passes `keys=None` to `_gone`, or drops pins whose sitting is gone).
 - Routes: `exams_list` reads `c["level"]` directly; use-anyway, move and invigilators do not check the room against the
   settings' rooms; deleting an unknown id answers ok.
 - Pages: a cleared number field can get its old value back on repaint; the cross deletes a paper with no confirm;
