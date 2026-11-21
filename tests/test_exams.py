@@ -113,6 +113,7 @@ def part_day_after_noon_saves_and_stops_the_right_periods():
     r = _rows(D.day_view(pub, F.CAL, saved, "2026-10-05"))[10]
     assert r["stopped"] == [(760, 800)] and r["running"] == [(740, 760), (800, 820)], r
     assert P.check(saved, pub["model"], F.CAL)["errors"] == []
+    SC.delete(e["id"])
 
 @t
 def whole_day_stops_every_sec3_lesson():
@@ -457,12 +458,15 @@ def common_test_supervised_by_lesson_teacher():
 @t
 def locked_names_kept():
     s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
-    s["pins"]["duties"] = {"2026-10-05 07:50|3-01": ["Ms Grace Yeo", "Mr Gone Away"]}
+    s["pins"]["duties"] = {"2026-10-05 07:50|3-01": ["Ms Grace Yeo"]}
     d, _ = _duties(s)
     d1 = d[0]
-    assert "Ms Grace Yeo" in d1["names"] and "Mr Gone Away" not in d1["names"] and len(d1["names"]) == d1["need"] and d1["locked"] is True, d1
-    assert len(set(d1["names"])) == 2
+    assert d1["names"] == ["Ms Grace Yeo"] and d1["need"] == 2 and d1["short"] == 1 and d1["locked"] is True, d1
     assert IV.duty_minutes(d)["Ms Grace Yeo"] == 85
+    s["pins"]["duties"] = {"2026-10-05 07:50|3-01": ["Ms Grace Yeo", "Mr Gone Away"]}
+    d1 = _duties(s)[0][0]
+    assert "Ms Grace Yeo" in d1["names"] and "Mr Gone Away" not in d1["names"] and len(d1["names"]) == d1["need"] == 2, d1
+    assert d1["short"] == 0 and d1["locked"] is True and len(set(d1["names"])) == 2
 
 def _made_sched(**kw):
     s = _sit([_paper(subject="English", date="2026-10-05", start="07:50"),
@@ -499,6 +503,50 @@ def move_keeps_hand_changes():
     _mk(s, only=key)
     d = next(x for x in s["made"]["duties"] if x["key"] == key and x["room"] == "3-01")
     assert "Mr Ivan Lee" in d["names"] and d["locked"] is True, d
+
+def _duty(s, key, room):
+    return next(x for x in s["made"]["duties"] if x["key"] == key and x["room"] == room)
+
+@t
+def cross_leaves_short_by_one_and_the_name_stays_off():
+    s = _mk(_made_sched())
+    key = "2026-10-05 07:50"
+    first, second = _duty(s, key, "3-01")["names"]
+    MK.set_invigilators(s, key, "3-01", [first])
+    _mk(s, only=key)
+    d = _duty(s, key, "3-01")
+    assert d["names"] == [first] and d["short"] == 1 and d["locked"] is True, d
+    _mk(s)
+    d = _duty(s, key, "3-01")
+    assert d["names"] == [first] and second not in d["names"] and d["short"] == 1, d
+    assert MK.summary(_PUB, F.CAL, s, _xset())["counts"]["short"] == 1
+    MK.set_invigilators(s, key, "3-01", None)
+    assert key + "|3-01" not in s["pins"]["duties"]
+    _mk(s, only=key)
+    d = _duty(s, key, "3-01")
+    assert len(d["names"]) == 2 and d["short"] == 0 and d["locked"] is False, d
+
+@t
+def a_name_that_left_is_replaced_and_the_replacement_kept():
+    s = _mk(_made_sched())
+    key = "2026-10-05 07:50"
+    MK.set_invigilators(s, key, "3-01", ["Ms Grace Yeo", "Mr Gone Away"])
+    _mk(s)
+    d = _duty(s, key, "3-01")
+    assert d["names"][0] == "Ms Grace Yeo" and len(d["names"]) == 2 and "Mr Gone Away" not in d["names"] and d["short"] == 0, d
+    assert d["locked"] is True and s["made"]["gone"] == ["Mr Gone Away is no longer on the timetable."]
+    assert s["pins"]["duties"][key + "|3-01"] == d["names"], s["pins"]["duties"]
+    _mk(s)
+    assert _duty(s, key, "3-01")["names"] == d["names"] and s["made"]["gone"] == []
+
+@t
+def only_keeps_the_other_sittings_duties_as_they_were():
+    s = _mk(_made_sched())
+    later = "2026-10-05 10:00"
+    before = [x for x in s["made"]["duties"] if x["key"] == later]
+    _mk(s, only="2026-10-05 07:50")
+    assert [x for x in s["made"]["duties"] if x["key"] == later] == before
+    assert later + "|3-01" not in s["pins"]["duties"] and not any(k.startswith(later) for k in s["pins"]["duties"])
 
 @t
 def gone_people_are_named_once():
@@ -665,7 +713,12 @@ def create_fill_make_view():
         assert "3A-07" in [x for x, _ in r.get_json()["made"]["seats"][key]["3-02"]]
         r = c.post(f"/api/exams/{s['id']}/invigilators", json=dict(key=key, room="3-01", names=["Mr Ivan Lee"])); assert r.status_code == 200
         d1 = next(x for x in r.get_json()["made"]["duties"] if x["key"] == key and x["room"] == "3-01")
-        assert "Mr Ivan Lee" in d1["names"] and d1["locked"] is True, d1
+        assert d1["names"] == ["Mr Ivan Lee"] and d1["locked"] is True and d1["short"] == 1, d1
+        r = c.post(f"/api/exams/{s['id']}/invigilators", json=dict(key=key, room="3-01", names=None)); assert r.status_code == 200, r.data
+        d1 = next(x for x in r.get_json()["made"]["duties"] if x["key"] == key and x["room"] == "3-01")
+        assert d1["locked"] is False and d1["short"] == 0 and key + "|3-01" not in c.get(f"/api/exams/{s['id']}").get_json()["pins"]["duties"], d1
+        assert c.post(f"/api/exams/{s['id']}/invigilators", json=dict(key=key, room="3-01", names="x")).status_code == 400
+        r = c.post(f"/api/exams/{s['id']}/invigilators", json=dict(key=key, room="3-01", names=["Mr Ivan Lee"])); assert r.status_code == 200
         for path, body in (("move", dict(key="bad", students=["3A-07"], room="3-02")), ("invigilators", dict(key="bad", room="3-01", names=[])),
                            ("use-anyway", dict(key="bad", room="Hall"))):
             r = c.post(f"/api/exams/{s['id']}/{path}", json=body)

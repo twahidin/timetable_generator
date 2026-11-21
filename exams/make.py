@@ -19,13 +19,18 @@ def _split(k):
     return key, room
 
 
-def _gone(pub, sched, model):
-    """sentences for pinned students and invigilators no longer there; those pins are dropped"""
+def _gone(pub, sched, model, keys=None):
+    """sentences for pinned students and invigilators no longer there, and per pinned duty how many names were dropped
+    {pin key: n}; those pins are dropped. With keys, only the pins of those sittings (the others are kept as they are)."""
     known_s = {s["id"] for s in model.get("students") or []}
     known_p = {p["name"] for p in relief.people.people(pub, relief.settings.load(pub)["extra_staff"])}
     pins = sched.setdefault("pins", dict(rooms={}, duties={}))
-    out = []
-    for key, by in list((pins.get("rooms") or {}).items()):
+    pins.setdefault("rooms", {})
+    pins.setdefault("duties", {})
+    out, dropped = [], {}
+    for key, by in list(pins["rooms"].items()):
+        if keys is not None and key not in keys:
+            continue
         for sid in list(by):
             if sid not in known_s:
                 s = "%s is no longer on the timetable." % sid
@@ -34,7 +39,9 @@ def _gone(pub, sched, model):
                 del by[sid]
         if not by:
             del pins["rooms"][key]
-    for key, names in list((pins.get("duties") or {}).items()):
+    for pk, names in list(pins["duties"].items()):
+        if keys is not None and _split(pk)[0] not in keys:
+            continue
         keep = []
         for n in names:
             if n in known_p:
@@ -44,11 +51,12 @@ def _gone(pub, sched, model):
                 if s not in out:
                     out.append(s)
         if len(keep) != len(names):
+            dropped[pk] = len(names) - len(keep)
             if keep:
-                pins["duties"][key] = keep
+                pins["duties"][pk] = keep
             else:
-                del pins["duties"][key]
-    return out
+                del pins["duties"][pk]
+    return out, dropped
 
 
 def _span(sit, students, rules, duties):
@@ -60,15 +68,17 @@ def _span(sit, students, rules, duties):
 
 
 def make(pub, cal, sched, xset, only=None) -> dict:
+    """seats and duties for every sitting; with only (a sitting key), that sitting (and any sitting not made before) is made
+    again and the others are kept as they were"""
     model = pub["model"]
     old = sched.get("made") or {}
-    gone = _gone(pub, sched, model)
-    pins = sched["pins"]
     sits = _seat.sittings(sched)
     keys = {s["key"] for s in sits}
     keep_seats = {k: v for k, v in (old.get("seats") or {}).items() if k in keys} if only else {}
     old_duties = [d for d in old.get("duties") or [] if d["key"] in keys] if only else []
-    redo = {s["key"] for s in sits} if not only else {only} | (keys - set(keep_seats))
+    redo = keys if not only else {only} | (keys - set(keep_seats))
+    gone, dropped = _gone(pub, sched, model, redo)
+    pins = sched["pins"]
     seats, unseated, used = {}, {}, []
     for sit in sits:
         key = sit["key"]
@@ -87,21 +97,14 @@ def make(pub, cal, sched, xset, only=None) -> dict:
             seats[key] = keep_seats[key]
             unseated[key] = list((old.get("unseated") or {}).get(key) or [])
         used.append((sit["date"], lo, hi, set(seats[key])))
-    real = sched
-    work = sched
-    if only:
-        work = dict(sched, pins=dict(pins, duties=dict(pins.get("duties") or {})))
-        for d in old_duties:
-            if d["key"] not in redo:
-                work["pins"]["duties"]["%s|%s" % (d["key"], d["room"])] = list(d["names"])
-    duties = _inv.assign(pub, cal, work, xset, seats)
-    if only:
-        fresh = [d for d in duties if d["key"] in redo]
-        duties = sorted(fresh + [copy.deepcopy(d) for d in old_duties if d["key"] not in redo],
-                        key=lambda d: (d["date"], d["start"], d["room"]))
-    real_pins = (real.get("pins") or {}).get("duties") or {}
+    fixed = [copy.deepcopy(d) for d in old_duties if d["key"] not in redo]
+    duties = _inv.assign(pub, cal, sched, xset, {k: v for k, v in seats.items() if k in redo}, refill=dropped, fixed=fixed)
+    hand = pins.setdefault("duties", {})
     for d in duties:
-        d["locked"] = "%s|%s" % (d["key"], d["room"]) in real_pins
+        pk = "%s|%s" % (d["key"], d["room"])
+        if d["key"] in redo and pk in hand and hand[pk] != d["names"]:
+            hand[pk] = list(d["names"])   # a replacement for a name that left is kept by the next Make
+        d["locked"] = pk in hand
     sched["made"] = dict(seats=seats, unseated=unseated, duties=duties, gone=gone, made_at=_now())
     return sched
 
@@ -113,7 +116,12 @@ def move(sched, key, sids, room) -> None:
 
 
 def set_invigilators(sched, key, room, names) -> None:
-    sched.setdefault("pins", dict(rooms={}, duties={})).setdefault("duties", {})["%s|%s" % (key, room)] = list(names)
+    """names chosen by hand for a duty; None hands the duty back to the app"""
+    hand = sched.setdefault("pins", dict(rooms={}, duties={})).setdefault("duties", {})
+    if names is None:
+        hand.pop("%s|%s" % (key, room), None)
+    else:
+        hand["%s|%s" % (key, room)] = list(names)
 
 
 def summary(pub, cal, sched, xset) -> dict:

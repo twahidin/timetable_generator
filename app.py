@@ -1071,7 +1071,8 @@ def _exam_move(pub, s, b):
     _exam_remake(pub, s, b["key"])
 
 def _exam_invigilators(pub, s, b):
-    if not isinstance(b["names"], list) or not all(isinstance(x, str) for x in b["names"]): raise ValueError(exams_schedules.WRONG)
+    """names: the names chosen by hand, or null to let the app choose again"""
+    if b["names"] is not None and (not isinstance(b["names"], list) or not all(isinstance(x, str) for x in b["names"])): raise ValueError(exams_schedules.WRONG)
     if not isinstance(b["key"], str) or not isinstance(b["room"], str): raise ValueError(exams_schedules.WRONG)
     _exam_sitting(s, b["key"])
     exams_make.set_invigilators(s, b["key"], b["room"], b["names"])

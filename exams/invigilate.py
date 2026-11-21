@@ -109,16 +109,21 @@ def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exc
     return groups
 
 
-def assign(pub, cal, sched, xset, seats_by_key) -> list:
+def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
+    """the duties of the sittings in seats_by_key, filled. A hand-set duty (a pin) keeps exactly its pinned names and is filled
+    only up to the number of its names that left the timetable: refill[pin key] (dropped before) plus pinned names that are
+    no longer people. `fixed` duties (sittings kept as they are) are returned unchanged and count as other duties."""
     model = pub["model"]
     rules = xset["rules"]
     people = {p["name"] for p in relief.people.people(pub, relief.settings.load(pub)["extra_staff"])}
     pins = (sched.get("pins") or {}).get("duties") or {}
     common = sched.get("supervision") == "lesson"
-    duties, subjects_of = [], {}
+    duties, subjects_of, places = [], {}, {}
     papers = {p["id"]: p for p in sched.get("papers") or []}
     for sit in _seating.sittings(sched):
-        seated = (seats_by_key or {}).get(sit["key"]) or {}
+        if sit["key"] not in (seats_by_key or {}):
+            continue
+        seated = seats_by_key[sit["key"]] or {}
         students = _seating.sitting_students(sit, sched, model)
         subjects_of[sit["key"]] = [papers[i]["subject"] for i in sit["papers"] if i in papers]
         view = _days.day_view(pub, cal, sched, sit["date"])
@@ -131,13 +136,15 @@ def assign(pub, cal, sched, xset, seats_by_key) -> list:
             n_need = need(room_set, len(ids), [students[s].get("aa") for s in ids], rules)
             duty = dict(key=sit["key"], room=room, date=sit["date"], start=sit["start"] - rules["arrive"], end=end, need=n_need,
                         names=[], chief=None, reasons={}, backup={}, short=0, locked=False)
-            pin = pins.get("%s|%s" % (sit["key"], room))
+            pk = "%s|%s" % (sit["key"], room)
+            pin = pins.get(pk)
             if pin is not None:
                 duty["locked"] = True
                 for n in pin:
                     if n in people and n not in duty["names"]:
                         duty["names"].append(n)
                         duty["reasons"][n] = "chosen by hand"
+                places[id(duty)] = (refill or {}).get(pk, 0) + sum(1 for n in pin if n not in people)
             elif common:
                 classes = {students[s]["cls"] for s in ids}
                 for l in view["lessons"]:
@@ -150,14 +157,17 @@ def assign(pub, cal, sched, xset, seats_by_key) -> list:
                     duty["need"] = len(duty["names"])
             duties.append(duty)
     duties.sort(key=lambda d: (d["date"], d["start"], d["room"]))
+    every = duties + list(fixed)
     other = {}
     for d in duties:
         year = d["date"][:4]
         if year not in other:
             other[year] = _other_minutes(sched, year)
         left = d["need"] - len(d["names"])
+        if d["locked"]:
+            left = min(left, places.get(id(d), 0))
         if left > 0 and not (common and not d["locked"] and d["names"]):
-            others = [x for x in duties if x is not d]
+            others = [x for x in every if x is not d]
             got = candidates(pub, cal, sched, xset, d["date"], d["start"], d["end"], others, subjects_of[d["key"]],
                              exclude=d["names"], _other=other[year])
             for group in ("freed", "free", "backups", "need_backup"):
@@ -172,4 +182,4 @@ def assign(pub, cal, sched, xset, seats_by_key) -> list:
         d["short"] = max(0, d["need"] - len(d["names"]))
         if (xset["rooms"].get(d["room"]) or {}).get("hall") and d["names"]:
             d["chief"] = next((n for n in xset["chiefs"] if n in d["names"]), d["names"][0])
-    return duties
+    return sorted(every, key=lambda d: (d["date"], d["start"], d["room"]))

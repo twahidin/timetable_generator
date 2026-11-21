@@ -649,7 +649,8 @@
     const d = (made.duties || []).find(x => dutyEq(x, p));
     if (!d) return `<div class="panel"><h3>Who could take it</h3><p class="muted small">That duty is not there any more.</p></div>`;
     const head = `<h3>Who could take it</h3><p class="small"><b>${esc(d.room)}</b> · ${esc(fmtDate(d.date))} ${hhmm(d.start)}–${hhmm(d.end)}</p>
-      <h4>Now</h4><div class="small">${d.names.map(n => `<div>${esc(n)} <button type="button" class="small danger" data-act="whoDrop" data-c="${esc(n)}" title="Take ${esc(n)} off" aria-label="Take ${esc(n)} off" ${S.busy ? "disabled" : ""}>✕</button></div>`).join("") || `<span class="muted">No one</span>`}</div>`;
+      <h4>Now</h4><div class="small">${d.names.map(n => `<div>${esc(n)} <button type="button" class="small danger" data-act="whoDrop" data-c="${esc(n)}" title="Take ${esc(n)} off" aria-label="Take ${esc(n)} off" ${S.busy ? "disabled" : ""}>✕</button></div>`).join("") || `<span class="muted">No one</span>`}</div>
+      ${d.locked ? `<p class="small"><span class="muted">Chosen by hand: Make again keeps these names.</span> <button type="button" class="small" data-act="whoAuto" ${S.busy ? "disabled" : ""}>Let the app choose</button></p>` : ""}`;
     if (!S.who) return `<div class="panel">${head}<p class="muted small">Loading…</p></div>`;
     if (S.who.error) return `<div class="panel">${head}<p class="msg bad">${esc(S.who.error)}</p></div>`;
     const groups = [["freed", "Freed by the exam"], ["free", "Free then"], ["backups", "Backup invigilators"], ["need_backup", "Would need a backup"]];
@@ -678,6 +679,7 @@
       <div>${whoPanel(made)}${loadList(made)}</div></div>`;
   }
 
+  /* names: the names chosen by hand, or null to hand the duty back to the app */
   async function changeNames(names) {
     const p = S.duty; if (!p) return;
     const ok = await viewAction("invigilators", { key: p.key, room: p.room, names }, "Saved");
@@ -780,6 +782,7 @@
     if (act === "pickRoom") { S.room = a; paint(); return; }
     if (act === "useAnyway") { viewAction("use-anyway", { key: a, room: b.dataset.b }, "The room is in use for this sitting."); return; }
     if (act === "duty") { S.duty = { key: a, room: b.dataset.b }; loadWho(false); return; }
+    if (act === "whoAuto") { changeNames(null); return; }
     if (act === "whoDrop" || act === "whoUse") {
       const p = S.duty, d = p && ((madeOf() || {}).duties || []).find(x => dutyEq(x, p)), n = b.dataset.c;
       if (!d) return;
