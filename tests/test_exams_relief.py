@@ -1145,6 +1145,40 @@ def the_lists_read_relief_once():
         _drop(r); _drop(r2)
     assert "exams_schedules._all(" not in open(os.path.join(ROOT, "app.py"), encoding="utf-8").read()
 
+# ---- after the accounts merges: a Handled ourselves change is one history entry, as every exams and events save
+import history as H  # noqa: E402
+
+@t
+def handled_ourselves_is_one_history_entry():
+    _fresh()
+    def entries(): return [x for x in H.read(kinds=["exams"], limit=10000) if x.get("what") == "handled"]
+    with published(PUB):
+        c = committee()
+        e = _made_exam([_duty([DANIEL])]); id = e["id"]
+        _send_approve(c, id)
+        n = len(entries())
+        ok(c.post(f"/api/exams/{id}/handled", json=dict(teacher=DANIEL, key=DKEY, handled=True)))
+        ok(c.post(f"/api/exams/{id}/handled", json=dict(teacher=DANIEL, key=DKEY, handled=False)))
+        assert c.post(f"/api/exams/{id}/handled", json=dict(teacher=DANIEL, key="nope", handled=True)).status_code == 400
+        got = list(reversed(entries()[:len(entries()) - n]))
+        lesson = f"{DANIEL}'s 4A Mathematics on Mon 4 Jan 08:00–08:40"
+        assert [(x["text"], x["link"], x["exam"], x["where"], x["who"], x["as"]) for x in got] == [
+            (f"{EXAM}: {lesson} handled ourselves", "/exams", id, "Exams and events", None, "Shared committee code"),
+            (f"{EXAM}: {lesson} no longer handled ourselves", "/exams", id, "Exams and events", None, "Shared committee code")], got
+        _fresh()        # the exam stops 3A: the event's backup below is a 3A lesson
+        ev = SC.new_event(EVENT, ["Sec 4"], [], ISO, ISO, GRACE, GRACE)
+        ev["days"] = {ISO: dict(levels=["Sec 4"], whole=False, **{"from": "07:40", "to": "09:00"})}
+        ev["going"] = [AISHA]
+        eid = SC.save(ev, PUB, CAL, GRACE)["id"]
+        _send_approve(c, eid, "/api/events")
+        key = _backups(eid)[0]["lessons"][0]["key"]
+        n = len(entries())
+        ok(staff(GRACE).post(f"/api/events/{eid}/handled", json=dict(teacher=AISHA, key=key, handled=True)))     # the teacher in charge
+        got = entries()[:len(entries()) - n]
+        assert [(x["text"], x["link"], x["exam"], x["who"], x["via"]) for x in got] == [
+            (f"{EVENT}: {AISHA}'s 3A English on Mon 4 Jan 07:40–08:20 handled ourselves", f"/events/{eid}", eid, GRACE, "code")], got
+    _clear()
+
 
 _clear()
 print(f"{COUNT} exams and relief tests passed")

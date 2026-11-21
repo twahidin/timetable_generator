@@ -2495,8 +2495,7 @@ def _set_handled(pub, s, b, event):
     if item is None: raise ValueError(NO_BACKUP)
     tag = "%s|%s" % (teacher, key)
     s["handled"] = [x for x in s.get("handled") or [] if isinstance(x, str) and x != tag] + ([tag] if on else [])
-    d = datetime.date.fromisoformat(item["date"])
-    lesson = f"{teacher}'s {', '.join(item.get('classes') or [])} {item.get('subject') or ''} on {d:%a} {d.day} {d:%b} {item['start']}–{item['end']}"
+    lesson = f"{teacher}'s {', '.join(item.get('classes') or [])} {item.get('subject') or ''} on {exams_days.nice(item['date'])} {item['start']}–{item['end']}"
     return f"{lesson} handled ourselves" if on else f"{lesson} no longer handled ourselves"
 
 def _handled(pub, who, s, event):

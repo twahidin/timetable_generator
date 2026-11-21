@@ -274,3 +274,54 @@ Follow-up for the lead (Ruling: not fixed here, no second fix wave): `app._exams
 the live site), while relief uses the school's date. Between 00:00 and 08:00 Singapore time an approval or publish sync
 treats yesterday as today and may change yesterday's backup lessons. The fix is one line: make `_exams_today()` the
 school's date (as `relief.lessons.today()`); it also affects stage 2's banner and "today" on the main site.
+
+## Merged with accounts (through stages 2 and 4, and relief stage 2)
+
+On 22 November 2026 two branches that already carried main's accounts (PR #83) were merged into this branch with `git
+merge` (no rebase): `exams-stage-4` d2054e2 (stage 4 with stage 2 and the accounts) as 8e66402, then `relief-stage-2`
+41c5035 (relief stage 2 with the accounts) as 1eeb914. Conflicts: README.md, app.py, static/relief.js, tests/test_relief.py
+(first); README.md, app.py, relief/free.py, relief/web.py (second). Where the sides meet, one line each:
+
+- **Handled ourselves routes name their right** as their neighbours: `/api/exams/<id>/handled` `need("exams", "committee")`
+  (as Someone away), `/api/events/<id>/handled` `need("committee", "timetable")` (as the events routes); inside, the same
+  gates as before (`_exams_gate`: the Exams and events extra or the timetable committee; `_event_gate`: the teacher in
+  charge or the timetable committee). Both pinned in `tests/test_routes.py` (`GUARDS`, `EXAMS_ENDPOINTS`, `EVENTS_ENDPOINTS`).
+- **History.** A Handled ourselves change is one entry, as every exams save (kind `exams`, what `handled`, Where "Exams and
+  events", `exam` = the id, link `/exams` or `/events/<id>`): "<schedule>: <teacher>'s <classes> <subject> on <Mon 4 Jan>
+  <start>–<end> handled ourselves" (or "no longer handled ourselves"); a refusal writes none. Test:
+  `handled_ourselves_is_one_history_entry`.
+- **Order inside a save.** `_exam_approval` writes stage 2's history step (in `_save_exam`), then syncs relief inside the
+  lock, only when the save worked; the publish route writes main's publish entry, then syncs; relief's `_change` writes its
+  history entry (`_noted`), then runs `after` (the sync); relief's create notes, then syncs; cancel names its words and
+  syncs after. Every sync from relief still runs once relief's own call has returned (P13 kept).
+- **The relief section of app.py** is relief-stage-2's own text (its accounts merge and its follow-up), taken in the first
+  merge so the second left it alone: `relief_has`, `me_staff` and `role` are gone, and
+  `relief_web.init(has=has, me=who, need=need, note=_relief_entry)`. Relief's rights are exactly relief-stage-2's. The first
+  merge commit alone does not start: its app.py already expects the relief/web.py that the second merge brings.
+- **static/relief.js and tests/test_relief.py** (first merge) are resolved as relief-stage-2 resolved them.
+- **relief/free.py** `free_then`: relief-stage-2's `everyone` (the published teachers: staff added in the accounts teach no
+  lessons and are never free then) with stage 3's `busy` list.
+- **The relief hooks are unchanged in behaviour:** `_links`, `_sync_exams` after create and cancel, `_out`'s `stopped`,
+  What's in's `changed_at`, `choose`'s stopped refusal, the `links=None` keywords, the takeover in `absences.new`,
+  `_absent_then` reading a backup by its needed lessons.
+- **Backups.** `by` stays "Exams committee" (exam) or the teacher in charge (event). Nothing of stage 3 read relief's old
+  lists: `exams.relief_links` reads no staff list, `absences.from_exams` checks none, `absences.new` checks the accounts'
+  listing (relief-stage-2), and the events' staff list is the accounts' since the stage 4 merge. A sync's backup records
+  write no history entry (as before): the step that caused the sync has its own.
+- **README.** Relief's paragraph is relief-stage-2's with stage 3's "Relief also knows ..." paragraph; the events
+  paragraph is the stage 4 merge's with stage 3's backups text, and the Handled ourselves tick is written to the History.
+- **tests/test_exams_relief.py** signs in as main's tests do (the one sign-in page: a person's own code signs them in by
+  name, checked in the session; the shared committee code) and takes management and the relief team from the accounts
+  (Grace a school leader, later with the Relief team extra; `accounts.people` is `ACC` there, since `AP` is
+  `exams.approval`); relief's settings file is written without the old lists. The assertions are the same.
+
+No choice changes who may do something compared with stage 3, the stage 4 merge and relief-stage-2, so nothing is blocked.
+The follow-up in "After the fix wave" (`app._exams_today()` is the server's date) is still open.
+
+Checked after the merges, every suite alone one after another (the machine loaded by other sessions): all 23 python suites
+pass (`test_exams_relief` 58, `test_exams` 187, `test_relief` 42, `test_relief_requests` 59, `test_routes` 18,
+`test_accounts` 13, `test_admin` 18, `test_history` 27, `test_signin` 24, `test_sync` 32, and the rest as before) and `smoke`
+102; `--full`: `test_fixes` 67, `test_combined` 39, `smoke` 103, and `test_typed` 34 and `test_helper` 21 on their second
+runs (the first runs failed only on their 30-second sample solve, at a load average near 30; nothing here touches the
+solver, `typed.py` or the helper). All 17 node test files pass; `node --check` passes on every `static/*.js` and on the
+published page's script; the two copies of `timetable_page.html` are identical.
