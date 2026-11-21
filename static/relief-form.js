@@ -9,7 +9,7 @@
    other periods) keeps the work of every lesson still listed, and a lesson whose cover the person has not chosen follows
    the new list's others. opts: workLabel (the work box's label), empty (the line when there are no lessons), side(lesson) and extra(lesson) (HTML beside the lesson's name and under its work; escape
    what goes in them with ReliefForm.esc), onChange() (called on every edit).
-   ReliefForm.read(container) gives [{key, needed, work: {text, link, files: []}}] for POST /api/relief/absences;
+   ReliefForm.read(container) gives [{key, needed?, work: {text, link, files: []}}] for POST /api/relief/absences (needed is there only when the person chose it with "Ask for cover anyway" / "No relief needed"; left out, the server decides from who is away at Send);
    ReliefForm.needed(container, key) says whether one listed lesson is to be covered.
    ReliefForm.files(container) gives [{key, files: [File]}]: a file is sent after the absence is saved (POST
    …/files), then attached with PUT …/lessons/<key>/work.
@@ -194,7 +194,9 @@ window.ReliefForm = (function () {
     if (!f) return [];
     return f.list.map(x => {
       const s = f.st.get(x.key);
-      return { key: x.key, needed: !!s.needed, work: s.needed ? { text: s.text.trim(), link: s.link.trim(), files: [] } : { text: "", link: "", files: [] } };
+      const row = { key: x.key, work: s.needed ? { text: s.text.trim(), link: s.link.trim(), files: [] } : { text: "", link: "", files: [] } };
+      if (s.chosen) row.needed = !!s.needed;   /* only what the person chose: left out, the server decides from its records at Send */
+      return row;
     });
   }
 

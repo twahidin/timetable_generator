@@ -133,6 +133,9 @@ def rule_on_day(dname, r):
     return dy == "All" or dname.split()[-1][:3] == dy[:3]
 
 
+_day_ok = rule_on_day   # the old name, still called by code written before the rename
+
+
 def _rows(model, bnds, day, windows):
     """the lessons of a timetable day as day_view gives them; windows {class: [(start, end)]}: a period stops when every
     class of the lesson has a window holding it"""

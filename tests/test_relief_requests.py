@@ -974,6 +974,23 @@ def a_shared_lesson_is_needed_when_the_others_are_away_too():
     AB.cancel(part["id"], "x", BUSY)
 
 @t
+def a_lesson_sent_without_needed_is_decided_from_the_records_at_send():
+    # the page leaves "needed" out until the person chooses; the body below has no such key (data() has none either)
+    body = data(lessons=[dict(key=K8, work=dict(text="", link="", files=[]))])
+    assert "needed" not in body["lessons"][0]
+    busy = AB.new(data(teacher=BUSY), APUB, BUSY, "asked")      # Busy's absence is saved before Eve sends
+    with published(APUB):
+        r = ok(staff(EVE).post("/api/relief/absences", json=body))
+    e8 = at(r, 8)
+    assert e8["needed"] is True and e8["not_needed"] is None, e8
+    AB.cancel(r["id"], "x", EVE); AB.cancel(busy["id"], "x", BUSY)
+    with published(APUB):                                       # Busy is there: the same body is "not needed"
+        r = ok(staff(EVE).post("/api/relief/absences", json=body))
+    e8 = at(r, 8)
+    assert e8["needed"] is False and e8["not_needed"] == dict(by="app", why=f"{BUSY} is there"), e8
+    AB.cancel(r["id"], "x", EVE)
+
+@t
 def teaches_this_subject_means_the_same_subject_family():
     G2, ADD = "Ms Gee Two", "Mr Add Ma"
     rows = [dict(name=EVE, dept="Mathematics"), dict(name=G2, dept="Mathematics"), dict(name=ADD, dept="Mathematics")]
@@ -1125,5 +1142,10 @@ def the_pages_copy():
     assert '"Earlier"' in inbox
     assert '"relief.ro:" + R.me.name' in page and 'getItem("relief.ro")' not in page
     assert "The app's picks for open lessons, and approving them, come in the next stage" in " ".join(open(os.path.join(ROOT, "README.md")).read().split())
+
+@t
+def the_old_name_of_rule_on_day_still_works():
+    from exams import days                # exams stage 2 (PR #81) still calls it by its old name
+    assert days._day_ok is days.rule_on_day
 
 print(f"{COUNT} relief request tests passed")

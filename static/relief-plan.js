@@ -316,7 +316,7 @@
     const list = listEl(), teacher = P.teacher;
     P.busy = true; P.msg = null; paintSend();
     const lessons = RF.read(list).map(l => {
-      const name = l.needed ? P.chosen.get(chosenKey(l.key)) : "";
+      const name = RF.needed(list, l.key) ? P.chosen.get(chosenKey(l.key)) : "";
       return name ? Object.assign(l, { relief: name }) : l;
     });
     const body = { teacher, dates: dates(), periods: P.away === "some" ? [P.from, P.to] : null, reason: P.reason,
