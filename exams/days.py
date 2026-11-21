@@ -70,9 +70,25 @@ def _window(sched, date, bnds):
     return minutes(e["from"]), minutes(e["to"])
 
 
-def _levels(sched, date):
+def levels_of(sched, model):
+    """the schedule's levels; an exam of chosen classes with no level takes the levels of those classes"""
+    if sched.get("levels"):
+        return list(sched["levels"])
+    chosen = set(sched.get("classes") or [])
+    out = []
+    for c in model.get("classes") or []:
+        if c["name"] in chosen and c["level"] not in out:
+            out.append(c["level"])
+    return out
+
+
+def _levels(sched, date, model):
+    """the levels sitting on a date: the day's own list when it has one (an exam of chosen classes cannot name a day's
+    levels on the page, so an empty list there means its classes' levels), else the schedule's levels"""
     e = _entry(sched, date)
-    return list(e["levels"]) if e.get("levels") is not None else list(sched.get("levels") or [])
+    if e.get("levels") is not None and (e["levels"] or sched.get("levels")):
+        return list(e["levels"])
+    return levels_of(sched, model)
 
 
 def dates(sched, cal, model):
@@ -82,7 +98,7 @@ def dates(sched, cal, model):
     while d <= last:
         iso = d.isoformat()
         s, e = _window(sched, iso, bnds)
-        out.append(dict(date=iso, day=school_day(cal, model["days"], d), levels=_levels(sched, iso), start=s, end=e))
+        out.append(dict(date=iso, day=school_day(cal, model["days"], d), levels=_levels(sched, iso, model), start=s, end=e))
         d += datetime.timedelta(days=1)
     return out
 
@@ -111,7 +127,7 @@ def day_view(pub, cal, sched, date):
     day = school_day(cal, model["days"], _date(date))
     window = {}
     if sched["start"] <= date <= sched["end"]:
-        levels = _levels(sched, date)
+        levels = _levels(sched, date, model)
         chosen = sched.get("classes") or []
         win = _window(sched, date, bnds)
         for c in model["classes"]:

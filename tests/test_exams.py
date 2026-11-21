@@ -315,6 +315,18 @@ def check_window_and_together():
 
 
 @t
+def classes_only_exam_uses_their_levels():
+    s = _sched(levels=[], classes=["3A"], days={})
+    v = D.day_view(F.sample_pub(), F.CAL, s, "2026-10-05")
+    assert set(v["window"]) == {"3A"} and _rows(v)[0]["stopped"] and not _rows(v)[1]["stopped"], v["window"]
+    assert D.dates(s, F.CAL, _M)[0]["levels"] == ["Sec 3"]
+    s["days"] = {"2026-10-05": dict(levels=[], whole=True)}
+    assert set(D.day_view(F.sample_pub(), F.CAL, s, "2026-10-05")["window"]) == {"3A"}
+    e = _new(); e.update(levels=[], classes=["3A"], access=[], papers=[_paper(date="2026-10-05", start="07:50")])
+    assert P.check(e, _M, F.CAL)["errors"] == []
+    assert [p["subject"] for p in P.fill_from_subjects(e, _M)] == ["Assembly", "Combined Science", "Pure Chemistry"]
+
+@t
 def count_sentences_say_the_number_once():
     r = _chk([_paper(who="level", date="2026-10-05", start="07:50"), _paper(subject="Mathematics", who="level", date="2026-10-05", start="09:00"),
               _paper(subject="Science", who="level", date="2026-10-05", start="10:30")])

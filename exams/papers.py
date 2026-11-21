@@ -47,9 +47,12 @@ def who_sits(paper, model) -> list:
 
 
 def fill_from_subjects(sched, model) -> list:
-    """new papers: one per (level, subject) of the published lessons at the schedule's levels, none already there"""
+    """new papers: one per (level, subject) of the published lessons at the schedule's levels (of its chosen classes, when
+    it has some), none already there"""
     have = {(p.get("level"), p.get("subject")) for p in sched.get("papers") or []}
-    want = sorted({(l["level"], l["subject"]) for l in model.get("lessons") or [] if l.get("level") in (sched.get("levels") or [])})
+    levels, chosen = _days.levels_of(sched, model), set(sched.get("classes") or [])
+    want = sorted({(l["level"], l["subject"]) for l in model.get("lessons") or []
+                   if l.get("level") in levels and (not chosen or chosen & set(l.get("classes") or []))})
     return [dict(id=secrets.token_hex(4), level=lv, subject=sb, paper="Paper 1", minutes=60, date=None, start=None,
                  who="groups", students=[], together="") for lv, sb in want if (lv, sb) not in have]
 
