@@ -5,15 +5,16 @@ to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable.
 Staff (a personal code each, made from their name): the Relief module and everything the teacher code opens."""
-import copy, gzip, io, os, re, shutil, sys, tempfile, traceback, zipfile
+import copy, datetime, gzip, hmac, io, os, re, shutil, sys, tempfile, time, traceback, urllib.parse, zipfile
 from functools import wraps
-from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response
+from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response, g
 from werkzeug.middleware.proxy_fix import ProxyFix
 from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, draft, store, sync, typed
+import access, checks, draft, history, store, sync, typed
+from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, people as relief_people, settings as relief_settings
 from ttgen import choices
 
@@ -25,25 +26,127 @@ app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(32)
 app.json.sort_keys = False   # the setup's days (Mon..Fri) and levels keep their order through the API; the grid lists days in it
 app.config.update(MAX_CONTENT_LENGTH=40 * 1024 * 1024, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=store.on_railway(), PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 120)
-limiter = access.Limiter()
+limiter = access.Limiter()        # 10 wrong codes or passwords from one address in 10 minutes
+lockout = passwords.Lockout()     # 5 wrong passwords for one username in 15 minutes
 _cache = {}
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # ------------------------------------------------------------------------------------------------ access
-def role(): return session.get("role")
+# Who is signed in. Session keys: a shared code `role` (committee, head, teacher, student); a student's personal code
+# `role` "personal" and `sid`; a person (staff, by name) `who`, `via` ("code" or "password"), `n` (the sign-in number on
+# their record: raising it ends every older session) and, signed in with a password, `exp` (14 days). Relief stage 1's
+# sessions (`role` "staff" and `who`) count as code sessions with `n` 0. Rights come from the records on each request,
+# never from the cookie.
+API = ("/api/", "/pdf/", "/files/")
+FORTNIGHT = 14 * 24 * 3600
+SHARED_AS = {"committee": "Shared committee code", "head": "Shared heads' code", "teacher": "Shared teacher code", "student": "Shared student code"}
+_KEYS = ("role", "who", "via", "n", "exp", "sid")
+_NOBODY = dict(person=None, via=None, shared=None)
 
-def need(*roles):
+def _api(): return request.path.startswith(API)
+
+def _end(gone=False):
+    """end the session; gone: a code session whose person is no longer on the published timetable ("Code no longer valid")"""
+    session.clear(); g._gone = gone
+    return _NOBODY
+
+def _stand_in(name, data):
+    """a code session's person while nothing is published (a publish swaps folders): from their record, so the session
+    stays, as relief's did"""
+    r = people.record(data, name)
+    return dict(name=name, short=name, depts=list(r["depts"]), role="", teaches=False, staff_only=False, group=r["group"] or "teacher",
+                extras=r["extras"], username=r["username"], off=r["off"], has_password=bool(r["pw"]), last=max(r["signins"], default=None),
+                n=r["n"], must_change=r["must_change"])
+
+def _check():
+    """the session held against the records: dict(person, via, shared); a session that no longer holds is cleared"""
+    name, r = session.get("who"), session.get("role")
+    if name is not None:
+        v = session.get("via", "code")
+        if not isinstance(name, str) or v not in ("code", "password") or r not in (None, "staff"): return _end()
+        exp = session.get("exp")
+        if v == "password" and not (isinstance(exp, (int, float)) and time.time() < exp): return _end()
+        data, pub = people.load(), store.published()
+        p = people.find(name, pub, data)
+        if p is None:
+            if v == "password": return _end()       # a password session never depends on the published timetable
+            if pub: return _end(gone=True)          # dropped or renamed on a later publish
+            p = _stand_in(name, data)
+        if p["off"] or p["n"] != session.get("n", 0): return _end()
+        p.pop("pw", None)
+        return dict(person=p, via=v, shared=None)
+    if r in people.SHARED:
+        if people.load()["ways"]["off"].get(r) is not None: return _end()   # turned off on the admin page
+        return dict(person=None, via="shared", shared=r)
+    if r == "personal": return dict(person=None, via="personal", shared=None)
+    return _NOBODY
+
+def _state():
+    """(session key, checked session, rights), worked out once a request and again only when the session changes"""
+    key = tuple(session.get(k) for k in _KEYS)
+    got = g.get("_signed")
+    if got is None or got[0] != key:
+        st = _check()
+        got = g._signed = (tuple(session.get(k) for k in _KEYS), st, rights_table.rights(st["person"], st["via"], st["shared"]))
+    return got
+
+def who():
+    """the person signed in by name (people.find, without the password hash), or None"""
+    return _state()[1]["person"]
+
+def via(): return _state()[1]["via"]
+
+def shared(): return _state()[1]["shared"]
+
+def rights(): return _state()[2]
+
+def has(right): return right in rights()
+
+def by():
+    """who the history records for this session"""
+    st = _state()[1]
+    if st["person"]: return history.by_of(st["person"]["name"], st["via"])
+    if st["via"] == "shared": return history.by_of(None, "shared", SHARED_AS[st["shared"]])
+    if st["via"] == "personal": return history.by_of(None, "personal", "A student")
+    return history.by_of(None, "?")
+
+def role():
+    """(bridge until Task 6) the old role name: a person is "staff", or "committee" / "head" when signed in with a
+    password and holding those rights"""
+    st = _state()[1]
+    if st["via"] == "shared": return st["shared"]
+    if st["via"] == "personal": return "personal"
+    if st["person"] is None: return None
+    return "committee" if has("committee") else "head" if has("setup") else "staff"
+
+def _legacy():
+    """(bridge until Task 6) the old role names this session passes as: a person also counts as "staff\""""
+    r = role()
+    if r is None: return set()
+    return {r, "staff"} if who() is not None else {r}
+
+def _must_change_first():
+    """a person whose password is a one-time one chooses their own before anything else"""
+    p = who()
+    if p is None or not (p.get("must_change") and p.get("username") and p.get("has_password")): return None
+    if _api(): return {"error": "Choose a new password first."}, 403
+    return redirect("/account/password")
+
+def need(*names):
+    """the route needs one of these rights (until Task 6 also one of the old role names: committee, head, teacher,
+    student, staff, personal)"""
     def deco(f):
         @wraps(f)
         def inner(*a, **k):
-            if role() not in roles:
-                if request.path.startswith(("/api/", "/pdf/", "/files/")): return {"error": "Please sign in again."}, 401
-                return redirect("/login")
-            if role() == "staff" and me_staff() is None:   # dropped or renamed on a later publish: me_staff has ended the session
-                if request.path.startswith(("/api/", "/pdf/", "/files/")): return {"error": "Please sign in again."}, 401
-                if store.published(): return _no_longer_valid()
-                # nothing published (a publish is swapping folders): the session stays; the page says "Not published yet"
+            stop = _must_change_first()
+            if stop: return stop
+            if not (rights() & set(names) or _legacy() & set(names)):
+                if _api(): return {"error": "Please sign in again."}, 401
+                return _no_longer_valid() if g.get("_gone") else redirect("/login")
+            if role() == "staff" and via() == "code" and _api() and not store.published():
+                return {"error": "Please sign in again."}, 401   # (bridge, as relief stage 1) nothing published: the session stays
             return f(*a, **k)
+        inner._need = names
         return inner
     return deco
 
@@ -53,6 +156,9 @@ def esc(s):
 def setup_problems():
     """what this deployment is missing (Railway variables, a volume): on the sign-in page and in the logs at startup"""
     _, probs = access.configured()
+    if people.admins(people.load()):   # people sign in as themselves now: a shared code left unset is not a problem
+        unset = {f"{var} is not set in Railway variables." for _, var in access.ROLES}
+        probs = [p for p in probs if p not in unset]
     if not store.on_volume(): probs.append("No Railway volume: the setup and the published timetable are lost on the next deploy. Add a volume mounted at /data.")
     return probs
 
@@ -64,67 +170,285 @@ def page(title, body):
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)}</title>
 <link rel="stylesheet" href="/static/login.css"></head><body>{body}</body></html>"""
 
-# the choices on the front page; each one accepts only its own kind of code
-CHOICES = {
-    "committee": dict(title="Build and publish the timetable", blurb="Timetable committee: build the setup, download it, publish the timetable.",
-                      label="Committee code", hint="Use the code given to the timetable committee.", roles=("committee",)),
-    "heads": dict(title="Department heads", blurb="Heads of department: who teaches which class and group, teaching groups and bands.",
-                  label="Heads' code", hint="Use the code given to heads of department.", roles=("head",)),
-    "teacher": dict(title="Teacher's timetable", blurb="Every class, teacher and room timetable, Who's free and PDFs.",
-                    label="Teacher code", hint="Use the teacher code the school gave you.", roles=("teacher", "staff")),
-    "relief": dict(title="Relief", blurb="Ask for or plan relief, set work, see your reliefs.", label="Your personal code",
-                   hint="Use the personal code on the slip from the timetable committee.", roles=("staff",), img="/static/choice-relief.svg"),
-    "student": dict(title="Student timetable", blurb="Your class timetable, or your own with a personal code.",
-                    label="Student code or personal code", hint="Use the student code the school gave you. A personal code shows only your own timetable.",
-                    roles=("student", "personal")),
-}
-CHOICE_OF = {r: k for k, c in CHOICES.items() for r in c["roles"]}   # a staff code on another card points to Relief (the later card)
+# ------------------------------------------------------------------------------------------------ signing in
+CODE_LABEL = "Your personal code (on the slip from the school)"
+TO_USERNAME = "Committee and management: sign in with your username"
+WRONG_CODE = "That code does not work. Check it and try again."
+TOO_MANY_CODES = "Too many wrong codes. Wait ten minutes and try again."
+SWITCHED_OFF = "This account is switched off. Ask the timetable committee."
+NO_ACCOUNTS = "Accounts need SECRET_KEY in Railway variables."
+NO_MATCH = "That username and password do not match."
+LOCKED = "Too many wrong tries. Wait 15 minutes and try again."
+TOO_MANY = "Too many wrong tries. Wait ten minutes and try again."
+NOT_SAME = "The two new passwords are not the same."
+NOT_CURRENT = "Your current password is not right."
+NO_PASSWORD = "You sign in with your personal code, so you have no password to change. Ask an admin if you need a username."
+NO_RECOVERY = "That username and recovery code do not match."
+RECOVERY_USED = "That recovery code has been used. Set a new ADMIN_RECOVERY_CODE in Railway variables."
+CROSS_SITE = "That request did not come from this site."
 NO_PERSONAL_STAFF = "Personal codes are off until SECRET_KEY is set in Railway variables."
+_SIGNED_IN = {"code": "Signed in with their code", "password": "Signed in with their password", "shared": "Signed in with a shared code",
+              "personal": "Signed in with a personal code", "recovery": "Signed in with the recovery code and set a new password"}
 
-def img_of(k): return CHOICES[k].get("img") or f"/static/choice-{k}.png"
+def accounts_on():
+    """accounts (passwords) need SECRET_KEY: without it the sessions are signed with a key that changes at every restart"""
+    return bool(os.environ.get("SECRET_KEY"))
+
+def school_name():
+    pub = store.published()
+    return ((pub or {}).get("meta") or {}).get("school") or os.environ.get("SCHOOL_NAME") or "School timetable"
+
+def _warnings():
+    return "".join(f"<p class='warn'>{esc(p)}</p>" for p in setup_problems())
+
+def _code_page(msg=""):
+    err, warn = (f"<p class='err'>{esc(msg)}</p>" if msg else ""), _warnings()
+    return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school_name())}</h1><p>Timetable</p></header>
+<div class="login one"><form method="post" action="/login"><label for="code">{esc(CODE_LABEL)}</label>
+<input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" autofocus required>
+<button type="submit">Open</button></form>{err}
+<p class="way"><a href="/login/password">{esc(TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")
+
+def _form_page(title, form, msg="", hint="", back=("/login", "Sign in with a code"), tail=None):
+    """a small page with one form; tail: the HTML at its foot (the setup warnings unless given)"""
+    err = f"<p class='err'>{esc(msg)}</p>" if msg else ""
+    return page(title, f"""<main class="login"><p class="small"><a class="back" href="{back[0]}">&larr; {esc(back[1])}</a></p>
+<h1>{esc(title)}</h1><p class="muted">{esc(school_name())}</p>{form}{err}{f'<p class="muted small">{esc(hint)}</p>' if hint else ""}{_warnings() if tail is None else tail}</main>""")
+
+def _field(name, label, kind="password", auto="off", focus=False):
+    t = ' type="password"' if kind == "password" else ' autocapitalize="none" spellcheck="false"'
+    return f"""<label for="{name}">{esc(label)}</label><input id="{name}" name="{name}" class="plain"{t} autocomplete="{auto}"{" autofocus" if focus else ""} required>"""
+
+def _password_page(msg=""):
+    form = f"""<form method="post" action="/login/password">{_field("username", "Username", "text", "username", True)}
+{_field("password", "Password", auto="current-password")}<button type="submit">Sign in</button></form>""" if accounts_on() else ""
+    return _form_page("Sign in with your username", form, msg, "Forgotten your password? Ask an admin to give you a new one.")
+
+def _change_page(p, msg="", form=True):
+    first = "<p>Choose your own password before you go on.</p>" if p.get("must_change") else ""
+    f = f"""{first}<form method="post" action="/account/password">{_field("current", "Your current password", auto="current-password", focus=True)}
+{_field("new", "New password (at least 10 characters)", auto="new-password")}{_field("again", "New password again", auto="new-password")}
+<button type="submit">Change password</button></form>""" if form else ""
+    return _form_page("Change your password", f, msg, f"Signed in as {p['name']}.", back=("/home", "Back"), tail='<p class="small"><a href="/logout">Sign out</a></p>')
+
+def _recover_page(msg=""):
+    form = f"""<form method="post" action="/login/recover">{_field("username", "Admin username", "text", "username", True)}
+{_field("code", "Recovery code (ADMIN_RECOVERY_CODE)")}{_field("new", "New password (at least 10 characters)", auto="new-password")}
+{_field("again", "New password again", auto="new-password")}<button type="submit">Set the password and sign in</button></form>""" if accounts_on() else ""
+    return _form_page("Admin recovery", form, msg, "The recovery code works once. Remove ADMIN_RECOVERY_CODE from Railway variables once you are back in.")
+
+def _record_signin(ok, how, name=None, shared_=None, reason=None):
+    """one history entry for a sign-in or a refused try. Never what was typed: a name only when it is a person's"""
+    as_ = name or (SHARED_AS.get(shared_) if shared_ else None) or ("A student" if how == "personal" else "Unknown")
+    entry = {"kind": "signin", "ok": ok, "via": how, "shared": shared_, "who": name, "as": as_, "reason": reason,
+             "addr": request.remote_addr or "?", "text": _SIGNED_IN.get(how, "Signed in") if ok else f"Sign-in refused: {reason}"}
+    try: history.add(entry)
+    except Exception as e: print(f"WARNING: a sign-in could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+
+_quiet = {}   # (what, address or username) -> when its last locked try was recorded: one line per ten minutes, however many tries
+
+def _record_locked(key, how, name=None):
+    now = time.time()
+    if now - _quiet.get(key, 0) < 600: return
+    if len(_quiet) > 5000: _quiet.clear()
+    _quiet[key] = now
+    _record_signin(False, how, name, reason="locked")
+
+def _record_account(what, name, text):
+    try: history.add({"kind": "account", "what": what, "people": [name], "changes": [], "text": text, **by()})
+    except Exception as e: print(f"WARNING: an account change could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+
+def _note_signin(name):
+    """the time on the person's record (the last two are kept); a sign-in never fails for want of it"""
+    def change(d):
+        r = d["people"].get(name)
+        if not isinstance(r, dict): r = d["people"][name] = {}
+        s = r.get("signins") if isinstance(r.get("signins"), list) else []
+        r["signins"] = [x for x in s if isinstance(x, (int, float)) and not isinstance(x, bool)][-1:] + [time.time()]
+    try: people.update(change)
+    except Exception as e: print(f"WARNING: a sign-in time could not be kept ({type(e).__name__})", file=sys.stderr, flush=True)
+
+def _start(**keys):
+    session.clear(); session.permanent = True; session.update(keys)
 
 @app.get("/login")
-def login_page(msg="", choice=None, fix=None):
-    pub = store.published(); school = (pub["meta"]["school"] if pub else None) or os.environ.get("SCHOOL_NAME") or "School timetable"
-    warn = "".join(f"<p class='warn'>{esc(p)}</p>" for p in setup_problems())
-    link = f' <a href="/login?as={fix}">Open {esc(CHOICES[fix]["title"])}</a>' if fix else ""
-    err = f"<p class='err'>{esc(msg)}{link}</p>" if msg else ""
-    choice = choice or request.args.get("as")
-    c = CHOICES.get(choice or "") if choice != "heads" or os.environ.get("HEADS_CODE") else None
-    if not c:
-        cards = "".join(f"""<a class="choice" href="/login?as={k}"><img src="{img_of(k)}" alt="" width="112" height="112">
-<span class="txt"><b>{esc(v["title"])}</b><span class="muted small">{esc(v["blurb"])}</span></span><span class="go">Enter code &rarr;</span></a>""" for k, v in CHOICES.items() if k != "heads" or os.environ.get("HEADS_CODE"))
-        return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school)}</h1><p>Timetable</p></header>
-<nav class="choices">{cards}</nav>{f'<div class="notes">{err}{warn}</div>' if err or warn else ""}</main>""")
-    form = f"""<form method="post" action="/login"><input type="hidden" name="as" value="{choice}"><label for="code">{esc(c["label"])}</label>
-<input id="code" name="code" autocomplete="off" autocapitalize="characters" autofocus required>
-<button type="submit">Open</button></form>"""
-    if choice == "relief" and not access.personal_codes_on(): form = f"<p class='warn'>{esc(NO_PERSONAL_STAFF)}</p>"
-    return page(c["title"], f"""<main class="login"><p class="small"><a class="back" href="/login">&larr; Other choices</a></p>
-<div class="picked"><img src="{img_of(choice)}" alt="" width="56" height="56"><span><h1>{esc(c["title"])}</h1><p class="muted">{esc(school)}</p></span></div>
-{form}{err}
-<p class="muted small">{esc(c["hint"])}</p>{warn}</main>""")
+def login_page():
+    return _code_page()   # ?as= (the old cards) is accepted and ignored
 
 @app.post("/login")
 def login():
-    who = request.remote_addr or "?"
-    choice = request.form.get("as")
-    if choice not in CHOICES: return redirect("/login")
-    if limiter.blocked(who): return login_page("Too many wrong codes. Wait ten minutes and try again.", choice), 429
-    pub = store.published()
-    r, sid = access.match(request.form.get("code"), pub["codes"] if pub else {}, relief_people.staff_codes(relief_staff(pub)) if pub else {})
+    addr = request.remote_addr or "?"
+    if limiter.blocked(addr):
+        _record_locked(("addr", addr), "code"); return _code_page(TOO_MANY_CODES), 429
+    pub, data = store.published(), people.load()
+    r, val = access.match(request.form.get("code"), pub["codes"] if pub else {}, relief_people.staff_codes(people.staff(pub, data)))
+    if r in people.SHARED and data["ways"]["off"].get(r) is not None:   # a shared code turned off is a wrong code
+        limiter.fail(addr); _record_signin(False, "shared", shared_=r, reason="code turned off"); return _code_page(WRONG_CODE), 401
     if not r:
-        limiter.fail(who); return login_page("That code does not work. Check it and try again.", choice), 401
-    if r not in CHOICES[choice]["roles"]:   # a real code, but for another choice: not a guess, so no limiter strike
-        return login_page(f"That code is not for {CHOICES[choice]['title']}.", choice, fix=CHOICE_OF[r]), 403
-    session.clear(); session.permanent = True; session["role"] = r
-    if r == "staff": session["who"] = sid; return redirect("/relief" if choice == "relief" else "/timetable")
-    if sid is not None: session["sid"] = sid
-    return redirect({"committee": "/", "head": "/", "personal": "/me"}.get(r, "/timetable"))
+        limiter.fail(addr); _record_signin(False, "code", reason="wrong code"); return _code_page(WRONG_CODE), 401
+    if r == "staff":
+        rec = people.record(data, val)
+        if rec["off"]:   # the right code: not a guess, so no strike
+            _record_signin(False, "code", val, reason="switched off"); return _code_page(SWITCHED_OFF), 403
+        _note_signin(val); _start(who=val, via="code", n=rec["n"]); _record_signin(True, "code", val)
+        return redirect("/home")
+    if r == "personal":
+        _start(role="personal", sid=val); _record_signin(True, "personal"); return redirect("/me")
+    _start(role=r); _record_signin(True, "shared", shared_=r)
+    return redirect("/" if r in ("committee", "head") else "/timetable")
+
+@app.route("/login/password", methods=["GET", "POST"])
+def login_password():
+    if not accounts_on(): return _password_page(NO_ACCOUNTS), 403 if request.method == "POST" else 200
+    if request.method == "GET": return _password_page()
+    addr = request.remote_addr or "?"
+    username = str(request.form.get("username") or "").strip()[:200]
+    key, data = username.lower(), people.load()
+    name, _ = people.by_username(data, username)
+    if limiter.blocked(addr):
+        _record_locked(("addr", addr), "password", name); return _password_page(TOO_MANY), 429
+    if lockout.blocked(key):   # an unknown username locks the same way, so the answer never shows which usernames exist
+        _record_locked(("user", key), "password", name); return _password_page(LOCKED), 429
+    rec = people.record(data, name) if name else None
+    if not passwords.check_pw(rec["pw"] if rec else None, request.form.get("password")):
+        limiter.fail(addr); lockout.fail(key)
+        _record_signin(False, "password", name, reason="wrong password" if name else "unknown username")
+        return _password_page(NO_MATCH), 401
+    if rec["off"]:
+        _record_signin(False, "password", name, reason="switched off"); return _password_page(SWITCHED_OFF), 403
+    lockout.clear(key); _note_signin(name)
+    _start(who=name, via="password", n=rec["n"], exp=time.time() + FORTNIGHT); _record_signin(True, "password", name)
+    return redirect("/account/password" if rec["must_change"] else "/home")
+
+@app.route("/account/password", methods=["GET", "POST"])
+def account_password():
+    p = who()
+    if p is None: return redirect("/login")
+    if not accounts_on(): return _change_page(p, NO_ACCOUNTS, form=False), 403
+    if not p.get("username"): return _change_page(p, NO_PASSWORD, form=False), 403
+    if request.method == "GET": return _change_page(p)
+    addr, key = request.remote_addr or "?", p["username"].lower()
+    if limiter.blocked(addr): return _change_page(p, TOO_MANY), 429
+    if lockout.blocked(key): return _change_page(p, LOCKED), 429
+    cur, new, again = (str(request.form.get(k) or "") for k in ("current", "new", "again"))
+    rec = people.record(people.load(), p["name"])
+    if not passwords.check_pw(rec["pw"], cur):
+        limiter.fail(addr); lockout.fail(key); return _change_page(p, NOT_CURRENT), 403
+    why = passwords.problem(new, rec["username"] or "", p["name"])
+    if why: return _change_page(p, why), 400
+    if new != again: return _change_page(p, NOT_SAME), 400
+    h = passwords.hash_pw(new)
+    def change(d):
+        x = d["people"].setdefault(p["name"], {})
+        n = people.record(d, p["name"])["n"] + 1
+        x.update(pw=h, must_change=False, n=n)
+        return n
+    try: n = people.update(change)
+    except people.Unreadable: return _change_page(p, people.UNREADABLE), 503
+    session["n"] = n   # this session stays; every other one of this person's ends (its number is old)
+    _record_account("password", p["name"], "Changed their own password")
+    return redirect("/home")
+
+def _recovery_used(data, code):
+    return any(passwords.check_pw(h, code) for h in data["ways"]["recovery_used"] if isinstance(h, str))
+
+@app.route("/login/recover", methods=["GET", "POST"])
+def login_recover():
+    """while ADMIN_RECOVERY_CODE is set: an admin's username and that code (accepted once per value) set a new password"""
+    code = (os.environ.get("ADMIN_RECOVERY_CODE") or "").strip()
+    if not code: abort(404)
+    if not accounts_on(): return _recover_page(NO_ACCOUNTS), 403 if request.method == "POST" else 200
+    if request.method == "GET": return _recover_page()
+    addr = request.remote_addr or "?"
+    if limiter.blocked(addr):
+        _record_locked(("addr", addr), "recovery"); return _recover_page(TOO_MANY), 429
+    username = str(request.form.get("username") or "").strip()[:200]
+    given, new, again = (str(request.form.get(k) or "") for k in ("code", "new", "again"))
+    data = people.load(); name, _ = people.by_username(data, username)
+    right = hmac.compare_digest(given.strip().encode(), code.encode())
+    if right and _recovery_used(data, code):
+        limiter.fail(addr); _record_signin(False, "recovery", name, reason="wrong code"); return _recover_page(RECOVERY_USED), 403
+    if not right or name not in people.admins(data):
+        limiter.fail(addr); _record_signin(False, "recovery", name, reason="wrong code"); return _recover_page(NO_RECOVERY), 401
+    why = passwords.problem(new, username, name)
+    if why: return _recover_page(why), 400
+    if new != again: return _recover_page(NOT_SAME), 400
+    h, used = passwords.hash_pw(new), passwords.hash_pw(code)
+    def change(d):
+        if _recovery_used(d, code) or name not in people.admins(d): return None   # used meanwhile
+        x = d["people"][name]
+        s = x.get("signins") if isinstance(x.get("signins"), list) else []
+        n = people.record(d, name)["n"] + 1
+        x.update(pw=h, must_change=False, n=n, signins=[t for t in s if isinstance(t, (int, float)) and not isinstance(t, bool)][-1:] + [time.time()])
+        d["ways"]["recovery_used"].append(used)
+        return n
+    try: n = people.update(change)
+    except people.Unreadable: return _recover_page(people.UNREADABLE), 503
+    if n is None: return _recover_page(RECOVERY_USED), 403
+    lockout.clear(username.lower())
+    _start(who=name, via="password", n=n, exp=time.time() + FORTNIGHT); _record_signin(True, "recovery", name)
+    return redirect("/home")
 
 @app.get("/logout")
 def logout():
     session.clear(); return redirect("/login")
+
+@app.get("/home")
+@need("timetable")
+def home():
+    """(bridge until Task 6 makes it the tiles page) a person opens what / opens for them"""
+    return redirect("/")
+
+# ------------------------------------------------------------------------------------------------ every request
+@app.before_request
+def same_site_only():
+    """a change (POST, PUT, PATCH, DELETE) whose Origin, else Referer, names another site is refused, so another site
+    cannot make a signed-in person's browser send one; a request with neither header is allowed"""
+    if request.method not in ("POST", "PUT", "PATCH", "DELETE"): return None
+    src = request.headers.get("Origin") or request.headers.get("Referer")
+    if not src: return None
+    try: host = urllib.parse.urlsplit(src).netloc
+    except ValueError: host = ""
+    return ({"error": CROSS_SITE}, 403) if host.lower() != request.host.lower() else None
+
+_tidied_on = None   # the day the accounts and the history were last tidied: kept in memory (once a day, and after a restart)
+
+def _day(iso):
+    try: d = datetime.date.fromisoformat(iso)
+    except (TypeError, ValueError): return str(iso)
+    return f"{d.day} {d.strftime('%b %Y')}"
+
+@app.before_request
+def tidy_once_a_day():
+    """the first request of each day ends the Exams and events extras whose date has passed, and removes history files
+    over two years old. A failure here never breaks the request"""
+    global _tidied_on
+    today = datetime.date.today()
+    if _tidied_on == today: return None
+    _tidied_on = today
+    try:
+        ended = []
+        if people.sweep(copy.deepcopy(people.load()), today):   # write the accounts only when an end date has passed
+            def sweep(d):
+                was = {n: r["extras"].get("exams") for n, r in d["people"].items() if isinstance(r, dict) and isinstance(r.get("extras"), dict)}
+                return [(n, was.get(n)) for n in people.sweep(d, today)]
+            ended = people.update(sweep)
+        if ended:
+            history.add_many([{"kind": "account", "what": "ended", "who": None, "as": "The app", "via": "app", "people": [n],
+                               "changes": [{"name": n, "field": "exams", "was": until, "now": None}],
+                               "text": f"Exams and events access ended (until {_day(until)})"} for n, until in ended])
+        history.prune(today)
+    except Exception as e:
+        print(f"WARNING: the daily tidy of the accounts and the history failed ({type(e).__name__})", file=sys.stderr, flush=True)
+    return None
+
+_OPEN = {"/login", "/login/password", "/login/recover", "/logout", "/account/password", "/healthz"}
+
+@app.before_request
+def password_first():
+    """a one-time password is changed before any page or call"""
+    if request.path in _OPEN or request.path.startswith("/static/"): return None
+    return _must_change_first()
 
 @app.get("/healthz")
 def health(): return {"ok": True}
@@ -742,14 +1066,11 @@ def relief_staff(pub):
     return relief_people.people(pub, relief_settings.load(pub)["extra_staff"])
 
 def me_staff(pub=None):
-    """the person signed in with their own code (their entry in relief_staff), or None; a staff session whose person
-    is no longer on the published timetable or the staff list is ended"""
-    if role() != "staff": return None
-    pub = pub or store.published(); who = session.get("who")
-    if not pub: return None   # nothing published (a publish may be swapping folders): no one to find, but the session stays
-    p = next((x for x in relief_staff(pub) if x["name"] == who), None) if who else None
-    if p is None: session.clear()
-    return p
+    """(bridge until Task 7, which uses who()) the person signed in by name while the timetable is published, else None.
+    who() has already ended a code session whose person is no longer on the published timetable; with nothing published
+    (a publish may be swapping folders) there is no one to find, but the session stays"""
+    if role() != "staff" or not (pub or store.published()): return None
+    return who()
 
 def _relief_rights(pub):
     """(may read the settings, may save them, saved by) for whoever is signed in; None when a staff session has ended"""
@@ -778,7 +1099,7 @@ def relief_me():
 
 @app.get("/relief/settings")
 def relief_settings_page():
-    if not role(): return redirect("/login")
+    if not role(): return _no_longer_valid() if g.get("_gone") else redirect("/login")
     if role() == "staff" and me_staff() is None: return _no_longer_valid()
     if role() == "committee" or (role() == "staff" and (_relief_rights(store.published()) or (0, 0))[1]):
         return app.send_static_file("relief-settings.html")

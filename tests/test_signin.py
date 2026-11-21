@@ -1,0 +1,426 @@
+"""Plain-assert tests for signing in as a person (accounts stage 1): .venv/bin/python tests/test_signin.py"""
+import contextlib, datetime, glob, io, json, os, pickle, secrets, sys, tempfile, time
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA = tempfile.mkdtemp()
+KEY = secrets.token_hex(16)
+CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
+os.environ.pop("ADMIN_RECOVERY_CODE", None)
+os.environ.update(DATA_DIR=DATA, SECRET_KEY=KEY, AI_PROVIDER="anthropic", AI_API_KEY="", **CODES)
+sys.path.insert(0, ROOT)
+import app as A, access, history as H, store  # noqa: E402
+from accounts import passwords as PW, people as P  # noqa: E402
+from relief import people as RP  # noqa: E402
+
+SECRETS = [KEY, *CODES.values()]          # every password, code and recovery value used here: none may reach the history
+
+def secret(n=8):
+    s = secrets.token_hex(n); SECRETS.append(s); return s
+
+def staff_code(name):
+    c = access.staff_code(name); SECRETS.append(c); return c
+
+WRONG = "That code does not work. Check it and try again."
+OFF = "This account is switched off. Ask the timetable committee."
+NO_MATCH = "That username and password do not match."
+LOCKED = "Too many wrong tries. Wait 15 minutes and try again."
+NO_SECRET = "Accounts need SECRET_KEY in Railway variables."
+FIRST = "Choose a new password first."
+AGAIN = "Please sign in again."
+CROSS = "That request did not come from this site."
+
+# made-up people: three published teachers, and a committee member who is not on the timetable
+ALICE, BEN, ERIC, DANA = "Ms Alice Tan", "Mr Ben Ong", "Mr Eric Goh", "Ms Dana Yeo"
+TEACHERS = [dict(name=ALICE, dept="Science"), dict(name=BEN, dept="Mathematics"), dict(name=ERIC, dept="Science", role="HOD")]
+
+def publish(teachers=TEACHERS):
+    """write what store.published() reads: a fake school with the teachers, one student, and the pages already made"""
+    pub = RP.fake_pub(teachers)
+    pub["meta"].update(published_at="1 Nov 2026, 09:00", ok=True)
+    pub["model"]["students"] = [dict(id="S001", name="Sam Student", cls="1A")]
+    os.makedirs(store.PUB, exist_ok=True)
+    with open(os.path.join(store.PUB, "model.pkl"), "wb") as f: pickle.dump(pub["model"], f)
+    store.write_json(os.path.join(store.PUB, "meta.json"), pub["meta"])
+    store._cache.update(stamp=None, value=None)
+    views = store.published()["views"]
+    for k in ("committee", "teacher", "staff", "student"): views[("view", k)] = f"the {k} page"
+
+def unpublish():
+    p = os.path.join(store.PUB, "meta.json")
+    if os.path.exists(p): os.remove(p)
+    store._cache.update(stamp=None, value=None)
+
+def person(name, **fields):
+    """a record, made the way the admin page will make it"""
+    def fn(d): d["people"].setdefault(name, {}).update(fields)
+    P.update(fn)
+
+def account(name, group="committee", **fields):
+    pw = secret(); user = name.split(" ", 1)[1].lower().replace(" ", ".")
+    person(name, group=group, username=user, pw=PW.hash_pw(pw), **fields)
+    return user, pw
+
+def rec(name): return P.record(P.load(), name)
+
+def code_in(code, c=None, **extra):
+    c = c or A.app.test_client(); return c, c.post("/login", data=dict(code=code, **extra))
+
+def pw_in(user, pw, c=None):
+    c = c or A.app.test_client(); return c, c.post("/login/password", data=dict(username=user, password=pw))
+
+def recover(user, code, new, c=None):
+    c = c or A.app.test_client(); return c, c.post("/login/recover", data=dict(username=user, code=code, new=new, again=new))
+
+def kept(c):
+    with c.session_transaction() as s: return dict(s)
+
+def last(kind="signin"): return H.read(kinds=[kind], limit=1)[0]
+
+def went(r, where): return r.status_code == 302 and r.headers["Location"].endswith(where)
+
+def strikes(): return len(A.limiter.fails["127.0.0.1"])
+
+COUNT = 0
+def t(f):
+    global COUNT
+    A.limiter.fails.clear(); A.lockout.fails.clear(); publish()
+    f(); COUNT += 1
+    return f
+
+@t
+def the_page_is_one_box_and_a_link():
+    c = A.app.test_client()
+    page = c.get("/login").data.decode()
+    assert "Sample School" in page and "Your personal code (on the slip from the school)" in page and 'name="code"' in page and ">Open<" in page
+    assert 'href="/login/password"' in page and "Committee and management: sign in with your username" in page
+    assert "Google" not in page and 'class="choice' not in page and "Department heads" not in page
+    assert c.get("/login?as=relief").data.decode() == page        # the old cards' ?as= is accepted and ignored
+    old = os.environ.pop("STUDENT_CODE")
+    try:
+        unset = "STUDENT_CODE is not set in Railway variables."
+        assert unset in A.setup_problems() and unset in c.get("/login").data.decode()
+        person("Ms Kim Ho", group="committee", added=True, extras=dict(relief=False, exams=None, admin=True))
+        assert unset not in A.setup_problems() and unset not in c.get("/login").data.decode()   # once an admin exists
+        assert not any("not set in Railway variables" in p for p in A.setup_problems())
+    finally:
+        os.environ["STUDENT_CODE"] = old; P.update(lambda d: d["people"].pop("Ms Kim Ho"))
+
+@t
+def a_published_teacher_signs_in_with_their_code_and_lands_on_home():
+    code = staff_code(ALICE)
+    c, r = code_in(code)
+    assert went(r, "/home"), (r.status_code, r.headers.get("Location"))
+    s = kept(c); assert s["who"] == ALICE and s["via"] == "code" and s["n"] == 0 and "role" not in s and "exp" not in s, s
+    e = last()
+    assert (e["ok"], e["via"], e["who"], e["as"], e["shared"], e["reason"], e["addr"]) == (True, "code", ALICE, ALICE, None, None, "127.0.0.1"), e
+    for _ in range(2): code_in(code.lower().replace("-", " "))      # codes are read ignoring case, spaces and dashes
+    assert len(rec(ALICE)["signins"]) == 2                           # the last two are kept
+    assert c.get("/timetable").data == b"the staff page"
+
+@t
+def shared_codes_still_work():
+    before = sorted(P.load()["people"])
+    for var, where, role, label in (("COMMITTEE_CODE", "/", "committee", "Shared committee code"), ("HEADS_CODE", "/", "head", "Shared heads' code"),
+                                    ("TEACHER_CODE", "/timetable", "teacher", "Shared teacher code"), ("STUDENT_CODE", "/timetable", "student", "Shared student code")):
+        c, r = code_in(CODES[var], **{"as": "relief"})
+        assert went(r, where), (var, r.status_code)
+        s = kept(c); assert s["role"] == role and "who" not in s, (var, s)
+        e = last(); assert (e["ok"], e["via"], e["shared"], e["who"], e["as"]) == (True, "shared", role, None, label), e
+    c, r = code_in(CODES["COMMITTEE_CODE"])
+    assert c.get("/api/status").get_json()["role"] == "committee"
+    sc = access.personal_code("S001"); SECRETS.append(sc)
+    c, r = code_in(sc)
+    assert went(r, "/me") and kept(c)["role"] == "personal" and kept(c)["sid"] == "S001"
+    e = last(); assert (e["ok"], e["via"], e["who"], e["as"], e["shared"]) == (True, "personal", None, "A student", None), e
+    assert "S001" not in json.dumps(e)                                # no student id in the history
+    assert sorted(P.load()["people"]) == before                       # no record for a shared or a student's code
+
+@t
+def a_turned_off_shared_code_is_refused_and_its_open_sessions_end():
+    tc, r = code_in(CODES["TEACHER_CODE"]); assert went(r, "/timetable") and tc.get("/timetable").data == b"the teacher page"
+    cc, r = code_in(CODES["COMMITTEE_CODE"]); assert cc.get("/api/status").status_code == 200
+    P.update(lambda d: d["ways"]["off"].update(teacher=time.time(), committee=time.time()))
+    try:
+        r = tc.get("/timetable"); assert went(r, "/login") and "role" not in kept(tc)
+        r = cc.get("/api/status"); assert r.status_code == 401 and r.get_json() == {"error": AGAIN} and "role" not in kept(cc)
+        n = strikes()
+        c, r = code_in(CODES["TEACHER_CODE"])
+        assert r.status_code == 401 and WRONG in r.data.decode() and "role" not in kept(c) and strikes() == n + 1
+        e = last(); assert (e["ok"], e["reason"], e["shared"], e["via"]) == (False, "code turned off", "teacher", "shared"), e
+    finally: P.update(lambda d: d["ways"]["off"].update(teacher=None, committee=None))
+    c, r = code_in(CODES["TEACHER_CODE"]); assert went(r, "/timetable")
+
+@t
+def a_wrong_code_is_a_strike_and_ten_block_the_address():
+    c, r = code_in(secret(4))
+    assert r.status_code == 401 and WRONG in r.data.decode() and strikes() == 1 and "role" not in kept(c)
+    e = last(); assert (e["ok"], e["reason"], e["via"], e["who"]) == (False, "wrong code", "code", None), e
+    for _ in range(9): code_in(secret(4))
+    c, r = code_in(CODES["TEACHER_CODE"]); assert r.status_code == 429 and "role" not in kept(c)
+    assert last()["reason"] == "locked"
+
+@t
+def password_sign_in():
+    user, pw = account(DANA)
+    c, r = pw_in(user.upper(), pw)                                    # usernames ignore case
+    assert went(r, "/home"), r.status_code
+    s = kept(c); assert s["who"] == DANA and s["via"] == "password" and s["n"] == 0 and "role" not in s, s
+    assert abs(s["exp"] - time.time() - 14 * 24 * 3600) < 60
+    assert c.get("/api/status").get_json()["role"] == "committee"
+    e = last(); assert (e["ok"], e["via"], e["who"], e["reason"]) == (True, "password", DANA, None), e
+    assert len(rec(DANA)["signins"]) == 1
+    k, r = code_in(staff_code(DANA))                                 # her code opens all but the setup and the admin page
+    assert went(r, "/home") and kept(k)["via"] == "code" and k.get("/api/status").status_code == 401
+    user, pw = account(ERIC, group="hod", depts=["Science"])
+    c, r = pw_in(user, pw); assert went(r, "/home") and c.get("/api/status").get_json()["role"] == "head"
+
+@t
+def an_unknown_username_and_a_wrong_password_get_the_same_answer():
+    user, pw = account("Mr Omar Ali", group="leader", added=True)
+    _, a = pw_in("nobody.here", secret()); _, b = pw_in(user, secret())
+    assert a.status_code == b.status_code == 401 and a.data == b.data and NO_MATCH in a.data.decode()
+    assert strikes() == 2
+    new, old = H.read(kinds=["signin"], limit=2)
+    assert (new["reason"], new["who"], new["via"]) == ("wrong password", "Mr Omar Ali", "password"), new
+    assert (old["reason"], old["who"], old["as"]) == ("unknown username", None, "Unknown"), old
+    assert "nobody" not in json.dumps(old)                            # what was typed is never recorded
+
+@t
+def five_wrong_passwords_lock_the_account():
+    user, pw = account("Ms Fay Ng", group="leader", added=True)
+    for _ in range(5): _, r = pw_in(user, secret()); assert r.status_code == 401
+    c, r = pw_in(user, pw)
+    assert r.status_code == 429 and LOCKED in r.data.decode() and "who" not in kept(c)
+    e = last(); assert (e["ok"], e["reason"], e["who"]) == (False, "locked", "Ms Fay Ng"), e
+    A.limiter.fails.clear()
+    for _ in range(5): pw_in("no.such.person", secret())             # an unknown username locks the same way: nothing shows who exists
+    _, u = pw_in("no.such.person", secret()); assert u.status_code == 429 and u.data == r.data
+    for q in A.lockout.fails.values():                                # 15 minutes later
+        for i in range(len(q)): q[i] -= 901
+    A.limiter.fails.clear()
+    c, r = pw_in(user, pw); assert went(r, "/home") and kept(c)["who"] == "Ms Fay Ng"
+    assert user not in A.lockout.fails
+
+@t
+def must_change_sends_every_page_to_the_password_page():
+    user, pw = account("Mr Gus Lee", group="leader", added=True, must_change=True)
+    c, r = pw_in(user, pw); assert went(r, "/account/password"), r.status_code
+    for url in ("/", "/home", "/timetable", "/relief", "/relief/settings"): assert went(c.get(url), "/account/password"), url
+    for url in ("/api/status", "/api/relief/me", "/pdf/classes/1A", "/files/book/classes"):
+        r = c.get(url); assert r.status_code == 403 and r.get_json() == {"error": FIRST}, (url, r.status_code)
+    r = c.get("/account/password"); assert r.status_code == 200 and all(f'name="{k}"' in r.data.decode() for k in ("current", "new", "again"))
+    new = secret()
+    r = c.post("/account/password", data=dict(current=pw, new=new, again=new)); assert went(r, "/home"), r.status_code
+    assert rec("Mr Gus Lee")["must_change"] is False and rec("Mr Gus Lee")["n"] == 1 and kept(c)["n"] == 1
+    assert PW.check_pw(rec("Mr Gus Lee")["pw"], new) and c.get("/timetable").status_code == 200
+    k, _ = pw_in(user, new)
+    x, y, short = secret(), secret(), secret(2)
+    for data, text in ((dict(current=new, new=short, again=short), "Use at least 10 characters."),
+                       (dict(current=new, new=x, again=y), "The two new passwords are not the same."),
+                       (dict(current=secret(), new=x, again=x), "Your current password is not right.")):
+        r = k.post("/account/password", data=data); assert r.status_code in (400, 403) and text in r.data.decode(), (text, r.status_code)
+    assert PW.check_pw(rec("Mr Gus Lee")["pw"], new) and k.get("/timetable").status_code == 200
+    person("Mr Gus Lee", must_change=True)                            # a new one-time password: every way in goes there first
+    assert went(k.get("/timetable"), "/account/password")
+    g, r = code_in(staff_code("Mr Gus Lee")); assert went(g.get("/timetable"), "/account/password")
+    a, _ = code_in(staff_code(ALICE))                                  # no username: no password to change
+    assert a.get("/account/password").status_code == 403 and a.get("/timetable").status_code == 200
+    assert went(A.app.test_client().get("/account/password"), "/login")
+
+@t
+def changing_the_password_ends_the_persons_other_sessions():
+    user, pw = account("Ms Hana Lim", group="leader", added=True)
+    a, _ = pw_in(user, pw); b, _ = pw_in(user, pw)
+    assert a.get("/timetable").status_code == 200 and b.get("/timetable").status_code == 200
+    new = secret()
+    r = a.post("/account/password", data=dict(current=pw, new=new, again=new)); assert went(r, "/home")
+    assert a.get("/timetable").data == b"the staff page"              # this session is kept, with the new number
+    assert went(b.get("/timetable"), "/login") and "who" not in kept(b)
+    _, r = pw_in(user, pw); assert r.status_code == 401
+    _, r = pw_in(user, new); assert went(r, "/home")
+    e = last("account"); assert (e["what"], e["who"], e["people"]) == ("password", "Ms Hana Lim", ["Ms Hana Lim"]), e
+
+@t
+def a_password_session_ends_after_14_days():
+    user, pw = account(DANA)
+    c, _ = pw_in(user, pw); assert c.get("/api/status").status_code == 200
+    with c.session_transaction() as s: s["exp"] = time.time() + 86400   # 13 days old
+    assert c.get("/api/status").status_code == 200
+    with c.session_transaction() as s: s["exp"] = time.time() - 1
+    r = c.get("/api/status"); assert r.status_code == 401 and r.get_json() == {"error": AGAIN} and "who" not in kept(c)
+    c, _ = pw_in(user, pw)
+    with c.session_transaction() as s: del s["exp"]
+    assert c.get("/api/status").status_code == 401
+    k, _ = code_in(staff_code(ALICE)); assert "exp" not in kept(k) and k.get("/timetable").status_code == 200
+
+@t
+def a_code_session_lives_through_a_publish_and_ends_when_the_teacher_is_dropped():
+    c, _ = code_in(staff_code(BEN)); d, _ = code_in(staff_code(BEN))
+    unpublish()                                                       # a publish swaps folders: for a moment nothing is published
+    r = c.get("/timetable"); assert r.status_code == 200 and b"Not published yet" in r.data and b"Code no longer valid" not in r.data
+    r = c.get("/api/relief/me"); assert r.status_code == 401 and r.get_json() == {"error": AGAIN}
+    s = kept(c); assert s["who"] == BEN and s["via"] == "code", s
+    publish([x for x in TEACHERS if x["name"] != BEN])
+    r = c.get("/timetable"); assert r.status_code == 200 and b"Code no longer valid" in r.data and b"the staff page" not in r.data, (r.status_code, r.data[:300])
+    assert "who" not in kept(c)
+    r = d.get("/api/relief/me"); assert r.status_code == 401 and r.get_json() == {"error": AGAIN} and "who" not in kept(d)
+    _, r = code_in(staff_code(BEN)); assert r.status_code == 401
+
+@t
+def a_committee_password_session_does_not_need_the_timetable():
+    user, pw = account(DANA)
+    c, r = pw_in(user, pw); assert went(r, "/home") and c.get("/api/status").get_json()["role"] == "committee"
+    unpublish()
+    assert c.get("/api/status").status_code == 200
+    k, r = pw_in(user, pw); assert went(r, "/home") and k.get("/api/status").status_code == 200
+    publish([dict(name=ALICE, dept="Science")])
+    assert c.get("/api/status").status_code == 200 and k.get("/api/status").status_code == 200
+
+@t
+def a_switched_off_person_is_refused():
+    code = staff_code(ALICE)
+    person(ALICE, off=True)
+    try:
+        c, r = code_in(code)
+        assert r.status_code == 403 and OFF in r.data.decode() and "who" not in kept(c) and strikes() == 0   # no strike
+        e = last(); assert (e["ok"], e["reason"], e["who"], e["via"]) == (False, "switched off", ALICE, "code"), e
+    finally: person(ALICE, off=False)
+    user, pw = account("Ms Ivy Chan", group="leader", added=True, off=True)
+    _, r = pw_in(user, pw); assert r.status_code == 403 and OFF in r.data.decode()
+    _, r = pw_in(user, secret()); assert r.status_code == 401 and NO_MATCH in r.data.decode()   # a wrong password says nothing about the account
+    c, _ = code_in(code); assert c.get("/timetable").status_code == 200
+    person(ALICE, off=True)
+    try: assert went(c.get("/timetable"), "/login") and "who" not in kept(c)   # an open session ends at its next request
+    finally: person(ALICE, off=False)
+
+@t
+def a_relief_stage_1_session_counts_as_a_code_session():
+    c = A.app.test_client()
+    with c.session_transaction() as s: s["role"], s["who"] = "staff", ALICE
+    assert c.get("/timetable").data == b"the staff page"
+    with A.app.test_request_context():
+        A.session["role"], A.session["who"] = "staff", ALICE
+        assert A.via() == "code" and A.who()["name"] == ALICE
+    person(ALICE, n=1)                                                # a raised number ends it, as it ends any older session
+    try: assert went(c.get("/timetable"), "/login") and "who" not in kept(c)
+    finally: person(ALICE, n=0)
+
+@t
+def the_session_model():
+    with A.app.test_request_context():
+        A.session["role"] = "committee"
+        assert A.via() == "shared" and A.shared() == "committee" and A.who() is None and A.has("codes") and A.role() == "committee"
+        assert A.by() == {"who": None, "as": "Shared committee code", "via": "shared"}
+    with A.app.test_request_context():
+        A.session.update(role="personal", sid="S001")
+        assert A.via() == "personal" and A.rights() == frozenset({"own"}) and A.by()["as"] == "A student" and A.shared() is None
+    with A.app.test_request_context():
+        A.session.update(who=ALICE, via="code", n=0)
+        p = A.who()
+        assert p["name"] == ALICE and p["depts"] == ["Science"] and "pw" not in p and A.via() == "code" and A.shared() is None
+        assert A.has("relief") and not A.has("setup") and A.role() == "staff"
+        assert A.by() == {"who": ALICE, "as": ALICE, "via": "code"}
+    with A.app.test_request_context():
+        assert A.via() is None and A.who() is None and A.rights() == frozenset() and A.by()["as"] == "Unknown" and A.role() is None
+    calls = []
+    real = A.rights_table.rights
+    A.rights_table.rights = lambda *a, **k: calls.append(1) or real(*a, **k)
+    try:
+        with A.app.test_request_context():
+            A.session.update(who=ALICE, via="code", n=0)
+            A.rights(); A.has("relief"); A.rights()
+            assert len(calls) == 1                                    # worked out once a request, kept on flask.g
+    finally: A.rights_table.rights = real
+    assert A.app.view_functions["post_setup_changes"]._need == ("committee", "head")
+    assert A.app.view_functions["timetable"]._need == ("committee", "head", "teacher", "student", "staff")
+
+@t
+def recovery_works_once_per_value_and_only_with_the_variable():
+    c = A.app.test_client()
+    assert c.get("/login/recover").status_code == 404 and c.post("/login/recover", data={}).status_code == 404
+    user, pw = account("Ms Jo Tan", added=True, extras=dict(relief=False, exams=None, admin=True))
+    other, _ = account("Mr Kai Lee", added=True)                      # committee, not an admin
+    rc = secret(); os.environ["ADMIN_RECOVERY_CODE"] = rc
+    try:
+        page = c.get("/login/recover").data.decode(); assert 'name="code"' in page and 'name="username"' in page
+        for _ in range(5): pw_in(user, secret())                      # she is locked out as well
+        A.limiter.fails.clear()
+        new = secret()
+        k, r = recover(user, rc, new); assert went(r, "/home"), r.status_code
+        s = kept(k); assert s["who"] == "Ms Jo Tan" and s["via"] == "password" and s["n"] == 1, s
+        assert PW.check_pw(rec("Ms Jo Tan")["pw"], new) and user not in A.lockout.fails and k.get("/api/status").status_code == 200
+        e = last(); assert (e["ok"], e["via"], e["who"]) == (True, "recovery", "Ms Jo Tan"), e
+        _, r = pw_in(user, new); assert went(r, "/home")
+        _, r = recover(user, rc, secret()); assert r.status_code in (401, 403) and PW.check_pw(rec("Ms Jo Tan")["pw"], new)   # once per value
+        _, r = recover(user, secret(), secret()); assert r.status_code == 401
+        rc2 = secret(); os.environ["ADMIN_RECOVERY_CODE"] = rc2
+        _, r = recover(other, rc2, secret()); assert r.status_code == 401   # only an admin's username
+        new2 = secret()
+        _, r = recover(user, rc2, new2); assert went(r, "/home") and PW.check_pw(rec("Ms Jo Tan")["pw"], new2)
+        used = P.load()["ways"]["recovery_used"]; assert len(used) == 2 and PW.check_pw(used[0], rc) and PW.check_pw(used[1], rc2)
+    finally: os.environ.pop("ADMIN_RECOVERY_CODE", None)
+    assert c.get("/login/recover").status_code == 404
+
+@t
+def a_change_from_another_site_is_refused():
+    c, _ = code_in(CODES["COMMITTEE_CODE"])
+    body = dict(client="x", since=0, ops=[])
+    for h in ({"Origin": "https://elsewhere.example"}, {"Referer": "https://elsewhere.example/page"}, {"Origin": "null"},
+              {"Origin": "https://elsewhere.example", "Referer": "http://localhost/"}):
+        r = c.post("/api/setup/changes", json=body, headers=h); assert r.status_code == 403 and r.get_json() == {"error": CROSS}, h
+    r = c.put("/api/setup", json={}, headers={"Origin": "https://elsewhere.example"}); assert r.status_code == 403
+    for h in ({"Origin": "http://localhost"}, {"Referer": "http://localhost/"}, {}):
+        r = c.post("/api/setup/changes", json=body, headers=h); assert r.status_code != 403 and r.get_json() != {"error": CROSS}, h
+    assert c.get("/api/status", headers={"Origin": "https://elsewhere.example"}).status_code == 200   # reading is not a change
+    k = A.app.test_client()
+    r = k.post("/login", data=dict(code=CODES["TEACHER_CODE"]), headers={"Origin": "https://elsewhere.example"})
+    assert r.status_code == 403 and "role" not in kept(k)
+
+@t
+def accounts_need_secret_key():
+    user, pw = account(DANA); code = staff_code(ALICE)
+    del os.environ["SECRET_KEY"]
+    try:
+        page = A.app.test_client().get("/login/password").data.decode(); assert NO_SECRET in page and 'name="password"' not in page
+        c, r = pw_in(user, pw); assert r.status_code == 403 and NO_SECRET in r.data.decode() and "who" not in kept(c)
+        c, r = code_in(CODES["COMMITTEE_CODE"]); assert went(r, "/")         # the shared codes work as today
+        _, r = code_in(code); assert r.status_code == 401                     # personal codes are off
+    finally: os.environ["SECRET_KEY"] = KEY
+    _, r = pw_in(user, pw); assert went(r, "/home")
+
+@t
+def the_daily_tidy():
+    today = datetime.date.today(); yesterday = today - datetime.timedelta(days=1)
+    person("Ms Lia Ong", group="teacher", added=True, extras=dict(relief=False, exams=yesterday.isoformat(), admin=False))
+    person("Mr Max Ho", group="teacher", added=True, extras=dict(relief=False, exams=today.isoformat(), admin=False))
+    old = os.path.join(H.DIR, "2001-01.jsonl"); os.makedirs(H.DIR, exist_ok=True); open(old, "w").close()
+    A._tidied_on = None
+    assert A.app.test_client().get("/healthz").status_code == 200
+    assert rec("Ms Lia Ong")["extras"]["exams"] is None and rec("Mr Max Ho")["extras"]["exams"] == today.isoformat()
+    e = last("account")
+    assert e["text"] == f"Exams and events access ended (until {yesterday.day} {yesterday.strftime('%b %Y')})" and e["people"] == ["Ms Lia Ong"], e
+    assert (e["what"], e["who"], e["as"], e["via"]) == ("ended", None, "The app", "app"), e
+    assert not os.path.exists(old)                                    # history files over two years old are removed
+    n = len(H.read(kinds=["account"], limit=1000))
+    person("Ms Lia Ong", extras=dict(relief=False, exams=yesterday.isoformat(), admin=False))
+    A.app.test_client().get("/healthz")                               # once a day
+    assert len(H.read(kinds=["account"], limit=1000)) == n and rec("Ms Lia Ong")["extras"]["exams"] == yesterday.isoformat()
+    real = H.prune
+    def boom(*a, **k): raise RuntimeError("never shown")
+    H.prune = boom; A._tidied_on = None; err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err): r = A.app.test_client().get("/healthz")
+    finally: H.prune = real
+    assert r.status_code == 200 and "RuntimeError" in err.getvalue() and "never shown" not in err.getvalue() and err.getvalue().count("\n") == 1, err.getvalue()
+
+@t
+def nothing_typed_reaches_the_history():
+    text = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(H.DIR, "*.jsonl")))
+    assert text.count('"kind": "signin"') > 30, text.count('"kind": "signin"')
+    for s in SECRETS:
+        assert not any(x in text for x in {s, s.upper(), s.lower(), access.norm(s)}), "a password, code or recovery value is in the history"
+    assert "nobody.here" not in text and "no.such.person" not in text
+    with open(P.PATH, encoding="utf-8") as f: kept_file = f.read()
+    for s in SECRETS:
+        assert not any(x in kept_file for x in {s, s.upper(), s.lower(), access.norm(s)}), "a password, code or recovery value is in the accounts file"
+
+print(f"{COUNT} sign-in tests passed")

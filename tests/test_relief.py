@@ -234,9 +234,10 @@ def a_term_or_holiday_needs_a_name_before_its_dates():
                 dict(terms=[], holidays=[dict(name=None, start="bad", end="")])):
         raises(ValueError, lambda: S.save(base(calendar=cal), PUB, "x"), NAMELESS)
 
-# ---- signing in as a person, the Relief card and the relief routes
+# ---- signing in as a person (one box for every code), and the relief routes
 import contextlib, csv, io  # noqa: E402
 from relief import codes as RC  # noqa: E402
+from accounts import people as AP  # noqa: E402
 
 @contextlib.contextmanager
 def published(pub):
@@ -244,40 +245,38 @@ def published(pub):
     try: yield
     finally: store.published = old
 
-def signed_in(card, code):
+def signed_in(code):
     c = A.app.test_client()
-    r = c.post("/login", data={"as": card, "code": code})
+    r = c.post("/login", data={"code": code})
     return c, r
 
 def committee():
-    c, r = signed_in("committee", os.environ["COMMITTEE_CODE"]); assert r.status_code == 302
+    c, r = signed_in(os.environ["COMMITTEE_CODE"]); assert r.status_code == 302
     return c
 
-def staff(name, card="relief"):
-    c, r = signed_in(card, access.staff_code(name)); assert r.status_code == 302, (name, r.status_code)
+def staff(name):
+    c, r = signed_in(access.staff_code(name)); assert r.status_code == 302, (name, r.status_code)
     return c
 
 SETTINGS_DENIED = "Only the timetable committee and the relief team can change relief settings."
 NOT_PUBLISHED = "Publish the timetable first: relief reads the teachers from it."
 
 @t
-def relief_card_is_on_the_front_page():
+def the_front_page_is_one_box_for_every_code():
     c = A.app.test_client()
     with published(PUB):
         front = c.get("/login").data
-        assert b"Relief" in front and b'src="/static/choice-relief.svg"' in front and b'src="/static/choice-teacher.png"' in front
-        page = c.get("/login?as=relief").data
-        assert b"Your personal code" in page and b'name="code"' in page and b'src="/static/choice-relief.svg"' in page
-        assert A.CHOICES["teacher"]["roles"] == ("teacher", "staff") and A.CHOICES["relief"]["roles"] == ("staff",)
-    assert os.path.exists(os.path.join(ROOT, "static", "choice-relief.svg"))
+        assert b"Your personal code (on the slip from the school)" in front and front.count(b'name="code"') == 1 and b'class="choice' not in front
+        assert c.get("/login?as=relief").data == front                 # the old cards' links still open the page
+        assert not hasattr(A, "CHOICES")
 
 @t
 def a_staff_code_signs_in_as_that_person():
     fresh()
     with published(PUB):
-        c, r = signed_in("relief", access.staff_code("Mr Darren Lim"))
-        assert r.status_code == 302 and r.headers["Location"].endswith("/relief"), r.headers.get("Location")
-        with c.session_transaction() as s: assert s["role"] == "staff" and s["who"] == "Mr Darren Lim"
+        c, r = signed_in(access.staff_code("Mr Darren Lim"))
+        assert r.status_code == 302 and r.headers["Location"].endswith("/home"), r.headers.get("Location")
+        with c.session_transaction() as s: assert s["who"] == "Mr Darren Lim" and s["via"] == "code" and "role" not in s
         me = c.get("/api/relief/me").get_json()
         assert me == dict(name="Mr Darren Lim", depts=["Science"], on_team=False, on_management=False, can_settings=False), me
         r = c.get("/"); assert r.status_code == 302 and r.headers["Location"].endswith("/relief")
@@ -287,7 +286,7 @@ def a_staff_code_signs_in_as_that_person():
             A.session["who"] = "Ms Nobody"
             assert A.me_staff() is None and "role" not in A.session and "who" not in A.session
             A.session["role"] = "teacher"; assert A.me_staff() is None and A.session["role"] == "teacher"
-    bad, r = signed_in("relief", "ZZZZ-ZZZZ"); assert r.status_code == 401
+    bad, r = signed_in("ZZZZ-ZZZZ"); assert r.status_code == 401
 
 def timetable_pub(pub):
     """a fake published timetable the teacher routes can answer from: no classes, and the teacher page already made"""
@@ -300,13 +299,14 @@ def timetable_pub(pub):
 TPUB = timetable_pub(PUB)
 
 @t
-def a_staff_code_opens_the_teachers_timetable_card():
+def a_staff_code_opens_the_teachers_timetable():
     with published(TPUB):
-        c, r = signed_in("teacher", access.staff_code("Mr Darren Lim"))
-        assert r.status_code == 302 and r.headers["Location"].endswith("/timetable"), r.headers.get("Location")
+        c, r = signed_in(access.staff_code("Mr Darren Lim"))
+        assert r.status_code == 302 and r.headers["Location"].endswith("/home"), r.headers.get("Location")
         assert c.get("/api/relief/me").get_json()["name"] == "Mr Darren Lim"
-        c2, r = signed_in("student", access.staff_code("Mr Darren Lim"))
-        assert r.status_code == 403 and b"?as=relief" in r.data          # a staff code on another card points to the Relief card
+        c2 = A.app.test_client()                                      # a page still sending an old card's choice: the choice is ignored
+        r = c2.post("/login", data={"as": "student", "code": access.staff_code("Mr Darren Lim")})
+        assert r.status_code == 302 and r.headers["Location"].endswith("/home") and c2.get("/api/relief/me").get_json()["name"] == "Mr Darren Lim"
         # treated as a teacher: the teacher's page and files, not the committee's
         r = c.get("/timetable"); assert r.status_code == 200 and r.data == b"the staff page"
         assert c.get("/pdf/custom?cls=1A").status_code == 404 and c.get("/pdf/classes/1A").status_code == 404
@@ -316,7 +316,7 @@ def a_staff_code_opens_the_teachers_timetable_card():
 @t
 def a_dropped_teacher_loses_the_teacher_routes_too():
     fresh()
-    with published(TPUB): a, b, d = (staff("Mr Darren Lim", card="teacher") for _ in range(3))
+    with published(TPUB): a, b, d = (staff("Mr Darren Lim") for _ in range(3))
     with published(timetable_pub(P.fake_pub([dict(name="Ms Evelyn Koh", dept="Science")]))):
         r = a.get("/timetable"); assert r.status_code == 200 and b"Code no longer valid" in r.data and b"the teacher page" not in r.data
         r = b.get("/pdf/classes/1A"); assert r.status_code == 401 and r.get_json() == {"error": "Please sign in again."}
@@ -348,7 +348,7 @@ def staff_on_the_timetable_get_the_way_back_to_relief():
     pub = copy.deepcopy(PUB); pub["views"] = {}
     try:
         with published(pub):
-            s, (tc, _) = staff("Mr Darren Lim", card="teacher"), signed_in("teacher", os.environ["TEACHER_CODE"])
+            s, (tc, _) = staff("Mr Darren Lim"), signed_in(os.environ["TEACHER_CODE"])
             assert s.get("/timetable").data == b"page 1" and tc.get("/timetable").data == b"page 2"
             assert s.get("/timetable").data == b"page 1" and tc.get("/timetable").data == b"page 2" and len(seen) == 2   # each kept, apart
     finally: E.render_html = old
@@ -357,10 +357,13 @@ def staff_on_the_timetable_get_the_way_back_to_relief():
     assert set(pub["views"]) == {("view", "staff"), ("view", "teacher")}, list(pub["views"])
 
 @t
-def teacher_code_on_the_relief_card_is_refused_with_the_right_link():
+def a_teacher_code_sent_from_the_old_relief_card_opens_the_timetable():
     with published(PUB):
-        c, r = signed_in("relief", os.environ["TEACHER_CODE"])
-        assert r.status_code == 403 and b"?as=teacher" in r.data, r.status_code
+        c = A.app.test_client()
+        r = c.post("/login", data={"as": "relief", "code": os.environ["TEACHER_CODE"]})   # the choice is ignored: the code decides
+        assert r.status_code == 302 and r.headers["Location"].endswith("/timetable"), r.status_code
+        with c.session_transaction() as s: assert s["role"] == "teacher" and "who" not in s
+        assert c.get("/api/relief/me").status_code == 401                # the shared teacher code is nobody's: no relief page
 
 @t
 def a_staff_session_cannot_reach_committee_routes():
@@ -413,7 +416,7 @@ def settings_rights():
         for x in (team, com):
             r = x.get("/relief/settings"); assert r.status_code == 200 and b"/static/relief-settings.js" in r.data, r.status_code; r.close()
         r = team.get("/relief"); assert r.status_code == 200 and b"/static/relief.js" in r.data, r.status_code; r.close()
-        tc, _ = signed_in("teacher", os.environ["TEACHER_CODE"])
+        tc, _ = signed_in(os.environ["TEACHER_CODE"])
         assert tc.get("/api/relief/settings").status_code == 401 and tc.put("/api/relief/settings", json=base()).status_code == 401
         assert tc.get("/relief/settings").status_code == 403 and tc.get("/api/relief/me").status_code == 401
         # a refused save is a sentence (400), never a server error
@@ -442,13 +445,15 @@ def codes_off_without_secret_key():
     with published(PUB):
         del os.environ["SECRET_KEY"]
         try:
-            page = A.app.test_client().get("/login?as=relief").data
-            assert A.NO_PERSONAL_STAFF.encode() in page and b'name="code"' not in page
+            page = A.app.test_client().get("/login").data              # the box stays for the shared codes; the page says why personal ones fail
+            assert b'name="code"' in page and b"SECRET_KEY is not set" in page
             assert A.NO_PERSONAL_STAFF == "Personal codes are off until SECRET_KEY is set in Railway variables."
             assert com.get("/api/relief/codes.csv").status_code == 409 and com.get("/api/relief/code-slips.pdf").status_code == 409
-            _, r = signed_in("relief", access.staff_code("Mr Darren Lim")); assert r.status_code == 401
+            assert com.get("/api/relief/codes.csv").data.decode() == A.NO_PERSONAL_STAFF
+            _, r = signed_in(access.staff_code("Mr Darren Lim")); assert r.status_code == 401
+            _, r = signed_in(os.environ["TEACHER_CODE"]); assert r.status_code == 302
         finally: os.environ["SECRET_KEY"] = KEY
-        assert b'name="code"' in A.app.test_client().get("/login?as=relief").data
+        assert b"SECRET_KEY is not set" not in A.app.test_client().get("/login").data
 
 @t
 def codes_csv_and_slips():
@@ -467,10 +472,13 @@ def codes_csv_and_slips():
         assert office[2] == access.staff_code("Mdm Office Staff") and office[1] == ""
         assert next(x for x in rows if x[0] == "Mr Darren Lim")[1] == "Science"
         r = com.get("/api/relief/code-slips.pdf"); assert r.status_code == 200 and r.data.startswith(b"%PDF") and r.mimetype == "application/pdf"
+        # signing in reads the accounts: until relief's extra staff move there (accounts Task 7), she is added to both
+        AP.update(lambda d: d["people"].setdefault("Mdm Office Staff", {}).update(added=True, group="executive", note="admin"))
         sc = staff("Mdm Office Staff")
         assert sc.get("/api/relief/codes.csv").status_code == 403 and sc.get("/api/relief/code-slips.pdf").status_code == 403
         # signed in with her code, she is that person
         assert sc.get("/api/relief/me").get_json()["name"] == "Mdm Office Staff"
+    AP.update(lambda d: d["people"].pop("Mdm Office Staff"))
 
 @t
 def codes_csv_lists_both_departments():
