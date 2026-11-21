@@ -1,6 +1,7 @@
 """Absence records: a teacher's absence (asked by them or planned by someone else), its lessons, work and relief.
 One JSON file each under DATA/relief/absences."""
 import datetime, os, secrets, threading
+from zoneinfo import ZoneInfo
 
 import store
 from relief import files as _files
@@ -28,7 +29,7 @@ def _path(id):
 
 
 def _now():
-    return datetime.datetime.now().isoformat(timespec="seconds")
+    return datetime.datetime.now(ZoneInfo(os.environ.get("SCHOOL_TZ") or "Asia/Singapore")).isoformat(timespec="seconds")
 
 
 def _say(d):
@@ -104,6 +105,17 @@ def _iso_dates(v, today):
     return sorted(out)
 
 
+def _no_overlap(records, teacher, lessons):
+    """refuse when another absence of the teacher, not cancelled, has a needed lesson overlapping one of lessons (dicts with ISO dates)"""
+    for r in records:
+        if r.get("cancelled") or r.get("teacher") != teacher: continue
+        for old in r["lessons"]:
+            if not old.get("needed"): continue
+            for x in lessons:
+                if x["date"] == old["date"] and _free._overlap(x["p"], x["n"], old["p"], old["n"]):
+                    raise ValueError(f"{r['by']} has already sent an absence for {teacher} on {_say(datetime.date.fromisoformat(x['date']))}.")
+
+
 def new(data, pub, by, how, may_choose=False) -> dict:
     pub = _pub(pub)
     if how not in ("asked", "planned") or not isinstance(data, dict): raise ValueError(WRONG)
@@ -149,31 +161,27 @@ def new(data, pub, by, how, may_choose=False) -> dict:
         else:
             needed = a.get("needed") is not False
             not_needed = None if needed else dict(by=by, why="Not needed")
-        work = _check_work(a.get("work"))
-        if work["files"]: raise ValueError(NO_FILES_YET)
-        built.append(dict(x, date=x["date"].isoformat(), needed=needed, not_needed=not_needed, relief=None, relief_by=None, work=work, _ask=a))
+        built.append(dict(x, date=x["date"].isoformat(), needed=needed, not_needed=not_needed, relief=None, relief_by=None,
+                          work=dict(text="", link="", files=[]), _ask=a))
     if not any(x["needed"] for x in built): raise ValueError("There are no lessons to cover in that time.")
     with _LOCK:
         records = all_records()
-        for r in records:
-            if r.get("cancelled") or r.get("teacher") != teacher: continue
-            for old in r["lessons"]:
-                if not old.get("needed"): continue
-                for x in built:
-                    if x["needed"] and x["date"] == old["date"] and _free._overlap(x["p"], x["n"], old["p"], old["n"]):
-                        d = datetime.date.fromisoformat(x["date"])
-                        raise ValueError(f"{r['by']} has already sent an absence for {teacher} on {_say(d)}.")
+        _no_overlap(records, teacher, [x for x in built if x["needed"]])
         pending = dict(teacher=teacher, dates=[d.isoformat() for d in dates], periods=periods, cancelled=None, lessons=[])
+        if not may_choose and any(x["needed"] and x["_ask"].get("relief") for x in built):
+            raise ValueError("Only management and the relief team choose relief teachers.")     # before free_then: no probing who is free
         for x in built:
-            name = x.pop("_ask").get("relief")
+            name = x["_ask"].get("relief")
             if name and x["needed"]:
                 lesson = dict(x, date=datetime.date.fromisoformat(x["date"]))
                 free = _free.free_then(pub, settings, records + [pending], lesson, teacher)
                 if name not in [p["name"] for g in free["groups"] for p in g["people"]]:
                     raise ValueError(f"{name} is not free for {' and '.join(x['classes'])} {x['subject']} then.")
-                if not may_choose: raise ValueError("Only management and the relief team choose relief teachers.")
                 x["relief"], x["relief_by"] = name, by
             pending["lessons"].append(x)
+        for x in built:      # the work checks come last
+            x["work"] = _check_work(x.pop("_ask").get("work"))
+            if x["work"]["files"]: raise ValueError(NO_FILES_YET)
         r = dict(id=secrets.token_hex(6), teacher=teacher, dates=pending["dates"], periods=periods, reason=reason, reason_text=text.strip(),
                  remarks=remarks.strip(), reporting_officer=officer, by=by, how=how, at=_now(), acknowledged=None, cancelled=None,
                  lessons=pending["lessons"])
@@ -222,12 +230,15 @@ def set_work(id, key, work, by):
             if not p: raise ValueError(CHANGED)
             old = next((o for o in x["work"]["files"] if o["id"] == fid), None)
             name = old["name"] if old else _files.clean_name(f.get("name") if isinstance(f, dict) else "")
-            kept.append(dict(id=fid, name=name, size=os.path.getsize(p)))
-        gone = [o["id"] for o in x["work"]["files"] if o["id"] not in {k["id"] for k in kept}]
+            ext = os.path.splitext(p)[1]      # the name always ends with the stored file's own extension
+            base = os.path.splitext(name)[0] if os.path.splitext(name)[1] else name
+            kept.append(dict(id=fid, name=(base + ext)[:100] if not name.lower().endswith(ext.lower()) else name, size=os.path.getsize(p)))
+        before = {o["id"] for l in r["lessons"] for o in l["work"]["files"]}
         w["files"] = kept
         x["work"] = w
         _save(r)
-    for fid in gone: _files.delete(id, fid)
+        still = {o["id"] for l in r["lessons"] for o in l["work"]["files"]}
+        for fid in before - still: _files.delete(id, fid)
     return r
 
 
@@ -252,6 +263,7 @@ def needed_again(id, key, by, pub=None):
         r = _editable(id)
         _may_change(r, by, pub)
         x = _lesson(r, key)
+        _no_overlap([o for o in all_records() if o["id"] != r["id"]], r["teacher"], [x])
         x["needed"], x["not_needed"] = True, None
         _save(r)
     return r

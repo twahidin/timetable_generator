@@ -39,10 +39,10 @@ def _week_dates(cal, days, date):
     return [d for d in out if school_day(cal, days, d) is not None]
 
 
-def week_so_far(pub, cal, records, name, date):
+def week_so_far(pub, cal, records, name, date, skip=None):
     """teaching periods plus relief periods in the school dates of the week holding date"""
     days = ((pub or {}).get("model") or {}).get("days") or []
-    return _lessons.teaching_periods(pub, cal, name, date) + relief_periods(records, name, _week_dates(cal, days, date))
+    return _lessons.teaching_periods(pub, cal, name, date) + relief_periods(records, name, _week_dates(cal, days, date), skip)
 
 
 def _absent_then(records, name, iso, p, n):
@@ -110,13 +110,14 @@ def free_then(pub, settings, records, lesson, absent):
             elif r.get("rule") == "Keep free together" and r.get("scope") == "Department" and r.get("target") in who["depts"] and _rule_hits(r, day, p, n):
                 if "department meeting time" not in marks: marks.append("department meeting time")
         if blocked: continue
-        today = relief_periods(records, name, {date}, skip=(absent, lesson.get("key")))   # this lesson's own periods are added below, not counted twice
+        skip = (absent, lesson.get("key"))
+        today = relief_periods(records, name, {date}, skip=skip)   # this lesson's own periods are added below, not counted twice
         fat = bool(fat_role) and who["role"] == fat_role
         limit = lim.get("fat_per_day") if fat else lim.get("other_per_day")
         over = limit is not None and today + n > limit
         if over: marks.append(f"at {today} relief periods today (the limit is {limit})")
         free.append(dict(name=name, depts=list(who["depts"]), subjects=sorted(taught.get(name, ())), fat=fat,
-                         week=week_so_far(pub, cal, records, name, date), today=today, term=relief_periods(records, name, term_dates),
+                         week=week_so_far(pub, cal, records, name, date, skip=skip), today=today, term=relief_periods(records, name, term_dates, skip=skip),
                          marks=marks, over=over))
     free.sort(key=lambda x: (bool(x["marks"]), x["week"], x["term"], x["name"]))
     titles, buckets = [], {}

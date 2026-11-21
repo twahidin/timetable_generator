@@ -491,4 +491,64 @@ def nothing_half_saved_on_refusal():
     assert files_in(ADIR) == before and files_in(FL.DIR) == fb
     assert not [f for f in files_in(ADIR) if f.endswith(".tmp")]
 
+
+# ---- Task 3 fix round 1 ----
+@t
+def work_checks_come_last():
+    first = AB.new(data(periods=[5, 6]), APUB, GRACE, "planned")
+    bad = dict(key=lk(APUB, 5), work=dict(text="", link="ftp://x", files=[]))
+    refuses("Ms Grace Wong has already sent an absence for Ms Evelyn Koh on Tue 13 Oct.", lambda: AB.new(data(periods=[5, 6], lessons=[bad]), APUB, EVE, "asked"))
+    AB.cancel(first["id"], "x", GRACE, APUB)
+    refuses("Only management and the relief team choose relief teachers.",
+            lambda: AB.new(data(lessons=[dict(key=lk(APUB, 5), relief=SAM, work=dict(text="", link="ftp://x", files=[]))]), APUB, EVE, "asked"))
+    refuses("A link starts with http:// or https://.", lambda: AB.new(data(lessons=[bad]), APUB, EVE, "asked"))
+
+@t
+def an_ordinary_teacher_cannot_probe_who_is_free():
+    refuses("Only management and the relief team choose relief teachers.",
+            lambda: AB.new(data(lessons=[dict(key=lk(APUB, 5), relief=BUSY)]), APUB, EVE, "asked"))
+    refuses("Only management and the relief team choose relief teachers.",
+            lambda: AB.new(data(lessons=[dict(key=lk(APUB, 5), relief="Mr Nobody")]), APUB, EVE, "asked"))
+
+@t
+def an_attached_file_keeps_its_own_extension_and_stays_while_used():
+    r = AB.new(data(lessons=[dict(key=lk(APUB, 8), needed=True)]), APUB, EVE, "asked"); i = r["id"]
+    k5, k8 = lk(APUB, 5), lk(APUB, 8)
+    f = FL.save(i, "notes.pdf", b"%PDF")
+    AB.set_work(i, k5, dict(text="", link="", files=[dict(f, name="x.html")]), EVE)
+    AB.set_work(i, k8, dict(text="", link="", files=[dict(f, name="y.exe")]), EVE)
+    got = AB.load(i)["lessons"]
+    assert got[0]["work"]["files"][0]["name"] == "x.pdf" and got[1]["work"]["files"][0]["name"] == "y.pdf", got
+    AB.set_work(i, k5, dict(text="", link="", files=[]), EVE)
+    assert FL.path(i, f["id"]), "still on the other lesson"
+    AB.set_work(i, k8, dict(text="", link="", files=[]), EVE)
+    assert FL.path(i, f["id"]) is None
+    AB.cancel(i, "x", EVE, APUB)
+
+@t
+def needed_again_checks_the_overlap_too():
+    first = AB.new(data(periods=[5, 6]), APUB, GRACE, "planned")
+    k = lk(APUB, 5)
+    AB.not_needed(first["id"], k, "covered", GRACE, APUB)
+    second = AB.new(data(periods=[5, 6]), APUB, EVE, "asked")
+    refuses("Ms Evelyn Koh has already sent an absence for Ms Evelyn Koh on Tue 13 Oct.", lambda: AB.needed_again(first["id"], k, GRACE, APUB))
+    AB.cancel(second["id"], "x", EVE, APUB)
+    AB.needed_again(first["id"], k, GRACE, APUB)
+    AB.cancel(first["id"], "x", GRACE, APUB)
+
+@t
+def times_are_school_time_with_the_offset():
+    r = AB.new(data(), APUB, EVE, "asked")
+    assert r["at"].endswith("+08:00"), r["at"]
+    AB.cancel(r["id"], "x", EVE, APUB)
+    assert AB.load(r["id"])["cancelled"]["at"].endswith("+08:00")
+
+@t
+def week_and_term_leave_out_the_chosen_lessons_own_periods():
+    pub = world(); ls = lesson_of(pub)
+    recs = [rec(EVE, [rl("2026-10-13", 5, 2, MAYA, key=ls["key"])], periods=[5, 6])]
+    m = [x for g in FR.free_then(pub, settings(), recs, ls, EVE)["groups"] for x in g["people"] if x["name"] == MAYA][0]
+    n = [x for g in FR.free_then(pub, settings(), [], ls, EVE)["groups"] for x in g["people"] if x["name"] == MAYA][0]
+    assert (m["week"], m["term"], m["today"]) == (n["week"], n["term"], n["today"]) == (2, 0, 0), (m, n)
+
 print(f"{COUNT} relief request tests passed")
