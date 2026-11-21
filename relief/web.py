@@ -6,15 +6,19 @@ Every route answers 401 {"error": "Please sign in again."} without a person sign
 NO_PUB when nothing is published, 403 {"error": sentence} without the right and 400 {"error": sentence} on a refusal.
 The absence reason reaches only the absent teacher, whoever planned it, relief.plan and relief.team: every route that
 answers a record or one of its files asks _record first, and the lists are the caller's own, the caller's planned ones,
-or (relief.team) everything.
+or (relief.team) everything. The remarks are for the relief team: a record sent to someone who is only its absent
+teacher (not its sender, not relief.plan, not relief.team) leaves them out (_out).
 
 Hand-over to the accounts work: every permission question here goes through has(right), passed in with
 init(has=..., me=..., role=...); app.py passes relief_has. When the accounts work merges, init(has=...) receives its
-`has`: the right names (relief, relief.plan, relief.team, relief.settings, relief.save) are already the same.
+`has`: the right names (relief, relief.plan, relief.team, relief.settings, relief.save) are already the same. The relief
+team's right to change any absence (not needed, needed again, cancel) is asked here too, has("relief.team"), and passed
+into relief.absences as team=...; relief.absences never reads the settings' team list itself.
 
 Bodies: POST /api/relief/absences takes relief.absences.new's fields (teacher: yourself when left out; dates, periods,
 reason, reason_text, remarks, reporting_officer, lessons=[{key, needed, relief, work}]); PUT …/work takes the work
-{text, link, files: [{id, name}]}; POST …/not-needed and …/cancel take {why}; PUT …/relief takes {relief: a name, or
+{text, link, files: [{id, name}], known: [the file ids the page started from]} (a missing or other body is refused,
+never read as "no work"); POST …/not-needed and …/cancel take {why}; PUT …/relief takes {relief: a name, or
 null to take the choice off}; POST …/files takes one file in the multipart field "file"; POST /api/relief/absences/seen
 takes {at}: the as_of the What's in list answered (now when left out). Periods are 0-based, as in the records."""
 import csv, datetime, io, os, threading
@@ -43,6 +47,7 @@ GONE = "That absence is not there any more."
 NO_FILE = "That file is not there any more."
 PERIODS = "Choose the periods again."
 DATES = "Choose the dates again."
+ENTIRE = "Entire Class"
 COLUMNS = ["Date", "Absent", "Class / group", "Periods", "Time", "Relief teacher", "Remarks", "Set by"]
 SEEN = os.path.join(store.DATA, "relief", "seen.json")
 _SEEN_LOCK = threading.Lock()
@@ -92,9 +97,16 @@ def _cal(pub):
     return _settings.load(pub)["calendar"]
 
 
-def _views(records, pub):
+def _out(r, pub, me, cal=None):
+    """the record as it is sent: lessons marked changed (matches_now), the remarks left out for someone who is only its absent teacher"""
+    v = _absences.matches_now(r, pub, cal if cal is not None else _cal(pub))
+    if me == r.get("teacher") and me != r.get("by") and not _sees_all(): v.pop("remarks", None)
+    return v
+
+
+def _views(records, pub, me):
     cal = _cal(pub)
-    return [_absences.matches_now(r, pub, cal) for r in records]
+    return [_out(r, pub, me, cal) for r in records]
 
 
 def _on_staff(pub, settings, name):
@@ -148,7 +160,8 @@ def _periods(pub):
 @bp.get("/api/relief/lessons")
 def lessons():
     """a teacher's lessons on the dates (a,b) and periods (from, to), with every period of the day ({p, start, end}) for the
-    forms' "Some periods"; relief for yourself, relief.plan for anyone else"""
+    forms' "Some periods"; each lesson's others are its other teachers who are not away then (a shared lesson needs no relief
+    only while one of them is there); relief for yourself, relief.plan for anyone else"""
     pub, me, err = _gate()
     if err: return err
     teacher = request.args.get("teacher") or me
@@ -158,7 +171,9 @@ def lessons():
         _on_staff(pub, settings, teacher)
         dates = _absences._iso_dates([x.strip() for x in (request.args.get("dates") or "").split(",") if x.strip()], _lessons.today())
         periods = _period_range(pub, request.args.get("from"), request.args.get("to"))
-        by_date = {d.isoformat(): [_iso(x) for x in _lessons.on_date(pub, settings["calendar"], teacher, d, periods=periods)] for d in dates}
+        records = _absences.all_records()
+        by_date = {d.isoformat(): [_iso(dict(x, others=_free.there_then(records, x["others"], d, x["p"], x["n"])))       # as new() decides
+                                   for x in _lessons.on_date(pub, settings["calendar"], teacher, d, periods=periods)] for d in dates}
         every = _periods(pub)
     except ValueError as e: return _refusal(e)
     return jsonify(lessons=[x for v in by_date.values() for x in v], by_date=by_date, periods=every)
@@ -206,21 +221,21 @@ def create():
     try: r = _absences.new(dict(data, teacher=teacher), pub, me, how, may_choose=plan)
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "sending an absence")
-    return jsonify(_absences.matches_now(r, pub, _cal(pub)))
+    return jsonify(_out(r, pub, me))
 
 
 @bp.get("/api/relief/absences/mine")
 def mine():
     pub, me, err = _gate()
     if err: return err
-    return jsonify(absences=_views(_absences.for_teacher(me), pub))
+    return jsonify(absences=_views(_absences.for_teacher(me), pub, me))
 
 
 @bp.get("/api/relief/absences/planned")
 def planned():
     pub, me, err = _gate("relief.plan", PLAN_ONLY)
     if err: return err
-    return jsonify(absences=_views(_absences.planned_by(me), pub))
+    return jsonify(absences=_views(_absences.planned_by(me), pub, me))
 
 
 def _seen_at(name):
@@ -236,7 +251,7 @@ def whats_in():
     if err: return err
     since, as_of = _seen_at(me), _clock().isoformat()
     out = []
-    for v in _views(_absences.all_records(), pub):
+    for v in _views(_absences.all_records(), pub, me):
         at = _time(v.get("at"))
         v["new"] = since is None or at is None or at >= since
         out.append(v)
@@ -266,7 +281,7 @@ def one(id):
     if err: return err
     r, err = _record(id, me)
     if err: return err
-    return jsonify(_absences.matches_now(r, pub, _cal(pub)))
+    return jsonify(_out(r, pub, me))
 
 
 def _change(id, do, right=None, refused=None):
@@ -279,7 +294,7 @@ def _change(id, do, right=None, refused=None):
     try: r = do(r, me, pub, _body())
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "changing an absence")
-    return jsonify(_absences.matches_now(r, pub, _cal(pub)))
+    return jsonify(_out(r, pub, me))
 
 
 @bp.post("/api/relief/absences/<id>/acknowledge")
@@ -289,17 +304,18 @@ def acknowledge(id):
 
 @bp.put("/api/relief/absences/<id>/lessons/<path:key>/work")
 def work(id, key):
+    """a body that is not the work with its files and known (none, not JSON, {}) is refused by set_work: it never clears the work"""
     return _change(id, lambda r, me, pub, b: _absences.set_work(r["id"], key, b, me))
 
 
 @bp.post("/api/relief/absences/<id>/lessons/<path:key>/not-needed")
 def not_needed(id, key):
-    return _change(id, lambda r, me, pub, b: _absences.not_needed(r["id"], key, b.get("why"), me, pub))
+    return _change(id, lambda r, me, pub, b: _absences.not_needed(r["id"], key, b.get("why"), me, team=_has("relief.team")))
 
 
 @bp.post("/api/relief/absences/<id>/lessons/<path:key>/needed")
 def needed(id, key):
-    return _change(id, lambda r, me, pub, b: _absences.needed_again(r["id"], key, me, pub))
+    return _change(id, lambda r, me, pub, b: _absences.needed_again(r["id"], key, me, team=_has("relief.team")))
 
 
 def _choose(r, key, me, pub, b):
@@ -315,7 +331,7 @@ def relief(id, key):
 
 @bp.post("/api/relief/absences/<id>/cancel")
 def cancel(id):
-    return _change(id, lambda r, me, pub, b: _absences.cancel(r["id"], b.get("why"), me, pub))
+    return _change(id, lambda r, me, pub, b: _absences.cancel(r["id"], b.get("why"), me, team=_has("relief.team")))
 
 
 # ---- work files
@@ -360,6 +376,13 @@ def _day(v, default):
     except ValueError: raise ValueError(DATES)
 
 
+def _class_group(x):
+    """'1B, 1A Maths (G1)': the classes and subject, and the group unless it is the whole class (as the pages' title)"""
+    g = x.get("group") or ""
+    head = " ".join(v for v in (", ".join(x.get("classes") or []), x.get("subject") or "") if v)
+    return head + (f" ({g})" if g and g != ENTIRE else "")
+
+
 def _periods_text(x):
     p, n = int(x["p"]), int(x.get("n") or 1)
     return f"P{p + 1}" if n == 1 else f"P{p + 1}–P{p + n}"
@@ -388,7 +411,7 @@ def planned_csv():
     buf = io.StringIO(); w = csv.writer(buf)
     w.writerow(COLUMNS)
     for d, p, teacher, x, r in rows:
-        group = " ".join(v for v in (", ".join(x.get("classes") or []), x.get("subject") or "", x.get("group") or "") if v)
+        group = _class_group(x)
         time = f"{x['start']}–{x['end']}" if x.get("start") and x.get("end") else ""
         w.writerow([_cell(v) for v in (d.isoformat(), teacher, group, _periods_text(x), time, x.get("relief") or "Not chosen yet",
                                        r.get("remarks") or "", r.get("by") or "")])

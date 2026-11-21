@@ -2,6 +2,7 @@
 import datetime
 
 from exams.days import rule_on_day
+from ttgen.spec import family
 from relief import lessons as _lessons
 from relief.calendar import school_day, term_of, week_of
 from relief.people import people as _people
@@ -54,6 +55,12 @@ def _absent_then(records, name, iso, p, n):
     return False
 
 
+def there_then(records, names, date, p, n):
+    """the names (a lesson's other teachers) not away on date (a date or an ISO string) at any of the periods p..p+n-1"""
+    iso = _iso(date)
+    return [x for x in names if not _absent_then(records, x, iso, int(p), int(n or 1))]
+
+
 def _chosen_then(records, name, iso, p, n, key, absent):
     """relief already chosen for name on another lesson overlapping this one (the same lesson of the same absence does not count)"""
     for r in records:
@@ -74,7 +81,8 @@ def _rule_hits(rule, day, p, n):
 
 
 def free_then(pub, settings, records, lesson, absent):
-    """the people free for the lesson (a dict from lessons.on_date) of the absent teacher:
+    """the people free for the lesson (a dict from lessons.on_date) of the absent teacher; "teaches {subject}" compares
+    subject families (ttgen.spec.family: Mathematics G2 teaches a Mathematics G3 lesson), the title keeps the lesson's own subject:
     -> dict(groups=[dict(title, people=[dict(name, depts, subjects, fat, week, today, term, marks, over)])], teaching=[names])"""
     cal = settings.get("calendar") or {}
     lim = settings.get("limits") or {}
@@ -128,6 +136,7 @@ def free_then(pub, settings, records, lesson, absent):
         title = "Other departments"
         mine = [d for d in absent_depts if d in x["depts"]]
         if mine:
-            title = next((f"{d} · teaches {subject}" for d in mine if subject in x["subjects"]), f"{mine[0]} · other subjects")
+            same = family(subject) in {family(s) for s in x["subjects"]}
+            title = f"{mine[0]} · teaches {subject}" if same else f"{mine[0]} · other subjects"
         buckets.setdefault(title, []).append(x)
     return dict(groups=[dict(title=t, people=buckets[t]) for t in titles if buckets.get(t)], teaching=sorted(teaching))

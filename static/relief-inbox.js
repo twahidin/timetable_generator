@@ -2,8 +2,10 @@
 /* What's in (/relief#inbox), for the relief team (me.can_team), read-only: every absence, newest first, with when it came
    in, who sent it and how, for whom and when, the reason, whether the absent teacher has acknowledged (when someone else
    planned it), how many lessons have work and how many have a relief teacher; cancelled ones dimmed. Views: Coming up,
-   Today, Cancelled. "new" = came in since this person last looked. The list is read with a GET, which never writes;
-   once it is shown, the page posts the list's as_of to /api/relief/absences/seen. */
+   Today, Earlier (every date past, not cancelled), Cancelled: every absence is in one of them. "new" = came in since this
+   person last looked, counted over the absences the views show, and each view says how many of its own are new. The
+   list is read with a GET, which never writes; once it is shown, the page posts the list's as_of to
+   /api/relief/absences/seen. */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day;
   const $ = (s, el = document) => el.querySelector(s);
@@ -12,6 +14,7 @@
   const VIEWS = [
     ["coming", "Coming up", r => !r.cancelled && lastDate(r) >= RF.today(), "Nothing coming up."],
     ["today", "Today", r => !r.cancelled && (r.dates || []).includes(RF.today()), "No one is away today."],
+    ["earlier", "Earlier", r => !r.cancelled && lastDate(r) < RF.today(), "Nothing earlier."],
     ["cancelled", "Cancelled", r => !!r.cancelled, "Nothing cancelled."],
   ];
   const hasWork = x => { const w = x.work || {}; return !!(w.text || w.link || (w.files || []).length); };
@@ -54,8 +57,10 @@
       box.innerHTML = I.err ? `<div class="card"><p>${R.say(I.err)}</p><p><button type="button" data-in="reload">Try again</button></p></div>` : `<div class="card"><p class="muted">Loading…</p></div>`;
       return;
     }
-    const v = VIEWS.find(x => x[0] === I.view) || VIEWS[0], rows = I.list.filter(v[2]), fresh = I.list.filter(r => r.new).length;
-    const seg = VIEWS.map(([k, label, f]) => `<button type="button" data-in="view" data-v="${k}" class="${k === v[0] ? "on" : ""}" aria-pressed="${k === v[0] ? "true" : "false"}">${esc(label)} (${I.list.filter(f).length})</button>`).join("");
+    const v = VIEWS.find(x => x[0] === I.view) || VIEWS[0], rows = I.list.filter(v[2]);
+    const fresh = I.list.filter(r => r.new && VIEWS.some(w => w[2](r))).length;   /* only what a view shows counts as new */
+    const count = f => { const all = I.list.filter(f), n = all.filter(r => r.new).length; return n ? `${all.length} · ${n} new` : String(all.length); };
+    const seg = VIEWS.map(([k, label, f]) => `<button type="button" data-in="view" data-v="${k}" class="${k === v[0] ? "on" : ""}" aria-pressed="${k === v[0] ? "true" : "false"}">${esc(label)} (${esc(count(f))})</button>`).join("");
     const about = [I.asOf ? `As of ${stamp(I.asOf, true)}` : "", fresh ? `${fresh} new since you last looked` : ""].filter(Boolean).join(" · ");
     box.innerHTML = `<div class="card">
       <div class="ab-top"><div><h2>What's in</h2><div class="small muted">${esc(about)}</div></div>
@@ -63,7 +68,7 @@
       ${I.err ? `<p>${R.say(I.err)}</p>` : ""}
       ${rows.length ? `<div class="tablewrap"><table class="rtable inbox"><thead><tr><th>Submitted</th><th>By</th><th>For</th><th>When</th><th>Reason</th><th>Absent teacher</th><th>Work</th><th>Relief</th></tr></thead>
         <tbody>${rows.map(row).join("")}</tbody></table></div>` : `<p class="muted">${esc(v[3])}</p>`}
-      <div class="note">Picking and approving relief teachers come in the next stage.</div></div>`;
+      <div class="note">The app's picks for open lessons, and approving them, come in the next stage.</div></div>`;
   }
 
   async function load() {

@@ -3,10 +3,11 @@
    small helpers every relief page uses (escaping, dates, periods).
 
    ReliefForm.lessons(container, lessons, opts) draws the lessons (as /api/relief/lessons gives them), each with its work:
-   a work box, a link box and "Add a file". A shared lesson (others teach it too) shows "{others} is there: no relief
-   needed" with "Ask for cover anyway". What is typed is kept for each lesson key, so calling it again (other dates,
-   other periods) keeps the work of every lesson still listed. opts: workLabel (the work box's label), empty (the line
-   when there are no lessons), side(lesson) and extra(lesson) (HTML beside the lesson's name and under its work; escape
+   a work box, a link box and "Add a file". A shared lesson (x.others: its other teachers who are not away then, as
+   /api/relief/lessons gives them) shows "{others} is there: no relief needed" with "Ask for cover anyway"; with nobody
+   there it is an ordinary lesson to cover. What is typed is kept for each lesson key, so calling it again (other dates,
+   other periods) keeps the work of every lesson still listed, and a lesson whose cover the person has not chosen follows
+   the new list's others. opts: workLabel (the work box's label), empty (the line when there are no lessons), side(lesson) and extra(lesson) (HTML beside the lesson's name and under its work; escape
    what goes in them with ReliefForm.esc), onChange() (called on every edit).
    ReliefForm.read(container) gives [{key, needed, work: {text, link, files: []}}] for POST /api/relief/absences;
    ReliefForm.needed(container, key) says whether one listed lesson is to be covered.
@@ -106,7 +107,9 @@ window.ReliefForm = (function () {
     f.list = Array.isArray(list) ? list : [];
     f.opts = opts || {};
     for (const x of f.list) {
-      if (!f.st.has(x.key)) f.st.set(x.key, { needed: !(Array.isArray(x.others) && x.others.length), text: "", link: "", files: [], err: "" });
+      const shared = Array.isArray(x.others) && x.others.length > 0, s = f.st.get(x.key);
+      if (!s) f.st.set(x.key, { needed: !shared, chosen: false, text: "", link: "", files: [], err: "" });
+      else if (!s.chosen) s.needed = !shared;   /* until the person says, it follows whether someone is there */
     }
     draw(container, f);
   }
@@ -181,8 +184,8 @@ window.ReliefForm = (function () {
       const what = b.dataset.rf;
       if (what === "add") { const input = r.querySelector('input[data-rf="file"]'); if (input) input.click(); return; }
       if (what === "unfile") { s.files.splice(Number(b.dataset.j), 1); s.err = ""; changed(); redrawRow(container, f, r, '[data-rf="add"]'); return; }
-      if (what === "cover") { s.needed = true; changed(); redrawRow(container, f, r, '[data-rf="text"]'); return; }
-      if (what === "nocover") { s.needed = false; changed(); redrawRow(container, f, r, '[data-rf="cover"]'); return; }
+      if (what === "cover") { s.needed = true; s.chosen = true; changed(); redrawRow(container, f, r, '[data-rf="text"]'); return; }
+      if (what === "nocover") { s.needed = false; s.chosen = true; changed(); redrawRow(container, f, r, '[data-rf="cover"]'); return; }
     });
   }
 

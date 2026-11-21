@@ -19,6 +19,8 @@ NOT_YOURS = "You cannot change this absence."
 CANCELLED = "This absence was cancelled."
 NO_FILES_YET = "Add files after the absence is sent."
 SAY_WHY = "Say why in a line."
+PAST_LESSON = "This lesson is in the past."
+PAST_ABSENCE = "This absence is in the past."
 MAX_DATES, MAX_TEXT, MAX_LINK = 10, 2000, 500
 
 
@@ -69,10 +71,6 @@ def _save(r):
 
 def _pub(pub):
     return pub if pub is not None else store.published()
-
-
-def _team(pub):
-    return _settings.load(pub)["team"]
 
 
 def _check_work(work, allow_files=False):
@@ -152,20 +150,24 @@ def new(data, pub, by, how, may_choose=False) -> dict:
     for x in asked:
         if x.get("key") not in mine: raise ValueError(CHANGED)
         asks[x["key"]] = x
-    built = []
-    for key, x in mine.items():
-        a = asks.get(key, {})
-        if x["others"]:      # a shared lesson needs no relief unless the client says so
-            needed = a.get("needed") is True
-            not_needed = None if needed else dict(by="app", why=f"{' and '.join(x['others'])} is there")
-        else:
-            needed = a.get("needed") is not False
-            not_needed = None if needed else dict(by=by, why="Not needed")
-        built.append(dict(x, date=x["date"].isoformat(), needed=needed, not_needed=not_needed, relief=None, relief_by=None,
-                          work=dict(text="", link="", files=[]), _ask=a))
-    if not any(x["needed"] for x in built): raise ValueError("There are no lessons to cover in that time.")
     with _LOCK:
         records = all_records()
+        built = []
+        for key, x in mine.items():
+            a = asks.get(key, {})
+            # a shared lesson needs no relief unless the client says so, but only while one of its other teachers is there:
+            # others keeps those not away then, and with none there it is an ordinary lesson (needed unless the client says not).
+            # An absence sent earlier that said "{them} is there" is left as it is; this one covers the lesson.
+            there = _free.there_then(records, x["others"], x["date"], x["p"], x["n"])
+            if there:
+                needed = a.get("needed") is True
+                not_needed = None if needed else dict(by="app", why=f"{' and '.join(there)} is there")
+            else:
+                needed = a.get("needed") is not False
+                not_needed = None if needed else dict(by=by, why="Not needed")
+            built.append(dict(x, date=x["date"].isoformat(), others=there, needed=needed, not_needed=not_needed, relief=None, relief_by=None,
+                              work=dict(text="", link="", files=[]), _ask=a))
+        if not any(x["needed"] for x in built): raise ValueError("There are no lessons to cover in that time.")
         _no_overlap(records, teacher, [x for x in built if x["needed"]])
         pending = dict(teacher=teacher, dates=[d.isoformat() for d in dates], periods=periods, cancelled=None, lessons=[])
         if not may_choose and any(x["needed"] and x["_ask"].get("relief") for x in built):
@@ -206,6 +208,17 @@ def _owner(r, by):
     return by == r["teacher"] or (r["how"] == "planned" and by == r["by"])
 
 
+def _past(x):
+    """refuse a change to a lesson dated before today (the school's date)"""
+    if datetime.date.fromisoformat(x["date"]) < _lessons.today(): raise ValueError(PAST_LESSON)
+
+
+def _ids(v):
+    """a list of file ids (strings), or WRONG"""
+    if not isinstance(v, list) or len(v) > 50 or not all(isinstance(f, str) for f in v): raise ValueError(WRONG)
+    return set(v)
+
+
 def acknowledge(id, by):
     with _LOCK:
         r = _editable(id)
@@ -217,10 +230,16 @@ def acknowledge(id, by):
 
 
 def set_work(id, key, work, by):
+    """work = {text, link, files: [{id, name}], known: [the file ids on the lesson when the caller's page read it]}; a file on
+    the lesson now that is not in known (someone else added it meanwhile) is kept; a file deleted is one the caller knew,
+    took off, and no lesson of the absence lists any more"""
+    if not isinstance(work, dict) or not isinstance(work.get("files"), list): raise ValueError(WRONG)
+    known = _ids(work.get("known"))
     with _LOCK:
         r = _editable(id)
         if not _owner(r, by): raise ValueError(NOT_YOURS)
         x = _lesson(r, key)
+        _past(x)
         w = _check_work(work)
         if len(w["files"]) > _files.PER_LESSON: raise ValueError("A lesson can have at most 5 files.")
         kept = []
@@ -228,41 +247,46 @@ def set_work(id, key, work, by):
             fid = f.get("id") if isinstance(f, dict) else f
             p = _files.path(id, fid)
             if not p: raise ValueError(CHANGED)
+            if fid in [k["id"] for k in kept]: continue
             old = next((o for o in x["work"]["files"] if o["id"] == fid), None)
             name = old["name"] if old else _files.clean_name(f.get("name") if isinstance(f, dict) else "")
             ext = os.path.splitext(p)[1]      # the name always ends with the stored file's own extension
-            base = os.path.splitext(name)[0] if os.path.splitext(name)[1] else name
-            kept.append(dict(id=fid, name=(base + ext)[:100] if not name.lower().endswith(ext.lower()) else name, size=os.path.getsize(p)))
-        before = {o["id"] for l in r["lessons"] for o in l["work"]["files"]}
-        w["files"] = kept
-        x["work"] = w
+            kept.append(dict(id=fid, name=name if name.lower().endswith(ext.lower()) else _files.fit(name, ext), size=os.path.getsize(p)))
+        sent = {k["id"] for k in kept}
+        kept += [o for o in x["work"]["files"] if o["id"] not in known and o["id"] not in sent]
+        if len(kept) > _files.PER_LESSON: raise ValueError("A lesson can have at most 5 files.")
+        before = {o["id"] for o in x["work"]["files"]}
+        x["work"] = dict(text=w["text"], link=w["link"], files=kept)
         _save(r)
         still = {o["id"] for l in r["lessons"] for o in l["work"]["files"]}
         for fid in before - still: _files.delete(id, fid)
     return r
 
 
-def _may_change(r, by, pub):
-    if not _owner(r, by) and by not in _team(_pub(pub)): raise ValueError(NOT_YOURS)
+def _may_change(r, by, team):
+    """the absent teacher, its planner, or (team: the caller has relief.team, asked by relief/web.py through has) the relief team"""
+    if not _owner(r, by) and not team: raise ValueError(NOT_YOURS)
 
 
-def not_needed(id, key, why, by, pub=None):
+def not_needed(id, key, why, by, *, team=False):
     why = why.strip() if isinstance(why, str) else ""
     with _LOCK:
         r = _editable(id)
-        _may_change(r, by, pub)
+        _may_change(r, by, team)
         x = _lesson(r, key)
+        _past(x)
         if not 1 <= len(why) <= 200: raise ValueError(SAY_WHY)
         x["needed"], x["not_needed"], x["relief"], x["relief_by"] = False, dict(by=by, why=why), None, None
         _save(r)
     return r
 
 
-def needed_again(id, key, by, pub=None):
+def needed_again(id, key, by, *, team=False):
     with _LOCK:
         r = _editable(id)
-        _may_change(r, by, pub)
+        _may_change(r, by, team)
         x = _lesson(r, key)
+        _past(x)
         _no_overlap([o for o in all_records() if o["id"] != r["id"]], r["teacher"], [x])
         x["needed"], x["not_needed"] = True, None
         _save(r)
@@ -275,6 +299,7 @@ def choose(id, key, relief_name, by, pub):
     with _LOCK:
         r = _editable(id)
         x = _lesson(r, key)
+        _past(x)
         if not x["needed"]: raise ValueError("This lesson does not need relief.")
         if not relief_name:
             x["relief"], x["relief_by"] = None, None
@@ -287,11 +312,13 @@ def choose(id, key, relief_name, by, pub):
     return r
 
 
-def cancel(id, why, by, pub=None):
+def cancel(id, why, by, *, team=False):
+    """refused once every date of the absence is before today; an absence with a date still to come is cancelled whole"""
     why = why.strip() if isinstance(why, str) else ""
     with _LOCK:
         r = _editable(id)
-        _may_change(r, by, pub)
+        _may_change(r, by, team)
+        if all(datetime.date.fromisoformat(d) < _lessons.today() for d in r["dates"]): raise ValueError(PAST_ABSENCE)
         if not 1 <= len(why) <= 200: raise ValueError(SAY_WHY)
         r["cancelled"] = dict(at=_now(), by=by, why=why)
         _save(r)
@@ -299,7 +326,9 @@ def cancel(id, why, by, pub=None):
 
 
 def matches_now(record, pub, cal):
-    """the record with each lesson marked changed when the teacher no longer has it on the published timetable"""
-    out = dict(record)
-    out["lessons"] = [dict(x, changed=not _lessons.still_there(pub, cal, record["teacher"], x)) for x in record["lessons"]]
+    """the record with each lesson marked changed when the teacher no longer has it on the published timetable; a lesson
+    dated before today is not read again (changed False): it is history, and What's in stays quick over a year of records"""
+    today, out = _lessons.today(), dict(record)
+    out["lessons"] = [dict(x, changed=datetime.date.fromisoformat(x["date"]) >= today and not _lessons.still_there(pub, cal, record["teacher"], x))
+                      for x in record["lessons"]]
     return out

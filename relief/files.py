@@ -11,11 +11,19 @@ WRONG_KIND = "Send a PDF, Word, PowerPoint, Excel or picture file."
 TOO_BIG = "A file can be at most 10 MB."
 
 
+def fit(name, ext=None):
+    """name with the extension ext (its own when None) in place of its own, at most 100 characters: the part before the
+    extension is cut, never the extension"""
+    base, own = os.path.splitext(name)
+    ext = own if ext is None else ext
+    return base[:100 - len(ext)] + ext if len(ext) < 100 else (base + ext)[:100]
+
+
 def clean_name(name):
-    """letters, digits, spaces and . - _ ( ) only; at most 100 characters"""
+    """letters, digits, spaces and . - _ ( ) only; at most 100 characters, the extension kept"""
     name = os.path.basename(str(name or "").replace("\\", "/"))
     name = re.sub(r"[^\w .\-()]", "", name, flags=re.ASCII).strip()
-    return name[:100] or "file"
+    return fit(name) or "file"
 
 
 def _folder(absence_id):

@@ -78,10 +78,12 @@
 
   /* ================================================================ absences, as cards */
   /* R.absences(opts) draws absences as cards in a box: each with its lessons, their relief teacher and their work. The
-     work of an absence that is not cancelled can be changed by its absent teacher or its planner: what is typed is kept
-     in drafts (absence id -> lesson key -> work) until it is saved, so a redraw never loses it. A file is sent at once and
-     attached when the work is saved. My absences and Planned by me (relief-plan.js) each have one. opts: load() -> {ok,
-     data: [records]} or a refusal as api() gives it; empty (HTML when there are none); show(r) (which records are drawn;
+     work of an absence that is not cancelled can be changed by its absent teacher or its planner, on lessons dated today
+     or later (a past lesson is shown as it was, without its buttons; an absence whose dates are all past can only be
+     acknowledged): what is typed is kept in drafts (absence id -> lesson key -> work, with known: the file ids the
+     lesson had when the draft began) until it is saved, so a redraw never loses it. A save sends known, so a file
+     someone else added meanwhile is kept. A file is sent at once and attached when the work is saved. My absences and
+     Planned by me (relief-plan.js) each have one. opts: load() -> {ok, data: [records]} or a refusal as api() gives it; empty (HTML when there are none); show(r) (which records are drawn;
      all when left out); side(r, x) (HTML beside a lesson to cover, in place of "Relief: …"; escape what goes in it);
      extra(r, x) (HTML under that lesson); painted() (after each drawing). It gives {mount(box), load(), dirty(), list(),
      error(), find(id), put(record), paint(id, focus), paintAll()}. */
@@ -120,7 +122,7 @@
 
     function draftOf(r, x) {
       const d = M.drafts.get(r.id), w = x.work || {};
-      return (d && d.get(x.key)) || { text: w.text || "", link: w.link || "", files: (w.files || []).slice() };
+      return (d && d.get(x.key)) || { text: w.text || "", link: w.link || "", files: (w.files || []).slice(), known: (w.files || []).map(f => f.id) };
     }
 
     function editDraft(r, x) {   /* the draft of one lesson, made from its saved work on the first change */
@@ -130,9 +132,9 @@
       return d.get(x.key);
     }
 
-    function changedWork(r, k, w) {   /* a draft that differs from the saved work, on a lesson that still needs relief */
+    function changedWork(r, k, w) {   /* a draft that differs from the saved work, on a lesson that still needs relief, today or later */
       const x = lessonOf(r, k), s = (x && x.work) || {}, ids = f => (f || []).map(o => o.id).join(" ");
-      return !!(x && x.needed && (w.text !== (s.text || "") || w.link !== (s.link || "") || ids(w.files) !== ids(s.files)));
+      return !!(x && x.needed && x.date >= RF.today() && (w.text !== (s.text || "") || w.link !== (s.link || "") || ids(w.files) !== ids(s.files)));
     }
 
     function dirtyOf(r) {
@@ -153,14 +155,15 @@
         return date + lessonRow(r, x, i, editable);
       }).join("");
       let acts = "";
-      if (editable) {
-        const asking = M.ask && M.ask.id === r.id && M.ask.key === null;
-        const cancel = asking
+      const live = (r.dates || []).some(d => d >= RF.today());   /* every date past: nothing left to change, only to acknowledge */
+      if (editable && (live || needAck(r))) {
+        const asking = live && M.ask && M.ask.id === r.id && M.ask.key === null;
+        const cancel = !live ? "" : asking
           ? `<div class="ab-ask"><label for="why-${esc(r.id)}">Cancel this absence? Say why in a line.</label><input id="why-${esc(r.id)}" data-why="1" maxlength="200" value="${esc(M.ask.why)}" autocomplete="off">
               <button type="button" class="danger" data-act="cancel-go" ${busy ? "disabled" : ""}>Cancel the absence</button><button type="button" data-act="ask-off">Keep it</button></div>`
           : `<button type="button" class="danger" data-act="cancel-ask" ${busy ? "disabled" : ""}>Not needed at all: cancel</button>`;
         const main = needAck(r)
-          ? `<button type="button" class="primary" data-act="ack" ${busy ? "disabled" : ""}>Acknowledge and save the work</button>`
+          ? `<button type="button" class="primary" data-act="ack" ${busy ? "disabled" : ""}>${live ? "Acknowledge and save the work" : "Acknowledge"}</button>`
           : `<button type="button" class="primary" data-act="save" ${busy || !dirtyOf(r) ? "disabled" : ""}>Save the work</button>`;
         acts = asking ? `${cancel}<div class="bar">${main}${say(M.msg.get(r.id))}</div>` : `<div class="bar">${cancel}<span class="grow"></span>${main}</div><div class="bar">${say(M.msg.get(r.id))}</div>`;
       } else if (M.msg.get(r.id)) acts = `<div class="bar">${say(M.msg.get(r.id))}</div>`;
@@ -171,7 +174,7 @@
     }
 
     function lessonRow(r, x, i, editable) {
-      const cover = x.needed && !r.cancelled;
+      const cover = x.needed && !r.cancelled, now = editable && x.date >= RF.today();   /* a past lesson keeps what it has */
       const side = !cover ? "" : opts.side ? opts.side(r, x) || ""
         : x.relief ? `Relief: <b>${esc(x.relief)}</b>` : `Relief: <span class="muted">the relief team will assign</span>`;
       const changed = x.changed && !r.cancelled && x.date >= RF.today() ? `<div class="ab-changed">The lesson has changed since this was planned</div>` : "";
@@ -179,8 +182,8 @@
       let body;
       if (!x.needed) {
         const nn = x.not_needed || {}, line = nn.by === "app" ? `${nn.why}: no relief needed` : `Not needed: ${nn.why || ""}`;
-        body = `<div class="ab-nn"><span class="muted">${esc(line)}</span>${editable && !r.cancelled ? `<button type="button" class="small" data-act="needed" ${M.busy.has(r.id) ? "disabled" : ""}>Needed after all</button>` : ""}</div>`;
-      } else body = editable ? workEdit(r, x, i) : workRead(r, x);
+        body = `<div class="ab-nn"><span class="muted">${esc(line)}</span>${now && !r.cancelled ? `<button type="button" class="small" data-act="needed" ${M.busy.has(r.id) ? "disabled" : ""}>Needed after all</button>` : ""}</div>`;
+      } else body = now ? workEdit(r, x, i) : workRead(r, x);
       const extra = cover && opts.extra ? opts.extra(r, x) || "" : "";
       return `<div class="rl" data-key="${esc(x.key)}">${head}${changed}${body}${extra}</div>`;
     }
@@ -268,7 +271,7 @@
       const d = M.drafts.get(r.id);
       if (!d) return [];
       return [...d.entries()].filter(([k, w]) => changedWork(r, k, w)).map(([k, w]) => async () => {
-        const res = await api(`/api/relief/absences/${enc(r.id)}/lessons/${enc(k)}/work`, json("PUT", { text: w.text, link: w.link, files: w.files.map(f => ({ id: f.id, name: f.name })) }));
+        const res = await api(`/api/relief/absences/${enc(r.id)}/lessons/${enc(k)}/work`, json("PUT", { text: w.text, link: w.link, files: w.files.map(f => ({ id: f.id, name: f.name })), known: (w.known || []).slice() }));
         if (res.ok) { d.delete(k); M.lerr.delete(lkey(r.id, k)); if (!d.size) M.drafts.delete(r.id); }
         else M.lerr.set(lkey(r.id, k), { text: res.error, bad: true });   /* the refusal shows on its lesson too */
         return res;
@@ -427,8 +430,9 @@
   const A = { pane: null, day: "today", picked: [], away: "whole", from: null, to: null, reason: "", text: "", ro: "", people: null, perr: null,
               periods: [], readFor: "", lessons: [], lerr: null, loading: false, seq: 0, busy: false, msg: null, dirty: false };
 
-  const roRemembered = () => { try { return localStorage.getItem("relief.ro") || ""; } catch (e) { return ""; } };
-  const roRemember = v => { try { localStorage.setItem("relief.ro", v); } catch (e) { /* private window: not remembered */ } };
+  /* the reporting officer is remembered on this device for each person (a staffroom computer is shared) */
+  const roRemembered = () => { try { return localStorage.getItem("relief.ro:" + R.me.name) || ""; } catch (e) { return ""; } };
+  const roRemember = v => { try { localStorage.setItem("relief.ro:" + R.me.name, v); } catch (e) { /* private window: not remembered */ } };
 
   function dates() {
     const t = RF.today();
@@ -554,7 +558,7 @@
       }
       if (!got.length) continue;
       const w = ((rec.lessons || []).find(x => x.key === key) || {}).work || {};
-      const p = await api(`/api/relief/absences/${enc(rec.id)}/lessons/${enc(key)}/work`, json("PUT", { text: w.text || "", link: w.link || "", files: got }));
+      const p = await api(`/api/relief/absences/${enc(rec.id)}/lessons/${enc(key)}/work`, json("PUT", { text: w.text || "", link: w.link || "", files: got, known: [] }));   /* known none: whatever the lesson has is kept */
       if (!p.ok) failed.push(`${got.map(f => f.name).join(", ")}: ${p.error}`);
     }
     return failed;

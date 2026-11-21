@@ -31,14 +31,14 @@ relief requests on the Relief home, in tabs that show only to those who may use 
 - **The relief team:** **What's in**, read-only: every absence, who sent it and how, the acknowledgement, the work,
   the relief chosen or open, cancellations, and what is new since they last looked.
 
-The reason for an absence is seen only by the absent teacher, whoever planned it, management and the relief team.
-Picking and approving relief teachers (and the reliefs a teacher covers) come in the next stage; nobody is told on
-Telegram yet. Relief reads the teachers from the published timetable, so publish first. **Relief settings** (the
-committee page's header link, or the Relief home for the relief team) hold management, the relief team, other staff
-who teach no lessons, the Flexi Adjunct Teachers' role, the relief rules in words, the limits the app checks, the times
-and the school calendar (terms, which week each term starts as, holidays). The committee downloads the personal
-teacher codes there as a list (CSV) or as slips to print. Like the personal student codes, they are made from each
-name and `SECRET_KEY`, and are off without it.
+The reason for an absence is seen only by the absent teacher, whoever planned it, management and the relief team. The
+app's picks for open lessons, and approving them, come in the next stage, with the reliefs a teacher covers; nobody is
+told on Telegram yet. Relief reads the teachers from the published timetable, so publish first. **Relief settings**
+(the committee page's header link, or the Relief home for the relief team) hold management, the relief team, other
+staff who teach no lessons, the Flexi Adjunct Teachers' role, the relief rules in words, the limits the app checks,
+the times and the school calendar (terms, which week each term starts as, holidays). The committee downloads the
+personal teacher codes there as a list (CSV) or as slips to print. Like the personal student codes, they are made from
+each name and `SECRET_KEY`, and are off without it.
 
 **Exams and events.** The front page has an **Exams and events** card (`/exams`), for the exams committee only: the names on the exams committee list in **Exam settings**, and the timetable committee. Everyone else is refused, because it shows student names, seats and access arrangements. Stage 1 is the committee's own working: set up an exam or a test, say which levels and days it covers (a whole day or part of a day), fill in the papers (by hand or from an uploaded paper list) and their times, and check the paper times. **Make** then stops the lessons that fall inside the exam, frees their teachers, seats the students in the exam rooms, and picks invigilators (or leaves the teacher of the lesson in the room, for a test). The committee can move a class to another room, set the invigilators by hand, and print the seating plans, the roster by day and the lessons sheet, or download the Excel. It needs the Relief **school calendar** (to know which timetable day a date is) and the personal teacher codes (to know who is on the staff), and reads everything from the published timetable. Nothing is sent to students or teachers yet.
 
