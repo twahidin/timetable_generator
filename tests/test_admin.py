@@ -663,4 +663,23 @@ def put_back_a_broken_account_line_says_so():
         mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]]
         assert mine and "back" not in mine[0], mine
 
+@t
+def put_back_a_head_with_no_departments():
+    c = admin()
+    P.update(lambda d: d["people"][SITI].update(group="sh", depts=[]))     # an SH with no departments on the admin page (step 4 says MA)
+    assert post(c, "/api/admin/person", name=SITI, group="teacher")[0] == 200
+    e = accounts()[0]; assert e["changes"] == [dict(name=SITI, field="group", was="sh", now="teacher")], e["changes"]
+    assert back(c, e["id"]) == (200, dict(done=True, text="Put back."))
+    r = rec(SITI); assert (r["group"], r["depts"]) == ("sh", []), r
+    assert accounts()[0]["changes"] == [dict(name=SITI, field="group", was="teacher", now="sh")], accounts()[0]["changes"]
+
+@t
+def put_back_of_a_line_with_no_text_is_still_recorded():
+    c = admin()
+    P.update(lambda d: d["people"][PRIYA].update(note="now"))
+    e = H.add({"kind": "account", "what": "note", "where": "Admin", "people": [PRIYA], "text": None,
+               "changes": [dict(name=PRIYA, field="note", was="before", now="now")], **H.by_of(ALICIA, "password")})
+    got = back(c, e["id"]); assert got == (200, dict(done=True, text="Put back.")) and rec(PRIYA)["note"] == "before", got
+    p = accounts()[0]; assert (p["what"], p["text"], p["putback"]) == ("putback", "Put back: ", "a:" + e["id"]), p
+
 print(f"{COUNT} admin tests passed")

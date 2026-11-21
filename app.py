@@ -1745,6 +1745,7 @@ def _put_back_account(unit, e):
     """put back an admin-page change: every field of every person goes back to what the entry says it was, all in one
     people.update and only while each is still as the entry left it; nothing is written when any check refuses"""
     me, by_, pub = who()["name"], by(), store.published()
+    text = "Put back: " + str(e.get("text") or "")
     per = {}
     for c in e.get("changes") or []:
         per.setdefault(c["name"], {})[c["field"]] = (c.get("was"), c.get("now"))
@@ -1755,7 +1756,11 @@ def _put_back_account(unit, e):
         for n, fs in per.items():
             if any(_field_now(d, items[n], n, f) != now for f, (was, now) in fs.items()): raise Refused(AGAIN_SINCE)
         before = people.usable_admins(d)
-        done = {n: _change(d, n, items[n], {f: was for f, (was, now) in fs.items()}) for n, fs in per.items()}
+        def want(n, fs):   # a head again keeps the departments they have now: _change would otherwise give them step 4's
+            w = {f: was for f, (was, now) in fs.items()}
+            if w.get("group") in people.HEADS and "depts" not in w: w["depts"] = list(people.record(d, n)["depts"])
+            return w
+        done = {n: _change(d, n, items[n], want(n, fs)) for n, fs in per.items()}
         touched = [n for n in per if done[n]]
         if not touched: raise Refused(AGAIN_SINCE)
         _whole(d, touched, before)
@@ -1763,7 +1768,7 @@ def _put_back_account(unit, e):
     try: touched, changes = _update_as(me, go)
     except Refused as x: return {"error": str(x)}, 409
     except people.Unreadable: return {"error": people.UNREADABLE}, 503
-    _account_entry("putback", touched, changes, "Put back: " + e.get("text", ""), by_=by_, putback=unit, putback_of=e.get("as"), putback_ts=e.get("ts"))
+    _account_entry("putback", touched, changes, text, by_=by_, putback=unit, putback_of=e.get("as"), putback_ts=e.get("ts"))
     return {"done": True, "text": "Put back."}
 
 @app.post("/api/history/back")
