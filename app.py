@@ -75,6 +75,7 @@ def _check():
             if pub: return _end(gone=True)          # dropped or renamed on a later publish
             p = _stand_in(name, data)
         if p["off"] or p["n"] != session.get("n", 0): return _end()
+        if v == "password" and not p.get("pw"): return _end()   # no password on the record (removed, or never set): no password session
         p.pop("pw", None)
         return dict(person=p, via=v, shared=None)
     if r in people.SHARED:
@@ -1227,13 +1228,476 @@ def relief_codes_csv():
 @app.get("/api/relief/code-slips.pdf")
 @need("codes")
 def relief_code_slips():
+    """everyone's slips; ?names=a,b only those people's (the admin page's "Print their code slips")"""
     refused = _relief_codes_refused(); pub = store.published()
     if refused: return refused
     if not pub: return NO_RELIEF_PUB, 409
+    ps = relief_staff(pub)
+    if request.args.get("names") is not None:
+        mine = {n.strip() for n in request.args["names"].split(",") if n.strip()}
+        ps = [p for p in ps if p["name"] in mine]
+        if not ps: return {"error": NO_ONE}, 400
     buf = io.BytesIO()
-    relief_codes.slips_pdf(pub["model"]["school"]["name"], relief_staff(pub), request.host_url.rstrip("/"), buf)
+    relief_codes.slips_pdf(pub["model"]["school"]["name"], ps, request.host_url.rstrip("/"), buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="relief code slips.pdf", mimetype="application/pdf")
+
+# ------------------------------------------------------------------------------------------------ admins: people and the ways in
+# The named admins (committee group, Admin extra, signed in with their password) manage people here; every check is the
+# server's. A change is judged whole inside one people.update, so two admins at once cannot both remove the other, and a
+# refused change writes nothing. A change that lessens what a person may do, or removes a way in, raises their sign-in
+# number `n`: they are signed out everywhere. Each change is one history entry, `changes` [{name, field, was, now}], never
+# a password.
+PICK_GROUP = "Pick a group."
+ONLY_COMMITTEE_ADMIN = "Only the timetable committee can be admins."
+LAST_ADMIN = "{} is the last admin: make another admin first."
+EXAMS_UNTIL = "Give the last day of the exams and events access."
+BAD_USERNAME = "A username is 3 to 40 letters, digits, dots, dashes or underscores."
+TAKEN = "That username is taken."
+NOT_A_DEPT = "{} is not one of the school's departments."
+NOT_STAFF = "{} is not on the published timetable or the staff list."
+NAMELESS = "A staff member needs a name."
+FORMULA_NAME = "A name cannot start with {}."
+LONG_NAME = "Keep a name under 100 characters."
+ON_TIMETABLE = "{} is already a teacher on the timetable."
+ON_STAFF = "{} is already on the staff list."
+LONG_NOTE = "Keep a note under 200 characters."
+NO_ONE = "Tick at least one person."
+PICK_ACTION = "Pick what to do."
+PICK_EXTRA = "Pick an extra."
+NO_USERNAME = "Give them a username first."
+PICK_SHARED = "Pick a shared code."
+UNREAD_CHANGE = "The change could not be read. Reload the page and try again."
+FIRST_ADMIN = "Make the first admin"
+HAS_PASSWORD = "{} has a password already: they make themselves the first admin, signed in with it."
+EXTRA_LABELS = {"relief": "Relief team", "exams": "Exams and events", "admin": "Admin"}
+SIGNS_OUT = {"group", "depts", "relief", "exams", "admin", "off"}   # and a username changed or removed
+_USERNAME = re.compile(r"[a-z0-9._-]{3,40}")
+_ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+class Refused(Exception):
+    """one check's sentence: the whole change is refused and nothing is written"""
+
+def _admin_off():
+    """the admin calls are refused while SECRET_KEY is not set (accounts are off)"""
+    return ({"error": NO_ACCOUNTS}, 403) if not accounts_on() else None
+
+def _body():
+    b = request.get_json(force=True, silent=True)
+    if not isinstance(b, dict): raise Refused(UNREAD_CHANGE)
+    return b
+
+def school_depts():
+    """the departments of the school in the setup being edited; [] with no setup"""
+    spec = store.setup_record()["spec"]
+    school = spec.get("school") if isinstance(spec, dict) else None
+    d = school.get("departments") if isinstance(school, dict) else None
+    return [x.strip() for x in d if isinstance(x, str) and x.strip()] if isinstance(d, list) else []
+
+def _name_problem(name):
+    """relief's checks of a typed name (the codes CSV is opened in a spreadsheet): the sentence, or None"""
+    if not name: return NAMELESS
+    if name[0] in relief_settings.FORMULA: return FORMULA_NAME.format(name[0])
+    if len(name) > 100: return LONG_NAME
+    return None
+
+def _username(v):
+    """a username as typed -> as kept (lower case); None when none is given"""
+    if v is None or (isinstance(v, str) and not v.strip()): return None
+    u = v.strip().lower() if isinstance(v, str) else ""
+    if not _USERNAME.fullmatch(u): raise Refused(BAD_USERNAME)
+    return u
+
+def _taken(d, u, name):
+    """another person's record holds this username (compared ignoring case)"""
+    return bool(u) and any(n != name and isinstance(r, dict) and str(r.get("username") or "").lower() == u for n, r in d["people"].items())
+
+def _until(v, today):
+    """an Exams and events end date: an ISO date, today or later; None or False takes the extra away"""
+    if v is None or v is False: return None
+    try: d = datetime.date.fromisoformat(v.strip()) if isinstance(v, str) and _ISO_DAY.fullmatch(v.strip()) else None
+    except ValueError: d = None
+    if d is None or d < today: raise Refused(EXAMS_UNTIL)
+    return d.isoformat()
+
+def _wanted(b, today):
+    """the fields of one person the body sets, each checked on its own -> {field: value}"""
+    want = {}
+    if "group" in b:
+        if b["group"] not in people.GROUPS: raise Refused(PICK_GROUP)
+        want["group"] = b["group"]
+    if "depts" in b:
+        if not isinstance(b["depts"], list) or not all(isinstance(x, str) for x in b["depts"]): raise Refused(UNREAD_CHANGE)
+        school, got = school_depts(), []
+        for x in (x.strip() for x in b["depts"]):
+            if x and x not in got:
+                if x not in school: raise Refused(NOT_A_DEPT.format(x))
+                got.append(x)
+        want["depts"] = got
+    if "extras" in b:
+        ex = b["extras"]
+        if not isinstance(ex, dict) or any(not isinstance(ex[k], bool) for k in ("relief", "admin") if k in ex): raise Refused(UNREAD_CHANGE)
+        want.update({k: ex[k] for k in ("relief", "admin") if k in ex})
+        if "exams" in ex: want["exams"] = _until(ex["exams"], today)
+    if "username" in b: want["username"] = _username(b["username"])
+    if "note" in b:
+        if b["note"] is not None and not isinstance(b["note"], str): raise Refused(UNREAD_CHANGE)
+        want["note"] = (b["note"] or "").strip()
+        if len(want["note"]) > 200: raise Refused(LONG_NOTE)
+    if "off" in b:
+        if not isinstance(b["off"], bool): raise Refused(UNREAD_CHANGE)
+        want["off"] = b["off"]
+    return want
+
+def _change(d, name, item, want):
+    """make `want` true of name's record in d. item: their staff item before the change (None: they are being added).
+    -> the changes [{name, field, was, now}] against what they have now; nothing that is so already"""
+    r, out, want = people.record(d, name), [], dict(want)
+    def put(field, was, now): out.append(dict(name=name, field=field, was=copy.deepcopy(was), now=copy.deepcopy(now)))
+    if item is None and not r["added"]: r["added"] = True; put("added", False, True)
+    group = item["group"] if item else (r["group"] or "executive")
+    if "group" in want and want["group"] != group:
+        put("group", group, want["group"]); r["group"] = want["group"]
+        if want["group"] in people.HEADS and not r["depts"] and "depts" not in want and item and item["depts"]:
+            want["depts"] = list(item["depts"])                      # a new head changes the map for their step-4 departments
+        if want["group"] != "committee" and "admin" not in want: want["admin"] = False   # the Admin extra is the committee's
+    if "depts" in want and want["depts"] != r["depts"]: put("depts", r["depts"], want["depts"]); r["depts"] = list(want["depts"])
+    for k in ("relief", "exams", "admin"):
+        if k in want and want[k] != r["extras"][k]: put(k, r["extras"][k], want[k]); r["extras"][k] = want[k]
+    if "username" in want and want["username"] != r["username"]:
+        put("username", r["username"], want["username"]); r["username"] = want["username"]
+        if not r["username"]: r.update(pw=None, must_change=False)   # no username, no password: a later username starts without one
+    if "note" in want and want["note"] != r["note"]: put("note", r["note"], want["note"]); r["note"] = want["note"]
+    if "off" in want and want["off"] != r["off"]: put("off", r["off"], want["off"]); r["off"] = want["off"]
+    if any(c["field"] in SIGNS_OUT or (c["field"] == "username" and c["was"]) for c in out): r["n"] += 1
+    if out: d["people"][name] = r
+    return out
+
+def _whole(d, touched, before):
+    """the checks of a change as a whole, on d as it leaves it: Admin only in the committee, and an admin left"""
+    for n in touched:
+        r = people.record(d, n)
+        if r["extras"]["admin"] and r["group"] != "committee": raise Refused(ONLY_COMMITTEE_ADMIN)
+    if not people.admins(d): raise Refused(LAST_ADMIN.format(next((n for n in touched if n in before), touched[0])))
+
+def _admin_item(pub, data, name):
+    """one person as the admin page shows them: their staff item and their note; None when not on the staff list"""
+    p = next((p for p in people.staff(pub, data) if p["name"] == name), None)
+    return dict(p, note=people.record(data, name)["note"]) if p else None
+
+def _said(c):
+    f, was, now = c["field"], c["was"], c["now"]
+    if f == "added": return "added to the staff list"
+    if f == "group": return f"group {people.LABELS.get(was, was)} → {people.LABELS.get(now, now)}"
+    if f == "depts": return "changes the map for " + (", ".join(now) or "no department")
+    if f == "exams": return f"Exams and events until {_day(now)}" if now else "Exams and events taken away"
+    if f in ("relief", "admin"): return f"{EXTRA_LABELS[f]} {'given' if now else 'taken away'}"
+    if f == "username": return f"username {now}" if now else "username and password removed"
+    if f == "note": return "note changed"
+    return "switched off" if now else "switched on"
+
+def _what(out):
+    """the kind of a change to one person, by its weightiest field"""
+    fields = [c["field"] for c in out]
+    if "added" in fields: return "add"
+    if "off" in fields: return "off" if next(c for c in out if c["field"] == "off")["now"] else "on"
+    for f, what in (("group", "group"), ("relief", "extras"), ("exams", "extras"), ("admin", "extras"), ("depts", "depts"), ("username", "username")):
+        if f in fields: return what
+    return "note"
+
+def _account_entry(what, names, changes, text, by_=None, **more):
+    """one kind-account entry; a change is never undone for want of its entry"""
+    try: history.add({"kind": "account", "what": what, "people": names, "changes": changes, "text": text, **more, **(by_ or by())})
+    except Exception as e: print(f"WARNING: an account change could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
+
+def _keep_me(me, names):
+    """an admin's change to themselves signs out their other sessions, not this one"""
+    if me in names:
+        r = people.record(people.load(), me)
+        if not r["off"]: session["n"] = r["n"]
+
+def _and(names):
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+_BULK_SAY = {("give", "relief"): (("joins", "join"), "the relief team", "{} is on the relief team already."),
+             ("give", "admin"): (("gets", "get"), "the admin page", "{} is an admin already."),
+             ("take", "relief"): (("leaves", "leave"), "the relief team", "{} is not on the relief team."),
+             ("take", "exams"): (("loses", "lose"), "the exams and events pages", "{} does not have the exams and events pages."),
+             ("take", "admin"): (("loses", "lose"), "the admin page", "{} is not an admin.")}
+
+def _bulk_lines(act, key, val, names, done, d):
+    """what a change to several people does, naming each person and anything already so ("their" for everyone)"""
+    moved, same = [n for n in names if done[n]], [n for n in names if not done[n]]
+    def verb(one, many): return one if len(moved) == 1 else many
+    def had(n, f): return next((c["was"] for c in done[n] if c["field"] == f), None)
+    lines = []
+    if act == "give" and key == "exams":
+        if moved: lines.append(f"{_and(moved)} {verb('gets', 'get')} the exams and events pages until {_day(val)}.")
+        lines += [f"{n} has it already: their end date moves to {_day(val)}." for n in moved if had(n, "exams")]
+        lines += [f"{n} has it already, until {_day(val)}: nothing changes for them." for n in same]
+    elif act in ("give", "take"):
+        verbs, what, already = _BULK_SAY[(act, key)]
+        if moved: lines.append(f"{_and(moved)} {verb(*verbs)} {what}.")
+        lines += [already.format(n) for n in same]
+    elif act == "group":
+        label = people.LABELS[val]
+        if moved: lines.append(f"{_and(moved)} {verb('moves', 'move')} to the {label} group.")
+        for n in moved:
+            if had(n, "admin"): lines.append(f"{n} stops being an admin: only the timetable committee can be admins.")
+            if val in people.HEADS:
+                ds = people.record(d, n)["depts"]
+                if not ds: lines.append(f"{n} has no department on step 4: tick their departments on their panel, or they can change no rows.")
+                else: lines.append(f"{n} changes the map for {', '.join(ds)}{' (from step 4)' if any(c['field'] == 'depts' for c in done[n]) else ''}.")
+        lines += [f"{n} is in the {label} group already." for n in same]
+    elif act == "off":
+        if moved: lines.append(f"{_and(moved)} {verb('is', 'are')} switched off and signed out everywhere.")
+        lines += [f"{n} is switched off already." for n in same]
+    else:
+        if moved: lines.append(f"{_and(moved)} can sign in again.")
+        lines += [f"{n} is not switched off." for n in same]
+    return lines
+
+def _bulk(d, pub, b, today):
+    """one change for every ticked person, made on d -> dict(lines, touched, changes, what, text). The preview runs it
+    on a copy of the records and the apply inside people.update, so the preview's lines are what the apply does"""
+    names = b.get("names")
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names): raise Refused(UNREAD_CHANGE)
+    names = list(dict.fromkeys(names))
+    if not names: raise Refused(NO_ONE)
+    act = b.get("action")
+    if act not in ("give", "take", "group", "off", "on"): raise Refused(PICK_ACTION)
+    if act in ("give", "take"):
+        key = b.get("extra")
+        if not isinstance(key, str) or key not in EXTRA_LABELS: raise Refused(PICK_EXTRA)
+        if key != "exams": val = act == "give"
+        elif act == "take": val = None
+        elif b.get("until") is None or b.get("until") is False: raise Refused(EXAMS_UNTIL)
+        else: val = _until(b["until"], today)
+    elif act == "group":
+        if b.get("group") not in people.GROUPS: raise Refused(PICK_GROUP)
+        key, val = "group", b["group"]
+    else: key, val = "off", act == "off"
+    items = {p["name"]: p for p in people.staff(pub, d)}
+    for n in names:
+        if n not in items: raise Refused(NOT_STAFF.format(n))
+    before = people.admins(d)
+    done = {n: _change(d, n, items[n], {key: val}) for n in names}
+    touched = [n for n in names if done[n]]
+    if touched: _whole(d, touched, before)
+    them = ", ".join(touched)
+    text = {"give": lambda: f"Gave {EXTRA_LABELS[key]}{' until ' + _day(val) if key == 'exams' else ''} to {them}",
+            "take": lambda: f"Took away {EXTRA_LABELS[key]} from {them}", "group": lambda: f"Moved {them} to the {people.LABELS[val]} group",
+            "off": lambda: f"Switched off {them}", "on": lambda: f"Switched on {them}"}[act]()
+    return dict(lines=_bulk_lines(act, key, val, names, done, d), touched=touched, changes=[c for n in touched for c in done[n]],
+                what="extras" if act in ("give", "take") else act, text=text)
+
+def _ways():
+    data, (have, _) = people.load(), access.configured()
+    recs = [people.record(data, n) for n in data["people"]]
+    return dict(secret_key=accounts_on(), personal_codes=access.personal_codes_on(), password_accounts=sum(1 for r in recs if r["username"] and r["pw"]),
+                shared=[dict(code=x, set=bool(have.get(x)), off=data["ways"]["off"].get(x), used_week=history.uses(kind="signin", via="shared", shared=x, ok=True))
+                        for x in people.SHARED],
+                recovery_set=bool((os.environ.get("ADMIN_RECOVERY_CODE") or "").strip()))
+
+@app.get("/admin")
+@need("admin")
+def admin_page():
+    move_relief_lists()
+    if not accounts_on(): return page("Admin", f"<main class='login'><h1>Admin</h1><p class='muted'>{esc(NO_ACCOUNTS)}</p></main>"), 403
+    return app.send_static_file("admin.html")
+
+@app.get("/api/admin/people")
+@need("admin")
+def admin_people():
+    """the staff list with its hints and, once, what moved from relief's and exams' own lists"""
+    stop = _admin_off()
+    if stop: return stop
+    move_relief_lists()
+    pub, data = store.published(), people.load()
+    ps = [dict(p, note=people.record(data, p["name"])["note"]) for p in people.staff(pub, data)]
+    group, heads = {p["name"]: p["group"] for p in ps}, []
+    for x in (((pub or {}).get("model") or {}).get("setup") or {}).get("teachers") or []:
+        n = str(x.get("name") or "").strip()
+        if str(x.get("role") or "").strip().upper() in ("HOD", "SH") and group.get(n) == "teacher" and n not in heads: heads.append(n)
+    no_dept = [p["name"] for p in ps if p["group"] in people.HEADS and not people.record(data, p["name"])["depts"]]   # they change no rows (R8)
+    return jsonify(people=ps, departments=school_depts(), groups=[[k, people.LABELS[k]] for k in people.GROUPS],
+                   hints=dict(heads_on_step4=heads, no_google=[], heads_no_dept=no_dept), moved=data["moved"] if isinstance(data["moved"], list) else [],
+                   me=who()["name"])
+
+@app.post("/api/admin/person")
+@need("admin")
+def admin_person():
+    """change one person, or add one by name (added: true) -> their staff item"""
+    stop = _admin_off()
+    if stop: return stop
+    me, pub, today = who()["name"], store.published(), datetime.date.today()
+    try:
+        b = _body()
+        if not isinstance(b.get("name"), str): raise Refused(UNREAD_CHANGE)
+        adding = b.get("added") is True
+        name = b["name"].strip() if adding else b["name"]
+        if adding and _name_problem(name): raise Refused(_name_problem(name))
+        want = _wanted(b, today)
+        def change(d):
+            item = next((p for p in people.staff(pub, d) if p["name"] == name), None)
+            if adding and item: raise Refused((ON_STAFF if item["staff_only"] else ON_TIMETABLE).format(name))
+            if not adding and item is None: raise Refused(NOT_STAFF.format(name))
+            if want.get("username") and _taken(d, want["username"], name): raise Refused(TAKEN)
+            before = people.admins(d)
+            out = _change(d, name, item, want)
+            if out: _whole(d, [name], before)
+            return out
+        out = people.update(change)
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    if out:
+        _account_entry(_what(out), [name], out, f"{name}: " + "; ".join(_said(c) for c in out))
+        _keep_me(me, [name])
+    return jsonify(_admin_item(pub, people.load(), name))
+
+@app.post("/api/admin/bulk")
+@need("admin")
+def admin_bulk():
+    """one change for several people: the preview's lines, then (preview: false) all of it or none of it"""
+    stop = _admin_off()
+    if stop: return stop
+    me, pub, today = who()["name"], store.published(), datetime.date.today()
+    try:
+        b = _body()
+        if b.get("preview", True) is not False:   # only an explicit preview: false changes anything
+            if not people.readable(): raise people.Unreadable(people.UNREADABLE)
+            return jsonify(lines=_bulk(people.load(), pub, b, today)["lines"], applied=False)
+        got = people.update(lambda d: _bulk(d, pub, b, today))
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    if got["touched"]:
+        _account_entry(got["what"], got["touched"], got["changes"], got["text"])
+        _keep_me(me, got["touched"])
+    return jsonify(lines=got["lines"], applied=bool(got["touched"]))
+
+@app.post("/api/admin/reset")
+@need("admin")
+def admin_reset():
+    """a one-time password (and the username, when given): the answer is the only place it ever appears"""
+    stop = _admin_off()
+    if stop: return stop
+    me, pub = who()["name"], store.published()
+    try:
+        b = _body()
+        name = b.get("name")
+        if not isinstance(name, str): raise Refused(UNREAD_CHANGE)
+        given = _username(b.get("username"))
+        if not any(p["name"] == name for p in people.staff(pub)): raise Refused(NOT_STAFF.format(name))
+        once = passwords.one_time(); h = passwords.hash_pw(once)
+        def change(d):
+            if not any(p["name"] == name for p in people.staff(pub, d)): raise Refused(NOT_STAFF.format(name))
+            r = people.record(d, name)
+            u = given or r["username"]
+            if not u: raise Refused(NO_USERNAME)
+            if _taken(d, u, name): raise Refused(TAKEN)
+            out = [dict(name=name, field="username", was=r["username"], now=u)] if u != r["username"] else []
+            r.update(username=u, pw=h, must_change=True, n=r["n"] + 1)
+            d["people"][name] = r
+            return out, u
+        out, u = people.update(change)
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    lockout.clear(u)
+    _account_entry("reset", [name], out, f"{name}: a new one-time password" + (f"; username {u}" if out else ""))
+    _keep_me(me, [name])
+    r = jsonify(once=once); r.headers["Cache-Control"] = "no-store"
+    return r
+
+@app.get("/api/admin/ways")
+@need("admin")
+def admin_ways():
+    stop = _admin_off()
+    return stop or jsonify(_ways())
+
+@app.post("/api/admin/shared-off")
+@need("admin")
+def admin_shared_off():
+    """turn a shared code off (its open sessions end at their next request) or on again -> the ways in"""
+    stop = _admin_off()
+    if stop: return stop
+    try:
+        b = _body()
+        r, off = b.get("code"), b.get("off")
+        if r not in people.SHARED: raise Refused(PICK_SHARED)
+        if not isinstance(off, bool): raise Refused(UNREAD_CHANGE)
+        at = time.time()
+        def change(d):
+            was = d["ways"]["off"].get(r)
+            d["ways"]["off"][r] = now = (was if was is not None else at) if off else None
+            return was, now
+        was, now = people.update(change)
+    except Refused as e: return {"error": str(e)}, 400
+    except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    if (was is None) != (now is None):
+        label = SHARED_AS[r]
+        _account_entry("shared-off", [], [dict(name=label, field="off", was=was, now=now)],
+                       f"Turned {'off' if off else 'on'} the {label[0].lower() + label[1:]}", shared=r)
+    return jsonify(_ways())
+
+@app.get("/api/admin/students")
+@need("admin")
+def admin_students():
+    stop = _admin_off()
+    if stop: return stop
+    pub = store.published()
+    return jsonify([{"id": s.get("id"), "name": s.get("name"), "class": s.get("cls")} for s in ((pub or {}).get("model") or {}).get("students") or []])
+
+def _first_page(msg="", form=True, name="", username=""):
+    f = ""
+    if form:
+        opts = "".join(f'<option value="{esc(p["name"])}"></option>' for p in people.staff(store.published()))
+        f = f"""<p>No one is an admin yet. Make yourself the first: you then sign in with this username and password, and give everyone else their access on the admin page.</p>
+<form method="post" action="/admin/first"><label for="name">Your name (pick it from the list, or type it)</label>
+<input id="name" name="name" class="plain" list="staff" value="{esc(name)}" autocomplete="off" required><datalist id="staff">{opts}</datalist>
+<label for="username">Username (for example daniel.wong)</label><input id="username" name="username" class="plain" value="{esc(username)}" autocapitalize="none" spellcheck="false" autocomplete="username" required>
+{_field("new", "Password (at least 10 characters)", auto="new-password")}{_field("again", "Password again", auto="new-password")}
+<button type="submit">Make me the first admin</button></form>"""
+    return _form_page(FIRST_ADMIN, f, msg, back=("/", "Committee page"))
+
+@app.route("/admin/first", methods=["GET", "POST"])
+@need("committee")
+def admin_first():
+    """while no one is an admin: whoever holds the committee's rights makes themselves the first admin, with a password,
+    and is signed in as them. Once an admin exists this page is not there"""
+    if not people.readable(): return _first_page(ACCOUNTS_UNREADABLE, form=False), 503
+    if people.admins(people.load()): abort(404)
+    if not accounts_on(): return _first_page(NO_ACCOUNTS, form=False), 403
+    if request.method == "GET": return _first_page()
+    name, typed = (str(request.form.get(k) or "").strip() for k in ("name", "username"))
+    new, again = (str(request.form.get(k) or "") for k in ("new", "again"))
+    pub = store.published()
+    def back(msg): return _first_page(msg, name=name, username=typed), 400
+    if not any(p["name"] == name for p in people.staff(pub)) and _name_problem(name): return back(_name_problem(name))
+    try: u = _username(typed)
+    except Refused as e: return back(str(e))
+    if not u: return back(BAD_USERNAME)
+    why = passwords.problem(new, u, name)
+    if why: return back(why)
+    if new != again: return back(NOT_SAME)
+    h, by_, me = passwords.hash_pw(new), by(), (who() or {}).get("name")
+    def change(d):
+        if people.admins(d): return None                          # someone was quicker
+        if _taken(d, u, name): raise Refused(TAKEN)
+        if people.record(d, name)["pw"] and name != me: raise Refused(HAS_PASSWORD.format(name))   # no one else's password is replaced
+        item = next((p for p in people.staff(pub, d) if p["name"] == name), None)
+        out = _change(d, name, item, dict(group="committee", admin=True, username=u, off=False))
+        r = people.record(d, name)
+        r.update(pw=h, must_change=False, n=r["n"] + 1)
+        d["people"][name] = r
+        return out, r["n"]
+    try: got = people.update(change)
+    except Refused as e: return back(str(e))
+    except people.Unreadable: return _first_page(people.UNREADABLE, form=False), 503
+    if got is None: abort(404)
+    out, n = got
+    _account_entry("first-admin", [name], out, f"{name}: made the first admin", by_=by_)
+    _start(who=name, via="password", n=n, exp=time.time() + FORTNIGHT); _note_signin(name)
+    return redirect("/admin")
 
 # ------------------------------------------------------------------------------------------------ staff: exams and events
 NO_EXAMS_PUB = "Publish the timetable first: exams read the classes, students and lessons from it."

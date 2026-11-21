@@ -455,9 +455,10 @@ def a_relief_team_extra_alone_may_save_and_a_leader_only_read():
 
 @t
 def relief_me_answers_a_strong_person():
-    from werkzeug.security import generate_password_hash  # noqa: F401
+    from werkzeug.security import generate_password_hash
     fresh()
-    AP.update(lambda d: d["people"].update({"Mr Hod One": dict(group="hod", depts=["Science"], username="hod.one"), "Ms Com One": dict(group="committee", username="com.one")}))
+    pw = generate_password_hash(secrets.token_hex(8))   # a password session ends when its record holds no password
+    AP.update(lambda d: d["people"].update({"Mr Hod One": dict(group="hod", depts=["Science"], username="hod.one", pw=pw), "Ms Com One": dict(group="committee", username="com.one", pw=pw)}))
     try:
         for name, group in (("Mr Hod One", "hod"), ("Ms Com One", "committee")):
             c = A.app.test_client()

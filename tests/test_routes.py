@@ -8,7 +8,7 @@ for k in ("ADMIN_RECOVERY_CODE", "ANTHROPIC_API_KEY", "TYPED_REQUEST_MODEL", "AI
 os.environ.update(DATA_DIR=DATA, SECRET_KEY=secrets.token_hex(16), AI_PROVIDER="anthropic", AI_API_KEY="", **CODES)
 sys.path.insert(0, ROOT)
 import app as A, history as H, store, sync  # noqa: E402
-from accounts import people as P, rights as R  # noqa: E402
+from accounts import passwords as PW, people as P, rights as R  # noqa: E402
 from relief import people as RP  # noqa: E402
 from ttgen.samples import secondary  # noqa: E402
 
@@ -22,12 +22,13 @@ TINA, HAL, RIA, ELI = "Ms Tina Teo", "Mr Hal Ong", "Ms Ria Tan", "Mr Eli Ng"
 CORA, ADA, LEE, EVE = "Ms Cora Lim", "Ms Ada Koh", "Mr Lee Chua", "Mdm Eve Sim"
 MAX = "Mr Max Ho"   # a teacher added by name whose Exams and events extra ended yesterday
 TEACHERS = [dict(name=TINA, dept="SC"), dict(name=HAL, dept="SC", role="HOD"), dict(name=RIA, dept="MA"), dict(name=ELI, dept="EL")]
-RECORDS = {HAL: dict(group="hod", depts=["SC", "MA"], username="hal.ong"),
+PW_HASH = PW.hash_pw(secrets.token_hex(8))   # a password session ends when its record holds no password
+RECORDS = {HAL: dict(group="hod", depts=["SC", "MA"], username="hal.ong", pw=PW_HASH),
            RIA: dict(extras=dict(relief=True, exams=None, admin=False)),
            ELI: dict(extras=dict(relief=False, exams=TOMORROW, admin=False)),
-           CORA: dict(group="committee", added=True, username="cora.lim"),
-           ADA: dict(group="committee", added=True, username="ada.koh", extras=dict(relief=False, exams=None, admin=True)),
-           LEE: dict(group="leader", added=True, username="lee.chua"),
+           CORA: dict(group="committee", added=True, username="cora.lim", pw=PW_HASH),
+           ADA: dict(group="committee", added=True, username="ada.koh", pw=PW_HASH, extras=dict(relief=False, exams=None, admin=True)),
+           LEE: dict(group="leader", added=True, username="lee.chua", pw=PW_HASH),
            EVE: dict(group="executive", added=True),
            MAX: dict(group="teacher", added=True, extras=dict(relief=False, exams=YESTERDAY, admin=False))}
 
@@ -149,6 +150,9 @@ EXAMS_ENDPOINTS = ("exams_home", "exams_settings_page", "exams_one_page", "exams
                    "exams_create", "exams_get", "exams_put", "exams_delete", "exams_fill", "exams_papers_download", "exams_papers_upload",
                    "exams_view", "exams_make_route", "exams_move", "exams_invigilators", "exams_use_anyway", "exams_print", "exams_download", "exams_who")
 
+# every admin page and API route: the Admin extra (a committee member signed in with their password); the first admin: the committee
+ADMIN_ENDPOINTS = ("admin_page", "admin_people", "admin_person", "admin_bulk", "admin_reset", "admin_ways", "admin_shared_off", "admin_students")
+
 @t
 def the_guards_are_the_brief_s_table():
     need = lambda endpoint: A.app.view_functions[endpoint]._need
@@ -158,8 +162,10 @@ def the_guards_are_the_brief_s_table():
                            ("me", ("own",)), ("pdf_me", ("own",)), ("relief_home", ("relief", "relief.settings")), ("relief_me", ("relief",)),
                            ("relief_settings_page", ("relief.settings",)), ("relief_settings_get", ("relief.settings",)), ("relief_settings_put", ("relief.save",)),
                            ("relief_codes_csv", ("codes",)), ("relief_code_slips", ("codes",)), ("home", ("timetable",)), ("draft_preview_page", ("committee",))) + tuple(
-                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS):
+                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS) + tuple((e, ("admin",)) for e in ADMIN_ENDPOINTS) + (("admin_first", ("committee",)),):
         assert need(endpoint) == want, (endpoint, need(endpoint))
+    admin = {r.endpoint for r in A.app.url_map.iter_rules() if r.rule.startswith(("/admin", "/api/admin"))}
+    assert admin == set(ADMIN_ENDPOINTS) | {"admin_first"}, sorted(admin ^ (set(ADMIN_ENDPOINTS) | {"admin_first"}))
     for bad in (("staff",), ("head",), ("personal",), ("committee", "teacher"), ()):
         try: A.need(*bad)
         except ValueError: pass

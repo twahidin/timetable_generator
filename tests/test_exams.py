@@ -938,7 +938,9 @@ def only_the_committees_get_in():
             assert ES.load(_PUB)["saved_by"] == "Ms Grace Yeo"
         r = c.put("/api/exams/settings", json=dict(mine["settings"], committee=["Ms Grace Yeo", "Mr Ben Ong"]))
         assert r.status_code == 200 and "committee" not in store.read_json(ES.PATH) and AP.record(AP.load(), "Mr Ben Ong")["extras"]["exams"] is None
+        from werkzeug.security import generate_password_hash
         AP.update(lambda d: d["people"].setdefault("Ms Ada Koh", {}).update(group="committee", added=True, username="ada.koh",
+                                                                            pw=generate_password_hash(secrets.token_hex(8)),   # a password session needs one
                                                                             extras=dict(relief=False, exams=None, admin=True)))
         try:
             a = staff("Ms Ada Koh", via="password")                      # an admin: the line links to the admin page
