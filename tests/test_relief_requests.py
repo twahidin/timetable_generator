@@ -551,4 +551,350 @@ def week_and_term_leave_out_the_chosen_lessons_own_periods():
     n = [x for g in FR.free_then(pub, settings(), [], ls, EVE)["groups"] for x in g["people"] if x["name"] == MAYA][0]
     assert (m["week"], m["term"], m["today"]) == (n["week"], n["term"], n["today"]) == (2, 0, 0), (m, n)
 
+# ---- Task 4: rights and routes ----
+import contextlib, csv, io, urllib.parse  # noqa: E402
+import access  # noqa: E402
+from flask import session as _session  # noqa: E402
+
+@contextlib.contextmanager
+def published(pub):
+    old = store.published; store.published = lambda: pub
+    try: yield
+    finally: store.published = old
+
+def signed_in(card, code):
+    c = A.app.test_client()
+    r = c.post("/login", data={"as": card, "code": code})
+    return c, r
+
+def committee():
+    c, r = signed_in("committee", os.environ["COMMITTEE_CODE"]); assert r.status_code == 302
+    return c
+
+def staff(name):
+    c, r = signed_in("relief", access.staff_code(name)); assert r.status_code == 302, (name, r.status_code)
+    return c
+
+PLAN_ONLY = "Only management and the relief team plan relief for a colleague."
+CHOOSE_ONLY = "Only management and the relief team choose relief teachers."
+TEAM_ONLY = "Only the relief team can open What's in."
+NOT_YOURS = "This absence is not yours to open."
+GONE_ABS = "That absence is not there any more."
+NO_PUB = "Publish the timetable first: relief reads the teachers from it."
+SIGN_IN = "Please sign in again."
+K5, K8 = lk(APUB, 5), lk(APUB, 8)
+SEEN = os.path.join(DATA, "relief", "seen.json")
+
+def q(s): return urllib.parse.quote(s, safe="")
+
+def ask(c, **kw):
+    d = dict(teacher=EVE, dates=["2026-10-13"], periods=None, reason="Medical", reason_text="", remarks="", reporting_officer=GRACE, lessons=[])
+    d.update(kw)
+    return c.post("/api/relief/absences", json=d)
+
+def ok(r, code=200):
+    assert r.status_code == code, (r.status_code, r.get_data(as_text=True)[:400])
+    return r.get_json()
+
+def no(r, code, text):
+    assert r.status_code == code, (code, r.status_code, r.get_data(as_text=True)[:400])
+    assert r.get_json() == {"error": text}, r.get_json()
+
+def lesson_url(i, key, what): return f"/api/relief/absences/{i}/lessons/{q(key)}/{what}"
+
+def upload(c, i, name="notes.pdf", data=b"%PDF-1 notes"):
+    return c.post(f"/api/relief/absences/{i}/files", data={"file": (io.BytesIO(data), name)}, content_type="multipart/form-data")
+
+def cancel_all(c, *ids):
+    for i in ids: ok(c.post(f"/api/relief/absences/{i}/cancel", json=dict(why="Tidy up")))
+
+@t
+def asking_through_the_api():
+    with published(APUB):
+        eve = staff(EVE)
+        got = ok(eve.get("/api/relief/lessons?dates=2026-10-13"))
+        assert [x["p"] for x in got["lessons"]] == [5, 8] and list(got["by_date"]) == ["2026-10-13"], got
+        assert got["by_date"]["2026-10-13"] == got["lessons"]
+        a, b = got["lessons"]
+        assert a["key"] == K5 and a["date"] == "2026-10-13" and (a["start"], a["end"]) == ("10:30", "11:30") and b["others"] == [BUSY], got
+        assert [x["p"] for x in ok(eve.get(f"/api/relief/lessons?teacher={q(EVE)}&dates=2026-10-13&from=5&to=6"))["lessons"]] == [5]
+        two = ok(eve.get("/api/relief/lessons?dates=2026-10-13,%202026-10-27"))
+        assert list(two["by_date"]) == ["2026-10-13", "2026-10-27"] and len(two["lessons"]) == 4, two
+        no(eve.get("/api/relief/lessons?dates=2026-10-17"), 400, "Sat 17 Oct is not a school day in the calendar.")
+        for bad in ("", "nope", "2026-10-09"):
+            no(eve.get("/api/relief/lessons?dates=" + bad), 400, "Choose up to 10 school days, today or later.")
+        for per in ("from=5", "to=6", "from=x&to=6", "from=6&to=5", "from=0&to=12", "from=-1&to=2"):
+            no(eve.get("/api/relief/lessons?dates=2026-10-13&" + per), 400, "Choose the periods again.")
+        people = ok(eve.get("/api/relief/people"))
+        assert {"name": GRACE, "depts": ["Mathematics"]} in people and all(set(p) == {"name", "depts"} for p in people), people
+        before = files_in(ADIR)
+        no(ask(eve, lessons=[dict(key=K5, relief=SAM)]), 400, CHOOSE_ONLY)
+        no(eve.post("/api/relief/absences", data="nope", content_type="application/json"), 400, AB.WRONG)
+        no(ask(eve, lessons=[dict(key=["x"])]), 400, AB.WRONG)
+        assert files_in(ADIR) == before
+        r = ok(ask(eve, how="planned", by=SAM, lessons=[dict(key=K5, work=dict(text="Read p.4", link="", files=[]))]))
+        assert r["how"] == "asked" and r["by"] == EVE and r["teacher"] == EVE and r["reason"] == "Medical", r
+        assert [x["changed"] for x in r["lessons"]] == [False, False] and r["lessons"][0]["work"]["text"] == "Read p.4"
+        i = r["id"]
+        assert AB.load(i)["how"] == "asked" and "changed" not in AB.load(i)["lessons"][0]
+        assert i in [x["id"] for x in ok(eve.get("/api/relief/absences/mine"))["absences"]]
+        assert ok(eve.get(f"/api/relief/absences/{i}"))["reason"] == "Medical"
+        no(ask(eve, teacher=None), 400, "Ms Evelyn Koh has already sent an absence for Ms Evelyn Koh on Tue 13 Oct.")   # no teacher: yourself, asked
+        got = ok(eve.put(lesson_url(i, K5, "work"), json=dict(text="Read p.5", link="https://x.test/a", files=[])))
+        assert got["lessons"][0]["work"] == dict(text="Read p.5", link="https://x.test/a", files=[]) and got["lessons"][0]["changed"] is False
+        no(eve.put(lesson_url(i, K5, "work"), json=dict(text="", link="ftp://x", files=[])), 400, "A link starts with http:// or https://.")
+        assert ok(eve.post(lesson_url(i, K8, "needed")))["lessons"][1]["needed"] is True
+        got = ok(eve.post(lesson_url(i, K8, "not-needed"), json=dict(why="Covered by Mr Busy Chan")))
+        assert got["lessons"][1]["needed"] is False and got["lessons"][1]["not_needed"] == dict(by=EVE, why="Covered by Mr Busy Chan")
+        no(eve.post(lesson_url(i, K8, "not-needed"), json={}), 400, "Say why in a line.")
+        no(eve.post(lesson_url(i, "nokey", "needed")), 400, AB.CHANGED)
+        no(eve.put(lesson_url(i, K5, "relief"), json=dict(relief=SAM)), 403, CHOOSE_ONLY)
+        no(eve.post(f"/api/relief/absences/{i}/acknowledge"), 400, "Only Ms Evelyn Koh can acknowledge this.")
+        no(eve.post(f"/api/relief/absences/{i}/cancel", json=dict(why=" ")), 400, "Say why in a line.")
+        got = ok(eve.post(f"/api/relief/absences/{i}/cancel", json=dict(why="Better now")))
+        assert got["cancelled"]["by"] == EVE and got["cancelled"]["why"] == "Better now"
+        no(eve.post(f"/api/relief/absences/{i}/cancel", json=dict(why="again")), 400, "This absence was cancelled.")
+
+@t
+def planning_needs_the_right():
+    with published(APUB):
+        sam, grace, team = staff(SAM), staff(GRACE), staff(TEAMER)
+        before = files_in(ADIR)
+        no(sam.get(f"/api/relief/free?absent={q(EVE)}&key={q(K5)}"), 403, CHOOSE_ONLY)
+        no(ask(sam), 403, PLAN_ONLY)
+        no(ask(sam, teacher="Mr Nobody"), 403, PLAN_ONLY)
+        no(sam.get(f"/api/relief/lessons?teacher={q(EVE)}&dates=2026-10-13"), 403, PLAN_ONLY)
+        no(sam.get(f"/api/relief/lessons?teacher=Mr%20Nobody&dates=2026-10-13"), 403, PLAN_ONLY)
+        no(sam.get("/api/relief/absences/planned"), 403, PLAN_ONLY)
+        no(sam.get("/api/relief/planned.csv"), 403, PLAN_ONLY)
+        no(sam.get("/api/relief/absences"), 403, TEAM_ONLY)
+        assert files_in(ADIR) == before
+        free = ok(grace.get(f"/api/relief/free?absent={q(EVE)}&key={q(K5)}"))
+        assert SAM in [p["name"] for g in free["groups"] for p in g["people"]] and BUSY in free["teaching"], free
+        assert "reason" not in json.dumps(free)
+        no(grace.get(f"/api/relief/free?absent={q(EVE)}&key={q('2026-10-13/x/0/1/1A/Art/')}"), 400, AB.CHANGED)
+        no(grace.get(f"/api/relief/free?absent={q(EVE)}&key=nope"), 400, AB.CHANGED)
+        no(grace.get(f"/api/relief/free?absent=Mr%20Nobody&key={q(K5)}"), 400, "Mr Nobody is not on the published timetable or the staff list.")
+        no(grace.get(f"/api/relief/free?key={q(K5)}"), 400, "That person is not on the published timetable or the staff list.")
+        no(grace.get("/api/relief/lessons?teacher=Mr%20Nobody&dates=2026-10-13"), 400, "Mr Nobody is not on the published timetable or the staff list.")
+        assert [x["p"] for x in ok(grace.get(f"/api/relief/lessons?teacher={q(EVE)}&dates=2026-10-13"))["lessons"]] == [5, 8]
+        r = ok(ask(grace, reporting_officer="", lessons=[dict(key=K5, relief=SAM)]))
+        assert r["how"] == "planned" and r["by"] == GRACE and r["teacher"] == EVE, r
+        assert r["lessons"][0]["relief"] == SAM and r["lessons"][0]["relief_by"] == GRACE and r["lessons"][0]["changed"] is False
+        i = r["id"]
+        assert ok(team.put(lesson_url(i, K5, "relief"), json=dict(relief=None)))["lessons"][0]["relief"] is None
+        got = ok(team.put(lesson_url(i, K5, "relief"), json=dict(relief=FLEX)))["lessons"][0]
+        assert got["relief"] == FLEX and got["relief_by"] == TEAMER
+        no(team.put(lesson_url(i, K5, "relief"), json=dict(relief=BUSY)), 400, f"{BUSY} is not free for 1A Science then.")
+        no(team.put(lesson_url(i, K5, "relief"), json=dict(relief=["x"])), 400, AB.WRONG)
+        no(team.put(lesson_url(i, K8, "relief"), json=dict(relief=SAM)), 400, "This lesson does not need relief.")
+        assert AB.load(i)["lessons"][0]["relief"] == FLEX
+        cancel_all(grace, i)
+
+@t
+def a_team_member_sees_whats_in_and_new_since():
+    old_now = AB._now
+    try:
+        with published(APUB):
+            eve, team, grace, sam = staff(EVE), staff(TEAMER), staff(GRACE), staff(SAM)
+            AB._now = lambda: "2026-10-12T09:00:00+08:00"
+            one = ok(ask(eve, dates=["2026-10-27"]))["id"]
+            seen_before = open(SEEN).read() if os.path.exists(SEEN) else None
+            got = ok(team.get("/api/relief/absences"))
+            assert (open(SEEN).read() if os.path.exists(SEEN) else None) == seen_before, "a GET never writes"
+            ids = [x["id"] for x in got["absences"]]
+            assert one in ids and got["new_since"] is None and all(x["new"] for x in got["absences"]), got["new_since"]
+            ats = [x["at"] for x in got["absences"]]
+            assert ats == sorted(ats, reverse=True), "newest first"
+            assert [x for x in got["absences"] if x["id"] == one][0]["reason"] == "Medical" and got["as_of"]
+            assert all("changed" in x for r in got["absences"] for x in r["lessons"])
+            saved = ok(team.post("/api/relief/absences/seen", json=dict(at="2026-10-12T09:30:00+08:00")))
+            assert saved == dict(seen="2026-10-12T09:30:00+08:00"), saved
+            assert store.read_json(SEEN) == {TEAMER: "2026-10-12T09:30:00+08:00"}
+            got = ok(team.get("/api/relief/absences"))
+            assert got["new_since"] == "2026-10-12T09:30:00+08:00"
+            assert [x["new"] for x in got["absences"] if x["id"] == one] == [False]
+            AB._now = lambda: "2026-10-12T10:00:00+08:00"
+            two = ok(ask(grace, dates=["2026-11-10"]))["id"]
+            got = {x["id"]: x["new"] for x in ok(team.get("/api/relief/absences"))["absences"]}
+            assert got[two] is True and got[one] is False, got
+            AB._now = old_now
+            later = ok(team.post("/api/relief/absences/seen", json=dict(at="2099-01-01T00:00:00+08:00")))["seen"]
+            assert later < "2099" and later.endswith("+08:00"), later
+            assert ok(team.post("/api/relief/absences/seen", json=dict(at="nope")))["seen"].endswith("+08:00")
+            assert ok(team.post("/api/relief/absences/seen"))["seen"].endswith("+08:00")
+            got = ok(team.get("/api/relief/absences"))
+            assert not any(x["new"] for x in got["absences"] if x["id"] in (one, two))
+            no(grace.get("/api/relief/absences"), 403, TEAM_ONLY)
+            no(grace.post("/api/relief/absences/seen"), 403, TEAM_ONLY)
+            no(sam.post("/api/relief/absences/seen"), 403, TEAM_ONLY)
+            assert set(store.read_json(SEEN)) == {TEAMER}
+            cancel_all(eve, one); cancel_all(grace, two)
+    finally: AB._now = old_now
+
+@t
+def management_sees_planned_by_me():
+    with published(APUB):
+        grace, team, eve = staff(GRACE), staff(TEAMER), staff(EVE)
+        a = ok(ask(grace, periods=[5, 6]))
+        b = ok(ask(team, periods=[8, 8], lessons=[dict(key=K8, needed=True)]))
+        assert a["how"] == b["how"] == "planned" and b["by"] == TEAMER
+        for c, me, theirs, other in ((grace, GRACE, a, b), (team, TEAMER, b, a)):
+            got = ok(c.get("/api/relief/absences/planned"))["absences"]
+            ids = [x["id"] for x in got]
+            assert theirs["id"] in ids and other["id"] not in ids and all(x["by"] == me and x["how"] == "planned" for x in got), (me, ids)
+        assert all("changed" in x for x in ok(grace.get("/api/relief/absences/planned"))["absences"][0]["lessons"])
+        mine = {x["id"]: x for x in ok(eve.get("/api/relief/absences/mine"))["absences"]}
+        assert mine[a["id"]]["how"] == "planned" and mine[b["id"]]["by"] == TEAMER
+        assert ok(grace.get(f"/api/relief/absences/{b['id']}"))["reason"] == "Medical"        # management opens any absence
+        no(grace.post(f"/api/relief/absences/{a['id']}/acknowledge"), 400, "Only Ms Evelyn Koh can acknowledge this.")
+        got = ok(eve.post(f"/api/relief/absences/{a['id']}/acknowledge"))
+        assert got["acknowledged"]["at"] and got["lessons"][0]["changed"] is False
+        assert ok(grace.put(lesson_url(a["id"], K5, "work"), json=dict(text="p.9", link="", files=[])))["lessons"][0]["work"]["text"] == "p.9"
+        no(grace.put(lesson_url(b["id"], K8, "work"), json=dict(text="x", link="", files=[])), 400, "You cannot change this absence.")
+        no(grace.post(f"/api/relief/absences/{b['id']}/cancel", json=dict(why="x")), 400, "You cannot change this absence.")
+        cancel_all(grace, a["id"]); cancel_all(eve, b["id"])
+
+@t
+def another_teachers_absence_is_403_and_hides_the_reason():
+    with published(APUB):
+        eve, sam, grace, team = staff(EVE), staff(SAM), staff(GRACE), staff(TEAMER)
+        r = ok(ask(eve, reason="Other", reason_text="A private matter", remarks="Quiet please"))
+        i = r["id"]
+        fid = ok(upload(eve, i))["id"]
+        ok(eve.put(lesson_url(i, K5, "work"), json=dict(text="", link="", files=[dict(id=fid, name="notes.pdf")])))
+        kept = AB.load(i)
+        calls = [("GET", f"/api/relief/absences/{i}", None), ("POST", f"/api/relief/absences/{i}/acknowledge", None),
+                 ("PUT", lesson_url(i, K5, "work"), dict(text="x", link="", files=[])), ("POST", lesson_url(i, K5, "not-needed"), dict(why="x")),
+                 ("POST", lesson_url(i, K8, "needed"), None), ("PUT", lesson_url(i, K5, "relief"), dict(relief=FLEX)),
+                 ("POST", f"/api/relief/absences/{i}/cancel", dict(why="x")), ("GET", f"/api/relief/files/{i}/{fid}", None)]
+        for method, url, body in calls:
+            no(sam.open(url, method=method, json=body), 403, NOT_YOURS)
+        no(upload(sam, i), 403, NOT_YOURS)
+        assert AB.load(i) == kept, "nothing changed"
+        for gone in ("abcdef123456", "nope"):       # someone who may not open every absence cannot tell a missing one from another's
+            no(sam.get(f"/api/relief/absences/{gone}"), 403, NOT_YOURS)
+            no(sam.post(f"/api/relief/absences/{gone}/cancel", json=dict(why="x")), 403, NOT_YOURS)
+            no(grace.get(f"/api/relief/absences/{gone}"), 404, GONE_ABS)
+        seen = [sam.get("/api/relief/absences/mine"), sam.get("/api/relief/people"), sam.get("/api/relief/lessons?dates=2026-10-13")]
+        assert i not in [x["id"] for x in seen[0].get_json()["absences"]]
+        for x in seen: assert b"A private matter" not in x.data and b"Other" not in x.data, x.data[:200]
+        for c in (eve, grace, team):      # the absent teacher, management (not the planner) and the relief team may open it
+            got = ok(c.get(f"/api/relief/absences/{i}"))
+            assert got["reason"] == "Other" and got["reason_text"] == "A private matter"
+            assert c.get(f"/api/relief/files/{i}/{fid}").status_code == 200
+        cancel_all(eve, i)
+
+@t
+def files_round_trip_and_rights():
+    with published(APUB):
+        eve, grace, team, sam = staff(EVE), staff(GRACE), staff(TEAMER), staff(SAM)
+        i = ok(ask(grace))["id"]
+        f = ok(upload(eve, i, "Week 3 notes.PDF", b"%PDF-1 week 3"))
+        assert f["name"] == "Week 3 notes.PDF" and f["size"] == len(b"%PDF-1 week 3") and len(f["id"]) == 12, f
+        g = ok(upload(grace, i, "slides.pptx", b"PK slides"))            # the planner may add files too
+        ok(eve.put(lesson_url(i, K5, "work"), json=dict(text="See the notes", link="", files=[f, g])))
+        r = eve.get(f"/api/relief/files/{i}/{f['id']}")
+        assert r.status_code == 200 and r.data == b"%PDF-1 week 3", r.status_code
+        assert r.headers["Content-Disposition"].startswith("attachment") and "Week 3 notes.PDF" in r.headers["Content-Disposition"], r.headers
+        assert "no-store" in r.headers["Cache-Control"]
+        for c in (grace, team): assert c.get(f"/api/relief/files/{i}/{g['id']}").data == b"PK slides"
+        no(sam.get(f"/api/relief/files/{i}/{f['id']}"), 403, NOT_YOURS)
+        no(eve.get(f"/api/relief/files/{i}/abcdef123456"), 404, "That file is not there any more.")
+        no(eve.get(f"/api/relief/files/{i}/x.y"), 404, "That file is not there any more.")
+        before = files_in(os.path.join(FL.DIR, i))
+        no(upload(team, i), 403, "You cannot change this absence.")        # the team may open it, not add to it
+        no(upload(sam, i), 403, NOT_YOURS)
+        no(upload(eve, i, "run.exe", b"MZ"), 400, FL.WRONG_KIND)
+        no(upload(eve, i, "empty.pdf", b""), 400, FL.WRONG_KIND)
+        no(eve.post(f"/api/relief/absences/{i}/files", data={}, content_type="multipart/form-data"), 400, FL.WRONG_KIND)
+        old = FL.MAX
+        try:
+            FL.MAX = 100
+            no(upload(eve, i, "big.pdf", b"x" * 101), 400, FL.TOO_BIG)                       # read in a bounded way
+            no(upload(eve, i, "huge.pdf", b"x" * (200 * 1024)), 400, FL.TOO_BIG)              # refused from its length
+        finally: FL.MAX = old
+        assert files_in(os.path.join(FL.DIR, i)) == before, "nothing half-saved"
+        cancel_all(eve, i)
+        no(upload(eve, i), 400, "This absence was cancelled.")
+        assert eve.get(f"/api/relief/files/{i}/{f['id']}").status_code == 200, "a cancelled absence's files still open"
+        no(upload(eve, "abcdef123456"), 403, NOT_YOURS)
+        no(upload(grace, "abcdef123456"), 404, GONE_ABS)
+
+@t
+def planned_csv_has_no_reason_and_no_formulas():
+    with published(APUB):
+        grace, team, eve = staff(GRACE), staff(TEAMER), staff(EVE)
+        a = ok(ask(grace, reason="Other", reason_text="Secret clinic visit", remarks="=HYPERLINK(\"http://x.test\")",
+                   lessons=[dict(key=K5, relief=SAM), dict(key=K8, needed=True)]))["id"]
+        b = ok(ask(eve, dates=["2026-10-27"], reason="Child sick"))["id"]           # asked, not planned: not in the file
+        c = ok(ask(team, dates=["2026-11-10"], remarks="Course"))["id"]
+        d = ok(ask(team, dates=["2026-10-27"], periods=[8, 8], lessons=[dict(key=lk(APUB, 8).replace("2026-10-13", "2026-10-27"), needed=True)]))["id"]
+        cancel_all(team, d)
+        r = grace.get("/api/relief/planned.csv?start=2026-10-13&end=2026-10-27")
+        assert r.status_code == 200 and r.mimetype == "text/csv" and "attachment" in r.headers["Content-Disposition"], r.status_code
+        text = r.data.decode("utf-8")
+        assert text.startswith("﻿")
+        rows = list(csv.reader(io.StringIO(text.lstrip("﻿"))))
+        assert rows[0] == ["Date", "Absent", "Class / group", "Periods", "Time", "Relief teacher", "Remarks", "Set by"], rows[0]
+        assert rows[1:] == [["2026-10-13", EVE, "1A Science", "P6–P7", "10:30–11:30", SAM, "'=HYPERLINK(\"http://x.test\")", GRACE],
+                            ["2026-10-13", EVE, "5A Art", "P9", "12:00–12:30", "Not chosen yet", "'=HYPERLINK(\"http://x.test\")", GRACE]], rows[1:]
+        for secret in ("Secret clinic visit", "Other", "Child sick", "Medical"): assert secret not in text, secret
+        rows = list(csv.reader(io.StringIO(team.get("/api/relief/planned.csv?start=2026-11-10&end=2026-11-10").data.decode("utf-8").lstrip("﻿"))))
+        assert [x[0] for x in rows[1:]] == ["2026-11-10"] and rows[1][6] == "Course" and rows[1][7] == TEAMER, rows
+        assert len(list(csv.reader(io.StringIO(grace.get("/api/relief/planned.csv").data.decode("utf-8"))))) == 1, "today (12 Oct) has none"
+        for bad in ("start=nope", "start=2026-10-27&end=2026-10-13", "end=13/10/2026"):
+            no(grace.get("/api/relief/planned.csv?" + bad), 400, "Choose the dates again.")
+        cancel_all(grace, a); cancel_all(eve, b); cancel_all(team, c)
+
+@t
+def nothing_published_and_signed_out_answers():
+    x = "abcdef123456"
+    routes = [("GET", "/api/relief/lessons?dates=2026-10-13"), ("GET", f"/api/relief/free?absent={q(EVE)}&key={q(K5)}"), ("GET", "/api/relief/people"),
+              ("POST", "/api/relief/absences"), ("GET", "/api/relief/absences/mine"), ("GET", "/api/relief/absences/planned"),
+              ("GET", "/api/relief/absences"), ("POST", "/api/relief/absences/seen"), ("GET", f"/api/relief/absences/{x}"),
+              ("POST", f"/api/relief/absences/{x}/acknowledge"), ("PUT", lesson_url(x, K5, "work")), ("POST", lesson_url(x, K5, "not-needed")),
+              ("POST", lesson_url(x, K5, "needed")), ("PUT", lesson_url(x, K5, "relief")), ("POST", f"/api/relief/absences/{x}/cancel"),
+              ("POST", f"/api/relief/absences/{x}/files"), ("GET", f"/api/relief/files/{x}/{x}"), ("GET", "/api/relief/planned.csv")]
+    with published(APUB):
+        team = staff(TEAMER)
+        cm = committee()
+        tc, r = signed_in("teacher", os.environ["TEACHER_CODE"]); assert r.status_code == 302
+        left = A.app.test_client()
+        with left.session_transaction() as s: s["role"], s["who"] = "staff", "Mr Left Lee"
+        for method, url in routes:
+            for c in (A.app.test_client(), cm, tc):
+                no(c.open(url, method=method, json={}), 401, SIGN_IN)
+        no(left.open(routes[2][1], method="GET"), 401, SIGN_IN)
+        with left.session_transaction() as s: assert "role" not in s and "who" not in s, "the session of someone who left is ended"
+    with published(None):
+        for method, url in routes:
+            no(team.open(url, method=method, json={}), 409, NO_PUB)
+            no(A.app.test_client().open(url, method=method, json={}), 401, SIGN_IN)
+    with published(APUB):
+        assert ok(team.get("/api/relief/people")), "the session stayed while nothing was published"
+    assert A.NO_RELIEF_PUB == NO_PUB
+
+@t
+def me_has_can_plan_and_can_team():
+    with published(APUB):
+        for name, plan, team in ((EVE, False, False), (GRACE, True, False), (TEAMER, True, True)):
+            me = ok(staff(name).get("/api/relief/me"))
+            assert (me["can_plan"], me["can_team"]) == (plan, team), (name, me)
+        assert set(ok(staff(EVE).get("/api/relief/me"))) == {"name", "depts", "on_team", "on_management", "can_settings", "can_plan", "can_team"}
+        with A.app.test_request_context():
+            _session["role"], _session["who"] = "staff", GRACE
+            assert A.relief_has("relief") and A.relief_has("relief.plan") and not A.relief_has("relief.team")
+            assert A.relief_has("relief.settings") and not A.relief_has("relief.save") and not A.relief_has("relief.nope")
+            _session["who"] = TEAMER
+            assert all(A.relief_has(r) for r in ("relief", "relief.plan", "relief.team", "relief.settings", "relief.save"))
+            _session.clear(); _session["role"] = "committee"
+            assert A.relief_has("relief.settings") and A.relief_has("relief.save")
+            assert not any(A.relief_has(r) for r in ("relief", "relief.plan", "relief.team"))
+            _session.clear()
+            assert not any(A.relief_has(r) for r in ("relief", "relief.plan", "relief.team", "relief.settings", "relief.save"))
+    from relief import web as W
+    assert W._has is A.relief_has and W._me is A.me_staff and W._role is A.role
+    assert "relief_web" in A.app.blueprints
+
 print(f"{COUNT} relief request tests passed")
