@@ -632,6 +632,7 @@
     const flags = [];
     if (Object.keys(d.backup || {}).length) flags.push(`<span class="flag">Backup needed</span>`);
     if (d.short) flags.push(`<span class="flag">Short by ${d.short}</span>`);
+    for (const [n, why] of Object.entries(d.not_free || {})) flags.push(`<span class="flag">Not free: ${esc(n)} ${esc(why)}</span>`);
     const names = d.names.map(n => `<div>${esc(n)}${d.chief === n ? ` <span class="chip">chief</span>` : ""}${(d.backup || {})[n] ? ` <span class="chip amber">backup</span>` : ""}
       <span class="muted small">${esc((d.reasons || {})[n] || "")}</span></div>`).join("");
     const sub = Object.keys((d.backup || {})).length ? `<div class="small muted">${Object.keys(d.backup).map(esc).join(", ")} teaches a lesson then</div>` : "";
@@ -649,7 +650,7 @@
     const d = (made.duties || []).find(x => dutyEq(x, p));
     if (!d) return `<div class="panel"><h3>Who could take it</h3><p class="muted small">That duty is not there any more.</p></div>`;
     const head = `<h3>Who could take it</h3><p class="small"><b>${esc(d.room)}</b> · ${esc(fmtDate(d.date))} ${hhmm(d.start)}–${hhmm(d.end)}</p>
-      <h4>Now</h4><div class="small">${d.names.map(n => `<div>${esc(n)} <button type="button" class="small danger" data-act="whoDrop" data-c="${esc(n)}" title="Take ${esc(n)} off" aria-label="Take ${esc(n)} off" ${S.busy ? "disabled" : ""}>✕</button></div>`).join("") || `<span class="muted">No one</span>`}</div>
+      <h4>Now</h4><div class="small">${d.names.map(n => `<div>${esc(n)}${(d.not_free || {})[n] ? ` <span class="flag">Not free: ${esc(d.not_free[n])}</span>` : ""} <button type="button" class="small danger" data-act="whoDrop" data-c="${esc(n)}" title="Take ${esc(n)} off" aria-label="Take ${esc(n)} off" ${S.busy ? "disabled" : ""}>✕</button></div>`).join("") || `<span class="muted">No one</span>`}</div>
       ${d.locked ? `<p class="small"><span class="muted">Chosen by hand: Make again keeps these names.</span> <button type="button" class="small" data-act="whoAuto" ${S.busy ? "disabled" : ""}>Let the app choose</button></p>` : ""}`;
     if (!S.who) return `<div class="panel">${head}<p class="muted small">Loading…</p></div>`;
     if (S.who.error) return `<div class="panel">${head}<p class="msg bad">${esc(S.who.error)}</p></div>`;

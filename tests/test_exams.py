@@ -455,6 +455,39 @@ def common_test_supervised_by_lesson_teacher():
     duty = next(x for x in d if x["room"] == "3-02")
     assert duty["names"] == ["Ms Chloe Tan"] and duty["reasons"] == {"Ms Chloe Tan": "supervises their own lesson"} and duty["need"] == 1
 
+def _overlaps(duties):
+    return [(a["room"], b["room"], n) for i, a in enumerate(duties) for b in duties[i + 1:]
+            if a["date"] == b["date"] and a["start"] < b["end"] and a["end"] > b["start"] for n in set(a["names"]) & set(b["names"])]
+
+@t
+def common_test_lesson_of_three_classes_is_one_teachers_one_room():
+    import copy
+    pub = copy.deepcopy(_PUB)
+    pub["model"]["lessons"].append(F._lesson(10, 1, 2, 4, "Sec 3", ["3A", "3B", "4A"], "CCE", "Entire Class", ["Mr Ben Ong", "Ms Chloe Tan"], "Hall"))
+    s = _sit([_paper(who="level", minutes=30, date="2026-10-06", start="08:40"),
+              _paper(level="Sec 4", who="level", minutes=30, date="2026-10-06", start="08:40")],
+             levels=["Sec 3", "Sec 4"], kind="test", supervision="lesson")
+    x = _xset()
+    MK.make(pub, F.CAL, s, x)
+    d = s["made"]["duties"]
+    assert {x["room"] for x in d} == {"3-01", "3-02", "4-01"}, d
+    assert _overlaps(d) == [], _overlaps(d)
+    own = [(x["room"], n) for x in d for n, why in x["reasons"].items() if why == "supervises their own lesson"]
+    assert sorted(n for _, n in own) == ["Mr Ben Ong", "Ms Chloe Tan"] and len({r for r, _ in own}) == 2, own
+    rest = next(x for x in d if not any(v == "supervises their own lesson" for v in x["reasons"].values()))
+    assert len(rest["names"]) == 2 and rest["short"] == 0, rest
+
+@t
+def common_test_teacher_not_free_is_not_used_and_halls_get_invigilators():
+    s = _sit([_paper(subject="Mathematics", minutes=30, date="2026-10-05", start="07:50")], kind="test", supervision="lesson")
+    x = _xset(); x["never"] = ["Ms Chloe Tan"]
+    d, _ = _duties(s, xset=x)
+    duty = next(y for y in d if y["room"] == "3-02")
+    assert "Ms Chloe Tan" not in duty["names"] and duty["need"] == 2 and len(duty["names"]) == 2, duty
+    s["seating"]["home_rooms"] = False
+    d, _ = _duties(s, rooms=("Hall",))
+    assert d[0]["room"] == "Hall" and d[0]["need"] == 2 and "supervises their own lesson" not in d[0]["reasons"].values(), d[0]
+
 @t
 def locked_names_kept():
     s = _sit([_paper(who="level", date="2026-10-05", start="07:50")])
@@ -538,6 +571,28 @@ def a_name_that_left_is_replaced_and_the_replacement_kept():
     assert s["pins"]["duties"][key + "|3-01"] == d["names"], s["pins"]["duties"]
     _mk(s)
     assert _duty(s, key, "3-01")["names"] == d["names"] and s["made"]["gone"] == []
+
+@t
+def hand_picked_names_are_checked():
+    s = _mk(_sit([_paper(who="level", date="2026-10-05", start="07:50")], days=dict(SEC3)))
+    key = "2026-10-05 07:50"
+    MK.set_invigilators(s, key, "3-01", ["Mr Daniel Koh"])
+    _mk(s, only=key)
+    d = _duty(s, key, "3-01")
+    assert d["names"] == ["Mr Daniel Koh"] and d["backup"] == {"Mr Daniel Koh": [2]}, d
+    assert d["reasons"]["Mr Daniel Koh"] == "chosen by hand; teaches 4A Mathematics 08:00–08:40: needs a backup", d["reasons"]
+    assert MK.summary(_PUB, F.CAL, s, _xset())["counts"]["backups"] >= 1
+    other = _duty(s, key, "3-02")["names"]
+    MK.set_invigilators(s, key, "3-01", ["Mr Ivan Lee", other[0]])
+    MK.set_invigilators(s, key, "3-02", [other[0]])
+    _mk(s, only=key)
+    d = _duty(s, key, "3-01")
+    assert d["names"] == ["Mr Ivan Lee", other[0]], d
+    assert d["not_free"] == {"Mr Ivan Lee": "is not available then (a Must rule)", other[0]: "is on another duty then (3-02)"}, d["not_free"]
+    assert _duty(s, key, "3-02")["not_free"] == {other[0]: "is on another duty then (3-01)"}
+    x = _xset(); x["never"] = ["Mr Ivan Lee"]
+    MK.make(_PUB, F.CAL, s, x, only=key)
+    assert _duty(s, key, "3-01")["not_free"]["Mr Ivan Lee"] == "is on the never list"
 
 @t
 def only_keeps_the_other_sittings_duties_as_they_were():

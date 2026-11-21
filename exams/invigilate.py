@@ -57,6 +57,30 @@ def _classes(rows):
     return ", ".join(out)
 
 
+def _free(name, view, start, end, duties, xset, skip=None):
+    """'free then' for one person from start to end on the view's date: (why not, "" when free; the lessons they teach then
+    that still run). The one check behind the candidates, the names chosen by hand and the lesson teachers of a test.
+    duties: the duties already made (any date); skip: the duty being filled."""
+    rules = xset["rules"]
+    if name in xset["never"]:
+        return "is on the never list", []
+    if _hit(view["blocked"].get(name, ()), start, end):
+        return "is not available then (a Must rule)", []
+    on_date = [d for d in duties if d is not skip and d["date"] == view["date"]]
+    clash = next((d for d in on_date if name in d["names"] and d["start"] < end and d["end"] > start), None)
+    if clash:
+        return "is on another duty then (%s)" % clash["room"], []
+    most = rules.get("max_per_day")
+    if most and sum(1 for d in on_date if name in d["names"]) >= most:
+        return "has %d %s that day already" % (most, "duty" if most == 1 else "duties"), []
+    return "", [l for l in view["lessons"] if name in l["teachers"] and _hit(l["running"], start, end)]
+
+
+def _teaches(running):
+    return "; ".join("teaches %s %s %s–%s: needs a backup" % (", ".join(l["classes"]), l["subject"], _days.hhmm(l["start"]),
+                                                             _days.hhmm(l["end"])) for l in running)
+
+
 def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exclude=(), _other=None) -> dict:
     model = pub["model"]
     rules = xset["rules"]
@@ -65,7 +89,6 @@ def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exc
     view = _days.day_view(pub, cal, sched, date)
     mine = duty_minutes(duties)
     other = _other if _other is not None else _other_minutes(sched, date[:4])
-    on_date = [d for d in duties if d["date"] == date]
     subjects = set(subjects)
     taught = {}
     for l in model.get("lessons") or []:
@@ -73,25 +96,20 @@ def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exc
             taught.setdefault(n, set()).add(l["subject"])
     groups = dict(freed=[], free=[], backups=[], need_backup=[])
     for name in pool:
-        if name in exclude or name in xset["never"]:
+        if name in exclude:
             continue
-        if _hit(view["blocked"].get(name, ()), start, end):
-            continue
-        if any(name in d["names"] and d["start"] < end and d["end"] > start for d in on_date):
-            continue
-        if rules.get("max_per_day") and sum(1 for d in on_date if name in d["names"]) >= rules["max_per_day"]:
+        why, running = _free(name, view, start, end, duties, xset)
+        if why:
             continue
         if rules.get("not_own_subject") and subjects & taught.get(name, set()):
             continue
         stopped = [l for l in view["lessons"] if name in l["teachers"] and _hit(l["stopped"], start, end)]
-        running = [l for l in view["lessons"] if name in l["teachers"] and _hit(l["running"], start, end)]
         c = dict(name=name, minutes=mine.get(name, 0), other=other.get(name, 0), reason="", rows=[])
         if running:
             if name in xset["backups"]:
                 continue
             c["rows"] = [l["row"] for l in running]
-            c["reason"] = "; ".join("teaches %s %s %s–%s: needs a backup" % (", ".join(l["classes"]), l["subject"],
-                                    _days.hhmm(l["start"]), _days.hhmm(l["end"])) for l in running)
+            c["reason"] = _teaches(running)
             groups["need_backup"].append(c)
         elif name in xset["backups"]:
             c["reason"] = "backup invigilator"
@@ -109,16 +127,51 @@ def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exc
     return groups
 
 
+def _lesson_teachers(model, view, sit, duties, ids_of, students, every, xset):
+    """a common test supervised by the lesson teachers: each teacher of a lesson stopped at the start supervises one ordinary
+    classroom of the sitting (not a hall, not an access room), the one holding most of that lesson's students, else the
+    lesson's own room; a teacher already used or not free for the duty time is left out. Rooms left without one are
+    filled by the normal picks."""
+    rooms = [d for d in duties if not d["locked"] and not (xset["rooms"].get(d["room"]) or {}).get("hall")
+             and not (xset["rooms"].get(d["room"]) or {}).get("access")]
+    if not rooms:
+        return
+    groups_of = {x["id"]: x.get("groups") or [] for x in model.get("students") or []}
+    classes = {students[sid]["cls"] for d in duties for sid in ids_of[id(d)]}
+    lessons = model.get("lessons") or []
+    for l in view["lessons"]:
+        if not (set(l["classes"]) & classes and _hit(l["stopped"], sit["start"], sit["start"] + 1)):
+            continue
+        group = (lessons[l["row"]] if l["row"] < len(lessons) else {}).get("group")
+        mine = {sid for sid in students if students[sid]["cls"] in l["classes"]
+                and (group == "Entire Class" or group in groups_of.get(sid, []))}
+        for n in l["teachers"]:
+            count = {id(d): len(mine & set(ids_of[id(d)])) for d in rooms}
+            best = sorted(rooms, key=lambda d: (-count[id(d)], len(d["names"]), d["room"] != l["room"], d["room"]))
+            d = best[0] if count[id(best[0])] else next((x for x in rooms if x["room"] == l["room"]), None)
+            if d is None:
+                continue
+            why, running = _free(n, view, d["start"], d["end"], every, xset, skip=d)
+            if why or running or n in d["names"]:
+                continue
+            d["names"].append(n)
+            d["reasons"][n] = "supervises their own lesson"
+    for d in rooms:
+        if d["names"]:
+            d["need"] = len(d["names"])
+
+
 def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
     """the duties of the sittings in seats_by_key, filled. A hand-set duty (a pin) keeps exactly its pinned names and is filled
     only up to the number of its names that left the timetable: refill[pin key] (dropped before) plus pinned names that are
-    no longer people. `fixed` duties (sittings kept as they are) are returned unchanged and count as other duties."""
+    no longer people; each name chosen by hand is checked as 'free then' (a backup when their lesson runs, else a not_free
+    reason). `fixed` duties (sittings kept as they are) are returned unchanged and count as other duties."""
     model = pub["model"]
     rules = xset["rules"]
     people = {p["name"] for p in relief.people.people(pub, relief.settings.load(pub)["extra_staff"])}
     pins = (sched.get("pins") or {}).get("duties") or {}
     common = sched.get("supervision") == "lesson"
-    duties, subjects_of, places = [], {}, {}
+    duties, subjects_of, places, views, ids_of, by_sit = [], {}, {}, {}, {}, []
     papers = {p["id"]: p for p in sched.get("papers") or []}
     for sit in _seating.sittings(sched):
         if sit["key"] not in (seats_by_key or {}):
@@ -126,7 +179,8 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
         seated = seats_by_key[sit["key"]] or {}
         students = _seating.sitting_students(sit, sched, model)
         subjects_of[sit["key"]] = [papers[i]["subject"] for i in sit["papers"] if i in papers]
-        view = _days.day_view(pub, cal, sched, sit["date"])
+        view = views[sit["key"]] = _days.day_view(pub, cal, sched, sit["date"])
+        mine = []
         for room, seats in seated.items():
             ids = [sid for sid, _ in seats if sid in students]
             if not ids:
@@ -135,7 +189,8 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
             room_set = xset["rooms"].get(room) or {}
             n_need = need(room_set, len(ids), [students[s].get("aa") for s in ids], rules)
             duty = dict(key=sit["key"], room=room, date=sit["date"], start=sit["start"] - rules["arrive"], end=end, need=n_need,
-                        names=[], chief=None, reasons={}, backup={}, short=0, locked=False)
+                        names=[], chief=None, reasons={}, backup={}, not_free={}, short=0, locked=False)
+            ids_of[id(duty)] = ids
             pk = "%s|%s" % (sit["key"], room)
             pin = pins.get(pk)
             if pin is not None:
@@ -145,19 +200,14 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
                         duty["names"].append(n)
                         duty["reasons"][n] = "chosen by hand"
                 places[id(duty)] = (refill or {}).get(pk, 0) + sum(1 for n in pin if n not in people)
-            elif common:
-                classes = {students[s]["cls"] for s in ids}
-                for l in view["lessons"]:
-                    if set(l["classes"]) & classes and _hit(l["stopped"], sit["start"], sit["start"] + 1):
-                        for n in l["teachers"]:
-                            if n not in duty["names"]:
-                                duty["names"].append(n)
-                                duty["reasons"][n] = "supervises their own lesson"
-                if duty["names"]:
-                    duty["need"] = len(duty["names"])
             duties.append(duty)
-    duties.sort(key=lambda d: (d["date"], d["start"], d["room"]))
+            mine.append(duty)
+        by_sit.append((sit, students, mine))
     every = duties + list(fixed)
+    if common:
+        for sit, students, mine in by_sit:
+            _lesson_teachers(model, views[sit["key"]], sit, mine, ids_of, students, every, xset)
+    duties.sort(key=lambda d: (d["date"], d["start"], d["room"]))
     other = {}
     for d in duties:
         year = d["date"][:4]
@@ -168,6 +218,7 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
             left = min(left, places.get(id(d), 0))
         if left > 0 and not (common and not d["locked"] and d["names"]):
             others = [x for x in every if x is not d]
+            hall = (xset["rooms"].get(d["room"]) or {}).get("hall")
             got = candidates(pub, cal, sched, xset, d["date"], d["start"], d["end"], others, subjects_of[d["key"]],
                              exclude=d["names"], _other=other[year])
             for group in ("freed", "free", "backups", "need_backup"):
@@ -182,4 +233,14 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
         d["short"] = max(0, d["need"] - len(d["names"]))
         if (xset["rooms"].get(d["room"]) or {}).get("hall") and d["names"]:
             d["chief"] = next((n for n in xset["chiefs"] if n in d["names"]), d["names"][0])
+    for d in duties:
+        for n in d["names"]:
+            if d["reasons"].get(n) != "chosen by hand":
+                continue
+            why, running = _free(n, views[d["key"]], d["start"], d["end"], every, xset, skip=d)
+            if why:
+                d["not_free"][n] = why
+            elif running:
+                d["backup"][n] = [l["row"] for l in running]
+                d["reasons"][n] = "chosen by hand; " + _teaches(running)
     return sorted(every, key=lambda d: (d["date"], d["start"], d["room"]))
