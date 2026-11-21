@@ -325,7 +325,8 @@ username and a password, and you are signed in as the first admin. If every admi
 
 ### History
 
-The history page keeps who changed what, and when, for two years. A change to the setup can be put back from there. The
+The history page keeps who changed what, and when, for two years. A change to the setup can be put back from there,
+and an admin can put back a change made on the admin page (a group, departments, an extra, a note, switched off or on). The
 committee sees everything; a head of department sees changes to their departments and their own; everyone else who can
 change something sees their own. After signing in, the home page shows "Since you last signed in", a short summary of
 what changed since the person's previous sign-in. The committee can download the history as an Excel file.
