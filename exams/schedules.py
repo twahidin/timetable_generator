@@ -155,8 +155,12 @@ def _check(s, pub):
         if x.get("student") not in students: raise ValueError(f"{x.get('student')} is not on the published timetable.")
 
 
-def save(sched, pub, cal, by) -> dict:
-    _check(sched, pub)
+def save(sched, pub, cal, by, check=True) -> dict:
+    """check the schedule against the published timetable and write it at once. check=False: an approval action (approve,
+    send back, withdraw, someone is away), which changes none of what the timetable is checked for, so a schedule
+    approved before a new publish can still be withdrawn"""
+    if check:
+        _check(sched, pub)
     out = dict(sched, saved_at=_now(), saved_by=by)
     with _LOCK:
         os.makedirs(DIR, exist_ok=True)

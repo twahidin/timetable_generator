@@ -891,9 +891,9 @@ def _exam_json():
     d = request.get_json(force=True, silent=True)
     return d if isinstance(d, dict) else {}
 
-def _save_exam(sched, pub, by):
+def _save_exam(sched, pub, by, check=True):
     """save a schedule; (the saved schedule, None) or (None, the 400 answer): malformed JSON never gives a 500"""
-    try: return exams_schedules.save(sched, pub, _exam_cal(pub), by), None
+    try: return exams_schedules.save(sched, pub, _exam_cal(pub), by, check=check), None
     except ValueError as e: return None, ({"error": str(e)}, 400)
     except BAD_INPUT: return None, ({"error": exams_schedules.WRONG}, 400)
 
@@ -1266,9 +1266,10 @@ def _exam_review_reply(pub, s):
                    can_send=exams_approval.blocked(s, model, stale, errors), can_approve=_exams_can_approve(),
                    unsent=exams_approval.changes(s, model) if st == "approved" else [], review=rv)
 
-def _exam_approval(id, act, approver=False):
+def _exam_approval(id, act, approver=False, check=False):
     """run act(pub, sched, who, now, body) on the stored schedule, save and answer with the review; locked from loading to
-    saving, as _exam_changed is"""
+    saving, as _exam_changed is. Only Send checks the schedule against the timetable (check=True): approve, send back,
+    withdraw and someone is away still work after a new publish"""
     pub, who, err = _exams_gate()
     if err: return err
     if approver and not _exams_can_approve(): return {"error": ONLY_APPROVE}, 403
@@ -1278,7 +1279,7 @@ def _exam_approval(id, act, approver=False):
         try: act(pub, s, who, exams_schedules._now(), _exam_json())
         except ValueError as e: return {"error": str(e)}, 400
         except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
-        saved, bad = _save_exam(s, pub, who)
+        saved, bad = _save_exam(s, pub, who, check=check)
     return bad or _exam_review_reply(pub, saved)
 
 @app.get("/api/exams/<id>/review")
@@ -1297,7 +1298,7 @@ def _exam_send(pub, s, by, now, b):
 
 @app.post("/api/exams/<id>/send")
 @need("committee", "staff")
-def exams_send(id): return _exam_approval(id, _exam_send)
+def exams_send(id): return _exam_approval(id, _exam_send, check=True)
 
 @app.post("/api/exams/<id>/approve")
 @need("committee", "staff")

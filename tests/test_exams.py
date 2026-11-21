@@ -1903,5 +1903,33 @@ def an_approve_during_a_make_is_kept():
         now = SC.load(id)
         assert now["status"] == "approved" and now["approved"] and now["log"][-1]["what"] == "approved", (now["status"], now["log"])
 
+def _without(sid, at="2026-10-02T09:30:00"):
+    """the timetable published again without one student"""
+    pub = copy.deepcopy(_PUB); pub["meta"]["published_at"] = at
+    pub["model"]["students"] = [x for x in pub["model"]["students"] if x["id"] != sid]
+    return pub
+
+@t
+def approval_actions_work_after_a_publish_drops_a_student():
+    _setup()
+    acc = [dict(student="3A-05", extra=25, own_room=False, reader=False, scribe=False, note="")]
+    with published(_PUB):
+        c = committee()
+        s = _exam(c); id = s["id"]
+        times = {"English": "07:50", "Pure Chemistry": "10:00"}
+        s["papers"] = [dict(p, date="2026-10-05", start=times[p["subject"]]) for p in s["papers"] if p["subject"] in times]
+        s["access"] = acc
+        assert c.put("/api/exams/" + id, json=s).status_code == 200
+        assert c.post(f"/api/exams/{id}/make", json={}).status_code == 200
+        assert c.post(f"/api/exams/{id}/send").status_code == 200 and c.post(f"/api/exams/{id}/approve").status_code == 200
+    with published(_without("3A-05")):
+        body = dict(key=KEY1, room="3-01", away="Ms Chloe Tan", name="Mr Ben Ong")
+        r = c.post(f"/api/exams/{id}/away", json=body); assert r.status_code == 200, r.data
+        assert c.get(f"/api/exams/{id}/review").status_code == 200
+        r = c.put("/api/exams/" + id, json=SC.load(id))
+        assert r.status_code == 400 and r.get_json()["error"] == "3A-05 is not on the published timetable.", r.data
+        r = c.post(f"/api/exams/{id}/withdraw"); assert r.status_code == 200, r.data
+        assert SC.on_site() == [] and SC.load(id)["status"] == "withdrawn"
+
 
 print(f"{COUNT} exams tests passed")
