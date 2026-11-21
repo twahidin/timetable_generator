@@ -889,9 +889,12 @@ def _exam_view(pub, sched):
                 rooms_by_key=_exam_rooms_by_key(pub, cal, sched))
 
 def _exam_rooms_by_key(pub, cal, sched):
-    """for each sitting, every exam room with its seats and what keeps it busy then (empty text: free)"""
+    """for each sitting, every exam room with its seats and what keeps it busy then (empty text: free); a room another
+    overlapping sitting of the made schedule holds is busy, so the move selects do not offer it"""
     xset = exams_settings.load(pub)
-    return {x["key"]: [[r["name"], r["seats"], r["busy"]] for r in exams_seating.rooms_free(pub, cal, sched, x, xset, set())] for x in exams_seating.sittings(sched)}
+    held = exams_make.held(pub, sched, xset)
+    return {x["key"]: [[r["name"], r["seats"], r["busy"]] for r in exams_seating.rooms_free(pub, cal, sched, x, xset, held.get(x["key"], set()))]
+            for x in exams_seating.sittings(sched)}
 
 @app.get("/exams")
 @need("committee", "staff")

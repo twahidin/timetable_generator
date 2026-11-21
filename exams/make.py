@@ -67,6 +67,26 @@ def _span(sit, students, rules, duties):
     return sit["start"] - rules["arrive"], (max(ends) if ends else sit["start"]) + rules["stay"]
 
 
+def _spans(pub, sched, xset, duties, seats):
+    """(sitting, start, end, rooms) of every sitting: from its duties when it has them, else its students' times"""
+    out = []
+    for sit in _seat.sittings(sched):
+        lo, hi = _span(sit, _seat.sitting_students(sit, sched, pub["model"]), xset["rules"], duties)
+        out.append((sit, lo, hi, set((seats or {}).get(sit["key"]) or {})))
+    return out
+
+
+def _held(spans, sit, lo, hi):
+    return {r for s2, a, b, rooms in spans if s2["key"] != sit["key"] and s2["date"] == sit["date"] and a < hi and b > lo for r in rooms}
+
+
+def held(pub, sched, xset) -> dict:
+    """{sitting key: the rooms other sittings of the made schedule seat students in while it runs}"""
+    made = sched.get("made") or {}
+    spans = _spans(pub, sched, xset, made.get("duties") or [], made.get("seats") or {})
+    return {sit["key"]: _held(spans, sit, lo, hi) for sit, lo, hi, _ in spans}
+
+
 def make(pub, cal, sched, xset, only=None) -> dict:
     """seats and duties for every sitting; with only (a sitting key), that sitting (and any sitting not made before) is made
     again and the others are kept as they were"""
@@ -80,6 +100,7 @@ def make(pub, cal, sched, xset, only=None) -> dict:
     gone, dropped = _gone(pub, sched, model, redo)
     pins = sched["pins"]
     seats, unseated, used = {}, {}, []
+    kept = [x for x in _spans(pub, sched, xset, old_duties, keep_seats) if x[0]["key"] not in redo]   # earlier and later
     for sit in sits:
         key = sit["key"]
         students = _seat.sitting_students(sit, sched, model)
@@ -88,7 +109,7 @@ def make(pub, cal, sched, xset, only=None) -> dict:
         else:
             lo, hi = _span(sit, students, xset["rules"], old_duties)
         if key in redo:
-            taken = {r for d, a, b, rooms in used if d == sit["date"] and a < hi and b > lo for r in rooms}
+            taken = {r for d, a, b, rooms in used if d == sit["date"] and a < hi and b > lo for r in rooms} | _held(kept, sit, lo, hi)
             free = [r for r in _seat.rooms_free(pub, cal, sched, sit, xset, taken) if r["busy"] == ""]
             res = _seat.seat(sit, students, free, sched, model, (pins.get("rooms") or {}).get(key, {}))
             seats[key] = {r: s for r, s in res["rooms"].items() if s}

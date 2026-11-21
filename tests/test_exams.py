@@ -400,6 +400,24 @@ def pins_win():
     st, r = _seated(s, pins={"3A-07": "3-02", "9Z-01": "3-02", "3A-08": "Nowhere"})
     assert "3A-07" in [x for x, _ in r["rooms"]["3-02"]] and "3A-07" not in [x for x, _ in r["rooms"]["3-01"]], r
 
+@t
+def combined_venue_and_its_part_not_both_used():
+    import copy
+    s = _sit([_paper(who="level", date="2026-10-06", start="08:00")])
+    s["seating"]["home_rooms"] = False
+    x = _xset(("LT1&2", "LT2")); x["rooms"]["LT1&2"]["seats"] = 50
+    sit = _first(s)
+    free = [r for r in SE.rooms_free(_PUB, F.CAL, s, sit, x, set()) if r["busy"] == ""]
+    assert sorted(r["name"] for r in free) == ["LT1&2", "LT2"], free
+    r = SE.seat(sit, SE.sitting_students(sit, s, _M), free, s, _M, {})
+    assert [k for k, v in r["rooms"].items() if v] == ["LT1&2"] and len(r["unseated"]) == 10, r["unseated"]
+    m = copy.deepcopy(_M); m["classes"][0]["home"] = "LT2"
+    s["seating"]["home_rooms"] = True
+    x = _xset(("LT1&2", "LT2"))
+    free = [r for r in SE.rooms_free(dict(model=m), F.CAL, s, sit, x, set()) if r["busy"] == ""]
+    r = SE.seat(sit, SE.sitting_students(sit, s, m), free, s, m, {})
+    assert [k for k, v in r["rooms"].items() if v] == ["LT2"] and len(r["rooms"]["LT2"]) == 40 and len(r["unseated"]) == 20, r
+
 def _duties(s, rooms=("3-01", "3-02"), xset=None, **kw):
     x = xset or _xset()
     seats = {}
@@ -602,6 +620,25 @@ def only_keeps_the_other_sittings_duties_as_they_were():
     _mk(s, only="2026-10-05 07:50")
     assert [x for x in s["made"]["duties"] if x["key"] == later] == before
     assert later + "|3-01" not in s["pins"]["duties"] and not any(k.startswith(later) for k in s["pins"]["duties"])
+
+@t
+def remaking_one_sitting_leaves_a_later_sittings_room():
+    papers = [_paper(minutes=120, date="2026-10-06", start="08:00", who="students", students=["3A-%02d" % i for i in range(1, 31)]),
+              _paper(subject="Mathematics", date="2026-10-06", start="09:00", who="students", students=["3B-%02d" % i for i in range(1, 31)])]
+    s = _sit(papers, days={"2026-10-06": dict(levels=["Sec 3"], whole=True)})
+    s["seating"]["home_rooms"] = False
+    x = ES.defaults()
+    x["rooms"] = {"Hall": dict(seats=40, rows=None, cols=None, hall=True, access=False, note=""),
+                  "Lab 3-08": dict(seats=40, rows=None, cols=None, hall=False, access=False, note="")}
+    MK.make(_PUB, F.CAL, s, x)
+    first, later = "2026-10-06 08:00", "2026-10-06 09:00"
+    assert list(s["made"]["seats"][first]) == ["Hall"] and list(s["made"]["seats"][later]) == ["Lab 3-08"], s["made"]["seats"]
+    assert MK.held(_PUB, s, x) == {first: {"Lab 3-08"}, later: {"Hall"}}
+    got = {r["name"]: r["busy"] for r in SE.rooms_free(_PUB, F.CAL, s, SE.sittings(s)[0], x, MK.held(_PUB, s, x)[first])}
+    assert got == {"Hall": "", "Lab 3-08": "used by another sitting"}, got
+    MK.move(s, first, ["3A-01"], "Lab 3-08")
+    MK.make(_PUB, F.CAL, s, x, only=first)
+    assert list(s["made"]["seats"][first]) == ["Hall"] and list(s["made"]["seats"][later]) == ["Lab 3-08"], s["made"]["seats"]
 
 @t
 def gone_people_are_named_once():
@@ -826,6 +863,14 @@ def view_carries_levels_and_the_rooms_of_each_sitting():
         rooms = {n: (seats, busy) for n, seats, busy in v["rooms_by_key"]["2026-10-05 09:00"]}
         assert rooms["Hall"][1] == "rain room for PE with 4A" and rooms["3-01"][1] == "", rooms
         assert rooms["Hall"][0] > 0
+        s["papers"] = [dict(p, date="2026-10-05", start="09:00") for p in s["papers"] if p["subject"] == "English"]
+        s["papers"] += [dict(s["papers"][0], id="zz", subject="Mathematics", start="09:30")]
+        assert c.put("/api/exams/" + s["id"], json=s).status_code == 200
+        assert c.post(f"/api/exams/{s['id']}/make", json={}).status_code == 200
+        v = c.get(f"/api/exams/{s['id']}/view").get_json()
+        first = {n: busy for n, _, busy in v["rooms_by_key"]["2026-10-05 09:00"]}
+        later = set(v["made"]["seats"]["2026-10-05 09:30"])
+        assert later and all(first[n] == "used by another sitting" for n in later), (first, later)
 
 @t
 def make_refuses_without_students():

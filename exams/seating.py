@@ -142,11 +142,15 @@ def seat(sitting, students, rooms, sched, model, pins) -> dict:
     by_room = {r["name"]: r for r in rooms}
     put = {r["name"]: [] for r in rooms}
     left = {sid: True for sid in students}
+    parts = model.get("room_parts") or {}
+    shut = set()   # a combined venue and its own rooms are one space: once one of them has a student, the others are shut
 
     def room_left(name):
-        return _space(by_room[name], spacing) - len(put[name])
+        return 0 if name in shut else _space(by_room[name], spacing) - len(put[name])
 
     def place(sid, name):
+        if not put[name]:
+            shut.update(n for n in _related(name, parts) if n != name)
         put[name].append(sid)
         left.pop(sid, None)
 
