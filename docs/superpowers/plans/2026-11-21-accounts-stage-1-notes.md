@@ -1,6 +1,7 @@
 # Accounts stage 1: notes
 
-Built 21 November 2026 on branch `accounts-stage-1`, subagent-driven (a builder and a reviewer per task, 14 tasks).
+Built 21 November 2026 on branch `accounts-stage-1`, subagent-driven (a builder and a reviewer per task, 14 tasks), then
+one fix wave after the final whole-branch review (5 important findings and 9 minors, all fixed with tests).
 Ledger and task reports: `.superpowers/sdd/2026-11-21-accounts-stage-1-accounts-rights-history/` (not in the repository).
 Design: `../specs/` (accounts and history).
 
@@ -11,11 +12,24 @@ Design: `../specs/` (accounts and history).
 - **Rights by group.** The server decides from the people's records, on every request: committee, leaders, heads (with the
   departments they change), teachers, executives, students; plus extras (Relief team, Exams and events until a date, Admin).
   Every route names the right it needs; the whole map is pinned in `tests/test_routes.py`.
-- **People file** (`accounts/`): who is who, one-time passwords, a recovery code, a lock after wrong tries.
+- **People file** (`accounts/`): who is who, one-time passwords, a recovery code, a lock after wrong tries. Keys a later
+  version adds (at the top of a record or in its extras) are kept through every change.
+- **Only the admin page sees account fields.** Every other reply (relief settings, exams settings, the code slips) gets a
+  person as name, short, departments, role, teaches and staff-only, never a username, group, extras or sign-in.
 - **Admin page** (`/admin`): Staff, Students, Ways in (turn a shared code off or on), code slips, bulk changes with a preview.
+  The committee code (or a committee member without the Admin extra) opening `/admin` goes to "Make the first admin" while
+  no admin can sign in, and is told "Only an admin can open this page." once one can. The committee page says "No admin
+  account yet. Make the first admin" until then, and shows Admin and History links to those who hold them.
+- **Recovery code:** `ADMIN_RECOVERY_CODE` shorter than 16 characters (after trimming) counts as not set; the warnings and
+  Ways in say so. While a usable one is set, Ways in says to remove it once you are back in.
 - **History** (`/history`): who changed what and when, setup changes, refused changes, publishing, relief, exams, sign-ins,
-  account changes; each setup entry keeps the old and new values for a later Put back.
-- **Heads** change only their own departments' lines on step 5 (a refused change is skipped and reported).
+  account changes; each setup entry keeps the old and new values for a later Put back. Account entries are under Where
+  "Admin", sign-ins under "Sign-in" (entries stored before this carry no `where` and are found by their kind), whole-setup
+  replacements under "Setup". A refused change names its row and its departments (as the row was and as the change would
+  have left it), so the department filter finds it. An admin's own change is recorded under their name even when it ends
+  their session; an undo of several fixes names each one; automatic saved copies are "The app".
+- **Heads** change only their own departments' lines on step 5 (a refused change is skipped and reported). The admin page
+  shows a head the departments on their record: none ticked shows none (relief alone keeps step 4's for such a head).
 - **Home page** with tiles by right (Committee page, Timetables, Relief, Exams and events, Admin, History). The Exams and
   events tile shows for the committee too, with no "Until" line.
 - Relief settings and the exams committee now read from the people file (migrated once).
@@ -45,12 +59,20 @@ Design: `../specs/` (accounts and history).
 21. R21 test secrets grepped for in files are at least 16 hex characters: a flaky suite hides real failures.
 22. R22 the one-time password is cleared on a tab switch: nothing.
 23. R23 history step names follow PR #80's page words; old entries keep their stored text: older entries read differently.
+24. R24 (fix wave) picking Where "Sign-in" shows the sign-ins without the Sign-ins toggle: nothing (the toggle still hides them elsewhere).
+25. R25 (fix wave) `/admin` for the committee without the Admin extra: a 403 page with a link back once an admin can sign in,
+    "Make the first admin" before: a committee member sees a dead end they cannot open anyway.
+26. R26 (fix wave) relief's departments for a head with none ticked stay step 4's (`/api/relief/me`): the relief page shows
+    departments the head changes no rows for.
+27. R27 (fix wave) a refused change's `text` starts "Refused: " and says what was tried; its `depts` are judged without
+    applying it (a set's value on a copy of the row): a merge or delete shows the row's departments as it was only.
 
 ## Known limits (deferred minors, grouped)
 
-- **Accounts file:** unknown keys are dropped on read; a non-ISO exams date reads as none; an empty file counts as unreadable;
-  re-adding a name with an old off-list record brings back its old group and extras; an admin can reset the only other admin and
-  then drop their own Admin; recovery code strength is not checked; the same-origin check depends on `X-Forwarded-Host` on Railway.
+- **Accounts file:** a non-ISO exams date reads as none; an empty file counts as unreadable; re-adding a name with an old
+  off-list record brings back its old group and extras; an admin can reset the only other admin and then drop their own Admin;
+  the same-origin check depends on `X-Forwarded-Host` on Railway.
+- If the accounts file cannot be read, shared codes an admin turned off work again until it is fixed (the off switches live in that file).
 - **Sign-in:** while the file is unreadable, a person's code gets 401 and a strike; a recovery race returns 403 with no entry.
 - **History:** whole month files are read (24 months scanned for a week); one gunicorn worker assumed; some follow-ups are dropped
   under a who filter; step names are hard-coded in `history.js`.
@@ -59,7 +81,7 @@ Design: `../specs/` (accounts and history).
 - **Relief settings:** a Management name with an explicit group keeps it; an extra-staff name with a record overwrites its note.
 - **Admin page:** failed loads say "Loading…" or the wrong sentence; no "Saved." after some saves; "Off since" uses the UTC date;
   a partial bulk apply does not say what changed; heads with another role are dropped silently.
-- **Fixes and undo:** undoing a batch records only the newest text; failure isolation is tested for fix and undo only.
+- **Fixes and undo:** failure isolation is tested for fix and undo only.
 - **Leftovers:** unused `static/choice-*` images; duplicated RIGHTS list in `app.py` (a test keeps it equal); test helper clean-ups.
 
 ## Not tried in a browser
@@ -68,7 +90,8 @@ Design: `../specs/` (accounts and history).
 - Some admin page paths: Ways in off/on, the bulk preview with an invalid date, radio focus in the bar menu.
 - The code slips PDF (only by fetch).
 - The 401 banner on the admin page, and the leave-page behaviour after a session ends.
-- The Put-back-free history views on a phone width; the head's step 5 pages with a real head signed in.
+- The history page (which has no Put back yet) on a phone width; the head's step 5 pages with a real head signed in.
+- The committee page's new header links (Admin, History) and the "Make the first admin" line (checked by tests on the files only).
 
 ## For stage 2
 
@@ -80,11 +103,14 @@ Design: `../specs/` (accounts and history).
 
 ## Deploy notes
 
+- First check that signing in works at all (every form checks that it came from the app's own address behind Railway's proxy);
+  try it on the unused second copy first, with the lead's word.
 - Set `SECRET_KEY` first (without it personal codes and slips are off).
-- After "Deploy Latest Commit", sign in with the committee code and open `/admin/first` to make the first admin.
+- After "Deploy Latest Commit", sign in with the committee code and press "Make the first admin" on the committee page
+  (or open `/admin`, which goes there while no admin exists).
+- If `ADMIN_RECOVERY_CODE` is set, it needs at least 16 letters or digits, or recovery stays off.
 - The shared codes keep working until they are turned off on the admin page's **Ways in**.
 - Check the same-origin refusal on admin POSTs behind Railway's proxy after the first deploy.
-- (Do not deploy a commit between the old Task 6 and Task 7: both are in now.)
 
 ## Open questions for the lead
 
@@ -94,4 +120,9 @@ Design: `../specs/` (accounts and history).
 
 ## Checked
 
-- Every suite and every node test on the final code: see the task 14 report. `tests/test_routes.py` pins the whole route map.
+- Every suite and every node test on the final code after the fix wave. `tests/test_routes.py` pins the whole route map.
+- Python: accounts 13, history 27, history_draft 9, signin 24, routes 17, admin 18, relief 41, exams 76, sync 32, board 58,
+  teachers 9, venues 4, combined 38, ask 49, verify 56, rules 11, choices 16, parents 35, typed 33 (--full 34), helper 20
+  (--full 21), fixes 65 (--full 67), smoke 102 (--full 103): all pass.
+- Node: every `tests/*.test.js` (15 files) passes; `node --check` on app.js, admin.js, history.js, relief.js, relief-settings.js,
+  exams.js and exams-settings.js.

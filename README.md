@@ -306,7 +306,7 @@ and loading the setup. In short:
    without a volume they are lost on every deploy.
 3. **Variables:** `SECRET_KEY` (a long random string; keep it), `COMMITTEE_CODE`, `TEACHER_CODE` and `STUDENT_CODE` (at
    least 6 letters or digits each, all different).
-4. **Settings → Networking → Generate Domain**, open it and sign in with the committee code, then open `/admin/first` to make the first admin (see Admin page below). The sign-in page and the
+4. **Settings → Networking → Generate Domain**, open it and sign in with the committee code, then press "Make the first admin" on the committee page (or open `/admin/first`; see Admin page below). The sign-in page and the
    deploy logs list anything still missing (a code, `SECRET_KEY` or the volume).
 
 ### Admin page
@@ -317,8 +317,11 @@ pick one person to set their group, the departments a head changes the map for, 
 events until a date, Admin), their username and a one-time password, or switch them off; or tick several people and
 give or take an extra, set a group, print their code slips or switch them off, reading a preview of what it will do
 before pressing the button. **Ways in** shows each way to sign in and lets you turn a shared code off or on, with its
-week's use. It needs `SECRET_KEY`. To make the first admin, sign in with the committee code and open `/admin/first`:
-you give your name, a username and a password, and you are signed in as the first admin.
+week's use. It needs `SECRET_KEY`. To make the first admin, sign in with the committee code: until an admin exists the
+committee page says "No admin account yet. Make the first admin" (and `/admin` goes there too); you give your name, a
+username and a password, and you are signed in as the first admin. If every admin forgets their password, set
+`ADMIN_RECOVERY_CODE` in Railway variables (at least 16 letters or digits; a shorter one is ignored) and use
+`/login/recover` once with an admin's username; then remove the variable.
 
 Coming from a version that generated in the app: the `AI_*` and `SOLVE_SECONDS` variables are no longer read
 ([details](docs/DEPLOY.md#coming-from-an-earlier-version)).
