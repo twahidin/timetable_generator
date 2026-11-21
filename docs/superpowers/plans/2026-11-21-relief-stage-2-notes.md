@@ -39,18 +39,15 @@ Design: `../specs/2026-11-20-relief-module-design.md`.
 14. Remarks are left out for the absent teacher alone.
 15. The final fix wave: the shared-lesson cover, the Earlier view, past lessons read-only, files kept when someone else
     attached them meanwhile, What's in faster, the team right passed from the routes.
-16. **One point left open for the lead** (see below).
-
-## Left open: one small fix recommended before the pull request
-
-If a teacher's form shows a shared lesson as "no relief needed" (because the co-teacher was there when the page loaded)
-and the co-teacher's own absence arrives before Send, the lesson is recorded "Not needed" on both, and the class has
-no teacher. The fix is small: the page sends "needed" only when the person chose it, so the server decides from the
-records at that moment. It needs the lead's word, because the build process allows only one fix wave.
+16. A stale "is there" default for a shared lesson was sent as an explicit Not needed; on the lead's word ("Fix it
+    first") the page now sends "needed" only when the person chose it, and the server decides from the records at
+    that moment.
+17. `exams/days.py` keeps `_day_ok` as a second name for `rule_on_day`: exams stage 2 (PR #81) still calls the old
+    name, so without it whichever of the two merges second would break when an exam day is shown.
 
 ## Checked
 
-- Every suite on the final code (391c9c0): `test_relief_requests` 56, `test_relief` 37, `smoke` 102, `test_exams` 72,
+- Every suite on the final code (acfdd33): `test_relief_requests` 58, `test_relief` 37, `smoke` 102, `test_exams` 72,
   and every other suite and `node tests/*.test.js`.
 - Browser, with real clicks, on the made-up secondary sample with a made-up term: 35 checks passed (asking with work,
   link and file; a Saturday refused; planning with a choice and an open lesson; acknowledging, work, not needed;
@@ -82,3 +79,5 @@ records at that moment. It needs the lead's word, because the build process allo
   input; the "Your timetable has changed…" sentence for a file that has gone; the "chosen here" person keeps the
   primary Choose button; the Planned-by-me Lessons column narrow on a phone; `family()` merges bracketed subjects
   (ranking heading only).
+- From the last re-review: the shared-lesson test pins the server's side only (no test runs the page's `read()`); a
+  planner's pick on a lesson the server then finds covered by a co-teacher is dropped without a word.
