@@ -178,7 +178,7 @@ def make(pub, cal, sched, xset, only=None, elsewhere=None) -> dict:
     approved invigilators where those are still free then. elsewhere: the other schedules' duties (None: read them)."""
     model = pub["model"]
     if elsewhere is None:
-        elsewhere = _schedules.elsewhere(sched.get("id"))
+        elsewhere = _schedules.elsewhere(sched.get("id"), pub["model"])
     old = sched.get("made") or {}
     sits = _seat.sittings(sched)
     keys = {s["key"] for s in sits}

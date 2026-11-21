@@ -924,7 +924,7 @@ def _exam_rooms_by_key(pub, cal, sched):
     overlapping sitting of the made schedule holds is busy, so the move selects do not offer it"""
     xset = exams_settings.load(pub)
     held = exams_make.held(pub, sched, xset)
-    return {x["key"]: [[r["name"], r["seats"], r["busy"]] for r in exams_seating.rooms_free(pub, cal, sched, x, xset, held.get(x["key"], set()), elsewhere=exams_schedules.elsewhere(sched.get("id")))]
+    return {x["key"]: [[r["name"], r["seats"], r["busy"]] for r in exams_seating.rooms_free(pub, cal, sched, x, xset, held.get(x["key"], set()), elsewhere=exams_schedules.elsewhere(sched.get("id"), pub["model"]))]
             for x in exams_seating.sittings(sched)}
 
 @app.get("/exams")
@@ -1247,7 +1247,7 @@ def _exam_candidates(pub, s, key, room, approved=False):
     subjects = [papers[i]["subject"] for i in (sit or {}).get("papers", []) if i in papers]
     rest = [x for x in duties if x is not d]
     return d, exams_invigilate.candidates(pub, _exam_cal(pub), s, exams_settings.load(pub), d["date"], d["start"], d["end"], rest, subjects=subjects,
-                                          exclude=d["names"] if approved else (), elsewhere=exams_schedules.elsewhere(s.get("id")))
+                                          exclude=d["names"] if approved else (), elsewhere=exams_schedules.elsewhere(s.get("id"), pub["model"]))
 
 @app.get("/api/exams/<id>/who")
 @need("committee", "staff")
@@ -1271,7 +1271,7 @@ def _exam_review_reply(pub, s):
     stale = exams_make.stale(s, xset, model)
     errors = exams_papers.check(s, model, _exam_cal(pub), xset["rules"])["errors"]
     st = s.get("status") or "draft"
-    rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"))) if s.get("made") else None
+    rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"), pub["model"])) if s.get("made") else None
     return jsonify(status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
                    changed=s.get("sent_fp") is not None and s.get("sent_fp") != exams_approval.fp(s),

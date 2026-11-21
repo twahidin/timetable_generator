@@ -265,28 +265,73 @@ def on_site() -> list:
     return [a for a in (_approval.as_schedule(s) for s in _all()) if a]
 
 
-def elsewhere(id) -> list:
-    """what the other schedules hold: one busy per duty (dict(id, name, status, date, start, end, room, names)). Waiting: the
-    working duties; approved: the approved copy's; changes waiting: the approved copy's, and the working duties that differ
-    from them (either may be what the main site shows soon); draft and withdrawn hold nothing."""
+def copies(id) -> list:
+    """for every other stored schedule, the copy the main site shows or may soon show: waiting: the working copy; approved:
+    the approved copy; changes waiting: both (the approved first); draft and withdrawn: none. Each has status "waiting" or
+    "approved"."""
     out = []
-
-    def add(s, src, name, status, skip=()):
-        for d in (src or {}).get("duties") or []:
-            b = dict(id=s["id"], name=name, status=status, date=d["date"], start=d["start"], end=d["end"], room=d["room"],
-                     names=list(d.get("names") or []))
-            if (b["date"], b["start"], b["end"], b["room"], b["names"]) not in skip:
-                out.append(b)
     for s in _all():
         if s["id"] == id:
             continue
         st = s.get("status") or "draft"
         if st == "waiting":
-            add(s, s.get("made"), s.get("name"), "waiting")
+            out.append(dict(s, status="waiting"))
         elif st in ("approved", "changes") and s.get("approved"):
-            ap = s["approved"]
-            add(s, ap.get("made"), ap.get("name"), "approved")
+            out.append(dict(_approval.as_schedule(s), status="approved"))
             if st == "changes":
-                held = [(d["date"], d["start"], d["end"], d["room"], list(d.get("names") or [])) for d in (ap.get("made") or {}).get("duties") or []]
-                add(s, s.get("made"), s.get("name"), "waiting", skip=held)
+                out.append(dict(s, status="waiting"))
     return out
+
+
+def event_busy(copy, model) -> list:
+    """what an event holds on each date from its start to its end with classes on: the people going (one busy, with the
+    classes), then each venue. Nothing when the timetable has no periods."""
+    bnds = _days.bounds(model) if model else []
+    if not bnds:
+        return []
+    out = []
+    d, last = _days._date(copy["start"]), _days._date(copy["end"])
+    while d <= last:
+        iso = d.isoformat()
+        win = _days._windows(copy, iso, model, bnds)
+        d += datetime.timedelta(days=1)
+        if not win:
+            continue
+        a, b = next(iter(win.values()))
+        base = dict(id=copy["id"], name=copy.get("name"), status=copy["status"], date=iso, start=a, end=b, kind=EVENT)
+        if copy.get("going"):
+            out.append(dict(base, room="", names=list(copy["going"]), classes=list(win)))
+        for v in copy.get("venues") or []:
+            out.append(dict(base, room=v, names=[], classes=[]))
+    return out
+
+
+def _duty_busy(copy):
+    return [dict(id=copy["id"], name=copy.get("name"), status=copy["status"], date=d["date"], start=d["start"], end=d["end"],
+                 room=d["room"], names=list(d.get("names") or [])) for d in (copy.get("made") or {}).get("duties") or []]
+
+
+def busies(copies, model) -> list:
+    """the busy list of some copies: an exam gives one per made duty, an event what event_busy gives. A waiting copy leaves
+    out the busies equal (date, start, end, room, names) to one of the approved copy of the same schedule."""
+    key = lambda b: (b["date"], b["start"], b["end"], b["room"], tuple(b["names"]))
+    mine = [(c, event_busy(c, model) if c.get("kind") == EVENT else _duty_busy(c)) for c in copies]
+    held = {c["id"]: {key(b) for b in bs} for c, bs in mine if c["status"] == "approved"}
+    return [b for c, bs in mine for b in bs if not (c["status"] == "waiting" and key(b) in held.get(c["id"], ()))]
+
+
+def elsewhere(id, model=None) -> list:
+    """what the other schedules hold (see busies); model None: the published timetable's"""
+    if model is None:
+        pub = store.published()
+        model = pub["model"] if pub else None
+    return busies(copies(id), model)
+
+
+def shared_line(model, s, tag, date, start, end, classes) -> str:
+    """"{other} ({status}) has {classes} on {date} too.": the classes of s, among the other's classes, whose window on that
+    date overlaps start..end; "" when none. The one sentence behind the exam review and the event clashes."""
+    bnds = _days.bounds(model)
+    win = _days._windows(s, date, model, bnds)
+    both = [c for c in win if c in classes and win[c][0] < end and win[c][1] > start]
+    return "%s has %s on %s too." % (tag, ", ".join(both), _days.nice(date)) if both else ""

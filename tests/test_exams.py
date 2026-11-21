@@ -2163,6 +2163,7 @@ import exams.events as EV  # noqa: E402
 def _ev(**kw):
     e = SC.new_event("Sec 3 Learning Journey", ["Sec 3"], [], "2026-10-05", "2026-10-05", "Ms Aisha Rahman", "Ms Aisha Rahman")
     e["days"] = {"2026-10-05": dict(levels=None, whole=False, **{"from": "07:40", "to": "10:40"})}
+    e["going"] = ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman"]
     e.update(kw)
     return e
 
@@ -2173,7 +2174,7 @@ def _ev_bad(sentence, **kw):
 
 @t
 def event_record_and_its_check():
-    e = _ev()
+    e = _ev(going=[])
     assert e["kind"] == "event" and e["in_charge"] == "Ms Aisha Rahman" and e["going"] == [] and e["going_by"] == "people"
     assert e["status"] == "draft" and e["approved"] is None and e["made"] is None and e["created_by"] == "Ms Aisha Rahman"
     SC._check(_ev(), _PUB)
@@ -2243,6 +2244,89 @@ def venues_taken_flag_running_lessons():
     assert EV.cuts(_PUB, F.CAL, cut) == ["On Mon 5 Oct the event time ends in the middle of 2 lessons."]
     assert EV.on_dates(_PUB, F.CAL, _ev(start="2026-10-12", end="2026-10-12", days={})) == []
     assert EV.on_dates(_PUB, F.CAL, _ev())[0]["classes"] == ["3A", "3B"]
+
+@t
+def event_busies_for_other_schedules():
+    busy = SC.busies([dict(_ev(venues=["Hall"]), id="ev1", status="approved")], _M)
+    assert busy == [dict(id="ev1", name="Sec 3 Learning Journey", status="approved", date="2026-10-05", start=460, end=640, room="",
+                         names=["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman"], classes=["3A", "3B"], kind="event"),
+                    dict(id="ev1", name="Sec 3 Learning Journey", status="approved", date="2026-10-05", start=460, end=640, room="Hall",
+                         names=[], classes=[], kind="event")], busy
+    s = _sit([_paper(date="2026-10-05", start="07:50")], days=dict(SEC3))
+    r = SE.rooms_free(_PUB, F.CAL, s, _first(s), _xset(), set(), elsewhere=busy)
+    assert next(x for x in r if x["name"] == "Hall")["busy"] == "taken by Sec 3 Learning Journey until 10:40", r
+    why = IV._free("Ms Aisha Rahman", D.day_view(_PUB, F.CAL, s, "2026-10-05"), 455, 540, [], _xset(), elsewhere=busy)[0]
+    assert why == "is on Sec 3 Learning Journey then" and "()" not in why
+    _reset()
+    SC.save(dict(_ev(venues=["Hall"]), id="ev2", status="waiting"), _PUB, F.CAL, "t")
+    SC.save(dict(_ev(), id="ev3", status="draft"), _PUB, F.CAL, "t")
+    got = SC.elsewhere("zzzz", _M)
+    assert [(b["id"], b["status"], b["room"]) for b in got] == [("ev2", "waiting", ""), ("ev2", "waiting", "Hall")], got
+    assert [b["id"] for b in SC.elsewhere("ev2", _M)] == []
+    _reset()
+    SC.save(dict(_ev(), id="ev4", status="approved", approved=dict(_ev())), _PUB, F.CAL, "t")
+    assert [(b["id"], b["status"]) for b in SC.elsewhere("zzzz", _M)] == [("ev4", "approved")]
+    assert [c["status"] for c in SC.copies("zzzz")] == ["approved"]
+    _reset()
+    assert SC.event_busy(dict(_ev(), id="x", status="waiting"), dict(_M, NP=0, times=[], school={})) == []
+
+@t
+def event_busies_leave_out_a_waiting_copy_equal_to_the_approved_one():
+    a = dict(_ev(), id="ev5", status="approved")
+    w = dict(_ev(going=["Ms Aisha Rahman"]), id="ev5", status="waiting")
+    got = SC.busies([a, w], _M)
+    assert [(b["status"], b["names"]) for b in got] == [("approved", ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman"]), ("waiting", ["Ms Aisha Rahman"])], got
+    assert [b["status"] for b in SC.busies([a, dict(a, status="waiting")], _M)] == ["approved"]
+
+@t
+def event_clashes_with_an_exam_for_the_same_class():
+    A = _approved()
+    others = [dict(AP.as_schedule(A), status="approved")]
+    busy = SC.busies(others, _M)
+    got = EV.clashes(_PUB, F.CAL, _ev(), busy, others)
+    assert got == ["Ms Aisha Rahman, Mon 5 Oct 07:40–10:40: is on Sec 3 End-of-Year Exam then (3-01).",
+                   "Mr Hafiz Rahman, Mon 5 Oct 07:40–10:40: is on Sec 3 End-of-Year Exam then (3-02).",
+                   "Sec 3 End-of-Year Exam (approved) has 3A, 3B on Mon 5 Oct too."], got
+    assert EV.send_errors(_PUB, F.CAL, _ev(), busy, others) == [
+        "Fix the clashes first: Ms Aisha Rahman, Mon 5 Oct 07:40–10:40: is on Sec 3 End-of-Year Exam then (3-01)."]
+    rv = RV.review(_PUB, F.CAL, A, _xset(("3-01", "3-02", "4-01", "Hall")), SC.busies([dict(_ev(), id="ev1", status="waiting")], _M))
+    ch = {c["key"]: c["lines"] for c in rv["checks"]}
+    assert ch["others"] == ["Sec 3 Learning Journey (waiting) takes 2 of these invigilators on Mon 5 Oct.",
+                            "Sec 3 Learning Journey (waiting) has 3A, 3B on Mon 5 Oct too."], ch["others"]
+    assert ch["free"] == ["Ms Aisha Rahman, 3-01 on Mon 5 Oct 07:35–09:00: is on Sec 3 Learning Journey then.",
+                          "Mr Hafiz Rahman, 3-02 on Mon 5 Oct 09:45–11:10: is on Sec 3 Learning Journey then."], ch["free"]
+    assert not any("()" in l for l in ch["free"] + got)
+
+@t
+def event_venue_taken_by_another_schedule():
+    others = [dict(_ev(name="Sec 3 Talk", going=[], venues=["LT1"]), id="ev2", status="waiting")]
+    mine = _ev(name="Sec 4 Talk", levels=["Sec 4"], days={"2026-10-05": dict(levels=["Sec 4"], whole=False, **{"from": "07:40", "to": "10:40"})},
+               venues=["LT1&2"], going=["Mr Daniel Koh"], duties=[])
+    assert EV.other_lines(_PUB, F.CAL, mine, SC.busies(others, _M), others) == ["Sec 3 Talk (waiting) uses LT1 on Mon 5 Oct too."]
+
+@t
+def event_send_errors():
+    S = lambda e: EV.send_errors(_PUB, F.CAL, e, [], [])
+    assert S(_ev()) == []
+    assert S(_ev(going=[], duties=[])) == ["Add at least one person going with the classes."]
+    assert S(_ev(start="2026-10-12", end="2026-10-12", days={})) == ["Pick at least one school day for the event."]
+    assert S(_ev(duties=[dict(duty="First aid", who="Mr Ben Ong", time="all day")])) == ["Pick a person going for every duty."]
+    assert S(_ev(going=["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman", "Mr Ivan Lee"])) == [
+        "Fix the clashes first: Mr Ivan Lee, Mon 5 Oct 07:40–10:40: is not available then (a Must rule)."]
+
+@t
+def who_may_replace_someone_going():
+    assert EV.who_free(_PUB, F.CAL, _ev(), []) == dict(freed=[dict(name="Mr Ben Ong", reason="freed: lessons with 3A, 3B stop"),
+                                                               dict(name="Ms Chloe Tan", reason="freed: lessons with 3B stop")], free=[])
+
+@t
+def a_multi_date_event_names_each_date():
+    day = dict(levels=None, whole=False, **{"from": "07:40", "to": "10:40"})
+    e = _ev(end="2026-10-06", going=["Ms Grace Yeo", "Mr Ivan Lee"], days={"2026-10-05": day, "2026-10-06": dict(day)})
+    got = EV.going(_PUB, F.CAL, e, [])
+    assert len(EV.on_dates(_PUB, F.CAL, e)) == 2, EV.on_dates(_PUB, F.CAL, e)
+    assert got[0]["status"] == "backup" and "(Mon 5 Oct)" in got[0]["text"], got
+    assert got[1]["status"] == "not_free" and got[1]["text"].endswith("(Mon 5 Oct)"), got
 
 
 print(f"{COUNT} exams tests passed")

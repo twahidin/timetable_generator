@@ -176,3 +176,88 @@ def cuts(pub, cal, s) -> list:
         if n:
             out.append("On %s the event time ends in the middle of %s." % (_days.nice(e["date"]), "1 lesson" if n == 1 else "%d lessons" % n))
     return out
+
+
+def people_lines(pub, cal, s, elsewhere) -> list:
+    """each person going who is not free for the event on a date, with why"""
+    views = _views(pub, cal, s)
+    out = []
+    for name in s.get("going") or []:
+        for e, view in views:
+            why, _ = _inv._free(name, view, e["start"], e["end"], [], FREE, elsewhere=elsewhere)
+            if why:
+                out.append("%s, %s %s–%s: %s." % (name, _days.nice(e["date"]), _days.hhmm(e["start"]), _days.hhmm(e["end"]), why))
+    return out
+
+
+def other_lines(pub, cal, s, elsewhere, others) -> list:
+    """the other schedules (copies) holding the event's classes at the same time, and using a venue it takes"""
+    model = pub["model"]
+    bnds = _days.bounds(model)
+    parts = model.get("room_parts") or {}
+    taken = _taken(pub, s)
+    dates = on_dates(pub, cal, s)
+    tags = sorted({(o["name"], o["status"]) for o in others} | {(b["name"], b["status"]) for b in elsewhere})
+    shares, uses = [], []
+    for tag in tags:
+        label = "%s (%s)" % tag
+        for e in dates:
+            for o in (o for o in others if (o["name"], o["status"]) == tag):
+                win = _days._windows(o, e["date"], model, bnds)
+                line = _sched.shared_line(model, s, label, e["date"], e["start"], e["end"],
+                                          [c for c, w in win.items() if w[0] < e["end"] and w[1] > e["start"]])
+                if line and line not in shares:
+                    shares.append(line)
+            rooms = []
+            for b in (b for b in elsewhere if (b["name"], b["status"]) == tag and b["date"] == e["date"] and b["room"]):
+                if b["start"] < e["end"] and b["end"] > e["start"] and b["room"] in taken and b["room"] not in rooms:
+                    rooms.append(b["room"])
+            uses += ["%s uses %s on %s too." % (label, r, _days.nice(e["date"])) for r in rooms]
+    return shares + uses
+
+
+def clashes(pub, cal, s, elsewhere, others) -> list:
+    return people_lines(pub, cal, s, elsewhere) + other_lines(pub, cal, s, elsewhere, others)
+
+
+def send_errors(pub, cal, s, elsewhere, others) -> list:
+    """what stops an event from being sent, in order (the name and the classes are checked on every save)"""
+    out = []
+    if not on_dates(pub, cal, s):
+        out.append("Pick at least one school day for the event.")
+    going = s.get("going") or []
+    if not going:
+        out.append("Add at least one person going with the classes.")
+    if any(d.get("who") not in going for d in s.get("duties") or []):
+        out.append("Pick a person going for every duty.")
+    found = clashes(pub, cal, s, elsewhere, others)
+    if found:
+        out.append("Fix the clashes first: %s" % found[0])
+    return out
+
+
+def who_free(pub, cal, s, elsewhere) -> dict:
+    """everyone relief knows who is not going and is free for the whole event: freed (a lesson of theirs stops then) or free"""
+    views = _views(pub, cal, s)
+    goes = set(s.get("going") or [])
+    freed, free = [], []
+    for p in sorted(_people(pub), key=lambda p: p["name"]):
+        name = p["name"]
+        if name in goes:
+            continue
+        stops, ok = [], True
+        for e, view in views:
+            why, _ = _inv._free(name, view, e["start"], e["end"], [], FREE, elsewhere=elsewhere)
+            if why or _spans(view, name, e["start"], e["end"]):
+                ok = False
+                break
+            for l in view["lessons"]:
+                if name in l["teachers"] and any(sp[0] < e["end"] and sp[1] > e["start"] for sp in l["stopped"]):
+                    stops += [c for c in l["classes"] if c not in stops]
+        if not ok:
+            continue
+        if stops:
+            freed.append(dict(name=name, reason="freed: lessons with %s stop" % ", ".join(stops)))
+        else:
+            free.append(dict(name=name, reason="free then"))
+    return dict(freed=freed, free=free)
