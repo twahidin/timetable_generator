@@ -1042,6 +1042,18 @@ def _made_exam(c, mutate=None):
     assert c.post(f"/api/exams/{s['id']}/make", json={}).status_code == 200
     return s
 
+import exams.printouts as PR  # noqa: E402
+
+@t
+def printout_titles_use_the_page_words():
+    import io
+    assert PR.TITLES == {"seating": "Seating plan", "doors": "Door list", "attendance": "Attendance sheet", "classes": "Class lists",
+                         "roster-day": "Roster by day", "roster-teacher": "Roster by teacher", "timetable": "Exam timetable"}
+    assert set(PR.TITLES) == set(PR.WHATS)
+    assert PR._day("2026-10-05") == "Mon 5 Oct" and PR._day("2026-11-01") == "Sun 1 Nov"
+    assert PR._sitting_title(dict(date="2026-10-05", start=470), "Hall") == "Mon 5 Oct · 07:50 · Hall"
+    assert PR._Doc(_PUB, dict(name="Sec 3 Exam"), "roster-day", io.BytesIO()).head == "Sample School · Sec 3 Exam · Roster by day"
+
 @t
 def printouts_and_excel():
     import io, openpyxl
@@ -1056,7 +1068,8 @@ def printouts_and_excel():
         for what in ("seating", "doors", "attendance", "classes", "roster-day", "roster-teacher", "timetable"):
             r = c.get(f"/api/exams/{s['id']}/print/{what}.pdf")
             assert r.status_code == 200 and r.data.startswith(b"%PDF"), (what, r.status_code)
-            assert f"Sec 3 Exam {what}.pdf" in r.headers["Content-Disposition"] and r.headers["Content-Disposition"].startswith("inline"), r.headers["Content-Disposition"]
+            title = PR.TITLES[what]
+            assert f"Sec 3 Exam {title}.pdf" in r.headers["Content-Disposition"] and r.headers["Content-Disposition"].startswith("inline"), r.headers["Content-Disposition"]
         assert c.get(f"/api/exams/{s['id']}/print/nothing.pdf").status_code == 404
         assert c.get(f"/api/exams/{s['id']}/view").get_json()["stale"] is False
         now = c.get(f"/api/exams/{s['id']}").get_json()

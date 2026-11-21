@@ -1,5 +1,6 @@
 """Printouts (A4 PDFs) and the Excel download for a made exam schedule. Reads the schedule and the published model; writes nothing."""
 import collections
+import datetime
 import io
 import re
 
@@ -10,7 +11,20 @@ from exams import seating as _seat
 from relief.codes import _cell
 
 WHATS = ("seating", "doors", "attendance", "classes", "roster-day", "roster-teacher", "timetable")
+TITLES = {"seating": "Seating plan", "doors": "Door list", "attendance": "Attendance sheet", "classes": "Class lists",
+          "roster-day": "Roster by day", "roster-teacher": "Roster by teacher", "timetable": "Exam timetable"}   # the page's button words
+_WEEK = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 LISTS = dict(none="No relief needed", backup="Backup needed", runs="Runs as usual")
+
+
+def _day(iso) -> str:
+    """a date as the page writes it: "Mon 5 Oct" """
+    try:
+        d = datetime.date.fromisoformat(str(iso))
+    except ValueError:
+        return str(iso or "")
+    return "%s %d %s" % (_WEEK[d.weekday()], d.day, _MONTHS[d.month - 1])
 
 
 def _made(sched):
@@ -49,7 +63,7 @@ class _Doc:
         self.R, self.B = _fonts()
         self.W, self.H = A4
         self.M = 36
-        self.head = "%s · %s · %s" % (pub["model"]["school"]["name"], sched.get("name"), what)
+        self.head = "%s · %s · %s" % (pub["model"]["school"]["name"], sched.get("name"), TITLES.get(what, what))
         self.c = canvas.Canvas(out, pagesize=A4)
         self.c.setTitle(self.head)
         self.page()
@@ -141,7 +155,7 @@ class _Doc:
 
 
 def _sitting_title(sit, room):
-    return "%s %s · %s" % (sit["date"], _days.hhmm(sit["start"]), room)
+    return "%s · %s · %s" % (_day(sit["date"]), _days.hhmm(sit["start"]), room)
 
 
 def _per_room(d, pub, sched, xset, what):
@@ -184,7 +198,7 @@ def _classes(d, pub, sched):
             d.line("%s  %s" % (sid, names[sid].get("name")), bold=True, size=9.5, gap=2)
             for p in mine[sid]:
                 room, seat = at.get((keys[p["id"]], sid), ("not seated", ""))
-                d.row([_papers.label(p), p["date"], _span(p), room, seat], w, size=8.5, gap=3)
+                d.row([_papers.label(p), _day(p["date"]), _span(p), room, seat], w, size=8.5, gap=3)
 
 
 def _roster(d, sched, by_teacher):
@@ -198,10 +212,10 @@ def _roster(d, sched, by_teacher):
         for n in sorted(mine):
             d.title(n)
             for x in sorted(mine[n], key=lambda x: (x["date"], x["start"])):
-                d.row([x["date"], "%s to %s" % (_days.hhmm(x["start"]), _days.hhmm(x["end"])), x["room"], "chief" if x.get("chief") == n else ""], w)
+                d.row([_day(x["date"]), "%s to %s" % (_days.hhmm(x["start"]), _days.hhmm(x["end"])), x["room"], "chief" if x.get("chief") == n else ""], w)
     else:
         for date in sorted({x["date"] for x in duties}):
-            d.title(date)
+            d.title(_day(date))
             d.row(["Time", "Room", "Chief", "Invigilators"], [110, 90, 110, 200], bold=True)
             for x in sorted((x for x in duties if x["date"] == date), key=lambda x: (x["start"], x["room"])):
                 d.row(["%s to %s" % (_days.hhmm(x["start"]), _days.hhmm(x["end"])), x["room"], x.get("chief") or "", ", ".join(x["names"])], [110, 90, 110, 200])
@@ -216,7 +230,7 @@ def _timetable(d, sched):
         d.title(lv)
         w = [90, 110, 250]
         for p in sorted(by[lv], key=lambda p: (p["date"], _days.minutes(p["start"]))):
-            d.row([p["date"], _span(p), _papers.label(p)], w)
+            d.row([_day(p["date"]), _span(p), _papers.label(p)], w)
 
 
 def pdf(what, pub, cal, sched, xset, out) -> None:
