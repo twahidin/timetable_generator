@@ -79,6 +79,40 @@ def _gone(pub, sched, model, keys=None):
     return out, dropped
 
 
+def gone_now(pub, sched) -> list:
+    """sentences, once each, for everyone the schedule names who is no longer on the published timetable: pinned students
+    and invigilators, and the invigilators and students of the made duties and seats (picked by hand or by the app)"""
+    model = pub["model"]
+    known_s = {s["id"] for s in model.get("students") or []}
+    known_p = {p["name"] for p in relief.people.people(pub, relief.settings.load(pub)["extra_staff"])}
+    pins = sched.get("pins") or {}
+    made = sched.get("made") or {}
+    out = []
+
+    def say(x):
+        s = "%s is no longer on the timetable." % x
+        if s not in out:
+            out.append(s)
+    for by in (pins.get("rooms") or {}).values():
+        for sid in by:
+            if sid not in known_s:
+                say(sid)
+    for names in (pins.get("duties") or {}).values():
+        for n in names:
+            if n not in known_p:
+                say(n)
+    for d in made.get("duties") or []:
+        for n in d.get("names") or []:
+            if n not in known_p:
+                say(n)
+    for rooms in (made.get("seats") or {}).values():
+        for rows in rooms.values():
+            for sid, _ in rows:
+                if sid not in known_s:
+                    say(sid)
+    return out
+
+
 def _span(sit, students, rules, duties):
     mine = [d for d in duties if d["key"] == sit["key"]]
     if mine:
@@ -207,7 +241,9 @@ def summary(pub, cal, sched, xset) -> dict:
                   two_a_day=len({sid for (_, sid), n in per_day.items() if n >= 2}), duties=len(duties),
                   backups=sum(len(d["backup"]) for d in duties), short=sum(d["short"] for d in duties),
                   unseated=sum(len(v) for v in (made.get("unseated") or {}).values()))
-    return dict(days=out, counts=counts, checks=_papers.check(sched, model, cal, xset["rules"]), gone=list(made.get("gone") or []))
+    gone = gone_now(pub, sched)
+    gone += [g for g in made.get("gone") or [] if g not in gone]   # and the ones the last Make dropped
+    return dict(days=out, counts=counts, checks=_papers.check(sched, model, cal, xset["rules"]), gone=gone)
 
 
 def lesson_lists(pub, cal, sched) -> dict:

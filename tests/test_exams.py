@@ -753,6 +753,26 @@ def gone_people_are_named_once():
     assert s["made"]["gone"] == []
 
 @t
+def gone_is_named_before_make_again():
+    import copy
+    s = _mk(_made_sched())
+    key = "2026-10-05 07:50"
+    picked = _duty(s, key, "3-01")["names"][0]
+    MK.set_invigilators(s, key, "3-02", ["Mr Ivan Lee"])
+    pub = copy.deepcopy(_PUB); m = pub["model"]
+    for k in ("teachers",):
+        m[k] = [x for x in m[k] if x["name"] not in (picked, "Mr Ivan Lee")]
+    m["setup"]["teachers"] = [x for x in m["setup"]["teachers"] if x["name"] not in (picked, "Mr Ivan Lee")]
+    m["students"] = [x for x in m["students"] if x["id"] != "3A-02"]
+    MK.move(s, key, ["3A-03"], "3-02")
+    m["students"] = [x for x in m["students"] if x["id"] != "3A-03"]
+    got = MK.summary(pub, F.CAL, s, _xset())["gone"]
+    assert sorted(got) == sorted("%s is no longer on the timetable." % x for x in ("3A-02", "3A-03", picked, "Mr Ivan Lee")), got
+    MK.make(pub, F.CAL, s, _xset(("3-01", "3-02", "4-01", "Hall")))
+    MK.make(pub, F.CAL, s, _xset(("3-01", "3-02", "4-01", "Hall")))
+    assert MK.summary(pub, F.CAL, s, _xset())["gone"] == []
+
+@t
 def summary_counts():
     s = _mk(_made_sched())
     r = MK.summary(_PUB, F.CAL, s, _xset())
