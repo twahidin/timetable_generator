@@ -200,6 +200,7 @@ def page(title, body):
 
 # ------------------------------------------------------------------------------------------------ signing in
 CODE_LABEL = "Your personal code (on the slip from the school)"
+CODE_LABEL_SHARED = "Your code (the one the school gave you)"   # while a shared code still opens the site
 TO_USERNAME = "Committee and management: sign in with your username"
 WRONG_CODE = "That code does not work. Check it and try again."
 TOO_MANY_CODES = "Too many wrong codes. Wait ten minutes and try again."
@@ -231,10 +232,19 @@ def school_name():
 def _warnings():
     return "".join(f"<p class='warn'>{esc(p)}</p>" for p in setup_problems())
 
+def _code_label():
+    """the code box's words: the plain ones people already know while any shared code is set and not turned off (a teacher
+    with the shared teacher code is not told they need a personal one); "personal code" once every shared code is off.
+    Accounts that cannot be read count as on, as the sign-in does (a turned-off code works again then)"""
+    have, _ = access.configured()
+    try: off = people.load()["ways"]["off"]
+    except Exception: off = {}
+    return CODE_LABEL_SHARED if any(have.get(r) and off.get(r) is None for r in people.SHARED) else CODE_LABEL
+
 def _code_page(msg=""):
     err, warn = (f"<p class='err'>{esc(msg)}</p>" if msg else ""), _warnings()
     return page("Sign in", f"""<main class="front"><header class="hero"><h1>{esc(school_name())}</h1><p>Timetable</p></header>
-<div class="login one"><form method="post" action="/login"><label for="code">{esc(CODE_LABEL)}</label>
+<div class="login one"><form method="post" action="/login"><label for="code">{esc(_code_label())}</label>
 <input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" autofocus required>
 <button type="submit">Open</button></form>{err}
 <p class="way"><a href="/login/password">{esc(TO_USERNAME)}&nbsp;&rarr;</a></p></div>{f'<div class="notes">{warn}</div>' if warn else ""}</main>""")

@@ -99,7 +99,8 @@ def t(f):
 def the_page_is_one_box_and_a_link():
     c = A.app.test_client()
     page = c.get("/login").data.decode()
-    assert "Sample School" in page and "Your personal code (on the slip from the school)" in page and 'name="code"' in page and ">Open<" in page
+    assert "Sample School" in page and "Your code (the one the school gave you)" in page and 'name="code"' in page and ">Open<" in page
+    assert "personal code" not in page                             # the shared codes are on: the words people already know
     assert 'href="/login/password"' in page and "Committee and management: sign in with your username" in page
     assert "Google" not in page and 'class="choice' not in page and "Department heads" not in page
     assert c.get("/login?as=relief").data.decode() == page        # the old cards' ?as= is accepted and ignored
@@ -114,6 +115,28 @@ def the_page_is_one_box_and_a_link():
         assert not any("not set in Railway variables" in p for p in A.setup_problems())
     finally:
         os.environ["STUDENT_CODE"] = old; P.update(lambda d: d["people"].pop("Ms Kim Ho"))
+
+@t
+def the_box_says_personal_code_once_every_shared_code_is_off():
+    c = A.app.test_client()
+    def turn(off):
+        P.update(lambda d: d["ways"]["off"].update({r: ("2026-11-22" if off else None) for r in P.SHARED}))
+    try:
+        turn(True)
+        page = c.get("/login").data.decode()
+        assert "Your personal code (on the slip from the school)" in page and "Your code (the one the school gave you)" not in page
+        P.update(lambda d: d["ways"]["off"].update(teacher=None))    # one shared code on again: the familiar words come back
+        assert "Your code (the one the school gave you)" in c.get("/login").data.decode()
+        turn(True)
+        old = os.environ.pop("TEACHER_CODE")                          # a shared code that is not set does not count as on
+        try:
+            P.update(lambda d: d["ways"]["off"].update(teacher=None))
+            assert "Your personal code (on the slip from the school)" in c.get("/login").data.decode()
+        finally:
+            os.environ["TEACHER_CODE"] = old
+    finally:
+        turn(False)
+    assert "Your code (the one the school gave you)" in c.get("/login").data.decode()
 
 @t
 def a_published_teacher_signs_in_with_their_code_and_lands_on_home():
