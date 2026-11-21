@@ -896,7 +896,7 @@ def _posted_fixes():
 def draft_fixes():
     r = _checked(lambda: draft.fix_many(_posted_fixes(), stamp=_stamp_of(request.get_json(force=True, silent=True))), sentences=True)
     if _worked(r):
-        ts = draft.last_batch_texts(); _draft_entry("fix", f"{len(ts)} fixes: " + "; ".join(t or "" for t in ts))
+        ts = draft.last_batch_texts(); _draft_entry("fix", (f"{len(ts)} fixes: " if len(ts) != 1 else "1 fix: ") + "; ".join(t or "" for t in ts))
     return r
 
 @app.post("/api/draft/preview")

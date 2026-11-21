@@ -59,7 +59,7 @@ def upload_fix_undo_are_recorded():
 def two_fixes_are_one_entry():
     r = c.post("/api/draft/fixes", json=dict(fixes=[dict(kind="move", id=1, d=1, p=1)])); assert r.status_code == 200, r.get_json()
     e = H.read(kinds=["draft"], limit=1)[0]; mine(e)
-    assert e["what"] == "fix" and e["text"].startswith("1 fixes: ") and draft.last_fix_text() in e["text"], e
+    assert e["what"] == "fix" and e["text"].startswith("1 fix: ") and draft.last_fix_text() in e["text"], e
     assert c.post("/api/draft/undo").status_code == 200
 
 @t
@@ -91,16 +91,22 @@ def a_decision_is_recorded_and_threads_who_to_the_setup():
 
 @t
 def publishing_is_recorded():
-    real, sent = store.publish, []
-    store.publish = lambda *a, **k: sent.append(k) or {}
+    real = draft.publish; draft.publish = lambda: dict(published=True)
     try:
-        r = c.post("/api/draft/publish")
-        if r.status_code == 200:
-            e = H.read(kinds=["draft"], limit=1)[0]; mine(e)
-            assert (e["what"], e["where"], e["text"]) == ("publish", "Step 9 · Publish", "Published the timetable"), e
-        else:
-            n = count(); assert r.status_code in (409, 400), r.status_code; assert count() == n
-    finally: store.publish = real
+        n = len(entries("draft")); r = c.post("/api/draft/publish"); assert r.status_code == 200, r.get_json()
+        assert len(entries("draft")) == n + 1
+        e = entries("draft")[0]; mine(e)
+        assert (e["what"], e["where"], e["text"], e["link"]) == ("publish", "Step 9 · Publish", "Published the timetable", "/"), e
+    finally: draft.publish = real
+
+@t
+def a_refused_publish_writes_nothing():
+    real = draft.publish
+    def refuse(): raise draft.Critical(1)
+    draft.publish = refuse
+    try:
+        n = count(); r = c.post("/api/draft/publish"); assert r.status_code == 409, r.status_code; assert count() == n
+    finally: draft.publish = real
 
 @t
 def a_history_failure_never_fails_the_action():
