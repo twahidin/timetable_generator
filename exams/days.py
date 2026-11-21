@@ -20,8 +20,39 @@ def hhmm(m):
     return "%02d:%02d" % divmod(int(m), 60)
 
 
+def _clock(t):
+    """a time as the published model writes it ("7.40", "1.00" or "07:40"), read without am or pm"""
+    m = re.fullmatch(r"(\d{1,2})[.:](\d{2})", str(t).strip())
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        raise ValueError("%s is not a time." % t)
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
 def bounds(model):
-    return [(minutes(a), minutes(b)) for a, b in model["times"]]
+    """(start, end) minutes of each period. Read from the school's start time and period length, as ttgen/spec.py does: the
+    model's `times` are a 12-hour clock without am or pm ("12.40", then "1.00"). Without those, `times` are read in order,
+    12 hours added whenever a time is lower than the one before."""
+    sc = model.get("school") or {}
+    NP = model.get("NP") or len(model.get("times") or [])
+    try:
+        h, m = map(int, str(sc["start_time"]).split(":")[:2])
+        pm = int(sc["period_minutes"])
+        if NP and pm > 0:
+            return [(h * 60 + m + pm * p, h * 60 + m + pm * (p + 1)) for p in range(NP)]
+    except (KeyError, TypeError, ValueError):
+        pass
+    out, last, add = [], -1, 0
+    for pair in model.get("times") or []:
+        two = []
+        for t in pair:
+            v = _clock(t) + add
+            while v < last:
+                add += 720
+                v += 720
+            two.append(v)
+            last = v
+        out.append(tuple(two))
+    return out
 
 
 def _date(s):

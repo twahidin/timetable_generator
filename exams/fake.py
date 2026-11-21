@@ -1,4 +1,5 @@
 """A made-up school for the exams tests, shaped as ttgen/export.py builds the published model. Made-up names only."""
+from ttgen.report import clock
 from ttgen.spec import day_names
 
 CAL = dict(terms=[dict(name="Term 4", start="2026-09-07", end="2026-11-20", starts_as="Odd")],
@@ -8,10 +9,6 @@ TEACHERS = [("Ms Aisha Rahman", "English"), ("Mr Ben Ong", "Science"), ("Ms Chlo
             ("Mr Daniel Koh", "Mathematics"), ("Ms Grace Yeo", "English"), ("Mr Hafiz Rahman", "PE"), ("Mr Ivan Lee", "English")]
 
 
-def _clock(m):
-    return "%02d:%02d" % divmod(m, 60)
-
-
 def _lesson(i, d, p, n, level, classes, subject, group, teachers, room, rain=""):
     return dict(id=i, d=d, p=p, n=n, level=level, block="", classes=classes, subject=subject, group=group,
                 teachers=teachers, room=room, ext=False, rain=rain)
@@ -19,8 +16,8 @@ def _lesson(i, d, p, n, level, classes, subject, group, teachers, room, rain="")
 
 def sample_pub() -> dict:
     NP = 26
-    start = 7 * 60 + 40
-    times = [[_clock(start + 20 * p), _clock(start + 20 * (p + 1))] for p in range(NP)]
+    sc = dict(start_time="07:40", period_minutes=20)
+    times = [[clock(sc, p), clock(sc, p + 1)] for p in range(NP)]   # the real model's dotted 12-hour clock: "12.40", "1.00"
     classes = [dict(name="3A", level="Sec 3", size=30, home="3-01", parents=[]),
                dict(name="3B", level="Sec 3", size=30, home="3-02", parents=[]),
                dict(name="4A", level="Sec 4", size=30, home="4-01", parents=[])]

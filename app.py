@@ -16,7 +16,7 @@ from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VE
 import access, checks, draft, store, sync, typed
 from relief import codes as relief_codes, people as relief_people, settings as relief_settings
 from ttgen import choices
-import exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts
+import exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -884,7 +884,7 @@ def _exam_view(pub, sched):
     sids = sorted(mine | {i for p in papers for i in exams_papers.who_sits(p, model)})
     return dict(summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=exams_make.lesson_lists(pub, cal, sched),
                 made=sched.get("made"), students={i: [by_id[i]["name"], by_id[i]["cls"]] for i in sids if i in by_id},
-                counts={p.get("id"): len(exams_papers.who_sits(p, model)) for p in papers}, periods=[list(t) for t in model.get("times") or []],
+                counts={p.get("id"): len(exams_papers.who_sits(p, model)) for p in papers}, periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)],
                 rooms=exams_settings.load(pub)["rooms"], students_missing=not model.get("students"), levels=list(model.get("levels") or []),
                 rooms_by_key=_exam_rooms_by_key(pub, cal, sched))
 

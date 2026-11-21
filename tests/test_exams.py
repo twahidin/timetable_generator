@@ -29,7 +29,8 @@ def t(f):
 def sample_school_is_consistent():
     m = F.sample_pub()["model"]
     assert len(m["students"]) == 90 and len(m["lessons"]) == 10 and len(m["rooms"]) == 9
-    assert len(m["times"]) == 26 and m["times"][0] == ["07:40", "08:00"] and m["times"][6][0] == "09:40" and m["times"][9][0] == "10:40"
+    assert len(m["times"]) == 26 and m["times"][0] == ["7.40", "8.00"] and m["times"][6][0] == "9.40" and m["times"][9][0] == "10.40"
+    assert m["times"][15] == ["12.40", "1.00"] and m["times"][-1] == ["4.00", "4.20"], "the real dotted 12-hour clock"
     assert C.school_day(F.CAL, m["days"], date(2026, 10, 5)) == "Odd Mon"
     assert C.school_day(F.CAL, m["days"], date(2026, 10, 12)) is None
 
@@ -82,8 +83,36 @@ def _rows(view):
 
 @t
 def times_round_trip():
-    assert D.minutes("07:40") == 460 and D.hhmm(460) == "07:40"
+    assert D.minutes("07:40") == 460 and D.hhmm(460) == "07:40" and D.minutes("8:05") == 485
     raises(ValueError, lambda: D.minutes("7.40"), "7.40 is not a time.")
+    m = F.sample_pub()["model"]
+    b = D.bounds(m)
+    assert len(b) == 26 and b[0] == (460, 480) and b[15] == (760, 780) and b[16] == (780, 800) and b[-1] == (960, 980), b
+    m.pop("school")
+    assert D.bounds(m) == b, "without a start time the dotted times are read, 12 hours added after noon"
+    m["times"] = [["%02d:%02d" % divmod(a, 60), "%02d:%02d" % divmod(z, 60)] for a, z in b]
+    assert D.bounds(m) == b
+
+@t
+def whole_day_stops_afternoon_periods():
+    pub = F.sample_pub()
+    pub["model"]["lessons"].append(F._lesson(10, 0, 18, 2, "Sec 3", ["3A"], "Art", "Entire Class", ["Ms Aisha Rahman"], "3-01"))
+    r = _rows(D.day_view(pub, F.CAL, _sched(days=SEC3), "2026-10-05"))[10]
+    assert r["stopped"] == [(820, 860)] and r["running"] == [], r
+
+@t
+def part_day_after_noon_saves_and_stops_the_right_periods():
+    pub = F.sample_pub()
+    pub["model"]["lessons"].append(F._lesson(10, 0, 14, 4, "Sec 3", ["3A"], "Art", "Entire Class", ["Ms Aisha Rahman"], "3-01"))
+    e = SC.new("exam", "Afternoon", ["Sec 3"], "2026-10-05", "2026-10-05", "Ms Grace Yeo", pub=pub)
+    e["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "12:40", "to": "13:20"})}
+    e["papers"] = [dict(id="p1", level="Sec 3", subject="Art", paper="", minutes=30, date="2026-10-05", start="12:45", who="level",
+                        students=[], together="")]
+    saved = SC.save(e, pub, F.CAL, "x")
+    assert saved["days"]["2026-10-05"]["from"] == "12:40" and saved["days"]["2026-10-05"]["to"] == "13:20"
+    r = _rows(D.day_view(pub, F.CAL, saved, "2026-10-05"))[10]
+    assert r["stopped"] == [(760, 800)] and r["running"] == [(740, 760), (800, 820)], r
+    assert P.check(saved, pub["model"], F.CAL)["errors"] == []
 
 @t
 def whole_day_stops_every_sec3_lesson():
@@ -192,6 +221,18 @@ def save_refuses_bad_input():
     bad("Extra time for 3A-05 must be 0 to 100 percent.", access=[dict(student="3A-05", extra=150)])
     bad("ZZ-99 is not on the published timetable.", access=[dict(student="ZZ-99", extra=10)])
     bad("Check the exam and try again.", levels="Sec 3")
+
+@t
+def saved_times_are_24_hour_hhmm():
+    pub = F.sample_pub()
+    e = _new()
+    e["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "7:40", "to": "9:00"})}
+    e["papers"] = [dict(id="p1", level="Sec 3", subject="English", paper="Paper 1", minutes=30, date="2026-10-05", start="8:05",
+                        who="level", students=[], together="")]
+    saved = SC.save(e, pub, F.CAL, "x")
+    assert saved["days"]["2026-10-05"]["from"] == "07:40" and saved["days"]["2026-10-05"]["to"] == "09:00", saved["days"]
+    assert saved["papers"][0]["start"] == "08:05" and SC.load(e["id"])["papers"][0]["start"] == "08:05"
+    SC.delete(e["id"])
 
 @t
 def access_arrangements_carry_forward():
@@ -652,7 +693,7 @@ def view_carries_counts_periods_and_the_levels_students():
         c = committee()
         s = _exam(c)
         v = c.get(f"/api/exams/{s['id']}/view").get_json()
-        assert v["periods"] == _PUB["model"]["times"] and v["periods"][0] == ["07:40", "08:00"], v["periods"][:2]
+        assert v["periods"][0] == ["07:40", "08:00"] and v["periods"][16] == ["13:00", "13:20"] and len(v["periods"]) == 26, v["periods"][:2]
         assert set(v["counts"]) == {p["id"] for p in s["papers"]} and all(n >= 0 for n in v["counts"].values())
         eng = next(p for p in s["papers"] if p["subject"] == "English")
         assert v["counts"][eng["id"]] > 0

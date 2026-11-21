@@ -68,12 +68,17 @@ def _check(s, pub):
     starts, ends = {x for x, _ in bnds}, {y for _, y in bnds}
     for date, e in s["days"].items():
         if not isinstance(e, dict): raise ValueError(WRONG)
-        if e.get("whole", True): continue
+        if e.get("whole", True):
+            for k in ("from", "to"):   # not used on a whole day; kept only as a 24-hour time
+                try: e[k] = _days.hhmm(_days.minutes(e[k])) if e.get(k) not in (None, "") else None
+                except ValueError: e[k] = None
+            continue
         try: f, t = _days.minutes(e.get("from")), _days.minutes(e.get("to"))
         except ValueError: raise ValueError(WRONG)
-        if f not in starts: raise ValueError(f"{e['from']} is not the start of a period.")
-        if t not in ends: raise ValueError(f"{e['to']} is not the end of a period.")
+        if f not in starts: raise ValueError(f"{_days.hhmm(f)} is not the start of a period.")
+        if t not in ends: raise ValueError(f"{_days.hhmm(t)} is not the end of a period.")
         if t <= f: raise ValueError(f"On {date} the end is before the start.")
+        e["from"], e["to"] = _days.hhmm(f), _days.hhmm(t)   # one format everywhere: 24-hour HH:MM
     levels = set(model.get("levels") or [])
     for lv in s["levels"] + [x for e in s["days"].values() for x in (e.get("levels") or [])]:
         if lv not in levels: raise ValueError(f"{lv} is not a level of the published timetable.")
@@ -83,6 +88,10 @@ def _check(s, pub):
     for p in s["papers"]:
         if not isinstance(p, dict): raise ValueError(WRONG)
         if not _int(p.get("minutes")) or p["minutes"] < 1: raise ValueError(f"Give {_papers.label(p)} a length in minutes.")
+        if p.get("start") in (None, ""): p["start"] = None
+        else:
+            try: p["start"] = _days.hhmm(_days.minutes(p["start"]))
+            except ValueError: raise ValueError(f"Give {_papers.label(p)} a start time such as 08:00.")
     students = {x["id"] for x in model.get("students") or []}
     for x in s["access"]:
         if not isinstance(x, dict): raise ValueError(WRONG)
