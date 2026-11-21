@@ -1,10 +1,13 @@
 """What approved exams and events mean for relief on a date: which lessons do not run, who is busy and when. Only approved
-copies count (as on the main site). Every answer is "", [] or 0 when the date is not a school day or there are no periods."""
+copies count (as on the main site). Every answer is "", [] or 0 when the date is not a school day or there are no periods.
+And the backups: the lessons of the people on an approved schedule's duties (or going with the event) that still run, sent
+to relief as planned absences (backups, sync) and marked on the exams page (mark)."""
 import datetime
 
 from exams import days as _days
 from exams import approval as _approval
 from exams import schedules as _schedules
+from relief import absences as _absences
 from relief import lessons as _lessons
 from relief.calendar import school_day
 
@@ -12,6 +15,8 @@ INVIGILATING = "Invigilating: %s"
 AT_EVENT = "At event: %s"
 EXAMS_BY = "Exams committee"
 EXAMS_COMMITTEE = "the exams committee"
+DUTY_CHANGED = "The duty changed."
+WITHDRAWN = "The schedule was withdrawn."
 
 
 def _iso(date) -> str:
@@ -183,9 +188,29 @@ def _minutes(bnds, periods):
     return (bnds[a][0], bnds[b][1]) if a <= b else None
 
 
+def _away_spans(bnds, records) -> dict:
+    """{(teacher, ISO date): [(start, end) minutes]}: each absence of relief's own (not cancelled, not a backup) over its
+    periods, or over the whole day; a malformed record is skipped, never raised"""
+    out = {}
+    for r in records or []:
+        try:
+            if not isinstance(r, dict) or r.get("cancelled") or r.get("exams") or not isinstance(r.get("teacher"), str) or not r["teacher"]:
+                continue
+            span, dates = _minutes(bnds, r.get("periods")), r.get("dates")
+            if not span or not isinstance(dates, list):
+                continue
+            isos = [datetime.date.fromisoformat(_iso(d)).isoformat() for d in dates]
+        except (KeyError, ValueError, TypeError, IndexError):
+            continue
+        for d in isos:
+            out.setdefault((r["teacher"], d), []).append(span)
+    return out
+
+
 def relief_busies(model, records) -> list:
     """busies (the shape schedules.busies gives) for relief's own records: whoever is away over their periods, and whoever
-    is chosen to cover a lesson. A cancelled record gives none; a backup record (with exams) gives only the cover."""
+    is chosen to cover a lesson. A cancelled record gives none; a backup record (with exams) gives only the cover. A malformed
+    record or lesson is skipped."""
     bnds = _days.bounds(model) if model else []
     out = []
     if not bnds:
@@ -195,15 +220,14 @@ def relief_busies(model, records) -> list:
         out.append(dict(id="relief", kind="relief", name="Relief", status="approved", date=_iso(date), start=a, end=b, room="",
                         names=[name], why=why))
 
+    for (name, d), spans in _away_spans(bnds, records).items():
+        for a, b in spans:
+            busy(name, d, a, b, "is away then (relief)")
     for r in records or []:
-        if r.get("cancelled"):
+        if not isinstance(r, dict) or r.get("cancelled") or not isinstance(r.get("lessons"), list):
             continue
-        span = _minutes(bnds, r.get("periods"))
-        if span and not r.get("exams") and r.get("teacher"):
-            for d in r.get("dates") or []:
-                busy(r["teacher"], d, span[0], span[1], "is away then (relief)")
-        for x in r.get("lessons") or []:
-            if not x.get("needed") or not x.get("relief"):
+        for x in r["lessons"]:
+            if not isinstance(x, dict) or not x.get("needed") or not isinstance(x.get("relief"), str) or not x["relief"]:
                 continue
             try:
                 p = int(x["p"])
@@ -227,14 +251,7 @@ def away_on(sched, model, records, today) -> list:
     bnds = _days.bounds(model) if model else []
     if not ap or not bnds:
         return []
-    away = {}
-    for r in records or []:
-        if r.get("cancelled") or r.get("exams") or not r.get("teacher"):
-            continue
-        span = _minutes(bnds, r.get("periods"))
-        if span:
-            for d in r.get("dates") or []:
-                away.setdefault((r["teacher"], d), []).append(span)
+    away = _away_spans(bnds, records)
     iso_today = _iso(today)
     out, seen = [], set()
     if ap.get("kind") == _schedules.EVENT:
@@ -257,3 +274,144 @@ def away_on(sched, model, records, today) -> list:
                                                                                                   _days.hhmm(d["start"]), _days.hhmm(d["end"]))))
     out.sort(key=lambda x: (x["date"], x["name"]))
     return out
+
+
+def _windows_of(ap, model):
+    """[(name, ISO date, start, end)] of an approved copy: each name on an exam duty over the duty, each person going with
+    an event over the event's window that date"""
+    if ap.get("kind") == _schedules.EVENT:
+        try:
+            rows = _schedules.event_busy(dict(ap, status="approved"), model)
+        except (KeyError, TypeError, ValueError):
+            rows = []
+    else:
+        rows = (ap.get("made") or {}).get("duties") or []
+    out = []
+    for b in rows:
+        try:
+            out += [(n, _iso(b["date"]), int(b["start"]), int(b["end"])) for n in b.get("names") or [] if isinstance(n, str)]
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return sorted(out)
+
+
+def backups(pub, cal, sched, links, records, today) -> dict:
+    """{name: [lessons]} (P7) from the schedule's approved copy: for each person on a duty (or going with the event), their
+    lessons (relief.lessons.on_date, ISO dates) with a period that runs during the duty (or the event's window), dated today or
+    later, not "Handled ourselves" ({name}|{key} in sched["handled"]) and not while they are away in an absence of their own
+    (records: relief's). A lesson that does not run (links.stopped: its classes are on this or another approved schedule)
+    needs none. {} when the schedule has no approved copy."""
+    ap = _approval.as_schedule(sched) if sched else None
+    model = (pub or {}).get("model") or {}
+    bnds = _days.bounds(model) if model else []
+    if not ap or not bnds:
+        return {}
+    iso_today = _iso(today)
+    handled = {x for x in sched.get("handled") or [] if isinstance(x, str)}
+    away = _away_spans(bnds, records)
+    out, seen = {}, set()
+    for name, iso, a, z in _windows_of(ap, model):
+        if iso < iso_today:
+            continue
+        try:
+            mine = _lessons.on_date(pub, cal, name, datetime.date.fromisoformat(iso))
+        except ValueError:          # not a school day, or no calendar
+            continue
+        runs = links._day(iso)["runs"]
+        for x in mine:
+            if (name, x["key"]) in seen or "%s|%s" % (name, x["key"]) in handled or links.stopped(x):
+                continue
+            periods = runs.get(x["key"], range(x["p"], x["p"] + x["n"]))
+            if not any(p < len(bnds) and bnds[p][0] < z and a < bnds[p][1] for p in periods):
+                continue
+            span = links._span(x["p"], x["n"])
+            if span and any(s < span[1] and span[0] < e for s, e in away.get((name, iso), ())):
+                continue
+            seen.add((name, x["key"]))
+            out.setdefault(name, []).append(dict(x, date=iso))
+    return out
+
+
+def _ahead(r, iso):
+    """the keys of a record's lessons dated iso or later"""
+    return {x["key"] for x in r.get("lessons") or [] if isinstance(x, dict) and x.get("key") and str(x.get("date") or "") >= iso}
+
+
+def sync(sched, pub, cal, today) -> dict:
+    """keep relief's backups of the schedule in step with its approved copy (P6, P7, P9); idempotent. Per person: a backup
+    holding the same lessons (dated today or later) stays; otherwise a new one is made, carrying the relief, relief_by and work
+    of the old by key, and the old is cancelled ("The duty changed."), as is the backup of someone no longer needing one. A
+    schedule without an approved copy (withdrawn) has every backup cancelled ("The schedule was withdrawn."); a backup whose
+    every date is before today stays (relief.absences.cancel_exams). A timetable with no periods or a calendar with no terms
+    changes nothing. Runs inside exams.schedules.editing(); relief.absences takes its own lock. -> dict(sent, cancelled)"""
+    out = dict(sent=0, cancelled=0)
+    sid = (sched or {}).get("id")
+    if not sid:
+        return out
+    live = _absences.exams_records(sid)
+
+    def cancel(r, why):
+        if _absences.cancel_exams(r["id"], why).get("cancelled"):
+            out["cancelled"] += 1
+
+    ap = _approval.as_schedule(sched)
+    if ap is None:
+        for r in live:
+            cancel(r, WITHDRAWN)
+        return out
+    model = (pub or {}).get("model") or {}
+    if not (_days.bounds(model) if model else []) or not (cal or {}).get("terms"):
+        return out
+    links = Links(pub, cal, [s for s in _schedules.on_site() if s.get("id") != sid] + [ap])
+    want = backups(pub, cal, sched, links, _absences.all_records(), today)
+    iso = _iso(today)
+    event = ap.get("kind") == _schedules.EVENT
+    by = (ap.get("in_charge") or sched.get("in_charge") or "") if event else EXAMS_BY
+    text = (AT_EVENT if event else INVIGILATING) % ap.get("name")
+    source = dict(id=sid, kind=sched.get("kind"))
+    mine = {}
+    for r in live:
+        mine.setdefault(r.get("teacher"), []).append(r)
+    for name in sorted(set(want) | {n for n in mine if isinstance(n, str)}):
+        lessons = want.get(name, [])
+        cur = [r for r in mine.get(name, []) if _ahead(r, iso)]       # a backup with every lesson past is history: left
+        keys = {x["key"] for x in lessons}
+        if (len(cur) == 1 and _ahead(cur[0], iso) == keys) or (not cur and not keys):
+            continue
+        if lessons and _absences.from_exams(name, lessons, source, by, text, None, links=links, carry=[r["id"] for r in cur]):
+            out["sent"] += 1
+        for r in cur:
+            cancel(r, DUTY_CHANGED)
+    return out
+
+
+def mark(items, sched, records):
+    """each backup item of the schedule's lessons lists (with teacher and key) gets state and relief: "handled" when it is
+    Handled ourselves; "relief" (relief: the name) when relief holds it with a relief teacher chosen; "sent" when relief holds
+    it (in a backup of this schedule, or as a needed lesson of an absence of the teacher's own: that absence covers it); else
+    "later" (it goes to relief when the schedule is approved). -> items"""
+    sid = (sched or {}).get("id")
+    handled = {x for x in (sched or {}).get("handled") or [] if isinstance(x, str)}
+    held = {}
+    for r in records or []:
+        if not isinstance(r, dict) or r.get("cancelled") or not isinstance(r.get("teacher"), str):
+            continue
+        ex = r.get("exams")
+        if ex and not (isinstance(ex, dict) and ex.get("id") == sid):
+            continue
+        for x in r.get("lessons") or []:
+            if not isinstance(x, dict) or not isinstance(x.get("key"), str) or (not ex and not x.get("needed")):
+                continue
+            k = (r["teacher"], x["key"])
+            name = x.get("relief") if x.get("needed") and isinstance(x.get("relief"), str) and x["relief"] else None
+            if k not in held or (name and not held[k]):
+                held[k] = name
+    for it in items or []:
+        k = (it.get("teacher"), it.get("key"))
+        if "%s|%s" % k in handled:
+            it["state"], it["relief"] = "handled", None
+        elif k in held:
+            it["state"], it["relief"] = ("relief", held[k]) if held[k] else ("sent", None)
+        else:
+            it["state"], it["relief"] = "later", None
+    return items

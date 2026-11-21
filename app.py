@@ -871,12 +871,13 @@ NO_EVENT = "That event is not there any more."
 ONLY_IN_CHARGE = "Only the teacher in charge and the timetable committee can open this event."
 PICK_IN_CHARGE = "Pick the teacher in charge."
 EVENT_KEEPS = ("id", "kind", "in_charge", "created_at", "created_by", "status", "approved", "approved_at", "approved_by", "sent_at",
-               "sent_by", "sent_fp", "note", "log")
+               "sent_by", "sent_fp", "note", "log", "handled")
 ONLY_APPROVE = "Only the timetable committee can approve, send back or withdraw."
 ON_SITE = "This schedule is on the main site: the timetable committee must withdraw it before it can be deleted."
 EXAM_KEEPS = ("id", "created_at", "created_by", "made", "pins", "use_anyway", "status", "approved", "approved_at", "approved_by",
-              "sent_at", "sent_by", "sent_fp", "note", "log")
+              "sent_at", "sent_by", "sent_fp", "note", "log", "handled")    # handled: Handled ourselves, changed by its own route
 BAD_INPUT = (TypeError, KeyError, AttributeError)
+NO_BACKUP = "That lesson no longer needs a backup."
 
 def _exams_rights(pub):
     """(may use exams, saved by) for whoever is signed in; None when a staff session has ended"""
@@ -956,6 +957,17 @@ def _save_exam(sched, pub, by, check=True, event=False):
     except ValueError as e: return None, ({"error": str(e)}, 400)
     except BAD_INPUT: return None, ({"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400)
 
+def _marked(lists, sched):
+    """the lessons lists with each backup's state in relief and its relief teacher (exams.relief_links.mark)"""
+    exams_relief_links.mark(lists["backup"], sched, relief_absences.all_records())
+    return lists
+
+def _relief_sync(pub, s):
+    """relief's backups in step with the saved schedule (exams.relief_links.sync), after every approval action and Handled
+    ourselves change that saved. It never fails the action: an error is logged and the next action syncs again"""
+    try: exams_relief_links.sync(s, pub, _exam_cal(pub), _exams_today())
+    except Exception: app.logger.exception("exams: relief sync failed")
+
 def _exam_view(pub, sched):
     model, cal = pub["model"], _exam_cal(pub)
     by_id = {x["id"]: x for x in model.get("students") or []}
@@ -963,7 +975,7 @@ def _exam_view(pub, sched):
     levels, classes = set(sched.get("levels") or []), set(sched.get("classes") or [])
     mine = {x["id"] for x in model.get("students") or [] if exams_papers._student_level(model, x) in levels or x.get("cls") in classes}
     sids = sorted(mine | {i for p in papers for i in exams_papers.who_sits(p, model)})
-    return dict(summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=exams_make.lesson_lists(pub, cal, sched),
+    return dict(summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=_marked(exams_make.lesson_lists(pub, cal, sched), sched),
                 made=sched.get("made"), students={i: [by_id[i]["name"], by_id[i]["cls"]] for i in sids if i in by_id},
                 counts={p.get("id"): len(exams_papers.who_sits(p, model)) for p in papers}, periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)],
                 rooms=exams_settings.load(pub)["rooms"], students_missing=not model.get("students"), levels=list(model.get("levels") or []),
@@ -1359,6 +1371,7 @@ def _exam_approval(id, act, approver=False, check=False, event=False):
         except ValueError as e: return {"error": str(e)}, 400
         except BAD_INPUT: return {"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400
         saved, bad = _save_exam(s, pub, who, check=check, event=event)
+        if not bad: _relief_sync(pub, saved)     # inside the lock: two syncs of one schedule never run at once
     return bad or (_event_review_reply if event else _exam_review_reply)(pub, saved)
 
 @app.get("/api/exams/<id>/review")
@@ -1409,6 +1422,36 @@ def _exam_away(pub, s, by, now, b):
 @need("committee", "staff")
 def exams_away(id): return _exam_approval(id, _exam_away)
 
+def _set_handled(pub, s, b, event):
+    """Handled ourselves on (handled true) or off for one backup lesson: body {teacher, key, handled}; refused unless it is a
+    backup of the working copy now. The list stays out of the approved copy and the fingerprint"""
+    teacher, key, on = b.get("teacher"), b.get("key"), b.get("handled")
+    if not isinstance(teacher, str) or not isinstance(key, str) or not isinstance(on, bool):
+        raise ValueError(exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG)
+    items = (exams_events if event else exams_make).lesson_lists(pub, _exam_cal(pub), s)["backup"]
+    if not any(x["teacher"] == teacher and x["key"] == key for x in items): raise ValueError(NO_BACKUP)
+    tag = "%s|%s" % (teacher, key)
+    s["handled"] = [x for x in s.get("handled") or [] if isinstance(x, str) and x != tag] + ([tag] if on else [])
+
+def _handled(pub, who, s, event):
+    """save a Handled ourselves change (no check: it works after a new publish too), sync relief and answer as the view"""
+    try: _set_handled(pub, s, _exam_json(), event)
+    except ValueError as e: return {"error": str(e)}, 400
+    except BAD_INPUT + (IndexError,): return {"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400
+    saved, bad = _save_exam(s, pub, who, check=False, event=event)
+    if bad: return bad
+    _relief_sync(pub, saved)
+    return (_event_view_reply if event else _exam_view_reply)(pub, saved)
+
+@app.post("/api/exams/<id>/handled")
+@need("committee", "staff")
+def exams_handled(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    with exams_schedules.editing():
+        s, err = _exam_or_404(id)
+        return err or _handled(pub, who, s, False)
+
 # ------------------------------------------------------------------------------------------------ staff: events
 def _event_others(pub, s):
     """(the other schedules' copies, what they hold busy) for an event"""
@@ -1436,7 +1479,7 @@ def _event_view(pub, s):
     return dict(summary=dict(days=[dict(date=e["date"], day=e["day"], levels=e["levels"], whole=bool(entry(e["date"]).get("whole", True)),
                                         window=[exams_days.hhmm(e["start"]), exams_days.hhmm(e["end"])]) for e in exams_days.dates(s, cal, model)]),
                 classes=[c["name"] for c in model.get("classes") or [] if c["name"] in inside], going=exams_events.going(pub, cal, s, busy),
-                lessons=exams_events.lesson_lists(pub, cal, s), freed=exams_events.freed(pub, cal, s, busy), flags=exams_events.flags(pub, cal, s),
+                lessons=_marked(exams_events.lesson_lists(pub, cal, s), s), freed=exams_events.freed(pub, cal, s, busy), flags=exams_events.flags(pub, cal, s),
                 cuts=exams_events.cuts(pub, cal, s), clashes=exams_events.clashes(pub, cal, s, busy, others),
                 periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)], rooms=[r["name"] for r in model.get("rooms") or []],
                 depts=sorted({d for p in people for d in p["depts"]}), people=[p["name"] for p in people])
@@ -1501,14 +1544,16 @@ def events_delete(id):
         exams_schedules.delete(id)
     return {"ok": True}
 
+def _event_view_reply(pub, s):
+    try: return jsonify(_event_view(pub, s))
+    except ValueError as e: return {"error": str(e)}, 400
+    except BAD_INPUT + (IndexError,): return {"error": exams_schedules.EVENT_WRONG}, 400
+
 @app.get("/api/events/<id>/view")
 @need("committee", "staff")
 def events_view(id):
     pub, who, s, _, err = _event_gate(id)
-    if err: return err
-    try: return jsonify(_event_view(pub, s))
-    except ValueError as e: return {"error": str(e)}, 400
-    except BAD_INPUT + (IndexError,): return {"error": exams_schedules.EVENT_WRONG}, 400
+    return err or _event_view_reply(pub, s)
 
 @app.post("/api/events/<id>/fill")
 @need("committee", "staff")
@@ -1570,6 +1615,13 @@ def events_withdraw(id): return _exam_approval(id, _act_withdraw, approver=True,
 @app.post("/api/events/<id>/away")
 @need("committee", "staff")
 def events_away(id): return _exam_approval(id, _event_away, event=True)
+
+@app.post("/api/events/<id>/handled")
+@need("committee", "staff")
+def events_handled(id):
+    with exams_schedules.editing():
+        pub, who, s, _, err = _event_gate(id)
+        return err or _handled(pub, who, s, True)
 
 @app.get("/api/events/<id>/who")
 @need("committee", "staff")

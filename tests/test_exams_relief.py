@@ -483,6 +483,276 @@ def exams_page_shows_away():
     js = open(os.path.join(ROOT, "static", "exams.js"), encoding="utf-8").read()
     assert "Away (from relief)" in js and ".away" in js
 
+# ---- Task 5: backups go to relief when a schedule is approved
+import copy, shutil  # noqa: E402
+from exams import make as MK  # noqa: E402
+
+CHLOE, HAFIZ = "Ms Chloe Tan", "Mr Hafiz Rahman"
+store.write_json(RS.PATH, dict(calendar=CAL, team=[GRACE], management=[GRACE], limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=""))
+DKEY = RL.key_of(M, 2, MON, "Odd Mon")      # Daniel's 4A Mathematics, periods 2-3 (08:00-08:40): 4A is not on a Sec 3 exam
+DUTY_KEY = ISO + " 07:50"
+SOON = date(2026, 12, 1)
+
+def _fresh():
+    _clear()
+    shutil.rmtree(AB.DIR, ignore_errors=True)
+
+def _duty(names, start=460, end=550, room="3-01", key=DUTY_KEY):
+    return dict(key=key, date=ISO, start=start, end=end, room=room, need=1, names=list(names), chief=None, reasons={}, backup={},
+                not_free={}, short=0, locked=False)
+
+def _made_exam(duties):
+    """a Sec 3 exam on MON, made by hand (no papers) so that it can be sent"""
+    e = SC.new("exam", EXAM, ["Sec 3"], ISO, ISO, GRACE, pub=PUB)
+    e["days"] = {ISO: dict(levels=["Sec 3"], whole=True)}
+    e = SC.save(e, PUB, CAL, GRACE)          # the check sets the day's from and to, which Make's fingerprint reads
+    e["made"] = dict(seats={}, unseated={}, duties=duties, gone=[], made_at="x", fingerprint=MK.fingerprint(e, XS.load(PUB), M), published_at=None)
+    return SC.save(e, PUB, CAL, GRACE)
+
+def committee():
+    c = A.app.test_client()
+    assert c.post("/login", data={"as": "committee", "code": os.environ["COMMITTEE_CODE"]}).status_code == 302
+    return c
+
+def ok(r):
+    assert r.status_code == 200, (r.status_code, r.get_data(as_text=True)[:400])
+    return r.get_json()
+
+def _send_approve(c, id, base="/api/exams"):
+    ok(c.post(f"{base}/{id}/send"))
+    return ok(c.post(f"{base}/{id}/approve"))
+
+def _backups(id):
+    return AB.exams_records(id)
+
+@t
+def approve_sends_backups():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        e = _made_exam([_duty([DANIEL])]); id = e["id"]
+        ok(c.post(f"/api/exams/{id}/send"))
+        assert _backups(id) == [], "nothing goes to relief before approval"
+        ok(c.post(f"/api/exams/{id}/approve"))
+        got = _backups(id)
+        assert len(got) == 1, got
+        r = got[0]
+        assert r["teacher"] == DANIEL and r["reason_text"] == "Invigilating: " + EXAM and r["by"] == "Exams committee", r
+        assert r["how"] == "planned" and r["reason"] == "Other" and r["exams"] == dict(id=id, kind="exam") and r["dates"] == [ISO], r
+        assert r["cancelled"] is None and r["acknowledged"] is None
+        assert [(x["key"], x["needed"], x["relief"]) for x in r["lessons"]] == [(DKEY, True, None)], r["lessons"]
+        j = ok(staff(GRACE).get("/api/relief/absences"))
+        assert r["id"] in [x["id"] for x in j["absences"]], "it shows in What's in"
+        v = ok(c.get(f"/api/exams/{id}/view"))
+        item = next(x for x in v["lessons"]["backup"] if x["key"] == DKEY)
+        assert item["teacher"] == DANIEL and item["state"] == "sent" and item["relief"] is None, item
+
+@t
+def event_backup_by_the_teacher_in_charge():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        ev = SC.new_event(EVENT, ["Sec 4"], [], ISO, ISO, GRACE, GRACE)
+        ev["days"] = {ISO: dict(levels=["Sec 4"], whole=False, **{"from": "07:40", "to": "09:00"})}
+        ev["going"] = [AISHA]      # her 3A English (07:40-08:20) runs: 3A is not on the event
+        id = SC.save(ev, PUB, CAL, GRACE)["id"]
+        _send_approve(c, id, "/api/events")
+        got = _backups(id)
+        assert len(got) == 1 and got[0]["teacher"] == AISHA and got[0]["reason_text"] == "At event: " + EVENT and got[0]["by"] == GRACE, got
+        assert got[0]["exams"] == dict(id=id, kind="event") and [x["classes"] for x in got[0]["lessons"]] == [["3A"]], got[0]
+        key = got[0]["lessons"][0]["key"]
+        v = ok(c.post(f"/api/events/{id}/handled", json=dict(teacher=AISHA, key=key, handled=True)))
+        assert next(x for x in v["lessons"]["backup"] if x["key"] == key)["state"] == "handled"
+        assert _backups(id) == []
+        ok(c.post(f"/api/events/{id}/handled", json=dict(teacher=AISHA, key=key, handled=False)))
+        assert len(_backups(id)) == 1
+
+@t
+def handled_ourselves_sends_nothing():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        e = _made_exam([_duty([DANIEL])]); id = e["id"]
+        _send_approve(c, id)
+        rid = _backups(id)[0]["id"]
+        fp0, sent0 = AP.fp(SC.load(id)), SC.load(id)["sent_fp"]
+        url = f"/api/exams/{id}/handled"
+        j = ok(c.post(url, json=dict(teacher=DANIEL, key=DKEY, handled=True)))
+        item = next(x for x in j["lessons"]["backup"] if x["key"] == DKEY)
+        assert item["teacher"] == DANIEL and item["state"] == "handled" and item["relief"] is None, item
+        assert SC.load(id)["handled"] == [DANIEL + "|" + DKEY]
+        assert _backups(id) == [] and AB.load(rid)["cancelled"]["by"] == "app"
+        j = ok(c.post(url, json=dict(teacher=DANIEL, key=DKEY, handled=False)))
+        assert next(x for x in j["lessons"]["backup"] if x["key"] == DKEY)["state"] == "sent"
+        again = _backups(id)
+        assert len(again) == 1 and again[0]["id"] != rid, "unmarking sends it again"
+        ok(c.put("/api/exams/" + id, json=dict(SC.load(id), handled=[DANIEL + "|" + DKEY])))
+        assert SC.load(id)["handled"] == [] and [r["id"] for r in _backups(id)] == [again[0]["id"]], "a PUT cannot change handled"
+        assert AP.fp(SC.load(id)) == fp0 and SC.load(id)["sent_fp"] == sent0 and SC.load(id)["status"] == "approved"
+        assert "handled" not in AP.SNAP and "handled" not in SC.load(id)["approved"]
+        r = c.post(url, json=dict(teacher=DANIEL, key="nope", handled=True))
+        assert r.status_code == 400 and r.get_json() == {"error": "That lesson no longer needs a backup."}, r.get_data(as_text=True)
+        r = c.post(url, json=dict(teacher=DANIEL, key=DKEY, handled="yes"))
+        assert r.status_code == 400
+
+@t
+def sync_is_idempotent_and_keeps_the_chosen_relief():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        e = _made_exam([_duty([HAFIZ])]); id = e["id"]      # his 4A PE (08:40-09:20) runs into the duty
+        _send_approve(c, id)
+        first = _backups(id)
+        assert len(first) == 1 and [x["subject"] for x in first[0]["lessons"]] == ["PE"], first
+        assert RL.sync(SC.load(id), PUB, CAL, SOON) == dict(sent=0, cancelled=0)
+        assert [r["id"] for r in _backups(id)] == [first[0]["id"]], "a second sync changes nothing"
+        pe = first[0]["lessons"][0]["key"]
+        AB.choose(first[0]["id"], pe, BEN, GRACE, PUB, links=_links())
+        AB.set_work(first[0]["id"], pe, dict(text="Run the fitness test", link="", files=[], known=[]), HAFIZ)
+        s = SC.load(id)
+        s["made"]["duties"].append(_duty([HAFIZ], start=690, end=730, room="3-02", key=ISO + " 11:40"))    # the Assembly at 11:20
+        SC.save(s, PUB, CAL, GRACE, check=False)
+        _send_approve(c, id)
+        now = _backups(id)
+        assert len(now) == 1 and now[0]["id"] != first[0]["id"], now
+        by = {x["subject"]: x for x in now[0]["lessons"]}
+        assert set(by) == {"PE", "Assembly"}, by
+        assert by["PE"]["relief"] == BEN and by["PE"]["relief_by"] == GRACE and by["PE"]["work"]["text"] == "Run the fitness test", by["PE"]
+        assert by["Assembly"]["relief"] is None and by["Assembly"]["needed"] is True
+        assert AB.load(first[0]["id"])["cancelled"]["why"] == "The duty changed."
+
+@t
+def withdraw_cancels_but_keeps_the_past():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        id = _made_exam([_duty([DANIEL])])["id"]
+        _send_approve(c, id)
+        rid = _backups(id)[0]["id"]
+        ok(c.post(f"/api/exams/{id}/withdraw"))
+        got = AB.load(rid)["cancelled"]
+        assert got["why"] == "The schedule was withdrawn." and got["by"] == "app" and got["at"], got
+        assert _backups(id) == []
+        id2 = _made_exam([_duty([DANIEL])])["id"]
+        _send_approve(c, id2)
+        rid2 = _backups(id2)[0]["id"]
+        old, oldx = LS.today, A._exams_today
+        LS.today = A._exams_today = lambda: date(2027, 1, 5)
+        try:
+            ok(c.post(f"/api/exams/{id2}/withdraw"))
+        finally:
+            LS.today, A._exams_today = old, oldx
+        assert AB.load(rid2)["cancelled"] is None, "a backup whose every date is past stays as it is"
+
+@t
+def own_absence_takes_over():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        id = _made_exam([_duty([DANIEL])])["id"]
+        _send_approve(c, id)
+        b = _backups(id)[0]
+        AB.choose(b["id"], DKEY, CHLOE, GRACE, PUB, links=_links())     # Chloe's 3B lesson then stops: she is free
+        AB.set_work(b["id"], DKEY, dict(text="Do page 5", link="", files=[], known=[]), DANIEL)
+        j = ok(staff(DANIEL).post("/api/relief/absences", json=dict(dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[])))
+        x = next(x for x in j["lessons"] if x["key"] == DKEY)
+        assert x["needed"] is True and x["relief"] == CHLOE and x["relief_by"] == GRACE and x["work"]["text"] == "Do page 5", x
+        gone = AB.load(b["id"])
+        assert gone["cancelled"]["why"] == "Moved to %s's own absence." % DANIEL and gone["cancelled"]["by"] == "app", gone["cancelled"]
+        assert gone["lessons"] == []
+        assert ok(c.get(f"/api/exams/{id}/review"))["away"][0].startswith("Away (from relief): " + DANIEL)
+        assert RL.sync(SC.load(id), PUB, CAL, SOON)["sent"] == 0 and _backups(id) == [], "no backup for someone away then"
+        ok(c.post(f"/api/exams/{id}/away", json=dict(key=DUTY_KEY, room="3-01", away=DANIEL, name=BEN)))
+        assert SC.load(id)["approved"]["made"]["duties"][0]["names"] == [BEN]
+        assert _backups(id) == [], "Ben has no lesson then, and Daniel is away"
+        mine = AB.load(j["id"])
+        assert mine["cancelled"] is None and [(y["key"], y["relief"]) for y in mine["lessons"]] == [(DKEY, CHLOE)], "covered once"
+
+@t
+def republish_drops_a_vanished_backup():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        id = _made_exam([_duty([DANIEL])])["id"]
+        _send_approve(c, id)
+        rid = _backups(id)[0]["id"]
+    s = SC.load(id)
+    s["handled"] = [DANIEL + "|2027-01-04/Odd Mon/20/1/4A/Gone/Entire Class"]      # a lesson no longer on the timetable
+    SC.save(s, PUB, CAL, GRACE, check=False)
+    pub2 = copy.deepcopy(PUB)
+    pub2["model"]["lessons"][2]["teachers"] = [CHLOE]           # Daniel no longer teaches 4A Mathematics then
+    with published(pub2):
+        s = SC.load(id); s["scripts"] = "The office"
+        ok(c.put("/api/exams/" + id, json=s))
+        ok(c.post(f"/api/exams/{id}/send"))                     # an approval action: relief is synced
+        assert AB.load(rid)["cancelled"]["why"] == "The duty changed." and _backups(id) == []
+        v = ok(c.get(f"/api/exams/{id}/view"))
+        assert all(x["state"] == "later" for x in v["lessons"]["backup"]), v["lessons"]["backup"]
+
+@t
+def class_on_another_schedule_needs_no_backup():
+    _fresh()
+    e = _exam(duty_names=(DANIEL,)); _event()       # Daniel's 4A lesson during the duty: 4A is on the event then
+    assert RL.backups(PUB, CAL, SC.load(e["id"]), _links(), [], SOON) == {}
+    assert RL.sync(SC.load(e["id"]), PUB, CAL, SOON) == dict(sent=0, cancelled=0) and _backups(e["id"]) == []
+    _clear(); e = _exam(duty_names=(DANIEL,))
+    got = RL.backups(PUB, CAL, SC.load(e["id"]), _links(), [], SOON)
+    assert list(got) == [DANIEL] and [x["key"] for x in got[DANIEL]] == [DKEY] and got[DANIEL][0]["date"] == ISO, got
+    assert RL.backups(PUB, CAL, SC.load(e["id"]), _links(), [], date(2027, 1, 5)) == {}, "dated before today"
+    assert RL.backups(PUB, CAL, dict(SC.load(e["id"]), handled=[DANIEL + "|" + DKEY]), _links(), [], SOON) == {}
+    assert RL.backups(PUB, CAL, SC.load(e["id"]), _links(), [_rec(DANIEL, periods=[1, 2])], SOON) == {}, "away then"
+    assert list(RL.backups(PUB, CAL, SC.load(e["id"]), _links(), [_rec(DANIEL, periods=[9, 10])], SOON)) == [DANIEL]
+    assert RL.backups(PUB, CAL, _exam("waiting"), _links(), [], SOON) == {}, "no approved copy"
+
+@t
+def sync_failure_does_not_fail_approve():
+    _fresh()
+    old, lg = RL.sync, A.app.logger
+    old_exc, seen = lg.exception, []
+    def boom(*a, **k): raise RuntimeError("test")
+    RL.sync, lg.exception = boom, lambda msg, *a, **k: seen.append(msg)
+    try:
+        with published(PUB):
+            c = committee()
+            id = _made_exam([_duty([DANIEL])])["id"]
+            ok(c.post(f"/api/exams/{id}/send"))
+            j = ok(c.post(f"/api/exams/{id}/approve"))
+            assert j["status"] == "approved" and _backups(id) == []
+            assert seen and set(seen) == {"exams: relief sync failed"}, seen
+    finally:
+        RL.sync, lg.exception = old, old_exc
+
+@t
+def from_exams_carries_by_key():
+    _fresh()
+    src = dict(id="s1", kind="exam")
+    mine = [dict(x, date=ISO) for x in LS.on_date(PUB, CAL, HAFIZ, MON)]       # PE (periods 5-6) and the Assembly (period 13)
+    pe, asm = mine[0]["key"], mine[1]["key"]
+    r = AB.from_exams(HAFIZ, mine, src, "Exams committee", "Invigilating: X", None)
+    assert r["periods"] == [4, 12] and r["dates"] == [ISO] and all(x["needed"] for x in r["lessons"]), r
+    AB.choose(r["id"], pe, BEN, GRACE, PUB)
+    AB.set_work(r["id"], pe, dict(text="Laps", link="", files=[], known=[]), HAFIZ)
+    AB.not_needed(r["id"], asm, "The hall is closed", GRACE, team=True)
+    r2 = AB.from_exams(HAFIZ, mine, src, "Exams committee", "Invigilating: X", None, carry=[r["id"]])
+    by = {x["key"]: x for x in r2["lessons"]}
+    assert by[pe]["relief"] == BEN and by[pe]["relief_by"] == GRACE and by[pe]["work"]["text"] == "Laps", by[pe]
+    assert by[asm]["needed"] is False and by[asm]["not_needed"]["by"] == GRACE, "a not needed someone chose is kept"
+    assert AB.from_exams(HAFIZ, mine[1:], src, "Exams committee", "x", None, carry=[r["id"]]) is None, "nothing needed: nothing saved"
+    away = _put(_rec(HAFIZ, periods=[4, 5]))
+    r3 = AB.from_exams(HAFIZ, mine, src, "Exams committee", "x", None)
+    assert [x["key"] for x in r3["lessons"]] == [asm], "a lesson while away in an absence of their own is left to it"
+    _drop(away)
+
+@t
+def malformed_records_are_skipped():
+    _clear(); e = _exam(duty_names=(DANIEL,))
+    bad = [_rec(DANIEL, periods="x"), _rec(DANIEL, periods=[1]), _rec(DANIEL, periods=[None, 2]), _rec(DANIEL, dates=["Monday"]),
+           dict(_rec(DANIEL), dates=ISO), _rec(AISHA, exams=dict(id="e", kind="exam"), lessons=["x", dict(needed=True, relief=BEN), dict(COVER, relief=["x"])]),
+           dict(id="no-teacher", dates=[ISO]), _rec(["x"]), "not a record", None]
+    assert RL.relief_busies(M, bad) == []
+    assert RL.away_on(SC.load(e["id"]), M, bad, SOON) == []
+    assert list(RL.backups(PUB, CAL, SC.load(e["id"]), _links(), bad, SOON)) == [DANIEL]
+
 
 _clear()
 print(f"{COUNT} exams and relief tests passed")

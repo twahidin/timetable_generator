@@ -9,6 +9,7 @@ import relief.settings
 from exams import approval as _approval
 from exams import days as _days
 from exams import invigilate as _inv
+from exams.relief_links import key_of as _key_of
 from exams import papers as _papers
 from exams import schedules as _schedules
 from exams import seating as _seat
@@ -310,7 +311,8 @@ def lesson_lists(pub, cal, sched) -> dict:
             for sp in l["running"]:
                 hit = next(((t, d) for t in l["teachers"] for d in mine if t in d["names"] and d["start"] < sp[1] and d["end"] > sp[0]), None)
                 if hit:
-                    out["backup"].append(item(sp, "%s is invigilating %s" % (hit[0], hit[1]["room"])))
+                    out["backup"].append(dict(item(sp, "%s is invigilating %s" % (hit[0], hit[1]["room"])), teacher=hit[0],
+                                              key=_key_of(model, l["row"], date, e["day"])))
                 else:
                     out["runs"].append(item(sp, ""))
     return out
