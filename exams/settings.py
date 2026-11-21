@@ -1,27 +1,29 @@
-"""Exams settings: the committee, the rooms' exam seats, the invigilator pool and the rules. One JSON file under DATA/exams."""
+"""Exams settings: the rooms' exam seats, the invigilator pool and the rules. One JSON file under DATA/exams. The exams
+committee moved into the accounts (the Exams and events extra, changed on the admin page): the `committee` list the file
+still holds is kept as it was, for the record, and never read."""
 import os, threading
 
 import store
-from relief import people as _people
-from relief import settings as _relief
+from accounts import people as _accounts
 
 PATH = os.path.join(store.DATA, "exams", "settings.json")
 _LOCK = threading.Lock()
 WRONG = "Check the settings and try again."
-LISTS = ("committee", "backups", "chiefs", "never")
+LISTS = ("backups", "chiefs", "never")
+KEPT = ("committee",)      # the old list: stored untouched, never read
 LABELS = dict(per_classroom="invigilators per classroom", hall_per="students per hall invigilator", arrive="arrive before",
               stay="stay after", max_per_day="duties a day")
 RANGES = dict(per_classroom=(1, 10), hall_per=(1, 500), arrive=(0, 120), stay=(0, 120), max_per_day=(1, 20))
 
 
 def defaults() -> dict:
-    return dict(committee=[], rooms={}, backups=[], chiefs=[], never=[],
+    return dict(rooms={}, backups=[], chiefs=[], never=[],
                 rules=dict(per_classroom=2, hall_per=40, hall_chief=True, arrive=15, stay=10, max_per_day=None, not_own_subject=False),
                 saved_at=None, saved_by=None)
 
 
 def _known(pub) -> set:
-    return {p["name"] for p in _people.people(pub, _relief.load(pub)["extra_staff"])}
+    return {p["name"] for p in _accounts.staff(pub)}   # the published teachers and the staff added in the accounts
 
 
 def load(pub) -> dict:
@@ -95,14 +97,17 @@ def _check(new, pub) -> dict:
         if not (_int(v) and lo <= v <= hi): raise ValueError(f"Give a whole number for {LABELS[k]}.")
     for k in ("hall_chief", "not_own_subject"):
         if not isinstance(rules[k], bool): raise ValueError(WRONG)
-    return dict(committee=lists["committee"], rooms=rooms, backups=lists["backups"], chiefs=lists["chiefs"], never=lists["never"],
+    return dict(rooms=rooms, backups=lists["backups"], chiefs=lists["chiefs"], never=lists["never"],
                 rules={k: rules[k] for k in base["rules"]})
 
 
 def save(data, pub, by) -> dict:
+    """a `committee` list in data is ignored: only an admin changes the exams committee, on the admin page"""
     clean = _check(data, pub)
     clean.update(saved_at=store.now(), saved_by=by)
     with _LOCK:
+        old = store.read_json(PATH, {})
+        clean.update({k: old[k] for k in KEPT if isinstance(old, dict) and k in old})
         os.makedirs(os.path.dirname(PATH), exist_ok=True)
         store.write_json(PATH, clean)
     return load(pub)

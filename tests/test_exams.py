@@ -1,5 +1,5 @@
 """Plain-assert tests for exams: .venv/bin/python tests/test_exams.py"""
-import os, secrets, sys, tempfile
+import os, secrets, sys, tempfile, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 KEY = secrets.token_hex(16)
@@ -44,9 +44,11 @@ def settings_defaults_and_round_trip():
     d = ES.load(pub)
     want = ES.defaults(); want.update(missing=[], missing_rooms=[])
     assert d == want, d
+    assert "committee" not in d, "the exams committee is the accounts' Exams and events extra now"
     out = ES.save(dict(committee=["Ms Grace Yeo"], rooms={"Hall": dict(seats=240, rows=24, cols=10, hall=True, access=False, note="")},
                        backups=["Mr Ivan Lee"]), pub, "Ms Grace Yeo")
-    assert out["committee"] == ["Ms Grace Yeo"] and out["backups"] == ["Mr Ivan Lee"] and out["saved_by"] == "Ms Grace Yeo"
+    assert "committee" not in out and out["backups"] == ["Mr Ivan Lee"] and out["saved_by"] == "Ms Grace Yeo"
+    assert "committee" not in store.read_json(ES.PATH), "a committee list sent is not saved"
     assert out["rooms"]["Hall"]["seats"] == 240
     assert ES.load(pub) == out
 
@@ -54,12 +56,27 @@ def settings_defaults_and_round_trip():
 def settings_refuse_bad_values():
     pub = F.sample_pub()
     hall = dict(seats=240, rows=24, cols=10, hall=True, access=False, note="")
-    raises(ValueError, lambda: ES.save(dict(committee=["Mr Nobody"]), pub, "x"), "Mr Nobody is not on the published timetable or the staff list.")
+    raises(ValueError, lambda: ES.save(dict(backups=["Mr Nobody"]), pub, "x"), "Mr Nobody is not on the published timetable or the staff list.")
     raises(ValueError, lambda: ES.save(dict(rooms={"Gym": hall}), pub, "x"), "Gym is not a room of the published timetable.")
     raises(ValueError, lambda: ES.save(dict(rooms={"Hall": dict(hall, seats=0)}), pub, "x"), "Give Hall a number of exam seats.")
     raises(ValueError, lambda: ES.save(dict(rooms={"Hall": dict(hall, rows=10, cols=10)}), pub, "x"), "Hall: rows times columns is less than its exam seats.")
     raises(ValueError, lambda: ES.save(dict(rules=dict(per_classroom="two")), pub, "x"), "Give a whole number for invigilators per classroom.")
-    raises(ValueError, lambda: ES.save(dict(committee="Ms Grace Yeo"), pub, "x"), "Check the settings and try again.")
+    raises(ValueError, lambda: ES.save(dict(backups="Ms Grace Yeo"), pub, "x"), "Check the settings and try again.")
+
+@t
+def settings_save_ignores_the_committee_list():
+    _fresh()
+    pub = F.sample_pub()
+    os.makedirs(os.path.dirname(ES.PATH), exist_ok=True)
+    store.write_json(ES.PATH, dict(committee=["Ms Grace Yeo", "Mr Gone Away"], backups=["Mr Ivan Lee"]))
+    d = ES.load(pub)
+    assert "committee" not in d and d["missing"] == [] and d["backups"] == ["Mr Ivan Lee"], d
+    for sent in ("not a list", ["Mr Nobody"], [5], []):                           # ignored, never refused
+        out = ES.save(dict(committee=sent, backups=["Mr Ben Ong"]), pub, "x")
+        raw = store.read_json(ES.PATH)
+        assert raw["committee"] == ["Ms Grace Yeo", "Mr Gone Away"] and raw["backups"] == ["Mr Ben Ong"], raw   # kept as stored
+        assert "committee" not in out
+    _fresh()
 
 @t
 def settings_drop_people_no_longer_there():
@@ -828,16 +845,32 @@ def published(pub):
     try: yield
     finally: store.published = old
 
-def signed_in(card, code):
+from accounts import people as AP  # noqa: E402
+import datetime as _dt  # noqa: E402
+AGAIN = {"error": "Please sign in again."}
+LATER = (_dt.date.today() + _dt.timedelta(days=30)).isoformat()
+EARLIER = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
+
+def signed_in(code):
+    """the one box of the sign-in page"""
     c = A.app.test_client()
-    return c, c.post("/login", data={"as": card, "code": code})
+    return c, c.post("/login", data={"code": code})
 
 def committee():
-    c, r = signed_in("committee", os.environ["COMMITTEE_CODE"]); assert r.status_code == 302
+    c, r = signed_in(os.environ["COMMITTEE_CODE"]); assert r.status_code == 302
     return c
 
-def staff(name, card="exams"):
-    c, r = signed_in(card, access.staff_code(name)); assert r.status_code == 302, (name, r.status_code)
+def exams_until(name, until):
+    """the person's Exams and events extra in the accounts (None: taken off)"""
+    AP.update(lambda d: d["people"].setdefault(name, {}).setdefault("extras", {}).update(exams=until))
+
+def staff(name, via="code", until=None):
+    """a session of the person signed in by name, as tests/test_routes.py builds them; until: their Exams and events extra"""
+    if until is not None: exams_until(name, until)
+    c = A.app.test_client()
+    with c.session_transaction() as s:
+        s.update(who=name, via=via, n=AP.record(AP.load(), name)["n"])
+        if via == "password": s["exp"] = time.time() + 3600
     return c
 
 def _cal(on=True):
@@ -856,47 +889,70 @@ def _rooms_saved():
     store.write_json(ES.PATH, dict(committee=[], rooms=x["rooms"]))
 
 @t
-def exams_card_on_the_front_page():
-    c = A.app.test_client()
+def exams_tile_on_the_home_page():
     with published(_PUB):
-        front = c.get("/login").data
-        assert b"Exams and events" in front and b'src="/static/choice-exams.svg"' in front
-        _, r = signed_in("exams", access.staff_code("Ms Grace Yeo"))
-        assert r.status_code == 302 and r.headers["Location"] == "/exams", r.headers
-        _, r = signed_in("exams", os.environ["TEACHER_CODE"])
-        assert r.status_code == 403 and b"/login?as=teacher" in r.data, r.data
-        _, r = signed_in("relief", access.staff_code("Ms Grace Yeo"))
-        assert r.headers["Location"] == "/relief"
-    assert A.CHOICE_OF["staff"] == "relief"
+        front = A.app.test_client().get("/login").data
+        assert b"Exams and events" not in front and b"choice-exams.svg" not in front, "one box, no cards"
+        c, r = signed_in(access.staff_code("Ms Grace Yeo"))
+        assert r.status_code == 302 and r.headers["Location"] == "/home", r.headers
+        page = c.get("/home").data.decode()
+        assert 'href="/exams"' not in page and 'href="/relief"' in page, "no Exams and events extra: no tile"
+        exams_until("Ms Grace Yeo", LATER)
+        try:
+            page = c.get("/home").data.decode()
+            d = _dt.date.fromisoformat(LATER)
+            assert 'href="/exams"' in page and "Exams and events" in page and f"Until {d.day} {d.strftime('%b %Y')}" in page, page
+        finally: exams_until("Ms Grace Yeo", None)
+        _, r = signed_in(os.environ["TEACHER_CODE"])
+        assert r.status_code == 302 and r.headers["Location"] == "/timetable", r.headers
+    assert not hasattr(A, "CHOICES") and not hasattr(A, "CHOICE_OF")
 
 @t
 def only_the_committees_get_in():
     _reset(); _cal()
     with published(_PUB):
         s = staff("Ms Grace Yeo")
-        r = s.get("/api/exams"); assert r.status_code == 403 and r.get_json()["error"] == A.ONLY_EXAMS, r.data
-        assert s.get("/api/exams/me").get_json() == dict(name="Ms Grace Yeo", can_use=False)
-        assert s.get("/api/exams/settings").status_code == 403
+        r = s.get("/api/exams"); assert r.status_code == 401 and r.get_json() == AGAIN, r.data
+        assert s.get("/api/exams/me").status_code == 401 and s.get("/api/exams/settings").status_code == 401
+        r = s.get("/exams"); assert r.status_code == 302 and r.headers["Location"].endswith("/login"), r.headers
         c = committee()
         assert c.get("/api/exams").status_code == 200
-        assert c.get("/api/exams/me").get_json() == dict(name="Timetable committee", can_use=True)
+        assert c.get("/api/exams/me").get_json() == dict(name="Timetable committee", can_use=True, home="/")
         d = c.get("/api/exams/settings").get_json()
-        assert d["settings"]["committee"] == [] and {"name": "Hall", "kind": "pe venue", "capacity": 400} in [dict(zip(("name", "kind", "capacity"), r)) if isinstance(r, list) else r for r in d["rooms"]], d["rooms"]
-        d["settings"]["committee"] = ["Ms Grace Yeo"]
-        r = c.put("/api/exams/settings", json=d["settings"]); assert r.status_code == 200, r.data
+        assert d["lists"] == dict(committee=[]) and d["can_admin"] is False and "committee_ok" not in d and "committee" not in d["settings"], d
+        assert {"name": "Hall", "kind": "pe venue", "capacity": 400} in [dict(zip(("name", "kind", "capacity"), r)) if isinstance(r, list) else r for r in d["rooms"]], d["rooms"]
+        r = c.put("/api/exams/settings", json=dict(d["settings"], committee=["Ms Grace Yeo"])); assert r.status_code == 200, r.data
+        assert "committee" not in store.read_json(ES.PATH) and r.get_json()["lists"] == dict(committee=[]), "only an admin, on the admin page"
+        assert s.get("/api/exams").status_code == 401, "the exams committee list no longer opens exams: the accounts do"
+        exams_until("Ms Grace Yeo", LATER)
         assert s.get("/api/exams").status_code == 200
-        assert s.get("/api/exams/me").get_json()["can_use"] is True
+        assert s.get("/api/exams/me").get_json() == dict(name="Ms Grace Yeo", can_use=True, home="/home")
         assert s.get("/exams").status_code == 200 and s.get("/exams/settings").status_code == 200
         mine = s.get("/api/exams/settings").get_json()
-        assert mine["committee_ok"] is False and d["committee_ok"] is True
-        for names in (["Ms Grace Yeo", "Mr Ben Ong"], []):
+        assert mine["lists"] == dict(committee=[["Ms Grace Yeo", LATER]]) and mine["can_admin"] is False, mine["lists"]
+        assert c.get("/api/exams/settings").get_json()["lists"] == mine["lists"]
+        for names in (["Ms Grace Yeo", "Mr Ben Ong"], [], "x"):
             r = s.put("/api/exams/settings", json=dict(mine["settings"], committee=names, backups=["Mr Ivan Lee"]))
-            assert r.status_code == 200 and r.get_json()["settings"]["committee"] == ["Ms Grace Yeo"], r.data
-            assert ES.load(_PUB)["committee"] == ["Ms Grace Yeo"] and ES.load(_PUB)["backups"] == ["Mr Ivan Lee"]
+            assert r.status_code == 200 and r.get_json()["lists"] == mine["lists"], r.data
+            assert "committee" not in store.read_json(ES.PATH) and ES.load(_PUB)["backups"] == ["Mr Ivan Lee"]
+            assert ES.load(_PUB)["saved_by"] == "Ms Grace Yeo"
         r = c.put("/api/exams/settings", json=dict(mine["settings"], committee=["Ms Grace Yeo", "Mr Ben Ong"]))
-        assert r.status_code == 200 and ES.load(_PUB)["committee"] == ["Ms Grace Yeo", "Mr Ben Ong"]
+        assert r.status_code == 200 and "committee" not in store.read_json(ES.PATH) and AP.record(AP.load(), "Mr Ben Ong")["extras"]["exams"] is None
+        from werkzeug.security import generate_password_hash
+        AP.update(lambda d: d["people"].setdefault("Ms Ada Koh", {}).update(group="committee", added=True, username="ada.koh",
+                                                                            pw=generate_password_hash(secrets.token_hex(8)),   # a password session needs one
+                                                                            extras=dict(relief=False, exams=None, admin=True)))
+        try:
+            a = staff("Ms Ada Koh", via="password")                      # an admin: the line links to the admin page
+            j = a.get("/api/exams/settings").get_json(); assert j["can_admin"] is True and j["lists"] == mine["lists"], j
+            assert a.get("/api/exams/me").get_json() == dict(name="Ms Ada Koh", can_use=True, home="/home")
+            assert staff("Ms Ada Koh").get("/api/exams").status_code == 401, "her code opens no committee rights and she has no Exams extra"
+        finally: AP.update(lambda d: d["people"].pop("Ms Ada Koh"))
         assert c.put("/api/exams/settings", json="x").status_code == 400
         assert c.put("/api/exams/settings", data="{bad", content_type="application/json").status_code == 400
+        exams_until("Ms Grace Yeo", EARLIER)
+        assert s.get("/api/exams").status_code == 401 and s.get("/api/exams/me").status_code == 401, "past the end date: no way in"
+        exams_until("Ms Grace Yeo", None)
     r = A.app.test_client().get("/api/exams"); assert r.status_code == 401
     with published(None):
         assert committee().get("/api/exams").status_code == 409
@@ -1121,13 +1177,143 @@ def printouts_and_excel():
         assert c.get(f"/api/exams/{s['id']}/print/seating.pdf").data.startswith(b"%PDF")
     assert A.app.test_client().get(f"/api/exams/{s['id']}/download.xlsx").status_code in (401, 403)
 
+# ---- exams' committee list moves into the accounts (the Exams and events extra, until 31 December), once
+import history as H  # noqa: E402
+
+DEC = "%d-12-31" % _dt.date.today().year
+
+def moved_line(name, until=None):
+    d = _dt.date.fromisoformat(until or DEC)
+    return f"{name}: Exams and events until {d.day} {d.strftime('%b %Y')} (from the exams committee list: check the end date)"
+
+def _no_accounts():
+    if os.path.exists(AP.PATH): os.remove(AP.PATH)
+
+@t
+def migrate_moves_the_exams_committee_list_once():
+    _no_accounts()
+    assert AP.blank()["migrated_exams"] is False and AP._fill({"migrated_exams": "yes"})["migrated_exams"] is False
+    assert AP.migrate(_PUB, {}, None) is None and not os.path.exists(AP.PATH), "no exams settings: nothing to move yet"
+    assert AP.migrate(_PUB, {}, dict(committee=[])) is None and not os.path.exists(AP.PATH), "nothing to move: no file is made"
+    n0 = len(H.read(kinds=["account"], limit=10000))
+    raw = dict(committee=["Ms Grace Yeo", " Mr Ben Ong ", "Ms Grace Yeo", 5, ""], backups=["Mr Ivan Lee"])
+    lines = AP.migrate(None, {}, raw)                    # an extra needs no role: it moves while nothing is published too
+    assert lines == [moved_line("Ms Grace Yeo"), moved_line("Mr Ben Ong")], lines
+    d = AP.load()
+    assert d["migrated_exams"] is True and d["moved"] == lines, d
+    assert AP.record(d, "Ms Grace Yeo")["extras"]["exams"] == DEC and AP.record(d, "Mr Ben Ong")["extras"]["exams"] == DEC
+    assert AP.record(d, "Mr Ivan Lee")["extras"]["exams"] is None and "Mr Ivan Lee" not in d["people"]
+    got = H.read(kinds=["account"], limit=10000); assert len(got) == n0 + 1, (n0, len(got))
+    e = got[0]
+    assert (e["what"], e["text"], e["people"]) == ("moved", "Moved from the exams committee list", ["Ms Grace Yeo", "Mr Ben Ong"]), e
+    assert (e["who"], e["as"], e["via"]) == (None, "The app", "app"), e
+    assert AP.migrate(_PUB, {}, dict(committee=["Ms Chloe Tan"])) is None and AP.load()["moved"] == lines, "once"
+    assert AP.record(AP.load(), "Ms Chloe Tan")["extras"]["exams"] is None and len(H.read(kinds=["account"], limit=10000)) == n0 + 1
+    # a live install whose relief lists moved before exams arrived: the exams list still moves once, its lines after relief's
+    relief_line = "Mr Ivan Lee: Relief team (from relief's Team list)"
+    AP.update(lambda d: d.update(people={"Ms Grace Yeo": dict(extras=dict(relief=False, exams="2099-03-31", admin=False))},
+                                 migrated=True, migrated_exams=False, moved=[relief_line]))
+    lines = AP.migrate(_PUB, dict(team=["Mr Daniel Koh"]), dict(committee=["Ms Grace Yeo", "Ms Chloe Tan"]))
+    assert lines == [moved_line("Ms Grace Yeo", "2099-03-31"), moved_line("Ms Chloe Tan")], lines   # a later end date given is kept
+    d = AP.load()
+    assert d["moved"] == [relief_line] + lines and d["migrated"] is True and d["migrated_exams"] is True, d["moved"]
+    assert AP.record(d, "Ms Grace Yeo")["extras"]["exams"] == "2099-03-31" and AP.record(d, "Ms Chloe Tan")["extras"]["exams"] == DEC
+    assert AP.record(d, "Mr Daniel Koh")["extras"]["relief"] is False, "relief's part is not done twice"
+    # a new install: both lists in one call, an entry each
+    _no_accounts(); n0 = len(H.read(kinds=["account"], limit=10000))
+    lines = AP.migrate(_PUB, dict(team=["Mr Daniel Koh"]), dict(committee=["Ms Chloe Tan"]))
+    assert lines == ["Mr Daniel Koh: Relief team (from relief's Team list)", moved_line("Ms Chloe Tan")], lines
+    d = AP.load(); assert d["migrated"] is True and d["migrated_exams"] is True and d["moved"] == lines
+    got = H.read(kinds=["account"], limit=10000); assert len(got) == n0 + 2
+    assert [e["text"] for e in got[:2]] == ["Moved from the exams committee list", "Moved from relief's lists"], [e["text"] for e in got[:2]]
+    # relief waits for a publish (a Management name needs its role): the exams list does not wait
+    _no_accounts()
+    assert AP.migrate(None, dict(management=["Ms Chloe Tan"]), dict(committee=["Mr Ben Ong"])) == [moved_line("Mr Ben Ong")]
+    d = AP.load(); assert d["migrated"] is False and d["migrated_exams"] is True and AP.record(d, "Ms Chloe Tan")["group"] is None
+    _no_accounts()
+
+@t
+def the_startup_call_and_the_settings_routes_move_the_list():
+    _reset(); _cal(); _no_accounts()
+    os.makedirs(os.path.dirname(ES.PATH), exist_ok=True)
+    store.write_json(ES.PATH, dict(committee=["Ms Chloe Tan"], backups=["Mr Ivan Lee"]))
+    with published(_PUB):
+        assert A.move_relief_lists() == [moved_line("Ms Chloe Tan")] and A.move_relief_lists() is None
+        _no_accounts()
+        r = committee().get("/exams/settings"); assert r.status_code == 200
+        assert AP.load()["migrated_exams"] is True and AP.record(AP.load(), "Ms Chloe Tan")["extras"]["exams"] == DEC
+        for call in (lambda c: c.get("/api/exams/settings"), lambda c: c.put("/api/exams/settings", json=dict(backups=["Mr Ivan Lee"]))):
+            _no_accounts()
+            j = call(committee()).get_json()
+            assert j["lists"] == dict(committee=[["Ms Chloe Tan", DEC]]), j
+        assert staff("Ms Chloe Tan").get("/api/exams").status_code == 200, "the moved name opens exams"
+        assert store.read_json(ES.PATH)["committee"] == ["Ms Chloe Tan"], "the old list stays in the file, for the record"
+    _no_accounts(); _reset()
+
+@t
+def each_exams_save_writes_one_entry():
+    import io
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        s = staff("Ms Grace Yeo", until=LATER)
+        n = [len(H.read(kinds=["exams"], limit=10000))]
+        def wrote(r, what, text):
+            assert r.status_code == 200, (what, r.status_code, r.data[:200])
+            got = H.read(kinds=["exams"], limit=10000)
+            assert len(got) == n[0] + 1, (what, n[0], len(got)); n[0] += 1
+            e = got[0]
+            assert (e["what"], e["text"], e["where"], e["link"]) == (what, text, "Exams and events", "/exams"), e
+            assert (e["who"], e["as"], e["via"]) == ("Ms Grace Yeo", "Ms Grace Yeo", "code"), e
+            return e
+        def none(r, code):
+            assert r.status_code == code, (r.status_code, r.data[:200])
+            assert len(H.read(kinds=["exams"], limit=10000)) == n[0], "no entry"
+        st = s.get("/api/exams/settings").get_json()["settings"]
+        wrote(s.put("/api/exams/settings", json=st), "settings", "Exam settings saved")
+        none(s.put("/api/exams/settings", json="x"), 400)
+        r = s.post("/api/exams", json=dict(kind="exam", name="Mid-year exam", levels=["Sec 3"], start="2026-10-05", end="2026-10-06"))
+        x = r.get_json(); e = wrote(r, "create", "Mid-year exam: created"); assert e["exam"] == x["id"], e
+        none(s.post("/api/exams", json=dict(kind="party", name="X")), 400)
+        x["days"] = dict(SEC3)
+        wrote(s.put("/api/exams/" + x["id"], json=x), "edit", "Mid-year exam: changed")
+        none(s.put("/api/exams/" + x["id"], json=dict(x, papers="x")), 400)
+        none(s.put("/api/exams/ffff", json=x), 404)
+        r = s.post(f"/api/exams/{x['id']}/fill"); x = r.get_json()
+        wrote(r, "fill", "Mid-year exam: papers added from the subjects")
+        times = {"English": "07:50", "Pure Chemistry": "10:00"}
+        x["papers"] = [dict(p, date="2026-10-05", start=times[p["subject"]]) for p in x["papers"] if p["subject"] in times]
+        wrote(s.put("/api/exams/" + x["id"], json=x), "edit", "Mid-year exam: changed")
+        r = s.get(f"/api/exams/{x['id']}/papers.xlsx"); none(r, 200)
+        wrote(s.post(f"/api/exams/{x['id']}/papers.xlsx", data=dict(file=(io.BytesIO(r.data), "p.xlsx"))), "papers", "Mid-year exam: paper list uploaded")
+        none(s.post(f"/api/exams/{x['id']}/papers.xlsx", data=dict(file=(io.BytesIO(b"junk"), "p.xlsx"))), 400)
+        wrote(s.post(f"/api/exams/{x['id']}/make", json={}), "make", "Mid-year exam: seats and duties made")
+        none(s.post(f"/api/exams/{x['id']}/make", json=dict(only=5)), 400)
+        key = "2026-10-05 07:50"
+        wrote(s.post(f"/api/exams/{x['id']}/move", json=dict(key=key, students=["3A-07"], room="3-02")), "move", "Mid-year exam: students moved")
+        none(s.post(f"/api/exams/{x['id']}/move", json=dict(key="bad", students=["3A-07"], room="3-02")), 400)
+        wrote(s.post(f"/api/exams/{x['id']}/invigilators", json=dict(key=key, room="3-01", names=["Mr Ivan Lee"])), "invigilators", "Mid-year exam: invigilators changed")
+        none(s.post(f"/api/exams/{x['id']}/invigilators", json=dict(key=key, room="3-01", names="x")), 400)
+        wrote(s.post(f"/api/exams/{x['id']}/use-anyway", json=dict(key=key, room="Hall")), "use-anyway", "Mid-year exam: Hall used anyway")
+        long = "Room " + "x" * 300                                       # the page's room text is cut to 60 characters for the history
+        e = wrote(s.post(f"/api/exams/{x['id']}/use-anyway", json=dict(key=key, room=long)), "use-anyway", f"Mid-year exam: {long[:59]}… used anyway")
+        assert len(e["text"]) == len("Mid-year exam: ") + 60 + len(" used anyway"), e["text"]
+        for url in ("", "/view", "/print/seating.pdf", "/download.xlsx", f"/who?key={key}&room=3-01"): none(s.get(f"/api/exams/{x['id']}{url}"), 200)
+        none(s.get("/api/exams"), 200)
+        wrote(s.delete("/api/exams/" + x["id"]), "delete", "Mid-year exam: deleted")
+        none(s.delete("/api/exams/" + x["id"]), 200)                       # nothing there: nothing deleted, no entry
+        r = committee().put("/api/exams/settings", json=st); assert r.status_code == 200
+        e = H.read(kinds=["exams"], limit=1)[0]; assert (e["who"], e["as"], e["via"], e["text"]) == (None, "Shared committee code", "shared", "Exam settings saved"), e
+    exams_until("Ms Grace Yeo", None); _reset()
+
 def _page(name):
     with open(os.path.join(ROOT, "static", name), encoding="utf-8") as f:
         return f.read()
 
 @t
 def the_pages_carry_the_words():
-    assert "Only the timetable committee can change this list." in _page("exams-settings.js")
+    xs = _page("exams-settings.js")
+    assert "Change these on the admin page." in xs and "Ask an admin to change these." in xs and 'href="/admin"' in xs
+    assert "Only the timetable committee can change this list." not in xs and "committee_ok" not in xs
     js = _page("exams.js")
     for words in ("How to seat", "Own class in own home room", "Mix classes", "Alternate levels by column", "Alternate papers",
                   "One level per block", "Class, then Student ID", "Every seat", "A seat left between", "Let the app choose",

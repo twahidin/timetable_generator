@@ -224,7 +224,7 @@ def _applied(op):
     """an op as it is applied: a new row gets its id here, so the checks stay the same from one build to the next"""
     return ["add", op[1], dict(op[2], _id=sync.new_id()), op[3]] if op and op[0] == "add" else op
 
-def decide(key, answer):
+def decide(key, answer, by=None):
     """record what to do with one warning; 'step5' changes the setup to match the timetable. Returns info()."""
     if answer not in ANSWERS: raise ValueError("Choose what to do with the warning.")
     if answer == "met" and not key.endswith(":again"): raise ValueError("That answer is only for a rule to check again.")
@@ -240,8 +240,8 @@ def decide(key, answer):
         if w["ops"] is None:
             if w["kind"] != "deployment": raise ValueError("This warning cannot be settled by updating step 5.")
             raise ValueError(WAITING_REFUSED if w["text"].endswith(WAITING) else "This difference is set on step 3 for the whole level; the app does not change it from here.")
-        store.restore_point("Before updating step 5 from the timetable")
-        try: store.apply_changes([_applied(op) for op in w["ops"]], client="draft", since=int(j["setup_version"][1:]))
+        store.restore_point("Before updating step 5 from the timetable", by)   # the copy names who pressed it
+        try: store.apply_changes([_applied(op) for op in w["ops"]], client="draft", since=int(j["setup_version"][1:]), by=by)
         except store.Refused as e: raise ValueError(str(e))
         except store.Replaced: raise ValueError("The setup was replaced while this was happening. Check the list again.")
         except LookupError: raise ValueError("Save the school's setup first: the timetable is checked against it.")
@@ -606,6 +606,21 @@ def ask(words, pick=None, ask=None):
     elif not typed.check(ask): return dict(ok=False, error=typed.FAILED)
     m, rec, fx = _now()
     return dict(ok=True, ask=ask, **typed.answer(m, m["checked_setup"], m["days"], ask, pick if _pick_ok(pick) else None))
+
+def last_fix_text():
+    """the text of the newest fix on the draft, or None when there is none"""
+    fl = (store.read_json(_p("meta.json"), {}) or {}).get("fixes") or [] if exists() else []
+    return fl[-1].get("text") if fl else None
+
+def last_batch_texts():
+    """the texts of the newest fix and the fixes made together with it, oldest first"""
+    fl = (store.read_json(_p("meta.json"), {}) or {}).get("fixes") or [] if exists() else []
+    if not fl: return []
+    b = fl[-1].get("batch"); out = [fl[-1].get("text")]
+    for f in reversed(fl[:-1]):
+        if not b or f.get("batch") != b: break
+        out.append(f.get("text"))
+    return out[::-1]
 
 def undo():
     """drop the last fix, and the fixes made together with it (the same batch). Returns info()."""

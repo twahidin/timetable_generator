@@ -1,8 +1,11 @@
-"""Relief settings: who is on the team, the rules, the limits, the times, the school calendar. One JSON file under DATA/relief."""
+"""Relief settings: the rules, the limits, the times, the school calendar. One JSON file under DATA/relief. The lists of who is
+on management, on the relief team and on the extra staff moved into the accounts: what the file still holds of them is kept
+as it was, for the record, and never read."""
 import datetime, os, re, threading
 
 import store
 from relief import people as _people
+from accounts import people as _accounts
 
 PATH = os.path.join(store.DATA, "relief", "settings.json")
 _LOCK = threading.Lock()
@@ -33,7 +36,7 @@ def role_names(pub) -> list:
 
 
 def defaults(pub) -> dict:
-    return dict(management=[], team=[], extra_staff=[], fat_role=_fat_role(pub), rules=list(DEFAULT_RULES),
+    return dict(fat_role=_fat_role(pub), rules=list(DEFAULT_RULES),
                 limits=dict(fat_per_day=3, other_per_day=None, never=[]),
                 times=dict(fill_at="15:00", remind_at="15:00", report_every=15, weekly_day="Fri", weekly_at="15:00"),
                 calendar=dict(terms=[], holidays=[]), saved_at=None, saved_by=None)
@@ -48,9 +51,13 @@ def _merged(pub, saved) -> dict:
     return d
 
 
+KEPT = ("management", "team", "extra_staff")      # the old lists: stored untouched, never read
+
+
 def load(pub) -> dict:
     d = _merged(pub, store.read_json(PATH, {}))
-    known = {p["name"] for p in _people.people(pub, d["extra_staff"])}
+    for k in KEPT: d.pop(k, None)
+    known = {p["name"] for p in _accounts.staff(pub)}
     missing = []
     def keep(names):
         out = []
@@ -58,7 +65,6 @@ def load(pub) -> dict:
             if n in known: out.append(n)
             elif n not in missing: missing.append(n)
         return out
-    d["management"], d["team"] = keep(d["management"]), keep(d["team"])
     d["limits"]["never"] = keep(d["limits"].get("never") or [])
     d["missing"] = missing
     return d
@@ -92,29 +98,13 @@ def _check(new, pub):
     a value of the wrong JSON type (a list where an object belongs, None where a list belongs) is UNREAD"""
     if not isinstance(new, dict): raise ValueError(UNREAD)
     base = defaults(pub)
-    extra, seen = [], set()
-    teachers = {p["name"] for p in _people.people(pub, [])}
-    for x in _of(new, "extra_staff", list, []):
-        if not isinstance(x, dict): raise ValueError(UNREAD)
-        name = _text(x.get("name"))
-        if not name: raise ValueError("A staff member needs a name.")
-        if name[0] in FORMULA: raise ValueError(f"A name cannot start with {name[0]}.")   # the codes CSV is opened in a spreadsheet
-        if name in teachers: raise ValueError(f"{name} is already a teacher on the timetable.")
-        if name in seen: raise ValueError(f"{name} is on the staff list twice.")
-        if len(name) > 100: raise ValueError("Keep a name under 100 characters.")
-        note = _text(x.get("note"))
-        if len(note) > 200: raise ValueError("Keep a note under 200 characters.")
-        seen.add(name); extra.append(dict(name=name, note=note))
-    known = {p["name"] for p in _people.people(pub, extra)}
+    known = {p["name"] for p in _accounts.staff(pub)}
     limits = _of(new, "limits", dict, {})
-    lists = {}
-    for key, src in (("management", new), ("team", new), ("never", limits)):
-        out = []
-        for n in _of(src, key, list, []):
-            n = _text(n)
-            if n not in known: raise ValueError(f"{n} is not on the published timetable or the staff list.")
-            if n not in out: out.append(n)
-        lists[key] = out
+    never = []
+    for n in _of(limits, "never", list, []):
+        n = _text(n)
+        if n not in known: raise ValueError(f"{n} is not on the published timetable or the staff list.")
+        if n not in never: never.append(n)
     role = _text(new.get("fat_role"))
     if role and role not in role_names(pub): raise ValueError(f"There is no role {role} on step 4.")
     rules = [_text(r) for r in _of(new, "rules", list, base["rules"])]
@@ -154,8 +144,8 @@ def _check(new, pub):
         a, b = _date(h.get("start")), _date(h.get("end") or h.get("start"))
         if not a or not b or b < a: raise ValueError(f"Check the dates of {name}.")
         holidays.append(dict(start=a.isoformat(), end=b.isoformat(), name=name))
-    return dict(management=lists["management"], team=lists["team"], extra_staff=extra, fat_role=role, rules=rules,
-                limits=dict(fat_per_day=lim["fat_per_day"], other_per_day=lim["other_per_day"], never=lists["never"]),
+    return dict(fat_role=role, rules=rules,
+                limits=dict(fat_per_day=lim["fat_per_day"], other_per_day=lim["other_per_day"], never=never),
                 times=dict(fill_at=times["fill_at"], remind_at=times["remind_at"], report_every=times["report_every"], weekly_day=times["weekly_day"], weekly_at=times["weekly_at"]),
                 calendar=dict(terms=clean_terms, holidays=holidays))
 
@@ -164,6 +154,10 @@ def save(new, pub, by):
     clean = _check(new, pub)
     clean.update(saved_at=store.now(), saved_by=by)
     with _LOCK:
+        old = store.read_json(PATH, {})
+        if isinstance(old, dict):
+            for k in KEPT:
+                if k in old: clean[k] = old[k]
         os.makedirs(os.path.dirname(PATH), exist_ok=True)
         store.write_json(PATH, clean)
     return load(pub)

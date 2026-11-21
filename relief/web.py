@@ -1,19 +1,20 @@
 """The relief request routes (stage 2): a teacher asks for relief and sets work for each lesson; management and the
 relief team plan relief for a colleague and choose relief teachers; the absent teacher acknowledges, sets work or
-cancels; the relief team sees What's in. Registered from app.py after init(has=..., me=..., role=...).
+cancels; the relief team sees What's in. Registered from app.py after init(has=..., me=..., need=...).
 
-Every route answers 401 {"error": "Please sign in again."} without a person signed in with their own code, 409 with
-NO_PUB when nothing is published, 403 {"error": sentence} without the right and 400 {"error": sentence} on a refusal.
+Every route answers 401 {"error": "Please sign in again."} without a person signed in by name who has the relief right
+(app.py's need("relief"), as every other route of the app), 409 with NO_PUB when nothing is published, 403 {"error":
+sentence} without the narrower right (relief.plan, relief.team) and 400 {"error": sentence} on a refusal.
 The absence reason reaches only the absent teacher, whoever planned it, relief.plan and relief.team: every route that
 answers a record or one of its files asks _record first, and the lists are the caller's own, the caller's planned ones,
 or (relief.team) everything. The remarks are for the relief team: a record sent to someone who is only its absent
 teacher (not its sender, not relief.plan, not relief.team) leaves them out (_out).
 
-Hand-over to the accounts work: every permission question here goes through has(right), passed in with
-init(has=..., me=..., role=...); app.py passes relief_has. When the accounts work merges, init(has=...) receives its
-`has`: the right names (relief, relief.plan, relief.team, relief.settings, relief.save) are already the same. The relief
-team's right to change any absence (not needed, needed again, cancel) is asked here too, has("relief.team"), and passed
-into relief.absences as team=...; relief.absences never reads the settings' team list itself.
+Rights come from the accounts (accounts/rights.py): every permission question here goes through has(right), app.py's
+`has`, passed in with init(has=..., me=..., need=...). Any signed-in staff person has relief; school leaders, HODs and
+SHs have relief.plan; the Relief team extra gives relief.plan and relief.team. The relief team's right to change any
+absence (not needed, needed again, cancel) is asked here too, has("relief.team"), and passed into relief.absences as
+team=...; relief.absences never reads who is on the team itself.
 
 Bodies: POST /api/relief/absences takes relief.absences.new's fields (teacher: yourself when left out; dates, periods,
 reason, reason_text, remarks, reporting_officer, lessons=[{key, needed, relief, work}]); PUT …/work takes the work
@@ -22,11 +23,13 @@ never read as "no work"); POST …/not-needed and …/cancel take {why}; PUT …
 null to take the choice off}; POST …/files takes one file in the multipart field "file"; POST /api/relief/absences/seen
 takes {at}: the as_of the What's in list answered (now when left out). Periods are 0-based, as in the records."""
 import csv, datetime, io, os, threading
+from functools import wraps
 from zoneinfo import ZoneInfo
 
 from flask import Blueprint, Response, current_app, jsonify, request, send_file
 
 import store
+from accounts import people as _accounts
 from exams.days import bounds, hhmm
 from relief import absences as _absences
 from relief import files as _files
@@ -34,7 +37,6 @@ from relief import free as _free
 from relief import lessons as _lessons
 from relief import settings as _settings
 from relief.codes import _cell
-from relief.people import people as _people
 
 bp = Blueprint("relief_web", __name__)
 NO_PUB = "Publish the timetable first: relief reads the teachers from it."
@@ -54,23 +56,39 @@ _SEEN_LOCK = threading.Lock()
 BAD_INPUT = (TypeError, KeyError, AttributeError)     # malformed JSON never gives a 500
 SLACK = 64 * 1024                                      # room for the multipart lines around one file
 
-_has = _me = _role = None
+_has = _me = _need = _note = None
+_GUARDS = set()        # every right list a route here names, checked by app.py's need() in init
 
 
-def init(has, me, role):
-    """has(right) -> bool; me(pub) -> the person signed in with their own code (dict with name) or None; role() -> the session's role"""
-    global _has, _me, _role
-    _has, _me, _role = has, me, role
+def init(has, me, need, note=None):
+    """has(right) -> bool: the accounts' rights of whoever is signed in; me() -> the person signed in by name (a dict with
+    name; app.py's who(), which ends the session of someone no longer on the published timetable) or None; need(*rights):
+    app.py's route guard, which every route here goes through (a wrong right name stops the app at start, as there);
+    note(what, text, absence id): one history entry for a relief save (app.py's _relief_entry, by whoever is signed in)"""
+    global _has, _me, _need, _note
+    _has, _me, _need, _note = has, me, need, note
+    for names in _GUARDS: need(*names)
+
+
+def need(*names):
+    """the route needs one of these rights: app.py's need() decides on every request (passed in with init); the names
+    stay on the route as _need, for the route map (tests/test_routes.py)"""
+    _GUARDS.add(names)
+    def deco(f):
+        @wraps(f)
+        def inner(*a, **k): return _need(*names)(f)(*a, **k)
+        inner._need = names
+        return inner
+    return deco
 
 
 # ---- helpers
 def _gate(right="relief", refused=None):
     """-> (pub, the person's name, None) or (None, None, the refusing answer)"""
-    if _role() != "staff": return None, None, ({"error": SIGN_IN}, 401)
+    p = _me()
+    if p is None or not _has("relief"): return None, None, ({"error": SIGN_IN}, 401)
     pub = store.published()
     if not pub: return None, None, ({"error": NO_PUB}, 409)
-    p = _me(pub)
-    if p is None or not _has("relief"): return None, None, ({"error": SIGN_IN}, 401)
     if right != "relief" and not _has(right): return None, None, ({"error": refused}, 403)
     return pub, p["name"], None
 
@@ -109,10 +127,33 @@ def _views(records, pub, me):
     return [_out(r, pub, me, cal) for r in records]
 
 
-def _on_staff(pub, settings, name):
+def _staff(pub):
+    """everyone relief knows: the published timetable's teachers and the staff added in the accounts (no account field)"""
+    return _accounts.listing(pub)
+
+
+def _on_staff(pub, name):
     """raises the sentence new() says when name is not someone relief knows"""
-    if not isinstance(name, str) or name not in {p["name"] for p in _people(pub, settings["extra_staff"])}:
+    if not isinstance(name, str) or name not in {p["name"] for p in _staff(pub)}:
         raise ValueError(f"{name if isinstance(name, str) and name else 'That person'} is not on the published timetable or the staff list.")
+
+
+def _noted(what, r, words):
+    """the history entry for a save (the accounts design: one per relief save, naming who, what and which absence, with a
+    link; never the reason, nor a why typed with it): 'Relief for <teacher> on <dates>: <words>' (words: a string, or
+    a function giving it)"""
+    if _note is None: return
+    try:
+        days = ", ".join(_absences._say(datetime.date.fromisoformat(d)) for d in r.get("dates") or [])
+        _note(what, f"Relief for {r.get('teacher')} on {days}: {words() if callable(words) else words}", r.get("id"))
+    except Exception:          # the save has happened: a history entry that cannot be made never fails it
+        current_app.logger.exception("relief: the history entry for %s could not be made", what)
+
+
+def _lesson_words(r, key):
+    """'1B, 1A Maths (G1) on Tue 13 Oct': the lesson a history entry is about"""
+    x = next((x for x in r.get("lessons") or [] if x.get("key") == key), None)
+    return f"{_class_group(x)} on {_absences._say(datetime.date.fromisoformat(x['date']))}" if x else "a lesson"
 
 
 def _period_range(pub, a, b):
@@ -158,6 +199,7 @@ def _periods(pub):
 
 # ---- what a form needs
 @bp.get("/api/relief/lessons")
+@need("relief")
 def lessons():
     """a teacher's lessons on the dates (a,b) and periods (from, to), with every period of the day ({p, start, end}) for the
     forms' "Some periods"; each lesson's others are its other teachers who are not away then (a shared lesson needs no relief
@@ -168,7 +210,7 @@ def lessons():
     if teacher != me and not _has("relief.plan"): return {"error": PLAN_ONLY}, 403
     try:
         settings = _settings.load(pub)
-        _on_staff(pub, settings, teacher)
+        _on_staff(pub, teacher)
         dates = _absences._iso_dates([x.strip() for x in (request.args.get("dates") or "").split(",") if x.strip()], _lessons.today())
         periods = _period_range(pub, request.args.get("from"), request.args.get("to"))
         records = _absences.all_records()
@@ -180,6 +222,7 @@ def lessons():
 
 
 @bp.get("/api/relief/free")
+@need("relief")
 def free():
     """who is free for one lesson (its key) of the absent teacher, grouped and ranked; relief.plan"""
     pub, me, err = _gate("relief.plan", CHOOSE_ONLY)
@@ -187,7 +230,7 @@ def free():
     absent, key = request.args.get("absent") or "", request.args.get("key") or ""
     try:
         settings = _settings.load(pub)
-        _on_staff(pub, settings, absent)
+        _on_staff(pub, absent)
         try: date = datetime.date.fromisoformat(key.split("/")[0])
         except ValueError: raise ValueError(_absences.CHANGED)
         lesson = next((x for x in _lessons.on_date(pub, settings["calendar"], absent, date) if x["key"] == key), None)
@@ -198,15 +241,17 @@ def free():
 
 
 @bp.get("/api/relief/people")
+@need("relief")
 def people():
     """everyone relief knows, for the reporting officer and absent teacher pickers: [{name, depts}]"""
     pub, me, err = _gate()
     if err: return err
-    return jsonify([dict(name=p["name"], depts=p["depts"]) for p in _people(pub, _settings.load(pub)["extra_staff"])])
+    return jsonify([dict(name=p["name"], depts=p["depts"]) for p in _staff(pub)])
 
 
 # ---- absences
 @bp.post("/api/relief/absences")
+@need("relief")
 def create():
     """asked when the teacher is yourself (or left out); planned for a colleague with relief.plan"""
     pub, me, err = _gate()
@@ -221,10 +266,12 @@ def create():
     try: r = _absences.new(dict(data, teacher=teacher), pub, me, how, may_choose=plan)
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "sending an absence")
+    _noted(how, r, how)
     return jsonify(_out(r, pub, me))
 
 
 @bp.get("/api/relief/absences/mine")
+@need("relief")
 def mine():
     pub, me, err = _gate()
     if err: return err
@@ -232,6 +279,7 @@ def mine():
 
 
 @bp.get("/api/relief/absences/planned")
+@need("relief")
 def planned():
     pub, me, err = _gate("relief.plan", PLAN_ONLY)
     if err: return err
@@ -244,6 +292,7 @@ def _seen_at(name):
 
 
 @bp.get("/api/relief/absences")
+@need("relief")
 def whats_in():
     """every absence, newest first; new = submitted at or after the time this person last marked What's in as seen
     (never: all new). Reads only: the page posts /seen after showing the list."""
@@ -259,6 +308,7 @@ def whats_in():
 
 
 @bp.post("/api/relief/absences/seen")
+@need("relief")
 def seen():
     """records when this person last saw What's in: the as_of posted back, never later than now"""
     pub, me, err = _gate("relief.team", TEAM_ONLY)
@@ -276,6 +326,7 @@ def seen():
 
 
 @bp.get("/api/relief/absences/<id>")
+@need("relief")
 def one(id):
     pub, me, err = _gate()
     if err: return err
@@ -284,8 +335,9 @@ def one(id):
     return jsonify(_out(r, pub, me))
 
 
-def _change(id, do, right=None, refused=None):
-    """open the absence (403/404 as _record), check the right, do(record, me, pub, body) -> the saved record"""
+def _change(id, do, what, words, right=None, refused=None):
+    """open the absence (403/404 as _record), check the right, do(record, me, pub, body) -> the saved record, then its
+    history entry: what, and words(the saved record)"""
     pub, me, err = _gate()
     if err: return err
     r, err = _record(id, me)
@@ -294,28 +346,35 @@ def _change(id, do, right=None, refused=None):
     try: r = do(r, me, pub, _body())
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "changing an absence")
+    _noted(what, r, lambda: words(r))
     return jsonify(_out(r, pub, me))
 
 
 @bp.post("/api/relief/absences/<id>/acknowledge")
+@need("relief")
 def acknowledge(id):
-    return _change(id, lambda r, me, pub, b: _absences.acknowledge(r["id"], me))
+    return _change(id, lambda r, me, pub, b: _absences.acknowledge(r["id"], me), "acknowledged", lambda r: "acknowledged")
 
 
 @bp.put("/api/relief/absences/<id>/lessons/<path:key>/work")
+@need("relief")
 def work(id, key):
     """a body that is not the work with its files and known (none, not JSON, {}) is refused by set_work: it never clears the work"""
-    return _change(id, lambda r, me, pub, b: _absences.set_work(r["id"], key, b, me))
+    return _change(id, lambda r, me, pub, b: _absences.set_work(r["id"], key, b, me), "work", lambda r: f"work set for {_lesson_words(r, key)}")
 
 
 @bp.post("/api/relief/absences/<id>/lessons/<path:key>/not-needed")
+@need("relief")
 def not_needed(id, key):
-    return _change(id, lambda r, me, pub, b: _absences.not_needed(r["id"], key, b.get("why"), me, team=_has("relief.team")))
+    return _change(id, lambda r, me, pub, b: _absences.not_needed(r["id"], key, b.get("why"), me, team=_has("relief.team")),
+                   "not-needed", lambda r: f"{_lesson_words(r, key)} not needed")
 
 
 @bp.post("/api/relief/absences/<id>/lessons/<path:key>/needed")
+@need("relief")
 def needed(id, key):
-    return _change(id, lambda r, me, pub, b: _absences.needed_again(r["id"], key, me, team=_has("relief.team")))
+    return _change(id, lambda r, me, pub, b: _absences.needed_again(r["id"], key, me, team=_has("relief.team")),
+                   "needed", lambda r: f"{_lesson_words(r, key)} needed again")
 
 
 def _choose(r, key, me, pub, b):
@@ -324,18 +383,28 @@ def _choose(r, key, me, pub, b):
     return _absences.choose(r["id"], key, name or None, me, pub)
 
 
+def _chosen_words(r, key):
+    x = next((x for x in r.get("lessons") or [] if x.get("key") == key), {})
+    return f"{x['relief']} chosen for {_lesson_words(r, key)}" if x.get("relief") else f"no relief teacher chosen for {_lesson_words(r, key)}"
+
+
 @bp.put("/api/relief/absences/<id>/lessons/<path:key>/relief")
+@need("relief")
 def relief(id, key):
-    return _change(id, lambda r, me, pub, b: _choose(r, key, me, pub, b), right="relief.plan", refused=CHOOSE_ONLY)
+    return _change(id, lambda r, me, pub, b: _choose(r, key, me, pub, b), "relief", lambda r: _chosen_words(r, key),
+                   right="relief.plan", refused=CHOOSE_ONLY)
 
 
 @bp.post("/api/relief/absences/<id>/cancel")
+@need("relief")
 def cancel(id):
-    return _change(id, lambda r, me, pub, b: _absences.cancel(r["id"], b.get("why"), me, team=_has("relief.team")))
+    return _change(id, lambda r, me, pub, b: _absences.cancel(r["id"], b.get("why"), me, team=_has("relief.team")), "cancelled",
+                   lambda r: "cancelled")
 
 
 # ---- work files
 @bp.post("/api/relief/absences/<id>/files")
+@need("relief")
 def upload(id):
     """one file for the absent teacher or its planner; refused from its length before the body is read"""
     pub, me, err = _gate()
@@ -354,6 +423,7 @@ def upload(id):
 
 
 @bp.get("/api/relief/files/<id>/<file>")
+@need("relief")
 def download(id, file):
     """the file as an attachment with the name it was given, for whoever may open the absence"""
     pub, me, err = _gate()
@@ -389,6 +459,7 @@ def _periods_text(x):
 
 
 @bp.get("/api/relief/planned.csv")
+@need("relief")
 def planned_csv():
     """the lessons needing relief in every absence not cancelled, planned or asked, dated start..end (today when left out),
     so a day's sheet is complete; Set by = whoever sent it; never the reason"""
