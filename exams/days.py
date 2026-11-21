@@ -120,6 +120,9 @@ def rule_on_day(dname, r):
     return dy == "All" or dname.split()[-1][:3] == dy[:3]
 
 
+_day_ok = rule_on_day   # the old name, still called by code written before the rename
+
+
 def day_view(pub, cal, sched, date):
     model = pub["model"]
     bnds = bounds(model)

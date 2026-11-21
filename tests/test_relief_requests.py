@@ -1143,4 +1143,9 @@ def the_pages_copy():
     assert '"relief.ro:" + R.me.name' in page and 'getItem("relief.ro")' not in page
     assert "The app's picks for open lessons, and approving them, come in the next stage" in " ".join(open(os.path.join(ROOT, "README.md")).read().split())
 
+@t
+def the_old_name_of_rule_on_day_still_works():
+    from exams import days                # exams stage 2 (PR #81) still calls it by its old name
+    assert days._day_ok is days.rule_on_day
+
 print(f"{COUNT} relief request tests passed")
