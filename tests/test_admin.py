@@ -31,6 +31,9 @@ NO_ONE = "Tick at least one person."
 def last_admin(n): return f"{n} is the last admin: make another admin first."
 def not_dept(d): return f"{d} is not one of the school's departments."
 def not_staff(n): return f"{n} is not on the published timetable or the staff list."
+ONLY_ADMIN = "Only an admin can open this page."
+RECOVERY_ON = "A recovery code is set in Railway variables: remove it once you are back in."
+RECOVERY_SHORT = "ADMIN_RECOVERY_CODE is too short (use at least 16 letters or digits); recovery is off."
 
 TODAY = datetime.date.today()
 RAVI_UNTIL = (TODAY + datetime.timedelta(days=40)).isoformat()
@@ -151,6 +154,8 @@ def the_people_list():
     assert by[FARID]["extras"]["relief"] is True and by[LEE]["staff_only"] is True and by[LEE]["group"] == "leader"
     assert by[ALICIA]["has_password"] is True and by[ALICIA]["username"] == USERS[ALICIA] and by[NUR]["has_password"] is False
     assert by[RAVI]["extras"]["exams"] == RAVI_UNTIL and by[DANIEL]["group"] == "teacher" and by[PRIYA]["note"] == ""
+    assert by[SITI]["group"] == "sh" and by[SITI]["depts"] == [], "a head with no department ticked is shown with none (step 4 has MA)"
+    assert by[DANIEL]["depts"] == ["SC"], "anyone else: step 4's departments"
     assert all("pw" not in p and "n" not in p for p in j["people"])
     P.update(lambda d: d.update(moved=[]))                                   # nothing moved: [] and None alike
     assert c.get("/api/admin/people").get_json()["moved"] == []
@@ -168,7 +173,10 @@ def the_admin_routes_are_for_admins_only():
             r = who.open(url, method=method, json=dict(name=LEE, group="committee", extras=dict(admin=True), names=[LEE], action="give", extra="admin",
                                                         preview=False, code="teacher", off=True))
             assert r.status_code == 401 and r.get_json() == AGAIN, (method, url, r.status_code, r.get_json())
-        assert went(who.get("/admin"), "/login")
+        r = who.get("/admin")
+        if who in clients[1::4]:                                             # the shared committee code and a committee member: told, not sent away
+            assert r.status_code == 403 and ONLY_ADMIN in r.get_data(as_text=True), r.status_code
+        else: assert went(r, "/login"), r.status_code
     assert raw() == before and len(accounts()) == n, "a refused call changes nothing"
     assert rec(LEE)["extras"]["admin"] is False and rec(LEE)["group"] == "leader"
 
@@ -204,7 +212,7 @@ def one_person_changes_each_write_one_entry_and_sign_them_out_when_they_lessen()
     def change(**body):
         n = len(accounts()); code, j = post(c, "/api/admin/person", **body); assert code == 200, (body, code, j)
         got = accounts(); assert len(got) == n + 1, (body, len(got) - n)
-        e = got[0]; assert (e["kind"], e["who"], e["via"], e["people"]) == ("account", ALICIA, "password", [body["name"].strip()]), e
+        e = got[0]; assert (e["kind"], e["who"], e["via"], e["people"], e["where"]) == ("account", ALICIA, "password", [body["name"].strip()], "Admin"), e
         return j, e
     dan = as_person(DANIEL)
     j, e = change(name=DANIEL, group="hod")                                  # a new head changes the map for their step-4 departments
@@ -361,7 +369,8 @@ def a_password_session_ends_when_the_record_has_no_password():
 def the_ways_in():
     c = admin()
     j = c.get("/api/admin/ways").get_json()
-    assert list(j) == ["secret_key", "personal_codes", "password_accounts", "shared", "recovery_set"], j
+    assert list(j) == ["secret_key", "personal_codes", "password_accounts", "shared", "recovery_set", "recovery_short", "recovery_warn"], j
+    assert j["recovery_short"] is False and j["recovery_warn"] is None
     have = sum(1 for n in P.load()["people"] if rec(n)["username"] and rec(n)["pw"])
     assert (j["secret_key"], j["personal_codes"], j["password_accounts"], j["recovery_set"]) == (True, True, have, False), j
     assert [s["code"] for s in j["shared"]] == list(P.SHARED) and all(s["set"] is True and s["off"] is None for s in j["shared"]), j["shared"]
@@ -382,8 +391,17 @@ def the_ways_in():
         code, j = post(c, "/api/admin/shared-off", **body); assert code == 400 and "error" in j, (body, j)
     assert post(c, "/api/admin/shared-off", code="boss", off=True)[1] == {"error": "Pick a shared code."}
     os.environ["ADMIN_RECOVERY_CODE"] = secret(); SECRETS.append(os.environ["ADMIN_RECOVERY_CODE"])
-    try: assert c.get("/api/admin/ways").get_json()["recovery_set"] is True
+    try:
+        w = c.get("/api/admin/ways").get_json()
+        assert (w["recovery_set"], w["recovery_short"], w["recovery_warn"]) == (True, False, RECOVERY_ON), w   # warned until it is removed
+        os.environ["ADMIN_RECOVERY_CODE"] = secrets.token_hex(7)              # 14 letters or digits: too short, so off
+        w = c.get("/api/admin/ways").get_json()
+        assert (w["recovery_set"], w["recovery_short"], w["recovery_warn"]) == (False, True, RECOVERY_SHORT), w
+        assert RECOVERY_SHORT in A.setup_problems()
     finally: os.environ.pop("ADMIN_RECOVERY_CODE")
+    j = c.get("/api/admin/ways").get_json(); assert (j["recovery_set"], j["recovery_short"], j["recovery_warn"]) == (False, False, None)
+    js = open(os.path.join(ROOT, "static", "admin.js"), encoding="utf-8").read()
+    assert "w.recovery_warn ? `<div class=\"hint\">${esc(w.recovery_warn)}</div>`" in js and "Too short: recovery is off" in js
     old = os.environ.pop("SECRET_KEY")                                       # accounts are refused without SECRET_KEY
     try:
         for method, url in ROUTES:
@@ -469,6 +487,65 @@ def the_first_admin_once_and_only_for_the_committee():
         assert P.admins(P.load()) == ["Ms Wendy Ang"]
     finally:
         P.update(lambda d: d["people"][ALICIA]["extras"].update(admin=True))
+
+@t
+def a_head_with_every_department_unticked_has_none():
+    c = admin()
+    P.update(lambda d: d["people"].setdefault(MARCUS, {}).update(group="sh", depts=["EL"]))
+    try:
+        code, j = post(c, "/api/admin/person", name=MARCUS, depts=[])
+        assert code == 200 and (j["group"], j["depts"]) == ("sh", []) and rec(MARCUS)["depts"] == [], (code, j)
+        e = accounts()[0]; assert e["changes"] == [dict(name=MARCUS, field="depts", was=["EL"], now=[])] and e["text"] == f"{MARCUS}: changes the map for no department", e
+        j = c.get("/api/admin/people").get_json(); by = {p["name"]: p for p in j["people"]}
+        assert by[MARCUS]["depts"] == [] and MARCUS in j["hints"]["heads_no_dept"], (by[MARCUS], j["hints"])
+        with A.app.test_request_context():                                   # what the server gives him: none either (R8)
+            A.session.update(who=MARCUS, via="password", n=rec(MARCUS)["n"], exp=time.time() + 60)
+            P.update(lambda d: d["people"][MARCUS].update(pw=PW.hash_pw(secret())))
+            assert A.head_depts() == [] and A.who()["depts"] == []
+        s = as_person(MARCUS).get("/api/relief/me").get_json()
+        assert s["depts"] == ["EL"], "relief keeps step 4's departments for a head with none ticked, explicitly"
+    finally: P.update(lambda d: d["people"][MARCUS].update(group=None, depts=[], pw=None))
+
+@t
+def an_admin_s_own_change_is_recorded_under_their_name_even_when_it_ends_their_session():
+    keep = {k: rec(JOSEPH)[k] for k in ("username", "pw")}
+    P.update(lambda d: d["people"][JOSEPH].setdefault("extras", {}).update(admin=True))
+    try:
+        j = signed_in(JOSEPH)
+        code, out = post(j, "/api/admin/person", name=JOSEPH, username=None)   # no username, so no password: this session ends
+        assert code == 200 and out["username"] is None, (code, out)
+        e = accounts()[0]
+        assert (e["what"], e["who"], e["as"], e["via"], e["where"]) == ("username", JOSEPH, JOSEPH, "password", "Admin"), e
+        assert j.get("/api/admin/people").status_code == 401
+        P.update(lambda d: d["people"][JOSEPH].update(**keep))
+        j = signed_in(JOSEPH)
+        code, out = post(j, "/api/admin/bulk", names=[JOSEPH], action="off", preview=False)
+        assert code == 200 and out["applied"] is True, out
+        e = accounts()[0]; assert (e["what"], e["who"], e["as"], e["where"]) == ("off", JOSEPH, JOSEPH, "Admin"), e
+    finally:
+        P.update(lambda d: (d["people"][JOSEPH].update(off=False, **keep), d["people"][JOSEPH]["extras"].update(admin=False)))
+
+@t
+def keys_this_version_does_not_know_survive_an_admin_change():
+    P.update(lambda d: (d["people"][GRACE].update(later_key={"kept": [1, 2]}), d["people"][GRACE].setdefault("extras", {}).update(later_extra="2027-01-01")))
+    try:
+        assert rec(GRACE)["later_key"] == {"kept": [1, 2]} and rec(GRACE)["extras"]["later_extra"] == "2027-01-01"
+        c = admin()
+        code, j = post(c, "/api/admin/person", name=GRACE, note="Kept through a change", extras=dict(relief=True)); assert code == 200, j
+        code, j = post(c, "/api/admin/bulk", names=[GRACE], action="take", extra="relief", preview=False); assert code == 200, j
+        stored = json.loads(raw())["people"][GRACE]
+        assert stored["later_key"] == {"kept": [1, 2]} and stored["extras"]["later_extra"] == "2027-01-01", stored
+        assert stored["note"] == "Kept through a change" and stored["extras"]["relief"] is False
+    finally:
+        P.update(lambda d: (d["people"][GRACE].pop("later_key", None), d["people"][GRACE]["extras"].pop("later_extra", None)))
+
+@t
+def every_account_entry_is_under_admin():
+    got = accounts(); assert got and {e["what"] for e in got} >= {"moved", "group", "reset", "off", "first-admin", "shared-off"}, {e["what"] for e in got}
+    assert all(e.get("where") == "Admin" for e in got), [e for e in got if e.get("where") != "Admin"][:1]
+    c = admin()
+    j = c.get("/api/history", query_string=dict(where="Admin")).get_json()
+    assert j["entries"] and all(e["kind"] == "account" for e in j["entries"]), j["entries"][:1]
 
 @t
 def no_password_or_code_in_the_history():

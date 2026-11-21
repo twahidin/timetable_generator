@@ -63,6 +63,15 @@ def two_fixes_are_one_entry():
     assert c.post("/api/draft/undo").status_code == 200
 
 @t
+def undoing_a_batch_names_every_fix_in_it():
+    r = c.post("/api/draft/fixes", json=dict(fixes=[dict(kind="move", id=1, d=1, p=1), dict(kind="move", id=1, d=2, p=1)])); assert r.status_code == 200, r.get_json()
+    ts = draft.last_batch_texts(); assert len(ts) == 2 and all(ts), ts
+    assert c.post("/api/draft/undo").status_code == 200
+    u = H.read(kinds=["draft"], limit=1)[0]; mine(u)
+    assert (u["what"], u["text"]) == ("undo", "Undid 2 fixes: " + "; ".join(ts)), u
+    assert draft.last_fix_text() is None
+
+@t
 def refused_actions_write_nothing():
     n = count()
     assert c.post("/api/draft/undo").status_code == 400          # nothing to undo
@@ -83,6 +92,8 @@ def a_decision_is_recorded_and_threads_who_to_the_setup():
             assert s and s[0]["who"] == NAME and s[0]["as"] == NAME, s
             d = H.read(kinds=["draft"], limit=1)[0]; mine(d)
             assert d["what"] == "decide" and d["text"] == f"Decided: step5 — {k['text']}", d
+            cp = store.copies()[0]                                     # the saved copy taken first names who pressed it
+            assert (cp["what"], cp["who"]) == ("Before updating step 5 from the timetable", NAME), cp
             global STEP5; STEP5 = True; return
         k = w[0]
         r = c.post("/api/draft/decide", json=dict(key=k["key"], answer="accept")); assert r.status_code == 200, r.get_json()

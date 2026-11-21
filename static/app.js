@@ -2934,6 +2934,11 @@ async function poll() {   // every few seconds: the published timetable and the 
     if (wl) { wl.hidden = !me; wl.textContent = me ? [me, G.st.group].filter(Boolean).join(" · ") : ""; }
     if (hl) hl.hidden = !me;
     if (sw) sw.hidden = !(["committee", "head"].includes(G.st.shared) && G.st.admin_exists);   /* a shared code while an admin can give accounts */
+    const rights = Array.isArray(G.st.rights) ? G.st.rights : [];   /* the links of the rights this session holds: the server decides again on each page */
+    const al = $("#adminLink"), hy = $("#historyLink"), fa = $("#firstAdmin");
+    if (al) al.hidden = !rights.includes("admin");
+    if (hy) hy.hidden = !rights.includes("history");
+    if (fa) fa.hidden = !(G.st.admin_exists === false && rights.includes("committee"));   /* deploy day: the committee code makes the first admin */
     paintPublished(); draftWatch();
   } catch (e) { }
   G.inflight = false;

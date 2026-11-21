@@ -169,8 +169,26 @@ def setup_problems():
     if people.usable_admins(people.load()):   # people sign in as themselves now: a shared code left unset is not a problem
         unset = {f"{var} is not set in Railway variables." for _, var in access.ROLES}
         probs = [p for p in probs if p not in unset]
+    if recovery_too_short(): probs.append(RECOVERY_SHORT)
     if not store.on_volume(): probs.append("No Railway volume: the setup and the published timetable are lost on the next deploy. Add a volume mounted at /data.")
     return probs
+
+RECOVERY_MIN = 16
+RECOVERY_SHORT = "ADMIN_RECOVERY_CODE is too short (use at least 16 letters or digits); recovery is off."
+RECOVERY_ON = "A recovery code is set in Railway variables: remove it once you are back in."
+
+def _recovery_raw():
+    return (os.environ.get("ADMIN_RECOVERY_CODE") or "").strip()
+
+def recovery_code():
+    """ADMIN_RECOVERY_CODE (trimmed) when it is long enough to use: 16 characters or more. A shorter one counts as not
+    set (/login/recover is not there), so a weak value can never open an admin account"""
+    c = _recovery_raw()
+    return c if len(c) >= RECOVERY_MIN else None
+
+def recovery_too_short():
+    """ADMIN_RECOVERY_CODE is set but too short to use (the Ways in tab and the warnings say so)"""
+    return 0 < len(_recovery_raw()) < RECOVERY_MIN
 
 def startup_log():
     print(f"Timetable app: data in {store.DATA}", file=sys.stderr, flush=True)
@@ -252,7 +270,7 @@ def _recover_page(msg=""):
 def _record_signin(ok, how, name=None, shared_=None, reason=None):
     """one history entry for a sign-in or a refused try. Never what was typed: a name only when it is a person's"""
     as_ = name or (SHARED_AS.get(shared_) if shared_ else None) or ("A student" if how == "personal" else "Unknown")
-    entry = {"kind": "signin", "ok": ok, "via": how, "shared": shared_, "who": name, "as": as_, "reason": reason,
+    entry = {"kind": "signin", "where": "Sign-in", "ok": ok, "via": how, "shared": shared_, "who": name, "as": as_, "reason": reason,
              "addr": request.remote_addr or "?", "text": _SIGNED_IN.get(how, "Signed in") if ok else f"Sign-in refused: {reason}"}
     try: history.add(entry)
     except Exception as e: print(f"WARNING: a sign-in could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
@@ -267,7 +285,7 @@ def _record_locked(key, how, name=None):
     _record_signin(False, how, name, reason="locked")
 
 def _record_account(what, name, text):
-    try: history.add({"kind": "account", "what": what, "people": [name], "changes": [], "text": text, **by()})
+    try: history.add({"kind": "account", "what": what, "where": "Admin", "people": [name], "changes": [], "text": text, **by()})
     except Exception as e: print(f"WARNING: an account change could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
 
 def _note_signin(name):
@@ -374,8 +392,8 @@ def _recovery_used(data, code):
 @app.route("/login/recover", methods=["GET", "POST"])
 def login_recover():
     """while ADMIN_RECOVERY_CODE is set: an admin's username and that code (accepted once per value) set a new password"""
-    code = (os.environ.get("ADMIN_RECOVERY_CODE") or "").strip()
-    if not code: abort(404)
+    code = recovery_code()
+    if not code: abort(404)   # not set, or too short to use
     if not accounts_on(): return _recover_page(NO_ACCOUNTS), 403 if request.method == "POST" else 200
     if not people.readable(): return _recover_page(PERSON_OFF), 403 if request.method == "POST" else 200
     if request.method == "GET": return _recover_page()
@@ -491,7 +509,7 @@ def tidy_once_a_day():
                 return [(n, was.get(n)) for n in people.sweep(d, today)]
             ended = people.update(sweep)
         if ended:
-            history.add_many([{"kind": "account", "what": "ended", "who": None, "as": "The app", "via": "app", "people": [n],
+            history.add_many([{"kind": "account", "what": "ended", "where": "Admin", "who": None, "as": "The app", "via": "app", "people": [n],
                                "changes": [{"name": n, "field": "exams", "was": until, "now": None}],
                                "text": f"Exams and events access ended (until {_day(until)})"} for n, until in ended])
         history.prune(today)
@@ -876,8 +894,8 @@ def draft_fix():
 @app.post("/api/draft/undo")
 @need("committee")
 def draft_undo():
-    was = draft.last_fix_text(); r = _checked(draft.undo, sentences=True)
-    if _worked(r): _draft_entry("undo", f"Undid: {was}")
+    was = draft.last_batch_texts(); r = _checked(draft.undo, sentences=True)   # read before: the undo drops the newest fix and its batch
+    if _worked(r): _draft_entry("undo", f"Undid: {(was or [None])[0]}" if len(was) <= 1 else f"Undid {len(was)} fixes: " + "; ".join(t or "" for t in was))
     return r
 
 @app.get("/api/draft/suggest")
@@ -1159,8 +1177,16 @@ ONLY_SETTINGS = "Only the timetable committee and the relief team can change rel
 ONLY_CODES = "Only the timetable committee can download the codes."
 
 def relief_staff(pub):
-    """the people relief knows: the published timetable's teachers and the staff added in the accounts"""
-    return people.staff(pub)
+    """the people relief and exams know: the published timetable's teachers and the staff added in the accounts, as
+    name, short, depts (step 4's), role, teaches and staff_only only. Every reply to a page that is not the admin page
+    uses this, never people.staff (which carries usernames, groups, extras and sign-ins)"""
+    return people.listing(pub)
+
+def _relief_depts(pub, p):
+    """the departments relief shows for the person p (a staff item): a head's ticked ones, else step 4's. Relief keeps
+    step 4's for a head with none ticked (the admin page shows them none, and they change no rows)"""
+    if p["group"] in people.HEADS and p["depts"]: return list(p["depts"])
+    return next((list(x["depts"]) for x in relief_staff(pub) if x["name"] == p["name"]), list(p["depts"]))
 
 def move_relief_lists():
     """relief's own Management, Relief team and extra staff lists, and exams' committee list, move into the accounts, once
@@ -1192,8 +1218,8 @@ def relief_home():
 def relief_me():
     p = who()
     if p is None: return {"error": "Please sign in again."}, 401
-    pub = bool(store.published())   # nothing published: a publish may be swapping folders, so no departments, but the person still answers
-    return jsonify(name=p["name"], depts=p["depts"] if pub else [], published=pub, on_team=bool(p["extras"].get("relief")), on_management=p["group"] in people.MANAGEMENT,
+    pub_ = store.published(); pub = bool(pub_)   # nothing published: a publish may be swapping folders, so no departments, but the person still answers
+    return jsonify(name=p["name"], depts=_relief_depts(pub_, p) if pub else [], published=pub, on_team=bool(p["extras"].get("relief")), on_management=p["group"] in people.MANAGEMENT,
                    can_settings=has("relief.save"))
 
 @app.get("/relief/settings")
@@ -1214,7 +1240,7 @@ def _relief_lists(pub):
 def _relief_settings_reply(pub, settings):
     m = pub["model"]; rights = _relief_rights(pub) or (False, False, None)
     lists = _relief_lists(pub)
-    return jsonify(settings=settings, lists=lists, can_admin=has("admin"), people=relief_people.people(pub, [dict(name=n) for n in lists["added"]]), roles=relief_settings.role_names(pub), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=has("codes"))
+    return jsonify(settings=settings, lists=lists, can_admin=has("admin"), people=relief_staff(pub), roles=relief_settings.role_names(pub), weeks=m["school"]["weeks"], can_save=rights[1], can_codes=has("codes"))
 
 @app.get("/api/relief/settings")
 @need("relief.settings")
@@ -1276,9 +1302,12 @@ def relief_code_slips():
 # ------------------------------------------------------------------------------------------------ admins: people and the ways in
 # The named admins (committee group, Admin extra, signed in with their password) manage people here; every check is the
 # server's. A change is judged whole inside one people.update, so two admins at once cannot both remove the other, and a
-# refused change writes nothing. A change that lessens what a person may do, or removes a way in, raises their sign-in
-# number `n`: they are signed out everywhere. Each change is one history entry, `changes` [{name, field, was, now}], never
-# a password.
+# refused change writes nothing. Any change to a person's rights (their group, the departments they change, an extra
+# given or taken away), switching them off or on, a username changed or removed, and a password reset raise their
+# sign-in number `n`, so they are signed out everywhere (the design: "changing their rights signs them out everywhere at
+# once", a gain as well as a loss); a note or a first username does not. Each change is one history entry, `changes`
+# [{name, field, was, now}], never a password, recorded under who made it as they were before it (their own change may
+# end their session).
 PICK_GROUP = "Pick a group."
 ONLY_COMMITTEE_ADMIN = "Only the timetable committee can be admins."
 LAST_ADMIN = "{} is the last admin: make another admin first."
@@ -1441,7 +1470,7 @@ def _what(out):
 
 def _account_entry(what, names, changes, text, by_=None, **more):
     """one kind-account entry; a change is never undone for want of its entry"""
-    try: history.add({"kind": "account", "what": what, "people": names, "changes": changes, "text": text, **more, **(by_ or by())})
+    try: history.add({"kind": "account", "what": what, "where": "Admin", "people": names, "changes": changes, "text": text, **more, **(by_ or by())})
     except Exception as e: print(f"WARNING: an account change could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
 
 def _update_as(me, fn):
@@ -1539,7 +1568,8 @@ def _ways():
     return dict(secret_key=accounts_on(), personal_codes=access.personal_codes_on(), password_accounts=sum(1 for r in recs if r["username"] and r["pw"]),
                 shared=[dict(code=x, set=bool(have.get(x)), off=data["ways"]["off"].get(x), used_week=history.uses(kind="signin", via="shared", shared=x, ok=True))
                         for x in people.SHARED],
-                recovery_set=bool((os.environ.get("ADMIN_RECOVERY_CODE") or "").strip()))
+                recovery_set=bool(recovery_code()), recovery_short=recovery_too_short(),
+                recovery_warn=RECOVERY_SHORT if recovery_too_short() else RECOVERY_ON if recovery_code() else None)
 
 # ------------------------------------------------------------------------------------------------ the history page
 HISTORY_MAX = 500
@@ -1588,10 +1618,18 @@ def api_history():
     except Exception: depts = []
     return jsonify(entries=found[:limit], more=len(found) > limit, admin=has("admin"), depts=depts)
 
+ONLY_ADMIN = "Only an admin can open this page."
+
 @app.get("/admin")
-@need("admin")
+@need("admin", "committee")
 def admin_page():
+    """the admin page for an admin. The committee without the Admin extra (the committee code on deploy day, or a
+    committee member) is sent to "Make the first admin" while no admin can sign in, and is told the page is an admin's
+    once one can"""
     move_relief_lists()
+    if not has("admin"):
+        if not people.usable_admins(people.load()): return redirect("/admin/first")
+        return page("Admin", f"<main class='login'><h1>Admin</h1><p class='muted'>{esc(ONLY_ADMIN)}</p><p><a href='/'>Back</a></p></main>"), 403
     if not accounts_on(): return page("Admin", f"<main class='login'><h1>Admin</h1><p class='muted'>{esc(NO_ACCOUNTS)}</p></main>"), 403
     return app.send_static_file("admin.html")
 
@@ -1622,7 +1660,7 @@ def admin_person():
     """change one person, or add one by name (added: true) -> their staff item"""
     stop = _admin_off()
     if stop: return stop
-    me, pub, today = who()["name"], store.published(), datetime.date.today()
+    me, by_, pub, today = who()["name"], by(), store.published(), datetime.date.today()   # by_ before: their own change may end this session
     try:
         b = _body()
         if not isinstance(b.get("name"), str): raise Refused(UNREAD_CHANGE)
@@ -1642,7 +1680,7 @@ def admin_person():
         out = _update_as(me, change)
     except Refused as e: return {"error": str(e)}, 400
     except people.Unreadable: return {"error": people.UNREADABLE}, 503
-    if out: _account_entry(_what(out), [name], out, f"{name}: " + "; ".join(_said(c) for c in out))
+    if out: _account_entry(_what(out), [name], out, f"{name}: " + "; ".join(_said(c) for c in out), by_=by_)
     return jsonify(_admin_item(pub, people.load(), name))
 
 @app.post("/api/admin/bulk")
@@ -1651,7 +1689,7 @@ def admin_bulk():
     """one change for several people: the preview's lines, then (preview: false) all of it or none of it"""
     stop = _admin_off()
     if stop: return stop
-    me, pub, today = who()["name"], store.published(), datetime.date.today()
+    me, by_, pub, today = who()["name"], by(), store.published(), datetime.date.today()
     try:
         b = _body()
         if b.get("preview", True) is not False:   # only an explicit preview: false changes anything
@@ -1660,7 +1698,7 @@ def admin_bulk():
         got = _update_as(me, lambda d: _bulk(d, pub, b, today))
     except Refused as e: return {"error": str(e)}, 400
     except people.Unreadable: return {"error": people.UNREADABLE}, 503
-    if got["touched"]: _account_entry(got["what"], got["touched"], got["changes"], got["text"])
+    if got["touched"]: _account_entry(got["what"], got["touched"], got["changes"], got["text"], by_=by_)
     return jsonify(lines=got["lines"], applied=bool(got["touched"]))
 
 @app.post("/api/admin/reset")
@@ -1669,7 +1707,7 @@ def admin_reset():
     """a one-time password (and the username, when given): the answer is the only place it ever appears"""
     stop = _admin_off()
     if stop: return stop
-    me, pub = who()["name"], store.published()
+    me, by_, pub = who()["name"], by(), store.published()
     try:
         b = _body()
         name = b.get("name")
@@ -1691,7 +1729,7 @@ def admin_reset():
     except Refused as e: return {"error": str(e)}, 400
     except people.Unreadable: return {"error": people.UNREADABLE}, 503
     lockout.clear(u)
-    _account_entry("reset", [name], out, f"{name}: a new one-time password" + (f"; username {u}" if out else ""))
+    _account_entry("reset", [name], out, f"{name}: a new one-time password" + (f"; username {u}" if out else ""), by_=by_)
     r = jsonify(once=once); r.headers["Cache-Control"] = "no-store"
     return r
 
@@ -1707,6 +1745,7 @@ def admin_shared_off():
     """turn a shared code off (its open sessions end at their next request) or on again -> the ways in"""
     stop = _admin_off()
     if stop: return stop
+    by_ = by()
     try:
         b = _body()
         r, off = b.get("code"), b.get("off")
@@ -1723,7 +1762,7 @@ def admin_shared_off():
     if (was is None) != (now is None):
         label = SHARED_AS[r]
         _account_entry("shared-off", [], [dict(name=label, field="off", was=was, now=now)],
-                       f"Turned {'off' if off else 'on'} the {label[0].lower() + label[1:]}", shared=r)
+                       f"Turned {'off' if off else 'on'} the {label[0].lower() + label[1:]}", by_=by_, shared=r)
     return jsonify(_ways())
 
 @app.get("/api/admin/students")
@@ -2084,7 +2123,11 @@ def exams_invigilators(id): return _exam_changed(id, _exam_invigilators, "invigi
 
 @app.post("/api/exams/<id>/use-anyway")
 @need("exams", "committee")
-def exams_use_anyway(id): return _exam_changed(id, _exam_use_anyway, "use-anyway", lambda b: f"{b['room']} used anyway")
+def exams_use_anyway(id): return _exam_changed(id, _exam_use_anyway, "use-anyway", lambda b: f"{_short(b['room'], 60)} used anyway")
+
+def _short(text, n):
+    """text cut to n characters (the last one an ellipsis) for the history: a room name sent by the page is not trusted to be short"""
+    return text if len(text) <= n else text[:n - 1] + "…"
 
 @app.get("/api/exams/<id>/print/<what>.pdf")
 @need("exams", "committee")

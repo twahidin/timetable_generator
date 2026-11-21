@@ -1294,6 +1294,9 @@ def each_exams_save_writes_one_entry():
         wrote(s.post(f"/api/exams/{x['id']}/invigilators", json=dict(key=key, room="3-01", names=["Mr Ivan Lee"])), "invigilators", "Mid-year exam: invigilators changed")
         none(s.post(f"/api/exams/{x['id']}/invigilators", json=dict(key=key, room="3-01", names="x")), 400)
         wrote(s.post(f"/api/exams/{x['id']}/use-anyway", json=dict(key=key, room="Hall")), "use-anyway", "Mid-year exam: Hall used anyway")
+        long = "Room " + "x" * 300                                       # the page's room text is cut to 60 characters for the history
+        e = wrote(s.post(f"/api/exams/{x['id']}/use-anyway", json=dict(key=key, room=long)), "use-anyway", f"Mid-year exam: {long[:59]}… used anyway")
+        assert len(e["text"]) == len("Mid-year exam: ") + 60 + len(" used anyway"), e["text"]
         for url in ("", "/view", "/print/seating.pdf", "/download.xlsx", f"/who?key={key}&room=3-01"): none(s.get(f"/api/exams/{x['id']}{url}"), 200)
         none(s.get("/api/exams"), 200)
         wrote(s.delete("/api/exams/" + x["id"]), "delete", "Mid-year exam: deleted")

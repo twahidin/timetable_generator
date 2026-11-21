@@ -1,5 +1,5 @@
 """Plain-assert tests for the history file: .venv/bin/python tests/test_history.py"""
-import contextlib, copy, datetime, io, os, sys, tempfile, time
+import contextlib, copy, datetime, io, os, re, sys, tempfile, time, urllib.parse
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 os.environ.update(DATA_DIR=DATA, AI_API_KEY="")
@@ -33,6 +33,7 @@ def add_and_read_newest_first():
     assert H.by_of("Ann Lee", "password") == {"who": "Ann Lee", "as": "Ann Lee", "via": "password"}
     assert H.by_of(None, "shared", "Shared teacher code") == {"who": None, "as": "Shared teacher code", "via": "shared"}
     assert H.by_of(None, "?")["as"] == "Unknown"
+    assert H.by_of(None, "app") == {"who": None, "as": "The app", "via": "app"}
 
 @t
 def forbidden_keys_dropped():
@@ -140,8 +141,11 @@ def setup_entries_never_raises():
     T = spec["teachers"][0]
     ops = [["merge", "teachers", T["_id"], "can_teach", ["X"]], ["set", "nosuch", "a", "f", 1],
            ["set", "teachers", T["_id"], "note", "hi"], 5, [], ["merge"], ["add", "teachers", "notadict", ""]]
-    es = H.setup_entries(spec, ops, H.by_of("Ann", "password"), "b", 1)
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err): es = H.setup_entries(spec, ops, H.by_of("Ann", "password"), "b", 1)
     assert [e["op"] for e in es] == ["set"] and es[0]["now"] == "hi", es
+    lines = err.getvalue().splitlines()                                 # an operation dropped is said, as the store says it: its type only
+    assert len(lines) == 3 and all(re.fullmatch(r"warning: the history could not be written \((IndexError|TypeError)\)", x) for x in lines), lines
 
 @t
 def row_label_every_section():
@@ -211,6 +215,52 @@ def apply_changes_writes_who():
     r = ref[0]
     assert r["why"] == "Not your department." and r["op"] == ["set", "classes", cid2, "class", "Eta"]
     assert r["as"] == "Ann Lee" and r["via"] == "password" and r["where"] == "Step 2 · Classes", r
+
+@t
+def refused_entries_name_the_row_and_its_departments():
+    spec = _setup_in_store()
+    L = next(r for r in spec["lessons"] if sync.lesson_dept(spec, r))
+    d0 = sync.lesson_dept(spec, L)
+    other = next(x for x in spec["subjects"] if str(x.get("dept") or "").strip() not in ("", d0))
+    d1 = str(other["dept"]).strip()
+    lab = H.row_label("lessons", L)
+    ops = [["set", "lessons", L["_id"], "subject", other["subject"]], ["set", "lessons", L["_id"], "periods", 3],
+           ["add", "teachers", {"_id": "newt000001", "name": "Zed Ng", "dept": "Maths"}, ""], ["school", "name", "X"],
+           ["set", ["odd"], "x", "y", 1]]
+    def flt(sp, ops): return [], [(i, "Not yours.") for i in range(len(ops))]
+    v0 = store.setup_record()["v"]
+    store.apply_changes(ops, "c1", filter=flt, by=H.by_of("Ann Lee", "password"))
+    assert store.setup_record()["v"] == v0, "nothing was applied"
+    a, b, c, d, e = H.read(kinds=["setup-refused"])[::-1]
+    assert (a["label"], a["where"], a["why"]) == (lab, "Step 5 · Teacher Deployment Editor", "Not yours.") and a["depts"] == [d0, d1], a
+    assert a["text"] == H._cut(f"Refused: {lab}: subject → {other['subject']}"), a["text"]
+    assert b["depts"] == [d0] and b["text"] == H._cut(f"Refused: {lab}: periods → 3"), b
+    assert (c["label"], c["depts"], c["text"], c["where"]) == ("Zed Ng", ["Maths"], "Refused: Add Zed Ng", "Step 4 · Teachers"), c
+    assert (d["label"], d["where"], d["depts"]) == ("name", "School & day", []) and d["text"].startswith("Refused: name: "), d
+    assert (e["label"], e["text"], e["where"], e["depts"], e["op"]) == (None, "Refused", "Setup", [], ["set", ["odd"], "x", "y", 1]), e
+    assert [x["text"] for x in H.read(dept=d1, kinds=["setup-refused"])] == [a["text"]], "the department filter finds it"
+    assert all(x["as"] == "Ann Lee" and x["via"] == "password" for x in (a, b, c, d, e))
+
+@t
+def an_automatic_saved_copy_is_by_the_app():
+    _setup_in_store()
+    store._last_point[0] = 0                                           # long enough since the last one: the change takes a copy first
+    store.apply_changes([["school", "timetable", "Term 3"]], "c1", by=H.by_of("Ann Lee", "password"))
+    cp = store.copies()[0]; assert (cp["what"], cp["who"]) == ("While working", "The app"), cp
+
+@t
+def where_admin_and_sign_in_also_find_entries_by_their_kind():
+    fresh()
+    H.add({"kind": "account", "as": "A", "text": "old account"})        # written before account entries carried a where
+    H.add({"kind": "account", "as": "A", "where": "Admin", "text": "new account"})
+    H.add({"kind": "signin", "as": "A", "text": "old sign-in"})
+    H.add({"kind": "signin", "as": "A", "where": "Sign-in", "text": "new sign-in"})
+    H.add({"kind": "setup-replaced", "as": "A", "where": "Setup", "text": "Saved"})
+    H.add({"kind": "setup", "as": "A", "where": "Step 4 · Teachers", "text": "a row"})
+    assert [e["text"] for e in H.read(where="Admin")] == ["new account", "old account"]
+    assert [e["text"] for e in H.read(where="Sign-in")] == ["new sign-in", "old sign-in"], "picking Sign-in shows the sign-ins"
+    assert [e["text"] for e in H.read(where="Setup")] == ["Saved"] and [e["text"] for e in H.read(where="Step 4 · Teachers")] == ["a row"]
+    assert [e["text"] for e in H.read()] == ["a row", "Saved", "new account", "old account"], "sign-ins stay hidden otherwise"
 
 @t
 def class_parents_ops_are_app_entries():
@@ -354,6 +404,27 @@ def who_filter_is_one_read_and_pages_cleanly():
     d2 = api(c, "?who=RARE&limit=2&before=" + d["entries"][-1]["id"])[1]
     assert [e["text"] for e in d2["entries"]] == ["n0"] and d2["more"] is False
     assert [e["text"] for e in api(c, "?who=rare&limit=3")[1]["entries"]] == ["n800", "n400", "n0"]
+
+def offered():
+    js = open(os.path.join(ROOT, "static", "history.js"), encoding="utf-8").read()
+    return re.findall(r'"([^"]+)"', re.search(r"const WHERES = \[(.*?)\];", js, re.S).group(1))
+
+@t
+def the_page_offers_every_where_the_app_writes():
+    written = set(H.WHERE.values()) | {"School & day", "Setup", "Step 8 · Upload and edit", "Step 9 · Publish", "Relief settings", "Exams and events", "Admin", "Sign-in"}
+    assert written <= set(offered()), written - set(offered())
+
+@t
+def api_each_where_returns_its_entries():
+    fresh()
+    kind = {"Admin": "account", "Sign-in": "signin", "Setup": "setup-replaced", "Relief settings": "relief", "Exams and events": "exams"}
+    for w in offered(): H.add({"kind": kind.get(w, "draft" if w.startswith(("Step 8", "Step 9")) else "setup"), "as": "A", "where": w, "text": "in " + w})
+    H.add({"kind": "account", "as": "A", "text": "an older account entry"}); H.add({"kind": "signin", "as": "A", "text": "an older sign-in"})
+    c = committee()
+    for w in offered():
+        got = [e["text"] for e in api(c, "?where=" + urllib.parse.quote(w))[1]["entries"]]
+        want = ["in " + w] + {"Admin": ["an older account entry"], "Sign-in": ["an older sign-in"]}.get(w, [])
+        assert sorted(got) == sorted(want), (w, got)
 
 @t
 def unsafe_links_are_dropped():

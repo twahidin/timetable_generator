@@ -240,7 +240,7 @@ def decide(key, answer, by=None):
         if w["ops"] is None:
             if w["kind"] != "deployment": raise ValueError("This warning cannot be settled by updating step 5.")
             raise ValueError(WAITING_REFUSED if w["text"].endswith(WAITING) else "This difference is set on step 3 for the whole level; the app does not change it from here.")
-        store.restore_point("Before updating step 5 from the timetable")
+        store.restore_point("Before updating step 5 from the timetable", by)   # the copy names who pressed it
         try: store.apply_changes([_applied(op) for op in w["ops"]], client="draft", since=int(j["setup_version"][1:]), by=by)
         except store.Refused as e: raise ValueError(str(e))
         except store.Replaced: raise ValueError("The setup was replaced while this was happening. Check the list again.")

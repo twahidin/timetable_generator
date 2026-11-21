@@ -140,14 +140,16 @@ def _record(entries):
 def save_setup(spec):
     return replace_setup(spec, "Saved")
 
-def _refused_entries(ops, refused, by, v):
+def _refused_entries(spec, ops, refused, by, v):
+    """one kind-"setup-refused" entry per refused operation, with the sentence shown and what it was about (its row's
+    label, departments and a line of text, judged on spec: the setup as it was, before anything of this change)"""
     import history
     out = []
     for i, why in refused:
         try: op = ops[i]
         except (IndexError, TypeError): continue
-        sec = op[1] if isinstance(op, list) and len(op) > 1 else None
-        out.append(dict(kind="setup-refused", v=v, op=copy.deepcopy(op), why=why, where=history.WHERE.get(sec, "Setup"), **by))
+        about = history.refused_about(spec, op) if isinstance(op, list) and op else dict(label=None, depts=[], text="Refused", where="Setup")
+        out.append(dict(kind="setup-refused", v=v, op=copy.deepcopy(op), why=why, **about, **by))
     return out
 
 def _risky(ops):
@@ -180,14 +182,14 @@ def apply_changes(ops, client, check=None, since=None, filter=None, by=None):
         if filter: ops, refused = filter(cur["spec"], ops)
         by = _by(by)
         if not ops:
-            _record(_refused_entries(all_ops, refused, by, cur["v"]))
+            _record(_refused_entries(cur["spec"], all_ops, refused, by, cur["v"]))
             return cur["v"], refused, None
-        if datetime.datetime.now().timestamp() - _last_point[0] > POINT_EVERY or _risky(ops): restore_point("While working")
         import history
+        if datetime.datetime.now().timestamp() - _last_point[0] > POINT_EVERY or _risky(ops): restore_point("While working", history.by_of(None, "app"))   # taken by the app itself
         batch = "b" + os.urandom(4).hex()
         try: entries = history.setup_entries(copy.deepcopy(cur["spec"]), ops, by, batch, cur["v"] + 1)
         except Exception as e: entries = []; _warn(e)
-        entries += _refused_entries(all_ops, refused, by, cur["v"] + 1)
+        entries += _refused_entries(cur["spec"], all_ops, refused, by, cur["v"] + 1)   # before the change is applied
         sync.apply(cur["spec"], ops)
         cur["v"] += 1
         _log.append(dict(v=cur["v"], client=client, ops=ops))

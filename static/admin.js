@@ -377,11 +377,13 @@
       const btn = !r.set ? "" : off ? `<button type="button" class="small" data-act="shared" data-code="${esc(r.code)}" data-off="0">Turn on</button>` : `<button type="button" class="small danger" data-act="shared" data-code="${esc(r.code)}" data-off="1">Turn off</button>`;
       return `<tr><td>${esc(SHARED_NAMES[r.code] || r.code)}</td><td>${state}</td><td>${btn}</td></tr>`;
     }).join("");
+    const recovery = w.recovery_set ? "Set in Railway variables" : w.recovery_short ? "Too short: recovery is off" : "Not set";
     $("#view").innerHTML = `${w.secret_key ? "" : `<div class="hint">Accounts need SECRET_KEY in Railway variables.</div>`}
+      ${w.recovery_warn ? `<div class="hint">${esc(w.recovery_warn)}</div>` : ""}
       <div class="tw ways"><table><thead><tr><th style="width:34%">Way in</th><th>State</th><th></th></tr></thead><tbody>
       <tr><td><b>Personal codes</b> (staff and students)</td><td>${w.personal_codes ? "On" : "Off"}</td><td><button type="button" class="small" data-act="slipsall">Print slips</button></td></tr>
       <tr><td><b>Username and password</b></td><td>${w.secret_key ? "On" : "Off"} · ${esc(plural(w.password_accounts, "account", "accounts"))}</td><td></td></tr>
-      <tr><td><b>Recovery code</b></td><td>${w.recovery_set ? "Set in Railway variables" : "Not set"}</td><td></td></tr>
+      <tr><td><b>Recovery code</b></td><td>${esc(recovery)}</td><td></td></tr>
       ${sh}</tbody></table></div>
       <div class="w" style="margin-top:8px">"Used … times" counts sign-ins with the shared code in the last week, so you can see when it is safe to turn off.</div>`;
   }

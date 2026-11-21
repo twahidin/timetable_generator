@@ -30,7 +30,10 @@ _last = [0, -1]   # ms and counter of the last id given out
 
 
 def by_of(who, via, shared=None):
-    return {"who": who, "as": who or shared or "Unknown", "via": via}
+    """who an entry is by: a person's name, else the shared code's label, else "The app" for what the app does by
+    itself, else "Unknown"
+    """
+    return {"who": who, "as": who or shared or ("The app" if via == "app" else "Unknown"), "via": via}
 
 
 # the school's own setup rows keep their group `code` in these fields of these kinds (ruling R6)
@@ -109,6 +112,8 @@ def add(entry):
 
 
 _MONTH_FILE = re.compile(r"^\d{4}-\d{2}\.jsonl$")
+# the page's Where choices that are kinds of entry: entries written before they carried a `where` are found by their kind
+_WHERE_KIND = {"Admin": "account", "Sign-in": "signin"}
 
 
 def _files():
@@ -129,8 +134,11 @@ def _lines(name):
 
 def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, signins=False, before=None, limit=200,
          who_contains=None):
+    """the entries, newest first, that match every filter given. where "Sign-in" shows the sign-ins without signins;
+    where "Admin" or "Sign-in" also finds the account or sign-in entries that carry no `where`"""
     out = []
     needle = who_contains.strip().lower() if isinstance(who_contains, str) and who_contains.strip() else None
+    where_kind = _WHERE_KIND.get(where)
     for name in _files():
         for line in reversed(_lines(name)):
             if needle and needle not in line.lower():   # cheap: the name is in the raw line or the entry cannot match
@@ -145,10 +153,12 @@ def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, si
                 continue
             if needle and needle not in str(e.get("as") or "").lower():
                 continue
-            if e.get("kind") == "signin" and not signins and not (kinds and "signin" in kinds):
+            if e.get("kind") == "signin" and not signins and not (kinds and "signin" in kinds) and where_kind != "signin":
                 continue
             ts = e.get("ts") or 0
-            if (who is not None and e.get("who") != who) or (where is not None and e.get("where") != where) \
+            if where is not None and e.get("where") != where and not (where_kind and not e.get("where") and e.get("kind") == where_kind):
+                continue
+            if (who is not None and e.get("who") != who) \
                     or (kinds and e.get("kind") not in kinds) or (since is not None and ts < since) \
                     or (until is not None and ts > until) or (dept is not None and dept not in (e.get("depts") or [])):
                 continue
@@ -301,6 +311,39 @@ def setup_entries(spec_before, ops, by, batch, v):
             if finish:
                 finish(e)
             out.append(dict(kind="setup", batch=batch, v=v, op=op[0], **by, **e))
-        except Exception:   # a malformed operation gives no entry; the save path must never fail here
+        except Exception as x:   # a malformed operation gives no entry, said in one line; the save path must never fail here
+            store._warn(x)
             continue
     return out
+
+
+def refused_about(spec, op):
+    """label, depts, text and where of an operation that was refused, judged on the setup as it was (it was never
+    applied): the row it named, and the departments of that row both as it is and as the operation would leave it, so
+    the page names the row and the department filter finds it"""
+    try:
+        name = op[0]
+        if name in ("set", "merge", "add", "del") and isinstance(op[1], str) and op[1] in sync.LISTS:
+            section = op[1]
+            row = op[2] if name == "add" else sync._find(spec, section, op[2])
+            lab = row_label(section, row)
+            depts = _depts(spec, section, row)
+            if name == "set" and isinstance(row, dict) and isinstance(op[3], str):
+                after = dict(row)
+                after[op[3]] = op[4]
+                depts += [d for d in _depts(spec, section, after) if d not in depts]
+            if name == "add":
+                text = f"Add {lab}"
+            elif name == "del":
+                text = f"Delete {lab}"
+            elif name == "set":
+                text = f"{lab}: {op[3]} → {_show(op[4])}"
+            else:
+                text = f"{lab}: {op[3]} + {_show(op[4])} − {_show(op[5])}"
+            return dict(label=lab, depts=depts, text=_cut("Refused: " + text), where=WHERE.get(section, "Setup"))
+        if name in ("school", "day", "top"):
+            e, _ = _plain_entry(spec, op)
+            return dict(label=e["label"], depts=[], text=_cut("Refused: " + e["text"]), where=_SCHOOL_DAY)
+    except Exception as x:   # a malformed operation: the refusal is still recorded, with what is known
+        store._warn(x)
+    return dict(label=None, depts=[], text="Refused", where="Setup")

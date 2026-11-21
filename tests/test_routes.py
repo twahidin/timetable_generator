@@ -149,7 +149,7 @@ def every_route_has_a_guard_and_the_guard_decides():
 GUARDS = {
     "admin_bulk": ('admin',),
     "admin_first": ('committee',),
-    "admin_page": ('admin',),
+    "admin_page": ('admin', 'committee'),
     "admin_people": ('admin',),
     "admin_person": ('admin',),
     "admin_reset": ('admin',),
@@ -257,8 +257,9 @@ EXAMS_ENDPOINTS = ("exams_home", "exams_settings_page", "exams_one_page", "exams
                    "exams_create", "exams_get", "exams_put", "exams_delete", "exams_fill", "exams_papers_download", "exams_papers_upload",
                    "exams_view", "exams_make_route", "exams_move", "exams_invigilators", "exams_use_anyway", "exams_print", "exams_download", "exams_who")
 
-# every admin page and API route: the Admin extra (a committee member signed in with their password); the first admin: the committee
-ADMIN_ENDPOINTS = ("admin_page", "admin_people", "admin_person", "admin_bulk", "admin_reset", "admin_ways", "admin_shared_off", "admin_students")
+# every admin API route: the Admin extra (a committee member signed in with their password); the first admin: the committee; the
+# admin page: an admin, or the committee (sent to the first admin while there is none, else told it is an admin's)
+ADMIN_ENDPOINTS = ("admin_people", "admin_person", "admin_bulk", "admin_reset", "admin_ways", "admin_shared_off", "admin_students")
 
 @t
 def the_guards_are_the_brief_s_table():
@@ -269,10 +270,11 @@ def the_guards_are_the_brief_s_table():
                            ("me", ("own",)), ("pdf_me", ("own",)), ("relief_home", ("relief", "relief.settings")), ("relief_me", ("relief",)),
                            ("relief_settings_page", ("relief.settings",)), ("relief_settings_get", ("relief.settings",)), ("relief_settings_put", ("relief.save",)),
                            ("relief_codes_csv", ("codes",)), ("relief_code_slips", ("codes",)), ("home", ("timetable",)), ("draft_preview_page", ("committee",))) + tuple(
-                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS) + tuple((e, ("admin",)) for e in ADMIN_ENDPOINTS) + (("admin_first", ("committee",)),):
+                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS) + tuple((e, ("admin",)) for e in ADMIN_ENDPOINTS) + (("admin_first", ("committee",)),
+                               ("admin_page", ("admin", "committee"))):
         assert need(endpoint) == want, (endpoint, need(endpoint))
     admin = {r.endpoint for r in A.app.url_map.iter_rules() if r.rule.startswith(("/admin", "/api/admin"))}
-    assert admin == set(ADMIN_ENDPOINTS) | {"admin_first"}, sorted(admin ^ (set(ADMIN_ENDPOINTS) | {"admin_first"}))
+    assert admin == set(ADMIN_ENDPOINTS) | {"admin_first", "admin_page"}, sorted(admin ^ (set(ADMIN_ENDPOINTS) | {"admin_first", "admin_page"}))
     for bad in (("staff",), ("head",), ("personal",), ("committee", "teacher"), ()):
         try: A.need(*bad)
         except ValueError: pass
@@ -409,6 +411,55 @@ def status_says_who_is_signed_in():
     P.update(lambda d: d["people"][ADA]["extras"].update(admin=False))
     try: assert client(dict(role="committee")).get("/api/status").get_json()["admin_exists"] is False
     finally: P.update(lambda d: d["people"][ADA]["extras"].update(admin=True))
+
+RELIEF_SHAPED = {"name", "short", "depts", "role", "teaches", "staff_only"}
+USERNAMES = ("hal.ong", "cora.lim", "ada.koh", "lee.chua")
+
+@t
+def no_account_field_reaches_a_page_that_is_not_the_admin_page():
+    for kind, url in (("teacher on exams until tomorrow", "/api/exams/settings"), ("teacher on the relief team", "/api/relief/settings"),
+                      ("shared committee", "/api/exams/settings"), ("shared committee", "/api/relief/settings"), ("hod by code", "/api/relief/settings")):
+        r = client(KINDS[kind][0]).get(url); j = r.get_json()
+        assert r.status_code == 200 and j["people"], (kind, url, r.status_code, j)
+        assert all(set(p) == RELIEF_SHAPED for p in j["people"]), (kind, url, j["people"][:1])
+        body = r.get_data(as_text=True)
+        assert not any(u in body for u in USERNAMES) and '"has_password"' not in body and '"extras"' not in body and '"last"' not in body, (kind, url)
+        names = {p["name"] for p in j["people"]}; assert {TINA, HAL, CORA, ADA} <= names, names   # the staff added by name are there, without their accounts
+    assert all(set(p) == RELIEF_SHAPED for p in A.relief_staff(store.published()))
+    j = client(person(HAL, "code")).get("/api/relief/me").get_json(); assert j["depts"] == ["SC", "MA"], j   # a head's ticked departments
+    P.update(lambda d: d["people"][HAL].update(depts=[]))
+    try: assert client(person(HAL, "code")).get("/api/relief/me").get_json()["depts"] == ["SC"]   # none ticked: relief keeps step 4's
+    finally: P.update(lambda d: d["people"][HAL].update(depts=["SC", "MA"]))
+
+ONLY_ADMIN = "Only an admin can open this page."
+
+@t
+def the_admin_page_sends_the_committee_to_the_first_admin_while_there_is_none():
+    for kind in ("shared committee", "committee by password"):        # an admin can sign in: the page is an admin's
+        r = client(KINDS[kind][0]).get("/admin"); body = r.get_data(as_text=True)
+        assert r.status_code == 403 and ONLY_ADMIN in body and "href='/'" in body, (kind, r.status_code)
+    r = client(person(ADA, "password")).get("/admin"); assert r.status_code == 200 and b"admin.js" in r.data; r.close()
+    for kind in ("admin by code", "committee by code", "hod by password", "shared head", "shared teacher", "nobody"):
+        assert to_login(client(KINDS[kind][0]).get("/admin")), kind
+    P.update(lambda d: d["people"][ADA]["extras"].update(admin=False))   # deploy day: no admin yet
+    try:
+        for kind in ("shared committee", "committee by password"):
+            assert went(client(KINDS[kind][0]).get("/admin"), "/admin/first"), kind
+        r = client(dict(role="committee")).get("/admin/first"); assert r.status_code == 200 and 'name="new"' in r.data.decode()
+        assert to_login(client(KINDS["admin by code"][0]).get("/admin")) and to_login(client(KINDS["shared head"][0]).get("/admin"))
+    finally: P.update(lambda d: d["people"][ADA]["extras"].update(admin=True))
+
+@t
+def the_committee_page_links_the_first_admin_admin_and_history_by_right():
+    page = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
+    js = open(os.path.join(ROOT, "static", "app.js"), encoding="utf-8").read()
+    assert re.search(r'<div id="firstAdmin"[^>]*hidden>No admin account yet\. <a href="/admin/first">Make the first admin</a></div>', page), "the first admin line"
+    assert re.search(r'<a [^>]*id="adminLink" href="/admin" hidden>Admin</a>', page) and re.search(r'<a [^>]*id="historyLink" href="/history" hidden>History</a>', page)
+    assert 'al.hidden = !rights.includes("admin")' in js and 'hy.hidden = !rights.includes("history")' in js
+    assert 'fa.hidden = !(G.st.admin_exists === false && rights.includes("committee"))' in js
+    j = client(dict(role="committee")).get("/api/status").get_json()   # what the page reads: the rights and whether an admin exists
+    assert "committee" in j["rights"] and "history" in j["rights"] and "admin" not in j["rights"] and j["admin_exists"] is True, j
+    assert "admin" in client(person(ADA, "password")).get("/api/status").get_json()["rights"]
 
 def sent(base, edit):
     """the ops the page sends for an edit (sync.diff of the setup before and after), as tests/test_sync.py makes them"""

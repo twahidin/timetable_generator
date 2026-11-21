@@ -145,6 +145,34 @@ def corrupt_record_does_not_break_helpers():
     assert P.admins(d) == []
 
 @t
+def unknown_keys_are_kept_and_known_ones_cleaned():
+    d = P.blank()
+    d["people"]["Ms Later"] = dict(group="hod", added=True, depts=[" Sci "], later={"a": [1]}, extras=dict(relief="yes", later_extra=3), n="x")
+    r = P.record(d, "Ms Later")
+    assert r["later"] == {"a": [1]} and r["extras"] == dict(later_extra=3, relief=False, exams=None, admin=False), r
+    assert r["depts"] == ["Sci"] and r["n"] == 0 and r["group"] == "hod"
+    r["later"]["a"].append(2); assert d["people"]["Ms Later"]["later"] == {"a": [1]}, "a copy: the data is not changed through it"
+    s = {x["name"]: x for x in P.staff(pub(), d)}; assert "later" not in s["Ms Later"], "only the known fields reach a staff item"
+    P.update(lambda x: x["people"].update({"Ms Later": dict(d["people"]["Ms Later"])}))
+    P.update(lambda x: x["people"].update({"Ms Later": dict(P.record(x, "Ms Later"), note="changed")}))   # a read-modify-write
+    got = P.load()["people"]["Ms Later"]; assert got["later"] == {"a": [1]} and got["extras"]["later_extra"] == 3 and got["note"] == "changed", got
+    P.update(lambda x: x["people"].pop("Ms Later"))
+
+@t
+def a_head_s_departments_are_their_record_s_and_the_listing_carries_no_account_field():
+    d = P.blank()
+    d["people"]["Ms Test One"] = dict(group="hod", depts=[])
+    d["people"]["Mr Test Two"] = dict(group="sh", depts=["Sci"])
+    d["people"]["Ms Added"] = dict(added=True, username="ms.added", pw="HASHSECRET")
+    s = {x["name"]: x for x in P.staff(pub(), d)}
+    assert s["Ms Test One"]["depts"] == [] and s["Mr Test Two"]["depts"] == ["Sci"], s   # none ticked stays none; step 4 says Sci and Maths
+    ls = P.listing(pub(), d)
+    assert [x["name"] for x in ls] == ["Mr Test Two", "Ms Test One", "Ms Added"], [x["name"] for x in ls]   # relief's order: by department, none last
+    assert all(set(x) == {"name", "short", "depts", "role", "teaches", "staff_only"} for x in ls), ls
+    assert {x["name"]: x["depts"] for x in ls} == {"Ms Test One": ["Sci"], "Mr Test Two": ["Maths"], "Ms Added": []}, "step 4's departments"
+    assert "HASHSECRET" not in repr(ls) and "ms.added" not in repr(ls)
+
+@t
 def the_moved_flag_is_a_real_boolean():
     assert P.blank()["migrated"] is False and P._fill({"migrated": "yes"})["migrated"] is False and P._fill({"migrated": True, "moved": ["x"]})["moved"] == ["x"]
 

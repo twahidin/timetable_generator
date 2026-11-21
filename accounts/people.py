@@ -34,11 +34,18 @@ def _iso(v):
     try: return datetime.date.fromisoformat(v).isoformat() if isinstance(v, str) else None
     except ValueError: return None
 
+_KNOWN_EXTRAS = ("relief", "exams", "admin")
+
 def _clean(got):
-    """a stored record with every field forced to its proper type, so a hand-edited file cannot break callers"""
-    r = _defaults()
+    """a stored record with every known field forced to its proper type, so a hand-edited file cannot break callers.
+    Keys this version does not know (a later version's, at the top or in extras) are kept as they are, so a
+    read-modify-write never drops them"""
+    known = _defaults()
+    r = {k: v for k, v in got.items() if k not in known}
+    r.update(known)
     ex = got.get("extras") if isinstance(got.get("extras"), dict) else {}
-    r["extras"] = {"relief": ex.get("relief") is True, "exams": _iso(ex.get("exams")), "admin": ex.get("admin") is True}
+    r["extras"] = {k: v for k, v in ex.items() if k not in _KNOWN_EXTRAS}
+    r["extras"].update(relief=ex.get("relief") is True, exams=_iso(ex.get("exams")), admin=ex.get("admin") is True)
     r["group"] = got.get("group") if got.get("group") in GROUPS else None
     d = got.get("depts")
     r["depts"] = [x.strip() for x in d if isinstance(x, str) and x.strip()] if isinstance(d, list) else []
@@ -90,20 +97,34 @@ def update(fn):
         return out
 
 def _item(base, rec, published):
+    """one person as the admin page sees them. A head's departments are their record's (the ones they change the map
+    for: none ticked stays none, as the server gives them none); everyone else's are step 4's"""
     group = rec["group"] or ("teacher" if published else "executive")
-    depts = rec["depts"] if group in HEADS and rec["depts"] else base["depts"]
+    depts = rec["depts"] if group in HEADS else base["depts"]
     last = max((s for s in rec["signins"] if isinstance(s, (int, float))), default=None)
     return dict(base, group=group, depts=list(depts), extras=rec["extras"], username=rec["username"], off=rec["off"],
                 has_password=bool(rec["pw"]), last=last)
 
-def staff(pub, data=None):
-    data = load() if data is None else data
+def _listing(pub, data):
+    """(the people as relief knows them, the names on the published timetable)"""
     base = _relief.people(pub, [])
     names = {p["name"] for p in base}
     extra = [dict(name=n, short=n, depts=[], role="", teaches=False, staff_only=True)
              for n, r in data["people"].items() if n not in names and isinstance(r, dict) and (r.get("added") or r.get("username"))]
     extra.sort(key=lambda p: p["name"])
-    return [_item(p, record(data, p["name"]), p["name"] in names) for p in base + extra]
+    return base + extra, names
+
+def listing(pub, data=None):
+    """the people for every page that is not the admin page (relief, exams, the code slips): name, short, depts (step
+    4's), role, teaches and staff_only only, never an account field (group, extras, username, a password, sign-ins).
+    In relief's order: by first department, people with none last, then by name"""
+    return sorted(_listing(pub, load() if data is None else data)[0], key=lambda p: (not p["depts"], p["depts"][0] if p["depts"] else "", p["name"]))
+
+def staff(pub, data=None):
+    """the people with their account fields, for the admin page and the server's own checks only"""
+    data = load() if data is None else data
+    base, names = _listing(pub, data)
+    return [_item(p, record(data, p["name"]), p["name"] in names) for p in base]
 
 def find(name, pub, data=None):
     data = load() if data is None else data
@@ -154,7 +175,7 @@ def _day(iso):
 
 def _moved_entry(people, text):
     import history
-    try: history.add({"kind": "account", "what": "moved", "people": people, "changes": [], "text": text, "who": None, "as": "The app", "via": "app"})
+    try: history.add({"kind": "account", "what": "moved", "where": "Admin", "people": people, "changes": [], "text": text, "who": None, "as": "The app", "via": "app"})
     except Exception as e: print(f"WARNING: a move into the accounts could not be recorded in the history ({type(e).__name__})", file=sys.stderr, flush=True)
 
 def migrate(pub, relief_raw, exams_raw=None):

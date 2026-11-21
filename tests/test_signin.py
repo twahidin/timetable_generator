@@ -123,6 +123,7 @@ def a_published_teacher_signs_in_with_their_code_and_lands_on_home():
     s = kept(c); assert s["who"] == ALICE and s["via"] == "code" and s["n"] == 0 and "role" not in s and "exp" not in s, s
     e = last()
     assert (e["ok"], e["via"], e["who"], e["as"], e["shared"], e["reason"], e["addr"]) == (True, "code", ALICE, ALICE, None, None, "127.0.0.1"), e
+    assert e["where"] == "Sign-in", e                               # the history page's Where filter finds it
     for _ in range(2): code_in(code.lower().replace("-", " "))      # codes are read ignoring case, spaces and dashes
     assert len(rec(ALICE)["signins"]) == 2                           # the last two are kept
     assert c.get("/timetable").data == b"the person page"
@@ -385,6 +386,27 @@ def recovery_works_once_per_value_and_only_with_the_variable():
     finally: os.environ.pop("ADMIN_RECOVERY_CODE", None)
     assert c.get("/login/recover").status_code == 404
 
+SHORT_RECOVERY = "ADMIN_RECOVERY_CODE is too short (use at least 16 letters or digits); recovery is off."
+
+@t
+def a_short_recovery_code_counts_as_not_set():
+    c = A.app.test_client()
+    user, _ = account("Ms Ivy Goh", added=True, extras=dict(relief=False, exams=None, admin=True))
+    for short in (secrets.token_hex(7), "  " + secrets.token_hex(7) + "  ", "x"):   # 14 letters or digits (after trimming), and one
+        os.environ["ADMIN_RECOVERY_CODE"] = short
+        try:
+            assert A.recovery_code() is None and A.recovery_too_short()
+            assert c.get("/login/recover").status_code == 404
+            _, r = recover(user, short, secret()); assert r.status_code == 404, r.status_code   # a weak code opens nothing
+            assert SHORT_RECOVERY in A.setup_problems() and SHORT_RECOVERY in c.get("/login").data.decode()
+        finally: os.environ.pop("ADMIN_RECOVERY_CODE", None)
+    os.environ["ADMIN_RECOVERY_CODE"] = "  " + secret() + "  "        # 16 after trimming: on
+    try:
+        assert A.recovery_code() and not A.recovery_too_short() and c.get("/login/recover").status_code == 200
+        assert SHORT_RECOVERY not in A.setup_problems()
+    finally: os.environ.pop("ADMIN_RECOVERY_CODE", None)
+    assert SHORT_RECOVERY not in A.setup_problems() and not A.recovery_too_short()
+
 @t
 def a_change_from_another_site_is_refused():
     c, _ = code_in(CODES["COMMITTEE_CODE"])
@@ -423,7 +445,7 @@ def the_daily_tidy():
     assert rec("Ms Lia Ong")["extras"]["exams"] is None and rec("Mr Max Ho")["extras"]["exams"] == today.isoformat()
     e = last("account")
     assert e["text"] == f"Exams and events access ended (until {yesterday.day} {yesterday.strftime('%b %Y')})" and e["people"] == ["Ms Lia Ong"], e
-    assert (e["what"], e["who"], e["as"], e["via"]) == ("ended", None, "The app", "app"), e
+    assert (e["what"], e["who"], e["as"], e["via"], e["where"]) == ("ended", None, "The app", "app", "Admin"), e
     assert not os.path.exists(old)                                    # history files over two years old are removed
     n = len(H.read(kinds=["account"], limit=1000))
     person("Ms Lia Ong", extras=dict(relief=False, exams=yesterday.isoformat(), admin=False))
