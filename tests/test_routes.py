@@ -187,28 +187,39 @@ GUARDS = {
     "draft_suggest": ('committee',),
     "draft_undo": ('committee',),
     "draft_upload": ('committee',),
+    "exams_approve": ('exams', 'committee'),
+    "exams_away": ('exams', 'committee'),
     "exams_create": ('exams', 'committee'),
+    "exams_day": ('timetable',),
     "exams_delete": ('exams', 'committee'),
     "exams_download": ('exams', 'committee'),
     "exams_fill": ('exams', 'committee'),
     "exams_get": ('exams', 'committee'),
-    "exams_home": ('exams', 'committee'),
+    "exams_home": ('exams', 'committee', 'timetable'),
     "exams_invigilators": ('exams', 'committee'),
     "exams_list": ('exams', 'committee'),
     "exams_make_route": ('exams', 'committee'),
-    "exams_me": ('exams', 'committee'),
+    "exams_me": ('exams', 'committee', 'timetable'),
     "exams_move": ('exams', 'committee'),
+    "exams_my_duties": ('timetable',),
+    "exams_my_exams": ('own',),
     "exams_one_page": ('exams', 'committee'),
     "exams_papers_download": ('exams', 'committee'),
     "exams_papers_upload": ('exams', 'committee'),
     "exams_print": ('exams', 'committee'),
+    "exams_published_list": ('timetable',),
+    "exams_published_print": ('timetable',),
     "exams_put": ('exams', 'committee'),
+    "exams_review_get": ('exams', 'committee'),
+    "exams_send": ('exams', 'committee'),
+    "exams_send_back": ('exams', 'committee'),
     "exams_settings_get": ('exams', 'committee'),
     "exams_settings_page": ('exams', 'committee'),
     "exams_settings_put": ('exams', 'committee'),
     "exams_use_anyway": ('exams', 'committee'),
     "exams_view": ('exams', 'committee'),
     "exams_who": ('exams', 'committee'),
+    "exams_withdraw": ('exams', 'committee'),
     "export_printouts": ('committee',),
     "files": ('files',),
     "files": ('files',),
@@ -252,10 +263,19 @@ def a_shared_code_session_is_sent_from_the_password_page_to_login():
         r = client(dict(role=role)).get("/account/password")
         assert to_login(r), (role, r.status_code, r.headers.get("Location"))
 
-# every exams page and API route: the Exams and events extra (until its end date) or the timetable committee
-EXAMS_ENDPOINTS = ("exams_home", "exams_settings_page", "exams_one_page", "exams_me", "exams_settings_get", "exams_settings_put", "exams_list",
+# every exams page and API route: the Exams and events extra (until its end date) or the timetable committee; approving,
+# sending back and withdrawing are then the timetable committee's alone (inside the route: _exams_can_approve)
+EXAMS_ENDPOINTS = ("exams_settings_page", "exams_one_page", "exams_settings_get", "exams_settings_put", "exams_list",
                    "exams_create", "exams_get", "exams_put", "exams_delete", "exams_fill", "exams_papers_download", "exams_papers_upload",
-                   "exams_view", "exams_make_route", "exams_move", "exams_invigilators", "exams_use_anyway", "exams_print", "exams_download", "exams_who")
+                   "exams_view", "exams_make_route", "exams_move", "exams_invigilators", "exams_use_anyway", "exams_print", "exams_download", "exams_who",
+                   "exams_review_get", "exams_send", "exams_approve", "exams_send_back", "exams_withdraw", "exams_away")
+# the exams page and who is asking: also every other person signed in by name, for their own exam duties (exams stage 2's My exam duties;
+# the shared heads', teacher and student codes are sent to their own page / refused inside the route)
+EXAMS_DUTIES_PAGE = ("exams_home", "exams_me")
+# the main site's exams data (exams stage 2): everyone who sees the published timetable (how much: _published_reader); a person's own
+# duties (a person signed in by name, any way in, or the committee code); a student's own exam timetable (their personal code)
+EXAMS_SITE = (("exams_day", ("timetable",)), ("exams_published_list", ("timetable",)), ("exams_published_print", ("timetable",)),
+              ("exams_my_duties", ("timetable",)), ("exams_my_exams", ("own",)))
 
 # every admin API route: the Admin extra (a committee member signed in with their password); the first admin: the committee; the
 # admin page: an admin, or the committee (sent to the first admin while there is none, else told it is an admin's)
@@ -270,8 +290,8 @@ def the_guards_are_the_brief_s_table():
                            ("me", ("own",)), ("pdf_me", ("own",)), ("relief_home", ("relief", "relief.settings")), ("relief_me", ("relief",)),
                            ("relief_settings_page", ("relief.settings",)), ("relief_settings_get", ("relief.settings",)), ("relief_settings_put", ("relief.save",)),
                            ("relief_codes_csv", ("codes",)), ("relief_code_slips", ("codes",)), ("home", ("timetable",)), ("draft_preview_page", ("committee",))) + tuple(
-                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS) + tuple((e, ("admin",)) for e in ADMIN_ENDPOINTS) + (("admin_first", ("committee",)),
-                               ("admin_page", ("admin", "committee"))):
+                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS) + tuple((e, ("exams", "committee", "timetable")) for e in EXAMS_DUTIES_PAGE) + EXAMS_SITE + tuple(
+                               (e, ("admin",)) for e in ADMIN_ENDPOINTS) + (("admin_first", ("committee",)), ("admin_page", ("admin", "committee"))):
         assert need(endpoint) == want, (endpoint, need(endpoint))
     admin = {r.endpoint for r in A.app.url_map.iter_rules() if r.rule.startswith(("/admin", "/api/admin"))}
     assert admin == set(ADMIN_ENDPOINTS) | {"admin_first", "admin_page"}, sorted(admin ^ (set(ADMIN_ENDPOINTS) | {"admin_first", "admin_page"}))
@@ -280,8 +300,9 @@ def the_guards_are_the_brief_s_table():
         except ValueError: pass
         else: raise AssertionError(f"need{bad} was accepted")
     assert not hasattr(A, "role") and not hasattr(A, "_legacy")
-    exams = {r.endpoint for r in A.app.url_map.iter_rules() if "/exams" in r.rule}
-    assert exams == set(EXAMS_ENDPOINTS), sorted(exams ^ set(EXAMS_ENDPOINTS))
+    exams = {r.endpoint for r in A.app.url_map.iter_rules() if "/exams" in r.rule or r.rule == "/api/day"}
+    every = set(EXAMS_ENDPOINTS) | set(EXAMS_DUTIES_PAGE) | {e for e, _ in EXAMS_SITE}
+    assert exams == every, sorted(exams ^ every)
 
 @t
 def the_known_rights_are_every_right_the_table_gives():
@@ -296,7 +317,8 @@ def the_known_rights_are_every_right_the_table_gives():
 def an_executive_does_not_reach_relief():
     c = client(person(EVE, "code"))
     assert to_login(c.get("/relief")) and c.get("/api/relief/me").get_json() == AGAIN and c.get("/api/relief/me").status_code == 401
-    assert went(c.get("/home"), "/timetable")                         # one tile: it opens straight away
+    r = c.get("/home"); page = r.get_data(as_text=True)              # no Relief tile: Timetables and her own exam duties (two tiles)
+    assert r.status_code == 200 and re.findall(r'<a class="tile" href="([^"]+)"', page) == ["/timetable", "/exams"] and "My exam duties" in page, page[-600:]
     assert kept(c)["who"] == EVE
 
 @t
@@ -323,23 +345,24 @@ def tiles(c):
 @t
 def home_shows_exactly_the_tiles_of_the_table():
     shown, greyed, page = tiles(client(person(TINA, "code")))
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief")] and greyed == [], (shown, greyed)
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam duties", "/exams")] and greyed == [], (shown, greyed)
+    assert "Exams and events" not in page, "no Exams and events extra: her own exam duties only"
     assert f"Hello, {TINA}" in page and "Signed in with your code" in page and 'href="/logout"' in page and "Sign out" in page
     shown, greyed, page = tiles(client(person(ADA, "password")))
     assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams"), ("Admin", "/admin"), ("History", "/history")], shown
     assert greyed == [] and "Signed in with your password" in page
     assert "Until" not in page.split("Exams and events")[1].split("</a>")[0], "the committee's tile has no end date"
     shown, greyed, _ = tiles(client(person(ADA, "code")))           # the committee's code: all but the setup and the admin page
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief")], shown
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam duties", "/exams")], shown
     assert greyed == [("Committee page", "/login/password"), ("Admin", "/login/password")], greyed
     shown, greyed, _ = tiles(client(person(CORA, "code")))          # no Admin extra: no Admin tile, greyed or not
     assert greyed == [("Committee page", "/login/password")], greyed
     shown, greyed, _ = tiles(client(person(HAL, "code")))
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief")] and greyed == [("Committee page", "/login/password")], (shown, greyed)
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam duties", "/exams")] and greyed == [("Committee page", "/login/password")], (shown, greyed)
     shown, greyed, _ = tiles(client(person(HAL, "password")))
-    assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief")] and greyed == [], shown
+    assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam duties", "/exams")] and greyed == [], shown
     shown, greyed, _ = tiles(client(person(LEE, "password")))
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief")] and greyed == [], shown
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam duties", "/exams")] and greyed == [], shown
     # Exams and events: the exams pages are on the app now; the tile only while they are
     assert any(r.rule == "/exams" for r in A.app.url_map.iter_rules())
     shown, _, page = tiles(client(person(ELI, "code")))
@@ -347,18 +370,21 @@ def home_shows_exactly_the_tiles_of_the_table():
     d = datetime.date.fromisoformat(TOMORROW); assert f"Until {d.day} {d.strftime('%b %Y')}" in page
     real = A._route_exists
     A._route_exists = lambda path: path != "/exams" and real(path)
-    try: shown, _, _ = tiles(client(person(ELI, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief"], shown
+    try:
+        shown, _, _ = tiles(client(person(ELI, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief"], shown
+        shown, _, _ = tiles(client(person(TINA, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief"], shown
     finally: A._route_exists = real
 
 @t
 def an_exams_extra_opens_exams_until_its_end_date():
     eli, max_ = client(person(ELI, "code")), client(person(MAX, "code"))
     assert eli.get("/exams").status_code == 200 and eli.get("/exams/settings").status_code == 200
-    assert eli.get("/api/exams/me").get_json() == dict(name=ELI, can_use=True, home="/home")
+    assert eli.get("/api/exams/me").get_json() == dict(name=ELI, can_use=True, can_approve=False, home="/home")
     j = eli.get("/api/exams/settings").get_json()
     assert [ELI, TOMORROW] in j["lists"]["committee"] and j["can_admin"] is False, j["lists"]
     assert client(person(ADA, "password")).get("/api/exams/settings").get_json()["can_admin"] is True
-    assert to_login(max_.get("/exams")) and max_.get("/api/exams/me").get_json() == AGAIN and max_.get("/api/exams").status_code == 401
+    assert max_.get("/exams").status_code == 200 and max_.get("/api/exams").status_code == 401 and to_login(max_.get("/exams/settings"))
+    assert max_.get("/api/exams/me").get_json() == dict(name=MAX, can_use=False, can_approve=False, home="/home"), "his own exam duties only"
     assert MAX not in [n for n, _ in j["lists"]["committee"]]
     assert "Exams and events" not in max_.get("/home").get_data(as_text=True)
     assert kept(max_)["who"] == MAX, "an ended extra ends no session"
@@ -391,7 +417,7 @@ def the_timetable_page_each_kind_sees():
     (v1, a1), (v2, a2), (v3, a3), (v4, a4), (v5, a5) = seen
     assert (a1["mode"], a1["home"], a1["homeLabel"]) == ("teacher", "/home", "Home") and v1 == "full", a1
     assert (a2["mode"], a2["home"], a2["homeLabel"]) == ("teacher", "/relief", "Relief"), a2
-    assert (a3["mode"], a3["home"]) == ("teacher", None) and (v4, a4["mode"], a4["tabs"]) == ("student", "student", ["classes", "students"])
+    assert (a3["mode"], a3["home"]) == ("teacher", None) and (v4, a4["mode"], a4["tabs"]) == ("student", "student", ["classes", "students", "exams"])
     assert (a5["mode"], a5["home"], a5["homeLabel"], a5["tabs"]) == ("committee", "/", "Committee page", None)
     assert a1["tabs"] == a3["tabs"] and a1["files"] == a3["files"] == A.files_for("teacher") and a5["files"] == A.files_for("committee")
 

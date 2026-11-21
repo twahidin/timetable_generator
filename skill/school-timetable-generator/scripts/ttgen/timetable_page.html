@@ -63,6 +63,14 @@ a.btn{display:inline-flex;align-items:center;color:var(--ink);text-decoration:no
 .cell.ext{border-style:dashed}.cell.ext:after{content:"after school";font-size:9.5px;font-weight:700;color:#8A5300}
 .cell:hover{filter:brightness(.97);z-index:2;outline:2px solid color-mix(in srgb,var(--a) 50%,transparent)}
 .cell.dim{opacity:.22;filter:grayscale(1)}
+.cell.x{opacity:.5;filter:grayscale(.7)}.cell.x b,.cell.x span{text-decoration:line-through}
+.cell.exam{--t:#F1EAFA;--a:#6b3fa0;cursor:default}.cell.exam b{color:#4A2873}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .cell.exam{--a:#9C7BD6}:root:not([data-theme="light"]) .cell.exam b{color:#E6DAF8}}
+:root[data-theme="dark"] .cell.exam{--a:#9C7BD6}:root[data-theme="dark"] .cell.exam b{color:#E6DAF8}
+.datepick{display:flex;align-items:center;gap:6px}.datepick input{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.onmsg{padding:8px 20px;font-size:13px;color:var(--bad);background:var(--panel);border-bottom:1px solid var(--line)}
+.onday{margin:0 0 12px;padding:7px 10px;border-radius:8px;font-size:13px;background:color-mix(in srgb,#6b3fa0 12%,transparent);border-left:3px solid #6b3fa0}
+.myexams{margin-bottom:14px}.myexams h2{font-size:18px;margin:0 0 6px}.myexams h3,.exams h3{font-size:14px;margin:14px 0 6px}.exams h2{font-size:17px;margin:18px 0 2px}.exams h2 small{font-weight:400;font-size:12.5px;color:var(--muted);margin-left:8px}
 .banner{background:#FFF4D6;color:#5C4400;padding:8px 20px;font-size:13px;font-weight:600;border-bottom:1px solid #E8D9A8}
 .lsw{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.lsw button{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:5px 12px;cursor:pointer;font-size:13px;color:var(--sub)}
 .lsw button.on{background:var(--accent);border-color:var(--accent);color:var(--panel)}.lsw .count{margin:0 0 0 6px}
@@ -109,7 +117,7 @@ html.inapp:not([data-theme="dark"]) .card,html.inapp:not([data-theme="dark"]) .b
 @media (max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:12px 16px 30px}header.top{gap:10px}.brand{flex:1 1 0}.status{font-size:11px;padding:4px 8px}.browse{position:static;max-height:300px}header.top{flex-wrap:wrap;padding:10px 16px}.search{order:3;max-width:none;flex-basis:100%}
   nav.tabs{padding:4px 16px 0}.stats{margin-left:0}.card{padding:14px}}
 @media print{@page{size:A4 landscape;margin:9mm}html,body{background:#fff}header.top,nav.tabs,.browse,.tools,.note.screen{display:none!important}main{display:block;padding:0}
-  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw,.banner{display:none!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
+  .card{border:0;box-shadow:none;padding:0}.gridwrap{overflow:visible}.tt{min-width:0}.cell,.bk,.sw,.kicker,.mrow,.mrow i,.mcard{-webkit-print-color-adjust:exact;print-color-adjust:exact}.filters,.lsw,.banner,.onmsg{display:none!important}.tablebox{max-height:none;overflow:visible}.lcls{content-visibility:visible}
   .legend{grid-template-columns:repeat(3,1fr);font-size:10px}.vhead h1{font-size:20px}}
 </style>
 </head>
@@ -135,7 +143,7 @@ if (APP) document.documentElement.classList.add("inapp");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const NP = D.NP, DAYS = D.days, ND = DAYS.length, WEEKS = D.school.weeks || 1, PER_WEEK = Math.max(1, Math.floor(ND / WEEKS));
 const ENTIRE = "Entire Class", BREAK = { F: "Assembly", R: "Recess", U: "Lunch" };
-const L = D.lessons.map(r => ({ id: r[0], d: r[1], p: r[2], n: r[3], level: r[4], block: r[5], classes: r[6], subject: r[7], group: r[8], teachers: r[9], room: r[10], ext: !!r[11], rain: r[12] || "" }));
+const L = D.lessons.map((r, i) => ({ id: r[0], d: r[1], p: r[2], n: r[3], level: r[4], block: r[5], classes: r[6], subject: r[7], group: r[8], teachers: r[9], room: r[10], ext: !!r[11], rain: r[12] || "", i }));   /* i: the row in D.lessons, the published model's row, as the exams answers name it */
 const roomLine = x => x.rain ? `${x.room} (rain ${x.rain})` : x.room;   // a PE lesson's rain room: its class's home room, kept free
 const CLS = D.classes.map(r => ({ name: r[0], level: r[1], size: r[2], home: r[3], parents: r[4] || [] }));   // an older page's data has no fifth element
 const PNAME = D.parents_name || "Form teachers";
@@ -154,6 +162,19 @@ const tshort = ts => ts.map(t => (tIx.get(t) || {}).short || t).join(", ");
 const busyTeachers = new Set(L.flatMap(x => x.teachers)), busyRooms = new Set(L.flatMap(x => x.room ? [x.room, ...singles(x.room)] : [])), busyClasses = new Set(L.flatMap(x => x.classes));
 const time = p => D.times[Math.max(0, Math.min(NP - 1, p))];
 const when = x => `${DAYS[x.d]} ${time(x.p)[0]}–${time(x.p + x.n - 1)[1]}`;
+/* exams: the date choice (dates) and the Exams tab and banner (exams) are for the signed-in site; personal mode asks only /api/me/exams */
+const DATES = !!(APP && APP.dates) && MODE !== "personal";
+const EXAMS = !!(APP && APP.exams) && MODE !== "personal";
+const WKD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function niceDate(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || "")); if (!m) return String(iso || ""); const t = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); return `${WKD[t.getUTCDay()]} ${t.getUTCDate()} ${MON[t.getUTCMonth()]}`; }   /* "Mon 5 Oct", as the server writes dates */
+const mins = t => { const m = /^(\d{1,2})[.:](\d{2})$/.exec(String(t || "").trim()); return m ? +m[1] * 60 + +m[2] : null; };
+/* each period's start and end in minutes, read as exams/days.py bounds() reads them: from the school's start time and period length, else from the times, 12 hours added when a time goes back */
+const PB = (() => {
+  const sc = D.school || {}, st = mins(sc.start_time), pm = +sc.period_minutes;
+  if (st !== null && pm > 0) return D.times.map((_, p) => [st + pm * p, st + pm * (p + 1)]);
+  let last = -1, add = 0;
+  return D.times.map(two => two.map(t => { let v = mins(t); if (v === null) return last; v += add; while (v < last) { add += 720; v += 720; } last = v; return v; }));
+})();
 function weekDay(n) { const p = String(n).split(" "); return p.length > 1 ? [p[0], p[p.length - 1]] : ["", p[0]]; }
 function compact(cs) {
   cs = [...cs].sort((a, b) => a.length - b.length || a.localeCompare(b));
@@ -174,7 +195,7 @@ function codesFor(levels) {
 }
 
 // ------------------------------------------------------------------ views
-function cellOf(xs, title, lines) { const x0 = xs[0]; return { d: x0.d, p: x0.p, n: x0.n, title, lines: lines.filter(Boolean), color: colorOf(x0.subject), ext: xs.some(x => x.ext), id: x0.id }; }
+function cellOf(xs, title, lines) { const x0 = xs[0]; return { d: x0.d, p: x0.p, n: x0.n, title, lines: lines.filter(Boolean), color: colorOf(x0.subject), ext: xs.some(x => x.ext), id: x0.id, ix: xs.map(x => x.i) }; }
 function classView(c) {
   const info = cIx.get(c), rows = L.filter(x => x.classes.includes(c)), bg = {};
   rows.forEach(x => { if (x.block) (bg[x.block] = bg[x.block] || new Set()).add(x.group); });
@@ -236,6 +257,34 @@ function personalView(cls, groups, head) {
     legend: [...ent.values()].map(e => ({ color: colorOf(e.x.subject), label: short(e.x.subject), text: `${e.x.subject} · ${e.x.group !== ENTIRE ? e.x.group : "with the class"} · ${e.x.teachers.join(", ") || "-"} · ${common(e.rooms) || "-"} · ${e.periods} periods` })) }, head);
 }
 const studentView = id => { const s = sIx.get(id); return personalView(s.cls, s.groups, { key: id, kicker: "Student", title: s.name, sub: `${s.id} · Class ${s.cls} · ${(cIx.get(s.cls) || {}).level || ""}${parentsLine(s.cls)}` }); };
+/* a room, the combined venues made with it and its own rooms, as exams/seating.py _related reads them: one space for exams */
+const relatedRooms = r => uniq([r, ...ROOMS.filter(x => x.parts.includes(r)).map(x => x.name), ...((rIx.get(r) || {}).parts || [])]);
+/* a view on the chosen date (S.on, from /api/day): only that day's row, a lesson that does not happen crossed out, a shortened one with the
+   times it still runs, and the exams of the class (a student: their class), the teacher or the room. The PDF, CSV and legend stay the usual timetable */
+function dated(v) {
+  const on = S.on, ex = on.exams || {}, nd = niceDate(on.date);
+  if (!on.day) { v.noday = `${nd} is outside the terms or a holiday in the school calendar.`; v.cells = []; return v; }
+  const only = DAYS.indexOf(on.day), stop = new Set(ex.stopped || []), runs = new Map();
+  (ex.shortened || []).forEach(([i, a, b]) => { if (!runs.has(i)) runs.set(i, []); runs.get(i).push(`${a}–${b}`); });
+  v.only = only;
+  v.cells = v.cells.filter(c => c.d === only);
+  v.cells.forEach(c => {
+    const ix = c.ix || [], run = uniq(ix.flatMap(i => runs.get(i) || []));
+    if (run.length) c.lines = [`runs ${run.join(", ")} only`, ...c.lines];
+    else if (ix.length && ix.every(i => stop.has(i))) c.x = true;
+  });
+  const cls = v.kind === "class" ? v.key : v.kind === "student" ? (v.cls || (sIx.get(v.key) || {}).cls) : null;
+  const inRoom = r => relatedRooms(r).flatMap(q => ((ex.rooms || {})[q] || []).map(it => q === r ? it : Object.assign({}, it, { via: q })));   /* a combined venue and its rooms count as one room */
+  const items = cls ? (ex.classes || {})[cls] : v.kind === "teacher" ? (ex.teachers || {})[v.key] : v.kind === "room" ? inRoom(v.key) : null;
+  const tm = it => `${it.start}–${it.end}`;
+  (items || []).forEach(it => {
+    const title = cls ? it.label : v.kind === "teacher" ? `${it.role} · ${it.room}` : "Exam";
+    const lines = cls ? [it.room, tm(it), it.seat_note] : [it.label, tm(it), it.via ? `in ${it.via}` : ""];
+    v.cells.push({ d: only, p: +it.p || 0, n: +it.n || 0, title, lines: lines.filter(Boolean), exam: true, when: `${nd} (${on.day})` });
+  });
+  v.onLine = ex.banner ? `On ${nd} (${on.day}): ${ex.banner}. Lessons that don't happen are crossed out.` : `On ${nd} (${on.day}): no exams or tests. This is the usual ${on.day} timetable.`;
+  return v;
+}
 
 // ------------------------------------------------------------------ grid
 function lanes(cells) {
@@ -253,15 +302,16 @@ function gridHTML(v) {
   const most = Array(ND).fill(1); for (const [c, [, n]] of ln) most[c.d] = Math.max(most[c.d], n);
   let h = `<div class="gridwrap"><div class="tt" style="--np:${NP};--cw:${cw}px;--rh:${rh}px"><div class="head"><div></div><div class="ph">${D.times.map((t, p) => `<div>${p}<b>${esc(t[0])}</b></div>`).join("")}</div></div>`;
   for (let d = 0; d < ND; d++) {
+    if (v.only != null && d !== v.only) continue;   /* a view on a date: that day's row only */
     const [wk, dn] = weekDay(DAYS[d]); let inner = "";
     const codes = v.codes ? v.codes[d] : null;
     if (codes) for (let p = 0; p < NP;) { const ch = codes[p]; let q = p; while (q + 1 < NP && codes[q + 1] === ch) q++;
       if (BREAK[ch] || ch === "." || ch === "A") inner += `<div class="bk ${ch === "." ? "none" : ch === "A" ? "slot" : ""}${q === p && NP > 18 ? " v" : ""}" style="left:${p / NP * 100}%;width:${(q - p + 1) / NP * 100}%"><span>${esc(BREAK[ch] || "")}</span></div>`; p = q + 1; }
     for (const c of v.cells.filter(c => c.d === d)) {
-      const [i, n] = ln.get(c) || [0, 1], [t, a] = c.ext ? D.ext : pal(c.color);
-      inner += `<div class="cell${c.ext ? " ext" : ""}${c.dim ? " dim" : ""}" data-id="${c.id}" tabindex="0" style="left:calc(${c.p / NP * 100}% + 0px);width:calc(${c.n / NP * 100}% - 2px);top:${i / n * 100}%;height:calc(${100 / n}% - 2px);--t:#${t};--a:#${a}" title="${esc([c.title, ...c.lines, when(c)].join("\n"))}"><b>${esc(c.title)}</b>${c.lines.map((l, j) => `<span class="${j ? "m" : ""}">${esc(l)}</span>`).join("")}</div>`;
+      const [i, n] = ln.get(c) || [0, 1], [t, a] = c.exam ? [] : c.ext ? D.ext : pal(c.color);   /* an exam takes its colours from .cell.exam */
+      inner += `<div class="cell${c.ext ? " ext" : ""}${c.dim ? " dim" : ""}${c.x ? " x" : ""}${c.exam ? " exam" : ""}"${c.exam ? "" : ` data-id="${c.id}"`} tabindex="0" style="left:calc(${c.p / NP * 100}% + 0px);width:calc(${c.n / NP * 100}% - 2px);top:${i / n * 100}%;height:calc(${100 / n}% - 2px)${c.exam ? "" : `;--t:#${t};--a:#${a}`}" title="${esc([c.title, ...c.lines, c.when || when(c)].join("\n"))}"><b>${esc(c.title)}</b>${c.lines.map((l, j) => `<span class="${j ? "m" : ""}">${esc(l)}</span>`).join("")}</div>`;
     }
-    h += `<div class="row${WEEKS > 1 && d % PER_WEEK === 0 && d ? " wk" : ""}"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track"${most[d] > 1 ? ` style="height:calc(var(--rh) * 1.7)"` : ""}>${inner}</div></div>`;
+    h += `<div class="row${WEEKS > 1 && d % PER_WEEK === 0 && d && v.only == null ? " wk" : ""}"><div class="dl">${wk ? `<small>${esc(wk)}</small>` : ""}${esc(dn)}</div><div class="track"${most[d] > 1 ? ` style="height:calc(var(--rh) * 1.7)"` : ""}>${inner}</div></div>`;
   }
   return h + "</div></div>";
 }
@@ -270,7 +320,8 @@ function viewHTML(v, extra = "") {
   const leg = v.legend.map(e => { const [t, a] = pal(e.color); return `<div><i class="sw" style="--t:#${t};--a:#${a}"></i><span><b>${esc(e.label)}</b> ${esc(e.text)}</span></div>`; }).join("");
   return `<div class="card"><div class="vhead"><div><h1><span class="kicker">${esc(v.kicker)}</span>${esc(v.title)}</h1><div class="sub">${esc(v.sub || "")}</div></div><div class="stats">${stats}</div></div>
     <div class="tools">${pdfLink(v)}<button data-act="print">Print</button><button data-act="csv">Download CSV</button>${MODE === "personal" ? "" : `<button data-act="link">Copy link</button>`}${extra}</div>
-    ${v.cells.length ? gridHTML(v) : `<div class="empty">No lessons.</div>`}
+    ${v.onLine ? `<p class="onday">${esc(v.onLine)}</p>` : ""}
+    ${v.noday ? `<div class="empty"><b>Not a school day.</b><br>${esc(v.noday)}</div>` : v.cells.length ? gridHTML(v) : `<div class="empty">No lessons.</div>`}
     <div class="legend"><h3>${esc(v.lt)}</h3>${leg}</div>
     <div class="note">Times are period start times. Grey columns are breaks; pale yellow is an after-school slot, used only when needed. Click a lesson for every group, teacher and room in it.</div></div>`;
 }
@@ -287,9 +338,9 @@ function pdfLink(v) {
 // ------------------------------------------------------------------ state, tabs, lists
 const APP_TABS = APP && APP.tabs ? APP.tabs : null;
 const TABS_ALL = [["classes", "Classes", CLS.filter(c => busyClasses.has(c.name)).length], ["teachers", "Teachers", busyTeachers.size], ["rooms", "Rooms", busyRooms.size],
-  ["students", MODE === "student" ? "Build my timetable" : "Students", MODE === "student" ? "" : STU.length], ["lessons", "Lessons", lessonRows.size], ["free", "Who's free", ""], ["checks", "Checks", ""]];
+  ["students", MODE === "student" ? "Build my timetable" : "Students", MODE === "student" ? "" : STU.length], ["lessons", "Lessons", lessonRows.size], ["free", "Who's free", ""], ...(EXAMS ? [["exams", "Exams", ""]] : []), ["checks", "Checks", ""]];
 const TABS = TABS_ALL.filter(t => !APP_TABS || APP_TABS.includes(t[0]));
-const S = { tab: "classes", key: null, chip: {}, fq: "", current: null, lf: {}, sort: ["day", 1], showAll: false, lview: "grids" };   // lview: how the Lessons tab shows what the filter finds
+const S = { tab: "classes", key: null, chip: {}, fq: "", current: null, lf: {}, sort: ["day", 1], showAll: false, lview: "grids", on: null, onWant: "" };   // lview: how the Lessons tab shows what the filter finds; on: /api/day's answer for the chosen date (null: the usual timetable)
 const LVIEWS = [["grids", "Class grids"], ["page", "One page"], ["table", "Table"]];
 function listItems(tab) {
   if (tab === "classes") return CLS.filter(c => busyClasses.has(c.name)).map(c => ({ key: c.name, label: c.name, small: c.home, group: c.level }));
@@ -315,15 +366,17 @@ function show(tab, key, opts = {}) {
   if (MODE === "personal") return showPersonal();
   clearTimeout(S.lt);   // a redraw of the Lessons tab that was waiting for typing to pause
   if (!TABS.some(t => t[0] === tab)) { tab = TABS[0][0]; key = null; }
-  S.tab = tab; S.key = key; renderTabs(); const wide = ["lessons", "free", "checks"].includes(tab); $("#main").classList.toggle("wide", wide);
+  S.tab = tab; S.key = key; renderTabs(); const wide = ["lessons", "free", "checks", "exams"].includes(tab); $("#main").classList.toggle("wide", wide);
   if (!wide) renderList();
   if (tab === "lessons") { if (opts.filters) { S.lf = opts.filters; S.showAll = false; } return renderLessons(); }
   if (tab === "free") return renderFree();
   if (tab === "checks") return renderChecks();
+  if (tab === "exams") return renderExams();
   if (tab === "students" && (key === "__build" || !STU.length)) return renderBuilder(opts.build);
   if (tab === "students" && !sIx.has(key)) key = null;
   if (!key) { const first = listItems(tab)[0]; if (!first) { $("#view").innerHTML = `<div class="card empty">Nothing here yet.</div>`; return; } return show(tab, first.key); }
   const v = tab === "classes" ? classView(key) : tab === "teachers" ? teacherView(key) : tab === "rooms" ? roomView(key) : studentView(key);
+  if (S.on) dated(v);
   S.current = v; $("#view").innerHTML = viewHTML(v); setHash(`#${tab}/${encodeURIComponent(key)}`);
   const a = $(`#list a[data-key="${CSS.escape(key)}"]`); if (a) a.scrollIntoView({ block: "nearest" });
 }
@@ -340,7 +393,9 @@ function renderBuilder(pre) {
   $("#view").innerHTML = `<div class="card"><h1 style="margin:0 0 4px;font-size:20px">${MODE === "student" ? "Build my timetable" : "Build a student timetable"}</h1><div class="sub" style="color:var(--sub)">${MODE === "student" ? "Pick your class, then the group you are in for each block (your subject teacher or form teacher can tell you)." : STU.length ? "Or pick a student from the list." : "This timetable has no student list, so pick the class and the group the student is in for each block."}</div>
     <div class="builder"><label>Class<select id="bcls">${CLS.filter(c => busyClasses.has(c.name)).map(c => `<option ${c.name === cls ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>${sel}</div><div id="bview"></div></div>`;
   const update = () => { const groups = [...document.querySelectorAll("#view select[data-b]")].map(s => s.value); S.bgroups = groups;
-    const v = personalView(cls, groups, { key: "custom", cls, groups, kicker: "Student", title: `Class ${cls}`, sub: `Groups ${groups.join(", ") || "-"}` }); S.current = v;
+    const v = personalView(cls, groups, { key: "custom", cls, groups, kicker: "Student", title: `Class ${cls}`, sub: `Groups ${groups.join(", ") || "-"}` });
+    if (S.on) dated(v);
+    S.current = v;
     $("#bview").innerHTML = viewHTML(v).replace('<div class="card">', '<div>'); setHash(`#build/${encodeURIComponent(cls)}/${groups.map(encodeURIComponent).join(",")}`); };
   $("#bcls").onchange = e => { S.bcls = e.target.value; S.bgroups = []; renderBuilder(); };
   document.querySelectorAll("#view select[data-b]").forEach(s => s.onchange = update); update();
@@ -436,18 +491,33 @@ function drawLessonTable() {
 // ------------------------------------------------------------------ who's free
 function renderFree() {
   const f = S.ff || (S.ff = { d: 0, from: 1, to: Math.min(NP - 1, 3) }), per = D.times.map((t, p) => [p, `${p} · ${t[0]}`]);
+  if (S.on && !S.on.day) {   /* a date with no school: nothing to look up */
+    $("#view").innerHTML = `<div class="card"><h1 style="margin:0 0 10px;font-size:20px">Who's free</h1><div class="empty"><b>Not a school day.</b><br>${esc(niceDate(S.on.date))} is outside the terms or a holiday in the school calendar.</div></div>`;
+    return setHash("#free");
+  }
+  /* on a date: that day, a lesson that does not happen leaves its teacher, room and class free (a shortened one only where it still runs), and exam duties, exam rooms and sittings are busy */
+  const on = S.on && S.on.day ? S.on : null, ex = on ? on.exams || {} : {}, day = on ? DAYS.indexOf(on.day) : +f.d;
+  const stop = new Set(ex.stopped || []), runs = new Map();
+  (ex.shortened || []).forEach(([i, a, b]) => { if (!runs.has(i)) runs.set(i, []); runs.get(i).push([mins(a), mins(b)]); });
+  const ran = x => { const ps = []; for (let q = x.p; q < x.p + x.n; q++) if (!stop.has(x.i) || (runs.get(x.i) || []).some(([a, b]) => PB[q] && a < PB[q][1] && b > PB[q][0])) ps.push(q); return ps; };   /* a period where any part of the lesson still runs is busy */
   const tb = new Set(), rb = new Set(), cb = new Set(), load = {};
   const seenTL = new Set();
-  L.forEach(x => { if (x.d !== +f.d) return; x.teachers.forEach(t => { const k = t + "|" + x.id; if (!seenTL.has(k)) { seenTL.add(k); load[t] = (load[t] || 0) + x.n; } });
-    if (x.p <= +f.to && x.p + x.n - 1 >= +f.from) { x.teachers.forEach(t => tb.add(t)); if (x.room) singles(x.room).concat(x.room).forEach(r => rb.add(r)); if (x.rain) x.rain.split(", ").forEach(r => singles(r).concat(r).forEach(q => rb.add(q))); x.classes.forEach(c => cb.add(c)); } });
+  L.forEach(x => { if (x.d !== day) return; const ps = ran(x); if (!ps.length) return; x.teachers.forEach(t => { const k = t + "|" + x.id; if (!seenTL.has(k)) { seenTL.add(k); load[t] = (load[t] || 0) + ps.length; } });
+    if (ps.some(q => q >= +f.from && q <= +f.to)) { x.teachers.forEach(t => tb.add(t)); if (x.room) singles(x.room).concat(x.room).forEach(r => rb.add(r)); if (x.rain) x.rain.split(", ").forEach(r => singles(r).concat(r).forEach(q => rb.add(q))); x.classes.forEach(c => cb.add(c)); } });
+  const hit = it => +it.p < +f.to + 1 && +it.p + +it.n > +f.from;   /* an exam item's p and n are period positions: period q is q to q + 1 */
+  Object.entries(ex.teachers || {}).forEach(([t, its]) => { if (its.some(hit)) tb.add(t); });
+  Object.entries(ex.rooms || {}).forEach(([r, its]) => { if (its.some(hit)) singles(r).concat(r).forEach(q => rb.add(q)); });
+  Object.entries(ex.classes || {}).forEach(([c, its]) => { if (its.some(hit)) cb.add(c); });
   const freeT = TCH.filter(t => busyTeachers.has(t.name) && !tb.has(t.name)), freeR = ROOMS.filter(r => !rb.has(r.name) && !r.parts.some(q => rb.has(q)) && r.name !== "TBC");
   const grp = (arr, g) => { const m = new Map(); arr.forEach(x => { const k = g(x) || "Other"; if (!m.has(k)) m.set(k, []); m.get(k).push(x); }); return [...m].sort((a, b) => a[0].localeCompare(b[0])); };
-  const inSchool = CLS.filter(c => busyClasses.has(c.name)).filter(c => { const g = D.grid[c.level]; if (!g) return false; for (let p = +f.from; p <= +f.to; p++) if (g[+f.d][p] === "L") return true; return false; });
-  $("#view").innerHTML = `<div class="card"><h1 style="margin:0 0 10px;font-size:20px">Who's free</h1><div class="filters">
-    <label>Day<select data-ff="d">${DAYS.map((d, i) => `<option value="${i}" ${+f.d === i ? "selected" : ""}>${esc(d)}</option>`).join("")}</select></label>
+  const inSchool = CLS.filter(c => busyClasses.has(c.name)).filter(c => { const g = D.grid[c.level]; if (!g || !g[day]) return false; for (let p = +f.from; p <= +f.to; p++) if (g[day][p] === "L") return true; return false; });
+  const dayPick = on ? `<label>Date<b class="count" style="margin:0;padding:6px 0">${esc(niceDate(on.date))} (${esc(on.day)})</b></label>` : `<label>Day<select data-ff="d">${DAYS.map((d, i) => `<option value="${i}" ${+f.d === i ? "selected" : ""}>${esc(d)}</option>`).join("")}</select></label>`;
+  const dayName = on ? `${niceDate(on.date)} (${on.day})` : DAYS[f.d];
+  $("#view").innerHTML = `<div class="card"><h1 style="margin:0 0 10px;font-size:20px">Who's free</h1>${on ? `<p class="onday">On ${esc(niceDate(on.date))} (${esc(on.day)}): ${esc(ex.banner || "no exams or tests")}.</p>` : ""}<div class="filters">
+    ${dayPick}
     <label>From<select data-ff="from">${per.map(([v, t]) => `<option value="${v}" ${+f.from === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
     <label>To<select data-ff="to">${per.map(([v, t]) => `<option value="${v}" ${+f.to === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label></div>
-    <p class="count">${esc(DAYS[f.d])}, ${esc(time(+f.from)[0])}–${esc(time(+f.to)[1])}: ${freeT.length} teachers and ${freeR.length} rooms free. Teachers show how many periods they teach that day.</p>
+    <p class="count">${esc(dayName)}, ${esc(time(+f.from)[0])}–${esc(time(+f.to)[1])}: ${freeT.length} teachers and ${freeR.length} rooms free. Teachers show how many periods they teach that day.${on ? " Duties and exam rooms count as busy; lessons that don't happen do not." : ""}</p>
     <h3 style="font-size:14px;margin:14px 0 8px">Teachers free</h3><div class="cols">${grp(freeT, t => t.dept).map(([g, ts]) => `<div><h4>${esc(g)}</h4>${ts.map(t => `<span class="pill"><a data-go="teachers" data-key="${esc(t.name)}">${esc(t.name)}</a> <small>${load[t.name] || 0}</small></span>`).join("")}</div>`).join("") || "<div class='empty'>None</div>"}</div>
     <h3 style="font-size:14px;margin:18px 0 8px">Rooms free</h3><div class="cols">${grp(freeR, r => r.kind).map(([g, rs]) => `<div><h4>${esc(g)}</h4>${rs.map(r => `<span class="pill"><a data-go="rooms" data-key="${esc(r.name)}">${esc(r.name)}</a></span>`).join("")}</div>`).join("") || "<div class='empty'>None</div>"}</div>
     <h3 style="font-size:14px;margin:18px 0 8px">Classes with no lesson then</h3><div>${inSchool.filter(c => !cb.has(c.name)).map(c => `<span class="pill"><a data-go="classes" data-key="${esc(c.name)}">${esc(c.name)}</a></span>`).join("") || "<span class='count'>Every class in school then has a lesson.</span>"}</div></div>`;
@@ -461,6 +531,70 @@ function renderChecks() {
     ${c.notes.length ? `<h3 style="font-size:14px">Notes</h3><ul>${c.notes.map(a => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}
     <p class="note">${esc(D.school.name)} · ${esc(D.school.timetable)} · generated ${esc(D.generated)}. ${CLS.length} classes, ${busyTeachers.size} teachers, ${busyRooms.size} rooms, ${STU.length} students, ${lessonRows.size} lesson times.</p></div>`;
   setHash("#checks");
+}
+
+// ------------------------------------------------------------------ exams (read at runtime: the page is kept per role until the next publish)
+const EXFAIL = "The exams could not be loaded. Try again later.";
+const KINDS = { exam: "Exam", test: "Common test" };
+const span2 = (a, b) => a === b ? niceDate(a) : `${niceDate(a)}–${niceDate(b)}`;
+const tbl = (head, rows) => `<div class="tablebox"><table class="lt"><thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+function examHTML(s) {
+  const lv = Object.entries(s.levels || {}).map(([l, ps]) => `<h3>${esc(l)}</h3>` + tbl(["Date", "Time", "Paper"], ps.map(p => [niceDate(p.date), `${p.start}–${p.end}`, p.label]))).join("");
+  const ro = (s.roster || []).length ? `<h3>Roster by day</h3>` + tbl(["Date", "Time", "Room", "Paper", "Invigilators"], s.roster.map(r => [niceDate(r.date), `${r.start}–${r.end}`, r.room, r.label, (r.names || []).map(n => n === r.chief ? n + " (chief)" : n).join(", ")])) : "";
+  const pr = (s.prints || []).length ? `<div class="tools" style="margin-top:12px">${s.prints.map(([t, h]) => `<a class="btn" href="${esc(h)}" target="_blank" rel="noopener">${esc(t)}</a>`).join("")}</div>` : "";
+  return `<h2>${esc(s.name)}<small>${esc(KINDS[s.kind] || s.kind || "")} · ${esc(span2(s.start, s.end))}</small></h2>${lv}${ro}${pr}`;
+}
+function renderExams() {
+  const ex = S.ex;
+  const body = !ex ? `<p class="count">Loading the exams…</p>` : ex.error ? `<p class="badline">${esc(ex.error)}</p>` : !(ex.schedules || []).length ? `<div class="empty">No exams or tests on the main site now.</div>` : ex.schedules.map(examHTML).join("");
+  $("#view").innerHTML = `<div class="card exams"><h1 style="margin:0 0 4px;font-size:20px">Exams</h1>${body}</div>`;
+  setHash("#exams");
+}
+function loadExams() {
+  const done = j => {
+    S.ex = j && !j.error && Array.isArray(j.schedules) ? j : { error: (j && j.error) || EXFAIL };
+    if (S.ex.banner && !$("#exbanner")) {
+      const b = document.createElement("div"); b.className = "banner"; b.id = "exbanner";
+      b.innerHTML = `${esc(S.ex.banner)}${TABS.some(t => t[0] === "exams") ? ` <a href="#exams" data-tab="exams">See Exams</a>` : ""}`;
+      document.querySelector("header.top").after(b);
+    }
+    if (S.tab === "exams") renderExams();
+  };
+  fetch("/api/published/exams", { credentials: "same-origin" }).then(r => r.json()).then(done, () => done(null));
+}
+
+// ------------------------------------------------------------------ the timetable on a date (/api/day)
+const DAYFAIL = "The timetable on that date could not be loaded. Try again.", REPUB = "The timetable was published again: reload the page.";
+function onMsg(t) { const m = $("#onmsg"); if (m) { m.textContent = t || ""; m.hidden = !t; } }
+function pickDate(iso) {
+  S.onWant = iso || ""; onMsg("");
+  const u = $("#onUsual"); if (u) u.hidden = !S.onWant;
+  if (!iso) { S.on = null; return show(S.tab, S.key); }
+  const stamp = APP && APP.published_at;   /* the timetable this page was drawn from: an answer for another publish would draw wrong cells */
+  const done = j => {
+    if (S.onWant !== iso) return;   /* a later choice is on its way */
+    if (j && !j.error && j.exams && stamp && j.published_at !== stamp) j = { error: REPUB };
+    if (j && !j.error && j.exams) S.on = j;
+    else { S.on = null; onMsg((j && j.error) || DAYFAIL); }
+    show(S.tab, S.key);
+  };
+  fetch("/api/day?date=" + encodeURIComponent(iso) + (stamp ? "&published_at=" + encodeURIComponent(stamp) : ""), { credentials: "same-origin" }).then(r => r.json()).then(done, () => done(null));
+}
+
+// ------------------------------------------------------------------ personal mode: my exam timetable (/api/me/exams only)
+const MEFAIL = "Your exam timetable could not be loaded. Try again later.";
+function myExams() {
+  if (S.me === undefined) {
+    S.me = null;
+    fetch("/api/me/exams", { credentials: "same-origin" }).then(r => r.json()).then(j => { S.me = j && Array.isArray(j.schedules) ? j : { error: (j && j.error) || MEFAIL }; myExams(); }, () => { S.me = { error: MEFAIL }; myExams(); });
+    return;
+  }
+  if (!S.me || $("#myexams") || !$("#view")) return;
+  if (S.me.error) return $("#view").insertAdjacentHTML("afterbegin", `<p class="note" id="myexams">${esc(S.me.error)}</p>`);
+  const ss = S.me.schedules.filter(s => (s.papers || []).length);
+  if (!ss.length) return;   /* no papers: nothing shows */
+  const row = p => `<tr><td>${esc(niceDate(p.date))}${p.report ? ` · report ${esc(p.report)}` : ""}</td><td>${esc(p.label)}</td><td>${esc(p.start)}–${esc(p.end)}</td><td>${esc(p.room || "")}</td><td>${p.seat ? `Seat ${esc(p.seat)}` : ""}</td><td>${esc(p.note || "")}</td></tr>`;
+  $("#view").insertAdjacentHTML("afterbegin", `<div class="card myexams" id="myexams"><h2>My exam timetable</h2>${ss.map(s => `<h3>${esc(s.name)}</h3><div class="tablebox"><table class="lt"><tbody>${s.papers.map(row).join("")}</tbody></table></div>`).join("")}</div>`);
 }
 
 // ------------------------------------------------------------------ lesson details, search, events
@@ -540,12 +674,13 @@ function showPersonal() {
   $("#tabs").style.display = "none"; $("#main").classList.add("wide"); $(".search").style.visibility = "hidden";
   const s = STU[0]; if (!s) { $("#view").innerHTML = `<div class="card empty">Your timetable is not available.</div>`; return; }
   const v = studentView(s.id); S.current = v; $("#view").innerHTML = viewHTML(v);
+  if (APP && APP.exams) myExams();
 }
 function route() {
   if (MODE === "personal") return showPersonal();
   const h = decodeURIComponent(location.hash.slice(1));
   if (h.startsWith("lessons")) { const f = {}; S.lview = "grids"; /* a link with no view named opens on Class grids */ (location.hash.split("?")[1] || "").split("&").filter(Boolean).forEach(kv => { const [k, v] = kv.split("="); if (k === "view") { if (LVIEWS.some(x => x[0] === v)) S.lview = v; return; } f[k] = k === "ext" ? true : decodeURIComponent(v || ""); }); return show("lessons", null, { filters: f }); }
-  if (h === "free" || h === "checks") return show(h, null);
+  if (h === "free" || h === "checks" || h === "exams") return show(h, null);
   if (h.startsWith("build/")) { const [, c, g] = location.hash.slice(1).split("/"); return show("students", "__build", { build: { cls: decodeURIComponent(c || ""), groups: (g || "").split(",").map(decodeURIComponent) } }); }
   const i = h.indexOf("/"); if (i > 0) { const t = h.slice(0, i), k = h.slice(i + 1); const ok = { classes: cIx, teachers: tIx, rooms: rIx, students: sIx }[t]; if (ok && ok.has(k)) return show(t, k); }
   show(TABS[0][0], null);
@@ -557,6 +692,15 @@ if (APP) {
   $("#theme").before(box);
   if (APP.placeholder) $("#q").placeholder = APP.placeholder;
   if (APP.banner) { const b = document.createElement("div"); b.className = "banner"; b.textContent = APP.banner; document.querySelector("header.top").after(b); }   /* a preview says so, above everything */
+  if (DATES) {
+    const dp = document.createElement("span"); dp.className = "datepick";
+    dp.innerHTML = `<input type="date" id="onDate" aria-label="Show the timetable on a date" title="Show the timetable on a date"><button class="btn" id="onUsual" hidden>Usual timetable</button>`;
+    $("#theme").before(dp);
+    const msg = document.createElement("div"); msg.id = "onmsg"; msg.className = "onmsg"; msg.hidden = true; $("#tabs").after(msg);   /* a date the server cannot show: its sentence, above the view */
+    $("#onDate").addEventListener("change", e => pickDate(e.target.value));
+    $("#onUsual").onclick = () => { $("#onDate").value = ""; pickDate(""); };
+  }
+  if (EXAMS) loadExams();
 }
 const st = $("#status"); st.className = "status " + (D.checks.ok ? "ok" : "bad"); st.textContent = D.checks.ok ? "All checks passed" : `${D.checks.problems.length} problems`; st.style.cursor = "pointer"; st.onclick = () => show("checks", null);
 if (!TABS.some(t => t[0] === "checks")) st.style.display = "none";

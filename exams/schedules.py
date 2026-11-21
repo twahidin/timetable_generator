@@ -2,13 +2,20 @@
 import datetime, os, secrets, threading
 
 import store
+from exams import approval as _approval
 from exams import days as _days
 from exams import papers as _papers
 
 DIR = os.path.join(store.DATA, "exams", "schedules")
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()   # one process (gunicorn: one worker, threads): held by a route from loading a schedule to saving it
 WRONG = "Check the exam and try again."
 NO_CALENDAR = "Set the school calendar in Relief settings first: exams need it to know which timetable day a date is."
+
+
+def editing():
+    """the lock a route holds from loading a schedule to saving it (and the delete), so two saves at once never undo each
+    other: an approve during a Make is not lost when the Make saves the copy it loaded before"""
+    return _LOCK
 
 
 def _path(id):
@@ -67,8 +74,8 @@ def new(kind, name, levels, start, end, by, pub=None) -> dict:
     return dict(id=secrets.token_hex(4), kind=kind, name=name, levels=list(levels), classes=[], start=start, end=end, days={},
                 times=dict(report="07:30", min_break=20, max_papers=2), papers=[], access=access,
                 seating=dict(order="class", shared="levels", spacing="every", home_rooms=True),
-                supervision="lesson" if test else "invigilators", pins=dict(rooms={}, duties={}), use_anyway=[], made=None,
-                status="draft", created_at=_now(), created_by=by, saved_at=None, saved_by=None)
+                supervision="lesson" if test else "invigilators", scripts="", pins=dict(rooms={}, duties={}), use_anyway=[], made=None,
+                status="draft", log=[], approved=None, note="", created_at=_now(), created_by=by, saved_at=None, saved_by=None)
 
 
 def _check(s, pub):
@@ -77,6 +84,7 @@ def _check(s, pub):
     for k, typ in (("name", str), ("levels", list), ("classes", list), ("days", dict), ("papers", list), ("access", list),
                    ("start", str), ("end", str)):
         if not isinstance(s.get(k), typ): raise ValueError(WRONG)
+    if not isinstance(s.get("scripts", ""), str): raise ValueError(WRONG)
     if not s["name"].strip(): raise ValueError("Give the exam a name.")
     if s.get("kind") not in KINDS or s.get("supervision") not in SUPERVISION: raise ValueError(WRONG)
     if not _texts(s["levels"]) or not _texts(s["classes"]): raise ValueError(WRONG)
@@ -147,8 +155,12 @@ def _check(s, pub):
         if x.get("student") not in students: raise ValueError(f"{x.get('student')} is not on the published timetable.")
 
 
-def save(sched, pub, cal, by) -> dict:
-    _check(sched, pub)
+def save(sched, pub, cal, by, check=True) -> dict:
+    """check the schedule against the published timetable and write it at once. check=False: an approval action (approve,
+    send back, withdraw, someone is away), which changes none of what the timetable is checked for, so a schedule
+    approved before a new publish can still be withdrawn"""
+    if check:
+        _check(sched, pub)
     out = dict(sched, saved_at=_now(), saved_by=by)
     with _LOCK:
         os.makedirs(DIR, exist_ok=True)
@@ -162,10 +174,24 @@ def load(id):
     return s if isinstance(s, dict) else None
 
 
-def listing() -> list:
-    rows = [dict(id=s["id"], kind=s.get("kind"), name=s.get("name"), levels=s.get("levels"), start=s.get("start"), end=s.get("end"),
-                 papers=len(s.get("papers") or []), status=s.get("status"), saved_at=s.get("saved_at"), _c=s.get("created_at") or "")
-            for s in _all()]
+def all_saved() -> list:
+    """every saved schedule, as stored"""
+    return _all()
+
+
+def listing(today, published_at=None) -> list:
+    """one row per schedule, newest first; today (the caller's: app._exams_today) gives the label's 'Ended', published_at
+    the 'retimed' flag"""
+    rows = []
+    for s in _all():
+        st = s.get("status") or "draft"
+        ap = s.get("approved")
+        read = ap if st in ("approved", "changes") and ap else s
+        rows.append(dict(id=s["id"], kind=s.get("kind"), name=s.get("name"), levels=s.get("levels"), start=s.get("start"), end=s.get("end"),
+                         papers=len(s.get("papers") or []), status=s.get("status"), saved_at=s.get("saved_at"), label=_approval.label(s, today),
+                         note=s.get("note") or "", sent_by=s.get("sent_by"), sent_at=s.get("sent_at"), approved_at=s.get("approved_at"),
+                         on_site=[ap["start"], ap["end"]] if ap else None,
+                         retimed=st in ("waiting", "approved", "changes") and _approval.retimed(read, published_at), _c=s.get("created_at") or ""))
     rows.sort(key=lambda r: r["saved_at"] or r["_c"], reverse=True)
     for r in rows: r.pop("_c")
     return rows
@@ -175,3 +201,35 @@ def delete(id):
     with _LOCK:
         try: os.remove(_path(id))
         except (FileNotFoundError, ValueError): pass
+
+
+def on_site() -> list:
+    """the approved copy (as a schedule) of every schedule that has one"""
+    return [a for a in (_approval.as_schedule(s) for s in _all()) if a]
+
+
+def elsewhere(id) -> list:
+    """what the other schedules hold: one busy per duty (dict(id, name, status, date, start, end, room, names)). Waiting: the
+    working duties; approved: the approved copy's; changes waiting: the approved copy's, and the working duties that differ
+    from them (either may be what the main site shows soon); draft and withdrawn hold nothing."""
+    out = []
+
+    def add(s, src, name, status, skip=()):
+        for d in (src or {}).get("duties") or []:
+            b = dict(id=s["id"], name=name, status=status, date=d["date"], start=d["start"], end=d["end"], room=d["room"],
+                     names=list(d.get("names") or []))
+            if (b["date"], b["start"], b["end"], b["room"], b["names"]) not in skip:
+                out.append(b)
+    for s in _all():
+        if s["id"] == id:
+            continue
+        st = s.get("status") or "draft"
+        if st == "waiting":
+            add(s, s.get("made"), s.get("name"), "waiting")
+        elif st in ("approved", "changes") and s.get("approved"):
+            ap = s["approved"]
+            add(s, ap.get("made"), ap.get("name"), "approved")
+            if st == "changes":
+                held = [(d["date"], d["start"], d["end"], d["room"], list(d.get("names") or [])) for d in (ap.get("made") or {}).get("duties") or []]
+                add(s, s.get("made"), s.get("name"), "waiting", skip=held)
+    return out

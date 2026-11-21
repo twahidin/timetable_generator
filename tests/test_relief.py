@@ -568,7 +568,8 @@ def codes_csv_and_slips():
         # signed in with her code, she is that person: an executive, who sees the timetable and has no relief of her own
         with sc.session_transaction() as x: assert x["who"] == "Mdm Office Staff" and x["via"] == "code"
         assert sc.get("/api/relief/me").get_json() == AGAIN and sc.get("/relief").headers["Location"].endswith("/login")
-        assert sc.get("/home").headers["Location"].endswith("/timetable")
+        home = sc.get("/home"); page = home.get_data(as_text=True)    # her tiles: Timetables and her own exam duties, no Relief
+        assert home.status_code == 200 and 'href="/timetable"' in page and 'href="/exams"' in page and 'href="/relief"' not in page, page[-400:]
     AP.update(lambda d: d["people"].pop("Mdm Office Staff"))
 
 @t
