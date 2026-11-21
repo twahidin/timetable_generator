@@ -869,6 +869,14 @@ def only_the_committees_get_in():
         assert s.get("/api/exams").status_code == 200
         assert s.get("/api/exams/me").get_json()["can_use"] is True
         assert s.get("/exams").status_code == 200 and s.get("/exams/settings").status_code == 200
+        mine = s.get("/api/exams/settings").get_json()
+        assert mine["committee_ok"] is False and d["committee_ok"] is True
+        for names in (["Ms Grace Yeo", "Mr Ben Ong"], []):
+            r = s.put("/api/exams/settings", json=dict(mine["settings"], committee=names, backups=["Mr Ivan Lee"]))
+            assert r.status_code == 200 and r.get_json()["settings"]["committee"] == ["Ms Grace Yeo"], r.data
+            assert ES.load(_PUB)["committee"] == ["Ms Grace Yeo"] and ES.load(_PUB)["backups"] == ["Mr Ivan Lee"]
+        r = c.put("/api/exams/settings", json=dict(mine["settings"], committee=["Ms Grace Yeo", "Mr Ben Ong"]))
+        assert r.status_code == 200 and ES.load(_PUB)["committee"] == ["Ms Grace Yeo", "Mr Ben Ong"]
         assert c.put("/api/exams/settings", json="x").status_code == 400
         assert c.put("/api/exams/settings", data="{bad", content_type="application/json").status_code == 400
     r = A.app.test_client().get("/api/exams"); assert r.status_code == 401
@@ -1088,6 +1096,7 @@ def _page(name):
 
 @t
 def the_pages_carry_the_words():
+    assert "Only the timetable committee can change this list." in _page("exams-settings.js")
     js = _page("exams.js")
     for words in ("How to seat", "Own class in own home room", "Mix classes", "Alternate levels by column", "Alternate papers",
                   "One level per block", "Class, then Student ID", "Every seat", "A seat left between", "Let the app choose",

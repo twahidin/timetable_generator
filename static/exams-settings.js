@@ -27,6 +27,10 @@
   }
 
   function chips(key) {
+    if (key === "committee" && !S.d.committee_ok) {   /* staff see the exams committee but cannot change it */
+      const names = S.f[key].map(n => `<span class="pchip">${esc(n)}</span>`).join("");
+      return `<div class="chiprow">${names || `<span class="muted small">No one yet.</span>`}</div><div class="small muted">Only the timetable committee can change this list.</div>`;
+    }
     const list = S.f[key].map((n, i) => `<span class="pchip">${esc(n)}<button type="button" data-unchip="${key}" data-i="${i}" title="Take ${esc(n)} off" aria-label="Take ${esc(n)} off ${LISTS[key]}">✕</button></span>`).join("");
     return `<div class="chiprow">${list || `<span class="muted small">No one yet.</span>`}<button type="button" class="small" data-pick="${key}">+ Add</button></div>${S.open === key ? picker(key) : ""}`;
   }

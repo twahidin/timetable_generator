@@ -918,8 +918,10 @@ def exams_me():
     return jsonify(name=rights[1], can_use=rights[0])
 
 def _exam_settings_reply(pub, settings):
+    """committee_ok: only the timetable committee changes the exams committee list"""
     m = pub["model"]
-    return jsonify(settings=settings, people=relief_staff(pub), rooms=[[r["name"], r.get("kind"), r.get("capacity")] for r in m.get("rooms") or []])
+    return jsonify(settings=settings, people=relief_staff(pub), rooms=[[r["name"], r.get("kind"), r.get("capacity")] for r in m.get("rooms") or []],
+                   committee_ok=role() == "committee")
 
 @app.get("/api/exams/settings")
 @need("committee", "staff")
@@ -933,7 +935,9 @@ def exams_settings_get():
 def exams_settings_put():
     pub, who, err = _exams_gate()
     if err: return err
-    try: saved = exams_settings.save(request.get_json(force=True, silent=True), pub, who)
+    body = request.get_json(force=True, silent=True)
+    if role() != "committee" and isinstance(body, dict): body = dict(body, committee=exams_settings.load(pub)["committee"])   # kept as it is
+    try: saved = exams_settings.save(body, pub, who)
     except ValueError as e: return {"error": str(e)}, 400
     except BAD_INPUT: return {"error": exams_settings.WRONG}, 400
     return _exam_settings_reply(pub, saved)
