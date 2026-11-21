@@ -16,7 +16,7 @@
     tab: "when", timer: null, chain: Promise.resolve(), dirty: false, rev: 0, saving: false, msg: "", bad: false,
     nf: null, mk: null, duties: null, accCls: "", note: "",
     busy: false, sit: "", room: "", mvCls: "", mvStu: "", duty: null, who: null, whoTok: 0, open: {},
-    me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, sbNote: "", aw: { away: "", who: "", data: null, err: "", say: "", tok: 0 }
+    me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, abMsg: "", sbNote: "", aw: { away: "", who: "", data: null, err: "", say: "", tok: 0 }
   };
   /* the tabs: tabs 4 to 7 are added to this list; each draw() gives the html of its tab body */
   const TABS = [
@@ -183,7 +183,7 @@
     S.duties = du.ok ? du.j : null;
     if (!me.j.can_use) {
       if (!S.duties) { fail(du.j.error || "Something went wrong.", "/relief"); return; }
-      $("#main").innerHTML = `<div class="head"><h1>My exam duties</h1></div>${dutiesCard(true)}<p><a href="${me.j.name === "Timetable committee" ? "/" : "/relief"}">Back to Relief</a></p>`;
+      $("#main").innerHTML = `<div class="head"><h1>My exam duties</h1></div>${dutiesCard(true)}<p><a href="/relief">Back to Relief</a></p>`;
       return;
     }
     const r = await api("GET", "/api/exams");
@@ -859,7 +859,8 @@
     const r = await api("POST", `/api/exams/${S.id}/${path}`, body);
     S.busy = false;
     if (r.status === 401 || r.status === 403) return false;
-    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return false; }
+    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; S.abMsg = S.msg; paintSave(); paint(); return false; }
+    S.abMsg = "";
     const g = await api("GET", "/api/exams/" + S.id);
     if (g.ok) S.sched = g.j;
     takeReview(r.j); S.sbNote = ""; S.msg = ok || ""; paintSave();
@@ -868,12 +869,12 @@
   }
 
   /* the same clash can be in both Invigilators free ("is on {schedule} then") and Other schedules ("takes {n} of these
-     invigilators"): the second names nobody, so its "takes" lines go when the first already names the people */
+     invigilators"): a "takes" line goes only when a free line names that same schedule (not the own-duty "is on another duty then") */
   function checkLines(c, all) {
     let lines = c.lines;
     if (c.key === "others" && !c.ok) {
-      const named = (all.find(x => x.key === "free") || { lines: [] }).lines.some(l => / is on .+ then \(/.test(l));
-      if (named) lines = lines.filter(l => !/ takes \d+ of these invigilators on /.test(l));
+      const free = (all.find(x => x.key === "free") || { lines: [] }).lines;
+      lines = lines.filter(l => { const m = /^(.*) \([^()]*\) takes \d+ of these invigilators on /.exec(l); return !(m && free.some(f => f.includes(` is on ${m[1]} then (`))); });
     }
     return lines;
   }
@@ -911,7 +912,7 @@
     if (!rv) return `<div class="card"><p class="muted">Loading…</p></div>`;
     const st = rv.status, why = rv.can_send || "", unsent = rv.unsent || [], me = S.me.can_approve;
     const out = [`<div class="card"><h2>Approval</h2><p><span class="chip ${chipClass({ label: rv.label })}">${esc(rv.label)}</span></p>
-      ${rv.note ? `<p>Sent back by the timetable committee: “${esc(rv.note)}”</p>` : ""}</div>`];
+      ${S.abMsg ? `<p class="msg bad" role="status">${esc(S.abMsg)}</p>` : ""}${rv.note ? `<p>Sent back by the timetable committee: “${esc(rv.note)}”</p>` : ""}</div>`];
     if (st === "draft" || st === "withdrawn") out.push(sendBox("Send to the timetable committee", "", "Send to the timetable committee", "send", why));
     if ((st === "waiting" || st === "changes") && rv.changed) out.push(sendBox("Send again", "Changed since you sent it: send it again.", "Send again", "send", why));
     if (st === "approved" && unsent.length) out.push(`<div class="card"><h2>Changes not sent yet</h2>${unsent.map(c => `<p>${esc(c.text)}</p>`).join("")}<div class="row"><button type="button" class="primary" data-act="approval" data-a="send" ${S.busy || why ? "disabled" : ""}>Send the changes</button>${why ? `<span class="muted small">${esc(why)}</span>` : ""}</div></div>`);
@@ -992,7 +993,7 @@
       return;
     }
     if (!s) return;
-    if (act === "tab") { S.tab = a; S.note = ""; render(); if (a === "approval") loadReview(false); return; }
+    if (act === "tab") { S.tab = a; S.note = ""; render(); if (a === "approval") { S.abMsg = ""; loadReview(false); } return; }
     if (act === "dayWhole") {
       const date = a, on = b.dataset.b === "1", p = periods();
       edit(() => setDay(date, on ? { whole: true } : { whole: false, from: p.length ? p[0][0] : null, to: p.length ? p[Math.min(3, p.length - 1)][1] : null }), true);

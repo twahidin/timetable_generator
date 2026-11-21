@@ -1874,6 +1874,8 @@ def the_exams_pages_carry_the_approval_words():
                   "Lessons that won't happen: ", "Rain rooms used anyway: ", "Take ${S.sched.name} off the main site now?", "/api/exams/my-duties",
                   "&copy=approved", "Lessons that don't happen: "):
         assert words in js, words
+    assert "g.includes(` is on ${m[1]} then (`)" not in js and "f.includes(` is on ${m[1]} then (`)" in js, "a takes line goes only when a free line names that schedule"
+    assert "S.abMsg" in js, "a refusal shows beside the Approval buttons"
     assert "Exams · " in _page("app.js"), "the committee page counts the schedules waiting"
 
 
