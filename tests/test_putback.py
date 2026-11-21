@@ -95,9 +95,9 @@ def same_save_and_its_follow_ups_do_not_block():
     es = save(sp, [["set", "teachers", T["_id"], "short", "AA"], ["set", "teachers", T["_id"], "dept", "Zed"]], ANN, "bann", T0)
     app = H.add({"kind": "app", "op": "set", "section": "teachers", "row": T["_id"], "field": "short", "was": "AA", "now": "AB",
                  "as": "The app", "via": "app", "follows": "bann", "ts": T0 + 0.5})
-    u, ents, newer = P.gather(es[1]["id"])      # the middle of the save is enough
-    assert [e["id"] for e in ents] == [e["id"] for e in es] and [e["id"] for e in newer] == [app["id"]]
-    assert P.why_not(ents, newer) is None
+    u, ents, newer = P.gather(es[1]["id"])      # the middle of the save is enough; the app's follow-up is part of the save
+    assert [e["id"] for e in ents] == [e["id"] for e in es] + [app["id"]] and newer == [] and P.own(ents) == es
+    assert P.why_not(ents, newer) is None and P.why_not(es, [app]) is None
     other = H.add({"kind": "app", "op": "set", "section": "teachers", "row": T["_id"], "field": "short", "was": "AA", "now": "AB",
                    "as": "The app", "via": "app", "follows": "bother", "ts": T0 + 1})
     assert P.why_not(ents, [other] + newer) == "Can't put back: the app changed this again on " + H.short_when(T0 + 1)
@@ -307,8 +307,8 @@ def as_person(name, via="password"):
         if via == "password": s["exp"] = time.time() + 3600
     return c
 
-def start():
-    fresh(); sp = spec(); store.replace_setup(sp, "test"); return store.setup_record()["spec"]
+def start(sp=None):
+    fresh(); sp = sp or spec(); store.replace_setup(sp, "test"); return store.setup_record()["spec"]
 
 def change(c, *ops):
     r = c.post("/api/setup/changes", json={"client": "x", "since": store.setup_record()["v"], "ops": [list(o) for o in ops]}); assert r.status_code == 200, r.get_json()
@@ -363,6 +363,65 @@ def a_resent_save_is_recorded_once():
     now = store.setup_record()["spec"]
     assert sync._find(now, "teachers", T["_id"])["short"] == was and sync._find(now, "teachers", "newrow0001") is None
     assert [e["text"] for e in entries()[-2:]] == ["Deleted Zed Ng", T["name"] + ": short ZZ → " + was], entries()[-2:]
+
+def parents_school():
+    """a made-up setup using Class Parents: each class has a form teacher"""
+    sp = spec()
+    for k in sp["classes"]: k["parents"] = ["Form " + k["class"]]
+    return sp
+
+def form_time_school():
+    """Class Parents, and a subject for them that has no lessons yet"""
+    sp = parents_school()
+    sp["subjects"].append({"_id": "subjform01", "subject": "Form Time", "code": "FT", "dept": "EL", "periods": {"Sec 1": 1}})
+    return sp
+
+@t
+def class_parents_follow_ups_go_back_with_the_save():
+    sp = parents_school(); sub = sp["subjects"][0]["subject"]; sp["school"]["parents_subjects"] = [sub]
+    L = next(x for x in sp["lessons"] if x["subject"] == sub)
+    for k in ("block", "code_override"): L.pop(k, None)
+    L.update(teachers=["Typed Teacher"], by_hand=True)    # a whole-class lesson whose teacher was typed, not the form teachers
+    sp = start(sp); before = copy.deepcopy(sp)
+    assert sync._find(sp, "lessons", L["_id"])["teachers"] == ["Typed Teacher"]
+    change(as_person(CORA), ["set", "lessons", L["_id"], "block", sp["blocks"][0]["block"]])
+    assert [(e["field"], e["was"], e["now"]) for e in entries("app")] == [("by_hand", True, None)], entries("app")
+    mine = entries()[-1]
+    j = as_person(DEV).get("/api/history").get_json()
+    assert [e["back"] for e in j["entries"] if e["id"] == mine["id"]] == [{"unit": "b:" + mine["batch"], "n": 1, "ok": True, "why": None}], j
+    assert back(as_person(DEV), mine["id"]) == (200, {"done": True, "text": "Put back."})
+    now = store.setup_record()["spec"]
+    assert sync._find(now, "lessons", L["_id"])["teachers"] == ["Typed Teacher"], sync._find(now, "lessons", L["_id"])
+    assert sync._canon(now) == sync._canon(before)
+
+@t
+def a_new_class_parents_subject_goes_back_with_its_lessons():
+    sp = start(form_time_school()); before = copy.deepcopy(sp)
+    change(as_person(CORA), ["school", "parents_subjects", ["Form Time"]])
+    made = [e for e in entries("app") if e["op"] == "add"]
+    assert made and all(e["now"]["subject"] == "Form Time" for e in made), entries("app")
+    mine = entries()[-1]
+    assert back(as_person(DEV), mine["id"]) == (200, {"done": True, "text": "Put back."})
+    now = store.setup_record()["spec"]
+    assert not any(x["subject"] == "Form Time" for x in now["lessons"]), [x["_id"] for x in now["lessons"] if x["subject"] == "Form Time"]
+    assert sync._canon(now) == sync._canon(before)
+
+@t
+def a_later_change_to_a_follow_up_blocks_the_save():
+    start(form_time_school())
+    change(as_person(CORA), ["school", "parents_subjects", ["Form Time"]])
+    mine = entries()[-1]; made = [e for e in entries("app") if e["op"] == "add"][0]
+    change(as_person(CORA), ["set", "lessons", made["row"], "periods", 2])     # a lesson the app added, changed again
+    later = entries()[-1]
+    s, j = back(as_person(DEV), mine["id"])
+    assert (s, j) == (409, {"error": "Can't put back: " + CORA + " changed this again on " + H.short_when(later["ts"])}), (s, j)
+    start(form_time_school()); change(as_person(CORA), ["school", "parents_subjects", ["Form Time"]])
+    mine = entries()[-1]; made = [e for e in entries("app") if e["op"] == "add"][0]
+    real = store._record
+    store._record = lambda es: None              # a lesson the app added swapped for another row, with no entry (so the app adds none)
+    try: store.apply_changes([["del", "lessons", made["row"]], ["add", "lessons", dict(made["now"], _id="otherform1"), ""]], "z")
+    finally: store._record = real
+    assert back(as_person(DEV), mine["id"]) == (409, {"error": "Can't put back: this was changed again since."})
 
 @t
 def put_back_twice_is_refused():

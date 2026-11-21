@@ -1,5 +1,7 @@
 """The rules of Put back: which recorded changes can be put back, and the setup operations that do it.
-A save (one batch of setup entries) or one account entry is a unit; a unit is put back whole or not at all."""
+A save (one batch of setup entries) or one account entry is a unit; a unit is put back whole or not at all. A save's
+unit also holds the app's follow-ups to it (kind "app", `follows` its batch: the Class Parents' lessons the app put
+right after it): they are put back first, and they too must be untouched since."""
 import datetime
 
 import history
@@ -24,14 +26,24 @@ def unit_of(e):
     return None
 
 
+def follow_up(e, batch):
+    """is e one of the app's follow-ups to the save `batch`?"""
+    return isinstance(e, dict) and e.get("kind") == "app" and batch is not None and e.get("follows") == batch
+
+
+def own(unit_entries):
+    """the unit's own entries: the save's or the account change's, without the app's follow-ups"""
+    return [e for e in unit_entries if e.get("kind") != "app"]
+
+
 def _window(ts):
     return history.read(kinds=TOUCH_KINDS, since=ts - 60, until=ts + 60, limit=10 ** 7)
 
 
 def gather(entry_id):
     """(unit, the unit's entries oldest first, the TOUCH_KINDS entries newer than its newest one, newest first), or None
-    when the id is not in the history or its entry has no unit. A save's entries are written within a second of each
-    other, so they are looked for in a minute around the entry"""
+    when the id is not in the history or its entry has no unit. A save's entries and the app's follow-ups to it are
+    written within a second of each other, so they are looked for in a minute around the entry"""
     e = history.find(entry_id)
     unit = unit_of(e)
     if unit is None:
@@ -40,7 +52,7 @@ def gather(entry_id):
     if unit.startswith("a:"):
         ents = [e]
     else:
-        ents = sorted((x for x in _window(ts) if unit_of(x) == unit), key=lambda x: x["id"])
+        ents = sorted((x for x in _window(ts) if unit_of(x) == unit or follow_up(x, e.get("batch"))), key=lambda x: x["id"])
     last = ents[-1]["id"]
     since = min(x.get("ts") or 0 for x in ents) - 60
     newer = [x for x in history.read(kinds=TOUCH_KINDS, since=since, limit=10 ** 7) if x["id"] > last]
@@ -91,10 +103,11 @@ def _iso_day(iso):
 
 def why_not(unit_entries, newer, today=None):
     """None when the unit can be put back, else the sentence saying why not. newer: the TOUCH_KINDS entries after the
-    unit, newest first; the closest later change is the one named"""
-    if not unit_entries:
+    unit, newest first; the closest later change is the one named. What the app's follow-ups in the unit touched must be
+    untouched too"""
+    if not own(unit_entries):
         return _OLD
-    first = unit_entries[0]
+    first = own(unit_entries)[0]
     account = first.get("kind") == "account"
     if account:
         changes = [c for e in unit_entries for c in e.get("changes") or [] if isinstance(c, dict)]
@@ -150,11 +163,11 @@ def _canon_eq(a, b):
 
 
 def changed_since(spec, unit_entries):
-    """None when every row and field is still as the save left it, else the sentence"""
+    """None when every row and field is still as the save and the app's follow-ups to it left it, else the sentence"""
     last = {}
     for e in unit_entries:
         op = e.get("op")
-        if e.get("kind") != "setup" or op is None:
+        if e.get("kind") not in ("setup", "app") or op is None:
             continue
         last[(op, e.get("section"), e.get("row"), e.get("level"), e.get("field") if op not in ("add", "del") else None)] = e
     for (op, sec, row, level, field), e in last.items():
@@ -182,9 +195,9 @@ def changed_since(spec, unit_entries):
 
 
 def annotate(shown, newer_all, may):
-    """sets e["back"] on each entry of `shown` whose unit may(unit_entries) allows: {"unit", "n", "ok", "why"}.
-    The caller passes in newer_all every TOUCH_KINDS entry from 60 seconds before the oldest shown entry on, newest
-    first; the unit's entries are collected from newer_all and shown together"""
+    """sets e["back"] on each entry of `shown` whose unit may(unit_entries) allows: {"unit", "n", "ok", "why"}, n the
+    unit's own entries (not the app's follow-ups). The caller passes in newer_all every TOUCH_KINDS entry from 60
+    seconds before the oldest shown entry on, newest first; the unit's entries are collected from newer_all and shown together"""
     pool = {}
     for e in list(newer_all) + list(shown):
         pool.setdefault(e.get("id"), e)
@@ -193,6 +206,8 @@ def annotate(shown, newer_all, may):
         u = unit_of(e)
         if u:
             units.setdefault(u, []).append(e)
+        elif e.get("kind") == "app" and e.get("follows") is not None:
+            units.setdefault("b:" + str(e["follows"]), []).append(e)
     by_key, replaced = {}, []   # newer_all indexed once: by what each entry touches, and the whole-setup replacements
     for x in newer_all:
         if x.get("kind") == "setup-replaced":
@@ -218,6 +233,6 @@ def annotate(shown, newer_all, may):
                     if x.get("id") > last:
                         hits[x["id"]] = x
                 why = why_not(ents, sorted(hits.values(), key=lambda x: x["id"], reverse=True))
-                done[u] = {"unit": u, "n": len(ents), "ok": why is None, "why": why}
+                done[u] = {"unit": u, "n": len(own(ents)), "ok": why is None, "why": why}
         if done[u] is not None:
             e["back"] = dict(done[u])

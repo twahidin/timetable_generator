@@ -1720,7 +1720,9 @@ CANT_BACK = "This change cannot be put back here."
 
 def may_put_back(es):
     """may the signed-in person put back this unit (its entries, oldest first)? The committee any setup change, a head
-    signed in by name their own; an admin an account change. The shared heads' code never puts back"""
+    signed in by name their own (the app's follow-ups to it are nobody's); an admin an account change. The shared heads'
+    code never puts back"""
+    es = putback.own(es)
     if not es: return False
     if putback.unit_of(es[0]).startswith("a:"): return has("admin")
     if has("committee"): return True
