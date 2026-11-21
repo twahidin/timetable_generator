@@ -1931,5 +1931,35 @@ def approval_actions_work_after_a_publish_drops_a_student():
         r = c.post(f"/api/exams/{id}/withdraw"); assert r.status_code == 200, r.data
         assert SC.on_site() == [] and SC.load(id)["status"] == "withdrawn"
 
+def _ap_duty(s, key, room):
+    return next(x for x in s["approved"]["made"]["duties"] if x["key"] == key and x["room"] == room)
+
+@t
+def someone_away_keeps_the_working_copys_own_change():
+    _reset()   # the picks count the minutes of the schedules saved by earlier tests
+    s = _approved()
+    MK.set_invigilators(s, KEY1, "3-01", ["Ms Aisha Rahman", "Mr Hafiz Rahman"]); _mk(s, only=KEY1)   # waiting: Chloe -> Hafiz
+    pk = KEY1 + "|3-01"
+    AP.replace(s, KEY1, "3-01", "Ms Aisha Rahman", "Mr Ivan Lee", "Ms Grace Yeo", NOW)
+    assert _ap_duty(s, KEY1, "3-01")["names"] == ["Mr Ivan Lee", "Ms Chloe Tan"] == s["approved"]["pins"]["duties"][pk]
+    assert _duty(s, KEY1, "3-01")["names"] == ["Mr Ivan Lee", "Mr Hafiz Rahman"] == s["pins"]["duties"][pk], s["pins"]
+    _mk(s)
+    assert _duty(s, KEY1, "3-01")["names"] == ["Mr Ivan Lee", "Mr Hafiz Rahman"], _duty(s, KEY1, "3-01")
+    assert "Mon 5 Oct 07:50, 3-01: Ms Chloe Tan → Mr Hafiz Rahman (invigilator)." in [c["text"] for c in AP.changes(s, _M)], AP.changes(s, _M)
+
+@t
+def someone_away_already_on_the_working_duty_is_not_named_twice():
+    _reset()   # the picks count the minutes of the schedules saved by earlier tests
+    s = _approved()
+    MK.set_invigilators(s, KEY1, "3-01", ["Ms Aisha Rahman", "Mr Hafiz Rahman"]); _mk(s, only=KEY1)
+    AP.replace(s, KEY1, "3-01", "Ms Aisha Rahman", "Mr Hafiz Rahman", "Ms Grace Yeo", NOW)
+    assert _ap_duty(s, KEY1, "3-01")["names"] == ["Mr Hafiz Rahman", "Ms Chloe Tan"]
+    d = _duty(s, KEY1, "3-01")
+    assert d["names"] == ["Mr Hafiz Rahman"] == s["pins"]["duties"][KEY1 + "|3-01"] and d["short"] == 1 and "Ms Aisha Rahman" not in d["reasons"], d
+    other = _approved()   # a working duty without the person away is left as it is, pin and all
+    MK.set_invigilators(other, KEY1, "3-01", ["Mr Ben Ong", "Mr Hafiz Rahman"]); _mk(other, only=KEY1)
+    AP.replace(other, KEY1, "3-01", "Ms Aisha Rahman", "Mr Ivan Lee", "Ms Grace Yeo", NOW)
+    assert _duty(other, KEY1, "3-01")["names"] == ["Mr Ben Ong", "Mr Hafiz Rahman"] == other["pins"]["duties"][KEY1 + "|3-01"]
+
 
 print(f"{COUNT} exams tests passed")

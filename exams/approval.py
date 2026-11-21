@@ -254,15 +254,35 @@ def _swap(duty, away, name) -> None:
     duty["names"] = [name if x == away else x for x in duty["names"]]
     if duty.get("chief") == away:
         duty["chief"] = name
-    duty.setdefault("reasons", {}).pop(away, None)
+    if not isinstance(duty.get("reasons"), dict):
+        duty["reasons"] = {}
+    duty["reasons"].pop(away, None)
     duty["reasons"][name] = "replaces %s, who is away" % away
     for k in ("backup", "not_free"):
         if isinstance(duty.get(k), dict):
             duty[k].pop(away, None)
 
 
+def _drop(duty, away) -> None:
+    """away leaves a duty that already has the person taking over: one name fewer, no one named twice"""
+    duty["names"] = [x for x in duty["names"] if x != away]
+    if duty.get("chief") == away:
+        duty["chief"] = duty["names"][0] if duty["names"] else None
+    for k in ("reasons", "backup", "not_free"):
+        if isinstance(duty.get(k), dict):
+            duty[k].pop(away, None)
+    if isinstance(duty.get("need"), int):
+        duty["short"] = max(0, duty["need"] - len(duty["names"]))
+
+
+def _pin(copy_, pk, names) -> None:
+    copy_.setdefault("pins", dict(rooms={}, duties={})).setdefault("duties", {})[pk] = list(names)
+
+
 def replace(sched, key, room, away, name, by, now) -> str:
-    """someone on an approved duty is away: swap the name in both copies at once and note it. The route checks name is free."""
+    """someone on an approved duty is away: swap the name in both copies at once and note it. The route checks name is free.
+    The approved copy is pinned to its own names; the working copy's duty changes (and is pinned to its own names) only
+    when it holds the person away, so a change waiting for approval stays as it was."""
     ap = sched.get("approved")
     if not ap:
         raise ValueError(NOT_ON_SITE)
@@ -275,12 +295,15 @@ def replace(sched, key, room, away, name, by, now) -> str:
         raise ValueError("%s is on that duty already." % name)
     was_sent = sched.get("sent_fp") is not None and sched["sent_fp"] == fp(sched)
     _swap(duty, away, name)
+    pk = "%s|%s" % (key, room)
+    _pin(ap, pk, duty["names"])
     mine = next((d for d in (sched.get("made") or {}).get("duties") or [] if d["key"] == key and d["room"] == room), None)
     if mine and away in mine["names"]:
-        _swap(mine, away, name)
-    pk = "%s|%s" % (key, room)
-    for copy_ in (ap, sched):
-        copy_.setdefault("pins", dict(rooms={}, duties={})).setdefault("duties", {})[pk] = list(duty["names"])
+        if name in mine["names"]:
+            _drop(mine, away)
+        else:
+            _swap(mine, away, name)
+        _pin(sched, pk, mine["names"])
     if was_sent:
         sched["sent_fp"] = fp(sched)
     detail = "%s %s–%s, %s: %s (away) → %s" % (_days.nice(duty["date"]), _days.hhmm(duty["start"]), _days.hhmm(duty["end"]), room, away, name)
