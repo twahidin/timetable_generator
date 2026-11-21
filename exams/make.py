@@ -22,6 +22,11 @@ def _now():
     return datetime.datetime.now().isoformat(timespec="seconds")
 
 
+def published_at(pub):
+    """when the published timetable was published (None for a sample); the one reading behind made and the review"""
+    return (pub.get("meta") or {}).get("published_at")
+
+
 def fingerprint(sched, xset) -> str:
     """what Make uses (papers, days, levels and classes, access arrangements, seating, supervision, the exam rooms), as a
     short hash kept in made: a change to any of it makes the made seats and duties stale"""
@@ -214,7 +219,7 @@ def make(pub, cal, sched, xset, only=None, elsewhere=None) -> dict:
     if only and keys - redo and old.get("fingerprint") != fp:
         fp = old.get("fingerprint")   # the kept sittings were made from what was there before: still stale
     sched["made"] = dict(seats=seats, unseated=unseated, duties=duties, gone=gone, made_at=_now(), fingerprint=fp,
-                       published_at=(pub.get("meta") or {}).get("published_at"))
+                       published_at=published_at(pub))
     return sched
 
 

@@ -1388,4 +1388,86 @@ def approved_make_does_not_keep_someone_who_teaches_the_new_subject():
         return [n for d in s["made"]["duties"] if d["key"] == key2 for n in d["names"]]
     assert "Mr Ben Ong" in names(False) and "Mr Ben Ong" not in names(True)
 
+import exams.review as RV  # noqa: E402
+
+def _waiting():
+    s = _mk(_made_sched())
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
+    return s
+
+_X4 = ("3-01", "3-02", "4-01", "Hall")
+
+@t
+def review_of_a_waiting_schedule():
+    s = _waiting()
+    r = RV.review(_PUB, F.CAL, s, _xset(_X4), [])
+    assert r["copy"] == "working" and r["changes"] == [] and r["done_without"] == []
+    w = r["what"]
+    assert w["classes"] == ["3A", "3B"] and w["levels"] == ["Sec 3"] and w["papers"] == 2 and w["stopped"] == 5, w
+    assert w["teachers"] == 6 and w["duties"] == 3 and w["most"] == ["Mr Ben Ong", 1] and w["backups"] == 0 and w["anyway"] == [], w
+    assert w["venues"] == [dict(room="3-01", dates=1, start="07:35", end="11:10"), dict(room="3-02", dates=1, start="09:45", end="11:10")], w["venues"]
+    assert [c["key"] for c in r["checks"]] == ["papers", "seats", "free", "others", "timetable"], r["checks"]
+    assert all(c["ok"] for c in r["checks"]), r["checks"]
+    assert r["checks"][2]["lines"] == ["Every invigilator is free then."]
+
+@t
+def review_after_a_new_timetable():
+    pub1 = copy.deepcopy(_PUB); pub1["meta"]["published_at"] = "2026-10-01T08:00:00"
+    s = MK.make(pub1, F.CAL, _made_sched(), _xset(_X4), elsewhere=[])
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, []); AP.approve(s, "Timetable committee", NOW)
+    pub2 = copy.deepcopy(pub1); pub2["meta"]["published_at"] = "2026-10-02T09:30:00"
+    pub2["model"]["lessons"].append(F._lesson(10, 0, 2, 2, "Sec 4", ["4A"], "Science", "Entire Class", ["Ms Aisha Rahman"], "LT2"))
+    assert RV.review(pub1, F.CAL, s, _xset(_X4), [])["checks"][4]["ok"]
+    r = RV.review(pub2, F.CAL, s, _xset(_X4), [])
+    assert r["copy"] == "approved"
+    assert r["checks"][4]["lines"] == ["The timetable changed since this was made: a new timetable was published on Fri 2 Oct. "
+                                       "Ask the exams committee to make it again."], r["checks"][4]
+    assert r["checks"][2]["lines"] == ["Ms Aisha Rahman, 3-01 on Mon 5 Oct 07:35\u201309:00: teaches 4A Science 08:20\u201309:00."], r["checks"][2]
+
+@t
+def review_names_other_schedules():
+    s = _waiting()
+    other = [dict(id="b", name="Sec 4 Exam", status="waiting", date="2026-10-05", start=500, end=560, room="3-01",
+                  names=["Ms Aisha Rahman", "Mr Ben Ong"])]
+    c = RV.review(_PUB, F.CAL, s, _xset(_X4), other)["checks"]
+    assert c[3]["ok"] is False and c[3]["lines"] == ["Sec 4 Exam (waiting) takes 1 of these invigilators on Mon 5 Oct.",
+                                                      "Sec 4 Exam (waiting) uses 3-01 on Mon 5 Oct too."], c[3]
+
+@t
+def review_counts_seats_and_short_places():
+    s = _waiting()
+    s["made"]["unseated"][KEY1] = ["3A-30"]
+    _duty(s, KEY1, "3-01")["short"] = 1
+    c = RV.review(_PUB, F.CAL, s, _xset(_X4), [])["checks"]
+    assert c[1]["lines"] == ["1 student has no seat."] and not c[1]["ok"]
+    assert c[2]["lines"][-1] == "3-01 on Mon 5 Oct 07:35\u201309:00 is short by 1.", c[2]
+    s["made"]["unseated"][KEY1] = ["3A-30", "3A-29"]
+    assert RV.review(_PUB, F.CAL, s, _xset(_X4), [])["checks"][1]["lines"] == ["2 students have no seat."]
+
+@t
+def review_of_changes_lists_them():
+    s = _approved()
+    MK.move(s, KEY1, ["3A-07"], "3-02")
+    _mk(s, only=KEY1)
+    AP.send(s, _M, "Ms Grace Yeo", NOW, False, [])
+    r = RV.review(_PUB, F.CAL, s, _xset(_X4), [])
+    assert r["copy"] == "working" and [c["text"] for c in r["changes"]] == [c["text"] for c in AP.changes(s, _M)] and len(r["changes"]) == 3
+
+@t
+def review_and_gone_list_agree_for_kept_sittings():
+    s = _approved()
+    pub2 = copy.deepcopy(_PUB)
+    gone = "Ms Chloe Tan"
+    for l in pub2["model"]["lessons"]:
+        l["teachers"] = [x for x in l["teachers"] if x != gone]
+    pub2["model"]["teachers"] = [x for x in pub2["model"]["teachers"] if x["name"] != gone]
+    pub2["model"]["setup"]["teachers"] = [x for x in pub2["model"]["setup"]["teachers"] if x["name"] != gone]
+    MK.make(pub2, F.CAL, s, _xset(_X4), elsewhere=[])
+    assert _duty(s, KEY1, "3-01")["names"].count(gone) == 1, "kept sitting keeps the name"
+    line = "%s is no longer on the timetable." % gone
+    for sch in (s, dict(s, status="waiting")):
+        got = RV.review(pub2, F.CAL, sch, _xset(_X4), [])["checks"][2]
+        assert line in got["lines"] and not got["ok"], got
+    assert line in MK.summary(pub2, F.CAL, s, _xset(_X4))["gone"]
+
 print(f"{COUNT} exams tests passed")
