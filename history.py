@@ -382,7 +382,9 @@ def _plain_entry(work, op):
 
 
 def setup_entries(spec_before, ops, by, batch, v):
-    """One kind-"setup" entry per operation, each judged on a working copy as the operations before it leave it."""
+    """One kind-"setup" entry per operation that changed something, each judged on a working copy as the operations
+    before it leave it. An operation apply skips (a row added that is there already, one deleted that is gone, a field no
+    one may set) and a value set to what it was give no entry: a save the page sends again records nothing new."""
     work = copy.deepcopy(spec_before)
     out = []
     for op in ops:
@@ -397,9 +399,12 @@ def setup_entries(spec_before, ops, by, batch, v):
                 e, finish = _plain_entry(work, op)
             else:
                 continue
-            sync.apply(work, [copy.deepcopy(op)])
+            if sync.apply(work, [copy.deepcopy(op)]):
+                continue
             if finish:
                 finish(e)
+            if op[0] not in ("add", "del") and sync._canon(e["was"]) == sync._canon(e["now"]):
+                continue
             out.append(dict(kind="setup", batch=batch, v=v, op=op[0], **by, **e))
         except Exception as x:   # a malformed operation gives no entry, said in one line; the save path must never fail here
             store._warn(x)

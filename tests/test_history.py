@@ -120,7 +120,7 @@ def setup_entries_values():
     assert es[2]["was"] == "Maths" and es[2]["now"] == "Science" and set(es[2]["depts"]) == {"Maths", "Science"}
     assert es[3]["now"] is None and es[3]["was"]["class"] == spec["classes"][0]["class"] and es[3]["text"].startswith("Deleted ")
     assert H.row_label("x", None) == "(gone)"
-    s2 = H.setup_entries(spec, [["school", "name", "X"], ["day", "Sec 1", "Mon", None], ["top", "k", 1]], by, "b2", 8)
+    s2 = H.setup_entries(spec, [["school", "name", "X"], ["day", "Sec 1", "Odd Mon", None], ["top", "k", 1]], by, "b2", 8)
     assert [e["where"] for e in s2] == ["School & day"] * 3 and s2[0]["text"].startswith("name: ")
 
 @t
@@ -144,8 +144,8 @@ def setup_entries_never_raises():
     err = io.StringIO()
     with contextlib.redirect_stderr(err): es = H.setup_entries(spec, ops, H.by_of("Ann", "password"), "b", 1)
     assert [e["op"] for e in es] == ["set"] and es[0]["now"] == "hi", es
-    lines = err.getvalue().splitlines()                                 # an operation dropped is said, as the store says it: its type only
-    assert len(lines) == 3 and all(re.fullmatch(r"warning: the history could not be written \((IndexError|TypeError)\)", x) for x in lines), lines
+    lines = err.getvalue().splitlines()                                 # an operation dropped is said, as the store says it: its type only (the short merge is skipped by apply: no entry, nothing said)
+    assert len(lines) == 2 and all(re.fullmatch(r"warning: the history could not be written \((IndexError|TypeError)\)", x) for x in lines), lines
 
 @t
 def row_label_every_section():

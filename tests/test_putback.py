@@ -226,6 +226,20 @@ def annotate_marks_each_unit():
     assert by_id[c[0]["id"]]["back"] == {"unit": "b:bcc", "n": 1, "ok": True, "why": None}
     assert P.PUTTABLE == {"group", "depts", "relief", "exams", "admin", "note", "off"}
 
+@t
+def skipped_and_unchanged_ops_give_no_entry():
+    sp = spec(); T = sp["teachers"][0]; lv = next(iter(sp["day_structure"])); day = next(iter(sp["day_structure"][lv]))
+    same = [["set", "teachers", T["_id"], "short", T["short"]], ["set", "teachers", T["_id"], "nosuchfield", None],
+            ["set", "teachers", "no-such-row", "short", "Q"], ["set", "teachers", T["_id"], "_id", "x"],
+            ["add", "teachers", copy.deepcopy(T), ""], ["del", "teachers", "no-such-row"],
+            ["merge", "lessons", sp["lessons"][0]["_id"], "classes", sp["lessons"][0]["classes"][:1], []],
+            ["school", "name", sp["school"].get("name")], ["school", "nosuchkey", None],
+            ["day", lv, day, sp["day_structure"][lv][day]], ["top", "nosuchkey", None], ["top", "lessons", []]]
+    for op in same:
+        assert H.setup_entries(sp, [op], ANN, "bx", 1) == [], op
+    es = H.setup_entries(sp, same + [["set", "teachers", T["_id"], "short", "ZZ"]], ANN, "bx", 1)
+    assert [(e["op"], e["was"], e["now"]) for e in es] == [("set", T["short"], "ZZ")], es
+
 def _fake(i, **k):
     return dict({"kind": "setup", "id": "h%016d" % i, "ts": T0 + i, "batch": "bf%d" % i, "op": "set", "section": "lessons",
                  "row": "other%d" % (i % 50), "field": "periods", "as": "Bob Tan", "was": 1, "now": 2}, **k)
@@ -332,6 +346,23 @@ def a_save_of_three_goes_back_whole():
     assert [e["back"]["n"] for e in j["entries"] if e["id"] in {x["id"] for x in es}] == [3, 3, 3], j
     assert back(c, es[1]["id"])[0] == 200
     assert [field("teachers", i, "short") for i in range(3)] == was
+
+@t
+def a_resent_save_is_recorded_once():
+    sp = start(); T = sp["teachers"][0]; was = T["short"]; v0 = store.setup_record()["v"]
+    ops = [["set", "teachers", T["_id"], "short", "ZZ"], ["add", "teachers", {"_id": "newrow0001", "name": "Zed Ng"}, ""]]
+    c = as_person(CORA)
+    for _ in range(2):   # a lost reply: the page sends the same save again, from the same version
+        r = c.post("/api/setup/changes", json={"client": "x", "since": v0, "ops": ops}); assert r.status_code == 200, r.get_json()
+    es = entries()
+    assert [(e["op"], e["text"]) for e in es] == [("set", T["name"] + ": short " + was + " → ZZ"), ("add", "Added Zed Ng")], es
+    j = as_person(DEV).get("/api/history").get_json()
+    marks = [e["back"] for e in j["entries"] if e["id"] in {x["id"] for x in es}]
+    assert len(marks) == 2 and all(m["ok"] for m in marks), marks
+    assert back(as_person(DEV), es[0]["id"]) == (200, {"done": True, "text": "Put back."})
+    now = store.setup_record()["spec"]
+    assert sync._find(now, "teachers", T["_id"])["short"] == was and sync._find(now, "teachers", "newrow0001") is None
+    assert [e["text"] for e in entries()[-2:]] == ["Deleted Zed Ng", T["name"] + ": short ZZ → " + was], entries()[-2:]
 
 @t
 def put_back_twice_is_refused():
