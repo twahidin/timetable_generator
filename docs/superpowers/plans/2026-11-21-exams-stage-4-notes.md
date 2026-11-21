@@ -119,7 +119,7 @@ the 16 python suites (`test_exams`, `test_relief`, `test_typed`, `test_helper`, 
 `test_venues`, `smoke`), the 17 node test files, and `node --check` on `static/app.js`, `static/exams.js`,
 `static/exams-settings.js` and the last script of `ttgen/timetable_page.html`; then `--full` for `test_typed`,
 `test_helper`, `test_fixes` and `smoke`, each alone, all pass. The two copies of the published page, and every
-`ttgen/*.py` against its skill copy, are identical. (`test_combined --full` is not in this task's list and was not run.)
+`ttgen/*.py` against its skill copy, are identical. (`test_combined --full` was run in the final review: 39 checks pass.)
 
 ### The school's real published timetable (CTSS), counts only, scratch folder deleted
 
@@ -202,3 +202,26 @@ made-up day, Tue 24 Nov (Even Tues).
 - Not built: a Preview on the main site for events (as for exams, P10), a typed multi-day event test, an event in the print
   pages, and a message to people going (nothing tells anyone yet).
 - Date rule to keep in mind (K12): `event_busy` covers non-school dates; `on_dates` and `day` do not.
+
+## Final review fix wave (after 7288bd7..16d866f)
+
+Fixed, each with a test in `tests/test_exams.py`:
+- A rain field naming several rooms ("Hall, LT2") is split in `events.flags` and `events.freed` (`_rains`).
+- A fill that adds no one answers the event unchanged and saves nothing, so a sent event keeps its fingerprint.
+- `startOne` calls `links(S.me.can_use)`; the Send-back note says "the teacher in charge" on an event; README and the card
+  blurb mention events; `EVENT_WRONG` ("Check the event and try again.") for the event routes and `_check_event`.
+- `busies` dedupe key includes the classes; a person's lessons are listed in time order; `where` is capped at 120
+  characters, a duty at 120 and its time at 60 (as the page inputs do); `freed` leaves out rooms another schedule's duty
+  or venue uses then (`elsewhere`).
+- Tests added: several rain rooms, freed with elsewhere, the busies class key, text limits, a multi-date event (time order,
+  per-date busies), the duty hand-over and `sent_fp` re-stamp in `replace_going`, an empty fill on a sent event, a PUT of
+  `in_charge` or `status` ignored.
+
+Rulings (accepted as the review describes):
+- A teacher in charge sees other schedules' names and duty rooms in clash lines (needed to resolve a clash).
+- `/view` gives a teacher in charge the staff list ("Pick people" needs it).
+- Approve does not re-run `send_errors` (as exams); an exam's Send is not blocked by an event clash (review only).
+- People going still show their running other-class lessons on the main site until relief stage 3.
+- No "timetable changed" warning for events after a republish (plan P5); a forged day entry naming another level is as
+  stage 2; the teacher in charge cannot be reassigned (K10, open point: let the committee set it when accounts land);
+  `event_busy` covers non-school dates (K12); a lesson shared with a class not on the event still runs (spec rule).
