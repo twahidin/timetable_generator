@@ -9,9 +9,10 @@
     document.title = `Relief · ${me.name}`;
     $("#title").textContent = `Relief · ${me.name}`;
     $("#settingsLink").hidden = !me.can_settings;
+    const note = me.published === false ? `<p class="muted small">The timetable is not published yet.</p>` : "";
     const about = [(me.depts || []).join(", "), me.on_management ? "Management" : "", me.on_team ? "Relief team" : ""].filter(Boolean).join(" · ");
     $("#main").innerHTML = `<div class="card">${about ? `<p class="muted small who">${esc(about)}</p>` : ""}
-      <p>Asking for relief, planning relief and the reliefs you cover arrive here in the next stage.</p></div>`;
+      ${note}<p>Asking for relief, planning relief and the reliefs you cover arrive here in the next stage.</p></div>`;
   }
 
   function fail(text) {

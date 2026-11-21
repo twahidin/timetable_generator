@@ -214,6 +214,7 @@ button.avatar:not(:disabled):hover { box-shadow: 0 0 0 2px var(--line); }
 .dpkey i.band{background:#eaf3ff;border-color:#b9d3f5}.dpkey i.whole{background:#e8f6ec;border-color:#a9dcb8}.dpkey i.own{background:var(--panel);border-color:var(--line)}
 .dpcard:hover{border-color:#c5ccd8}
 .dpcard.locked{cursor:default}
+.otherdept{opacity:.55}   /* step 5: another department's row or band, for a head signed in as a person */
 .dpts{margin-top:6px;display:flex;flex-direction:column;gap:4px;align-items:flex-start}
 .dpt{display:flex;gap:6px;align-items:center;width:100%;min-width:0}
 .dpn{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
