@@ -14,7 +14,7 @@ from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, draft, store, sync, typed
-from relief import codes as relief_codes, people as relief_people, settings as relief_settings, web as relief_web
+from relief import codes as relief_codes, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
 from ttgen import choices
 import exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts
 
@@ -795,7 +795,7 @@ def relief_me():
     if p is None: return {"error": "Please sign in again."}, 401
     s = relief_settings.load(pub); team = p["name"] in s["team"]
     return jsonify(name=p["name"], depts=p["depts"], on_team=team, on_management=p["name"] in s["management"], can_settings=team,
-                   can_plan=relief_has("relief.plan"), can_team=relief_has("relief.team"))
+                   can_plan=relief_has("relief.plan"), can_team=relief_has("relief.team"), today=relief_lessons.today().isoformat())
 
 @app.get("/relief/settings")
 def relief_settings_page():

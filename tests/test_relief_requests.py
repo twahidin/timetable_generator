@@ -617,6 +617,10 @@ def asking_through_the_api():
         assert got["by_date"]["2026-10-13"] == got["lessons"]
         a, b = got["lessons"]
         assert a["key"] == K5 and a["date"] == "2026-10-13" and (a["start"], a["end"]) == ("10:30", "11:30") and b["others"] == [BUSY], got
+        assert got["periods"] == [dict(p=i, start=f"{8 + i // 2:02d}:{30 * (i % 2):02d}", end=f"{8 + (i + 1) // 2:02d}:{30 * ((i + 1) % 2):02d}") for i in range(12)], got["periods"]
+        assert got["periods"][0] == dict(p=0, start="08:00", end="08:30") and got["periods"][-1] == dict(p=11, start="13:30", end="14:00")
+        some = ok(eve.get("/api/relief/lessons?dates=2026-10-13&from=5&to=6"))
+        assert some["periods"] == got["periods"], "every period of the day, whatever the from and to"
         assert [x["p"] for x in ok(eve.get(f"/api/relief/lessons?teacher={q(EVE)}&dates=2026-10-13&from=5&to=6"))["lessons"]] == [5]
         two = ok(eve.get("/api/relief/lessons?dates=2026-10-13,%202026-10-27"))
         assert list(two["by_date"]) == ["2026-10-13", "2026-10-27"] and len(two["lessons"]) == 4, two
@@ -630,8 +634,7 @@ def asking_through_the_api():
         before = files_in(ADIR)
         no(ask(eve, lessons=[dict(key=K5, relief=SAM)]), 400, CHOOSE_ONLY)
         no(eve.post("/api/relief/absences", data="nope", content_type="application/json"), 400, AB.WRONG)
-        no(ask(eve, lessons=[dict(key=["x"])]), 400, AB.WRONG)
-        assert files_in(ADIR) == before
+        assert files_in(ADIR) == before            # a key that is not a string: an_unexpected_body_is_answered_plainly_and_logged
         r = ok(ask(eve, how="planned", by=SAM, lessons=[dict(key=K5, work=dict(text="Read p.4", link="", files=[]))]))
         assert r["how"] == "asked" and r["by"] == EVE and r["teacher"] == EVE and r["reason"] == "Medical", r
         assert [x["changed"] for x in r["lessons"]] == [False, False] and r["lessons"][0]["work"]["text"] == "Read p.4"
@@ -827,7 +830,7 @@ def planned_csv_has_no_reason_and_no_formulas():
         grace, team, eve = staff(GRACE), staff(TEAMER), staff(EVE)
         a = ok(ask(grace, reason="Other", reason_text="Secret clinic visit", remarks="=HYPERLINK(\"http://x.test\")",
                    lessons=[dict(key=K5, relief=SAM), dict(key=K8, needed=True)]))["id"]
-        b = ok(ask(eve, dates=["2026-10-27"], reason="Child sick"))["id"]           # asked, not planned: not in the file
+        b = ok(ask(eve, dates=["2026-10-27"], reason="Child sick"))["id"]           # asked: in the file too, set by the teacher
         c = ok(ask(team, dates=["2026-11-10"], remarks="Course"))["id"]
         d = ok(ask(team, dates=["2026-10-27"], periods=[8, 8], lessons=[dict(key=lk(APUB, 8).replace("2026-10-13", "2026-10-27"), needed=True)]))["id"]
         cancel_all(team, d)
@@ -838,7 +841,9 @@ def planned_csv_has_no_reason_and_no_formulas():
         rows = list(csv.reader(io.StringIO(text.lstrip("﻿"))))
         assert rows[0] == ["Date", "Absent", "Class / group", "Periods", "Time", "Relief teacher", "Remarks", "Set by"], rows[0]
         assert rows[1:] == [["2026-10-13", EVE, "1A Science", "P6–P7", "10:30–11:30", SAM, "'=HYPERLINK(\"http://x.test\")", GRACE],
-                            ["2026-10-13", EVE, "5A Art", "P9", "12:00–12:30", "Not chosen yet", "'=HYPERLINK(\"http://x.test\")", GRACE]], rows[1:]
+                            ["2026-10-13", EVE, "5A Art", "P9", "12:00–12:30", "Not chosen yet", "'=HYPERLINK(\"http://x.test\")", GRACE],
+                            ["2026-10-27", EVE, "1A Science", "P6–P7", "10:30–11:30", "Not chosen yet", "", EVE]], rows[1:]
+        assert all(r[3] != "P9" for r in rows[1:] if r[0] == "2026-10-27"), "the cancelled one and the shared lesson nobody asked to cover are left out"
         for secret in ("Secret clinic visit", "Other", "Child sick", "Medical"): assert secret not in text, secret
         rows = list(csv.reader(io.StringIO(team.get("/api/relief/planned.csv?start=2026-11-10&end=2026-11-10").data.decode("utf-8").lstrip("﻿"))))
         assert [x[0] for x in rows[1:]] == ["2026-11-10"] and rows[1][6] == "Course" and rows[1][7] == TEAMER, rows
@@ -846,6 +851,35 @@ def planned_csv_has_no_reason_and_no_formulas():
         for bad in ("start=nope", "start=2026-10-27&end=2026-10-13", "end=13/10/2026"):
             no(grace.get("/api/relief/planned.csv?" + bad), 400, "Choose the dates again.")
         cancel_all(grace, a); cancel_all(eve, b); cancel_all(team, c)
+
+@t
+def an_unexpected_body_is_answered_plainly_and_logged():
+    import logging
+    from flask.logging import default_handler
+    got = []
+    class Keep(logging.Handler):
+        def emit(self, record): got.append(record)
+    keep, lg, old_ack = Keep(level=logging.ERROR), A.app.logger, AB.acknowledge
+    lg.addHandler(keep); lg.removeHandler(default_handler)          # kept here, not printed over the test output
+    try:
+        with published(APUB):
+            eve, grace = staff(EVE), staff(GRACE)
+            before = files_in(ADIR)
+            no(ask(eve, lessons=[dict(key=["x"])]), 400, AB.WRONG)
+            assert files_in(ADIR) == before, "nothing written"
+            assert len(got) == 1 and got[0].exc_info and got[0].exc_info[0] is TypeError, got
+            assert "sending an absence" in got[0].getMessage(), got[0].getMessage()
+            no(ask(eve, lessons=[dict(key="nope")]), 400, AB.CHANGED)
+            assert len(got) == 1, "a refusal in plain words is not logged"
+            i = ok(ask(grace))["id"]
+            AB.acknowledge = lambda *a: {}["a bug"]
+            no(eve.post(f"/api/relief/absences/{i}/acknowledge"), 400, AB.WRONG)
+            assert len(got) == 2 and got[1].exc_info[0] is KeyError and "changing an absence" in got[1].getMessage(), got
+            AB.acknowledge = old_ack
+            cancel_all(grace, i)
+    finally:
+        AB.acknowledge = old_ack
+        lg.removeHandler(keep); lg.addHandler(default_handler)
 
 @t
 def nothing_published_and_signed_out_answers():
@@ -881,7 +915,9 @@ def me_has_can_plan_and_can_team():
         for name, plan, team in ((EVE, False, False), (GRACE, True, False), (TEAMER, True, True)):
             me = ok(staff(name).get("/api/relief/me"))
             assert (me["can_plan"], me["can_team"]) == (plan, team), (name, me)
-        assert set(ok(staff(EVE).get("/api/relief/me"))) == {"name", "depts", "on_team", "on_management", "can_settings", "can_plan", "can_team"}
+        me = ok(staff(EVE).get("/api/relief/me"))
+        assert set(me) == {"name", "depts", "on_team", "on_management", "can_settings", "can_plan", "can_team", "today"}, me
+        assert me["today"] == "2026-10-12", "the school's date, from relief.lessons.today()"
         with A.app.test_request_context():
             _session["role"], _session["who"] = "staff", GRACE
             assert A.relief_has("relief") and A.relief_has("relief.plan") and not A.relief_has("relief.team")

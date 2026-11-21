@@ -20,9 +20,10 @@ takes {at}: the as_of the What's in list answered (now when left out). Periods a
 import csv, datetime, io, os, threading
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, Response, jsonify, request, send_file
+from flask import Blueprint, Response, current_app, jsonify, request, send_file
 
 import store
+from exams.days import bounds, hhmm
 from relief import absences as _absences
 from relief import files as _files
 from relief import free as _free
@@ -132,10 +133,22 @@ def _refusal(e):
     return {"error": str(e) if isinstance(e, ValueError) else _absences.WRONG}, 400
 
 
+def _odd(e, what):
+    """the catch-all refusal for a body the checks did not expect: the person gets the plain sentence, the log the trace"""
+    current_app.logger.exception("relief: %s failed on an unexpected body", what)
+    return _refusal(e)
+
+
+def _periods(pub):
+    """every period of the day: [{p, start, end}] (0-based p, times as HH:MM)"""
+    return [dict(p=i, start=hhmm(a), end=hhmm(b)) for i, (a, b) in enumerate(bounds((pub or {}).get("model") or {}))]
+
+
 # ---- what a form needs
 @bp.get("/api/relief/lessons")
 def lessons():
-    """a teacher's lessons on the dates (a,b) and periods (from, to); relief for yourself, relief.plan for anyone else"""
+    """a teacher's lessons on the dates (a,b) and periods (from, to), with every period of the day ({p, start, end}) for the
+    forms' "Some periods"; relief for yourself, relief.plan for anyone else"""
     pub, me, err = _gate()
     if err: return err
     teacher = request.args.get("teacher") or me
@@ -146,8 +159,9 @@ def lessons():
         dates = _absences._iso_dates([x.strip() for x in (request.args.get("dates") or "").split(",") if x.strip()], _lessons.today())
         periods = _period_range(pub, request.args.get("from"), request.args.get("to"))
         by_date = {d.isoformat(): [_iso(x) for x in _lessons.on_date(pub, settings["calendar"], teacher, d, periods=periods)] for d in dates}
+        every = _periods(pub)
     except ValueError as e: return _refusal(e)
-    return jsonify(lessons=[x for v in by_date.values() for x in v], by_date=by_date)
+    return jsonify(lessons=[x for v in by_date.values() for x in v], by_date=by_date, periods=every)
 
 
 @bp.get("/api/relief/free")
@@ -190,7 +204,8 @@ def create():
     how = "asked" if teacher == me else "planned"
     if how == "planned" and not plan: return {"error": PLAN_ONLY}, 403
     try: r = _absences.new(dict(data, teacher=teacher), pub, me, how, may_choose=plan)
-    except (ValueError,) + BAD_INPUT as e: return _refusal(e)
+    except ValueError as e: return _refusal(e)
+    except BAD_INPUT as e: return _odd(e, "sending an absence")
     return jsonify(_absences.matches_now(r, pub, _cal(pub)))
 
 
@@ -262,7 +277,8 @@ def _change(id, do, right=None, refused=None):
     if err: return err
     if right and not _has(right): return {"error": refused}, 403
     try: r = do(r, me, pub, _body())
-    except (ValueError,) + BAD_INPUT as e: return _refusal(e)
+    except ValueError as e: return _refusal(e)
+    except BAD_INPUT as e: return _odd(e, "changing an absence")
     return jsonify(_absences.matches_now(r, pub, _cal(pub)))
 
 
@@ -351,8 +367,8 @@ def _periods_text(x):
 
 @bp.get("/api/relief/planned.csv")
 def planned_csv():
-    """the lessons needing relief in planned absences (not cancelled) dated start..end (today when left out), every
-    planner's; never the reason"""
+    """the lessons needing relief in every absence not cancelled, planned or asked, dated start..end (today when left out),
+    so a day's sheet is complete; Set by = whoever sent it; never the reason"""
     pub, me, err = _gate("relief.plan", PLAN_ONLY)
     if err: return err
     try:
@@ -363,7 +379,7 @@ def planned_csv():
     except ValueError as e: return _refusal(e)
     rows = []
     for r in _absences.all_records():
-        if r.get("cancelled") or r.get("how") != "planned": continue
+        if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
             if not x.get("needed"): continue
             d = datetime.date.fromisoformat(x["date"])

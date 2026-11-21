@@ -8,10 +8,12 @@
    other periods) keeps the work of every lesson still listed. opts: workLabel (the work box's label), empty (the line
    when there are no lessons), side(lesson) and extra(lesson) (HTML beside the lesson's name and under its work; escape
    what goes in them with ReliefForm.esc), onChange() (called on every edit).
-   ReliefForm.read(container) gives [{key, needed, work: {text, link, files: []}}] for POST /api/relief/absences.
+   ReliefForm.read(container) gives [{key, needed, work: {text, link, files: []}}] for POST /api/relief/absences;
+   ReliefForm.needed(container, key) says whether one listed lesson is to be covered.
    ReliefForm.files(container) gives [{key, files: [File]}]: a file is sent after the absence is saved (POST
    …/files), then attached with PUT …/lessons/<key>/work.
-   ReliefForm.person(container, opts) is a search-as-you-type picker of people [{name, depts}]. */
+   ReliefForm.person(container, opts) is a search-as-you-type picker of people [{name, depts}].
+   ReliefForm.today() is the school's date: the page sets it once from /api/relief/me with ReliefForm.setToday(iso). */
 window.ReliefForm = (function () {
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -20,7 +22,6 @@ window.ReliefForm = (function () {
   const MAX_FILE = 10 * 1024 * 1024, PER_LESSON = 5;
   const WRONG_KIND = "Send a PDF, Word, PowerPoint, Excel or picture file.", TOO_BIG = "A file can be at most 10 MB.";
   const TOO_MANY = "A lesson can have at most 5 files.";
-  const SCHOOL_TZ = "Asia/Singapore";   /* as relief.lessons.today(): the school's date, wherever the device is */
   const ENTIRE = "Entire Class";
   const forms = new WeakMap(), pickers = new WeakMap();
   let made = 0;
@@ -44,12 +45,11 @@ window.ReliefForm = (function () {
     return isoOf(d);
   }
 
-  function today() {
-    try {
-      const p = {};
-      new Intl.DateTimeFormat("en-GB", { timeZone: SCHOOL_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date()).forEach(x => { p[x.type] = x.value; });
-      if (p.year && p.month && p.day) return `${p.year}-${p.month}-${p.day}`;
-    } catch (e) { /* an old browser: the device's own date */ }
+  let schoolToday = "";
+  function setToday(iso) { if (/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""))) schoolToday = iso; }
+
+  function today() {   /* the school's date, as the server gave it (/api/relief/me's today); the device's own date only before that */
+    if (schoolToday) return schoolToday;
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
@@ -68,6 +68,17 @@ window.ReliefForm = (function () {
   }
 
   const when = x => [periods(x), time(x), x.room || ""].filter(Boolean).join(" · ");
+
+  /* "Some periods": from and to over every period of the day ([{p, start, end}] from /api/relief/lessons), each with its
+     time; nothing is chosen until the person chooses. The selects carry data-per="from" / "to". */
+  function periodSelects(idp, list, from, to) {
+    const opt = (p, label, cur) => `<option value="${p}"${p === cur ? " selected" : ""}>${esc(label)}</option>`;
+    const pick = `<option value=""${from === null ? " selected" : ""}>Choose…</option>`, pickTo = `<option value=""${to === null ? " selected" : ""}>Choose…</option>`;
+    const froms = list.map(x => opt(Number(x.p), `P${Number(x.p) + 1}${x.start ? ` (${x.start})` : ""}`, from)).join("");
+    const tos = list.filter(x => from === null || Number(x.p) >= from).map(x => opt(Number(x.p), `P${Number(x.p) + 1}${x.end ? ` (till ${x.end})` : ""}`, to)).join("");
+    return `<div class="line"><label for="${esc(idp)}From">from</label><select id="${esc(idp)}From" data-per="from">${pick}${froms}</select>
+      <label for="${esc(idp)}To">to</label><select id="${esc(idp)}To" data-per="to">${pickTo}${tos}</select></div>`;
+  }
 
   function size(n) {
     n = Number(n) || 0;
@@ -184,6 +195,11 @@ window.ReliefForm = (function () {
     });
   }
 
+  function needed(container, key) {   /* is this lesson to be covered (a shared lesson is not, until "Ask for cover anyway")? */
+    const f = forms.get(container), st = f && f.st.get(key);
+    return !!(st && st.needed);
+  }
+
   function files(container) {
     const f = forms.get(container);
     if (!f) return [];
@@ -251,5 +267,5 @@ window.ReliefForm = (function () {
     });
   }
 
-  return { lessons, read, files, redraw, reset, person, esc, day, addDays, today, periods, time, title, when, size, checkFile, fit, fitAll, KINDS };
+  return { lessons, read, files, needed, redraw, reset, person, esc, day, addDays, today, setToday, periods, periodSelects, time, title, when, size, checkFile, fit, fitAll, KINDS };
 })();
