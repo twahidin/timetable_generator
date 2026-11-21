@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exams and events mockups</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2433;--muted:#5d6678;--line:#e3e7ee;--navy:#1f4e78;--accent:#2563eb;--warn:#b42318;--warn-bg:#fdecec;--ok:#067647;--ok-bg:#e7f6ee;--chip:#eef2f8;--amber:#9a5b00;--amber-bg:#fff4e0;--ex:#6b3fa0;--ex-bg:#f1eafb;--ev:#0e7490;--ev-bg:#e0f5f9;--l1:#dbeafe;--l2:#fde68a;--l3:#d1fae5;--l4:#fbcfe8}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.4}
+header.top{background:var(--navy);color:#fff;padding:14px 20px}
+header.top h1{margin:0;font-size:18px}
+header.top p{margin:2px 0 0;opacity:.85;font-size:13px}
+nav.tabs{display:flex;flex-wrap:wrap;gap:6px;padding:10px 20px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+nav.tabs button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;color:var(--ink)}
+nav.tabs button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+main{padding:18px 20px 60px;max-width:1280px;margin:0 auto}
+section.screen{display:none}
+section.screen.on{display:block}
+.about{background:#fff;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:10px 14px;margin-bottom:16px}
+.about b{color:var(--navy)}
+.about .who{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+.prop{background:var(--amber-bg);color:var(--amber);border-radius:4px;padding:0 5px;font-size:11px;font-weight:600;white-space:nowrap}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.spread{justify-content:space-between}
+h2{margin:0;font-size:22px}
+h3{margin:0 0 8px;font-size:15px}
+h4{margin:10px 0 6px;font-size:13px;color:var(--navy);text-transform:uppercase;letter-spacing:.04em}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:13px;cursor:default;white-space:nowrap;display:inline-block}
+.btn.primary{background:#111827;color:#fff;border-color:#111827}
+.btn.blue{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.ok{background:var(--ok);color:#fff;border-color:var(--ok)}
+.btn.sm{padding:4px 9px;font-size:12px}
+.chip{display:inline-block;background:var(--chip);border-radius:999px;padding:2px 9px;font-size:12px;white-space:nowrap}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}
+.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.amber{background:var(--amber-bg);color:var(--amber)}
+.chip.blue{background:#e6efff;color:#1d4ed8}
+.chip.ex{background:var(--ex-bg);color:var(--ex)}
+.chip.ev{background:var(--ev-bg);color:var(--ev)}
+.chip.on{background:var(--navy);color:#fff}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:left;font-weight:600;padding:8px;border-bottom:1px solid var(--line)}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.input{border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:#fffdf3;font-size:13px;display:inline-block;min-width:110px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg span{padding:6px 11px;font-size:13px;border-right:1px solid var(--line);background:#fff}
+.seg span:last-child{border-right:0}
+.seg span.on{background:var(--navy);color:#fff}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.flow{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin:8px 0 16px}
+.step{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;position:relative}
+.step .n{display:inline-block;background:var(--navy);color:#fff;border-radius:999px;width:22px;height:22px;text-align:center;line-height:22px;font-size:12px;font-weight:700;margin-bottom:6px}
+.step ul{margin:6px 0 0;padding-left:18px;font-size:13px}
+.case{border-radius:10px;padding:12px;border:1px solid var(--line)}
+.case.a{background:var(--ok-bg)}
+.case.b{background:var(--amber-bg)}
+.case.c{background:var(--warn-bg)}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;grid-template-columns:1fr auto;gap:6px;margin-bottom:10px}
+.tl td{font-size:12.5px}
+.pp{display:block;border-radius:6px;padding:4px 7px;margin:0 0 4px;font-size:12px;border:1px solid transparent}
+.pp.ex{background:var(--ex-bg);border-color:#dccaf2}
+.pp.norm{background:repeating-linear-gradient(45deg,#f3f4f6,#f3f4f6 6px,#fff 6px,#fff 12px);color:var(--muted)}
+.pp.ev{background:var(--ev-bg);border-color:#b6e3ec}
+.pp b{font-weight:600}
+.seats{display:grid;grid-template-columns:28px repeat(10,1fr);gap:4px;font-size:10.5px}
+.seat{border-radius:5px;padding:4px 2px;text-align:center;line-height:1.15;border:1px solid rgba(0,0,0,.05)}
+.seat.s1{background:var(--l1)}
+.seat.s2{background:var(--l2)}
+.seat.empty{background:#fff;border:1px dashed var(--line);color:#c3c8d2}
+.seat.lab{background:none;border:0;color:var(--muted);font-weight:600}
+.front{grid-column:2/-1;text-align:center;background:#111827;color:#fff;border-radius:5px;font-size:11px;padding:3px}
+.bar{height:8px;border-radius:4px;background:var(--chip);overflow:hidden;min-width:90px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.bar.hi i{background:var(--amber)}
+.phone{width:340px;border:10px solid #111827;border-radius:30px;background:#fff;padding:14px 14px 20px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+.phone .t{font-weight:700;font-size:15px;margin-bottom:2px}
+.duty{border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin:8px 0}
+.duty .when{font-size:12px;color:var(--muted)}
+.big{font-size:20px;font-weight:700}
+.kpi{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.kpi div{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px}
+.kpi .k{font-size:12px;color:var(--muted)}
+.cal td{width:14%;}
+.tt{border-collapse:separate;border-spacing:3px}
+.tt td,.tt th{border:0;padding:5px 6px;font-size:12px}
+.tt td.p{color:var(--muted);white-space:nowrap;width:90px}
+.tt .les{background:#eef2f8;border-radius:6px}
+.tt .x{background:#f3f4f6;border-radius:6px;color:#9aa1ad;text-decoration:line-through}
+.tt .exm{background:var(--ex-bg);border-radius:6px;color:var(--ex);font-weight:600}
+.tt .inv{background:var(--amber-bg);border-radius:6px;color:var(--amber);font-weight:600}
+.flag{color:var(--warn);font-weight:600}
+.okc{color:var(--ok);font-weight:600}
+.note{font-size:12px;color:var(--muted);margin-top:6px}
+@media (max-width:900px){.grid2,.grid3,.flow,.kpi{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Exams, tests and events: mockups (20 Nov 2026)</h1>
+  <p>Every name is made up. <span class="prop" style="background:#fff4e0">my proposal</span> marks something I filled in that you haven't agreed yet. Nothing here is built.</p>
+</header>
+<nav class="tabs" id="tabs">
+  <button data-s="s0" class="on">0 · The whole journey</button>
+  <button data-s="s1">1 · Exams and events</button>
+  <button data-s="s2">2 · Set up: what and when</button>
+  <button data-s="s3">3 · Set up: the papers</button>
+  <button data-s="s4">4 · The schedule</button>
+  <button data-s="s5">5 · Venues and seating</button>
+  <button data-s="s6">6 · Invigilators</button>
+  <button data-s="s7">7 · Backups and relief</button>
+  <button data-s="s8">8 · An event</button>
+  <button data-s="s10">10 · Timetable committee: approve</button>
+  <button data-s="s9">9 · What teachers and students see</button>
+</nav>
+<main>
+
+<!-- 0 JOURNEY -->
+<section class="screen on" id="s0">
+  <div class="about"><div class="who">The idea in one page</div>
+    The exams committee (or whoever runs the event) <span class="prop">my proposal</span> says <b>what</b> (an exam, a common test or an event), <b>when</b> (dates, whole day or part of the day) and <b>for whom</b> (the whole school, some levels or some classes). The app knows from the published timetable which lessons still run at every minute of those days. From that it does the slow part: <b>venues, seats, invigilators and backups</b>.</div>
+  <div class="flow">
+    <div class="step"><span class="n">1</span><br><b>Set it up</b>
+      <ul><li>Exam, common test or event</li><li>Dates from the school calendar</li><li>Levels or classes</li><li>Each day: whole day off, or part of the day</li><li>The papers, or the event's times</li></ul></div>
+    <div class="step"><span class="n">2</span><br><b>The app makes it</b>
+      <ul><li>Checks your paper times: no student in two papers at once</li><li>Picks venues big enough that no running lesson needs</li><li>Seats every student</li><li>Picks invigilators who are free then, shared fairly</li></ul></div>
+    <div class="step"><span class="n">3</span><br><b>You check and change</b>
+      <ul><li>Move a paper, a room or an invigilator</li><li>The checks run again at once</li><li>Clashes and full rooms shown in red</li></ul></div>
+    <div class="step"><span class="n">4</span><br><b>Backups</b>
+      <ul><li>Lessons that stop: no relief needed</li><li>Lessons whose teacher is busy at the exam: sent to the relief team, or "we'll handle it"</li></ul></div>
+    <div class="step" style="border-color:var(--accent);box-shadow:0 0 0 3px #e6efff"><span class="n">5</span><br><b>Timetable committee approves</b>
+      <ul><li>Only for what shows on the main site</li><li>Sees what changes there</li><li>Approve, or send back with a note</li><li>Every later change to the main site comes back here</li></ul></div>
+    <div class="step"><span class="n">6</span><br><b>On the main site, for its dates only</b>
+      <ul><li>Exam timetable, seating plans, roster</li><li>Each teacher's duties, each student's papers and seats</li><li>The timetable on those dates shows it</li><li>Afterwards: the usual timetable again</li><li>Backups go to the relief team <span class="prop">my proposal</span></li></ul></div>
+  </div>
+  <h3>What it changes for relief</h3>
+  <div class="grid3">
+    <div class="case a"><b>Class is on the exam or event</b><br>That lesson doesn't happen, so <b>no relief is needed</b>. Its teacher is free then and can invigilate.<div class="note">Example: Ms Nadia's 3B Maths on Mon 5 Oct, 08:20. 3B is sitting English.</div></div>
+    <div class="case b"><b>Teacher is busy at the exam or event</b><br>Invigilating, or going with the classes. Relief's "free then" list <b>leaves them out</b>, so relief never picks someone who is invigilating.</div>
+    <div class="case c"><b>Busy at the exam, but has a lesson that still runs</b><br>A Sec 4 class keeps its lessons. <b>Backup needed</b>: sent to the relief team as planned relief (approve, notify, acknowledge as usual), or marked "handled ourselves".</div>
+  </div>
+  <p class="note">Shared with relief: the school calendar (terms, Odd and Even weeks, holidays), personal teacher codes, and the published timetable on a date.</p>
+</section>
+
+<!-- 1 LIST -->
+<section class="screen" id="s1">
+  <div class="about"><div class="who">Exams committee and the timetable committee · a new card on the landing page <span class="prop">my proposal</span></div>
+    Every special schedule of the year in one list. The <b>exams committee</b> (a list of people with their personal codes, like the relief team) <span class="prop">my proposal</span> makes and changes them freely. Only putting one on the main site, or changing what's there, waits for the timetable committee. Each schedule has its own dates, levels and status. They can overlap, so a Sec 2 learning journey can fall in the Sec 4 prelims, and the app checks them against each other.</div>
+  <div class="row spread" style="margin-bottom:12px">
+    <h2>Exams, tests and events · 2026</h2>
+    <div class="row"><span class="btn blue">+ New exam or test</span><span class="btn">+ New event</span></div>
+  </div>
+  <div class="card"><div><span class="chip ex">Exam</span> <b>Sec 1–3 End-of-Year Exam</b><br><span class="muted small">Mon 5 Oct – Thu 15 Oct · Sec 1, Sec 2, Sec 3 · whole days, part day on Fri 9 Oct · 41 papers · 26 venues · 74 invigilators</span></div><div><span class="chip ok">Approved · on the main site 5–15 Oct</span></div></div>
+  <div class="card"><div><span class="chip ex">Exam</span> <b>Sec 4 Preliminary Exam</b><br><span class="muted small">Mon 17 Aug – Fri 28 Aug · Sec 4 · part of the day (lessons after the papers) · 22 papers</span></div><div><span class="chip blue">Waiting for the timetable committee</span><br><span class="small muted">sent by Ms Grace Yeo, Thu 13 Aug</span></div></div>
+  <div class="card"><div><span class="chip blue">Common test</span> <b>Sec 3 Maths WA2</b><br><span class="muted small">Thu 7 May · Sec 3 · 10:20–11:40 · in classrooms · 1 paper</span></div><div><span class="chip">Ended</span></div></div>
+  <div class="card"><div><span class="chip ev">Event</span> <b>Sports Day</b> <span class="small muted">· teacher in charge Mr Hafiz Rahman</span><br><span class="muted small">Fri 13 Feb · whole school · 07:40–12:40 · off site · 31 teachers going</span></div><div><span class="chip">Ended</span></div></div>
+  <div class="card"><div><span class="chip ev">Event</span> <b>Sec 2 Learning Journey</b> <span class="small muted">· teacher in charge Ms Aisha Rahman</span><br><span class="muted small">Wed 18 Mar · Sec 2 · 08:00–13:00 · 12 teachers going · 7 backups</span></div><div><span class="chip warn">Sent back</span><br><span class="small muted">"2C and 2D have a Science WA that morning"</span></div></div>
+  <p class="note">The dates come from the school calendar the relief plan already keeps. A date outside every term, or on a holiday, can't be picked.</p>
+</section>
+
+<!-- 2 WHAT AND WHEN -->
+<section class="screen" id="s2">
+  <div class="about"><div class="who">Committee · new exam, part 1 of 2</div>
+    Each day can be <b>whole day off</b> (the level has no lessons) or <b>part of the day</b> (lessons stop from the first paper to the last, then run as usual). You said it's sometimes one and sometimes the other.</div>
+  <div class="panel">
+    <div class="row" style="margin-bottom:12px"><b style="width:120px">What is it</b><span class="seg"><span class="on">Exam</span><span>Common test</span><span>Event</span></span></div>
+    <div class="row" style="margin-bottom:12px"><b style="width:120px">Name</b><span class="input" style="min-width:320px">Sec 1–3 End-of-Year Exam</span></div>
+    <div class="row" style="margin-bottom:12px"><b style="width:120px">Who</b><span class="chip">Whole school</span><span class="chip on">Sec 1 ✓</span><span class="chip on">Sec 2 ✓</span><span class="chip on">Sec 3 ✓</span><span class="chip">Sec 4</span><span class="muted small">or <u>pick classes</u></span></div>
+    <div class="row"><b style="width:120px">Dates</b><span class="input">Mon 5 Oct 2026</span> to <span class="input">Thu 15 Oct 2026</span><span class="muted small">9 school days (Mon 12 Oct is a holiday in the calendar)</span></div>
+  </div>
+  <div class="panel">
+    <h3>Each day</h3>
+    <table>
+      <tr><th>Date</th><th>Timetable day</th><th>Levels sitting</th><th>How much of the day</th><th>Lessons for those levels</th></tr>
+      <tr><td>Mon 5 Oct</td><td>Odd Mon</td><td>Sec 1, 2, 3</td><td><span class="seg"><span class="on">Whole day</span><span>Part</span></span></td><td class="muted">none: students go home after the last paper</td></tr>
+      <tr><td>Tue 6 Oct</td><td>Odd Tue</td><td>Sec 1, 2, 3</td><td><span class="seg"><span class="on">Whole day</span><span>Part</span></span></td><td class="muted">none</td></tr>
+      <tr><td>Wed 7 Oct</td><td>Odd Wed</td><td>Sec 1, 2, 3</td><td><span class="seg"><span class="on">Whole day</span><span>Part</span></span></td><td class="muted">none</td></tr>
+      <tr><td>Thu 8 Oct</td><td>Odd Thu</td><td>Sec 1, 2, 3</td><td><span class="seg"><span class="on">Whole day</span><span>Part</span></span></td><td class="muted">none</td></tr>
+      <tr><td>Fri 9 Oct</td><td>Odd Fri</td><td>Sec 1, 2, 3</td><td><span class="seg"><span>Whole day</span><span class="on">Part</span></span> <span class="input" style="min-width:70px">07:40</span>–<span class="input" style="min-width:70px">10:20</span></td><td>normal lessons from 10:20</td></tr>
+      <tr><td class="muted">Mon 12 Oct</td><td class="muted" colspan="4">Holiday (from the school calendar)</td></tr>
+      <tr><td>Tue 13 Oct</td><td>Even Tue</td><td>Sec 1, 2, 3</td><td><span class="seg"><span class="on">Whole day</span><span>Part</span></span></td><td class="muted">none</td></tr>
+      <tr><td>Wed 14 Oct</td><td>Even Wed</td><td>Sec 3</td><td><span class="seg"><span class="on">Whole day</span><span>Part</span></span></td><td class="muted">Sec 1 and 2 have finished: back to lessons <span class="prop">my proposal</span></td></tr>
+      <tr><td>Thu 15 Oct</td><td>Even Thu</td><td>Sec 3</td><td><span class="seg"><span>Whole day</span><span class="on">Part</span></span> <span class="input" style="min-width:70px">07:40</span>–<span class="input" style="min-width:70px">09:40</span></td><td>normal lessons from 09:40</td></tr>
+    </table>
+    <p class="note">Sec 4 isn't in this exam, so Sec 4 keeps its full timetable every day. That's where the backups come from.</p>
+  </div>
+  <div class="panel">
+    <h3>Exam-day times <span class="prop">my proposal</span></h3>
+    <div class="row"><span>Students report</span><span class="input" style="min-width:70px">07:30</span><span>First paper</span><span class="input" style="min-width:70px">07:50</span><span>Break between papers at least</span><span class="input" style="min-width:60px">20 min</span><span>Last paper ends by</span><span class="input" style="min-width:70px">13:00</span><span>At most</span><span class="input" style="min-width:40px">2</span><span>papers a day for one student</span></div>
+  </div>
+  <div class="row"><span class="btn">Back</span><span class="btn blue">Next: the papers</span></div>
+</section>
+
+<!-- 3 PAPERS -->
+<section class="screen" id="s3">
+  <div class="about"><div class="who">Committee · new exam, part 2 of 2</div>
+    The papers. <b>Who sits</b> comes from the subject groups already in the timetable, so Pure Chemistry is sat by the Pure Chemistry groups, not typed again. You set every paper's date and time. The app checks them, then does the rest.</div>
+  <div class="row spread" style="margin-bottom:10px">
+    <div class="row"><span class="btn">Fill from the subjects of Sec 1–3</span><span class="btn">Upload a paper list (Excel)</span><span class="btn">+ Add a paper</span></div>
+    <span class="muted small">41 papers · 39 with a time · <span class="flag">2 still need one</span></span>
+  </div>
+  <div class="panel" style="padding:6px 10px">
+    <table>
+      <tr><th>Level</th><th>Subject</th><th>Paper</th><th>Length</th><th>Who sits</th><th>Sits with</th><th>When</th></tr>
+      <tr><td>Sec 3</td><td>English</td><td>Paper 1 Writing</td><td>1 h 50</td><td>All Sec 3 <span class="muted">(296)</span></td><td></td><td>Mon 5 Oct 07:50</td></tr>
+      <tr><td>Sec 3</td><td>English</td><td>Paper 2 Comprehension</td><td>1 h 50</td><td>All Sec 3 <span class="muted">(296)</span></td><td></td><td>Tue 6 Oct 07:50</td></tr>
+      <tr><td>Sec 3</td><td>Mathematics</td><td>Paper 1</td><td>1 h 15</td><td>G3 Maths groups <span class="muted">(210)</span></td><td><span class="chip">G2 Maths P1</span></td><td>Mon 5 Oct 10:00</td></tr>
+      <tr><td>Sec 3</td><td>Mathematics (G2)</td><td>Paper 1</td><td>1 h 15</td><td>G2 Maths groups <span class="muted">(86)</span></td><td><span class="chip">G3 Maths P1</span></td><td>Mon 5 Oct 10:00</td></tr>
+      <tr><td>Sec 3</td><td>Pure Chemistry</td><td>Paper 1+2</td><td>1 h 45</td><td>3PC1, 3PC2 <span class="muted">(64)</span></td><td><span class="chip">Combined Sci (Chem)</span></td><td>Wed 7 Oct 10:20</td></tr>
+      <tr><td>Sec 3</td><td>Combined Science (Chem)</td><td>Paper 1+2</td><td>1 h 15</td><td>3CS1–3CS4 <span class="muted">(150)</span></td><td><span class="chip">Pure Chemistry</span></td><td>Wed 7 Oct 10:20</td></tr>
+      <tr><td>Sec 3</td><td>Chinese</td><td>Paper 2</td><td>1 h 30</td><td>3CL1–3CL5 <span class="muted">(171)</span></td><td><span class="chip">Malay P2</span> <span class="chip">Tamil P2</span></td><td>Thu 8 Oct 07:50</td></tr>
+      <tr><td>Sec 3</td><td>Malay</td><td>Paper 2</td><td>1 h 30</td><td>3ML1–3ML3 <span class="muted">(98)</span></td><td><span class="chip">Chinese P2</span> <span class="chip">Tamil P2</span></td><td>Thu 8 Oct 07:50</td></tr>
+      <tr><td>Sec 3</td><td>History (Elective)</td><td>Paper 1</td><td>1 h</td><td>Combined Humanities groups <span class="muted">(188)</span></td><td></td><td><span class="input" style="min-width:90px">date ▾</span> <span class="input" style="min-width:60px">time</span></td></tr>
+      <tr><td>Sec 2</td><td>English</td><td>Paper 1 Writing</td><td>1 h 30</td><td>All Sec 2 <span class="muted">(300)</span></td><td></td><td>Mon 5 Oct 07:50</td></tr>
+      <tr><td>Sec 1</td><td>English</td><td>Paper 1 Writing</td><td>1 h 30</td><td>All Sec 1 <span class="muted">(312)</span></td><td></td><td>Mon 5 Oct 07:50</td></tr>
+      <tr><td colspan="7" class="muted small">… 30 more</td></tr>
+    </table>
+  </div>
+  <div class="panel">
+    <h3>Checks on your times</h3>
+    <div class="small">
+      <span class="okc">✓</span> No student has two papers at the same time (from the subject groups).<br>
+      <span class="okc">✓</span> Papers marked "sits with" start together.<br>
+      <span class="okc">✓</span> No paper on a holiday or outside the exam's days.<br>
+      <span class="flag">●</span> 4 students have 3 papers on Tue 13 Oct (Higher Chinese, Chinese, History). <span class="muted">A warning, not a stop: the limit is</span> <span class="input" style="min-width:30px">2</span> <span class="muted">a day</span> <span class="prop">my proposal</span><br>
+      <span class="okc">✓</span> Students with access arrangements: their extra time is added (25%, from the list on screen 5).
+    </div>
+  </div>
+  <div class="row"><span class="btn">Back</span><span class="btn blue">Find venues, seats and invigilators</span></div>
+</section>
+
+<!-- 4 SCHEDULE -->
+<section class="screen" id="s4">
+  <div class="about"><div class="who">Committee · the schedule the app made</div>
+    Days down, levels across. Purple is a paper, striped means normal lessons still run. The line under each day shows what that day does to teachers. <b>Make again</b> keeps your paper times and redoes venues, seats and invigilators, keeping any you changed by hand.</div>
+  <div class="row spread" style="margin-bottom:10px"><h2>Sec 1–3 End-of-Year Exam</h2><div class="row"><span class="btn">Make again</span><span class="btn">Download (Excel)</span><span class="btn">Preview on the main site</span><span class="btn blue">Send to the timetable committee</span></div></div>
+  <div class="kpi">
+    <div><div class="k">Papers</div><div class="big">41</div></div>
+    <div><div class="k">Students with 2 papers in a day</div><div class="big">118</div><div class="small muted">none with 3</div></div>
+    <div><div class="k">Invigilation duties</div><div class="big">212</div></div>
+    <div><div class="k">Backups needed</div><div class="big" style="color:var(--amber)">9</div></div>
+    <div><div class="k">To check</div><div class="big" style="color:var(--warn)">2</div></div>
+  </div>
+  <div class="panel" style="padding:6px 10px">
+    <table class="tl">
+      <tr><th style="width:110px">Day</th><th>Sec 1</th><th>Sec 2</th><th>Sec 3</th><th>Sec 4</th></tr>
+      <tr><td><b>Mon 5 Oct</b><br><span class="muted small">Odd Mon · whole day</span></td>
+        <td><span class="pp ex"><b>English P1</b> 07:50–09:20<br>Hall + 1A–1E rooms</span><span class="pp ex"><b>Geography</b> 09:40–10:40</span></td>
+        <td><span class="pp ex"><b>English P1</b> 07:50–09:20<br>Hall + 2A–2D rooms</span><span class="pp ex"><b>Literature</b> 09:40–10:40</span></td>
+        <td><span class="pp ex"><b>English P1</b> 07:50–09:40</span><span class="pp ex"><b>Maths P1 (G3 + G2)</b> 10:00–11:15</span></td>
+        <td><span class="pp norm">normal lessons all day</span></td></tr>
+      <tr><td colspan="5" class="small muted" style="background:#fafbfc">Teachers: <b>46</b> freed by the exam · <b>28</b> invigilating · <b>21</b> still teaching Sec 4 · <span style="color:var(--amber)">3 backups</span></td></tr>
+      <tr><td><b>Tue 6 Oct</b><br><span class="muted small">Odd Tue · whole day</span></td>
+        <td><span class="pp ex"><b>Maths P1</b> 07:50–09:20</span></td>
+        <td><span class="pp ex"><b>Maths P1</b> 07:50–09:20</span><span class="pp ex"><b>History</b> 09:40–10:40</span></td>
+        <td><span class="pp ex"><b>English P2</b> 07:50–09:40</span></td>
+        <td><span class="pp norm">normal lessons</span></td></tr>
+      <tr><td colspan="5" class="small muted" style="background:#fafbfc">Teachers: <b>51</b> freed · <b>22</b> invigilating · <b>21</b> still teaching Sec 4 · <span style="color:var(--amber)">2 backups</span></td></tr>
+      <tr><td><b>Fri 9 Oct</b><br><span class="muted small">Odd Fri · part, to 10:20</span></td>
+        <td><span class="pp ex"><b>Science</b> 07:50–09:20</span><span class="pp norm">lessons from 10:20</span></td>
+        <td><span class="pp ex"><b>Science</b> 07:50–09:20</span><span class="pp norm">lessons from 10:20</span></td>
+        <td><span class="pp ex"><b>Physics / Combined Sci (Phy)</b> 07:50–09:35</span><span class="pp norm">lessons from 10:20</span></td>
+        <td><span class="pp norm">normal lessons</span></td></tr>
+      <tr><td colspan="5" class="small muted" style="background:#fafbfc">Teachers: <b>44</b> freed until 10:20 · <b>24</b> invigilating · <span style="color:var(--amber)">1 backup</span></td></tr>
+      <tr><td colspan="5" class="muted small">… 6 more days</td></tr>
+    </table>
+  </div>
+  <div class="panel">
+    <h3>To check</h3>
+    <div class="small"><span class="flag">●</span> <b>Wed 7 Oct 10:20, Hall:</b> Sec 4 PE is in the Hall then (rain plan). Sec 3 Chemistry has been put in 6 classrooms instead. <span class="btn sm">Keep</span> <span class="btn sm">Use the Hall anyway</span></div>
+    <div class="small" style="margin-top:8px"><span class="flag">●</span> <b>Thu 8 Oct, Mother Tongue papers:</b> 4 students take Chinese and Higher Chinese. Higher Chinese has been placed on Tue 13 Oct so they don't clash. <span class="btn sm">OK</span> <span class="btn sm">Change</span></div>
+  </div>
+</section>
+
+<!-- 5 VENUES AND SEATING -->
+<section class="screen" id="s5">
+  <div class="about"><div class="who">Committee · one sitting at a time</div>
+    For each sitting the app fills venues that no running lesson needs, largest first. It seats students by the order you pick and keeps students with access arrangements in their own room with their extra time. Print a <b>seating plan</b> per venue, a <b>door list</b> per venue, and a <b>class list</b> showing where each student sits.</div>
+  <div class="grid2">
+    <div>
+      <div class="panel">
+        <div class="row spread"><h3 style="margin:0">Mon 5 Oct · 07:50 · English P1: Sec 1 (312) + Sec 2 (300)</h3><span class="chip ok">612 seated</span></div>
+        <table style="margin-top:8px">
+          <tr><th>Venue</th><th>Seats</th><th>Who</th><th>Invigilators</th></tr>
+          <tr><td><b>Hall</b></td><td>240 / 240</td><td>Sec 1 and Sec 2 in alternate columns: 1A–1C, 2A–2C</td><td>6 (1 chief)</td></tr>
+          <tr><td>Classrooms 1-01 to 1-05</td><td>187 / 210</td><td>1D–1H in their own rooms</td><td>5</td></tr>
+          <tr><td>Classrooms 2-01 to 2-04</td><td>176 / 168 <span class="flag">+8</span></td><td>2D–2G in their own rooms</td><td>4</td></tr>
+          <tr><td>Room 3-11 (special)</td><td>9 / 24</td><td>Access arrangements: 7 extra time 25%, 2 reader</td><td>2 <span class="muted small">(1 + reader)</span></td></tr>
+        </table>
+        <p class="small"><span class="flag">●</span> 2F has 44 students and room 2-04 seats 42. <span class="btn sm">Move 2 to Room 3-11</span> <span class="btn sm">Use Lab 2-08 for 2F</span></p>
+      </div>
+      <div class="panel">
+        <h3>How to seat <span class="prop">my proposal</span></h3>
+        <div class="row small" style="margin-bottom:8px"><b style="width:120px">Order</b><span class="seg"><span class="on">Class, then register number</span><span>Index number</span><span>Name</span></span></div>
+        <div class="row small" style="margin-bottom:8px"><b style="width:120px">Shared venue</b><span class="seg"><span class="on">Alternate levels by column</span><span>Alternate papers</span><span>One level per block of seats</span></span></div>
+        <div class="row small" style="margin-bottom:8px"><b style="width:120px">Spacing</b><span class="seg"><span class="on">Every seat</span><span>Leave a seat between</span></span></div>
+        <div class="row small"><b style="width:120px">Classrooms</b><span class="seg"><span class="on">Own class in own home room</span><span>Mix classes</span></span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="row spread"><h3 style="margin:0">Hall · seating plan</h3><span class="btn sm">Print</span></div>
+      <p class="small muted" style="margin:4px 0 8px">Blue Sec 1 · yellow Sec 2 · 24 rows × 10</p>
+      <div class="seats">
+        <span></span><div class="front">FRONT · invigilators' table</div>
+        <span class="seat lab"></span><span class="seat lab">A</span><span class="seat lab">B</span><span class="seat lab">C</span><span class="seat lab">D</span><span class="seat lab">E</span><span class="seat lab">F</span><span class="seat lab">G</span><span class="seat lab">H</span><span class="seat lab">I</span><span class="seat lab">J</span>
+        <span class="seat lab">1</span><span class="seat s1">1A<br>01</span><span class="seat s2">2A<br>01</span><span class="seat s1">1A<br>25</span><span class="seat s2">2A<br>25</span><span class="seat s1">1B<br>09</span><span class="seat s2">2B<br>09</span><span class="seat s1">1B<br>33</span><span class="seat s2">2B<br>33</span><span class="seat s1">1C<br>17</span><span class="seat s2">2C<br>17</span>
+        <span class="seat lab">2</span><span class="seat s1">1A<br>02</span><span class="seat s2">2A<br>02</span><span class="seat s1">1A<br>26</span><span class="seat s2">2A<br>26</span><span class="seat s1">1B<br>10</span><span class="seat s2">2B<br>10</span><span class="seat s1">1B<br>34</span><span class="seat s2">2B<br>34</span><span class="seat s1">1C<br>18</span><span class="seat s2">2C<br>18</span>
+        <span class="seat lab">3</span><span class="seat s1">1A<br>03</span><span class="seat s2">2A<br>03</span><span class="seat s1">1A<br>27</span><span class="seat s2">2A<br>27</span><span class="seat s1">1B<br>11</span><span class="seat s2">2B<br>11</span><span class="seat s1">1B<br>35</span><span class="seat s2">2B<br>35</span><span class="seat s1">1C<br>19</span><span class="seat s2">2C<br>19</span>
+        <span class="seat lab">4</span><span class="seat s1">1A<br>04</span><span class="seat s2">2A<br>04</span><span class="seat s1">1A<br>28</span><span class="seat s2">2A<br>28</span><span class="seat s1">1B<br>12</span><span class="seat s2">2B<br>12</span><span class="seat s1">1B<br>36</span><span class="seat s2">2B<br>36</span><span class="seat s1">1C<br>20</span><span class="seat s2">2C<br>20</span>
+        <span class="seat lab">⋮</span><span class="seat empty">⋮</span><span class="seat empty">⋮</span><span class="seat empty">⋮</span><span class="seat empty">⋮</span><span class="seat empty">⋮</span><span class="seat empty">⋮</span><span class="seat empty">⋮</span><span class="seat empty">⋮</span><span class="seat empty">⋮</span><span class="seat empty">⋮</span>
+        <span class="seat lab">24</span><span class="seat s1">1A<br>24</span><span class="seat s2">2A<br>24</span><span class="seat s1">1B<br>08</span><span class="seat s2">2B<br>08</span><span class="seat s1">1B<br>32</span><span class="seat s2">2B<br>32</span><span class="seat s1">1C<br>16</span><span class="seat s2">2C<br>16</span><span class="seat s1">1C<br>40</span><span class="seat s2">2C<br>40</span>
+      </div>
+      <p class="small muted">A seat shows the class and register number. Hover shows the name, e.g. <b>D2: 2A-26 Ryan Lim</b>. Seat numbers go on each student's exam timetable.</p>
+      <div class="row"><span class="btn sm">Door list</span><span class="btn sm">Class lists</span><span class="btn sm">Attendance sheet</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 INVIGILATORS -->
+<section class="screen" id="s6">
+  <div class="about"><div class="who">Committee · the invigilation roster</div>
+    Every duty is checked against that teacher's own lessons <b>on that date</b>: a Sec 4 lesson still runs, a Sec 3 lesson doesn't. The app picks people who are free, freed teachers first, then shares the duty minutes out evenly. Click a duty to see who else could take it.</div>
+  <div class="grid2">
+    <div>
+      <div class="panel" style="padding:6px 10px">
+        <table>
+          <tr><th>When</th><th>Venue · paper</th><th>Invigilators</th><th>Check</th></tr>
+          <tr><td>Mon 5 Oct<br><span class="small muted">07:35–09:30</span></td><td><b>Hall</b><br><span class="small">Sec 1 + 2 English P1 · 240</span></td><td class="small">Ms Grace Yeo <span class="chip">chief</span><br>Mr Kelvin Goh · Ms Priya Nair · Mr Ben Ong · Mdm Lim Hui Min · Mr Farid Osman</td><td><span class="okc">✓</span></td></tr>
+          <tr><td>Mon 5 Oct<br><span class="small muted">07:35–09:50</span></td><td><b>3-01</b><br><span class="small">Sec 3 English P1 · 3A · 38</span></td><td class="small">Mr Daniel Koh<br>Ms Siti Aminah</td><td><span class="flag">Backup</span><br><span class="small">Mr Koh teaches 4C Maths 08:20–09:00</span></td></tr>
+          <tr><td>Mon 5 Oct<br><span class="small muted">07:35–09:50</span></td><td><b>3-02</b><br><span class="small">Sec 3 English P1 · 3B · 37</span></td><td class="small">Ms Nadia Ismail<br>Mr Wong Jun Jie</td><td><span class="okc">✓</span> <span class="small muted">both freed</span></td></tr>
+          <tr><td>Mon 5 Oct<br><span class="small muted">09:55–11:20</span></td><td><b>3-01</b><br><span class="small">Sec 3 Maths P1 · 3A · 38</span></td><td class="small">Ms Chloe Tan<br>Mr Arjun Pillai</td><td><span class="chip amber">own subject</span><br><span class="small">Ms Tan teaches Maths</span></td></tr>
+          <tr><td>Mon 5 Oct<br><span class="small muted">07:35–09:30</span></td><td><b>3-11</b><br><span class="small">Access arrangements · 9</span></td><td class="small">Mdm Rosnah Ali<br>Mr Leon Teo <span class="chip">reader</span></td><td><span class="okc">✓</span></td></tr>
+          <tr><td colspan="4" class="small muted">… 207 more duties</td></tr>
+        </table>
+      </div>
+      <div class="panel">
+        <h3>Rules for invigilators <span class="small muted">(numbers are my proposal)</span></h3>
+        <div class="small">
+          ✓ Always: only teachers <b>free then</b>: not teaching a lesson that still runs, not away (from relief), not on another duty or event.<br>
+          ✓ How many: <span class="input" style="min-width:30px">2</span> per classroom; Hall <span class="input" style="min-width:30px">1</span> per <span class="input" style="min-width:30px">40</span> students plus a chief.<br>
+          ✓ Arrive <span class="input" style="min-width:50px">15 min</span> before the paper, stay <span class="input" style="min-width:50px">10 min</span> after for scripts.<br>
+          ✓ Who first: teachers whose own class is sitting (freed), then others who are free, lightest duty load first.<br>
+          ☐ Not in a paper of their own subject. <span class="muted">Is this a rule at your school?</span><br>
+          ☐ The subject teacher on standby for the first 15 minutes of their paper.<br>
+          ✓ <b>Backup invigilators, used first for a replacement:</b> <span class="chip">Mr Ivan Lee</span> <span class="chip">Mdm Rosnah Ali</span> <span class="chip">Mr Leon Teo</span> <span class="chip">Ms Tina Low (adjunct)</span> <span class="muted">+ add · may include staff who don't teach</span><br>
+          ✓ Keep backup invigilators off regular duties where possible, so they're free when needed <span class="prop">my proposal</span><br>
+          ✓ Never: <span class="chip">Mr Principal</span> <span class="chip">Ms VP</span> <span class="muted">(a list, like relief's)</span>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h3>Who could take 3-01 · Mon 07:35–09:50</h3>
+        <h4>Freed by the exam (their class is sitting)</h4>
+        <div class="small">Mr Ivan Lee · English <span class="muted">· 160 min so far</span> <span class="btn sm">Use</span></div>
+        <div class="small" style="margin-top:4px">Ms Mei Chan · Geography <span class="muted">· 200 min</span> <span class="btn sm">Use</span></div>
+        <h4>Free anyway</h4>
+        <div class="small">Mr Hafiz Rahman · PE <span class="muted">· 110 min</span> <span class="btn sm">Use</span></div>
+        <h4>Would need a backup</h4>
+        <div class="small muted">Mr Daniel Koh: 4C Maths 08:20–09:00 (now)<br>Ms Joanne Sim: 4A Chemistry 07:40–08:40</div>
+      </div>
+      <div class="panel">
+        <h3>Duty load · this exam</h3>
+        <table class="small">
+          <tr><td>Ms Mei Chan</td><td><div class="bar hi"><i style="width:92%"></i></div></td><td>8 · 11 h</td></tr>
+          <tr><td>Ms Grace Yeo</td><td><div class="bar"><i style="width:80%"></i></div></td><td>7 · 9 h 40</td></tr>
+          <tr><td>Mr Wong Jun Jie</td><td><div class="bar"><i style="width:70%"></i></div></td><td>6 · 8 h 20</td></tr>
+          <tr><td>Mr Daniel Koh</td><td><div class="bar"><i style="width:40%"></i></div></td><td>3 · 4 h 50</td></tr>
+          <tr><td>Ms Joanne Sim</td><td><div class="bar"><i style="width:15%"></i></div></td><td>1 · 1 h 50 <span class="muted">(Sec 4 heavy)</span></td></tr>
+        </table>
+        <p class="note">Counted this exam and across the year. Also counted in relief's "week so far", so relief shares out fairly in an exam week.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 BACKUPS AND RELIEF -->
+<section class="screen" id="s7">
+  <div class="about"><div class="who">Committee, then the relief team</div>
+    Every lesson in the exam's days falls into one of three lists. Only the middle one reaches the relief team, and only after the timetable committee approves <span class="prop">my proposal</span>. A backup you send goes in as <b>planned relief</b>, so it follows the relief rules: the AI's pick, the team's approval, Telegram, acknowledgement.</div>
+  <div class="grid3">
+    <div class="panel" style="background:var(--ok-bg)"><h3>No relief needed · 1,284 lessons</h3><div class="small">The class is sitting the exam, so the lesson doesn't happen.<br><br>e.g. Mon 5 Oct 08:20 · 3B Maths · Ms Nadia Ismail<br>Mon 5 Oct 10:40 · 2A Science · Mr Ben Ong<br><span class="muted">…</span></div><p class="note">These never show up as relief, and the teachers count as free for invigilation.</p></div>
+    <div class="panel" style="background:var(--amber-bg)"><h3>Backup needed · 9 lessons</h3>
+      <div class="small"><b>Mon 5 Oct 08:20–09:00 · 4C Maths</b><br>Mr Daniel Koh is invigilating 3-01<br><span class="btn sm blue">Send to relief team</span> <span class="btn sm">Handled ourselves</span> <span class="btn sm">Pick another invigilator</span></div>
+      <div class="small" style="margin-top:10px"><b>Tue 6 Oct 07:40–08:40 · 4A Chemistry</b><br>Ms Joanne Sim is chief in the Hall<br><span class="chip ok">Sent · AI pick Mr Hafiz Rahman · approved</span></div>
+      <div class="small" style="margin-top:10px"><b>Fri 9 Oct 09:00–09:40 · 1C Maths</b> <span class="muted">(part day: Sec 1 back at 10:20)</span><br>not affected <span class="muted">(1C is still on the exam)</span></div>
+      <p class="note"><span class="btn sm">Send all 9 to the relief team</span></p></div>
+    <div class="panel" style="background:#fff"><h3>Runs as usual</h3><div class="small">Sec 4 lessons whose teacher has no exam duty then.<br><br>Lessons of Sec 1–3 after the papers on part days (Fri 9 Oct from 10:20).</div></div>
+  </div>
+  <div class="panel">
+    <h3>A teacher with exam duties is away: two parts</h3>
+    <div class="row" style="gap:10px;margin-bottom:10px"><div class="case b small" style="flex:1"><b>Exam duties → the exams committee</b><br>Hall 07:35–09:30 (invigilator). Replacement picked below, on the main site at once.</div><div class="case c small" style="flex:1"><b>Lessons with other levels → the relief team</b><br>4A English 10:20–11:00 still runs. It goes to the relief team as usual: their pick, approval, Telegram.</div><div class="case a small" style="flex:1"><b>Lessons of classes on the exam</b><br>3B English 07:40: not happening. No one covers it.</div></div>
+    <div class="small">Ms Priya Nair asked for relief for <b>Tue 6 Oct</b> on the relief app, at 06:42. She had a duty: <b>Hall 07:35–09:30</b>.<br>
+      <span class="flag">●</span> The exams committee is told at once <span class="muted">(in the app, and on Telegram once relief's bot is there)</span> <span class="prop">my proposal</span><br>
+      <div style="background:var(--chip);border-radius:8px;padding:8px 10px;margin-top:8px">
+        <b>Who could take it</b> · free then<br>
+        <span class="small" style="font-weight:700;color:var(--navy)">BACKUP INVIGILATORS FIRST</span><br>
+        Mr Ivan Lee · backup · free · 40 min so far <span class="btn sm blue">Use</span><br>
+        Ms Tina Low · backup (adjunct) · free · 0 min <span class="btn sm blue">Use</span><br>
+        <span class="small" style="font-weight:700;color:var(--navy)">THEN OTHERS FREE THEN, LIGHTEST DUTY LOAD FIRST</span><br>
+        Mr Hafiz Rahman · PE · free anyway · 110 min <span class="btn sm blue">Use</span>
+      </div>
+      <p class="note">The exams committee picks the replacement. <b>It goes on the main site at once</b>, without waiting for the timetable committee, and the timetable committee is told. Mr Lee, a backup invigilator, is told on Telegram and sees it in his duties. Only a replacement for someone away works this way; any other change still waits for approval.</p></div>
+  </div>
+  <div class="panel">
+    <h3>The relief team's Today page on an exam day</h3>
+    <div class="small" style="background:var(--ex-bg);border-radius:8px;padding:8px 10px;margin-bottom:8px"><b>Mon 5 Oct · Sec 1–3 End-of-Year Exam.</b> Sec 1–3 lessons don't run. 28 teachers are invigilating and aren't offered for relief. 3 backups came from the exam.</div>
+    <table class="small">
+      <tr><th>Lesson</th><th>Absent / busy</th><th>Why</th><th>Relief</th><th>Status</th></tr>
+      <tr><td>08:20 · 4C Maths · 4-03</td><td>Mr Daniel Koh</td><td><span class="chip ex">Invigilating</span></td><td>Mr Hafiz Rahman <span class="muted">· free, lightest week</span></td><td><span class="chip amber">waiting for you</span></td></tr>
+      <tr><td>12:00 · 4B English · 4-02</td><td>Ms Rachel Ho</td><td><span class="chip">Medical</span></td><td>Mr Wong Jun Jie <span class="muted">· freed by the exam, same subject</span></td><td><span class="chip ok">acknowledged</span></td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- 8 EVENT -->
+<section class="screen" id="s8">
+  <div class="about"><div class="who">Teacher in charge of the event · then the timetable committee approves</div>
+    The <b>teacher in charge</b> sets up the event, signing in with their personal code. It goes to the timetable committee for approval before it shows on the main site, like an exam <span class="prop">my proposal</span>. An event works like an exam with no papers or seats. It has a time, the classes in it, and <b>who goes with them</b>. Their lessons with classes not at the event become backups. Lessons of the classes at the event stop.</div>
+  <div class="grid2">
+    <div>
+      <div class="panel">
+        <div class="row" style="margin-bottom:12px"><b style="width:120px">What is it</b><span class="seg"><span>Exam</span><span>Common test</span><span class="on">Event</span></span></div>
+        <div class="row" style="margin-bottom:12px"><b style="width:120px">Name</b><span class="input" style="min-width:300px">Sec 2 Learning Journey</span></div>
+        <div class="row" style="margin-bottom:12px"><b style="width:120px">Who</b><span class="chip">Whole school</span><span class="chip">Sec 1</span><span class="chip on">Sec 2 ✓</span><span class="chip">Sec 3</span><span class="chip">Sec 4</span></div>
+        <div class="row" style="margin-bottom:12px"><b style="width:120px">When</b><span class="input">Wed 18 Mar 2026</span><span class="muted small">Even Wed</span><span class="seg"><span>Whole day</span><span class="on">Part</span></span><span class="input" style="min-width:70px">08:00</span>–<span class="input" style="min-width:70px">13:00</span></div>
+        <div class="row"><b style="width:120px">Where</b><span class="input" style="min-width:200px">Off site (museum)</span><span class="muted small">or pick venues in school, which are then taken</span></div>
+      </div>
+      <div class="panel">
+        <h3>Who goes with the classes</h3>
+        <div class="row small" style="margin-bottom:8px"><span class="chip on">Form teachers of 2A–2G ✓</span><span class="chip">Teachers who'd teach Sec 2 then</span><span class="chip">A department</span><span class="chip">Pick people</span></div>
+        <table class="small">
+          <tr><td>Ms Aisha Rahman · 2A form teacher</td><td class="muted">free then: her Sec 2 lessons stop</td></tr>
+          <tr><td>Mr Ben Ong · 2B form teacher</td><td><span class="flag">teaches 4A Science 11:20–12:00</span> → backup</td></tr>
+          <tr><td>Ms Siti Aminah · 2C form teacher</td><td><span class="flag">teaches 3D Malay 09:40–10:40</span> → backup</td></tr>
+          <tr><td colspan="2" class="muted">… 9 more · + add a person</td></tr>
+        </table>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h3>What it does to lessons</h3>
+        <div class="case a small" style="margin-bottom:8px"><b>64 Sec 2 lessons stop</b> · no relief needed<br>Their 19 teachers are free then (shown in Who's free on that date)</div>
+        <div class="case c small" style="margin-bottom:8px"><b>7 lessons need backup</b><br>teachers going who have Sec 1, 3 or 4 classes<br><span class="btn sm blue">Send to relief team</span> <span class="btn sm">Handled ourselves</span></div>
+        <div class="case small"><b>Venues freed:</b> 2A–2G home rooms, 08:00–13:00 <span class="muted">(could be used for a make-up paper)</span></div>
+        <div class="row" style="margin-top:12px"><span class="btn">Save draft</span><span class="btn blue">Send to the timetable committee</span></div>
+        <p class="note">If a teacher going on the event is away, the teacher in charge picks a replacement, which goes on at once. The relief team covers that teacher's other lessons, as for exams.</p>
+      </div>
+      <div class="panel">
+        <h3>Duties at the event <span class="prop">my proposal</span></h3>
+        <div class="small">Optional list: duty · who · time<br>Bus marshal · Mr Farid Osman · 07:45<br>First aid · Mdm Lim Hui Min · all day</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 APPROVE -->
+<section class="screen" id="s10">
+  <div class="about"><div class="who">Timetable committee · approve before it goes on the main site</div>
+    The exams committee sends the schedule here. The timetable committee sees <b>what it changes on the main site</b> and approves it, or sends it back with a note. Only an approved schedule shows on the main site, and only on its own dates. After the last date, everyone sees the usual timetable again.</div>
+  <div class="row spread" style="margin-bottom:10px"><h2>Waiting for you · Sec 4 Preliminary Exam</h2><span class="small muted">sent by Ms Grace Yeo (Exams) · Thu 13 Aug, 16:05</span></div>
+  <div class="grid2">
+    <div>
+      <div class="panel">
+        <h3>What changes on the main site, Mon 17 – Fri 28 Aug</h3>
+        <table class="small">
+          <tr><td style="width:220px"><b>Classes</b></td><td>4A–4G (Sec 4) · 22 papers · part of the day, lessons after the papers</td></tr>
+          <tr><td><b>Lessons that won't happen</b></td><td>412 Sec 4 lessons <span class="muted">(no relief needed)</span></td></tr>
+          <tr><td><b>Teachers with duties</b></td><td>58 teachers · 146 invigilation duties · most: Ms Mei Chan, 9</td></tr>
+          <tr><td><b>Backups for the relief team</b></td><td>11 lessons of Sec 1–3, sent when you approve</td></tr>
+          <tr><td><b>Venues taken</b></td><td>Hall 07:30–11:00 on 8 days · 7 Sec 4 home rooms · Lab 3-08 on Tue 18 Aug</td></tr>
+          <tr><td><b>Lessons moved out of their room</b></td><td><span class="flag">6</span> Sec 1–3 PE lessons that use the Hall in wet weather <span class="btn sm">See them</span></td></tr>
+        </table>
+      </div>
+      <div class="panel">
+        <h3>Checks</h3>
+        <div class="small"><span class="okc">✓</span> No student has two papers at once · <span class="okc">✓</span> every student has a seat · <span class="okc">✓</span> every invigilator is free then</div>
+        <div class="small" style="margin-top:6px"><span class="flag">●</span> <b>Clash with another schedule:</b> the Sec 2 Learning Journey (waiting) takes 3 of these invigilators on Wed 19 Aug.</div>
+        <div class="small" style="margin-top:6px"><span class="flag">●</span> <b>Timetable changed since this was made:</b> you published a new timetable on Fri 14 Aug. 2 duties now clash with lessons. <span class="btn sm">Ask the exams committee to make it again</span></div>
+      </div>
+      <div class="row"><span class="btn ok">Approve: show on the main site</span><span class="btn">Send back with a note</span><span class="btn">Preview on the main site</span></div>
+    </div>
+    <div class="panel">
+      <h3>What needs your approval</h3>
+      <div class="small">
+        <b>Only changes to the main site.</b> Any change that would show there comes back to you, whether it's a paper, a date, a venue, a seat or an invigilator. You see just what changed. The approved version stays on the main site until you approve the new one.<br><br>
+        <b>Not the exams committee's own work.</b> Drafts, trying things, seating plans, rosters, printouts and downloads stay inside the exams committee. They don't need you.<br><br>
+        <b>One exception:</b> when an invigilator is away, the exams committee's replacement goes on at once. It's listed here under "Done without approval".<br><br>
+        <b>Withdraw</b> takes it off the main site at once. Backups already sent are cancelled in relief <span class="prop">my proposal</span>.
+      </div>
+      <h4>A change waiting for you</h4>
+      <div class="small" style="background:var(--chip);border-radius:8px;padding:8px 10px">Sec 1–3 End-of-Year Exam · 2 changes · sent by Ms Grace Yeo<br>• Tue 6 Oct, Hall: Mr Ben Ong → Mr Ivan Lee (invigilator)<br>• Thu 8 Oct: Malay P2 moved from 3-04 to 3-06<br><span class="btn sm ok">Approve the changes</span> <span class="btn sm">Send back</span></div>
+      <h4>Done without approval</h4>
+      <div class="small">Tue 6 Oct · Hall · Ms Priya Nair (away) → Mr Ivan Lee · by Ms Grace Yeo, 06:51</div>
+      <h4>Approved earlier</h4>
+      <div class="small">Sec 1–3 End-of-Year Exam · approved by Mr Daniel Koh, Tue 29 Sep · 4 invigilator changes since</div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 WHAT PEOPLE SEE -->
+<section class="screen" id="s9">
+  <div class="about"><div class="who">Published · teachers, students and parents</div>
+    A teacher sees their duties and which lessons don't happen. A student sees their papers with venue and seat. The published timetable, opened on an exam date, shows the exam in place of lessons. This is the date choice the relief plan adds.</div>
+  <div class="grid-phones row" style="align-items:flex-start;gap:28px">
+    <div class="phone">
+      <div class="t">My exam duties</div><div class="small muted">Mr Wong Jun Jie · Sec 1–3 End-of-Year Exam</div>
+      <div class="duty"><div class="when">Mon 5 Oct · 07:35–09:50</div><b>Invigilate 3-02</b> · Sec 3 English P1 · 37 students<div class="small muted">with Ms Nadia Ismail · scripts to the staff room</div></div>
+      <div class="duty"><div class="when">Mon 5 Oct · 09:55–11:20</div><b>Invigilate Hall</b> · Sec 3 Maths P1<div class="small muted">chief: Ms Grace Yeo</div></div>
+      <div class="duty" style="background:var(--amber-bg)"><div class="when">Mon 5 Oct · 12:00–12:40</div><b>Relief</b> · 4B English · 4-02<div class="small muted">for Ms Rachel Ho · acknowledged</div></div>
+      <div class="small" style="margin-top:8px"><b>Lessons that don't happen</b><br>Mon 07:40 3B English · Tue 07:40 3B English · Wed 10:20 3A Literature</div>
+      <div class="small muted" style="margin-top:8px">6 duties · 8 h 20 min this exam</div>
+    </div>
+    <div class="phone">
+      <div class="t">My exam timetable</div><div class="small muted">Alicia Ng · 3B · register 4</div>
+      <div class="duty"><div class="when">Mon 5 Oct · report 07:30</div><b>English P1</b> 07:50–09:40<div><span class="chip">Room 3-02</span> <span class="chip">Seat 4</span></div></div>
+      <div class="duty"><div class="when">Mon 5 Oct</div><b>Maths P1</b> 10:00–11:15<div><span class="chip">Hall</span> <span class="chip">Seat F12</span></div></div>
+      <div class="duty"><div class="when">Wed 7 Oct</div><b>Pure Chemistry</b> 10:20–12:05<div><span class="chip">Lab 3-08</span> <span class="chip">Seat 17</span></div></div>
+      <div class="duty" style="background:var(--ev-bg)"><div class="when">Fri 9 Oct</div><b>Physics</b> 07:50–09:35, then lessons from 10:20</div>
+      <div class="small muted" style="margin-top:8px">Parents see the same with the student's personal code.</div>
+    </div>
+    <div class="panel" style="flex:1;min-width:320px">
+      <div class="row spread"><h3 style="margin:0">Class 3B · <span class="input" style="min-width:120px">Mon 5 Oct ▾</span></h3><span class="chip ex">End-of-Year Exam</span></div>
+      <table class="tt" style="margin-top:8px">
+        <tr><th></th><th>Usual</th><th>On Mon 5 Oct</th></tr>
+        <tr><td class="p">07:40–08:20</td><td class="x">English · Mr Wong</td><td class="exm" rowspan="3">EXAM · English P1<br>07:50–09:40 · Room 3-02</td></tr>
+        <tr><td class="p">08:20–09:00</td><td class="x">Maths · Ms Nadia</td></tr>
+        <tr><td class="p">09:00–09:40</td><td class="x">Chinese · Mdm Lim</td></tr>
+        <tr><td class="p">09:40–10:00</td><td class="les">Recess</td><td class="les">Break</td></tr>
+        <tr><td class="p">10:00–11:20</td><td class="x">Science · Ms Joanne</td><td class="exm">EXAM · Maths P1<br>10:00–11:15 · Hall</td></tr>
+        <tr><td class="p">11:20–13:00</td><td class="x">History, PE</td><td class="muted">Home after the last paper</td></tr>
+      </table>
+      <div class="note">Lessons that don't happen are crossed out. The usual timetable is one click away ("Usual timetable").</div>
+      <div class="row spread" style="margin-top:14px"><h3 style="margin:0">Mr Daniel Koh · Mon 5 Oct</h3></div>
+      <table class="tt" style="margin-top:8px">
+        <tr><td class="p">07:35–09:50</td><td class="inv">INVIGILATE · 3-01 · Sec 3 English P1</td></tr>
+        <tr><td class="p">08:20–09:00</td><td class="x">4C Maths → relief: Mr Hafiz Rahman</td></tr>
+        <tr><td class="p">10:20–11:00</td><td class="les">4C Maths · 4-03</td></tr>
+      </table>
+      <div class="note">Who's free on that date counts invigilation and events.</div>
+    </div>
+  </div>
+</section>
+
+</main>
+<script>
+document.getElementById('tabs').addEventListener('click', e => {
+  const b = e.target.closest('button[data-s]'); if (!b) return;
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('section.screen').forEach(s => s.classList.toggle('on', s.id === b.dataset.s));
+  window.scrollTo(0, 0);
+});
+</script>
+</body>
+</html>
