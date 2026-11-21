@@ -114,7 +114,7 @@ def _no_overlap(records, teacher, lessons):
                     raise ValueError(f"{r['by']} has already sent an absence for {teacher} on {_say(datetime.date.fromisoformat(x['date']))}.")
 
 
-def new(data, pub, by, how, may_choose=False) -> dict:
+def new(data, pub, by, how, may_choose=False, links=None) -> dict:
     pub = _pub(pub)
     if how not in ("asked", "planned") or not isinstance(data, dict): raise ValueError(WRONG)
     settings = _settings.load(pub)
@@ -158,8 +158,11 @@ def new(data, pub, by, how, may_choose=False) -> dict:
             # a shared lesson needs no relief unless the client says so, but only while one of its other teachers is there:
             # others keeps those not away then, and with none there it is an ordinary lesson (needed unless the client says not).
             # An absence sent earlier that said "{them} is there" is left as it is; this one covers the lesson.
-            there = _free.there_then(records, x["others"], x["date"], x["p"], x["n"])
-            if there:
+            there = _free.there_then(records, x["others"], x["date"], x["p"], x["n"], links=links)
+            stopped = links.stopped(x) if links is not None else ""
+            if stopped:      # an approved exam or event holds every period of it: it does not happen, whatever the client asked
+                needed, not_needed = False, dict(by="app", why="Not happening: " + stopped)
+            elif there:
                 needed = a.get("needed") is True
                 not_needed = None if needed else dict(by="app", why=f"{' and '.join(there)} is there")
             else:
@@ -167,7 +170,8 @@ def new(data, pub, by, how, may_choose=False) -> dict:
                 not_needed = None if needed else dict(by=by, why="Not needed")
             built.append(dict(x, date=x["date"].isoformat(), others=there, needed=needed, not_needed=not_needed, relief=None, relief_by=None,
                               work=dict(text="", link="", files=[]), _ask=a))
-        if not any(x["needed"] for x in built): raise ValueError("There are no lessons to cover in that time.")
+        if not any(x["needed"] for x in built) and not (links is not None and any(links.duties(teacher, d, tuple(periods) if periods else None) for d in dates)):
+            raise ValueError("There are no lessons to cover in that time.")
         _no_overlap(records, teacher, [x for x in built if x["needed"]])
         pending = dict(teacher=teacher, dates=[d.isoformat() for d in dates], periods=periods, cancelled=None, lessons=[])
         if not may_choose and any(x["needed"] and x["_ask"].get("relief") for x in built):
@@ -176,7 +180,7 @@ def new(data, pub, by, how, may_choose=False) -> dict:
             name = x["_ask"].get("relief")
             if name and x["needed"]:
                 lesson = dict(x, date=datetime.date.fromisoformat(x["date"]))
-                free = _free.free_then(pub, settings, records + [pending], lesson, teacher)
+                free = _free.free_then(pub, settings, records + [pending], lesson, teacher, links=links)
                 if name not in [p["name"] for g in free["groups"] for p in g["people"]]:
                     raise ValueError(f"{name} is not free for {' and '.join(x['classes'])} {x['subject']} then.")
                 x["relief"], x["relief_by"] = name, by
@@ -293,7 +297,7 @@ def needed_again(id, key, by, *, team=False):
     return r
 
 
-def choose(id, key, relief_name, by, pub):
+def choose(id, key, relief_name, by, pub, links=None):
     """relief_name None or "" takes the choice off; the caller checks the relief.plan right"""
     pub = _pub(pub)
     with _LOCK:
@@ -304,7 +308,7 @@ def choose(id, key, relief_name, by, pub):
         if not relief_name:
             x["relief"], x["relief_by"] = None, None
         else:
-            free = _free.free_then(pub, _settings.load(pub), all_records(), dict(x, date=datetime.date.fromisoformat(x["date"])), r["teacher"])
+            free = _free.free_then(pub, _settings.load(pub), all_records(), dict(x, date=datetime.date.fromisoformat(x["date"])), r["teacher"], links=links)
             if relief_name not in [p["name"] for g in free["groups"] for p in g["people"]]:
                 raise ValueError(f"{relief_name} is not free for {' and '.join(x['classes'])} {x['subject']} then.")
             x["relief"], x["relief_by"] = relief_name, by

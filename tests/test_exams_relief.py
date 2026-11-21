@@ -264,5 +264,85 @@ def relief_plan_page_shows_the_busy_fold():
     js = open(os.path.join(ROOT, "static", "relief-plan.js"), encoding="utf-8").read()
     assert "on an exam duty or at an event then" in js
 
+# ---- Task 3: asking for and planning relief on an exam or event day
+from relief import absences as AB  # noqa: E402
+
+def _ask(teacher, lessons=None, **kw):
+    return dict(teacher=teacher, dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=lessons or [], **kw)
+
+def _q(c, teacher, path="lessons"):
+    return c.get("/api/relief/%s?teacher=%s&dates=%s" % (path, urllib.parse.quote(teacher), ISO))
+
+@t
+def lessons_route_marks_not_happening():
+    _clear(); _exam()
+    with published(PUB):
+        j = _q(staff(GRACE), AISHA).get_json()
+    by = {x["classes"][0]: x for x in j["lessons"]}
+    assert by["3A"]["stopped"] == "3A is on " + EXAM, j["lessons"]
+    assert all(x["stopped"] == "" for x in j["lessons"] if x["classes"] == ["4A"])
+    assert j["duties"][ISO] == [dict(start="07:40", end="09:10", what="Invigilating: %s · 3-01" % EXAM, replaces="the exams committee")], j["duties"]
+    _clear()
+    with published(PUB):
+        j = _q(staff(GRACE), AISHA).get_json()
+    assert all(x["stopped"] == "" for x in j["lessons"]) and j["duties"][ISO] == []
+
+@t
+def new_absence_marks_stopped_lessons():
+    _clear(); _exam()
+    with published(PUB):
+        mine = LS.on_date(PUB, CAL, AISHA, MON)
+        stopped = [x for x in mine if "3A" in x["classes"]]
+        assert stopped
+        asks = [dict(key=x["key"], needed=True) for x in mine]
+        r = AB.new(_ask(AISHA, asks), PUB, GRACE, "planned", may_choose=True, links=_links())
+        for x in r["lessons"]:
+            if x["key"] in {y["key"] for y in stopped}:
+                assert x["needed"] is False and x["not_needed"] == dict(by="app", why="Not happening: 3A is on " + EXAM), x
+        AB.cancel(r["id"], "test", GRACE, team=True)
+
+@t
+def duty_only_absence_is_accepted():
+    _clear(); _exam()
+    old = LS.today
+    with published(PUB):
+        c = staff(GRACE)
+        mine = LS.on_date(PUB, CAL, AISHA, MON)
+        body = _ask(AISHA, [dict(key=x["key"], needed=False) for x in mine])
+        r = c.post("/api/relief/absences", json=body)
+        assert r.status_code == 200, r.get_data(as_text=True)[:300]
+        AB.cancel(r.get_json()["id"], "test", GRACE, team=True)
+        _clear()
+        r = c.post("/api/relief/absences", json=body)
+        assert r.status_code in (400, 409, 422) and r.get_json()["error"] == "There are no lessons to cover in that time.", r.get_data(as_text=True)[:300]
+
+@t
+def choosing_an_invigilator_is_refused():
+    _clear()
+    with published(PUB):
+        c = staff(GRACE)
+        mine = LS.on_date(PUB, CAL, DANIEL, MON)
+        row = next(x for x in mine if x["p"] == 1)
+        r = c.post("/api/relief/absences", json=_ask(DANIEL, [dict(key=x["key"], needed=True) for x in mine]))
+        assert r.status_code == 200, r.get_data(as_text=True)[:300]
+        rid = r.get_json()["id"]
+        url = "/api/relief/absences/%s/lessons/%s/relief" % (rid, urllib.parse.quote(row["key"]))
+        _exam(duty_names=(BEN,))
+        r = c.put(url, json=dict(relief=BEN))
+        err = r.get_json()["error"]
+        assert r.status_code != 200 and err.startswith(BEN + " is not free for ") and err.endswith(" then."), (r.status_code, err)
+        _clear()
+        r = c.put(url, json=dict(relief=BEN))
+        assert r.status_code == 200, r.get_data(as_text=True)[:300]
+        AB.cancel(rid, "test", GRACE, team=True)
+
+@t
+def forms_say_not_happening():
+    for f in ("relief.js", "relief-plan.js"):
+        js = open(os.path.join(ROOT, "static", f), encoding="utf-8").read()
+        assert "Not happening: " in js and "no relief needed" in js, f
+    assert "replaces you" in open(os.path.join(ROOT, "static", "relief.js"), encoding="utf-8").read()
+    assert "replaces them" in open(os.path.join(ROOT, "static", "relief-plan.js"), encoding="utf-8").read()
+
 _clear()
 print(f"{COUNT} exams and relief tests passed")

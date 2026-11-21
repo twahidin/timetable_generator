@@ -252,8 +252,11 @@
     const empty = P.loading || P.lerr ? "" : !P.teacher ? "Choose the absent teacher first." : !dates().length ? "Choose the dates first."
       : someWaiting() ? "Choose the periods first." : `${P.teacher} has no lessons then.`;
     sayBox.innerHTML = P.lerr ? `<p>${say(P.lerr)}${P.lerr.status === 0 ? ` <button type="button" class="small" data-pl="reread">Try again</button>` : ""}</p>` : P.loading ? `<p class="small muted">Reading the lessons…</p>` : "";
-    RF.lessons(list, P.lerr ? [] : P.lessons, {   /* with a refusal, nothing is listed (and nothing is sent), but what was typed is kept */
-      empty, workLabel: `Work for this lesson (optional: ${P.teacher || "the absent teacher"} is asked to set it)`, onChange: lessonEdited,
+    const shown = P.lerr ? [] : P.lessons, stopped = shown.filter(x => x.stopped), duties = P.lerr ? {} : P.duties || {};
+    const lines = Object.keys(duties).sort().flatMap(d => (duties[d] || []).map(u => `<p class="small">${esc(`${day(d)}: ${u.what}, ${u.start}–${u.end}: ${u.replaces} replaces them.`)}</p>`));
+    $("#plStopped", P.pane).innerHTML = stopped.map(x => `<p class="small muted"><b>${esc(RF.title(x))}</b> · ${esc(RF.when(x))}: ${esc("Not happening: " + x.stopped + " · no relief needed")}</p>`).join("") + lines.join("");
+    RF.lessons(list, shown.filter(x => !x.stopped), {   /* with a refusal, nothing is listed (and nothing is sent), but what was typed is kept */
+      empty: stopped.length || lines.length ? "" : empty, workLabel: `Work for this lesson (optional: ${P.teacher || "the absent teacher"} is asked to set it)`, onChange: lessonEdited,
       side: x => RF.needed(list, x.key) ? sideHTML(formCtx(x.key), P.chosen.get(chosenKey(x.key)) || "") : "",
       extra: x => RF.needed(list, x.key) ? `<div class="pl-free">${freeArea(formCtx(x.key))}</div>` : "",
     });
@@ -293,6 +296,7 @@
     if (!r.ok) { P.readFor = ""; P.lessons = []; P.lerr = { text: r.error, bad: true, status: r.status }; paintAway(); paintLessons(); paintSend(); return; }
     if (Array.isArray(r.data.periods)) P.periods = r.data.periods;
     P.readFor = key;
+    P.duties = r.data.duties || {};
     P.lessons = some && !both ? [] : r.data.lessons || [];   /* "Some periods" lists nothing until from and to are chosen */
     paintAway(); paintLessons(); paintSend();
   }
@@ -486,7 +490,7 @@
         <div class="field"><div class="flabel">Away for</div><div id="plAway"></div></div>
         <div class="field"><div class="flabel">Reason</div><div id="plReason"></div></div>
         <div class="field"><label class="flabel" for="plRemarks">Remarks for the relief team</label><input id="plRemarks" class="reason-line" maxlength="300" placeholder="e.g. Worksheets are on the desk" autocomplete="off"></div>
-        <div class="field"><div class="flabel" id="plLessonsLabel"></div><div id="plLessonsSay"></div><div id="plLessonList"></div></div>
+        <div class="field"><div class="flabel" id="plLessonsLabel"></div><div id="plLessonsSay"></div><div id="plStopped"></div><div id="plLessonList"></div></div>
         <div id="plSend"></div></div>
         <div class="card" id="plPlanned"><div class="ab-top"><h2>Planned by me</h2></div>
           <div class="pl-dl"><span class="flabel">Download the relief sheet</span>

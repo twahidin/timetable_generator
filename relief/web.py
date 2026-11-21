@@ -178,11 +178,13 @@ def lessons():
         dates = _absences._iso_dates([x.strip() for x in (request.args.get("dates") or "").split(",") if x.strip()], _lessons.today())
         periods = _period_range(pub, request.args.get("from"), request.args.get("to"))
         records = _absences.all_records()
-        by_date = {d.isoformat(): [_iso(dict(x, others=_free.there_then(records, x["others"], d, x["p"], x["n"])))       # as new() decides
+        links = _links(pub, settings["calendar"])
+        by_date = {d.isoformat(): [_iso(dict(x, others=_free.there_then(records, x["others"], d, x["p"], x["n"], links=links), stopped=links.stopped(x)))       # as new() decides
                                    for x in _lessons.on_date(pub, settings["calendar"], teacher, d, periods=periods)] for d in dates}
         every = _periods(pub)
+        duties = {d.isoformat(): links.duties(teacher, d, periods) for d in dates}
     except ValueError as e: return _refusal(e)
-    return jsonify(lessons=[x for v in by_date.values() for x in v], by_date=by_date, periods=every)
+    return jsonify(lessons=[x for v in by_date.values() for x in v], by_date=by_date, periods=every, duties=duties)
 
 
 @bp.get("/api/relief/free")
@@ -224,7 +226,7 @@ def create():
     plan = _has("relief.plan")
     how = "asked" if teacher == me else "planned"
     if how == "planned" and not plan: return {"error": PLAN_ONLY}, 403
-    try: r = _absences.new(dict(data, teacher=teacher), pub, me, how, may_choose=plan)
+    try: r = _absences.new(dict(data, teacher=teacher), pub, me, how, may_choose=plan, links=_links(pub, _cal(pub)))
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "sending an absence")
     return jsonify(_out(r, pub, me))
@@ -327,7 +329,7 @@ def needed(id, key):
 def _choose(r, key, me, pub, b):
     name = b.get("relief")
     if name is not None and not isinstance(name, str): raise ValueError(_absences.WRONG)
-    return _absences.choose(r["id"], key, name or None, me, pub)
+    return _absences.choose(r["id"], key, name or None, me, pub, links=_links(pub, _cal(pub)))
 
 
 @bp.put("/api/relief/absences/<id>/lessons/<path:key>/relief")
