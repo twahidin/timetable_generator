@@ -279,7 +279,8 @@ def a_staff_code_signs_in_as_that_person():
         assert r.status_code == 302 and r.headers["Location"].endswith("/relief"), r.headers.get("Location")
         with c.session_transaction() as s: assert s["role"] == "staff" and s["who"] == "Mr Darren Lim"
         me = c.get("/api/relief/me").get_json()
-        assert me == dict(name="Mr Darren Lim", depts=["Science"], on_team=False, on_management=False, can_settings=False), me
+        assert me == dict(name="Mr Darren Lim", depts=["Science"], on_team=False, on_management=False, can_settings=False, can_plan=False, can_team=False,
+                          today=A.relief_lessons.today().isoformat()), me
         r = c.get("/"); assert r.status_code == 302 and r.headers["Location"].endswith("/relief")
         with A.app.test_request_context():
             A.session["role"], A.session["who"] = "staff", "Mr Darren Lim"
