@@ -1059,6 +1059,52 @@ def a_backup_emptied_partly_by_a_duty_change_says_the_duty_changed():
     assert RL.sync(SC.load(id), PUB, CAL, SOON) == dict(sent=0, cancelled=1)
     assert AB.load(b["id"])["cancelled"]["why"] == "The duty changed.", AB.load(b["id"])["cancelled"]
 
+@t
+def links_log_what_they_cannot_read_once():
+    _clear(); e = _exam(); _event()
+    lg, seen = RL.logger, []
+    old_exc, old_view, old_busies = lg.exception, RL._days.merged_view, RL._schedules.busies
+    def no_view(*a, **k): raise KeyError("test")
+    def busies(copies, model):
+        if copies[0]["id"] == e["id"]: raise KeyError("test")
+        return old_busies(copies, model)
+    lg.exception = lambda msg, *a, **k: seen.append(msg % a)
+    RL._days.merged_view = no_view
+    try:
+        L = _links()
+        tue = date(2027, 1, 5)
+        assert L.stopped(_lesson(0)) == L.stopped(_lesson(0)) == L.stopped(dict(_lesson(0), date=tue)) == ""
+        assert seen == ["exams: relief links could not read %s" % ISO, "exams: relief links could not read 2027-01-05"], seen
+        seen[:] = []
+        RL._days.merged_view, RL._schedules.busies = old_view, busies
+        L = _links()
+        assert L.busy(AISHA, MON, 0, 1) == L.busy(AISHA, MON, 0, 1) == "", "the exam that cannot be read gives no duty"
+        assert L.busy(BEN, MON, 0, 1) == "At event: " + EVENT, "the event still counts"
+        assert seen == ["exams: relief links could not read the duties of schedule %s" % e["id"]], seen
+    finally:
+        lg.exception, RL._days.merged_view, RL._schedules.busies = old_exc, old_view, old_busies
+
+@t
+def links_name_the_classes_when_two_windows_meet_mid_period():
+    _clear()
+    for name, a, b in (("Sec 4 Talk", "08:40", "08:50"), ("Sec 4 Visit", "08:50", "09:00")):
+        e = SC.new_event(name, ["Sec 4"], [], ISO, ISO, GRACE, GRACE)
+        e["days"] = {ISO: dict(levels=["Sec 4"], whole=False, **{"from": a, "to": b})}
+        _approve(e)
+    real = RL._days.merged_view
+    def joined(pub, cal, scheds, iso):        # as a view that joins windows meeting mid-period would give it
+        v = real(pub, cal, scheds, iso)
+        for r in v["lessons"]:
+            if r["row"] == 7: r["stopped"], r["running"] = [(520, 540)], []       # 4A Literature, period 4 (08:40-09:00)
+        return v
+    RL._days.merged_view = joined
+    try:
+        assert _links().stopped(_lesson(7)) == "4A is on Sec 4 Talk and Sec 4 Visit", _links().stopped(_lesson(7))
+    finally:
+        RL._days.merged_view = real
+    assert _links().stopped(_lesson(7)) == "", "the view as it is: no one window holds the period, so it runs"
+    _clear()
+
 
 _clear()
 print(f"{COUNT} exams and relief tests passed")

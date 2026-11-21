@@ -74,6 +74,7 @@ class Links:
             view = _days.merged_view(self.pub, self.cal, self.scheds, iso)
             wins = [(s, _days._windows(s, iso, self.model, self.bnds)) for s in self.scheds]
         except (ValueError, KeyError, IndexError, TypeError):
+            logger.exception("exams: relief links could not read %s", iso)        # once a date: the answer is kept
             return out
         out["day"] = day
         for r in view["lessons"]:
@@ -85,8 +86,8 @@ class Links:
             if r["running"] or not r["stopped"]:
                 continue
             held = []
-            for s, w in wins:
-                mine = [c for c in r["classes"] if c in w and any(w[c][0] <= self.bnds[p][0] and self.bnds[p][1] <= w[c][1] for p in periods)]
+            for s, w in wins:      # a class is named for each schedule whose window overlaps the stopped time (two may meet mid-period)
+                mine = [c for c in r["classes"] if c in w and any(w[c][0] < b and a < w[c][1] for a, b in r["stopped"])]
                 if mine:
                     held.append((min(w[c][0] for c in mine), s["name"], mine))
             held.sort(key=lambda h: h[0])
@@ -100,17 +101,20 @@ class Links:
         return self._day(lesson["date"])["stopped"].get(lesson["key"], "")
 
     def _by_name(self):
-        """{iso: {name: [(start, end, what, replaces)]}} from the approved duties and events, by start"""
+        """{iso: {name: [(start, end, what, replaces)]}} from the approved duties and events, by start; a schedule that cannot
+        be read gives none (one log line)"""
         if self._duties is not None:
             return self._duties
         out = self._duties = {}
         if not self.bnds or not self.scheds:
             return out
         by_id = {s["id"]: s for s in self.scheds}
-        try:
-            rows = _schedules.busies(self.scheds, self.model)
-        except (ValueError, KeyError, TypeError):
-            return out
+        rows = []
+        for s in self.scheds:
+            try:
+                rows += _schedules.busies([s], self.model)
+            except (ValueError, KeyError, TypeError):
+                logger.exception("exams: relief links could not read the duties of schedule %s", s.get("id"))
         for b in rows:
             s = by_id.get(b["id"])
             if s is None or not b.get("names"):
