@@ -46,4 +46,27 @@ t("an event's free line has no room in brackets", () => {
   const all = [free([ev("Ms A"), ev("Mr B")]), others([TAKES])];
   assert.deepStrictEqual(checkLines(all[1], all), []);
 });
+/* the Lessons tab: one backup item of each state, its sentence and its "Handled ourselves" box */
+const esc = x => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const stateCode = SRC.slice(SRC.indexOf("const BACKUP_STATE"), SRC.indexOf("function lessonList("));   /* the state table, the box rule and backupState */
+const lessonsTab = view => new Function("esc", "S", "fmtDate", `${stateCode}\n${cut("lessonList")}\n${cut("tabLessons")}; return tabLessons();`)(esc, { view, open: {}, busy: false }, d => d);
+const STATES = [["later", "Goes to the relief team when approved", true], ["sent", "Sent to the relief team", true], ["relief", "Relief: Mr Ben Ong", true],
+  ["handled", "Handled ourselves", true], ["stopped", "Not happening: 3A is on Sec 3 End-of-Year Exam", false], ["past", "In the past", false], ["elsewhere", "Sent by another schedule", false]];
+t("the Lessons tab says where each backup stands and offers Handled ourselves only where it can", () => {
+  const backup = STATES.map(([state], i) => ({ date: "2027-01-04", start: "07:40", end: "08:20", classes: ["3A"], subject: "English", teachers: ["Ms Z"], teacher: "Ms Z" + i, key: "k" + i, state,
+    relief: state === "relief" ? "Mr Ben Ong" : null, stopped: state === "stopped" ? "3A is on Sec 3 End-of-Year Exam" : "" }));
+  const html = lessonsTab({ lessons: { none: [], backup, runs: [] } });
+  STATES.forEach(([state, text, box], i) => {
+    assert(html.includes(`>${text}`), state + ": " + text);
+    const has = html.includes(`data-t="Ms Z${i}" data-k="k${i}"`);
+    assert.strictEqual(has, box, state + " box");
+  });
+  assert.strictEqual((html.match(/Handled ourselves<\/label>/g) || []).length, 4);
+  assert(/data-k="k3" checked/.test(html), "only the handled one is ticked");
+  assert(!/data-k="k0" checked/.test(html));
+  assert(html.includes("Backups go to the relief team as planned relief when the schedule is approved."));
+});
+t("the exams page no longer says that sending comes in a later stage", () => {
+  assert(!SRC.includes("arrives in a later stage") && !SRC.includes("comes in a later stage"));
+});
 console.log(`${n} exams page tests passed`);

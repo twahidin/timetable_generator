@@ -871,5 +871,25 @@ def malformed_records_are_skipped():
     assert list(RL.backups(PUB, CAL, SC.load(e["id"]), _links(), bad, SOON)) == [DANIEL]
 
 
+@t
+def handled_on_one_schedule_covers_every_schedule():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        a = _made_exam([_duty([DANIEL])])["id"]; _send_approve(c, a)
+        b = _made_exam([_duty([DANIEL])])["id"]; _send_approve(c, b)
+        assert [len(_backups(a)), len(_backups(b))] == [1, 0]
+        ok(c.post(f"/api/exams/{a}/handled", json=dict(teacher=DANIEL, key=DKEY, handled=True)))
+        assert [len(_backups(a)), len(_backups(b))] == [0, 0], "the other schedule sends nothing for it either"
+        item = next(x for x in ok(c.get(f"/api/exams/{b}/view"))["lessons"]["backup"] if x["key"] == DKEY)
+        assert item["state"] == "elsewhere", item
+        assert ok(c.get(f"/api/exams/{b}/review"))["review"]["what"]["backups"] == 0, "not counted on the Approval tab"
+        ok(c.post(f"/api/exams/{a}/handled", json=dict(teacher=DANIEL, key=DKEY, handled=False)))
+        assert [len(_backups(a)), len(_backups(b))] == [1, 0]
+        assert ok(c.get(f"/api/exams/{a}/review"))["review"]["what"]["backups"] == 1
+        ok(c.post(f"/api/exams/{a}/handled", json=dict(teacher=DANIEL, key=DKEY, handled=True)))
+        assert ok(c.get(f"/api/exams/{a}/review"))["review"]["what"]["backups"] == 0, "handled ourselves is not counted"
+
+
 _clear()
 print(f"{COUNT} exams and relief tests passed")

@@ -884,10 +884,22 @@
   }
 
   /* ---------------------------------------------------------------- tab 7: lessons */
-  function lessonList(title, list, cls, extra) {
+  /* where one backup stands: the sentence for its state, and whether "Handled ourselves" can be ticked (not once it is stopped, past or sent by another schedule) */
+  const BACKUP_STATE = {
+    later: () => "Goes to the relief team when approved", sent: () => "Sent to the relief team", relief: l => `Relief: ${l.relief}`,
+    handled: () => "Handled ourselves", stopped: l => `Not happening: ${l.stopped}`, past: () => "In the past", elsewhere: () => "Sent by another schedule"
+  };
+  const CAN_HANDLE = { later: 1, sent: 1, relief: 1, handled: 1 };
+  function backupState(l) {
+    const f = BACKUP_STATE[l.state]; if (!f) return "";
+    const box = CAN_HANDLE[l.state] ? ` <label class="tick"><input type="checkbox" data-h="1" data-t="${esc(l.teacher)}" data-k="${esc(l.key)}" ${l.state === "handled" ? "checked" : ""} ${S.busy ? "disabled" : ""}> Handled ourselves</label>` : "";
+    return `<div class="small muted">${esc(f(l))}${box}</div>`;
+  }
+
+  function lessonList(title, list, cls, extra, state) {
     const by = {}; list.forEach(l => { (by[l.date] = by[l.date] || []).push(l); });
     const days = Object.keys(by).sort().map(date => `<details data-d="${esc(title + date)}" ${S.open[title + date] ? "open" : ""}><summary>${esc(fmtDate(date))} · ${by[date].length}</summary>
-      ${by[date].map(l => `<div class="small">${esc(l.start)}–${esc(l.end)} · ${esc((l.classes || []).join(", "))} ${esc(l.subject)}${(l.teachers || []).length ? " · " + esc(l.teachers.join(", ")) : ""}${l.note ? ` <span class="muted">· ${esc(l.note)}</span>` : ""}</div>`).join("")}</details>`).join("");
+      ${by[date].map(l => `<div class="small">${esc(l.start)}–${esc(l.end)} · ${esc((l.classes || []).join(", "))} ${esc(l.subject)}${(l.teachers || []).length ? " · " + esc(l.teachers.join(", ")) : ""}${l.note ? ` <span class="muted">· ${esc(l.note)}</span>` : ""}</div>${state ? state(l) : ""}`).join("")}</details>`).join("");
     return `<div class="panel ${cls}"><h3>${esc(title)} · ${list.length} ${list.length === 1 ? "lesson" : "lessons"}</h3>${days || `<div class="small muted">None.</div>`}${extra || ""}</div>`;
   }
 
@@ -896,7 +908,7 @@
     if (!L) return `<div class="card"><p class="muted">Loading…</p></div>`;
     return `<div class="grid3">
       ${lessonList("No relief needed", L.none || [], "okbg")}
-      ${lessonList("Backup needed", L.backup || [], "ambg", `<p class="muted small" style="margin-top:10px">Sending backups to the relief team arrives in a later stage.</p>`)}
+      ${lessonList("Backup needed", L.backup || [], "ambg", `<p class="muted small" style="margin-top:10px">Backups go to the relief team as planned relief when the schedule is approved.</p>`, backupState)}
       ${lessonList("Runs as usual", L.runs || [], "")}</div>`;
   }
 
@@ -1091,7 +1103,7 @@
       return `<div class="card"><h2>What changes on the main site</h2>
       <p>Classes ${esc(w.classes.join(", ") || "none")} (${esc(w.levels.join(", ") || "none")})${w.where ? " · " + esc(w.where) : ""} · ${when}</p>
       <p>Lessons that won't happen: ${w.stopped} (no relief needed)</p>
-      <p>People going: ${w.going} · lessons that need backup: ${w.backups} (sending them comes in a later stage)</p>
+      <p>People going: ${w.going} · lessons that need backup: ${w.backups} (sent to the relief team when approved)</p>
       <p>Venues taken: ${venues || "none"}</p>
       <p>Lessons that use a venue taken: ${w.flagged}</p></div>`;
     }
@@ -1100,7 +1112,7 @@
       <p>Classes ${esc(w.classes.join(", ") || "none")} (${esc(w.levels.join(", ") || "none")}) · ${nTimes(w.papers, "paper", "papers")} · ${when}</p>
       <p>Lessons that won't happen: ${w.stopped} (no relief needed)</p>
       <p>Teachers with duties: ${w.teachers} · ${nTimes(w.duties, "duty", "duties")}${w.most ? ` · most: ${esc(w.most[0])}, ${w.most[1]}` : ""}</p>
-      <p>Backups for the relief team: ${w.backups} (sending them comes in a later stage)</p>
+      <p>Backups for the relief team: ${w.backups} (sent when approved)</p>
       <p>Venues taken: ${venues || "none"}</p>
       ${anyway ? `<p>Rain rooms used anyway: ${anyway}</p>` : ""}</div>`;
   }
@@ -1170,8 +1182,20 @@
     if (el.tagName === "SELECT" || ty === "checkbox" || ty === "date" || ty === "file") return;
     onField(e);
   }
+  /* "Handled ourselves": the answer is the schedule's view again (the Lessons tab reads it); the Approval counts are read again */
+  async function onHandled(el) {
+    if (S.busy) { el.checked = !el.checked; return; }
+    S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
+    const r = await api("POST", `${S.base}/${S.id}/handled`, { teacher: el.dataset.t, key: el.dataset.k, handled: !!el.checked });
+    S.busy = false;
+    if (r.status === 401 || r.status === 403) return;
+    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return; }
+    S.view = r.j; S.rv = null; paintSave(); paint();
+  }
+
   function onChange(e) {
     const el = e.target, ty = el.type;
+    if (ty === "checkbox" && el.dataset.h && S.id) { onHandled(el); return; }
     if (ty === "file") { onFile(el); return; }
     if (el.tagName === "SELECT" || ty === "checkbox" || ty === "date") onField(e);
   }

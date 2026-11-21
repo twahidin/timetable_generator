@@ -302,9 +302,17 @@ def _live_backups(records):
 
 
 def _held_elsewhere(records, sid) -> set:
-    """{(teacher, lesson key)} held by a live backup of another schedule (needed or marked not needed)"""
-    return {(r["teacher"], x["key"]) for r in _live_backups(records) if r["exams"].get("id") != sid
-            for x in r.get("lessons") or [] if isinstance(x, dict) and isinstance(x.get("key"), str)}
+    """{(teacher, lesson key)} held by a live backup of another schedule (needed or marked not needed), or put in another
+    approved schedule's "Handled ourselves" ({teacher}|{key}): handled on one schedule covers that lesson for every schedule"""
+    out = {(r["teacher"], x["key"]) for r in _live_backups(records) if r["exams"].get("id") != sid
+           for x in r.get("lessons") or [] if isinstance(x, dict) and isinstance(x.get("key"), str)}
+    for o in _schedules.all_saved():
+        if o.get("id") == sid or not o.get("approved"):
+            continue
+        for tag in o.get("handled") or []:
+            if isinstance(tag, str) and "|" in tag:
+                out.add(tuple(tag.split("|", 1)))
+    return out
 
 
 def backups(pub, cal, sched, links, records, today) -> dict:
