@@ -16,6 +16,8 @@ AT_EVENT = "At event: %s"
 EXAMS_BY = "Exams committee"
 EXAMS_COMMITTEE = "the exams committee"
 DUTY_CHANGED = "The duty changed."
+HANDLED_BY_EXAMS = "Handled by the exams committee."
+HANDLED_BY_IN_CHARGE = "Handled by the teacher in charge."
 WITHDRAWN = "The schedule was withdrawn."
 SYNC_FAILED = "exams: relief sync failed"
 logger = logging.getLogger(__name__)
@@ -397,8 +399,9 @@ def sync(sched, pub, cal, today, copies=None) -> dict:
     """keep relief's backups of the schedule in step with its approved copy (P6, P7, P9), changing them in place
     (relief.absences.update_exams: a lesson dated before today always stays); idempotent. Per person, the lessons wanted
     (backups) against the keys of their backup's lessons dated today or later: the same (and the same by and reason) changes
-    nothing; else the backup is brought up to date (lessons no longer wanted go, new ones come in, cancelled "The duty
-    changed." only once it has no lesson at all); no backup yet: a new one (from_exams). A schedule without an approved copy
+    nothing; else the backup is brought up to date (lessons no longer wanted go, new ones come in, cancelled only once it has
+    no lesson at all: "Handled by the exams committee." (or "...the teacher in charge." for an event) when every lesson that
+    left went because it is now "Handled ourselves", else "The duty changed."); no backup yet: a new one (from_exams). A schedule without an approved copy
     (withdrawn): every lesson dated today or later goes, and a backup left with none is cancelled "The schedule was
     withdrawn." (P12 as amended). A timetable with no periods or a calendar with no terms changes nothing. copies: the
     approved copies (schedules.on_site()), read here when None. Runs inside exams.schedules.editing(); relief.absences takes
@@ -434,6 +437,7 @@ def sync(sched, pub, cal, today, copies=None) -> dict:
     by = (ap.get("in_charge") or sched.get("in_charge") or "") if event else EXAMS_BY
     text = (AT_EVENT if event else INVIGILATING) % ap.get("name")
     source = dict(id=sid, kind=sched.get("kind"))
+    handled = {x for x in sched.get("handled") or [] if isinstance(x, str)}
     mine = {}
     for r in live:
         mine.setdefault(r["teacher"], []).append(r)
@@ -452,7 +456,11 @@ def sync(sched, pub, cal, today, copies=None) -> dict:
         if _ahead(main, iso) == keys and main.get("by") == by and main.get("reason_text") == text:
             continue
         held = {x.get("key") for x in main.get("lessons") or [] if isinstance(x, dict)}
-        update(main, keys, [x for x in lessons if x["key"] not in held], by, text, DUTY_CHANGED)
+        leaving = _ahead(main, iso) - keys
+        why = DUTY_CHANGED
+        if leaving and all("%s|%s" % (name, k) in handled for k in leaving):
+            why = HANDLED_BY_IN_CHARGE if event else HANDLED_BY_EXAMS
+        update(main, keys, [x for x in lessons if x["key"] not in held], by, text, why)
     return out
 
 

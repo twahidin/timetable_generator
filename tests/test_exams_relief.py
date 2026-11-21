@@ -560,10 +560,10 @@ def event_backup_by_the_teacher_in_charge():
         got = _backups(id)
         assert len(got) == 1 and got[0]["teacher"] == AISHA and got[0]["reason_text"] == "At event: " + EVENT and got[0]["by"] == GRACE, got
         assert got[0]["exams"] == dict(id=id, kind="event") and [x["classes"] for x in got[0]["lessons"]] == [["3A"]], got[0]
-        key = got[0]["lessons"][0]["key"]
+        key, rid = got[0]["lessons"][0]["key"], got[0]["id"]
         v = ok(c.post(f"/api/events/{id}/handled", json=dict(teacher=AISHA, key=key, handled=True)))
         assert next(x for x in v["lessons"]["backup"] if x["key"] == key)["state"] == "handled"
-        assert _backups(id) == []
+        assert _backups(id) == [] and AB.load(rid)["cancelled"]["why"] == "Handled by the teacher in charge.", AB.load(rid)["cancelled"]
         ok(c.post(f"/api/events/{id}/handled", json=dict(teacher=AISHA, key=key, handled=False)))
         assert len(_backups(id)) == 1
 
@@ -582,6 +582,7 @@ def handled_ourselves_sends_nothing():
         assert item["teacher"] == DANIEL and item["state"] == "handled" and item["relief"] is None, item
         assert SC.load(id)["handled"] == [DANIEL + "|" + DKEY]
         assert _backups(id) == [] and AB.load(rid)["cancelled"]["by"] == "app"
+        assert AB.load(rid)["cancelled"]["why"] == "Handled by the exams committee.", AB.load(rid)["cancelled"]
         j = ok(c.post(url, json=dict(teacher=DANIEL, key=DKEY, handled=False)))
         assert next(x for x in j["lessons"]["backup"] if x["key"] == DKEY)["state"] == "sent"
         again = _backups(id)
@@ -1042,6 +1043,21 @@ def a_stale_handled_tag_counts_for_nothing():
             "Daniel is off the first schedule's duty: its tag no longer covers his lesson"
         item = next(x for x in ok(c.get(f"/api/exams/{b}/view"))["lessons"]["backup"] if x["key"] == DKEY)
         assert item["state"] == "sent", item
+
+@t
+def a_backup_emptied_partly_by_a_duty_change_says_the_duty_changed():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        id = _made_exam(_two_duties())["id"]
+        _send_approve(c, id)
+        b = _backups(id)[0]
+        pe = next(x["key"] for x in b["lessons"] if x["subject"] == "PE")
+    s = SC.load(id)
+    s["made"]["duties"], s["handled"] = s["made"]["duties"][:1], [HAFIZ + "|" + pe]      # PE handled, the Assembly duty gone
+    _approve(s)
+    assert RL.sync(SC.load(id), PUB, CAL, SOON) == dict(sent=0, cancelled=1)
+    assert AB.load(b["id"])["cancelled"]["why"] == "The duty changed.", AB.load(b["id"])["cancelled"]
 
 
 _clear()
