@@ -103,5 +103,15 @@ const t = async (name, f) => { try { await f(); } catch (e) { console.error("FAI
     }
   });
 
+  await t("a line whose departments are not a list still shows", async () => {
+    const es = [Object.assign({ id: "h2", kind: "setup", where: "Step 4 · Teachers", depts: 5, text: "odd" }, ENTRY),
+      Object.assign({ id: "h1", kind: "setup", where: "Step 4 · Teachers", depts: ["SC"], text: "fine" }, ENTRY)];
+    const p = page(() => [200, reply(es)]);
+    await p.settle();
+    const shown = p.$("#list").textContent;
+    assert.ok(shown.includes("odd") && shown.includes("fine"), shown);
+    assert.deepStrictEqual(p.$("#fDept").children.map(c => c.textContent), ["All departments", "SC"]);
+  });
+
   console.log(`${n} history page cases passed`);
 })().catch(e => { console.error(e); process.exit(1); });

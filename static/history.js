@@ -152,7 +152,7 @@
   function fillDepts() {
     const sel = $("#fDept"); if (!sel) return;
     const names = S.depts.slice();
-    if (S.scope !== "dept") for (const e of S.entries) for (const d of e.depts || []) if (typeof d === "string" && !names.includes(d)) names.push(d);
+    if (S.scope !== "dept") for (const e of S.entries) for (const d of Array.isArray(e.depts) ? e.depts : []) if (typeof d === "string" && !names.includes(d)) names.push(d);
     if (S.dept && !names.includes(S.dept)) names.push(S.dept);
     const key = names.join("\u0001") + "|" + S.dept;
     if (sel.dataset.key === key) return;

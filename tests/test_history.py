@@ -617,4 +617,38 @@ def download_drops_characters_excel_refuses():
     row = [c.value for c in list(_sheet(r).iter_rows())[1]]
     assert row[2] == "Ann" and row[5] == "text" and row[6] == "w" and row[7] == "n", row
 
+SINCE = "Since you last signed in"
+
+@t
+def a_mistyped_line_never_takes_the_page_down():
+    fresh()
+    CY = "Cy Test"
+    P.update(lambda d: d["people"].update({CY: dict(group="committee", added=True, username="cy.t", pw=PW.hash_pw(secrets.token_hex(8)))}))
+    t0 = time.time() - 3600
+    P.update(lambda d: [d["people"][n].update(signins=[t0, time.time()]) for n in (CY, HANA)])
+    row = dict(kind="setup", op="set", section="teachers", row="r1", field="short", who=ANN, where="Step 4 · Teachers", depts=["Maths"], **{"as": ANN})
+    good = H.add(dict(row, batch="bgood", was="A", now="B", text="good"))
+    bad = [dict(row, batch="bts", was="B", now="C", text="ts as text", ts="soon"),
+           dict(row, batch="bdepts", field="name", text="depts as a number", depts=5),
+           dict(row, batch="bnested", field="dept", text="depts holding a list", depts=[["Maths"]]),
+           dict(row, batch="bvia", field="note", text="via as a list", via=["password"]),
+           dict(row, batch="bkind", text="kind as a list", kind=["setup"])]
+    with open(month_file(good), "a") as f:
+        for i, b in enumerate(bad): f.write(json.dumps(dict(b, id=good["id"] + str(i), at=good["at"], ts=b.get("ts", good["ts"] + i + 1))) + "\n")
+    cy, hana = as_person(CY, "password"), as_person(HANA, "password")
+    for c in (cy, hana, committee()):
+        for q in ("", "?from=2020-01-01", f"?since={t0}", "?dept=Maths", "?signins=1"):
+            s, d = api(c, q); assert s == 200, (q, s)
+    s, d = api(cy)
+    assert {"good", "ts as text", "depts as a number", "via as a list"} <= {e["text"] for e in d["entries"]}, d
+    assert "back" in next(e for e in d["entries"] if e["text"] == "good"), d        # still marked (a line with no readable time is not placed after it)
+    seen = {e["text"] for e in api(hana)[1]["entries"]}                    # the head: Maths rows; a line whose departments cannot be read is no one's department
+    assert {"good", "ts as text", "via as a list"} <= seen and not {"depts as a number", "depts holding a list"} & seen, seen
+    r = cy.get("/api/history/download"); assert r.status_code == 200, r.status_code
+    rows = {x[5]: x for x in ([c.value for c in row] for row in _sheet(r).iter_rows())}
+    assert rows["via as a list"][3] == "['password']" and rows["ts as text"][0] in (None, ""), rows
+    for c in (cy, hana):
+        r = c.get("/home"); assert r.status_code == 200 and SINCE in r.data.decode(), r.data.decode()[:300]
+    assert cy.post("/api/history/back", json={"id": good["id"] + "0"}).status_code == 409
+
 print(f"{COUNT} history tests passed")

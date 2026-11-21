@@ -253,6 +253,20 @@ def band_clash_judges_the_names_the_put_back_leaves():
     assert P.band_clash(sp, [["set", "lessons", L["_id"], "block", "Sec 1 English"], ["del", "blocks", "newband002"]]) is None   # the lesson goes back with it
     assert P.band_clash(sp, [["set", "blocks", "newband002", "level", "Sec 2"]]) is None and P.band_clash(sp, [["set", "blocks", 5, "block", "x"], 7]) is None
 
+@t
+def a_line_with_no_readable_time_is_not_a_crash():
+    import json
+    fresh(); sp = spec(); T = sp["teachers"][0]
+    [a] = save(sp, [["set", "teachers", T["_id"], "short", "AA"]], ANN, "bann", T0)
+    b = dict(a, id=a["id"] + "1", batch="bodd", ts="soon", **BOB)
+    with open(os.path.join(H.DIR, a["at"][:7] + ".jsonl"), "a") as f: f.write(json.dumps(b) + "\n")
+    assert P.why_not([a], [b]).startswith("Can't put back: Bob Tan changed this again on "), P.why_not([a], [b])
+    u, ents, newer = P.gather(b["id"])
+    assert u == "b:bodd" and [x["id"] for x in ents] == [b["id"]] and H.ts_of(b) is None and H.ts_of(a) == a["ts"]
+    assert H.ts_of({"ts": True}) is None and H.ts_of({"ts": float("nan")}) is None and H.ts_of(None) is None
+    odd = dict(a, section=["x"], row={"a": 1}, field=["f"])                    # lists where names belong: refused, never a crash
+    assert P.changed_since(sp, [odd]) == "Can't put back: this was changed again since." and P.why_not([a], [odd]) is None
+
 def _fake(i, **k):
     return dict({"kind": "setup", "id": "h%016d" % i, "ts": T0 + i, "batch": "bf%d" % i, "op": "set", "section": "lessons",
                  "row": "other%d" % (i % 50), "field": "periods", "as": "Bob Tan", "was": 1, "now": 2}, **k)

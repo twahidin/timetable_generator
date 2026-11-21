@@ -6,6 +6,7 @@ The row a setup entry is about is `row` (the entry's own `id` is its place in th
 import copy
 import datetime
 import json
+import math
 import os
 import re
 import threading
@@ -79,6 +80,12 @@ def _make(entry):
     e["ts"] = float(ts)
     e["at"] = datetime.datetime.fromtimestamp(ts, SCHOOL_TZ).isoformat(timespec="seconds")
     return e
+
+
+def ts_of(e):
+    """an entry's time as a number of seconds, or None when its line has none that can be read (cut short, hand-edited)"""
+    ts = e.get("ts") if isinstance(e, dict) else None
+    return float(ts) if isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(ts) else None
 
 
 def day_start(text):
@@ -168,7 +175,8 @@ def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, si
          who_contains=None, allow=None):
     """the entries, newest first, that match every filter given. where "Sign-in" shows the sign-ins without signins;
     where "Admin" or "Sign-in" also finds the account or sign-in entries that carry no `where`.
-    allow(entry) -> bool is applied after every other filter (sign-ins too); month files wholly before `since` are not opened"""
+    allow(entry) -> bool is applied after every other filter (sign-ins too); month files wholly before `since` are not opened.
+    A line whose ts is not a number counts as written at 0, one whose depts is not a list as of no department"""
     out = []
     needle = who_contains.strip().lower() if isinstance(who_contains, str) and who_contains.strip() else None
     where_kind = _WHERE_KIND.get(where)
@@ -191,12 +199,13 @@ def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, si
                 continue
             if e.get("kind") == "signin" and not signins and not (kinds and "signin" in kinds) and where_kind != "signin":
                 continue
-            ts = e.get("ts") or 0
+            ts = ts_of(e) or 0
+            depts = e.get("depts") if isinstance(e.get("depts"), list) else []
             if where is not None and e.get("where") != where and not (where_kind and not e.get("where") and e.get("kind") == where_kind):
                 continue
             if (who is not None and e.get("who") != who) \
-                    or (kinds and e.get("kind") not in kinds) or (since is not None and ts < since) \
-                    or (until is not None and ts > until) or (dept is not None and dept not in (e.get("depts") or [])):
+                    or (kinds and (not isinstance(e.get("kind"), str) or e.get("kind") not in kinds)) or (since is not None and ts < since) \
+                    or (until is not None and ts > until) or (dept is not None and dept not in depts):
                 continue
             if allow is not None and not allow(e):
                 continue

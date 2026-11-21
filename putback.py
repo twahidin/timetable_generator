@@ -18,13 +18,19 @@ _TAKEN = "Can't put back: another band is called {} now."
 _JOINED = "Can't put back: lessons or rules joined {} after this change."
 
 
+def _readable(changes):
+    """an account entry's changes as the admin page writes them: a list of {name, field, …} with text name and field"""
+    return isinstance(changes, list) and all(isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("field"), str)
+                                             for c in changes)
+
+
 def unit_of(e):
     """the unit a history entry belongs to: "b:" + its batch, "a:" + its id for an account change; None for the rest"""
     if not isinstance(e, dict):
         return None
     if e.get("kind") == "setup" and e.get("batch"):
         return "b:" + str(e["batch"])
-    if e.get("kind") == "account" and e.get("changes") and e.get("id"):
+    if e.get("kind") == "account" and e.get("changes") and e.get("id") and _readable(e["changes"]):
         return "a:" + str(e["id"])
     return None
 
@@ -51,15 +57,22 @@ def gather(entry_id):
     unit = unit_of(e)
     if unit is None:
         return None
-    ts = e.get("ts") or 0
+    ts = history.ts_of(e) or 0
     if unit.startswith("a:"):
         ents = [e]
     else:
         ents = sorted((x for x in _window(ts) if unit_of(x) == unit or follow_up(x, e.get("batch"))), key=lambda x: x["id"])
+        if not any(x["id"] == e["id"] for x in ents):
+            ents = sorted(ents + [e], key=lambda x: x["id"])
     last = ents[-1]["id"]
-    since = min(x.get("ts") or 0 for x in ents) - 60
+    since = min(history.ts_of(x) or 0 for x in ents) - 60
     newer = [x for x in history.read(kinds=TOUCH_KINDS, since=since, limit=10 ** 7) if x["id"] > last]
     return unit, ents, newer
+
+
+def _plain(v):
+    """v when it can be part of a key (a hand-edited line may hold a list or a dict anywhere), else None"""
+    return v if v is None or isinstance(v, (str, int, float, bool)) else None
 
 
 def _touches(e):
@@ -68,15 +81,16 @@ def _touches(e):
     if kind == "setup-replaced":
         return set(), set()
     if kind == "account":
-        keys = {("a", c.get("name"), c.get("field")) for c in e.get("changes") or [] if isinstance(c, dict)}
+        changes = e.get("changes") if isinstance(e.get("changes"), list) else []
+        keys = {("a", _plain(c.get("name")), _plain(c.get("field"))) for c in changes if isinstance(c, dict)}
         return keys, keys
-    op, sec, row, field = e.get("op"), e.get("section"), e.get("row"), e.get("field")
+    op, sec, row, field = e.get("op"), _plain(e.get("section")), _plain(e.get("row")), _plain(e.get("field"))
     if op in ("set", "merge"):
         return {("f", sec, row, field), ("r", sec, row)}, {("f", sec, row, field), ("d", sec, row)}
     if op in ("add", "del"):
         return {("r", sec, row), ("d", sec, row)}, {("r", sec, row)}
     if op in ("school", "day", "top"):
-        k = ("p", sec, e.get("level"), field)
+        k = ("p", sec, _plain(e.get("level")), field)
         return {k}, {k}
     return set(), set()
 
@@ -87,7 +101,7 @@ def _who(e):
 
 
 def _blocker_sentence(unit, b):
-    when = history.short_when(b.get("ts") or 0)
+    when = history.short_when(history.ts_of(b) or 0)
     if b.get("kind") == "setup-replaced":
         return f"Can't put back: the whole setup was replaced on {when}. Use a saved copy on the committee page."
     if b.get("putback") == unit:
@@ -172,7 +186,7 @@ def changed_since(spec, unit_entries):
         op = e.get("op")
         if e.get("kind") not in ("setup", "app") or op is None:
             continue
-        last[(op, e.get("section"), e.get("row"), e.get("level"), e.get("field") if op not in ("add", "del") else None)] = e
+        last[(_plain(op), _plain(e.get("section")), _plain(e.get("row")), _plain(e.get("level")), _plain(e.get("field")) if op not in ("add", "del") else None)] = e
     for (op, sec, row, level, field), e in last.items():
         if op in ("set", "merge"):
             r = sync._find(spec, sec, row)

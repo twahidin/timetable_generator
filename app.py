@@ -1619,7 +1619,10 @@ def history_scope():
     p = who(); me = p["name"] if p else None
     if has("history.dept") and p:
         mine = list(people.record(people.load(), me)["depts"])
-        return "dept", (lambda e: e.get("who") == me or bool(set(e.get("depts") or []) & set(mine))), mine
+        def about_mine(e):   # a line whose departments are not a list of names is no one's department
+            ds = e.get("depts")
+            return isinstance(ds, list) and any(isinstance(d, str) and d in mine for d in ds)
+        return "dept", (lambda e: e.get("who") == me or about_mine(e)), mine
     if has("history.own") and p: return "own", (lambda e: e.get("who") == me), []
     return None, None, []
 
@@ -1672,13 +1675,13 @@ def history_download():
     for e in found[:HISTORY_DOWNLOAD_MAX]:
         day = clock = ""
         try:
-            d = datetime.datetime.fromtimestamp(float(e["ts"]), history.SCHOOL_TZ)
+            d = datetime.datetime.fromtimestamp(history.ts_of(e), history.SCHOOL_TZ)
             day, clock = d.strftime("%Y-%m-%d"), f"{d.hour % 12 or 12}:{d.minute:02d} {'am' if d.hour < 12 else 'pm'}"
-        except (KeyError, TypeError, ValueError, OverflowError, OSError): pass
-        via = e.get("via")
+        except (TypeError, ValueError, OverflowError, OSError): pass
+        via = str(e.get("via") or "")
         setup = e.get("kind") == "setup"
         depts = e.get("depts")
-        put([day, clock, str(e.get("as") or e.get("who") or ""), _VIA.get(via) or (str(via) if via else ""), str(e.get("where") or ""),
+        put([day, clock, str(e.get("as") or e.get("who") or ""), _VIA.get(via) or via, str(e.get("where") or ""),
              str(e.get("text") or ""), history._show(e.get("was")) if setup else "", history._show(e.get("now")) if setup else "",
              ", ".join(str(x) for x in depts) if isinstance(depts, list) else ""])
     if len(found) > HISTORY_DOWNLOAD_MAX: put([HISTORY_MORE])
@@ -1706,9 +1709,9 @@ def api_history():
     if scope == "dept" and dept is not None and dept not in mine: return jsonify(entries=[], more=False, admin=has("admin"), depts=mine, scope=scope, download=False)
     found = history.read(before=before, limit=limit + 1, allow=allow, **f)
     shown = found[:limit]
-    if shown and (has("setup") or has("admin")):
-        oldest = min(e.get("ts") or 0 for e in shown)
-        putback.annotate(shown, history.read(since=oldest - 60, kinds=putback.TOUCH_KINDS, limit=10 ** 7), may_put_back)
+    times = [t for t in map(history.ts_of, shown) if t is not None]     # a line whose ts cannot be read is skipped here
+    if times and (has("setup") or has("admin")):
+        putback.annotate(shown, history.read(since=min(times) - 60, kinds=putback.TOUCH_KINDS, limit=10 ** 7), may_put_back)
     for e in found:
         if "link" in e and not _SAFE_LINK.match(e["link"] if isinstance(e["link"], str) else ""): del e["link"]
     try: depts = [str(d) for d in store.setup_record()["spec"]["school"]["departments"]]

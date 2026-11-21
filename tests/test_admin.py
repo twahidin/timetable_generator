@@ -651,4 +651,16 @@ def only_an_admin_puts_back_accounts():
     code, k = back(jc, e["id"]); assert code == 403, (code, k)
     assert raw() == before and rec(PRIYA)["note"] == "back me"
 
+@t
+def put_back_a_broken_account_line_says_so():
+    c = admin()
+    g = dict(field="group", was="teacher", now="hod")
+    for changes in ([g], [dict(name=NUR)], [dict(g, name=["x"])], [dict(g, name=NUR, field=5)], "group", [3]):
+        e = H.add({"kind": "account", "what": "group", "where": "Admin", "people": [NUR], "changes": changes, "text": "hand-edited", **H.by_of(ALICIA, "password")})
+        before = raw()
+        assert back(c, e["id"]) == (409, {"error": "This change cannot be put back here."}), changes
+        assert raw() == before
+        mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]]
+        assert mine and "back" not in mine[0], mine
+
 print(f"{COUNT} admin tests passed")
