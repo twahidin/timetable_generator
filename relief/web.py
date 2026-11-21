@@ -268,15 +268,15 @@ def _seen_at(name):
 
 @bp.get("/api/relief/absences")
 def whats_in():
-    """every absence, newest first; new = submitted at or after the time this person last marked What's in as seen
-    (never: all new). Reads only: the page posts /seen after showing the list."""
+    """every absence, newest first; new = submitted, or given a lesson (a backup's changed_at), at or after the time this
+    person last marked What's in as seen (never: all new). Reads only: the page posts /seen after showing the list."""
     pub, me, err = _gate("relief.team", TEAM_ONLY)
     if err: return err
     since, as_of = _seen_at(me), _clock().isoformat()
     out = []
     for v in _views(_absences.all_records(), pub, me):
-        at = _time(v.get("at"))
-        v["new"] = since is None or at is None or at >= since
+        at, changed = _time(v.get("at")), _time(v.get("changed_at"))
+        v["new"] = since is None or at is None or at >= since or (changed is not None and changed >= since)
         out.append(v)
     return jsonify(absences=out, new_since=since.isoformat() if since else None, as_of=as_of)
 

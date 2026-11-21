@@ -981,6 +981,23 @@ def one_failing_sync_does_not_stop_the_others():
     finally:
         RL.sync, lg.exception = real, old_exc
 
+@t
+def a_lesson_added_to_a_backup_is_new_in_whats_in():
+    _fresh()
+    mine = [dict(x, date=ISO) for x in LS.on_date(PUB, CAL, HAFIZ, MON)]        # PE and the Assembly
+    r = AB.from_exams(HAFIZ, mine[:1], dict(id="s1", kind="exam"), "Exams committee", "Invigilating: X", None)
+    r["at"] = "2026-11-01T08:00:00+08:00"
+    _put(r)
+    with published(PUB):
+        g = staff(GRACE)
+        ok(g.post("/api/relief/absences/seen", json={}))
+        new = lambda: next(x for x in ok(g.get("/api/relief/absences"))["absences"] if x["id"] == r["id"])["new"]
+        assert new() is False, "seen already"
+        AB.update_exams(r["id"], {mine[0]["key"]}, [], None, None, SOON)
+        assert new() is False and "changed_at" not in AB.load(r["id"]), "nothing came in"
+        AB.update_exams(r["id"], {mine[0]["key"]}, mine[1:], None, None, SOON)
+        assert AB.load(r["id"])["changed_at"] and new() is True, "a lesson came in: new again"
+
 
 _clear()
 print(f"{COUNT} exams and relief tests passed")

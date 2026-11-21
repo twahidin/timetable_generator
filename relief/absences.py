@@ -286,8 +286,9 @@ def update_exams(id, keep_keys, add_lessons, by, reason_text, today, why="The du
     """change a backup in place (never cancel and make again, so what relief did on it stays): every lesson dated today or
     later whose key is not in keep_keys goes (a lesson dated before today always stays: it is history and counts in relief's
     periods), add_lessons come in (as from_exams decides; a key it holds already is left), by and reason_text are brought up
-    to date (None: as they are), acknowledged is cleared when a lesson came in (the person must look again), and dates and
-    periods follow the lessons. Cancelled (why) only when no lesson at all is left. today: the caller's (one clock).
+    to date (None: as they are), acknowledged is cleared and changed_at stamped when a lesson came in (the person must look
+    again; What's in shows it new), and dates and periods follow the lessons. Cancelled (why) only when no lesson at all is
+    left. today: the caller's (one clock).
     -> the record; {} when it is not there; a cancelled one as it is"""
     iso = _free._iso(today)
     keep = set(keep_keys or ())
@@ -307,7 +308,7 @@ def update_exams(id, keep_keys, add_lessons, by, reason_text, today, why="The du
         r["lessons"] = kept + added
         if by is not None: r["by"] = by
         if reason_text is not None: r["reason_text"] = reason_text
-        if added: r["acknowledged"] = None
+        if added: r["acknowledged"], r["changed_at"] = None, _now()
         if any(isinstance(x, dict) for x in r["lessons"]):
             r["dates"], r["periods"] = _dates_and_periods(r["lessons"])
         else:
