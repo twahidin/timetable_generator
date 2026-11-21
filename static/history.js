@@ -12,7 +12,7 @@
   const VIA = { password: "password", code: "code", shared: "shared code", personal: "personal code", app: "by itself", google: "Google" };
   const CUT = 120;
   const S = { who: "", where: "", dept: "", from: "", to: "", signins: false, entries: [], more: false, admin: false, depts: [], token: 0, busy: false,
-    scope: "", download: false, since: "", keep: "", posting: false };
+    scope: "", download: false, since: "", keep: "", keepOk: false, posting: false };
   try { S.who = new URLSearchParams(location.search).get("who") || ""; } catch (e) { S.who = ""; }
   try { const sv = new URLSearchParams(location.search).get("since") || ""; S.since = /^\d+(\.\d+)?$/.test(sv) ? sv : ""; } catch (e) { S.since = ""; }
 
@@ -54,7 +54,7 @@
     const hr = d.getHours();
     return `${hr % 12 || 12}:${pad(d.getMinutes())} ${hr < 12 ? "am" : "pm"}`;
   }
-  function note(text) { const m = $("#msg"); m.replaceChildren(); if (text) m.append(h("div", { class: "msg", text })); }
+  function note(text, ok) { const m = $("#msg"); m.replaceChildren(); if (text) m.append(h("div", { class: ok ? "msg ok" : "msg", text })); }
 
   async function api(query) {
     let r, d = null;
@@ -89,10 +89,10 @@
       S.more = !!d.more; S.admin = !!d.admin;
       if (Array.isArray(d.depts)) S.depts = d.depts;
       S.scope = d.scope || ""; S.download = !!d.download;
-      note(S.keep); S.keep = "";
+      note(S.keep, S.keepOk); S.keep = ""; S.keepOk = false;
     } catch (e) {
       if (token !== S.token) return;
-      note(S.keep && !older ? S.keep + " " + e.message : e.message); S.keep = "";
+      note(S.keep && !older ? S.keep + " " + e.message : e.message); S.keep = ""; S.keepOk = false;
     }
     S.busy = false;
     drawScope();
@@ -157,17 +157,17 @@
     const key = names.join("\u0001") + "|" + S.dept;
     if (sel.dataset.key === key) return;
     sel.dataset.key = key;
-    sel.replaceChildren(h("option", { value: "", text: "All departments" }), names.map(d => h("option", { value: d, text: d, selected: d === S.dept })));
+    sel.replaceChildren(h("option", { value: "", text: "All departments" }), ...names.map(d => h("option", { value: d, text: d, selected: d === S.dept })));
   }
 
   /* ---------------------------------------------------------------- entries */
   function link(e) {
     const where = String(e.where || "");
-    if (typeof e.link === "string" && /^\/(?![\/\\\s])/.test(e.link)) return [e.link, "Open " + where.replace(/^Exams and events$/, "exams and events")];
-    if (e.kind === "exams") return ["/exams", "Open exams and events"];
     if (where.startsWith("Step 8")) return ["/", "Undo it on step 8"];
     if (where.startsWith("Step 9")) return ["/", "Open step 9"];
     if (e.kind === "setup-replaced") return ["/", "Use a saved copy on the committee page"];
+    if (typeof e.link === "string" && /^\/(?![\/\\\s])/.test(e.link)) return [e.link, "Open " + where.replace(/^Exams and events$/, "exams and events")];
+    if (e.kind === "exams") return ["/exams", "Open exams and events"];
     if (e.kind === "relief" || where.startsWith("Relief")) return ["/relief", "Open relief"];
     if (e.kind === "account" && S.admin && Array.isArray(e.people) && e.people.length) return ["/admin", "Open the admin page"];
     return null;
@@ -190,18 +190,18 @@
     if (S.posting) return;
     if (!window.confirm(n > 1 ? `Put back these ${n} changes?` : "Put back this change?")) return;
     S.posting = true; btn.disabled = true;
-    let text = "";
+    let text = "", ok = false;
     try {
       const r = await fetch("/api/history/back", { method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: e.id }) });
       let d = null;
       try { d = await r.json(); } catch (x) { d = null; }
       if (r.status === 401) text = AGAIN;
-      else if (r.ok) text = (d && d.text) || "Put back.";
+      else if (r.ok) { text = (d && d.text) || "Put back."; ok = true; }
       else text = (d && d.error) || "Something went wrong. Reload the page and try again.";
     } catch (x) { text = "The server could not be reached. Try again."; }
     S.posting = false;
-    S.keep = text;
+    S.keep = text; S.keepOk = ok;
     load(false);
   }
   function row(e, extra, first) {
