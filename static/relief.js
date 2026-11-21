@@ -1,15 +1,18 @@
 "use strict";
 /* The Relief home (/relief) for a member of staff signed in by name (their own code or password). Tabs: My absences and Ask for relief
-   (this file); Plan relief and What's in come from relief-plan.js and relief-inbox.js, which call
+   (this file); Reliefs I'm covering, Plan relief, What's in and Today come from relief-covering.js, relief-plan.js,
+   relief-inbox.js and relief-today.js, which call
    Relief.tab(name, {init(pane, me), shown(pane), dirty()}). A tab shows only when the person may open it and its code is
    loaded. Each tab keeps its own part of the page, so moving between tabs loses nothing typed; leaving the page with
    something unsent or unsaved asks first. A refusal shows the server's sentence and keeps everything typed.
-   For the other two files, Relief also gives api, json, people, say, absences (the absence cards of My absences, for
-   Planned by me), attach (a form's files, after the absence is saved), span, reason and plural. */
+   For those files, Relief also gives api, json, people, say, absences (the absence cards of My absences, for
+   Planned by me), attach (a form's files, after the absence is saved), span, reason and plural; relief-plan.js adds
+   freeList (the "free then" list, for Today's Change). */
 (function () {
   const RF = window.ReliefForm, esc = RF.esc, day = RF.day, enc = encodeURIComponent;
   const $ = (s, el = document) => el.querySelector(s);
-  const TABS = [["mine", () => true], ["ask", () => true], ["plan", me => !!me.can_plan], ["inbox", me => !!me.can_team]];
+  const TABS = [["mine", () => true], ["ask", () => true], ["covering", () => true], ["plan", me => !!me.can_plan], ["inbox", me => !!me.can_team],
+                ["today", me => !!me.can_team]];
   const UNREACHABLE = "Could not reach the server. Check the connection and try again.";
   const mods = {};
   const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
@@ -66,7 +69,7 @@
     if (!allowed(k)) k = "mine";
     R.cur = k;
     for (const [n] of TABS) { const p = $(`#pane-${n}`); if (p) p.hidden = n !== k; }
-    $("#main").classList.toggle("wide", k === "inbox");   /* What's in is a wide table */
+    $("#main").classList.toggle("wide", k === "inbox" || k === "today");   /* What's in and Today are wide tables */
     const m = mods[k], pane = $(`#pane-${k}`);
     if (!m.started) { m.started = true; m.init(pane, R.me); }
     else if (m.shown) m.shown(pane);

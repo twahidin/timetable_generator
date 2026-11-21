@@ -1569,6 +1569,23 @@ def today_lists_covers_in_time_order_with_counts_and_no_reason():
                                                     counts=dict(need=0, waiting=0, approved=0, acknowledged=0, change=0, nobody=0, open=0))
     no(team.get("/api/relief/today?date=13/10/2026"), 400, "Choose the dates again.")
 
+OVER_ONLY = "Only teachers over a limit are free then: choose one yourself."
+
+@rt
+def today_says_when_only_people_over_a_limit_are_free():
+    """an open cover where everyone free is over a checked limit: the app's run leaves it open (its shortlist drops them),
+    so Today says the team must choose; it is not "nobody" """
+    fresh()
+    team = staff(TEAMER)
+    absent()                                                          # Ms Evelyn Koh asks for Tue 13 Oct: P3-P5 and P6-P7 to cover
+    rows = [r for r in ok(team.get("/api/relief/today?date=2026-10-13"))["rows"] if r["state"] == "open"]
+    assert [(r["p"], r["n"], r["nobody"], r["warn"]) for r in rows] == [(2, 3, False, None), (5, 2, False, None)], rows
+    with saved_settings(limits=dict(fat_per_day=1, other_per_day=1, never=[])):   # two periods or more take anyone over 1
+        got = ok(team.get("/api/relief/today?date=2026-10-13"))
+    rows = [r for r in got["rows"] if r["state"] == "open"]
+    assert [(r["p"], r["nobody"], r["warn"]) for r in rows] == [(2, False, OVER_ONLY), (5, False, OVER_ONLY)], rows
+    assert (got["counts"]["open"], got["counts"]["nobody"]) == (2, 0), got["counts"]
+
 TEAM_ROUTES = lambda i: [("GET", "/api/relief/today?date=2026-10-13", None), ("POST", cover_url(i, K5, "approve"), None),
                          ("POST", "/api/relief/today/approve-all", dict(date="2026-10-13")), ("PUT", cover_url(i, K5, "relief"), dict(relief=MAYA)),
                          ("GET", cover_url(i, K5, "free"), None), ("POST", lesson_url(i, K2, "split"), dict(at=3)), ("POST", lesson_url(i, K2, "join"), None),

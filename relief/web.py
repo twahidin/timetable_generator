@@ -70,6 +70,7 @@ PERIODS = "Choose the periods again."
 DATES = "Choose the dates again."
 TERM = "Choose the term again."
 STALE = "{name} is no longer free then: change it"
+OVER_ONLY = "Only teachers over a limit are free then: choose one yourself."   # the app's run leaves such a cover open
 ENTIRE = "Entire Class"
 COLUMNS = ["Date", "Absent", "Class / group", "Periods", "Time", "Relief teacher", "Remarks", "Set by"]
 LOAD_COLUMNS = ["Name", "Departments", "Flexi Adjunct", "Teaching this week", "Relief this week", "Week so far", "Relief this term",
@@ -639,8 +640,9 @@ def _date_in(v):
 def _row(pub, settings, records, r, x, c, i):
     """one cover as Today lists it. stale: its relief teacher (waiting or approved) is no longer free then; over_now: the
     relief takes them over a checked limit; nobody: an open cover nobody at all is free for; warn: the sentence for any of
-    these; change: a request to change, with its new pick (stale too when that person is no longer free). One free_then for
-    the cover gives them all; never the absence's reason"""
+    these, and OVER_ONLY for an open cover whose free people are all over a limit (the app picks none of them); change: a
+    request to change, with its new pick (stale too when that person is no longer free). One free_then for the cover gives
+    them all; never the absence's reason"""
     s = _cover.state(r, x, c)
     ckey, p, n = _cover.cover_key(x, i), int(c["p"]), int(c.get("n") or 1)
     start, end = _times(pub, x, c)
@@ -660,6 +662,7 @@ def _row(pub, settings, records, r, x, c, i):
     free = {q["name"]: q for g in got["groups"] for q in g["people"]}
     if s == "open":
         if not free: row.update(nobody=True, warn=_cover.NOBODY)
+        elif all(q.get("over") for q in free.values()): row["warn"] = OVER_ONLY
         return row
     who = c["relief"]
     row.update(stale=who not in free, over_now=bool(free.get(who, {}).get("over")))

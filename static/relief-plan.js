@@ -6,7 +6,8 @@
    open goes to the relief team. Planned by me lists what this person planned; Open shows an absence as the same card as
    My absences (R.absences), with Choose on its open lessons, and Download gives the relief sheet for a range of dates.
    The form is kept in P and the lessons' work by ReliefForm; the "free then" lists are kept in F. A refusal shows the
-   server's sentence and keeps everything typed and chosen. */
+   server's sentence and keeps everything typed and chosen. The list itself is drawn by Relief.freeList, which Today's
+   Change (relief-today.js) uses too. */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day, enc = encodeURIComponent, say = R.say;
   const $ = (s, el = document) => el.querySelector(s);
@@ -87,26 +88,36 @@
     const s = F.st.get(ctx) || {}, x = inf.x, close = `<button type="button" class="small" data-pl="close">Close the list</button>`;
     if (s.loading) return `<div class="pl-list"><p class="small muted">Finding who is free…</p></div>`;
     if (s.err) return `<div class="pl-list"><p>${say(s.err)}</p><div class="bar"><button type="button" class="small" data-pl="free">Try again</button>${close}</div></div>`;
-    const d = s.data || {}, groups = Array.isArray(d.groups) ? d.groups : [], teaching = Array.isArray(d.teaching) ? d.teaching : [];
-    const n = groups.reduce((a, g) => a + (g.people || []).length, 0), also = inf.r ? new Map() : alsoChosen(x);
+    return freeList({ data: s.data, x, chosen: inf.chosen, also: inf.r ? new Map() : alsoChosen(x), busy: s.busy, teaching: s.teaching });
+  }
+
+  /* the "free then" list as HTML, from a free route's answer; Today's Change (relief-today.js) draws the same list through
+     Relief.freeList. o: data ({groups, teaching}), x (the lesson, or a cover with its date: classes, subject, group, p, n,
+     date), chosen (the name chosen now, or ""), also (Map: name -> the lesson they are chosen for here), busy (Choose
+     disabled), teaching (the names teaching then shown), mark (the chosen person's chip, "Chosen" when left out). Its
+     buttons carry data-pl: "choose" with data-name, "teaching" and "close". */
+  function freeList(o) {
+    const d = o.data || {}, x = o.x, groups = Array.isArray(d.groups) ? d.groups : [], teaching = Array.isArray(d.teaching) ? d.teaching : [];
+    const n = groups.reduce((a, g) => a + (g.people || []).length, 0), also = o.also || new Map(), close = `<button type="button" class="small" data-pl="close">Close the list</button>`;
     const lead = groups.length && (groups[0].people || []).length && !groups[0].people[0].over ? groups[0].people[0].name : "";
     const person = p => {
       const what = [(p.depts || []).join(", "), (p.subjects || []).join(", ")].filter(Boolean).join(": ");
       const marks = (p.marks || []).concat(also.has(p.name) ? [`chosen for ${also.get(p.name)} here`] : []);
-      const on = p.name === inf.chosen;
-      const pick = on ? `<span class="chip st-ok">Chosen</span>`
-        : `<button type="button" class="small${p.name === lead ? " primary" : ""}" data-pl="choose" data-name="${esc(p.name)}" ${s.busy ? "disabled" : ""}>Choose</button>`;
+      const on = !!o.chosen && p.name === o.chosen;
+      const pick = on ? `<span class="chip st-ok">${esc(o.mark || "Chosen")}</span>`
+        : `<button type="button" class="small${p.name === lead ? " primary" : ""}" data-pl="choose" data-name="${esc(p.name)}" ${o.busy ? "disabled" : ""}>Choose</button>`;
       return `<div class="cand${p.over ? " dim" : ""}${on ? " on" : ""}"><div class="cand-who"><b>${esc(p.name)}</b>${p.fat ? ` <span class="fat">Flexi Adjunct</span>` : ""}${what ? ` <span class="why">${esc(what)}</span>` : ""}${marks.map(t => ` <span class="mark">${esc(t)}</span>`).join("")}</div>
         <span class="small cand-n">week ${esc(p.week)}</span><span class="small muted cand-n">${esc(p.today)} relief today</span>${pick}</div>`;
     };
-    const fold = teaching.length ? ` · <button type="button" class="linkish" data-pl="teaching" aria-expanded="${s.teaching ? "true" : "false"}">${s.teaching ? "Hide" : "Show"} the ${teaching.length} teaching then</button>` : "";
+    const fold = teaching.length ? ` · <button type="button" class="linkish" data-pl="teaching" aria-expanded="${o.teaching ? "true" : "false"}">${o.teaching ? "Hide" : "Show"} the ${teaching.length} teaching then</button>` : "";
     return `<div class="pl-list" role="group" aria-label="${esc(`Who is free for ${RF.title(x)}`)}">
       <div class="small muted">Free at ${esc(RF.periods(x))} on ${esc(day(x.date))}: ${esc(R.plural(n, "teacher"))}${fold}</div>
-      ${s.teaching && teaching.length ? `<div class="small pl-teaching">${esc(teaching.join(", "))}</div>` : ""}
+      ${o.teaching && teaching.length ? `<div class="small pl-teaching">${esc(teaching.join(", "))}</div>` : ""}
       ${n ? groups.map(g => `<div class="tier">${esc(g.title)}</div>${(g.people || []).map(person).join("")}`).join("") : `<p class="small muted">No one is free then.</p>`}
       <div class="small muted pl-foot">"week" = teaching periods plus relief periods so far this week, lightest first in each group. A dimmed teacher is over a limit and can still be chosen.</div>
       <div class="bar">${close}</div></div>`;
   }
+  R.freeList = freeList;
 
   function repaint(ctx, withSide = true) {   /* one lesson's choice and list, in place: what is being typed elsewhere keeps its place */
     const row = rowOf(ctx), inf = info(ctx);
