@@ -156,10 +156,11 @@ def _names(v) -> str:
     return ", ".join(v) if v else "no one"
 
 
-def _rooms_text(counts) -> str:
+def _rooms_text(counts, counted=False) -> str:
+    """counted: the same one room on both sides, so the counts are what changed ("3-01 (30) → 3-01 (31)")"""
     if not counts:
         return "not seated"
-    if len(counts) == 1:
+    if len(counts) == 1 and not counted:
         return next(iter(counts))
     return ", ".join("%s (%d)" % (r, n) for r, n in sorted(counts.items(), key=lambda x: (-x[1], x[0])))
 
@@ -238,8 +239,10 @@ def changes(sched, model) -> list:
     for k in keys:
         a, b = _by_class(so.get(k), cls), _by_class(sn.get(k), cls)
         for c in sorted(set(a) | set(b)):
-            if a.get(c, {}) != b.get(c, {}):
-                add("rooms", "%s %s, %s: %s → %s." % (_days.nice(k[:10]), k[11:], c, _rooms_text(a.get(c)), _rooms_text(b.get(c))))
+            ra, rb = a.get(c, {}), b.get(c, {})
+            if ra != rb:
+                counted = len(ra) == 1 and set(ra) == set(rb)
+                add("rooms", "%s %s, %s: %s → %s." % (_days.nice(k[:10]), k[11:], c, _rooms_text(ra, counted), _rooms_text(rb, counted)))
     for k in keys:
         was = {sid: (room, seat) for room, rows in (so.get(k) or {}).items() for sid, seat in rows}
         n = sum(1 for room, rows in (sn.get(k) or {}).items() for sid, seat in rows if sid in was and was[sid][0] == room and was[sid][1] != seat)

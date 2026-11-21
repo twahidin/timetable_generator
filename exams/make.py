@@ -27,18 +27,26 @@ def published_at(pub):
     return (pub.get("meta") or {}).get("published_at")
 
 
-def fingerprint(sched, xset) -> str:
-    """what Make uses (papers, days, levels and classes, access arrangements, seating, supervision, the exam rooms), as a
-    short hash kept in made: a change to any of it makes the made seats and duties stale"""
+def fingerprint(sched, xset, model) -> str:
+    """what Make uses (papers, days, levels and classes, access arrangements, seating, supervision, the exam rooms, and who
+    sits each paper on the published timetable), as a short hash kept in made: a change to any of it, a student who joins
+    or leaves after a new publish too, makes the made seats and duties stale"""
     used = {k: sched.get(k) for k in _USED}
     used["rooms"] = xset.get("rooms")
+    used["sit"] = {str(p.get("id")): _papers.who_sits(p, model) for p in sched.get("papers") or [] if isinstance(p, dict)}
     return hashlib.sha256(json.dumps(used, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
-def stale(sched, xset) -> bool:
+def stale(sched, xset, model) -> bool:
     """the schedule was made, and what Make used has changed since"""
     made = sched.get("made")
-    return bool(made) and made.get("fingerprint") != fingerprint(sched, xset)
+    return bool(made) and made.get("fingerprint") != fingerprint(sched, xset, model)
+
+
+def placed(made, key) -> set:
+    """the students a made sitting holds: seated in a room or left unseated"""
+    rows = ((made or {}).get("seats") or {}).get(key) or {}
+    return {sid for seats in rows.values() for sid, _ in seats} | set(((made or {}).get("unseated") or {}).get(key) or [])
 
 
 def sitting_fp(sched, key, xset) -> str:
@@ -178,7 +186,9 @@ def make(pub, cal, sched, xset, only=None, elsewhere=None) -> dict:
     ap = None if only else _approval.as_schedule(sched)
     if ap and (ap.get("made") or {}).get("seats"):
         src = ap["made"]
-        same = {k for k in src["seats"] if k in keys and sitting_fp(sched, k, xset) == sitting_fp(ap, k, xset)}
+        by_key = {s["key"]: s for s in sits}
+        same = {k for k in src["seats"] if k in keys and sitting_fp(sched, k, xset) == sitting_fp(ap, k, xset)
+                and set(_seat.sitting_students(by_key[k], sched, model)) == placed(src, k)}   # a student who joined or left: seated again
         prefer = {"%s|%s" % (d["key"], d["room"]): list(d["names"]) for d in src.get("duties") or [] if d["key"] not in same}
     keep = keys if only else same   # the sittings that may be kept as they were
     keep_seats = {k: copy.deepcopy(v) for k, v in (src.get("seats") or {}).items() if k in keep} if (only or same) else {}
@@ -215,7 +225,7 @@ def make(pub, cal, sched, xset, only=None, elsewhere=None) -> dict:
         if d["key"] in redo and pk in hand and hand[pk] != d["names"]:
             hand[pk] = list(d["names"])   # a replacement for a name that left is kept by the next Make
         d["locked"] = pk in hand
-    fp = fingerprint(sched, xset)
+    fp = fingerprint(sched, xset, model)
     if only and keys - redo and old.get("fingerprint") != fp:
         fp = old.get("fingerprint")   # the kept sittings were made from what was there before: still stale
     sched["made"] = dict(seats=seats, unseated=unseated, duties=duties, gone=gone, made_at=_now(), fingerprint=fp,

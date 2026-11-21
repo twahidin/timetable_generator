@@ -908,7 +908,7 @@ def _exam_view(pub, sched):
                 made=sched.get("made"), students={i: [by_id[i]["name"], by_id[i]["cls"]] for i in sids if i in by_id},
                 counts={p.get("id"): len(exams_papers.who_sits(p, model)) for p in papers}, periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)],
                 rooms=exams_settings.load(pub)["rooms"], students_missing=not model.get("students"), levels=list(model.get("levels") or []),
-                rooms_by_key=_exam_rooms_by_key(pub, cal, sched), stale=exams_make.stale(sched, exams_settings.load(pub)))
+                rooms_by_key=_exam_rooms_by_key(pub, cal, sched), stale=exams_make.stale(sched, exams_settings.load(pub), model))
 
 def _exam_rooms_by_key(pub, cal, sched):
     """for each sitting, every exam room with its seats and what keeps it busy then (empty text: free); a room another
@@ -1154,7 +1154,7 @@ def exams_print(id, what):
     if err: return err
     if what not in exams_printouts.WHATS: abort(404)
     if not s.get("made"): return {"error": "Press Make first."}, 409
-    if exams_make.stale(s, exams_settings.load(pub)): return {"error": exams_make.STALE}, 409
+    if exams_make.stale(s, exams_settings.load(pub), pub["model"]): return {"error": exams_make.STALE}, 409
     from ttgen.export import safe_name
     buf = io.BytesIO()
     exams_printouts.pdf(what, pub, _exam_cal(pub), s, exams_settings.load(pub), buf)
@@ -1221,7 +1221,7 @@ def exams_download(id):
     s, err = _exam_or_404(id)
     if err: return err
     if not s.get("made"): return {"error": "Press Make first."}, 409
-    if exams_make.stale(s, exams_settings.load(pub)): return {"error": exams_make.STALE}, 409
+    if exams_make.stale(s, exams_settings.load(pub), pub["model"]): return {"error": exams_make.STALE}, 409
     from ttgen.export import safe_name
     return send_file(io.BytesIO(exams_printouts.xlsx(pub, _exam_cal(pub), s, exams_settings.load(pub))), as_attachment=True,
                      download_name=safe_name(s.get("name")) + ".xlsx", mimetype=XLSX)
@@ -1256,7 +1256,7 @@ def exams_who(id):
 def _exam_review_reply(pub, s):
     """the Approval tab: state, who sent and approved, what is waiting and the review a committee reads"""
     model, xset = pub["model"], exams_settings.load(pub)
-    stale = exams_make.stale(s, xset)
+    stale = exams_make.stale(s, xset, model)
     errors = exams_papers.check(s, model, _exam_cal(pub), xset["rules"])["errors"]
     st = s.get("status") or "draft"
     rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"))) if s.get("made") else None
@@ -1294,7 +1294,7 @@ def exams_review_get(id):
 
 def _exam_send(pub, s, by, now, b):
     xset, model = exams_settings.load(pub), pub["model"]
-    exams_approval.send(s, model, by, now, exams_make.stale(s, xset), exams_papers.check(s, model, _exam_cal(pub), xset["rules"])["errors"])
+    exams_approval.send(s, model, by, now, exams_make.stale(s, xset, model), exams_papers.check(s, model, _exam_cal(pub), xset["rules"])["errors"])
 
 @app.post("/api/exams/<id>/send")
 @need("committee", "staff")

@@ -4,6 +4,7 @@ from exams import days as _days
 from exams import invigilate as _inv
 from exams import make as _make
 from exams import papers as _papers
+from exams import seating as _seating
 
 
 def _span(a, b) -> str:
@@ -47,8 +48,16 @@ def _papers_check(model, cal, s, xset) -> dict:
                 lines=errors or ["No student has two papers at once, and every paper is on an exam day."])
 
 
-def _seats_check(s) -> dict:
-    n = sum(len(v) for v in ((s.get("made") or {}).get("unseated") or {}).values())
+def _seats_check(s, model) -> dict:
+    """students with no seat: the unseated ones, and anyone who sits a made sitting now but is in neither its seats nor its
+    unseated list (a student who joined after the sitting was made)"""
+    made = s.get("made") or {}
+    seats, unseated = made.get("seats") or {}, made.get("unseated") or {}
+    none = {sid for v in unseated.values() for sid in v}
+    for sit in _seating.sittings(s):
+        if sit["key"] in seats or sit["key"] in unseated:
+            none |= set(_seating.sitting_students(sit, s, model)) - _make.placed(made, sit["key"])
+    n = len(none)
     if not n:
         return dict(key="seats", ok=True, lines=["Every student has a seat."])
     return dict(key="seats", ok=False, lines=["1 student has no seat." if n == 1 else "%d students have no seat." % n])
@@ -108,7 +117,7 @@ def review(pub, cal, sched, xset, elsewhere) -> dict:
     ap = _approval.as_schedule(sched) if sched.get("status") == "approved" else None
     s = ap or sched
     model = pub["model"]
-    checks = [_papers_check(model, cal, s, xset), _seats_check(s), _free_check(pub, cal, s, xset, elsewhere),
+    checks = [_papers_check(model, cal, s, xset), _seats_check(s, model), _free_check(pub, cal, s, xset, elsewhere),
               _others_check(s, elsewhere), _timetable_check(pub, s)]
     return dict(copy="approved" if ap else "working", what=_what(pub, cal, s), checks=checks,
                 changes=_approval.changes(sched, model) if sched.get("status") == "changes" else [],

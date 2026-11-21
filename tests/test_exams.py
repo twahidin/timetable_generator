@@ -742,19 +742,19 @@ def remaking_one_sitting_leaves_a_later_sittings_room():
 def a_change_after_make_is_stale():
     x = _xset(("3-01", "3-02", "4-01", "Hall"))
     s = _mk(_made_sched())
-    assert MK.stale(s, x) is False and s["made"]["fingerprint"] == MK.fingerprint(s, x)
+    assert MK.stale(s, x, _M) is False and s["made"]["fingerprint"] == MK.fingerprint(s, x, _M)
     s["papers"][0]["minutes"] = 70
-    assert MK.stale(s, x) is True
+    assert MK.stale(s, x, _M) is True
     _mk(s, only="2026-10-05 07:50")
-    assert MK.stale(s, x) is True, "a one-sitting Make keeps the other sitting as it was"
+    assert MK.stale(s, x, _M) is True, "a one-sitting Make keeps the other sitting as it was"
     _mk(s)
-    assert MK.stale(s, x) is False
+    assert MK.stale(s, x, _M) is False
     for k, v in (("seating", dict(s["seating"], spacing="gap")), ("access", [dict(student="3A-01", extra=25)]), ("supervision", "lesson"),
                  ("days", {}), ("classes", ["3A"]), ("levels", ["Sec 3", "Sec 4"])):
-        assert MK.stale(dict(s, **{k: v}), x) is True, k
-    x2 = _xset(("3-01", "3-02", "4-01")); assert MK.stale(s, x2) is True
-    assert MK.stale(dict(s, name="Another name", times=dict(s["times"], report="07:00")), x) is False
-    assert MK.stale(dict(s, made=None), x) is False
+        assert MK.stale(dict(s, **{k: v}), x, _M) is True, k
+    x2 = _xset(("3-01", "3-02", "4-01")); assert MK.stale(s, x2, _M) is True
+    assert MK.stale(dict(s, name="Another name", times=dict(s["times"], report="07:00")), x, _M) is False
+    assert MK.stale(dict(s, made=None), x, _M) is False
 
 @t
 def gone_people_are_named_once():
@@ -1960,6 +1960,40 @@ def someone_away_already_on_the_working_duty_is_not_named_twice():
     MK.set_invigilators(other, KEY1, "3-01", ["Mr Ben Ong", "Mr Hafiz Rahman"]); _mk(other, only=KEY1)
     AP.replace(other, KEY1, "3-01", "Ms Aisha Rahman", "Mr Ivan Lee", "Ms Grace Yeo", NOW)
     assert _duty(other, KEY1, "3-01")["names"] == ["Mr Ben Ong", "Mr Hafiz Rahman"] == other["pins"]["duties"][KEY1 + "|3-01"]
+
+def _joined(sid="3A-31", at="2026-10-02T09:30:00"):
+    """the timetable published again with one more student in 3A, in the Pure Chemistry group"""
+    pub = copy.deepcopy(_PUB); pub["meta"]["published_at"] = at
+    pub["model"]["students"].append(dict(id=sid, name="Student " + sid, cls="3A", level="Sec 3", groups=["3PC1"]))
+    return pub
+
+def _placed(made, key):
+    return {sid for rows in (made.get("seats") or {}).get(key, {}).values() for sid, _ in rows} | set((made.get("unseated") or {}).get(key) or [])
+
+@t
+def a_student_who_joins_after_approval_makes_it_stale_and_is_flagged():
+    _reset()
+    s, x = _approved(), _xset(_X4)
+    pub2 = _joined()
+    assert MK.stale(s, x, _M) is False and MK.stale(s, x, pub2["model"]) is True, "who sits each paper is part of what Make used"
+    c = RV.review(pub2, F.CAL, s, x, [])["checks"][1]
+    assert c["ok"] is False and c["lines"] == ["1 student has no seat."], c
+    assert RV.review(_PUB, F.CAL, s, x, [])["checks"][1]["ok"] is True
+
+@t
+def make_again_seats_a_student_who_joins_after_approval():
+    _reset()
+    s, x = _approved(), _xset(_X4)
+    pub2 = _joined()
+    MK.make(pub2, F.CAL, s, x, elsewhere=[])
+    m2 = pub2["model"]
+    for sit in SE.sittings(s):
+        assert set(SE.sitting_students(sit, s, m2)) == _placed(s["made"], sit["key"]), sit["key"]
+    assert "3A-31" in _placed(s["made"], KEY1) and "3A-31" in _placed(s["made"], "2026-10-05 10:00")
+    assert MK.stale(s, x, m2) is False and RV._seats_check(s, m2)["ok"] is True
+    texts = [c["text"] for c in AP.changes(s, m2)]
+    assert "Mon 5 Oct 07:50, 3A: 3-01 (30) → 3-01 (31)." in texts, texts
+    assert "3A-31" not in _placed(s["approved"]["made"], KEY1), "the main site waits for the change to be approved"
 
 
 print(f"{COUNT} exams tests passed")
