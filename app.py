@@ -1350,17 +1350,21 @@ def exams_who(id):
     return jsonify(got)
 
 # ------------------------------------------------------------------------------------------------ staff: exams, approval
-def _away_texts(pub, s):
-    """the texts that say who on an approved schedule is away in relief (from today); [] for any other schedule"""
+def _away_texts(pub, s, records=None):
+    """the texts that say who on an approved schedule is away in relief (from today); [] for any other schedule. records:
+    relief's (read here when None)"""
     try:
-        return [x["text"] for x in exams_relief_links.away_on(s, pub["model"], relief_absences.all_records(), _exams_today())]
+        return [x["text"] for x in exams_relief_links.away_on(s, pub["model"], relief_absences.all_records() if records is None else records, _exams_today())]
     except (ValueError, KeyError, TypeError):
         return []
 
 def _with_away(rows, pub):
-    saved = {s["id"]: s for s in exams_schedules._all()}
+    """each list row with away (_away_texts) for an approved schedule, [] for any other; relief's records are read once"""
+    saved, records = {s["id"]: s for s in exams_schedules.all_saved()}, None
     for r in rows:
-        r["away"] = _away_texts(pub, saved[r["id"]]) if r["id"] in saved and r.get("status") in ("approved", "changes") else []
+        on = r["id"] in saved and r.get("status") in ("approved", "changes")
+        if on and records is None: records = relief_absences.all_records()
+        r["away"] = _away_texts(pub, saved[r["id"]], records) if on else []
     return rows
 
 def _exam_review_reply(pub, s):

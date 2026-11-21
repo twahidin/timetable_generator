@@ -1105,6 +1105,23 @@ def links_name_the_classes_when_two_windows_meet_mid_period():
     assert _links().stopped(_lesson(7)) == "", "the view as it is: no one window holds the period, so it runs"
     _clear()
 
+@t
+def the_lists_read_relief_once():
+    _fresh()
+    _exam(duty_names=(AISHA,)); _exam(duty_names=(BEN,)); _event()
+    r = _put(_rec(AISHA, periods=[0, 1])); r2 = _put(_rec(BEN))
+    real, calls = AB.all_records, []
+    AB.all_records = lambda: calls.append(1) or real()
+    try:
+        with published(PUB):
+            j = ok(committee().get("/api/exams"))
+        assert len(calls) == 1, calls
+        assert sorted(len(x["away"]) for x in j["schedules"]) == [1, 1], j["schedules"]
+    finally:
+        AB.all_records = real
+        _drop(r); _drop(r2)
+    assert "exams_schedules._all(" not in open(os.path.join(ROOT, "app.py"), encoding="utf-8").read()
+
 
 _clear()
 print(f"{COUNT} exams and relief tests passed")
