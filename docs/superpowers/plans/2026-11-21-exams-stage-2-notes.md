@@ -8,18 +8,21 @@ Design: `../specs/2026-11-20-exams-and-events-design.md`. Stage 1: `2026-11-21-e
 
 - **Approval.** An exam moves draft, waiting for the timetable committee, approved (on the main site), or back to draft
   with the committee's note (sent back), or withdrawn. "Ended" is worked out from the last date. **Send to the timetable
-  committee** needs Make done, not stale and no check error. **Approve, Send back and Withdraw** (and the same for a
-  list of changes) are for the timetable committee only. Approving freezes a copy of everything the main site reads
+  committee** needs Make done, not stale and no paper-time error (the other checks are for the timetable committee to
+  weigh). **Approve, Send back and Withdraw** (and the same for a list of changes) are for the timetable committee only,
+  and they still work after a new publish (they save without the timetable check; Send and every edit keep it). Approving freezes a copy of everything the main site reads
   (papers, days, levels, classes, access, seats and duties); the schedule keeps a log of who did what and when.
 - **Changes after approval.** An edit and Make leave the approved copy on the main site. **Send the changes** lists what
   would differ (papers added, removed or moved, invigilator changes, room changes, seat counts) and puts the schedule in
   "changes waiting"; the committee sees only that list. Make again keeps every sitting whose papers are as approved
   exactly as approved, and re-seats a changed sitting while keeping its approved invigilators where they are still free.
 - **Someone is away.** On an approved schedule the exams committee names the person who is away and who takes the duty;
-  it is applied to the working copy and the approved copy together, logged, and listed for the timetable committee as
-  "Done without approval".
-- **Other schedules count.** The rooms and duties of other schedules that are waiting (their working copy) or approved
-  (their approved copy) are taken or busy for Make, "Who could take it" and the "free then" check.
+  it is applied to the approved copy, and to the working copy only where its duty holds the person away (a change
+  waiting for approval is kept as it is), logged, and listed for the timetable committee as "Done without approval". The
+  panel lists every duty of the approved copy, so a duty is reachable even when a waiting change moved its sitting.
+- **Other schedules count.** The rooms and duties of other schedules that are waiting (their working copy), approved
+  (their approved copy) or approved with changes waiting (both copies) are taken or busy for Make, "Who could take it"
+  and the "free then" check. A combined venue and its own rooms are one room in the review's clash line.
 - **The Approval tab** (mockup tab 10): what changes on the main site (classes and dates, lessons that stop, teachers
   with duties and the most duties, venues taken, rain rooms used anyway), five checks (papers, everyone seated,
   invigilators free then, clashes with other schedules, "the timetable changed since this was made"), the buttons and
@@ -36,8 +39,9 @@ Design: `../specs/2026-11-20-exams-and-events-design.md`. Stage 1: `2026-11-21-e
   card; `GET /api/exams/my-duties`) and **My exam timetable** (a student's own papers with report time, venue and seat,
   and their access arrangement's room and times only for them; `GET /api/me/exams`, personal code, used by parents too).
 - A full Make now clears a pin of a vanished sitting (stage 1's follow-up). "Scripts go to" is a new field on an exam.
-- Rights live in four helpers in `app.py` (`_exams_gate`, `_exams_rights`, `_exams_can_approve`, `_published_reader`) and
-  `@need(...)` uses only today's role names, so the personal-accounts work can rewrite them in one place.
+- Rights live in six helpers in `app.py` (`_exams_gate`, `_exams_rights`, `_exams_can_approve`, `_exams_can_keep_list`,
+  `_published_reader`, `_exams_student`) and `@need(...)` uses only today's role names: no other exams line reads the
+  role or the session, so the personal-accounts work rewrites them in one place.
 - No model, Telegram or network call anywhere; nobody is messaged yet.
 
 ## The controller's brief: decisions (B1 to B13)
@@ -97,7 +101,102 @@ rooms. P10 "Preview on the main site" (mockup tab 10) is not built. P11 The comm
   (fix round of Task 8).
 - The trailer on commits stays the plan's "Claude Opus 5.5".
 
+## The final review's fix wave (21 November 2026)
+
+A whole-branch review (cc310f4..543da73) confirmed four important findings on the made-up school; one fixer then made
+every change below, each with a test (the made-up school only).
+
+1. **Overlapping saves.** An approve during a Make was undone when the Make saved the copy it had loaded (gunicorn runs
+   one process with 8 threads). Every route that loads and saves a schedule (edit, Fill, paper upload, Make, move,
+   invigilators, use anyway, send, approve, send back, withdraw, someone is away) and delete now hold one lock
+   (`schedules.editing()`, an `RLock`) from loading to saving. Test: a slowed Make and an approve in two threads; the
+   approve is kept.
+2. **Approval after a new publish.** Approve, send back, withdraw and someone is away save with `check=False`, so a
+   schedule approved before a publish that dropped one of its students can still be withdrawn; Send and every edit keep
+   the check.
+3. **Someone is away and a waiting change.** The approved copy is pinned to its own names; the working copy's duty is
+   changed (and pinned to its own names) only when it holds the person away, and when the person taking over is on it
+   already the one away just leaves (no name twice, `short` worked out again).
+4. **A student who joins after approval.** Make keeps an approved sitting only when the students who sit it now are its
+   seated and unseated students; who sits each paper is in `make.fingerprint` (so the schedule is stale after such a
+   publish); the seats check also counts students who sit a made sitting but are in neither list. A class whose count
+   changes in one room reads "3A: 3-01 (30) → 3-01 (31)." in the change list.
+5. `/api/day` takes only YYYY-MM-DD (`fromisoformat(raw).isoformat() == raw`): no week dates or short forms.
+6. A schedule with changes waiting holds both copies for the other schedules (the working duties that differ are
+   "waiting").
+7. Who keeps the exams committee list (`_exams_can_keep_list`) and the student of `/api/me/exams` (`_exams_student`) are
+   named helpers; no other exams line reads the role or the session (a test reads `app.py` for it).
+8. The "Someone is away" panel lists every duty of the approved copy ("Duty on the main site").
+9. My exam duties lists the lessons that don't happen for a teacher with no duty too (the card shows for them).
+10. The timetable check without a publish date reads "a new timetable was published." (never "published on .").
+11. `schedules.listing(today)` needs `today`; nothing in `exams/` reads the clock but `schedules._now` (invigilate reads
+    the saved schedules through `schedules.all_saved()`).
+12. `/who?copy=approved` for a duty that is not there: "That duty is not on the main site."
+13. The Approval tab keeps a "takes N of these invigilators" line unless the free lines name that schedule on that date
+    for at least N people (a node test runs the function cut from `static/exams.js`).
+14. README: Send needs Make done, nothing changed since, and no paper-time error.
+15. A published page left open across a publish: the page carries the timetable's `published_at` (in its app settings),
+    sends it with `/api/day`, and the answer carries it; a different one gives 409 "The timetable was published again:
+    reload the page." and the page shows that sentence instead of drawing cells.
+16. A combined venue and its rooms are one room in the review's clash line and on a room's view of a date (a paper held
+    in LT1 shows on LT1&2 as "in LT1"; Who's free already counted them together). Done on the page for the room view: the
+    server's room items stay per room, so Who's free does not mark a sibling room busy.
+
+Tests the review asked for, added: reader and scribe students left out of the class room line for the student code;
+Make reading a stored neighbour from disk (its room and invigilators taken: Review Focus 4 end to end); the change kinds
+levels, dates, day, scripts, access, Added (timed and not), Removed and timetable; and a committed node test of the
+published page's dates (`tests/timetable_page.test.js`: the page's last script in a small fake DOM, crossed cells,
+"runs ... only", exam cells for a class, a teacher and a room, Who's free on a date, a holiday, the stamp check).
+
+Cost to know: who sits each paper is now part of what Make used, so a schedule made before this change reads "The exam
+changed since Make: press Make again." once after the deploy (stage 1 schedules on the live site included).
+
+### Rulings recorded with the fix wave
+
+- P2 keeps an unchanged approved sitting and flags a name that now clashes (instead of re-filling it), as Review Focus 1
+  chose; the committee changes it by hand.
+- After a new publish the build shows the `retimed` flag and review lines (plan B6), not a count sentence.
+- "My exam duties" lives on the Exams and events card (plan decision); a teacher's own page comes with accounts.
+- Approve is not blocked by failed checks: the committee decides with the checks in front of it.
+
 ## Checked
+
+### After the fix wave
+
+- Every suite run alone one after another on the final code, all pass: `test_exams` 141, `test_relief` 37,
+  `test_typed` 33 (`--full` 34), `test_helper` 20 (`--full` 21), `test_fixes` 65 (`--full` 67), `test_combined` 38
+  (`--full` 39), `test_verify` 56, `test_rules` 11, `test_choices` 16, `test_parents` 35, `test_sync` 18, `test_board` 58,
+  `test_ask` 49, `test_teachers` 9, `test_venues` 4, `smoke` 102 (`--full` 103), the 17 node test files (two new:
+  `tests/exams.test.js` 4, `tests/timetable_page.test.js` 5), and `node --check` on `static/app.js`, `static/exams.js`,
+  `static/exams-settings.js` and the last script of `ttgen/timetable_page.html`. The two copies of the page, and every
+  `ttgen/*.py` against its skill copy, are identical. In the back-to-back run, with the machine busy (load average about
+  20), `test_typed --full` and `test_helper --full` (solver runs) failed once each; run alone afterwards both pass.
+- **The school's real timetable (CTSS), counts only, scratch folder deleted.** The newest solver timetable file in the
+  folder (v23; the same file stage 1 counted, not Task 9's v17 from deployment): 1985 lessons, 26 periods, no student
+  list, so 973 made-up students for the 25 classes of Sec 1-3 by class size. The same made-up term and exam as Task 9
+  (Mon 23 to Fri 27 Nov, whole days, one paper per level a day at 08:00 for 90 minutes), the 41 classroom rooms as exam
+  rooms, made, sent and approved through the functions.
+  - Make: 15 papers, 5 sittings, 4865 student-papers seated, 0 unseated, 125 duties, 0 short. The review's five checks
+    all ok.
+  - First day, `published.day` for staff: 156 lessons crossed out, 25 class items, 50 teacher items (50 teachers), 25
+    rooms; for the student code 156 crossed out, 25 class items, 0 teachers, 0 rooms.
+  - 93 teachers have duties (250 duty rows, the most is 5; that teacher has 12 lessons that do not happen). The one
+    teacher with no duty has lessons that do not happen and now sees them (item 9). All 973 students have papers (4865
+    rows).
+  - `/api/day` for the first day: 19228 bytes for staff, 4180 for the student code; `/api/published/exams`: 29585 and
+    1503 bytes. A Saturday answers `day: null`; an old page's stamp answers 409; a week date ("2026-W48-1") answers 400.
+  - The fix wave on real data: one more made-up student in a Sec 1 class on a new publish makes the schedule stale and the
+    review says "1 student has no seat."; Make again re-seats the 5 sittings that student sits (0 kept as approved, since
+    every day's sitting holds a Sec 1 paper), places the student in all 5, is fresh, and lists 6 changes; Withdraw after
+    that publish answers 200 and the main site is empty.
+  - Times: the machine was busy (load average about 20), so Make took 0.6 to 1.4 s both on the code before the fix wave
+    (543da73) and after it, run back to back; the fix wave adds no measurable time (review 0.05 to 0.09 s, a day 4 to 12
+    ms, `my_duties` 10 to 19 ms a teacher, either way).
+- The fix wave's commits hold no real staff name (207 names and short forms of the newest file searched in
+  `git log -p 543da73..HEAD`: no full name; two short forms that are ordinary words, one of them also a first name the
+  made-up school uses) and not the school's full name (0); the same holds for the whole branch.
+
+### At the end of the build (before the fix wave)
 
 - Every suite run alone one after another on the final code, all pass: `test_exams` 121, `test_relief` 37, `test_typed`
   33 (`--full` 34), `test_helper` 20 (`--full` 21), `test_fixes` 65 (`--full` 67), `test_verify` 56, `test_rules` 11,
@@ -135,6 +234,8 @@ rooms. P10 "Preview on the main site" (mockup tab 10) is not built. P11 The comm
 
 ## Not tried in a browser
 
+- The fix wave's page changes (the away panel's duty list, the duties card for a teacher with no duty, the "takes" rule,
+  the "published again" sentence, a combined venue's room view on a date): covered by node tests and source tests only.
 - Send back, Withdraw, changes waiting, "Someone is away".
 - A staff member's "My exam duties" and the student's `/me` "My exam timetable" (personal and staff codes cannot be typed
   in the pane; covered by tests).
@@ -143,27 +244,23 @@ rooms. P10 "Preview on the main site" (mockup tab 10) is not built. P11 The comm
 
 ## Deferred minors
 
+What the fix wave below closed is gone from this list.
+
 - Approval: `printouts.py` has an unused `import datetime`; `approval._when` reads `p["minutes"]` (TypeError if missing);
-  `replace()` can add a duplicate name if the working copy already holds it; `_swap` does a `setdefault` on reasons that
-  may be None; several change kinds have no test (levels, dates, scripts, access, day, Added/Removed, timetable);
   `fp` uses `default=str`.
 - Make: the approved duties are deep-copied twice; `_gone(keys=None)` reports gone names for kept sittings whose duties
-  still carry them; the prefer pick has no chief-first choice; the backup skip in the prefer loop has no test; there is no
-  test of Make with `elsewhere` read from disk (Review Focus 4 end to end).
-- Review: the timetable check flags an unmade schedule and can print an empty date; a "takes N" line is dropped once any
-  invigilator is named for that schedule, so a second person's clash can vanish when the free lines name fewer people
-  than its count; no test with a class outside every window.
-- Schedules and routes: `schedules.listing` falls back to `datetime.date.today()` (only `app._exams_today` and
-  `schedules._now` should read the clock); delete is a load-then-delete, not atomic; no route-level test of `elsewhere`
-  with a second approved schedule; `/api/day` accepts ISO week dates ("2026-W41-1"); a near-empty assertion at the end of
-  `day_refuses_bad_dates`; print names other than seating are not tested against `TITLES`.
-- Published layer: reader and scribe exclusions from a class line are untested; "also {rooms}" can name a non-access
-  duty room; the banner count counts a make-up date outside start..end; `published` calls the private `days._date` and
-  `days._window`; module-level test statements sit outside `@t`.
-- Pages: the fake-DOM harness for the published page is not committed (source-string tests only); a mixed cell is drawn
-  uncrossed; `chipClass` depends on the label strings; `say` is built twice; "Who takes it" does not exclude names already
-  on the duty; the chip and notice refresh only on opening the Approval tab or on an action; two weak assertions
-  (`"S.abMsg"` in the js, a negative check of a string that never existed).
+  still carry them; the prefer pick has no chief-first choice; the backup skip in the prefer loop has no test.
+- Review: the timetable check would flag an unmade schedule (the review only runs once made); no test with a class
+  outside every window.
+- Schedules and routes: no route-level test of `elsewhere` with a second approved schedule (the fix wave's test reads a
+  stored neighbour through Make itself); a near-empty assertion at the end of `day_refuses_bad_dates`; print names other
+  than seating are not tested against `TITLES`; one lock for every schedule, so a Make of one schedule holds an edit of
+  another for its 0.6 s.
+- Published layer: "also {rooms}" can name a non-access duty room; the banner count counts a make-up date outside
+  start..end; `published` calls the private `days._date` and `days._window`; module-level test statements sit outside
+  `@t`.
+- Pages: a mixed cell is drawn uncrossed; `chipClass` depends on the label strings; `say` is built twice; the chip and
+  notice refresh only on opening the Approval tab or on an action; one weak assertion (`"S.abMsg"` in the js).
 - Spec items not built: "lessons that use a taken venue" in the review (stage 1's busy-room flag covers it);
   "Preview on the main site" (P10).
 
@@ -173,8 +270,9 @@ rooms. P10 "Preview on the main site" (mockup tab 10) is not built. P11 The comm
   is away. Relief's absences should feed "Someone is away" (today the exams committee says who is away). Relief stage 3
   adds its own layer to the same `/api/day` answer: the `exams` key is a small object so another key can sit beside it.
   Nothing tells a teacher or student yet (no Telegram, no page notice beyond the banner).
-- **Stage 4 and accounts.** `_exams_gate`, `_exams_rights`, `_exams_can_approve` and `_published_reader` are the only
-  places that read the role; personal accounts rewrite them. A history page with "Put back" can read `log` and the
+- **Stage 4 and accounts.** `_exams_gate`, `_exams_rights`, `_exams_can_approve`, `_exams_can_keep_list`,
+  `_published_reader` and `_exams_student` are the only places that read the role or the session; personal accounts
+  rewrite them. A history page with "Put back" can read `log` and the
   approved copy; no history page exists yet. The staff code in the pane could not be tried, so My exam duties needs a
   browser check once accounts exist.
 - The real timetable has no student list: real seating needs the students uploaded or added to the setup and published.
