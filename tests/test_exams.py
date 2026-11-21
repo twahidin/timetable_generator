@@ -1873,13 +1873,13 @@ def the_exams_pages_carry_the_approval_words():
     js = _page("exams.js")
     for words in ("Approval", "Send to the timetable committee", "Send again", "Send the changes", "Approve: show on the main site",
                   "Approve the changes", "Send back with a note", "Withdraw from the main site", "Done without approval", "Someone is away",
-                  "Replace now", "My exam duties", "You have no exam duties on the main site.", "Scripts go to",
+                  "Replace now", "My exam and event duties", "You have no exam or event duties on the main site.", "Scripts go to",
                   "On the main site. Changes you make here wait for the timetable committee: send them from the Approval tab.",
                   "Changes not sent yet", "Nothing on the main site has changed since it was approved.", "What changes on the main site",
                   "Lessons that won't happen: ", "Rain rooms used anyway: ", "Take ${S.sched.name} off the main site now?", "/api/exams/my-duties",
                   "&copy=approved", "Lessons that don't happen: "):
         assert words in js, words
-    assert "g.includes(` is on ${m[1]} then (`)" not in js and "f.includes(` is on ${m[1]} then (`)" in js, "a takes line goes only when a free line names that schedule"
+    assert "g.includes(` is on ${m[1]} then`)" not in js and "f.includes(` is on ${m[1]} then`)" in js, "a takes line goes only when a free line names that schedule, with or without a room"
     assert "S.abMsg" in js, "a refusal shows beside the Approval buttons"
     assert "Exams · " in _page("app.js"), "the committee page counts the schedules waiting"
 
@@ -2660,5 +2660,19 @@ def event_cannot_be_forged_or_decided_by_its_teacher():
         assert a.post(f"/api/events/{id}/send-back").status_code != 200 and SC.load(id)["status"] == "waiting", SC.load(id)["status"]
         assert c.post(f"/api/events/{id}/approve").status_code == 200
         assert a.post(f"/api/events/{id}/withdraw").status_code != 200 and SC.load(id)["status"] == "approved"
+
+
+@t
+def the_exams_pages_carry_the_event_words():
+    js = _page("exams.js")
+    for words in ("Exams, tests and events", "+ New event", "New event", "Teacher in charge", "Venues in school",
+                  "Venues ticked here are taken: exams and other events cannot use them then.", "Who goes", "Form teachers of ",
+                  "Teachers who'd teach them then", "A department", "Pick people", " off the list", "+ Add a duty", "Clashes",
+                  "Lessons that use a venue taken", "Venues freed: ", "My exam and event duties", "You have no exam or event duties on the main site.",
+                  "You are not in charge of an event yet.", "People going: ", " goes in their place on the main site now. The timetable committee sees it under Done without approval.",
+                  "/api/events"):
+        assert words in js, words
+    assert "/api/events" in _page("app.js"), "the committee page counts the events waiting too"
+    assert "ev-kind" in _page("exams.html"), "the Event chip has a colour"
 
 print(f"{COUNT} exams tests passed")
