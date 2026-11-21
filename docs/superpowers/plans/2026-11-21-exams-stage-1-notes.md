@@ -118,8 +118,11 @@ Each item has a test on the made-up school (`tests/test_exams.py`).
   (`--full` 34), `test_helper` 20 (`--full` 21), `test_fixes` 65 (`--full` 67), `test_verify` 56, `test_rules` 11,
   `test_choices` 16, `test_parents` 35, `test_sync` 18, `test_board` 58, `test_combined` 38, `test_ask` 49,
   `test_teachers` 9, `test_venues` 4, `smoke` 102 (`--full` 103), and the 15 node test files.
-- After the fix wave: `test_exams` 72, `test_relief` 37, `smoke` 102, `smoke --full` 103, `node --check` on
-  `exams.js` and `exams-settings.js`; the other suites as in the fix-wave report.
+- After the fix wave, run one after another: `test_exams` 72, `test_relief` 37, `smoke` 102 (`--full` 103), and every
+  other suite unchanged: `test_ask` 49, `test_board` 58, `test_choices` 16, `test_combined` 38, `test_fixes` 65,
+  `test_helper` 20, `test_parents` 35, `test_rules` 11, `test_sync` 18, `test_teachers` 9, `test_typed` 33,
+  `test_venues` 4, `test_verify` 56, the 15 node test files, and `node --check` on `app.js`, `exams.js` and
+  `exams-settings.js`.
 - Browser, made-up school (during the build; the fix wave's page changes were not tried in a browser): the front
   card, committee sign-in, Exam settings, a new exam with a part day, Fill from the subjects, Make, a room's seat grid,
   Move class to..., Who could take it, the Lessons tab, and the printouts drawn to PNG; phone width 375 with no
