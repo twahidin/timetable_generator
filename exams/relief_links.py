@@ -3,6 +3,7 @@ copies count (as on the main site). Every answer is "", [] or 0 when the date is
 import datetime
 
 from exams import days as _days
+from exams import approval as _approval
 from exams import schedules as _schedules
 from relief import lessons as _lessons
 from relief.calendar import school_day
@@ -170,3 +171,89 @@ class Links:
             if mine:
                 total += len([p for p, (x, y) in enumerate(self.bnds) if p not in running and any(a < y and x < b for a, b, *_ in mine)])
         return total
+
+
+def _minutes(bnds, periods):
+    """(start, end) minutes of periods [from, to] (0-based, inclusive), or of the whole day when None"""
+    if not bnds:
+        return None
+    if not periods:
+        return bnds[0][0], bnds[-1][1]
+    a, b = max(int(periods[0]), 0), min(int(periods[1]), len(bnds) - 1)
+    return (bnds[a][0], bnds[b][1]) if a <= b else None
+
+
+def relief_busies(model, records) -> list:
+    """busies (the shape schedules.busies gives) for relief's own records: whoever is away over their periods, and whoever
+    is chosen to cover a lesson. A cancelled record gives none; a backup record (with exams) gives only the cover."""
+    bnds = _days.bounds(model) if model else []
+    out = []
+    if not bnds:
+        return out
+
+    def busy(name, date, a, b, why):
+        out.append(dict(id="relief", kind="relief", name="Relief", status="approved", date=_iso(date), start=a, end=b, room="",
+                        names=[name], why=why))
+
+    for r in records or []:
+        if r.get("cancelled"):
+            continue
+        span = _minutes(bnds, r.get("periods"))
+        if span and not r.get("exams") and r.get("teacher"):
+            for d in r.get("dates") or []:
+                busy(r["teacher"], d, span[0], span[1], "is away then (relief)")
+        for x in r.get("lessons") or []:
+            if not x.get("needed") or not x.get("relief"):
+                continue
+            try:
+                p = int(x["p"])
+                last = min(p + max(int(x.get("n") or 1), 1), len(bnds)) - 1
+                if p < 0 or p >= len(bnds):
+                    continue
+                busy(x["relief"], x["date"], bnds[p][0], bnds[last][1],
+                     "covers relief then (%s %s)" % (", ".join(x.get("classes") or []), x.get("subject") or ""))
+            except (KeyError, ValueError, TypeError):
+                continue
+    return out
+
+
+def away_on(sched, model, records, today) -> list:
+    """for an approved schedule (saved, or its approved copy as a schedule), dated today or later: dict(name, date, text) for
+    each person on a duty or going with the event who has an absence (not a backup) overlapping their window then"""
+    if sched.get("approved"):
+        ap = _approval.as_schedule(sched)
+    else:
+        ap = sched if sched.get("status") in ("approved", "changes") else None
+    bnds = _days.bounds(model) if model else []
+    if not ap or not bnds:
+        return []
+    away = {}
+    for r in records or []:
+        if r.get("cancelled") or r.get("exams") or not r.get("teacher"):
+            continue
+        span = _minutes(bnds, r.get("periods"))
+        if span:
+            for d in r.get("dates") or []:
+                away.setdefault((r["teacher"], d), []).append(span)
+    iso_today = _iso(today)
+    out, seen = [], set()
+    if ap.get("kind") == _schedules.EVENT:
+        for b in _schedules.event_busy(dict(ap, status="approved"), model):
+            if b["date"] < iso_today or not b["names"]:
+                continue
+            for n in b["names"]:
+                if (n, b["date"]) not in seen and any(a < b["end"] and b["start"] < z for a, z in away.get((n, b["date"]), ())):
+                    seen.add((n, b["date"]))
+                    out.append(dict(name=n, date=b["date"], text="Away (from relief): %s on %s, going with the event. Replace them "
+                                                                 "under Someone is away." % (n, _days.nice(b["date"]))))
+    else:
+        for d in (ap.get("made") or {}).get("duties") or []:
+            if d["date"] < iso_today:
+                continue
+            for n in d.get("names") or []:
+                if any(a < d["end"] and d["start"] < z for a, z in away.get((n, d["date"]), ())):
+                    out.append(dict(name=n, date=d["date"], text="Away (from relief): %s on %s, on duty in %s %s\u2013%s. Replace "
+                                                                 "them under Someone is away." % (n, _days.nice(d["date"]), d["room"],
+                                                                                                  _days.hhmm(d["start"]), _days.hhmm(d["end"]))))
+    out.sort(key=lambda x: (x["date"], x["name"]))
+    return out

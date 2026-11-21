@@ -110,9 +110,13 @@
   }
   const sentOn = at => at ? fmtDate(String(at).slice(0, 10)) : "";
 
+  /* who on an approved schedule is away in relief: the server's texts, as notices */
+  const awayNotes = list => (list || []).length ? `<div class="notice" role="status" aria-label="Away (from relief)">${list.map(t => `<div>${esc(t)}</div>`).join("")}</div>` : "";
+
   /* the lines under a schedule's name in the list */
   function statusLines(s) {
     const out = [];
+    (s.away || []).forEach(t => out.push(`<b>${esc(t)}</b>`));
     if (s.note && s.status === "approved") out.push(`Changes sent back: “${esc(s.note)}”`);
     else if (s.note && (s.status || "draft") === "draft") out.push(`Sent back: “${esc(s.note)}”`);
     if (s.status === "waiting" || s.status === "changes") out.push(`sent by ${esc(s.sent_by || "")}, ${esc(sentOn(s.sent_at))}`);
@@ -839,7 +843,7 @@
     const names = groups.flatMap(([k]) => (G[k] || []).map(c => c.name));
     const who = names.includes(A.who) ? A.who : "";
     const sel = groups.map(([k, title]) => (G[k] || []).length ? `<optgroup label="${esc(title)}">${G[k].map(c => opt(c.name, who, `${c.name} · ${c.minutes} min so far`)).join("")}</optgroup>` : "").join("");
-    return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">This changes the duty on the main site now, without a new approval.</p>
+    return `${awayNotes((S.rv || {}).away)}<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">This changes the duty on the main site now, without a new approval.</p>
       <div class="line"><b>Who is away</b><select data-aw="away" aria-label="Who is away">${d.names.map(n => opt(n, A.away)).join("")}</select></div>
       <div class="line"><b>Who takes it</b><select data-aw="who" aria-label="Who takes it"><option value="">Choose a name</option>${sel}</select></div>
       <div class="row"><button type="button" data-act="replace" ${S.busy ? "disabled" : ""}>Replace now</button></div>${say}</div>`;
@@ -948,7 +952,7 @@
     const names = groups.flatMap(([k]) => (G[k] || []).map(c => c.name));
     const who = names.includes(A.who) ? A.who : "";
     const sel = groups.map(([k, title]) => (G[k] || []).length ? `<optgroup label="${esc(title)}">${G[k].map(c => opt(c.name, who, `${c.name} · ${c.reason}`)).join("")}</optgroup>` : "").join("");
-    return `<div class="card"><h2>Someone is away</h2><p class="muted small">This changes who goes on the main site now, without a new approval.</p>
+    return `${awayNotes((S.rv || {}).away)}<div class="card"><h2>Someone is away</h2><p class="muted small">This changes who goes on the main site now, without a new approval.</p>
       <div class="line"><b>Who is away</b><select data-aw="away" aria-label="Who is away">${ap.map(n => opt(n, A.away)).join("")}</select></div>
       <div class="line"><b>Who takes it</b><select data-aw="who" aria-label="Who takes it"><option value="">Choose a name</option>${sel}</select></div>
       <div class="row"><button type="button" data-act="evReplace" ${S.busy ? "disabled" : ""}>Replace now</button></div>${say}</div>`;
@@ -1112,6 +1116,7 @@
     const st = rv.status, why = rv.can_send || "", unsent = rv.unsent || [], me = S.me.can_approve;
     const out = [`<div class="card"><h2>Approval</h2><p><span class="chip ${chipClass({ label: rv.label })}">${esc(rv.label)}</span></p>
       ${S.abMsg ? `<p class="msg bad" role="status">${esc(S.abMsg)}</p>` : ""}${rv.note ? `<p>Sent back by the timetable committee: “${esc(rv.note)}”</p>` : ""}</div>`];
+    if ((rv.away || []).length) out.push(awayNotes(rv.away));
     if (st === "draft" || st === "withdrawn") out.push(sendBox("Send to the timetable committee", "", "Send to the timetable committee", "send", why));
     if ((st === "waiting" || st === "changes") && rv.changed) out.push(sendBox("Send again", "Changed since you sent it: send it again.", "Send again", "send", why));
     if (st === "approved" && unsent.length) out.push(`<div class="card"><h2>Changes not sent yet</h2>${unsent.map(c => `<p>${esc(c.text)}</p>`).join("")}<div class="row"><button type="button" class="primary" data-act="approval" data-a="send" ${S.busy || why ? "disabled" : ""}>Send the changes</button>${why ? `<span class="muted small">${esc(why)}</span>` : ""}</div></div>`);

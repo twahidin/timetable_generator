@@ -344,5 +344,145 @@ def forms_say_not_happening():
     assert "replaces you" in open(os.path.join(ROOT, "static", "relief.js"), encoding="utf-8").read()
     assert "replaces them" in open(os.path.join(ROOT, "static", "relief-plan.js"), encoding="utf-8").read()
 
+# ---- Task 4: exams see relief: someone away or covering relief is not free; away notices
+from exams import invigilate as INV, settings as XS, review as RV, events as EV  # noqa: E402
+
+def _rec(teacher, periods=None, dates=(ISO,), lessons=(), cancelled=None, **kw):
+    return dict(id="rec-" + secrets.token_hex(4), teacher=teacher, dates=list(dates), periods=periods, cancelled=cancelled,
+                lessons=list(lessons), **kw)
+
+def _put(r):
+    os.makedirs(AB.DIR, exist_ok=True)
+    store.write_json(os.path.join(AB.DIR, r["id"] + ".json"), r)
+    return r
+
+def _drop(r):
+    try: os.remove(os.path.join(AB.DIR, r["id"] + ".json"))
+    except FileNotFoundError: pass
+
+COVER = dict(date=ISO, p=0, n=1, classes=["1A"], subject="Art", needed=True, relief=BEN)
+
+@t
+def relief_busies_shapes():
+    away = _rec(DANIEL, periods=[1, 2])
+    whole = _rec(AISHA)
+    gone = _rec(GRACE, cancelled=dict(by="x"))
+    backup = _rec(BEN, exams=dict(id="e", kind="exam"), lessons=[dict(COVER, relief=DANIEL, classes=["1A", "1B"])])
+    unneeded = _rec(AISHA, cancelled=None, lessons=[dict(COVER, needed=False), dict(COVER, relief="")])
+    got = RL.relief_busies(M, [away, whole, gone, backup, unneeded])
+    bnds = D.bounds(M)
+    for b in got:
+        assert b["id"] == "relief" and b["kind"] == "relief" and b["name"] == "Relief" and b["status"] == "approved" and b["room"] == "", b
+    mine = [(b["names"], b["start"], b["end"], b["why"]) for b in got]
+    assert ([DANIEL], bnds[1][0], bnds[2][1], "is away then (relief)") in mine, mine
+    assert ([AISHA], bnds[0][0], bnds[-1][1], "is away then (relief)") in mine, mine
+    assert ([DANIEL], bnds[0][0], bnds[0][1], "covers relief then (1A, 1B Art)") in mine, mine
+    assert not any(GRACE in b["names"] for b in got) and not any(BEN in b["names"] for b in got)
+    assert len(got) == 4, mine
+
+@t
+def away_person_is_not_a_candidate():
+    _clear()
+    r = _put(_rec(AISHA, periods=[0, 4]))
+    try:
+        xset = XS.load(PUB)
+        busy = SC.elsewhere("x", M)
+        view = D.day_view(PUB, CAL, SC.new("exam", "T", ["Sec 3"], ISO, ISO, GRACE, pub=PUB), ISO)
+        why, _ = INV._free(AISHA, view, 460, 550, [], xset, elsewhere=busy)
+        assert why == "is away then (relief)", why
+        s = SC.new("exam", "T", ["Sec 3"], ISO, ISO, GRACE, pub=PUB)
+        got = INV.candidates(PUB, CAL, s, xset, ISO, 460, 550, [], elsewhere=busy)
+        assert AISHA not in [c["name"] for g in got.values() for c in g], got
+        got2 = INV.candidates(PUB, CAL, s, xset, ISO, 460, 550, [])
+        assert AISHA in [c["name"] for g in got2.values() for c in g], "free without the relief busy"
+    finally:
+        _drop(r)
+
+@t
+def relief_cover_is_busy():
+    _clear()
+    r = _put(_rec(DANIEL, lessons=[COVER]))
+    try:
+        s = SC.new("exam", "T", ["Sec 3"], ISO, ISO, GRACE, pub=PUB)
+        view = D.day_view(PUB, CAL, s, ISO)
+        why, _ = INV._free(BEN, view, 460, 550, [], XS.load(PUB), elsewhere=SC.elsewhere("x", M))
+        assert why == "covers relief then (1A Art)", why
+    finally:
+        _drop(r)
+
+@t
+def relief_busies_are_not_other_schedules():
+    _clear()
+    e = _exam(duty_names=(AISHA,))
+    ev = _event()
+    r = _put(_rec(AISHA, periods=[0, 4]))
+    r2 = _put(_rec(BEN, lessons=[COVER]))
+    try:
+        xset = XS.load(PUB)
+        busy = SC.elsewhere(e["id"], M)
+        assert any(b.get("kind") == "relief" for b in busy)
+        rv = RV.review(PUB, CAL, SC.load(e["id"]), xset, busy)
+        other = next(c for c in rv["checks"] if c["key"] == "others")
+        assert other["ok"] and "Relief" not in " ".join(other["lines"]), other
+        busy = SC.elsewhere(ev["id"], M)
+        lines = EV.other_lines(PUB, CAL, ev, busy, [])
+        assert not any("Relief" in l for l in lines), lines
+        assert EV.freed(PUB, CAL, ev, busy) == EV.freed(PUB, CAL, ev, [])
+    finally:
+        _drop(r); _drop(r2)
+
+@t
+def away_notice_on_an_approved_exam_and_event():
+    _clear()
+    e, ev = _exam(duty_names=(AISHA,)), _event()
+    today = date(2026, 12, 1)
+    recs = [_rec(AISHA, periods=[0, 1]), _rec(BEN)]
+    got = RL.away_on(e, M, recs, today)
+    assert got == [dict(name=AISHA, date=ISO, text="Away (from relief): %s on Mon 4 Jan, on duty in 3-01 07:40\u201309:10. "
+                                                    "Replace them under Someone is away." % AISHA)], got
+    got = RL.away_on(ev, M, recs, today)
+    assert got == [dict(name=BEN, date=ISO, text="Away (from relief): %s on Mon 4 Jan, going with the event. "
+                                                  "Replace them under Someone is away." % BEN)], got
+    assert RL.away_on(e, M, [_rec(AISHA, cancelled=dict(by="x"))], today) == []
+    assert RL.away_on(e, M, [_rec(AISHA, periods=[9, 10])], today) == [], "away outside the duty"
+    assert RL.away_on(e, M, [_rec(AISHA, exams=dict(id="x", kind="exam"))], today) == []
+    assert RL.away_on(e, M, recs, date(2027, 1, 5)) == [], "past date"
+    assert RL.away_on(_exam("waiting"), M, recs, today) == [], "only approved"
+
+@t
+def lists_and_reviews_carry_away():
+    _clear()
+    e, ev = _exam(duty_names=(AISHA,)), _event()
+    for sv in (e,):
+        sv["made"]["duties"][0]["key"] = "k"; sv["approved"] = AP.public(sv); SC.save(sv, PUB, CAL, "x", check=False)
+    r = _put(_rec(AISHA, periods=[0, 1], dates=[ISO]))
+    r2 = _put(_rec(BEN))
+    old, oldp = A._exams_today, store.published
+    A._exams_today = lambda: date(2026, 12, 1)
+    store.published = lambda: PUB
+    try:
+        with A.app.test_request_context():
+            pass
+        c = staff(GRACE)
+        c.post("/login", data={"as": "committee", "code": os.environ["COMMITTEE_CODE"]})
+        j = c.get("/api/exams").get_json()
+        row = next(x for x in j["schedules"] if x["id"] == e["id"])
+        assert row["away"] and row["away"][0].startswith("Away (from relief): " + AISHA), row
+        j = c.get("/api/events").get_json()
+        row = next(x for x in j["schedules"] if x["id"] == ev["id"])
+        assert row["away"] and "going with the event" in row["away"][0], row
+        rr = c.get("/api/exams/%s/review" % e["id"]); assert rr.status_code == 200, (rr.status_code, rr.get_data(as_text=True)[:200])
+        assert rr.get_json()["away"][0].startswith("Away (from relief)")
+        assert "going with the event" in c.get("/api/events/%s/review" % ev["id"]).get_json()["away"][0]
+    finally:
+        A._exams_today, store.published = old, oldp
+        _drop(r); _drop(r2)
+
+@t
+def exams_page_shows_away():
+    js = open(os.path.join(ROOT, "static", "exams.js"), encoding="utf-8").read()
+    assert "Away (from relief)" in js and ".away" in js
+
+
 _clear()
 print(f"{COUNT} exams and relief tests passed")

@@ -206,6 +206,7 @@ def other_lines(pub, cal, s, elsewhere, others) -> list:
     parts = model.get("room_parts") or {}
     taken = _taken(pub, s)
     dates = on_dates(pub, cal, s)
+    elsewhere = [b for b in elsewhere if b.get("kind") != "relief"]
     tags = sorted({(o["name"], o["status"]) for o in others} | {(b["name"], b["status"]) for b in elsewhere})
     shares, uses = [], []
     for tag in tags:

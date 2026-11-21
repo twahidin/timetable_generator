@@ -15,6 +15,8 @@ from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, draft, store, sync, typed
 from relief import codes as relief_codes, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
+from relief import absences as relief_absences
+import exams.relief_links as exams_relief_links
 from ttgen import choices
 import datetime
 import exams.approval as exams_approval, exams.review as exams_review, exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts, exams.published as exams_published, exams.events as exams_events
@@ -1027,7 +1029,7 @@ def exams_list():
     pub, who, err = _exams_gate()
     if err: return err
     m = pub["model"]
-    return jsonify(schedules=exams_schedules.listing(_exams_today(), exams_make.published_at(pub), kinds=("exam", "test")), levels=m.get("levels") or [], classes=[[c["name"], c["level"]] for c in m.get("classes") or []],
+    return jsonify(schedules=_with_away(exams_schedules.listing(_exams_today(), exams_make.published_at(pub), kinds=("exam", "test")), pub), levels=m.get("levels") or [], classes=[[c["name"], c["level"]] for c in m.get("classes") or []],
                    calendar_ok=bool(_exam_cal(pub).get("terms")))
 
 @app.post("/api/exams")
@@ -1315,6 +1317,19 @@ def exams_who(id):
     return jsonify(got)
 
 # ------------------------------------------------------------------------------------------------ staff: exams, approval
+def _away_texts(pub, s):
+    """the texts that say who on an approved schedule is away in relief (from today); [] for any other schedule"""
+    try:
+        return [x["text"] for x in exams_relief_links.away_on(s, pub["model"], relief_absences.all_records(), _exams_today())]
+    except (ValueError, KeyError, TypeError):
+        return []
+
+def _with_away(rows, pub):
+    saved = {s["id"]: s for s in exams_schedules._all()}
+    for r in rows:
+        r["away"] = _away_texts(pub, saved[r["id"]]) if r["id"] in saved and r.get("status") in ("approved", "changes") else []
+    return rows
+
 def _exam_review_reply(pub, s):
     """the Approval tab: state, who sent and approved, what is waiting and the review a committee reads"""
     model, xset = pub["model"], exams_settings.load(pub)
@@ -1326,7 +1341,7 @@ def _exam_review_reply(pub, s):
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
                    changed=s.get("sent_fp") is not None and s.get("sent_fp") != exams_approval.fp(s),
                    can_send=exams_approval.blocked(s, model, stale, errors), can_approve=_exams_can_approve(),
-                   unsent=exams_approval.changes(s, model) if st == "approved" else [], review=rv)
+                   unsent=exams_approval.changes(s, model) if st == "approved" else [], review=rv, away=_away_texts(pub, s))
 
 def _exam_approval(id, act, approver=False, check=False, event=False):
     """run act(pub, sched, who, now, body) on the stored schedule, save and answer with the review; locked from loading to
@@ -1398,7 +1413,7 @@ def exams_away(id): return _exam_approval(id, _exam_away)
 def _event_others(pub, s):
     """(the other schedules' copies, what they hold busy) for an event"""
     others = exams_schedules.copies(s.get("id"))
-    return others, exams_schedules.busies(others, pub["model"])
+    return others, exams_schedules.busies(others, pub["model"]) + exams_schedules.relief_busy(pub["model"])
 
 def _event_review_reply(pub, s):
     """the Approval tab of an event: as an exam's, with the event's own review and what stops Send"""
@@ -1409,7 +1424,7 @@ def _event_review_reply(pub, s):
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
                    changed=s.get("sent_fp") is not None and s.get("sent_fp") != exams_approval.fp(s),
                    can_send=exams_approval.blocked(s, model, False, exams_events.send_errors(pub, cal, s, busy, others)), can_approve=_exams_can_approve(),
-                   unsent=exams_approval.changes(s, model) if st == "approved" else [], review=exams_events.review(pub, cal, s, busy, others))
+                   unsent=exams_approval.changes(s, model) if st == "approved" else [], review=exams_events.review(pub, cal, s, busy, others), away=_away_texts(pub, s))
 
 def _event_view(pub, s):
     model, cal = pub["model"], _exam_cal(pub)
@@ -1436,7 +1451,7 @@ def events_list():
     pub, who, _, every, err = _event_gate()
     if err: return err
     m = pub["model"]
-    return jsonify(schedules=exams_schedules.listing(_exams_today(), exams_make.published_at(pub), ("event",), None if every else who),
+    return jsonify(schedules=_with_away(exams_schedules.listing(_exams_today(), exams_make.published_at(pub), ("event",), None if every else who), pub),
                    levels=m.get("levels") or [], classes=[[c["name"], c["level"]] for c in m.get("classes") or []],
                    calendar_ok=bool(_exam_cal(pub).get("terms")), people=[p["name"] for p in relief_staff(pub)] if every else [])
 
