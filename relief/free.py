@@ -50,10 +50,13 @@ def week_so_far(pub, cal, records, name, date, skip=None, links=None):
 
 
 def _absent_then(records, name, iso, p, n):
+    """name is away then: an absence of theirs over its periods, or a needed lesson of it overlapping. A backup (exams: the
+    person is on an exam duty or at an event) is read by its needed lessons only: its periods are the span of its lessons, for
+    the pages, not time away"""
     for r in records:
         if r.get("cancelled") or r.get("teacher") != name or iso not in [_iso(d) for d in r.get("dates") or []]: continue
         per = r.get("periods")
-        if per is None or _overlap(per[0], per[1] - per[0] + 1, p, n): return True
+        if not r.get("exams") and (per is None or _overlap(per[0], per[1] - per[0] + 1, p, n)): return True
         if any(x.get("needed") and _iso(x["date"]) == iso and _overlap(x["p"], int(x.get("n") or 1), p, n) for x in r.get("lessons") or []): return True
     return False
 

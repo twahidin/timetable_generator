@@ -118,11 +118,11 @@ def lesson_lists(pub, cal, s) -> dict:
             for sp in l["stopped"]:
                 out["none"].append(item(sp, "shortened" if l["running"] else ""))
             for sp in l["running"]:
-                who = next((t for t in l["teachers"] if t in goes), None) if sp[0] < e["end"] and sp[1] > e["start"] else None
-                if who:
+                whos = [t for t in l["teachers"] if t in goes] if sp[0] < e["end"] and sp[1] > e["start"] else []   # one per person going
+                for who in whos:
                     out["backup"].append(dict(item(sp, "%s is at %s" % (who, s["name"])), teacher=who,
                                               key=_key_of(pub["model"], l["row"], e["date"], e["day"])))
-                else:
+                if not whos:
                     out["runs"].append(item(sp, ""))
     return out
 

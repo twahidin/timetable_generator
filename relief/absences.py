@@ -231,8 +231,9 @@ def _dates_and_periods(lessons):
 
 def _take_over(records, r):
     """own absence wins (P10): a lesson of the new absence r that is a needed lesson of one of the teacher's backups moves in
-    with its relief (unless r chose one), relief_by and work; the backup drops it, and is cancelled once it has no needed
-    lesson left. Runs inside _LOCK and never touches the exams lock. -> the backups changed (to save)"""
+    with its relief (unless r chose one), relief_by and work; the backup drops it, and is cancelled once no lesson is left (a
+    lesson marked not needed stays in it, so the next sync does not send it again). Runs inside _LOCK and never touches the
+    exams lock. -> the backups changed (to save)"""
     mine = {x["key"]: x for x in r["lessons"]}
     changed = []
     for o in records:
@@ -245,7 +246,7 @@ def _take_over(records, r):
                 x["relief"], x["relief_by"] = y["relief"], y.get("relief_by")
             x["work"] = _moved_work(x["work"], y, o["id"], r["id"])
         o["lessons"] = [y for y in o["lessons"] if not (isinstance(y, dict) and y.get("key") in moved)]
-        if any(y.get("needed") for y in o["lessons"] if isinstance(y, dict)):
+        if any(isinstance(y, dict) for y in o["lessons"]):
             o["dates"], o["periods"] = _dates_and_periods(o["lessons"])
         else:
             o["cancelled"] = dict(at=_now(), by="app", why=f"Moved to {r['teacher']}'s own absence.")
@@ -253,45 +254,70 @@ def _take_over(records, r):
     return changed
 
 
-def from_exams(teacher, lessons, source, by, reason_text, records=None, links=None, carry=None):
+def _backup_lesson(records, teacher, x, links):
+    """one lesson of a backup (x from lessons.on_date): needed unless one of its other teachers is there (there_then, as new
+    decides), no relief, no work; None while the teacher is away in an absence of their own (that absence covers it)"""
+    iso = _free._iso(x["date"])
+    try: away = _free._absent_then([r for r in records if not r.get("exams")], teacher, iso, x["p"], x["n"])
+    except (KeyError, TypeError, ValueError, IndexError): away = False      # a malformed absence never stops a backup
+    if away: return None
+    there = _free.there_then(records, x.get("others") or [], iso, x["p"], x["n"], links=links)
+    return dict(x, date=iso, others=there, needed=not there, not_needed=dict(by="app", why=f"{' and '.join(there)} is there") if there else None,
+                relief=None, relief_by=None, work=dict(text="", link="", files=[]))
+
+
+def from_exams(teacher, lessons, source, by, reason_text, records=None, links=None):
     """a backup (P6): a planned absence of someone on an exam duty or at an event, holding exactly lessons (dicts from
-    lessons.on_date, ISO dates), source dict(id, kind) the schedule. Each lesson is needed unless one of its other teachers is
-    there (there_then, as new decides); a lesson while the teacher is away in an absence of their own is left to that
-    absence. carry: the ids of backups this one replaces, whose lessons (same key) keep their relief, relief_by and work, and a
-    "not needed" someone chose. -> the record, or None (nothing saved) when no lesson is needed. records None: read here."""
+    lessons.on_date, ISO dates; see _backup_lesson), source dict(id, kind) the schedule. -> the record, or None (nothing
+    saved) when no lesson is needed. records None: read here, under the lock"""
     with _LOCK:
         records = all_records() if records is None else records
-        own = [r for r in records if not r.get("exams")]
-        rid = secrets.token_hex(6)
-        old = {}
-        for oid in carry or []:
-            o = load(oid)
-            for y in (o or {}).get("lessons") or []:
-                if isinstance(y, dict) and y.get("key"): old.setdefault(y["key"], (oid, y))
-        built = []
-        for x in lessons:
-            iso = _free._iso(x["date"])
-            try: away = _free._absent_then(own, teacher, iso, x["p"], x["n"])
-            except (KeyError, TypeError, ValueError, IndexError): away = False      # a malformed absence never stops a backup
-            if away: continue
-            there = _free.there_then(records, x.get("others") or [], iso, x["p"], x["n"], links=links)
-            y = dict(x, date=iso, others=there, needed=not there, not_needed=dict(by="app", why=f"{' and '.join(there)} is there") if there else None,
-                     relief=None, relief_by=None, work=dict(text="", link="", files=[]))
-            if y["key"] in old:
-                oid, prev = old[y["key"]]
-                chose = prev.get("not_needed") if isinstance(prev.get("not_needed"), dict) else None
-                if chose and chose.get("by") != "app":
-                    y["needed"], y["not_needed"] = False, dict(chose)
-                elif y["needed"] and prev.get("needed") and prev.get("relief"):
-                    y["relief"], y["relief_by"] = prev["relief"], prev.get("relief_by")
-                y["work"] = _moved_work(y["work"], prev, oid, rid)
-            built.append(y)
+        built = [y for y in (_backup_lesson(records, teacher, x, links) for x in lessons) if y]
         if not any(y["needed"] for y in built): return None
         dates, periods = _dates_and_periods(built)
-        r = dict(id=rid, teacher=teacher, dates=dates, periods=periods, reason="Other", reason_text=reason_text, remarks="",
+        r = dict(id=secrets.token_hex(6), teacher=teacher, dates=dates, periods=periods, reason="Other", reason_text=reason_text, remarks="",
                  reporting_officer="", by=by, how="planned", at=_now(), acknowledged=None, cancelled=None, lessons=built,
                  exams=dict(id=source["id"], kind=source["kind"]))
         _save(r)
+    return r
+
+
+def update_exams(id, keep_keys, add_lessons, by, reason_text, today, why="The duty changed.", links=None) -> dict:
+    """change a backup in place (never cancel and make again, so what relief did on it stays): every lesson dated today or
+    later whose key is not in keep_keys goes (a lesson dated before today always stays: it is history and counts in relief's
+    periods), add_lessons come in (as from_exams decides; a key it holds already is left), by and reason_text are brought up
+    to date (None: as they are), acknowledged is cleared when a lesson came in (the person must look again), and dates and
+    periods follow the lessons. Cancelled (why) only when no lesson at all is left. today: the caller's (one clock).
+    -> the record; {} when it is not there; a cancelled one as it is"""
+    iso = _free._iso(today)
+    keep = set(keep_keys or ())
+    with _LOCK:
+        r = load(id)
+        if r is None: return {}
+        if r.get("cancelled"): return r
+        before = list(r.get("lessons") or [])
+        kept = [x for x in before if not isinstance(x, dict) or str(x.get("date") or "") < iso or x.get("key") in keep]
+        have = {x.get("key") for x in kept if isinstance(x, dict)}
+        records, added = all_records(), []
+        for x in add_lessons or []:
+            if x["key"] in have: continue
+            y = _backup_lesson(records, r["teacher"], x, links)
+            if y:
+                added.append(y); have.add(y["key"])
+        r["lessons"] = kept + added
+        if by is not None: r["by"] = by
+        if reason_text is not None: r["reason_text"] = reason_text
+        if added: r["acknowledged"] = None
+        if any(isinstance(x, dict) for x in r["lessons"]):
+            r["dates"], r["periods"] = _dates_and_periods(r["lessons"])
+        else:
+            r["cancelled"] = dict(at=_now(), by="app", why=why)
+        _save(r)
+        still = {f.get("id") for x in r["lessons"] if isinstance(x, dict) for f in (x.get("work") or {}).get("files") or [] if isinstance(f, dict)}
+        for x in before:
+            if isinstance(x, dict) and x not in kept:
+                for f in (x.get("work") or {}).get("files") or []:
+                    if isinstance(f, dict) and f.get("id") not in still: _files.delete(id, f.get("id"))
     return r
 
 
@@ -300,18 +326,15 @@ def exams_records(source_id) -> list:
     return [r for r in all_records() if not r.get("cancelled") and isinstance(r.get("exams"), dict) and r["exams"].get("id") == source_id]
 
 
-def _all_past(r):
-    try: return all(datetime.date.fromisoformat(d) < _lessons.today() for d in r.get("dates") or [])
-    except (TypeError, ValueError): return False
-
-
-def cancel_exams(id, why) -> dict:
-    """cancel a backup for the app (cancelled dict(at, by="app", why)); left as it is when cancelled already, or when every
-    date of it is before today (history stays). {} when it is not there"""
+def cancel_exams(id, why, today) -> dict:
+    """cancel a whole backup for the app (cancelled dict(at, by="app", why)); left as it is when cancelled already, or when
+    every date of it is before today (the caller's: one clock). {} when it is not there. Sync changes backups in place
+    (update_exams) and does not call this"""
+    iso = _free._iso(today)
     with _LOCK:
         r = load(id)
         if r is None: return {}
-        if r.get("cancelled") or _all_past(r): return r
+        if r.get("cancelled") or all(str(d) < iso for d in r.get("dates") or []): return r
         r["cancelled"] = dict(at=_now(), by="app", why=why)
         _save(r)
     return r

@@ -957,16 +957,28 @@ def _save_exam(sched, pub, by, check=True, event=False):
     except ValueError as e: return None, ({"error": str(e)}, 400)
     except BAD_INPUT: return None, ({"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400)
 
-def _marked(lists, sched):
-    """the lessons lists with each backup's state in relief and its relief teacher (exams.relief_links.mark)"""
-    exams_relief_links.mark(lists["backup"], sched, relief_absences.all_records())
+def _marked(lists, sched, pub, cal):
+    """the lessons lists with each backup's state in relief, its relief teacher and why it stops (exams.relief_links.mark,
+    with the other schedules' approved copies)"""
+    links = exams_relief_links.Links(pub, cal, [x for x in exams_schedules.on_site() if x.get("id") != sched.get("id")])
+    exams_relief_links.mark(lists["backup"], sched, relief_absences.all_records(), links, _exams_today())
     return lists
 
 def _relief_sync(pub, s):
-    """relief's backups in step with the saved schedule (exams.relief_links.sync), after every approval action and Handled
-    ourselves change that saved. It never fails the action: an error is logged and the next action syncs again"""
-    try: exams_relief_links.sync(s, pub, _exam_cal(pub), _exams_today())
-    except Exception: app.logger.exception("exams: relief sync failed")
+    """relief's backups in step (exams.relief_links.sync) after every approval action and Handled ourselves change that saved:
+    the schedule acted on first, then every other one a sync may change (to_sync), so a lesson one schedule gives up or stops
+    goes to (or leaves) another at once. Each sync is idempotent; one failing never stops the others and never fails the
+    action: each error is logged and the next action syncs again"""
+    say = lambda: app.logger.exception("exams: relief sync failed")
+    try: cal, today, copies = _exam_cal(pub), _exams_today(), exams_schedules.on_site()
+    except Exception: return say()
+    try: exams_relief_links.sync(s, pub, cal, today, copies=copies)
+    except Exception: say()
+    try: others = exams_relief_links.to_sync(s.get("id"), exams_schedules.all_saved(), relief_absences.all_records(), today)
+    except Exception: return say()
+    for o in others:
+        try: exams_relief_links.sync(o, pub, cal, today, copies=copies)
+        except Exception: say()
 
 def _exam_view(pub, sched):
     model, cal = pub["model"], _exam_cal(pub)
@@ -975,7 +987,7 @@ def _exam_view(pub, sched):
     levels, classes = set(sched.get("levels") or []), set(sched.get("classes") or [])
     mine = {x["id"] for x in model.get("students") or [] if exams_papers._student_level(model, x) in levels or x.get("cls") in classes}
     sids = sorted(mine | {i for p in papers for i in exams_papers.who_sits(p, model)})
-    return dict(summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=_marked(exams_make.lesson_lists(pub, cal, sched), sched),
+    return dict(summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=_marked(exams_make.lesson_lists(pub, cal, sched), sched, pub, cal),
                 made=sched.get("made"), students={i: [by_id[i]["name"], by_id[i]["cls"]] for i in sids if i in by_id},
                 counts={p.get("id"): len(exams_papers.who_sits(p, model)) for p in papers}, periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)],
                 rooms=exams_settings.load(pub)["rooms"], students_missing=not model.get("students"), levels=list(model.get("levels") or []),
@@ -1479,7 +1491,7 @@ def _event_view(pub, s):
     return dict(summary=dict(days=[dict(date=e["date"], day=e["day"], levels=e["levels"], whole=bool(entry(e["date"]).get("whole", True)),
                                         window=[exams_days.hhmm(e["start"]), exams_days.hhmm(e["end"])]) for e in exams_days.dates(s, cal, model)]),
                 classes=[c["name"] for c in model.get("classes") or [] if c["name"] in inside], going=exams_events.going(pub, cal, s, busy),
-                lessons=_marked(exams_events.lesson_lists(pub, cal, s), s), freed=exams_events.freed(pub, cal, s, busy), flags=exams_events.flags(pub, cal, s),
+                lessons=_marked(exams_events.lesson_lists(pub, cal, s), s, pub, cal), freed=exams_events.freed(pub, cal, s, busy), flags=exams_events.flags(pub, cal, s),
                 cuts=exams_events.cuts(pub, cal, s), clashes=exams_events.clashes(pub, cal, s, busy, others),
                 periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)], rooms=[r["name"] for r in model.get("rooms") or []],
                 depts=sorted({d for p in people for d in p["depts"]}), people=[p["name"] for p in people])
