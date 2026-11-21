@@ -5,6 +5,7 @@ import relief.settings
 from exams import approval as _approval
 from exams import days as _days
 from exams import invigilate as _inv
+from exams.relief_links import key_of as _key_of
 from exams import schedules as _sched
 from exams import seating as _seat
 
@@ -117,10 +118,11 @@ def lesson_lists(pub, cal, s) -> dict:
             for sp in l["stopped"]:
                 out["none"].append(item(sp, "shortened" if l["running"] else ""))
             for sp in l["running"]:
-                who = next((t for t in l["teachers"] if t in goes), None) if sp[0] < e["end"] and sp[1] > e["start"] else None
-                if who:
-                    out["backup"].append(item(sp, "%s is at %s" % (who, s["name"])))
-                else:
+                whos = [t for t in l["teachers"] if t in goes] if sp[0] < e["end"] and sp[1] > e["start"] else []   # one per person going
+                for who in whos:
+                    out["backup"].append(dict(item(sp, "%s is at %s" % (who, s["name"])), teacher=who,
+                                              key=_key_of(pub["model"], l["row"], e["date"], e["day"])))
+                if not whos:
                     out["runs"].append(item(sp, ""))
     return out
 
@@ -206,6 +208,7 @@ def other_lines(pub, cal, s, elsewhere, others) -> list:
     parts = model.get("room_parts") or {}
     taken = _taken(pub, s)
     dates = on_dates(pub, cal, s)
+    elsewhere = [b for b in elsewhere if b.get("kind") != "relief"]
     tags = sorted({(o["name"], o["status"]) for o in others} | {(b["name"], b["status"]) for b in elsewhere})
     shares, uses = [], []
     for tag in tags:

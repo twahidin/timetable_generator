@@ -89,6 +89,7 @@ def _others_check(s, elsewhere, model) -> dict:
     parts = model.get("room_parts") or {}
     duties = (s.get("made") or {}).get("duties") or []
     takes, uses, shares = [], [], []
+    elsewhere = [b for b in elsewhere if b.get("kind") != "relief"]
     for other in sorted({(b["name"], b["status"]) for b in elsewhere}):
         mine = [b for b in elsewhere if (b["name"], b["status"]) == other]
         for date in sorted({b["date"] for b in mine}):
