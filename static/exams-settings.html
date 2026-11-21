@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exam settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+.ex{max-width:1180px;margin:0 auto;padding:20px}
+.ex fieldset{border:0;margin:0;padding:0;min-width:0}
+.ex .head{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:0 0 10px}
+.ex .head h1,.ex .head h2{margin:0}
+.msg{font-size:13px}
+.msg.bad{color:var(--warn);font-weight:600}
+.msg.ok{color:var(--ok)}
+.dirty{color:#7a4b00;font-size:13px}
+.flag{color:var(--warn);font-weight:600}
+.okc{color:var(--ok);font-weight:600}
+.amber{color:#9a5b00;font-weight:600}
+.chip.ex-kind{background:#f1eafb;color:#6b3fa0}
+.chip.test-kind{background:#dbeafe;color:#1f4e78}
+.chip.draft{background:var(--chip);color:var(--ink)}
+.chiprow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.pchip{display:inline-flex;align-items:center;gap:2px;padding:3px 3px 3px 10px;font-size:13px;background:var(--chip);border-radius:999px}
+.pchip button{border:0;background:transparent;padding:0 6px;border-radius:999px;line-height:1.5;color:var(--muted);box-shadow:none}
+.pchip button:hover:not(:disabled){background:rgba(27,35,48,.08);color:var(--warn);box-shadow:none}
+.picker{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px;max-width:440px}
+.picker .row{flex-wrap:nowrap}
+.picker input{flex:1;min-width:0}
+.picker ul{list-style:none;margin:6px 0 0;padding:0;max-height:240px;overflow:auto}
+.picker li button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;border:0;background:transparent;padding:6px 8px;border-radius:6px;box-shadow:none}
+.picker li button:hover:not(:disabled),.picker li button.first{background:rgba(37,99,235,.08);box-shadow:none}
+.picker li .muted{font-size:12px;white-space:nowrap}
+.picker .none{padding:6px 8px}
+@media (max-width:640px){.ex{padding:12px}}
+.setting{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;padding:14px 0;border-bottom:1px solid var(--line)}
+.setting:last-child{border-bottom:0}
+.setting .k{font-weight:600}
+.setting .k .small{font-weight:400;margin-top:2px;line-height:1.4}
+.setting .v{min-width:0}
+.savebar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+.savebar.last{margin:0}
+.line{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px}
+.line input[type=number]{width:80px}
+.rooms td input[type=number]{width:70px}
+.rooms td input[type=text]{min-width:160px}
+.rooms td.c{text-align:center}
+.rooms td input[type=checkbox]{width:auto}
+.rooms td.x{width:1%}
+@media (max-width:760px){.setting{grid-template-columns:minmax(0,1fr);gap:6px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">⇄</span><div><div class="title" id="title">Exam settings</div><div class="sub">The exams committee, the exam rooms, the invigilator lists and the rules.</div></div></div>
+  <div class="top-actions" id="links">
+    <a class="ghost filebtn" href="/exams">Exams</a>
+    <a class="ghost filebtn" href="/logout">Sign out</a>
+  </div>
+</header>
+<main class="ex" id="main">
+  <div class="card"><p class="muted">Loading…</p></div>
+</main>
+<script src="/static/exams-settings.js"></script>
+</body>
+</html>

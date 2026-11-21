@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exams</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+.ex{max-width:1180px;margin:0 auto;padding:20px}
+.ex fieldset{border:0;margin:0;padding:0;min-width:0}
+.ex .head{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:0 0 10px}
+.ex .head h1,.ex .head h2{margin:0}
+.msg{font-size:13px}
+.msg.bad{color:var(--warn);font-weight:600}
+.msg.ok{color:var(--ok)}
+.dirty{color:#7a4b00;font-size:13px}
+.flag{color:var(--warn);font-weight:600}
+.okc{color:var(--ok);font-weight:600}
+.amber{color:#9a5b00;font-weight:600}
+.chip.ex-kind{background:#f1eafb;color:#6b3fa0}
+.chip.test-kind{background:#dbeafe;color:#1f4e78}
+.chip.draft{background:var(--chip);color:var(--ink)}
+.chiprow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.pchip{display:inline-flex;align-items:center;gap:2px;padding:3px 3px 3px 10px;font-size:13px;background:var(--chip);border-radius:999px}
+.pchip button{border:0;background:transparent;padding:0 6px;border-radius:999px;line-height:1.5;color:var(--muted);box-shadow:none}
+.pchip button:hover:not(:disabled){background:rgba(27,35,48,.08);color:var(--warn);box-shadow:none}
+.picker{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px;max-width:440px}
+.picker .row{flex-wrap:nowrap}
+.picker input{flex:1;min-width:0}
+.picker ul{list-style:none;margin:6px 0 0;padding:0;max-height:240px;overflow:auto}
+.picker li button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;border:0;background:transparent;padding:6px 8px;border-radius:6px;box-shadow:none}
+.picker li button:hover:not(:disabled),.picker li button.first{background:rgba(37,99,235,.08);box-shadow:none}
+.picker li .muted{font-size:12px;white-space:nowrap}
+.picker .none{padding:6px 8px}
+@media (max-width:640px){.ex{padding:12px}}
+.xtabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.xtabs button{border-radius:999px;font-size:13px;padding:6px 12px}
+.xtabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.savebar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 12px;min-height:22px}
+.scard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;align-items:center;padding:12px 14px;margin-bottom:10px}
+.scard a.name{font-weight:700;color:var(--navy);text-decoration:none}
+.scard a.name:hover{text-decoration:underline}
+.form .line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.form .line>b{width:110px;flex:none}
+.form .line input[type=text]{min-width:260px}
+.tick{display:inline-flex;align-items:center;gap:4px;background:var(--chip);border-radius:999px;padding:3px 10px;font-size:13px;cursor:pointer}
+.tick input{width:auto;margin:0}
+details.pickc{margin-top:6px}
+details.pickc .classes{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
+.panel{margin:0 0 14px}
+.daytable td{white-space:nowrap}
+.daytable td.lv{white-space:normal}
+.daytable td select{width:auto}
+.daytable td input[type=time]{width:auto}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:4px 10px;font-size:13px;background:var(--panel);box-shadow:none}
+.seg button.on{background:var(--accent);color:#fff}
+.seg.wrap{flex-wrap:wrap}
+.times .line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
+.times input[type=number]{width:70px}
+.ptable td input[type=text]{min-width:90px}
+.ptable td input[type=number]{width:72px}
+.ptable td.who{min-width:150px}
+.ptable td.x{width:1%}
+.ptable select{width:auto;max-width:170px}
+.checks div{margin:3px 0}
+.mk{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 12px}
+.mk .line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
+.mk .stu{display:flex;flex-wrap:wrap;gap:6px;max-height:200px;overflow:auto;margin:6px 0}
+.add{margin-top:8px}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 14px}
+.kpi>div{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.kpi .k{font-size:12px;color:var(--muted)}
+.kpi .big{font-size:24px;font-weight:700}
+.tl td,.tl th{vertical-align:top;text-align:left}
+.tl td.dayline{background:#fafbfc}
+.pp{display:block;border-radius:6px;padding:4px 7px;margin:0 0 4px;font-size:12px;border:1px solid transparent}
+.pp.ex{background:#f1eafb;border-color:#dccaf2}
+.pp.norm{background:repeating-linear-gradient(45deg,#f3f4f6,#f3f4f6 6px,#fff 6px,#fff 12px);color:var(--muted)}
+.pp b{font-weight:600}
+.chip.amber{background:#fff4d6;color:#7a5a00}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}
+.chip.bad{background:var(--warn-bg);color:var(--warn)}
+.grid2{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px;align-items:start}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;align-items:start}
+@media (max-width:860px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.panel.okbg{background:var(--ok-bg)}
+.panel.ambg{background:#fff7e6}
+.panel h4{margin:10px 0 4px;font-size:13px}
+.panel details{margin:2px 0}
+.panel details>div{padding-left:14px}
+tr.busy td{background:#f3f4f6;color:var(--muted)}
+tr.pick td{background:rgba(37,99,235,.07)}
+button.linkb{border:0;background:transparent;padding:0;color:var(--navy);font-weight:600;text-decoration:underline;box-shadow:none}
+button.linkb.on{color:var(--accent)}
+.seatwrap{overflow:auto;max-height:70vh}
+.seats{display:grid;gap:4px;font-size:10.5px}
+.seat{border-radius:5px;padding:4px 2px;text-align:center;line-height:1.15;border:1px solid rgba(0,0,0,.05);overflow:hidden}
+.seat.lab{background:none;border:0;color:var(--muted);font-weight:600}
+.seat.empty{background:#fff;border:1px dashed var(--line)}
+.seat.s0{background:#dbeafe}.seat.s1{background:#fff4d6}.seat.s2{background:#e7f6ee}.seat.s3{background:#fde4ec}.seat.s4{background:#ece4fb}.seat.s5{background:#e0f2f1}
+.mv{margin-top:14px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.mv .line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 0}
+.mv select{width:auto}
+.whorow{display:flex;justify-content:space-between;gap:8px;align-items:center;margin:4px 0}
+.bar{height:8px;background:var(--chip);border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">⇄</span><div><div class="title" id="title">Exams</div><div class="sub">Exam and test schedules, seating and invigilation.</div></div></div>
+  <div class="top-actions" id="links">
+    <a class="ghost filebtn" href="/exams">Exams</a>
+    <a class="ghost filebtn" href="/logout">Sign out</a>
+  </div>
+</header>
+<main class="ex" id="main">
+  <div class="card"><p class="muted">Loading…</p></div>
+</main>
+<script src="/static/exams.js"></script>
+</body>
+</html>

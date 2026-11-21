@@ -17,6 +17,7 @@ import access, checks, draft, history, store, sync, typed
 from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, people as relief_people, settings as relief_settings
 from ttgen import choices
+import exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -1233,6 +1234,328 @@ def relief_code_slips():
     relief_codes.slips_pdf(pub["model"]["school"]["name"], relief_staff(pub), request.host_url.rstrip("/"), buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="relief code slips.pdf", mimetype="application/pdf")
+
+# ------------------------------------------------------------------------------------------------ staff: exams and events
+NO_EXAMS_PUB = "Publish the timetable first: exams read the classes, students and lessons from it."
+ONLY_EXAMS = "Only the exams committee and the timetable committee can open exams."
+NO_STUDENTS = "The published timetable has no students. Add them on the Students step and publish again to seat them."
+NO_EXAM = "That exam is not there any more."
+EXAM_KEEPS = ("id", "created_at", "created_by", "made", "pins", "use_anyway", "status")
+BAD_INPUT = (TypeError, KeyError, AttributeError)
+
+def _exams_rights(pub):
+    """(may use exams, saved by) for whoever is signed in, from the accounts: the Exams and events extra (until its end
+    date) or the timetable committee; saved by the person's name, or "Timetable committee" for the shared committee code.
+    None when nobody is signed in by name or with the committee code"""
+    p = who()
+    if p is None: return (True, "Timetable committee") if has("committee") else None
+    return has("exams") or has("committee"), p["name"]
+
+def _exams_gate():
+    """-> (pub, who, None) when the person may use exams, else (None, None, the refusing answer)"""
+    pub = store.published()
+    if not pub: return None, None, ({"error": NO_EXAMS_PUB}, 409)
+    rights = _exams_rights(pub)
+    if rights is None: return None, None, ({"error": "Please sign in again."}, 401)
+    if not rights[0]: return None, None, ({"error": ONLY_EXAMS}, 403)
+    return pub, rights[1], None
+
+def _exam_cal(pub): return relief_settings.load(pub)["calendar"]
+
+def _exam_json():
+    d = request.get_json(force=True, silent=True)
+    return d if isinstance(d, dict) else {}
+
+def _save_exam(sched, pub, by):
+    """save a schedule; (the saved schedule, None) or (None, the 400 answer): malformed JSON never gives a 500"""
+    try: return exams_schedules.save(sched, pub, _exam_cal(pub), by), None
+    except ValueError as e: return None, ({"error": str(e)}, 400)
+    except BAD_INPUT: return None, ({"error": exams_schedules.WRONG}, 400)
+
+def _exam_view(pub, sched):
+    model, cal = pub["model"], _exam_cal(pub)
+    by_id = {x["id"]: x for x in model.get("students") or []}
+    papers = sched.get("papers") or []
+    levels, classes = set(sched.get("levels") or []), set(sched.get("classes") or [])
+    mine = {x["id"] for x in model.get("students") or [] if exams_papers._student_level(model, x) in levels or x.get("cls") in classes}
+    sids = sorted(mine | {i for p in papers for i in exams_papers.who_sits(p, model)})
+    return dict(summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=exams_make.lesson_lists(pub, cal, sched),
+                made=sched.get("made"), students={i: [by_id[i]["name"], by_id[i]["cls"]] for i in sids if i in by_id},
+                counts={p.get("id"): len(exams_papers.who_sits(p, model)) for p in papers}, periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)],
+                rooms=exams_settings.load(pub)["rooms"], students_missing=not model.get("students"), levels=list(model.get("levels") or []),
+                rooms_by_key=_exam_rooms_by_key(pub, cal, sched), stale=exams_make.stale(sched, exams_settings.load(pub)))
+
+def _exam_rooms_by_key(pub, cal, sched):
+    """for each sitting, every exam room with its seats and what keeps it busy then (empty text: free); a room another
+    overlapping sitting of the made schedule holds is busy, so the move selects do not offer it"""
+    xset = exams_settings.load(pub)
+    held = exams_make.held(pub, sched, xset)
+    return {x["key"]: [[r["name"], r["seats"], r["busy"]] for r in exams_seating.rooms_free(pub, cal, sched, x, xset, held.get(x["key"], set()))]
+            for x in exams_seating.sittings(sched)}
+
+@app.get("/exams")
+@need("exams", "committee")
+def exams_home(): return app.send_static_file("exams.html")
+
+@app.get("/exams/settings")
+@need("exams", "committee")
+def exams_settings_page(): return app.send_static_file("exams-settings.html")
+
+@app.get("/exams/<id>")
+@need("exams", "committee")
+def exams_one_page(id): return app.send_static_file("exams.html")
+
+@app.get("/api/exams/me")
+@need("exams", "committee")
+def exams_me():
+    pub = store.published()
+    if not pub: return {"error": NO_EXAMS_PUB}, 409
+    rights = _exams_rights(pub)
+    if rights is None: return {"error": "Please sign in again."}, 401
+    return jsonify(name=rights[1], can_use=rights[0], home="/home" if who() else "/")   # a person's way back is their home page
+
+def _exam_settings_reply(pub, settings):
+    """committee_ok: only the timetable committee changes the exams committee list"""
+    m = pub["model"]
+    return jsonify(settings=settings, people=relief_staff(pub), rooms=[[r["name"], r.get("kind"), r.get("capacity")] for r in m.get("rooms") or []],
+                   committee_ok=has("committee"))
+
+@app.get("/api/exams/settings")
+@need("exams", "committee")
+def exams_settings_get():
+    pub, who, err = _exams_gate()
+    if err: return err
+    return _exam_settings_reply(pub, exams_settings.load(pub))
+
+@app.put("/api/exams/settings")
+@need("exams", "committee")
+def exams_settings_put():
+    pub, who, err = _exams_gate()
+    if err: return err
+    body = request.get_json(force=True, silent=True)
+    if not has("committee") and isinstance(body, dict): body = dict(body, committee=exams_settings.load(pub)["committee"])   # kept as it is
+    try: saved = exams_settings.save(body, pub, who)
+    except ValueError as e: return {"error": str(e)}, 400
+    except BAD_INPUT: return {"error": exams_settings.WRONG}, 400
+    return _exam_settings_reply(pub, saved)
+
+@app.get("/api/exams")
+@need("exams", "committee")
+def exams_list():
+    pub, who, err = _exams_gate()
+    if err: return err
+    m = pub["model"]
+    return jsonify(schedules=exams_schedules.listing(), levels=m.get("levels") or [], classes=[[c["name"], c["level"]] for c in m.get("classes") or []],
+                   calendar_ok=bool(_exam_cal(pub).get("terms")))
+
+@app.post("/api/exams")
+@need("exams", "committee")
+def exams_create():
+    pub, who, err = _exams_gate()
+    if err: return err
+    if not _exam_cal(pub).get("terms"): return {"error": exams_schedules.NO_CALENDAR}, 409
+    b = _exam_json()
+    try:
+        if b.get("kind") not in ("exam", "test"): raise ValueError(exams_schedules.WRONG)
+        sched = exams_schedules.new(b["kind"], b.get("name"), b.get("levels"), b.get("start"), b.get("end"), who, pub=pub)
+    except ValueError as e: return {"error": str(e)}, 400
+    except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
+    saved, bad = _save_exam(sched, pub, who)
+    return bad or jsonify(saved)
+
+def _exam_or_404(id):
+    s = exams_schedules.load(id)
+    return (s, None) if s else (None, ({"error": NO_EXAM}, 404))
+
+@app.get("/api/exams/<id>")
+@need("exams", "committee")
+def exams_get(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    return err or jsonify(s)
+
+@app.put("/api/exams/<id>")
+@need("exams", "committee")
+def exams_put(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    old, err = _exam_or_404(id)
+    if err: return err
+    new = dict(_exam_json(), **{k: old.get(k) for k in EXAM_KEEPS})
+    saved, bad = _save_exam(new, pub, who)
+    return bad or jsonify(saved)
+
+@app.delete("/api/exams/<id>")
+@need("exams", "committee")
+def exams_delete(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    exams_schedules.delete(id)
+    return {"ok": True}
+
+@app.post("/api/exams/<id>/fill")
+@need("exams", "committee")
+def exams_fill(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    if err: return err
+    s["papers"] = list(s.get("papers") or []) + exams_papers.fill_from_subjects(s, pub["model"])
+    saved, bad = _save_exam(s, pub, who)
+    return bad or jsonify(saved)
+
+@app.get("/api/exams/<id>/papers.xlsx")
+@need("exams", "committee")
+def exams_papers_download(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    if err: return err
+    from ttgen.export import safe_name
+    return send_file(io.BytesIO(exams_papers.paper_list_xlsx(s)), as_attachment=True, download_name=safe_name(f"{s.get('name')} papers") + ".xlsx", mimetype=XLSX)
+
+@app.post("/api/exams/<id>/papers.xlsx")
+@need("exams", "committee")
+def exams_papers_upload(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    if err: return err
+    f = request.files.get("file")
+    if not f: return {"error": "Choose the paper list to upload."}, 400
+    try: rows = exams_papers.read_paper_list(f.read())
+    except ValueError as e: return {"error": str(e)}, 400
+    s["papers"] = [p for p in s.get("papers") or [] if p.get("who") == "students"] + rows
+    saved, bad = _save_exam(s, pub, who)
+    return bad or jsonify(saved)
+
+def _exam_view_reply(pub, sched):
+    """the view as JSON; a schedule the code cannot read answers 400 with a sentence, never 500"""
+    try: return jsonify(_exam_view(pub, sched))
+    except ValueError as e: return {"error": str(e)}, 400
+    except BAD_INPUT + (IndexError,): return {"error": exams_schedules.WRONG}, 400
+
+@app.get("/api/exams/<id>/view")
+@need("exams", "committee")
+def exams_view(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    return err or _exam_view_reply(pub, s)
+
+def _exam_changed(id, change):
+    """run change(pub, sched, body) on the stored schedule, save it and answer as the view does"""
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    if err: return err
+    try: err = change(pub, s, _exam_json())
+    except ValueError as e: return {"error": str(e)}, 400
+    except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
+    if err: return err
+    saved, bad = _save_exam(s, pub, who)
+    return bad or _exam_view_reply(pub, saved)
+
+def _exam_make(pub, s, b):
+    model, cal = pub["model"], _exam_cal(pub)
+    if not model.get("students"): return {"error": NO_STUDENTS}, 409
+    errors = exams_papers.check(s, model, cal, exams_settings.load(pub)["rules"])["errors"]
+    if errors: return {"error": f"Fix the paper times first: {errors[0]}"}, 400
+    only = b.get("only")
+    if only is not None and not isinstance(only, str): raise ValueError(exams_schedules.WRONG)
+    exams_make.make(pub, cal, s, exams_settings.load(pub), only=only)
+
+def _exam_sitting(s, key):
+    if key not in {x["key"] for x in exams_seating.sittings(s)}: raise ValueError("That sitting is not in this exam.")
+
+def _exam_remake(pub, s, key):
+    """a made schedule is made again for that sitting alone, so the answer shows the change"""
+    if s.get("made"): exams_make.make(pub, _exam_cal(pub), s, exams_settings.load(pub), only=key)
+
+def _exam_move(pub, s, b):
+    if not isinstance(b["students"], list) or not all(isinstance(x, str) for x in b["students"]): raise ValueError(exams_schedules.WRONG)
+    if not isinstance(b["key"], str) or not isinstance(b["room"], str): raise ValueError(exams_schedules.WRONG)
+    _exam_sitting(s, b["key"])
+    exams_make.move(s, b["key"], b["students"], b["room"])
+    _exam_remake(pub, s, b["key"])
+
+def _exam_invigilators(pub, s, b):
+    """names: the names chosen by hand, or null to let the app choose again"""
+    if b["names"] is not None and (not isinstance(b["names"], list) or not all(isinstance(x, str) for x in b["names"])): raise ValueError(exams_schedules.WRONG)
+    if not isinstance(b["key"], str) or not isinstance(b["room"], str): raise ValueError(exams_schedules.WRONG)
+    _exam_sitting(s, b["key"])
+    exams_make.set_invigilators(s, b["key"], b["room"], b["names"])
+    _exam_remake(pub, s, b["key"])
+
+def _exam_use_anyway(pub, s, b):
+    if not isinstance(b["key"], str) or not isinstance(b["room"], str): raise ValueError(exams_schedules.WRONG)
+    _exam_sitting(s, b["key"])
+    pair = [b["key"], b["room"]]
+    if pair not in s.setdefault("use_anyway", []): s["use_anyway"].append(pair)
+    _exam_remake(pub, s, b["key"])
+
+@app.post("/api/exams/<id>/make")
+@need("exams", "committee")
+def exams_make_route(id): return _exam_changed(id, _exam_make)
+
+@app.post("/api/exams/<id>/move")
+@need("exams", "committee")
+def exams_move(id): return _exam_changed(id, _exam_move)
+
+@app.post("/api/exams/<id>/invigilators")
+@need("exams", "committee")
+def exams_invigilators(id): return _exam_changed(id, _exam_invigilators)
+
+@app.post("/api/exams/<id>/use-anyway")
+@need("exams", "committee")
+def exams_use_anyway(id): return _exam_changed(id, _exam_use_anyway)
+
+@app.get("/api/exams/<id>/print/<what>.pdf")
+@need("exams", "committee")
+def exams_print(id, what):
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    if err: return err
+    if what not in exams_printouts.WHATS: abort(404)
+    if not s.get("made"): return {"error": "Press Make first."}, 409
+    if exams_make.stale(s, exams_settings.load(pub)): return {"error": exams_make.STALE}, 409
+    from ttgen.export import safe_name
+    buf = io.BytesIO()
+    exams_printouts.pdf(what, pub, _exam_cal(pub), s, exams_settings.load(pub), buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=False, download_name=safe_name(f"{s.get('name')} {exams_printouts.TITLES[what]}") + ".pdf", mimetype="application/pdf")
+
+@app.get("/api/exams/<id>/download.xlsx")
+@need("exams", "committee")
+def exams_download(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    if err: return err
+    if not s.get("made"): return {"error": "Press Make first."}, 409
+    if exams_make.stale(s, exams_settings.load(pub)): return {"error": exams_make.STALE}, 409
+    from ttgen.export import safe_name
+    return send_file(io.BytesIO(exams_printouts.xlsx(pub, _exam_cal(pub), s, exams_settings.load(pub))), as_attachment=True,
+                     download_name=safe_name(s.get("name")) + ".xlsx", mimetype=XLSX)
+
+@app.get("/api/exams/<id>/who")
+@need("exams", "committee")
+def exams_who(id):
+    pub, who, err = _exams_gate()
+    if err: return err
+    s, err = _exam_or_404(id)
+    if err: return err
+    key, room = request.args.get("key", ""), request.args.get("room", "")
+    duties = (s.get("made") or {}).get("duties") or []
+    d = next((x for x in duties if x["key"] == key and x["room"] == room), None)
+    if d is None: return {"error": "Press Make first."}, 404
+    sit = next((x for x in exams_seating.sittings(s) if x["key"] == key), None)
+    papers = {p["id"]: p for p in s.get("papers") or []}
+    subjects = [papers[i]["subject"] for i in (sit or {}).get("papers", []) if i in papers]
+    rest = [x for x in duties if x is not d]
+    return jsonify(exams_invigilate.candidates(pub, _exam_cal(pub), s, exams_settings.load(pub), d["date"], d["start"], d["end"], rest, subjects=subjects))
 
 startup_log()
 move_relief_lists()

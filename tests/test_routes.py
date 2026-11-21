@@ -32,7 +32,7 @@ def publish():
     """what store.published() reads: a fake school with the teachers, one class and one student"""
     pub = RP.fake_pub(TEACHERS)
     pub["meta"].update(published_at="1 Nov 2026, 09:00", ok=True)
-    pub["model"].update(classes=[dict(name="1A")], class_ix={}, teacher_ix={}, room_ix={}, students=[dict(id="S001", name="Sam Student", cls="1A")])
+    pub["model"].update(classes=[dict(name="1A", level="Sec 1")], class_ix={}, teacher_ix={}, room_ix={}, students=[dict(id="S001", name="Sam Student", cls="1A")])
     pub["model"]["school"]["timetable"] = "2027 Timetable"
     os.makedirs(store.PUB, exist_ok=True)
     with open(os.path.join(store.PUB, "model.pkl"), "wb") as f: pickle.dump(pub["model"], f)
@@ -140,6 +140,11 @@ def every_route_has_a_guard_and_the_guard_decides():
     try: walk(rules)
     finally: E.render_html, E.student_view, E.pdf_bytes = real
 
+# every exams page and API route: the Exams and events extra (until its end date) or the timetable committee
+EXAMS_ENDPOINTS = ("exams_home", "exams_settings_page", "exams_one_page", "exams_me", "exams_settings_get", "exams_settings_put", "exams_list",
+                   "exams_create", "exams_get", "exams_put", "exams_delete", "exams_fill", "exams_papers_download", "exams_papers_upload",
+                   "exams_view", "exams_make_route", "exams_move", "exams_invigilators", "exams_use_anyway", "exams_print", "exams_download", "exams_who")
+
 @t
 def the_guards_are_the_brief_s_table():
     need = lambda endpoint: A.app.view_functions[endpoint]._need
@@ -148,13 +153,16 @@ def the_guards_are_the_brief_s_table():
                            ("timetable", ("timetable",)), ("pdf_custom", ("timetable",)), ("pdf_one", ("timetable",)), ("files", ("files",)),
                            ("me", ("own",)), ("pdf_me", ("own",)), ("relief_home", ("relief", "relief.settings")), ("relief_me", ("relief",)),
                            ("relief_settings_page", ("relief.settings",)), ("relief_settings_get", ("relief.settings",)), ("relief_settings_put", ("relief.save",)),
-                           ("relief_codes_csv", ("codes",)), ("relief_code_slips", ("codes",)), ("home", ("timetable",)), ("draft_preview_page", ("committee",))):
+                           ("relief_codes_csv", ("codes",)), ("relief_code_slips", ("codes",)), ("home", ("timetable",)), ("draft_preview_page", ("committee",))) + tuple(
+                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS):
         assert need(endpoint) == want, (endpoint, need(endpoint))
     for bad in (("staff",), ("head",), ("personal",), ("committee", "teacher"), ()):
         try: A.need(*bad)
         except ValueError: pass
         else: raise AssertionError(f"need{bad} was accepted")
     assert not hasattr(A, "role") and not hasattr(A, "_legacy")
+    exams = {r.endpoint for r in A.app.url_map.iter_rules() if "/exams" in r.rule}
+    assert exams == set(EXAMS_ENDPOINTS), sorted(exams ^ set(EXAMS_ENDPOINTS))
 
 @t
 def the_known_rights_are_every_right_the_table_gives():
@@ -212,15 +220,15 @@ def home_shows_exactly_the_tiles_of_the_table():
     assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief")] and greyed == [], shown
     shown, greyed, _ = tiles(client(person(LEE, "password")))
     assert shown == [("Timetables", "/timetable"), ("Relief", "/relief")] and greyed == [], shown
-    # Exams and events only once the exams pages exist (they do not on this branch)
-    assert not any(r.rule == "/exams" for r in A.app.url_map.iter_rules())
-    shown, _, _ = tiles(client(person(ELI, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief"], shown
-    real = A._route_exists
-    A._route_exists = lambda path: path == "/exams" or real(path)
-    try: shown, _, page = tiles(client(person(ELI, "code")))
-    finally: A._route_exists = real
+    # Exams and events: the exams pages are on the app now; the tile only while they are
+    assert any(r.rule == "/exams" for r in A.app.url_map.iter_rules())
+    shown, _, page = tiles(client(person(ELI, "code")))
     assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams")], shown
     d = datetime.date.fromisoformat(TOMORROW); assert f"Until {d.day} {d.strftime('%b %Y')}" in page
+    real = A._route_exists
+    A._route_exists = lambda path: path != "/exams" and real(path)
+    try: shown, _, _ = tiles(client(person(ELI, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief"], shown
+    finally: A._route_exists = real
 
 @t
 def a_name_on_home_is_escaped():
