@@ -258,4 +258,237 @@ def a_cancelled_absence_counts_nothing():
     f = [x for g in got["groups"] for x in g["people"] if x["name"] == FLEX][0]
     assert (f["today"], f["week"], f["term"], f["over"], f["marks"]) == (0, 0, 0, False, []), f
 
+
+@t
+def a_chosen_person_is_not_over_the_limit_by_their_own_lesson():
+    pub = world(); ls = lesson_of(pub)
+    recs = [rec(EVE, [rl("2026-10-13", 5, 2, FLEX, key=ls["key"])], periods=[5, 6])]
+    got = FR.free_then(pub, settings(fat=3), recs, ls, EVE)
+    f = [x for g in got["groups"] for x in g["people"] if x["name"] == FLEX][0]
+    assert (f["today"], f["over"], f["marks"]) == (0, False, []), f
+    other = [rec(GONE, [rl("2026-10-13", 8, 2, FLEX, key="z")], periods=[8, 9])]
+    got = FR.free_then(pub, settings(fat=3), recs + other, ls, EVE)
+    f = [x for g in got["groups"] for x in g["people"] if x["name"] == FLEX][0]
+    assert f["today"] == 2 and f["over"] is True, f
+
+@t
+def a_second_department_lands_in_that_group():
+    both = people_rows() + [dict(name="Ms Dual Ng", dept="Mathematics", dept2="Science")]
+    pub = world(rows=both); ls = lesson_of(pub)
+    got = FR.free_then(pub, settings(), [], ls, EVE)
+    g = by_title(got)
+    assert "Ms Dual Ng" in names(g["Science \u00b7 other subjects"]), [(x["title"], names(x)) for x in got["groups"]]
+    assert "Ms Dual Ng" not in names(g["Other departments"])
+
+# ---- Task 3: absence records and work files ----
+import json  # noqa: E402
+from relief import absences as AB  # noqa: E402
+from relief import files as FL  # noqa: E402
+from relief import settings as RS  # noqa: E402
+
+LS.today = lambda: D(2026, 10, 12)
+GRACE, TEAMER = "Ms Grace Wong", "Mr Team Lee"
+os.makedirs(os.path.dirname(RS.PATH), exist_ok=True)
+store.write_json(RS.PATH, dict(calendar=CAL, team=[TEAMER], management=[GRACE], limits=dict(fat_per_day=3, other_per_day=None, never=[]), fat_role=FAT))
+
+def awf(rows_extra=()):
+    pub = world(rows=people_rows() + [dict(name=GRACE, dept="Mathematics"), dict(name=TEAMER, dept="Mathematics")] + list(rows_extra),
+                extra=[L(TUE, 8, 1, ["5A"], "Art", [EVE, BUSY])])
+    return pub
+APUB = awf()
+ADIR = os.path.join(DATA, "relief", "absences")
+
+def files_in(d):
+    return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+def data(**kw):
+    d = dict(teacher=EVE, dates=["2026-10-13"], periods=None, reason="Medical", reason_text="", remarks="", reporting_officer=GRACE, lessons=[])
+    d.update(kw); return d
+
+def lk(pub, p):
+    return [x for x in LS.on_date(pub, CAL, EVE, D13) if x["p"] == p][0]["key"]
+
+def refuses(text, f, **kw):
+    before, fbefore = files_in(ADIR), files_in(FL.DIR)
+    raises(ValueError, f, text)
+    assert files_in(ADIR) == before and files_in(FL.DIR) == fbefore, "a refused call wrote something"
+
+@t
+def the_sentences_are_exact():
+    assert AB.CHANGED == "Your timetable has changed since you opened this page. Open it again."
+    assert AB.REASONS == ("Medical", "Child sick", "Course", "Other")
+    assert FL.KINDS == (".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".png", ".jpg", ".jpeg") and FL.MAX == 10 * 1024 * 1024
+
+@t
+def asking_for_yourself_round_trip():
+    r = AB.new(data(), APUB, EVE, "asked")
+    assert len(r["id"]) == 12 and r["teacher"] == EVE and r["how"] == "asked" and r["by"] == EVE and r["dates"] == ["2026-10-13"]
+    assert r["acknowledged"] is None and r["cancelled"] is None and r["reporting_officer"] == GRACE and r["reason"] == "Medical"
+    assert [x["p"] for x in r["lessons"]] == [5, 8], [x["p"] for x in r["lessons"]]
+    a, b = r["lessons"]
+    assert a["needed"] is True and a["not_needed"] is None and a["relief"] is None and a["relief_by"] is None and a["date"] == "2026-10-13"
+    assert a["work"] == dict(text="", link="", files=[]) and a["subject"] == "Science" and a["n"] == 2 and (a["start"], a["end"]) == ("10:30", "11:30")
+    assert AB.load(r["id"]) == json.loads(json.dumps(r)) and os.path.exists(os.path.join(ADIR, r["id"] + ".json"))
+    assert AB.all_records()[0]["id"] == r["id"] and AB.for_teacher(EVE)[0]["id"] == r["id"] and AB.planned_by(EVE) == []
+    assert AB.load("nope") is None
+    AB.cancel(r["id"], "Better now", EVE, APUB)
+
+@t
+def planning_for_a_colleague_with_a_chosen_relief_teacher():
+    k = lk(APUB, 5)
+    d = data(how="x", lessons=[dict(key=k, needed=True, relief=SAM, work=dict(text="Chapter 3", link="https://x.test/a", files=[]))])
+    r = AB.new(d, APUB, GRACE, "planned", may_choose=True)
+    a = r["lessons"][0]
+    assert r["by"] == GRACE and r["how"] == "planned" and a["relief"] == SAM and a["relief_by"] == GRACE
+    assert a["work"]["text"] == "Chapter 3" and a["work"]["link"] == "https://x.test/a"
+    assert AB.planned_by(GRACE)[0]["id"] == r["id"] and AB.planned_by(EVE) == []
+    refuses("Only Ms Evelyn Koh can acknowledge this.", lambda: AB.acknowledge(r["id"], GRACE))
+    AB.acknowledge(r["id"], EVE)
+    assert AB.load(r["id"])["acknowledged"]["at"]
+    AB.cancel(r["id"], "Not needed", GRACE, APUB)
+
+@t
+def a_shared_lesson_needs_no_relief_unless_asked():
+    r = AB.new(data(), APUB, EVE, "asked")
+    b = [x for x in r["lessons"] if x["p"] == 8][0]
+    assert b["needed"] is False and b["not_needed"] == dict(by="app", why=f"{BUSY} is there") and b["others"] == [BUSY]
+    AB.cancel(r["id"], "x", EVE, APUB)
+    r = AB.new(data(lessons=[dict(key=lk(APUB, 8), needed=True)]), APUB, EVE, "asked")
+    b = [x for x in r["lessons"] if x["p"] == 8][0]
+    assert b["needed"] is True and b["not_needed"] is None
+    AB.not_needed(r["id"], b["key"], "Covered by Mr Busy Chan", EVE, APUB)
+    b = AB.load(r["id"])["lessons"][1]
+    assert b["needed"] is False and b["not_needed"] == dict(by=EVE, why="Covered by Mr Busy Chan")
+    AB.needed_again(r["id"], b["key"], TEAMER, APUB)
+    b = AB.load(r["id"])["lessons"][1]
+    assert b["needed"] is True and b["not_needed"] is None
+    refuses("You cannot change this absence.", lambda: AB.not_needed(r["id"], b["key"], "x", SAM, APUB))
+    refuses("Say why in a line.", lambda: AB.not_needed(r["id"], b["key"], " ", EVE, APUB))
+    refuses(AB.CHANGED, lambda: AB.not_needed(r["id"], "nokey", "why", EVE, APUB))
+    AB.cancel(r["id"], "x", TEAMER, APUB)
+
+@t
+def every_refusal_says_its_sentence_and_writes_nothing():
+    k = lk(APUB, 5)
+    new = lambda by="asked", pub=APUB, who=EVE, may=False, **kw: (lambda: AB.new(data(**kw), pub, who, by, may_choose=may))
+    refuses("Mr Nobody is not on the published timetable or the staff list.", new(teacher="Mr Nobody"))
+    bad = "Choose up to 10 school days, today or later."
+    refuses(bad, new(dates=[])); refuses(bad, new(dates=[f"2026-10-{d:02d}" for d in range(13, 24)]))
+    refuses(bad, new(dates=["nope"])); refuses(bad, new(dates=["2026-10-09"])); refuses(bad, new(dates="2026-10-13"))
+    refuses("Sat 17 Oct is not a school day in the calendar.", new(dates=["2026-10-17"]))
+    for per in ([3], [4, 2], [-1, 2], [0, 12], ["a", 2], [1.5, 2], "x"):
+        refuses("Choose the periods again.", new(periods=per))
+    why = "Choose a reason; for Other, say why in a line."
+    refuses(why, new(reason="Holiday")); refuses(why, new(reason="Other")); refuses(why, new(reason="Other", reason_text="  "))
+    refuses(why, new(reason="Medical", reason_text="x" * 201))
+    refuses("Keep the remarks under 300 characters.", new(remarks="x" * 301))
+    refuses("Choose your reporting officer.", new(reporting_officer=""))
+    refuses("Choose your reporting officer.", new(reporting_officer="Mr Nobody"))
+    refuses("There are no lessons to cover in that time.", new(periods=[3, 4]))
+    refuses("There are no lessons to cover in that time.", new(dates=["2026-10-13"], lessons=[dict(key=lk(APUB, 8), needed=False)], periods=[8, 8]))
+    refuses(AB.CHANGED, new(lessons=[dict(key="2026-10-13/x/0/1/1A/Art/", needed=True)]))
+    refuses(f"{BUSY} is not free for 1A Science then.", new(lessons=[dict(key=k, relief=BUSY)], may=True))
+    refuses("Only management and the relief team choose relief teachers.", new(lessons=[dict(key=k, relief=SAM)]))
+    refuses("A link starts with http:// or https://.", new(lessons=[dict(key=k, work=dict(text="", link="ftp://x", files=[]))]))
+    refuses("A link starts with http:// or https://.", new(lessons=[dict(key=k, work=dict(text="", link="https://" + "x" * 500, files=[]))]))
+    refuses("Keep the work under 2000 characters.", new(lessons=[dict(key=k, work=dict(text="x" * 2001, link="", files=[]))]))
+    r = AB.new(data(periods=[5, 6]), APUB, EVE, "asked")
+    assert [x["p"] for x in r["lessons"]] == [5]
+    AB.cancel(r["id"], "x", EVE, APUB)
+
+@t
+def overlap_is_refused_naming_the_first_sender():
+    r = AB.new(data(periods=[5, 6]), APUB, GRACE, "planned")
+    refuses("Ms Grace Wong has already sent an absence for Ms Evelyn Koh on Tue 13 Oct.",
+            lambda: AB.new(data(periods=[6, 6]), APUB, EVE, "asked"))
+    r2 = AB.new(data(periods=[8, 8], lessons=[dict(key=lk(APUB, 8), needed=True)]), APUB, EVE, "asked")
+    AB.cancel(r["id"], "x", GRACE, APUB)
+    r3 = AB.new(data(periods=[5, 6]), APUB, EVE, "asked")
+    for x in (r2, r3): AB.cancel(x["id"], "x", EVE, APUB)
+
+@t
+def acknowledge_once_only_by_the_absent_teacher():
+    r = AB.new(data(), APUB, GRACE, "planned")
+    refuses("Only Ms Evelyn Koh can acknowledge this.", lambda: AB.acknowledge(r["id"], GRACE))
+    AB.acknowledge(r["id"], EVE)
+    refuses("This was acknowledged already.", lambda: AB.acknowledge(r["id"], EVE))
+    AB.cancel(r["id"], "x", GRACE, APUB)
+    mine = AB.new(data(), APUB, EVE, "asked")
+    raises(ValueError, lambda: AB.acknowledge(mine["id"], EVE))
+    AB.cancel(mine["id"], "x", EVE, APUB)
+
+@t
+def work_choosing_and_cancelling():
+    r = AB.new(data(), APUB, GRACE, "planned"); i = r["id"]; k = lk(APUB, 5)
+    AB.set_work(i, k, dict(text="Read p.4", link="http://a.test", files=[]), EVE)
+    AB.set_work(i, k, dict(text="Read p.5", link="", files=[]), GRACE)
+    assert AB.load(i)["lessons"][0]["work"]["text"] == "Read p.5"
+    refuses("You cannot change this absence.", lambda: AB.set_work(i, k, dict(text="x", link="", files=[]), SAM))
+    refuses("You cannot change this absence.", lambda: AB.set_work(i, k, dict(text="x", link="", files=[]), TEAMER))
+    refuses(AB.CHANGED, lambda: AB.set_work(i, "nokey", dict(text="x", link="", files=[]), EVE))
+    AB.choose(i, k, SAM, TEAMER, APUB)
+    a = AB.load(i)["lessons"][0]
+    assert a["relief"] == SAM and a["relief_by"] == TEAMER
+    refuses(f"{BUSY} is not free for 1A Science then.", lambda: AB.choose(i, k, BUSY, TEAMER, APUB))
+    AB.choose(i, k, None, TEAMER, APUB)
+    assert AB.load(i)["lessons"][0]["relief"] is None
+    AB.choose(i, k, FLEX, GRACE, APUB)
+    refuses("Say why in a line.", lambda: AB.cancel(i, "", EVE, APUB))
+    refuses("Say why in a line.", lambda: AB.cancel(i, "x" * 201, EVE, APUB))
+    refuses("You cannot change this absence.", lambda: AB.cancel(i, "no", SAM, APUB))
+    AB.cancel(i, "Plans changed", TEAMER, APUB)
+    c = AB.load(i)["cancelled"]
+    assert c["by"] == TEAMER and c["why"] == "Plans changed" and c["at"]
+    gone = "This absence was cancelled."
+    refuses(gone, lambda: AB.cancel(i, "again", EVE, APUB))
+    refuses(gone, lambda: AB.set_work(i, k, dict(text="x", link="", files=[]), EVE))
+    refuses(gone, lambda: AB.choose(i, k, SAM, GRACE, APUB))
+    refuses(gone, lambda: AB.not_needed(i, k, "x", EVE, APUB))
+    refuses(gone, lambda: AB.needed_again(i, k, EVE, APUB))
+    refuses(gone, lambda: AB.acknowledge(i, EVE))
+    assert AB.load(i)["lessons"][0]["relief"] == FLEX
+
+@t
+def a_changed_lesson_is_marked_not_fatal():
+    r = AB.new(data(), APUB, EVE, "asked")
+    moved = world(rows=people_rows() + [dict(name=GRACE), dict(name=TEAMER)], extra=[L(TUE, 8, 1, ["5A"], "Art", [EVE, BUSY])])
+    moved["model"]["lessons"] = [dict(x, p=6) if x["subject"] == "Science" else x for x in moved["model"]["lessons"]]
+    got = AB.matches_now(r, moved, CAL)
+    assert [x["changed"] for x in got["lessons"]] == [True, False], got["lessons"]
+    assert [x["changed"] for x in AB.matches_now(r, APUB, CAL)["lessons"]] == [False, False]
+    assert "changed" not in AB.load(r["id"])["lessons"][0]
+    AB.cancel(r["id"], "x", EVE, APUB)
+
+@t
+def files_wrong_kind_too_big_and_six_refused():
+    r = AB.new(data(), APUB, EVE, "asked"); i = r["id"]; k = lk(APUB, 5)
+    refuses("Send a PDF, Word, PowerPoint, Excel or picture file.", lambda: FL.save(i, "run.exe", b"x"))
+    refuses("Send a PDF, Word, PowerPoint, Excel or picture file.", lambda: FL.save(i, "noext", b"x"))
+    refuses("A file can be at most 10 MB.", lambda: FL.save(i, "big.pdf", b"x" * (FL.MAX + 1)))
+    f = FL.save(i, "../Week 3 (notes).PDF", b"%PDF")
+    assert f["name"] == "Week 3 (notes).PDF" and f["size"] == 4 and len(f["id"]) == 12, f
+    p = FL.path(i, f["id"])
+    assert p == os.path.join(FL.DIR, i, f["id"] + ".pdf") and open(p, "rb").read() == b"%PDF"
+    assert FL.path(i, "zzzz") is None and FL.path("nope", f["id"]) is None and FL.path(i, "../x") is None
+    assert FL.save(i, "a<b>:c?.png", b"x")["name"] == "abc.png"
+    AB.set_work(i, k, dict(text="", link="", files=[f]), EVE)
+    assert AB.load(i)["lessons"][0]["work"]["files"] == [f]
+    refuses(AB.CHANGED, lambda: AB.set_work(i, k, dict(text="", link="", files=[dict(id="abcdef123456", name="x.pdf", size=1)]), EVE))
+    six = [FL.save(i, f"w{n}.pdf", b"x") for n in range(6)]
+    refuses("A lesson can have at most 5 files.", lambda: AB.set_work(i, k, dict(text="", link="", files=six), EVE))
+    assert AB.load(i)["lessons"][0]["work"]["files"] == [f]
+    AB.set_work(i, k, dict(text="", link="", files=six[:5]), EVE)
+    assert FL.path(i, f["id"]) is None, "a file taken off the lesson is deleted"
+    FL.delete(i, six[0]["id"]); assert FL.path(i, six[0]["id"]) is None
+    FL.delete(i, six[0]["id"])
+    AB.cancel(i, "x", EVE, APUB)
+
+@t
+def nothing_half_saved_on_refusal():
+    before, fb = files_in(ADIR), files_in(FL.DIR)
+    for kw in (dict(remarks="x" * 301), dict(reason="Nope"), dict(dates=["2026-10-17"])):
+        raises(ValueError, lambda: AB.new(data(**kw), APUB, EVE, "asked"))
+    assert files_in(ADIR) == before and files_in(FL.DIR) == fb
+    assert not [f for f in files_in(ADIR) if f.endswith(".tmp")]
+
 print(f"{COUNT} relief request tests passed")

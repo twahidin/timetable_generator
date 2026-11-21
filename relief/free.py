@@ -20,13 +20,15 @@ def _overlap(p, n, q, m):
     return p <= q + m - 1 and q <= p + n - 1
 
 
-def relief_periods(records, name, dates):
-    """periods of lessons where relief is name, still needed, in an absence not cancelled, on one of dates (dates or ISO strings)"""
+def relief_periods(records, name, dates, skip=None):
+    """periods of lessons where relief is name, still needed, in an absence not cancelled, on one of dates (dates or ISO strings);
+    skip = (absent teacher, lesson key) leaves that one lesson out"""
     want = {_iso(d) for d in dates}
     total = 0
     for r in records:
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
+            if skip and r.get("teacher") == skip[0] and x.get("key") == skip[1]: continue
             if x.get("relief") == name and x.get("needed") and _iso(x["date"]) in want: total += int(x.get("n") or 1)
     return total
 
@@ -108,7 +110,7 @@ def free_then(pub, settings, records, lesson, absent):
             elif r.get("rule") == "Keep free together" and r.get("scope") == "Department" and r.get("target") in who["depts"] and _rule_hits(r, day, p, n):
                 if "department meeting time" not in marks: marks.append("department meeting time")
         if blocked: continue
-        today = relief_periods(records, name, {date})
+        today = relief_periods(records, name, {date}, skip=(absent, lesson.get("key")))   # this lesson's own periods are added below, not counted twice
         fat = bool(fat_role) and who["role"] == fat_role
         limit = lim.get("fat_per_day") if fat else lim.get("other_per_day")
         over = limit is not None and today + n > limit
