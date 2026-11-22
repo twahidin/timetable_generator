@@ -106,7 +106,7 @@ const box = (checked, teacher = "Ms Z", key = "k1") => ({ checked, dataset: { t:
 })().catch(e => { console.error(e); process.exit(1); });
 /* the page's own functions against a fake server that keeps one schedule and its revision */
 const CONSTS = SRC.slice(SRC.indexOf("  const SERVER_KEYS"), SRC.indexOf("  /* the one place that decides"));   /* the keys and small helpers takeSched reads */
-const NAMES = ["takeRev", "takeSched", "takeOwn", "blockPage", "onChain", "saveInner", "saveNow", "flush", "edit", "refreshView", "serverAction", "viewAction", "approvalAction", "onHandled", "takeReview", "loadReview", "onWhenField", "onClick"];
+const NAMES = ["takeRev", "takeSched", "takeOwn", "blockPage", "onChain", "saveInner", "saveNow", "flush", "edit", "refreshView", "serverAction", "viewAction", "approvalAction", "onHandled", "takeReview", "loadReview", "onWhenField", "onClick", "onPaperField", "dropSuggested", "agreeSuggested", "suggestedLine"];
 const SENT = who => `This exam was changed by ${who} since you opened it. Reload to carry on.`;
 function rig(ev) {
   const srv = { sched: { id: "x1", name: "E", papers: [], going: ["Ms A"], duties: [{ who: "Ms A" }], rev: 1, saved_by: "Ms A" }, calls: [], holds: {}, lock: null, onPost: null, failGet: false, delay: 0, noAdd: false, clean: false, norm: null, cut: {} };
@@ -119,7 +119,7 @@ function rig(ev) {
     const cutOff = srv.cut[m + rest]; delete srv.cut[m + rest];   /* "late": the server's work is done, its answer is cut off; "early": the answer is another page's, nothing reached the server */
     if (cutOff === "early") return { ok: true, status: 200, j: {} };
     if (m === "PUT") { if (srv.lock) await srv.lock; out = b.rev !== srv.sched.rev ? { ok: false, status: 409, j: { error: SENT("Ms B") } }
-        : (srv.sched = Object.assign({}, JSON.parse(JSON.stringify(b)), { rev: srv.sched.rev + 1, saved_by: "Ms A" }), srv.norm && srv.norm(srv.sched), srv.clean && (srv.sched.suggested = (srv.sched.suggested || []).filter(id => srv.sched.papers.some(p => p.id === id))), { ok: true, status: 200, j: JSON.parse(JSON.stringify(srv.sched)) }); }
+        : (srv.prev = srv.sched, srv.sched = Object.assign({}, JSON.parse(JSON.stringify(b)), { rev: srv.sched.rev + 1, saved_by: "Ms A" }), srv.norm && srv.norm(srv.sched), srv.clean && (srv.sched.suggested = (srv.sched.suggested || []).filter(id => srv.sched.papers.some(p => p.id === id && !(srv.prev.papers || []).some(q => q.id === id && (q.date !== p.date || q.start !== p.start))))), { ok: true, status: 200, j: JSON.parse(JSON.stringify(srv.sched)) }); }
     else if (m === "GET" && rest === "" && srv.failGet) { srv.failGet = false; out = { ok: false, status: 500, j: { error: "down" } }; }
     else if (m === "GET" && rest === "") out = { ok: true, status: 200, j: JSON.parse(JSON.stringify(srv.sched)) };
     else if (m === "GET" && rest === "/view") out = { ok: true, status: 200, j: { rev: srv.sched.rev, made: null } };
@@ -479,6 +479,33 @@ const named = fn => assert(fn, "function missing");
     assert.strictEqual(S.blocked, false, "the save's own reply blocked the page"); assert.strictEqual(S.dirty, true);
     await f.flush();
     assert.deepStrictEqual([srv.sched.suggested, S.sched.suggested, srv.sched.papers], [[], [], [{ id: "b" }]]); assert.strictEqual(S.dirty, false);
+  });
+  c4("a suggested paper moved to another day, then Agreed on another while the save is in flight", async () => {
+    const { S, srv, f } = rig(); srv.clean = true; srv.delay = 30;
+    const two = () => [{ id: "a", date: "2026-10-05", start: "07:50", level: "Sec 3" }, { id: "b", date: "2026-10-06", start: "07:50", level: "Sec 3" }];
+    for (const x of [srv.sched, S.sched, S.known]) Object.assign(x, { papers: two(), suggested: ["a", "b"] });
+    f.onPaperField({ value: "2026-10-07" }, "pdate", "0");
+    assert.deepStrictEqual(S.sched.suggested, ["b"], "the page drops the id in the same edit");
+    const w = f.flush(); await sleep(10); f.agreeSuggested("b"); await w;
+    assert.strictEqual(S.blocked, false); assert.strictEqual(S.dirty, true);
+    await f.flush();
+    assert.deepStrictEqual([srv.sched.suggested, S.sched.suggested], [[], []], "neither a nor b is suggested"); assert.strictEqual(S.dirty, false);
+    assert.strictEqual(srv.sched.papers[0].date, "2026-10-07");
+  });
+  c4("a start change drops the id, other fields keep it, a day-less paper stays", async () => {
+    const { S, f } = rig();
+    S.sched.papers = [{ id: "a", date: "2026-10-05", start: "07:50", minutes: 60 }, { id: "b", date: null, start: null }]; S.sched.suggested = ["a", "b"];
+    f.onPaperField({ value: "70" }, "pmin", "0"); f.onPaperField({ value: "Maths" }, "psubject", "0"); assert.deepStrictEqual(S.sched.suggested, ["a", "b"]);
+    f.onPaperField({ value: "08:20" }, "pstart", "0"); assert.deepStrictEqual(S.sched.suggested, ["b"]);
+    f.onPaperField({ value: "" }, "pdate", "1"); assert.deepStrictEqual(S.sched.suggested, ["b"], "no change of date or start");
+    f.onPaperField({ value: "2026-10-06" }, "pdate", "1"); assert.deepStrictEqual(S.sched.suggested, []);
+  });
+  c4("taking a paper off drops its id, and the Approval line counts what is suggested", async () => {
+    const { S, f } = rig();
+    S.sched.papers = [{ id: "a" }, { id: "b" }]; S.sched.suggested = ["a", "b"];
+    assert.strictEqual(f.suggestedLine(), "2 papers have a suggested time.");
+    f.dropSuggested(["a"]); assert.deepStrictEqual(S.sched.suggested, ["b"]); assert.strictEqual(f.suggestedLine(), "1 paper has a suggested time.");
+    S.sched.suggested = []; assert.strictEqual(f.suggestedLine(), ""); delete S.sched.suggested; assert.strictEqual(f.suggestedLine(), "");
   });
   c4("an event's going list the server cleans, one more typed", async () => {
     const { S, srv, f } = rig(true); srv.delay = 30; srv.norm = s => { s.going = uniq(s.going); };

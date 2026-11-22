@@ -510,7 +510,7 @@
       <td class="who">${who}</td>
       <td><input type="text" ${at("ptog", i)} value="${esc(p.together || "")}" maxlength="80" aria-label="Sits with, paper ${i + 1}"></td>
       <td><select ${at("pdate", i)} aria-label="Date of paper ${i + 1}">${opt("", p.date || "", "date")}${days.map(d => opt(d, p.date, fmtDate(d))).join("")}</select></td>
-      <td><input type="time" ${at("pstart", i)} value="${esc(p.start || "")}" aria-label="Start of paper ${i + 1}"></td>
+      <td><input type="time" ${at("pstart", i)} value="${esc(p.start || "")}" aria-label="Start of paper ${i + 1}">${(S.sched.suggested || []).includes(p.id) ? ` <span class="chip">suggested</span> <button type="button" class="small" data-act="agreed" data-a="${esc(p.id)}" aria-label="Agree the time of paper ${i + 1}">Agreed</button>` : ""}</td>
       <td class="x"><button type="button" class="small danger" data-act="delPaper" data-a="${i}" title="Take this paper off" aria-label="Take paper ${i + 1} off">✕</button></td></tr>`;
   }
 
@@ -555,6 +555,18 @@
     ${checksPanel()}`;
   }
 
+  /* a paper's time is suggested until a person changes the date or start or presses Agreed: the page takes the id off in the
+    same edit as the change, as the server does, so a save's reply cannot bring it back */
+  function dropSuggested(ids) {
+    if (!S.sched.suggested) return;
+    S.sched.suggested = S.sched.suggested.filter(x => !ids.includes(x));
+  }
+  function agreeSuggested(id) { edit(() => { dropSuggested([id]); }, true); }
+  function suggestedLine() {
+    const n = ((S.sched && S.sched.suggested) || []).length;
+    return n ? `${n} ${n === 1 ? "paper has" : "papers have"} a suggested time.` : "";
+  }
+
   function onPaperField(el, k, a) {
     const p = S.sched.papers[Number(a)], v = el.value;
     if (!p) return;
@@ -564,8 +576,8 @@
     if (k === "pmin") { const n = Number(v); if (!Number.isInteger(n) || n < 1) return; return edit(() => { p.minutes = n; }); }
     if (k === "pwho") return edit(() => { p.who = v; }, true);
     if (k === "ptog") return edit(() => { p.together = v; });
-    if (k === "pdate") return edit(() => { p.date = v || null; }, true);
-    if (k === "pstart") return edit(() => { p.start = v || null; });
+    if (k === "pdate") return edit(() => { if ((p.date || null) !== (v || null)) dropSuggested([p.id]); p.date = v || null; }, true);
+    if (k === "pstart") return edit(() => { if ((p.start || null) !== (v || null)) dropSuggested([p.id]); p.start = v || null; });
   }
 
   function onMakeup(el) {
@@ -1203,6 +1215,7 @@
     const out = [`<div class="card"><h2>Approval</h2><p><span class="chip ${chipClass({ label: rv.label })}">${esc(rv.label)}</span></p>
       ${S.abMsg ? `<p class="msg bad" role="status">${esc(S.abMsg)}</p>` : ""}${rv.note ? `<p>Sent back by the timetable committee: “${esc(rv.note)}”</p>` : ""}</div>`];
     if ((rv.away || []).length) out.push(awayNotes(rv.away));
+    if (suggestedLine()) out.push(`<div class="card"><p>${esc(suggestedLine())}</p></div>`);
     if (st === "draft" || st === "withdrawn") out.push(sendBox("Send to the timetable committee", "", "Send to the timetable committee", "send", why));
     if ((st === "waiting" || st === "changes") && rv.changed) out.push(sendBox("Send again", "Changed since you sent it: send it again.", "Send again", "send", why));
     if (st === "approved" && unsent.length) out.push(`<div class="card"><h2>Changes not sent yet</h2>${unsent.map(c => `<p>${esc(c.text)}</p>`).join("")}<div class="row"><button type="button" class="primary" data-act="approval" data-a="send" ${S.busy || why ? "disabled" : ""}>Send the changes</button>${why ? `<span class="muted small">${esc(why)}</span>` : ""}</div></div>`);
@@ -1351,7 +1364,8 @@
     if (act === "addMakeup") { S.mk = { level: paperLevels()[0] || "", subject: "", paper: "Make-up", minutes: "60", cls: "", picked: [] }; paint(); return; }
     if (act === "mkCancel") { S.mk = null; paint(); return; }
     if (act === "mkAdd") { mkAdd(); return; }
-    if (act === "delPaper") { edit(() => { s.papers.splice(Number(a), 1); }, true); return; }
+    if (act === "delPaper") { edit(() => { const gone = s.papers.splice(Number(a), 1); dropSuggested(gone.map(x => x.id)); }, true); return; }
+    if (act === "agreed") { agreeSuggested(a); return; }
     if (act === "accAdd") { edit(() => { s.access.push({ student: a, extra: 0, own_room: false, reader: false, scribe: false, note: "" }); }, true); return; }
     if (act === "make") { viewAction("make", {}, "Made."); return; }
     if (act === "pickRoom") { S.room = a; paint(); return; }

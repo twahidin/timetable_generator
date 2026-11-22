@@ -3278,4 +3278,68 @@ def an_event_has_the_same_check():
         assert r.get_json()["rev"] == SC.load(id)["rev"] == 6
         assert c.put(f"/api/events/{id}", json=dict(c.get(f"/api/events/{id}").get_json()), headers=_OLD).status_code == 200
 
+# ------------------------------------------------------------------------------------------------ the suggested mark
+def _papers_for_mark():
+    base = dict(level="Sec 3", subject="English", paper="Paper 1", minutes=60, who="level", students=[], together="")
+    return [dict(base, id="pa", date="2026-10-05", start="07:50"), dict(base, id="pb", paper="Paper 2", date="2026-10-06", start="07:50")]
+
+@t
+def suggested_keeps_ids_of_papers_that_exist():
+    pub = F.sample_pub(); e = _new(); e["papers"] = _papers_for_mark()
+    e["suggested"] = ["pb", "gone", "pa", "pb"]
+    saved = SC.save(e, pub, F.CAL, "x"); assert saved["suggested"] == ["pb", "pa"], saved["suggested"]
+    e2 = _new(); e2["papers"] = _papers_for_mark()
+    assert SC.save(e2, pub, F.CAL, "x")["suggested"] == []     # a missing key becomes []
+    s = dict(suggested=["a", "b", "a", "z"], papers=[dict(id="b"), dict(id="a")])
+    assert SC.clean_suggested(s) is None and s["suggested"] == ["a", "b"]
+    s = dict(papers=[dict(id="a")]); SC.clean_suggested(s); assert "suggested" not in s or s["suggested"] == []
+
+@t
+def suggested_must_be_a_list_of_strings():
+    pub = F.sample_pub()
+    for bad in (None, "pa", {"pa": 1}, 5, [1], ["pa", None], [["pa"]]):
+        e = _new(); e["papers"] = _papers_for_mark(); e["suggested"] = bad
+        raises(ValueError, lambda: SC.save(e, pub, F.CAL, "x"), SC.WRONG)
+
+@t
+def suggested_never_changes_what_the_site_or_make_see():
+    x = _xset(("3-01", "3-02", "4-01", "Hall"))
+    s = _mk(_made_sched()); fp0, pub0, mk0 = AP.fp(s), AP.public(s), MK.fingerprint(s, x, _M)
+    s["suggested"] = [p["id"] for p in s["papers"]]
+    assert "suggested" not in AP.SNAP and "suggested" not in MK._USED and "suggested" not in AP.public(s)
+    assert AP.fp(s) == fp0 and AP.public(s) == pub0 and MK.fingerprint(s, x, _M) == mk0 and MK.stale(s, x, _M) is False
+
+@t
+def a_put_drops_a_suggested_id_when_its_date_or_start_changes():
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee(); e = _a_draft(c); id = e["id"]
+        ps = [dict(p, date=None, start=None) for p in _papers_for_mark()]
+        e = dict(e, papers=ps, suggested=["pa", "pb"])
+        r = c.put(f"/api/exams/{id}", json=e); assert r.status_code == 200, r.data
+        e = r.get_json(); assert e["suggested"] == ["pa", "pb"], "papers that are new keep their mark"
+        for field, val in (("minutes", 70), ("paper", "Paper 9")):
+            ps = [dict(p, **({field: val} if p["id"] == "pa" else {})) for p in e["papers"]]
+            r = c.put(f"/api/exams/{id}", json=dict(e, papers=ps)); assert r.status_code == 200, r.data
+            e = r.get_json(); assert e["suggested"] == ["pa", "pb"], (field, e["suggested"])
+        ps = [dict(p, date="2026-10-06") if p["id"] == "pa" else p for p in e["papers"]]
+        r = c.put(f"/api/exams/{id}", json=dict(e, papers=ps)); e = r.get_json()
+        assert e["suggested"] == ["pb"], e["suggested"]
+        ps = [dict(p, start="08:20") if p["id"] == "pb" else p for p in e["papers"]]
+        r = c.put(f"/api/exams/{id}", json=dict(e, papers=ps)); e = r.get_json()
+        assert e["suggested"] == [], e["suggested"]
+        new = dict(_papers_for_mark()[0], id="pn", date="2026-10-05", start="07:50")
+        r = c.put(f"/api/exams/{id}", json=dict(e, papers=e["papers"] + [new], suggested=["pn"])); e = r.get_json()
+        assert e["suggested"] == ["pn"], "a new paper keeps its mark"
+        r = c.put(f"/api/exams/{id}", json=dict(e, suggested="pn")); assert r.status_code == 400 and r.get_json() == {"error": SC.WRONG}
+        assert "suggested" not in json.dumps(c.get(f"/api/exams/{id}/view").get_json().get("summary", {}))
+
+@t
+def an_older_schedule_without_the_key_behaves_as_empty():
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee(); e = _a_draft(c)
+        r = c.put(f"/api/exams/{e['id']}", json={k: v for k, v in e.items() if k != "suggested"}); assert r.status_code == 200, r.data
+        assert r.get_json().get("suggested") == []
+
 print(f"{COUNT} exams tests passed")

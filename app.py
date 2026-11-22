@@ -2253,6 +2253,14 @@ def exams_get(id):
     s, err = _exam_or_404(id)
     return err or jsonify(s)
 
+def _drop_moved_suggestions(old, new):
+    """a suggested time stops being suggested when that paper's date or start is changed: its id goes from the new body"""
+    sug = new.get("suggested")
+    if not isinstance(sug, list): return
+    was = {p.get("id"): (p.get("date") or None, p.get("start") or None) for p in old.get("papers") or [] if isinstance(p, dict)}
+    now = {p.get("id"): (p.get("date") or None, p.get("start") or None) for p in new.get("papers") or [] if isinstance(p, dict)}
+    new["suggested"] = [i for i in sug if not (isinstance(i, str) and i in was and i in now and was[i] != now[i])]
+
 @app.put("/api/exams/<id>")
 @need("exams", "committee")
 def exams_put(id):
@@ -2266,6 +2274,7 @@ def exams_put(id):
         new = dict(_exam_json(), **{k: old.get(k) for k in EXAM_KEEPS})
         new["log"] = old.get("log") or []
         if new.get("kind") not in exams_schedules.KINDS: return {"error": exams_schedules.WRONG}, 400   # an exam never becomes an event
+        _drop_moved_suggestions(old, new)
         saved, bad = _save_exam(new, pub, who, "edit", "changed")
     return bad or jsonify(saved)
 
@@ -2316,7 +2325,9 @@ def exams_papers_upload(id):
     with exams_schedules.editing():
         s, err = _exam_or_404(id)
         if err: return err
+        was = dict(s)
         s["papers"] = [p for p in s.get("papers") or [] if p.get("who") == "students"] + rows
+        _drop_moved_suggestions(was, s)
         saved, bad = _save_exam(s, pub, who, "papers", "paper list uploaded")
     return bad or jsonify(saved)
 
