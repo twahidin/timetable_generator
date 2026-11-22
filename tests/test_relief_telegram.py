@@ -4079,6 +4079,22 @@ def a_word_that_is_no_reason_is_asked_again():
         with school(EVE): i = told_planned(); press(EVE, "cancel"); say(EVE, why); assert (absences.load(i)["cancelled"] or {}).get("why") == why, why
 
 @t
+def never_mind_is_no_reason_to_cancel():
+    listed = ("never mind", "nevermind", "don't cancel", "dont cancel", "do not cancel", "not cancel", "don't cancel it", "do not cancel it", "not now", "wait", "keep it please", "please keep it", "forget it")
+    with school(EVE):
+        i = told_planned(); press(EVE, "cancel"); was, h = file_of(i), Since()
+        for x in listed:
+            for text in (x, x.upper(), x.capitalize() + ".", f"  {x.replace(' ', '   ')}!! ", f"“{x}”", f"{x} 🙏", f"...{x}", x.replace(" ", "\n"), x.replace("'", "’")):       # ’ is what a phone types
+                assert talk_to(EVE, lambda: say(EVE, text)) == [(WHY_CANCEL, keep_it(EVE))], text
+        assert file_of(i) == was and h.new() == [] and edits() == [] and len(talks()) == 1
+    # the whole line alone, and the cancel question alone: anything else is the why
+    for why in ("No longer needed", "Course postponed", "Never mind, the course is off", "I do not need it, so cancel", "Wait for the new date", "Not now but next week", "Waiting list", "Forget it: HOD said no",
+                "Don't cancel the next one", "Please keep it on record", "Not needed"):
+        with school(EVE): i = told_planned(); press(EVE, "cancel"); assert talk_to(EVE, lambda: say(EVE, why)) == [(SENT_CANCEL, None)] and absences.load(i)["cancelled"]["why"] == why, why
+    for why in ("Never mind", "Don’t cancel", "Not now", "wait"):
+        with school(SAM): i, key = told_relief(); press(SAM, "change"); assert talk_to(SAM, lambda: say(SAM, why)) == [(SENT_CHANGE, None)] and covered(i, K5)[2]["change"]["why"] == why, why
+
+@t
 def a_code_shaped_why_is_the_answer():
     for why in ("Sent them", "ABCD-EFGH", access.staff_code(SAM), "/ill", "/starting late", "<b>x</b>", "“quoted”", "No relief is needed", "Keep the class with me", "7"):
         with school(SAM):

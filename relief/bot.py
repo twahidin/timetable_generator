@@ -27,7 +27,8 @@ says the same and saves nothing.
 
 Request to change and Not needed ask why first: a talk (table talks), one a chat, TALK_MINUTES long, the newest in place of any
 other. Until it is over, what is typed there is the why, whatever it looks like (never a code), judged again as a press is. A line
-that is blank, too long or no reason (_no_reason: "No", "Ok, thanks") is nobody's why: the question is asked again. So it is, after
+that is blank, too long or no reason (_no_reason: "No", "Ok, thanks"; to the cancel question "Never mind" and the rest of
+NOT_CANCEL too) is nobody's why: the question is asked again. So it is, after
 LAST_ONE, when the line replies to any message but the question asked last (its id is in the talk). /cancel ends the talk, and
 so do COMMANDS, which work as ever, and the Keep it button of the cancel question (its token is the talk's key): pressed once
 the talk is over it is OLD_BUTTON, for something may have been changed since. A request to change is refused when the relief was
@@ -73,7 +74,10 @@ NO_REASON = frozenset("no n nope yes y ok okay thanks thank you cancel keep it s
 ANSWER_MOST, TEXT_MOST = 200, 4096           # characters Telegram takes of an answer to a press, and of a message
 TIMEOUT = 8                                  # seconds for each call made while Telegram waits for the hook's answer
 _HANDLE = re.compile(r"[A-Za-z0-9_]{1,64}")
+NOT_CANCEL = frozenset(("never mind", "nevermind", "don't cancel", "dont cancel", "do not cancel", "not cancel", "don't cancel it", "do not cancel it",
+                        "not now", "wait", "keep it please", "please keep it", "forget it"))        # nor does one of these, the whole line, to the cancel question
 _WORD = re.compile(r"[^\W_]+")
+_ENDS = re.compile(r"^[\W_]+|[\W_]+$")
 _DATA = re.compile(r"b:([A-Za-z0-9_-]{16})")              # a button's callback data (relief/outbox.py)
 STAYS = (_web.NO_PUB,)                       # a refusal that keeps any button: a publish may be swapping folders
 _log = logging.getLogger("relief.telegram")
@@ -389,7 +393,7 @@ def _asked(p, kind):
 
 def _ask(chat, talk):
     """the talk's question asked (again): the one a line may reply to from now on -> whether it surely came"""
-    question, f, keep = TALKS[talk["kind"]]
+    question, f, keep, lines = TALKS[talk["kind"]]
     r = reply(chat, question, buttons=[[dict(text=KEEP, callback_data="b:" + talk["d"]["key"])]] if keep else None, ask=not keep)
     if not r["ok"]: return False
     n = r["result"].get("message_id") if isinstance(r["result"], dict) else None
@@ -431,9 +435,11 @@ def _replies_to(m):
     return n if type(n) is int else 0
 
 
-def _no_reason(why):
-    """nothing in the line but words of NO_REASON, in any case, whatever is around them (or no word at all)"""
-    return all(w in NO_REASON for w in _WORD.findall(why.casefold()))
+def _no_reason(why, lines):
+    """nothing in the line but words of NO_REASON, in any case, whatever is around them (or no word at all), or it is one of
+    lines, whatever is at its ends"""
+    why = why.casefold().replace("’", "'")       # what a phone types
+    return all(w in NO_REASON for w in _WORD.findall(why)) or _ENDS.sub("", why) in lines
 
 
 def _line(chat, talk, text, cmd, to):
@@ -449,10 +455,11 @@ def _line(chat, talk, text, cmd, to):
     why = " ".join(text.split())                 # one line, as the page's box gives it
     other = to is not None and to != talk["d"].get("question")
     if other: reply(chat, LAST_ONE)
-    if other or not 1 <= len(why) <= WHY_MOST or _no_reason(why):
+    question, f, keep, lines = TALKS[talk["kind"]]
+    if other or not 1 <= len(why) <= WHY_MOST or _no_reason(why, lines):
         _ask(chat, talk)
         return True
-    f, d = TALKS[talk["kind"]][1], talk["d"]
+    d = talk["d"]
     def do():
         if not _end(chat, talk): return None     # over meanwhile: this line is not its why
         b = _button(chat, d["token"])
@@ -470,5 +477,5 @@ def _line(chat, talk, text, cmd, to):
 ACTIONS = dict(ack=("relief", _ack, ()), change=("relief", _ask_change, ()), cancel=("relief", _ask_cancel, ()), keep=("relief", _keep, (OLD_BUTTON,)),
                approve=("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE)))
 # a talk, by its kind: (what it asks, what its why does: f(the button, why, when it began) -> _Out, whether its question has a Keep
-# it button: Telegram takes that or the line opened for the answer, not both)
-TALKS = dict(change=(WHY_CHANGE, _change, False), cancel=(WHY_CANCEL, _cancel, True))
+# it button: Telegram takes that or the line opened for the answer, not both, the lines that are no why of it)
+TALKS = dict(change=(WHY_CHANGE, _change, False, frozenset()), cancel=(WHY_CANCEL, _cancel, True, NOT_CANCEL))
