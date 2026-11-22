@@ -4,6 +4,7 @@ from exams import days as _days
 from exams import invigilate as _inv
 from exams import make as _make
 from exams import papers as _papers
+from exams import schedules as _schedules
 from exams import seating as _seating
 
 
@@ -87,7 +88,8 @@ def _others_check(s, elsewhere, model) -> dict:
     """another schedule's invigilators and rooms at the same time; a combined venue and its own rooms are one room"""
     parts = model.get("room_parts") or {}
     duties = (s.get("made") or {}).get("duties") or []
-    takes, uses = [], []
+    takes, uses, shares = [], [], []
+    elsewhere = [b for b in elsewhere if b.get("kind") != "relief"]
     for other in sorted({(b["name"], b["status"]) for b in elsewhere}):
         mine = [b for b in elsewhere if (b["name"], b["status"]) == other]
         for date in sorted({b["date"] for b in mine}):
@@ -101,7 +103,11 @@ def _others_check(s, elsewhere, model) -> dict:
             if names:
                 takes.append("%s takes %d of these invigilators on %s." % (tag, len(names), _days.nice(date)))
             uses += ["%s uses %s on %s too." % (tag, r, _days.nice(date)) for r in rooms]
-    lines = takes + uses
+            for b in (b for b in mine if b["date"] == date and b.get("classes")):
+                line = _schedules.shared_line(model, s, tag, date, b["start"], b["end"], b["classes"])
+                if line and line not in shares:
+                    shares.append(line)
+    lines = takes + uses + shares
     return dict(key="others", ok=not lines, lines=lines or ["No clash with other schedules."])
 
 

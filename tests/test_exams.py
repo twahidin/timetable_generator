@@ -897,7 +897,7 @@ def exams_tile_on_the_home_page():
         c, r = signed_in(access.staff_code("Ms Grace Yeo"))
         assert r.status_code == 302 and r.headers["Location"] == "/home", r.headers
         page = c.get("/home").data.decode()
-        assert 'href="/exams"' in page and "My exam duties" in page and "Exams and events" not in page and 'href="/relief"' in page, "no Exams and events extra: her own duties only"
+        assert 'href="/exams"' in page and "My exam and event duties" in page and "Exams and events" not in page and 'href="/relief"' in page, "no Exams and events extra: her own duties and events only"
         exams_until("Ms Grace Yeo", LATER)
         try:
             page = c.get("/home").data.decode()
@@ -915,7 +915,8 @@ def only_the_committees_get_in():
         s = staff("Ms Grace Yeo")
         r = s.get("/api/exams"); assert r.status_code == 401 and r.get_json() == AGAIN, r.data
         assert s.get("/api/exams/settings").status_code == 401
-        # no extra: the exams page opens for her own exam duties only (stage 2's My exam duties), nothing of the working
+        # no extra: the exams page opens for her own exam and event duties and her own events only (stage 2's My exam duties,
+        # stage 4's My exam and event duties), nothing of the exams' working
         assert s.get("/api/exams/me").get_json() == dict(name="Ms Grace Yeo", can_use=False, can_approve=False, home="/home")
         assert s.get("/exams").status_code == 200
         r = s.get("/exams/settings"); assert r.status_code == 302 and r.headers["Location"].endswith("/login"), r.headers
@@ -1304,7 +1305,7 @@ def each_exams_save_writes_one_entry():
         for url in ("", "/view", "/print/seating.pdf", "/download.xlsx", f"/who?key={key}&room=3-01"): none(s.get(f"/api/exams/{x['id']}{url}"), 200)
         none(s.get("/api/exams"), 200)
         wrote(s.delete("/api/exams/" + x["id"]), "delete", "Mid-year exam: deleted")
-        none(s.delete("/api/exams/" + x["id"]), 200)                       # nothing there: nothing deleted, no entry
+        none(s.delete("/api/exams/" + x["id"]), 404)                       # nothing there: nothing deleted, no entry (404 since stage 4)
         r = committee().put("/api/exams/settings", json=st); assert r.status_code == 200
         e = H.read(kinds=["exams"], limit=1)[0]; assert (e["who"], e["as"], e["via"], e["text"]) == (None, "Shared committee code", "shared", "Exam settings saved"), e
     exams_until("Ms Grace Yeo", None); _reset()
@@ -2115,10 +2116,13 @@ def the_published_page_has_the_date_choice():
     src = open(os.path.join(ROOT, "ttgen", "timetable_page.html"), encoding="utf-8").read()
     for words in ("Usual timetable", 'id="onDate"', 'aria-label="Show the timetable on a date"', "Not a school day.",
                   " is outside the terms or a holiday in the school calendar.", "Lessons that don't happen are crossed out.",
-                  ": no exams or tests. This is the usual ", "See Exams", "No exams or tests on the main site now.", "My exam timetable",
-                  "Roster by day", " (chief)", "/api/day?date=", "/api/published/exams", "/api/me/exams", ".cell.x", ".cell.exam", ".datepick",
-                  "runs ", "Duties and exam rooms count as busy; lessons that don't happen do not."):
+                  ": no exams, tests or events. This is the usual ", "See Exams and events", "No exams, tests or events on the main site now.",
+                  "My exam timetable", "Roster by day", " (chief)", "/api/day?date=", "/api/published/exams", "/api/me/exams", ".cell.x", ".cell.exam",
+                  ".datepick", "runs ", "Duties, events and the rooms they take count as busy; lessons that don't happen do not.", "Exams and events",
+                  "Teacher in charge: ", "Going: "):
         assert words in src, words
+    for old in ("no exams or tests", "No exams or tests on the main site now.", "See Exams</a>", "Duties and exam rooms count as busy"):
+        assert old not in src, old
     skill = open(os.path.join(ROOT, "skill", "school-timetable-generator", "scripts", "ttgen", "timetable_page.html"), encoding="utf-8").read()
     assert src == skill, "the skill's copy of the page is the same"
 
@@ -2128,13 +2132,13 @@ def the_exams_pages_carry_the_approval_words():
     js = _page("exams.js")
     for words in ("Approval", "Send to the timetable committee", "Send again", "Send the changes", "Approve: show on the main site",
                   "Approve the changes", "Send back with a note", "Withdraw from the main site", "Done without approval", "Someone is away",
-                  "Replace now", "My exam duties", "You have no exam duties on the main site.", "Scripts go to",
+                  "Replace now", "My exam and event duties", "You have no exam or event duties on the main site.", "Scripts go to",
                   "On the main site. Changes you make here wait for the timetable committee: send them from the Approval tab.",
                   "Changes not sent yet", "Nothing on the main site has changed since it was approved.", "What changes on the main site",
                   "Lessons that won't happen: ", "Rain rooms used anyway: ", "Take ${S.sched.name} off the main site now?", "/api/exams/my-duties",
                   "&copy=approved", "Lessons that don't happen: "):
         assert words in js, words
-    assert "g.includes(` is on ${m[1]} then (`)" not in js and "f.includes(` is on ${m[1]} then (`)" in js, "a takes line goes only when a free line names that schedule"
+    assert "g.includes(` is on ${m[1]} then`)" not in js and "f.includes(` is on ${m[1]} then`)" in js, "a takes line goes only when a free line names that schedule, with or without a room"
     assert "S.abMsg" in js, "a refusal shows beside the Approval buttons"
     assert "Exams · " in _page("app.js"), "the committee page counts the schedules waiting"
 
@@ -2282,7 +2286,7 @@ def rights_reads_go_through_named_helpers():
     import re
     src = open(os.path.join(ROOT, "app.py"), encoding="utf-8").read()
     part = src.split("# ------------------------------------------------------------------------------------------------ staff: exams and events")[1]
-    helpers = ("_exams_rights", "_exams_can_approve", "_published_reader", "_exams_student")
+    helpers = ("_exams_rights", "_exams_can_approve", "_published_reader", "_exams_student", "_event_rights")
     for name, body in re.findall(r"\ndef (\w+)\(.*?\):(.*?)(?=\n(?:def |@app|# -{20}))", part, re.S):
         if name not in helpers:
             assert "role()" not in body and 'session.get("sid")' not in body and "session[" not in body and "shared()" not in body, name
@@ -2417,5 +2421,706 @@ def changes_list_the_other_kinds():
         "Access arrangements changed for 1 student.", "Added Sec 3 Mathematics Paper 1: Tue 6 Oct 08:00–09:00.", "Added Sec 3 Art Paper 1 with no time.",
         "Removed Sec 3 Pure Chemistry Paper 1.", "Made again for the timetable published on Fri 2 Oct."], [c["text"] for c in AP.changes(s, _M)]
 
+
+import exams.events as EV  # noqa: E402
+
+def _ev(**kw):
+    e = SC.new_event("Sec 3 Learning Journey", ["Sec 3"], [], "2026-10-05", "2026-10-05", "Ms Aisha Rahman", "Ms Aisha Rahman")
+    e["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "07:40", "to": "10:40"})}
+    e["where"] = "Off site (museum)"
+    e["going"] = ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman"]
+    e["duties"] = [dict(duty="Bus marshal", who="Mr Hafiz Rahman", time="07:45")]
+    e.update(kw)
+    return e
+
+def _ev_bad(sentence, **kw):
+    try: SC._check(_ev(**kw), _PUB)
+    except ValueError as x: assert str(x) == sentence, (str(x), sentence); return
+    raise AssertionError("passed: " + sentence)
+
+@t
+def event_record_and_its_check():
+    e = _ev(going=[])
+    assert e["kind"] == "event" and e["in_charge"] == "Ms Aisha Rahman" and e["going"] == [] and e["going_by"] == "people"
+    assert e["status"] == "draft" and e["approved"] is None and e["made"] is None and e["created_by"] == "Ms Aisha Rahman"
+    SC._check(_ev(), _PUB)
+    _ev_bad("Give the event a name.", name=" ")
+    _ev_bad("Pick at least one level or class.", levels=[])
+    _ev_bad("An event can cover at most 31 days.", end="2026-11-30")
+    _ev_bad("Gym is not a room of the published timetable.", venues=["Gym"])
+    _ev_bad("Mr Nobody is not on the published timetable or the staff list.", going=["Mr Nobody"])
+    _ev_bad(SC.EVENT_WRONG, going_by="friends")
+    _ev_bad(SC.EVENT_WRONG, duties=[dict(duty="x", who=5, time="")])
+    _ev_bad("07:50 is not the start of a period.", days={"2026-10-05": dict(whole=False, **{"from": "07:50", "to": "10:40"})})
+    ok = _ev(going=["Ms Grace Yeo", "Ms Grace Yeo"]); SC._check(ok, _PUB)
+    assert ok["going"] == ["Ms Grace Yeo"]
+    d = _ev(duties=[dict(duty="gate", who=None, time=None)]); SC._check(d, _PUB)
+    assert d["duties"] == [dict(duty="gate", who="", time="")]
+    assert SC.place(_ev(where="", venues=["LT1&2", "Hall"])) == "LT1&2, Hall" and SC.place(_ev(where=" Field ")) == "Field" and SC.place(_ev(where="")) == ""
+
+@t
+def a_forged_event_carries_no_exam_items():
+    e = _ev(made=dict(duties=[1]), papers=[_paper()], access=[dict(student="3A-01")], times=dict(report="x"), seating=dict(order="x"),
+            supervision="lesson", scripts="the office", pins=dict(rooms={"k": {}}, duties={}), use_anyway=[["k", "r"]])
+    SC._check(e, _PUB)
+    assert (e["made"], e["papers"], e["access"], e["times"], e["seating"], e["supervision"], e["scripts"], e["use_anyway"]) == (
+        None, [], [], {}, {}, "", "", []) and e["pins"] == dict(rooms={}, duties={})
+
+@t
+def fill_the_going_list():
+    e = _ev(going=[])
+    assert EV.fill(_PUB, F.CAL, e, "form teachers") == ["Ms Aisha Rahman", "Ms Chloe Tan"]
+    assert EV.fill(_PUB, F.CAL, e, "teachers then") == ["Ms Aisha Rahman", "Ms Chloe Tan", "Mr Ben Ong", "Ms Grace Yeo"]
+    assert EV.fill(_PUB, F.CAL, e, "department", dept="English") == ["Mr Ivan Lee", "Ms Aisha Rahman", "Ms Grace Yeo"]
+    try: EV.fill(_PUB, F.CAL, e, "department", dept="")
+    except ValueError as x: assert str(x) == "Pick a department."
+    else: raise AssertionError
+    assert EV.fill(_PUB, F.CAL, e, "people", names=["Mr Daniel Koh", "Mr Nobody"]) == ["Mr Daniel Koh"]
+    try: EV.fill(_PUB, F.CAL, e, "friends")
+    except ValueError as x: assert str(x) == SC.EVENT_WRONG
+    else: raise AssertionError
+    assert EV.fill(_PUB, F.CAL, _ev(going=["Ms Aisha Rahman"]), "form teachers") == ["Ms Chloe Tan"]
+
+@t
+def who_goes_free_or_backup():
+    e = _ev(going=["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman", "Mr Ivan Lee"])
+    assert EV.going(_PUB, F.CAL, e, []) == [
+        dict(name="Ms Aisha Rahman", tag="teacher in charge · 3A form teacher", status="free", text="free then: lessons with 3A stop"),
+        dict(name="Ms Grace Yeo", tag="", status="backup", text="teaches 4A Literature 08:40–09:00 → backup"),
+        dict(name="Mr Hafiz Rahman", tag="", status="backup", text="teaches 4A PE 09:00–09:40 → backup"),
+        dict(name="Mr Ivan Lee", tag="", status="not_free", text="is not available then (a Must rule)")]
+
+@t
+def event_lesson_lists():
+    L = EV.lesson_lists(_PUB, F.CAL, _ev(going=["Mr Hafiz Rahman", "Ms Grace Yeo"]))
+    assert [(i["subject"], i["classes"]) for i in L["none"]] == [("English", ["3A"]), ("Mathematics", ["3B"]),
+                                                                  ("Pure Chemistry", ["3A", "3B"]), ("Combined Science", ["3A", "3B"])]
+    assert [(i["subject"], i["start"], i["note"]) for i in L["backup"]] == [
+        ("PE", "09:00", "Mr Hafiz Rahman is at Sec 3 Learning Journey"), ("Literature", "08:40", "Ms Grace Yeo is at Sec 3 Learning Journey")]
+    assert [i["subject"] for i in L["runs"]] == ["Mathematics", "English", "Assembly"]
+    assert EV.freed(_PUB, F.CAL, _ev()) == [dict(date="2026-10-05", start="07:40", end="10:40", rooms=["3-01", "3-02", "Lab 3-08"])]
+    assert EV.freed(_PUB, F.CAL, _ev(venues=["3-01"]))[0]["rooms"] == ["3-02", "Lab 3-08"]
+
+@t
+def venues_taken_flag_running_lessons():
+    assert EV.flags(_PUB, F.CAL, _ev(venues=["LT1&2", "Hall"])) == [
+        "Mon 5 Oct 08:40–09:00: Literature with 4A uses LT1 then.", "Mon 5 Oct 09:00–09:40: PE with 4A uses Hall in wet weather then."]
+    assert EV.flags(_PUB, F.CAL, _ev()) == []
+    cut = _ev(days={"2026-10-05": dict(whole=False, **{"from": "07:40", "to": "08:00"})})
+    assert EV.cuts(_PUB, F.CAL, cut) == ["On Mon 5 Oct the event time ends in the middle of 2 lessons."]
+    assert EV.on_dates(_PUB, F.CAL, _ev(start="2026-10-12", end="2026-10-12", days={})) == []
+    assert EV.on_dates(_PUB, F.CAL, _ev())[0]["classes"] == ["3A", "3B"]
+
+@t
+def event_busies_for_other_schedules():
+    busy = SC.busies([dict(_ev(venues=["Hall"]), id="ev1", status="approved")], _M)
+    assert busy == [dict(id="ev1", name="Sec 3 Learning Journey", status="approved", date="2026-10-05", start=460, end=640, room="",
+                         names=["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman"], classes=["3A", "3B"], kind="event"),
+                    dict(id="ev1", name="Sec 3 Learning Journey", status="approved", date="2026-10-05", start=460, end=640, room="Hall",
+                         names=[], classes=[], kind="event")], busy
+    s = _sit([_paper(date="2026-10-05", start="07:50")], days=dict(SEC3))
+    r = SE.rooms_free(_PUB, F.CAL, s, _first(s), _xset(), set(), elsewhere=busy)
+    assert next(x for x in r if x["name"] == "Hall")["busy"] == "taken by Sec 3 Learning Journey until 10:40", r
+    why = IV._free("Ms Aisha Rahman", D.day_view(_PUB, F.CAL, s, "2026-10-05"), 455, 540, [], _xset(), elsewhere=busy)[0]
+    assert why == "is on Sec 3 Learning Journey then" and "()" not in why
+    _reset()
+    SC.save(dict(_ev(venues=["Hall"]), id="ev2", status="waiting"), _PUB, F.CAL, "t")
+    SC.save(dict(_ev(), id="ev3", status="draft"), _PUB, F.CAL, "t")
+    got = SC.elsewhere("zzzz", _M)
+    assert [(b["id"], b["status"], b["room"]) for b in got] == [("ev2", "waiting", ""), ("ev2", "waiting", "Hall")], got
+    assert [b["id"] for b in SC.elsewhere("ev2", _M)] == []
+    _reset()
+    SC.save(dict(_ev(), id="ev4", status="approved", approved=dict(_ev())), _PUB, F.CAL, "t")
+    assert [(b["id"], b["status"]) for b in SC.elsewhere("zzzz", _M)] == [("ev4", "approved")]
+    assert [c["status"] for c in SC.copies("zzzz")] == ["approved"]
+    _reset()
+    assert SC.event_busy(dict(_ev(), id="x", status="waiting"), dict(_M, NP=0, times=[], school={})) == []
+
+@t
+def event_busies_leave_out_a_waiting_copy_equal_to_the_approved_one():
+    a = dict(_ev(), id="ev5", status="approved")
+    w = dict(_ev(going=["Ms Aisha Rahman"]), id="ev5", status="waiting")
+    got = SC.busies([a, w], _M)
+    assert [(b["status"], b["names"]) for b in got] == [("approved", ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman"]), ("waiting", ["Ms Aisha Rahman"])], got
+    assert [b["status"] for b in SC.busies([a, dict(a, status="waiting")], _M)] == ["approved"]
+
+@t
+def event_clashes_with_an_exam_for_the_same_class():
+    A = _approved()
+    others = [dict(AP.as_schedule(A), status="approved")]
+    busy = SC.busies(others, _M)
+    got = EV.clashes(_PUB, F.CAL, _ev(), busy, others)
+    assert got == ["Ms Aisha Rahman, Mon 5 Oct 07:40–10:40: is on Sec 3 End-of-Year Exam then (3-01).",
+                   "Mr Hafiz Rahman, Mon 5 Oct 07:40–10:40: is on Sec 3 End-of-Year Exam then (3-02).",
+                   "Sec 3 End-of-Year Exam (approved) has 3A, 3B on Mon 5 Oct too."], got
+    assert EV.send_errors(_PUB, F.CAL, _ev(), busy, others) == [
+        "Fix the clashes first: Ms Aisha Rahman, Mon 5 Oct 07:40–10:40: is on Sec 3 End-of-Year Exam then (3-01)."]
+    rv = RV.review(_PUB, F.CAL, A, _xset(("3-01", "3-02", "4-01", "Hall")), SC.busies([dict(_ev(), id="ev1", status="waiting")], _M))
+    ch = {c["key"]: c["lines"] for c in rv["checks"]}
+    assert ch["others"] == ["Sec 3 Learning Journey (waiting) takes 2 of these invigilators on Mon 5 Oct.",
+                            "Sec 3 Learning Journey (waiting) has 3A, 3B on Mon 5 Oct too."], ch["others"]
+    assert ch["free"] == ["Ms Aisha Rahman, 3-01 on Mon 5 Oct 07:35–09:00: is on Sec 3 Learning Journey then.",
+                          "Mr Hafiz Rahman, 3-02 on Mon 5 Oct 09:45–11:10: is on Sec 3 Learning Journey then."], ch["free"]
+    assert not any("()" in l for l in ch["free"] + got)
+
+@t
+def event_venue_taken_by_another_schedule():
+    others = [dict(_ev(name="Sec 3 Talk", going=[], venues=["LT1"]), id="ev2", status="waiting")]
+    mine = _ev(name="Sec 4 Talk", levels=["Sec 4"], days={"2026-10-05": dict(levels=["Sec 4"], whole=False, **{"from": "07:40", "to": "10:40"})},
+               venues=["LT1&2"], going=["Mr Daniel Koh"], duties=[])
+    assert EV.other_lines(_PUB, F.CAL, mine, SC.busies(others, _M), others) == ["Sec 3 Talk (waiting) uses LT1 on Mon 5 Oct too."]
+
+@t
+def event_send_errors():
+    S = lambda e: EV.send_errors(_PUB, F.CAL, e, [], [])
+    assert S(_ev()) == []
+    assert S(_ev(going=[], duties=[])) == ["Add at least one person going with the classes."]
+    assert S(_ev(start="2026-10-12", end="2026-10-12", days={})) == ["Pick at least one school day for the event."]
+    assert S(_ev(duties=[dict(duty="First aid", who="Mr Ben Ong", time="all day")])) == ["Pick a person going for every duty."]
+    assert S(_ev(going=["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman", "Mr Ivan Lee"])) == [
+        "Fix the clashes first: Mr Ivan Lee, Mon 5 Oct 07:40–10:40: is not available then (a Must rule)."]
+
+@t
+def who_may_replace_someone_going():
+    assert EV.who_free(_PUB, F.CAL, _ev(), []) == dict(freed=[dict(name="Mr Ben Ong", reason="freed: lessons with 3A, 3B stop"),
+                                                               dict(name="Ms Chloe Tan", reason="freed: lessons with 3B stop")], free=[])
+
+@t
+def a_multi_date_event_names_each_date():
+    day = dict(levels=None, whole=False, **{"from": "07:40", "to": "10:40"})
+    e = _ev(end="2026-10-06", going=["Ms Grace Yeo", "Mr Ivan Lee"], days={"2026-10-05": day, "2026-10-06": dict(day)})
+    got = EV.going(_PUB, F.CAL, e, [])
+    assert len(EV.on_dates(_PUB, F.CAL, e)) == 2, EV.on_dates(_PUB, F.CAL, e)
+    assert got[0]["status"] == "backup" and "(Mon 5 Oct)" in got[0]["text"], got
+    assert got[1]["status"] == "not_free" and got[1]["text"].endswith("(Mon 5 Oct)"), got
+
+def _ev_ok(**kw):
+    e = _ev(**kw)
+    AP.send(e, _M, "Ms Aisha Rahman", NOW, False, [])
+    AP.approve(e, "Timetable committee", NOW)
+    return e
+
+E1 = AP.as_schedule(_ev_ok(venues=["Hall"]))
+
+@t
+def event_states_and_copy():
+    e = _ev()
+    assert AP.blocked(e, _M, False, []) == ""
+    assert AP.blocked(e, _M, False, ["Add at least one person going with the classes."]) == "Add at least one person going with the classes."
+    e = _ev_ok()
+    assert e["approved"]["going"] == e["going"] and set(AP.public(e)) == set(AP.SNAP + AP.EVENT_KEYS)
+    assert AP.blocked(e, _M, False, []) == "Nothing on the main site changes."
+    assert AP.label(e, date(2026, 10, 5)) == "Approved · on the main site" and AP.label(e, date(2026, 10, 6)) == "Ended"
+    assert set(AP.public(_made_sched())) == set(AP.SNAP)
+    w = _ev(); AP.send(w, _M, "Ms Aisha Rahman", NOW, False, [])
+    try: AP.send_back(w, "  ", "Timetable committee", NOW)
+    except ValueError as x: assert str(x) == "Write a note for the teacher in charge.", x
+    else: raise AssertionError
+    w["where"] = "Elsewhere"
+    try: AP.approve(w, "Timetable committee", NOW)
+    except ValueError as x: assert str(x) == "This schedule changed after it was sent. Ask the teacher in charge to send it again.", x
+    else: raise AssertionError
+
+@t
+def event_changes_list():
+    e = _ev_ok()
+    e.update(where="Science Centre", venues=["Hall"], going=["Ms Aisha Rahman", "Mr Hafiz Rahman", "Mr Daniel Koh"], duties=[])
+    assert [c["text"] for c in AP.changes(e, _M)] == ["Where: Off site (museum) → Science Centre.", "Venues taken: none → Hall.",
+        "Mr Daniel Koh now goes with the classes.", "Ms Grace Yeo no longer goes with the classes.", "Duties at the event changed."]
+    AP.send(e, _M, "Ms Aisha Rahman", NOW, False, [])
+    assert e["status"] == "changes" and e["log"][-1]["detail"] == "5 changes"
+    f = _ev_ok(); f["days"]["2026-10-05"]["to"] = "11:00"
+    assert [c["text"] for c in AP.changes(f, _M)] == ["Mon 5 Oct: part of the day 07:40–10:40 (Sec 3) → part of the day 07:40–11:00 (Sec 3)."]
+    g = _ev_ok(); g["days"] = {}
+    assert [c["text"] for c in AP.changes(g, _M)] == ["Mon 5 Oct: part of the day 07:40–10:40 (Sec 3) → as the event."]
+
+@t
+def someone_away_from_an_event():
+    e = _ev_ok()
+    assert AP.replace_going(e, "Mr Hafiz Rahman", "Mr Ben Ong", "Ms Aisha Rahman", NOW) == "Mon 5 Oct, going: Mr Hafiz Rahman (away) → Mr Ben Ong"
+    for c in (e, e["approved"]):
+        assert c["going"] == ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Ben Ong"] and c["duties"][0]["who"] == "Mr Ben Ong", c
+    assert e["status"] == "approved" and AP.changes(e, _M) == [] and AP.done_without(e)[0]["by"] == "Ms Aisha Rahman"
+    for away, name, said in (("Mr Daniel Koh", "Mr Ben Ong", "Mr Daniel Koh is not going."), ("Ms Aisha Rahman", "Ms Grace Yeo", "Ms Grace Yeo is going already.")):
+        try: AP.replace_going(_ev_ok(), away, name, "x", NOW)
+        except ValueError as x: assert str(x) == said, x
+        else: raise AssertionError
+    try: AP.replace_going(_ev(), "Mr Hafiz Rahman", "Mr Ben Ong", "x", NOW)
+    except ValueError as x: assert str(x) == "This schedule is not on the main site."
+    else: raise AssertionError
+    w = _ev_ok(); w["going"] = ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Ben Ong"]
+    AP.replace_going(w, "Mr Hafiz Rahman", "Mr Ben Ong", "x", NOW)
+    assert w["going"] == ["Ms Aisha Rahman", "Ms Grace Yeo", "Mr Ben Ong"] and w["approved"]["duties"][0]["who"] == "Mr Ben Ong"
+    sent = _ev_ok()
+    assert sent["sent_fp"] == AP.fp(sent)
+    AP.replace_going(sent, "Mr Hafiz Rahman", "Mr Ben Ong", "Ms Aisha Rahman", NOW)
+    assert sent["sent_fp"] == AP.fp(sent) and "Mr Ben Ong" in sent["going"], "a replacement keeps a sent copy unchanged"
+    ev9 = dict(_ev_ok(), id="ev9")
+    SC.save(ev9, _PUB, F.CAL, "t")
+    got = [b for b in SC.elsewhere("zzzz", _M) if b["id"] == "ev9"]
+    assert any(b["names"] == ev9["going"] and b["status"] == "approved" for b in got), got
+
+@t
+def event_review():
+    e = _ev(venues=["LT1&2", "Hall"]); AP.send(e, _M, "Ms Aisha Rahman", NOW, False, [])
+    r = EV.review(_PUB, F.CAL, e, [], [])
+    assert r["copy"] == "working" and r["changes"] == [] and r["done_without"] == []
+    assert r["what"] == dict(kind="event", classes=["3A", "3B"], levels=["Sec 3"], start="2026-10-05", end="2026-10-05",
+        days=[dict(date="2026-10-05", whole=False, window=["07:40", "10:40"])], where="Off site (museum)", in_charge="Ms Aisha Rahman",
+        stopped=4, going=3, backups=2, venues=[dict(room="Hall", dates=1, start="07:40", end="10:40"), dict(room="LT1&2", dates=1, start="07:40", end="10:40")],
+        flagged=2), r["what"]
+    assert [c["key"] for c in r["checks"]] == ["going", "venues", "others"]
+    c = {x["key"]: x for x in r["checks"]}
+    assert c["going"]["ok"] and c["going"]["lines"] == ["Everyone going is free then."]
+    assert not c["venues"]["ok"] and c["venues"]["lines"] == EV.flags(_PUB, F.CAL, e) and len(c["venues"]["lines"]) == 2
+    assert c["others"]["ok"] and c["others"]["lines"] == ["No clash with other schedules."]
+    v = _ev(going=["Mr Ivan Lee"]); AP.send(v, _M, "Ms Aisha Rahman", NOW, False, [])
+    assert EV.review(_PUB, F.CAL, v, [], [])["checks"][0]["lines"] == ["Mr Ivan Lee, Mon 5 Oct 07:40–10:40: is not available then (a Must rule)."]
+    assert not EV.review(_PUB, F.CAL, v, [], [])["checks"][0]["ok"]
+
+
+def _event(a):
+    r = a.post("/api/events", json=dict(name="Sec 3 Learning Journey", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05"))
+    assert r.status_code == 200, r.data
+    id = r.get_json()["id"]
+    e = a.get("/api/events/" + id).get_json()
+    e["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "07:40", "to": "10:40"})}
+    e["where"] = "Off site (museum)"
+    r = a.put("/api/events/" + id, json=e); assert r.status_code == 200, r.data
+    return r.get_json()
+
+def _approved_event(a, c):
+    e = _event(a); id = e["id"]
+    r = a.post(f"/api/events/{id}/fill", json=dict(way="form teachers")); assert r.status_code == 200, r.data
+    r = a.post(f"/api/events/{id}/fill", json=dict(way="department", dept="PE")); assert r.status_code == 200, r.data
+    r = a.post(f"/api/events/{id}/send"); assert r.status_code == 200, r.data
+    r = c.post(f"/api/events/{id}/approve"); assert r.status_code == 200, r.data
+    return e
+
+@t
+def any_teacher_may_start_an_event():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        r = a.post("/api/events", json=dict(name="Sec 3 Learning Journey", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05", in_charge="Mr Ben Ong"))
+        assert r.status_code == 200 and r.get_json()["in_charge"] == "Ms Aisha Rahman" and r.get_json()["kind"] == "event", r.data
+        id = r.get_json()["id"]
+        rows = a.get("/api/events").get_json()["schedules"]
+        assert len(rows) == 1 and rows[0]["label"] == "Draft" and rows[0]["in_charge"] == "Ms Aisha Rahman" and rows[0]["n_going"] == 0, rows
+        r = a.get("/api/exams"); assert r.status_code == 401 and r.get_json() == AGAIN, r.data   # accounts: the guard refuses (no exams right)
+        assert a.get("/api/events").get_json()["people"] == []
+        assert a.get(f"/events/{id}").status_code == 200
+        body = dict(name="Sec 3 Sports", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05")
+        r = c.post("/api/events", json=body); assert r.status_code == 400 and r.get_json() == {"error": A.PICK_IN_CHARGE}, r.data
+        r = c.post("/api/events", json=dict(body, in_charge="Mr Nobody")); assert r.status_code == 400 and r.get_json() == {"error": "Mr Nobody is not on the published timetable or the staff list."}, r.data
+        r = c.post("/api/events", json=dict(body, in_charge="Mr Ben Ong")); assert r.status_code == 200 and r.get_json()["in_charge"] == "Mr Ben Ong", r.data
+        d = c.get("/api/events").get_json()
+        assert len(d["schedules"]) == 2 and "Mr Ben Ong" in d["people"], d
+        assert not any(x["kind"] == "event" for x in c.get("/api/exams").get_json()["schedules"])
+        _cal(False)
+        r = a.post("/api/events", json=body); assert r.status_code == 409 and r.get_json() == {"error": SC.NO_CALENDAR}, r.data
+
+@t
+def only_the_teacher_in_charge_and_the_committee():
+    _setup()
+    with published(_PUB):
+        a, b, g, c = staff("Ms Aisha Rahman"), staff("Mr Ben Ong"), staff("Ms Grace Yeo"), committee()
+        e = _event(a); id = e["id"]
+        no = dict(error=A.ONLY_IN_CHARGE)
+        for r in (b.get(f"/api/events/{id}"), b.put(f"/api/events/{id}", json=e), b.delete(f"/api/events/{id}"), b.post(f"/api/events/{id}/send"),
+                  b.post(f"/api/events/{id}/fill", json=dict(way="form teachers")), b.post(f"/api/events/{id}/away", json=dict(away="x", name="y")),
+                  b.get(f"/api/events/{id}/view"), b.get(f"/api/events/{id}/who")):
+            assert r.status_code == 403 and r.get_json() == no, (r.status_code, r.data)
+        assert b.get("/api/events").get_json()["schedules"] == []
+        for r in (g.get(f"/api/exams/{id}"), g.put(f"/api/exams/{id}", json=e), g.delete(f"/api/exams/{id}")):
+            assert r.status_code == 404 and r.get_json() == {"error": A.NO_EXAM}, (r.status_code, r.data)
+        assert a.get(f"/api/events/{id}").status_code == 200, "the delete did not remove it"
+        assert not any(x["id"] == id for x in g.get("/api/exams").get_json()["schedules"])
+        x = _exam(g); x["kind"] = "event"
+        r = g.put("/api/exams/" + x["id"], json=x); assert r.status_code == 400 and r.get_json() == {"error": SC.WRONG}, r.data
+        assert g.get("/api/exams/" + x["id"]).get_json()["kind"] == "exam"
+        assert c.get(f"/api/events/{id}").status_code == 200 and any(r_["id"] == id for r_ in c.get("/api/events").get_json()["schedules"])
+        e = a.get(f"/api/events/{id}").get_json()
+        r = a.put(f"/api/events/{id}", json=dict(e, in_charge="Mr Ben Ong", status="approved", approved=dict(start="2026-10-05"), approved_by="x")); assert r.status_code == 200, r.data
+        got = a.get(f"/api/events/{id}").get_json()
+        assert got["in_charge"] == "Ms Aisha Rahman" and got["status"] == "draft" and not got["approved"] and got["approved_by"] is None, got
+        r = a.post(f"/api/events/{id}/approve"); assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_APPROVE}, r.data
+        r = g.get(f"/api/events/{x['id']}"); assert r.status_code == 404 and r.get_json() == {"error": A.NO_EVENT}, r.data
+        assert c.get(f"/api/events/{x['id']}").status_code == 404
+
+@t
+def a_forged_event_put_puts_no_exam_items_on_the_site():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        id = _event(a)["id"]
+        a.post(f"/api/events/{id}/fill", json=dict(way="form teachers"))
+        got = a.get(f"/api/events/{id}").get_json()
+        forged = dict(got, papers=[_paper()], access=[dict(student="3A-01", extra=25)], times=dict(report="07:30", min_break=20, max_papers=2),
+                      made=dict(duties=[dict(key="k", room="3-01", date="2026-10-05", start=460, end=540, names=["Mr Ben Ong"], backup=[], short=0)], seats={}, unseated={}),
+                      supervision="lesson", scripts="x", pins=dict(rooms={"a": 1}, duties={}), use_anyway=["x"])
+        r = a.put(f"/api/events/{id}", json=forged); assert r.status_code == 200, r.data
+        s = SC.load(id)
+        assert s["papers"] == [] and s["access"] == [] and s["made"] is None and s["use_anyway"] == [] and s["scripts"] == "", s
+        r = a.post(f"/api/events/{id}/send"); assert r.status_code == 200, r.data
+        assert c.post(f"/api/events/{id}/approve").status_code == 200
+        site = [x for x in SC.on_site() if x["id"] == id][0]
+        assert site["papers"] == [] and not (site.get("made") or {}).get("duties") and not (site.get("made") or {}).get("seats") and site["access"] == [], site
+
+@t
+def fill_view_send_approve():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _event(a); id = e["id"]
+        r = a.post(f"/api/events/{id}/send"); assert r.status_code == 400 and r.get_json() == {"error": "Add at least one person going with the classes."}, r.data
+        r = a.post(f"/api/events/{id}/fill", json=dict(way="form teachers")); assert r.status_code == 200, r.data
+        assert r.get_json()["going"] == ["Ms Aisha Rahman", "Ms Chloe Tan"] and r.get_json()["going_by"] == "form teachers", r.get_json()
+        r = a.post(f"/api/events/{id}/fill", json=dict(way="department", dept="PE")); assert r.status_code == 200, r.data
+        assert r.get_json()["going"] == ["Ms Aisha Rahman", "Ms Chloe Tan", "Mr Hafiz Rahman"] and r.get_json()["going_by"] == "department"
+        r = a.post(f"/api/events/{id}/fill", json=dict(way="people", names="x")); assert r.status_code == 400, r.data
+        v = a.get(f"/api/events/{id}/view").get_json()
+        assert [x["status"] for x in v["going"]] == ["free", "free", "backup"], v["going"]
+        assert len(v["lessons"]["none"]) == 4 and v["freed"][0]["rooms"] == ["3-01", "3-02", "Lab 3-08"], (v["lessons"]["none"], v["freed"])
+        assert v["summary"]["days"][0]["date"] == "2026-10-05" and v["summary"]["days"][0]["whole"] is False and v["summary"]["days"][0]["window"] == ["07:40", "10:40"], v["summary"]
+        assert v["classes"] == ["3A", "3B"] and "PE" in v["depts"] and "Ms Aisha Rahman" in v["people"] and "Hall" in v["rooms"], v
+        for k in ("flags", "cuts", "clashes", "periods"): assert k in v, k
+        r = a.post(f"/api/events/{id}/send"); assert r.status_code == 200, r.data
+        assert r.get_json()["label"] == "Waiting for the timetable committee" and r.get_json()["review"]["what"]["kind"] == "event", r.data
+        assert a.get(f"/api/events/{id}/review").status_code == 200
+        r = c.post(f"/api/events/{id}/approve"); assert r.status_code == 200, r.data
+        site = [x for x in SC.on_site() if x["id"] == id][0]
+        assert site["going"] == ["Ms Aisha Rahman", "Ms Chloe Tan", "Mr Hafiz Rahman"], site
+        assert a.get(f"/api/events/{id}/who").status_code == 200
+
+@t
+def event_send_refused_on_a_clash():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        _approved_exam(c)
+        e = _event(a); id = e["id"]
+        a.post(f"/api/events/{id}/fill", json=dict(way="form teachers"))
+        r = a.post(f"/api/events/{id}/send"); assert r.status_code == 400 and r.get_json()["error"].startswith("Fix the clashes first: "), r.data
+        rv = a.get(f"/api/events/{id}/review").get_json()
+        others = [x for x in rv["review"]["checks"] if x["key"] == "others"][0]["lines"]
+        assert "Sec 3 Exam (approved) has 3A, 3B on Mon 5 Oct too." in others, others
+
+@t
+def away_on_an_approved_event():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _approved_event(a, c); id = e["id"]
+        w = a.get(f"/api/events/{id}/who").get_json()
+        assert [x["name"] for x in w["freed"]] == ["Mr Ben Ong"], w
+        r = a.post(f"/api/events/{id}/away", json=dict(away="Mr Hafiz Rahman", name="Mr Daniel Koh")); assert r.status_code == 400 and r.get_json() == {"error": "Mr Daniel Koh is not free then."}, r.data
+        r = a.post(f"/api/events/{id}/away", json=dict(away="Mr Hafiz Rahman", name="Mr Ben Ong")); assert r.status_code == 200, r.data
+        site = [x for x in SC.on_site() if x["id"] == id][0]
+        assert site["going"] == ["Ms Aisha Rahman", "Ms Chloe Tan", "Mr Ben Ong"], site["going"]
+        assert r.get_json()["review"]["done_without"][0]["detail"] == "Mon 5 Oct, going: Mr Hafiz Rahman (away) \u2192 Mr Ben Ong", r.get_json()["review"]["done_without"]
+        r = a.delete(f"/api/events/{id}"); assert r.status_code == 409 and r.get_json() == {"error": A.ON_SITE}, r.data
+        assert c.post(f"/api/events/{id}/withdraw").status_code == 200 and SC.on_site() == []
+        assert a.delete(f"/api/events/{id}").status_code == 200 and SC.load(id) is None
+
+@t
+def event_rights_stay_inside_helpers():
+    import re
+    src = open(os.path.join(ROOT, "app.py"), encoding="utf-8").read()
+    assert "def _event_rights(" in src and "def _event_gate(" in src
+    body = re.search(r"\ndef _event_rights\(.*?\):(.*?)\n(?:def |@app)", src, re.S).group(1)
+    assert 'has("committee")' in body and "who()" in body, "the accounts' rights decide"
+    assert "role()" not in body and "session" not in body and "shared()" not in body and 'has("exams")' not in body, "no role names; the exams extra gives nothing here"
+
+@t
+def event_rights_by_the_accounts():
+    """the teacher in charge (anyone signed in by name, any way in) and the timetable committee (the committee right) open
+    and change an event; the shared heads', teacher and student codes, a personal student code and the exams committee do not"""
+    from werkzeug.security import generate_password_hash
+    _setup()
+    pw, code, lead = "Ms Cora Lim", "Mr Leo Tan", "Mr Max Ho"
+    hashed = lambda: generate_password_hash(secrets.token_hex(8))
+    ACC.update(lambda d: (d["people"].setdefault(pw, {}).update(group="committee", added=True, username="cora.lim", pw=hashed()),
+                          d["people"].setdefault(code, {}).update(group="committee", added=True),
+                          d["people"].setdefault(lead, {}).update(group="leader", added=True, username="max.ho", pw=hashed())))
+    try:
+        with published(_PUB):
+            a, g = staff("Ms Aisha Rahman"), staff("Ms Grace Yeo")     # Ms Grace Yeo holds the Exams and events extra (_setup)
+            cp, ck, lp = staff(pw, via="password"), staff(code), staff(lead, via="password")
+            e = _event(a); id = e["id"]
+            for kind in ("head", "teacher", "student"):               # the shared codes are nobody's: no event is theirs
+                k = as_role(kind)
+                for r in (k.get("/api/events"), k.post("/api/events", json=dict(name="X")), k.get(f"/api/events/{id}"), k.get("/api/events/ffff"),
+                          k.post(f"/api/events/{id}/send"), k.get(f"/api/events/{id}/who")):
+                    assert r.status_code == 403 and r.get_json() == {"error": A.ONLY_OWN_EVENTS}, (kind, r.status_code, r.data)
+                r = k.get(f"/events/{id}"); assert r.status_code == 302 and r.headers["Location"].endswith("/") and not r.headers["Location"].endswith("/login"), (kind, r.headers)
+            st = as_role("personal", sid="3A-07")
+            assert st.get("/api/events").status_code == 401 and st.get("/api/events").get_json() == AGAIN
+            r = st.get(f"/events/{id}"); assert r.status_code == 302 and r.headers["Location"].endswith("/login"), r.headers
+            no = {"error": A.ONLY_IN_CHARGE}
+            for who_, k in (("the exams committee", g), ("a committee member by code", ck), ("a leader by password", lp)):
+                for r in (k.get(f"/api/events/{id}"), k.put(f"/api/events/{id}", json=e), k.post(f"/api/events/{id}/fill", json=dict(way="form teachers"))):
+                    assert r.status_code == 403 and r.get_json() == no, (who_, r.status_code, r.data)
+                d = k.get("/api/events").get_json()
+                assert d["schedules"] == [] and d["people"] == [], (who_, d)
+                assert k.get(f"/events/{id}").status_code == 200, "the page opens; the event then says it is not theirs"
+            r = lp.post("/api/events", json=dict(name="Sec 3 Sports", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05", in_charge="Mr Ben Ong"))
+            assert r.status_code == 200 and r.get_json()["in_charge"] == lead and r.get_json()["created_by"] == lead, r.data
+            assert [x["in_charge"] for x in lp.get("/api/events").get_json()["schedules"]] == [lead]
+            r = ck.post("/api/events", json=dict(name="Sec 3 Camp", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05"))
+            assert r.status_code == 200 and r.get_json()["in_charge"] == code, "by code a committee member is a teacher in charge, not the committee"
+            r = g.post("/api/events", json=dict(name="Sec 3 Walk", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05"))
+            assert r.status_code == 200 and r.get_json()["in_charge"] == "Ms Grace Yeo", "the exams committee may start its own, as anyone"
+            d = cp.get("/api/events").get_json()                       # the committee by password: every event, and names the teacher in charge
+            assert len(d["schedules"]) == 4 and "Mr Ben Ong" in d["people"], d
+            assert cp.get(f"/api/events/{id}").status_code == 200
+            got = cp.get(f"/api/events/{id}").get_json(); got["where"] = "Science Centre"
+            r = cp.put(f"/api/events/{id}", json=got); assert r.status_code == 200 and r.get_json()["saved_by"] == pw, r.data
+            assert H.read(kinds=["exams"], limit=1)[0]["who"] == pw
+            body = dict(name="Sec 3 Talk", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05")
+            r = cp.post("/api/events", json=body); assert r.status_code == 400 and r.get_json() == {"error": A.PICK_IN_CHARGE}, r.data
+            r = cp.post("/api/events", json=dict(body, in_charge="Mr Ben Ong")); assert r.status_code == 200 and r.get_json()["in_charge"] == "Mr Ben Ong", r.data
+            assert a.post(f"/api/events/{id}/fill", json=dict(way="form teachers")).status_code == 200
+            assert a.post(f"/api/events/{id}/send").status_code == 200
+            for k in (a, ck, g):
+                r = k.post(f"/api/events/{id}/approve"); assert r.status_code == 403, r.data
+            r = cp.post(f"/api/events/{id}/approve"); assert r.status_code == 200 and r.get_json()["status"] == "approved", r.data
+            assert SC.load(id)["approved_by"] == pw
+    finally:
+        ACC.update(lambda d: [d["people"].pop(n, None) for n in (pw, code, lead)])
+        _reset()
+
+@t
+def each_event_save_and_step_writes_one_history_entry():
+    """as exams: create, edit, fill, send, approve, send back, withdraw, someone away and delete write one entry each,
+    named by who did it and linked to the event; a refusal, or a fill that adds no one, writes none"""
+    _setup()
+    with published(_PUB):
+        a, b, c = staff("Ms Aisha Rahman"), staff("Mr Ben Ong"), committee()
+        n = [len(H.read(kinds=["exams"], limit=10000))]
+        name = "Sec 3 Learning Journey"
+        def wrote(r, what, text, who_, link=None):
+            assert r.status_code == 200, (what, r.status_code, r.data[:200])
+            got = H.read(kinds=["exams"], limit=10000); assert len(got) == n[0] + 1, (what, n[0], len(got)); n[0] += 1
+            e = got[0]
+            assert (e["what"], e["text"], e["where"], e["link"], e["exam"]) == (what, f"{name}: {text}", "Exams and events", link or f"/events/{id}", id), e
+            assert e["as"] == who_, e
+            return e
+        def none(r, code):
+            assert r.status_code == code, (r.status_code, r.data[:200])
+            assert len(H.read(kinds=["exams"], limit=10000)) == n[0], "no entry"
+        r = a.post("/api/events", json=dict(name=name, levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05"))
+        id = r.get_json()["id"]
+        e = wrote(r, "create", "created", "Ms Aisha Rahman"); assert e["via"] == "code" and e["who"] == "Ms Aisha Rahman", e
+        x = a.get(f"/api/events/{id}").get_json(); none(a.get(f"/api/events/{id}"), 200)
+        x["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "07:40", "to": "10:40"})}; x["where"] = "Off site (museum)"
+        wrote(a.put(f"/api/events/{id}", json=x), "edit", "changed", "Ms Aisha Rahman")
+        none(b.put(f"/api/events/{id}", json=x), 403)
+        none(a.put(f"/api/events/{id}", json=dict(x, going="x")), 400)
+        wrote(a.post(f"/api/events/{id}/fill", json=dict(way="form teachers")), "fill", "2 added to the people going (the form teachers)", "Ms Aisha Rahman")
+        none(a.post(f"/api/events/{id}/fill", json=dict(way="form teachers")), 200)          # no one new: nothing saved
+        wrote(a.post(f"/api/events/{id}/fill", json=dict(way="department", dept="PE")), "fill", "1 added to the people going (a department)", "Ms Aisha Rahman")
+        for url in ("/view", "/review", "/who"): a.get(f"/api/events/{id}{url}")
+        none(a.get("/api/events"), 200)
+        none(a.post(f"/api/events/{id}/approve"), 403)                  # the teacher in charge does not approve
+        wrote(a.post(f"/api/events/{id}/send"), "send", "sent to the timetable committee", "Ms Aisha Rahman")
+        none(c.post(f"/api/events/{id}/send-back", json=dict(note="")), 400)
+        wrote(c.post(f"/api/events/{id}/send-back", json=dict(note="Not that day")), "send-back", "sent back to the teacher in charge", "Shared committee code")
+        assert "Not that day" not in H.read(kinds=["exams"], limit=1)[0]["text"], "the note stays in the event's own log"
+        wrote(a.post(f"/api/events/{id}/send"), "send", "sent to the timetable committee", "Ms Aisha Rahman")
+        wrote(c.post(f"/api/events/{id}/approve"), "approve", "approved: on the main site", "Shared committee code")
+        none(a.post(f"/api/events/{id}/away", json=dict(away="Mr Hafiz Rahman", name="Mr Daniel Koh")), 400)
+        wrote(a.post(f"/api/events/{id}/away", json=dict(away="Mr Hafiz Rahman", name="Mr Ben Ong")), "away",
+              "someone away replaced at once (Mon 5 Oct, going: Mr Hafiz Rahman (away) \u2192 Mr Ben Ong)", "Ms Aisha Rahman")
+        none(a.delete(f"/api/events/{id}"), 409)
+        wrote(c.post(f"/api/events/{id}/withdraw"), "withdraw", "withdrawn from the main site", "Shared committee code")
+        none(c.post(f"/api/events/{id}/withdraw"), 400)
+        wrote(a.delete(f"/api/events/{id}"), "delete", "deleted", "Ms Aisha Rahman", link="/exams")
+        none(a.delete(f"/api/events/{id}"), 404)
+        assert H.read(kinds=["exams"], limit=1)[0]["link"] == "/exams", "a deleted event's entry links to the list"
+    _reset()
+
+
+# ---- events on the main site (stage 4, task 5)
+_EVK = {"start", "end", "label", "room", "seat_note", "exam", "kind", "p", "n"}
+
+@t
+def event_on_a_date():
+    e = PB.day(_PUB, F.CAL, [E1], "2026-10-05", True)["exams"]
+    assert e["stopped"] == [0, 1, 3, 4], e["stopped"]
+    assert e["classes"]["3A"] == [dict(start="07:40", end="10:40", label="Sec 3 Learning Journey", room="Off site (museum)",
+                                       seat_note="", exam="Sec 3 Learning Journey", kind="event", p=0.0, n=9.0)], e["classes"]
+    assert "4A" not in e["classes"]
+    assert e["teachers"]["Mr Hafiz Rahman"] == [dict(start="07:40", end="10:40", label="Sec 3 Learning Journey", room="Off site (museum)",
+                                                     role="At event", duty="Bus marshal 07:45", exam="Sec 3 Learning Journey", kind="event", p=0.0, n=9.0)]
+    assert e["teachers"]["Ms Grace Yeo"][0]["duty"] == "", e["teachers"]["Ms Grace Yeo"]
+    assert set(e["rooms"]) == {"Hall"}, e["rooms"]
+    assert e["banner"] == "Sec 3 Learning Journey"
+
+@t
+def student_code_sees_name_where_time_only():
+    d = PB.day(_PUB, F.CAL, [E1], "2026-10-05", False)
+    assert d["exams"]["teachers"] == {} and d["exams"]["rooms"] == {}
+    assert d["exams"]["classes"] == PB.day(_PUB, F.CAL, [E1], "2026-10-05", True)["exams"]["classes"]
+    blob = json.dumps(d) + json.dumps(PB.listing(_PUB, [E1], date(2026, 10, 1), False, cal=F.CAL))
+    for w in ("Ms Aisha Rahman", "Ms Grace Yeo", "Mr Hafiz Rahman", "Bus marshal"):
+        assert w not in blob, w
+    r = PB.listing(_PUB, [E1], date(2026, 10, 1), False, cal=F.CAL)["schedules"][0]
+    assert set(r) == {"id", "name", "kind", "start", "end", "classes", "where", "days"}, set(r)
+    out = PB.listing(_PUB, [E1], date(2026, 10, 1), True, cal=F.CAL)
+    f = out["schedules"][0]
+    assert f["in_charge"] == "Ms Aisha Rahman" and f["going"] == _ev()["going"], f
+    assert f["duties"] == [dict(duty="Bus marshal", who="Mr Hafiz Rahman", time="07:45")], f["duties"]
+    assert f["days"] == [dict(date="2026-10-05", start="07:40", end="10:40")], f["days"]
+    assert out["banner"] == "Sec 3 Learning Journey: Mon 5 Oct.", out["banner"]
+
+@t
+def event_and_exam_on_one_date():
+    e = PB.day(_PUB, F.CAL, [A1, E1], "2026-10-05", True)["exams"]
+    assert [(x["start"], x["label"]) for x in e["classes"]["3A"]] == [
+        ("07:40", "Sec 3 Learning Journey"), ("07:50", "Sec 3 English Paper 1"), ("10:00", "Sec 3 Pure Chemistry Paper 1")], e["classes"]["3A"]
+    assert [(x["start"], x["role"]) for x in e["teachers"]["Ms Aisha Rahman"]] == [("07:35", "Invigilate"), ("07:40", "At event")], e["teachers"]["Ms Aisha Rahman"]
+    assert e["banner"] == "Sec 3 End-of-Year Exam · Sec 3 Learning Journey", e["banner"]
+    assert 7 not in e["stopped"]
+
+@t
+def my_event_duties_and_timetable():
+    d = date(2026, 10, 1)
+    out = PB.my_duties(_PUB, F.CAL, [E1], "Mr Hafiz Rahman", d)
+    assert out == dict(schedules=[dict(id=E1["id"], name="Sec 3 Learning Journey", kind="event", where="Off site (museum)", in_charge="Ms Aisha Rahman",
+                                       minutes=180, duties=[dict(date="2026-10-05", start="07:40", end="10:40", duty="Bus marshal 07:45")])], lessons=[]), out
+    g = PB.my_duties(_PUB, F.CAL, [E1], "Ms Grace Yeo", d)
+    assert g["lessons"] == [dict(date="2026-10-05", start="09:40", end="10:40", classes=["3A", "3B"], subject="Combined Science")], g["lessons"]
+    b = PB.my_duties(_PUB, F.CAL, [E1], "Mr Ben Ong", d)
+    assert b["schedules"] == [] and [(x["start"], x["end"], x["subject"]) for x in b["lessons"]] == [("09:40", "10:40", "Pure Chemistry")], b["lessons"]
+    ev = dict(id=E1["id"], name="Sec 3 Learning Journey", kind="event", where="Off site (museum)", papers=[],
+              days=[dict(date="2026-10-05", start="07:40", end="10:40", note="then lessons from 10:40")])
+    assert PB.my_exams(_PUB, F.CAL, [E1], "3A-07", d)["schedules"] == [ev]
+    assert PB.my_exams(_PUB, F.CAL, [E1], "4A-01", d)["schedules"] == []
+    both = PB.my_exams(_PUB, F.CAL, [A1, E1], "3A-07", d)["schedules"]
+    assert [x["name"] for x in both] == ["Sec 3 End-of-Year Exam", "Sec 3 Learning Journey"] and both[0]["kind"] == "exam" and both[1] == ev, both
+
+@t
+def event_routes_on_the_main_site():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _approved_event(a, c); id = e["id"]
+        with _today(date(2026, 10, 1)):
+            r = as_role("student").get("/api/day?date=2026-10-05"); assert r.status_code == 200, r.data
+            it = r.get_json()["exams"]["classes"]["3A"][0]
+            assert set(it) == _EVK and it["kind"] == "event", it
+            assert r.get_json()["exams"]["teachers"] == {}
+            for n in ("Ms Aisha Rahman", "Ms Chloe Tan", "Mr Hafiz Rahman", "Bus marshal"):
+                assert n not in r.get_data(as_text=True), n
+            s = [x for x in as_role("student").get("/api/published/exams").get_json()["schedules"] if x["id"] == id][0]
+            assert "going" not in s and "in_charge" not in s, s
+            t_ = [x for x in as_role("teacher").get("/api/published/exams").get_json()["schedules"] if x["id"] == id][0]
+            assert t_["going"] == ["Ms Aisha Rahman", "Ms Chloe Tan", "Mr Hafiz Rahman"], t_["going"]
+            assert c.get(f"/api/published/exams/{id}/print/seating.pdf").status_code == 404
+            md = as_role("staff", who="Mr Hafiz Rahman").get("/api/exams/my-duties").get_json()
+            assert [x["id"] for x in md["schedules"]] == [id] and md["schedules"][0]["kind"] == "event", md
+            me = as_role("personal", sid="3A-07").get("/api/me/exams").get_json()
+            assert [x["id"] for x in me["schedules"]] == [id] and me["schedules"][0]["days"][0]["date"] == "2026-10-05", me
+
+@t
+def event_cannot_be_forged_or_decided_by_its_teacher():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _event(a); id = e["id"]
+        e["kind"] = "exam"
+        assert a.put("/api/events/" + id, json=e).status_code == 200
+        assert SC.load(id)["kind"] == "event"
+        a.post(f"/api/events/{id}/fill", json=dict(way="form teachers"))
+        assert a.post(f"/api/events/{id}/send").status_code == 200
+        assert a.post(f"/api/events/{id}/send-back").status_code != 200 and SC.load(id)["status"] == "waiting", SC.load(id)["status"]
+        assert c.post(f"/api/events/{id}/approve").status_code == 200
+        assert a.post(f"/api/events/{id}/withdraw").status_code != 200 and SC.load(id)["status"] == "approved"
+
+def _rain_pub(rain):
+    import copy
+    p = copy.deepcopy(_PUB)
+    next(l for l in p["model"]["lessons"] if l["subject"] == "PE")["rain"] = rain
+    return p
+
+@t
+def several_rain_rooms_are_each_taken_or_used():
+    P = _rain_pub("Hall, LT2")
+    assert EV.flags(P, F.CAL, _ev(venues=["LT2"])) == ["Mon 5 Oct 09:00–09:40: PE with 4A uses LT2 in wet weather then."]
+    assert EV.flags(P, F.CAL, _ev(venues=["Hall"])) == ["Mon 5 Oct 09:00–09:40: PE with 4A uses Hall in wet weather then."]
+    Q = _rain_pub("3-01, LT2")
+    assert EV.freed(Q, F.CAL, _ev())[0]["rooms"] == ["3-02", "Lab 3-08"], EV.freed(Q, F.CAL, _ev())
+    assert EV.freed(_PUB, F.CAL, _ev())[0]["rooms"] == ["3-01", "3-02", "Lab 3-08"]
+
+@t
+def freed_rooms_leave_out_what_another_schedule_uses_then():
+    busy = SC.busies([dict(_ev(name="Sec 3 Talk", going=[], venues=["Lab 3-08"]), id="ev2", status="waiting")], _M)
+    assert EV.freed(_PUB, F.CAL, _ev(), busy)[0]["rooms"] == ["3-01", "3-02"], EV.freed(_PUB, F.CAL, _ev(), busy)
+    assert EV.freed(_PUB, F.CAL, _ev(), [])[0]["rooms"] == ["3-01", "3-02", "Lab 3-08"]
+
+@t
+def a_waiting_event_copy_that_adds_a_class_still_shows():
+    a = dict(_ev(levels=["Sec 3"], classes=["3A"]), id="ev6", status="approved")
+    w = dict(_ev(levels=["Sec 3"], classes=["3A", "3B"]), id="ev6", status="waiting")
+    got = [b for b in SC.busies([a, w], _M) if b["room"] == ""]
+    assert [(b["status"], b["classes"]) for b in got] == [("approved", ["3A"]), ("waiting", ["3A", "3B"])], got
+
+@t
+def event_text_limits_and_wording():
+    _ev_bad("Where can be at most 120 characters.", where="x" * 121)
+    _ev_bad("A duty can be at most 120 characters and its time at most 60.", duties=[dict(duty="x", who="", time="t" * 61)])
+    SC._check(_ev(where="x" * 120, duties=[dict(duty="d" * 120, who="", time="t" * 60)]), _PUB)
+    assert SC.EVENT_WRONG == "Check the event and try again." and SC.WRONG == "Check the exam and try again."
+
+@t
+def a_multi_date_event_lists_lessons_in_time_order_and_per_date_busies():
+    import copy
+    P = copy.deepcopy(_PUB)
+    P["model"]["lessons"].insert(0, dict(P["model"]["lessons"][7], id=50, p=6, n=1, subject="Art", room="4-01"))   # Ms Grace Yeo, later than her Literature
+    day = dict(levels=None, whole=False, **{"from": "07:40", "to": "10:40"})
+    e = _ev(end="2026-10-06", going=["Ms Grace Yeo"], days={"2026-10-05": day, "2026-10-06": dict(day)})
+    got = EV.going(P, F.CAL, e, [])[0]["text"]
+    assert got == "teaches 4A Literature 08:40–09:00 (Mon 5 Oct); teaches 4A Art 09:40–10:00 (Mon 5 Oct) → backup", got
+    busy = SC.event_busy(dict(e, id="evm", status="approved"), _M)
+    assert sorted({b["date"] for b in busy}) == ["2026-10-05", "2026-10-06"], busy
+    assert [d["date"] for d in EV.on_dates(_PUB, F.CAL, e)] == ["2026-10-05", "2026-10-06"]
+
+@t
+def a_fill_that_adds_no_one_leaves_a_sent_event_unchanged():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _event(a); id = e["id"]
+        assert a.post(f"/api/events/{id}/fill", json=dict(way="form teachers")).status_code == 200
+        assert a.post(f"/api/events/{id}/send").status_code == 200
+        r = a.post(f"/api/events/{id}/fill", json=dict(way="department", dept="Nobody here")); assert r.status_code == 200, r.data
+        assert r.get_json()["going_by"] == "form teachers" and SC.load(id)["going_by"] == "form teachers"
+        assert a.get(f"/api/events/{id}/review").get_json()["changed"] is False
+        assert c.post(f"/api/events/{id}/approve").status_code == 200, "Approve is not refused after an empty fill"
+
+@t
+def a_committee_put_cannot_change_in_charge():
+    _setup()
+    with published(_PUB):
+        a, c = staff("Ms Aisha Rahman"), committee()
+        e = _event(a); id = e["id"]
+        for who_, cl in (("committee", c), ("teacher", a)):
+            e2 = dict(e, in_charge="Mr Ben Ong", status="approved")
+            assert cl.put("/api/events/" + id, json=e2).status_code in (200, 403)
+            assert SC.load(id)["in_charge"] == "Ms Aisha Rahman" and SC.load(id)["status"] == "draft", who_
+
+@t
+def the_exams_pages_carry_the_event_words():
+    js = _page("exams.js")
+    for words in ("Exams, tests and events", "+ New event", "New event", "Teacher in charge", "Venues in school",
+                  "Venues ticked here are taken: exams and other events cannot use them then.", "Who goes", "Form teachers of ",
+                  "Teachers who'd teach them then", "A department", "Pick people", " off the list", "+ Add a duty", "Clashes",
+                  "Lessons that use a venue taken", "Venues freed: ", "My exam and event duties", "You have no exam or event duties on the main site.",
+                  "You are not in charge of an event yet.", "People going: ", " goes in their place on the main site now. The timetable committee sees it under Done without approval.",
+                  "/api/events"):
+        assert words in js, words
+    assert "/api/events" in _page("app.js"), "the committee page counts the events waiting too"
+    assert "ev-kind" in _page("exams.html"), "the Event chip has a colour"
 
 print(f"{COUNT} exams tests passed")

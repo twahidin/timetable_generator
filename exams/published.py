@@ -14,6 +14,39 @@ from exams import seating as _seating
 
 PRINTS = ("seating", "roster-day", "roster-teacher", "timetable")
 SEP = " · "
+EVENT_ROLE = "At event"
+
+
+def _event(s):
+    return s.get("kind") == "event"
+
+
+def _place(s):
+    return str(s.get("where") or "").strip() or ", ".join(s.get("venues") or [])
+
+
+def _ev_dates(pub, cal, s):
+    """[(date, {class: (start, end)})] of an event: the school dates (every date when cal is None) with classes on"""
+    model = pub["model"]
+    bnds = _days.bounds(model)
+    out = []
+    d, last = _days._date(s["start"]), _days._date(s["end"])
+    while d <= last:
+        iso = d.isoformat()
+        if cal is None or _days.school_day(cal, model["days"], d) is not None:
+            win = _days._windows(s, iso, model, bnds)
+            if win:
+                out.append((iso, win))
+        d += _datetime.timedelta(days=1)
+    return out
+
+
+def _duty_text(s, name):
+    return ", ".join(("%s %s" % (d.get("duty") or "", d.get("time") or "")).strip() for d in s.get("duties") or [] if d.get("who") == name)
+
+
+def _span(a, b, bnds):
+    return dict(p=pos(bnds, a), n=round(pos(bnds, b) - pos(bnds, a), 3))
 
 
 def pos(bnds, m) -> float:
@@ -69,6 +102,13 @@ def _class_items(pub, s, date, bnds):
     access = {a["student"]: a for a in s.get("access") or [] if isinstance(a, dict) and a.get("student")}
     held = _papers_at(s)
     out = {}
+    if _event(s):
+        bnds = _days.bounds(model)
+        a, b = None, None
+        for c, (a, b) in _days._windows(s, date, model, bnds).items():
+            out.setdefault(c, []).append(dict(start=_hm(a), end=_hm(b), label=s["name"], room=_place(s), seat_note="", exam=s["name"], kind="event",
+                                              **_span(a, b, bnds)))
+        return out
     for sit in _seating.sittings(s):
         if sit["date"] != date:
             continue
@@ -127,6 +167,16 @@ def day(pub, cal, scheds, date, full) -> dict:
             classes.setdefault(c, []).extend(items)
         if not full:
             continue
+        if _event(s):
+            win = next(iter(_days._windows(s, date, model, bnds).values()), None)
+            if win:
+                span = dict(start=_hm(win[0]), end=_hm(win[1]), label=s["name"])
+                pn = _span(win[0], win[1], bnds)
+                for n in s.get("going") or []:
+                    teachers.setdefault(n, []).append(dict(span, room=_place(s), role=EVENT_ROLE, duty=_duty_text(s, n), exam=s["name"], kind="event", **pn))
+                for v in s.get("venues") or []:
+                    rooms.setdefault(v, []).append(dict(span, exam=s["name"], kind="event", **pn))
+            continue
         for d, ps in _duties_on(s, date):
             lab = _label(ps)
             span = dict(start=_hm(d["start"]), end=_hm(d["end"]), label=lab)
@@ -151,10 +201,25 @@ def _banner(shown, today):
     return " ".join(parts) or None
 
 
-def listing(pub, scheds, today, full) -> dict:
+def _event_row(pub, cal, s, full):
+    model = pub["model"]
+    dates = _ev_dates(pub, cal, s)
+    seen = {c for _, win in dates for c in win}
+    bnds = _days.bounds(model)
+    row = dict(id=s["id"], name=s["name"], kind="event", start=s["start"], end=s["end"], classes=[c["name"] for c in model.get("classes") or [] if c["name"] in seen],
+               where=_place(s), days=[dict(date=iso, start=_hm(min(w[0] for w in win.values())), end=_hm(max(w[1] for w in win.values()))) for iso, win in dates])
+    if full:
+        row.update(in_charge=s.get("in_charge"), going=list(s.get("going") or []), duties=[dict(duty=d.get("duty"), who=d.get("who"), time=d.get("time")) for d in s.get("duties") or []])
+    return row
+
+
+def listing(pub, scheds, today, full, cal=None) -> dict:
     shown = _active(scheds, today)
     rows = []
     for s in shown:
+        if _event(s):
+            rows.append(_event_row(pub, cal, s, full))
+            continue
         levels = {}
         for p in sorted(s.get("papers") or [], key=lambda p: (p.get("date") or "", p.get("start") or "")):
             if p.get("who") in ("level", "groups") and p.get("date") and p.get("start"):
@@ -180,6 +245,13 @@ def my_duties(pub, cal, scheds, name, today) -> dict:
         while d0 <= d1:
             dates.add(d0.isoformat())
             d0 += _datetime.timedelta(days=1)
+        if _event(s):
+            if name in (s.get("going") or []):
+                spans = [(iso, min(w[0] for w in win.values()), max(w[1] for w in win.values())) for iso, win in _ev_dates(pub, cal, s)]
+                out.append(dict(id=s["id"], name=s["name"], kind="event", where=_place(s), in_charge=s.get("in_charge"),
+                                minutes=sum(b - a for _, a, b in spans),
+                                duties=[dict(date=iso, start=_hm(a), end=_hm(b), duty=_duty_text(s, name)) for iso, a, b in spans]))
+            continue
         mine = [(d, ps) for d, ps in _all_duties(s) if name in (d.get("names") or [])]
         if not mine:
             continue
@@ -191,7 +263,7 @@ def my_duties(pub, cal, scheds, name, today) -> dict:
             rows.append(dict(date=d["date"], start=_hm(d["start"]), end=_hm(d["end"]), room=d["room"], label=_label(ps), students=len(seated),
                              others=[n for n in d.get("names") or [] if n != name], chief=chief if chief and chief != name else None,
                              role="Chief invigilator" if chief == name else "Invigilate"))
-        out.append(dict(id=s["id"], name=s["name"], scripts=s.get("scripts") or "", minutes=sum(d["end"] - d["start"] for d, _ in mine), duties=rows))
+        out.append(dict(id=s["id"], name=s["name"], kind=s.get("kind"), scripts=s.get("scripts") or "", minutes=sum(d["end"] - d["start"] for d, _ in mine), duties=rows))
     lessons = []
     for iso in sorted(dates):
         for r in _days.merged_view(pub, cal, scheds, iso)["lessons"]:
@@ -205,7 +277,15 @@ def my_exams(pub, cal, scheds, sid, today) -> dict:
     model = pub["model"]
     bnds = _days.bounds(model)
     out = []
+    cls = next((x.get("cls") for x in model.get("students") or [] if x["id"] == sid), None)
     for s in _active(scheds, today):
+        if _event(s):
+            days = [dict(date=iso, start=_hm(win[cls][0]), end=_hm(win[cls][1]),
+                         note="then lessons from %s" % _hm(win[cls][1]) if bnds and win[cls][1] < bnds[-1][1] else "")
+                    for iso, win in _ev_dates(pub, cal, s) if cls in win]
+            if days:
+                out.append(dict(id=s["id"], name=s["name"], kind="event", where=_place(s), papers=[], days=days))
+            continue
         access = {a["student"]: a for a in s.get("access") or [] if isinstance(a, dict) and a.get("student")}
         mine = [p for p in s.get("papers") or [] if p.get("date") and p.get("start") and sid in _papers.who_sits(p, model)]
         if not mine:
@@ -229,5 +309,5 @@ def my_exams(pub, cal, scheds, sid, today) -> dict:
             rows.append(dict(date=p["date"], report=rep if first[p["date"]] == i and bnds and w0 == bnds[0][0] else None,
                              start=_hm(_days.minutes(p["start"])), end=_hm(_papers.ends(p, sid, access)), label=_papers.label(p), room=room,
                              seat=seat, note="then lessons from %s" % _hm(w1) if last[p["date"]] == i and bnds and w1 < bnds[-1][1] else ""))
-        out.append(dict(id=s["id"], name=s["name"], papers=rows))
+        out.append(dict(id=s["id"], name=s["name"], kind=s.get("kind"), papers=rows))
     return dict(schedules=out)

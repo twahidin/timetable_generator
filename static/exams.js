@@ -9,17 +9,18 @@
   const NO_CALENDAR = "Set the school calendar in Relief settings first: exams need it to know which timetable day a date is.";
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const KINDS = { exam: "Exam", test: "Common test" };
+  const KINDS = { exam: "Exam", test: "Common test", event: "Event" };
   const NO_STUDENTS_YET = "The published timetable has no students yet: add them on the Students step and publish again to check clashes and seat students.";
   const S = {
     id: null, list: null, sched: null, view: null, levels: [], classes: [],
+    base: "/api/exams", tabs: null, evl: null, me0: null, ne: null, ev: { dept: "", pick: "" },
     tab: "when", timer: null, chain: Promise.resolve(), dirty: false, rev: 0, saving: false, msg: "", bad: false,
     nf: null, mk: null, duties: null, accCls: "", note: "",
     busy: false, sit: "", room: "", mvCls: "", mvStu: "", duty: null, who: null, whoTok: 0, open: {},
     me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, abMsg: "", sbNote: "", aw: { duty: null, away: "", who: "", data: null, err: "", say: "", tok: 0 }
   };
   /* the tabs: tabs 4 to 7 are added to this list; each draw() gives the html of its tab body */
-  const TABS = [
+  const EX_TABS = [
     { key: "when", name: "What and when", draw: () => tabWhen() },
     { key: "papers", name: "Papers", draw: () => tabPapers() },
     { key: "access", name: "Access arrangements", draw: () => tabAccess() },
@@ -29,6 +30,15 @@
     { key: "lessons", name: "Lessons", draw: () => tabLessons() },
     { key: "approval", name: "Approval", draw: () => tabApproval() }
   ];
+  /* an event has four tabs; the approval tab is the exams' own */
+  const EV_TABS = [
+    { key: "ewhen", name: "What and when", draw: () => tabEvWhen() },
+    { key: "egoes", name: "Who goes", draw: () => tabEvGoes() },
+    { key: "elessons", name: "Lessons", draw: () => tabEvLessons() },
+    { key: "approval", name: "Approval", draw: () => tabApproval() }
+  ];
+  S.tabs = EX_TABS;
+  const isEv = () => S.base === "/api/events";
 
   /* ---------------------------------------------------------------- small helpers */
   const at = (k, a, b) => `data-k="${k}"${a !== undefined ? ` data-a="${esc(a)}"` : ""}${b !== undefined ? ` data-b="${esc(b)}"` : ""} data-f="${esc([k, a, b].filter(x => x !== undefined).join("|"))}"`;
@@ -100,9 +110,13 @@
   }
   const sentOn = at => at ? fmtDate(String(at).slice(0, 10)) : "";
 
+  /* who on an approved schedule is away in relief: the server's texts, as notices */
+  const awayNotes = list => (list || []).length ? `<div class="notice" role="status" aria-label="Away (from relief)">${list.map(t => `<div>${esc(t)}</div>`).join("")}</div>` : "";
+
   /* the lines under a schedule's name in the list */
   function statusLines(s) {
     const out = [];
+    (s.away || []).forEach(t => out.push(`<b>${esc(t)}</b>`));
     if (s.note && s.status === "approved") out.push(`Changes sent back: “${esc(s.note)}”`);
     else if (s.note && (s.status || "draft") === "draft") out.push(`Sent back: “${esc(s.note)}”`);
     if (s.status === "waiting" || s.status === "changes") out.push(`sent by ${esc(s.sent_by || "")}, ${esc(sentOn(s.sent_at))}`);
@@ -111,17 +125,62 @@
     return out.map(x => `<br><span class="muted small">${x}</span>`).join("");
   }
 
-  function drawList() {
-    const L = S.list, nf = S.nf;
-    const rows = L.schedules.map(s => `<div class="card scard"><div><span class="chip ${s.kind === "test" ? "test-kind" : "ex-kind"}">${esc(KINDS[s.kind] || s.kind)}</span>
+  const dates = s => s.start === s.end ? esc(fmtDate(s.start)) : `${esc(fmtDate(s.start))} to ${esc(fmtDate(s.end))}`;
+
+  function examCard(s) {
+    return `<div class="card scard"><div><span class="chip ${s.kind === "test" ? "test-kind" : "ex-kind"}">${esc(KINDS[s.kind] || s.kind)}</span>
       <a class="name" href="/exams/${esc(s.id)}">${esc(s.name)}</a><br>
       <span class="muted small">${esc(fmtDate(s.start))} to ${esc(fmtDate(s.end))}${(s.levels || []).length ? " · " + esc(s.levels.join(", ")) : ""} · ${s.papers} ${s.papers === 1 ? "paper" : "papers"}</span>${statusLines(s)}</div>
-      <div><span class="chip ${chipClass(s)}">${esc(s.label || "Draft")}</span></div></div>`).join("");
-    const cal = L.calendar_ok ? "" : `<p class="notice">${esc(NO_CALENDAR)} <a href="/relief/settings">Relief settings</a></p>`;
-    $("#main").innerHTML = `<div class="head"><h1>Exams and tests</h1>
-      <div class="row"><button type="button" class="primary" data-act="newOpen" ${L.calendar_ok && !nf.open ? "" : "disabled"}>+ New exam or test</button></div></div>
-      ${cal}${nf.open ? newForm() : ""}${dutiesCard()}
-      ${rows || `<div class="card"><p class="muted">No exams or tests yet.</p></div>`}`;
+      <div><span class="chip ${chipClass(s)}">${esc(s.label || "Draft")}</span></div></div>`;
+  }
+
+  function eventCard(s) {
+    const who = (s.levels || []).length ? s.levels.join(", ") : (s.classes || []).join(", ");
+    const line = [dates(s), esc(who), esc(s.where || ""), `${s.n_going} going`].filter(Boolean).join(" · ");
+    return `<div class="card scard"><div><span class="chip ev-kind">Event</span>
+      <a class="name" href="/events/${esc(s.id)}">${esc(s.name)}</a><span class="muted small"> · teacher in charge ${esc(s.in_charge || "")}</span><br>
+      <span class="muted small">${line}</span>${statusLines(s)}</div>
+      <div><span class="chip ${chipClass(s)}">${esc(s.label || "Draft")}</span></div></div>`;
+  }
+
+  function drawList() {
+    const L = S.list, E = S.evl, nf = S.nf, ne = S.ne, use = !!L;
+    const all = (L ? L.schedules.map(x => [x, examCard]) : []).concat(E.schedules.map(x => [x, eventCard]));
+    all.sort((x, y) => String(y[0].saved_at || "9").localeCompare(String(x[0].saved_at || "9")));
+    const rows = all.map(([x, f]) => f(x)).join("");
+    const calOk = (!L || L.calendar_ok) && E.calendar_ok;
+    const cal = calOk ? "" : `<p class="notice">${esc(NO_CALENDAR)} <a href="/relief/settings">Relief settings</a></p>`;
+    $("#main").innerHTML = `<div class="head"><h1>${use ? "Exams, tests and events" : "Exams and events"}</h1>
+      <div class="row">${use ? `<button type="button" class="primary" data-act="newOpen" ${L.calendar_ok && !nf.open ? "" : "disabled"}>+ New exam or test</button>` : ""}<button type="button" ${use ? "" : `class="primary"`} data-act="evOpen" ${E.calendar_ok && !ne.open ? "" : "disabled"}>+ New event</button></div></div>
+      ${cal}${nf.open ? newForm() : ""}${ne.open ? newEvForm() : ""}${dutiesCard()}
+      ${rows || `<div class="card"><p class="muted">${use ? "No exams, tests or events yet." : "You are not in charge of an event yet."}</p></div>`}${use ? "" : `<p><a href="${esc(S.home || "/home")}">Back to Home</a></p>`}`;
+  }
+
+  function blankEv() { return { open: false, name: "", levels: [], classes: [], start: "", end: "", in_charge: "" }; }
+
+  function newEvForm() {
+    const ne = S.ne, E = S.evl;
+    const lv = E.levels.map(l => `<label class="tick"><input type="checkbox" data-ne="level" data-v="${esc(l)}" ${ne.levels.includes(l) ? "checked" : ""}> ${esc(l)}</label>`).join("");
+    const cl = E.classes.map(([c, l]) => `<label class="tick" title="${esc(l)}"><input type="checkbox" data-ne="class" data-v="${esc(c)}" ${ne.classes.includes(c) ? "checked" : ""}> ${esc(c)}</label>`).join("");
+    const ppl = (E.people || []).length ? `<div class="line"><b>Teacher in charge</b><select data-ne="in_charge" aria-label="Teacher in charge"><option value="">Choose a teacher</option>${E.people.map(n => opt(n, ne.in_charge)).join("")}</select></div>` : "";
+    return `<div class="card form"><h2>New event</h2>
+      <div class="line"><b>Name</b><input type="text" data-ne="name" value="${esc(ne.name)}" maxlength="120" placeholder="e.g. Sec 2 Learning Journey" aria-label="Name"></div>
+      <div class="line"><b>Who</b><span class="chiprow">${lv || `<span class="muted small">The published timetable has no levels.</span>`}</span></div>
+      <div class="line"><b></b><details class="pickc" ${ne.classes.length ? "open" : ""}><summary>Or pick classes</summary><div class="classes">${cl}</div></details></div>
+      <div class="line"><b>Dates</b><input type="date" data-ne="start" value="${esc(ne.start)}" aria-label="First day"> to <input type="date" data-ne="end" value="${esc(ne.end)}" aria-label="Last day"></div>
+      ${ppl}
+      <div class="row"><button type="button" class="primary" data-act="evSave">Make it</button><button type="button" data-act="evCancel">Cancel</button><span class="msg bad" id="neMsg" role="status"></span></div></div>`;
+  }
+
+  async function evSave() {
+    const ne = S.ne, msg = $("#neMsg"), btn = $('[data-act="evSave"]');
+    const say = t => { if (msg) msg.textContent = t; };
+    say(""); if (btn) btn.disabled = true;
+    const body = { name: ne.name, levels: ne.levels, classes: ne.classes, start: ne.start, end: ne.end };
+    if ((S.evl.people || []).length) body.in_charge = ne.in_charge;
+    const r = await api("POST", "/api/events", body);
+    if (!r.ok) { if (btn) btn.disabled = false; if (r.status !== 403) say(r.j.error || "That did not work. Try again."); return; }
+    location.href = "/events/" + r.j.id;
   }
 
   function newForm() {
@@ -159,6 +218,12 @@
   const nTimes = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
   function dutyBlock(sc) {
+    if (sc.kind === "event") {
+      const er = sc.duties.map(d => `<tr><td>${esc(fmtDate(d.date))} · ${esc(d.start)}–${esc(d.end)}</td><td>At the event${sc.where ? " · " + esc(sc.where) : ""}</td>
+        <td class="small">${d.duty ? "duty: " + esc(d.duty) : ""}</td></tr>`).join("");
+      return `<h3>${esc(sc.name)}</h3><div class="tablewrap"><table><tbody>${er}</tbody></table></div>
+        <p class="muted small">teacher in charge: ${esc(sc.in_charge || "")}</p>`;
+    }
     const rows = sc.duties.map(d => `<tr><td>${esc(fmtDate(d.date))} · ${esc(d.start)}–${esc(d.end)}</td>
       <td>${esc(d.role)} ${esc(d.room)} · ${esc(d.label)} · ${nTimes(d.students, "student", "students")}</td>
       <td class="small">${[d.others.length ? "with " + esc(d.others.join(", ")) : "", d.chief ? "chief: " + esc(d.chief) : "", sc.scripts ? "scripts to " + esc(sc.scripts) : ""].filter(Boolean).join(" · ")}</td></tr>`).join("");
@@ -172,7 +237,7 @@
     const D = S.duties; if (!D) return "";
     if (!D.schedules.length && !(D.lessons || []).length && !alone) return "";
     const lessons = (D.lessons || []).length ? `<p class="small">Lessons that don't happen: ${D.lessons.map(l => `${esc(fmtDate(l.date))} ${esc(l.start)} ${esc((l.classes || []).join(", "))} ${esc(l.subject)}`).join(" · ")}</p>` : "";
-    return `<div class="card"><h2>My exam duties</h2>${D.schedules.map(dutyBlock).join("") || `<p class="muted">You have no exam duties on the main site.</p>`}${lessons}</div>`;
+    return `<div class="card"><h2>My exam and event duties</h2>${D.schedules.map(dutyBlock).join("") || `<p class="muted">You have no exam or event duties on the main site.</p>`}${lessons}</div>`;
   }
 
   async function startList() {
@@ -182,21 +247,22 @@
     links(me.j.can_use);
     const du = await api("GET", "/api/exams/my-duties");
     S.duties = du.ok ? du.j : null;
-    if (!me.j.can_use) {
-      const home = me.j.home || "/home";   /* a person's way back is their home page */
-      if (!S.duties) { fail(du.j.error || "Something went wrong.", home); return; }
-      $("#main").innerHTML = `<div class="head"><h1>My exam duties</h1></div>${dutiesCard(true)}<p><a href="${esc(home)}">Back to Home</a></p>`;
-      return;
+    S.home = me.j.home || "/home";   /* a person's way back is their home page */
+    const ev = await api("GET", "/api/events");
+    if (ev.status === 401 || ev.status === 403) return;
+    if (!ev.ok) { fail(ev.j.error || "Something went wrong.", me.j.can_use ? "" : S.home); return; }
+    S.evl = ev.j; S.ne = blankEv(); S.nf = blankForm(); S.list = null;
+    if (me.j.can_use) {
+      const r = await api("GET", "/api/exams");
+      if (r.status === 401 || r.status === 403) return;
+      if (!r.ok) { fail(r.j.error || "Something went wrong."); return; }
+      S.list = r.j;
     }
-    const r = await api("GET", "/api/exams");
-    if (r.status === 401 || r.status === 403) return;
-    if (!r.ok) { fail(r.j.error || "Something went wrong."); return; }
-    S.list = r.j; S.nf = blankForm();
     drawList();
   }
 
   /* ================================================================ one schedule */
-  const tab = () => TABS.find(t => t.key === S.tab) || TABS[0];
+  const tab = () => S.tabs.find(t => t.key === S.tab) || S.tabs[0];
 
   function saveInner() {
     return `${S.dirty ? `<span class="dirty">Changes not saved.</span>` : ""}${S.msg ? `<span class="msg ${S.bad ? "bad" : "ok"}" role="status">${esc(S.msg)}</span>` : ""}`;
@@ -206,10 +272,10 @@
   function render() {
     const s = S.sched;
     $("#main").innerHTML = `<div class="head"><div><h1>${esc(s.name)} <span class="chip ${chipClass({ label: S.label })}" id="statchip">${esc(S.label)}</span></h1>
-      <div class="muted small"><a href="/exams">All exams</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}</div></div>
+      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? " · teacher in charge " + esc(s.in_charge || "") : ""}</div></div>
       <div class="savebar" id="saveline">${saveInner()}</div></div>
       ${onSite() ? `<p class="notice">On the main site. Changes you make here wait for the timetable committee: send them from the Approval tab.</p>` : ""}
-      <div class="xtabs" role="tablist">${TABS.map(t => `<button type="button" role="tab" class="${t.key === S.tab ? "on" : ""}" aria-selected="${t.key === S.tab}" data-act="tab" data-a="${t.key}">${esc(t.name)}</button>`).join("")}</div>
+      <div class="xtabs" role="tablist">${S.tabs.map(t => `<button type="button" role="tab" class="${t.key === S.tab ? "on" : ""}" aria-selected="${t.key === S.tab}" data-act="tab" data-a="${t.key}">${esc(t.name)}</button>`).join("")}</div>
       <div id="tabbody">${tab().draw()}</div><input type="file" id="paperFile" accept=".xlsx" hidden>`;
   }
 
@@ -246,7 +312,7 @@
     if (!S.dirty) return true;
     const rev = S.rev;
     S.saving = true;
-    const r = await api("PUT", "/api/exams/" + S.id, S.sched);
+    const r = await api("PUT", `${S.base}/${S.id}`, S.sched);
     S.saving = false;
     if (r.status === 401 || r.status === 403) return false;
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "Nothing was saved. Try again."; paintSave(); return false; }
@@ -258,7 +324,7 @@
   }
 
   async function refreshView() {
-    const r = await api("GET", `/api/exams/${S.id}/view`);
+    const r = await api("GET", `${S.base}/${S.id}/view`);
     if (!r.ok) return;
     S.view = r.j;
     if (S.sched) paint();
@@ -778,7 +844,7 @@
     const names = groups.flatMap(([k]) => (G[k] || []).map(c => c.name));
     const who = names.includes(A.who) ? A.who : "";
     const sel = groups.map(([k, title]) => (G[k] || []).length ? `<optgroup label="${esc(title)}">${G[k].map(c => opt(c.name, who, `${c.name} · ${c.minutes} min so far`)).join("")}</optgroup>` : "").join("");
-    return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">This changes the duty on the main site now, without a new approval.</p>
+    return `${awayNotes((S.rv || {}).away)}<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">This changes the duty on the main site now, without a new approval.</p>
       <div class="line"><b>Who is away</b><select data-aw="away" aria-label="Who is away">${d.names.map(n => opt(n, A.away)).join("")}</select></div>
       <div class="line"><b>Who takes it</b><select data-aw="who" aria-label="Who takes it"><option value="">Choose a name</option>${sel}</select></div>
       <div class="row"><button type="button" data-act="replace" ${S.busy ? "disabled" : ""}>Replace now</button></div>${say}</div>`;
@@ -819,10 +885,23 @@
   }
 
   /* ---------------------------------------------------------------- tab 7: lessons */
-  function lessonList(title, list, cls, extra) {
+  /* where one backup stands: the sentence for its state, and whether "Handled ourselves" can be ticked (not once it is stopped, past, or sent or handled by another schedule) */
+  const BACKUP_STATE = {
+    later: () => "Goes to the relief team when approved", sent: () => "Sent to the relief team", relief: l => `Relief: ${l.relief}`,
+    handled: () => "Handled ourselves", stopped: l => `Not happening: ${l.stopped}`, past: () => "In the past", elsewhere: () => "Sent by another schedule",
+    handled_elsewhere: () => "Handled by another schedule"
+  };
+  const CAN_HANDLE = { later: 1, sent: 1, relief: 1, handled: 1 };
+  function backupState(l) {
+    const f = BACKUP_STATE[l.state]; if (!f) return "";
+    const box = CAN_HANDLE[l.state] ? ` <label class="tick"><input type="checkbox" data-h="1" data-f="h:${esc(l.teacher)}|${esc(l.key)}" data-t="${esc(l.teacher)}" data-k="${esc(l.key)}" ${((S.hpend || {})[l.teacher + "|" + l.key] ?? l.state === "handled") ? "checked" : ""}> Handled ourselves</label>` : "";
+    return `<div class="small muted">${esc(f(l))}${box}</div>`;
+  }
+
+  function lessonList(title, list, cls, extra, state) {
     const by = {}; list.forEach(l => { (by[l.date] = by[l.date] || []).push(l); });
     const days = Object.keys(by).sort().map(date => `<details data-d="${esc(title + date)}" ${S.open[title + date] ? "open" : ""}><summary>${esc(fmtDate(date))} · ${by[date].length}</summary>
-      ${by[date].map(l => `<div class="small">${esc(l.start)}–${esc(l.end)} · ${esc((l.classes || []).join(", "))} ${esc(l.subject)}${(l.teachers || []).length ? " · " + esc(l.teachers.join(", ")) : ""}${l.note ? ` <span class="muted">· ${esc(l.note)}</span>` : ""}</div>`).join("")}</details>`).join("");
+      ${by[date].map(l => `<div class="small">${esc(l.start)}–${esc(l.end)} · ${esc((l.classes || []).join(", "))} ${esc(l.subject)}${(l.teachers || []).length ? " · " + esc(l.teachers.join(", ")) : ""}${l.note ? ` <span class="muted">· ${esc(l.note)}</span>` : ""}</div>${state ? state(l) : ""}`).join("")}</details>`).join("");
     return `<div class="panel ${cls}"><h3>${esc(title)} · ${list.length} ${list.length === 1 ? "lesson" : "lessons"}</h3>${days || `<div class="small muted">None.</div>`}${extra || ""}</div>`;
   }
 
@@ -831,13 +910,131 @@
     if (!L) return `<div class="card"><p class="muted">Loading…</p></div>`;
     return `<div class="grid3">
       ${lessonList("No relief needed", L.none || [], "okbg")}
-      ${lessonList("Backup needed", L.backup || [], "ambg", `<p class="muted small" style="margin-top:10px">Sending backups to the relief team arrives in a later stage.</p>`)}
+      ${lessonList("Backup needed", L.backup || [], "ambg", `<p class="muted small" style="margin-top:10px">Backups go to the relief team as planned relief when the schedule is approved.</p>`, backupState)}
       ${lessonList("Runs as usual", L.runs || [], "")}</div>`;
+  }
+
+  /* ---------------------------------------------------------------- the event editor */
+  function tabEvWhen() {
+    const s = S.sched, V = S.view;
+    const lv = S.levels.map(l => `<label class="tick"><input type="checkbox" ${at("level", l)} ${s.levels.includes(l) ? "checked" : ""}> ${esc(l)}</label>`).join("");
+    const cl = S.classes.map(([c, l]) => `<label class="tick" title="${esc(l)}"><input type="checkbox" ${at("class", c)} ${s.classes.includes(c) ? "checked" : ""}> ${esc(c)}</label>`).join("");
+    const days = (V && V.summary.days) || [];
+    const rows = V ? days.map(dayRow).join("") : `<tr><td colspan="4" class="muted">Loading…</td></tr>`;
+    const rooms = ((V && V.rooms) || []).map(r => `<label class="tick"><input type="checkbox" ${at("venue", r)} ${(s.venues || []).includes(r) ? "checked" : ""}> ${esc(r)}</label>`).join("");
+    const bad = l => `<div><span class="flag">●</span> ${esc(l)}</div>`;
+    const clashes = V ? ((V.clashes || []).map(bad).join("") || `<div><span class="okc">✓</span> No clashes.</div>`) : `<p class="muted">Loading…</p>`;
+    const flags = V && (V.flags || []).length ? `<h3>Lessons that use a venue taken</h3>${V.flags.map(bad).join("")}` : "";
+    const cuts = V && (V.cuts || []).length ? V.cuts.map(bad).join("") : "";
+    return `<div class="card form"><div class="line"><b>What is it</b><span>Event</span></div>
+      <div class="line"><b>Name</b><input type="text" ${at("name")} value="${esc(s.name)}" maxlength="120" placeholder="e.g. Sec 2 Learning Journey" aria-label="Name"></div>
+      <div class="line"><b>Who</b><span class="chiprow">${lv}</span></div>
+      <div class="line"><b></b><details class="pickc" ${s.classes.length ? "open" : ""}><summary>Or pick classes</summary><div class="classes">${cl}</div></details></div>
+      <div class="line"><b>Dates</b><input type="date" ${at("start")} value="${esc(s.start)}" aria-label="First day"> to <input type="date" ${at("end")} value="${esc(s.end)}" aria-label="Last day"></div>
+      <div class="line"><b>Where</b><input type="text" ${at("where")} value="${esc(s.where || "")}" maxlength="120" placeholder="Off site (museum)" aria-label="Where"></div>
+      <div class="line"><b>Venues in school</b><span class="chiprow">${rooms || `<span class="muted small">Loading…</span>`}</span></div>
+      <p class="muted small">Venues ticked here are taken: exams and other events cannot use them then.</p></div>
+      <div class="card"><h2>Each day</h2><div class="tablewrap"><table class="daytable"><thead><tr><th>Date</th><th>Timetable day</th><th>Levels going</th><th>How much of the day</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="muted small">A level that is not going on a day keeps its full timetable that day. On a part day, lessons stop from the first time to the second and run as usual outside it.</p></div>
+      <div class="card"><h2>Clashes</h2>${clashes}${flags}${cuts ? `<h3>Where the time cuts a lesson</h3>${cuts}` : ""}</div>`;
+  }
+
+  const goingRows = () => (S.sched.going || []).map(n => {
+    const g = ((S.view && S.view.going) || []).find(x => x.name === n);
+    const text = g ? `<span class="${g.status === "free" ? "muted" : g.status === "backup" ? "amber" : "flag"} small">${esc(g.text)}</span>` : "";
+    return `<tr><td>${esc(n)}${g && g.tag ? ` · ${esc(g.tag)}` : ""}</td><td>${text}</td>
+      <td><button type="button" class="small danger" data-act="goDrop" data-a="${esc(n)}" title="Take ${esc(n)} off the list" aria-label="Take ${esc(n)} off the list">✕</button></td></tr>`;
+  }).join("");
+
+  function dutyEvRow(d, i) {
+    const names = S.sched.going || [];
+    const who = names.includes(d.who) || !d.who ? names : names.concat([d.who]);
+    return `<tr><td><input type="text" ${at("evDuty", i)} value="${esc(d.duty)}" maxlength="120" placeholder="e.g. Bus captain" aria-label="Duty"></td>
+      <td><select ${at("evWho", i)} aria-label="Who does the duty"><option value="">Choose a name</option>${who.map(n => opt(n, d.who)).join("")}</select></td>
+      <td><input type="text" ${at("evTime", i)} value="${esc(d.time)}" maxlength="60" placeholder="e.g. 07:30 at the gate" aria-label="Time"></td>
+      <td><button type="button" class="small danger" data-act="dutyDel" data-a="${i}" title="Take this duty off" aria-label="Take this duty off">✕</button></td></tr>`;
+  }
+
+  function awayEv() {
+    const ap = onSite() ? (S.sched.approved.going || []) : [];
+    if (!ap.length) return "";
+    const A = S.aw, G = A.data;
+    const say = A.say ? `<p class="msg ok" role="status">${esc(A.say)}</p>` : "";
+    if (A.err) return `<div class="card"><h2>Someone is away</h2><p class="msg bad">${esc(A.err)}</p>${say}</div>`;
+    if (!G) return `<div class="card"><h2>Someone is away</h2><p class="muted small">Loading…</p>${say}</div>`;
+    const groups = [["freed", "Freed by the event"], ["free", "Free then"]];
+    const names = groups.flatMap(([k]) => (G[k] || []).map(c => c.name));
+    const who = names.includes(A.who) ? A.who : "";
+    const sel = groups.map(([k, title]) => (G[k] || []).length ? `<optgroup label="${esc(title)}">${G[k].map(c => opt(c.name, who, `${c.name} · ${c.reason}`)).join("")}</optgroup>` : "").join("");
+    return `${awayNotes((S.rv || {}).away)}<div class="card"><h2>Someone is away</h2><p class="muted small">This changes who goes on the main site now, without a new approval.</p>
+      <div class="line"><b>Who is away</b><select data-aw="away" aria-label="Who is away">${ap.map(n => opt(n, A.away)).join("")}</select></div>
+      <div class="line"><b>Who takes it</b><select data-aw="who" aria-label="Who takes it"><option value="">Choose a name</option>${sel}</select></div>
+      <div class="row"><button type="button" data-act="evReplace" ${S.busy ? "disabled" : ""}>Replace now</button></div>${say}</div>`;
+  }
+
+  async function loadEvAway(keep) {
+    if (!onSite()) return;
+    const tok = ++S.aw.tok;
+    if (!keep) { S.aw.data = null; S.aw.err = ""; S.aw.say = ""; S.aw.away = (S.sched.approved.going || [])[0] || ""; S.aw.who = ""; if (S.tab === "egoes") paint(); }
+    const r = await api("GET", `${S.base}/${S.id}/who`);
+    if (tok !== S.aw.tok || r.status === 401 || r.status === 403) return;
+    if (r.ok) { S.aw.data = r.j; S.aw.err = ""; } else { S.aw.data = null; S.aw.err = r.j.error || "Could not list who could take it."; }
+    if (S.tab === "egoes") paint();
+  }
+
+  async function evReplace() {
+    const A = S.aw;
+    if (!A.away || !A.who) { S.bad = true; S.msg = "Choose who is away and who takes it."; paintSave(); return; }
+    const name = A.who, say = `${name} goes in their place on the main site now. The timetable committee sees it under Done without approval.`;
+    const ok = await approvalAction("away", { away: A.away, name }, "");
+    if (!ok) return;
+    await loadEvAway(false); S.aw.say = say; if (S.tab === "egoes") paint();
+  }
+
+  function tabEvGoes() {
+    const s = S.sched, V = S.view, going = s.going || [];
+    const classes = V && (V.classes || []).length ? V.classes.join(", ") : "the classes";
+    const notGoing = ((V && V.people) || []).filter(n => !going.includes(n));
+    const depts = (V && V.depts) || [];
+    const me = S.ev;
+    const nB = going.filter(n => { const g = ((V && V.going) || []).find(x => x.name === n); return g && g.status === "backup"; }).length;
+    const pick = (V && V.people) ? `<div class="line"><b>Pick people</b><select data-ev="pick" aria-label="Pick people"><option value="">Choose a name</option>${notGoing.map(n => opt(n, me.pick)).join("")}</select> <button type="button" data-act="goPick">Add</button></div>` : "";
+    const dept = depts.length ? `<div class="line"><b>A department</b><select data-ev="dept" aria-label="A department"><option value="">Choose a department</option>${depts.map(d => opt(d, me.dept)).join("")}</select> <button type="button" data-act="goDept">Add</button></div>` : "";
+    return `<div class="card"><h2>Who goes</h2>
+      <div class="row"><button type="button" data-act="goFill" data-a="form teachers">Form teachers of ${esc(classes)}</button><button type="button" data-act="goFill" data-a="teachers then">Teachers who'd teach them then</button></div>
+      ${dept}${pick}
+      ${S.note ? `<p class="msg ok" role="status">${esc(S.note)}</p>` : ""}
+      <div class="tablewrap"><table><tbody>${goingRows() || `<tr><td class="muted">No one yet.</td></tr>`}</tbody></table></div>
+      <p class="small">${going.length} going · ${nB} with lessons that need backup</p></div>
+      <div class="card"><h2>Duties at the event</h2><div class="tablewrap"><table><thead><tr><th>Duty</th><th>Who</th><th>Time</th><th></th></tr></thead><tbody>${(s.duties || []).map(dutyEvRow).join("")}</tbody></table></div>
+      <div class="row"><button type="button" data-act="dutyAdd">+ Add a duty</button></div></div>${awayEv()}`;
+  }
+
+  function tabEvLessons() {
+    const fr = (S.view && S.view.freed) || [];
+    const freed = fr.length ? `<div class="card"><h2>Venues freed</h2>${fr.map(f => `<p class="small">Venues freed: ${esc(f.rooms.join(", "))} on ${esc(fmtDate(f.date))} ${esc(f.start)}–${esc(f.end)} (could be used for a make-up paper)</p>`).join("")}</div>` : "";
+    return tabLessons() + freed;
+  }
+
+  function onEventField(el, k, a, b) {
+    const s = S.sched, v = el.value;
+    if (k === "where") return edit(() => { s.where = v; });
+    if (k === "venue") return edit(() => { s.venues = el.checked ? uniq((s.venues || []).concat([a])) : (s.venues || []).filter(x => x !== a); });
+    if (k === "evDuty") return edit(() => { s.duties[+a].duty = v; });
+    if (k === "evTime") return edit(() => { s.duties[+a].time = v; });
+    if (k === "evWho") return edit(() => { s.duties[+a].who = v; });
+    return onWhenField(el, k, a, b);
+  }
+
+  /* an event's three ways of filling the list, and the two that add the chosen names */
+  function goFill(way, dept, names) {
+    const before = (S.sched.going || []).length;
+    serverAction("POST", `${S.base}/${S.id}/fill`, { way, dept, names }, undefined, j => { const n = (j.going || []).length - before; S.note = n > 0 ? `Added ${n} ${n === 1 ? "person" : "people"}.` : "There is no one new to add."; });
   }
 
   /* ---------------------------------------------------------------- tab 8: approval */
   const onSite = () => !!(S.sched && S.sched.approved && (S.sched.status === "approved" || S.sched.status === "changes"));
-  const CHECK_NAMES = { papers: "Paper times", seats: "Seats", free: "Invigilators free", others: "Other schedules", timetable: "Timetable" };
+  const CHECK_NAMES = { papers: "Paper times", seats: "Seats", free: "Invigilators free", others: "Other schedules", timetable: "Timetable", going: "People going", venues: "Venues" };
   const stamp = at => at ? `${fmtDate(String(at).slice(0, 10))} ${esc(String(at).slice(11, 16))}` : "";
 
   /* the review's answer is the page's: it also brings the status, which is kept on the schedule and the chip */
@@ -850,7 +1047,7 @@
     const tok = ++S.rvTok;
     if (!keep) { S.rv = null; S.rvErr = ""; if (S.tab === "approval") paint(); }
     await flush();
-    const r = await api("GET", `/api/exams/${S.id}/review`);
+    const r = await api("GET", `${S.base}/${S.id}/review`);
     if (tok !== S.rvTok || r.status === 401 || r.status === 403) return;
     if (r.ok) takeReview(r.j); else { S.rv = null; S.rvErr = r.j.error || "Could not read the approval."; }
     const chip = $("#statchip"); if (chip) { chip.textContent = S.label; chip.className = "chip " + chipClass({ label: S.label }); }
@@ -863,12 +1060,12 @@
     await flush();
     if (S.dirty) return false;
     S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
-    const r = await api("POST", `/api/exams/${S.id}/${path}`, body);
+    const r = await api("POST", `${S.base}/${S.id}/${path}`, body);
     S.busy = false;
     if (r.status === 401 || r.status === 403) return false;
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; S.abMsg = S.msg; paintSave(); paint(); return false; }
     S.abMsg = "";
-    const g = await api("GET", "/api/exams/" + S.id);
+    const g = await api("GET", `${S.base}/${S.id}`);
     if (g.ok) S.sched = g.j;
     takeReview(r.j); S.sbNote = ""; S.msg = ok || ""; paintSave();
     render(); refreshView();
@@ -884,7 +1081,7 @@
       const free = (all.find(x => x.key === "free") || { lines: [] }).lines;
       lines = lines.filter(l => {
         const m = /^(.*) \([^()]*\) takes (\d+) of these invigilators on (.*)\.$/.exec(l); if (!m) return true;
-        const named = uniq(free.filter(f => f.includes(` is on ${m[1]} then (`) && f.includes(` on ${m[3]} `)).map(f => f.split(", ")[0]));
+        const named = uniq(free.filter(f => f.includes(` is on ${m[1]} then`) && f.includes(` on ${m[3]} `)).map(f => f.split(", ")[0]));
         return named.length < +m[2];
       });
     }
@@ -904,12 +1101,20 @@
     const part = w.days.filter(d => !d.whole), all = w.days.length;
     const when = !part.length ? "whole days" : part.length === all ? "part of the day" : `whole days, part day on ${part.map(d => esc(fmtDate(d.date))).join(", ")}`;
     const venues = w.venues.map(v => `${esc(v.room)} ${esc(v.start)}–${esc(v.end)} on ${nTimes(v.dates, "day", "days")}`).join("; ");
+    if (w.kind === "event") {
+      return `<div class="card"><h2>What changes on the main site</h2>
+      <p>Classes ${esc(w.classes.join(", ") || "none")} (${esc(w.levels.join(", ") || "none")})${w.where ? " · " + esc(w.where) : ""} · ${when}</p>
+      <p>Lessons that won't happen: ${w.stopped} (no relief needed)</p>
+      <p>People going: ${w.going} · lessons that need backup: ${w.backups} (sent to the relief team when approved)</p>
+      <p>Venues taken: ${venues || "none"}</p>
+      <p>Lessons that use a venue taken: ${w.flagged}</p></div>`;
+    }
     const anyway = (w.anyway || []).map(a => { const [d, t] = String(a.key).split(" "); return `${esc(a.room)} ${esc(fmtDate(d))} ${esc(t || "")}`.trim(); }).join("; ");
     return `<div class="card"><h2>What changes on the main site</h2>
       <p>Classes ${esc(w.classes.join(", ") || "none")} (${esc(w.levels.join(", ") || "none")}) · ${nTimes(w.papers, "paper", "papers")} · ${when}</p>
       <p>Lessons that won't happen: ${w.stopped} (no relief needed)</p>
       <p>Teachers with duties: ${w.teachers} · ${nTimes(w.duties, "duty", "duties")}${w.most ? ` · most: ${esc(w.most[0])}, ${w.most[1]}` : ""}</p>
-      <p>Backups for the relief team: ${w.backups} (sending them comes in a later stage)</p>
+      <p>Backups for the relief team: ${w.backups} (sent when approved)</p>
       <p>Venues taken: ${venues || "none"}</p>
       ${anyway ? `<p>Rain rooms used anyway: ${anyway}</p>` : ""}</div>`;
   }
@@ -925,6 +1130,7 @@
     const st = rv.status, why = rv.can_send || "", unsent = rv.unsent || [], me = S.me.can_approve;
     const out = [`<div class="card"><h2>Approval</h2><p><span class="chip ${chipClass({ label: rv.label })}">${esc(rv.label)}</span></p>
       ${S.abMsg ? `<p class="msg bad" role="status">${esc(S.abMsg)}</p>` : ""}${rv.note ? `<p>Sent back by the timetable committee: “${esc(rv.note)}”</p>` : ""}</div>`];
+    if ((rv.away || []).length) out.push(awayNotes(rv.away));
     if (st === "draft" || st === "withdrawn") out.push(sendBox("Send to the timetable committee", "", "Send to the timetable committee", "send", why));
     if ((st === "waiting" || st === "changes") && rv.changed) out.push(sendBox("Send again", "Changed since you sent it: send it again.", "Send again", "send", why));
     if (st === "approved" && unsent.length) out.push(`<div class="card"><h2>Changes not sent yet</h2>${unsent.map(c => `<p>${esc(c.text)}</p>`).join("")}<div class="row"><button type="button" class="primary" data-act="approval" data-a="send" ${S.busy || why ? "disabled" : ""}>Send the changes</button>${why ? `<span class="muted small">${esc(why)}</span>` : ""}</div></div>`);
@@ -933,7 +1139,7 @@
     out.push(whatBlock(rv.review.what), checksBlock(rv.review));
     if (me && (st === "waiting" || st === "changes")) {
       out.push(`<div class="card"><h2>${st === "waiting" ? "Approve: show on the main site" : "Approve the changes"}</h2><div class="row"><button type="button" class="primary" data-act="approval" data-a="approve" ${S.busy ? "disabled" : ""}>${st === "waiting" ? "Approve: show on the main site" : "Approve the changes"}</button></div></div>
-        <div class="card"><h2>Send back with a note</h2><div class="line"><input type="text" data-sb="1" data-f="sb" value="${esc(S.sbNote)}" maxlength="300" placeholder="What the exams committee should change" aria-label="Note for the exams committee"></div>
+        <div class="card"><h2>Send back with a note</h2><div class="line"><input type="text" data-sb="1" data-f="sb" value="${esc(S.sbNote)}" maxlength="300" placeholder="What ${isEv() ? "the teacher in charge" : "the exams committee"} should change" aria-label="Note for ${isEv() ? "the teacher in charge" : "the exams committee"}"></div>
         <div class="row"><button type="button" data-act="approval" data-a="send-back" ${S.busy ? "disabled" : ""}>Send back</button></div></div>`);
     }
     if (me && (st === "approved" || st === "changes")) out.push(`<div class="card"><h2>Withdraw from the main site</h2><div class="row"><button type="button" class="danger" data-act="approval" data-a="withdraw" ${S.busy ? "disabled" : ""}>Withdraw from the main site</button></div></div>`);
@@ -961,9 +1167,12 @@
     if (S.id && el.dataset.sb) { S.sbNote = el.value; return; }
     if (S.id && el.dataset.acc === "cls") { S.accCls = el.value; paint(); return; }
     if (!S.id && el.dataset.nf) { onNewField(el); return; }
+    if (!S.id && el.dataset.ne) { onNewEvField(el); return; }
+    if (S.id && el.dataset.ev) { S.ev[el.dataset.ev] = el.value; return; }
     if (!S.id || !S.sched) return;
     const k = el.dataset.k, a = el.dataset.a, b = el.dataset.b;
     if (!k) return;
+    if (isEv()) { onEventField(el, k, a, b); return; }
     if (k === "name" || k === "start" || k === "end" || k === "sup" || k === "scripts" || k === "level" || k === "class" || k.startsWith("day") || k === "time") onWhenField(el, k, a, b);
     else if (k.startsWith("a")) onAccessField(el, k, a);
     else onPaperField(el, k, a);
@@ -975,8 +1184,21 @@
     if (el.tagName === "SELECT" || ty === "checkbox" || ty === "date" || ty === "file") return;
     onField(e);
   }
+  /* "Handled ourselves": the answer is the schedule's view again (the Lessons tab reads it); the Approval counts are read again */
+  async function onHandled(el) {
+    if (S.busy) { el.checked = !el.checked; return; }
+    const tag = el.dataset.t + "|" + el.dataset.k;
+    S.busy = true; S.msg = ""; S.bad = false; S.hpend = { [tag]: !!el.checked }; paintSave();
+    const r = await api("POST", `${S.base}/${S.id}/handled`, { teacher: el.dataset.t, key: el.dataset.k, handled: !!el.checked });
+    S.busy = false; S.hpend = {};
+    if (r.status === 401 || r.status === 403) { paint(); return; }
+    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return; }
+    S.view = r.j; S.rv = null; paintSave(); paint();
+  }
+
   function onChange(e) {
     const el = e.target, ty = el.type;
+    if (ty === "checkbox" && el.dataset.h && S.id) { onHandled(el); return; }
     if (ty === "file") { onFile(el); return; }
     if (el.tagName === "SELECT" || ty === "checkbox" || ty === "date") onField(e);
   }
@@ -987,6 +1209,17 @@
       const key = k === "level" ? "levels" : "classes";
       nf[key] = el.checked ? uniq(nf[key].concat([el.dataset.v])) : nf[key].filter(x => x !== el.dataset.v);
     } else nf[k] = v;
+  }
+
+  function onNewEvField(el) {
+    const ne = S.ne, k = el.dataset.ne, v = el.value;
+    if (k === "level" || k === "class") {
+      const key = k === "level" ? "levels" : "classes";
+      ne[key] = el.checked ? uniq(ne[key].concat([el.dataset.v])) : ne[key].filter(x => x !== el.dataset.v);
+    } else {
+      ne[k] = v;
+      if (k === "start" && v && (!ne.end || ne.end < v)) { ne.end = v; const e = $('[data-ne="end"]'); if (e) e.value = v; }   /* the last day starts as the first */
+    }
   }
 
   function onFile(el) {
@@ -1003,10 +1236,22 @@
       if (act === "newOpen") { S.nf.open = true; drawList(); const n = $('[data-nf="name"]'); if (n) n.focus(); }
       else if (act === "newCancel") { S.nf = blankForm(); drawList(); }
       else if (act === "newSave") newSave();
+      else if (act === "evOpen") { S.ne.open = true; drawList(); const n = $('[data-ne="name"]'); if (n) n.focus(); }
+      else if (act === "evCancel") { S.ne = blankEv(); drawList(); }
+      else if (act === "evSave") evSave();
       return;
     }
     if (!s) return;
-    if (act === "tab") { S.tab = a; S.note = ""; render(); if (a === "approval") { S.abMsg = ""; loadReview(false); } return; }
+    if (act === "tab") { S.tab = a; S.note = ""; render(); if (a === "approval") { S.abMsg = ""; loadReview(false); } if (a === "egoes") loadEvAway(false); return; }
+    if (isEv()) {
+      if (act === "goFill") { goFill(a, "", []); return; }
+      if (act === "goDept") { if (!S.ev.dept) { S.note = ""; S.bad = true; S.msg = "Pick a department."; paintSave(); return; } goFill("department", S.ev.dept, []); return; }
+      if (act === "goPick") { if (!S.ev.pick) { S.bad = true; S.msg = "Pick a person."; paintSave(); return; } const n = S.ev.pick; S.ev.pick = ""; goFill("people", "", [n]); return; }
+      if (act === "goDrop") { edit(() => { s.going = (s.going || []).filter(x => x !== a); (s.duties || []).forEach(d => { if (d.who === a) d.who = ""; }); }, true); return; }
+      if (act === "dutyAdd") { edit(() => { s.duties = (s.duties || []).concat([{ duty: "", who: "", time: "" }]); }, true); return; }
+      if (act === "dutyDel") { edit(() => { s.duties.splice(Number(a), 1); }, true); return; }
+      if (act === "evReplace") { evReplace(); return; }
+    }
     if (act === "dayWhole") {
       const date = a, on = b.dataset.b === "1", p = periods();
       edit(() => setDay(date, on ? { whole: true } : { whole: false, from: p.length ? p[0][0] : null, to: p.length ? p[Math.min(3, p.length - 1)][1] : null }), true);
@@ -1053,15 +1298,16 @@
   /* the sentence kept for the editor is dropped when the editor does not open, so it does not turn up on a later visit */
   function dropNote() { try { sessionStorage.removeItem("examsNote"); } catch (e) { /* no storage */ } }
 
-  async function startOne(id) {
+  async function startOne(id, ev) {
     links();
     S.id = id;
-    const [r, v, l, me] = await Promise.all([api("GET", "/api/exams/" + id), api("GET", `/api/exams/${id}/view`), api("GET", "/api/exams"), api("GET", "/api/exams/me")]);
+    if (ev) { S.base = "/api/events"; S.tabs = EV_TABS; S.tab = "ewhen"; }
+    const [r, v, l, me] = await Promise.all([api("GET", `${S.base}/${id}`), api("GET", `${S.base}/${id}/view`), api("GET", ev ? "/api/events" : "/api/exams"), api("GET", "/api/exams/me")]);
     for (const x of [r, v, l, me]) if (x.status === 401 || x.status === 403) { dropNote(); return; }
     for (const x of [r, v, l, me]) if (!x.ok) { dropNote(); fail(x.j.error || "Something went wrong."); return; }
-    S.me = me.j; S.label = ((l.j.schedules || []).find(x => x.id === id) || {}).label || "Draft";
+    S.me = me.j; links(S.me.can_use); S.label = ((l.j.schedules || []).find(x => x.id === id) || {}).label || "Draft";
     S.sched = r.j; S.view = v.j; S.levels = l.j.levels || []; S.classes = l.j.classes || [];
-    document.title = r.j.name + " · Exams";
+    document.title = r.j.name + (ev ? " · Events" : " · Exams");
     render();
     try {
       const n = sessionStorage.getItem("examsNote");
@@ -1074,6 +1320,6 @@
   document.addEventListener("change", onChange);
   document.addEventListener("toggle", e => { const d = e.target; if (d && d.dataset && d.dataset.d) S.open[d.dataset.d] = d.open; }, true);
   window.addEventListener("beforeunload", e => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
-  const m = /^\/exams\/([A-Za-z0-9]+)\/?$/.exec(location.pathname);
-  if (m && m[1] !== "settings") startOne(m[1]); else startList();
+  const m = /^\/exams\/([A-Za-z0-9]+)\/?$/.exec(location.pathname), me2 = /^\/events\/([A-Za-z0-9]+)\/?$/.exec(location.pathname);
+  if (me2) startOne(me2[1], true); else if (m && m[1] !== "settings") startOne(m[1], false); else startList();
 })();

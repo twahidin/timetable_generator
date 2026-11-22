@@ -2942,15 +2942,16 @@ async function postTry(url, body) {   // as post, but a refusal is not said: {j}
   if (!r.ok) return { error: j.error || "Something went wrong." };
   return { j };
 }
-/* "Exams · 2 waiting": the exams and tests the timetable committee has still to approve (looked up about every half minute) */
+/* "Exams · 2 waiting": the exams, tests and events the timetable committee has still to approve (looked up about every half minute) */
 const XW = { n: null, at: 0 };
 async function examsWaiting() {
   const xl = $("#examsLink"); if (!xl || xl.hidden) return;
   if (Date.now() - XW.at > 30000) {
     XW.at = Date.now();
     try {
-      const r = await fetch("/api/exams", { cache: "no-store" });
-      if (r.ok) { const j = await r.json(); XW.n = (j.schedules || []).filter(x => x.status === "waiting" || x.status === "changes").length; }
+      const waiting = x => x.status === "waiting" || x.status === "changes";
+      const r = await fetch("/api/exams", { cache: "no-store" }), r2 = await fetch("/api/events", { cache: "no-store" });
+      if (r.ok) { const j = await r.json(), j2 = r2.ok ? await r2.json() : {}; XW.n = (j.schedules || []).filter(waiting).length + (j2.schedules || []).filter(waiting).length; }
     } catch (e) { }
   }
   xl.textContent = XW.n ? `Exams · ${XW.n} waiting` : "Exams";

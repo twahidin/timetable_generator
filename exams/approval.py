@@ -8,6 +8,8 @@ from exams import papers as _papers
 
 SNAP = ("name", "kind", "levels", "classes", "start", "end", "days", "times", "papers", "access", "seating", "supervision",
         "scripts", "made", "pins", "use_anyway")
+EVENT_KEYS = ("in_charge", "where", "venues", "going", "going_by", "duties")
+WHO = dict(event="the teacher in charge")
 STALE = "The exam changed since Make: press Make again."
 NOT_ON_SITE = "This schedule is not on the main site."
 NOTHING_WAITING = "There is nothing waiting for approval."
@@ -17,7 +19,8 @@ LABELS = dict(draft="Draft", waiting="Waiting for the timetable committee", appr
 
 def public(sched) -> dict:
     """what the main site may show: deep copies of SNAP, the made part cut to seats, unseated, duties and published_at"""
-    out = {k: copy.deepcopy(sched.get(k)) for k in SNAP}
+    event = sched.get("kind") == "event"
+    out = {k: copy.deepcopy(sched.get(k)) for k in SNAP + (EVENT_KEYS if event else ())}
     if out["scripts"] is None:
         out["scripts"] = ""
     m = sched.get("made")
@@ -69,7 +72,15 @@ def _n(n, one, many) -> str:
     return "1 %s" % one if n == 1 else "%d %s" % (n, many)
 
 
+def _who_to(sched) -> str:
+    return WHO.get(sched.get("kind"), "the exams committee")
+
+
 def blocked(sched, model, stale, errors) -> str:
+    if sched.get("kind") == "event":
+        if errors:
+            return errors[0]
+        return "Nothing on the main site changes." if sched.get("status") == "approved" and not changes(sched, model) else ""
     if not sched.get("made"):
         return "Press Make first."
     if stale:
@@ -101,7 +112,7 @@ def approve(sched, by, now) -> None:
     if st not in ("waiting", "changes"):
         raise ValueError(NOTHING_WAITING)
     if fp(sched) != sched.get("sent_fp"):
-        raise ValueError("This schedule changed after it was sent. Ask the exams committee to send it again.")
+        raise ValueError("This schedule changed after it was sent. Ask %s to send it again." % _who_to(sched))
     sched["approved"] = public(sched)
     sched["approved_at"], sched["approved_by"], sched["note"] = now, by, ""
     sched["status"] = "approved"
@@ -111,7 +122,7 @@ def approve(sched, by, now) -> None:
 def send_back(sched, note, by, now) -> None:
     note = str(note or "").strip()
     if not note:
-        raise ValueError("Write a note for the exams committee.")
+        raise ValueError("Write a note for %s." % _who_to(sched))
     st = sched.get("status")
     if st not in ("waiting", "changes"):
         raise ValueError(NOTHING_WAITING)
@@ -128,10 +139,10 @@ def withdraw(sched, by, now) -> None:
     log(sched, by, "withdrawn", "", now)
 
 
-def _entry(e) -> str:
+def _entry(e, noun="exam") -> str:
     e = e or {}
     if not e:
-        return "as the exam"
+        return "as the " + noun
     if e.get("whole", True) or not (e.get("from") and e.get("to")):
         out = "whole day"
     else:
@@ -174,6 +185,23 @@ def _by_class(seats, cls) -> dict:
     return out
 
 
+def _event_changes(old, new, add) -> None:
+    pl = lambda v: ", ".join(v) if v else "none"
+    if (old.get("where") or "") != (new.get("where") or ""):
+        add("where", "Where: %s → %s." % (old.get("where") or "not set", new.get("where") or "not set"))
+    if list(old.get("venues") or []) != list(new.get("venues") or []):
+        add("venues", "Venues taken: %s → %s." % (pl(old.get("venues")), pl(new.get("venues"))))
+    a, b = list(old.get("going") or []), list(new.get("going") or [])
+    for n in b:
+        if n not in a:
+            add("going", "%s now goes with the classes." % n)
+    for n in a:
+        if n not in b:
+            add("going", "%s no longer goes with the classes." % n)
+    if (old.get("duties") or []) != (new.get("duties") or []):
+        add("duties", "Duties at the event changed.")
+
+
 def changes(sched, model) -> list:
     """what the working copy would change on the main site: a list of dict(kind, text), in the order of the page"""
     old, new = sched.get("approved"), public(sched)
@@ -192,9 +220,11 @@ def changes(sched, model) -> list:
     if lc(old) != lc(new):
         add("levels", "Levels and classes: %s → %s." % (lc(old), lc(new)))
     for d in sorted(set(old["days"] or {}) | set(new["days"] or {})):
-        a, b = _entry((old["days"] or {}).get(d)), _entry((new["days"] or {}).get(d))
+        a, b = _entry((old["days"] or {}).get(d), new["kind"]), _entry((new["days"] or {}).get(d), new["kind"])
         if a != b:
             add("day", "%s: %s → %s." % (_days.nice(d), a, b))
+    if new["kind"] == "event":
+        _event_changes(old, new, add)
     ro, rn = (old["times"] or {}).get("report"), (new["times"] or {}).get("report")
     if ro != rn:
         add("times", "Report time: %s → %s." % (ro, rn))
@@ -310,5 +340,35 @@ def replace(sched, key, room, away, name, by, now) -> str:
     if was_sent:
         sched["sent_fp"] = fp(sched)
     detail = "%s %s–%s, %s: %s (away) → %s" % (_days.nice(duty["date"]), _days.hhmm(duty["start"]), _days.hhmm(duty["end"]), room, away, name)
+    log(sched, by, "replaced", detail, now)
+    return detail
+
+
+def replace_going(sched, away, name, by, now) -> str:
+    """someone going with an approved event is away: name takes over in both copies at once (as every duty's who) and it is
+    noted. The route checks name is free. The working copy changes only when it holds the person away."""
+    ap = sched.get("approved")
+    if not ap:
+        raise ValueError(NOT_ON_SITE)
+    if away not in (ap.get("going") or []):
+        raise ValueError("%s is not going." % away)
+    if name in ap["going"]:
+        raise ValueError("%s is going already." % name)
+    was_sent = sched.get("sent_fp") is not None and sched["sent_fp"] == fp(sched)
+    swap = lambda c: (c.update(going=[name if x == away else x for x in c["going"]]),
+                      [d.update(who=name) for d in c.get("duties") or [] if d.get("who") == away])
+    swap(ap)
+    if away in (sched.get("going") or []):
+        if name in sched["going"]:
+            sched["going"] = [x for x in sched["going"] if x != away]
+            for d in sched.get("duties") or []:
+                if d.get("who") == away:
+                    d["who"] = name
+        else:
+            swap(sched)
+    if was_sent:
+        sched["sent_fp"] = fp(sched)
+    a, b = _days.nice(ap["start"]), _days.nice(ap["end"])
+    detail = "%s, going: %s (away) → %s" % (a if a == b else "%s–%s" % (a, b), away, name)
     log(sched, by, "replaced", detail, now)
     return detail
