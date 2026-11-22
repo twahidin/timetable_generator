@@ -8,6 +8,7 @@ from accounts import people as _accounts
 from exams import approval as _approval
 from exams import days as _days
 from exams import invigilate as _inv
+from exams.relief_links import key_of as _key_of
 from exams import papers as _papers
 from exams import schedules as _schedules
 from exams import seating as _seat
@@ -307,9 +308,11 @@ def lesson_lists(pub, cal, sched) -> dict:
             for sp in l["stopped"]:
                 out["none"].append(item(sp, "shortened" if l["running"] else ""))
             for sp in l["running"]:
-                hit = next(((t, d) for t in l["teachers"] for d in mine if t in d["names"] and d["start"] < sp[1] and d["end"] > sp[0]), None)
-                if hit:
-                    out["backup"].append(item(sp, "%s is invigilating %s" % (hit[0], hit[1]["room"])))
-                else:
+                hits = [(t, d) for t in l["teachers"]          # one backup per teacher on a duty then (their own first duty)
+                        for d in [next((d for d in mine if t in d["names"] and d["start"] < sp[1] and d["end"] > sp[0]), None)] if d]
+                for t, d in hits:
+                    out["backup"].append(dict(item(sp, "%s is invigilating %s" % (t, d["room"])), teacher=t,
+                                              key=_key_of(model, l["row"], date, e["day"])))
+                if not hits:
                     out["runs"].append(item(sp, ""))
     return out

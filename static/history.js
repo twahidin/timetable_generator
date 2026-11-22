@@ -8,7 +8,7 @@
   const AGAIN = "Please sign in again.";
   const WHERES = ["Step 1 · Venues", "Step 2 · Classes", "Step 3 · Subjects", "Step 4 · Teachers", "Step 5 · Teacher Deployment Editor",
     "Step 5 · Banding & TG Group Editor", "Step 6 · Configuration & constraints", "Students", "School & day", "Setup", "Step 8 · Upload and edit",
-    "Step 9 · Publish", "Relief settings", "Exams and events", "Admin", "Sign-in"];
+    "Step 9 · Publish", "Relief", "Relief settings", "Exams and events", "Admin", "Sign-in"];
   const VIA = { password: "password", code: "code", shared: "shared code", personal: "personal code", app: "by itself", google: "Google" };
   const CUT = 120;
   const S = { who: "", where: "", dept: "", from: "", to: "", signins: false, entries: [], more: false, admin: false, depts: [], token: 0, busy: false };

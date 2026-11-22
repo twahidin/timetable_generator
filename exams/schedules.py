@@ -342,7 +342,17 @@ def elsewhere(id, model=None) -> list:
     if model is None:
         pub = store.published()
         model = pub["model"] if pub else None
-    return busies(copies(id), model)
+    return busies(copies(id), model) + relief_busy(model)
+
+
+def relief_busy(model) -> list:
+    """relief's own busies (people away, people covering relief) on the published timetable; imported here because
+    exams.relief_links imports this module"""
+    if not model:
+        return []
+    from exams import relief_links
+    from relief import absences
+    return relief_links.relief_busies(model, absences.all_records())
 
 
 def shared_line(model, s, tag, date, start, end, classes) -> str:
