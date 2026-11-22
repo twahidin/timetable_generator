@@ -340,7 +340,7 @@ def preview_page():
     what still stands in the way of publishing. Nothing is published or stored. NoDraft without a draft."""
     from ttgen.export import render_html
     if not exists(): raise NoDraft("There is no draft.")
-    m, rec, fx = model_now(); j = info(m, rec) or {}; waiting, crit = _count(fx["pool"]), j.get("critical") or 0
+    m, rec, fx = model_now(); j = _finish(_build(m, rec, fx)); waiting, crit = _count(fx["pool"]), j["critical"]   # checked with its edits, as info() does: without fx the answers to its own warnings would be dropped
     banner = "Preview: this is the draft as it stands, not the published timetable."
     if waiting: banner += " 1 lesson waiting in Not placed is not on it." if waiting == 1 else f" {waiting} lessons waiting in Not placed are not on it."
     if crit: banner += " " + critical_text(crit)

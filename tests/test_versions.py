@@ -362,6 +362,19 @@ def test_a_decision_is_never_written_on_another_draft():
         with patched(draft, "_build", build): draft.decide("typed:1:again", "open"); draft.decide("typed:1:again", "met")
         assert seen == [False, False], seen
 
+def test_the_preview_page_checks_the_draft_with_its_edits():
+    """looking at the preview drops no answer and changes no count: it is checked with its edits (the rule to check again, the lesson waiting in Not placed), as the draft is"""
+    with typed_rule():
+        save_draft(ROWS, REPORT); wipe_versions(); move_to(two_places()[0]); met(); lift_one(); j = c.get("/api/draft").get_json()
+        meta = lambda: store.read_json(draft._p("meta.json")); d, before, st = decisions(), meta(), c.get("/api/status").get_json()["draft"]
+        assert d["typed:1:again"]["answer"] == "met" and any(w["crit"] == "notplaced" for w in j["warnings"]) and (before["critical"], before["open"]) == (j["critical"], j["open"]), (d, before)
+        for _ in range(2):
+            r = c.get("/draft/preview"); assert r.status_code == 200, r.status_code
+            assert decisions() == d, (decisions(), d)
+            assert (meta()["critical"], meta()["open"]) == (before["critical"], before["open"]) and meta() == before, (meta(), before)
+            assert draft.critical_text(j["critical"]) in r.get_data(as_text=True) and "1 lesson waiting in Not placed is not on it." in r.get_data(as_text=True)   # the banner counts the lesson that waits
+        assert c.get("/api/status").get_json()["draft"] == st and c.get("/api/draft").get_json() == j
+
 def test_a_copy_that_fails_leaves_nothing_behind():
     save_draft(ROWS); wipe_versions(); v = versions.save("Plain", "T"); move_to(two_places()[0]); before = fixes_in(); real = shutil.copytree
     def copytree(src, dst, *a, **k):
