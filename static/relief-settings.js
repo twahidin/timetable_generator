@@ -6,6 +6,7 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const DAYS = [["Mon", "Monday"], ["Tue", "Tuesday"], ["Wed", "Wednesday"], ["Thu", "Thursday"], ["Fri", "Friday"]];
   const FIXED = "Always true, whatever the rules say: only teachers free at that time · never someone away that day · the relief team approves before anything is sent.";
+  const NAMES = "Write people by their full name. The app replaces names with labels before the rules go to the AI.";
   const S = { data: null, f: null, dirty: false, busy: false, msg: "", bad: false, open: null, q: "" };
 
   const clone = x => JSON.parse(JSON.stringify(x));
@@ -70,6 +71,7 @@
     return R.map((r, i) => `<div class="rule"><span class="num">${i + 1}</span><textarea class="wrapbox" data-rule="${i}" maxlength="300" rows="2" aria-label="Rule ${i + 1}" placeholder="e.g. Never give relief to the Principal or Vice-Principals.">${esc(r)}</textarea>
       <span class="acts"><button type="button" class="small" data-up="${i}" ${i === 0 ? "disabled" : ""} title="Move up" aria-label="Move rule ${i + 1} up">↑</button><button type="button" class="small" data-down="${i}" ${i === n - 1 ? "disabled" : ""} title="Move down" aria-label="Move rule ${i + 1} down">↓</button><button type="button" class="small danger" data-unrule="${i}" title="Take this rule off" aria-label="Take rule ${i + 1} off">✕</button></span></div>`).join("")
       + `<button type="button" class="small add" data-act="addRule">+ Add a rule</button>
+      <div class="small muted names">${esc(NAMES)}</div>
       <div class="small muted fixed">${esc(FIXED)}<span class="locked">fixed</span></div>`;
   }
 

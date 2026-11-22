@@ -15,7 +15,7 @@ from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, draft, history, store, sync, typed
 from accounts import passwords, people, rights as rights_table
-from relief import codes as relief_codes, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
+from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
 from relief import absences as relief_absences
 import exams.relief_links as exams_relief_links
 from ttgen import choices
@@ -1322,6 +1322,7 @@ def _relief_entry(what, text, absence=None):
 # relief requests: relief/web.py, every route through need(), every right through has(), every save in the history
 relief_web.init(has=has, me=who, need=need, note=_relief_entry)
 app.register_blueprint(relief_web.bp)
+if os.environ.get("RELIEF_JOBS") == "on": relief_fill.start()     # relief picks when due, every minute (the Dockerfile sets it; tests and local runs never do)
 
 # ------------------------------------------------------------------------------------------------ admins: people and the ways in
 # The named admins (committee group, Admin extra, signed in with their password) manage people here; every check is the

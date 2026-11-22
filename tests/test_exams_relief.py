@@ -666,7 +666,9 @@ def own_absence_takes_over():
         AB.set_work(b["id"], DKEY, dict(text="Do page 5", link="", files=[], known=[]), DANIEL)
         j = ok(staff(DANIEL).post("/api/relief/absences", json=dict(dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[])))
         x = next(x for x in j["lessons"] if x["key"] == DKEY)
-        assert x["needed"] is True and x["relief"] == CHLOE and x["relief_by"] == GRACE and x["work"]["text"] == "Do page 5", x
+        assert x["needed"] is True and x["relief"] is None and x["work"]["text"] == "Do page 5", "the absent teacher sees a name once approved"
+        x = next(x for x in AB.load(j["id"])["lessons"] if x["key"] == DKEY)
+        assert x["relief"] == CHLOE and x["relief_by"] == GRACE, x
         gone = AB.load(b["id"])
         assert gone["cancelled"]["why"] == "Moved to %s's own absence." % DANIEL and gone["cancelled"]["by"] == "app", gone["cancelled"]
         assert gone["lessons"] == []

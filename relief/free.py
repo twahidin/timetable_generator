@@ -3,6 +3,7 @@ import datetime
 
 from exams.days import rule_on_day
 from ttgen.spec import family
+from relief import cover as _cover        # cover imports this module too: neither reads the other's names at import
 from relief import lessons as _lessons
 from relief.calendar import school_day, term_of, week_of
 from relief.people import people as _people
@@ -22,15 +23,21 @@ def _overlap(p, n, q, m):
 
 
 def relief_periods(records, name, dates, skip=None):
-    """periods of lessons where relief is name, still needed, in an absence not cancelled, on one of dates (dates or ISO strings);
-    skip = (absent teacher, lesson key) leaves that one lesson out"""
+    """periods of covers (a whole lesson, or each part of a split one by its own n) that book name (cover.booked: its relief,
+    or the new pick of a request to change waiting for the team), of lessons still needed, in an absence not cancelled, on
+    one of dates (dates or ISO strings); skip = (absent teacher, cover key) leaves that one cover out"""
     want = {_iso(d) for d in dates}
     total = 0
     for r in records:
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
-            if skip and r.get("teacher") == skip[0] and x.get("key") == skip[1]: continue
-            if x.get("relief") == name and x.get("needed") and _iso(x["date"]) in want: total += int(x.get("n") or 1)
+            parts = x.get("parts")         # the name first, and cheaply: almost every lesson is ruled out here
+            if (x.get("relief") != name and not x.get("change") if not parts else all(c.get("relief") != name and not c.get("change") for c in parts)): continue
+            if not x.get("needed") or _iso(x["date"]) not in want: continue
+            for i, c in enumerate(_cover.covers(x)):
+                if name not in _cover.booked(c): continue
+                if skip and r.get("teacher") == skip[0] and _cover.cover_key(x, i) == skip[1]: continue
+                total += int(c.get("n") or 1)
     return total
 
 
@@ -70,13 +77,18 @@ def there_then(records, names, date, p, n, links=None):
 
 
 def _chosen_then(records, name, iso, p, n, key, absent):
-    """relief already chosen for name on another lesson overlapping this one (the same lesson of the same absence does not count)"""
+    """relief already given to name on another cover overlapping this one, or name the new pick of another's request to
+    change (cover.booked); the same cover key of the same absent teacher does not count: a whole lesson's key, or a part's"""
     for r in records:
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
-            if x.get("relief") != name or not x.get("needed") or _iso(x["date"]) != iso: continue
-            if x.get("key") == key and r.get("teacher") == absent: continue
-            if _overlap(x["p"], int(x.get("n") or 1), p, n): return True
+            parts = x.get("parts")         # the name first, as in relief_periods
+            if (x.get("relief") != name and not x.get("change") if not parts else all(c.get("relief") != name and not c.get("change") for c in parts)): continue
+            if not x.get("needed") or _iso(x["date"]) != iso: continue
+            for i, c in enumerate(_cover.covers(x)):
+                if name not in _cover.booked(c): continue
+                if _cover.cover_key(x, i) == key and r.get("teacher") == absent: continue
+                if _overlap(int(c["p"]), int(c.get("n") or 1), p, n): return True
     return False
 
 

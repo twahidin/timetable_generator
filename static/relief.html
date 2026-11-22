@@ -114,8 +114,53 @@ table.rtable td.act{text-align:right;white-space:nowrap}
 table.rtable tr.off td{opacity:.62}
 table.rtable tr.new td{background:#f3f8ff}
 table.inbox{min-width:860px}
+/* Today (the relief team) */
+.td-acts{justify-content:flex-end}
+.td-day{margin:0 0 12px}
+.td-counts{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.counter{display:flex;flex-direction:column;gap:2px;border:1px solid var(--line);border-radius:10px;padding:6px 12px;background:var(--panel);min-width:112px}
+.counter b{font-size:20px;line-height:1.2}
+.counter.amber b{color:#9a5b00}.counter.ok b{color:var(--ok)}.counter.blue b{color:#1d4ed8}.counter.bad b{color:var(--warn)}
+.td-top{margin:0 0 8px}
+.td-list{border-top:1px solid var(--line)}
+.td-row{display:grid;grid-template-columns:92px minmax(0,1.3fr) minmax(0,2fr) minmax(0,1.3fr);gap:6px 14px;padding:10px 6px;border-bottom:1px solid var(--line);align-items:start}
+.td-row.td-cols{font-size:12px;font-weight:600;color:var(--muted);padding:6px}
+.td-row.off>:not(.td-under){opacity:.62}
+.td-row.ask{background:#fffaf0}
+.td-under{grid-column:1 / -1}
+.td-under .pl-list{margin-top:4px}
+.td-relief .why{margin-top:2px}
+.td-by{display:inline-block;font-size:11px;font-weight:700;color:#1d4ed8;background:#e6efff;border-radius:4px;padding:0 5px}
+.td-warn{font-size:12.5px;color:var(--warn);margin-top:4px}
+.td-busy{color:var(--navy);font-style:italic}
+/* Load (the relief team) */
+.ld-filters{margin:0 0 10px}
+.ld-filters select{max-width:100%}
+.ld-dept{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ld-table .linkish{text-align:left}
+table.ld-table{min-width:640px}
+table.rtable th.num,table.rtable td.num{text-align:right;white-space:nowrap}
+.ld-one{margin-top:14px}
+.ld-one h3{margin:0 0 2px}
+tr.ld-wait td{background:#fffaf0}
+.td-new{margin-top:6px}
+.td-yes{color:var(--ok)}.td-no{color:var(--warn)}
+.chip.td-chip{white-space:normal;display:inline-block}
+.chip.st-sent{background:#eef4fb;color:var(--navy)}
+.chip.st-blue{background:#e6efff;color:#1d4ed8}
+.td-btns{margin-top:6px;gap:6px}
+.td-split{display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:#fafbfc;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.td-split>span{width:100%}
+/* Reliefs I'm covering */
+.cv-work{margin-top:6px}
+.cv-asked{margin-top:8px;color:#1d4ed8}
+.cv.cv-past{background:#f7f8fa}
+.cv:focus{outline:2px solid rgba(37,99,235,.35);outline-offset:2px}
+@media (max-width:760px){.td-row{grid-template-columns:64px minmax(0,1fr)}.td-row>.td-relief,.td-row>.td-state{grid-column:1 / -1}.td-row.td-cols{display:none}
+  .td-acts{justify-content:flex-start}}
 @media (max-width:640px){.relief{padding:12px}.seg{display:flex}.seg button{flex:1 1 auto;padding:7px 8px}.bar .grow{display:none}
-  .cand{grid-template-columns:auto auto minmax(0,1fr)}.cand .cand-who{grid-column:1 / -1}.cand button,.cand .chip{justify-self:end}}
+  .cand{grid-template-columns:auto auto minmax(0,1fr)}.cand .cand-who{grid-column:1 / -1}.cand button,.cand .chip{justify-self:end}
+  .counter{min-width:0;flex:1 1 40%}.td-day .seg{flex:1 1 100%}}
 </style>
 </head>
 <body>
@@ -132,18 +177,27 @@ table.inbox{min-width:860px}
   <nav class="tabs rtabs" id="tabs" role="tablist" aria-label="Relief" hidden>
     <button type="button" role="tab" id="tab-mine" data-tab="mine" aria-controls="pane-mine" hidden>My absences<span class="n" id="mineN"></span></button>
     <button type="button" role="tab" id="tab-ask" data-tab="ask" aria-controls="pane-ask" hidden>Ask for relief</button>
+    <button type="button" role="tab" id="tab-covering" data-tab="covering" aria-controls="pane-covering" hidden>Reliefs I'm covering</button>
     <button type="button" role="tab" id="tab-plan" data-tab="plan" aria-controls="pane-plan" hidden>Plan relief</button>
     <button type="button" role="tab" id="tab-inbox" data-tab="inbox" aria-controls="pane-inbox" hidden>What's in</button>
+    <button type="button" role="tab" id="tab-today" data-tab="today" aria-controls="pane-today" hidden>Today</button>
+    <button type="button" role="tab" id="tab-load" data-tab="load" aria-controls="pane-load" hidden>Load</button>
   </nav>
   <div id="loading" class="card"><p class="muted">Loading…</p></div>
   <section class="pane" id="pane-mine" role="tabpanel" aria-labelledby="tab-mine" hidden></section>
   <section class="pane" id="pane-ask" role="tabpanel" aria-labelledby="tab-ask" hidden></section>
+  <section class="pane" id="pane-covering" role="tabpanel" aria-labelledby="tab-covering" hidden></section>
   <section class="pane" id="pane-plan" role="tabpanel" aria-labelledby="tab-plan" hidden></section>
   <section class="pane" id="pane-inbox" role="tabpanel" aria-labelledby="tab-inbox" hidden></section>
+  <section class="pane" id="pane-today" role="tabpanel" aria-labelledby="tab-today" hidden></section>
+  <section class="pane" id="pane-load" role="tabpanel" aria-labelledby="tab-load" hidden></section>
 </main>
 <script src="/static/relief-form.js"></script>
 <script src="/static/relief.js"></script>
 <script src="/static/relief-plan.js"></script>
 <script src="/static/relief-inbox.js"></script>
+<script src="/static/relief-today.js"></script>
+<script src="/static/relief-load.js"></script>
+<script src="/static/relief-covering.js"></script>
 </body>
 </html>
