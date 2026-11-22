@@ -68,7 +68,7 @@ def _free(name, view, start, end, duties, xset, skip=None, elsewhere=()):
         return "is on another duty then (%s)" % clash["room"], []
     busy = next((b for b in elsewhere if name in b["names"] and b["date"] == view["date"] and b["start"] < end and b["end"] > start), None)
     if busy:
-        return "is on %s then (%s)" % (busy["name"], busy["room"]), []
+        return ("is on %s then (%s)" % (busy["name"], busy["room"]) if busy["room"] else "is on %s then" % busy["name"]), []
     most = rules.get("max_per_day")
     if most and sum(1 for d in on_date if name in d["names"]) >= most:
         return "has %d %s that day already" % (most, "duty" if most == 1 else "duties"), []

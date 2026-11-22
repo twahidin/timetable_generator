@@ -17,7 +17,7 @@ import access, checks, draft, history, store, sync, typed
 from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, people as relief_people, settings as relief_settings
 from ttgen import choices
-import exams.approval as exams_approval, exams.review as exams_review, exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts, exams.published as exams_published
+import exams.approval as exams_approval, exams.review as exams_review, exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts, exams.published as exams_published, exams.events as exams_events
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.join(HERE, "skill", "school-timetable-generator")
@@ -440,7 +440,7 @@ TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("se
          ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
          ("History", "Who changed what, and when", "/history", ("history",)))
 GREYED = ("Committee page", "Admin")   # signed in with a code, these wait for the password
-DUTIES_TILE = ("My exam duties", "Your exam duties and the lessons that don't happen")   # in place of Exams and events for everyone else
+DUTIES_TILE = ("My exam and event duties", "Your duties, your events and the lessons that don't happen")   # in place of Exams and events for everyone else
 TO_PASSWORD = "Sign in with your password to open this."
 _HOW = {"code": "Signed in with your code", "password": "Signed in with your password"}
 
@@ -450,7 +450,8 @@ def _route_exists(path):
 def _tiles(p):
     """the tiles for the person p, in order, as (title, line, link, greyed): those they may open, and greyed those only
     their password opens (a committee member's or a head's code opens all but the setup and the admin page). Without the
-    exams rights, Exams and events is My exam duties: the same page shows them only their own duties (exams stage 2)"""
+    exams rights, Exams and events is My exam and event duties: the same page shows them only their own duties (exams stage
+    2) and the events they are in charge of, where they may start one (stage 4)"""
     mine, strong = rights(), (rights_table.rights(p, "password") if via() == "code" else frozenset())
     out = []
     for title, line, link, need_ in TILES:
@@ -1833,6 +1834,11 @@ NO_EXAMS_PUB = "Publish the timetable first: exams read the classes, students an
 ONLY_EXAMS = "Only the exams committee and the timetable committee can open exams."
 NO_STUDENTS = "The published timetable has no students. Add them on the Students step and publish again to seat them."
 NO_EXAM = "That exam is not there any more."
+NO_EVENT = "That event is not there any more."
+ONLY_IN_CHARGE = "Only the teacher in charge and the timetable committee can open this event."
+PICK_IN_CHARGE = "Pick the teacher in charge."
+EVENT_KEEPS = ("id", "kind", "in_charge", "created_at", "created_by", "status", "approved", "approved_at", "approved_by", "sent_at",
+               "sent_by", "sent_fp", "note", "log")
 ONLY_APPROVE = "Only the timetable committee can approve, send back or withdraw."
 ON_SITE = "This schedule is on the main site: the timetable committee must withdraw it before it can be deleted."
 EXAM_KEEPS = ("id", "created_at", "created_by", "made", "pins", "use_anyway", "status", "approved", "approved_at", "approved_by",
@@ -1852,6 +1858,18 @@ def _exams_can_approve():
     committee member signed in with their password)"""
     return has("committee")
 
+def _event_rights(sched):
+    """(may open this event, saved by, sees every event) for whoever is signed in, from the accounts: the timetable
+    committee (the committee right: the shared committee code, or a committee member signed in with their password) opens
+    every event; anyone else signed in by name (any way in) only an event they are in charge of (sched None: the list, and
+    starting one, as its teacher in charge). Saved by the person's name, or "Timetable committee" for the shared committee
+    code. None for the shared heads', teacher and student codes: they are nobody's, so no event is theirs. The Exams and
+    events extra gives nothing here: the exams committee does not manage events"""
+    p = who()
+    if has("committee"): return True, p["name"] if p else "Timetable committee", True
+    if p is None: return None
+    return (sched is None or sched.get("in_charge") == p["name"]), p["name"], False
+
 def _exams_today(): return datetime.date.today()
 
 def _published_reader():
@@ -1869,7 +1887,8 @@ BAD_DATE = "Give a date such as 2026-10-05."
 REPUBLISHED = "The timetable was published again: reload the page."
 NO_DAY_CAL = "The school calendar is not set yet, so the timetable cannot be shown on a date."
 ONLY_STAFF_PRINTS = "Only staff can open the seating plans and rosters."
-ONLY_OWN_DUTIES = "Sign in with your own code or password to see your exam duties."
+ONLY_OWN_DUTIES = "Sign in with your own code or password to see your exam and event duties."
+ONLY_OWN_EVENTS = "Sign in with your own code or password to start or open an event."
 
 def _exams_gate():
     """-> (pub, who, None) when the person may use exams, else (None, None, the refusing answer)"""
@@ -1880,28 +1899,43 @@ def _exams_gate():
     if not rights[0]: return None, None, ({"error": ONLY_EXAMS}, 403)
     return pub, rights[1], None
 
+def _event_gate(id=None):
+    """-> (pub, who, the event, sees every event, None) when the person may open the event (or, with no id, events), else
+    (None, None, None, None, the refusing answer)"""
+    no = lambda ans: (None, None, None, None, ans)
+    pub = store.published()
+    if not pub: return no(({"error": NO_EXAMS_PUB}, 409))
+    if _event_rights(None) is None: return no(({"error": ONLY_OWN_EVENTS}, 403))   # a shared code other than the committee's: before any event is read
+    sched = None
+    if id is not None:
+        sched = exams_schedules.load(id)
+        if not sched or sched.get("kind") != "event": return no(({"error": NO_EVENT}, 404))
+    rights = _event_rights(sched)
+    if not rights[0]: return no(({"error": ONLY_IN_CHARGE}, 403))
+    return pub, rights[1], sched, rights[2], None
+
 def _exam_cal(pub): return relief_settings.load(pub)["calendar"]
 
 def _exam_json():
     d = request.get_json(force=True, silent=True)
     return d if isinstance(d, dict) else {}
 
-def _exams_entry(what, text, exam=None):
-    """one history entry for an exams save: who, what, which, a link (not field by field; exams keeps its own record). A
-    failure to write it never fails the save"""
-    e = {"kind": "exams", "what": what, "where": "Exams and events", "text": text, "link": "/exams", **by()}
+def _exams_entry(what, text, exam=None, link="/exams"):
+    """one history entry for an exams or events save: who, what, which, a link (not field by field; exams keeps its own
+    record). An event's entry links to the event itself (/events/<id>). A failure to write it never fails the save"""
+    e = {"kind": "exams", "what": what, "where": "Exams and events", "text": text, "link": link, **by()}
     if exam: e["exam"] = exam
     try: history.add(e)
     except Exception as x: print(f"WARNING: an exams change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
 
-def _save_exam(sched, pub, saved_by, what, words, check=True):
+def _save_exam(sched, pub, saved_by, what, words, check=True, event=False):
     """save a schedule and record it in the history as "<its name>: <words>"; (the saved schedule, None) or (None, the
     400 answer): malformed JSON never gives a 500. check=False: saved without the timetable check (approve, send back,
-    withdraw and someone is away still work after a new publish)"""
+    withdraw and someone is away still work after a new publish). event=True: an event's wording and its own link"""
     try: saved = exams_schedules.save(sched, pub, _exam_cal(pub), saved_by, check=check)
     except ValueError as e: return None, ({"error": str(e)}, 400)
-    except BAD_INPUT: return None, ({"error": exams_schedules.WRONG}, 400)
-    _exams_entry(what, f"{saved['name']}: {words}", saved.get("id"))
+    except BAD_INPUT: return None, ({"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400)
+    _exams_entry(what, f"{saved['name']}: {words}", saved.get("id"), f"/events/{saved.get('id')}" if event else "/exams")
     return saved, None
 
 def _exam_view(pub, sched):
@@ -1922,7 +1956,7 @@ def _exam_rooms_by_key(pub, cal, sched):
     overlapping sitting of the made schedule holds is busy, so the move selects do not offer it"""
     xset = exams_settings.load(pub)
     held = exams_make.held(pub, sched, xset)
-    return {x["key"]: [[r["name"], r["seats"], r["busy"]] for r in exams_seating.rooms_free(pub, cal, sched, x, xset, held.get(x["key"], set()), elsewhere=exams_schedules.elsewhere(sched.get("id")))]
+    return {x["key"]: [[r["name"], r["seats"], r["busy"]] for r in exams_seating.rooms_free(pub, cal, sched, x, xset, held.get(x["key"], set()), elsewhere=exams_schedules.elsewhere(sched.get("id"), pub["model"]))]
             for x in exams_seating.sittings(sched)}
 
 @app.get("/exams")
@@ -1991,7 +2025,7 @@ def exams_list():
     pub, who, err = _exams_gate()
     if err: return err
     m = pub["model"]
-    return jsonify(schedules=exams_schedules.listing(_exams_today(), exams_make.published_at(pub)), levels=m.get("levels") or [], classes=[[c["name"], c["level"]] for c in m.get("classes") or []],
+    return jsonify(schedules=exams_schedules.listing(_exams_today(), exams_make.published_at(pub), kinds=("exam", "test")), levels=m.get("levels") or [], classes=[[c["name"], c["level"]] for c in m.get("classes") or []],
                    calendar_ok=bool(_exam_cal(pub).get("terms")))
 
 @app.post("/api/exams")
@@ -2011,7 +2045,7 @@ def exams_create():
 
 def _exam_or_404(id):
     s = exams_schedules.load(id)
-    return (s, None) if s else (None, ({"error": NO_EXAM}, 404))
+    return (s, None) if s and s.get("kind") != "event" else (None, ({"error": NO_EXAM}, 404))   # an event has its own routes
 
 @app.get("/api/exams/<id>")
 @need("exams", "committee")
@@ -2031,6 +2065,7 @@ def exams_put(id):
         if err: return err
         new = dict(_exam_json(), **{k: old.get(k) for k in EXAM_KEEPS})
         new["log"] = old.get("log") or []
+        if new.get("kind") not in exams_schedules.KINDS: return {"error": exams_schedules.WRONG}, 400   # an exam never becomes an event
         saved, bad = _save_exam(new, pub, who, "edit", "changed")
     return bad or jsonify(saved)
 
@@ -2040,8 +2075,9 @@ def exams_delete(id):
     pub, who, err = _exams_gate()
     if err: return err
     with exams_schedules.editing():   # an approve cannot land between the check and the delete
-        s = exams_schedules.load(id)
-        if s and s.get("approved"): return {"error": ON_SITE}, 409
+        s, err = _exam_or_404(id)
+        if err: return err
+        if s.get("approved"): return {"error": ON_SITE}, 409
         exams_schedules.delete(id)
     if s: _exams_entry("delete", f"{s.get('name')}: deleted", s.get("id"))   # nothing there, nothing deleted: no entry
     return {"ok": True}
@@ -2210,7 +2246,7 @@ def exams_day():
 def exams_published_list():
     pub = store.published()
     if not pub: return {"error": NO_EXAMS_PUB}, 409
-    return jsonify(exams_published.listing(pub, exams_schedules.on_site(), _exams_today(), _published_reader() == "full"))
+    return jsonify(exams_published.listing(pub, exams_schedules.on_site(), _exams_today(), _published_reader() == "full", cal=_exam_cal(pub)))
 
 @app.get("/api/published/exams/<id>/print/<what>.pdf")
 @need("timetable")
@@ -2220,7 +2256,7 @@ def exams_published_print(id, what):
     if _published_reader() != "full": return {"error": ONLY_STAFF_PRINTS}, 403
     if what not in exams_published.PRINTS: abort(404)
     site = next((x for x in exams_schedules.on_site() if x["id"] == id), None)
-    if site is None: abort(404)
+    if site is None or site.get("kind") == "event": abort(404)
     from ttgen.export import safe_name
     buf = io.BytesIO()
     exams_printouts.pdf(what, pub, _exam_cal(pub), site, exams_settings.load(pub), buf)
@@ -2267,7 +2303,7 @@ def _exam_candidates(pub, s, key, room, approved=False):
     subjects = [papers[i]["subject"] for i in (sit or {}).get("papers", []) if i in papers]
     rest = [x for x in duties if x is not d]
     return d, exams_invigilate.candidates(pub, _exam_cal(pub), s, exams_settings.load(pub), d["date"], d["start"], d["end"], rest, subjects=subjects,
-                                          exclude=d["names"] if approved else (), elsewhere=exams_schedules.elsewhere(s.get("id")))
+                                          exclude=d["names"] if approved else (), elsewhere=exams_schedules.elsewhere(s.get("id"), pub["model"]))
 
 @app.get("/api/exams/<id>/who")
 @need("exams", "committee")
@@ -2291,41 +2327,45 @@ def _exam_review_reply(pub, s):
     stale = exams_make.stale(s, xset, model)
     errors = exams_papers.check(s, model, _exam_cal(pub), xset["rules"])["errors"]
     st = s.get("status") or "draft"
-    rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"))) if s.get("made") else None
+    rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"), pub["model"])) if s.get("made") else None
     return jsonify(status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
                    changed=s.get("sent_fp") is not None and s.get("sent_fp") != exams_approval.fp(s),
                    can_send=exams_approval.blocked(s, model, stale, errors), can_approve=_exams_can_approve(),
                    unsent=exams_approval.changes(s, model) if st == "approved" else [], review=rv)
 
-# what the history says for each step the schedule's own log records (the log keeps the note and the details)
+# what the history says for each step the schedule's own log records (the log keeps the note and the details); "sent back"
+# names who it goes back to: the exams committee, or an event's teacher in charge
 EXAM_STEPS = {"sent": "sent to the timetable committee", "sent again": "sent to the timetable committee again",
               "changes sent": "changes sent to the timetable committee", "approved": "approved: on the main site",
-              "changes approved": "changes approved: on the main site", "sent back": "sent back to the exams committee",
-              "changes sent back": "changes sent back to the exams committee", "withdrawn": "withdrawn from the main site",
+              "changes approved": "changes approved: on the main site", "sent back": "sent back to {who}",
+              "changes sent back": "changes sent back to {who}", "withdrawn": "withdrawn from the main site",
               "replaced": "someone away replaced at once"}
 
 def _exam_step_words(s):
     """the history's words for the step act() has just logged on s: its log's newest entry"""
     e = (s.get("log") or [{}])[-1]
-    words = EXAM_STEPS.get(e.get("what"), str(e.get("what") or "changed"))
+    words = EXAM_STEPS.get(e.get("what"), str(e.get("what") or "changed")).replace("{who}", exams_approval.WHO.get(s.get("kind"), "the exams committee"))
     return f"{words} ({e['detail']})" if e.get("what") in ("changes sent", "replaced") and e.get("detail") else words
 
-def _exam_approval(id, act, what, approver=False, check=False):
+def _exam_approval(id, act, what, approver=False, check=False, event=False):
     """run act(pub, sched, who, now, body) on the stored schedule, save, record it in the history (what: the entry's kind
     of step) and answer with the review; locked from loading to saving, as _exam_changed is. Only Send checks the schedule
-    against the timetable (check=True): approve, send back, withdraw and someone is away still work after a new publish"""
-    pub, who, err = _exams_gate()
-    if err: return err
-    if approver and not _exams_can_approve(): return {"error": ONLY_APPROVE}, 403
+    against the timetable (check=True): approve, send back, withdraw and someone is away still work after a new publish.
+    event=True: the same for an event (its rights, wording and reply)"""
     with exams_schedules.editing():
-        s, err = _exam_or_404(id)
+        if event: pub, who, s, _, err = _event_gate(id)
+        else: (pub, who, err), s = _exams_gate(), None
         if err: return err
+        if approver and not _exams_can_approve(): return {"error": ONLY_APPROVE}, 403
+        if not event:
+            s, err = _exam_or_404(id)
+            if err: return err
         try: act(pub, s, who, exams_schedules._now(), _exam_json())
         except ValueError as e: return {"error": str(e)}, 400
-        except BAD_INPUT: return {"error": exams_schedules.WRONG}, 400
-        saved, bad = _save_exam(s, pub, who, what, _exam_step_words(s), check=check)
-    return bad or _exam_review_reply(pub, saved)
+        except BAD_INPUT: return {"error": exams_schedules.EVENT_WRONG if event else exams_schedules.WRONG}, 400
+        saved, bad = _save_exam(s, pub, who, what, _exam_step_words(s), check=check, event=event)
+    return bad or (_event_review_reply if event else _exam_review_reply)(pub, saved)
 
 @app.get("/api/exams/<id>/review")
 @need("exams", "committee")
@@ -2345,17 +2385,21 @@ def _exam_send(pub, s, by, now, b):
 @need("exams", "committee")
 def exams_send(id): return _exam_approval(id, _exam_send, "send", check=True)
 
+def _act_approve(pub, s, by, now, b): exams_approval.approve(s, by, now)
+def _act_send_back(pub, s, by, now, b): exams_approval.send_back(s, b.get("note"), by, now)
+def _act_withdraw(pub, s, by, now, b): exams_approval.withdraw(s, by, now)
+
 @app.post("/api/exams/<id>/approve")
 @need("exams", "committee")
-def exams_approve(id): return _exam_approval(id, lambda pub, s, by, now, b: exams_approval.approve(s, by, now), "approve", approver=True)
+def exams_approve(id): return _exam_approval(id, _act_approve, "approve", approver=True)
 
 @app.post("/api/exams/<id>/send-back")
 @need("exams", "committee")
-def exams_send_back(id): return _exam_approval(id, lambda pub, s, by, now, b: exams_approval.send_back(s, b.get("note"), by, now), "send-back", approver=True)
+def exams_send_back(id): return _exam_approval(id, _act_send_back, "send-back", approver=True)
 
 @app.post("/api/exams/<id>/withdraw")
 @need("exams", "committee")
-def exams_withdraw(id): return _exam_approval(id, lambda pub, s, by, now, b: exams_approval.withdraw(s, by, now), "withdraw", approver=True)
+def exams_withdraw(id): return _exam_approval(id, _act_withdraw, "withdraw", approver=True)
 
 def _exam_away(pub, s, by, now, b):
     key, room, away, name = b["key"], b["room"], b["away"], b["name"]
@@ -2370,6 +2414,185 @@ def _exam_away(pub, s, by, now, b):
 @app.post("/api/exams/<id>/away")
 @need("exams", "committee")
 def exams_away(id): return _exam_approval(id, _exam_away, "away")
+
+# ------------------------------------------------------------------------------------------------ staff: events
+def _event_others(pub, s):
+    """(the other schedules' copies, what they hold busy) for an event"""
+    others = exams_schedules.copies(s.get("id"))
+    return others, exams_schedules.busies(others, pub["model"])
+
+def _event_review_reply(pub, s):
+    """the Approval tab of an event: as an exam's, with the event's own review and what stops Send"""
+    model, cal = pub["model"], _exam_cal(pub)
+    others, busy = _event_others(pub, s)
+    st = s.get("status") or "draft"
+    return jsonify(status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
+                   approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
+                   changed=s.get("sent_fp") is not None and s.get("sent_fp") != exams_approval.fp(s),
+                   can_send=exams_approval.blocked(s, model, False, exams_events.send_errors(pub, cal, s, busy, others)), can_approve=_exams_can_approve(),
+                   unsent=exams_approval.changes(s, model) if st == "approved" else [], review=exams_events.review(pub, cal, s, busy, others))
+
+def _event_view(pub, s):
+    model, cal = pub["model"], _exam_cal(pub)
+    others, busy = _event_others(pub, s)
+    dts = exams_events.on_dates(pub, cal, s)
+    inside = {c for e in dts for c in e["classes"]}
+    people = relief_staff(pub)
+    entry = lambda date: (s.get("days") or {}).get(date) or {}
+    return dict(summary=dict(days=[dict(date=e["date"], day=e["day"], levels=e["levels"], whole=bool(entry(e["date"]).get("whole", True)),
+                                        window=[exams_days.hhmm(e["start"]), exams_days.hhmm(e["end"])]) for e in exams_days.dates(s, cal, model)]),
+                classes=[c["name"] for c in model.get("classes") or [] if c["name"] in inside], going=exams_events.going(pub, cal, s, busy),
+                lessons=exams_events.lesson_lists(pub, cal, s), freed=exams_events.freed(pub, cal, s, busy), flags=exams_events.flags(pub, cal, s),
+                cuts=exams_events.cuts(pub, cal, s), clashes=exams_events.clashes(pub, cal, s, busy, others),
+                periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)], rooms=[r["name"] for r in model.get("rooms") or []],
+                depts=sorted({d for p in people for d in p["depts"]}), people=[p["name"] for p in people])
+
+@app.get("/events/<id>")
+@need("committee", "timetable")
+def events_one_page(id):
+    """the event editor, for the timetable committee and anyone signed in by name (the event then says whether they may
+    open it: its teacher in charge); the shared heads', teacher and student codes are nobody's: their own page"""
+    if _event_rights(None) is None: return redirect("/")
+    return app.send_static_file("exams.html")
+
+@app.get("/api/events")
+@need("committee", "timetable")
+def events_list():
+    pub, who, _, every, err = _event_gate()
+    if err: return err
+    m = pub["model"]
+    return jsonify(schedules=exams_schedules.listing(_exams_today(), exams_make.published_at(pub), ("event",), None if every else who),
+                   levels=m.get("levels") or [], classes=[[c["name"], c["level"]] for c in m.get("classes") or []],
+                   calendar_ok=bool(_exam_cal(pub).get("terms")), people=[p["name"] for p in relief_staff(pub)] if every else [])
+
+@app.post("/api/events")
+@need("committee", "timetable")
+def events_create():
+    pub, who, _, every, err = _event_gate()
+    if err: return err
+    if not _exam_cal(pub).get("terms"): return {"error": exams_schedules.NO_CALENDAR}, 409
+    b = _exam_json()
+    in_charge = b.get("in_charge")
+    if every:
+        if not isinstance(in_charge, str) or not in_charge.strip(): return {"error": PICK_IN_CHARGE}, 400
+        if in_charge not in {p["name"] for p in relief_staff(pub)}: return {"error": f"{in_charge} is not on the published timetable or the staff list."}, 400
+    else: in_charge = who
+    try: sched = exams_schedules.new_event(b["name"], b["levels"], b.get("classes") or [], b["start"], b["end"], who, in_charge)
+    except ValueError as e: return {"error": str(e)}, 400
+    except BAD_INPUT: return {"error": exams_schedules.EVENT_WRONG}, 400
+    with exams_schedules.editing():
+        saved, bad = _save_exam(sched, pub, who, "create", "created", event=True)
+    return bad or jsonify(saved)
+
+@app.get("/api/events/<id>")
+@need("committee", "timetable")
+def events_get(id):
+    pub, who, s, _, err = _event_gate(id)
+    return err or jsonify(s)
+
+@app.put("/api/events/<id>")
+@need("committee", "timetable")
+def events_put(id):
+    with exams_schedules.editing():   # from loading to saving: what is kept is what is stored now
+        pub, who, old, _, err = _event_gate(id)
+        if err: return err
+        new = dict(_exam_json(), **{k: old.get(k) for k in EVENT_KEEPS})
+        new["log"] = old.get("log") or []
+        saved, bad = _save_exam(new, pub, who, "edit", "changed", event=True)
+    return bad or jsonify(saved)
+
+@app.delete("/api/events/<id>")
+@need("committee", "timetable")
+def events_delete(id):
+    with exams_schedules.editing():
+        pub, who, s, _, err = _event_gate(id)
+        if err: return err
+        if s.get("approved"): return {"error": ON_SITE}, 409
+        exams_schedules.delete(id)
+    _exams_entry("delete", f"{s.get('name')}: deleted", s.get("id"), "/exams")   # the event is gone: the entry links to the list
+    return {"ok": True}
+
+@app.get("/api/events/<id>/view")
+@need("committee", "timetable")
+def events_view(id):
+    pub, who, s, _, err = _event_gate(id)
+    if err: return err
+    try: return jsonify(_event_view(pub, s))
+    except ValueError as e: return {"error": str(e)}, 400
+    except BAD_INPUT + (IndexError,): return {"error": exams_schedules.EVENT_WRONG}, 400
+
+@app.post("/api/events/<id>/fill")
+@need("committee", "timetable")
+def events_fill(id):
+    with exams_schedules.editing():
+        pub, who, s, _, err = _event_gate(id)
+        if err: return err
+        b = _exam_json()
+        try:
+            names = b.get("names") or []
+            if not isinstance(names, list) or not all(isinstance(x, str) for x in names) or not isinstance(b.get("dept") or "", str): raise ValueError(exams_schedules.EVENT_WRONG)
+            added = exams_events.fill(pub, _exam_cal(pub), s, b.get("way"), b.get("dept") or "", names)
+            if not added: return jsonify(s)   # nobody to add: nothing changes, so a sent event keeps its fingerprint
+            s["going"] = list(s.get("going") or []) + added
+            s["going_by"] = b["way"]
+        except ValueError as e: return {"error": str(e)}, 400
+        except BAD_INPUT: return {"error": exams_schedules.EVENT_WRONG}, 400
+        saved, bad = _save_exam(s, pub, who, "fill", f"{len(added)} added to the people going ({EVENT_FILLS[b['way']]})", event=True)
+    return bad or jsonify(saved)
+
+# how the history names each way of filling the going list
+EVENT_FILLS = {"form teachers": "the form teachers", "teachers then": "the teachers who would teach them then",
+               "department": "a department", "people": "picked people"}
+
+def _event_send(pub, s, by, now, b):
+    others, busy = _event_others(pub, s)
+    exams_approval.send(s, pub["model"], by, now, False, exams_events.send_errors(pub, _exam_cal(pub), s, busy, others))
+
+def _event_free(pub, s):
+    """who may stand in for someone going with the approved event: the names relief finds free then (freed, then free)"""
+    ap = exams_approval.as_schedule(s)
+    if ap is None: raise ValueError(exams_approval.NOT_ON_SITE)
+    return exams_events.who_free(pub, _exam_cal(pub), ap, exams_schedules.elsewhere(s.get("id"), pub["model"]))
+
+def _event_away(pub, s, by, now, b):
+    away, name = b["away"], b["name"]
+    if not all(isinstance(x, str) for x in (away, name)): raise ValueError(exams_schedules.EVENT_WRONG)
+    if name not in {c["name"] for g in ("freed", "free") for c in _event_free(pub, s)[g]}: raise ValueError("%s is not free then." % name)
+    exams_approval.replace_going(s, away, name, by, now)
+
+@app.get("/api/events/<id>/review")
+@need("committee", "timetable")
+def events_review_get(id):
+    pub, who, s, _, err = _event_gate(id)
+    return err or _event_review_reply(pub, s)
+
+@app.post("/api/events/<id>/send")
+@need("committee", "timetable")
+def events_send(id): return _exam_approval(id, _event_send, "send", check=True, event=True)
+
+@app.post("/api/events/<id>/approve")
+@need("committee", "timetable")
+def events_approve(id): return _exam_approval(id, _act_approve, "approve", approver=True, event=True)
+
+@app.post("/api/events/<id>/send-back")
+@need("committee", "timetable")
+def events_send_back(id): return _exam_approval(id, _act_send_back, "send-back", approver=True, event=True)
+
+@app.post("/api/events/<id>/withdraw")
+@need("committee", "timetable")
+def events_withdraw(id): return _exam_approval(id, _act_withdraw, "withdraw", approver=True, event=True)
+
+@app.post("/api/events/<id>/away")
+@need("committee", "timetable")
+def events_away(id): return _exam_approval(id, _event_away, "away", event=True)
+
+@app.get("/api/events/<id>/who")
+@need("committee", "timetable")
+def events_who(id):
+    pub, who, s, _, err = _event_gate(id)
+    if err: return err
+    try: return jsonify(_event_free(pub, s))
+    except ValueError as e: return {"error": str(e)}, 400
 
 startup_log()
 move_relief_lists()
