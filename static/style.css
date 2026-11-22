@@ -580,6 +580,27 @@ body.vslock{overflow:hidden}
 .vsbtns{display:flex;gap:6px;flex-wrap:wrap}.vsbtns button{padding:4px 9px;font-size:13px}
 .vsdel{color:var(--warn)}
 .vspop button:disabled{opacity:.5;cursor:default}
+/* step 8's Re-fit window (built on the Versions one: .vsov, .vspop, .vshead) */
+.vsbar{display:flex;gap:8px;flex-wrap:wrap}
+.rflink{border:0;background:none;color:var(--accent);padding:0 0 0 6px;text-decoration:underline;font:inherit}
+.rfpop h3{margin:16px 0 6px;font-size:14px}.rfpop h4{margin:0 0 4px}
+.rffit{margin:0;padding-left:22px}.rffit li{margin:2px 0}
+#rfMore summary{cursor:pointer;color:var(--accent);margin:4px 0 0 2px}
+.rfrules{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 4px}
+.rfchip{display:inline-block;font-size:11.5px;border-radius:999px;padding:1px 9px;background:var(--chip);color:var(--muted);border:1px solid var(--line);vertical-align:1px}
+.rfchip.day{background:#fffaeb;color:#b54708;border-color:#fedf89}
+.rfsr{position:absolute;left:-9999px}
+.rfgroup{margin:12px 0;padding:8px 12px;border:1px solid var(--line);border-radius:10px}
+.rfgtext{margin:0 0 6px;font-weight:600}
+.rfstep{display:flex;gap:10px;align-items:flex-start;padding:4px 0}
+.rfn{flex:0 0 22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.rfsay{flex:1;min-width:0;overflow-wrap:anywhere}
+.rfneeds{margin:14px 0;padding:8px 14px;background:#fffaeb;border-left:4px solid #f79009;border-radius:6px}.rfneeds h3{margin-top:4px}.rfneeds p{margin:4px 0}
+.rftotals{margin:14px 0 4px;font-weight:600}
+.rfgrey{opacity:.55}
+.rfpre{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
+.rffoot{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}.rffoot .row{flex-wrap:wrap}
+.rfpop progress{width:100%;max-width:420px;display:block}
 @media(max-width:640px){.vsov{padding:0}.vspop{border-radius:0;min-height:100%}}
 @media(max-width:640px){.vstable,.vstable tbody,.vstable tr,.vstable td{display:block;width:100%;box-sizing:border-box}.vstable tr:first-child{display:none}.vstable tr{border-bottom:1px solid var(--line);padding:6px 0}.vstable td{border:0;padding:3px 8px}.vstable td[data-l]:not(:first-child)::before{content:attr(data-l) ": ";color:var(--muted);font-size:12px}}
 @media(max-width:640px){.vstable td.vsbtns{display:flex;gap:6px;flex-wrap:wrap}}

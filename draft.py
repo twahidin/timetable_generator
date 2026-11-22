@@ -274,7 +274,8 @@ def _finish(j, change=None):
         if meta is not None and j["stamp"] == stamp(meta, dict(v=int(j["setup_version"][1:]))):   # the stamp of the draft on disk, for the setup version j was checked against
             store.write_json(_p("decisions.json"), decisions)
             store.write_json(_p("meta.json"), dict(meta, open=n, critical=crit))
-    return dict(j, warnings=ws, open=n, critical=crit,
+    import refit   # here: refit does not import draft, and the page asks this of the answered warnings
+    return dict(j, warnings=ws, open=n, critical=crit, refit=refit.needed(ws),
                 step5=sum(1 for d in decisions.values() if d.get("answer") == "step5"))
 
 def info(model=None, rec=None):

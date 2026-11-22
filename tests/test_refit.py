@@ -2071,6 +2071,19 @@ def test_a_list_of_many_fixes_is_shown_made_and_taken_back_whole():
     finally: A._refit_clear(); put_setup(was)
 
 
+def test_info_says_whether_there_is_anything_to_refit():
+    flag = lambda: (c.get("/api/draft").get_json(), draft.info())
+    with scene():   # the teachers differ from step 5
+        j, i = flag(); assert j["refit"] is True and i["refit"] is True and refit.needed(j["warnings"]) is True
+    fits = [one(1, 0, 1, CLS, EL, T1)]
+    with scene(rows=fits):   # the timetable is what step 5 says
+        j, i = flag(); assert j["refit"] is False and i["refit"] is False and not refit.targets(j["warnings"]), [w["key"] for w in j["warnings"]]
+    with scene(rows=fits, rules=[dict(AWAY(T1, 0, 1, 1), strength="Prefer")]):   # only a Prefer rule is broken
+        j, i = flag(); assert any(w["kind"] == "rule" and not w.get("decision") for w in j["warnings"]) and j["refit"] is False and i["refit"] is False, [w["key"] for w in j["warnings"]]
+    with scene():   # the one warning answered: step 8 counts it settled
+        draft.decide(TEACH, "step5"); j, i = flag(); assert j["refit"] is False and i["refit"] is False
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()
