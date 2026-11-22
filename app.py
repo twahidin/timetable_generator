@@ -13,7 +13,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, draft, history, store, sync, typed, versions
+import access, checks, compare, draft, history, store, sync, typed, versions
 from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, people as relief_people, settings as relief_settings
 from ttgen import choices
@@ -968,11 +968,11 @@ def _version_error(e):
 @app.get("/api/draft/versions")
 @need("committee")
 def draft_versions():
-    """the saved versions of the draft, newest first, with the draft's own counts and (Task 5) the published timetable's"""
+    """the saved versions of the draft, newest first, with the draft's own counts and the published timetable's"""
     try:
         j = draft.info(); summary = None
         if j: summary = dict(source=j.get("source"), fixes=len(j.get("fixes") or []), critical=j["critical"], warnings=sum(1 for w in j["warnings"] if not w.get("decision") and not w.get("crit")))
-        return jsonify(versions=versions.listing(), draft=summary, published=None)
+        return jsonify(versions=versions.listing(), draft=summary, published=compare.published_counts())
     except LookupError: return {"error": NO_SETUP}, 409
     except Exception as e:
         app.logger.exception("listing the versions"); return {"error": f"Could not list the versions: {e}"}, 400
