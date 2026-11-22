@@ -8,7 +8,7 @@ pick), pick None while being picked) and history (dict(what, who, by, at, why) f
 Every change is load, modify, save under absences._LOCK; nothing here calls the model.
 
 links (exams.relief_links.Links, or None) says what approved exams and events do to a date. A lesson they stop is not picked
-for, approved, given to anyone, split or joined (NOT_HAPPENING) and takes nobody's time; nothing of it is written, so a lesson that happens
+for, approved, given to anyone, split, joined, kept, acknowledged or asked to change (NOT_HAPPENING) and takes nobody's time; nothing of it is written, so a lesson that happens
 again (the exam withdrawn) has the cover it had. Someone on an exam duty or at an event is not free (free.free_then)."""
 import datetime
 
@@ -360,12 +360,13 @@ def join(id, key, by, links=None):
     return r
 
 
-def keep(id, ckey, by):
+def keep(id, ckey, by, links=None):
     """the team closes a request to change: the relief stays with the teacher who asked, and its new pick, if any, is
     written down as dropped"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
         if state(r, x, c) != "change": raise ValueError(NO_CHANGE_ASKED)
+        _happens(links, x)
         now, new = _absences._now(), new_pick(c)
         if new: _log(c, "dropped", new["who"], by, now)                     # the request's new pick is not needed now
         c["change"] = None
@@ -378,12 +379,13 @@ def _mine(r, x, c, me):
     if state(r, x, c) not in ("approved", "acknowledged", "change") or c.get("relief") != me: raise ValueError(NOT_YOURS_COVER)
 
 
-def acknowledge_once(id, ckey, me):
+def acknowledge_once(id, ckey, me, links=None):
     """the approved relief teacher acknowledges (once; after asking to change, it takes the relief after all) -> (the record,
     whether this call did it: False when it was acknowledged already, on the page or on Telegram, and nothing was saved)"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
         _mine(r, x, c, me)
+        _happens(links, x)
         if state(r, x, c) == "acknowledged": return r, False
         now = _absences._now()
         new = (c.get("change") or {}).get("pick")
@@ -394,16 +396,17 @@ def acknowledge_once(id, ckey, me):
     return r, True
 
 
-def acknowledge(id, ckey, me):
+def acknowledge(id, ckey, me, links=None):
     """as acknowledge_once -> the record"""
-    return acknowledge_once(id, ckey, me)[0]
+    return acknowledge_once(id, ckey, me, links=links)[0]
 
 
-def ask_change(id, ckey, why, me):
+def ask_change(id, ckey, why, me, links=None):
     """the approved relief teacher asks to change, saying why in a line; the relief stays with them until the team acts"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
         _mine(r, x, c, me)
+        _happens(links, x)
         if state(r, x, c) == "change": raise ValueError(ASKED_ALREADY)
         why = why.strip() if isinstance(why, str) else ""
         if not 1 <= len(why) <= 200: raise ValueError(CHANGE_WHY)

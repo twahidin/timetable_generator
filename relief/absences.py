@@ -166,30 +166,30 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
             # others keeps those not away then, and with none there it is an ordinary lesson (needed unless the client says not).
             # An absence sent earlier that said "{them} is there" is left as it is; this one covers the lesson.
             there = _free.there_then(records, x["others"], x["date"], x["p"], x["n"], links=links)
-            stopped = links.stopped(x) if links is not None else ""
-            if stopped:      # an approved exam or event holds every period of it: it does not happen, whatever the client asked
-                needed, not_needed = False, dict(by="app", why="Not happening: " + stopped)
-            elif there:
+            # A lesson an approved exam or event stops is kept as any other (needed, unless the client or a co-teacher says
+            # not): the stop is worked out wherever it matters (cover.stopped) and never written, so a lesson that happens
+            # again, the exam withdrawn, still has its relief asked for.
+            if there:
                 needed = a.get("needed") is True
                 not_needed = None if needed else dict(by="app", why=f"{' and '.join(there)} is there")
             else:
                 needed = a.get("needed") is not False
                 not_needed = None if needed else dict(by=by, why="Not needed")
             built.append(dict(x, date=x["date"].isoformat(), others=there, needed=needed, not_needed=not_needed, relief=None, relief_by=None,
-                              work=dict(text="", link="", files=[]), _ask=a))
-        if not any(x["needed"] for x in built) and not (links is not None and any(links.duties(teacher, d, tuple(periods) if periods else None) for d in dates)):
+                              work=dict(text="", link="", files=[]), _ask=a, _stopped=bool(_cover.stopped(links, x))))
+        if not any(x["needed"] or x["_stopped"] for x in built) and not (links is not None and any(links.duties(teacher, d, tuple(periods) if periods else None) for d in dates)):
             raise ValueError("There are no lessons to cover in that time.")
         _no_overlap(records, teacher, [x for x in built if x["needed"]])
         pending = dict(teacher=teacher, dates=[d.isoformat() for d in dates], periods=periods, cancelled=None, lessons=[])
-        if not may_choose and any(x["needed"] and x["_ask"].get("relief") for x in built):
+        if not may_choose and any(x["needed"] and not x["_stopped"] and x["_ask"].get("relief") for x in built):
             raise ValueError("Only management and the relief team choose relief teachers.")     # before free_then: no probing who is free
         moving = _moving(records, teacher, built)
         for o, moved in moving:
             for x in built:
-                if x["needed"] and x["key"] in moved: _may_replace(moved[x["key"]], x, x["_ask"].get("relief"))
+                if x["needed"] and not x["_stopped"] and x["key"] in moved: _may_replace(moved[x["key"]], x, x["_ask"].get("relief"))
         for x in built:
             name = x["_ask"].get("relief")
-            if name and x["needed"]:
+            if name and x["needed"] and not x["_stopped"]:          # nobody is chosen for a lesson that does not happen (as choose)
                 lesson = dict(x, date=datetime.date.fromisoformat(x["date"]))
                 free = _free.free_then(pub, settings, records + [pending], lesson, teacher, links=links)
                 if name not in [p["name"] for g in free["groups"] for p in g["people"]]:
@@ -197,6 +197,7 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
                 x["relief"], x["relief_by"] = name, by
             pending["lessons"].append(x)
         for x in built:      # the work checks come last
+            x.pop("_stopped")
             x["work"] = _check_work(x.pop("_ask").get("work"))
             if x["work"]["files"]: raise ValueError(NO_FILES_YET)
         r = dict(id=secrets.token_hex(6), teacher=teacher, dates=pending["dates"], periods=periods, reason=reason, reason_text=text.strip(),
@@ -299,7 +300,7 @@ def _backup_lesson(records, teacher, x, links):
     """one lesson of a backup (x from lessons.on_date): needed unless one of its other teachers is there (there_then, as new
     decides), no relief, no work; None while the teacher is away in an absence of their own (that absence covers it)"""
     iso = _free._iso(x["date"])
-    try: away = _free._absent_then([r for r in records if not r.get("exams")], teacher, iso, x["p"], x["n"])
+    try: away = _free._absent_then([r for r in records if not r.get("exams")], teacher, iso, x["p"], x["n"], links=links)
     except (KeyError, TypeError, ValueError, IndexError): away = False      # a malformed absence never stops a backup
     if away: return None
     there = _free.there_then(records, x.get("others") or [], iso, x["p"], x["n"], links=links)

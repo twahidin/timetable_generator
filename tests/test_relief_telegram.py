@@ -3106,7 +3106,7 @@ def unreadable():
     """what exams.relief_links reads cannot be read (the line fill logs of it is not printed here)"""
     lg = logging.getLogger("relief.fill"); quiet = logging.NullHandler(); lg.addHandler(quiet); prop, lg.propagate = lg.propagate, False
     try:
-        with stand_in(SC, "on_site", lambda: 1 / 0): yield
+        with stand_in(SC, "read_on_site", lambda: 1 / 0): yield
     finally: lg.removeHandler(quiet); lg.propagate = prop
 def exam_links(): return RL.Links.load(SCHOOL, TERM)      # what a sweep reads, and gives due
 def relief_buttons(i, ckey=K5, who_=SAM, date="2026-10-13"):
@@ -3282,7 +3282,7 @@ def on_again_reaches_whoever_was_told_it_was_off():
 
 @t
 def on_again_is_not_said_of_a_lesson_that_is_not_there_any_more():
-    """a publish moved it, or its date is a holiday now: the exam does not stop it, and it does not happen either"""
+    """a publish moved it (the exam stops it still, by its own periods), or its date is a holiday now (nothing does): it does not happen either way"""
     row = next(x for x in SCHOOL["model"]["lessons"] if x["classes"] == ["1A", "1B"])
     @contextlib.contextmanager
     def moved():
@@ -3297,15 +3297,15 @@ def on_again_is_not_said_of_a_lesson_that_is_not_there_any_more():
     for gone_then in (moved, holiday):
         with exam_school(SAM):
             i, key = told_relief(); e = exam(); swept()
-            with gone_then(): assert CV.stopped(RL.Links.load(SCHOOL, rs()["calendar"]), covered(i, K5)[1]) == "" and swept() == 0, "the exam is on still"
+            with gone_then(): assert bool(CV.stopped(RL.Links.load(SCHOOL, rs()["calendar"]), covered(i, K5)[1])) == (gone_then is moved) and swept() == 0, "the exam is on still"
             assert swept() == 0; withdraw(e)
             with gone_then(): assert swept() == 0 and dues(links=exam_links()) == [], "nor once it is withdrawn"
             assert TE.sweep() == 1
             with gone_then(): assert send() == 0 and state(f"again:{key}:0") == "dropped" and swept() == 0, "nor when that happens before it goes"
             assert swept() == 1 and swept() == 0 and said(SAM) == [RELIEF_K5, STOPPED_K5, AGAIN_K5], gone_then.__name__
             again_on(e); TE.sweep()
-            with gone_then(): assert send() == 0 and state(f"stopped:{key}:1") == "dropped", "that it is stopped is not so then"
-            assert swept() == 1 and said(SAM)[3:] == [STOPPED_K5]
+            with gone_then(): assert send() == (gone_then is moved) and state(f"stopped:{key}:1") == ("sent" if gone_then is moved else "dropped"), "on a holiday it is not so that it is stopped"
+            assert swept() == (gone_then is holiday) and said(SAM)[3:] == [STOPPED_K5]
 
 @t
 def nothing_is_said_about_stopping_while_the_exams_cannot_be_read():
@@ -3388,9 +3388,9 @@ def a_takeover_of_the_absence_changes_nothing_of_a_stopped_relief():
         assert swept() == 0 and said(SAM) == [RELIEF_K5] and said(TEAM) == [] and len(said(EVE)) == 1, "the same relief, in another absence: nobody is told that it was cancelled"
         e = exam(); assert swept() == 1; withdraw(e); assert swept() == 1 and said(SAM)[1:] == [STOPPED_K5, AGAIN_K5] and buttons_of(outs("again")[0]) == relief_buttons(j)
         at("09:20"); absences.cancel(j, "x", EVE); swept(); assert said(SAM)[3:] == [GONE_K5] and said(TEAM) == [CANCELLED_EVE.format(EVE)], "that one is cancelled"
-    with exam_school(SAM, EVE, TEAM):                                                      # taken over while it is stopped: the new absence needs no relief for it, so the cover ends
-        d, b = backup(); e = exam(); swept(); at("09:10"); j = own(); x = covered(j, K5)[1]; assert x["needed"] is False and x["not_needed"]["why"] == f"Not happening: 1A, 1B are on {EXAM}"
-        assert swept() == 1 and said(SAM) == [RELIEF_K5, STOPPED_K5, GONE_K5] and said(TEAM) == []; withdraw(e); assert swept() == 0
+    with exam_school(SAM, EVE, TEAM):                                                      # taken over while it is stopped: the new absence keeps it, so the relief goes with it and is on again
+        d, b = backup(); e = exam(); swept(); at("09:10"); j = own(); assert covered(j, K5)[1]["needed"] is True and CV.state(*covered(j, K5)) == "approved"
+        assert swept() == 0 and said(SAM) == [RELIEF_K5, STOPPED_K5] and said(TEAM) == []; withdraw(e); assert swept() == 1 and said(SAM)[2:] == [AGAIN_K5] and buttons_of(outs("again")[0]) == relief_buttons(j)
     with exam_school(SAM, EVE, TEAM):                                                      # in step with the exams: a stopped lesson leaves the backup, so its relief is gone
         d, b = backup(); e = exam(); RL.sync_all(SCHOOL, TERM, LS.today()); assert absences.load(b)["lessons"] == [] and [x["key"] for x in absences.load(b)["gone"]] == [K5]
         swept(); assert said(SAM) == [RELIEF_K5, GONE_K5] and len(said(TEAM)) == 1 and said(TEAM)[0].startswith("❌ Cancelled by "), "that backup is over"
@@ -4279,7 +4279,7 @@ def two_presses_at_once_save_once():
     # one at a time: another's press, and a typed line, wait until the one that is going is done
     with school(SAM, EVE, MAYA):
         i, key = told_relief(); j = told_planned(dates=["2026-10-16"]); give(i, K2, MAYA); swept(); press(MAYA, "change"); inside, go, real_once = threading.Event(), threading.Event(), CV.acknowledge_once
-        def slow(*a): inside.set(); assert go.wait(10) and bot._pressing.locked(); return real_once(*a)
+        def slow(*a, **k): inside.set(); assert go.wait(10) and bot._pressing.locked(); return real_once(*a, **k)
         with stand_in(CV, "acknowledge_once", slow):
             ups = [callback("b:" + tok(n, what), under(tok(n, what))) for n, what in ((SAM, "ack"), (EVE, "cancel"))] + [msg("A meeting", CHATS[MAYA])]
             ths = [threading.Thread(target=hook, args=(u,)) for u in ups]
@@ -4291,11 +4291,11 @@ def two_presses_at_once_save_once():
     for first in ("page", "here"):
         with school(SAM):
             i, key = told_relief(); h, real_once, done = Since(), CV.acknowledge_once, []
-            def once(*a):
+            def once(*a, **k):
                 if not done:
                     done.append(1)
                     on_cover(SAM, i, K5, "acknowledge") if first == "page" else hook(callback("b:" + tok(SAM, "ack"), under(tok(SAM, "ack"))))
-                return real_once(*a)
+                return real_once(*a, **k)
             if first == "page":
                 with stand_in(bot._cover, "acknowledge_once", once): assert press(SAM, "ack") == ("✅ Acknowledged 09:00.", False)
             else:

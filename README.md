@@ -46,7 +46,7 @@ Stage 3 is the relief team's module and everyone's cover list:
 Nothing reaches a relief teacher before the relief team approves it. There is no Telegram yet (stage 4), and the
 published timetable on a date, with the relief in it, comes later.
 
-Relief also knows what approved exams and events do to a date (stage 3 of exams and events): a lesson whose every period stops for an exam or event shows as "Not happening" and needs no relief; someone on an exam duty or going to an event is not offered as free then (a fold under the list says who and why) and cannot be chosen; their duty minutes count in "week so far"; and an absence on a day the teacher has a duty may be sent even when every lesson stops, because the duty must be replaced. The forms list the teacher's duties on each date. An absence sent before the exam or event was approved shows such a lesson as "Not happening", and it cannot be given a relief teacher. The relief team's pages know the same: such a lesson is not picked for, approved or counted (Today and Reliefs I'm covering say "Not happening", and a relief given before stands again if the exam is withdrawn); nobody on an exam duty or at an event is picked, and an approved relief who is given a duty then is flagged; Today says which duty the teacher of a backup is on; and Load's "Week so far" and the numbers the AI is given count exam and event duties and leave out lessons that stop.
+Relief also knows what approved exams and events do to a date (stage 3 of exams and events): a lesson whose every period stops for an exam or event shows as "Not happening" and needs no relief while it is stopped (if the exam is withdrawn, an absence sent meanwhile asks for its relief again); someone on an exam duty or going to an event is not offered as free then (a fold under the list says who and why) and cannot be chosen; their duty minutes count in "week so far"; and an absence may be sent even when every lesson stops, because the duty must be replaced and the exams committee sees who is away. The forms list the teacher's duties on each date. An absence sent before the exam or event was approved shows such a lesson as "Not happening", and it cannot be given a relief teacher. The relief team's pages know the same: such a lesson is not picked for, approved or counted (Today and Reliefs I'm covering say "Not happening", and a relief given before stands again if the exam is withdrawn); nobody on an exam duty or at an event is picked, and an approved relief who is given a duty then is flagged; Today says which duty the teacher of a backup is on; and Load's "Week so far" and the numbers the AI is given count exam and event duties and leave out lessons that stop.
 
 The reason for an absence is seen only by the absent teacher, whoever planned it, management and the relief team; each
 relief save is one line in the **History**, never with the reason. Relief reads the teachers from the published timetable, so publish first. **Relief settings**
@@ -195,6 +195,21 @@ is not on step 3, and a named subject the class has only in groups.
    There is no other editor: everything is done on the board and in its panel. At the foot of the timetable card,
    under the upload's notes, **Go to step 9** goes on. Steps 8 and 9 do not show the setup's "Things to fix" column, so the
    timetable has the page's width.
+
+   **Saved versions and Compare.** Step 8 keeps one draft and, beside it, named versions of it that can be opened again. **Compare** (the
+   page `/compare`, for the committee) sets two of them side by side: the draft, a saved version or the published timetable. Lessons are matched
+   by what they are (the planned lesson of step 5), never by lesson number, so two uploads that number their lessons differently still compare.
+   Six tiles count the lessons at another time, the lessons with a different teacher or room, the critical mistakes, the warnings and the longest
+   day of a teacher. Critical and warnings are "checked now": each timetable is checked against the setup as it is today, so a version saved
+   before step 5 changed can show warnings it did not have then. **Show** picks a class, a teacher or a room: its week on each side is drawn in
+   two grids (stacked on a phone), with **mark what differs** outlining in orange the places that are not the same, bands in light blue, and a
+   sentence for each difference below. **Download the differences (Excel)** lists every difference, class by class. Comparing only reads: nothing
+   is changed. The **Versions** button on the upload card (**Versions (3)** when there are three) opens the list over the page: **Save the draft
+   as** names a copy of the draft (**Save version**; at most 30 are saved by hand); each version has **Open**, **Compare…**, **Download**
+   (the timetable as a database) and **Delete** (it asks first). **Open** never loses the draft you had: the draft is kept first as a version of
+   its own, and step 8 is drawn from the one opened. The app also keeps the draft as a version before an upload replaces it and before a version
+   is opened (the newest 10 of these are kept, the older ones go). The list also shows the published timetable, to compare with. The list only
+   reads and saves: nothing in it publishes.
 6. **Publish** (step 9): it shows the timetable as it will be published, read-only: the critical mistakes (each with
    **Show on step 8**, which opens step 8 with the warning marked in the panel's Warnings tab and its lesson selected on
    the board, or a lesson that is not placed selected in the Not placed tab), every other

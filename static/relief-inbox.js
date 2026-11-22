@@ -45,7 +45,7 @@
     let tail;
     if (r.cancelled) {
       const c = r.cancelled;
-      tail = `<td colspan="3"><span class="chip st-off">${esc(`Cancelled by ${c.by}${c.at ? `, ${stamp(c.at)}` : ""}: “${c.why}”`)}</span></td>`;
+      tail = `<td colspan="3"><span class="chip st-off">${esc(`Cancelled${c.by === "app" ? "" : ` by ${c.by}`}${c.at ? `, ${stamp(c.at)}` : ""}: “${c.why}”`)}</span></td>`;
     } else {
       const ack = r.how !== "planned" ? `<span class="small muted">their own request</span>`
         : r.acknowledged ? `<span class="chip st-ok">✓ ${esc(stamp(r.acknowledged.at) || "acknowledged")}</span>` : `<span class="chip st-amber">not acknowledged yet</span>`;

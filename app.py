@@ -13,7 +13,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, draft, history, store, sync, typed
+import access, checks, compare, draft, history, store, sync, typed, versions
 from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
@@ -799,7 +799,7 @@ def _worked(r):
 @need("committee")
 def draft_upload():
     """a timetable made outside the app (the skill with an AI agent, or another program) becomes the draft: kept on the
-    server and checked against the saved setup. A draft with fixes that were never published is replaced only with replace=1."""
+    server and checked against the saved setup. The draft it replaces is kept as a version (replace=1 is still accepted and ignored)."""
     spec, _ = store.load_setup()
     if not spec: return {"error": NO_SETUP}, 409
     work = tempfile.mkdtemp(prefix="tt-")
@@ -807,12 +807,12 @@ def draft_upload():
         try:
             sp, tp = _save_uploads(work)
             name = os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file"
-            m = draft.save(sp, tp, name, spec,
-                           replace=request.form.get("replace") == "1")
-        except draft.UnpublishedFixes as e: return {"error": str(e), "fixes": e.count}, 409
+            got = {}
+            m = draft.save(sp, tp, name, spec, by=by()["as"], out=got)
+            kept = got.get("kept")
         except ValueError as e: return {"error": str(e)}, 400
-        r = _checked(lambda: draft.info(model=m))
-        if _worked(r): _draft_entry("upload", f"Uploaded {name}")
+        r = _checked(lambda: dict(draft.info(model=m), kept=kept))
+        if _worked(r): _draft_entry("upload", f"Uploaded {name}" + (f"; the draft before is kept as version “{kept['name']}”" if kept else ""))
         return r
     finally: shutil.rmtree(work, ignore_errors=True)
 
@@ -829,7 +829,7 @@ def draft_decide():
     try:
         try: w = next((w for w in (draft.info() or {}).get("warnings", []) if w.get("key") == key), None)
         except Exception: w = None
-        out = jsonify(draft.decide(key, body.get("answer"), by=by()))
+        uid = body.get("upload_id"); out = jsonify(draft.decide(key, body.get("answer"), by=by(), upload_id=uid if isinstance(uid, str) else None))
         _draft_entry("decide", f"Decided: {body.get('answer')} — {w['text'] if w else key}")
         return out
     except ValueError as e: return {"error": str(e)}, 400
@@ -964,6 +964,143 @@ def draft_download():
         return send_file(data, as_attachment=True, download_name=safe_name(f"{m['school']['name']} {m['school']['timetable']}") + " - draft.sqlite", mimetype="application/vnd.sqlite3")
     finally: shutil.rmtree(work, ignore_errors=True)
 
+def _version_error(e):
+    """a ValueError from versions.* as a sentence: 404 for a version that is not there, else 400"""
+    return {"error": str(e)}, (404 if str(e) == "There is no such version." else 400)
+
+@app.get("/api/draft/versions")
+@need("committee")
+def draft_versions():
+    """the saved versions of the draft, newest first, with the draft's own counts and the published timetable's"""
+    try:
+        j = draft.info(); summary = None
+        if j: summary = dict(source=j.get("source"), fixes=len(j.get("fixes") or []), critical=j["critical"], warnings=sum(1 for w in j["warnings"] if not w.get("decision") and not w.get("crit")))
+        return jsonify(versions=versions.listing(), draft=summary, published=compare.published_counts())
+    except LookupError: return {"error": NO_SETUP}, 409
+    except Exception as e:
+        app.logger.exception("listing the versions"); return {"error": f"Could not list the versions: {e}"}, 400
+
+@app.post("/api/draft/versions")
+@need("committee")
+def draft_version_save():
+    body = request.get_json(force=True, silent=True); body = body if isinstance(body, dict) else {}
+    try: v = versions.save(body.get("name"), by()["as"])
+    except ValueError as e: return _version_error(e)
+    _draft_entry("version", f"Saved version “{v['name']}”")
+    return jsonify(v)
+
+@app.post("/api/draft/versions/<vid>/open")
+@need("committee")
+def draft_version_open(vid):
+    try: got = versions.open_version(vid, by()["as"])
+    except ValueError as e: return _version_error(e)
+    kept, opened = got["kept"], got["opened"]
+    _draft_entry("version", f"Opened version “{opened['name']}”" + (f"; the draft before is kept as version “{kept['name']}”" if kept else ""))   # the version is the draft now, whatever the check below says
+    r = _checked(lambda: dict(info=draft.info() or {"draft": None}, kept=kept, opened=opened))
+    return r if _worked(r) else (dict(r[0], kept=kept, opened=opened), r[1])
+
+@app.delete("/api/draft/versions/<vid>")
+@need("committee")
+def draft_version_delete(vid):
+    try: v = versions.delete(vid)
+    except ValueError as e: return _version_error(e)
+    _draft_entry("version", f"Deleted version “{v['name']}”")
+    return jsonify(deleted=v)
+
+@app.get("/api/draft/versions/<vid>/download")
+@need("committee")
+def draft_version_download(vid):
+    """a saved version as a timetable database, like the draft's own download"""
+    from ttgen.export import safe_name
+    try: f = versions.folder(vid); name = versions._read(vid)["name"]
+    except (ValueError, TypeError): return {"error": "There is no such version."}, 404
+    work = tempfile.mkdtemp(prefix="tt-")
+    try:
+        try: path = os.path.join(work, "version.sqlite"); draft.database(path, folder=f)
+        except draft.NotPlaced as e: return {"error": str(e), "unplaced": e.count}, 409
+        except LookupError: return {"error": NO_SETUP}, 409
+        except Exception as e:
+            app.logger.exception("downloading a version"); return {"error": f"Could not make the file: {e}"}, 400
+        with open(path, "rb") as fh: data = io.BytesIO(fh.read())
+        return send_file(data, as_attachment=True, download_name=safe_name(name) + " - version.sqlite", mimetype="application/vnd.sqlite3")
+    finally: shutil.rmtree(work, ignore_errors=True)
+
+# ------------------------------------------------------------------------------------------------ the Compare page
+@app.get("/compare")
+@need("committee")
+def compare_page():
+    return app.send_static_file("compare.html")
+
+def _compare_sources():
+    """the pickers of the Compare page: the draft (when there is one), every version newest first, the published timetable (when there is one)"""
+    out = [dict(src="draft", label=compare.label("draft"))] if draft.exists() else []
+    out += [dict(src="v:" + v["id"], label=versions.label(v)) for v in versions.listing(counts=False)]
+    if store.published(): out.append(dict(src="published", label=compare.label("published")))
+    return out
+
+def _compare_error(e):
+    """404 for a version that is not there, 400 for any other sentence, 409 without a setup; a compare that goes wrong is a sentence too (400), as _checked does, never a server error"""
+    if type(e) is LookupError: return {"error": NO_SETUP}, 409   # no setup saved (a KeyError or IndexError is a fault in the compare)
+    if isinstance(e, ValueError): return {"error": str(e)}, 404 if str(e) == compare.NO_VERSION else 400
+    app.logger.exception("comparing two timetables"); return {"error": f"Could not compare the timetables: {e}"}, 400
+
+def _compare_pair():
+    """(a, b) from the query: b is the draft unless given; a is the first picker entry that is not b"""
+    b = request.args.get("b") or "draft"; a = request.args.get("a")
+    if not a:
+        a = next((s["src"] for s in _compare_sources() if s["src"] != b), None)
+        if not a: raise ValueError("There is nothing to compare with yet.")
+    return a, b
+
+def _involves(row, view, name):
+    if row is None: return False
+    return name in row["classes"] if view == "class" else name in row["teachers"] if view == "teacher" else row["room"] == name
+
+@app.get("/api/compare")
+@need("committee")
+def api_compare():
+    """two timetables side by side: ?a=&b=&view=class|teacher|room&name=. The totals, the pickers, the week of the chosen class, teacher or room on
+    each side with the cells that take part in a difference (`marks`, [day, period]) and a sentence for each difference that involves it (`lines`)"""
+    rec = store.setup_record()
+    try:
+        a, b = _compare_pair(); la, lb = compare.label(a), compare.label(b); d, ma, mb = compare.both(a, b, rec)
+    except Exception as e: return _compare_error(e)
+    view = request.args.get("view") or "class"; name = request.args.get("name")
+    if view not in ("class", "teacher", "room"): return {"error": compare.NO_NAME}, 400
+    names = d["names"][{"class": "classes", "teacher": "teachers", "room": "rooms"}[view]]
+    if not name:
+        name = next((n for n in names if any(_involves(i["a"], view, n) or _involves(i["b"], view, n) for i in d["items"])), names[0] if names else None)
+    if name not in names: return {"error": compare.NO_NAME}, 400
+    try:
+        weeks = {}
+        for k, m in (("a", ma), ("b", mb)):
+            try: weeks[k] = compare.week(m, view, name)
+            except ValueError as e:
+                if str(e) != compare.NO_NAME: raise
+                weeks[k] = None   # the name is on the other timetable only
+    except Exception as e: return _compare_error(e)
+    have = weeks["a"] or weeks["b"]
+    if have is None: return {"error": compare.NO_NAME}, 400
+    for k in ("a", "b"):
+        if weeks[k] is None: weeks[k] = dict(have, cells=[])
+    mine = [i for i in d["items"] if _involves(i["a"], view, name) or _involves(i["b"], view, name)]
+    marks = {k: [] for k in "ab"}
+    for i in mine:
+        for k in "ab":
+            r = i[k]
+            if _involves(r, view, name) and [r["d"], r["p"]] not in marks[k]: marks[k].append([r["d"], r["p"]])
+    return jsonify(a=dict(src=a, label=la), b=dict(src=b, label=lb), sources=_compare_sources(), totals=d["totals"], names=d["names"], view=view, name=name,
+                   weeks=weeks, marks=marks, lines=list(dict.fromkeys(compare.line(i, d["days"]) for i in mine)))
+
+@app.get("/api/compare.xlsx")
+@need("committee")
+def api_compare_xlsx():
+    from ttgen.export import safe_name
+    try:
+        a, b = _compare_pair(); la, lb = compare.name(a), compare.name(b); data = compare.xlsx(a, b, store.setup_record())
+    except Exception as e: return _compare_error(e)
+    return send_file(io.BytesIO(data), as_attachment=True, download_name=safe_name(f"Differences {la} and {lb}") + ".xlsx", mimetype=XLSX)
+
 @app.post("/api/draft/publish")
 @need("committee")
 def draft_publish():
@@ -1049,7 +1186,7 @@ def status():
     mine = dict(who=p["name"] if p else None, group=people.LABELS.get(p["group"]) if p else None, via=via(), depts=head_depts(), rights=sorted(rights()), shared=shared(),
                 admin_exists=bool(people.usable_admins(people.load())))
     if not has("committee"): return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info(), **mine)
-    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), typed=typed.enabled(), **mine)
+    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), versions=versions.count(), typed=typed.enabled(), **mine)
 
 NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
 
@@ -1903,7 +2040,9 @@ def _event_rights(sched):
     if p is None: return None
     return (sched is None or sched.get("in_charge") == p["name"]), p["name"], False
 
-def _exams_today(): return datetime.date.today()
+def _exams_today():
+    """the school's date, as relief has it: the live server runs on UTC, where it is still yesterday until 8 in the morning"""
+    return relief_lessons.today()
 
 def _published_reader():
     """who may read the published exams data, and how much: "full" (teacher names, duty rooms, roster, prints) for everyone
