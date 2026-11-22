@@ -4,9 +4,12 @@ A teacher goes as a code ("T07"), several people who fit as "T03 or T11", a stud
 school". Words are compared in any case, with wide and joined letters as plain ones, no accents, every dash a hyphen and without
 the characters nobody sees; letters and digits glued together are read apart, but a word of the timetable ("3A", "T02") stays whole.
 
-1. TITLED NAMES: a title (TITLES; it is a teacher's, never part of a student's name) and the longest run of words after it, on one
-line and in one cell, that are all in one teacher's name. Nothing else takes a word of it; a whole name of that teacher that holds
-it, in other cells too, is the same match. What is left beside it is looked at on its own.
+1. TITLED NAMES: a title (TITLES; it is a teacher's, never part of a student's name) and the longest run of words after it that are
+all in one teacher's name, with a space or one hyphen, apostrophe, dot or underscore between two of them and no other mark. Nothing
+else takes a word of it. It may go on, when the pick (2) then hides at least as many words: with the last words it gave back because
+they begin somebody's whole name in its cell and a teacher is left without them ("Ms Ho Yu Joel Yap": Ms Ho Yu, Mr Joel Yap; a whole
+name gives none back); or to that teacher's whole name that holds it, in its line and cell, through marks, one comma or brackets that
+close. A name stored with a title in it ("Ho Mei (Mrs Wong)") goes first, as it is stored. What is left is looked at on its own.
 
 2. WHOLE STORED NAMES, in the words left: every word of a name, in any order, across white space, tabs and bars, lines, one hyphen,
 apostrophe, dot or underscore, brackets, quotes or asterisks, a footnote's digit or mark, and one comma or semicolon. Of all ways to
@@ -15,7 +18,7 @@ and commas, the most in their stored order, the leftmost. Nothing later undoes o
 date, subject or room is beside it: with a student Goh Jun "Mon 3 Jun Goh 8.00" is "Mon 3 a student 8.00", with a Mr Art Koh "Sec 3
 Art Koh" is "Sec 3 T05", and the row is asked about. A name with a comma in it gives way to names without one that hide more, or as
 much (two matches, one on each side), unless it is a teacher's with one word on one side. A part (below) of three or more words, in
-one cell, that holds somebody's whole name is picked among them.
+one cell, that holds somebody's whole name is picked among them. A name with a bracketed part is one by the words outside it too.
 
 3. THE REST, from left to right and the longest first, where the text is from decides:
 - everywhere: two or more words of one name side by side, in any order; a student's ID; a stored name of one word, as it is written
@@ -23,13 +26,12 @@ one cell, that holds somebody's whole name is picked among them.
 - "typed" (a person's own words): also the short name exactly as it is written, and one word that starts with a capital letter
   and is in a teacher's name (not one in capitals with a digit: "WA2");
 - "app" (the app's own sentences and records): also the short name exactly as it is written;
-- "list" (the agreed list): nothing more. Its single words and short names are left alone.
-Any other place counts as "typed", which hides the most.
+- "list" (the agreed list): nothing more: its single words and short names are left alone. Any other place counts as "typed".
 
 Never a code: a protected word on its own (a day or month, or a word of a level, class, subject, short subject, setup code or
 room of the published timetable), or several that all are; a link of names (bin, s/o, and) or one letter on its own; small words
 in small letters ("do an"); one letter glued to a digit (P3, T01); a unit after a number that is a length ("90 min"), not a level's
-(Sec 3) or a paper's (P1); "min" is one only after 10 or more, not part of a time, room or class, or after hours ("1h 5 min"). The words
+(Sec 3) or a paper's (P1); "min" is one only after 10 to 300, not part of a time, room or class, or after hours ("1h 5 min"). The words
 after a unit are, when it makes a whole name of three or more of them ("90 min Jun Tan"), and so is the unit itself after the number
 of a line or cell, 1 to 45, when a whole name starts with it ("12 Min Thu").
 No title: "teacher" and "sir" unless a word with a capital follows; "MISS" before a subject in capitals ("WILL MISS ART"); a
@@ -78,7 +80,6 @@ _CONTROL = re.compile(r"[\x00-\x08\x0e-\x1b\x7f]")
 _NONE, _SOFT, _CELL, _LINE, _COMMA = range(5)           # between two words: nothing that joins; a space or a mark; a tab or a wide space; a line break; a comma
 _LINES = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
 _TIGHT = "-'\u2018\u2019`._"                            # with no space beside it: Wei-Ling, Nur'Aisyah, tan.wei.ling, tan_wei_ling
-_APOSTROPHES = ("'", "\u2019")
 _LIKE_ONE = "\u02b9\u02bb\u02bc\u02bd\u2032"            # signs written for an apostrophe
 _COMMAS = "\u3001\u060c\uff64"
 _MARKS = dict.fromkeys(map(ord, "()[]{}\"'*_^\u2018\u2019\u201c\u201d\u2020\u2021\u00a7\u00b6"))      # round a word of a name
@@ -171,7 +172,7 @@ class _Text:
             if self.key[j] in _UNITS and digit[k] and self.near(j) and not self.level(k) and not (self.glued(k) and not self.unit[j - 2]):
                 hours = self.unit[j - 2] and self.key[j - 2] in _HOURS
                 part = self.norm[self.b[j - 2]:self.a[k]] in (".", ":", "-", "/") and any(c.isdecimal() for c in self.raw[j - 2])          # of a time (8.30), a room (3-01) or a class (3A-12)
-                self.unit[j] = self.key[j] not in ("min", "mins") or hours or len(self.raw[k].lstrip("0")) > 1 and not part and self.raw[k] not in names._strings      # after a number, not a level's (Sec 3) or a paper's (P1)
+                self.unit[j] = self.key[j] not in ("min", "mins") or hours or len(r := self.raw[k].lstrip("0")) in (2, 3) and int(r) < 301 and not part and self.raw[k] not in names._strings      # after a number, not a level's (Sec 3) or a paper's (P1)
                 self.line[j] = len(self.raw[k]) < 3 and 0 < int(self.raw[k]) < 46 and (j == 1 or bool(_EDGE.search(self.norm[self.b[j - 2]:self.a[k]])))      # the number of a line
             elif len(self.key[j]) == 1:          # one letter glued to a digit (P3, T01) is no word of a name
                 self.off[j] = any(0 <= k < n and digit[k] and self.glued(max(j, k)) for k in (j - 1, j + 1))
@@ -188,20 +189,12 @@ class _Text:
 
     def small(self, j): return self.raw[j].islower()
 
-    def sign(self, j):
-        """is word j capitals with a digit glued after it: a paper ("WA2"), not a name alone"""
-        return self.raw[j].isupper() and self.glued(j + 1) and self.digit[j + 1]
-
     def after(self, j):
         """(the next word, what is between them) after word j; digits glued to the end of j or to the next word are a footnote's, and
         are passed over, unless they are a date's or a length's"""
         k = j + 1
         if k + 1 < self.n and self.digit[k] and (self.glued(k) or self.glued(k + 1) and not self.dated(k + 1, -1) and self.key[k + 1] not in _UNITS): return k + 1, self.gap[k + 1 if self.glued(k) else k]
         return k, self.gap[k] if k < self.n else _NONE
-
-    def owns(self, j):
-        """is word j the s of "Ms Tan's": no word of a name"""
-        return self.key[j] == "s" and self.between(j)[-1:] in _APOSTROPHES
 
     def near(self, j):
         """is word j right after the word before it: glued, or with a space or hyphen between them, and no other mark"""
@@ -326,6 +319,7 @@ class Names:
         self._long = {}          # number of words -> whose whole name is that many
         self._titled = {"": 0}   # title -> who has it ("": who has none in front)
         self._ones = {}          # a name of one word -> [(as written, person's mask)]
+        self._outside = {}       # the words of a name that are outside its brackets, sorted -> [each person's mask]
         self._tree = {}          # the full names as stored, word by word: word -> (next, marks between); None -> mask
         self._schools = {}       # the same, for the school's names
         for i, name in enumerate(self._people + [n for _, n in kids]): self._learn(i, name)
@@ -386,6 +380,9 @@ class Names:
         if len(body) == 1: self._ones.setdefault(words[0], []).append((t.raw[first], me))
         elif len(words) < len(body) or any(t.gap[j] == _NONE for j in body[1:]): self._plant(self._tree, t, first, me)        # what a run of words cannot find
         if all(t.key[j] in _TITLES or t.key[j] in words for j in body): self._long[len(words)] = self._long.get(len(words), 0) | me
+        outside = [j for j in body if t.key[j] in words and not any(m.start() < t.a[j] < m.end() for m in re.finditer(r"\(.*?\)|\[.*?\]|\{.*?\}", t.norm))]
+        if len(outside) == 1 < len(words): self._ones.setdefault(t.key[outside[0]], []).append((t.raw[outside[0]], me))          # known by the words outside its brackets too
+        elif len(outside) < len(words): self._outside.setdefault(tuple(sorted(t.key[j] for j in outside)), []).append(me)
         for j, k in enumerate(words):
             at = (k, words[:j + 1].count(k))
             self._has[at] = self._has.get(at, 0) | me
@@ -433,10 +430,6 @@ class Names:
         """is word j an ordinary word in small letters beside a word that is not: "Lim may be away", "Ask Kumar a question" """
         return t.small(j) and not t.small(beside) and self._plain(t.key[j])
 
-    def _apart(self, t, s, j):
-        """is word s no part of a name that goes on at word j: "may Lim come", "on 3 May long papers are" """
-        return self._verb(t, s, j) or t.dated(s, -1) and t.small(j) and not t.small(s)
-
     def _title(self, t, i):
         """(the word after the titles at word i, them), or (i, None). A title is on the line and in the cell of its name. "MISS" is
         not one before a word of a subject in capitals; a subject's code, as it is written ("DR"), only before a word that a teacher
@@ -452,9 +445,7 @@ class Names:
         return (s, got) if got else (i, None)
 
     def _by_title(self, mask, title):
-        same = 0
-        for k in title: same |= self._titled.get(_ALIKE.get(k, k), 0)
-        return mask & same or mask
+        return mask & functools.reduce(int.__or__, (self._titled.get(_ALIKE.get(k, k), 0) for k in title), 0) or mask
 
     def _loose_end(self, t, words, mask):
         """in typed words: may the last word of a match be something else: in another cell or line, a date, a verb, or (when it
@@ -483,7 +474,7 @@ class Names:
         if self._nobody(t, words): return 0
         if k > 1: return mask
         raw, one = t.raw[words[0]], 0
-        if t.sign(words[0]): return 0
+        if raw.isupper() and t.glued(words[0] + 1) and t.digit[words[0] + 1]: return 0          # capitals with a digit glued after them: a paper ("WA2"), not a name alone
         for written, person in self._ones.get(keys[0], ()):
             if raw == written or raw.isupper() and len(raw) > 1: one |= person
         pool = teachers if one & self._teachers or where == "typed" and raw[:1].isupper() else 0
@@ -508,24 +499,30 @@ class Names:
             words = words + [j]
             yield words, mask, comma, g
             j, g = t.after(j)
-            if j >= t.n or t.owns(j) or g == _NONE or g == _COMMA and comma: return
+            if j >= t.n or g == _NONE or g == _COMMA and comma or t.key[j] == "s" and t.between(j)[-1:] in ("'", "\u2019"): return          # the s of "Ms Tan's" is no word of a name
             if g == _COMMA: comma = len(words)
 
     def _titles(self, t, where, heads):
-        """{word: (end, who)} of the titled names, from the word after the title: the longest run of words of one teacher's name in its
-        cell; or that teacher's whole name that holds it, if it has more than a month beyond; or a short name ("Ms Ho") or a name as
-        it is stored ("Ms Tan2") that does. Not one in a name as it is stored ("Ho Mei (Mrs Wong)")"""
-        out, spans = {}, [(s, e, mask) for s in range(t.n) if t.key[s] in self._tree for e, mask in self._walk(self._tree, t, s)]
+        """({word: (end, who)} of the titled names, from the word after the title: the run (_part), or a short name ("Ms Ho") or a name as it
+        is stored ("Ms Tan2") that holds it; [(word, (end, what it adds, who))] of the ways a run may go on, for _wholes to weigh: with the
+        words it gave back; to that teacher's whole name, when a word past the run is not slight or, in a list, no comma is), see the top"""
+        out = {s: (e, mask) for s in range(t.n) if t.key[s] in self._tree for e, mask in self._walk(self._tree, t, s)[-1:] if _TITLES.intersection(t.key[s + 1:e])}
+        grown, adds = [], lambda js, comma: (len(js), sum(t.key[j] not in self._prot for j in js), len(js), 0, -bool(comma), 0)
+        for s, (e, _) in out.items(): t.taken[s:e] = [True] * (e - s)
         for i, (s, title) in heads.items():
             got = self._part(t, s, title, where) if s not in out else None          # of two titles, with the first
-            if not got or any(a < i and b >= got[0] for a, b, _ in spans): continue
-            for words, mask, comma, _ in self._runs(t, s, self._teachers):
-                e, who = words[-1] + 1, mask & self._long.get(len(words), 0) & got[1]
-                if who and not (comma and self._part(t, words[comma], None, where, False)) and (any(not self._slight(t, j) for j in range(got[0], e)) or where != "typed" and all(g == _SOFT for g in t.gap[got[0]:e])): got = e, who
-            more = self._exact(t, i, where) + [(b, 0, mask & self._teachers) for a, b, mask in reversed(spans) if a == s]
-            out[s] = next(((e, who) for e, _, who in more if who and e >= got[0]), got)
-        for s, (e, _) in out.items(): t.taken[s:e] = [True] * (e - s)
-        return out
+            if not got: continue
+            more = self._exact(t, i, where) + [(e, 0, mask & self._teachers) for e, mask in reversed(self._walk(self._tree, t, s))]
+            out[s] = e, mine = next(((e, who) for e, _, who in more if who and e >= got[0] and not {_CELL, _LINE}.intersection(t.gap[s + 1:e])), got[:2])
+            if len(got) > 2 and out[s] == got[:2]: grown.append((s, (got[2], adds([j for j in range(e, got[2]) if not t.digit[j]], 0), got[3])))
+            for words, mask, comma, g in self._runs(t, s, self._teachers) if out[s] == got[:2] else ():
+                x, who, past = words[-1], mask & self._long.get(len(words), 0) & mine, [j for j in words if j >= e]
+                inner, close = t.norm[t.b[s - 1]:t.b[x]], t.norm[t.b[x]:t.b[x] + 1]          # a bracket closes in it, or right after it
+                if g in (_CELL, _LINE): break
+                if not past or not who or comma and self._part(t, words[comma], None, where, False) or any(inner.count(a) - inner.count(b) not in (0, close == b) for a, b in ("()", "[]", "{}")): continue
+                if any(not self._slight(t, j) for j in past) or where != "typed" and not comma: grown.append((s, (x + 1, adds(past, comma), who)))
+            t.taken[s:e] = [True] * (e - s)
+        return out, grown
 
     def _whole(self, t, s, where):
         """[(where it starts, its end, how many words, what it weighs, who)] of the whole stored names of two or more words from word
@@ -535,7 +532,7 @@ class Names:
         out = []
         for words, mask, comma, g in self._runs(t, s, self._all):
             n, e = len(words), words[-1] + 1
-            full = mask & self._long.get(n, 0) if n > 1 else 0
+            full = mask & (self._long.get(n, 0) | (sum(self._outside.get(tuple(sorted(t.key[j] for j in words)), ())) if self._outside else 0)) if n > 1 else 0
             if t.unit[s]:
                 if g != _SOFT: break
                 same = sum(1 << i for i in _bits(full) if self._order[i] == [t.key[w] for w in words]) if t.line[s] else 0
@@ -568,7 +565,7 @@ class Names:
             if None in node: out.append((j, node[None]))
         return out
 
-    def _wholes(self, t, where):
+    def _wholes(self, t, where, grown):
         """{word: (end, who)} of the whole names in the words left (who is None: the school's), picked as the top of the file says. A
         part that holds one counts a word less when it is in one too; a name with a comma in it gives way to all parts"""
         found, near, far, commas = [[] for _ in range(t.n)], [t.n + 1] * t.n, [0] * t.n, False          # (end, its value, who); of the whole names with no comma, the first end of one from a word, and the last of one it is in
@@ -589,6 +586,7 @@ class Names:
                     add(s, x, n - (x <= far[s]), n - (x <= far[s]), mask)
             got = self._part(t, s, None, where, False) if commas else None
             if got and not any(far[s:got[0]]): add(s, got[0], got[0] - s, 0, 0)
+        for s, got in grown: found[s].append(got)          # a titled run that goes on: its words past the run, and no name more
         best, take = [(0,) * 6] * (t.n + 1), [None] * t.n
         for s in range(t.n - 1, -1, -1):
             best[s] = best[s + 1]
@@ -606,14 +604,16 @@ class Names:
 
     # ------------------------------------------------------------------------------------------------ what is left
     def _part(self, t, s, title, where, commas=True):
-        """(end, who) of the longest run of words of one name at word s, or None; after a title, of a teacher's. In a list and in the
-        app's words a day or month bound to a day's number after it is not in it, and protected words are cut from its ends"""
+        """(end, who) of the longest run of words of one name at word s, or None. In a list and in the app's words a day or month bound to
+        a day's number after it is not in it, and protected words are cut from its ends. After a title: of a teacher's, and with (the run's
+        end, whose it is) too when it gave its last words back"""
         words, masks, comma = [], [], 0
         for run, mask, before, g in self._runs(t, s, self._teachers if title else self._all):
             j = run[-1]
             if t.unit[j] or where != "typed" and t.dated(j, 1) and not (title and self._by_title(self._long.get(1, 0), title) & mask): break
-            if len(run) == 2 and not title and self._apart(t, s, j) or g == _COMMA and not commas: break
-            if g in (_CELL, _LINE) and (title or t.key[words[-1]] in self._prot or t.key[j] in self._prot): break          # a month in another cell or line
+            if g == _COMMA and not commas or len(run) == 2 and not title and (self._verb(t, s, j) or t.dated(s, -1) and t.small(j) and not t.small(s)): break          # "may Lim come", "on 3 May long papers are"
+            if title and words and (g != _SOFT or any(t.between(k) not in _TIGHT for k in range(words[-1] + 1, j + 1))): break          # after a title: a space or a tight join, no other mark
+            if g in (_CELL, _LINE) and (t.key[words[-1]] in self._prot or t.key[j] in self._prot): break          # a month in another cell or line
             words, comma = run, before
             masks.append(mask)
         if not words: return None
@@ -631,6 +631,9 @@ class Names:
         if who and comma and len(words) > comma:                                 # a match on each side of the comma
             before = self._part(t, s, title, where, False)
             if before and self._part(t, words[comma], None, where, False): return before
+        for c in range(len(words) - 1, 0, -1) if title and who and not who & self._long.get(len(words), 0) else ():          # "Ms Ho Yu Joel Yap": Joel is Mr Joel Yap's
+            rest = self._who(t, words[:c], masks[c - 1], title, where)
+            if rest and any(a == words[c] and e > words[-1] + 1 and v > 0 and not t.dated(e - 1, 1) and set(t.gap[a + 1:e]) == {_SOFT} for a, e, _, v, _ in self._whole(t, words[c], where)): return words[c - 1] + 1, rest, words[-1] + 1, who
         return (words[-1] + 1, who) if who else None
 
     def _exact(self, t, i, where):
@@ -666,9 +669,7 @@ class Names:
         found = self._exact(t, i, where) if t.key[i] in self._firsts else []          # (end, order on a tie, who)
         got = self._part(t, i, None, where) if (t.key[i], 1) in self._has else None
         if got: found.append((got[0], 2, got[1]))
-        if not found: return None
-        e, _, who = max(found, key=lambda x: x[:2])
-        return e, who
+        return max(found, key=lambda x: x[:2])[::2] if found else None
 
     def _label(self, who, raw):
         who &= self._teachers
@@ -701,8 +702,8 @@ class Names:
     def _pass(self, t, where):
         """t's text with the names in it replaced"""
         heads = {i: (s, title) for i in range(t.n) if t.key[i] in _TITLES for s, title in [self._title(t, i)] if title}       # a title -> the word after it and the titles that follow it, them
-        names = self._titles(t, where, heads)
-        names.update(self._wholes(t, where))
+        names, grown = self._titles(t, where, heads)
+        names.update(self._wholes(t, where, grown))
         text, parts, at, i = t.text, [], 0, 0
         while i < t.n:
             got = None
@@ -735,8 +736,7 @@ class Names:
         if isinstance(obj, str): return self.out(obj, where)
         if obj is None or isinstance(obj, (bool, int, float)): return obj
         if isinstance(obj, dict): return {k: self.scrub(v, where) for k, v in obj.items()}
-        if isinstance(obj, list): return [self.scrub(v, where) for v in obj]
-        if isinstance(obj, tuple): return tuple(self.scrub(v, where) for v in obj)
+        if isinstance(obj, (list, tuple)): return type(obj)(self.scrub(v, where) for v in obj)
         raise TypeError(f"cannot be sent: {type(obj).__name__}")
 
     def code(self, name):
