@@ -11,6 +11,9 @@ import app as A, store  # noqa: E402,F401
 from relief import tg, tgdb  # noqa: E402
 import json, logging, urllib.error  # noqa: E402
 
+KINDS = logging.getLogger("relief.telegram")           # what it logs is not printed here: the tests that check it attach their own handler
+KINDS.addHandler(logging.NullHandler()); KINDS.propagate = False
+
 REAL = []
 def never(url, data, headers, timeout):
     REAL.append(1); raise AssertionError("a test reached the network")
@@ -312,7 +315,7 @@ def wipe():
     with tgdb.db() as c:
         for table in ("links", "codes", "talks", "updates", "outbox", "buttons"): c.execute(f"DELETE FROM {table}")
         c.execute("DELETE FROM state WHERE k='bot'")
-    tg.PRACTICE_LOG.clear(); links.tries.fails.clear(); OB._doubt.clear()
+    tg.PRACTICE_LOG.clear(); links.tries.fails.clear(); OB._doubt.clear(); OB._hold[0] = 0.0
 
 @contextlib.contextmanager
 def no_pub(pub=None):
@@ -1090,7 +1093,7 @@ def an_entry_says_who_and_by_what_way():
 @t
 def nothing_private_is_logged_by_the_hook():
     h, root = Grab(), logging.getLogger()
-    old = root.level; root.addHandler(h); root.setLevel(logging.DEBUG)
+    old = root.level; root.addHandler(h); KINDS.addHandler(h); root.setLevel(logging.DEBUG)
     try:
         with telegram():
             code = links.new_code(TIA)["code"]
@@ -1110,10 +1113,10 @@ def nothing_private_is_logged_by_the_hook():
         assert "ValueError" in text, "a failure is logged by its kind"
         everything = "\n".join(r.getMessage() + str(r.exc_info or "") + str(r.args or "") for r in h.records)
         for bad in (code, access.norm(code), "ABCD", "a private line", "98765", "some_handle_y", tg.hook_secret() or "x" * 64): assert bad not in everything, "logged"
-    finally: root.removeHandler(h); root.setLevel(old)
+    finally: root.removeHandler(h); KINDS.removeHandler(h); root.setLevel(old)
 
 # ---- Task 3: the message queue and its sender ----
-import subprocess  # noqa: E402
+import datetime, subprocess  # noqa: E402
 from relief import absences, files as FI  # noqa: E402
 
 assert OB.SPACING == 0.05 and OB.EVERY == 5
@@ -1173,6 +1176,14 @@ def now_is(text):
     try: yield
     finally: absences._now = old
 
+@contextlib.contextmanager
+def work(*names):
+    """made-up work files -> their rows for queue"""
+    got = [FI.save("abc123", n, f"made-up {n}".encode()) for n in names]
+    try: yield [dict(id="abc123", file=x["id"], name=n) for x, n in zip(got, names)]
+    finally:
+        for x in got: FI.delete("abc123", x["id"])
+
 @t
 def a_key_queues_once_and_only_for_a_linked_person():
     with telegram():
@@ -1190,16 +1201,80 @@ def a_key_queues_once_and_only_for_a_linked_person():
         assert tg.PRACTICE_LOG == [] and rows("buttons") == [], "queueing sends nothing"
         for s in ("queued", "sending", "sent", "failed", "unsure"):
             put("k", state=s); assert q(text="Another") is False and item("k")["text"] == "Line é 1\nLine 2 ", s
-        put("k", state="dropped", tries=4, slows=3, next_at=9e9, files_failed=1)
+        put("k", state="dropped", tries=4, next_at=9e9, files_failed=1)
         assert q(text="Again") is True, "a dropped key is as if it were not there"
-        r = item("k"); assert (r["text"], r["state"], r["tries"], r["slows"], r["files_failed"], r["buttons"]) == ("Again", "queued", 0, 0, 0, "[]") and len(rows("outbox")) == 1, r
+        r = item("k"); assert (r["text"], r["state"], r["tries"], r["files_failed"], r["buttons"]) == ("Again", "queued", 0, 0, "[]") and "slows" not in r and len(rows("outbox")) == 1, r
         assert q() is False
-        for bad in ([["x"]], [[dict(what="ack")]], [5]):          # a button that cannot be shown is the caller's mistake, said at once
-            try: q("bad", buttons=bad)
-            except (TypeError, ValueError, KeyError, AttributeError): pass
-            else: raise AssertionError(bad)
-        assert state("bad") is None
         assert q("flat", buttons=[dict(text="One", what="ack")]) is True and json.loads(item("flat")["buttons"]) == [[dict(text="One", what="ack")]], "a button alone is its own row"
+
+@t
+def what_cannot_be_kept_is_refused_when_it_is_queued():
+    with telegram():
+        links.link(TIA, 501, None); ok = dict(text="A", what="ack", id="abc", ckey="c", who=TIA, extra=dict(a=[1, None]))
+        loop = []; loop.append(loop)
+        bad = [[["x"]], [5], [[dict(what="ack")]], [[dict(ok, text=None)]], [[dict(ok, text=" ")]], [[dict(text="x", url=None)]], [[dict(text="x", url=5)]], [[dict(text="x", url=["https://x"])]]]
+        bad += [[[dict(ok, **{k: v})]] for k in ("text", "what", "id", "ckey", "who") for v in (["x"], dict(a=1), 5, 2 ** 70, True, b"x", "\ud800")]
+        bad += [[[dict(ok, extra=v)]] for v in (object(), {1, 2}, b"x", loop)] + [[[ok], [dict(ok, who=["x"])]]]
+        for b in bad:
+            try: q("bad", buttons=b)
+            except ValueError: pass
+            else: raise AssertionError(b)
+        for text in (None, 5, ["x"], b"x", "\ud800"):
+            try: q("bad", text=text)
+            except ValueError: pass
+            else: raise AssertionError(text)
+        for more in (dict(ref=object()), dict(files=[object()]), dict(files=["x"]), dict(files=[5]), dict(files=[dict(id={1})])):
+            try: q("bad", **more)
+            except ValueError: pass
+            else: raise AssertionError(more)
+        assert rows("outbox") == [], "nothing of it is kept"
+        assert q("good", buttons=[[ok, dict(text="B", what=None, id=None, ckey=None, who=None)], [dict(text="C", url="https://x.org")]]) and q("plain", text="")
+        assert q("one", files=(x for x in [dict(id="a", file="b", name="c")]), buttons=(r for r in [[ok]])) and len(json.loads(item("one")["files"])) == 1
+        assert OB.send_due()["sent"] == 3
+
+@t
+def a_bad_item_never_stops_the_rest():
+    """rows that should not be there (kept by an earlier version, or by hand)"""
+    button = lambda **more: json.dumps([[dict(dict(text="A", what="ack", id="abc"), **more)]])
+    bads = [dict(buttons=button(who=["x"])), dict(text=None), dict(buttons=button(id=2 ** 70)), dict(buttons=button(what=dict(a=1))), dict(buttons="{ not json"), dict(buttons=None),
+            dict(buttons='[["x"]]'), dict(buttons='[[{"what": "ack"}]]'), dict(ref="not json"), dict(files=None), dict(at="not a time", buttons=button()), dict(buttons=button(ckey="\ud800"))]
+    with made_up():
+        links.link(TIA, 501, None)
+        for i, b in enumerate(bads):                                                         # each alone, with one after it
+            q(f"bad{i}"); put(f"bad{i}", **b); q(f"good{i}", text=f"good {i}"); f, seen = tele()
+            assert with_send(f, OB.send_due) == dict(sent=1, waiting=0) and texts(seen) == [f"good {i}"], (b, seen)
+            assert state(f"bad{i}") == "failed" and item(f"bad{i}")["tries"] == 1 and q(f"bad{i}") is False, b
+        f, seen = tele(); assert with_send(f, lambda: OB.send_due(now=9e12)) == dict(sent=0, waiting=0) and seen == [], "failed for good"
+        assert OB.told("bad0")["state"] == "failed" == OB.told_for("bad0")["bad0"]["state"]
+        wipe(); bot_on("ctss_made_up_bot"); links.link(TIA, 501, None)                      # more bad ones than a run takes, among good ones
+        for i in range(50):
+            q(f"bad{i}"); put(f"bad{i}", **bads[i % 2])
+            if i % 5 == 0: q(f"good{i}", text=f"good {i}")
+        f, seen = tele(); runs = [with_send(f, OB.send_due) for _ in range(2)]
+        assert sum(r["sent"] for r in runs) == 10 and runs[-1]["waiting"] == 0 and texts(seen) == [f"good {i}" for i in range(0, 50, 5)], runs
+        assert {state(f"bad{i}") for i in range(50)} == {"failed"}
+        # a store that is locked, or a disk that is full, is nobody's fault: the run ends and nothing is failed by it
+        real = tgdb.db; q("a", text="a"); q("b", text="b"); writes = []
+        def locked(read=False):
+            if not read: writes.append(1); raise sqlite3.OperationalError("database is locked")
+            return real(read)
+        tgdb.db = locked; f, seen = tele()
+        try: assert with_send(f, OB.send_due) == dict(sent=0, waiting=2) and writes == [1] and seen == []
+        finally: tgdb.db = real
+        assert item("a")["state"] == item("b")["state"] == "queued" and item("a")["tries"] == 0
+        real_chat = links.chat_of                                                            # locked as the chat is looked up
+        def no_chat(name): writes.append(2); raise sqlite3.OperationalError("database is locked")
+        links.chat_of = no_chat
+        try: assert with_send(f, OB.send_due) == dict(sent=0, waiting=2) and writes == [1, 2] and item("a")["tries"] == 0 == item("a")["next_at"]
+        finally: links.chat_of = real_chat
+        assert with_send(f, OB.send_due)["sent"] == 2
+        real_settle = OB._settle; q("c", text="c"); q("d", text="d")                         # any other trouble with one answer: the next one goes
+        def settle(it, *a):
+            if it["key"] == "c": raise sqlite3.IntegrityError("made up")
+            return real_settle(it, *a)
+        OB._settle = settle; f, seen = tele()
+        try: assert with_send(f, OB.send_due) == dict(sent=1, waiting=0) and (state("c"), state("d")) == ("sending", "sent") and texts(seen) == ["c", "d"]
+        finally: OB._settle = real_settle
 
 @t
 def two_sweeps_queue_one():
@@ -1315,7 +1390,7 @@ def killed_at_any_step_a_message_never_goes_twice():
                 q(buttons=[[dict(text="A", what="ack")]], files=[dict(id="abc123", file=saved["id"], name="work.pdf")])
                 dead, got, docs = killed_at(n, lambda: [OB.send_due(now=1000 * i) for i in (1, 2, 3)[:len(first) + 1]], *first)
                 assert not OB._busy.locked()
-                mid = state("k"); OB.recover(); OB._doubt.clear()                 # the app starts again, and everything works
+                mid = state("k"); OB.recover(); OB._doubt.clear(); OB._hold[0] = 0.0       # the app starts again, and everything works
                 f, seen = tele(); with_send(f, lambda: [OB.send_due(now=10_000 * i) for i in (1, 2, 3)])
                 assert len(got) + len(texts(seen)) <= 1, (first, n, mid, "went twice")
                 assert len(docs) + len([1 for m, p, up in seen if m == "sendDocument"]) <= 1, (first, n, mid, "a file went twice")
@@ -1362,37 +1437,68 @@ def slow_and_network_wait_and_retry():
             now += wait
         assert go(now) == dict(sent=0, waiting=0) and state("k") == "failed" and len(seen) == 6
         go(9e12); assert len(seen) == 6 and q() is False
-        # slow: as long as Telegram says, an hour at most, and no try is counted
+        # slow: until Telegram's pause ends, an hour at most, and no try is counted
         f, seen = tele(SLOW(12), NEVER_LEFT, SLOW(7200), SLOW(0)); q("s", text="Slow one"); now = 2_000_000
-        go(now); r = item("s"); assert (r["state"], r["tries"], r["slows"], r["next_at"]) == ("queued", 0, 1, now + 12), r
+        go(now); r = item("s"); assert (r["state"], r["tries"], r["next_at"], r["sent_at"]) == ("queued", 0, now + 12, None), r
         go(now + 11); assert len(seen) == 1
-        go(now + 12); r = item("s"); assert (r["tries"], r["slows"], r["next_at"]) == (1, 1, now + 12 + 5), r
-        go(now + 17); r = item("s"); assert (r["tries"], r["slows"], r["next_at"]) == (1, 2, now + 17 + 3600), r
-        go(now + 17 + 3600); r = item("s"); assert r["slows"] == 3 and r["next_at"] >= now + 17 + 3601, r
-        assert go(now + 9999)["sent"] == 1 and texts(seen) == ["Slow one"] * 5 and state("s") == "sent"
-        # ... 20 times in all
-        f, seen = tele(rest=SLOW(1)); q("t")
-        for i in range(1, 21): go(1000 * i); assert (state("t"), item("t")["slows"], len(seen)) == ("queued", i, i)
-        go(21_000); assert state("t") == "failed" and len(seen) == 21
+        go(now + 12); r = item("s"); assert (r["tries"], r["next_at"]) == (1, now + 12 + 5), r
+        go(now + 17); r = item("s"); assert (r["tries"], r["next_at"]) == (1, now + 17 + 3600), r
+        go(now + 17 + 3600); r = item("s"); assert (r["tries"], r["next_at"]) == (1, now + 17 + 3601), r
+        assert go(now + 17 + 3601)["sent"] == 1 and texts(seen) == ["Slow one"] * 5 and state("s") == "sent"
+        f, seen = tele(rest=SLOW(1)); q("t")                                        # however often it says so
+        for i in range(1, 41): go(10_000_000 + 1000 * i); assert (state("t"), item("t")["tries"], len(seen)) == ("queued", 0, i)
+        f, seen = tele(); assert go(11_000_000)["sent"] == 1
         f, seen = tele(SLOW(5), NEVER_LEFT); real = OB._clock                       # the real clock, when none is given
-        OB._clock = lambda: 5_000_000.5
-        try: q("u"); with_send(f, OB.send_due); assert item("u")["next_at"] == 5_000_005.5
+        OB._clock = lambda: 15_000_000.5
+        try: q("u"); with_send(f, OB.send_due); assert item("u")["next_at"] == 15_000_005.5 == OB._hold[0]
         finally: OB._clock = real
 
 @t
-def a_flood_answer_stops_the_run():
-    """Telegram asked for a pause: nothing more goes in this run, and nothing else before it (or a minute) is over"""
+def a_pause_telegram_asks_for_holds_everything():
     with made_up():
-        links.link(TIA, 501, None); links.link(HUGO, 502, None)
-        for i in range(6): q(f"k{i}", HUGO if i else TIA, str(i))
-        f, seen = tele(SLOW(30)); go = lambda at: with_send(f, lambda: OB.send_due(now=at))
-        assert go(1000) == dict(sent=0, waiting=6) and len(seen) == 1
-        for at in (1001, 1005, 1029): assert go(at) == dict(sent=0, waiting=6) and len(seen) == 1, at
-        assert go(1030) == dict(sent=6, waiting=0) and texts(seen) == list("001" + "2345"), texts(seen)
-        for i in range(6): q(f"m{i}", HUGO if i else TIA, str(i))
-        f, seen = tele(SLOW(3600)); go(2000)
-        assert go(2059)["sent"] == 0 and go(2060) == dict(sent=5, waiting=1) and item("m0")["next_at"] == 5600, "one person's hour is not everybody's"
-        assert go(5600)["sent"] == 1
+        links.link(TIA, 501, None); links.link(HUGO, 502, None); f, seen = tele(SLOW(30)); go = lambda at, **k: with_send(f, lambda: OB.send_due(now=at, **k))
+        for i in range(3): q(f"k{i}", text=f"old {i}")
+        assert go(1000) == dict(sent=0, waiting=3) and texts(seen) == ["old 0"]
+        was = rows("outbox"); q("new", HUGO, "new")                                  # queued during the pause: it waits its turn behind the older ones
+        for at in (1000, 1001, 1015, 1029.9):
+            with valid(lambda it: (_ for _ in ()).throw(ValueError())): assert go(at) == dict(sent=0, waiting=4) and len(seen) == 1, at
+            with record(TIA, off=True): assert go(at) == dict(sent=0, waiting=4) and rows("outbox")[:3] == was, "nothing is dropped or counted"
+        assert go(1030) == dict(sent=4, waiting=0) and texts(seen)[1:] == ["old 0", "old 1", "old 2", "new"], texts(seen)
+        # a storm of new ones during one pause: nothing until it ends, then oldest first
+        f, seen = tele(SLOW(600)); q("a0", text="a0"); go(2000)
+        for i in range(1, 40): q(f"a{i}", HUGO if i % 2 else TIA, f"a{i}"); assert go(2000 + 15 * i)["sent"] == 0 and len(seen) == 1, i
+        assert go(2599.9)["sent"] == 0 and len(seen) == 1 and go(2600, limit=30) == dict(sent=30, waiting=10) and go(2600) == dict(sent=10, waiting=0)
+        assert texts(seen)[1:] == [f"a{i}" for i in range(40)], "oldest first, each once"
+        # one pause after another: nobody is pushed back behind a newer one
+        f, seen = tele(SLOW(10), SLOW(10), SLOW(10)); q("b0", text="b0"); got = []
+        for i in range(1, 4): go(3000 + 10 * i); q(f"b{i}", text=f"b{i}")
+        assert texts(seen) == ["b0"] * 3 and go(3040)["sent"] == 4 and texts(seen)[3:] == ["b0", "b1", "b2", "b3"]
+        # never longer than an hour, and a clock put back does not make it longer
+        f, seen = tele(SLOW(99_999)); q("c", text="c"); q("c2", text="c2"); go(5000)
+        assert OB.HOLD_MOST == 3600 and len(seen) == 1 and go(8599)["sent"] == 0 and len(seen) == 1 and go(8600)["sent"] == 2
+        f, seen = tele(SLOW(3600)); q("d"); go(9e9); put("d", next_at=0); f, seen = tele(); assert go(5000)["sent"] == 1
+        for at, odd in ((20_000, -5), (21_000, 0), (22_000, float("nan"))):
+            f, seen = tele(SLOW(odd)); q(f"o{odd}"); go(at); assert OB._hold[0] == at + 1 and len(seen) == 1, odd; assert go(at + 1)["sent"] == 1
+        # the bot's own question (after an unsure one) can be told to wait too
+        f, seen = tele(MAY_HAVE, me=SLOW(40)); q("e", text="e"); q("g", text="g"); go(30_000); go(30_001); n = len(seen); assert [m for m, p, up in seen] == ["sendMessage", "getMe"]
+        for at in (30_002, 30_040): assert go(at) == dict(sent=0, waiting=1) and len(seen) == n, at
+        f, seen = tele(); assert go(30_041)["sent"] == 1 and [m for m, p, up in seen] == ["getMe", "sendMessage"]
+
+@t
+def a_pause_asked_for_by_a_file_holds_everything():
+    with made_up(), work("a.pdf", "b.docx", "c.png") as fs:
+        links.link(TIA, 501, None); q("k", files=fs); q("next", text="next"); f, seen = tele(OK_, OK_, SLOW(600)); NAPS.clear()
+        go = lambda at: with_send(f, lambda: OB.send_due(now=at)); said = lambda: [up[1] if up else p["text"] for m, p, up in seen]
+        assert go(1000) == dict(sent=1, waiting=1) and said() == ["A made-up message", "a.pdf", "b.docx"] and NAPS == [], "one call, and nothing after it"
+        assert OB.told("k")["state"] == "sent" and OB.told("k")["files_failed"] == 2, "the file and those after it"
+        for at in (1001, 1599): assert go(at) == dict(sent=0, waiting=1) and len(seen) == 3
+        assert go(1600) == dict(sent=1, waiting=0) and said()[3:] == ["next"], "the files are not tried again"
+        for s, waits in ((20, True), (21, False)):                                  # waited for at once up to FILE_SLOW seconds
+            wipe(); bot_on("ctss_made_up_bot"); links.link(TIA, 501, None); q("k", files=fs); NAPS.clear(); f, seen = tele(OK_, SLOW(s)); go(1000)
+            assert (NAPS == [20] and said()[1:] == ["a.pdf", "a.pdf", "b.docx", "c.png"] and OB.told("k")["files_failed"] == 0) if waits else \
+                (NAPS == [] and said()[1:] == ["a.pdf"] and OB.told("k")["files_failed"] == 3), (s, NAPS, said())
+        wipe(); bot_on("ctss_made_up_bot"); links.link(TIA, 501, None); q("k", files=fs[:2]); q("z", text="z"); NAPS.clear(); f, seen = tele(OK_, SLOW(2), SLOW(3), SLOW(4))
+        assert go(1000)["sent"] == 2 and NAPS == [2, 3, 4] and said()[1:] == ["a.pdf"] * 3 + ["b.docx", "z"] and OB.told("k")["files_failed"] == 1, "the last pause is kept to as well"
 
 @t
 def refused_is_failed_and_unsure_is_unsure():
@@ -1418,7 +1524,7 @@ def an_unsure_send_holds_the_rest():
         f, seen = tele(MAY_HAVE)
         assert go(f) == dict(sent=0, waiting=2) and said(seen) == ["sendMessage"] and texts(seen) == ["a"] and state("a") == "unsure", "the run ends"
         was = rows("outbox")
-        for me in (MAY_HAVE, NEVER_LEFT, DOWN, LATE, REFUSED, SLOW(3), BLOCKED, (200, dict(ok=False))):
+        for me in (MAY_HAVE, NEVER_LEFT, DOWN, LATE, REFUSED, BLOCKED, (200, dict(ok=False))):
             f, seen = tele(me=me); times.clear()
             assert go(f) == dict(sent=0, waiting=2) and seen == [("getMe", {}, None)] and rows("outbox") == was, me
             assert times == [("getMe", 5)] and links.chat_of(TIA) == 501, me
@@ -1498,12 +1604,46 @@ def a_blocked_chat_is_unlinked():
         wipe(); bot_on("ctss_made_up_bot"); links.link(TIA, 501, None)
         f, seen = tele(BLOCKED, before=lambda *a: links.link(HUGO, 501, None)); q("a"); with_send(f, OB.send_due)
         assert links.linked() and links.chat_of(HUGO) == 501 and links.chat_of(TIA) is None and item("a") is None
-        # the bot disconnected meanwhile (somebody else's token says 403 to everybody): nobody is unlinked
+        # the bot disconnected meanwhile (somebody else's token says 403 to everybody): nobody is unlinked, and it waits
+        wipe(); bot_on("ctss_made_up_bot"); links.link(TIA, 501, None); b = tgdb.get_state("bot")
+        f, seen = tele(BLOCKED, before=lambda *a: tgdb.set_state("bot", None)); q("a"); q("b")
+        assert with_send(f, OB.send_due) == dict(sent=0, waiting=2) and links.chat_of(TIA) == 501 and len(seen) == 1
+        assert (state("a"), item("a")["tries"], item("a")["sent_at"]) == ("queued", 0, None)
+        tgdb.set_state("bot", b); f, seen = tele(); assert with_send(f, OB.send_due)["sent"] == 2
+        # switched off meanwhile: the chat is still theirs, and blocked
         wipe(); bot_on("ctss_made_up_bot"); links.link(TIA, 501, None)
-        def off(*a):
-            with tgdb.db() as c: c.execute("DELETE FROM state WHERE k='bot'")
-        f, seen = tele(BLOCKED, before=off); q("a"); with_send(f, OB.send_due)
-        assert links.chat_of(TIA) == 501 and item("a") is None
+        with record(TIA): f, seen = tele(BLOCKED, before=lambda *a: AP.update(lambda d: d["people"].__setitem__(TIA, dict(off=True)))); q("a"); with_send(f, OB.send_due)
+        assert TIA not in links.linked() and item("a") is None
+        # whatever goes wrong there, the message is not left as being sent
+        def boom(*a, **k): raise RuntimeError("made up")
+        for what, want in (("unlink", None), ("connected", "queued"), ("chat_of", None)):
+            wipe(); bot_on("ctss_made_up_bot"); links.link(TIA, 501, None); q("a"); real = getattr(links, what)
+            f, seen = tele(BLOCKED, before=lambda *a: setattr(links, what, boom))
+            try: with_send(f, OB.send_due)
+            finally: setattr(links, what, real)
+            assert state("a") == want, (what, state("a"))
+
+@t
+def an_item_sending_for_too_long_is_unsure():
+    with made_up():
+        links.link(TIA, 501, None); assert OB.STUCK == 120; f, seen = tele(); go = lambda at: with_send(f, lambda: OB.send_due(now=at))
+        for k, at in (("old", 879.9), ("edge", 880), ("fresh", 999), ("none", None)): q(k); put(k, state="sending", claimed=at, sent_at="2026-10-13T07:21:00+08:00")
+        q("go"); assert go(1000) == dict(sent=1, waiting=0)
+        assert [state(k) for k in ("old", "edge", "fresh", "none", "go")] == ["unsure", "sending", "sending", "sending", "sent"]
+        assert OB.told("old")["at"] == "2026-10-13T07:21:00+08:00" and q("old") is False
+        go(1200); assert [state(k) for k in ("old", "edge", "fresh", "none")] == ["unsure", "unsure", "unsure", "sending"] and len(seen) == 1, "never sent again"
+        q("k"); go(2000); assert item("k")["claimed"] == 2000 and state("k") == "sent"
+        put("k", state="sending"); b = tgdb.get_state("bot"); tgdb.set_state("bot", None); go(9000); assert state("k") == "sending", "nothing changes while it is off"
+        tgdb.set_state("bot", b); OB._hold[0] = 9999.0; go(9000); assert state("k") == "unsure", "a pause does not hide it"
+        # an answer that could not be written, in the app as it runs
+        real = tgdb.db; broken = []
+        def db(read=False):
+            if broken and not read: raise sqlite3.OperationalError("database is locked")
+            return real(read)
+        OB._hold[0] = 0.0; f, seen = tele(before=lambda *a: broken.append(1)); q("w"); tgdb.db = db
+        try: go(10_000)
+        finally: tgdb.db = real
+        f, seen = tele(); go(10_100); assert state("w") == "sending"; go(10_121); assert state("w") == "unsure" and seen == []
 
 @t
 def unlink_may_name_the_chat():
@@ -1523,15 +1663,52 @@ def an_item_no_longer_true_is_dropped():
         assert (got[0]["name"], got[0]["kind"], got[0]["ref"], got[0]["state"], got[0]["text"]) == (TIA, "relief", dict(id="abc", n=1), "queued", "A made-up message"), got[0]
         assert got[1]["ref"] is None and OB.told("a")["state"] == "dropped"
         assert OB.send_due(now=9e12) == dict(sent=0, waiting=0) and q("a") is True and OB.send_due()["sent"] == 1 and state("a") == "sent"
-        # it raises, or answers nothing: the message goes (VALID is asked last thing, each time it is tried)
-        def boom(it): raise ValueError(TIA)
-        for i, f in enumerate((boom, lambda it: None, lambda it: 0)):
+        for i, f in enumerate((lambda it: None, lambda it: 0)):                           # only False drops it
             q(f"v{i}")
             with valid(f): assert OB.send_due()["sent"] == 1 and state(f"v{i}") == "sent", i
     with made_up():
         links.link(TIA, 501, None); f, seen = tele(NEVER_LEFT); q("r"); with_send(f, lambda: OB.send_due(now=1000))
         with valid(lambda it: False): with_send(f, lambda: OB.send_due(now=2000))
         assert state("r") == "dropped" and len(seen) == 1, "asked again before another try"
+
+@t
+def what_cannot_be_checked_waits_and_is_not_sent():
+    class Odd(Exception): pass
+    def check(raises):
+        """VALID, or the look for the person's chat, raising for the first n tries"""
+        left = [raises]
+        def f(*a):
+            if left[0] > 0: left[0] -= 1; raise kinds[left[0] % len(kinds)](f"{TIA} made up")
+            return True
+        return f
+    kinds = (Odd, ValueError, sqlite3.OperationalError); ladder = (5, 30, 120, 600, 1800)
+    with made_up():
+        links.link(TIA, 501, None); f, seen = tele(); h = Grab(); KINDS.addHandler(h)
+        go = lambda at: with_send(f, lambda: OB.send_due(now=at))
+        q("a"); now = 1000
+        with valid(check(4)):
+            for i in range(4):
+                assert go(now) == dict(sent=0, waiting=1) and (state("a"), item("a")["tries"], item("a")["next_at"]) == ("queued", i + 1, now + ladder[i]), i
+                go(now + ladder[i] - 1); assert item("a")["tries"] == i + 1; now += ladder[i]
+            assert seen == [] and go(now) == dict(sent=1, waiting=0) and len(seen) == 1 and go(9e12)["sent"] == 0 and len(seen) == 1
+        q("b"); q("other", text="other"); now = 100_000
+        with valid(lambda it: it["key"] != "b" or check(1)()):
+            for i in range(5): go(now); assert (state("b"), item("b")["tries"]) == ("queued", i + 1); now += ladder[i]
+            assert texts(seen)[1:] == ["other"], "only that one waits"
+            go(now); assert state("b") == "failed" and go(9e12) == dict(sent=0, waiting=0) and len(seen) == 2 and q("b") is False
+        # the person's chat could not be looked up (the timetable being published): the same
+        q("c"); real = links.chat_of; n = [2]
+        def chat_of(name):
+            if n[0]: n[0] -= 1; raise FileNotFoundError("made up")
+            return real(name)
+        links.chat_of = chat_of
+        try:
+            go(1000); assert (state("c"), item("c")["tries"], item("c")["next_at"]) == ("queued", 1, 1005)
+            go(1005); assert (state("c"), item("c")["tries"]) == ("queued", 2)
+            assert go(1035)["sent"] == 1 and len(seen) == 3
+        finally: links.chat_of = real
+        KINDS.removeHandler(h); said = [r.getMessage() for r in h.records]
+        assert any("Odd" in x for x in said) and any("FileNotFoundError" in x for x in said) and not any("made up" in x or "Tia" in x for x in said), said
 
 @t
 def the_chat_is_read_when_it_goes():
@@ -1570,10 +1747,10 @@ def nothing_goes_while_the_bot_is_off():
 @t
 def buttons_carry_a_token_under_64_bytes():
     with made_up():
-        links.link(TIA, 501, None); f, seen = tele(); extra = dict(absent="Mdm Very Long Name " * 9, n=[1])
-        q(buttons=[[dict(text="✅ Acknowledge", what="ack", id="abc", ckey="Mon|3|S1|" + "x" * 90, who=TIA, extra=extra), dict(text="↩ Request to change", what="change", id="abc", ckey="c")],
+        links.link(TIA, 501, None); f, seen = tele(); extra = dict(absent="Mdm Very Long Name " * 9, n=[1]); SENT_AT = datetime.datetime(2026, 10, 12, 23, 20, tzinfo=datetime.timezone.utc).timestamp()
+        with now_is("2026-10-13T07:20:00+08:00"): q(buttons=[[dict(text="✅ Acknowledge", what="ack", id="abc", ckey="Mon|3|S1|" + "x" * 90, who=TIA, extra=extra), dict(text="↩ Request to change", what="change", id="abc", ckey="c")],
                    [dict(text="Open in the app", url="https://ct.example.org/relief"), dict(text="Open here", url="http://localhost:8000/relief")],
-                   [dict(text="Not secure", url="http://example.org"), dict(text="Odd", url="javascript:alert(1)"), dict(text="None", url=None)]])
+                   [dict(text="Not secure", url="http://example.org"), dict(text="Odd", url="javascript:alert(1)")]])
         with_send(f, lambda: OB.send_due(now=5000))
         kb = seen[0][1]["reply_markup"]["inline_keyboard"]
         assert [[b["text"] for b in row] for row in kb] == [["✅ Acknowledge", "↩ Request to change"], ["Open in the app"]], kb
@@ -1583,7 +1760,7 @@ def buttons_carry_a_token_under_64_bytes():
         got = {r["token"]: r for r in rows("buttons")}
         assert set(got) == {d[2:] for d in data}
         a, b = got[data[0][2:]], got[data[1][2:]]
-        assert (a["name"], a["what"], a["id"], a["ckey"], a["who"], json.loads(a["extra"]), a["until"]) == (TIA, "ack", "abc", "Mon|3|S1|" + "x" * 90, TIA, extra, 5000 + 30 * 86400), a
+        assert (a["name"], a["what"], a["id"], a["ckey"], a["who"], json.loads(a["extra"]), a["until"]) == (TIA, "ack", "abc", "Mon|3|S1|" + "x" * 90, TIA, extra, SENT_AT + 30 * 86400), "30 days from when it was queued"
         assert (b["name"], b["what"], b["id"], b["ckey"], b["who"], json.loads(b["extra"])) == (TIA, "change", "abc", "c", None, None), b
         f, seen = tele(); q("none", buttons=[[dict(text="x", url="http://localhost/relief")]]); q("no"); with_send(f, OB.send_due)
         assert all("reply_markup" not in p for m, p, up in seen) and len(seen) == 2 and len(rows("buttons")) == 2
@@ -1594,11 +1771,12 @@ def buttons_carry_a_token_under_64_bytes():
 @t
 def a_retry_keeps_its_tokens():
     with made_up():
-        links.link(TIA, 501, None); f, seen = tele(NEVER_LEFT, SLOW(3), DOWN); q(buttons=[[dict(text="A", what="ack"), dict(text="B", what="change")]])
+        links.link(TIA, 501, None); f, seen = tele(NEVER_LEFT, SLOW(3), DOWN); SENT_AT = datetime.datetime(2026, 10, 12, 23, 20, tzinfo=datetime.timezone.utc).timestamp()
+        with now_is("2026-10-13T07:20:00+08:00"): q(buttons=[[dict(text="A", what="ack"), dict(text="B", what="change")]])
         for at in (1000, 2000, 3000, 4000): with_send(f, lambda: OB.send_due(now=at))
         kbs = [p["reply_markup"]["inline_keyboard"] for m, p, up in seen]
         assert len(kbs) == 4 and all(k == kbs[0] for k in kbs) and state("k") == "sent", kbs
-        got = rows("buttons"); assert len(got) == 2 and {r["until"] for r in got} == {4000 + 30 * 86400}, "kept 30 days from the try that went"
+        got = rows("buttons"); assert len(got) == 2 and {r["until"] for r in got} == {SENT_AT + 30 * 86400}, "30 days from when it was queued, over every try"
         # buttons taken from another message (a reminder's) get tokens of their own
         q("again", buttons=json.loads(item("k")["buttons"])); f, seen = tele(); with_send(f, OB.send_due)
         assert not {b["callback_data"] for b in seen[0][1]["reply_markup"]["inline_keyboard"][0]} & {b["callback_data"] for b in kbs[0][0]} and len(rows("buttons")) == 4
@@ -1628,14 +1806,6 @@ def a_long_text_is_cut_at_a_line_end():
         assert goes("a" * (room - 1) + "\n" + "b" * 100) == "a" * (room - 1) + "\n" + more
         assert goes("a\n" + "a" * (room - 2) + "\n" + "b" * 100) == "a\n" + more
 
-@contextlib.contextmanager
-def work(*names):
-    """made-up work files -> their rows for queue"""
-    got = [FI.save("abc123", n, f"made-up {n}".encode()) for n in names]
-    try: yield [dict(id="abc123", file=x["id"], name=n) for x, n in zip(got, names)]
-    finally:
-        for x in got: FI.delete("abc123", x["id"])
-
 @t
 def files_follow_the_message_and_a_failed_file_is_noted():
     with made_up(), work("a.pdf", "b.docx", "c.png") as fs:
@@ -1646,19 +1816,23 @@ def files_follow_the_message_and_a_failed_file_is_noted():
         assert state("k") == "sent" and OB.told("k")["files_failed"] == 1 == OB.told_for("k")["k"]["files_failed"] and item("k")["message_id"] == 1001
         assert with_send(f, OB.send_due)["sent"] == 0 and len(seen) == 4, "never again"
         # slow and network: twice more, with a short wait; unsure, blocked and refused: not again
-        for answers, calls, failed, naps in (((SLOW(3),), 2, 0, 1), ((SLOW(3), NEVER_LEFT), 3, 0, 2), ((DOWN, DOWN, DOWN), 3, 1, 2), ((SLOW(9999), SLOW(1)), 3, 0, 2),
+        for answers, calls, failed, naps in (((SLOW(3),), 2, 0, 1), ((SLOW(3), NEVER_LEFT), 3, 0, 2), ((DOWN, DOWN, DOWN), 3, 1, 2), ((SLOW(9999), SLOW(1)), 1, 1, 0), ((SLOW(20), SLOW(1)), 3, 0, 2),
                                              ((MAY_HAVE,), 1, 1, 0), ((LATE,), 1, 1, 0), ((BLOCKED,), 1, 1, 0), ((REFUSED,), 1, 1, 0), ((NEVER_LEFT, MAY_HAVE), 2, 1, 1)):
-            NAPS.clear(); f, seen = tele(OK_, *answers); key = f"f{len(rows('outbox'))}"; q(key, files=fs[:1]); with_send(f, OB.send_due)
+            NAPS.clear(); OB._hold[0] = 0.0; f, seen = tele(OK_, *answers); key = f"f{len(rows('outbox'))}"; q(key, files=fs[:1]); with_send(f, OB.send_due)
             assert (len(seen) - 1, OB.told(key)["files_failed"], len(NAPS), state(key)) == (calls, failed, naps, "sent"), (answers, seen, NAPS)
             assert all(0 < n <= 20 for n in NAPS), NAPS
         assert links.chat_of(TIA) == 501, "a file refused unlinks nobody"
+        # after one that may or may not have gone the rest are not tried: counted as not gone
+        for answers, names, failed in (((MAY_HAVE,), ["a.pdf"], 3), ((OK_, LATE), ["a.pdf", "b.docx"], 2), ((REFUSED,), ["a.pdf", "b.docx", "c.png"], 1), ((OK_, DOWN, MAY_HAVE), ["a.pdf", "b.docx", "b.docx"], 2)):
+            f, seen = tele(OK_, *answers); key = f"f{len(rows('outbox'))}"; q(key, files=fs); q(key + "z", text="z"); with_send(f, OB.send_due)
+            assert [up[1] if up else p["text"] for m, p, up in seen[1:]] == names + ["z"] and OB.told(key)["files_failed"] == failed, (answers, seen)
         # missing, odd or unreadable: noted, the others go
         for bad in (dict(id="abc123", file="0" * 12, name="x.pdf"), dict(id="../x", file="y", name="z"), dict(name="x.pdf"), dict(id="abc123", file=fs[0]["file"])):
             f, seen = tele(); key = f"f{len(rows('outbox'))}"; q(key, files=[bad, fs[1]]); with_send(f, OB.send_due)
             assert len(seen) == 2 and seen[1][2][1] == "b.docx" and OB.told(key)["files_failed"] == 1 and state(key) == "sent", (bad, seen)
         # a message that did not go takes no file with it
         for answer_ in (REFUSED, MAY_HAVE, LATE, NEVER_LEFT, SLOW(4), BLOCKED):
-            OB._doubt.clear(); f, seen = tele(answer_); key = f"f{len(rows('outbox'))}"; q(key, files=fs); with_send(f, lambda: OB.send_due(now=1000)); assert len(seen) == 1, answer_
+            OB._doubt.clear(); OB._hold[0] = 0.0; f, seen = tele(answer_); key = f"f{len(rows('outbox'))}"; q(key, files=fs); with_send(f, lambda: OB.send_due(now=1000)); assert len(seen) == 1, answer_
         # the person's Telegram moved while the files were going: the rest do not go to a chat that is another's
         wipe(); bot_on("ctss_made_up_bot"); links.link(TIA, 501, None)
         f, seen = tele(before=lambda m, p, up: up and up[1] == "a.pdf" and links.link(HUGO, 501, None)); q("m", files=fs); with_send(f, OB.send_due)
@@ -1746,7 +1920,6 @@ def messages_are_spaced():
 
 @t
 def old_items_and_buttons_are_pruned_only_when_asked():
-    import datetime
     with telegram():
         links.link(TIA, 501, None); now = datetime.datetime(2026, 11, 22, 9, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=8)))
         ago = lambda days: (now - datetime.timedelta(days=days)).isoformat(timespec="seconds")
@@ -1811,25 +1984,33 @@ def the_sender_starts_only_with_the_jobs_and_a_token():
 
 @t
 def nothing_private_is_logged_by_the_sender():
-    h, root = Grab(), logging.getLogger(); old = root.level; root.addHandler(h); root.setLevel(logging.DEBUG)
+    h, root = Grab(), logging.getLogger(); old = root.level; root.addHandler(h); KINDS.addHandler(h); root.setLevel(logging.DEBUG)
     try:
         with made_up(), work("secret-name.pdf") as fs:
             tok = os.environ["TELEGRAM_BOT_TOKEN"]; links.link(TIA, 987650077, None); real = tgdb.db
             for i, a in enumerate((OK_, BLOCKED, REFUSED, DOWN, SLOW(3), NEVER_LEFT, MAY_HAVE, ValueError(f"{TIA} {tok}"))):
-                links.link(TIA, 987650077, None); f, seen = tele(a, MAY_HAVE)
-                q(f"relief:{TIA}:{i}", text="a private line", files=fs + [dict(name="secret-name.pdf")], buttons=[[dict(text="private label", what="ack", extra=dict(p="private extra"))]])
-                def boom(it): raise RuntimeError(f"{TIA} a private line {tok}")
-                with valid(boom): with_send(f, lambda: OB.send_due(now=1000))
+                links.link(TIA, 987650077, None); OB._hold[0] = 0.0; f, seen = tele(a, MAY_HAVE)
+                q(f"relief:{TIA}:{i}", text="a private line", files=[dict(name="secret-name.pdf")] + fs, buttons=[[dict(text="private label", what="ack", extra=dict(p="private extra"))]])
+                with_send(f, lambda: OB.send_due(now=1000)); assert "a private line" in texts(seen), a
+            def boom(it): raise RuntimeError(f"{TIA} a private line {tok}")
+            q(f"relief:{TIA}:y")
+            with valid(boom): with_send(tele()[0], lambda: OB.send_due(now=1000))
+            q(f"relief:{TIA}:z"); put(f"relief:{TIA}:z", buttons='[[{"what": "a private line"}]]'); with_send(tele()[0], lambda: OB.send_due(now=1000)); assert state(f"relief:{TIA}:z") == "failed"
+            real_unlink = links.unlink
+            def no_unlink(name, chat=None): raise LookupError(f"{name} {chat} {tok}")
+            links.unlink = no_unlink; q(f"relief:{TIA}:w")
+            try: with_send(tele(BLOCKED)[0], lambda: OB.send_due(now=1000))
+            finally: links.unlink = real_unlink
             q(f"relief:{TIA}:x")
             def no_store(read=False): raise sqlite3.OperationalError(f"{TIA} a private line") if read is False else None
             tgdb.db = lambda read=False: real(read) if read else no_store()
             try: with_send(tele()[0], lambda: OB.send_due(now=9e12))
             finally: tgdb.db = real
         mine = "\n".join(r.getMessage() for r in h.records if r.name.startswith("relief"))
-        for want in ("RuntimeError", "OperationalError", "network", "unsure", "blocked", "slow", "refused"): assert want in mine, (want, mine)
+        for want in ("RuntimeError", "OperationalError", "KeyError", "LookupError", "network", "unsure", "blocked", "slow", "refused"): assert want in mine, (want, mine)
         everything = "\n".join(r.getMessage() + str(r.exc_info or "") + str(r.args or "") for r in h.records)
         for bad in ("private", TIA, "Tia", "98765", tok, "secret-name", "relief:", tg.hook_secret() or "x" * 64): assert bad not in everything, bad
-    finally: root.removeHandler(h); root.setLevel(old)
+    finally: root.removeHandler(h); KINDS.removeHandler(h); root.setLevel(old)
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
