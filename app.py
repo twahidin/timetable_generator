@@ -5,7 +5,7 @@ to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable.
 Staff (a personal code each, made from their name): the Relief module and everything the teacher code opens."""
-import copy, datetime, gzip, hmac, io, os, re, shutil, sys, tempfile, time, traceback, urllib.parse, zipfile
+import copy, datetime, gzip, hmac, io, os, re, secrets, shutil, sys, tempfile, threading, time, traceback, urllib.parse, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response, g
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -13,7 +13,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, compare, draft, history, store, sync, typed, versions
+import access, checks, compare, draft, history, refit, refit_plan, store, sync, typed, versions
 from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
 from relief import absences as relief_absences
@@ -1024,6 +1024,116 @@ def draft_version_download(vid):
         with open(path, "rb") as fh: data = io.BytesIO(fh.read())
         return send_file(data, as_attachment=True, download_name=safe_name(name) + " - version.sqlite", mimetype="application/vnd.sqlite3")
     finally: shutil.rmtree(work, ignore_errors=True)
+
+# ------------------------------------------------------------------------------------------------ Re-fit: the job
+REFIT_DEAD_S = 600       # a running job older than this counts as dead: a new request starts over, and the old thread's answer is dropped
+REFIT_FAILED = "The re-fit could not be worked out. Run Re-fit again."
+REFIT_STALE = "The draft changed since this list was made. Run Re-fit again."
+REFIT_GONE = "That re-fit list is gone. Run Re-fit again."
+REFIT_LOCK = threading.Lock()   # guards REFIT only: never held while draft's or store's functions run, and they are never called from under it
+REFIT = dict(state="idle")      # the one job: id, stamp, state (idle, running, done, failed), done, total, plan (with its raw fixes: the server's own), error, started, thread
+
+def _refit_clear():
+    with REFIT_LOCK: REFIT.clear(); REFIT.update(state="idle")
+
+def _refit_set(jid, **kw):
+    """change the job, only while it is still the one with this id and running (a thread whose job was replaced writes nothing)"""
+    with REFIT_LOCK:
+        if REFIT.get("id") != jid or REFIT.get("state") != "running": return False
+        REFIT.update(kw); return True
+
+def _refit_run(jid, given):
+    """the thread of a job: the plan of the one model it was given, which it reads only (no lock of draft's is held while it searches)"""
+    try:
+        p = refit_plan.plan(*given, progress=lambda done, total: _refit_set(jid, done=done, total=total))
+        _refit_set(jid, state="done", plan=dict(p, id=jid))
+    except BaseException as e:
+        # the type and the last frame only: the text of the error may hold a name from the timetable
+        frames = list(traceback.walk_tb(e.__traceback__)); where = f"{os.path.basename(frames[-1][0].f_code.co_filename)}:{frames[-1][1]}" if frames else "?"
+        app.logger.error("Re-fit: the job could not be worked out (%s at %s)", type(e).__name__, where)
+        _refit_set(jid, state="failed", error=REFIT_FAILED)
+    finally: _refit_set(jid, state="failed", error=REFIT_FAILED)   # a no-op unless the thread is leaving with the job still running
+
+def _refit_text(t):
+    """the history line of a re-fit that was made, from the plan's totals"""
+    n = lambda k, one, many: f"{k} {one if k == 1 else many}"
+    return f"Re-fit: {n(t['changes'], 'change', 'changes')} ({n(t['moved'], 'lesson moved', 'lessons moved')}, {t['another_day']} to another day, {n(len(t['typed']), 'typed rule', 'typed rules')} to check again)"
+
+def _refit_name():
+    """the name of the version kept before a re-fit: "Before re-fit, 22 Nov 1.12 pm" """
+    day, _, at = versions.when(store.now()).partition(", ")
+    return f"Before re-fit, {' '.join(day.split()[:2])} {at}"
+
+@app.post("/api/draft/refit")
+@need("committee")
+def draft_refit_start():
+    """start working out a re-fit of the draft in a thread (one at a time); the page polls GET"""
+    with REFIT_LOCK: busy = REFIT.get("state") == "running" and time.monotonic() - REFIT["started"] < REFIT_DEAD_S
+    if busy: return {"error": "A re-fit is already running."}, 409
+    try:
+        m, rec, fx = draft._now(); decisions = draft.decisions_now(); ws = draft.listed(m, fx, decisions)["warnings"]; stamp = draft.stamp(m["draft_meta"], rec)   # one model, for the check and the thread
+    except draft.NoDraft as e: return {"error": str(e)}, 404
+    except Exception as e:
+        if type(e) is LookupError: return {"error": NO_SETUP}, 409
+        app.logger.exception("starting a re-fit"); return {"error": "The re-fit could not be started. Run Re-fit again."}, 400
+    if not refit.needed(ws): return {"error": "Nothing to re-fit: the timetable fits the setup."}, 400
+    jid = secrets.token_hex(6); t = threading.Thread(target=_refit_run, args=(jid, (m, rec, fx, decisions, ws)), daemon=True)
+    with REFIT_LOCK:
+        if REFIT.get("state") == "running" and time.monotonic() - REFIT["started"] < REFIT_DEAD_S: return {"error": "A re-fit is already running."}, 409
+        REFIT.clear(); REFIT.update(id=jid, stamp=stamp, state="running", done=0, total=None, plan=None, error=None, started=time.monotonic(), thread=t); t.start()
+    return {"id": jid, "started": True}
+
+def _refit_stale(plan):
+    """whether the draft is not the one the plan was made for (true when that cannot be told)"""
+    try: return not draft.exists() or plan["stamp"] != draft.stamp()
+    except Exception: return True
+
+@app.get("/api/draft/refit")
+@need("committee")
+def draft_refit_get():
+    """the job as the page polls it: no raw fixes, only what the page shows (groups with the text of each step, also, needs, totals, late, seconds)"""
+    with REFIT_LOCK: job = dict(REFIT)
+    if job["state"] == "idle": return {"state": "idle"}
+    out = {k: job.get(k) for k in ("state", "id", "done", "total", "error")}
+    if job["state"] == "done":
+        p = job["plan"]; out["plan"] = {k: v for k, v in dict(p, groups=[dict(g, steps=[{k: v for k, v in s.items() if k != "fix"} for s in g["steps"]]) for g in p["groups"]]).items() if k != "fixes"}
+        out["stale"] = _refit_stale(p)
+    return jsonify(out)
+
+def _refit_plan_of(jid):
+    """the plan of the done job with this id, or None"""
+    with REFIT_LOCK: return REFIT["plan"] if REFIT.get("state") == "done" and isinstance(jid, str) and jid == REFIT.get("id") else None
+
+@app.get("/api/draft/refit/preview")
+@need("committee")
+def draft_refit_preview():
+    p = _refit_plan_of(request.args.get("id"))
+    if p is None: return {"error": REFIT_GONE}, 404
+    if _refit_stale(p): return {"error": REFIT_STALE}, 400
+    return _checked(lambda: draft.preview(list(p["fixes"]), many=True), sentences=True)
+
+@app.post("/api/draft/refit/apply")
+@need("committee")
+def draft_refit_apply():
+    """make the stored list (never one the page sent): the job is taken out first, so a second click finds it gone, and put back when the apply is refused"""
+    body = request.get_json(force=True, silent=True); jid = body.get("id") if isinstance(body, dict) else None
+    with REFIT_LOCK:
+        if not (REFIT.get("state") == "done" and isinstance(jid, str) and jid == REFIT.get("id")): return {"error": REFIT_GONE}, 404
+        if not REFIT["plan"]["fixes"]: return {"error": "There is nothing to apply."}, 400
+        job = dict(REFIT); REFIT.clear(); REFIT.update(state="idle")
+    def refused(text, status):
+        with REFIT_LOCK:
+            if REFIT.get("state") == "idle": REFIT.clear(); REFIT.update(job)   # unless a new job has started since
+        return {"error": text}, status
+    p = job["plan"]
+    try: out = draft.refit_apply(list(p["fixes"]), p["stamp"], _refit_name(), by()["as"])
+    except draft.NoDraft as e: return refused(str(e), 404)
+    except ValueError as e: return refused(REFIT_STALE if str(e) == draft.MOVED else str(e), 400)
+    except Exception as e:
+        if type(e) is LookupError: return refused(NO_SETUP, 409)
+        app.logger.exception("making a re-fit"); return refused("The re-fit could not be made. Run Re-fit again.", 400)
+    _draft_entry("refit", _refit_text(p["totals"]))
+    return jsonify(info=out["info"], kept=out["kept"], changes=len(p["fixes"]))
 
 # ------------------------------------------------------------------------------------------------ the Compare page
 @app.get("/compare")
