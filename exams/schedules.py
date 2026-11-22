@@ -232,6 +232,12 @@ def _check(s, pub):
         if x.get("student") not in students: raise ValueError(f"{x.get('student')} is not on the published timetable.")
 
 
+def rev_of(s) -> int:
+    """the revision a stored schedule is at: 0 when it has none (saved before revisions) or is not there"""
+    r = (s or {}).get("rev")
+    return r if isinstance(r, int) and not isinstance(r, bool) else 0
+
+
 def save(sched, pub, cal, by, check=True) -> dict:
     """check the schedule against the published timetable and write it at once. check=False: an approval action (approve,
     send back, withdraw, someone is away), which changes none of what the timetable is checked for, so a schedule
@@ -240,6 +246,7 @@ def save(sched, pub, cal, by, check=True) -> dict:
         _check(sched, pub)
     out = dict(sched, saved_at=_now(), saved_by=by)
     with _LOCK:
+        out["rev"] = rev_of(load(out["id"])) + 1   # every save raises it: a page started from an older copy can be told
         os.makedirs(DIR, exist_ok=True)
         store.write_json(_path(out["id"]), out)
     return out

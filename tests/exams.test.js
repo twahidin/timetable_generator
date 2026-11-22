@@ -73,7 +73,7 @@ t("the exams page no longer says that sending comes in a later stage", () => {
 /* onHandled: the click path with a stubbed api */
 const runHandled = async (S, reply) => {
   const calls = [];
-  const f = new Function("S", "api", "paint", "paintSave", `async ${cut("onHandled")}; return onHandled;`)(S, async (m, u, b) => { calls.push([m, u, b]); return reply; }, () => {}, () => {});
+  const f = new Function("S", "api", "paint", "paintSave", `${cut("takeRev")}\nasync ${cut("onHandled")}; return onHandled;`)(S, async (m, u, b) => { calls.push([m, u, b]); return reply; }, () => {}, () => {});
   return [f, calls];
 };
 const box = (checked, teacher = "Ms Z", key = "k1") => ({ checked, dataset: { t: teacher, k: key } });
@@ -95,6 +95,36 @@ const box = (checked, teacher = "Ms Z", key = "k1") => ({ checked, dataset: { t:
   assert.strictEqual(calls[0][1], "/api/events/e1/handled");
   assert.strictEqual(S.msg, "That lesson no longer needs a backup."); assert.strictEqual(S.bad, true);
   assert.deepStrictEqual(S.view, { old: 1 }); assert.deepStrictEqual(S.hpend, {});
+  S = { base: "/api/exams", id: "x1", busy: false, view: {}, rv: {}, hpend: {}, sched: { rev: 3 } };
+  [f, calls] = await runHandled(S, { ok: true, status: 200, j: { lessons: { backup: [] }, rev: 4 } });
+  await f(box(true));
+  assert.strictEqual(S.sched.rev, 4, "the answer's revision becomes the page's");
   console.log("onHandled cases passed");
+})().catch(e => { console.error(e); process.exit(1); });
+/* takeRev and the save that is refused as old */
+const takeRev = S => new Function("S", `${cut("takeRev")}; return takeRev;`)(S);
+t("takeRev follows a reply's revision, and leaves it alone when the reply has none", () => {
+  const S = { sched: { rev: 1 } }, f = takeRev(S);
+  f({ rev: 5 }); assert.strictEqual(S.sched.rev, 5);
+  f({}); f(null); f({ rev: "x" }); assert.strictEqual(S.sched.rev, 5);
+  const none = { sched: null }; takeRev(none)({ rev: 2 }); assert.strictEqual(none.sched, null);
+});
+const runSave = async (S, reply) => {
+  const calls = [];
+  const f = new Function("S", "api", "paintSave", "refreshView", `${cut("takeRev")}\nasync ${cut("saveNow")}; return saveNow;`)(S, async (m, u, b) => { calls.push([m, u, b && b.rev]); return reply; }, () => {}, async () => {});
+  return [f, calls];
+};
+(async () => {
+  const sent = "This exam was changed by Ms A since you opened it. Reload to carry on.";
+  let S = { base: "/api/exams", id: "x1", dirty: true, rev: 1, sched: { rev: 2 }, msg: "", bad: false, blocked: false };
+  let [f, calls] = await runSave(S, { ok: false, status: 409, j: { error: sent } });
+  assert.strictEqual(await f(), false);
+  assert.strictEqual(S.blocked, true); assert.strictEqual(S.bad, true); assert.strictEqual(S.msg, sent); assert.strictEqual(S.dirty, true);
+  assert.strictEqual(S.sched.rev, 2, "a refused save does not move the revision");
+  S = { base: "/api/exams", id: "x1", dirty: true, rev: 1, sched: { rev: 2 }, msg: "", bad: false, blocked: false };
+  [f, calls] = await runSave(S, { ok: true, status: 200, j: { rev: 3, saved_at: "t", saved_by: "Ms A" } });
+  assert.strictEqual(await f(), true);
+  assert.strictEqual(S.sched.rev, 3); assert.strictEqual(S.blocked, false); assert.strictEqual(calls[0][2], 2, "the save sends the revision it started from");
+  console.log("save cases passed");
 })().catch(e => { console.error(e); process.exit(1); });
 console.log(`${n} exams page tests passed`);

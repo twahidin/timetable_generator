@@ -14,7 +14,7 @@
   const S = {
     id: null, list: null, sched: null, view: null, levels: [], classes: [],
     base: "/api/exams", tabs: null, evl: null, me0: null, ne: null, ev: { dept: "", pick: "" },
-    tab: "when", timer: null, chain: Promise.resolve(), dirty: false, rev: 0, saving: false, msg: "", bad: false,
+    tab: "when", timer: null, chain: Promise.resolve(), dirty: false, blocked: false, rev: 0, saving: false, msg: "", bad: false,
     nf: null, mk: null, duties: null, accCls: "", note: "",
     busy: false, sit: "", room: "", mvCls: "", mvStu: "", duty: null, who: null, whoTok: 0, open: {},
     me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, abMsg: "", sbNote: "", aw: { duty: null, away: "", who: "", data: null, err: "", say: "", tok: 0 }
@@ -265,9 +265,12 @@
   const tab = () => S.tabs.find(t => t.key === S.tab) || S.tabs[0];
 
   function saveInner() {
-    return `${S.dirty ? `<span class="dirty">Changes not saved.</span>` : ""}${S.msg ? `<span class="msg ${S.bad ? "bad" : "ok"}" role="status">${esc(S.msg)}</span>` : ""}`;
+    return `${S.dirty ? `<span class="dirty">Changes not saved.</span>` : ""}${S.msg ? `<span class="msg ${S.bad ? "bad" : "ok"}" role="status">${esc(S.msg)}</span>` : ""}${S.blocked ? ` <a href="">Reload</a>` : ""}`;
   }
   function paintSave() { const el = $("#saveline"); if (el) el.innerHTML = saveInner(); }
+
+  /* every answer that carries the schedule's revision moves the page's copy to it, so the next save is not taken for an old one */
+  function takeRev(j) { if (S.sched && j && Number.isInteger(j.rev)) S.sched.rev = j.rev; }
 
   function render() {
     const s = S.sched;
@@ -296,6 +299,7 @@
 
   /* change the schedule, then save it after a pause */
   function edit(fn, redraw) {
+    if (S.blocked) return;
     fn();
     S.dirty = true; S.rev++; S.msg = ""; S.bad = false; S.note = ""; paintSave();
     clearTimeout(S.timer); S.timer = setTimeout(flush, 800);
@@ -303,6 +307,7 @@
   }
 
   function flush() {
+    if (S.blocked) return S.chain;
     clearTimeout(S.timer); S.timer = null;
     S.chain = S.chain.then(saveNow, saveNow);
     return S.chain;
@@ -315,8 +320,9 @@
     const r = await api("PUT", `${S.base}/${S.id}`, S.sched);
     S.saving = false;
     if (r.status === 401 || r.status === 403) return false;
+    if (r.status === 409) { S.blocked = true; S.bad = true; S.msg = r.j.error || "This was changed since you opened it. Reload to carry on."; paintSave(); return false; }
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "Nothing was saved. Try again."; paintSave(); return false; }
-    S.sched.saved_at = r.j.saved_at; S.sched.saved_by = r.j.saved_by;
+    S.sched.saved_at = r.j.saved_at; S.sched.saved_by = r.j.saved_by; takeRev(r.j);
     if (S.rev === rev) { S.dirty = false; S.bad = false; S.msg = "Saved"; }
     paintSave();
     await refreshView();
@@ -326,7 +332,7 @@
   async function refreshView() {
     const r = await api("GET", `${S.base}/${S.id}/view`);
     if (!r.ok) return;
-    S.view = r.j;
+    S.view = r.j; takeRev(r.j);
     if (S.sched) paint();
   }
 
@@ -338,7 +344,7 @@
     const r = await api(method, url, body, form);
     if (r.status === 401 || r.status === 403) return;
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); return; }
-    S.sched = r.j;
+    S.sched = r.j; takeRev(r.j);
     if (done) done(r.j);
     paintSave();
     await refreshView();
@@ -608,7 +614,7 @@
     S.busy = false;
     if (r.status === 401 || r.status === 403) return false;
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return false; }
-    S.view = r.j; S.msg = typeof ok === "function" ? ok(r.j) : (ok || ""); paintSave(); paint();
+    S.view = r.j; takeRev(r.j); S.msg = typeof ok === "function" ? ok(r.j) : (ok || ""); paintSave(); paint();
     return true;
   }
 
@@ -1039,7 +1045,7 @@
 
   /* the review's answer is the page's: it also brings the status, which is kept on the schedule and the chip */
   function takeReview(j) {
-    S.rv = j; S.rvErr = "";
+    S.rv = j; S.rvErr = ""; takeRev(j);
     S.label = j.label || S.label; S.sched.status = j.status; S.sched.note = j.note;
   }
 
@@ -1193,7 +1199,7 @@
     S.busy = false; S.hpend = {};
     if (r.status === 401 || r.status === 403) { paint(); return; }
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return; }
-    S.view = r.j; S.rv = null; paintSave(); paint();
+    S.view = r.j; takeRev(r.j); S.rv = null; paintSave(); paint();
   }
 
   function onChange(e) {
@@ -1319,7 +1325,7 @@
   document.addEventListener("input", onInput);
   document.addEventListener("change", onChange);
   document.addEventListener("toggle", e => { const d = e.target; if (d && d.dataset && d.dataset.d) S.open[d.dataset.d] = d.open; }, true);
-  window.addEventListener("beforeunload", e => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
+  window.addEventListener("beforeunload", e => { if (S.dirty && !S.blocked) { e.preventDefault(); e.returnValue = ""; } });
   const m = /^\/exams\/([A-Za-z0-9]+)\/?$/.exec(location.pathname), me2 = /^\/events\/([A-Za-z0-9]+)\/?$/.exec(location.pathname);
   if (me2) startOne(me2[1], true); else if (m && m[1] !== "settings") startOne(m[1], false); else startList();
 })();

@@ -2134,7 +2134,7 @@ def _exam_view(pub, sched):
     levels, classes = set(sched.get("levels") or []), set(sched.get("classes") or [])
     mine = {x["id"] for x in model.get("students") or [] if exams_papers._student_level(model, x) in levels or x.get("cls") in classes}
     sids = sorted(mine | {i for p in papers for i in exams_papers.who_sits(p, model)})
-    return dict(summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=_marked(exams_make.lesson_lists(pub, cal, sched), sched, pub, cal),
+    return dict(rev=exams_schedules.rev_of(sched), summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=_marked(exams_make.lesson_lists(pub, cal, sched), sched, pub, cal),
                 made=sched.get("made"), students={i: [by_id[i]["name"], by_id[i]["cls"]] for i in sids if i in by_id},
                 counts={p.get("id"): len(exams_papers.who_sits(p, model)) for p in papers}, periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)],
                 rooms=exams_settings.load(pub)["rooms"], students_missing=not model.get("students"), levels=list(model.get("levels") or []),
@@ -2233,6 +2233,14 @@ def exams_create():
     saved, bad = _save_exam(sched, pub, who, "create", "created")
     return bad or jsonify(saved)
 
+def _stale_rev(old, b, event=False):
+    """None when the page's copy (the body's rev) is the stored one; else the 409 answer naming who saved last. A schedule
+    saved before revisions has no rev: a body without one passes (once: the next save gives it one)"""
+    stored, got = exams_schedules.rev_of(old), b.get("rev")
+    if got is None and "rev" not in old or (isinstance(got, int) and not isinstance(got, bool) and got == stored): return None
+    what = "event" if event else "exam"
+    return {"error": f"This {what} was changed by {old.get('saved_by') or 'someone'} since you opened it. Reload to carry on."}, 409
+
 def _exam_or_404(id):
     s = exams_schedules.load(id)
     return (s, None) if s and s.get("kind") != "event" else (None, ({"error": NO_EXAM}, 404))   # an event has its own routes
@@ -2253,6 +2261,8 @@ def exams_put(id):
     with exams_schedules.editing():   # from loading to saving: what is kept is what is stored now
         old, err = _exam_or_404(id)
         if err: return err
+        stale = _stale_rev(old, _exam_json())
+        if stale: return stale
         new = dict(_exam_json(), **{k: old.get(k) for k in EXAM_KEEPS})
         new["log"] = old.get("log") or []
         if new.get("kind") not in exams_schedules.KINDS: return {"error": exams_schedules.WRONG}, 400   # an exam never becomes an event
@@ -2540,7 +2550,7 @@ def _exam_review_reply(pub, s):
     st = s.get("status") or "draft"
     rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"), pub["model"], own=_reviewed(s))) if s.get("made") else None
     if rv: _backups_left(rv, lambda: exams_make.lesson_lists(pub, _exam_cal(pub), exams_approval.as_schedule(s) if rv.get("copy") == "approved" else s), s, pub)
-    return jsonify(status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
+    return jsonify(rev=exams_schedules.rev_of(s), status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
                    changed=s.get("sent_fp") is not None and s.get("sent_fp") != exams_approval.fp(s),
                    can_send=exams_approval.blocked(s, model, stale, errors), can_approve=_exams_can_approve(),
@@ -2682,7 +2692,7 @@ def _event_review_reply(pub, s):
     model, cal = pub["model"], _exam_cal(pub)
     others, busy = _event_others(pub, s)
     st = s.get("status") or "draft"
-    return jsonify(status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
+    return jsonify(rev=exams_schedules.rev_of(s), status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
                    changed=s.get("sent_fp") is not None and s.get("sent_fp") != exams_approval.fp(s),
                    can_send=exams_approval.blocked(s, model, False, exams_events.send_errors(pub, cal, s, busy, others)), can_approve=_exams_can_approve(),
@@ -2695,7 +2705,7 @@ def _event_view(pub, s):
     inside = {c for e in dts for c in e["classes"]}
     people = relief_staff(pub)
     entry = lambda date: (s.get("days") or {}).get(date) or {}
-    return dict(summary=dict(days=[dict(date=e["date"], day=e["day"], levels=e["levels"], whole=bool(entry(e["date"]).get("whole", True)),
+    return dict(rev=exams_schedules.rev_of(s), summary=dict(days=[dict(date=e["date"], day=e["day"], levels=e["levels"], whole=bool(entry(e["date"]).get("whole", True)),
                                         window=[exams_days.hhmm(e["start"]), exams_days.hhmm(e["end"])]) for e in exams_days.dates(s, cal, model)]),
                 classes=[c["name"] for c in model.get("classes") or [] if c["name"] in inside], going=exams_events.going(pub, cal, s, busy),
                 lessons=_marked(exams_events.lesson_lists(pub, cal, s), s, pub, cal), freed=exams_events.freed(pub, cal, s, busy), flags=exams_events.flags(pub, cal, s),
@@ -2752,6 +2762,8 @@ def events_put(id):
     with exams_schedules.editing():   # from loading to saving: what is kept is what is stored now
         pub, who, old, _, err = _event_gate(id)
         if err: return err
+        stale = _stale_rev(old, _exam_json(), event=True)
+        if stale: return stale
         new = dict(_exam_json(), **{k: old.get(k) for k in EVENT_KEEPS})
         new["log"] = old.get("log") or []
         saved, bad = _save_exam(new, pub, who, "edit", "changed", event=True)

@@ -20,6 +20,21 @@ def raises(exc, f, text=None):
         return
     raise AssertionError("did not raise")
 
+from flask.testing import FlaskClient  # noqa: E402
+
+class _Page(FlaskClient):
+    """a test client that saves like a page that has just reloaded: a PUT of an exam or event carries the stored revision,
+    so the many tests that save an old copy of a schedule they hold still test what they were written for. A PUT with the
+    header X-Old-Page is sent as it is: the tests of the revision check itself use that"""
+    def open(self, *args, **kw):
+        body, path = kw.get("json"), str(args[0]) if args and isinstance(args[0], str) else ""
+        m = re.fullmatch(r"/api/(exams|events)/([A-Za-z0-9]+)", path)
+        if kw.get("method") == "PUT" and m and isinstance(body, dict) and "X-Old-Page" not in (kw.get("headers") or {}):
+            kw["json"] = dict(body, rev=SC.rev_of(SC.load(m.group(2)))) if SC.load(m.group(2)) else body
+        return super().open(*args, **kw)
+
+A.app.test_client_class = _Page
+
 COUNT = 0
 def t(f):
     global COUNT
@@ -3154,5 +3169,113 @@ def stamps_are_in_school_time_and_keep_their_shape():
                 assert abs((DT.datetime.fromisoformat(now) - want).total_seconds()) < 60, (tz, now, want)
     with school_tz("Pacific/Kiritimati"):
         assert SC.new("test", "T", ["Sec 3"], "2026-10-05", "2026-10-05", "Ms Grace Yeo", pub=F.sample_pub())["created_at"][:10] == RLS.today().isoformat()
+
+# ------------------------------------------------------------------------------------------------ the save check
+_OLD = {"X-Old-Page": "1"}
+
+def _a_draft(c):
+    r = c.post("/api/exams", json=dict(kind="exam", name="Sec 3 Exam", levels=["Sec 3"], start="2026-10-05", end="2026-10-06"))
+    assert r.status_code == 200, r.data
+    return r.get_json()
+
+@t
+def a_save_raises_the_revision():
+    _reset(); _cal(); _rooms_saved()
+    pub = F.sample_pub()
+    s = SC.new("exam", "Sec 3 Exam", ["Sec 3"], "2026-10-05", "2026-10-06", "Ms A", pub=pub)
+    assert SC.rev_of(s) == 0
+    s = SC.save(s, pub, F.CAL, "Ms A"); assert s["rev"] == 1
+    assert SC.save(s, pub, F.CAL, "Ms A")["rev"] == 2 and SC.load(s["id"])["rev"] == 2
+    with published(_PUB):
+        c = committee()
+        x = _a_draft(c); assert x["rev"] == 1
+        assert c.put("/api/exams/" + x["id"], json=x, headers=_OLD).get_json()["rev"] == 2
+        assert c.get("/api/exams/" + x["id"]).get_json()["rev"] == 2
+
+@t
+def an_older_page_is_refused():
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee()
+        x = _a_draft(c); id = x["id"]
+        old = c.get("/api/exams/" + id).get_json()
+        assert c.put("/api/exams/" + id, json=dict(old, name="Second"), headers=_OLD).status_code == 200
+        before = SC.load(id)
+        r = c.put("/api/exams/" + id, json=dict(old, name="Third"), headers=_OLD)
+        who = before["saved_by"]
+        assert r.status_code == 409 and r.get_json() == {"error": f"This exam was changed by {who} since you opened it. Reload to carry on."}, r.data
+        assert SC.load(id) == before, "nothing saved"
+        for bad in ("2", True, 1.0, [2]):
+            assert c.put("/api/exams/" + id, json=dict(old, rev=bad), headers=_OLD).status_code == 409, bad
+        assert c.put("/api/exams/" + id, json={k: v for k, v in old.items() if k != "rev"}, headers=_OLD).status_code == 409
+        cur = c.get("/api/exams/" + id).get_json()
+        assert cur["rev"] == 2 and c.put("/api/exams/" + id, json=dict(cur, name="X"), headers=_OLD).status_code == 200
+        assert SC.load(id)["name"] == "X" and SC.load(id)["rev"] == 3
+        raw = dict(SC.load(id)); raw["saved_by"] = None; store.write_json(SC._path(id), raw)
+        r = c.put("/api/exams/" + id, json=dict(old, name="Y"), headers=_OLD)
+        assert r.status_code == 409 and r.get_json()["error"] == "This exam was changed by someone since you opened it. Reload to carry on."
+
+@t
+def a_schedule_from_before_has_no_rev():
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee()
+        x = _a_draft(c); id = x["id"]
+        raw = {k: v for k, v in SC.load(id).items() if k != "rev"}; store.write_json(SC._path(id), raw)
+        assert "rev" not in c.get("/api/exams/" + id).get_json()
+        body = {k: v for k, v in c.get("/api/exams/" + id).get_json().items() if k != "rev"}
+        assert c.put("/api/exams/" + id, json=body, headers=_OLD).status_code == 200 and SC.load(id)["rev"] == 1
+        assert c.put("/api/exams/" + id, json=body, headers=_OLD).status_code == 409
+        raw = {k: v for k, v in SC.load(id).items() if k != "rev"}; store.write_json(SC._path(id), raw)
+        assert c.put("/api/exams/" + id, json=dict(body, rev=0), headers=_OLD).status_code == 200, "0 is what none is"
+
+@t
+def make_and_approve_raise_it_and_tell_it():
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee()
+        s = _exam(c); id = s["id"]
+        times = {"English": "07:50", "Pure Chemistry": "10:00"}
+        s = c.get("/api/exams/" + id).get_json()
+        s["papers"] = [dict(p, date="2026-10-05", start=times[p["subject"]]) for p in s["papers"] if p["subject"] in times]
+        assert c.put("/api/exams/" + id, json=s, headers=_OLD).status_code == 200
+        def follow(r, where=lambda j: j):
+            assert r.status_code == 200, r.data
+            j = r.get_json(); assert where(j)["rev"] == SC.load(id)["rev"], "the answer tells the revision it saved"
+            assert c.put("/api/exams/" + id, json=dict(c.get("/api/exams/" + id).get_json(), rev=where(j)["rev"]), headers=_OLD).status_code == 200
+            return j
+        before = SC.load(id)["rev"]
+        r = c.post(f"/api/exams/{id}/make", json={}); v = follow(r); assert v["rev"] == before + 1
+        assert c.get(f"/api/exams/{id}/view").get_json()["rev"] == SC.load(id)["rev"]
+        key = "2026-10-05 07:50"
+        follow(c.post(f"/api/exams/{id}/move", json=dict(key=key, students=["3A-07"], room="3-02")))
+        follow(c.post(f"/api/exams/{id}/send"))
+        follow(c.post(f"/api/exams/{id}/approve"))
+        assert c.get(f"/api/exams/{id}/review").get_json()["rev"] == SC.load(id)["rev"]
+        f = _a_draft(c)["id"]
+        r = c.post(f"/api/exams/{f}/fill"); assert r.status_code == 200 and r.get_json()["rev"] == SC.load(f)["rev"]
+
+@t
+def an_event_has_the_same_check():
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee()
+        r = c.post("/api/events", json=dict(name="Sec 3 Learning Journey", levels=["Sec 3"], classes=[], start="2026-10-05", end="2026-10-05", in_charge="Mr Ben Ong"))
+        assert r.status_code == 200, r.data
+        e = r.get_json(); id = e["id"]; assert e["rev"] == 1
+        assert c.get(f"/api/events/{id}").get_json()["rev"] == 1 and c.get(f"/api/events/{id}/view").get_json()["rev"] == 1
+        assert c.put(f"/api/events/{id}", json=e, headers=_OLD).get_json()["rev"] == 2
+        before = SC.load(id)
+        r = c.put(f"/api/events/{id}", json=dict(e, name="Other"), headers=_OLD)
+        assert r.status_code == 409 and r.get_json() == {"error": f"This event was changed by {before['saved_by']} since you opened it. Reload to carry on."}, r.data
+        assert SC.load(id) == before
+        e = dict(c.get(f"/api/events/{id}").get_json(), where="Off site (museum)", days={"2026-10-05": dict(levels=["Sec 3"], whole=False, **{"from": "07:40", "to": "10:40"})})
+        r = c.put(f"/api/events/{id}", json=e, headers=_OLD); assert r.status_code == 200 and r.get_json()["rev"] == 3, r.data
+        r = c.post(f"/api/events/{id}/fill", json=dict(way="form teachers")); assert r.status_code == 200 and r.get_json()["rev"] == 4, r.data
+        assert c.get(f"/api/events/{id}/review").get_json()["rev"] == 4
+        r = c.post(f"/api/events/{id}/fill", json=dict(way="department", dept="PE")); assert r.status_code == 200, r.data
+        r = c.post(f"/api/events/{id}/send"); assert r.status_code == 200, r.data
+        assert r.get_json()["rev"] == SC.load(id)["rev"] == 6
+        assert c.put(f"/api/events/{id}", json=dict(c.get(f"/api/events/{id}").get_json()), headers=_OLD).status_code == 200
 
 print(f"{COUNT} exams tests passed")
