@@ -993,7 +993,7 @@ function exportCard() {   // step 8's upload: the timetable file first, its setu
   const t = upTexts(null, null);
   const box = (n, id, title, kinds, accept) => `<label class="upbox${id === "exSetup" ? " dim" : ""}" data-upbox="${id}"><span class="upn">${n}</span><span class="upt"><b>${title}</b><span class="muted small">${kinds}</span></span>
       <span class="upgo">Choose file…<span class="muted small"> or drop it here</span></span><input type="file" id="${id}" accept="${accept}" hidden></label>`;
-  return `<div class="card" id="printouts"><h2>Upload a timetable</h2><p class="muted">Upload the timetable the chatbot made. The app keeps it as the draft, checks it against the setup and lists what it found: fix it here, then publish on step 9.</p>
+  return `<div class="card" id="printouts"><div class="vshead2"><h2>Upload a timetable</h2><button id="vsBtn" data-vsopen="1">${vsLabel()}</button></div><p class="muted">Upload the timetable the chatbot made. The app keeps it as the draft, checks it against the setup and lists what it found: fix it here, then publish on step 9.</p>
     <div class="upboxes">
       <div>${box(1, "exTT", "Timetable file", ".sqlite or .xlsx", ".xlsx,.sqlite,.sqlite3,.db")}<div class="upname" id="exTTName">${t.tt}</div></div>
       <div>${box(2, "exSetup", "Its setup workbook", ".xlsx · only with a timetable workbook", ".xlsx")}<div class="upname" id="exSetupName">${t.su}</div></div>
@@ -1797,6 +1797,7 @@ document.addEventListener("click", async e => {
   if (tc && !e.target.closest("button, input, select, textarea, label") && !tc.classList.contains("open")) { tkOpenCard(Number(tc.dataset.tcard), tc); return; }
   if (bdCellClick(e)) return;
   if (e.target.closest("#pbDownload")) { e.preventDefault(); downloadDraft(); return; }   // fetched, so a refusal is said in words, not shown as a page
+  if (e.target.closest("[data-vsopen]")) { vsOpen(); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c, [data-mcard]"); if (!b) return;
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); G.refetch = onDraftStep(); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
@@ -2974,7 +2975,7 @@ async function poll() {   // every few seconds: the published timetable and the 
     if (al) al.hidden = !rights.includes("admin");
     if (hy) hy.hidden = !rights.includes("history");
     if (fa) fa.hidden = !(G.st.admin_exists === false && rights.includes("committee"));   /* deploy day: the committee code makes the first admin */
-    paintPublished(); draftWatch();
+    paintPublished(); draftWatch(); if (!VS.open) { VS.list = null; } vsPaintBtn();
   } catch (e) { }
   G.inflight = false;
   G.timer = setTimeout(poll, 5000);
@@ -3093,6 +3094,133 @@ async function uploadDraft() {
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
   finally { btns.forEach(x => x.disabled = false); upPaint(); }
 }
+/* step 8's Versions pop-out: the saved versions of the draft, fixed over the page. State: open, list (the answer of GET /api/draft/versions), busy
+   (a request is out: the buttons wait), gen (a late answer of an older load is dropped), name (the typed name, kept while the list is drawn again) */
+const VS = { open: false, list: null, busy: false, gen: 0, name: null, err: "" };
+const vsCount = () => VS.list ? VS.list.versions.length : (G.st && G.st.draft && G.st.draft.versions) || 0;
+const vsLabel = () => { const n = vsCount(); return n > 0 ? `Versions (${n})` : "Versions"; };
+function vsPaintBtn() { const b = $("#vsBtn"); if (b) b.textContent = vsLabel(); }
+const vsDay = s => String(s || "").split(/\s+/).slice(0, 3).join(" ").replace(/,$/, "");   // "22 Nov 2026, 14:30" as the app writes it: the day, month and year
+function vsDefaultName() {
+  const d = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short" }), src = S.draft && S.draft.source ? String(S.draft.source).replace(/\.[^.\/]*$/, "") : "";
+  return ((src || "Draft") + " · " + (src ? "edited " : "") + d).slice(0, 80);
+}
+function vsCounts(v) { return v.critical === null || v.critical === undefined ? `<span class="muted">not checked</span>` : `${v.critical} critical · ${v.warnings === null || v.warnings === undefined ? "?" : v.warnings} warnings`; }
+function vsHTML() {
+  const L = VS.list, off = VS.busy ? " disabled" : "", vs = L ? L.versions : [], d = L && L.draft, p = L && L.published;
+  const firstV = vs[0] ? "v:" + vs[0].id : null;
+  const cmp = (a, b) => !b ? "" : `<button data-vs="compare" data-a="${esc(a)}" data-b="${esc(b)}"${off}>Compare…</button>`;
+  const row = (name, tag, sub, changes, counts, btns) => `<tr><td><b>${name}</b>${tag ? ` <span class="vstag">${tag}</span>` : ""}${sub ? `<div class="muted small">${sub}</div>` : ""}</td>${changes}<td>${counts}</td><td class="vsbtns">${btns}</td></tr>`;
+  const kept = { upload: "uploading", open: "opening a version", refit: "a re-fit" };
+  const rows = [];
+  if (d) rows.push(row("The draft on step 8", "now", "", `<td>${d.fixes ? d.fixes + (d.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(d), firstV ? cmp("draft", firstV) : p ? cmp("draft", "published") : ""));
+  vs.forEach(v => rows.push(row(esc(v.name), "", `${esc(v.saved_at || "")} · ${v.kind === "saved" ? "by " + esc(v.by || "") : "kept by the app before " + (kept[v.kind] || "a change")}`,
+    `<td>${v.fixes ? v.fixes + (v.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(v),
+    `<button data-vs="open" data-id="${esc(v.id)}"${off}>Open</button>${cmp("v:" + v.id, d ? "draft" : p ? "published" : "")}<button data-vs="download" data-id="${esc(v.id)}"${off}>Download</button><button class="vsdel" data-vs="delete" data-id="${esc(v.id)}"${off}>Delete</button>`)));
+  if (p) rows.push(row("Published timetable", "what teachers see", p.published_at ? "published " + esc(vsDay(p.published_at)) : "", `<td class="muted">–</td>`, p.error ? `<span class="muted">could not be read</span>` : vsCounts(p), d ? cmp("published", "draft") : firstV ? cmp("published", firstV) : ""));
+  const table = L ? (rows.length ? `<div class="tablewrap"><table class="vstable"><tr><th>Version</th><th>Changes made in the app</th><th>Checked now</th><th></th></tr>${rows.join("")}</table></div>
+    <p class="muted small">“Checked now” means against the setup as it is today: a version saved before step 5 changed can show warnings it did not have then.</p>` : "")
+    + (vs.length ? "" : `<p class="muted">No versions yet.</p>`) : `<p class="muted">${VS.err ? esc(VS.err) : "Loading…"}</p>`;
+  const save = d ? `<div class="vssave"><label class="f">Save the draft as<input id="vsName" type="text" maxlength="80" value="${esc(VS.name === null ? vsDefaultName() : VS.name)}"></label><button class="primary" data-vs="save"${off}>Save version</button></div>` : "";
+  return `<div class="vspop" role="dialog" aria-modal="true" aria-labelledby="vsTitle" tabindex="-1"><div class="vshead"><h2 id="vsTitle">Versions</h2><button data-vs="close">Close</button></div>
+    <p class="muted">Step 8 keeps one draft. A version is a named copy of it that you can open again later. Opening a version never loses the draft you had: it is kept as a version first.</p>${save}${table}</div>`;
+}
+function vsDraw() {
+  const ov = $("#vsOv"); if (!ov) return;
+  const n = $("#vsName"), typed = n ? n.value : null; if (n) VS.name = typed;
+  const had = n && document.activeElement === n, pos = had ? n.selectionStart : 0;
+  const sc = ov.querySelector(".vspop") ? ov.scrollTop : 0;
+  ov.innerHTML = vsHTML(); ov.scrollTop = sc;
+  if (had) { const m = $("#vsName"); if (m) { m.focus(); try { m.setSelectionRange(pos, pos); } catch (e) { } } }
+  vsPaintBtn();
+}
+async function vsLoad() {   // the list again; a late answer of an older load is dropped
+  const g = ++VS.gen;
+  try {
+    const r = await fetch("/api/draft/versions"), j = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (g !== VS.gen) return;
+    if (!r.ok) { VS.err = j.error || "Could not list the versions."; if (!VS.list) { vsDraw(); } else toast(VS.err); return; }
+    VS.list = j; VS.err = "";
+  } catch (err) { if (g !== VS.gen) return; VS.err = "Could not reach the server: " + err.message; if (VS.list) toast(VS.err); }
+  if (VS.open) vsDraw(); else vsPaintBtn();
+}
+function vsOpen() {
+  if (VS.open) return;
+  VS.open = true; VS.name = null; VS.err = "";
+  let ov = $("#vsOv"); if (!ov) { ov = document.createElement("div"); ov.id = "vsOv"; ov.className = "vsov"; document.body.appendChild(ov); }
+  ov.hidden = false; document.body.classList.add("vslock"); vsDraw();
+  const p = ov.querySelector(".vspop"); if (p) p.focus();
+  vsLoad();
+}
+function vsClose() {
+  if (!VS.open) return;
+  VS.open = false; const ov = $("#vsOv"); if (ov) { ov.hidden = true; ov.innerHTML = ""; }
+  document.body.classList.remove("vslock");
+  const b = $("#vsBtn"); if (b) b.focus({ preventScroll: true });
+}
+async function vsRequest(url, opt) {   // one request at a time; {r, j} or null when the page goes to sign in or the server cannot be reached (said)
+  VS.busy = true; if (VS.open) vsDraw();
+  try {
+    const r = await fetch(url, opt);
+    if (r.status === 401) { location.href = "/login"; return null; }
+    return { r, j: r.headers.get("Content-Type") && /json/.test(r.headers.get("Content-Type")) ? await r.json().catch(() => ({})) : null };
+  } catch (err) { toast("Could not reach the server: " + err.message); return null; }
+}
+const vsDone = () => { VS.busy = false; if (VS.open) vsDraw(); };
+async function vsAction(b) {
+  const a = b.dataset.vs, id = b.dataset.id;
+  if (a === "close") { vsClose(); return; }
+  if (VS.busy) return;
+  const v = VS.list && VS.list.versions.find(x => x.id === id);
+  if (a === "compare") { location.href = "/compare?a=" + encodeURIComponent(b.dataset.a) + "&b=" + encodeURIComponent(b.dataset.b); return; }
+  if (a === "save") {
+    const n = $("#vsName"), name = n ? n.value.trim() : ""; if (n) VS.name = n.value;
+    if (!name) { toast("Give the version a name."); return; }
+    const x = await vsRequest("/api/draft/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    if (x && !x.r.ok) toast((x.j && x.j.error) || "Could not save the version.");
+    else if (x) { toast("Saved the version “" + ((x.j && x.j.name) || name) + "”."); VS.name = null; }
+    VS.busy = false; await vsLoad(); vsDone(); return;
+  }
+  if (!v) return;
+  if (a === "open") {
+    const x = await vsRequest(`/api/draft/versions/${encodeURIComponent(id)}/open`, { method: "POST" });
+    if (x && !x.r.ok) { toast((x.j && x.j.error) || "Could not open the version."); VS.busy = false; if (x.r.status === 404) await vsLoad(); vsDone(); return; }
+    if (!x) { vsDone(); return; }
+    const j = x.j || {}; S.draft = j.info && j.info.warnings ? j.info : null; S.help = null; VS.busy = false;
+    vsClose(); drawDraft(); poll(); vsLoad();
+    toast("Opened “" + ((j.opened && j.opened.name) || v.name) + "”." + (j.kept ? " The draft you had is kept as version “" + j.kept.name + "”." : ""));
+    return;
+  }
+  if (a === "delete") {
+    if (!confirm(`Delete the version “${v.name}”? This cannot be undone.`)) return;
+    const x = await vsRequest(`/api/draft/versions/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (x && !x.r.ok) toast((x.j && x.j.error) || "Could not delete the version.");
+    VS.busy = false; await vsLoad(); vsDone(); poll(); return;
+  }
+  if (a === "download") {
+    const x = await vsRequest(`/api/draft/versions/${encodeURIComponent(id)}/download`);
+    if (!x) { vsDone(); return; }
+    if (!x.r.ok) { toast((x.j && x.j.error) || "Could not download the version."); vsDone(); return; }
+    const cd = x.r.headers.get("Content-Disposition") || "", star = cd.match(/filename\*=UTF-8''([^;]+)/i), plain = cd.match(/filename="?([^";]+)"?/);
+    let nm = v.name + " - version.sqlite"; try { nm = star ? decodeURIComponent(star[1]) : plain ? plain[1] : nm; } catch (e) { }
+    try { dl(await x.r.blob(), nm); } catch (err) { toast("Could not save the file: " + err.message); }
+    vsDone(); return;
+  }
+}
+document.addEventListener("click", e => {   // the pop-out's own buttons (it is outside the page's own handler's steps); a click on the dim backdrop closes it
+  const ov = e.target.closest && e.target.closest("#vsOv"); if (!ov) return;
+  e.stopPropagation();
+  if (e.target === ov) { vsClose(); return; }
+  const b = e.target.closest("[data-vs]"); if (b) vsAction(b);
+}, true);
+document.addEventListener("keydown", e => {   // Escape closes; Tab stays inside the pop-out
+  if (!VS.open) return;
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); vsClose(); return; }
+  if (e.key === "Tab") { const f = [...document.querySelectorAll("#vsOv button:not([disabled]), #vsOv input")]; if (!f.length) return;
+    const i = f.indexOf(document.activeElement), last = f.length - 1;
+    if (e.shiftKey && i <= 0) { e.preventDefault(); f[last].focus(); } else if (!e.shiftKey && (i === -1 || i === last)) { e.preventDefault(); f[0].focus(); } }
+}, true);
 async function refreshDraft() {   // the draft again from the server, and the step drawn from it
   try {
     const r = await fetch("/api/draft"), j = await r.json().catch(() => ({}));

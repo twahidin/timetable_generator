@@ -172,7 +172,12 @@ is not on step 3, and a named subject the class has only in groups.
    before step 5 changed can show warnings it did not have then. **Show** picks a class, a teacher or a room: its week on each side is drawn in
    two grids (stacked on a phone), with **mark what differs** outlining in orange the places that are not the same, bands in light blue, and a
    sentence for each difference below. **Download the differences (Excel)** lists every difference, class by class. Comparing only reads: nothing
-   is changed.
+   is changed. The **Versions** button on the upload card (**Versions (3)** when there are three) opens the list over the page: **Save the draft
+   as** names a copy of the draft (**Save version**; at most 30 are saved by hand); each version has **Open**, **Compare…**, **Download**
+   (the timetable as a database) and **Delete** (it asks first). **Open** never loses the draft you had: the draft is kept first as a version of
+   its own, and step 8 is drawn from the one opened. The app also keeps the draft as a version before an upload replaces it and before a version
+   is opened (the newest 10 of these are kept, the older ones go). The list also shows the published timetable, to compare with. The list only
+   reads and saves: nothing in it publishes.
 6. **Publish** (step 9): it shows the timetable as it will be published, read-only: the critical mistakes (each with
    **Show on step 8**, which opens step 8 with the warning marked in the panel's Warnings tab and its lesson selected on
    the board, or a lesson that is not placed selected in the Not placed tab), every other
