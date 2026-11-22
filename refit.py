@@ -1,9 +1,10 @@
 """Re-fit: the fewest lesson changes that make the draft fit the setup again. Here are the warnings it works on, the change
-itself for each, where a lesson may go, and the search for the list of fixes that settles one warning."""
-import collections, itertools, re, time
-import helper, fixes
+itself for each, where a lesson may go, the search for the list of fixes that settles one warning, and the plan: one list for
+all of them, with its reasons and its numbers."""
+import collections, itertools, logging, re, time
+import draft, helper, fixes
 from ttgen import verify
-from ttgen.export import ENTIRE
+from ttgen.export import ENTIRE, check_model
 from ttgen.spec import single_rooms, whole as whole_n
 
 MAX_MOVES = 3        # the most moves and swaps in one answer
@@ -15,6 +16,7 @@ CAND_LESSONS = 4     # the lessons tried for a change
 CAND_SLOTS = 8       # the places tried for a lesson
 TAKEN_SLOTS = 6      # the places in use tried for a missing lesson when none is free
 BUDGET_S = 30.0      # the most seconds for a whole re-fit
+LOOK_S = 2.0         # the least seconds one warning's full search is given of them
 
 NO_FIT = "No list of up to 3 moves fits it."
 BAND = "This changes the band itself: change it on the board, or ask the agent for a new timetable."
@@ -22,7 +24,10 @@ SPLIT = "Its lessons are taught by different teachers: change them on the board.
 NOT_ONE = "More than one teacher changes: change it on the board."
 TOO_MANY = "More than 8 changes: change it on the board."
 LATE = "Not looked at in time; run Re-fit again."
+BROKEN = "The app could not work this one out: change it on the board."
 OVER = " over the allowance."   # how fixes.judge ends a teacher's allowance line: the only Prefer reason an answer may give
+
+_log = logging.getLogger(__name__)
 
 PARTS = ("teachers", "missing", "periods", "extra", "venue", "half")   # the step 5 differences it works on, in this order
 
@@ -271,6 +276,7 @@ def _gone(m, spec, days, w, before, room):
     wh = w.get("where") or {}
     if w.get("kind") != "clash": return helper.settles(m, spec, days, w, m["lessons"], before)
     if room: return not _over(m, m["lessons"], *room)
+    if w.get("crit") == "notplaced" or w["key"].startswith("clash:bands:"): return False   # no list places a lesson or moves a band
     if wh.get("id") is None: return bool(before.get("named")) and helper.settles(m, spec, days, w, m["lessons"], before)   # a double booking
     x = next((x for x in m["lessons"] if x["id"] == wh["id"] and x["group"] == wh.get("row", x["group"])), None)
     return x is None or (w.get("crit") != "noteacher" and (m["days"][x["d"]], x["p"]) != (wh.get("day"), wh.get("period")))
@@ -496,3 +502,157 @@ def solve(m, spec, days, target, pool, moved, deadline, stats=None, max_moves=No
     if got is not None: s["late"] = False
     else: s["reason"] = LATE if s["late"] else TOO_MANY if search.many else search.refused or NO_FIT
     return got
+
+
+# ----------------------------------------------------------------------------------------------- the plan: one list for every target
+def _typed(m, spec, touched, was):
+    """the numbers of the typed rules to check again after a change that touched these lessons (m: the timetable it leaves)"""
+    return sorted({int(w["key"].split(":")[1]) for w in verify.typed_again(m, spec, touched, was)})
+
+def _again(w): return bool(re.fullmatch(r"typed:\d+:again(#\d+)?", w["key"]))
+
+def _wishes(ws):
+    """how many open Prefer warnings there are, "No room" and the typed rules to check again aside"""
+    return sum(1 for w in ws if not w["decision"] and w["strength"] == "Prefer" and not w["key"].startswith("room:none:") and not _again(w))
+
+class _Plan:
+    """the work of plan: the targets (each is its place in ts) looked at in turn, every one on the timetable the list leaves so far.
+    Nothing of m or of the targets is changed"""
+    def __init__(self, m, ts, progress, end):
+        self.m, self.spec, self.days, self.ts, self.progress, self.end = m, m["checked_setup"], m["days"], ts, progress, end
+        self.first = {x["id"] for x in m["lessons"]}             # the lessons on the timetable the plan starts from
+        self.now, self.changes, self.moved = m, 0, set()         # the timetable the list leaves so far; how often it changed; the lessons that stay where they are: moved or put in by the list
+        self.solved, self.also, self.broken = [], set(), set()   # (target, its answer) in the order solved; those settled by the fixes of others; those the search broke on
+        self.why, self.told = {}, set()                          # target -> the sentence of its last full look; the targets progress was told of
+        self.seen, self.full, self.had = {}, {}, {}              # target -> self.changes at its last look, and at its last full look; the seconds that one had, when it was cut short
+
+    def fixes(self): return [f for _, got in self.solved for f in got["fixes"]]
+    def lessons(self): return helper._apply(self.m["lessons"], self.fixes(), self.spec, self.days)["lessons"]   # the whole list from the start: an added lesson never takes the number of one deleted before it
+
+    # ------------------------------------------------------------ looking at the targets
+    def run(self):
+        """passes without a move until one settles nothing, then a round of the full search, and so on until a round has nothing to look at or the time is up"""
+        while True:
+            while self._pass(): pass
+            if not self._round(): break
+        if self.progress and len(self.told) < len(self.ts): self.progress(len(self.ts), len(self.ts))   # the time ran out
+
+    def _open(self):
+        closed = {i for i, _ in self.solved} | self.also | self.broken
+        return [i for i in range(len(self.ts)) if i not in closed]
+
+    def _pass(self):
+        """every target not looked at since the timetable last changed, with no move -> whether the timetable changed"""
+        was = self.changes
+        for i in self._open():
+            if time.monotonic() >= self.end: break
+            if self.seen.get(i) != self.changes: self._look(i, self.end, 0)
+        return self.changes != was
+
+    def _round(self):
+        """the full search for every target not searched in full since the timetable last changed, each with its share of the time left; and
+        again for one whose search was cut short, when its share is more than it had -> whether any was searched"""
+        todo = [i for i in self._open() if self.full.get(i) != self.changes or i in self.had]; looked = False
+        for left, i in zip(range(len(todo), 0, -1), todo):
+            now = time.monotonic()
+            if now >= self.end: break
+            deadline = min(self.end, now + max(LOOK_S, (self.end - now) / left))
+            if self.full.get(i) == self.changes and deadline - now <= self.had[i]: continue
+            looked, self.full[i] = True, self.changes
+            if self._look(i, deadline): self.had[i] = deadline - now
+            else: self.had.pop(i, None)
+        return looked
+
+    def _look(self, i, deadline, most=None):
+        """look at one target (most: the moves allowed, None: a full look) and take the answer, when there is one -> whether the look was cut short"""
+        self.seen[i], s = self.changes, {}
+        try: got = solve(self.now, self.spec, self.days, self.ts[i], self.m["pool"], self.moved, deadline, s, most)
+        except Exception:
+            _log.exception("Re-fit: a target of the kind %s could not be worked out", self.ts[i]["kind"])
+            self.why[i] = BROKEN; self.broken.add(i); self._tell(i); return False
+        if got is not None and not all(f[k] in self.first for f in got["fixes"] for k in ("id", "a", "b") if k in f):
+            got, s = None, dict(reason=NO_FIT, late=False)   # it names a lesson the list itself puts in: Apply numbers those its own way
+        if got is not None: self._take(i, got)
+        elif most is None: self.why[i] = s["reason"]
+        if got is not None or most is None: self._tell(i)
+        return got is None and s["late"]
+
+    def _take(self, i, got):
+        if not got["fixes"]: self.also.add(i); return
+        self.solved.append((i, got)); self.changes += 1
+        self.now = dict(self.m, lessons=self.lessons())
+        self.moved |= got["moved"] | {x["id"] for x in self.now["lessons"]} - self.first
+
+    def _tell(self, i):
+        if i in self.told: return
+        self.told.add(i)
+        if self.progress: self.progress(len(self.told), len(self.ts))
+
+    # ------------------------------------------------------------ the list as a whole
+    def made(self, fx, decisions):
+        """(helper.chain of the whole list on the timetable the plan starts from, what step 8 would list of the timetable it leaves)"""
+        c = helper.chain(self.m, self.spec, self.days, self.fixes()); m = dict(self.m, lessons=c["lessons"]); checks = check_model(m)
+        problems = list(checks["problems"]) + list(m.get("choice_problems") or []); m["checks"] = dict(checks, problems=problems, ok=not problems)   # as model_from_files makes it: the clashes are read from it
+        return c, draft.listed(m, dict(fx, touched=set(fx["touched"]) | c["touched"], was=list(fx["was"]) + c["was"]), decisions)
+
+    def _stands(self, i, lessons):
+        """whether target i's warning is settled on these lessons, as the search says it (for one settled by others: as solve says it is gone)"""
+        w = self.ts[i]["w"]; room = _room_clash(self.m, w); m = dict(self.m, lessons=lessons)
+        if i in self.also: return _gone(m, self.spec, self.days, w, helper._before(m, self.spec, w), room)
+        return _settled(self.m, self.spec, self.days, w, lessons, helper._before(self.m, self.spec, w), room)
+
+    def holds(self, c, before, after):
+        """whether the list as a whole is one to offer (c, after: made's; before: what step 8 lists now): the judge has every step, every
+        target is settled at the end, and there are no more mistakes and no more open wishes than before"""
+        if _refusal(c) or len(c["texts"]) != len(self.fixes()): return False
+        if not all(self._stands(i, c["lessons"]) for i in [i for i, _ in self.solved] + sorted(self.also)): return False
+        return after["critical"] <= before["critical"] and _wishes(after["warnings"]) <= _wishes(before["warnings"])
+
+    def drop(self):
+        """the last solved target is taken out of the list, and with it those that only its fixes had settled"""
+        self.why[self.solved.pop()[0]] = NO_FIT; L = self.lessons()
+        for i in [i for i in self.also if not self._stands(i, L)]: self.also.discard(i); self.why[i] = NO_FIT
+
+    def groups(self):
+        """the solved targets, each with its steps: numbered over the whole list and worded on the timetable the earlier steps leave"""
+        out, L, n = [], self.m["lessons"], 0
+        for i, got in self.solved:
+            steps = []
+            for f, why in zip(got["fixes"], got["why"]):
+                r = helper._apply(L, [f], self.spec, self.days); n += 1
+                steps.append(dict(n=n, fix=f, text=helper.say(dict(self.m, lessons=L), self.spec, self.days, f), why=why, tags=self._tags(f, L, r))); L = r["lessons"]
+            out.append(dict(self._said(i), steps=steps))
+        return out
+
+    def _tags(self, f, lessons, r):
+        """what a step (its fix, the lessons before it, what helper._apply made of them) is flagged with"""
+        day = f["kind"] == "move" and helper._first(lessons, f["id"])["d"] != f["d"]; bare = f["kind"] == "add" and fixes._no_room(f["room"])
+        return ["another day"] * day + ["no room"] * bare + [f"check T{n} again" for n in _typed(dict(self.m, lessons=r["lessons"]), self.spec, r["touched"], r["was"])]
+
+    def _said(self, i): return {k: self.ts[i][k] for k in ("key", "kind", "text")}
+
+    def needs(self):
+        done = {i for i, _ in self.solved} | self.also
+        return [dict(self._said(i), why=self.why.get(i, LATE)) for i in range(len(self.ts)) if i not in done]   # no full look: not in time
+
+def plan(m, rec, fx, decisions, warnings, progress=None, budget=None):
+    """one list of fixes for every target of the warnings (the list step 8 shows), worked out in budget seconds (default BUDGET_S). m, rec and fx are
+    draft.model_now()'s, decisions the draft's answers; none of what it is given is changed, and nothing is written. progress(done, total) is called
+    as the targets are settled or have had their first full look. -> dict(
+    stamp: the draft's, so a list made for a draft that has changed since is told apart;
+    groups: the targets settled, in that order, each dict(key, kind, text, steps=[dict(n, fix, text, why, tags)]), n from 1 over the whole list;
+    fixes: every fix, in order; also: the texts of the targets that others' fixes settle; needs: the rest, in the targets' order, each dict(key, kind, text, why);
+    totals: dict(changes, moved (the lessons whose day or period changes), another_day (those whose day does), critical and warnings ([before, after] as step 8
+    counts them, without the typed rules the list makes one check again), typed (the numbers of those rules));
+    late: whether any of needs was not looked at in time; seconds)"""
+    begun = time.monotonic(); p = _Plan(m, targets(warnings), progress, begun + (BUDGET_S if budget is None else budget)); p.run()
+    before = draft.listed(m, fx, decisions); c, after = p.made(fx, decisions)
+    while p.solved and not p.holds(c, before, after): p.drop(); c, after = p.made(fx, decisions)   # it always holds when the judging was right
+    had = {w["key"] for w in before["warnings"] if _again(w)}   # the rules to check again for the edits made already
+    count = lambda t: sum(1 for w in t["warnings"] if not w["decision"] and not w.get("crit") and (w["key"] in had or not _again(w)))
+    at = lambda lessons: {x["id"]: (x["d"], x["p"]) for x in lessons}
+    a, b = at(m["lessons"]), at(c["lessons"]); went = [i for i in a if i in b and a[i] != b[i]]; needs = p.needs()
+    totals = dict(changes=len(p.fixes()), moved=len(went), another_day=sum(a[i][0] != b[i][0] for i in went), critical=[before["critical"], after["critical"]],
+                  warnings=[count(before), count(after)], typed=_typed(dict(m, lessons=c["lessons"]), p.spec, c["touched"], c["was"]))
+    return dict(stamp=draft.stamp(m["draft_meta"], rec), groups=p.groups(), fixes=p.fixes(), needs=needs, also=[t["text"] for i, t in enumerate(p.ts) if i in p.also], totals=totals,
+                late=any(x["why"] == LATE for x in needs), seconds=round(time.monotonic() - begun, 1))

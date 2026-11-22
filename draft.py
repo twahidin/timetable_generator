@@ -210,10 +210,14 @@ def tally(warnings, decisions):
     ws = [dict(w, decision=decisions.get(w["key"])) for w in warnings]
     return dict(decisions=decisions, warnings=ws, open=sum(1 for w in ws if not w["decision"]), critical=sum(1 for w in ws if w.get("crit")))
 
+def listed(m, fx=None, decisions=None):
+    """the model's warnings as step 8 lists them, with the decisions laid on: tally's dict(decisions, warnings, open, critical). Writes nothing."""
+    fx = fx or dict(texts=[], problems=[], touched=set(), was=[], pool=[])
+    return tally(_warned(m, fx)["warnings"], decisions or {})
+
 def counts(m, rec, fx=None, decisions=None):
     """dict(critical, warnings) of the model as step 8 counts them: critical as the draft counts it, warnings = those with no decision that are not critical. Writes nothing."""
-    fx = fx or dict(texts=[], problems=[], touched=set(), was=[], pool=[])
-    t = tally(_warned(m, fx)["warnings"], decisions or {})
+    t = listed(m, fx, decisions)
     return dict(critical=t["critical"], warnings=sum(1 for w in t["warnings"] if not w["decision"] and not w.get("crit")))
 
 def checked_in(folder, rec=None):
