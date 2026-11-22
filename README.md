@@ -123,7 +123,7 @@ is not on step 3, and a named subject the class has only in groups.
 4. **Make the timetable outside**: give the agent both, and ask it to generate the timetable and report anything that
    does not fit. It hands back a timetable database (`.sqlite`) or a timetable workbook (a Lessons sheet).
 5. **Upload and edit** (step 8): upload that file (a workbook comes with its setup workbook; a database made by the skill holds
-   its setup) and press **Check**. The upload becomes the **draft**, kept on the server, and the app checks it four ways
+   its setup) and press **Upload and check** (each of the two boxes takes a click or a dropped file). The upload becomes the **draft**, kept on the server, and the app checks it four ways
    against the setup as it is now: clashes (teacher, class, room and student double-booked, lessons outside lesson time),
    differences from the deployment (who teaches what, periods placed against periods planned, rooms; other teachers than the
    form teachers on a lesson they take show here like any other, and **Update step 5** keeps the timetable's teachers and
