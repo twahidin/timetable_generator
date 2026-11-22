@@ -181,7 +181,8 @@ def state_and_seen_updates_survive_a_reopen():
     with tgdb.db() as c:
         ids = [r["id"] for r in c.execute("select id from updates order by id")]
     assert len(ids) == 1000 and ids[-1] == 1209 and ids[0] == 210, (len(ids), ids[:2])
-    assert tgdb.first_time(1209) is False and tgdb.first_time(5) is True
+    assert tgdb.first_time(1209) is False and tgdb.first_time(5) is True       # 5 had fallen out of the last 1000
+    assert tgdb.first_time(5) is False
     try:
         with tgdb.db() as c:
             c.execute("insert into state(k, v) values ('boom', '1')"); raise KeyError("x")
@@ -190,6 +191,77 @@ def state_and_seen_updates_survive_a_reopen():
     with tgdb.db() as c:
         names = {r[0] for r in c.execute("select name from sqlite_master where type='table'")}
     assert {"links", "codes", "outbox", "buttons", "talks", "updates", "state"} <= names
+
+@t
+def a_random_restart_of_update_ids_is_never_forgotten():
+    for i in range(5000, 6100): tgdb.first_time(i)
+    assert tgdb.first_time(42) is True and tgdb.first_time(42) is False         # a low id after high ones
+    assert tgdb.first_time(43) is True and tgdb.first_time(43) is False and tgdb.first_time(42) is False
+    assert tgdb.first_time(9_000_000) is True and tgdb.first_time(9_000_000) is False and tgdb.first_time(43) is False
+    with tgdb.db(read=True) as c:
+        assert c.execute("select count(*) from updates").fetchone()[0] == 1000
+
+@t
+def unsure_covers_what_may_have_gone_out():
+    import http.client, socket, ssl
+    os.environ["TELEGRAM_BOT_TOKEN"] = secrets.token_hex(12)
+    U = urllib.error.URLError
+    cases = [(BrokenPipeError(), "unsure"), (ConnectionAbortedError(), "unsure"), (ConnectionResetError(), "unsure"),
+             (socket.timeout(), "unsure"), (http.client.RemoteDisconnected("x"), "unsure"), (ConnectionRefusedError(), "network"),
+             (U(socket.gaierror(8, "nodename")), "network"), (U(ConnectionRefusedError()), "network"),
+             (U(TimeoutError()), "unsure"), (U(ConnectionResetError()), "unsure"), (U(BrokenPipeError()), "unsure"),
+             (U(OSError("odd")), "unsure"), (U("plain text"), "network"), (U(ssl.SSLCertVerificationError("bad")), "network"),
+             (RuntimeError("odd"), "network")]
+    try:
+        for exc, want in cases:
+            got = with_send(failing(exc), lambda: tg.call("sendMessage", dict(chat_id=1, text="hi")))["kind"]
+            assert got == want, (repr(exc), got, want)
+    finally:
+        os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+
+@t
+def a_failed_download_logs_a_kind_only_once():
+    tok = secrets.token_hex(12)
+    os.environ["TELEGRAM_BOT_TOKEN"] = tok
+    h, lg = Grab(), logging.getLogger("relief.telegram")
+    lg.addHandler(h)
+    def run(fake):
+        h.records.clear()
+        assert with_send(fake, lambda: tg.download("id", 10)) is None
+        return [r.getMessage() for r in h.records]
+    def second_fails(url, data, headers, timeout):
+        if url.endswith("/getFile"): return 200, b'{"ok": true, "result": {"file_path": "a/b", "file_size": 1}}'
+        raise TimeoutError(tok)
+    def big(url, data, headers, timeout):
+        if url.endswith("/getFile"): return 200, b'{"ok": true, "result": {"file_path": "a/b"}}'
+        return 200, b"x" * 50
+    def second_403(url, data, headers, timeout):
+        if url.endswith("/getFile"): return 200, b'{"ok": true, "result": {"file_path": "a/b"}}'
+        return 403, tok.encode()
+    try:
+        assert run(failing(urllib.error.URLError(tok))) == ["network"]
+        assert run(answer(429, dict(ok=False))) == ["slow"]
+        assert run(second_fails) == ["unsure"]
+        assert run(big) == ["refused"]
+        assert run(second_403) == ["blocked"]
+    finally:
+        lg.removeHandler(h); os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+
+@t
+def two_threads_reading_then_writing_never_lock():
+    import threading
+    tgdb.set_state("ctr", 0)
+    errs = []
+    def work():
+        try:
+            for _ in range(20):
+                with tgdb.db() as c:
+                    v = json.loads(c.execute("select v from state where k='ctr'").fetchone()["v"])
+                    c.execute("update state set v=? where k='ctr'", (json.dumps(v + 1),))
+        except Exception as e: errs.append(repr(e))
+    ts = [threading.Thread(target=work) for _ in range(2)]
+    [x.start() for x in ts]; [x.join() for x in ts]
+    assert errs == [] and tgdb.get_state("ctr") == 40, (errs, tgdb.get_state("ctr"))
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

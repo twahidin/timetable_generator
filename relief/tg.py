@@ -9,8 +9,8 @@ JSON), "network" (5xx, or never connected) and "unsure" (the request went out an
 so the message may have arrived). files: (field, filename, bytes) sent as multipart. download: a file by its id, None when
 over the limit or failed.
 The bot's address holds the token: no address, exception text or answer body is ever logged or raised; a failure is logged by
-its kind alone to "relief.telegram". CALL-hook idea: tests replace _send, which is the only way out."""
-import hashlib, hmac, itertools, json, logging, os, secrets, socket, threading, urllib.error, urllib.request
+its kind alone to "relief.telegram". Tests replace _send, which is the only way out."""
+import hashlib, ssl, hmac, itertools, json, logging, os, secrets, socket, threading, urllib.error, urllib.request
 import http.client
 
 API = "https://api.telegram.org"
@@ -72,7 +72,11 @@ def _body(raw):
 
 
 def _kind_of(exc):
-    if isinstance(exc, (TimeoutError, socket.timeout, ConnectionResetError, http.client.HTTPException)): return "unsure"
+    """'network' when nothing can have gone out, 'unsure' when the request may have: never retried by itself"""
+    if isinstance(exc, urllib.error.URLError):
+        exc = exc.reason
+    if isinstance(exc, (socket.gaierror, ConnectionRefusedError, ssl.SSLError, ssl.CertificateError)): return "network"
+    if isinstance(exc, (ConnectionError, TimeoutError, socket.timeout, http.client.HTTPException, OSError)): return "unsure"
     return "network"
 
 
@@ -111,8 +115,6 @@ def call(method, params=None, files=None, timeout=15):
             except Exception: raw = b""
             status = e.code
         return _classify(status, raw)
-    except urllib.error.URLError:
-        return _fail("network")
     except Exception as e:
         return _fail(_kind_of(e))
 
@@ -124,13 +126,16 @@ def download(file_id, limit):
         if practice():
             with _plock: PRACTICE_LOG.append(("download", dict(file_id=file_id)))
             return PRACTICE_FILE if len(PRACTICE_FILE) <= limit else None
-        r = call("getFile", dict(file_id=file_id))
-        if not r["ok"] or not isinstance(r["result"], dict): return None
+        r = call("getFile", dict(file_id=file_id))          # a failure here is already logged, by kind
+        if not r["ok"]: return None
+        if not isinstance(r["result"], dict): _log.warning("refused"); return None
         path, size = r["result"].get("file_path"), r["result"].get("file_size")
-        if not path or (isinstance(size, int) and size > limit): return None
+        if not path or (isinstance(size, int) and size > limit): _log.warning("refused"); return None
         status, raw = _send(f"{API}/file/bot{token()}/{path}", None, {}, 30)
-        if status != 200 or len(raw) > limit: return None
+        if status != 200:
+            _classify(status, raw); return None             # logs its kind
+        if len(raw) > limit: _log.warning("refused"); return None
         return raw
-    except Exception:
-        _log.warning("download failed")
+    except Exception as e:
+        _log.warning(_kind_of(e))
         return None
