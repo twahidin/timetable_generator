@@ -1,5 +1,6 @@
 """Exam and test schedules: make, check, save, list. One JSON file each under DATA/exams/schedules."""
 import datetime, os, secrets, threading
+from zoneinfo import ZoneInfo
 
 import store
 from accounts import people as _accounts
@@ -27,7 +28,9 @@ def _path(id):
 
 
 def _now():
-    return datetime.datetime.now().isoformat(timespec="seconds")
+    """the school's date and time, for the stamps (made, saved, sent, approved, replaced), which pages show as they are: the
+    live server runs on UTC, 8 hours behind. No offset, as every stamp saved before"""
+    return datetime.datetime.now(ZoneInfo(os.environ.get("SCHOOL_TZ") or "Asia/Singapore")).replace(tzinfo=None).isoformat(timespec="seconds")
 
 
 def _int(v):
