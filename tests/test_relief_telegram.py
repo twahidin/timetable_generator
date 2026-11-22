@@ -211,6 +211,8 @@ def unsure_covers_what_may_have_gone_out():
              (U(socket.gaierror(8, "nodename")), "network"), (U(ConnectionRefusedError()), "network"),
              (U(TimeoutError()), "unsure"), (U(ConnectionResetError()), "unsure"), (U(BrokenPipeError()), "unsure"),
              (U(OSError("odd")), "unsure"), (U("plain text"), "network"), (U(ssl.SSLCertVerificationError("bad")), "network"),
+             (ssl.SSLCertVerificationError("bad"), "network"), (U(ssl.SSLError("handshake")), "unsure"),
+             (ssl.SSLError("mid-read"), "unsure"), (ssl.SSLEOFError("eof"), "unsure"), (ssl.SSLZeroReturnError("zero"), "unsure"),
              (RuntimeError("odd"), "network")]
     try:
         for exc, want in cases:

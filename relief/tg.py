@@ -75,7 +75,7 @@ def _kind_of(exc):
     """'network' when nothing can have gone out, 'unsure' when the request may have: never retried by itself"""
     if isinstance(exc, urllib.error.URLError):
         exc = exc.reason
-    if isinstance(exc, (socket.gaierror, ConnectionRefusedError, ssl.SSLError, ssl.CertificateError)): return "network"
+    if isinstance(exc, (socket.gaierror, ConnectionRefusedError, ssl.SSLCertVerificationError)): return "network"
     if isinstance(exc, (ConnectionError, TimeoutError, socket.timeout, http.client.HTTPException, OSError)): return "unsure"
     return "network"
 
