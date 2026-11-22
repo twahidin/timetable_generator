@@ -50,9 +50,12 @@ in mind together), then reviewed by a fresh reviewer, one fix wave, one scoped r
   68, `test_routes` 18, `test_rules` 11, `test_signin` 24, `test_sync` 32, `test_teachers` 9, `test_typed` 33, `test_venues` 4,
   `test_verify` 56, `smoke` 102; every `tests/*.test.js`; `node --check`; and `--full`: `test_fixes` 67, `test_combined` 39,
   `smoke` 103.
-- **Not passed yet:** `test_typed --full` and `test_helper --full`, whose 30-second solves need a quiet machine. Run three times
-  while other work kept the load at 8 to 35 on 8 cores, they failed on this branch and, the same way, on plain main (a5ca928);
-  no file they exercise (typed.py, helper.py, checks.py, fixes.py, ttgen) differs from main. Run them again before the merge.
+- `test_typed --full` and `test_helper --full`, whose 30-second solves need a quiet machine, failed at first on this branch and, the
+  same way, on plain main (a5ca928), while other work kept the load at 8 to 35 on 8 cores; no file they exercise (typed.py,
+  helper.py, checks.py, fixes.py, ttgen) differs from main. Run again on 22 November: `test_typed --full` passed (34).
+  `test_helper --full` passed 1 run of 3 (21): its failures are not load but a fault in main, a swap with another lesson of the
+  same group counted as settling a rule warning, fixed on 16 November on the unmerged branch `helper-full-flake` (b21c9cb). With
+  that fix it passed 3 of 4; the fourth failed another check (a Music Room clash), not looked into.
 - **The school's real timetable, numbers only** (scratch data, deleted): 111 teachers, 8 made-up absences, 25 lessons to cover,
   all picked and approved; a made-up whole-day Sec 3 exam stopped 5 of them: Today counted 20 and showed 5 as "Not happening",
   and all 25 were back after a withdraw. No waiting pick sat on anyone with a duty. Today took 1.2 to 1.4 s with the exam

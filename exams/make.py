@@ -1,6 +1,5 @@
 """Make an exam schedule's seats and duties, keep hand changes, and the figures the pages show."""
 import copy
-import datetime
 import hashlib
 import json
 
@@ -19,7 +18,7 @@ _USED = ("papers", "days", "levels", "classes", "start", "end", "access", "seati
 
 
 def _now():
-    return datetime.datetime.now().isoformat(timespec="seconds")
+    return _schedules._now()
 
 
 def published_at(pub):

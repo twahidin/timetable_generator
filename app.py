@@ -1892,7 +1892,9 @@ def _event_rights(sched):
     if p is None: return None
     return (sched is None or sched.get("in_charge") == p["name"]), p["name"], False
 
-def _exams_today(): return datetime.date.today()
+def _exams_today():
+    """the school's date, as relief has it: the live server runs on UTC, where it is still yesterday until 8 in the morning"""
+    return relief_lessons.today()
 
 def _published_reader():
     """who may read the published exams data, and how much: "full" (teacher names, duty rooms, roster, prints) for everyone

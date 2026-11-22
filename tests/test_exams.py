@@ -3123,4 +3123,36 @@ def the_exams_pages_carry_the_event_words():
     assert "/api/events" in _page("app.js"), "the committee page counts the events waiting too"
     assert "ev-kind" in _page("exams.html"), "the Event chip has a colour"
 
+# ---- the school's date and time: the live server runs on UTC, 8 hours behind the school
+import contextlib, datetime as DT  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+from relief import lessons as RLS  # noqa: E402
+
+@contextlib.contextmanager
+def school_tz(name):
+    old = os.environ.get("SCHOOL_TZ"); os.environ["SCHOOL_TZ"] = name
+    try: yield
+    finally:
+        if old is None: os.environ.pop("SCHOOL_TZ")
+        else: os.environ["SCHOOL_TZ"] = old
+
+@t
+def today_is_the_schools_date_as_relief_has_it():
+    old = RLS.today; RLS.today = lambda: date(2031, 3, 4)
+    try: assert A._exams_today() == date(2031, 3, 4)
+    finally: RLS.today = old
+    for tz in ("Pacific/Kiritimati", "Pacific/Pago_Pago"):      # 25 hours apart, so never one date: the server's own zone gives one at most
+        with school_tz(tz): assert A._exams_today() == RLS.today() == DT.datetime.now(ZoneInfo(tz)).date(), tz
+
+@t
+def stamps_are_in_school_time_and_keep_their_shape():
+    for tz in ("Pacific/Kiritimati", "Pacific/Pago_Pago"):
+        with school_tz(tz):
+            want = DT.datetime.now(ZoneInfo(tz)).replace(tzinfo=None)
+            for now in (SC._now(), MK._now()):
+                assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d", now), now     # no offset: as every stamp saved before
+                assert abs((DT.datetime.fromisoformat(now) - want).total_seconds()) < 60, (tz, now, want)
+    with school_tz("Pacific/Kiritimati"):
+        assert SC.new("test", "T", ["Sec 3"], "2026-10-05", "2026-10-05", "Ms Grace Yeo", pub=F.sample_pub())["created_at"][:10] == RLS.today().isoformat()
+
 print(f"{COUNT} exams tests passed")
