@@ -274,13 +274,31 @@
     save's, a fill's), never from a view or a review, which carry a revision but not the contents */
   function takeRev(j) { if (S.sched && j && Number.isInteger(j.rev)) S.sched.rev = j.rev; }
 
-  /* what the server alone changes (the saved schedule keeps these whatever the page sends) */
-  const SERVER_KEYS = ["made", "pins", "use_anyway", "status", "approved", "approved_at", "approved_by", "sent_at", "sent_by", "sent_fp", "note", "log", "handled"];
-  /* the whole schedule from the server replaces the page's; an edit made meanwhile (not saved yet) stays, on top of what only the server changes */
-  function takeSched(j) {
-    if (S.dirty && S.sched) SERVER_KEYS.forEach(k => { if (k in j) S.sched[k] = j[k]; else delete S.sched[k]; });
-    else S.sched = j;
-    takeRev(j);
+  /* what always comes from the server whole: its own parts, which a save from the page never changes */
+  const SERVER_KEYS = ["rev", "saved_at", "saved_by", "status", "approved", "approved_at", "approved_by", "sent_at", "sent_by", "sent_fp", "note", "log", "handled", "made", "pins", "use_anyway", "created_at", "created_by", "id", "kind"];
+  const canon = v => JSON.stringify(v, (k, x) => x && typeof x === "object" && !Array.isArray(x) ? Object.keys(x).sort().reduce((o, y) => { o[y] = x[y]; return o; }, {}) : x);
+  const copyOf = v => JSON.parse(JSON.stringify(v));
+  const changedSentence = () => `This ${isEv() ? "event" : "exam"} was changed by someone else since you opened it. Reload to carry on.`;
+
+  /* the one place that decides what the page keeps when the server sends back the whole schedule (base: the page's copy when the
+    action began). Nothing typed since: theirs, whole. Something typed: key by key, what only I changed stays, what only they
+    changed comes in, and the same key changed by both to different values blocks the page. The revision is theirs. -> may go on */
+  function takeSched(theirs, base) {
+    const mine = S.sched;
+    if (!mine) { S.sched = theirs; return true; }
+    const keys = Array.from(new Set(Object.keys(mine).concat(Object.keys(theirs), Object.keys(base || {})))).filter(k => !SERVER_KEYS.includes(k));
+    const typed = keys.some(k => canon(mine[k]) !== canon((base || {})[k]));
+    if (!typed) { S.sched = theirs; return true; }
+    const out = {};
+    SERVER_KEYS.forEach(k => { if (k in theirs) out[k] = theirs[k]; });
+    for (const k of keys) {
+      const mineSays = canon(mine[k]) !== canon(base[k]), theirsSay = canon(theirs[k]) !== canon(base[k]);
+      if (mineSays && theirsSay && canon(mine[k]) !== canon(theirs[k])) { blockPage(changedSentence()); return false; }
+      const v = mineSays ? mine[k] : theirs[k];
+      if (v !== undefined) out[k] = v;
+    }
+    S.sched = out;
+    return true;
   }
 
   /* from here nothing is saved or done: someone else has saved this one since it was opened */
@@ -291,13 +309,14 @@
   function takeOwn(j) {
     if (!S.sched) return true;
     if (j && Number.isInteger(j.rev) && j.rev === (S.sched.rev || 0) + 1) { S.sched.rev = j.rev; return true; }
-    blockPage(`This ${isEv() ? "event" : "exam"} was changed by someone else since you opened it. Reload to carry on.`);
+    blockPage(changedSentence());
     return false;
   }
 
-  /* an action at the server goes in the queue of saves, so an edit made meanwhile is saved after it, with the new revision */
-  function onChain(run) {
-    const job = S.chain.then(run, run);
+  /* an action at the server goes in the queue of saves, so an edit made meanwhile is saved after it, with the new revision. A
+    page that has been blocked since it was asked does nothing: undo puts back what the click set */
+  function onChain(run, undo) {
+    const job = S.chain.then(() => { if (S.blocked) { if (undo) undo(); return false; } return run(); }, () => run());
     S.chain = job.then(() => {}, () => {});
     return job;
   }
@@ -371,17 +390,19 @@
   async function serverAction(method, url, body, form, done) {
     if (S.blocked) return;
     await flush();
-    if (S.blocked) return;
     if (S.dirty) return;   /* the save was refused: its sentence is on the screen */
     S.msg = ""; S.bad = false;
-    const r = await api(method, url, body, form);
-    if (r.status === 401 || r.status === 403) return;
-    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); return; }
-    takeSched(r.j);
-    if (done) done(r.j);
-    paintSave();
-    await refreshView();
-    render();
+    const base = copyOf(S.sched);
+    return onChain(async () => {
+      const r = await api(method, url, body, form);
+      if (r.status === 401 || r.status === 403) return;
+      if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); return; }
+      if (!takeSched(r.j, base)) return;
+      if (done) done(r.j);
+      paintSave();
+      await refreshView();
+      render();
+    });
   }
 
   /* ---------------------------------------------------------------- tab 1: what and when */
@@ -641,7 +662,7 @@
   async function viewAction(path, body, ok) {
     if (S.busy || S.blocked) return false;
     await flush();
-    if (S.dirty || S.blocked) return false;   /* the save was refused: its sentence is on the screen */
+    if (S.dirty) return false;   /* the save was refused: its sentence is on the screen */
     S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
     return onChain(async () => {
       const r = await api("POST", `/api/exams/${S.id}/${path}`, body);
@@ -652,7 +673,7 @@
       if (!takeOwn(r.j)) { paint(); return false; }
       S.msg = typeof ok === "function" ? ok(r.j) : (ok || ""); paintSave(); paint();
       return true;
-    });
+    }, () => { S.busy = false; paintSave(); paint(); return false; });
   }
 
   async function loadWho(keep) {
@@ -1101,21 +1122,23 @@
   async function approvalAction(path, body, ok) {
     if (S.busy || S.blocked) return false;
     await flush();
-    if (S.dirty || S.blocked) return false;
+    if (S.dirty) return false;
     S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
+    const base = copyOf(S.sched), keys = isEv() && path === "away";   /* an event's away changes who is going: a page-owned key */
     return onChain(async () => {
       const r = await api("POST", `${S.base}/${S.id}/${path}`, body);
       S.busy = false;
       if (r.status === 401 || r.status === 403) return false;
       if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; S.abMsg = S.msg; paintSave(); paint(); return false; }
       S.abMsg = "";
-      if (!takeOwn(r.j)) { paint(); return false; }   /* the answer's revision is the page's only when it is the next one */
+      if (!keys && !takeOwn(r.j)) { paint(); return false; }   /* the answer's revision is the page's only when it is the next one */
       const g = await api("GET", `${S.base}/${S.id}`);
-      if (g.ok) { takeSched(g.j); }
+      if (g.ok) { if (!takeSched(g.j, base)) { paint(); return false; } }
+      else if (keys) { blockPage(changedSentence()); paint(); return false; }   /* the page's own keys changed and cannot be read: its copy is old */
       takeReview(r.j); S.sbNote = ""; S.msg = ok || ""; paintSave();
       render(); refreshView();
       return true;
-    });
+    }, () => { S.busy = false; paintSave(); paint(); });
   }
 
   /* the same clash can be in both Invigilators free ("is on {schedule} then") and Other schedules ("takes {n} of these
@@ -1242,8 +1265,11 @@
       if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return; }
       S.view = r.j; S.rv = null;
       takeOwn(r.j); paintSave(); paint();
-    });
+    }, () => { S.busy = false; S.hpend = {}; paintSave(); paint(); });
   }
+
+  /* leaving with unsaved changes asks first; a blocked page cannot save them, so it does not ask (Reload is its way out) */
+  function onBeforeUnload(e) { if (S.dirty && !S.blocked) { e.preventDefault(); e.returnValue = ""; } }
 
   function onChange(e) {
     const el = e.target, ty = el.type;
@@ -1369,7 +1395,7 @@
   document.addEventListener("input", onInput);
   document.addEventListener("change", onChange);
   document.addEventListener("toggle", e => { const d = e.target; if (d && d.dataset && d.dataset.d) S.open[d.dataset.d] = d.open; }, true);
-  window.addEventListener("beforeunload", e => { if (S.dirty && !S.blocked) { e.preventDefault(); e.returnValue = ""; } });
+  window.addEventListener("beforeunload", onBeforeUnload);
   const m = /^\/exams\/([A-Za-z0-9]+)\/?$/.exec(location.pathname), me2 = /^\/events\/([A-Za-z0-9]+)\/?$/.exec(location.pathname);
   if (me2) startOne(me2[1], true); else if (m && m[1] !== "settings") startOne(m[1], false); else startList();
 })();
