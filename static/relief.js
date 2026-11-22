@@ -114,7 +114,7 @@
   function needAck(r) { return r.how === "planned" && !r.acknowledged && !r.cancelled && r.teacher === R.me.name; }
 
   function status(r) {
-    if (r.cancelled) return [`Cancelled by ${who(r.cancelled.by)}: ${r.cancelled.why}`, "st-off"];
+    if (r.cancelled) return [`Cancelled${r.cancelled.by === "app" ? "" : ` by ${who(r.cancelled.by)}`}: ${r.cancelled.why}`, "st-off"];   /* by the app: a takeover, a duty changed */
     if (r.how === "planned" && !r.acknowledged) return [r.teacher === R.me.name ? "Please acknowledge and set work" : "Not acknowledged yet", "st-warn"];
     if (r.how === "planned") return ["Acknowledged", "st-ok"];
     return ["With the relief team", "st-ok"];
