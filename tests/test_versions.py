@@ -289,13 +289,31 @@ def test_a_deleted_version_is_refused_plainly():
 
 def test_download_a_version():
     save_draft(ROWS); wipe_versions(); one_fix()
+    assert draft.model_now()[2]["pool"] == [], "the made-up draft must have nothing in Not placed"
     v = c.post("/api/draft/versions", json=dict(name="For the file")).get_json()
     r = c.get(f"/api/draft/versions/{v['id']}/download")
-    if r.status_code == 409: assert r.get_json()["unplaced"] >= 1; wipe_versions(); return   # the made-up draft may have a lesson waiting
-    assert r.status_code == 200 and "For the file - version.sqlite" in r.headers["Content-Disposition"], r.headers
+    assert r.status_code == 200 and "For the file - version.sqlite" in r.headers["Content-Disposition"], (r.status_code, r.get_json())
     p = os.path.join(tempfile.mkdtemp(), "v.sqlite"); open(p, "wb").write(r.data)
     spec = c.get("/api/setup").get_json()["spec"]
-    m = model_from_files(None, p, spec=spec); assert len(m["lessons"]) == len(draft.model_now()[0]["lessons"]) and m["lessons"]
+    m = model_from_files(None, p, spec=spec); assert m["lessons"] and len(m["lessons"]) == len(draft.model_now()[0]["lessons"])
+    wipe_versions()
+
+def test_a_version_with_an_unplaced_lesson_is_not_downloaded():
+    save_draft(ROWS); wipe_versions()
+    j = c.post("/api/draft/fix", json=dict(kind="lift", id=PLAIN_ID)).get_json(); assert j["unplaced"] == 1, j
+    v = c.post("/api/draft/versions", json=dict(name="With a gap")).get_json()
+    r = c.get(f"/api/draft/versions/{v['id']}/download"); w = c.get("/api/draft/download")
+    assert r.status_code == 409 and r.get_json()["unplaced"] == 1 and r.get_json() == w.get_json() and w.status_code == 409, (r.get_json(), w.get_json())
+    wipe_versions()
+
+def test_a_corrupt_version_is_not_opened():
+    save_draft(ROWS); wipe_versions(); one_fix()
+    v = c.post("/api/draft/versions", json=dict(name="Spoiled")).get_json()
+    tp = draft.paths(versions.folder(v["id"]))[1]; open(tp, "wb").write(b"garbage")
+    before = (draft.model_now()[0]["lessons"], c.get("/api/draft").get_json()["fixes"]); n = len(versions.listing(counts=False))
+    r = c.post(f"/api/draft/versions/{v['id']}/open")
+    assert r.status_code == 400 and r.get_json() == {"error": "That version cannot be opened: its files could not be read."}, (r.status_code, r.get_json())
+    assert (draft.model_now()[0]["lessons"], c.get("/api/draft").get_json()["fixes"]) == before and len(versions.listing(counts=False)) == n
     wipe_versions()
 
 def test_an_upload_over_a_kept_draft_keeps_nothing_new():

@@ -102,6 +102,9 @@ def open_version(vid, by):
     """make a version the draft: the draft as it is now is kept first (kind "open"); returns dict(kept, opened)"""
     with draft._lock:
         src = folder(vid); opened = _read(vid)
+        try:
+            if not draft.model_in(src)[0]["lessons"]: raise ValueError("no lessons")
+        except Exception: raise ValueError("That version cannot be opened: its files could not be read.")   # a version that does not read never replaces the draft, and nothing is kept
         kept = keep("open", by, protect=vid)
         new, old = draft.DIR + ".new", draft.DIR + ".old"
         shutil.rmtree(new, ignore_errors=True)
