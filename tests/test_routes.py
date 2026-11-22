@@ -68,14 +68,14 @@ KINDS = {
     "hod by password": (person(HAL, "password"), BASE | {"relief.plan", "relief.settings", "setup", "history.dept", "history.own"}),
     "hod by code": (person(HAL, "code"), BASE | {"relief.plan", "relief.settings", "history.own"}),
     "leader by password": (person(LEE, "password"), BASE | {"relief.plan", "relief.settings", "history.own"}),
-    "teacher by code": (person(TINA, "code"), BASE),
-    "executive by code": (person(EVE, "code"), {"timetable", "files"}),
+    "teacher by code": (person(TINA, "code"), BASE | {"history.own"}),
+    "executive by code": (person(EVE, "code"), {"timetable", "files", "history.own"}),
     "teacher on the relief team": (person(RIA, "code"), BASE | {"relief.plan", "relief.settings", "relief.save", "relief.team", "history.own"}),
     "teacher on exams until tomorrow": (person(ELI, "code"), BASE | {"exams", "history.own"}),
-    "teacher whose exams ended yesterday": (person(MAX, "code"), BASE),
+    "teacher whose exams ended yesterday": (person(MAX, "code"), BASE | {"history.own"}),
     "admin by password": (person(ADA, "password"), BASE | {"relief.settings", "relief.save", "committee", "setup", "history", "codes", "admin", "history.own"}),
     "admin by code": (person(ADA, "code"), BASE | {"relief.settings", "relief.save", "history.own"}),
-    "relief stage 1 session": (dict(role="staff", who=TINA), BASE),
+    "relief stage 1 session": (dict(role="staff", who=TINA), BASE | {"history.own"}),
 }
 
 def client(keys):
@@ -157,6 +157,8 @@ GUARDS = {
     "admin_students": ('admin',),
     "admin_ways": ('admin',),
     "api_blank": ('committee',),
+    "api_compare": ('committee',),
+    "api_compare_xlsx": ('committee',),
     "api_history": ('history', 'history.dept', 'history.own'),
     "history_back": ('setup', 'admin'),
     "history_download": ('history',),
@@ -165,6 +167,7 @@ GUARDS = {
     "check_setup": ('committee',),
     "code_slips": ('committee',),
     "codes_csv": ('committee',),
+    "compare_page": ('committee',),
     "dl_blank": ('committee',),
     "dl_sample": ('committee',),
     "dl_skill_md": ('committee',),
@@ -188,29 +191,62 @@ GUARDS = {
     "draft_slots": ('committee',),
     "draft_suggest": ('committee',),
     "draft_undo": ('committee',),
+    "draft_version_delete": ('committee',),
+    "draft_version_download": ('committee',),
+    "draft_version_open": ('committee',),
+    "draft_version_save": ('committee',),
+    "draft_versions": ('committee',),
     "draft_upload": ('committee',),
+    "events_approve": ('committee', 'timetable'),
+    "events_away": ('committee', 'timetable'),
+    "events_create": ('committee', 'timetable'),
+    "events_delete": ('committee', 'timetable'),
+    "events_fill": ('committee', 'timetable'),
+    "events_get": ('committee', 'timetable'),
+    "events_handled": ('committee', 'timetable'),
+    "events_list": ('committee', 'timetable'),
+    "events_one_page": ('committee', 'timetable'),
+    "events_put": ('committee', 'timetable'),
+    "events_review_get": ('committee', 'timetable'),
+    "events_send": ('committee', 'timetable'),
+    "events_send_back": ('committee', 'timetable'),
+    "events_view": ('committee', 'timetable'),
+    "events_who": ('committee', 'timetable'),
+    "events_withdraw": ('committee', 'timetable'),
+    "exams_approve": ('exams', 'committee'),
+    "exams_away": ('exams', 'committee'),
     "exams_create": ('exams', 'committee'),
+    "exams_day": ('timetable',),
     "exams_delete": ('exams', 'committee'),
     "exams_download": ('exams', 'committee'),
     "exams_fill": ('exams', 'committee'),
     "exams_get": ('exams', 'committee'),
-    "exams_home": ('exams', 'committee'),
+    "exams_handled": ('exams', 'committee'),
+    "exams_home": ('exams', 'committee', 'timetable'),
     "exams_invigilators": ('exams', 'committee'),
     "exams_list": ('exams', 'committee'),
     "exams_make_route": ('exams', 'committee'),
-    "exams_me": ('exams', 'committee'),
+    "exams_me": ('exams', 'committee', 'timetable'),
     "exams_move": ('exams', 'committee'),
+    "exams_my_duties": ('timetable',),
+    "exams_my_exams": ('own',),
     "exams_one_page": ('exams', 'committee'),
     "exams_papers_download": ('exams', 'committee'),
     "exams_papers_upload": ('exams', 'committee'),
     "exams_print": ('exams', 'committee'),
+    "exams_published_list": ('timetable',),
+    "exams_published_print": ('timetable',),
     "exams_put": ('exams', 'committee'),
+    "exams_review_get": ('exams', 'committee'),
+    "exams_send": ('exams', 'committee'),
+    "exams_send_back": ('exams', 'committee'),
     "exams_settings_get": ('exams', 'committee'),
     "exams_settings_page": ('exams', 'committee'),
     "exams_settings_put": ('exams', 'committee'),
     "exams_use_anyway": ('exams', 'committee'),
     "exams_view": ('exams', 'committee'),
     "exams_who": ('exams', 'committee'),
+    "exams_withdraw": ('exams', 'committee'),
     "export_printouts": ('committee',),
     "files": ('files',),
     "files": ('files',),
@@ -238,6 +274,43 @@ GUARDS = {
     "relief_settings_get": ('relief.settings',),
     "relief_settings_page": ('relief.settings',),
     "relief_settings_put": ('relief.save',),
+    # relief requests (relief/web.py): the guard is relief on every route; the narrower rights (relief.plan, relief.team)
+    # are checked inside the routes, with their own sentences, and pinned in RELIEF_INSIDE further down
+    "relief_web.acknowledge": ('relief',),
+    "relief_web.cancel": ('relief',),
+    "relief_web.create": ('relief',),
+    "relief_web.download": ('relief',),
+    "relief_web.free": ('relief',),
+    "relief_web.lessons": ('relief',),
+    "relief_web.mine": ('relief',),
+    "relief_web.needed": ('relief',),
+    "relief_web.not_needed": ('relief',),
+    "relief_web.one": ('relief',),
+    "relief_web.people": ('relief',),
+    "relief_web.planned": ('relief',),
+    "relief_web.planned_csv": ('relief',),
+    "relief_web.relief": ('relief',),
+    "relief_web.seen": ('relief',),
+    "relief_web.upload": ('relief',),
+    "relief_web.whats_in": ('relief',),
+    "relief_web.work": ('relief',),
+    # relief stage 3: the relief team's (relief.team inside, in RELIEF_INSIDE) and the relief teacher's (relief plus "this
+    # cover is yours", asked inside)
+    "relief_web.today": ('relief',),
+    "relief_web.approve": ('relief',),
+    "relief_web.approve_all": ('relief',),
+    "relief_web.change": ('relief',),
+    "relief_web.cover_free": ('relief',),
+    "relief_web.split": ('relief',),
+    "relief_web.join": ('relief',),
+    "relief_web.keep": ('relief',),
+    "relief_web.fill_now": ('relief',),
+    "relief_web.load": ('relief',),
+    "relief_web.load_one": ('relief',),
+    "relief_web.load_csv": ('relief',),
+    "relief_web.covering": ('relief',),
+    "relief_web.cover_acknowledge": ('relief',),
+    "relief_web.ask_change": ('relief',),
     "restore_setup": ('committee',),
     "status": ('setup',),
     "timetable": ('timetable',),
@@ -255,10 +328,27 @@ def a_shared_code_session_is_sent_from_the_password_page_to_login():
         r = client(dict(role=role)).get("/account/password")
         assert to_login(r), (role, r.status_code, r.headers.get("Location"))
 
-# every exams page and API route: the Exams and events extra (until its end date) or the timetable committee
-EXAMS_ENDPOINTS = ("exams_home", "exams_settings_page", "exams_one_page", "exams_me", "exams_settings_get", "exams_settings_put", "exams_list",
+# every exams page and API route: the Exams and events extra (until its end date) or the timetable committee; approving,
+# sending back and withdrawing are then the timetable committee's alone (inside the route: _exams_can_approve)
+EXAMS_ENDPOINTS = ("exams_settings_page", "exams_one_page", "exams_settings_get", "exams_settings_put", "exams_list",
                    "exams_create", "exams_get", "exams_put", "exams_delete", "exams_fill", "exams_papers_download", "exams_papers_upload",
-                   "exams_view", "exams_make_route", "exams_move", "exams_invigilators", "exams_use_anyway", "exams_print", "exams_download", "exams_who")
+                   "exams_view", "exams_make_route", "exams_move", "exams_invigilators", "exams_use_anyway", "exams_print", "exams_download", "exams_who",
+                   "exams_review_get", "exams_send", "exams_approve", "exams_send_back", "exams_withdraw", "exams_away",
+                   "exams_handled")   # exams stage 3: Handled ourselves on a backup
+# the exams page and who is asking: also every other person signed in by name, for their own exam duties (exams stage 2's My exam duties;
+# stage 4's My exam and event duties, with the events they are in charge of;
+# the shared heads', teacher and student codes are sent to their own page / refused inside the route)
+EXAMS_DUTIES_PAGE = ("exams_home", "exams_me")
+# the main site's exams data (exams stage 2): everyone who sees the published timetable (how much: _published_reader); a person's own
+# duties (a person signed in by name, any way in, or the committee code); a student's own exam timetable (their personal code)
+EXAMS_SITE = (("exams_day", ("timetable",)), ("exams_published_list", ("timetable",)), ("exams_published_print", ("timetable",)),
+              ("exams_my_duties", ("timetable",)), ("exams_my_exams", ("own",)))
+# every events page and API route (exams stage 4): the timetable committee and anyone signed in by name; inside, _event_rights
+# lets the committee open every event and a person only the ones they are in charge of (any person may start one); the shared
+# heads', teacher and student codes are sent to their own page / refused inside the route; the exams committee's extra adds nothing
+EVENTS_ENDPOINTS = ("events_one_page", "events_list", "events_create", "events_get", "events_put", "events_delete", "events_view",
+                    "events_fill", "events_review_get", "events_send", "events_approve", "events_send_back", "events_withdraw",
+                    "events_away", "events_who", "events_handled")   # exams stage 3: Handled ourselves on a backup
 
 # every admin API route: the Admin extra (a committee member signed in with their password); the first admin: the committee; the
 # admin page: an admin, or the committee (sent to the first admin while there is none, else told it is an admin's)
@@ -273,8 +363,9 @@ def the_guards_are_the_brief_s_table():
                            ("me", ("own",)), ("pdf_me", ("own",)), ("relief_home", ("relief", "relief.settings")), ("relief_me", ("relief",)),
                            ("relief_settings_page", ("relief.settings",)), ("relief_settings_get", ("relief.settings",)), ("relief_settings_put", ("relief.save",)),
                            ("relief_codes_csv", ("codes",)), ("relief_code_slips", ("codes",)), ("home", ("timetable",)), ("draft_preview_page", ("committee",))) + tuple(
-                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS) + tuple((e, ("admin",)) for e in ADMIN_ENDPOINTS) + (("admin_first", ("committee",)),
-                               ("admin_page", ("admin", "committee"))):
+                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS) + tuple((e, ("exams", "committee", "timetable")) for e in EXAMS_DUTIES_PAGE) + EXAMS_SITE + tuple(
+                               (e, ("committee", "timetable")) for e in EVENTS_ENDPOINTS) + tuple(
+                               (e, ("admin",)) for e in ADMIN_ENDPOINTS) + (("admin_first", ("committee",)), ("admin_page", ("admin", "committee"))):
         assert need(endpoint) == want, (endpoint, need(endpoint))
     admin = {r.endpoint for r in A.app.url_map.iter_rules() if r.rule.startswith(("/admin", "/api/admin"))}
     assert admin == set(ADMIN_ENDPOINTS) | {"admin_first", "admin_page"}, sorted(admin ^ (set(ADMIN_ENDPOINTS) | {"admin_first", "admin_page"}))
@@ -283,8 +374,11 @@ def the_guards_are_the_brief_s_table():
         except ValueError: pass
         else: raise AssertionError(f"need{bad} was accepted")
     assert not hasattr(A, "role") and not hasattr(A, "_legacy")
-    exams = {r.endpoint for r in A.app.url_map.iter_rules() if "/exams" in r.rule}
-    assert exams == set(EXAMS_ENDPOINTS), sorted(exams ^ set(EXAMS_ENDPOINTS))
+    exams = {r.endpoint for r in A.app.url_map.iter_rules() if "/exams" in r.rule or r.rule == "/api/day"}
+    every = set(EXAMS_ENDPOINTS) | set(EXAMS_DUTIES_PAGE) | {e for e, _ in EXAMS_SITE}
+    assert exams == every, sorted(exams ^ every)
+    events = {r.endpoint for r in A.app.url_map.iter_rules() if "/events" in r.rule}
+    assert events == set(EVENTS_ENDPOINTS), sorted(events ^ set(EVENTS_ENDPOINTS))
 
 @t
 def the_known_rights_are_every_right_the_table_gives():
@@ -299,7 +393,8 @@ def the_known_rights_are_every_right_the_table_gives():
 def an_executive_does_not_reach_relief():
     c = client(person(EVE, "code"))
     assert to_login(c.get("/relief")) and c.get("/api/relief/me").get_json() == AGAIN and c.get("/api/relief/me").status_code == 401
-    assert went(c.get("/home"), "/timetable")                         # one tile: it opens straight away
+    r = c.get("/home"); page = r.get_data(as_text=True)              # no Relief tile: Timetables and her own exam duties (two tiles)
+    assert r.status_code == 200 and re.findall(r'<a class="tile" href="([^"]+)"', page) == ["/timetable", "/exams", "/history"] and "My exam and event duties" in page, page[-600:]
     assert kept(c)["who"] == EVE
 
 @t
@@ -326,23 +421,24 @@ def tiles(c):
 @t
 def home_shows_exactly_the_tiles_of_the_table():
     shown, greyed, page = tiles(client(person(TINA, "code")))
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief")] and greyed == [], (shown, greyed)
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [], (shown, greyed)
+    assert "Exams and events" not in page, "no Exams and events extra: her own exam duties only"
     assert f"Hello, {TINA}" in page and "Signed in with your code" in page and 'href="/logout"' in page and "Sign out" in page
     shown, greyed, page = tiles(client(person(ADA, "password")))
     assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams"), ("Admin", "/admin"), ("History", "/history")], shown
     assert greyed == [] and "Signed in with your password" in page
     assert "Until" not in page.split("Exams and events")[1].split("</a>")[0], "the committee's tile has no end date"
     shown, greyed, _ = tiles(client(person(ADA, "code")))           # the committee's code: all but the setup and the admin page
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("History", "/history")], shown   # their own history
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")], shown   # their own history
     assert greyed == [("Committee page", "/login/password"), ("Admin", "/login/password")], greyed
     shown, greyed, _ = tiles(client(person(CORA, "code")))          # no Admin extra: no Admin tile, greyed or not
     assert greyed == [("Committee page", "/login/password")], greyed
     shown, greyed, _ = tiles(client(person(HAL, "code")))
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("History", "/history")] and greyed == [("Committee page", "/login/password")], (shown, greyed)
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [("Committee page", "/login/password")], (shown, greyed)
     shown, greyed, _ = tiles(client(person(HAL, "password")))
-    assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("History", "/history")] and greyed == [], shown
+    assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [], shown
     shown, greyed, _ = tiles(client(person(LEE, "password")))
-    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("History", "/history")] and greyed == [], shown
+    assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("My exam and event duties", "/exams"), ("History", "/history")] and greyed == [], shown
     # Exams and events: the exams pages are on the app now; the tile only while they are
     assert any(r.rule == "/exams" for r in A.app.url_map.iter_rules())
     shown, _, page = tiles(client(person(ELI, "code")))
@@ -350,18 +446,21 @@ def home_shows_exactly_the_tiles_of_the_table():
     d = datetime.date.fromisoformat(TOMORROW); assert f"Until {d.day} {d.strftime('%b %Y')}" in page
     real = A._route_exists
     A._route_exists = lambda path: path != "/exams" and real(path)
-    try: shown, _, _ = tiles(client(person(ELI, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief", "History"], shown
+    try:
+        shown, _, _ = tiles(client(person(ELI, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief", "History"], shown
+        shown, _, _ = tiles(client(person(TINA, "code"))); assert [x for x, _ in shown] == ["Timetables", "Relief", "History"], shown
     finally: A._route_exists = real
 
 @t
 def an_exams_extra_opens_exams_until_its_end_date():
     eli, max_ = client(person(ELI, "code")), client(person(MAX, "code"))
     assert eli.get("/exams").status_code == 200 and eli.get("/exams/settings").status_code == 200
-    assert eli.get("/api/exams/me").get_json() == dict(name=ELI, can_use=True, home="/home")
+    assert eli.get("/api/exams/me").get_json() == dict(name=ELI, can_use=True, can_approve=False, home="/home")
     j = eli.get("/api/exams/settings").get_json()
     assert [ELI, TOMORROW] in j["lists"]["committee"] and j["can_admin"] is False, j["lists"]
     assert client(person(ADA, "password")).get("/api/exams/settings").get_json()["can_admin"] is True
-    assert to_login(max_.get("/exams")) and max_.get("/api/exams/me").get_json() == AGAIN and max_.get("/api/exams").status_code == 401
+    assert max_.get("/exams").status_code == 200 and max_.get("/api/exams").status_code == 401 and to_login(max_.get("/exams/settings"))
+    assert max_.get("/api/exams/me").get_json() == dict(name=MAX, can_use=False, can_approve=False, home="/home"), "his own exam duties only"
     assert MAX not in [n for n, _ in j["lists"]["committee"]]
     assert "Exams and events" not in max_.get("/home").get_data(as_text=True)
     assert kept(max_)["who"] == MAX, "an ended extra ends no session"
@@ -394,7 +493,7 @@ def the_timetable_page_each_kind_sees():
     (v1, a1), (v2, a2), (v3, a3), (v4, a4), (v5, a5) = seen
     assert (a1["mode"], a1["home"], a1["homeLabel"]) == ("teacher", "/home", "Home") and v1 == "full", a1
     assert (a2["mode"], a2["home"], a2["homeLabel"]) == ("teacher", "/relief", "Relief"), a2
-    assert (a3["mode"], a3["home"]) == ("teacher", None) and (v4, a4["mode"], a4["tabs"]) == ("student", "student", ["classes", "students"])
+    assert (a3["mode"], a3["home"]) == ("teacher", None) and (v4, a4["mode"], a4["tabs"]) == ("student", "student", ["classes", "students", "exams"])
     assert (a5["mode"], a5["home"], a5["homeLabel"], a5["tabs"]) == ("committee", "/", "Committee page", None)
     assert a1["tabs"] == a3["tabs"] and a1["files"] == a3["files"] == A.files_for("teacher") and a5["files"] == A.files_for("committee")
 
@@ -433,6 +532,39 @@ def no_account_field_reaches_a_page_that_is_not_the_admin_page():
     P.update(lambda d: d["people"][HAL].update(depts=[]))
     try: assert client(person(HAL, "code")).get("/api/relief/me").get_json()["depts"] == ["SC"]   # none ticked: relief keeps step 4's
     finally: P.update(lambda d: d["people"][HAL].update(depts=["SC", "MA"]))
+
+# relief requests (relief stage 2, relief/web.py): every route needs relief (the map above); these also ask a narrower
+# right inside, answered with their own sentence (a 403 that is not the guard's): relief.plan to see who is free, the
+# planned list and the relief sheet; relief.team for What's in. School leaders, HODs and SHs plan; the Relief team extra
+# plans and is the relief team (R16)
+PLAN_ONLY = "Only management and the relief team plan relief for a colleague."
+CHOOSE_ONLY = "Only management and the relief team choose relief teachers."
+TEAM_ONLY = "Only the relief team can open What's in."
+RELIEF_INSIDE = {("GET", "/api/relief/free"): ("relief.plan", CHOOSE_ONLY), ("GET", "/api/relief/absences/planned"): ("relief.plan", PLAN_ONLY),
+                 ("GET", "/api/relief/planned.csv"): ("relief.plan", PLAN_ONLY), ("GET", "/api/relief/absences"): ("relief.team", TEAM_ONLY),
+                 ("POST", "/api/relief/absences/seen"): ("relief.team", TEAM_ONLY)}
+# relief stage 3: the relief team's routes (Today, approving, changing, splitting, Fill now, the load tracker)
+_X, _K = "abcdef123456", urllib.parse.quote("2026-10-13/Even Tue/5/2/1A/Science/", safe="")
+RELIEF_INSIDE.update({(m, u): ("relief.team", TEAM_ONLY) for m, u in (
+    ("GET", "/api/relief/today"), ("POST", f"/api/relief/absences/{_X}/covers/{_K}/approve"), ("POST", "/api/relief/today/approve-all"),
+    ("PUT", f"/api/relief/absences/{_X}/covers/{_K}/relief"), ("GET", f"/api/relief/absences/{_X}/covers/{_K}/free"),
+    ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/split"), ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/join"),
+    ("POST", f"/api/relief/absences/{_X}/covers/{_K}/keep"), ("POST", "/api/relief/today/fill"), ("GET", "/api/relief/load"),
+    ("GET", f"/api/relief/load/{urllib.parse.quote(TINA)}"), ("GET", "/api/relief/load.csv"))})
+
+@t
+def relief_requests_ask_the_narrower_right_inside():
+    for kind, (keys, have) in KINDS.items():
+        if "relief" not in have: continue
+        c = client(keys)
+        j = c.get("/api/relief/me").get_json()
+        assert (j["can_plan"], j["can_team"]) == ("relief.plan" in have, "relief.team" in have), (kind, j)
+        for (method, url), (right, sentence) in RELIEF_INSIDE.items():
+            r = c.open(url, method=method, json={})
+            if right in have: assert r.status_code not in (401, 403, 500), (kind, method, url, r.status_code, r.get_data(as_text=True)[:200])
+            else: assert r.status_code == 403 and r.get_json() == {"error": sentence}, (kind, method, url, r.status_code, r.get_data(as_text=True)[:200])
+            r.close()
+        assert kept(c) == keys, (kind, kept(c))
 
 ONLY_ADMIN = "Only an admin can open this page."
 

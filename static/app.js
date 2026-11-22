@@ -973,12 +973,32 @@ function renderIssues() {
 }
 
 
-function exportCard() {
-  return `<div class="card" id="printouts"><h2>Upload the timetable</h2><p class="muted">Upload the timetable the chatbot made, with its setup workbook. The timetable can be a workbook with a Lessons sheet or a timetable database (.sqlite); a database made by this app or the skill holds its setup, so it can come on its own.</p>
-    <p class="muted"><b>Check</b> keeps the file as a draft, checks it against the setup and lists what it found. Fix it here, then go to step 9 to publish.</p>
-    <div class="row" style="margin-top:10px"><label class="filebtn">Setup workbook (.xlsx)<input type="file" id="exSetup" accept=".xlsx" hidden></label><span class="muted" id="exSetupName">none chosen</span></div>
-    <div class="row" style="margin-top:8px"><label class="filebtn">Timetable (.xlsx or .sqlite)<input type="file" id="exTT" accept=".xlsx,.sqlite,.sqlite3,.db" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
-    <div class="row" style="margin-top:12px"><button class="primary" id="imCheck">Check</button></div>
+const isDbName = n => /\.(sqlite3?|db)$/i.test(n || "");
+function upTexts(a, b) {   // step 8's upload, from the chosen setup workbook (a) and timetable (b): each box's line, the hint and whether it can go
+  const db = !!b && isDbName(b.name), ready = !!b && (!!a || db);
+  const name = (f, id) => `<span class="upok">✓ ${esc(f.name)}</span> <button class="small ghost" data-upclear="${id}" title="Take this file off">Remove</button>`;
+  return { ready, dim: db && !a,
+    tt: b ? name(b, "exTT") : `<span class="muted">No file chosen yet.</span>`,
+    su: a ? name(a, "exSetup") : `<span class="muted">${b && !db ? "Needed: a timetable workbook comes with its setup workbook." : "Not needed for a .sqlite: it holds its setup."}</span>`,
+    hint: !b ? "Choose the timetable file first." : !ready ? "Add its setup workbook (box 2)." : "Ready." };
+}
+function upPaint() {   // the two boxes, their lines and the button again, after a file is chosen, dropped or removed
+  const tt = $("#exTT"), su = $("#exSetup"); if (!tt || !su) return;
+  const a = su.files[0], b = tt.files[0], t = upTexts(a, b);
+  $("#exTTName").innerHTML = t.tt; $("#exSetupName").innerHTML = t.su; $("#upHint").textContent = t.hint; $("#imCheck").disabled = !t.ready;
+  [[tt, b], [su, a]].forEach(([inp, f]) => { const box = inp.closest(".upbox"); box.classList.toggle("has", !!f); box.querySelector(".upgo").innerHTML = f ? "Change file…" : `Choose file…<span class="muted small"> or drop it here</span>`; });
+  su.closest(".upbox").classList.toggle("dim", t.dim);
+}
+function exportCard() {   // step 8's upload: the timetable file first, its setup workbook second (a database holds its own); a box takes a click or a dropped file
+  const t = upTexts(null, null);
+  const box = (n, id, title, kinds, accept) => `<label class="upbox${id === "exSetup" ? " dim" : ""}" data-upbox="${id}"><span class="upn">${n}</span><span class="upt"><b>${title}</b><span class="muted small">${kinds}</span></span>
+      <span class="upgo">Choose file…<span class="muted small"> or drop it here</span></span><input type="file" id="${id}" accept="${accept}" hidden></label>`;
+  return `<div class="card" id="printouts"><div class="vshead2"><h2>Upload a timetable</h2><button id="vsBtn" data-vsopen="1">${vsLabel()}</button></div><p class="muted">Upload the timetable the chatbot made. The app keeps it as the draft, checks it against the setup and lists what it found: fix it here, then publish on step 9.</p>
+    <div class="upboxes">
+      <div>${box(1, "exTT", "Timetable file", ".sqlite or .xlsx", ".xlsx,.sqlite,.sqlite3,.db")}<div class="upname" id="exTTName">${t.tt}</div></div>
+      <div>${box(2, "exSetup", "Its setup workbook", ".xlsx · only with a timetable workbook", ".xlsx")}<div class="upname" id="exSetupName">${t.su}</div></div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="imCheck" disabled>Upload and check</button><span class="muted small" id="upHint">${t.hint}</span></div>
     <div id="imResult">${S.draft ? draftHTML(S.draft).head : loadingDraft() ? LOADING : ""}</div></div>`;
 }
 /* step 6's third card: the second choices in their give-way order, each editable in place, and the form that adds one */
@@ -1777,6 +1797,7 @@ document.addEventListener("click", async e => {
   if (tc && !e.target.closest("button, input, select, textarea, label") && !tc.classList.contains("open")) { tkOpenCard(Number(tc.dataset.tcard), tc); return; }
   if (bdCellClick(e)) return;
   if (e.target.closest("#pbDownload")) { e.preventDefault(); downloadDraft(); return; }   // fetched, so a refusal is said in words, not shown as a page
+  if (e.target.closest("[data-vsopen]")) { vsOpen(); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c, [data-mcard]"); if (!b) return;
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); G.refetch = onDraftStep(); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
@@ -1875,7 +1896,8 @@ document.addEventListener("click", async e => {
     if (Number.isFinite(id)) bdShowTray(id); else bdShowWarning(key, true);
     return;
   }
-  if (b.id === "imCheck") { uploadDraft(false); return; }
+  if (b.id === "imCheck") { uploadDraft(); return; }
+  if (b.dataset.upclear) { const inp = $("#" + b.dataset.upclear); if (inp) { inp.value = ""; upPaint(); } return; }
   if (b.id === "pbPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; publishDraft(); return; }
   if (bdClick(b)) return;
   if (fxClick(b)) return;
@@ -2920,6 +2942,20 @@ async function postTry(url, body) {   // as post, but a refusal is not said: {j}
   if (!r.ok) return { error: j.error || "Something went wrong." };
   return { j };
 }
+/* "Exams · 2 waiting": the exams, tests and events the timetable committee has still to approve (looked up about every half minute) */
+const XW = { n: null, at: 0 };
+async function examsWaiting() {
+  const xl = $("#examsLink"); if (!xl || xl.hidden) return;
+  if (Date.now() - XW.at > 30000) {
+    XW.at = Date.now();
+    try {
+      const waiting = x => x.status === "waiting" || x.status === "changes";
+      const r = await fetch("/api/exams", { cache: "no-store" }), r2 = await fetch("/api/events", { cache: "no-store" });
+      if (r.ok) { const j = await r.json(), j2 = r2.ok ? await r2.json() : {}; XW.n = (j.schedules || []).filter(waiting).length + (j2.schedules || []).filter(waiting).length; }
+    } catch (e) { }
+  }
+  xl.textContent = XW.n ? `Exams · ${XW.n} waiting` : "Exams";
+}
 async function poll() {   // every few seconds: the published timetable and the deployment's state (G.st)
   clearTimeout(G.timer);
   if (G.inflight) { G.timer = setTimeout(poll, 500); return; }
@@ -2930,6 +2966,7 @@ async function poll() {   // every few seconds: the published timetable and the 
     G.st = await r.json();
     const rl = $("#reliefLink"); if (rl) rl.hidden = G.st.role !== "committee";   /* the relief settings are the committee's, not the heads' */
     const xl = $("#examsLink"); if (xl) xl.hidden = G.st.role !== "committee";   /* exams are the committee's too */
+    examsWaiting();
     const wl = $("#whoami"), hl = $("#homeLink"), sw = $("#sharedWarn"), me = G.st.who;   /* a person: their name and group, and the way to their home page; nothing for a shared code */
     if (wl) { wl.hidden = !me; wl.textContent = me ? [me, G.st.group].filter(Boolean).join(" · ") : ""; }
     if (hl) hl.hidden = !me;
@@ -2939,7 +2976,7 @@ async function poll() {   // every few seconds: the published timetable and the 
     if (al) al.hidden = !rights.includes("admin");
     if (hy) hy.hidden = !rights.includes("history");
     if (fa) fa.hidden = !(G.st.admin_exists === false && rights.includes("committee"));   /* deploy day: the committee code makes the first admin */
-    paintPublished(); draftWatch();
+    paintPublished(); draftWatch(); if (!VS.open) { VS.list = null; } vsPaintBtn();
   } catch (e) { }
   G.inflight = false;
   G.timer = setTimeout(poll, 5000);
@@ -2995,10 +3032,20 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
 
 /* ---------------- downloads */
 document.addEventListener("change", e => {
-  if (e.target.id === "exSetup" || e.target.id === "exTT") { const f = e.target.files[0]; $("#" + e.target.id + "Name").textContent = f ? f.name : "none chosen"; }
+  if (e.target.id === "exSetup" || e.target.id === "exTT") upPaint();
   if (e.target.id === "bdFind" && S.board) { S.board.find = e.target.value; bdDraw(); return; }
   if (e.target.dataset && e.target.dataset.dfilter) { S.dfilter = e.target.dataset.dfilter; drawDraft(); }
 });
+["dragover", "dragleave", "drop"].forEach(ev => document.addEventListener(ev, e => {   // a file dropped on one of step 8's upload boxes is chosen there
+  const box = e.target.closest && e.target.closest(".upbox"); if (!box) return;
+  e.preventDefault();
+  if (ev === "dragover") { box.classList.add("over"); return; }
+  if (ev === "dragleave" && box.contains(e.relatedTarget)) return;
+  box.classList.remove("over"); if (ev === "dragleave") return;
+  const f = e.dataTransfer && e.dataTransfer.files[0], inp = $("#" + box.dataset.upbox); if (!f || !inp) return;
+  if (!(inp.id === "exSetup" ? /\.xlsx$/i.test(f.name) : /\.(xlsx|sqlite3?|db)$/i.test(f.name))) { toast(inp.id === "exSetup" ? "The setup workbook is an .xlsx file." : "The timetable is an .xlsx workbook or a .sqlite database."); return; }
+  const dt = new DataTransfer(); dt.items.add(f); inp.files = dt.files; upPaint();
+}));
 /* the chosen setup workbook and timetable as form data, or null (with a message) when something is missing */
 function timetableForm() {
   const a = $("#exSetup").files[0], b = $("#exTT").files[0];
@@ -3034,25 +3081,168 @@ function drawDraft() {   // the upload card's head and the timetable card again 
   box.innerHTML = S.draft ? draftHTML(S.draft).head : "";
   bdMount(); bdDraftDraw();
 }
-async function uploadDraft(replace) {
+async function uploadDraft() {
   const fd = timetableForm(); if (!fd) return;
-  if (replace) fd.append("replace", "1");
   const box = $("#imResult"), btns = ["#imCheck"].map(q => $(q)).filter(Boolean);
   btns.forEach(x => x.disabled = true);
   box.innerHTML = `<p class="muted" style="margin-top:10px">Checking the timetable against the setup…</p>`;
   try {
     const r = await fetch("/api/draft", { method: "POST", body: fd }), j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/login"; return; }
-    if (r.status === 409 && j.fixes && !replace) {
-      drawDraft();
-      if (confirm(`${j.error || "The draft has changes that were never published."} Replace the draft with this file?`)) { btns.forEach(x => x.disabled = false); return uploadDraft(true); }   // the server's sentence counts the lessons waiting in Not placed
-      return;
-    }
     if (!r.ok) { drawDraft(); toast(j.error || "Could not check the timetable."); return; }
+    const kept = j.kept; delete j.kept;   // not of the draft: the next fetch of the same draft must be equal to this one
     S.draft = j; S.help = null; drawDraft(); poll();
+    if (kept) toast(vsKeptSay(kept));
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
-  finally { btns.forEach(x => x.disabled = false); }
+  finally { btns.forEach(x => x.disabled = false); upPaint(); }
 }
+/* step 8's Versions pop-out: the saved versions of the draft, fixed over the page. State: open, list (the answer of GET /api/draft/versions), busy
+   (a request is out: the buttons wait), gen (a late answer of an older load is dropped), name (the typed name, kept while the list is drawn again) */
+const VS = { open: false, list: null, busy: false, gen: 0, name: null, err: "" };
+const vsCount = () => VS.list ? VS.list.versions.length : (G.st && G.st.versions) || 0;   // the status counts them whether or not there is a draft
+const vsLabel = () => { const n = vsCount(); return n > 0 ? `Versions (${n})` : "Versions"; };
+function vsPaintBtn() { const b = $("#vsBtn"); if (b) b.textContent = vsLabel(); }
+function vsWhen(s) {   // "22 Nov 2026, 13:12" as the app writes it -> "22 Nov 2026, 1.12 pm"; any other text as it is (versions.when on the server)
+  const m = /^(.+), (\d{1,2}):(\d{2})$/.exec(String(s || "")); if (!m) return String(s || "");
+  const h = Number(m[2]); return `${m[1]}, ${h % 12 || 12}.${m[3]} ${h < 12 ? "am" : "pm"}`;
+}
+const vsKeptSay = v => "The draft you had is kept as version “" + v.name + "”.";
+function vsDefaultName() {
+  const d = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short" }), src = S.draft && S.draft.source ? String(S.draft.source).replace(/\.[^.\/]*$/, "") : "";
+  return ((src || "Draft") + " · " + (src ? "edited " : "") + d).slice(0, 80);
+}
+function vsCounts(v) { return v.critical === null || v.critical === undefined ? `<span class="muted">not checked</span>` : `${v.critical} critical · ${v.warnings === null || v.warnings === undefined ? "?" : v.warnings} warnings`; }
+function vsHTML() {
+  const L = VS.list, off = VS.busy ? " disabled" : "", vs = L ? L.versions : [], d = L && L.draft, p = L && L.published;
+  const firstV = vs[0] ? "v:" + vs[0].id : null;
+  const cmp = (a, b) => !b ? "" : `<button data-vs="compare" data-a="${esc(a)}" data-b="${esc(b)}"${off}>Compare…</button>`;
+  const row = (name, tag, sub, saved, changes, counts, btns) => `<tr><td data-l="Version"><b>${name}</b>${tag ? ` <span class="vstag">${tag}</span>` : ""}${sub ? `<div class="muted small">${sub}</div>` : ""}</td><td data-l="Saved">${saved}</td>${changes}<td data-l="Checked now">${counts}</td><td class="vsbtns">${btns}</td></tr>`;
+  const kept = { upload: "uploading", open: "opening a version", refit: "a re-fit" };
+  const rows = [], ud = G.st && G.st.draft && G.st.draft.uploaded_at;
+  if (d) rows.push(row("The draft on step 8", "now", d.source ? "from " + esc(d.source) : "", ud ? `uploaded ${esc(vsWhen(ud))}` : `<span class="muted">–</span>`, `<td data-l="Changes made in the app">${d.fixes ? d.fixes + (d.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(d), firstV ? cmp("draft", firstV) : p ? cmp("draft", "published") : ""));
+  vs.forEach(v => rows.push(row(esc(v.name), "", v.source ? "from " + esc(v.source) : "", `${esc(vsWhen(v.saved_at))}<div class="muted small">${v.kind === "saved" ? "by " + esc(v.by || "") : "kept by the app before " + (kept[v.kind] || "a change")}</div>`,
+    `<td data-l="Changes made in the app">${v.fixes ? v.fixes + (v.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(v),
+    `<button data-vs="open" data-id="${esc(v.id)}"${off}>Open</button>${cmp("v:" + v.id, d ? "draft" : p ? "published" : "")}<button data-vs="download" data-id="${esc(v.id)}"${off}>Download</button><button class="vsdel" data-vs="delete" data-id="${esc(v.id)}"${off}>Delete</button>`)));
+  if (p) rows.push(row("Published timetable", "what teachers see", "", p.published_at ? "published " + esc(vsWhen(p.published_at)) : `<span class="muted">–</span>`, `<td data-l="Changes made in the app" class="muted">–</td>`, p.error ? `<span class="muted">could not be read</span>` : vsCounts(p), d ? cmp("published", "draft") : firstV ? cmp("published", firstV) : ""));
+  const table = L ? (rows.length ? `<div class="tablewrap"><table class="vstable"><tr><th>Version</th><th>Saved</th><th>Changes made in the app</th><th>Checked now</th><th></th></tr>${rows.join("")}</table></div>
+    <p class="muted small">“Checked now” means against the setup as it is today: a version saved before step 5 changed can show warnings it did not have then.</p>
+    <p class="muted small">The app keeps the newest 10 of the versions it saves itself; versions you save stay until you delete them.</p>` : "")
+    + (vs.length ? "" : `<p class="muted">No versions yet.</p>`) : `<p class="muted">${VS.err ? esc(VS.err) : "Loading…"}</p>`;
+  const save = d ? `<div class="vssave"><label class="f">Save the draft as<input id="vsName" type="text" maxlength="80" value="${esc(VS.name === null ? vsDefaultName() : VS.name)}"></label><button class="primary" data-vs="save"${off}>Save version</button></div>` : "";
+  return `<div class="vspop" role="dialog" aria-modal="true" aria-labelledby="vsTitle" tabindex="-1"><div class="vshead"><h2 id="vsTitle">Versions</h2><button data-vs="close">Close</button></div>
+    <p class="muted">Step 8 keeps one draft. A version is a named copy of it that you can open again later. Opening a version never loses the draft you had: it is kept as a version first.</p>${save}${table}</div>`;
+}
+const vsKey = el => !el || !el.closest || !el.closest("#vsOv") ? null : el.id === "vsName" ? "name" : el.dataset && el.dataset.vs ? el.dataset.vs + "|" + (el.dataset.id || el.dataset.a || "") : null;
+let vsFocusKey = null, vsQuiet = false;   // the control focus belongs on (a redraw puts it back; a disabled one is waited for); vsQuiet: the app moved focus itself
+document.addEventListener("focusin", e => { if (!vsQuiet) { const k = vsKey(e.target); if (k) vsFocusKey = k; } });
+function vsFocus() {   // after a draw: the same control if it is there and can take focus, else the name box, else Close
+  const ov = $("#vsOv"); if (!ov || !VS.open) return;
+  const all = [...ov.querySelectorAll("[data-vs], #vsName")], by = k => all.find(x => vsKey(x) === k && !x.disabled);
+  let el = vsFocusKey && by(vsFocusKey), fb = false;
+  if (!el) { el = $("#vsName") || by("close|"); fb = true; }
+  if (!el || document.activeElement === el) return;
+  vsQuiet = fb; try { el.focus({ preventScroll: true }); } finally { vsQuiet = false; }
+}
+function vsDraw() {
+  const ov = $("#vsOv"); if (!ov) return;
+  const n = $("#vsName"); if (n) VS.name = n.value;
+  const pos = n && document.activeElement === n ? n.selectionStart : null, sc = ov.scrollTop;
+  ov.innerHTML = vsHTML(); ov.scrollTop = sc;
+  vsFocus();
+  const m = $("#vsName"); if (pos !== null && m && document.activeElement === m) { try { m.setSelectionRange(pos, pos); } catch (e) { } }
+  vsPaintBtn();
+}
+async function vsLoad() {   // the list again; a late answer of an older load is dropped
+  const g = ++VS.gen;
+  try {
+    const r = await fetch("/api/draft/versions"), j = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = "/login"; return; }
+    if (g !== VS.gen) return;
+    if (!r.ok) { VS.err = j.error || "Could not list the versions."; if (!VS.list) { vsDraw(); } else toast(VS.err); return; }
+    VS.list = j; VS.err = "";
+  } catch (err) { if (g !== VS.gen) return; VS.err = "Could not reach the server: " + err.message; if (VS.list) toast(VS.err); }
+  if (VS.open) vsDraw(); else vsPaintBtn();
+}
+function vsOpen() {
+  if (VS.open) return;
+  VS.open = true; VS.name = null; VS.err = "";
+  let ov = $("#vsOv"); if (!ov) { ov = document.createElement("div"); ov.id = "vsOv"; ov.className = "vsov"; document.body.appendChild(ov); }
+  ov.hidden = false; document.body.classList.add("vslock"); vsFocusKey = null; vsDraw();
+  if (G.st && !G.st.draft && G.st.versions === 0) { VS.list = { versions: [], draft: null, published: null }; vsDraw(); return; }   // the status says there is no draft and there are no versions: nothing to ask the server
+  vsLoad();
+}
+function vsClose() {
+  if (!VS.open) return;
+  VS.open = false; const ov = $("#vsOv"); if (ov) { ov.hidden = true; ov.innerHTML = ""; }
+  document.body.classList.remove("vslock");
+  const b = $("#vsBtn"); if (b) b.focus({ preventScroll: true });
+}
+async function vsRequest(url, opt) {   // one request at a time; {r, j} or null when the page goes to sign in or the server cannot be reached (said)
+  VS.busy = true; if (VS.open) vsDraw();
+  try {
+    const r = await fetch(url, opt);
+    if (r.status === 401) { location.href = "/login"; return null; }
+    return { r, j: r.headers.get("Content-Type") && /json/.test(r.headers.get("Content-Type")) ? await r.json().catch(() => ({})) : null };
+  } catch (err) { toast("Could not reach the server: " + err.message); return null; }
+}
+const vsDone = () => { VS.busy = false; if (VS.open) vsDraw(); };
+async function vsAction(b) {
+  const a = b.dataset.vs, id = b.dataset.id;
+  if (a === "close") { vsClose(); return; }
+  if (VS.busy) return;
+  const v = VS.list && VS.list.versions.find(x => x.id === id);
+  if (a === "compare") { location.href = "/compare?a=" + encodeURIComponent(b.dataset.a) + "&b=" + encodeURIComponent(b.dataset.b); return; }
+  if (a === "save") {
+    const n = $("#vsName"), name = n ? n.value.trim() : ""; if (n) VS.name = n.value;
+    if (!name) { toast("Give the version a name."); return; }
+    const x = await vsRequest("/api/draft/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    if (x && !x.r.ok) toast((x.j && x.j.error) || "Could not save the version.");
+    else if (x) { toast("Saved the version “" + ((x.j && x.j.name) || name) + "”."); VS.name = null; }
+    VS.busy = false; await vsLoad(); vsDone(); return;
+  }
+  if (!v) return;
+  if (a === "open") {
+    const x = await vsRequest(`/api/draft/versions/${encodeURIComponent(id)}/open`, { method: "POST" });
+    if (x && !x.r.ok) {   // x.j.opened: the version was opened and the check after it went wrong
+      toast(((x.j && x.j.error) || "Could not open the version.") + (x.j && x.j.kept ? " " + vsKeptSay(x.j.kept) : "")); VS.busy = false;
+      if (x.r.status === 404 || (x.j && x.j.opened)) await vsLoad(); vsDone(); if (x.j && x.j.opened) poll(); return;
+    }
+    if (!x) { vsDone(); return; }
+    const j = x.j || {}, good = j.info && j.info.warnings; if (good) S.draft = j.info; S.help = null; VS.busy = false;
+    vsClose(); if (good) drawDraft(); else refreshDraft().then(() => { if (STEPS[S.step][0] === "edit") drawDraft(); }); poll(); vsLoad();
+    toast("Opened “" + ((j.opened && j.opened.name) || v.name) + "”." + (j.kept ? " " + vsKeptSay(j.kept) : ""));
+    return;
+  }
+  if (a === "delete") {
+    if (!confirm(`Delete the version “${v.name}”? This cannot be undone.`)) return;
+    const x = await vsRequest(`/api/draft/versions/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (x && !x.r.ok) toast((x.j && x.j.error) || "Could not delete the version.");
+    VS.busy = false; await vsLoad(); vsDone(); poll(); return;
+  }
+  if (a === "download") {
+    const x = await vsRequest(`/api/draft/versions/${encodeURIComponent(id)}/download`);
+    if (!x) { vsDone(); return; }
+    if (!x.r.ok) { toast((x.j && x.j.error) || "Could not download the version."); vsDone(); return; }
+    const cd = x.r.headers.get("Content-Disposition") || "", star = cd.match(/filename\*=UTF-8''([^;]+)/i), plain = cd.match(/filename="?([^";]+)"?/);
+    let nm = v.name + " - version.sqlite"; try { nm = star ? decodeURIComponent(star[1]) : plain ? plain[1] : nm; } catch (e) { }
+    try { dl(await x.r.blob(), nm); } catch (err) { toast("Could not save the file: " + err.message); }
+    vsDone(); return;
+  }
+}
+document.addEventListener("click", e => {   // the pop-out's own buttons (it is outside the page's own handler's steps); a click on the dim backdrop closes it
+  const ov = e.target.closest && e.target.closest("#vsOv"); if (!ov) return;
+  e.stopPropagation();
+  if (e.target === ov) { vsClose(); return; }
+  const b = e.target.closest("[data-vs]"); if (b) vsAction(b);
+}, true);
+document.addEventListener("keydown", e => {   // Escape closes; Tab stays inside the pop-out; undo, redo, cut and paste never reach the page behind it (in the name box they are the browser's own)
+  if (!VS.open) return;
+  if ((e.ctrlKey || e.metaKey) && ["z", "y", "x", "v"].includes((e.key || "").toLowerCase()) && !(e.target && e.target.id === "vsName")) { e.preventDefault(); e.stopPropagation(); return; }
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); vsClose(); return; }
+  if (e.key === "Tab") { const f = [...document.querySelectorAll("#vsOv button:not([disabled]), #vsOv input")]; if (!f.length) return;
+    const i = f.indexOf(document.activeElement), last = f.length - 1;
+    if (e.shiftKey && i <= 0) { e.preventDefault(); f[last].focus(); } else if (!e.shiftKey && (i === -1 || i === last)) { e.preventDefault(); f[0].focus(); } }
+}, true);
 async function refreshDraft() {   // the draft again from the server, and the step drawn from it
   try {
     const r = await fetch("/api/draft"), j = await r.json().catch(() => ({}));
@@ -3076,7 +3266,7 @@ async function publishDraft() {   // step 9
   finally { DR.hold = false; DR.seen = null; }   // the next status is taken as seen, so the same summary causes no fetch
 }
 async function decide(answer, key) {   // answer is step5, open or met; the key is the warning's (it may hold a "|")
-  const j = await post("/api/draft/decide", { key, answer });
+  const j = await post("/api/draft/decide", { key, answer, upload_id: S.draft ? S.draft.upload_id : null });   // the upload the warning was shown of
   if (!j) return;
   if (S.help && S.help.warn === key) fxShut(S.help);   // the warning is answered: its ways shut
   S.draft = j; drawDraft();   // only the result area: render() would reset the chosen file names

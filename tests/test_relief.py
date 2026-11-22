@@ -274,7 +274,8 @@ def a_staff_code_signs_in_as_that_person():
         assert r.status_code == 302 and r.headers["Location"].endswith("/home"), r.headers.get("Location")
         with c.session_transaction() as s: assert s["who"] == "Mr Darren Lim" and s["via"] == "code" and "role" not in s
         me = c.get("/api/relief/me").get_json()
-        assert me == dict(name="Mr Darren Lim", depts=["Science"], published=True, on_team=False, on_management=False, can_settings=False), me
+        assert me == dict(name="Mr Darren Lim", depts=["Science"], published=True, on_team=False, on_management=False, can_settings=False,
+                          can_plan=False, can_team=False, today=A.relief_lessons.today().isoformat()), me
         r = c.get("/"); assert r.status_code == 302 and r.headers["Location"].endswith("/home")   # a person's front door: their tiles
         with A.app.test_request_context():
             A.session["role"], A.session["who"] = "staff", "Mr Darren Lim"
@@ -448,8 +449,10 @@ def a_relief_team_extra_alone_may_save_and_a_leader_only_read():
             assert S.load(PUB)["rules"] == ["A rule."]
             assert lead.get("/api/relief/settings").status_code == 200
             assert lead.put("/api/relief/settings", json=base()).status_code == 401
-            assert team.get("/api/relief/me").get_json() == dict(name="Ms Evelyn Koh", depts=["Science"], published=True, on_team=True, on_management=False, can_settings=True)
-            assert lead.get("/api/relief/me").get_json() == dict(name="Mr Darren Lim", depts=["Science"], published=True, on_team=False, on_management=True, can_settings=False)
+            assert team.get("/api/relief/me").get_json() == dict(name="Ms Evelyn Koh", depts=["Science"], published=True, on_team=True, on_management=False, can_settings=True,
+                                                                     can_plan=True, can_team=True, today=A.relief_lessons.today().isoformat())   # R16: the Relief team extra plans too
+            assert lead.get("/api/relief/me").get_json() == dict(name="Mr Darren Lim", depts=["Science"], published=True, on_team=False, on_management=True, can_settings=False,
+                                                                     can_plan=True, can_team=False, today=A.relief_lessons.today().isoformat())
     finally: AP.update(lambda d: (d["people"].pop("Ms Evelyn Koh"), d["people"].pop("Mr Darren Lim")))
     fresh()
 
@@ -522,6 +525,19 @@ def the_routes_move_the_lists_once_and_keep_the_old_file():
     _reset(); fresh()
 
 @t
+def the_relief_home_moves_the_lists_too():
+    fresh(); _reset()
+    store.write_json(S.PATH, dict(team=["Mr Darren Lim"]))     # relief's old team list, not moved yet: no other page has run
+    with published(PUB):
+        c = staff("Mr Darren Lim")
+        assert AP.load()["migrated"] is False
+        j = c.get("/api/relief/me").get_json()
+        assert (j["can_team"], j["can_plan"], j["on_team"]) == (True, True, True), j     # the What's in tab, on the first open
+        assert AP.load()["migrated"] is True and AP.record(AP.load(), "Mr Darren Lim")["extras"]["relief"] is True
+        assert A.move_relief_lists() is None and c.get("/api/relief/me").get_json()["can_team"] is True   # once only
+    _reset(); fresh()
+
+@t
 def nothing_published_says_so():
     com = committee()
     with published(None):
@@ -568,7 +584,8 @@ def codes_csv_and_slips():
         # signed in with her code, she is that person: an executive, who sees the timetable and has no relief of her own
         with sc.session_transaction() as x: assert x["who"] == "Mdm Office Staff" and x["via"] == "code"
         assert sc.get("/api/relief/me").get_json() == AGAIN and sc.get("/relief").headers["Location"].endswith("/login")
-        assert sc.get("/home").headers["Location"].endswith("/timetable")
+        home = sc.get("/home"); page = home.get_data(as_text=True)    # her tiles: Timetables and her own exam duties, no Relief
+        assert home.status_code == 200 and 'href="/timetable"' in page and 'href="/exams"' in page and 'href="/relief"' not in page, page[-400:]
     AP.update(lambda d: d["people"].pop("Mdm Office Staff"))
 
 @t

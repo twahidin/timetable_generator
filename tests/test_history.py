@@ -413,13 +413,13 @@ def offered():
 
 @t
 def the_page_offers_every_where_the_app_writes():
-    written = set(H.WHERE.values()) | {"School & day", "Setup", "Step 8 · Upload and edit", "Step 9 · Publish", "Relief settings", "Exams and events", "Admin", "Sign-in"}
+    written = set(H.WHERE.values()) | {"School & day", "Setup", "Step 8 · Upload and edit", "Step 9 · Publish", "Relief", "Relief settings", "Exams and events", "Admin", "Sign-in"}
     assert written <= set(offered()), written - set(offered())
 
 @t
 def api_each_where_returns_its_entries():
     fresh()
-    kind = {"Admin": "account", "Sign-in": "signin", "Setup": "setup-replaced", "Relief settings": "relief", "Exams and events": "exams"}
+    kind = {"Admin": "account", "Sign-in": "signin", "Setup": "setup-replaced", "Relief": "relief", "Relief settings": "relief", "Exams and events": "exams"}
     for w in offered(): H.add({"kind": kind.get(w, "draft" if w.startswith(("Step 8", "Step 9")) else "setup"), "as": "A", "where": w, "text": "in " + w})
     H.add({"kind": "account", "as": "A", "text": "an older account entry"}); H.add({"kind": "signin", "as": "A", "text": "an older sign-in"})
     c = committee()
@@ -485,9 +485,18 @@ def own_scope_sees_only_own():
     assert c.get("/history").status_code == 200
 
 @t
+def a_teacher_sees_only_their_own():
+    fresh()
+    H.add({"kind": "relief", "who": TOM, "as": TOM, "where": "Relief", "text": "mine"}); H.add({"kind": "relief", "who": "Someone Else", "as": "Someone Else", "where": "Relief", "text": "theirs"})
+    code, j = api(as_person(TOM))
+    assert code == 200 and [e["text"] for e in j["entries"]] == ["mine"] and j["scope"] == "own" and j["download"] is False, j
+    assert as_person(TOM).get("/history").status_code == 200
+
+@t
 def no_history_right_is_401():
     fresh()
-    c = as_person(TOM)
+    c = A.app.test_client()
+    with c.session_transaction() as s: s["role"] = "teacher"   # the shared teacher code: nobody's own history
     assert c.get("/api/history").status_code == 401
     r = c.get("/history"); assert r.status_code == 302 and r.headers["Location"].endswith("/login"), r.headers
 

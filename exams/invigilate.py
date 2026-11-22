@@ -29,11 +29,8 @@ def duty_minutes(duties) -> dict:
 def _other_minutes(sched, year) -> dict:
     """minutes per name in the other saved schedules, for duties dated in the same calendar year"""
     out = {}
-    for row in _schedules.listing():
-        if row["id"] == sched.get("id"):
-            continue
-        s = _schedules.load(row["id"])
-        if not s or not s.get("made"):
+    for s in _schedules.all_saved():
+        if s["id"] == sched.get("id") or not s.get("made"):
             continue
         for d in s["made"].get("duties") or []:
             if str(d.get("date", ""))[:4] != year:
@@ -56,7 +53,7 @@ def _classes(rows):
     return ", ".join(out)
 
 
-def _free(name, view, start, end, duties, xset, skip=None):
+def _free(name, view, start, end, duties, xset, skip=None, elsewhere=()):
     """'free then' for one person from start to end on the view's date: (why not, "" when free; the lessons they teach then
     that still run). The one check behind the candidates, the names chosen by hand and the lesson teachers of a test.
     duties: the duties already made (any date); skip: the duty being filled."""
@@ -69,6 +66,11 @@ def _free(name, view, start, end, duties, xset, skip=None):
     clash = next((d for d in on_date if name in d["names"] and d["start"] < end and d["end"] > start), None)
     if clash:
         return "is on another duty then (%s)" % clash["room"], []
+    busy = next((b for b in elsewhere if name in b["names"] and b["date"] == view["date"] and b["start"] < end and b["end"] > start), None)
+    if busy:
+        if busy.get("why"):
+            return busy["why"], []
+        return ("is on %s then (%s)" % (busy["name"], busy["room"]) if busy["room"] else "is on %s then" % busy["name"]), []
     most = rules.get("max_per_day")
     if most and sum(1 for d in on_date if name in d["names"]) >= most:
         return "has %d %s that day already" % (most, "duty" if most == 1 else "duties"), []
@@ -80,7 +82,23 @@ def _teaches(running):
                                                              _days.hhmm(l["end"])) for l in running)
 
 
-def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exclude=(), _other=None) -> dict:
+def _taught(model) -> dict:
+    out = {}
+    for l in model.get("lessons") or []:
+        for n in l.get("teachers") or []:
+            out.setdefault(n, set()).add(l["subject"])
+    return out
+
+
+def _barred(name, running, subjects, taught, xset) -> bool:
+    """left out whoever the rules keep off a paper: someone who teaches its subject (when that rule is on), and a backup
+    invigilator whose lesson still runs. The one filter behind the candidates and the approved names kept by Make."""
+    if xset["rules"].get("not_own_subject") and set(subjects) & taught.get(name, set()):
+        return True
+    return bool(running) and name in xset["backups"]
+
+
+def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exclude=(), _other=None, elsewhere=()) -> dict:
     model = pub["model"]
     rules = xset["rules"]
     pool = [p["name"] for p in _accounts.staff(pub)
@@ -89,24 +107,19 @@ def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exc
     mine = duty_minutes(duties)
     other = _other if _other is not None else _other_minutes(sched, date[:4])
     subjects = set(subjects)
-    taught = {}
-    for l in model.get("lessons") or []:
-        for n in l.get("teachers") or []:
-            taught.setdefault(n, set()).add(l["subject"])
+    taught = _taught(model)
     groups = dict(freed=[], free=[], backups=[], need_backup=[])
     for name in pool:
         if name in exclude:
             continue
-        why, running = _free(name, view, start, end, duties, xset)
+        why, running = _free(name, view, start, end, duties, xset, elsewhere=elsewhere)
         if why:
             continue
-        if rules.get("not_own_subject") and subjects & taught.get(name, set()):
+        if _barred(name, running, subjects, taught, xset):
             continue
         stopped = [l for l in view["lessons"] if name in l["teachers"] and _hit(l["stopped"], start, end)]
         c = dict(name=name, minutes=mine.get(name, 0), other=other.get(name, 0), reason="", rows=[])
         if running:
-            if name in xset["backups"]:
-                continue
             c["rows"] = [l["row"] for l in running]
             c["reason"] = _teaches(running)
             groups["need_backup"].append(c)
@@ -126,7 +139,7 @@ def candidates(pub, cal, sched, xset, date, start, end, duties, subjects=(), exc
     return groups
 
 
-def _lesson_teachers(model, view, sit, duties, ids_of, students, every, xset):
+def _lesson_teachers(model, view, sit, duties, ids_of, students, every, xset, elsewhere=()):
     """a common test supervised by the lesson teachers: each teacher of a lesson stopped at the start supervises one ordinary
     classroom of the sitting (not a hall, not an access room), the one holding most of that lesson's students, else the
     lesson's own room; a teacher already used or not free for the duty time is left out. Rooms left without one are
@@ -150,7 +163,7 @@ def _lesson_teachers(model, view, sit, duties, ids_of, students, every, xset):
             d = best[0] if count[id(best[0])] else next((x for x in rooms if x["room"] == l["room"]), None)
             if d is None:
                 continue
-            why, running = _free(n, view, d["start"], d["end"], every, xset, skip=d)
+            why, running = _free(n, view, d["start"], d["end"], every, xset, skip=d, elsewhere=elsewhere)
             if why or running or n in d["names"]:
                 continue
             d["names"].append(n)
@@ -160,11 +173,41 @@ def _lesson_teachers(model, view, sit, duties, ids_of, students, every, xset):
             d["need"] = len(d["names"])
 
 
-def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
+def _check_names(duties, every, views, xset, elsewhere, hand_only):
+    """each name is 'free then' or not: a not_free reason, or a backup when their lesson runs (a name chosen by hand also has
+    that said in its reason). hand_only: only the names chosen by hand (assign); else every name, from scratch (recheck)."""
+    for d in duties:
+        if not hand_only:
+            d["not_free"], d["backup"] = {}, {}
+        for n in d["names"]:
+            hand = d["reasons"].get(n) == "chosen by hand"
+            if hand_only and not hand:
+                continue
+            why, running = _free(n, views[d["key"]], d["start"], d["end"], every, xset, skip=d, elsewhere=elsewhere)
+            if why:
+                d["not_free"][n] = why
+            elif running:
+                d["backup"][n] = [l["row"] for l in running]
+                if hand:
+                    d["reasons"][n] = "chosen by hand; " + _teaches(running)
+
+
+def recheck(pub, cal, sched, xset, duties, every, elsewhere=()) -> None:
+    """kept duties: not_free and backup worked out again for every name (as assign does for names chosen by hand), against the
+    timetable, the rules and the other schedules as they are now; reasons are kept"""
+    views = {}
+    for d in duties:
+        if d["date"] not in views:
+            views[d["date"]] = _days.day_view(pub, cal, sched, d["date"])
+    _check_names(duties, every, {d["key"]: views[d["date"]] for d in duties}, xset, elsewhere, hand_only=False)
+
+
+def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=(), elsewhere=(), prefer=None) -> list:
     """the duties of the sittings in seats_by_key, filled. A hand-set duty (a pin) keeps exactly its pinned names and is filled
     only up to the number of its names that left the timetable: refill[pin key] (dropped before) plus pinned names that are
     no longer people; each name chosen by hand is checked as 'free then' (a backup when their lesson runs, else a not_free
-    reason). `fixed` duties (sittings kept as they are) are returned unchanged and count as other duties."""
+    reason). `fixed` duties (sittings kept as they are) are returned unchanged and count as other duties. `prefer`
+    {pin key: names}: names an unpinned duty keeps (the approved ones) when still free then, before anyone else is picked."""
     model = pub["model"]
     rules = xset["rules"]
     people = {p["name"] for p in _accounts.staff(pub)}
@@ -205,13 +248,24 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
     every = duties + list(fixed)
     if common:
         for sit, students, mine in by_sit:
-            _lesson_teachers(model, views[sit["key"]], sit, mine, ids_of, students, every, xset)
+            _lesson_teachers(model, views[sit["key"]], sit, mine, ids_of, students, every, xset, elsewhere)
     duties.sort(key=lambda d: (d["date"], d["start"], d["room"]))
-    other = {}
+    other, taught = {}, _taught(model)
     for d in duties:
         year = d["date"][:4]
         if year not in other:
             other[year] = _other_minutes(sched, year)
+        if not d["locked"] and prefer:
+            for n in (prefer.get("%s|%s" % (d["key"], d["room"])) or []):
+                if len(d["names"]) >= d["need"] or n in d["names"] or n not in people:
+                    continue
+                why, running = _free(n, views[d["key"]], d["start"], d["end"], every, xset, skip=d, elsewhere=elsewhere)
+                if why or _barred(n, running, subjects_of[d["key"]], taught, xset):
+                    continue
+                d["names"].append(n)
+                d["reasons"][n] = "as approved" + ("; " + _teaches(running) if running else "")
+                if running:
+                    d["backup"][n] = [l["row"] for l in running]
         left = d["need"] - len(d["names"])
         if d["locked"]:
             left = min(left, places.get(id(d), 0))
@@ -219,7 +273,7 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
             others = [x for x in every if x is not d]
             hall = (xset["rooms"].get(d["room"]) or {}).get("hall")
             got = candidates(pub, cal, sched, xset, d["date"], d["start"], d["end"], others, subjects_of[d["key"]],
-                             exclude=d["names"], _other=other[year])
+                             exclude=d["names"], _other=other[year], elsewhere=elsewhere)
             order = [(group, c) for group in ("freed", "free", "backups", "need_backup") for c in got[group]]
             if hall and not any(n in xset["chiefs"] for n in d["names"]):   # a hall: a free chief invigilator first, if any
                 chief = next(((g, c) for g, c in order if c["name"] in xset["chiefs"] and g != "need_backup"), None)
@@ -237,14 +291,5 @@ def assign(pub, cal, sched, xset, seats_by_key, refill=None, fixed=()) -> list:
         d["short"] = max(0, d["need"] - len(d["names"]))
         if (xset["rooms"].get(d["room"]) or {}).get("hall") and d["names"]:
             d["chief"] = next((n for n in xset["chiefs"] if n in d["names"]), d["names"][0])
-    for d in duties:
-        for n in d["names"]:
-            if d["reasons"].get(n) != "chosen by hand":
-                continue
-            why, running = _free(n, views[d["key"]], d["start"], d["end"], every, xset, skip=d)
-            if why:
-                d["not_free"][n] = why
-            elif running:
-                d["backup"][n] = [l["row"] for l in running]
-                d["reasons"][n] = "chosen by hand; " + _teaches(running)
+    _check_names(duties, every, views, xset, elsewhere, hand_only=True)
     return sorted(every, key=lambda d: (d["date"], d["start"], d["room"]))

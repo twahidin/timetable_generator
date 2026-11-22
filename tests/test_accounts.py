@@ -57,8 +57,8 @@ def rights_table():
     assert S("head") == {"setup", "timetable", "files"} and S("teacher") == {"timetable", "files"} and S("student") == {"timetable"}
     assert R.rights(None, "personal") == {"own"}
     base = {"timetable", "files"}
-    assert R.rights(person("executive"), "code") == base
-    assert R.rights(person("teacher"), "code") == base | {"relief"}
+    assert R.rights(person("executive"), "code") == base | {"history.own"}
+    assert R.rights(person("teacher"), "code") == base | {"relief", "history.own"}
     assert R.rights(person("leader"), "code") == base | {"relief", "relief.plan", "relief.settings", "history.own"}
     assert R.rights(person("hod"), "code") == base | {"relief", "relief.plan", "relief.settings", "history.own"}
     c = R.rights(person("committee"), "code")
@@ -81,8 +81,8 @@ def rights_table():
 def history_rights_by_group():
     hp = R.rights(person("hod"), "password"); assert "history.dept" in hp and "history.own" in hp and "history" not in hp
     hc = R.rights(person("hod"), "code"); assert "history.own" in hc and "history.dept" not in hc   # relief settings is a change
-    assert not {"history", "history.dept", "history.own"} & R.rights(person("teacher"), "code")
-    assert not {"history", "history.dept", "history.own"} & R.rights(person("executive"), "code")
+    for g in ("teacher", "executive", "leader"):   # anyone signed in by name can change something now (relief, their own events)
+        own = R.rights(person(g), "code"); assert "history.own" in own and not {"history", "history.dept"} & own, g
     ex = dict(person("executive"), extras=dict(relief=False, exams="2999-12-31", admin=False))
     assert "history.own" in R.rights(ex, "code")
     assert {"history", "history.own"} <= R.rights(person("committee"), "password")
