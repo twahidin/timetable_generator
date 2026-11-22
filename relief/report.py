@@ -69,7 +69,7 @@ WEEKLY, DAY = ("Fri", "15:00"), datetime.timedelta(days=1)               # when 
 AGAIN, OPEN_TODAY, OPEN_SUMMARY = "Remind them again", "Open relief today", "Open the full summary"
 NOBODY = "Nobody to remind."
 NOT_ON = "Not on Telegram."
-TOO_SOON = "Reminded at {at}: wait a few minutes."
+TOO_SOON = "Sent at {at}: wait a few minutes."  # the relief itself or a reminder of it, whichever was last
 _log = logging.getLogger("relief.telegram")
 
 

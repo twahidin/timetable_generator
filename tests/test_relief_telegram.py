@@ -4459,7 +4459,7 @@ D13 = "2026-10-13"
 TODAY_BUTTON = [dict(text="Open relief today", url=BASE + "/relief#today")]
 SAM_LINE, MAYA_LINE = "\n• Mr Sam Tan · 1A, 1B Science (G2) P6–P7 · starts 10:30 · ", "\n• Ms Maya Lee · 1C Science P3–P5 · starts 09:00 · "
 STARTED, SAM_STARTED, MAYA_STARTED = "\nStarted without acknowledgement:", "\n• Mr Sam Tan · 1A, 1B Science (G2) P6–P7 (10:30)", "\n• Ms Maya Lee · 1C Science P3–P5 (09:00)"
-NOBODY, NOT_ON, TOO_SOON = "Nobody to remind.", "Not on Telegram.", "Reminded at {}: wait a few minutes."
+NOBODY, NOT_ON, TOO_SOON = "Nobody to remind.", "Not on Telegram.", "Sent at {}: wait a few minutes."
 BY = (TEAM, "telegram")
 def head(hm, n): return f"⏰ {hm} · Not yet acknowledged ({n})"
 def all_clear(hm, n): return f"✅ {hm} · All {n} reliefs for today are acknowledged."
@@ -4866,6 +4866,17 @@ def remind_resends_once_every_five_minutes():
         assert TE.sweep() == 0 and swept() == 0 and said(SAM) == [RELIEF_K5]; put(key, state="dropped"); at("07:00", 13); assert remind(asks(i, K5))["sent"] == 1 and state(key) == "queued" and len(outs("relief")) == 1
     with school(SAM, TEAM):                                                                # the clock put back: never sooner
         i = today_reliefs((K5, SAM)); at("06:30", 13); assert remind(asks(i, K5))["sent"] == 0
+
+@t
+def a_reminder_asked_for_soon_after_the_relief_says_when_that_went():
+    why = "Sent at 06:57: wait a few minutes."                                             # nobody has been reminded: the relief alone has gone
+    with school(SAM, TEAM):
+        i = today_reliefs(); at("06:57", 13); give(i, K5, SAM); swept(); key = relief_key_of(i, K5); assert [(r["key"], r["state"]) for r in outs("relief")] == [(key, "sent")] and said(SAM) == [RELIEF_K5]
+        assert ticked("07:00") == keyed("0700"); send(); h = Since()
+        assert skips(remind(asks(i, K5))) == [(K5, SAM, why)]
+        assert call(TEAM, "post", "/api/relief/today/remind", dict(date=D13, covers=[dict(id=i, ckey=K5)])) == dict(sent=0, skipped=[dict(ckey=K5, name=SAM, why=why)]), "on the page"
+        assert press(TEAM, "remind") == (why, True), "under the report on Telegram"
+        assert [r["key"] for r in outs("relief")] == [key] and h.new() == []
 
 @t
 def two_reminders_at_once_are_one():

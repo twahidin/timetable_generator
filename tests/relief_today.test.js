@@ -95,7 +95,7 @@ t("Remind: what it sends, off while it is on its way, its answer beside the row,
 });
 t("Remind: why not, and a refusal", async () => {
   const p = await today(day([row(), maya()]));
-  for (const why of ["Reminded at 07:38: wait a few minutes.", "Nobody to remind.", "Not on Telegram."]) { p.remind = ok({ sent: 0, skipped: [{ ckey: "k5", name: SAM, why }] }); await p.press("Remind"); assert.strictEqual(p.under(), why); assert.ok(p.row().querySelector(".msg.bad")); }
+  for (const why of ["Sent at 07:38: wait a few minutes.", "Nobody to remind.", "Not on Telegram."]) { p.remind = ok({ sent: 0, skipped: [{ ckey: "k5", name: SAM, why }] }); await p.press("Remind"); assert.strictEqual(p.under(), why); assert.ok(p.row().querySelector(".msg.bad")); }
   for (const [a, text] of [[no(409, "Telegram is not connected yet."), "Telegram is not connected yet."], [no(503, "Telegram could not be reached just now. Try again."), "Telegram could not be reached just now. Try again."], [new Error("x"), "Could not reach the server. Check the connection and try again."]]) {
     p.remind = a; await p.press("Remind"); assert.strictEqual(p.under(), text); assert.ok(p.row().querySelector(".msg.bad")); assert.ok(!p.btn("Remind").disabled);
   }
@@ -155,7 +155,7 @@ t("Remind all: what it sends, off while anything is on its way, and what it answ
   const p = await today(day([row(), maya(), row({ ckey: "k7", key: "k7", linked: false }), inState("acknowledged", { ckey: "k8", key: "k8" }), inState("waiting", { ckey: "k9", key: "k9" })])), wait = later(); p.remind = wait.answer;
   await p.click("button", ALL); assert.deepStrictEqual(p.sent(), [`POST {"date":"${TODAY}","covers":[{"id":"a1","ckey":"k5"},{"id":"a1","ckey":"k2"}]}`]);
   assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now (off)", ALL + " (off)", "Refresh"]); assert.ok(p.btn("Remind").disabled && p.btn("Approve", "k9").disabled); await p.click("button", ALL); assert.strictEqual(p.sent().length, 1);
-  const why = "Reminded at 07:38: wait a few minutes.";
+  const why = "Sent at 07:38: wait a few minutes.";
   wait.give(200, { sent: 1, skipped: [{ ckey: "k2", name: MAYA, why }, { ckey: "k7", name: null, why: "Nobody to remind." }, { ckey: "k8", name: null, why: "Nobody to remind." }, { ckey: "k9", name: MAYA, why }, { ckey: "kx", why: "Not on Telegram." }] }); await p.settle();
   assert.deepStrictEqual(p.top(), ["Reminded 1.", `${MAYA}: ${why}`, "Nobody to remind.", `${MAYA}: ${why}`, "Not on Telegram."]); assert.strictEqual(p.all("#tdTop .msg.bad").length, 4); assert.strictEqual(p.all("#tdTop .msg.ok").length, 1);
   assert.strictEqual(p.under(), ""); assert.strictEqual(p.reads(), 2); assert.strictEqual(p.focus(), p.find("button", ALL)); assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now", ALL, "Refresh"]);
