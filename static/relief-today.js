@@ -12,16 +12,24 @@
    refuses or skips a pick that has changed since this page read it ("The pick has changed since you looked…"), and the
    re-read shows the new one. A lesson an approved exam or event stops is shown as "Not happening", with why, out of the
    counts and with no buttons; the teacher of a backup is in school, so the row says which duty they are on. A row is known by its absence id and cover key together (two absent co-teachers of one
-   lesson share a cover key). */
+   lesson share a cover key).
+   While the bot is connected (telegram in the answer; nothing of this shows while it is not): an approved row says what was sent
+   on Telegram (told) or that its teacher is not there (linked); Remind on a row, for whoever can be reached, and Remind all not
+   acknowledged at the top, which answers above the rows. While a row says "Being sent…" (or, after a step taken here, "Not sent
+   yet") the day is read again every 3 seconds, 5 times at most, only on screen; what came of it is said in the live line too
+   (T.said, not seen). */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day, enc = encodeURIComponent, say = R.say;
   const $ = (s, el = document) => el.querySelector(s);
   const EVERY = 3000, SENT = ["approved", "acknowledged", "change"];
+  const READS = 5;   /* how often the day is read again by itself for what is being sent */
   /* top: the lines above the rows ({text, bad, fill}); msg: a line beside a row (row key -> {text, bad}); busy: rows with
-     a step on its way; all: Approve all or Fill now on its way; open: the row whose "free then" list is open, free: each
-     list's answer; split: the row whose split choice is open */
+     a step on its way; all: Approve all, Fill now or Remind all on its way; open: the row whose "free then" list is open, free: each
+     list's answer; split: the row whose split choice is open; step: the day was last asked for after a step that the server
+     took; reads: how often it was read again since for what is being sent; said: what came of that, for the live line; lines: the
+     lines above the rows as drawn */
   const T = { pane: null, date: "", data: null, err: null, seq: 0, loading: false, timer: 0, wait: 0, top: [], msg: new Map(),
-              busy: new Set(), all: false, open: null, free: new Map(), split: null };
+              busy: new Set(), all: false, open: null, free: new Map(), split: null, step: false, reads: 0, said: "", lines: "" };
 
   const rid = r => r.id + "\n" + r.ckey;
   const rows = () => (T.data && Array.isArray(T.data.rows) ? T.data.rows : []);
@@ -36,6 +44,20 @@
     const s = String(at || ""), d = s.slice(0, 10), t = s.slice(11, 16);
     if (!/^\d{2}:\d{2}$/.test(t)) return "";
     return d === RF.today() ? t : `${day(d)}, ${t}`;
+  }
+
+  /* ---------------------------------------------------------------- Telegram */
+  const bot = () => !!T.data && T.data.telegram === true;
+  const toRemind = () => (bot() ? rows().filter(r => r.state === "approved" && r.linked) : []);   /* approved, not acknowledged, and can be reached */
+  const isWrong = r => r.linked && !!r.told && (r.told.state === "unsure" || r.told.state === "failed");
+  const isComing = r => r.state === "approved" && r.linked && (r.told && r.told.state !== "dropped" ? r.told.state === "queued" : T.step);   /* being sent, or about to be (a message is made after the step that asks for it) */
+  const again = () => !!T.data && (T.data.filling || (bot() && T.reads < READS && rows().some(isComing)));   /* the day is to be read again by itself */
+
+  function told(r) {   /* an approved row's line: what its teacher was sent */
+    const s = r.told ? r.told.state : "", sent = s === "sent" ? `Sent ${clock(r.told.at)}`.trim() : "";
+    if (!r.linked) return sent ? `${sent} · not on Telegram now` : "Not on Telegram: they see it in Reliefs I'm covering";
+    if (sent) return sent;
+    return s === "unsure" ? "May not have been sent: remind them" : s === "queued" ? "Being sent…" : s === "failed" ? "Could not be sent: remind them" : "Not sent yet";
   }
 
   /* ---------------------------------------------------------------- a row */
@@ -68,7 +90,7 @@
     switch (r.state) {
       case "open": return c("No relief teacher yet", "");
       case "waiting": return c("Waiting for you", "st-amber");
-      case "approved": return c("Approved: they see it in Reliefs I'm covering", "st-sent")
+      case "approved": return (bot() ? c("Approved", "st-sent") + `<div class="${isWrong(r) ? "td-warn" : "small muted"}">${esc(told(r))}</div>` : c("Approved: they see it in Reliefs I'm covering", "st-sent"))
         + (r.approved && r.approved.by ? `<div class="small muted">by ${esc(r.approved.by)}${clock(r.approved.at) ? `, ${esc(clock(r.approved.at))}` : ""}</div>` : "");
       case "acknowledged": return c(`✓ Acknowledged${r.ack && clock(r.ack.at) ? ` ${clock(r.ack.at)}` : ""}`, "st-ok");
       case "change": return c(`Asked to change${r.change && clock(r.change.at) ? ` ${clock(r.change.at)}` : ""}`, "st-blue");
@@ -86,6 +108,7 @@
     if (r.state === "change" && r.change && r.change.pick && !r.change.stale) out.push(b("approve", "Approve the new pick", "primary"));
     const listOpen = T.open === k;
     out.push(b(listOpen ? "close" : "free", listOpen ? "Close the list" : r.state === "open" ? "Choose" : "Change", "", ` aria-expanded="${listOpen ? "true" : "false"}"`));
+    if (bot() && r.state === "approved" && r.linked) out.push(b("remind", "Remind"));   /* after Change, where the focus goes when Approve is gone */
     if (r.state === "change" && r.pick) out.push(b("keep", `Keep ${r.pick.who}`));
     if (Number(r.n) >= 2 && (r.state === "open" || r.state === "waiting")) {
       const on = T.split === k;
@@ -149,16 +172,26 @@
 
   function paintActs() {
     const c = (T.data && T.data.counts) || {}, w = Number(c.waiting) || 0, off = !T.data || past() || T.all;
-    $("#tdActs", T.pane).innerHTML = `<button type="button" class="primary" data-td="all"${off || !w ? " disabled" : ""}>${esc(w ? `Approve all ${w} waiting` : "Approve all waiting")}</button>
-      <button type="button" data-td="fill"${off ? " disabled" : ""}>Fill now</button>
+    const all = toRemind().length ? `
+      <button type="button" data-td="remind-all"${off || T.busy.size ? " disabled" : ""}>Remind all not acknowledged</button>` : "";
+    const box = $("#tdActs", T.pane), a = document.activeElement, had = a && box.contains(a) ? a.dataset.td : "";
+    box.innerHTML = `<button type="button" class="primary" data-td="all"${off || !w ? " disabled" : ""}>${esc(w ? `Approve all ${w} waiting` : "Approve all waiting")}</button>
+      <button type="button" data-td="fill"${off ? " disabled" : ""}>Fill now</button>${all}
       <button type="button" class="small" data-td="reload"${T.loading ? " disabled" : ""}>${T.loading ? "Reading…" : "Refresh"}</button>`;
+    if (had) focusAct(had);
+  }
+
+  function focusAct(...acts) {   /* the first of these buttons at the top that can be pressed */
+    const b = acts.map(x => $(`#tdActs [data-td="${x}"]`, T.pane)).find(x => x && !x.disabled);
+    if (b) b.focus({ preventScroll: true });
   }
 
   function paintTop() {
     const lines = T.top.map(m => `<p class="td-top">${say(m)}</p>`);
     if (T.data && T.data.filling) lines.push(`<p class="td-top small td-busy">Being picked… The page reads the day again every 3 seconds.</p>`);
     if (T.err && T.data) lines.push(`<p class="td-top">${say(T.err)} <button type="button" class="small" data-td="reload">Try again</button></p>`);
-    $("#tdTop", T.pane).innerHTML = lines.join("");
+    if (T.said) lines.push(`<p class="vh">${esc(T.said)}</p>`);
+    if (lines.join("") !== T.lines) $("#tdTop", T.pane).innerHTML = T.lines = lines.join("");   /* a live region: what is there already is not said again */
   }
 
   function focusNow() {   /* the focused button of a row, as {k, sel, extra}, or null */
@@ -191,20 +224,24 @@
   /* ---------------------------------------------------------------- the server */
   function schedule() {
     clearTimeout(T.timer); T.timer = 0;
-    if (T.data && T.data.filling && onScreen()) T.timer = setTimeout(() => { T.timer = 0; if (onScreen()) load(true); }, EVERY);
+    if (again() && onScreen()) T.timer = setTimeout(() => { T.timer = 0; if (onScreen()) load(true); }, EVERY);
   }
 
-  async function load(quiet) {   /* quiet: a fetch while picks are made, drawn again only when something changed */
+  async function load(quiet, step) {   /* quiet: a fetch while picks are made or something is being sent, drawn again only when something changed; step: after a step the server took */
     const seq = ++T.seq, date = T.date;
     clearTimeout(T.timer); T.timer = 0;
     T.loading = true;
+    T.reads = quiet && !(T.data && T.data.filling) ? T.reads + 1 : 0;
+    if (!quiet) T.step = !!step;
     if (!quiet) paintActs();
     const res = await R.api(`/api/relief/today?date=${enc(date)}`);
     if (seq !== T.seq) return;
     T.loading = false;
     if (!res.ok) { T.err = { text: res.error, bad: true, status: res.status }; paint(); return; }   /* no more fetches until Try again */
     const same = quiet && !T.err && T.data && JSON.stringify(T.data) === JSON.stringify(res.data);
+    const was = new Set(rows().filter(isComing).map(rid));
     T.err = null; T.data = res.data;
+    T.said = !bot() ? "" : rows().filter(r => was.has(rid(r)) && r.state === "approved" && !isComing(r)).map(r => `${r.pick ? `${r.pick.who}, ` : ""}${lessonName(r)}: ${told(r)}`).join(". ");
     for (const [k, m] of [...T.msg]) if (!findRow(k)) { T.msg.delete(k); T.top.push(m); }   /* its row is gone (split, joined): said above the rows */
     const live = k => { const r = findRow(k); return r && r.state !== "cancelled" && r.state !== "stopped"; };
     if (T.open && !live(T.open)) T.open = null;
@@ -214,14 +251,14 @@
     schedule();
   }
 
-  async function act(k, method, url, body, done) {   /* one step on one row; then the day is read again */
+  async function act(k, method, url, body, done) {   /* one step on one row; then the day is read again. done(answer): what is said, or {text, bad} */
     const f = focusNow();
-    T.busy.add(k); T.msg.delete(k); paintRows();
+    T.busy.add(k); T.msg.delete(k); paintActs(); paintRows();
     const res = await R.api(url, R.json(method, body));
     T.busy.delete(k);
     if (!res.ok) T.msg.set(k, { text: res.error, bad: true, status: res.status });
-    else { const text = done ? done(res.data) : ""; if (text) T.msg.set(k, { text, bad: false }); }
-    await load();
+    else { const m = done ? done(res.data) : ""; if (m) T.msg.set(k, typeof m === "string" ? { text: m, bad: false } : m); }
+    await load(false, res.ok);
     if (f && !focusNow()) refocus(f, true);
   }
 
@@ -272,7 +309,33 @@
         if (r) T.msg.set(rid(r), { text: s.why, bad: true });
       }
     }
-    await load();
+    await load(false, res.ok);
+  }
+
+  /* ---- Remind: the server sends the reliefs again that still wait to be acknowledged, and says why not for the others */
+  const asked = list => ({ date: T.date, covers: list.map(r => ({ id: r.id, ckey: r.ckey })) });
+  const notSent = got => (got && Array.isArray(got.skipped) ? got.skipped : []).filter(s => s && s.why);
+
+  function remind(k, r) {
+    act(k, "POST", "/api/relief/today/remind", asked([r]), got => {
+      if (got && Number(got.sent)) return "Reminded.";
+      const s = notSent(got)[0];
+      return s ? { text: s.why, bad: true } : "";
+    });
+  }
+
+  async function remindAll() {
+    const body = asked(toRemind());
+    T.all = true; T.top = []; paint();
+    const res = await R.api("/api/relief/today/remind", R.json("POST", body));
+    T.all = false;
+    if (!res.ok) T.top = [{ text: res.error, bad: true, status: res.status }];
+    else {
+      T.top = [{ text: `Reminded ${Number(res.data && res.data.sent) || 0}.`, bad: false }];
+      for (const s of notSent(res.data)) if (s.name || !T.top.some(m => m.text === s.why)) T.top.push({ text: s.name ? `${s.name}: ${s.why}` : s.why, bad: true });   /* a reason with no name is said once */
+    }
+    await load(false, res.ok);
+    if (R.cur === "today" && (!document.activeElement || document.activeElement === document.body)) focusAct("remind-all", "reload");
   }
 
   async function fillNow() {
@@ -302,6 +365,7 @@
       case "reload": T.err = null; load(); return;
       case "all": approveAll(); return;
       case "fill": fillNow(); return;
+      case "remind-all": remindAll(); return;
     }
     const k = keyOf(b), r = k && findRow(k);
     if (!r) return;
@@ -317,6 +381,7 @@
       case "pl-choose": choose(k, b.dataset.name || ""); return;
       case "pl-teaching": { const s = T.free.get(k); if (s) { s.teaching = !s.teaching; paintRows(); focusIn(k, '[data-pl="teaching"]'); } return; }
       case "pl-duty": { const s = T.free.get(k); if (s) { s.duty = !s.duty; paintRows(); focusIn(k, '[data-pl="duty"]'); } return; }
+      case "remind": remind(k, r); return;
       case "keep": act(k, "POST", `${cover}/keep`, {}, () => `${r.pick.who} kept: the relief stays with them.`); return;
       case "split": T.split = k; T.open = null; T.msg.delete(k); paintRows(); focusIn(k, '[data-td="split-go"]'); return;
       case "split-off": T.split = null; paintRows(); focusIn(k, '[data-td="split"]'); return;
@@ -341,7 +406,7 @@
     if (e.key === "Escape" && T.open && e.target.closest && e.target.closest(".pl-list")) { e.preventDefault(); closeFree(T.open); }
   }
 
-  document.addEventListener("visibilitychange", () => { if (T.pane && onScreen() && T.data && T.data.filling && !T.timer) load(true); });
+  document.addEventListener("visibilitychange", () => { if (T.pane && onScreen() && again() && !T.timer) load(true); });
 
   R.tab("today", {
     init(pane) {

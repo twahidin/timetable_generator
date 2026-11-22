@@ -5085,6 +5085,43 @@ def today_rows_say_when_it_was_told_and_if_not_on_telegram():
         with stand_in(tgdb, "db", lambda read=False: opened.append(1)): assert row() == (None, False) and opened == [], "no token: the store is not opened"
         os.environ["TELEGRAM_BOT_TOKEN"] = "practice"; assert row()[1] is True
 
+@t
+def today_says_whether_the_bot_is_connected():
+    def day_(name=TEAM): return call(name, "get", f"/api/relief/today?date={D13}")
+    with school(SAM, TEAM):
+        i = today_reliefs((K5, SAM)); got = day_(); assert got["telegram"] is True and set(got) == {"date", "filling", "counts", "rows", "telegram"}, set(got)
+        assert call(TEAM, "get", "/api/relief/today?date=2026-10-20")["telegram"] is True and call(TEAM, "get", "/api/relief/today?date=2026-10-20")["rows"] == [], "a day with nothing on it too"
+        bot_ = tgdb.get_state("bot"); tgdb.set_state("bot", None); got = day_(); assert got["telegram"] is False and next(v for v in got["rows"] if v["ckey"] == K5)["linked"] is True, "a token, and not connected: what the rows say is not shown"
+        for odd in ("x", dict(bot_, key=digest("another")), dict(bot_, username="")): tgdb.set_state("bot", odd); assert day_()["telegram"] is False, odd
+        tgdb.set_state("bot", bot_); assert day_()["telegram"] is True
+        real = os.environ.pop("SECRET_KEY")
+        try:
+            with A.app.test_request_context(): assert WB._connected() is False
+        finally: os.environ["SECRET_KEY"] = real
+        os.environ["TELEGRAM_BOT_TOKEN"] = "made-up-" + secrets.token_hex(10); assert day_()["telegram"] is False, "connected under another token"; os.environ["TELEGRAM_BOT_TOKEN"] = "practice"
+        errs = []
+        for e in (sqlite3.OperationalError, KeyError, OSError):                                # never the page's failure, and its kind alone is written down
+            def boom(*a, **k): raise e(f"{SAM} a private line")
+            with stand_in(links, "connected", boom), stand_in(A.app.logger, "error", lambda *a: errs.append(a)): got = day_()
+            assert got["telegram"] is False and next(v for v in got["rows"] if v["ckey"] == K5)["told"]["state"] == "sent", e
+        assert [a[1:] for a in errs] == [("OperationalError",), ("KeyError",), ("OSError",)] and SAM not in str(errs), errs
+        with quiet_app(), stand_in(tgdb, "db", lambda *a, **k: 1 / 0): assert day_()["telegram"] is False
+        text = json.dumps(day_()); assert all(x not in text for x in (BASE, "practice_bot", digest(tg.hook_secret()), str(CHATS[SAM]))), "whether, and no more"
+        os.environ.pop("TELEGRAM_BOT_TOKEN"); opened = []
+        with stand_in(tgdb, "db", lambda read=False: opened.append(1)): assert day_()["telegram"] is False and opened == [], "no token: the store is not opened"
+        os.environ["TELEGRAM_BOT_TOKEN"] = "practice"; assert day_()["telegram"] is True
+        for name, code in ((HUGO, 403), (SAM, 403)): assert "telegram" not in call(name, "get", f"/api/relief/today?date={D13}", code=code), name
+
+@t
+def the_telegram_pages_are_there():
+    read = lambda f: open(os.path.join(ROOT, "static", f), encoding="utf-8").read()
+    html, js, card, sets, sets_html = read("relief.html"), read("relief.js"), read("relief-telegram.js"), read("relief-settings.js"), read("relief-settings.html")
+    assert html.count('<script src="/static/relief-telegram.js"></script>') == 1 and html.index("/static/relief.js") < html.index("/static/relief-telegram.js")
+    assert '<div id="mineTelegram"></div><div id="mineList"></div>' in js and "R.linkCard(" in card and '"/api/relief/telegram"' in card
+    for word in ("localStorage", "sessionStorage", "indexedDB", "cookie", "location", "history.", "console.", "eval(", "//cdn", "http://", "https://"): assert word not in card, word
+    assert 'id="telegram"' in sets_html and "/api/relief/telegram/admin" in sets and "docs/DEPLOY.md" in sets
+    for word in ("api.telegram.org", "t.me"): assert all(word not in x for x in (html, js, card, sets, sets_html)), word
+
 # ---- Task 6, fix round 1
 KR = next(x["key"] for x in LS.on_date(SCHOOL, TERM, RUTH, datetime.date(2026, 10, 13)) if x["p"] == 6)
 

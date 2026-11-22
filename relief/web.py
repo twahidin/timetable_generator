@@ -783,6 +783,13 @@ def _telegram(pub):
     return _tell.Said({}), {}
 
 
+def _connected():
+    """the bot is connected; False when that cannot be read: the page works without"""
+    try: return _chats.connected() is not None
+    except Exception as e: current_app.logger.error("relief: whether Telegram is connected could not be read (%s)", type(e).__name__)
+    return False
+
+
 def _told(said, r, c, row):
     """what was said of the relief in the row on Telegram (tell.Said.of); None when it has not reached its teacher, or cannot be
     worked out (a record changed by hand): never the page's failure"""
@@ -801,7 +808,7 @@ def today():
     acknowledged, change, nobody, open) and filling: picks are being made (the page fetches again). On Telegram, each row: told,
     dict(state "sent" | "unsure" (it may have been) | "queued" | "failed" | "dropped", at) of the last message of the relief
     approved, its reminders too, else None (tell.Said.of; a stopped lesson's is None), and linked, its relief teacher can be
-    reached; relief.team"""
+    reached; telegram: the bot is connected (the page shows neither while it is not); relief.team"""
     pub, me, err = _gate(*TEAM)
     if err: return err
     try: date = _day(request.args.get("date"), _lessons.today()).isoformat()
@@ -822,7 +829,7 @@ def today():
     for v in rows:
         if v["state"] in ("cancelled", "stopped"): continue
         counts["need"] += 1; counts[v["state"]] += 1; counts["nobody"] += v["nobody"]
-    return jsonify(date=date, filling=filling, counts=counts, rows=rows)
+    return jsonify(date=date, filling=filling, counts=counts, rows=rows, telegram=_connected())
 
 
 @bp.post("/api/relief/absences/<id>/covers/<path:ckey>/approve")

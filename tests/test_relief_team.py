@@ -1571,7 +1571,7 @@ def today_lists_covers_in_time_order_with_counts_and_no_reason():
     AB.cancel(j, "Better", GRACE)
     got = ok(team.get("/api/relief/today?date=2026-10-13"))
     assert [r["state"] for r in got["rows"] if r["id"] == j] == ["cancelled", "cancelled"] and got["counts"]["need"] == 4, got["counts"]
-    assert ok(team.get("/api/relief/today")) == dict(date="2026-10-12", filling=False, rows=[],
+    assert ok(team.get("/api/relief/today")) == dict(date="2026-10-12", filling=False, rows=[], telegram=False,
                                                     counts=dict(need=0, waiting=0, approved=0, acknowledged=0, change=0, nobody=0, open=0))
     no(team.get("/api/relief/today?date=13/10/2026"), 400, "Choose the dates again.")
 

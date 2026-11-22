@@ -5,6 +5,7 @@
    Relief.tab(name, {init(pane, me), shown(pane), dirty()}). A tab shows only when the person may open it and its code is
    loaded. Each tab keeps its own part of the page, so moving between tabs loses nothing typed; leaving the page with
    something unsent or unsaved asks first. A refusal shows the server's sentence and keeps everything typed.
+   At the top of My absences is the Link Telegram card: relief-telegram.js calls Relief.linkCard({init(box), shown()}).
    For those files, Relief also gives api, json, people, say, absences (the absence cards of My absences, for
    Planned by me), attach (a form's files, after the absence is saved), span, reason and plural; relief-plan.js adds
    freeList (the "free then" list, for Today's Change). */
@@ -16,7 +17,7 @@
   const UNREACHABLE = "Could not reach the server. Check the connection and try again.";
   const mods = {};
   const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
-  const R = window.Relief = { me: null, cur: null, tab, go, api, json, people, say, dirtyAny, absences, attach, span, reason, plural, reliefLines, approvedOf };
+  const R = window.Relief = { me: null, cur: null, tab, linkCard, go, api, json, people, say, dirtyAny, absences, attach, span, reason, plural, reliefLines, approvedOf };
 
   /* The relief line of a lesson to cover, read cover by cover (x.covers, in time order, never x.parts[i]): the relief teacher
      once approved (approved, acknowledged or asked to change), the planner's own choice still waiting ("Planned: name,
@@ -419,7 +420,7 @@
   }
 
   /* ================================================================ My absences */
-  /* Every absence of mine, newest first, as cards (R.absences). */
+  /* The Link Telegram card, then every absence of mine, newest first, as cards (R.absences). */
   const mine = absences({
     load: () => api("/api/relief/absences/mine").then(r => r.ok ? { ok: true, status: r.status, data: r.data.absences || [] } : r),
     empty: `<div class="card"><p class="muted">No absences yet. When you ask for relief, or someone plans relief for you, it shows here.</p><button type="button" class="primary" data-go="ask">Ask for relief</button></div>`,
@@ -431,13 +432,20 @@
     if (el) { el.textContent = n ? String(n) : ""; el.title = n ? `${plural(n, "absence")} to acknowledge` : ""; }
   }
 
+  let link = null;
+  function linkCard(mod) {   /* the card's code, ready before the tab is or after it */
+    link = mod;
+    if (mods.mine.started) mod.init($("#mineTelegram"));
+  }
+
   tab("mine", {
     init(pane) {
-      pane.innerHTML = `<div id="mineList"></div>`;
+      pane.innerHTML = `<div id="mineTelegram"></div><div id="mineList"></div>`;
       mine.mount($("#mineList", pane));
       mine.load();
+      if (link) link.init($("#mineTelegram", pane));
     },
-    shown() { mine.load(); },
+    shown() { mine.load(); if (link) link.shown(); },
     dirty() { return mine.dirty(); },
     reload() { mine.load(); },
   });

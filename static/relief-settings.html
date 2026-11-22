@@ -53,6 +53,21 @@
 .cal td.empty{color:var(--muted);padding:8px}
 .add{margin-top:8px}
 .codes{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* the Telegram card */
+.tg-state{margin:0 0 8px;line-height:1.5;overflow-wrap:anywhere}
+.tg .notice{margin:0 0 10px}
+.tg .ask{display:flex;gap:6px;align-items:center;flex-wrap:wrap;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:8px}
+.tg .ask .q{width:100%;font-size:12.5px}
+#tgSay{margin-top:8px;font-size:13px}
+#tgSay:empty{margin:0}
+.tg .msg a{color:var(--accent)}
+.tg details{margin-top:10px}
+.tg details ul{list-style:none;margin:6px 0 0;padding:0;font-size:13px}
+.tg-no{columns:220px;column-gap:20px}
+.tg-no li{padding:2px 0;break-inside:avoid;overflow-wrap:anywhere}
+.tg-yes li{display:flex;gap:4px 10px;flex-wrap:wrap;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)}
+.tg-yes .who{min-width:0;overflow-wrap:anywhere}
+.tg-yes .ask{width:100%;margin:2px 0 4px}
 @media (max-width:760px){.setting{grid-template-columns:minmax(0,1fr);gap:6px}.rs{padding:12px}}
 </style>
 </head>
@@ -63,8 +78,9 @@
     <a class="ghost filebtn" href="/logout">Sign out</a>
   </div>
 </header>
-<main class="rs" id="main">
-  <div class="card"><p class="muted">Loading…</p></div>
+<main class="rs">
+  <div id="main"><div class="card"><p class="muted">Loading…</p></div></div>
+  <section id="telegram" aria-label="Telegram"></section>
 </main>
 <script src="/static/relief-settings.js"></script>
 </body>
