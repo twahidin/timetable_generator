@@ -14,6 +14,8 @@ NO_NAME = "Pick a class, teacher or room on both timetables."
 UNREADABLE = "The published timetable could not be read."
 KINDS = ("time", "teacher", "room", "only_a", "only_b")
 
+_counts_cache = {}   # published_counts: {key: (meta.json mtime, setup version), value}
+
 def label(src):
     if src == "draft": return "The draft on step 8"
     if src == "published": return "Published timetable"
@@ -56,7 +58,16 @@ def published_counts(rec=None):
     pub = store.published()
     if not pub: return None
     rec = rec or store.setup_record()
-    return dict(published_at=(pub.get("meta") or {}).get("published_at"), **draft.counts(_published_model(rec), rec))
+    try: stamp = os.path.getmtime(os.path.join(store.PUB, "meta.json"))
+    except OSError: stamp = None
+    key = (stamp, rec["v"]); hit = _counts_cache.get("key") == key and _counts_cache.get("value")
+    if hit: return dict(hit)
+    at = (pub.get("meta") or {}).get("published_at")
+    try: out = dict(published_at=at, **draft.counts(_published_model(rec), rec))
+    except ValueError as e:
+        if str(e) != UNREADABLE: raise
+        out = dict(published_at=at, critical=None, warnings=None, error=UNREADABLE)
+    _counts_cache.update(key=key, value=out); return dict(out)
 
 def rows(m):
     """one dict per lesson row and planned key (a whole-class row taught to two classes gives two)"""
@@ -92,7 +103,7 @@ def _kinds(x, y):
     if x is None: return ["only_b"]
     if y is None: return ["only_a"]
     k = []
-    if (x["d"], x["p"]) != (y["d"], y["p"]): k.append("time")
+    if (x["d"], x["p"], x["n"]) != (y["d"], y["p"], y["n"]): k.append("time")   # a change of length is a change of time
     if x["teachers"] != y["teachers"]: k.append("teacher")
     if x["room"] != y["room"]: k.append("room")
     return k
@@ -109,7 +120,7 @@ def diff(src_a, src_b, rec=None):
     ra, rb = rows(ma), rows(mb)
     items = [dict(a=x, b=y, kinds=k) for x, y in pair(ra, rb) if (k := _kinds(x, y))]
     ids = lambda kind: len({i["b"]["id"] for i in items if kind in i["kinds"] and i["b"]})
-    totals = dict(lessons=len({r["id"] for r in rb}), moved=ids("time"), teacher=ids("teacher"), room=ids("room"),
+    totals = dict(lessons=len({r["id"] for r in rb}), moved=len({i["b"]["id"] for i in items if i["a"] and i["b"] and (i["a"]["d"], i["a"]["p"]) != (i["b"]["d"], i["b"]["p"])}), teacher=ids("teacher"), room=ids("room"),
                   critical=[ca["critical"], cb["critical"]], warnings=[ca["warnings"], cb["warnings"]], longest=[_longest(ma), _longest(mb)])
     order = lambda key: list(dict.fromkeys([c["name"] for c in ma[key]] + [c["name"] for c in mb[key]]))
     rooms = sorted({r["room"] for r in ra + rb if r["room"]})
@@ -118,10 +129,11 @@ def diff(src_a, src_b, rec=None):
 def line(item, days):
     a, b = item.get("a"), item.get("b")
     at = lambda r: f"{days[r['d']]} {r['p']}"
+    per = lambda r: f" ({r['n']} period{'' if r['n'] == 1 else 's'})"
     if a is None: return f"{b['subject']}: only in B ({at(b)})"
     if b is None: return f"{a['subject']}: only in A ({at(a)})"
     parts = []
-    if "time" in item["kinds"]: parts.append(f"{at(a)} → {at(b)}")
+    if "time" in item["kinds"]: longer = a.get("n") != b.get("n"); parts.append(f"{at(a)}{per(a) if longer else ''} → {at(b)}{per(b) if longer else ''}")
     if "teacher" in item["kinds"]: parts.append("teacher " + (" & ".join(a["teachers"]) or "none") + " → " + (" & ".join(b["teachers"]) or "none"))
     if "room" in item["kinds"]: parts.append("room " + (a["room"] or "none") + " → " + (b["room"] or "none"))
     return f"{b['subject']}: " + ", ".join(parts)

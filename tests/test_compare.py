@@ -1,5 +1,5 @@
 """Plain-assert tests for comparing two timetables: .venv/bin/python tests/test_compare.py"""
-import gzip, io, json, os, secrets, shutil, sys, tempfile, time
+import copy, gzip, io, json, os, secrets, shutil, sys, tempfile, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODE = secrets.token_hex(4)
@@ -101,14 +101,15 @@ def test_pair_matches_same_slot_first():
     assert [(x and x["p"], y and y["p"]) for x, y in got] == [(4, 4), (1, 6), (None, 7)], got
 
 def test_week_of_a_room():
-    two_timetables(); m = compare.model_of("draft", None); before = list(m["lessons"])
+    two_timetables(); m = compare.model_of("draft", None); before = copy.deepcopy(m["lessons"])
     rooms = sorted({x["room"] for x in m["lessons"] if x["room"]}); assert rooms, "the sample has rooms"
     r = rooms[0]; w = compare.week(m, "room", r)
     assert sorted((c["d"], c["p"], c["key"]) for c in w["cells"]) == sorted((x["d"], x["p"], k) for x in m["lessons"] if x["room"] == r for k in [":".join(kk) for kk in __import__("helper")._keys_of(x)])
     assert w["NP"] == m["NP"] and w["days"] == list(m["days"])
     assert compare.week(m, "class", CLASSES[0])["cells"] and compare.week(m, "teacher", TEACHERS[0])["cells"]
     for bad in (("room", "Nowhere"), ("class", "Nobody"), ("teacher", ""), ("thing", "x")): raises(ValueError, lambda: compare.week(m, *bad), "Pick a class, teacher or room on both timetables.")
-    assert m["lessons"] == before and compare.model_of("draft", None)["lessons"] == before   # the shared model is untouched
+    compare.diff("draft", "draft"); compare.rows(m); compare.xlsx("draft", "draft"); compare.week(m, "class", CLASSES[0])
+    assert m["lessons"] == before and compare.model_of("draft", None)["lessons"] == before   # the shared model is untouched, lesson by lesson
 
 def test_published_compares():
     shutil.rmtree(versions.VDIR, ignore_errors=True); save_draft(CLEAN)
@@ -137,6 +138,37 @@ def test_excel_has_one_row_per_difference():
     ws = openpyxl.load_workbook(io.BytesIO(compare.xlsx(a, "draft"))).active
     assert ws.title == "Differences" and [x.value for x in ws[1]] == ["Class", "Lesson", "A", "B"]
     assert ws.max_row - 1 == want, (ws.max_row, want)
+
+def test_a_length_change_is_a_time_difference():
+    shutil.rmtree(versions.VDIR, ignore_errors=True)
+    save_draft([dict(ROWS[0], p=2, n=1)]); v = versions.save("Short", "Tester"); save_draft([dict(ROWS[0], id=77, p=2, n=2)])
+    d = compare.diff("v:" + v["id"], "draft"); assert len(d["items"]) == 1 and d["items"][0]["kinds"] == ["time"], d["items"]
+    assert d["totals"]["moved"] == 0
+    assert compare.line(d["items"][0], DAYS) == f"{SUBJ}: {DAYS[0]} 2 (1 period) → {DAYS[0]} 2 (2 periods)", compare.line(d["items"][0], DAYS)
+
+def test_published_counts_are_cached_until_the_setup_or_the_publish_changes():
+    shutil.rmtree(versions.VDIR, ignore_errors=True); save_draft(CLEAN); assert c.post("/api/draft/publish").status_code == 200
+    real, calls = compare._published_model, []
+    compare._published_model = lambda rec: (calls.append(1), real(rec))[1]; compare._counts_cache.clear()
+    try:
+        first = compare.published_counts(); compare.published_counts(); compare.published_counts()
+        assert len(calls) == 1, calls
+        rec = store.setup_record(); compare.published_counts(dict(rec, v=rec["v"] + 1)); assert len(calls) == 2   # another setup version: fresh
+        time.sleep(0.05); assert c.post("/api/draft/publish").status_code == 200
+        again = compare.published_counts(); assert len(calls) == 3 and again["published_at"] is not None and first["critical"] == again["critical"] == 0
+    finally: compare._published_model = real
+
+def test_an_unreadable_published_timetable_does_not_break_the_list():
+    shutil.rmtree(versions.VDIR, ignore_errors=True); save_draft(CLEAN); versions.save("Kept", "Tester"); assert c.post("/api/draft/publish").status_code == 200
+    import pickle
+    path = os.path.join(store.PUB, "model.pkl"); good = open(path, "rb").read()
+    m = pickle.loads(good); m["lessons"] = [dict(x, d=object()) for x in m["lessons"]]
+    open(path, "wb").write(pickle.dumps(m)); store._cache.update(stamp=None, value=None); compare._counts_cache.clear()
+    try:
+        r = c.get("/api/draft/versions"); assert r.status_code == 200, r.get_json(); j = r.get_json()
+        assert j["published"]["critical"] is None and j["published"]["error"] == "The published timetable could not be read." and j["published"]["published_at"], j["published"]
+        assert "Kept" in [v["name"] for v in j["versions"]]
+    finally: open(path, "wb").write(good); store._cache.update(stamp=None, value=None); compare._counts_cache.clear()
 
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
