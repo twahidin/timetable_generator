@@ -53,6 +53,11 @@ def a_names(*staff, students=KIDS, **kw):
 def all_where(N, text, want):
     for w in WHERES: same(N.out(text, w), want)
 
+def apart(N, text, typed, rest):
+    """one answer in a person's own words, another in a list and in the app's words"""
+    same(N.out(text, "typed"), typed)
+    for w in ("list", "app"): same(N.out(text, w), rest)
+
 @t
 def a_teacher_goes_as_one_code_however_the_name_is_written():
     N = a_names()
@@ -76,6 +81,8 @@ def the_short_name_is_a_name_in_typed_and_app_text_and_not_in_a_list():
     N = a_names(("Ms Wong Mei", "W.M."), ("Mr Lau Kit", "L K"), ("Mdm Ho Siu", "Ms Ho"), "Ms Ho Yan")
     same(N.out("W.M. and L K and Ms Ho", "app"), f"{N.code('Ms Wong Mei')}. and {N.code('Mr Lau Kit')} and {N.code('Mdm Ho Siu')}")
     same(N.out("W.M. and L K and Ms Ho", "list"), f"W.M. and L K and {N.code('Ms Ho Yan')}")
+    N = a_names((TAN, "TWL"), ("Mr Tan Boon Kiat", "Tan"))                        # the longest match
+    same(N.out("Tan Wei Ling, Tan and 1TWL", "typed"), f"{N.code(TAN)}, {N.code('Mr Tan Boon Kiat')} and 1 {N.code(TAN)}")
     N = a_names(("Ms Tan Wei Ling", "TWL"), ("Mr Teo Wee Leong", "TWL"))          # one short name, two people
     same(N.out("TWL", "app"), f"{N.code('Mr Teo Wee Leong')} or {N.code(TAN)}")
 
@@ -93,36 +100,83 @@ def days_months_subjects_and_rooms_are_never_changed():
     all_where(N, "May June, Art May and May", "May June, Art May and May")
     same(N.out("ART is full", "typed"), "ART is full"); same(N.out("ART is full", "app"), "ART is full")
     all_where(N, "Ms May Art", N.code("Ms May Art"))
-    all_where(a_names("May (Art)", "Tan Ah Kow (Will)"), "May (Art), Tan Ah Kow (Will), Tan Ah Kow (will be late)", "May (Art), T02, T02 (will be late)")
+    N = a_names("May (Art)", "Tan Ah Kow (Will)")
+    all_where(N, "May (Art), Tan Ah Kow (Will)", "May (Art), T02"); same(N.out("Tan Ah Kow (will be late)", "typed"), "T02 (will be late)")
+
+@t
+def a_date_or_a_room_beside_a_name_stays_in_typed_words():
+    N = a_names(); lim, koh = N.code(LIM), N.code(KOH)
+    for text, want in (("Mdm Lim may be away", f"{lim} may be away"), ("mdm lim may be away", f"{lim} may be away"), ("Mdm Lim May 3", f"{lim} May 3"),
+                       ("Mdm Lim May 2027", f"{lim} May 2027"), ("Mdm Lim May 3rd", f"{lim} May 3rd"), ("When may Lim invigilate?", f"When may {lim} invigilate?"),
+                       ("on 3 May Lim is away", f"on 3 May {lim} is away"), ("Put Mr Koh Art Room 3A", f"Put {koh} Art Room 3A"),
+                       ("Sec 3\tArt\tKoh\t3 May", f"Sec 3\tArt\t{koh}\t3 May"), ("May\nLim", f"May\n{lim}"),
+                       ("3 May\nLim, Lim\nMay 3", f"3 May\n{lim}, {lim}\nMay 3"), ("Exams in May, Lim is away", f"Exams in May, {lim} is away"),
+                       ("Lim, May is full", f"{lim}, May is full"), ("on 3rd May Lim is away", f"on 3rd May {lim} is away"), ("English, 3 May, Lim", f"English, 3 May, {lim}")):
+        same(N.out(text, "typed"), want)
+    N = a_names("Ms Osman Jun Vani English", students=[("S1", "Tan May Ling")])
+    same(N.out("Jun   Vani English \t osman", "typed"), "T01")                                                       # what starts after it hides only some
+    same(N.out("Tan May 3, Ling May 3", "typed"), "a student 3, a student 3")                                         # nothing is left that is a match
+    same(N.out("Tan\nMay 3, 3 May\nTan", "typed"), "Tan\nMay 3, 3 May\nTan")                                        # part of a student's name
+    same(a_names("Ms Tan Wei May").out("Ms Wei May English", "typed"), "T01 English")                                  # in the name's own order it is the name
+    same(a_names(LIM, students=[("S1", "May Long Hui")]).out("3 May long papers, May Long", "typed"), "3 May long papers, a student")
 
 @t
 def a_date_or_a_room_beside_a_name_stays():
     N = a_names(); lim, koh = N.code(LIM), N.code(KOH)
-    all_where(N, "Mdm Lim may be away", f"{lim} may be away")
-    all_where(N, "Mdm Lim May 3", f"{lim} May 3"); all_where(N, "Mdm Lim May 2027", f"{lim} May 2027")
-    all_where(N, "Mdm Lim May 3rd", f"{lim} May 3rd")
-    same(N.out("When may Lim invigilate?", "typed"), f"When may {lim} invigilate?")
-    same(N.out("on 3 May Lim is away", "typed"), f"on 3 May {lim} is away")
     all_where(N, "English\tMdm Lim\tMay 3", f"English\t{lim}\tMay 3")
     all_where(N, "on 3 May\nMdm Lim is away", f"on 3 May\n{lim} is away")
-    same(N.out("English\t3 May\tLim\nMaths\tLim\tMay 4", "list"), "English\t3 May\tLim\nMaths\tLim\tMay 4")
-    all_where(N, "Put Mr Koh Art Room 3A", f"Put {koh} Art Room 3A")
     all_where(N, "Mr Koh\nArt\t3 May", f"{koh}\nArt\t3 May")
     all_where(a_names(subjects=("Food and Nutrition",)), "Mr Koh Art and Mdm Lim May and", f"{koh} and {lim} and")
     for text in ("3A will miss Art", "they miss May, so miss English"): all_where(N, text, text)
-    all_where(N, "mdm lim may be away", f"{lim} may be away"); all_where(N, "May Mdm Lim come?", f"May {lim} come?")
-    for w in ("list", "app"): same(N.out("When may Lim come? Lim may be late.", w), "When may Lim come? Lim may be late.")
+    all_where(N, "May Mdm Lim come?", f"May {lim} come?")
     all_where(N, "tell each teacher May 3 is fixed", "tell each teacher May 3 is fixed")
     all_where(N, "Teacher Art Room 3A", "Teacher Art Room 3A"); all_where(N, "Teacher\nArt\t3A", "Teacher\nArt\t3A")
-    same(N.out("Sec 3\tArt\tKoh\t3 May\nSec 4\tArt   Koh", "list"), "Sec 3\tArt\tKoh\t3 May\nSec 4\tArt   Koh")      # cells of a row
     all_where(N, "Mdm Lim\tMay 3\tMr Koh\tArt", f"{lim}\tMay 3\t{koh}\tArt")
-    all_where(N, "Mdm May\nLim", lim); same(N.out("May\nLim", "typed"), f"May\n{lim}"); same(N.out("May\nLim, Koh\nArt", "list"), f"{lim}, {koh}")                    # a line cut in a name
-    same(N.out("3 May\nLim, Lim\nMay 3", "list"), "3 May\nLim, Lim\nMay 3"); same(N.out("3 May\nLim, Lim\nMay 3", "typed"), f"3 May\n{lim}, {lim}\nMay 3")
-    all_where(a_names("Ms Tan Wei May"), "Ms Wei May English, Tan Wei May 3A", "T01 English, T01 3A")                  # in the name's own order it is the name
-    all_where(a_names(LIM, students=[("S1", "May Long")]), "3 May long papers, May Long", "3 May long papers, a student")
+    all_where(N, "Mdm May\nLim", lim); same(N.out("May\nLim; Koh\nArt", "list"), f"{lim}; {koh}")                    # a line cut in a name
+    all_where(a_names("Ms Tan Wei May"), "Tan Wei May 3A", "T01 3A")
     # what is left out of a name is never a word that only a name has
     for text in ("1 May Lim", "Lim May 3", "May Lim 3"):
         for w in WHERES: assert "Lim" not in N.out(text, w), (text, w, N.out(text, w))
+
+@t
+def in_a_list_part_of_a_name_beside_a_date_or_a_subject_stays():
+    """the stored names have more words than the text: a month or weekday bound to a day's number never joins part of a name, and
+    protected words are cut from its ends, so one word of a name alone is left, which a list leaves alone"""
+    N = a_names("Ms May Lim Hui", "Mr Art Koh Beng", students=[("S1", "Goh Jun Wei"), ("S2", "Tan May Ling Ai")]); lim, koh = N.code("Ms May Lim Hui"), N.code("Mr Art Koh Beng")
+    for text in ("Sec 3 Art Koh", "Mon 3 Jun Goh 8.00", "on 3 May Lim", "Lim May 3", "Koh Art", "Art, Koh", "Jun Goh", "May\tLim", "Art   Koh", "3A Goh Jun", "Mdm May 3", "Lim\nMay 3"):
+        for w in ("list", "app"): same(N.out(text, w), text)
+    for w in ("list", "app"):
+        same(N.out("Ms Lim May, Ms May, Mr Koh Art Room", w), f"{lim} May, {lim}, {koh} Art Room")          # a title makes a person of what is left
+        same(N.out("May Tan Ling, Ling Ai May 3, Koh Beng and", w), f"May a student, a student May 3, {koh} and")       # and so do two words
+        same(N.out("Tan May Ling", w), "a student")                                                        # in the middle it is the name
+
+@t
+def in_a_list_a_whole_name_of_more_words_is_coded_beside_a_date():
+    N = a_names("Mr Art Koh Beng", students=[("S1", "Goh Jun Wei"), ("S2", "Yeo Jun")]); koh = N.code("Mr Art Koh Beng")
+    for text in ("Goh   Jun   Wei", "Goh\tJun\tWei", "wei jun GOH", "Goh, Jun Wei", "Yeo\tJun", "Yeo   Jun", "jun Yeo", "Jun\tYeo"): all_where(N, text, "a student")
+    apart(N, "Mon 3 Jun Wei Goh 8.00, Sec 3 Art Koh Beng", f"Mon 3 Jun a student 8.00, Sec 3 {koh}", f"Mon 3 a student 8.00, Sec 3 {koh}")
+    for w in ("list", "app"): same(N.out("wei GOH jun; Jun\nGoh\nWei", w), "a student; a student")
+    for w in ("list", "app"): same(N.out("Yeo Jun 3, Sec 3 Jun Yeo, 3A Jun Yeo", w), "a student 3, Sec 3 a student, 3A a student")      # the 3 of a level is no day
+
+@t
+def in_a_list_a_whole_name_of_two_words_is_coded_though_one_is_a_subject_or_a_month():
+    """the stored names are exactly the two words: they are always coded, and the subject or the date is asked about"""
+    N = a_names(); lim, koh = N.code(LIM), N.code(KOH)
+    for w in ("list", "app"):
+        same(N.out("Sec 3 Art Koh", w), f"Sec 3 {koh}")
+        same(N.out("3 May Lim, Lim May 3, Art\tKoh, 3 May\tLim, Art, Koh, Mdm Lim May 3", w), f"3 {lim}, {lim} 3, {koh}, 3 {lim}, {koh}, {lim} 3")
+        same(a_names("Mdm May", "Mr Art").out("Mdm May 3, 3 May, Mr Art Room, May 3", w), "T01 3, 3 May, T02 Room, May 3")       # a whole name of one word, with its title
+        same(N.out("when MAY lim, Mr Koh Art Room, Lim may; 3 May\nLim; Lim\nMay 3", w), f"when {lim}, {koh} Room, {lim}; 3 {lim}; {lim} 3")
+
+@t
+def in_a_list_a_students_whole_name_of_two_words_after_a_day_reads_as_a_date_and_stays():
+    """the known limit, in the docstring: a student Goh Jun straight after a day's number"""
+    N = a_names(students=[("S1", "Goh Jun")])
+    for w in ("list", "app"):
+        same(N.out("Mon 3 Jun Goh 8.00", w), "Mon 3 Jun Goh 8.00")
+        same(N.out("Jun Goh, Goh Jun 3, 3 Goh Jun, Mon Jun Goh", w), "a student, a student 3, 3 a student, Mon a student")      # everywhere else it is the student
+        same(N.out("1) Jun Goh\n(2) Jun Goh\n3. Jun Goh\n4\tJun Goh", w), "1) a student\n(2) a student\n3. a student\n4\ta student")      # the number of a line is no day
+    same(N.out("Mon 3 Jun Goh 8.00", "typed"), "Mon 3 a student 8.00")
 
 @t
 def a_student_is_never_named():
@@ -142,6 +196,7 @@ def a_student_id_that_could_be_a_date_is_not_one():
     text = "3 May 2027, 2027-10-05, 3A"
     all_where(N, text, text)
     all_where(N, "25001 and student 1023", "a student and student a student")
+    all_where(N, "student #1023, student no. 1023, Student No 1023, ID: 1023, pupil number 1023", "student #a student, student no. a student, Student No a student, ID: a student, pupil number a student")
     all_where(a_names(students=[("Lab 3-08", "Jo Png"), ("3A-01", "Bo Yeo")]), "Lab 3-08, lab 3-08 and 3a-01", "Lab 3-08, lab 3-08 and a student")
     N = a_names(students=[("ZYAP", "Zed Yap"), ("MAY", "Uma Roy"), ("A", "Bo Yeo"), ("Wee Kim", "Wee Kim")])       # an ID with no digit: as it is written
     all_where(N, "ZYAP, zyap, MAY, May, A Wee Kim and wee kim", "a student, zyap, MAY, May, A a student and a student")
@@ -160,6 +215,8 @@ def a_teacher_wins_over_a_student():
     N = a_names(students=[("S1", "Tan Wei Ling"), ("S2", "Wei Ling Ho"), ("S3", "Tan Wei Ling Faith")]); c = N.code(TAN)
     all_where(N, "Tan Wei Ling", c); all_where(N, "Wei Ling", c); all_where(N, "S1", "a student")
     all_where(N, "Wei Ling Ho and Tan Wei Ling Faith", "a student and a student")   # the longer one is the student's alone
+    all_where(a_names("Ms Tan Wei", students=[("S1", "Tan Wei Ling Ho")]), "Tan Wei Ling", "a student")                 # the longest match first
+    all_where(a_names(TAN, students=[("S1", "Wei Ling")]), "Wei Ling", "T01")       # part of a teacher's name, and a student's whole one
 
 @t
 def two_people_who_fit_the_same_words_go_as_both_codes():
@@ -204,7 +261,7 @@ def a_name_of_one_word():
 def titles_with_stops_in_any_case_and_the_ones_used_here():
     N = a_names(TAN, "Ms Siti Aminah binte Yusof", RIZAL, "Grace Lee", "Mr Koh Ah Huat")
     c = N.code(TAN)
-    for text in ("Ms. Tan", "Ms.Tan", "ms tan", "MS TAN", "Ms  Tan", "Ms\u00a0Tan", "Ms\nTan", "Miss Tan", "miss tan", "Mdm. Tan Wei Ling", "(Ms) Tan", "Dr Ling"):
+    for text in ("Ms. Tan", "Ms.Tan", "ms tan", "MS TAN", "Ms  Tan", "Ms\u00a0Tan", "Miss Tan", "miss tan", "Mdm. Tan Wei Ling", "(Ms) Tan", "Dr Ling"):
         all_where(N, f"see {text} now", f"see {c} now")
     all_where(N, "Madam Tan Wei Ling", c); all_where(N, "madam tan and MADAM. Ling", f"{c} and {c}")
     all_where(a_names(TAN, "Mdm Tan Ai"), "Madam Tan and Mdm Tan", "T01 and T01")
@@ -218,9 +275,11 @@ def titles_with_stops_in_any_case_and_the_ones_used_here():
         same(N.out(text, "list"), text)
     for text in ("teacher grace", "sir koh", "Teacher Alicia", "Dear Sir or Madam"): same(N.out(text, "typed"), text)
     all_where(a_names(TAN, students=[("S1", "Grace Ho")]), "Teacher Grace", "Teacher Grace")       # Grace is not a teacher
-    all_where(N, "the teacher Ms Tan", f"the teacher {c}")
+    all_where(N, "the teacher Ms Tan and the teacher (Grace Lee)", f"the teacher {c} and the teacher ({N.code('Grace Lee')})")
+    all_where(a_names(), "Mr ART", "T03")
     all_where(a_names(), "the teacher Alicia Ng. They miss Alicia Ng.", "the teacher a student. They miss a student.")
     all_where(a_names(students=[("S1", "Siti Aminah @ Rose")]), "the teacher Siti Aminah @ Rose, Siti Aminah", "the teacher a student, a student")
+    same(a_names(students=[("S1", "Siti Aminah @ Rose")]).out("Siti Aminah; Rose", "list"), "a student; Rose")
     all_where(a_names("Teacher A"), "Teacher A, Ms a student, Miss a lesson", "T01, Ms a student, Miss a lesson")
     assert set(HONORIFICS) < set(names.TITLES) and {"madam", "cikgu", "encik", "puan", "ustaz", "ustazah", "sir", "teacher", "prof", "professor"} < set(names.TITLES)
     for h in HONORIFICS: all_where(N, f"{h} ling, {h.upper()}. LING", f"{c}, {c}")
@@ -231,9 +290,9 @@ def names_in_every_kind_of_text():
     for before, after in (("", ""), ("(", ")"), ("[", "]"), ('"', '"'), ("- ", "\n"), ("\t", "\t"), ("x:", ";"), ("1. ", "."), ("3A/", "/3B"), ("**", "**"), ("", "'s"), ("", "\u2019s"), ("<b>", "</b>"), ("a, ", ", b"), ("\u201c", "\u201d"), ("Mon ", " 3")):
         all_where(N, f"{before}Tan Wei Ling{after}", f"{before}{c}{after}")
         all_where(N, f"{before}Ms Tan{after}", f"{before}{c}{after}")
-    all_where(N, "Tan Wei\nLing, Tan  Wei   Ling, Tan\tWei Ling, Tan Wei-Ling, Wei-Ling, Tan Wei-\nLing, Ms\tTan", f"{c}, {c}, {c}, {c}, {c}, {c}, {c}")
-    all_where(N, 'Ms "Tan" and Ms *Ling*', f'{c}" and {c}*')
-    same(N.out("Wei - Ling. Wei; Ling: Wei / Ling, Wei & Ling", "list"), "Wei - Ling. Wei; Ling: Wei / Ling, Wei & Ling")       # not side by side
+    all_where(N, "Tan Wei\nLing, Tan  Wei   Ling, Tan\tWei Ling, Tan Wei-Ling, Wei-Ling, Tan Wei-\nLing", f"{c}, {c}, {c}, {c}, {c}, {c}")
+    all_where(N, 'Ms "Tan" and Ms *Ling* (Ms (Tan))', f'{c} and {c} ({c})')
+    same(N.out("Wei - Ling. Wei; Ling: Wei / Ling; Wei & Ling", "list"), "Wei - Ling. Wei; Ling: Wei / Ling; Wei & Ling")       # not side by side
     all_where(N, "tan.wei.ling@example.org, tan_wei_ling@example.org, Tan_Wei_Ling.docx", f"{c}@example.org, {c}@example.org, {c}.docx")
     aisyah, kumar, siti, jean, teo = (N.code(x) for x in ("Ms Nur'Aisyah Salleh", "Mr Kumar s/o Raman", "Ms Siti binte Ahmad", "Ms Jean-Marie Png", "Tan Ah Kow (Mrs Teo)"))
     all_where(N, "Nur'Aisyah, Nur\u2019Aisyah, Nur Aisyah Salleh, Ms Aisyah", f"{aisyah}, {aisyah}, {aisyah}, {aisyah}")
@@ -243,6 +302,9 @@ def names_in_every_kind_of_text():
     same(N.out("Dear Mrs, or Mr", "typed"), "Dear Mrs, or Mr")
     all_where(N, "Tan Ah Kow (Mrs Teo), Mrs Teo, Tan Ah Kow", f"{teo}, {teo}, {teo}")
     same(N.out("Ask Ahmad, Siti and Rizal", "typed"), f"Ask {N.code(RIZAL)} or {siti}, {siti} and {N.code(RIZAL)}")
+    N = a_names("Ms Relief @ One", "Mr Relief @ One", "Art / Music", "Mr Aziz Jun", "Ms Aziz Hana Bao", subjects=("Music",))
+    all_where(N, "MR RELIEF @ ONE, Art / Music", f"{N.code('Mr Relief @ One')}, Art / Music")
+    for w in ("list", "app"): same(N.out("Jun Aziz Hana", w), f"Jun {N.code('Ms Aziz Hana Bao')}")       # the match that hides more
     all_where(N, "bin and binte, s/o and d/o", "bin and binte, s/o and d/o")       # what joins a name is not a name
     same(N.out("And of The Bin", "typed"), "And of The Bin")
     N = a_names("Nora and Tan", "Ms Hope of Glory")
@@ -257,13 +319,102 @@ def the_same_letters_in_another_form():
     all_where(N, "Ra\ufb01q Salim", N.code("Mr Rafiq Salim")); all_where(N, "Tan\u2009Wei\u3000Ling", c)
 
 @t
-def a_comma_in_the_stored_order_hides_the_whole_name_in_a_list():
-    N = a_names(TAN, "Ms Grace Lim", "Lee, Hui Min"); c = N.code(TAN)
-    for w in ("list", "app"): same(N.out("Tan, Wei Ling", w), c)
-    same(N.out("Tan, Wei Ling", "typed"), f"{c}, {c}")
-    same(N.out("Ask Grace, Lim and Tan", "typed"), f"Ask {N.code('Ms Grace Lim')}, {N.code('Ms Grace Lim')} and {c}")
-    all_where(N, "Lee, Hui Min", N.code("Lee, Hui Min"))
-    same(a_names().out("English, 3 May, Lim", "list"), "English, 3 May, Lim")
+def a_comma_joins_the_words_of_one_name():
+    N = a_names(TAN, "Ms Grace Lim", "Lee, Hui Min", "Mr Koh Ah Huat", students=[("S1", "Alicia Ng"), ("S2", "Ng Wei Jie"), ("S3", "Lim Tan"), ("S4", "Tan Alicia")]); c, g = N.code(TAN), N.code("Ms Grace Lim")
+    all_where(N, "Ng, Alicia; Alicia, Ng; ng ,alicia; Ng, Wei Jie; Wei Jie, Ng; JIE, wei", "; ".join(["a student"] * 6))
+    all_where(N, "Ng\u3001Alicia; Ng\uff0c Alicia; Ng,\nAlicia; Ng ,\tAlicia", "; ".join(["a student"] * 4))
+    all_where(N, "Lim, Grace; Grace, Lim; Tan, Wei Ling; Wei Ling, Tan; Lee, Hui Min", f"{g}; {g}; {c}; {c}; {N.code('Lee, Hui Min')}")
+    all_where(N, "Ms Wei Ling, Tan Wei Ling", f"{c}, {c}")                          # a name on each side
+    for w in ("list", "app"): same(N.out("Wei, Ling, Tan", w), f"{c}, Tan")         # one comma in a match
+    same(N.out("Ask Tan, Koh and Grace", "typed"), f"Ask {c}, {N.code('Mr Koh Ah Huat')} and {g}")
+    same(N.out("Ask Koh, Lim, Tan", "typed"), f"Ask {N.code('Mr Koh Ah Huat')}, {g}, {c}")        # each a teacher of their own, though Lim Tan is a student
+    all_where(N, "Tan, Alicia", "a student")
+    N = a_names("Ms Chng Jun Priya Ravi", "Ms Neo Noor", "Mr Neo Noor Qing Ai", "Ms Toh Dewi Jun Suri"); p = N.code("Ms Chng Jun Priya Ravi")
+    for w in ("list", "app"): same(N.out("Chng Jun, Priya Ravi; Jun, Chng Priya Ravi; Dewi\tJun,Toh suri", w), f"{p}; {p}; {N.code('Ms Toh Dewi Jun Suri')}")      # not a match on each side
+    same(N.out("1DEWI\tJun,Toh suri", "typed"), f"1 {N.code('Ms Toh Dewi Jun Suri')}\tJun,{N.code('Ms Toh Dewi Jun Suri')}")
+    M = a_names("Ms Ravi Lee", students=[("S1", "Toh Dewi Jun Suri Ravi")])
+    for text in ("Dewi Toh\tJun suri, Ravi", "Toh Dewi, Ravi\tJun suri"): same(M.out(text, "typed"), "a student")        # what is on each side leaves a word
+    assert "qing" not in N.out("Noor, Neo qing", "typed"), N.out("Noor, Neo qing", "typed")                          # the match after the comma goes further
+    all_where(N, "English, Mon 3 May, 08:00, Sec 3, 3A", "English, Mon 3 May, 08:00, Sec 3, 3A")
+
+@t
+def a_digit_or_a_mark_glued_to_a_name():
+    N = a_names(TAN, "Mr T Kumar", ("Ms Wa Pek", "WA"), "Ms Tan2", rooms=("Art Room", "T02", "5Z Lab")); c = N.code(TAN)
+    all_where(N, "Alicia Ng\u00b9, 1Alicia Ng, S101Alicia Ng, S101\u00b9, Alicia\u00b9 Ng\u00b2, Alicia Ng7, Alicia1 Ng",
+              "a student \u00b9, 1 a student, a student a student, a student \u00b9, a student \u00b2, a student 7, a student")
+    all_where(N, "Alicia 2Ng, 1Alicia 2Ng3, Alicia1234 Ng", "a student, 1 a student 3, a student")
+    all_where(a_names(LIM, students=[("S1", "Goh Jun Wei")]), "Goh 3Jun 8.00, Wei3 May", "Goh 3Jun 8.00, Wei3 May")             # but a date is a date
+    all_where(N, "Ms Wei Ling\u00b2, Tan Wei Ling\u00b9, Tan Wei Ling3, \u00b9Tan Wei Ling, MS LING4, Tan Wei Ling\u2020", f"{c} \u00b2, {c} \u00b9, {c} 3, \u00b9 {c}, {c} 4, {c}\u2020")
+    all_where(N, "Ms Tan2 and Alicia Ng\u00aa, \u2460Alicia Ng", f"{N.code('Ms Tan2')} and a student \u00aa, \u2460 a student")
+    all_where(N, "3A, T02, LT1, 5Z, P3, WA2, WA1 3A, T01 and T09", "3A, T02, LT1, 5Z, P3, WA2, WA1 3A, T01 and T09")       # classes, rooms and papers are whole
+    M = a_names(TAN, students=[("3A-07", "Bo Yeo"), ("25001", "Cy Wee Li"), ("S101", "Alicia Ng")])
+    all_where(M, "Tan Wei Ling3A-07, Bo Yeo25001, 3A-07Bo Yeo, Alicia NgS101, S101S101, A25001, X3A-07, XS101", "T01 a student, a student a student, a student a student, a student a student, a student a student, A25001, X3A-07, XS101")
+    same(N.out("Tan Wei3 and Pek3; WA3", "typed"), f"{c} 3 and {N.code('Ms Wa Pek')} 3; WA3")           # a name with a digit; capitals with a digit are a paper
+    for w in ("list", "app"): same(N.out("Alicia Ng\u24d0, Mr T09, T09 Kumar, Alicia; 2Ng; 1Alicia; Ng", w), "a student\u24d0, Mr T09, T09 Kumar, Alicia; 2Ng; 1Alicia; Ng")
+    M = a_names("Mr Art Koh 1", "Ms June Lee", students=[("S101A", "Bo Yeo"), ("G3", "Di Teo"), ("S1", "Eng Gita Jun Koh")], subjects=("Music G3",))
+    for w in ("list", "app"): same(M.out("Sec 3 Art Koh, Mr Art Koh 1, S101A, S101A5, G3, gita \t Koh \t Jun\x01eng3", w), f"Sec 3 Art Koh, {M.code('Mr Art Koh 1')}, a student, S101A5, G3, a student 3")
+    same(N.out("Wa, WA and Ms Wa", "typed"), ", ".join([N.code("Ms Wa Pek")]) + f", {N.code('Ms Wa Pek')} and {N.code('Ms Wa Pek')}")
+    all_where(N, "Mr T, Mr T02", f"{N.code('Mr T Kumar')}, Mr T02")
+    for w in WHERES: same(N.back(N.out("Ms Wei Ling2 and 1Tan Wei Ling", w)), f"{TAN} 2 and 1 {TAN}")                      # a code is never run into a digit
+
+@t
+def hidden_characters_dashes_and_wide_forms():
+    N = a_names(TAN, students=[("S101", "Alicia Ng"), ("3A-07", "Bo Yeo Li"), ("S-1\u20132", "Cy Wee"), ("AB-9", "Di Teo")]); c = N.code(TAN)
+    for i in ("3A-07", "3A\u201107", "3A\u201307", "3A\u201407", "3A\u221207", "3A\uff0d07", "3A\u200b-07", "3A-\u00ad07", "\uff13\uff21-07", "3a-0\u20607", "\uff33101", "S1\u200b01", "s\u00ad101", "S\x00101", "S-1-2", "s\u20101\u20132", "A\u200bB-9", "ab\u00ad-\u200b9"):
+        all_where(N, f"for {i}, then", "for a student, then")
+    for n in ("Alicia\u200bNg", "Ali\u200bcia Ng", "Ali\u200bcia\u200bNg", "Alicia\u200e Ng", "\u202aAlicia\u202c Ng", "Alicia \u2066Ng\u2069", "Alicia\x01Ng", "A\x01licia Ng", "Ng\u2060Alicia", "Alicia\u3164Ng", "Alicia\ufe0f Ng",
+              "Alicia\u034f Ng", "Alicia\ufeffNg", "\uff21\uff4c\uff49\uff43\uff49\uff41 \uff2e\uff47", "Alicia\u2011Ng", "Alicia\u2013Ng", "A\u0301licia N\u0327g", "Ng\uff0cAlicia", "N\u200bg, Alicia"):
+        for w in WHERES:
+            got = N.out(f"see {n} now", w); assert "a student" in got and not re.search("[A-Za-z]", got.replace("see", "").replace("a student", "").replace("now", "")), (n, w, got)
+    for n in ("Ms\u200bTan", "Ms\u200b Tan", "T\u200ban W\u200bei Ling", "Tan\u200bWei\u200bLing", "Tan\u200bWei Ling", "\uff2d\uff53 \uff34\uff41\uff4e", "Ta\x7fn Wei Ling", "Tan\u2013Wei\u2013Ling", "Wei\u00adLi\u200bng", "Ms Ta\x02n"):
+        all_where(N, f"see {n}, now", f"see {c}, now")
+    N = a_names("Ms Sng Ai Li", "Ms Lian Koh", students=[("S1", "Ng S Mei Jun"), ("S2", "Heng Li An"), ("S3", "See Alicia Ong")])       # a word that can be read as two
+    all_where(N, "S\x01N\u200eg \t Jun   MEI; Li\u200bAn, Heng; See\u200bAlicia", "a student; a student; a student")
+    all_where(N, "Xyz\u200bHeng Li An", "Xyz\u200ba student")
+    many = "x\u200b " * 120                                                           # a long text is read both ways in one order only
+    for w in ("list", "app"): same(N.out(many + "S\x01N\u200eg \t Jun   MEI; Heng\u200bLi An; Xyz\u200bHeng Li; T\u00ada", w), many + "a student; a student; Xyz\u200ba student; T\u00ada")
+    M = a_names("Ng June", "Mr A Rahman", "Mr T Kumar", students=[("S1", "Sng June"), ("S2", "May The Yap")])
+    all_where(M, "S\u200bNg June", "a student"); same(M._left("T01, a student at the school, may\u200b P3, 3A")[0], 0); same(M._left("Kumar\u200bJune and Ng")[0], 4)
+    M = a_names(TAN, "Mr T Kumar", "Ms Li An", "Ms Sng Ai", students=[("S1", "Ng S Mei")])
+    same(M.out("T\u200ban; see S\x01Ng Mei", "typed"), f"{M.code(TAN)}; see a student")
+    for w in ("list", "app"):
+        same(a_names("Miss Goh Will Lian Kiran", students=[("S1", "Will Goh")]).out("K\u2060iran-Goh will", w), "T01 will")
+        same(a_names("Mdm Sng Art", students=[("S1", "Ng S")]).out("S\x01NG ART - 3A", w), "T01 - 3A")
+        same(a_names("Ng Omar Dewi S", "Sng Bao", students=[("S1", "Ng S")]).out("O\x01MAR  S\u200bNG", w), "T01")
+        same(a_names("Mdm Sng May S Ng").out("Sng\r\nS\u200bNG\x01May", w), "T01")
+    all_where(a_names("Ms Sng Xin Ai", students=[("S1", "Ng S Art Xin")]), "S\x01Ng-Xin Art", "a student")
+    all_where(a_names(TAN, "Mr T Kumar", "Ms Li An"), "T\u200ban Wei Ling, Wei T\u200ban", "T03, T03")
+    for w in ("list", "app"): same(a_names("Ng Li Ah S", students=[("S1", "Sng Li")]).out("Li (S\x01Ng\" Ah, L\u200bi Sng", w), "T01, a student")
+    for text in ("Caf\u00e9 \u2013 3 May \u00bd \uff21\uff22", "a\u200bb \u2014 \u2460 x\u00b2", "\u200b\u200e\u00ad", "\u0301\u0302", "Sec\u200b 3 \u2013 English"): all_where(N, text, text)       # and nothing else is changed
+
+@t
+def a_unit_after_a_number_is_not_a_name():
+    N = a_names("Mr Jun Min", "Ms Min An", "Mr Hr Goh", "Ms Sec Mins", students=[("S1", "Min Jun Tan")])
+    for text in ("90 min Jun 3", "90 Min Jun 3", "1 h 30 min an extra", "2 hrs, 45mins, 30 sec, 1h30min, 1 hr Goh", "30-min paper, 90 MIN"): all_where(N, text.replace(" Goh", ""), text.replace(" Goh", ""))
+    for w in ("list", "app"): same(N.out("Jun 5min, Jun 5 min", w), "Jun 5min, Jun 5 min")
+    all_where(N, "Mr Min An, Min Jun and Ms An", f"{N.code('Ms Min An')}, {N.code('Mr Jun Min')} and {N.code('Ms Min An')}")
+    all_where(N, "1. Min Jun Tan; Sec 3 Min Jun Tan; 2) Min Jun Tan", "1. a student; Sec 3 a student; 2) a student")                     # not a length: no number, a level's number
+
+@t
+def what_is_not_a_title():
+    pub = a_pub(); pub["model"]["setup"]["subjects"] = [dict(subject="Drama", code="DR")]
+    N = names.Names(pub, people(TAN, "Dr Lee Ming", KOH, LIM), kids(*KIDS)); c, lee = N.code(TAN), N.code("Dr Lee Ming")
+    for w in ("list", "app"): same(N.out("3A DR Tan 3 May", w), "3A DR Tan 3 May")          # a subject's code, as it is written
+    all_where(N, "Dr Lee, Dr. Ming and DR LEE MING", f"{lee}, {lee} and {lee}")
+    all_where(N, "3A WILL MISS ART, MISS MAY", "3A WILL MISS ART, MISS MAY")
+    all_where(N, "MISS TAN, Miss May and MR ART KOH", f"{c}, {N.code(LIM)} and {N.code(KOH)}")
+    for text in ("Ms\tTan", "Ms   Tan", "Ms\nTan", "Ms\r\nTan"):                             # another cell or line
+        same(N.out(text, "list"), text); same(N.out(text, "typed"), text.replace("Tan", c))
+    all_where(N, "Ms Tan\n3A; Ms Wei\t3 May", f"{c}\n3A; {c}\t3 May")
+    same(N.out("Ms Tan\nWei went", "list"), f"{c}\nWei went")
+    all_where(N, "Ms\tTan Wei Ling, Ms Tan\tWei Ling", f"Ms\t{c}, {c}")                      # but a whole name is a name
+
+@t
+def marks_round_the_words_of_a_name():
+    N = a_names(); c = N.code(TAN)
+    all_where(N, "(Alicia) Ng, **Alicia** Ng, Alicia (Ng), \"Alicia\" Ng, [Alicia] [Ng], Alicia 'Ng', *Alicia Ng*, \u201cAlicia\u201d Ng", ", ".join(["a student"] * 4 + ["[a student]", "a student", "*a student*", "a student"]))
+    all_where(N, "(Tan) Wei Ling, Ms (Wei) Ling, Wei (Ling)", f"{c}, {c}, {c}")
+    all_where(N, "Room (Art), English (3A), (May) 3", "Room (Art), English (3A), (May) 3")
 
 @t
 def small_words_and_times_are_not_people():
@@ -272,7 +423,7 @@ def small_words_and_times_are_not_people():
     all_where(N, text, text)
     all_where(N, "from 8.00 AM to 9 AM", "from 8.00 AM to 9 AM")
     same(N.out("AM is free", "app"), f"{N.code('Mr Ang Min')} is free")
-    all_where(N, "Mr Tay will be away and mr tay will go", f"{N.code('Mr Will Tay')} will be away and {N.code('Mr Will Tay')} will go")
+    same(N.out("Mr Tay will be away and mr tay will go", "typed"), f"{N.code('Mr Will Tay')} will be away and {N.code('Mr Will Tay')} will go")
     same(N.out("On Mon, S is on", "app"), "On Mon, S is on")                       # a short name that is a small word or one letter
     same(N.out("Ask Kumar a question", "typed"), f"Ask {N.code('Mr S Kumar')} a question"); same(N.out("KUMAR'S", "typed"), f"{N.code('Mr S Kumar')}'S")
     same(a_names(LIM, students=[("S1", "Tan Will An")]).out("Tan will be away, Tan Will", "list"), "Tan will be away, a student")
@@ -306,6 +457,8 @@ def what_is_protected():
     for w in ("monday", "mon", "sunday", "sun", "may", "september", "sep", "sec", "3", "3a", "4a", "english", "quill", "design", "technology", "music", "g3", "mu", "el", "art", "room", "lab", "hall", "lt1", "08"):
         assert w in got, w
     for w in ("tan", "rahman", "aisha", "lim", "rizal", "mr", "lang"): assert w not in got, w
+    pub = a_pub(rooms=("Caf\u00e9",), subjects=("Mathematics",)); pub["model"]["classes"].append(dict(name="9Q", level="Sec 9", size=1, home="Nook", parents=[]))
+    assert {"caf\u00e9", "cafe", "math", "9q", "nook"} < names.protected(pub)
     bare = names.protected(None)
     assert bare == names.protected({}) and {"mon", "monday", "may", "december", "dec"} < bare and "english" not in bare
     assert len(bare) == 7 * 2 + 12 * 2 - 1, "May is its own three letters"
@@ -332,8 +485,9 @@ def codes_become_names_again():
         for w in WHERES: same(N.back(N.out(f"{n} is on duty, as {n}", w)), f"{n} is on duty, as {n}"); same(N.out(N.back(N.out(n, w)), w), N.code(n))
     same(N.back(N.out("Ask Tan, TWL and ms ling", "typed")), f"Ask {TAN}, {TAN} and {TAN}")
     same(N.back(f"{c}'s, ({c}), {c}/{c}, {c}."), f"{TAN}'s, ({TAN}), {TAN}/{TAN}, {TAN}.")
-    text = f"T99, T7, t01, X{c}, {c}A, {c}_1, _{c}, {c}0, L{c}"
+    text = f"T99, T7, t01, X{c}, {c}A, {c}0, L{c}, 1{c}"
     same(N.back(text), text)
+    same(N.back(f"_{c}_, {c}_1, *{c}*"), f"_{TAN}_, {TAN}_1, *{TAN}*")
     odd = "Tan Ah Kow (Mrs Teo)"; N = a_names(odd, TAN)
     for w in WHERES: same(N.back(N.out(f"{odd}, {TAN}", w)), f"{odd}, {TAN}")
 
@@ -360,6 +514,11 @@ def nothing_published_and_nobody_listed():
         all_where(N, "Ms Tan on Mon 3 May", "T01 on Mon 3 May")
     N = names.Names(a_pub(), [dict(name=" Ms Tan Wei Ling ", short=None), dict(name=""), dict(name=None), {}, dict(name="Mr"), dict(name="---"), dict(name=TAN, short="XYZ")], [{}, dict(id=None, name=None), dict(id=7, name="")])
     all_where(N, "Ms Tan, Mr, ---, XYZ, 7", f"{N.code(TAN)}, Mr, ---, XYZ, 7")      # of two with one name the first is kept
+    odd = ("\uff9e", "\uff9f\uff9e", "\u200b", "\u0301", "\x00", "\ud800", "\u3164", "\u00b2", "^", "_")
+    M = names.Names(a_pub(school="\uff9e\uff9e\uff9e\uff9e"), people(*odd, *[f"Ms {x}" for x in odd], *[(f"Mr X{i} Q", x) for i, x in enumerate(odd)]) + [None, 3, "x"], kids(*[(x, x) for x in odd], *[(f"9{x}", f"Z {x}") for x in odd]) + [None, 7])
+    for x in odd + tuple(f"Ms {x} a{x}b {x}9" for x in odd): all_where(M, x, x)
+    M = names.Names(a_pub(), iter(people(TAN)), (x for x in kids(*KIDS))); all_where(M, "Ms Tan, Alicia Ng", "T01, a student")      # any kind of list
+    names.Names([], [], []); names.Names("x", (), ()); names.Names(dict(model=[], meta=[]), [], [])
     for bad in (None, 3, 2.5, ["Ms Tan"], {"a": 1}, b"Ms Tan"):
         for w in WHERES: assert N.out(bad, w) is bad
         assert N.back(bad) is bad
@@ -377,36 +536,60 @@ def a_big_school():
     assert len(staff) == 120 and len(pupils) == 1000
     return staff, [(f"S{i:04d}", n) for i, n in enumerate(pupils)]
 
+def dressed(rnd, ws, joins):
+    """the words ws as somebody might write them: each in a case of its own, joined by joins (a comma at most once), hidden
+    characters between or inside them, a mark or a digit glued on"""
+    ws = [rnd.choice((str, str, str.lower, str.upper, str.title))(x) for x in ws]
+    if rnd.random() < .2: k = rnd.randrange(len(ws)); ws[k] = ws[k][:1] + rnd.choice("\u200b\u00ad\u200e\x01\u2060") + ws[k][1:]
+    if rnd.random() < .1: ws = ["".join(chr(ord(c) + 0xfee0) if "!" <= c <= "~" else c for c in x) for x in ws]
+    if rnd.random() < .1: ws[-1] += rnd.choice("\u00b9\u00b2\u20203")
+    out, comma = ws[0], False
+    for x in ws[1:]:
+        j = rnd.choice(joins)
+        if "," in j and comma: j = " "
+        comma = comma or "," in j
+        out += j + x
+    return out
+
 @t
 def nobody_known_leaks_in_any_form():
-    """every teacher and student, every order of two or more of the words, with titles, in every kind of text: no word of the
-    name is left (but one that is a month), and who it is is among the codes sent"""
+    """every teacher and student, orders of the words, with titles, in every kind of text and dressed up in every way above: no word
+    of the name is left (but a month that is cut from part of a name), and who it is is among the codes"""
     staff, pupils = a_big_school(); rnd = random.Random(11)
     N = names.Names(a_pub(), people(*staff), kids(*pupils))
     free = names.protected(a_pub())
-    frames = ("{}", "see {} on Mon 3 May", "3A\t{}\t08:00", "({})", "{},", "Room 3-01: {}\n- next", "x {}'s")
-    words = lambda s: {x.casefold() for x in re.findall(r"[^\W_]+", s)}
+    frames = ("{}", "see {} on Mon 4", "3A\t{}\t08:00", "({})", "{},", "Room 3-01: {}\n- next", "x {}'s", "1{}", "\u201c{}\u201d", "English {} 3A", "Sec 3 {}")
+    part, whole = (" ", " ", "  ", "-", ", ", " ,", "\u2011", "\u00a0", ") (", "\u200b", "** "), (" ", "   ", "\t", ", ", ",", "\n", "\u200b", "\u2013", "\x01", " \u200e", " (", "\" ")
+    words = lambda s: {x for x in re.findall(r"[^\W\d_]+", names._fold(s)[0].casefold())}
     n = 0
+    some = lambda ws, k, m: rnd.sample(list(itertools.permutations(ws, k)), min(m, len(list(itertools.permutations(ws, k)))))
     for name in staff:
         ws = name.split()[1:]
         for k in range(1, len(ws) + 1):
-            for p in itertools.permutations(ws, k):
-                forms = [f"{h} {' '.join(p)}" for h in ("Ms", "mr.", "MDM", "Madam", "Cikgu")]
-                if k > 1: forms += [" ".join(p), "\n".join(p), " ".join(p).upper(), "-".join(p).lower()]
+            for p in some(ws, k, 6):
+                forms = [f"{h} {dressed(rnd, p, (' ', ' ', '-', '  '))}" for h in rnd.sample(("Ms", "mr.", "MDM", "Madam", "Cikgu", "(Dr)"), 2)] + [" ".join([name.split()[0], *p])]
+                if k > 1: forms += [dressed(rnd, p, part) for _ in range(2)]
+                if k == len(ws): forms += [dressed(rnd, p, whole) for _ in range(3)]
                 for f in forms:
                     for w in WHERES:
                         got = N.out(rnd.choice(frames).format(f), w); n += 1
-                        assert not (words(" ".join(p)) - free) & words(got), (f, w, got)
-                        if k == len(ws) and "\n" not in f and f.split()[0].casefold().strip(".") not in names.TITLES or f == " ".join([name.split()[0], *p]):
-                            assert N.code(name) in got, (f, w, got)
+                        left = words(" ".join(p)) & words(got)
+                        if k == len(ws) and w != "typed": assert not left, (f, w, got)            # a whole name: not even a month
+                        plain = re.findall(r"[^\W_]+", names._fold(f)[0])
+                        titled = plain[0].casefold() in names.TITLES and not (plain[0].isupper() and plain[1].isupper() and plain[1].casefold() in free)
+                        if titled or len(words(" ".join(p)) - free) > 1 or k == len(ws): assert not left - free, (f, w, got)
+                        if k == len(ws) and f == " ".join([name.split()[0], *p]): assert N.code(name) in got, (f, w, got)
     for i, name in pupils:
         ws = name.split()
         for k in range(2, len(ws) + 1):
-            for p in itertools.permutations(ws, k):
-                got = N.out(rnd.choice(frames).format(rnd.choice((" ".join(p), " ".join(p).lower(), " ".join(p).upper()))), rnd.choice(WHERES)); n += 1
-                assert not (words(" ".join(p)) - free) & words(got), (p, got)
-        all_where(N, f"({i})", "(a student)")
-    assert n > 10000, n
+            for p in some(ws, k, 2):
+                f, w = dressed(rnd, p, whole if k == len(ws) else part), rnd.choice(WHERES)
+                frame = rnd.choice([x for x in frames if x != "1{}" or p[0].casefold() not in free])          # "1 Jun Goh" is the known limit
+                got = N.out(frame.format(f), w); n += 1
+                left = words(" ".join(p)) & words(got)
+                if k == len(ws) or len(words(" ".join(p)) - free) > 1: assert not left - free, (f, w, got)
+        if rnd.random() < .2: all_where(N, f"({i}) {i.lower()}\u00b9 {i[0]}\u200b{i[1:]}", "(a student) a student \u00b9 a student")
+    assert n > 12000, n
     for name in staff:
         for w in WHERES: same(N.out(name, w), N.code(name)); same(N.back(N.out(name, w)), name); same(N.out(N.out(name, w), w), N.code(name))
 
@@ -425,14 +608,24 @@ def ordinary_text_never_changes():
 
 @t
 def a_long_text_is_quick():
+    """20,000 characters in under half a second with 120 staff and 1,000 students, however they are put together (the work, not
+    the wait: an ordinary one takes about 0.1 s)"""
     staff, pupils = a_big_school(); rnd = random.Random(3)
-    N = names.Names(a_pub(), people(*staff), kids(*pupils))
+    N = names.Names(a_pub(school="Gita Hana School"), people(*staff, ("Ms Tan Wei Ling", "T W L")), kids(*pupils, ("A-1-B-2-C-3", "Bao Bao Bao Cai")))
     words = _FIRST + _LAST + ["Mon", "3", "May", "English", "Ms", "Mr", "Room", "to", "an", "S0001", "T01"]
-    for sep in (" ", "\n", ", "):
+    texts = []
+    for sep in (" ", "\n", ", ", "-", "\u200b", "\t", " ("):
         text = ""
         while len(text) < 20000: text += rnd.choice(words) + sep
+        texts.append(text)
+    one, two = pupils[0][1], staff[0].split(" ", 1)[1]
+    texts += [x * (20000 // len(x) + 1) for x in ("dr\n", "dr ", "Ms. ", "Mr Dr ", "teacher ", "(Ms) ", "DR\t", " ", "\t", "\n", "a", "\u0301", "\u200b", "a\u200b", "Bao\u200b", "1a", "S0001", "-", "(", "*", ",", ", ", "Bao ", "Bao, ", "Bao-",
+                                                   "Bao Cai ", "Tan, Wei Ling, ", "Wei, Ling, ", one + " ", one + ", ", two + ", ", "Ms " + two + ", ", "the ", "The Gita ", "Gita Hana ", "3 May ", "May ", "student ", "student no. 1", "A-1-", "T W ", "T\u00b9",
+                                                   "Bao Bao ", "Jun ", "Jun 3 ", "x" * 5000 + " ", "\uff21", "\u00bd", "\u3164", "\ufdfa", " \u200b", "Bao     ", "Bao" + " " * 4000)]
+    texts += ["Bao" + " " * 19000 + "Cai", "Bao" * 6000 + "\u200b", "\u200b".join("BaoCai" * 3000), "Ms" + " " * 19000]
+    for text in texts:
         for w in WHERES:
-            at = time.process_time(); N.out(text[:20000], w); took = time.process_time() - at        # the work, not the wait: it is 0.05 s
-            assert took < 0.5, f"{took:.2f} s"
+            at = time.process_time(); N.out(text[:20000], w); took = time.process_time() - at
+            assert took < 0.5, f"{took:.2f} s: {text[:20]!r}"
 
 print(f"{COUNT} plan tests passed")
