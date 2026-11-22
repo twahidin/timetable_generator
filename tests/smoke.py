@@ -518,7 +518,7 @@ def test_a_fix_moves_the_lesson_and_undo_brings_it_back():
     g = c.get("/api/draft/grid?view=class&name=1A").get_json(); assert (s["d"], s["p"]) in {(x["d"], x["p"]) for x in g["lessons"] if x["id"] == lid}
     assert c.get("/api/status").get_json()["draft"]["open"] == j["open"]
     st = c.get("/api/status").get_json()["draft"]; assert st["critical"] == j["critical"] and st["fixes"] == 1, (st, j["critical"])   # after a fix
-    assert {k: v for k, v in j.items() if k != "kept"} == c.get("/api/draft").get_json()   # the page compares the two: the same draft is not redrawn
+    assert j == c.get("/api/draft").get_json()   # the page compares the two: the same draft is not redrawn
     assert store.read_json(os.path.join(store.DATA, "draft", "meta.json"))["fixes"][0]["at"]
     j = c.post("/api/draft/undo").get_json(); assert j["fixes"] == [] and c.post("/api/draft/undo").status_code == 400
     st = c.get("/api/status").get_json()["draft"]; assert st["critical"] == j["critical"] and st["fixes"] == 0 and st["open"] == j["open"], (st, j["critical"])   # after the undo

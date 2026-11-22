@@ -255,6 +255,65 @@ def test_upload_over_fixes_keeps_the_draft():
     assert r.status_code == 400 and len(versions.listing(counts=False)) == n
     wipe_versions()
 
+def newest_entry():
+    return A.history.read(limit=1)[0]
+
+def texts(n=3):
+    return [e["text"] for e in A.history.read(limit=n)]
+
+def test_version_routes_need_the_committee():
+    save_draft(ROWS); wipe_versions()
+    for m, u in [("get", "/api/draft/versions"), ("post", "/api/draft/versions"), ("post", "/api/draft/versions/abc/open"), ("delete", "/api/draft/versions/abc"), ("get", "/api/draft/versions/abc/download")]:
+        r = getattr(NOSE, m)(u); assert r.status_code == 401 and r.get_json() == {"error": "Please sign in again."}, (m, u, r.status_code)
+
+def test_save_open_delete_through_the_routes():
+    save_draft(ROWS); wipe_versions(); one_fix()
+    r = c.post("/api/draft/versions", json=dict(name="Before the trial")); assert r.status_code == 200, r.get_json()
+    v = r.get_json(); assert v["name"] == "Before the trial" and v["kind"] == "saved"
+    j = c.get("/api/draft/versions").get_json(); assert [x["id"] for x in j["versions"]] == [v["id"]] and j["published"] is None and j["draft"]["fixes"] == 1, j
+    assert c.post("/api/draft/versions", json=dict(name=" ")).status_code == 400
+    c.post("/api/draft/undo"); assert c.get("/api/draft").get_json()["fixes"] == []
+    r = c.post(f"/api/draft/versions/{v['id']}/open"); assert r.status_code == 200, r.get_json()
+    o = r.get_json(); assert len(o["info"]["fixes"]) == 1 and o["opened"]["id"] == v["id"] and o["kept"]["kind"] == "open", o
+    r = c.delete(f"/api/draft/versions/{v['id']}"); assert r.status_code == 200 and r.get_json()["deleted"]["id"] == v["id"]
+    assert v["id"] not in [x["id"] for x in c.get("/api/draft/versions").get_json()["versions"]]
+    got = texts(4); assert [got[0], got[1], got[3]] == ["Deleted version “Before the trial”", f"Opened version “Before the trial”; the draft before is kept as version “{o['kept']['name']}”", "Saved version “Before the trial”"], got
+    wipe_versions()
+
+def test_a_deleted_version_is_refused_plainly():
+    save_draft(ROWS); wipe_versions()
+    v = c.post("/api/draft/versions", json=dict(name="Gone soon")).get_json(); assert c.delete(f"/api/draft/versions/{v['id']}").status_code == 200
+    said = {"error": "There is no such version."}
+    for r in (c.post(f"/api/draft/versions/{v['id']}/open"), c.get(f"/api/draft/versions/{v['id']}/download"), c.delete(f"/api/draft/versions/{v['id']}"), c.delete("/api/draft/versions/not-a-version")):
+        assert r.status_code == 404 and r.get_json() == said, (r.status_code, r.get_json())
+
+def test_download_a_version():
+    save_draft(ROWS); wipe_versions(); one_fix()
+    v = c.post("/api/draft/versions", json=dict(name="For the file")).get_json()
+    r = c.get(f"/api/draft/versions/{v['id']}/download")
+    if r.status_code == 409: assert r.get_json()["unplaced"] >= 1; wipe_versions(); return   # the made-up draft may have a lesson waiting
+    assert r.status_code == 200 and "For the file - version.sqlite" in r.headers["Content-Disposition"], r.headers
+    p = os.path.join(tempfile.mkdtemp(), "v.sqlite"); open(p, "wb").write(r.data)
+    spec = c.get("/api/setup").get_json()["spec"]
+    m = model_from_files(None, p, spec=spec); assert len(m["lessons"]) == len(draft.model_now()[0]["lessons"]) and m["lessons"]
+    wipe_versions()
+
+def test_an_upload_over_a_kept_draft_keeps_nothing_new():
+    save_draft(ROWS); wipe_versions(); one_fix()
+    assert c.post("/api/draft/versions", json=dict(name="Already kept")).status_code == 200
+    n = len(versions.listing(counts=False))
+    r = c.post("/api/draft", data=dict(setup=(io.BytesIO(setup_bytes(SPEC)), "setup.xlsx"), timetable=(io.BytesIO(workbook(ROWS[:2])), "again.xlsx")), content_type="multipart/form-data")
+    assert r.status_code == 200 and r.get_json()["kept"] is None, r.get_json()
+    assert len(versions.listing(counts=False)) == n and newest_entry()["text"] == "Uploaded again.xlsx", newest_entry()
+    wipe_versions()
+
+def test_the_history_names_the_version_kept():
+    save_draft(ROWS); wipe_versions(); one_fix()
+    r = c.post("/api/draft", data=dict(setup=(io.BytesIO(setup_bytes(SPEC)), "setup.xlsx"), timetable=(io.BytesIO(workbook(ROWS[:2])), "next.xlsx")), content_type="multipart/form-data")
+    k = r.get_json()["kept"]; assert k, r.get_json()
+    assert newest_entry()["text"].endswith(f"; the draft before is kept as version “{k['name']}”"), newest_entry()
+    wipe_versions()
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()

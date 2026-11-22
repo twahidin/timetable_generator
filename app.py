@@ -13,7 +13,7 @@ from ttgen.samples import secondary, primary
 from ttgen.template import write_template
 from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
-import access, checks, draft, history, store, sync, typed
+import access, checks, draft, history, store, sync, typed, versions
 from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, people as relief_people, settings as relief_settings
 from ttgen import choices
@@ -959,6 +959,67 @@ def draft_download():
             app.logger.exception("downloading the draft"); return {"error": f"Could not make the file: {e}"}, 400
         with open(path, "rb") as f: data = io.BytesIO(f.read())
         return send_file(data, as_attachment=True, download_name=safe_name(f"{m['school']['name']} {m['school']['timetable']}") + " - draft.sqlite", mimetype="application/vnd.sqlite3")
+    finally: shutil.rmtree(work, ignore_errors=True)
+
+def _version_error(e):
+    """a ValueError from versions.* as a sentence: 404 for a version that is not there, else 400"""
+    return {"error": str(e)}, (404 if str(e) == "There is no such version." else 400)
+
+@app.get("/api/draft/versions")
+@need("committee")
+def draft_versions():
+    """the saved versions of the draft, newest first, with the draft's own counts and (Task 5) the published timetable's"""
+    try:
+        j = draft.info(); summary = None
+        if j: summary = dict(source=j.get("source"), fixes=len(j.get("fixes") or []), critical=j["critical"], warnings=sum(1 for w in j["warnings"] if not w.get("decision") and not w.get("crit")))
+        return jsonify(versions=versions.listing(), draft=summary, published=None)
+    except LookupError: return {"error": NO_SETUP}, 409
+    except Exception as e:
+        app.logger.exception("listing the versions"); return {"error": f"Could not list the versions: {e}"}, 400
+
+@app.post("/api/draft/versions")
+@need("committee")
+def draft_version_save():
+    body = request.get_json(force=True, silent=True); body = body if isinstance(body, dict) else {}
+    try: v = versions.save(body.get("name"), by()["as"])
+    except ValueError as e: return _version_error(e)
+    _draft_entry("version", f"Saved version “{v['name']}”")
+    return jsonify(v)
+
+@app.post("/api/draft/versions/<vid>/open")
+@need("committee")
+def draft_version_open(vid):
+    try: got = versions.open_version(vid, by()["as"])
+    except ValueError as e: return _version_error(e)
+    kept, opened = got["kept"], got["opened"]
+    r = _checked(lambda: dict(info=draft.info() or {"draft": None}, kept=kept, opened=opened))
+    if _worked(r): _draft_entry("version", f"Opened version “{opened['name']}”" + (f"; the draft before is kept as version “{kept['name']}”" if kept else ""))
+    return r
+
+@app.delete("/api/draft/versions/<vid>")
+@need("committee")
+def draft_version_delete(vid):
+    try: v = versions.delete(vid)
+    except ValueError as e: return _version_error(e)
+    _draft_entry("version", f"Deleted version “{v['name']}”")
+    return jsonify(deleted=v)
+
+@app.get("/api/draft/versions/<vid>/download")
+@need("committee")
+def draft_version_download(vid):
+    """a saved version as a timetable database, like the draft's own download"""
+    from ttgen.export import safe_name
+    try: f = versions.folder(vid); name = versions._read(vid)["name"]
+    except (ValueError, TypeError): return {"error": "There is no such version."}, 404
+    work = tempfile.mkdtemp(prefix="tt-")
+    try:
+        try: path = os.path.join(work, "version.sqlite"); draft.database(path, folder=f)
+        except draft.NotPlaced as e: return {"error": str(e), "unplaced": e.count}, 409
+        except LookupError: return {"error": NO_SETUP}, 409
+        except Exception as e:
+            app.logger.exception("downloading a version"); return {"error": f"Could not make the file: {e}"}, 400
+        with open(path, "rb") as fh: data = io.BytesIO(fh.read())
+        return send_file(data, as_attachment=True, download_name=safe_name(name) + " - version.sqlite", mimetype="application/vnd.sqlite3")
     finally: shutil.rmtree(work, ignore_errors=True)
 
 @app.post("/api/draft/publish")
