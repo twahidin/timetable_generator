@@ -505,7 +505,24 @@ const named = fn => assert(fn, "function missing");
     S.sched.papers = [{ id: "a" }, { id: "b" }]; S.sched.suggested = ["a", "b"];
     assert.strictEqual(f.suggestedLine(), "2 papers have a suggested time.");
     f.dropSuggested(["a"]); assert.deepStrictEqual(S.sched.suggested, ["b"]); assert.strictEqual(f.suggestedLine(), "1 paper has a suggested time.");
+    S.sched.suggested = ["a", "gone"]; assert.strictEqual(f.suggestedLine(), "1 paper has a suggested time.", "only papers the page holds are counted");
     S.sched.suggested = []; assert.strictEqual(f.suggestedLine(), ""); delete S.sched.suggested; assert.strictEqual(f.suggestedLine(), "");
+  });
+  c4("the Approval tab shows the suggested line between the status line and the Send card, and never blocks", async () => {
+    const SRCS = ["suggestedLine", "tabApproval"].map(cut).join("\n");
+    const draw = (status, ids, extra) => {
+      const S = { sched: { papers: [{ id: "a" }, { id: "b" }], suggested: ids }, rv: Object.assign({ status, label: "L", can_send: "", unsent: [], review: { what: [], changes: [], done_without: [] }, changed: true }, extra || {}), me: { can_approve: true }, busy: false, sbNote: "" };
+      const sendBox = (title, lead, label, path, why) => `<SEND ${path}${S.busy || why ? " disabled" : ""}>`;
+      return new Function("S", "esc", "chipClass", "sendBox", "awayNotes", "whatBlock", "checksBlock", "isEv", "stamp", `${SRCS}; return tabApproval();`)(S, esc, () => "", sendBox, () => "", () => "<WHAT>", () => "<CHECKS>", () => false, x => x);
+    };
+    let h = draw("draft", ["a", "b"]); const line = "2 papers have a suggested time.";
+    assert(h.indexOf("Approval</h2>") < h.indexOf(line) && h.indexOf(line) < h.indexOf("<SEND send"), "below the status line, above the Send card");
+    assert(draw("draft", ["a"]).includes("1 paper has a suggested time.")); assert(!draw("draft", []).includes("suggested time"));
+    assert(!draw("draft", ["gone"]).includes("suggested time"));
+    for (const st of ["approved", "changes", "waiting", "withdrawn"]) {
+      h = draw(st, ["a", "b"], { unsent: [{ text: "x" }], changed: true, review: { what: [], changes: [{ text: "c" }], done_without: [] } });
+      assert(h.includes(line), st); assert(!/disabled/.test(h), st + ": a button is disabled because of the line");
+    }
   });
   c4("an event's going list the server cleans, one more typed", async () => {
     const { S, srv, f } = rig(true); srv.delay = 30; srv.norm = s => { s.going = uniq(s.going); };

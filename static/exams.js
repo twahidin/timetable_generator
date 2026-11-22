@@ -563,7 +563,8 @@
   }
   function agreeSuggested(id) { edit(() => { dropSuggested([id]); }, true); }
   function suggestedLine() {
-    const n = ((S.sched && S.sched.suggested) || []).length;
+    const have = ((S.sched && S.sched.papers) || []).map(p => p.id);
+    const n = ((S.sched && S.sched.suggested) || []).filter(id => have.includes(id)).length;
     return n ? `${n} ${n === 1 ? "paper has" : "papers have"} a suggested time.` : "";
   }
 

@@ -3342,4 +3342,31 @@ def an_older_schedule_without_the_key_behaves_as_empty():
         r = c.put(f"/api/exams/{e['id']}", json={k: v for k, v in e.items() if k != "suggested"}); assert r.status_code == 200, r.data
         assert r.get_json().get("suggested") == []
 
+@t
+def an_upload_keeps_a_make_up_papers_mark_and_drops_the_rest():
+    import io
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee(); e = _a_draft(c); id = e["id"]
+        ps = _papers_for_mark() + [dict(_papers_for_mark()[0], id="pm", who="students", students=["3A-01"], paper="Make-up", date="2026-10-06", start="09:00")]
+        r = c.put(f"/api/exams/{id}", json=dict(e, papers=ps, suggested=["pa", "pb", "pm"])); assert r.status_code == 200, r.data
+        assert r.get_json()["suggested"] == ["pa", "pb", "pm"]
+        x = c.get(f"/api/exams/{id}/papers.xlsx"); assert x.status_code == 200
+        r2 = c.post(f"/api/exams/{id}/papers.xlsx", data=dict(file=(io.BytesIO(x.data), "p.xlsx"))); assert r2.status_code == 200, r2.data
+        got = r2.get_json(); assert "pm" in [p["id"] for p in got["papers"]], got["papers"]
+        assert got["suggested"] == ["pm"], got["suggested"]
+        assert SC.load(id)["suggested"] == ["pm"]
+
+@t
+def a_start_given_as_7_50_is_the_stored_07_50():
+    _reset(); _cal(); _rooms_saved()
+    with published(_PUB):
+        c = committee(); e = _a_draft(c); id = e["id"]
+        e = c.put(f"/api/exams/{id}", json=dict(e, papers=_papers_for_mark(), suggested=["pa"])).get_json()
+        ps = [dict(p, start="7:50") if p["id"] == "pa" else p for p in e["papers"]]
+        e = c.put(f"/api/exams/{id}", json=dict(e, papers=ps)).get_json()
+        assert e["suggested"] == ["pa"] and e["papers"][0]["start"] == "07:50", e["suggested"]
+        ps = [dict(p, start="7:55") if p["id"] == "pa" else p for p in e["papers"]]
+        assert c.put(f"/api/exams/{id}", json=dict(e, papers=ps)).get_json()["suggested"] == []
+
 print(f"{COUNT} exams tests passed")

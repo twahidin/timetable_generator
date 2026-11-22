@@ -2257,8 +2257,13 @@ def _drop_moved_suggestions(old, new):
     """a suggested time stops being suggested when that paper's date or start is changed: its id goes from the new body"""
     sug = new.get("suggested")
     if not isinstance(sug, list): return
-    was = {p.get("id"): (p.get("date") or None, p.get("start") or None) for p in old.get("papers") or [] if isinstance(p, dict)}
-    now = {p.get("id"): (p.get("date") or None, p.get("start") or None) for p in new.get("papers") or [] if isinstance(p, dict)}
+    def at(p):
+        st = p.get("start") or None
+        try: st = exams_days.minutes(st) if st else None   # "7:50" and "07:50" are one time
+        except ValueError: pass
+        return (p.get("date") or None, st)
+    was = {p.get("id"): at(p) for p in old.get("papers") or [] if isinstance(p, dict)}
+    now = {p.get("id"): at(p) for p in new.get("papers") or [] if isinstance(p, dict)}
     new["suggested"] = [i for i in sug if not (isinstance(i, str) and i in was and i in now and was[i] != now[i])]
 
 @app.put("/api/exams/<id>")
