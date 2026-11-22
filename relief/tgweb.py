@@ -1,0 +1,207 @@
+"""Telegram's routes: the hook Telegram posts each update to, a person's own link, and connecting the bot (relief settings).
+Registered from app.py after init(has=..., me=..., need=..., note=...), as relief/web.py is.
+
+POST /telegram/hook is the app's one route without a session: Telegram has none. It answers 404 while there is no token or
+no bot is connected, 403 unless X-Telegram-Bot-Api-Secret-Token is tg.hook_secret() (compared with hmac.compare_digest; ""
+never matches), before any of the body is read, and 413 past LIMIT (read from the stream, never more than one byte past it).
+With the right secret each update is acted on once (tgdb.first_time) by bot.handle and answered 200; a body that is not an
+update is answered 200 and nothing is done, or Telegram would send it again; a store that fails is 503, so that it does.
+
+A person's own link needs relief and a person signed in by name: GET /api/relief/telegram, POST …/code (a one-time code and
+the address that opens the bot with it), DELETE …/link. Relief settings (relief.save): GET …/admin, POST …/connect (points
+Telegram at the address it was pressed on), …/disconnect and …/unlink {name}. No answer holds the token, the hook's secret, a
+chat id or anything Telegram said."""
+import hmac, json, logging, re
+from functools import wraps
+
+from flask import Blueprint, abort, jsonify, request
+
+import store
+from accounts import people as _accounts
+from accounts import rights as _rights
+from relief import absences as _absences
+from relief import bot, links, tg, tgdb
+
+bp = Blueprint("relief_tg", __name__)
+HOOK = "/telegram/hook"
+LIMIT = 256 * 1024                          # bytes of one update
+SIGN_IN = "Please sign in again."
+NOT_CONNECTED = "Telegram is not connected yet."
+NO_TOKEN = "Add the bot's token in Railway variables first (TELEGRAM_BOT_TOKEN)."
+NO_KEY = "Set SECRET_KEY in Railway variables first: the bot needs it."
+NOT_HTTPS = "Telegram needs a secure address: open the app at its https address and press Connect there."
+NO_ANSWER = "Telegram did not answer, or did not accept the bot. Check TELEGRAM_BOT_TOKEN in Railway variables and try again."
+HALF_OFF = "Disconnected here, but Telegram did not answer. The app reads and sends nothing now."
+NO_LINK = "That person has no Telegram linked."
+COMMANDS = [dict(command="relief", description="Ask for relief"), dict(command="stop", description="Unlink this Telegram"),
+            dict(command="help", description="What this bot does")]
+_USERNAME = re.compile(r"[A-Za-z0-9_]{1,64}")
+_log = logging.getLogger("relief.telegram")
+_has = _me = _need = _note = None
+_GUARDS = set()        # every right list a route here names, checked by app.py's need() in init
+
+
+def init(has, me, need, note=None):
+    """as relief/web.py's init; note(what, text, absence=None, who=None, via=None) also records what people do on Telegram"""
+    global _has, _me, _need, _note
+    _has, _me, _need, _note = has, me, need, note
+    for names in _GUARDS: need(*names)
+    bot.init(note)
+
+
+def need(*names):
+    """the route needs one of these rights: app.py's need() decides on every request; the names stay on the route as _need,
+    for the route map (tests/test_routes.py)"""
+    _GUARDS.add(names)
+    def deco(f):
+        @wraps(f)
+        def inner(*a, **k): return _need(*names)(f)(*a, **k)
+        inner._need = names
+        return inner
+    return deco
+
+
+def _noted(what, text):
+    """one history entry by whoever is signed in; a failure to make it never fails the change"""
+    if _note is None: return
+    try: _note(what, text)
+    except Exception as e: _log.warning("a history entry could not be made (%s)", type(e).__name__)
+
+
+# ---- the hook
+def _right_secret():
+    want, got = tg.hook_secret(), request.headers.get("X-Telegram-Bot-Api-Secret-Token") or ""
+    return want != "" and hmac.compare_digest(got.encode("utf-8", "replace"), want.encode())
+
+
+def _raw():
+    """the body, or None past LIMIT, whatever Content-Length says"""
+    if (request.content_length or 0) > LIMIT: return None
+    out = b""
+    while len(out) <= LIMIT:
+        more = request.stream.read(LIMIT + 1 - len(out))
+        if not more: return out
+        out += more
+    return None
+
+
+def _update(raw):
+    """the update, a dict with its update_id (a number the store can keep), or None"""
+    try: d = json.loads(raw)
+    except (ValueError, RecursionError): return None
+    i = d.get("update_id") if isinstance(d, dict) else None
+    return d if type(i) is int and abs(i) < 2 ** 63 else None
+
+
+@bp.post(HOOK)
+def hook():
+    if links.connected() is None: abort(404)
+    if not _right_secret(): return "", 403
+    raw = _raw()
+    if raw is None: return "", 413
+    u = _update(raw)
+    if u is None: return "", 200
+    try: new = tgdb.first_time(u["update_id"])
+    except Exception as e:
+        _log.warning("an update could not be recorded (%s)", type(e).__name__)
+        return "", 503
+    if new: bot.handle(u)
+    return "", 200
+
+
+# ---- a person's own link
+def _mine():
+    """-> (the person's name, None) or (None, the refusing answer)"""
+    p = _me()
+    if p is None or not _has("relief"): return None, ({"error": SIGN_IN}, 401)
+    return p["name"], None
+
+
+def _status(name):
+    b, x = links.connected(), links.linked().get(name)
+    return jsonify(on=tg.on(), connected=b is not None, bot=b["username"] if b else None, linked=x is not None,
+                   handle=x["handle"] if x else None, since=x["at"] if x else None)
+
+
+@bp.get("/api/relief/telegram")
+@need("relief")
+def status():
+    name, err = _mine()
+    return err or _status(name)
+
+
+@bp.post("/api/relief/telegram/code")
+@need("relief")
+def code():
+    """a one-time code for whoever is signed in, for themselves only"""
+    name, err = _mine()
+    if err: return err
+    b = links.connected()
+    if b is None: return {"error": NOT_CONNECTED}, 409
+    c = links.new_code(name)
+    return jsonify(code=c["code"], url=f"https://t.me/{b['username']}?start={c['code']}", until=c["until"])
+
+
+@bp.delete("/api/relief/telegram/link")
+@need("relief")
+def unlink_mine():
+    name, err = _mine()
+    if err: return err
+    if links.unlink(name) is not None: _noted("telegram unlinked", "Telegram unlinked")
+    return _status(name)
+
+
+# ---- relief settings
+def _admin():
+    """people: how many hold relief; not_linked: which of them have no Telegram; linked: every link, so any can be taken away"""
+    b, got = links.connected(), links.linked()
+    able = sorted(p["name"] for p in _accounts.staff(store.published()) if "relief" in _rights.rights(p, links.VIA))
+    return jsonify(token_set=tg.on(), practice=tg.practice(), connected=b is not None, bot=b["username"] if b else None, base=b.get("base") if b else None,
+                   at=b.get("at") if b else None, linked=[dict(name=n, handle=got[n]["handle"], at=got[n]["at"]) for n in sorted(got)],
+                   not_linked=[n for n in able if n not in got], people=len(able))
+
+
+@bp.get("/api/relief/telegram/admin")
+@need("relief.save")
+def admin(): return _admin()
+
+
+@bp.post("/api/relief/telegram/connect")
+@need("relief.save")
+def connect():
+    """Telegram sends this bot's updates to the address this was pressed on; what was waiting there is dropped"""
+    base = request.host_url.rstrip("/")
+    if not tg.on(): return {"error": NO_TOKEN}, 409
+    if not tg.hook_secret(): return {"error": NO_KEY}, 409
+    if not base.startswith("https://") and not tg.practice(): return {"error": NOT_HTTPS}, 409
+    r = tg.call("getMe", timeout=8)
+    username = r["result"].get("username") if r["ok"] and isinstance(r["result"], dict) else None
+    if not isinstance(username, str) or not _USERNAME.fullmatch(username): return {"error": NO_ANSWER}, 502
+    r = tg.call("setWebhook", dict(url=base + HOOK, secret_token=tg.hook_secret(), allowed_updates=["message", "callback_query"],
+                                   max_connections=4, drop_pending_updates=True))
+    if not r["ok"]: return {"error": NO_ANSWER}, 502
+    tgdb.set_state("bot", dict(username=username, base=base, at=_absences._now()))
+    tg.call("setMyCommands", dict(commands=COMMANDS), timeout=8)          # the menu only: its failure does not matter
+    _noted("telegram connected", f"Telegram connected (@{username})")
+    return _admin()
+
+
+@bp.post("/api/relief/telegram/disconnect")
+@need("relief.save")
+def disconnect():
+    """off here at once (the hook is 404 from now), then Telegram is told"""
+    with tgdb.db() as c: was = c.execute("DELETE FROM state WHERE k='bot'").rowcount
+    if was: _noted("telegram disconnected", "Telegram disconnected")
+    if tg.on() and not tg.call("deleteWebhook", timeout=8)["ok"]: return {"error": HALF_OFF}, 502
+    return _admin()
+
+
+@bp.post("/api/relief/telegram/unlink")
+@need("relief.save")
+def unlink():
+    """{name}: anybody's link taken away"""
+    d = request.get_json(force=True, silent=True)
+    name = d.get("name") if isinstance(d, dict) else None
+    if not isinstance(name, str) or links.unlink(name) is None: return {"error": NO_LINK}, 404
+    _noted("telegram unlinked", f"Telegram unlinked for {name}")
+    return _admin()

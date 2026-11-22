@@ -15,7 +15,7 @@ from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, draft, history, store, sync, typed
 from accounts import passwords, people, rights as rights_table
-from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
+from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, people as relief_people, settings as relief_settings, tgweb as relief_tgweb, web as relief_web
 from ttgen import choices
 import exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts
 
@@ -1302,10 +1302,11 @@ def relief_code_slips():
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="relief code slips.pdf", mimetype="application/pdf")
 
-def _relief_entry(what, text, absence=None):
+def _relief_entry(what, text, absence=None, who=None, via=None):
     """one history entry for a relief request's save (relief/web.py): who, what, which, a link (not field by field; relief
-    keeps its own record, and the entry never holds the reason). A failure to write it never fails the save"""
-    e = {"kind": "relief", "what": what, "where": "Relief", "text": text, "link": "/relief", **by()}
+    keeps its own record, and the entry never holds the reason). who and via: the person who did it without a session (on
+    Telegram), else whoever is signed in. A failure to write it never fails the save"""
+    e = {"kind": "relief", "what": what, "where": "Relief", "text": text, "link": "/relief", **(history.by_of(who, via) if who else by())}
     if absence: e["absence"] = absence
     try: history.add(e)
     except Exception as x: print(f"WARNING: a relief change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
@@ -1313,6 +1314,9 @@ def _relief_entry(what, text, absence=None):
 # relief requests: relief/web.py, every route through need(), every right through has(), every save in the history
 relief_web.init(has=has, me=who, need=need, note=_relief_entry)
 app.register_blueprint(relief_web.bp)
+# Telegram: linking, connecting the bot, and the hook it posts to (relief/tgweb.py: the hook alone has no guard, it needs Telegram's secret header)
+relief_tgweb.init(has=has, me=who, need=need, note=_relief_entry)
+app.register_blueprint(relief_tgweb.bp)
 if os.environ.get("RELIEF_JOBS") == "on": relief_fill.start()     # relief picks when due, every minute (the Dockerfile sets it; tests and local runs never do)
 
 # ------------------------------------------------------------------------------------------------ admins: people and the ways in

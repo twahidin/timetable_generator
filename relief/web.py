@@ -93,7 +93,8 @@ def init(has, me, need, note=None):
     """has(right) -> bool: the accounts' rights of whoever is signed in; me() -> the person signed in by name (a dict with
     name; app.py's who(), which ends the session of someone no longer on the published timetable) or None; need(*rights):
     app.py's route guard, which every route here goes through (a wrong right name stops the app at start, as there);
-    note(what, text, absence id): one history entry for a relief save (app.py's _relief_entry, by whoever is signed in)"""
+    note(what, text, absence id, who=None, via=None): one history entry for a relief save (app.py's _relief_entry: by the
+    person who did it on Telegram when given, else by whoever is signed in)"""
     global _has, _me, _need, _note
     _has, _me, _need, _note = has, me, need, note
     for names in _GUARDS: need(*names)
@@ -218,14 +219,16 @@ def _on_staff(pub, name):
         raise ValueError(f"{name if isinstance(name, str) and name else 'That person'} is not on the published timetable or the staff list.")
 
 
-def _noted(what, r, words):
+def _noted(what, r, words, by=None):
     """the history entry for a save (the accounts design: one per relief save, naming who, what and which absence, with a
     link; never the reason, nor a why typed with it): 'Relief for <teacher> on <dates>: <words>' (words: a string, or
-    a function giving it)"""
+    a function giving it). by: (the person's name, "telegram") when they did it on Telegram, else whoever is signed in"""
     if _note is None: return
     try:
         days = ", ".join(_absences._say(datetime.date.fromisoformat(d)) for d in r.get("dates") or [])
-        _note(what, f"Relief for {r.get('teacher')} on {days}: {words() if callable(words) else words}", r.get("id"))
+        text = f"Relief for {r.get('teacher')} on {days}: {words() if callable(words) else words}"
+        if by is None: _note(what, text, r.get("id"))
+        else: _note(what, text, r.get("id"), who=by[0], via=by[1])
     except Exception:          # the save has happened: a history entry that cannot be made never fails it
         current_app.logger.exception("relief: the history entry for %s could not be made", what)
 
