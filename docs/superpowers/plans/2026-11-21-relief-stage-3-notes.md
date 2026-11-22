@@ -63,8 +63,24 @@ Plan: `2026-11-21-relief-stage-3-relief-team.md`. Design: `../specs/2026-11-20-r
     data), removed afterwards. If wrong: nothing kept.
 25. The browser checks of Tasks 5 and 6 (21 real-click checks) stand for Task 7's list. If wrong: a page change after
     them is untried.
+26. (Final review) Approve, Approve the new pick and Approve all send the person the page showed; the server refuses, or
+    skips in Approve all, with "The pick has changed since you looked: look again before approving." when the pick is no
+    longer that person, so nobody is approved whom the team did not see. If wrong: one more press after a re-read.
+27. (Final review) Approve all records exactly the covers it approved, one History line each; skipped rows carry the
+    absence. If wrong: nothing.
+28. (Final review) The planned-relief sheet names a relief teacher only once approved; otherwise "Waiting for the relief
+    team" or "Not chosen yet". If wrong: a column's wording.
+29. (Final review) Keep and Change log the pick they drop; a planner choosing on an approved or split lesson is told
+    "This lesson's relief is approved already: ask the relief team to change it." or "This lesson is split: the relief
+    team chooses for each part."; a request to change re-picks only that absence (its other open lessons may be picked
+    early, still waiting for approval). If wrong: copy.
 
 ## Checked
+
+- The final whole-branch review (most capable model): one Critical (Approve could approve a pick the team never saw)
+  and two Important (Approve all's History lines; unapproved picks on the planned-relief sheet), all fixed in one wave
+  with seven new tests, each failing on the old code; a browser check with real clicks: Approve on a stale row is refused
+  with its sentence and the page shows the new pick; Approve all skips it and approves the rest with one History line.
 
 - Every suite on the final code (53183fd plus these docs), all passing: `test_accounts` 13, `test_admin` 18,
   `test_ask` 49, `test_board` 58, `test_choices` 16, `test_combined` 38, `test_exams` 76, `test_fixes` 65,
@@ -88,8 +104,6 @@ Plan: `2026-11-21-relief-stage-3-relief-team.md`. Design: `../specs/2026-11-20-r
 
 ## Not tried in a browser
 
-- A cover skipped in Approve all (one line per skipped cover with its sentence): it could not be made to happen on
-  purpose, the page was only checked with nothing skipped.
 - A refusal shown beside a row: nothing was refused during the check; the page shows the server's sentence by the same
   path as the success lines.
 - The Flexi Adjunct filter's positive case on Load: the sample has no Flexi role, so it was checked with a page-only
@@ -118,6 +132,13 @@ takeover in `absences.new`):
 ## For stage 3b and stage 4, and minor items left
 
 Stage 3b (the timetable on a date) and stage 4 (Telegram):
+- Approving a change request's new pick writes no "dropped" line for the teacher who asked (one line in `cover._approve`).
+- A request to change re-picks that absence's other open lessons too, before they are due (each a model call when the AI
+  is set up; they only wait for approval); passing the cover's date to `fill.soon` would keep it to that day.
+- Today shows no "the lesson has changed since this was planned" flag, and a run still picks for a lesson gone after a
+  republish (final review M4).
+- The past lessons of a cancelled absence keep their relief but stop counting in load, the AI's numbers and the covering
+  list (final review M3).
 - Picks for a term's first school day fall due on the previous term's last school day (the design as written).
 - Nothing is told to anyone on Telegram; approval is the only gate to a relief teacher.
 - A pending Fill now for a date not yet due is lost on a restart.
@@ -138,8 +159,6 @@ Small things in the code:
 - The rules scrub does not catch a bare surname alone ("Tan"), and "May" at a sentence start is replaced; short names
   match with exact case only. Tests do not clear `AI_API_KEY` or `AI_PROVIDER` (a shell with them set turns the
   suite red), and one test uses a literal fake key.
-- Approve all may approve a pick saved by a background run between its listing and the lock without a history line
-  (have `cover.approve_all` return the pairs); its skipped rows lack the absence id.
 - Fill now accepts a past date (does nothing) while Approve all refuses it.
 - Today: `nobody` means nobody at all is free, while a cover left open because everyone free is over a limit shows
   plain "open" (the page words it "Only teachers over a limit are free then"); cancelled absences are listed outside
