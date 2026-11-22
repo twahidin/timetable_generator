@@ -42,7 +42,8 @@ force, always after the save and the absences lock. Each save here is one histor
 
 Stage 4: each save, after its history entry, asks relief.tell (_tell_soon) what there is to say on Telegram; nothing is sent
 from a route, and a message that cannot be worked out never fails the save. What a person may also do on Telegram
-(relief/bot.py) has its history entry's words and what follows the save in STEPS, the same for both."""
+(relief/bot.py) has its history entry's words and what follows the save in STEPS, the same for both; so has an absence asked for there
+(relief/asking.py) in created. via ("telegram") in a record: it was asked for there (What's in alone shows it)."""
 import csv, datetime, io, os, threading
 from functools import wraps
 from zoneinfo import ZoneInfo
@@ -400,8 +401,8 @@ def lessons():
         periods = _period_range(pub, request.args.get("from"), request.args.get("to"))
         records = _absences.all_records()
         links = _links_or_none(pub, settings["calendar"])
-        by_date = {d.isoformat(): [_iso(dict(x, others=_free.there_then(records, x["others"], d, x["p"], x["n"], links=links), stopped=_cover.stopped(links, x)))       # as new() decides
-                                   for x in _lessons.on_date(pub, settings["calendar"], teacher, d, periods=periods)] for d in dates}
+        by_date = {d.isoformat(): [_iso(_absences.as_now(records, x, links)) for x in _lessons.on_date(pub, settings["calendar"], teacher, d, periods=periods)]
+                   for d in dates}                                                          # as new() decides
         every = _periods(pub)
         duties = {d.isoformat(): links.duties(teacher, d, periods) if links is not None else [] for d in dates}
     except ValueError as e: return _refusal(e)
@@ -437,6 +438,14 @@ def people():
 
 
 # ---- absences
+def created(how, r, pub, by=None):
+    """what follows the save of a new absence, asked or planned, on the page or (by: the person's name, "telegram") on Telegram"""
+    _noted(how, r, how, by=by)
+    _sync_exams(pub)
+    _soon()               # an absence for today is picked at once; its teacher stops being anyone's waiting pick
+    _tell_soon()
+
+
 @bp.post("/api/relief/absences")
 @need("relief")
 def create():
@@ -453,10 +462,7 @@ def create():
     try: r = _absences.new(dict(data, teacher=teacher), pub, me, how, may_choose=plan, links=_links_or_none(pub, _cal(pub)))
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "sending an absence")
-    _noted(how, r, how)
-    _sync_exams(pub)
-    _soon()               # an absence for today is picked at once; its teacher stops being anyone's waiting pick
-    _tell_soon()
+    created(how, r, pub)
     return jsonify(_out(r, pub, me))
 
 

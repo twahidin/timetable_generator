@@ -250,7 +250,7 @@ def connect():
     r = tg.call("getMe", timeout=8)
     username = r["result"].get("username") if r["ok"] and isinstance(r["result"], dict) else None
     if not isinstance(username, str) or not _USERNAME.fullmatch(username): return {"error": NO_ANSWER}, 502
-    r = tg.call("setWebhook", dict(url=base + HOOK, secret_token=tg.hook_secret(), allowed_updates=["message", "callback_query"],
+    r = tg.call("setWebhook", dict(url=base + HOOK, secret_token=tg.hook_secret(), allowed_updates=["message", "edited_message", "callback_query"],
                                    max_connections=4, drop_pending_updates=True))
     if not r["ok"]: return {"error": NO_ANSWER}, 502
     was, key = tgdb.get_state("bot"), links.key()

@@ -2,15 +2,19 @@
 alone (never a code, a chat id, a name, a token or what was typed).
 
 Only a message, or a press of a button, in a person's own (private) chat, by that person (from has the chat's id, as Telegram
-always gives it there), is read or answered; groups, channels, other bots and every other kind of update are ignored. Anything shaped like a code (alone, or after /start, as Telegram's own link sends it) is tried as a link
-code; when it is not a current one the message is deleted and answered BAD_CODE (BAD_CODE_KEPT when Telegram did not delete
+always gives it there), is read or answered; groups, channels, other bots and every other kind of update are ignored, and a message
+changed after it was sent unless the person is asking for relief. Anything shaped like a code (alone, or after /start, as Telegram's
+own link sends it) is tried as a link code; when it is not a current one the message is deleted and answered BAD_CODE (BAD_CODE_KEPT when Telegram did not delete
 it), the same for a real personal code and a made-up one (links.use never looks at those). The code a chat linked itself
 with, sent by it again, is answered HELLO and changes nothing (links.again). A chat whose person is not there, or has no relief now
 (links.name_of), is answered NOT_LINKED. Each of these two answers counts against links.tries, and a chat over it gets nothing at all: no
 answer, no deleteMessage, its code not tried. The count is made with the check (_counting, never held during a call to
 Telegram), so messages that come at once get no more.
 
-/start, /help and anything else from a linked chat: HELLO. /stop unlinks. A person's link that moved is told in the old chat
+/start, /help and anything else from a linked chat: HELLO. /stop unlinks. /relief asks for relief: relief/asking.py, which has all of
+that conversation (a talk of kind ASK); here it is only led to, by /relief, a press of one of its buttons, or a message while it goes
+on. It ends when another talk is opened in its place or a command is sent; when a day had been chosen by then the person is told that
+nothing was sent (asking.NOT_SENT), but for /relief, which begins another. A person's link that moved is told in the old chat
 (MOVED_LINK); a chat that was someone else's is told so before HELLO (TAKEN). Linking, moving and unlinking are each one
 history entry by that person, via telegram (init's note), naming no chat, handle or code. A link just made asks relief.tell
 for what is still to come for that person.
@@ -31,8 +35,8 @@ Request to change and Not needed ask why first: a talk (table talks), one a chat
 other. Until it is over, what is typed there is the why, whatever it looks like (never a code), judged again as a press is. A line
 that is blank, too long or no reason (_no_reason: "No", "Ok, thanks") is nobody's why: the question is asked again. So it is, after
 LAST_ONE, when the line replies to any message but the question asked last (its id is in the talk). /cancel ends the talk, and
-so do COMMANDS, which work as ever. A request to change is sent at the why; it is refused when the relief was acknowledged since
-its question was asked. A talk is over before anything is done in it, so it is done once. When a question may not have reached
+so do COMMANDS, which work as ever. A talk that runs out is deleted when it is met, and by the clock (forget). A request to change is
+sent at the why; it is refused when the relief was acknowledged since its question was asked. A talk is over before anything is done in it, so it is done once. When a question may not have reached
 the person there is no talk.
 
 An absence is cancelled by a press alone, never by a typed line (it cannot be undone). Its why is kept in the talk and shown
@@ -79,6 +83,7 @@ REMINDED = "Reminded {n}."
 WENT_WRONG = "Something went wrong. Try again in the app."
 COMMANDS = ("/start", "/stop", "/help", "/relief")        # these end a talk
 TALK_MINUTES = 15
+ASK = "ask"                                  # the kind of the talk, and of its buttons, that asks for relief (relief/asking.py)
 WHY_MOST = 200                               # characters of a why (as relief.cover and relief.absences have it)
 NO_REASON = frozenset("no n nope yes y ok okay thanks thank you cancel keep it stop".split())       # a line of these words alone gives none
 ANSWER_MOST, TEXT_MOST = 200, 4096           # characters Telegram takes of an answer to a press, and of a message
@@ -94,8 +99,9 @@ _pressing = threading.Lock()
 _note = None
 # what a press or a line comes to: what is answered (an alert: the person has to close it), the line its message gains, losing
 # its buttons, the same of the message its talk began at (also: that message, the line), the talk opened (its question is to be
-# asked), and what follows (the history entry and the rest), called with nothing held
-_Out = collections.namedtuple("_Out", "text alert line also talk after", defaults=(None, False, None, None, None, None))
+# asked), what follows (the history entry and the rest), called with nothing held, what is said before its question (first), and
+# what is done once all this is (then)
+_Out = collections.namedtuple("_Out", "text alert line also talk after first then", defaults=(None, False, None, None, None, None, None, None))
 
 
 def init(note):
@@ -116,6 +122,7 @@ def handle(update):
     try:
         u = update if isinstance(update, dict) else {}
         if isinstance(u.get("message"), dict): _message(u["message"])
+        elif isinstance(u.get("edited_message"), dict): _edited(u["edited_message"])
         elif isinstance(u.get("callback_query"), dict): _press(u["callback_query"])
     except Exception as e:
         _log.warning("an update could not be handled (%s)", type(e).__name__)
@@ -149,16 +156,22 @@ def _command(text):
     return parts[0].split("@", 1)[0].lower(), parts[1] if len(parts) > 1 else ""
 
 
+def _asking():
+    """relief/asking.py, which reads this module at import"""
+    from relief import asking
+    return asking
+
+
 def _message(m):
     chat = _private(m)
     if chat is None: return
     text = m["text"] if isinstance(m.get("text"), str) else ""
     cmd, rest = _command(text.strip())
     talk = _talk(chat)
-    if talk and cmd in COMMANDS: _end(chat, talk)
-    elif talk and _line(chat, talk, text, cmd, _replies_to(m)): return
+    if talk and cmd in COMMANDS: _leave(chat, talk, cmd)
+    elif talk and _line(chat, talk, m, text, cmd): return
     if cmd == "/start" and links.shaped(rest): return _code(chat, m, rest)
-    if cmd not in ("/start", "/stop", "/help") and links.shaped(text): return _code(chat, m, text)
+    if cmd not in COMMANDS and links.shaped(text): return _code(chat, m, text)
     key = f"tg:{chat}"
     with _counting:
         if links.tries.blocked(key): return
@@ -168,7 +181,23 @@ def _message(m):
     if was: _noted("telegram unlinked", "Telegram unlinked", was)
     if name is None: reply(chat, NOT_LINKED)
     elif was: reply(chat, STOPPED)
+    elif cmd == "/relief": _asking().start(chat, name)
     else: reply(chat, HELLO.format(name=name))
+
+
+def _edited(m):
+    """a message changed after it was sent: nothing is taken from it, and who is asking for relief is told so"""
+    chat = _private(m)
+    talk = _talk(chat) if chat is not None else None
+    if talk and talk["kind"] == ASK and not links.tries.blocked(f"tg:{chat}"):
+        name = links.name_of(chat)
+        if name is not None: _asking().line(chat, name, dict(m, text=None, document=None, photo=None, reply_to_message=None, external_reply=None))
+
+
+def _leave(chat, talk, cmd):
+    """a command ends the talk; a request for relief that had got as far as a day is said not to be sent (/relief begins another)"""
+    if talk["kind"] != ASK: _end(chat, talk)
+    else: _asking().leave(chat, quiet=cmd == "/relief")
 
 
 def _code(chat, m, code):
@@ -219,11 +248,13 @@ def _press(q):
     except Exception as e: out = _broke(e)
     if out is None: return
     _follow(out)
+    if out.first: reply(chat, out.first)
     lost = out.talk is not None and not _ask(chat, out.talk)
     _answer(q, WENT_WRONG if lost else out.text, lost or out.alert)
     if lost: _end(chat, out.talk)                # what is typed next is not the answer to a question that may not have come
     if out.line: _settle(chat, message, out.line)
     if out.also: _settle(chat, *out.also)
+    if out.then: out.then()
 
 
 def _pressed(chat, data, message):
@@ -444,12 +475,13 @@ def _asked(p, kind):
 def _open(chat, kind, d, b, buttons):
     """the talk open in the chat, in place of any other, TALK_MINUTES from now, its question to be asked (_ask). buttons: those of
     its question, {token: what}, for the person of button b alone and good as long"""
-    until = _clock() + TALK_MINUTES * 60
+    until, old = _clock() + TALK_MINUTES * 60, _talk(chat)
     talk = dict(kind=kind, data=json.dumps(d), until=until, d=d)
+    first, then = _asking().replaced(chat, old["d"]) if old and old["kind"] == ASK else (None, None)
     with tgdb.db() as c:
         c.executemany("INSERT OR REPLACE INTO buttons(token, name, what, id, until) VALUES (?, ?, ?, ?, ?)", [(t, b["name"], what, b["id"], until) for t, what in buttons.items()])
         c.execute("INSERT OR REPLACE INTO talks(chat, kind, data, until) VALUES (?, ?, ?, ?)", (chat, kind, talk["data"], until))
-    return _Out(talk=talk)
+    return _Out(talk=talk, first=first, then=then)
 
 
 def _question(talk):
@@ -492,6 +524,11 @@ def _end(chat, talk):
         return _still(c, chat, talk) and c.execute("DELETE FROM talks WHERE chat=?", (chat,)).rowcount == 1
 
 
+def forget():
+    """the talks that have run out are deleted, with what was typed in them (every minute: tell.MINUTE)"""
+    with tgdb.db() as c: c.execute("DELETE FROM talks WHERE until<?", (_clock(),))
+
+
 def _talk(chat):
     """the talk that waits for a line in the chat, dict(kind, data, until, d: data read), or None; one whose time is over, or that
     cannot be read, is deleted, one of another kind left alone"""
@@ -520,12 +557,14 @@ def _no_reason(why):
     return all(w in NO_REASON for w in _WORD.findall(why.casefold()))
 
 
-def _line(chat, talk, text, cmd, to):
-    """what was typed while a talk waits, replying to the message to -> whether it was for the talk (the rest is for _message)"""
+def _line(chat, talk, m, text, cmd):
+    """what was typed (or sent) while a talk waits -> whether it was for the talk (the rest is for _message)"""
     if links.tries.blocked(f"tg:{chat}"): return True                            # nothing at all
-    if links.name_of(chat) is None:
+    name, to = links.name_of(chat), _replies_to(m)
+    if name is None:
         _end(chat, talk)
         return False
+    if talk["kind"] == ASK: return _asking().cancel(chat) if cmd == "/cancel" else _asking().line(chat, name, m)
     if cmd == "/cancel":
         if not _end(chat, talk): return False
         reply(chat, NOTHING)
@@ -553,11 +592,15 @@ def _line(chat, talk, text, cmd, to):
     return True
 
 
+def _asked_for(p):
+    return _asking().step(p.chat, p.button["name"], press=p)
+
+
 # what a button does, by its kind: (the right it needs, f(p) with p.chat, p.button (_button) and p.message (its id and text) ->
 # _Out, the refusals that keep it: {name} is the one it shows, {why} is anything, ANY is every refusal)
 ACTIONS = {"ack": ("relief", _ack, (_cover.NOT_HAPPENING,)), "change": ("relief", _ask_change, (_cover.NOT_HAPPENING,)),
            "cancel": ("relief", _ask_cancel, ()), "keep": ("relief", _keep, (OLD_BUTTON,)),
            "cancel-yes": ("relief", _yes, (OLD_BUTTON,)), "approve": ("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE, _cover.NOT_HAPPENING)),
-           "remind": ("relief.team", _remind, ANY)}
-# what the why typed in a talk comes to, by its kind: f(chat, the button, why, talk) -> _Out
-TALKS = dict(change=_change, cancel=_sure)
+           "remind": ("relief.team", _remind, ANY), ASK: ("relief", _asked_for, ANY)}
+# what the why typed in a talk comes to, by its kind: f(chat, the button, why, talk) -> _Out (asking for relief has its own: asking.line)
+TALKS = {"change": _change, "cancel": _sure, ASK: None}

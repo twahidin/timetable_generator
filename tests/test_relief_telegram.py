@@ -892,7 +892,7 @@ def connect_saves_the_bot_and_points_the_hook_here():
         assert b["key"] == digest(tg.hook_secret()) and tg.hook_secret() not in json.dumps(b) and b["key"] not in r.get_data(as_text=True), "a digest alone is kept"
         assert re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+", b["at"]) and links.connected() == {k: b[k] for k in ("username", "base", "at")}
         assert [m for m, p in tg.PRACTICE_LOG] == ["getMe", "setWebhook", "setMyCommands"], tg.PRACTICE_LOG
-        assert tg.PRACTICE_LOG[1][1] == dict(url="http://localhost/telegram/hook", secret_token=tg.hook_secret(), allowed_updates=["message", "callback_query"],
+        assert tg.PRACTICE_LOG[1][1] == dict(url="http://localhost/telegram/hook", secret_token=tg.hook_secret(), allowed_updates=["message", "edited_message", "callback_query"],
                                              max_connections=4, drop_pending_updates=True)
         assert [x["command"] for x in tg.PRACTICE_LOG[2][1]["commands"]] == ["relief", "stop", "help"] and all(x["description"] for x in tg.PRACTICE_LOG[2][1]["commands"])
         assert tg.hook_secret() not in json.dumps(j) and hook(msg("/help", 501)).status_code == 200
@@ -2004,7 +2004,7 @@ def the_sender_starts_only_with_the_jobs_and_a_token():
     def go(jobs, token):
         env = dict(os.environ, DATA_DIR=tempfile.mkdtemp(), RELIEF_JOBS=jobs, TELEGRAM_BOT_TOKEN=token)
         return subprocess.Popen([sys.executable, "-c", code], env=env, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    cases = [("on", "practice", "['relief-telegram', 'relief-tell-ticker', 'relief-ticker'] ['relief.tell.sweep', 'relief.report.tick']"), ("on", "", "['relief-ticker'] []"), ("", "practice", "[] []")]
+    cases = [("on", "practice", "['relief-telegram', 'relief-tell-ticker', 'relief-ticker'] ['relief.tell.sweep', 'relief.report.tick', 'relief.bot.forget']"), ("on", "", "['relief-ticker'] []"), ("", "practice", "[] []")]
     for p, (jobs, token, want) in zip([go(j, k) for j, k, w in cases], cases):
         out, err = p.communicate(timeout=120)
         assert p.returncode == 0 and out.strip().splitlines()[-1] == want, (jobs, token, out[-300:], err[-300:])
@@ -4011,8 +4011,9 @@ def cancel_and_the_other_commands_end_a_talk():
             press(SAM, "change"); assert talk_to(SAM, lambda: say(SAM, text)) == [(NOTHING, None)] and rows("talks") == [], text
         press(EVE, "cancel"); assert talk_to(EVE, lambda: say(EVE, "/cancel")) == [(NOTHING, None)] and rows("talks") == []
         assert talk_to(SAM, lambda: say(SAM, "/cancel")) == [(HELLO.format(name=SAM), None)], "with nothing to end"
-        for text in ("/help", "/start", "/start hello there", "/HELP@practice_bot", "/relief"):
+        for text in ("/help", "/start", "/start hello there", "/HELP@practice_bot"):
             press(EVE, "cancel"); assert talk_to(EVE, lambda: say(EVE, text)) == [(HELLO.format(name=EVE), None)] and rows("talks") == [], text
+        press(EVE, "cancel"); assert [x for x, b in talk_to(EVE, lambda: say(EVE, "/relief"))] == ["Hi Ms Evelyn Koh. Which day are you away?"] and [x[1] for x in talks()] == ["ask"], "asking for relief is another"
         assert (file_of(i), file_of(j)) == was and h.new() == []
         press(EVE, "cancel"); c = links.new_code(EVE)["code"]; assert talk_to(EVE, lambda: say(EVE, f"/start {c}"))[0] == (HELLO.format(name=EVE), None) and rows("talks") == [], "a link is a link"
         press(EVE, "cancel"); tg.PRACTICE_LOG.clear(); say(EVE, "/start ABCD-EFGH"); assert sent() == [(CHATS[EVE], BAD_CODE)] and rows("talks") == []
@@ -4180,10 +4181,10 @@ def a_typed_line_never_cancels():
         for token, m in yes[:-1]: assert press_keep(token, m) == (OLD_BUTTON, True)
         assert press_yes(EVE, chat=CHATS[MAYA]) == (NOT_YOURS_BUTTON, True) and file_of(i) == was and h.new() == [] and edits() == [] and dict(talk_of(EVE), question=0) == dict(last, question=0)
         assert press_yes(EVE) == (SENT_CANCEL, False) and absences.load(i)["cancelled"] == dict(at=clock.now, by=EVE, why="Course postponed") and len(h.new()) == 1, "its own, with the reason it shows"
-    for text in ("/cancel", "/help", "/start", "/relief"):                                 # a command ends it, and the Yes with it
+    for text, want in (("/cancel", NOTHING), ("/help", HELLO.format(name=EVE)), ("/start", HELLO.format(name=EVE)), ("/relief", "Hi Ms Evelyn Koh. Which day are you away?")):       # a command ends it, and the Yes with it
         with school(EVE):
             i = told_planned(); was = file_of(i); press(EVE, "cancel"); say(EVE, "x"); token, m = talk_of(EVE)["yes"], sure(EVE)
-            assert talk_to(EVE, lambda: say(EVE, text)) == [(NOTHING if text == "/cancel" else HELLO.format(name=EVE), None)] and press_keep(token, m) == (OLD_BUTTON, True) and file_of(i) == was, text
+            assert [x for x, b in talk_to(EVE, lambda: say(EVE, text))] == [want] and press_keep(token, m) == (OLD_BUTTON, True) and file_of(i) == was, text
     with school(EVE, SAM):                                                                 # another question in its place
         i, key_ = told_relief(); j = absent(teacher=SAM, by=HUGO); swept(); was = file_of(j); press(SAM, "cancel"); say(SAM, "x"); token, m = talk_of(SAM)["yes"], sure(SAM); press(SAM, "change")
         assert press_keep(token, m) == (OLD_BUTTON, True) and file_of(j) == was and [x[1] for x in talks()] == ["change"]
@@ -5102,7 +5103,7 @@ def the_answer_is_the_first_reason_that_says_something():
     assert answer(lambda i: (acked(i, K2, MAYA), acked(i, K5, SAM), at("07:10", 13))) == (NOBODY, True)
     assert answer(lambda i: (links.unlink(MAYA), reminded(i, K5))) == (NOT_ON, True) and answer(lambda i: (links.unlink(SAM), reminded(i, K2))) == (TOO_SOON.format("07:10"), True), "the first of them"
     assert answer(lambda i: (acked(i, K2, MAYA), at("07:10", 13))) == ("Reminded 1.", False)
-    assert bot.ACTIONS["remind"][2] is bot.ANY and not isinstance(bot.ANY, (tuple, str)) and [k for k, v in bot.ACTIONS.items() if v[2] is bot.ANY] == ["remind"]
+    assert bot.ACTIONS["remind"][2] is bot.ANY and not isinstance(bot.ANY, (tuple, str)) and [k for k, v in bot.ACTIONS.items() if v[2] is bot.ANY] == ["remind", "ask"]
     with school(SAM, TEAM):                                                                # whatever the sentence looks like
         today_reliefs((K5, SAM)); ticked("07:00"); send()
         for text in ("{why}", "a {name} {", "x"):
@@ -5960,6 +5961,832 @@ def the_summary_is_quick():
             absences._save(r)
         began = time.process_time(); v = SU.week(SCHOOL, rs(), absences.all_records(), MON12, clock.now, links=exam_links()); took = time.process_time() - began; assert adds_up(v)["absences"] == 61 and len(v["rows"]) == 122 and took < 1.5, took
         at("15:00", 16); began = time.process_time(); assert weekly("15:00") == weeked(); first = time.process_time() - began; began = time.process_time(); assert weekly("15:01") == []; second = time.process_time() - began; assert first < 2.0 and second < 0.5, (first, second)
+
+# ---- Task 8: asking for relief on Telegram ----
+import glob, io  # noqa: E402
+from relief import asking as AK, files as FI  # noqa: E402
+
+HI, DAY_ROWS = "Hi Ms Evelyn Koh. Which day are you away?", [["Today, Mon 12 Oct"], ["Tomorrow, Tue 13 Oct"], ["Several days"], ["Another day"]]
+SPAN, SPAN_ROWS = "Whole day, or some periods?", [["Whole day", "Some periods"]]
+WHICH_DAY, WHICH_DAYS, TICK_ONE = "Which day?", "Which days? Tick them, then press Done.", "Tick at least one day."
+FROM_P, TO_P, NO_DAYS = "From which period?", "To which period?", "There are no school days coming up in the calendar."
+REASON, REASON_ROWS, SAY_WHY = "Reason?", [["Medical", "Child sick"], ["Course", "Other"]], "Say why in one line."
+RIGHT_ROSA, WHO_IS = "Your reporting officer is Ms Rosa Ng. Right?", "Who is your reporting officer? Type part of their name."
+WHO_HIT, NOT_HERE, NOBODY_MATCHES = "Who is your reporting officer?", "Not here? Type more of the name.", "Nobody on the staff list matches that. Type part of their name."
+WORK_2 = "Work for 1C Science P3–P5 on Tue 13 Oct (09:00)? Type it, send a file or a photo, or tap Later."
+WORK_5 = "Work for 1A, 1B Science (G2) P6–P7 on Tue 13 Oct (10:30)? Type it, send a file or a photo, or tap Later."
+WORK_W = "Work for 2A Science P2 on Wed 14 Oct (08:30)? Type it, send a file or a photo, or tap Later."
+NO_LESSONS, PRESS_ONE, SEND_ONE = "There are no lessons to cover in that time.", "Please press one of the buttons.", "Send text, a file or a photo."
+NOT_SENT, NOTHING_SENT = "Your request for relief was not sent. Send /relief to start again.", "Cancelled: nothing was sent."
+ON_2, ON_5 = "• 1C Science P3–P5 on Tue 13 Oct: ", "• 1A, 1B Science (G2) P6–P7 on Tue 13 Oct: "
+LIST_HEAD, SET_, NONE_YET = "Relief for Tue 13 Oct · whole day\nReason: Medical\nReporting officer: Ms Rosa Ng", "work set", "no work yet"
+LIST_ROWS, FIRST_ROWS, LAST_ROWS = [["Send", "Start again"]], [["Later, in the app"], ["Later for all the rest"]], [["Same as before", "Later, in the app"]]
+TOO_MANY = "A lesson can have at most 5 files."
+OPEN_MINE = [["Open in the app"]]
+LINE = "a line"
+
+def sent_text(n, m, tail="Ms Rosa Ng will be told."): return f"✅ Sent to the relief team: {n}, {m}. {tail}"
+def keyboard(markup):
+    """what a message offers: the rows of its buttons' labels, LINE (the line opens for the answer), or None"""
+    return None if not markup else LINE if "force_reply" in markup else [[b["text"] for b in row] for row in markup["inline_keyboard"]]
+def heard(name, f): return [(x, keyboard(b)) for x, b in talk_to(name, f)]
+def board(name):
+    """the last question with buttons in name's chat, as it is now: (its text, {label: callback data})"""
+    got = None
+    for m, p in list(tg.PRACTICE_LOG):
+        kb = (p.get("reply_markup") or {}).get("inline_keyboard")
+        if p.get("chat_id") != CHATS[name] or not kb or not any("callback_data" in b for row in kb for b in row): continue
+        got = (p["text"] if m == "sendMessage" else got[0], {b["text"]: b["callback_data"] for row in kb for b in row if "callback_data" in b})
+    return got
+def rows_now(name):
+    """the rows of labels of that question, as they are now"""
+    return [keyboard(p["reply_markup"]) for m, p in list(tg.PRACTICE_LOG) if p.get("chat_id") == CHATS[name] and (p.get("reply_markup") or {}).get("inline_keyboard")][-1]
+def asking_of(name): return next((d for c, k, d, u in talks() if (c, k) == (CHATS[name], "ask")), None)
+def tapping(name, label, chat=None):
+    """a press of that button of the last question, as Telegram posts it"""
+    text, keys_ = board(name); d = asking_of(name)
+    return callback(keys_[label], dict(message_id=(d or {}).get("question") or 1, date=1, chat=dict(id=CHATS[name], type="private"), text=text), chat)
+def tap(name, *labels):
+    """what the bot says to a press of that button (of each, one after another: to the last)"""
+    for label in labels: u = tapping(name, label); got = heard(name, lambda: hook(u))
+    return got
+def answered(u):
+    """what the press is answered: (the text, an alert); pressed again, it is another update"""
+    n = len(answers()); hook(dict(u, update_id=next(_ids))); got = answers()[n:]; assert len(got) == 1, got
+    return got[0]
+def relief_(name=EVE): return heard(name, lambda: say(name, "/relief"))
+def says(name, text, **more): return heard(name, lambda: say(name, text, **more))
+def _with(name, **more):
+    u = msg(None, CHATS[name]); del u["message"]["text"]; u["message"].update(more); return u
+def a_doc(name, file_name="Worksheet.pdf", file_id="F1", size=1000, **more):
+    return _with(name, document=dict(file_id=file_id, file_unique_id="u", file_name=file_name, file_size=size), **more)
+def a_photo(name, file_id="P1", **more):
+    return _with(name, photo=[dict(file_id=file_id + "-s", file_unique_id="a", width=90, height=67, file_size=1200), dict(file_id=file_id, file_unique_id="c", width=1280, height=960, file_size=210000),
+                              dict(file_id=file_id + "-m", file_unique_id="b", width=320, height=240, file_size=20000)], **more)
+def doc(name, *a, **k): return heard(name, lambda: hook(a_doc(name, *a, **k)))
+def photo(name, *a, **k): return heard(name, lambda: hook(a_photo(name, *a, **k)))
+def to_work(name=EVE, day="Tomorrow, Tue 13 Oct", reason="Medical"):
+    """/relief, as far as the first lesson's work (or what is asked in its place) -> what was said last"""
+    say(name, "/relief"); tap(name, day, "Whole day", reason)
+    if reason == "Other": say(name, "zebra-reason")
+    if board(name)[0] == RIGHT_ROSA: return tap(name, "Yes")
+    say(name, "rosa"); return tap(name, "Ms Rosa Ng")
+def to_list(name=EVE, **kw): to_work(name, **kw); return tap(name, "Later for all the rest")
+def sends(name=EVE): return tap(name, "Send")
+def mine(name=EVE): return absences.for_teacher(name)
+def only(name=EVE):
+    r, = mine(name); return r
+def plain(r):
+    """a record without what is never the same twice (its id, its files' ids) or says how it came (via)"""
+    r = json.loads(json.dumps({k: v for k, v in r.items() if k not in ("id", "via")}))
+    for x in r["lessons"]:
+        for f in x["work"]["files"]: f.pop("id")
+    return r
+def by_page(name=EVE, files=(), **body):
+    """the same absence sent by the page's form (static/relief.js's send and attach) -> its record"""
+    c = who(name); d = dict(dict(dates=["2026-10-13"], periods=None, reason="Medical", reason_text="", reporting_officer=ROSA, lessons=[]), **body)
+    r = c.post("/api/relief/absences", json=d); assert r.status_code == 200, r.get_json()
+    i = r.get_json()["id"]
+    for key, name_, data in files:
+        f = c.post(f"/api/relief/absences/{i}/files", data=dict(file=(io.BytesIO(data), name_)), content_type="multipart/form-data").get_json()
+        w = next(x for x in absences.load(i)["lessons"] if x["key"] == key)["work"]
+        r = c.put(f"/api/relief/absences/{i}/lessons/{quoted(key)}/work", json=dict(text=w["text"], link=w["link"], files=[dict(id=f["id"], name=f["name"])], known=[])); assert r.status_code == 200, r.get_json()
+    return absences.load(i)
+def raw_store():
+    """every byte of the Telegram store's files"""
+    return b"".join(open(p, "rb").read() for p in glob.glob(tgdb.PATH + "*"))
+def secs(hm, day=12):
+    return datetime.datetime.fromisoformat(f"2026-10-{day:02d}T{hm if len(hm) > 5 else hm + ':00'}+08:00").timestamp()
+
+@t
+def the_asking_texts_are_the_plans():
+    assert (AK.HI, AK.SEVERAL, AK.ANOTHER, AK.WHICH_DAY, AK.WHICH_DAYS, AK.DONE, AK.TICK_ONE, AK.NO_DAYS) == ("Hi {name}. Which day are you away?", "Several days", "Another day", WHICH_DAY, WHICH_DAYS, "Done", TICK_ONE, NO_DAYS)
+    assert (AK.WHOLE_OR_SOME, AK.WHOLE, AK.SOME, AK.FROM, AK.TO, AK.REASON, AK.SAY_WHY) == (SPAN, "Whole day", "Some periods", FROM_P, TO_P, REASON, SAY_WHY)
+    assert (AK.RIGHT, AK.YES, AK.SOMEONE_ELSE, AK.WHO, AK.NOT_HERE, AK.NOBODY) == ("Your reporting officer is {name}. Right?", "Yes", "Someone else", WHO_IS, NOT_HERE, NOBODY_MATCHES)
+    assert (AK.SAME, AK.LATER, AK.LATER_ALL, AK.PRESS_ONE, AK.SEND_ONE, AK.SEND, AK.START_AGAIN) == ("Same as before", "Later, in the app", "Later for all the rest", PRESS_ONE, SEND_ONE, "Send", "Start again")
+    assert (AK.NOT_SENT, AK.CANCELLED, AK.NOT_ATTACHED, AK.NOT_TOLD) == (NOT_SENT, NOTHING_SENT, "{name} could not be attached: add it in the app.", "{officer} is not on Telegram: please tell them yourself.")
+    assert absences.NO_LESSONS == NO_LESSONS and absences.TOO_MANY == TOO_MANY and AK.MINUTES == 30 and bot.ACTIONS["ask"][0] == "relief" and bot.ACTIONS["ask"][2] is bot.ANY
+
+@t
+def a_whole_conversation_sends_an_absence():
+    with school():
+        page = by_page(lessons=[dict(key=K2, work=dict(text="Textbook p. 112, Q1–10.\nCollect at the end.", link="", files=[])), dict(key=K5, work=dict(text="", link="https://sls.example.org/ratio-2", files=[])),
+                                dict(key=K8, work=dict(text="", link="", files=[]))])
+    with school(EVE, ROSA, TEAM):
+        h, n = Since(), len(answers())
+        assert relief_() == [(HI, DAY_ROWS)] and [x[:2] for x in talks()] == [(CHATS[EVE], "ask")] and talks()[0][3] == secs("09:30")
+        assert tap(EVE, "Tomorrow, Tue 13 Oct") == [(SPAN, SPAN_ROWS)] and tap(EVE, "Whole day") == [(REASON, REASON_ROWS)] and tap(EVE, "Medical") == [(WHO_IS, LINE)]
+        assert says(EVE, "rosa") == [(WHO_HIT, [["Ms Rosa Ng"]])] and tap(EVE, "Ms Rosa Ng") == [(WORK_2, FIRST_ROWS)]
+        assert says(EVE, " Textbook p. 112, Q1–10.\nCollect at the end. ") == [(WORK_5, LAST_ROWS)]
+        assert says(EVE, "https://sls.example.org/ratio-2") == [(f"{LIST_HEAD}\n{ON_2}{SET_}\n{ON_5}{SET_}", LIST_ROWS)]
+        assert mine() == [] and h.new() == [] and answers()[n:] == [(None, None)] * 4, "nothing is sent before Send; each press is answered, with no word"
+        assert talk_to(EVE, lambda: hook(tapping(EVE, "Send"))) == [(sent_text("2 lessons", "work set for 2"), dict(inline_keyboard=[[dict(text="Open in the app", url=BASE + "/relief#mine")]]))]
+        r = only(); assert plain(r) == plain(page), (plain(r), plain(page))
+        assert r["how"] == "asked" and r["by"] == EVE == r["teacher"] and r["id"] != page["id"] and absences._path(r["id"]) and [x["needed"] for x in r["lessons"]] == [True, True, False]
+        assert h.new() == [by_telegram(EVE, "asked", "asked", r["id"])] and talks() == [] and answers()[-1] == (None, None)
+        send(); assert said(ROSA) == [OFFICER_EVE] and [x for x in said(EVE) if x.startswith("✅")] == [sent_text("2 lessons", "work set for 2")], "the officer is told as by the page"
+        assert [e[2] for e in edits()][-1] == f"{LIST_HEAD}\n{ON_2}{SET_}\n{ON_5}{SET_}\n\nSend"
+        assert says(EVE, "Thanks") == [(HELLO.format(name=EVE), None)] and len(mine()) == 1, "and it is over"
+
+@t
+def every_press_takes_its_buttons_off_and_says_the_choice():
+    with school(EVE, ROSA):
+        relief_()
+        for label in ("Several days", "Tue 13 Oct", "Wed 14 Oct", "Done", "Some periods", "P3 · 09:00", "P7 · 11:30", "Other"):
+            q_, text = asking_of(EVE)["question"], board(EVE)[0]; n, k, c = len(edits()), len(calls("editMessageReplyMarkup")), len(tg.PRACTICE_LOG); tap(EVE, label)
+            assert [m for m, p in tg.PRACTICE_LOG[c:]] == ["answerCallbackQuery"] + (["editMessageReplyMarkup"] if label in ("Tue 13 Oct", "Wed 14 Oct") else ["editMessageText", "sendMessage"]), "answered at once, then changed, then asked"
+            if label in ("Tue 13 Oct", "Wed 14 Oct"): assert len(edits()) == n and calls("editMessageReplyMarkup")[k:][0]["message_id"] == q_ == asking_of(EVE)["question"], "a tick: the same message"
+            else: assert edits()[n:] == [(CHATS[EVE], q_, f"{text}\n\n" + ("Tue 13 Oct, Wed 14 Oct" if label == "Done" else label))] and "reply_markup" not in calls("editMessageText")[-1], label
+        # typed: the question the line answers has no buttons (why), or loses them (who)
+        k = len(calls("editMessageReplyMarkup")); say(EVE, "zebra-reason"); assert len(calls("editMessageReplyMarkup")) == k
+        say(EVE, "m"); q_ = asking_of(EVE)["question"]; k = len(calls("editMessageReplyMarkup")); say(EVE, "rosa"); assert calls("editMessageReplyMarkup")[k:] == [dict(chat_id=CHATS[EVE], message_id=q_)], "its buttons off"
+        tap(EVE, "Ms Rosa Ng"); q_ = asking_of(EVE)["question"]; k, n = len(calls("editMessageReplyMarkup")), len(edits()); say(EVE, "Read p. 5")
+        assert calls("editMessageReplyMarkup")[k:] == [dict(chat_id=CHATS[EVE], message_id=q_)] and len(edits()) == n and asking_of(EVE)["question"] > q_
+        q_ = asking_of(EVE)["question"]; doc(EVE); assert calls("editMessageReplyMarkup")[-1] == dict(chat_id=CHATS[EVE], message_id=q_), "a file is an answer too"
+
+@t
+def an_absence_asked_on_telegram_is_marked_so():
+    with school(EVE, TEAM):
+        to_list(); sends(); r = only(); assert r["via"] == "telegram" and file_of(r["id"]).count(b'"via"') == 1
+        j = by_page(dates=["2026-10-16"])["id"]; assert "via" not in absences.load(j), "the page's has none"
+        v = {x["id"]: x for x in call(TEAM, "get", "/api/relief/absences")["absences"]}; assert v[r["id"]]["via"] == "telegram" and v[r["id"]]["how"] == "asked" and "via" not in v[j]
+        assert absences.set_via(j, "telegram")["via"] == "telegram" == absences.load(j)["via"] and plain(absences.load(j)) == plain(dict(absences.load(j)))
+        for bad in ("dead00beef", "../x"):
+            try: absences.set_via(bad, "telegram"); assert False, bad
+            except ValueError as e: assert str(e) == absences.WRONG
+        seen = []
+        with stand_in(absences, "_save", lambda r: seen.append(absences._LOCK.locked())): absences.set_via(j, "telegram")
+        assert seen == [True], "under the lock"
+    # nothing else shows it: not the message to the officer, the team, the relief teacher, nor the planned relief sheet
+    with school(EVE, ROSA, SAM, TEAM):
+        to_list(); sends(); i = only()["id"]; give(i, K5, SAM); swept(); send(); sheet = who(TEAM).get("/api/relief/planned.csv?start=2026-10-13").get_data(as_text=True)
+        assert "elegram" not in "".join(said(ROSA) + said(SAM) + said(TEAM)) and "elegram" not in sheet
+
+@t
+def several_days_and_some_periods():
+    ten = ["Mon 12 Oct", "Tue 13 Oct", "Wed 14 Oct", "Thu 15 Oct", "Fri 16 Oct", "Mon 19 Oct", "Tue 20 Oct", "Wed 21 Oct", "Thu 22 Oct", "Fri 23 Oct"]
+    pairs = lambda labels: [labels[i:i + 2] for i in range(0, len(labels), 2)]
+    with school(EVE, ROSA):
+        relief_(); assert tap(EVE, "Several days") == [(WHICH_DAYS, pairs(ten) + [["Done"]])]
+        was = talks(); u = tapping(EVE, "Done"); assert answered(u) == (TICK_ONE, True) and talks() == was and edits()[-1][2].endswith("Several days"), "nothing ticked"
+        assert tap(EVE, "Wed 14 Oct") == [] and rows_now(EVE) == pairs(["✓ " + x if x == "Wed 14 Oct" else x for x in ten]) + [["Done"]]
+        tap(EVE, "Fri 23 Oct", "Tue 13 Oct", "✓ Fri 23 Oct"); ticked = pairs(["✓ " + x if x in ("Wed 14 Oct", "Tue 13 Oct") else x for x in ten]) + [["Done"]]
+        assert rows_now(EVE) == ticked and asking_of(EVE)["dates"] == [] and len(said(EVE)) == 2 and {p["message_id"] for p in calls("editMessageReplyMarkup")} == {asking_of(EVE)["question"]}
+        assert tap(EVE, "Done") == [(SPAN, SPAN_ROWS)] and asking_of(EVE)["dates"] == ["2026-10-13", "2026-10-14"]
+        got = tap(EVE, "Some periods"); assert got == [(FROM_P, [["P1 · 08:00", "P2 · 08:30", "P3 · 09:00"], ["P4 · 09:30", "P5 · 10:00", "P6 · 10:30"], ["P7 · 11:00", "P8 · 11:30", "P9 · 12:00"], ["P10 · 12:30", "P11 · 13:00", "P12 · 13:30"]])]
+        assert tap(EVE, "P2 · 08:30") == [(TO_P, [["P2 · 09:00", "P3 · 09:30", "P4 · 10:00"], ["P5 · 10:30", "P6 · 11:00", "P7 · 11:30"], ["P8 · 12:00", "P9 · 12:30", "P10 · 13:00"], ["P11 · 13:30", "P12 · 14:00"]])]
+        assert tap(EVE, "P5 · 10:30") == [(REASON, REASON_ROWS)]
+        tap(EVE, "Course"); say(EVE, "ng rosa"); assert tap(EVE, "Ms Rosa Ng") == [(WORK_2, FIRST_ROWS)] and tap(EVE, "Later, in the app") == [(WORK_W, [["Later, in the app"]])]
+        assert says(EVE, "p. 3")[0][0] == f"Relief for Tue 13 Oct, Wed 14 Oct · P2–P5\nReason: Course\nReporting officer: Ms Rosa Ng\n{ON_2}{NONE_YET}\n• 2A Science P2 on Wed 14 Oct: {SET_}"
+        assert sends() == [(sent_text("2 lessons", "work set for 1"), OPEN_MINE)]
+        r = only(); assert (r["dates"], r["periods"], r["reason"], r["reason_text"], [x["key"] for x in r["lessons"]]) == (["2026-10-13", "2026-10-14"], [1, 4], "Course", "", [K2, KW]) and r["lessons"][1]["work"]["text"] == "p. 3"
+        absences.cancel(r["id"], "x", EVE); want = plain(dict(r, cancelled=None)); page = by_page(dates=["2026-10-13", "2026-10-14"], periods=[1, 4], reason="Course", lessons=[dict(key=KW, work=dict(text="p. 3"))]); assert plain(page) == want
+    with school(EVE, ROSA):                                                                # one period; one lesson
+        relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Some periods", "P6 · 10:30", "P6 · 11:00", "Child sick"); say(EVE, "rosa"); assert tap(EVE, "Ms Rosa Ng") == [(WORK_5, [["Later, in the app"]])]
+        assert tap(EVE, "Later, in the app")[0][0] == f"Relief for Tue 13 Oct · P6\nReason: Child sick\nReporting officer: Ms Rosa Ng\n{ON_5}{NONE_YET}" and sends() == [(sent_text("1 lesson", "no work set yet"), OPEN_MINE)]
+        assert only()["periods"] == [5, 5]
+
+@t
+def another_day_is_one_of_the_next_ten():
+    with school(EVE, ROSA):
+        relief_(); got = tap(EVE, "Another day"); assert got[0][0] == WHICH_DAY and sum(got[0][1], []) == ["Mon 12 Oct", "Tue 13 Oct", "Wed 14 Oct", "Thu 15 Oct", "Fri 16 Oct", "Mon 19 Oct", "Tue 20 Oct", "Wed 21 Oct", "Thu 22 Oct", "Fri 23 Oct"]
+        assert tap(EVE, "Fri 16 Oct") == [(SPAN, SPAN_ROWS)] and asking_of(EVE)["dates"] == ["2026-10-16"] and edits()[-1][2] == "Which day?\n\nFri 16 Oct"
+    # only school days are offered: a weekend, a holiday, the end of term, the days between two terms
+    def first(hm_day, **cal):
+        with school(EVE, calendar=dict(TERM, **cal)): at("09:00", hm_day); got = relief_(); return got
+    assert first(16) == [(HI, [["Today, Fri 16 Oct"], ["Several days"], ["Another day"]])] and first(17) == [(HI, [["Several days"], ["Another day"]])] and first(18) == [(HI, [["Tomorrow, Mon 19 Oct"], ["Several days"], ["Another day"]])]
+    assert first(12, holidays=[dict(name="Made up", start="2026-10-12", end="2026-10-13")]) == [(HI, [["Several days"], ["Another day"]])]
+    two = [dict(name="Term 4", start="2026-09-07", end="2026-10-14", starts_as="Odd"), dict(name="Term 1", start="2026-11-02", end="2026-11-30", starts_as="Odd")]
+    with school(EVE, calendar=dict(terms=two, holidays=[])):
+        relief_(); assert sum(tap(EVE, "Another day")[0][1], []) == ["Mon 12 Oct", "Tue 13 Oct", "Wed 14 Oct", "Mon 2 Nov", "Tue 3 Nov", "Wed 4 Nov", "Thu 5 Nov", "Fri 6 Nov", "Mon 9 Nov", "Tue 10 Nov"]
+    last = lambda day: [dict(name="T", start="2026-09-07", end="2026-10-09", starts_as="Odd"), dict(name="U", start=day, end="2027-03-01", starts_as="Odd")]
+    with school(EVE, calendar=dict(terms=last("2026-12-11"), holidays=[])): assert relief_() == [(HI, [["Several days"], ["Another day"]])] and tap(EVE, "Another day")[0][1] == [["Fri 11 Dec"]], "60 days on"
+    with school(EVE, calendar=dict(terms=last("2026-12-14"), holidays=[])): assert relief_() == [(NO_DAYS, None)] and talks() == []
+    with school(EVE, calendar=dict(terms=last("2026-12-14"), holidays=[])): at("09:00", 15); assert relief_() == [(HI, [["Several days"], ["Another day"]])], "60 days on, again"
+    with school(EVE, calendar=dict(terms=last("2026-12-15"), holidays=[])): at("09:00", 15); assert relief_() == [(NO_DAYS, None)], "61"
+
+@t
+def what_cannot_be_asked_is_said_at_once():
+    with school(EVE, calendar=dict(terms=[], holidays=[])): assert relief_() == [(LS.NO_CALENDAR, None)] and talks() == [] and rows("buttons") == []
+    with school(EVE):
+        with no_pub(): assert relief_() == [(WB.NO_PUB, None)] and talks() == []
+        with stand_in(WB, "_staff", lambda pub: []): assert relief_() == [(f"{EVE} is not on the published timetable or the staff list.", None)] and talks() == [], "the app's own sentence"
+        with stand_in(WB, "_staff", lambda pub: 1 / 0): assert relief_() == [(WENT_WRONG, None)] and talks() == []
+        assert relief_() == [(HI, DAY_ROWS)]
+    with school(HUGO):                                                                     # someone with no lessons at all
+        say(HUGO, "/relief"); assert tap(HUGO, "Tomorrow, Tue 13 Oct") == [(NO_LESSONS, None), ("Hi Mr Hugo Ong. Which day are you away?", DAY_ROWS)]
+
+@t
+def an_unlinked_chat_cannot_ask():
+    with school(EVE):
+        hook(msg("/relief", 990)); assert sent(990) == [(990, NOT_LINKED)] and len(links.tries.fails["tg:990"]) == 1 and talks() == []
+        for k in range(8): hook(msg("/relief", 990))
+        assert len(sent(990)) == 5 and talks() == [] and rows("buttons") == [], "held back as any"
+        with record(EVE, group="executive", extras=dict(relief=False, exams=None, admin=False)): assert relief_() == [(NOT_LINKED, None)] and talks() == [], "without the relief right"
+        with record(EVE, off=True): assert relief_() == [(NOT_LINKED, None)]
+        with broken_accounts(): links.tries.fails.clear(); assert relief_() == [(NOT_LINKED, None)]
+        for kind in ("group", "supergroup", "channel"): n = len(tg.PRACTICE_LOG); hook(msg("/relief", CHATS[EVE], kind=kind)); assert len(tg.PRACTICE_LOG) == n
+        links.tries.fails.clear()
+        for text in ("/relief", "/RELIEF", " /relief ", "/relief@practice_bot", "/relief tomorrow please"): assert says(EVE, text) == [(HI, DAY_ROWS)], text
+        assert len(talks()) == 1 and rows("links")[0]["name"] == EVE
+    with school(EVE):                                                                      # a linked person over the limit: nothing at all, at any step
+        to_work(); was = talks()
+        for k in range(5): links.tries.fail(f"tg:{CHATS[EVE]}")
+        u = tapping(EVE, "Later, in the app"); tg.PRACTICE_LOG.clear(); say(EVE, "p. 5"); say(EVE, "/cancel"); hook(a_doc(EVE)); hook(dict(update_id=next(_ids), edited_message=msg("x", CHATS[EVE])["message"])); hook(u)
+        assert tg.PRACTICE_LOG == [] and talks() == was; say(EVE, "/help"); say(EVE, "/relief"); assert tg.PRACTICE_LOG == [] and mine() == []
+    with school(EVE, SAM):                                                                 # another's press of my button, and mine in another chat
+        to_work(); was = talks(); u = tapping(EVE, "Later, in the app", chat=CHATS[SAM]); assert answered(u) == (NOT_YOURS_BUTTON, True) and talks() == was
+        u = tapping(EVE, "Later, in the app", chat=991); assert answered(u) == (NOT_LINKED, True) and talks() == was
+
+@t
+def other_asks_a_line_and_refuses_an_empty_one():
+    with school(EVE, ROSA):
+        relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day"); assert tap(EVE, "Other") == [(SAY_WHY, LINE)]
+        was = {k: v for k, v in asking_of(EVE).items() if k != "question"}
+        for text in ("", "   ", "\n\t ", "x" * 201, "é " * 150, None, 7, ["x"]): assert says(EVE, text) == [(SAY_WHY, LINE)] and {k: v for k, v in asking_of(EVE).items() if k != "question"} == was, text
+        assert heard(EVE, lambda: hook(a_photo(EVE, caption="zebra"))) == [(SAY_WHY, LINE)] and heard(EVE, lambda: hook(_with(EVE, sticker=dict(file_id="s")))) == [(SAY_WHY, LINE)], "not a line: asked again"
+        assert says(EVE, "  A parent\n meeting  at 10 ") == [(WHO_IS, LINE)]
+        say(EVE, "rosa"); tap(EVE, "Ms Rosa Ng"); text = tap(EVE, "Later for all the rest")[0][0]; assert "Reason: Other\n" in text and "parent" not in text
+        sends(); r = only(); assert (r["reason"], r["reason_text"]) == ("Other", "A parent meeting at 10")
+    for line in ("x" * 200, " " + "é" * 200 + " ", "No", "ok", "ABCD-EFGH", access.staff_code(EVE), "/ill", "7", "<b>x</b>"):       # what looks like a code or a command that is none is the line
+        with school(EVE, ROSA):
+            relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day", "Other"); assert says(EVE, line) == [(WHO_IS, LINE)] and asking_of(EVE)["why"] == line.strip() and deleted() == [] and not links.tries.fails.get(f"tg:{CHATS[EVE]}"), line
+            say(EVE, "rosa"); tap(EVE, "Ms Rosa Ng", "Later for all the rest", "Send"); assert only()["reason_text"] == line.strip()
+    with school(EVE, ROSA):                                                                # the line belongs to Other alone
+        relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day", "Other"); say(EVE, "zebra-reason"); say(EVE, "rosa"); tap(EVE, "Ms Rosa Ng", "Later for all the rest", "Start again", "Tomorrow, Tue 13 Oct", "Whole day", "Course"); say(EVE, "rosa")
+        tap(EVE, "Ms Rosa Ng", "Later for all the rest", "Send"); assert (only()["reason"], only()["reason_text"]) == ("Course", "")
+
+@t
+def the_last_officer_is_offered():
+    with school(EVE, HUGO, SAM):
+        absent(dates=["2026-10-16"], reporting_officer=SAM); at("09:01"); absent(teacher=SAM, dates=["2026-10-13"], reporting_officer=HUGO); at("09:02"); absent(by=HUGO, dates=["2026-10-14"], reporting_officer="")      # mine, another's, and one planned with none
+        relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day"); assert tap(EVE, "Medical") == [("Your reporting officer is Mr Sam Tan. Right?", [["Yes", "Someone else"]])]
+        assert tap(EVE, "Yes") == [(WORK_2, FIRST_ROWS)] and asking_of(EVE)["officer"] == SAM and edits()[-1][2].endswith("Right?\n\nYes")
+        relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day", "Medical"); assert tap(EVE, "Someone else") == [(WHO_IS, LINE)] and says(EVE, "ROSA") == [(WHO_HIT, [["Ms Rosa Ng"]])]
+    for officer in ("", EVE, "Mr Nobody Known", None, 7):                                  # none, themself, gone: the one before it
+        with school(EVE):
+            absent(dates=["2026-10-16"], reporting_officer=ROSA); at("09:01"); i = absent(dates=["2026-10-14"]); change_record(i, lambda r: r.update(reporting_officer=officer)); change_record(i, lambda r: r.update(cancelled=dict(at=clock.now, by=EVE, why="x")))
+            relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day"); assert tap(EVE, "Medical") == [(RIGHT_ROSA, [["Yes", "Someone else"]])], officer
+    with school(EVE):                                                                      # gone between the question and the press: refused, and the buttons stay
+        absent(dates=["2026-10-16"]); relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day", "Medical"); was = talks(); u = tapping(EVE, "Yes"); real = WB._staff
+        with stand_in(WB, "_staff", lambda pub: [p for p in real(pub) if p["name"] != ROSA]): assert answered(u) == (f"{ROSA} is not on the published timetable or the staff list.", True) and talks() == was
+        assert tap(EVE, "Yes") == [(WORK_2, FIRST_ROWS)]
+    # the search
+    with school(EVE):
+        relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day", "Medical")
+        assert says(EVE, "zzz") == [(NOBODY_MATCHES, LINE)] and says(EVE, "evelyn") == [(NOBODY_MATCHES, LINE)], "never themself"
+        assert says(EVE, "  ") == [(NOBODY_MATCHES, LINE)] and says(EVE, "lee MS") == [(WHO_HIT, [["Ms Maya Lee"]])], "every word, in any order and case"
+        assert says(EVE, "mr") == [(WHO_HIT, [[p["name"]] for p in AP.listing(SCHOOL) if "Mr " in p["name"]])] and 2 < len(rows_now(EVE)) <= 8
+        assert says(EVE, "rosa") == [(WHO_HIT, [["Ms Rosa Ng"]])] and says(EVE, "maya") == [(WHO_HIT, [["Ms Maya Lee"]])], "typed again: looked for again"
+        u = callback(next(b["callback_data"] for m, p in tg.PRACTICE_LOG for row in (p.get("reply_markup") or {}).get("inline_keyboard", []) for b in row if b["text"] == "Ms Rosa Ng"), question(EVE, WHO_HIT)); assert answered(u) == (OLD_BUTTON, True), "of the search before"
+        assert tap(EVE, "Ms Maya Lee") == [(WORK_2, FIRST_ROWS)] and asking_of(EVE)["officer"] == MAYA
+    nine = RP.fake_pub([dict(name=EVE, dept="Science")] + [dict(name=f"Mx Made Up {k}", dept="Science") for k in range(9)], SCHOOL["model"]["lessons"][:2]); nine["model"].update(NP=12, school=SCHOOL["model"]["school"])
+    with school(EVE), no_pub(nine):
+        relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day", "Medical")
+        assert says(EVE, "made") == [(WHO_HIT + "\n" + NOT_HERE, [[f"Mx Made Up {k}"] for k in range(8)])] and says(EVE, "made 8") == [(WHO_HIT, [["Mx Made Up 8"]])] and len(says(EVE, "up")[0][1]) == 8
+
+@t
+def a_shared_lesson_is_left_out():
+    keys_ = lambda: [x["key"] for x in asking_of(EVE)["lessons"]]
+    def on_page(dates="2026-10-13"):
+        """the lessons the page's form would count as to cover"""
+        return [x["key"] for x in call(EVE, "get", f"/api/relief/lessons?dates={dates}")["lessons"] if not x["others"] and not x["stopped"]]
+    with school(EVE, BUSY):
+        to_work(); assert keys_() == [K2, K5] == on_page(), "Busy is there for the third"
+        absent(teacher=BUSY); to_work(); assert keys_() == [K2, K5, K8] == on_page(), "away too"
+        tap(EVE, "Later for all the rest"); sends(); assert [(x["key"], x["needed"]) for x in only()["lessons"]] == [(K2, True), (K5, True), (K8, True)]
+    with exam_school(EVE):                                                                 # an exam stops one: not asked of, and kept in the absence as the page keeps it
+        e = exam("1C"); to_work(); assert keys_() == [K5] == on_page(); tap(EVE, "Later, in the app"); assert sends() == [(sent_text("1 lesson", "no work set yet", "Ms Rosa Ng is not on Telegram: please tell them yourself."), OPEN_MINE)]
+        assert [(x["key"], x["needed"]) for x in only()["lessons"]] == [(K2, True), (K5, True), (K8, False)]; want = plain(only())
+    with exam_school(EVE): exam("1C"); assert plain(by_page()) == want, "the same record"
+    with exam_school(EVE, BUSY):                                                           # a co-teacher on a duty is not there
+        exam("4A", duties=[(BUSY, 720, 750)]); to_work(); assert K8 in keys_() and keys_() == on_page()
+    with exam_school(EVE):                                                                 # every lesson stopped: sent as the page's is, with none to set work for
+        exam("1A", "1B", "1C", "5A"); got = to_work(); assert got == [(LIST_HEAD, LIST_ROWS)] and on_page() == []
+        assert sends() == [(sent_text("0 lessons", "no work set yet", "Ms Rosa Ng is not on Telegram: please tell them yourself."), OPEN_MINE)] and [x["needed"] for x in only()["lessons"]] == [True, True, False]
+    with exam_school(EVE):                                                                 # a shared lesson alone, and stopped: the page sends it, and so it goes on
+        exam("5A"); relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Some periods", "P9 · 12:00"); assert tap(EVE, "P9 · 12:30") == [(REASON, REASON_ROWS)] and by_page(periods=[8, 8])["lessons"][0]["needed"] is False
+    # no lesson that needs relief: the sentence, and the day asked again
+    with school(EVE):
+        relief_(); assert tap(EVE, "Today, Mon 12 Oct") == [(NO_LESSONS, None), (HI, DAY_ROWS)] and asking_of(EVE)["dates"] == [] and edits()[-1][2] == f"{HI}\n\nToday, Mon 12 Oct"
+        assert tap(EVE, "Tomorrow, Tue 13 Oct") == [(SPAN, SPAN_ROWS)]
+        tap(EVE, "Some periods", "P9 · 12:00"); assert tap(EVE, "P10 · 13:00") == [(NO_LESSONS, None), (SPAN, SPAN_ROWS)], "the shared one alone"
+        tap(EVE, "Some periods", "P1 · 08:00"); assert tap(EVE, "P3 · 09:30") == [(REASON, REASON_ROWS)] and asking_of(EVE)["periods"] == [0, 2]
+    with exam_school(EVE):                                                                 # a duty counts, as the page counts it: that day, at that time
+        exam("5A", date="2026-10-15", duties=[(EVE, 540, 600)]); relief_(); tap(EVE, "Another day"); assert tap(EVE, "Thu 15 Oct") == [(SPAN, SPAN_ROWS)]
+        tap(EVE, "Some periods", "P6 · 10:30"); assert tap(EVE, "P7 · 11:30") == [(NO_LESSONS, None), (SPAN, SPAN_ROWS)]
+        tap(EVE, "Whole day", "Medical"); say(EVE, "rosa"); assert tap(EVE, "Ms Rosa Ng") == [("Relief for Thu 15 Oct · whole day\nReason: Medical\nReporting officer: Ms Rosa Ng", LIST_ROWS)] and sends()[0][0].startswith("✅ Sent to the relief team: 0 lessons, no work set yet.") and only()["lessons"] == []
+    with exam_school(EVE):                                                                 # what the exams mean cannot be read: as on the page
+        exam("1C")
+        with unreadable(), quiet_app(): to_work(); assert keys_() == [K2, K5]
+    # nothing to cover any more by the time the officer is known (Busy there after all): the sentence, and the day again
+    with school(EVE, BUSY):
+        absent(teacher=BUSY); relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Some periods", "P9 · 12:00", "P9 · 12:30", "Medical"); say(EVE, "rosa"); absences.cancel(mine(BUSY)[0]["id"], "x", BUSY)
+        assert tap(EVE, "Ms Rosa Ng") == [(NO_LESSONS, None), (HI, DAY_ROWS)] and asking_of(EVE)["reason"] is None
+
+@t
+def an_overlap_is_refused_with_the_apps_sentence():
+    with school(EVE, ROSA):
+        i = absent(); to_list(); was, f, h = talks(), file_of(i), Since(); OVER = f"{EVE} has already sent an absence for {EVE} on Tue 13 Oct."
+        n = len(edits()); u = tapping(EVE, "Send"); assert answered(u) == (OVER, True) and talks() == was and len(mine()) == 1 and file_of(i) == f and h.new() == [] and len(edits()) == n and not [x for x in said(EVE) if x.startswith("✅")]
+        with stand_in(TE, "soon", lambda: 1 / 0), stand_in(WB, "_sync_exams", lambda pub: 1 / 0): assert answered(tapping(EVE, "Send")) == (OVER, True) and talks() == was, "pressed again: the same; nothing follows a refusal"
+        absences.cancel(i, "x", EVE); assert sends() == [(sent_text("2 lessons", "no work set yet"), OPEN_MINE)] and len(mine()) == 2, "its buttons work still"
+    with school(EVE):
+        absent(); to_list(); assert answered(tapping(EVE, "Send"))[1] is True and tap(EVE, "Start again") == [(HI, DAY_ROWS)] and asking_of(EVE)["dates"] == [] and edits()[-1][2].endswith("\n\nStart again")
+    with school(EVE):                                                                      # refused, and another talk was opened meanwhile (another copy of the app): that one stays
+        def meanwhile(*a, **k):
+            with tgdb.db() as c: c.execute("INSERT INTO talks(chat, kind, data, until) VALUES (?, 'change', '{}', 9e12)", (CHATS[EVE],))
+            raise ValueError("Made up.")
+        to_list()
+        with stand_in(absences, "new", meanwhile): assert answered(tapping(EVE, "Send")) == ("Made up.", True)
+        assert [x[1] for x in talks()] == ["change"]
+    # a lesson that is not there any more between the list and Send (a publish), or an officer who is not
+    with school(EVE, ROSA):
+        to_list(); was = talks(); less = json.loads(json.dumps(SCHOOL)); less["model"]["lessons"] = [L for L in less["model"]["lessons"] if L["p"] != 5]
+        with no_pub(less): assert answered(tapping(EVE, "Send")) == (absences.CHANGED, True) and talks() == was and mine() == []; assert tap(EVE, "Start again") == [(HI, DAY_ROWS)]
+        assert to_list()[0][0].count("•") == 2 and sends()[0][0].startswith("✅")
+    with school(EVE):
+        to_list(); real = AP.listing
+        with stand_in(AP, "listing", lambda pub, data=None: [p for p in real(pub, data) if p["name"] != ROSA]): assert answered(tapping(EVE, "Send")) == ("Choose your reporting officer.", True) and mine() == [] and asking_of(EVE)
+    with school(EVE):                                                                      # a day that has passed by then: the day's button, and Send
+        at("23:50", 13); say(EVE, "/relief"); u = tapping(EVE, "Today, Tue 13 Oct"); at("00:01", 14); was = talks(); assert answered(u) == ("Choose up to 10 school days, today or later.", True) and talks() == was
+        at("23:50", 13); to_list(day="Today, Tue 13 Oct"); at("00:05", 14); was = talks(); assert answered(tapping(EVE, "Send")) == ("Choose up to 10 school days, today or later.", True) and talks() == was and mine() == []
+    with school(EVE):                                                                      # added meanwhile: in the absence, with no work
+        to_list(); more = json.loads(json.dumps(SCHOOL)); more["model"]["lessons"].append(lesson(TUE, 10, 1, ["4A"], "Biology", [EVE]))
+        with no_pub(more): assert sends()[0][0].startswith("✅ Sent to the relief team: 3 lessons, no work set yet.")
+
+@t
+def a_photo_and_a_document_are_attached():
+    with school(EVE, ROSA):
+        to_work(); got = []
+        with stand_in(tg, "download", lambda fid, limit: got.append((fid, limit))): assert doc(EVE, "Work sheet (1).pdf", "F-doc", caption="Q1 to Q5\nthen hand in") == [(WORK_5, LAST_ROWS)] and photo(EVE, "F-pic") == [(f"{LIST_HEAD}\n{ON_2}{SET_}\n{ON_5}{SET_}", LIST_ROWS)]
+        assert got == [] and [m for m, p in tg.PRACTICE_LOG if m in ("download", "getFile")] == [], "nothing is downloaded before Send"
+        assert json.dumps(asking_of(EVE)).count("F-pic") == 1 and "F-pic-s" not in json.dumps(asking_of(EVE)), "the largest size"
+        fetched = []
+        with stand_in(tg, "download", lambda fid, limit: (fetched.append((fid, limit, absences._LOCK.locked(), bot._pressing.locked(), len(mine()), len(talks()))), f"bytes of {fid}".encode())[1]):
+            assert sends() == [(sent_text("2 lessons", "work set for 2"), OPEN_MINE)]
+        assert fetched == [("F-doc", FI.MAX, False, False, 1, 0), ("F-pic", FI.MAX, False, False, 1, 0)], fetched
+        r = only(); a, b = r["lessons"][0]["work"], r["lessons"][1]["work"]; assert (a["text"], a["link"], [f["name"] for f in a["files"]]) == ("Q1 to Q5\nthen hand in", "", ["Work sheet (1).pdf"]) and (b["text"], [f["name"] for f in b["files"]]) == ("", ["photo 1.jpg"])
+        assert open(FI.path(r["id"], a["files"][0]["id"]), "rb").read() == b"bytes of F-doc" and open(FI.path(r["id"], b["files"][0]["id"]), "rb").read() == b"bytes of F-pic"; want = plain(r)
+    with school(EVE, ROSA):
+        assert plain(by_page(files=[(K2, "Work sheet (1).pdf", b"bytes of F-doc"), (K5, "photo 1.jpg", b"bytes of F-pic")], lessons=[dict(key=K2, work=dict(text="Q1 to Q5\nthen hand in"))])) == want, "as the page's form makes it"
+    # a link alone is the link; with anything else it is text; line breaks kept
+    for line, text, link in (("https://x.example.org/a?b=c#d", "", "https://x.example.org/a?b=c#d"), (" HTTP://X.example.org ", "", "HTTP://X.example.org"), ("see https://x.example.org", "see https://x.example.org", ""),
+                             ("https://x.example.org\nhttps://y.example.org", "https://x.example.org\nhttps://y.example.org", ""), ("ftp://x.example.org", "ftp://x.example.org", ""), ("a\n\n b ", "a\n\n b", ""), ("ABCD-EFGH", "ABCD-EFGH", ""), ("/ill", "/ill", ""), ("No", "No", "")):
+        with school(EVE, ROSA): to_work(); say(EVE, line); tap(EVE, "Later, in the app", "Send"); w = only()["lessons"][0]["work"]; assert (w["text"], w["link"]) == (text, link), line
+    # Same as before: the last earlier lesson's text, link and files; only once there is one
+    with school(EVE, ROSA):
+        say(EVE, "/relief"); tap(EVE, "Several days", "Tue 13 Oct", "Wed 14 Oct", "Fri 16 Oct", "Done", "Whole day", "Medical"); say(EVE, "rosa"); tap(EVE, "Ms Rosa Ng")
+        assert tap(EVE, "Later, in the app")[0][1] == FIRST_ROWS, "no work before: nothing to repeat"
+        assert doc(EVE, "a.pdf", "F-a", caption="Read")[0][1] == [["Same as before", "Later, in the app"], ["Later for all the rest"]]
+        assert tap(EVE, "Same as before")[0][1] == LAST_ROWS and tap(EVE, "Same as before")[0][0].split("\n")[3:] == [f"{ON_2}{NONE_YET}", f"{ON_5}{SET_}", f"• 2A Science P2 on Wed 14 Oct: {SET_}", f"• 1A Art P1–P2 on Fri 16 Oct: {SET_}"]
+        n = len(tg.PRACTICE_LOG); assert sends()[0][0] == sent_text("4 lessons", "work set for 3") and [p["file_id"] for m, p in tg.PRACTICE_LOG[n:] if m == "download"] == ["F-a"], "one file, downloaded once"
+        assert [m for m, p in tg.PRACTICE_LOG[n:]] == ["answerCallbackQuery", "editMessageText", "download", "sendMessage"], "the press is answered before anything is fetched"
+        works = {x["key"]: x["work"] for x in only()["lessons"]}; assert works[K2] == dict(text="", link="", files=[]) and works[K5] == works[KW] == works[KF] and works[KF]["text"] == "Read" and [f["name"] for f in works[KF]["files"]] == ["a.pdf"]
+        assert len(os.listdir(os.path.join(FI.DIR, only()["id"]))) == 1
+    with school(EVE, ROSA): to_work(); say(EVE, "https://x.example.org"); tap(EVE, "Same as before", "Send"); assert [x["work"]["link"] for x in only()["lessons"]] == ["https://x.example.org"] * 2 + [""]
+
+@t
+def too_big_or_wrong_kind_is_named():
+    with school(EVE, ROSA):
+        to_work(); was = {k: v for k, v in asking_of(EVE).items() if k != "question"}; again = lambda s: [(s, None), (WORK_2, FIRST_ROWS)]
+        for name_, size, sentence in (("film.mp4", 5, FI.WRONG_KIND), ("archive.zip", 5, FI.WRONG_KIND), ("no extension", 5, FI.WRONG_KIND), (".pdf", 5, FI.WRONG_KIND), ("big.pdf", FI.MAX + 1, FI.TOO_BIG), ("empty.pdf", 0, FI.WRONG_KIND), ("x.PDF.exe", 5, FI.WRONG_KIND)):
+            assert doc(EVE, name_, "F", size) == again(f"{name_}: {sentence}"), name_
+        assert doc(EVE, "a" * 300 + ".zip", "F", 5) == again("a" * 96 + ".zip: " + FI.WRONG_KIND), "a name this long is cut"
+        assert doc(EVE, "two\nlines.zip", "F", 5) == again(f"two lines.zip: {FI.WRONG_KIND}") and doc(EVE, None, "F", 5) == again(f"file: {FI.WRONG_KIND}")
+        u = a_photo(EVE); [p.update(file_size=FI.MAX + 1) for p in u["message"]["photo"]]; assert heard(EVE, lambda: hook(u)) == again(f"photo 1.jpg: {FI.TOO_BIG}")
+        assert says(EVE, "x" * 2001) == again("Keep the work under 2000 characters.") and says(EVE, "https://" + "x" * 500) == again("A link starts with http:// or https://.") and doc(EVE, caption="x" * 2001) == again("Keep the work under 2000 characters.")
+        assert {k: v for k, v in asking_of(EVE).items() if k != "question"} == was and FI.MAX == 10 * 1024 * 1024, "nothing of these is kept"
+        assert photo(EVE)[0][0] == WORK_5 and doc(EVE, "ten.PDF", "F", FI.MAX)[0][0].startswith("Relief for"), "just within"
+    for kind in (dict(sticker=dict(file_id="s", emoji="x")), dict(voice=dict(file_id="v", duration=1)), dict(video=dict(file_id="v")), dict(video_note=dict(file_id="v")), dict(audio=dict(file_id="a")), dict(location=dict(latitude=1, longitude=1)),
+                 dict(contact=dict(phone_number="1")), dict(document=7), dict(document={}), dict(document=dict(file_id=7, file_name="a.pdf")), dict(photo=[]), dict(photo=[7]), dict(photo=[dict(width=1)]), {}):
+        with school(EVE, ROSA):
+            to_work(); was = {k: v for k, v in asking_of(EVE).items() if k != "question"}; assert heard(EVE, lambda: hook(_with(EVE, **kind))) == [(SEND_ONE, None), (WORK_2, FIRST_ROWS)], kind
+            assert {k: v for k, v in asking_of(EVE).items() if k != "question"} == was
+    with school(EVE, ROSA):                                                                # a message changed after it was sent: here alone anything is said of it
+        edit = lambda text: dict(update_id=next(_ids), edited_message=msg(text, CHATS[EVE])["message"])
+        assert heard(EVE, lambda: hook(edit("/relief"))) == [] and heard(EVE, lambda: hook(edit(links.new_code(SAM)["code"]))) == [] and links.name_of(CHATS[EVE]) == EVE
+        relief_(); assert heard(EVE, lambda: hook(edit("x"))) == [(PRESS_ONE, None), (HI, DAY_ROWS)] and heard(EVE, lambda: hook(edit("/cancel"))) == [(PRESS_ONE, None), (HI, DAY_ROWS)] and asking_of(EVE)
+        to_work(); assert heard(EVE, lambda: hook(edit("p. 5"))) == [(SEND_ONE, None), (WORK_2, FIRST_ROWS)] and asking_of(EVE)["work"] == {}
+        j = told_planned(dates=["2026-10-16"]); press(EVE, "cancel"); assert heard(EVE, lambda: hook(edit("The course is off"))) == [] and [x[1] for x in talks()] == ["cancel"]
+
+@t
+def the_files_of_an_album_belong_to_one_lesson():
+    with school(EVE, ROSA):
+        to_work(); assert photo(EVE, "A1", media_group_id="g1", caption="Page 1") == [(WORK_5, LAST_ROWS)]; was = talks()[0][3]; at("09:05")
+        assert photo(EVE, "A2", media_group_id="g1") == [] and doc(EVE, "a3.pdf", "A3", media_group_id="g1", caption="and 2") == [], "with no second question"
+        assert talks()[0][3] == was + 300 and all(r["until"] == was + 300 for r in rows("buttons")) and asking_of(EVE)["at"] == 1 and type(asking_of(EVE)["question"]) is int
+        assert photo(EVE, "A2", media_group_id="g1") == [], "the same one twice"
+        for k in (4, 5): assert photo(EVE, f"A{k}", media_group_id="g1") == []
+        assert photo(EVE, "A6", media_group_id="g1") == [(f"photo 5.jpg: {TOO_MANY}", None)] and doc(EVE, "x.zip", "A7", media_group_id="g1") == [(f"x.zip: {FI.WRONG_KIND}", None)] and asking_of(EVE)["step"] == "work"
+        assert photo(EVE, "B1", media_group_id="g2")[0][0].startswith("Relief for") and photo(EVE, "B2", media_group_id="g2") == [] and photo(EVE, "A9", media_group_id="g9") == [(PRESS_ONE, None), (board(EVE)[0], LIST_ROWS)], "after the last lesson too; another album is none's"
+        assert sends()[0][0] == sent_text("2 lessons", "work set for 2"); a, b = [x["work"] for x in only()["lessons"][:2]]
+        assert a["text"] == "Page 1\nand 2" and [f["name"] for f in a["files"]] == ["photo 1.jpg", "photo 2.jpg", "a3.pdf", "photo 3.jpg", "photo 4.jpg"] and [f["name"] for f in b["files"]] == ["photo 5.jpg", "photo 6.jpg"], (a, b)
+    with school(EVE, ROSA):                                                                # Same as before, and then the rest of that album
+        to_work(); photo(EVE, "A1", media_group_id="g1"); tap(EVE, "Same as before"); photo(EVE, "A2", media_group_id="g1"); sends(); assert [[f["name"] for f in x["work"]["files"]] for x in only()["lessons"]] == [["photo 1.jpg", "photo 2.jpg"]] * 2 + [[]]
+    with school(EVE, ROSA):                                                                # its first was refused: asked again, and the next is the answer
+        to_work(); assert doc(EVE, "x.zip", "A1", media_group_id="g1") == [(f"x.zip: {FI.WRONG_KIND}", None), (WORK_2, FIRST_ROWS)] and doc(EVE, "y.pdf", "A2", media_group_id="g1") == [(WORK_5, LAST_ROWS)]
+    for lock in (None, contextlib.nullcontext()) * 3:                                      # all at once, as Telegram posts them; in two copies of the app too
+      with school(EVE, ROSA):
+        to_work(); ups = [a_photo(EVE, f"A{k}", media_group_id="g1") for k in range(4)]
+        with stand_in(bot, "_pressing", lock or bot._pressing): at_once(*[lambda u=u: hook(u) for u in ups])
+        d = asking_of(EVE); assert d["at"] == 1 and [len(AK._work_of(d, k)["files"]) for k in (K2, K5)] == [4, 0] and sorted(f[0] for f in AK._work_of(d, K2)["files"]) == ["A0", "A1", "A2", "A3"] and type(d["question"]) is int, d
+        assert says(EVE, "p. 5")[0][0].startswith("Relief for") and sends()[0][0].startswith("✅")
+    with school(EVE, ROSA):                                                                # the question for the next lesson is on its way while the album goes on: its id is noted, and its answer taken
+        to_work(); real, nested = tg.call, []
+        def slow(method, params=None, **kw):
+            if method == "sendMessage" and params["text"] == WORK_5 and not nested: nested.append(1); hook(a_photo(EVE, "A2", media_group_id="g1"))
+            return real(method, params, **kw)
+        with stand_in(tg, "call", slow): photo(EVE, "A1", media_group_id="g1")
+        assert nested and type(asking_of(EVE)["question"]) is int and len(AK._work_of(asking_of(EVE), K2)["files"]) == 2 and says(EVE, "p. 5")[0][0].startswith("Relief for")
+    for odd in (7, "", None, ["g1"], {}):                                                  # what is no album id is none
+        with school(EVE, ROSA): to_work(); photo(EVE, "A1", media_group_id=odd); assert photo(EVE, "A2", media_group_id=odd)[0][0].startswith("Relief for"), odd
+
+@t
+def a_file_that_cannot_be_had_is_named_and_the_rest_goes():
+    lost = lambda *names: "\n".join(f"{n} could not be attached: add it in the app." for n in names)
+    with school(EVE, ROSA):
+        to_work(); doc(EVE, "a.pdf", "F-a", media_group_id="g"); doc(EVE, "b.pdf", "F-b", media_group_id="g"); tap(EVE, "Same as before")
+        with stand_in(tg, "download", lambda fid, limit: None if fid == "F-a" else b"b"): assert sends() == [(lost("a.pdf"), None), (sent_text("2 lessons", "work set for 2"), OPEN_MINE)], "named once"
+        assert [[f["name"] for f in x["work"]["files"]] for x in only()["lessons"]] == [["b.pdf"], ["b.pdf"], []] and len(os.listdir(os.path.join(FI.DIR, only()["id"]))) == 1
+    def boom(*a, **k): raise RuntimeError(f"{EVE} zebra-work F-a")
+    for module, name in ((tg, "download"), (FI, "save"), (absences, "set_work")):           # whatever fails: the absence is sent, once, and said to be
+        h = Grab(); KINDS.addHandler(h)
+        try:
+            with school(EVE, ROSA):
+                to_work(); doc(EVE, "a.pdf", "F-a"); e = Since(); u = tapping(EVE, "Later, in the app"); hook(u)
+                with stand_in(module, name, boom): assert sends() == [(lost("a.pdf"), None), (sent_text("2 lessons", "no work set yet"), OPEN_MINE)], name
+                assert len(mine()) == 1 and [x[3] for x in e.new()] == ["asked"] and talks() == [] and only()["via"] == "telegram" and only()["lessons"][0]["work"]["files"] == []
+                assert not os.path.isdir(os.path.join(FI.DIR, only()["id"])) or os.listdir(os.path.join(FI.DIR, only()["id"])) == [], "no file is left that no lesson lists"
+        finally: KINDS.removeHandler(h)
+        assert h.records and not any(w in r.getMessage() for r in h.records for w in (EVE, "zebra", "F-a", "a.pdf")), [r.getMessage() for r in h.records]
+    with school(EVE, ROSA):                                                                # the answer of Telegram is larger than it said, or of no bytes
+        to_work(); doc(EVE, "a.pdf", "F-a"); tap(EVE, "Later, in the app")
+        with stand_in(tg, "download", lambda fid, limit: b""): assert sends()[0] == (lost("a.pdf"), None)
+    with school(EVE, ROSA, TEAM):                                                          # cancelled on the page while its files come; a lesson an exam took away
+        to_work(); doc(EVE, "a.pdf", "F-a"); tap(EVE, "Later, in the app")
+        with stand_in(tg, "download", lambda fid, limit: (absences.cancel(only()["id"], "x", EVE), b"x")[1]): assert sends()[0] == (lost("a.pdf"), None)
+        assert only()["cancelled"] and only()["lessons"][0]["work"]["files"] == [] and only()["lessons"][0]["work"]["text"] == ""
+    with school(EVE, ROSA):                                                                # text set in the app meanwhile is kept, and so is a file added there
+        to_work(); doc(EVE, "a.pdf", "F-a"); tap(EVE, "Later, in the app")
+        def meanwhile(fid, limit):
+            i = only()["id"]; f = FI.save(i, "mine.pdf", b"m"); absences.set_work(i, K2, dict(text="Typed there", link="https://x.example.org", files=[dict(id=f["id"], name=f["name"])], known=[]), EVE); return b"x"
+        with stand_in(tg, "download", meanwhile): assert sends()[0][0] == sent_text("2 lessons", "work set for 1")
+        w = only()["lessons"][0]["work"]; assert (w["text"], w["link"], [f["name"] for f in w["files"]]) == ("Typed there", "https://x.example.org", ["mine.pdf", "a.pdf"])
+    with school(EVE, ROSA):                                                                # a backup's own files are kept (the exams committee's absence moved into this one)
+        to_work(); doc(EVE, "a.pdf", "F-a"); tap(EVE, "Later, in the app"); sends(); assert len(only()["lessons"][0]["work"]["files"]) == 1
+    with school(EVE, ROSA):                                                                # every file failing: one message
+        to_work(); [doc(EVE, f"{k}.pdf", f"F{k}", media_group_id="g") for k in range(5)]; tap(EVE, "Later, in the app")
+        with stand_in(tg, "download", lambda fid, limit: None): assert sends() == [(lost(*[f"{k}.pdf" for k in range(5)]), None), (sent_text("2 lessons", "no work set yet"), OPEN_MINE)]
+
+@t
+def the_app_failing_after_the_save_never_sends_it_twice():
+    def boom(*a, **k): raise RuntimeError(f"{EVE} zebra-reason")
+    with school(EVE, ROSA), quiet_app():                                                   # not marked: sent all the same
+        to_list(); e = Since()
+        with stand_in(absences, "set_via", boom): assert sends()[0][0].startswith("✅ Sent")
+        assert len(mine()) == 1 and "via" not in only() and [x[3] for x in e.new()] == ["asked"] and talks() == []
+    for module, name in ((WB, "_noted"), (WB, "_sync_exams"), (WB, "_soon"), (WB, "_tell_soon"), (links, "reachable"), (absences, "load")):
+        with school(EVE, ROSA), quiet_app():
+            to_list(); u = tapping(EVE, "Send"); again = tapping(EVE, "Send")
+            with stand_in(module, name, boom): hook(u)
+            assert len(mine()) == 1 and talks() == [] and [x for x in said(EVE) if x.startswith("✅ Sent")], name
+            assert answered(again) == (OLD_BUTTON, True) and len(mine()) == 1, name
+    class Dies(BaseException): pass
+    def dies(*a, **k): raise Dies()
+    for module, name in ((absences, "set_via"), (WB, "_noted"), (tg, "download"), (absences, "set_work")):       # the app stops there: one absence, and pressing again makes no other
+        with school(EVE, ROSA):
+            to_work(); doc(EVE, "a.pdf", "F-a"); tap(EVE, "Later, in the app"); again = tapping(EVE, "Send"); u = tapping(EVE, "Send")
+            with stand_in(module, name, dies):
+                try: handled(u)
+                except Dies: pass
+            assert len(mine()) == 1 and not bot._pressing.locked() and not absences._LOCK.locked(), name
+            assert answered(again) == (OLD_BUTTON, True) and len(mine()) == 1, name
+    with school(EVE, ROSA):                                                                # in the save itself: nothing is known of it, so the conversation is over
+        to_list(); u, again = tapping(EVE, "Send"), tapping(EVE, "Send"); n = len(edits())
+        with stand_in(absences, "new", boom): assert answered(u) == (WENT_WRONG, True)
+        assert mine() == [] and talks() == [] and len(edits()) == n and answered(again) == (OLD_BUTTON, True), "one press is one try"
+    with school(EVE, ROSA):                                                                # what follows happens in the page's order, with nothing held, before the press is answered
+        to_list(); order, real = [], (WB._noted, WB._sync_exams, WB._soon, WB._tell_soon, tg.call); held = lambda: (absences._LOCK.locked(), bot._pressing.locked(), bot._counting.locked())
+        with stand_in(WB, "_noted", lambda what, r, w, by=None: (order.append(("noted", what, w, by, "via" in absences.load(r["id"]), *held())), real[0](what, r, w, by=by))), stand_in(WB, "_sync_exams", lambda pub: (order.append(("sync", pub is SCHOOL, *held())), real[1](pub))), \
+                stand_in(WB, "_soon", lambda **kw: (order.append(("soon", kw, *held())), real[2](**kw))[1]), stand_in(WB, "_tell_soon", lambda: (order.append(("tell", *held())), real[3]())), \
+                stand_in(tg, "call", lambda m, p=None, **kw: (order.append((m, *held())), real[4](m, p, **kw))[1]): sends()
+        F = (False, False, False); assert order == [("noted", "asked", "asked", (EVE, "telegram"), True, *F), ("sync", True, *F), ("soon", {}, *F), ("tell", *F), ("answerCallbackQuery", *F), ("editMessageText", *F), ("sendMessage", *F)], order
+    with school(EVE, ROSA, SAM):                                                           # ... and the page's own, by the same function
+        order = []
+        with stand_in(WB, "_noted", lambda what, r, w, by=None: order.append(("noted", what, w, by))), stand_in(WB, "_sync_exams", lambda pub: order.append("sync")), stand_in(WB, "_soon", lambda **kw: order.append(("soon", kw))), stand_in(WB, "_tell_soon", lambda: order.append("tell")): by_page()
+        assert order == [("noted", "asked", "asked", None), "sync", ("soon", {}), "tell"], order
+
+@t
+def two_presses_of_send_at_once_make_one_absence():
+    for lock in (None, contextlib.nullcontext()):                                          # in one copy of the app, and (no lock between them) in two
+        for _ in range(3):
+            with school(EVE, ROSA):
+                to_list(); ups, h = [tapping(EVE, "Send") for _ in range(6)], Since()
+                with stand_in(bot, "_pressing", lock or bot._pressing): at_once(*[lambda u=u: hook(u) for u in ups])
+                assert len(mine()) == 1 and len(h.new()) == 1 and sorted(answers()[-6:], key=str) == sorted([(None, None)] + [(OLD_BUTTON, True)] * 5, key=str), answers()[-6:]
+                assert [x for x in said(EVE) if x.startswith("✅")] == [sent_text("2 lessons", "no work set yet")] and talks() == []
+        with school(EVE, ROSA):                                                            # two buttons of one question at once: one of them
+            relief_(); ups = [tapping(EVE, x) for x in ("Tomorrow, Tue 13 Oct", "Several days", "Another day")]
+            with stand_in(bot, "_pressing", lock or bot._pressing): at_once(*[lambda u=u: hook(u) for u in ups])
+            assert sorted(answers()[-3:], key=str) == sorted([(None, None)] + [(OLD_BUTTON, True)] * 2, key=str) and len(said(EVE)) == 2 and len(talks()) == 1
+        with school(EVE, ROSA):                                                            # Send and Start again at once: one of them
+            to_list(); ups = [tapping(EVE, x) for x in ("Send", "Start again")]
+            with stand_in(bot, "_pressing", lock or bot._pressing): at_once(*[lambda u=u: hook(u) for u in ups])
+            assert sorted(answers()[-2:], key=str) == sorted([(None, None), (OLD_BUTTON, True)], key=str) and len(mine()) + len(talks()) == 1
+    with school(EVE, ROSA):                                                                # refused at once, again and again: the conversation stays, whole
+        absent(); to_list(); was = talks(); ups = [tapping(EVE, "Send") for _ in range(4)]; at_once(*[lambda u=u: hook(u) for u in ups]); assert [a for a, _ in answers()[-4:]] == [f"{EVE} has already sent an absence for {EVE} on Tue 13 Oct."] * 4 and talks() == was
+    with school(EVE, ROSA):                                                                # ticks at once are all kept, and the buttons shown last are as they are
+        relief_(); tap(EVE, "Several days"); ups = [tapping(EVE, x) for x in ("Tue 13 Oct", "Wed 14 Oct", "Fri 16 Oct", "Tue 20 Oct")]; at_once(*[lambda u=u: hook(u) for u in ups])
+        assert sorted(asking_of(EVE)["ticks"]) == ["2026-10-13", "2026-10-14", "2026-10-16", "2026-10-20"] and sorted(x for x in sum(rows_now(EVE), []) if x.startswith("✓")) == ["✓ Fri 16 Oct", "✓ Tue 13 Oct", "✓ Tue 20 Oct", "✓ Wed 14 Oct"]
+    with school(EVE, ROSA):                                                                # a tick whose buttons reach Telegram after a later tick's: they are put right
+        relief_(); tap(EVE, "Several days"); u, w, real, nested = tapping(EVE, "Tue 13 Oct"), tapping(EVE, "Wed 14 Oct"), tg.call, []
+        def stale(method, params=None, **kw):
+            if method == "editMessageReplyMarkup" and not nested: nested.append(1); hook(w)
+            return real(method, params, **kw)
+        with stand_in(tg, "call", stale): hook(u)
+        assert [x for x in sum(rows_now(EVE), []) if x.startswith("✓")] == ["✓ Tue 13 Oct", "✓ Wed 14 Oct"] and len(calls("editMessageReplyMarkup")) == 3
+    with school(EVE, ROSA):                                                                # lines at once: each answers one question at most, and is never taken twice
+        to_work(); ups = [msg(f"Line {k}", CHATS[EVE]) for k in range(4)]; at_once(*[lambda u=u: hook(u) for u in ups]); d = asking_of(EVE)
+        got = [AK._work_of(d, k)["text"] for k in (K2, K5)]; assert got[0].startswith("Line ") and len({x for x in got if x}) == len([x for x in got if x]), got
+
+@t
+def a_press_of_an_earlier_step_does_nothing():
+    with school(EVE, ROSA, SAM):
+        old = []
+        def step(f): old.extend((tapping(EVE, x), x) for x in board(EVE)[1]); return f()
+        relief_()
+        for label in ("Several days", "Tue 13 Oct", "Done", "Some periods", "P1 · 08:00", "P7 · 11:30", "Medical"): step(lambda: tap(EVE, label))
+        say(EVE, "ms"); step(lambda: tap(EVE, "Ms Rosa Ng")); step(lambda: says(EVE, "p. 1")); step(lambda: tap(EVE, "Same as before"))
+        now_, was, n = set(board(EVE)[1].values()), talks(), len(said(EVE)); stale = [(u, x) for u, x in old if u["callback_query"]["data"] not in now_]; assert len(stale) > 30 and set(board(EVE)[1]) == {"Send", "Start again"}
+        for u, x in stale: assert answered(u) == (OLD_BUTTON, True), x
+        assert talks() == was and len(said(EVE)) == n and mine() == []
+        assert all(re.fullmatch(r"b:[A-Za-z0-9_-]{16}", v) for v in now_) and {r["token"] for r in rows("buttons") if r["what"] == "ask"} == {v[2:] for v in now_}, "the ones that are over are not kept"
+        assert all((r["name"], r["id"], r["ckey"], r["who"], r["extra"]) == (EVE, None, None, None, None) for r in rows("buttons") if r["what"] == "ask"), "a button holds nothing of what was said"
+        sends(); assert len(mine()) == 1
+        for u, x in old: assert answered(u) == (OLD_BUTTON, True), x
+        assert len(mine()) == 1
+    with school(EVE, ROSA, SAM):                                                           # two people at once: each conversation is its own
+        relief_(); say(SAM, "/relief"); tap(EVE, "Tomorrow, Tue 13 Oct"); tap(SAM, "Several days"); assert tap(EVE, "Whole day") == [(REASON, REASON_ROWS)] and asking_of(SAM)["step"] == "days" and {r["name"] for r in rows("buttons")} == {EVE, SAM}
+        say(SAM, "/cancel"); assert [x[0] for x in talks()] == [CHATS[EVE]] and tap(EVE, "Medical") == [(WHO_IS, LINE)]
+    with school(EVE, ROSA):                                                                # /relief again: the one before it is over, with no word of it
+        to_list(); u = tapping(EVE, "Send"); assert relief_() == [(HI, DAY_ROWS)] and answered(u) == (OLD_BUTTON, True) and mine() == [] and asking_of(EVE)["reason"] is None
+        v = tapping(EVE, "Tomorrow, Tue 13 Oct"); tap(EVE, "Tomorrow, Tue 13 Oct"); was = talks(); assert answered(v) == (OLD_BUTTON, True) and talks() == was, "pressed twice"
+    with school(EVE, ROSA):                                                                # a talk that had moved on meanwhile (another copy of the app): nothing is done
+        relief_(); old_ = bot._talk(CHATS[EVE]); u, w = tapping(EVE, "Tomorrow, Tue 13 Oct"), tapping(EVE, "Several days"); hook(u); was = talks(); n = len(said(EVE))
+        with stand_in(bot, "_talk", lambda chat: old_): assert answered(w) == (OLD_BUTTON, True) and says(EVE, "x") == [] and len(said(EVE)) == n
+        assert talks() == was and [x[2]["step"] for x in talks()] == ["span"]
+        to_work(); old_ = bot._talk(CHATS[EVE]); say(EVE, "p. 1"); was = [(c, k, dict(d, question=0), u_) for c, k, d, u_ in talks()]
+        with stand_in(bot, "_talk", lambda chat: old_): n = len(tg.PRACTICE_LOG); say(EVE, "p. 2"); assert tg.PRACTICE_LOG[n:] == [], "the line that lost the race: nothing"
+        assert [(c, k, dict(d, question=0), u_) for c, k, d, u_ in talks()] == was
+
+@t
+def text_where_a_button_is_needed_is_asked_again():
+    with school(EVE, ROSA):
+        relief_()
+        for text, labels in ((HI, ["Several days"]), (WHICH_DAYS, ["Tue 13 Oct", "Done"]), (SPAN, ["Some periods"]), (FROM_P, ["P1 · 08:00"]), (TO_P, ["P7 · 11:30"]), (REASON, ["Medical"])):
+            assert board(EVE)[0] == text; d, rows_, k = asking_of(EVE), rows_now(EVE), len(calls("editMessageReplyMarkup"))
+            for line in ("hello", "Yes", "1", "Tue 13 Oct", "Send", "ABCD-EFGH", "", None): assert says(EVE, line) == [(PRESS_ONE, None), (text, rows_)], (text, line)
+            e = asking_of(EVE); assert dict(e, question=0) == dict(d, question=0) and e["question"] > d["question"] and deleted() == [] and calls("editMessageReplyMarkup")[k] == dict(chat_id=CHATS[EVE], message_id=d["question"]), "the same question; the buttons of the one before are taken off"
+            assert heard(EVE, lambda: hook(a_doc(EVE))) == [(PRESS_ONE, None), (text, rows_)] and heard(EVE, lambda: hook(_with(EVE, voice=dict(file_id="v")))) == [(PRESS_ONE, None), (text, rows_)]
+            tap(EVE, *labels)
+        say(EVE, "ms"); rows_ = rows_now(EVE); assert heard(EVE, lambda: hook(a_photo(EVE))) == [(PRESS_ONE, None), (WHO_HIT, rows_)], "names are offered: a button, or more of the name"
+        say(EVE, "rosa"); tap(EVE, "Ms Rosa Ng", "Later for all the rest"); assert says(EVE, "yes please") == [(PRESS_ONE, None), (board(EVE)[0], LIST_ROWS)] and mine() == [], "a line never sends"
+    with school(EVE, ROSA):                                                                # how long it lasts is not made longer by this
+        relief_(); at("09:20"); say(EVE, "hello"); assert talks()[0][3] == secs("09:30")
+    # a line, or a file, that replies to another message is not the answer (as for a why)
+    with school(EVE, ROSA):
+        to_work(); d = asking_of(EVE); assert heard(EVE, lambda: reply_to(EVE, d["question"] - 3, "p. 5")) == [(LAST_ONE, None), (WORK_2, FIRST_ROWS)] and asking_of(EVE)["work"] == {}
+        assert heard(EVE, lambda: hook(a_doc(EVE, reply_to_message=dict(message_id=1)))) == [(LAST_ONE, None), (WORK_2, FIRST_ROWS)] and heard(EVE, lambda: say(EVE, "x", external_reply=dict(origin={}))) == [(LAST_ONE, None), (WORK_2, FIRST_ROWS)]
+        assert heard(EVE, lambda: reply_to(EVE, asking_of(EVE)["question"], "p. 5"))[0][0] == WORK_5
+        assert photo(EVE, "A1", media_group_id="g", reply_to_message=dict(message_id=asking_of(EVE)["question"]))[0][0].startswith("Relief for") and photo(EVE, "A2", media_group_id="g", reply_to_message=dict(message_id=3)) == [], "an album goes on whatever it replies to"
+
+@t
+def a_question_that_may_not_have_come_is_asked_again():
+    """what is typed is never taken for the answer to a question the person may not have seen"""
+    for kind in ("unsure", "network", "slow", "refused"):
+        real = tg.call
+        def failing_(method, params=None, **kw):
+            r = real(method, params, **kw)
+            return dict(ok=False, result=None, kind=kind, retry_after=5) if method == "sendMessage" else r
+        with school(EVE, ROSA):
+            relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day"); u = tapping(EVE, "Other")
+            with stand_in(tg, "call", failing_): assert answered(u) == (None, None)
+            assert asking_of(EVE)["step"] == "why" and says(EVE, "Hello?") == [(SAY_WHY, LINE)] and asking_of(EVE)["why"] == "" and says(EVE, "A meeting") == [(WHO_IS, LINE)], kind
+            say(EVE, "rosa")
+            with stand_in(tg, "call", failing_): hook(tapping(EVE, "Ms Rosa Ng"))
+            assert says(EVE, "Hello?") == [(WORK_2, FIRST_ROWS)] and asking_of(EVE)["work"] == {}, kind
+            with stand_in(tg, "call", failing_): say(EVE, "p. 5")
+            assert heard(EVE, lambda: hook(a_doc(EVE))) == [(WORK_5, LAST_ROWS)] and tap(EVE, "Later, in the app")[0][0].startswith("Relief for")
+            with stand_in(tg, "call", failing_): hook(tapping(EVE, "Send"))
+            assert len(mine()) == 1 and mine()[0]["lessons"][0]["work"]["text"] == "p. 5" and talks() == [], "sent, whatever became of the message that says so"
+        with school(EVE):                                                                  # its buttons work, should it have come after all
+            relief_(); u = tapping(EVE, "Tomorrow, Tue 13 Oct")
+            with stand_in(tg, "call", failing_): hook(u)
+            assert tap(EVE, "Whole day") == [(REASON, REASON_ROWS)], kind
+        with school(EVE):
+            with stand_in(tg, "call", failing_): say(EVE, "/relief")
+            assert says(EVE, "hello") == [(HI, DAY_ROWS)] and tap(EVE, "Tomorrow, Tue 13 Oct") == [(SPAN, SPAN_ROWS)], kind
+    real = tg.call                                                                         # it came, and Telegram did not say its id: a line that replies to nothing is the answer
+    for result in (None, True, {}, dict(message_id="7")):
+        with school(EVE, ROSA), stand_in(tg, "call", lambda method, params=None, **kw: dict(real(method, params, **kw), **({"result": result} if method == "sendMessage" else {}))):
+            relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day", "Other"); assert heard(EVE, lambda: reply_to(EVE, 7, "A meeting")) == [(LAST_ONE, None), (SAY_WHY, LINE)] and says(EVE, "A meeting") == [(WHO_IS, LINE)], result
+            say(EVE, "rosa"); tap(EVE, "Ms Rosa Ng"); assert says(EVE, "p. 5")[0][0] == WORK_5
+    with school(EVE, ROSA):                                                                # answered before its id was noted: the id is not the next question's
+        ids, nested = [], []
+        def early(method, params=None, **kw):
+            r = real(method, params, **kw)
+            if method == "sendMessage": ids.append((params["text"], r["result"]["message_id"]))
+            if method == "sendMessage" and params["text"] == SPAN and not nested: nested.append(1); hook(tapping(EVE, "Whole day"))
+            return r
+        relief_()
+        with stand_in(tg, "call", early): tap(EVE, "Tomorrow, Tue 13 Oct")
+        assert [x for x, n in ids] == [SPAN, REASON] and asking_of(EVE)["step"] == "reason" and asking_of(EVE)["question"] == ids[1][1], ids
+    with school(EVE, ROSA):                                                                # a failing edit or answer changes nothing
+        with stand_in(tg, "call", lambda method, params=None, **kw: dict(real(method, params, **kw), ok=method not in ("editMessageText", "editMessageReplyMarkup", "answerCallbackQuery"))):
+            relief_(); tap(EVE, "Several days", "Tue 13 Oct"); assert asking_of(EVE)["ticks"] == ["2026-10-13"]; tap(EVE, "Done", "Whole day", "Medical"); say(EVE, "rosa"); tap(EVE, "Ms Rosa Ng"); say(EVE, "p. 5"); tap(EVE, "Later, in the app", "Send"); assert len(mine()) == 1
+
+@t
+def a_talk_ends_after_thirty_minutes_and_on_cancel():
+    with school(EVE, ROSA):
+        relief_(); at("09:20"); tap(EVE, "Tomorrow, Tue 13 Oct"); assert talks()[0][3] == secs("09:50") and {r["until"] for r in rows("buttons")} == {secs("09:50")}, "30 minutes from the last step"
+        at("09:50"); assert tap(EVE, "Whole day") == [(REASON, REASON_ROWS)], "in its last second"
+        at("10:20:01"); u = tapping(EVE, "Medical"); assert answered(u) == (OLD_BUTTON, True) and says(EVE, "hello") == [(HELLO.format(name=EVE), None)] and rows("talks") == [] and mine() == []
+        relief_(); at("10:55"); assert says(EVE, "ABCD-EFGH", message_id=41) == [(BAD_CODE, None)] and deleted() == [(CHATS[EVE], 41)], "a code is a code again"
+        links.tries.fails.clear(); relief_(); tap(EVE, "Several days"); at("11:20"); tap(EVE, "Tue 13 Oct"); assert talks()[0][3] == secs("11:50") and {r["until"] for r in rows("buttons")} == {secs("11:50")}, "a tick is a step"
+    for step in (0, 1, 2, 3):
+        for text in ("/cancel", " /CANCEL ", "/cancel@practice_bot", "/cancel it was a mistake"):
+            with school(EVE, ROSA):
+                relief_(); [tap(EVE, x) for x in ("Tomorrow, Tue 13 Oct", "Whole day", "Medical")[:step]]; q_ = asking_of(EVE)["question"]
+                assert says(EVE, text) == [(NOTHING_SENT, None)] and rows("talks") == [] and mine() == [], (step, text)
+                assert calls("editMessageReplyMarkup")[-1:] == ([dict(chat_id=CHATS[EVE], message_id=q_)] if step < 3 else []), "the question loses its buttons"
+                assert says(EVE, "/cancel") == [(HELLO.format(name=EVE), None)]
+    with school(EVE, ROSA): to_list(); u = tapping(EVE, "Send"); assert says(EVE, "/cancel") == [(NOTHING_SENT, None)] and answered(u) == (OLD_BUTTON, True) and mine() == []
+    # the other commands: told when a day was chosen
+    for text, want in (("/help", [HELLO.format(name=EVE)]), ("/start", [HELLO.format(name=EVE)]), ("/start hello there", [HELLO.format(name=EVE)]), ("/stop", [STOPPED]), ("/start ABCD-EFGH", [BAD_CODE]), ("/HELP@practice_bot", [HELLO.format(name=EVE)])):
+        with school(EVE, ROSA):
+            relief_(); assert [x for x, b in says(EVE, text)] == want and rows("talks") == [], "no day chosen: nothing to tell"
+        with school(EVE, ROSA):
+            relief_(); tap(EVE, "Tomorrow, Tue 13 Oct"); u = tapping(EVE, "Whole day"); assert [x for x, b in says(EVE, text)] == [NOT_SENT] + want and rows("talks") == [] and mine() == [], text
+            assert answered(u)[0] in (OLD_BUTTON, NOT_LINKED)
+    with school(EVE, ROSA): relief_(); tap(EVE, "Several days", "Tue 13 Oct"); assert [x for x, b in says(EVE, "/help")][0] == NOT_SENT, "a day ticked is a day chosen"
+    with school(EVE, ROSA): to_list(); assert relief_() == [(HI, DAY_ROWS)], "/relief starts anew without saying it"
+    with school(EVE, ROSA): to_list(); tap(EVE, "Send"); assert [x for x, b in says(EVE, "/help")] == [HELLO.format(name=EVE)], "sent: nothing to tell"
+    with school(EVE, HUGO):                                                                # linked to another by /start: said to whose it was, before
+        relief_(); tap(EVE, "Tomorrow, Tue 13 Oct"); c = links.new_code(HUGO)["code"]; links.unlink(HUGO); assert [x for x, b in says(EVE, f"/start {c}")] == [NOT_SENT, TAKEN, HELLO.format(name=HUGO)] and rows("talks") == []
+    with school(EVE):                                                                      # no right any more: NOT_LINKED alone
+        relief_(); tap(EVE, "Tomorrow, Tue 13 Oct")
+        with record(EVE, group="executive", extras=dict(relief=False, exams=None, admin=False)): assert says(EVE, "/help") == [(NOT_LINKED, None)] and rows("talks") == []
+    # one nobody comes back to is deleted by the clock
+    with school(EVE, SAM, ROSA):
+        i, key = told_relief(); press(SAM, "change"); to_work(reason="Other"); at("09:15"); bot.forget(); assert sorted(x[1] for x in talks()) == ["ask", "change"]; at("09:15:01"); bot.forget(); assert [x[1] for x in talks()] == ["ask"]
+        at("09:30"); bot.forget(); assert talks() and b"zebra-reason" in raw_store(); at("09:30:01"); bot.forget(); assert rows("talks") == [] and b"zebra-reason" not in raw_store()
+
+@t
+def another_question_in_its_place_says_it_was_not_sent():
+    for what, question_ in (("change", WHY_CHANGE), ("cancel", WHY_CANCEL)):
+        with school(EVE, SAM, TEAM):
+            name = SAM if what == "change" else EVE
+            if what == "change": i, key = told_relief()
+            else: i = told_planned(dates=["2026-10-16"])
+            was = file_of(i); say(name, "/relief"); assert [x for x, b in talk_to(name, lambda: press(name, what))] == [question_], "no day chosen: nothing to tell"
+            say(name, "/relief"); tap(name, "Tomorrow, Tue 13 Oct"); u, q_ = tapping(name, "Whole day"), asking_of(name)["question"]
+            assert [x for x, b in talk_to(name, lambda: press(name, what))] == [NOT_SENT, question_] and [x[1] for x in talks()] == [what], "told, before the question"
+            assert answered(u) == (OLD_BUTTON, True) and [x[1] for x in talks()] == [what] and calls("editMessageReplyMarkup")[-1] == dict(chat_id=CHATS[name], message_id=q_)
+            assert mine(name) == ([] if what == "change" else [absences.load(i)]) and file_of(i) == was
+            assert says(name, "/relief")[0][1] == DAY_ROWS and [x[1] for x in talks()] == ["ask"], "and /relief ends that one, with no word"
+    with school(SAM, EVE, TEAM):                                                           # acknowledging a relief leaves the conversation as it is
+        i, key = told_relief(); say(SAM, "/relief"); tap(SAM, "Tomorrow, Tue 13 Oct"); was = talks(); assert press(SAM, "ack")[0].startswith("✅ Acknowledged") and talks() == was and tap(SAM, "Whole day") == [(REASON, REASON_ROWS)]
+    with school(SAM, TEAM):                                                                # refused at the press (moved to another): no question, and the conversation goes on
+        i, key = told_relief(); say(SAM, "/relief"); tap(SAM, "Tomorrow, Tue 13 Oct"); was = talks(); give(i, K5, MAYA); assert press(SAM, "change") == (CV.NOT_YOURS_COVER, True) and talks() == was and NOT_SENT not in said(SAM)
+
+@t
+def losing_the_right_or_the_link_mid_way():
+    with school(EVE, ROSA, SAM):
+        to_list(); was = talks(); u = lambda label="Send": tapping(EVE, label)
+        with record(EVE, off=True): assert answered(u()) == (NOT_LINKED, True)
+        with record(EVE, group="executive", extras=dict(relief=False, exams=None, admin=False)): assert answered(u()) == (NOT_YOURS_BUTTON, True)
+        with broken_accounts(): links.tries.fails.clear(); assert answered(u()) == (NOT_LINKED, True)
+        with no_pub(RP.fake_pub([dict(name=HUGO)])): links.tries.fails.clear(); assert answered(u()) == (NOT_LINKED, True), "gone from the timetable"
+        links.tries.fails.clear(); assert talks() == was and mine() == [], "nothing is done, and given back it goes on"
+        with record(EVE, off=True): assert says(EVE, "hello") == [(NOT_LINKED, None)]
+        assert rows("talks") == [] and answered(u()) == (OLD_BUTTON, True) and mine() == [], "a line ends it"
+    with school(EVE, ROSA, MAYA):
+        to_list(); v = tapping(EVE, "Send"); links.unlink(EVE); assert rows("talks") == [] and answered(v) == (NOT_LINKED, True); links.link(EVE, CHATS[EVE], None); assert answered(v) == (OLD_BUTTON, True) and mine() == []
+    with school(EVE, ROSA, MAYA):                                                          # moved to another phone: nobody there goes on with it
+        to_list(); v = tapping(EVE, "Send"); links.link(EVE, 995, None); assert rows("talks") == [] and answered(callback(v["callback_query"]["data"], v["callback_query"]["message"], chat=995)) == (OLD_BUTTON, True) and mine() == []
+    with school(EVE, ROSA, MAYA):                                                          # the chat is another's, and the talk was put back by hand: nothing of it is theirs
+        to_list(); v = tapping(EVE, "Send"); kept_ = rows("talks")[0]; links.unlink(EVE); links.link(MAYA, CHATS[EVE], None)
+        with tgdb.db() as c: c.execute("INSERT OR REPLACE INTO talks(chat, kind, data, until) VALUES (?, ?, ?, ?)", (kept_["chat"], kept_["kind"], kept_["data"], kept_["until"]))
+        assert answered(v) == (NOT_YOURS_BUTTON, True) and says(EVE, "x") == [(HELLO.format(name=MAYA), None)] and mine() == mine(MAYA) == [] and rows("talks") == []
+    for bad in ("{ not json", "[]", "null", "{}", '{"name": "Ms Evelyn Koh"}'):              # a conversation that cannot be read is none, or is one that went wrong: never anything done
+        with school(EVE):
+            with tgdb.db() as c: c.execute("INSERT OR REPLACE INTO talks(chat, kind, data, until) VALUES (?, 'ask', ?, 9e12)", (CHATS[EVE], bad))
+            got = says(EVE, "x"); assert got in ([(HELLO.format(name=EVE), None)], [(WENT_WRONG, None)]) and mine() == [] and says(EVE, "/cancel")[0][0] in (NOTHING_SENT, HELLO.format(name=EVE)) and relief_() == [(HI, DAY_ROWS)], bad
+
+@t
+def a_publish_mid_way_never_loses_the_conversation():
+    with school(EVE, ROSA):
+        relief_(); was = talks()
+        with no_pub(): assert answered(tapping(EVE, "Tomorrow, Tue 13 Oct")) == (WB.NO_PUB, True) and talks() == was
+        tap(EVE, "Tomorrow, Tue 13 Oct")
+        with no_pub(): assert tap(EVE, "Whole day") == [(REASON, REASON_ROWS)], "what needs no timetable goes on"
+        with no_pub(): assert tap(EVE, "Medical") == [(WHO_IS, LINE)]
+        was = talks()
+        with no_pub(): assert says(EVE, "rosa") == [(WB.NO_PUB, None)] and [(c, k, d, u) for c, k, d, u in talks()] == was
+        say(EVE, "rosa"); u = tapping(EVE, "Ms Rosa Ng")
+        with no_pub(): assert answered(u) == (WB.NO_PUB, True)
+        tap(EVE, "Ms Rosa Ng")
+        with no_pub(): assert says(EVE, "p. 5") == [(WORK_5, LAST_ROWS)] and tap(EVE, "Same as before")[0][0].startswith("Relief for")
+        was = talks()
+        with no_pub(): assert answered(tapping(EVE, "Send")) == (WB.NO_PUB, True) and answered(tapping(EVE, "Start again")) == (WB.NO_PUB, True) and talks() == was and mine() == []
+        assert sends()[0][0] == sent_text("2 lessons", "work set for 2")
+    for cal, sentence in ((dict(terms=[], holidays=[]), LS.NO_CALENDAR), (dict(TERM, holidays=[dict(name="x", start="2026-10-13", end="2026-10-13")]), "Tue 13 Oct is not a school day in the calendar.")):
+        with school(EVE, ROSA):                                                            # the calendar changed: the app's sentence, and the buttons stay
+            relief_(); store.write_json(RS.PATH, dict(calendar=cal)); was = talks(); assert answered(tapping(EVE, "Tomorrow, Tue 13 Oct")) == (sentence, True) and talks() == was
+        with school(EVE, ROSA): to_list(); store.write_json(RS.PATH, dict(calendar=cal)); was = talks(); assert answered(tapping(EVE, "Send")) == (sentence, True) and talks() == was and mine() == []
+
+@t
+def an_officer_who_is_not_on_telegram_is_said_to_be():
+    NOT_ON = "Ms Rosa Ng is not on Telegram: please tell them yourself."
+    with school(EVE): to_list(); assert sends() == [(sent_text("2 lessons", "no work set yet", NOT_ON), OPEN_MINE)]
+    with school(EVE, ROSA):
+        to_list()
+        with record(ROSA, group="executive", extras=dict(relief=False, exams=None, admin=False)): assert sends()[0][0].endswith(NOT_ON), "linked, and without relief: not reached"
+    for base in ("http://localhost", "", None):                                            # Telegram takes https buttons alone
+        with school(EVE, ROSA, base=base): to_list(); assert sends() == [(sent_text("2 lessons", "no work set yet"), None)], base
+
+@t
+def a_very_long_list_is_cut():
+    days_ = [d for d in DAYS]
+    def busy_school(classes):
+        pub = RP.fake_pub([dict(name=EVE, dept="Science"), dict(name=ROSA, dept="English")], [lesson(d, p, 1, classes, "Science with a long name", [EVE], group=f"Group {p}") for d in days_ for p in range(8)])
+        pub["model"]["school"].update(start_time="08:00", period_minutes=30); pub["model"]["NP"] = 12; pub["model"]["setup"]["rules"] = []
+        return pub
+    for classes, least in ((["1A"], 30), ([f"Sec {k} Integrity" for k in range(12)], 5)):
+        with school(EVE, ROSA), no_pub(busy_school(classes)):
+            relief_(); tap(EVE, "Several days"); [tap(EVE, x) for x in list(board(EVE)[1]) if x != "Done"]; tap(EVE, "Done", "Whole day", "Medical"); say(EVE, "rosa"); tap(EVE, "Ms Rosa Ng"); assert len(asking_of(EVE)["lessons"]) == 80
+            assert says(EVE, "x" * 2000)[0][1] == [["Same as before", "Later, in the app"], ["Later for all the rest"]]
+            text, rows_ = tap(EVE, "Later for all the rest")[0]; lines = text.split("\n"); shown = [x for x in lines if x.startswith("•")]
+            assert rows_ == LIST_ROWS and len(text) <= 4096 and lines[-1] == f"and {80 - len(shown)} more" and least <= len(shown) <= 30 and (least != 30 or len(shown) == 30), (len(text), len(shown))
+            assert sends()[0][0] == sent_text("80 lessons", "work set for 1") and len(only()["lessons"]) == 80
+            for m, p in tg.PRACTICE_LOG:
+                assert len(p.get("text") or "") <= 4096 and all(len(b.get("callback_data", "").encode()) <= 64 and 1 <= len(b["text"]) <= 64 for row in (p.get("reply_markup") or {}).get("inline_keyboard", []) for b in row), (m, p)
+    thirty = RP.fake_pub([dict(name=EVE, dept="Science"), dict(name=ROSA, dept="English")], [lesson(d, p, 1, ["1A"], "Art", [EVE]) for d in days_[5:8] for p in range(10)]); thirty["model"].update(NP=12); thirty["model"]["school"].update(start_time="08:00", period_minutes=30)
+    with school(EVE, ROSA), no_pub(thirty):
+        relief_(); tap(EVE, "Several days", "Mon 12 Oct", "Tue 13 Oct", "Wed 14 Oct", "Done", "Whole day", "Medical"); say(EVE, "rosa"); tap(EVE, "Ms Rosa Ng"); text = tap(EVE, "Later for all the rest")[0][0]; assert text.count("•") == 30 and "more" not in text
+    with school(EVE, ROSA):                                                                # a school whose periods have no times
+        bare = json.loads(json.dumps(SCHOOL)); bare["model"]["school"].pop("start_time"); bare["model"].pop("times", None)
+        with no_pub(bare):
+            relief_(); tap(EVE, "Tomorrow, Tue 13 Oct"); assert tap(EVE, "Some periods") == [(FROM_P, [["P1", "P2", "P3"], ["P4", "P5", "P6"], ["P7", "P8", "P9"], ["P10", "P11", "P12"]])] and tap(EVE, "P3")[0][1][0] == ["P3", "P4", "P5"]
+            tap(EVE, "P12", "Medical"); say(EVE, "rosa"); assert tap(EVE, "Ms Rosa Ng")[0][0] == WORK_2.replace(" (09:00)", "")
+
+@t
+def the_typed_reason_is_nowhere_but_in_the_absence():
+    h, root = Grab(), logging.getLogger(); old = root.level; root.addHandler(h); KINDS.addHandler(h); root.setLevel(logging.DEBUG); real = tg.call
+    def boom(*a, **k): raise LookupError(f"{EVE} zebra-reason quokka-work 987654")
+    clear = lambda: b"zebra" not in raw_store() and b"quokka" not in raw_store()
+    try:
+        with school(EVE, ROSA, TEAM, SAM):
+            to_work(reason="Other"); say(EVE, "quokka-work"); assert b"zebra-reason" in raw_store(), "kept while it is going"
+            shown_ = "".join(x for x in said(EVE)); assert "zebra" not in shown_ and "quokka" not in shown_, "never said back"
+            tap(EVE, "Later, in the app"); sends(); i = only()["id"]; assert only()["reason_text"] == "zebra-reason" and clear(), "sent: gone from the store"
+            give(i, K5, SAM); swept(); send(); everyone = "".join(x for c, x in sent() if c != CHATS[EVE]); assert "Other" in "".join(said(ROSA)) and "zebra" not in everyone and "zebra" not in "".join(x for c, x in sent(CHATS[EVE]))
+            absences.cancel(i, "x", EVE)
+            for end in (lambda: say(EVE, "/cancel"), lambda: say(EVE, "/help"), lambda: say(EVE, "/relief"), lambda: tap(EVE, "Later for all the rest", "Start again"), lambda: links.unlink(EVE)):
+                if EVE not in links.linked(): links.link(EVE, CHATS[EVE], None)
+                to_work(reason="Other"); end(); assert clear(), "however it ends"
+            links.link(EVE, CHATS[EVE], None); to_work(reason="Other"); tap(EVE, "Later for all the rest")
+            with stand_in(absences, "new", boom): answered(tapping(EVE, "Send"))
+            assert clear() and talks() == []; to_work(reason="Other"); u = tapping(EVE, "Later, in the app"); at("12:00"); answered(u); say(EVE, "hello"); assert clear(), "run out, and met"
+            for module, name in ((store, "published"), (tgdb, "db"), (absences, "all_records"), (RS, "load")):
+                at("09:00"); to_work(reason="Other"); u = tapping(EVE, "Later, in the app"); v = tapping(EVE, "Later for all the rest")
+                with stand_in(module, name, boom), quiet_app(): handled(u); handled(msg("zebra-line", CHATS[EVE])); handled(a_doc(EVE, "quokka.pdf")); handled(v); handled(msg("/relief", CHATS[EVE])); handled(msg("/cancel", CHATS[EVE]))
+                say(EVE, "/cancel")
+            with stand_in(tg, "call", lambda m, p=None, **kw: tg._fail("refused")): to_fail = [handled(msg(x, CHATS[EVE])) for x in ("/relief", "zebra-line", "/cancel")]
+        raw = "".join(open(os.path.join(history.DIR, f), encoding="utf-8").read() for f in os.listdir(history.DIR)); assert "zebra-reason" not in raw and "quokka" not in raw
+        mine_ = "\n".join(r.getMessage() for r in h.records if r.name.startswith("relief")); assert "LookupError" in mine_ and "refused" in mine_, mine_
+        everything = "\n".join(r.getMessage() + str(r.exc_info or "") + str(r.args or "") for r in h.records if r.name.startswith("relief"))
+        for bad in [EVE, ROSA, "zebra", "quokka", "987654", K5, *(str(c) for c in CHATS.values())]: assert bad not in everything, bad
+        assert real is tg.call
+    finally: root.removeHandler(h); KINDS.removeHandler(h); root.setLevel(old)
+
+@t
+def nothing_is_held_while_anything_is_said():
+    real, seen = tg.call, []
+    def spy(method, params=None, **kw): seen.append((method, absences._LOCK.locked(), bot._pressing.locked(), bot._counting.locked())); return real(method, params, **kw)
+    with school(EVE, ROSA), stand_in(tg, "call", spy):
+        relief_(); tap(EVE, "Several days", "Tue 13 Oct", "Done", "Some periods", "P1 · 08:00", "P7 · 11:30", "Other"); say(EVE, ""); say(EVE, "x"); say(EVE, "zzz"); say(EVE, "rosa"); tap(EVE, "Ms Rosa Ng"); doc(EVE, "x.zip"); doc(EVE); say(EVE, "x" * 2001); tap(EVE, "Same as before", "Send")
+        relief_(); say(EVE, "x"); say(EVE, "/cancel")
+    assert len(seen) > 40 and not any(any(x[1:]) for x in seen), [x for x in seen if any(x[1:])]
+    with school(EVE, ROSA):                                                                # no model call, and no thread
+        with stand_in(PK, "CALL", lambda data: 1 / 0): n = threading.active_count(); to_list(); sends(); assert threading.active_count() == n and len(mine()) == 1
+    # an update is acted on once; a press from another kind of chat, or by another, on nothing
+    with school(EVE, ROSA):
+        to_list(); u = tapping(EVE, "Send"); [hook(u) for _ in range(3)]; assert len(mine()) == 1 and len([x for x in said(EVE) if x.startswith("✅")]) == 1
+        for bad in (dict(data="b:" + "x" * 16), dict(data=None), dict(data="ask:send")): v = dict(tapping(EVE, "Send")["callback_query"]); v.update(bad); assert answered(dict(update_id=next(_ids), callback_query=v)) == (OLD_BUTTON, True)
+    for first in ("asking", "bot"):                                                        # either can be imported first
+        p = subprocess.run([sys.executable, "-c", f"import relief.{first}"], cwd=ROOT, env=dict(os.environ, DATA_DIR=tempfile.mkdtemp()), capture_output=True, text=True); assert p.returncode == 0, p.stderr[-400:]
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

@@ -32,11 +32,17 @@ def _folder(absence_id):
     return os.path.join(DIR, absence_id)
 
 
-def save(absence_id, filename, data) -> dict:
+def check(filename, size):
+    """refuses a file by its name and its size in bytes (None: not known yet) -> its extension"""
     ext = os.path.splitext(str(filename or ""))[1].lower()
-    if ext not in KINDS: raise ValueError(WRONG_KIND)
-    if not isinstance(data, (bytes, bytearray)) or not data: raise ValueError(WRONG_KIND)
-    if len(data) > MAX: raise ValueError(TOO_BIG)
+    if ext not in KINDS or size == 0: raise ValueError(WRONG_KIND)
+    if size is not None and size > MAX: raise ValueError(TOO_BIG)
+    return ext
+
+
+def save(absence_id, filename, data) -> dict:
+    if not isinstance(data, (bytes, bytearray)): raise ValueError(WRONG_KIND)
+    ext = check(filename, len(data))
     folder = _folder(absence_id)
     file_id = secrets.token_hex(6)
     os.makedirs(folder, exist_ok=True)

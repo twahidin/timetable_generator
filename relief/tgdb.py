@@ -1,7 +1,8 @@
 """The Telegram stage's SQLite file, DATA/relief/telegram.db (standard library sqlite3).
 
 db: a context manager giving one connection per block (never shared between threads): it commits on a normal exit, rolls back
-on an exception and is always closed; WAL mode, a 10 second wait for a lock, rows as sqlite3.Row. The tables are made on first
+on an exception and is always closed; WAL mode, a 10 second wait for a lock, rows as sqlite3.Row; what is deleted or written over
+is not left in the file (secure_delete: a talk holds what a person typed). The tables are made on first
 use, and again harmlessly any time. get_state / set_state keep JSON values by key; raise_state is for what is to be done once. first_time: True only the first time an
 update id is seen; the table keeps the last KEEP ids by order of arrival (Telegram may restart its ids at any number)."""
 import contextlib, json, os, sqlite3, threading
@@ -49,6 +50,7 @@ def db(read=False):
     c.row_factory = sqlite3.Row
     try:
         c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA secure_delete=ON")
         c.execute("BEGIN" if read else "BEGIN IMMEDIATE")
         try:
             yield c
