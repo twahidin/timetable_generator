@@ -26,16 +26,18 @@ new pick's reason.
 
 A lesson an approved exam or event stops (exams.relief_links, by cover.stopped) keeps its cover as it is, so it is worked out
 each time: links is read once a sweep (fill._links, in no request; None: the exams cannot be read, no lesson counts as stopped
-and nothing is said or taken back about stopping). While it is stopped nothing is made of its covers (no relief, ask, askpick or
-kept: they are made once it stands), and it is not gone or moved by that: those are said when the cover itself ends or goes to
-another. again is said to whoever was told it is stopped, whatever was approved since, unless the relief itself is said again
-(_on_again); never of a lesson that is not there any more (a publish moved it, or its date is a holiday now). stopped says why,
-again nothing of it; no other message names an exam or event. A backup (exams) taken over by the teacher's own absence is not
-told as cancelled: its reliefs went with it.
+and nothing is said or taken back about stopping). A date something of which could not be read is so too, that date alone
+(known, which all that is asked of links here and in relief/report.py goes through). While a lesson is stopped nothing is made of
+its covers (no relief, ask, askpick or kept: they are made once it stands), and it is not gone or moved by that: those are said
+when the cover itself ends or goes to another; planned does not count it. again is said to whoever was told it is stopped,
+whatever was approved since, unless the relief itself is said again (_on_again); never of a lesson that is not there any more (a
+publish moved it, or its date is a holiday now). stopped says why, again nothing of it; no other message names an exam or event.
+A backup (exams) taken over by the teacher's own absence is not told as cancelled: its reliefs went with it.
 
 still_true asks again when a message is about to go: it is dropped (its key may be queued again) when the lesson is over, when
 what it says is not so any more (what it asks of a lesson that is stopped now, too), or when its person is not on the team a
-message was for. stopped and again are dropped too while the exams cannot be read: due makes them anew once they can.
+message was for. stopped and again are dropped too while the exams, or that date in them, cannot be read: due makes them anew
+once they can be.
 
 sweep never raises and asks Telegram nothing; soon asks for one in a thread, and start is a ticker of one minute for the hooks
 in MINUTE (the sweep, the reports), apart from relief.fill's, whose runs can wait long for the model. Two sweeps never run at
@@ -95,8 +97,10 @@ def relief_text(day, lesson, periods, time, room, absent, work):
 
 
 def planned_text(days, away, by, n):
-    return (f"📋 Relief planned for you\n{days} · {away}\nPlanned by {by}\n{n} {'lesson' if n == 1 else 'lessons'} will be covered.\n"
-            "Please acknowledge and set work for the relief teachers.")
+    """n: how many of its lessons will be covered (none: not said)"""
+    lines = ["📋 Relief planned for you", f"{days} · {away}", f"Planned by {by}"]
+    if n: lines.append(f"{n} {'lesson' if n == 1 else 'lessons'} will be covered.")
+    return "\n".join(lines + ["Please acknowledge and set work for the relief teachers."])
 
 
 def remind_text(days):
@@ -145,6 +149,18 @@ def ask_text(who, lesson, periods, start, day, why, pick=None, nobody=False):
 
 
 # ---- what both due and still_true ask
+def known(links, iso):
+    """links, for what is asked of them of that date (ISO); None when they are None, or something of the date could not be read
+    (Links.unread)"""
+    try: return None if links is None or links.unread(iso) else links
+    except Exception: return None
+
+
+def _stopped(links, x):
+    """why an approved exam or event stops lesson x; "" when none does, and when that is not known"""
+    return _cover.stopped(known(links, x["date"]), x)
+
+
 def _time(v):
     """an ISO date-time in school time, or None"""
     try: return _fill._when(v) if isinstance(v, str) else None
@@ -280,9 +296,10 @@ def _on_again(pub, cal, ref, r, x, c):
 
 def _stops(w, key, ref, r, x, c):
     """stopped, when the lesson of a cover still theirs is stopped; again, when it is on again (_on_again) for who was told that it
-    was stopped; nothing while the exams cannot be read"""
-    if w.links is None: return
-    why, what, ref_ = _cover.stopped(w.links, x), (ref["lesson"], ref["periods"], ref["start"], ref["day"]), dict(ref, id=r["id"])       # id: where the cover is now
+    was stopped; nothing while that is not known"""
+    links = known(w.links, x["date"])
+    if links is None: return
+    why, what, ref_ = _cover.stopped(links, x), (ref["lesson"], ref["periods"], ref["start"], ref["day"]), dict(ref, id=r["id"])       # id: where the cover is now
     if why: yield _item(f"stopped:{key}:{_times_told(w.told, 'again', key)}", ref["who"], "stopped", stopped_text(*what, why), ref=ref_)
     else:
         n = _times_told(w.told, "stopped", key)
@@ -324,7 +341,7 @@ def _planned(w, r):
     the time the reminder goes (remind_at on the school day before; today or not)"""
     out, ref, days = [], dict(id=r["id"]), words.days(r)
     if _since(w, r.get("at")):
-        n = sum(1 for x in r.get("lessons") or [] if x.get("needed"))
+        n = sum(1 for x in r.get("lessons") or [] if x.get("needed") and not _stopped(w.links, x))
         out.append(_item(f"planned:{r['id']}", r["teacher"], "planned", planned_text(days, words.away(r), r.get("by"), n),
                          [[dict(text=SET_WORK, url=w.base + "/relief#mine")], [dict(text=NOT_NEEDED, what="cancel", id=r["id"])]], ref=ref))
     if _fill.nudge(r, w.pub, w.settings, w.now, w.today):
@@ -404,7 +421,7 @@ def _ask(w, r, x, c, ckey):
 
 def _nobody_else(w, r, x, c, ckey):
     """nobody is free for the cover but the teacher who asked to change"""
-    try: got = _free.free_then(w.pub, w.settings, w.records, dict(x, key=ckey, p=int(c["p"]), n=int(c.get("n") or 1)), r["teacher"], links=w.links)
+    try: got = _free.free_then(w.pub, w.settings, w.records, dict(x, key=ckey, p=int(c["p"]), n=int(c.get("n") or 1)), r["teacher"], links=known(w.links, x["date"]))
     except ValueError: return False             # no longer a school day in the calendar: nothing to say
     return not any(q["name"] != c["relief"] for g in got["groups"] for q in g["people"])
 
@@ -421,7 +438,7 @@ def due(pub, settings, records, now, reach, told, since, team=(), base="", short
                               team=sorted(n for n in set(team) if n in reach), base=base or "", shorts=shorts or {}, unread=unread, links=links,
                               bnds=bounds((pub or {}).get("model") or {}))
     still = list(_each(sorted(records, key=lambda r: (str(r.get("at")), str(r.get("dates")))), lambda r: [r] if _last(r) >= w.today.isoformat() else []))
-    covers = sorted(_each(still, lambda r: _fill._covers([r], None, None, now, w.bnds, links)), key=lambda t: (t[1]["date"], int(t[2]["p"]), str(t[0]["id"]), t[3]))
+    covers = sorted(_each(still, lambda r: [t for t in _fill._covers([r], None, None, now, w.bnds) if not _stopped(links, t[1])]), key=lambda t: (t[1]["date"], int(t[2]["p"]), str(t[0]["id"]), t[3]))
     out = list(_each(_told_reliefs(w), lambda v: _of_told(w, *v)))       # what is theirs no more comes before what is theirs now
     out += _each(still, lambda r: _absence(w, r))
     out += _each(covers, lambda t: _of_cover(w, *t))
@@ -629,7 +646,7 @@ def _exams():
 
 def _stands_now(x):
     """lesson x is not stopped now, as far as it is known"""
-    return not _cover.stopped(_exams()[2], x)
+    return not _stopped(_exams()[2], x)
 
 
 def _theirs(ref):
@@ -649,15 +666,16 @@ def _relief_true(ref, name):
 def _stopped_true(ref, name):
     """the relief is theirs still (gone or moved says it when not) and its lesson known to be stopped"""
     got = _theirs(ref)
-    return got is not None and bool(_cover.stopped(_exams()[2], got[1]))
+    return got is not None and bool(_stopped(_exams()[2], got[1]))
 
 
 def _again_true(ref, name):
     """the relief is theirs still, its lesson known not to be stopped, and on again (_on_again)"""
     got = _theirs(ref)
     if got is None: return False
-    pub, cal, exams = _exams()
-    return exams is not None and not _cover.stopped(exams, got[1]) and _on_again(pub, cal, ref, *got)
+    pub, cal, links = _exams()
+    links = known(links, got[1]["date"])
+    return links is not None and not _cover.stopped(links, got[1]) and _on_again(pub, cal, ref, *got)
 
 
 def _ended_true(ref, name):

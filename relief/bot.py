@@ -328,13 +328,18 @@ def _after(step, r, b, pub):
     return lambda: _web.step_saved(step, r, b["ckey"], b["name"], pub, by=(b["name"], links.VIA))
 
 
+def _exams(pub):
+    """what approved exams and events stop, as the page has it (what can be read of a date, whatever of it cannot)"""
+    return _web._links_or_none(pub, _web._cal(pub))
+
+
 def _ack(p):
     b, pub = p.button, _published()
     r, x, c = _theirs(b)
     t = _talk(p.chat)                            # a request to change this very cover that waits for its why is over
     if t and t["kind"] == "change" and (t["d"].get("absent"), t["d"].get("ckey")) == (b["extra"].get("absent"), b["ckey"]): _end(p.chat, t)
     first = False
-    if _cover.state(r, x, c) != "acknowledged": r, first = _cover.acknowledge_once(r["id"], b["ckey"], b["name"])
+    if _cover.state(r, x, c) != "acknowledged": r, first = _cover.acknowledge_once(r["id"], b["ckey"], b["name"], links=_exams(pub))
     line = f"✅ Acknowledged {_hm(_cover.find(r, b['ckey'])[1]['ack']['at'])}."
     return _Out(line, line=line, after=_after("ack", r, b, pub) if first else None)
 
@@ -359,9 +364,10 @@ def _remind(p):
 
 def _ask_change(p):
     """what the page would refuse whatever the why is refused at once; nothing is saved"""
-    _published()
+    pub = _published()
     r, x, c = _theirs(p.button)
     _absences._past(x)
+    _cover._happens(_exams(pub), x)
     if _cover.state(r, x, c) == "change": raise ValueError(_cover.ASKED_ALREADY)
     return _asked(p, "change")
 
@@ -371,7 +377,7 @@ def _change(chat, b, why, talk):
     r, x, c = _theirs(b)
     began = talk["until"] - TALK_MINUTES * 60    # when its question was first asked
     if c.get("ack") and _fill._when(c["ack"]["at"]).timestamp() > began: raise ValueError(_absences.ACKED)        # on the page, since
-    r = _cover.ask_change(r["id"], b["ckey"], why, b["name"])
+    r = _cover.ask_change(r["id"], b["ckey"], why, b["name"], links=_exams(pub))
     return _Out(SENT_CHANGE, line=f"↩ Asked to change {_hm(_cover.find(r, b['ckey'])[1]['change']['at'])}.", after=_after("change", r, b, pub))
 
 

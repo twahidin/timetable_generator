@@ -3891,8 +3891,6 @@ def what_stops_a_lesson_is_said_as_the_page_says_it():
     with exam_school(SAM, MAYA, TEAM):                                                     # on an exam duty then: not free
         i = told_ask(); exam("5A", name=EXAM2, duties=[(MAYA, 630, 690)]); was = file_of(i)
         assert press(TEAM, "approve") == ("Ms Maya Lee is no longer free then. Choose someone else.", True) and file_of(i) == was
-    with exam_school(SAM):                                                                 # a relief of a stopped lesson is answered as on the page
-        i, key = told_relief(); exam(); at("09:15"); assert press(SAM, "ack") == ("✅ Acknowledged 09:15.", False) and state_of(i) == "acknowledged"
     with exam_school(SAM, EVE, TEAM):                                                      # cancelling an absence of one's own gives its lesson back to the backup at once
         exam("5A", name=EXAM2, duties=[(EVE, 630, 690)]); j = told_planned(); backups = lambda: [r for r in absences.all_records() if r.get("exams") and not r["cancelled"]]
         assert backups() == []; press(EVE, "cancel"); say(EVE, "Better"); assert backups() == [] and press_yes(EVE) == (SENT_CANCEL, False) and absences.load(j)["cancelled"] and [x["key"] for r in backups() for x in r["lessons"]] == [K5]
@@ -5248,6 +5246,196 @@ def what_was_said_is_read_without_what_it_holds():
             assert got == {k: OB.told(key)[k] for k in ("state", "at", "name")} == dict(state=s, at=f"2026-10-13T06:{50 if s in ('sent', 'unsure') else 40}:00+08:00", name=SAM), s
         put(key, state="sent", ref="{ not json", buttons="x", text=None); assert TE.said().sent_at(key) and TE.said().of(key) == dict(state="sent", at="2026-10-13T06:50:00+08:00")
         with stand_in(OB, "told_for", lambda prefix: 1 / 0): assert TE.said().of(key)["state"] == "sent"
+
+# ---- Task 6b: main's stopped lessons: what a stopped one is answered, a date that cannot be read, a lesson stopped when its absence was sent ----
+NOT_ON_K5 = f"This lesson is not happening: 1A, 1B are on {EXAM}."
+D14 = "2026-10-14"
+PLANNED_N = lambda n: PLANNED_EVE.replace("2 lessons will be covered.\n", {0: "", 1: "1 lesson will be covered.\n"}.get(n, f"{n} lessons will be covered.\n"))
+
+@contextlib.contextmanager
+def damage(date=D13):
+    """that date, and no other, cannot be read: an approved exam of it (of a class that nobody here is relieved in) has a duty that cannot (the line the exams log of it is not printed here)"""
+    id_ = exam("3B", name="A damaged exam", date=date, duties=[(OFFIE, 630, 690)]); s = SC.load(id_); s["approved"]["made"]["duties"][0]["start"] = None; saved_exam(s)
+    old, RL.logger.disabled = RL.logger.disabled, True
+    try: yield
+    finally: RL.logger.disabled = old; SC.delete(id_)
+@contextlib.contextmanager
+def broken_file():
+    """a schedule's file cannot be read, so no date can"""
+    os.makedirs(SC.DIR, exist_ok=True); p = os.path.join(SC.DIR, "broken1.json")
+    with open(p, "w", encoding="utf-8") as f: f.write("{not json")
+    try: yield
+    finally: os.remove(p)
+@contextlib.contextmanager
+def raising():
+    """whether a date could be read cannot be told"""
+    with stand_in(RL.Links, "unread", lambda self, date: 1 / 0): yield
+UNREAD = (damage, broken_file, raising)
+
+@t
+def what_is_known_is_known_by_the_date():
+    with exam_school():
+        exam(); x = exam_links(); assert TE.known(None, D13) is None and TE.known(x, D13) is x and TE.known(x, D14) is x
+        with damage(): x = exam_links(); assert TE.known(x, D13) is None and TE.known(x, D14) is x and x.stopped(dict(key=K5, date=D13)) == f"1A, 1B are on {EXAM}", "what can be read is there, and is not all"
+        with broken_file(): x = exam_links(); assert TE.known(x, D13) is TE.known(x, D14) is None
+        with raising(): assert TE.known(exam_links(), D13) is None
+
+@t
+def nothing_is_said_about_stopping_of_a_date_that_cannot_be_read():
+    for unread in UNREAD:
+        with exam_school(SAM, MAYA):
+            i, key = told_relief(); e = exam()
+            with unread(): assert swept() == 0, "stopped, and not all is known"
+            swept(); assert said(SAM) == [RELIEF_K5, STOPPED_K5]; withdraw(e)
+            with unread(): assert swept() == 0, "on again, as far as is known"
+            swept(); assert said(SAM)[2:] == [AGAIN_K5]; again_on(e); swept()
+            with unread(): assert swept() == 0, "nor taken back"
+            assert swept() == 0 and said(SAM)[3:] == [STOPPED_K5]; at("09:10"); give(i, K5, MAYA)
+            with unread(): assert swept() == 2 and said(SAM)[4:] == [MOVED_K5] and said(MAYA) == [RELIEF_K5], "that it is another's is said as ever, and the relief, as with no exams"
+        with exam_school(SAM):                                                             # queued, and the date unread when it would go: dropped (never failed), and made anew once it can be read
+            i, key = told_relief(); e = exam()
+            for queued, text in ((f"stopped:{key}:0", STOPPED_K5), (f"again:{key}:0", AGAIN_K5)):
+                if queued.startswith("again:"): withdraw(e)
+                assert TE.sweep() == 1; n = len(said(SAM))
+                with unread(): assert send() == 0 and state(queued) == "dropped" and [TE.sweep() for _ in range(3)] == [0] * 3 and OB.send_due(now=time.time() + 9000)["sent"] == 0
+                assert len(said(SAM)) == n and swept() == 1 and swept() == 0 and said(SAM)[n:] == [text] and (item(queued)["state"], item(queued)["tries"]) == ("sent", 0), (unread.__name__, queued)
+    # a date alone: what is stopped, and on again, of another is said
+    with exam_school(SAM, MAYA):
+        i = absent(by=HUGO, dates=[D13, D14]); give(i, K5, SAM); give(i, KW, MAYA); swept(); e, f = exam(), exam("2A", name=EXAM2, date=D14)
+        with damage(): assert swept() == 1 and told_of("stopped") == [("stopped", MAYA)]
+        assert swept() == 1 and told_of("stopped") == [("stopped", MAYA), ("stopped", SAM)]; withdraw(e); withdraw(f)
+        with damage(D14): assert swept() == 1 and told_of("again") == [("again", SAM)]
+        again_on(f); withdraw(f); TE.sweep()
+        with damage(): assert send() == 1 and told_of("again") == [("again", SAM), ("again", MAYA)] and said(SAM)[1:] == [STOPPED_K5, AGAIN_K5], "read again when it goes, for its own date"
+
+@t
+def no_lesson_counts_as_stopped_on_a_date_that_cannot_be_read():
+    def it(kind): r = outs(kind)[0]; return dict(r, ref=json.loads(r["ref"]))
+    for unread in UNREAD:
+        with exam_school(SAM):                                                             # the relief goes, as with no exams
+            i = absent(by=HUGO); give(i, K5, SAM); e = exam(); assert swept() == 0
+            with damage(D14): assert swept() == 0, "another date's: stopped still"
+            with unread(): assert swept() == 1 and said(SAM) == [RELIEF_K5]
+            swept(); assert said(SAM)[1:] == [STOPPED_K5]
+        with exam_school(SAM, MAYA, TEAM):                                                 # so do the ask, its pick and the kept
+            i = asked(pick=False); e = exam(); at("09:12")
+            with unread(): assert swept() == 1 and len(said(TEAM)) == 1; new_pick(i, K5, MAYA); assert swept() == 1 and told_of("askpick") == [("askpick", TEAM)]
+            at("09:20"); CV.keep(i, K5, TEAM)
+            with unread(): assert swept() == 1 and said(SAM)[-1] == KEPT_K5
+        with exam_school(SAM, MAYA, TEAM):                                                 # and when they go
+            i = asked(pick=False); new_pick(i, K5, MAYA); TE.sweep(); e = exam(); relief, ask = it("relief"), it("ask"); swept(); stopped = it("stopped"); again = dict(stopped, kind="again")
+            assert [TE.still_true(x) for x in (relief, ask, dict(ask, kind="askpick"), stopped, again)] == [False, False, False, True, False]
+            with unread(): assert [TE.still_true(x) for x in (relief, ask, dict(ask, kind="askpick"), stopped, again)] == [True, True, True, False, False]
+            with damage(D14): assert [TE.still_true(x) for x in (relief, ask, stopped)] == [False, False, True]
+            CV.keep(i, K5, TEAM); withdraw(e); TE.sweep(); kept = it("kept"); again_on(e); assert TE.still_true(kept) is False
+            with unread(): assert TE.still_true(kept) is True
+            withdraw(e); assert TE.still_true(again) is True
+            with unread(): assert TE.still_true(again) is False
+        with exam_school(SAM, TEAM, limits=dict(fat_per_day=3, other_per_day=None, never=[RUTH, BUSY, HUGO, LEE, TEAM, ROSA, OFFIE])):      # nor does anybody as on a duty
+            i = asked(pick=False); at("09:12"); exam("5A", name=EXAM2, duties=[(MAYA, 630, 690)])
+            with unread(): swept(); assert outs("ask")[0]["text"].endswith("No new pick yet: open the app.")
+
+@t
+def a_day_that_cannot_be_read_is_reported_as_while_the_exams_cannot():
+    for unread in UNREAD:
+        with exam_school(SAM, MAYA, TEAM):
+            i = today_reliefs((K2, MAYA), (K5, SAM)); exam()
+            with unread(): ticked("07:00"); assert texts_to()[-1] == head("07:00", 2) + MAYA_LINE + "sent 06:50" + SAM_LINE + "sent 06:50", "as if none were stopped"
+            with unread(): ticked("09:00"); assert texts_to()[-1] == head("09:00", 1) + SAM_LINE + "sent 06:50" and tgdb.get_state(f"started:{relief_key_of(i, K2)}") is None
+            with unread(): assert ticked("10:30") == [], "nothing is said to have started"
+            assert ticked("10:45") == keyed("1045") and texts_to()[-1] == head("10:45", 0) + STARTED + MAYA_STARTED, "read again: once, and not the one that is stopped"
+            with unread(): assert ticked("11:00") == []
+            assert ticked("11:15") == cleared(1) and texts_to()[-1] == none_waits("11:15", 1)
+        with exam_school(SAM, TEAM):                                                       # every one acknowledged: how many there are is not known
+            i = today_reliefs((K5, SAM)); ticked("07:00"); on_cover(SAM, i, K5, "acknowledge")
+            with unread(): assert ticked("07:15") == []
+            with unreadable(): assert ticked("07:30") == [], "nor while nothing of the exams can be read"
+            with damage(D14): assert ticked("07:45") == cleared(1)
+    with exam_school(SAM, MAYA, TEAM):                                                     # another date's: as ever
+        i = today_reliefs((K2, MAYA), (K5, SAM)); exam()
+        with damage(D14): ticked("07:00"); assert texts_to()[-1] == head("07:00", 1) + MAYA_LINE + "sent 06:50"; ticked("09:00"); assert texts_to()[-1] == head("09:00", 0) + STARTED + MAYA_STARTED and ticked("09:15") == cleared(1)
+
+@t
+def a_lesson_stopped_is_reminded_of_only_while_its_date_cannot_be_read():
+    for unread in UNREAD:
+        with exam_school(SAM, TEAM):
+            i = today_reliefs((K5, SAM)); exam(); at("07:00", 13); assert skips(remind(asks(i, K5))) == [(K5, SAM, NOBODY)]
+            with damage(D14): assert remind(asks(i, K5))["sent"] == 0
+            with unread(): assert remind(asks(i, K5))["sent"] == 1 and send() == 1 and said(SAM)[1:] == [RELIEF_K5]
+
+@t
+def planned_says_how_many_will_be_covered():
+    assert TE.planned_text("Tue 13 Oct", "whole day", HUGO, 0) == PLANNED_N(0) == "📋 Relief planned for you\nTue 13 Oct · whole day\nPlanned by Mr Hugo Ong\nPlease acknowledge and set work for the relief teachers."
+    for classes, n in ((("3B",), 2), (("1A", "1B"), 1), (("1C",), 1), (("1A", "1B", "1C"), 0)):
+        with exam_school(EVE): exam(*classes); absent(by=HUGO); swept(); assert said(EVE) == [PLANNED_N(n)], classes
+    with exam_school(EVE): exam(); absent(by=HUGO, lessons=[dict(key=K2, needed=False)]); swept(); assert said(EVE) == [PLANNED_N(0)], "one not needed, one stopped"
+    for unread in (*UNREAD, unreadable):                                                   # not known: counted
+        with exam_school(EVE):
+            exam("1A", "1B", "1C"); absent(by=HUGO)
+            with unread(): swept(); assert said(EVE) == [PLANNED_N(2)], unread.__name__
+    with exam_school(EVE):                                                                 # a date alone
+        exam(); exam("2A", name=EXAM2, date=D14); absent(by=HUGO, dates=[D13, D14])
+        with damage(): swept(); assert said(EVE) == [PLANNED_N(2).replace("Tue 13 Oct", "Tue 13 Oct, Wed 14 Oct")]
+
+@t
+def a_stopped_lesson_is_refused_as_on_the_page():
+    page = dict(ack="acknowledge", change="ask-change")
+    for what in ("ack", "change"):
+        with exam_school(SAM, TEAM):
+            i, key = told_relief(); e = exam(); was, h, asked_for = file_of(i), Since(), []
+            with stand_in(TE, "soon", lambda: asked_for.append(1)): assert press(SAM, what) == (NOT_ON_K5, True)
+            assert file_of(i) == was and h.new() == [] and asked_for == [] and rows("talks") == [] and taken_off(SAM, what, NOT_ON_K5) and said(SAM) == [RELIEF_K5]
+            assert on_cover(SAM, i, K5, page[what], dict(why="x"), code=400) == dict(error=NOT_ON_K5), "as the page"
+            # on again: fresh buttons, which do it
+            swept(); at("09:30"); withdraw(e); swept(); assert said(SAM)[1:] == [STOPPED_K5, AGAIN_K5]; tg.PRACTICE_LOG.clear()
+            if what == "ack": assert press(SAM, "ack") == ("✅ Acknowledged 09:30.", False) and state_of(i) == "acknowledged" and edits() == [(CHATS[SAM], outs("again")[0]["message_id"], AGAIN_K5 + "\n\n✅ Acknowledged 09:30.")]
+            else: assert talk_to(SAM, lambda: press(SAM, "change")) == [(WHY_CHANGE, FORCE)] and talk_to(SAM, lambda: say(SAM, "A meeting")) == [(SENT_CHANGE, None)] and state_of(i) == "change"
+            assert [x[3] for x in h.new()] == [dict(ack="relief acknowledged", change="asked to change")[what]]
+        with exam_school(SAM):                                                             # what can be read stops it, whatever else cannot (as the page has it); nothing of the exams can: as if there were none
+            i, key = told_relief(); e = exam()
+            for unread in UNREAD:
+                with unread(): assert press(SAM, what) == (NOT_ON_K5, True) and on_cover(SAM, i, K5, page[what], dict(why="x"), code=400) == dict(error=NOT_ON_K5), unread.__name__
+            with unreadable(), quiet_app(): assert press(SAM, what) == (("✅ Acknowledged 09:00.", False) if what == "ack" else (None, None))
+        for f, sentence in ((lambda i: give(i, K5, MAYA), CV.NOT_YOURS_COVER), (lambda i: at("08:00", day=14), absences.PAST_LESSON), (lambda i: absences.cancel(i, "x", HUGO), CV.NOT_YOURS_COVER)):      # what the page would say first
+            with exam_school(SAM): i, key = told_relief(); f(i); exam(); assert press(SAM, what) == (sentence, True) and "Zebra" not in json.dumps(tg.PRACTICE_LOG), what
+    with exam_school(SAM, TEAM):                                                           # when its why is typed
+        i, key = told_relief(); press(SAM, "change"); e = exam(); was, h = file_of(i), Since()
+        assert talk_to(SAM, lambda: say(SAM, "A meeting")) == [(NOT_ON_K5, None)] and rows("talks") == [] and file_of(i) == was and h.new() == [] and taken_off(SAM, "change", NOT_ON_K5)
+        swept(); withdraw(e); swept(); assert talk_to(SAM, lambda: press(SAM, "change")) == [(WHY_CHANGE, FORCE)]
+    with exam_school(SAM, TEAM):                                                           # asked to change already, and it is stopped since: that it is stopped, first, as the page; nor taken after all
+        i, key = told_relief(); CV.ask_change(i, K5, "x", SAM); exam(); was = file_of(i); assert press(SAM, "change") == press(SAM, "ack") == (NOT_ON_K5, True) and file_of(i) == was
+        assert [on_cover(SAM, i, K5, x, dict(why="x"), code=400) for x in page.values()] == [dict(error=NOT_ON_K5)] * 2
+    with exam_school(SAM):                                                                 # acknowledged already: answered as it is, as the page answers
+        i, key = told_relief(); press(SAM, "ack"); exam(); was, h = file_of(i), Since(); at("09:30"); assert press(SAM, "ack") == ("✅ Acknowledged 09:00.", False) and file_of(i) == was and h.new() == []
+        assert on_cover(SAM, i, K5, "acknowledge")["state"] == "acknowledged" and press(SAM, "change") == (NOT_ON_K5, True)
+    with exam_school(SAM):                                                                 # it is the save itself that refuses, under the lock
+        i, key = told_relief(); exam(); was = file_of(i)
+        for f in (CV.acknowledge_once, CV.acknowledge, lambda *a, **k: CV.ask_change(i, K5, "x", SAM, **k)):
+            try: f(i, K5, SAM, links=exam_links()); raise AssertionError("saved")
+            except ValueError as e: assert str(e) == NOT_ON_K5 and file_of(i) == was
+
+@t
+def a_lesson_stopped_when_its_absence_was_sent_is_told_once_it_is_on():
+    def row(ckey=K5): return next(v for v in call(TEAM, "get", f"/api/relief/today?date={D13}")["rows"] if v["ckey"] == ckey)
+    def sent_by(who_, **kw): return call(who_, "post", "/api/relief/absences", dict(dict(dates=[D13], reason="Medical", reporting_officer=ROSA, lessons=[]), **kw))["id"]
+    for planned in (True, False):
+        with exam_school(EVE, SAM, MAYA, TEAM, LEE):
+            at("15:30"); e = exam(); i = sent_by(HUGO, teacher=EVE, lessons=[dict(key=K5, relief=SAM)]) if planned else sent_by(EVE)
+            x = covered(i, K5)[1]; assert (x["needed"], x["not_needed"], x["relief"], state_of(i)) == (True, None, None, "open"), x
+            swept(); assert said(EVE) == ([PLANNED_N(1)] if planned else [])
+            # nothing of it while it is stopped: no pick, no message, no line of the report, nothing on Today
+            assert FL.run(ids=[i])["picked"] == 1 and state_of(i) == "open" and state_of(i, K2) == "waiting"; give(i, K2, MAYA); swept(); assert told_of("relief") == [("relief", MAYA)]
+            assert [(row()["state"], row()["told"]), row(K2)["told"]["state"]] == [("stopped", None), "sent"]
+            at("06:50", 13); swept(); assert ticked("07:00") == keyed("0700", LEE, TEAM) and "Science (G2)" not in texts_to()[-1]; send(); CV.acknowledge(i, K2, MAYA); assert ticked("07:15") == cleared(1, LEE, TEAM) and texts_to()[-1].endswith("The 1 relief for today is acknowledged."); send()
+            assert remind(asks(i, K5))["sent"] == 0 and said(SAM) == [] and {k for k, n in told_of()} <= {"planned", "remind", "relief", "report", "clear"}, told_of()
+            # withdrawn: it needs a relief, which is told as any other
+            at("07:20", 13); withdraw(e); assert swept() == 0 and row()["state"] == "open" and FL.run(ids=[i])["picked"] == 1 and swept() == 0 and said(SAM) == [], "a pick is nobody's message"
+            on_cover(TEAM, i, K5, "approve", dict(who=SAM)); send(); assert said(SAM) == [RELIEF_K5] and row()["told"] == dict(state="sent", at=clock.now) and not told_of("again")
+            assert ticked("07:30") == keyed("0730", LEE, TEAM) and texts_to()[-1] == head("07:30", 1) + SAM_LINE + "sent 07:20" and press(SAM, "ack") == ("✅ Acknowledged 07:30.", False)
+            again_on(e); swept(); assert said(SAM)[1:] == [STOPPED_K5] and row()["told"] is None
+    with exam_school(EVE, SAM, TEAM):                                                      # every lesson of it stopped: the absence is taken, and says nothing of them
+        exam("1A", "1B", "1C"); i = sent_by(HUGO, teacher=EVE); swept(); assert told_of() == [("planned", EVE)] and said(EVE) == [PLANNED_N(0)] and FL.run(ids=[i]) == dict(picked=0, nobody=0) and swept() == 0
+        absences.cancel(i, "x", HUGO); swept(); assert said(EVE)[1:] == said(TEAM) == [CANCELLED_EVE.format(HUGO)] and said(SAM) == []
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

@@ -16,8 +16,8 @@ who can be reached, when a relief waits or has just started; its button reminds 
 report went since the last all clear, clear:{date}:{n}:{name} goes instead, the n-th that day: all are acknowledged, or how many
 started without. It waits while a request to change of a lesson still to start is with the team, since neither would be true, and
 while an absence, or a lesson or cover of today in one, cannot be read (what can be is reported): it may hold a relief that waits.
-While the exams cannot be read no lesson counts as stopped, and nothing is said to have started, nor all clear over it: it may be
-stopped.
+While the exams, or today in them, cannot be read (tell.known) no lesson counts as stopped, nothing is said to have started and
+there is no all clear: one may be stopped.
 
 A line says when the teacher was told (tell.Said; the day too, when it was not today), or that they have not been, or are not on
 Telegram; never why anyone is away.
@@ -184,20 +184,19 @@ def _tick(now):
     reach = _links.reachable(pub)
     team = sorted(p["name"] for p in _accounts.staff(pub) if p["name"] in reach and "relief.team" in _rights.rights(p, _links.VIA))
     if not team: return []                      # nobody to tell: the mark is not done with
-    w = types.SimpleNamespace(pub=pub, now=now, date=date, bnds=bnds, reach=reach, links=_fill._links(pub, cal), said=tell.said(), went=_went(date))
+    w = types.SimpleNamespace(pub=pub, now=now, date=date, bnds=bnds, reach=reach, links=tell.known(_fill._links(pub, cal), date), said=tell.said(), went=_went(date))
     records, unread = _records()
     w.passed = len(unread)
     rows = sorted((v for r in records for v in _reliefs(w, r)), key=lambda v: (v["starts"], v["who"], v["key"]))
     waiting = [v for v in rows if v["state"] == "approved" and not v["over"]]
-    unlisted = [v for v in rows if v["state"] == "approved" and v["over"] and not _listed(w, v)]
-    started = unlisted if w.links is not None else []
+    started = [v for v in rows if v["state"] == "approved" and v["over"] and not _listed(w, v)] if w.links is not None else []
     text, ref = None, dict(date=date, mark=mark, made=now.isoformat(timespec="seconds"))
     if waiting or started:
         text = report_text(f"{now:%H:%M}", waiting, started)
         buttons = [[dict(text=AGAIN, what="remind", extra=dict(date=date, covers=[v["cover"] for v in waiting]))]] if waiting else []
         buttons.append([dict(text=OPEN_TODAY, url=(bot.get("base") or "") + "/relief#today")])
         kind, key = "report", f"report:{date}:{hhmm(mark).replace(':', '')}"
-    elif rows and not unlisted and not w.passed and not any(v["state"] == "change" and not v["over"] for v in rows):
+    elif rows and w.links is not None and not w.passed and not any(v["state"] == "change" and not v["over"] for v in rows):
         n = _spell(w)
         if n is not None:
             text = clear_text(f"{now:%H:%M}", len(rows), sum(v["state"] != "acknowledged" for v in rows))
@@ -275,7 +274,7 @@ def _remind(date, covers, now, done, skipped):
     pub = store.published()
     if not pub: raise ValueError(_web.NO_PUB)
     cal = _settings.load(pub).get("calendar") or {}
-    w = types.SimpleNamespace(pub=pub, now=_fill._when(now), date=date, bnds=bounds(pub.get("model") or {}), reach=_links.reachable(pub), links=_fill._links(pub, cal),
+    w = types.SimpleNamespace(pub=pub, now=_fill._when(now), date=date, bnds=bounds(pub.get("model") or {}), reach=_links.reachable(pub), links=tell.known(_fill._links(pub, cal), date),
                               records=_absences.all_records(), said=tell.said())
     for v in covers:
         try: who, why = _send_again(w, v)
