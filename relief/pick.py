@@ -4,7 +4,8 @@ shortlist: the people free then (free.free_then for the cover's own periods and 
 the group each is in, whether they teach the subject and the relief they already have that week. labelled: what the model is
 sent, every teacher as "Teacher {n}" (n in the app's order) and every name in the school's rules made the same label, or
 "another teacher": no name, absence reason, remark, reporting officer, work, link or file is in it. Names are caught as
-stored, without the honorific, with another honorific, as honorific and surname ("Ms Koh"), with any spaces between words.
+stored, without the honorific, with another honorific, and as an honorific with any words of the name in any order ("Ms Tan",
+"Mdm Tan" and "Ms Wei Ling" for Ms Tan Wei Ling), with any spaces between words.
 ask: one call to the model typed.py uses (the same key, model and client) with this module's own SYSTEM, SCHEMA and usage
 guard. choose_for: the model's label when it is on the shortlist and its reason, with the names put back, is 1-300
 characters and names nobody off the shortlist; else the first teacher in the app's order with APP_ORDER, and the kind of
@@ -124,16 +125,29 @@ def app_order(short):
 
 _TOK = re.compile(r"\w+|[^\w\s.]")       # words and marks; spaces and dots are left out, so any run of them matches
 _WORD = re.compile(r"\w+")
+_JOIN = re.compile(r"\s+|[-\u2010\u2011'\u2019]")       # between two words of a name after an honorific: spaces, or a hyphen or apostrophe alone
+# ordinary words, which may also be in a name: after an honorific that is a word too, _SMALL (in small letters) after "Dr" or
+# "miss" ("the Dr may be away", "miss a lesson") and _PROPER (in any) after "miss" ("miss May exams", "miss Art"); and either, in
+# small letters, after a name with a capital ("Ms Tan may take two")
+_SMALL = frozenset("""a an the any all some no one two three both each every this that these those my our your his her their its it them him us me
+    other another such more most many much only just so too and or if as at by for from in into of off on out over to up when while who
+    first last next long short early late full half double extra may will can must is has was are be do does s
+    lesson lessons class classes period periods school work duty duties time""".split())
+_PROPER = frozenset("""mon tue tues wed thu thur thurs fri sat sun monday tuesday wednesday thursday friday saturday sunday
+    jan feb mar apr may jun jul aug sep sept oct nov dec january february march april june july august september october november december
+    art music drama dance science physics chemistry biology maths math mathematics english literature history geography humanities chinese malay tamil
+    pe cce sports design technology computing food nutrition assembly recess lunch hall lab labs room rooms library gym studio field court canteen""".split())
 
 
 @functools.lru_cache(maxsize=16)
 def _table(pairs):
-    """the forms of each (name, short) in pairs -> (folded, exact, longest): folded and exact map a tuple of tokens (folded:
-    in any case, exact: as written) to {level: names}; where a form fits people at several levels, the lowest wins.
+    """the forms of each (name, short) in pairs -> (folded, exact, longest, words, hons): folded and exact map a tuple of tokens
+    (folded: in any case, exact: as written) to {level: names}; where a form fits people at several levels, the lowest wins.
     0: the name as stored (honorific and all), the short name; 1: the name without its honorific; 2: another honorific
-    before it; 3: its honorific and last word ("Ms Koh"); 4: any honorific and the last word. A form of one word (a name
-    without its honorific that is one word) is matched as written, so it does not catch an ordinary word"""
-    folded, exact = {}, {}
+    before it. A form of one word (a name without its honorific that is one word) is matched as written, so it does not catch
+    an ordinary word. words and hons are for an honorific with some words of a name (_run): {(word, k): those whose name has
+    that word k times or more} and {name: its honorific or None}"""
+    folded, exact, words, hons = {}, {}, {}, {}
     def put(table, toks, level, name): table.setdefault(tuple(toks), {}).setdefault(level, set()).add(name)
     for name, short in pairs:
         toks = _TOK.findall(name)
@@ -141,39 +155,85 @@ def _table(pairs):
         rest = toks[1:] if hon else toks
         if rest:
             low = [t.casefold() for t in rest]
-            last = next((t for t in reversed(low) if _WORD.fullmatch(t)), None)
             if hon: put(folded, [hon] + low, 0, name)
             if len(rest) == 1: put(exact, rest, 1 if hon else 0, name)
             else:
                 put(folded, low, 1 if hon else 0, name)
                 for h in HONORIFICS: put(folded, [h] + low, 2, name)
-            if last:
-                if hon: put(folded, [hon, last], 3, name)
-                for h in HONORIFICS: put(folded, [h, last], 4, name)
+            hons[name], times = hon, {}
+            for w in low:
+                if w in HONORIFICS or not any(ch.isalpha() for ch in w): continue      # marks, and the number in "Mr Tan 1"
+                times[w] = times.get(w, 0) + 1
+                words.setdefault((w, times[w]), set()).add(name)
         s = _TOK.findall(short)
         if s and short != name: put(exact, s, 0, name)
-    return folded, exact, max((len(k) for t in (folded, exact) for k in t), default=0)
+    return folded, exact, max((len(k) for t in (folded, exact) for k in t), default=0), words, hons
 
 
 def _matcher(staff):
     return _table(tuple((str(p.get("name") or "").strip(), str(p.get("short") or "").strip()) for p in staff))
 
 
+def _run(text, toks, i, words):
+    """-> (n, names): the n tokens from the honorific toks[i] that are it and words of one name, in any order and no more often
+    than the name has them (names: the people whose name has them all); (0, ()) when the next word is in nobody's name, or all
+    of them are ordinary words there (_SMALL, _PROPER, "Mr or Ms"). An ordinary word in small letters after one with a capital
+    is left unless more of the name follows it, and a full stop ends the run but for an initial's ("Ms W. Tan")"""
+    hon = toks[i].group()
+    verb, noun, big = hon == "miss", hon.casefold() == "dr", hon[0].isupper()
+    n, got, who, used, caps, plain, real, j = 0, (), None, {}, False, True, False, i + 1
+    while j < len(toks):
+        as_is = toks[j].group()
+        w = as_is.casefold()
+        used[w] = used.get(w, 0) + 1
+        them = words.get((w, used[w]), set())
+        who = them if who is None else who & them
+        if not who: break
+        plain = plain and (as_is in _SMALL and (verb or noun) or verb and w in _PROPER or big and as_is in ("and", "or"))
+        cap = as_is[0].isupper()
+        if cap or not caps or as_is not in _SMALL and w not in _PROPER: n, got, real = j + 1 - i, who, not plain
+        caps = caps or cap
+        at, j = toks[j].end(), j + 1
+        if j < len(toks) and not _WORD.match(toks[j].group()): j += 1              # perhaps a hyphen or an apostrophe inside the name
+        gap = text[at:toks[j].start()] if j < len(toks) else ""
+        if not (_JOIN.fullmatch(gap) or len(as_is) == 1 and gap.strip() == "."): break
+    return (n, got) if real else (0, ())
+
+
+def _at(text, toks, i, table):
+    """-> (n, names): the longest form that starts at toks[i], in tokens, and the people it stands for; (0, ()) for none. An
+    honorific with some words of a name comes after the forms of _table: 3: those with that honorific, and those stored with
+    none, which may be theirs too; 4: everyone with the words"""
+    folded, exact, longest, words, hons = table
+    hon = toks[i].group().casefold()
+    n, run = _run(text, toks, i, words) if hon in HONORIFICS else (0, ())
+    for k in range(max(n, min(longest, len(toks) - i)), 0, -1):
+        span, found = [m.group() for m in toks[i:i + k]], {}
+        for forms, key in ((folded, tuple(w.casefold() for w in span)), (exact, tuple(span))):
+            for level, who in forms.get(key, {}).items(): found.setdefault(level, set()).update(who)
+        if k == n:
+            own = {p for p in run if hons[p] == hon}
+            if own: found[3] = own | {p for p in run if hons[p] is None}
+            found[4] = run
+        if found: return k, found[min(found)]
+    return 0, ()
+
+
 def _named(text, table):
     """[(start, end, names)]: each place text names someone, leftmost and longest first, never overlapping; names is the
-    set of people that form stands for (more than one: it fits several)"""
-    folded, exact, longest = table
+    set of people that form stands for (more than one: it fits several). A form that starts inside another and ends after it
+    ("Tan WL", a short name, in "Ms Tan WL") is taken with it, so no part of it is left: names is then who both stand for,
+    or everyone when that is nobody"""
     toks, out, i = list(_TOK.finditer(text)), [], 0
     while i < len(toks):
-        for n in range(min(longest, len(toks) - i), 0, -1):
-            span = toks[i:i + n]
-            found = {}
-            for table, key in ((folded, tuple(m.group().casefold() for m in span)), (exact, tuple(m.group() for m in span))):
-                for level, who in table.get(key, {}).items(): found.setdefault(level, set()).update(who)
-            if found:
-                out.append((span[0].start(), span[-1].end(), found[min(found)])); i += n
-                break
-        else: i += 1
+        n, who = _at(text, toks, i, table)
+        if not n: i += 1; continue
+        start, end = i, i + n
+        while i < end:
+            m, them = _at(text, toks, i, table)
+            if i + m > end: end, who = i + m, who & them or who | them
+            i += 1
+        out.append((toks[start].start(), toks[end - 1].end(), who))
     return out
 
 
@@ -273,7 +333,8 @@ def _checked(answer, names, table):
     reason = _LABEL.sub(put, answer["reason"].strip()).strip()
     if unknown or not 1 <= len(reason) <= MAX_REASON: return None
     on = set(names.values())
-    if any(them - on for _, _, them in _named(reason, table)): return None      # someone off the shortlist, in any form
+    said = _LABEL.sub("\0", answer["reason"])       # without the labels: the words beside one are not part of that person's name
+    if any(them - on for _, _, them in _named(said, table)): return None      # someone off the shortlist, in any form
     return who, reason
 
 
