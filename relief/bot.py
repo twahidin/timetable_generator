@@ -12,10 +12,11 @@ Telegram), so messages that come at once get no more.
 
 /start, /help and anything else from a linked chat: HELLO. /stop unlinks. A person's link that moved is told in the old chat
 (MOVED_LINK); a chat that was someone else's is told so before HELLO (TAKEN). Linking, moving and unlinking are each one
-history entry by that person, via telegram (init's note), naming no chat, handle or code."""
+history entry by that person, via telegram (init's note), naming no chat, handle or code. A link just made asks relief.tell
+for what is still to come for that person."""
 import logging, re, threading
 
-from relief import links, tg
+from relief import links, tell, tg
 
 HELLO = "Linked: {name}. You'll get your reliefs here. Send /relief to ask for relief, /stop to unlink."
 NOT_LINKED = "This Telegram is not linked. Open Relief in the school's app, press Link Telegram and follow the link there."
@@ -118,3 +119,4 @@ def _code(chat, m, code):
             _noted("telegram unlinked", f"Telegram unlinked for {x['name']}: the same Telegram is now {name}'s", name)
             reply(x["chat"], TAKEN)
     reply(chat, HELLO.format(name=name))
+    if not twice: tell.soon()                # what is still to come for them, after HELLO

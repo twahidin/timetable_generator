@@ -8,8 +8,9 @@ call cut short is simply made again). Each pick is worked out by pick.choose_for
 called while it is held) and saved by cover.set_pick, which checks again under the lock that the cover is still open and
 the person still free: a pick refused there is never saved. One run at a time (_busy). soon() asks for a run from a page,
 in a daemon thread (inline when SYNC); start() is the one-minute ticker, which app.py starts only when RELIEF_JOBS=on (the
-Dockerfile sets it; tests and local runs never do). Errors are logged to "relief.fill" by their kind alone, never a
-record's contents."""
+Dockerfile sets it; tests and local runs never do). AFTER: what runs at the end of every tick and of every run soon() asked
+for, whatever became of it, with nothing held (app.py puts relief.tell.sweep there when RELIEF_JOBS=on); never after run
+itself. Errors are logged to "relief.fill" by their kind alone, never a record's contents."""
 import datetime, logging, os, threading
 from zoneinfo import ZoneInfo
 
@@ -24,6 +25,7 @@ from relief.calendar import school_day
 
 ON = os.environ.get("RELIEF_JOBS") == "on"     # automatic triggers (a new absence, needed again, cancel) run only then
 SYNC = False                                    # tests: soon() runs inline
+AFTER = []                                      # called with nothing at the end of tick and of a run soon() asked for
 EVERY = 60                                      # seconds between the ticker's runs
 FILL_AT = (15, 0)                               # when times.fill_at cannot be read
 _busy = threading.Lock()                        # one run at a time
@@ -69,6 +71,16 @@ def _when(now):
     now = _absences._now() if now is None else now
     if isinstance(now, str): now = datetime.datetime.fromisoformat(now)
     return now.replace(tzinfo=_tz()) if now.tzinfo is None else now.astimezone(_tz())
+
+
+def nudge(r, pub, settings, now, today):
+    """the absent teacher is to be reminded: the absence was planned by someone else, not acknowledged, not cancelled, not
+    over, and now is past times.remind_at on the school day before its first lesson (due_at)"""
+    if r.get("how") != "planned" or r.get("acknowledged") or r.get("cancelled"): return False
+    dates = sorted(x["date"] for x in r.get("lessons") or []) or sorted(r.get("dates") or [])
+    if not dates or dates[-1] < today.isoformat(): return False
+    days = ((pub or {}).get("model") or {}).get("days") or []
+    return now >= due_at(settings.get("calendar") or {}, days, dates[0], (settings.get("times") or {}).get("remind_at"), today=today)
 
 
 def _ended(x, c, now, bnds):
@@ -198,16 +210,24 @@ def run(ids=None, date=None, call=None, now=None):
     finally: _busy.release()
 
 
+def _after():
+    for f in list(AFTER):
+        try: f()
+        except Exception as e: _log.error("what follows a relief run failed: %s", type(e).__name__)
+
+
 def _queued(key):
-    with _busy:                                 # waits for a run that is going (the ticker's, or another): nothing asked for is lost
-        with _asked_lock:                       # going before it stops being asked for: filling() stays True throughout
-            _going[0] += 1; _asked.discard(key)
-        try:
-            if SYNC: return _run(key[0], key[1], None, None)
-            try: _run(key[0], key[1], None, None)
-            except Exception as e: _log.error("the relief run failed: %s", type(e).__name__)
-        finally:
-            with _asked_lock: _going[0] -= 1
+    try:
+        with _busy:                             # waits for a run that is going (the ticker's, or another): nothing asked for is lost
+            with _asked_lock:                   # going before it stops being asked for: filling() stays True throughout
+                _going[0] += 1; _asked.discard(key)
+            try:
+                if SYNC: return _run(key[0], key[1], None, None)
+                try: _run(key[0], key[1], None, None)
+                except Exception as e: _log.error("the relief run failed: %s", type(e).__name__)
+            finally:
+                with _asked_lock: _going[0] -= 1
+    finally: _after()
 
 
 def soon(ids=None, date=None, force=False):
@@ -241,11 +261,13 @@ def filling():
 
 
 def tick(now=None):
-    """one run of the ticker; every error is caught and logged by its kind alone -> run's answer, or None"""
+    """one run of the ticker, then AFTER (also while another run is going: what is told never waits for the model); every
+    error is caught and logged by its kind alone -> run's answer, or None"""
     try: return run(now=now)
     except Exception as e:
         _log.error("the relief run failed: %s", type(e).__name__)
         return None
+    finally: _after()
 
 
 def _loop(every):

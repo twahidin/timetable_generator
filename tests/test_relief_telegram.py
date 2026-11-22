@@ -275,7 +275,8 @@ def two_threads_reading_then_writing_never_lock():
 import collections, contextlib, hashlib, itertools, re, sqlite3, threading, time  # noqa: E402
 import access, history  # noqa: E402
 from accounts import people as AP, rights as AR  # noqa: E402
-from relief import bot, links, outbox as OB, people as RP, tgweb, web as WB  # noqa: E402
+from relief import bot, links, outbox as OB, people as RP, tell as TE, tgweb, web as WB  # noqa: E402
+TE.SYNC = True                                        # a sweep asked for (after a save, after linking) runs inline here, in no thread
 
 TIA, HUGO, CORA, EXE, TEAM, ROSA, GONE_, OFFIE = ("Ms Tia Teo", "Mr Hugo Ong", "Ms Cora Lim", "Mdm Exe Sim", "Ms Team Tan", "Ms Rosa Ng",
                                                   "Mr Gone Goh", "Mr Offie Foo")
@@ -1162,7 +1163,7 @@ def state(key): return (item(key) or {}).get("state")
 def put(key, **changes):
     with tgdb.db() as c:
         for k, v in changes.items(): assert c.execute(f"UPDATE outbox SET {k}=? WHERE key=?", (v, key)).rowcount == 1
-def q(key="k", name=TIA, text="A made-up message", **more): return OB.queue(key, name, text, kind=more.pop("kind", "relief"), **more)
+def q(key="k", name=TIA, text="A made-up message", **more): return OB.queue(key, name, text, kind=more.pop("kind", "made-up"), **more)
 
 @contextlib.contextmanager
 def valid(f):
@@ -1196,7 +1197,7 @@ def a_key_queues_once_and_only_for_a_linked_person():
         with now_is("2026-10-13T07:20:00+08:00"): assert q(text="Line é 1\nLine 2 ", buttons=buttons, files=files, ref=ref) is True
         r = item("k")
         assert (r["name"], r["chat"], r["kind"], r["text"], r["state"], r["at"], r["sent_at"], r["message_id"], r["tries"]) == \
-            (TIA, 501, "relief", "Line é 1\nLine 2 ", "queued", "2026-10-13T07:20:00+08:00", None, None, 0), r
+            (TIA, 501, "made-up", "Line é 1\nLine 2 ", "queued", "2026-10-13T07:20:00+08:00", None, None, 0), r
         assert json.loads(r["ref"]) == ref and json.loads(r["files"]) == files and json.loads(r["buttons"]) == buttons
         assert tg.PRACTICE_LOG == [] and rows("buttons") == [], "queueing sends nothing"
         for s in ("queued", "sending", "sent", "failed", "unsure"):
@@ -2011,6 +2012,838 @@ def nothing_private_is_logged_by_the_sender():
         everything = "\n".join(r.getMessage() + str(r.exc_info or "") + str(r.args or "") for r in h.records)
         for bad in ("private", TIA, "Tia", "98765", tok, "secret-name", "relief:", tg.hook_secret() or "x" * 64): assert bad not in everything, bad
     finally: root.removeHandler(h); KINDS.removeHandler(h); root.setLevel(old)
+
+# ---- Task 4: what to tell, and telling it ----
+import shutil, types, urllib.parse  # noqa: E402
+from relief import cover as CV, fill as FL, free as FR, lessons as LS, pick as PK, settings as RS, words as WO  # noqa: E402
+from ttgen.spec import day_names  # noqa: E402
+
+EVE, SAM, RUTH, MAYA, BUSY, LEE = "Ms Evelyn Koh", "Mr Sam Tan", "Ms Ruth Goh", "Ms Maya Lee", "Mr Busy Chan", "Mr Team Lee"
+DAYS = day_names(2)
+TUE, WED, FRI = [next(d for d in DAYS if d.startswith("Even") and d.split()[-1].startswith(x)) for x in ("Tue", "Wed", "Fri")]
+TERM = dict(terms=[dict(name="Term 4", start="2026-09-07", end="2026-11-20", starts_as="Odd")], holidays=[])
+BASE = "https://relief.example.org"
+
+def lesson(day, p, n, classes, subject, teachers, group="", room="2-05"):
+    return dict(d=DAYS.index(day), p=p, n=n, classes=classes, subject=subject, group=group, teachers=teachers, room=room, level="Sec 1")
+
+# periods of 30 minutes from 08:00: P3-P5 is 09:00-10:30, P6-P7 10:30-11:30. Today is Mon 12 Oct 2026 unless a test says not
+SCHOOL = RP.fake_pub([dict(name=EVE, dept="Science"), dict(name=SAM, dept="Science", short="Mr Tan"), dict(name=RUTH, dept="Science"), dict(name=MAYA, dept="Mathematics", short="Ms Lee"),
+                      dict(name=BUSY, dept="Mathematics"), dict(name=HUGO, dept="Science", role="HOD"), dict(name=TEAM, dept="Mathematics"), dict(name=LEE, dept="Mathematics"),
+                      dict(name=ROSA, dept="English"), dict(name=OFFIE, dept="English")],
+                     [lesson(TUE, 2, 3, ["1C"], "Science", [EVE], room=""), lesson(TUE, 5, 2, ["1A", "1B"], "Science", [EVE], group="G2"), lesson(TUE, 8, 1, ["5A"], "Art", [EVE, BUSY]),
+                      lesson(WED, 1, 1, ["2A"], "Science", [EVE]), lesson(FRI, 0, 2, ["1A"], "Art", [EVE]), lesson(TUE, 0, 1, ["2A"], "Science", [SAM]),
+                      lesson(TUE, 6, 1, ["3B"], "Physics", [RUTH]), lesson(TUE, 6, 1, ["4A"], "Maths", [BUSY])])
+SCHOOL["model"]["school"].update(start_time="08:00", period_minutes=30)
+SCHOOL["model"]["NP"] = 12
+SCHOOL["model"]["setup"]["rules"] = []
+AP.update(lambda d: d["people"].update({LEE: dict(extras=dict(relief=True, exams=None, admin=False))}))
+os.makedirs(os.path.dirname(RS.PATH), exist_ok=True)
+clock = types.SimpleNamespace(now=None)
+CHATS = {n: 811 + i for i, n in enumerate((EVE, SAM, RUTH, MAYA, BUSY, HUGO, TEAM, LEE, ROSA))}
+def at(hm, day=12): clock.now = f"2026-10-{day:02d}T{hm if len(hm) > 5 else hm + ':00'}+08:00"
+def day_key(p, date): return next(x["key"] for x in LS.on_date(SCHOOL, TERM, EVE, date) if x["p"] == p)
+K2, K5, K8 = [day_key(p, datetime.date(2026, 10, 13)) for p in (2, 5, 8)]
+KW, KF = day_key(1, datetime.date(2026, 10, 14)), day_key(0, datetime.date(2026, 10, 16))
+
+@contextlib.contextmanager
+def school(*linked, since="2026-10-12T08:00:00+08:00", base=BASE, **settings):
+    """the made-up school at 09:00 on Mon 12 Oct 2026 with no absences, its bot connected at `since` and these people linked"""
+    old = LS.today, absences._now, FL.SYNC, FL.ON, PK.CALL
+    shutil.rmtree(absences.DIR, ignore_errors=True)
+    store.write_json(RS.PATH, dict(dict(calendar=TERM), **settings))
+    LS.today, absences._now = lambda: datetime.date.fromisoformat(clock.now[:10]), lambda: clock.now
+    FL.SYNC, FL.ON, PK.CALL = True, False, lambda data: dict(label="Teacher 1", reason="Teacher 1 is free then.")
+    at("09:00")
+    try:
+        with telegram(), no_pub(SCHOOL):
+            tgdb.set_state("bot", dict(username="practice_bot", base=base, at=since, key=digest(tg.hook_secret())))
+            for n in linked: links.link(n, CHATS[n], None)
+            yield
+    finally:
+        LS.today, absences._now, FL.SYNC, FL.ON, PK.CALL = old
+        shutil.rmtree(absences.DIR, ignore_errors=True)
+        os.remove(RS.PATH)
+
+def absent(teacher=EVE, by=None, lessons=(), dates=("2026-10-13",), **kw):
+    """an absence asked by the teacher (by None), or planned by by with the relief teachers in lessons -> its id"""
+    d = dict(dict(teacher=teacher, dates=list(dates), periods=None, reason="Medical", reason_text="", remarks="", reporting_officer=ROSA, lessons=list(lessons)), **kw)
+    return absences.new(d, SCHOOL, by or teacher, "planned" if by else "asked", may_choose=bool(by))["id"]
+
+def rs(): return RS.load(SCHOOL)
+def give(i, ckey, who_, by=TEAM): return CV.change(i, ckey, who_, by, SCHOOL, rs())          # chosen and approved in one
+def covered(i, ckey): r = absences.load(i); return (r, *CV.find(r, ckey))
+def approved_at(i, ckey): return covered(i, ckey)[2]["approved"]["at"]
+def new_pick(i, ckey, who_, reason="Teaches Science and is free then."):
+    return CV.set_pick(i, ckey, dict(who=who_, by="ai", reason=reason, at=clock.now), SCHOOL, rs(), into="change")
+def outs(kind=None, name=None): return [r for r in rows("outbox") if kind in (None, r["kind"]) and name in (None, r["name"])]
+def buttons_of(r): return [[{k: v for k, v in b.items() if k != "token"} for b in row] for row in json.loads(r["buttons"])]
+def told_of(kind=None, name=None): return [(r["kind"], r["name"]) for r in outs(kind, name)]
+def send(): return OB.send_due()["sent"]
+def swept(): n = TE.sweep(); send(); return n                                              # a sweep, and what it queued sent
+def said(name): return [x for c, x in sent(CHATS[name])]
+def change_record(i, f):
+    r = absences.load(i); f(r); absences._save(r)
+def quoted(x): return urllib.parse.quote(x, safe="")
+def call(name, method, url, body=None, code=200):
+    r = getattr(who(name), method)(url, json=body or {})
+    assert r.status_code == code, (r.status_code, r.get_data(as_text=True)[:300])
+    return r.get_json()
+def on_cover(name, i, ckey, what, body=None, code=200): return call(name, "put" if what == "relief" else "post", f"/api/relief/absences/{i}/covers/{quoted(ckey)}/{what}", body, code)
+def on_lesson(name, i, key, what, body=None, code=200): return call(name, "put" if what in ("relief", "work") else "post", f"/api/relief/absences/{i}/lessons/{quoted(key)}/{what}", body, code)
+def dues(records=None, told=None, reach=None, **kw):
+    """due, with what a sweep would pass it"""
+    now = kw.pop("now", clock.now)
+    return TE.due(SCHOOL, rs(), absences.all_records() if records is None else records, now, links.reachable() if reach is None else reach,
+                  OB.told_for("") if told is None else told, kw.pop("since", "2026-10-12T08:00:00+08:00"), **dict(dict(team=(TEAM, LEE), base=BASE), **kw))
+
+RELIEF_K5 = "🔔 Relief for you · Tue 13 Oct\n1A, 1B Science (G2) · P6–P7 · 10:30–11:30\nRoom 2-05\nFor Ms Evelyn Koh\nNo work set yet: look in Reliefs I'm covering."
+MOVED_K5 = "✔ The relief team has moved 1A, 1B Science (G2) P6–P7 on Tue 13 Oct to someone else. You're free then."
+GONE_K5 = "❌ No longer needed: 1A, 1B Science (G2) P6–P7 (10:30) on Tue 13 Oct. You're free then."
+KEPT_K5 = "The relief team has kept 1A, 1B Science (G2) P6–P7 on Tue 13 Oct with you."
+ASK_K5 = "↩ Request to change\nMr Sam Tan · 1A, 1B Science (G2) · P6–P7 (10:30) on Tue 13 Oct\n“A parent meeting”\n"
+PLANNED_EVE = "📋 Relief planned for you\nTue 13 Oct · whole day\nPlanned by Mr Hugo Ong\n2 lessons will be covered.\nPlease acknowledge and set work for the relief teachers."
+REMIND_EVE = "⏰ Reminder: please acknowledge your relief for Tue 13 Oct and set work."
+OFFICER_EVE = "Ms Evelyn Koh is away on Tue 13 Oct (whole day): Medical.\nRelief is being arranged."
+CANCELLED_EVE = "❌ Cancelled by {}: Ms Evelyn Koh's absence on Tue 13 Oct. Its reliefs are no longer needed."
+
+@t
+def every_text_is_the_plans():
+    plan = open(os.path.join(ROOT, "docs", "superpowers", "plans", "2026-11-22-relief-stage-4-telegram.md"), encoding="utf-8").read()
+    pick = dict(who="{name}", reason="{pick reason}")
+    got = TE.relief_text("{day}", "{lesson}", "{periods}", "{time}", "{room}", "{absent}", dict(text="{text}", link="{link}", files=[1, 2])).replace("Files: 2", "Files: {n}")
+    got += "\n" + TE.planned_text("{days}", "{whole day or periods}", "{by}", 4).replace("4 lessons", "{n} lessons") + "\n" + TE.remind_text("{days}")
+    got += "\n" + TE.officer_text("{absent}", "{days}", "{whole day or periods}", "{kind}") + "\n" + TE.cancelled_text("{by}", "{absent}", "{days}")
+    got += "\n" + TE.gone_text("{lesson}", "{periods}", "{start}", "{day}") + "\n" + TE.moved_text("{lesson}", "{periods}", "{day}") + "\n" + TE.kept_text("{lesson}", "{periods}", "{day}")
+    got += "\n" + TE.ask_text("{who}", "{lesson}", "{periods}", "{start}", "{day}", "{why}", pick=pick)
+    got += "\n" + TE.ask_text("", "", "", "x", "", "", nobody=True).splitlines()[-1] + "\n" + TE.ask_text("", "", "", "x", "", "").splitlines()[-1]
+    got += "\n" + TE.relief_text("", "x", "", "", "", "", {}).splitlines()[-1]
+    for line in got.splitlines(): assert f"`{line}`" in plan, line
+    assert len(got.splitlines()) == 7 + 5 + 1 + 2 + 1 + 1 + 1 + 1 + 5 + 3, got
+    for label in ("✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"): assert f"`{label}`" in plan
+    # whole, in order, with made-up words
+    assert TE.relief_text("Tue 13 Oct", "2B Science", "P9–P11", "10:40–11:40", "2-06", EVE, dict(text="Notes, chapter 6.", link="https://x.org/a", files=[dict(id="a"), dict(id="b")])) == \
+        "🔔 Relief for you · Tue 13 Oct\n2B Science · P9–P11 · 10:40–11:40\nRoom 2-06\nFor Ms Evelyn Koh\nWork from Ms Evelyn Koh: Notes, chapter 6.\nLink: https://x.org/a\nFiles: 2, sent after this message."
+    assert TE.relief_text("Tue 13 Oct", "2B Science", "P9", "", "", EVE, {}) == "🔔 Relief for you · Tue 13 Oct\n2B Science · P9\nFor Ms Evelyn Koh\nNo work set yet: look in Reliefs I'm covering."
+    for work, last in ((dict(text="", link="https://x.org/a", files=[]), ["Link: https://x.org/a"]), (dict(files=[1]), ["Files: 1, sent after this message."])):   # work, with nothing typed: it is not said that none is set
+        assert TE.relief_text("d", "l", "P1", "", "", EVE, work).splitlines()[2:] == ["For Ms Evelyn Koh"] + last
+    assert TE.planned_text("Tue 13 Oct", "whole day", HUGO, 2) == PLANNED_EVE and "\n1 lesson will be covered.\n" in TE.planned_text("d", "whole day", HUGO, 1)
+    assert TE.remind_text("Tue 13 Oct") == REMIND_EVE and TE.officer_text(EVE, "Tue 13 Oct", "whole day", "Medical") == OFFICER_EVE
+    assert TE.cancelled_text(HUGO, EVE, "Tue 13 Oct") == CANCELLED_EVE.format(HUGO)
+    assert TE.gone_text("1A, 1B Science (G2)", "P6–P7", "10:30", "Tue 13 Oct") == GONE_K5 and "Art P1 on Tue" in TE.gone_text("Art", "P1", "", "Tue")
+    assert TE.moved_text("1A, 1B Science (G2)", "P6–P7", "Tue 13 Oct") == MOVED_K5 and TE.kept_text("1A, 1B Science (G2)", "P6–P7", "Tue 13 Oct") == KEPT_K5
+    ask = lambda **k: TE.ask_text(SAM, "1A, 1B Science (G2)", "P6–P7", "10:30", "Tue 13 Oct", "A parent meeting", **k)
+    assert ask(pick=dict(who=MAYA, reason="Is free then.")) == ASK_K5 + "New pick: Ms Maya Lee\nIs free then." and ask(pick=dict(who=MAYA, reason="")) == ASK_K5 + "New pick: Ms Maya Lee"
+    assert ask(nobody=True) == ASK_K5 + "Nobody else is free then: choose someone in the app." and ask() == ASK_K5 + "No new pick yet: open the app."
+
+@t
+def the_words_are_the_pages_own():
+    assert (WB._class_group, WB._periods_text, WB._times, WB._nudge, WB.ENTIRE) == (WO.class_group, WO.periods_text, WO.times, FL.nudge, "Entire Class"), "web's names are the same functions"
+    x = dict(key="k", date="2026-10-13", p=8, n=3, start="12:00", end="13:30", classes=["1B", "1A"], subject="Maths", group="G1")
+    assert WO.class_group(x) == "1B, 1A Maths (G1)" and WO.class_group(dict(x, group="Entire Class")) == "1B, 1A Maths" and WO.class_group(dict(subject="Art")) == "Art" and WO.class_group({}) == ""
+    assert WO.periods_text(x) == "P9–P11" and WO.periods_text(dict(p=0, n=1)) == "P1" and WO.periods_text(dict(p=2)) == "P3"
+    assert WO.times(SCHOOL, x, x) == ("12:00", "13:30") and WO.times(None, dict(p=1), {}) == ("", "")
+    part = dict(p=9, n=2); assert WO.times(SCHOOL, dict(x, parts=[part]), part) == ("12:30", "13:30") and WO.times(None, dict(x, parts=[part]), part) == ("", "")
+    assert WO.day("2026-10-13") == "Tue 13 Oct" and WO.day("2026-10-03T09:00:00+08:00") == "Sat 3 Oct"
+    assert WO.days(dict(dates=["2026-10-13", "2026-10-14"])) == "Tue 13 Oct, Wed 14 Oct" and WO.days({}) == ""
+    assert [WO.away(dict(periods=v)) for v in (None, [0, 2], [3, 3], [0, 8])] == ["whole day", "P1–P3", "P4", "P1–P9"] and WO.away({}) == "whole day"
+
+@t
+def the_module_stands_alone():
+    """tell imports neither web nor bot nor tgweb (they import it), and sets the queue's check at import"""
+    code = "import sys; import relief.tell, relief.outbox as o; print([m for m in ('relief.web', 'relief.bot', 'relief.tgweb', 'flask') if m in sys.modules], o.VALID is relief.tell.still_true, relief.tell.SYNC)"
+    p = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=dict(os.environ, DATA_DIR=tempfile.mkdtemp()), capture_output=True, text=True)
+    assert p.stdout.strip() == "[] True False", (p.stdout, p.stderr[-400:])
+    assert OB.VALID is TE.still_true and TE.still_true(dict(key="any")) is True and TE.still_true(dict(key="x", kind="exam-duty", ref=None)) is True
+    assert {"relief", "planned", "remind", "officer", "ask", "askpick"} == set(TE.CHECKS), "report, clear and weekly (Tasks 6 and 7) are added here"
+
+# ---- the hooks: fill.AFTER, tell.soon, and who asks for a sweep
+@t
+def what_runs_after_a_tick_and_a_run_asked_for():
+    log, h = logging.getLogger("relief.fill"), Grab(); log.addHandler(h); prop, log.propagate = log.propagate, False
+    real_run, seen = FL._run, []
+    def hook_(): seen.append((FL._busy.locked(), FL._going[0]))
+    def boom(): raise RuntimeError(f"{SAM} made up")
+    try:
+        with school():
+            assert FL.AFTER == [], "nothing is hooked in a test"
+            FL.AFTER.extend([hook_, boom, hook_])
+            FL.run(); assert seen == [], "never in run itself"
+            assert FL.tick() == dict(picked=0, nobody=0) and seen == [(False, 0)] * 2, "both, whatever the one between them did, with nothing held"
+            FL.soon(force=True); assert seen == [(False, 0)] * 4 and len(h.records) == 2
+            FL.SYNC = False; FL.soon(force=True); ths = [x for x in threading.enumerate() if x.name == "relief-fill"]; [x.join(10) for x in ths]; assert len(seen) == 6
+            def bad(*a): raise ValueError(f"{SAM} made up")
+            FL._run = bad; h.records.clear()
+            assert FL.tick() is None and len(seen) == 8, "a run that failed too"
+            FL.SYNC = True
+            try: FL.soon(force=True); raise AssertionError("inline, a failed run raises as it did")
+            except ValueError: pass
+            assert len(seen) == 10 and not FL._busy.locked() and FL._going[0] == 0
+            FL._run = real_run
+            with FL._busy: assert FL.tick()["busy"] is True
+            assert len(seen) == 12, "a tick that found another run going: the messages do not wait for the model"
+    finally: FL._run = real_run; FL.AFTER.clear(); log.removeHandler(h); log.propagate = prop
+    lines = [r.getMessage() for r in h.records]
+    assert any("RuntimeError" in x for x in lines) and not any(SAM in x or "made up" in x for x in lines) and all(r.exc_info is None for r in h.records), lines
+
+@t
+def the_sweep_is_hooked_only_with_the_jobs_on():
+    code = "import app; from relief import fill, tell; print([f is tell.sweep for f in fill.AFTER])"
+    def go(jobs):
+        env = dict(os.environ, DATA_DIR=tempfile.mkdtemp(), RELIEF_JOBS=jobs, TELEGRAM_BOT_TOKEN="")
+        return subprocess.Popen([sys.executable, "-c", code], env=env, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    for p, want in zip([go("on"), go(""), go("off")], ["[True]", "[]", "[]"]):
+        out, err = p.communicate(timeout=120); assert p.returncode == 0 and out.strip().splitlines()[-1] == want, (want, out[-200:], err[-300:])
+
+@contextlib.contextmanager
+def stand_in(module, name, f):
+    old = getattr(module, name); setattr(module, name, f)
+    try: yield
+    finally: setattr(module, name, old)
+
+@t
+def a_sweep_asked_for_while_one_runs_runs_once_more_after():
+    def ended():
+        for x in [x for x in threading.enumerate() if x.name == "relief-tell"]: x.join(10)
+        assert not any(x.name == "relief-tell" for x in threading.enumerate())
+    with school(SAM):
+        TE.SYNC = False
+        try:
+            inside, let, ran, now_ = threading.Event(), threading.Event(), [], []
+            def slow(*a, **k):
+                now_.append(1); ran.append((threading.current_thread().name, threading.current_thread().daemon, len(now_))); inside.set(); assert let.wait(10); now_.pop()
+                return []
+            with stand_in(TE, "due", slow):
+                assert TE.soon() is True and inside.wait(10)
+                for _ in range(8): assert TE.soon() is True
+                direct = threading.Thread(target=TE.sweep); direct.start(); time.sleep(0.05)      # the ticker's, meanwhile: it waits
+                assert len(ran) == 1 and direct.is_alive()
+                let.set(); ended(); direct.join(10)
+                assert len(ran) == 3 and [x[0] for x in ran].count("relief-tell") == 2, ran
+                assert all(x[2] == 1 for x in ran), "never two at once"
+                assert [x[1] for x in ran if x[0] == "relief-tell"] == [True, True]
+                TE.soon(); ended(); assert len(ran) == 4, "and again later"
+            # a thread that cannot be had never fails the save that asked, and the next one asked for runs
+            def refuse(self): raise RuntimeError("can't start new thread")
+            real = threading.Thread.start; threading.Thread.start = refuse
+            try: assert TE.soon() is False
+            finally: threading.Thread.start = real
+            with stand_in(TE, "due", lambda *a, **k: ran.append(1) or []): assert TE.soon() is True; ended()
+            assert len(ran) == 5
+        finally: TE.SYNC = True
+
+@t
+def soon_and_sweep_do_nothing_while_the_bot_is_off():
+    n = []
+    with school(SAM), stand_in(TE, "due", lambda *a, **k: n.append(1) or []):
+        assert TE.soon() is True and TE.sweep() == 0 and len(n) == 2
+        b = tgdb.get_state("bot"); tgdb.set_state("bot", None); assert TE.soon() is False and TE.sweep() == 0 and len(n) == 2, "not connected"
+        tgdb.set_state("bot", b); os.environ.pop("TELEGRAM_BOT_TOKEN")
+        opened = []
+        with stand_in(tgdb, "db", lambda read=False: opened.append(1)): assert TE.soon() is False and TE.sweep() == 0 and opened == [], "no token: not even the store is opened"
+        os.environ["TELEGRAM_BOT_TOKEN"] = "practice"
+        with no_pub(): assert TE.sweep() == 0 and len(n) == 2, "nothing published (a publish swaps folders): the next one"
+        with broken_accounts(): assert TE.sweep() == 0 and len(n) == 2, "nobody can be reached"
+        links.unlink(SAM); assert TE.sweep() == 0 and len(n) == 2, "nobody linked"
+
+@t
+def the_sweep_never_raises_and_logs_its_kind_alone():
+    h = Grab(); KINDS.addHandler(h)
+    def boom(*a, **k): raise LookupError(f"{SAM} a private line")
+    try:
+        with school(SAM):
+            i = absent(by=HUGO); give(i, K5, SAM)
+            for module, name in ((TE, "due"), (store, "published"), (links, "reachable"), (absences, "all_records"), (RS, "load"), (links, "connected"), (OB, "told_for"), (AP, "staff")):
+                h.records.clear()
+                with stand_in(module, name, boom): assert TE.sweep() == 0 and TE.soon() in (True, False), name
+                assert [r.getMessage() for r in h.records] and all("LookupError" in r.getMessage() and "private" not in r.getMessage() and SAM not in r.getMessage() and r.exc_info is None for r in h.records), name
+            assert outs() == [] and not absences._LOCK.locked()
+            # one message that cannot be queued never stops the rest; the store failing ends the sweep, and the next one queues them
+            give(i, K2, SAM); real = OB.queue
+            with stand_in(OB, "queue", lambda key, *a, **k: boom() if K2 in key else real(key, *a, **k)): assert TE.sweep() == 1
+            assert [r["ref"] and json.loads(r["ref"])["ckey"] for r in outs()] == [K5] and h.records and not any("private" in r.getMessage() for r in h.records)
+            def locked(*a, **k): tries.append(1); raise sqlite3.OperationalError("database is locked")
+            tries = []; links.link(ROSA, CHATS[ROSA], None)
+            with stand_in(OB, "queue", locked): assert TE.sweep() == 0 and len(tries) == 1
+            assert TE.sweep() == 2 and len(outs()) == 3; links.unlink(ROSA)
+            # an absence that cannot be read as one (changed by hand) is passed over: the others' messages go
+            j = absent(dates=["2026-10-16"]); give(j, KF, RUTH); links.link(RUTH, CHATS[RUTH], None)
+            for n, odd in enumerate((dict(id="odd1", teacher=EVE, dates="x", lessons=[5]), dict(id="odd2", dates=[5, None]), dict(id="odd3", teacher=["x"], how="planned", by=[], at="x", dates=["2026-10-13"], lessons=[dict(date="2026-10-13")]),
+                                     dict(id="odd4", teacher=SAM, dates=["2026-10-13"], cancelled=5, lessons=None), dict(id="odd5", teacher=SAM, dates=["2026-10-13"], reporting_officer=["x"], lessons=[dict(date="2026-10-13", key="k", p="a private word", needed=True)]))):
+                absences._save(odd)
+            h.records.clear(); assert TE.sweep() == 1 and told_of(name=RUTH) == [("relief", RUTH)] and h.records
+            assert not any("private" in r.getMessage() or "odd" in r.getMessage() for r in h.records)
+    finally: KINDS.removeHandler(h)
+
+@t
+def every_save_asks_for_a_sweep_once_after_its_history_entry():
+    asked, fails = [], []
+    def spy():
+        asked.append((len(entries()), absences._LOCK.locked()))
+        if fails: raise RuntimeError("made up")
+    with school(), stand_in(TE, "soon", spy):
+        def after(f, n=1):
+            del asked[:]; before = len(entries()); got = f()
+            assert len(asked) == n and all(x == (before + n, False) for x in asked), (asked, before)
+            return got
+        body = dict(teacher=EVE, dates=["2026-10-13"], periods=None, reason="Medical", reporting_officer=ROSA, lessons=[])
+        i = after(lambda: call(HUGO, "post", "/api/relief/absences", body))["id"]
+        after(lambda: call(EVE, "post", f"/api/relief/absences/{i}/acknowledge"))
+        after(lambda: call(EVE, "post", f"/api/relief/absences/{i}/acknowledge", code=400), 0)                  # refused: nothing saved
+        after(lambda: on_lesson(EVE, i, K5, "work", dict(text="Read", link="", files=[], known=[])))
+        after(lambda: on_lesson(HUGO, i, K5, "relief", dict(relief=SAM)))
+        after(lambda: on_lesson(EVE, i, K8, "needed")); after(lambda: on_lesson(EVE, i, K8, "not-needed", dict(why="No")))
+        after(lambda: on_cover(TEAM, i, K5, "approve", dict(who=MAYA), code=400), 0); after(lambda: on_cover(EVE, i, K5, "approve", dict(who=SAM), code=403), 0)
+        after(lambda: on_cover(TEAM, i, K5, "approve", dict(who=SAM)))
+        after(lambda: on_cover(SAM, i, K5, "acknowledge")); after(lambda: on_cover(SAM, i, K5, "acknowledge"), 0)   # the second saves nothing
+        after(lambda: on_cover(MAYA, i, K5, "acknowledge", code=403), 0)
+        after(lambda: on_cover(SAM, i, K5, "ask-change", dict(why="A meeting"))); after(lambda: on_cover(TEAM, i, K5, "keep"))
+        after(lambda: on_cover(TEAM, i, K5, "relief", dict(relief=MAYA)))
+        after(lambda: on_lesson(TEAM, i, K2, "split", dict(at=3))); after(lambda: on_lesson(TEAM, i, K2, "join"))
+        on_lesson(HUGO, i, K2, "relief", dict(relief=SAM)); rows_ = [dict(id=i, ckey=K2, who=SAM)]
+        after(lambda: call(TEAM, "post", "/api/relief/today/approve-all", dict(date="2026-10-13", covers=rows_)))
+        after(lambda: call(TEAM, "post", "/api/relief/today/approve-all", dict(date="2026-10-13", covers=rows_)), 0)   # skipped: nothing saved
+        fails.append(1); errs = []                                                          # asking never fails the save
+        with stand_in(A.app.logger, "error", lambda *a: errs.append(a)): after(lambda: call(HUGO, "post", f"/api/relief/absences/{i}/cancel", dict(why="Better")))
+        assert absences.load(i)["cancelled"] and [x[1:] for x in errs] == [("RuntimeError",)], errs
+
+@t
+def linking_asks_for_a_sweep_once():
+    n = []
+    with school(), stand_in(TE, "soon", lambda: n.append(list(sent()))):
+        c = links.new_code(SAM)["code"]
+        hook(msg(f"/start {c}", 812)); assert n == [[(812, HELLO.format(name=SAM))]], "after the answer"
+        hook(msg(f"/start {c}", 812)); hook(msg("/help", 812)); hook(msg("ABCD-EFGH", 999)); hook(msg("/stop", 812)); assert len(n) == 1, "only a link that was made"
+    with school():
+        i = absent(by=HUGO); give(i, K5, SAM); assert TE.sweep() == 0
+        hook(msg(links.new_code(SAM)["code"], 812)); assert told_of() == [("relief", SAM)]
+        send(); assert said(SAM) == [HELLO.format(name=SAM), RELIEF_K5]
+
+# ---- the relief teacher
+@t
+def approve_queues_the_relief_once():
+    with school(SAM, TEAM):
+        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)])
+        assert TE.sweep() == 0 and outs() == []
+        on_cover(TEAM, i, K5, "approve", dict(who=SAM))                                    # in the app: the save asked for the sweep
+        r, = outs(); ref = json.loads(r["ref"])
+        assert r["key"] == f"relief:{EVE}:{K5}:2026-10-12T09:00:00+08:00" and (r["name"], r["kind"], r["text"], r["state"]) == (SAM, "relief", RELIEF_K5, "queued"), r
+        assert json.loads(r["buttons"]) == [[dict(text="✅ Acknowledge", what="ack", id=i, ckey=K5, who=SAM, extra=dict(absent=EVE, date="2026-10-13")),
+                                            dict(text="↩ Request to change", what="change", id=i, ckey=K5, who=SAM, extra=dict(absent=EVE, date="2026-10-13"))]]
+        assert ref == dict(id=i, absent=EVE, ckey=K5, approved_at="2026-10-12T09:00:00+08:00", who=SAM, lesson="1A, 1B Science (G2)", periods="P6–P7", start="10:30",
+                           day="Tue 13 Oct", date="2026-10-13", ends="2026-10-13T11:30:00+08:00"), ref
+        assert OB._wake.is_set() and json.loads(r["files"]) == []
+        OB._wake.clear(); assert TE.sweep() == 0 and TE.soon() is True and len(outs()) == 1 and not OB._wake.is_set(), "a second sweep queues nothing"
+        assert send() == 1 and said(SAM) == [RELIEF_K5] and TE.sweep() == 0
+        links.link(ROSA, CHATS[ROSA], None); assert TE.sweep() == 1
+        offered = []
+        with stand_in(OB, "queue", lambda *a, **k: offered.append(a) or False): assert TE.sweep() == 0 and offered == [], "what is in the queue is not even offered to it"
+        for s in ("sending", "sent", "failed", "unsure", "queued"): put(r["key"], state=s); assert TE.sweep() == 0, s
+        on_cover(SAM, i, K5, "acknowledge"); at("09:30"); assert TE.sweep() == 0 and len(outs("relief")) == 1
+
+@t
+def two_copies_sweeping_at_once_queue_one():
+    """two copies of the app (a deploy swaps them): another lock, the same store"""
+    with school(SAM, MAYA, EVE, ROSA):
+        i = absent(by=HUGO); give(i, K5, SAM); give(i, K2, MAYA); got, go = [], threading.Barrier(6)
+        def copy(): go.wait(); got.append(TE._swept(None))
+        ths = [threading.Thread(target=copy) for _ in range(6)]; [x.start() for x in ths]; [x.join() for x in ths]
+        assert sum(got) == 4 and sorted(told_of()) == sorted([("officer", ROSA), ("planned", EVE), ("relief", SAM), ("relief", MAYA)]) and send() == 4, (got, told_of())
+
+@t
+def the_work_and_its_files_go_with_the_relief():
+    with school(SAM):
+        i = absent(by=HUGO); f = FI.save(i, "Sheet 4.pdf", b"made-up")
+        absences.set_work(i, K2, dict(text="Notes, chapter 6.", link="https://example.org/a", files=[dict(id=f["id"], name="Sheet 4.pdf")], known=[]), EVE)
+        give(i, K2, SAM); assert swept() == 1
+        r, = outs()
+        assert r["text"] == "🔔 Relief for you · Tue 13 Oct\n1C Science · P3–P5 · 09:00–10:30\nFor Ms Evelyn Koh\nWork from Ms Evelyn Koh: Notes, chapter 6.\nLink: https://example.org/a\nFiles: 1, sent after this message."
+        assert json.loads(r["files"]) == [dict(id=i, file=f["id"], name="Sheet 4.pdf")] and r["state"] == "sent" and r["files_failed"] == 0
+        assert [m for m, p in tg.PRACTICE_LOG if m.startswith("send")] == ["sendMessage", "sendDocument"]
+        FI.delete(i, f["id"])
+        # a part of a split lesson: its own periods and times
+        j = absent(dates=["2026-10-16"]); CV.split(j, KF, 1, TEAM); give(j, KF + "#0", SAM); swept()
+        assert "\n1A Art · P1 · 08:00–08:30\n" in said(SAM)[-1] and json.loads(outs()[-1]["ref"])["ends"] == "2026-10-16T08:30:00+08:00"
+        give(j, KF + "#1", SAM); swept()
+        assert "🔔 Relief for you · Fri 16 Oct\n1A Art · P2 · 08:30–09:00\nRoom 2-05\n" in said(SAM)[-1] and json.loads(outs()[-1]["ref"])["ends"] == "2026-10-16T09:00:00+08:00"
+
+@t
+def nothing_goes_before_approval():
+    with school(SAM, RUTH, MAYA, TEAM, LEE, HUGO):
+        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)])
+        for hm in ("09:00", "09:05", "15:00", "23:00"): at(hm); assert TE.sweep() == 0 and outs() == [], hm
+        give(i, K2, SAM); swept(); CV.ask_change(i, K2, "A meeting", SAM); new_pick(i, K2, MAYA); swept()
+        assert set(told_of()) == {("relief", SAM), ("ask", TEAM), ("ask", LEE)}, "the new pick of a request to change is told to the team alone"
+
+@t
+def only_people_reached_are_told():
+    with school(TEAM):
+        i = absent(by=HUGO); give(i, K5, SAM)
+        assert TE.sweep() == 0 and outs() == [], "Sam is not linked: the app shows it"
+        links.link(SAM, CHATS[SAM], None)
+        with record(SAM, off=True): assert TE.sweep() == 0
+        assert TE.sweep() == 1 and told_of() == [("relief", SAM)]
+        assert dues(reach={}) == []; send(); absences.not_needed(i, K5, "x", HUGO); assert [x["name"] for x in dues()] == [SAM] and dues(reach={TEAM: 1}) == []
+        absences.needed_again(i, K5, HUGO)
+        got = dues(reach={EVE: 1, ROSA: 2}, told={}); assert {(x["kind"], x["name"]) for x in got} == {("planned", EVE), ("officer", ROSA)}
+
+@t
+def a_moved_relief_tells_the_first_teacher_once():
+    with school(SAM, MAYA, RUTH):
+        i = absent(by=HUGO); give(i, K5, SAM); assert swept() == 1
+        key = f"relief:{EVE}:{K5}:{approved_at(i, K5)}"
+        at("09:10"); give(i, K5, MAYA); assert swept() == 2
+        assert [(r["key"], r["name"], r["text"]) for r in outs()][1:] == [(f"moved:{key}", SAM, MOVED_K5), (f"relief:{EVE}:{K5}:{approved_at(i, K5)}", MAYA, RELIEF_K5)]
+        assert swept() == 0
+        at("09:20"); CV.ask_change(i, K5, "A meeting", MAYA); new_pick(i, K5, TEAM); CV.approve(i, K5, TEAM, LEE, SCHOOL, rs()); swept()      # a request to change approved
+        assert said(SAM) == [RELIEF_K5, MOVED_K5] and said(MAYA) == [RELIEF_K5, MOVED_K5]
+        at("09:30"); absences.cancel(i, "Better", HUGO); swept(); swept()
+        assert said(SAM) == [RELIEF_K5, MOVED_K5] and said(MAYA) == [RELIEF_K5, MOVED_K5], "who was told it moved is not told again that it ended"
+        # moved before its message went: the first teacher gets nothing at all
+        j = absent(dates=["2026-10-16"]); give(j, KF, SAM); TE.sweep(); at("09:40"); give(j, KF, RUTH); n = len(said(SAM)); swept(); swept()
+        assert len(said(SAM)) == n and state(f"relief:{EVE}:{KF}:2026-10-12T09:30:00+08:00") == "dropped" and len(said(RUTH)) == 1
+
+@t
+def a_relief_no_longer_needed_is_told_once():
+    for how in ("cancel", "not needed", "split", "lost"):
+        with school(SAM, MAYA):
+            i = absent(by=HUGO); give(i, K5, SAM); swept(); key = f"relief:{EVE}:{K5}:{approved_at(i, K5)}"; at("09:10")
+            if how == "cancel": absences.cancel(i, "Better", HUGO)
+            if how == "not needed": absences.not_needed(i, K5, "A test", HUGO)
+            if how == "split": absences.not_needed(i, K5, "A test", HUGO); absences.needed_again(i, K5, HUGO); CV.split(i, K5, 6, TEAM)       # the cover key is no longer there
+            if how == "lost": change_record(i, lambda r: r.update(lessons=[x for x in r["lessons"] if x["key"] != K5]))                        # taken off outside our routes
+            assert swept() == 1 and [(r["key"], r["kind"], r["name"], r["text"]) for r in outs()][1:] == [(f"gone:{key}", "gone", SAM, GONE_K5)], how
+            assert swept() == 0 and said(SAM) == [RELIEF_K5, GONE_K5]
+            if how == "not needed":                                                        # needed again, and given to another: Sam has been told already
+                absences.needed_again(i, K5, HUGO); at("09:20"); give(i, K5, MAYA); swept(); assert said(SAM) == [RELIEF_K5, GONE_K5] and said(MAYA) == [RELIEF_K5]
+                at("09:30"); give(i, K5, SAM); swept(); assert said(SAM) == [RELIEF_K5, GONE_K5, RELIEF_K5]                        # and theirs again: a relief anew
+                at("09:40"); absences.not_needed(i, K5, "A test", HUGO); swept(); assert said(SAM)[3:] == [GONE_K5] and swept() == 0 and said(MAYA) == [RELIEF_K5, MOVED_K5]
+
+@t
+def the_same_person_again_is_neither_moved_nor_gone():
+    with school(SAM, MAYA):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); at("09:10"); give(i, K5, SAM); swept(); swept()
+        assert said(SAM) == [RELIEF_K5] * 2 and set(told_of()) == {("relief", SAM)}, "approved again: told again, with what it is now"
+        at("09:20"); give(i, K5, MAYA); told = OB.told_for("relief:"); want = [f"moved:{outs()[1]['key']}"]
+        for order in (told, dict(reversed(list(told.items())))): assert [x["key"] for x in dues(told=order) if x["kind"] == "moved"] == want, "for the last of them"
+        swept(); swept(); assert said(SAM)[2:] == [MOVED_K5], "once, for both"
+        at("09:30"); give(i, K5, SAM); swept(); at("09:40"); give(i, K5, MAYA); swept(); swept()
+        assert said(SAM)[3:] == [RELIEF_K5, MOVED_K5], "given back and moved again: once more"
+        # cancelled and planned again for the same lessons, the same person approved: told of it, and not that it ended
+        at("10:00"); j = absent(dates=["2026-10-16"], by=HUGO); give(j, KF, SAM); swept(); n = len(said(SAM))
+        absences.cancel(j, "Better", HUGO); at("10:05"); k = absent(dates=["2026-10-16"], by=HUGO); give(k, KF, SAM); swept(); swept()
+        assert len(said(SAM)) == n + 1 and said(SAM)[-1].startswith("🔔 Relief for you · Fri 16 Oct")
+        absences.cancel(k, "Better", HUGO); at("10:10"); swept(); swept(); assert len(said(SAM)) == n + 2 and said(SAM)[-1].startswith("❌ No longer needed: 1A Art P1–P2 (08:00) on Fri 16 Oct")
+
+@t
+def two_approvals_in_one_second_tell_both():
+    """the same cover approved to Sam, then given to Maya, in the same second: the same approved.at"""
+    with school(SAM, MAYA):
+        i = absent(by=HUGO); give(i, K5, SAM); TE.sweep(); give(i, K5, MAYA); assert TE.sweep() == 1
+        base = f"relief:{EVE}:{K5}:2026-10-12T09:00:00+08:00"
+        assert [(r["key"], r["name"]) for r in outs()] == [(base, SAM), (f"{base}:{MAYA}", MAYA)]
+        assert send() == 1 and state(base) == "dropped" and swept() == 0 and said(MAYA) == [RELIEF_K5] and said(SAM) == [], "Sam's had not gone: it never does, and Maya is told once"
+        at("09:05"); give(i, K5, SAM); swept(); assert said(MAYA) == [RELIEF_K5, MOVED_K5] and said(SAM) == [RELIEF_K5]
+    with school(SAM, MAYA):                                                                # Sam's had gone
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); give(i, K5, MAYA); swept(); swept()
+        assert said(SAM) == [RELIEF_K5, MOVED_K5] and said(MAYA) == [RELIEF_K5]
+
+@t
+def a_cover_taken_over_by_another_absence_is_not_told_again():
+    """an exam's takeover moves an approved cover to another record of the same teacher: the same key, approved.at and person"""
+    def take_over(i, j):
+        r = absences.load(i); x = next(x for x in r["lessons"] if x["key"] == K5)
+        r["lessons"].remove(x); absences._save(r); absences._save(dict(r, id=j, how="asked", by=EVE, lessons=[x], at=clock.now))
+    with school(SAM, MAYA):
+        i = absent(by=HUGO); give(i, K5, SAM); TE.sweep(); take_over(i, "dead00beef")
+        assert send() == 1 and swept() == 0 and said(SAM) == [RELIEF_K5], "still true, neither gone nor moved, and not sent again"
+        at("09:10"); give("dead00beef", K5, MAYA); swept(); swept(); assert said(SAM) == [RELIEF_K5, MOVED_K5] and said(MAYA) == [RELIEF_K5]
+    with school(SAM):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); take_over(i, "dead00beef"); at("09:10"); swept(); assert said(SAM) == [RELIEF_K5]
+        absences.cancel("dead00beef", "Better", EVE); swept(); assert said(SAM) == [RELIEF_K5, GONE_K5]
+    with school(SAM, MAYA):                                                                # the absence the message was about is looked at first, wherever else the cover is
+        for mine, other in (("1" * 12, "2" * 12), ("3" * 12, "0" * 12)):
+            i = absent(by=HUGO); give(i, K5, SAM); r = absences.load(i); os.remove(absences._path(i)); absences._save(dict(r, id=mine)); TE.sweep()
+            x = json.loads(json.dumps(next(x for x in r["lessons"] if x["key"] == K5))); x["relief"] = MAYA; absences._save(dict(r, id=other, lessons=[x])); ref = json.loads(outs(name=SAM)[0]["ref"])
+            assert TE._holder(absences.all_records(), dict(ref, id=mine))[1]["relief"] == SAM and TE._holder(absences.all_records(), dict(ref, id=other))[1]["relief"] == MAYA
+            shutil.rmtree(absences.DIR)
+
+@t
+def a_lesson_two_absent_teachers_share_is_each_ones_own_relief():
+    """the lesson's key is the same in both absences: what is told is kept apart by the absent teacher"""
+    with school(SAM, MAYA):
+        i = absent(by=HUGO, lessons=[dict(key=K8, needed=True)]); j = absent(teacher=BUSY, lessons=[dict(key=K8, needed=True)])
+        give(i, K8, SAM); give(j, K8, MAYA); assert swept() == 2 and {json.loads(r["ref"])["absent"] for r in outs()} == {EVE, BUSY}
+        assert swept() == 0; at("09:10"); absences.not_needed(i, K8, "x", HUGO); swept(); swept()
+        assert [x[:19] for x in said(SAM)] == ["🔔 Relief for you · ", "❌ No longer needed:"] and len(said(MAYA)) == 1, "gone, not moved to who relieves the other teacher"
+
+@t
+def an_absence_that_cannot_be_read_never_says_its_reliefs_are_gone():
+    with school(SAM, MAYA):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); j = absent(dates=["2026-10-16"]); p = absences._path(i); good = open(p, encoding="utf-8").read()
+        open(p, "w", encoding="utf-8").write("{ not json"); assert swept() == 0 and said(SAM) == [RELIEF_K5]
+        give(j, KF, MAYA); assert swept() == 1 and len(said(MAYA)) == 1, "the other messages go"
+        open(p, "w", encoding="utf-8").write(good); assert swept() == 0
+        os.rename(absences.DIR, absences.DIR + ".away")
+        try: assert swept() == 0 and said(SAM) == [RELIEF_K5], "the folder itself not there"
+        finally: os.rename(absences.DIR + ".away", absences.DIR)
+        os.remove(p); assert swept() == 1 and said(SAM) == [RELIEF_K5, GONE_K5], "really gone"
+    # a change of two records (an exam's takeover) read half way: the cover is in neither, until it is read again in one go
+    with school(SAM):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); held, real = [], absences.all_records
+        def half():
+            held.append(absences._LOCK.locked()); got = real()
+            return got if absences._LOCK.locked() else [dict(v, lessons=[y for y in v["lessons"] if y["key"] != K5]) for v in got]
+        with stand_in(absences, "all_records", half): assert swept() == 0 and held == [False, True] and said(SAM) == [RELIEF_K5] and not absences._LOCK.locked()
+        with stand_in(absences, "all_records", lambda: held.append(absences._LOCK.locked()) or real()): del held[:]; assert swept() == 0 and held == [False], "read once when nothing is gone"
+
+@t
+def a_lesson_that_is_over_is_not_told():
+    with school(SAM, MAYA, TEAM):
+        i = absent(by=HUGO); at("11:29", 13); give(i, K5, SAM); assert [x["kind"] for x in dues()] == ["relief"]
+        at("11:30", 13); assert dues() == [] and TE.sweep() == 0, "its end: nothing more"
+        at("11:29", 13); swept(); assert said(SAM) == [RELIEF_K5]
+        give(i, K5, MAYA); at("11:30", 13); assert swept() == 0 and len(said(SAM)) == 1, "nor that it moved"
+        at("09:00", 14); assert dues() == []
+        # queued, and over before it could go
+        at("11:29", 13); TE.sweep(); at("11:30", 13); send(); assert said(MAYA) == [] and state(f"relief:{EVE}:{K5}:2026-10-13T11:29:00+08:00:{MAYA}") == "dropped"
+    with school(SAM):                                                                      # a period with no times: over when its day is
+        i = absent(by=HUGO); give(i, K5, SAM); change_record(i, lambda r: [x.update(p=20) for x in r["lessons"] if x["key"] == K5])
+        at("23:59", 13); x, = dues(); assert x["ref"]["ends"] == "2026-10-14T00:00:00+08:00"; swept(); absences.cancel(i, "x", HUGO); assert [x["kind"] for x in dues()] == ["gone"]; at("00:00", 14); assert dues() == []
+    with school(SAM, TEAM):
+        i = absent(by=HUGO); give(i, K5, SAM); CV.ask_change(i, K5, "A meeting", SAM)
+        at("11:29", 13); assert {x["kind"] for x in dues()} == {"ask"}; at("11:30", 13); assert dues() == []
+        at("11:29", 13); CV.keep(i, K5, TEAM); assert {x["kind"] for x in dues()} == {"relief", "kept"}; at("11:30", 13); assert dues() == []
+
+@t
+def remind_copies_are_not_reliefs_of_their_own():
+    """Task 6 sends a relief again under its key with :r1 after it: it never makes a second moved or gone"""
+    with school(SAM, MAYA):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); r, = outs()
+        assert OB.queue(r["key"] + ":r1", SAM, "again", kind="relief", ref=json.loads(r["ref"])) and send() == 1
+        at("09:10"); give(i, K5, MAYA); swept(); swept(); assert told_of("moved") == [("moved", SAM)]
+    with school(SAM, MAYA):                                                                # the first never went: the copy alone counts for nothing
+        i = absent(by=HUGO); give(i, K5, SAM); TE.sweep(); r, = outs(); put(r["key"], state="failed")
+        OB.queue(r["key"] + ":r1", SAM, "again", kind="relief", ref=json.loads(r["ref"])); send(); at("09:10"); give(i, K5, MAYA); swept(); assert told_of("moved") == []
+    for s, n in (("sent", 1), ("unsure", 1), ("queued", 0), ("sending", 0), ("failed", 0), ("dropped", 0)):
+        with school(SAM):
+            i = absent(by=HUGO); give(i, K5, SAM); TE.sweep(); put(outs()[0]["key"], state=s); at("09:10"); absences.cancel(i, "Better", HUGO)
+            assert len([x for x in dues() if x["kind"] == "gone"]) == n, s
+
+# ---- the absent teacher, the reporting officer, the team
+@t
+def planned_tells_the_absent_teacher():
+    with school(EVE, HUGO, TEAM):
+        i = absent(by=HUGO); assert TE.sweep() == 1
+        r, = outs(); assert (r["key"], r["name"], r["kind"], r["text"]) == (f"planned:{i}", EVE, "planned", PLANNED_EVE), r
+        assert json.loads(r["buttons"]) == [[dict(text="✅ Acknowledge and set work", url=BASE + "/relief#mine")], [dict(text="❌ Not needed: cancel", what="cancel", id=i)]]
+        assert swept() == 0 and said(EVE) == [PLANNED_EVE], "once; the planner is not told"
+    with school(EVE):
+        i = absent(by=HUGO, dates=["2026-10-13", "2026-10-14"], periods=[0, 2]); TE.sweep(); assert outs()[0]["text"].splitlines()[1:4] == ["Tue 13 Oct, Wed 14 Oct · P1–P3", "Planned by Mr Hugo Ong", "2 lessons will be covered."]
+    with school(EVE):
+        absent(by=HUGO, periods=[2, 4]); TE.sweep(); assert "\n1 lesson will be covered.\n" in outs()[0]["text"]
+    for what in ("asked", "acknowledged", "cancelled", "past", "by themselves", "not planned"):
+        with school(EVE):
+            i = absent(by=None if what == "asked" else HUGO)
+            if what == "by themselves": change_record(i, lambda r: r.update(by=EVE))
+            if what == "not planned": change_record(i, lambda r: r.update(how="asked"))
+            if what == "acknowledged": absences.acknowledge(i, EVE)
+            if what == "cancelled": absences.cancel(i, "Better", HUGO)
+            if what == "past": at("09:00", 14)
+            assert [x for x in dues() if x["kind"] in ("planned", "remind")] == [] and [x for x in outs() if x["name"] == EVE] == [], what
+    with school(EVE):                                                                      # acknowledged before it could go
+        i = absent(by=HUGO); TE.sweep(); absences.acknowledge(i, EVE); assert send() == 0 and said(EVE) == []
+
+@t
+def the_reminder_goes_once_after_its_time():
+    with school(EVE):
+        i = absent(by=HUGO); swept(); at("14:59"); assert swept() == 0
+        at("15:00"); assert swept() == 1 and [(r["key"], r["kind"], r["text"], json.loads(r["buttons"])) for r in outs()][1:] == [(f"remind:{i}", "remind", REMIND_EVE, [])]
+        for hm, d in (("15:01", 12), ("23:00", 12), ("00:00", 13), ("09:00", 13)): at(hm, d); assert swept() == 0, (hm, d)
+        assert said(EVE) == [PLANNED_EVE, REMIND_EVE]
+    for sent_, day in (("15:00", 12), ("16:00", 12), ("07:00", 13)):                       # sent at or after that time: never, the next day neither
+        with school(EVE):
+            at(sent_, day); i = absent(by=HUGO); swept()
+            for hm, d in (("16:30", 12), ("23:59", 12), ("00:00", 13), ("07:30", 13), ("12:00", 13)):
+                if (d, hm) >= (day, sent_): at(hm, d); assert swept() == 0, (sent_, hm, d)
+            assert told_of() == [("planned", EVE)]
+    with school(EVE):                                                                      # the first day's, when there are several
+        at("16:00"); i = absent(by=HUGO, dates=["2026-10-13", "2026-10-16"]); assert swept() == 1
+        for hm, d in (("16:30", 12), ("00:00", 13), ("15:30", 15), ("09:00", 16)): at(hm, d); assert swept() == 0, (hm, d)
+    with school(EVE, times=dict(remind_at="16:30")):                                       # the setting, and the school day before
+        i = absent(by=HUGO, dates=["2026-10-16"]); swept(); at("16:29", 15); assert swept() == 0; at("16:30", 15); assert swept() == 1
+    for what in ("acknowledged", "cancelled", "asked"):
+        with school(EVE):
+            i = absent(by=None if what == "asked" else HUGO); swept()
+            if what == "acknowledged": absences.acknowledge(i, EVE)
+            if what == "cancelled": absences.cancel(i, "Better", HUGO)
+            at("15:00"); swept(); assert "remind" not in [k for k, n in told_of()], what
+    with school(EVE):                                                                      # acknowledged between the two
+        i = absent(by=HUGO); swept(); at("15:00"); TE.sweep(); absences.acknowledge(i, EVE); assert send() == 0
+
+@t
+def the_officer_message_has_only_the_kind_of_reason():
+    with school(ROSA, EVE, HUGO, TEAM):
+        i = absent(reason="Other", reason_text="a made-up private matter", remarks="a made-up remark"); TE.sweep()
+        r, = outs(); assert (r["key"], r["name"], r["kind"], r["text"], json.loads(r["buttons"])) == \
+            (f"officer:{i}", ROSA, "officer", "Ms Evelyn Koh is away on Tue 13 Oct (whole day): Other.\nRelief is being arranged.", [])
+        assert "made-up" not in str(r) and swept() == 0 and told_of() == [("officer", ROSA)]
+        absent(teacher=EVE, dates=["2026-10-16"], periods=[0, 1], reason="Course", by=HUGO); TE.sweep()
+        assert [r["text"] for r in outs("officer")][1:] == ["Ms Evelyn Koh is away on Fri 16 Oct (P1–P2): Course.\nRelief is being arranged."]
+        change_record(i, lambda r: r.update(reason="something typed by hand", id="f" * 12)); TE.sweep(); assert "hand" not in str(outs())
+    for officer, by in ((EVE, None), (EVE, HUGO), (HUGO, HUGO), ("Mr Nobody Known", None), ("", None), (None, None)):
+        with school(ROSA, EVE, HUGO):
+            i = absent(by=by or (None if officer else HUGO)); change_record(i, lambda r: r.update(reporting_officer=officer) if officer is not None else r.pop("reporting_officer"))
+            assert [x for x in dues() if x["kind"] == "officer"] == [], officer
+    for what in ("cancelled", "past"):
+        with school(ROSA):
+            i = absent(); absences.cancel(i, "Better", EVE) if what == "cancelled" else at("09:00", 14); assert dues() == [], what
+
+@t
+def cancel_tells_the_team_the_planner_and_the_told():
+    with school(EVE, SAM, MAYA, HUGO, TEAM, LEE, ROSA):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); at("09:10"); absences.cancel(i, "a made-up why", EVE); swept(); swept()
+        assert sorted((r["kind"], r["name"], r["key"]) for r in outs()[3:]) == sorted([("gone", SAM, f"gone:relief:{EVE}:{K5}:2026-10-12T09:00:00+08:00")] + [("cancelled", n, f"cancelled:{i}:{n}") for n in (HUGO, TEAM, LEE)]), outs()[3:]
+        assert said(HUGO) == said(TEAM) == said(LEE) == [CANCELLED_EVE.format(EVE)] and said(SAM) == [RELIEF_K5, GONE_K5] and "made-up why" not in str(rows("outbox"))
+        assert {x["name"] for x in dues(reach={TEAM: 1}, told={})} == {TEAM}, "nobody who cannot be reached"
+    for by, want in ((HUGO, {TEAM, LEE}), (TEAM, {HUGO, LEE})):                            # never the canceller; the absent teacher is not told either
+        with school(EVE, HUGO, TEAM, LEE, ROSA):
+            i = absent(by=HUGO); swept(); absences.cancel(i, "Better", by, team=True); swept(); assert {n for k, n in told_of("cancelled")} == want
+    with school(EVE, TEAM, LEE):                                                           # asked by the teacher: there is no planner
+        i = absent(); swept(); absences.cancel(i, "Better", TEAM, team=True); swept(); assert told_of("cancelled") == [("cancelled", LEE)]
+    with school(TEAM, LEE):                                                                # a team member who is the absent teacher and cancels
+        i = absent(teacher=SAM, lessons=[]); absences.cancel(i, "Better", SAM); swept(); assert {n for k, n in told_of("cancelled")} == {TEAM, LEE}
+    with school(TEAM):                                                                     # long after, to somebody on the team now: nothing about what is past
+        i = absent(); absences.cancel(i, "Better", EVE); at("09:00", 14); assert dues() == []
+
+@t
+def a_team_member_is_told_by_their_rights_at_that_moment():
+    with school(TEAM, LEE, HUGO, SAM):
+        i = absent(); absences.cancel(i, "Better", EVE)
+        with record(LEE, extras=dict(relief=False, exams=None, admin=False)), record(SAM, extras=dict(relief=True, exams=None, admin=False)): TE.sweep()
+        assert {n for k, n in told_of("cancelled")} == {TEAM, SAM}
+        TE.sweep(); assert {n for k, n in told_of("cancelled")} == {TEAM, SAM, LEE}
+
+@t
+def both_roles_get_both_messages():
+    """a person who is both the relief teacher and on the team; a team member who is the absent teacher"""
+    with school(TEAM, LEE, EVE):
+        i = absent(by=HUGO); give(i, K2, TEAM, by=TEAM); swept(); assert ("relief", TEAM) in told_of(), "approved by themselves"
+        CV.ask_change(i, K2, "A meeting", TEAM); new_pick(i, K2, MAYA); swept(); assert {n for k, n in told_of("ask")} == {TEAM, LEE}
+        CV.keep(i, K2, TEAM); swept(); assert told_of("kept") == [("kept", TEAM)]
+        at("09:10"); give(i, K2, MAYA, by=TEAM); swept(); assert told_of("moved") == [("moved", TEAM)]
+    with record(EVE, extras=dict(relief=True, exams=None, admin=False)), school(TEAM, EVE, SAM):
+        i = absent(by=HUGO); give(i, K2, SAM); CV.ask_change(i, K2, "A meeting", SAM); new_pick(i, K2, MAYA); swept()
+        assert sorted(told_of(name=EVE)) == [("ask", EVE), ("planned", EVE)]
+
+# ---- the request to change
+def ask_buttons(i, name=MAYA, short="Ms Lee"): return [[dict(text=f"Approve {short}", what="approve", id=i, ckey=K5, who=name)], [dict(text="Open in the app", url=BASE + "/relief#today")]]
+
+def asked(*, pick=True):
+    """Sam's relief, told, then asked to change at 09:10 -> the absence's id"""
+    i = absent(by=HUGO); give(i, K5, SAM); swept(); at("09:10")
+    if pick: on_cover(SAM, i, K5, "ask-change", dict(why="A parent meeting"))              # in the app: the pick is made at once
+    else: CV.ask_change(i, K5, "A parent meeting", SAM)
+    return i
+
+@t
+def an_ask_waits_for_the_pick_then_goes():
+    with school(SAM, MAYA, TEAM, LEE, HUGO, EVE):
+        i = asked(pick=False); n = len(outs())
+        for hm in ("09:10", "09:11:59"): at(hm); assert TE.sweep() == 0, "two minutes for the pick"
+        new_pick(i, K5, MAYA); assert TE.sweep() == 2
+        a, b = outs()[n:]; ask_at = "2026-10-12T09:10:00+08:00"
+        assert [(r["key"], r["name"], r["kind"], r["text"]) for r in (a, b)] == [(f"ask:{i}:{K5}:{ask_at}:{x}", x, "ask", ASK_K5 + "New pick: Ms Maya Lee\nTeaches Science and is free then.") for x in (LEE, TEAM)]
+        assert json.loads(a["buttons"]) == json.loads(b["buttons"]) == ask_buttons(i)
+        at("09:30"); assert swept() == 0 and len(said(TEAM)) == 1 and said(MAYA) == [] and said(SAM) == [RELIEF_K5], "only the team, once, with that pick"
+        on_cover(TEAM, i, K5, "approve", dict(who=MAYA)); send(); assert said(SAM) == [RELIEF_K5, MOVED_K5] and said(MAYA) == [RELIEF_K5] and len(said(TEAM)) == 1
+    with school(SAM, TEAM):                                                                # asked in the app: the pick is in with the answer
+        with stand_in(FL, "AFTER", [TE.sweep]): i = asked()
+        new = covered(i, K5)[2]["change"]["pick"]; r, = outs("ask")
+        assert r["text"] == ASK_K5 + f"New pick: {new['who']}\n{new['reason']}" and json.loads(r["buttons"])[0][0]["who"] == new["who"]
+
+@t
+def an_ask_without_a_pick_goes_after_two_minutes_and_the_pick_once_more():
+    with school(SAM, MAYA, TEAM, LEE):
+        i = asked(pick=False); ask_at = "2026-10-12T09:10:00+08:00"; calls, real = [], FR.free_then
+        def free_then(*a): calls.append(a[3]["key"]); return real(*a)
+        with stand_in(FR, "free_then", free_then):
+            at("09:11:59"); assert TE.sweep() == 0 and calls == []
+            at("09:12"); assert swept() == 2 and calls == [K5], calls
+            r = outs("ask")[0]; assert r["text"] == ASK_K5 + "No new pick yet: open the app." and json.loads(r["buttons"]) == [[dict(text="Open in the app", url=BASE + "/relief#today")]]
+            for hm in ("09:13", "10:00"): at(hm); assert swept() == 0
+            assert calls == [K5], "asked who is free only for the message that says it"
+            new_pick(i, K5, MAYA); del calls[:]; assert swept() == 2 and calls == []
+        r = outs("askpick", TEAM)[0]; assert (r["key"], r["name"], r["text"]) == (f"askpick:{i}:{K5}:{ask_at}:{TEAM}", TEAM, ASK_K5 + "New pick: Ms Maya Lee\nTeaches Science and is free then.")
+        assert buttons_of(r) == ask_buttons(i) and swept() == 0 and len(said(TEAM)) == 2
+    with school(SAM, TEAM, limits=dict(fat_per_day=3, other_per_day=None, never=[MAYA, RUTH, BUSY, HUGO, LEE, TEAM, ROSA, OFFIE])):
+        i = asked(pick=False); at("09:12"); swept(); assert outs("ask")[0]["text"] == ASK_K5 + "Nobody else is free then: choose someone in the app.", "Sam, who asked, does not count"
+    with school(SAM, TEAM, limits=dict(fat_per_day=3, other_per_day=None, never=[MAYA, BUSY, HUGO, LEE, TEAM, ROSA, OFFIE])):
+        i = absent(by=HUGO); CV.split(i, K5, 6, TEAM); give(i, K5 + "#0", SAM); CV.ask_change(i, K5 + "#0", "x", SAM); at("09:12"); swept()
+        assert outs("ask")[0]["text"].endswith("No new pick yet: open the app."), "a part of a split lesson: Ruth is free for that part"
+    with school(SAM, TEAM):                                                                # a date that is no longer a school day: said as plainly
+        i = asked(pick=False); at("09:12")
+        def odd(*a): raise ValueError("made up")
+        with stand_in(FR, "free_then", odd): swept()
+        assert outs("ask")[0]["text"].endswith("No new pick yet: open the app.")
+    with school(SAM):                                                                      # nobody on the team to tell: nothing is worked out
+        i = asked(pick=False); at("09:12")
+        with stand_in(FR, "free_then", lambda *a: 1 / 0): assert TE.sweep() == 0
+
+@t
+def a_pick_the_ask_carried_is_not_sent_twice():
+    with school(SAM, MAYA, TEAM):
+        i = asked(pick=False); new_pick(i, K5, MAYA); swept(); assert swept() == 0 and told_of("askpick") == []
+        CV.drop(i, K5, "x", who=MAYA, into="change"); at("09:20"); assert swept() == 0, "dropped: nothing to say yet"
+        new_pick(i, K5, MAYA); assert swept() == 0, "the same name again"
+        CV.drop(i, K5, "x", who=MAYA, into="change"); new_pick(i, K5, HUGO); assert swept() == 1 and "New pick: Mr Hugo Ong\n" in outs("askpick")[0]["text"], "another name: once more"
+        assert swept() == 0
+    for s, n in (("queued", 0), ("sent", 0), ("failed", 0), ("dropped", 1)):
+        with school(SAM, TEAM):
+            i = asked(pick=False); new_pick(i, K5, MAYA); TE.sweep(); put(outs("ask")[0]["key"], state=s); assert TE.sweep() == n and told_of("askpick") == [], s
+
+@t
+def a_request_that_is_over_is_not_told():
+    for how in ("kept", "acknowledged", "changed", "cancelled"):
+        with school(SAM, MAYA, TEAM):
+            i = asked(pick=False); new_pick(i, K5, MAYA); TE.sweep()
+            if how == "kept": CV.keep(i, K5, LEE)
+            if how == "acknowledged": CV.acknowledge(i, K5, SAM)
+            if how == "changed": give(i, K5, HUGO)
+            if how == "cancelled": absences.cancel(i, "Better", HUGO)
+            send(); assert not any(x.startswith("↩") for x in said(TEAM)) and [x for x in dues(told={}) if x["kind"] in ("ask", "askpick")] == [], how
+    with school(SAM, MAYA, TEAM):                                                          # asked again: another request
+        i = asked(pick=False); new_pick(i, K5, MAYA); swept(); at("09:20"); CV.keep(i, K5, LEE); swept(); at("09:30"); CV.ask_change(i, K5, "A parent meeting", SAM); new_pick(i, K5, MAYA); swept()
+        assert [r["key"][-26 - len(TEAM):] for r in outs("ask")] == [f"2026-10-12T{hm}:00+08:00:{TEAM}" for hm in ("09:10", "09:30")] and len(said(TEAM)) == 2
+
+@t
+def kept_tells_the_asker():
+    with school(SAM, MAYA, TEAM, LEE, EVE):
+        i = asked(pick=False); new_pick(i, K5, MAYA); swept(); at("09:20"); on_cover(TEAM, i, K5, "keep"); send()
+        r, = outs("kept"); assert (r["key"], r["name"], r["text"], json.loads(r["buttons"])) == (f"kept:{i}:{K5}:2026-10-12T09:20:00+08:00", SAM, KEPT_K5, [])
+        assert swept() == 0 and said(SAM) == [RELIEF_K5, KEPT_K5] and said(MAYA) == []
+        at("09:30"); on_cover(SAM, i, K5, "ask-change", dict(why="Again")); at("09:40"); on_cover(LEE, i, K5, "keep"); send(); assert said(SAM)[2:] == [KEPT_K5], "kept a second time"
+    for later in ("asked again", "moved", "moved and back", "cancelled"):                  # no longer so when it could first be told
+        with school(TEAM):
+            i = asked(pick=False); at("09:20"); CV.keep(i, K5, TEAM); at("09:30")
+            if later == "asked again": CV.ask_change(i, K5, "Again", SAM)
+            if later.startswith("moved"): give(i, K5, MAYA)
+            if later == "moved and back": at("09:40"); give(i, K5, SAM)
+            if later == "cancelled": absences.cancel(i, "Better", HUGO)
+            links.link(SAM, CHATS[SAM], None); links.link(MAYA, CHATS[MAYA], None); assert [x for x in dues() if x["kind"] == "kept"] == [], later
+    with school(TEAM):                                                                     # acknowledged since: told
+        i = asked(pick=False); at("09:20"); CV.keep(i, K5, TEAM); CV.acknowledge(i, K5, SAM); links.link(SAM, CHATS[SAM], None); assert [x["kind"] for x in dues()] == ["kept"]
+    with school(MAYA):                                                                     # kept, and moved in the same second: not said to the other
+        i = asked(pick=False); CV.keep(i, K5, TEAM); give(i, K5, MAYA); assert [x["kind"] for x in dues()] == ["relief"]
+
+# ---- what is old, and what is still to come
+@t
+def a_person_who_links_later_gets_what_is_still_to_come():
+    with school(TEAM):
+        i = absent(by=HUGO); give(i, K5, SAM); give(i, K2, SAM); j = absent(dates=["2026-10-16"]); give(j, KF, SAM); CV.acknowledge(i, K2, SAM)
+        at("15:00"); assert swept() == 0
+        links.link(SAM, CHATS[SAM], None); swept(); assert [x.splitlines()[0][-6:] for x in said(SAM)] == ["13 Oct", "16 Oct"] and said(SAM)[0] == RELIEF_K5, "in time order; one acknowledged in the app is not asked again"
+        links.link(EVE, CHATS[EVE], None); links.link(ROSA, CHATS[ROSA], None); swept()
+        assert said(EVE) == [PLANNED_EVE, REMIND_EVE] and said(ROSA) == [OFFICER_EVE, "Ms Evelyn Koh is away on Fri 16 Oct (whole day): Medical.\nRelief is being arranged."], (said(EVE), said(ROSA))
+        links.link(SAM, 900, None); assert swept() == 0, "another phone: nothing is sent twice"
+        # moved while they had no Telegram: told when they have one again
+        links.unlink(SAM); at("15:10"); give(i, K5, MAYA); assert swept() == 0; links.link(SAM, CHATS[SAM], None); swept(); assert said(SAM)[-1] == MOVED_K5
+
+@t
+def nothing_old_is_sent_when_the_bot_first_connects():
+    with school(EVE, SAM, ROSA, TEAM, HUGO, since="2026-10-12T12:00:00+08:00"):
+        i = absent(by=HUGO); give(i, K5, SAM); CV.ask_change(i, K5, "x", SAM); CV.keep(i, K5, TEAM); j = absent(by=HUGO, dates=["2026-10-16"]); absences.cancel(j, "Better", EVE)
+        at("12:30"); assert TE.sweep() == 1 and told_of() == [("relief", SAM)], "the relief is still to be done, whenever it was approved"
+        at("15:00"); assert TE.sweep() == 1 and told_of()[1:] == [("remind", EVE)], "and still to be acknowledged"
+        k = absent(by=HUGO, dates=["2026-10-16"]); CV.ask_change(i, K5, "x", SAM); CV.keep(i, K5, TEAM); TE.sweep()
+        assert set(told_of()[2:]) == {("planned", EVE), ("officer", ROSA), ("kept", SAM)}, told_of()
+        absences.cancel(k, "Better", EVE); TE.sweep(); assert {(a, b) for a, b in told_of("cancelled")} == {("cancelled", TEAM), ("cancelled", HUGO)}
+    with school(EVE, ROSA, since="2026-10-12T09:00:00+08:00"): absent(by=HUGO); assert TE.sweep() == 2, "in the very second it was connected: told"
+    with school(EVE, ROSA, TEAM, since=None): absent(by=HUGO); assert TE.sweep() == 2; at("09:01"); assert dues(since=None, told={}) == [], "no time of connecting: nothing before now"
+
+# ---- still true when it goes
+@t
+def still_true_says_what_may_still_go():
+    def it(kind, name=None): r = outs(kind, name)[0]; return dict(r, ref=json.loads(r["ref"]))
+    with school(EVE, SAM, ROSA, TEAM, MAYA):
+        i = absent(by=HUGO); give(i, K5, SAM); TE.sweep(); relief, planned, officer = it("relief"), it("planned"), it("officer")
+        assert all(TE.still_true(x) is True for x in (relief, planned, officer))
+        CV.acknowledge(i, K5, SAM); assert TE.still_true(relief) is True; CV.ask_change(i, K5, "x", SAM); assert TE.still_true(relief) is True, "theirs, whatever they answered in the app"
+        new_pick(i, K5, MAYA); TE.sweep(); ask = it("ask"); assert TE.still_true(ask) is True
+        absences.acknowledge(i, EVE); assert TE.still_true(planned) is False and TE.still_true(dict(planned, kind="remind")) is False and TE.still_true(officer) is True
+        at("11:30", 13); assert TE.still_true(relief) is False, "over"; at("11:29", 13); assert TE.still_true(relief) is True
+        at("09:00", 14); assert TE.still_true(officer) is False, "past"; at("09:10")
+        CV.keep(i, K5, TEAM); assert TE.still_true(ask) is False and TE.still_true(dict(ask, kind="askpick")) is False
+        CV.ask_change(i, K5, "x", SAM); assert TE.still_true(ask) is False, "another request"; CV.keep(i, K5, TEAM)
+        give(i, K5, SAM); assert TE.still_true(relief) is False, "approved anew: that message is the one to go"
+        absences.cancel(i, "Better", HUGO); assert TE.still_true(officer) is False and TE.still_true(relief) is False
+        for kind in ("gone", "moved", "kept", "cancelled", "report", "clear", "weekly", "anything"): assert TE.still_true(dict(kind=kind, ref=None)) is True, kind
+    with school(EVE, SAM, ROSA, TEAM):
+        i = absent(by=HUGO); give(i, K5, SAM); j = absent(dates=["2026-10-16"]); TE.sweep(); CV.ask_change(i, K5, "x", SAM); new_pick(i, K5, MAYA); TE.sweep()
+        items = [next(dict(r, ref=json.loads(r["ref"])) for r in outs(k) if json.loads(r["ref"])["id"] == i) for k in ("relief", "planned", "officer", "ask")]; p = absences._path(i); good = open(p, encoding="utf-8").read()
+        def raises(x):
+            try: TE.still_true(x)
+            except Exception: return True
+            return False
+        for bad in ("{ not json", "[]", "{}", ""): open(p, "w", encoding="utf-8").write(bad); assert all(raises(x) for x in items), bad
+        assert send() == 1 and [state(x["key"]) for x in items] == ["queued"] * 4, "what cannot be read waits (the other officer message went)"
+        open(p, "w", encoding="utf-8").write(good); assert all(TE.still_true(x) is True for x in items)
+        os.rename(p, p + ".away"); assert all(TE.still_true(x) is False for x in items), "the file really gone"
+        q_ = absences._path(j); other = open(q_, encoding="utf-8").read(); open(q_, "w", encoding="utf-8").write("{ not json")
+        assert raises(items[0]) and all(TE.still_true(x) is False for x in items[1:]), "the cover may be in the one that cannot be read"
+        open(q_, "w", encoding="utf-8").write(other); os.rename(p + ".away", p)
+        with stand_in(absences, "all_records", lambda: 1 / 0): assert TE.still_true(items[0]) is True, "every record is read only when its own does not answer"
+
+# ---- what a message never carries
+@t
+def no_message_carries_remarks_or_the_typed_reason():
+    with school(EVE, SAM, ROSA, TEAM, LEE, HUGO, MAYA):
+        i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)], reason="Other", reason_text="zebra-reason", remarks="quokka-remark")
+        change_record(i, lambda r: [x.update(pick=dict(who=SAM, by="ai", reason="lemur-first-pick", at=clock.now)) for x in r["lessons"] if x["key"] == K5])
+        on_cover(TEAM, i, K5, "approve", dict(who=SAM)); send()
+        at("09:10"); CV.ask_change(i, K5, "walrus-why", SAM); new_pick(i, K5, MAYA, reason="okapi-new-pick"); swept()
+        at("09:15"); CV.keep(i, K5, LEE); swept(); at("09:20"); CV.ask_change(i, K5, "walrus-why", SAM); swept(); at("09:25"); swept(); new_pick(i, K5, MAYA, reason="okapi-new-pick"); swept()
+        at("09:30"); on_cover(TEAM, i, K5, "approve", dict(who=MAYA)); swept(); at("15:00"); swept()
+        absences.not_needed(i, K2, "gecko-not-needed", HUGO); absences.cancel(i, "bison-cancel", EVE); swept()
+        j = absent(dates=["2026-10-16"], reason="Course", remarks="quokka-remark"); swept()
+        kinds = {k for k, n in told_of()}; assert kinds == {"planned", "officer", "relief", "ask", "askpick", "kept", "moved", "remind", "gone", "cancelled"}, kinds
+        for r in outs():
+            all_ = json.dumps(r, ensure_ascii=False) + r["text"]
+            for word in ("zebra", "quokka", "lemur", "gecko", "bison"): assert word not in all_, (word, r["kind"])
+            for word in ("walrus", "okapi"): assert (word in all_) <= (r["kind"] in ("ask", "askpick") and r["name"] in (TEAM, LEE)), (word, r["kind"], r["name"])
+            for word in absences.REASONS: assert (word in r["text"]) <= (r["kind"] == "officer" and r["name"] == ROSA), (word, r["kind"])
+        assert set(CHATS[n] for n in (TEAM, LEE)) >= {c for c, x in sent() if "walrus" in x} and any("okapi" in x for x in said(TEAM))
+
+@t
+def due_is_worked_out_from_what_it_is_given():
+    with school(EVE, SAM, ROSA, TEAM, MAYA):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); give(i, K2, SAM); CV.ask_change(i, K2, "x", SAM); at("09:10"); absences.not_needed(i, K5, "x", HUGO)
+        records, told, reach, st = absences.all_records(), OB.told_for(""), links.reachable(), rs(); before = json.dumps(records)
+        def no(*a, **k): raise AssertionError("due read something")
+        with stand_in(store, "read_json", no), stand_in(store, "published", no), stand_in(tgdb, "db", no), stand_in(absences, "all_records", no), stand_in(absences, "_now", no), stand_in(LS, "today", no), stand_in(os, "listdir", no):
+            args = (SCHOOL, st, records, clock.now, reach, told, "2026-10-12T08:00:00+08:00")
+            a, b = [TE.due(*args, team=(TEAM, LEE), base=BASE, shorts={}) for _ in range(2)]
+            none = TE.due(*args)
+        assert a == b and json.dumps(records) == before and [(x["kind"], x["name"]) for x in a] == [("gone", SAM), ("ask", TEAM)], a
+        assert all(set(x) == {"key", "name", "kind", "text", "buttons", "files", "ref"} for x in a) and [x["kind"] for x in none] == ["gone"], "no team: nothing for it"
+        assert [x["kind"] for x in TE.due(*args, team=(TEAM,), whole=False)] == ["ask"], "some records could not be read: nothing is said to have ended"
+        assert json.dumps(a) and TE.due(SCHOOL, st, [], datetime.datetime(2026, 10, 12, 1, 10, tzinfo=datetime.timezone.utc), reach, {}, None) == []
+        # no short name known: the name
+        new_pick(i, K2, MAYA); got = dues(told={}); assert [x["buttons"][0][0]["text"] for x in got if x["kind"] == "ask"] == ["Approve Ms Maya Lee"]
+        assert [x["buttons"][0][0]["text"] for x in dues(told={}, shorts={MAYA: "Ms Lee"}) if x["kind"] == "ask"] == ["Approve Ms Lee"]
+
+@t
+def the_sweep_is_quick():
+    with school(EVE, SAM, ROSA, TEAM, LEE, HUGO):
+        i = absent(by=HUGO, dates=["2026-10-13", "2026-10-14", "2026-10-16"]); give(i, K5, SAM); give(i, KF, SAM); whole_ = absences.load(i); os.remove(absences._path(i))
+        for n in range(200):
+            r = json.loads(json.dumps(whole_)); r.update(id=f"{n:012x}", teacher=f"Mx Made Up {n}")
+            if n % 2: r.update(dates=["2026-10-01"], lessons=[dict(x, date="2026-10-01", key=x["key"].replace("2026-10-13", "2026-10-01")) for x in r["lessons"][:3]])
+            absences._save(r)
+        began = time.monotonic(); n = TE.sweep(); first = time.monotonic() - began
+        assert n == 300, n                                                                 # 100 to come: two reliefs and the officer's, each
+        began = time.monotonic(); assert TE.sweep() == 0; second = time.monotonic() - began
+        assert first < 2 and second < 0.5, (first, second)
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
