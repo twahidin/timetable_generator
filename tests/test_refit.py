@@ -764,7 +764,7 @@ def test_adding_a_period_takes_a_free_slot():
     m, spec, days, pool, ts = case([one(1, 0, 1, CLS_B, EL, T0, n=2)], lambda s: (plans(5, 2, key)(s), gives(T0, key)(s)))   # the same for a lesson that is short of periods
     got, _ = solved(m, spec, days, t_of(ts, "periods"), pool); assert [f["n"] for f in got["fixes"]] == [2, 1] and got["why"] == ["Step 3 plans 5 periods of it."] * 2, got
     m, spec, days, pool, ts = case([], plans(9, 1, key)); got, stats = hunt(m, spec, days, t_of(ts), pool); assert got is None and stats["reason"] == refit.TOO_MANY == "More than 8 changes: change it on the board.", (got, stats)
-    m, spec, days, pool, ts = case([], plans(8, 1, key)); got, _ = solved(m, spec, days, t_of(ts), pool); assert len(got["fixes"]) == 8, got
+    m, spec, days, pool, ts = case([], plans(8, 1, key)); got, _ = hunt(m, spec, days, t_of(ts), pool); assert len(got["fixes"]) == 8, got
     eight = [x for d in range(5) for x in full(*(OPEN[:8] if d == 0 else []), d=d, cls=CLS_B)]
     m, spec, days, pool, ts = case(eight, plans(9, 1, key)); got, stats = hunt(m, spec, days, t_of(ts), pool); assert got is None and stats["reason"] == refit.NO_FIT, (got, stats)   # a ninth has no place at all: that is the reason
     crowd = [one(100 * d + p, d, p, CLS_B, "Other", T2) for d in range(1, 5) for p in OPEN[:3]]   # Monday is far the emptiest: the second goes to another day all the same
@@ -837,6 +837,40 @@ def test_a_place_the_add_could_not_take_afterwards_is_not_tried():
     assert all(d_ <= held_ and OPEN[0] in held_ for d_, (_, held_) in zip(differ, asked)) and max(map(len, differ)) >= 2, differ   # direct is told of both, and of the earlier targets'
     for fx, c_, _ in judged:
         gone = [f["id"] for f in fx if f["kind"] == "move"]; put = [(f["d"], f["p"]) for f in fx if f["kind"] == "add"]; assert len(set(gone)) == len(gone) and len(set(put)) == len(put), fx
+
+def test_an_add_is_judged_in_the_room_it_takes():
+    key = f"C:{CLS_B}:{EL}"; part = f"dep:{key}:missing"; need = lambda s: (plans(1, 1, key)(s), gives(T0, key)(s)); last = OPEN[-1]
+    home = case([])[0]["class_ix"][CLS_B]["home"]; shut = dict(scope="Room", target=home, rule="Not available", week="Both", day=DAYS[0], strength="Must", **{"from": 0, "to": NPD - 2})   # 1B's home room is shut on Monday
+    plain = lambda first: [one(100 * d + p, d, p, CLS_B, "Mathematics", T2) for d in range(first, 5) for p in OPEN if not (d in (0, 1) and p == last)]
+    m, spec, days, pool, ts = case(plain(1) + [band(901, 1, last, CLS, T0)], need, rules=[shut]); t = ts[part]   # Monday is free for 1B, the rest of the week is taken
+    assert {(s_["state"], s_["why"].startswith("Rule Room")) for s_ in fixes.add_slots(m, spec, days, key, 1, pool) if s_["d"] == 0 and s_["state"] != "na"} == {("no", True)}
+    cands = [c[0] for c in refit.direct(m, spec, days, t, pool)[0]]; assert [(c["d"], c["p"], c["room"]) for c in cands] == [(1, p, home) for p in OPEN[:6]], cands   # with nothing to move on Monday its places are none
+    got, _ = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="move", id=100 + OPEN[5], d=1, p=last), dict(kind="add", key=key, d=1, p=OPEN[5], n=1, room=home)], got
+    m, spec, days, pool, ts = case(plain(0) + [band(900, 0, last, CLS, T0), band(901, 1, last, CLS, T0)], need, rules=[shut]); t = ts[part]   # Monday is taken too: its lessons could move, but the add could not have the room
+    assert [c[0]["d"] for c in refit.direct(m, spec, days, t, pool)[0]] == [1] * 6
+    got, _ = solved(m, spec, days, t, pool); assert got["fixes"][0]["d"] == 1 and got["moved"] == {100 + OPEN[5]}, got
+    m, spec, days, pool, ts = case([], need, rules=[dict(shut, day="All")]); assert refit.direct(m, spec, days, ts[part], pool) == ([], None)   # a place that is refused with no lesson in it is not one
+
+def test_an_add_is_never_on_top_of_another_lesson_of_the_key():
+    key = "G:PULL1"; part = lambda p: f"dep:{key}:{p}"
+    def group(teachers, periods, length=1, double=False):   # a group outside a band on step 5, and Monday as a day a teacher may take two lessons at once
+        def change(s):
+            base = next(r for r in s["lessons"] if r.get("code") == ENTIRE and CLS in r["classes"])
+            s["lessons"].append(dict(base, code="PULL1", code_override="PULL1", classes=[CLS], block="", subject=EL, teachers=list(teachers), periods=periods, length=length, room_kind=None))
+            if double: s["school"].update(extra_settings=list(s["school"].get("extra_settings") or []) + [["Teachers may take two lessons at once on", DAYS[0]]])
+        return change
+    only_monday = [AWAY(T0, d) for d in range(1, 5)]
+    def adds(got): return [(f["d"], f["p"], f["n"]) for f in got["fixes"]]
+    def apart(got): cells = [(d, q) for d, p, n in adds(got) for q in range(p, p + n)]; assert len(cells) == len(set(cells)), got; return adds(got)
+    for teachers, periods, double, rules, want in (([T0], 2, True, only_monday, [(0, 1, 1), (0, 2, 1)]), ([T0], 2, False, only_monday, [(0, 1, 1), (0, 2, 1)]), ([], 6, False, [], [(d, 1, 1) for d in range(5)] + [(0, 2, 1)]), ([T0], 6, True, [], [(d, 1, 1) for d in range(5)] + [(0, 2, 1)])):
+        m, spec, days, pool, ts = case([], group(teachers, periods, double=double), rules=rules); got, _ = solved(m, spec, days, ts[part("missing")], pool); assert apart(got) == want, got
+    m, spec, days, pool, ts = case([], group([T0], 4, 2, True), rules=only_monday); got, _ = solved(m, spec, days, ts[part("missing")], pool); assert apart(got) == [(0, 1, 2), (0, 5, 2)], got   # lessons of two: not over half of one either
+    # nor on top of one that is on the timetable
+    mine = [one(40, 0, 1, CLS, EL, T0, group="PULL1")]
+    m, spec, days, pool, ts = case(mine, group([T0], 2, double=True), rules=only_monday); t = ts[part("periods")]
+    assert fixes.judge(m, spec, days, dict(kind="add", key=key, d=0, p=1, n=1, room=""), pool=pool)["state"] == "ok"   # the judge itself would have it
+    assert (0, 1) not in {(c[0]["d"], c[0]["p"]) for c in refit.direct(m, spec, days, t, pool)[0]}; got, _ = solved(m, spec, days, t, pool); assert adds(got) == [(0, 2, 1)], got
+    m, spec, days, pool, ts = case([one(40, 0, 2, CLS, EL, T0, group="PULL1")], group([T0], 3, 2, True), rules=only_monday); got, _ = solved(m, spec, days, ts[part("periods")], pool); assert adds(got) == [(0, 5, 2)], got   # nor with one of its two periods on it
 
 def test_a_surplus_is_deleted_from_the_fullest_days():
     rows = [one(1, 0, 1), one(2, 0, 2), one(5, 0, 3, CLS, "Other"), one(3, 1, 1), one(4, 1, 2), one(6, 1, 3, CLS, "Other"), one(7, 2, 1)]   # Mon and Tue have three periods each, Wed one

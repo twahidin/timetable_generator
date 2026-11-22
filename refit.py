@@ -77,24 +77,27 @@ def _usable(j):
     return j["state"] == "ok" or (j["state"] == "prefer" and j["why"].endswith(OVER))
 
 def _adds(m, spec, days, pool, ks, k, e, n, held):
-    cls = _class_of(k, e); c = fixes._ctx(m)
+    cls = _class_of(k, e); c = fixes._ctx(m); own = {(x["d"], q) for x in helper._of_key(m["lessons"], k) for q in fixes._span(x)}   # when the key has a lesson already (one put in by the list too): no other goes on top of it, which the judge allows on a day of doubles or with no teacher
     busy = lambda d: len({x["id"] for x in m["lessons"] if cls in x["classes"] and x["d"] == d})   # the lessons the class already has that day
-    slots = sorted(fixes.add_slots(m, spec, days, ks, n, pool), key=lambda s: (busy(s["d"]), s["d"], s["p"]))
+    slots = [s for s in fixes.add_slots(m, spec, days, ks, n, pool) if not any((s["d"], q) in own for q in range(s["p"], s["p"] + n))]
+    slots.sort(key=lambda s: (busy(s["d"]), s["d"], s["p"]))
     free = [[dict(kind="add", key=ks, d=s["d"], p=s["p"], n=n, room=fixes.add_room(m, spec, ks, s["d"], s["p"], n, c))] for s in slots if _usable(s)]
     return free or _taken(m, spec, days, pool, ks, n, slots, c, held)
 
 def _taken(m, spec, days, pool, ks, n, slots, c, held):
     """adds at places (slots, in their order) that are refused only for lessons there that a search may move (not a band, not in held): at most
-    TAKEN_SLOTS, each one the judge lets the add have with those lessons off the timetable, in the room add_room gives it then"""
+    TAKEN_SLOTS, each one the judge lets the add have, in the room add_room gives it then, with those lessons off the timetable"""
     out, b = [], c["busy"]
     for s in slots:
         if len(out) == TAKEN_SLOTS: break
         if s["state"] != "no": continue
         f = dict(kind="add", key=ks, d=s["d"], p=s["p"], n=n, room=""); row, there = [], set(); fixes.apply_one(row, f, spec, days, new_id=c["next_id"])
         while (y := b.blocker(row, s["d"], s["p"], n, ignore=there)) is not None: there.add(y)
-        if any(y in held or fixes._block(b.ids[y]) for y in there) or not _usable(fixes.judge(m, spec, days, dict(f, out=sorted(there)), c, pool=pool)): continue
+        usable = lambda f: _usable(fixes.judge(m, spec, days, dict(f, out=sorted(there)), c, pool=pool))
+        if not there or any(y in held or fixes._block(b.ids[y]) for y in there) or not usable(f): continue   # with no lesson there, nothing to move makes it a place
         m2 = dict(m, lessons=[x for x in m["lessons"] if x["id"] not in there]); c2 = dict(c, m=m2, busy=fixes.Busy(m2, base=b))
-        out.append([dict(f, room=fixes.add_room(m2, spec, ks, s["d"], s["p"], n, c2))])
+        f = dict(f, room=fixes.add_room(m2, spec, ks, s["d"], s["p"], n, c2))
+        if usable(f): out.append([f])
     return out
 
 def _day_periods(lessons, cls):
@@ -190,7 +193,7 @@ def direct(m, spec, days, target, pool, held=()):
     """the change itself for one target, before any search -> (candidates, sentence): the candidate changes, each a list of fixes,
     best first; and a Needs-you sentence when the target can never be one of the app's changes, else None. clash and rule have none
     here (the search moves lessons). held: the ids of lessons that stay where they are (moved already): none is deleted, and no add is
-offered in the place of one. Never changes m or its lessons; a key step 5 no longer has gives the warning's own text"""
+    offered in the place of one. Never changes m or its lessons; a key step 5 no longer has gives the warning's own text"""
     text = target["text"]
     try:
         if target["kind"] in ("clash", "rule"): return [], None
