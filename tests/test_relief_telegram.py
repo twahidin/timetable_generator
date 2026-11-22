@@ -82,7 +82,9 @@ def every_failure_becomes_its_kind():
         r = kind(answer(429, dict(ok=False)))
         assert r["kind"] == "slow" and r["retry_after"] == 5, r
         assert kind(answer(400, dict(ok=False)))["kind"] == "refused"
-        assert kind(answer(502, b"bad gateway"))["kind"] == "network"
+        for status in (500, 504): assert kind(answer(status, b"late"))["kind"] == "unsure" and kind(answer(status, dict(ok=True, result=1)))["kind"] == "unsure", status
+        for status in (501, 502, 503, 505, 520, 599): assert kind(answer(status, b"bad gateway"))["kind"] == "network", status
+        assert kind(failing(urllib.error.HTTPError("u", 504, "x", {}, None)))["kind"] == "unsure"
         assert kind(answer(200, dict(ok=False)))["kind"] == "refused"
         assert kind(answer(200, b"<html>"))["kind"] == "refused"
         assert kind(failing(urllib.error.URLError("no route")))["kind"] == "network"
@@ -270,7 +272,7 @@ def two_threads_reading_then_writing_never_lock():
 import collections, contextlib, hashlib, itertools, re, sqlite3, threading, time  # noqa: E402
 import access, history  # noqa: E402
 from accounts import people as AP, rights as AR  # noqa: E402
-from relief import bot, links, people as RP, tgweb, web as WB  # noqa: E402
+from relief import bot, links, outbox as OB, people as RP, tgweb, web as WB  # noqa: E402
 
 TIA, HUGO, CORA, EXE, TEAM, ROSA, GONE_, OFFIE = ("Ms Tia Teo", "Mr Hugo Ong", "Ms Cora Lim", "Mdm Exe Sim", "Ms Team Tan", "Ms Rosa Ng",
                                                   "Mr Gone Goh", "Mr Offie Foo")
@@ -310,7 +312,7 @@ def wipe():
     with tgdb.db() as c:
         for table in ("links", "codes", "talks", "updates", "outbox", "buttons"): c.execute(f"DELETE FROM {table}")
         c.execute("DELETE FROM state WHERE k='bot'")
-    tg.PRACTICE_LOG.clear(); links.tries.fails.clear()
+    tg.PRACTICE_LOG.clear(); links.tries.fails.clear(); OB._doubt.clear()
 
 @contextlib.contextmanager
 def no_pub(pub=None):
@@ -1112,17 +1114,17 @@ def nothing_private_is_logged_by_the_hook():
 
 # ---- Task 3: the message queue and its sender ----
 import subprocess  # noqa: E402
-from relief import absences, files as FI, outbox as OB  # noqa: E402
+from relief import absences, files as FI  # noqa: E402
 
 assert OB.SPACING == 0.05 and OB.EVERY == 5
 OB.SPACING = 0
 NAPS = []                                             # every wait the sender asked for, never waited for here
 OB._sleep = NAPS.append
 OK_ = None
-BLOCKED, REFUSED, DOWN = (403, dict(ok=False)), (400, dict(ok=False)), (502, dict(ok=False))
+BLOCKED, REFUSED, DOWN, LATE = (403, dict(ok=False)), (400, dict(ok=False)), (502, dict(ok=False)), (504, dict(ok=False))
 def SLOW(s): return 429, dict(ok=False, parameters=dict(retry_after=s))
 NEVER_LEFT, MAY_HAVE = ConnectionRefusedError("made up"), TimeoutError("made up")
-MAYBE_SENT = (OK_, MAY_HAVE)                          # the answers after which the message is, or may be, with the person
+MAYBE_SENT = (OK_, MAY_HAVE, LATE)                          # the answers after which the message is, or may be, with the person
 
 def made_up(): return telegram(token="made-up-" + secrets.token_hex(10))
 
@@ -1138,14 +1140,14 @@ def parts(data, headers):
         else: params[field] = json.loads(body)
     return params, up
 
-def tele(*answers, rest=OK_, before=None):
-    """a _send answering one call after another from answers, then rest: (status, body), an exception, or OK_; seen: every
-    call as (method, params, file)"""
+def tele(*answers, rest=OK_, before=None, me=OK_):
+    """a _send answering one call after another from answers, then rest: (status, body), an exception, or OK_ (getMe: always
+    me); seen: every call as (method, params, file)"""
     seen, left = [], list(answers)
     def f(url, data, headers, timeout):
         seen.append((url.rsplit("/", 1)[1], *parts(data, headers)))
         if before: before(*seen[-1])
-        got = left.pop(0) if left else rest
+        got = me if seen[-1][0] == "getMe" else left.pop(0) if left else rest
         if isinstance(got, BaseException): raise got
         status, body = got or (200, dict(ok=True, result=dict(message_id=1000 + len(seen))))
         return status, json.dumps(body).encode()
@@ -1288,8 +1290,8 @@ def killed_at(n, f, *answers):
         step()
     def out(url, data, headers, timeout):
         step()
-        answer_ = left.pop(0) if left else OK_
-        if any(answer_ is x for x in MAYBE_SENT):
+        answer_ = left.pop(0) if left and not url.endswith("/getMe") else OK_
+        if any(answer_ is x for x in MAYBE_SENT) and not url.endswith("/getMe"):
             (got if url.endswith("/sendMessage") else docs).append(parts(data, headers))
         step()
         if isinstance(answer_, BaseException): raise answer_
@@ -1306,14 +1308,14 @@ def killed_at_any_step_a_message_never_goes_twice():
     saved = FI.save("abc123", "work.pdf", b"made-up work"); ends = collections.Counter()
     keep = sqlite3.connect(tgdb.PATH); keep.execute("SELECT count(*) FROM state").fetchone()      # one connection kept open: the others close much faster
     with made_up():
-        for first in ((), (DOWN, NEVER_LEFT), (SLOW(9),), (MAY_HAVE,), (REFUSED,), (BLOCKED,)):
+        for first in ((), (DOWN, NEVER_LEFT), (SLOW(9),), (MAY_HAVE,), (LATE,), (REFUSED,), (BLOCKED,)):
             n = 0
             while True:
                 n += 1; wipe(); bot_on("ctss_made_up_bot"); links.link(TIA, 501, None)
                 q(buttons=[[dict(text="A", what="ack")]], files=[dict(id="abc123", file=saved["id"], name="work.pdf")])
                 dead, got, docs = killed_at(n, lambda: [OB.send_due(now=1000 * i) for i in (1, 2, 3)[:len(first) + 1]], *first)
                 assert not OB._busy.locked()
-                mid = state("k"); OB.recover()                                    # the app starts again, and everything works
+                mid = state("k"); OB.recover(); OB._doubt.clear()                 # the app starts again, and everything works
                 f, seen = tele(); with_send(f, lambda: [OB.send_due(now=10_000 * i) for i in (1, 2, 3)])
                 assert len(got) + len(texts(seen)) <= 1, (first, n, mid, "went twice")
                 assert len(docs) + len([1 for m, p, up in seen if m == "sendDocument"]) <= 1, (first, n, mid, "a file went twice")
@@ -1341,6 +1343,10 @@ def a_store_that_fails_after_the_call_never_sends_again():
         assert len(seen) == 1 == len(failed) and state("a") == "sending" and state("b") == "queued", "the run stops when the store does"
         f, seen = tele(); assert with_send(f, OB.send_due) == dict(sent=1, waiting=0) and state("a") == "sending"
         OB.recover(); assert state("a") == "unsure" and with_send(f, OB.send_due) == dict(sent=0, waiting=0) and len(seen) == 1
+        broken.clear(); failed.clear(); f, seen = tele(MAY_HAVE, before=lambda *a: broken.append(1)); q("c"); q("d"); tgdb.db = db
+        try: with_send(f, OB.send_due)
+        finally: tgdb.db = real
+        assert state("c") == "sending" and OB._doubt.is_set(), "held, though the answer could not be written"
 
 @t
 def slow_and_network_wait_and_retry():
@@ -1392,13 +1398,80 @@ def a_flood_answer_stops_the_run():
 def refused_is_failed_and_unsure_is_unsure():
     with made_up():
         links.link(TIA, 501, None)
-        for i, (answer_, want) in enumerate(((REFUSED, "failed"), ((200, dict(ok=False)), "failed"), (MAY_HAVE, "unsure"), (ConnectionResetError(), "unsure"))):
+        for i, (answer_, want) in enumerate(((REFUSED, "failed"), ((200, dict(ok=False)), "failed"), (MAY_HAVE, "unsure"), (ConnectionResetError(), "unsure"), (LATE, "unsure"), ((500, dict(ok=False)), "unsure"))):
             f, seen = tele(answer_)
             with now_is("2026-10-13T07:20:00+08:00"): q(f"k{i}")
             with now_is("2026-10-13T07:25:00+08:00"): assert with_send(f, OB.send_due) == dict(sent=0, waiting=0)
             assert OB.told(f"k{i}")["state"] == want and (item(f"k{i}")["sent_at"] is None) is (want == "failed") and OB.told(f"k{i}")["at"] == ("2026-10-13T07:25:00+08:00" if want == "unsure" else "2026-10-13T07:20:00+08:00")
-            assert with_send(f, lambda: OB.send_due(now=9e12)) == dict(sent=0, waiting=0) and len(seen) == 1 and q(f"k{i}") is False, want
+            assert with_send(f, lambda: OB.send_due(now=9e12)) == dict(sent=0, waiting=0) and len(texts(seen)) == 1 and q(f"k{i}") is False, want
         assert links.chat_of(TIA) == 501
+
+@t
+def an_unsure_send_holds_the_rest():
+    with made_up():
+        links.link(TIA, 501, None); times = []
+        def go(f):
+            def timed(url, data, headers, timeout): times.append((url.rsplit("/", 1)[1], timeout)); return f(url, data, headers, timeout)
+            return with_send(timed, OB.send_due)
+        said = lambda seen: [m for m, p, up in seen]
+        for k in "abc": q(k, text=k)
+        f, seen = tele(MAY_HAVE)
+        assert go(f) == dict(sent=0, waiting=2) and said(seen) == ["sendMessage"] and texts(seen) == ["a"] and state("a") == "unsure", "the run ends"
+        was = rows("outbox")
+        for me in (MAY_HAVE, NEVER_LEFT, DOWN, LATE, REFUSED, SLOW(3), BLOCKED, (200, dict(ok=False))):
+            f, seen = tele(me=me); times.clear()
+            assert go(f) == dict(sent=0, waiting=2) and seen == [("getMe", {}, None)] and rows("outbox") == was, me
+            assert times == [("getMe", 5)] and links.chat_of(TIA) == 501, me
+        q("d", text="d"); f, seen = tele(me=DOWN); assert go(f) == dict(sent=0, waiting=3) and said(seen) == ["getMe"], "what comes meanwhile waits too"
+        with broken_accounts(): f, seen = tele(); assert go(f) == dict(sent=0, waiting=3) and seen == []
+        b = tgdb.get_state("bot"); tgdb.set_state("bot", None); assert go(f) == dict(sent=0, waiting=3) and seen == []; tgdb.set_state("bot", b)
+        f, seen = tele(); assert go(f) == dict(sent=3, waiting=0) and said(seen) == ["getMe"] + ["sendMessage"] * 3 and texts(seen) == ["b", "c", "d"]
+        assert state("a") == "unsure"
+        q("e"); f, seen = tele(); assert go(f)["sent"] == 1 and said(seen) == ["sendMessage"], "asked once"
+        # it comes back and goes again: one more message, not all of them
+        for k in "wxyz": q(k, text=k)
+        for k in "wx": f, seen = tele(MAY_HAVE); go(f); assert texts(seen) == [k] and state(k) == "unsure"
+        f, seen = tele(); assert go(f) == dict(sent=2, waiting=0) and texts(seen) == ["y", "z"]
+        # a refusal, a failure to connect or a flood answer is no such doubt
+        for answer_ in (REFUSED, NEVER_LEFT, DOWN, SLOW(1)):
+            f, seen = tele(answer_); q("h" + str(len(rows("outbox")))); go(f); assert not OB._doubt.is_set(), answer_
+
+@t
+def a_hold_survives_a_run_asked_for_at_the_same_time():
+    with made_up():
+        links.link(TIA, 501, None)
+        for k in "abc": q(k, text=k)
+        busy, inside, go = dict(sent=0, waiting=2, busy=True), threading.Event(), threading.Event()
+        other = lambda: [OB.send_due(), OB.send_due(now=9e12)]
+        out = []; f, seen = tele(MAY_HAVE, before=lambda *a: out.extend(other()))          # while the message is timing out
+        assert with_send(f, OB.send_due) == dict(sent=0, waiting=2) and out == [busy, busy] and OB._doubt.is_set()
+        def wait(*a): inside.set(); assert go.wait(10)
+        f, seen = tele(me=MAY_HAVE, before=wait); got = []                                  # while getMe is
+        def both():
+            th = threading.Thread(target=lambda: got.append(OB.send_due())); th.start(); assert inside.wait(10)
+            assert other() == [busy, busy]; go.set(); th.join(10)
+        with_send(f, both); assert got == [dict(sent=0, waiting=2)] and [m for m, p, up in seen] == ["getMe"] and OB._doubt.is_set()
+        ths = [threading.Thread(target=OB.send_due) for _ in range(6)]; f, seen = tele(me=NEVER_LEFT)
+        with_send(f, lambda: ([x.start() for x in ths], [x.join() for x in ths])); assert {m for m, p, up in seen} == {"getMe"} and OB._doubt.is_set()
+        f, seen = tele(); assert with_send(f, OB.send_due) == dict(sent=2, waiting=0) and texts(seen) == ["b", "c"]
+
+@t
+def nothing_is_dropped_while_the_accounts_cannot_be_read():
+    with made_up():
+        links.link(TIA, 501, None); links.link(HUGO, 502, None); q("a", text="a"); q("b", HUGO, "b"); was = rows("outbox"); f, seen = tele()
+        asked = []
+        with broken_accounts(), valid(lambda it: asked.append(it)): assert with_send(f, OB.send_due) == dict(sent=0, waiting=2) and seen == [] == asked and rows("outbox") == was
+        # ... from the moment it is looked at: the run stops there
+        real, left = AP.readable, [True, True]
+        AP.readable = lambda: left.pop(0) if left else real()
+        try:
+            with broken_accounts(): assert with_send(f, OB.send_due) == dict(sent=0, waiting=2) and seen == [] and rows("outbox") == was and left == []
+        finally: AP.readable = real
+        good = open(AP.PATH, encoding="utf-8").read()                                       # between two messages
+        f, seen = tele(before=lambda *a: open(AP.PATH, "w", encoding="utf-8").write("{ not json"))
+        try: assert with_send(f, OB.send_due) == dict(sent=1, waiting=1) and texts(seen) == ["a"] and state("b") == "queued"
+        finally: open(AP.PATH, "w", encoding="utf-8").write(good)
+        f, seen = tele(); assert with_send(f, OB.send_due) == dict(sent=1, waiting=0) and texts(seen) == ["b"]
 
 @t
 def a_blocked_chat_is_unlinked():
@@ -1574,7 +1647,7 @@ def files_follow_the_message_and_a_failed_file_is_noted():
         assert with_send(f, OB.send_due)["sent"] == 0 and len(seen) == 4, "never again"
         # slow and network: twice more, with a short wait; unsure, blocked and refused: not again
         for answers, calls, failed, naps in (((SLOW(3),), 2, 0, 1), ((SLOW(3), NEVER_LEFT), 3, 0, 2), ((DOWN, DOWN, DOWN), 3, 1, 2), ((SLOW(9999), SLOW(1)), 3, 0, 2),
-                                             ((MAY_HAVE,), 1, 1, 0), ((BLOCKED,), 1, 1, 0), ((REFUSED,), 1, 1, 0), ((NEVER_LEFT, MAY_HAVE), 2, 1, 1)):
+                                             ((MAY_HAVE,), 1, 1, 0), ((LATE,), 1, 1, 0), ((BLOCKED,), 1, 1, 0), ((REFUSED,), 1, 1, 0), ((NEVER_LEFT, MAY_HAVE), 2, 1, 1)):
             NAPS.clear(); f, seen = tele(OK_, *answers); key = f"f{len(rows('outbox'))}"; q(key, files=fs[:1]); with_send(f, OB.send_due)
             assert (len(seen) - 1, OB.told(key)["files_failed"], len(NAPS), state(key)) == (calls, failed, naps, "sent"), (answers, seen, NAPS)
             assert all(0 < n <= 20 for n in NAPS), NAPS
@@ -1584,8 +1657,8 @@ def files_follow_the_message_and_a_failed_file_is_noted():
             f, seen = tele(); key = f"f{len(rows('outbox'))}"; q(key, files=[bad, fs[1]]); with_send(f, OB.send_due)
             assert len(seen) == 2 and seen[1][2][1] == "b.docx" and OB.told(key)["files_failed"] == 1 and state(key) == "sent", (bad, seen)
         # a message that did not go takes no file with it
-        for answer_ in (REFUSED, MAY_HAVE, NEVER_LEFT, SLOW(4), BLOCKED):
-            f, seen = tele(answer_); key = f"f{len(rows('outbox'))}"; q(key, files=fs); with_send(f, lambda: OB.send_due(now=1000)); assert len(seen) == 1, answer_
+        for answer_ in (REFUSED, MAY_HAVE, LATE, NEVER_LEFT, SLOW(4), BLOCKED):
+            OB._doubt.clear(); f, seen = tele(answer_); key = f"f{len(rows('outbox'))}"; q(key, files=fs); with_send(f, lambda: OB.send_due(now=1000)); assert len(seen) == 1, answer_
         # the person's Telegram moved while the files were going: the rest do not go to a chat that is another's
         wipe(); bot_on("ctss_made_up_bot"); links.link(TIA, 501, None)
         f, seen = tele(before=lambda m, p, up: up and up[1] == "a.pdf" and links.link(HUGO, 501, None)); q("m", files=fs); with_send(f, OB.send_due)
@@ -1634,7 +1707,7 @@ def another_copy_starting_never_makes_it_go_again():
         with made_up():
             links.link(TIA, 501, None); f, seen = tele(answer_, before=lambda *a: [OB._mark_unsure() for _ in range(2)]); q()
             with_send(f, lambda: OB.send_due(now=1000)); assert state("k") == want, (answer_, state("k"))
-            with_send(f, lambda: OB.send_due(now=9e12)); assert len(seen) == 1
+            with_send(f, lambda: OB.send_due(now=9e12)); assert len(texts(seen)) == 1
 
 @t
 def recover_waits_for_a_run_that_is_going():

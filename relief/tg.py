@@ -5,9 +5,9 @@ nothing leaves the server, every call is kept in PRACTICE_LOG as (method, params
 hook_secret: hex HMAC-SHA256 of "telegram-hook:" + token under SECRET_KEY, what Telegram sends back with each update
 ("" when there is no SECRET_KEY). call: one Bot API method, never raising: dict(ok, result, kind, retry_after), kind None
 when ok, else "blocked" (403), "slow" (429, wait retry_after), "refused" (other 4xx, no token, an answer that is not ok or not
-JSON), "network" (5xx, or never connected) and "unsure" (the request went out and no answer came: a read timeout or a reset,
-so the message may have arrived). files: (field, filename, bytes) sent as multipart. download: a file by its id, None when
-over the limit or failed.
+JSON), "network" (an outage: 5xx other than 500 and 504, or never connected) and "unsure" (the request went out and no answer
+came, a read timeout or a reset, or it was 500 or 504, which may come after it was taken: the message may have arrived). files:
+(field, filename, bytes) sent as multipart. download: a file by its id, None when over the limit or failed.
 The bot's address holds the token: no address, exception text or answer body is ever logged or raised; a failure is logged by
 its kind alone to "relief.telegram". Tests replace _send, which is the only way out."""
 import hashlib, ssl, hmac, itertools, json, logging, os, secrets, socket, threading, urllib.error, urllib.request
@@ -90,7 +90,7 @@ def _classify(status, raw):
         ra = ((d or {}).get("parameters") or {}).get("retry_after")
         return _fail("slow", ra if isinstance(ra, (int, float)) and not isinstance(ra, bool) else 5)
     if 400 <= status < 500: return _fail("refused")
-    return _fail("network")
+    return _fail("unsure" if status in (500, 504) else "network")
 
 
 def call(method, params=None, files=None, timeout=15):

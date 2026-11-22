@@ -9,12 +9,14 @@ had never been queued, so its key may be queued again).
 
 send_due sends what is due, oldest first, one run at a time in this copy of the app; an item is taken from queued to sending
 in one statement, so two copies never send the same one either. Nothing goes, and nothing is changed, while the bot is not
-connected (links.connected: no token, or another bot's). Each item: VALID(item) False drops it (tell.still_true; raising, or
-anything else, lets it go); the chat is links.chat_of(name) at that moment, never the one it was queued with; then what
-tg.call answers: "network" (nothing went out) waits WAITS[tries] and after the last of them fails; "slow" waits as long as
-Telegram says (SLOW_MOST at most, SLOWS times in all), no try counted, and ends the run, with everything else held as long
-(HOLD at most); "blocked" unlinks the person, only while that chat is still theirs, and removes the item, so that its key may
-be queued once they link again; "unsure" is unsure; anything else failed.
+connected (links.connected: no token, or another bot's) or the accounts cannot be read (nobody could be found then). Each item:
+VALID(item) False drops it (tell.still_true; raising, or anything else, lets it go); the chat is links.chat_of(name) at that
+moment, never the one it was queued with; then what tg.call answers: "network" (nothing went out) waits WAITS[tries], all five
+of them, so it is failed at the sixth try; "slow" waits as long as Telegram says (SLOW_MOST at most, SLOWS times in all), no try
+counted, and ends the run, with everything else held as long (HOLD at most); "blocked" unlinks the person, only while that chat
+is still theirs, and removes the item, so that its key may be queued once they link again; "unsure" is unsure and ends the run;
+anything else failed. After an unsure one nothing goes until Telegram has answered getMe, asked at the start of each run (_doubt,
+in memory: a restart clears it), so a dead connection makes one message unsure, not all.
 
 The text is plain (no parse_mode) and cut at a line end when longer than LIMIT. A button's token is made for the first try
 and kept with the item, so every try carries the same ones; its row in buttons is (re)written with the item's sending, until
@@ -29,6 +31,7 @@ send_due every EVERY seconds or when woken. Failures are logged to "relief.teleg
 name, a chat, a token or a key (keys hold names)."""
 import datetime, json, logging, secrets, sqlite3, threading, time
 
+from accounts import people as _accounts
 from relief import absences as _absences
 from relief import files as _files
 from relief import links, tg, tgdb
@@ -40,8 +43,10 @@ SPACING = 0.05                                  # seconds at least between two c
 LIMIT, MORE = 4000, "…and more in the app."
 BUTTON_DAYS, KEEP_DAYS = 30, 400
 FILE_TRIES, FILE_WAIT, FILE_SLOW, FILE_TIMEOUT = 3, 2, 20, 60
+ME_TIMEOUT = 5
 VALID = lambda item: True                       # item: the stored message as a dict (key, name, kind, ref, text, ...)
 _busy = threading.Lock()                        # one run at a time
+_doubt = threading.Event()                      # a message may or may not have gone: the next waits for Telegram to answer
 _last = [0.0]                                   # when the last call ended (time.monotonic)
 _wake, _stop = threading.Event(), threading.Event()
 _sender = None
@@ -165,7 +170,7 @@ def _settle(item, chat, r, now):
             return "sent", False
         if kind == "unsure":
             c.execute("UPDATE outbox SET state='unsure', sent_at=? WHERE key=? AND state='sending'", (_absences._now(), key))
-            return "unsure", False
+            return "unsure", True
         if kind == "slow" and item["slows"] < SLOWS:
             wait = min(SLOW_MOST, max(1, r["retry_after"] or 0))
             c.execute("UPDATE outbox SET state='queued', sent_at=NULL, slows=slows+1, next_at=? WHERE key=? AND state='sending'", (now + wait, key))
@@ -212,11 +217,14 @@ def _one(key, clock):
     _pace()                                                          # before the checks, so they are as late as can be
     chat = links.chat_of(item["name"]) if _valid(item) else None
     if chat is None:
+        if not _accounts.readable(): return None, True               # nobody can be found now: not that they are gone
         with tgdb.db() as c: c.execute("UPDATE outbox SET state='dropped' WHERE key=? AND state='queued'", (key,))
         return "dropped", False
     params = _params(item, chat)
     if not _claim(item, chat, clock()): return None, False
-    got = _settle(item, chat, _call("sendMessage", params), clock())
+    r = _call("sendMessage", params)
+    if r["kind"] == "unsure": _doubt.set()
+    got = _settle(item, chat, r, clock())
     if got[0] == "sent": _send_files(item, chat)
     return got
 
@@ -226,12 +234,21 @@ def _waiting():
     with tgdb.db(read=True) as c: return c.execute("SELECT count(*) FROM outbox WHERE state='queued'").fetchone()[0]
 
 
+def _may():
+    """a message may go at all now"""
+    return links.connected() is not None and _accounts.readable()
+
+
 def _run(now, limit):
     clock, sent = _clock if now is None else (lambda: now), 0
+    if not _may(): return dict(sent=0, waiting=_waiting())
+    if _doubt.is_set():
+        if not tg.call("getMe", timeout=ME_TIMEOUT)["ok"]: return dict(sent=0, waiting=_waiting())
+        _doubt.clear()
     with tgdb.db(read=True) as c:
         due = [r["key"] for r in c.execute("SELECT key FROM outbox WHERE state='queued' AND next_at<=? ORDER BY at, rowid LIMIT ?", (clock(), limit))]
     for key in due:
-        if links.connected() is None: break
+        if not _may(): break
         try: state, ends = _one(key, clock)
         except Exception as e:                                       # one marked sending stays so: unsure when the app next starts
             _log.error("a message could not be sent (%s)", type(e).__name__)
