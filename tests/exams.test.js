@@ -97,4 +97,20 @@ const box = (checked, teacher = "Ms Z", key = "k1") => ({ checked, dataset: { t:
   assert.deepStrictEqual(S.view, { old: 1 }); assert.deepStrictEqual(S.hpend, {});
   console.log("onHandled cases passed");
 })().catch(e => { console.error(e); process.exit(1); });
+/* the event's heading: Change is the timetable committee's alone, and the one in charge is not on the list */
+const heading = S => new Function("esc", "S", "opt", `${cut("icButton")}\n${cut("icLine")}; return [icButton(), icLine()];`)(esc, S, (v, cur, text) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(text)}</option>`);
+t("Change shows to the timetable committee, and opens the list without the one in charge", () => {
+  const S = (can, open, who = "", busy = false) => ({ me: { can_approve: can }, ic: { open, who }, busy, sched: { in_charge: "Ms <A>" }, view: { people: ["Ms <A>", "Mr B", "Ms C"] } });
+  assert.deepStrictEqual(heading(S(false, false)), ["", ""]);
+  assert.deepStrictEqual(heading(S(false, true)), ["", ""], "never for the teacher in charge");
+  const [button, none] = heading(S(true, false));
+  assert.ok(button.includes('data-act="icOpen"') && none === "");
+  const [gone, line] = heading(S(true, true));
+  assert.ok(gone === "" && line.includes('value="Mr B"') && line.includes('value="Ms C"') && !line.includes('value="Ms &lt;A&gt;"'), line);
+  assert.ok(line.includes("Ms &lt;A&gt; no longer does") && /data-act="icGo" disabled/.test(line), line);
+  assert.ok(!/data-act="icGo" disabled/.test(heading(S(true, true, "Mr B"))[1]) && heading(S(true, true, "Mr B"))[1].includes('value="Mr B" selected'));
+  assert.ok(/data-act="icGo" disabled/.test(heading(S(true, true, "Mr B", true))[1]), "while it is on its way");
+  assert.ok(!heading({ ...S(true, true), sched: {}, view: null })[1].includes("no longer does"));
+});
+
 console.log(`${n} exams page tests passed`);

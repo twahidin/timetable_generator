@@ -17,7 +17,8 @@
     tab: "when", timer: null, chain: Promise.resolve(), dirty: false, rev: 0, saving: false, msg: "", bad: false,
     nf: null, mk: null, duties: null, accCls: "", note: "",
     busy: false, sit: "", room: "", mvCls: "", mvStu: "", duty: null, who: null, whoTok: 0, open: {},
-    me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, abMsg: "", sbNote: "", aw: { duty: null, away: "", who: "", data: null, err: "", say: "", tok: 0 }
+    me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, abMsg: "", sbNote: "", aw: { duty: null, away: "", who: "", data: null, err: "", say: "", tok: 0 },
+    ic: { open: false, who: "" }   /* the timetable committee's change of an event's teacher in charge */
   };
   /* the tabs: tabs 4 to 7 are added to this list; each draw() gives the html of its tab body */
   const EX_TABS = [
@@ -269,10 +270,22 @@
   }
   function paintSave() { const el = $("#saveline"); if (el) el.innerHTML = saveInner(); }
 
+  /* an event's teacher in charge, whom the timetable committee may change: Change beside the name opens a line to pick another */
+  function icButton() {
+    return S.me.can_approve && !S.ic.open ? ` <button type="button" class="small" data-act="icOpen" aria-label="Change the teacher in charge">Change</button>` : "";
+  }
+  function icLine() {
+    if (!S.me.can_approve || !S.ic.open) return "";
+    const now = S.sched.in_charge || "", people = ((S.view && S.view.people) || []).filter(n => n !== now);
+    return `<div class="line" role="group" aria-label="Change the teacher in charge"><select data-ic="who" aria-label="New teacher in charge"><option value="">Choose a teacher</option>${people.map(n => opt(n, S.ic.who, n)).join("")}</select>
+      <button type="button" class="primary" data-act="icGo" ${S.busy || !S.ic.who ? "disabled" : ""}>Put them in charge</button> <button type="button" data-act="icOff">Back</button></div>
+      <p class="muted small">At once, with no approval: the new teacher in charge opens and changes the event${now ? `, and ${esc(now)} no longer does` : ""}. Who is going stays as it is.</p>`;
+  }
+
   function render() {
     const s = S.sched;
     $("#main").innerHTML = `<div class="head"><div><h1>${esc(s.name)} <span class="chip ${chipClass({ label: S.label })}" id="statchip">${esc(S.label)}</span></h1>
-      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? " · teacher in charge " + esc(s.in_charge || "") : ""}</div></div>
+      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? " · teacher in charge " + esc(s.in_charge || "") + icButton() : ""}</div>${isEv() ? icLine() : ""}</div>
       <div class="savebar" id="saveline">${saveInner()}</div></div>
       ${onSite() ? `<p class="notice">On the main site. Changes you make here wait for the timetable committee: send them from the Approval tab.</p>` : ""}
       <div class="xtabs" role="tablist">${S.tabs.map(t => `<button type="button" role="tab" class="${t.key === S.tab ? "on" : ""}" aria-selected="${t.key === S.tab}" data-act="tab" data-a="${t.key}">${esc(t.name)}</button>`).join("")}</div>
@@ -991,6 +1004,14 @@
     await loadEvAway(false); S.aw.say = say; if (S.tab === "egoes") paint();
   }
 
+  async function icChange() {
+    const name = S.ic.who;
+    if (!name || S.busy) return;
+    if (!await approvalAction("in-charge", { name }, `${name} is in charge now.`)) return;
+    S.ic = { open: false, who: "" }; render();
+    const el = document.querySelector('[data-act="icOpen"]'); if (el) el.focus({ preventScroll: true });
+  }
+
   function tabEvGoes() {
     const s = S.sched, V = S.view, going = s.going || [];
     const classes = V && (V.classes || []).length ? V.classes.join(", ") : "the classes";
@@ -1169,6 +1190,7 @@
     if (!S.id && el.dataset.nf) { onNewField(el); return; }
     if (!S.id && el.dataset.ne) { onNewEvField(el); return; }
     if (S.id && el.dataset.ev) { S.ev[el.dataset.ev] = el.value; return; }
+    if (S.id && el.dataset.ic) { S.ic.who = el.value; const go = document.querySelector('[data-act="icGo"]'); if (go) go.disabled = S.busy || !S.ic.who; return; }
     if (!S.id || !S.sched) return;
     const k = el.dataset.k, a = el.dataset.a, b = el.dataset.b;
     if (!k) return;
@@ -1251,6 +1273,12 @@
       if (act === "dutyAdd") { edit(() => { s.duties = (s.duties || []).concat([{ duty: "", who: "", time: "" }]); }, true); return; }
       if (act === "dutyDel") { edit(() => { s.duties.splice(Number(a), 1); }, true); return; }
       if (act === "evReplace") { evReplace(); return; }
+      if (act === "icOpen" || act === "icOff") {
+        S.ic = { open: act === "icOpen", who: "" }; render();
+        const el = document.querySelector(S.ic.open ? '[data-ic="who"]' : '[data-act="icOpen"]'); if (el) el.focus({ preventScroll: true });
+        return;
+      }
+      if (act === "icGo") { icChange(); return; }
     }
     if (act === "dayWhole") {
       const date = a, on = b.dataset.b === "1", p = periods();
