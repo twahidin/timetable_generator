@@ -11,7 +11,7 @@
   const SEEN = "admin-moved-seen";
   const S = { tab: "staff", people: [], depts: [], groups: [], hints: {}, moved: [], me: "", students: null, ways: null,
               q: "", fg: "", fd: "", fe: "", sq: "", ticked: new Set(), sel: null, menu: null, once: null, examsOpen: null,
-              confirmReset: null, pmsg: null, msg: null, out: false, token: 0 };
+              confirmReset: null, rename: null, pmsg: null, msg: null, out: false, token: 0 };
 
   /* ---------------------------------------------------------------- small helpers */
   const fmtDay = iso => { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(iso || ""); return m ? `${+m[3]} ${MONTHS[+m[2] - 1]} ${m[1]}` : String(iso || ""); };
@@ -270,7 +270,7 @@
   }
 
   /* ---- one person's panel */
-  function closePanel() { S.sel = null; S.once = null; S.confirmReset = null; S.pmsg = null; S.examsOpen = null; }
+  function closePanel() { S.sel = null; S.once = null; S.confirmReset = null; S.rename = null; S.pmsg = null; S.examsOpen = null; }
 
   function drawPanel() {
     const el = $("#panel"), p = S.sel && person(S.sel);
@@ -283,7 +283,10 @@
       <div class="w">From step 4; tick more if they look after two.</div></div>` : "";
     const suggest = p.name.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9._-]/g, "").slice(0, 40);
     const acct = p.username
-      ? `<div>Username <b>${esc(p.username)}</b> <span class="w">· ${p.has_password ? "password set" : "no password yet"}</span></div>`
+      ? (S.rename && S.rename.name === p.name
+        ? `<div class="row"><input id="uname2" type="text" value="${esc(S.rename.value)}" aria-label="New username" maxlength="40" autocomplete="off" autocapitalize="none" spellcheck="false" style="max-width:220px"><button type="button" class="primary small" data-act="renamego">Save</button><button type="button" class="small" data-act="renameno">Cancel</button></div>
+          <div class="w">${p.has_password ? "They keep their password" : "They have no password yet"}, and are signed out everywhere.</div>`
+        : `<div>Username <b>${esc(p.username)}</b> <span class="w">· ${p.has_password ? "password set" : "no password yet"}</span> <button type="button" class="small" data-act="rename">Change username</button></div>`)
       : `<div class="w" style="margin-bottom:4px">No username yet.</div><div class="row"><input id="uname" type="text" value="${esc(suggest)}" aria-label="Username" autocomplete="off" style="max-width:220px"></div>`;
     const resetBtn = p.username ? (S.confirmReset === p.name
       ? `<span class="w">Give ${esc(p.name)} a new one-time password and sign them out everywhere?</span> <button type="button" class="primary small" data-act="reset">Yes, reset it</button> <button type="button" class="small" data-act="resetno">Cancel</button>`
@@ -311,6 +314,20 @@
     try {
       await api("/api/admin/person", body);
       S.pmsg = ok ? { text: ok, bad: false } : null;
+      await loadPeople();
+    } catch (e) { if (!S.out) S.pmsg = { text: e.message, bad: true }; }
+    drawAll();
+  }
+
+  async function rename(p) {
+    const typed = ($("#uname2") || {}).value || "", u = typed.trim().toLowerCase();
+    S.rename.value = typed; S.pmsg = null;
+    if (!u) { S.pmsg = { text: "Type a username.", bad: true }; return drawPanel(); }
+    if (u === p.username) { S.rename = null; return drawPanel(); }
+    try {
+      await api("/api/admin/person", { name: p.name, username: typed });
+      S.rename = null;
+      S.pmsg = { text: `Username is now ${u}. ${p.has_password ? "They keep their password and are" : "They are"} signed out everywhere.`, bad: false };
       await loadPeople();
     } catch (e) { if (!S.out) S.pmsg = { text: e.message, bad: true }; }
     drawAll();
@@ -405,7 +422,7 @@
 
   async function showTab(tab) {
     if (tab === S.tab) return;
-    S.tab = tab; S.menu = null; S.once = null; S.confirmReset = null; note(null);
+    S.tab = tab; S.menu = null; S.once = null; S.confirmReset = null; S.rename = null; note(null);
     if (tab === "staff") skeleton();
     if (tab === "ways") { S.ways = null; }
     drawAll();
@@ -414,7 +431,7 @@
 
   /* ---------------------------------------------------------------- events */
   function pick(name) {
-    if (S.sel !== name) { S.once = null; S.confirmReset = null; S.pmsg = null; S.examsOpen = null; }
+    if (S.sel !== name) { S.once = null; S.confirmReset = null; S.rename = null; S.pmsg = null; S.examsOpen = null; }
     S.sel = name; drawTable(); drawPanel();
     if (window.matchMedia("(max-width:900px)").matches && $("#panel .side")) $("#panel .side").scrollIntoView({ block: "start" });   /* the panel is under the table on a narrow screen */
   }
@@ -440,6 +457,9 @@
     else if (a === "addopen") drawAdd(true);
     else if (a === "addno") drawAdd(false);
     else if (a === "addgo") addPerson();
+    else if (a === "rename") { S.rename = { name: p.name, value: p.username }; S.pmsg = null; S.confirmReset = null; drawPanel(); const i = $("#uname2"); if (i) { i.focus(); i.select(); } }
+    else if (a === "renameno") { S.rename = null; S.pmsg = null; drawPanel(); }
+    else if (a === "renamego") rename(p);
     else if (a === "resetask") { S.confirmReset = p.name; drawPanel(); }
     else if (a === "resetno") { S.confirmReset = null; drawPanel(); }
     else if (a === "reset") reset({ name: p.name });
@@ -447,6 +467,11 @@
     else if (a === "swoff") savePerson({ name: p.name, off: true }, `${p.name} is switched off and signed out.`);
     else if (a === "swon") savePerson({ name: p.name, off: false }, `${p.name} is switched on.`);
     else if (a === "shared") turnShared(t.dataset.code, t.dataset.off === "1");
+  });
+
+  document.addEventListener("keydown", e => {   /* Enter in the new username saves it */
+    const p = e.key === "Enter" && e.target.id === "uname2" && S.sel && person(S.sel);
+    if (p) { e.preventDefault(); rename(p); }
   });
 
   document.addEventListener("change", e => {

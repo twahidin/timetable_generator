@@ -361,7 +361,8 @@ and loading the setup. In short:
 `/admin` is for the named admins (the timetable committee with the Admin extra, signed in with a username and
 password). It has **Staff**, **Students**, **Ways in** and a link to the **History**. On Staff you search and filter,
 pick one person to set their group, the departments a head changes the map for, the extras (Relief team, Exams and
-events until a date, Admin), their username and a one-time password, or switch them off; or tick several people and
+events until a date, Admin), their username (changed later with **Change username**: they keep their password and are
+signed out) and a one-time password, or switch them off; or tick several people and
 give or take an extra, set a group, print their code slips or switch them off, reading a preview of what it will do
 before pressing the button. **Ways in** shows each way to sign in and lets you turn a shared code off or on, with its
 week's use. It needs `SECRET_KEY`. To make the first admin, sign in with the committee code: until an admin exists the

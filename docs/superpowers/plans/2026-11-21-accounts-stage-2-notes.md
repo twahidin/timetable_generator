@@ -78,3 +78,16 @@ Plan rulings P1-P9 are in the plan. During the build:
   history page in about 0.27 s and the download in 1.5 s with 30000 extra entries; the home summary in about 0.13 s.
 - Browser (made-up people, real clicks): the summary on the home page, See them, the Since note and Show all, a six-change band rename put back,
   an account change put back, the greyed reasons, a head's view (scope line, own Put back only, Department filter), phone width.
+
+## After the build (22 and 23 Nov 2026)
+
+- **The sign-in box** says "Your code (the one the school gave you)" while any shared code is on, and "Your personal code" only when all are off.
+- **Brought up to main** (exams stages 2 to 4, relief stages 2 and 3, saved versions, upload box). Anyone signed in by name can now change
+  something there (ask for relief, start an event), so everyone with a name has `history.own` and sees a History tile with their own changes
+  only (a ruling: the design's "everyone else who can change something"). The home tiles are Timetables, Relief, My exam and event duties,
+  History (and Committee page, Exams and events, Admin for those who may open them).
+- **Stage 1 went live first** (main 9280e46): the live history has files named by the server's UTC clock. A `since` filter leaves nine hours of
+  slack so none is skipped at a month's edge; entries without `after`/`level` work or say why (see above).
+- **Change username** on the Admin page's person panel: the password is kept, the old username stops working and the person is signed out.
+  Found by the lead on the live page; the server already allowed it.
+- Not in a browser: the History tile of an ordinary teacher.

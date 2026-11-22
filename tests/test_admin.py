@@ -559,6 +559,22 @@ def putback_admin_sentence(): return putback._ADMIN
 def back(c, eid): return post(c, "/api/history/back", id=eid)
 
 @t
+def a_changed_username_keeps_the_password_and_signs_out():
+    c, old = admin(), signed_in(LEE)
+    n0, pw0 = rec(LEE)["n"], rec(LEE)["pw"]
+    try:
+        r = c.post("/api/admin/person", json=dict(name=LEE, username="Lee.New")); assert r.status_code == 200 and r.get_json()["username"] == "lee.new", r.get_json()
+        assert rec(LEE)["pw"] == pw0 and rec(LEE)["n"] == n0 + 1 and r.get_json()["has_password"] is True
+        assert old.get("/api/history").status_code == 401, "their old session ends"
+        _, r = pw_in("lee.kokhwa", PWS[LEE]); assert r.status_code != 302, "the old username does not work"
+        c2, r = pw_in("LEE.new", PWS[LEE]); assert r.status_code == 302 and r.headers["Location"].endswith("/home"), "the new one works with the same password"
+        e = H.read(kinds={"account"}, limit=1)[0]
+        assert e["what"] == "username" and e["changes"] == [dict(name=LEE, field="username", was="lee.kokhwa", now="lee.new")], e
+    finally:
+        c.post("/api/admin/person", json=dict(name=LEE, username="lee.kokhwa"))
+    assert pw_in("lee.kokhwa", PWS[LEE])[1].status_code == 302
+
+@t
 def put_back_a_bulk_change():
     c = admin()
     P.update(lambda d: [d["people"].setdefault(n, {}).setdefault("extras", {}).update(exams=None) for n in (NUR, WEI)])
