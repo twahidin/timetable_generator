@@ -10,7 +10,7 @@ same relief then; relief_key and _relief_key_for say what happens when two peopl
 gone:{relief key} or moved:{relief key}, one of them once, to a person told of a relief (its message, or a reminder of it, sent
 or unsure) that is not approved to them any more, from what that message's ref holds: the cover, or its absence, may be gone;
 stopped:{relief key}:{k} and again:{relief key}:{k} to a person told of a relief that is still theirs, while its lesson is
-stopped and once it stands again (below; k counts the times);
+stopped and once it stands again (below; k counts the times; stopped is said anew once it was said since that the relief is on);
 {relief key}:r{n}, the relief sent once more because the team reminded them (relief/report.py queues it, the n-th time): it tells
 them of the relief, under the relief's own key (_own), and is no relief of its own;
 kept:{absent}:{ckey}:{when} to the teacher who asked to change; ask:{absent}:{ckey}:{change.at}:{name} to each of the team
@@ -29,10 +29,11 @@ each time: links is read once a sweep (fill._links, in no request; None: the exa
 and nothing is said or taken back about stopping). A date something of which could not be read is so too, that date alone
 (known, which all that is asked of links here and in relief/report.py goes through). While a lesson is stopped nothing is made of
 its covers (no relief, ask, askpick or kept: they are made once it stands), and it is not gone or moved by that: those are said
-when the cover itself ends or goes to another; planned does not count it. again is said to whoever was told it is stopped,
-whatever was approved since, unless the relief itself is said again (_on_again); never of a lesson that is not there any more (a
-publish moved it, or its date is a holiday now). stopped says why, again nothing of it; no other message names an exam or event.
-A backup (exams) taken over by the teacher's own absence is not told as cancelled: its reliefs went with it.
+when the cover itself ends or goes to another. planned does not count it, and of an absence with no lesson left to cover there is
+no remind, and officer says nothing of relief. again is said to whoever was told it is stopped, whatever was approved since,
+unless the relief itself is said again (_on_again); never of a lesson that is not there any more (a publish moved it, or its date
+is a holiday now). stopped says why, again nothing of it; no other message names an exam or event. A backup (exams) taken over by
+the teacher's own absence is not told as cancelled: its reliefs went with it.
 
 still_true asks again when a message is about to go: it is dropped (its key may be queued again) when the lesson is over, when
 what it says is not so any more (what it asks of a lesson that is stopped now, too), or when its person is not on the team a
@@ -107,8 +108,9 @@ def remind_text(days):
     return f"⏰ Reminder: please acknowledge your relief for {days} and set work."
 
 
-def officer_text(absent, days, away, kind):
-    return f"{absent} is away on {days} ({away}): {kind}.\nRelief is being arranged."
+def officer_text(absent, days, away, kind, relief=True):
+    """relief: it has a lesson to cover"""
+    return f"{absent} is away on {days} ({away}): {kind}." + ("\nRelief is being arranged." if relief else "")
 
 
 def cancelled_text(by, absent, days):
@@ -160,6 +162,11 @@ def known(links, iso):
 def _stopped(links, x):
     """why an approved exam or event stops lesson x; "" when none does, and when that is not known"""
     return _cover.stopped(known(links, x["date"]), x)
+
+
+def _to_cover(links, r):
+    """how many lessons of the absence are to be covered: needed, and not stopped as far as is known"""
+    return sum(1 for x in r.get("lessons") or [] if x.get("needed") and not _stopped(links, x))
 
 
 def _time(v):
@@ -295,17 +302,25 @@ def _on_again(pub, cal, ref, r, x, c):
     return _lessons.still_there(pub, cal, r["teacher"], x)
 
 
+def _said_on(w, key, n):
+    """whether the person was told, after the n-th message that the relief under key is stopped, that it is on: by its again, or by
+    the relief or a reminder of it that went later"""
+    if (w.told.get(f"again:{key}:{n}") or {}).get("state") in SENT: return True
+    off = _time(w.told[f"stopped:{key}:{n}"]["at"])
+    return any(t["state"] in SENT and when > off for when, _, t in w.said._messages(key))
+
+
 def _stops(w, key, ref, r, x, c):
-    """stopped, when the lesson of a cover still theirs is stopped; again, when it is on again (_on_again) for who was told that it
-    was stopped; nothing while that is not known"""
+    """stopped, when the lesson of a cover still theirs is stopped, unless that is the last they were told (_said_on); again, when
+    it is on again (_on_again) for who was told that it was stopped; nothing while that is not known"""
     links = known(w.links, x["date"])
     if links is None: return
     why, what, ref_ = _cover.stopped(links, x), (ref["lesson"], ref["periods"], ref["start"], ref["day"]), dict(ref, id=r["id"])       # id: where the cover is now
-    if why: yield _item(f"stopped:{key}:{_times_told(w.told, 'again', key)}", ref["who"], "stopped", stopped_text(*what, why), ref=ref_)
-    else:
-        n = _times_told(w.told, "stopped", key)
-        if n and _on_again(w.pub, w.settings.get("calendar") or {}, ref, r, x, c):
-            yield _item(f"again:{key}:{n - 1}", ref["who"], "again", again_text(*what), _answers(r, x, ref["ckey"], ref["who"]), ref=ref_)
+    n = _times_told(w.told, "stopped", key)
+    if why:
+        if not n or _said_on(w, key, n - 1): yield _item(f"stopped:{key}:{n}", ref["who"], "stopped", stopped_text(*what, why), ref=ref_)
+    elif n and _on_again(w.pub, w.settings.get("calendar") or {}, ref, r, x, c):
+        yield _item(f"again:{key}:{n - 1}", ref["who"], "again", again_text(*what), _answers(r, x, ref["ckey"], ref["who"]), ref=ref_)
 
 
 def _absence(w, r):
@@ -338,14 +353,13 @@ def _taken_over(r):
 
 
 def _planned(w, r):
-    """the absence planned for a teacher who has not acknowledged it, and the reminder: never for an absence sent at or after
-    the time the reminder goes (remind_at on the school day before; today or not)"""
-    out, ref, days = [], dict(id=r["id"]), words.days(r)
+    """the absence planned for a teacher who has not acknowledged it, and the reminder: never for an absence with no lesson to
+    cover, or sent at or after the time the reminder goes (remind_at on the school day before; today or not)"""
+    out, ref, days, n = [], dict(id=r["id"]), words.days(r), _to_cover(w.links, r)
     if _since(w, r.get("at")):
-        n = sum(1 for x in r.get("lessons") or [] if x.get("needed") and not _stopped(w.links, x))
         out.append(_item(f"planned:{r['id']}", r["teacher"], "planned", planned_text(days, words.away(r), r.get("by"), n),
                          [[dict(text=SET_WORK, url=w.base + "/relief#mine")], [dict(text=NOT_NEEDED, what="cancel", id=r["id"])]], ref=ref))
-    if _fill.nudge(r, w.pub, w.settings, w.now, w.today):
+    if n and _fill.nudge(r, w.pub, w.settings, w.now, w.today):
         first, at = min([x["date"] for x in r.get("lessons") or []] or r["dates"]), _time(r.get("at"))
         remind = _fill.due_at(w.settings.get("calendar") or {}, ((w.pub or {}).get("model") or {}).get("days") or [], first,
                               (w.settings.get("times") or {}).get("remind_at"), today=datetime.date.min)
@@ -357,7 +371,8 @@ def _officer(w, r):
     name = r.get("reporting_officer")
     if name not in w.reach or name in (r["teacher"], r.get("by")) or not _since(w, r.get("at")): return []
     kind = r.get("reason") if r.get("reason") in _absences.REASONS else "Other"        # one of the four, never anything typed
-    return [_item(f"officer:{r['id']}", name, "officer", officer_text(r["teacher"], words.days(r), words.away(r), kind), ref=dict(id=r["id"]))]
+    text = officer_text(r["teacher"], words.days(r), words.away(r), kind, _to_cover(w.links, r) > 0)
+    return [_item(f"officer:{r['id']}", name, "officer", text, ref=dict(id=r["id"]))]
 
 
 def _of_cover(w, r, x, c, ckey):
@@ -421,8 +436,10 @@ def _ask(w, r, x, c, ckey):
 
 
 def _nobody_else(w, r, x, c, ckey):
-    """nobody is free for the cover but the teacher who asked to change"""
-    try: got = _free.free_then(w.pub, w.settings, w.records, dict(x, key=ckey, p=int(c["p"]), n=int(c.get("n") or 1)), r["teacher"], links=known(w.links, x["date"]))
+    """nobody is free for the cover but the teacher who asked to change (False while that is not known)"""
+    links = known(w.links, x["date"])
+    if links is None: return False              # who is on a duty is not known
+    try: got = _free.free_then(w.pub, w.settings, w.records, dict(x, key=ckey, p=int(c["p"]), n=int(c.get("n") or 1)), r["teacher"], links=links)
     except ValueError: return False             # no longer a school day in the calendar: nothing to say
     return not any(q["name"] != c["relief"] for g in got["groups"] for q in g["people"])
 
@@ -437,7 +454,7 @@ def due(pub, settings, records, now, reach, told, since, team=(), base="", short
     now = _fill._when(now)
     w = types.SimpleNamespace(pub=pub, settings=settings, records=records, now=now, today=now.date(), reach=reach, told=told, since=_time(since) or now,
                               team=sorted(n for n in set(team) if n in reach), base=base or "", shorts=shorts or {}, unread=unread, links=links,
-                              bnds=bounds((pub or {}).get("model") or {}))
+                              bnds=bounds((pub or {}).get("model") or {}), said=Said(told))
     still = list(_each(sorted(records, key=lambda r: (str(r.get("at")), str(r.get("dates")))), lambda r: [r] if _last(r) >= w.today.isoformat() else []))
     covers = sorted(_each(still, lambda r: [t for t in _fill._covers([r], None, None, now, w.bnds) if not _stopped(links, t[1])]), key=lambda t: (t[1]["date"], int(t[2]["p"]), str(t[0]["id"]), t[3]))
     out = list(_each(_told_reliefs(w), lambda v: _of_told(w, *v)))       # what is theirs no more comes before what is theirs now
@@ -702,11 +719,17 @@ def _ask_true(ref, name):
     return got[2]["change"].get("at") == ref["at"] and (_cover.new_pick(got[2]) or {}).get("who") == ref["pick"] and _stands_now(got[1])
 
 
-def _absence_true(ref, name, acknowledged_too=True):
-    """the absence is still to come and not cancelled (nor acknowledged)"""
+def _absence_now(ref, acknowledged_too=True):
+    """the absence, while it is still to come and not cancelled (nor acknowledged), else None"""
     r = _read(ref["id"])
-    if r is None or r.get("cancelled") or _last(r) < _fill._when(None).date().isoformat(): return False
-    return not (acknowledged_too and r.get("acknowledged"))
+    if r is None or r.get("cancelled") or _last(r) < _fill._when(None).date().isoformat(): return None
+    return None if acknowledged_too and r.get("acknowledged") else r
+
+
+def _remind_true(ref, name):
+    """the absence is still to come, not answered, and has a lesson to cover"""
+    r = _absence_now(ref)
+    return r is not None and _to_cover(_exams()[2], r) > 0
 
 
 def _cancelled_true(ref, name):
@@ -717,7 +740,8 @@ def _cancelled_true(ref, name):
 # what is asked of a queued message, by its kind, before it goes: CHECK(its ref, its person) -> bool. A kind not here is always
 # true (relief/report.py puts report and clear here)
 CHECKS = dict(relief=_relief_true, gone=_ended_true, moved=_ended_true, stopped=_stopped_true, again=_again_true, kept=_kept_true, ask=_ask_true,
-              askpick=_ask_true, planned=_absence_true, remind=_absence_true, officer=lambda ref, name: _absence_true(ref, name, False), cancelled=_cancelled_true)
+              askpick=_ask_true, planned=lambda ref, name: _absence_now(ref) is not None, remind=_remind_true,
+              officer=lambda ref, name: _absence_now(ref, False) is not None, cancelled=_cancelled_true)
 
 
 def still_true(item):

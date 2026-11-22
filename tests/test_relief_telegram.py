@@ -5426,6 +5426,11 @@ def a_stopped_lesson_is_refused_as_on_the_page():
         for f in (CV.acknowledge_once, CV.acknowledge, lambda *a, **k: CV.ask_change(i, K5, "x", SAM, **k)):
             try: f(i, K5, SAM, links=exam_links()); raise AssertionError("saved")
             except ValueError as e: assert str(e) == NOT_ON_K5 and file_of(i) == was
+        CV.acknowledge(i, K5, SAM); was = file_of(i)                                       # in the page's order: whose it is, then whether it happens, then whether it is answered already
+        for f in (CV.acknowledge_once, CV.acknowledge):
+            for who_, sentence in ((SAM, NOT_ON_K5), (MAYA, CV.NOT_YOURS_COVER)):
+                try: f(i, K5, who_, links=exam_links()); raise AssertionError(sentence)
+                except ValueError as e: assert str(e) == sentence and file_of(i) == was
 
 @t
 def a_lesson_stopped_when_its_absence_was_sent_is_told_once_it_is_on():
@@ -5449,6 +5454,69 @@ def a_lesson_stopped_when_its_absence_was_sent_is_told_once_it_is_on():
     with exam_school(EVE, SAM, TEAM):                                                      # every lesson of it stopped: the absence is taken, and says nothing of them
         exam("1A", "1B", "1C"); i = sent_by(HUGO, teacher=EVE); swept(); assert told_of() == [("planned", EVE)] and said(EVE) == [PLANNED_N(0)] and FL.run(ids=[i]) == dict(picked=0, nobody=0) and swept() == 0
         absences.cancel(i, "x", HUGO); swept(); assert said(EVE)[1:] == said(TEAM) == [CANCELLED_EVE.format(HUGO)] and said(SAM) == []
+
+# ---- Task 6b, fix round 1
+@t
+def stopped_is_said_again_once_something_said_that_it_is_on():
+    def stopped(i): return [x["key"] for x in dues(links=exam_links()) if x["kind"] == "stopped"]
+    for unread in (*UNREAD, unreadable):                                                   # reminded by the team while it is not known, and stopped still
+        with exam_school(SAM, TEAM):
+            i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); e = exam(); at("06:55", 13); assert swept() == 1 and said(SAM) == [RELIEF_K5, STOPPED_K5]
+            for hm in ("06:56", "06:57", "06:59"): at(hm, 13); assert swept() == 0, "once, while nothing said since that it is on"
+            at("07:00", 13)
+            with unread(): assert remind(asks(i, K5))["sent"] == 1 and send() == 1 and swept() == 0 and said(SAM)[2:] == [RELIEF_K5]
+            at("07:05", 13); assert swept() == 1 and said(SAM)[3:] == [STOPPED_K5] and keys("stopped") == [f"stopped:{key}:0", f"stopped:{key}:1"], unread.__name__
+            for hm in ("07:06", "07:30"): at(hm, 13); assert swept() == 0, "once again"
+            assert TE.said().sent_at(key) is None and TE.said().of(key) is None, "they know of no relief"
+            withdraw(e); ticked("07:45"); assert texts_to()[-1].endswith("not told yet"); assert swept() == 1 and keys("again") == [f"again:{key}:1"] and said(SAM)[4:] == [AGAIN_K5]
+            assert f"{TE.said().sent_at(key):%H:%M}" == "07:00"; at("07:50", 13); again_on(e); assert swept() == 1 and swept() == 0 and keys("stopped")[2:] == [f"stopped:{key}:2"] and said(SAM)[5:] == [STOPPED_K5]
+    for remind_ in (True, False):                                                          # on again was never told: stopped again is news only to who was reminded
+        with exam_school(SAM, TEAM):
+            i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); e = exam(); at("06:55", 13); swept(); withdraw(e); TE.sweep(); put(f"again:{key}:0", state="failed"); at("07:00", 13)
+            if remind_: assert remind(asks(i, K5))["sent"] == 1; send()
+            at("07:05", 13); again_on(e); assert swept() == int(remind_) and keys("stopped")[1:] == [f"stopped:{key}:1"] * remind_ and swept() == 0
+            withdraw(e); at("07:10", 13); assert swept() == int(remind_) and said(SAM)[2:] == ([RELIEF_K5, STOPPED_K5, AGAIN_K5] if remind_ else [])
+    with exam_school(SAM, TEAM):                                                           # the states of what said so, and when it went
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); exam(); at("06:55", 13); swept(); at("07:00", 13); one = [f"stopped:{key}:1"]
+        with damage(): remind(asks(i, K5)); send()
+        at("07:10", 13)
+        for s, n in (("sent", 1), ("unsure", 1), ("queued", 0), ("sending", 0), ("failed", 0), ("dropped", 0)): put(key + ":r1", state=s); assert stopped(i) == one * n, s
+        put(key + ":r1", state="sent", sent_at="2026-10-13T06:54:59+08:00"); assert stopped(i) == [], "before it"
+        put(key + ":r1", sent_at="2026-10-13T06:55:00+08:00"); assert stopped(i) == [], "in that second: not known to be after it"
+        put(key + ":r1", sent_at="2026-10-13T06:55:01+08:00"); assert stopped(i) == one
+        put(key + ":r1", state="dropped"); put(key, sent_at="2026-10-13T07:01:00+08:00"); assert stopped(i) == one, "the message itself, that went later"
+        put(key, sent_at="2026-10-13T06:50:00+08:00"); assert stopped(i) == []
+        other = {f"{key}:{MAYA}{n}": dict(state="sent", at=clock.now, name=MAYA, ref=None) for n in ("", ":r1")}; assert [x["key"] for x in dues(told={**OB.told_for(""), **other}, links=exam_links()) if x["kind"] == "stopped"] == [], "another's"
+
+@t
+def nobody_else_is_not_said_of_a_date_that_cannot_be_read():
+    nobody, unsure = "Nobody else is free then: choose someone in the app.", "No new pick yet: open the app."
+    for cm, text in ((contextlib.nullcontext, nobody), (lambda: damage(D14), nobody), *((u, unsure) for u in (*UNREAD, unreadable))):
+        with exam_school(SAM, TEAM, limits=dict(fat_per_day=3, other_per_day=None, never=[RUTH, BUSY, HUGO, LEE, TEAM, ROSA, OFFIE, MAYA])):
+            i = asked(pick=False); at("09:12")
+            with cm(): swept(); assert outs("ask")[0]["text"].endswith(text), text
+
+@t
+def an_absence_with_nothing_to_cover_says_nothing_of_relief():
+    alone = "Ms Evelyn Koh is away on Tue 13 Oct (whole day): Medical."; assert TE.officer_text(EVE, "Tue 13 Oct", "whole day", "Medical", False) == alone == OFFICER_EVE.split("\n")[0]
+    with exam_school(EVE, ROSA):
+        e = exam("1A", "1B", "1C"); i = absent(by=HUGO); swept(); assert said(ROSA) == [alone] and said(EVE) == [PLANNED_N(0)]; at("15:00"); assert swept() == 0
+        withdraw(e); assert swept() == 1 and said(EVE)[1:] == [REMIND_EVE] and said(ROSA) == [alone], "something to cover: reminded"
+    with exam_school(EVE, ROSA): exam(); absent(by=HUGO); swept(); at("15:00"); swept(); assert said(ROSA) == [OFFICER_EVE] and said(EVE) == [PLANNED_N(1), REMIND_EVE], "one is left"
+    with exam_school(EVE):                                                                 # queued, and then nothing is left: dropped, and made anew
+        i = absent(by=HUGO); swept(); at("15:00"); assert TE.sweep() == 1; e = exam("1A", "1B", "1C"); assert send() == 0 and state(f"remind:{i}") == "dropped" and swept() == 0
+        withdraw(e); assert swept() == 1 and swept() == 0 and said(EVE) == [PLANNED_EVE, REMIND_EVE]
+    with exam_school(EVE):                                                                 # none of them needed
+        i = absent(by=HUGO); swept(); at("15:00"); TE.sweep(); absences.not_needed(i, K2, "x", HUGO); r, = outs("remind"); r = dict(r, ref=json.loads(r["ref"])); assert TE.still_true(r) is True
+        absences.not_needed(i, K5, "x", HUGO); assert TE.still_true(r) is False and send() == 0 and swept() == 0 and said(EVE) == [PLANNED_EVE]
+    for unread in (*UNREAD, unreadable):                                                   # not known: to be covered
+        with exam_school(EVE, ROSA):
+            exam("1A", "1B", "1C"); absent(by=HUGO)
+            with unread(): swept(); at("15:00"); swept(); assert said(ROSA) == [OFFICER_EVE] and said(EVE) == [PLANNED_N(2), REMIND_EVE], unread.__name__
+    with exam_school(EVE, ROSA):                                                           # a duty and no lesson
+        exam("5A", name=EXAM2, date="2026-10-15", duties=[(EVE, 630, 690)]); d = dict(teacher=EVE, dates=["2026-10-15"], periods=None, reason="Medical", reason_text="", remarks="", reporting_officer=ROSA, lessons=[])
+        assert absences.new(d, SCHOOL, HUGO, "planned", may_choose=True, links=exam_links())["lessons"] == []; swept(); at("15:00", 14); assert swept() == 0
+        assert said(ROSA) == [alone.replace("Tue 13", "Thu 15")] and said(EVE) == [PLANNED_N(0).replace("Tue 13", "Thu 15")]
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
