@@ -329,7 +329,7 @@ def the_whole_endpoint_map_is_pinned():
 def the_hook_refuses_every_kind_without_the_header():
     rules = [r for r in A.app.url_map.iter_rules() if r.endpoint.startswith("relief_tg.") and not getattr(A.app.view_functions[r.endpoint], "_need", None)]
     assert [(r.rule, r.methods - {"OPTIONS"}) for r in rules] == [(HOOK, {"POST"})], rules     # the only one of Telegram's routes without a guard
-    stop = dict(update_id=41, message=dict(message_id=1, chat=dict(id=501, type="private"), text="/stop"))
+    stop = dict(update_id=41, message={"message_id": 1, "chat": dict(id=501, type="private"), "from": dict(id=501, is_bot=False), "text": "/stop"})
     for kind, (keys, _) in KINDS.items(): assert client(keys).post(HOOK, json=stop).status_code == 404, kind     # no bot: not there at all
     os.environ["TELEGRAM_BOT_TOKEN"] = "practice"
     tgdb.set_state("bot", dict(username="practice_bot", base="http://localhost", at="2026-11-22T08:00:00+08:00", key=hashlib.sha256(tg.hook_secret().encode()).hexdigest()))
@@ -347,8 +347,9 @@ def the_hook_refuses_every_kind_without_the_header():
         with tgdb.db(read=True) as d: assert d.execute("SELECT count(*) FROM updates").fetchone()[0] == 0, "a refused update is not remembered"
         # with the header a session does not matter, and gives nothing more: the chat alone says who it is
         c = client(KINDS["admin by password"][0])
-        r = c.post(HOOK, json=dict(stop, update_id=42, message=dict(stop["message"], chat=dict(id=502, type="private"))), headers={"X-Telegram-Bot-Api-Secret-Token": right})
+        r = c.post(HOOK, json=dict(stop, update_id=42, message={**stop["message"], "chat": dict(id=502, type="private"), "from": dict(id=502, is_bot=False)}), headers={"X-Telegram-Bot-Api-Secret-Token": right})
         assert r.status_code == 200 and r.data == b"" and TL.chat_of(TINA) == 501 and kept(c) == KINDS["admin by password"][0]
+        assert [p["chat_id"] for m, p in tg.PRACTICE_LOG] == [502], "read, and answered there"
         assert client({}).post(HOOK, json=stop, headers={"X-Telegram-Bot-Api-Secret-Token": right}).status_code == 200 and TL.chat_of(TINA) is None
     finally:
         os.environ.pop("TELEGRAM_BOT_TOKEN", None); tg.PRACTICE_LOG.clear()

@@ -361,13 +361,15 @@ def recover():
 
 
 def prune(now=None):
-    """messages that are over and were queued more than KEEP_DAYS ago, and buttons past their time, are deleted"""
+    """messages that are over and were queued more than KEEP_DAYS ago, and buttons and talks (relief/bot.py) past their time, are
+    deleted"""
     now = _clock() if now is None else now
     tz = datetime.datetime.fromisoformat(_absences._now()).tzinfo
     before = datetime.datetime.fromtimestamp(now - KEEP_DAYS * 86400, tz).isoformat(timespec="seconds")
     with tgdb.db() as c:
         c.execute("DELETE FROM outbox WHERE state IN ('sent', 'failed', 'unsure', 'dropped') AND at<?", (before,))
         c.execute("DELETE FROM buttons WHERE until<?", (now,))
+        c.execute("DELETE FROM talks WHERE until<?", (now,))
 
 
 def _loop(every):

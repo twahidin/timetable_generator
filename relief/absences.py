@@ -22,6 +22,7 @@ NO_FILES_YET = "Add files after the absence is sent."
 SAY_WHY = "Say why in a line."
 PAST_LESSON = "This lesson is in the past."
 PAST_ABSENCE = "This absence is in the past."
+ACKED = "This was acknowledged already."
 NO_NEED = "This lesson does not need relief."
 APPROVED_ALREADY = "This lesson's relief is approved already: ask the relief team to change it."
 IS_SPLIT = "This lesson is split: the relief team chooses for each part."
@@ -412,7 +413,7 @@ def acknowledge(id, by):
     with _LOCK:
         r = _editable(id)
         if by != r["teacher"] or r["how"] != "planned": raise ValueError(f"Only {r['teacher']} can acknowledge this.")
-        if r["acknowledged"]: raise ValueError("This was acknowledged already.")
+        if r["acknowledged"]: raise ValueError(ACKED)
         r["acknowledged"] = dict(at=_now())
         _save(r)
     return r
