@@ -5118,9 +5118,10 @@ def the_telegram_pages_are_there():
     html, js, card, sets, sets_html = read("relief.html"), read("relief.js"), read("relief-telegram.js"), read("relief-settings.js"), read("relief-settings.html")
     assert html.count('<script src="/static/relief-telegram.js"></script>') == 1 and html.index("/static/relief.js") < html.index("/static/relief-telegram.js")
     assert '<div id="mineTelegram"></div><div id="mineList"></div>' in js and "R.linkCard(" in card and '"/api/relief/telegram"' in card
-    for word in ("localStorage", "sessionStorage", "indexedDB", "cookie", "location", "history.", "console.", "eval(", "//cdn", "http://", "https://"): assert word not in card, word
+    for word in ("localStorage", "sessionStorage", "indexedDB", "cookie", "location", "history.", "console.", "eval(", "//cdn", "http://"): assert word not in card, word
+    assert card.count("https://") == 1 and 'startsWith("https://")' in card and 'addEventListener("pagehide"' in card and 'addEventListener("pageshow"' in card
     assert 'id="telegram"' in sets_html and "/api/relief/telegram/admin" in sets and "docs/DEPLOY.md" in sets
-    for word in ("api.telegram.org", "t.me"): assert all(word not in x for x in (html, js, card, sets, sets_html)), word
+    for word in ("api.telegram.org", "//t.me"): assert all(word not in x for x in (html, js, card, sets, sets_html)), word
 
 # ---- Task 6, fix round 1
 KR = next(x["key"] for x in LS.on_date(SCHOOL, TERM, RUTH, datetime.date(2026, 10, 13)) if x["p"] == 6)

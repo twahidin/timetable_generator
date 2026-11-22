@@ -1,6 +1,7 @@
 // A small stand-in for a browser's page, for the node tests that run a page's own script (relief_telegram, relief_today and
 // relief_settings): the page's own HTML from static/, its scripts, selectors, events that bubble, the focus, and a clock and
 // timers the test moves itself. HTML that is not well nested throws. There is no network: every fetch is answered by the test.
+// It knows no visibility and no layout: what is hidden, or in a hidden tab of the page, can be pressed and given the focus.
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -39,7 +40,7 @@ class El {
   elements() { return this.kids.flatMap(k => (k instanceof El ? [k, ...k.elements()] : [])); }
   contains(el) { for (let x = el; x; x = x.parent) if (x === this) return true; return false; }
   get textContent() { return this.kids.map(k => (k instanceof El ? k.textContent : k)).join(""); }
-  set textContent(v) { this.empty(); this.add(String(v)); }
+  set textContent(v) { this.empty(); this.add(String(v)); this.page.drawn.push(this); }
   empty() { for (const k of this.kids) if (k instanceof El) k.parent = null; this.kids = []; }
   get innerHTML() { return this.kids.map(k => (k instanceof El ? k.outerHTML : encode(k))).join(""); }
   set innerHTML(v) { this.empty(); this.page.parse(this, String(v)); this.page.drawn.push(this); }
@@ -82,7 +83,7 @@ class El {
 
 /* the page static/{html}, its scripts not run yet. server(call): the answer to a fetch of {method, url, body}: {status, data}, a promise of one, or an Error (nobody answers) */
 function open(html, { server, hash = "", search = "", now = "2026-10-13T07:20:00+08:00", hidden = false }) {
-  const page = { calls: [], drawn: [], focused: null, now: Date.parse(now), timers: [], server, left: 0 };
+  const page = { calls: [], drawn: [], focused: null, now: Date.parse(now), timers: [], server };
   page.parse = (into, text) => {
     const open_ = [into];
     let at = 0;
@@ -166,6 +167,8 @@ function open(html, { server, hash = "", search = "", now = "2026-10-13T07:20:00
   page.key = async (el, key) => { const e = fire(el, "keydown", { key }); await page.settle(); return e; };
   page.type = async (sel, v) => { const el = page.find(sel); el.focus(); el.value = v; fire(el, "input"); await page.settle(); };
   page.show = async on => { page.document.visibilityState = on ? "visible" : "hidden"; fire(page.document.body, "visibilitychange"); await page.settle(); };
+  page.leave = async () => { (page.window.on.pagehide || []).forEach(f => f({ type: "pagehide" })); await page.settle(); };   /* another page in its place; back: it is there again, kept (persisted) or not */
+  page.back = async persisted => { (page.window.on.pageshow || []).forEach(f => f({ type: "pageshow", persisted })); await page.settle(); };
   page.focus = () => { const a = page.document.activeElement; return a === body ? "" : a; };
   return page;
 }

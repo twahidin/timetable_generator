@@ -28,6 +28,7 @@ async function opened(api, settings = ok(SETTINGS)) {
   await p.settle();
   p.card = () => p.text("#telegram");
   p.top = () => p.text("#tgTop");
+  p.live = () => p.all("#telegram [aria-live]").map(e => `${e.id}: ${p.text(e)}`);
   p.sent = () => p.calls.filter(c => c.url.startsWith(URL)).map(c => `${c.method} ${c.url.slice(URL.length + 1)}${c.body && Object.keys(c.body).length ? " " + JSON.stringify(c.body) : ""}`);
   p.buttons = () => p.all("#telegram button").map(b => p.text(b) + (b.disabled ? " (off)" : ""));
   p.row = name => p.all("#telegram li").find(li => p.text(li).includes(name));
@@ -35,7 +36,7 @@ async function opened(api, settings = ok(SETTINGS)) {
   return p;
 }
 const all = []; const t = (name, f) => all.push([name, f]);
-const none = p => assert.strictEqual(p.$("#telegram").innerHTML, "");
+const none = p => { assert.strictEqual(p.$("#telegram").innerHTML, ""); assert.ok(p.$("#telegram").hidden, "no empty region called Telegram"); };
 
 t("nothing for whoever cannot read it, and no way off the page", async () => {
   for (const a of [no(403, "No."), no(401, "Please sign in again."), { status: 401 }]) { const p = await opened({ "GET admin": a }); none(p); assert.strictEqual(p.location.href, ""); assert.ok(p.text("#main").includes("Relief rules"), "the settings are there"); }
@@ -49,6 +50,18 @@ t("it cannot be read just now: why, and Try again", async () => {
 });
 t("the settings cannot be read: the card does not need them", async () => {
   const p = await opened({ "GET admin": ok(TOKEN) }, no(409, "Publish the timetable first.")); assert.ok(p.text("#main").includes("Publish the timetable first.")); assert.ok(p.card().includes(SET));
+});
+t("the card's place is hidden until there is something in it, and again when there is not", async () => {
+  const wait = later(), p = await opened({ "GET admin": wait.answer });
+  none(p);
+  wait.give(500, { error: "Made up." });
+  await p.settle();
+  assert.ok(!p.$("#telegram").hidden);
+  p.api["GET admin"] = no(403, "No.");
+  await p.click("#telegram button", "Try again");
+  none(p);
+  const q = await opened({ "GET admin": ok(TOKEN) });
+  assert.ok(!q.$("#telegram").hidden);
 });
 t("no token", async () => {
   const p = await opened({ "GET admin": ok(OFF) }); assert.strictEqual(p.card(), `Telegram ${NOT_SET}`); assert.deepStrictEqual(p.buttons(), []); assert.strictEqual(p.text("#telegram h2"), "Telegram"); assert.deepStrictEqual(p.sent(), ["GET admin"]);
@@ -135,11 +148,30 @@ t("what is typed in the settings is never lost, and is not saved by this card", 
   const p = await opened({ "GET admin": ok(CONNECTED), "POST connect": ok(CONNECTED), "POST unlink": ok(CONNECTED), "POST disconnect": no(502, "x") }); await p.type('textarea[data-rule="0"]', "A rule not saved yet."); await p.type("#limFat", "5"); const area = p.find('textarea[data-rule="0"]');
   await p.click("button", "Connect again"); await p.in(SAM, "Unlink"); await p.in(SAM, "Unlink"); await p.click("button", "Disconnect"); await p.click("button", "Disconnect"); await p.key(p.find("button", "Keep it"), "Escape");
   assert.strictEqual(p.find('textarea[data-rule="0"]'), area); assert.deepStrictEqual([area.value, p.find("#limFat").value], ["A rule not saved yet.", "5"]); assert.ok(p.text('[data-bar]').includes("Changes not saved.")); assert.ok(p.calls.every(c => c.method !== "PUT"));
-  const el = p.all("#tgTop p")[0]; await p.click('.savebar.first button[data-act="save"]'); assert.deepStrictEqual(p.calls.filter(c => c.method === "PUT").map(c => [c.url, c.body.rules[0], "telegram" in c.body]), [["/api/relief/settings", "A rule not saved yet.", false]]); assert.strictEqual(p.all("#tgTop p")[0], el, "nor does Save touch the card");
+  const el = p.find("#tgState"), drawn = p.drawn.filter(x => x === el).length; await p.click('.savebar.first button[data-act="save"]'); assert.deepStrictEqual(p.calls.filter(c => c.method === "PUT").map(c => [c.url, c.body.rules[0], "telegram" in c.body]), [["/api/relief/settings", "A rule not saved yet.", false]]); assert.ok(p.find("#tgState") === el && p.drawn.filter(x => x === el).length === drawn, "nor does Save touch the card");
 });
-t("only what changes is drawn; what is said aloud", async () => {
-  const p = await opened({ "GET admin": ok(CONNECTED), "POST connect": ok(CONNECTED) }); assert.deepStrictEqual(["#tgTop", "#tgSay"].map(x => p.$(x).getAttribute("aria-live")), ["polite", "polite"]); const el = p.all("#tgTop .tg-state")[0];
-  await p.click("button", "Connect again"); assert.strictEqual(p.all("#tgTop .tg-state")[0], el); assert.ok(p.buttons().every(x => /[A-Za-z]/.test(x)));
+t("only what changes is drawn, and only the lines that change are live, each on its own", async () => {
+  const p = await opened({ "GET admin": ok(CONNECTED) });
+  assert.deepStrictEqual(p.live(), [`tgState: ${ON}`, "tgCount: 2 of 4 linked", "tgSay: "]);
+  assert.ok(p.all("#telegram [aria-live]").every(e => e.getAttribute("aria-live") === "polite"));
+  assert.ok(!p.live().join().includes(ONE) && p.card().includes(ONE));
+  const state = p.find("#tgState"), count = p.find("#tgCount"), writes = el => p.drawn.filter(x => x === el).length, was = writes(state);
+  p.api["POST unlink"] = ok(Object.assign({}, CONNECTED, { linked: [link(MAYA)], not_linked: [EVE, RUTH, SAM] }));
+  await p.in(SAM, "Unlink");
+  await p.in(SAM, "Unlink");
+  assert.strictEqual(p.text(count), "1 of 4 linked");
+  assert.strictEqual(writes(state), was, "how it is connected has not changed, and is not said again");
+  p.api["POST connect"] = ok(Object.assign({}, CONNECTED, { linked: [link(MAYA)], not_linked: [EVE, RUTH, SAM] }));
+  const n = writes(count);
+  await p.click("button", "Connect again");
+  assert.deepStrictEqual([writes(state), writes(count)], [was, n]);
+  assert.strictEqual(p.text("#tgSay"), "Connected.");
+  assert.ok(p.find("#tgState") === state && p.find("#tgCount") === count);
+  p.api["POST disconnect"] = ok(TOKEN);
+  await p.click("button", "Disconnect");
+  await p.click("button", "Disconnect");
+  assert.deepStrictEqual([p.text("#tgState"), p.text("#tgCount")], [SET, ""]);
+  assert.ok(p.buttons().every(x => /[A-Za-z]/.test(x)));
 });
 t("everything is escaped", async () => {
   const mark = x => `<u title="${x}">'${x}'</u>&`, d = Object.assign({}, CONNECTED, { bot: mark("bot"), base: mark("base"), at: mark("at"), linked: [link(mark("name"), mark("handle"), mark("when"))], not_linked: [mark("free")] });

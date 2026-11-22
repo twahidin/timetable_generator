@@ -55,6 +55,8 @@
 .codes{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 /* the Telegram card */
 .tg-state{margin:0 0 8px;line-height:1.5;overflow-wrap:anywhere}
+.tg-state:empty{margin:0}
+#tgOne{margin:0 0 10px}
 .tg .notice{margin:0 0 10px}
 .tg .ask{display:flex;gap:6px;align-items:center;flex-wrap:wrap;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:8px}
 .tg .ask .q{width:100%;font-size:12.5px}
@@ -80,7 +82,7 @@
 </header>
 <main class="rs">
   <div id="main"><div class="card"><p class="muted">Loading…</p></div></div>
-  <section id="telegram" aria-label="Telegram"></section>
+  <section id="telegram" aria-label="Telegram" hidden></section>
 </main>
 <script src="/static/relief-settings.js"></script>
 </body>

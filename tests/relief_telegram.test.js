@@ -26,7 +26,6 @@ async function opened(api, more = {}) {
   page.reads = () => page.calls.filter(c => c.method === "GET" && c.url === URL).length;
   page.told = (method, at) => page.calls.filter(c => c.method === method && c.url === URL + at).length;
   page.card = () => page.text("#mineTelegram");
-  page.body = () => page.text("#tgBody");
   page.buttons = () => page.all("#mineTelegram button").map(b => page.text(b) + (b.disabled ? " (off)" : ""));
   return page;
 }
@@ -53,7 +52,7 @@ t("not connected, or the status cannot be read: nothing at all", async () => {
 t("connected, not linked", async () => {
   const p = await opened({ "GET ": ok(FREE) });
   assert.strictEqual(p.card(), `Telegram ${LINE} Link Telegram`); assert.strictEqual(p.all("#tgBody .bar").length, 1, "no empty line"); assert.strictEqual(p.text("#mineTelegram h2"), "Telegram"); assert.deepStrictEqual(p.buttons(), ["Link Telegram"]);
-  assert.strictEqual(p.$("#tgBody").getAttribute("aria-live"), "polite"); await p.tick(60000); assert.strictEqual(p.reads(), 1, "no code: nothing is read by itself");
+  await p.tick(60000); assert.strictEqual(p.reads(), 1, "no code: nothing is read by itself");
 });
 t("the card is above the absences, whichever script is ready first", async () => {
   let p = await opened({ "GET ": ok(FREE) }); assert.ok(p.$("#pane-mine").innerHTML.indexOf("mineTelegram") < p.$("#pane-mine").innerHTML.indexOf("mineList"));
@@ -73,9 +72,35 @@ t("Link Telegram: the steps, the code, and where the focus goes", async () => {
   const wait = later(), p = await opened({ "GET ": ok(FREE), "POST /code": wait.answer });
   await p.click("button", "Link Telegram"); assert.deepStrictEqual(p.buttons(), ["Link Telegram (off)"]); await p.click("button", "Link Telegram"); assert.strictEqual(p.told("POST", "/code"), 1, "pressed twice");
   wait.give(200, code(p).data); await p.settle();
-  assert.strictEqual(p.body(), `1. Open the bot 2. Press Start there. Or send this code to @made_up_bot: ${CODE} The code works once and runs out in 15 minutes. Cancel`);
+  assert.strictEqual(p.card(), `Telegram 1. Open the bot 2. Press Start there. Or send this code to @made_up_bot: ${CODE} The code works once and runs out in 15 minutes. Cancel`);
   const a = p.find("#tgBody a"); assert.deepStrictEqual([a.getAttribute("href"), a.getAttribute("target"), a.getAttribute("rel"), p.text(a)], [BOT + CODE, "_blank", "noopener", "Open the bot"]);
   const c = p.find("#tgBody .codeline"); assert.ok(c.classes().includes("tg-code")); assert.strictEqual(c.textContent, CODE); assert.strictEqual(p.focus(), a); assert.deepStrictEqual(p.buttons(), ["Cancel"]);
+});
+t("an address that is not https is no link: the code line alone", async () => {
+  for (const url of ["javascript:alert(1)", "http://t.me/x?start=1", "//t.me/x", "data:text/html,x", " https://t.me/x"]) {
+    const p = await opened({ "GET ": ok(FREE) });
+    p.api["POST /code"] = ok({ code: CODE, url, until: p.now / 1000 + 900 });
+    await p.click("button", "Link Telegram");
+    assert.strictEqual(p.card(), `Telegram Or send this code to @made_up_bot: ${CODE} The code works once and runs out in 15 minutes. Cancel`, url);
+    assert.strictEqual(p.all("#mineTelegram a").length, 0);
+    assert.strictEqual(p.focus(), p.find("button", "Cancel"));
+  }
+});
+t("a code that did not come whole is a refusal, and it can be asked for again", async () => {
+  const url = BOT + CODE;
+  for (const a of [{ status: 200 }, ok(null), ok({}), ok([]), ok("x"), ok({ code: CODE }), ok({ url }), ok({ code: "", url }), ok({ code: CODE, url: "" }), ok({ code: 5, url }), ok({ code: CODE, url: {} })]) {
+    const p = await opened({ "GET ": ok(FREE), "POST /code": a }), what = JSON.stringify(a);
+    await p.click("button", "Link Telegram");
+    assert.strictEqual(p.card(), `Telegram ${LINE} Link Telegram Something went wrong. Try again.`, what);
+    assert.deepStrictEqual(p.buttons(), ["Link Telegram"], what);
+    assert.ok(p.$("#tgBody .msg.bad"), what);
+    assert.strictEqual(p.focus(), p.find("button", "Link Telegram"));
+    await p.tick(60000);
+    assert.strictEqual(p.reads(), 1, "nothing to wait for");
+    p.api["POST /code"] = () => code(p);
+    await p.click("button", "Link Telegram");
+    has(p, CODE);
+  }
 });
 t("the code is nowhere but in the card", async () => {
   const p = await coded(); has(p, CODE);
@@ -110,12 +135,29 @@ t("only while the tab is on screen", async () => {
   await p.click("#tab-mine"); assert.strictEqual(p.reads(), 4); has(p, CODE); await p.tick(5000); assert.strictEqual(p.reads(), 5);
   await p.show(false); p.api["GET "] = ok(LINKED); await p.tick(20000); has(p, CODE); await p.show(true); has(p, "Linked as @sam_made_up"); nowhere(p, CODE);
 });
-t("a hidden page that comes back twice reads once at a time", async () => {
-  const p = await coded(), wait = later(); p.api["GET "] = wait.answer; await p.tick(5000); assert.strictEqual(p.reads(), 2); await p.tick(30000); assert.strictEqual(p.reads(), 2, "the next waits for the answer");
-  wait.give(200, FREE); await p.settle(); p.api["GET "] = ok(FREE); await p.tick(5000); assert.strictEqual(p.reads(), 3);
+t("one read at a time, however often the page is hidden and shown, or the tab pressed, while it is on its way", async () => {
+  const p = await coded(), wait = later();
+  p.api["GET "] = wait.answer;
+  await p.tick(5000);
+  assert.strictEqual(p.reads(), 2);
+  for (let i = 0; i < 3; i++) { await p.show(false); await p.show(true); }
+  await p.click("#tab-mine");
+  await p.tick(30000);
+  assert.strictEqual(p.reads(), 2, "the next waits for the answer");
+  wait.give(200, FREE);
+  await p.settle();
+  p.api["GET "] = ok(FREE);
+  await p.tick(4999);
+  assert.strictEqual(p.reads(), 2);
+  await p.tick(1);
+  assert.strictEqual(p.reads(), 3);
+  const q = await opened({ "GET ": later().answer });
+  await q.click("#tab-ask");
+  await q.click("#tab-mine");
+  assert.strictEqual(q.reads(), 1, "the first one too");
 });
 t("past its time: it has run out, and a new one can be had", async () => {
-  const p = await coded(); await p.tick(899000); has(p, CODE); await p.tick(5000); assert.strictEqual(p.body(), `${OUT} Get a new code`); nowhere(p, CODE);
+  const p = await coded(); await p.tick(899000); has(p, CODE); await p.tick(5000); assert.strictEqual(p.card(), `Telegram ${OUT} Get a new code`); nowhere(p, CODE);
   const n = p.reads(); assert.strictEqual(n, 181); await p.tick(60000); assert.strictEqual(p.reads(), n); p.api["POST /code"] = () => code(p, "WXYZ-2345");
   await p.click("button", "Get a new code"); has(p, "WXYZ-2345", "The code works once"); hasNot(p, OUT, CODE); await p.tick(5000); assert.strictEqual(p.reads(), n + 1);
   await p.click("button", "Cancel"); assert.strictEqual(p.card(), `Telegram ${LINE} Link Telegram`);
@@ -125,13 +167,13 @@ t("a link made just before it ran out is seen", async () => {
   const p = await coded(); await p.tick(899000); p.api["GET "] = ok(LINKED); await p.tick(5000); has(p, "Linked as"); hasNot(p, OUT);
 });
 t("it runs out when the status cannot be read too, and off screen", async () => {
-  let p = await coded(); p.api["GET "] = new Error("x"); await p.tick(890000); has(p, CODE); await p.tick(15000); assert.strictEqual(p.body(), `${OUT} Get a new code`);
-  p = await coded(); await p.show(false); await p.tick(3600000); await p.show(true); assert.strictEqual(p.body(), `${OUT} Get a new code`); nowhere(p, CODE);
+  let p = await coded(); p.api["GET "] = new Error("x"); await p.tick(890000); has(p, CODE); await p.tick(15000); assert.strictEqual(p.card(), `Telegram ${OUT} Get a new code`);
+  p = await coded(); await p.show(false); await p.tick(3600000); await p.show(true); assert.strictEqual(p.card(), `Telegram ${OUT} Get a new code`); nowhere(p, CODE);
 });
 t("its time is the server's, unless this device's clock cannot be right", async () => {
-  let p = await coded({}, 30); await p.tick(25000); has(p, CODE); await p.tick(5000); assert.strictEqual(p.body(), `${OUT} Get a new code`);
+  let p = await coded({}, 30); await p.tick(25000); has(p, CODE); await p.tick(5000); assert.strictEqual(p.card(), `Telegram ${OUT} Get a new code`);
   for (const left of [-1, -86400, 0, 901, 86400, NaN]) {
-    p = await coded({}, left); has(p, CODE); await p.tick(895000); has(p, CODE); await p.tick(5000); assert.strictEqual(p.body(), `${OUT} Get a new code`, left);
+    p = await coded({}, left); has(p, CODE); await p.tick(895000); has(p, CODE); await p.tick(5000); assert.strictEqual(p.card(), `Telegram ${OUT} Get a new code`, left);
   }
 });
 t("Cancel: the code goes, nothing more is read, and a late answer changes nothing", async () => {
@@ -139,9 +181,102 @@ t("Cancel: the code goes, nothing more is read, and a late answer changes nothin
   await p.click("button", "Cancel"); assert.strictEqual(p.card(), `Telegram ${LINE} Link Telegram`); nowhere(p, CODE); assert.strictEqual(p.focus(), p.find("button", "Link Telegram"));
   wait.give(200, OFF); await p.settle(); has(p, "Link Telegram"); await p.tick(60000); assert.strictEqual(p.reads(), n);
 });
-t("a status that fails while a code shows keeps it; the bot disconnected takes the card away", async () => {
+t("signed out, or the right gone, while a code shows: the card and the code go, and nothing more is read", async () => {
+  for (const a of [no(401, "Please sign in again."), no(403, "Choose a new password first.")]) {
+    const p = await coded();
+    await p.tick(5000);
+    has(p, CODE);
+    p.api["GET "] = a;
+    const n = p.reads();
+    await p.tick(5000);
+    assert.strictEqual(p.$("#mineTelegram").innerHTML, "", a.status);
+    nowhere(p, CODE);
+    assert.strictEqual(p.reads(), n + 1);
+    await p.tick(860000);
+    await p.show(false);
+    await p.show(true);
+    assert.strictEqual(p.reads(), n + 1, "the reads have stopped");
+    p.api["GET "] = ok(FREE);
+    await p.click("#tab-mine");
+    assert.strictEqual(p.card(), `Telegram ${LINE} Link Telegram`, "read again when the tab is shown, without the code");
+  }
+});
+t("the page is left: the code goes from it at once, and the reads stop", async () => {
   const p = await coded();
-  for (const a of [new Error("x"), no(500, "x"), no(401, "Please sign in again.")]) { p.api["GET "] = a; await p.tick(5000); has(p, CODE); }
+  await p.tick(5000);
+  await p.leave();
+  nowhere(p, CODE);
+  assert.strictEqual(p.card(), `Telegram ${LINE} Link Telegram`);
+  const n = p.reads();
+  await p.tick(900000);
+  await p.show(false);
+  await p.show(true);
+  assert.strictEqual(p.reads(), n);
+});
+t("the page is left with a read on its way: its answer changes nothing", async () => {
+  const p = await coded(), wait = later();
+  p.api["GET "] = wait.answer;
+  await p.tick(5000);
+  await p.leave();
+  wait.give(200, LINKED);
+  await p.settle();
+  assert.strictEqual(p.card(), `Telegram ${LINE} Link Telegram`);
+  await p.tick(60000);
+  assert.strictEqual(p.reads(), 2);
+});
+t("the page is left with the code on its way: it is not shown when it comes", async () => {
+  const p = await opened({ "GET ": ok(FREE) }), step = later();
+  p.api["POST /code"] = step.answer;
+  await p.click("button", "Link Telegram");
+  await p.leave();
+  step.give(200, code(p).data);
+  await p.settle();
+  nowhere(p, CODE);
+  assert.deepStrictEqual(p.buttons(), ["Link Telegram"]);
+  await p.tick(60000);
+  assert.strictEqual(p.reads(), 1);
+});
+t("back on a page the browser kept: the status is read again, on My absences", async () => {
+  const p = await coded();
+  await p.leave();
+  p.api["GET "] = no(401, "Please sign in again.");
+  const n = p.reads();
+  await p.back(false);
+  assert.strictEqual(p.reads(), n, "a page opened anew reads by itself");
+  await p.back(true);
+  assert.strictEqual(p.reads(), n + 1);
+  assert.strictEqual(p.$("#mineTelegram").innerHTML, "", "signed out: nothing");
+  nowhere(p, CODE);
+  p.api["GET "] = ok(LINKED);
+  await p.leave();
+  await p.back(true);
+  has(p, "Linked as @sam_made_up");
+  await p.click("#tab-ask");
+  const m = p.reads();
+  await p.leave();
+  await p.back(true);
+  assert.strictEqual(p.reads(), m, "another tab of the page: when My absences is shown");
+  await p.click("#tab-mine");
+  assert.strictEqual(p.reads(), m + 1);
+  const q = await opened({ "GET ": ok(FREE) }, { hash: "#ask" });
+  await q.leave();
+  await q.back(true);
+  assert.strictEqual(q.reads(), 0, "My absences not opened yet");
+});
+t("opening the bot, in a new tab or the Telegram app, does not end the code", async () => {
+  const p = await coded();
+  await p.click("#tgBody a");
+  await p.show(false);
+  await p.tick(30000);
+  await p.show(true);
+  has(p, CODE);
+  p.api["GET "] = ok(LINKED);
+  await p.tick(5000);
+  has(p, "Linked as @sam_made_up");
+});
+t("a lost connection or a failing server while a code shows keeps it; the bot disconnected takes the card away", async () => {
+  const p = await coded();
+  for (const a of [new Error("x"), no(500, "x"), no(503, "x")]) { p.api["GET "] = a; await p.tick(5000); has(p, CODE); }
   p.api["GET "] = ok(FREE); await p.tick(5000); has(p, CODE); p.api["GET "] = ok(OFF); await p.tick(5000); assert.strictEqual(p.$("#mineTelegram").innerHTML, ""); nowhere(p, CODE);
   const n = p.reads(); await p.tick(60000); assert.strictEqual(p.reads(), n); p.api["GET "] = ok(FREE); await p.click("#tab-mine"); assert.strictEqual(p.card(), `Telegram ${LINE} Link Telegram`, "the old code does not come back");
 });
@@ -188,6 +323,35 @@ t("everything is escaped", async () => {
   await p.click("button", "Link Telegram"); has(p, mark("bot"), mark("code")); assert.strictEqual(p.find("#tgBody a").getAttribute("href"), `https://t.me/"><u>x</u>`); assert.strictEqual(p.all("#mineTelegram u").length, 0);
   p.api["GET "] = ok(Object.assign({}, LINKED, { handle: mark("handle"), since: mark("since") })); await p.tick(5000); has(p, mark("handle"), mark("since")); assert.strictEqual(p.all("#mineTelegram u").length, 0);
   p.api["DELETE /link"] = no(400, mark("refusal")); await p.click("button", "Unlink"); await p.click("button", "Unlink"); has(p, mark("refusal")); assert.strictEqual(p.all("#mineTelegram u").length, 0);
+});
+t("only the line is a live region: the steps, the question and the buttons are where the focus goes, a refusal says itself", async () => {
+  const live = p => p.all("#mineTelegram [aria-live]").map(e => e.id), line = p => p.text("#tgLine");
+  let p = await opened({ "GET ": ok(FREE) });
+  assert.deepStrictEqual(live(p), ["tgLine"]);
+  assert.strictEqual(line(p), LINE);
+  const el = p.find("#tgLine");
+  p.api["POST /code"] = no(409, "Telegram is not connected yet.");
+  await p.click("button", "Link Telegram");
+  assert.strictEqual(p.all("#tgLine [role]").length, 0);
+  assert.strictEqual(p.find("#tgBody [role=\"status\"]").textContent, "Telegram is not connected yet.", "once, and not in the live line");
+  p.api["POST /code"] = () => code(p);
+  const drawn = p.drawn.length;
+  await p.click("button", "Link Telegram");
+  assert.strictEqual(line(p), "", "the steps are not read out: the focus is on Open the bot");
+  assert.ok(p.text("#tgBody").startsWith("1. Open the bot"));
+  p.api["GET "] = ok(LINKED);
+  await p.tick(5000);
+  assert.strictEqual(line(p), "Linked as @sam_made_up since Mon 12 Oct.");
+  assert.strictEqual(p.find("#tgLine"), el, "the same element: what is written into it is said");
+  const n = p.drawn.filter(x => x === el).length;
+  await p.click("button", "Unlink");
+  assert.strictEqual(line(p), "Linked as @sam_made_up since Mon 12 Oct.");
+  assert.strictEqual(p.drawn.filter(x => x === el).length, n, "the question does not say the line again");
+  assert.ok(p.drawn.length > drawn && p.text("#tgBody").startsWith("Stop relief messages"));
+  assert.strictEqual(p.all("#tgBody [aria-live]").length, 0);
+  p = await coded({}, 10);
+  await p.tick(15000);
+  assert.strictEqual(line(p), OUT);
 });
 t("every button has its words, and what it sends is what the routes take", async () => {
   const p = await coded(); assert.ok(p.buttons().every(x => /[A-Za-z]/.test(x))); assert.deepStrictEqual(p.calls.filter(c => c.url.startsWith(URL)).map(c => `${c.method} ${c.url}`), [`GET ${URL}`, `POST ${URL}/code`]);

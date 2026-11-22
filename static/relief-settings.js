@@ -312,14 +312,14 @@
     return `<span class="msg ${m.bad ? "bad" : "ok"}">${esc(m.text)}${again}</span>`;
   }
 
-  function tgTop(d) {
-    const out = d.practice ? [`<p class="notice">Practice mode: nothing is sent to Telegram.</p>`] : [];
-    const people = Number(d.people) || 0, n = people - tgRows(d.not_linked).length;
-    if (!d.token_set) out.push(`<p class="tg-state">${esc(NO_TOKEN)}</p>`);
-    else if (!d.connected) out.push(`<p class="tg-state">${esc(NOT_YET)}</p>`);
-    else out.push(`<p class="tg-state"><b>${esc(`Connected as @${d.bot}${d.at ? ` since ${dayOf(d.at)}` : ""}${d.base ? `: ${d.base}` : ""}`)}</b></p><p class="tg-state">${esc(`${n} of ${people} linked`)}</p>`);
-    if (d.token_set) out.push(`<p class="small muted">${esc(ONE_COPY)}</p>`);
-    return out.join("");
+  function tgState(d) {
+    if (!d.connected) return esc(d.token_set ? NOT_YET : NO_TOKEN);
+    return `<b>${esc(`Connected as @${d.bot}${d.at ? ` since ${dayOf(d.at)}` : ""}${d.base ? `: ${d.base}` : ""}`)}</b>`;
+  }
+
+  function tgCount(d) {
+    const people = Number(d.people) || 0;
+    return d.connected ? esc(`${people - tgRows(d.not_linked).length} of ${people} linked`) : "";
   }
 
   function tgActs(d) {
@@ -343,20 +343,25 @@
   }
 
   function tgPut(id, html) {
-    if (TG.drawn[id] !== html) $(`#${id}`, TG.box).innerHTML = TG.drawn[id] = html;
+    if ((TG.drawn[id] || "") !== html) $(`#${id}`, TG.box).innerHTML = TG.drawn[id] = html;
   }
 
   function tgFind(act, name) { return [...TG.box.querySelectorAll(`[data-tg="${act}"]`)].find(b => name === undefined || b.dataset.name === name); }
 
   function tgPaint() {
     const d = TG.data;
-    if (!d && !TG.err) { TG.box.innerHTML = ""; TG.drawn = {}; return; }
-    if (!TG.drawn.card) {
+    TG.box.hidden = !d && !TG.err;   /* an empty one is no region of the page */
+    if (TG.box.hidden) { TG.box.innerHTML = ""; TG.drawn = {}; return; }
+    if (!TG.drawn.card) {   /* live: the lines that change, each on its own, so that one is not said with another */
       TG.drawn = { card: true };
-      TG.box.innerHTML = `<div class="card tg"><h2>Telegram</h2><div id="tgTop" aria-live="polite"></div><div id="tgActs"></div><div id="tgSay" aria-live="polite"></div><div id="tgLists"></div></div>`;
+      TG.box.innerHTML = `<div class="card tg"><h2>Telegram</h2><div id="tgTop"><div id="tgPractice"></div><p class="tg-state" id="tgState" aria-live="polite"></p><p class="tg-state" id="tgCount" aria-live="polite"></p>
+        <div class="small muted" id="tgOne"></div></div><div id="tgActs"></div><div id="tgSay" aria-live="polite"></div><div id="tgLists"></div></div>`;
     }
     const a = document.activeElement, had = a && TG.box.contains(a) ? a : null;
-    tgPut("tgTop", d ? tgTop(d) : `<p class="tg-state">${tgSay(TG.err)}</p>`);
+    tgPut("tgPractice", d && d.practice ? `<p class="notice">Practice mode: nothing is sent to Telegram.</p>` : "");
+    tgPut("tgState", d ? tgState(d) : tgSay(TG.err));
+    tgPut("tgCount", d ? tgCount(d) : "");
+    tgPut("tgOne", d && d.token_set ? esc(ONE_COPY) : "");
     tgPut("tgActs", d ? tgActs(d) : `<div class="codes">${tgButton("reload", "Try again", "small")}</div>`);
     tgPut("tgSay", TG.msg ? tgSay(TG.msg) : "");
     tgPut("tgLists", d ? tgLists(d) : "");

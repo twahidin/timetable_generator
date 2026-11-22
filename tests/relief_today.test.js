@@ -38,7 +38,7 @@ async function today(d, more = {}) {
   p.btn = (label, k = "k5") => [...p.row(k).querySelectorAll("button")].find(b => p.text(b) === label) || null;
   p.acts = () => p.all("#tdActs button").map(b => p.text(b) + (b.disabled ? " (off)" : ""));
   p.top = () => p.all("#tdTop .td-top").map(e => p.text(e));
-  p.aloud = () => p.text("#tdTop .vh") || "";
+  p.aloud = () => p.text("#tdSaid") || "";
   return p;
 }
 const BY = `by ${TEAM}, 07:15`;
@@ -61,6 +61,19 @@ t("what was said of an approved relief, before who approved it", async () => {
     const p = await today(day([row({ told: x, linked: false })])); assert.strictEqual(p.state(), `Approved ${line} ${BY} Change`);
   }
   const p = await today(day([row({ approved: null })])); assert.strictEqual(p.state(), "Approved Sent 07:20 Change Remind");
+});
+t("on a date past, only what is so", async () => {
+  const YESTERDAY = "2026-10-12", lines = [[told("sent"), true, "Sent 07:20"], [told("unsure"), true, "May not have been sent"], [told("queued"), true, "Being sent…"], [told("failed"), true, "Could not be sent"], [null, true, "Not sent"], [told("dropped"), true, "Not sent"],
+    [null, false, NOT_ON], [told("failed"), false, NOT_ON], [told("sent"), false, "Sent 07:20 · not on Telegram now"]];
+  for (const [x, linked, line] of lines) {
+    const p = await today(c => ok(day([row({ told: x, linked })], { date: c.url.slice(-10) }))), input = p.find("#tdDate");
+    input.value = YESTERDAY;
+    for (const f of p.find("#pane-today").on.change) f({ target: input });
+    await p.tick(400);
+    assert.strictEqual(p.text("#tdTitle"), "Relief on Mon 12 Oct");
+    assert.strictEqual(p.state(), `Approved ${line} ${BY}`);
+    assert.strictEqual(p.row().querySelectorAll(".td-state .td-warn").length, linked && x && ["unsure", "failed"].includes(x.state) ? 1 : 0);
+  }
 });
 t("what went wrong is marked, the rest is not", async () => {
   for (const [x, bad] of [["sent", 0], ["queued", 0], ["unsure", 1], ["failed", 1], ["dropped", 0]]) { const p = await today(day([row({ told: told(x) })])); assert.strictEqual(p.row().querySelectorAll(".td-state .td-warn").length, bad, x); }
@@ -97,6 +110,34 @@ t("two rows of one cover key are told apart by their absence", async () => {
 t("acknowledged meanwhile: no Remind any more, and the row's first button has the focus", async () => {
   const p = await today(day([row()])); p.remind = () => { p.day = day([inState("acknowledged")]); return ok({ sent: 0, skipped: [{ ckey: "k5", name: SAM, why: "Nobody to remind." }] }); };
   await p.press("Remind"); assert.strictEqual(p.btn("Remind"), null); assert.strictEqual(p.under(), "Nobody to remind."); assert.strictEqual(p.focus(), p.btn("Change")); assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now", "Refresh"]);
+});
+t("an answer that comes after the date was moved is not said above the other day's rows", async () => {
+  const gives = [[200, { sent: 1, skipped: [] }], [200, { sent: 0, skipped: [{ ckey: "k5", name: SAM, why: "Nobody to remind." }] }], [503, { error: "Telegram could not be reached just now. Try again." }]];
+  for (const press of [p => p.press("Remind"), p => p.click("button", ALL)]) {
+    for (const [status, data] of gives) {
+      const p = await today(day([row()])), wait = later();
+      p.remind = wait.answer;
+      await press(p);
+      await p.click("#tdSeg button", "Tomorrow");
+      assert.ok(p.acts().includes(ALL + " (off)"), "one is on its way still");
+      wait.give(status, data);
+      await p.settle();
+      assert.deepStrictEqual(p.top(), [], `${press} ${status}`);
+      assert.strictEqual(p.under(), "");
+      assert.ok(p.acts().includes(ALL) && !p.btn("Remind").disabled, "and it can be pressed again");
+      await p.click("#tdSeg button", "Today");
+      assert.deepStrictEqual([p.top(), p.under()], [[], ""]);
+      assert.ok(!p.btn("Remind").disabled);
+    }
+    const p = await today(day([row()])), wait = later();
+    p.remind = wait.answer;
+    await press(p);
+    await p.click("#tdSeg button", "Tomorrow");
+    await p.click("#tdSeg button", "Today");
+    wait.give(200, { sent: 1, skipped: [] });
+    await p.settle();
+    assert.ok([...p.top(), p.under()].some(x => x.startsWith("Reminded")), "back on the day it was pressed on: said there");
+  }
 });
 t("Remind is for whoever can be reached, on a date not past; another date says so", async () => {
   const p = await today(day([row({ linked: false, told: null }), maya()])); assert.strictEqual(p.btn("Remind"), null); assert.ok(p.btn("Remind", "k2"));
@@ -158,6 +199,71 @@ t("approved here: its message is made after the answer, so the day is read again
   const q = await today(day([inState("waiting", { told: null }), row({ ckey: "k8", key: "k8", linked: false, told: null })])); q.steps = ok({}); q.day = day([row({ linked: false, told: null }), row({ ckey: "k8", key: "k8", linked: false, told: null })]); await q.press("Approve"); await q.tick(60000); assert.strictEqual(q.reads(), 2, "nobody who can be reached");
   const r = await today(day([WAITS], { telegram: false })); r.steps = ok({}); r.day = day([row({ told: null })], { telegram: false }); await r.press("Approve"); await r.tick(60000); assert.strictEqual(r.reads(), 2, "no bot");
 });
+t("what is followed after a step is followed through a Refresh, the tab shown again and a refused step", async () => {
+  const WAITS = inState("waiting", { told: null }), between = [p => p.click("button", "Refresh"), async p => { await p.click("#tab-ask"); await p.click("#tab-today"); }, async p => { p.remind = no(503, "x"); await p.press("Remind"); }, async p => { p.steps = no(400, "x"); await p.press("Approve", "k2"); }];
+  for (const step of between) {
+    const p = await today(day([WAITS, maya({ state: "waiting", approved: null, told: null })]));
+    p.steps = ok({});
+    p.day = day([row({ told: null }), maya({ state: "waiting", approved: null, told: null })]);
+    await p.press("Approve");
+    await step(p);
+    const n = p.reads();
+    await p.tick(3000);
+    assert.strictEqual(p.reads(), n + 1, String(step));
+    p.day = day([row({ told: told("sent", NOW) }), maya({ state: "waiting", approved: null, told: null })]);
+    await p.tick(3000);
+    assert.ok(p.state().startsWith("Approved Sent 07:40 by"));
+    assert.strictEqual(p.aloud(), `${SAM}, 1A Science P6–P7: Sent 07:40`);
+    await p.tick(60000);
+    assert.strictEqual(p.reads(), n + 2, "told: no more");
+  }
+});
+t("it ends when it is told, when the date is changed, and after the 5 reads", async () => {
+  const NONE = row({ told: null }), approved = async () => { const p = await today(day([inState("waiting", { told: null })])); p.steps = ok({}); p.day = day([NONE]); await p.press("Approve"); return p; };
+  let p = await approved();
+  await p.tick(15000);
+  assert.strictEqual(p.reads(), 7);
+  await p.click("button", "Refresh");
+  await p.tick(60000);
+  assert.strictEqual(p.reads(), 8, "the 5 reads are over");
+  p = await approved();
+  await p.click("#tdSeg button", "Tomorrow");
+  await p.click("#tdSeg button", "Today");
+  const n = p.reads();
+  await p.tick(60000);
+  assert.strictEqual(p.reads(), n, "another date in between");
+  p = await approved();
+  p.day = day([row({ told: told("queued") })]);
+  await p.tick(3000);
+  p.day = day([row({ told: told("dropped") })]);
+  await p.tick(3000);
+  const m = p.reads();
+  await p.tick(60000);
+  assert.strictEqual(p.reads(), m, "it was told, and is followed no more");
+});
+t("a row that is gone after its step (split) is followed no more, and the page goes on", async () => {
+  const p = await today(day([inState("waiting", { told: null })]));
+  p.steps = ok({});
+  p.day = day([0, 1].map(i => inState("waiting", { ckey: `k5#${i}`, split: true, p: 5 + i, n: 1, told: null })));
+  await p.press("Split");
+  await p.press("Split after P6");
+  assert.strictEqual(p.all(".td-row[data-ckey]").length, 2);
+  assert.ok(p.top()[0].includes("split after P6"), "said above the rows, as before");
+  await p.tick(60000);
+  assert.strictEqual(p.reads(), 2);
+});
+t("only the row of the step is followed", async () => {
+  const p = await today(day([row({ told: null }), maya({ state: "waiting", approved: null, told: null })]));
+  p.steps = ok({});
+  p.day = day([row({ told: null }), maya({ told: null })]);
+  await p.press("Approve", "k2");
+  p.day = day([row({ told: null }), maya({ told: told("sent", NOW) })]);
+  await p.tick(3000);
+  assert.strictEqual(p.aloud(), `${MAYA}, 1A Science P2: Sent 07:40`);
+  const n = p.reads();
+  await p.tick(60000);
+  assert.strictEqual(p.reads(), n, "Mr Tan's was not sent before either");
+});
 t("only on screen; back on screen it is read at once, still five times in all", async () => {
   const p = await today(day([row({ told: told("queued") })])); await p.show(false); await p.tick(60000); assert.strictEqual(p.reads(), 1); await p.show(true); assert.strictEqual(p.reads(), 2); await p.tick(60000); assert.strictEqual(p.reads(), 6);
   await p.show(false); await p.show(true); await p.tick(60000); assert.strictEqual(p.reads(), 6); await p.click("#tab-mine"); await p.tick(60000); assert.strictEqual(p.reads(), 6); await p.click("#tab-today"); assert.strictEqual(p.reads(), 7, "the tab shown: from the start");
@@ -177,10 +283,49 @@ t("nothing is drawn again while nothing has changed, and the focus stays", async
   for (const label of ["Fill now", ALL, "Refresh"]) { const q = await today(day([row({ told: told("queued") })])); q.find("#tdActs button", label).focus(); await q.tick(3000); assert.strictEqual(q.focus(), q.find("#tdActs button", label), label); q.day = day([row()]); await q.tick(3000); assert.strictEqual(q.focus(), q.find("#tdActs button", label), label); }
   p.find("#tab-mine").focus(); p.day = day([row({ told: told("failed") })]); await p.click("button", "Refresh"); p.find("#tab-mine").focus(); await p.tick(3000); assert.strictEqual(p.focus(), p.find("#tab-mine"));
 });
+t("the buttons at the top are drawn only when something in them changes", async () => {
+  const p = await today(day([row({ told: told("queued") })])), els = () => p.all("#tdActs button"), was = els();
+  for (let i = 0; i < 3; i++) await p.tick(3000);
+  assert.strictEqual(p.reads(), 4);
+  els().forEach((b, i) => assert.ok(b === was[i], p.text(b)));
+  p.day = day([row()]);
+  await p.tick(3000);
+  els().forEach((b, i) => assert.ok(b === was[i], "the row alone has changed"));
+  p.day = day([inState("acknowledged")]);
+  await p.click("button", "Refresh");
+  assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now", "Refresh"]);
+});
+t("the buttons at the top after a reading that changed nothing: as they are, not as they were drawn during it", async () => {
+  const p = await today(day([inState("waiting")], { filling: true, telegram: false })), wait = later();
+  p.day = () => wait.answer;
+  await p.tick(3000);
+  p.steps = later().answer;
+  await p.click("button", "Fill now");
+  assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now (off)", "Reading… (off)"], "no bot: as the page was");
+  wait.give(200, day([inState("waiting")], { filling: true, telegram: false }));
+  await p.settle();
+  assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now (off)", "Refresh"]);
+});
+t("a row's button pressed while the day is read by itself: Refresh stays as it is", async () => {
+  for (const telegram of [false, true]) {
+    const p = await today(day([inState("waiting")], { filling: true, telegram })), wait = later();
+    p.day = () => wait.answer;
+    await p.tick(3000);
+    assert.strictEqual(p.reads(), 2);
+    p.steps = later().answer;
+    await p.press("Approve");
+    assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now", "Refresh"], `telegram ${telegram}`);
+  }
+  const p = await today(day([row()])), wait = later();
+  p.day = () => wait.answer;
+  await p.click("button", "Refresh");
+  assert.ok(p.acts().includes("Reading… (off)"), "asked for: it says so");
+});
 t("what came of it is said to who cannot see it, once", async () => {
-  const p = await today(day([row({ told: told("queued") }), maya({ told: told("queued") })])); assert.strictEqual(p.$("#tdTop").getAttribute("aria-live"), "polite"); assert.strictEqual(p.aloud(), ""); await p.tick(3000); assert.strictEqual(p.aloud(), "");
+  const p = await today(day([row({ told: told("queued") }), maya({ told: told("queued") })])), el = p.find("#tdSaid"); assert.ok(el.getAttribute("aria-live") === "polite" && el.classes().includes("vh")); assert.strictEqual(p.aloud(), ""); await p.tick(3000); assert.strictEqual(p.aloud(), "");
   p.day = day([row({ told: told("sent", NOW) }), maya({ told: told("queued") })]); await p.tick(3000); assert.strictEqual(p.aloud(), `${SAM}, 1A Science P6–P7: Sent 07:40`);
-  const line = p.find("#tdTop .vh"); p.day = day([row({ told: told("sent", NOW) }), maya({ told: told("queued") })], { counts: { need: 3 } }); await p.tick(3000); assert.strictEqual(p.aloud(), ""); assert.notStrictEqual(p.$("#tdTop .vh"), line);
+  await p.tick(3000); assert.strictEqual(p.aloud(), "", "nothing new: it does not stay to be read"); await p.click("button", "Refresh");
+  p.day = day([row({ told: told("sent", NOW) }), maya({ told: told("queued") })], { counts: { need: 3 } }); await p.tick(3000); assert.strictEqual(p.aloud(), ""); assert.ok(p.find("#tdSaid") === el, "the same element: what is written into it is said");
   p.day = day([row({ told: told("sent", NOW) }), maya({ told: told("unsure", NOW) })]); await p.tick(3000); assert.strictEqual(p.aloud(), `${MAYA}, 1A Science P2: May not have been sent: remind them`);
   const q = await today(day([row({ told: told("queued") })])); q.day = day([inState("acknowledged")]); await q.tick(3000); assert.strictEqual(q.aloud(), "", "answered already: the row says so"); const r = await today(day([row({ told: null })])); r.day = day([row()]); await r.click("button", "Refresh"); assert.strictEqual(r.aloud(), "");
 });
@@ -191,6 +336,23 @@ t("nothing is said while no bot is connected; a row without a name still has its
 t("Remind all: the focus elsewhere, or on another tab, is left there", async () => {
   for (const [go, where] of [[p => p.find("#tab-mine").focus(), "#tab-mine"], [p => p.click("#tab-ask"), "#tab-ask"], [p => p.find("#tdDate").focus(), "#tdDate"]]) { const p = await today(day([row()])), wait = later(); p.remind = wait.answer; await p.click("button", ALL); await go(p); wait.give(200, { sent: 1, skipped: [] }); await p.settle(); assert.strictEqual(p.focus(), p.find(where), where); }
   const p = await today(day([row()])), wait = later(); p.remind = wait.answer; await p.click("button", ALL); await p.click("#tab-ask"); p.focused = null; wait.give(200, { sent: 1, skipped: [] }); await p.settle(); assert.strictEqual(p.focus(), "", "not on the screen: nothing is given the focus");
+});
+t("the lines above the rows are not said again with what came of it, nor the unseen line with them", async () => {
+  const q = await today(day([row({ told: told("queued") })]));
+  q.remind = ok({ sent: 1, skipped: [] });
+  await q.click("button", ALL);
+  const top = q.find("#tdTop .td-top");
+  q.day = day([row({ told: told("sent", NOW) })]);
+  await q.tick(3000);
+  assert.ok(q.aloud().endsWith("Sent 07:40") && q.find("#tdTop .td-top") === top);
+  assert.strictEqual(q.all("#tdTop .vh").length, 0);
+});
+t("no bot any more: the unseen line goes", async () => {
+  const p = await today(day([row()]));
+  p.find("#tdSaid");
+  p.day = day([row()], { telegram: false });
+  await p.click("button", "Refresh");
+  assert.strictEqual(p.$("#tdSaid"), null);
 });
 t("the lines above the rows are not said again by a reading that changes none of them", async () => {
   const p = await today(day([row({ told: told("queued") })])); p.remind = ok({ sent: 1, skipped: [] }); await p.click("button", ALL); const line = p.find("#tdTop .td-top"); assert.strictEqual(p.text(line), "Reminded 1.");
