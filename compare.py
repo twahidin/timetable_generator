@@ -66,7 +66,7 @@ def published_counts(rec=None):
     try: out = dict(published_at=at, **draft.counts(_published_model(rec), rec))
     except ValueError as e:
         if str(e) != UNREADABLE: raise
-        out = dict(published_at=at, critical=None, warnings=None, error=UNREADABLE)
+        return dict(published_at=at, critical=None, warnings=None, error=UNREADABLE)   # not cached: a one-off failure must not stick
     _counts_cache.update(key=key, value=out); return dict(out)
 
 def rows(m):

@@ -156,6 +156,10 @@ def test_published_counts_are_cached_until_the_setup_or_the_publish_changes():
         rec = store.setup_record(); compare.published_counts(dict(rec, v=rec["v"] + 1)); assert len(calls) == 2   # another setup version: fresh
         time.sleep(0.05); assert c.post("/api/draft/publish").status_code == 200
         again = compare.published_counts(); assert len(calls) == 3 and again["published_at"] is not None and first["critical"] == again["critical"] == 0
+        def bad(rec): calls.append(1); raise ValueError(compare.UNREADABLE)
+        compare._published_model = bad; compare._counts_cache.clear(); n = len(calls)
+        assert compare.published_counts()["error"] == compare.UNREADABLE and compare.published_counts()["error"] == compare.UNREADABLE
+        assert len(calls) == n + 2, calls   # an unreadable timetable is read again on the next call
     finally: compare._published_model = real
 
 def test_an_unreadable_published_timetable_does_not_break_the_list():
