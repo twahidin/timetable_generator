@@ -245,6 +245,15 @@
 - [ ] **Step 2: Check** `node --check static/app.js` and `for f in tests/*.test.js; do node "$f" >/dev/null || echo FAIL $f; done` and `.venv/bin/python tests/smoke.py && .venv/bin/python tests/test_refit.py && .venv/bin/python tests/test_versions.py`
 - [ ] **Step 3: Commit** `git add static/app.js static/style.css README.md && git commit -m "Step 8: the Re-fit window"` (README: a paragraph under Upload and edit: what Re-fit does, its rules, the list, Apply, Undo, the version kept, typed rules flagged.)
 
+### Task 7b: Another day as the last resort, and trades (added 2026-11-23)
+
+Measured on the school's real file before Task 8 (counts only): with every lesson on its own day only about a third of one-teacher changes have any answer, however deep the search; the lead was asked and said a lesson may change day, flagged, when nothing works on its own day.
+
+- `refit.day_moves` and `refit.solve` take `far`: after the same-day places also moves to, and exchanges with lessons of, other days (`FAR_SLOTS` of them, nearest day first). The plan looks at every open target on the lessons' own days first; only then, in a round of its own, with `far`; whenever that settles one, it starts again with the same-day looks.
+- A teachers target whose mirror image is also open (the two teachers trade a class) has the app's `trade` change as a further candidate; it settles both.
+- Every step that changes the day of a lesson is flagged "another day"; a band is never moved; the judge stays step by step (`helper.chain`).
+- Folded in from the reviews of Tasks 4 and 5: a break mistake is keyed by its lesson in the check of the whole list, `SPLIT` before `ONE_SIDED`, Must rules in that check, the `lifted` test helper, the order of `_taken`'s places.
+
 ### Task 8: Real file, tuning and notes
 
 **Files:**
