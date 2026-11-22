@@ -270,34 +270,30 @@
   }
   function paintSave() { const el = $("#saveline"); if (el) el.innerHTML = saveInner(); }
 
-  /* the revision moves with the contents: it is taken only from an answer that holds the whole schedule (the schedule itself, a
-    save's, a fill's), never from a view or a review, which carry a revision but not the contents */
-  function takeRev(j) { if (S.sched && j && Number.isInteger(j.rev)) S.sched.rev = j.rev; }
-
   /* what always comes from the server whole: its own parts, which a save from the page never changes */
   const SERVER_KEYS = ["rev", "saved_at", "saved_by", "status", "approved", "approved_at", "approved_by", "sent_at", "sent_by", "sent_fp", "note", "log", "handled", "made", "pins", "use_anyway", "created_at", "created_by", "id", "kind"];
   const canon = v => JSON.stringify(v, (k, x) => x && typeof x === "object" && !Array.isArray(x) ? Object.keys(x).sort().reduce((o, y) => { o[y] = x[y]; return o; }, {}) : x);
   const copyOf = v => JSON.parse(JSON.stringify(v));
   const changedSentence = () => `This ${isEv() ? "event" : "exam"} was changed by someone else since you opened it. Reload to carry on.`;
 
-  /* the one place that decides what the page keeps when the server sends back the whole schedule (base: the page's copy when the
-    action began). Nothing typed since: theirs, whole. Something typed: key by key, what only I changed stays, what only they
-    changed comes in, and the same key changed by both to different values blocks the page. The revision is theirs. -> may go on */
+  /* the one place that decides what the page keeps when the server sends back the whole schedule, and so the only place a revision
+    is taken with contents. base: the last whole copy the server is known to hold (S.known; a save's own body for its reply). Nothing
+    typed since: theirs, whole. Something typed: key by key, what only I changed stays, what only they changed comes in, and the
+    same key changed by both to different values blocks the page. The server's own parts and the revision are theirs. -> may go on */
   function takeSched(theirs, base) {
-    const mine = S.sched;
-    if (!mine) { S.sched = theirs; return true; }
-    const keys = Array.from(new Set(Object.keys(mine).concat(Object.keys(theirs), Object.keys(base || {})))).filter(k => !SERVER_KEYS.includes(k));
-    const typed = keys.some(k => canon(mine[k]) !== canon((base || {})[k]));
-    if (!typed) { S.sched = theirs; return true; }
+    const mine = S.sched, known = base || S.known || (mine && copyOf(mine)) || {};
+    if (!mine) { S.sched = theirs; S.known = copyOf(theirs); return true; }
+    const keys = Array.from(new Set(Object.keys(mine).concat(Object.keys(theirs), Object.keys(known)))).filter(k => !SERVER_KEYS.includes(k));
+    if (!keys.some(k => canon(mine[k]) !== canon(known[k]))) { S.sched = theirs; S.known = copyOf(theirs); return true; }
     const out = {};
     SERVER_KEYS.forEach(k => { if (k in theirs) out[k] = theirs[k]; });
     for (const k of keys) {
-      const mineSays = canon(mine[k]) !== canon(base[k]), theirsSay = canon(theirs[k]) !== canon(base[k]);
+      const mineSays = canon(mine[k]) !== canon(known[k]), theirsSay = canon(theirs[k]) !== canon(known[k]);
       if (mineSays && theirsSay && canon(mine[k]) !== canon(theirs[k])) { blockPage(changedSentence()); return false; }
       const v = mineSays ? mine[k] : theirs[k];
       if (v !== undefined) out[k] = v;
     }
-    S.sched = out;
+    S.sched = out; S.known = copyOf(theirs);
     return true;
   }
 
@@ -316,7 +312,8 @@
   /* an action at the server goes in the queue of saves, so an edit made meanwhile is saved after it, with the new revision. A
     page that has been blocked since it was asked does nothing: undo puts back what the click set */
   function onChain(run, undo) {
-    const job = S.chain.then(() => { if (S.blocked) { if (undo) undo(); return false; } return run(); }, () => run());
+    const go = () => { if (S.blocked) { if (undo) undo(); return false; } return run(); };
+    const job = S.chain.then(go, go);
     S.chain = job.then(() => {}, () => {});
     return job;
   }
@@ -367,12 +364,13 @@
     if (S.blocked) return false;
     const rev = S.rev;
     S.saving = true;
-    const r = await api("PUT", `${S.base}/${S.id}`, S.sched);
+    const sent = copyOf(S.sched);   /* what this save sends is the base its own reply is read against */
+    const r = await api("PUT", `${S.base}/${S.id}`, sent);
     S.saving = false;
     if (r.status === 401 || r.status === 403) return false;
     if (r.status === 409 && /was changed by/.test(r.j.error || "")) { blockPage(r.j.error); return false; }
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "Nothing was saved. Try again."; paintSave(); return false; }
-    S.sched.saved_at = r.j.saved_at; S.sched.saved_by = r.j.saved_by; takeRev(r.j);
+    if (!takeSched(r.j, sent)) { paintSave(); return false; }   /* what the server cleaned reaches the page, what was typed meanwhile stays */
     if (S.rev === rev) { S.dirty = false; S.bad = false; S.msg = "Saved"; }
     paintSave();
     await refreshView();
@@ -392,12 +390,11 @@
     await flush();
     if (S.dirty) return;   /* the save was refused: its sentence is on the screen */
     S.msg = ""; S.bad = false;
-    const base = copyOf(S.sched);
     return onChain(async () => {
       const r = await api(method, url, body, form);
       if (r.status === 401 || r.status === 403) return;
       if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); return; }
-      if (!takeSched(r.j, base)) return;
+      if (!takeSched(r.j)) return;
       if (done) done(r.j);
       paintSave();
       await refreshView();
@@ -1124,7 +1121,7 @@
     await flush();
     if (S.dirty) return false;
     S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
-    const base = copyOf(S.sched), keys = isEv() && path === "away";   /* an event's away changes who is going: a page-owned key */
+    const keys = isEv() && path === "away";   /* an event's away changes who is going: a page-owned key */
     return onChain(async () => {
       const r = await api("POST", `${S.base}/${S.id}/${path}`, body);
       S.busy = false;
@@ -1133,7 +1130,7 @@
       S.abMsg = "";
       if (!keys && !takeOwn(r.j)) { paint(); return false; }   /* the answer's revision is the page's only when it is the next one */
       const g = await api("GET", `${S.base}/${S.id}`);
-      if (g.ok) { if (!takeSched(g.j, base)) { paint(); return false; } }
+      if (g.ok) { if (!takeSched(g.j)) { paint(); return false; } }
       else if (keys) { blockPage(changedSentence()); paint(); return false; }   /* the page's own keys changed and cannot be read: its copy is old */
       takeReview(r.j); S.sbNote = ""; S.msg = ok || ""; paintSave();
       render(); refreshView();
@@ -1382,7 +1379,7 @@
     for (const x of [r, v, l, me]) if (x.status === 401 || x.status === 403) { dropNote(); return; }
     for (const x of [r, v, l, me]) if (!x.ok) { dropNote(); fail(x.j.error || "Something went wrong."); return; }
     S.me = me.j; links(S.me.can_use); S.label = ((l.j.schedules || []).find(x => x.id === id) || {}).label || "Draft";
-    S.sched = r.j; S.view = v.j; S.levels = l.j.levels || []; S.classes = l.j.classes || [];
+    S.sched = r.j; S.known = copyOf(r.j); S.view = v.j; S.levels = l.j.levels || []; S.classes = l.j.classes || [];
     document.title = r.j.name + (ev ? " · Events" : " · Exams");
     render();
     try {
