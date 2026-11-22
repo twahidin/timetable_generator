@@ -15,7 +15,7 @@ from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, draft, history, store, sync, typed
 from accounts import passwords, people, rights as rights_table
-from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, people as relief_people, settings as relief_settings, tgweb as relief_tgweb, web as relief_web
+from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, outbox as relief_outbox, people as relief_people, settings as relief_settings, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from ttgen import choices
 import exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts
 
@@ -1318,6 +1318,7 @@ app.register_blueprint(relief_web.bp)
 relief_tgweb.init(has=has, me=who, need=need, note=_relief_entry)
 app.register_blueprint(relief_tgweb.bp)
 if os.environ.get("RELIEF_JOBS") == "on": relief_fill.start()     # relief picks when due, every minute (the Dockerfile sets it; tests and local runs never do)
+if os.environ.get("RELIEF_JOBS") == "on" and relief_tg.on(): relief_outbox.start()     # the Telegram messages, every 5 seconds
 
 # ------------------------------------------------------------------------------------------------ admins: people and the ways in
 # The named admins (committee group, Admin extra, signed in with their password) manage people here; every check is the

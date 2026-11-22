@@ -116,18 +116,18 @@ def link(name, chat, handle, lost=None):
     with tgdb.db() as c: return _put(c, name, chat, handle, lost)
 
 
-def _drop(column, value):
+def _drop(column, value, chat=None):
     with tgdb.db() as c:
         r = c.execute(f"SELECT name, chat FROM links WHERE {column}=?", (value,)).fetchone()
-        if r is None: return None
+        if r is None or chat not in (None, r["chat"]): return None
         c.execute("DELETE FROM links WHERE name=?", (r["name"],))
         c.execute("DELETE FROM talks WHERE chat=?", (r["chat"],))
         return r
 
 
-def unlink(name):
-    """-> the chat that was name's, or None"""
-    r = _drop("name", name)
+def unlink(name, chat=None):
+    """-> the chat that was name's, or None; with chat, only while it is still that one"""
+    r = _drop("name", name, chat)
     return r["chat"] if r else None
 
 
