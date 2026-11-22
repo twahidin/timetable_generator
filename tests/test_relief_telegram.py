@@ -2187,6 +2187,7 @@ def the_module_stands_alone():
     code = "import sys; import relief.tell, relief.outbox as o; print([m for m in ('relief.web', 'relief.bot', 'relief.tgweb', 'flask') if m in sys.modules], o.VALID is relief.tell.still_true, relief.tell.SYNC)"
     p = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=dict(os.environ, DATA_DIR=tempfile.mkdtemp()), capture_output=True, text=True)
     assert p.stdout.strip() == "[] True False", (p.stdout, p.stderr[-400:])
+    assert not hasattr(TE, "links") and TE._links is links, "due has a parameter of that name: the module goes by another"
     assert OB.VALID is TE.still_true and TE.still_true(dict(key="any")) is True and TE.still_true(dict(key="x", kind="exam-duty", ref=None)) is True
     assert {"relief", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick"} == set(TE.CHECKS), "report, clear and weekly (Tasks 6 and 7) are added here"
 
@@ -3233,6 +3234,56 @@ def stopped_is_neither_gone_nor_moved():
         open(p, "w", encoding="utf-8").write(good); assert TE.sweep() == 1; open(p, "w", encoding="utf-8").write("{ not json"); assert send() == 0 and state(f"stopped:{key}:0") == "queued"
 
 @t
+def on_again_reaches_whoever_was_told_it_was_off():
+    """approved anew to the same person, whose message of that never went, and answered in the app: they were told it is stopped, so they are told it is on again"""
+    for answer in ("acknowledged", "change"):
+        for queued in (True, False):
+            with exam_school(SAM):
+                i, key = told_relief(); at("09:10"); give(i, K5, SAM)
+                if queued: assert TE.sweep() == 1
+                CV.acknowledge(i, K5, SAM) if answer == "acknowledged" else CV.ask_change(i, K5, "A parent meeting", SAM)
+                at("09:20"); e = exam(); swept(); assert said(SAM) == [RELIEF_K5, STOPPED_K5] and keys("stopped") == [f"stopped:{key}:0"] and CV.state(*covered(i, K5)) == answer
+                at("09:30"); withdraw(e); assert [x["kind"] for x in dues(links=exam_links())] == ["again"] and swept() == 1, (answer, queued)
+                r, = outs("again"); assert (r["key"], r["name"], r["text"], r["state"], buttons_of(r)) == (f"again:{key}:0", SAM, AGAIN_K5, "sent", relief_buttons(i)), r
+                assert swept() == 0 and said(SAM) == [RELIEF_K5, STOPPED_K5, AGAIN_K5]
+                again_on(e); swept(); withdraw(e); swept(); assert swept() == 0 and said(SAM)[3:] == [STOPPED_K5, AGAIN_K5] and keys("again") == [f"again:{key}:{n}" for n in (0, 1)], "each time"
+    for answer, n in (("acknowledged", 1), ("change", 1), (None, 0)):                      # approved anew while it waits to go: unless the relief itself is said again
+        with exam_school(SAM):
+            i, key = told_relief(); e = exam(); swept(); withdraw(e); TE.sweep(); at("09:10"); give(i, K5, SAM)
+            if answer == "acknowledged": CV.acknowledge(i, K5, SAM)
+            if answer == "change": CV.ask_change(i, K5, "x", SAM)
+            assert send() == n and state(f"again:{key}:0") == ("sent" if n else "dropped"); swept(); assert said(SAM)[2:] == [AGAIN_K5 if n else RELIEF_K5] and swept() == 0, answer
+    with exam_school(SAM, MAYA):                                                           # acknowledged by another, whom it moved to: nothing to Sam but that it moved
+        i, key = told_relief(); e = exam(); swept(); withdraw(e); TE.sweep(); at("09:10"); give(i, K5, MAYA); CV.acknowledge(i, K5, MAYA); send(); swept(); assert said(SAM)[2:] == [MOVED_K5]
+
+@t
+def on_again_is_not_said_of_a_lesson_that_is_not_there_any_more():
+    """a publish moved it, or its date is a holiday now: the exam does not stop it, and it does not happen either"""
+    row = next(x for x in SCHOOL["model"]["lessons"] if x["classes"] == ["1A", "1B"])
+    @contextlib.contextmanager
+    def moved():
+        row["p"] = 6
+        try: yield
+        finally: row["p"] = 5
+    @contextlib.contextmanager
+    def holiday():
+        store.write_json(RS.PATH, dict(calendar=dict(TERM, holidays=[dict(name="A made-up day", start="2026-10-13", end="2026-10-13")])))
+        try: yield
+        finally: store.write_json(RS.PATH, dict(calendar=TERM))
+    for gone_then in (moved, holiday):
+        with exam_school(SAM):
+            i, key = told_relief(); e = exam(); swept()
+            with gone_then(): assert CV.stopped(RL.Links.load(SCHOOL, rs()["calendar"]), covered(i, K5)[1]) == "" and swept() == 0, "the exam is on still"
+            assert swept() == 0; withdraw(e)
+            with gone_then(): assert swept() == 0 and dues(links=exam_links()) == [], "nor once it is withdrawn"
+            assert TE.sweep() == 1
+            with gone_then(): assert send() == 0 and state(f"again:{key}:0") == "dropped" and swept() == 0, "nor when that happens before it goes"
+            assert swept() == 1 and swept() == 0 and said(SAM) == [RELIEF_K5, STOPPED_K5, AGAIN_K5], gone_then.__name__
+            again_on(e); TE.sweep()
+            with gone_then(): assert send() == 0 and state(f"stopped:{key}:1") == "dropped", "that it is stopped is not so then"
+            assert swept() == 1 and said(SAM)[3:] == [STOPPED_K5]
+
+@t
 def nothing_is_said_about_stopping_while_the_exams_cannot_be_read():
     h = Grab(); lg = logging.getLogger("relief.fill"); lg.addHandler(h); prop, lg.propagate = lg.propagate, False
     try:
@@ -3251,15 +3302,18 @@ def nothing_is_said_about_stopping_while_the_exams_cannot_be_read():
             i = absent(by=HUGO); give(i, K5, SAM); e = exam()
             with unreadable(): assert swept() == 1 and said(SAM) == [RELIEF_K5]
             swept(); assert said(SAM)[1:] == [STOPPED_K5]
-        with exam_school(SAM):                                                             # what is queued about stopping waits, neither sent nor dropped
-            i, key = told_relief(); e = exam(); TE.sweep(); later = lambda n: OB.send_due(now=time.time() + n)["sent"]
-            with unreadable(): assert send() == 0 and state(f"stopped:{key}:0") == "queued"
-            assert later(4000) == 1 and said(SAM)[1:] == [STOPPED_K5]; withdraw(e); TE.sweep()
-            with unreadable(): assert send() == 0 and state(f"again:{key}:0") == "queued"
-            with stand_in(store, "published", lambda: None):                               # nor while a publish swaps the timetable
-                try: TE.still_true(dict(item(f"again:{key}:0"), ref=json.loads(item(f"again:{key}:0")["ref"]))); raise AssertionError("said")
-                except ValueError: pass
-            assert later(4000) == 1 and said(SAM)[2:] == [AGAIN_K5]
+        with exam_school(SAM):                                                             # what is queued about stopping is dropped (never failed, however long they cannot be read), and made anew once they can
+            i, key = told_relief(); e = exam()
+            for queued, text in ((f"stopped:{key}:0", STOPPED_K5), (f"again:{key}:0", AGAIN_K5)):
+                if queued.startswith("again:"): withdraw(e)
+                assert TE.sweep() == 1; n = len(said(SAM))
+                with unreadable(): assert send() == 0 and state(queued) == "dropped" and [TE.sweep() for _ in range(8)] == [0] * 8 and OB.send_due(now=time.time() + 9000)["sent"] == 0
+                assert len(said(SAM)) == n and swept() == 1 and swept() == 0 and said(SAM)[n:] == [text] and (item(queued)["state"], item(queued)["tries"]) == ("sent", 0), queued
+            again_on(e); TE.sweep(); kind = lambda k: dict(item(f"stopped:{key}:1"), kind=k, ref=json.loads(item(f"stopped:{key}:1")["ref"]))
+            with stand_in(store, "published", lambda: None): assert [TE.still_true(kind(k)) for k in ("stopped", "again")] == [False, False], "nor while nothing is published"
+            for n, (module, name) in enumerate(((RS, "load"), (store, "published"), (TE, "_now"))):       # what else cannot be read: it waits
+                with stand_in(module, name, lambda *a: 1 / 0): put(f"stopped:{key}:1", next_at=0); assert send() == 0 and (state(f"stopped:{key}:1"), item(f"stopped:{key}:1")["tries"]) == ("queued", n + 1), name
+            assert OB.send_due(now=time.time() + 4000)["sent"] == 1 and said(SAM)[3:] == [STOPPED_K5]
     finally: lg.removeHandler(h); lg.propagate = prop
 
 @t
@@ -3281,10 +3335,7 @@ def still_true_knows_what_is_stopped():
         with unreadable(): assert all(TE.still_true(x) is True for x in (relief, ask, askpick, planned, officer)), "no lesson counts as stopped"
         TE.sweep(); stopped = it("stopped"); again = dict(stopped, kind="again"); assert TE.still_true(stopped) is True and TE.still_true(again) is False
         withdraw(e); assert TE.still_true(stopped) is False and TE.still_true(again) is True and TE.still_true(relief) is True
-        for x in (stopped, again):
-            with unreadable():
-                try: TE.still_true(x); raise AssertionError(x["kind"])
-                except ValueError: pass
+        with unreadable(): assert TE.still_true(stopped) is False and TE.still_true(again) is False, "not known: neither goes"
         CV.keep(i, K5, TEAM); TE.sweep(); kept = it("kept"); assert TE.still_true(kept) is True; again_on(e); assert TE.still_true(kept) is False and TE.still_true(stopped) is True
         absences.not_needed(i, K5, "x", HUGO); gone = dict(relief, kind="gone"); assert TE.still_true(gone) is True and TE.still_true(dict(gone, kind="moved")) is True, "gone and moved, as it stood"
         assert TE.still_true(stopped) is False, "gone says it"

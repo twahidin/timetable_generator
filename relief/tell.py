@@ -26,12 +26,14 @@ A lesson an approved exam or event stops (exams.relief_links, by cover.stopped) 
 each time: links is read once a sweep (fill._links, in no request; None: the exams cannot be read, no lesson counts as stopped
 and nothing is said or taken back about stopping). While it is stopped nothing is made of its covers (no relief, ask, askpick or
 kept: they are made once it stands), and it is not gone or moved by that: those are said when the cover itself ends or goes to
-another. stopped says why, again nothing of it; no other message names an exam or event. A backup (exams) taken over by the
-teacher's own absence is not told as cancelled: its reliefs went with it.
+another. again is said to whoever was told it is stopped, whatever was approved since, unless the relief itself is said again
+(_on_again); never of a lesson that is not there any more (a publish moved it, or its date is a holiday now). stopped says why,
+again nothing of it; no other message names an exam or event. A backup (exams) taken over by the teacher's own absence is not
+told as cancelled: its reliefs went with it.
 
 still_true asks again when a message is about to go: it is dropped (its key may be queued again) when the lesson is over, when
 what it says is not so any more (what it asks of a lesson that is stopped now, too), or when its person is not on the team a
-message was for. stopped and again wait while the exams cannot be read.
+message was for. stopped and again are dropped too while the exams cannot be read: due makes them anew once they can.
 
 sweep never raises and asks Telegram nothing; soon asks for one in a thread, and start is a ticker of one minute for the hooks
 in MINUTE (the sweep, the reports), apart from relief.fill's, whose runs can wait long for the model. Two sweeps never run at
@@ -49,7 +51,9 @@ from relief import absences as _absences
 from relief import cover as _cover
 from relief import fill as _fill
 from relief import free as _free
-from relief import links, outbox, tgdb
+from relief import lessons as _lessons
+from relief import links as _links
+from relief import outbox, tgdb
 from relief import settings as _settings
 from relief import words
 
@@ -260,15 +264,23 @@ def _times_told(w, kind, key):
     return n
 
 
+def _on_again(pub, cal, ref, r, x, c):
+    """again may be said of a cover still theirs, its lesson not stopped: the lesson is there still, and no relief message says it
+    anew (approved anew and not answered, the relief itself does)"""
+    if c["approved"].get("at") != ref["approved_at"] and _cover.state(r, x, c) == "approved": return False
+    return _lessons.still_there(pub, cal, r["teacher"], x)
+
+
 def _stops(w, key, ref, r, x, c):
-    """stopped, when the lesson of a cover still theirs is stopped; again, when it stands again and is theirs as it was approved
-    when they were told (approved anew, the relief itself is said again); nothing while the exams cannot be read"""
+    """stopped, when the lesson of a cover still theirs is stopped; again, when it is on again (_on_again) for who was told that it
+    was stopped; nothing while the exams cannot be read"""
     if w.links is None: return
     why, what, ref_ = _cover.stopped(w.links, x), (ref["lesson"], ref["periods"], ref["start"], ref["day"]), dict(ref, id=r["id"])       # id: where the cover is now
     if why: yield _item(f"stopped:{key}:{_times_told(w, 'again', key)}", ref["who"], "stopped", stopped_text(*what, why), ref=ref_)
-    elif c["approved"].get("at") == ref["approved_at"]:
+    else:
         n = _times_told(w, "stopped", key)
-        if n: yield _item(f"again:{key}:{n - 1}", ref["who"], "again", again_text(*what), _answers(r, x, ref["ckey"], ref["who"]), ref=ref_)
+        if n and _on_again(w.pub, w.settings.get("calendar") or {}, ref, r, x, c):
+            yield _item(f"again:{key}:{n - 1}", ref["who"], "again", again_text(*what), _answers(r, x, ref["ckey"], ref["who"]), ref=ref_)
 
 
 def _absence(w, r):
@@ -421,14 +433,14 @@ def _queued(keys):
 
 
 def _sweep(now):
-    bot = links.connected()                     # None without a token too
+    bot = _links.connected()                    # None without a token too
     pub = store.published() if bot else None
     if not pub: return 0                        # nothing published (a publish swaps folders): the next sweep
-    reach = links.reachable(pub)
+    reach = _links.reachable(pub)
     if not reach: return 0
     told = _told()
     now, settings, people = _fill._when(now), _settings.load(pub), _accounts.staff(pub)
-    more = dict(team=[p["name"] for p in people if "relief.team" in _rights.rights(p, links.VIA)], base=bot["base"], shorts={p["name"]: p["short"] for p in people},
+    more = dict(team=[p["name"] for p in people if "relief.team" in _rights.rights(p, _links.VIA)], base=bot["base"], shorts={p["name"]: p["short"] for p in people},
                 links=_fill._links(pub, settings.get("calendar") or {}))
     records, unread = _records() if os.path.isdir(_absences.DIR) else ([], {})          # none yet
     for kind in sorted(set(unread.values())): _log.warning("an absence could not be read (%s)", kind)
@@ -472,7 +484,7 @@ def soon():
     ticker's next one does it). In a daemon thread named relief-tell; one asked for while another runs runs once more after
     it; inline when SYNC (tests). Never raises. Never call it holding absences._LOCK"""
     try:
-        if links.connected() is None: return False
+        if _links.connected() is None: return False
         if SYNC:
             sweep()
             return True
@@ -521,7 +533,7 @@ def _over(ref):
 
 def _on_team(name):
     if not _accounts.readable(): raise ValueError("the accounts could not be read")           # nobody's rights are known now
-    return "relief.team" in links.rights_named(name)
+    return "relief.team" in _links.rights_named(name)
 
 
 def _now(ref):
@@ -537,21 +549,17 @@ def _now(ref):
 
 
 def _exams():
-    """what approved exams and events stop now; None when that cannot be read, or nothing is published (a publish swaps folders)"""
+    """(the published timetable, the calendar, what approved exams and events stop now); the last None when that cannot be read,
+    or nothing is published (a publish swaps folders)"""
     pub = store.published()
-    return _fill._links(pub, _settings.load(pub).get("calendar") or {}) if pub else None
+    if not pub: return None, {}, None
+    cal = _settings.load(pub).get("calendar") or {}
+    return pub, cal, _fill._links(pub, cal)
 
 
 def _stands_now(x):
     """lesson x is not stopped now, as far as it is known"""
-    return not _cover.stopped(_exams(), x)
-
-
-def _known_stopped(x):
-    """lesson x is stopped now; raises when that cannot be known (what says so waits)"""
-    exams = _exams()
-    if exams is None: raise ValueError("the exams and events could not be read")
-    return bool(_cover.stopped(exams, x))
+    return not _cover.stopped(_exams()[2], x)
 
 
 def _theirs(ref):
@@ -560,28 +568,24 @@ def _theirs(ref):
     return got if got is not None and got[2].get("relief") == ref["who"] else None
 
 
-def _as_told(ref):
-    """_theirs, as it was approved when the message was made"""
-    got = _theirs(ref)
-    return got if got is not None and got[2]["approved"].get("at") == ref["approved_at"] else None
-
-
 def _relief_true(ref, name):
     """the relief is theirs still, as it was approved when the message was made, and its lesson not stopped"""
-    got = _as_told(ref)
-    return got is not None and _stands_now(got[1])
+    got = _theirs(ref)
+    return got is not None and got[2]["approved"].get("at") == ref["approved_at"] and _stands_now(got[1])
 
 
 def _stopped_true(ref, name):
-    """the relief is theirs still (gone or moved says it when not) and its lesson stopped"""
+    """the relief is theirs still (gone or moved says it when not) and its lesson known to be stopped"""
     got = _theirs(ref)
-    return got is not None and _known_stopped(got[1])
+    return got is not None and bool(_cover.stopped(_exams()[2], got[1]))
 
 
 def _again_true(ref, name):
-    """the relief is theirs still, as it was approved when they were told of it, and its lesson not stopped"""
-    got = _as_told(ref)
-    return got is not None and not _known_stopped(got[1])
+    """the relief is theirs still, its lesson known not to be stopped, and on again (_on_again)"""
+    got = _theirs(ref)
+    if got is None: return False
+    pub, cal, exams = _exams()
+    return exams is not None and not _cover.stopped(exams, got[1]) and _on_again(pub, cal, ref, *got)
 
 
 def _ended_true(ref, name):
