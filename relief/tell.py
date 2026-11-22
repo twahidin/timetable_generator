@@ -12,7 +12,8 @@ that is not approved to them any more, from what that message's ref holds: the c
 kept:{id}:{ckey}:{when} to the teacher who asked to change; ask:{id}:{ckey}:{change.at}:{name} to each of the team with the
 new pick, or two minutes after the request without one, and then askpick:… once when a pick (another than the ask carried)
 is in; planned:{id} and remind:{id} to the absent teacher; officer:{id} to the reporting officer; cancelled:{id}:{name} to the
-team and the planner, never to who cancelled.
+team, the planner, and the absent teacher and the officer who were told of the absence (planned or officer sent or unsure),
+never to who cancelled.
 
 Only people who can be reached are told. planned, officer, kept and cancelled are for what was done since the bot was
 connected; nothing is said of a lesson that is over or an absence that is past. No message carries the typed reason, the
@@ -44,7 +45,8 @@ NO_WORK = "No work set yet: look in Reliefs I'm covering."
 NOBODY_ELSE = "Nobody else is free then: choose someone in the app."
 NO_PICK = "No new pick yet: open the app."
 ACK, CHANGE, SET_WORK, NOT_NEEDED, OPEN = "✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"
-TOLD = ("relief:", "gone:", "moved:", "ask:")   # the keys due must know of
+TOLD = ("relief:", "gone:", "moved:", "ask:", "planned:", "officer:")    # the keys due must know of
+SENT = ("sent", "unsure")                       # the states in which a person was told, or may have been
 _going = threading.Lock()                       # one sweep at a time
 _asked, _asked_lock = [False], threading.Lock() # a sweep soon() asked for has not started
 _log = logging.getLogger("relief.telegram")
@@ -186,7 +188,7 @@ def _ended(w):
     last = {}
     for key, t in w.told.items():
         ref = t.get("ref")
-        if t["state"] not in ("sent", "unsure") or not _base(key, ref) or ref.get("who") not in w.reach: continue
+        if t["state"] not in SENT or not _base(key, ref) or ref.get("who") not in w.reach: continue
         ends, at = _time(ref.get("ends")), _time(ref["approved_at"])
         if ends is None or ends <= w.now or at is None: continue
         cover = (ref["who"], ref["absent"], ref["ckey"])
@@ -218,7 +220,9 @@ def _since(w, v):
 def _cancelled(w, r):
     gone = r["cancelled"]
     if not _since(w, gone.get("at")): return []
-    names = set(w.team) | ({r.get("by")} if r.get("how") == "planned" and r.get("by") in w.reach else set())
+    told = [w.told.get(f"{kind}:{r['id']}") for kind in ("planned", "officer")]
+    names = [r.get("by")] if r.get("how") == "planned" else []
+    names = set(w.team) | {n for n in names + [t["name"] for t in told if t and t["state"] in SENT] if n in w.reach}
     text = cancelled_text(gone.get("by"), r["teacher"], words.days(r))
     return [_item(f"cancelled:{r['id']}:{n}", n, "cancelled", text, ref=dict(id=r["id"])) for n in sorted(names - {gone.get("by")})]
 
@@ -412,16 +416,27 @@ def _read(id):
     return r
 
 
-def _relief_true(ref):
-    """the relief is approved to that person still, as it was when the message was made, and its lesson is not over"""
-    if _time(ref["ends"]) <= _fill._when(None): return False
+def _theirs(ref):
+    """the cover of the relief a message was about, when it is approved to that person now, else None"""
     own = _read(ref["id"])
     got = _holder([own] if own else [], ref)
     if got is None:
         records, whole = _records()
         got = _holder(records, ref)
         if got is None and not whole: raise ValueError("an absence could not be read")    # the cover may be in that one
-    return got is not None and got[1].get("relief") == ref["who"] and got[1]["approved"].get("at") == ref["approved_at"]
+    return got[1] if got and got[1].get("relief") == ref["who"] else None
+
+
+def _relief_true(ref):
+    """the relief is theirs still, as it was approved when the message was made, and its lesson is not over"""
+    if _time(ref["ends"]) <= _fill._when(None): return False
+    c = _theirs(ref)
+    return c is not None and c["approved"].get("at") == ref["approved_at"]
+
+
+def _ended_true(ref):
+    """gone or moved: the relief is not theirs again (a message that waited goes after the one that says it is)"""
+    return _theirs(ref) is None
 
 
 def _absence_true(ref, acknowledged_too=True):
@@ -440,9 +455,9 @@ def _ask_true(ref):
     return _cover.state(r, x, c) == "change" and c["change"].get("at") == ref["at"]
 
 
-# what is asked of a queued message, by its kind, before it goes: CHECK(its ref) -> bool. A kind not here is always true (gone,
-# moved, kept, cancelled; report, clear and weekly put their own here)
-CHECKS = dict(relief=_relief_true, planned=_absence_true, remind=_absence_true, officer=lambda ref: _absence_true(ref, False), ask=_ask_true, askpick=_ask_true)
+# what is asked of a queued message, by its kind, before it goes: CHECK(its ref) -> bool. A kind not here is always true (kept,
+# cancelled; report, clear and weekly put their own here)
+CHECKS = dict(relief=_relief_true, gone=_ended_true, moved=_ended_true, planned=_absence_true, remind=_absence_true, officer=lambda ref: _absence_true(ref, False), ask=_ask_true, askpick=_ask_true)
 
 
 def still_true(item):

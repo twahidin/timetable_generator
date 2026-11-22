@@ -2155,7 +2155,7 @@ def the_module_stands_alone():
     p = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=dict(os.environ, DATA_DIR=tempfile.mkdtemp()), capture_output=True, text=True)
     assert p.stdout.strip() == "[] True False", (p.stdout, p.stderr[-400:])
     assert OB.VALID is TE.still_true and TE.still_true(dict(key="any")) is True and TE.still_true(dict(key="x", kind="exam-duty", ref=None)) is True
-    assert {"relief", "planned", "remind", "officer", "ask", "askpick"} == set(TE.CHECKS), "report, clear and weekly (Tasks 6 and 7) are added here"
+    assert {"relief", "gone", "moved", "planned", "remind", "officer", "ask", "askpick"} == set(TE.CHECKS), "report, clear and weekly (Tasks 6 and 7) are added here"
 
 # ---- the hooks: fill.AFTER, tell.soon, and who asks for a sweep
 @t
@@ -2436,6 +2436,44 @@ def the_same_person_again_is_neither_moved_nor_gone():
         absences.cancel(k, "Better", HUGO); at("10:10"); swept(); swept(); assert len(said(SAM)) == n + 2 and said(SAM)[-1].startswith("❌ No longer needed: 1A Art P1–P2 (08:00) on Fri 16 Oct")
 
 @t
+def what_waited_is_not_sent_once_the_relief_is_theirs_again():
+    """Telegram is down when gone (or moved) is to go; meanwhile the same person is approved again, and that message goes first"""
+    later = lambda: OB.send_due(now=time.time() + 4000)["sent"]
+    for how in ("gone", "moved"):
+        with school(SAM, MAYA):
+            i = absent(by=HUGO); give(i, K5, SAM); swept(); key = f"{how}:{outs()[0]['key']}"; at("09:10")
+            def end():
+                if how == "gone": absences.not_needed(i, K5, "x", HUGO)
+                else: give(i, K5, MAYA)
+            def back():
+                if how == "gone": absences.needed_again(i, K5, HUGO)
+                give(i, K5, SAM)
+            end(); TE.sweep(); put(key, tries=4, next_at=time.time() + 1800); at("09:20"); back(); swept()
+            assert said(SAM) == [RELIEF_K5] * 2 and state(key) == "queued"
+            later(); assert state(key) == "dropped" and said(SAM) == [RELIEF_K5] * 2 and swept() == 0, "never said after it"
+            at("09:30"); end(); swept(); swept(); assert said(SAM)[2:] == [GONE_K5 if how == "gone" else MOVED_K5], "theirs no more again: said, once"
+            # dropped, and the second approval never went: what was told first still has to be said to have ended
+        with school(SAM, MAYA):
+            i = absent(by=HUGO); give(i, K5, SAM); swept(); key = f"{how}:{outs()[0]['key']}"; at("09:10"); end(); TE.sweep(); put(key, tries=4, next_at=time.time() + 1800)
+            at("09:20"); back(); TE.sweep(); later_key = outs("relief", SAM)[-1]["key"]; put(later_key, next_at=time.time() + 9000); later(); assert state(key) == "dropped" and len(said(SAM)) == 1
+            at("09:30"); end(); swept(); later(); OB.send_due(now=time.time() + 10_000)
+            assert state(later_key) == "dropped" and said(SAM) == [RELIEF_K5, GONE_K5 if how == "gone" else MOVED_K5]
+    for s in ("approved", "acknowledged", "change"):                                       # theirs, in each of the three states, wherever the cover is now
+        with school(SAM):
+            i = absent(by=HUGO); give(i, K5, SAM); swept(); ref = json.loads(outs()[0]["ref"]); at("09:10"); give(i, K5, SAM)
+            if s == "acknowledged": CV.acknowledge(i, K5, SAM)
+            if s == "change": CV.ask_change(i, K5, "x", SAM)
+            assert CV.state(*covered(i, K5)) == s and [TE.still_true(dict(kind=k, ref=ref)) for k in ("gone", "moved")] == [False, False], s
+            assert [TE.still_true(dict(kind=k, ref=dict(ref, who=MAYA))) for k in ("gone", "moved")] == [True, True], "approved to another: said"
+            r = absences.load(i); x = next(x for x in r["lessons"] if x["key"] == K5); r["lessons"].remove(x); absences._save(r); absences._save(dict(r, id="dead00beef", lessons=[x]))
+            assert TE.still_true(dict(kind="gone", ref=ref)) is False, "in another absence of the same teacher"
+            absences.cancel("dead00beef", "x", HUGO); assert TE.still_true(dict(kind="gone", ref=ref)) is True and TE.still_true(dict(kind="moved", ref=ref)) is True
+            j = absent(dates=["2026-10-16"]); p = absences._path(j); open(p, "w", encoding="utf-8").write("{ not json")
+            for k in ("gone", "moved"):
+                try: TE.still_true(dict(kind=k, ref=ref)); raise AssertionError(k)
+                except ValueError: pass                                                    # it may be in the one that cannot be read: it waits
+
+@t
 def two_approvals_in_one_second_tell_both():
     """the same cover approved to Sam, then given to Maya, in the same second: the same approved.at"""
     with school(SAM, MAYA):
@@ -2603,18 +2641,43 @@ def the_officer_message_has_only_the_kind_of_reason():
 def cancel_tells_the_team_the_planner_and_the_told():
     with school(EVE, SAM, MAYA, HUGO, TEAM, LEE, ROSA):
         i = absent(by=HUGO); give(i, K5, SAM); swept(); at("09:10"); absences.cancel(i, "a made-up why", EVE); swept(); swept()
-        assert sorted((r["kind"], r["name"], r["key"]) for r in outs()[3:]) == sorted([("gone", SAM, f"gone:relief:{EVE}:{K5}:2026-10-12T09:00:00+08:00")] + [("cancelled", n, f"cancelled:{i}:{n}") for n in (HUGO, TEAM, LEE)]), outs()[3:]
-        assert said(HUGO) == said(TEAM) == said(LEE) == [CANCELLED_EVE.format(EVE)] and said(SAM) == [RELIEF_K5, GONE_K5] and "made-up why" not in str(rows("outbox"))
+        assert sorted((r["kind"], r["name"], r["key"]) for r in outs()[3:]) == sorted([("gone", SAM, f"gone:relief:{EVE}:{K5}:2026-10-12T09:00:00+08:00")] + [("cancelled", n, f"cancelled:{i}:{n}") for n in (HUGO, TEAM, LEE, ROSA)]), outs()[3:]
+        assert said(HUGO) == said(TEAM) == said(LEE) == [CANCELLED_EVE.format(EVE)] and said(ROSA) == [OFFICER_EVE, CANCELLED_EVE.format(EVE)] and said(EVE) == [PLANNED_EVE] and said(SAM) == [RELIEF_K5, GONE_K5] and "made-up why" not in str(rows("outbox"))
         assert {x["name"] for x in dues(reach={TEAM: 1}, told={})} == {TEAM}, "nobody who cannot be reached"
-    for by, want in ((HUGO, {TEAM, LEE}), (TEAM, {HUGO, LEE})):                            # never the canceller; the absent teacher is not told either
+    for by, want in ((HUGO, {TEAM, LEE, EVE, ROSA}), (TEAM, {HUGO, LEE, EVE, ROSA})):      # never the canceller
         with school(EVE, HUGO, TEAM, LEE, ROSA):
             i = absent(by=HUGO); swept(); absences.cancel(i, "Better", by, team=True); swept(); assert {n for k, n in told_of("cancelled")} == want
     with school(EVE, TEAM, LEE):                                                           # asked by the teacher: there is no planner
         i = absent(); swept(); absences.cancel(i, "Better", TEAM, team=True); swept(); assert told_of("cancelled") == [("cancelled", LEE)]
     with school(TEAM, LEE):                                                                # a team member who is the absent teacher and cancels
         i = absent(teacher=SAM, lessons=[]); absences.cancel(i, "Better", SAM); swept(); assert {n for k, n in told_of("cancelled")} == {TEAM, LEE}
+    with record(EVE, extras=dict(relief=True, exams=None, admin=False)), school(EVE, TEAM):  # told of it, and on the team: one message
+        i = absent(by=HUGO); swept(); absences.cancel(i, "Better", HUGO); swept(); assert sorted(told_of("cancelled")) == [("cancelled", EVE), ("cancelled", TEAM)] and said(EVE) == [PLANNED_EVE, CANCELLED_EVE.format(HUGO)]
     with school(TEAM):                                                                     # long after, to somebody on the team now: nothing about what is past
         i = absent(); absences.cancel(i, "Better", EVE); at("09:00", 14); assert dues() == []
+
+@t
+def cancelled_reaches_whoever_was_told_of_the_absence():
+    """the absent teacher told it was planned, and the reporting officer told of it, hear that it is cancelled by someone else"""
+    for s, told in (("sent", True), ("unsure", True), ("queued", False), ("sending", False), ("failed", False), ("dropped", False)):
+        with school(EVE, ROSA, TEAM):
+            i = absent(by=HUGO); TE.sweep(); [put(f"{k}:{i}", state=s) for k in ("planned", "officer")]; absences.cancel(i, "a made-up why", HUGO)
+            assert {x["name"] for x in dues() if x["kind"] == "cancelled"} == {TEAM} | ({EVE, ROSA} if told else set()), s
+            TE.sweep(); assert {(r["key"], r["text"]) for r in outs("cancelled")} == {(f"cancelled:{i}:{n}", CANCELLED_EVE.format(HUGO)) for n in {TEAM} | ({EVE, ROSA} if told else set())}, s
+    for one, other, n in (("planned", "officer", EVE), ("officer", "planned", ROSA)):      # each by their own message alone
+        with school(EVE, ROSA):
+            i = absent(by=HUGO); TE.sweep(); put(f"{one}:{i}", state="sent"); put(f"{other}:{i}", state="failed"); absences.cancel(i, "x", HUGO); assert [x["name"] for x in dues()] == [n]
+    with school(TEAM):                                                                     # not linked then: never told of it, nor of its end
+        i = absent(by=HUGO); swept(); absences.cancel(i, "x", HUGO); [links.link(n, CHATS[n], None) for n in (EVE, ROSA)]; swept(); assert said(EVE) == said(ROSA) == []
+    with school(EVE, ROSA, TEAM):                                                          # queued and cancelled before it went: neither
+        i = absent(by=HUGO); TE.sweep(); absences.cancel(i, "x", HUGO); send(); swept(); assert said(EVE) == said(ROSA) == [] and said(TEAM) == [CANCELLED_EVE.format(HUGO)]
+    for by in (EVE, ROSA):                                                                 # the canceller never
+        with school(EVE, ROSA):
+            i = absent(by=HUGO); swept(); absences.cancel(i, "x", by, team=True); swept(); assert told_of("cancelled") == [("cancelled", ROSA if by == EVE else EVE)], by
+    with school(EVE, ROSA):                                                                # asked by the teacher, cancelled by the team: the officer alone was told
+        i = absent(); swept(); absences.cancel(i, "x", TEAM, team=True); swept(); assert told_of("cancelled") == [("cancelled", ROSA)] and said(EVE) == []
+        j = absent(dates=["2026-10-16"]); swept(); absences.cancel(j, "x", TEAM, team=True); links.unlink(ROSA); assert dues() == [], "not reached now"
+        links.link(ROSA, CHATS[ROSA], None); at("09:00", 17); assert dues() == [], "past"
 
 @t
 def a_team_member_is_told_by_their_rights_at_that_moment():
@@ -2777,7 +2840,7 @@ def still_true_says_what_may_still_go():
         CV.ask_change(i, K5, "x", SAM); assert TE.still_true(ask) is False, "another request"; CV.keep(i, K5, TEAM)
         give(i, K5, SAM); assert TE.still_true(relief) is False, "approved anew: that message is the one to go"
         absences.cancel(i, "Better", HUGO); assert TE.still_true(officer) is False and TE.still_true(relief) is False
-        for kind in ("gone", "moved", "kept", "cancelled", "report", "clear", "weekly", "anything"): assert TE.still_true(dict(kind=kind, ref=None)) is True, kind
+        for kind in ("kept", "cancelled", "report", "clear", "weekly", "anything"): assert TE.still_true(dict(kind=kind, ref=None)) is True, kind
     with school(EVE, SAM, ROSA, TEAM):
         i = absent(by=HUGO); give(i, K5, SAM); j = absent(dates=["2026-10-16"]); TE.sweep(); CV.ask_change(i, K5, "x", SAM); new_pick(i, K5, MAYA); TE.sweep()
         items = [next(dict(r, ref=json.loads(r["ref"])) for r in outs(k) if json.loads(r["ref"])["id"] == i) for k in ("relief", "planned", "officer", "ask")]; p = absences._path(i); good = open(p, encoding="utf-8").read()
