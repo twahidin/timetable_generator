@@ -190,6 +190,53 @@ def test_counts_follow_the_setup_version():
     ck = draft.checked_in(os.path.join(versions.VDIR, v["id"])); assert (after["critical"], after["warnings"]) == (ck["critical"], ck["warnings"])
     assert c.put("/api/setup", json=rec["spec"]).status_code == 200
 
+def test_opening_the_oldest_automatic_version_keeps_it():
+    save_draft(ROWS); wipe_versions(); ids = []
+    for i in range(10):
+        save_draft(ROWS); ids.append(versions.keep("upload", "T")["id"])
+    save_draft(ROWS); one_fix()   # the draft now matches no version
+    assert len(versions.listing(counts=False)) == 10
+    r = versions.open_version(ids[0], "T")
+    got = [x["id"] for x in versions.listing(counts=False)]
+    assert ids[0] in got and r["kept"]["id"] in got and ids[1] not in got and len(got) == 10, got   # the next oldest went instead
+    assert store.read_json(draft._p("meta.json"))["upload_id"] == r["opened"]["identity"][0] and c.get("/api/draft").get_json()["fixes"] == []
+
+def test_a_broken_version_json_blocks_nothing():
+    save_draft(ROWS); wipe_versions(); good = versions.save("Good", "T")
+    for i, text in enumerate(["", "{not json", "[1, 2]", '{"kind": "saved"}', '{"identity": [1, 2, 3]}', '{"kind": "saved", "identity": "x"}']):
+        d = os.path.join(versions.VDIR, secrets.token_hex(6)); os.makedirs(d)
+        if text: open(os.path.join(d, "version.json"), "w").write(text)
+    os.makedirs(os.path.join(versions.VDIR, secrets.token_hex(6)))   # no version.json at all
+    save_draft(ROWS); k = versions.keep("upload", "T"); assert k is not None
+    ls = versions.listing(); assert [x["id"] for x in ls] == [k["id"], good["id"]]
+    assert draft.summary()["versions"] == len(ls) == len(versions.listing(counts=False)) == 2
+    bad = next(x for x in os.listdir(versions.VDIR) if x not in (k["id"], good["id"]))
+    raises(ValueError, lambda: versions.folder(bad), "There is no such version.")
+    wipe_versions()
+
+def test_a_version_that_cannot_be_read_does_not_hide_the_others():
+    save_draft(ROWS); wipe_versions(); one_fix(); a = versions.save("A", "T"); save_draft(ROWS); b = versions.save("B", "T")
+    open(os.path.join(versions.VDIR, a["id"], "timetable.xlsx"), "wb").write(b"junk")
+    rec = store.setup_record(); spec2 = json.loads(json.dumps(rec["spec"])); spec2["school"]["name"] = "Made-up School"   # a new setup version: every count is redone
+    assert c.put("/api/setup", json=spec2).status_code == 200
+    import contextlib
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err): ls = versions.listing()
+    by = {x["id"]: x for x in ls}; assert set(by) == {a["id"], b["id"]}
+    assert (by[a["id"]]["critical"], by[a["id"]]["warnings"]) == (None, None) and by[a["id"]]["fixes"] == 1
+    ck = draft.checked_in(draft.DIR); assert (by[b["id"]]["critical"], by[b["id"]]["warnings"]) == (ck["critical"], ck["warnings"])
+    assert a["id"] in err.getvalue()
+    # the lock is free while counts are built
+    import threading; seen = []
+    orig = draft.checked_in
+    def spy(folder, rec=None):
+        got = []; t = threading.Thread(target=lambda: got.append(draft._lock.acquire(timeout=2) and (draft._lock.release() or True))); t.start(); t.join(); seen.append(got[0]); return orig(folder, rec)
+    c.put("/api/setup", json=rec["spec"]); draft.checked_in = spy
+    try: versions.listing()
+    finally: draft.checked_in = orig
+    assert seen and all(seen), seen
+    wipe_versions()
+
 def test_bad_ids_are_refused():
     for bad in ("../draft", "zz", "0" * 12, "A" * 12, "", None, "0" * 13):
         raises(ValueError, lambda: versions.folder(bad), "There is no such version.")
