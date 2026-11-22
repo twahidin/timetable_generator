@@ -30,6 +30,7 @@ MON = date(2027, 1, 4)          # Odd Mon
 ISO = MON.isoformat()
 PUB = F.sample_pub()
 M = PUB["model"]
+LS.today = A._exams_today = lambda: date(2026, 12, 1)       # the dates here are made up: the real clock never reaches them
 EXAM, EVENT = "Sec 3 End-of-Year Exam", "Sec 4 Learning Journey"
 AISHA, BEN = "Ms Aisha Rahman", "Mr Ben Ong"
 
