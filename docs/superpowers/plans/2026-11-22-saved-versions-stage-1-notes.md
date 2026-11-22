@@ -16,8 +16,12 @@ The newest setup (the 20 November one) with the newest returned timetable that g
 
 ## Rulings made while building
 
-- Listing counts are computed outside the lock and cached per setup version.
-- `keep()` skips a draft whose identity matches any version.
+- Listing counts are computed outside the lock and cached per setup version and per newest change to the checking modules.
+- `keep()` skips a draft whose identity matches any version. The identity is the upload id, the number of fixes and a hash of every fix and answer (not the newest fix's time, which is only to the minute): a copy too many is kept rather than one too few. A draft with no upload id is always kept.
+- `draft._finish` writes nothing when the draft on disk is no longer the one its answer was built from.
+- A swap that fails puts the draft back; a copy that fails leaves no ".new" folder behind.
+- A line of Compare names the class ("3B Mathematics: Mon 3 → Mon 6") or the group ("Mathematics (3MA1): …"); a line is said once.
+- The version count is `versions` at the top of `/api/status`, not inside the draft, so it is there without a draft.
 - A version that cannot be read is never opened (the draft stays).
 - A malformed version.json is skipped everywhere.
 - `published_counts` degrades to an error figure instead of breaking the list, and caches by published stamp and setup version but never an error.
@@ -35,12 +39,10 @@ Not checked: the operating system's file picker and a real drag from the desktop
 
 ## Deferred small points
 
-- A ".new" folder is left behind by a failed keep.
 - A malformed version folder cannot be deleted through the app.
 - Tests still send replace=1.
 - Some colours are hard-coded in compare.html.
 - The default-name test for Compare is weak.
-- The same timetable is loaded up to three times per Compare request.
 - The 409 no-setup path of the new routes is untested.
 - Numeric fields are unescaped in the pop-out.
 - `_involves` repeats `compare.week`'s rule.
