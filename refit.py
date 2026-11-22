@@ -65,10 +65,10 @@ def _teachers(m, spec, ks, e, rows, text):
     have = {t for x in rows for t in x["teachers"]}; want = set(e["teachers"])
     if not want: return [], text   # nobody on step 5 for the key: the warning's own words
     gone, new = have - want, want - have
-    one = len(gone) == 1 and len(new) == 1
-    alike = all(set(x["teachers"]) == set(rows[0]["teachers"]) for x in rows)
-    if not one: return [], ONE_SIDED if len(gone) + len(new) == 1 else NOT_ONE
+    alike = all(set(x["teachers"]) == set(rows[0]["teachers"]) for x in rows); sided = len(gone) + len(new) == 1
+    if not sided and not (len(gone) == 1 and len(new) == 1): return [], NOT_ONE
     if not alike: return [], SPLIT
+    if sided: return [], ONE_SIDED
     known = {t.get("name") for t in spec.get("teachers") or [] if isinstance(t, dict)}
     if not new <= known: return [], f"{next(iter(new))} is not on the setup's list of teachers."
     g, n = next(iter(gone)), next(iter(new))
@@ -92,13 +92,15 @@ def _meets(rows, d, p, n):
     return {x["id"] for x in rows if x["d"] == d and x["p"] < p + n and p < x["p"] + x["n"]}
 
 def _taken(m, spec, days, pool, ks, n, slots, c, held, own):
-    """adds at places (slots, in their order) that are refused only for lessons there that a search may move (not a band, not in held): at most
+    """adds at places (slots, in their order, those that meet a lesson of the key last) that are refused only for lessons there that a search may move (not a band, not in held): at most
     TAKEN_SLOTS, each one the judge lets the add have, in the room add_room gives it then, with those lessons off the timetable. A lesson of the
     key itself (own: their rows) may be one of those there, when the place is not all inside it (that lesson would only be put elsewhere, and the
     place take the turn of another); a place that meets a lesson of the key which is not in the way of the add is left out"""
     out, b = [], c["busy"]
-    for s in slots:
+    for s in sorted(slots, key=lambda s: bool(_meets(own, s["d"], s["p"], n))):
+
         if len(out) == TAKEN_SLOTS: break
+
         if s["state"] != "no" or any(x["d"] == s["d"] and x["p"] <= s["p"] and s["p"] + n <= x["p"] + x["n"] for x in own): continue
         f = dict(kind="add", key=ks, d=s["d"], p=s["p"], n=n, room=""); row, there = [], set(); fixes.apply_one(row, f, spec, days, new_id=c["next_id"])
         while (y := b.blocker(row, s["d"], s["p"], n, ignore=there)) is not None: there.add(y)

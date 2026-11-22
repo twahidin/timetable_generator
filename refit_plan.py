@@ -16,19 +16,27 @@ def _again(w): return bool(re.fullmatch(r"typed:\d+:again(#\d+)?", w["key"]))
 
 def _mistakes(m, ws):
     """the critical mistakes of a list of step 8's, as a set that tells what is new: two lessons at once (of a teacher, of a class, in a room) once for
-    every period it names, (its kind, who, day, period), so a line that comes in two is the same; any other by its key"""
+    every period it names, (its kind, who, day, period), so a line that comes in two is the same; a lesson out of lesson time by its key and the lesson
+    (two in one place read the same); any other by its key"""
     out = set()
     for w in ws:
         if not w.get("crit"): continue
         if w["crit"] == "room": who, cells = refit._room_clash(m, w) or (None, None)
         else: who = helper._clash_who(w)[0] if w["crit"] in ("teacher", "class") else None; cells = helper._clash_slots(m, w, who) if who else None
-        out |= {(w["crit"], who, d, q) for d, q in cells} if cells else {(w["crit"], helper._base(w["key"]))}
+        wh = w.get("where") or {}; which = (wh.get("id"), wh.get("row")) if w["crit"] == "break" else ()
+        out |= {(w["crit"], who, d, q) for d, q in cells} if cells else {(w["crit"], helper._base(w["key"]), *which)}
     return out
+
+def _subject(w): return fixes._subject(dict(w, key=helper._base(w["key"])))   # what a rule's warning is about, as the judge counts it
+
+def _musts(ws):
+    """the Must rules a list of step 8's says are broken, answered or not, as a set that tells what is new: each by what it is about"""
+    return {_subject(w) for w in ws if w["kind"] == "rule" and w["strength"] == "Must"}
 
 def _wishes(ws):
     """the open Prefer warnings of a list of step 8's ("No room" and the typed rules to check again aside), as a set that tells what is new: a rule's
     by what it is about, as the judge counts them, any other by its key"""
-    return {fixes._subject(dict(w, key=helper._base(w["key"]))) if w["kind"] == "rule" else helper._base(w["key"])
+    return {_subject(w) if w["kind"] == "rule" else helper._base(w["key"])
             for w in ws if not w["decision"] and w["strength"] == "Prefer" and not w["key"].startswith("room:none:") and not _again(w)}
 
 def _on(w, ws):
@@ -158,8 +166,8 @@ class _Plan:
         return draft.listed(dict(self.now, checks=dict(checks, problems=problems, ok=not problems)), dict(self.fx, touched=set(self.fx["touched"]) | self.touched(), was=was), self.decisions)
 
     def _new(self, before, after):
-        """whether the second of two lists of step 8's has a mistake or a wish that the first has not"""
-        return bool(_mistakes(self.m, after["warnings"]) - _mistakes(self.m, before["warnings"]) or _wishes(after["warnings"]) - _wishes(before["warnings"]))
+        """whether the second of two lists of step 8's has a mistake, a broken Must rule or a wish that the first has not"""
+        a, b = before["warnings"], after["warnings"]; return bool(_mistakes(self.m, b) - _mistakes(self.m, a) or _musts(b) - _musts(a) or _wishes(b) - _wishes(a))
 
     def _accepted(self, m, got):
         """whether the judge has every fix of an answer, in order, on the timetable m"""
@@ -171,7 +179,7 @@ class _Plan:
 
     def _at_fault(self, before, after):
         """the solved targets whose answer the judge has not on the timetable the earlier ones leave, or that are open at the end; and None, when the list
-        as a whole has a mistake or a wish that was not there before. Empty: the list is one to offer"""
+        as a whole has a mistake, a broken Must rule or a wish that was not there before. Empty: the list is one to offer"""
         if not self.solved: return set()
         bad, m = {None} if self._new(before, after) else set(), self.m
         for i, got, r in self.solved:
@@ -180,8 +188,9 @@ class _Plan:
         return bad
 
     def _sift(self, bad, before):
-        """go through the answers once, in their order, and keep those that are accepted, settle their target and bring no mistake and no wish, each on what
-        the ones kept before it leave. One that does not needs you; those not gone through in SIFT_S seconds were not looked at in time"""
+        """go through the answers once, in their order, and keep those that are accepted, settle their target and bring no mistake, no broken Must rule and no wish, each on what
+        the ones kept before it leave.
+ One that does not needs you; those not gone through in SIFT_S seconds were not looked at in time"""
         end, old, last = time.monotonic() + SIFT_S, self.solved, before; self._start()
         for i, got, _ in old:
             if time.monotonic() >= end: self.why[i] = refit.LATE; continue

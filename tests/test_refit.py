@@ -195,6 +195,8 @@ def test_split_lessons_need_you():
     assert refit.direct(m, spec, days, target("teachers", KEY), pool) == ([], refit.SPLIT)
     step5_row(spec)["teachers"] = [TEACHERS[1]]   # both a split and more than one change: NOT_ONE wins
     assert refit.direct(m, spec, days, target("teachers", KEY), pool) == ([], refit.NOT_ONE)
+    for names in ([TEACHERS[0]], [TEACHERS[0], TEACHERS[2], TEACHERS[1]]):   # a split where one is only taken off or added: that its lessons have different teachers comes first
+        step5_row(spec)["teachers"] = names; assert refit.direct(m, spec, days, target("teachers", KEY), pool) == ([], refit.SPLIT), names
 
 def test_a_teacher_not_on_the_list_needs_you():
     m, spec, days, pool = world(ROWS)
@@ -919,9 +921,14 @@ def test_an_add_takes_the_place_of_a_lesson_of_its_key_that_can_move():
     double = one(1, 0, 6, CLS_B, EL, T0, n=2); m, spec, days, pool, ts = case([double] + bands(0, 5, 6, 7, 8) + [x for d in range(1, 5) for x in bands(d)], need(4)); t = ts[part]
     assert refit.direct(m, spec, days, t, pool) == ([[add(0, 5)], [add(0, 7)]], None)   # over half of it, and not just where it is
     got, _ = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=7), add(0, 5)] and got["moved"] == {1}, got
-    others = [one(100 * d + p + 10, d, p, CLS_B, "Mathematics", T2) for d in range(5) for p in OPEN if not (d == 0 and p in (5, 6, 7, 8))]; m, spec, days, pool, ts = case([double] + others, need(4)); t = ts[part]   # among places of other lessons it has its turn in direct's order
-    assert [(c[0]["d"], c[0]["p"]) for c in refit.direct(m, spec, days, t, pool)[0]] == [(0, 1), (0, 2), (0, 5), (0, 7), (0, 8), (0, 9)]
-    got, _ = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=7), add(0, 5)], got
+    others = [one(100 * d + p + 10, d, p, CLS_B, "Mathematics", T2) for d in range(5) for p in OPEN if not (d == 0 and p in (5, 6, 7, 8))]; m, spec, days, pool, ts = case([double] + others, need(4)); t = ts[part]   # among places of other lessons it comes last
+    assert [(c[0]["d"], c[0]["p"]) for c in refit.direct(m, spec, days, t, pool)[0]] == [(0, 1), (0, 2), (0, 8), (0, 9), (1, 1), (1, 2)]
+    got, _ = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="move", id=19, d=0, p=5), add(0, 8)], got
+    m, spec, days, pool, ts = case([double] + [x for x in others if x["p"] in (1, 2, 3) and x["day"] == DAYS[0]] + bands(0, 1, 2, 3, 5, 6, 7, 8) + [x for d in range(1, 5) for x in bands(d)], need(4)); assert [(c[0]["d"], c[0]["p"]) for c in refit.direct(m, spec, days, ts[part], pool)[0]] == [(0, 1), (0, 2), (0, 5), (0, 7)]   # (it is one of them still)
+    # six doubles that can go nowhere, whose eight places come first in direct's order: the place that helps has a turn all the same
+    six = [one(1 + 3 * d + i, d, p, CLS_B, EL, T0, n=2) for d in (0, 1) for i, p in enumerate((1, 5, 8))]; maths = [one(100 * d + p + 10, d, p, CLS_B, "Mathematics", T2) for d, ps in ((0, (3, 7, 10)), (1, (3, 7, 10)), (4, OPEN[2:])) for p in ps]
+    m, spec, days, pool, ts = case(six + maths + bands(2) + bands(3) + [band(9, 4, 1, CLS, T0)], need(14)); got, _ = solved(m, spec, days, ts[part], pool); assert got["fixes"] == [dict(kind="move", id=413, d=4, p=1), add(4, 2)], got
+
     # nor is a place inside a longer lesson of the key tried for a shorter one: it would take the turn of another lesson's
     rows = [one(1, 0, 1, CLS_B, EL, T0, n=2), band(9, 0, 10, CLS, T0)] + [one(100 * d + p + 10, d, p, CLS_B, "Mathematics", T2) for d in range(5) for p in OPEN if not (d == 0 and p in (1, 2, 10))]
     m, spec, days, pool, ts = case(rows, need(3)); t = ts[part]; assert [(c[0]["d"], c[0]["p"], c[0]["n"]) for c in refit.direct(m, spec, days, t, pool)[0]] == [(0, p, 1) for p in (3, 5, 6, 7, 8, 9)]
@@ -1099,7 +1106,8 @@ TIMES = (refit.BUDGET_S, refit_plan.LOOK_S, refit_plan.SIFT_S); refit.BUDGET_S =
 def ready(rows, change=None, rules=(), report=(), lifted=()):
     """what plan is given for a timetable of these rows (see case), with no edit made yet: (m, rec, fx); lifted: the ids of lessons that wait in Not placed"""
     m, spec, *_ = case(rows, change, rules, report); pool = [x for x in m["lessons"] if x["id"] in lifted]
-    m.update(lessons=[x for x in m["lessons"] if x["id"] not in lifted], pool=pool, draft_meta={}); return m, dict(v=1, spec=spec), dict(texts=[], problems=[], touched=set(), was=[], pool=pool)
+    m.update(lessons=[x for x in m["lessons"] if x["id"] not in lifted], pool=pool, draft_meta={}); m["checks"] = export.check_model(m)   # (one that waits is in no clash)
+    return m, dict(v=1, spec=spec), dict(texts=[], problems=[], touched=set(), was=[], pool=pool)
 
 def said(m, fx, *starts, decisions=None):
     """the warnings step 8 lists of this timetable, with these answers; only those whose key starts so, when any start is given"""
@@ -1218,7 +1226,10 @@ def test_one_settled_by_the_changes_of_another():
     p = planned(given, extra, "rule:"); assert keys(p) == [extra] and len(p["also"]) == 1 and p["also"][0].startswith("Rule Teacher"), p
 
 def test_a_lesson_not_placed_and_two_bands_at_once_need_you():
+    two = [one(1, 0, 1), one(6, 0, 1, CLS_B, "Other", T0)]; clash = lambda given: [w["crit"] for w in said(given[0], given[2], "clash:") if w["crit"]]; assert clash(ready(two)) == ["teacher"] and clash(ready(two, lifted={6})) == ["notplaced"]   # one that waits is in no clash
+
     given = ready([one(1, 0, 1), one(6, 2, 1, "1C", "Other", T2)], gives(T1), lifted={6}); m, rec, fx = given; p = planned(given, TEACH, "clash:notplaced:")   # no list places a lesson
+
     assert keys(p) == [TEACH] and p["also"] == [] and needs(p) == {"clash:notplaced:6": "That lesson is not placed. Place it first."}, p
     assert fixes.judge(m, m["checked_setup"], m["days"], dict(kind="move", id=6, d=2, p=2), pool=m["pool"])["why"] == refit.NOT_PLACED   # the judge's own words
     t = next(t for t in refit.targets(said(m, fx, "clash:notplaced:"))); got, stats = hunt(m, m["checked_setup"], m["days"], t, m["pool"]); assert got is None and stats == dict(nodes=0, reason=refit.NOT_PLACED, late=False), (got, stats)
@@ -1515,6 +1526,18 @@ def test_only_the_answer_at_fault_is_given_up():
         with swapped(listing(mine, k, "deployment", "x")): given_up(refit_plan.plan(*given, {}, ws))   # one that step 8 lists still
         for crit in ("room", "break"):
             with swapped(listing(mine, "clash:made up", "clash", "x", crit=crit)): given_up(refit_plan.plan(*given, {}, ws))   # a new mistake
+        for answers in ({}, {"rule:0:x": dict(answer="step5")}):
+            with swapped(listing(mine, "rule:0:x", "rule", "x")): given_up(refit_plan.plan(*given, answers, ws))   # a Must rule broken anew, answered or not (as the judge has it)
+        with swapped(listing(lambda made: True, "rule:0:x", "rule", "x")):
+            with swapped(listing(mine, "rule:0:x#2", "rule", "x")): assert keys(refit_plan.plan(*given, {}, ws)) == list(ABC)   # one that is there before, and a second line of it
+        at_ = lambda i, p: dict(cls=CLS, day=DAYS[0], period=p, id=i, row=ENTIRE)
+        with swapped(listing(lambda made: k not in made, "rule:0:a|1", "rule", "x", where=at_(1, 1))):   # by the rule and the lesson, wherever that is: the same as before
+            with swapped(listing(mine, "rule:0:a|2", "rule", "x", where=at_(1, 2))): assert keys(refit_plan.plan(*given, {}, ws)) == list(ABC)
+            with swapped(listing(mine, "rule:0:a|2", "rule", "x", where=at_(5, 2))): given_up(refit_plan.plan(*given, {}, ws))
+            with swapped(listing(mine, "rule:1:a|2", "rule", "x", where=at_(1, 2))): given_up(refit_plan.plan(*given, {}, ws))
+        with swapped(listing(lambda made: k not in made, "clash:made up", "clash", "x", crit="break", where=at_(1, 0))):   # a lesson in a break: another in its place reads the same and is new
+            with swapped(listing(mine, "clash:made up", "clash", "x", crit="break", where=at_(5, 0))): given_up(refit_plan.plan(*given, {}, ws))
+            with swapped(listing(mine, "clash:made up", "clash", "x", crit="break", where=at_(1, 0))): assert keys(refit_plan.plan(*given, {}, ws)) == list(ABC)
         for x in (("rule:0:x", "rule", "x"), ("bands:beside:x", "clash", "x"), ("typed:1:none", "typed", "x")):
             with swapped(listing(mine, *x, strength="Prefer")): given_up(refit_plan.plan(*given, {}, ws))   # a new wish
         for x, strength in ((("clash:made up", "clash", "x"), "Must"), (("room:none:5:x", "room", "x"), "Prefer"), (("typed:1:again", "typed", "x"), "Prefer"), (("typed:12:again#2", "typed", "x"), "Prefer")):
@@ -1523,6 +1546,13 @@ def test_only_the_answer_at_fault_is_given_up():
         with swapped(listing(lambda made: True, "rule:0:x", "rule", "x", strength="Prefer")): assert keys(refit_plan.plan(*given, {}, ws)) == list(ABC)   # nor one that is there before
         with swapped(listing(lambda made: True, "rule:0:x", "rule", "x", strength="Prefer")):
             with swapped(listing(mine, "rule:0:x#2", "rule", "x", strength="Prefer")): assert keys(refit_plan.plan(*given, {}, ws)) == list(ABC)   # a second line of what is there before is none
+
+def test_a_must_rule_broken_anew_is_never_offered():
+    blind = lambda *a, **k: dict(state="ok", why="", must=[], prefer=[]); not_then = dict(scope="Class", target=CLS, rule="Not in periods", week="Both", day="All", strength="Must", **{"from": 1, "to": 1})
+    def offered(*rules): given = ready([one(1, 0, 1)], gives(T1), rules=rules); p = refit_plan.plan(*given, {}, said(given[0], given[2], TEACH)); return p["fixes"], needs(p)
+    with swapped((fixes, "judge", blind)):   # the judge made blind: the check of the whole list sees that T1 is not there then
+        assert offered(AWAY(T1, 0, 1, 1)) == offered(AWAY(T1, 0, 1, 1), not_then) == ([], {TEACH: refit.NO_FIT})
+        assert offered(not_then) == offered(AWAY(T0, 0, 1, 1)) == ([GIVE], {})   # a rule the lesson breaks as it is is no reason
 
 def test_a_mistake_brought_is_not_made_good_by_one_settled():
     rows = [one(1, 0, 1), one(2, 2, 1, "1C", EL, T2), one(3, 2, 1, "1B", EL, T2)]; given = ready(rows, both(gives(T1), gives(T2, f"C:1C:{EL}"))); m, rec, fx = given; clash = "clash:Teacher double-booked: "
@@ -1541,7 +1571,9 @@ def test_what_is_new_on_a_list_is_told():
     for kind, who, long_, short_ in (("teacher", T0, one(1, 1, 1, CLS, "Mathematics", T0, n=3), [one(2 + i, 1, 1 + i, cls, EL, T0) for i, (cls, _) in enumerate(late)]), ("class", CLS, one(1, 1, 1, CLS, "Mathematics", T0, n=3), [one(2 + i, 1, 1 + i, CLS, EL, t) for i, (_, t) in enumerate(late)]),
                                      ("room", "1-01", one(1, 1, 1, CLS, "Mathematics", T0, n=3, room="1-01"), [one(2 + i, 1, 1 + i, cls, EL, t, room="1-01") for i, (cls, t) in enumerate(late)])):
         assert crit(long_, *short_) == cells(kind, who, 1, 2, 3) and crit(long_, short_[0], short_[2]) == cells(kind, who, 1, 3), (kind, crit(long_, *short_))
-    assert crit(dict(one(1, 1, 1), teachers=[])) == {("noteacher", f"clash:noteacher:1:{ENTIRE}")}; two = crit(one(1, 0, 0), one(2, 0, 0, CLS_B, EL, T1)); assert len(two) == 1 and next(iter(two))[0] == "break" and "#" not in next(iter(two))[1]   # any other by its key, without its number
+    assert crit(dict(one(1, 1, 1), teachers=[])) == {("noteacher", f"clash:noteacher:1:{ENTIRE}")}   # any other by its key, without its number
+    first, second = [crit(one(1, 0, p), one(2, 0, 1 - p, CLS_B, EL, T1)) for p in (0, 1)]; two = crit(one(1, 0, 0), one(2, 0, 0, CLS_B, EL, T1)); assert len(first) == len(second) == 1 and first != second and two == first | second and {x[0] for x in two} == {"break"}, (first, second, two)   # one in a break by its lesson too: a new one that reads the same as one that is gone is new
+    assert all("#" not in x[1] for x in two) and {x[2:] for x in two} == {(1, ENTIRE), (2, ENTIRE)}, two
     double = lambda s: s["school"].update(extra_settings=list(s["school"].get("extra_settings") or []) + [["Teachers may take two lessons at once on", DAYS[1]]]); assert crit(one(1, 1, 1), one(2, 1, 1, CLS_B), change=double) == set()   # what is no mistake is none
     w = lambda key, kind="rule", strength="Prefer", decision=None, **k: dict(verify.warning(key, kind, "x", strength=strength, **k), decision=decision); at_ = lambda i, p_: dict(cls=CLS, day=DAYS[0], period=p_, id=i, row=ENTIRE); wishes = refit_plan._wishes
     assert wishes([w("rule:r1:a|0|1", where=at_(1, 1))]) == wishes([w("rule:r1:a|0|5#2", where=at_(1, 5))]) != wishes([w("rule:r1:a|0|1", where=at_(2, 1))]) and wishes([w("rule:r1:a|0|1", where=at_(1, 1))]) != wishes([w("rule:r2:a|0|1", where=at_(1, 1))])   # a rule and a lesson, wherever it is
