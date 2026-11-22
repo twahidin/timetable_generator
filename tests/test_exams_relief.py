@@ -2079,28 +2079,30 @@ def a_new_teacher_in_charge_takes_the_events_backups():
     _fresh()
     with published(PUB):
         c = committee()
-        ev = SC.new_event(EVENT, ["Sec 4"], [], ISO, ISO, GRACE, GRACE)
+        ev = SC.new_event(EVENT, ["Sec 4"], [], ISO, ISO, BEN, BEN)
         ev["days"] = {ISO: dict(levels=["Sec 4"], whole=False, **{"from": "07:40", "to": "09:00"})}
         ev["going"] = [AISHA]
-        id = SC.save(ev, PUB, CAL, GRACE)["id"]
+        id = SC.save(ev, PUB, CAL, BEN)["id"]
         _send_approve(c, id, "/api/events")
         b = _backups(id)[0]
         key = b["lessons"][0]["key"]
         CV.change(b["id"], key, HAFIZ, GRACE, PUB, ST, links=_links())
         AB.acknowledge(b["id"], AISHA)
-        assert b["by"] == GRACE and _links().duties(AISHA, MON)[0]["replaces"] == GRACE + ", the teacher in charge"
+        assert b["by"] == BEN and _links().duties(AISHA, MON)[0]["replaces"] == BEN + ", the teacher in charge"
+        d, was = staff(DANIEL), staff(BEN)
+        assert was.get(f"/api/relief/absences/{b['id']}").status_code == 200 and d.get(f"/api/relief/absences/{b['id']}").status_code == 403
         ok(c.post(f"/api/events/{id}/in-charge", json=dict(name=DANIEL)))
         now = _backups(id)
         assert [(r["id"], r["by"], [x["key"] for x in r["lessons"]], bool(r["acknowledged"])) for r in now] == [(b["id"], DANIEL, [key], True)], now
         assert CV.state(*_cov(b["id"], key)) == "approved", "what relief did on it stays"
         assert _links().duties(AISHA, MON)[0]["replaces"] == DANIEL + ", the teacher in charge"
-        d, g = staff(DANIEL), staff(CHLOE)
         assert ok(d.get(f"/api/relief/absences/{b['id']}"))["by"] == DANIEL, "the new teacher in charge may open the backup"
+        r = was.get(f"/api/relief/absences/{b['id']}")
+        assert r.status_code == 403 and was.get(f"/api/events/{id}").status_code == 403, "the one before opens neither any more"
         ok(c.post(f"/api/events/{id}/handled", json=dict(teacher=AISHA, key=key, handled=True)))
         assert AB.load(b["id"])["cancelled"]["why"] == "Handled by the teacher in charge."
         ok(d.post(f"/api/events/{id}/handled", json=dict(teacher=AISHA, key=key, handled=False)))
         assert [r["by"] for r in _backups(id)] == [DANIEL], "sent again by the new one"
-        assert g.get(f"/api/events/{id}").status_code == 403
 
 
 _clear()

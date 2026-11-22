@@ -270,9 +270,11 @@
   }
   function paintSave() { const el = $("#saveline"); if (el) el.innerHTML = saveInner(); }
 
-  /* an event's teacher in charge, whom the timetable committee may change: Change beside the name opens a line to pick another */
-  function icButton() {
-    return S.me.can_approve && !S.ic.open ? ` <button type="button" class="small" data-act="icOpen" aria-label="Change the teacher in charge">Change</button>` : "";
+  /* an event's teacher in charge, whom the timetable committee may change: Change beside the name opens a line to pick
+     another. Only the heading is drawn again (paintIc), so nothing typed or opened on the tab below is touched */
+  function icName() {
+    const change = S.me.can_approve && !S.ic.open ? ` <button type="button" class="small" data-act="icOpen" aria-label="Change the teacher in charge">Change</button>` : "";
+    return ` · teacher in charge ${esc(S.sched.in_charge || "")}${change}`;
   }
   function icLine() {
     if (!S.me.can_approve || !S.ic.open) return "";
@@ -282,10 +284,17 @@
       <p class="muted small">At once, with no approval: the new teacher in charge opens and changes the event${now ? `, and ${esc(now)} no longer does` : ""}. Who is going stays as it is.</p>`;
   }
 
+  function paintIc(focus) {
+    const a = $("#icname"), b = $("#icline");
+    if (a) a.innerHTML = icName();
+    if (b) b.innerHTML = icLine();
+    const el = focus ? document.querySelector(focus) : null; if (el) el.focus({ preventScroll: true });
+  }
+
   function render() {
     const s = S.sched;
     $("#main").innerHTML = `<div class="head"><div><h1>${esc(s.name)} <span class="chip ${chipClass({ label: S.label })}" id="statchip">${esc(S.label)}</span></h1>
-      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? " · teacher in charge " + esc(s.in_charge || "") + icButton() : ""}</div>${isEv() ? icLine() : ""}</div>
+      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? `<span id="icname">${icName()}</span>` : ""}</div>${isEv() ? `<div id="icline">${icLine()}</div>` : ""}</div>
       <div class="savebar" id="saveline">${saveInner()}</div></div>
       ${onSite() ? `<p class="notice">On the main site. Changes you make here wait for the timetable committee: send them from the Approval tab.</p>` : ""}
       <div class="xtabs" role="tablist">${S.tabs.map(t => `<button type="button" role="tab" class="${t.key === S.tab ? "on" : ""}" aria-selected="${t.key === S.tab}" data-act="tab" data-a="${t.key}">${esc(t.name)}</button>`).join("")}</div>
@@ -1004,12 +1013,19 @@
     await loadEvAway(false); S.aw.say = say; if (S.tab === "egoes") paint();
   }
 
+  /* only the name changes, at the server and here: what is typed meanwhile is left alone, and its save keeps the stored name */
   async function icChange() {
     const name = S.ic.who;
     if (!name || S.busy) return;
-    if (!await approvalAction("in-charge", { name }, `${name} is in charge now.`)) return;
-    S.ic = { open: false, who: "" }; render();
-    const el = document.querySelector('[data-act="icOpen"]'); if (el) el.focus({ preventScroll: true });
+    S.busy = true; S.msg = ""; S.bad = false; paintSave(); paintIc();
+    const r = await api("POST", `${S.base}/${S.id}/in-charge`, { name });
+    S.busy = false;
+    if (r.status === 401 || r.status === 403) return;
+    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paintIc(); return; }
+    S.sched.in_charge = name; if (S.sched.approved) S.sched.approved.in_charge = name;
+    S.ic = { open: false, who: "" }; S.msg = `${name} is in charge now.`;
+    takeReview(r.j); paintSave(); paintIc('[data-act="icOpen"]');
+    refreshView();
   }
 
   function tabEvGoes() {
@@ -1274,8 +1290,8 @@
       if (act === "dutyDel") { edit(() => { s.duties.splice(Number(a), 1); }, true); return; }
       if (act === "evReplace") { evReplace(); return; }
       if (act === "icOpen" || act === "icOff") {
-        S.ic = { open: act === "icOpen", who: "" }; render();
-        const el = document.querySelector(S.ic.open ? '[data-ic="who"]' : '[data-act="icOpen"]'); if (el) el.focus({ preventScroll: true });
+        S.ic = { open: act === "icOpen", who: "" };
+        paintIc(S.ic.open ? '[data-ic="who"]' : '[data-act="icOpen"]');
         return;
       }
       if (act === "icGo") { icChange(); return; }
