@@ -6,7 +6,8 @@ run keeps nothing in memory: each run reads the published timetable, the setting
 cover stays open until its pick is saved, so a restart loses nothing (the next run finds every pick still due, and a model
 call cut short is simply made again). Each pick is worked out by pick.choose_for outside absences._LOCK (the model is never
 called while it is held) and saved by cover.set_pick, which checks again under the lock that the cover is still open and
-the person still free: a pick refused there is never saved. One run at a time (_busy). soon() asks for a run from a page,
+the person still free: a pick refused there is never saved. A lesson an approved exam or event stops (exams.relief_links,
+read once a run) is left as it is: neither picked for nor dropped. One run at a time (_busy). soon() asks for a run from a page,
 in a daemon thread (inline when SYNC); start() is the one-minute ticker, which app.py starts only when RELIEF_JOBS=on (the
 Dockerfile sets it; tests and local runs never do). Errors are logged to "relief.fill" by their kind alone, never a
 record's contents."""
@@ -81,14 +82,25 @@ def _ended(x, c, now, bnds):
     return now.hour * 60 + now.minute >= bnds[min(p + n, len(bnds)) - 1][1]
 
 
-def _covers(records, ids, date, now, bnds):
-    """[(record, lesson, cover, cover key)] of every cover whose lesson is not over, of absences not cancelled (of ids, on
-    date, when given), in time order"""
+def _links(pub, cal):
+    """what approved exams and events mean for relief (exams.relief_links), imported here to keep the modules apart; None,
+    with one log line (the kind of error alone), when they cannot be read: the picks go on as if there were none"""
+    try:
+        from exams.relief_links import Links
+        return Links.load(pub, cal)
+    except Exception as e:
+        _log.warning("the exams and events could not be read: %s", type(e).__name__)
+        return None
+
+
+def _covers(records, ids, date, now, bnds, links=None):
+    """[(record, lesson, cover, cover key)] of every cover whose lesson is not over and not stopped, of absences not
+    cancelled (of ids, on date, when given), in time order"""
     rows = []
     for r in records:
         if r.get("cancelled") or (ids is not None and r.get("id") not in ids): continue
         for x in r.get("lessons") or []:
-            if date is not None and x.get("date") != date: continue
+            if (date is not None and x.get("date") != date) or _cover.stopped(links, x): continue
             for i, c in enumerate(_cover.covers(x)):
                 if not _ended(x, c, now, bnds):
                     rows.append(((x["date"], int(c["p"]), r.get("at") or "", r["id"], _cover.cover_key(x, i)), r, x, c))
@@ -116,7 +128,7 @@ def _waits(r, x, c):
     return s == "waiting" or (s == "change" and bool(_cover.new_pick(c)))
 
 
-def _one(pub, settings, id, ckey, call, clock, bnds):
+def _one(pub, settings, id, ckey, call, clock, bnds, links=None):
     """the pick for one cover, from fresh records (so it sees every pick before it), worked out outside the lock and saved
     under it; when the save is refused as no longer free (someone took the cover or the person meanwhile), worked out once
     more from fresh records, then left as it is. -> "picked", "nobody" (nobody free; it stays open) or None"""
@@ -129,12 +141,12 @@ def _one(pub, settings, id, ckey, call, clock, bnds):
         if _cover.state(r, x, c) == "open": into, without = "pick", ()
         elif _asks_change(r, x, c): into, without = "change", (c["relief"],)        # never the teacher who asked
         else: return None
-        try: p = _pick.choose_for(pub, settings, records, r, x, c, call=call, without=without)
+        try: p = _pick.choose_for(pub, settings, records, r, x, c, call=call, without=without, links=links)
         except Exception as e:                  # free_then's own, such as a date no longer a school day: this cover waits
             _log.warning("a pick was not made: %s", type(e).__name__); return None
         if p is None: return "nobody"
         try:
-            _cover.set_pick(id, ckey, p, pub, settings, into=into)
+            _cover.set_pick(id, ckey, p, pub, settings, into=into, links=links)
             return "picked"
         except Exception as e:
             if again or not (isinstance(e, ValueError) and str(e) == _cover.NOT_FREE.format(name=p["who"])):
@@ -149,20 +161,21 @@ def _run(ids, date, call, now):
     model = pub.get("model") or {}
     bnds, days, cal = bounds(model), model.get("days") or [], settings.get("calendar") or {}
     fill_at = (settings.get("times") or {}).get("fill_at")
+    links = _links(pub, cal)
     ids = None if ids is None else {ids} if isinstance(ids, str) else {str(i) for i in ids}
     date = None if date is None else _date(date).isoformat()
     def clock(): return _when(now)              # the time given, else the time now at each step
     # 1. a waiting pick whose person is no longer free goes back to open, and so does the new pick of a request to change
     #    (picked again below), due or not; an approved relief stays (the team changes it)
     records = _absences.all_records()
-    for id, ckey in [(r["id"], k) for r, x, c, k in _covers(records, ids, date, clock(), bnds) if _waits(r, x, c)]:
+    for id, ckey in [(r["id"], k) for r, x, c, k in _covers(records, ids, date, clock(), bnds, links) if _waits(r, x, c)]:
         got = _find(records, id, ckey)
         if got is None or not _waits(*got): continue
         r, x, c = got
         into = "pick" if _cover.state(r, x, c) == "waiting" else "change"
         who = c["relief"] if into == "pick" else _cover.new_pick(c)["who"]
         try:
-            if not _cover.stale(pub, settings, records, r, x, c, into=into): continue
+            if not _cover.stale(pub, settings, records, r, x, c, into=into, links=links): continue
             _cover.drop(id, ckey, _cover.NOT_FREE.format(name=who), who=who, into=into)     # not if a planner chose again meanwhile
         except Exception as e:
             _log.warning("a waiting pick was not checked: %s", type(e).__name__); continue
@@ -173,13 +186,13 @@ def _run(ids, date, call, now):
         if d not in due: due[d] = due_at(cal, days, d, fill_at, today=t.date()) <= t
         return due[d]
     records = _absences.all_records()
-    todo = [(r["id"], k) for r, x, c, k in _covers(records, ids, date, t, bnds)
+    todo = [(r["id"], k) for r, x, c, k in _covers(records, ids, date, t, bnds, links)
             if (_cover.state(r, x, c) == "open" and (ids is not None or date is not None or is_due(x["date"]))) or _asks_change(r, x, c)]
     picked = nobody = 0
     if todo: _picking.set()
     try:
         for id, ckey in todo:
-            got = _one(pub, settings, id, ckey, call, clock, bnds)
+            got = _one(pub, settings, id, ckey, call, clock, bnds, links)
             picked += got == "picked"; nobody += got == "nobody"
     finally: _picking.clear()
     return dict(picked=picked, nobody=nobody)

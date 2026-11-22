@@ -22,10 +22,11 @@ def _overlap(p, n, q, m):
     return p <= q + m - 1 and q <= p + n - 1
 
 
-def relief_periods(records, name, dates, skip=None):
+def relief_periods(records, name, dates, skip=None, links=None):
     """periods of covers (a whole lesson, or each part of a split one by its own n) that book name (cover.booked: its relief,
     or the new pick of a request to change waiting for the team), of lessons still needed, in an absence not cancelled, on
-    one of dates (dates or ISO strings); skip = (absent teacher, cover key) leaves that one cover out"""
+    one of dates (dates or ISO strings); skip = (absent teacher, cover key) leaves that one cover out; with links a lesson
+    an approved exam or event stops (links.stopped) takes nobody's time"""
     want = {_iso(d) for d in dates}
     total = 0
     for r in records:
@@ -33,7 +34,7 @@ def relief_periods(records, name, dates, skip=None):
         for x in r.get("lessons") or []:
             parts = x.get("parts")         # the name first, and cheaply: almost every lesson is ruled out here
             if (x.get("relief") != name and not x.get("change") if not parts else all(c.get("relief") != name and not c.get("change") for c in parts)): continue
-            if not x.get("needed") or _iso(x["date"]) not in want: continue
+            if not x.get("needed") or _iso(x["date"]) not in want or _cover.stopped(links, x): continue
             for i, c in enumerate(_cover.covers(x)):
                 if name not in _cover.booked(c): continue
                 if skip and r.get("teacher") == skip[0] and _cover.cover_key(x, i) == skip[1]: continue
@@ -52,7 +53,7 @@ def week_so_far(pub, cal, records, name, date, skip=None, links=None):
     adds exam duties and event periods and takes off lessons that stop"""
     days = ((pub or {}).get("model") or {}).get("days") or []
     dates = _week_dates(cal, days, date)
-    total = _lessons.teaching_periods(pub, cal, name, date) + relief_periods(records, name, dates, skip)
+    total = _lessons.teaching_periods(pub, cal, name, date) + relief_periods(records, name, dates, skip, links=links)
     return total + links.week_change(name, dates) if links is not None else total
 
 
@@ -76,15 +77,16 @@ def there_then(records, names, date, p, n, links=None):
             and not (links is not None and links.busy(x, iso, int(p), int(n or 1)))]
 
 
-def _chosen_then(records, name, iso, p, n, key, absent):
+def _chosen_then(records, name, iso, p, n, key, absent, links=None):
     """relief already given to name on another cover overlapping this one, or name the new pick of another's request to
-    change (cover.booked); the same cover key of the same absent teacher does not count: a whole lesson's key, or a part's"""
+    change (cover.booked); the same cover key of the same absent teacher does not count: a whole lesson's key, or a part's;
+    nor, with links, a cover of a lesson an approved exam or event stops"""
     for r in records:
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
             parts = x.get("parts")         # the name first, as in relief_periods
             if (x.get("relief") != name and not x.get("change") if not parts else all(c.get("relief") != name and not c.get("change") for c in parts)): continue
-            if not x.get("needed") or _iso(x["date"]) != iso: continue
+            if not x.get("needed") or _iso(x["date"]) != iso or _cover.stopped(links, x): continue
             for i, c in enumerate(_cover.covers(x)):
                 if name not in _cover.booked(c): continue
                 if _cover.cover_key(x, i) == key and r.get("teacher") == absent: continue
@@ -135,7 +137,7 @@ def free_then(pub, settings, records, lesson, absent, links=None):
         why = links.busy(name, date, p, n) if links is not None else ""
         if why:
             busy.append(dict(name=name, why=why)); continue
-        if _absent_then(records, name, iso, p, n) or _chosen_then(records, name, iso, p, n, lesson.get("key"), absent) or name in never: continue
+        if _absent_then(records, name, iso, p, n) or _chosen_then(records, name, iso, p, n, lesson.get("key"), absent, links=links) or name in never: continue
         marks, blocked = [], False
         for r in rules:
             if r.get("rule") == "Not available" and r.get("scope") == "Teacher" and r.get("target") == name and _rule_hits(r, day, p, n):
@@ -145,13 +147,13 @@ def free_then(pub, settings, records, lesson, absent, links=None):
                 if "department meeting time" not in marks: marks.append("department meeting time")
         if blocked: continue
         skip = (absent, lesson.get("key"))
-        today = relief_periods(records, name, {date}, skip=skip)   # this lesson's own periods are added below, not counted twice
+        today = relief_periods(records, name, {date}, skip=skip, links=links)   # this lesson's own periods are added below, not counted twice
         fat = bool(fat_role) and who["role"] == fat_role
         limit = lim.get("fat_per_day") if fat else lim.get("other_per_day")
         over = limit is not None and today + n > limit
         if over: marks.append(f"at {today} relief periods today (the limit is {limit})")
         free.append(dict(name=name, depts=list(who["depts"]), subjects=sorted(taught.get(name, ())), fat=fat,
-                         week=week_so_far(pub, cal, records, name, date, skip=skip, links=links), today=today, term=relief_periods(records, name, term_dates, skip=skip),
+                         week=week_so_far(pub, cal, records, name, date, skip=skip, links=links), today=today, term=relief_periods(records, name, term_dates, skip=skip, links=links),
                          marks=marks, over=over))
     free.sort(key=lambda x: (bool(x["marks"]), x["week"], x["term"], x["name"]))
     titles, buckets = [], {}

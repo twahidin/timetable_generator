@@ -1,6 +1,6 @@
 """Absence records: a teacher's absence (asked by them or planned by someone else), its lessons, work and relief.
 One JSON file each under DATA/relief/absences."""
-import datetime, os, secrets, shutil, threading
+import copy, datetime, os, secrets, shutil, threading
 from zoneinfo import ZoneInfo
 
 import store
@@ -26,6 +26,7 @@ NO_NEED = "This lesson does not need relief."
 APPROVED_ALREADY = "This lesson's relief is approved already: ask the relief team to change it."
 IS_SPLIT = "This lesson is split: the relief team chooses for each part."
 MAX_DATES, MAX_TEXT, MAX_LINK = 10, 2000, 500
+COVER = ("relief", "relief_by", "pick", "approved", "ack", "change", "history", "parts")     # a lesson's cover (relief.cover), moved whole
 
 
 def _path(id):
@@ -233,21 +234,47 @@ def _dates_and_periods(lessons):
             [min(int(x["p"]) for x in lessons), max(int(x["p"]) + int(x.get("n") or 1) - 1 for x in lessons)] if lessons else None)
 
 
+def _move_cover(o, y, r, x):
+    """the cover of the backup o's lesson y becomes that of lesson x of the new absence r: its relief and how far that has
+    gone (COVER), with its history. A planner's choice in r replaces a pick still waiting (written down as dropped; the
+    caller refused one against an approved relief of someone else, or a split lesson); a lesson r says needs no relief ends
+    the cover, as not_needed does"""
+    for c in _cover.covers(y): _cover._settle(o, c)       # a planner's choice gets its pick and history line as o dated it
+    chosen = (x["relief"], x["relief_by"]) if x["needed"] and x.get("relief") and not y.get("approved") else None
+    x.update({k: copy.deepcopy(y[k]) for k in COVER if k in y})
+    if not x["needed"]:
+        why = x.get("not_needed") or {}
+        _cover.clear(r, x, why.get("by") or r["by"], why.get("why"), r["at"])
+    elif chosen:
+        if x.get("relief") and x["relief"] != chosen[0]: _cover._log(x, "dropped", x["relief"], r["by"], r["at"])
+        x.update(_cover.OPEN)
+        x["relief"], x["relief_by"] = chosen
+
+
 def _take_over(records, r):
     """own absence wins (P10): a lesson of the new absence r that is a needed lesson of one of the teacher's backups moves in
-    with its relief (unless r chose one), relief_by and work; the backup drops it, and is cancelled once no lesson is left (a
-    lesson marked not needed stays in it, so the next sync does not send it again). Runs inside _LOCK and never touches the
-    exams lock. -> the backups changed (to save)"""
+    with its whole cover (_move_cover) and its work; the backup drops it, and is cancelled once no lesson is left (a lesson
+    marked not needed stays in it, so the next sync does not send it again). First, before anything is changed, what choose
+    refuses on the backup is refused here too, naming the lesson: a choice for a lesson the relief team has split (IS_SPLIT),
+    or has approved for someone else (APPROVED_ALREADY). Runs inside _LOCK and never touches the exams lock. -> the backups
+    changed (to save)"""
     mine = {x["key"]: x for x in r["lessons"]}
-    changed = []
+    moving = []
     for o in records:
         if o.get("cancelled") or not o.get("exams") or o.get("teacher") != r["teacher"]: continue
         moved = {y["key"]: y for y in o.get("lessons") or [] if isinstance(y, dict) and y.get("needed") and y.get("key") in mine}
-        if not moved: continue
+        if moved: moving.append((o, moved))
+    for o, moved in moving:
         for key, y in moved.items():
             x = mine[key]
-            if x["needed"] and not x.get("relief") and y.get("relief"):
-                x["relief"], x["relief_by"] = y["relief"], y.get("relief_by")
+            if not x["needed"] or not x.get("relief"): continue
+            no = IS_SPLIT if y.get("parts") else APPROVED_ALREADY if y.get("approved") and y.get("relief") != x["relief"] else ""
+            if no: raise ValueError(f"{' and '.join(x['classes'])} {x['subject']}: {no[0].lower()}{no[1:]}")
+    changed = []
+    for o, moved in moving:
+        for key, y in moved.items():
+            x = mine[key]
+            _move_cover(o, y, r, x)
             x["work"] = _moved_work(x["work"], y, o["id"], r["id"])
         o["lessons"] = [y for y in o["lessons"] if not (isinstance(y, dict) and y.get("key") in moved)]
         if any(isinstance(y, dict) for y in o["lessons"]):
@@ -291,8 +318,9 @@ def update_exams(id, keep_keys, add_lessons, by, reason_text, today, why="The du
     later whose key is not in keep_keys goes (a lesson dated before today always stays: it is history and counts in relief's
     periods), add_lessons come in (as from_exams decides; a key it holds already is left), by and reason_text are brought up
     to date (None: as they are), acknowledged is cleared and changed_at stamped when a lesson came in (the person must look
-    again; What's in shows it new), and dates and periods follow the lessons. Cancelled (why) only when no lesson at all is
-    left. today: the caller's (one clock).
+    again; What's in shows it new), and dates and periods follow the lessons. A lesson that goes with a relief or a history has
+    its cover ended first (relief.cover.clear, why) and is kept, without its work, in the record's gone list (gone: dict(at,
+    why)), so its history is not lost. Cancelled (why) only when no lesson at all is left. today: the caller's (one clock).
     -> the record; {} when it is not there; a cancelled one as it is"""
     iso = _free._iso(today)
     keep = set(keep_keys or ())
@@ -310,6 +338,8 @@ def update_exams(id, keep_keys, add_lessons, by, reason_text, today, why="The du
             if y:
                 added.append(y); have.add(y["key"])
         r["lessons"] = kept + added
+        for x in before:
+            if isinstance(x, dict) and x not in kept: _gone(r, x, why)
         if by is not None: r["by"] = by
         if reason_text is not None: r["reason_text"] = reason_text
         if added: r["acknowledged"], r["changed_at"] = None, _now()
@@ -324,6 +354,16 @@ def update_exams(id, keep_keys, add_lessons, by, reason_text, today, why="The du
                 for f in (x.get("work") or {}).get("files") or []:
                     if isinstance(f, dict) and f.get("id") not in still: _files.delete(id, f.get("id"))
     return r
+
+
+def _gone(r, x, why):
+    """lesson x leaving backup r: its cover ends (the relief written down as dropped), and it is kept in r["gone"] when there
+    is anything to keep"""
+    if not isinstance(x.get("parts") or [], list): return
+    now = _now()
+    _cover.clear(r, x, "app", why, now)
+    if not any(c.get("history") for c in [x] + list(x.get("parts") or [])): return
+    r.setdefault("gone", []).append(dict({k: v for k, v in x.items() if k != "work"}, gone=dict(at=now, why=why)))
 
 
 def exams_records(source_id) -> list:

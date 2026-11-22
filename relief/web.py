@@ -75,8 +75,10 @@ OVER_ONLY = "Only teachers over a limit are free then: choose one yourself."   #
 ENTIRE = "Entire Class"
 COLUMNS = ["Date", "Absent", "Class / group", "Periods", "Time", "Relief teacher", "Remarks", "Set by"]
 NOT_CHOSEN = "Not chosen yet"                          # the planned relief sheet's Relief teacher for an open cover
+NOT_ON = "Not happening: {why}"                         # ... for a lesson an approved exam or event stops
 WAITING_TEAM = "Waiting for the relief team"           # ... for a pick not approved yet: a name only once approved
-LOAD_COLUMNS = ["Name", "Departments", "Flexi Adjunct", "Teaching this week", "Relief this week", "Week so far", "Relief this term",
+LOAD_COLUMNS = ["Name", "Departments", "Flexi Adjunct", "Teaching this week", "Relief this week", "Exams and events this week", "Week so far",
+                "Relief this term",
                 "Requests to change this term"]
 TEAM = ("relief.team", TEAM_ONLY)                      # the gate of the relief team's routes
 APPROVED = ("approved", "acknowledged", "change")      # the states in which a relief has reached its teacher
@@ -152,6 +154,17 @@ def _links(pub, cal):
     if got is None or got.pub is not pub:
         got = _g.relief_links = Links.load(pub, cal)
     return got
+
+
+def _links_or_none(pub, cal):
+    """_links for the relief team's pages and the relief teacher's: None, with the error logged once a request, when the
+    exams and events cannot be read (relief's own pages work as if there were none)"""
+    if _g.get("relief_links_failed"): return None
+    try: return _links(pub, cal)
+    except Exception:
+        _g.relief_links_failed = True
+        current_app.logger.exception("relief: the exams and events could not be read")
+        return None
 
 
 def _sync_exams(pub):
@@ -434,7 +447,8 @@ def _seen_at(name):
 def whats_in():
     """every absence, newest first; new = submitted, or given a lesson (a backup's changed_at), at or after the time this
     person last marked What's in as seen (never: all new); cover = dict(total, approved, waiting, open): its covers that
-    need relief, each part of a split lesson one (approved: approved, acknowledged or asked to change); nudge: planned by
+    need relief, each part of a split lesson one, less the lessons an exam or event stops (approved: approved, acknowledged
+    or asked to change); nudge: planned by
     someone else, not acknowledged, not cancelled, not over, and now past times.remind_at on the school day before its
     first lesson (fill.due_at). Reads only: the page posts /seen after showing the list."""
     pub, me, err = _gate("relief.team", TEAM_ONLY)
@@ -447,14 +461,16 @@ def whats_in():
         v = _out(r, pub, me, settings["calendar"])                      # _links keeps one Links for the request
         at, changed = _time(v.get("at")), _time(v.get("changed_at"))
         v["new"] = since is None or at is None or at >= since or (changed is not None and changed >= since)
-        v["cover"], v["nudge"] = _cover_counts(r), _nudge(r, pub, settings, now, today)
+        v["cover"], v["nudge"] = _cover_counts(v), _nudge(r, pub, settings, now, today)
         out.append(v)
     return jsonify(absences=out, new_since=since.isoformat() if since else None, as_of=as_of)
 
 
 def _cover_counts(r):
+    """r: the record as _out sends it, its lessons marked stopped (one that does not happen needs no relief)"""
     n = dict(total=0, approved=0, waiting=0, open=0)
     for x in r.get("lessons") or []:
+        if x.get("stopped"): continue
         for c in _cover.covers(x):
             s = _cover.state(r, x, c)
             if s == "cancelled": continue
@@ -641,9 +657,11 @@ def _periods_text(x):
     return f"P{p + 1}" if n == 1 else f"P{p + 1}–P{p + n}"
 
 
-def _relief_cell(r, x, c):
-    """the sheet's Relief teacher for a cover: the name once approved (approved, acknowledged, asked to change), else
-    WAITING_TEAM for a pick (the AI's, the app's, a planner's) or NOT_CHOSEN"""
+def _relief_cell(r, x, c, links=None):
+    """the sheet's Relief teacher for a cover: NOT_ON when an exam or event stops the lesson, else the name once approved
+    (approved, acknowledged, asked to change), else WAITING_TEAM for a pick (the AI's, the app's, a planner's) or NOT_CHOSEN"""
+    why = _cover.stopped(links, x)
+    if why: return NOT_ON.format(why=why)
     s = _cover.state(r, x, c)
     if s in APPROVED: return c.get("relief") or NOT_CHOSEN
     return WAITING_TEAM if s == "waiting" else NOT_CHOSEN
@@ -671,13 +689,14 @@ def planned_csv():
             d = datetime.date.fromisoformat(x["date"])
             if start <= d <= end: rows += [(d, int(c["p"]), r["teacher"], x, c, r) for c in _cover.covers(x)]
     rows.sort(key=lambda t: t[:3])
+    links = _links_or_none(pub, _cal(pub)) if rows else None
     buf = io.StringIO(); w = csv.writer(buf)
     w.writerow(COLUMNS)
     for d, p, teacher, x, c, r in rows:
         group = _class_group(x)
         a, b = _times(pub, x, c)
         time = f"{a}–{b}" if a and b else ""
-        w.writerow([_cell(v) for v in (d.isoformat(), teacher, group, _periods_text(c), time, _relief_cell(r, x, c),
+        w.writerow([_cell(v) for v in (d.isoformat(), teacher, group, _periods_text(c), time, _relief_cell(r, x, c, links),
                                        r.get("remarks") or "", r.get("by") or "")])
     name = f"planned relief {start.isoformat()}" + (f" to {end.isoformat()}" if end != start else "") + ".csv"
     return Response("﻿" + buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -691,8 +710,10 @@ def _date_in(v):
     except ValueError: raise ValueError(_absences.WRONG)
 
 
-def _row(pub, settings, records, r, x, c, i):
-    """one cover as Today lists it. stale: its relief teacher (waiting or approved) is no longer free then; over_now: the
+def _row(pub, settings, records, r, x, c, i, links=None):
+    """one cover as Today lists it. state "stopped" (stopped: why) for a lesson an approved exam or event stops: nothing is
+    to be done for it, and its pick or relief (pick) is shown as it was; duty: why its teacher is not there when they are in
+    school, on an exam duty or at an event (a backup's reason), else "". stale: its relief teacher (waiting or approved) is no longer free then; over_now: the
     relief takes them over a checked limit; nobody: an open cover nobody at all is free for; warn: the sentence for any of
     these, and OVER_ONLY for an open cover whose free people are all over a limit (the app picks none of them); change: a
     request to change, with its new pick (stale too when that person is no longer free). One free_then for the cover gives
@@ -709,9 +730,11 @@ def _row(pub, settings, records, r, x, c, i):
                work_set=bool(w.get("text") or w.get("link") or w.get("files")), state=s, pick=brief(pk) if s != "open" else None,
                approved=c.get("approved") or None, ack=c.get("ack") or None,
                change=dict(why=ch.get("why"), at=ch.get("at"), pick=brief(new), stale=False) if ch else None,
-               stale=False, over_now=False, nobody=False, warn=None)
+               stale=False, over_now=False, nobody=False, warn=None, stopped="", duty=(r.get("reason_text") or "") if r.get("exams") else "")
     if s == "cancelled": return row
-    try: got = _free.free_then(pub, settings, records, dict(x, key=ckey, p=p, n=n), r["teacher"])
+    why = _cover.stopped(links, x)
+    if why: return dict(row, state="stopped", stopped=why)
+    try: got = _free.free_then(pub, settings, records, dict(x, key=ckey, p=p, n=n), r["teacher"], links=links)
     except ValueError: return row                # no longer a school day in the calendar: nothing to say
     free = {q["name"]: q for g in got["groups"] for q in g["people"]}
     if s == "open":
@@ -729,7 +752,7 @@ def _row(pub, settings, records, r, x, c, i):
 @need("relief")
 def today():
     """every cover of the date's lessons that need relief (?date=YYYY-MM-DD, today when left out), in time order, one row a
-    cover (_row; a cancelled absence's as "cancelled", out of the counts), with counts=dict(need, waiting, approved,
+    cover (_row; a cancelled absence's as "cancelled", one an exam or event stops as "stopped", both out of the counts), with counts=dict(need, waiting, approved,
     acknowledged, change, nobody, open) and filling: picks are being made (the page fetches again); relief.team"""
     pub, me, err = _gate(*TEAM)
     if err: return err
@@ -737,14 +760,15 @@ def today():
     except ValueError as e: return _refusal(e)
     filling = _fill.filling()                   # read first: a run that ends while the rows are read is fetched again
     settings, records, rows = _settings.load(pub), _absences.all_records(), []
+    links = _links_or_none(pub, settings["calendar"])
     for r in records:
         for x in r.get("lessons") or []:
             if x.get("date") != date or not x.get("needed"): continue
-            rows += [_row(pub, settings, records, r, x, c, i) for i, c in enumerate(_cover.covers(x))]
+            rows += [_row(pub, settings, records, r, x, c, i, links) for i, c in enumerate(_cover.covers(x))]
     rows.sort(key=lambda v: (v["p"], v["absent"], v["ckey"]))
     counts = dict(need=0, waiting=0, approved=0, acknowledged=0, change=0, nobody=0, open=0)
     for v in rows:
-        if v["state"] == "cancelled": continue
+        if v["state"] in ("cancelled", "stopped"): continue
         counts["need"] += 1; counts[v["state"]] += 1; counts["nobody"] += v["nobody"]
     return jsonify(date=date, filling=filling, counts=counts, rows=rows)
 
@@ -754,7 +778,7 @@ def today():
 def approve(id, ckey):
     """{who}: the waiting pick, or a request to change's new pick, approved while it is still who (the name the page
     showed), else PICK_CHANGED, as for a body without who; relief.team"""
-    return _change(id, lambda r, me, pub, b: _cover.approve(r["id"], ckey, b.get("who"), me, pub, _settings.load(pub)), "approved",
+    return _change(id, lambda r, me, pub, b: _cover.approve(r["id"], ckey, b.get("who"), me, pub, _settings.load(pub), links=_links_or_none(pub, _cal(pub))), "approved",
                    lambda r: f"{_relief_of(r, ckey)} approved for {_cover_words(r, ckey)}", gate=TEAM)
 
 
@@ -769,7 +793,7 @@ def approve_all():
     b = _body()
     try:
         date = _date_in(b.get("date"))
-        got = _cover.approve_all(date, b.get("covers"), me, pub, _settings.load(pub))
+        got = _cover.approve_all(date, b.get("covers"), me, pub, _settings.load(pub), links=_links_or_none(pub, _cal(pub)))
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "approving all")
     records = {}
@@ -783,7 +807,7 @@ def approve_all():
 @need("relief")
 def change(id, ckey):
     """Change: {relief: a name} gives the cover to them and approves it in one; relief.team"""
-    return _change(id, lambda r, me, pub, b: _cover.change(r["id"], ckey, b.get("relief"), me, pub, _settings.load(pub)), "changed",
+    return _change(id, lambda r, me, pub, b: _cover.change(r["id"], ckey, b.get("relief"), me, pub, _settings.load(pub), links=_links_or_none(pub, _cal(pub))), "changed",
                    lambda r: f"{_relief_of(r, ckey)} chosen and approved for {_cover_words(r, ckey)}", gate=TEAM)
 
 
@@ -799,7 +823,9 @@ def cover_free(id, ckey):
         x, c = _cover.find(r, ckey)
         if r.get("cancelled"): raise ValueError(_absences.CANCELLED)
         if not x.get("needed"): raise ValueError(_absences.NO_NEED)
-        got = _free.free_then(pub, _settings.load(pub), _absences.all_records(), dict(x, key=ckey, p=int(c["p"]), n=int(c.get("n") or 1)), r["teacher"])
+        links = _links_or_none(pub, _cal(pub))
+        _cover._happens(links, x)
+        got = _free.free_then(pub, _settings.load(pub), _absences.all_records(), dict(x, key=ckey, p=int(c["p"]), n=int(c.get("n") or 1)), r["teacher"], links=links)
     except ValueError as e: return _refusal(e)
     return jsonify(got)
 
@@ -843,7 +869,8 @@ def fill_now():
 # ---- the relief teacher: Reliefs I'm covering, Acknowledge, Request to change
 def _covering_item(pub, r, ckey):
     """a cover approved to the person asking, as they see it: never the absence's reason, remarks, reporting officer, who
-    planned it, a pick (or its reason) or the cover's history; change: their own request (why, at), never its new pick"""
+    planned it, a pick (or its reason) or the cover's history; change: their own request (why, at), never its new pick;
+    stopped: why an approved exam or event stops the lesson (nothing to cover then), or "" """
     x, c = _cover.find(r, ckey)
     s, (start, end), w = _cover.state(r, x, c), _times(pub, x, c), x.get("work") or {}
     ch = c.get("change") if s == "change" else None
@@ -851,7 +878,8 @@ def _covering_item(pub, r, ckey):
                 classes=list(x.get("classes") or []), subject=x.get("subject") or "", group=x.get("group") or "", room=x.get("room") or "",
                 absent=r["teacher"], work=dict(text=w.get("text") or "", link=w.get("link") or "",
                                                files=[dict(id=f.get("id"), name=f.get("name"), size=f.get("size")) for f in w.get("files") or []]),
-                state=s, ack=c.get("ack") or None, change=dict(why=ch.get("why"), at=ch.get("at")) if ch else None)
+                state=s, ack=c.get("ack") or None, change=dict(why=ch.get("why"), at=ch.get("at")) if ch else None,
+                stopped=_cover.stopped(_links_or_none(pub, _cal(pub)), x))
 
 
 @bp.get("/api/relief/covering")
@@ -932,16 +960,19 @@ def _term_dates(term):
 
 
 def _load(pub):
-    """-> (the date, the term, rows): every teacher with teaching that week, or relief that week or term: teaching (periods
-    that week), relief (periods that week), week (week so far: both), term (relief periods that term), changes (requests to
-    change they made on lessons that term), counted as the free-then counts do (free.relief_periods: approved or waiting,
-    a request to change's new pick too, never a cancelled absence or a lesson no longer needed)"""
+    """-> (the date, the term, rows): every teacher with teaching, relief or exam and event duties that week, or relief that
+    term: teaching (periods that week), relief (periods that week), exams (periods more that week for exam duties and events,
+    less those of lessons that stop; may be below 0), week (week so far: the three), term (relief periods that term), changes
+    (requests to change they made on lessons that term), counted as the free-then counts do (free.relief_periods and
+    week_so_far: approved or waiting, a request to change's new pick too, never a cancelled absence, a lesson no longer
+    needed or one an exam or event stops)"""
     settings = _settings.load(pub)
     cal, fat_role = settings["calendar"], settings.get("fat_role") or ""
     d, term = _load_window(pub, cal)
     week = _free._week_dates(cal, ((pub or {}).get("model") or {}).get("days") or [], d)
     tdates = _term_dates(term)
     records, changes, within = _absences.all_records(), {}, {x.isoformat() for x in tdates}
+    links = _links_or_none(pub, cal)
     for r in records:
         for x in r.get("lessons") or []:
             if x.get("date") not in within: continue
@@ -951,11 +982,12 @@ def _load(pub):
     for p in _accounts.listing(pub):
         if p["staff_only"]: continue
         name = p["name"]
-        teaching, relief = _lessons.teaching_periods(pub, cal, name, d), _free.relief_periods(records, name, week)
-        n = _free.relief_periods(records, name, tdates) if tdates else 0
-        if teaching or relief or n:
+        teaching, relief = _lessons.teaching_periods(pub, cal, name, d), _free.relief_periods(records, name, week, links=links)
+        n = _free.relief_periods(records, name, tdates, links=links) if tdates else 0
+        exams = links.week_change(name, week) if links is not None else 0
+        if teaching or relief or exams or n:
             rows.append(dict(name=name, depts=list(p["depts"]), fat=bool(fat_role) and p.get("role") == fat_role, teaching=teaching,
-                             relief=relief, week=teaching + relief, term=n, changes=changes.get(name, 0)))
+                             relief=relief, exams=exams, week=teaching + relief + exams, term=n, changes=changes.get(name, 0)))
     return d, term, rows
 
 
@@ -968,7 +1000,7 @@ def _window_out(d, term):
 @need("relief")
 def load():
     """the load tracker: dict(week={start, end}, term={name, start, end} or None, rows=[{name, depts, fat, teaching, relief,
-    week, term, changes}]) in relief's order (by first department, none last, then name); relief.team"""
+    exams, week, term, changes}]) in relief's order (by first department, none last, then name); relief.team"""
     pub, me, err = _gate(*TEAM)
     if err: return err
     try: d, term, rows = _load(pub)
@@ -980,7 +1012,8 @@ def load():
 @need("relief")
 def load_one(name):
     """every relief that books name in the term (?week= or ?term= as /load): reliefs=[{id, ckey, date, p, n, start, end,
-    lesson, absent, state ("new pick" for a request to change's new pick), by, reason (the pick's), approved_by}] by date
+    lesson, absent, state ("new pick" for a request to change's new pick, "not happening" when an exam or event stops the
+    lesson: not counted in the load), by, reason (the pick's), approved_by}] by date
     and period; relief.team"""
     pub, me, err = _gate(*TEAM)
     if err: return err
@@ -989,17 +1022,18 @@ def load_one(name):
         d, term = _load_window(pub, _cal(pub))
     except ValueError as e: return _refusal(e)
     within, out = {x.isoformat() for x in _term_dates(term)}, []
+    links = _links_or_none(pub, _cal(pub))
     for r in _absences.all_records():
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
             if x.get("date") not in within or not x.get("needed"): continue
             for i, c in enumerate(_cover.covers(x)):
                 if name not in _cover.booked(c): continue
-                mine = c.get("relief") == name
+                mine, off = c.get("relief") == name, _cover.stopped(links, x)
                 pk = _cover.pick_of(r, c) if mine else _cover.new_pick(c)
                 start, end = _times(pub, x, c)
                 out.append(dict(id=r["id"], ckey=_cover.cover_key(x, i), date=x["date"], p=int(c["p"]), n=int(c.get("n") or 1), start=start, end=end,
-                                lesson=f"{_class_group(x)} {_periods_text(c)}", absent=r["teacher"], state=_cover.state(r, x, c) if mine else "new pick",
+                                lesson=f"{_class_group(x)} {_periods_text(c)}", absent=r["teacher"], state="not happening" if off else _cover.state(r, x, c) if mine else "new pick",
                                 by=(pk or {}).get("by"), reason=(pk or {}).get("reason") or "",
                                 approved_by=(c.get("approved") or {}).get("by") if mine else None))
     out.sort(key=lambda v: (v["date"], v["p"], v["absent"]))
@@ -1017,7 +1051,7 @@ def load_csv():
     buf = io.StringIO(); w = csv.writer(buf)
     w.writerow(LOAD_COLUMNS)
     for x in rows:
-        w.writerow([_cell(v) for v in (x["name"], ", ".join(x["depts"]), "Yes" if x["fat"] else "", x["teaching"], x["relief"], x["week"],
-                                       x["term"], x["changes"])])
+        w.writerow([_cell(v) for v in (x["name"], ", ".join(x["depts"]), "Yes" if x["fat"] else "", x["teaching"], x["relief"])]
+                   + [x["exams"]] + [_cell(v) for v in (x["week"], x["term"], x["changes"])])          # exams may be below 0: a number, never a formula
     name = f"relief load {week_of(d)[0].isoformat()}.csv"
     return Response("﻿" + buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f'attachment; filename="{name}"'})
