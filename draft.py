@@ -100,16 +100,21 @@ def model_now(rec=None):
         meta = store.read_json(_p("meta.json"), {}); fl = meta.get("fixes") or []
         key = (meta.get("uploaded_at"), meta.get("upload_id"), rec["v"], json.dumps(fl, sort_keys=True))
         if _cache.get("key") == key: return _cache["m"], rec, _cache["fx"]
-    m, rec, fx = model_in(DIR, rec)
+        args = paths()
+    m, rec, fx = _model_of(args, meta, rec)   # built from the meta read under the lock, so the key matches the model
     with _lock: _cache.clear(); _cache.update(key=key, m=m, fx=fx)
     return m, rec, fx
 
 def model_in(folder, rec=None):
     """model_now for any draft folder (a copy of the draft): (model, setup record, fx) with that folder's fixes applied, and no shared cache"""
+    meta = store.read_json(os.path.join(folder, "meta.json"), {}) or {}
+    return _model_of(paths(folder), meta, rec)
+
+def _model_of(args, meta, rec=None):
+    """(model, setup record, fx) from paths() args and the meta.json already read"""
     rec = rec or store.setup_record(); spec = rec["spec"]
     if not spec: raise LookupError("no setup")
-    meta = store.read_json(os.path.join(folder, "meta.json"), {}) or {}
-    fx = {}; m = model_from_files(None, paths(folder)[1], spec=spec, edit=fixes.editor(meta.get("fixes") or [], fx))   # no re-read of the setup workbook: the spec is given
+    fx = {}; m = model_from_files(None, args[1], spec=spec, edit=fixes.editor(meta.get("fixes") or [], fx))   # no re-read of the setup workbook: the spec is given
     if meta.get("config_id"): m["setup"].setdefault("school", {})["config_id"] = meta["config_id"]
     fx.setdefault("pool", []); m["pool"] = fx["pool"]
     return m, rec, fx
@@ -188,13 +193,17 @@ def _warned(m, fx):
     ws["warnings"] = ws["warnings"] + _own_warnings(m, pool); _withhold(ws["warnings"], pool); _no_teacher(ws["warnings"])
     return ws
 
-def tally(warnings, decisions):
-    """the warnings with their decision laid on, and how many are open and critical: dict(warnings, open, critical). A decision whose warning is gone is
-    dropped, except the step5 ones, and one that says "left" is dropped (its warning is open again); "met" and "step5" settle a warning. Pure."""
+def _live(warnings, decisions):
+    """the decisions that stay: not "left", and either their warning is still there or they are step5 ones"""
     keys = {w["key"] for w in warnings}
-    decisions = {k: d for k, d in decisions.items() if d.get("answer") != "left" and (k in keys or d.get("answer") == "step5")}
+    return {k: d for k, d in decisions.items() if d.get("answer") != "left" and (k in keys or d.get("answer") == "step5")}
+
+def tally(warnings, decisions):
+    """the warnings with their decision laid on, and how many are open and critical: dict(decisions kept, warnings, open, critical). A decision whose warning is gone is
+    dropped, except the step5 ones, and one that says "left" is dropped (its warning is open again); "met" and "step5" settle a warning. Pure."""
+    decisions = _live(warnings, decisions)
     ws = [dict(w, decision=decisions.get(w["key"])) for w in warnings]
-    return dict(warnings=ws, open=sum(1 for w in ws if not w["decision"]), critical=sum(1 for w in ws if w.get("crit")))
+    return dict(decisions=decisions, warnings=ws, open=sum(1 for w in ws if not w["decision"]), critical=sum(1 for w in ws if w.get("crit")))
 
 def counts(m, rec, fx=None, decisions=None):
     """dict(critical, warnings) of the model as step 8 counts them: critical as the draft counts it, warnings = those with no decision that are not critical. Writes nothing."""
@@ -233,14 +242,12 @@ def _finish(j, change=None):
     made while the model was being built stays), change = (key, decision or None) is applied, and a decision whose warning is
     gone is dropped, except the step5 ones: they record that step 5 was updated from the timetable. A decision that says "left"
     (from a draft kept before that answer went) is dropped too: its warning is open again."""
-    keys = {w["key"] for w in j["warnings"]}
     with _lock:
         decisions = store.read_json(_p("decisions.json"), {}) or {} if exists() else {}
         if change:
             if change[1] is None: decisions.pop(change[0], None)
             else: decisions[change[0]] = change[1]
-        t = tally(j["warnings"], decisions); ws = t["warnings"]
-        decisions = {k: d for k, d in decisions.items() if d.get("answer") != "left" and (k in keys or d.get("answer") == "step5")}
+        t = tally(j["warnings"], decisions); ws = t["warnings"]; decisions = t["decisions"]
         n, crit = t["open"], t["critical"]
         if exists():
             store.write_json(_p("decisions.json"), decisions)

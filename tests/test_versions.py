@@ -90,6 +90,7 @@ def test_tally_is_what_finish_counts():
     assert draft.tally(ws, {plain["key"]: dict(answer="met")})["open"] == base["open"] - 1
     assert draft.tally(ws, {plain["key"]: dict(answer="left")})["open"] == base["open"]   # "left" is dropped
     assert draft.tally(ws, {"gone:key": dict(answer="met")})["open"] == base["open"]      # a decision with no warning is dropped
+    assert draft.tally(ws, {plain["key"]: dict(answer="met"), "gone:key": dict(answer="met"), "s": dict(answer="step5")})["decisions"].keys() == {plain["key"], "s"}   # the kept decisions are what _finish saves
     assert draft.tally(ws, {})["critical"] == sum(1 for w in ws if w.get("crit")) == draft.info()["critical"]
 
 def test_database_of_a_folder():
