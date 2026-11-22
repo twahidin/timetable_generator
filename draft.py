@@ -84,10 +84,15 @@ def _waiting():
     try: return _count(model_now()[2]["pool"])
     except Exception: return 0
 
+def _versions():
+    """how many saved versions there are (folders in draft_versions)"""
+    import versions
+    return versions.count()
+
 def summary():
     """what /api/status shows of the draft, from meta.json alone (no model is built)"""
     meta = store.read_json(_p("meta.json")) if exists() else None
-    return dict(uploaded_at=meta.get("uploaded_at"), upload_id=meta.get("upload_id"), source=meta.get("source"), open=meta.get("open"), critical=meta.get("critical"), fixes=len(meta.get("fixes") or [])) if meta else None
+    return dict(uploaded_at=meta.get("uploaded_at"), upload_id=meta.get("upload_id"), source=meta.get("source"), open=meta.get("open"), critical=meta.get("critical"), fixes=len(meta.get("fixes") or []), versions=_versions()) if meta else None
 
 def model_now(rec=None):
     """(model, setup record, fx) of the draft with its fixes applied, checked against the setup record (default: as it is now).
