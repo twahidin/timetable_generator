@@ -1022,6 +1022,81 @@ def draft_version_download(vid):
         return send_file(data, as_attachment=True, download_name=safe_name(name) + " - version.sqlite", mimetype="application/vnd.sqlite3")
     finally: shutil.rmtree(work, ignore_errors=True)
 
+# ------------------------------------------------------------------------------------------------ the Compare page
+@app.get("/compare")
+@need("committee")
+def compare_page():
+    return app.send_static_file("compare.html")
+
+def _compare_sources():
+    """the pickers of the Compare page: the draft (when there is one), every version newest first, the published timetable (when there is one)"""
+    out = [dict(src="draft", label=compare.label("draft"))] if draft.exists() else []
+    out += [dict(src="v:" + v["id"], label=v["name"]) for v in versions.listing(counts=False)]
+    if store.published(): out.append(dict(src="published", label=compare.label("published")))
+    return out
+
+def _compare_error(e):
+    """404 for a version that is not there, 400 for any other thing the user can mend, 409 without a setup"""
+    if isinstance(e, LookupError): return {"error": NO_SETUP}, 409
+    return {"error": str(e)}, 404 if str(e) == compare.NO_VERSION else 400
+
+def _compare_pair():
+    """(a, b) from the query: b is the draft unless given; a is the first picker entry that is not b"""
+    b = request.args.get("b") or "draft"; a = request.args.get("a")
+    if not a:
+        a = next((s["src"] for s in _compare_sources() if s["src"] != b), None)
+        if not a: raise ValueError("There is nothing to compare with yet.")
+    return a, b
+
+def _involves(row, view, name):
+    if row is None: return False
+    return name in row["classes"] if view == "class" else name in row["teachers"] if view == "teacher" else row["room"] == name
+
+@app.get("/api/compare")
+@need("committee")
+def api_compare():
+    """two timetables side by side: ?a=&b=&view=class|teacher|room&name=. The totals, the pickers, the week of the chosen class, teacher or room on
+    each side with the cells that take part in a difference (`marks`, [day, period]) and a sentence for each difference that involves it (`lines`)"""
+    rec = store.setup_record()
+    try:
+        a, b = _compare_pair(); la, lb = compare.label(a), compare.label(b); d = compare.diff(a, b, rec)
+    except (ValueError, LookupError) as e: return _compare_error(e)
+    view = request.args.get("view") or "class"; name = request.args.get("name")
+    if view not in ("class", "teacher", "room"): return {"error": compare.NO_NAME}, 400
+    names = d["names"][{"class": "classes", "teacher": "teachers", "room": "rooms"}[view]]
+    if not name:
+        name = next((n for n in names if any(_involves(i["a"], view, n) or _involves(i["b"], view, n) for i in d["items"])), names[0] if names else None)
+    if name not in names: return {"error": compare.NO_NAME}, 400
+    try:
+        weeks = {}
+        for k, src in (("a", a), ("b", b)):
+            try: weeks[k] = compare.week(compare.model_of(src, rec), view, name)
+            except ValueError as e:
+                if str(e) != compare.NO_NAME: raise
+                weeks[k] = None   # the name is on the other timetable only
+    except (ValueError, LookupError) as e: return _compare_error(e)
+    have = weeks["a"] or weeks["b"]
+    if have is None: return {"error": compare.NO_NAME}, 400
+    for k in ("a", "b"):
+        if weeks[k] is None: weeks[k] = dict(have, cells=[])
+    mine = [i for i in d["items"] if _involves(i["a"], view, name) or _involves(i["b"], view, name)]
+    marks = {k: [] for k in "ab"}
+    for i in mine:
+        for k in "ab":
+            r = i[k]
+            if _involves(r, view, name) and [r["d"], r["p"]] not in marks[k]: marks[k].append([r["d"], r["p"]])
+    return jsonify(a=dict(src=a, label=la), b=dict(src=b, label=lb), sources=_compare_sources(), totals=d["totals"], names=d["names"], view=view, name=name,
+                   weeks=weeks, marks=marks, lines=[compare.line(i, d["days"]) for i in mine])
+
+@app.get("/api/compare.xlsx")
+@need("committee")
+def api_compare_xlsx():
+    from ttgen.export import safe_name
+    try:
+        a, b = _compare_pair(); la, lb = compare.label(a), compare.label(b); data = compare.xlsx(a, b, store.setup_record())
+    except (ValueError, LookupError) as e: return _compare_error(e)
+    return send_file(io.BytesIO(data), as_attachment=True, download_name=safe_name(f"Differences {la} and {lb}") + ".xlsx", mimetype=XLSX)
+
 @app.post("/api/draft/publish")
 @need("committee")
 def draft_publish():

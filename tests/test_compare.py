@@ -174,6 +174,47 @@ def test_an_unreadable_published_timetable_does_not_break_the_list():
         assert "Kept" in [v["name"] for v in j["versions"]]
     finally: open(path, "wb").write(good); store._cache.update(stamp=None, value=None); compare._counts_cache.clear()
 
+def test_compare_routes_need_the_committee():
+    r = NOSE.get("/compare"); assert r.status_code == 302 and "/login" in r.headers["Location"], (r.status_code, r.headers.get("Location"))
+    for u in ("/api/compare", "/api/compare.xlsx"):
+        r = NOSE.get(u); assert r.status_code == 401, (u, r.status_code)
+    assert c.get("/compare").status_code == 200 and b"compare.js" in c.get("/compare").data
+
+def test_compare_api_shape():
+    a = two_timetables()
+    r = c.get(f"/api/compare?a={a}&b=draft&view=class&name={CLASSES[0]}"); assert r.status_code == 200, r.get_json(); j = r.get_json()
+    assert j["a"] == dict(src=a, label="Run A") and j["b"]["src"] == "draft" and j["view"] == "class" and j["name"] == CLASSES[0]
+    assert len(j["lines"]) >= 1 and j["totals"]["moved"] == 1 and j["names"]["classes"][:2] == CLASSES
+    assert [DAYS.index(DAYS[0]), 2] in j["marks"]["b"] and [0, 0] in j["marks"]["a"], j["marks"]   # the moved lesson: new time on b, old time on a
+    assert sorted(j["weeks"]) == ["a", "b"] and j["weeks"]["a"]["NP"] == j["weeks"]["b"]["NP"]
+    srcs = [s["src"] for s in j["sources"]]; assert srcs[0] == "draft" and a in srcs, srcs
+    assert next(s for s in j["sources"] if s["src"] == "draft")["label"] == "The draft on step 8"
+    # no b -> the draft; no view or name -> the first class with a difference
+    j2 = c.get(f"/api/compare?a={a}").get_json(); assert j2["b"]["src"] == "draft" and j2["view"] == "class" and j2["name"] in j2["names"]["classes"] and j2["lines"], j2
+    # a teacher and a room
+    jt = c.get(f"/api/compare?a={a}&view=teacher&name={TEACHERS[1]}").get_json(); assert jt["lines"] and jt["marks"]["a"] + jt["marks"]["b"], jt
+    jr = c.get(f"/api/compare?a={a}&view=room&name={ROOM}").get_json(); assert jr["lines"] and jr["marks"]["b"] and not jr["marks"]["a"], jr
+    # unknown name on both sides: 400; a name on one side only: two grids, the missing one empty
+    r = c.get(f"/api/compare?a={a}&view=class&name=Nobody"); assert r.status_code == 400 and r.get_json()["error"] == "Pick a class, teacher or room on both timetables.", r.get_json()
+    one = c.get(f"/api/compare?a={a}&view=class&name={CLASSES[1]}"); assert one.status_code == 200
+    # the same timetable twice: nothing differs, still a page
+    same = c.get("/api/compare?a=draft&b=draft"); assert same.status_code == 200 and same.get_json()["lines"] == [] and same.get_json()["marks"] == dict(a=[], b=[])
+    x = c.get(f"/api/compare.xlsx?a={a}&b=draft"); assert x.status_code == 200 and "Differences Run A and The draft on step 8.xlsx" in x.headers["Content-Disposition"], x.headers
+    assert openpyxl.load_workbook(io.BytesIO(x.data)).active.max_row >= 4
+
+def test_compare_a_class_on_one_side_only():
+    shutil.rmtree(versions.VDIR, ignore_errors=True)
+    save_draft(ROWS[:2]); v = versions.save("Few", "Tester"); save_draft(ROWS[:2] + [dict(EXTRA, classes=[CLASSES[1]])])
+    j = c.get(f"/api/compare?a=v:{v['id']}&view=class&name={CLASSES[1]}"); assert j.status_code == 200, j.get_json(); j = j.get_json()
+    assert j["weeks"]["a"]["cells"] == [] and j["weeks"]["b"]["cells"] and j["weeks"]["a"]["NP"] == j["weeks"]["b"]["NP"] and j["marks"]["b"] and not j["marks"]["a"], j
+
+def test_compare_unknown_source():
+    two_timetables()
+    r = c.get("/api/compare?a=v:000000000000&b=draft"); assert r.status_code == 404 and r.get_json()["error"] == "There is no such version.", r.get_json()
+    r = c.get("/api/compare?a=draft&b=published")
+    if r.status_code != 200: assert r.status_code == 400 and r.get_json()["error"], r.get_json()
+    assert c.get("/api/compare.xlsx?a=v:000000000000&b=draft").status_code == 404
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()

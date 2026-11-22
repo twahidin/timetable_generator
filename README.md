@@ -163,6 +163,16 @@ is not on step 3, and a named subject the class has only in groups.
    There is no other editor: everything is done on the board and in its panel. At the foot of the timetable card,
    under the upload's notes, **Go to step 9** goes on. Steps 8 and 9 do not show the setup's "Things to fix" column, so the
    timetable has the page's width.
+
+   **Saved versions and Compare.** Step 8 keeps one draft and, beside it, named versions of it that can be opened again. **Compare** (the
+   page `/compare`, for the committee) sets two of them side by side: the draft, a saved version or the published timetable. Lessons are matched
+   by what they are (the planned lesson of step 5), never by lesson number, so two uploads that number their lessons differently still compare.
+   Six tiles count the lessons at another time, the lessons with a different teacher or room, the critical mistakes, the warnings and the longest
+   day of a teacher. Critical and warnings are "checked now": each timetable is checked against the setup as it is today, so a version saved
+   before step 5 changed can show warnings it did not have then. **Show** picks a class, a teacher or a room: its week on each side is drawn in
+   two grids (stacked on a phone), with **mark what differs** outlining in orange the places that are not the same, bands in light blue, and a
+   sentence for each difference below. **Download the differences (Excel)** lists every difference, class by class. Comparing only reads: nothing
+   is changed.
 6. **Publish** (step 9): it shows the timetable as it will be published, read-only: the critical mistakes (each with
    **Show on step 8**, which opens step 8 with the warning marked in the panel's Warnings tab and its lesson selected on
    the board, or a lesson that is not placed selected in the Not placed tab), every other
