@@ -30,10 +30,10 @@ or when their person is not on the team any more (tell.CHECKS).
 The weekly summary (relief/summary.py's numbers of one week) goes at weekly_day weekly_at of the relief settings (WEEKLY where they
 cannot be read), whatever kind of day that is, and until a DAY after; later than that it is not sent at all. On a Friday it is about
 that week, else about the week before. A week is done with as a mark is (state weekly_last: its Monday's ordinal), also when it had no
-relief: nothing is sent then. While nobody on the team can be reached, or the accounts or the exams cannot be read, it is not done
-with; a date of the exams that cannot be read stops no lesson of it (tell.known). weekly:{monday}:{name} goes to each of the team who
-can be reached, with a button that opens the page on that week, and is dropped when it is a DAY old, or when its person is not on the
-team any more.
+relief: nothing is sent then. While nobody on the team can be reached, the accounts or the exams cannot be read, or there is no relief
+and an absence's file cannot be read (it may hold one), it is not done with; a date of the exams that cannot be read stops no lesson of
+it (tell.known). weekly:{monday}:{name} goes to each of the team who can be reached, with a button that opens the page on that week,
+and is dropped when it is a DAY old, or when its person is not on the team any more.
 
 remind sends a relief again to its teacher, for the page (relief/tgweb.py) and for the button (relief/bot.py): its message as it
 would be made now, under the relief's key with :r{n} after it, WAIT at least after the last of that relief's messages went or was
@@ -269,6 +269,7 @@ def _weekly(s):
     records, unread = _records()
     for kind in sorted(set(unread.values())): _log.warning("an absence could not be read (%s)", kind)
     v = _summary.week(s.pub, s.settings, records, monday, s.now, links=types.SimpleNamespace(stopped=lambda x: tell._stopped(links, x)))
+    if unread and not v["periods"]: return []   # what cannot be read may hold the week's reliefs: not done with
     text = summary_text(v)
     if not tgdb.raise_state("weekly_last", monday.toordinal()) or not v["periods"]: return []
     button = dict(text=OPEN_SUMMARY, url=f"{s.bot.get('base') or ''}/relief?week={iso}#summary")

@@ -78,17 +78,18 @@
 
   async function load() {
     const seq = ++S.seq;
+    S.err = null;
     paint();
     const r = await R.api(`/api/relief/summary?week=${enc(S.week)}`);
     if (seq !== S.seq) return;   /* another week was asked for since */
-    if (r.ok) { S.err = null; S.data = r.data; }
+    if (r.ok) S.data = r.data;
     else S.err = { text: r.error, bad: true, status: r.status };
     paint();
   }
 
   function setWeek(iso) {
-    if (iso === S.week) return;
-    S.week = iso; S.data = null; S.err = null;
+    S.week = iso;
+    S.data = null;
     load();
   }
 
@@ -98,9 +99,10 @@
     switch (b.dataset.sm) {
       case "before": setWeek(RF.addDays(S.week, -7)); return;
       case "after": setWeek(RF.addDays(S.week, 7)); return;
-      case "now": setWeek(thisWeek()); $("#smTitle", S.pane).focus(); return;   /* the button goes */
-      case "reload": S.err = null; load(); return;
+      case "now": setWeek(thisWeek()); break;
+      case "reload": load(); break;
     }
+    $("#smTitle", S.pane).focus();   /* the button pressed is not there any more */
   }
 
   R.tab("summary", {

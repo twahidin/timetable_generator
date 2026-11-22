@@ -60,14 +60,14 @@ def _request(c):
 
 
 def _ack(w, x, c, state):
-    """(how it was acknowledged: "on_time" | "late" | "never" | "waiting", as a row says it)"""
+    """(how it was acknowledged: "on_time" | "late" | "never" | "waiting", as a row says it); on time goes by the minute, as it is said"""
     if state != "acknowledged":                 # asked to change: not acknowledged
         how = "never" if _fill._ended(x, c, w.now, w.bnds) else "waiting"
         return how, how
     at, date, p = _when(c["ack"]["at"]), datetime.date.fromisoformat(x["date"]), int(c["p"])
     start = datetime.timedelta(minutes=w.bnds[p][0]) if p < len(w.bnds) else datetime.timedelta(days=1)      # no times: its day's end
     said = f"{at:%H:%M}" if at.date() == date else f"{words.day(at.date())}, {at:%H:%M}"
-    on_time = at <= datetime.datetime.combine(date, datetime.time(), tzinfo=at.tzinfo) + start
+    on_time = at.replace(second=0, microsecond=0) <= datetime.datetime.combine(date, datetime.time(), tzinfo=at.tzinfo) + start
     return ("on_time", said) if on_time else ("late", f"late {said}")
 
 

@@ -5580,6 +5580,10 @@ def the_numbers_add_up():
     v = wk(away(EVE, on(12, 0, 1, RUTH, st(12, "07:00"))), away(ROSA, on(13, 0, 1, MAYA, st(12, "08:00")))); assert v["top"] == [(MAYA, 1), (RUTH, 1)] and v["by_dept"] == [("English", 1), ("Science", 1)]
     # two on one date and period go by who is absent
     assert [x["absent"] for x in wk(away(RUTH, on(13, 0, 1, SAM, st(12, "08:00"))), away(EVE, on(13, 0, 1, MAYA, st(12, "08:00"))))["rows"]] == [EVE, RUTH]
+    # and of one absent teacher by the lesson, then by who relieves it, whichever came first (two records, or one)
+    three = [on(13, 0, 1, RUTH, st(12, "08:00"), classes=("1A",)), on(13, 0, 1, SAM, st(12, "08:00"), classes=("1B",)), on(13, 0, 1, MAYA, st(12, "08:00"), classes=("1B",))]
+    for order in itertools.permutations(three):
+        for records in ([away(EVE, x) for x in order], [away(EVE, *order)]): assert [(x["lesson"], x["relief"]) for x in wk(*records)["rows"]] == [("1A Maths P1", RUTH), ("1B Maths P1", SAM), ("1B Maths P1", MAYA)]
 
 @t
 def a_percentage_is_whole_and_half_goes_up():
@@ -5615,7 +5619,8 @@ def ack_on_time_late_never_waiting():
         v = adds_up(wk(away(EVE, on(13, p, n, MAYA, st(12, "08:00"), at_, change)), now=now, **kw)); got, = [k for k in ("on_time", "late", "never", "waiting") if v[k]]; assert v[got] == n
         return got, v["rows"][0]["ack"]
     # P3-P4 of Tue 13 is 09:00-10:00
-    for at_, want in ((st(12, "15:20"), ("on_time", "Mon 12 Oct, 15:20")), (st(13, "00:00"), ("on_time", "00:00")), (st(13, "07:15"), ("on_time", "07:15")), ("2026-10-13T09:00:00+08:00", ("on_time", "09:00")), ("2026-10-13T09:00:01+08:00", ("late", "late 09:00")),
+    for at_, want in ((st(12, "15:20"), ("on_time", "Mon 12 Oct, 15:20")), (st(13, "00:00"), ("on_time", "00:00")), (st(13, "07:15"), ("on_time", "07:15")), ("2026-10-13T08:59:59+08:00", ("on_time", "08:59")), ("2026-10-13T09:00:00+08:00", ("on_time", "09:00")),
+                      ("2026-10-13T09:00:01+08:00", ("on_time", "09:00")), ("2026-10-13T09:00:59+08:00", ("on_time", "09:00")), ("2026-10-13T09:01:00+08:00", ("late", "late 09:01")), ("2026-10-13T01:00:59+00:00", ("on_time", "09:00")), ("2026-10-13T01:01:00+00:00", ("late", "late 09:01")),
                       (st(13, "09:30"), ("late", "late 09:30")), (st(13, "18:00"), ("late", "late 18:00")), (st(14, "08:05"), ("late", "late Wed 14 Oct, 08:05")), ("2026-10-12T23:15:00+00:00", ("on_time", "07:15")), ("2026-10-13T01:30:00+00:00", ("late", "late 09:30")), ("2026-10-12T15:30:00+00:00", ("on_time", "Mon 12 Oct, 23:30"))):
         assert ack(at_) == want, at_
         assert ack(at_, now=st(12, "08:00")) == want, "whatever the time is now"
@@ -5733,8 +5738,8 @@ def weekly(hm, day=16): at(hm, day); return [k for k in RE.tick() if k.startswit
 def weeked(*names, monday=W12): return [f"weekly:{monday}:{n}" for n in names or (TEAM,)]
 def marked(): return tgdb.get_state("weekly_last")
 def a_relief():
-    """Sam's relief of K5, approved and told on the day, acknowledged at 07:15"""
-    i = today_reliefs((K5, SAM)); at("07:15", 13); CV.acknowledge(i, K5, SAM)
+    """Sam's relief of K5, approved and told on the day, acknowledged at 07:15 -> the absence's id"""
+    i = today_reliefs((K5, SAM)); at("07:15", 13); CV.acknowledge(i, K5, SAM); return i
 TEXT_K5 = ("📊 Relief summary · Week 6 (12–16 Oct)\n2 relief periods for 1 absence\n• Planned ahead 0 · arranged on the day 2\n• Acknowledged on time 2 · late 0 · never 0\n• Asked to change 0\nMost relief this week:\nMr Sam Tan 2\nBy department of the absent teacher:\nScience 2")
 
 @t
@@ -5831,6 +5836,28 @@ def the_message_waits_while_nothing_can_be_worked_out():
         a_relief(); j = absent(teacher=RUTH, by=HUGO); open(absences._path(j), "w", encoding="utf-8").write("{ a private word"); h, seen, real = Grab(), [], TE._records; KINDS.addHandler(h)
         with stand_in(TE, "_records", lambda: (seen.append(absences._LOCK.locked()), real())[1]): assert weekly("15:00") == weeked() and outs("weekly")[0]["text"] == TEXT_K5
         KINDS.removeHandler(h); assert set(seen) == {True} and not absences._LOCK.locked() and h.records and all("private" not in r.getMessage() and j not in r.getMessage() and r.exc_info is None for r in h.records)
+
+@t
+def a_week_with_an_absence_that_cannot_be_read_and_no_relief_is_not_done_with():
+    def damage_(i):
+        """the absence's file cannot be read -> what makes it good again"""
+        p = absences._path(i); good = open(p, encoding="utf-8").read(); open(p, "w", encoding="utf-8").write("{ a private word"); return lambda: open(p, "w", encoding="utf-8").write(good)
+    with school(SAM, TEAM):                                                                # the only file there is: said once it can be read
+        good = damage_(a_relief())
+        for hm in ("15:00", "15:01", "15:09:59"): assert weekly(hm) == [] and marked() is None and outs("weekly") == [], hm
+        good(); assert weekly("15:10") == weeked() and marked() == MON12.toordinal() and outs("weekly")[0]["text"] == TEXT_K5 and weekly("15:11") == [] and len(outs("weekly")) == 1
+    h = Grab()
+    with school(SAM, TEAM):                                                                # never: nothing, and nothing raised; made good after the 24 hours, nothing either
+        good = damage_(a_relief()); KINDS.addHandler(h)
+        for hm, day in (("15:00", 16), ("15:01", 16), ("23:59", 16), ("00:00", 17), ("14:59:59", 17), ("15:00", 17), ("12:00", 18), ("15:00", 19), ("15:00", 22)): assert weekly(hm, day) == [] and marked() is None and outs("weekly") == [], (hm, day)
+        KINDS.removeHandler(h); good(); assert weekly("15:01", 22) == [] and marked() is None
+        assert h.records and {r.getMessage().split(" (")[0] for r in h.records} == {"an absence could not be read"} and not any("private" in r.getMessage() or r.exc_info for r in h.records), [r.getMessage() for r in h.records]
+        at("08:00", 22); j = absent(dates=["2026-10-27"]); give(j, absences.load(j)["lessons"][0]["key"], MAYA); assert weekly("15:00", 30) == weeked(monday="2026-10-26"), "the weeks after it go as ever"
+    with school(SAM, TEAM):                                                                # one that can be read, with no relief of that week, changes nothing
+        good = damage_(a_relief()); absent(teacher=RUTH, by=HUGO); assert weekly("15:00") == [] and marked() is None; good(); assert weekly("15:01") == weeked()
+    with school(SAM, MAYA, TEAM):                                                          # with a relief that can be read, it goes: the rest counts
+        damage_(a_relief()); j = absent(teacher=RUTH, by=HUGO); give(j, KR, MAYA); assert weekly("15:00") == weeked() and "\n1 relief period for 1 absence\n" in outs("weekly")[0]["text"] and marked() == MON12.toordinal()
+    with school(SAM, TEAM): good = damage_(a_relief()); good(); absences.cancel(absences.all_records()[0]["id"], "x", HUGO); assert weekly("15:00") == [] and marked() == MON12.toordinal(), "all can be read, and no relief: done with"
 
 @t
 def the_report_and_the_summary_do_not_stop_each_other():
