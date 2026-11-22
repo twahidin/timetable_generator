@@ -21,6 +21,8 @@ NO_FIT = "No list of up to 3 moves fits it."
 BAND = "This changes the band itself: change it on the board, or ask the agent for a new timetable."
 SPLIT = "Its lessons are taught by different teachers: change them on the board."
 NOT_ONE = "More than one teacher changes: change it on the board."
+ONE_SIDED = "A teacher is added or taken off, not changed for another: change it on the board."
+NO_STAFF = "Step 5 has no teacher for it: choose one there first, then run Re-fit again."
 TOO_MANY = "More than 8 changes: change it on the board."
 LATE = "Not looked at in time; run Re-fit again."
 NOT_PLACED = "That lesson is not placed. Place it first."   # fixes.apply_one's own words
@@ -65,7 +67,7 @@ def _teachers(m, spec, ks, e, rows, text):
     gone, new = have - want, want - have
     one = len(gone) == 1 and len(new) == 1
     alike = all(set(x["teachers"]) == set(rows[0]["teachers"]) for x in rows)
-    if not one: return [], NOT_ONE
+    if not one: return [], ONE_SIDED if len(gone) + len(new) == 1 else NOT_ONE
     if not alike: return [], SPLIT
     known = {t.get("name") for t in spec.get("teachers") or [] if isinstance(t, dict)}
     if not new <= known: return [], f"{next(iter(new))} is not on the setup's list of teachers."
@@ -214,6 +216,7 @@ def direct(m, spec, days, target, pool, held=()):
         if part in ("missing", "periods") and _band(e, rows): return [], BAND
         if part in ("missing", "periods"):
             have = verify.placed(dict(m, lessons=list(m["lessons"]) + list(pool or ()))).get(k, {}).get("periods", 0)
+            if have < e["periods"] and not e["teachers"]: return [], NO_STAFF   # a lesson nobody teaches is a mistake, which the judge does not look for
             if have < e["periods"]:
                 sh = next((x for x in fixes.short(m, spec, pool or ()) if x["key"] == ks), None)
                 return (_adds(m, spec, days, pool or (), ks, k, e, sh["n"], held) if sh else []), None
@@ -329,10 +332,20 @@ def _in_the_way(m, spec, days, b, f, must):
     hits = [_blocker(b, days, [x for x in after["lessons"] if x["id"] == i], placed) for i in sorted(placed)]
     return [h for h in hits if h]
 
+def waiting(pool, fx):
+    """what the fixes change of the lessons not placed (pool: their rows) when they are made on the draft: a teacher fix reaches every row of its
+    key -> (those rows as they are just before, the pool after). Nothing of pool is changed"""
+    was = []
+    for f in fx:
+        if f["kind"] != "teacher": continue
+        mine = fixes.rows_of_key(pool, fixes._key(f["key"])); ids = {id(x) for x in mine}; was += mine
+        pool = [dict(x, teachers=list(f["teachers"])) if id(x) in ids else x for x in pool]
+    return was, pool
+
 def rechecked(m, spec, lessons, touched, was, fx=()):
     """the numbers of the typed rules (T1, T2 ...) that the fixes fx make one check again, sorted: verify.typed_again with these lessons on the
-    timetable (touched and was: helper._apply's for the fixes)"""
-    return sorted({int(w["key"].split(":")[1]) for w in verify.typed_again(dict(m, lessons=lessons), spec, touched, was)})
+    timetable (touched and was: helper._apply's for the fixes) and with the lessons not placed (m["pool"]) that a teacher fix reaches"""
+    return sorted({int(w["key"].split(":")[1]) for w in verify.typed_again(dict(m, lessons=lessons), spec, touched, list(was) + waiting(m.get("pool") or [], fx)[0])})
 
 class _Search:
     """the search for one target. A list looked at is a node (moves, parts): moves the items of day_moves in it, first, each with the
