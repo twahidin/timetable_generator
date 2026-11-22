@@ -326,8 +326,8 @@ def test_barred_day_opens_other_days():
         assert refit.barred(m, spec, days, PLAIN_ID, 0, pool) is True
         assert refit.barred(m, spec, days, PLAIN_ID, 1, pool) is False
         memo = {}; got = moves(m, spec, days, PLAIN_ID, memo=memo, limit=50)
-        far = [g for g in got if g["other"]]; near = [g for g in got if not g["other"]]
-        assert far and got == near + far   # same-day items first, then the other days
+        far = [g for g in got if g["other"]]
+        assert far and got == far   # the day is barred: no same-day items, only other days
         assert all(g["fix"]["kind"] == "move" and g["fix"]["d"] != 0 and g["dist"] == 10 * g["fix"]["d"] + abs(g["fix"]["p"]) for g in far), far
         assert [g["fix"]["d"] for g in far] == sorted(g["fix"]["d"] for g in far)
         assert memo[("barred", PLAIN_ID, 0)] is True

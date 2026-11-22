@@ -146,6 +146,7 @@ def day_moves(m, spec, days, lesson_id, ctx, memo, moved, limit=CAND_SLOTS):
         same.append((abs(s["p"] - p0), s["p"], dict(fix=fix, other=False, dist=abs(s["p"] - p0))))
     out = [x[2] for x in sorted(same, key=lambda x: x[:2])]
     if barred(m, spec, days, lesson_id, d0, pool, memo):
+        out = []   # a same-day place keeps the lesson on a barred day, where the Must rule stays broken
         far = sorted((s for s in ok if s["d"] != d0 and s["swap"] is None), key=lambda s: (abs(s["d"] - d0), s["d"], abs(s["p"] - p0), s["p"]))
         out += [dict(fix=dict(kind="move", id=lesson_id, d=s["d"], p=s["p"]), other=True, dist=10 * abs(s["d"] - d0) + abs(s["p"] - p0)) for s in far]
     return out[:limit]
