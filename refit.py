@@ -230,23 +230,33 @@ def _gone(m, spec, days, w, before, room):
     x = next((x for x in m["lessons"] if x["id"] == wh["id"] and x["group"] == wh.get("row", x["group"])), None)
     return x is None or (w.get("crit") != "noteacher" and (m["days"][x["d"]], x["p"]) != (wh.get("day"), wh.get("period")))
 
-def _in_the_way(m, spec, days, b, f):
-    """the lessons in the way of a refused fix on the timetable m (b: its Busy) -> [(lesson id, why)], in the order found: for a
-    teacher fix, one for each lesson of its key that a new teacher cannot take; for a move, swap or add, one for each lesson it
-    places; none for a room (Busy names no lesson for one), a delete or a rule"""
-    out = []
-    def ask(rows, ignore):
-        x = rows[0]; y = b.blocker(rows, x["d"], x["p"], x["n"], ignore=ignore)   # the lesson helper._alone would name is this one too
-        if y is not None: out.append((y, b.clash(rows, x["d"], x["p"], x["n"], ignore=ignore).replace(" is teaching ", " teaches ", 1)))
-    if f["kind"] == "teacher":
-        ids = list(dict.fromkeys(x["id"] for x in helper._of_key(m["lessons"], fixes._key(f["key"]))))
-        for i in ids:   # as fixes.judge sees a teacher change: only a teacher who was not there can clash
-            had = {t for y in b.ids[i] for t in y["teachers"]}
-            ask([dict(y, teachers=[t for t in f["teachers"] if t not in had], classes=[], group=ENTIRE, rain="", room="") for y in b.ids[i]], set(ids))
-    elif f["kind"] in ("move", "swap", "add"):
-        after = helper._apply(m["lessons"], [f], spec, days); placed = after["touched"]
-        for i in sorted(placed): ask([x for x in after["lessons"] if x["id"] == i], placed)
+def _blocker(b, rows, ignore):
+    """(the lesson in the way of these rows where they are, why), or None: b.blocker, which names the lesson helper._alone would too"""
+    x = rows[0]; y = b.blocker(rows, x["d"], x["p"], x["n"], ignore=ignore)
+    return None if y is None else (y, b.clash(rows, x["d"], x["p"], x["n"], ignore=ignore).replace(" is teaching ", " teaches ", 1))
+
+def _blocked(m, b, f):
+    """the lessons of a teacher fix's key whose time a new teacher cannot take on the timetable m (b: its Busy) -> [(lesson id, the lesson in the way, why)]"""
+    ids = list(dict.fromkeys(x["id"] for x in helper._of_key(m["lessons"], fixes._key(f["key"])))); out = []
+    for i in ids:   # as fixes.judge sees a teacher change: only a teacher who was not there can clash
+        had = {t for y in b.ids[i] for t in y["teachers"]}
+        hit = _blocker(b, [dict(y, teachers=[t for t in f["teachers"] if t not in had], classes=[], group=ENTIRE, rain="", room="") for y in b.ids[i]], set(ids))
+        if hit: out.append((i, *hit))
     return out
+
+def _either(blocked):
+    """the lessons whose move helps blocked lessons -> [(lesson id, why)]: those in the way, then the blocked lessons themselves"""
+    return [(y, why) for _, y, why in blocked] + [(i, why) for i, _, why in blocked]
+
+def _in_the_way(m, spec, days, b, f):
+    """the lessons whose move may help a refused fix on the timetable m (b: its Busy) -> [(lesson id, why)], in the order found: for a
+    teacher fix those in the way of a new teacher, then the lessons of its key they are in the way of; for a move, swap or add those in
+    the way of each lesson it places; none for a room (Busy names no lesson for one), a delete or a rule"""
+    if f["kind"] == "teacher": return _either(_blocked(m, b, f))
+    if f["kind"] not in ("move", "swap", "add"): return []
+    after = helper._apply(m["lessons"], [f], spec, days); placed = after["touched"]
+    hits = [_blocker(b, [x for x in after["lessons"] if x["id"] == i], placed) for i in sorted(placed)]
+    return [h for h in hits if h]
 
 class _Search:
     """the search for one target. A list looked at is a node (moves, parts): moves the items of day_moves in it, first, each with the
@@ -258,6 +268,7 @@ class _Search:
         self.ctx = fixes._ctx(m); self.rows = self.ctx["busy"].ids   # lesson id -> its rows
         self.memo, self.bars, self.places = {}, {}, {}               # helper.chain's memo; day_moves' memo; lesson id -> its day_moves
         self.seen, self.solved, self.refused = set(), [], ""         # the lists looked at; the answers of the present depth; the judge's last sentence about the change itself
+        self.blocked = []                                            # the lessons of a teacher change no new teacher can take on m, as _blocked gives them
         self.key = helper._dep_parts(target["key"])[0]; self.row5 = verify.planned_rows(spec).get(self.key) or {}
         if cands: self._about()
 
@@ -329,16 +340,26 @@ class _Search:
         if i not in self.places: self._in_time(); self.places[i] = day_moves(self.m, self.spec, self.days, i, self.ctx, self.bars, self.moved, CAND_SLOTS)
         return self.places[i]
 
+    def _may(self, i):
+        """whether a lesson may be moved at all: on the timetable, not a band, not moved by an earlier target"""
+        return i in self.rows and i not in self.moved and not fixes._block(self.rows[i])
+
+    def _still(self, moves):
+        """the blocked lessons of a teacher change that stay blocked after these moves, whatever else is moved: neither the lesson nor the one in its way is"""
+        done = {i for x in moves for i in _ids(x["fix"])}
+        return [b for b in self.blocked if b[0] not in done and b[1] not in done]
+
     def _children(self, failed):
-        """each list that is no answer with one move more, put first: of a lesson that may help it, not a band, not moved by an earlier target, not moved by the list already"""
+        """each list that is no answer with one move more, put first: of a lesson that may help it and that the list has not moved already.
+        One with more lessons still in the way than moves may follow is left out"""
         for (moves, parts), ways in failed:
-            done = {i for x in moves for i in _ids(x["fix"])}; may = {}
+            done = {i for x in moves for i in _ids(x["fix"])}; able = {}
             for i, why in ways:
-                if i in self.rows and i not in done and i not in self.moved and not fixes._block(self.rows[i]): may.setdefault(i, why)
-            for i, why in list(may.items())[:CAND_LESSONS]:
+                if i not in done and self._may(i): able.setdefault(i, why)
+            for i, why in list(able.items())[:CAND_LESSONS]:
                 for x in self._places(i):
-                    child = ((dict(x, why=why),) + moves, parts)
-                    if not _ids(x["fix"]) & done and self._new(child): yield child
+                    child = ((dict(x, why=why),) + moves, parts); left = MAX_MOVES - len(child[0])
+                    if not _ids(x["fix"]) & done and len({y for _, y, _ in self._still(child[0])}) <= left and self._new(child): yield child
 
     def run(self):
         """the best answer of the fewest moves that has one, or None"""
@@ -347,28 +368,32 @@ class _Search:
             for k in range(MAX_MOVES + 1):
                 failed, opened = [], []
                 for node in level:
+                    if still := self._still(node[0]): self._in_time(); failed.append((node, _either(still))); continue   # the new teacher is busy then: the judge would refuse it
                     how, c = self._look(node)
                     if how == "open" and node[1]: opened.append(node)
                     elif how != "solved": failed.append((node, self._ways(node, how, c)))
                 for node in opened:
                     if self.solved or self._grow(node, failed): break
                 if self.solved: break
+                if k == 0 and self.target["kind"] == "teachers":
+                    self.blocked = _blocked(self.m, self.ctx["busy"], self.cands[0][0])
+                    if not all(self._may(y) or self._may(i) for i, y, _ in self.blocked): break   # one of them stays blocked whatever moves
                 level = self._children(failed)   # made as they are looked at
         except _Stop: pass   # the best found so far
         return self._best()
 
     # ------------------------------------------------------------ the answer
     def _best(self):
-        """the answer ranked first: the fewest moves to another day, the fewest typed rules touched, the nearest moves, the fewest allowances gone over, then direct's order, then the words"""
+        """the answer ranked first: the fewest lessons moved (a swap moves two), the fewest moves to another day, the fewest typed rules touched, the
+        nearest moves, the fewest allowances gone over, then direct's order, then the words"""
+        at = {x["id"]: (x["d"], x["p"]) for x in self.m["lessons"]}
         def entry(node, c):
+            moved = {x["id"] for x in c["lessons"] if x["id"] in at and at[x["id"]] != (x["d"], x["p"])}
             typed = {int(w["key"].split(":")[1]) for w in verify.typed_again(dict(self.m, lessons=c["lessons"]), self.spec, c["touched"], c["was"])}
             moves, parts = node; other = sum(x["other"] for x in moves); fx = self._fixes(node)
-            return (other, len(typed), sum(x["dist"] for x in moves), sum(len(j["prefer"]) for j in c["steps"]), parts, repr(fx)), node, c, typed, other, fx
-        if not self.solved: return None
-        _, (moves, parts), c, typed, other, fx = min((entry(*s) for s in self.solved), key=lambda e: e[0])
-        at = {x["id"]: (x["d"], x["p"]) for x in self.m["lessons"]}
-        return dict(fixes=fx, moved={x["id"] for x in c["lessons"] if x["id"] in at and at[x["id"]] != (x["d"], x["p"])}, other=other, typed=typed,
-                    why=[x["why"] for x in moves] + [self._why(f) for j in parts for f in self.cands[j]])
+            rank = (len(moved), other, len(typed), sum(x["dist"] for x in moves), sum(len(j["prefer"]) for j in c["steps"]), parts, repr(fx))
+            return rank, dict(fixes=fx, moved=moved, other=other, typed=typed, why=[x["why"] for x in moves] + [self._why(f) for j in parts for f in self.cands[j]])
+        return min((entry(*s) for s in self.solved), key=lambda e: e[0])[1] if self.solved else None
 
     def _why(self, f):
         """why a change of step 5 itself is made"""
