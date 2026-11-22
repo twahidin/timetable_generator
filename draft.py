@@ -48,10 +48,12 @@ _cache = {}                 # one entry: the model of the draft with its fixes a
 def _p(name): return os.path.join(DIR, name)
 def exists(): return os.path.exists(_p("meta.json"))
 
-def paths():
-    """(setup workbook or None, timetable file) of the draft"""
-    tp = next(os.path.join(DIR, f) for f in sorted(os.listdir(DIR)) if f.startswith("timetable."))
-    return (_p("setup.xlsx") if os.path.exists(_p("setup.xlsx")) else None), tp
+def paths(folder=None):
+    """(setup workbook or None, timetable file) of the draft, or of folder (a copy of it)"""
+    d = folder or DIR
+    tp = next(os.path.join(d, f) for f in sorted(os.listdir(d)) if f.startswith("timetable."))
+    sp = os.path.join(d, "setup.xlsx")
+    return (sp if os.path.exists(sp) else None), tp
 
 def model(spec): return model_from_files(*paths(), spec=spec)
 
@@ -98,11 +100,18 @@ def model_now(rec=None):
         meta = store.read_json(_p("meta.json"), {}); fl = meta.get("fixes") or []
         key = (meta.get("uploaded_at"), meta.get("upload_id"), rec["v"], json.dumps(fl, sort_keys=True))
         if _cache.get("key") == key: return _cache["m"], rec, _cache["fx"]
-        args = paths()
-    fx = {}; m = model_from_files(None, args[1], spec=spec, edit=fixes.editor(fl, fx))   # no re-read of the setup workbook: the spec is given
+    m, rec, fx = model_in(DIR, rec)
+    with _lock: _cache.clear(); _cache.update(key=key, m=m, fx=fx)
+    return m, rec, fx
+
+def model_in(folder, rec=None):
+    """model_now for any draft folder (a copy of the draft): (model, setup record, fx) with that folder's fixes applied, and no shared cache"""
+    rec = rec or store.setup_record(); spec = rec["spec"]
+    if not spec: raise LookupError("no setup")
+    meta = store.read_json(os.path.join(folder, "meta.json"), {}) or {}
+    fx = {}; m = model_from_files(None, paths(folder)[1], spec=spec, edit=fixes.editor(meta.get("fixes") or [], fx))   # no re-read of the setup workbook: the spec is given
     if meta.get("config_id"): m["setup"].setdefault("school", {})["config_id"] = meta["config_id"]
     fx.setdefault("pool", []); m["pool"] = fx["pool"]
-    with _lock: _cache.clear(); _cache.update(key=key, m=m, fx=fx)
     return m, rec, fx
 
 def _unique(ws):
@@ -172,17 +181,42 @@ def _no_teacher(ws):
         if re.fullmatch(r"dep:.+:teachers(?:#\d+)?", w["key"]) and (w.get("sides") or {}).get("timetable") == "":
             w["text"] = w["text"].replace(" is taught by  on the timetable;", " has no teacher on the timetable;", 1)
 
-def _build(m=None, rec=None, fx=None):
+def _warned(m, fx):
+    """verify.warnings of the model with the warnings of the draft's own laid on (what step 8 lists, before decisions)"""
+    pool = fx.get("pool") or []
+    ws = verify.warnings(m, touched=fx["touched"], was=fx.get("was") or ())
+    ws["warnings"] = ws["warnings"] + _own_warnings(m, pool); _withhold(ws["warnings"], pool); _no_teacher(ws["warnings"])
+    return ws
+
+def tally(warnings, decisions):
+    """the warnings with their decision laid on, and how many are open and critical: dict(warnings, open, critical). A decision whose warning is gone is
+    dropped, except the step5 ones, and one that says "left" is dropped (its warning is open again); "met" and "step5" settle a warning. Pure."""
+    keys = {w["key"] for w in warnings}
+    decisions = {k: d for k, d in decisions.items() if d.get("answer") != "left" and (k in keys or d.get("answer") == "step5")}
+    ws = [dict(w, decision=decisions.get(w["key"])) for w in warnings]
+    return dict(warnings=ws, open=sum(1 for w in ws if not w["decision"]), critical=sum(1 for w in ws if w.get("crit")))
+
+def counts(m, rec, fx=None, decisions=None):
+    """dict(critical, warnings) of the model as step 8 counts them: critical as the draft counts it, warnings = those with no decision that are not critical. Writes nothing."""
+    fx = fx or dict(texts=[], problems=[], touched=set(), was=[], pool=[])
+    t = tally(_warned(m, fx)["warnings"], decisions or {})
+    return dict(critical=t["critical"], warnings=sum(1 for w in t["warnings"] if not w["decision"] and not w.get("crit")))
+
+def checked_in(folder, rec=None):
+    """counts of the draft folder (a copy of the draft) checked against the setup (or rec)"""
+    m, rec, fx = model_in(folder, rec)
+    return counts(m, rec, fx, store.read_json(os.path.join(folder, "decisions.json"), {}) or {})
+
+def _build(m=None, rec=None, fx=None, folder=None):
     """the draft with its fixes applied, checked against the setup as it is now (or rec, a setup record): the fields of info()
     before decisions are laid over them. m: a model already built (by save, with no fixes yet, or with its rec and fx from model_now)."""
-    if m is None: m, rec, fx = model_now(rec)
+    if m is None: m, rec, fx = model_in(folder, rec) if folder else model_now(rec)
     else:
         rec = rec or store.setup_record(); fx = fx or dict(texts=[], problems=[], touched=set(), was=[], pool=[])
         if not rec["spec"]: raise LookupError("no setup")
     spec = rec["spec"]
-    with _lock: meta = store.read_json(_p("meta.json"), {})
-    ws = verify.warnings(m, touched=fx["touched"], was=fx.get("was") or ()); ch = m["checks"]; pool = fx.get("pool") or []
-    ws["warnings"] = ws["warnings"] + _own_warnings(m, pool); _withhold(ws["warnings"], pool); _no_teacher(ws["warnings"])
+    with _lock: meta = store.read_json(os.path.join(folder or DIR, "meta.json"), {})
+    ws = _warned(m, fx); ch = m["checks"]; pool = fx.get("pool") or []
     cid, ver = meta.get("config_id") or "", rec["v"]; got = re.fullmatch(r"v(\d+)", cid)
     state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
              "same" if int(got[1]) == ver else "older" if int(got[1]) < ver else "newer")
@@ -205,10 +239,9 @@ def _finish(j, change=None):
         if change:
             if change[1] is None: decisions.pop(change[0], None)
             else: decisions[change[0]] = change[1]
+        t = tally(j["warnings"], decisions); ws = t["warnings"]
         decisions = {k: d for k, d in decisions.items() if d.get("answer") != "left" and (k in keys or d.get("answer") == "step5")}
-        ws = [dict(w, decision=decisions.get(w["key"])) for w in j["warnings"]]
-        n = sum(1 for w in ws if not w["decision"])   # "met" and "step5" settle a warning
-        crit = sum(1 for w in ws if w.get("crit"))
+        n, crit = t["open"], t["critical"]
         if exists():
             store.write_json(_p("decisions.json"), decisions)
             store.write_json(_p("meta.json"), dict(store.read_json(_p("meta.json"), {}), open=n, critical=crit))
@@ -633,10 +666,10 @@ def undo():
         store.write_json(_p("meta.json"), dict(meta, fixes=fl, published_fixes=min(meta.get("published_fixes", 0), len(fl))))
         return info()
 
-def database(path):
+def database(path, folder=None):
     """the draft with its fixes as a timetable database at path, its setup labelled with the setup's version now (on a copy:
     the cached model is shared). NotPlaced while a lesson waits in Not placed."""
-    m, rec, fx = _now()
+    m, rec, fx = model_in(folder) if folder else _now()
     if fx["pool"]: raise NotPlaced(_count(fx["pool"]))
     setup = dict(m["setup"]); setup["school"] = dict(setup.get("school") or {}, config_id=f"v{rec['v']}")
     write_db(m, path, spec=setup)
