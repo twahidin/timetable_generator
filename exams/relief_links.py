@@ -46,7 +46,8 @@ class Links:
         self.bnds = _days.bounds(self.model) if self.model else []
         self._days, self._weeks = {}, {}
         self._duties = None
-        self._unread, self._dates = bool(unread), set()     # a schedule's file could not be read; the dates that could not
+        self._unread = bool(unread) or not all(self._date(s.get(k)) for s in self.scheds for k in ("start", "end"))
+        self._dates = set()         # the dates that could not be read (_unread: a schedule's file, or its own dates, could not)
 
     @classmethod
     def load(cls, pub, cal):
@@ -54,7 +55,7 @@ class Links:
         return cls(pub, cal, scheds, unread=bad)
 
     def unread(self, date) -> bool:
-        """something about the date could not be read (a schedule's file, whose dates are not known then; the date; or the
+        """something about the date could not be read (a schedule's file or its own dates, so any date may be; the date; or the
         duties of a schedule holding it), so a lesson said to run may be stopped and someone said to be free may be on a duty"""
         iso = _iso(date)
         self._day(iso)
@@ -68,83 +69,109 @@ class Links:
             return None
 
     def _day(self, date):
-        """for one date: the timetable day, {key: text} of the lessons that do not run, {key: running-period set}"""
+        """for one date: the timetable day, {key: text} of the lessons that do not run, {key: running-period set}, and the
+        windows each schedule holds its classes in. A date that cannot be read (any damage) is as one with nothing on it (one
+        log line; unread says so)"""
         iso = _iso(date)
         if iso in self._days:
             return self._days[iso]
-        out = dict(day=None, stopped={}, runs={})
-        self._days[iso] = out
+        self._days[iso] = dict(day=None, stopped={}, runs={}, wins=[])
         d = self._date(date)
         if d is None or not self.bnds or not self.scheds or not self.model.get("days"):
-            return out
+            return self._days[iso]
         if not any(str(s.get("start") or "") <= iso <= str(s.get("end") or "") for s in self.scheds) and iso not in self._by_name():
-            return out          # no schedule that date: every lesson runs and nobody is on a duty
+            return self._days[iso]          # no schedule that date: every lesson runs and nobody is on a duty
         try:
-            day = school_day(self.cal, self.model["days"], d)
-            if day is None:
-                return out
-            view = _days.merged_view(self.pub, self.cal, self.scheds, iso)
-            wins = [(s, _days._windows(s, iso, self.model, self.bnds)) for s in self.scheds]
-        except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+            self._days[iso] = self._read_day(iso, d)
+        except Exception:
             logger.exception("exams: relief links could not read %s", iso)        # once a date: the answer is kept
             self._dates.add(iso)
+        return self._days[iso]
+
+    def _read_day(self, iso, d):
+        out = dict(day=school_day(self.cal, self.model["days"], d), stopped={}, runs={}, wins=[])
+        if out["day"] is None:
             return out
-        out["day"] = day
+        view = _days.merged_view(self.pub, self.cal, self.scheds, iso)
+        out["wins"] = [(s, _days._windows(s, iso, self.model, self.bnds)) for s in self.scheds]
         for r in view["lessons"]:
             L = self.model["lessons"][r["row"]]
-            key = key_of(self.model, r["row"], iso, day)
+            key = key_of(self.model, r["row"], iso, out["day"])
             p0, n = int(L["p"]), int(L.get("n") or 1)
             periods = range(p0, min(p0 + n, len(self.bnds)))
             out["runs"][key] = {p for p in periods if not any(a <= self.bnds[p][0] and self.bnds[p][1] <= b for a, b in r["stopped"])}
-            if r["running"] or not r["stopped"]:
-                continue
-            held = []
-            for s, w in wins:      # a class is named for each schedule whose window overlaps the stopped time (two may meet mid-period)
-                mine = [c for c in r["classes"] if c in w and any(w[c][0] < b and a < w[c][1] for a, b in r["stopped"])]
-                if mine:
-                    held.append((min(w[c][0] for c in mine), s["name"], mine))
-            held.sort(key=lambda h: h[0])
-            classes = [c for c in r["classes"] if any(c in h[2] for h in held)]
-            out["stopped"][key] = "%s %s on %s" % (", ".join(classes), "is" if len(classes) == 1 else "are",
-                                                    _names([h[1] for h in held]))
+            if not r["running"] and r["stopped"]:
+                out["stopped"][key] = self._why(r["classes"], r["stopped"], out["wins"])
         return out
 
+    def _why(self, classes, spans, wins):
+        """"3B is on Sec 3 End-of-Year Exam" for classes stopped over spans [(start, end)]: a class is named for each schedule
+        whose window overlaps the stopped time (two may meet mid-period)"""
+        held = []
+        for s, w in wins:
+            mine = [c for c in classes if c in w and any(w[c][0] < b and a < w[c][1] for a, b in spans)]
+            if mine:
+                held.append((min(w[c][0] for c in mine), s["name"], mine))
+        held.sort(key=lambda h: h[0])
+        named = [c for c in classes if any(c in h[2] for h in held)]
+        return "%s %s on %s" % (", ".join(named), "is" if len(named) == 1 else "are", _names([h[1] for h in held]))
+
     def stopped(self, lesson) -> str:
-        """why a lesson does not run on its date: "3B is on Sec 3 End-of-Year Exam"; "" when a period of it runs"""
-        return self._day(lesson["date"])["stopped"].get(lesson["key"], "")
+        """why a lesson does not run on its date: "3B is on Sec 3 End-of-Year Exam"; "" when a period of it runs. A lesson no
+        longer on the published timetable under its key (an absence keeps the key it was sent with; a new publish may have
+        moved it or renamed its group) is read by its own periods and classes"""
+        d = self._day(lesson["date"])
+        if lesson.get("key") in d["runs"] or not d["wins"]:
+            return d["stopped"].get(lesson.get("key"), "")
+        windows = {}
+        for _, w in d["wins"]:
+            for c, at in w.items():
+                windows.setdefault(c, []).append(at)
+        try:
+            span = self._span(int(lesson["p"]), int(lesson.get("n") or 1))
+            if span is None or not _held(lesson, self.bnds, windows):
+                return ""
+            return self._why(list(lesson["classes"]), [span], d["wins"])
+        except (KeyError, TypeError, ValueError):
+            return ""
 
     def _by_name(self):
         """{iso: {name: [(start, end, what, replaces)]}} from the approved duties and events, by start; a schedule that cannot
-        be read gives none (one log line)"""
+        be read gives none (one log line; unread says so)"""
         if self._duties is not None:
             return self._duties
         out = self._duties = {}
         self._spans = []            # the (start, end) of the schedules whose duties cannot be read
         if not self.bnds or not self.scheds:
             return out
-        by_id = {s["id"]: s for s in self.scheds}
-        rows = []
         for s in self.scheds:
             try:
-                rows += _schedules.busies([s], self.model)
-            except (ValueError, KeyError, TypeError, AttributeError):
+                rows = [self._duty(b, s) for b in _schedules.busies([s], self.model)]
+            except Exception:
                 logger.exception("exams: relief links could not read the duties of schedule %s", s.get("id"))
-                self._spans.append((str(s.get("start") or ""), str(s.get("end") or "9999")))
-        for b in rows:
-            s = by_id.get(b["id"])
-            if s is None or not b.get("names"):
+                a, b = str(s.get("start") or ""), str(s.get("end") or "")
+                self._spans.append((a, b) if self._date(a) and self._date(b) else ("", "9999"))
                 continue
-            if s.get("kind") == _schedules.EVENT:
-                what, replaces = AT_EVENT % s.get("name"), "%s, the teacher in charge" % s.get("in_charge")
-            else:
-                what = INVIGILATING % s.get("name") + (" · %s" % b["room"] if b.get("room") else "")
-                replaces = EXAMS_COMMITTEE
-            for n in b["names"]:
-                out.setdefault(b["date"], {}).setdefault(n, []).append((b["start"], b["end"], what, replaces, s))
+            for iso, names, row in rows:
+                for n in names:
+                    out.setdefault(iso, {}).setdefault(n, []).append(row)
         for names in out.values():
             for v in names.values():
                 v.sort(key=lambda x: x[0])
         return out
+
+    def _duty(self, b, s):
+        """one busy of schedule s -> (ISO date, names, (start, end, what, replaces, s)); a damaged one raises"""
+        names, a, z = b["names"], b["start"], b["end"]
+        if self._date(b["date"]) is None or not isinstance(names, list) or not all(isinstance(n, str) for n in names) \
+                or not all(isinstance(m, int) for m in (a, z)):
+            raise ValueError("a duty that cannot be read")
+        if s.get("kind") == _schedules.EVENT:
+            what, replaces = AT_EVENT % s.get("name"), "%s, the teacher in charge" % s.get("in_charge")
+        else:
+            what = INVIGILATING % s.get("name") + (" \u00b7 %s" % b["room"] if b.get("room") else "")
+            replaces = EXAMS_COMMITTEE
+        return _iso(b["date"]), names, (a, z, what, replaces, s)
 
     def _mine(self, name, date):
         d = self._date(date)

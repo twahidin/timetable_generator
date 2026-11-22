@@ -176,7 +176,7 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
                 not_needed = None if needed else dict(by=by, why="Not needed")
             built.append(dict(x, date=x["date"].isoformat(), others=there, needed=needed, not_needed=not_needed, relief=None, relief_by=None,
                               work=dict(text="", link="", files=[]), _ask=a, _stopped=bool(_cover.stopped(links, x))))
-        if not any(x["needed"] for x in built) and not (links is not None and any(links.duties(teacher, d, tuple(periods) if periods else None) for d in dates)):
+        if not any(x["needed"] or x["_stopped"] for x in built) and not (links is not None and any(links.duties(teacher, d, tuple(periods) if periods else None) for d in dates)):
             raise ValueError("There are no lessons to cover in that time.")
         _no_overlap(records, teacher, [x for x in built if x["needed"]])
         pending = dict(teacher=teacher, dates=[d.isoformat() for d in dates], periods=periods, cancelled=None, lessons=[])
@@ -299,7 +299,7 @@ def _backup_lesson(records, teacher, x, links):
     """one lesson of a backup (x from lessons.on_date): needed unless one of its other teachers is there (there_then, as new
     decides), no relief, no work; None while the teacher is away in an absence of their own (that absence covers it)"""
     iso = _free._iso(x["date"])
-    try: away = _free._absent_then([r for r in records if not r.get("exams")], teacher, iso, x["p"], x["n"])
+    try: away = _free._absent_then([r for r in records if not r.get("exams")], teacher, iso, x["p"], x["n"], links=links)
     except (KeyError, TypeError, ValueError, IndexError): away = False      # a malformed absence never stops a backup
     if away: return None
     there = _free.there_then(records, x.get("others") or [], iso, x["p"], x["n"], links=links)

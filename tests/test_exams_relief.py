@@ -1846,6 +1846,13 @@ def an_absence_whose_lessons_all_stop_is_taken():
         busy = SC.elsewhere("x", M)
         assert [b["why"] for b in busy if b["names"] == [CHLOE] and b["id"] == "relief"] == ["is away then (relief)"], "the exams committee sees who is away"
         _fresh()
+        M["lessons"][1]["teachers"] = [CHLOE, HAFIZ]            # with a co-teacher there, its lesson is not needed, and still stopped
+        try:
+            _exam(duty_names=(IVAN,))
+            r = staff(CHLOE).post("/api/relief/absences", json=dict(dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[]))
+            assert r.status_code == 200 and r.get_json()["lessons"][0]["needed"] is False, r.get_json()
+        finally: M["lessons"][1]["teachers"] = [CHLOE]
+        _fresh()
         r = staff(BEN).post("/api/relief/absences", json=dict(dates=["2027-01-05"], reason="Medical", reporting_officer=GRACE, lessons=[]))
         assert r.status_code == 400 and r.get_json()["error"] == "There are no lessons to cover in that time.", "still refused with no lesson at all"
 
@@ -1955,6 +1962,34 @@ def links_say_what_they_could_not_read():
         assert L.unread(MON) and not L.unread("2027-02-01"), "the duties of a schedule could not be read: the dates it holds"
     finally: RL.logger.exception, RL._days.merged_view, RL._schedules.busies = lg, old_view, old_busies
     assert not RL.Links(None, CAL, []).unread(MON)
+    # damage inside a schedule: it never raises, once or again, and says so
+    lg = RL.logger.exception
+    RL.logger.exception = lambda *a, **k: None
+    def hurt(f, far="2027-02-01"):
+        _clear(); e = _exam(duty_names=(AISHA,)); ap = AP.as_schedule(SC.load(e["id"])); f(ap)
+        L = RL.Links(PUB, CAL, [ap])
+        for _ in range(2):
+            L.stopped(dict(key=CKEY, date=ISO)); L.busy(AISHA, MON, 0, 1); L.duties(AISHA, MON); L.week_change(AISHA, [MON])
+        return L.unread(MON), L.unread(MON), L.unread(far)
+    try:
+        assert hurt(lambda ap: ap.pop("name")) == (True, True, False), "the text of a stop needs the name"
+        for bad in (dict(start="07:40"), dict(start=None), dict(names=[1]), dict(date="Monday")):
+            assert hurt(lambda ap: ap["made"]["duties"][0].update(bad)) == (True, True, False), bad
+        assert hurt(lambda ap: ap["made"]["duties"].append(dict(ap["made"]["duties"][0], start="x")))[0], "one good duty and one bad"
+        for k in ("start", "end"):
+            for v in ("x", None): assert hurt(lambda ap: ap.update({k: v})) == (True, True, True), (k, v)
+    finally: RL.logger.exception = lg
+    _clear()
+    with open(path, "w", encoding="utf-8") as f: f.write("{}")
+    old = store.read_json
+    def gone(p, default=None):              # deleted between the listing and the reading
+        if p == path and os.path.exists(path): os.remove(path)
+        return old(p, default)
+    store.read_json = gone
+    try: assert not RL.Links.load(PUB, CAL).unread(MON), "a file deleted meanwhile is simply gone"
+    finally:
+        store.read_json = old
+        if os.path.exists(path): os.remove(path)
 
 @t
 def the_relief_teachers_steps_and_keep_refuse_a_stopped_lesson():
@@ -1982,7 +2017,40 @@ def the_relief_teachers_steps_and_keep_refuse_a_stopped_lesson():
 @t
 def a_cancel_by_the_app_is_not_shown_as_a_person():
     js = {f: open(os.path.join(ROOT, "static", f), encoding="utf-8").read() for f in ("relief.js", "relief-plan.js", "relief-inbox.js")}
-    for f, code in js.items(): assert '.by === "app"' in code, f
+    for f, code in (("relief.js", 'r.cancelled.by === "app" ? ""'), ("relief-plan.js", 'r.cancelled.by === "app" ? ""'), ("relief-inbox.js", 'c.by === "app" ? ""')):
+        assert code in js[f], f
+
+@t
+def a_stopped_lesson_stays_stopped_when_a_publish_changes_its_key():
+    _fresh()
+    with published(PUB):
+        _exam(duty_names=(IVAN,))
+        i = _plan(CHLOE, links=_links())["id"]
+        was = M["lessons"][1]["group"]
+        M["lessons"][1]["group"] = "Renamed"                # a new publish: the key the absence holds is no longer on the timetable
+        try:
+            x = AB.load(i)["lessons"][0]
+            assert x["key"] not in _links()._day(ISO)["runs"] and _links().stopped(x) == STOP
+            assert FL.run(ids=[i], now=DEC) == dict(picked=0, nobody=0) and CV.state(*_cov(i, CKEY)) == "open"
+            row = next(v for v in ok(_relief_team().get("/api/relief/today?date=" + ISO))["rows"] if v["ckey"] == CKEY)
+            assert row["state"] == "stopped" and row["stopped"] == STOP, row
+            for odd in (dict(x, p="x"), dict(x, p=None), dict(x, classes=None), dict(x, classes=[]), dict(x, p=99)): assert _links().stopped(odd) == "", odd
+            assert _links().stopped(dict(x, classes=["3B", "4A"])) == "", "a class of it is not on the exam"
+            assert _links().stopped(dict(x, p=20, n=1)) == STOP, "read by its own periods (a whole day)"
+        finally: M["lessons"][1]["group"] = was
+
+@t
+def a_stopped_lesson_of_ones_own_takes_no_time_from_a_relief():
+    _fresh()
+    with published(PUB):
+        i = _plan(DANIEL)["id"]                             # 4A Mathematics, periods 2-3
+        CV.change(i, DKEY, CHLOE, GRACE, PUB, ST, links=RL.Links(PUB, CAL, [AP.as_schedule(_exam(duty_names=(IVAN,)))]))
+        _plan(CHLOE, links=_links(), periods=[0, 0])        # away from period 1 alone; her stopped double is periods 1-2
+        assert CV.stale(PUB, ST, AB.all_records(), *_cov(i, DKEY), links=_links()) is False, "she is there for period 2: the double does not happen"
+        assert CHLOE in FR.there_then(AB.all_records(), [CHLOE], MON, 1, 1, links=_links())
+        assert CHLOE not in FR.there_then(AB.all_records(), [CHLOE], MON, 0, 1, links=_links()), "period 1 she is away"
+        _clear()
+        assert CV.stale(PUB, ST, AB.all_records(), *_cov(i, DKEY), links=_links()) is True, "the exam withdrawn, the double happens, and she is away for it"
 
 
 _clear()

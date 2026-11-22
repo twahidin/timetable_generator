@@ -57,15 +57,17 @@ def week_so_far(pub, cal, records, name, date, skip=None, links=None):
     return total + links.week_change(name, dates) if links is not None else total
 
 
-def _absent_then(records, name, iso, p, n):
+def _absent_then(records, name, iso, p, n, links=None):
     """name is away then: an absence of theirs over its periods, or a needed lesson of it overlapping. A backup (exams: the
     person is on an exam duty or at an event) is read by its needed lessons only: its periods are the span of its lessons, for
-    the pages, not time away"""
+    the pages, not time away. With links, a lesson an approved exam or event stops takes nobody's time (the absence's own
+    periods still do)"""
     for r in records:
         if r.get("cancelled") or r.get("teacher") != name or iso not in [_iso(d) for d in r.get("dates") or []]: continue
         per = r.get("periods")
         if not r.get("exams") and (per is None or _overlap(per[0], per[1] - per[0] + 1, p, n)): return True
-        if any(x.get("needed") and _iso(x["date"]) == iso and _overlap(x["p"], int(x.get("n") or 1), p, n) for x in r.get("lessons") or []): return True
+        if any(x.get("needed") and _iso(x["date"]) == iso and _overlap(x["p"], int(x.get("n") or 1), p, n) and not _cover.stopped(links, x)
+               for x in r.get("lessons") or []): return True
     return False
 
 
@@ -73,7 +75,7 @@ def there_then(records, names, date, p, n, links=None):
     """the names (a lesson's other teachers) not away on date (a date or an ISO string) at any of the periods p..p+n-1,
     and (with links) not on an exam duty or at an event then"""
     iso = _iso(date)
-    return [x for x in names if not _absent_then(records, x, iso, int(p), int(n or 1))
+    return [x for x in names if not _absent_then(records, x, iso, int(p), int(n or 1), links=links)
             and not (links is not None and links.busy(x, iso, int(p), int(n or 1)))]
 
 
@@ -137,7 +139,7 @@ def free_then(pub, settings, records, lesson, absent, links=None):
         why = links.busy(name, date, p, n) if links is not None else ""
         if why:
             busy.append(dict(name=name, why=why)); continue
-        if _absent_then(records, name, iso, p, n) or _chosen_then(records, name, iso, p, n, lesson.get("key"), absent, links=links) or name in never: continue
+        if _absent_then(records, name, iso, p, n, links=links) or _chosen_then(records, name, iso, p, n, lesson.get("key"), absent, links=links) or name in never: continue
         marks, blocked = [], False
         for r in rules:
             if r.get("rule") == "Not available" and r.get("scope") == "Teacher" and r.get("target") == name and _rule_hits(r, day, p, n):
