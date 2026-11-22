@@ -337,22 +337,29 @@ def busies(copies, model) -> list:
     return [b for c, bs in mine for b in bs if not (c["status"] == "waiting" and key(b) in held.get(c["id"], ()))]
 
 
-def elsewhere(id, model=None) -> list:
-    """what the other schedules hold (see busies); model None: the published timetable's"""
+def elsewhere(id, model=None, own=None) -> list:
+    """what the other schedules hold (see busies), and relief (relief_busy); own: the copy of schedule id being worked on
+    (the working copy, or the approved one when someone is replaced on it; None: the saved working copy); model None: the
+    published timetable's"""
     if model is None:
         pub = store.published()
         model = pub["model"] if pub else None
-    return busies(copies(id), model) + relief_busy(model)
+    return busies(copies(id), model) + relief_busy(model, id, own)
 
 
-def relief_busy(model) -> list:
-    """relief's own busies (people away, people covering relief) on the published timetable; imported here because
-    exams.relief_links imports this module"""
+def relief_busy(model, id=None, own=None) -> list:
+    """relief's own busies (people away, people approved to cover relief) on the published timetable, less the covers of
+    lessons that the copy own of schedule id (None: its saved working copy) or another approved schedule stops; the schedules
+    are read only when someone is approved to cover. Imported here because exams.relief_links imports this module"""
     if not model:
         return []
     from exams import relief_links
     from relief import absences
-    return relief_links.relief_busies(model, absences.all_records())
+
+    def scheds():
+        mine = own if own is not None else (load(id) if id else None)
+        return [s for s in on_site() if s.get("id") != id] + ([mine] if mine else [])
+    return relief_links.relief_busies(model, absences.all_records(), scheds)
 
 
 def shared_line(model, s, tag, date, start, end, classes) -> str:

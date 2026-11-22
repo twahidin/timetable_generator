@@ -1,8 +1,9 @@
 "use strict";
 /* What's in (/relief#inbox), for the relief team (me.can_team), read-only: every absence, newest first, with when it came
    in, who sent it and how, for whom and when, the reason, whether the absent teacher has acknowledged (when someone else
-   planned it), how many lessons have work and how many have a relief teacher; cancelled ones dimmed. Views: Coming up,
-   Today, Earlier (every date past, not cancelled), Cancelled: every absence is in one of them. "new" = came in since this
+   planned it), how many lessons have work and how many reliefs are approved, waiting or open (from the server's cover
+   counts); cancelled ones dimmed. Views: Coming up, Needs a nudge (planned by someone else, not acknowledged, and past
+   the time to remind them), Today, Earlier (every date past, not cancelled), Cancelled: every absence is in one of them (Needs a nudge only picks some of Coming up's). "new" = came in since this
    person last looked, counted over the absences the views show, and each view says how many of its own are new. The
    list is read with a GET, which never writes; once it is shown, the page posts the list's as_of to
    /api/relief/absences/seen. */
@@ -13,6 +14,7 @@
   const lastDate = r => (r.dates || []).slice().sort().pop() || "";
   const VIEWS = [
     ["coming", "Coming up", r => !r.cancelled && lastDate(r) >= RF.today(), "Nothing coming up."],
+    ["nudge", "Needs a nudge", r => !!r.nudge, "Nobody needs a nudge."],
     ["today", "Today", r => !r.cancelled && (r.dates || []).includes(RF.today()), "No one is away today."],
     ["earlier", "Earlier", r => !r.cancelled && lastDate(r) < RF.today(), "Nothing earlier."],
     ["cancelled", "Cancelled", r => !!r.cancelled, "Nothing cancelled."],
@@ -25,9 +27,18 @@
     return `${d === RF.today() && !plain ? "Today" : day(d)}${/^\d{2}:\d{2}$/.test(t) ? `, ${t}` : ""}`;
   }
 
+  function status(r) {   /* "3 of 5 approved", "2 waiting", "1 open" from the server's cover counts */
+    const c = r.cover || { total: 0, approved: 0, waiting: 0, open: 0 };
+    if (!c.total) return `<span class="muted">—</span>`;
+    const bits = [c.approved === c.total ? `${c.approved} approved` : `${c.approved} of ${c.total} approved`];
+    if (c.waiting) bits.push(`${c.waiting} waiting`);
+    if (c.open) bits.push(`${c.open} open`);
+    return `<span class="${c.approved === c.total ? "chip st-ok" : c.open ? "chip st-amber" : "chip"}">${esc(bits.join(" · "))}</span>`;
+  }
+
   function row(r) {
-    const all = r.lessons || [], cover = all.filter(x => x.needed), n = cover.length;
-    const work = cover.filter(hasWork).length, chosen = cover.filter(x => x.relief).length;
+    const all = r.lessons || [], cover = all.filter(x => x.needed && !x.stopped), n = cover.length;
+    const work = cover.filter(hasWork).length;
     const changed = !r.cancelled && all.some(x => x.changed && x.date >= RF.today());
     const when = (r.dates || []).map(d => d === RF.today() ? "Today" : day(d)).join(", ");
     const how = r.how === "planned" ? "planned · app" : "for themselves · app";
@@ -39,7 +50,7 @@
       const ack = r.how !== "planned" ? `<span class="small muted">their own request</span>`
         : r.acknowledged ? `<span class="chip st-ok">✓ ${esc(stamp(r.acknowledged.at) || "acknowledged")}</span>` : `<span class="chip st-amber">not acknowledged yet</span>`;
       const w = n ? `<span class="${work === n ? "chip st-ok" : ""}">${work} of ${n}</span>` : `<span class="muted">none to cover</span>`;
-      const rel = n ? `<span class="${chosen === n ? "chip st-ok" : "chip"}">${chosen} chosen · ${n - chosen} open</span>` : `<span class="muted">—</span>`;
+      const rel = status(r);
       tail = `<td>${ack}</td><td>${w}</td><td>${rel}</td>`;
     }
     return `<tr class="${[r.new ? "new" : "", r.cancelled ? "off" : ""].filter(Boolean).join(" ")}">
@@ -66,9 +77,9 @@
       <div class="ab-top"><div><h2>What's in</h2><div class="small muted">${esc(about)}</div></div>
         <div class="row"><div class="seg" role="group" aria-label="Which absences">${seg}</div><button type="button" class="small" data-in="reload" ${I.loading ? "disabled" : ""}>${I.loading ? "Reading…" : "Refresh"}</button></div></div>
       ${I.err ? `<p>${R.say(I.err)}</p>` : ""}
-      ${rows.length ? `<div class="tablewrap"><table class="rtable inbox"><thead><tr><th>Submitted</th><th>By</th><th>For</th><th>When</th><th>Reason</th><th>Absent teacher</th><th>Work</th><th>Relief</th></tr></thead>
+      ${rows.length ? `<div class="tablewrap"><table class="rtable inbox"><thead><tr><th>Submitted</th><th>By</th><th>For</th><th>When</th><th>Reason</th><th>Absent teacher</th><th>Work</th><th>Relief status</th></tr></thead>
         <tbody>${rows.map(row).join("")}</tbody></table></div>` : `<p class="muted">${esc(v[3])}</p>`}
-      <div class="note">The app's picks for open lessons, and approving them, come in the next stage.</div></div>`;
+      </div>`;
   }
 
   async function load() {

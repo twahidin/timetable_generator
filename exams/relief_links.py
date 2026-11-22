@@ -44,7 +44,7 @@ class Links:
         self.model = (pub or {}).get("model") or {}
         self.scheds = [dict(s, status="approved") for s in scheds or []]
         self.bnds = _days.bounds(self.model) if self.model else []
-        self._days = {}
+        self._days, self._weeks = {}, {}
         self._duties = None
 
     @classmethod
@@ -67,13 +67,15 @@ class Links:
         d = self._date(date)
         if d is None or not self.bnds or not self.scheds or not self.model.get("days"):
             return out
+        if not any(str(s.get("start") or "") <= iso <= str(s.get("end") or "") for s in self.scheds) and iso not in self._by_name():
+            return out          # no schedule that date: every lesson runs and nobody is on a duty
         try:
             day = school_day(self.cal, self.model["days"], d)
             if day is None:
                 return out
             view = _days.merged_view(self.pub, self.cal, self.scheds, iso)
             wins = [(s, _days._windows(s, iso, self.model, self.bnds)) for s in self.scheds]
-        except (ValueError, KeyError, IndexError, TypeError):
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError):
             logger.exception("exams: relief links could not read %s", iso)        # once a date: the answer is kept
             return out
         out["day"] = day
@@ -113,7 +115,7 @@ class Links:
         for s in self.scheds:
             try:
                 rows += _schedules.busies([s], self.model)
-            except (ValueError, KeyError, TypeError):
+            except (ValueError, KeyError, TypeError, AttributeError):
                 logger.exception("exams: relief links could not read the duties of schedule %s", s.get("id"))
         for b in rows:
             s = by_id.get(b["id"])
@@ -163,7 +165,14 @@ class Links:
 
     def week_change(self, name, dates) -> int:
         """periods more (+) or fewer (-) the person works on these dates: duty and event periods that are not a period of a
-        lesson of theirs that runs, less the periods of their lessons that stop"""
+        lesson of theirs that runs, less the periods of their lessons that stop (kept: a free list asks for everyone, once a
+        lesson)"""
+        asked = (name, tuple(_iso(d) for d in dates))
+        if asked not in self._weeks:
+            self._weeks[asked] = self._week_change(name, dates)
+        return self._weeks[asked]
+
+    def _week_change(self, name, dates) -> int:
         total = 0
         for date in dates:
             d = self._date(date)
@@ -215,10 +224,28 @@ def _away_spans(bnds, records) -> dict:
     return out
 
 
-def relief_busies(model, records) -> list:
+def _approved_covers(x) -> list:
+    """the covers of lesson x (its parts when it is split) whose relief the relief team has approved, well-formed ones only: a
+    pick still waiting is relief's to make again, and reaches nobody"""
+    parts = x.get("parts")
+    if parts and not isinstance(parts, list):
+        return []
+    return [c for c in (parts or [x]) if isinstance(c, dict) and c.get("approved") and isinstance(c.get("relief"), str) and c["relief"]]
+
+
+def _held(x, bnds, windows) -> bool:
+    """every period of lesson x stops: each of its classes has a window ({class: [(start, end)]}) holding the period"""
+    classes, p = x.get("classes") or [], int(x["p"])
+    periods = range(p, min(p + max(int(x.get("n") or 1), 1), len(bnds)))
+    return bool(classes) and bool(periods) and all(any(a <= bnds[q][0] and bnds[q][1] <= b for a, b in windows.get(c, ()))
+                                                   for q in periods for c in classes)
+
+
+def relief_busies(model, records, scheds=()) -> list:
     """busies (the shape schedules.busies gives) for relief's own records: whoever is away over their periods, and whoever
-    is chosen to cover a lesson. A cancelled record gives none; a backup record (with exams) gives only the cover. A malformed
-    record or lesson is skipped."""
+    the relief team has approved to cover a lesson (each part of a split lesson over its own periods), unless a schedule of
+    scheds (a list, or a function giving one, called only when someone is approved) stops that lesson. A cancelled record
+    gives none; a backup record (with exams) gives only the cover. A malformed record, lesson or schedule is skipped."""
     bnds = _days.bounds(model) if model else []
     out = []
     if not bnds:
@@ -231,21 +258,35 @@ def relief_busies(model, records) -> list:
     for (name, d), spans in _away_spans(bnds, records).items():
         for a, b in spans:
             busy(name, d, a, b, "is away then (relief)")
-    for r in records or []:
-        if not isinstance(r, dict) or r.get("cancelled") or not isinstance(r.get("lessons"), list):
-            continue
-        for x in r["lessons"]:
-            if not isinstance(x, dict) or not x.get("needed") or not isinstance(x.get("relief"), str) or not x["relief"]:
-                continue
-            try:
-                p = int(x["p"])
-                last = min(p + max(int(x.get("n") or 1), 1), len(bnds)) - 1
-                if p < 0 or p >= len(bnds):
+    covers = [(x, c) for r in records or [] if isinstance(r, dict) and not r.get("cancelled") and isinstance(r.get("lessons"), list)
+              for x in r["lessons"] if isinstance(x, dict) and x.get("needed") for c in _approved_covers(x)]
+    if not covers:
+        return out
+    scheds = list((scheds() if callable(scheds) else scheds) or ())     # outside the skipping below: an error reading them is not hidden
+    windows = {}
+
+    def held(x):
+        iso = _iso(x["date"])
+        if iso not in windows:
+            windows[iso] = {}
+            for s in scheds:
+                try:
+                    for c, w in _days._windows(s, iso, model, bnds).items():
+                        windows[iso].setdefault(c, []).append(w)
+                except (KeyError, ValueError, TypeError, AttributeError):
                     continue
-                busy(x["relief"], x["date"], bnds[p][0], bnds[last][1],
-                     "covers relief then (%s %s)" % (", ".join(x.get("classes") or []), x.get("subject") or ""))
-            except (KeyError, ValueError, TypeError):
+        return _held(x, bnds, windows[iso])
+
+    for x, c in covers:
+        try:
+            p = int(c["p"])
+            last = min(p + max(int(c.get("n") or 1), 1), len(bnds)) - 1
+            if p < 0 or p >= len(bnds) or held(x):
                 continue
+            busy(c["relief"], x["date"], bnds[p][0], bnds[last][1],
+                 "covers relief then (%s %s)" % (", ".join(x.get("classes") or []), x.get("subject") or ""))
+        except (KeyError, ValueError, TypeError):
+            continue
     return out
 
 
@@ -514,7 +555,8 @@ def sync_all(pub, cal, today, first=None) -> None:
 
 def mark(items, sched, records, links, today):
     """each backup item of the schedule's lessons lists (with teacher, key, date) gets state, relief and stopped, the first
-    that holds: "handled" (Handled ourselves); "relief" (relief: the name) or "sent" when relief holds it (in a backup of this
+    that holds: "handled" (Handled ourselves); "relief" (relief: the name, once the relief team has approved the whole lesson)
+    or "sent" when relief holds it (in a backup of this
     schedule, or as a needed lesson of an absence of the teacher's own: that absence covers it); "stopped" (stopped: why)
     when another approved schedule stops it (links: the other schedules' approved copies, or None); "past" when dated before
     today; "handled_elsewhere" when another schedule handled it (_handled_elsewhere); "elsewhere" when another schedule's
@@ -534,7 +576,9 @@ def mark(items, sched, records, links, today):
             if not isinstance(x, dict) or not isinstance(x.get("key"), str) or (not ex and not x.get("needed")):
                 continue
             k = (r["teacher"], x["key"])
-            name = x.get("relief") if x.get("needed") and isinstance(x.get("relief"), str) and x["relief"] else None
+            got, parts = _approved_covers(x), x.get("parts")
+            whole = x.get("needed") and got and len(got) == (len(parts) if parts else 1)
+            name = _names(sorted({c["relief"] for c in got})) if whole else None
             if k not in held or (name and not held[k]):
                 held[k] = name
     for it in items or []:

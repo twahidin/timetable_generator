@@ -15,7 +15,7 @@ from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, draft, history, store, sync, typed
 from accounts import passwords, people, rights as rights_table
-from relief import codes as relief_codes, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
+from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
 from relief import absences as relief_absences
 import exams.relief_links as exams_relief_links
 from ttgen import choices
@@ -1322,6 +1322,7 @@ def _relief_entry(what, text, absence=None):
 # relief requests: relief/web.py, every route through need(), every right through has(), every save in the history
 relief_web.init(has=has, me=who, need=need, note=_relief_entry)
 app.register_blueprint(relief_web.bp)
+if os.environ.get("RELIEF_JOBS") == "on": relief_fill.start()     # relief picks when due, every minute (the Dockerfile sets it; tests and local runs never do)
 
 # ------------------------------------------------------------------------------------------------ admins: people and the ways in
 # The named admins (committee group, Admin extra, signed in with their password) manage people here; every check is the
@@ -2005,7 +2006,8 @@ def _exam_rooms_by_key(pub, cal, sched):
     overlapping sitting of the made schedule holds is busy, so the move selects do not offer it"""
     xset = exams_settings.load(pub)
     held = exams_make.held(pub, sched, xset)
-    return {x["key"]: [[r["name"], r["seats"], r["busy"]] for r in exams_seating.rooms_free(pub, cal, sched, x, xset, held.get(x["key"], set()), elsewhere=exams_schedules.elsewhere(sched.get("id"), pub["model"]))]
+    busy = exams_schedules.elsewhere(sched.get("id"), pub["model"], own=sched)
+    return {x["key"]: [[r["name"], r["seats"], r["busy"]] for r in exams_seating.rooms_free(pub, cal, sched, x, xset, held.get(x["key"], set()), elsewhere=busy)]
             for x in exams_seating.sittings(sched)}
 
 @app.get("/exams")
@@ -2352,7 +2354,7 @@ def _exam_candidates(pub, s, key, room, approved=False):
     subjects = [papers[i]["subject"] for i in (sit or {}).get("papers", []) if i in papers]
     rest = [x for x in duties if x is not d]
     return d, exams_invigilate.candidates(pub, _exam_cal(pub), s, exams_settings.load(pub), d["date"], d["start"], d["end"], rest, subjects=subjects,
-                                          exclude=d["names"] if approved else (), elsewhere=exams_schedules.elsewhere(s.get("id"), pub["model"]))
+                                          exclude=d["names"] if approved else (), elsewhere=exams_schedules.elsewhere(s.get("id"), pub["model"], own=s))
 
 @app.get("/api/exams/<id>/who")
 @need("exams", "committee")
@@ -2387,13 +2389,17 @@ def _with_away(rows, pub):
         r["away"] = _away_texts(pub, saved[r["id"]], records) if on else []
     return rows
 
+def _reviewed(s):
+    """the copy a review reads (exams.review.review, exams.events.review): the approved one when s is approved, else s"""
+    return (exams_approval.as_schedule(s) if s.get("status") == "approved" else None) or s
+
 def _exam_review_reply(pub, s):
     """the Approval tab: state, who sent and approved, what is waiting and the review a committee reads"""
     model, xset = pub["model"], exams_settings.load(pub)
     stale = exams_make.stale(s, xset, model)
     errors = exams_papers.check(s, model, _exam_cal(pub), xset["rules"])["errors"]
     st = s.get("status") or "draft"
-    rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"), pub["model"])) if s.get("made") else None
+    rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"), pub["model"], own=_reviewed(s))) if s.get("made") else None
     if rv: _backups_left(rv, lambda: exams_make.lesson_lists(pub, _exam_cal(pub), exams_approval.as_schedule(s) if rv.get("copy") == "approved" else s), s, pub)
     return jsonify(status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
@@ -2520,11 +2526,14 @@ def exams_handled(id):
 
 # ------------------------------------------------------------------------------------------------ staff: events
 def _event_others(pub, s):
-    """(the other schedules' copies, what they hold busy) for an event"""
+    """(the other schedules' copies, what they and relief hold busy) for an event (the copy s)"""
     others = exams_schedules.copies(s.get("id"))
-    return others, exams_schedules.busies(others, pub["model"]) + exams_schedules.relief_busy(pub["model"])
+    return others, exams_schedules.busies(others, pub["model"]) + exams_schedules.relief_busy(pub["model"], s.get("id"), s)
 
 def _event_review(pub, cal, s, busy, others):
+    """others and busy: _event_others of s (what Send reads); an approved event's review reads its approved copy instead"""
+    own = _reviewed(s)
+    if own is not s: others, busy = _event_others(pub, own)
     rv = exams_events.review(pub, cal, s, busy, others)
     copy = lambda: exams_approval.as_schedule(s) if rv.get("copy") == "approved" else s
     return _backups_left(rv, lambda: exams_events.lesson_lists(pub, cal, copy()), s, pub)
@@ -2662,7 +2671,7 @@ def _event_free(pub, s):
     """who may stand in for someone going with the approved event: the names relief finds free then (freed, then free)"""
     ap = exams_approval.as_schedule(s)
     if ap is None: raise ValueError(exams_approval.NOT_ON_SITE)
-    return exams_events.who_free(pub, _exam_cal(pub), ap, exams_schedules.elsewhere(s.get("id"), pub["model"]))
+    return exams_events.who_free(pub, _exam_cal(pub), ap, exams_schedules.elsewhere(s.get("id"), pub["model"], own=ap))
 
 def _event_away(pub, s, by, now, b):
     away, name = b["away"], b["name"]
