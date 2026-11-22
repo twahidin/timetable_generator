@@ -20,8 +20,10 @@ refusals, and the same history entry and what follows it (web.step_saved), by th
 is pressed (_button): its token is in the table and has not run out (OLD_BUTTON), the chat is of the very person it was sent to
 and they have the right it needs now (NOT_YOURS_BUTTON; ACTIONS); a chat of nobody there gets NOT_LINKED, counted as above. A
 cover that is not in its absence any more is looked for by its absent teacher (_cover_of). Done, the message it was on loses its
-buttons and gains a line of what was done and when; refused, it stays as it is. Acknowledge pressed again says the same and
-saves nothing.
+buttons and gains a line of what was done and when. Refused in the app's own words, whether at the press or when its why was
+typed, it loses them too and gains that sentence, for pressing again cannot help; unless it can (_acted: STAYS, and what the kind
+has in ACTIONS). It stays as it is for a button that may not be pressed (_button) and for WENT_WRONG. Acknowledge pressed again
+says the same and saves nothing.
 
 Request to change and Not needed ask why first: a talk (table talks), one a chat, TALK_MINUTES long, the newest in place of any
 other. Until it is over, what is typed there is the why, whatever it looks like (never a code), judged again as a press is; a
@@ -65,12 +67,13 @@ ANSWER_MOST, TEXT_MOST = 200, 4096           # characters Telegram takes of an a
 TIMEOUT = 8                                  # seconds for each call made while Telegram waits for the hook's answer
 _HANDLE = re.compile(r"[A-Za-z0-9_]{1,64}")
 _DATA = re.compile(r"b:([A-Za-z0-9_-]{16})")              # a button's callback data (relief/outbox.py)
+STAYS = (_web.NO_PUB,)                       # a refusal that keeps any button: a publish may be swapping folders
 _log = logging.getLogger("relief.telegram")
 _counting = threading.Lock()
 _pressing = threading.Lock()
 _note = None
-# what a press or a line comes to: what is answered (an alert: the person has to close it), the line its message gains, the
-# question asked and the talk opened for it, and what follows (the history entry and the rest), called with nothing held
+# what a press or a line comes to: what is answered (an alert: the person has to close it), the line its message gains, losing
+# its buttons, the question asked and the talk opened for it, and what follows (the history entry and the rest), called with nothing held
 _Out = collections.namedtuple("_Out", "text alert line ask talk after", defaults=(None, False, None, None, None, None))
 
 
@@ -211,12 +214,22 @@ def _pressed(chat, data, message):
     token = _DATA.fullmatch(data) if isinstance(data, str) else None
     def do():
         b = _button(chat, token[1] if token else "")
-        return ACTIONS[b["what"]][1](types.SimpleNamespace(chat=chat, button=b, message=message))
+        return _acted(b, lambda: ACTIONS[b["what"]][1](types.SimpleNamespace(chat=chat, button=b, message=message)))
     return _did(do)
 
 
+def _acted(b, f):
+    """what f does for button b comes to; refused by the app: its sentence, which the message gains too, unless the button is
+    one to press again (STAYS, or a sentence its kind has in ACTIONS)"""
+    try: return f()
+    except ValueError as e:
+        if type(e) is not ValueError: raise
+        stays = any(str(e) == x.format(name=b["who"]) for x in (*STAYS, *ACTIONS[b["what"]][2]))
+        return _Out(str(e), alert=True, line=None if stays else str(e))
+
+
 def _did(f):
-    """what f comes to, no other press or line going at the same time; a refusal is the app's own sentence"""
+    """what f comes to, no other press or line going at the same time; a button that may not be pressed is its sentence"""
     try:
         with _pressing: return f()
     except Exception as e:
@@ -389,7 +402,8 @@ def _line(chat, talk, text, cmd):
     def do():
         if not _end(chat, talk): return None     # over meanwhile: this line is not its why
         data.update(json.loads(talk["data"]))
-        return f(_button(chat, data["token"]), why)
+        b = _button(chat, data["token"])
+        return _acted(b, lambda: f(b, why))
     out = _did(do)
     if out is None: return False
     _follow(out)
@@ -398,7 +412,9 @@ def _line(chat, talk, text, cmd):
     return True
 
 
-# what a button does, by its kind: (the right it needs, f(p) with p.chat, p.button (_button) and p.message (its id and text) -> _Out)
-ACTIONS = dict(ack=("relief", _ack), change=("relief", _ask_change), cancel=("relief", _ask_cancel), approve=("relief.team", _approve))
+# what a button does, by its kind: (the right it needs, f(p) with p.chat, p.button (_button) and p.message (its id and text) ->
+# _Out, the refusals that keep it: {name} is the one it shows)
+ACTIONS = dict(ack=("relief", _ack, ()), change=("relief", _ask_change, ()), cancel=("relief", _ask_cancel, ()),
+               approve=("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE)))
 # what a talk asks, by its kind, and what its why does: f(the button, why) -> _Out
 TALKS = dict(change=(WHY_CHANGE, _change), cancel=(WHY_CANCEL, _cancel))
