@@ -14,8 +14,9 @@
   const S = {
     id: null, list: null, sched: null, view: null, levels: [], classes: [],
     tab: "when", timer: null, chain: Promise.resolve(), dirty: false, rev: 0, saving: false, msg: "", bad: false,
-    nf: null, mk: null, accCls: "", note: "",
-    busy: false, sit: "", room: "", mvCls: "", mvStu: "", duty: null, who: null, whoTok: 0, open: {}
+    nf: null, mk: null, duties: null, accCls: "", note: "",
+    busy: false, sit: "", room: "", mvCls: "", mvStu: "", duty: null, who: null, whoTok: 0, open: {},
+    me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, abMsg: "", sbNote: "", aw: { duty: null, away: "", who: "", data: null, err: "", say: "", tok: 0 }
   };
   /* the tabs: tabs 4 to 7 are added to this list; each draw() gives the html of its tab body */
   const TABS = [
@@ -25,7 +26,8 @@
     { key: "schedule", name: "Schedule", draw: () => tabSchedule() },
     { key: "venues", name: "Venues and seats", draw: () => tabVenues() },
     { key: "invig", name: "Invigilators", draw: () => tabInvig() },
-    { key: "lessons", name: "Lessons", draw: () => tabLessons() }
+    { key: "lessons", name: "Lessons", draw: () => tabLessons() },
+    { key: "approval", name: "Approval", draw: () => tabApproval() }
   ];
 
   /* ---------------------------------------------------------------- small helpers */
@@ -80,23 +82,45 @@
     $("#main").innerHTML = `<div class="card"><h1>Exams</h1><p class="msg bad">${esc(text)}</p><p><a href="${back || "/exams"}">${back ? "Back" : "Back to Exams"}</a></p></div>`;
   }
 
-  function links() {
-    $("#links").innerHTML = `<a class="ghost filebtn" href="/exams">Exams</a><a class="ghost filebtn" href="/exams/settings">Exam settings</a><a class="ghost filebtn" href="/logout">Sign out</a>`;
+  function links(member) {
+    $("#links").innerHTML = `<a class="ghost filebtn" href="/exams">Exams</a>${member === false ? "" : `<a class="ghost filebtn" href="/exams/settings">Exam settings</a>`}<a class="ghost filebtn" href="/logout">Sign out</a>`;
   }
 
   /* ================================================================ the list */
   function blankForm() { return { kind: "exam", name: "", levels: [], classes: [], start: "", end: "", open: false }; }
 
+  /* the chip's class from the server's label: draft, waiting, approved, ended or withdrawn */
+  function chipClass(s) {
+    const l = s.label || "";
+    if (l === "Ended") return "ended";
+    if (l === "Withdrawn") return "withdrawn";
+    if (l.startsWith("Waiting")) return "waiting";
+    if (l.startsWith("Approved")) return "approved";
+    return "draft";
+  }
+  const sentOn = at => at ? fmtDate(String(at).slice(0, 10)) : "";
+
+  /* the lines under a schedule's name in the list */
+  function statusLines(s) {
+    const out = [];
+    if (s.note && s.status === "approved") out.push(`Changes sent back: “${esc(s.note)}”`);
+    else if (s.note && (s.status || "draft") === "draft") out.push(`Sent back: “${esc(s.note)}”`);
+    if (s.status === "waiting" || s.status === "changes") out.push(`sent by ${esc(s.sent_by || "")}, ${esc(sentOn(s.sent_at))}`);
+    if ((s.status === "approved" || s.status === "changes") && s.on_site) out.push(`on the main site ${esc(fmtDate(s.on_site[0]))} to ${esc(fmtDate(s.on_site[1]))}`);
+    if (s.retimed) out.push("The timetable changed since this was made.");
+    return out.map(x => `<br><span class="muted small">${x}</span>`).join("");
+  }
+
   function drawList() {
     const L = S.list, nf = S.nf;
     const rows = L.schedules.map(s => `<div class="card scard"><div><span class="chip ${s.kind === "test" ? "test-kind" : "ex-kind"}">${esc(KINDS[s.kind] || s.kind)}</span>
       <a class="name" href="/exams/${esc(s.id)}">${esc(s.name)}</a><br>
-      <span class="muted small">${esc(fmtDate(s.start))} to ${esc(fmtDate(s.end))}${(s.levels || []).length ? " · " + esc(s.levels.join(", ")) : ""} · ${s.papers} ${s.papers === 1 ? "paper" : "papers"}</span></div>
-      <div><span class="chip draft">Draft</span></div></div>`).join("");
+      <span class="muted small">${esc(fmtDate(s.start))} to ${esc(fmtDate(s.end))}${(s.levels || []).length ? " · " + esc(s.levels.join(", ")) : ""} · ${s.papers} ${s.papers === 1 ? "paper" : "papers"}</span>${statusLines(s)}</div>
+      <div><span class="chip ${chipClass(s)}">${esc(s.label || "Draft")}</span></div></div>`).join("");
     const cal = L.calendar_ok ? "" : `<p class="notice">${esc(NO_CALENDAR)} <a href="/relief/settings">Relief settings</a></p>`;
     $("#main").innerHTML = `<div class="head"><h1>Exams and tests</h1>
       <div class="row"><button type="button" class="primary" data-act="newOpen" ${L.calendar_ok && !nf.open ? "" : "disabled"}>+ New exam or test</button></div></div>
-      ${cal}${nf.open ? newForm() : ""}
+      ${cal}${nf.open ? newForm() : ""}${dutiesCard()}
       ${rows || `<div class="card"><p class="muted">No exams or tests yet.</p></div>`}`;
   }
 
@@ -131,8 +155,39 @@
     location.href = "/exams/" + r.j.id;
   }
 
+  /* ---------------------------------------------------------------- my exam duties */
+  const nTimes = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+  function dutyBlock(sc) {
+    const rows = sc.duties.map(d => `<tr><td>${esc(fmtDate(d.date))} · ${esc(d.start)}–${esc(d.end)}</td>
+      <td>${esc(d.role)} ${esc(d.room)} · ${esc(d.label)} · ${nTimes(d.students, "student", "students")}</td>
+      <td class="small">${[d.others.length ? "with " + esc(d.others.join(", ")) : "", d.chief ? "chief: " + esc(d.chief) : "", sc.scripts ? "scripts to " + esc(sc.scripts) : ""].filter(Boolean).join(" · ")}</td></tr>`).join("");
+    return `<h3>${esc(sc.name)}</h3><div class="tablewrap"><table><tbody>${rows}</tbody></table></div>
+      <p class="muted small">${nTimes(sc.duties.length, "duty", "duties")} · ${esc(fmtLen(sc.minutes))} this exam</p>`;
+  }
+
+  /* S.duties is null until /api/exams/my-duties answers; a member with no duties and no lesson that doesn't happen sees no
+     card, someone else sees the sentence (and the lessons, when there are some) */
+  function dutiesCard(alone) {
+    const D = S.duties; if (!D) return "";
+    if (!D.schedules.length && !(D.lessons || []).length && !alone) return "";
+    const lessons = (D.lessons || []).length ? `<p class="small">Lessons that don't happen: ${D.lessons.map(l => `${esc(fmtDate(l.date))} ${esc(l.start)} ${esc((l.classes || []).join(", "))} ${esc(l.subject)}`).join(" · ")}</p>` : "";
+    return `<div class="card"><h2>My exam duties</h2>${D.schedules.map(dutyBlock).join("") || `<p class="muted">You have no exam duties on the main site.</p>`}${lessons}</div>`;
+  }
+
   async function startList() {
-    links();
+    const me = await api("GET", "/api/exams/me");
+    if (me.status === 401 || me.status === 403) return;
+    if (!me.ok) { links(); fail(me.j.error || "Something went wrong."); return; }
+    links(me.j.can_use);
+    const du = await api("GET", "/api/exams/my-duties");
+    S.duties = du.ok ? du.j : null;
+    if (!me.j.can_use) {
+      const home = me.j.home || "/home";   /* a person's way back is their home page */
+      if (!S.duties) { fail(du.j.error || "Something went wrong.", home); return; }
+      $("#main").innerHTML = `<div class="head"><h1>My exam duties</h1></div>${dutiesCard(true)}<p><a href="${esc(home)}">Back to Home</a></p>`;
+      return;
+    }
     const r = await api("GET", "/api/exams");
     if (r.status === 401 || r.status === 403) return;
     if (!r.ok) { fail(r.j.error || "Something went wrong."); return; }
@@ -150,9 +205,10 @@
 
   function render() {
     const s = S.sched;
-    $("#main").innerHTML = `<div class="head"><div><h1>${esc(s.name)}</h1>
+    $("#main").innerHTML = `<div class="head"><div><h1>${esc(s.name)} <span class="chip ${chipClass({ label: S.label })}" id="statchip">${esc(S.label)}</span></h1>
       <div class="muted small"><a href="/exams">All exams</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}</div></div>
       <div class="savebar" id="saveline">${saveInner()}</div></div>
+      ${onSite() ? `<p class="notice">On the main site. Changes you make here wait for the timetable committee: send them from the Approval tab.</p>` : ""}
       <div class="xtabs" role="tablist">${TABS.map(t => `<button type="button" role="tab" class="${t.key === S.tab ? "on" : ""}" aria-selected="${t.key === S.tab}" data-act="tab" data-a="${t.key}">${esc(t.name)}</button>`).join("")}</div>
       <div id="tabbody">${tab().draw()}</div><input type="file" id="paperFile" accept=".xlsx" hidden>`;
   }
@@ -270,6 +326,7 @@
       <div class="line"><b>Who</b><span class="chiprow">${lv}</span></div>
       <div class="line"><b></b><details class="pickc" ${s.classes.length ? "open" : ""}><summary>Or pick classes</summary><div class="classes">${cl}</div></details></div>
       <div class="line"><b>Dates</b><input type="date" ${at("start")} value="${esc(s.start)}" aria-label="First day"> to <input type="date" ${at("end")} value="${esc(s.end)}" aria-label="Last day"></div>
+      <div class="line"><b>Scripts go to</b><input type="text" ${at("scripts")} value="${esc(s.scripts || "")}" maxlength="120" placeholder="the staff room" aria-label="Scripts go to"></div>
       ${sup}</div>
       <div class="card"><h2>Each day</h2><div class="tablewrap"><table class="daytable"><thead><tr><th>Date</th><th>Timetable day</th><th>Levels sitting</th><th>How much of the day</th></tr></thead><tbody>${rows}</tbody></table></div>
       <p class="muted small">A level that is not sitting on a day keeps its full timetable that day. On a part day, lessons stop from the first time to the second and run as usual outside it.</p></div>
@@ -294,6 +351,7 @@
     if (k === "start") return edit(() => { s.start = v; }, false);
     if (k === "end") return edit(() => { s.end = v; }, false);
     if (k === "sup") return edit(() => { s.supervision = v; });
+    if (k === "scripts") return edit(() => { s.scripts = v; });
     if (k === "level") return edit(() => setLevel(a, el.checked), true);
     if (k === "class") return edit(() => { s.classes = el.checked ? uniq(s.classes.concat([a])) : s.classes.filter(x => x !== a); }, true);
     if (k === "dayLevel") return edit(() => { const L = dayState(a).levels; setDay(a, { levels: el.checked ? uniq(L.concat([b])) : L.filter(x => x !== b) }); });
@@ -692,6 +750,50 @@
     return `<div class="panel">${head}${body}</div>`;
   }
 
+  /* someone is away: the duty as it is on the main site, and who could take it (the approved copy, not the working one).
+     The panel lists every duty of the approved copy, so a duty is reachable even when a change waiting for approval moved
+     its sitting: the one picked here (S.aw.duty), else the approved duty of the duty picked in the table */
+  const approvedDuties = () => onSite() ? ((S.sched.approved.made || {}).duties || []) : [];
+  const approvedDuty = () => { const p = S.aw.duty || S.duty; return p ? approvedDuties().find(x => dutyEq(x, p)) || null : null; };
+
+  async function loadAway(keep) {
+    const d = approvedDuty(), tok = ++S.aw.tok;
+    if (!d) { S.aw.data = null; return; }
+    if (!keep) { S.aw.data = null; S.aw.err = ""; S.aw.say = ""; S.aw.away = d.names[0] || ""; S.aw.who = ""; paint(); }
+    const r = await api("GET", `/api/exams/${S.id}/who?key=${encodeURIComponent(d.key)}&room=${encodeURIComponent(d.room)}&copy=approved`);
+    if (tok !== S.aw.tok || r.status === 401 || r.status === 403) return;
+    if (r.ok) { S.aw.data = r.j; S.aw.err = ""; } else { S.aw.data = null; S.aw.err = r.j.error || "Could not list who could take it."; }
+    paint();
+  }
+
+  function awayPanel() {
+    const list = approvedDuties(); if (!list.length) return "";
+    const d = approvedDuty(), A = S.aw, G = A.data;
+    const say = A.say ? `<p class="msg ok" role="status">${esc(A.say)}</p>` : "";
+    const pick = `<div class="line"><b>Duty on the main site</b><select data-aw="duty" aria-label="Duty on the main site"><option value="">Choose a duty</option>${list.map(x => opt(`${x.key}|${x.room}`, d ? `${d.key}|${d.room}` : "", `${fmtDate(x.date)} ${hhmm(x.start)}–${hhmm(x.end)} · ${x.room}`)).join("")}</select></div>`;
+    if (!d) return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">Choose the duty on the main site that someone cannot do.</p>${say}</div>`;
+    if (A.err) return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="msg bad">${esc(A.err)}</p>${say}</div>`;
+    if (!G) return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">Loading…</p>${say}</div>`;
+    const groups = [["freed", "Freed by the exam"], ["free", "Free then"], ["backups", "Backup invigilators"]];
+    const names = groups.flatMap(([k]) => (G[k] || []).map(c => c.name));
+    const who = names.includes(A.who) ? A.who : "";
+    const sel = groups.map(([k, title]) => (G[k] || []).length ? `<optgroup label="${esc(title)}">${G[k].map(c => opt(c.name, who, `${c.name} · ${c.minutes} min so far`)).join("")}</optgroup>` : "").join("");
+    return `<div class="panel"><h3>Someone is away</h3>${pick}<p class="muted small">This changes the duty on the main site now, without a new approval.</p>
+      <div class="line"><b>Who is away</b><select data-aw="away" aria-label="Who is away">${d.names.map(n => opt(n, A.away)).join("")}</select></div>
+      <div class="line"><b>Who takes it</b><select data-aw="who" aria-label="Who takes it"><option value="">Choose a name</option>${sel}</select></div>
+      <div class="row"><button type="button" data-act="replace" ${S.busy ? "disabled" : ""}>Replace now</button></div>${say}</div>`;
+  }
+
+  async function replaceNow() {
+    const d = approvedDuty(), A = S.aw;
+    if (!d || !A.away || !A.who) { A.say = ""; S.bad = true; S.msg = "Choose who is away and who takes it."; paintSave(); return; }
+    const name = A.who;
+    const ok = await approvalAction("away", { key: d.key, room: d.room, away: A.away, name }, "");
+    if (!ok) return;
+    S.aw.say = `${name} takes the duty on the main site now. The timetable committee sees it under Done without approval.`;
+    loadAway(false); S.aw.say = `${name} takes the duty on the main site now. The timetable committee sees it under Done without approval.`;
+  }
+
   function loadList(made) {
     const mins = {};
     for (const d of made.duties || []) for (const n of d.names) { const m = mins[n] || (mins[n] = { n: 0, t: 0 }); m.n++; m.t += d.end - d.start; }
@@ -706,7 +808,7 @@
     const duties = made.duties || [];
     return `${staleLine()}<div class="grid2"><div><div class="row" style="margin-bottom:10px">${printLink("roster-day", "Roster by day")}${printLink("roster-teacher", "Roster by teacher")}</div>
       <div class="tablewrap"><table><thead><tr><th>When</th><th>Venue</th><th>Invigilators</th><th>Check</th><th></th></tr></thead><tbody>${duties.map(dutyRow).join("") || `<tr><td colspan="5" class="muted" style="padding:10px">No duties.</td></tr>`}</tbody></table></div></div>
-      <div>${whoPanel(made)}${loadList(made)}</div></div>`;
+      <div>${whoPanel(made)}${awayPanel()}${loadList(made)}</div></div>`;
   }
 
   /* names: the names chosen by hand, or null to hand the duty back to the app */
@@ -733,17 +835,136 @@
       ${lessonList("Runs as usual", L.runs || [], "")}</div>`;
   }
 
+  /* ---------------------------------------------------------------- tab 8: approval */
+  const onSite = () => !!(S.sched && S.sched.approved && (S.sched.status === "approved" || S.sched.status === "changes"));
+  const CHECK_NAMES = { papers: "Paper times", seats: "Seats", free: "Invigilators free", others: "Other schedules", timetable: "Timetable" };
+  const stamp = at => at ? `${fmtDate(String(at).slice(0, 10))} ${esc(String(at).slice(11, 16))}` : "";
+
+  /* the review's answer is the page's: it also brings the status, which is kept on the schedule and the chip */
+  function takeReview(j) {
+    S.rv = j; S.rvErr = "";
+    S.label = j.label || S.label; S.sched.status = j.status; S.sched.note = j.note;
+  }
+
+  async function loadReview(keep) {
+    const tok = ++S.rvTok;
+    if (!keep) { S.rv = null; S.rvErr = ""; if (S.tab === "approval") paint(); }
+    await flush();
+    const r = await api("GET", `/api/exams/${S.id}/review`);
+    if (tok !== S.rvTok || r.status === 401 || r.status === 403) return;
+    if (r.ok) takeReview(r.j); else { S.rv = null; S.rvErr = r.j.error || "Could not read the approval."; }
+    const chip = $("#statchip"); if (chip) { chip.textContent = S.label; chip.className = "chip " + chipClass({ label: S.label }); }
+    if (S.tab === "approval") paint();
+  }
+
+  /* send, approve, send back, withdraw: the schedule is read again afterwards, because the approved copy moves with them */
+  async function approvalAction(path, body, ok) {
+    if (S.busy) return false;
+    await flush();
+    if (S.dirty) return false;
+    S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
+    const r = await api("POST", `/api/exams/${S.id}/${path}`, body);
+    S.busy = false;
+    if (r.status === 401 || r.status === 403) return false;
+    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; S.abMsg = S.msg; paintSave(); paint(); return false; }
+    S.abMsg = "";
+    const g = await api("GET", "/api/exams/" + S.id);
+    if (g.ok) S.sched = g.j;
+    takeReview(r.j); S.sbNote = ""; S.msg = ok || ""; paintSave();
+    render(); refreshView();
+    return true;
+  }
+
+  /* the same clash can be in both Invigilators free ("is on {schedule} then") and Other schedules ("takes {n} of these
+     invigilators on {date}"): a "takes" line goes only when the free lines name that same schedule on that date for at least
+     n people (not the own-duty "is on another duty then"), so a second person's clash never drops out of sight */
+  function checkLines(c, all) {
+    let lines = c.lines;
+    if (c.key === "others" && !c.ok) {
+      const free = (all.find(x => x.key === "free") || { lines: [] }).lines;
+      lines = lines.filter(l => {
+        const m = /^(.*) \([^()]*\) takes (\d+) of these invigilators on (.*)\.$/.exec(l); if (!m) return true;
+        const named = uniq(free.filter(f => f.includes(` is on ${m[1]} then (`) && f.includes(` on ${m[3]} `)).map(f => f.split(", ")[0]));
+        return named.length < +m[2];
+      });
+    }
+    return lines;
+  }
+
+  function checksBlock(rv) {
+    const rows = rv.checks.map(c => {
+      const lines = checkLines(c, rv.checks);
+      if (!lines.length) return "";
+      return `<div class="checks"><b>${esc(CHECK_NAMES[c.key] || c.key)}</b>${c.ok ? lines.map(l => `<div><span class="okc">✓</span> ${esc(l)}</div>`).join("") : lines.map(l => `<div><span class="flag">●</span> ${esc(l)}</div>`).join("")}</div>`;
+    }).join("");
+    return `<div class="card"><h2>Checks</h2>${rows}</div>`;
+  }
+
+  function whatBlock(w) {
+    const part = w.days.filter(d => !d.whole), all = w.days.length;
+    const when = !part.length ? "whole days" : part.length === all ? "part of the day" : `whole days, part day on ${part.map(d => esc(fmtDate(d.date))).join(", ")}`;
+    const venues = w.venues.map(v => `${esc(v.room)} ${esc(v.start)}–${esc(v.end)} on ${nTimes(v.dates, "day", "days")}`).join("; ");
+    const anyway = (w.anyway || []).map(a => { const [d, t] = String(a.key).split(" "); return `${esc(a.room)} ${esc(fmtDate(d))} ${esc(t || "")}`.trim(); }).join("; ");
+    return `<div class="card"><h2>What changes on the main site</h2>
+      <p>Classes ${esc(w.classes.join(", ") || "none")} (${esc(w.levels.join(", ") || "none")}) · ${nTimes(w.papers, "paper", "papers")} · ${when}</p>
+      <p>Lessons that won't happen: ${w.stopped} (no relief needed)</p>
+      <p>Teachers with duties: ${w.teachers} · ${nTimes(w.duties, "duty", "duties")}${w.most ? ` · most: ${esc(w.most[0])}, ${w.most[1]}` : ""}</p>
+      <p>Backups for the relief team: ${w.backups} (sending them comes in a later stage)</p>
+      <p>Venues taken: ${venues || "none"}</p>
+      ${anyway ? `<p>Rain rooms used anyway: ${anyway}</p>` : ""}</div>`;
+  }
+
+  function sendBox(title, lead, label, path, why) {
+    return `<div class="card"><h2>${title}</h2>${lead ? `<p>${lead}</p>` : ""}<div class="row"><button type="button" class="primary" data-act="approval" data-a="${path}" ${S.busy || why ? "disabled" : ""}>${label}</button>${why ? `<span class="muted small">${esc(why)}</span>` : ""}</div></div>`;
+  }
+
+  function tabApproval() {
+    const rv = S.rv;
+    if (S.rvErr) return `<div class="card"><p class="muted">${esc(S.rvErr)}</p></div>`;
+    if (!rv) return `<div class="card"><p class="muted">Loading…</p></div>`;
+    const st = rv.status, why = rv.can_send || "", unsent = rv.unsent || [], me = S.me.can_approve;
+    const out = [`<div class="card"><h2>Approval</h2><p><span class="chip ${chipClass({ label: rv.label })}">${esc(rv.label)}</span></p>
+      ${S.abMsg ? `<p class="msg bad" role="status">${esc(S.abMsg)}</p>` : ""}${rv.note ? `<p>Sent back by the timetable committee: “${esc(rv.note)}”</p>` : ""}</div>`];
+    if (st === "draft" || st === "withdrawn") out.push(sendBox("Send to the timetable committee", "", "Send to the timetable committee", "send", why));
+    if ((st === "waiting" || st === "changes") && rv.changed) out.push(sendBox("Send again", "Changed since you sent it: send it again.", "Send again", "send", why));
+    if (st === "approved" && unsent.length) out.push(`<div class="card"><h2>Changes not sent yet</h2>${unsent.map(c => `<p>${esc(c.text)}</p>`).join("")}<div class="row"><button type="button" class="primary" data-act="approval" data-a="send" ${S.busy || why ? "disabled" : ""}>Send the changes</button>${why ? `<span class="muted small">${esc(why)}</span>` : ""}</div></div>`);
+    if (st === "approved" && !unsent.length) out.push(`<div class="card"><p class="muted">Nothing on the main site has changed since it was approved.</p></div>`);
+    if (st === "changes" && rv.review.changes.length) out.push(`<div class="card"><h2>${me ? "Changes waiting for you" : "Changes waiting for the timetable committee"}</h2>${rv.review.changes.map(c => `<p>${esc(c.text)}</p>`).join("")}</div>`);
+    out.push(whatBlock(rv.review.what), checksBlock(rv.review));
+    if (me && (st === "waiting" || st === "changes")) {
+      out.push(`<div class="card"><h2>${st === "waiting" ? "Approve: show on the main site" : "Approve the changes"}</h2><div class="row"><button type="button" class="primary" data-act="approval" data-a="approve" ${S.busy ? "disabled" : ""}>${st === "waiting" ? "Approve: show on the main site" : "Approve the changes"}</button></div></div>
+        <div class="card"><h2>Send back with a note</h2><div class="line"><input type="text" data-sb="1" data-f="sb" value="${esc(S.sbNote)}" maxlength="300" placeholder="What the exams committee should change" aria-label="Note for the exams committee"></div>
+        <div class="row"><button type="button" data-act="approval" data-a="send-back" ${S.busy ? "disabled" : ""}>Send back</button></div></div>`);
+    }
+    if (me && (st === "approved" || st === "changes")) out.push(`<div class="card"><h2>Withdraw from the main site</h2><div class="row"><button type="button" class="danger" data-act="approval" data-a="withdraw" ${S.busy ? "disabled" : ""}>Withdraw from the main site</button></div></div>`);
+    const dw = rv.review.done_without || [];
+    if (dw.length) out.push(`<div class="card"><h2>Done without approval</h2>${dw.map(e => `<p>${esc(e.detail)} · by ${esc(e.by)}, ${stamp(e.at)}</p>`).join("")}</div>`);
+    return out.join("");
+  }
+
+  async function onApproval(a) {
+    if (a === "send-back") return approvalAction("send-back", { note: S.sbNote }, "Sent back.");
+    if (a === "withdraw") {
+      if (!confirm(`Take ${S.sched.name} off the main site now?`)) return;
+      return approvalAction("withdraw", {}, "Taken off the main site.");
+    }
+    return approvalAction(a, {}, a === "approve" ? "Approved." : "Sent.");
+  }
+
   /* ---------------------------------------------------------------- events */
   function onField(e) {
     const el = e.target;
     if (S.id && el.dataset.x) { onVenue(el); return; }
     if (S.id && el.dataset.mk) { onMakeup(el); return; }
+    if (S.id && el.dataset.aw === "duty") { const v = el.value, i = v.indexOf("|"); S.aw.duty = v ? { key: v.slice(0, i), room: v.slice(i + 1) } : null; loadAway(false); paint(); return; }
+    if (S.id && el.dataset.aw) { S.aw[el.dataset.aw] = el.value; return; }
+    if (S.id && el.dataset.sb) { S.sbNote = el.value; return; }
     if (S.id && el.dataset.acc === "cls") { S.accCls = el.value; paint(); return; }
     if (!S.id && el.dataset.nf) { onNewField(el); return; }
     if (!S.id || !S.sched) return;
     const k = el.dataset.k, a = el.dataset.a, b = el.dataset.b;
     if (!k) return;
-    if (k === "name" || k === "start" || k === "end" || k === "sup" || k === "level" || k === "class" || k.startsWith("day") || k === "time") onWhenField(el, k, a, b);
+    if (k === "name" || k === "start" || k === "end" || k === "sup" || k === "scripts" || k === "level" || k === "class" || k.startsWith("day") || k === "time") onWhenField(el, k, a, b);
     else if (k.startsWith("a")) onAccessField(el, k, a);
     else onPaperField(el, k, a);
   }
@@ -785,7 +1006,7 @@
       return;
     }
     if (!s) return;
-    if (act === "tab") { S.tab = a; S.note = ""; render(); return; }
+    if (act === "tab") { S.tab = a; S.note = ""; render(); if (a === "approval") { S.abMsg = ""; loadReview(false); } return; }
     if (act === "dayWhole") {
       const date = a, on = b.dataset.b === "1", p = periods();
       edit(() => setDay(date, on ? { whole: true } : { whole: false, from: p.length ? p[0][0] : null, to: p.length ? p[Math.min(3, p.length - 1)][1] : null }), true);
@@ -816,7 +1037,9 @@
       return;
     }
     if (act === "useAnyway") { viewAction("use-anyway", { key: a, room: b.dataset.b }, "The room is in use for this sitting."); return; }
-    if (act === "duty") { S.duty = { key: a, room: b.dataset.b }; loadWho(false); return; }
+    if (act === "duty") { S.duty = { key: a, room: b.dataset.b }; S.aw.duty = null; loadWho(false); loadAway(false); return; }
+    if (act === "approval") { onApproval(a); return; }
+    if (act === "replace") { replaceNow(); return; }
     if (act === "whoAuto") { changeNames(null); return; }
     if (act === "whoDrop" || act === "whoUse") {
       const p = S.duty, d = p && ((madeOf() || {}).duties || []).find(x => dutyEq(x, p)), n = b.dataset.c;
@@ -833,9 +1056,10 @@
   async function startOne(id) {
     links();
     S.id = id;
-    const [r, v, l] = await Promise.all([api("GET", "/api/exams/" + id), api("GET", `/api/exams/${id}/view`), api("GET", "/api/exams")]);
-    for (const x of [r, v, l]) if (x.status === 401 || x.status === 403) { dropNote(); return; }
-    for (const x of [r, v, l]) if (!x.ok) { dropNote(); fail(x.j.error || "Something went wrong."); return; }
+    const [r, v, l, me] = await Promise.all([api("GET", "/api/exams/" + id), api("GET", `/api/exams/${id}/view`), api("GET", "/api/exams"), api("GET", "/api/exams/me")]);
+    for (const x of [r, v, l, me]) if (x.status === 401 || x.status === 403) { dropNote(); return; }
+    for (const x of [r, v, l, me]) if (!x.ok) { dropNote(); fail(x.j.error || "Something went wrong."); return; }
+    S.me = me.j; S.label = ((l.j.schedules || []).find(x => x.id === id) || {}).label || "Draft";
     S.sched = r.j; S.view = v.j; S.levels = l.j.levels || []; S.classes = l.j.classes || [];
     document.title = r.j.name + " · Exams";
     render();
