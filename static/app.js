@@ -3110,15 +3110,15 @@ function vsHTML() {
   const L = VS.list, off = VS.busy ? " disabled" : "", vs = L ? L.versions : [], d = L && L.draft, p = L && L.published;
   const firstV = vs[0] ? "v:" + vs[0].id : null;
   const cmp = (a, b) => !b ? "" : `<button data-vs="compare" data-a="${esc(a)}" data-b="${esc(b)}"${off}>Compare…</button>`;
-  const row = (name, tag, sub, changes, counts, btns) => `<tr><td><b>${name}</b>${tag ? ` <span class="vstag">${tag}</span>` : ""}${sub ? `<div class="muted small">${sub}</div>` : ""}</td>${changes}<td>${counts}</td><td class="vsbtns">${btns}</td></tr>`;
+  const row = (name, tag, sub, saved, changes, counts, btns) => `<tr><td data-l="Version"><b>${name}</b>${tag ? ` <span class="vstag">${tag}</span>` : ""}${sub ? `<div class="muted small">${sub}</div>` : ""}</td><td data-l="Saved">${saved}</td>${changes}<td data-l="Checked now">${counts}</td><td class="vsbtns">${btns}</td></tr>`;
   const kept = { upload: "uploading", open: "opening a version", refit: "a re-fit" };
-  const rows = [];
-  if (d) rows.push(row("The draft on step 8", "now", "", `<td>${d.fixes ? d.fixes + (d.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(d), firstV ? cmp("draft", firstV) : p ? cmp("draft", "published") : ""));
-  vs.forEach(v => rows.push(row(esc(v.name), "", `${esc(v.saved_at || "")} · ${v.kind === "saved" ? "by " + esc(v.by || "") : "kept by the app before " + (kept[v.kind] || "a change")}`,
-    `<td>${v.fixes ? v.fixes + (v.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(v),
+  const rows = [], ud = G.st && G.st.draft && G.st.draft.uploaded_at;
+  if (d) rows.push(row("The draft on step 8", "now", "", ud ? `uploaded ${esc(vsDay(ud))}` : `<span class="muted">–</span>`, `<td data-l="Changes made in the app">${d.fixes ? d.fixes + (d.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(d), firstV ? cmp("draft", firstV) : p ? cmp("draft", "published") : ""));
+  vs.forEach(v => rows.push(row(esc(v.name), "", v.source ? "from " + esc(v.source) : "", `${esc(vsDay(v.saved_at))}<div class="muted small">${v.kind === "saved" ? "by " + esc(v.by || "") : "kept by the app before " + (kept[v.kind] || "a change")}</div>`,
+    `<td data-l="Changes made in the app">${v.fixes ? v.fixes + (v.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(v),
     `<button data-vs="open" data-id="${esc(v.id)}"${off}>Open</button>${cmp("v:" + v.id, d ? "draft" : p ? "published" : "")}<button data-vs="download" data-id="${esc(v.id)}"${off}>Download</button><button class="vsdel" data-vs="delete" data-id="${esc(v.id)}"${off}>Delete</button>`)));
-  if (p) rows.push(row("Published timetable", "what teachers see", p.published_at ? "published " + esc(vsDay(p.published_at)) : "", `<td class="muted">–</td>`, p.error ? `<span class="muted">could not be read</span>` : vsCounts(p), d ? cmp("published", "draft") : firstV ? cmp("published", firstV) : ""));
-  const table = L ? (rows.length ? `<div class="tablewrap"><table class="vstable"><tr><th>Version</th><th>Changes made in the app</th><th>Checked now</th><th></th></tr>${rows.join("")}</table></div>
+  if (p) rows.push(row("Published timetable", "what teachers see", "", p.published_at ? "published " + esc(vsDay(p.published_at)) : `<span class="muted">–</span>`, `<td data-l="Changes made in the app" class="muted">–</td>`, p.error ? `<span class="muted">could not be read</span>` : vsCounts(p), d ? cmp("published", "draft") : firstV ? cmp("published", firstV) : ""));
+  const table = L ? (rows.length ? `<div class="tablewrap"><table class="vstable"><tr><th>Version</th><th>Saved</th><th>Changes made in the app</th><th>Checked now</th><th></th></tr>${rows.join("")}</table></div>
     <p class="muted small">“Checked now” means against the setup as it is today: a version saved before step 5 changed can show warnings it did not have then.</p>` : "")
     + (vs.length ? "" : `<p class="muted">No versions yet.</p>`) : `<p class="muted">${VS.err ? esc(VS.err) : "Loading…"}</p>`;
   const save = d ? `<div class="vssave"><label class="f">Save the draft as<input id="vsName" type="text" maxlength="80" value="${esc(VS.name === null ? vsDefaultName() : VS.name)}"></label><button class="primary" data-vs="save"${off}>Save version</button></div>` : "";
@@ -3151,6 +3151,7 @@ function vsOpen() {
   let ov = $("#vsOv"); if (!ov) { ov = document.createElement("div"); ov.id = "vsOv"; ov.className = "vsov"; document.body.appendChild(ov); }
   ov.hidden = false; document.body.classList.add("vslock"); vsDraw();
   const p = ov.querySelector(".vspop"); if (p) p.focus();
+  if (!(G.st && G.st.draft) && !((G.st && G.st.draft && G.st.draft.versions) || 0)) { VS.list = { versions: [], draft: null, published: null }; vsDraw(); return; }   // no draft and no versions: nothing to ask the server
   vsLoad();
 }
 function vsClose() {
@@ -3187,8 +3188,8 @@ async function vsAction(b) {
     const x = await vsRequest(`/api/draft/versions/${encodeURIComponent(id)}/open`, { method: "POST" });
     if (x && !x.r.ok) { toast((x.j && x.j.error) || "Could not open the version."); VS.busy = false; if (x.r.status === 404) await vsLoad(); vsDone(); return; }
     if (!x) { vsDone(); return; }
-    const j = x.j || {}; S.draft = j.info && j.info.warnings ? j.info : null; S.help = null; VS.busy = false;
-    vsClose(); drawDraft(); poll(); vsLoad();
+    const j = x.j || {}, good = j.info && j.info.warnings; if (good) S.draft = j.info; S.help = null; VS.busy = false;
+    vsClose(); if (good) drawDraft(); else refreshDraft().then(() => { if (STEPS[S.step][0] === "edit") drawDraft(); }); poll(); vsLoad();
     toast("Opened “" + ((j.opened && j.opened.name) || v.name) + "”." + (j.kept ? " The draft you had is kept as version “" + j.kept.name + "”." : ""));
     return;
   }
