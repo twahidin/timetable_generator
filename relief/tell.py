@@ -112,7 +112,8 @@ def officer_text(absent, days, away, kind):
 
 
 def cancelled_text(by, absent, days):
-    return f"❌ Cancelled by {by}: {absent}'s absence on {days}. Its reliefs are no longer needed."
+    """by "app": no person did (a duty changed, an exam withdrawn), and nobody is named"""
+    return f"❌ Cancelled{'' if by == 'app' else f' by {by}'}: {absent}'s absence on {days}. Its reliefs are no longer needed."
 
 
 def _from(start):

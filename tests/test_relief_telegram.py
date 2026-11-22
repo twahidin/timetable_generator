@@ -2141,6 +2141,7 @@ PLANNED_EVE = "📋 Relief planned for you\nTue 13 Oct · whole day\nPlanned by 
 REMIND_EVE = "⏰ Reminder: please acknowledge your relief for Tue 13 Oct and set work."
 OFFICER_EVE = "Ms Evelyn Koh is away on Tue 13 Oct (whole day): Medical.\nRelief is being arranged."
 CANCELLED_EVE = "❌ Cancelled by {}: Ms Evelyn Koh's absence on Tue 13 Oct. Its reliefs are no longer needed."
+CANCELLED_BY_APP = "❌ Cancelled: Ms Evelyn Koh's absence on Tue 13 Oct. Its reliefs are no longer needed."        # not in the plan's table
 
 @t
 def every_text_is_the_plans():
@@ -2164,7 +2165,7 @@ def every_text_is_the_plans():
         assert TE.relief_text("d", "l", "P1", "", "", EVE, work).splitlines()[2:] == ["For Ms Evelyn Koh"] + last
     assert TE.planned_text("Tue 13 Oct", "whole day", HUGO, 2) == PLANNED_EVE and "\n1 lesson will be covered.\n" in TE.planned_text("d", "whole day", HUGO, 1)
     assert TE.remind_text("Tue 13 Oct") == REMIND_EVE and TE.officer_text(EVE, "Tue 13 Oct", "whole day", "Medical") == OFFICER_EVE
-    assert TE.cancelled_text(HUGO, EVE, "Tue 13 Oct") == CANCELLED_EVE.format(HUGO)
+    assert TE.cancelled_text(HUGO, EVE, "Tue 13 Oct") == CANCELLED_EVE.format(HUGO) and TE.cancelled_text("app", EVE, "Tue 13 Oct") == CANCELLED_BY_APP
     assert TE.gone_text("1A, 1B Science (G2)", "P6–P7", "10:30", "Tue 13 Oct") == GONE_K5 and "Art P1 on Tue" in TE.gone_text("Art", "P1", "", "Tue")
     assert TE.moved_text("1A, 1B Science (G2)", "P6–P7", "Tue 13 Oct") == MOVED_K5 and TE.kept_text("1A, 1B Science (G2)", "P6–P7", "Tue 13 Oct") == KEPT_K5
     ask = lambda **k: TE.ask_text(SAM, "1A, 1B Science (G2)", "P6–P7", "10:30", "Tue 13 Oct", "A parent meeting", **k)
@@ -3393,7 +3394,7 @@ def a_takeover_of_the_absence_changes_nothing_of_a_stopped_relief():
         assert swept() == 0 and said(SAM) == [RELIEF_K5, STOPPED_K5] and said(TEAM) == []; withdraw(e); assert swept() == 1 and said(SAM)[2:] == [AGAIN_K5] and buttons_of(outs("again")[0]) == relief_buttons(j)
     with exam_school(SAM, EVE, TEAM):                                                      # in step with the exams: a stopped lesson leaves the backup, so its relief is gone
         d, b = backup(); e = exam(); RL.sync_all(SCHOOL, TERM, LS.today()); assert absences.load(b)["lessons"] == [] and [x["key"] for x in absences.load(b)["gone"]] == [K5]
-        swept(); assert said(SAM) == [RELIEF_K5, GONE_K5] and len(said(TEAM)) == 1 and said(TEAM)[0].startswith("❌ Cancelled by "), "that backup is over"
+        swept(); assert said(SAM) == [RELIEF_K5, GONE_K5] and said(TEAM) == said(EVE)[1:] == [CANCELLED_BY_APP], "that backup is over, cancelled by nobody"
         withdraw(e); RL.sync_all(SCHOOL, TERM, LS.today()); c = [r["id"] for r in absences.all_records() if r.get("exams") and not r["cancelled"]]; assert len(c) == 1; at("09:30"); give(c[0], K5, SAM); swept(); assert said(SAM)[2:] == [RELIEF_K5]
 
 @t
@@ -5380,11 +5381,12 @@ def planned_says_how_many_will_be_covered():
 @t
 def a_stopped_lesson_is_refused_as_on_the_page():
     page = dict(ack="acknowledge", change="ask-change")
+    def untouched(): return edits() == [] and calls("editMessageReplyMarkup") == []
     for what in ("ack", "change"):
         with exam_school(SAM, TEAM):
             i, key = told_relief(); e = exam(); was, h, asked_for = file_of(i), Since(), []
             with stand_in(TE, "soon", lambda: asked_for.append(1)): assert press(SAM, what) == (NOT_ON_K5, True)
-            assert file_of(i) == was and h.new() == [] and asked_for == [] and rows("talks") == [] and taken_off(SAM, what, NOT_ON_K5) and said(SAM) == [RELIEF_K5]
+            assert file_of(i) == was and h.new() == [] and asked_for == [] and rows("talks") == [] and untouched() and said(SAM) == [RELIEF_K5], "its buttons stay: it may be on again"
             assert on_cover(SAM, i, K5, page[what], dict(why="x"), code=400) == dict(error=NOT_ON_K5), "as the page"
             # on again: fresh buttons, which do it
             swept(); at("09:30"); withdraw(e); swept(); assert said(SAM)[1:] == [STOPPED_K5, AGAIN_K5]; tg.PRACTICE_LOG.clear()
@@ -5397,11 +5399,17 @@ def a_stopped_lesson_is_refused_as_on_the_page():
                 with unread(): assert press(SAM, what) == (NOT_ON_K5, True) and on_cover(SAM, i, K5, page[what], dict(why="x"), code=400) == dict(error=NOT_ON_K5), unread.__name__
             with unreadable(), quiet_app(): assert press(SAM, what) == (("✅ Acknowledged 09:00.", False) if what == "ack" else (None, None))
         for f, sentence in ((lambda i: give(i, K5, MAYA), CV.NOT_YOURS_COVER), (lambda i: at("08:00", day=14), absences.PAST_LESSON), (lambda i: absences.cancel(i, "x", HUGO), CV.NOT_YOURS_COVER)):      # what the page would say first
-            with exam_school(SAM): i, key = told_relief(); f(i); exam(); assert press(SAM, what) == (sentence, True) and "Zebra" not in json.dumps(tg.PRACTICE_LOG), what
+            with exam_school(SAM): i, key = told_relief(); f(i); exam(); assert press(SAM, what) == (sentence, True) and "Zebra" not in json.dumps(tg.PRACTICE_LOG) and taken_off(SAM, what, sentence), what
     with exam_school(SAM, TEAM):                                                           # when its why is typed
         i, key = told_relief(); press(SAM, "change"); e = exam(); was, h = file_of(i), Since()
-        assert talk_to(SAM, lambda: say(SAM, "A meeting")) == [(NOT_ON_K5, None)] and rows("talks") == [] and file_of(i) == was and h.new() == [] and taken_off(SAM, "change", NOT_ON_K5)
-        swept(); withdraw(e); swept(); assert talk_to(SAM, lambda: press(SAM, "change")) == [(WHY_CHANGE, FORCE)]
+        assert talk_to(SAM, lambda: say(SAM, "A meeting")) == [(NOT_ON_K5, None)] and rows("talks") == [] and file_of(i) == was and h.new() == [] and untouched()
+        withdraw(e); assert talk_to(SAM, lambda: press(SAM, "change")) == [(WHY_CHANGE, FORCE)] and talk_to(SAM, lambda: say(SAM, "A meeting")) == [(SENT_CHANGE, None)] and [x[3] for x in h.new()] == ["asked to change"], "the same button, once it is withdrawn"
+        assert edits() == [(CHATS[SAM], item(key)["message_id"], RELIEF_K5 + "\n\n↩ Asked to change 09:00.")]
+    with exam_school(SAM):                                                                 # withdrawn before any sweep, so nobody was told of it: the same button does it, once
+        i, key = told_relief(); e, token, h = exam(), tok(SAM, "ack"), Since(); assert [press(SAM, "ack") for _ in range(2)] == [(NOT_ON_K5, True)] * 2 and untouched()
+        withdraw(e); at("09:10"); assert [press(SAM, "ack") for _ in range(2)] == [("✅ Acknowledged 09:10.", False)] * 2 and tok(SAM, "ack") == token and state_of(i) == "acknowledged"
+        assert h.new() == [by_telegram(SAM, "relief acknowledged", f"{SAM} acknowledged {ON_K5}", i)] and [x["what"] for x in covered(i, K5)[2]["history"]].count("acknowledged") == 1 and edits()[0] == (CHATS[SAM], item(key)["message_id"], RELIEF_K5 + "\n\n✅ Acknowledged 09:10.")
+        assert swept() == 0 and said(SAM) == [RELIEF_K5]
     with exam_school(SAM, TEAM):                                                           # asked to change already, and it is stopped since: that it is stopped, first, as the page; nor taken after all
         i, key = told_relief(); CV.ask_change(i, K5, "x", SAM); exam(); was = file_of(i); assert press(SAM, "change") == press(SAM, "ack") == (NOT_ON_K5, True) and file_of(i) == was
         assert [on_cover(SAM, i, K5, x, dict(why="x"), code=400) for x in page.values()] == [dict(error=NOT_ON_K5)] * 2

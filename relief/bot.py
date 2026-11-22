@@ -22,9 +22,10 @@ and they have the right it needs now (NOT_YOURS_BUTTON; ACTIONS); a chat of nobo
 cover that is not in its absence any more is looked for by its absent teacher (_cover_of). Done, the message it was on loses its
 buttons and gains a line of what was done and when. Refused in the app's own words, whether at the press or when its why was
 typed, it loses them too and gains that sentence, for pressing again cannot help; unless it can (_acted: STAYS, and what the kind
-has in ACTIONS). It stays as it is for a button that may not be pressed (_button) and for WENT_WRONG. Acknowledge pressed again
-says the same and saves nothing. Remind them again (relief/report.py: the reliefs its report listed, its extra) never changes the
-report: whoever could not be reminded, it can be pressed again later.
+has in ACTIONS: a lesson an exam or event stops may be on again before anybody is told that it was not). It stays as it is for a
+button that may not be pressed (_button) and for WENT_WRONG. Acknowledge pressed again says the same and saves nothing. Remind
+them again (relief/report.py: the reliefs its report listed, its extra) never changes the report: whoever could not be reminded, it
+can be pressed again later.
 
 Request to change and Not needed ask why first: a talk (table talks), one a chat, TALK_MINUTES long, the newest in place of any
 other. Until it is over, what is typed there is the why, whatever it looks like (never a code), judged again as a press is. A line
@@ -240,6 +241,12 @@ def _pressed(chat, data, message):
     return _did(do)
 
 
+def _says(text, sentence, b):
+    """text is that sentence of the app: {name} the one button b shows, {why} whatever it is"""
+    head, why, tail = sentence.replace("{name}", str(b["who"])).partition("{why}")
+    return text.startswith(head) and text.endswith(tail) if why else text == head
+
+
 def _acted(b, f):
     """what f does for button b comes to; refused by the app: its sentence, which the message gains too, unless the button is
     one to press again (STAYS, or a sentence its kind has in ACTIONS)"""
@@ -247,7 +254,7 @@ def _acted(b, f):
     except ValueError as e:
         if type(e) is not ValueError: raise
         keeps = ACTIONS[b["what"]][2]
-        stays = keeps is ANY or any(str(e) == x.format(name=b["who"]) for x in (*STAYS, *keeps))
+        stays = keeps is ANY or any(_says(str(e), x, b) for x in (*STAYS, *keeps))
         return _Out(str(e), alert=True, line=None if stays else str(e))
 
 
@@ -547,8 +554,9 @@ def _line(chat, talk, text, cmd, to):
 
 
 # what a button does, by its kind: (the right it needs, f(p) with p.chat, p.button (_button) and p.message (its id and text) ->
-# _Out, the refusals that keep it: {name} is the one it shows, ANY is every refusal)
-ACTIONS = {"ack": ("relief", _ack, ()), "change": ("relief", _ask_change, ()), "cancel": ("relief", _ask_cancel, ()), "keep": ("relief", _keep, (OLD_BUTTON,)),
+# _Out, the refusals that keep it: {name} is the one it shows, {why} is anything, ANY is every refusal)
+ACTIONS = {"ack": ("relief", _ack, (_cover.NOT_HAPPENING,)), "change": ("relief", _ask_change, (_cover.NOT_HAPPENING,)),
+           "cancel": ("relief", _ask_cancel, ()), "keep": ("relief", _keep, (OLD_BUTTON,)),
            "cancel-yes": ("relief", _yes, (OLD_BUTTON,)), "approve": ("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE)),
            "remind": ("relief.team", _remind, ANY)}
 # what the why typed in a talk comes to, by its kind: f(chat, the button, why, talk) -> _Out
