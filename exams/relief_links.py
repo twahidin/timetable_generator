@@ -44,7 +44,7 @@ class Links:
         self.model = (pub or {}).get("model") or {}
         self.scheds = [dict(s, status="approved") for s in scheds or []]
         self.bnds = _days.bounds(self.model) if self.model else []
-        self._days = {}
+        self._days, self._weeks = {}, {}
         self._duties = None
 
     @classmethod
@@ -75,7 +75,7 @@ class Links:
                 return out
             view = _days.merged_view(self.pub, self.cal, self.scheds, iso)
             wins = [(s, _days._windows(s, iso, self.model, self.bnds)) for s in self.scheds]
-        except (ValueError, KeyError, IndexError, TypeError):
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError):
             logger.exception("exams: relief links could not read %s", iso)        # once a date: the answer is kept
             return out
         out["day"] = day
@@ -115,7 +115,7 @@ class Links:
         for s in self.scheds:
             try:
                 rows += _schedules.busies([s], self.model)
-            except (ValueError, KeyError, TypeError):
+            except (ValueError, KeyError, TypeError, AttributeError):
                 logger.exception("exams: relief links could not read the duties of schedule %s", s.get("id"))
         for b in rows:
             s = by_id.get(b["id"])
@@ -165,7 +165,14 @@ class Links:
 
     def week_change(self, name, dates) -> int:
         """periods more (+) or fewer (-) the person works on these dates: duty and event periods that are not a period of a
-        lesson of theirs that runs, less the periods of their lessons that stop"""
+        lesson of theirs that runs, less the periods of their lessons that stop (kept: a free list asks for everyone, once a
+        lesson)"""
+        asked = (name, tuple(_iso(d) for d in dates))
+        if asked not in self._weeks:
+            self._weeks[asked] = self._week_change(name, dates)
+        return self._weeks[asked]
+
+    def _week_change(self, name, dates) -> int:
         total = 0
         for date in dates:
             d = self._date(date)
@@ -237,18 +244,20 @@ def _held(x, bnds, windows) -> bool:
 def relief_busies(model, records, scheds=()) -> list:
     """busies (the shape schedules.busies gives) for relief's own records: whoever is away over their periods, and whoever
     the relief team has approved to cover a lesson (each part of a split lesson over its own periods), unless a schedule of
-    scheds stops that lesson. A cancelled record gives none; a backup record (with exams) gives only the cover. A malformed
+    scheds (a list, or a function giving one, called only when someone is approved) stops that lesson. A cancelled record gives none; a backup record (with exams) gives only the cover. A malformed
     record, lesson or schedule is skipped."""
     bnds = _days.bounds(model) if model else []
-    out, windows = [], {}
+    out, windows, read = [], {}, []
     if not bnds:
         return out
 
     def held(x):
         iso = _iso(x["date"])
+        if not read:
+            read.append(list((scheds() if callable(scheds) else scheds) or ()))
         if iso not in windows:
             windows[iso] = {}
-            for s in scheds or ():
+            for s in read[0]:
                 try:
                     for c, w in _days._windows(s, iso, model, bnds).items():
                         windows[iso].setdefault(c, []).append(w)

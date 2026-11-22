@@ -206,8 +206,9 @@
     const same = quiet && !T.err && T.data && JSON.stringify(T.data) === JSON.stringify(res.data);
     T.err = null; T.data = res.data;
     for (const [k, m] of [...T.msg]) if (!findRow(k)) { T.msg.delete(k); T.top.push(m); }   /* its row is gone (split, joined): said above the rows */
-    if (T.open && !findRow(T.open)) T.open = null;
-    if (T.split && !findRow(T.split)) T.split = null;
+    const live = k => { const r = findRow(k); return r && r.state !== "cancelled" && r.state !== "stopped"; };
+    if (T.open && !live(T.open)) T.open = null;
+    if (T.split && !live(T.split)) T.split = null;
     if (!T.data.filling) T.top = T.top.filter(m => !m.fill);
     if (same) paintActs(); else paint();
     schedule();

@@ -157,8 +157,8 @@ def _links(pub, cal):
 
 
 def _links_or_none(pub, cal):
-    """_links for the relief team's pages and the relief teacher's: None, with the error logged once a request, when the
-    exams and events cannot be read (relief's own pages work as if there were none)"""
+    """_links, or None, with the error logged once a request, when the exams and events cannot be read: relief works as if
+    there were none"""
     if _g.get("relief_links_failed"): return None
     try: return _links(pub, cal)
     except Exception:
@@ -185,12 +185,14 @@ def _out(r, pub, me, cal=None, links=None):
     """the record as it is sent: lessons marked changed (matches_now) and stopped (why an approved exam or event stops a
     lesson dated today or later of a record still to come, else ""; links: one per request, built here when None), each with
     its covers ([{ckey, p, n, start, end, state, relief, planned}], by p: the lesson itself, or its parts); the remarks left
-    out for someone who is only its absent teacher. The absent teacher who may not open every absence (not relief.plan, not
+    out for someone who is only its absent teacher, and gone (the lessons that left a backup, with their picks and reasons)
+    for everyone. The absent teacher who may not open every absence (not relief.plan, not
     relief.team) sees a relief teacher's name only once it is approved (relief and relief_by None before), and no pick,
     request to change or history, on the lesson and on each part (Decision 4). Everyone else sees the relief as it is, and
     planned: the planner's own choice still waiting for the relief team (None otherwise)."""
     cal = cal if cal is not None else _cal(pub)
     v = _absences.matches_now(r, pub, cal)
+    v.pop("gone", None)
     today = _lessons.today().isoformat()
     ahead = not v.get("cancelled") and any(str(d) >= today for d in v.get("dates") or [])
     try:
@@ -361,11 +363,11 @@ def lessons():
         dates = _absences._iso_dates([x.strip() for x in (request.args.get("dates") or "").split(",") if x.strip()], _lessons.today())
         periods = _period_range(pub, request.args.get("from"), request.args.get("to"))
         records = _absences.all_records()
-        links = _links(pub, settings["calendar"])
-        by_date = {d.isoformat(): [_iso(dict(x, others=_free.there_then(records, x["others"], d, x["p"], x["n"], links=links), stopped=links.stopped(x)))       # as new() decides
+        links = _links_or_none(pub, settings["calendar"])
+        by_date = {d.isoformat(): [_iso(dict(x, others=_free.there_then(records, x["others"], d, x["p"], x["n"], links=links), stopped=_cover.stopped(links, x)))       # as new() decides
                                    for x in _lessons.on_date(pub, settings["calendar"], teacher, d, periods=periods)] for d in dates}
         every = _periods(pub)
-        duties = {d.isoformat(): links.duties(teacher, d, periods) for d in dates}
+        duties = {d.isoformat(): links.duties(teacher, d, periods) if links is not None else [] for d in dates}
     except ValueError as e: return _refusal(e)
     return jsonify(lessons=[x for v in by_date.values() for x in v], by_date=by_date, periods=every, duties=duties)
 
@@ -384,7 +386,7 @@ def free():
         except ValueError: raise ValueError(_absences.CHANGED)
         lesson = next((x for x in _lessons.on_date(pub, settings["calendar"], absent, date) if x["key"] == key), None)
         if lesson is None: raise ValueError(_absences.CHANGED)
-        got = _free.free_then(pub, settings, _absences.all_records(), lesson, absent, links=_links(pub, settings["calendar"]))
+        got = _free.free_then(pub, settings, _absences.all_records(), lesson, absent, links=_links_or_none(pub, settings["calendar"]))
     except ValueError as e: return _refusal(e)
     return jsonify(got)
 
@@ -412,7 +414,7 @@ def create():
     plan = _has("relief.plan")
     how = "asked" if teacher == me else "planned"
     if how == "planned" and not plan: return {"error": PLAN_ONLY}, 403
-    try: r = _absences.new(dict(data, teacher=teacher), pub, me, how, may_choose=plan, links=_links(pub, _cal(pub)))
+    try: r = _absences.new(dict(data, teacher=teacher), pub, me, how, may_choose=plan, links=_links_or_none(pub, _cal(pub)))
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "sending an absence")
     _noted(how, r, how)
@@ -456,21 +458,20 @@ def whats_in():
     since, as_of = _seen_at(me), _clock().isoformat()
     settings = _settings.load(pub)
     now, today = _fill._when(None), _lessons.today()
-    out = []
+    out, links = [], _links_or_none(pub, settings["calendar"])
     for r in _absences.all_records():
         v = _out(r, pub, me, settings["calendar"])                      # _links keeps one Links for the request
         at, changed = _time(v.get("at")), _time(v.get("changed_at"))
         v["new"] = since is None or at is None or at >= since or (changed is not None and changed >= since)
-        v["cover"], v["nudge"] = _cover_counts(v), _nudge(r, pub, settings, now, today)
+        v["cover"], v["nudge"] = _cover_counts(r, links), _nudge(r, pub, settings, now, today)
         out.append(v)
     return jsonify(absences=out, new_since=since.isoformat() if since else None, as_of=as_of)
 
 
-def _cover_counts(r):
-    """r: the record as _out sends it, its lessons marked stopped (one that does not happen needs no relief)"""
+def _cover_counts(r, links=None):
     n = dict(total=0, approved=0, waiting=0, open=0)
     for x in r.get("lessons") or []:
-        if x.get("stopped"): continue
+        if _cover.stopped(links, x): continue            # a lesson that does not happen needs no relief, past or to come
         for c in _cover.covers(x):
             s = _cover.state(r, x, c)
             if s == "cancelled": continue
@@ -562,7 +563,7 @@ def needed(id, key):
 def _choose(r, key, me, pub, b):
     name = b.get("relief")
     if name is not None and not isinstance(name, str): raise ValueError(_absences.WRONG)
-    return _absences.choose(r["id"], key, name or None, me, pub, links=_links(pub, _cal(pub)))
+    return _absences.choose(r["id"], key, name or None, me, pub, links=_links_or_none(pub, _cal(pub)))
 
 
 def _chosen_words(r, key):
@@ -834,7 +835,7 @@ def cover_free(id, ckey):
 @need("relief")
 def split(id, key):
     """{at}: the lesson (or the part holding period at) split so that a part starts at period at; relief.team"""
-    return _change(id, lambda r, me, pub, b: _cover.split(r["id"], key, b.get("at"), me), "split",
+    return _change(id, lambda r, me, pub, b: _cover.split(r["id"], key, b.get("at"), me, links=_links_or_none(pub, _cal(pub))), "split",
                    lambda r: f"{_lesson_words(r, key)} split before P{int(_body().get('at')) + 1}", gate=TEAM)
 
 
@@ -842,7 +843,7 @@ def split(id, key):
 @need("relief")
 def join(id, key):
     """Join again: the parts made one open lesson, while none is approved; relief.team"""
-    return _change(id, lambda r, me, pub, b: _cover.join(r["id"], key, me), "joined", lambda r: f"{_lesson_words(r, key)} joined again", gate=TEAM)
+    return _change(id, lambda r, me, pub, b: _cover.join(r["id"], key, me, links=_links_or_none(pub, _cal(pub))), "joined", lambda r: f"{_lesson_words(r, key)} joined again", gate=TEAM)
 
 
 @bp.post("/api/relief/absences/<id>/covers/<path:ckey>/keep")

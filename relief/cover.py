@@ -8,7 +8,7 @@ pick), pick None while being picked) and history (dict(what, who, by, at, why) f
 Every change is load, modify, save under absences._LOCK; nothing here calls the model.
 
 links (exams.relief_links.Links, or None) says what approved exams and events do to a date. A lesson they stop is not picked
-for, approved or given to anyone (NOT_HAPPENING) and takes nobody's time; nothing of it is written, so a lesson that happens
+for, approved, given to anyone, split or joined (NOT_HAPPENING) and takes nobody's time; nothing of it is written, so a lesson that happens
 again (the exam withdrawn) has the cover it had. Someone on an exam duty or at an event is not free (free.free_then)."""
 import datetime
 
@@ -305,7 +305,7 @@ def change(id, ckey, who, by, pub, settings, links=None):
     return r
 
 
-def split(id, key, at, by):
+def split(id, key, at, by, links=None):
     """split a lesson (by its key) at period at into two open parts; on a lesson split already, the part holding at is split
     the same way, so a lesson can have three parts or more. The part split keeps its place and the new part goes last, so a
     part's key never comes to mean another part (covers of a split lesson are not always in time order). Refused with
@@ -315,6 +315,7 @@ def split(id, key, at, by):
         x = _absences._lesson(r, key)
         _absences._past(x)
         if not x.get("needed"): raise ValueError(_absences.NO_NEED)
+        _happens(links, x)
         parts = x.get("parts")
         if parts:
             if not _absences._int(at): raise ValueError(_absences.WRONG)
@@ -337,7 +338,7 @@ def split(id, key, at, by):
     return r
 
 
-def join(id, key, by):
+def join(id, key, by, links=None):
     """the parts of a split lesson made one open lesson again, their history kept; refused once a part is approved"""
     with _absences._LOCK:
         r = _absences._editable(id)
@@ -345,6 +346,7 @@ def join(id, key, by):
         _absences._past(x)
         parts = x.get("parts")
         if not parts: raise ValueError(_absences.CHANGED)
+        _happens(links, x)
         if any(c.get("approved") for c in parts): raise ValueError(SPLIT_SENT)
         now = _absences._now()
         for c in parts: _settle(r, c)

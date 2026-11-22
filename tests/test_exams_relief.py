@@ -1238,17 +1238,21 @@ def a_stopped_lesson_is_not_picked_or_approved():
     with published(PUB):
         i = _plan(CHLOE)["id"]
         j = _plan(AISHA, RL.key_of(M, 0, MON, "Odd Mon"), HAFIZ)["id"]
-        e = _exam(duty_names=(BEN,))
+        e = _exam(duty_names=(BEN, HAFIZ))
         L = _links()
-        assert CV.stale(PUB, ST, AB.all_records(), *_cov(j, RL.key_of(M, 0, MON, "Odd Mon")), links=L) is False
+        assert L.busy(HAFIZ, MON, 0, 2) and CV.stale(PUB, ST, AB.all_records(), *_cov(j, RL.key_of(M, 0, MON, "Odd Mon")), links=L) is False
         for f in (lambda: CV.set_pick(i, CKEY, _pk(HAFIZ), PUB, ST, links=L), lambda: CV.change(i, CKEY, HAFIZ, GRACE, PUB, ST, links=L)):
             raises(ValueError, f, NOT_ON)
-        got = FL.run(ids=[i, j], now=DEC)
-        assert got == dict(picked=0, nobody=0), got
+        old, asked = PK.choose_for, []
+        PK.choose_for = lambda *a, **k: asked.append(a[4]["key"]) or old(*a, **k)
+        try: got = FL.run(ids=[i, j], now=DEC)
+        finally: PK.choose_for = old
+        assert got == dict(picked=0, nobody=0) and asked == [], "the model is not even asked"
         assert CV.state(*_cov(i, CKEY)) == "open" and _cov(i, CKEY)[2].get("history") in (None, [])
         assert _cov(j, RL.key_of(M, 0, MON, "Odd Mon"))[2]["relief"] == HAFIZ, "a waiting pick of a stopped lesson is left as it is"
         AKEY = RL.key_of(M, 0, MON, "Odd Mon")
         raises(ValueError, lambda: CV.approve(j, AKEY, HAFIZ, GRACE, PUB, ST, links=L), NOT_ON.replace("3B", "3A"))
+        raises(ValueError, lambda: CV.split(j, AKEY, 1, GRACE, links=L), NOT_ON.replace("3B", "3A"))
         all_ = CV.approve_all(ISO, [dict(id=j, ckey=AKEY, who=HAFIZ)], GRACE, PUB, ST, links=L)
         assert all_["approved"] == [] and all_["skipped"][0]["why"] == NOT_ON.replace("3B", "3A"), all_
         s = SC.load(e["id"]); s.update(status="withdrawn", approved=None); SC.save(s, PUB, CAL, GRACE, check=False)
@@ -1274,17 +1278,30 @@ def someone_on_a_duty_is_never_picked_or_approved():
         assert FL.run(ids=[i], now=DEC)["picked"] == 1
         c = _cov(i, DKEY)[2]
         assert c["relief"] not in (None, BEN) and ("dropped", BEN, "app") in _hist(c), c
-        who = c["relief"]
-        CV.approve(i, DKEY, who, GRACE, PUB, ST, links=_links())
-        _clear(); _exam(duty_names=(who,))          # an approved relief stays, flagged on Today
+        _clear()
+        who = HAFIZ                                 # free then with or without the exam, so only the duty can flag them
+        CV.change(i, DKEY, who, GRACE, PUB, ST, links=_links())
+        row = next(v for v in ok(_relief_team().get("/api/relief/today?date=" + ISO))["rows"] if v["ckey"] == DKEY)
+        assert row["stale"] is False and row["warn"] is None, row
+        _exam(duty_names=(who,))                    # an approved relief stays, flagged on Today
         FL.run(ids=[i], now=DEC)
         assert _cov(i, DKEY)[2]["relief"] == who and CV.state(*_cov(i, DKEY)) == "approved"
         row = next(v for v in ok(_relief_team().get("/api/relief/today?date=" + ISO))["rows"] if v["ckey"] == DKEY)
         assert row["stale"] is True and row["warn"] == who + " is no longer free then: change it", row
         free = ok(_relief_team().get("/api/relief/absences/%s/covers/%s/free" % (i, urllib.parse.quote(DKEY))))
         assert dict(name=who, why="Invigilating: " + EXAM) in free["busy"], free["busy"]
-        raises_to = _relief_team().put("/api/relief/absences/%s/covers/%s/relief" % (i, urllib.parse.quote(DKEY)), json=dict(relief=who))
+        url = "/api/relief/absences/%s/covers/%s" % (i, urllib.parse.quote(DKEY))
+        raises_to = _relief_team().put(url + "/relief", json=dict(relief=who))
         assert raises_to.status_code == 400 and raises_to.get_json()["error"] == CV.NOT_FREE.format(name=who)
+        j = _plan(GRACE, periods=[9, 10])["id"]     # 4A English: a waiting pick of someone then put on a duty is not approved
+        ekey = RL.key_of(M, 6, MON, "Odd Mon")
+        CV.set_pick(j, ekey, _pk(CHLOE), PUB, ST)
+        s = SC.load(SC.on_site()[0]["id"]); s["made"]["duties"] += [dict(date=ISO, start=640, end=700, room="3-02", names=[CHLOE])]; _approve(s)
+        no = CV.NOT_FREE.format(name=CHLOE)
+        r = _relief_team().post("/api/relief/absences/%s/covers/%s/approve" % (j, urllib.parse.quote(ekey)), json=dict(who=CHLOE))
+        assert r.status_code == 400 and r.get_json()["error"] == no, r.get_json()
+        r = ok(_relief_team().post("/api/relief/today/approve-all", json=dict(date=ISO, covers=[dict(id=j, ckey=ekey, who=CHLOE)])))
+        assert r["approved"] == 0 and r["skipped"][0]["why"] == no, r
 
 @t
 def fill_works_when_the_exams_cannot_be_read():
@@ -1350,6 +1367,24 @@ def own_absence_takes_over_a_split_lesson_and_a_planners_pick():
         c = _cov(r["id"], DKEY)[2]
         assert c["relief"] == BEN and CV.state(*_cov(r["id"], DKEY)) == "waiting" and CV.pick_of(rec, c)["who"] == BEN
         assert _hist(c) == [("pick", CHLOE, "planner"), ("dropped", CHLOE, GRACE)], c["history"]
+        for who, want in ((None, [("pick", CHLOE, "planner")]), (CHLOE, [("pick", CHLOE, "planner")]), (BEN, [("pick", CHLOE, "planner"), ("dropped", CHLOE, GRACE)])):
+            _fresh()
+            id = _made_exam([_duty([DANIEL])])["id"]
+            _send_approve(committee(), id)
+            o = _backups(id)[0]
+            o["lessons"][0].update(relief=CHLOE, relief_by="Mr Planner"); o["at"] = "2026-11-02T09:00:00+08:00"     # relief stage 2's shape: no pick
+            _put(o)
+            r = _plan(DANIEL, DKEY, who, links=_links())
+            c = _cov(r["id"], DKEY)[2]
+            assert _hist(c) == want and c["history"][0]["why"] == "Planned by Mr Planner on Mon 2 Nov.", (who, c["history"])
+            assert c["relief"] == (who or CHLOE) and c["relief_by"] == (GRACE if who else "Mr Planner"), c
+        _fresh()
+        id = _made_exam([_duty([DANIEL])])["id"]
+        _send_approve(committee(), id)
+        b = _backups(id)[0]["id"]
+        CV.split(b, DKEY, 2, GRACE)
+        CV.change(b, DKEY + "#0", CHLOE, GRACE, PUB, ST, links=_links())
+        raises(ValueError, lambda: _plan(DANIEL, DKEY, CHLOE, links=_links()), "4A Mathematics: this lesson is split: the relief team chooses for each part.")
 
 @t
 def an_approved_relief_is_not_replaced_by_a_new_absence():
@@ -1427,6 +1462,15 @@ def the_exams_side_sees_approved_reliefs_only():
         CV.ask_change(b, DKEY, "A meeting", CHLOE)
         assert len(RL.relief_busies(M, AB.all_records())) == 1, "until the team acts the relief stays"
         _fresh()
+        id = _made_exam([_duty([DANIEL])])["id"]
+        _send_approve(c, id)
+        b = _backups(id)[0]["id"]
+        CV.split(b, DKEY, 2, GRACE)
+        CV.change(b, DKEY + "#0", CHLOE, GRACE, PUB, ST, links=_links())
+        assert (item()["state"], item()["relief"]) == ("sent", None), "a part is still open"
+        CV.change(b, DKEY + "#1", BEN, GRACE, PUB, ST, links=_links())
+        assert (item()["state"], item()["relief"]) == ("relief", BEN + " and " + CHLOE), item()
+        _fresh()
         b = _plan(DANIEL)["id"]
         CV.split(b, DKEY, 2, GRACE)
         CV.change(b, DKEY + "#1", BEN, GRACE, PUB, ST)
@@ -1446,6 +1490,18 @@ def a_relief_the_exam_itself_stops_holds_nobody():
         assert covers(SC.elsewhere("x", M)) == [[HAFIZ]], "another schedule does not, while this one is not approved"
         _approve(SC.load(e["id"]))
         assert covers(SC.elsewhere("x", M)) == [], "an approved schedule stops it for everyone"
+        s = SC.load(e["id"]); s["days"] = {ISO: dict(levels=[], whole=True)}; s["classes"] = ["3A"]; s["status"] = "changes"
+        SC.save(s, PUB, CAL, GRACE, check=False)
+        assert covers(SC.elsewhere(e["id"], M)) == [[HAFIZ]], "its working copy no longer stops 3B: its own approved copy does not count"
+        assert covers(SC.elsewhere(e["id"], M, own=AP.as_schedule(SC.load(e["id"])))) == [], "replacing someone on the approved copy"
+        assert covers(SC.elsewhere("x", M)) == [], "for others the approved copy still stops it"
+        n = []
+        old = SC.on_site
+        SC.on_site = lambda: n.append(1) or old()
+        try:
+            SC.elsewhere("x", M); assert len(n) == 1
+            AB.cancel(i, "x", GRACE); SC.elsewhere("x", M); assert len(n) == 1, "with nobody approved the schedules are not read"
+        finally: SC.on_site = old
 
 @t
 def todays_page_and_the_lists_show_a_stopped_lesson():
@@ -1500,6 +1556,13 @@ def load_and_the_ai_count_exam_duties():
         assert now[BEN]["exams"] == L.week_change(BEN, week) == 5 - 3 and now[BEN]["teaching"] == before[BEN]["teaching"]
         assert now[BEN]["week"] == now[BEN]["teaching"] + now[BEN]["relief"] + 2, now[BEN]
         assert now[CHLOE]["exams"] == -2 and now[CHLOE]["week"] == 0, "her only lesson that week stops"
+        k = _plan(CHLOE)["id"]
+        CV.change(k, CKEY, HAFIZ, GRACE, PUB, ST)           # (no links: as it was chosen before the exam)
+        hafiz = rows()[HAFIZ]
+        assert (hafiz["relief"], hafiz["term"]) == (0, 0), hafiz
+        one = ok(team.get("/api/relief/load/%s?week=%s" % (urllib.parse.quote(HAFIZ), ISO)))["reliefs"]
+        assert [(v["ckey"], v["state"]) for v in one] == [(CKEY, "not happening")], one
+        AB.cancel(k, "x", GRACE)
         csv_ = team.get("/api/relief/load.csv?week=" + ISO).get_data(as_text=True)
         head = csv_.lstrip("\ufeff").splitlines()[0]
         assert "Exams and events" in head, head
@@ -1536,9 +1599,22 @@ def relief_team_pages_work_when_the_exams_cannot_be_read():
                       "/api/relief/planned.csv?start=" + ISO):
                 r = team.get(u)
                 assert r.status_code == 200, (u, r.status_code)
+            j = ok(team.get("/api/relief/lessons?dates=%s&teacher=%s" % (ISO, urllib.parse.quote(HAFIZ))))
+            assert [x["stopped"] for x in j["lessons"]] == ["", ""] and j["duties"] == {ISO: []}, j
+            ok(team.get("/api/relief/free?absent=%s&key=%s" % (urllib.parse.quote(DANIEL), urllib.parse.quote(DKEY))))
+            ok(team.put("/api/relief/absences/%s/lessons/%s/relief" % (i, urllib.parse.quote(DKEY)), json=dict(relief=BEN)))
             ok(team.put("/api/relief/absences/%s/covers/%s/relief" % (i, urllib.parse.quote(DKEY)), json=dict(relief=BEN)))
+            ok(staff(HAFIZ).post("/api/relief/absences", json=dict(dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[])))
         finally:
             RL.Links.load = old; A.app.logger.disabled = False
+        e = _exam(duty_names=(BEN,))                    # an approved copy that cannot be used
+        s = SC.load(e["id"]); s["approved"]["days"] = {ISO: "x"}; SC.save(s, PUB, CAL, GRACE, check=False)
+        old_log, RL.logger.disabled = RL.logger.disabled, True
+        try:
+            for u in ("/api/relief/today?date=" + ISO, "/api/relief/load?week=" + ISO, "/api/relief/planned.csv?start=" + ISO):
+                assert team.get(u).status_code == 200, u
+            FL.run(ids=[i], now=DEC)
+        finally: RL.logger.disabled = old_log
 
 @t
 def a_links_date_with_no_schedule_reads_nothing():
@@ -1552,6 +1628,10 @@ def a_links_date_with_no_schedule_reads_nothing():
         assert seen == [], "a date no approved schedule holds costs nothing"
         assert L.stopped(dict(key=CKEY, date=ISO)) == STOP and seen == [ISO]
     finally: D.merged_view = old
+    s = SC.load(SC.on_site()[0]["id"]); s["made"]["duties"][0]["date"] = "2027-01-18"; _approve(s)      # a duty outside the schedule's own dates
+    L = _links()
+    assert L.busy(BEN, "2027-01-18", 0, 1) == "Invigilating: " + EXAM and L.duties(BEN, "2027-01-18")
+    assert L.week_change(BEN, [date(2027, 1, 18)]) == L.week_change(BEN, [date(2027, 1, 18)]) == 5
 
 @t
 def the_pages_show_not_happening_and_duties():
@@ -1559,6 +1639,103 @@ def the_pages_show_not_happening_and_duties():
     assert 'case "stopped"' in js["relief-today.js"] and "Not happening" in js["relief-today.js"] and "r.duty" in js["relief-today.js"]
     assert "pl-duty" in js["relief-today.js"] and "c.stopped" in js["relief-covering.js"]
     assert "Exams and events" in js["relief-load.js"] and "busy_open" not in js["relief-plan.js"]
+
+@t
+def what_left_a_backup_is_sent_to_nobody():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        id = _made_exam(_two_duties())["id"]
+        _send_approve(c, id)
+        b = _backups(id)[0]["id"]
+        pe = {x["subject"]: x["key"] for x in AB.load(b)["lessons"]}["PE"]
+        CV.set_pick(b, pe, dict(_pk(BEN, "ai"), reason="Rule 3 says so."), PUB, ST, links=_links())
+        ok(c.post(f"/api/exams/{id}/handled", json=dict(teacher=HAFIZ, key=pe, handled=True)))
+        assert AB.load(b)["gone"], "kept"
+        for who, u in ((HAFIZ, "/api/relief/absences/mine"), (HAFIZ, "/api/relief/absences/" + b), (GRACE, "/api/relief/absences"),
+                       (GRACE, "/api/relief/absences/" + b)):
+            text = json.dumps(ok(staff(who).get(u)))
+            assert "gone" not in text and "Rule 3" not in text and "Because" not in text, (who, u)
+        text = json.dumps(ok(staff(HAFIZ).get("/api/relief/absences/mine")))
+        assert BEN not in text
+
+@t
+def replacing_someone_on_an_approved_exam_sees_the_approved_copy():
+    _fresh()
+    with published(PUB):
+        c = committee()
+        i = _plan(DANIEL)["id"]
+        CV.change(i, DKEY, BEN, GRACE, PUB, ST)             # Ben is approved to cover Daniel's 4A Mathematics: a Sec 3 exam does not stop it
+        e = _made_exam([_duty([AISHA])]); id = e["id"]
+        _send_approve(c, id)
+        s = SC.load(id); s["levels"] = ["Sec 3", "Sec 4"]; s["days"] = {ISO: dict(levels=["Sec 3", "Sec 4"], whole=True)}      # an edit not sent
+        SC.save(s, PUB, CAL, GRACE, check=False)
+        assert SC.load(id)["approved"]["days"][ISO]["levels"] == ["Sec 3"]
+        r = c.post(f"/api/exams/{id}/away", json=dict(key=DUTY_KEY, room="3-01", away=AISHA, name=BEN))
+        assert r.status_code == 400 and "not free" in r.get_json()["error"], r.get_json()
+        assert SC.load(id)["approved"]["made"]["duties"][0]["names"] == [AISHA]
+
+@t
+def an_event_that_stops_a_lesson_frees_its_relief():
+    _fresh()
+    with published(PUB):
+        i = _plan(DANIEL)["id"]
+        CV.change(i, DKEY, HAFIZ, GRACE, PUB, ST)
+        ev = SC.new_event(EVENT, [], ["4A"], ISO, ISO, GRACE, GRACE)
+        ev["days"] = {ISO: dict(whole=False, **{"from": "07:40", "to": "09:00"})}; ev["going"] = [HAFIZ]
+        ev = SC.save(ev, PUB, CAL, GRACE, check=False)
+        others, busy = A._event_others(PUB, ev)
+        assert not any(b["why"].startswith("covers relief") for b in busy if b.get("why")), busy
+        ev["days"] = {ISO: dict(whole=False, **{"from": "10:00", "to": "11:00"})}
+        others, busy = A._event_others(PUB, ev)
+        assert [b["names"] for b in busy if b.get("why", "").startswith("covers relief")] == [[HAFIZ]], "the copy worked on, not the saved one"
+
+@t
+def whats_in_leaves_out_a_stopped_lesson_after_its_date_too():
+    _fresh()
+    old = LS.today
+    with published(PUB):
+        i = _plan(CHLOE)["id"]
+        _exam(duty_names=(IVAN,))
+        r = AB.load(i); r["dates"] = [ISO, "2027-01-05"]; _put(r)            # still coming up the next day
+        LS.today = lambda: date(2027, 1, 5)
+        try: rows = {r["id"]: r for r in ok(_relief_team().get("/api/relief/absences"))["absences"]}
+        finally: LS.today = old
+        assert rows[i]["cover"] == dict(total=0, approved=0, waiting=0, open=0), rows[i]["cover"]
+
+@t
+def a_request_to_changes_new_pick_on_a_duty_is_picked_again():
+    _fresh()
+    with published(PUB):
+        i = _plan(DANIEL)["id"]
+        CV.change(i, DKEY, HAFIZ, GRACE, PUB, ST)
+        CV.ask_change(i, DKEY, "A meeting", HAFIZ)
+        CV.set_pick(i, DKEY, _pk(BEN), PUB, ST, into="change")
+        _exam(duty_names=(BEN,))
+        assert CV.stale(PUB, ST, AB.all_records(), *_cov(i, DKEY), into="change", links=_links()) is True
+        assert FL.run(ids=[i], now=DEC)["picked"] == 1
+        new = CV.new_pick(_cov(i, DKEY)[2])
+        assert new and new["who"] not in (BEN, HAFIZ), new
+
+@t
+def the_shortlist_leaves_out_reliefs_of_stopped_lessons():
+    _fresh()
+    with published(PUB):
+        k = _plan(CHLOE)["id"]
+        CV.change(k, CKEY, HAFIZ, GRACE, PUB, ST)
+        i = _plan(GRACE, periods=[9, 10])["id"]
+        ekey = RL.key_of(M, 6, MON, "Odd Mon")
+        hafiz = lambda **kw: next(p for p in PK.shortlist(PUB, ST, AB.all_records(), *_cov(i, ekey), **kw) if p["name"] == HAFIZ)
+        assert (hafiz()["week_relief"], hafiz()["today_at"]) == (2, [(0, 2)])
+        _exam(duty_names=(IVAN,))
+        got = hafiz(links=_links())
+        assert (got["week_relief"], got["today_at"], got["by_day"]["Mon"]) == (0, [], 0), got
+
+@t
+def the_pages_offer_nothing_for_a_stopped_lesson():
+    js = {f: open(os.path.join(ROOT, "static", f), encoding="utf-8").read() for f in ("relief.js", "relief-plan.js", "relief-inbox.js", "relief-today.js")}
+    assert "!x.changed && !x.stopped && x.date" in js["relief-plan.js"] and "x.needed && !x.stopped && !r.cancelled" in js["relief.js"]
+    assert "x.needed && !x.stopped)" in js["relief-inbox.js"] and 'r.state !== "cancelled" && r.state !== "stopped"; };' in js["relief-today.js"]
 
 
 _clear()

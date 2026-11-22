@@ -182,6 +182,10 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
         pending = dict(teacher=teacher, dates=[d.isoformat() for d in dates], periods=periods, cancelled=None, lessons=[])
         if not may_choose and any(x["needed"] and x["_ask"].get("relief") for x in built):
             raise ValueError("Only management and the relief team choose relief teachers.")     # before free_then: no probing who is free
+        moving = _moving(records, teacher, built)
+        for o, moved in moving:
+            for x in built:
+                if x["needed"] and x["key"] in moved: _may_replace(moved[x["key"]], x, x["_ask"].get("relief"))
         for x in built:
             name = x["_ask"].get("relief")
             if name and x["needed"]:
@@ -197,7 +201,7 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
         r = dict(id=secrets.token_hex(6), teacher=teacher, dates=pending["dates"], periods=periods, reason=reason, reason_text=text.strip(),
                  remarks=remarks.strip(), reporting_officer=officer, by=by, how=how, at=_now(), acknowledged=None, cancelled=None,
                  lessons=pending["lessons"])
-        backups = _take_over(records, r)
+        backups = _take_over(moving, r)
         _save(r)
         for o in backups: _save(o)      # after the absence: a lesson is never left in neither
     return r
@@ -236,8 +240,8 @@ def _dates_and_periods(lessons):
 
 def _move_cover(o, y, r, x):
     """the cover of the backup o's lesson y becomes that of lesson x of the new absence r: its relief and how far that has
-    gone (COVER), with its history. A planner's choice in r replaces a pick still waiting (written down as dropped; the
-    caller refused one against an approved relief of someone else, or a split lesson); a lesson r says needs no relief ends
+    gone (COVER), with its history. A planner's choice in r replaces a pick still waiting (written down as dropped; new
+    refused one against an approved relief of someone else, or a split lesson: _may_replace); a lesson r says needs no relief ends
     the cover, as not_needed does"""
     for c in _cover.covers(y): _cover._settle(o, c)       # a planner's choice gets its pick and history line as o dated it
     chosen = (x["relief"], x["relief_by"]) if x["needed"] and x.get("relief") and not y.get("approved") else None
@@ -251,25 +255,30 @@ def _move_cover(o, y, r, x):
         x["relief"], x["relief_by"] = chosen
 
 
-def _take_over(records, r):
-    """own absence wins (P10): a lesson of the new absence r that is a needed lesson of one of the teacher's backups moves in
-    with its whole cover (_move_cover) and its work; the backup drops it, and is cancelled once no lesson is left (a lesson
-    marked not needed stays in it, so the next sync does not send it again). First, before anything is changed, what choose
-    refuses on the backup is refused here too, naming the lesson: a choice for a lesson the relief team has split (IS_SPLIT),
-    or has approved for someone else (APPROVED_ALREADY). Runs inside _LOCK and never touches the exams lock. -> the backups
-    changed (to save)"""
-    mine = {x["key"]: x for x in r["lessons"]}
-    moving = []
+def _moving(records, teacher, lessons):
+    """[(backup, {key: its lesson})]: the needed lessons of the teacher's backups that are among lessons (a new absence's)"""
+    keys, out = {x["key"] for x in lessons}, []
     for o in records:
-        if o.get("cancelled") or not o.get("exams") or o.get("teacher") != r["teacher"]: continue
-        moved = {y["key"]: y for y in o.get("lessons") or [] if isinstance(y, dict) and y.get("needed") and y.get("key") in mine}
-        if moved: moving.append((o, moved))
-    for o, moved in moving:
-        for key, y in moved.items():
-            x = mine[key]
-            if not x["needed"] or not x.get("relief"): continue
-            no = IS_SPLIT if y.get("parts") else APPROVED_ALREADY if y.get("approved") and y.get("relief") != x["relief"] else ""
-            if no: raise ValueError(f"{' and '.join(x['classes'])} {x['subject']}: {no[0].lower()}{no[1:]}")
+        if o.get("cancelled") or not o.get("exams") or o.get("teacher") != teacher: continue
+        moved = {y["key"]: y for y in o.get("lessons") or [] if isinstance(y, dict) and y.get("needed") and y.get("key") in keys}
+        if moved: out.append((o, moved))
+    return out
+
+
+def _may_replace(y, x, name):
+    """what choose refuses on a backup's lesson y is refused of a new absence's lesson x too, naming it: choosing name for a
+    lesson the relief team has split, or has approved for someone else"""
+    if not name: return
+    no = IS_SPLIT if y.get("parts") else APPROVED_ALREADY if y.get("approved") and y.get("relief") != name else ""
+    if no: raise ValueError(f"{' and '.join(x['classes'])} {x['subject']}: {no[0].lower()}{no[1:]}")
+
+
+def _take_over(moving, r):
+    """own absence wins (P10): a lesson of the new absence r that is a needed lesson of one of the teacher's backups (moving,
+    from _moving) moves in with its whole cover (_move_cover) and its work; the backup drops it, and is cancelled once no
+    lesson is left (a lesson marked not needed stays in it, so the next sync does not send it again). Runs inside _LOCK and
+    never touches the exams lock. -> the backups changed (to save)"""
+    mine = {x["key"]: x for x in r["lessons"]}
     changed = []
     for o, moved in moving:
         for key, y in moved.items():

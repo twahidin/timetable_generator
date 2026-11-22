@@ -193,7 +193,7 @@
     }
 
     function lessonRow(r, x, i, editable) {
-      const cover = x.needed && !r.cancelled, now = editable && x.date >= RF.today();   /* a past lesson keeps what it has */
+      const cover = x.needed && !x.stopped && !r.cancelled, now = editable && x.date >= RF.today();   /* a past lesson keeps what it has */
       const side = !cover ? "" : opts.side ? opts.side(r, x) || ""
         : reliefLines(x);
       const changed = x.changed && !r.cancelled && x.date >= RF.today() ? `<div class="ab-changed">The lesson has changed since this was planned</div>` : "";

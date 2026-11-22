@@ -37,8 +37,8 @@
     painted: paintPlanned,
   });
 
-  /* a lesson gone from the timetable, or past, keeps what it has; a lesson with a cover approved, or split, is the relief team's */
-  const mayChoose = x => !x.changed && x.date >= RF.today() && !R.approvedOf(x).length && (x.covers || []).length < 2;
+  /* a lesson gone from the timetable, stopped by an exam or event, or past, keeps what it has; a lesson with a cover approved, or split, is the relief team's */
+  const mayChoose = x => !x.changed && !x.stopped && x.date >= RF.today() && !R.approvedOf(x).length && (x.covers || []).length < 2;
   const plainSide = x => R.reliefLines(x);
 
   /* ---------------------------------------------------------------- the "free then" list */
@@ -359,7 +359,7 @@
 
   /* ---------------------------------------------------------------- Planned by me */
   function plannedRow(r) {
-    const cover = (r.lessons || []).filter(x => x.needed), k = cover.filter(x => R.approvedOf(x).length || (x.covers || []).some(c => c.planned)).length;
+    const cover = (r.lessons || []).filter(x => x.needed && !x.stopped), k = cover.filter(x => R.approvedOf(x).length || (x.covers || []).some(c => c.planned)).length;
     const changedNow = !r.cancelled && (r.lessons || []).some(x => x.changed && x.date >= RF.today());
     let chip;
     if (r.cancelled) chip = `<span class="chip st-off">Cancelled by ${esc(who(r.cancelled.by))}: ${esc(r.cancelled.why)}</span>`;
