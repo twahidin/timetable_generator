@@ -849,7 +849,7 @@ def join(id, key):
 @need("relief")
 def keep(id, ckey):
     """Keep: a request to change closed, the relief staying with the teacher who asked; relief.team"""
-    return _change(id, lambda r, me, pub, b: _cover.keep(r["id"], ckey, me), "kept",
+    return _change(id, lambda r, me, pub, b: _cover.keep(r["id"], ckey, me, links=_links_or_none(pub, _cal(pub))), "kept",
                    lambda r: f"{_relief_of(r, ckey)} kept for {_cover_words(r, ckey)}", gate=TEAM)
 
 
@@ -903,14 +903,14 @@ def covering():
 def _yours(id, ckey, do, what, words, after=None):
     """a step the approved relief teacher of the cover takes: anyone else (or a cover not approved, gone, or of no absence)
     gets 403 NOT_YOURS_COVER, the same answer whatever the reason, before anything is read out; do(record, lesson, cover,
-    me, body) -> the saved record, or None when nothing was to be saved (no history entry then); after(): once saved"""
+    me, body, pub) -> the saved record, or None when nothing was to be saved (no history entry then); after(): once saved"""
     pub, me, err = _gate()
     if err: return err
     r = _absences.load(id)
     try: x, c = _cover.find(r, ckey) if r else (None, None)
     except ValueError: c = None
     if c is None or c.get("relief") != me or _cover.state(r, x, c) not in APPROVED: return {"error": _cover.NOT_YOURS_COVER}, 403
-    try: saved = do(r, x, c, me, _body())
+    try: saved = do(r, x, c, me, _body(), pub)
     except ValueError as e: return ({"error": str(e)}, 403) if str(e) == _cover.NOT_YOURS_COVER else _refusal(e)
     except BAD_INPUT as e: return _odd(e, "answering a relief")
     if saved is None: return jsonify(_covering_item(pub, r, ckey))
@@ -923,8 +923,8 @@ def _yours(id, ckey, do, what, words, after=None):
 @need("relief")
 def cover_acknowledge(id, ckey):
     """the relief teacher acknowledges (once: again is the same answer, no new history entry)"""
-    def do(r, x, c, me, b):
-        return None if _cover.state(r, x, c) == "acknowledged" else _cover.acknowledge(r["id"], ckey, me)
+    def do(r, x, c, me, b, pub):
+        return None if _cover.state(r, x, c) == "acknowledged" else _cover.acknowledge(r["id"], ckey, me, links=_links_or_none(pub, _cal(pub)))
     return _yours(id, ckey, do, "relief acknowledged", lambda r, me: f"{me} acknowledged {_cover_words(r, ckey)}")
 
 
@@ -933,7 +933,7 @@ def cover_acknowledge(id, ckey):
 def ask_change(id, ckey):
     """{why}: a line; the relief stays theirs until the team acts, and a new pick is made at once (fill.soon for this
     absence alone, with force, after the save); the history entry never holds the why"""
-    return _yours(id, ckey, lambda r, x, c, me, b: _cover.ask_change(r["id"], ckey, b.get("why"), me), "asked to change",
+    return _yours(id, ckey, lambda r, x, c, me, b, pub: _cover.ask_change(r["id"], ckey, b.get("why"), me, links=_links_or_none(pub, _cal(pub))), "asked to change",
                   lambda r, me: f"{me} asked to change {_cover_words(r, ckey)}", after=lambda: _soon(ids=[id], force=True))
 
 

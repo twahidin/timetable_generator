@@ -304,7 +304,7 @@ def new_absence_marks_stopped_lessons():
         r = AB.new(_ask(AISHA, asks), PUB, GRACE, "planned", may_choose=True, links=_links())
         for x in r["lessons"]:
             if x["key"] in {y["key"] for y in stopped}:
-                assert x["needed"] is False and x["not_needed"] == dict(by="app", why="Not happening: 3A is on " + EXAM), x
+                assert x["needed"] is True and x["not_needed"] is None, "the stop is worked out, never written: %s" % x
         AB.cancel(r["id"], "test", GRACE, team=True)
 
 @t
@@ -1814,6 +1814,175 @@ def schedules_that_cannot_be_read_are_not_taken_as_none():
         def broken(): raise KeyError("status")
         raises(KeyError, lambda: RL.relief_busies(M, AB.all_records(), broken))
         assert [b["names"] for b in RL.relief_busies(M, AB.all_records(), [dict(id="x")]) if b["why"].startswith("covers")] == [[HAFIZ]], "one odd schedule stops nothing"
+
+# ---- an absence sent while an exam stops a lesson, and the exam withdrawn later
+def _withdraw(id):
+    s = SC.load(id); s.update(status="withdrawn", approved=None); SC.save(s, PUB, CAL, GRACE, check=False)
+
+@t
+def a_lesson_stopped_when_the_absence_was_sent_is_covered_once_the_exam_is_withdrawn():
+    _fresh()
+    with published(PUB):
+        e = _exam(duty_names=(IVAN,))
+        j = ok(staff(CHLOE).post("/api/relief/absences", json=dict(dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[])))
+        x = j["lessons"][0]
+        assert (x["key"], x["needed"], x["stopped"], x["not_needed"]) == (CKEY, True, STOP, None), x
+        team, i = _relief_team(), j["id"]
+        row = lambda: next(v for v in ok(team.get("/api/relief/today?date=" + ISO))["rows"] if v["ckey"] == CKEY)
+        counts = lambda: next(r for r in ok(team.get("/api/relief/absences"))["absences"] if r["id"] == i)["cover"]
+        assert row()["state"] == "stopped" and counts() == dict(total=0, approved=0, waiting=0, open=0)
+        assert FL.run(ids=[i], now=DEC) == dict(picked=0, nobody=0), "nothing to pick for while it is stopped"
+        _withdraw(e["id"])
+        assert row()["state"] == "open" and counts()["open"] == 1, "the lesson happens: it needs a relief teacher"
+        assert FL.run(ids=[i], now=DEC)["picked"] == 1
+
+@t
+def an_absence_whose_lessons_all_stop_is_taken():
+    _fresh()
+    with published(PUB):
+        _exam(duty_names=(IVAN,))                   # Chloe's only lesson that day stops, and she has no duty
+        r = staff(CHLOE).post("/api/relief/absences", json=dict(dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[]))
+        assert r.status_code == 200, r.get_json()
+        busy = SC.elsewhere("x", M)
+        assert [b["why"] for b in busy if b["names"] == [CHLOE] and b["id"] == "relief"] == ["is away then (relief)"], "the exams committee sees who is away"
+        _fresh()
+        r = staff(BEN).post("/api/relief/absences", json=dict(dates=["2027-01-05"], reason="Medical", reporting_officer=GRACE, lessons=[]))
+        assert r.status_code == 400 and r.get_json()["error"] == "There are no lessons to cover in that time.", "still refused with no lesson at all"
+
+@t
+def the_same_stopped_lesson_is_not_sent_twice():
+    _fresh()
+    with published(PUB):
+        _exam(duty_names=(IVAN,))
+        _plan(CHLOE, links=_links())
+        r = staff(CHLOE).post("/api/relief/absences", json=dict(dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[]))
+        assert r.status_code == 400 and r.get_json()["error"] == f"{GRACE} has already sent an absence for {CHLOE} on Mon 4 Jan.", r.get_json()
+
+@t
+def a_choice_for_a_stopped_lesson_is_left_out():
+    _fresh()
+    with published(PUB):
+        e = _exam(duty_names=(IVAN,))
+        r = _plan(CHLOE, CKEY, HAFIZ, links=_links())                   # the planner's page was opened before the exam was approved
+        x = r["lessons"][0]
+        assert x["needed"] is True and x["relief"] is None and "_stopped" not in x and "_ask" not in x, x
+        r = AB.load(r["id"])
+        assert [sorted(y) for y in r["lessons"]] == [sorted(k for k in y if not k.startswith("_")) for y in r["lessons"]]
+        _withdraw(e["id"])
+        assert CV.state(*_cov(r["id"], CKEY)) == "open"
+        _fresh(); _exam(duty_names=(IVAN,))
+        r = AB.new(dict(teacher=CHLOE, dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[dict(key=CKEY, relief=HAFIZ)]), PUB, CHLOE, "asked",
+                   links=_links())
+        assert r["lessons"][0]["relief"] is None, "someone who may not choose is not refused for a lesson that does not happen"
+
+@t
+def what_the_client_said_is_kept_for_a_stopped_lesson():
+    _fresh()
+    with published(PUB):
+        _exam(duty_names=(CHLOE,))
+        r = AB.new(dict(teacher=CHLOE, dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[dict(key=CKEY, needed=False)]), PUB, CHLOE, "asked", links=_links())
+        assert r["lessons"][0]["needed"] is False and r["lessons"][0]["not_needed"] == dict(by=CHLOE, why="Not needed"), r["lessons"]
+        _fresh()
+        M["lessons"][1]["teachers"] = [CHLOE, HAFIZ]                    # Hafiz is there
+        try:
+            _exam(duty_names=(CHLOE,))
+            x = AB.new(dict(teacher=CHLOE, dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[]), PUB, CHLOE, "asked", links=_links())["lessons"][0]
+            assert x["needed"] is False and x["not_needed"] == dict(by="app", why=HAFIZ + " is there"), x
+        finally: M["lessons"][1]["teachers"] = [CHLOE]
+
+@t
+def a_takeover_keeps_the_relief_of_a_lesson_stopped_by_then():
+    _fresh()
+    with published(PUB):
+        id = _made_exam([_duty([DANIEL])])["id"]
+        _send_approve(committee(), id)
+        b = _backups(id)[0]["id"]
+        CV.change(b, DKEY, CHLOE, GRACE, PUB, ST, links=_links())
+        ev = _event()                                                   # saved as approved, with no sync: 4A is on it, and the backup still holds the lesson
+        r = AB.new(dict(teacher=DANIEL, dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[]), PUB, DANIEL, "asked", links=_links())
+        assert r["lessons"][0]["needed"] is True and CV.state(*_cov(r["id"], DKEY)) == "approved" and _links().stopped(AB.load(r["id"])["lessons"][0])
+        _withdraw(ev["id"])
+        mine = ok(staff(CHLOE).get("/api/relief/covering"))["covers"]
+        assert [(v["ckey"], v["state"], v["stopped"]) for v in mine] == [(DKEY, "approved", "")], "the relief stands again"
+        _fresh()
+        id = _made_exam([_duty([DANIEL])])["id"]
+        _send_approve(committee(), id)
+        CV.change(_backups(id)[0]["id"], DKEY, CHLOE, GRACE, PUB, ST, links=_links())
+        _event()
+        r = _plan(DANIEL, DKEY, BEN, links=_links())                    # the choice is left out, so it is not refused against the approved relief
+        assert _cov(r["id"], DKEY)[2]["relief"] == CHLOE and CV.state(*_cov(r["id"], DKEY)) == "approved"
+
+@t
+def the_exams_page_says_stopped_before_sent():
+    _fresh()
+    with published(PUB):
+        ev = _event()                                                   # 4A is on it 07:40-09:00: Daniel's 4A Mathematics stops
+        _plan(DANIEL, links=_links())
+        e = _exam(duty_names=(DANIEL,))
+        items = [dict(teacher=DANIEL, key=DKEY, date=ISO)]
+        got = RL.mark(items, SC.load(e["id"]), AB.all_records(), RL.Links(PUB, CAL, [AP.as_schedule(SC.load(ev["id"]))]), SOON)[0]
+        assert got["state"] == "stopped" and got["stopped"] == "4A is on " + EVENT, got
+
+# ---- the relief session's points: unread, the relief teacher's steps, and the words of a takeover
+@t
+def links_say_what_they_could_not_read():
+    _fresh()
+    e = _exam(duty_names=(AISHA,))
+    L = RL.Links.load(PUB, CAL)
+    assert not L.unread(MON) and not L.unread("2027-02-01")
+    path = os.path.join(SC.DIR, "broken1.json")
+    with open(path, "w", encoding="utf-8") as f: f.write("{not json")
+    try:
+        L = RL.Links.load(PUB, CAL)
+        assert L.unread(MON) and L.unread("2027-02-01"), "its dates are not known: every date is unread"
+        assert L.stopped(dict(key=CKEY, date=ISO)) == STOP, "what can be read still counts"
+        assert [s["id"] for s in SC.on_site()] == [e["id"]]
+    finally: os.remove(path)
+    with open(path, "w", encoding="utf-8") as f: f.write('["no id"]')
+    try: assert RL.Links.load(PUB, CAL).unread(MON), "not a schedule"
+    finally: os.remove(path)
+    lg, old_view, old_busies = RL.logger.exception, RL._days.merged_view, RL._schedules.busies
+    RL.logger.exception = lambda *a, **k: None
+    try:
+        def no_view(*a, **k): raise KeyError("test")
+        RL._days.merged_view = no_view
+        L = _links()
+        assert L.unread(MON) and not L.unread("2027-02-01"), "the date that could not be read, alone"
+        RL._days.merged_view = old_view
+        def no_busies(*a): raise KeyError("test")
+        RL._schedules.busies = no_busies
+        L = _links()
+        assert L.unread(MON) and not L.unread("2027-02-01"), "the duties of a schedule could not be read: the dates it holds"
+    finally: RL.logger.exception, RL._days.merged_view, RL._schedules.busies = lg, old_view, old_busies
+    assert not RL.Links(None, CAL, []).unread(MON)
+
+@t
+def the_relief_teachers_steps_and_keep_refuse_a_stopped_lesson():
+    _fresh()
+    with published(PUB):
+        i = _plan(CHLOE)["id"]
+        CV.change(i, CKEY, HAFIZ, GRACE, PUB, ST)
+        e = _exam(duty_names=(IVAN,))
+        h, url = staff(HAFIZ), "/api/relief/absences/%s/covers/%s/" % (i, urllib.parse.quote(CKEY))
+        for r in (h.post(url + "acknowledge", json={}), h.post(url + "ask-change", json=dict(why="A meeting"))):
+            assert r.status_code == 400 and r.get_json()["error"] == NOT_ON, r.get_json()
+        assert CV.state(*_cov(i, CKEY)) == "approved"
+        r = staff(BEN).post(url + "acknowledge", json={})
+        assert r.status_code == 403 and r.get_json()["error"] == CV.NOT_YOURS_COVER, "someone else is told nothing about it"
+        _withdraw(e["id"])
+        ok(h.post(url + "ask-change", json=dict(why="A meeting")))
+        _approve(SC.load(e["id"]), "approved")
+        r = _relief_team().post(url + "keep", json={})
+        assert r.status_code == 400 and r.get_json()["error"] == NOT_ON, r.get_json()
+        _withdraw(e["id"])
+        ok(_relief_team().post(url + "keep", json={}))
+        ok(h.post(url + "acknowledge", json={}))
+        assert CV.state(*_cov(i, CKEY)) == "acknowledged"
+
+@t
+def a_cancel_by_the_app_is_not_shown_as_a_person():
+    js = {f: open(os.path.join(ROOT, "static", f), encoding="utf-8").read() for f in ("relief.js", "relief-plan.js", "relief-inbox.js")}
+    for f, code in js.items(): assert '.by === "app"' in code, f
 
 
 _clear()

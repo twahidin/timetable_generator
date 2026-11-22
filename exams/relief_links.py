@@ -39,17 +39,27 @@ def _names(items):
 
 
 class Links:
-    def __init__(self, pub, cal, scheds):
+    def __init__(self, pub, cal, scheds, unread=False):
         self.pub, self.cal = pub, cal or {}
         self.model = (pub or {}).get("model") or {}
         self.scheds = [dict(s, status="approved") for s in scheds or []]
         self.bnds = _days.bounds(self.model) if self.model else []
         self._days, self._weeks = {}, {}
         self._duties = None
+        self._unread, self._dates = bool(unread), set()     # a schedule's file could not be read; the dates that could not
 
     @classmethod
     def load(cls, pub, cal):
-        return cls(pub, cal, _schedules.on_site() if pub else [])
+        scheds, bad = _schedules.read_on_site() if pub else ([], False)
+        return cls(pub, cal, scheds, unread=bad)
+
+    def unread(self, date) -> bool:
+        """something about the date could not be read (a schedule's file, whose dates are not known then; the date; or the
+        duties of a schedule holding it), so a lesson said to run may be stopped and someone said to be free may be on a duty"""
+        iso = _iso(date)
+        self._day(iso)
+        self._by_name()
+        return self._unread or iso in self._dates or any(a <= iso <= b for a, b in self._spans)
 
     def _date(self, date):
         try:
@@ -77,6 +87,7 @@ class Links:
             wins = [(s, _days._windows(s, iso, self.model, self.bnds)) for s in self.scheds]
         except (ValueError, KeyError, IndexError, TypeError, AttributeError):
             logger.exception("exams: relief links could not read %s", iso)        # once a date: the answer is kept
+            self._dates.add(iso)
             return out
         out["day"] = day
         for r in view["lessons"]:
@@ -108,6 +119,7 @@ class Links:
         if self._duties is not None:
             return self._duties
         out = self._duties = {}
+        self._spans = []            # the (start, end) of the schedules whose duties cannot be read
         if not self.bnds or not self.scheds:
             return out
         by_id = {s["id"]: s for s in self.scheds}
@@ -117,6 +129,7 @@ class Links:
                 rows += _schedules.busies([s], self.model)
             except (ValueError, KeyError, TypeError, AttributeError):
                 logger.exception("exams: relief links could not read the duties of schedule %s", s.get("id"))
+                self._spans.append((str(s.get("start") or ""), str(s.get("end") or "9999")))
         for b in rows:
             s = by_id.get(b["id"])
             if s is None or not b.get("names"):
@@ -555,10 +568,10 @@ def sync_all(pub, cal, today, first=None) -> None:
 
 def mark(items, sched, records, links, today):
     """each backup item of the schedule's lessons lists (with teacher, key, date) gets state, relief and stopped, the first
-    that holds: "handled" (Handled ourselves); "relief" (relief: the name, once the relief team has approved the whole lesson)
-    or "sent" when relief holds it (in a backup of this
-    schedule, or as a needed lesson of an absence of the teacher's own: that absence covers it); "stopped" (stopped: why)
-    when another approved schedule stops it (links: the other schedules' approved copies, or None); "past" when dated before
+    that holds: "handled" (Handled ourselves); "stopped" (stopped: why) when another approved schedule stops it (links: the
+    other schedules' approved copies, or None); "relief" (relief: the name, once the relief team has approved the whole lesson)
+    or "sent" when relief holds it (in a backup of this schedule, or as a needed lesson of an absence of the teacher's own:
+    that absence covers it); "past" when dated before
     today; "handled_elsewhere" when another schedule handled it (_handled_elsewhere); "elsewhere" when another schedule's
     backup of that person holds it; else "later" (it goes to relief when the schedule is approved). -> items"""
     sid = (sched or {}).get("id")
@@ -587,10 +600,10 @@ def mark(items, sched, records, links, today):
         why = links.stopped(it) if links is not None and it.get("date") and it.get("key") else ""
         if "%s|%s" % k in handled:
             it["state"] = "handled"
+        elif why:           # before held: an absence of the teacher's own keeps a lesson that stops
+            it["state"], it["stopped"] = "stopped", why
         elif k in held:
             it["state"], it["relief"] = ("relief", held[k]) if held[k] else ("sent", None)
-        elif why:
-            it["state"], it["stopped"] = "stopped", why
         elif str(it.get("date") or "") < iso_today:
             it["state"] = "past"
         elif k in handled_else:
