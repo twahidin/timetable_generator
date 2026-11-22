@@ -1094,7 +1094,8 @@ def links_log_what_they_cannot_read_once():
     def busies(copies, model):
         if copies[0]["id"] == e["id"]: raise KeyError("test")
         return old_busies(copies, model)
-    lg.exception = lambda msg, *a, **k: seen.append(msg % a)
+    old_err = lg.error
+    lg.exception = lg.error = lambda msg, *a, **k: seen.append(msg % a)
     RL._days.merged_view = no_view
     try:
         L = _links()
@@ -1108,7 +1109,7 @@ def links_log_what_they_cannot_read_once():
         assert L.busy(BEN, MON, 0, 1) == "At event: " + EVENT, "the event still counts"
         assert seen == ["exams: relief links could not read the duties of schedule %s" % e["id"]], seen
     finally:
-        lg.exception, RL._days.merged_view, RL._schedules.busies = old_exc, old_view, old_busies
+        lg.exception, lg.error, RL._days.merged_view, RL._schedules.busies = old_exc, old_err, old_view, old_busies
 
 @t
 def links_name_the_classes_when_two_windows_meet_mid_period():
@@ -1948,8 +1949,8 @@ def links_say_what_they_could_not_read():
     with open(path, "w", encoding="utf-8") as f: f.write('["no id"]')
     try: assert RL.Links.load(PUB, CAL).unread(MON), "not a schedule"
     finally: os.remove(path)
-    lg, old_view, old_busies = RL.logger.exception, RL._days.merged_view, RL._schedules.busies
-    RL.logger.exception = lambda *a, **k: None
+    lg, old_view, old_busies, old_err = RL.logger.exception, RL._days.merged_view, RL._schedules.busies, RL.logger.error
+    RL.logger.exception = RL.logger.error = lambda *a, **k: None
     try:
         def no_view(*a, **k): raise KeyError("test")
         RL._days.merged_view = no_view
@@ -1960,11 +1961,10 @@ def links_say_what_they_could_not_read():
         RL._schedules.busies = no_busies
         L = _links()
         assert L.unread(MON) and not L.unread("2027-02-01"), "the duties of a schedule could not be read: the dates it holds"
-    finally: RL.logger.exception, RL._days.merged_view, RL._schedules.busies = lg, old_view, old_busies
+    finally: RL.logger.exception, RL._days.merged_view, RL._schedules.busies, RL.logger.error = lg, old_view, old_busies, old_err
     assert not RL.Links(None, CAL, []).unread(MON)
     # damage inside a schedule: it never raises, once or again, and says so
-    lg = RL.logger.exception
-    RL.logger.exception = lambda *a, **k: None
+    RL.logger.exception = RL.logger.error = lambda *a, **k: None
     def hurt(f, far="2027-02-01"):
         _clear(); e = _exam(duty_names=(AISHA,)); ap = AP.as_schedule(SC.load(e["id"])); f(ap)
         L = RL.Links(PUB, CAL, [ap])
@@ -1978,7 +1978,11 @@ def links_say_what_they_could_not_read():
         assert hurt(lambda ap: ap["made"]["duties"].append(dict(ap["made"]["duties"][0], start="x")))[0], "one good duty and one bad"
         for k in ("start", "end"):
             for v in ("x", None): assert hurt(lambda ap: ap.update({k: v})) == (True, True, True), (k, v)
-    finally: RL.logger.exception = lg
+        _clear(); e = _exam(duty_names=(AISHA,)); ap = AP.as_schedule(SC.load(e["id"]))
+        ap["made"]["duties"].insert(0, dict(ap["made"]["duties"][0], names=[BEN], start=None))
+        L = RL.Links(PUB, CAL, [ap])
+        assert L.busy(AISHA, MON, 0, 1) == "Invigilating: " + EXAM and L.busy(BEN, MON, 0, 1) == "" and L.unread(MON), "the good duty still counts"
+    finally: RL.logger.exception, RL.logger.error = lg, old_err
     _clear()
     with open(path, "w", encoding="utf-8") as f: f.write("{}")
     old = store.read_json
@@ -2051,6 +2055,23 @@ def a_stopped_lesson_of_ones_own_takes_no_time_from_a_relief():
         assert CHLOE not in FR.there_then(AB.all_records(), [CHLOE], MON, 0, 1, links=_links()), "period 1 she is away"
         _clear()
         assert CV.stale(PUB, ST, AB.all_records(), *_cov(i, DKEY), links=_links()) is True, "the exam withdrawn, the double happens, and she is away for it"
+
+@t
+def a_sync_changes_nothing_on_a_date_that_could_not_be_read():
+    _fresh()
+    with published(PUB):
+        id = _made_exam([_duty([DANIEL, HAFIZ])])["id"]
+        _send_approve(committee(), id)
+        before = {r["teacher"]: (r["id"], [x["key"] for x in r["lessons"]], r["cancelled"]) for r in _backups(id)}
+        assert set(before) == {DANIEL, HAFIZ}, before
+        ev = SC.load(_event()["id"]); ev["approved"].pop("name"); SC.save(ev, PUB, CAL, GRACE, check=False)        # damaged: 4A's stop cannot be worded
+        s = SC.load(id); s["approved"]["made"]["duties"][0]["names"] = [DANIEL, HAFIZ, GRACE]; SC.save(s, PUB, CAL, GRACE, check=False)
+        RL.logger.disabled = True
+        try: assert RL.sync(SC.load(id), PUB, CAL, SOON) == dict(sent=0, cancelled=0)
+        finally: RL.logger.disabled = False
+        assert {r["teacher"]: (r["id"], [x["key"] for x in r["lessons"]], r["cancelled"]) for r in _backups(id)} == before, "left as it is"
+        SC.delete(ev["id"])
+        assert RL.sync(SC.load(id), PUB, CAL, SOON)["sent"] == 1, "mended: Grace's lesson is sent"
 
 
 _clear()

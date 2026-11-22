@@ -136,8 +136,8 @@ class Links:
             return ""
 
     def _by_name(self):
-        """{iso: {name: [(start, end, what, replaces)]}} from the approved duties and events, by start; a schedule that cannot
-        be read gives none (one log line; unread says so)"""
+        """{iso: {name: [(start, end, what, replaces)]}} from the approved duties and events, by start; a schedule, or a duty,
+        that cannot be read gives none (one log line a schedule; unread says so), and its other duties still count"""
         if self._duties is not None:
             return self._duties
         out = self._duties = {}
@@ -145,16 +145,19 @@ class Links:
         if not self.bnds or not self.scheds:
             return out
         for s in self.scheds:
-            try:
-                rows = [self._duty(b, s) for b in _schedules.busies([s], self.model)]
-            except Exception:
-                logger.exception("exams: relief links could not read the duties of schedule %s", s.get("id"))
-                a, b = str(s.get("start") or ""), str(s.get("end") or "")
-                self._spans.append((a, b) if self._date(a) and self._date(b) else ("", "9999"))
-                continue
-            for iso, names, row in rows:
+            failed = None
+            try: busies = _schedules.busies([s], self.model)
+            except Exception as e: busies, failed = [], e
+            for b in busies:
+                try: iso, names, row = self._duty(b, s)
+                except Exception as e:
+                    failed = e
+                    continue
                 for n in names:
                     out.setdefault(iso, {}).setdefault(n, []).append(row)
+            if failed is not None:
+                logger.error("exams: relief links could not read the duties of schedule %s", s.get("id"), exc_info=failed)
+                self._spans.append((str(s.get("start") or ""), str(s.get("end") or "9999")))
         for names in out.values():
             for v in names.values():
                 v.sort(key=lambda x: x[0])
@@ -518,6 +521,9 @@ def sync(sched, pub, cal, today, copies=None) -> dict:
         return out
     links = Links(pub, cal, [s for s in (_schedules.on_site() if copies is None else copies) if s.get("id") != sid] + [ap])
     want = backups(pub, cal, sched, links, records, today)
+    if any(d in links._dates for d in {d for _, d, _, _ in _windows_of(ap, model)} | {k.split("/", 1)[0] for r in live for k in _ahead(r, iso)}):
+        logger.error("exams: relief sync of %s left as it is: a date could not be read", sid)     # what stops then is not known
+        return out
     event = ap.get("kind") == _schedules.EVENT
     by = (ap.get("in_charge") or sched.get("in_charge") or "") if event else EXAMS_BY
     text = (AT_EVENT if event else INVIGILATING) % ap.get("name")
