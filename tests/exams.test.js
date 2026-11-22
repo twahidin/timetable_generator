@@ -11,6 +11,9 @@ function cut(name) {
   for (; i < SRC.length; i++) { if (SRC[i] === "{") depth++; else if (SRC[i] === "}" && --depth === 0) break; }
   return SRC.slice(at, i + 1);
 }
+const has = n => SRC.indexOf(`function ${n}(`) >= 0;
+const cutA = n => { const at = SRC.indexOf(`function ${n}(`); return (SRC.slice(at - 6, at) === "async " ? "async " : "") + cut(n); };
+const fns = names => names.filter(has).map(cutA).join("\n");
 const uniq = a => a.filter((x, i) => a.indexOf(x) === i);
 const checkLines = new Function("uniq", `${cut("checkLines")}; return checkLines;`)(uniq);
 
@@ -73,12 +76,12 @@ t("the exams page no longer says that sending comes in a later stage", () => {
 /* onHandled: the click path with a stubbed api */
 const runHandled = async (S, reply) => {
   const calls = [];
-  const f = new Function("S", "api", "paint", "paintSave", `${cut("takeRev")}\nasync ${cut("onHandled")}; return onHandled;`)(S, async (m, u, b) => { calls.push([m, u, b]); return reply; }, () => {}, () => {});
+  const f = new Function("S", "api", "paint", "paintSave", `${fns(["takeRev", "takeOwn", "blockPage", "onChain"])}\nasync ${cut("onHandled")}; return onHandled;`)(S, async (m, u, b) => { calls.push([m, u, b]); return reply; }, () => {}, () => {});
   return [f, calls];
 };
 const box = (checked, teacher = "Ms Z", key = "k1") => ({ checked, dataset: { t: teacher, k: key } });
 (async () => {
-  let S = { base: "/api/exams", id: "x1", busy: false, view: { old: 1 }, rv: {}, hpend: {} };
+  let S = { base: "/api/exams", id: "x1", busy: false, view: { old: 1 }, rv: {}, hpend: {}, chain: Promise.resolve() };
   let [f, calls] = await runHandled(S, { ok: true, status: 200, j: { lessons: { backup: [] } } });
   const el = box(true), p = f(el);
   assert.deepStrictEqual(S.hpend, { "Ms Z|k1": true }, "the chosen value shows while in flight");
@@ -89,42 +92,152 @@ const box = (checked, teacher = "Ms Z", key = "k1") => ({ checked, dataset: { t:
   await p;
   assert.deepStrictEqual(calls[0], ["POST", "/api/exams/x1/handled", { teacher: "Ms Z", key: "k1", handled: true }]);
   assert.deepStrictEqual(S.view, { lessons: { backup: [] } }); assert.strictEqual(S.rv, null); assert.deepStrictEqual(S.hpend, {}); assert.strictEqual(S.busy, false);
-  S = { base: "/api/events", id: "e1", busy: false, view: { old: 1 }, rv: { keep: 1 }, hpend: {}, msg: "", bad: false };
+  S = { base: "/api/events", id: "e1", busy: false, view: { old: 1 }, rv: { keep: 1 }, hpend: {}, msg: "", bad: false, chain: Promise.resolve() };
   [f, calls] = await runHandled(S, { ok: false, status: 400, j: { error: "That lesson no longer needs a backup." } });
   await f(box(true));
   assert.strictEqual(calls[0][1], "/api/events/e1/handled");
   assert.strictEqual(S.msg, "That lesson no longer needs a backup."); assert.strictEqual(S.bad, true);
   assert.deepStrictEqual(S.view, { old: 1 }); assert.deepStrictEqual(S.hpend, {});
-  S = { base: "/api/exams", id: "x1", busy: false, view: {}, rv: {}, hpend: {}, sched: { rev: 3 } };
+  S = { base: "/api/exams", id: "x1", busy: false, view: {}, rv: {}, hpend: {}, sched: { rev: 3 }, chain: Promise.resolve() };
   [f, calls] = await runHandled(S, { ok: true, status: 200, j: { lessons: { backup: [] }, rev: 4 } });
   await f(box(true));
   assert.strictEqual(S.sched.rev, 4, "the answer's revision becomes the page's");
   console.log("onHandled cases passed");
 })().catch(e => { console.error(e); process.exit(1); });
-/* takeRev and the save that is refused as old */
-const takeRev = S => new Function("S", `${cut("takeRev")}; return takeRev;`)(S);
-t("takeRev follows a reply's revision, and leaves it alone when the reply has none", () => {
-  const S = { sched: { rev: 1 } }, f = takeRev(S);
-  f({ rev: 5 }); assert.strictEqual(S.sched.rev, 5);
-  f({}); f(null); f({ rev: "x" }); assert.strictEqual(S.sched.rev, 5);
-  const none = { sched: null }; takeRev(none)({ rev: 2 }); assert.strictEqual(none.sched, null);
-});
-const runSave = async (S, reply) => {
-  const calls = [];
-  const f = new Function("S", "api", "paintSave", "refreshView", `${cut("takeRev")}\nasync ${cut("saveNow")}; return saveNow;`)(S, async (m, u, b) => { calls.push([m, u, b && b.rev]); return reply; }, () => {}, async () => {});
-  return [f, calls];
-};
+/* the page's own functions against a fake server that keeps one schedule and its revision */
+const SERVER_KEYS_SRC = SRC.slice(SRC.indexOf("const SERVER_KEYS"), SRC.indexOf("\n", SRC.indexOf("const SERVER_KEYS")));
+const NAMES = ["takeRev", "takeSched", "takeOwn", "blockPage", "onChain", "saveInner", "saveNow", "flush", "edit", "refreshView", "serverAction", "viewAction", "approvalAction", "onHandled", "takeReview", "loadReview", "onClick"];
+const SENT = who => `This exam was changed by ${who} since you opened it. Reload to carry on.`;
+function rig(ev) {
+  const srv = { sched: { id: "x1", name: "E", papers: [], rev: 1, saved_by: "Ms A" }, calls: [], holds: {}, lock: null };
+  const S = { base: ev ? "/api/events" : "/api/exams", id: "x1", sched: { id: "x1", name: "E", papers: [], rev: 1 }, view: null, rv: null, chain: Promise.resolve(), timer: null,
+    dirty: false, blocked: false, rev: 0, saving: false, msg: "", bad: false, busy: false, hpend: {}, rvTok: 0, tab: "when", label: "Draft", note: "", sbNote: "", abMsg: "" };
+  const api = async (m, u, b) => {
+    const rest = u.replace(S.base + "/x1", "");
+    srv.calls.push([m, rest]);
+    let out;
+    if (m === "PUT") { if (srv.lock) await srv.lock; out = b.rev !== srv.sched.rev ? { ok: false, status: 409, j: { error: SENT("Ms B") } }
+        : (srv.sched = Object.assign({}, b, { rev: srv.sched.rev + 1, saved_by: "Ms A" }), { ok: true, status: 200, j: Object.assign({}, srv.sched) }); }
+    else if (m === "GET" && rest === "") out = { ok: true, status: 200, j: JSON.parse(JSON.stringify(srv.sched)) };
+    else if (m === "GET" && rest === "/view") out = { ok: true, status: 200, j: { rev: srv.sched.rev, made: null } };
+    else if (m === "GET" && rest === "/review") out = { ok: true, status: 200, j: { rev: srv.sched.rev, status: "draft", label: "Draft", note: "" } };
+    else if (m === "POST") {
+      if (rest === "/fill") { srv.sched.rev++; out = { ok: true, status: 200, j: Object.assign({}, srv.sched) }; }
+      else {
+        let done; srv.lock = new Promise(r => { done = r; });
+        if (srv.holds[rest]) await srv.holds[rest];
+        srv.sched.rev++; srv.lock = null; done();
+        out = { ok: true, status: 200, j: rest === "/make" || rest === "/handled" ? { rev: srv.sched.rev, made: {} } : { rev: srv.sched.rev, status: "draft", label: "Draft", note: "" } };
+      }
+    } else throw new Error("unexpected " + m + " " + u);
+    const h = srv.holds[m + rest]; delete srv.holds[m + rest];   /* one call is held, the later ones are not */
+    if (h) await h;
+    return out;
+  };
+  const noop = () => {}, loc = { reloaded: 0, reload() { this.reloaded++; } };
+  const names = NAMES.filter(has);
+  const f = new Function("S", "api", "paint", "paintSave", "render", "$", "chipClass", "esc", "isEv", "location", "setTimeout", "clearTimeout",
+    `${SERVER_KEYS_SRC}\n${fns(NAMES)}\nreturn {${names.join(",")}};`)(S, api, noop, noop, noop, () => null, () => "", esc, () => S.base === "/api/events", loc, setTimeout, clearTimeout);
+  return { S, srv, f, loc };
+}
+const gate = () => { let go; const p = new Promise(r => { go = r; }); return { p, go }; };
+const tick = () => new Promise(r => setTimeout(r, 5));
+const named = fn => assert(fn, "function missing");
+
 (async () => {
-  const sent = "This exam was changed by Ms A since you opened it. Reload to carry on.";
-  let S = { base: "/api/exams", id: "x1", dirty: true, rev: 1, sched: { rev: 2 }, msg: "", bad: false, blocked: false };
-  let [f, calls] = await runSave(S, { ok: false, status: 409, j: { error: sent } });
-  assert.strictEqual(await f(), false);
-  assert.strictEqual(S.blocked, true); assert.strictEqual(S.bad, true); assert.strictEqual(S.msg, sent); assert.strictEqual(S.dirty, true);
-  assert.strictEqual(S.sched.rev, 2, "a refused save does not move the revision");
-  S = { base: "/api/exams", id: "x1", dirty: true, rev: 1, sched: { rev: 2 }, msg: "", bad: false, blocked: false };
-  [f, calls] = await runSave(S, { ok: true, status: 200, j: { rev: 3, saved_at: "t", saved_by: "Ms A" } });
-  assert.strictEqual(await f(), true);
-  assert.strictEqual(S.sched.rev, 3); assert.strictEqual(S.blocked, false); assert.strictEqual(calls[0][2], 2, "the save sends the revision it started from");
-  console.log("save cases passed");
+  /* 1: a reply that carries only a revision never moves the page's revision; the contents are still old */
+  for (const how of ["review", "make", "view"]) {
+    const { S, srv, f } = rig();
+    srv.sched = Object.assign({}, srv.sched, { papers: [{ id: "p1" }], rev: 2 });   /* someone else filled the papers */
+    if (how === "review") await f.loadReview(false);
+    else if (how === "make") await f.viewAction("make", {}, "Made.");
+    else await f.refreshView();
+    assert.strictEqual(S.sched.rev === 1 || S.blocked, true, how + ": rev 2 was taken with old contents");
+    f.edit(() => { S.sched.name = "Mine"; });
+    await f.flush();
+    assert.deepStrictEqual(srv.sched.papers, [{ id: "p1" }], how + ": the stored papers are intact");
+    assert.strictEqual(S.sched.papers.length, 0);
+    assert.strictEqual(S.blocked, true, how + ": the page ends blocked");
+    assert.strictEqual(srv.sched.name, "E", how + ": nothing of the old copy was saved");
+  }
+  { /* the approval buttons: the answer counts only as the next revision */
+    const { S, srv, f } = rig(); srv.sched.rev = 2;
+    assert.strictEqual(await f.approvalAction("send", {}, "Sent."), false);
+    assert.strictEqual(S.blocked, true); assert.strictEqual(S.msg === "Sent.", false);
+  }
+  console.log("stale contents cases passed");
+
+  /* 2: an edit made while the page's own Make runs is saved afterwards, nothing lost, no block */
+  for (const how of ["make", "send", "handled"]) {
+    const { S, srv, f } = rig(), g = gate();
+    const rest = how === "handled" ? "/handled" : "/" + how; srv.holds[rest] = g.p;
+    const p = how === "make" ? f.viewAction("make", {}, "Made.") : how === "send" ? f.approvalAction("send", {}, "Sent.") : f.onHandled({ checked: true, dataset: { t: "Ms Z", k: "k1" } });
+    await tick(); assert.strictEqual(S.busy, true);
+    f.edit(() => { S.sched.name = "Mine"; });
+    const w = f.flush(); await tick();
+    g.go(); await p; await w;
+    assert.strictEqual(S.blocked, false, how + ": no block"); assert.strictEqual(S.dirty, false, how + ": saved");
+    assert.strictEqual(srv.sched.name, "Mine", how + ": the edit is stored"); assert.strictEqual(srv.sched.rev, 3);
+    assert.strictEqual(S.sched.rev, 3);
+  }
+  console.log("edit while an action runs cases passed");
+
+  /* 3: a GET that lands late never changes the revision */
+  for (const how of ["view", "review"]) {
+    const { S, srv, f } = rig(), g = gate();
+    srv.holds["GET/" + how] = g.p;
+    const late = how === "view" ? f.refreshView() : f.loadReview(true);
+    await tick();
+    f.edit(() => { S.sched.name = "Mine"; }); await f.flush();
+    assert.strictEqual(S.sched.rev, 2);
+    g.go(); await late;
+    assert.strictEqual(S.sched.rev, 2, how + ": a late answer does not move the revision back");
+    assert.strictEqual(S.blocked, false);
+  }
+  console.log("late GET cases passed");
+
+  /* every caller that may take a revision does, and only as the ruling says */
+  { const { S, srv, f } = rig(); f.edit(() => { S.sched.name = "A"; }); await f.flush(); assert.strictEqual(S.sched.rev, 2, "saveNow takes the PUT's rev"); }
+  { const { S, srv, f } = rig(); await f.serverAction("POST", "/api/exams/x1/fill", {}); assert.strictEqual(S.sched.rev, 2, "serverAction takes the whole schedule's rev"); }
+  { const { S, srv, f } = rig(); assert.strictEqual(await f.viewAction("make", {}, "Made."), true); assert.strictEqual(S.sched.rev, 2, "viewAction takes its own save"); }
+  { const { S, srv, f } = rig(); assert.strictEqual(await f.approvalAction("send", {}, "Sent."), true); assert.strictEqual(S.sched.rev, 2, "approvalAction takes the GET's rev"); assert.strictEqual(S.sched.name, "E"); }
+  { const { S, srv, f } = rig(); await f.onHandled({ checked: true, dataset: { t: "Ms Z", k: "k1" } }); assert.strictEqual(S.sched.rev, 2, "onHandled takes its own save"); }
+  { const { S, srv, f } = rig(); await f.loadReview(false); await f.refreshView(); assert.strictEqual(S.sched.rev, 1, "the two GETs of a part never take it"); }
+  { const { S, f } = rig(); S.dirty = true; S.sched.name = "mine";
+    f.takeSched({ id: "x1", name: "theirs", rev: 4, status: "approved", log: [1] });
+    assert.deepStrictEqual([S.sched.name, S.sched.rev, S.sched.status, S.sched.log], ["mine", 4, "approved", [1]], "an unsaved edit stays, the server's own parts and revision come in");
+    S.dirty = false; f.takeSched({ id: "x1", name: "theirs", rev: 5 }); assert.deepStrictEqual([S.sched.name, S.sched.rev], ["theirs", 5]); }
+  console.log("takeRev callers passed");
+
+  /* the sentences */
+  { const { S, srv, f } = rig(); srv.sched.rev = 5;
+    f.edit(() => { S.sched.name = "A"; }); await f.flush();
+    assert.strictEqual(S.blocked, true); assert.strictEqual(S.blockMsg, SENT("Ms B")); assert.strictEqual(S.dirty, true);
+    S.msg = "Choose who is away and who takes it."; S.bad = true;
+    const html = f.saveInner();
+    assert(html.includes(SENT("Ms B")) && !html.includes("Choose who"), "the sentence stays whatever is set after it");
+    assert(html.includes('data-act="reload"') && html.includes("<button"), "a Reload button");
+    const n = srv.calls.length;
+    f.edit(() => { S.sched.name = "B"; }); assert.strictEqual(S.sched.name, "A", "edit does nothing while blocked");
+    const ch = S.chain; await f.flush(); assert.strictEqual(srv.calls.length, n, "flush sends nothing while blocked"); assert.strictEqual(S.chain, ch, "and queues nothing");
+    S.chain = Promise.resolve().then(() => f.saveNow()); await S.chain; assert.strictEqual(srv.calls.length, n, "a queued save sends nothing");
+    await f.serverAction("POST", "/api/exams/x1/fill", {}); assert.strictEqual(srv.calls.length, n, "nor does an action");
+  }
+  { const { S, srv, f, loc } = rig(); S.id = "x1";
+    f.onClick({ target: { closest: () => ({ dataset: { act: "reload" }, matches: () => false }) } });
+    assert.strictEqual(loc.reloaded, 1, "the button reloads the page"); }
+  { const { S, srv, f } = rig(true); srv.sched.rev = 9; f.edit(() => {}); await f.flush(); assert.strictEqual(S.blockMsg, SENT("Ms B")); }
+  { const { S, srv, f } = rig(); srv.sched.rev = 2; await f.viewAction("make", {}, "Made.");
+    assert.strictEqual(S.blocked, true); assert.strictEqual(S.blockMsg, "This exam was changed by someone else since you opened it. Reload to carry on."); }
+  { const { S, srv, f } = rig(true); srv.sched.rev = 2; await f.viewAction("make", {}, "Made.");
+    assert.strictEqual(S.blockMsg, "This event was changed by someone else since you opened it. Reload to carry on."); }
+  { /* any other 409 is just a sentence */
+    const { S, srv, f } = rig();
+    const api409 = async () => ({ ok: false, status: 409, j: { error: "Publish the timetable first." } });
+    const g = new Function("S", "api", "paintSave", "refreshView", "takeRev", "takeOwn", "blockPage", `${cutA("saveNow")}; return saveNow;`)(S, api409, () => {}, async () => {}, () => {}, () => true, () => {});
+    S.dirty = true; assert.strictEqual(await g(), false);
+    assert.strictEqual(S.blocked, false); assert.strictEqual(S.msg, "Publish the timetable first."); assert.strictEqual(S.bad, true);
+  }
+  console.log("block cases passed");
 })().catch(e => { console.error(e); process.exit(1); });
 console.log(`${n} exams page tests passed`);

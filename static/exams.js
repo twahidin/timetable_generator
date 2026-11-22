@@ -265,12 +265,42 @@
   const tab = () => S.tabs.find(t => t.key === S.tab) || S.tabs[0];
 
   function saveInner() {
-    return `${S.dirty ? `<span class="dirty">Changes not saved.</span>` : ""}${S.msg ? `<span class="msg ${S.bad ? "bad" : "ok"}" role="status">${esc(S.msg)}</span>` : ""}${S.blocked ? ` <a href="">Reload</a>` : ""}`;
+    const msg = S.blocked ? S.blockMsg : S.msg, bad = S.blocked || S.bad;   /* once blocked, nothing else set later hides why */
+    return `${S.dirty ? `<span class="dirty">Changes not saved.</span>` : ""}${msg ? `<span class="msg ${bad ? "bad" : "ok"}" role="status">${esc(msg)}</span>` : ""}${S.blocked ? ` <button type="button" data-act="reload">Reload</button>` : ""}`;
   }
   function paintSave() { const el = $("#saveline"); if (el) el.innerHTML = saveInner(); }
 
-  /* every answer that carries the schedule's revision moves the page's copy to it, so the next save is not taken for an old one */
+  /* the revision moves with the contents: it is taken only from an answer that holds the whole schedule (the schedule itself, a
+    save's, a fill's), never from a view or a review, which carry a revision but not the contents */
   function takeRev(j) { if (S.sched && j && Number.isInteger(j.rev)) S.sched.rev = j.rev; }
+
+  /* what the server alone changes (the saved schedule keeps these whatever the page sends) */
+  const SERVER_KEYS = ["made", "pins", "use_anyway", "status", "approved", "approved_at", "approved_by", "sent_at", "sent_by", "sent_fp", "note", "log", "handled"];
+  /* the whole schedule from the server replaces the page's; an edit made meanwhile (not saved yet) stays, on top of what only the server changes */
+  function takeSched(j) {
+    if (S.dirty && S.sched) SERVER_KEYS.forEach(k => { if (k in j) S.sched[k] = j[k]; else delete S.sched[k]; });
+    else S.sched = j;
+    takeRev(j);
+  }
+
+  /* from here nothing is saved or done: someone else has saved this one since it was opened */
+  function blockPage(sentence) { S.blocked = true; S.blockMsg = sentence; S.bad = true; clearTimeout(S.timer); S.timer = null; paintSave(); }
+
+  /* the answer to one of the page's own actions, each of which saves exactly once: it must be the next revision, else someone
+    saved in between and the page's copy is old. -> whether the page may go on */
+  function takeOwn(j) {
+    if (!S.sched) return true;
+    if (j && Number.isInteger(j.rev) && j.rev === (S.sched.rev || 0) + 1) { S.sched.rev = j.rev; return true; }
+    blockPage(`This ${isEv() ? "event" : "exam"} was changed by someone else since you opened it. Reload to carry on.`);
+    return false;
+  }
+
+  /* an action at the server goes in the queue of saves, so an edit made meanwhile is saved after it, with the new revision */
+  function onChain(run) {
+    const job = S.chain.then(run, run);
+    S.chain = job.then(() => {}, () => {});
+    return job;
+  }
 
   function render() {
     const s = S.sched;
@@ -315,12 +345,13 @@
 
   async function saveNow() {
     if (!S.dirty) return true;
+    if (S.blocked) return false;
     const rev = S.rev;
     S.saving = true;
     const r = await api("PUT", `${S.base}/${S.id}`, S.sched);
     S.saving = false;
     if (r.status === 401 || r.status === 403) return false;
-    if (r.status === 409) { S.blocked = true; S.bad = true; S.msg = r.j.error || "This was changed since you opened it. Reload to carry on."; paintSave(); return false; }
+    if (r.status === 409 && /was changed by/.test(r.j.error || "")) { blockPage(r.j.error); return false; }
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "Nothing was saved. Try again."; paintSave(); return false; }
     S.sched.saved_at = r.j.saved_at; S.sched.saved_by = r.j.saved_by; takeRev(r.j);
     if (S.rev === rev) { S.dirty = false; S.bad = false; S.msg = "Saved"; }
@@ -332,19 +363,21 @@
   async function refreshView() {
     const r = await api("GET", `${S.base}/${S.id}/view`);
     if (!r.ok) return;
-    S.view = r.j; takeRev(r.j);
+    S.view = r.j;
     if (S.sched) paint();
   }
 
   /* an action the server does to the schedule (fill, upload): our own edits go first, the answer replaces the schedule */
   async function serverAction(method, url, body, form, done) {
+    if (S.blocked) return;
     await flush();
+    if (S.blocked) return;
     if (S.dirty) return;   /* the save was refused: its sentence is on the screen */
     S.msg = ""; S.bad = false;
     const r = await api(method, url, body, form);
     if (r.status === 401 || r.status === 403) return;
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); return; }
-    S.sched = r.j; takeRev(r.j);
+    takeSched(r.j);
     if (done) done(r.j);
     paintSave();
     await refreshView();
@@ -606,16 +639,20 @@
 
   /* what the page does at the server: our own edits go first, then the answer (the whole view) replaces S.view */
   async function viewAction(path, body, ok) {
-    if (S.busy) return false;
+    if (S.busy || S.blocked) return false;
     await flush();
-    if (S.dirty) return false;   /* the save was refused: its sentence is on the screen */
+    if (S.dirty || S.blocked) return false;   /* the save was refused: its sentence is on the screen */
     S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
-    const r = await api("POST", `/api/exams/${S.id}/${path}`, body);
-    S.busy = false;
-    if (r.status === 401 || r.status === 403) return false;
-    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return false; }
-    S.view = r.j; takeRev(r.j); S.msg = typeof ok === "function" ? ok(r.j) : (ok || ""); paintSave(); paint();
-    return true;
+    return onChain(async () => {
+      const r = await api("POST", `/api/exams/${S.id}/${path}`, body);
+      S.busy = false;
+      if (r.status === 401 || r.status === 403) return false;
+      if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return false; }
+      S.view = r.j;
+      if (!takeOwn(r.j)) { paint(); return false; }
+      S.msg = typeof ok === "function" ? ok(r.j) : (ok || ""); paintSave(); paint();
+      return true;
+    });
   }
 
   async function loadWho(keep) {
@@ -1045,7 +1082,7 @@
 
   /* the review's answer is the page's: it also brings the status, which is kept on the schedule and the chip */
   function takeReview(j) {
-    S.rv = j; S.rvErr = ""; takeRev(j);
+    S.rv = j; S.rvErr = "";
     S.label = j.label || S.label; S.sched.status = j.status; S.sched.note = j.note;
   }
 
@@ -1062,20 +1099,23 @@
 
   /* send, approve, send back, withdraw: the schedule is read again afterwards, because the approved copy moves with them */
   async function approvalAction(path, body, ok) {
-    if (S.busy) return false;
+    if (S.busy || S.blocked) return false;
     await flush();
-    if (S.dirty) return false;
+    if (S.dirty || S.blocked) return false;
     S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
-    const r = await api("POST", `${S.base}/${S.id}/${path}`, body);
-    S.busy = false;
-    if (r.status === 401 || r.status === 403) return false;
-    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; S.abMsg = S.msg; paintSave(); paint(); return false; }
-    S.abMsg = "";
-    const g = await api("GET", `${S.base}/${S.id}`);
-    if (g.ok) S.sched = g.j;
-    takeReview(r.j); S.sbNote = ""; S.msg = ok || ""; paintSave();
-    render(); refreshView();
-    return true;
+    return onChain(async () => {
+      const r = await api("POST", `${S.base}/${S.id}/${path}`, body);
+      S.busy = false;
+      if (r.status === 401 || r.status === 403) return false;
+      if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; S.abMsg = S.msg; paintSave(); paint(); return false; }
+      S.abMsg = "";
+      if (!takeOwn(r.j)) { paint(); return false; }   /* the answer's revision is the page's only when it is the next one */
+      const g = await api("GET", `${S.base}/${S.id}`);
+      if (g.ok) { takeSched(g.j); }
+      takeReview(r.j); S.sbNote = ""; S.msg = ok || ""; paintSave();
+      render(); refreshView();
+      return true;
+    });
   }
 
   /* the same clash can be in both Invigilators free ("is on {schedule} then") and Other schedules ("takes {n} of these
@@ -1192,14 +1232,17 @@
   }
   /* "Handled ourselves": the answer is the schedule's view again (the Lessons tab reads it); the Approval counts are read again */
   async function onHandled(el) {
-    if (S.busy) { el.checked = !el.checked; return; }
+    if (S.busy || S.blocked) { el.checked = !el.checked; return; }
     const tag = el.dataset.t + "|" + el.dataset.k;
     S.busy = true; S.msg = ""; S.bad = false; S.hpend = { [tag]: !!el.checked }; paintSave();
-    const r = await api("POST", `${S.base}/${S.id}/handled`, { teacher: el.dataset.t, key: el.dataset.k, handled: !!el.checked });
-    S.busy = false; S.hpend = {};
-    if (r.status === 401 || r.status === 403) { paint(); return; }
-    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return; }
-    S.view = r.j; takeRev(r.j); S.rv = null; paintSave(); paint();
+    return onChain(async () => {
+      const r = await api("POST", `${S.base}/${S.id}/handled`, { teacher: el.dataset.t, key: el.dataset.k, handled: !!el.checked });
+      S.busy = false; S.hpend = {};
+      if (r.status === 401 || r.status === 403) { paint(); return; }
+      if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return; }
+      S.view = r.j; S.rv = null;
+      takeOwn(r.j); paintSave(); paint();
+    });
   }
 
   function onChange(e) {
@@ -1238,6 +1281,7 @@
   function onClick(e) {
     const b = e.target.closest("button[data-act]"); if (!b || b.matches(":disabled")) return;
     const act = b.dataset.act, a = b.dataset.a, s = S.sched;
+    if (act === "reload") { location.reload(); return; }
     if (!S.id) {
       if (act === "newOpen") { S.nf.open = true; drawList(); const n = $('[data-nf="name"]'); if (n) n.focus(); }
       else if (act === "newCancel") { S.nf = blankForm(); drawList(); }
