@@ -1849,10 +1849,8 @@ def test_only_met_answers_of_the_touched_rules_go():
     with typed_scene():
         got = run_job(); old = dict(at="1 Jan 2026, 09:00"); write = lambda d: store.write_json(os.path.join(draft.DIR, "decisions.json"), d)
         keep = {"typed:1:again": dict(old, answer="met"), "typed:1:again#2": dict(old, answer="met"), "typed:2:again": dict(old, answer="met"), "typed:1:again#3": dict(old, answer="step5"), "dep:x:teachers": dict(old, answer="step5")}
-        write(keep); stamp = draft.stamp(); real = draft.info; draft.info = lambda *a, **k: None   # what is in decisions.json before the draft is looked at again
-        try: out = draft.refit_apply(copy.deepcopy(A.REFIT["plan"]["fixes"]), stamp, "Before re-fit, test", "Test")
-        finally: draft.info = real
-        assert out["typed"] == [1] and out["kept"] is not None and out["info"] is None and len(out["texts"]) == len(A.REFIT["plan"]["fixes"]), out
+        write(keep); stamp = draft.stamp(); out = draft.refit_apply(copy.deepcopy(A.REFIT["plan"]["fixes"]), stamp, "Before re-fit, test", "Test")
+        assert out["typed"] == [1] and out["kept"] is not None and set(out) == {"kept", "texts", "typed"} and len(out["texts"]) == len(A.REFIT["plan"]["fixes"]), out
         assert store.read_json(os.path.join(draft.DIR, "decisions.json")) == {k: v for k, v in keep.items() if k not in ("typed:1:again", "typed:1:again#2")}
 
 def test_preview_of_a_plan():
@@ -1934,6 +1932,143 @@ def test_the_job_changes_nothing():
         c.get("/api/draft"); m, rec, fx = draft.model_now(); was = copy.deepcopy([m, fx]); files = (read("meta.json"), read("decisions.json")); run_job()
         assert (read("meta.json"), read("decisions.json")) == files and draft.model_now()[0] is m and [m, fx] == was
         c.get("/api/draft/refit"); assert (read("meta.json"), read("decisions.json")) == files
+
+
+# ------------------------------------------------------------ fix round 1: lists of many fixes, failures after the write, names kept out of the log
+@contextlib.contextmanager
+def logged():
+    """every log record of the app's logger, as text (message, exc_text, exc_info), while the block runs"""
+    got = []
+    class Grab(logging.Handler):
+        def emit(self, rec): got.append(rec.getMessage() + "|" + str(rec.exc_text) + "|" + str(rec.exc_info) + "|" + str(rec.args))
+    h = Grab(); A.app.logger.addHandler(h)
+    try: yield got
+    finally: A.app.logger.removeHandler(h)
+
+@contextlib.contextmanager
+def patched(obj, name, new):
+    was = getattr(obj, name); setattr(obj, name, new)
+    try: yield was
+    finally: setattr(obj, name, was)
+
+NAME = "Zephyr Quill"
+def boom(*a, **k): raise RuntimeError(f"secret {NAME}")
+def no_name(got, *answers): assert got and not any("Zephyr" in x or "Quill" in x for x in got) and not any("Zephyr" in json.dumps(a) for a in answers), (got, answers)
+
+def test_a_failure_in_the_start_the_apply_the_preview_and_the_check_names_nothing():
+    with scene():
+        with logged() as got, patched(draft, "listed", boom):   # the start
+            r = c.post("/api/draft/refit"); assert r.status_code == 400 and r.get_json() == dict(error="The re-fit could not be started. Run Re-fit again."), r.get_json(); no_name(got, r.get_json())
+        assert A.REFIT["state"] == "idle"
+        j = run_job()
+        with logged() as got, patched(helper, "chain", boom):   # the preview, then the apply
+            r = c.get("/api/draft/refit/preview?id=" + j["id"]); assert r.status_code == 400 and r.get_json() == dict(error="The preview could not be made. Run Re-fit again."), r.get_json(); no_name(got, r.get_json())
+            files, n = (read("meta.json"), read("decisions.json")), versions.count()
+            r2 = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); assert r2.status_code == 400 and r2.get_json() == dict(error="The re-fit could not be made. Run Re-fit again."), r2.get_json(); no_name(got, r2.get_json(), r.get_json())
+        assert (read("meta.json"), read("decisions.json")) == files and versions.count() == n and A.REFIT["state"] == "done" and A.REFIT["id"] == j["id"]   # not made: the job is back
+        before = len(fixes_now())
+        with logged() as got, patched(draft, "info", boom):   # the check after the apply: the re-fit is made
+            r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); b = r.get_json()
+            assert r.status_code == 400 and b["error"] == "The re-fit was made, but the timetable could not be checked. Open step 8 again." and b["changes"] >= 1 and b["kept"]["kind"] == "refit", b; no_name(got, b)
+        assert len(fixes_now()) == before + b["changes"] and A.REFIT["state"] == "idle" and A.history.read(limit=1)[0]["what"] == "refit"   # recorded, and the job is not put back
+
+def test_the_check_after_the_apply_with_no_setup_is_a_409():
+    with scene():
+        j = run_job()
+        with patched(draft, "info", lambda *a, **k: (_ for _ in ()).throw(LookupError())):
+            r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); assert r.status_code == 409 and r.get_json()["error"] == A.REFIT_UNCHECKED and r.get_json()["kept"] is not None, r.get_json()
+
+def test_a_start_with_no_setup_is_a_409():
+    with scene():
+        with patched(store, "setup_record", lambda *a, **k: dict(v=1, spec=None)):
+            r = c.post("/api/draft/refit"); assert r.status_code == 409 and r.get_json() == dict(error=A.NO_SETUP), r.get_json()
+        assert A.REFIT["state"] == "idle"
+
+def test_a_thread_that_cannot_start_leaves_the_job_idle():
+    with scene():
+        class Dead:
+            def __init__(self, *a, **k): pass
+            def start(self): raise RuntimeError(f"no thread for {NAME}")
+        with logged() as got, patched(A.threading, "Thread", Dead):
+            r = c.post("/api/draft/refit"); assert r.status_code == 400 and r.get_json() == dict(error="The re-fit could not be started. Run Re-fit again."), r.get_json(); no_name(got, r.get_json())
+        assert A.REFIT["state"] == "idle" and c.get("/api/draft/refit").get_json() == dict(state="idle")
+
+def test_a_running_job_past_its_time_is_told_as_failed():
+    with scene():
+        A._refit_clear(); A.REFIT.update(id="abc", state="running", done=0, total=None, plan=None, error=None, started=time.monotonic() - A.REFIT_DEAD_S - 1)
+        g = c.get("/api/draft/refit").get_json(); assert g["state"] == "failed" and g["error"] == A.REFIT_FAILED, g
+        A.REFIT["started"] = time.monotonic(); assert c.get("/api/draft/refit").get_json()["state"] == "running"
+
+def test_apply_with_no_draft_is_the_stale_sentence_and_the_job_stays():
+    with scene():
+        j = run_job(); os.rename(draft.DIR, draft.DIR + ".away")
+        try: r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); assert r.status_code == 400 and r.get_json() == dict(error=REFIT_STALE), r.get_json()
+        finally: os.rename(draft.DIR + ".away", draft.DIR)
+        assert A.REFIT["state"] == "done" and A.REFIT["id"] == j["id"]
+
+def test_a_setup_saved_while_the_list_is_judged_makes_it_stale():
+    with scene():
+        j = run_job(); files, n = (read("meta.json"), read("decisions.json")), versions.count(); real = helper.chain; s = json.loads(json.dumps(store.setup_record()["spec"]))
+        def saving(*a, **k):
+            out = real(*a, **k); s["rules"] = list(s["rules"]) + [dict(PREFER_RULE, note="made-up second wish")]; put_setup(s); return out
+        with patched(helper, "chain", saving):
+            r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); assert r.status_code == 400 and r.get_json() == dict(error=REFIT_STALE), r.get_json()
+        assert (read("meta.json"), read("decisions.json")) == files and versions.count() == n and A.REFIT["id"] == j["id"]
+
+def test_a_refused_apply_leaves_a_new_job_alone():
+    with scene():
+        j = run_job(); other = A.app.test_client(); other.post("/login", data={"as": "committee", "code": CODE}); made = []
+        def meanwhile(*a, **k):
+            r = other.post("/api/draft/refit"); made.append(r.get_json()["id"]); poll(); raise ValueError("refused here")
+        with patched(draft, "refit_apply", meanwhile):
+            r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); assert r.status_code == 400 and r.get_json() == dict(error="refused here")
+        assert A.REFIT["id"] == made[0] != j["id"] and A.REFIT["state"] == "done"
+
+def test_a_clash_at_apply_is_refused_with_the_judges_sentence():
+    with scene(rows=[one(1, 0, 1), one(2, 0, 2, CLS, "Other", T2)]):
+        j = run_job(); bad = [dict(kind="move", id=1, d=0, p=2)]; m, rec, fx = draft.model_now(); why = helper.chain(m, m["checked_setup"], m["days"], bad)["why"]; assert why and len(why) > 5
+        A.REFIT["plan"]["fixes"] = bad   # the stamp is the draft's now
+        files, n = (read("meta.json"), read("decisions.json")), versions.count()
+        r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); assert r.status_code == 400 and r.get_json() == dict(error=why), (r.get_json(), why)
+        assert (read("meta.json"), read("decisions.json")) == files and versions.count() == n and A.REFIT["state"] == "done" and A.REFIT["id"] == j["id"]
+        A.REFIT["plan"]["fixes"] = [dict(kind="teacher", key=KEY, teachers=[T1]), dict(bad[0]), dict(kind="teacher", key=KEY, teachers=[T0])]   # a preview whose middle step is refused
+        r = c.get("/api/draft/refit/preview?id=" + j["id"]); b = r.get_json(); assert r.status_code == 200 and b["state"] == "no" and b["why"] == why and len(b["texts"]) == 1, b
+        assert (read("meta.json"), read("decisions.json")) == files
+
+def forced(c_, state, prefer=(), cut=0):
+    """helper.chain's answer made to say state, with these reasons on its first step, and cut texts missing"""
+    steps = [dict(j) for j in c_["steps"]]; steps[0] = dict(steps[0], prefer=list(prefer), state=state)
+    return dict(c_, state=state, why=prefer[0] if prefer else "", steps=steps, texts=c_["texts"][:len(c_["texts"]) - cut])
+
+def test_a_prefer_is_applied_only_when_it_is_an_allowance_line():
+    with scene():
+        j = run_job(); real = helper.chain; files, n = (read("meta.json"), read("decisions.json")), versions.count(); other = "Made-up wish is not met."
+        with patched(helper, "chain", lambda *a, **k: forced(real(*a, **k), "prefer", [other])):
+            r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); assert r.status_code == 400 and r.get_json() == dict(error=other), r.get_json()
+        assert (read("meta.json"), read("decisions.json")) == files and versions.count() == n and A.REFIT["state"] == "done"
+        with patched(helper, "chain", lambda *a, **k: forced(real(*a, **k), "prefer", ["Made-up teacher is over the allowance."])):
+            r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); assert r.status_code == 200, r.get_json()
+
+def test_a_list_not_all_made_is_refused():
+    with scene():
+        j = run_job(); real = helper.chain; files, n = (read("meta.json"), read("decisions.json")), versions.count()
+        with patched(helper, "chain", lambda *a, **k: forced(real(*a, **k), "ok", cut=1)):
+            r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); assert r.status_code == 400 and r.get_json() == dict(error="That fix could not be made. Check the list again."), r.get_json()
+        assert (read("meta.json"), read("decisions.json")) == files and versions.count() == n and A.REFIT["state"] == "done"
+
+def test_a_list_of_many_fixes_is_shown_made_and_taken_back_whole():
+    was = json.loads(json.dumps(store.setup_record()["spec"]))
+    try:
+        a_draft(); A._refit_clear(); j = run_job(); stored = copy.deepcopy(A.REFIT["plan"]["fixes"]); n = len(stored); assert n >= 4, n
+        shown = c.get("/api/draft/refit").get_json()["plan"]; assert sum(len(g["steps"]) for g in shown["groups"]) == n and shown["totals"]["changes"] == n and '"fix"' not in json.dumps(shown) and '"fixes"' not in json.dumps(shown)
+        files = (read("meta.json"), read("decisions.json")); r = c.get("/api/draft/refit/preview?id=" + j["id"]); pre = r.get_json(); assert r.status_code == 200 and len(pre["texts"]) == n and pre["state"] in ("ok", "prefer"), pre
+        assert (read("meta.json"), read("decisions.json")) == files
+        before = fixes_now(); r = c.post("/api/draft/refit/apply", json=dict(id=j["id"])); b = r.get_json(); assert r.status_code == 200 and b["changes"] == n and b["kept"]["kind"] == "refit", b
+        now = fixes_now(); new = now[len(before):]; assert now[:len(before)] == before and len(new) == n and len({f["batch"] for f in new}) == 1 and new[0]["batch"] and all(f["at"] == new[0]["at"] for f in new)
+        assert [{k: v for k, v in f.items() if k not in ("at", "text", "batch")} for f in new] == stored and [f["text"] for f in new] == pre["texts"]   # all, in order, as shown
+        assert A.history.read(limit=1)[0]["text"] == A._refit_text(shown["totals"]) and len(b["info"]["fixes"]) == len(now)
+        u = c.post("/api/draft/undo"); assert u.status_code == 200 and fixes_now() == before   # one Undo takes them all back
+    finally: A._refit_clear(); put_setup(was)
 
 
 if __name__ == "__main__":

@@ -620,10 +620,12 @@ def decisions_now():
 
 def refit_apply(steps, stamp, keep_name, by):
     """make a re-fit's list: the fixes the server holds (steps), judged together with helper.chain on the draft as it is now, and made as one batch, or none. stamp: the draft's
-    when the list was made (ValueError(MOVED) when it is not the draft's now). A list the judge refuses (an answer that is not ok, or prefer for more than an allowance line) or that is not
-    all made is refused with the judge's sentence, and then nothing is written and no version kept. Otherwise the draft is kept first as a version of kind refit (None when this very draft is kept
-    already; keep_name names it), then every fix is written to meta.json at once with one batch id (so one Undo takes them back), then the "met" answers of the typed rules the list makes
-    one check again are taken out of decisions.json (a "met" answer does not come back with Undo). -> dict(info, kept, texts, typed: those rules' numbers, sorted)"""
+    when the list was made (ValueError(MOVED) when it is not the draft's now, looked at again after the judging, for the setup may be saved meanwhile). A list the judge refuses (an
+    answer that is not ok, or prefer for more than an allowance line) or that is not all made is refused with the judge's sentence, and then nothing is written and no version kept.
+    Otherwise, in this order: the draft is kept as a version of kind refit (None when this very draft is kept already; keep_name names it); the "met" answers of the typed rules the list
+    makes one check again are taken out of decisions.json (a "met" answer does not come back with Undo); and last every fix is written to meta.json at once with one batch id (so one Undo
+    takes them back). So a write that fails leaves a rule open again, never a fix made and a rule wrongly met. Nothing is raised once meta.json is written.
+    -> dict(kept, texts, typed: those rules' numbers, sorted)"""
     import refit, versions
     with _lock:
         m, rec, fx = _now(); _moved(stamp, rec); spec, days = m["checked_setup"], m["days"]
@@ -632,14 +634,15 @@ def refit_apply(steps, stamp, keep_name, by):
         bad = refit._refusal(c)
         if bad: raise ValueError(bad[1])
         if len(c["texts"]) != len(fl): raise ValueError("That fix could not be made. Check the list again.")
+        _moved(stamp, store.setup_record())   # the setup may have been saved while the list was judged
         typed_ = refit.rechecked(m, spec, c["lessons"], c["touched"], c["was"], fl)   # worked out on the model before the steps, with the lessons waiting in Not placed
         kept = versions.keep("refit", by, name=keep_name)
-        batch, at = secrets.token_hex(4), store.now(); meta = store.read_json(_p("meta.json"), {})
-        store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=at, text=t, batch=batch) for f, t in zip(fl, c["texts"])]))
         asked = lambda k: (g := re.fullmatch(r"typed:(\d+):again(#\d+)?", k)) and int(g[1]) in typed_
         d = store.read_json(_p("decisions.json"), {}) or {}; left = {k: v for k, v in d.items() if not (asked(k) and isinstance(v, dict) and v.get("answer") == "met")}
         if left != d: store.write_json(_p("decisions.json"), left)
-        return dict(info=info(), kept=kept, texts=list(c["texts"]), typed=typed_)
+        batch, at = secrets.token_hex(4), store.now(); meta = store.read_json(_p("meta.json"), {})
+        store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=at, text=t, batch=batch) for f, t in zip(fl, c["texts"])]))
+        return dict(kept=kept, texts=list(c["texts"]), typed=typed_)
 
 def suggest(key):
     """ways to settle the warning with that key, as the draft is now -> helper.suggest's dict(suggestions, none, blocked)"""
