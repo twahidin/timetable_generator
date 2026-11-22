@@ -58,39 +58,47 @@ def save(setup_path, timetable_path, source, spec, replace=False, by="Committee"
     is already kept or there was none); replace is accepted and ignored. A new upload starts with no decisions."""
     import versions
     with _lock:
-        new, old = DIR + ".new", DIR + ".old"
-        shutil.rmtree(new, ignore_errors=True); os.makedirs(new)
-        if setup_path: shutil.copy(setup_path, os.path.join(new, "setup.xlsx"))
-        shutil.copy(timetable_path, os.path.join(new, "timetable" + os.path.splitext(timetable_path)[1]))
-        try: m = model_from_files(os.path.join(new, "setup.xlsx") if setup_path else None, [os.path.join(new, f) for f in os.listdir(new) if f.startswith("timetable.")][0], spec=spec)
-        except Exception as e:
-            shutil.rmtree(new, ignore_errors=True); raise ValueError(f"Could not read the files: {e}")
-        if not m["lessons"]: shutil.rmtree(new, ignore_errors=True); raise ValueError("The timetable has no lessons.")
-        kept = versions.keep("upload", by)   # after the new files read well, before the swap: a draft is never lost
-        if out is not None: out["kept"] = kept
-        store.write_json(os.path.join(new, "decisions.json"), {})
-        store.write_json(os.path.join(new, "meta.json"), dict(source=source, uploaded_at=store.now(), upload_id=uuid.uuid4().hex, fixes=[], school=m["file_school"],
-                                                              config_id=str(((m["setup"].get("school") or {}).get("config_id")) or "").strip()))
-        shutil.rmtree(old, ignore_errors=True)
-        if os.path.exists(DIR): os.replace(DIR, old)
-        os.replace(new, DIR); shutil.rmtree(old, ignore_errors=True); _cache.clear()
+        new = DIR + ".new"
+        shutil.rmtree(new, ignore_errors=True)
+        try:
+            os.makedirs(new)
+            if setup_path: shutil.copy(setup_path, os.path.join(new, "setup.xlsx"))
+            shutil.copy(timetable_path, os.path.join(new, "timetable" + os.path.splitext(timetable_path)[1]))
+            try: m = model_from_files(os.path.join(new, "setup.xlsx") if setup_path else None, [os.path.join(new, f) for f in os.listdir(new) if f.startswith("timetable.")][0], spec=spec)
+            except Exception as e: raise ValueError(f"Could not read the files: {e}")
+            if not m["lessons"]: raise ValueError("The timetable has no lessons.")
+            kept = versions.keep("upload", by)   # after the new files read well, before the swap: a draft is never lost
+            if out is not None: out["kept"] = kept
+            meta = dict(source=source, uploaded_at=store.now(), upload_id=uuid.uuid4().hex, fixes=[], school=m["file_school"],
+                        config_id=str(((m["setup"].get("school") or {}).get("config_id")) or "").strip())
+            store.write_json(os.path.join(new, "decisions.json"), {})
+            store.write_json(os.path.join(new, "meta.json"), meta)
+            swap_in(new)
+        finally: shutil.rmtree(new, ignore_errors=True)   # nothing is left of a copy that failed
+        m["draft_meta"] = meta
         return m
 
-def _versions():
-    """how many saved versions there are (folders in draft_versions)"""
-    import versions
-    return versions.count()
+def swap_in(new):
+    """under the lock: the folder new becomes the draft. When it cannot be put in place the draft that was there is put back and the error raised, so the draft is never left missing"""
+    old = DIR + ".old"
+    shutil.rmtree(old, ignore_errors=True)
+    if os.path.exists(DIR): os.replace(DIR, old)
+    try: os.replace(new, DIR)
+    except BaseException:
+        if os.path.exists(old) and not os.path.exists(DIR): os.replace(old, DIR)
+        raise
+    shutil.rmtree(old, ignore_errors=True); _cache.clear()
 
 def summary():
     """what /api/status shows of the draft, from meta.json alone (no model is built)"""
     meta = store.read_json(_p("meta.json")) if exists() else None
-    return dict(uploaded_at=meta.get("uploaded_at"), upload_id=meta.get("upload_id"), source=meta.get("source"), open=meta.get("open"), critical=meta.get("critical"), fixes=len(meta.get("fixes") or []), versions=_versions()) if meta else None
+    return dict(uploaded_at=meta.get("uploaded_at"), upload_id=meta.get("upload_id"), source=meta.get("source"), open=meta.get("open"), critical=meta.get("critical"), fixes=len(meta.get("fixes") or [])) if meta else None
 
 def model_now(rec=None):
     """(model, setup record, fx) of the draft with its fixes applied, checked against the setup record (default: as it is now).
     fx = dict(texts, problems, touched, was, pool) from fixes.apply; pool is the rows of the lessons not placed, which the model also carries
-    as m["pool"] for the helper and the typed request (they judge with it). One model is kept, for the same upload, setup version and fixes; it is
-    shared between requests, so nothing may change it."""
+    as m["pool"] for the helper and the typed request (they judge with it). m["draft_meta"] is the meta.json the model was built from. One model is kept,
+    for the same upload, setup version and fixes; it is shared between requests, so nothing may change it."""
     rec = rec or store.setup_record(); spec = rec["spec"]
     if not spec: raise LookupError("no setup")
     with _lock:
@@ -113,7 +121,7 @@ def _model_of(args, meta, rec=None):
     if not spec: raise LookupError("no setup")
     fx = {}; m = model_from_files(None, args[1], spec=spec, edit=fixes.editor(meta.get("fixes") or [], fx))   # no re-read of the setup workbook: the spec is given
     if meta.get("config_id"): m["setup"].setdefault("school", {})["config_id"] = meta["config_id"]
-    fx.setdefault("pool", []); m["pool"] = fx["pool"]
+    fx.setdefault("pool", []); m["pool"] = fx["pool"]; m["draft_meta"] = meta
     return m, rec, fx
 
 def _unique(ws):
@@ -221,7 +229,9 @@ def _build(m=None, rec=None, fx=None, folder=None):
         rec = rec or store.setup_record(); fx = fx or dict(texts=[], problems=[], touched=set(), was=[], pool=[])
         if not rec["spec"]: raise LookupError("no setup")
     spec = rec["spec"]
-    with _lock: meta = store.read_json(os.path.join(folder or DIR, "meta.json"), {})
+    with _lock: meta = store.read_json(os.path.join(folder or DIR, "meta.json"), {}) or {}
+    of = m.get("draft_meta")
+    if of is not None and not _same_draft(of, meta): meta = of   # the draft was replaced or changed while the model was built: this speaks for the one it was built from
     ws = _warned(m, fx); ch = m["checks"]; pool = fx.get("pool") or []
     cid, ver = meta.get("config_id") or "", rec["v"]; got = re.fullmatch(r"v(\d+)", cid)
     state = ("unknown" if not cid else "unsaved" if cid.endswith("+") else "unknown" if not got else
@@ -234,21 +244,28 @@ def _build(m=None, rec=None, fx=None, folder=None):
                 typed=len(typed_rules(spec)), warnings=ws["warnings"], not_checked=ws["not_checked"], fixes=[dict(text=f.get("text"), at=f.get("at"), kind=f.get("kind"), batch=f.get("batch")) for f in meta.get("fixes") or []], fix_problems=fx["problems"], unplaced=_count(pool),
                 other_school=ours if ours and theirs and ours.lower() != theirs.lower() else "")
 
+def _same_draft(a, b):
+    """whether two meta.json are of one draft: the same upload with the same fixes"""
+    return all(a.get(k) == b.get(k) for k in ("upload_id", "uploaded_at")) and (a.get("fixes") or []) == (b.get("fixes") or [])
+
 def _finish(j, change=None):
     """lay the decisions over the warnings and count them. Under the lock the decisions are read again from disk (a decision
     made while the model was being built stays), change = (key, decision or None) is applied, and a decision whose warning is
     gone is dropped, except the step5 ones: they record that step 5 was updated from the timetable. A decision that says "left"
-    (from a draft kept before that answer went) is dropped too: its warning is open again."""
+    (from a draft kept before that answer went) is dropped too: its warning is open again. Nothing is written when the draft on
+    disk is no longer the one j was built from (another tab opened a version, uploaded or made a fix meanwhile): the answers of
+    that draft are not j's to drop."""
     with _lock:
+        meta = (store.read_json(_p("meta.json"), {}) or {}) if exists() else None
         decisions = store.read_json(_p("decisions.json"), {}) or {} if exists() else {}
         if change:
             if change[1] is None: decisions.pop(change[0], None)
             else: decisions[change[0]] = change[1]
         t = tally(j["warnings"], decisions); ws = t["warnings"]; decisions = t["decisions"]
         n, crit = t["open"], t["critical"]
-        if exists():
+        if meta is not None and j["stamp"] == stamp(meta, dict(v=int(j["setup_version"][1:]))):   # the stamp of the draft on disk, for the setup version j was checked against
             store.write_json(_p("decisions.json"), decisions)
-            store.write_json(_p("meta.json"), dict(store.read_json(_p("meta.json"), {}), open=n, critical=crit))
+            store.write_json(_p("meta.json"), dict(meta, open=n, critical=crit))
     return dict(j, warnings=ws, open=n, critical=crit,
                 step5=sum(1 for d in decisions.values() if d.get("answer") == "step5"))
 
@@ -261,19 +278,20 @@ def _applied(op):
     """an op as it is applied: a new row gets its id here, so the checks stay the same from one build to the next"""
     return ["add", op[1], dict(op[2], _id=sync.new_id()), op[3]] if op and op[0] == "add" else op
 
-def decide(key, answer, by=None):
-    """record what to do with one warning; 'step5' changes the setup to match the timetable. Returns info()."""
+REPLACED = "The draft was replaced while this was happening. Check the list again."
+
+def decide(key, answer, by=None, upload_id=None):
+    """record what to do with one warning; 'step5' changes the setup to match the timetable. upload_id: the upload the page showed the warning of, when it
+    sends one (refused when the draft is of another upload now). Returns info()."""
     if answer not in ANSWERS: raise ValueError("Choose what to do with the warning.")
     if answer == "met" and not key.endswith(":again"): raise ValueError("That answer is only for a rule to check again.")
-    if not exists(): raise ValueError("There is no draft.")
-    if answer != "step5":
+    with _lock:   # from the build to the write: the draft the warning is found on is the draft written to, and a second step5 click waits, then finds the warning gone (so a row is never added twice)
+        if not exists(): raise ValueError("There is no draft.")
+        if upload_id is not None and upload_id != (store.read_json(_p("meta.json"), {}) or {}).get("upload_id"): raise ValueError(REPLACED)
         j = _build(); w = next((w for w in j["warnings"] if w["key"] == key), None)
         if answer == "open": return _finish(j, (key, None))
         if not w: raise ValueError("That warning is no longer on the list.")
-        return _finish(j, (key, dict(answer=answer, at=store.now())))
-    with _lock:   # from the build to the change: a second click waits, then finds the warning gone (so a row is never added twice)
-        j = _build(); w = next((w for w in j["warnings"] if w["key"] == key), None)
-        if not w: raise ValueError("That warning is no longer on the list.")
+        if answer == "met": return _finish(j, (key, dict(answer=answer, at=store.now())))
         if w["ops"] is None:
             if w["kind"] != "deployment": raise ValueError("This warning cannot be settled by updating step 5.")
             raise ValueError(WAITING_REFUSED if w["text"].endswith(WAITING) else "This difference is set on step 3 for the whole level; the app does not change it from here.")

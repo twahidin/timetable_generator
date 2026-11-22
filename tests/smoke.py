@@ -29,9 +29,9 @@ def test_removed_routes():
 
 def test_status_shape():
     j = c.get("/api/status").get_json()
-    assert set(j) == {"role", "codes", "code_problems", "volume", "setup_saved_at", "published", "draft", "typed",
+    assert set(j) == {"role", "codes", "code_problems", "volume", "setup_saved_at", "published", "draft", "versions", "typed",
                       "who", "group", "via", "depts", "rights", "shared", "admin_exists"}, sorted(j)   # who is signed in (accounts)
-    assert j["published"] is None and j["role"] == "committee" and j["draft"] is None
+    assert j["published"] is None and j["role"] == "committee" and j["draft"] is None and j["versions"] == 0   # the saved versions are counted whether or not there is a draft
     assert (j["who"], j["group"], j["via"], j["depts"], j["shared"], j["admin_exists"]) == (None, None, "shared", None, "committee", False) and "committee" in j["rights"], j
 
 def test_old_runs_folder_is_harmless():
@@ -339,7 +339,7 @@ def test_draft_upload_check_decide_publish():
     assert r.status_code == 200 and j["open"] == len(j["warnings"]) and j["config_state"] in ("same", "older", "unknown", "unsaved"), j
     assert len(set(_warn_keys(j))) == len(j["warnings"]) and "left" not in j and j["critical"] == sum(1 for w in j["warnings"] if w["crit"]) and j["fixes"] == [] and j["lessons"] == 1
     st = c.get("/api/status").get_json()["draft"]; assert st["critical"] == j["critical"] and st["fixes"] == 0 and st["open"] == j["open"], (st, j["critical"])   # right after the upload
-    assert {k: v for k, v in j.items() if k != "kept"} == c.get("/api/draft").get_json()
+    assert j == dict(c.get("/api/draft").get_json(), kept=j["kept"])   # the upload's answer is the draft's, with kept beside it and nothing else
     k = f"dep:C:{row['classes'][0]}:{row['subject']}:teachers"; assert k in _warn_keys(j)
     j2 = c.post("/api/draft/decide", json={"key": k, "answer": "open"}).get_json()
     assert j2["open"] == j["open"] and "left" not in j2 and next(w for w in j2["warnings"] if w["key"] == k)["decision"] is None

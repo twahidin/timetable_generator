@@ -5,23 +5,37 @@ import collections, io, os, shutil, tempfile
 import openpyxl
 import draft, fixes, helper, store, versions
 from ttgen.database import write_db
-from ttgen.export import model_from_files
+from ttgen.export import ENTIRE, model_from_files
 
 NO_DRAFT = "There is no draft."
 NO_PUB = "Nothing is published yet."
 NO_VERSION = "There is no such version."
 NO_NAME = "Pick a class, teacher or room on both timetables."
 UNREADABLE = "The published timetable could not be read."
+UNREADABLE_VERSION = "That version could not be read."
 KINDS = ("time", "teacher", "room", "only_a", "only_b")
 
 _counts_cache = {}   # published_counts: {key: (meta.json mtime, setup version), value}
 
-def label(src):
+def _version(src):
+    """the version.json of a "v:<id>" source"""
+    versions.folder(src[2:]); v = versions._read(src[2:])
+    if v is None: raise ValueError(NO_VERSION)   # deleted this moment
+    return v
+
+def _called(src, of):
     if src == "draft": return "The draft on step 8"
     if src == "published": return "Published timetable"
-    if isinstance(src, str) and src.startswith("v:"):
-        versions.folder(src[2:]); return versions._read(src[2:])["name"]
+    if isinstance(src, str) and src.startswith("v:"): return of(_version(src))
     raise ValueError("There is no such timetable.")
+
+def label(src):
+    """a source as the pickers name it: a version with the date and time it was saved"""
+    return _called(src, versions.label)
+
+def name(src):
+    """a source's plain name, for the name of a file"""
+    return _called(src, lambda v: v.get("name") or "Version")
 
 def _published_model(rec):
     pub = store.published()
@@ -45,8 +59,13 @@ def _load(src, rec):
     if src == "published":
         m = _published_model(rec); return m, draft.counts(m, rec)
     if isinstance(src, str) and src.startswith("v:"):
-        f = versions.folder(src[2:]); m, rec, fx = draft.model_in(f, rec)
-        return m, draft.counts(m, rec, fx, store.read_json(os.path.join(f, "decisions.json"), {}) or {})
+        f = versions.folder(src[2:])
+        try:
+            m, rec, fx = draft.model_in(f, rec)
+            return m, draft.counts(m, rec, fx, store.read_json(os.path.join(f, "decisions.json"), {}) or {})
+        except Exception as e:
+            versions.folder(src[2:])   # deleted meanwhile: there is no such version
+            raise ValueError(UNREADABLE_VERSION) from e
     raise ValueError("There is no such timetable.")
 
 def model_of(src, rec):
@@ -80,8 +99,9 @@ def rows(m):
     return out
 
 def pair(a, b):
-    """per key: rows at the same (d, p) pair first, the rest pair in (d, p) order, leftovers with None. Deterministic."""
-    sk = lambda r: (r["d"], r["p"], r["room"], r["id"] if isinstance(r["id"], (int, float)) else 0, str(r["id"]))
+    """per key: rows at the same (d, p) pair first, the rest pair in (d, p) order, leftovers with None. Rows at one time pair by room, then by teachers, and only then by
+    id (two uploads number their lessons differently). Deterministic."""
+    sk = lambda r: (r["d"], r["p"], r["room"], r["teachers"], r["id"] if isinstance(r["id"], (int, float)) else 0, str(r["id"]))
     ga, gb = collections.defaultdict(list), collections.defaultdict(list)
     for r in a: ga[r["key"]].append(r)
     for r in b: gb[r["key"]].append(r)
@@ -115,6 +135,11 @@ def _longest(m):
     return max(day.values(), default=0)
 
 def diff(src_a, src_b, rec=None):
+    """what differs between two sources: dict(totals, items, names, days)"""
+    return both(src_a, src_b, rec)[0]
+
+def both(src_a, src_b, rec=None):
+    """(diff, A's model, B's model): each side is loaded once, for a caller that shows the timetables too"""
     rec = rec or store.setup_record()
     ma, ca = _load(src_a, rec); mb, cb = _load(src_b, rec)
     ra, rb = rows(ma), rows(mb)
@@ -124,19 +149,23 @@ def diff(src_a, src_b, rec=None):
                   critical=[ca["critical"], cb["critical"]], warnings=[ca["warnings"], cb["warnings"]], longest=[_longest(ma), _longest(mb)])
     order = lambda key: list(dict.fromkeys([c["name"] for c in ma[key]] + [c["name"] for c in mb[key]]))
     rooms = sorted({r["room"] for r in ra + rb if r["room"]})
-    return dict(totals=totals, items=items, names=dict(classes=order("classes"), teachers=order("teachers"), rooms=rooms), days=list(mb["days"]))
+    return dict(totals=totals, items=items, names=dict(classes=order("classes"), teachers=order("teachers"), rooms=rooms), days=list(mb["days"])), ma, mb
+
+def who(r):
+    """a lesson row as a line names it: its class and subject ("3B Mathematics"), or a group's subject and code ("Mathematics (3MA1)")"""
+    return f"{', '.join(r['classes'])} {r['subject']}" if r["group"] == ENTIRE else f"{r['subject']} ({r['group']})"
 
 def line(item, days):
     a, b = item.get("a"), item.get("b")
     at = lambda r: f"{days[r['d']]} {r['p']}"
     per = lambda r: f" ({r['n']} period{'' if r['n'] == 1 else 's'})"
-    if a is None: return f"{b['subject']}: only in B ({at(b)})"
-    if b is None: return f"{a['subject']}: only in A ({at(a)})"
+    if a is None: return f"{who(b)}: only in B ({at(b)})"
+    if b is None: return f"{who(a)}: only in A ({at(a)})"
     parts = []
     if "time" in item["kinds"]: longer = a.get("n") != b.get("n"); parts.append(f"{at(a)}{per(a) if longer else ''} → {at(b)}{per(b) if longer else ''}")
     if "teacher" in item["kinds"]: parts.append("teacher " + (" & ".join(a["teachers"]) or "none") + " → " + (" & ".join(b["teachers"]) or "none"))
     if "room" in item["kinds"]: parts.append("room " + (a["room"] or "none") + " → " + (b["room"] or "none"))
-    return f"{b['subject']}: " + ", ".join(parts)
+    return f"{who(b)}: " + ", ".join(parts)
 
 def week(m, view, name):
     """one class's, teacher's or room's week -> dict(days, NP, times, cells)"""
@@ -147,8 +176,16 @@ def week(m, view, name):
     if not ok: raise ValueError(NO_NAME)
     short = lambda s: (m["subjects"].get(s) or {}).get("short") or s
     mine = {"class": lambda r: name in r["classes"], "teacher": lambda r: name in r["teachers"], "room": lambda r: r["room"] == name}[view]
-    cells = [dict(d=r["d"], p=r["p"], n=r["n"], short=short(r["subject"]), what=r["what"], teachers=r["teachers"], room=r["room"], block=r["block"], key=r["key"]) for r in rows(m) if mine(r)]
+    cells = [dict(d=r["d"], p=r["p"], n=r["n"], short=short(r["subject"]), group="" if r["group"] == ENTIRE else r["group"], what=r["what"], teachers=r["teachers"], room=r["room"], block=r["block"], key=r["key"]) for r in rows(m) if mine(r)]
     return dict(days=list(m["days"]), NP=m["NP"], times=m["times"], cells=cells)
+
+FORMULA = ("=", "+", "-", "@", "\t", "\r")   # how a cell a spreadsheet would work out starts
+
+def _as_text(ws):
+    """every cell that looks like a formula kept as the text it is (names come from what people typed)"""
+    for row in ws.iter_rows():
+        for x in row:
+            if isinstance(x.value, str) and x.value.startswith(FORMULA): x.data_type = "s"; x.quotePrefix = True
 
 def xlsx(src_a, src_b, rec=None):
     """the differences as one sheet: Class, Lesson, A, B; one row per item per class of the row, classes in setup order"""
@@ -158,4 +195,5 @@ def xlsx(src_a, src_b, rec=None):
     for i in d["items"]:
         r = i["b"] or i["a"]
         for c in sorted(r["classes"], key=lambda c: (rank.get(c, len(rank)), c)) or [""]: ws.append([c, r["what"], text(i["a"]), text(i["b"])])
+    _as_text(ws)
     buf = io.BytesIO(); wb.save(buf); return buf.getvalue()

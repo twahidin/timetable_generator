@@ -3090,18 +3090,23 @@ async function uploadDraft() {
     const r = await fetch("/api/draft", { method: "POST", body: fd }), j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/login"; return; }
     if (!r.ok) { drawDraft(); toast(j.error || "Could not check the timetable."); return; }
+    const kept = j.kept; delete j.kept;   // not of the draft: the next fetch of the same draft must be equal to this one
     S.draft = j; S.help = null; drawDraft(); poll();
-    if (j.kept) toast("The draft you had is kept as version “" + j.kept.name + "”.");
+    if (kept) toast(vsKeptSay(kept));
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
   finally { btns.forEach(x => x.disabled = false); upPaint(); }
 }
 /* step 8's Versions pop-out: the saved versions of the draft, fixed over the page. State: open, list (the answer of GET /api/draft/versions), busy
    (a request is out: the buttons wait), gen (a late answer of an older load is dropped), name (the typed name, kept while the list is drawn again) */
 const VS = { open: false, list: null, busy: false, gen: 0, name: null, err: "" };
-const vsCount = () => VS.list ? VS.list.versions.length : (G.st && G.st.draft && G.st.draft.versions) || 0;
+const vsCount = () => VS.list ? VS.list.versions.length : (G.st && G.st.versions) || 0;   // the status counts them whether or not there is a draft
 const vsLabel = () => { const n = vsCount(); return n > 0 ? `Versions (${n})` : "Versions"; };
 function vsPaintBtn() { const b = $("#vsBtn"); if (b) b.textContent = vsLabel(); }
-const vsDay = s => String(s || "").split(/\s+/).slice(0, 3).join(" ").replace(/,$/, "");   // "22 Nov 2026, 14:30" as the app writes it: the day, month and year
+function vsWhen(s) {   // "22 Nov 2026, 13:12" as the app writes it -> "22 Nov 2026, 1.12 pm"; any other text as it is (versions.when on the server)
+  const m = /^(.+), (\d{1,2}):(\d{2})$/.exec(String(s || "")); if (!m) return String(s || "");
+  const h = Number(m[2]); return `${m[1]}, ${h % 12 || 12}.${m[3]} ${h < 12 ? "am" : "pm"}`;
+}
+const vsKeptSay = v => "The draft you had is kept as version “" + v.name + "”.";
 function vsDefaultName() {
   const d = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short" }), src = S.draft && S.draft.source ? String(S.draft.source).replace(/\.[^.\/]*$/, "") : "";
   return ((src || "Draft") + " · " + (src ? "edited " : "") + d).slice(0, 80);
@@ -3114,13 +3119,14 @@ function vsHTML() {
   const row = (name, tag, sub, saved, changes, counts, btns) => `<tr><td data-l="Version"><b>${name}</b>${tag ? ` <span class="vstag">${tag}</span>` : ""}${sub ? `<div class="muted small">${sub}</div>` : ""}</td><td data-l="Saved">${saved}</td>${changes}<td data-l="Checked now">${counts}</td><td class="vsbtns">${btns}</td></tr>`;
   const kept = { upload: "uploading", open: "opening a version", refit: "a re-fit" };
   const rows = [], ud = G.st && G.st.draft && G.st.draft.uploaded_at;
-  if (d) rows.push(row("The draft on step 8", "now", "", ud ? `uploaded ${esc(vsDay(ud))}` : `<span class="muted">–</span>`, `<td data-l="Changes made in the app">${d.fixes ? d.fixes + (d.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(d), firstV ? cmp("draft", firstV) : p ? cmp("draft", "published") : ""));
-  vs.forEach(v => rows.push(row(esc(v.name), "", v.source ? "from " + esc(v.source) : "", `${esc(vsDay(v.saved_at))}<div class="muted small">${v.kind === "saved" ? "by " + esc(v.by || "") : "kept by the app before " + (kept[v.kind] || "a change")}</div>`,
+  if (d) rows.push(row("The draft on step 8", "now", d.source ? "from " + esc(d.source) : "", ud ? `uploaded ${esc(vsWhen(ud))}` : `<span class="muted">–</span>`, `<td data-l="Changes made in the app">${d.fixes ? d.fixes + (d.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(d), firstV ? cmp("draft", firstV) : p ? cmp("draft", "published") : ""));
+  vs.forEach(v => rows.push(row(esc(v.name), "", v.source ? "from " + esc(v.source) : "", `${esc(vsWhen(v.saved_at))}<div class="muted small">${v.kind === "saved" ? "by " + esc(v.by || "") : "kept by the app before " + (kept[v.kind] || "a change")}</div>`,
     `<td data-l="Changes made in the app">${v.fixes ? v.fixes + (v.fixes === 1 ? " change" : " changes") : "none"}</td>`, vsCounts(v),
     `<button data-vs="open" data-id="${esc(v.id)}"${off}>Open</button>${cmp("v:" + v.id, d ? "draft" : p ? "published" : "")}<button data-vs="download" data-id="${esc(v.id)}"${off}>Download</button><button class="vsdel" data-vs="delete" data-id="${esc(v.id)}"${off}>Delete</button>`)));
-  if (p) rows.push(row("Published timetable", "what teachers see", "", p.published_at ? "published " + esc(vsDay(p.published_at)) : `<span class="muted">–</span>`, `<td data-l="Changes made in the app" class="muted">–</td>`, p.error ? `<span class="muted">could not be read</span>` : vsCounts(p), d ? cmp("published", "draft") : firstV ? cmp("published", firstV) : ""));
+  if (p) rows.push(row("Published timetable", "what teachers see", "", p.published_at ? "published " + esc(vsWhen(p.published_at)) : `<span class="muted">–</span>`, `<td data-l="Changes made in the app" class="muted">–</td>`, p.error ? `<span class="muted">could not be read</span>` : vsCounts(p), d ? cmp("published", "draft") : firstV ? cmp("published", firstV) : ""));
   const table = L ? (rows.length ? `<div class="tablewrap"><table class="vstable"><tr><th>Version</th><th>Saved</th><th>Changes made in the app</th><th>Checked now</th><th></th></tr>${rows.join("")}</table></div>
-    <p class="muted small">“Checked now” means against the setup as it is today: a version saved before step 5 changed can show warnings it did not have then.</p>` : "")
+    <p class="muted small">“Checked now” means against the setup as it is today: a version saved before step 5 changed can show warnings it did not have then.</p>
+    <p class="muted small">The app keeps the newest 10 of the versions it saves itself; versions you save stay until you delete them.</p>` : "")
     + (vs.length ? "" : `<p class="muted">No versions yet.</p>`) : `<p class="muted">${VS.err ? esc(VS.err) : "Loading…"}</p>`;
   const save = d ? `<div class="vssave"><label class="f">Save the draft as<input id="vsName" type="text" maxlength="80" value="${esc(VS.name === null ? vsDefaultName() : VS.name)}"></label><button class="primary" data-vs="save"${off}>Save version</button></div>` : "";
   return `<div class="vspop" role="dialog" aria-modal="true" aria-labelledby="vsTitle" tabindex="-1"><div class="vshead"><h2 id="vsTitle">Versions</h2><button data-vs="close">Close</button></div>
@@ -3162,7 +3168,7 @@ function vsOpen() {
   VS.open = true; VS.name = null; VS.err = "";
   let ov = $("#vsOv"); if (!ov) { ov = document.createElement("div"); ov.id = "vsOv"; ov.className = "vsov"; document.body.appendChild(ov); }
   ov.hidden = false; document.body.classList.add("vslock"); vsFocusKey = null; vsDraw();
-  if (!(G.st && G.st.draft) && !((G.st && G.st.draft && G.st.draft.versions) || 0)) { VS.list = { versions: [], draft: null, published: null }; vsDraw(); return; }   // no draft and no versions: nothing to ask the server
+  if (G.st && !G.st.draft && G.st.versions === 0) { VS.list = { versions: [], draft: null, published: null }; vsDraw(); return; }   // the status says there is no draft and there are no versions: nothing to ask the server
   vsLoad();
 }
 function vsClose() {
@@ -3197,11 +3203,14 @@ async function vsAction(b) {
   if (!v) return;
   if (a === "open") {
     const x = await vsRequest(`/api/draft/versions/${encodeURIComponent(id)}/open`, { method: "POST" });
-    if (x && !x.r.ok) { toast((x.j && x.j.error) || "Could not open the version."); VS.busy = false; if (x.r.status === 404) await vsLoad(); vsDone(); return; }
+    if (x && !x.r.ok) {   // x.j.opened: the version was opened and the check after it went wrong
+      toast(((x.j && x.j.error) || "Could not open the version.") + (x.j && x.j.kept ? " " + vsKeptSay(x.j.kept) : "")); VS.busy = false;
+      if (x.r.status === 404 || (x.j && x.j.opened)) await vsLoad(); vsDone(); if (x.j && x.j.opened) poll(); return;
+    }
     if (!x) { vsDone(); return; }
     const j = x.j || {}, good = j.info && j.info.warnings; if (good) S.draft = j.info; S.help = null; VS.busy = false;
     vsClose(); if (good) drawDraft(); else refreshDraft().then(() => { if (STEPS[S.step][0] === "edit") drawDraft(); }); poll(); vsLoad();
-    toast("Opened “" + ((j.opened && j.opened.name) || v.name) + "”." + (j.kept ? " The draft you had is kept as version “" + j.kept.name + "”." : ""));
+    toast("Opened “" + ((j.opened && j.opened.name) || v.name) + "”." + (j.kept ? " " + vsKeptSay(j.kept) : ""));
     return;
   }
   if (a === "delete") {
@@ -3226,8 +3235,9 @@ document.addEventListener("click", e => {   // the pop-out's own buttons (it is 
   if (e.target === ov) { vsClose(); return; }
   const b = e.target.closest("[data-vs]"); if (b) vsAction(b);
 }, true);
-document.addEventListener("keydown", e => {   // Escape closes; Tab stays inside the pop-out
+document.addEventListener("keydown", e => {   // Escape closes; Tab stays inside the pop-out; undo, redo, cut and paste never reach the page behind it (in the name box they are the browser's own)
   if (!VS.open) return;
+  if ((e.ctrlKey || e.metaKey) && ["z", "y", "x", "v"].includes((e.key || "").toLowerCase()) && !(e.target && e.target.id === "vsName")) { e.preventDefault(); e.stopPropagation(); return; }
   if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); vsClose(); return; }
   if (e.key === "Tab") { const f = [...document.querySelectorAll("#vsOv button:not([disabled]), #vsOv input")]; if (!f.length) return;
     const i = f.indexOf(document.activeElement), last = f.length - 1;
@@ -3256,7 +3266,7 @@ async function publishDraft() {   // step 9
   finally { DR.hold = false; DR.seen = null; }   // the next status is taken as seen, so the same summary causes no fetch
 }
 async function decide(answer, key) {   // answer is step5, open or met; the key is the warning's (it may hold a "|")
-  const j = await post("/api/draft/decide", { key, answer });
+  const j = await post("/api/draft/decide", { key, answer, upload_id: S.draft ? S.draft.upload_id : null });   // the upload the warning was shown of
   if (!j) return;
   if (S.help && S.help.warn === key) fxShut(S.help);   // the warning is answered: its ways shut
   S.draft = j; drawDraft();   // only the result area: render() would reset the chosen file names

@@ -105,7 +105,9 @@
       const tr = h("tr", null, h("th", { class: "p", text: t ? `${p} · ${t[0]}` : String(p) }));
       for (let d = 0; d < week.days.length; d++) {
         const cs = slot[key(d, p)] || [];
-        const shorts = [...new Set(cs.map(c => c.short))];
+        const codes = new Map();   // each subject once, with the codes of its groups: "MA 3MA1, 3MA2 / EL"
+        for (const c of cs) { if (!codes.has(c.short)) codes.set(c.short, []); if (c.group && !codes.get(c.short).includes(c.group)) codes.get(c.short).push(c.group); }
+        const shorts = [...codes].map(([s, g]) => g.length ? s + " " + g.join(", ") : s);
         const cls = [!cs.length && "free", cs.some(c => c.block) && "bd", hot.has(key(d, p)) && "ch"].filter(Boolean).join(" ");
         const tip = cs.map(c => [c.what, c.teachers.join(" & "), c.room].filter(Boolean).join(" · ")).join("\n");
         tr.append(h("td", { class: cls, title: tip || null, text: cs.length ? shorts.join(" / ") : "·" }));

@@ -1,7 +1,7 @@
 """Saved versions of the step 8 draft: named copies of the draft folder in DATA_DIR/draft_versions/<id>/, each with a version.json.
 Saved by hand (kind "saved") or kept by the app before something replaces the draft ("upload", "open"; "refit" is for the re-fit).
 Nothing here publishes anything. Every function takes draft._lock (an RLock), so a caller may already hold it."""
-import os, re, secrets, shutil, sys, time
+import datetime, hashlib, json, os, re, secrets, shutil, sys, time
 import store, draft
 
 VDIR = os.path.join(store.DATA, "draft_versions")
@@ -11,11 +11,30 @@ NAME_MAX = 80
 KINDS = ("saved", "upload", "open", "refit")
 _ID = re.compile(r"[0-9a-f]{12}\Z")
 _JSON = "version.json"
+CHECKS = max(os.stat(f).st_mtime_ns for f in (draft.__file__, draft.fixes.__file__, draft.helper.__file__, draft.verify.__file__, __file__))   # the newest of the modules the counts come from: a deploy that changes one has the counts worked out again
 
-def identity(meta):
-    """[upload id, number of fixes, the newest fix's "at" or None]: two drafts with the same identity are the same draft"""
+def identity(meta, decisions):
+    """[upload id, number of fixes, a hash of the fixes and of the decisions ("left" is no decision)]: two drafts with the same identity are the same draft. Every field of
+    every fix and decision is in the hash, so a draft that differs in anything is told apart (a copy too many is kept rather than one too few)"""
     fl = meta.get("fixes") or []
-    return [meta.get("upload_id"), len(fl), (fl[-1].get("at") if fl else None)]
+    live = {k: d for k, d in (decisions or {}).items() if not (isinstance(d, dict) and d.get("answer") == "left")}
+    return [meta.get("upload_id"), len(fl), hashlib.sha1(json.dumps([fl, live], sort_keys=True).encode()).hexdigest()]
+
+def _identity_in(folder):
+    """the identity of a draft folder"""
+    read = lambda f: store.read_json(os.path.join(folder, f), {}) or {}
+    return identity(read("meta.json"), read("decisions.json"))
+
+def when(text):
+    """a time as store.now writes it ("22 Nov 2026, 13:12") as a person reads it ("22 Nov 2026, 1.12 pm"); any other text as it is, "" for none"""
+    try: t = datetime.datetime.strptime(text, "%d %b %Y, %H:%M")
+    except (TypeError, ValueError): return text if isinstance(text, str) else ""
+    return f"{text.split(',')[0]}, {t.hour % 12 or 12}.{t.minute:02d} {'am' if t.hour < 12 else 'pm'}"
+
+def label(v):
+    """a version's name with its date and time, so two of one name are told apart"""
+    name, at = v.get("name") or "Version", when(v.get("saved_at"))
+    return f"{name} ({at})" if at else name
 
 def _dir(vid): return os.path.join(VDIR, vid)
 def _read(vid):
@@ -40,17 +59,19 @@ def _make(kind, by, name):
     if name is None:
         name = ((os.path.splitext(source)[0] or "Draft") + " · " + " ".join(saved_at.split()[:2]))[:NAME_MAX]
     vid = secrets.token_hex(6); tmp = _dir(vid) + ".new"
-    os.makedirs(VDIR, exist_ok=True); shutil.rmtree(tmp, ignore_errors=True)
-    shutil.copytree(draft.DIR, tmp)
-    v = dict(id=vid, name=name, kind=kind, saved_at=saved_at, by=by, source=source, identity=identity(meta), checked=None, t=time.time_ns())
-    store.write_json(os.path.join(tmp, _JSON), v)
-    os.replace(tmp, _dir(vid))
+    os.makedirs(VDIR, exist_ok=True)
+    try:
+        shutil.copytree(draft.DIR, tmp)
+        v = dict(id=vid, name=name, kind=kind, saved_at=saved_at, by=by, source=source, identity=_identity_in(tmp), checked=None, t=time.time_ns())   # of the copy itself, so it never says more than the copy holds
+        store.write_json(os.path.join(tmp, _JSON), v)
+        os.replace(tmp, _dir(vid))
+    finally: shutil.rmtree(tmp, ignore_errors=True)   # nothing is left of a copy that failed
     return v
 
-def _trim(protect=None):
-    """drop the oldest versions of an automatic kind beyond AUTO_KEEP (never one saved by hand, never the protect one, which is being opened)"""
+def _trim(*protect):
+    """drop the oldest versions of an automatic kind beyond AUTO_KEEP (never one saved by hand, never one of protect: the one just kept, the one being opened)"""
     auto = [v for v in _all() if v["kind"] != "saved"]
-    for v in [v for v in reversed(auto) if v["id"] != protect][:max(0, len(auto) - AUTO_KEEP)]: shutil.rmtree(_dir(v["id"]), ignore_errors=True)
+    for v in [v for v in reversed(auto) if v["id"] not in protect][:max(0, len(auto) - AUTO_KEEP)]: shutil.rmtree(_dir(v["id"]), ignore_errors=True)
 
 def keep(kind, by, name=None, protect=None):
     """copy the draft into a new version; None when there is no draft or a version of this very draft (same identity) exists.
@@ -58,12 +79,13 @@ def keep(kind, by, name=None, protect=None):
     if kind not in KINDS: raise ValueError("There is no such kind of version.")
     with draft._lock:
         if not draft.exists(): return None
-        if identity(store.read_json(draft._p("meta.json"), {}) or {}) in [v["identity"] for v in _all()]: return None
-        v = _make(kind, by, name); _trim(protect); return v
+        i = _identity_in(draft.DIR)
+        if i[0] and i in [v["identity"] for v in _all()]: return None   # a draft with no upload id (kept from before uploads had one) cannot be told from another, so it is always kept
+        v = _make(kind, by, name); _trim(v["id"], protect); return v
 
 def save(name, by):
     """a version saved by hand"""
-    name = (name or "").strip()
+    name = " ".join(name.split()) if isinstance(name, str) else ""   # one line
     if not name: raise ValueError("Give the version a name.")
     if len(name) > NAME_MAX: raise ValueError(f"A version name is at most {NAME_MAX} characters.")
     with draft._lock:
@@ -73,7 +95,7 @@ def save(name, by):
 
 def listing(rec=None, counts=True):
     """the versions, newest first: dict(id, name, kind, saved_at, by, source, fixes, critical, warnings). With counts=False no model is built and
-    critical and warnings are None. Counts are kept in version.json with the setup version they were worked out against and redone when it changes.
+    critical and warnings are None. Counts are kept in version.json with the setup version they were worked out against and the checking code's age (CHECKS), and redone when either changes.
     The lock is held to read the list and to write a cache, never while a model is built; a version that cannot be read has None counts and is reported on stderr."""
     with draft._lock: vs = _all()
     rec = (rec or store.setup_record()) if counts else rec
@@ -82,8 +104,8 @@ def listing(rec=None, counts=True):
         e = dict(id=v["id"], name=v.get("name"), kind=v["kind"], saved_at=v.get("saved_at"), by=v.get("by"), source=v.get("source"), fixes=v["identity"][1], critical=None, warnings=None)
         if counts:
             ck = v.get("checked")
-            if not (isinstance(ck, dict) and ck.get("v") == rec["v"] and "critical" in ck and "warnings" in ck):
-                try: ck = dict(v=rec["v"], **draft.checked_in(_dir(v["id"]), rec))
+            if not (isinstance(ck, dict) and ck.get("v") == rec["v"] and ck.get("code") == CHECKS and "critical" in ck and "warnings" in ck):
+                try: ck = dict(v=rec["v"], code=CHECKS, **draft.checked_in(_dir(v["id"]), rec))
                 except Exception as x:
                     print(f"versions: cannot count version {v['id']}: {type(x).__name__}: {x}", file=sys.stderr); ck = None
                 if ck:
@@ -106,12 +128,12 @@ def open_version(vid, by):
             if not draft.model_in(src)[0]["lessons"]: raise ValueError("no lessons")
         except Exception: raise ValueError("That version cannot be opened: its files could not be read.")   # a version that does not read never replaces the draft, and nothing is kept
         kept = keep("open", by, protect=vid)
-        new, old = draft.DIR + ".new", draft.DIR + ".old"
+        new = draft.DIR + ".new"
         shutil.rmtree(new, ignore_errors=True)
-        shutil.copytree(src, new, ignore=shutil.ignore_patterns(_JSON))
-        shutil.rmtree(old, ignore_errors=True)
-        if os.path.exists(draft.DIR): os.replace(draft.DIR, old)
-        os.replace(new, draft.DIR); shutil.rmtree(old, ignore_errors=True); draft._cache.clear()
+        try:
+            shutil.copytree(src, new, ignore=shutil.ignore_patterns(_JSON))
+            draft.swap_in(new)
+        finally: shutil.rmtree(new, ignore_errors=True)   # nothing is left of a copy that failed
         return dict(kept=kept, opened=opened)
 
 def delete(vid):

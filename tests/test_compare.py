@@ -1,5 +1,5 @@
 """Plain-assert tests for comparing two timetables: .venv/bin/python tests/test_compare.py"""
-import copy, gzip, io, json, os, secrets, shutil, sys, tempfile, time
+import contextlib, copy, gzip, io, json, os, secrets, shutil, sys, tempfile, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODE = secrets.token_hex(4)
@@ -8,6 +8,7 @@ os.environ.update(DATA_DIR=DATA, SECRET_KEY=secrets.token_hex(16), AI_PROVIDER="
 sys.path.insert(0, ROOT)
 import openpyxl  # noqa: E402
 import app as A, compare, draft, store, versions  # noqa: E402
+from ttgen.export import ENTIRE  # noqa: E402
 from ttgen.template import write_template  # noqa: E402
 
 c = A.app.test_client()
@@ -30,8 +31,10 @@ def workbook(rows):
         ws.append([r["id"], r["day"], r["p"], r["p"] + r["n"] - 1, r["n"], "", "", r["level"], r.get("block", ""), ", ".join(r["classes"]), r["subject"], r.get("group", "Entire Class"), ", ".join(r.get("teachers", [])), r.get("room", ""), "", r.get("rain", "")])
     buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
 
+_made = {}   # the setup workbook is made once: every upload here sends the same one
 def setup_bytes(spec):
-    p = os.path.join(tempfile.mkdtemp(), "setup.xlsx"); write_template(spec, p); return open(p, "rb").read()
+    if "b" not in _made: p = os.path.join(tempfile.mkdtemp(), "setup.xlsx"); write_template(spec, p); _made["b"] = open(p, "rb").read()
+    return _made["b"]
 
 def save_draft(rows):
     r = c.post("/api/draft", data=dict(setup=(io.BytesIO(setup_bytes(SPEC)), "setup.xlsx"), timetable=(io.BytesIO(workbook(rows)), "timetable.xlsx"), replace="1"), content_type="multipart/form-data")
@@ -65,6 +68,12 @@ ROOM = next(iter(SPEC.get("rooms") or [dict(room="Room 1")]))
 ROOM = ROOM.get("room") or ROOM.get("name") if isinstance(ROOM, dict) else ROOM
 B_ROWS = shift(ROWS, {PLAIN_ID: dict(p=2, room=ROOM), OTHER_ID: dict(teachers=[TEACHERS[1]])}) + [EXTRA]
 
+@contextlib.contextmanager
+def patched(obj, name, value):
+    old = getattr(obj, name); setattr(obj, name, value)
+    try: yield
+    finally: setattr(obj, name, old)
+
 def two_timetables():
     """A is saved as a version, B is the draft; returns the version's source string"""
     shutil.rmtree(versions.VDIR, ignore_errors=True)
@@ -82,23 +91,61 @@ def test_pairs_ignore_ids_and_list_lessons_on_one_side():
     assert compare.diff(a, a)["items"] == [] and compare.diff("draft", "draft")["items"] == []
     assert compare.diff(a, "draft") == compare.diff(a, "draft")   # deterministic
     assert d["names"]["classes"][:2] == CLASSES and d["names"]["teachers"][:3] == TEACHERS
+    # the other way round, the lesson is only in A: it is listed, in the diff, on the page and in the Excel file
+    o = compare.diff("draft", a); only_a = [i for i in o["items"] if "only_a" in i["kinds"]]; said = f"{CLASSES[1]} {SUBJ2}: only in A ({LAST} 3)"
+    assert len(only_a) == 1 and only_a[0]["a"]["id"] == 200 and only_a[0]["b"] is None and not [i for i in o["items"] if "only_b" in i["kinds"]] and len(o["items"]) == 3
+    assert compare.line(only_a[0], o["days"]) == said
+    assert said in c.get(f"/api/compare?a=draft&b={a}&view=class&name={CLASSES[1]}").get_json()["lines"]
+    rows = [[x.value for x in r] for r in openpyxl.load_workbook(io.BytesIO(compare.xlsx("draft", a))).active.iter_rows(min_row=2)]
+    assert [r for r in rows if r[0] == CLASSES[1] and r[2].startswith(f"{LAST} 3") and not r[3]], rows
+
+def test_the_names_are_of_both_sides():
+    """a class, a teacher and a room that only one of the two timetables has can be picked, whichever side it is on"""
+    shutil.rmtree(versions.VDIR, ignore_errors=True)
+    few = [dict(ROWS[1], teachers=[TEACHERS[1]])]
+    save_draft(ROWS[:2] + [dict(id=9, day=DAYS[3], p=0, n=1, level=LEVEL, classes=["9Z"], subject=SUBJ, teachers=["Odd Visitor"], room="Odd Hut")]); v = "v:" + versions.save("With 9Z", "Tester")["id"]; save_draft(few)
+    for a, b in ((v, "draft"), ("draft", v)):
+        n = compare.diff(a, b)["names"]; assert "9Z" in n["classes"] and "Odd Visitor" in n["teachers"] and "Odd Hut" in n["rooms"], n
+        for view, name in (("class", "9Z"), ("teacher", "Odd Visitor"), ("room", "Odd Hut")):
+            r = c.get("/api/compare", query_string=dict(a=a, b=b, view=view, name=name)); assert r.status_code == 200, (view, r.get_json())
+            assert r.get_json()["lines"] == [f"9Z {SUBJ}: only in {'A' if a == v else 'B'} ({DAYS[3]} 0)"], r.get_json()["lines"]
 
 def test_lines_read_as_the_spec_says():
     a = two_timetables(); d = compare.diff(a, "draft"); lines = [compare.line(i, DAYS) for i in d["items"]]
-    assert f"{SUBJ}: {DAYS[0]} 0 → {DAYS[0]} 2, room none → {ROOM}" in lines, lines
-    assert f"{SUBJ2}: teacher none → {TEACHERS[1]}" in lines, lines
-    assert f"{SUBJ2}: only in B ({LAST} 3)" in lines, lines
-    one = dict(a=dict(d=4, p=2, teachers=["Karen Ismail"], room="", subject="Social Studies"), b=dict(d=3, p=4, teachers=["Hakim Kumar"], room="", subject="Social Studies"), kinds=["time", "teacher"])
-    days = ["Mon", "Tue", "Wed", "Thu", "Fri"]
-    assert compare.line(one, days) == "Social Studies: Fri 2 → Thu 4, teacher Karen Ismail → Hakim Kumar"
-    assert compare.line(dict(a=dict(d=0, p=3, teachers=[], room="", subject="Mathematics"), b=dict(d=0, p=6, teachers=[], room="", subject="Mathematics"), kinds=["time"]), days) == "Mathematics: Mon 3 → Mon 6"
-    assert compare.line(dict(a=dict(d=0, p=3, teachers=[], room="Lab 1", subject="Science"), b=dict(d=0, p=3, teachers=[], room="Lab 2", subject="Science"), kinds=["room"]), days) == "Science: room Lab 1 → Lab 2"
-    assert compare.line(dict(a=dict(d=1, p=5, teachers=[], room="", subject="Art"), b=None, kinds=["only_a"]), days) == "Art: only in A (Tue 5)"
+    assert f"{CLASSES[0]} {SUBJ}: {DAYS[0]} 0 → {DAYS[0]} 2, room none → {ROOM}" in lines, lines
+    assert f"{CLASSES[0]} {SUBJ2}: teacher none → {TEACHERS[1]}" in lines, lines
+    assert f"{CLASSES[1]} {SUBJ2}: only in B ({LAST} 3)" in lines, lines
+    row = lambda subject, d, p, teachers=(), room="", cls="3B", group=ENTIRE: dict(d=d, p=p, teachers=list(teachers), room=room, subject=subject, classes=[cls], group=group)
+    days = ["Mon", "Tue", "Wed", "Thu", "Fri"]; say = lambda a, b, *kinds: compare.line(dict(a=a, b=b, kinds=list(kinds)), days)
+    assert say(row("Social Studies", 4, 2, ["Karen Ismail"]), row("Social Studies", 3, 4, ["Hakim Kumar"]), "time", "teacher") == "3B Social Studies: Fri 2 → Thu 4, teacher Karen Ismail → Hakim Kumar"
+    assert say(row("Mathematics", 0, 3), row("Mathematics", 0, 6), "time") == "3B Mathematics: Mon 3 → Mon 6"
+    assert say(row("Science", 0, 3, room="Lab 1"), row("Science", 0, 3, room="Lab 2"), "room") == "3B Science: room Lab 1 → Lab 2"
+    assert say(row("Art", 1, 5), None, "only_a") == "3B Art: only in A (Tue 5)" and say(None, row("Science", 3, 7), "only_b") == "3B Science: only in B (Thu 7)"
+    assert say(row("Mathematics", 0, 3, group="3MA1"), row("Mathematics", 0, 6, group="3MA1"), "time") == "Mathematics (3MA1): Mon 3 → Mon 6"   # a group is named by its code
+
+def test_lines_tell_two_classes_and_two_groups_apart():
+    shutil.rmtree(versions.VDIR, ignore_errors=True); both = dict(id=1, n=1, level=LEVEL, classes=CLASSES, subject=SUBJ, teachers=[TEACHERS[0]])
+    band = lambda p: [dict(id=3, day=DAYS[2], p=p, n=1, level=LEVEL, block=f"{LEVEL} Band A", classes=[CLASSES[0]], subject=SUBJ, group=g, teachers=[TEACHERS[i]]) for i, g in ((1, "G1"), (2, "G2"))]
+    save_draft([dict(both, day=DAYS[0], p=2)] + band(1)); v = "v:" + versions.save("One", "Tester")["id"]; save_draft([dict(both, day=DAYS[0], p=3)] + band(4))
+    j = c.get("/api/compare", query_string=dict(a=v, view="teacher", name=TEACHERS[0])).get_json()
+    assert j["lines"] == [f"{x} {SUBJ}: {DAYS[0]} 2 → {DAYS[0]} 3" for x in CLASSES], j["lines"]
+    j = c.get("/api/compare", query_string=dict(a=v, view="class", name=CLASSES[0])).get_json()
+    assert j["lines"] == [f"{CLASSES[0]} {SUBJ}: {DAYS[0]} 2 → {DAYS[0]} 3"] + [f"{SUBJ} ({g}): {DAYS[2]} 1 → {DAYS[2]} 4" for g in ("G1", "G2")], j["lines"]
+    cells = {(x["d"], x["p"], x["group"]) for x in j["weeks"]["a"]["cells"]}; assert cells == {(0, 2, ""), (2, 1, "G1"), (2, 1, "G2")}, cells   # the group code is in the cell too
+    with patched(compare, "line", lambda i, days: "the same line"): assert c.get("/api/compare", query_string=dict(a=v)).get_json()["lines"] == ["the same line"]   # said once
 
 def test_pair_matches_same_slot_first():
-    r = lambda i, d, p: dict(key="G:X", id=i, d=d, p=p, room="")
+    r = lambda i, d, p: dict(key="G:X", id=i, d=d, p=p, room="", teachers=[])
     got = compare.pair([r(1, 0, 1), r(2, 0, 4)], [r(9, 0, 4), r(8, 0, 6), r(7, 0, 7)])
     assert [(x and x["p"], y and y["p"]) for x, y in got] == [(4, 4), (1, 6), (None, 7)], got
+
+def test_two_rows_of_one_key_at_one_time_pair_by_teacher():
+    r = lambda i, *teachers, room="": dict(key="G:X", id=i, d=0, p=1, n=1, room=room, teachers=list(teachers))
+    a, b = [r(1, "Ann Lee"), r(2, "Ben Tan")], [r(1, "Ben Tan"), r(2, "Ann Lee")]   # the ids the other way round
+    for x, y in ((a, b), (a[::-1], b), (a, b[::-1]), (b, a)):
+        got = compare.pair(x, y); assert len(got) == 2 and all(compare._kinds(*p) == [] for p in got), got
+    got = compare.pair(a + [r(3, "Cy Ong")], b); assert [(p[0] and p[0]["teachers"], p[1] and p[1]["teachers"]) for p in got] == [(["Ann Lee"], ["Ann Lee"]), (["Ben Tan"], ["Ben Tan"]), (["Cy Ong"], None)], got   # one more on one side
+    got = compare.pair([r(1, "Ann Lee", room="Lab 2"), r(2, "Ann Lee", room="Lab 1")], [r(7, "Ann Lee", room="Lab 1"), r(8, "Ann Lee", room="Lab 2")]); assert all(compare._kinds(*p) == [] for p in got), got   # the room first
 
 def test_week_of_a_room():
     two_timetables(); m = compare.model_of("draft", None); before = copy.deepcopy(m["lessons"])
@@ -139,12 +186,69 @@ def test_excel_has_one_row_per_difference():
     assert ws.title == "Differences" and [x.value for x in ws[1]] == ["Class", "Lesson", "A", "B"]
     assert ws.max_row - 1 == want, (ws.max_row, want)
 
+def test_a_name_that_looks_like_a_formula_is_text():
+    a = two_timetables(); real = compare.both
+    def both(*k):
+        d, ma, mb = real(*k)
+        for i, text in zip(d["items"], ("=SUM(A1)", "+1", "@cmd")):
+            for k in "ab":
+                if i[k]: i[k] = dict(i[k], subject=text, what=f"{text} for {CLASSES[0]}", room="-2+3", teachers=[], classes=["=1+1"])
+        return d, ma, mb
+    plain = [[x.value for x in r] for r in openpyxl.load_workbook(io.BytesIO(compare.xlsx(a, "draft"))).active.iter_rows()]
+    with patched(compare, "both", both): ws = openpyxl.load_workbook(io.BytesIO(compare.xlsx(a, "draft"))).active
+    cells = [x for r in ws.iter_rows(min_row=2) for x in r if isinstance(x.value, str)]
+    assert all(x.data_type == "s" for x in cells) and not [x for x in cells if x.data_type == "f"], [(x.value, x.data_type) for x in cells]
+    assert {x.value for x in ws["B"][1:]} == {f"{t} for {CLASSES[0]}" for t in ("=SUM(A1)", "+1", "@cmd")} and {x.value for x in ws["A"][1:]} == {"=1+1"}
+    assert all(x.quotePrefix for r in ws.iter_rows(min_row=2, max_col=2) for x in r)
+    assert [x.value for x in ws[1]] == ["Class", "Lesson", "A", "B"] and not any(x.quotePrefix for x in ws[1])   # a plain cell is as it was
+    again = openpyxl.load_workbook(io.BytesIO(compare.xlsx(a, "draft"))).active; assert [[x.value for x in r] for r in again.iter_rows()] == plain and not any(x.quotePrefix for r in again.iter_rows() for x in r)
+
+def test_versions_are_labelled_with_their_time():
+    shutil.rmtree(versions.VDIR, ignore_errors=True); save_draft(ROWS)
+    with patched(store, "now", lambda: "22 Nov 2026, 13:12"): v = "v:" + versions.save("Run A · edited", "Tester")["id"]
+    with patched(store, "now", lambda: "22 Nov 2026, 09:05"): w = "v:" + versions.save("Run A · edited", "Tester")["id"]   # the same name
+    assert compare.label(v) == "Run A · edited (22 Nov 2026, 1.12 pm)" and compare.label(w) == "Run A · edited (22 Nov 2026, 9.05 am)"
+    assert compare.label("draft") == "The draft on step 8" and compare.label("published") == "Published timetable"
+    j = c.get(f"/api/compare?a={v}&b={w}").get_json(); by = {s["src"]: s["label"] for s in j["sources"]}
+    assert by[v] == compare.label(v) == j["a"]["label"] and by[w] == compare.label(w) == j["b"]["label"] and by["draft"] == "The draft on step 8"
+    raises(ValueError, lambda: compare.label("v:" + "0" * 12), "There is no such version."); raises(ValueError, lambda: compare.label("thing"), "There is no such timetable.")
+
+def test_a_version_that_cannot_be_read_is_said():
+    a = two_timetables(); said = {"error": "That version could not be read."}; f = versions.folder(a[2:]); tp = draft.paths(f)[1]; good = open(tp, "rb").read()
+    def spoil(): open(tp, "wb").write(b"garbage")
+    def lose(): os.remove(tp)
+    for breakage in (spoil, lose):
+        breakage()
+        for u in (f"/api/compare?a={a}&b=draft", f"/api/compare?a=draft&b={a}", f"/api/compare.xlsx?a={a}&b=draft"):
+            r = c.get(u); assert r.status_code == 400 and r.get_json() == said, (u, r.status_code, r.get_json())
+        assert c.get("/compare").status_code == 200 and a in [s["src"] for s in c.get("/api/compare?a=draft&b=draft").get_json()["sources"]]
+        open(tp, "wb").write(good)
+    assert c.get(f"/api/compare?a={a}&b=draft").status_code == 200
+    # a fault in the compare itself is a sentence, and never "Save the school's setup first"
+    def fault(*k): raise KeyError("odd")
+    with patched(compare, "both", fault), patched(A.app.logger, "disabled", True):
+        for u in (f"/api/compare?a={a}&b=draft", f"/api/compare.xlsx?a={a}&b=draft"):
+            r = c.get(u); assert r.status_code == 400 and r.get_json()["error"].startswith("Could not compare the timetables: ") and A.NO_SETUP not in r.get_json()["error"], (u, r.get_json())
+    with patched(compare, "week", fault), patched(A.app.logger, "disabled", True): assert c.get(f"/api/compare?a={a}&b=draft").status_code == 400
+    # no setup is still said
+    def none(*k): raise LookupError("no setup")
+    with patched(compare, "both", none): r = c.get(f"/api/compare?a={a}&b=draft"); assert r.status_code == 409 and r.get_json() == {"error": A.NO_SETUP}
+    # a version deleted in the middle of it is no such version
+    def gone(folder, rec=None): shutil.rmtree(folder); raise OSError("gone")
+    with patched(draft, "model_in", gone): r = c.get(f"/api/compare?a={a}&b=draft"); assert r.status_code == 404 and r.get_json()["error"] == "There is no such version.", r.get_json()
+
+def test_one_compare_loads_each_side_once():
+    a = two_timetables(); real, calls = compare._load, []
+    with patched(compare, "_load", lambda src, rec: (calls.append(src), real(src, rec))[1]):
+        assert c.get(f"/api/compare?a={a}&b=draft&view=class&name={CLASSES[0]}").status_code == 200
+    assert calls == [a, "draft"], calls
+
 def test_a_length_change_is_a_time_difference():
     shutil.rmtree(versions.VDIR, ignore_errors=True)
     save_draft([dict(ROWS[0], p=2, n=1)]); v = versions.save("Short", "Tester"); save_draft([dict(ROWS[0], id=77, p=2, n=2)])
     d = compare.diff("v:" + v["id"], "draft"); assert len(d["items"]) == 1 and d["items"][0]["kinds"] == ["time"], d["items"]
     assert d["totals"]["moved"] == 0
-    assert compare.line(d["items"][0], DAYS) == f"{SUBJ}: {DAYS[0]} 2 (1 period) → {DAYS[0]} 2 (2 periods)", compare.line(d["items"][0], DAYS)
+    assert compare.line(d["items"][0], DAYS) == f"{CLASSES[0]} {SUBJ}: {DAYS[0]} 2 (1 period) → {DAYS[0]} 2 (2 periods)", compare.line(d["items"][0], DAYS)
 
 def test_published_counts_are_cached_until_the_setup_or_the_publish_changes():
     shutil.rmtree(versions.VDIR, ignore_errors=True); save_draft(CLEAN); assert c.post("/api/draft/publish").status_code == 200
@@ -183,7 +287,7 @@ def test_compare_routes_need_the_committee():
 def test_compare_api_shape():
     a = two_timetables()
     r = c.get(f"/api/compare?a={a}&b=draft&view=class&name={CLASSES[0]}"); assert r.status_code == 200, r.get_json(); j = r.get_json()
-    assert j["a"] == dict(src=a, label="Run A") and j["b"]["src"] == "draft" and j["view"] == "class" and j["name"] == CLASSES[0]
+    assert j["a"] == dict(src=a, label=compare.label(a)) and j["a"]["label"].startswith("Run A (") and j["b"]["src"] == "draft" and j["view"] == "class" and j["name"] == CLASSES[0]
     assert len(j["lines"]) >= 1 and j["totals"]["moved"] == 1 and j["names"]["classes"][:2] == CLASSES
     assert [DAYS.index(DAYS[0]), 2] in j["marks"]["b"] and [0, 0] in j["marks"]["a"], j["marks"]   # the moved lesson: new time on b, old time on a
     assert sorted(j["weeks"]) == ["a", "b"] and j["weeks"]["a"]["NP"] == j["weeks"]["b"]["NP"]

@@ -829,7 +829,7 @@ def draft_decide():
     try:
         try: w = next((w for w in (draft.info() or {}).get("warnings", []) if w.get("key") == key), None)
         except Exception: w = None
-        out = jsonify(draft.decide(key, body.get("answer"), by=by()))
+        uid = body.get("upload_id"); out = jsonify(draft.decide(key, body.get("answer"), by=by(), upload_id=uid if isinstance(uid, str) else None))
         _draft_entry("decide", f"Decided: {body.get('answer')} — {w['text'] if w else key}")
         return out
     except ValueError as e: return {"error": str(e)}, 400
@@ -995,9 +995,9 @@ def draft_version_open(vid):
     try: got = versions.open_version(vid, by()["as"])
     except ValueError as e: return _version_error(e)
     kept, opened = got["kept"], got["opened"]
+    _draft_entry("version", f"Opened version “{opened['name']}”" + (f"; the draft before is kept as version “{kept['name']}”" if kept else ""))   # the version is the draft now, whatever the check below says
     r = _checked(lambda: dict(info=draft.info() or {"draft": None}, kept=kept, opened=opened))
-    if _worked(r): _draft_entry("version", f"Opened version “{opened['name']}”" + (f"; the draft before is kept as version “{kept['name']}”" if kept else ""))
-    return r
+    return r if _worked(r) else (dict(r[0], kept=kept, opened=opened), r[1])
 
 @app.delete("/api/draft/versions/<vid>")
 @need("committee")
@@ -1034,14 +1034,15 @@ def compare_page():
 def _compare_sources():
     """the pickers of the Compare page: the draft (when there is one), every version newest first, the published timetable (when there is one)"""
     out = [dict(src="draft", label=compare.label("draft"))] if draft.exists() else []
-    out += [dict(src="v:" + v["id"], label=v["name"]) for v in versions.listing(counts=False)]
+    out += [dict(src="v:" + v["id"], label=versions.label(v)) for v in versions.listing(counts=False)]
     if store.published(): out.append(dict(src="published", label=compare.label("published")))
     return out
 
 def _compare_error(e):
-    """404 for a version that is not there, 400 for any other thing the user can mend, 409 without a setup"""
-    if isinstance(e, LookupError): return {"error": NO_SETUP}, 409
-    return {"error": str(e)}, 404 if str(e) == compare.NO_VERSION else 400
+    """404 for a version that is not there, 400 for any other sentence, 409 without a setup; a compare that goes wrong is a sentence too (400), as _checked does, never a server error"""
+    if type(e) is LookupError: return {"error": NO_SETUP}, 409   # no setup saved (a KeyError or IndexError is a fault in the compare)
+    if isinstance(e, ValueError): return {"error": str(e)}, 404 if str(e) == compare.NO_VERSION else 400
+    app.logger.exception("comparing two timetables"); return {"error": f"Could not compare the timetables: {e}"}, 400
 
 def _compare_pair():
     """(a, b) from the query: b is the draft unless given; a is the first picker entry that is not b"""
@@ -1062,8 +1063,8 @@ def api_compare():
     each side with the cells that take part in a difference (`marks`, [day, period]) and a sentence for each difference that involves it (`lines`)"""
     rec = store.setup_record()
     try:
-        a, b = _compare_pair(); la, lb = compare.label(a), compare.label(b); d = compare.diff(a, b, rec)
-    except (ValueError, LookupError) as e: return _compare_error(e)
+        a, b = _compare_pair(); la, lb = compare.label(a), compare.label(b); d, ma, mb = compare.both(a, b, rec)
+    except Exception as e: return _compare_error(e)
     view = request.args.get("view") or "class"; name = request.args.get("name")
     if view not in ("class", "teacher", "room"): return {"error": compare.NO_NAME}, 400
     names = d["names"][{"class": "classes", "teacher": "teachers", "room": "rooms"}[view]]
@@ -1072,12 +1073,12 @@ def api_compare():
     if name not in names: return {"error": compare.NO_NAME}, 400
     try:
         weeks = {}
-        for k, src in (("a", a), ("b", b)):
-            try: weeks[k] = compare.week(compare.model_of(src, rec), view, name)
+        for k, m in (("a", ma), ("b", mb)):
+            try: weeks[k] = compare.week(m, view, name)
             except ValueError as e:
                 if str(e) != compare.NO_NAME: raise
                 weeks[k] = None   # the name is on the other timetable only
-    except (ValueError, LookupError) as e: return _compare_error(e)
+    except Exception as e: return _compare_error(e)
     have = weeks["a"] or weeks["b"]
     if have is None: return {"error": compare.NO_NAME}, 400
     for k in ("a", "b"):
@@ -1089,15 +1090,15 @@ def api_compare():
             r = i[k]
             if _involves(r, view, name) and [r["d"], r["p"]] not in marks[k]: marks[k].append([r["d"], r["p"]])
     return jsonify(a=dict(src=a, label=la), b=dict(src=b, label=lb), sources=_compare_sources(), totals=d["totals"], names=d["names"], view=view, name=name,
-                   weeks=weeks, marks=marks, lines=[compare.line(i, d["days"]) for i in mine])
+                   weeks=weeks, marks=marks, lines=list(dict.fromkeys(compare.line(i, d["days"]) for i in mine)))
 
 @app.get("/api/compare.xlsx")
 @need("committee")
 def api_compare_xlsx():
     from ttgen.export import safe_name
     try:
-        a, b = _compare_pair(); la, lb = compare.label(a), compare.label(b); data = compare.xlsx(a, b, store.setup_record())
-    except (ValueError, LookupError) as e: return _compare_error(e)
+        a, b = _compare_pair(); la, lb = compare.name(a), compare.name(b); data = compare.xlsx(a, b, store.setup_record())
+    except Exception as e: return _compare_error(e)
     return send_file(io.BytesIO(data), as_attachment=True, download_name=safe_name(f"Differences {la} and {lb}") + ".xlsx", mimetype=XLSX)
 
 @app.post("/api/draft/publish")
@@ -1185,7 +1186,7 @@ def status():
     mine = dict(who=p["name"] if p else None, group=people.LABELS.get(p["group"]) if p else None, via=via(), depts=head_depts(), rights=sorted(rights()), shared=shared(),
                 admin_exists=bool(people.usable_admins(people.load())))
     if not has("committee"): return jsonify(role="head", volume=store.on_volume(), setup_saved_at=at, published=pub_info(), **mine)
-    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), typed=typed.enabled(), **mine)
+    return jsonify(role="committee", codes=have, code_problems=probs, volume=store.on_volume(), setup_saved_at=at, published=pub_info(), draft=draft.summary(), versions=versions.count(), typed=typed.enabled(), **mine)
 
 NO_PERSONAL = "Personal student codes are off until SECRET_KEY is set in Railway variables: without it, anyone who knows a Student ID could work out that student's code."
 
