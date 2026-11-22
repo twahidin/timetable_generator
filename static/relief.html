@@ -143,6 +143,26 @@ table.rtable th.num,table.rtable td.num{text-align:right;white-space:nowrap}
 .ld-one{margin-top:14px}
 .ld-one h3{margin:0 0 2px}
 tr.ld-wait td{background:#fffaf0}
+/* Weekly summary (the relief team) */
+.sm-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sm-nav h2{margin:0}
+.sm-nav h2:focus{outline:none}
+.sm-facts{margin:0 0 4px;display:grid;gap:4px}
+.sm-facts>div{display:flex;gap:2px 10px;flex-wrap:wrap}
+.sm-facts dt{flex:0 0 130px;color:var(--muted)}
+.sm-facts dd,.sm-bars dd{margin:0;min-width:0}
+.sm-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:0 28px}
+.sm-bars{margin:0;display:grid;gap:5px}
+.sm-bars>div{display:grid;grid-template-columns:9em minmax(0,1fr);gap:10px;align-items:center}
+.sm-bars.days>div{grid-template-columns:2.6em minmax(0,1fr)}
+.sm-bars dt{overflow-wrap:anywhere}
+.sm-bars dd{display:flex;align-items:center;gap:10px}
+.sm-bar{flex:1;min-width:0;height:10px;border-radius:999px;background:var(--chip);overflow:hidden}
+.sm-bar i{display:block;height:100%;background:var(--navy)}
+.sm-bars b{min-width:2.2em;text-align:right;font-variant-numeric:tabular-nums}
+.sm-top{margin:0}
+table.sm-table{min-width:620px}
+.sm-date{white-space:nowrap}
 .td-new{margin-top:6px}
 .td-yes{color:var(--ok)}.td-no{color:var(--warn)}
 .chip.td-chip{white-space:normal;display:inline-block}
@@ -182,6 +202,7 @@ tr.ld-wait td{background:#fffaf0}
     <button type="button" role="tab" id="tab-inbox" data-tab="inbox" aria-controls="pane-inbox" hidden>What's in</button>
     <button type="button" role="tab" id="tab-today" data-tab="today" aria-controls="pane-today" hidden>Today</button>
     <button type="button" role="tab" id="tab-load" data-tab="load" aria-controls="pane-load" hidden>Load</button>
+    <button type="button" role="tab" id="tab-summary" data-tab="summary" aria-controls="pane-summary" hidden>Weekly summary</button>
   </nav>
   <div id="loading" class="card"><p class="muted">Loading…</p></div>
   <section class="pane" id="pane-mine" role="tabpanel" aria-labelledby="tab-mine" hidden></section>
@@ -191,6 +212,7 @@ tr.ld-wait td{background:#fffaf0}
   <section class="pane" id="pane-inbox" role="tabpanel" aria-labelledby="tab-inbox" hidden></section>
   <section class="pane" id="pane-today" role="tabpanel" aria-labelledby="tab-today" hidden></section>
   <section class="pane" id="pane-load" role="tabpanel" aria-labelledby="tab-load" hidden></section>
+  <section class="pane" id="pane-summary" role="tabpanel" aria-labelledby="tab-summary" hidden></section>
 </main>
 <script src="/static/relief-form.js"></script>
 <script src="/static/relief.js"></script>
@@ -198,6 +220,7 @@ tr.ld-wait td{background:#fffaf0}
 <script src="/static/relief-inbox.js"></script>
 <script src="/static/relief-today.js"></script>
 <script src="/static/relief-load.js"></script>
+<script src="/static/relief-summary.js"></script>
 <script src="/static/relief-covering.js"></script>
 </body>
 </html>

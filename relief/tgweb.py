@@ -11,8 +11,8 @@ done, or Telegram would send it again; a store that fails is 503, so that it doe
 A person's own link needs relief and a person signed in by name: GET /api/relief/telegram, POST …/code (a one-time code and
 the address that opens the bot with it), DELETE …/link. Relief settings (relief.save): GET …/admin, POST …/connect (points
 Telegram at the app's address, _base), …/disconnect and …/unlink {name}. The relief team (relief.team, asked as relief/web.py's
-team routes ask it): POST /api/relief/today/remind. No answer holds the token, the hook's secret, a chat id or anything Telegram
-said."""
+team routes ask it): POST /api/relief/today/remind and GET /api/relief/summary (one week's numbers; it needs no token). No answer
+holds the token, the hook's secret, a chat id or anything Telegram said."""
 import hmac, json, logging, os, re, sqlite3
 from functools import wraps
 from urllib.parse import urlsplit
@@ -24,6 +24,9 @@ from accounts import people as _accounts
 from accounts import rights as _rights
 from relief import absences as _absences
 from relief import bot, links, report, tg, tgdb
+from relief import lessons as _lessons
+from relief import settings as _settings
+from relief import summary as _summary
 from relief import web as _web
 
 bp = Blueprint("relief_tg", __name__)
@@ -179,6 +182,20 @@ def remind():
         _log.error("a reminder could not be queued (%s)", type(e).__name__)
         return {"error": NOT_NOW}, 503
     return jsonify(got)
+
+
+@bp.get("/api/relief/summary")
+@need("relief")
+def summary():
+    """one week's numbers (summary.week): the week of ?week=YYYY-MM-DD, any date of it, or this week when left out; WRONG for what is
+    no date; relief.team"""
+    pub, me, err = _web._gate(*_web.TEAM)
+    if err: return err
+    v = request.args.get("week")
+    try: date = _web._date_in(v) if v else _lessons.today()
+    except ValueError as e: return _web._refusal(e)
+    settings = _settings.load(pub)
+    return jsonify(_summary.week(pub, settings, _absences.all_records(), date, _absences._now(), links=_web._links_or_none(pub, settings["calendar"])))
 
 
 # ---- relief settings

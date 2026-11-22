@@ -1,6 +1,9 @@
 """What the relief team is told by the clock on Telegram, and Remind.
 
-tick (every minute: tell.MINUTE) says which of today's approved reliefs nobody has acknowledged, at round times: every
+tick (every minute: tell.MINUTE) has two parts, the report and the weekly summary. They go by the bot, the timetable and the settings
+as they are read once; each has its own try, so neither stops the other.
+
+The report says which of today's approved reliefs nobody has acknowledged, at round times: every
 report_every minutes of the relief settings, counted from midnight, from BEFORE minutes before the first period starts
 (exams.days.bounds). The mark is the last such time at or before now, so a tick a little late, or after a restart, still says it
 once; what is written in it is the time now. A mark is done with once it has been worked out (state report_last:{date}, raised
@@ -24,6 +27,14 @@ Telegram; never why anyone is away.
 Both messages are dropped when they are OLD, when one of a later mark is there for that person (an old one never follows a newer),
 or when their person is not on the team any more (tell.CHECKS).
 
+The weekly summary (relief/summary.py's numbers of one week) goes at weekly_day weekly_at of the relief settings (WEEKLY where they
+cannot be read), whatever kind of day that is, and until a DAY after; later than that it is not sent at all. On a Friday it is about
+that week, else about the week before. A week is done with as a mark is (state weekly_last: its Monday's ordinal), also when it had no
+relief: nothing is sent then. While nobody on the team can be reached, or the accounts or the exams cannot be read, it is not done
+with; a date of the exams that cannot be read stops no lesson of it (tell.known). weekly:{monday}:{name} goes to each of the team who
+can be reached, with a button that opens the page on that week, and is dropped when it is a DAY old, or when its person is not on the
+team any more.
+
 remind sends a relief again to its teacher, for the page (relief/tgweb.py) and for the button (relief/bot.py): its message as it
 would be made now, under the relief's key with :r{n} after it, WAIT at least after the last of that relief's messages went or was
 queued. An earlier reminder that still waits is dropped then, so that they do not come all at once; a relief told to nobody yet
@@ -46,14 +57,16 @@ from relief import fill as _fill
 from relief import links as _links
 from relief import outbox, tell, tgdb
 from relief import settings as _settings
+from relief import summary as _summary
 from relief import web as _web
 from relief import words
-from relief.calendar import school_day
+from relief.calendar import school_day, week_of
 
 BEFORE, EVERY = 60, 15                          # minutes: the first report before the first period; between two, when the settings cannot be read
 OLD = datetime.timedelta(minutes=30)            # a report or an all clear this old does not go any more
 WAIT = datetime.timedelta(minutes=5)            # a relief is not sent again sooner
-AGAIN, OPEN_TODAY = "Remind them again", "Open relief today"
+WEEKLY, DAY = ("Fri", "15:00"), datetime.timedelta(days=1)               # when the summary goes, where the settings cannot be read; how long after that it may
+AGAIN, OPEN_TODAY, OPEN_SUMMARY = "Remind them again", "Open relief today", "Open the full summary"
 NOBODY = "Nobody to remind."
 NOT_ON = "Not on Telegram."
 TOO_SOON = "Reminded at {at}: wait a few minutes."
@@ -73,6 +86,36 @@ def clear_text(hm, n, k):
     """n: today's approved reliefs; k: how many of them started and were never acknowledged"""
     if k: return f"✅ {hm} · No reliefs are waiting now: {k} started without acknowledgement."
     return f"✅ {hm} · " + (f"All {n} reliefs for today are acknowledged." if n != 1 else "The 1 relief for today is acknowledged.")
+
+
+def summary_text(v):
+    """v: summary.week's"""
+    few = lambda pairs: " · ".join(f"{name} {n}" for name, n in pairs)
+    some = lambda n, what: f"{n} {what}" if n == 1 else f"{n} {what}s"
+    asked, depts = v["asked"], v["by_dept"]
+    lines = [f"📊 Relief summary · {v['label']}", f"{some(v['periods'], 'relief period')} for {some(v['absences'], 'absence')}"]
+    if v["fat_role"]: lines.append(f"• Flexi Adjuncts covered {v['fat_periods']} ({v['fat_percent']}%)")
+    lines += [f"• Planned ahead {v['ahead']} · arranged on the day {v['on_day']}",
+              f"• Acknowledged on time {v['on_time']} · late {v['late']} · never {v['never']}" + (f" · waiting {v['waiting']}" if v["waiting"] else ""),
+              f"• Asked to change {asked}" + (f" ({'all' if v['moved'] == asked else v['moved']} moved)" if asked else ""),
+              "Most relief this week:", few(v["top"]), "By department of the absent teacher:",
+              few(depts[:3] + ([("others", sum(n for _, n in depts[3:]))] if depts[3:] else []))]
+    return "\n".join(lines)
+
+
+# ---- what both parts of tick go by
+def _common(now):
+    """the bot, the timetable and the settings as they are now; None while nothing can be told: not connected, or nothing published
+    (a publish swaps folders)"""
+    bot = _links.connected()                    # None without a token too
+    pub = store.published() if bot else None
+    return types.SimpleNamespace(bot=bot, pub=pub, now=_fill._when(now), settings=_settings.load(pub)) if pub else None
+
+
+def _team(pub):
+    """({name: chat} of everyone who can be reached, the names of the team among them)"""
+    reach = _links.reachable(pub)
+    return reach, sorted(p["name"] for p in _accounts.staff(pub) if p["name"] in reach and "relief.team" in _rights.rights(p, _links.VIA))
 
 
 # ---- the report and all clear
@@ -171,18 +214,14 @@ def _to_each(names, kind, key, text, buttons, ref):
     return out
 
 
-def _tick(now):
-    bot = _links.connected()                    # None without a token too
-    pub = store.published() if bot else None
-    if not pub: return []                       # nothing published (a publish swaps folders): the next tick
-    now, model, settings = _fill._when(now), pub.get("model") or {}, _settings.load(pub)
+def _report(s):
+    bot, pub, now, settings, model = s.bot, s.pub, s.now, s.settings, s.pub.get("model") or {}
     date, bnds, cal = now.date().isoformat(), bounds(model), settings.get("calendar") or {}
     mark, last = _mark(now, settings, bnds), f"report_last:{date}"
     if mark is None or school_day(cal, model.get("days") or [], now.date()) is None: return []
     was = tgdb.get_state(last)
     if isinstance(was, int) and was >= mark: return []
-    reach = _links.reachable(pub)
-    team = sorted(p["name"] for p in _accounts.staff(pub) if p["name"] in reach and "relief.team" in _rights.rights(p, _links.VIA))
+    reach, team = _team(pub)
     if not team: return []                      # nobody to tell: the mark is not done with
     w = types.SimpleNamespace(pub=pub, now=now, date=date, bnds=bnds, reach=reach, links=tell.known(_fill._links(pub, cal), date), said=tell.said(), went=_went(date))
     records, unread = _records()
@@ -205,13 +244,54 @@ def _tick(now):
     return _to_each(team, kind, key, text, buttons, ref)
 
 
+# ---- the weekly summary
+def _week_due(now, settings):
+    """the Monday of the week whose summary is to go now, or None"""
+    times = settings.get("times")
+    day, at = (times.get("weekly_day"), times.get("weekly_at")) if isinstance(times, dict) else WEEKLY
+    if day not in _summary.DAYS: day = WEEKLY[0]
+    if not isinstance(at, str) or not _settings._TIME.match(at): at = WEEKLY[1]
+    week = datetime.timedelta(days=7)
+    sent = datetime.datetime.combine(now.date(), _fill._hm(at), tzinfo=now.tzinfo) - datetime.timedelta(days=(now.weekday() - _summary.DAYS.index(day)) % 7)
+    if sent > now: sent -= week                 # the last time it was to go
+    if now - sent >= DAY: return None
+    return week_of(sent.date() if day == "Fri" else sent.date() - week)[0]
+
+
+def _weekly(s):
+    monday = _week_due(s.now, s.settings)
+    if monday is None: return []
+    was, iso = tgdb.get_state("weekly_last"), monday.isoformat()
+    if isinstance(was, int) and was >= monday.toordinal(): return []
+    team = _team(s.pub)[1]
+    links = _fill._links(s.pub, s.settings.get("calendar") or {}) if team else None
+    if links is None: return []                 # nobody to tell, or not known what was stopped: the week is not done with
+    records, unread = _records()
+    for kind in sorted(set(unread.values())): _log.warning("an absence could not be read (%s)", kind)
+    v = _summary.week(s.pub, s.settings, records, monday, s.now, links=types.SimpleNamespace(stopped=lambda x: tell._stopped(links, x)))
+    text = summary_text(v)
+    if not tgdb.raise_state("weekly_last", monday.toordinal()) or not v["periods"]: return []
+    button = dict(text=OPEN_SUMMARY, url=f"{s.bot.get('base') or ''}/relief?week={iso}#summary")
+    return _to_each(team, "weekly", f"weekly:{iso}", text, [[button]], dict(monday=iso, made=s.now.isoformat(timespec="seconds")))
+
+
+def _weekly_fresh(ref, name):
+    """a summary: not a DAY old, and its person on the team still"""
+    return _fill._when(None) - tell._time(ref["made"]) < DAY and tell._on_team(name)
+
+
+# ---- every minute
 def tick(now=None):
-    """the report, or the all clear, of the mark there is now, when there is one to send -> the keys queued. now: the time (tests),
-    else absences._now(). Never raises"""
-    try: return _tick(now)
-    except Exception as e:
-        _log.error("the report could not be worked out (%s)", type(e).__name__)
-        return []
+    """the report, or the all clear, of the mark there is now, and the weekly summary, when there is one to send -> the keys queued.
+    now: the time (tests), else absences._now(). Never raises"""
+    out, s = [], None
+    try: s = _common(now)
+    except Exception as e: _log.error("the report could not be worked out (%s)", type(e).__name__)
+    parts = (("the report", _report), ("the weekly summary", _weekly)) if s else ()
+    for what, part in parts:
+        try: out += part(s)
+        except Exception as e: _log.error("%s could not be worked out (%s)", what, type(e).__name__)
+    return out
 
 
 def _fresh(ref, name):
@@ -221,7 +301,7 @@ def _fresh(ref, name):
                    for kind in ("report", "clear") for t in outbox.told_for(f"{kind}:{ref['date']}:").values())
 
 
-tell.CHECKS.update(report=_fresh, clear=_fresh)
+tell.CHECKS.update(report=_fresh, clear=_fresh, weekly=_weekly_fresh)
 
 
 # ---- Remind

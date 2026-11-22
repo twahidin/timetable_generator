@@ -2192,7 +2192,7 @@ def the_module_stands_alone():
     assert p.stdout.strip() == "[] True False", (p.stdout, p.stderr[-400:])
     assert not hasattr(TE, "links") and TE._links is links, "due has a parameter of that name: the module goes by another"
     assert OB.VALID is TE.still_true and TE.still_true(dict(key="any")) is True and TE.still_true(dict(key="x", kind="exam-duty", ref=None)) is True
-    assert {"relief", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "report", "clear"} == set(TE.CHECKS), "weekly (Task 7) is added here"
+    assert {"relief", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "report", "clear", "weekly"} == set(TE.CHECKS)
 
 # ---- the hooks: fill.AFTER, tell.soon, and who asks for a sweep
 @t
@@ -3060,7 +3060,7 @@ def still_true_says_what_may_still_go():
         at("09:20"); CV.ask_change(i, K5, "x", SAM); new_pick(i, K5, MAYA); assert TE.still_true(ask) is False, "another request, with the same pick"; CV.keep(i, K5, TEAM); at("09:10")
         give(i, K5, SAM); assert TE.still_true(relief) is False, "approved anew: that message is the one to go"
         absences.cancel(i, "Better", HUGO); assert TE.still_true(officer) is False and TE.still_true(relief) is False
-        for kind in ("weekly", "anything"): assert TE.still_true(dict(kind=kind, ref=None)) is True, kind
+        for kind in ("exam-duty", "anything"): assert TE.still_true(dict(kind=kind, ref=None)) is True, kind
     with school(EVE, SAM, ROSA, TEAM):
         i = absent(by=HUGO); give(i, K5, SAM); j = absent(dates=["2026-10-16"]); TE.sweep(); CV.ask_change(i, K5, "x", SAM); new_pick(i, K5, MAYA); TE.sweep()
         items = [next(dict(r, ref=json.loads(r["ref"])) for r in outs(k) if json.loads(r["ref"])["id"] == i) for k in ("relief", "planned", "officer", "ask")]; p = absences._path(i); good = open(p, encoding="utf-8").read()
@@ -5517,6 +5517,422 @@ def an_absence_with_nothing_to_cover_says_nothing_of_relief():
         exam("5A", name=EXAM2, date="2026-10-15", duties=[(EVE, 630, 690)]); d = dict(teacher=EVE, dates=["2026-10-15"], periods=None, reason="Medical", reason_text="", remarks="", reporting_officer=ROSA, lessons=[])
         assert absences.new(d, SCHOOL, HUGO, "planned", may_choose=True, links=exam_links())["lessons"] == []; swept(); at("15:00", 14); assert swept() == 0
         assert said(ROSA) == [alone.replace("Tue 13", "Thu 15")] and said(EVE) == [PLANNED_N(0).replace("Tue 13", "Thu 15")]
+
+# ---- Task 7: the weekly summary ----
+from relief import summary as SU  # noqa: E402
+
+MON12, W12, SUMMARY_URL = datetime.date(2026, 10, 12), "2026-10-12", "/api/relief/summary"
+WEEK_SCHOOL = RP.fake_pub([dict(name=EVE, dept="Science", dept2="Art"), dict(name=RUTH, dept="Science"), dict(name=MAYA, dept="Mathematics"), dict(name=ROSA, dept="English"), dict(name=HUGO),
+                           dict(name=SAM, dept="Science", role="FAT"), dict(name=BUSY, dept="Humanities", role="FAT"), dict(name=LEE, dept="Mathematics", role="HOD")])
+WEEK_SCHOOL["model"]["school"].update(start_time="08:00", period_minutes=30)
+WEEK_SCHOOL["model"]["NP"] = 12
+ZERO = dict(periods=0, absences=0, fat_periods=0, fat_percent=0, ahead=0, on_day=0, on_time=0, late=0, never=0, waiting=0, asked=0, moved=0, kept=0)
+def st(day, hm): return f"2026-10-{day:02d}T{hm}:00+08:00"
+def cov(relief=None, approved=None, ack=None, change=None, history=(), **more):
+    """the cover's fields, as relief.cover writes them"""
+    return dict(dict(relief=relief, relief_by=None, pick=None, approved=dict(by=TEAM, at=approved) if approved else None, ack=dict(at=ack) if ack else None,
+                     change=dict(why="walrus-why", at=change, pick=None) if change else None, history=list(history)), **more)
+def on(day, p, n=1, relief=None, *a, classes=("4D",), subject="Maths", needed=True, group="", **kw):
+    """a lesson of an absence, on that day of October, with its cover"""
+    d = f"2026-10-{day:02d}"
+    return cov(relief, *a, **dict(dict(key=f"{d}/{p}/{classes[0]}", date=d, p=p, n=n, classes=list(classes), subject=subject, group=group, needed=needed, room="2-05"), **kw))
+_made = itertools.count(1)
+def away(teacher, *lessons, **kw): return dict(dict(id=f"{next(_made):012x}", teacher=teacher, dates=sorted({x["date"] for x in lessons}), reason="Other", reason_text="zebra-reason", remarks="quokka-remark", how="asked", by=teacher, cancelled=None, lessons=list(lessons)), **kw)
+def hist(what, who_, day, hm="07:30", why=None): return dict(what=what, who=who_, by=TEAM, at=st(day, hm), why=why)
+def wk(*records, now=st(15, "10:00"), monday=MON12, pub=WEEK_SCHOOL, **kw):
+    more = {k: kw.pop(k) for k in list(kw) if k == "links"}
+    return SU.week(pub, dict(dict(fat_role="FAT", calendar=TERM), **kw), list(records), monday, now, **more)
+def nums(v, *names): return {k: v[k] for k in names or ZERO}
+def adds_up(v):
+    """what is in periods adds up to them -> v"""
+    for ks in (("ahead", "on_day"), ("on_time", "late", "never", "waiting")): assert sum(v[k] for k in ks) == v["periods"], (ks, v)
+    assert sum(v["by_day"].values()) == sum(n for _, n in v["by_dept"]) == v["periods"] >= v["fat_periods"] and v["asked"] >= v["moved"] + v["kept"], v
+    return v
+def a_week():
+    """a week made by hand, each case in it, as it stands at 10:00 on Thu 15 Oct"""
+    return [away(EVE, on(12, 2, 3, SAM, st(9, "15:00"), st(9, "15:20")), on(13, 0, 1, MAYA, st(13, "07:00"), st(13, "07:15")), on(13, 4, needed=False), on(14, 4), on(14, 6, 2, BUSY), on(9, 0, 2, SAM, st(9, "07:00")), on(19, 0, 2, SAM, st(9, "07:00"))),
+            away(RUTH, on(13, 5, 2, MAYA, st(13, "07:10"), st(13, "10:31"), classes=("1B", "1A"), subject="Science", group="G1")),
+            away(ROSA, on(14, 1, 1, SAM, st(13, "16:00")), on(15, 0, 2, BUSY, st(14, "15:00"), None, st(15, "07:00"), [hist("asked to change", BUSY, 15)])),
+            away(MAYA, on(16, 0, 2, RUTH, st(14, "15:00"), None, None, [hist("asked to change", SAM, 14), hist("approved", RUTH, 14, "15:00")])),
+            away(GONE_, on(15, 3, 2, RUTH, st(15, "07:00"), None, None, [hist("asked to change", RUTH, 15), hist("kept", RUTH, 15, "08:00")])),
+            away(HUGO, on(16, 2, 1, MAYA, st(12, "08:00"), st(12, "09:00"))),
+            away(LEE, on(16, 4), on(16, 6, 2, SAM))]
+
+@t
+def the_numbers_add_up():
+    v = adds_up(wk(*a_week()))
+    assert nums(v) == dict(periods=14, absences=6, fat_periods=6, fat_percent=43, ahead=9, on_day=5, on_time=5, late=2, never=3, waiting=4, asked=3, moved=1, kept=1), nums(v)
+    assert (v["start"], v["end"], v["label"], v["fat_role"]) == (W12, "2026-10-16", "Week 6 (12–16 Oct)", True)
+    assert v["top"] == [(SAM, 4), (MAYA, 4), (RUTH, 4)] and v["by_dept"] == [("Science", 6), ("English", 3), ("No department", 3), ("Mathematics", 2)] and v["by_day"] == dict(Mon=3, Tue=3, Wed=1, Thu=4, Fri=3) and list(v["by_day"]) == ["Mon", "Tue", "Wed", "Thu", "Fri"]
+    row = lambda date, lesson_, absent_, relief, ack: dict(date=f"2026-10-{date}", lesson=lesson_, absent=absent_, relief=relief, ack=ack)
+    assert v["rows"] == [row(12, "4D Maths P3–P5", EVE, SAM, "Fri 9 Oct, 15:20"), row(13, "4D Maths P1", EVE, MAYA, "07:15"), row(13, "1B, 1A Science (G1) P6–P7", RUTH, MAYA, "late 10:31"), row(14, "4D Maths P2", ROSA, SAM, "never"),
+                         row(15, "4D Maths P1–P2", ROSA, BUSY, "never"), row(15, "4D Maths P4–P5", GONE_, RUTH, "waiting"), row(16, "4D Maths P1–P2", MAYA, RUTH, "waiting"), row(16, "4D Maths P3", HUGO, MAYA, "Mon 12 Oct, 09:00")], v["rows"]
+    assert set(v) == {"start", "end", "label", "fat_role", "top", "by_dept", "by_day", "rows", *ZERO}
+    # whatever order the records come in, and nothing of them is changed
+    recs = a_week(); was = json.dumps(recs); assert wk(*reversed(recs)) == v == wk(*recs) and json.dumps(recs) == was
+    # the next week's and the one before are theirs alone; a week with nothing is zeros
+    w19, w5 = adds_up(wk(*a_week(), monday=datetime.date(2026, 10, 19))), adds_up(wk(*a_week(), monday=datetime.date(2026, 10, 5)))
+    assert nums(w19, "periods", "absences", "ahead", "waiting") == dict(periods=2, absences=1, ahead=2, waiting=2) and w19["label"] == "Week 7 (19–23 Oct)" and nums(w5, "periods", "absences", "on_day", "never") == dict(periods=2, absences=1, on_day=2, never=2)
+    for v in (wk(), wk(away(LEE, on(16, 4), on(16, 6, 2, SAM))), wk(away(EVE)), wk(*a_week(), monday=datetime.date(2027, 1, 4))): assert nums(v) == ZERO and (v["top"], v["by_dept"], v["rows"], v["by_day"]) == ([], [], [], dict(Mon=0, Tue=0, Wed=0, Thu=0, Fri=0))
+    # any day of the week, and a date as text, say which week
+    assert all(wk(*a_week(), monday=d) == wk(*a_week()) for d in (datetime.date(2026, 10, 14), datetime.date(2026, 10, 18), "2026-10-12", "2026-10-16"))
+    # as many periods: by name, whoever came first
+    v = wk(away(EVE, on(12, 0, 1, RUTH, st(12, "07:00"))), away(ROSA, on(13, 0, 1, MAYA, st(12, "08:00")))); assert v["top"] == [(MAYA, 1), (RUTH, 1)] and v["by_dept"] == [("English", 1), ("Science", 1)]
+    # two on one date and period go by who is absent
+    assert [x["absent"] for x in wk(away(RUTH, on(13, 0, 1, SAM, st(12, "08:00"))), away(EVE, on(13, 0, 1, MAYA, st(12, "08:00"))))["rows"]] == [EVE, RUTH]
+
+@t
+def a_percentage_is_whole_and_half_goes_up():
+    def pc(fat, other, **kw): return wk(away(EVE, *[on(13, p, 1, SAM if p < fat else MAYA, st(12, "08:00")) for p in range(fat + other)]), **kw)
+    for fat, other, want in ((0, 1, 0), (1, 0, 100), (1, 2, 33), (2, 1, 67), (1, 1, 50), (1, 7, 13), (3, 5, 38), (5, 3, 63), (1, 5, 17)): v = pc(fat, other); assert (v["fat_periods"], v["fat_percent"]) == (fat, want), (fat, other, v["fat_percent"])
+    for none in ("", None): v = pc(3, 5, fat_role=none); assert (v["fat_role"], v["fat_periods"], v["fat_percent"]) == (False, 0, 0)
+    v = pc(3, 5, fat_role="HOD"); assert (v["fat_role"], v["fat_periods"]) == (True, 0), "the role there is now"
+    assert nums(wk(away(EVE, on(13, 0, 1, LEE, st(12, "08:00"))), fat_role="HOD"), "fat_periods", "fat_percent") == dict(fat_periods=1, fat_percent=100)
+    assert wk(away(EVE, on(13, 0, 1, GONE_, st(12, "08:00"))))["fat_periods"] == 0, "not on the timetable any more"
+
+@t
+def a_cancelled_absence_does_not_count():
+    one = lambda **kw: on(13, 0, 2, MAYA, st(12, "08:00"), st(12, "09:00"), None, [hist("asked to change", SAM, 12), hist("approved", MAYA, 12)], **kw)
+    gone = dict(at=st(12, "10:00"), by=EVE, why="Better")
+    assert nums(wk(away(EVE, one())), "periods", "asked", "moved") == dict(periods=2, asked=1, moved=1)
+    for records in ([away(EVE, one(), cancelled=gone)], [away(EVE, one(needed=False))], [away(EVE, one(date="2026-10-17"))], [away(EVE, one(date="2026-10-18"))], [away(EVE, one(date="2026-10-11"))]): assert nums(wk(*records)) == ZERO, records
+    v = wk(away(EVE, one(), cancelled=gone), away(RUTH, one())); assert nums(v, "periods", "absences", "asked") == dict(periods=2, absences=1, asked=1) and v["by_dept"] == [("Science", 2)] and [x["absent"] for x in v["rows"]] == [RUTH]
+    with school(SAM, MAYA):                                                                # as the app does it
+        i, j = absent(by=HUGO), absent(teacher=RUTH, by=HUGO); give(i, K5, SAM); give(j, KR, MAYA); now_ = lambda: SU.week(SCHOOL, rs(), absences.all_records(), MON12, clock.now)
+        assert nums(now_(), "periods", "absences") == dict(periods=3, absences=2); absences.not_needed(i, K5, "x", HUGO); assert nums(now_(), "periods", "absences") == dict(periods=1, absences=1); absences.needed_again(i, K5, HUGO); assert now_()["periods"] == 1, "its relief ended"
+        absences.cancel(j, "Better", HUGO); assert nums(now_()) == ZERO
+
+@t
+def ahead_and_on_the_day_by_approval_date():
+    for at_, ahead in ((st(12, "23:59"), 2), (st(13, "00:00"), 0), (st(13, "07:00"), 0), (st(13, "12:00"), 0), (st(14, "08:00"), 0), (st(1, "08:00"), 2),
+                       ("2026-10-12T15:59:59+00:00", 2), ("2026-10-12T16:00:00+00:00", 0), ("2026-10-12T20:00:00+00:00", 0), ("2026-10-13T00:30:00+09:00", 2), ("2026-10-12T08:00:00", 2)):      # school time, whatever it was kept in
+        v = adds_up(wk(away(EVE, on(13, 2, 2, MAYA, at_)))); assert (v["ahead"], v["on_day"]) == (ahead, 2 - ahead), at_
+    assert (lambda v: (v["ahead"], v["on_day"]))(wk(away(EVE, on(13, 2, 2, MAYA, st(13, "07:00"), None, None, [hist("approved", SAM, 9)])))) == (0, 2), "the approval there is now"
+
+@t
+def ack_on_time_late_never_waiting():
+    def ack(at_=None, now=st(15, "10:00"), change=None, p=2, n=2, **kw):
+        v = adds_up(wk(away(EVE, on(13, p, n, MAYA, st(12, "08:00"), at_, change)), now=now, **kw)); got, = [k for k in ("on_time", "late", "never", "waiting") if v[k]]; assert v[got] == n
+        return got, v["rows"][0]["ack"]
+    # P3-P4 of Tue 13 is 09:00-10:00
+    for at_, want in ((st(12, "15:20"), ("on_time", "Mon 12 Oct, 15:20")), (st(13, "00:00"), ("on_time", "00:00")), (st(13, "07:15"), ("on_time", "07:15")), ("2026-10-13T09:00:00+08:00", ("on_time", "09:00")), ("2026-10-13T09:00:01+08:00", ("late", "late 09:00")),
+                      (st(13, "09:30"), ("late", "late 09:30")), (st(13, "18:00"), ("late", "late 18:00")), (st(14, "08:05"), ("late", "late Wed 14 Oct, 08:05")), ("2026-10-12T23:15:00+00:00", ("on_time", "07:15")), ("2026-10-13T01:30:00+00:00", ("late", "late 09:30")), ("2026-10-12T15:30:00+00:00", ("on_time", "Mon 12 Oct, 23:30"))):
+        assert ack(at_) == want, at_
+        assert ack(at_, now=st(12, "08:00")) == want, "whatever the time is now"
+    for now, want in ((st(12, "08:00"), "waiting"), (st(13, "09:00"), "waiting"), (st(13, "09:59"), "waiting"), (st(13, "10:00"), "never"), (st(13, "23:00"), "never"), (st(14, "00:00"), "never"), ("2026-10-13T01:59:00+00:00", "waiting"), ("2026-10-13T02:00:00+00:00", "never")):
+        assert ack(now=now) == (want, want) == ack(now=datetime.datetime.fromisoformat(now)), now
+        assert ack(now=now, change=st(12, "09:00")) == (want, want) and ack(st(12, "08:30"), now=now, change=st(12, "09:00")) == (want, want), "asked to change: not acknowledged"
+    # a lesson with no times is over with its day
+    bare = RP.fake_pub([dict(name=EVE, dept="Science"), dict(name=MAYA, dept="Mathematics")])
+    for pub, p in ((bare, 2), (WEEK_SCHOOL, 12)): assert ack(st(13, "23:59"), pub=pub, p=p) == ("on_time", "23:59") and ack(st(14, "00:01"), pub=pub, p=p)[0] == "late" and ack(now=st(13, "23:59"), pub=pub, p=p) == ("waiting",) * 2 and ack(now=st(14, "00:00"), pub=pub, p=p) == ("never",) * 2
+    assert ack(now=st(13, "13:59"), p=11, n=3)[0] == "waiting" and ack(now=st(13, "14:00"), p=11, n=3)[0] == "never", "past the last period: over with it"
+
+@t
+def a_split_lesson_counts_its_parts():
+    part = lambda p, n, *a, **kw: cov(*a, **dict(kw, p=p, n=n))
+    x = on(13, 2, 5, parts=[part(5, 2, RUTH, st(13, "07:00"), st(13, "07:20")), part(2, 2, SAM, st(12, "08:00"), st(13, "09:10")), part(4, 1, MAYA, st(12, "08:00"))], history=[hist("split", None, 12)])
+    v = adds_up(wk(away(EVE, x))); assert nums(v) == dict(ZERO, periods=5, absences=1, fat_periods=2, fat_percent=40, ahead=3, on_day=2, on_time=2, late=2, never=1), nums(v)
+    assert [(r["lesson"], r["relief"], r["ack"]) for r in v["rows"]] == [("4D Maths P3–P4", SAM, "late 09:10"), ("4D Maths P5", MAYA, "never"), ("4D Maths P6–P7", RUTH, "07:20")] and v["top"] == [(SAM, 2), (RUTH, 2), (MAYA, 1)] and v["by_dept"] == [("Science", 5)]
+    for c in x["parts"][1:]: c.update(CV.OPEN)                                              # a part not approved is not a relief
+    v = adds_up(wk(away(EVE, x))); assert nums(v, "periods", "absences", "on_time") == dict(periods=2, absences=1, on_time=2)
+    x["parts"][0]["history"], x["parts"][1]["history"] = [hist("asked to change", MAYA, 12), hist("approved", RUTH, 13)], [hist("asked to change", SAM, 12)]; v = wk(away(EVE, x)); assert nums(v, "asked", "moved", "kept", "periods") == dict(asked=2, moved=1, kept=0, periods=2), "in covers"
+    with school(SAM, RUTH):                                                                 # as the app splits one
+        at("06:50", 13); i = absent(by=HUGO); CV.split(i, K2, 3, TEAM); give(i, K2 + "#0", MAYA); give(i, K2 + "#1", RUTH); CV.acknowledge(i, K2 + "#1", RUTH); v = adds_up(SU.week(SCHOOL, rs(), absences.all_records(), MON12, clock.now))
+        assert [(r["lesson"], r["relief"], r["ack"]) for r in v["rows"]] == [("1C Science P3", MAYA, "waiting"), ("1C Science P4–P5", RUTH, "06:50")] and nums(v, "periods", "absences", "on_day") == dict(periods=3, absences=1, on_day=3)
+
+@t
+def a_lesson_an_exam_stops_is_no_relief():
+    with exam_school(SAM, MAYA):
+        i = absent(by=HUGO); give(i, K5, SAM); give(i, K2, MAYA); CV.ask_change(i, K5, "walrus-why", SAM); got = lambda **kw: nums(SU.week(SCHOOL, rs(), absences.all_records(), MON12, clock.now, **kw), "periods", "absences", "asked")
+        assert got() == dict(periods=5, absences=1, asked=1); e = exam(); assert got() == dict(periods=5, absences=1, asked=1) == got(links=None), "no links: none is stopped"
+        assert got(links=exam_links()) == dict(periods=3, absences=1, asked=0); j = exam("1C", name=EXAM2); assert got(links=exam_links()) == dict(periods=0, absences=0, asked=0); withdraw(j); withdraw(e); assert got(links=exam_links()) == dict(periods=5, absences=1, asked=1)
+
+@t
+def a_request_to_change_is_moved_kept_or_still_waiting():
+    A = hist("asked to change", SAM, 12, "09:00")
+    def what(*h, **kw):
+        v = wk(away(EVE, on(13, 0, 1, **dict(dict(history=list(h)), **kw)))); return v["asked"], v["moved"], v["kept"]
+    for h, want in (([], (0, 0, 0)), ([hist("pick", SAM, 12), hist("approved", SAM, 12), hist("acknowledged", SAM, 12)], (0, 0, 0)), ([A], (1, 0, 0)), ([A, hist("pick", MAYA, 12)], (1, 0, 0)), ([A, hist("pick", MAYA, 12), hist("dropped", MAYA, 12)], (1, 0, 0)),
+                    ([A, hist("pick", MAYA, 12), hist("approved", MAYA, 12)], (1, 1, 0)), ([A, hist("dropped", SAM, 12), hist("pick", RUTH, 12), hist("changed", RUTH, 12)], (1, 1, 0)), ([A, hist("kept", SAM, 12)], (1, 0, 1)), ([A, hist("pick", SAM, 12), hist("changed", SAM, 12)], (1, 0, 1)),
+                    ([A, hist("approved", SAM, 12)], (1, 0, 1)), ([A, hist("acknowledged", SAM, 12)], (1, 0, 1)), ([A, hist("approved", MAYA, 12), hist("acknowledged", MAYA, 12)], (1, 1, 0)), ([A, hist("approved", MAYA, 12), hist("dropped", MAYA, 12)], (1, 1, 0)),
+                    ([hist("approved", MAYA, 12), A], (1, 0, 0)), ([A, hist("kept", SAM, 12), A], (1, 0, 0)), ([A, hist("kept", SAM, 12), A, hist("approved", MAYA, 12)], (1, 1, 0)), ([A, hist("approved", MAYA, 12), hist("asked to change", MAYA, 12)], (1, 0, 0)),
+                    ([A, hist("approved", MAYA, 12), hist("asked to change", MAYA, 12), hist("approved", SAM, 12)], (1, 1, 0)), ([A, hist("approved", MAYA, 12), hist("changed", SAM, 12)], (1, 0, 1)), ([A, hist("dropped", SAM, 12)], (1, 0, 0))):
+        for state in (dict(relief=SAM, approved=st(12, "08:00")), dict(relief=MAYA, approved=st(12, "08:00"), change=st(12, "09:00")), dict(), dict(relief=MAYA)): assert what(*h, **state) == want, (h, state)
+    assert what(dict(A, at="2026-09-28T09:00:00+08:00")) == (1, 0, 0), "whenever it was asked"
+    # each way there is, in the app
+    def app(f):
+        with school(SAM, MAYA):
+            i = asked(pick=False); new_pick(i, K5, MAYA); f(i); v = adds_up(SU.week(SCHOOL, rs(), absences.all_records(), MON12, clock.now)); return v["asked"], v["moved"], v["kept"]
+    assert app(lambda i: None) == (1, 0, 0) and app(lambda i: CV.approve(i, K5, MAYA, TEAM, SCHOOL, rs())) == (1, 1, 0) and app(lambda i: give(i, K5, LEE)) == (1, 1, 0) and app(lambda i: CV.keep(i, K5, TEAM)) == (1, 0, 1)
+    assert app(lambda i: CV.acknowledge(i, K5, SAM)) == (1, 0, 1) and app(lambda i: give(i, K5, SAM)) == (1, 0, 1) and app(lambda i: (CV.approve(i, K5, MAYA, TEAM, SCHOOL, rs()), CV.ask_change(i, K5, "x", MAYA))) == (1, 0, 0)
+    assert app(lambda i: absences.not_needed(i, K5, "x", HUGO)) == (0, 0, 0) == app(lambda i: absences.cancel(i, "x", HUGO)) and app(lambda i: (absences.not_needed(i, K5, "x", HUGO), absences.needed_again(i, K5, HUGO))) == (1, 0, 0)
+
+@t
+def the_week_is_named():
+    cal = lambda *terms: dict(terms=[dict(name=f"T{n}", start=a, end=b, starts_as="Odd") for n, (a, b) in enumerate(terms)], holidays=[])
+    name = lambda monday, cal: wk(monday=datetime.date.fromisoformat(monday), calendar=cal)["label"]
+    T4 = cal(("2026-09-07", "2026-11-20"))
+    for monday, want in (("2026-09-07", "Week 1 (7–11 Sep)"), ("2026-09-14", "Week 2 (14–18 Sep)"), ("2026-09-28", "Week 4 (28 Sep–2 Oct)"), ("2026-10-12", "Week 6 (12–16 Oct)"), ("2026-11-16", "Week 11 (16–20 Nov)"), ("2026-11-23", "23–27 Nov"), ("2026-08-31", "31 Aug–4 Sep"), ("2026-12-28", "28 Dec–1 Jan")): assert name(monday, T4) == want, monday
+    # a term that starts mid-week: that week is its first; any of Mon to Fri in it will do
+    MID = cal(("2026-09-09", "2026-11-17"))
+    assert name("2026-09-07", MID) == "Week 1 (7–11 Sep)" and name("2026-09-14", MID) == "Week 2 (14–18 Sep)" and name("2026-11-16", MID) == "Week 11 (16–20 Nov)" and name("2026-11-23", MID) == "23–27 Nov"
+    for start, want in (("2026-09-11", "Week 1 (7–11 Sep)"), ("2026-09-12", "7–11 Sep"), ("2026-09-13", "7–11 Sep")): assert name("2026-09-07", cal((start, "2026-11-17"))) == want, start      # a Saturday is not of the week
+    assert name("2026-09-14", cal(("2026-06-29", "2026-09-15"), ("2026-09-17", "2026-11-20"))) == "Week 12 (14–18 Sep)", "two terms in it: the earlier"
+    for odd in ({}, dict(terms=[]), dict(terms=None), dict(terms=[dict(name="x")]), dict(terms=[5]), dict(terms=[dict(start="x", end=5)]), dict(terms="x"), None, "x"): assert name("2026-10-12", odd) == "12–16 Oct", odd
+
+@t
+def what_cannot_be_read_is_passed_over():
+    h = Grab(); KINDS.addHandler(h)
+    try:
+        good = adds_up(wk(*a_week())); ok = lambda **kw: dict(on(13, 8, 1, MAYA, st(12, "08:00"), st(12, "09:00")), **kw); assert h.records == []
+        bad_covers = [ok(relief=5), ok(relief=["x"]), ok(approved=5), ok(approved=dict(by=TEAM)), ok(approved=dict(by=TEAM, at=5)), ok(approved=dict(by=TEAM, at="private yesterday")), ok(ack=dict(at="private")), ok(ack=dict(at=None)), ok(ack=7), ok(p="a private word"), ok(p=None), ok(p=-1), ok(n="x"), ok(n=-3),
+                      ok(parts=[5]), ok(parts=5), ok(history=5), ok(history=[5]), ok(classes=[5]), ok(subject=5), ok(date=None), ok(date=["2026-10-13"]), 5, None, "private", dict(), dict(date="2026-10-13", needed=True, relief=SAM, approved=dict(at=st(12, "08:00")))]
+        for n, x in enumerate(bad_covers):
+            h.records.clear(); r = away(LEE); r["lessons"] = [x]; assert wk(*a_week(), r) == good, (n, x)
+            assert h.records and all(m.getMessage().endswith(")") and m.exc_info is None and "private" not in m.getMessage() and LEE not in m.getMessage() for m in h.records), (n, x)
+            r["lessons"] = [x, ok(), x]; v = adds_up(wk(*a_week(), r)); assert (v["periods"], v["absences"], v["on_time"]) == (good["periods"] + 1, good["absences"] + 1, good["on_time"] + 1), ("the rest of its absence counts", n, x)
+        for n, r in enumerate([5, None, "x", [], {}, dict(id="x"), dict(id="x", teacher=EVE, lessons=5), dict(id="x", teacher=EVE, lessons="private"), dict(id="x", teacher=["x"], lessons=[ok()]), dict(id="x", teacher=None, lessons=[ok()]), dict(id="x", teacher=5, lessons=[ok()]), dict(id="x", lessons=[ok()])]): assert wk(*a_week(), r) == good == wk(r, *a_week()), (n, r)
+        h.records.clear(); v = wk(*a_week(), away(LEE, ok(), lessons=[on(13, 8, 5, parts=[cov(5, st(12, "08:00"), p=8, n=2), cov(MAYA, st(12, "08:00"), st(12, "09:00"), p=10, n=1)])])); assert v["periods"] == good["periods"] + 1 and len(h.records) == 1, "a part alone"
+        h.records.clear(); assert wk(*a_week(), away(LEE, ok(cancelled=1), cancelled=dict(by=LEE)), away(LEE, dict(on(12, 0), needed=False, relief=5, approved=5, history=5)), away(LEE, dict(on(9, 0, 1, 5), p="x"))) == good and h.records == [], "what does not count is not read"
+    finally: KINDS.removeHandler(h)
+
+@t
+def the_summary_stands_alone():
+    """pure: no Flask, and no file is read or written"""
+    code = "import sys; import relief.summary; print([m for m in ('relief.web', 'relief.bot', 'relief.tgweb', 'relief.report', 'flask') if m in sys.modules])"
+    p = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=dict(os.environ, DATA_DIR=tempfile.mkdtemp()), capture_output=True, text=True); assert p.stdout.strip() == "[]", (p.stdout, p.stderr[-400:])
+    boom = lambda *a, **k: 1 / 0
+    with stand_in(store, "read_json", boom), stand_in(store, "published", boom), stand_in(AP, "load", boom), stand_in(AP, "_read", boom), stand_in(tgdb, "db", boom), stand_in(absences, "load", boom), stand_in(absences, "all_records", boom): assert wk(*a_week())["periods"] == 14
+
+@t
+def no_reason_is_in_the_numbers():
+    r = a_week()[2]; r["lessons"][1].update(pick=dict(who=BUSY, by="ai", reason="lemur-pick", at=st(14, "15:00")), work=dict(text="okapi-work", link="", files=[]))
+    r["lessons"][1]["history"] += [hist("pick", BUSY, 14, why="lemur-pick"), hist("dropped", SAM, 14, why="tapir-drop")]; v = wk(*a_week(), r); text = json.dumps(v, ensure_ascii=False) + RE.summary_text(v)
+    for word in ("zebra", "quokka", "lemur", "walrus", "okapi", "tapir", "Other", "asked to"): assert word not in text, word
+
+@t
+def the_summary_text_is_the_briefs():
+    v = dict(label="Week 6 (12–16 Oct)", periods=38, absences=9, fat_role=True, fat_periods=21, fat_percent=55, ahead=12, on_day=26, on_time=35, late=2, never=1, waiting=0, asked=3, moved=3, kept=0,
+             top=[("Ms Irene Chua", 9), ("Mdm Kavitha Pillai", 8), ("Mr Darren Lim", 6)], by_dept=[("Science", 14), ("Maths", 10), ("English", 8), ("Art", 4), ("PE", 2)])
+    MOCKUP = ("📊 Relief summary · Week 6 (12–16 Oct)\n38 relief periods for 9 absences\n• Flexi Adjuncts covered 21 (55%)\n• Planned ahead 12 · arranged on the day 26\n• Acknowledged on time 35 · late 2 · never 1\n• Asked to change 3 (all moved)\n"
+              "Most relief this week:\nMs Irene Chua 9 · Mdm Kavitha Pillai 8 · Mr Darren Lim 6\nBy department of the absent teacher:\nScience 14 · Maths 10 · English 8 · others 6")
+    assert RE.summary_text(v) == MOCKUP and RE.OPEN_SUMMARY == "Open the full summary"
+    mock = re.sub(r"<[^>]+>", "", open(os.path.join(ROOT, "docs", "superpowers", "specs", "2026-11-20-relief-module-mockups.html"), encoding="utf-8").read())
+    for line in MOCKUP.split("\n"): assert line in mock, line
+    line = lambda n, **kw: RE.summary_text(dict(v, **kw)).split("\n")[n]
+    assert line(1, periods=1, absences=1) == "1 relief period for 1 absence" and line(1, periods=1) == "1 relief period for 9 absences" and line(1, absences=1) == "38 relief periods for 1 absence"
+    assert line(4, waiting=4) == "• Acknowledged on time 35 · late 2 · never 1 · waiting 4"
+    for asked_, moved, want in ((0, 0, "0"), (3, 0, "3 (0 moved)"), (3, 2, "3 (2 moved)"), (3, 3, "3 (all moved)"), (1, 1, "1 (all moved)"), (1, 0, "1 (0 moved)")): assert line(5, asked=asked_, moved=moved) == f"• Asked to change {want}"
+    got = RE.summary_text(dict(v, fat_role=False)); assert got == MOCKUP.replace("• Flexi Adjuncts covered 21 (55%)\n", ""), got
+    assert line(2, fat_periods=0, fat_percent=0) == "• Flexi Adjuncts covered 0 (0%)", "a role is set, and none of them covered"
+    for n, want in ((1, "Science 14"), (2, "Science 14 · Maths 10"), (3, "Science 14 · Maths 10 · English 8"), (4, "Science 14 · Maths 10 · English 8 · others 4")): assert line(-1, by_dept=v["by_dept"][:n]) == want
+    assert line(7, top=v["top"][:1]) == "Ms Irene Chua 9" and len(RE.summary_text(v).split("\n")) == 10
+
+# ---- the message
+def weekly(hm, day=16): at(hm, day); return [k for k in RE.tick() if k.startswith("weekly:")]
+def weeked(*names, monday=W12): return [f"weekly:{monday}:{n}" for n in names or (TEAM,)]
+def marked(): return tgdb.get_state("weekly_last")
+def a_relief():
+    """Sam's relief of K5, approved and told on the day, acknowledged at 07:15"""
+    i = today_reliefs((K5, SAM)); at("07:15", 13); CV.acknowledge(i, K5, SAM)
+TEXT_K5 = ("📊 Relief summary · Week 6 (12–16 Oct)\n2 relief periods for 1 absence\n• Planned ahead 0 · arranged on the day 2\n• Acknowledged on time 2 · late 0 · never 0\n• Asked to change 0\nMost relief this week:\nMr Sam Tan 2\nBy department of the absent teacher:\nScience 2")
+
+@t
+def the_message_goes_once_at_its_time_and_not_without_reliefs():
+    with school(SAM, TEAM, LEE, EVE, HUGO):
+        a_relief()
+        for hm, day in (("08:00", 13), ("15:00", 15), ("00:00", 16), ("14:59:59", 16)): assert weekly(hm, day) == [] and marked() is None and outs("weekly") == [], (hm, day)
+        OB._wake.clear(); assert weekly("15:00") == weeked(LEE, TEAM) and OB._wake.is_set() and marked() == MON12.toordinal(); a, b = outs("weekly")
+        assert (a["name"], b["name"], a["kind"], json.loads(a["files"])) == (LEE, TEAM, "weekly", []) and a["text"] == b["text"] == TEXT_K5, a["text"]
+        assert buttons_of(a) == [[dict(text="Open the full summary", url=BASE + "/relief?week=2026-10-12#summary")]] and json.loads(a["ref"])["made"] == "2026-10-16T15:00:00+08:00"
+        OB._wake.clear()
+        for hm, day in (("15:00", 16), ("15:01", 16), ("23:59", 16), ("14:59", 17), ("15:00", 17), ("08:00", 18), ("15:00", 19), ("15:00", 22)): assert weekly(hm, day) == [] and not OB._wake.is_set(), (hm, day)
+        at("15:02", 16); assert send() >= 2 and said(TEAM)[-1] == TEXT_K5 == said(LEE)[-1] and not any("summary" in x for n in (EVE, HUGO, SAM) for x in said(n)), "the team alone"
+        # the next week's, its own; none of it without a relief, and it is done with
+        at("08:00", 19); assert weekly("15:00", 23) == [] and marked() == datetime.date(2026, 10, 19).toordinal(); j = absent(dates=["2026-10-27"]); kn = absences.load(j)["lessons"][0]["key"]; give(j, kn, MAYA); assert weekly("15:01", 23) == []
+        assert weekly("15:00", 30) == weeked(LEE, TEAM, monday="2026-10-26") and outs("weekly", TEAM)[-1]["text"].startswith("📊 Relief summary · Week 8 (26–30 Oct)\n")
+    for f in (lambda i: absences.cancel(i, "x", HUGO), lambda i: absences.not_needed(i, K5, "x", HUGO)):                  # no relief that week: nothing, and done with
+        with school(SAM, TEAM): i = today_reliefs((K5, SAM)); f(i); assert weekly("15:00") == [] and marked() == MON12.toordinal() and outs("weekly") == []
+    with school(TEAM): assert not os.path.isdir(absences.DIR) and weekly("15:00") == [] and marked() == MON12.toordinal()
+    with exam_school(SAM, TEAM): a_relief(); exam(); assert weekly("15:00") == [] and marked() == MON12.toordinal(), "its one lesson is stopped"
+    with school(SAM, TEAM, fat_role="Adjunct"): a_relief(); weekly("15:00"); assert "\n• Flexi Adjuncts covered 0 (0%)\n" in outs("weekly")[0]["text"]
+    with school(SAM, TEAM, times=dict(weekly_at="07:30")): today_reliefs((K5, SAM)); j = absent(dates=["2026-10-16"]); give(j, KF, MAYA); assert weekly("07:30") == weeked(); assert "\n4 relief periods for 2 absences\n• Planned ahead 2 · arranged on the day 2\n• Acknowledged on time 0 · late 0 · never 2 · waiting 2\n" in outs("weekly")[0]["text"], outs("weekly")[0]["text"]
+
+@t
+def the_week_it_is_about_goes_by_the_day_it_is_sent():
+    for day_, sent_on in (("Mon", 19), ("Tue", 20), ("Wed", 21), ("Thu", 22), ("Fri", 16)):
+        with school(SAM, TEAM, times=dict(weekly_day=day_, weekly_at="08:30")):
+            a_relief(); assert weekly("08:29:59", sent_on) == [] and marked() is None; assert weekly("08:30", sent_on) == weeked() and marked() == MON12.toordinal() and outs("weekly")[0]["text"] == TEXT_K5, day_
+            assert buttons_of(outs("weekly")[0])[0][0]["url"].endswith("?week=2026-10-12#summary") and weekly("08:31", sent_on) == []
+    with school(SAM, TEAM, times=dict(weekly_day="Wed", weekly_at="08:30")): a_relief(); assert weekly("08:30", 14) == [] and marked() == datetime.date(2026, 10, 5).toordinal(), "in the week itself it is about the one before, which had none"
+    # late: until 24 hours after its time, still about its own week; then not at all
+    for hm, day, goes in (("15:07", 16, True), ("23:59", 16, True), ("00:30", 17, True), ("14:59:59", 17, True), ("15:00", 17, False), ("10:00", 18, False), ("08:00", 19, False), ("14:59", 23, False)):
+        with school(SAM, TEAM): a_relief(); assert weekly(hm, day) == (weeked() if goes else []) and (marked() is None) is not goes, (hm, day)
+    with school(SAM, TEAM, times=dict(weekly_day="Mon", weekly_at="23:30")): a_relief(); assert weekly("10:00", 20) == weeked(), "a Monday's, on Tuesday: the same week"
+    # a holiday, and outside every term, too
+    for cal in (dict(TERM, holidays=[dict(start="2026-10-16", end="2026-10-16", name="A holiday")]), dict(terms=[dict(TERM["terms"][0], end="2026-10-15")], holidays=[])):
+        with school(SAM, TEAM): a_relief(); store.write_json(RS.PATH, dict(calendar=cal)); assert weekly("15:00") == weeked()
+    with school(SAM, TEAM): a_relief(); store.write_json(RS.PATH, dict(calendar=dict(terms=[], holidays=[]))); assert weekly("15:00") == weeked() and outs("weekly")[0]["text"].startswith("📊 Relief summary · 12–16 Oct\n"), "no calendar"
+    m = SCHOOL["model"]; old = dict(m["school"])
+    try:
+        with school(SAM, TEAM): a_relief(); m["school"].pop("start_time"); assert weekly("15:00") == weeked(), "nor does a timetable with no times stop it"
+    finally: m["school"].clear(); m["school"].update(old)
+    # the day or the time changed meanwhile: a week goes once
+    with school(SAM, TEAM):
+        a_relief(); assert weekly("15:00") == weeked(); store.write_json(RS.PATH, dict(calendar=TERM, times=dict(weekly_day="Fri", weekly_at="16:00"))); assert weekly("16:00") == []
+        store.write_json(RS.PATH, dict(calendar=TERM, times=dict(weekly_day="Mon", weekly_at="08:00"))); assert weekly("08:00", 19) == []; store.write_json(RS.PATH, dict(calendar=TERM, times=dict(weekly_day="Thu", weekly_at="23:00"))); assert weekly("08:30", 16) == [] and len(outs("weekly")) == 1
+    # what is kept, changed by hand: the queue still has it once
+    with school(SAM, TEAM):
+        a_relief(); weekly("15:00")
+        for odd in ("odd", None, [1], {}, 0): tgdb.set_state("weekly_last", odd); assert weekly("15:05") == [] and marked() == MON12.toordinal() and len(outs("weekly")) == 1, odd
+    with school(SAM, TEAM):                                                                # times that cannot be read: Fri, 15:00
+        a_relief()
+        for bad in ("x", None, 5, [], {}, dict(weekly_day="Sun"), dict(weekly_day=5), dict(weekly_day=["Fri"]), dict(weekly_at="x"), dict(weekly_at="25:00"), dict(weekly_at=None), dict(weekly_at=15), dict(weekly_at="9:00"), dict(weekly_at="15:00 "), dict(weekly_day=None, weekly_at=None)):
+            store.write_json(RS.PATH, dict(calendar=TERM, times=bad))
+            with tgdb.db() as c: c.execute("DELETE FROM state WHERE k='weekly_last'"); c.execute("DELETE FROM outbox WHERE kind='weekly'")
+            assert weekly("14:59") == [] and weekly("15:00") == weeked(), bad
+        store.write_json(RS.PATH, dict(calendar=TERM, times=dict(weekly_day="Thu", weekly_at="x")))
+        with tgdb.db() as c: c.execute("DELETE FROM state WHERE k='weekly_last'"); c.execute("DELETE FROM outbox WHERE kind='weekly'")
+        assert weekly("14:59", 22) == [] and weekly("15:00", 22) == weeked(), "each on its own"
+
+@t
+def the_message_waits_while_nothing_can_be_worked_out():
+    with exam_school(SAM, TEAM):
+        a_relief(); bot_ = tgdb.get_state("bot")
+        with no_pub(): assert weekly("15:00") == [] and marked() is None
+        with broken_accounts(): assert weekly("15:01") == [] and marked() is None
+        with unreadable(): assert weekly("15:02") == [] and marked() is None
+        for name in ("_links", "_when"):
+            with stand_in(FL, name, lambda *a, **k: 1 / 0): assert weekly("15:03") == [] and marked() is None
+        tgdb.set_state("bot", dict(bot_, key="another")); assert weekly("15:04") == [] and marked() is None; tgdb.set_state("bot", bot_)
+        os.environ.pop("TELEGRAM_BOT_TOKEN"); assert weekly("15:05") == [] and marked() is None; os.environ["TELEGRAM_BOT_TOKEN"] = "practice"
+        chat = links.unlink(TEAM); assert weekly("15:06") == [] and marked() is None; links.link(TEAM, chat, None)
+        with record(TEAM, extras=dict(relief=False, exams=None, admin=False)): assert weekly("15:07") == [] and marked() is None
+        with record(TEAM, off=True): assert weekly("15:08") == [] and marked() is None
+        for module, name in ((TE, "_records"), (RS, "load"), (SU, "week"), (AP, "staff"), (links, "reachable"), (RE, "summary_text")):
+            with stand_in(module, name, lambda *a, **k: 1 / 0): assert weekly("15:09") == [] and outs("weekly") == [], name
+        assert marked() is None, "nothing is marked before the text is there"
+        def locked(*a, **k): raise sqlite3.OperationalError("made up")
+        with stand_in(tgdb, "raise_state", locked): assert weekly("15:10") == [] and outs("weekly") == []
+        assert weekly("15:11") == weeked() and marked() == MON12.toordinal()
+    with school(SAM, TEAM):                                                                # it stops between the mark and the queue: not sent again
+        a_relief()
+        def dies(*a, **k): raise Killed()
+        with stand_in(OB, "queue", dies):
+            try: weekly("15:00"); raise AssertionError("it should have stopped")
+            except Killed: pass
+        assert marked() == MON12.toordinal() and weekly("15:01") == [] and outs("weekly") == []
+    with school(SAM, TEAM, LEE):                                                           # one that cannot be queued never stops the rest
+        a_relief(); real = OB.queue
+        with stand_in(OB, "queue", lambda key, name, *a, **k: 1 / 0 if name == LEE else real(key, name, *a, **k)): assert weekly("15:00") == weeked()
+    with school(SAM, TEAM, LEE):                                                           # two copies of the app
+        a_relief(); at("15:00", 16); got = []; at_once(*[lambda: got.append(RE.tick())] * 6); assert sorted(x for g in got for x in g) == weeked(LEE, TEAM) and sum(1 for g in got if g) == 1
+    with school(SAM, TEAM):                                                                # a file of an absence that cannot be read: the rest counts, its kind logged
+        a_relief(); j = absent(teacher=RUTH, by=HUGO); open(absences._path(j), "w", encoding="utf-8").write("{ a private word"); h, seen, real = Grab(), [], TE._records; KINDS.addHandler(h)
+        with stand_in(TE, "_records", lambda: (seen.append(absences._LOCK.locked()), real())[1]): assert weekly("15:00") == weeked() and outs("weekly")[0]["text"] == TEXT_K5
+        KINDS.removeHandler(h); assert set(seen) == {True} and not absences._LOCK.locked() and h.records and all("private" not in r.getMessage() and j not in r.getMessage() and r.exc_info is None for r in h.records)
+
+@t
+def the_report_and_the_summary_do_not_stop_each_other():
+    def both(hm="07:30"): at(hm, 16); return [k.split(":")[0] for k in RE.tick()]
+    def week_(): a_relief(); j = absent(dates=["2026-10-16"]); give(j, KF, SAM); swept()
+    early = dict(times=dict(weekly_at="07:30"))
+    h = Grab(); KINDS.addHandler(h)
+    def boom(*a, **k): raise LookupError(f"{SAM} a private line")
+    try:
+        with school(SAM, TEAM, **early): week_(); assert both() == ["report", "weekly"] and both() == [] and both("07:45") == ["report"]
+        for module, name, want in ((SU, "week", ["report"]), (RE, "summary_text", ["report"]), (RE, "report_text", ["weekly"]), (TE, "said", ["weekly"]), (RE, "_mark", ["weekly"]), (RE, "school_day", ["weekly"])):
+            with school(SAM, TEAM, **early):
+                week_(); h.records.clear()
+                with stand_in(module, name, boom): assert both() == want, name
+                assert len(h.records) == 1 and "LookupError" in h.records[0].getMessage() and "private" not in h.records[0].getMessage() and h.records[0].exc_info is None, [r.getMessage() for r in h.records]
+                assert both("07:31") == (["weekly"] if want == ["report"] else ["report"]), "a minute later"
+        with school(SAM, TEAM, **early):                                                   # what both go by is read once
+            week_(); reads = []
+            def counted(f, name): return lambda *a, **k: (reads.append(name), f(*a, **k))[1]
+            with stand_in(RS, "load", counted(RS.load, "settings")), stand_in(links, "connected", counted(links.connected, "bot")): assert both() == ["report", "weekly"]
+            assert reads.count("settings") == 1, reads
+            for hm in ("07:31", "07:32"):                                                  # done with: next to nothing is read
+                reads.clear()
+                with stand_in(TE, "_records", counted(TE._records, "records")), stand_in(FL, "_links", counted(FL._links, "links")), stand_in(links, "reachable", counted(links.reachable, "reach")): assert both(hm) == []
+                assert reads == [], reads
+    finally: KINDS.removeHandler(h)
+
+@t
+def an_old_summary_is_not_sent_nor_to_who_left_the_team():
+    with school(SAM, TEAM, LEE):
+        a_relief(); weekly("15:00"); r = dict(outs("weekly", TEAM)[0]); r["ref"] = json.loads(r["ref"])
+        at("14:59:59", 17); assert TE.still_true(r) is True; at("15:00", 17); assert TE.still_true(r) is False; at("15:30", 16)
+        with record(TEAM, extras=dict(relief=False, exams=None, admin=False)): assert TE.still_true(r) is False
+        with broken_accounts():
+            try: TE.still_true(r); raise AssertionError("nobody's rights are known")
+            except ValueError: pass
+        with record(LEE, extras=dict(relief=False, exams=None, admin=False)): send()
+        assert state(weeked(LEE)[0]) == "dropped" and state(weeked()[0]) == "sent" and said(LEE) == [] and said(TEAM)[-1] == TEXT_K5 and weekly("15:31") == []
+    with school(SAM, TEAM): a_relief(); weekly("15:00"); at("15:00", 17); send(); assert state(weeked()[0]) == "dropped" and not any("summary" in x for x in said(TEAM))
+    with school(SAM, TEAM, base=None): a_relief(); weekly("15:00"); send(); assert "reply_markup" not in calls("sendMessage")[-1], "an address that is not known: no button"
+
+@t
+def a_date_that_cannot_be_read_stops_no_lesson_of_the_message():
+    with exam_school(SAM, MAYA, TEAM):
+        i = today_reliefs((K5, SAM), (K2, MAYA)); exam()
+        with damage(): assert weekly("15:00") == weeked() and "\n5 relief periods for 1 absence\n" in outs("weekly")[0]["text"]
+    with exam_school(SAM, MAYA, TEAM):
+        today_reliefs((K5, SAM), (K2, MAYA)); exam()
+        with damage("2026-10-14"): assert weekly("15:00") == weeked() and "\n3 relief periods for 1 absence\n" in outs("weekly")[0]["text"], "another date's"
+
+# ---- the page
+@t
+def the_summary_route_needs_the_team():
+    with exam_school(SAM, TEAM):
+        i = today_reliefs((K5, SAM), (K2, MAYA)); at("09:30", 13); CV.acknowledge(i, K5, SAM)
+        for name in (EVE, SAM, ROSA): assert call(name, "get", SUMMARY_URL, code=403) == dict(error=WB.TEAM_ONLY)
+        assert call(HUGO, "get", SUMMARY_URL, code=403) == dict(error=WB.TEAM_ONLY), "management plans; the summary is the team's"
+        assert client({}).get(SUMMARY_URL).get_json() == AGAIN == who(EXE).get(SUMMARY_URL).get_json() == client(dict(role="committee")).get(SUMMARY_URL).get_json()
+        with no_pub(): assert call(TEAM, "get", SUMMARY_URL, code=409) == dict(error=WB.NO_PUB)
+        def made(monday=MON12, **kw): return json.loads(json.dumps(SU.week(SCHOOL, rs(), absences.all_records(), monday, clock.now, **kw)))
+        got = call(TEAM, "get", SUMMARY_URL); assert got == made() and got["periods"] == 5 and got["label"] == "Week 6 (12–16 Oct)" and got["fat_role"] is False and [x["ack"] for x in got["rows"]] == ["waiting", "09:30"], got
+        for d in (12, 13, 14, 15, 16, 17, 18): assert call(LEE, "get", f"{SUMMARY_URL}?week=2026-10-{d}") == got, d
+        for d, monday in ((11, datetime.date(2026, 10, 5)), (19, datetime.date(2026, 10, 19))): other = call(TEAM, "get", f"{SUMMARY_URL}?week=2026-10-{d}"); assert other == made(monday) and other["rows"] == [] and nums(other) == ZERO, d
+        assert call(TEAM, "get", SUMMARY_URL + "?week=") == got; at("10:00", 20); assert call(TEAM, "get", SUMMARY_URL)["start"] == "2026-10-19", "left out: this week"; at("09:30", 13)
+        for odd in ("x", "2026-13-01", "2026-10-32", "2026-10", "12 Oct", "2026-10-12T09:00", "0", "-1", "%00", "2026-10-12%0a", "9" * 400, "٢٠٢٦-١٠-١٢"): assert call(TEAM, "get", f"{SUMMARY_URL}?week={odd}", code=400) == dict(error=absences.WRONG), odd
+        for far in ("0001-01-01", "0001-01-07", "9999-12-31"): assert nums(call(TEAM, "get", f"{SUMMARY_URL}?week={far}")) == ZERO, far
+        # what an approved exam stops is left out; exams that cannot be read stop nothing
+        e = exam(); got = call(TEAM, "get", SUMMARY_URL); assert got == made(links=exam_links()) and got["periods"] == 3
+        with stand_in(SC, "read_on_site", lambda: 1 / 0), stand_in(A.app.logger, "exception", lambda *a, **k: None): assert call(TEAM, "get", SUMMARY_URL)["periods"] == 5
+        withdraw(e)
+        # no token, nobody linked, no bot: the page works; nothing is sent, or marked as sent
+        os.environ.pop("TELEGRAM_BOT_TOKEN"); wipe(); assert call(TEAM, "get", SUMMARY_URL)["periods"] == 5 and marked() is None and outs("weekly") == []
+        shutil.rmtree(absences.DIR); assert nums(call(TEAM, "get", SUMMARY_URL)) == ZERO
+    assert next(r for r in A.app.url_map.iter_rules() if r.rule == SUMMARY_URL).methods - {"HEAD", "OPTIONS"} == {"GET"}
+
+@t
+def the_page_never_holds_a_reason():
+    with school(SAM, MAYA, TEAM):
+        at("06:50", 13); i = absent(by=HUGO, reason="Other", reason_text="zebra-reason", remarks="quokka-remark"); give(i, K5, SAM); CV.ask_change(i, K5, "walrus-why", SAM); new_pick(i, K5, MAYA, "lemur-pick")
+        change_record(i, lambda r: [x.update(work=dict(text="okapi-work", link="", files=[])) for x in r["lessons"]])
+        on_cover(TEAM, i, K5, "approve", dict(who=MAYA)); raw = who(TEAM).get(SUMMARY_URL).get_data(as_text=True); assert json.loads(raw)["moved"] == 1; weekly("15:00"); raw += json.dumps(outs("weekly"), ensure_ascii=False)
+        for word in ("zebra", "quokka", "walrus", "lemur", "okapi", "Medical", "Other"): assert word not in raw, word
+
+@t
+def the_summary_page_is_there_for_the_team():
+    read = lambda f: open(os.path.join(ROOT, "static", f), encoding="utf-8").read()
+    html, js, page = read("relief.html"), read("relief.js"), read("relief-summary.js")
+    assert re.search(r'id="tab-load".*?</button>\s*<button type="button" role="tab" id="tab-summary" data-tab="summary" aria-controls="pane-summary" hidden>Weekly summary</button>', html) and '<section class="pane" id="pane-summary" role="tabpanel" aria-labelledby="tab-summary" hidden></section>' in html
+    assert html.index("/static/relief-load.js") < html.index('<script src="/static/relief-summary.js"></script>') and '["load", me => !!me.can_team], ["summary", me => !!me.can_team]]' in js
+    assert 'R.tab("summary"' in page and "/api/relief/summary?week=" in page and 'aria-label="Week before"' in page and 'aria-label="Week after"' in page and "No relief this week." in page
+    for word in ("localStorage", "eval(", "//cdn", "http://", "https://"): assert word not in page, word
+
+@t
+def the_summary_is_quick():
+    with exam_school(SAM, TEAM):
+        exam("3B", name=EXAM2); i = today_reliefs((K5, SAM), (K2, MAYA)); whole_ = absences.load(i)
+        for n in range(600):
+            r = json.loads(json.dumps(whole_)); r.update(id=f"{n:012x}", teacher=f"Mx Made Up {n}")
+            if n % 10: r.update(dates=["2026-10-01"], lessons=[dict(x, date="2026-10-01", key=x["key"].replace(D13, "2026-10-01")) for x in r["lessons"]])
+            absences._save(r)
+        began = time.process_time(); v = SU.week(SCHOOL, rs(), absences.all_records(), MON12, clock.now, links=exam_links()); took = time.process_time() - began; assert adds_up(v)["absences"] == 61 and len(v["rows"]) == 122 and took < 1.5, took
+        at("15:00", 16); began = time.process_time(); assert weekly("15:00") == weeked(); first = time.process_time() - began; began = time.process_time(); assert weekly("15:01") == []; second = time.process_time() - began; assert first < 2.0 and second < 0.5, (first, second)
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

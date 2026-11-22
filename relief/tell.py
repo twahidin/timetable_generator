@@ -738,7 +738,7 @@ def _cancelled_true(ref, name):
 
 
 # what is asked of a queued message, by its kind, before it goes: CHECK(its ref, its person) -> bool. A kind not here is always
-# true (relief/report.py puts report and clear here)
+# true (relief/report.py puts report, clear and weekly here)
 CHECKS = dict(relief=_relief_true, gone=_ended_true, moved=_ended_true, stopped=_stopped_true, again=_again_true, kept=_kept_true, ask=_ask_true,
               askpick=_ask_true, planned=lambda ref, name: _absence_now(ref) is not None, remind=_remind_true,
               officer=lambda ref, name: _absence_now(ref, False) is not None, cancelled=_cancelled_true)

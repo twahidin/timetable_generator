@@ -1468,7 +1468,7 @@ if os.environ.get("RELIEF_JOBS") == "on":                         # relief picks
     relief_fill.start()
 if os.environ.get("RELIEF_JOBS") == "on" and relief_tg.on():
     relief_tell.MINUTE.append(relief_tell.sweep)                  # what there is to say by the clock, every minute, whatever the picks are waiting for
-    relief_tell.MINUTE.append(relief_report.tick)                 # and then the relief team's report of who has not acknowledged
+    relief_tell.MINUTE.append(relief_report.tick)                 # and then the relief team's report of who has not acknowledged, and their weekly summary
     relief_tell.start()
     relief_outbox.start()                                         # the Telegram messages, every 5 seconds
 
