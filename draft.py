@@ -215,10 +215,14 @@ def listed(m, fx=None, decisions=None):
     fx = fx or dict(texts=[], problems=[], touched=set(), was=[], pool=[])
     return tally(_warned(m, fx)["warnings"], decisions or {})
 
+def counted(w):
+    """whether step 8 counts a warning of listed's among its warnings: open, and not critical"""
+    return not w["decision"] and not w.get("crit")
+
 def counts(m, rec, fx=None, decisions=None):
     """dict(critical, warnings) of the model as step 8 counts them: critical as the draft counts it, warnings = those with no decision that are not critical. Writes nothing."""
     t = listed(m, fx, decisions)
-    return dict(critical=t["critical"], warnings=sum(1 for w in t["warnings"] if not w["decision"] and not w.get("crit")))
+    return dict(critical=t["critical"], warnings=sum(1 for w in t["warnings"] if counted(w)))
 
 def checked_in(folder, rec=None):
     """counts of the draft folder (a copy of the draft) checked against the setup (or rec)"""
