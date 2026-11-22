@@ -453,7 +453,8 @@ def work_choosing_and_cancelling():
     refuses(gone, lambda: AB.not_needed(i, k, "x", EVE))
     refuses(gone, lambda: AB.needed_again(i, k, EVE))
     refuses(gone, lambda: AB.acknowledge(i, EVE))
-    assert AB.load(i)["lessons"][0]["relief"] == FLEX
+    a = AB.load(i)["lessons"][0]           # stage 3: cancelling ends the relief, and its history keeps who had it
+    assert a["relief"] is None and (a["history"][-1]["what"], a["history"][-1]["who"]) == ("dropped", FLEX), a
 
 @t
 def a_changed_lesson_is_marked_not_fatal():
@@ -849,7 +850,7 @@ def planned_csv_has_no_reason_and_no_formulas():
         assert text.startswith("﻿")
         rows = list(csv.reader(io.StringIO(text.lstrip("﻿"))))
         assert rows[0] == ["Date", "Absent", "Class / group", "Periods", "Time", "Relief teacher", "Remarks", "Set by"], rows[0]
-        assert rows[1:] == [["2026-10-13", EVE, "1A Science", "P6–P7", "10:30–11:30", SAM, "'=HYPERLINK(\"http://x.test\")", GRACE],
+        assert rows[1:] == [["2026-10-13", EVE, "1A Science", "P6–P7", "10:30–11:30", "Waiting for the relief team", "'=HYPERLINK(\"http://x.test\")", GRACE],
                             ["2026-10-13", EVE, "5A Art", "P9", "12:00–12:30", "Not chosen yet", "'=HYPERLINK(\"http://x.test\")", GRACE],
                             ["2026-10-27", EVE, "1A Science", "P6–P7", "10:30–11:30", "Not chosen yet", "", EVE]], rows[1:]
         assert all(r[3] != "P9" for r in rows[1:] if r[0] == "2026-10-27"), "the cancelled one and the shared lesson nobody asked to cover are left out"
@@ -1143,10 +1144,10 @@ def a_past_lesson_cannot_be_changed_but_can_be_acknowledged():
 @t
 def the_pages_copy():
     inbox, page = (open(os.path.join(ROOT, "static", f)).read() for f in ("relief-inbox.js", "relief.js"))
-    assert "The app's picks for open lessons, and approving them, come in the next stage." in inbox
+    assert "come in the next stage" not in inbox and '"Needs a nudge"' in inbox and "Relief status" in inbox
     assert '"Earlier"' in inbox
     assert '"relief.ro:" + R.me.name' in page and 'getItem("relief.ro")' not in page
-    assert "The app's picks for open lessons, and approving them, come in the next stage" in " ".join(open(os.path.join(ROOT, "README.md")).read().split())
+    assert "come in the next stage" not in " ".join(open(os.path.join(ROOT, "README.md")).read().split())
 
 @t
 def the_old_name_of_rule_on_day_still_works():

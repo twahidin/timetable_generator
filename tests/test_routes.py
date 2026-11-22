@@ -291,6 +291,23 @@ GUARDS = {
     "relief_web.upload": ('relief',),
     "relief_web.whats_in": ('relief',),
     "relief_web.work": ('relief',),
+    # relief stage 3: the relief team's (relief.team inside, in RELIEF_INSIDE) and the relief teacher's (relief plus "this
+    # cover is yours", asked inside)
+    "relief_web.today": ('relief',),
+    "relief_web.approve": ('relief',),
+    "relief_web.approve_all": ('relief',),
+    "relief_web.change": ('relief',),
+    "relief_web.cover_free": ('relief',),
+    "relief_web.split": ('relief',),
+    "relief_web.join": ('relief',),
+    "relief_web.keep": ('relief',),
+    "relief_web.fill_now": ('relief',),
+    "relief_web.load": ('relief',),
+    "relief_web.load_one": ('relief',),
+    "relief_web.load_csv": ('relief',),
+    "relief_web.covering": ('relief',),
+    "relief_web.cover_acknowledge": ('relief',),
+    "relief_web.ask_change": ('relief',),
     "restore_setup": ('committee',),
     "status": ('setup',),
     "timetable": ('timetable',),
@@ -523,6 +540,14 @@ TEAM_ONLY = "Only the relief team can open What's in."
 RELIEF_INSIDE = {("GET", "/api/relief/free"): ("relief.plan", CHOOSE_ONLY), ("GET", "/api/relief/absences/planned"): ("relief.plan", PLAN_ONLY),
                  ("GET", "/api/relief/planned.csv"): ("relief.plan", PLAN_ONLY), ("GET", "/api/relief/absences"): ("relief.team", TEAM_ONLY),
                  ("POST", "/api/relief/absences/seen"): ("relief.team", TEAM_ONLY)}
+# relief stage 3: the relief team's routes (Today, approving, changing, splitting, Fill now, the load tracker)
+_X, _K = "abcdef123456", urllib.parse.quote("2026-10-13/Even Tue/5/2/1A/Science/", safe="")
+RELIEF_INSIDE.update({(m, u): ("relief.team", TEAM_ONLY) for m, u in (
+    ("GET", "/api/relief/today"), ("POST", f"/api/relief/absences/{_X}/covers/{_K}/approve"), ("POST", "/api/relief/today/approve-all"),
+    ("PUT", f"/api/relief/absences/{_X}/covers/{_K}/relief"), ("GET", f"/api/relief/absences/{_X}/covers/{_K}/free"),
+    ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/split"), ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/join"),
+    ("POST", f"/api/relief/absences/{_X}/covers/{_K}/keep"), ("POST", "/api/relief/today/fill"), ("GET", "/api/relief/load"),
+    ("GET", f"/api/relief/load/{urllib.parse.quote(TINA)}"), ("GET", "/api/relief/load.csv"))})
 
 @t
 def relief_requests_ask_the_narrower_right_inside():
