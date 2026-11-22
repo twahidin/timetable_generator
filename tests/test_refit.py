@@ -304,6 +304,63 @@ def test_clash_rule_and_a_stale_key_give_nothing():
         assert refit.direct(m, spec, days, dict(kind=kind, key="dep:rubbish", text="gone", w={}), pool) == ([], "gone"), kind
     assert snapshot(m, pool) == before
 
+# ----------------------------------------------------------------------------------------------- where a lesson may go
+def moves(m, spec, days, i, moved=(), limit=refit.CAND_SLOTS, memo=None):
+    return refit.day_moves(m, spec, days, i, fixes._ctx(m), {} if memo is None else memo, set(moved), limit)
+
+def test_a_lesson_keeps_its_day():
+    m, spec, days, pool = world(ROWS); before = snapshot(m, pool)
+    got = moves(m, spec, days, PLAIN_ID, limit=50)
+    assert got and all(not g["other"] and g["fix"]["kind"] in ("move", "swap") for g in got), got
+    assert all(g["fix"]["d"] == 0 for g in got if g["fix"]["kind"] == "move")
+    assert [g["dist"] for g in got] == sorted(g["dist"] for g in got) and all(g["dist"] == g["fix"]["p"] for g in got)
+    assert not refit.barred(m, spec, days, PLAIN_ID, 0, pool)
+    assert len(moves(m, spec, days, PLAIN_ID)) <= refit.CAND_SLOTS
+    assert snapshot(m, pool) == before
+
+def test_barred_day_opens_other_days():
+    was = json.loads(json.dumps(store.setup_record()["spec"]))
+    try:
+        s = json.loads(json.dumps(was)); s["rules"] = list(s["rules"]) + [dict(MUST_RULE, to=99)]; put_setup(s)   # the teacher is not there that whole day
+        m, spec, days, pool = world(ROWS); before = snapshot(m, pool)
+        assert refit.barred(m, spec, days, PLAIN_ID, 0, pool) is True
+        assert refit.barred(m, spec, days, PLAIN_ID, 1, pool) is False
+        memo = {}; got = moves(m, spec, days, PLAIN_ID, memo=memo, limit=50)
+        far = [g for g in got if g["other"]]; near = [g for g in got if not g["other"]]
+        assert far and got == near + far   # same-day items first, then the other days
+        assert all(g["fix"]["kind"] == "move" and g["fix"]["d"] != 0 and g["dist"] == 10 * g["fix"]["d"] + abs(g["fix"]["p"]) for g in far), far
+        assert [g["fix"]["d"] for g in far] == sorted(g["fix"]["d"] for g in far)
+        assert memo[("barred", PLAIN_ID, 0)] is True
+        assert snapshot(m, pool) == before
+        s["rules"][-1] = dict(MUST_RULE, to=0); put_setup(s)   # one period only: the day stays open
+        m, spec, days, pool = world(ROWS)
+        assert refit.barred(m, spec, days, PLAIN_ID, 0, pool) is False
+        got = moves(m, spec, days, PLAIN_ID, limit=50); assert got and not any(g["other"] for g in got)
+        s["rules"][-1] = dict(MUST_RULE, strength="Prefer", to=99); put_setup(s)   # a Prefer rule bars nothing
+        m, spec, days, pool = world(ROWS); assert refit.barred(m, spec, days, PLAIN_ID, 0, pool) is False
+    finally: put_setup(was)
+
+def test_a_band_lesson_never_moves():
+    m, spec, days, pool = world(ROWS)
+    assert moves(m, spec, days, BAND_ID) == []
+    assert moves(m, spec, days, PLAIN_ID, moved={PLAIN_ID}) == []
+    assert moves(m, spec, days, 999) == []
+
+def test_a_swap_never_crosses_days_and_never_touches_a_moved_lesson():
+    cl = lambda i, d, p, **k: dict(id=i, day=DAYS[d], p=p, n=1, level=LEVEL, classes=[CLASSES[0]], subject=SUBJ2, teachers=[TEACHERS[2]], **k)
+    rows = ROWS + [cl(30, 4, 2), cl(31, 4, 3), cl(32, 4, 4, block=f"{LEVEL} Band B", group="G9"), cl(33, 3, 2)]
+    m, spec, days, pool = world(rows)
+    got_all = moves(m, spec, days, 30, limit=100); swaps = lambda **k: [g["fix"] for g in moves(m, spec, days, 30, limit=100, **k) if g["fix"]["kind"] == "swap"]
+    got = swaps(); assert dict(kind="swap", a=30, b=31) in got, [g["fix"] for g in got_all]
+    assert all(f["b"] not in (BAND_ID, 32, 33) and f["a"] == 30 for f in got), got   # not a band, not on another day
+    assert not any(f["b"] == 31 for f in swaps(moved={31}))
+    assert not any(g["other"] for g in got_all)
+
+def test_day_moves_does_not_mutate_the_model():
+    m, spec, days, pool = world(ROWS); before = copy.deepcopy(m["lessons"]); sp = copy.deepcopy(spec)
+    for i in (PLAIN_ID, OTHER_ID, BAND_ID): moves(m, spec, days, i); refit.barred(m, spec, days, i, 0, pool)
+    assert m["lessons"] == before and spec == sp
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()

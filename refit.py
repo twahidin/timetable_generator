@@ -106,6 +106,51 @@ def _rooms(m, spec, days, pool, x, ok=None):
     """a room fix for the row for each "ok" room of room_options, in its order (only the rooms the test ok(room) accepts, when one is given)"""
     return [[dict(kind="room", id=x["id"], group=x["group"], room=o["room"])] for o in fixes.room_options(m, spec, days, x["id"], x["group"], pool) if o["state"] == "ok" and (ok is None or ok(o["room"]))]
 
+# ----------------------------------------------------------------------------------------------- where a lesson may go
+def barred(m, spec, days, lesson_id, d, pool, memo=None):
+    """whether day d is closed to the lesson itself: with only its own rows on the timetable, every start period where it fits on
+    that day is refused by lesson_time (its hour outside the day, a break, a recess) or breaks a Must rule. No period that fits counts
+    as barred. Rooms, clashes, other lessons and Prefer rules do not count; a lesson in the pool is not asked about (False).
+    Cached by (lesson_id, d) in memo when one is given. Never changes m or its lessons"""
+    key = ("barred", lesson_id, d)
+    if memo is not None and key in memo: return memo[key]
+    rows = [x for x in m["lessons"] if x["id"] == lesson_id]
+    if not rows or any(x["id"] == lesson_id for x in pool or ()): out = False
+    else:
+        n = rows[0]["n"]; busy = fixes.Busy(m, [])
+        def closed(p):
+            moved = [dict(x, d=d, p=p) for x in rows]
+            if busy.lesson_time(moved, d, p, n): return True
+            return any(w.get("strength") == "Must" for w in verify.rules(dict(m, lessons=moved), spec)[0])
+        out = all(closed(p) for p in range(m["NP"] - n + 1))
+    if memo is not None: memo[key] = out
+    return out
+
+def day_moves(m, spec, days, lesson_id, ctx, memo, moved, limit=CAND_SLOTS):
+    """the moves and swaps of one lesson the rules allow now, best first -> [dict(fix, other, dist)]: the same day's "ok" slots nearest
+    period first (a swap only with a lesson that is not a band and not in moved), then, only when the lesson's own day is barred
+    (see barred), plain moves to other days (nearest day, then nearest period) with other=True; dist is the periods moved, 10 per
+    day for another day. [] for a band lesson, one in moved, or one not on the timetable. At most limit items. Never changes m"""
+    pool = m.get("pool") or (); rows = [x for x in m["lessons"] if x["id"] == lesson_id]
+    if not rows or lesson_id in moved or fixes._block(rows) or any(x["id"] == lesson_id for x in pool): return []
+    d0, p0 = rows[0]["d"], rows[0]["p"]
+    ok = [s for s in fixes.slots(m, spec, days, lesson_id, pool, extras=False, ctx=ctx) if s["state"] == "ok"]
+    same = []
+    for s in ok:
+        if s["d"] != d0: continue
+        if s["swap"] is not None:
+            o = [x for x in m["lessons"] if x["id"] == s["swap"]]
+            if not o or fixes._block(o) or s["swap"] in moved: continue
+            fix = dict(kind="swap", a=lesson_id, b=s["swap"])
+        else: fix = dict(kind="move", id=lesson_id, d=s["d"], p=s["p"])
+        same.append((abs(s["p"] - p0), s["p"], dict(fix=fix, other=False, dist=abs(s["p"] - p0))))
+    out = [x[2] for x in sorted(same, key=lambda x: x[:2])]
+    if barred(m, spec, days, lesson_id, d0, pool, memo):
+        far = sorted((s for s in ok if s["d"] != d0 and s["swap"] is None), key=lambda s: (abs(s["d"] - d0), s["d"], abs(s["p"] - p0), s["p"]))
+        out += [dict(fix=dict(kind="move", id=lesson_id, d=s["d"], p=s["p"]), other=True, dist=10 * abs(s["d"] - d0) + abs(s["p"] - p0)) for s in far]
+    return out[:limit]
+
+
 def direct(m, spec, days, target, pool):
     """the change itself for one target, before any search -> (candidates, sentence): the candidate changes, each a list of fixes,
     best first; and a Needs-you sentence when the target can never be one of the app's changes, else None. clash and rule have none
