@@ -23,6 +23,8 @@ SAY_WHY = "Say why in a line."
 PAST_LESSON = "This lesson is in the past."
 PAST_ABSENCE = "This absence is in the past."
 NO_NEED = "This lesson does not need relief."
+APPROVED_ALREADY = "This lesson's relief is approved already: ask the relief team to change it."
+IS_SPLIT = "This lesson is split: the relief team chooses for each part."
 MAX_DATES, MAX_TEXT, MAX_LINK = 10, 2000, 500
 
 
@@ -298,15 +300,16 @@ def needed_again(id, key, by, *, team=False):
 
 def choose(id, key, relief_name, by, pub):
     """the planner's choice, its pick (waiting for the relief team); relief_name None or "" takes it off; the caller checks
-    the relief.plan right. Once approved, or once the team has split the lesson, it is changed on the team's Today page."""
+    the relief.plan right. Once approved (APPROVED_ALREADY), or once the team has split the lesson (IS_SPLIT), it is
+    changed on the team's Today page."""
     pub = _pub(pub)
     with _LOCK:
         r = _editable(id)
         x = _lesson(r, key)
         _past(x)
         if not x["needed"]: raise ValueError(NO_NEED)
-        if x.get("parts"): raise ValueError(CHANGED)
-        if _cover.state(r, x, x) not in ("open", "waiting"): raise ValueError(_cover.NOT_WAITING)
+        if x.get("parts"): raise ValueError(IS_SPLIT)
+        if _cover.state(r, x, x) not in ("open", "waiting"): raise ValueError(APPROVED_ALREADY)
         now = _now()
         if not relief_name:
             if x.get("relief"):

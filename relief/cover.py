@@ -24,6 +24,7 @@ SPLIT_SENT = "Part of this lesson is approved already, so it cannot be joined ag
 CHANGE_WHY = "Say in a line why you cannot take it."
 ASKED_ALREADY = "You asked to change this relief already."
 NO_CHANGE_ASKED = "Nobody has asked to change this relief."
+PICK_CHANGED = "The pick has changed since you looked: look again before approving."
 BY = ("planner", "ai", "app", "team")
 OPEN = dict(relief=None, relief_by=None, pick=None, approved=None, ack=None, change=None)
 
@@ -189,12 +190,16 @@ def drop(id, ckey, why, who=None, *, into="pick"):
     return r
 
 
-def _approve(r, x, c, by, pub, settings, records, now):
-    """in memory: a waiting cover approved, or a change request's new pick made the relief; the person is checked again"""
+def _approve(r, x, c, who, by, pub, settings, records, now, waiting_only=False):
+    """in memory: a waiting cover approved, or a change request's new pick made the relief, only while that pick is still
+    who (the name the team member was shown), else PICK_CHANGED (also when it has been dropped since and not picked
+    again); the person is checked again. waiting_only (Approve all): a waiting cover alone, a request to change NOT_WAITING"""
     s = state(r, x, c)
     if s == "waiting": pick = pick_of(r, c)
-    elif s == "change" and c["change"].get("pick"): pick = c["change"]["pick"]
+    elif s == "change" and not waiting_only: pick = new_pick(c)
+    elif s == "open": pick = None
     else: raise ValueError(NOT_WAITING)
+    if pick is None or pick["who"] != who: raise ValueError(PICK_CHANGED)
     if not still_free(pub, settings, records, r, x, c, pick["who"]): raise ValueError(NOT_FREE.format(name=pick["who"]))
     _settle(r, c)
     if s == "change": c.update(relief=pick["who"], relief_by=None)
@@ -202,41 +207,66 @@ def _approve(r, x, c, by, pub, settings, records, now):
     _log(c, "approved", pick["who"], by, now)
 
 
-def approve(id, ckey, by, pub, settings):
-    """a person on the relief team approves; a checked limit is no reason to refuse (a person decides), not being free is"""
+def approve(id, ckey, who, by, pub, settings):
+    """a person on the relief team approves the pick they were shown, who: the waiting pick, or a request to change's new
+    pick; PICK_CHANGED, before anything is read, when who is not a name, and under the lock when that pick is no longer
+    who. A checked limit is no reason to refuse (a person decides), not being free is"""
+    if not isinstance(who, str) or not who: raise ValueError(PICK_CHANGED)
     pub = _absences._pub(pub)
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
-        _approve(r, x, c, by, pub, settings, _absences.all_records(), _absences._now())
+        _approve(r, x, c, who, by, pub, settings, _absences.all_records(), _absences._now())
         _absences._save(r)
     return r
 
 
-def approve_all(date, by, pub, settings):
-    """approve every waiting cover on date (a date or an ISO string) in time order, skipping those no longer free
-    -> dict(approved=int, skipped=[dict(ckey, name, why)])"""
+def _shown(rows):
+    """the covers Approve all was sent, [dict(id, ckey, who)] -> [(id, ckey, who)]: None (a page that did not send what it
+    showed) is PICK_CHANGED, anything else not such a list WRONG; a row without a name is kept, to be skipped"""
+    if rows is None: raise ValueError(PICK_CHANGED)
+    if not isinstance(rows, list): raise ValueError(_absences.WRONG)
+    out = []
+    for v in rows:
+        if not isinstance(v, dict) or not all(isinstance(v.get(k), str) and v[k] for k in ("id", "ckey")): raise ValueError(_absences.WRONG)
+        out.append((v["id"], v["ckey"], v.get("who")))
+    return out
+
+
+def approve_all(date, shown, by, pub, settings):
+    """approve the waiting covers the team member was shown on date (a date or an ISO string), shown=[dict(id, ckey, who)]
+    with who the pick shown, in time order: each only while it is still waiting for that person (else PICK_CHANGED, or
+    NOT_WAITING once approved or asked to change) and they are still free (else NOT_FREE); a cover not on date, or gone, is
+    skipped too. -> dict(approved=[(id, ckey, who)], skipped=[dict(id, ckey, name, why)]), name the person shown"""
     pub, iso = _absences._pub(pub), _free._iso(date)
     if datetime.date.fromisoformat(iso) < _lessons.today(): raise ValueError(_absences.PAST_LESSON)
+    shown = _shown(shown)
     with _absences._LOCK:
-        records, now, rows = _absences.all_records(), _absences._now(), []
-        for r in records:
-            for x in r.get("lessons") or []:
-                if x.get("date") != iso: continue
-                for i, c in enumerate(covers(x)):
-                    if state(r, x, c) == "waiting": rows.append((int(c["p"]), r["teacher"], cover_key(x, i), r, x, c))
-        rows.sort(key=lambda t: t[:3])
-        done, skipped, saved = 0, [], {}
-        for _, _, ckey, r, x, c in rows:          # records is the list each check reads: an approval is seen by the next
-            try: _approve(r, x, c, by, pub, settings, records, now)
+        records, now, rows, skipped = _absences.all_records(), _absences._now(), [], []
+        by_id = {r["id"]: r for r in records}
+        for id, ckey, who in shown:
+            try:
+                r = by_id.get(id)
+                if r is None: raise ValueError(_absences.WRONG)
+                if r.get("cancelled"): raise ValueError(_absences.CANCELLED)
+                x, c = find(r, ckey)
+                if x.get("date") != iso: raise ValueError(_absences.WRONG)
             except ValueError as e:
-                skipped.append(dict(ckey=ckey, name=c["relief"], why=str(e))); continue
-            done += 1; saved[r["id"]] = r
+                skipped.append(dict(id=id, ckey=ckey, name=who, why=str(e))); continue
+            rows.append((int(c["p"]), r["teacher"], ckey, id, who, r, x, c))
+        rows.sort(key=lambda t: t[:4])
+        done, saved = [], {}
+        for _, _, ckey, id, who, r, x, c in rows:  # records is the list each check reads: an approval is seen by the next
+            try: _approve(r, x, c, who, by, pub, settings, records, now, waiting_only=True)
+            except ValueError as e:
+                skipped.append(dict(id=id, ckey=ckey, name=who, why=str(e))); continue
+            done.append((id, ckey, who)); saved[id] = r
         for r in saved.values(): _absences._save(r)
     return dict(approved=done, skipped=skipped)
 
 
 def change(id, ckey, who, by, pub, settings):
-    """the team gives the cover to who and approves it in one (an open one, a waiting one, an approved one, a change request)"""
+    """the team gives the cover to who and approves it in one (an open one, a waiting one, an approved one, a change request);
+    the relief it replaces and a request's new pick, when not who, are written down as dropped"""
     if not isinstance(who, str) or not who: raise ValueError(_absences.WRONG)
     pub = _absences._pub(pub)
     with _absences._LOCK:
@@ -245,6 +275,8 @@ def change(id, ckey, who, by, pub, settings):
         if not still_free(pub, settings, _absences.all_records(), r, x, c, who): raise ValueError(NOT_FREE.format(name=who))
         _settle(r, c)
         now = _absences._now()
+        for gone in booked(c):                  # the relief and a request's new pick it replaces end here
+            if gone != who: _log(c, "dropped", gone, by, now)
         pick = dict(who=who, by="team", reason=CHOSEN.format(by=by, date=_day(now)), at=now)
         c.update(relief=who, relief_by=by, pick=pick, approved=dict(by=by, at=now), ack=None, change=None)
         _log(c, "pick", who, "team", now, pick["reason"])
@@ -307,12 +339,15 @@ def join(id, key, by):
 
 
 def keep(id, ckey, by):
-    """the team closes a request to change: the relief stays with the teacher who asked"""
+    """the team closes a request to change: the relief stays with the teacher who asked, and its new pick, if any, is
+    written down as dropped"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
         if state(r, x, c) != "change": raise ValueError(NO_CHANGE_ASKED)
+        now, new = _absences._now(), new_pick(c)
+        if new: _log(c, "dropped", new["who"], by, now)                     # the request's new pick is not needed now
         c["change"] = None
-        _log(c, "kept", c["relief"], by, _absences._now())
+        _log(c, "kept", c["relief"], by, now)
         _absences._save(r)
     return r
 

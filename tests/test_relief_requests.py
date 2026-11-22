@@ -850,7 +850,7 @@ def planned_csv_has_no_reason_and_no_formulas():
         assert text.startswith("﻿")
         rows = list(csv.reader(io.StringIO(text.lstrip("﻿"))))
         assert rows[0] == ["Date", "Absent", "Class / group", "Periods", "Time", "Relief teacher", "Remarks", "Set by"], rows[0]
-        assert rows[1:] == [["2026-10-13", EVE, "1A Science", "P6–P7", "10:30–11:30", SAM, "'=HYPERLINK(\"http://x.test\")", GRACE],
+        assert rows[1:] == [["2026-10-13", EVE, "1A Science", "P6–P7", "10:30–11:30", "Waiting for the relief team", "'=HYPERLINK(\"http://x.test\")", GRACE],
                             ["2026-10-13", EVE, "5A Art", "P9", "12:00–12:30", "Not chosen yet", "'=HYPERLINK(\"http://x.test\")", GRACE],
                             ["2026-10-27", EVE, "1A Science", "P6–P7", "10:30–11:30", "Not chosen yet", "", EVE]], rows[1:]
         assert all(r[3] != "P9" for r in rows[1:] if r[0] == "2026-10-27"), "the cancelled one and the shared lesson nobody asked to cover are left out"

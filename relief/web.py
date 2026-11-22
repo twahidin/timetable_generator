@@ -26,18 +26,19 @@ takes {at}: the as_of the What's in list answered (now when left out). Periods a
 
 Stage 3 (relief/cover.py, pick.py, fill.py). A cover is a lesson, or one part of a split lesson, by its cover key (the
 lesson's key, or key#i for part i); every list of covers is sent in time order (by p). The relief team (relief.team,
-asked inside with TEAM_ONLY before the absence is opened): Today (GET /today?date=), Approve (POST …/covers/<ckey>/approve),
-Approve all waiting (POST /today/approve-all {date}), Change (GET …/covers/<ckey>/free, then PUT …/covers/<ckey>/relief
-{relief}: chosen and approved in one), Split (POST …/lessons/<key>/split {at}: the first period of the second part) and
-Join again (POST …/lessons/<key>/join), Keep (POST …/covers/<ckey>/keep), Fill now (POST /today/fill {date}), the load
-tracker (GET /load, /load/<name>, /load.csv, each ?week=YYYY-MM-DD or ?term=<name>). The relief teacher (relief, and the
-cover approved to them, else NOT_YOURS_COVER): Reliefs I'm covering (GET /covering), Acknowledge (POST
-…/covers/<ckey>/acknowledge), Request to change (POST …/covers/<ckey>/ask-change {why}); they also open the files of a
-lesson they relieve. Nothing reaches a relief teacher before the team approves it, and nothing they are sent carries the
-absence's reason, remarks, reporting officer, a pick's reason or a cover's history. Picks are made by relief.fill in the
-background; a new absence, needed again and cancel ask for a run (automatic: only with RELIEF_JOBS on), Fill now and a
-request to change ask with force, always after the save and the absences lock. Each save here is one history entry; the
-background picks write none."""
+asked inside with TEAM_ONLY before the absence is opened): Today (GET /today?date=), Approve (POST …/covers/<ckey>/approve
+{who: the pick the page showed}), Approve all waiting (POST /today/approve-all {date, covers: [{id, ckey, who}], the
+waiting rows the page showed}), each refused or skipped with cover.PICK_CHANGED once that pick is no longer who; Change
+(GET …/covers/<ckey>/free, then PUT …/covers/<ckey>/relief {relief}: chosen and approved in one), Split (POST
+…/lessons/<key>/split {at}: the first period of the second part) and Join again (POST …/lessons/<key>/join), Keep (POST
+…/covers/<ckey>/keep), Fill now (POST /today/fill {date}), the load tracker (GET /load, /load/<name>, /load.csv, each
+?week=YYYY-MM-DD or ?term=<name>). The relief teacher (relief, and the cover approved to them, else NOT_YOURS_COVER):
+Reliefs I'm covering (GET /covering), Acknowledge (POST …/covers/<ckey>/acknowledge), Request to change (POST
+…/covers/<ckey>/ask-change {why}); they also open the files of a lesson they relieve. Nothing reaches a relief teacher
+before the team approves it, and nothing they are sent carries the absence's reason, remarks, reporting officer, a pick's
+reason or a cover's history. Picks are made by relief.fill in the background; a new absence, needed again and cancel ask
+for a run (automatic: only with RELIEF_JOBS on), Fill now and a request to change (for its own absence alone) ask with
+force, always after the save and the absences lock. Each save here is one history entry; the background picks write none."""
 import csv, datetime, io, os, threading
 from functools import wraps
 from zoneinfo import ZoneInfo
@@ -73,6 +74,8 @@ STALE = "{name} is no longer free then: change it"
 OVER_ONLY = "Only teachers over a limit are free then: choose one yourself."   # the app's run leaves such a cover open
 ENTIRE = "Entire Class"
 COLUMNS = ["Date", "Absent", "Class / group", "Periods", "Time", "Relief teacher", "Remarks", "Set by"]
+NOT_CHOSEN = "Not chosen yet"                          # the planned relief sheet's Relief teacher for an open cover
+WAITING_TEAM = "Waiting for the relief team"           # ... for a pick not approved yet: a name only once approved
 LOAD_COLUMNS = ["Name", "Departments", "Flexi Adjunct", "Teaching this week", "Relief this week", "Week so far", "Relief this term",
                 "Requests to change this term"]
 TEAM = ("relief.team", TEAM_ONLY)                      # the gate of the relief team's routes
@@ -595,12 +598,20 @@ def _periods_text(x):
     return f"P{p + 1}" if n == 1 else f"P{p + 1}–P{p + n}"
 
 
+def _relief_cell(r, x, c):
+    """the sheet's Relief teacher for a cover: the name once approved (approved, acknowledged, asked to change), else
+    WAITING_TEAM for a pick (the AI's, the app's, a planner's) or NOT_CHOSEN"""
+    s = _cover.state(r, x, c)
+    if s in APPROVED: return c.get("relief") or NOT_CHOSEN
+    return WAITING_TEAM if s == "waiting" else NOT_CHOSEN
+
+
 @bp.get("/api/relief/planned.csv")
 @need("relief")
 def planned_csv():
     """the lessons needing relief in every absence not cancelled, planned or asked, dated start..end (today when left out),
-    so a day's sheet is complete, one row a cover (each part of a split lesson its own); Set by = whoever sent it; never
-    the reason"""
+    so a day's sheet is complete, one row a cover (each part of a split lesson its own); Relief teacher: the name only once
+    the relief team has approved it (_relief_cell); Set by = whoever sent it; never the reason"""
     pub, me, err = _gate("relief.plan", PLAN_ONLY)
     if err: return err
     try:
@@ -623,7 +634,7 @@ def planned_csv():
         group = _class_group(x)
         a, b = _times(pub, x, c)
         time = f"{a}–{b}" if a and b else ""
-        w.writerow([_cell(v) for v in (d.isoformat(), teacher, group, _periods_text(c), time, c.get("relief") or "Not chosen yet",
+        w.writerow([_cell(v) for v in (d.isoformat(), teacher, group, _periods_text(c), time, _relief_cell(r, x, c),
                                        r.get("remarks") or "", r.get("by") or "")])
     name = f"planned relief {start.isoformat()}" + (f" to {end.isoformat()}" if end != start else "") + ".csv"
     return Response("﻿" + buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -698,33 +709,31 @@ def today():
 @bp.post("/api/relief/absences/<id>/covers/<path:ckey>/approve")
 @need("relief")
 def approve(id, ckey):
-    """a waiting pick approved, or a request to change's new pick made the relief; relief.team"""
-    return _change(id, lambda r, me, pub, b: _cover.approve(r["id"], ckey, me, pub, _settings.load(pub)), "approved",
+    """{who}: the waiting pick, or a request to change's new pick, approved while it is still who (the name the page
+    showed), else PICK_CHANGED, as for a body without who; relief.team"""
+    return _change(id, lambda r, me, pub, b: _cover.approve(r["id"], ckey, b.get("who"), me, pub, _settings.load(pub)), "approved",
                    lambda r: f"{_relief_of(r, ckey)} approved for {_cover_words(r, ckey)}", gate=TEAM)
 
 
 @bp.post("/api/relief/today/approve-all")
 @need("relief")
 def approve_all():
-    """every waiting cover of {date} approved, in time order, skipping those no longer free -> dict(approved, skipped=[{ckey,
-    name, why}]); one history entry for each cover approved; relief.team"""
+    """{date, covers: [{id, ckey, who}]}: the waiting covers of date the page showed, each approved in time order while it
+    still waits for who (cover.approve_all), the others skipped -> dict(approved: how many, skipped=[{id, ckey, name, why}]);
+    one history entry for each cover this call approved, and none for any other; relief.team"""
     pub, me, err = _gate(*TEAM)
     if err: return err
+    b = _body()
     try:
-        date = _date_in(_body().get("date"))
-        iso, settings = date.isoformat(), _settings.load(pub)
-        waiting = [(r["id"], _cover.cover_key(x, i)) for r in _absences.all_records() for x in r.get("lessons") or [] if x.get("date") == iso
-                   for i, c in enumerate(_cover.covers(x)) if _cover.state(r, x, c) == "waiting"]
-        got = _cover.approve_all(date, me, pub, settings)
+        date = _date_in(b.get("date"))
+        got = _cover.approve_all(date, b.get("covers"), me, pub, _settings.load(pub))
     except ValueError as e: return _refusal(e)
-    for id, ckey in waiting:                    # the ones this call approved: approved now, the last step of their history by me
-        r = _absences.load(id)
-        try: x, c = _cover.find(r, ckey) if r else (None, None)
-        except ValueError: continue
-        last = (c.get("history") or [{}])[-1] if c else {}
-        if c and _cover.state(r, x, c) in APPROVED and (last.get("what"), last.get("by")) == ("approved", me):
-            _noted("approved", r, lambda: f"{c['relief']} approved for {_cover_words(r, ckey)}")
-    return jsonify(got)
+    except BAD_INPUT as e: return _odd(e, "approving all")
+    records = {}
+    for id, ckey, who in got["approved"]:       # exactly the covers approved under the lock, read back for the entry's words
+        r = records[id] = records.get(id) or _absences.load(id)
+        if r: _noted("approved", r, lambda r=r, ckey=ckey, who=who: f"{who} approved for {_cover_words(r, ckey)}")
+    return jsonify(approved=len(got["approved"]), skipped=got["skipped"])
 
 
 @bp.put("/api/relief/absences/<id>/covers/<path:ckey>/relief")
@@ -851,10 +860,10 @@ def cover_acknowledge(id, ckey):
 @bp.post("/api/relief/absences/<id>/covers/<path:ckey>/ask-change")
 @need("relief")
 def ask_change(id, ckey):
-    """{why}: a line; the relief stays theirs until the team acts, and a new pick is made at once (fill.soon with force,
-    after the save); the history entry never holds the why"""
+    """{why}: a line; the relief stays theirs until the team acts, and a new pick is made at once (fill.soon for this
+    absence alone, with force, after the save); the history entry never holds the why"""
     return _yours(id, ckey, lambda r, x, c, me, b: _cover.ask_change(r["id"], ckey, b.get("why"), me), "asked to change",
-                  lambda r, me: f"{me} asked to change {_cover_words(r, ckey)}", after=lambda: _soon(force=True))
+                  lambda r, me: f"{me} asked to change {_cover_words(r, ckey)}", after=lambda: _soon(ids=[id], force=True))
 
 
 # ---- the load tracker (relief.team)

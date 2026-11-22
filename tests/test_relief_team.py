@@ -128,6 +128,9 @@ def the_sentences_are_exact():
     assert CV.SPLIT_SENT == "Part of this lesson is approved already, so it cannot be joined again."
     assert CV.CHANGE_WHY == "Say in a line why you cannot take it."
     assert AB.PAST_LESSON == "This lesson is in the past." and AB.CHANGED.startswith("Your timetable has changed")
+    assert CV.PICK_CHANGED == "The pick has changed since you looked: look again before approving."
+    assert AB.APPROVED_ALREADY == "This lesson's relief is approved already: ask the relief team to change it."
+    assert AB.IS_SPLIT == "This lesson is split: the relief team chooses for each part."
 
 @t
 def a_stage_2_record_reads_as_waiting_with_the_planned_reason():
@@ -150,7 +153,7 @@ def a_stage_2_record_reads_as_waiting_with_the_planned_reason():
     r, x, c = cov(i, K5)
     want = dict(who=SAM, by="planner", reason=f"Planned by {GRACE} on Fri 9 Oct.", at="2026-10-09T15:00:00+08:00")
     assert CV.pick_of(r, c) == want and CV.state(r, x, c) == "waiting"
-    same(CV.approve(i, K5, TEAMER, PUB, ST), i)
+    same(CV.approve(i, K5, SAM, TEAMER, PUB, ST), i)
     r, x, c = cov(i, K5)
     assert CV.state(r, x, c) == "approved" and c["pick"] == want and c["approved"] == dict(by=TEAMER, at=NOW), c
 
@@ -158,24 +161,24 @@ def a_stage_2_record_reads_as_waiting_with_the_planned_reason():
 def approve_makes_it_approved_and_records_who():
     fresh()
     r = absent(by=GRACE); i = r["id"]
-    refuses(CV.NOT_WAITING, lambda: CV.approve(i, K5, TEAMER, PUB, ST))          # open: nothing to approve
+    refuses(CV.PICK_CHANGED, lambda: CV.approve(i, K5, SAM, TEAMER, PUB, ST))          # open: the pick shown is gone
     same(AB.choose(i, K5, SAM, GRACE, PUB), i)
     want = dict(who=SAM, by="planner", reason=f"Planned by {GRACE} on Mon 12 Oct.", at=NOW)
     r, x, c = cov(i, K5)
     assert c["relief"] == SAM and c["relief_by"] == GRACE and c["pick"] == want, c
     assert c["history"] == [dict(what="pick", who=SAM, by="planner", at=NOW, why=want["reason"])], c["history"]
     assert CV.state(r, x, c) == "waiting" and CV.pick_of(r, c) == want
-    same(CV.approve(i, K5, TEAMER, PUB, ST), i)
+    same(CV.approve(i, K5, SAM, TEAMER, PUB, ST), i)
     r, x, c = cov(i, K5)
     assert CV.state(r, x, c) == "approved" and c["approved"] == dict(by=TEAMER, at=NOW) and c["relief"] == SAM and c["pick"] == want
     assert c["ack"] is None and c["change"] is None
     assert c["history"][-1] == dict(what="approved", who=SAM, by=TEAMER, at=NOW, why=None), c["history"]
-    refuses(CV.NOT_WAITING, lambda: CV.approve(i, K5, TEAMER, PUB, ST))
-    refuses(CV.NOT_WAITING, lambda: AB.choose(i, K5, MAYA, GRACE, PUB))           # the planner no longer changes an approved relief
-    refuses(CV.NOT_WAITING, lambda: AB.choose(i, K5, None, GRACE, PUB))
-    refuses(CV.NOT_WAITING, lambda: CV.approve(i, K8, TEAMER, PUB, ST))           # not needed
-    refuses(AB.CHANGED, lambda: CV.approve(i, "nokey", TEAMER, PUB, ST))
-    refuses(AB.WRONG, lambda: CV.approve("nope", K5, TEAMER, PUB, ST))
+    refuses(CV.NOT_WAITING, lambda: CV.approve(i, K5, SAM, TEAMER, PUB, ST))
+    refuses(AB.APPROVED_ALREADY, lambda: AB.choose(i, K5, MAYA, GRACE, PUB))      # the planner no longer changes an approved relief
+    refuses(AB.APPROVED_ALREADY, lambda: AB.choose(i, K5, None, GRACE, PUB))
+    refuses(CV.NOT_WAITING, lambda: CV.approve(i, K8, SAM, TEAMER, PUB, ST))           # not needed
+    refuses(AB.CHANGED, lambda: CV.approve(i, "nokey", SAM, TEAMER, PUB, ST))
+    refuses(AB.WRONG, lambda: CV.approve("nope", K5, SAM, TEAMER, PUB, ST))
     # the planner takes a waiting choice off: history keeps it
     AB.choose(i, K2, MAYA, GRACE, PUB)
     AB.choose(i, K2, None, GRACE, PUB)
@@ -189,7 +192,7 @@ def approve_makes_it_approved_and_records_who():
     r, x, c = cov(i, K2)
     f = [y for g in FR.free_then(PUB, ST, AB.all_records(), dict(x, key=K2), EVE)["groups"] for y in g["people"] if y["name"] == FLEX][0]
     assert f["over"] is True and f["today"] == 2, f
-    CV.approve(i, K2, TEAMER, PUB, ST)
+    CV.approve(i, K2, FLEX, TEAMER, PUB, ST)
     assert st(i, K2) == "approved"
 
 @t
@@ -202,23 +205,23 @@ def approve_refuses_someone_no_longer_free():
     absent(teacher=SAM)                                                          # the picked teacher asks for relief for that date first
     r, x, c = cov(i, K5)
     assert CV.stale(PUB, ST, AB.all_records(), r, x, c) and not CV.still_free(PUB, ST, AB.all_records(), r, x, c, SAM)
-    refuses(nf(SAM), lambda: CV.approve(i, K5, TEAMER, PUB, ST))
+    refuses(nf(SAM), lambda: CV.approve(i, K5, SAM, TEAMER, PUB, ST))
     assert st(i, K5) == "waiting"
     # teaching then: the published timetable changed under the pick
     AB.choose(i, K5, MAYA, GRACE, PUB)
-    refuses(nf(MAYA), lambda: CV.approve(i, K5, TEAMER, world([L(TUE, 6, 1, ["4B"], "Maths", [MAYA])]), ST))
+    refuses(nf(MAYA), lambda: CV.approve(i, K5, MAYA, TEAMER, world([L(TUE, 6, 1, ["4B"], "Maths", [MAYA])]), ST))
     # on the "never" list since
     never = dict(ST, limits=dict(ST["limits"], never=[MAYA]))
     r, x, c = cov(i, K5)
     assert CV.stale(PUB, never, AB.all_records(), r, x, c)
-    refuses(nf(MAYA), lambda: CV.approve(i, K5, TEAMER, PUB, never))
+    refuses(nf(MAYA), lambda: CV.approve(i, K5, MAYA, TEAMER, PUB, never))
     # given an overlapping relief somewhere else
     other = dict(id="x", teacher=RUTH, dates=["2026-10-13"], periods=None, cancelled=None,
                  lessons=[dict(key=KR6, date="2026-10-13", p=6, n=1, needed=True, relief=MAYA)])
     assert CV.stale(PUB, ST, AB.all_records() + [other], r, x, c)
     assert not CV.stale(PUB, ST, AB.all_records() + [dict(other, cancelled=dict(by=RUTH))], r, x, c)
     assert not CV.stale(PUB, ST, AB.all_records(), r, x, c)
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, MAYA, TEAMER, PUB, ST)
     r, x, c = cov(i, K5)
     assert CV.state(r, x, c) == "approved" and c["relief"] == MAYA
     assert CV.stale(PUB, never, AB.all_records(), r, x, c), "an approved relief can go stale too (the page says so)"
@@ -230,13 +233,15 @@ def approve_all_skips_the_stale_and_counts_the_rest():
     j = absent(teacher=RUTH, by=GRACE, lessons=[dict(key=KR6, relief=FLEX)])["id"]
     f = absent(by=GRACE, dates=["2026-10-16"], lessons=[dict(key=KF, relief=SAM)])["id"]
     absent(teacher=SAM)
-    got = CV.approve_all(D13, TEAMER, PUB, ST)
-    assert got == dict(approved=2, skipped=[dict(ckey=K5, name=SAM, why=nf(SAM))]), got
+    shown = [dict(id=j, ckey=KR6, who=FLEX), dict(id=i, ckey=K5, who=SAM), dict(id=i, ckey=K2, who=MAYA)]   # as the page showed them
+    got = CV.approve_all(D13, shown, TEAMER, PUB, ST)
+    assert got == dict(approved=[(i, K2, MAYA), (j, KR6, FLEX)], skipped=[dict(id=i, ckey=K5, name=SAM, why=nf(SAM))]), got
     assert (st(i, K5), st(i, K2), st(j, KR6), st(f, KF), st(j, KR2)) == ("waiting", "approved", "approved", "waiting", "open")
     assert cov(i, K2)[2]["approved"] == dict(by=TEAMER, at=NOW)
-    assert CV.approve_all("2026-10-13", TEAMER, PUB, ST) == dict(approved=0, skipped=[dict(ckey=K5, name=SAM, why=nf(SAM))])
-    assert CV.approve_all(D16, GRACE, PUB, ST) == dict(approved=1, skipped=[])
+    assert CV.approve_all("2026-10-13", shown[1:2], TEAMER, PUB, ST) == dict(approved=[], skipped=[dict(id=i, ckey=K5, name=SAM, why=nf(SAM))])
+    assert CV.approve_all(D16, [dict(id=f, ckey=KF, who=SAM)], GRACE, PUB, ST) == dict(approved=[(f, KF, SAM)], skipped=[])
     assert cov(f, KF)[2]["approved"]["by"] == GRACE
+    assert CV.approve_all(D13, [], TEAMER, PUB, ST) == dict(approved=[], skipped=[])
 
 @t
 def change_chooses_and_approves_in_one():
@@ -286,7 +291,7 @@ def split_at_a_boundary_gives_two_open_parts_and_join_undoes_it():
     refuses(CV.NO_SPLIT, lambda: CV.split(i, K2, 2, TEAMER))                         # P3 is a part of one period
     refuses(AB.WRONG, lambda: CV.split(i, K2, 5, TEAMER))
     refuses(AB.WRONG, lambda: CV.split(i, K2, "4", TEAMER))
-    refuses(AB.CHANGED, lambda: AB.choose(i, K2, SAM, GRACE, PUB))                   # a split lesson is chosen part by part
+    refuses(AB.IS_SPLIT, lambda: AB.choose(i, K2, SAM, GRACE, PUB))                  # a split lesson is chosen part by part, by the team
     CV.set_pick(i, K2 + "#1", pk(FLEX), PUB, ST)
     assert st(i, K2 + "#1") == "waiting" and st(i, K2 + "#0") == "open"
     same(CV.join(i, K2, TEAMER), i)
@@ -317,7 +322,7 @@ def the_relief_teacher_acknowledges_and_asks_to_change_only_their_own():
     r = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)]); i = r["id"]
     refuses(CV.NOT_YOURS_COVER, lambda: CV.acknowledge(i, K5, SAM))                  # waiting: not theirs until approved
     refuses(CV.NOT_YOURS_COVER, lambda: CV.ask_change(i, K5, "A meeting", SAM))
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
     for who in (MAYA, EVE, TEAMER, GRACE):
         refuses(CV.NOT_YOURS_COVER, lambda: CV.acknowledge(i, K5, who))
         refuses(CV.NOT_YOURS_COVER, lambda: CV.ask_change(i, K5, "A meeting", who))
@@ -348,7 +353,7 @@ def approving_a_change_request_moves_it_and_keep_leaves_it():
     i = absent(by=GRACE)["id"]
     CV.change(i, K5, SAM, TEAMER, PUB, ST)
     CV.ask_change(i, K5, "A meeting", SAM)
-    refuses(CV.NOT_WAITING, lambda: CV.approve(i, K5, TEAMER, PUB, ST))             # no new pick yet
+    refuses(CV.PICK_CHANGED, lambda: CV.approve(i, K5, FLEX, TEAMER, PUB, ST))             # no new pick yet: none to approve
     refuses(nf(BUSY), lambda: CV.set_pick(i, K5, pk(BUSY), PUB, ST, into="change"))
     same(CV.set_pick(i, K5, pk(FLEX), PUB, ST, into="change"), i)
     r, x, c = cov(i, K5)
@@ -356,7 +361,7 @@ def approving_a_change_request_moves_it_and_keep_leaves_it():
     assert c["history"][-1] == dict(what="pick", who=FLEX, by="ai", at=NOW, why=pk(FLEX)["reason"])
     refuses(nf(MAYA), lambda: CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change"))  # it has its new pick already
     refuses(nf(MAYA), lambda: CV.set_pick(i, K5, pk(MAYA), PUB, ST))                 # not open
-    same(CV.approve(i, K5, GRACE, PUB, ST), i)
+    same(CV.approve(i, K5, FLEX, GRACE, PUB, ST), i)
     r, x, c = cov(i, K5)
     assert CV.state(r, x, c) == "approved" and c["relief"] == FLEX and c["pick"] == pk(FLEX)
     assert c["approved"] == dict(by=GRACE, at=NOW) and c["change"] is None and c["ack"] is None
@@ -364,12 +369,12 @@ def approving_a_change_request_moves_it_and_keep_leaves_it():
     # the new pick is checked again when approved; Keep leaves the relief where it is
     CV.ask_change(i, K5, "Not today", FLEX)
     CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change")
-    refuses(nf(MAYA), lambda: CV.approve(i, K5, TEAMER, PUB, dict(ST, limits=dict(ST["limits"], never=[MAYA]))))
+    refuses(nf(MAYA), lambda: CV.approve(i, K5, MAYA, TEAMER, PUB, dict(ST, limits=dict(ST["limits"], never=[MAYA]))))
     refuses(CV.NO_CHANGE_ASKED, lambda: CV.keep(i, K2, TEAMER))
     same(CV.keep(i, K5, TEAMER), i)
     r, x, c = cov(i, K5)
     assert CV.state(r, x, c) == "approved" and c["relief"] == FLEX and c["change"] is None
-    assert c["history"][-1] == dict(what="kept", who=FLEX, by=TEAMER, at=NOW, why=None)
+    assert c["history"][-2:] == [dict(what="dropped", who=MAYA, by=TEAMER, at=NOW, why=None), dict(what="kept", who=FLEX, by=TEAMER, at=NOW, why=None)]
     assert "asked to change" in [h["what"] for h in c["history"]] and [h["who"] for h in c["history"] if h["what"] == "pick"][-1] == MAYA
     refuses(CV.NO_CHANGE_ASKED, lambda: CV.keep(i, K5, TEAMER))
 
@@ -403,7 +408,7 @@ def cancel_and_not_needed_end_the_cover_and_its_load():
     assert [FR.relief_periods(recs, n, {D13}) for n in (SAM, MAYA, FLEX)] == [0, 0, 0]
     assert MAYA in names(FR.free_then(PUB, ST, recs, LS.on_date(PUB, CAL, RUTH, D13)[0], RUTH))
     refuses(AB.CANCELLED, lambda: CV.acknowledge(i, K2 + "#0", MAYA))
-    refuses(AB.CANCELLED, lambda: CV.approve(i, K2 + "#1", TEAMER, PUB, ST))
+    refuses(AB.CANCELLED, lambda: CV.approve(i, K2 + "#1", FLEX, TEAMER, PUB, ST))
     refuses(AB.CANCELLED, lambda: CV.change(i, K5, MAYA, TEAMER, PUB, ST))
     refuses(nf(MAYA), lambda: CV.set_pick(i, K5, pk(MAYA), PUB, ST))                 # not open: a pick worked out meanwhile is not saved
     # an absence cancelled by stage 2 kept its relief: it still reads cancelled, never stale, and counts nothing
@@ -478,8 +483,8 @@ def actions_on_an_ended_lesson_are_refused():
     try:
         LS.today = lambda: D(2026, 10, 14)
         PAST = AB.PAST_LESSON
-        refuses(PAST, lambda: CV.approve(i, K5, TEAMER, PUB, ST))
-        refuses(PAST, lambda: CV.approve_all(D13, TEAMER, PUB, ST))
+        refuses(PAST, lambda: CV.approve(i, K5, SAM, TEAMER, PUB, ST))
+        refuses(PAST, lambda: CV.approve_all(D13, [dict(id=i, ckey=K5, who=SAM)], TEAMER, PUB, ST))
         refuses(PAST, lambda: CV.change(i, K5, FLEX, TEAMER, PUB, ST))
         refuses(PAST, lambda: CV.set_pick(j, KR6, pk(FLEX), PUB, ST))
         refuses(PAST, lambda: CV.drop(i, K5, "x"))
@@ -489,7 +494,7 @@ def actions_on_an_ended_lesson_are_refused():
         refuses(PAST, lambda: CV.acknowledge(i, K2, MAYA))
         refuses(PAST, lambda: CV.ask_change(i, K2, "A meeting", MAYA))
     finally: LS.today = old
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
     CV.acknowledge(i, K2, MAYA)
     assert (st(i, K5), st(i, K2)) == ("approved", "acknowledged")
 
@@ -502,22 +507,23 @@ def approve_all_approves_a_waiting_split_part():
     i = absent(by=GRACE)["id"]
     CV.split(i, K2, 3, TEAMER)
     CV.set_pick(i, K2 + "#1", pk(FLEX), PUB, ST)
-    assert CV.approve_all(D13, TEAMER, PUB, ST) == dict(approved=1, skipped=[])
+    assert CV.approve_all(D13, [dict(id=i, ckey=K2 + "#1", who=FLEX)], TEAMER, PUB, ST) == dict(approved=[(i, K2 + "#1", FLEX)], skipped=[])
     assert (st(i, K2 + "#0"), st(i, K2 + "#1")) == ("open", "approved")
     assert cov(i, K2 + "#1")[2]["approved"] == dict(by=TEAMER, at=NOW)
     absent(teacher=SAM)
     CV.set_pick(i, K2 + "#0", pk(MAYA), PUB, ST)
     r = AB.load(i); x = AB._lesson(r, K2); x["parts"][0]["relief"] = SAM; x["parts"][0]["pick"] = pk(SAM)   # SAM is away now
     AB._save(r)
-    assert CV.approve_all(D13, TEAMER, PUB, ST) == dict(approved=0, skipped=[dict(ckey=K2 + "#0", name=SAM, why=nf(SAM))])
+    got = CV.approve_all(D13, [dict(id=i, ckey=K2 + "#0", who=SAM)], TEAMER, PUB, ST)
+    assert got == dict(approved=[], skipped=[dict(id=i, ckey=K2 + "#0", name=SAM, why=nf(SAM))]), got
 
 @t
 def cancel_across_a_past_and_a_future_date_keeps_the_past_relief():
     fresh()
     k27 = key(EVE, 5, D(2026, 10, 27))
     i = absent(by=GRACE, dates=["2026-10-13", "2026-10-27"], lessons=[dict(key=K5, relief=SAM), dict(key=k27, relief=SAM)])["id"]
-    CV.approve(i, K5, TEAMER, PUB, ST)
-    CV.approve(i, k27, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
+    CV.approve(i, k27, SAM, TEAMER, PUB, ST)
     old = LS.today
     try:
         LS.today = lambda: D(2026, 10, 14)
@@ -583,18 +589,18 @@ def the_planners_pick_stays_in_history():
     reason = f"Planned by {GRACE} on Mon 12 Oct."
     i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM), dict(key=K2, relief=SAM)])["id"]  # stage 2's new: no pick, no history
     assert "history" not in cov(i, K5)[2]
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
     c = cov(i, K5)[2]
     assert whats(c) == [planned, ("approved", SAM, TEAMER)] and c["history"][0]["why"] == reason and c["history"][0]["at"] == NOW
     CV.ask_change(i, K5, "A meeting", SAM)
     CV.set_pick(i, K5, pk(FLEX), PUB, ST, into="change")
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, FLEX, TEAMER, PUB, ST)
     c = cov(i, K5)[2]
     assert c["pick"] == pk(FLEX) and whats(c)[0] == planned and c["history"][0]["why"] == reason, "the planner's pick outlives the new one"
     assert whats(c) == [planned, ("approved", SAM, TEAMER), ("asked to change", SAM, SAM), ("pick", FLEX, "ai"), ("approved", FLEX, TEAMER)], whats(c)
     # change, choose, drop, not needed and cancel each write the planner's pick down before they end it
     CV.change(i, K2, MAYA, TEAMER, PUB, ST)
-    assert whats(cov(i, K2)[2]) == [planned, ("pick", MAYA, "team"), ("changed", MAYA, TEAMER)]
+    assert whats(cov(i, K2)[2]) == [planned, ("dropped", SAM, TEAMER), ("pick", MAYA, "team"), ("changed", MAYA, TEAMER)]
     fresh()
     i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM), dict(key=K2, relief=SAM)])["id"]
     AB.choose(i, K5, MAYA, GRACE, PUB)
@@ -1412,7 +1418,7 @@ def a_change_requests_new_pick_books_its_teacher():
         assert FL.run(call=first, now=mon("09:00")) == dict(picked=1, nobody=0)
         j = absent(teacher=RUTH, periods=[6, 6])["id"]
         assert FL.run(call=first, now=mon("15:00")) == dict(picked=0, nobody=1) and st(j, KR6) == "open"
-        CV.approve(i, K5, TEAMER, PUB, s)
+        CV.approve(i, K5, TEAMER, TEAMER, PUB, s)
         recs = AB.all_records()
         assert relief_of(i, K5) == TEAMER and FR.relief_periods(recs, TEAMER, {D13}) == 2 and FR.relief_periods(recs, SAM, {D13}) == 0
 
@@ -1523,7 +1529,7 @@ def today_lists_covers_in_time_order_with_counts_and_no_reason():
     team = staff(TEAMER)
     i = absent(by=GRACE, reason="Other", reason_text="A private matter", remarks="Quiet please", lessons=[dict(key=K5, relief=SAM)])["id"]
     j = absent(teacher=RUTH, by=GRACE, reason="Child sick", lessons=[dict(key=KR6, relief=FLEX)])["id"]
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
     CV.change(i, K2, FLEX, TEAMER, PUB, ST)                          # P3-P5 to Mr Flex Ng, approved: with P7 too he goes over his 3
     AB.set_work(i, K5, dict(text="Read p.4", link="", files=[], known=[]), EVE)
     s = absent(teacher=SAM)["id"]                                     # Mr Sam Tan away too: his approved P6-P7 is stale now
@@ -1610,20 +1616,25 @@ def the_team_approves_changes_splits_and_keeps_through_the_api():
     i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]           # P3-P5 open, P6-P7 waiting for Mr Sam Tan
     j = absent(teacher=RUTH, by=GRACE, lessons=[dict(key=KR6, relief=FLEX)])["id"]
     n = len(notes())
-    got = ok(team.post(cover_url(i, K5, "approve")))
+    got = ok(team.post(cover_url(i, K5, "approve"), json=dict(who=SAM)))
     assert [x["covers"] for x in got["lessons"] if x["key"] == K5] == [[dict(ckey=K5, p=5, n=2, start="10:30", end="11:30", state="approved", relief=SAM, planned=None)]]
     assert got["reason"] == "Medical", "the team sees the whole record"
-    no(team.post(cover_url(i, K5, "approve")), 400, CV.NOT_WAITING)
-    no(team.post(cover_url(i, "nokey", "approve")), 400, AB.CHANGED)
-    no(team.post(cover_url("abcdef123456", K5, "approve")), 404, GONE_ABS)
+    no(team.post(cover_url(i, K5, "approve"), json=dict(who=SAM)), 400, CV.NOT_WAITING)
+    no(team.post(cover_url(i, "nokey", "approve"), json=dict(who=SAM)), 400, AB.CHANGED)
+    no(team.post(cover_url("abcdef123456", K5, "approve"), json=dict(who=SAM)), 404, GONE_ABS)
     # approve all: the waiting ones of the day in time order, a stale one skipped and named
     CV.set_pick(i, K2, pk(BUSY), PUB, ST)
     absent(teacher=BUSY)                                                       # then Mr Busy Chan asks for relief himself
     for bad in ("13/10/2026", 5, None, "", "2026-13-40"):
         no(team.post("/api/relief/today/approve-all", json=dict(date=bad)), 400, AB.WRONG)
     no(team.post("/api/relief/today/approve-all", json=dict(date="2026-10-09")), 400, AB.PAST_LESSON)
-    got = ok(team.post("/api/relief/today/approve-all", json=dict(date="2026-10-13")))
-    assert got == dict(approved=1, skipped=[dict(ckey=K2, name=BUSY, why=nf(BUSY))]), got
+    no(team.post("/api/relief/today/approve-all", json=dict(date="2026-10-13")), 400, CV.PICK_CHANGED)   # not what the page showed
+    shown = [dict(id=i, ckey=K2, who=BUSY), dict(id=j, ckey=KR6, who=FLEX)]
+    for bad in ("x", [None], [dict(id=i, ckey=5, who=BUSY)], [dict(ckey=K2, who=BUSY)]):
+        no(team.post("/api/relief/today/approve-all", json=dict(date="2026-10-13", covers=bad)), 400, AB.WRONG)
+    assert (st(j, KR6), st(i, K2)) == ("waiting", "waiting")
+    got = ok(team.post("/api/relief/today/approve-all", json=dict(date="2026-10-13", covers=shown)))
+    assert got == dict(approved=1, skipped=[dict(id=i, ckey=K2, name=BUSY, why=nf(BUSY))]), got
     assert (st(j, KR6), st(i, K2)) == ("approved", "waiting")
     # Change: the free-then list for the cover, then chosen and approved in one
     free = ok(team.get(cover_url(i, K2, "free")))
@@ -1673,14 +1684,14 @@ def covering_lists_only_approved_and_never_the_reason():
     k2 = key(EVE, 0, D2)
     with at("2026-10-02T07:00:00+08:00"):                                     # Fri 2 Oct, last week's: approved to Mr Sam Tan
         old = absent(by=GRACE, dates=["2026-10-02"], lessons=[dict(key=k2, relief=SAM)])["id"]
-        CV.approve(old, k2, TEAMER, PUB, ST)
+        CV.approve(old, k2, SAM, TEAMER, PUB, ST)
     i = absent(by=GRACE, dates=["2026-10-13", "2026-10-16"], reason="Other", reason_text="A private matter", remarks="Quiet please",
                lessons=[dict(key=K5, relief=SAM), dict(key=K2, relief=SAM), dict(key=KF, relief=SAM)])["id"]
     j = absent(teacher=RUTH, by=GRACE, lessons=[dict(key=KR6, relief=MAYA)])["id"]
     f = RF.save(i, "notes.pdf", b"%PDF-1 notes")
     AB.set_work(i, K5, dict(text="Read p.4", link="https://x.test/a", files=[f], known=[]), EVE)
-    for ckey in (K5, KF): CV.approve(i, ckey, TEAMER, PUB, ST)
-    CV.approve(j, KR6, TEAMER, PUB, ST)
+    for ckey in (K5, KF): CV.approve(i, ckey, SAM, TEAMER, PUB, ST)
+    CV.approve(j, KR6, MAYA, TEAMER, PUB, ST)
     sam = staff(SAM)
     with at("2026-10-14T08:00:00+08:00"):                                     # Wednesday: Tuesday's is earlier this week
         r = sam.get("/api/relief/covering"); got = ok(r)
@@ -1713,7 +1724,7 @@ def acknowledge_and_ask_change_are_the_relief_teachers_alone():
         no(c.post(cover_url(i, K5, "acknowledge")), 403, NOT_YOURS_COVER)
         no(c.post(cover_url(i, K5, "ask-change"), json=dict(why="A meeting")), 403, NOT_YOURS_COVER)
     assert snap() == before
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
     before, n = snap(), len(notes())
     for c in (ruth, team, eve, grace):
         no(c.post(cover_url(i, K5, "acknowledge")), 403, NOT_YOURS_COVER)
@@ -1750,7 +1761,7 @@ def the_relief_teacher_can_open_the_work_file():
     AB.set_work(i, K2, dict(text="", link="", files=[g], known=[]), EVE)
     url = lambda x: f"/api/relief/files/{i}/{x['id']}"
     no(sam.get(url(f)), 403, NOT_YOURS)                                       # waiting: not his yet
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
     r = sam.get(url(f))
     assert r.status_code == 200 and r.data == b"%PDF-1 notes" and "notes.pdf" in r.headers["Content-Disposition"] and "no-store" in r.headers["Cache-Control"]
     r.close()
@@ -1787,11 +1798,11 @@ def the_absent_teacher_sees_the_name_only_once_approved():
         g5, g2 = lesson(c, K5), lesson(c, K2)
         assert (g5["relief"], g5["planned"], g5["covers"][0]["planned"], g2["relief"], g2["planned"]) == (SAM, SAM, SAM, FLEX, None), (g5, g2)
         assert g2["pick"]["by"] == "ai" and g2["history"], g2
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
     e5 = lesson(eve, K5)
     assert e5["relief"] == SAM and e5["covers"][0]["state"] == "approved" and e5["covers"][0]["relief"] == SAM and "pick" not in e5, e5
     assert lesson(grace, K5)["planned"] is None
-    no(grace.put(lesson_url(i, K5, "relief"), json=dict(relief=MAYA)), 400, CV.NOT_WAITING)     # the planner no longer changes it (Ruling 11)
+    no(grace.put(lesson_url(i, K5, "relief"), json=dict(relief=MAYA)), 400, AB.APPROVED_ALREADY)   # the planner no longer changes it (Ruling 11)
     CV.ask_change(i, K5, "A parents' meeting", SAM); CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change")
     e5 = lesson(eve, K5)
     assert e5["relief"] == SAM and e5["covers"][0]["state"] == "change" and "change" not in e5, e5
@@ -1803,6 +1814,7 @@ def the_absent_teacher_sees_the_name_only_once_approved():
     assert [(x["relief"], x["covers"][0]["state"]) for x in got["lessons"]] == [(None, "open"), (None, "waiting")] and TEAMER not in json.dumps(got["lessons"])
     # a split lesson's parts are hidden the same way
     CV.split(i, K2, 3, TEAMER); CV.set_pick(i, K2 + "#1", pk(GRACE), PUB, ST)
+    no(grace.put(lesson_url(i, K2, "relief"), json=dict(relief=MAYA)), 400, AB.IS_SPLIT)          # the team chooses part by part
     e2 = lesson(eve, K2)
     assert [p.get("relief") for p in e2["parts"]] == [None, None] and not any({"pick", "history", "change"} & set(p) for p in e2["parts"]), e2["parts"]
     assert "history" not in e2 and [c["state"] for c in e2["covers"]] == ["open", "waiting"]
@@ -1814,7 +1826,7 @@ def load_counts_teaching_and_relief_for_the_week_and_term():
     fresh()
     team = staff(TEAMER)
     i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
     CV.set_pick(i, K2, pk(FLEX), PUB, ST)                                     # waiting: counted, as the free-then counts do
     absent(by=GRACE, dates=["2026-10-27"], lessons=[dict(key=K5_27, relief=SAM)])   # later in the term
     CV.ask_change(i, K5, "A meeting", SAM); CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change")   # the new pick books Ms Maya Lee too
@@ -1855,7 +1867,7 @@ def load_csv_neutralises_formulas():
     store.published = lambda: pub
     team = staff(TEAMER)
     i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
-    CV.approve(i, K5, TEAMER, pub, ST)
+    CV.approve(i, K5, SAM, TEAMER, pub, ST)
     r = team.get("/api/relief/load.csv?week=2026-10-13")
     assert r.status_code == 200 and r.mimetype == "text/csv" and r.headers["Content-Disposition"] == 'attachment; filename="relief load 2026-10-12.csv"', r.headers
     text = r.data.decode("utf-8")
@@ -1881,7 +1893,7 @@ def whats_in_counts_covers_and_marks_the_nudge():
         return {x: (rows[x]["cover"], rows[x]["nudge"]) for x in (i, j, k)}
     g = got()
     assert g[i] == (dict(total=2, approved=0, waiting=1, open=1), False) and g[j] == (dict(total=2, approved=0, waiting=0, open=2), False), g
-    CV.approve(i, K5, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
     CV.split(i, K2, 3, TEAMER); CV.set_pick(i, K2 + "#1", pk(FLEX), PUB, ST)
     assert got()[i][0] == dict(total=3, approved=1, waiting=1, open=1), got()[i]
     with at("2026-10-12T14:59:00+08:00"): assert [v[1] for v in got().values()] == [False, False, False]
@@ -1964,7 +1976,7 @@ def a_split_lesson_reads_its_parts_in_the_record_and_the_sheet():
     assert AB._lesson(AB.load(i), K2)["parts"] == stored and "ckey" not in stored[0], "sending never changes the record"
     assert next(v for v in ok(team.get("/api/relief/absences"))["absences"] if v["id"] == i)["cover"] == dict(total=4, approved=1, waiting=1, open=2)
     rows = list(csv.reader(io.StringIO(grace.get("/api/relief/planned.csv?start=2026-10-13").data.decode("utf-8").lstrip("﻿"))))
-    assert [r[2:6] for r in rows[1:]] == [["1C Science", "P3", "09:00–09:30", "Not chosen yet"], ["1C Science", "P4", "09:30–10:00", SAM],
+    assert [r[2:6] for r in rows[1:]] == [["1C Science", "P3", "09:00–09:30", "Not chosen yet"], ["1C Science", "P4", "09:30–10:00", "Waiting for the relief team"],
                                           ["1C Science", "P5", "10:00–10:30", FLEX], ["1A Science", "P6–P7", "10:30–11:30", "Not chosen yet"]], rows
     rows = ok(team.get("/api/relief/today?date=2026-10-13"))["rows"]
     assert [(r["ckey"], r["key"], r["split"], r["p"], r["start"]) for r in rows] == [(K2 + "#0", K2, True, 2, "09:00"), (K2 + "#2", K2, True, 3, "09:30"),
@@ -1981,6 +1993,187 @@ def the_new_routes_answer_signed_out_and_unpublished():
     store.published = lambda: None
     for method, url in routes:
         no(team.open(url, method=method, json={}), 409, NO_PUB)
+
+# ---- the final fix wave: Approve approves what the team member saw (Rulings 26 to 29) ----
+def who_shown(row):
+    """the name a Today row shows beside Approve: the waiting pick, or a request to change's new pick"""
+    return row["change"]["pick"]["who"] if row["state"] == "change" else row["pick"]["who"]
+
+def today_row(c, i, ckey, date="2026-10-13"):
+    return next(r for r in ok(c.get(f"/api/relief/today?date={date}"))["rows"] if (r["id"], r["ckey"]) == (i, ckey))
+
+RUTH7 = f"Relief for {RUTH} on Tue 13 Oct: {FLEX} approved for 3B Physics P7 on Tue 13 Oct"
+
+@rt
+def approve_is_refused_when_the_pick_changed_since_the_page_read_it():
+    fresh()
+    team = staff(TEAMER)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]           # P6-P7 waiting for Mr Sam Tan
+    seen = today_row(team, i, K5)
+    assert (seen["state"], who_shown(seen)) == ("waiting", SAM), seen
+    absent(teacher=SAM)                                                       # then he asks for relief himself: a run drops him and picks again
+    FL.run(date=D13, call=first, now=mon("09:00"))
+    new = relief_of(i, K5)
+    assert st(i, K5) == "waiting" and new not in (None, SAM), new
+    before, n = snap(), len(notes())
+    no(team.post(cover_url(i, K5, "approve"), json=dict(who=SAM)), 400, CV.PICK_CHANGED)
+    for bad in ({}, dict(who=None), dict(who=""), dict(who=[new])):            # a request without the name it showed
+        no(team.post(cover_url(i, K5, "approve"), json=bad), 400, CV.PICK_CHANGED)
+    no(team.post(cover_url(i, K5, "approve")), 400, CV.PICK_CHANGED)
+    assert snap() == before and len(notes()) == n and st(i, K5) == "waiting", "nothing approved, nothing noted"
+    refuses(CV.PICK_CHANGED, lambda: CV.approve(i, K5, SAM, TEAMER, PUB, ST))
+    refuses(CV.PICK_CHANGED, lambda: CV.approve(i, K5, None, TEAMER, PUB, ST))
+    # read again: the new pick is shown, approved and named
+    assert who_shown(today_row(team, i, K5)) == new
+    ok(team.post(cover_url(i, K5, "approve"), json=dict(who=new)))
+    assert st(i, K5) == "approved" and relief_of(i, K5) == new
+    assert notes()[n:] == [("approved", TEAMER, HEAD + f"{new} approved for 1A Science P6–P7 on Tue 13 Oct")], notes()[n:]
+
+@rt
+def approve_the_new_pick_is_refused_when_it_changed_since_the_page_read_it():
+    fresh()
+    team = staff(TEAMER)
+    i = absent(by=GRACE)["id"]
+    CV.change(i, K5, SAM, TEAMER, PUB, ST); CV.ask_change(i, K5, "A meeting", SAM)
+    CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change")
+    seen = today_row(team, i, K5)
+    assert (seen["state"], who_shown(seen)) == ("change", MAYA), seen
+    CV.drop(i, K5, nf(MAYA), who=MAYA, into="change"); CV.set_pick(i, K5, pk(FLEX), PUB, ST, into="change")   # a run picks again meanwhile
+    before, n = snap(), len(notes())
+    no(team.post(cover_url(i, K5, "approve"), json=dict(who=MAYA)), 400, CV.PICK_CHANGED)
+    no(team.post(cover_url(i, K5, "approve"), json={}), 400, CV.PICK_CHANGED)
+    refuses(CV.PICK_CHANGED, lambda: CV.approve(i, K5, SAM, TEAMER, PUB, ST))          # the teacher who asked is not the new pick
+    assert snap() == before and len(notes()) == n
+    r, x, c = cov(i, K5)
+    assert CV.state(r, x, c) == "change" and c["relief"] == SAM and CV.new_pick(c)["who"] == FLEX
+    CV.drop(i, K5, nf(FLEX), who=FLEX, into="change")                                   # dropped, not picked again yet: the same sentence
+    no(team.post(cover_url(i, K5, "approve"), json=dict(who=FLEX)), 400, CV.PICK_CHANGED)
+    CV.set_pick(i, K5, pk(FLEX), PUB, ST, into="change")
+    ok(team.post(cover_url(i, K5, "approve"), json=dict(who=FLEX)))
+    assert st(i, K5) == "approved" and relief_of(i, K5) == FLEX
+    assert notes()[n:] == [("approved", TEAMER, HEAD + f"{FLEX} approved for 1A Science P6–P7 on Tue 13 Oct")], notes()[n:]
+
+@rt
+def approve_all_approves_only_the_picks_the_page_showed():
+    fresh()
+    team, tab2 = staff(TEAMER), staff(TEAMER)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]                  # P3-P5 open, P6-P7 waiting for Mr Sam Tan
+    j = absent(teacher=RUTH, by=GRACE, lessons=[dict(key=KR6, relief=FLEX)])["id"]  # P7 waiting for Mr Flex Ng
+    rows = ok(team.get("/api/relief/today?date=2026-10-13"))["rows"]
+    shown = [dict(id=r["id"], ckey=r["ckey"], who=who_shown(r)) for r in rows if r["state"] == "waiting"]
+    assert shown == [dict(id=i, ckey=K5, who=SAM), dict(id=j, ckey=KR6, who=FLEX)], shown
+    absent(teacher=SAM)                                                              # then a run drops Mr Sam Tan, picks again, and picks P3-P5
+    FL.run(date=D13, call=first, now=mon("09:00"))
+    assert (st(i, K5), st(i, K2)) == ("waiting", "waiting") and relief_of(i, K5) not in (None, SAM)
+    n = len(notes())
+    got = ok(team.post("/api/relief/today/approve-all", json=dict(date="2026-10-13", covers=shown)))
+    assert got == dict(approved=1, skipped=[dict(id=i, ckey=K5, name=SAM, why=CV.PICK_CHANGED)]), got
+    assert (st(j, KR6), st(i, K5), st(i, K2)) == ("approved", "waiting", "waiting"), "a pick the page never showed is not approved"
+    assert notes()[n:] == [("approved", TEAMER, RUTH7)], notes()[n:]
+    # pressed again (a second tab, or a double click): nothing more is approved and no entry is written again
+    got = ok(tab2.post("/api/relief/today/approve-all", json=dict(date="2026-10-13", covers=shown)))
+    assert got == dict(approved=0, skipped=[dict(id=i, ckey=K5, name=SAM, why=CV.PICK_CHANGED), dict(id=j, ckey=KR6, name=FLEX, why=CV.NOT_WAITING)]), got
+    assert len(notes()) == n + 1
+    # a row whose name is missing is skipped, the rest approved
+    k = relief_of(i, K5)
+    got = ok(team.post("/api/relief/today/approve-all", json=dict(date="2026-10-13", covers=[dict(id=i, ckey=K5), dict(id=i, ckey=K2, who=relief_of(i, K2))])))
+    assert got == dict(approved=1, skipped=[dict(id=i, ckey=K5, name=None, why=CV.PICK_CHANGED)]) and st(i, K2) == "approved" and st(i, K5) == "waiting", got
+    assert relief_of(i, K5) == k
+
+@rt
+def approve_all_notes_exactly_the_covers_it_approved():
+    real = CV.approve_all
+    def setup():
+        fresh()
+        i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+        j = absent(teacher=RUTH, by=GRACE, lessons=[dict(key=KR6, relief=FLEX)])["id"]
+        return i, j, [dict(id=i, ckey=K5, who=SAM), dict(id=j, ckey=KR6, who=FLEX)]
+    def press(c, shown, meanwhile):
+        def hooked(*a, **kw):                   # what happens after the request arrives and before the approvals take the lock
+            CV.approve_all = real
+            meanwhile()
+            return real(*a, **kw)
+        CV.approve_all = hooked
+        try: return ok(c.post("/api/relief/today/approve-all", json=dict(date="2026-10-13", covers=shown)))
+        finally: CV.approve_all = real
+    team, tab2 = staff(TEAMER), staff(TEAMER)
+    # a background run saves a pick for the open P3-P5 meanwhile: it is not approved, and no entry names it
+    i, j, shown = setup()
+    n = len(notes())
+    got = press(team, shown, lambda: CV.set_pick(i, K2, pk(MAYA), PUB, ST))
+    assert got == dict(approved=2, skipped=[]), got
+    assert (st(i, K5), st(j, KR6), st(i, K2)) == ("approved", "approved", "waiting"), "the pick saved meanwhile is not approved"
+    assert notes()[n:] == [("approved", TEAMER, HEAD + f"{SAM} approved for 1A Science P6–P7 on Tue 13 Oct"), ("approved", TEAMER, RUTH7)], notes()[n:]
+    # two presses at once (two tabs): the second gets there first; each cover has one entry
+    i, j, shown = setup()
+    n = len(notes())
+    got = press(team, shown, lambda: ok(tab2.post("/api/relief/today/approve-all", json=dict(date="2026-10-13", covers=shown))))
+    assert got == dict(approved=0, skipped=[dict(id=i, ckey=K5, name=SAM, why=CV.NOT_WAITING), dict(id=j, ckey=KR6, name=FLEX, why=CV.NOT_WAITING)]), got
+    assert notes()[n:] == [("approved", TEAMER, HEAD + f"{SAM} approved for 1A Science P6–P7 on Tue 13 Oct"), ("approved", TEAMER, RUTH7)], notes()[n:]
+
+@rt
+def the_planned_sheet_names_only_an_approved_relief():
+    fresh()
+    grace = staff(GRACE)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]           # the planner's own choice, waiting
+    CV.set_pick(i, K2, pk(FLEX), PUB, ST)                                     # the AI's pick, waiting
+    j = absent(teacher=RUTH)["id"]                                            # nothing picked yet
+    def sheet():
+        text = grace.get("/api/relief/planned.csv?start=2026-10-13").data.decode("utf-8")
+        return text, [(r[1], r[3], r[5]) for r in csv.reader(io.StringIO(text.lstrip("\ufeff")))][1:]
+    W, N = "Waiting for the relief team", "Not chosen yet"
+    text, rows = sheet()
+    assert rows == [(EVE, "P3–P5", W), (RUTH, "P3", N), (EVE, "P6–P7", W), (RUTH, "P7", N)], rows
+    assert SAM not in text and FLEX not in text, "no name before the relief team approves it"
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST); CV.approve(i, K2, FLEX, TEAMER, PUB, ST); CV.change(j, KR6, MAYA, TEAMER, PUB, ST)
+    CV.acknowledge(i, K2, FLEX); CV.ask_change(i, K5, "A meeting", SAM); CV.set_pick(i, K5, pk(TEAMER), PUB, ST, into="change")
+    text, rows = sheet()
+    assert rows == [(EVE, "P3–P5", FLEX), (RUTH, "P3", N), (EVE, "P6–P7", SAM), (RUTH, "P7", MAYA)], rows
+    assert TEAMER not in text, "a request to change's new pick is not approved either"
+
+@t
+def keep_and_change_write_down_the_pick_they_drop():
+    fresh()
+    i = absent(by=GRACE)["id"]
+    CV.change(i, K5, SAM, TEAMER, PUB, ST)                                    # open: nothing is dropped
+    assert whats(cov(i, K5)[2]) == [("pick", SAM, "team"), ("changed", SAM, TEAMER)]
+    CV.ask_change(i, K5, "A meeting", SAM); CV.set_pick(i, K5, pk(FLEX), PUB, ST, into="change")
+    CV.change(i, K5, MAYA, GRACE, PUB, ST)                                    # the teacher who asked and the new pick both end
+    c = cov(i, K5)[2]
+    assert whats(c)[-4:] == [("dropped", SAM, GRACE), ("dropped", FLEX, GRACE), ("pick", MAYA, "team"), ("changed", MAYA, GRACE)], whats(c)
+    assert c["history"][-4] == dict(what="dropped", who=SAM, by=GRACE, at=NOW, why=None)
+    CV.ask_change(i, K5, "Not today", MAYA); CV.set_pick(i, K5, pk(FLEX), PUB, ST, into="change")
+    CV.change(i, K5, FLEX, TEAMER, PUB, ST)                                   # given to the new pick itself: only the teacher who asked ends
+    assert whats(cov(i, K5)[2])[-3:] == [("dropped", MAYA, TEAMER), ("pick", FLEX, "team"), ("changed", FLEX, TEAMER)], whats(cov(i, K5)[2])
+    CV.set_pick(i, K2, pk(SAM), PUB, ST)                                      # a waiting pick changed
+    CV.change(i, K2, MAYA, TEAMER, PUB, ST)
+    assert whats(cov(i, K2)[2]) == [("pick", SAM, "ai"), ("dropped", SAM, TEAMER), ("pick", MAYA, "team"), ("changed", MAYA, TEAMER)], whats(cov(i, K2)[2])
+    CV.change(i, K2, MAYA, TEAMER, PUB, ST)                                   # the same person again is not a drop
+    assert [w for w, _, _ in whats(cov(i, K2)[2])] == ["pick", "dropped", "pick", "changed", "pick", "changed"]
+    CV.ask_change(i, K2, "A meeting", MAYA); CV.set_pick(i, K2, pk(SAM), PUB, ST, into="change")
+    same(CV.keep(i, K2, GRACE), i)                                            # Keep: the request's new pick ends
+    assert whats(cov(i, K2)[2])[-3:] == [("pick", SAM, "ai"), ("dropped", SAM, GRACE), ("kept", MAYA, GRACE)], whats(cov(i, K2)[2])
+    CV.ask_change(i, K2, "Again", MAYA)                                       # no new pick yet: Keep drops nothing
+    CV.keep(i, K2, GRACE)
+    assert whats(cov(i, K2)[2])[-2:] == [("asked to change", MAYA, MAYA), ("kept", MAYA, GRACE)], whats(cov(i, K2)[2])
+
+@rt
+def a_request_to_change_runs_the_picks_of_its_own_absence_alone():
+    fresh()
+    sam = staff(SAM)
+    i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
+    k = absent(teacher=RUTH)["id"]                                            # another absence, its lessons open
+    calls, real = [], FL.soon
+    def spy(*a, **kw):
+        calls.append((a, kw)); return real(*a, **kw)
+    FL.soon, PK.CALL = spy, first
+    try:
+        with at("2026-10-12T15:30:00+08:00"):                                # past the fill time: Tuesday's picks are all due
+            ok(sam.post(cover_url(i, K5, "ask-change"), json=dict(why="A meeting")))
+    finally: FL.soon = real
+    assert calls == [((), dict(ids=[i], force=True))], calls
+    assert CV.new_pick(cov(i, K5)[2]) and (st(k, KR2), st(k, KR6)) == ("open", "open"), "only this absence is run"
 
 assert REAL == [], "a test reached the real call"
 

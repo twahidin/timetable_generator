@@ -8,7 +8,10 @@
    approved); Keep (on a request to change, where Approve reads "Approve the new pick"). At the top: Approve all waiting
    and Fill now. While the server says picks are being made (filling), the day is read again every 3 seconds, only while
    this tab is on screen. After every action the day is read again; a refusal shows the server's sentence beside its row.
-   A row is known by its absence id and cover key together (two absent co-teachers of one lesson share a cover key). */
+   Approve sends the name it shows (who), and Approve all the waiting rows it shows ({id, ckey, who} each): the server
+   refuses or skips a pick that has changed since this page read it ("The pick has changed since you looked…"), and the
+   re-read shows the new one. A row is known by its absence id and cover key together (two absent co-teachers of one
+   lesson share a cover key). */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day, enc = encodeURIComponent, say = R.say;
   const $ = (s, el = document) => el.querySelector(s);
@@ -252,16 +255,16 @@
 
   async function approveAll() {
     if (T.all || !T.data) return;
-    const before = rows();
+    const before = rows(), covers = before.filter(o => o.state === "waiting" && o.pick && o.pick.who).map(o => ({ id: o.id, ckey: o.ckey, who: o.pick.who }));
     T.all = true; T.top = []; paint();
-    const res = await R.api("/api/relief/today/approve-all", R.json("POST", { date: T.date }));
+    const res = await R.api("/api/relief/today/approve-all", R.json("POST", { date: T.date, covers }));
     T.all = false;
     if (!res.ok) T.top = [{ text: res.error, bad: true, status: res.status }];
     else {
       const got = res.data || {}, skipped = Array.isArray(got.skipped) ? got.skipped : [];
       T.top = [{ text: `Approved ${R.plural(Number(got.approved) || 0, "relief")}.${skipped.length ? ` Not approved: ${skipped.length}.` : ""}`, bad: false }];
-      for (const s of skipped) {   /* a skipped one is matched by its cover key and name (the answer carries no absence id) */
-        const r = before.find(o => o.ckey === s.ckey && o.state === "waiting" && o.pick && o.pick.who === s.name);
+      for (const s of skipped) {   /* a skipped one is matched by its absence id and cover key */
+        const r = before.find(o => o.id === s.id && o.ckey === s.ckey);
         T.top.push({ text: `${r ? `${lessonName(r)}, ${s.name}` : s.name}: ${s.why}`, bad: true });
         if (r) T.msg.set(rid(r), { text: s.why, bad: true });
       }
@@ -302,8 +305,8 @@
     const cover = `/api/relief/absences/${enc(r.id)}/covers/${enc(r.ckey)}`, lesson = `/api/relief/absences/${enc(r.id)}/lessons/${enc(r.key)}`;
     switch (a) {
       case "approve": {
-        const who = r.state === "change" ? r.change && r.change.pick && r.change.pick.who : r.pick && r.pick.who;
-        act(k, "POST", `${cover}/approve`, {}, () => `${who} approved: they see it in Reliefs I'm covering.`);
+        const who = (r.state === "change" ? r.change && r.change.pick && r.change.pick.who : r.pick && r.pick.who) || "";
+        act(k, "POST", `${cover}/approve`, { who }, () => `${who} approved: they see it in Reliefs I'm covering.`);   /* the name shown: refused if it changed */
         return;
       }
       case "free": openFree(k); return;
