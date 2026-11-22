@@ -384,7 +384,7 @@ def prune(now=None):
     with tgdb.db() as c:
         c.execute("DELETE FROM outbox WHERE state IN ('sent', 'failed', 'unsure', 'dropped') AND at<?", (before,))
         c.execute("DELETE FROM buttons WHERE until<?", (now,))
-        c.execute("DELETE FROM talks WHERE until<?", (now,))
+    tgdb.forget_talks(now)
 
 
 def _loop(every):

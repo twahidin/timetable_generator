@@ -2,9 +2,11 @@
 
 db: a context manager giving one connection per block (never shared between threads): it commits on a normal exit, rolls back
 on an exception and is always closed; WAL mode, a 10 second wait for a lock, rows as sqlite3.Row; what is deleted or written over
-is not left in the file (secure_delete: a talk holds what a person typed). The tables are made on first
-use, and again harmlessly any time. get_state / set_state keep JSON values by key; raise_state is for what is to be done once. first_time: True only the first time an
-update id is seen; the table keeps the last KEEP ids by order of arrival (Telegram may restart its ids at any number)."""
+is not left in the file (secure_delete: a talk holds what a person typed), though it may stay in telegram.db-wal while another
+connection is open (milliseconds; after the app is killed, until the next start's first close). The tables are made on first
+use, and again harmlessly any time. forget_talks is the one place that deletes the talks that have run out. get_state / set_state keep
+JSON values by key; raise_state is for what is to be done once. first_time: True only the first time an update id is seen; the table
+keeps the last KEEP ids by order of arrival (Telegram may restart its ids at any number)."""
 import contextlib, json, os, sqlite3, threading
 
 import store
@@ -82,6 +84,12 @@ def raise_state(k, n, also=()):
         if isinstance(was, (int, float)) and was >= n: return False
         c.executemany("INSERT OR REPLACE INTO state(k, v) VALUES (?, ?)", [(x, json.dumps(n)) for x in (k, *also)])
     return True
+
+
+def forget_talks(now):
+    """the talks past their time (until, epoch seconds) are deleted, with what was typed in them; no store is made for it"""
+    if not os.path.exists(PATH): return
+    with db() as c: c.execute("DELETE FROM talks WHERE until<?", (now,))
 
 
 def first_time(update_id):

@@ -130,10 +130,10 @@ def as_now(records, x, links):
     return dict(x, others=_free.there_then(records, x["others"], x["date"], x["p"], x["n"], links=links), stopped=_cover.stopped(links, x))
 
 
-def something_to_cover(teacher, dates, periods, lessons, links):
-    """refuses an absence with nothing in it: no lesson needed or stopped (lessons: whether each is), and no exam or event duty of the
-    teacher's in that time"""
-    if not any(lessons) and not (links is not None and any(links.duties(teacher, d, tuple(periods) if periods else None) for d in dates)):
+def something_to_cover(teacher, dates, periods, needed_or_stopped, links):
+    """refuses an absence with nothing in it: no lesson needed or stopped (needed_or_stopped: whether each is), and no exam or event duty
+    of the teacher's in that time"""
+    if not any(needed_or_stopped) and not (links is not None and any(links.duties(teacher, d, tuple(periods) if periods else None) for d in dates)):
         raise ValueError(NO_LESSONS)
 
 
@@ -452,11 +452,22 @@ def set_work(id, key, work, by):
     took off, and no lesson of the absence lists any more"""
     if not isinstance(work, dict) or not isinstance(work.get("files"), list): raise ValueError(WRONG)
     known = _ids(work.get("known"))
+    return _change_work(id, key, by, lambda now: (work, known))
+
+
+def add_file(id, key, f, by):
+    """the file f (as files.save gives it) added to the lesson's work as it is by then; refused as set_work refuses"""
+    return _change_work(id, key, by, lambda now: (dict(now, files=now["files"] + [f]), {o["id"] for o in now["files"]}))
+
+
+def _change_work(id, key, by, make):
+    """the lesson's work is set to make(what it is now)'s: (the work, the file ids its maker knew)"""
     with _LOCK:
         r = _editable(id)
         if not _owner(r, by): raise ValueError(NOT_YOURS)
         x = _lesson(r, key)
         _past(x)
+        work, known = make(x["work"])
         w = _check_work(work)
         if len(w["files"]) > _files.PER_LESSON: raise ValueError(TOO_MANY)
         kept = []

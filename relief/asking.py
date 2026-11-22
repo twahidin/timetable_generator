@@ -1,6 +1,6 @@
 """Asking for relief on Telegram: the conversation /relief begins, its questions, and what it sends. relief/bot.py leads here (start,
-step, line, cancel, leave, replaced); what is said and called is bot's (reply, _settle, _did ...), and bot imports this only when it
-is asked for.
+step, line, stray, cancel, leave, replaced); what is said and called is bot's (reply, _settle, _did ...), and bot imports this only
+when it is asked for.
 
 A conversation is one row of the table talks (kind bot.ASK) and nothing else: one a chat, good for MINUTES after its last step, the
 newest talk in place of any other. Its data: name, whose it is; step, ask and rows, the question it is at, as it is asked and asked
@@ -13,14 +13,16 @@ question's the conversation is at, else it is OLD_BUTTON and nothing changes. Pr
 choice; a tick (several days) changes the buttons of the very message. A line, a file or a photo is the answer where one is asked
 for (why, who, work); where only a button is, PRESS_ONE is said and the question asked again, which takes the buttons off the one
 before. What is typed is never taken for the answer to a question that is not known to have come, or when it replies to another
-message (bot.LAST_ONE); it is never a code. A step is judged as the page judges it, when it is taken: a refusal is the app's sentence,
-and the conversation is as it was. One step at a time (bot._pressing), and a step is saved only while the conversation is what it
-was judged by (_keep), so of two at once, in two copies of the app too, one is taken.
+message (bot.LAST_ONE); it is never a code. A message changed after it was sent is never an answer; one that says what is held already
+(_held) is not answered at all, since a link's preview can come as one. A step is judged as the page judges it, when it is taken: a
+refusal is the app's sentence, and the conversation is as it was. One step at a time (bot._pressing), and a step is saved only while
+the conversation is what it was judged by (_store), so of two at once, in two copies of the app too, one is taken.
 
 The lessons asked about are those that need relief, as absences.new decides it (_Now.lessons). Of a file or a photo only Telegram's
 id and the name are kept, judged by the name and the size Telegram gives (files.check, PER_LESSON); the files of one album that come
-later are the same lesson's, with no second question. Same as before is the work of the last lesson before that has any, files that
-come later too.
+later are the same lesson's, with no second question (the list, when it is out, is changed). Outside any conversation a file or a
+photo is said not to be attached (stray). Same as before is the work of the last lesson before that has any, files that come later
+too. The list before Send says what is set for each lesson (_what), never what it says.
 
 Send ends the conversation first, so an absence is sent once whatever happens; refused, it is put back. It is saved by absences.new,
 as the page's form does it, and marked (set_via); then, with nothing held, what follows on the page (web.created), the press is
@@ -60,17 +62,19 @@ SEND, START_AGAIN = "Send", "Start again"
 SENT = "✅ Sent to the relief team: {n}, {work}. {officer}"
 TOLD, NOT_TOLD = "{officer} will be told.", "{officer} is not on Telegram: please tell them yourself."
 NOT_ATTACHED = "{name} could not be attached: add it in the app."
+NOT_TAKEN = "That was not attached to any lesson: add it in the app."
 NOT_SENT = "Your request for relief was not sent. Send /relief to start again."
 CANCELLED = "Cancelled: nothing was sent."
 MINUTES = 30
 DAYS, AHEAD = 10, 60                             # the school days offered, and how many days after today they are looked for in
 MATCHES, SHOWN = 8, 30                           # the names offered; the lessons listed before Send
 TRIES = 5                                        # an album's file, when its talk moves on meanwhile
+ALBUMS = 50                                      # albums sent outside any conversation, the last ones (state albums), each said so once
 _LINK = re.compile(r"https?://\S+", re.I)
 _log = logging.getLogger("relief.telegram")
 # what is chosen, as a conversation begins: start, the first period; periods, [from, to] or None for the whole day; lessons, those
-# asked about, and at, which of them; work, {lesson's key: dict(text, link, files [[Telegram's id, name]], group: its album) or dict(same:
-# the key of another)}; photos, how many were sent
+# asked about, and at, which of them; work, {lesson's key: dict(text, link, files [[Telegram's id, name]], group: its album, captions:
+# those its text is made of) or dict(same: the key of another)}; photos, how many were sent
 _EMPTY = dict(dates=[], ticks=[], start=None, periods=None, reason=None, why="", officer=None, lessons=[], at=0, work={}, photos=0)
 
 
@@ -193,7 +197,7 @@ def _work(d, at, work, **more):
 def _list(d, **more):
     """what Send would send"""
     head = [f"Relief for {words.days(d)} · {words.away(d)}", f"Reason: {d['reason']}", f"Reporting officer: {d['officer']}"]
-    lines = ["• {lesson} {periods} on {day}: ".format(**x) + ("work set" if _has(_work_of(d, x["key"])) else "no work yet") for x in d["lessons"]]
+    lines = ["• {lesson} {periods} on {day}: ".format(**x) + _what(_work_of(d, x["key"])) for x in d["lessons"]]
     shown = lines[:SHOWN]
     while shown and len("\n".join(head + shown)) > outbox.LIMIT - 20: shown.pop()
     rest = [f"and {len(lines) - len(shown)} more"] if len(lines) > len(shown) else []
@@ -209,6 +213,13 @@ def _work_of(d, key):
 
 
 def _has(work): return bool(work["text"] or work["link"] or work["files"])
+
+
+def _what(work):
+    """'work set (text, 1 file)': what is set, never what it says; or 'no work yet'"""
+    n = len(work["files"])
+    parts = [k for k in ("text", "link") if work[k]] + ([f"{n} file" if n == 1 else f"{n} files"] if n else [])
+    return f"work set ({', '.join(parts)})" if parts else "no work yet"
 
 
 def _before(d, at, work):
@@ -230,7 +241,7 @@ def _file(m):
     text = lambda v: v if isinstance(v, str) else ""
     if not text(got.get("file_id")): return None
     size = got.get("file_size")
-    return dict(id=got["file_id"], name=name, size=size if type(size) is int else None, group=text(m.get("media_group_id")), caption=text(m.get("caption")))
+    return dict(id=got["file_id"], name=name, size=size if type(size) is int else None, group=text(m.get("media_group_id")), caption=text(m.get("caption")).strip())
 
 
 def _add(d, key, file):
@@ -245,7 +256,15 @@ def _add(d, key, file):
         if len(files) >= _files.PER_LESSON: raise ValueError(_absences.TOO_MANY)
     except ValueError as e: raise ValueError(f"{name}: {e}") from None
     text = _absences._check_work(dict(text="\n".join(v for v in (w.get("text"), file["caption"]) if v)))["text"]
-    return dict(photos=photos, work=dict(d["work"], **{key: dict(text=text, link="", files=files + [[file["id"], name]], group=w.get("group") or file["group"])}))
+    work = dict(text=text, link="", files=files + [[file["id"], name]], group=w.get("group") or file["group"], captions=w.get("captions", []) + [file["caption"]] * bool(file["caption"]))
+    return dict(photos=photos, work=dict(d["work"], **{key: work}))
+
+
+def _held(d, m):
+    """the message m says what the conversation holds already: the text or link of a lesson's work, a caption in it, or the reason typed"""
+    held = {v for w in d["work"].values() for v in (w.get("text"), w.get("link"), *w.get("captions", ()))}
+    said = [v.strip() for v in (m.get("text"), m.get("caption")) if isinstance(v, str) and v.strip()]
+    return any(v in held or " ".join(v.split()) == d["why"] for v in said)
 
 
 def _album(d, file):
@@ -254,7 +273,7 @@ def _album(d, file):
 
 
 # ---- the row
-def _mine(chat, me):
+def _conversation(chat, me):
     """me's conversation in the chat, or None; another's there is ended"""
     t = bot._talk(chat)
     if t is None or t["kind"] != bot.ASK: return None
@@ -263,7 +282,7 @@ def _mine(chat, me):
     return None
 
 
-def _keep(chat, was, d):
+def _store(chat, was, d):
     """the conversation is d, for MINUTES from now, and so are its question's buttons -> True; False, nothing changed, when it is not
     was any more (was None: in place of whatever talk there is)"""
     until = bot._clock() + MINUTES * 60
@@ -294,7 +313,7 @@ def _current(chat, key):
     return d if d.get("key") == key else None
 
 
-def _note(chat, key, n):
+def _asked_by(chat, key, n):
     """the question of that key was asked by the message n (None: its id is not known), while the conversation is at it"""
     with tgdb.db() as c:
         r = c.execute("SELECT data FROM talks WHERE chat=? AND kind=?", (chat, bot.ASK)).fetchone()
@@ -306,12 +325,14 @@ def _note(chat, key, n):
 def _keys(rows): return [[dict(text=label, callback_data="b:" + token) for label, _, token in row] for row in rows]
 
 
-def _ask(chat, d):
+def _put_question(chat, d):
     """the question, asked (again) -> whether it surely came; if not, what is typed next is not its answer"""
     r = bot.reply(chat, d["ask"], buttons=_keys(d["rows"]), ask=not d["rows"])
     if not r["ok"]: return False
     n = r["result"].get("message_id") if isinstance(r["result"], dict) else None
-    try: _note(chat, d["key"], n if type(n) is int else None)
+    try:
+        _asked_by(chat, d["key"], n if type(n) is int else None)
+        _redraw(chat, d["key"], (d["ask"], d["rows"]))
     except Exception as e: _log.warning("a question could not be noted (%s)", type(e).__name__)
     return True
 
@@ -325,24 +346,28 @@ def _next(chat, d, says, was):
     """the next question, d's, after the sentences; was: the conversation as a line answered it, its question to lose its buttons"""
     if was is not None: _off(chat, was)
     for s in says: bot.reply(chat, s)
-    _ask(chat, d)
+    _put_question(chat, d)
 
 
 def _reask(chat, key, says):
     d = _current(chat, key)
     if d is None: return                         # it has moved on
     for s in says: bot.reply(chat, s)
-    if _ask(chat, d): _off(chat, d)
+    if _put_question(chat, d): _off(chat, d)
 
 
-def _redraw(chat, key, n):
-    """the buttons of message n as they are now; once more when they changed while they were on their way"""
-    shown = None
-    while n is not None:
+def _redraw(chat, key, shown, n=None):
+    """the question of that key as it is now (its text, the labels of its buttons) on the message n, or the one that asked it last;
+    shown: (ask, rows) as it was there; once more when it changed on its way. Not while it is on its way itself (_put_question)"""
+    while True:
         d = _current(chat, key)
-        if d is None or d["rows"] == shown: return
-        shown = d["rows"]
-        tg.call("editMessageReplyMarkup", dict(chat_id=chat, message_id=n, reply_markup=dict(inline_keyboard=_keys(shown))), timeout=bot.TIMEOUT)
+        if d is None or (d["ask"], d["rows"]) == shown: return
+        to = n or d["question"]
+        if type(to) is not int: return
+        params = dict(chat_id=chat, message_id=to, reply_markup=dict(inline_keyboard=_keys(d["rows"])))
+        if d["ask"] == shown[0]: tg.call("editMessageReplyMarkup", params, timeout=bot.TIMEOUT)
+        else: tg.call("editMessageText", dict(params, text=d["ask"], disable_web_page_preview=True), timeout=bot.TIMEOUT)
+        shown = (d["ask"], d["rows"])
 
 
 # ---- a step (with bot._pressing held) -> bot._Out
@@ -352,7 +377,7 @@ def _move(chat, talk, new, typed=False):
     says, was = new.pop("says", ()), talk["d"] if talk else {}
     rows = [[[label, value, secrets.token_urlsafe(12)] for label, value in row] for row in new["rows"]]
     d = dict(was, **dict(new, rows=rows, key=secrets.token_urlsafe(12), question=False))
-    return bot._Out(then=lambda: _next(chat, d, says, was if typed else None)) if _keep(chat, talk, d) else None
+    return bot._Out(then=lambda: _next(chat, d, says, was if typed else None)) if _store(chat, talk, d) else None
 
 
 def _again(chat, d, *says):
@@ -402,7 +427,7 @@ PRESSED = dict(day=_on_day, days=_on_done, another=lambda w, d, v: _chosen(w, [v
                officer=_on_officer, who=_on_officer, work=_on_work, list=lambda w, d, v: _day(w))
 
 
-def _pressed(chat, talk, p):
+def _by_press(chat, talk, p):
     d = talk["d"] if talk else dict(rows=[])
     label, v = next(((label, v) for row in d["rows"] for label, v, token in row if token == p.button["token"]), (None, None))
     if label is None: raise ValueError(bot.OLD_BUTTON)
@@ -417,8 +442,8 @@ def _tick(chat, talk, v, n):
     d = talk["d"]
     ticks = sorted(set(d["ticks"]) ^ {v})
     rows = [[[label if x == "done" else _ticked(x, ticks), x, token] for label, x, token in row] for row in d["rows"]]
-    if not _keep(chat, talk, dict(d, ticks=ticks, rows=rows)): raise ValueError(bot.OLD_BUTTON)
-    return bot._Out(then=lambda: _redraw(chat, d["key"], n))
+    if not _store(chat, talk, dict(d, ticks=ticks, rows=rows)): raise ValueError(bot.OLD_BUTTON)
+    return bot._Out(then=lambda: _redraw(chat, d["key"], (d["ask"], d["rows"]), n))
 
 
 def _say_why(chat, talk, text, file):
@@ -452,12 +477,15 @@ SAID = dict(why=_say_why, who=_say_who, work=_say_work)
 
 
 def _more(chat, talk, key, file):
-    """another file of the album begun for lesson key: the same lesson's, with no question; refused, its sentence alone"""
-    try: got = _add(talk["d"], key, file)
+    """another file of the album begun for lesson key: the same lesson's, with no question (the list that is out says it too); refused,
+    its sentence alone"""
+    was = talk["d"]
+    try: d = dict(was, **_add(was, key, file))
     except ValueError as e:
         if type(e) is not ValueError: raise
         return bot._Out(str(e))
-    return bot._Out() if _keep(chat, talk, dict(talk["d"], **got)) else None
+    if d["step"] == "list": d["ask"] = _list(d)["ask"]
+    return bot._Out(then=lambda: _redraw(chat, d["key"], (was["ask"], was["rows"]))) if _store(chat, talk, d) else None
 
 
 def _said(chat, talk, text, file, to):
@@ -470,16 +498,18 @@ def _said(chat, talk, text, file, to):
     return SAID[d["step"]](chat, talk, text, file) if d["step"] in SAID else _again(chat, d, PRESS_ONE)
 
 
-def step(chat, me, text="", press=None, file=None, to=None):
+def step(chat, me, text="", press=None, file=None, to=None, edit=None):
     """one step of me's conversation in the chat: a press (bot's p), or a line or a file (_file's) that replies to the message to;
-    neither: something else was sent. With bot._pressing held -> bot._Out; None when there is no such conversation (not for a press:
-    OLD_BUTTON). A line that lost a race does nothing; a file of an album is put where its album is now"""
-    talk = _mine(chat, me)
-    if press is not None: return _pressed(chat, talk, press)
+    neither: something else was sent; edit: a message changed after it was sent. With bot._pressing held -> bot._Out; None when there
+    is no such conversation (not for a press: OLD_BUTTON). A line that lost a race does nothing; a file of an album is put where its
+    album is now"""
+    talk = _conversation(chat, me)
+    if press is not None: return _by_press(chat, talk, press)
     if talk is None: return None
+    if edit is not None and _held(talk["d"], edit): return bot._Out()
     out = _said(chat, talk, text, file, to)
     for _ in range(TRIES):
-        talk = _mine(chat, me) if out is None and file else None
+        talk = _conversation(chat, me) if out is None and file else None
         album = _album(talk["d"], file) if talk else None
         if album is None: break
         out = _more(chat, talk, album, file)
@@ -487,20 +517,41 @@ def step(chat, me, text="", press=None, file=None, to=None):
 
 
 # ---- what relief/bot.py calls
-def start(chat, me):
-    """/relief: a conversation of me's begun in the chat, or why it cannot be"""
-    out = bot._did(lambda: _move(chat, None, _day(_Now(me))))
-    if out.text: bot.reply(chat, out.text)
-    if out.then: out.then()
-
-
-def line(chat, me, m):
-    """a message while a conversation goes on -> whether it was for it"""
-    text = m["text"] if isinstance(m.get("text"), str) else ""
-    out = bot._did(lambda: step(chat, me, text=text, file=_file(m), to=bot._replies_to(m)))
+def _finish(chat, out):
+    """what a step that was no press comes to, said -> whether there was one"""
     if out is None: return False
     if out.text: bot.reply(chat, out.text)
     if out.then: out.then()
+    return True
+
+
+def start(chat, me):
+    """/relief: a conversation of me's begun in the chat, or why it cannot be"""
+    _finish(chat, bot._did(lambda: _move(chat, None, _day(_Now(me)))))
+
+
+def line(chat, me, m, edit=False):
+    """a message (edit: changed after it was sent) while a conversation goes on -> whether it was for it"""
+    text = m["text"] if isinstance(m.get("text"), str) else ""
+    if edit: return _finish(chat, bot._did(lambda: step(chat, me, edit=m)))
+    return _finish(chat, bot._did(lambda: step(chat, me, text=text, file=_file(m), to=bot._replies_to(m))))
+
+
+def stray(chat, m):
+    """a message no conversation takes -> whether it held a file or a photo: it is said not to be attached, an album's once"""
+    if _file(m) is None: return False
+    if _first_of(chat, m.get("media_group_id")): bot.reply(chat, NOT_TAKEN, buttons=_app())
+    return True
+
+
+def _first_of(chat, group):
+    """the album was not said so yet, as far as the last ALBUMS are known; always, for no album"""
+    if not isinstance(group, str) or not group: return True
+    with tgdb.db() as c:
+        r, mine = c.execute("SELECT v FROM state WHERE k='albums'").fetchone(), f"{chat}:{group}"
+        known = json.loads(r["v"]) if r else []
+        if mine in known: return False
+        c.execute("INSERT OR REPLACE INTO state(k, v) VALUES ('albums', ?)", (json.dumps((known + [mine])[-ALBUMS:]),))
     return True
 
 
@@ -543,8 +594,10 @@ def _send(chat, talk):
 
 
 def _back(chat, talk):
-    """refused: the conversation is as it was, unless another talk is there by now"""
-    with tgdb.db() as c: c.execute("INSERT OR IGNORE INTO talks(chat, kind, data, until) VALUES (?, ?, ?, ?)", (chat, talk["kind"], talk["data"], talk["until"]))
+    """refused: the conversation is as it was, unless another talk is there by now, or the chat is not that person's any more"""
+    with tgdb.db() as c:
+        c.execute("INSERT OR IGNORE INTO talks(chat, kind, data, until) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM links WHERE chat=? AND name=?)",
+                  (chat, talk["kind"], talk["data"], talk["until"], chat, talk["d"]["name"]))
 
 
 def _tried(f, other):
@@ -564,9 +617,13 @@ def _sent(chat, d, r, pub):
     mine = [x for x in r["lessons"] if x["needed"] and not _cover.stopped(exams, x)]
     n, m = len(mine), sum(1 for x in mine if _has(x["work"]))
     told = TOLD if _tried(lambda: d["officer"] in links.reachable(pub), False) else NOT_TOLD
+    bot.reply(chat, SENT.format(n="1 lesson" if n == 1 else f"{n} lessons", work=f"work set for {m}" if m else "no work set yet", officer=told.format(officer=d["officer"])), buttons=_app())
+
+
+def _app():
+    """the button that opens My absences in the app; None without an https address (Telegram takes no other)"""
     base = _tried(lambda: links.connected()["base"], "") or ""
-    bot.reply(chat, SENT.format(n="1 lesson" if n == 1 else f"{n} lessons", work=f"work set for {m}" if m else "no work set yet", officer=told.format(officer=d["officer"])),
-              buttons=[[dict(text=tell.OPEN, url=base + "/relief#mine")]] if base.lower().startswith("https://") else None)
+    return [[dict(text=tell.OPEN, url=base + "/relief#mine")]] if base.lower().startswith("https://") else None
 
 
 def _attach(id, d):
@@ -576,7 +633,7 @@ def _attach(id, d):
     for x in d["lessons"]:
         for tid, name in _work_of(d, x["key"])["files"]:
             if tid not in saved: saved[tid] = _tried(lambda: _fetched(id, tid, name), None)
-            if saved[tid] and _tried(lambda: _put(id, x["key"], saved[tid], d["name"]), False): on.add(tid)
+            if saved[tid] and _tried(lambda: _absences.add_file(id, x["key"], saved[tid], d["name"]), None): on.add(tid)
             else: lost[tid] = name
     for tid, f in saved.items():
         if f and tid not in on: _tried(lambda: _files.delete(id, f["id"]), None)
@@ -586,10 +643,3 @@ def _attach(id, d):
 def _fetched(id, tid, name):
     data = tg.download(tid, _files.MAX)
     return _files.save(id, name, data) if data is not None else None
-
-
-def _put(id, key, f, me):
-    """the saved file on lesson key, with what is there now"""
-    w = _absences._lesson(_absences.load(id), key)["work"]
-    _absences.set_work(id, key, dict(text=w["text"], link=w["link"], files=w["files"] + [f], known=[o["id"] for o in w["files"]]), me)
-    return True

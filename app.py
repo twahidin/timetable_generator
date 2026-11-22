@@ -1463,6 +1463,7 @@ app.register_blueprint(relief_web.bp)
 # Telegram: linking, connecting the bot, and the hook it posts to (relief/tgweb.py: the hook alone has no guard, it needs Telegram's secret header)
 relief_tgweb.init(has=has, me=who, need=need, note=_relief_entry)
 app.register_blueprint(relief_tgweb.bp)
+relief_bot.at_start()                                             # what was typed in a Telegram conversation that has run out is deleted, whatever is on
 if os.environ.get("RELIEF_JOBS") == "on":                         # relief picks when due, every minute (the Dockerfile sets it; tests and local runs never do)
     relief_fill.AFTER.append(relief_tell.sweep)                   # and then what there is to say on Telegram (nothing while the bot is off)
     relief_fill.start()
