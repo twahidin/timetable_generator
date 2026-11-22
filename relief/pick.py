@@ -39,7 +39,7 @@ SCHEMA = dict(type="object", additionalProperties=False, properties=dict(
 
 SYSTEM = """You pick the relief teacher for one lesson in a school's relief app, and answer with the pick and nothing else. A person on the school's relief team approves every pick before the teacher is told.
 
-You get the lesson (its subject, level, periods, weekday and date), the school's relief rules in order, the limits the app checks itself, and the teachers who are free for the whole lesson. Each teacher is a label such as "Teacher 3", with their departments, the subjects they teach, whether they teach this lesson's subject, whether they are a Flexi Adjunct Teacher, their teaching periods this week, their relief periods this week, today and this term, the periods of the relief they already have today, their relief periods on each school day of this week, and marks such as "prefers not" or "department meeting time". Every teacher listed is free then and under the checked limits. Periods are written P1, P2 and so on; P3–P5 is three periods.
+You get the lesson (its subject, level, periods, weekday and date), the school's relief rules in order, the limits the app checks itself, and the teachers who are free for the whole lesson. Each teacher is a label such as "Teacher 3", with their departments, the subjects they teach, whether they teach this lesson's subject, whether they are a Flexi Adjunct Teacher, their teaching periods this week (an exam duty or a school event counts as teaching, a lesson an exam or event stops does not), their relief periods this week, today and this term, the periods of the relief they already have today, their relief periods on each school day of this week, and marks such as "prefers not" or "department meeting time". Every teacher listed is free then and under the checked limits. Periods are written P1, P2 and so on; P3–P5 is three periods.
 
 Follow the rules in order: the first rule that tells the teachers apart decides, and a later rule only settles what the earlier ones leave open. A rule about something the data does not show, such as planned relief (the app has used it already), is passed over. Where the rules leave a choice, prefer a teacher with no marks.
 
@@ -58,9 +58,10 @@ def _span(p, n):
     return f"P{p + 1}" if n == 1 else f"P{p + 1}–P{p + n}"
 
 
-def _given(records, names, dates, skip):
-    """{name: [(ISO date, p, n)]}: the covers that book each of names (cover.booked) on dates, of lessons still needed in
-    absences not cancelled, less the cover skip = (absent teacher, cover key); counted as free.relief_periods counts them"""
+def _given(records, names, dates, skip, links=None):
+    """{name: [(ISO date, p, n)]}: the covers that book each of names (cover.booked) on dates, of lessons still needed (and,
+    with links, not stopped) in absences not cancelled, less the cover skip = (absent teacher, cover key); counted as
+    free.relief_periods counts them"""
     want = {_free._iso(d) for d in dates}
     out = {n: [] for n in names}
     for r in records:
@@ -70,7 +71,7 @@ def _given(records, names, dates, skip):
             if (x.get("relief") not in out and not x.get("change") if not parts else all(c.get("relief") not in out and not c.get("change") for c in parts)): continue
             if not x.get("needed"): continue
             iso = _free._iso(x["date"])
-            if iso not in want: continue
+            if iso not in want or _cover.stopped(links, x): continue
             for i, c in enumerate(_cover.covers(x)):
                 held = [w for w in _cover.booked(c) if w in out]
                 if not held or (r.get("teacher") == skip[0] and _cover.cover_key(x, i) == skip[1]): continue
@@ -78,10 +79,10 @@ def _given(records, names, dates, skip):
     return out
 
 
-def _shortlist(pub, settings, records, record, x, c, staff):
+def _shortlist(pub, settings, records, record, x, c, staff, links=None):
     absent = record["teacher"]
     lesson = dict(x, key=_cover._key_of(x, c), p=int(c["p"]), n=int(c.get("n") or 1))      # as cover.still_free asks
-    got = _free.free_then(pub, settings, records, lesson, absent)
+    got = _free.free_then(pub, settings, records, lesson, absent, links=links)
     subject = lesson.get("subject") or ""
     group = {}
     for d in next((p["depts"] for p in staff if p["name"] == absent), []):              # free_then's titles, in its order
@@ -94,24 +95,24 @@ def _shortlist(pub, settings, records, record, x, c, staff):
     cal = settings.get("calendar") or {}
     date = _free._date(lesson["date"])
     week = _free._week_dates(cal, ((pub or {}).get("model") or {}).get("days") or [], date)
-    given = _given(records, [p["name"] for p in short], week, (absent, lesson["key"]))
+    given = _given(records, [p["name"] for p in short], week, (absent, lesson["key"]), links=links)
     iso = date.isoformat()
     for p in short:
         mine = given[p["name"]]
-        p["teaching"] = _lessons.teaching_periods(pub, cal, p["name"], date)
+        p["teaching"] = _lessons.teaching_periods(pub, cal, p["name"], date) + (links.week_change(p["name"], week) if links is not None else 0)
         p["week_relief"] = sum(n for _, _, n in mine)
         p["by_day"] = {WEEKDAYS[d.weekday()]: sum(n for on, _, n in mine if on == d.isoformat()) for d in week}
         p["today_at"] = sorted((q, n) for on, q, n in mine if on == iso)
     return short
 
 
-def shortlist(pub, settings, records, record, x, c):
+def shortlist(pub, settings, records, record, x, c, links=None):
     """the people free for cover c of lesson x in record (free.free_then for the cover's periods and key) less anyone over a
     checked limit; each with g (0: the absent teacher's department and teaches the subject, 1: that department, other
     subjects, 2: other departments), teaches (teaches the lesson's subject, by subject family), teaching (periods this
-    week), week_relief, by_day ({"Mon": relief periods, ...} for the school dates of the week) and today_at ([(p, n)] of
+    week; with links, with exam and event duties and without lessons that stop, as in free's week), week_relief, by_day ({"Mon": relief periods, ...} for the school dates of the week) and today_at ([(p, n)] of
     the relief they have that day); none of it counts this cover"""
-    return _shortlist(pub, settings, records, record, x, c, _accounts.listing(pub))
+    return _shortlist(pub, settings, records, record, x, c, _accounts.listing(pub), links=links)
 
 
 def app_order(short):
@@ -276,7 +277,7 @@ def _checked(answer, names, table):
     return who, reason
 
 
-def choose_for(pub, settings, records, record, x, c, call=None, without=()):
+def choose_for(pub, settings, records, record, x, c, call=None, without=(), links=None):
     """the pick for cover c of lesson x in record: dict(who, by, reason, at), by "ai" (the model's answer, checked) or "app"
     (the first in the app's order, with APP_ORDER: no model, the guard full, a failure, or an answer that fails the check),
     or None when nobody is on the shortlist (less without: a name or names, such as the teacher who asked to change), and
@@ -286,7 +287,7 @@ def choose_for(pub, settings, records, record, x, c, call=None, without=()):
     busy, failed, bad answer) and nothing else: no data, exception text or name."""
     staff = _accounts.listing(pub)      # every person the accounts know: the published teachers and the staff added there
     leave = {without} if isinstance(without, str) else set(without or ())
-    short = [p for p in _shortlist(pub, settings, records, record, x, c, staff) if p["name"] not in leave]
+    short = [p for p in _shortlist(pub, settings, records, record, x, c, staff, links=links) if p["name"] not in leave]
     if not short: return None
     first = app_order(short)[0]["name"]
     try:

@@ -10,7 +10,8 @@
    this tab is on screen. After every action the day is read again; a refusal shows the server's sentence beside its row.
    Approve sends the name it shows (who), and Approve all the waiting rows it shows ({id, ckey, who} each): the server
    refuses or skips a pick that has changed since this page read it ("The pick has changed since you looked…"), and the
-   re-read shows the new one. A row is known by its absence id and cover key together (two absent co-teachers of one
+   re-read shows the new one. A lesson an approved exam or event stops is shown as "Not happening", with why, out of the
+   counts and with no buttons; the teacher of a backup is in school, so the row says which duty they are on. A row is known by its absence id and cover key together (two absent co-teachers of one
    lesson share a cover key). */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day, enc = encodeURIComponent, say = R.say;
@@ -48,7 +49,7 @@
   function relief(r) {
     const filling = !!(T.data && T.data.filling), warn = r.warn ? `<div class="td-warn">${esc(r.warn)}</div>` : "";
     const picking = `<span class="td-busy">Being picked…</span>`;
-    if (r.state === "cancelled") return `<span class="muted">${r.pick ? esc(r.pick.who) : "—"}</span>`;
+    if (r.state === "cancelled" || r.state === "stopped") return `<span class="muted">${r.pick ? esc(r.pick.who) : "—"}</span>`;
     if (r.state === "open") return warn || (filling ? picking : `<span class="muted">Not picked yet.</span>`);   /* warn: nobody free, or only people over a limit */
     const p = r.pick || {};
     if (r.state === "change") {
@@ -72,12 +73,13 @@
       case "acknowledged": return c(`✓ Acknowledged${r.ack && clock(r.ack.at) ? ` ${clock(r.ack.at)}` : ""}`, "st-ok");
       case "change": return c(`Asked to change${r.change && clock(r.change.at) ? ` ${clock(r.change.at)}` : ""}`, "st-blue");
       case "cancelled": return c("The absence is cancelled", "st-off");
+      case "stopped": return c("Not happening", "st-off") + (r.stopped ? `<div class="small muted">${esc(r.stopped)}</div>` : "");
       default: return c(String(r.state || ""), "");
     }
   }
 
   function buttons(r) {
-    if (r.state === "cancelled" || past()) return "";
+    if (r.state === "cancelled" || r.state === "stopped" || past()) return "";
     const k = rid(r), off = T.busy.has(k) || T.all ? " disabled" : "", out = [];
     const b = (act, label, cls, more) => `<button type="button" class="small${cls ? " " + cls : ""}" data-td="${act}"${more || ""}${off}>${esc(label)}</button>`;
     if (r.state === "waiting" && !r.stale) out.push(b("approve", "Approve", "primary"));
@@ -106,7 +108,7 @@
     if (s.err) return `<div class="pl-list"><p>${say(s.err)}</p><div class="bar"><button type="button" class="small" data-td="free">Try again</button>${close}</div></div>`;
     const mark = r.state === "waiting" ? "Picked" : r.state === "change" ? "Asked to change" : "Chosen";
     return R.freeList({ data: s.data, x: Object.assign({}, r, { date: T.date }), chosen: r.state === "open" ? "" : (r.pick && r.pick.who) || "",
-                        busy: !!s.busy || T.busy.has(k) || T.all, teaching: s.teaching, mark });
+                        busy: !!s.busy || T.busy.has(k) || T.all, teaching: s.teaching, duty: s.duty, mark });
   }
 
   function row(r) {
@@ -115,10 +117,10 @@
     if (T.split === k && Number(r.n) >= 2) under.push(splitHTML(r));
     if (T.open === k) under.push(freeArea(r));
     const work = r.work_set ? `<span class="td-yes">work set</span>` : `<span class="td-no">no work yet</span>`;
-    return `<div class="td-row${r.state === "cancelled" ? " off" : ""}${r.state === "change" ? " ask" : ""}" role="listitem" data-id="${esc(r.id)}" data-ckey="${esc(r.ckey)}">
+    return `<div class="td-row${r.state === "cancelled" || r.state === "stopped" ? " off" : ""}${r.state === "change" ? " ask" : ""}" role="listitem" data-id="${esc(r.id)}" data-ckey="${esc(r.ckey)}">
       <div class="td-when"><b>${esc(RF.periods(r))}</b>${r.start ? `<div class="small muted">${esc(RF.time(r))}</div>` : ""}</div>
       <div class="td-lesson"><b>${esc(RF.title(r))}</b>${r.room ? ` <span class="small muted">· ${esc(r.room)}</span>` : ""}
-        <div class="small">for ${esc(r.absent)} · ${work}</div>${r.split ? `<div class="small muted">part of a split lesson</div>` : ""}</div>
+        <div class="small">for ${esc(r.absent)}${r.duty ? ` <span class="muted">(${esc(r.duty)})</span>` : ""} · ${work}</div>${r.split ? `<div class="small muted">part of a split lesson</div>` : ""}</div>
       <div class="td-relief">${relief(r)}</div>
       <div class="td-state">${chip(r)}${buttons(r)}</div>
       ${under.length ? `<div class="td-under">${under.join("")}</div>` : ""}</div>`;
@@ -134,7 +136,7 @@
   }
 
   function paintHead() {
-    const t = RF.today(), d = T.date, live = rows().filter(r => r.state !== "cancelled"), away = new Set(live.map(r => r.absent)).size;
+    const t = RF.today(), d = T.date, live = rows().filter(r => r.state !== "cancelled" && r.state !== "stopped"), away = new Set(live.map(r => r.absent)).size;
     $("#tdTitle", T.pane).textContent = d === t ? "Relief today" : `Relief on ${day(d)}`;
     const when = d === t ? `Today, ${day(d)}` : d === RF.addDays(t, 1) ? `Tomorrow, ${day(d)}` : day(d);
     $("#tdSub", T.pane).textContent = [when, T.data ? `${R.plural(away, "teacher")} away` : "", past() ? "past: shown as it was" : ""].filter(Boolean).join(" · ");
@@ -204,8 +206,9 @@
     const same = quiet && !T.err && T.data && JSON.stringify(T.data) === JSON.stringify(res.data);
     T.err = null; T.data = res.data;
     for (const [k, m] of [...T.msg]) if (!findRow(k)) { T.msg.delete(k); T.top.push(m); }   /* its row is gone (split, joined): said above the rows */
-    if (T.open && !findRow(T.open)) T.open = null;
-    if (T.split && !findRow(T.split)) T.split = null;
+    const live = k => { const r = findRow(k); return r && r.state !== "cancelled" && r.state !== "stopped"; };
+    if (T.open && !live(T.open)) T.open = null;
+    if (T.split && !live(T.split)) T.split = null;
     if (!T.data.filling) T.top = T.top.filter(m => !m.fill);
     if (same) paintActs(); else paint();
     schedule();
@@ -313,6 +316,7 @@
       case "close": case "pl-close": closeFree(k); return;
       case "pl-choose": choose(k, b.dataset.name || ""); return;
       case "pl-teaching": { const s = T.free.get(k); if (s) { s.teaching = !s.teaching; paintRows(); focusIn(k, '[data-pl="teaching"]'); } return; }
+      case "pl-duty": { const s = T.free.get(k); if (s) { s.duty = !s.duty; paintRows(); focusIn(k, '[data-pl="duty"]'); } return; }
       case "keep": act(k, "POST", `${cover}/keep`, {}, () => `${r.pick.who} kept: the relief stays with them.`); return;
       case "split": T.split = k; T.open = null; T.msg.delete(k); paintRows(); focusIn(k, '[data-td="split-go"]'); return;
       case "split-off": T.split = null; paintRows(); focusIn(k, '[data-td="split"]'); return;

@@ -2923,7 +2923,7 @@ def an_ask_waits_for_the_pick_then_goes():
 def an_ask_without_a_pick_goes_after_two_minutes_and_the_pick_once_more():
     with school(SAM, MAYA, TEAM, LEE):
         i = asked(pick=False); ask_at = "2026-10-12T09:10:00+08:00"; calls, real = [], FR.free_then
-        def free_then(*a): calls.append(a[3]["key"]); return real(*a)
+        def free_then(*a, **k): calls.append(a[3]["key"]); return real(*a, **k)
         with stand_in(FR, "free_then", free_then):
             at("09:11:59"); assert TE.sweep() == 0 and calls == []
             at("09:12"); assert swept() == 2 and calls == [K5], calls
@@ -2940,12 +2940,12 @@ def an_ask_without_a_pick_goes_after_two_minutes_and_the_pick_once_more():
         assert outs("ask")[0]["text"].endswith("No new pick yet: open the app."), "a part of a split lesson: Ruth is free for that part"
     with school(SAM, TEAM):                                                                # a date that is no longer a school day: said as plainly
         i = asked(pick=False); at("09:12")
-        def odd(*a): raise ValueError("made up")
+        def odd(*a, **k): raise ValueError("made up")
         with stand_in(FR, "free_then", odd): swept()
         assert outs("ask")[0]["text"].endswith("No new pick yet: open the app.")
     with school(SAM):                                                                      # nobody on the team to tell: nothing is worked out
         i = asked(pick=False); at("09:12")
-        with stand_in(FR, "free_then", lambda *a: 1 / 0): assert TE.sweep() == 0
+        with stand_in(FR, "free_then", lambda *a, **k: 1 / 0): assert TE.sweep() == 0
 
 @t
 def a_pick_the_ask_carried_is_not_sent_twice():

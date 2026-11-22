@@ -2,13 +2,22 @@
 import datetime, os, secrets, threading
 
 import store
+from accounts import people as _accounts
+from exams import approval as _approval
 from exams import days as _days
 from exams import papers as _papers
 
 DIR = os.path.join(store.DATA, "exams", "schedules")
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()   # one process (gunicorn: one worker, threads): held by a route from loading a schedule to saving it
 WRONG = "Check the exam and try again."
+EVENT_WRONG = "Check the event and try again."
 NO_CALENDAR = "Set the school calendar in Relief settings first: exams need it to know which timetable day a date is."
+
+
+def editing():
+    """the lock a route holds from loading a schedule to saving it (and the delete), so two saves at once never undo each
+    other: an approve during a Make is not lost when the Make saves the copy it loaded before"""
+    return _LOCK
 
 
 def _path(id):
@@ -30,6 +39,8 @@ def _texts(v):
 
 
 KINDS = ("exam", "test")
+EVENT = "event"
+GOING_BY = ("form teachers", "teachers then", "department", "people")
 SUPERVISION = ("invigilators", "lesson")
 WHO = ("level", "groups", "students")
 SEATING = dict(order=("class", "name"), shared=("levels", "papers", "blocks"), spacing=("every", "gap"), home_rooms=(True, False))
@@ -67,37 +78,39 @@ def new(kind, name, levels, start, end, by, pub=None) -> dict:
     return dict(id=secrets.token_hex(4), kind=kind, name=name, levels=list(levels), classes=[], start=start, end=end, days={},
                 times=dict(report="07:30", min_break=20, max_papers=2), papers=[], access=access,
                 seating=dict(order="class", shared="levels", spacing="every", home_rooms=True),
-                supervision="lesson" if test else "invigilators", pins=dict(rooms={}, duties={}), use_anyway=[], made=None,
-                status="draft", created_at=_now(), created_by=by, saved_at=None, saved_by=None)
+                supervision="lesson" if test else "invigilators", scripts="", pins=dict(rooms={}, duties={}), use_anyway=[], made=None,
+                status="draft", log=[], approved=None, note="", created_at=_now(), created_by=by, saved_at=None, saved_by=None)
 
 
-def _check(s, pub):
-    if not isinstance(s, dict): raise ValueError(WRONG)
-    model = ((pub or {}).get("model") or {})
-    for k, typ in (("name", str), ("levels", list), ("classes", list), ("days", dict), ("papers", list), ("access", list),
-                   ("start", str), ("end", str)):
-        if not isinstance(s.get(k), typ): raise ValueError(WRONG)
-    if not s["name"].strip(): raise ValueError("Give the exam a name.")
-    if s.get("kind") not in KINDS or s.get("supervision") not in SUPERVISION: raise ValueError(WRONG)
+def new_event(name, levels, classes, start, end, by, in_charge) -> dict:
+    """a new event: a schedule of kind "event" (no papers, seats or duties of its own); reads no file"""
+    return dict(id=secrets.token_hex(4), kind=EVENT, name=name, levels=list(levels), classes=list(classes), start=start, end=end,
+                days={}, in_charge=in_charge, where="", venues=[], going=[], going_by="people", duties=[], made=None,
+                status="draft", log=[], approved=None, note="", created_at=_now(), created_by=by, saved_at=None, saved_by=None)
+
+
+def place(s) -> str:
+    """where an event is: the words typed, else its venues, else nothing"""
+    return str(s.get("where") or "").strip() or ", ".join(s.get("venues") or [])
+
+
+def _named(s, noun):
+    """the name must not be empty"""
+    if not s["name"].strip(): raise ValueError("Give the %s a name." % noun)
+
+
+def _lists_and_pick(s):
     if not _texts(s["levels"]) or not _texts(s["classes"]): raise ValueError(WRONG)
     if not s["levels"] and not s["classes"]: raise ValueError("Pick at least one level or class.")
-    seating = s.get("seating")
-    if not isinstance(seating, dict): raise ValueError(WRONG)
-    for k, allowed in SEATING.items():
-        v = seating.get(k)
-        if (k == "home_rooms" and not isinstance(v, bool)) or v not in allowed: raise ValueError(WRONG)
-    times = s.get("times")
-    if not isinstance(times, dict): raise ValueError(WRONG)
-    times["report"] = _time_or_none(times.get("report"), "Give the report time as a time such as 07:30.")
-    for k, lo, sentence in (("min_break", 0, "Give a whole number of minutes between two papers."),
-                            ("max_papers", 1, "Give a whole number for the most papers a day.")):
-        if not _int(times.get(k)): raise ValueError(WRONG)
-        if times[k] < lo: raise ValueError(sentence)
+
+
+def _when(s, model, noun):
+    """the dates, the days and the levels and classes against the published timetable: shared by exams and events"""
     try:
         a, b = datetime.date.fromisoformat(s["start"]), datetime.date.fromisoformat(s["end"])
     except ValueError: raise ValueError(WRONG)
     if b < a: raise ValueError("Check the dates: the last day is before the first.")
-    if (b - a).days + 1 > 31: raise ValueError("An exam can cover at most 31 days.")
+    if (b - a).days + 1 > 31: raise ValueError("An %s can cover at most 31 days." % noun)
     bnds = _days.bounds(model)
     starts, ends = {x for x, _ in bnds}, {y for _, y in bnds}
     for date, e in s["days"].items():
@@ -123,6 +136,68 @@ def _check(s, pub):
     classes = {c["name"] for c in model.get("classes") or []}
     for c in s["classes"]:
         if c not in classes: raise ValueError(f"{c} is not a class of the published timetable.")
+
+
+def _check_event(s, pub):
+    """an event's check: the exam sentence for a malformed request is worded for an event"""
+    try: _check_event_body(s, pub)
+    except ValueError as e:
+        if str(e) == WRONG: raise ValueError(EVENT_WRONG) from None
+        raise
+
+
+def _check_event_body(s, pub):
+    model = ((pub or {}).get("model") or {})
+    for k, typ in (("name", str), ("levels", list), ("classes", list), ("days", dict), ("start", str), ("end", str),
+                   ("in_charge", str), ("where", str), ("venues", list), ("going", list), ("duties", list)):
+        if not isinstance(s.get(k), typ): raise ValueError(WRONG)
+    if not s["name"].strip(): raise ValueError("Give the event a name.")
+    if s.get("going_by") not in GOING_BY: raise ValueError(WRONG)
+    _lists_and_pick(s)
+    if not _texts(s["venues"]) or not _texts(s["going"]): raise ValueError(WRONG)
+    for d in s["duties"]:
+        if not isinstance(d, dict): raise ValueError(WRONG)
+        for k in ("duty", "who", "time"):
+            if d.get(k) is None: d[k] = ""
+            if not isinstance(d[k], str): raise ValueError(WRONG)
+        if len(d["duty"]) > 120 or len(d["time"]) > 60: raise ValueError("A duty can be at most 120 characters and its time at most 60.")
+    if len(s["where"]) > 120: raise ValueError("Where can be at most 120 characters.")
+    _when(s, model, "event")
+    rooms = {r["name"] for r in model.get("rooms") or []}
+    for v in s["venues"]:
+        if v not in rooms: raise ValueError(f"{v} is not a room of the published timetable.")
+    known = {p["name"] for p in _accounts.listing(pub)}   # the published teachers and the staff added in the accounts
+    for n in s["going"]:
+        if n not in known: raise ValueError(f"{n} is not on the published timetable or the staff list.")
+    s["going"] = list(dict.fromkeys(s["going"]))
+    # an event holds no exam items: whatever came with it is emptied, so a forged copy puts none on the main site
+    s.update(made=None, papers=[], access=[], times={}, seating={}, supervision="", scripts="", pins=dict(rooms={}, duties={}), use_anyway=[])
+
+
+def _check(s, pub):
+    if not isinstance(s, dict): raise ValueError(WRONG)
+    if s.get("kind") == EVENT: return _check_event(s, pub)
+    model = ((pub or {}).get("model") or {})
+    for k, typ in (("name", str), ("levels", list), ("classes", list), ("days", dict), ("papers", list), ("access", list),
+                   ("start", str), ("end", str)):
+        if not isinstance(s.get(k), typ): raise ValueError(WRONG)
+    if not isinstance(s.get("scripts", ""), str): raise ValueError(WRONG)
+    _named(s, "exam")
+    if s.get("kind") not in KINDS or s.get("supervision") not in SUPERVISION: raise ValueError(WRONG)
+    _lists_and_pick(s)
+    seating = s.get("seating")
+    if not isinstance(seating, dict): raise ValueError(WRONG)
+    for k, allowed in SEATING.items():
+        v = seating.get(k)
+        if (k == "home_rooms" and not isinstance(v, bool)) or v not in allowed: raise ValueError(WRONG)
+    times = s.get("times")
+    if not isinstance(times, dict): raise ValueError(WRONG)
+    times["report"] = _time_or_none(times.get("report"), "Give the report time as a time such as 07:30.")
+    for k, lo, sentence in (("min_break", 0, "Give a whole number of minutes between two papers."),
+                            ("max_papers", 1, "Give a whole number for the most papers a day.")):
+        if not _int(times.get(k)): raise ValueError(WRONG)
+        if times[k] < lo: raise ValueError(sentence)
+    _when(s, model, "exam")
     ids = set()
     for p in s["papers"]:
         if not isinstance(p, dict): raise ValueError(WRONG)
@@ -147,8 +222,12 @@ def _check(s, pub):
         if x.get("student") not in students: raise ValueError(f"{x.get('student')} is not on the published timetable.")
 
 
-def save(sched, pub, cal, by) -> dict:
-    _check(sched, pub)
+def save(sched, pub, cal, by, check=True) -> dict:
+    """check the schedule against the published timetable and write it at once. check=False: an approval action (approve,
+    send back, withdraw, someone is away), which changes none of what the timetable is checked for, so a schedule
+    approved before a new publish can still be withdrawn"""
+    if check:
+        _check(sched, pub)
     out = dict(sched, saved_at=_now(), saved_by=by)
     with _LOCK:
         os.makedirs(DIR, exist_ok=True)
@@ -162,10 +241,31 @@ def load(id):
     return s if isinstance(s, dict) else None
 
 
-def listing() -> list:
-    rows = [dict(id=s["id"], kind=s.get("kind"), name=s.get("name"), levels=s.get("levels"), start=s.get("start"), end=s.get("end"),
-                 papers=len(s.get("papers") or []), status=s.get("status"), saved_at=s.get("saved_at"), _c=s.get("created_at") or "")
-            for s in _all()]
+def all_saved() -> list:
+    """every saved schedule, as stored"""
+    return _all()
+
+
+def listing(today, published_at=None, kinds=None, in_charge=None) -> list:
+    """one row per schedule, newest first; today (the caller's: app._exams_today) gives the label's 'Ended', published_at
+    the 'retimed' flag; kinds keeps only those kinds, in_charge only the events whose teacher in charge that is. An event
+    row adds in_charge, where, classes and n_going, and is never 'retimed' (it has no times of its own)"""
+    rows = []
+    for s in _all():
+        if kinds is not None and s.get("kind") not in kinds:
+            continue
+        if in_charge is not None and (s.get("kind") != EVENT or s.get("in_charge") != in_charge):
+            continue
+        st = s.get("status") or "draft"
+        ap = s.get("approved")
+        read = ap if st in ("approved", "changes") and ap else s
+        event = s.get("kind") == EVENT
+        more = dict(in_charge=s.get("in_charge"), where=place(s), classes=list(s.get("classes") or []), n_going=len(s.get("going") or [])) if event else {}
+        rows.append(dict(more, id=s["id"], kind=s.get("kind"), name=s.get("name"), levels=s.get("levels"), start=s.get("start"), end=s.get("end"),
+                         papers=len(s.get("papers") or []), status=s.get("status"), saved_at=s.get("saved_at"), label=_approval.label(s, today),
+                         note=s.get("note") or "", sent_by=s.get("sent_by"), sent_at=s.get("sent_at"), approved_at=s.get("approved_at"),
+                         on_site=[ap["start"], ap["end"]] if ap else None,
+                         retimed=not event and st in ("waiting", "approved", "changes") and _approval.retimed(read, published_at), _c=s.get("created_at") or ""))
     rows.sort(key=lambda r: r["saved_at"] or r["_c"], reverse=True)
     for r in rows: r.pop("_c")
     return rows
@@ -175,3 +275,97 @@ def delete(id):
     with _LOCK:
         try: os.remove(_path(id))
         except (FileNotFoundError, ValueError): pass
+
+
+def on_site() -> list:
+    """the approved copy (as a schedule) of every schedule that has one"""
+    return [a for a in (_approval.as_schedule(s) for s in _all()) if a]
+
+
+def copies(id) -> list:
+    """for every other stored schedule, the copy the main site shows or may soon show: waiting: the working copy; approved:
+    the approved copy; changes waiting: both (the approved first); draft and withdrawn: none. Each has status "waiting" or
+    "approved"."""
+    out = []
+    for s in _all():
+        if s["id"] == id:
+            continue
+        st = s.get("status") or "draft"
+        if st == "waiting":
+            out.append(dict(s, status="waiting"))
+        elif st in ("approved", "changes") and s.get("approved"):
+            out.append(dict(_approval.as_schedule(s), status="approved"))
+            if st == "changes":
+                out.append(dict(s, status="waiting"))
+    return out
+
+
+def event_busy(copy, model) -> list:
+    """what an event holds on each date from its start to its end with classes on: the people going (one busy, with the
+    classes), then each venue. Nothing when the timetable has no periods."""
+    bnds = _days.bounds(model) if model else []
+    if not bnds:
+        return []
+    out = []
+    d, last = _days._date(copy["start"]), _days._date(copy["end"])
+    while d <= last:
+        iso = d.isoformat()
+        win = _days._windows(copy, iso, model, bnds)
+        d += datetime.timedelta(days=1)
+        if not win:
+            continue
+        a, b = next(iter(win.values()))
+        base = dict(id=copy["id"], name=copy.get("name"), status=copy["status"], date=iso, start=a, end=b, kind=EVENT)
+        if copy.get("going"):
+            out.append(dict(base, room="", names=list(copy["going"]), classes=list(win)))
+        for v in copy.get("venues") or []:
+            out.append(dict(base, room=v, names=[], classes=[]))
+    return out
+
+
+def _duty_busy(copy):
+    return [dict(id=copy["id"], name=copy.get("name"), status=copy["status"], date=d["date"], start=d["start"], end=d["end"],
+                 room=d["room"], names=list(d.get("names") or [])) for d in (copy.get("made") or {}).get("duties") or []]
+
+
+def busies(copies, model) -> list:
+    """the busy list of some copies: an exam gives one per made duty, an event what event_busy gives. A waiting copy leaves
+    out the busies equal (date, start, end, room, names) to one of the approved copy of the same schedule."""
+    key = lambda b: (b["date"], b["start"], b["end"], b["room"], tuple(b["names"]), tuple(b.get("classes") or []))
+    mine = [(c, event_busy(c, model) if c.get("kind") == EVENT else _duty_busy(c)) for c in copies]
+    held = {c["id"]: {key(b) for b in bs} for c, bs in mine if c["status"] == "approved"}
+    return [b for c, bs in mine for b in bs if not (c["status"] == "waiting" and key(b) in held.get(c["id"], ()))]
+
+
+def elsewhere(id, model=None, own=None) -> list:
+    """what the other schedules hold (see busies), and relief (relief_busy); own: the copy of schedule id being worked on
+    (the working copy, or the approved one when someone is replaced on it; None: the saved working copy); model None: the
+    published timetable's"""
+    if model is None:
+        pub = store.published()
+        model = pub["model"] if pub else None
+    return busies(copies(id), model) + relief_busy(model, id, own)
+
+
+def relief_busy(model, id=None, own=None) -> list:
+    """relief's own busies (people away, people approved to cover relief) on the published timetable, less the covers of
+    lessons that the copy own of schedule id (None: its saved working copy) or another approved schedule stops; the schedules
+    are read only when someone is approved to cover. Imported here because exams.relief_links imports this module"""
+    if not model:
+        return []
+    from exams import relief_links
+    from relief import absences
+
+    def scheds():
+        mine = own if own is not None else (load(id) if id else None)
+        return [s for s in on_site() if s.get("id") != id] + ([mine] if mine else [])
+    return relief_links.relief_busies(model, absences.all_records(), scheds)
+
+
+def shared_line(model, s, tag, date, start, end, classes) -> str:
+    """"{other} ({status}) has {classes} on {date} too.": the classes of s, among the other's classes, whose window on that
+    date overlaps start..end; "" when none. The one sentence behind the exam review and the event clashes."""
+    bnds = _days.bounds(model)
+    win = _days._windows(s, date, model, bnds)
+    both = [c for c in win if c in classes and win[c][0] < end and win[c][1] > start]
+    return "%s has %s on %s too." % (tag, ", ".join(both), _days.nice(date)) if both else ""

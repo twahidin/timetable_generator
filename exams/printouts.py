@@ -13,18 +13,10 @@ from relief.codes import _cell
 WHATS = ("seating", "doors", "attendance", "classes", "roster-day", "roster-teacher", "timetable")
 TITLES = {"seating": "Seating plan", "doors": "Door list", "attendance": "Attendance sheet", "classes": "Class lists",
           "roster-day": "Roster by day", "roster-teacher": "Roster by teacher", "timetable": "Exam timetable"}   # the page's button words
-_WEEK = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 LISTS = dict(none="No relief needed", backup="Backup needed", runs="Runs as usual")
 
 
-def _day(iso) -> str:
-    """a date as the page writes it: "Mon 5 Oct" """
-    try:
-        d = datetime.date.fromisoformat(str(iso))
-    except ValueError:
-        return str(iso or "")
-    return "%s %d %s" % (_WEEK[d.weekday()], d.day, _MONTHS[d.month - 1])
+_day = _days.nice
 
 
 def _made(sched):

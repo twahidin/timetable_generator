@@ -37,7 +37,7 @@
   }
 
   function row(r) {
-    const all = r.lessons || [], cover = all.filter(x => x.needed), n = cover.length;
+    const all = r.lessons || [], cover = all.filter(x => x.needed && !x.stopped), n = cover.length;
     const work = cover.filter(hasWork).length;
     const changed = !r.cancelled && all.some(x => x.changed && x.date >= RF.today());
     const when = (r.dates || []).map(d => d === RF.today() ? "Today" : day(d)).join(", ");

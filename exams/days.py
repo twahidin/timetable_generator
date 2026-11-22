@@ -55,6 +55,19 @@ def bounds(model):
     return out
 
 
+_WEEK = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def nice(iso) -> str:
+    """a date as the page writes it: "Mon 5 Oct", from the first ten characters; anything else comes back as given"""
+    try:
+        d = datetime.date.fromisoformat(str(iso)[:10])
+    except ValueError:
+        return str(iso or "")
+    return "%s %d %s" % (_WEEK[d.weekday()], d.day, _MONTHS[d.month - 1])
+
+
 def _date(s):
     return datetime.date.fromisoformat(s)
 
@@ -123,36 +136,62 @@ def rule_on_day(dname, r):
 _day_ok = rule_on_day   # the old name, still called by code written before the rename
 
 
-def day_view(pub, cal, sched, date):
-    model = pub["model"]
-    bnds = bounds(model)
+def _rows(model, bnds, day, windows):
+    """the lessons of a timetable day as day_view gives them; windows {class: [(start, end)]}: a period stops when every
+    class of the lesson has a window holding it"""
     NP = len(bnds)
-    day = school_day(cal, model["days"], _date(date))
-    window = {}
+    lessons = []
+    if day is None:
+        return lessons
+    d = model["days"].index(day)
+    for i, l in enumerate(model["lessons"]):
+        if l["d"] != d:
+            continue
+        ps = range(l["p"], min(l["p"] + l["n"], NP))
+        stopped, running = [], []
+        for p in ps:
+            held = bool(l["classes"]) and all(any(a <= bnds[p][0] and bnds[p][1] <= b for a, b in windows.get(c, ())) for c in l["classes"])
+            (stopped if held else running).append(bnds[p])
+        lessons.append(dict(row=i, classes=l["classes"], teachers=l["teachers"], subject=l["subject"], level=l["level"],
+                            room=l["room"], rain=l.get("rain", ""), start=bnds[ps[0]][0], end=bnds[ps[-1]][1],
+                            stopped=_merge(stopped), running=_merge(running)))
+    return lessons
+
+
+def _windows(sched, date, model, bnds):
+    """{class: (start, end)} of the classes sitting on a date of one schedule"""
+    out = {}
     if sched["start"] <= date <= sched["end"]:
         levels = _levels(sched, date, model)
         chosen = sched.get("classes") or []
         win = _window(sched, date, bnds)
         for c in model["classes"]:
             if c["level"] in levels and (not chosen or c["name"] in chosen):
-                window[c["name"]] = win
-    lessons, blocked = [], {}
+                out[c["name"]] = win
+    return out
+
+
+def merged_view(pub, cal, scheds, date):
+    """the lessons of a date with the windows of every schedule in scheds together"""
+    model = pub["model"]
+    bnds = bounds(model)
+    day = school_day(cal, model["days"], _date(date))
+    windows = {}
+    for s in scheds:
+        for c, w in _windows(s, date, model, bnds).items():
+            windows.setdefault(c, []).append(w)
+    return dict(date=date, day=day, lessons=_rows(model, bnds, day, windows))
+
+
+def day_view(pub, cal, sched, date):
+    model = pub["model"]
+    bnds = bounds(model)
+    NP = len(bnds)
+    day = school_day(cal, model["days"], _date(date))
+    window = _windows(sched, date, model, bnds)
+    lessons = _rows(model, bnds, day, {c: [w] for c, w in window.items()})
+    blocked = {}
     if day is not None:
-        d = model["days"].index(day)
-        for i, l in enumerate(model["lessons"]):
-            if l["d"] != d:
-                continue
-            ps = range(l["p"], min(l["p"] + l["n"], NP))
-            inside = bool(l["classes"]) and all(c in window for c in l["classes"])
-            stopped, running = [], []
-            for p in ps:
-                if inside and all(window[c][0] <= bnds[p][0] and bnds[p][1] <= window[c][1] for c in l["classes"]):
-                    stopped.append(bnds[p])
-                else:
-                    running.append(bnds[p])
-            lessons.append(dict(row=i, classes=l["classes"], teachers=l["teachers"], subject=l["subject"], level=l["level"],
-                                room=l["room"], rain=l.get("rain", ""), start=bnds[ps[0]][0], end=bnds[ps[-1]][1],
-                                stopped=_merge(stopped), running=_merge(running)))
         for r in model.get("setup", {}).get("rules", []):
             if r.get("rule") != "Not available" or r.get("scope") != "Teacher" or str(r.get("strength") or "Must") != "Must":
                 continue

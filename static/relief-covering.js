@@ -3,7 +3,8 @@
    the Monday of this week on, from /api/relief/covering, grouped by date: the lesson, its periods and times, the room,
    whose class it is (the absent teacher), the work set with its link (opened in a new tab) and its files (downloads), and
    Acknowledge / Request to change (a line saying why, which the relief team reads; until they act the relief stays mine).
-   A past lesson is shown without its buttons. Nothing waiting for the relief team is here, and never an absence's reason
+   A past lesson is shown without its buttons, and so is one an approved exam or event stops ("Not happening", with why).
+   Nothing waiting for the relief team is here, and never an absence's reason
    (the server sends none). After each step the list is read again; a refusal shows the server's sentence beside it. */
 (function () {
   const R = window.Relief, RF = window.ReliefForm, esc = RF.esc, day = RF.day, enc = encodeURIComponent, say = R.say;
@@ -31,6 +32,7 @@
   }
 
   function chip(c) {
+    if (c.stopped) return `<span class="chip st-off">Not happening</span>`;
     if (c.state === "acknowledged") return `<span class="chip st-ok">✓ Acknowledged${c.ack && clock(c.ack.at) ? ` ${esc(clock(c.ack.at))}` : ""}</span>`;
     if (c.state === "change") return `<span class="chip st-blue">You asked to change</span>`;
     return `<span class="chip st-amber">Please acknowledge</span>`;
@@ -40,6 +42,7 @@
     const k = cid(c), off = C.busy.has(k) ? " disabled" : "", m = C.msg.get(k);
     const line = m ? `<div class="bar">${say(m)}</div>` : "";
     if (c.date < RF.today()) return line;   /* a past lesson: nothing to do */
+    if (c.stopped) return `<div class="small">${esc(c.stopped)}: there is no lesson to cover then.</div>${line}`;
     if (C.ask === k) {
       return `<div class="ab-ask"><label for="cvWhy">${esc(CHANGE_WHY)}</label><input id="cvWhy" data-cv="why" maxlength="200" value="${esc(C.why)}" autocomplete="off" required>
         <button type="button" class="small primary" data-cv="ask-go"${off}>Send to the relief team</button><button type="button" class="small" data-cv="ask-off">Back</button></div>${line}`;
@@ -53,7 +56,7 @@
   }
 
   function item(c) {
-    return `<div class="rl cv${c.date < RF.today() ? " cv-past" : ""}" data-id="${esc(c.id)}" data-ckey="${esc(c.ckey)}" tabindex="-1">
+    return `<div class="rl cv${c.date < RF.today() || c.stopped ? " cv-past" : ""}" data-id="${esc(c.id)}" data-ckey="${esc(c.ckey)}" tabindex="-1">
       <div class="rf-head"><div><b>${esc(RF.title(c))}</b> <span class="muted">· ${esc(RF.when(c))}</span></div><div class="rf-side small">${chip(c)}</div></div>
       <div class="small">${esc(c.absent)}'s class</div>
       ${work(c)}${acts(c)}</div>`;

@@ -973,12 +973,32 @@ function renderIssues() {
 }
 
 
-function exportCard() {
-  return `<div class="card" id="printouts"><h2>Upload the timetable</h2><p class="muted">Upload the timetable the chatbot made, with its setup workbook. The timetable can be a workbook with a Lessons sheet or a timetable database (.sqlite); a database made by this app or the skill holds its setup, so it can come on its own.</p>
-    <p class="muted"><b>Check</b> keeps the file as a draft, checks it against the setup and lists what it found. Fix it here, then go to step 9 to publish.</p>
-    <div class="row" style="margin-top:10px"><label class="filebtn">Setup workbook (.xlsx)<input type="file" id="exSetup" accept=".xlsx" hidden></label><span class="muted" id="exSetupName">none chosen</span></div>
-    <div class="row" style="margin-top:8px"><label class="filebtn">Timetable (.xlsx or .sqlite)<input type="file" id="exTT" accept=".xlsx,.sqlite,.sqlite3,.db" hidden></label><span class="muted" id="exTTName">none chosen</span></div>
-    <div class="row" style="margin-top:12px"><button class="primary" id="imCheck">Check</button></div>
+const isDbName = n => /\.(sqlite3?|db)$/i.test(n || "");
+function upTexts(a, b) {   // step 8's upload, from the chosen setup workbook (a) and timetable (b): each box's line, the hint and whether it can go
+  const db = !!b && isDbName(b.name), ready = !!b && (!!a || db);
+  const name = (f, id) => `<span class="upok">✓ ${esc(f.name)}</span> <button class="small ghost" data-upclear="${id}" title="Take this file off">Remove</button>`;
+  return { ready, dim: db && !a,
+    tt: b ? name(b, "exTT") : `<span class="muted">No file chosen yet.</span>`,
+    su: a ? name(a, "exSetup") : `<span class="muted">${b && !db ? "Needed: a timetable workbook comes with its setup workbook." : "Not needed for a .sqlite: it holds its setup."}</span>`,
+    hint: !b ? "Choose the timetable file first." : !ready ? "Add its setup workbook (box 2)." : "Ready." };
+}
+function upPaint() {   // the two boxes, their lines and the button again, after a file is chosen, dropped or removed
+  const tt = $("#exTT"), su = $("#exSetup"); if (!tt || !su) return;
+  const a = su.files[0], b = tt.files[0], t = upTexts(a, b);
+  $("#exTTName").innerHTML = t.tt; $("#exSetupName").innerHTML = t.su; $("#upHint").textContent = t.hint; $("#imCheck").disabled = !t.ready;
+  [[tt, b], [su, a]].forEach(([inp, f]) => { const box = inp.closest(".upbox"); box.classList.toggle("has", !!f); box.querySelector(".upgo").innerHTML = f ? "Change file…" : `Choose file…<span class="muted small"> or drop it here</span>`; });
+  su.closest(".upbox").classList.toggle("dim", t.dim);
+}
+function exportCard() {   // step 8's upload: the timetable file first, its setup workbook second (a database holds its own); a box takes a click or a dropped file
+  const t = upTexts(null, null);
+  const box = (n, id, title, kinds, accept) => `<label class="upbox${id === "exSetup" ? " dim" : ""}" data-upbox="${id}"><span class="upn">${n}</span><span class="upt"><b>${title}</b><span class="muted small">${kinds}</span></span>
+      <span class="upgo">Choose file…<span class="muted small"> or drop it here</span></span><input type="file" id="${id}" accept="${accept}" hidden></label>`;
+  return `<div class="card" id="printouts"><h2>Upload a timetable</h2><p class="muted">Upload the timetable the chatbot made. The app keeps it as the draft, checks it against the setup and lists what it found: fix it here, then publish on step 9.</p>
+    <div class="upboxes">
+      <div>${box(1, "exTT", "Timetable file", ".sqlite or .xlsx", ".xlsx,.sqlite,.sqlite3,.db")}<div class="upname" id="exTTName">${t.tt}</div></div>
+      <div>${box(2, "exSetup", "Its setup workbook", ".xlsx · only with a timetable workbook", ".xlsx")}<div class="upname" id="exSetupName">${t.su}</div></div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="imCheck" disabled>Upload and check</button><span class="muted small" id="upHint">${t.hint}</span></div>
     <div id="imResult">${S.draft ? draftHTML(S.draft).head : loadingDraft() ? LOADING : ""}</div></div>`;
 }
 /* step 6's third card: the second choices in their give-way order, each editable in place, and the form that adds one */
@@ -1876,6 +1896,7 @@ document.addEventListener("click", async e => {
     return;
   }
   if (b.id === "imCheck") { uploadDraft(false); return; }
+  if (b.dataset.upclear) { const inp = $("#" + b.dataset.upclear); if (inp) { inp.value = ""; upPaint(); } return; }
   if (b.id === "pbPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; publishDraft(); return; }
   if (bdClick(b)) return;
   if (fxClick(b)) return;
@@ -2920,6 +2941,20 @@ async function postTry(url, body) {   // as post, but a refusal is not said: {j}
   if (!r.ok) return { error: j.error || "Something went wrong." };
   return { j };
 }
+/* "Exams · 2 waiting": the exams, tests and events the timetable committee has still to approve (looked up about every half minute) */
+const XW = { n: null, at: 0 };
+async function examsWaiting() {
+  const xl = $("#examsLink"); if (!xl || xl.hidden) return;
+  if (Date.now() - XW.at > 30000) {
+    XW.at = Date.now();
+    try {
+      const waiting = x => x.status === "waiting" || x.status === "changes";
+      const r = await fetch("/api/exams", { cache: "no-store" }), r2 = await fetch("/api/events", { cache: "no-store" });
+      if (r.ok) { const j = await r.json(), j2 = r2.ok ? await r2.json() : {}; XW.n = (j.schedules || []).filter(waiting).length + (j2.schedules || []).filter(waiting).length; }
+    } catch (e) { }
+  }
+  xl.textContent = XW.n ? `Exams · ${XW.n} waiting` : "Exams";
+}
 async function poll() {   // every few seconds: the published timetable and the deployment's state (G.st)
   clearTimeout(G.timer);
   if (G.inflight) { G.timer = setTimeout(poll, 500); return; }
@@ -2930,6 +2965,7 @@ async function poll() {   // every few seconds: the published timetable and the 
     G.st = await r.json();
     const rl = $("#reliefLink"); if (rl) rl.hidden = G.st.role !== "committee";   /* the relief settings are the committee's, not the heads' */
     const xl = $("#examsLink"); if (xl) xl.hidden = G.st.role !== "committee";   /* exams are the committee's too */
+    examsWaiting();
     const wl = $("#whoami"), hl = $("#homeLink"), sw = $("#sharedWarn"), me = G.st.who;   /* a person: their name and group, and the way to their home page; nothing for a shared code */
     if (wl) { wl.hidden = !me; wl.textContent = me ? [me, G.st.group].filter(Boolean).join(" · ") : ""; }
     if (hl) hl.hidden = !me;
@@ -2995,10 +3031,20 @@ function paintPublished() {   // the Publish step's lower card: what teachers an
 
 /* ---------------- downloads */
 document.addEventListener("change", e => {
-  if (e.target.id === "exSetup" || e.target.id === "exTT") { const f = e.target.files[0]; $("#" + e.target.id + "Name").textContent = f ? f.name : "none chosen"; }
+  if (e.target.id === "exSetup" || e.target.id === "exTT") upPaint();
   if (e.target.id === "bdFind" && S.board) { S.board.find = e.target.value; bdDraw(); return; }
   if (e.target.dataset && e.target.dataset.dfilter) { S.dfilter = e.target.dataset.dfilter; drawDraft(); }
 });
+["dragover", "dragleave", "drop"].forEach(ev => document.addEventListener(ev, e => {   // a file dropped on one of step 8's upload boxes is chosen there
+  const box = e.target.closest && e.target.closest(".upbox"); if (!box) return;
+  e.preventDefault();
+  if (ev === "dragover") { box.classList.add("over"); return; }
+  if (ev === "dragleave" && box.contains(e.relatedTarget)) return;
+  box.classList.remove("over"); if (ev === "dragleave") return;
+  const f = e.dataTransfer && e.dataTransfer.files[0], inp = $("#" + box.dataset.upbox); if (!f || !inp) return;
+  if (!(inp.id === "exSetup" ? /\.xlsx$/i.test(f.name) : /\.(xlsx|sqlite3?|db)$/i.test(f.name))) { toast(inp.id === "exSetup" ? "The setup workbook is an .xlsx file." : "The timetable is an .xlsx workbook or a .sqlite database."); return; }
+  const dt = new DataTransfer(); dt.items.add(f); inp.files = dt.files; upPaint();
+}));
 /* the chosen setup workbook and timetable as form data, or null (with a message) when something is missing */
 function timetableForm() {
   const a = $("#exSetup").files[0], b = $("#exTT").files[0];
@@ -3051,7 +3097,7 @@ async function uploadDraft(replace) {
     if (!r.ok) { drawDraft(); toast(j.error || "Could not check the timetable."); return; }
     S.draft = j; S.help = null; drawDraft(); poll();
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
-  finally { btns.forEach(x => x.disabled = false); }
+  finally { btns.forEach(x => x.disabled = false); upPaint(); }
 }
 async function refreshDraft() {   // the draft again from the server, and the step drawn from it
   try {

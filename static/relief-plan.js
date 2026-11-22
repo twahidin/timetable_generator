@@ -37,8 +37,8 @@
     painted: paintPlanned,
   });
 
-  /* a lesson gone from the timetable, or past, keeps what it has; a lesson with a cover approved, or split, is the relief team's */
-  const mayChoose = x => !x.changed && x.date >= RF.today() && !R.approvedOf(x).length && (x.covers || []).length < 2;
+  /* a lesson gone from the timetable, stopped by an exam or event, or past, keeps what it has; a lesson with a cover approved, or split, is the relief team's */
+  const mayChoose = x => !x.changed && !x.stopped && x.date >= RF.today() && !R.approvedOf(x).length && (x.covers || []).length < 2;
   const plainSide = x => R.reliefLines(x);
 
   /* ---------------------------------------------------------------- the "free then" list */
@@ -90,7 +90,7 @@
     const s = F.st.get(ctx) || {}, x = inf.x, close = `<button type="button" class="small" data-pl="close">Close the list</button>`;
     if (s.loading) return `<div class="pl-list"><p class="small muted">Finding who is free…</p></div>`;
     if (s.err) return `<div class="pl-list"><p>${say(s.err)}</p><div class="bar"><button type="button" class="small" data-pl="free">Try again</button>${close}</div></div>`;
-    return freeList({ data: s.data, x, chosen: inf.chosen, also: inf.r ? new Map() : alsoChosen(x), busy: s.busy, teaching: s.teaching });
+    return freeList({ data: s.data, x, chosen: inf.chosen, also: inf.r ? new Map() : alsoChosen(x), busy: s.busy, teaching: s.teaching, duty: s.duty });
   }
 
   /* the "free then" list as HTML, from a free route's answer; Today's Change (relief-today.js) draws the same list through
@@ -99,7 +99,7 @@
      disabled), teaching (the names teaching then shown), mark (the chosen person's chip, "Chosen" when left out). Its
      buttons carry data-pl: "choose" with data-name, "teaching" and "close". */
   function freeList(o) {
-    const d = o.data || {}, x = o.x, groups = Array.isArray(d.groups) ? d.groups : [], teaching = Array.isArray(d.teaching) ? d.teaching : [];
+    const d = o.data || {}, x = o.x, groups = Array.isArray(d.groups) ? d.groups : [], teaching = Array.isArray(d.teaching) ? d.teaching : [], onDuty = Array.isArray(d.busy) ? d.busy : [];
     const n = groups.reduce((a, g) => a + (g.people || []).length, 0), also = o.also || new Map(), close = `<button type="button" class="small" data-pl="close">Close the list</button>`;
     const lead = groups.length && (groups[0].people || []).length && !groups[0].people[0].over ? groups[0].people[0].name : "";
     const person = p => {
@@ -112,9 +112,11 @@
         <span class="small cand-n">week ${esc(p.week)}</span><span class="small muted cand-n">${esc(p.today)} relief today</span>${pick}</div>`;
     };
     const fold = teaching.length ? ` · <button type="button" class="linkish" data-pl="teaching" aria-expanded="${o.teaching ? "true" : "false"}">${o.teaching ? "Hide" : "Show"} the ${teaching.length} teaching then</button>` : "";
+    const dutyFold = onDuty.length ? ` · <button type="button" class="linkish" data-pl="duty" aria-expanded="${o.duty ? "true" : "false"}">${o.duty ? "Hide" : "Show"} the ${onDuty.length} on an exam duty or at an event then</button>` : "";
     return `<div class="pl-list" role="group" aria-label="${esc(`Who is free for ${RF.title(x)}`)}">
-      <div class="small muted">Free at ${esc(RF.periods(x))} on ${esc(day(x.date))}: ${esc(R.plural(n, "teacher"))}${fold}</div>
+      <div class="small muted">Free at ${esc(RF.periods(x))} on ${esc(day(x.date))}: ${esc(R.plural(n, "teacher"))}${fold}${dutyFold}</div>
       ${o.teaching && teaching.length ? `<div class="small pl-teaching">${esc(teaching.join(", "))}</div>` : ""}
+      ${o.duty && onDuty.length ? `<div class="small pl-teaching">${esc(onDuty.map(b => `${b.name} (${b.why})`).join(", "))}</div>` : ""}
       ${n ? groups.map(g => `<div class="tier">${esc(g.title)}</div>${(g.people || []).map(person).join("")}`).join("") : `<p class="small muted">No one is free then.</p>`}
       <div class="small muted pl-foot">"week" = teaching periods plus relief periods so far this week, lightest first in each group. A dimmed teacher is over a limit and can still be chosen.</div>
       <div class="bar">${close}</div></div>`;
@@ -263,8 +265,11 @@
     const empty = P.loading || P.lerr ? "" : !P.teacher ? "Choose the absent teacher first." : !dates().length ? "Choose the dates first."
       : someWaiting() ? "Choose the periods first." : `${P.teacher} has no lessons then.`;
     sayBox.innerHTML = P.lerr ? `<p>${say(P.lerr)}${P.lerr.status === 0 ? ` <button type="button" class="small" data-pl="reread">Try again</button>` : ""}</p>` : P.loading ? `<p class="small muted">Reading the lessons…</p>` : "";
-    RF.lessons(list, P.lerr ? [] : P.lessons, {   /* with a refusal, nothing is listed (and nothing is sent), but what was typed is kept */
-      empty, workLabel: `Work for this lesson (optional: ${P.teacher || "the absent teacher"} is asked to set it)`, onChange: lessonEdited,
+    const shown = P.lerr ? [] : P.lessons, stopped = shown.filter(x => x.stopped), duties = P.lerr ? {} : P.duties || {};
+    const lines = Object.keys(duties).sort().flatMap(d => (duties[d] || []).map(u => `<p class="small">${esc(`${day(d)}: ${u.what}, ${u.start}–${u.end}: ${u.replaces} replaces them.`)}</p>`));
+    $("#plStopped", P.pane).innerHTML = stopped.map(x => `<p class="small muted"><b>${esc(RF.title(x))}</b> · ${esc(RF.when(x))}: ${esc("Not happening: " + x.stopped + " · no relief needed")}</p>`).join("") + lines.join("");
+    RF.lessons(list, shown.filter(x => !x.stopped), {   /* with a refusal, nothing is listed (and nothing is sent), but what was typed is kept */
+      empty: stopped.length || lines.length ? "" : empty, workLabel: `Work for this lesson (optional: ${P.teacher || "the absent teacher"} is asked to set it)`, onChange: lessonEdited,
       side: x => RF.needed(list, x.key) ? sideHTML(formCtx(x.key), P.chosen.get(chosenKey(x.key)) || "") : "",
       extra: x => RF.needed(list, x.key) ? `<div class="pl-free">${freeArea(formCtx(x.key))}</div>` : "",
     });
@@ -304,6 +309,7 @@
     if (!r.ok) { P.readFor = ""; P.lessons = []; P.lerr = { text: r.error, bad: true, status: r.status }; paintAway(); paintLessons(); paintSend(); return; }
     if (Array.isArray(r.data.periods)) P.periods = r.data.periods;
     P.readFor = key;
+    P.duties = r.data.duties || {};
     P.lessons = some && !both ? [] : r.data.lessons || [];   /* "Some periods" lists nothing until from and to are chosen */
     paintAway(); paintLessons(); paintSend();
   }
@@ -353,7 +359,7 @@
 
   /* ---------------------------------------------------------------- Planned by me */
   function plannedRow(r) {
-    const cover = (r.lessons || []).filter(x => x.needed), k = cover.filter(x => R.approvedOf(x).length || (x.covers || []).some(c => c.planned)).length;
+    const cover = (r.lessons || []).filter(x => x.needed && !x.stopped), k = cover.filter(x => R.approvedOf(x).length || (x.covers || []).some(c => c.planned)).length;
     const changedNow = !r.cancelled && (r.lessons || []).some(x => x.changed && x.date >= RF.today());
     let chip;
     if (r.cancelled) chip = `<span class="chip st-off">Cancelled by ${esc(who(r.cancelled.by))}: ${esc(r.cancelled.why)}</span>`;
@@ -453,6 +459,11 @@
         if (s) { s.teaching = !s.teaching; repaint(c, false); focusIn(c, '[data-pl="teaching"]'); }
         return;
       }
+      case "duty": {
+        const c = ctxOf(b), s = c && F.st.get(c);
+        if (s) { s.duty = !s.duty; repaint(c, false); focusIn(c, '[data-pl="duty"]'); }
+        return;
+      }
       case "choose": { const c = ctxOf(b); if (c) choose(c, b.dataset.name || ""); return; }
       case "clear": { const c = ctxOf(b); if (c) choose(c, ""); return; }
       case "open": openOne(b.dataset.id); return;
@@ -492,7 +503,7 @@
         <div class="field"><div class="flabel">Away for</div><div id="plAway"></div></div>
         <div class="field"><div class="flabel">Reason</div><div id="plReason"></div></div>
         <div class="field"><label class="flabel" for="plRemarks">Remarks for the relief team</label><input id="plRemarks" class="reason-line" maxlength="300" placeholder="e.g. Worksheets are on the desk" autocomplete="off"></div>
-        <div class="field"><div class="flabel" id="plLessonsLabel"></div><div id="plLessonsSay"></div><div id="plLessonList"></div></div>
+        <div class="field"><div class="flabel" id="plLessonsLabel"></div><div id="plLessonsSay"></div><div id="plStopped"></div><div id="plLessonList"></div></div>
         <div id="plSend"></div></div>
         <div class="card" id="plPlanned"><div class="ab-top"><h2>Planned by me</h2></div>
           <div class="pl-dl"><span class="flabel">Download the relief sheet</span>

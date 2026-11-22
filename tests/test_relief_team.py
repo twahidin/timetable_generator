@@ -1521,7 +1521,7 @@ def rt(f):
         store.published = old; FL.SYNC = False; FL.ON = False; PK.CALL = None; PK._seen.clear()
 
 ROW = {"id", "ckey", "key", "split", "absent", "classes", "subject", "group", "room", "p", "n", "start", "end", "work_set", "state", "pick",
-       "approved", "ack", "change", "stale", "over_now", "nobody", "warn"}
+       "approved", "ack", "change", "stale", "over_now", "nobody", "warn", "stopped", "duty"}
 
 @rt
 def today_lists_covers_in_time_order_with_counts_and_no_reason():
@@ -1543,7 +1543,7 @@ def today_lists_covers_in_time_order_with_counts_and_no_reason():
     assert r5 == dict(id=i, ckey=K5, key=K5, split=False, absent=EVE, classes=["1A"], subject="Science", group="", room="R1", p=5, n=2,
                       start="10:30", end="11:30", work_set=True, state="approved",
                       pick=dict(who=SAM, by="planner", reason=f"Planned by {GRACE} on Mon 12 Oct."), approved=dict(by=TEAMER, at=NOW),
-                      ack=None, change=None, stale=True, over_now=False, nobody=False, warn=STALE.format(name=SAM)), r5
+                      ack=None, change=None, stale=True, over_now=False, nobody=False, warn=STALE.format(name=SAM), stopped="", duty=""), r5
     r2, r6 = rows[1], rows[4]
     assert (r2["state"], r2["pick"]["who"], r2["pick"]["by"], r2["stale"], r2["over_now"], r2["work_set"]) == ("approved", FLEX, "team", False, True, False), r2
     assert (r6["id"], r6["state"], r6["pick"], r6["approved"], r6["over_now"], r6["warn"]) == (
@@ -1638,7 +1638,7 @@ def the_team_approves_changes_splits_and_keeps_through_the_api():
     assert (st(j, KR6), st(i, K2)) == ("approved", "waiting")
     # Change: the free-then list for the cover, then chosen and approved in one
     free = ok(team.get(cover_url(i, K2, "free")))
-    assert BUSY not in names(free) and MAYA in names(free) and set(free) == {"groups", "teaching"}, free
+    assert BUSY not in names(free) and MAYA in names(free) and set(free) == {"groups", "teaching", "busy"}, free
     no(team.get(cover_url(i, "nokey", "free")), 400, AB.CHANGED)
     no(team.get(cover_url(i, K8, "free")), 400, AB.NO_NEED)
     no(team.put(cover_url(i, K2, "relief"), json=dict(relief=BUSY)), 400, nf(BUSY))
@@ -1676,7 +1676,7 @@ def the_team_approves_changes_splits_and_keeps_through_the_api():
                    ("joined", TEAMER, fri + "1A Art on Fri 16 Oct joined again"),
                    ("kept", TEAMER, HEAD + f"{SAM} kept for 1A Science P6–P7 on Tue 13 Oct")], got
 
-COVER = {"id", "ckey", "date", "start", "end", "p", "n", "classes", "subject", "group", "room", "absent", "work", "state", "ack", "change"}
+COVER = {"id", "ckey", "date", "start", "end", "p", "n", "classes", "subject", "group", "room", "absent", "work", "state", "ack", "change", "stopped"}
 
 @rt
 def covering_lists_only_approved_and_never_the_reason():
@@ -1699,7 +1699,7 @@ def covering_lists_only_approved_and_never_the_reason():
     assert all(set(c) == COVER for c in got["covers"]), [set(c) ^ COVER for c in got["covers"]]
     assert got["covers"][0] == dict(id=i, ckey=K5, date="2026-10-13", start="10:30", end="11:30", p=5, n=2, classes=["1A"], subject="Science",
                                     group="", room="R1", absent=EVE, work=dict(text="Read p.4", link="https://x.test/a", files=[f]),
-                                    state="approved", ack=None, change=None), got["covers"][0]
+                                    state="approved", ack=None, change=None, stopped=""), got["covers"][0]
     text = r.get_data(as_text=True)
     for secret in ("A private matter", "Other", "Quiet please", "Medical", GRACE, "Planned by", "history", "reason", "remarks", "reporting_officer", "pick"):
         assert secret not in text, secret
@@ -1819,7 +1819,7 @@ def the_absent_teacher_sees_the_name_only_once_approved():
     assert [p.get("relief") for p in e2["parts"]] == [None, None] and not any({"pick", "history", "change"} & set(p) for p in e2["parts"]), e2["parts"]
     assert "history" not in e2 and [c["state"] for c in e2["covers"]] == ["open", "waiting"]
 
-LOAD = {"name", "depts", "fat", "teaching", "relief", "week", "term", "changes"}
+LOAD = {"name", "depts", "fat", "teaching", "relief", "exams", "week", "term", "changes"}
 
 @rt
 def load_counts_teaching_and_relief_for_the_week_and_term():
@@ -1835,9 +1835,9 @@ def load_counts_teaching_and_relief_for_the_week_and_term():
     rows = {r["name"]: r for r in got["rows"]}
     assert all(set(r) == LOAD for r in got["rows"])
     assert [r["name"] for r in got["rows"]] == [BUSY, MAYA, SAM, EVE, RUTH, FLEX], "by first department then name, none last; nobody with no teaching and no relief"
-    assert rows[SAM] == dict(name=SAM, depts=["Science"], fat=False, teaching=2, relief=2, week=4, term=4, changes=1), rows[SAM]
-    assert rows[FLEX] == dict(name=FLEX, depts=[], fat=True, teaching=0, relief=3, week=3, term=3, changes=0), rows[FLEX]
-    assert rows[MAYA] == dict(name=MAYA, depts=["Mathematics"], fat=False, teaching=2, relief=2, week=4, term=2, changes=0), rows[MAYA]
+    assert rows[SAM] == dict(name=SAM, depts=["Science"], fat=False, teaching=2, relief=2, exams=0, week=4, term=4, changes=1), rows[SAM]
+    assert rows[FLEX] == dict(name=FLEX, depts=[], fat=True, teaching=0, relief=3, exams=0, week=3, term=3, changes=0), rows[FLEX]
+    assert rows[MAYA] == dict(name=MAYA, depts=["Mathematics"], fat=False, teaching=2, relief=2, exams=0, week=4, term=2, changes=0), rows[MAYA]
     assert (rows[EVE]["teaching"], rows[EVE]["relief"], rows[BUSY]["teaching"]) == (8, 0, 2)
     for want in (BUSY, MAYA, SAM, EVE, RUTH, FLEX):
         assert FR.week_so_far(PUB, CAL, AB.all_records(), want, D13) == rows[want]["week"], want
@@ -1873,10 +1873,10 @@ def load_csv_neutralises_formulas():
     text = r.data.decode("utf-8")
     assert text.startswith("﻿")
     rows = list(csv.reader(io.StringIO(text.lstrip("﻿"))))
-    assert rows[0] == ["Name", "Departments", "Flexi Adjunct", "Teaching this week", "Relief this week", "Week so far", "Relief this term",
-                       "Requests to change this term"], rows[0]
-    assert ["'=HYPERLINK(1)", "'+Dept", "", "1", "0", "1", "0", "0"] in rows, rows
-    assert [SAM, "Science", "", "2", "2", "4", "2", "0"] in rows and [FLEX, "", "Yes", "0", "0", "0", "0", "0"] not in rows, rows
+    assert rows[0] == ["Name", "Departments", "Flexi Adjunct", "Teaching this week", "Relief this week", "Exams and events this week", "Week so far",
+                       "Relief this term", "Requests to change this term"], rows[0]
+    assert ["'=HYPERLINK(1)", "'+Dept", "", "1", "0", "0", "1", "0", "0"] in rows, rows
+    assert [SAM, "Science", "", "2", "2", "0", "4", "2", "0"] in rows and [FLEX, "", "Yes", "0", "0", "0", "0", "0", "0"] not in rows, rows
     names_ = [x["name"] for x in ok(team.get("/api/relief/load?week=2026-10-13"))["rows"]]
     assert [x[0] for x in rows[1:]] == ["'" + n if n.startswith("=") else n for n in names_] and names_[0] == odd, (rows, names_)
     no(team.get("/api/relief/load.csv?week=nope"), 400, "Choose the dates again.")

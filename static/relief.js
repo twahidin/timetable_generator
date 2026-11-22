@@ -193,10 +193,11 @@
     }
 
     function lessonRow(r, x, i, editable) {
-      const cover = x.needed && !r.cancelled, now = editable && x.date >= RF.today();   /* a past lesson keeps what it has */
+      const cover = x.needed && !x.stopped && !r.cancelled, now = editable && x.date >= RF.today();   /* a past lesson keeps what it has */
       const side = !cover ? "" : opts.side ? opts.side(r, x) || ""
         : reliefLines(x);
       const changed = x.changed && !r.cancelled && x.date >= RF.today() ? `<div class="ab-changed">The lesson has changed since this was planned</div>` : "";
+      const stop = x.stopped && !r.cancelled ? `<div class="ab-changed">${esc("Not happening: " + x.stopped)}</div>` : "";   /* an approved exam or event stops it */
       const head = `<div class="rf-head"><div><b>${esc(RF.title(x))}</b> <span class="muted">· ${esc(RF.when(x))}</span></div>${side ? `<div class="rf-side small">${side}</div>` : ""}</div>`;
       let body;
       if (!x.needed) {
@@ -204,7 +205,7 @@
         body = `<div class="ab-nn"><span class="muted">${esc(line)}</span>${now && !r.cancelled ? `<button type="button" class="small" data-act="needed" ${M.busy.has(r.id) ? "disabled" : ""}>Needed after all</button>` : ""}</div>`;
       } else body = now ? workEdit(r, x, i) : workRead(r, x);
       const extra = cover && opts.extra ? opts.extra(r, x) || "" : "";
-      return `<div class="rl" data-key="${esc(x.key)}">${head}${changed}${body}${extra}</div>`;
+      return `<div class="rl" data-key="${esc(x.key)}">${head}${changed}${stop}${body}${extra}</div>`;
     }
 
     function fileLink(r, f) {
@@ -508,7 +509,10 @@
     const sayBox = $("#askLessonsSay", A.pane), list = $("#askLessonList", A.pane);
     const empty = A.loading || A.lerr ? "" : !dates().length ? "Choose the dates first." : someWaiting() ? "Choose the periods first." : "You have no lessons then.";
     sayBox.innerHTML = A.lerr ? `<p>${say(A.lerr)}${A.lerr.status === 0 ? ` <button type="button" class="small" data-a="reread">Try again</button>` : ""}</p>` : A.loading ? `<p class="small muted">Reading your lessons…</p>` : "";
-    RF.lessons(list, A.lerr ? [] : A.lessons, { empty, onChange: changed });   /* with a refusal, nothing is listed (and nothing is sent), but what was typed is kept */
+    const shown = A.lerr ? [] : A.lessons, stopped = shown.filter(x => x.stopped), duties = A.lerr ? {} : A.duties || {};
+    const lines = Object.keys(duties).sort().flatMap(d => (duties[d] || []).map(u => `<p class="small">${esc(`${day(d)}: ${u.what}, ${u.start}–${u.end}: ${u.replaces} replaces you.`)}</p>`));
+    $("#askStopped", A.pane).innerHTML = stopped.map(x => `<p class="small muted"><b>${esc(RF.title(x))}</b> · ${esc(RF.when(x))}: ${esc("Not happening: " + x.stopped + " · no relief needed")}</p>`).join("") + lines.join("");
+    RF.lessons(list, shown.filter(x => !x.stopped), { empty: stopped.length || lines.length ? "" : empty, onChange: changed });   /* with a refusal, nothing is listed (and nothing is sent), but what was typed is kept */
   }
 
   function paintRO() {
@@ -543,6 +547,7 @@
     if (!r.ok) { A.readFor = ""; A.lessons = []; A.lerr = { text: r.error, bad: true, status: r.status }; paintAway(); paintLessons(); paintSend(); return; }
     if (Array.isArray(r.data.periods)) A.periods = r.data.periods;
     A.readFor = key;
+    A.duties = r.data.duties || {};
     A.lessons = some && !both ? [] : r.data.lessons || [];   /* "Some periods" lists nothing until from and to are chosen */
     paintAway(); paintLessons(); paintSend();
   }
@@ -640,7 +645,7 @@
         <div class="field"><div class="flabel">Which day?</div><div id="askDay"></div></div>
         <div class="field"><div class="flabel">Away for</div><div id="askAway"></div></div>
         <div class="field"><div class="flabel">Reason</div><div id="askReason"></div></div>
-        <div class="field"><div class="flabel">Your lessons then, and work for each</div><div id="askLessonsSay"></div><div id="askLessonList"></div></div>
+        <div class="field"><div class="flabel">Your lessons then, and work for each</div><div id="askLessonsSay"></div><div id="askStopped"></div><div id="askLessonList"></div></div>
         <div class="field"><div class="flabel">Reporting officer</div><div id="askRO"></div></div>
         <div id="askSend"></div></div>`;
       pane.addEventListener("click", askClick);

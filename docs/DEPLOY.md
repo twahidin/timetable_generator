@@ -109,7 +109,7 @@ about a minute for a 600-student school and uses one vCPU.
    setup opens by itself for the committee and the heads on any browser. The header shows Saved, Saving or Offline.
 6. On step 7, **Download**, get the configuration workbook and the timetable skill, and give both to an AI agent that
    can run code. It hands back the timetable file.
-7. On step 8, **Upload and edit**, upload that file, press **Check** and read what it found; fix what it lists there.
+7. On step 8, **Upload and edit**, upload that file, press **Upload and check** and read what it found; fix what it lists there.
    Then, on step 9, **Publish**, read the critical mistakes and warnings and press **Publish this timetable**: it is
    off while a critical mistake remains. Give teachers the teacher code and students the student code.
 8. Once the timetable is out, add students class by class on the Students step (optional; with them, no student gets two lessons at once and, with `SECRET_KEY` set, each
