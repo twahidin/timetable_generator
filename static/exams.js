@@ -277,11 +277,15 @@
   const changedSentence = () => `This ${isEv() ? "event" : "exam"} was changed by someone else since you opened it. Reload to carry on.`;
 
   /* the one place that decides what the page keeps when the server sends back the whole schedule, and so the only place a revision
-    is taken with contents. base: the last whole copy the server is known to hold (S.known; a save's own body for its reply). Nothing
-    typed since: theirs, whole. Something typed: key by key, what only I changed stays, what only they changed comes in, and the
-    same key changed by both to different values blocks the page. The server's own parts and the revision are theirs. -> may go on */
-  function takeSched(theirs, base) {
-    const mine = S.sched, known = base || S.known || (mine && copyOf(mine)) || {};
+    is taken with contents. It is read against the last whole copy the server is known to hold (S.known). Nothing typed since: theirs,
+    whole. Something typed: key by key, what only I changed stays, what only they changed comes in, and the same key changed by both
+    to different values blocks the page. The server's own parts and the revision are theirs. sent: what the page's own save sent,
+    given only for that save's answer, and then read against that. The save was accepted at the page's revision, so nobody else is
+    in its answer, only what the server made of what was sent: it never blocks, and what was typed meanwhile stays and is saved
+    next. An answer with no schedule in it (cut off, or not the server's) is not taken at all. -> whether it was taken */
+  function takeSched(theirs, sent) {
+    if (!theirs || !theirs.id) return false;
+    const mine = S.sched, known = sent || S.known || (mine && copyOf(mine)) || {};
     if (!mine) { S.sched = theirs; S.known = copyOf(theirs); return true; }
     const keys = Array.from(new Set(Object.keys(mine).concat(Object.keys(theirs), Object.keys(known)))).filter(k => !SERVER_KEYS.includes(k));
     if (!keys.some(k => canon(mine[k]) !== canon(known[k]))) { S.sched = theirs; S.known = copyOf(theirs); return true; }
@@ -289,7 +293,7 @@
     SERVER_KEYS.forEach(k => { if (k in theirs) out[k] = theirs[k]; });
     for (const k of keys) {
       const mineSays = canon(mine[k]) !== canon(known[k]), theirsSay = canon(theirs[k]) !== canon(known[k]);
-      if (mineSays && theirsSay && canon(mine[k]) !== canon(theirs[k])) { blockPage(changedSentence()); return false; }
+      if (!sent && mineSays && theirsSay && canon(mine[k]) !== canon(theirs[k])) { blockPage(changedSentence()); return false; }
       const v = mineSays ? mine[k] : theirs[k];
       if (v !== undefined) out[k] = v;
     }
@@ -364,13 +368,14 @@
     if (S.blocked) return false;
     const rev = S.rev;
     S.saving = true;
-    const sent = copyOf(S.sched);   /* what this save sends is the base its own reply is read against */
+    const sent = copyOf(S.sched);   /* what this save sends is what its own reply is read against */
     const r = await api("PUT", `${S.base}/${S.id}`, sent);
     S.saving = false;
     if (r.status === 401 || r.status === 403) return false;
     if (r.status === 409 && /was changed by/.test(r.j.error || "")) { blockPage(r.j.error); return false; }
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "Nothing was saved. Try again."; paintSave(); return false; }
-    if (!takeSched(r.j, sent)) { paintSave(); return false; }   /* what the server cleaned reaches the page, what was typed meanwhile stays */
+    /* what the server cleaned reaches the page, what was typed meanwhile stays; a 200 with no schedule in it is a failed save */
+    if (!takeSched(r.j, sent)) { S.bad = true; S.msg = "Nothing was saved. Try again."; paintSave(); return false; }
     if (S.rev === rev) { S.dirty = false; S.bad = false; S.msg = "Saved"; }
     paintSave();
     await refreshView();
@@ -394,7 +399,7 @@
       const r = await api(method, url, body, form);
       if (r.status === 401 || r.status === 403) return;
       if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); return; }
-      if (!takeSched(r.j)) return;
+      if (!takeSched(r.j)) { if (!S.blocked) { S.bad = true; S.msg = "That did not work. Try again."; paintSave(); } return; }
       if (done) done(r.j);
       paintSave();
       await refreshView();
@@ -1130,8 +1135,9 @@
       S.abMsg = "";
       if (!keys && !takeOwn(r.j)) { paint(); return false; }   /* the answer's revision is the page's only when it is the next one */
       const g = await api("GET", `${S.base}/${S.id}`);
-      if (g.ok) { if (!takeSched(g.j)) { paint(); return false; } }
-      else if (keys) { blockPage(changedSentence()); paint(); return false; }   /* the page's own keys changed and cannot be read: its copy is old */
+      const read = g.ok && takeSched(g.j);
+      if (!read && S.blocked) { paint(); return false; }
+      if (!read && keys) { blockPage(changedSentence()); paint(); return false; }   /* the page's own keys changed and cannot be read: its copy is old */
       takeReview(r.j); S.sbNote = ""; S.msg = ok || ""; paintSave();
       render(); refreshView();
       return true;

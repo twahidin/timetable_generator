@@ -106,18 +106,20 @@ const box = (checked, teacher = "Ms Z", key = "k1") => ({ checked, dataset: { t:
 })().catch(e => { console.error(e); process.exit(1); });
 /* the page's own functions against a fake server that keeps one schedule and its revision */
 const CONSTS = SRC.slice(SRC.indexOf("  const SERVER_KEYS"), SRC.indexOf("  /* the one place that decides"));   /* the keys and small helpers takeSched reads */
-const NAMES = ["takeRev", "takeSched", "takeOwn", "blockPage", "onChain", "saveInner", "saveNow", "flush", "edit", "refreshView", "serverAction", "viewAction", "approvalAction", "onHandled", "takeReview", "loadReview", "onClick"];
+const NAMES = ["takeRev", "takeSched", "takeOwn", "blockPage", "onChain", "saveInner", "saveNow", "flush", "edit", "refreshView", "serverAction", "viewAction", "approvalAction", "onHandled", "takeReview", "loadReview", "onWhenField", "onClick"];
 const SENT = who => `This exam was changed by ${who} since you opened it. Reload to carry on.`;
 function rig(ev) {
-  const srv = { sched: { id: "x1", name: "E", papers: [], going: ["Ms A"], duties: [{ who: "Ms A" }], rev: 1, saved_by: "Ms A" }, calls: [], holds: {}, lock: null, onPost: null, failGet: false, delay: 0, noAdd: false, clean: false };
+  const srv = { sched: { id: "x1", name: "E", papers: [], going: ["Ms A"], duties: [{ who: "Ms A" }], rev: 1, saved_by: "Ms A" }, calls: [], holds: {}, lock: null, onPost: null, failGet: false, delay: 0, noAdd: false, clean: false, norm: null, cut: {} };
   const S = { base: ev ? "/api/events" : "/api/exams", id: "x1", sched: { id: "x1", name: "E", papers: [], going: ["Ms A"], duties: [{ who: "Ms A" }], rev: 1 }, known: { id: "x1", name: "E", papers: [], going: ["Ms A"], duties: [{ who: "Ms A" }], rev: 1 }, view: null, rv: null, chain: Promise.resolve(), timer: null,
     dirty: false, blocked: false, rev: 0, saving: false, msg: "", bad: false, busy: false, hpend: {}, rvTok: 0, tab: "when", label: "Draft", note: "", sbNote: "", abMsg: "" };
   const api = async (m, u, b) => {
     const rest = u.replace(S.base + "/x1", "");
     srv.calls.push([m, rest]);
     let out;
+    const cutOff = srv.cut[m + rest]; delete srv.cut[m + rest];   /* "late": the server's work is done, its answer is cut off; "early": the answer is another page's, nothing reached the server */
+    if (cutOff === "early") return { ok: true, status: 200, j: {} };
     if (m === "PUT") { if (srv.lock) await srv.lock; out = b.rev !== srv.sched.rev ? { ok: false, status: 409, j: { error: SENT("Ms B") } }
-        : (srv.sched = Object.assign({}, b, { rev: srv.sched.rev + 1, saved_by: "Ms A" }), srv.clean && (srv.sched.suggested = (srv.sched.suggested || []).filter(id => srv.sched.papers.some(p => p.id === id))), { ok: true, status: 200, j: Object.assign({}, srv.sched) }); }
+        : (srv.sched = Object.assign({}, JSON.parse(JSON.stringify(b)), { rev: srv.sched.rev + 1, saved_by: "Ms A" }), srv.norm && srv.norm(srv.sched), srv.clean && (srv.sched.suggested = (srv.sched.suggested || []).filter(id => srv.sched.papers.some(p => p.id === id))), { ok: true, status: 200, j: JSON.parse(JSON.stringify(srv.sched)) }); }
     else if (m === "GET" && rest === "" && srv.failGet) { srv.failGet = false; out = { ok: false, status: 500, j: { error: "down" } }; }
     else if (m === "GET" && rest === "") out = { ok: true, status: 200, j: JSON.parse(JSON.stringify(srv.sched)) };
     else if (m === "GET" && rest === "/view") out = { ok: true, status: 200, j: { rev: srv.sched.rev, made: null } };
@@ -136,7 +138,7 @@ function rig(ev) {
     const h = srv.holds[m + rest]; delete srv.holds[m + rest];   /* one call is held, the later ones are not */
     if (h) await h;
     if (srv.delay) await sleep(srv.delay);
-    return out;
+    return cutOff ? { ok: true, status: 200, j: {} } : out;
   };
   const noop = () => {}, loc = { reloaded: 0, reload() { this.reloaded++; } };
   const names = NAMES.filter(has);
@@ -445,5 +447,108 @@ const named = fn => assert(fn, "function missing");
     assert.deepStrictEqual(S.known, sched); assert.notStrictEqual(S.known, S.sched, "a copy, not the page's own object");
   }
   console.log("round 3 cases passed");
+
+  /* round 4: a save's own reply never blocks (it was accepted at the page's revision, so nobody else is in it), and a 200 with no
+     schedule in it changes nothing. Every case runs, so one failing does not hide another */
+  const r4 = [], c4 = (name, run) => r4.push([name, run]);
+  const TIMES = { report: "07:30", min_break: 20, max_papers: 2 };
+  const hhmm = t => t ? t.padStart(5, "0") : null;                      /* what the server does to a time, a cleared one too */
+  const timed = () => { const r = rig(); for (const x of [r.srv.sched, r.S.sched, r.S.known]) x.times = Object.assign({}, TIMES); r.srv.norm = s => { s.times.report = hhmm(s.times.report); }; r.srv.delay = 30; return r; };
+  for (const [name, first, box, then, want] of [
+    ["the report time cleared, then the minutes typed", "", "min_break", "30", { report: null, min_break: 30, max_papers: 2 }],
+    ["the report time cleared, then typed again", "", "report", "08:30", { report: "08:30", min_break: 20, max_papers: 2 }],
+    ["a time the server rewrites, then another time", "8:00", "report", "8:15", { report: "08:15", min_break: 20, max_papers: 2 }],
+    ["a time the server rewrites, then the minutes", "8:00", "min_break", "30", { report: "08:00", min_break: 30, max_papers: 2 }],
+  ]) c4(name, async () => {
+    const { S, srv, f } = timed();
+    f.onWhenField({ value: first }, "time", "report");
+    const w = f.flush(); await sleep(10); f.onWhenField({ value: then }, "time", box); await w;
+    assert.strictEqual(S.blocked, false, "the save's own reply blocked the page");
+    assert.strictEqual(S.sched.rev, 2, "the revision is the reply's"); assert.deepStrictEqual(S.known.times, Object.assign({}, TIMES, { report: hhmm(first) }), "what the server holds");
+    assert.strictEqual(S.dirty, true, "what was typed meanwhile is still to be saved");
+    await f.flush();
+    assert.deepStrictEqual(srv.sched.times, want, "stored"); assert.deepStrictEqual(S.sched.times, want, "on the page");
+    assert.deepStrictEqual([S.blocked, S.dirty, S.sched.rev, S.msg], [false, false, 3, "Saved"]);
+  });
+  c4("a suggested paper taken off, then Agreed on another", async () => {
+    const { S, srv, f } = rig(); srv.clean = true; srv.delay = 30;
+    for (const x of [srv.sched, S.sched, S.known]) Object.assign(x, { papers: [{ id: "a" }, { id: "b" }], suggested: ["a", "b"] });
+    S.sched.papers = [{ id: "a" }, { id: "b" }];
+    f.edit(() => { S.sched.papers.splice(0, 1); });
+    const w = f.flush(); await sleep(10); f.edit(() => { S.sched.suggested = S.sched.suggested.filter(x => x !== "b"); }); await w;
+    assert.strictEqual(S.blocked, false, "the save's own reply blocked the page"); assert.strictEqual(S.dirty, true);
+    await f.flush();
+    assert.deepStrictEqual([srv.sched.suggested, S.sched.suggested, srv.sched.papers], [[], [], [{ id: "b" }]]); assert.strictEqual(S.dirty, false);
+  });
+  c4("an event's going list the server cleans, one more typed", async () => {
+    const { S, srv, f } = rig(true); srv.delay = 30; srv.norm = s => { s.going = uniq(s.going); };
+    f.edit(() => { S.sched.going = S.sched.going.concat(["Ms A"]); });
+    const w = f.flush(); await sleep(10); f.edit(() => { S.sched.going = S.sched.going.concat(["Ms D"]); }); await w;
+    assert.strictEqual(S.blocked, false, "the save's own reply blocked the page");
+    await f.flush(); assert.deepStrictEqual(srv.sched.going, ["Ms A", "Ms D"]); assert.deepStrictEqual(S.sched.going, ["Ms A", "Ms D"]);
+  });
+  c4("Fill clicked while the save runs and the minutes are typed", async () => {
+    const { S, srv, f } = timed(); f.onWhenField({ value: "" }, "time", "report");
+    const w = f.flush(); await sleep(5); const p = f.serverAction("POST", S.base + "/x1/fill", {}, undefined, noop2);
+    f.onWhenField({ value: "30" }, "time", "min_break"); await w; await p;
+    assert.strictEqual(S.blocked, false); assert.deepStrictEqual(srv.sched.times, { report: null, min_break: 30, max_papers: 2 });
+    assert.deepStrictEqual(S.sched.papers, [{ id: "p1" }], "and the Fill is done"); assert.strictEqual(S.sched.rev, srv.sched.rev);
+  });
+  c4("after such a save, another page's change still blocks and the rest still comes in", async () => {
+    for (const same of [true, false]) {
+      const { S, srv, f } = timed(); f.onWhenField({ value: "" }, "time", "report");
+      const w = f.flush(); await sleep(10); f.onWhenField({ value: "30" }, "time", "min_break"); await w;
+      const theirs = Object.assign(JSON.parse(JSON.stringify(srv.sched)), { name: "Theirs", rev: 3 }); if (!same) theirs.times.min_break = 45;
+      assert.strictEqual(f.takeSched(theirs), same, same ? "only the page changed the times" : "both changed the times");
+      assert.strictEqual(S.blocked, !same); assert.strictEqual(S.sched.times.min_break, 30); assert.strictEqual(S.sched.name, same ? "Theirs" : "E"); assert.strictEqual(S.sched.rev, same ? 3 : 2);
+      clearTimeout(S.timer);
+    }
+  });
+  c4("the server's own parts come from the reply, a save's own too", async () => {
+    const OWN = ["saved_at", "saved_by", "status", "approved", "approved_at", "approved_by", "sent_at", "sent_by", "sent_fp", "note", "log", "handled", "made", "pins", "use_anyway", "created_at", "created_by", "kind"];
+    for (const own of [true, false]) {
+      const { S, f } = rig(), all = v => Object.fromEntries(OWN.map(k => [k, v])), sent = Object.assign({ id: "x1", name: "E", rev: 1 }, all("sent"));
+      S.known = own ? null : sent; S.sched = Object.assign({ id: "x1", name: "Mine", rev: 1 }, all("page"));
+      assert.strictEqual(f.takeSched(Object.assign({ id: "x1", name: "E", rev: 2 }, all("server")), own ? sent : undefined), true);
+      assert.deepStrictEqual(S.sched, Object.assign({ id: "x1", name: "Mine", rev: 2 }, all("server"))); assert.strictEqual(S.blocked, false);
+    }
+  });
+  for (const how of ["early", "late"]) c4("a save whose 200 has no schedule in it, " + how, async () => {
+    const { S, srv, f } = rig(); srv.cut.PUT = how;
+    f.edit(() => { S.sched.name = "Mine"; });
+    assert.strictEqual(await f.flush(), false, "the save says it failed");
+    assert.deepStrictEqual(S.sched, { id: "x1", name: "Mine", papers: [], going: ["Ms A"], duties: [{ who: "Ms A" }], rev: 1 }, "the page's copy is untouched");
+    assert.strictEqual(S.known.name, "E"); assert.deepStrictEqual([S.msg, S.bad, S.dirty, S.blocked], ["Nothing was saved. Try again.", true, true, false]);
+    assert.deepStrictEqual(srv.calls, [["PUT", ""]], "and it goes no further");
+    if (how === "early") { await f.flush(); assert.strictEqual(srv.sched.name, "Mine", "the next try saves it"); assert.deepStrictEqual([S.msg, S.bad, S.dirty, S.sched.rev], ["Saved", false, false, 2]); }
+  });
+  c4("a save whose 200 has no schedule in it stops what was clicked after it", async () => {
+    const { S, srv, f } = rig(); srv.cut.PUT = "early"; f.edit(() => { S.sched.name = "Mine"; });
+    assert.strictEqual(await f.approvalAction("send", {}, "Sent."), false); assert.deepStrictEqual(srv.calls.filter(c => c[0] === "POST"), []); assert.strictEqual(S.sched.name, "Mine");
+  });
+  c4("a Fill whose 200 has no schedule in it", async () => {
+    const { S, srv, f } = rig(); srv.cut["POST/fill"] = "late"; let called = 0;
+    await f.serverAction("POST", S.base + "/x1/fill", {}, undefined, () => { called++; });
+    assert.deepStrictEqual([S.sched.id, S.sched.name, S.sched.rev, S.known.name], ["x1", "E", 1, "E"], "the page's copy is untouched");
+    assert.deepStrictEqual([S.msg, S.bad, S.blocked, called], ["That did not work. Try again.", true, false, 0]);
+  });
+  c4("the read after an action has no schedule in it: the same as a read that failed", async () => {
+    { const { S, srv, f } = rig(); srv.cut.GET = "late"; assert.strictEqual(await f.approvalAction("send", {}, "Sent."), true);
+      assert.deepStrictEqual([S.sched.id, S.sched.name, S.sched.rev, S.blocked, S.msg], ["x1", "E", 2, false, "Sent."]); }
+    { const { S, srv, f } = rig(true); srv.cut.GET = "late"; assert.strictEqual(await f.approvalAction("away", { away: "Ms A", name: "Ms C" }, "Done."), false);
+      assert.deepStrictEqual([S.sched.id, S.blocked, S.blockMsg], ["x1", true, "This event was changed by someone else since you opened it. Reload to carry on."]); assert.notStrictEqual(S.msg, "Done."); }
+  });
+  for (const typed of [true, false]) c4("a paper added in place while a second Fill runs stays" + (typed ? ", after a reply that was merged" : ""), async () => {
+    const { S, srv, f } = rig(), g = gate(); srv.holds["/fill"] = g.p; srv.delay = 30; srv.onPost = () => { srv.noAdd = true; };
+    const p1 = f.serverAction("POST", S.base + "/x1/fill", {}, undefined, noop2), p2 = f.serverAction("POST", S.base + "/x1/fill", {}, undefined, noop2); await tick();
+    if (typed) f.edit(() => { S.sched.name = "Mine"; });
+    g.go(); await p1; await tick(); f.edit(() => { S.sched.papers.push({ id: "mine" }); }); await p2;
+    assert.strictEqual(S.blocked, false); assert.deepStrictEqual(S.sched.papers, [{ id: "p1" }, { id: "mine" }], "what the page knows is a copy, not the page's own lists");
+    await f.flush(); assert.deepStrictEqual(srv.sched.papers, [{ id: "p1" }, { id: "mine" }]); assert.strictEqual(srv.sched.name, typed ? "Mine" : "E");
+  });
+  const r4bad = [];
+  for (const [name, run] of r4) { try { await run(); } catch (e) { r4bad.push(`${name}: ${String(e && e.message).split("\n").slice(0, 2).join(" ")}`); } }
+  if (r4bad.length) { console.error(`round 4: ${r4bad.length} of ${r4.length} failed\n  ${r4bad.join("\n  ")}`); process.exit(1); }
+  console.log(`round 4 cases passed (${r4.length})`);
 })().catch(e => { console.error(e); process.exit(1); });
 console.log(`${n} exams page tests passed`);
