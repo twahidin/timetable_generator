@@ -500,6 +500,21 @@ def test_a_lesson_the_new_teacher_may_not_take_then_is_moved():
     row = dict(scope="Teacher", target=T1, rule="Max periods in a row", number=2, week="Both", day="All", strength="Must")
     m, spec, days, pool, ts = case([one(1, 0, 1), one(2, 0, 2, CLS_B, SUBJ2, T1), one(3, 0, 3, "1C", "Mathematics", T1)], gives(T1), rules=[row])
     got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=5), GIVE] and got["why"][0].startswith(f"Rule Teacher · {T1} · Max periods in a row: "), got
+    # with a lesson on every day, it is the one of the day the rule is broken on that moves, wherever that is in the week
+    two_more = lambda d: [one(50, d, 2, CLS_B, SUBJ2, T1), one(51, d, 3, "1C", "Mathematics", T1)]
+    for n, bad in ((5, 4), (6, 4), (5, 0), (5, 2)):
+        m, spec, days, pool, ts = case([one(1 + d, d % 5, 1 if d < 5 else 7) for d in range(n)] + two_more(bad), gives(T1), rules=[row])
+        got, stats = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=1 + bad, d=bad, p=5), GIVE] and stats["nodes"] == 9, (n, bad, got, stats)   # and no other is looked at
+        assert got["why"][0].startswith(f"Rule Teacher · {T1} · Max periods in a row: ") and DAYS[bad] in got["why"][0], got
+    m, spec, days, pool, ts = case([one(1 + d, d, 1) for d in range(5)] + two_more(4) + [one(60, 2, 2, CLS_B, SUBJ2, T1), one(61, 2, 3, "1C", "Mathematics", T1)], gives(T1), rules=[row])   # on two days: both, each for its own day's sentence
+    with limits(CAND_SLOTS=5): got, _ = solved(m, spec, days, ts[TEACH], pool)
+    assert got["moved"] == {3, 5} and all(DAYS[f["d"]] in w for f, w in zip(got["fixes"][:2], got["why"])), got
+    before = [one(70 + p, 1, p, "1C", "Science", T1) for p in (5, 6, 7)]; liked = dict(scope="Teacher", target=T1, rule="Max periods a day", number=1, week="Both", day="All", strength="Prefer")   # a day T1 has too many on already, and one where only a wish gives, are not days of it
+    m5, spec5, days5, pool5, ts5 = case([one(1 + d, d, 1) for d in range(5)] + two_more(4) + before, gives(T1), rules=[row]); got, stats = solved(m5, spec5, days5, ts5[TEACH], pool5); assert got["moved"] == {5} and stats["nodes"] == 9, (got, stats)
+    m5, spec5, *_ = case([one(1 + d, d, 1) for d in range(5)] + two_more(4) + [one(80, 0, 7, "1C", "Science", T1)], gives(T1), rules=[row, liked]); assert list(refit._day_rules(m5, spec5, GIVE)) == [4]
+    must = fixes.judge(m, spec, days, GIVE)["must"]; ways = refit._in_the_way(m, spec, days, fixes.Busy(m), GIVE, must)
+    assert len(must) == 2 and [i for i, _ in ways] == [3, 5] and DAYS[2] in ways[0][1] and DAYS[4] in ways[1][1], ways
+    free = case([one(1 + d, d, 1) for d in range(5)], gives(T1)); assert refit._in_the_way(*free[:3], fixes.Busy(free[0]), GIVE, ["a made-up rule"]) == [(i, "a made-up rule") for i in (1, 2, 3, 4, 5)]   # a rule that names no day: all of them
     # a rule the lesson breaks with either teacher is not the new teacher's
     cls_rule = dict(scope="Class", target=CLS, rule="Not in periods", week="Both", day="All", strength="Must", **{"from": 1, "to": 3})
     m, spec, days, pool, ts = case([one(1, 0, 1)], gives(T1), rules=[cls_rule]); got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [GIVE], got
@@ -769,7 +784,7 @@ def test_a_missing_lesson_takes_the_place_of_one_that_can_move():
     cands, says = refit.direct(m, spec, days, t, pool); add = dict(kind="add", key=key, d=0, p=1, n=1, room=home); assert (cands, says) == ([[add]], None), (cands, says)   # only the place of a lesson that may move, in the room it leaves
     got, stats = solved(m, spec, days, t, pool)
     assert got == dict(fixes=[dict(kind="move", id=2, d=0, p=2), add], moved={2}, other=0, typed=set(), why=[f"{CLS_B} has Mathematics for {CLS_B} on {DAYS[0]} period 1.", "It was not on the timetable."]) and stats["nodes"] == 2, (got, stats)
-    got, stats = hunt(m, spec, days, t, pool, moved={2}); assert got is None and stats == dict(nodes=1, reason=refit.NO_FIT, late=False), stats
+    got, stats = hunt(m, spec, days, t, pool, moved={2}); assert got is None and stats == dict(nodes=0, reason=refit.NO_FIT, late=False), stats
     m, spec, days, pool, ts = case(rows, need, rules=[AWAY(T0, 0, 1, 1)]); assert refit.direct(m, spec, days, ts[part], pool) == ([], None)   # not a place a Must rule shuts
     m, spec, days, pool, ts = case(rows + [band(8, 0, 1, CLS, T0)], need); assert refit.direct(m, spec, days, ts[part], pool) == ([], None)   # nor one where a band is in the way as well
     m, spec, days, pool, ts = case(rows + [one(8, 1, 1, "1C", "Mathematics", T0)], need); assert refit.direct(m, spec, days, ts[part], pool) == ([[add]], None)   # whichever of the two is found first
@@ -781,6 +796,47 @@ def test_a_missing_lesson_takes_the_place_of_one_that_can_move():
     busy = lambda d: len({x["id"] for x in m["lessons"] if x["d"] == d}); cands = refit.direct(m, spec, days, t, pool)[0]
     assert len(cands) == 6 and [(c[0]["d"], c[0]["p"]) for c in cands] == [(0, p) for p in OPEN[:6]], cands
     assert all(fixes.judge(m, spec, days, c[0], pool=pool)["state"] == "no" for c in cands)
+
+def over(m, allowance, teacher=T0): return dict(m, teacher_ix=dict(m["teacher_ix"], **{teacher: dict(m["teacher_ix"][teacher], allowance=allowance)}))
+
+def test_an_add_over_the_allowance_needs_no_move():
+    key = f"C:{CLS_B}:{EL}"; part = f"dep:{key}:missing"; need = lambda n: lambda s: (plans(n, 1, key)(s), gives(T0, key)(s)); maths = [one(2, 0, 1, CLS_B, "Mathematics", T2)]
+    m, spec, days, pool, ts = case(maths, need(1)); usual = refit.direct(m, spec, days, ts[part], pool)[0]; assert len(usual) > 10
+    m = over(m, 0); states = {(s_["state"], s_["why"].endswith(ADD_OK)) for s_ in fixes.add_slots(m, spec, days, key, 1, pool) if s_["state"] in ("ok", "prefer")}; assert states == {("prefer", True)}   # every free place is over it
+    assert refit.direct(m, spec, days, ts[part], pool) == (usual, None)   # they are offered all the same, in the same order, and no place that is taken
+    got, _ = solved(m, spec, days, ts[part], pool); assert [got["fixes"]] == usual[:1] and got["moved"] == set(), got
+    m, spec, days, pool, ts = case(maths, need(2)); m = over(m, 1)   # the first add is within it, only the second goes over
+    got, _ = solved(m, spec, days, ts[part], pool); assert [(f["kind"], f["d"]) for f in got["fixes"]] == [("add", 1), ("add", 2)] and got["moved"] == set(), got
+    wish = dict(AWAY(T0), strength="Prefer"); wishes = [dict(wish, day=x) for x in DAYS]   # a wish of the teacher's is not given up for it
+    m, spec, days, pool, ts = case(maths, need(1), rules=wishes); assert refit.direct(over(m, 0), spec, days, ts[part], pool) == ([], None)
+    full_week = [x for d in range(5) for x in full(*([1, 2] if d == 0 else []), d=d, cls=CLS_B)] + maths + [band(9, 0, 2, CLS, T0)]   # no free place: one that a lesson may leave, over the allowance or not
+    m, spec, days, pool, ts = case(full_week, need(1)); m = over(m, 0); got, _ = solved(m, spec, days, ts[part], pool); assert got["moved"] == {2} and [f["kind"] for f in got["fixes"]] == ["move", "add"], got
+
+def test_a_place_the_add_could_not_take_afterwards_is_not_tried():
+    key = f"C:{CLS_B}:{EL}"; part = f"dep:{key}:missing"; need = lambda s: (plans(1, 1, key)(s), gives(T0, key)(s)); last = OPEN[-1]
+    week = [one(100 * d + p, d, p, CLS_B, "Mathematics", T2) for d in range(5) for p in OPEN if not (d in (0, 1) and p == last)]   # 1B's week is full but for the last period of Monday and Tuesday
+    bands = [band(900, 0, last, CLS, T0), band(901, 1, last, CLS, T0)]   # when the missing lesson's teacher has a band
+    most = dict(scope="Teacher", target=T0, rule="Max periods a day", number=2, week="Both", day="All", strength="Must")
+    m, spec, days, pool, ts = case(week + bands + [one(950, 0, OPEN[-2], "1C", "Science", T0)], need, rules=[most]); t = ts[part]   # with two periods on Monday T0 may have no more that day
+    cands = [c[0] for c in refit.direct(m, spec, days, t, pool)[0]]; assert [(c["d"], c["p"]) for c in cands] == [(0, OPEN[-2])] + [(1, p) for p in OPEN[:5]], cands   # none of Monday's but the place of that teacher's own lesson, which the rule is not broken without
+    got, _ = solved(m, spec, days, t, pool); assert got["fixes"][0] == dict(kind="move", id=100 + OPEN[4], d=1, p=last) and [(f["kind"], f["d"], f["p"]) for f in got["fixes"][1:]] == [("add", 1, OPEN[4])], got   # the nearest of the places tried
+    m, spec, days, pool, ts = case(week + bands, need); t = ts[part]; held = {p for p in OPEN[:6]}   # nor a place of a lesson an earlier target moved
+    assert [(c[0]["d"], c[0]["p"]) for c in refit.direct(m, spec, days, t, pool)[0]] == [(0, p) for p in OPEN[:6]]
+    assert [(c[0]["d"], c[0]["p"]) for c in refit.direct(m, spec, days, t, pool, held)[0]] == [(0, p) for p in OPEN[6:8]] + [(1, p) for p in OPEN[:4]]
+    got, _ = solved(m, spec, days, t, pool, moved=held); assert got["moved"] == {OPEN[7]} and got["fixes"][1]["p"] == OPEN[7], got
+    two = lambda s: (plans(2, 1, key)(s), gives(T0, key)(s))   # nor one of a lesson the list itself moved or put in
+    m, spec, days, pool, ts = case(week + bands, two)
+    asked, was = [], refit.direct
+    def watch(m_, *a): asked.append((m_["lessons"], a[-1])); return was(m_, *a)
+    try:
+        refit.direct = watch
+        with watching() as judged: got, _ = hunt(m, spec, days, ts[part], pool, moved={OPEN[0]})
+    finally: refit.direct = was
+    assert got and len(got["moved"]) == 2, got
+    at = {x["id"]: (x["d"], x["p"]) for x in m["lessons"]}; differ = [{x["id"] for x in L if at.get(x["id"]) != (x["d"], x["p"])} for L, _ in asked]
+    assert all(d_ <= held_ and OPEN[0] in held_ for d_, (_, held_) in zip(differ, asked)) and max(map(len, differ)) >= 2, differ   # direct is told of both, and of the earlier targets'
+    for fx, c_, _ in judged:
+        gone = [f["id"] for f in fx if f["kind"] == "move"]; put = [(f["d"], f["p"]) for f in fx if f["kind"] == "add"]; assert len(set(gone)) == len(gone) and len(set(put)) == len(put), fx
 
 def test_a_surplus_is_deleted_from_the_fullest_days():
     rows = [one(1, 0, 1), one(2, 0, 2), one(5, 0, 3, CLS, "Other"), one(3, 1, 1), one(4, 1, 2), one(6, 1, 3, CLS, "Other"), one(7, 2, 1)]   # Mon and Tue have three periods each, Wed one

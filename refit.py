@@ -72,23 +72,27 @@ def _teachers(m, spec, ks, e, rows, text):
 
 def _class_of(k, e, rows=()): return k[1] if k[0] == "C" else ((e or {}).get("classes") or [c for x in rows for c in x["classes"]] or [None])[0]
 
-def _adds(m, spec, days, pool, ks, k, e, n):
+def _usable(j):
+    """whether a place (as add_slots or the judge gives it) is one an answer may use: ok, or over a teacher's allowance and nothing else (the judge puts the rules it gives first)"""
+    return j["state"] == "ok" or (j["state"] == "prefer" and j["why"].endswith(OVER))
+
+def _adds(m, spec, days, pool, ks, k, e, n, held):
     cls = _class_of(k, e); c = fixes._ctx(m)
     busy = lambda d: len({x["id"] for x in m["lessons"] if cls in x["classes"] and x["d"] == d})   # the lessons the class already has that day
     slots = sorted(fixes.add_slots(m, spec, days, ks, n, pool), key=lambda s: (busy(s["d"]), s["d"], s["p"]))
-    ok = [[dict(kind="add", key=ks, d=s["d"], p=s["p"], n=n, room=fixes.add_room(m, spec, ks, s["d"], s["p"], n, c))] for s in slots if s["state"] == "ok"]
-    return ok or _taken(m, spec, days, pool, ks, n, slots, c)
+    free = [[dict(kind="add", key=ks, d=s["d"], p=s["p"], n=n, room=fixes.add_room(m, spec, ks, s["d"], s["p"], n, c))] for s in slots if _usable(s)]
+    return free or _taken(m, spec, days, pool, ks, n, slots, c, held)
 
-def _taken(m, spec, days, pool, ks, n, slots, c):
-    """adds at places (slots, in their order) that are refused only for lessons there that are not bands, so a search may move them: at most
-    TAKEN_SLOTS, each in the room add_room gives once those lessons are gone"""
+def _taken(m, spec, days, pool, ks, n, slots, c, held):
+    """adds at places (slots, in their order) that are refused only for lessons there that a search may move (not a band, not in held): at most
+    TAKEN_SLOTS, each one the judge lets the add have with those lessons off the timetable, in the room add_room gives it then"""
     out, b = [], c["busy"]
     for s in slots:
         if len(out) == TAKEN_SLOTS: break
         if s["state"] != "no": continue
         f = dict(kind="add", key=ks, d=s["d"], p=s["p"], n=n, room=""); row, there = [], set(); fixes.apply_one(row, f, spec, days, new_id=c["next_id"])
         while (y := b.blocker(row, s["d"], s["p"], n, ignore=there)) is not None: there.add(y)
-        if not there or any(fixes._block(b.ids[y]) for y in there) or _musts(m, spec, row): continue   # a rule refuses it, a band is there, or a rule would refuse it next
+        if any(y in held or fixes._block(b.ids[y]) for y in there) or not _usable(fixes.judge(m, spec, days, dict(f, out=sorted(there)), c, pool=pool)): continue
         m2 = dict(m, lessons=[x for x in m["lessons"] if x["id"] not in there]); c2 = dict(c, m=m2, busy=fixes.Busy(m2, base=b))
         out.append([dict(f, room=fixes.add_room(m2, spec, ks, s["d"], s["p"], n, c2))])
     return out
@@ -99,12 +103,13 @@ def _day_periods(lessons, cls):
     for g in {x["id"]: x for x in lessons if cls in x["classes"]}.values(): per[g["d"]] = per.get(g["d"], 0) + g["n"]
     return per
 
-def _deletes(m, spec, days, pool, k, e, rows):
+def _deletes(m, spec, days, pool, k, e, rows, held):
     c = fixes._ctx(m); L = m["lessons"]; per = _day_periods(L, _class_of(k, e, rows))
     first = {}
     for x in rows: first.setdefault(x["id"], x)
     out = []
     for i, x in sorted(first.items(), key=lambda v: (-per.get(v[1]["d"], 0), -v[1]["d"], -v[1]["p"], v[0])):
+        if i in held: continue   # moved already: the list would undo itself
         many = len(fixes._rows(L, i)) > 1
         f = dict(kind="delete", id=i, **({"group": ENTIRE if k[0] == "C" else k[1]} if many else {}))
         j = fixes.can_delete(m, spec, days, i, f.get("group"), pool, c)
@@ -181,17 +186,18 @@ def day_moves(m, spec, days, lesson_id, ctx, memo, moved, limit=CAND_SLOTS):
     return out[:limit]
 
 
-def direct(m, spec, days, target, pool):
+def direct(m, spec, days, target, pool, held=()):
     """the change itself for one target, before any search -> (candidates, sentence): the candidate changes, each a list of fixes,
     best first; and a Needs-you sentence when the target can never be one of the app's changes, else None. clash and rule have none
-    here (the search moves lessons). Never changes m or its lessons; a key step 5 no longer has gives the warning's own text"""
+    here (the search moves lessons). held: the ids of lessons that stay where they are (moved already): none is deleted, and no add is
+offered in the place of one. Never changes m or its lessons; a key step 5 no longer has gives the warning's own text"""
     text = target["text"]
     try:
         if target["kind"] in ("clash", "rule"): return [], None
         k, part = helper._dep_parts(target["key"]); plan = verify.planned_rows(spec); e = plan.get(k) if k else None; rows = helper._of_key(m["lessons"], k) if k else []
         if part == "extra":   # a key step 5 does not have: its rows are the surplus
             if k is None or e is not None or not rows: return [], text
-            return ([], BAND) if any(x.get("block") for x in rows) else (_deletes(m, spec, days, pool or (), k, None, rows), None)
+            return ([], BAND) if any(x.get("block") for x in rows) else (_deletes(m, spec, days, pool or (), k, None, rows, held), None)
         if e is None: return [], text
         ks = verify._kstr(k)
         if part == "teachers": return _teachers(m, spec, ks, e, rows, text) if rows else ([], text)
@@ -200,8 +206,8 @@ def direct(m, spec, days, target, pool):
             have = verify.placed(dict(m, lessons=list(m["lessons"]) + list(pool or ()))).get(k, {}).get("periods", 0)
             if have < e["periods"]:
                 sh = next((x for x in fixes.short(m, spec, pool or ()) if x["key"] == ks), None)
-                return (_adds(m, spec, days, pool or (), ks, k, e, sh["n"]) if sh else []), None
-            if part == "periods" and have > e["periods"]: return _deletes(m, spec, days, pool or (), k, e, rows), None
+                return (_adds(m, spec, days, pool or (), ks, k, e, sh["n"], held) if sh else []), None
+            if part == "periods" and have > e["periods"]: return _deletes(m, spec, days, pool or (), k, e, rows, held), None
             return [], text
         if part == "venue":
             wrong = _wrong_rows(m, e, rows)
@@ -275,14 +281,27 @@ def _either(blocked):
     """the lessons whose move helps blocked lessons -> [(lesson id, why)]: those in the way, then the blocked lessons themselves"""
     return [(y, why) for _, y, why in blocked if y is not None] + [(i, why) for i, _, why in blocked]
 
+def _day_rules(m, spec, f):
+    """{day: sentence} of the Must rules of a teacher's day ("Max periods in a row" and the like: their keys end |{day}) that the teacher fix f
+    breaks anew on the timetable m"""
+    own = {id(x) for x in helper._of_key(m["lessons"], fixes._key(f["key"]))}; near = [x for x in m["lessons"] if id(x) in own or set(x["teachers"]) & set(f["teachers"])]
+    was, out = fixes.rule_subjects(m, spec, near), {}
+    for k, w in fixes.rule_subjects(m, spec, [dict(x, teachers=list(f["teachers"])) if id(x) in own else x for x in near]).items():
+        if k in was or isinstance(k, tuple) or w.get("strength") != "Must": continue
+        who, _, d = k.split(":", 2)[2].rpartition("|")
+        if who in m["teacher_ix"] and d.isdigit(): out.setdefault(int(d), w["text"])
+    return out
+
 def _in_the_way(m, spec, days, b, f, must):
     """the lessons whose move may help a refused fix on the timetable m (b: its Busy; must: the Must rules it breaks, as judged) ->
     [(lesson id, why)], in the order found: for a teacher fix those in the way of a new teacher, then the lessons of its key that are
-    blocked (all of them when only a rule of the teacher's day refuses it); for a move, swap or add those in the way of each lesson it
-    places; none for a room (Busy names no lesson for one) or a delete"""
+    blocked; when only a rule of the teacher's day refuses it, the key's lessons of the days it is broken on (all of them when it names no
+    day); for a move, swap or add those in the way of each lesson it places; none for a room (Busy names no lesson for one) or a delete"""
     if f["kind"] == "teacher":
         blocked = _blocked(m, spec, days, b, f)
-        return _either(blocked) if blocked or not must else [(x["id"], must[0]) for x in helper._of_key(m["lessons"], fixes._key(f["key"]))]
+        if blocked or not must: return _either(blocked)
+        own = helper._of_key(m["lessons"], fixes._key(f["key"])); on = _day_rules(m, spec, f)
+        return [(x["id"], on[x["d"]]) for x in own if x["d"] in on] or [(x["id"], must[0]) for x in own]
     if f["kind"] not in ("move", "swap", "add"): return []
     after = helper._apply(m["lessons"], [f], spec, days); placed = after["touched"]
     hits = [_blocker(b, days, [x for x in after["lessons"] if x["id"] == i], placed) for i in sorted(placed)]
@@ -301,18 +320,16 @@ class _Search:
         self.blocked, self.own, self.given = [], set(), None   # for a teacher change: _blocked on m, the key's lessons, m with the change made
 
     # ------------------------------------------------------------ the change itself
-    def direct(self, m):
-        """direct's candidates on the timetable m and its sentence, without a delete of a lesson an earlier target moved (the list would undo itself)"""
-        cands, needs = direct(m, self.spec, self.days, self.target, m.get("pool") or ())
-        return [c for c in cands if not (c[0]["kind"] == "delete" and c[0]["id"] in self.moved)], needs
+    def _more(self, node, c):
+        """direct's candidates on the timetable a list leaves (c: its chain): none about a lesson that an earlier target or the list itself moved or put in"""
+        held = set(self.moved) | {i for x in node[0] for i in _ids(x["fix"])} | {x["id"] for x in c["lessons"] if x["id"] not in self.rows}
+        return direct(dict(self.m, lessons=c["lessons"]), self.spec, self.days, self.target, self.m.get("pool") or (), held)[0]
 
     def _grow(self, node, c, failed):
         """a list that fits and leaves the warning open (c: its chain), carried on with one more change, the first that fits each time ->
         whether that settles it. The changes are direct's on the timetable the list leaves (a lesson still missing may be shorter, a
-        day another), without an add in the place of one the list makes; an add on a day the list has no add on comes first"""
-        self._in_time(); put = [f for _, part in node[1] for f in part if f["kind"] == "add"]; days = {f["d"] for f in put}
-        meets = lambda f: f["kind"] == "add" and any(f["d"] == g["d"] and f["p"] < g["p"] + g["n"] and g["p"] < f["p"] + f["n"] for g in put)
-        more = [part for part in self.direct(dict(self.m, lessons=c["lessons"]))[0] if not meets(part[0])]
+        day another); an add on a day the list has no add on comes first"""
+        self._in_time(); more = self._more(node, c); days = {f["d"] for _, part in node[1] for f in part if f["kind"] == "add"}
         if len(node[1]) >= MAX_DIRECT: self.many |= bool(more); return False
         for j, part in sorted(enumerate(more), key=lambda x: x[1][0]["kind"] == "add" and x[1][0]["d"] in days):
             longer = (node[0], node[1] + ((j, part),))
@@ -451,7 +468,7 @@ def solve(m, spec, days, target, pool, moved, deadline, stats=None, max_moves=No
     before, room = helper._before(m, spec, w), _room_clash(m, w)
     if _gone(m, spec, days, w, before, room): return dict(fixes=[], moved=set(), other=0, typed=set(), why=[])
     if w.get("crit") == "noteacher": s["reason"] = helper.NO_TEACHER; return None   # no move gives it one
-    search = _Search(m, spec, days, target, moved, deadline, s, before, room, MAX_MOVES if max_moves is None else max_moves); cands, needs = search.direct(m)
+    search = _Search(m, spec, days, target, moved, deadline, s, before, room, MAX_MOVES if max_moves is None else max_moves); cands, needs = direct(m, spec, days, target, pool, moved)
     if not cands and target["kind"] not in ("clash", "rule"): s["reason"] = needs or NO_FIT; return None
     got = search.run(cands)
     if got is not None: s["late"] = False
