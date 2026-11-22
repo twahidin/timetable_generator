@@ -265,6 +265,7 @@ def titles_with_stops_in_any_case_and_the_ones_used_here():
         all_where(N, f"see {text} now", f"see {c} now")
     all_where(N, "Madam Tan Wei Ling", c); all_where(N, "madam tan and MADAM. Ling", f"{c} and {c}")
     all_where(a_names(TAN, "Mdm Tan Ai"), "Madam Tan and Mdm Tan", "T01 and T01")
+    all_where(a_names(TAN, "Mr Tan Boon Kiat"), "Mister Tan, mister tan and Mister. Boon", "T01, T01 and T01"); all_where(N, "Mister Koh", N.code("Mr Koh Ah Huat"))
     all_where(N, "Cikgu Siti", N.code("Ms Siti Aminah binte Yusof")); all_where(N, "Encik Ahmad", N.code(RIZAL))
     all_where(N, "Puan Aminah, Ustazah Siti, Ustaz Rizal, Prof. Koh and Professor Koh",
               ", ".join([N.code("Ms Siti Aminah binte Yusof")] * 2) + f", {N.code(RIZAL)}, " + " and ".join([N.code("Mr Koh Ah Huat")] * 2))
@@ -281,7 +282,7 @@ def titles_with_stops_in_any_case_and_the_ones_used_here():
     all_where(a_names(students=[("S1", "Siti Aminah @ Rose")]), "the teacher Siti Aminah @ Rose, Siti Aminah", "the teacher a student, a student")
     same(a_names(students=[("S1", "Siti Aminah @ Rose")]).out("Siti Aminah; Rose", "list"), "a student; Rose")
     all_where(a_names("Teacher A"), "Teacher A, Ms a student, Miss a lesson", "T01, Ms a student, Miss a lesson")
-    assert set(HONORIFICS) < set(names.TITLES) and {"madam", "cikgu", "encik", "puan", "ustaz", "ustazah", "sir", "teacher", "prof", "professor"} < set(names.TITLES)
+    assert set(HONORIFICS) < set(names.TITLES) and {"madam", "mister", "cikgu", "encik", "puan", "ustaz", "ustazah", "sir", "teacher", "prof", "professor"} < set(names.TITLES)
     for h in HONORIFICS: all_where(N, f"{h} ling, {h.upper()}. LING", f"{c}, {c}")
 
 @t
@@ -394,6 +395,21 @@ def a_unit_after_a_number_is_not_a_name():
     for w in ("list", "app"): same(N.out("Jun 5min, Jun 5 min", w), "Jun 5min, Jun 5 min")
     all_where(N, "Mr Min An, Min Jun and Ms An", f"{N.code('Ms Min An')}, {N.code('Mr Jun Min')} and {N.code('Ms Min An')}")
     all_where(N, "1. Min Jun Tan; Sec 3 Min Jun Tan; 2) Min Jun Tan", "1. a student; Sec 3 a student; 2) a student")                     # not a length: no number, a level's number
+
+@t
+def a_unit_gives_way_to_a_whole_name_of_three_words():
+    """a pasted class list, numbered with only a space: the number is no length when three or more words make a whole name"""
+    N = a_names("Mr Jun Min", "Ms Min Li Goh", students=[("S1", "Min Jun Tan"), ("S2", "Min Lee"), ("S3", "Hr Ong Bo Yi")]); goh = N.code("Ms Min Li Goh")
+    all_where(N, "1 Min Jun Tan", "1 a student"); all_where(N, "1 MIN JUN TAN\n2 Min Li Goh\n3 Tan Min Jun\n4\tMin Jun Tan\n5 Hr Ong Bo Yi", f"1 a student\n2 {goh}\n3 a student\n4\ta student\n5 a student")
+    all_where(N, "12 Min, Jun Tan; 1Min Jun Tan; 7 Min\tJun   Tan", "12 a student; 1 a student; 7 a student")
+    all_where(N, "90 min Jun Tan", "90 a student")                                 # accepted
+    for w in ("list", "app"):                                                        # part of a name, and a whole one of two words, keep their unit
+        same(N.out("90 min Jun 3; 90 Min Jun; 4 Min Lee; 30 min Li; 2 hr Ong; Jun Tan 90min paper", w), "90 min Jun 3; 90 Min Jun; 4 Min Lee; 30 min Li; 2 hr Ong; Jun Tan 90min paper")
+    same(N.out("90 min Jun 3; 90 Min Jun; 4 Min Lee", "typed"), "90 min Jun 3; 90 Min Jun; 4 Min Lee")
+    all_where(N, "Sec 3 Min Lee; 2) Min Lee; 3. Min Lee", "Sec 3 a student; 2) a student; 3. a student")      # the number of a level or of a line
+    M = a_names(("Mr Ming Yap", "MIN"), "Min @ Li", "Min Jo @ Li")
+    same(M.out("90 MIN, MIN is free", "app"), f"90 MIN, {M.code('Mr Ming Yap')} is free")
+    for w in ("list", "app"): same(M.out("90 Min @ Li; 90 Min Jo @ Li", w), f"90 Min @ Li; 90 {M.code('Min Jo @ Li')}")
 
 @t
 def what_is_not_a_title():

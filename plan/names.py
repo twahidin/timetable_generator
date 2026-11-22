@@ -18,9 +18,10 @@ across one comma (but not when the words on each side of it are a match of their
 
 Never a code: a protected word on its own (a day or month, or a word of a level, class, subject, short subject, setup code or
 room of the published timetable), or several that all are; a link of names (bin, s/o, and) or one letter on its own; small words
-in small letters ("do an"); one letter glued to a digit (P3, T01); a unit after a number ("90 min"). No title: "teacher" and "sir"
-unless a word with a capital follows; a subject's code as it is written ("DR"); one in capitals before a protected word in
-capitals ("WILL MISS ART"); and a title makes a person of a protected word ("Ms May").
+in small letters ("do an"); one letter glued to a digit (P3, T01); a unit after a number ("90 min"), unless it is in a whole name
+of three or more words ("1 Min Jun Tan" in a numbered class list). No title: "teacher" and "sir" unless a word with a capital
+follows; a subject's code as it is written ("DR"); one in capitals before a protected word in capitals ("WILL MISS ART"). A title
+makes a person of a protected word ("Ms May").
 
 In a list and in the app's words a month or weekday bound to a day's number ("Mon 3 Jun", "May 3") never joins PART of a name, and
 protected words are cut from the ends of part of a name: what is left must be two words, or have a title. So "Sec 3 Art Koh" and
@@ -43,9 +44,9 @@ import bisect, functools, re, unicodedata
 from relief.pick import HONORIFICS
 from ttgen.report import short_subject
 
-TITLES = HONORIFICS + ("madam", "cikgu", "encik", "puan", "ustaz", "ustazah", "sir", "teacher", "prof", "professor")
+TITLES = HONORIFICS + ("madam", "mister", "cikgu", "encik", "puan", "ustaz", "ustazah", "sir", "teacher", "prof", "professor")
 STUDENT, SCHOOL = "a student", "the school"
-_ALIKE = {"madam": "mdm", "professor": "prof"}          # one title, two ways to write it
+_ALIKE = {"madam": "mdm", "mister": "mr", "professor": "prof"}          # one title, two ways to write it
 _WORDS_TOO = ("teacher", "sir")                         # ordinary words too: a title only before a name word with a capital
 _TITLES = frozenset(TITLES)
 _DAYS = "monday tuesday wednesday thursday friday saturday sunday".split()
@@ -147,10 +148,11 @@ class _Text:
         self.gap = [_NONE] + [_gap(self.norm[self.b[j - 1]:self.a[j]], self.key[j - 1]) for j in range(1, self.n)]
         digit = [r.isdecimal() for r in self.raw]
         self.digit = digit
-        self.off = [False] * self.n              # words that are never part of a name: one letter glued to a digit (P3, T01), a unit after a number
+        self.off, self.unit = [False] * self.n, [False] * self.n      # one letter glued to a digit (P3, T01) is never a word of a name; a unit after a number only of a whole one
         for j in range(self.n):
             near = [k for k in (j - 1, j + 1) if 0 <= k < self.n and digit[k] and self.glued(max(j, k))]
-            self.off[j] = len(self.key[j]) == 1 and bool(near) or self.key[j] in _UNITS and j > 0 and digit[j - 1] and self.near(j) and not self.level(j - 1)
+            self.off[j] = len(self.key[j]) == 1 and bool(near)
+            self.unit[j] = not self.off[j] and self.key[j] in _UNITS and j > 0 and digit[j - 1] and self.near(j) and not self.level(j - 1)
 
     def glued(self, j): return 0 < j < self.n and self.a[j] == self.b[j - 1]
 
@@ -168,9 +170,9 @@ class _Text:
 
     def after(self, j):
         """(the next word, what is between them) after word j; digits glued to the end of j or to the next word are a footnote's, and
-        are passed over, unless they are a date's"""
+        are passed over, unless they are a date's or a length's"""
         k = j + 1
-        if k + 1 < self.n and self.digit[k] and (self.glued(k) or self.glued(k + 1) and not self.dated(k + 1, -1)): return k + 1, self.gap[k + 1 if self.glued(k) else k]
+        if k + 1 < self.n and self.digit[k] and (self.glued(k) or self.glued(k + 1) and not self.dated(k + 1, -1) and not self.unit[k + 1]): return k + 1, self.gap[k + 1 if self.glued(k) else k]
         return k, self.gap[k] if k < self.n else _NONE
 
     def owns(self, j):
@@ -465,8 +467,8 @@ class Names:
 
     # ------------------------------------------------------------------------------------------------ one match
     def _whole(self, t, s, title, where, commas, on=False):
-        """(end, who) of the longest whole stored name of two or more words at word s, in any order, or None; on: a title before it
-        is not on its line"""
+        """(end, who) of the longest whole stored name of two or more words at word s, in any order, or None; of three or more when a
+        unit after a number is one of them ("1 Min Jun Tan"). on: a title before it is not on its line"""
         words, masks, mask, seen, j, comma, best = [], [], self._all, {}, s, 0, None
         while j < t.n and not t.off[j]:
             k = t.key[j]
@@ -475,7 +477,7 @@ class Names:
             if not mask: break
             words.append(j); masks.append(mask)
             full = mask & self._long.get(len(words), 0)
-            if full and len(words) > 1 and (title or not self._nobody(t, words)):
+            if full and len(words) > (2 if any(t.unit[w] for w in words) else 1) and (title or not self._nobody(t, words)):
                 date = not full & self._teachers and len(words) == 2 and not title and t.dated(s, -1)      # "3 Jun Goh": see the top
                 if not date: best = (len(words), full)
             n, g = t.after(j)
@@ -509,7 +511,7 @@ class Names:
         """(end, who) of the longest run of words of one name at word s, or None. In a list and in the app's words a day or month
         bound to a day's number is never in it, and protected words are cut from its ends"""
         words, masks, mask, seen, j, comma = [], [], self._all, {}, s, 0
-        while j < t.n and not t.off[j]:
+        while j < t.n and not t.off[j] and not t.unit[j]:
             k = t.key[j]
             if where != "typed" and t.dated(j, 1) and not (title and j == s and self._by_title(self._long.get(1, 0), title) & self._has.get((k, 1), 0)): break
             seen[k] = seen.get(k, 0) + 1
@@ -570,7 +572,7 @@ class Names:
             rest = range(best[0], more[0]) if more else ()
             if any(t.gap[j] in (_CELL, _LINE) for j in rest) and any(t.key[j] not in self._prot for j in rest): best = more
         got = self._walk(self._tree, t, s)
-        if got and got[0] > (best[0] if best else s + 1) and (title or not all(w in self._prot for w in t.key[s:got[0]])):
+        if got and got[0] > (best[0] if best else s + (2 if t.unit[s] else 1)) and (title or not all(w in self._prot for w in t.key[s:got[0]])):
             teachers = got[1] & self._teachers
             if teachers: return got[0], self._by_title(teachers, title or [""])
             if not title or title[-1] not in _WORDS_TOO and not (title == ["miss"] and t.small(s - 1)): return got
@@ -586,7 +588,7 @@ class Names:
         out = []
         for e in range(min(i + self._longest, t.n), i, -1):
             s = self._cell(t, i, e)
-            if where != "list" and s in self._shorts and not t.glued(e) and not t.off[i] and not (s in ("AM", "PM") and i and t.digit[i - 1]): out.append((e, 3, self._shorts[s]))
+            if where != "list" and s in self._shorts and not t.glued(e) and not t.off[i] and not t.unit[i] and not (s in ("AM", "PM") and i and t.digit[i - 1]): out.append((e, 3, self._shorts[s]))
             if s.casefold() in self._ids or s in self._written: ok = not (t.glued(e) and t.digit[e]) and (not t.glued(i) or t.digit[i - 1] or len(t.key[i - 1]) > 1 and t.key[i - 1] in self._known)
             else: ok = s in self._bare and self._numbered(t, i)
             if ok: out.append((e, 1, 0))
