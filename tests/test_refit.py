@@ -222,6 +222,62 @@ def test_a_wrong_room_kind_is_a_room_fix():
     assert refit.direct(m, spec, days, target("venue", KEY, "venue text"), pool) == ([], "venue text")
     assert refit.direct(m, spec, days, target("half", KEY, "half text"), pool) == ([], "half text")   # no combined venue in the sample school
 
+def test_a_delete_names_its_group_only_when_the_lesson_has_several_rows():
+    def two(i, d, p, groups):   # one lesson id with a row for each group, no block
+        return [dict(id=i, day=DAYS[d], p=p, n=1, level=LEVEL, classes=["9Z"], subject=SUBJ, group=g, teachers=[TEACHERS[0]]) for g in groups]
+    rows = [r for r in ROWS if r["id"] != ODD_ID] + two(30, 3, 0, [ENTIRE, "G7"]) + two(31, 3, 1, [ENTIRE])
+    m, spec, days, pool = world(rows); before = snapshot(m, pool)
+    assert len(fixes._rows(m["lessons"], 30)) == 2 and len(fixes._rows(m["lessons"], 31)) == 1
+    c, s = refit.direct(m, spec, days, target("extra", f"C:9Z:{SUBJ}"), pool)
+    assert s is None and c == [[dict(kind="delete", id=31)], [dict(kind="delete", id=30, group=ENTIRE)]], c   # a whole-class row of the key: ENTIRE; a lesson of one row: no group; latest period first
+    c, s = refit.direct(m, spec, days, target("extra", "G:G7"), pool)
+    assert s is None and c == [[dict(kind="delete", id=30, group="G7")]], c   # a group's row: its code
+    assert snapshot(m, pool) == before
+
+def test_a_delete_the_app_refuses_for_a_rule_is_left_out_but_one_that_misses_the_plan_is_kept():
+    two = [dict(r, n=2) if r["id"] == PLAIN_ID else r for r in ROWS]   # the key has one two-period lesson
+    m, spec, days, pool = world(two); step5_row(spec)["periods"] = 1
+    j = fixes.can_delete(m, spec, days, PLAIN_ID, None, pool); assert j["state"] == "no" and j["plan"] is True, j   # deleting it leaves 0 periods, below the plan of 1
+    c, s = refit.direct(m, spec, days, target("periods", KEY), pool)
+    assert s is None and c == [[dict(kind="delete", id=PLAIN_ID)]], c   # kept: the search judges what it leaves
+    more = [r for r in two] + [dict(id=8, day=DAYS[1], p=2, n=1, level=LEVEL, classes=[CLS], subject=EL, teachers=[TEACHERS[0]])]
+    m, spec, days, pool = world(more); step5_row(spec)["periods"] = 1
+    was = fixes.can_delete
+    try:   # the app refuses deleting lesson 8 for a rule (a refusal that is not about the plan)
+        fixes.can_delete = lambda m_, sp, dy, i, g=None, pl=(), ctx=None: dict(state="no", why="a made-up rule", plan=False) if i == 8 else was(m_, sp, dy, i, g, pl, ctx)
+        c, s = refit.direct(m, spec, days, target("periods", KEY), pool)
+        assert s is None and [x[0]["id"] for x in c] == [PLAIN_ID], c
+    finally: fixes.can_delete = was
+    c, s = refit.direct(m, spec, days, target("periods", KEY), pool); assert {x[0]["id"] for x in c} == {PLAIN_ID, 8}, c
+
+def test_a_half_room_is_moved_to_a_room_that_seats_the_group():
+    rows = [dict(r, room="1-01") if r["id"] == PLAIN_ID else r for r in ROWS]
+    m, spec, days, pool = world(rows); k = fixes._key(KEY); e = verify.planned_rows(spec)[k]
+    n = verify._group_size(spec, k, e); assert n and n > 1
+    spec["venues"] = list(spec["venues"]) + [dict(room="Combo", kind="classroom", capacity=n)]
+    ix = {r: dict(v) for r, v in m["room_ix"].items()}; ix["Combo"] = dict(room="Combo", kind="classroom", capacity=n)
+    ix["1-01"]["capacity"] = n - 1; ix["1-02"]["capacity"] = n - 1   # two small halves of the combined venue
+    ix["1-03"]["capacity"] = None   # a room with no known size is not offered either
+    m2 = dict(m, room_parts={"Combo": ["1-01", "1-02"]}, room_ix=ix)
+    assert verify._half_venue(m2, spec, k, e, verify.placed(m2)[k]), "the fixture makes the half warning"
+    c, s = refit.direct(m2, spec, days, target("half", KEY, "half text"), pool); assert s is None, s
+    rooms = [x[0]["room"] for x in c]
+    ok = [o["room"] for o in fixes.room_options(m2, spec, days, PLAIN_ID, ENTIRE, pool) if o["state"] == "ok"]
+    assert "Combo" in rooms and "1-02" not in rooms and "1-03" not in rooms and "1-01" not in rooms, rooms
+    assert rooms == [r for r in ok if r not in ("1-02", "1-03")], (rooms, ok)   # room_options' order
+    assert all(x == [dict(kind="room", id=PLAIN_ID, group=ENTIRE, room=x[0]["room"])] for x in c)
+    for x in c:   # each one settles it
+        L = [dict(r, room=x[0]["room"]) if r["id"] == PLAIN_ID else r for r in m2["lessons"]]
+        assert verify._half_venue(m2, spec, k, e, verify.placed(dict(m2, lessons=L))[k]) is None, x
+
+def test_a_classroom_in_its_other_week_is_not_a_wrong_room():
+    rows = [dict(r, room="1-01") if r["id"] == PLAIN_ID else r for r in ROWS]
+    m, spec, days, pool = world(rows); step5_row(spec)["room_kind"] = "art room"; step5_row(spec)["room_weeks"] = "Odd"
+    d0 = list(m["days"]); d0[0] = "Even Monday"; mine = dict(m, days=d0)   # the lesson is on day 0, in an Even week: art is asked for only in Odd weeks
+    assert refit.direct(mine, spec, d0, target("venue", KEY, "venue text"), pool) == ([], "venue text")
+    d1 = list(m["days"]); d1[0] = "Odd Monday"; odd = dict(m, days=d1)   # in an Odd week it is wrong
+    c, s = refit.direct(odd, spec, d1, target("venue", KEY), pool); assert s is None and c and all(x[0]["kind"] == "room" for x in c), (c, s)
+
 def test_a_bands_periods_need_you():
     band = next(k for k, e in verify.planned_rows(SPEC_CHECKED).items() if k[0] == "G" and any(r.get("block") for r in e["rows"]))
     ks = f"G:{band[1]}"

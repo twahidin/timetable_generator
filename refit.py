@@ -91,19 +91,20 @@ def _wrong_rows(m, e, rows):
     kind_of = lambda x: m["room_ix"].get(x["room"], {}).get("kind") if x["room"] and x["room"] != "TBC" else None
     return [x for x in rows if kind_of(x) and kind_of(x) != e["room_kind"] and not (kind_of(x) == "classroom" and verify._other_week(m["days"][x["d"]], e["room_weeks"]))] if e["room_kind"] else []
 
-def _small_rows(m, spec, k, e, rows):
-    """the rows in one room of a combined venue that seats the group while that room does not -> [(row, the combined venues that do)]"""
+def _small(m, spec, k, e, room):
+    """whether a lesson of the row in this room is in one room of a combined venue that seats the group while that room does not (verify's half-venue test)"""
     parts = m.get("room_parts") or {}; n = verify._group_size(spec, k, e)
-    if n is None: return []
     seats = lambda r: whole_n((m["room_ix"].get(r) or {}).get("capacity"))
-    out = []
-    for x in rows:
-        big = [c for c, rooms in parts.items() if x["room"] in rooms and seats(x["room"]) is not None and seats(c) is not None and seats(x["room"]) < n <= seats(c)]
-        if big: out.append((x, big))
-    return out
+    return n is not None and any(room in rooms and seats(room) is not None and seats(c) is not None and seats(room) < n <= seats(c) for c, rooms in parts.items())
 
-def _rooms(m, spec, days, pool, x, only=None):
-    return [[dict(kind="room", id=x["id"], group=x["group"], room=o["room"])] for o in fixes.room_options(m, spec, days, x["id"], x["group"], pool) if o["state"] == "ok" and (only is None or o["room"] in only)]
+def _seats(m, spec, k, e, room):
+    """whether the room is known to seat the group"""
+    n = verify._group_size(spec, k, e); v = whole_n((m["room_ix"].get(room) or {}).get("capacity"))
+    return n is not None and v is not None and v >= n
+
+def _rooms(m, spec, days, pool, x, ok=None):
+    """a room fix for the row for each "ok" room of room_options, in its order (only the rooms the test ok(room) accepts, when one is given)"""
+    return [[dict(kind="room", id=x["id"], group=x["group"], room=o["room"])] for o in fixes.room_options(m, spec, days, x["id"], x["group"], pool) if o["state"] == "ok" and (ok is None or ok(o["room"]))]
 
 def direct(m, spec, days, target, pool):
     """the change itself for one target, before any search -> (candidates, sentence): the candidate changes, each a list of fixes,
@@ -131,7 +132,7 @@ def direct(m, spec, days, target, pool):
             wrong = _wrong_rows(m, e, rows)
             return ([c for x in wrong for c in _rooms(m, spec, days, pool or (), x)], None) if wrong else ([], text)
         if part == "half":
-            out = [c for x, big in _small_rows(m, spec, k, e, rows) for c in _rooms(m, spec, days, pool or (), x, big)]
+            out = [c for x in rows if _small(m, spec, k, e, x["room"]) for c in _rooms(m, spec, days, pool or (), x, lambda r: _seats(m, spec, k, e, r))]
             return (out, None) if out else ([], text)
         return [], text
     except Exception: return [], text
