@@ -195,8 +195,7 @@ def whole_names_are_decided_first():
     all_where(N, "SUN YANG, SUN HAO YU", "a student, a student"); all_where(N, "May Lee Hoon\nMay Wong", "T01\nT02")
     M = a_names(); all_where(M, "May Lim, May 3; Art Koh, Art Room", f"{M.code(LIM)}, May 3; {M.code(KOH)}, Art Room")
     M = a_names(students=[("S1", "Ann Bo"), ("S2", "Cy Di"), ("S3", "Ann Bo Cy Di")]); all_where(M, "Ann Bo Cy Di", "a student")      # the fewest
-    M = a_names(students=[("S1", "Ann Bo"), ("S2", "Cy Di"), ("S3", "Bo Cy Di Ed")]); same(M.out("Ann Bo Cy Di Ed", "list"), "Ann a student")      # the fewest, of as many words
-    M = a_names(TAN, students=[("S1", "Tan Wei Ling Bo Ai"), ("S2", "Alicia Ng")]); same(M.out("Tan Wei Ling Bo: Ng, Alicia", "list"), "T01 Bo: a student")      # not a longer part
+    M = a_names(TAN, students=[("S1", "Tan Wei Ling Bo Ai"), ("S2", "Alicia Ng")]); same(M.out("Tan Wei Ling Bo: Ng, Alicia", "list"), "a student: a student")
     M = a_names("Ms Loh Ai", students=[("S1", "Sun Loh"), ("S2", "Kim Zain"), ("S3", "Kim Loh")]); same(M.out("8.30 SUN LOH\tKIM ZAIN", "typed"), "8.30 SUN T01\ta student")      # in typed words too
     M = a_names(TAN, students=[("BO TAN", "Cy Foo")]); all_where(M, "BO TAN WEI LING", "BO T01")
     M = a_names(students=[("S1", "Ann Bo"), ("S2", "Bo Cy Di")]); all_where(M, "Bo Ann Bo Cy Di", "a student a student")              # the most words: not Ann Bo twice
@@ -204,6 +203,7 @@ def whole_names_are_decided_first():
     for w in ("list", "app"): same(M.out("Wee, Suri May 3: English Yeo Eng 3A: Suri May", w), "a student May 3: English a student 3A: a student")      # of as many words, the ones only a name has
     M = a_names("Ms Tan Wei Ling", students=[("S1", "Wei Ling Ho"), ("S2", "Ho Min Jo Bo")]); all_where(M, "Wei Ling Ho Min Jo Bo", "T01 a student")      # not the first that fits
     M = a_names(TAN, students=[("S1", "Alicia Ng"), ("S2", "Ng Wei Jie"), ("S3", "Bo Tan")]); all_where(M, "Alicia Ng, Wei Jie; Ng, Alicia Tan, Bo", "a student, a student; a student a student")      # a comma gives way to what hides more
+    all_where(a_names("Mdm Low Ming Lay", "Mr Ng Ming Lay", students=[("S1", "Low Jun")]), "Mon 3 Jun, Low Ming Lay, 8.00", "Mon 3 Jun, T01, 8.00")          # but not to part of a whole name
 
 @t
 def a_title_in_capitals():
@@ -222,12 +222,22 @@ def a_unit_after_a_number_stays():
     all_where(N, "1h 50min\tTan Hui Min\tHall", f"1h 50min\t{hui}\tHall"); all_where(N, "90 min, Tan Hui Min", f"90 min, {hui}")
     all_where(N, "1h 50min (Tan Hui Min)", f"1h 50min ({hui})"); all_where(N, "90 min\tTan Hui Min", f"90 min\t{hui}"); all_where(N, "90 min Tan Hui Min", f"90 min {hui}")
     all_where(N, "take 90 min Jun Tan", "take 90 min a student"); all_where(N, "90 min Jun Tan\n90 MIN LI GOH", f"90 min a student\n90 MIN {goh}")        # the rest of a whole name of three
-    for text in ("1h30min Thu", "90 min Thu 3 Oct", "90 min Jun 3", "90 Min Jun", "Paper 4 Min Thu", "1h 30 min Thu", "46 Min Thu", "0451 Min Thu", "045 Min Thu", "0 Min Thu", "1" * 5000 + " Min Thu", "45 min\tThu 3 Oct", "30 hr\tOng", "it is 4 Min Thu"): all_where(N, text, text)
+    for text in ("1h30min Thu", "1h 5 min Thu", "2 hours 5 min Thu", "2hours5min Thu", "90 min Thu 3 Oct", "90 min Jun 3", "90 Min Jun", "1h 30 min Thu", "46 Min Thu", "0451 Min Thu", "045 Min Thu", "1" * 5000 + " Min Thu", "45 min\tThu 3 Oct", "30 hr\tOng", "Seat 14 Min Thu", "it is 45 Mins Thu",
+                 "2 hours", "90 minutes Jun", "Jun 5min", "Jun 5 hours"): all_where(N, text, text)
     all_where(N, "1 Min Jun Tan", "1 a student"); all_where(N, "1 MIN JUN TAN\n2 Min Li Goh\n3 Tan Min Jun\n4\tMin Jun Tan\n5 Hr Ong Bo Yi\n45 min thu", f"1 a student\n2 {goh}\n3 a student\n4\ta student\n5 a student\n45 a student")
-    all_where(N, "English\t4 Min Thu\t3A | 12 Min Thu   7 Min Thu", "English\t4 a student\t3A | 12 a student   7 a student")                # the number of a line, or of a cell
-    all_where(N, "Jun5 min Tan", "a student")                                                                         # the 5 is a footnote's
-    all_where(N, "3 Min Tan Jun", "3 Min a student")                                                                  # not in the stored order
-    all_where(N, "Sec 3 Min Thu; 2) Min Thu; 3. Min Thu; S3 EL P1 Min Thu", "Sec 3 a student; 2) a student; 3. a student; S3 EL P1 a student")      # no length: a level, a line, a paper
+    all_where(N, "English\t14 Min Thu\t3A | 12 Min Thu   17 Min Thu", "English\t14 a student\t3A | 12 a student   17 a student")                # the number of a line, or of a cell
+    all_where(N, "13 Min Tan Jun", "13 Min a student")                                                                # not in the stored order
+    all_where(N, "Sec 3 Min Thu: 2) Min Thu: 3. Min Thu: S3 EL P1 Min Thu", "Sec 3 a student: 2) a student: 3. a student: S3 EL P1 a student")      # no length: a level, a line, a paper
+    for before in ("8.30", "08:30", "3-01", "3A 4", "Seat 4", "Group 2", "Paper 4", "it is 4", "0"): all_where(N, f"{before} Min Thu", f"{before} a student")          # nor a time, a room, or less than ten
+    all_where(N, "2hours30min\tTan Hui Min", f"2hours30min\t{hui}"); all_where(N, "Jun5 min Tan", "a student")        # the 5 is a footnote's
+    N = a_names(students=[("K2", "Min Thu"), ("K3", "Hr Ong Bo Yi"), ("K4", "Mins Thu"), ("K5", "Min Jun Sun Goh")])
+    for text in ("Paper: 14 min Thu 3 Oct", "Paper - 14 min Thu", "Sec 3 45 min Thu", "Seat 14 Mins Thu", "Seat 10 Min Thu", "90 min Jun Sun 8.00"): all_where(N, text, text)
+    M = a_names(students=[("K1", "Min Jun Tan"), ("K2", "Tan Bo"), ("K3", "Min Wee Koh"), ("K4", "Koh Jun")]); all_where(M, "90 min Jun Tan Bo, 90 min Wee Koh Jun", "90 min Jun a student, 90 min a student Jun")
+    for before in ("Seat 14,", "3-14", "8.14", "10:45", "Hour 5", "30 min 5", "Seat 9", "14", "3A-12", "3A/12", "4\u201112", "S3-14"): all_where(N, f"{before} Min Thu", f"{before} a student")
+    for text in ("Paper 1 - 45 min Thu 3 Oct", "8.30 - 45 min Thu", "Paper 3: 45 min Thu", "Paper:45 min Thu"): all_where(N, text, text)
+    P = a_pub(rooms=("201",)); P["model"]["classes"].append(dict(name="401", level="Sec 4", size=30, home="", parents=[])); M = names.Names(P, [], kids(("K2", "Min Thu")))
+    all_where(M, "401 Min Thu, 201 Min Thu, 301 Min Thu", "401 a student, 201 a student, 301 Min Thu")          # a class or a room that is a number
+    all_where(N, "Seat 4 Mins Thu; Sec 3 Hr Ong Bo Yi; P1 Hr Ong Bo Yi", "Seat 4 a student; Sec 3 a student; P1 a student"); all_where(N, "1 Hr Ong Bo Yi\n0 Hr Ong Bo Yi", "1 a student\n0 Hr a student")
 
 @t
 def a_title_is_a_teachers():
@@ -239,6 +249,70 @@ def a_title_is_a_teachers():
     all_where(M, "S3 EL P1,Mr Tan,May 3,8.00", f"S3 EL P1,{M.code('Mr Tan Boon Kiat')},May 3,8.00"); all_where(M, "Mdm Lee June 3", f"{M.code('Mdm Lee Siew')} June 3")
     M = a_names("Ms Siti Hawa", students=[("S1", "Siti @ Rose"), ("S2", "Aminah @ Rose")]); all_where(M, "Ms Siti @ Rose, Ms Aminah @ Rose", "T01 @ Rose, Ms a student")
     all_where(N, "Miss Alicia Tan; Dr Grace Goh Hui", "Miss a student; Dr a student")                                # no teacher has the word after the title
+
+@t
+def a_titled_name_is_decided_before_anything():
+    """the title and the longest run of words after it of one teacher's name, in its cell: nothing else takes a word of it"""
+    N = a_names("Mr Low Zhi Siew", students=[("K1", "Low Zhi"), ("K2", "May Siew")])
+    for sep in ("\t", ", ", " ", "\n", " | ", "   ", "; "):
+        for f in (str, str.upper): all_where(N, f(f"S3 EL P1{sep}Mr Low Zhi Siew{sep}May 3{sep}8.00am"), f(f"S3 EL P1{sep}T01{sep}May 3{sep}8.00am"))
+    all_where(N, "Mr Siew May 3, Mr Low Zhi, Mr Zhi", "T01 May 3, T01, T01")
+    all_where(a_names("Mr Low Zhi Siew", "Mr Low Zhi", students=[("K1", "Alicia Siew")]), "Mr Low Zhi Siew, Alicia is away. Mr Low Zhi, Siew Alicia", "T02, Alicia is away. T01, a student")
+    N = a_names("Ms Tan Wei Ling", students=[("K1", "Ling Jun")]); all_where(N, "S3 EL P1\tMs Wei Ling\tJun 3\t8.00; Ms Tan Ling\tJun 3", "S3 EL P1\tT01\tJun 3\t8.00; T01\tJun 3")
+    all_where(a_names("Mrs Goh Lay Wei", students=[("K1", "May Wei")]), "Mrs Lay Wei | May 1", "T01 | May 1")
+    all_where(a_names("Mdm Nicole Toh Xin Geok", "Ms Toh Xin"), "Mdm Toh Xin Geok, Ms Toh Xin, Mdm Toh Xin", "T01, T02, T01")
+    all_where(a_names("Mdm Nicole Toh Xin Geok", students=[("K1", "Toh Xin")]), "Mdm Toh Xin Geok, Toh Xin", "T01, T01")
+    N = a_names(LIM); apart(N, "Mdm Lim May 3, Mdm Lim\tMay 3, Mdm Lim, May 3, Mdm May\nLim", "T01 May 3, T01\tMay 3, T01, May 3, T01", "T01 3, T01\tMay 3, T01, May 3, T01")        # the same teacher's whole name is the same match; a month alone in another cell is not
+    all_where(a_names("Mdm Lim May Bo"), "Mdm Lim\tMay Bo, Mdm Lim\tMay 3", "T01, T01\tMay 3")
+    all_where(a_names("Ms Goh Li Art"), "Ms Li, Art\tGoh", "T01")                                                  # across a comma, when what is after it is no match of its own
+    all_where(a_names("Mrs Chng Grace Indra"), "Mrs Indra, Chng Grace Indra; Mrs Grace, Chng Indra; Mrs Grace, Chng\nIndra", "T01, T01; T01, T01; T01, T01")
+    N = a_names("Dr Koh Art", "Ms Koh Bo", "Dr Kiran Goh", "Mrs Goh Li"); koh, goh, bo, li = (N.code(x) for x in ("Dr Koh Art", "Dr Kiran Goh", "Ms Koh Bo", "Mrs Goh Li"))
+    all_where(N, "Dr Koh Art 3A, Mrs Goh Kiran, Dr Goh\tKiran", f"{koh} 3A, {goh}, {goh}"); all_where(N, "Ms Koh\tArt, Ms Koh, Art", f"{bo}\tArt, {bo}, Art")
+    apart(N, "Ms Koh Art 3A", f"{koh} 3A", f"{bo} Art 3A"); apart(N, "Mrs Goh\tKiran", f"{li}\t{goh}", f"{li}\tKiran")          # not another teacher's whole name
+    all_where(a_names("Mrs Tan Jia", "Mr Tan Jia May", "Dr Quek Yi Xuan", "Ms May Quek"), "Mrs Tan Jia May 3, Dr Quek May 3", "T03 May 3, T01 May 3")
+    N = a_names(("Ms Ho Siew Lan", "Ms Ho"), "Ms Ho Mei")
+    all_where(N, "Ms Ho Siew Lan, Ms Ho Mei", "T02, T01")
+    for w in ("typed", "app"): same(N.out("Ms Ho", w), "T02")                                                        # a short name as it is written
+    same(N.out("Ms Ho", "list"), "T01 or T02")
+    all_where(a_names("Ms Tan2", "Ms Tan"), "Ms Tan2, Ms Tan, MS TAN2", "T02, T01, T02")                             # a name as it is stored
+    all_where(a_names("Tan @ Rose", "Ms Tan @ Rose"), "TAN @ ROSE, Ms Tan @ Rose, MS TAN @ ROSE", "T02, T01, T01")
+    all_where(a_names("Ms Tan2 Bo", "Lim Bo", "Lim @ Rose", "Ms Lim @ Rose"), "Tan2 Bo, LIM @ ROSE", "T04, T01"); all_where(a_names("Ms Tan @ Rose", students=[("K1", "Tan @ Rose")]), "Tan @ Rose", "T01")
+    all_where(a_names("Ho Mei (Mrs Wong)", "Mrs Wong"), "Ho Mei (Mrs Wong), HO-MEI (MRS WONG), Mrs Wong", "T01, T01, T02")
+    all_where(a_names("Mr Dr Goh Bo", "Ms Goh Li"), "Mr. Dr. Goh, Dr Goh, Mr Goh, Ms Goh", "T01, T01, T01, T02")
+    all_where(a_names("Mr Goh Bo", "Dr Goh Li"), "Mr Dr Goh", "T01 or T02"); apart(a_names("Mdm Lim May Jun"), "Mdm Lim May\tJun 3", "T01\tJun 3", "T01 May\tJun 3"); apart(a_names(LIM), "Mdm May 3", "T01 3", "Mdm May 3")
+    N = a_names("Ms Rose", "Ms Lim May"); apart(N, "Ms May 3, Ms Rose, Ms May", "T01 3, T02, T01", "Ms May 3, T02, T01")
+    all_where(a_names(LIM), "Mdm may Lim, mdm may Lim comes", "T01, T01 comes")
+    apart(a_names("Ms Tan Wei Ling"), "Ms Tan\tWei 3A", "T01\tT01 3A", "T01\tWei 3A")
+    apart(a_names("Ms Lim May Bo Wee"), "3A\tLim May\tBo", "3A\tT01\tT01", "3A\tLim May\tBo")
+    same(a_names("Ms Tan Bo May", "Mr Tan Li").out("Tan Bo May 3", "typed"), "T02 May 3")                            # whose the words that stay are
+
+@t
+def a_tie_is_for_the_name_in_one_cell_and_in_its_order():
+    N = a_names("Mdm Lim May", "Mr Koh Art", students=[("K1", "Goh Jun")]); lim, koh = N.code("Mdm Lim May"), N.code("Mr Koh Art")
+    for sep in ("\t", ", ", "\n", " | ", "   "):
+        for w in WHERES: same(N.out(f"Mon 3 Jun{sep}Goh Jun{sep}3A", w), f"Mon 3 Jun{sep}a student{sep}3A")
+        for w in ("list", "app"):
+            same(N.out(f"Mon 3 May{sep}Lim May{sep}Hall", w), f"Mon 3 May{sep}{lim}{sep}Hall"); same(N.out(f"Sec 3 Art{sep}Koh Art{sep}Hall", w), f"Sec 3 Art{sep}{koh}{sep}Hall")
+            same(N.out(f"Hall{sep}Lim May{sep}May 3", w), f"Hall{sep}{lim}{sep}May 3")
+    for w in ("list", "app"): same(N.out("Mon 3 May Lim May Hall, Sec 3 Art Koh Art, Jun Goh Jun", w), f"Mon 3 May {lim} Hall, Sec 3 Art {koh}, Jun a student")          # on one line, the stored order
+    for sep in ("\t", ", ", "\n", " | ", "   "): all_where(a_names(LIM), f"Mon 3 May{sep}Lim May{sep}Hall", f"Mon 3 May{sep}T01{sep}Hall")          # in one cell, before the stored order
+    apart(a_names("Ms Li Bo", "Mr Bo Tan"), "Li Bo Tan, x", "T02 T01, x", "T02 Tan, x")                              # then the leftmost
+
+@t
+def a_part_that_holds_a_whole_name():
+    N = a_names("Mdm Nicole Toh Xin Geok", students=[("K1", "Ryan Ng Ze Qi"), ("K2", "Ng Ze"), ("K3", "Toh Xin"), ("K4", "Goh Jun Wei Bo"), ("K5", "Goh Jun")]); toh = N.code("Mdm Nicole Toh Xin Geok")
+    all_where(N, "Ng Ze Qi, Qi Ng Ze, Toh Xin Geok, Geok Toh Xin Nicole", f"a student, a student, {toh}, {toh}"); all_where(N, "Ng Ze, Ng\tZe", "a student, a student")
+    for w in ("list", "app"):
+        same(N.out("Ng Ze\tQi: Ng Ze, Qi", w), "a student\tQi: a student, Qi")                  # on one line and in one cell
+        same(N.out("Goh Jun 3: Bo Goh Jun 3", w), "a student 3: Bo a student 3")                 # a date's month never joins a part
+    all_where(a_names(students=[("K1", "Ng Ze Qi Bo"), ("K2", "Ze Qi"), ("K3", "Bo Cy Di")]), "Ng Ze Qi Bo Cy Di", "a student a student")        # the most words
+    all_where(a_names("Mr Ryan Ng Ze Qi", "Ms Qi Bo", "Mr Low Zhi Siew"), "Ng Ze Qi Bo; Low, Zhi Siew", "T02 T03; T01")      # a part that only meets a whole name gives way
+    all_where(a_names("Mr Xin Ng Ze Qi Bo", "Ms Ng Ze", "Ms Qi Bo"), "Ng Ze Qi Bo, Ng Ze, Qi Bo", "T01, T02, T03")           # the fewest names
+    all_where(a_names("Mr Ryan Ng Ze Qi", "Ms Ng Ze", "Ms Ze Qi Ng"), "Ng Ze Qi", "T03")                             # a whole name before a part
+    all_where(a_names("Mr Joel Ho Xin Boon", "Ms Ho Xin", students=[("K1", "Boon May"), ("K2", "Jun Joel"), ("K3", "Ng Joel")]), "Joel Ho Xin Boon May 3; Mon 3 Jun, Joel Ho Xin Boon; Ng Joel Ho Xin Boon", "T01 May 3; Mon 3 Jun, T01; a student T01")      # a date does not cut a whole name in two
+    N = a_names("Ms May Tan Bo Li", "Mr Tan Bo"); all_where(N, "on 3 May Tan Bo is, Tan Bo Li", "on 3 May T01 is, T02"); apart(N, "May Tan Bo", "T02", "May T01")
+    apart(a_names("Ms Tan Bo May Li Wee", "Mr Tan Bo"), "Tan Bo May3 Li, Tan Bo May 3", "T02, T01 May 3", "T01 May3 Li, T01 May 3")
+    apart(a_names("Mr Ryan Ng Ze Art", "Ms Ng Ze"), "Ng Ze Art 3A", "T01 3A", "T02 Art 3A")
 
 @t
 def long_ids_are_found_anywhere():
@@ -275,8 +349,18 @@ def a_student_id_that_could_be_a_date_is_not_one():
     text = "3 May 2027, 2027-10-05, 3A"
     all_where(N, text, text)
     all_where(N, "25001 and student 1023", "a student and student a student")
-    all_where(N, "student, 1023; students 1023. 1023; Student No.: 1023; ID No: 1023; students 1023 and 1023; students 1023 and 12; students 12, 1023 & 3; Students: 1023/12; for 12 students and 3", "student, 1023; students a student. 1023; Student No.: a student; ID No: a student; students a student and a student; students a student and 12; students 12, a student & 3; Students: a student/12; for 12 students and 3")
+    all_where(N, "Student No.: 1023; ID No: 1023; students 1023 and 1023; students 1023 and 12; students 12, 1023 & 3; pupil #1023; Student ID: 1023; student: 1023; student number 1023", "Student No.: a student; ID No: a student; students a student and a student; students a student and 12; students 12, a student & 3; pupil #a student; Student ID: a student; student: a student; student number a student")
+    for text in ("student, 1023", "student. 1023", "Students: 1023/1023", "for 12 students and 1023", "students\t1023", "student\n1023", "student   1023", "student | 1023", "Student No.\n1023"): all_where(N, text, text)
+    N = a_names(students=[(str(i), f"{'Ann Bo Cy Di'.split()[i % 4]} Z{chr(97 + i % 26)}{chr(97 + i // 26 % 26)}{chr(97 + i // 676)}") for i in range(1, 1101)])       # plain numbers, and ordinary lines
+    for text in ("Sec 3 students. 12 May: English", "Student\t8.00am", "Sec 4 students\n1 h 30 min", "No. of students: 35", "Pupils: 120", "students 12 May", "student 8.00, student 8:30, students 8 am", "student 90 min, students 2 h", "35 students, 2 rooms", "students 12 Mon", "Sec 3 students | 35", "for students\n3 May"): all_where(N, text, text)
+    all_where(N, "student 1023, 12 May; students 1023, 12 and 35; Student 35 is late; student 7", "student a student, 12 May; students a student, a student and a student; Student a student is late; student a student")
     all_where(N, "student #1023, student no. 1023, Student No 1023, ID: 1023, pupil number 1023", "student #a student, student no. a student, Student No a student, ID: a student, pupil number a student")
+    N = a_names(students=[("12", "Zed Ong"), ("14", "Yan Poh"), ("15", "Xu Ma"), ("16", "Wu Di"), ("17", "Vi Yo")])
+    for text in ("student Alicia and 12 rooms", "students 5 pm, students 12 PM, student 12am", "Student | No. 12", "Student\tNo. 12", "students: 12", "pupils: 12", "student 12.5", "student (12)", "or 12, and 12"): all_where(N, text, text)
+    all_where(N, "student 12, Mon 3 Oct; student 12 | May; student 12: absent; pupils 12", "student a student, Mon 3 Oct; student a student | May; student a student: absent; pupils a student")
+    all_where(N, "student nos 12 and 14, student numbers 12 or 14, IDs 12 and 14, IDs: 12", "student nos a student and a student, student numbers a student or a student, IDs a student and a student, IDs: a student")
+    all_where(N, "Ask student 12. 14 others came; student 12: 14 marks; student 12:absent", "Ask student a student. 14 others came; student a student: 14 marks; student a student:absent")
+    all_where(N, "students 12; 14 & 15 / 16 + 17, 12 - 14", "students a student; a student & a student / a student + a student, a student - 14"); all_where(N, "student 12\nand 14 rooms", "student a student\nand 14 rooms")
     all_where(a_names(students=[("Lab 3-08", "Jo Png"), ("3A-01", "Bo Yeo")]), "Lab 3-08, lab 3-08 and 3a-01", "Lab 3-08, lab 3-08 and a student")
     N = a_names(students=[("ZYAP", "Zed Yap"), ("MAY", "Uma Roy"), ("A", "Bo Yeo"), ("Wee Kim", "Wee Kim")])       # an ID with no digit: as it is written
     all_where(N, "ZYAP, zyap, MAY, May, A Wee Kim and wee kim", "a student, zyap, MAY, May, A a student and a student")
@@ -295,7 +379,7 @@ def a_teacher_wins_over_a_student():
     N = a_names(students=[("S1", "Tan Wei Ling"), ("S2", "Wei Ling Ho"), ("S3", "Tan Wei Ling Faith")]); c = N.code(TAN)
     all_where(N, "Tan Wei Ling", c); all_where(N, "Wei Ling", c); all_where(N, "S1", "a student")
     all_where(N, "Wei Ling Ho and Tan Wei Ling Faith", "a student and a student")   # the longer one is the student's alone
-    all_where(a_names("Ms Tan Wei", students=[("S1", "Tan Wei Ling Ho")]), "Tan Wei Ling", "T01 Ling")                  # a whole name first
+    all_where(a_names("Ms Tan Wei", students=[("S1", "Tan Wei Ling Ho")]), "Tan Wei Ling", "a student")                 # a part of three that holds a whole name of two
     all_where(a_names(TAN, students=[("S1", "Wei Ling")]), "Wei Ling", "T01")       # part of a teacher's name, and a student's whole one
 
 @t
@@ -326,6 +410,7 @@ def two_people_who_fit_the_same_words_go_as_both_codes():
 
 @t
 def a_name_of_one_word():
+    all_where(a_names("Ms Rose"), "a rose, Rose, ROSE", "a rose, T01, T01")
     N = a_names("Kamala", "Mr Koh", students=[("S1", "Kavin"), ("S2", "May")]); ka, ko = N.code("Kamala"), N.code("Mr Koh")
     all_where(N, "Kamala, KAMALA and Mr Koh", f"{ka}, {ka} and {ko}")              # the whole stored name, in every text
     all_where(N, "Koh and Kavin", f"{ko} and a student")
@@ -474,7 +559,7 @@ def hidden_characters_dashes_and_wide_forms():
 def a_unit_after_a_number_is_not_a_name():
     N = a_names("Mr Jun Min", "Ms Min An", "Mr Hr Goh", "Ms Sec Mins")
     for text in ("90 min Jun 3", "90 Min Jun 3", "1 h 30 min an extra", "2 hrs, 45mins, 30 sec, 1h30min, 1 hr", "30-min paper, 90 MIN"): all_where(N, text, text)
-    for w in ("list", "app"): same(N.out("Jun 5min, Jun 5 min, Jun An 90min paper", w), "Jun 5min, Jun 5 min, Jun An 90min paper")
+    for w in ("list", "app"): same(N.out("Jun 5min: Jun 50 min, Jun An 90min paper", w), "Jun 5min: Jun 50 min, Jun An 90min paper")
     all_where(N, "Mr Min An, Min Jun and Ms An", f"{N.code('Ms Min An')}, {N.code('Mr Jun Min')} and {N.code('Ms Min An')}")
     M = a_names(("Mr Ming Yap", "MIN"), "Min @ Li", "Min Jo @ Li")
     same(M.out("90 MIN, MIN is free", "app"), f"90 MIN, {M.code('Mr Ming Yap')} is free")
@@ -510,6 +595,8 @@ def small_words_and_times_are_not_people():
     same(N.out("On Mon, S is on", "app"), "On Mon, S is on")                       # a short name that is a small word or one letter
     same(N.out("Ask Kumar a question", "typed"), f"Ask {N.code('Mr S Kumar')} a question"); same(N.out("KUMAR'S", "typed"), f"{N.code('Mr S Kumar')}'S")
     same(a_names(LIM, students=[("S1", "Tan Will An")]).out("Tan will be away, Tan Will", "list"), "Tan will be away, a student")
+    all_where(a_names("Ms May An"), "May an, on May an extra", "T01, on T01 extra")
+    for w in ("list", "app"): same(a_names("Ms Lim An Bo Wee").out("an lim Bo", w), "T01")
     N2 = a_names("Ms Li An"); same(N2.out("An\nLi", "typed"), "T01"); all_where(N2, "Ms Li\nAn", "T01")
     same(N.out("A paper is on Mon", "typed"), "A paper is on Mon")                 # one letter alone is not a name
     all_where(N, "Mr S and Mr Kumar's", f"{N.code('Mr S Kumar')} and {N.code('Mr S Kumar')}'s")
@@ -552,6 +639,7 @@ def what_is_protected():
 
 @t
 def the_school_is_never_named():
+    all_where(a_names(), "the\nSample School, the | Sample School", "the school, the | the school"); all_where(a_names(school="Sir Sample Secondary"), "at Sir Sample Secondary", "at the school")
     N = a_names(school="CTSS Sample School")
     all_where(N, "CTSS Sample School timetable", "the school timetable"); all_where(N, "at the CTSS  SAMPLE\nschool's hall", "at the school's hall")
     assert "the school" in a_names().out("CTSS Sample School timetable", "app")
@@ -639,8 +727,8 @@ def dressed(rnd, ws, joins):
 def nobody_known_leaks_in_any_form():
     """every teacher and student, orders of the words, with titles, after any number, in every kind of text and dressed up in every
     way above. A whole name leaves no word of it in a list and in the app's words, and only a month in typed ones; part of a name of
-    two or more words that are not months, and a titled one, leave none but a month. What R4 and R1 leave is left out: a unit's word
-    straight after a number, and part of a name that has somebody's whole name in it"""
+    two or more words that are not months, and a titled one, leave none but a month. Left out: a unit's word straight after a number,
+    and part of a name that has somebody's whole name in it and is not of three or more words in one cell, with no month at its ends"""
     staff, pupils = a_big_school(); rnd = random.Random(11)
     N = names.Names(a_pub(), people(*staff), kids(*pupils))
     free = names.protected(a_pub()); units = names._UNITS
@@ -661,13 +749,12 @@ def nobody_known_leaks_in_any_form():
             return
         if whole_name and len(p) > 1 and real:
             assert not (left - free if w == "typed" or titled else left), (f, frame, w, got)
-        elif titled or len(real) > 1 and not holds(p): assert not left - free, (f, frame, w, got)
+        elif titled or len(real) > 1 and (not holds(p) or len(p) > 2 and "," not in f and not {p[0].casefold(), p[-1].casefold()} & free): assert not left - free, (f, frame, w, got)
     for name in staff:
         ws = name.split()[1:]
         for k in range(1, len(ws) + 1):
             for p in some(ws, k, 5):
                 heads = [f"{h} {dressed(rnd, p, (' ', ' ', '-', '  '))}" for h in rnd.sample(("Ms", "mr.", "MDM", "Madam", "Cikgu", "(Dr)"), 2)] + [f"{rnd.choice(('MDM', 'MR', 'MS', 'DR'))} {' '.join(p).upper()}"]
-                if holds(p) and k < len(ws): heads = []
                 for f in heads: check(f, p, k == len(ws), True, rnd.choice(WHERES))
                 for f in [dressed(rnd, p, part) for _ in range(2)] if k > 1 else []: check(f, p, False, False, rnd.choice(WHERES)) if k < len(ws) else None
                 for f in [dressed(rnd, p, whole) for _ in range(4)] if k == len(ws) else []:
@@ -710,6 +797,26 @@ def a_titled_teacher_is_never_a_student():
             if any({last, other} <= set(n.split()) for n in staff): continue
             for text in (f"Tell {h} {last}, {other} is away", f"{h} {last} ({other})", f"{h.upper()} {last.upper()} {other.upper()}", f"S3 EL P1,{h} {last},{other} 3,8.00"):
                 for w in WHERES: got = N.out(text, w); assert "a student" not in got and re.search(r"\bT\d\d", got) and other.casefold() in got.casefold() + (other.casefold() if w == "typed" else ""), (text, w, got)
+
+@t
+def a_titled_run_is_not_cut_and_a_date_is_not_taken():
+    """a titled run whose last word makes a student's whole name with the next word; and a date, with a month that a whole name ends with"""
+    staff, pupils = a_big_school(); rnd = random.Random(14)
+    N = names.Names(a_pub(), people(*staff), kids(*pupils))
+    pairs = [n.split() for _, n in pupils if len(n.split()) == 2]; n = 0
+    for name in staff:
+        h, *ws = name.split()
+        for w1, o in [(w1, o) for a, b in pairs for w1, o in ((a, b), (b, a)) if w1 in ws and o not in ws and w1 not in ("May", "Jun", "Sun", "Min")][:6]:
+            first = [z for z in ws if z != w1][:rnd.randint(1, 2)]
+            for sep in ("\t", ", ", " ", "\n", " | "):
+                for w in WHERES:
+                    got = N.out(f"S3 EL P1{sep}{h} {' '.join(first)} {w1}{sep}{o} 3{sep}8.00", w); n += 1
+                    if any({*first, w1, o} <= set(s.split()) for s in staff): continue
+                    assert "a student" not in got and re.search(r"\bT\d\d", got) and got.endswith(f"3{sep}8.00"), (name, w1, o, sep, w, got)
+    for x, m in [p for p in pairs if p[1] in ("May", "Jun")] + [n.split()[1:] for n in staff if n.split()[-1] in ("May", "Jun") and len(n.split()) == 3]:
+        for sep in ("\t", ", ", "\n", " | ", "   "):
+            for w in WHERES: got = N.out(f"Mon 3 {m}{sep}{x} {m}{sep}Hall", w); n += 1; assert got.startswith(f"Mon 3 {m}{sep}") and got.endswith("Hall") and x not in got, (x, m, sep, w, got)
+    assert n > 1500, n
 
 @t
 def ordinary_text_never_changes():
