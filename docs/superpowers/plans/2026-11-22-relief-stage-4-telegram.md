@@ -98,6 +98,8 @@ Messages (exact text; `·` is U+00B7, `–` U+2013; `{periods}` as "P9–P11", `
 | `BAD_CODE` | `That code is not right or has run out. Get a new one in the app. If it was your personal code, do not send it here: it opens the app. I have deleted your message.` |
 
 | `MOVED_LINK` | `Your relief messages now go to another Telegram. If this was not you, tell the relief team.` |
+| `TAKEN` | `This Telegram was linked to someone else before. Their relief messages no longer come here.` (a chat taken over by another person) |
+| `STOPPED` | `Unlinked. Your relief messages stop here. To link again, open Relief in the school's app and press Link Telegram.` |
 | `NOT_YOURS_BUTTON` | `This button is not for you.` |
 | `OLD_BUTTON` | `This button is no longer active.` |
 | `WHY_CHANGE` | `Say why in one line. Until the relief team replies, this relief is still yours.` |
@@ -278,8 +280,9 @@ Task 1.
   people reached are listed; a message to several people ends its key with `:{name}`), built from them alone:
   `planned:{id}` (teacher; `how == "planned"`, `by != teacher`, not acknowledged, not cancelled, its last date ≥ today),
   `remind:{id}` (teacher; `_nudge` true and the absence `at` before that remind time), `officer:{id}` (reporting officer ≠
-  teacher and ≠ `by`, not cancelled, last date ≥ today, absence `at` ≥ `since`; the same for `planned`), `relief:{id}:{ckey}:{approved.at}`
-  (state `approved`, lesson not over), `ask:{id}:{ckey}:{change.at}:{name}` (each team member; when the new pick is in, or 2 minutes after the request
+  teacher and ≠ `by`, not cancelled, last date ≥ today, absence `at` ≥ `since`; the same for `planned`), `relief:{absent}:{ckey}:{approved.at}` (state `approved`, lesson not over; `absent` is the absent teacher's name, not
+  the absence id: exams' takeover moves an approved cover into another absence, which must be neither gone nor sent
+  again), `ask:{id}:{ckey}:{change.at}:{name}` (each team member; when the new pick is in, or 2 minutes after the request
   without one, when `free.free_then` says whether it reads `Nobody else is free then…` or `No new pick yet…`; a pick that
   arrives after that goes once more as `askpick:{id}:{ckey}:{change.at}:{name}` with the Approve button), `gone:{relief key}` and `moved:{relief key}` (a base relief key told `sent` or `unsure` whose cover is no longer approved to that person: `moved` when the cover is
   approved to another person, else `gone`, also when the cover key is no longer there; the same person approved again is
@@ -288,6 +291,9 @@ Task 1.
   settings, records; queues; `wake`s the sender; 0 when `not tg.on()` or not connected). `still_true(item) -> bool`
   (relief: still approved to them with that `approved.at` and the lesson not over; planned/remind/officer: not cancelled
   and still to come; others true). `soon()` (a daemon thread unless `SYNC`).
+- A relief message's `ref` holds `dict(id, absent, ckey, approved_at, who, lesson, periods, start, day, date, ends)` (`lesson`
+  and the words as sent, `ends` the lesson's end as an ISO time), so `gone`, `moved` and reminders can be written when the
+  cover, or its absence, is no longer there (exams' `relief_links.sync` takes a lesson off a backup outside our routes).
 - The texts are built by functions named after the table above (`relief_text(...)`, `planned_text(...)` …), each tested
   against its exact text.
 - [ ] **Step 1: Write the failing tests**, one per key kind and each rule above, among them: `approve_queues_the_relief_once`
@@ -307,7 +313,9 @@ Task 1.
 **Files:** Modify `relief/bot.py`, `relief/tell.py` (buttons), `relief/web.py` (`_noted` by/via used); Test as Task 1.
 
 **Interfaces:**
-- Consumes: `cover.acknowledge`, `cover.ask_change`, `cover.approve`, `absences.cancel`, `links.*`, `outbox`.
+- Consumes: `cover.acknowledge`, `cover.ask_change`, `cover.approve`, `absences.cancel`, `links.*`, `outbox`. A button whose
+  stored absence id no longer holds the cover finds it by absent teacher and cover key (`extra`) in the records not
+  cancelled, and while a talk waits for a line, code-shaped text is the answer, never a code.
 - Produces in `bot.py`: button kinds `ack`, `change` (asks `WHY_CHANGE`, a talk of kind `change`), `cancel` (asks
   `WHY_CANCEL`, a talk of kind `cancel`), `approve` (needs `relief.team`; uses the name the message showed, so
   `PICK_CHANGED` comes back when it moved on), `remind`, and `url` (opened by Telegram, never sent here). Every press:
