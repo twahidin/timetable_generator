@@ -3125,13 +3125,24 @@ function vsHTML() {
   return `<div class="vspop" role="dialog" aria-modal="true" aria-labelledby="vsTitle" tabindex="-1"><div class="vshead"><h2 id="vsTitle">Versions</h2><button data-vs="close">Close</button></div>
     <p class="muted">Step 8 keeps one draft. A version is a named copy of it that you can open again later. Opening a version never loses the draft you had: it is kept as a version first.</p>${save}${table}</div>`;
 }
+const vsKey = el => !el || !el.closest || !el.closest("#vsOv") ? null : el.id === "vsName" ? "name" : el.dataset && el.dataset.vs ? el.dataset.vs + "|" + (el.dataset.id || el.dataset.a || "") : null;
+let vsFocusKey = null, vsQuiet = false;   // the control focus belongs on (a redraw puts it back; a disabled one is waited for); vsQuiet: the app moved focus itself
+document.addEventListener("focusin", e => { if (!vsQuiet) { const k = vsKey(e.target); if (k) vsFocusKey = k; } });
+function vsFocus() {   // after a draw: the same control if it is there and can take focus, else the name box, else Close
+  const ov = $("#vsOv"); if (!ov || !VS.open) return;
+  const all = [...ov.querySelectorAll("[data-vs], #vsName")], by = k => all.find(x => vsKey(x) === k && !x.disabled);
+  let el = vsFocusKey && by(vsFocusKey), fb = false;
+  if (!el) { el = $("#vsName") || by("close|"); fb = true; }
+  if (!el || document.activeElement === el) return;
+  vsQuiet = fb; try { el.focus({ preventScroll: true }); } finally { vsQuiet = false; }
+}
 function vsDraw() {
   const ov = $("#vsOv"); if (!ov) return;
-  const n = $("#vsName"), typed = n ? n.value : null; if (n) VS.name = typed;
-  const had = n && document.activeElement === n, pos = had ? n.selectionStart : 0;
-  const sc = ov.querySelector(".vspop") ? ov.scrollTop : 0;
+  const n = $("#vsName"); if (n) VS.name = n.value;
+  const pos = n && document.activeElement === n ? n.selectionStart : null, sc = ov.scrollTop;
   ov.innerHTML = vsHTML(); ov.scrollTop = sc;
-  if (had) { const m = $("#vsName"); if (m) { m.focus(); try { m.setSelectionRange(pos, pos); } catch (e) { } } }
+  vsFocus();
+  const m = $("#vsName"); if (pos !== null && m && document.activeElement === m) { try { m.setSelectionRange(pos, pos); } catch (e) { } }
   vsPaintBtn();
 }
 async function vsLoad() {   // the list again; a late answer of an older load is dropped
@@ -3149,8 +3160,7 @@ function vsOpen() {
   if (VS.open) return;
   VS.open = true; VS.name = null; VS.err = "";
   let ov = $("#vsOv"); if (!ov) { ov = document.createElement("div"); ov.id = "vsOv"; ov.className = "vsov"; document.body.appendChild(ov); }
-  ov.hidden = false; document.body.classList.add("vslock"); vsDraw();
-  const p = ov.querySelector(".vspop"); if (p) p.focus();
+  ov.hidden = false; document.body.classList.add("vslock"); vsFocusKey = null; vsDraw();
   if (!(G.st && G.st.draft) && !((G.st && G.st.draft && G.st.draft.versions) || 0)) { VS.list = { versions: [], draft: null, published: null }; vsDraw(); return; }   // no draft and no versions: nothing to ask the server
   vsLoad();
 }
