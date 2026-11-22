@@ -2389,13 +2389,17 @@ def _with_away(rows, pub):
         r["away"] = _away_texts(pub, saved[r["id"]], records) if on else []
     return rows
 
+def _reviewed(s):
+    """the copy a review reads (exams.review.review, exams.events.review): the approved one when s is approved, else s"""
+    return (exams_approval.as_schedule(s) if s.get("status") == "approved" else None) or s
+
 def _exam_review_reply(pub, s):
     """the Approval tab: state, who sent and approved, what is waiting and the review a committee reads"""
     model, xset = pub["model"], exams_settings.load(pub)
     stale = exams_make.stale(s, xset, model)
     errors = exams_papers.check(s, model, _exam_cal(pub), xset["rules"])["errors"]
     st = s.get("status") or "draft"
-    rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"), pub["model"], own=s)) if s.get("made") else None
+    rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"), pub["model"], own=_reviewed(s))) if s.get("made") else None
     if rv: _backups_left(rv, lambda: exams_make.lesson_lists(pub, _exam_cal(pub), exams_approval.as_schedule(s) if rv.get("copy") == "approved" else s), s, pub)
     return jsonify(status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
@@ -2527,6 +2531,9 @@ def _event_others(pub, s):
     return others, exams_schedules.busies(others, pub["model"]) + exams_schedules.relief_busy(pub["model"], s.get("id"), s)
 
 def _event_review(pub, cal, s, busy, others):
+    """others and busy: _event_others of s (what Send reads); an approved event's review reads its approved copy instead"""
+    own = _reviewed(s)
+    if own is not s: others, busy = _event_others(pub, own)
     rv = exams_events.review(pub, cal, s, busy, others)
     copy = lambda: exams_approval.as_schedule(s) if rv.get("copy") == "approved" else s
     return _backups_left(rv, lambda: exams_events.lesson_lists(pub, cal, copy()), s, pub)

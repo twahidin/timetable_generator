@@ -244,26 +244,12 @@ def _held(x, bnds, windows) -> bool:
 def relief_busies(model, records, scheds=()) -> list:
     """busies (the shape schedules.busies gives) for relief's own records: whoever is away over their periods, and whoever
     the relief team has approved to cover a lesson (each part of a split lesson over its own periods), unless a schedule of
-    scheds (a list, or a function giving one, called only when someone is approved) stops that lesson. A cancelled record gives none; a backup record (with exams) gives only the cover. A malformed
-    record, lesson or schedule is skipped."""
+    scheds (a list, or a function giving one, called only when someone is approved) stops that lesson. A cancelled record
+    gives none; a backup record (with exams) gives only the cover. A malformed record, lesson or schedule is skipped."""
     bnds = _days.bounds(model) if model else []
-    out, windows, read = [], {}, []
+    out = []
     if not bnds:
         return out
-
-    def held(x):
-        iso = _iso(x["date"])
-        if not read:
-            read.append(list((scheds() if callable(scheds) else scheds) or ()))
-        if iso not in windows:
-            windows[iso] = {}
-            for s in read[0]:
-                try:
-                    for c, w in _days._windows(s, iso, model, bnds).items():
-                        windows[iso].setdefault(c, []).append(w)
-                except (KeyError, ValueError, TypeError, AttributeError):
-                    continue
-        return _held(x, bnds, windows[iso])
 
     def busy(name, date, a, b, why):
         out.append(dict(id="relief", kind="relief", name="Relief", status="approved", date=_iso(date), start=a, end=b, room="",
@@ -272,22 +258,35 @@ def relief_busies(model, records, scheds=()) -> list:
     for (name, d), spans in _away_spans(bnds, records).items():
         for a, b in spans:
             busy(name, d, a, b, "is away then (relief)")
-    for r in records or []:
-        if not isinstance(r, dict) or r.get("cancelled") or not isinstance(r.get("lessons"), list):
-            continue
-        for x in r["lessons"]:
-            if not isinstance(x, dict) or not x.get("needed"):
-                continue
-            for c in _approved_covers(x):
+    covers = [(x, c) for r in records or [] if isinstance(r, dict) and not r.get("cancelled") and isinstance(r.get("lessons"), list)
+              for x in r["lessons"] if isinstance(x, dict) and x.get("needed") for c in _approved_covers(x)]
+    if not covers:
+        return out
+    scheds = list((scheds() if callable(scheds) else scheds) or ())     # outside the skipping below: an error reading them is not hidden
+    windows = {}
+
+    def held(x):
+        iso = _iso(x["date"])
+        if iso not in windows:
+            windows[iso] = {}
+            for s in scheds:
                 try:
-                    p = int(c["p"])
-                    last = min(p + max(int(c.get("n") or 1), 1), len(bnds)) - 1
-                    if p < 0 or p >= len(bnds) or held(x):
-                        continue
-                    busy(c["relief"], x["date"], bnds[p][0], bnds[last][1],
-                         "covers relief then (%s %s)" % (", ".join(x.get("classes") or []), x.get("subject") or ""))
-                except (KeyError, ValueError, TypeError):
+                    for c, w in _days._windows(s, iso, model, bnds).items():
+                        windows[iso].setdefault(c, []).append(w)
+                except (KeyError, ValueError, TypeError, AttributeError):
                     continue
+        return _held(x, bnds, windows[iso])
+
+    for x, c in covers:
+        try:
+            p = int(c["p"])
+            last = min(p + max(int(c.get("n") or 1), 1), len(bnds)) - 1
+            if p < 0 or p >= len(bnds) or held(x):
+                continue
+            busy(c["relief"], x["date"], bnds[p][0], bnds[last][1],
+                 "covers relief then (%s %s)" % (", ".join(x.get("classes") or []), x.get("subject") or ""))
+        except (KeyError, ValueError, TypeError):
+            continue
     return out
 
 

@@ -182,8 +182,8 @@ def _sync_exams(pub):
 
 
 def _out(r, pub, me, cal=None, links=None):
-    """the record as it is sent: lessons marked changed (matches_now) and stopped (why an approved exam or event stops a
-    lesson dated today or later of a record still to come, else ""; links: one per request, built here when None), each with
+    """the record as it is sent: lessons marked changed (matches_now) and stopped (why an approved exam or event stops the
+    lesson, past or to come, else "", and "" in a cancelled record; links: one per request, built here when None), each with
     its covers ([{ckey, p, n, start, end, state, relief, planned}], by p: the lesson itself, or its parts); the remarks left
     out for someone who is only its absent teacher, and gone (the lessons that left a backup, with their picks and reasons)
     for everyone. The absent teacher who may not open every absence (not relief.plan, not
@@ -193,11 +193,10 @@ def _out(r, pub, me, cal=None, links=None):
     cal = cal if cal is not None else _cal(pub)
     v = _absences.matches_now(r, pub, cal)
     v.pop("gone", None)
-    today = _lessons.today().isoformat()
-    ahead = not v.get("cancelled") and any(str(d) >= today for d in v.get("dates") or [])
+    live = not v.get("cancelled") and bool(v["lessons"])
     try:
-        if ahead and links is None: links = _links(pub, cal)
-        v["lessons"] = [dict(x, stopped=links.stopped(x) if ahead and str(x.get("date") or "") >= today else "") for x in v["lessons"]]
+        if live and links is None: links = _links(pub, cal)
+        v["lessons"] = [dict(x, stopped=links.stopped(x) if live else "") for x in v["lessons"]]
     except Exception:          # the exams side never stops relief's own pages
         current_app.logger.exception("relief: the exams and events could not be read")
         v["lessons"] = [dict(x, stopped="") for x in v["lessons"]]

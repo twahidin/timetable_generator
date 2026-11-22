@@ -1674,11 +1674,16 @@ def replacing_someone_on_an_approved_exam_sees_the_approved_copy():
         r = c.post(f"/api/exams/{id}/away", json=dict(key=DUTY_KEY, room="3-01", away=AISHA, name=BEN))
         assert r.status_code == 400 and "not free" in r.get_json()["error"], r.get_json()
         assert SC.load(id)["approved"]["made"]["duties"][0]["names"] == [AISHA]
+        s = SC.load(id); s["made"]["duties"][0]["names"] = [BEN]; s["approved"]["made"]["duties"][0]["names"] = [BEN]
+        SC.save(s, PUB, CAL, GRACE, check=False)            # Ben on the live duty and on a relief that runs
+        rv = ok(c.get(f"/api/exams/{id}/review"))["review"]
+        assert rv["copy"] == "approved" and "covers relief then (4A Mathematics)" in json.dumps(rv["checks"]), rv["checks"]
 
 @t
 def an_event_that_stops_a_lesson_frees_its_relief():
     _fresh()
     with published(PUB):
+        c = committee()
         i = _plan(DANIEL)["id"]
         CV.change(i, DKEY, HAFIZ, GRACE, PUB, ST)
         ev = SC.new_event(EVENT, [], ["4A"], ISO, ISO, GRACE, GRACE)
@@ -1689,6 +1694,16 @@ def an_event_that_stops_a_lesson_frees_its_relief():
         ev["days"] = {ISO: dict(whole=False, **{"from": "10:00", "to": "11:00"})}
         others, busy = A._event_others(PUB, ev)
         assert [b["names"] for b in busy if b.get("why", "").startswith("covers relief")] == [[HAFIZ]], "the copy worked on, not the saved one"
+        # an approved event with an unsent edit: its review and replacing someone going read the approved copy, Send the edit
+        _approve(SC.load(ev["id"]))
+        s = SC.load(ev["id"]); s["days"] = {ISO: dict(whole=False, **{"from": "10:00", "to": "11:00"})}; SC.save(s, PUB, CAL, GRACE, check=False)
+        rv = ok(c.get("/api/events/%s/review" % ev["id"]))["review"]
+        going = next(x for x in rv["checks"] if x["key"] == "going")
+        assert rv["copy"] == "approved" and going["ok"], going
+        s["going"] = [BEN]; s["days"] = {ISO: dict(whole=False, **{"from": "08:00", "to": "08:40"})}; s = _approve(s)
+        SC.save(dict(SC.load(s["id"]), days={ISO: dict(whole=False, **{"from": "10:00", "to": "11:00"})}), PUB, CAL, GRACE, check=False)
+        free = A._event_free(PUB, SC.load(s["id"]))
+        assert HAFIZ in [x["name"] for g in ("freed", "free") for x in free[g]], "the approved copy stops the lesson he covers"
 
 @t
 def whats_in_leaves_out_a_stopped_lesson_after_its_date_too():
@@ -1702,6 +1717,7 @@ def whats_in_leaves_out_a_stopped_lesson_after_its_date_too():
         try: rows = {r["id"]: r for r in ok(_relief_team().get("/api/relief/absences"))["absences"]}
         finally: LS.today = old
         assert rows[i]["cover"] == dict(total=0, approved=0, waiting=0, open=0), rows[i]["cover"]
+        assert rows[i]["lessons"][0]["stopped"] == STOP, "the pages say so after its date too"
 
 @t
 def a_request_to_changes_new_pick_on_a_duty_is_picked_again():
@@ -1736,6 +1752,67 @@ def the_pages_offer_nothing_for_a_stopped_lesson():
     js = {f: open(os.path.join(ROOT, "static", f), encoding="utf-8").read() for f in ("relief.js", "relief-plan.js", "relief-inbox.js", "relief-today.js")}
     assert "!x.changed && !x.stopped && x.date" in js["relief-plan.js"] and "x.needed && !x.stopped && !r.cancelled" in js["relief.js"]
     assert "x.needed && !x.stopped)" in js["relief-inbox.js"] and 'r.state !== "cancelled" && r.state !== "stopped"; };' in js["relief-today.js"]
+
+@t
+def a_stopped_lesson_is_not_split_or_joined_by_the_team():
+    _fresh()
+    with published(PUB):
+        i, j = _plan(CHLOE)["id"], _plan(AISHA)["id"]
+        AKEY = RL.key_of(M, 0, MON, "Odd Mon")
+        CV.split(i, CKEY, 1, GRACE)
+        CV.set_pick(i, CKEY + "#0", _pk(HAFIZ), PUB, ST)
+        _exam(duty_names=(IVAN,))
+        raises(ValueError, lambda: CV.join(i, CKEY, GRACE, links=_links()), NOT_ON)
+        team, q = _relief_team(), lambda id, key, what: "/api/relief/absences/%s/lessons/%s/%s" % (id, urllib.parse.quote(key), what)
+        for r in (team.post(q(i, CKEY, "join"), json={}), team.post(q(j, AKEY, "split"), json=dict(at=1))):
+            assert r.status_code == 400 and r.get_json()["error"].startswith("This lesson is not happening: "), r.get_json()
+        assert _cov(i, CKEY + "#0")[2]["relief"] == HAFIZ and not AB.load(j)["lessons"][0].get("parts")
+
+@t
+def a_lesson_not_needed_is_not_refused_for_its_choice():
+    _fresh()
+    with published(PUB):
+        id = _made_exam([_duty([DANIEL])])["id"]
+        _send_approve(committee(), id)
+        CV.change(_backups(id)[0]["id"], DKEY, CHLOE, GRACE, PUB, ST, links=_links())
+        r = AB.new(dict(teacher=DANIEL, dates=[ISO], reason="Other", reason_text="A course", lessons=[dict(key=DKEY, needed=False, relief=BEN)]), PUB, GRACE,
+                   "planned", may_choose=True, links=_links())
+        assert r["lessons"][0]["needed"] is False and r["lessons"][0]["relief"] is None
+
+@t
+def a_co_teacher_on_a_duty_is_not_there():
+    _fresh()
+    M["lessons"][2]["teachers"] = [DANIEL, CHLOE]           # a 4A Mathematics lesson both teach
+    try:
+        with published(PUB):
+            c = committee()
+            _made_exam([_duty([CHLOE])]); e = SC.all_saved()[0]["id"]; _send_approve(c, e)
+            assert _plan(DANIEL, links=_links())["lessons"][0]["needed"] is True, "Chloe is on a duty: she is not there"
+            x = ok(_relief_team().get("/api/relief/lessons?dates=%s&teacher=%s" % (ISO, urllib.parse.quote(DANIEL))))["lessons"][0]
+            assert x["others"] == [], x
+            _fresh()
+            id = _made_exam([_duty([DANIEL, CHLOE])])["id"]; _send_approve(c, id)
+            got = {r["teacher"]: r["lessons"][0]["needed"] for r in _backups(id)}
+            assert got == {DANIEL: True, CHLOE: True}, "both are on a duty: neither is there for the other"
+    finally: M["lessons"][2]["teachers"] = [DANIEL]
+
+@t
+def the_free_list_shows_the_week_with_duties():
+    _fresh(); _exam(duty_names=(BEN,))
+    L = _links()
+    got = FR.free_then(PUB, SETTINGS, [], _need(9), DANIEL, links=L)
+    ben = next(x for g in got["groups"] for x in g["people"] if x["name"] == BEN)
+    assert ben["week"] == FR.week_so_far(PUB, CAL, [], BEN, MON, links=L) != FR.week_so_far(PUB, CAL, [], BEN, MON), ben
+
+@t
+def schedules_that_cannot_be_read_are_not_taken_as_none():
+    _fresh()
+    with published(PUB):
+        i = _plan(DANIEL)["id"]
+        CV.change(i, DKEY, HAFIZ, GRACE, PUB, ST)
+        def broken(): raise KeyError("status")
+        raises(KeyError, lambda: RL.relief_busies(M, AB.all_records(), broken))
+        assert [b["names"] for b in RL.relief_busies(M, AB.all_records(), [dict(id="x")]) if b["why"].startswith("covers")] == [[HAFIZ]], "one odd schedule stops nothing"
 
 
 _clear()
