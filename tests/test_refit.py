@@ -115,6 +115,15 @@ def test_a_prefer_rule_is_not_a_target():
         assert refit.targets(made) == [], refit.targets(made)   # a typed warning, and a deployment part that is not one of the six
     finally: put_setup(was)
 
+def test_an_allowed_double_is_not_a_target():
+    w = lambda crit: dict(key="clash:made up " + crit, kind="clash", text="x", strength="Must", decision=None, crit=crit)
+    assert refit.targets([w("")]) == [] and refit.needed([w("")]) is False and [t["kind"] for t in refit.targets([w("teacher"), w(""), w("room")])] == ["clash", "clash"]
+    two = [one(2, 0, 1, CLS, EL, T1), one(3, 0, 1, CLS_B, EL, T1)]; said = lambda ts, start: [k for k in ts if k.startswith("clash:" + start)]
+    m, spec, days, pool, ts = case(two); assert said(ts, "Teacher double-booked: ")
+    allow = lambda s: s["school"].update(extra_settings=list(s["school"].get("extra_settings") or []) + [["Teachers may take two lessons at once on", DAYS[0]]])
+    m, spec, days, pool, ts = case(two, allow); assert m["double"] == {0} and not said(ts, "Teacher")   # the day the setup allows it
+    ws = [w for w in verify.warnings(m, spec)["warnings"] if w["key"].startswith("clash:Teacher in two lessons (allowed that day)")]; assert len(ws) == 1 and ws[0]["crit"] == ""   # step 8 still says it
+
 def test_a_subject_with_a_colon_and_a_repeated_key_keep_their_part():
     w = lambda key: dict(key=key, kind="deployment", text="x", strength="Must", decision=None)
     ts = refit.targets([w("dep:C:1A:English Language (Standard):extra"), w("dep:C:1A:Maths: Extra:teachers#2"), w("dep:G:G1:half")])
@@ -443,7 +452,7 @@ def test_the_blocker_is_moved_on_its_own_day():
     m, spec, days, pool, ts = case(BUSY + full(1), gives(T1))   # 1A's day is full: its own lesson stays
     got, stats = solved(m, spec, days, ts[TEACH], pool)
     assert got == dict(fixes=[dict(kind="move", id=2, d=0, p=2), GIVE], moved={2}, other=0, typed=set(),
-                       why=[f"{T1} teaches {SUBJ2} for {CLS_B} then.", f"Step 5 now gives it to {T1}."]), got   # the nearest period of the same day
+                       why=[f"{T1} teaches {SUBJ2} for {CLS_B} on {DAYS[0]} period 1.", f"Step 5 now gives it to {T1}."]), got   # the nearest period of the same day
     assert stats["nodes"] == 1 + len(moves(m, spec, days, 2)) == 9   # the change alone, then every place of lesson 2
     m, spec, days, pool, ts = case(BUSY + full(1) + [one(3, 0, 2, CLS_B, "Mathematics", T2)] + full(1, 2, cls=CLS_B, start=2000), gives(T1))   # 1B's day is full as well: its two lessons change places
     got, stats = solved(m, spec, days, ts[TEACH], pool)
@@ -453,23 +462,63 @@ def test_the_lesson_itself_is_moved():
     # the new teacher's lesson is a band's, or one an earlier target moved: the key's own lesson goes to another period of its day
     m, spec, days, pool, ts = case([one(1, 0, 1), band(3, 0, 1, CLS_B, T1)], gives(T1))
     got, stats = solved(m, spec, days, ts[TEACH], pool)
-    assert got == dict(fixes=[dict(kind="move", id=1, d=0, p=2), GIVE], moved={1}, other=0, typed=set(), why=[f"{T1} teaches group Q3 then.", f"Step 5 now gives it to {T1}."]), got
+    assert got == dict(fixes=[dict(kind="move", id=1, d=0, p=2), GIVE], moved={1}, other=0, typed=set(), why=[f"{T1} teaches group Q3 on {DAYS[0]} period 1.", f"Step 5 now gives it to {T1}."]), got
     assert stats["nodes"] == 1 + len(moves(m, spec, days, 1)) == 9
-    m, spec, days, pool, ts = case(BUSY, gives(T1)); got, _ = solved(m, spec, days, ts[TEACH], pool, moved={2}); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=2), GIVE] and got["why"][0] == f"{T1} teaches {SUBJ2} for {CLS_B} then.", got
+    m, spec, days, pool, ts = case(BUSY, gives(T1)); got, _ = solved(m, spec, days, ts[TEACH], pool, moved={2}); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=2), GIVE] and got["why"][0] == f"{T1} teaches {SUBJ2} for {CLS_B} on {DAYS[0]} period 1.", got
     # it ranks with the moves of the lesson in the way: the nearest wins, whichever it is
     m, spec, days, pool, ts = case(BUSY + [band(8, 0, 2, CLS_B, T3)], gives(T1)); t = ts[TEACH]   # 1B has a band in the next period, 1A is free
     got, stats = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=2), GIVE], got
     assert stats["nodes"] == 1 + len(moves(m, spec, days, 2)) + len(moves(m, spec, days, 1)) and moves(m, spec, days, 2)[0]["dist"] == 2, stats
     m, spec, days, pool, ts = case(BUSY + [band(8, 0, 2, CLS, T3)], gives(T1)); got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=2, d=0, p=2), GIVE], got
+    m, spec, days, pool, ts = case(BUSY + [one(7, 0, 2, CLS, "Mathematics", T2)] + full(1, 2), gives(T1)); got, _ = solved(m, spec, days, ts[TEACH], pool, moved={2}); assert got["fixes"] == [dict(kind="swap", a=1, b=7), GIVE], got
+    got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={2, 7}); assert got is None and stats["nodes"] == 1, (got, stats)   # nor with one an earlier target moved
+    m, spec, days, pool, ts = case([one(1, 0, 2), one(2, 0, 1, CLS_B, SUBJ2, T1, n=2)], gives(T1)); got, _ = solved(m, spec, days, ts[TEACH], pool)
+    assert got["why"][0] == f"{T1} teaches {SUBJ2} for {CLS_B} on {DAYS[0]} period 1.", got   # the time is that of the lesson in the way
     # after the lessons in the way: with one lesson to try it is not reached
     m, spec, days, pool, ts = case(BUSY, gives(T1))
     with limits(CAND_LESSONS=1): got, stats = solved(m, spec, days, ts[TEACH], pool); assert got["moved"] == {2} and stats["nodes"] == 9, (got, stats)
     # one of two lessons is blocked by a band, the other by a lesson whose class has a full day round it: one move of each kind
     m, spec, days, pool, ts = case([one(1, 0, 1), band(3, 0, 1, CLS_B, T1), one(4, 1, 1), one(5, 1, 1, CLS_B, SUBJ2, T1)] + full(1, d=1), gives(T1))
     with limits(CAND_SLOTS=3): got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["moved"] == {1, 5}, got
-    # a lesson that is refused for a rule is not moved for it
-    need = dict(MUST_RULE, target=T1, **{"from": 1, "to": 1})
-    m, spec, days, pool, ts = case([one(1, 0, 1)], gives(T1), rules=[need]); got, stats = hunt(m, spec, days, ts[TEACH], pool); assert got is None and stats["nodes"] == 1, (got, stats)
+
+AWAY = lambda who, d=0, a=0, b=NPD - 1: dict(MUST_RULE, target=who, day=DAYS[d], **{"from": a, "to": b})
+def test_a_lesson_the_new_teacher_may_not_take_then_is_moved():
+    m, spec, days, pool, ts = case([one(1, 0, 1)], gives(T1), rules=[AWAY(T1, 0, 1, 1)])   # T1 is not there in that period: no lesson is in the way
+    got, stats = solved(m, spec, days, ts[TEACH], pool)
+    assert got["fixes"] == [dict(kind="move", id=1, d=0, p=2), GIVE] and got["moved"] == {1} and got["other"] == 0 and got["why"][1] == f"Step 5 now gives it to {T1}.", got
+    assert got["why"][0].startswith(f"Rule Teacher · {T1} · Not available: ") and f"on {DAYS[0]} period 1" in got["why"][0], got
+    got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={1}); assert got is None and stats["nodes"] == 1 and stats["reason"].startswith(f"Rule Teacher · {T1} · "), (got, stats)
+    m, spec, days, pool, ts = case([one(1, 0, 1)], gives(T1), rules=[AWAY(T1, 0, 1, 3)])   # it goes to a time allowed for the new teacher, and no other is looked at
+    got, stats = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=5), GIVE] and stats["nodes"] == 1 + 6, (got, stats)
+    m, spec, days, pool, ts = case(BUSY, gives(T1), rules=[AWAY(T1, 0, 1, 1)])   # T1 has a lesson then as well: moving that one would not help
+    got, stats = solved(m, spec, days, ts[TEACH], pool); assert got["moved"] == {1} and stats["nodes"] == 9, (got, stats)
+    m, spec, days, pool, ts = case([one(1, 0, 1), one(4, 1, 1)], gives(T1), rules=[AWAY(T1, 0, 1, 1), AWAY(T1, 1, 1, 1)])   # two such lessons, two moves
+    with limits(CAND_SLOTS=2): got, stats = solved(m, spec, days, ts[TEACH], pool)
+    assert got["moved"] == {1, 4} and stats["nodes"] == 1 + 2 * 2, (got, stats)
+    m, spec, days, pool, ts = case([one(10 + d, d, 1) for d in range(4)], gives(T1), rules=[AWAY(T1, d, 1, 1) for d in range(4)]); got, stats = hunt(m, spec, days, ts[TEACH], pool); assert got is None and stats["nodes"] == 1, stats   # four are too many
+    # a rule of the new teacher's day: T1 may teach two periods in a row, and has the next two
+    row = dict(scope="Teacher", target=T1, rule="Max periods in a row", number=2, week="Both", day="All", strength="Must")
+    m, spec, days, pool, ts = case([one(1, 0, 1), one(2, 0, 2, CLS_B, SUBJ2, T1), one(3, 0, 3, "1C", "Mathematics", T1)], gives(T1), rules=[row])
+    got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=5), GIVE] and got["why"][0].startswith(f"Rule Teacher · {T1} · Max periods in a row: "), got
+    # a rule the lesson breaks with either teacher is not the new teacher's
+    cls_rule = dict(scope="Class", target=CLS, rule="Not in periods", week="Both", day="All", strength="Must", **{"from": 1, "to": 3})
+    m, spec, days, pool, ts = case([one(1, 0, 1)], gives(T1), rules=[cls_rule]); got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [GIVE], got
+    m, spec, days, pool, ts = case(BUSY, gives(T1), rules=[cls_rule]); got, _ = solved(m, spec, days, ts[TEACH], pool, moved={1}); assert got["moved"] == {2}, got   # so the lesson in the way may still move for it
+    got, _ = solved(m, spec, days, ts[TEACH], pool, moved={2}); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=2), GIVE], got   # and it may go where it breaks that rule as it did
+
+def test_the_lesson_keeps_its_day_unless_it_is_barred_for_the_new_teacher():
+    m, spec, days, pool, ts = case([one(1, 0, 1), band(3, 0, 1, CLS_B, T1)], gives(T1), rules=[AWAY(T0)])   # the teacher it has is away that whole day, the one it will have is not
+    assert refit.barred(m, spec, days, 1, 0, pool) is True
+    got, stats = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=1, d=0, p=2), GIVE] and got["other"] == 0, got
+    m, spec, days, pool, ts = case([one(1, 0, 1)], gives(T1), rules=[AWAY(T1)])   # the one it will have is away
+    assert refit.barred(m, spec, days, 1, 0, pool) is False
+    got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=1, d=1, p=1), GIVE] and got["other"] == 1, got
+    m, spec, days, pool, ts = case([one(1, 0, 1)], gives(T1), rules=[AWAY(T1), AWAY(T1, 1)])   # and the next day too: the places of that day are none
+    got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=1, d=2, p=1), GIVE] and got["other"] == 1, got
+    m, spec, days, pool, ts = case([one(1, 0, 1), band(3, 0, 1, CLS_B, T1)] + full(1), gives(T1), rules=[AWAY(T0)])   # nor does a full day open another
+    got, stats = hunt(m, spec, days, ts[TEACH], pool); assert got is None and stats["nodes"] == 1 and stats["reason"] == f"{T1} is teaching group Q3 then.", (got, stats)
+    m, spec, days, pool, ts = case(BUSY + full(1), gives(T1), rules=[AWAY(T1)]); t = ts[TEACH]   # the lesson in the way is barred by its own teacher: it may go to another day
+    got, _ = solved(m, spec, days, ts[f"rule:0:{CLS_B}|{SUBJ2}|0|1"], pool); assert got["moved"] == {2} and got["other"] == 1, got
 
 def test_a_move_of_one_lesson_comes_before_a_swap():
     m, spec, days, pool, ts = case(BUSY + full(1) + [one(3, 0, 2, CLS_B, "Mathematics", T2)], gives(T1)); t = ts[TEACH]
@@ -490,7 +539,7 @@ def test_two_lessons_in_the_way_are_two_moves():
     with limits(CAND_SLOTS=3):
         got, stats = solved(m, spec, days, ts[TEACH], pool, moved=own)
         assert got["fixes"] == [dict(kind="move", id=5, d=1, p=2), dict(kind="move", id=2, d=0, p=2), GIVE] and got["moved"] == {2, 5}, got   # both the nearest; the later move is put first
-        assert got["why"] == [f"{T1} teaches {SUBJ2} for {CLS_B} then."] * 2 + [f"Step 5 now gives it to {T1}."]
+        assert got["why"] == [f"{T1} teaches {SUBJ2} for {CLS_B} on {DAYS[1]} period 1.", f"{T1} teaches {SUBJ2} for {CLS_B} on {DAYS[0]} period 1.", f"Step 5 now gives it to {T1}."], got["why"]   # each with its own time
         assert stats["nodes"] == 1 + 3 * 3, stats   # the change alone; one move of each (the same two the other way round are not looked at again; one move leaves T1 busy at the other time, which needs no looking at)
         three = rows + [one(6, 2, 1), one(7, 2, 1, CLS_B, SUBJ2, T1)]
         m, spec, days, pool, ts = case(three, gives(T1))
@@ -511,7 +560,7 @@ def test_two_lessons_in_the_way_are_two_moves():
 def test_the_lessons_in_the_way_are_read_after_the_earlier_moves():
     m, spec, days, pool, ts = case(BUSY + [one(5, 0, 1, "1C", "Mathematics", T1)], gives(T1))   # T1 is in two places then: the second is in the way once the first is gone
     with limits(CAND_SLOTS=3): got, _ = solved(m, spec, days, ts[TEACH], pool, moved={1})
-    assert got["moved"] == {2, 5} and got["why"] == [f"{T1} teaches Mathematics for 1C then.", f"{T1} teaches {SUBJ2} for {CLS_B} then.", f"Step 5 now gives it to {T1}."], got
+    assert got["moved"] == {2, 5} and got["why"] == [f"{T1} teaches Mathematics for 1C on {DAYS[0]} period 1.", f"{T1} teaches {SUBJ2} for {CLS_B} on {DAYS[0]} period 1.", f"Step 5 now gives it to {T1}."], got
     # only a teacher who was not there is in the way of anything: T2 is in two places already and stays so
     rows = [dict(one(1, 0, 1), teachers=[T2, T0]), one(2, 0, 1, CLS_B, SUBJ2, T1), one(6, 0, 1, "1C", "Mathematics", T2)]
     m, spec, days, pool, ts = case(rows, lambda s: step5_row(s).update(teachers=[T2, T1]))
@@ -551,6 +600,37 @@ def test_the_first_depth_wins():
     m, spec, days, pool, ts = case(TWICE + near); t = clash_of(ts)
     got, _ = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="move", id=2, d=0, p=5)], got
 
+def test_fewer_moves_to_another_day_come_first():
+    barred = dict(AWAY(CLS), scope="Class"); words = dict(scope="Class", target=CLS_B, rule="In words", text="made-up words", strength="Must")   # 1A's lesson must leave Monday; 1B's stays, with a typed rule to check again
+    m, spec, days, pool, ts = case(TWICE, rules=[barred, words], report=[dict(no=1, result="Met")]); t = clash_of(ts)
+    assert moves(m, spec, days, 2)[0] == dict(fix=dict(kind="move", id=2, d=1, p=1), other=True, dist=10)
+    far = helper.chain(m, spec, days, [dict(kind="move", id=2, d=1, p=1)]); assert far["state"] == "ok" and helper.settles(m, spec, days, t["w"], far["lessons"])   # one lesson as well, with no typed rule
+    got, _ = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="move", id=3, d=0, p=2)] and got["other"] == 0 and got["typed"] == {1}, got
+    got, _ = solved(m, spec, days, t, pool, moved={3}); assert got["fixes"] == [dict(kind="move", id=2, d=1, p=1)] and got["other"] == 1, got
+
+def test_fewer_allowance_lines_come_first():
+    m, spec, days, pool, ts = case(TWICE); t = clash_of(ts); was = helper.chain
+    def chain(*a, **k):   # as if the moves of lesson 2 went over an allowance (nothing in one search can differ in it but by the judge's word)
+        c_ = was(*a, **k)
+        if c_["state"] == "ok" and any(f["id"] == 2 for f in a[3]): c_ = dict(c_, state="prefer", steps=[dict(j, state="prefer", prefer=[f"{T1} would have 9 periods, 1 over the allowance."]) for j in c_["steps"]])
+        return c_
+    try: helper.chain = chain; got, _ = hunt(m, spec, days, t, pool)
+    finally: helper.chain = was
+    assert got["fixes"] == [dict(kind="move", id=3, d=0, p=2)] and hunt(m, spec, days, t, pool)[0]["fixes"] == [dict(kind="move", id=2, d=0, p=2)], got
+
+def test_a_search_may_be_held_to_fewer_moves():
+    least = lambda m, spec, days, t, pool, most: refit.solve(m, spec, days, t, pool, set(), time.monotonic() + 60, None, most)
+    m, spec, days, pool, ts = case(BUSY, gives(T1)); stats = {}
+    assert refit.solve(m, spec, days, ts[TEACH], pool, set(), time.monotonic() + 60, stats, max_moves=0) is None and stats == dict(nodes=1, reason=f"{T1} is teaching {SUBJ2} for {CLS_B} then.", late=False), stats
+    was = refit._blocked
+    try: refit._blocked = lambda *a: 1 / 0; assert least(m, spec, days, ts[TEACH], pool, 0) is None   # with no moves to come nothing is worked out for them
+    finally: refit._blocked = was
+    assert least(m, spec, days, ts[TEACH], pool, 1)["moved"] == {1} == least(m, spec, days, ts[TEACH], pool, 3)["moved"]
+    m, spec, days, pool, ts = case([one(1, 0, 1)], gives(T1)); assert least(m, spec, days, ts[TEACH], pool, 0)["fixes"] == [GIVE]   # direct answers are made all the same
+    m, spec, days, pool, ts = case([one(1, 0, 1), one(2, 1, 1, CLS, "Other")], plans(2)); assert [f["kind"] for f in least(m, spec, days, ts[f"dep:{KEY}:periods"], pool, 0)["fixes"]] == ["add"]
+    m, spec, days, pool, ts = case(TWICE); assert least(m, spec, days, clash_of(ts), pool, 0) is None
+    m, spec, days, pool, ts = case(BUSY + [one(4, 1, 1), one(5, 1, 1, CLS_B, SUBJ2, T1)], gives(T1)); assert least(m, spec, days, ts[TEACH], pool, 1) is None and len(least(m, spec, days, ts[TEACH], pool, 2)["moved"]) == 2
+
 def test_no_list_of_more_moves_is_looked_at_once_one_is_found():
     row = dict(scope="Teacher", target=T1, rule="Max periods in a row", number=2, week="Both", day="All", strength="Must")
     m, spec, days, pool, ts = case([one(i, 0, p, CLASSES[i % 2], EL, T1) for i, p in enumerate((1, 2, 3, 5, 6), 1)], rules=[row]); t = clash_of(ts, "rule:")   # three in a row, then two
@@ -589,15 +669,42 @@ def test_a_band_is_never_moved():
     m, spec, days, pool, ts = case(rows + [band(21, 0, 2, "2A", planned[0])]); got, stats = hunt(m, spec, days, ts[t["key"]], pool)
     assert got is None and stats == dict(nodes=1, reason=f"{planned[0]} is teaching group Q21 then.", late=False), (got, stats)
 
-def test_the_reason_is_about_the_change_itself():
+def test_the_reason_is_about_the_timetable_as_it_is():
+    busy = f"{T1} is teaching {SUBJ2} for {CLS_B} then."
     rows = [one(1, 0, 1), one(4, 0, 2), one(2, 0, 1, CLS_B, SUBJ2, T1), one(5, 0, 2, "1C", "Mathematics", T1)]   # both of T1's lessons are in the way, and the nearest place of both is period 3
     m, spec, days, pool, ts = case(rows, gives(T1)); t = ts[TEACH]
-    with limits(CAND_SLOTS=1):
-        assert moves(m, spec, days, 2, limit=1)[0]["fix"]["p"] == moves(m, spec, days, 5, limit=1)[0]["fix"]["p"] == 3
-        both = helper.chain(m, spec, days, [dict(kind="move", id=5, d=0, p=3), dict(kind="move", id=2, d=0, p=3), GIVE]); assert both["state"] == "no" and len(both["steps"]) == 2   # refused at the second move
-        got, stats = hunt(m, spec, days, t, pool, moved={1, 4})
-        assert got is None and stats == dict(nodes=1 + 1, reason=f"{T1} is teaching {SUBJ2} for {CLS_B} then.", late=False) and both["why"] != stats["reason"], (stats, both["why"])
-    got, _ = solved(m, spec, days, t, pool, moved={1, 4}); assert got["moved"] == {2, 5}, got
+    with limits(CAND_SLOTS=1), watching() as judged:
+        got, stats = hunt(m, spec, days, t, pool, moved={1, 4}); assert got is None and stats == dict(nodes=1 + 1, reason=busy, late=False), stats
+    assert judged[-1][1]["why"] != busy   # the two moves meet in one place
+    # the period tried for the lesson itself is one where T1 has a band: that is not why it stays
+    m, spec, days, pool, ts = case(BUSY + [band(5, 0, 2, "1C", T1)] + full(1, 2), gives(T1))
+    with watching() as judged: got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={2})
+    assert got is None and stats["reason"] == busy and judged[-1][1]["why"] == f"{T1} is teaching group Q5 then.", (got, stats)
+    # with the lesson in the way moved, a wish about the other lesson refuses it
+    wish = dict(AWAY(T1, 1, 1, 1), strength="Prefer")
+    m, spec, days, pool, ts = case(BUSY + [one(4, 1, 1)], gives(T1), rules=[wish])
+    with watching() as judged: got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={1, 4})
+    assert got is None and stats["reason"] == busy and judged[-1][1]["why"].endswith("(Prefer)"), (got, stats)
+    # a lesson put in by the list itself is never the reason, nor is a place tried for a missing one
+    key = f"C:{CLS_B}:{EL}"; other = [x for d in range(5) for x in full(*([1] if d == 0 else []), d=d, cls=CLS_B)]
+    m, spec, days, pool, ts = case(other, plans(2, 1, key))   # one free period in the week, two lessons missing
+    with watching() as judged: got, stats = hunt(m, spec, days, ts[f"dep:{key}:missing"], pool)
+    assert got is None and stats["reason"] == refit.NO_FIT and [len(fx) for fx, *_ in judged][0] == 1, (got, stats)
+    m, spec, days, pool, ts = case([x for x in other if x["id"] != 1002], lambda s: (plans(1, 1, key)(s), gives(T3, key)(s))); t = ts[f"dep:{key}:missing"]   # two free periods, and the teacher has bands then
+    m = dict(m, lessons=m["lessons"] + [dict(next(x for x in m["lessons"] if x["id"] == 1003), id=1000 + p, p=p, classes=["1C"], group=f"R{p}") for p in (1, 2)])
+    got, stats = hunt(m, spec, days, t, pool); assert got is None and stats["reason"] == refit.NO_FIT, (got, stats)
+    # a delete the plan refuses is refused on the timetable as it is
+    m, spec, days, pool, ts = case([one(1, 0, 1, n=2)], plans(1)); got, stats = hunt(m, spec, days, ts[f"dep:{KEY}:periods"], pool)
+    assert got is None and stats["reason"] == f"That would leave {EL} for {CLS} with 0 periods; step 3 plans 1.", (got, stats)
+    m, spec, days, pool, ts = case([one(1, 0, 1, n=3), one(2, 1, 1, n=2)], plans(4)); got, stats = hunt(m, spec, days, ts[f"dep:{KEY}:periods"], pool)
+    assert got is None and stats["nodes"] == 2 and stats["reason"] == f"That would leave {EL} for {CLS} with 2 periods; step 3 plans 4.", (got, stats)   # the best candidate's
+    m, spec, days, pool, ts = case([one(1, 0, 1, n=2), one(2, 1, 1, n=2), one(3, 2, 1)], plans(1)); t = ts[f"dep:{KEY}:periods"]   # four periods over in lessons of 2, 2 and 1: the first two fit
+    got, _ = solved(m, spec, days, t, pool); assert {f["id"] for f in got["fixes"]} == {1, 2}, got
+    m, spec, days, pool, ts = case([one(1, 0, 1, n=2), one(3, 2, 1)], plans(2)); t = ts[f"dep:{KEY}:periods"]; got, _ = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="delete", id=3)], got
+    m, spec, days, pool, ts = case([one(1, 0, 1, n=3), one(3, 2, 1, n=2), one(4, 3, 1, n=2)], plans(4)); t = ts[f"dep:{KEY}:periods"]   # three periods over: the lesson of three goes
+    got, _ = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="delete", id=1)], got
+    m, spec, days, pool, ts = case([one(1, 0, 1, n=2), one(3, 2, 1, n=2), one(4, 3, 1, n=5)], plans(6)); t = ts[f"dep:{KEY}:periods"]   # three over in lessons of 2, 2 and 5: one of two fits by itself, so that five is too many is not why
+    got, stats = hunt(m, spec, days, t, pool); assert got is None and stats["reason"] == refit.NO_FIT, (got, stats)
 
 def test_a_lesson_moved_by_an_earlier_target_is_left_alone():
     m, spec, days, pool, ts = case(BUSY, gives(T1))
@@ -637,11 +744,43 @@ def test_adding_a_period_takes_a_free_slot():
     m, spec, days, pool, ts = case([one(1, 0, 2, CLS_B, EL, T0)], lambda s: (plans(3, 1, key)(s), gives(T0, key)(s)))   # two periods short: two adds, on two days
     got, _ = solved(m, spec, days, t_of(ts, "periods"), pool)
     assert [(f["kind"], f["d"]) for f in got["fixes"]] == [("add", 1), ("add", 2)] and got["why"] == ["Step 3 plans 3 periods of it."] * 2, got
-    m, spec, days, pool, ts = case([one(2, 0, 1, CLS_B, "Other", T2)], plans(3, 2, key))   # a lesson of two and one of one: the app has no such list
-    got, stats = hunt(m, spec, days, t_of(ts), pool); assert got is None and stats["reason"] == refit.NO_FIT and stats["nodes"] <= len(refit.direct(m, spec, days, t_of(ts), pool)[0]), (got, stats)
+    m, spec, days, pool, ts = case([one(2, 0, 1, CLS_B, "Other", T2)], plans(3, 2, key))   # three periods in lessons of two: one of two, then one of one, on another day
+    got, stats = solved(m, spec, days, t_of(ts), pool); assert [(f["kind"], f["n"], f["d"]) for f in got["fixes"]] == [("add", 2, 1), ("add", 1, 2)] and got["why"] == ["It was not on the timetable."] * 2, got
+    m, spec, days, pool, ts = case([one(1, 0, 1, CLS_B, EL, T0, n=2)], lambda s: (plans(5, 2, key)(s), gives(T0, key)(s)))   # the same for a lesson that is short of periods
+    got, _ = solved(m, spec, days, t_of(ts, "periods"), pool); assert [f["n"] for f in got["fixes"]] == [2, 1] and got["why"] == ["Step 3 plans 5 periods of it."] * 2, got
+    m, spec, days, pool, ts = case([], plans(9, 1, key)); got, stats = hunt(m, spec, days, t_of(ts), pool); assert got is None and stats["reason"] == refit.TOO_MANY == "More than 8 changes: change it on the board.", (got, stats)
+    m, spec, days, pool, ts = case([], plans(8, 1, key)); got, _ = solved(m, spec, days, t_of(ts), pool); assert len(got["fixes"]) == 8, got
+    eight = [x for d in range(5) for x in full(*(OPEN[:8] if d == 0 else []), d=d, cls=CLS_B)]
+    m, spec, days, pool, ts = case(eight, plans(9, 1, key)); got, stats = hunt(m, spec, days, t_of(ts), pool); assert got is None and stats["reason"] == refit.NO_FIT, (got, stats)   # a ninth has no place at all: that is the reason
+    crowd = [one(100 * d + p, d, p, CLS_B, "Other", T2) for d in range(1, 5) for p in OPEN[:3]]   # Monday is far the emptiest: the second goes to another day all the same
+    m, spec, days, pool, ts = case(crowd, plans(2, 1, key)); got, _ = solved(m, spec, days, t_of(ts), pool); assert [f["d"] for f in got["fixes"]] == [0, 1], got
+    with limits(MAX_GROWN=0): got, stats = hunt(m, spec, days, t_of(ts), pool); assert got is None and stats["reason"] == refit.NO_FIT, (got, stats)
+    m, spec, days, pool, ts = case([one(2, 0, 1, CLS_B, "Other", T2)], plans(3, 2, key))
     stats = {}; before = snapshot(m, pool)
     assert refit.solve(m, spec, days, t_of(ts), pool, set(), time.monotonic() - 1, stats) is None and stats == dict(nodes=0, reason=refit.LATE, late=True), stats
     assert snapshot(m, pool) == before
+
+def test_a_missing_lesson_takes_the_place_of_one_that_can_move():
+    key = f"C:{CLS_B}:{EL}"; part = f"dep:{key}:missing"; week = [x for d in range(5) for x in full(*([1, 2] if d == 0 else []), d=d, cls=CLS_B)]   # 1B's week is full of bands but for two periods of Monday
+    home = case([])[0]["class_ix"][CLS_B]["home"]; assert home
+    rows = week + [one(2, 0, 1, CLS_B, "Mathematics", T2, room=home), band(9, 0, 2, CLS, T0)]   # in the first 1B has Maths in its home room; in the second the missing lesson's teacher has a band
+    need = lambda s: (plans(1, 1, key)(s), gives(T0, key)(s))
+    m, spec, days, pool, ts = case(rows, need); t = ts[part]
+    cands, says = refit.direct(m, spec, days, t, pool); add = dict(kind="add", key=key, d=0, p=1, n=1, room=home); assert (cands, says) == ([[add]], None), (cands, says)   # only the place of a lesson that may move, in the room it leaves
+    got, stats = solved(m, spec, days, t, pool)
+    assert got == dict(fixes=[dict(kind="move", id=2, d=0, p=2), add], moved={2}, other=0, typed=set(), why=[f"{CLS_B} has Mathematics for {CLS_B} on {DAYS[0]} period 1.", "It was not on the timetable."]) and stats["nodes"] == 2, (got, stats)
+    got, stats = hunt(m, spec, days, t, pool, moved={2}); assert got is None and stats == dict(nodes=1, reason=refit.NO_FIT, late=False), stats
+    m, spec, days, pool, ts = case(rows, need, rules=[AWAY(T0, 0, 1, 1)]); assert refit.direct(m, spec, days, ts[part], pool) == ([], None)   # not a place a Must rule shuts
+    m, spec, days, pool, ts = case(rows + [band(8, 0, 1, CLS, T0)], need); assert refit.direct(m, spec, days, ts[part], pool) == ([], None)   # nor one where a band is in the way as well
+    m, spec, days, pool, ts = case(rows + [one(8, 1, 1, "1C", "Mathematics", T0)], need); assert refit.direct(m, spec, days, ts[part], pool) == ([[add]], None)   # whichever of the two is found first
+    most = dict(scope="Teacher", target=T0, rule="Max periods a day", number=1, week="Both", day="All", strength="Must")   # nor one refused for a rule of the teacher's day, with no lesson in the way
+    m, spec, days, pool, ts = case(week + [one(8, 0, 5, "1C", "Mathematics", T0)], need, rules=[most]); assert {s_["state"] for s_ in fixes.add_slots(m, spec, days, key, 1, pool)} == {"no", "na"} and refit.direct(m, spec, days, ts[part], pool) == ([], None)
+    m, spec, days, pool, ts = case(rows[:-1], need); cands = refit.direct(m, spec, days, ts[part], pool)[0]; assert [c[0]["p"] for c in cands] == [2]   # with a free place, only free places
+    plain = [one(100 * d + p, d, p, CLS_B, "Mathematics", T2) for d in range(5) for p in OPEN]   # 45 lessons that may move: six places, on the emptiest day first
+    m, spec, days, pool, ts = case(plain[:-1], need); t = ts[part]; m = dict(m, lessons=m["lessons"] + [dict(m["lessons"][-1], id=999, p=10)])
+    busy = lambda d: len({x["id"] for x in m["lessons"] if x["d"] == d}); cands = refit.direct(m, spec, days, t, pool)[0]
+    assert len(cands) == 6 and [(c[0]["d"], c[0]["p"]) for c in cands] == [(0, p) for p in OPEN[:6]], cands
+    assert all(fixes.judge(m, spec, days, c[0], pool=pool)["state"] == "no" for c in cands)
 
 def test_a_surplus_is_deleted_from_the_fullest_days():
     rows = [one(1, 0, 1), one(2, 0, 2), one(5, 0, 3, CLS, "Other"), one(3, 1, 1), one(4, 1, 2), one(6, 1, 3, CLS, "Other"), one(7, 2, 1)]   # Mon and Tue have three periods each, Wed one
@@ -653,7 +792,7 @@ def test_a_surplus_is_deleted_from_the_fullest_days():
     m, spec, days, pool, ts = case(rows); t = ts[f"dep:C:{CLS}:Other:extra"]
     got, _ = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="delete", id=6), dict(kind="delete", id=5)] and got["why"] == ["Step 3 plans 0 periods of it."] * 2, got
     ten = [one(i, i % 5, OPEN[i // 5], CLS, "Other") for i in range(1, 11)]   # ten lessons: more than one answer may delete
-    m, spec, days, pool, ts = case(ten); got, stats = hunt(m, spec, days, ts[f"dep:C:{CLS}:Other:extra"], pool); assert got is None and stats["reason"] == refit.NO_FIT and stats["nodes"] < refit.MAX_NODES, (got, stats)
+    m, spec, days, pool, ts = case(ten); got, stats = hunt(m, spec, days, ts[f"dep:C:{CLS}:Other:extra"], pool); assert got is None and stats["reason"] == refit.TOO_MANY and stats["nodes"] == 10 + 7, (got, stats)
     fewer = [one(1, 2, 1, n=2), one(2, 0, 1), one(3, 0, 2), one(4, 0, 3, CLS, "Other")]   # two periods over: one lesson of two rather than two of one, though those are on the fullest day
     m, spec, days, pool, ts = case(fewer, plans(2)); t = ts[f"dep:{KEY}:periods"]; assert [c[0]["id"] for c in refit.direct(m, spec, days, t, pool)[0]] == [3, 2, 1]
     got, _ = solved(m, spec, days, t, pool); assert got["fixes"] == [dict(kind="delete", id=1)], got
@@ -688,8 +827,7 @@ def test_never_more_prefer():
     got, _ = solved(m, spec, days, ts[TEACH], pool, moved={1}); assert got["fixes"] == [dict(kind="move", id=2, d=0, p=5), GIVE], got
 
 def test_a_must_rule_is_never_broken():
-    need = dict(MUST_RULE, target=T1, **{"from": 1, "to": 1})   # the new teacher is not there in that period
-    m, spec, days, pool, ts = case([one(1, 0, 1)], gives(T1), rules=[need])
+    m, spec, days, pool, ts = case([one(1, 0, 1)] + full(1), gives(T1), rules=[AWAY(T1, 0, 1, 1)])   # the new teacher is not there in that period, and 1A's day is full
     got, stats = hunt(m, spec, days, ts[TEACH], pool); assert got is None and stats["reason"].startswith("Rule ") and T1 in stats["reason"], (got, stats)
     must = dict(MUST_RULE, scope="Class", target=CLS_B, rule="Not in periods", day=DAYS[0], **{"from": 2, "to": 3})
     m, spec, days, pool, ts = case(BUSY, gives(T1), rules=[must])
