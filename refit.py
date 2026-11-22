@@ -1,11 +1,15 @@
-"""Re-fit: the fewest lesson changes that make the draft fit the setup again. Which warnings it works on is here."""
+"""Re-fit: the fewest lesson changes that make the draft fit the setup again. Here are the warnings it works on, the change
+itself for each, where a lesson may go, and the search for the list of fixes that settles one warning."""
+import collections, re, time
 import helper, fixes
 from ttgen import verify
 from ttgen.export import ENTIRE
-from ttgen.spec import whole as whole_n
+from ttgen.spec import single_rooms, whole as whole_n
 
-MAX_MOVES = 3        # the most changes in one answer
-MAX_NODES = 250      # the most search steps for one warning
+MAX_MOVES = 3        # the most moves and swaps in one answer
+MAX_DIRECT = 8       # the most changes of step 5 itself in one answer
+MAX_NODES = 250      # the most search steps (lists judged) for one warning
+MAX_KEPT = 40        # the timetables, each with its index, kept while looking
 CAND_LESSONS = 4     # the lessons tried for a change
 CAND_SLOTS = 8       # the places tried for a lesson
 BUDGET_S = 30.0      # the most seconds for a whole re-fit
@@ -15,6 +19,7 @@ BAND = "This changes the band itself: change it on the board, or ask the agent f
 SPLIT = "Its lessons are taught by different teachers: change them on the board."
 NOT_ONE = "More than one teacher changes: change it on the board."
 LATE = "Not looked at in time; run Re-fit again."
+OVER = " over the allowance."   # how fixes.judge ends a teacher's allowance line: the only Prefer reason an answer may give
 
 PARTS = ("teachers", "missing", "periods", "extra", "venue", "half")   # the step 5 differences it works on, in this order
 
@@ -71,10 +76,14 @@ def _adds(m, spec, days, pool, ks, k, e, n):
     ok.sort(key=lambda s: (busy(s["d"]), s["d"], s["p"]))
     return [[dict(kind="add", key=ks, d=s["d"], p=s["p"], n=n, room=fixes.add_room(m, spec, ks, s["d"], s["p"], n, c))] for s in ok]
 
+def _day_periods(lessons, cls):
+    """{day: the periods the class has on it}"""
+    per = {}
+    for g in {x["id"]: x for x in lessons if cls in x["classes"]}.values(): per[g["d"]] = per.get(g["d"], 0) + g["n"]
+    return per
+
 def _deletes(m, spec, days, pool, k, e, rows):
-    cls = _class_of(k, e, rows); c = fixes._ctx(m); L = m["lessons"]
-    per = {}   # the periods the class has on each day
-    for i, g in {x["id"]: x for x in L if cls in x["classes"]}.items(): per[g["d"]] = per.get(g["d"], 0) + g["n"]
+    c = fixes._ctx(m); L = m["lessons"]; per = _day_periods(L, _class_of(k, e, rows))
     first = {}
     for x in rows: first.setdefault(x["id"], x)
     out = []
@@ -182,3 +191,211 @@ def direct(m, spec, days, target, pool):
             return (out, None) if out else ([], text)
         return [], text
     except Exception: return [], text
+
+
+# ----------------------------------------------------------------------------------------------- the search for one target
+class _Stop(Exception):
+    """the search has reached its limit of steps or of time"""
+
+def _ids(fix): return {fix["a"], fix["b"]} if fix["kind"] == "swap" else {fix["id"]}
+
+def _refusal(c):
+    """(the step, the judge's sentence) that rules a chain out, or None for one that is accepted: every step ok, or prefer for allowance lines alone"""
+    if c["state"] not in helper.OK: return len(c["steps"]) - 1, c["why"]
+    return next(((i, t) for i, j in enumerate(c["steps"]) for t in j["prefer"] if not t.endswith(OVER)), None)
+
+# whether a warning is settled: helper.settles, with what it does not look at
+def _room_clash(m, w):
+    """(the room, the (d, q) it names) of a warning that a room is over capacity, else None"""
+    g = re.match(r"clash:Room over capacity: (.+?) on ", w.get("key") or ""); slots = g and helper._clash_slots(m, w, g.group(1))
+    return (g.group(1), slots) if slots else None
+
+def _over(m, lessons, room, slots):
+    """whether the room holds more lessons than it can in one of these (d, q), as export.check_model counts"""
+    parts = m.get("room_parts") or {}; stands = [x for x in lessons if not fixes._no_room(x["room"]) and room in single_rooms(x["room"], parts)]
+    n = collections.Counter((x["d"], q) for x in stands for q in fixes._span(x))
+    return any(n[s] > m["room_cap"].get(room, 1) for s in slots)
+
+def _settled(m, spec, days, w, lessons, before, room):
+    """helper.settles, and for a room over capacity (room: its _room_clash) the room itself: settles looks only at a clash's teacher or class"""
+    return helper.settles(m, spec, days, w, lessons, before) and not (room and _over(m, lessons, *room))
+
+def _gone(m, spec, days, w, before, room):
+    """whether an earlier target's fixes have settled the warning on m already. settles cannot say it of a clash about one lesson
+    (in a break, past the day, without a teacher): that is gone with the lesson, or, for its place, once the lesson is elsewhere"""
+    wh = w.get("where") or {}
+    if w.get("kind") != "clash": return helper.settles(m, spec, days, w, m["lessons"], before)
+    if room: return not _over(m, m["lessons"], *room)
+    if wh.get("id") is None: return bool(before.get("named")) and helper.settles(m, spec, days, w, m["lessons"], before)   # a double booking
+    x = next((x for x in m["lessons"] if x["id"] == wh["id"] and x["group"] == wh.get("row", x["group"])), None)
+    return x is None or (w.get("crit") != "noteacher" and (m["days"][x["d"]], x["p"]) != (wh.get("day"), wh.get("period")))
+
+def _in_the_way(m, spec, days, b, f):
+    """the lessons in the way of a refused fix on the timetable m (b: its Busy) -> [(lesson id, why)], in the order found: for a
+    teacher fix, one for each lesson of its key that a new teacher cannot take; for a move, swap or add, one for each lesson it
+    places; none for a room (Busy names no lesson for one), a delete or a rule"""
+    out = []
+    def ask(rows, ignore):
+        x = rows[0]; y = b.blocker(rows, x["d"], x["p"], x["n"], ignore=ignore)   # the lesson helper._alone would name is this one too
+        if y is not None: out.append((y, b.clash(rows, x["d"], x["p"], x["n"], ignore=ignore).replace(" is teaching ", " teaches ", 1)))
+    if f["kind"] == "teacher":
+        ids = list(dict.fromkeys(x["id"] for x in helper._of_key(m["lessons"], fixes._key(f["key"]))))
+        for i in ids:   # as fixes.judge sees a teacher change: only a teacher who was not there can clash
+            had = {t for y in b.ids[i] for t in y["teachers"]}
+            ask([dict(y, teachers=[t for t in f["teachers"] if t not in had], classes=[], group=ENTIRE, rain="", room="") for y in b.ids[i]], set(ids))
+    elif f["kind"] in ("move", "swap", "add"):
+        after = helper._apply(m["lessons"], [f], spec, days); placed = after["touched"]
+        for i in sorted(placed): ask([x for x in after["lessons"] if x["id"] == i], placed)
+    return out
+
+class _Search:
+    """the search for one target. A list looked at is a node (moves, parts): moves the items of day_moves in it, first, each with the
+    why of its lesson; parts the indexes of direct's candidates in it, after them. The lists are judged in order of how many moves
+    they have, and nothing of m or of what helper and fixes return is changed"""
+    def __init__(self, m, spec, days, target, cands, moved, deadline, stats, before, room):
+        self.m, self.spec, self.days, self.target, self.w = m, spec, days, target, target["w"]
+        self.cands, self.moved, self.deadline, self.stats, self.before, self.room = cands, moved, deadline, stats, before, room
+        self.ctx = fixes._ctx(m); self.rows = self.ctx["busy"].ids   # lesson id -> its rows
+        self.memo, self.bars, self.places = {}, {}, {}               # helper.chain's memo; day_moves' memo; lesson id -> its day_moves
+        self.seen, self.solved, self.refused = set(), [], ""         # the lists looked at; the answers of the present depth; the judge's last sentence about the change itself
+        self.key = helper._dep_parts(target["key"])[0]; self.row5 = verify.planned_rows(spec).get(self.key) or {}
+        if cands: self._about()
+
+    # ------------------------------------------------------------ several changes of step 5 in one answer
+    def _about(self):
+        """self.about: for each candidate, the periods it adds or takes away, its day, the periods its class has that day (a delete) and the
+        row whose room it changes; self.need: the periods the key is short of step 5's plan, or over it"""
+        L, pool = self.m["lessons"], self.m.get("pool") or (); cls = _class_of(self.key, self.row5 or None, helper._of_key(L, self.key)); per = _day_periods(L, cls)
+        def about(f):
+            if f["kind"] == "add": return dict(n=f["n"], d=f["d"], load=None, room=None)
+            if f["kind"] == "delete": x = self.rows[f["id"]][0]; return dict(n=x["n"], d=x["d"], load=per.get(x["d"], 0), room=None)
+            return dict(n=0, d=None, load=None, room=(f["id"], f["group"]) if f["kind"] == "room" else None)
+        self.about = [about(c[0]) for c in self.cands]
+        have = verify.placed(dict(self.m, lessons=list(L) + list(pool))).get(self.key, {}).get("periods", 0); self.need = abs(self.row5.get("periods", 0) - have)
+
+    def _more(self, parts):
+        """the candidates that may follow these: none that changes the same room again or goes past the periods needed. An add on a day
+        without one comes first, and the delete from the day that is then the class's fullest; else they keep direct's order"""
+        used = [self.about[j] for j in parts]; n = sum(a["n"] for a in used); rooms = {a["room"] for a in used if a["room"]}
+        def order(j):
+            a = self.about[j]; there = [u for u in used if u["d"] == a["d"]]
+            return (bool(there) if a["load"] is None else sum(u["n"] for u in there) - a["load"], j)
+        left = [j for j, a in enumerate(self.about) if j not in parts and a["room"] not in rooms and n + a["n"] <= self.need]
+        return sorted(left, key=order) if len(parts) < MAX_DIRECT else []
+
+    def _grow(self, node, failed):
+        """a list that fits and leaves the warning open, with further candidates put after it, the first that fits each time -> whether that settles it"""
+        for j in self._more(node[1]):
+            longer = (node[0], node[1] + (j,))
+            if not self._new(longer): continue
+            how, c = self._look(longer)
+            if how != "refused": return how == "solved" or self._grow(longer, failed)
+            failed.append((longer, self._ways(longer, how, c)))
+        return False
+
+    # ------------------------------------------------------------ judging a list
+    def _fixes(self, node): return [x["fix"] for x in node[0]] + [f for j in node[1] for f in self.cands[j]]
+
+    def _new(self, node):
+        """whether the list was not looked at before (the same moves and changes in another order leave the same timetable, and each is allowed by itself)"""
+        k = (frozenset(repr(x["fix"]) for x in node[0]), frozenset(node[1])); new = k not in self.seen; self.seen.add(k); return new
+
+    def _in_time(self):
+        if time.monotonic() > self.deadline: self.stats["late"] = True; raise _Stop
+
+    def _look(self, node):
+        """judge one list -> (how, its chain): "refused", "solved" (kept in self.solved) or "open": it fits and the warning stays. _Stop at a limit"""
+        self._in_time()
+        if self.stats["nodes"] >= MAX_NODES: raise _Stop
+        self.stats["nodes"] += 1; fx = self._fixes(node); c = helper.chain(self.m, self.spec, self.days, fx, self.ctx, self.memo)
+        while len(self.memo) > MAX_KEPT: del self.memo[next(iter(self.memo))]   # the oldest
+        if no := _refusal(c):
+            if no[0] >= len(node[0]): self.refused = no[1]   # what is said of a move tried for it would not be about the warning
+            return "refused", c
+        if not fx or not _settled(self.m, self.spec, self.days, self.w, c["lessons"], self.before, self.room): return "open", c   # the empty list is never an answer
+        self.solved.append((node, c)); return "solved", c
+
+    # ------------------------------------------------------------ the lists with one move more
+    def _ways(self, node, how, c):
+        """the lessons whose move may help a list that is no answer -> [(lesson id, why)]: the ones in the way of the step the judge
+        refused, or, where every step is allowed, the ones the clash or rule is about (no move settles a difference from step 5)"""
+        if how == "open": return [(i, f"The {self.target['kind']} needs it.") for i in helper.involved(dict(self.m, lessons=c["lessons"]), self.w)]
+        if c["state"] in helper.OK: return []   # a Prefer rule rules it out: nothing is in the way
+        i = len(c["steps"]) - 1; fx = self._fixes(node)
+        mi, ci = (self.m, self.ctx) if i == 0 else helper._after(self.m, self.spec, self.days, fx[:i], self.memo)
+        return _in_the_way(mi, self.spec, self.days, ci["busy"], fx[i])
+
+    def _places(self, i):
+        if i not in self.places: self._in_time(); self.places[i] = day_moves(self.m, self.spec, self.days, i, self.ctx, self.bars, self.moved, CAND_SLOTS)
+        return self.places[i]
+
+    def _children(self, failed):
+        """each list that is no answer with one move more, put first: of a lesson that may help it, not a band, not moved by an earlier target, not moved by the list already"""
+        for (moves, parts), ways in failed:
+            done = {i for x in moves for i in _ids(x["fix"])}; may = {}
+            for i, why in ways:
+                if i in self.rows and i not in done and i not in self.moved and not fixes._block(self.rows[i]): may.setdefault(i, why)
+            for i, why in list(may.items())[:CAND_LESSONS]:
+                for x in self._places(i):
+                    child = ((dict(x, why=why),) + moves, parts)
+                    if not _ids(x["fix"]) & done and self._new(child): yield child
+
+    def run(self):
+        """the best answer of the fewest moves that has one, or None"""
+        level = [n for n in ([((), (j,)) for j in range(len(self.cands))] or [((), ())]) if self._new(n)]
+        try:
+            for k in range(MAX_MOVES + 1):
+                failed, opened = [], []
+                for node in level:
+                    how, c = self._look(node)
+                    if how == "open" and node[1]: opened.append(node)
+                    elif how != "solved": failed.append((node, self._ways(node, how, c)))
+                for node in opened:
+                    if self.solved or self._grow(node, failed): break
+                if self.solved: break
+                level = self._children(failed)   # made as they are looked at
+        except _Stop: pass   # the best found so far
+        return self._best()
+
+    # ------------------------------------------------------------ the answer
+    def _best(self):
+        """the answer ranked first: the fewest moves to another day, the fewest typed rules touched, the nearest moves, the fewest allowances gone over, then direct's order, then the words"""
+        def entry(node, c):
+            typed = {int(w["key"].split(":")[1]) for w in verify.typed_again(dict(self.m, lessons=c["lessons"]), self.spec, c["touched"], c["was"])}
+            moves, parts = node; other = sum(x["other"] for x in moves); fx = self._fixes(node)
+            return (other, len(typed), sum(x["dist"] for x in moves), sum(len(j["prefer"]) for j in c["steps"]), parts, repr(fx)), node, c, typed, other, fx
+        if not self.solved: return None
+        _, (moves, parts), c, typed, other, fx = min((entry(*s) for s in self.solved), key=lambda e: e[0])
+        at = {x["id"]: (x["d"], x["p"]) for x in self.m["lessons"]}
+        return dict(fixes=fx, moved={x["id"] for x in c["lessons"] if x["id"] in at and at[x["id"]] != (x["d"], x["p"])}, other=other, typed=typed,
+                    why=[x["why"] for x in moves] + [self._why(f) for j in parts for f in self.cands[j]])
+
+    def _why(self, f):
+        """why a change of step 5 itself is made"""
+        n = self.row5.get("periods", 0); plan = f"Step 3 plans {n} period{'' if n == 1 else 's'} of it."
+        if f["kind"] == "teacher": return f"Step 5 now gives it to {fixes._names(f['teachers'])}."
+        if f["kind"] == "add": return "It was not on the timetable." if self.target["kind"] == "missing" else plan
+        if f["kind"] == "delete": return plan
+        return f"Step 3 asks for {self.row5['room_kind']}." if self.target["kind"] == "venue" else "It needs a room that seats the group."
+
+def solve(m, spec, days, target, pool, moved, deadline, stats=None):
+    """the best list of fixes for one target on the timetable m as it is now (the earlier targets' fixes are in it) -> dict(fixes, moved,
+    other, typed, why), or None when there is none within the limits. The list is at most MAX_MOVES moves and swaps (never of a band or of
+    a lesson in moved; each on its own day unless that day is barred for it), then the change itself. fixes is [] when the warning is
+    gone already; moved: the ids of the lessons whose day or period changes; other: how many moves go to another day; typed: the numbers
+    of the typed rules to check again; why: a plain sentence for each fix. deadline: a time.monotonic(). stats (a dict, when given) gets
+    nodes (the lists judged), reason (the Needs-you sentence when there is no answer, else "") and late (the deadline came first).
+    Nothing it is given is changed"""
+    s = {} if stats is None else stats; s.update(nodes=0, reason="", late=False); w = target["w"]
+    pool = m.get("pool") or pool or []; m = m if m.get("pool") is pool else dict(m, pool=pool)
+    if time.monotonic() > deadline: s.update(late=True, reason=LATE); return None
+    before, room = helper._before(m, spec, w), _room_clash(m, w)
+    if _gone(m, spec, days, w, before, room): return dict(fixes=[], moved=set(), other=0, typed=set(), why=[])
+    if w.get("crit") == "noteacher": s["reason"] = helper.NO_TEACHER; return None   # no move gives it one
+    cands, needs = direct(m, spec, days, target, pool)
+    cands = [c for c in cands if not (c[0]["kind"] == "delete" and c[0]["id"] in moved)]   # an earlier target moved it: the list would undo itself
+    if not cands and target["kind"] not in ("clash", "rule"): s["reason"] = needs or NO_FIT; return None
+    search = _Search(m, spec, days, target, cands, moved, deadline, s, before, room); got = search.run()
+    if got is not None: s["late"] = False
+    else: s["reason"] = LATE if s["late"] else search.refused or NO_FIT
+    return got
