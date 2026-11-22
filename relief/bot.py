@@ -27,13 +27,17 @@ says the same and saves nothing.
 
 Request to change and Not needed ask why first: a talk (table talks), one a chat, TALK_MINUTES long, the newest in place of any
 other. Until it is over, what is typed there is the why, whatever it looks like (never a code), judged again as a press is. A line
-that is blank, too long or no reason (_no_reason: "No", "Ok, thanks"; to the cancel question "Never mind" and the rest of
-NOT_CANCEL too) is nobody's why: the question is asked again. So it is, after
+that is blank, too long or no reason (_no_reason: "No", "Ok, thanks") is nobody's why: the question is asked again. So it is, after
 LAST_ONE, when the line replies to any message but the question asked last (its id is in the talk). /cancel ends the talk, and
-so do COMMANDS, which work as ever, and the Keep it button of the cancel question (its token is the talk's key): pressed once
-the talk is over it is OLD_BUTTON, for something may have been changed since. A request to change is refused when the relief was
-acknowledged since its question was asked. A talk is over before its why is acted on, so it is acted on once. When the question
-may not have reached the person there is no talk.
+so do COMMANDS, which work as ever. A request to change is sent at the why; it is refused when the relief was acknowledged since
+its question was asked. A talk is over before anything is done in it, so it is done once. When a question may not have reached
+the person there is no talk.
+
+An absence is cancelled by a press alone, never by a typed line (it cannot be undone). Its why is kept in the talk and shown
+(SURE_CANCEL) with two buttons, TALK_MINUTES from then; another line is another why, shown again. Yes, cancel it (its token is the
+talk's `yes`, a new one for each why, so it cancels for the reason it is shown with) is judged as a press is, by absences.cancel at
+that moment. Keep it, on that question and on the one before (its token is the talk's `key`), ends the talk. Pressed once the
+talk is over, each is OLD_BUTTON.
 
 One press or line at a time (_pressing), so two at once save once. It is let go, as the absences lock is, before anything is said
 to Telegram; what was saved is written down and followed up first, then the press is answered, then its message is changed. A
@@ -48,6 +52,7 @@ from relief import lessons as _lessons
 from relief import links, tell, tg, tgdb
 from relief import settings as _settings
 from relief import web as _web
+from relief import words
 
 HELLO = "Linked: {name}. You'll get your reliefs here. Send /relief to ask for relief, /stop to unlink."
 NOT_LINKED = "This Telegram is not linked. Open Relief in the school's app, press Link Telegram and follow the link there."
@@ -61,7 +66,8 @@ NOT_YOURS_BUTTON = "This button is not for you."
 OLD_BUTTON = "This button is no longer active."
 WHY_CHANGE = "Say why in one line. Until the relief team replies, this relief is still yours."
 WHY_CANCEL = "Cancel this absence? Say why in one line, or press Keep it."
-KEEP = "Keep it"
+SURE_CANCEL = "Cancel {days}? Your reason: {why}"
+KEEP, YES = "Keep it", "Yes, cancel it"
 LAST_ONE = "Answer the question I asked last."
 SENT_CHANGE = "Sent to the relief team. Until they reply, this relief is still yours."
 SENT_CANCEL = "Cancelled. The relief team will see it."
@@ -74,10 +80,7 @@ NO_REASON = frozenset("no n nope yes y ok okay thanks thank you cancel keep it s
 ANSWER_MOST, TEXT_MOST = 200, 4096           # characters Telegram takes of an answer to a press, and of a message
 TIMEOUT = 8                                  # seconds for each call made while Telegram waits for the hook's answer
 _HANDLE = re.compile(r"[A-Za-z0-9_]{1,64}")
-NOT_CANCEL = frozenset(("never mind", "nevermind", "don't cancel", "dont cancel", "do not cancel", "not cancel", "don't cancel it", "do not cancel it",
-                        "not now", "wait", "keep it please", "please keep it", "forget it"))        # nor does one of these, the whole line, to the cancel question
 _WORD = re.compile(r"[^\W_]+")
-_ENDS = re.compile(r"^[\W_]+|[\W_]+$")
 _DATA = re.compile(r"b:([A-Za-z0-9_-]{16})")              # a button's callback data (relief/outbox.py)
 STAYS = (_web.NO_PUB,)                       # a refusal that keeps any button: a publish may be swapping folders
 _log = logging.getLogger("relief.telegram")
@@ -85,8 +88,9 @@ _counting = threading.Lock()
 _pressing = threading.Lock()
 _note = None
 # what a press or a line comes to: what is answered (an alert: the person has to close it), the line its message gains, losing
-# its buttons, the talk opened (its question is to be asked), and what follows (the history entry and the rest), called with nothing held
-_Out = collections.namedtuple("_Out", "text alert line talk after", defaults=(None, False, None, None, None))
+# its buttons, the same of the message its talk began at (also: that message, the line), the talk opened (its question is to be
+# asked), and what follows (the history entry and the rest), called with nothing held
+_Out = collections.namedtuple("_Out", "text alert line also talk after", defaults=(None, False, None, None, None, None))
 
 
 def init(note):
@@ -214,6 +218,7 @@ def _press(q):
     _answer(q, WENT_WRONG if lost else out.text, lost or out.alert)
     if lost: _end(chat, out.talk)                # what is typed next is not the answer to a question that may not have come
     if out.line: _settle(chat, message, out.line)
+    if out.also: _settle(chat, *out.also)
 
 
 def _pressed(chat, data, message):
@@ -347,69 +352,117 @@ def _ask_change(p):
     return _asked(p, "change")
 
 
-def _change(b, why, began):
-    """began: when its question was first asked (epoch seconds)"""
+def _change(chat, b, why, talk):
     pub = _published()
     r, x, c = _theirs(b)
+    began = talk["until"] - TALK_MINUTES * 60    # when its question was first asked
     if c.get("ack") and _fill._when(c["ack"]["at"]).timestamp() > began: raise ValueError(_absences.ACKED)        # on the page, since
     r = _cover.ask_change(r["id"], b["ckey"], why, b["name"])
     return _Out(SENT_CHANGE, line=f"↩ Asked to change {_hm(_cover.find(r, b['ckey'])[1]['change']['at'])}.", after=_after("change", r, b, pub))
 
 
+def _may_cancel(b):
+    """the absence of the button, while its person may cancel it: theirs, or the one they planned (never by the team's right)"""
+    _published()
+    r = _absences._editable(b["id"])
+    _absences._may_change(r, b["name"], False)
+    if tell._last(r) < _lessons.today().isoformat(): raise ValueError(_absences.PAST_ABSENCE)
+    return r
+
+
 def _ask_cancel(p):
     """as _ask_change"""
-    _published()
-    r = _absences._editable(p.button["id"])
-    _absences._may_change(r, p.button["name"], False)
-    if tell._last(r) < _lessons.today().isoformat(): raise ValueError(_absences.PAST_ABSENCE)
+    _may_cancel(p.button)
     return _asked(p, "cancel")
 
 
-def _cancel(b, why, began):
-    pub = _published()
-    r = _absences.cancel(b["id"], why, b["name"], team=False)                    # theirs, or the one they planned: never by the team's right
-    return _Out(SENT_CANCEL, line=f"❌ Cancelled {_hm(r['cancelled']['at'])}.", after=_after("cancel", r, b, pub))
+def _sure(chat, b, why, talk):
+    """the why is kept and shown, with the buttons that cancel and that do not; nothing is cancelled here"""
+    r, yes = _may_cancel(b), secrets.token_urlsafe(12)
+    return _open(chat, "cancel", dict(talk["d"], why=why, days=words.days(r), yes=yes, question=None), b, {talk["d"]["key"]: "keep", yes: "cancel-yes"})
+
+
+def _mine(p, part):
+    """the chat's talk, over now, when the button is its own (part of its data holds the token); else OLD_BUTTON"""
+    t = _talk(p.chat)
+    if t is None or t["d"].get(part) != p.button["token"] or not _end(p.chat, t): raise ValueError(OLD_BUTTON)
+    return t
+
+
+def _yes(p):
+    """cancels the absence, for the reason the button is shown with"""
+    b, pub, d = p.button, _published(), _mine(p, "yes")["d"]
+    def cancel():
+        r = _absences.cancel(b["id"], d["why"], b["name"], team=False)
+        return _Out(SENT_CANCEL, line=SENT_CANCEL, also=f"❌ Cancelled {_hm(r['cancelled']['at'])}.", after=_after("cancel", r, b, pub))
+    out = _acted(b, cancel)                      # refused: both messages say why
+    return out._replace(also=(d["message"], out.also or out.line))
 
 
 def _keep(p):
     """ends the talk whose question the button is on; when that is over (answered, replaced, run out) nothing is said to be kept"""
-    t = _talk(p.chat)
-    if t is None or t["d"].get("key") != p.button["token"] or not _end(p.chat, t): raise ValueError(OLD_BUTTON)
+    _mine(p, "key")
     return _Out(NOTHING, line=NOTHING)
 
 
 # ---- talks
 def _asked(p, kind):
-    """a talk of that kind open in the chat, in place of any other, its question to be asked (_ask). key: its own, and the token of
-    the question's Keep it button when it has one; question: the id of the question's message, once asked"""
-    b, key, until = p.button, secrets.token_urlsafe(12), _clock() + TALK_MINUTES * 60
+    """a talk of that kind for the button pressed. key: its own, and the token of its Keep it button when it has one; question:
+    the id of the message that asks, once asked"""
+    b, key = p.button, secrets.token_urlsafe(12)
     d = dict(id=b["id"], ckey=b["ckey"], absent=b["extra"].get("absent"), token=b["token"], message=p.message, key=key, question=None)
+    return _open(p.chat, kind, d, b, {key: "keep"} if kind == "cancel" else {})
+
+
+def _open(chat, kind, d, b, buttons):
+    """the talk open in the chat, in place of any other, TALK_MINUTES from now, its question to be asked (_ask). buttons: those of
+    its question, {token: what}, for the person of button b alone and good as long"""
+    until = _clock() + TALK_MINUTES * 60
     talk = dict(kind=kind, data=json.dumps(d), until=until, d=d)
     with tgdb.db() as c:
-        if TALKS[kind][2]: c.execute("INSERT INTO buttons(token, name, what, id, until) VALUES (?, ?, 'keep', ?, ?)", (key, b["name"], b["id"], until))
-        c.execute("INSERT OR REPLACE INTO talks(chat, kind, data, until) VALUES (?, ?, ?, ?)", (p.chat, kind, talk["data"], until))
+        c.executemany("INSERT OR REPLACE INTO buttons(token, name, what, id, until) VALUES (?, ?, ?, ?, ?)", [(t, b["name"], what, b["id"], until) for t, what in buttons.items()])
+        c.execute("INSERT OR REPLACE INTO talks(chat, kind, data, until) VALUES (?, ?, ?, ?)", (chat, kind, talk["data"], until))
     return _Out(talk=talk)
+
+
+def _question(talk):
+    """(what the talk asks now, Telegram's inline buttons under it, or None: the line opened for the answer; it takes one of these)"""
+    d = talk["d"]
+    if talk["kind"] == "change": return WHY_CHANGE, None
+    keep = dict(text=KEEP, callback_data="b:" + d["key"])
+    if "yes" not in d: return WHY_CANCEL, [[keep]]
+    return SURE_CANCEL.format(days=d["days"], why=d["why"]), [[dict(text=YES, callback_data="b:" + d["yes"]), keep]]
 
 
 def _ask(chat, talk):
     """the talk's question asked (again): the one a line may reply to from now on -> whether it surely came"""
-    question, f, keep, lines = TALKS[talk["kind"]]
-    r = reply(chat, question, buttons=[[dict(text=KEEP, callback_data="b:" + talk["d"]["key"])]] if keep else None, ask=not keep)
+    question, buttons = _question(talk)
+    r = reply(chat, question, buttons=buttons, ask=buttons is None)
     if not r["ok"]: return False
     n = r["result"].get("message_id") if isinstance(r["result"], dict) else None
     try:
         with tgdb.db() as c:
-            c.execute("UPDATE talks SET data=? WHERE chat=? AND kind=? AND data=? AND until=?",
-                      (json.dumps(dict(talk["d"], question=n if type(n) is int else None)), chat, talk["kind"], talk["data"], talk["until"]))
+            if _still(c, chat, talk): c.execute("UPDATE talks SET data=? WHERE chat=?", (json.dumps(dict(talk["d"], question=n if type(n) is int else None)), chat))
     except Exception as e:                       # a reply to it is asked for once more, then: nothing is done
         _log.warning("a question could not be noted (%s)", type(e).__name__)
     return True
 
 
+def _still(c, chat, talk):
+    """the talk is the chat's now (its data holds a key of its own, and its why), whatever the id of its question was noted as
+    meanwhile"""
+    r = c.execute("SELECT data FROM talks WHERE chat=?", (chat,)).fetchone()
+    return r is not None and (r["data"] == talk["data"] or _but_question(r["data"]) == _but_question(talk["data"]))
+
+
+def _but_question(data):
+    return {k: v for k, v in json.loads(data).items() if k != "question"}
+
+
 def _end(chat, talk):
     """the chat's talk is over -> whether it was this one, and not over before"""
     with tgdb.db() as c:
-        return c.execute("DELETE FROM talks WHERE chat=? AND kind=? AND data=? AND until=?", (chat, talk["kind"], talk["data"], talk["until"])).rowcount == 1
+        return _still(c, chat, talk) and c.execute("DELETE FROM talks WHERE chat=?", (chat,)).rowcount == 1
 
 
 def _talk(chat):
@@ -435,11 +488,9 @@ def _replies_to(m):
     return n if type(n) is int else 0
 
 
-def _no_reason(why, lines):
-    """nothing in the line but words of NO_REASON, in any case, whatever is around them (or no word at all), or it is one of
-    lines, whatever is at its ends"""
-    why = why.casefold().replace("’", "'")       # what a phone types
-    return all(w in NO_REASON for w in _WORD.findall(why)) or _ENDS.sub("", why) in lines
+def _no_reason(why):
+    """nothing in the line but words of NO_REASON, in any case, whatever is around them (or no word at all)"""
+    return all(w in NO_REASON for w in _WORD.findall(why.casefold()))
 
 
 def _line(chat, talk, text, cmd, to):
@@ -455,27 +506,29 @@ def _line(chat, talk, text, cmd, to):
     why = " ".join(text.split())                 # one line, as the page's box gives it
     other = to is not None and to != talk["d"].get("question")
     if other: reply(chat, LAST_ONE)
-    question, f, keep, lines = TALKS[talk["kind"]]
-    if other or not 1 <= len(why) <= WHY_MOST or _no_reason(why, lines):
+    if other or not 1 <= len(why) <= WHY_MOST or _no_reason(why):
         _ask(chat, talk)
         return True
-    d = talk["d"]
     def do():
         if not _end(chat, talk): return None     # over meanwhile: this line is not its why
-        b = _button(chat, d["token"])
-        return _acted(b, lambda: f(b, why, talk["until"] - TALK_MINUTES * 60))
+        b = _button(chat, talk["d"]["token"])
+        return _acted(b, lambda: TALKS[talk["kind"]](chat, b, why, talk))
     out = _did(do)
     if out is None: return False
     _follow(out)
+    if out.talk is not None:
+        if not _ask(chat, out.talk):
+            _end(chat, out.talk)
+            reply(chat, WENT_WRONG)
+        return True
     reply(chat, out.text)
-    if out.line: _settle(chat, d["message"], out.line)
+    if out.line: _settle(chat, talk["d"]["message"], out.line)
     return True
 
 
 # what a button does, by its kind: (the right it needs, f(p) with p.chat, p.button (_button) and p.message (its id and text) ->
 # _Out, the refusals that keep it: {name} is the one it shows)
-ACTIONS = dict(ack=("relief", _ack, ()), change=("relief", _ask_change, ()), cancel=("relief", _ask_cancel, ()), keep=("relief", _keep, (OLD_BUTTON,)),
-               approve=("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE)))
-# a talk, by its kind: (what it asks, what its why does: f(the button, why, when it began) -> _Out, whether its question has a Keep
-# it button: Telegram takes that or the line opened for the answer, not both, the lines that are no why of it)
-TALKS = dict(change=(WHY_CHANGE, _change, False, frozenset()), cancel=(WHY_CANCEL, _cancel, True, NOT_CANCEL))
+ACTIONS = {"ack": ("relief", _ack, ()), "change": ("relief", _ask_change, ()), "cancel": ("relief", _ask_cancel, ()), "keep": ("relief", _keep, (OLD_BUTTON,)),
+           "cancel-yes": ("relief", _yes, (OLD_BUTTON,)), "approve": ("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE))}
+# what the why typed in a talk comes to, by its kind: f(chat, the button, why, talk) -> _Out
+TALKS = dict(change=_change, cancel=_sure)

@@ -3444,6 +3444,7 @@ WHY_CHANGE = "Say why in one line. Until the relief team replies, this relief is
 WHY_CANCEL = "Cancel this absence? Say why in one line, or press Keep it."
 SENT_CHANGE, SENT_CANCEL = "Sent to the relief team. Until they reply, this relief is still yours.", "Cancelled. The relief team will see it."
 LAST_ONE, ACKED = "Answer the question I asked last.", "This was acknowledged already."
+SURE = "Cancel {}? Your reason: {}"
 NOTHING, WENT_WRONG = "Nothing was changed.", "Something went wrong. Try again in the app."
 ENTRY = "Relief for Ms Evelyn Koh on Tue 13 Oct: "
 ON_K5 = "1A, 1B Science (G2) P6–P7 on Tue 13 Oct"
@@ -3457,7 +3458,14 @@ def talk_of(name): return next(d for c, k, d, u in talks() if c == CHATS[name])
 def keep_it(name):
     """the one button of the cancel question that waits in name's chat"""
     return dict(inline_keyboard=[[dict(text="Keep it", callback_data="b:" + talk_of(name)["key"])]])
-def question(name): return dict(message_id=talk_of(name)["question"], date=1, chat=dict(id=CHATS[name], type="private"), text=WHY_CANCEL)
+def question(name, text=WHY_CANCEL): return dict(message_id=talk_of(name)["question"], date=1, chat=dict(id=CHATS[name], type="private"), text=text)
+def yes_or_keep(name):
+    """the two buttons of the question that shows the reason"""
+    d = talk_of(name); return dict(inline_keyboard=[[dict(text="Yes, cancel it", callback_data="b:" + d["yes"]), dict(text="Keep it", callback_data="b:" + d["key"])]])
+def sure(name):
+    """that question, as Telegram gives it back with a press"""
+    d = talk_of(name); return question(name, SURE.format(d["days"], d["why"]))
+def press_yes(name, chat=None): return press_keep(talk_of(name)["yes"], sure(name), chat)
 def press_keep(token, m, chat=None):
     n = len(answers()); hook(callback("b:" + token, m, chat)); got = answers()[n:]; assert len(got) == 1, got
     return got[0]
@@ -3534,11 +3542,12 @@ def at_once(*fs):
 @t
 def the_answers_are_the_plans():
     assert (bot.OLD_BUTTON, bot.NOT_YOURS_BUTTON, bot.WHY_CHANGE, bot.WHY_CANCEL) == (OLD_BUTTON, NOT_YOURS_BUTTON, WHY_CHANGE, WHY_CANCEL)
-    assert (bot.SENT_CHANGE, bot.SENT_CANCEL, bot.NOTHING, bot.WENT_WRONG, bot.LAST_ONE, bot.KEEP) == (SENT_CHANGE, SENT_CANCEL, NOTHING, WENT_WRONG, LAST_ONE, "Keep it")       # not in the plan's table
+    assert (bot.SENT_CHANGE, bot.SENT_CANCEL, bot.NOTHING, bot.WENT_WRONG, bot.LAST_ONE, bot.KEEP, bot.YES, bot.SURE_CANCEL) == (SENT_CHANGE, SENT_CANCEL, NOTHING, WENT_WRONG, LAST_ONE, "Keep it", "Yes, cancel it", "Cancel {days}? Your reason: {why}")       # not in the plan's table
     plan = open(os.path.join(ROOT, "docs", "superpowers", "plans", "2026-11-22-relief-stage-4-telegram.md"), encoding="utf-8").read()
     for text in (OLD_BUTTON, NOT_YOURS_BUTTON, WHY_CHANGE): assert f"`{text}`" in plan, text        # WHY_CANCEL was ruled anew after the plan
     rights = {k: v[0] for k, v in bot.ACTIONS.items()}
-    assert bot.TALK_MINUTES == 15 and {k: rights[k] for k in ("ack", "change", "cancel", "approve", "keep")} == dict(ack="relief", change="relief", cancel="relief", approve="relief.team", keep="relief")
+    assert bot.TALK_MINUTES == 15 and {k: rights[k] for k in ("ack", "change", "cancel", "approve", "keep", "cancel-yes")} == {"ack": "relief", "change": "relief", "cancel": "relief", "approve": "relief.team", "keep": "relief", "cancel-yes": "relief"}
+    assert not hasattr(bot, "NOT_CANCEL"), "no list of phrases decides what is cancelled"
 
 @t
 def pressing_acknowledge_acknowledges_and_says_so():
@@ -3718,32 +3727,46 @@ def request_to_change_asks_why_then_sends():
             assert (os.path.exists(absences._path(i)) and file_of(i)) == was
 
 @t
-def cancel_asks_why_then_cancels():
+def cancel_asks_why_then_once_more_then_cancels():
     with school(EVE, HUGO, SAM, TEAM):
         i = told_planned(); give(i, K5, SAM); swept(); h, was = Since(), file_of(i); at("09:10"); token = tok(EVE, "cancel"); m = under(token)
         assert m["text"] == PLANNED_EVE and talk_to(EVE, lambda: press(EVE, "cancel")) == [(WHY_CANCEL, keep_it(EVE))] and answers() == [(None, None)]
         d = talk_of(EVE); assert talks()[0][:3] == (CHATS[EVE], "cancel", dict(id=i, ckey=None, absent=None, token=token, message=dict(id=m["message_id"], text=PLANNED_EVE), key=d["key"], question=d["question"]))
-        k, = [r for r in rows("buttons") if r["what"] == "keep"]; assert (k["token"], k["name"], k["until"]) == (d["key"], EVE, talks()[0][3]) and CHATS[EVE] not in (k["id"], k["extra"]), k
-        assert file_of(i) == was and h.new() == []
-        at("09:12"); order = []; real_sync, real_soon, real_tell = WB._sync_exams, WB._soon, WB._tell_soon
+        k, = [r for r in rows("buttons") if r["what"] == "keep"]; assert (k["token"], k["name"], k["id"], k["until"]) == (d["key"], EVE, i, talks()[0][3]) and CHATS[EVE] not in (k["id"], k["extra"]), k
+        # the line: kept, shown, and nothing cancelled
+        at("09:12"); assert talk_to(EVE, lambda: say(EVE, " The course\nwas called  off ")) == [("Cancel Tue 13 Oct? Your reason: The course was called off", yes_or_keep(EVE))]
+        assert file_of(i) == was and h.new() == [] and edits() == [] and len(answers()) == 1, "nothing is done yet"
+        e = talk_of(EVE); until = datetime.datetime.fromisoformat("2026-10-12T09:27:00+08:00").timestamp()
+        assert e == dict(d, why="The course was called off", days="Tue 13 Oct", yes=e["yes"], question=e["question"]) and e["question"] > d["question"] and talks()[0][3] == until, "15 minutes from this question"
+        mine = {r["what"]: r for r in rows("buttons") if r["what"] in ("keep", "cancel-yes")}; assert [(r["token"], r["name"], r["id"], r["until"]) for r in (mine["cancel-yes"], mine["keep"])] == [(e["yes"], EVE, i, until), (d["key"], EVE, i, until)]
+        assert re.fullmatch(r"[A-Za-z0-9_-]{16}", e["yes"]) and len({e["yes"], d["key"], token}) == 3 and len([r for r in rows("buttons") if r["what"] == "keep"]) == 1
+        # the press
+        at("09:26"); order = []; real_sync, real_soon, real_tell = WB._sync_exams, WB._soon, WB._tell_soon; x = sure(EVE); tg.PRACTICE_LOG.clear()
         locks = lambda: (absences._LOCK.locked(), bot._pressing.locked())
         with stand_in(WB, "_sync_exams", lambda pub: (order.append(("sync", pub is SCHOOL, len(entries()) - h.n, *locks())), real_sync(pub))), \
                 stand_in(WB, "_soon", lambda **kw: (order.append(("soon", kw, *locks())), real_soon(**kw))[1]), stand_in(WB, "_tell_soon", lambda: (order.append(("tell", *locks())), real_tell())):
-            assert talk_to(EVE, lambda: say(EVE, "The course was called off")) == [(SENT_CANCEL, None)]
+            assert press_yes(EVE) == (SENT_CANCEL, False)
         assert order == [("sync", True, 1, False, False), ("soon", {}, False, False), ("tell", False, False)], order
-        r = absences.load(i); assert r["cancelled"] == dict(at="2026-10-12T09:12:00+08:00", by=EVE, why="The course was called off") and state_of(i) == "cancelled"
-        assert h.new() == [by_telegram(EVE, "cancelled", "cancelled", i)] and rows("talks") == [] and edits() == [(CHATS[EVE], m["message_id"], PLANNED_EVE + "\n\n❌ Cancelled 09:12.")]
+        r = absences.load(i); assert r["cancelled"] == dict(at="2026-10-12T09:26:00+08:00", by=EVE, why="The course was called off") and state_of(i) == "cancelled"
+        assert h.new() == [by_telegram(EVE, "cancelled", "cancelled", i)] and rows("talks") == [] and sent() == [], "answered by the press"
+        assert edits() == [(CHATS[EVE], x["message_id"], x["text"] + "\n\n" + SENT_CANCEL), (CHATS[EVE], m["message_id"], PLANNED_EVE + "\n\n❌ Cancelled 09:26.")] and not any("reply_markup" in p for p in calls("editMessageText")), "both lose their buttons"
         send(); assert said(HUGO)[-1] == said(TEAM)[-1] == CANCELLED_EVE.format(EVE) and said(SAM)[-1] == GONE_K5, "who the page would tell"
-        assert press(EVE, "cancel") == (absences.CANCELLED, True) and rows("talks") == []
-    ways = {absences.CANCELLED: (lambda i: absences.cancel(i, "x", HUGO), 12), absences.PAST_ABSENCE: (lambda i: at("08:00", day=14), 12), absences.WRONG: (lambda i: os.remove(absences._path(i)), 12),
-            absences.NOT_YOURS: (lambda i: change_record(i, lambda r: r.update(teacher=RUTH)), 12)}
-    for sentence, (f, day) in ways.items():
+        was = file_of(i); assert press_keep(e["yes"], x) == press_keep(e["key"], x) == (OLD_BUTTON, True) and press(EVE, "cancel") == (absences.CANCELLED, True) and rows("talks") == [] and file_of(i) == was and h.new() == []
+    ways = {absences.CANCELLED: lambda i: absences.cancel(i, "x", HUGO), absences.PAST_ABSENCE: lambda i: at("00:01", day=14), absences.WRONG: lambda i: os.remove(absences._path(i)),
+            absences.NOT_YOURS: lambda i: change_record(i, lambda r: r.update(teacher=RUTH))}
+    for sentence, f in ways.items():
         with school(EVE):                                                                  # refused at the press: no question
             i = told_planned(); f(i); assert press(EVE, "cancel") == (sentence, True) and rows("talks") == [] and said(EVE) == [PLANNED_EVE] and taken_off(EVE, "cancel", sentence)
         if sentence == absences.PAST_ABSENCE: continue                                     # by then its conversation is over (below)
         with school(EVE):                                                                  # refused when the line comes
             i = told_planned(); press(EVE, "cancel"); f(i); was, h = os.path.exists(absences._path(i)) and file_of(i), Since()
             assert talk_to(EVE, lambda: say(EVE, "x")) == [(sentence, None)] and (os.path.exists(absences._path(i)) and file_of(i)) == was and h.new() == [] and taken_off(EVE, "cancel", sentence)
+    for sentence, f in ways.items():                                                       # refused at the last press: both messages say it and lose their buttons, the conversation is over
+        with school(EVE):
+            i = told_planned(); at("23:50", day=13); press(EVE, "cancel"); say(EVE, "x"); x, e, m = sure(EVE), talk_of(EVE), under(tok(EVE, "cancel")); f(i)
+            was, h = os.path.exists(absences._path(i)) and file_of(i), Since(); tg.PRACTICE_LOG.clear()
+            assert press_keep(e["yes"], x) == (sentence, True) and (os.path.exists(absences._path(i)) and file_of(i)) == was and h.new() == [] and rows("talks") == [], sentence
+            assert edits() == [(CHATS[EVE], x["message_id"], f"{x['text']}\n\n{sentence}"), (CHATS[EVE], m["message_id"], f"{m['text']}\n\n{sentence}")] and press_keep(e["yes"], x) == (OLD_BUTTON, True), sentence
     with school(EVE):
         i = told_planned(); at("23:50", day=13); press(EVE, "cancel"); at("00:01", day=14); assert talk_to(EVE, lambda: say(EVE, "x")) == [(absences.PAST_ABSENCE, None)] and not absences.load(i)["cancelled"] and taken_off(EVE, "cancel", absences.PAST_ABSENCE)
     with school(TEAM):                                                                     # the relief team's right does not count here: hers as the absent teacher, or not at all
@@ -3808,7 +3831,7 @@ def a_refused_button_is_taken_off():
     def within(cm, name, what):
         with cm: return press(name, what)
     def boom(*a, **k): raise RuntimeError("made up")
-    for name, what, module, f in ((SAM, "ack", CV, "acknowledge_once"), (SAM, "change", CV, "_mine"), (EVE, "cancel", absences, "_editable"), (TEAM, "approve", CV, "approve")):
+    for name, what, module, f in ((SAM, "ack", CV, "acknowledge_once"), (SAM, "change", CV, "_mine"), (EVE, "cancel", absences, "_editable"), (TEAM, "approve", CV, "approve")):        # (the second press of a cancel: its own test)
         stays(name, what, lambda i: press(name, what, chat=CHATS[MAYA]), (NOT_YOURS_BUTTON, True))
         stays(name, what, lambda i: (button(tok(name, what), until=0), press(name, what))[1], (OLD_BUTTON, True))
         stays(name, what, lambda i: within(record(name, group="executive", extras=dict(relief=False, exams=None, admin=False)), name, what), (NOT_YOURS_BUTTON, True))
@@ -3816,7 +3839,7 @@ def a_refused_button_is_taken_off():
         stays(name, what, lambda i: within(stand_in(module, f, boom), name, what), (WENT_WRONG, True))
         stays(name, what, lambda i: within(no_pub(), name, what), (WB.NO_PUB, True))
     # when its why was typed: the sentence is said, and the message loses its buttons; what is no refusal leaves it
-    for name, what, module, f, undo, sentence in ((SAM, "change", CV, "ask_change", lambda i: give(i, K5, MAYA), CV.NOT_YOURS_COVER), (EVE, "cancel", absences, "cancel", cancel_it, absences.CANCELLED)):
+    for name, what, module, f, undo, sentence in ((SAM, "change", CV, "ask_change", lambda i: give(i, K5, MAYA), CV.NOT_YOURS_COVER), (EVE, "cancel", absences, "_editable", cancel_it, absences.CANCELLED)):
         def told(i): give(i, K5, SAM); swept()
         with school(SAM, MAYA, EVE): i = told_planned(); told(i); press(name, what); undo(i); assert talk_to(name, lambda: say(name, "x")) == [(sentence, None)] and taken_off(name, what, sentence)
         for make, want in ((lambda: stand_in(module, f, boom), WENT_WRONG), (no_pub, WB.NO_PUB), (contextlib.nullcontext, OLD_BUTTON)):
@@ -3850,7 +3873,7 @@ def what_stops_a_lesson_is_said_as_the_page_says_it():
         i, key = told_relief(); exam(); at("09:15"); assert press(SAM, "ack") == ("✅ Acknowledged 09:15.", False) and state_of(i) == "acknowledged"
     with exam_school(SAM, EVE, TEAM):                                                      # cancelling an absence of one's own gives its lesson back to the backup at once
         exam("5A", name=EXAM2, duties=[(EVE, 630, 690)]); j = told_planned(); backups = lambda: [r for r in absences.all_records() if r.get("exams") and not r["cancelled"]]
-        assert backups() == []; press(EVE, "cancel"); say(EVE, "Better"); assert absences.load(j)["cancelled"] and [x["key"] for r in backups() for x in r["lessons"]] == [K5]
+        assert backups() == []; press(EVE, "cancel"); say(EVE, "Better"); assert backups() == [] and press_yes(EVE) == (SENT_CANCEL, False) and absences.load(j)["cancelled"] and [x["key"] for r in backups() for x in r["lessons"]] == [K5]
 
 @t
 def the_history_names_the_person_and_telegram():
@@ -3866,6 +3889,7 @@ def the_history_names_the_person_and_telegram():
     def here(what, i):
         name = dict(ack=SAM, change=SAM, cancel=EVE, approve=TEAM)[what]; press(name, what)
         if what in ("change", "cancel"): say(name, "zebra-why")
+        if what == "cancel": press_yes(name)
     def page(what, i):
         if what == "ack": on_cover(SAM, i, K5, "acknowledge")
         if what == "change": on_cover(SAM, i, K5, "ask-change", dict(why="zebra-why"))
@@ -3886,12 +3910,13 @@ def everything_is_done_before_the_press_is_answered_and_nothing_is_held():
         seen.append((method, len(entries()), absences._LOCK.locked(), bot._pressing.locked(), bot._counting.locked())); return real(method, params, **kw)
     with school(SAM, MAYA, EVE, TEAM):
         told_ask(); j = told_planned(dates=["2026-10-16"])
-        for who_, what, line in ((TEAM, "approve", None), (MAYA, "ack", None), (MAYA, "change", "x"), (EVE, "cancel", "x")):
+        ASK, SAID, DONE = ["sendMessage", "answerCallbackQuery"], ["sendMessage"], ["answerCallbackQuery", "editMessageText"]
+        for who_, what, line, want in ((TEAM, "approve", None, DONE), (MAYA, "ack", None, DONE), (MAYA, "change", "x", ASK + SAID + ["editMessageText"]), (EVE, "cancel", "x", ASK + SAID + DONE + ["editMessageText"])):
             swept(); n = len(entries()); del seen[:]
             with stand_in(tg, "call", spy):
                 press(who_, what)
                 if line: say(who_, line)
-            want = ["answerCallbackQuery", "editMessageText"] if not line else ["sendMessage", "answerCallbackQuery", "sendMessage", "editMessageText"]
+                if what == "cancel": assert [x[1] for x in seen] == [n] * 3; press_yes(who_)
             assert [x[0] for x in seen] == want and [x[1] for x in seen[-2:]] == [n + 1] * 2, (what, seen)
             assert not any(any(x[2:]) for x in seen), (what, seen)
         assert absences.load(j)["cancelled"]
@@ -3932,6 +3957,25 @@ def a_new_talk_replaces_the_old_one():
         i = absent(by=HUGO); give(i, K5, SAM); swept(); press(SAM, "change"); assert press(SAM, "ack")[0].startswith("✅") and rows("talks") == []
         assert talk_to(SAM, lambda: say(SAM, "Thanks")) == [(HELLO.format(name=SAM), None)] and state_of(i) == "acknowledged"
         give(i, K2, SAM); swept(); press(SAM, "change"); press_token([r["token"] for r in rows("buttons") if (r["what"], r["ckey"]) == ("ack", K5)][0]); assert [x[2]["ckey"] for x in talks()] == [K2], "another relief's conversation goes on"
+
+@t
+def a_talk_replaced_meanwhile_is_neither_acted_on_nor_ended():
+    """a line or a press that had read the talk there was before: nothing is done, and the talk there is now goes on"""
+    def with_old(old, f):
+        kept_ = rows("talks")
+        with stand_in(bot, "_talk", lambda chat: old): got = f()
+        assert rows("talks") == kept_ and len(kept_) == 1; return got
+    with school(SAM, EVE):
+        i = absent(by=HUGO); give(i, K5, SAM); swept(); a = tok(SAM, "change"); give(i, K2, SAM); swept(); b = tok(SAM, "change"); press_token(a); old = bot._talk(CHATS[SAM]); press_token(b); was, h = file_of(i), Since()
+        for text in ("A meeting", "/cancel"): assert with_old(old, lambda: talk_to(SAM, lambda: say(SAM, text))) == [(HELLO.format(name=SAM), None)], text
+        assert with_old(old, lambda: talk_to(SAM, lambda: say(SAM, "/help"))) == [(HELLO.format(name=SAM), None)] and file_of(i) == was and h.new() == [] and edits() == []
+        assert with_old(old, lambda: talk_to(SAM, lambda: say(SAM, "ok"))) == [(WHY_CHANGE, FORCE)], "asked again: its id is not noted as the other's"
+    with school(EVE):                                                                      # the reason changed, or the question was asked anew, between
+        for anew in (lambda: say(EVE, "Another reason"), lambda: press(EVE, "cancel")):
+            i = told_planned(dates=[f"2026-10-{13 if not outs('planned') else 16}"]); was, h = file_of(i), Since(); press(EVE, "cancel"); say(EVE, "The course is off"); x, e, old = sure(EVE), talk_of(EVE), bot._talk(CHATS[EVE]); anew()
+            for part in ("yes", "key"): assert with_old(old, lambda: press_keep(e[part], x)) == (OLD_BUTTON, True), part
+            assert with_old(old, lambda: talk_to(EVE, lambda: say(EVE, "A third"))) == [(HELLO.format(name=EVE), None)] and file_of(i) == was and h.new() == [] and edits() == []
+            say(EVE, "/cancel")
 
 @t
 def cancel_and_the_other_commands_end_a_talk():
@@ -3981,7 +4025,9 @@ def a_line_that_replies_to_another_message_acts_on_nothing():
         (t1, q1), (t2, q2) = ids; assert (t1, t2) == (WHY_CHANGE, WHY_CANCEL) and [x[1] for x in talks()] == ["cancel"]
         assert talk_to(SAM, lambda: reply_to(SAM, q1, "A parent meeting")) == [(LAST_ONE, None), (WHY_CANCEL, keep_it(SAM))]
         assert (file_of(i), file_of(j)) == was and h.new() == [] and [x[1] for x in talks()] == ["cancel"], "neither changed nor cancelled"
-        assert talk_to(SAM, lambda: reply_to(SAM, talk_of(SAM)["question"], "The course is off")) == [(SENT_CANCEL, None)] and absences.load(j)["cancelled"]["why"] == "The course is off" and file_of(i) == was[0]
+        assert talk_to(SAM, lambda: reply_to(SAM, talk_of(SAM)["question"], "The course is off")) == [(SURE.format("Tue 13 Oct", "The course is off"), yes_or_keep(SAM))] and (file_of(i), file_of(j)) == was
+        assert talk_to(SAM, lambda: reply_to(SAM, q2, "Another reason")) == [(LAST_ONE, None), (SURE.format("Tue 13 Oct", "The course is off"), yes_or_keep(SAM))], "to the question before: the reason shown stays"
+        assert press_yes(SAM) == (SENT_CANCEL, False) and absences.load(j)["cancelled"]["why"] == "The course is off" and file_of(i) == was[0]
     with school(SAM, TEAM):                                                                # and the other way about
         i, key = told_relief(); j = absent(teacher=SAM, by=HUGO); swept(); was = (file_of(i), file_of(j)); del ids[:]
         with stand_in(tg, "call", spy): press(SAM, "cancel"); press(SAM, "change")
@@ -4040,7 +4086,7 @@ def keep_it_ends_the_cancel_question():
         press(EVE, "cancel"); new = talk_of(EVE)["key"]; assert new != key and press_keep(key, m) == (OLD_BUTTON, True) and len(talks()) == 1
         # asked again (no answer in it): the same one, on either message
         say(EVE, "No"); assert talk_of(EVE)["key"] == new and press_keep(new, m) == (NOTHING, False) and rows("talks") == []
-    late = dict(answered=lambda i: say(EVE, "The course is off"), over=lambda i: at("09:25:01"), ended=lambda i: say(EVE, "/cancel"), helped=lambda i: say(EVE, "/help"))
+    late = dict(answered=lambda i: (say(EVE, "The course is off"), press_yes(EVE)), over=lambda i: at("09:25:01"), ended=lambda i: say(EVE, "/cancel"), helped=lambda i: say(EVE, "/help"))
     for how, f in late.items():
         with school(EVE, SAM):
             i = told_planned(); at("09:10"); press(EVE, "cancel"); key, m = talk_of(EVE)["key"], question(EVE); f(i); n, was, h = len(edits()), file_of(i), Since()
@@ -4058,11 +4104,22 @@ def keep_it_ends_the_cancel_question():
         i = told_planned(); real = tg.call
         with stand_in(tg, "call", lambda method, params=None, **kw: dict(real(method, params, **kw), ok=method != "sendMessage")): assert press(EVE, "cancel") == (WENT_WRONG, True)
         key = tok(EVE, "keep"); assert rows("talks") == [] and press_keep(key, under(tok(EVE, "cancel"))) == (OLD_BUTTON, True)
-    for _ in range(3):                                                                     # pressed and typed in the same moment: one of them
+    for _ in range(3):                                                                     # pressed and typed in the same moment: whichever came first, it is kept
         with school(EVE):
-            i = told_planned(); press(EVE, "cancel"); key, m = talk_of(EVE)["key"], question(EVE); h = Since()
-            at_once(lambda: hook(callback("b:" + key, m)), lambda: say(EVE, "The course is off")); gone = bool(absences.load(i)["cancelled"])
-            assert answers()[-1] == ((OLD_BUTTON, True) if gone else (NOTHING, False)) and len(h.new()) == gone and rows("talks") == [], (gone, answers())
+            i = told_planned(); was = file_of(i); press(EVE, "cancel"); key, m = talk_of(EVE)["key"], question(EVE); h = Since()
+            at_once(lambda: hook(callback("b:" + key, m)), lambda: say(EVE, "The course is off")); assert answers()[-1] == (NOTHING, False) and h.new() == [] and rows("talks") == [] and file_of(i) == was, answers()
+    with school(EVE):                                                                      # pressed while the id of its question is being noted: it is that talk all the same
+        for what in ("key", "yes"):
+            i = told_planned(dates=["2026-10-13" if what == "key" else "2026-10-16"]); press(EVE, "cancel"); say(EVE, "The course is off"); x, e, t_ = sure(EVE), talk_of(EVE), bot._talk(CHATS[EVE])
+            with tgdb.db() as c: c.execute("UPDATE talks SET data=?", (json.dumps(dict(e, question=e["question"] + 1)),))
+            with stand_in(bot, "_talk", lambda chat: t_): assert press_keep(e[what], x) == ((NOTHING, False) if what == "key" else (SENT_CANCEL, False)) and rows("talks") == [], what
+            assert bool(absences.load(i)["cancelled"]) == (what == "yes")
+    with school(EVE, MAYA):                                                                # on the question that shows the reason, and on the one before
+        for on in ("sure", "before"):
+            i = told_planned(dates=["2026-10-13" if on == "sure" else "2026-10-16"]); was, h = file_of(i), Since(); press(EVE, "cancel"); before = question(EVE); say(EVE, "The course is off"); x, e = sure(EVE), talk_of(EVE); tg.PRACTICE_LOG.clear()
+            m = x if on == "sure" else before; assert press_keep(e["key"], m, chat=CHATS[MAYA]) == (NOT_YOURS_BUTTON, True) and press_keep(e["key"], m) == (NOTHING, False)
+            assert edits() == [(CHATS[EVE], m["message_id"], m["text"] + "\n\n" + NOTHING)] and rows("talks") == [] and file_of(i) == was and h.new() == [], on
+            assert press_keep(e["yes"], x) == (OLD_BUTTON, True) and file_of(i) == was, "and then it cannot be cancelled by the other button"
 
 @t
 def a_word_that_is_no_reason_is_asked_again():
@@ -4074,25 +4131,70 @@ def a_word_that_is_no_reason_is_asked_again():
         for name, want in ((SAM, (WHY_CHANGE, FORCE)), (EVE, (WHY_CANCEL, keep_it(EVE)))):
             for text in shapes + more: assert talk_to(name, lambda: say(name, text)) == [want], (name, text)
         assert (file_of(i), file_of(j)) == was and h.new() == [] and edits() == [] and len(talks()) == 2
-        say(SAM, "No, I have a meeting"); say(EVE, "Stop: the course is off"); assert covered(i, K5)[2]["change"]["why"] == "No, I have a meeting" and absences.load(j)["cancelled"]["why"] == "Stop: the course is off"
+        say(SAM, "No, I have a meeting"); say(EVE, "Stop: the course is off"); press_yes(EVE); assert covered(i, K5)[2]["change"]["why"] == "No, I have a meeting" and absences.load(j)["cancelled"]["why"] == "Stop: the course is off"
     for why in ("Nobody is away", "Not needed", "Course off", "It rained", "Okayed by HOD", "I am well", "不用了", "nooo"):       # a word of its own is a reason
-        with school(EVE): i = told_planned(); press(EVE, "cancel"); say(EVE, why); assert (absences.load(i)["cancelled"] or {}).get("why") == why, why
+        with school(EVE): i = told_planned(); press(EVE, "cancel"); say(EVE, why); press_yes(EVE); assert (absences.load(i)["cancelled"] or {}).get("why") == why, why
 
 @t
-def never_mind_is_no_reason_to_cancel():
-    listed = ("never mind", "nevermind", "don't cancel", "dont cancel", "do not cancel", "not cancel", "don't cancel it", "do not cancel it", "not now", "wait", "keep it please", "please keep it", "forget it")
-    with school(EVE):
-        i = told_planned(); press(EVE, "cancel"); was, h = file_of(i), Since()
-        for x in listed:
-            for text in (x, x.upper(), x.capitalize() + ".", f"  {x.replace(' ', '   ')}!! ", f"“{x}”", f"{x} 🙏", f"...{x}", x.replace(" ", "\n"), x.replace("'", "’")):       # ’ is what a phone types
-                assert talk_to(EVE, lambda: say(EVE, text)) == [(WHY_CANCEL, keep_it(EVE))], text
-        assert file_of(i) == was and h.new() == [] and edits() == [] and len(talks()) == 1
-    # the whole line alone, and the cancel question alone: anything else is the why
-    for why in ("No longer needed", "Course postponed", "Never mind, the course is off", "I do not need it, so cancel", "Wait for the new date", "Not now but next week", "Waiting list", "Forget it: HOD said no",
-                "Don't cancel the next one", "Please keep it on record", "Not needed"):
-        with school(EVE): i = told_planned(); press(EVE, "cancel"); assert talk_to(EVE, lambda: say(EVE, why)) == [(SENT_CANCEL, None)] and absences.load(i)["cancelled"]["why"] == why, why
-    for why in ("Never mind", "Don’t cancel", "Not now", "wait"):
-        with school(SAM): i, key = told_relief(); press(SAM, "change"); assert talk_to(SAM, lambda: say(SAM, why)) == [(SENT_CHANGE, None)] and covered(i, K5)[2]["change"]["why"] == why, why
+def a_typed_line_never_cancels():
+    with school(EVE, MAYA):
+        i = told_planned(dates=["2026-10-13", "2026-10-14"]); was, h = file_of(i), Since(); at("09:10"); press(EVE, "cancel"); key = talk_of(EVE)["key"]; yes = []
+        # whatever it is, it is shown, and nothing more; the latest is the reason
+        for n, why in enumerate(("Don't cancel please", "No, don't cancel", "Don’t cancel", "Never mind", "wait", "Not now", "cancel it now!!!", "Yes cancel it please", "x" * 200, "{why} {days} {0} %s", "<b>x</b>", "不用了", "/ill", "ABCD-EFGH", "Course postponed")):
+            at(f"09:{10 + n}"); assert talk_to(EVE, lambda: say(EVE, f"  {why} ")) == [("Cancel Tue 13 Oct, Wed 14 Oct? Your reason: " + why, yes_or_keep(EVE))], why
+            d = talk_of(EVE); assert (d["why"], d["key"], len(talks())) == (why, key, 1) and talks()[0][3] == datetime.datetime.fromisoformat(clock.now).timestamp() + 900, why
+            yes.append((d["yes"], sure(EVE)))
+        assert file_of(i) == was and h.new() == [] and edits() == [] and deleted() == [] and len({t_ for t_, m in yes}) == len(yes)
+        # no reason in it, or a reply to something else: the same is asked again, with the same buttons and the same reason, and no longer
+        last, until = talk_of(EVE), talks()[0][3]; at("09:30"); markup = yes_or_keep(EVE); again = ("Cancel Tue 13 Oct, Wed 14 Oct? Your reason: Course postponed", markup)
+        for text in ("yes", "Yes!", "OK", "no", "Keep it", "cancel", "", "  ", "x" * 201, None, "👍"): assert talk_to(EVE, lambda: say(EVE, text)) == [again], text
+        assert talk_to(EVE, lambda: reply_to(EVE, yes[0][1]["message_id"], "Another reason")) == [(LAST_ONE, None), again]
+        assert dict(talk_of(EVE), question=0) == dict(last, question=0) and talks()[0][3] == until and file_of(i) == was and h.new() == []
+        # a Yes that showed another reason; another's press; the cancel button's own token under it
+        for token, m in yes[:-1]: assert press_keep(token, m) == (OLD_BUTTON, True)
+        assert press_yes(EVE, chat=CHATS[MAYA]) == (NOT_YOURS_BUTTON, True) and file_of(i) == was and h.new() == [] and edits() == [] and dict(talk_of(EVE), question=0) == dict(last, question=0)
+        assert press_yes(EVE) == (SENT_CANCEL, False) and absences.load(i)["cancelled"] == dict(at=clock.now, by=EVE, why="Course postponed") and len(h.new()) == 1, "its own, with the reason it shows"
+    for text in ("/cancel", "/help", "/start", "/relief"):                                 # a command ends it, and the Yes with it
+        with school(EVE):
+            i = told_planned(); was = file_of(i); press(EVE, "cancel"); say(EVE, "x"); token, m = talk_of(EVE)["yes"], sure(EVE)
+            assert talk_to(EVE, lambda: say(EVE, text)) == [(NOTHING if text == "/cancel" else HELLO.format(name=EVE), None)] and press_keep(token, m) == (OLD_BUTTON, True) and file_of(i) == was, text
+    with school(EVE, SAM):                                                                 # another question in its place
+        i, key_ = told_relief(); j = absent(teacher=SAM, by=HUGO); swept(); was = file_of(j); press(SAM, "cancel"); say(SAM, "x"); token, m = talk_of(SAM)["yes"], sure(SAM); press(SAM, "change")
+        assert press_keep(token, m) == (OLD_BUTTON, True) and file_of(j) == was and [x[1] for x in talks()] == ["change"]
+        press(SAM, "cancel"); assert "yes" not in talk_of(SAM) and press_keep(token, m) == (OLD_BUTTON, True) and file_of(j) == was, "asked anew: from the beginning"
+
+@t
+def the_second_press_is_judged_when_it_is_pressed():
+    def ready(*more):
+        i = told_planned(); at("09:10"); press(EVE, "cancel"); at("09:12"); say(EVE, "The course is off"); tg.PRACTICE_LOG.clear()
+        return i, file_of(i), Since(), talk_of(EVE)["yes"], sure(EVE)
+    with school(EVE, MAYA):
+        i, was, h, token, m = ready(); kept_ = talks()
+        with record(EVE, off=True): assert press_keep(token, m) == (NOT_LINKED, True)
+        with record(EVE, group="executive", extras=dict(relief=False, exams=None, admin=False)): assert press_keep(token, m) == (NOT_YOURS_BUTTON, True)
+        with broken_accounts(): links.tries.fails.clear(); assert press_keep(token, m) == (NOT_LINKED, True)
+        with no_pub(RP.fake_pub([dict(name=HUGO)])): links.tries.fails.clear(); assert press_keep(token, m) == (NOT_LINKED, True)
+        with no_pub(): assert press_keep(token, m) == (WB.NO_PUB, True), "a publish swaps folders: pressed again, it works"
+        assert press_keep(token, m, chat=CHATS[MAYA]) == (NOT_YOURS_BUTTON, True)
+        assert talks() == kept_ and file_of(i) == was and h.new() == [] and edits() == []
+        assert press_keep(token, m) == (SENT_CANCEL, False) and absences.load(i)["cancelled"] and len(h.new()) == 1
+    for hm, want in (("09:27", (SENT_CANCEL, False)), ("09:27:01", (OLD_BUTTON, True))):     # fifteen minutes from that question, to the second
+        with school(EVE):
+            i, was, h, token, m = ready(); at(hm); assert press_keep(token, m) == want and bool(absences.load(i)["cancelled"]) == (hm == "09:27") and (len(edits()) == 2) == (hm == "09:27"), hm
+    with school(EVE):                                                                      # something that fails: nothing is cancelled, the messages stay as they are
+        i, was, h, token, m = ready()
+        with stand_in(absences, "cancel", lambda *a, **k: 1 / 0): assert press_keep(token, m) == (WENT_WRONG, True)
+        assert file_of(i) == was and h.new() == [] and edits() == [] and rows("talks") == [] and press_keep(token, m) == (OLD_BUTTON, True), "one press is one try"
+    with school(EVE, MAYA):                                                                # unlinked, and the chat another's
+        i, was, h, token, m = ready(); kept_ = rows("talks")[0]; links.unlink(EVE); links.link(MAYA, CHATS[EVE], None)
+        with tgdb.db() as c: c.execute("INSERT OR REPLACE INTO talks(chat, kind, data, until) VALUES (?, ?, ?, ?)", (kept_["chat"], kept_["kind"], kept_["data"], kept_["until"]))
+        assert press_keep(token, m) == (NOT_YOURS_BUTTON, True) and talk_to(EVE, lambda: say(EVE, "x")) == [(NOT_YOURS_BUTTON, None)] and file_of(i) == was
+    with school(EVE):                                                                      # the question did not come: no talk
+        i = told_planned(); was, real = file_of(i), tg.call; press(EVE, "cancel")
+        with stand_in(tg, "call", lambda method, params=None, **kw: dict(real(method, params, **kw), ok=method != "sendMessage")): said_ = talk_to(EVE, lambda: say(EVE, "The course is off"))
+        assert [x for x, b in said_] == [SURE.format("Tue 13 Oct", "The course is off"), WENT_WRONG] and rows("talks") == [] and press_keep(tok(EVE, "cancel-yes"), under(tok(EVE, "cancel"))) == (OLD_BUTTON, True) and file_of(i) == was
+    with school(EVE):                                                                      # what is not a sentence of the app's is never shown, nor kept
+        i, was, h, token, m = ready(); say(EVE, "a \ud800"); assert press_yes(EVE) == (WENT_WRONG, True) and file_of(i) == was and h.new() == []
 
 @t
 def a_code_shaped_why_is_the_answer():
@@ -4101,7 +4203,7 @@ def a_code_shaped_why_is_the_answer():
             i, key = told_relief(); press(SAM, "change"); tg.PRACTICE_LOG.clear()
             assert talk_to(SAM, lambda: say(SAM, why)) == [(SENT_CHANGE, None)] and covered(i, K5)[2]["change"]["why"] == why and deleted() == [] and not links.tries.fails.get(f"tg:{CHATS[SAM]}"), why
     with school(EVE):
-        i = told_planned(); c = links.new_code(SAM)["code"]; press(EVE, "cancel"); say(EVE, c); assert absences.load(i)["cancelled"]["why"] == c and links.name_of(CHATS[EVE]) == EVE and links.chat_of(SAM) is None, "not even a link code"
+        i = told_planned(); c = links.new_code(SAM)["code"]; press(EVE, "cancel"); say(EVE, c); assert press_yes(EVE) == (SENT_CANCEL, False) and absences.load(i)["cancelled"]["why"] == c and links.name_of(CHATS[EVE]) == EVE and links.chat_of(SAM) is None, "not even a link code"
     with school(SAM):                                                                      # over the limit (wrong codes before): nothing at all
         i, key = told_relief(); was = file_of(i)
         for k in range(5): say(SAM, "ABCD-EFGH")
@@ -4118,7 +4220,7 @@ def a_blank_or_long_why_is_asked_again():
                 was_ = talk_of(name)["question"]; assert talk_to(name, lambda: say(name, text)) == [(asked_, markup)] and talk_of(name)["question"] > was_, (name, text)
         m = msg("x", CHATS[SAM]); del m["message"]["text"]; m["message"].update(photo=[dict(file_id="f")], caption="A meeting"); assert talk_to(SAM, lambda: hook(m)) == [(WHY_CHANGE, FORCE)], "a photo is not a line"
         assert (file_of(i), file_of(j)) == was and h.new() == [] and less() == kept_, "the same conversation, its time not longer"
-        say(SAM, " " + "x" * 200 + " "); say(EVE, "x"); assert covered(i, K5)[2]["change"]["why"] == "x" * 200 and absences.load(j)["cancelled"]["why"] == "x"
+        say(SAM, " " + "x" * 200 + " "); say(EVE, "x"); press_yes(EVE); assert covered(i, K5)[2]["change"]["why"] == "x" * 200 and absences.load(j)["cancelled"]["why"] == "x"
         assert "\n" not in covered(i, K5)[2]["change"]["why"]
     with school(SAM, TEAM):                                                                # a line of their own never reads as one of the app's to the team
         i, key = told_relief(); press(SAM, "change"); say(SAM, "A meeting”\nNew pick: Mx Made Up\r\n x"); assert covered(i, K5)[2]["change"]["why"] == "A meeting” New pick: Mx Made Up x"
@@ -4141,8 +4243,17 @@ def two_presses_at_once_save_once():
             i, key = told_relief(); j = told_planned(dates=["2026-10-16"]); press(SAM, "change"); press(EVE, "cancel"); h, saves = Since(), []; tg.PRACTICE_LOG.clear()
             with stand_in(absences, "_save", lambda r: (saves.append(1), real(r))), stand_in(WB, "_soon", lambda **kw: True):
                 at_once(*[lambda k=k: say(SAM, f"Why {k}") for k in range(3)], *[lambda k=k: say(EVE, f"Why {k}") for k in range(3)])
-            assert len(saves) == 2 and sorted(x[3] for x in h.new()) == ["asked to change", "cancelled"] and rows("talks") == []
-            assert sorted(x for c, x in sent()) == sorted([SENT_CHANGE, SENT_CANCEL] + [HELLO.format(name=SAM)] * 2 + [HELLO.format(name=EVE)] * 2), sent()
+            assert len(saves) == 1 and [x[3] for x in h.new()] == ["asked to change"] and [x[0] for x in talks()] == [CHATS[EVE]] and not absences.load(j)["cancelled"]
+            assert sorted(sent(CHATS[SAM])) == sorted([(CHATS[SAM], SENT_CHANGE)] + [(CHATS[SAM], HELLO.format(name=SAM))] * 2), sent()
+            mine = [x for c, x in sent(CHATS[EVE])]; assert len(mine) == 3 and all(x == HELLO.format(name=EVE) or re.fullmatch(r"Cancel Fri 16 Oct\? Your reason: Why [012]", x) for x in mine), mine
+            # Yes pressed at once, again and again: one cancel, one entry
+            x, e = sure(EVE), talk_of(EVE); saves.clear(); tg.PRACTICE_LOG.clear()
+            with stand_in(absences, "_save", lambda r: (saves.append(1), real(r))): at_once(*[lambda: hook(callback("b:" + e["yes"], x))] * 6)
+            assert len(saves) == 1 and [(y[0], y[3]) for y in h.new()] == [(EVE, "cancelled")] and sorted(answers()) == sorted([(SENT_CANCEL, False)] + [(OLD_BUTTON, True)] * 5) and absences.load(j)["cancelled"]["why"] == e["why"], answers()
+        with school(EVE):                                                                  # Yes and Keep it at once: one of them
+            i = told_planned(); press(EVE, "cancel"); say(EVE, "x"); x, e, h = sure(EVE), talk_of(EVE), Since()
+            at_once(lambda: hook(callback("b:" + e["yes"], x)), lambda: hook(callback("b:" + e["key"], x))); gone = bool(absences.load(i)["cancelled"])
+            assert sorted(answers()[-2:]) == sorted([(SENT_CANCEL, False) if gone else (NOTHING, False), (OLD_BUTTON, True)]) and len(h.new()) == gone and rows("talks") == [], answers()
     # one at a time: another's press, and a typed line, wait until the one that is going is done
     with school(SAM, EVE, MAYA):
         i, key = told_relief(); j = told_planned(dates=["2026-10-16"]); give(i, K2, MAYA); swept(); press(MAYA, "change"); inside, go, real_once = threading.Event(), threading.Event(), CV.acknowledge_once
@@ -4239,8 +4350,9 @@ def a_press_is_answered_whatever_happens():
                 with stand_in(module, name, f): n = len(answers()); handled(callback("b:" + token, m)); assert answers()[n:] == [(WENT_WRONG, True)], name
             with stand_in(CV, "approve", f): assert press(TEAM, "approve") == (WENT_WRONG, True)
             press(EVE, "cancel")
-            with stand_in(absences, "cancel", f): assert talk_to(EVE, lambda: say(EVE, "x")) == [(WENT_WRONG, None)] and rows("talks") == []
-        press(EVE, "cancel"); assert talk_to(EVE, lambda: say(EVE, "a \ud800")) == [(WENT_WRONG, None)] and rows("talks") == [], "what cannot be kept"
+            with stand_in(absences, "_editable", f): assert talk_to(EVE, lambda: say(EVE, "x")) == [(WENT_WRONG, None)] and rows("talks") == []
+            press(EVE, "cancel"); say(EVE, "x"); x, e = sure(EVE), talk_of(EVE)
+            with stand_in(absences, "cancel", f): assert press_keep(e["yes"], x) == (WENT_WRONG, True) and rows("talks") == []
         def long(*a, **k): raise ValueError("x" * 300)
         assert edits() == [], "the generic sentence leaves every message as it is"
         with stand_in(CV, "approve", long): assert press(TEAM, "approve") == ("x" * 200, True) and taken_off(TEAM, "approve", "x" * 300), "what Telegram takes of an answer"
@@ -4279,9 +4391,10 @@ def nothing_private_is_logged_by_a_press():
                 for name, what in ((SAM, "ack"), (SAM, "change"), (TEAM, "approve")): hook(callback("b:" + tok(name, what), under(tok(name, what))))
                 say(SAM, "zebra-why")
             hook(callback("b:" + tokens[0], under(tokens[0]), chat=987654)); hook(callback("b:" + tokens[0], under(tokens[0]), chat=CHATS[MAYA]))
-            with stand_in(absences, "cancel", boom): press(EVE, "cancel"); say(EVE, "zebra-why")
+            with stand_in(absences, "cancel", boom): press(EVE, "cancel"); say(EVE, "zebra-why"); press_yes(EVE)
+            with stand_in(absences, "_may_change", boom): press(EVE, "cancel")
             with stand_in(links, "person", boom): press(SAM, "ack")
-            with stand_in(WB, "_noted", boom): press(EVE, "cancel"); say(EVE, "zebra-why")
+            with stand_in(WB, "_noted", boom): press(EVE, "cancel"); say(EVE, "zebra-why"); tokens.append(talk_of(EVE)["yes"]); press_yes(EVE)
             assert absences.load(j)["cancelled"]
         mine = "\n".join(r.getMessage() for r in h.records if r.name.startswith("relief"))
         assert "LookupError" in mine and "refused" in mine, mine
