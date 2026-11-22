@@ -557,7 +557,7 @@ def _line(chat, talk, text, cmd, to):
 # _Out, the refusals that keep it: {name} is the one it shows, {why} is anything, ANY is every refusal)
 ACTIONS = {"ack": ("relief", _ack, (_cover.NOT_HAPPENING,)), "change": ("relief", _ask_change, (_cover.NOT_HAPPENING,)),
            "cancel": ("relief", _ask_cancel, ()), "keep": ("relief", _keep, (OLD_BUTTON,)),
-           "cancel-yes": ("relief", _yes, (OLD_BUTTON,)), "approve": ("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE)),
+           "cancel-yes": ("relief", _yes, (OLD_BUTTON,)), "approve": ("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE, _cover.NOT_HAPPENING)),
            "remind": ("relief.team", _remind, ANY)}
 # what the why typed in a talk comes to, by its kind: f(chat, the button, why, talk) -> _Out
 TALKS = dict(change=_change, cancel=_sure)

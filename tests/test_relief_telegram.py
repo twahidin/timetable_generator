@@ -3886,9 +3886,14 @@ def a_refused_button_is_taken_off():
 def what_stops_a_lesson_is_said_as_the_page_says_it():
     with exam_school(SAM, MAYA, TEAM):
         i = told_ask(); e = exam(); was, h = file_of(i), Since(); why = f"This lesson is not happening: 1A, 1B are on {EXAM}."
-        assert press(TEAM, "approve") == (why, True) and file_of(i) == was and h.new() == [] and taken_off(TEAM, "approve", why)
+        assert press(TEAM, "approve") == (why, True) and file_of(i) == was and h.new() == [] and edits() == [] and calls("editMessageReplyMarkup") == [], "its button stays: it may be on again"
         assert on_cover(TEAM, i, K5, "approve", dict(who=MAYA), code=400) == dict(error=why)
         with unreadable(), quiet_app(): assert press(TEAM, "approve")[0].startswith("✅ Approved"), "the exams cannot be read: as if there were none, as on the page"
+    with exam_school(SAM, MAYA, TEAM):                                                     # withdrawn: the same button does it, once
+        i = told_ask(); e, token, h, m = exam(), tok(TEAM, "approve"), Since(), under(tok(TEAM, "approve")); assert [press(TEAM, "approve") for _ in range(2)] == [(why, True)] * 2
+        withdraw(e); at("09:20"); assert tok(TEAM, "approve") == token and [press(TEAM, "approve") for _ in range(2)] == [("✅ Approved: Ms Maya Lee, 09:20.", False), (CV.NOT_WAITING, True)]
+        c = covered(i, K5)[2]; assert (c["relief"], c["approved"]) == (MAYA, dict(by=TEAM, at=clock.now)) and h.new() == [by_telegram(TEAM, "approved", f"{MAYA} approved for {ON_K5}", i)]
+        assert edits()[0] == (CHATS[TEAM], m["message_id"], m["text"] + "\n\n✅ Approved: Ms Maya Lee, 09:20."); send(); assert said(MAYA) == [RELIEF_K5]
     with exam_school(SAM, MAYA, TEAM):                                                     # on an exam duty then: not free
         i = told_ask(); exam("5A", name=EXAM2, duties=[(MAYA, 630, 690)]); was = file_of(i)
         assert press(TEAM, "approve") == ("Ms Maya Lee is no longer free then. Choose someone else.", True) and file_of(i) == was
