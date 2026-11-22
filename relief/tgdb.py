@@ -2,7 +2,7 @@
 
 db: a context manager giving one connection per block (never shared between threads): it commits on a normal exit, rolls back
 on an exception and is always closed; WAL mode, a 10 second wait for a lock, rows as sqlite3.Row. The tables are made on first
-use, and again harmlessly any time. get_state / set_state keep JSON values by key. first_time: True only the first time an
+use, and again harmlessly any time. get_state / set_state keep JSON values by key; raise_state is for what is to be done once. first_time: True only the first time an
 update id is seen; the table keeps the last KEEP ids by order of arrival (Telegram may restart its ids at any number)."""
 import contextlib, json, os, sqlite3, threading
 
@@ -69,6 +69,17 @@ def get_state(k, default=None):
 def set_state(k, v):
     with db() as c:
         c.execute("INSERT OR REPLACE INTO state(k, v) VALUES (?, ?)", (k, json.dumps(v)))
+
+
+def raise_state(k, n, also=()):
+    """k raised to the number n, and each key of also set to true with it, in one block on the store -> True; False, nothing
+    changed, when it is as high already (an earlier run, or another copy of the app, was there first)"""
+    with db() as c:
+        r = c.execute("SELECT v FROM state WHERE k=?", (k,)).fetchone()
+        was = json.loads(r["v"]) if r else None
+        if isinstance(was, (int, float)) and was >= n: return False
+        c.executemany("INSERT OR REPLACE INTO state(k, v) VALUES (?, ?)", [(k, json.dumps(n))] + [(x, "true") for x in also])
+    return True
 
 
 def first_time(update_id):

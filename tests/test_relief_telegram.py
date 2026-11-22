@@ -315,7 +315,7 @@ def bot_on(username="practice_bot"):
 def wipe():
     with tgdb.db() as c:
         for table in ("links", "codes", "talks", "updates", "outbox", "buttons"): c.execute(f"DELETE FROM {table}")
-        c.execute("DELETE FROM state WHERE k='bot'")
+        c.execute("DELETE FROM state")
     tg.PRACTICE_LOG.clear(); links.tries.fails.clear(); OB._doubt.clear(); OB._hold[0] = 0.0
 
 @contextlib.contextmanager
@@ -2000,11 +2000,11 @@ def the_sender_recovers_first_then_sends_and_never_dies():
 @t
 def the_sender_starts_only_with_the_jobs_and_a_token():
     assert not any(x.name == "relief-telegram" for x in threading.enumerate())
-    code = "import threading, app; from relief import tell; print(sorted(x.name for x in threading.enumerate() if x.name.startswith('relief')), [f is tell.sweep for f in tell.MINUTE])"
+    code = "import threading, app; from relief import tell; print(sorted(x.name for x in threading.enumerate() if x.name.startswith('relief')), [f'{f.__module__}.{f.__name__}' for f in tell.MINUTE])"
     def go(jobs, token):
         env = dict(os.environ, DATA_DIR=tempfile.mkdtemp(), RELIEF_JOBS=jobs, TELEGRAM_BOT_TOKEN=token)
         return subprocess.Popen([sys.executable, "-c", code], env=env, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    cases = [("on", "practice", "['relief-telegram', 'relief-tell-ticker', 'relief-ticker'] [True]"), ("on", "", "['relief-ticker'] []"), ("", "practice", "[] []")]
+    cases = [("on", "practice", "['relief-telegram', 'relief-tell-ticker', 'relief-ticker'] ['relief.tell.sweep', 'relief.report.tick']"), ("on", "", "['relief-ticker'] []"), ("", "practice", "[] []")]
     for p, (jobs, token, want) in zip([go(j, k) for j, k, w in cases], cases):
         out, err = p.communicate(timeout=120)
         assert p.returncode == 0 and out.strip().splitlines()[-1] == want, (jobs, token, out[-300:], err[-300:])
@@ -2191,7 +2191,7 @@ def the_module_stands_alone():
     assert p.stdout.strip() == "[] True False", (p.stdout, p.stderr[-400:])
     assert not hasattr(TE, "links") and TE._links is links, "due has a parameter of that name: the module goes by another"
     assert OB.VALID is TE.still_true and TE.still_true(dict(key="any")) is True and TE.still_true(dict(key="x", kind="exam-duty", ref=None)) is True
-    assert {"relief", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick"} == set(TE.CHECKS), "report, clear and weekly (Tasks 6 and 7) are added here"
+    assert {"relief", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "report", "clear"} == set(TE.CHECKS), "weekly (Task 7) is added here"
 
 # ---- the hooks: fill.AFTER, tell.soon, and who asks for a sweep
 @t
@@ -3037,7 +3037,7 @@ def still_true_says_what_may_still_go():
         at("09:20"); CV.ask_change(i, K5, "x", SAM); new_pick(i, K5, MAYA); assert TE.still_true(ask) is False, "another request, with the same pick"; CV.keep(i, K5, TEAM); at("09:10")
         give(i, K5, SAM); assert TE.still_true(relief) is False, "approved anew: that message is the one to go"
         absences.cancel(i, "Better", HUGO); assert TE.still_true(officer) is False and TE.still_true(relief) is False
-        for kind in ("report", "clear", "weekly", "anything"): assert TE.still_true(dict(kind=kind, ref=None)) is True, kind
+        for kind in ("weekly", "anything"): assert TE.still_true(dict(kind=kind, ref=None)) is True, kind
     with school(EVE, SAM, ROSA, TEAM):
         i = absent(by=HUGO); give(i, K5, SAM); j = absent(dates=["2026-10-16"]); TE.sweep(); CV.ask_change(i, K5, "x", SAM); new_pick(i, K5, MAYA); TE.sweep()
         items = [next(dict(r, ref=json.loads(r["ref"])) for r in outs(k) if json.loads(r["ref"])["id"] == i) for k in ("relief", "planned", "officer", "ask")]; p = absences._path(i); good = open(p, encoding="utf-8").read()
@@ -4423,6 +4423,593 @@ def the_page_still_answers_as_it_did():
     with school():
         i = absent(by=HUGO); give(i, K5, SAM); r, first = CV.acknowledge_once(i, K5, SAM); assert first is True and r == absences.load(i)
         was = file_of(i); r, first = CV.acknowledge_once(i, K5, SAM); assert first is False and r == absences.load(i) and file_of(i) == was and CV.acknowledge(i, K5, SAM) == r
+
+# ---- Task 6: Remind, the not-acknowledged report and all clear ----
+import importlib  # noqa: E402
+from relief import report as RE  # noqa: E402
+
+D13 = "2026-10-13"
+TODAY_BUTTON = [dict(text="Open relief today", url=BASE + "/relief#today")]
+SAM_LINE, MAYA_LINE = "\n• Mr Sam Tan · 1A, 1B Science (G2) P6–P7 · starts 10:30 · ", "\n• Ms Maya Lee · 1C Science P3–P5 · starts 09:00 · "
+STARTED, SAM_STARTED, MAYA_STARTED = "\nStarted without acknowledgement:", "\n• Mr Sam Tan · 1A, 1B Science (G2) P6–P7 (10:30)", "\n• Ms Maya Lee · 1C Science P3–P5 (09:00)"
+NOBODY, NOT_ON, TOO_SOON = "Nobody to remind.", "Not on Telegram.", "Reminded at {}: wait a few minutes."
+BY = (TEAM, "telegram")
+def head(hm, n): return f"⏰ {hm} · Not yet acknowledged ({n})"
+def all_clear(hm, n): return f"✅ {hm} · All {n} reliefs for today are acknowledged."
+def none_waits(hm, k): return f"✅ {hm} · No reliefs are waiting now: {k} started without acknowledgement."
+def ticked(hm, day=13): at(hm, day); return RE.tick()
+def keyed(hhmm, *names): return [f"report:{D13}:{hhmm}:{n}" for n in names or (TEAM,)]
+def cleared(n, *names): return [f"clear:{D13}:{n}:{x}" for x in names or (TEAM,)]
+def texts_to(name=TEAM): return [r["text"] for r in outs(name=name) if r["kind"] in ("report", "clear")]
+def today_reliefs(*given):
+    """an absence of Eve's on Tue 13 Oct, sent at 06:50 that day, with these (cover key, relief teacher) approved and told -> its id"""
+    at("06:50", 13); i = absent(by=HUGO)
+    for ckey, who_ in given: give(i, ckey, who_)
+    swept(); return i
+def relief_key_of(i, ckey): return f"relief:{EVE}:{ckey}:{approved_at(i, ckey)}"
+def asks(i, *ckeys): return [dict(id=i, ckey=k, absent=EVE) for k in ckeys]
+def remind(covers, date=D13): return RE.remind(date, covers, BY)
+def listed(i, *ckeys): return [dict(id=i, ckey=k, absent=EVE, approved_at=approved_at(i, k)) for k in ckeys]
+def every(n): store.write_json(RS.PATH, dict(calendar=TERM, times=dict(report_every=n)))
+def skips(got): return [(v["ckey"], v["name"], v["why"]) for v in got["skipped"]]
+
+@t
+def the_report_texts_are_the_plans():
+    plan = open(os.path.join(ROOT, "docs", "superpowers", "plans", "2026-11-22-relief-stage-4-telegram.md"), encoding="utf-8").read()
+    v = dict(who="{who}", lesson="{lesson}", periods="{periods}", start="{start}", how="sent {hh:mm}")
+    got = RE.report_text("{hh:mm}", [v], [v]).replace("(1)", "({n})", 1) + "\n" + RE.clear_text("{hh:mm}", 4, 0).replace(" 4 ", " {n} ")
+    assert len(got.splitlines()) == 5
+    for line in got.splitlines(): assert f"`{line}`" in plan, line
+    assert RE.clear_text("08:00", 4, 2) == none_waits("08:00", 2) and "`No reliefs are waiting now: {k} started without acknowledgement.`" in plan
+    assert RE.clear_text("08:00", 1, 0) == "✅ 08:00 · The 1 relief for today is acknowledged." and RE.clear_text("08:00", 1, 1) == none_waits("08:00", 1)
+    for label in (RE.AGAIN, RE.OPEN_TODAY): assert f"`{label}`" in plan
+    assert (RE.AGAIN, RE.OPEN_TODAY, RE.NOBODY, RE.NOT_ON, RE.TOO_SOON.format(at="07:20"), bot.REMINDED.format(n=2)) == ("Remind them again", "Open relief today", NOBODY, NOT_ON, TOO_SOON.format("07:20"), "Reminded 2.")
+    v = dict(who=SAM, lesson="1A Art", periods="P1", start="", how="not on Telegram")                          # a lesson with no times
+    assert RE.report_text("07:00", [v], [v]) == head("07:00", 1) + "\n• Mr Sam Tan · 1A Art P1 · not on Telegram" + STARTED + "\n• Mr Sam Tan · 1A Art P1"
+    assert RE.report_text("07:00", [v], []) == head("07:00", 1) + "\n• Mr Sam Tan · 1A Art P1 · not on Telegram" and RE.report_text("07:00", [], [v]).splitlines()[:2] == [head("07:00", 0), STARTED[1:]]
+
+@t
+def a_state_is_raised_once():
+    with telegram():
+        got = lambda *ks: [tgdb.get_state(k) for k in ks]
+        assert tgdb.raise_state("n", 5) is True and got("n") == [5] and tgdb.raise_state("n", 5, ["x"]) is False and tgdb.raise_state("n", 4, ["x"]) is False and got("n", "x") == [5, None]
+        assert tgdb.raise_state("n", 6, ["x", "y"]) is True and got("n", "x", "y") == [6, True, True] and tgdb.raise_state("m", 0) is True and tgdb.raise_state("m", 0) is False
+        for odd in ("odd", None, [9], {}): tgdb.set_state("n", odd); assert tgdb.raise_state("n", 1) is True and got("n") == [1], odd
+        done = []; at_once(*[lambda: done.append(tgdb.raise_state("k", 7))] * 8); assert sorted(done) == [False] * 7 + [True]
+
+@t
+def only_what_still_waits_is_dropped():
+    with telegram():
+        links.link(TIA, 501, None); q()
+        for s in ("sending", "sent", "failed", "unsure", "dropped"): put("k", state=s); assert OB.drop("k") is False and state("k") == s, s
+        put("k", state="queued"); assert OB.drop("nokey") is False and OB.drop("k") is True and state("k") == "dropped" and OB.drop("k") is False and q("k") is True and state("k") == "queued"
+
+# ---- the report
+@t
+def the_report_goes_at_its_marks_and_once_each():
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K5, SAM), (K2, MAYA)); assert ticked("06:59") == [] and outs("report") == []
+        OB._wake.clear(); assert ticked("07:00") == keyed("0700") and OB._wake.is_set(); r, = outs("report")
+        assert (r["name"], r["text"], json.loads(r["files"]), r["state"]) == (TEAM, head("07:00", 2) + MAYA_LINE + "sent 06:50" + SAM_LINE + "sent 06:50", [], "queued"), r["text"]
+        assert buttons_of(r) == [[dict(text="Remind them again", what="remind", extra=dict(date=D13, covers=listed(i, K2, K5)))], TODAY_BUTTON], buttons_of(r)
+        assert send() == 1 and json.loads(r["ref"])["made"] == "2026-10-13T07:00:00+08:00" and tgdb.get_state(f"report_last:{D13}") == 420
+        OB._wake.clear()
+        for hm in ("07:00", "07:01", "07:14:59"): assert ticked(hm) == [] and not OB._wake.is_set(), hm
+        assert ticked("07:15") == keyed("0715") and texts_to()[-1] == head("07:15", 2) + MAYA_LINE + "sent 06:50" + SAM_LINE + "sent 06:50"
+        on_cover(MAYA, i, K2, "acknowledge"); assert send() == 1 and ticked("07:29") == [] and ticked("07:30") == keyed("0730") and texts_to()[-1] == head("07:30", 1) + SAM_LINE + "sent 06:50"
+        assert buttons_of(outs("report")[-1])[0][0]["extra"] == dict(date=D13, covers=listed(i, K5)) and send() == 1
+        assert [x.split("\n")[0] for x in said(TEAM)] == [head("07:00", 2), head("07:15", 2), head("07:30", 1)] and said(SAM) == [RELIEF_K5], "the team alone"
+    with school(SAM, MAYA, TEAM):                                                          # in time order, whoever they are
+        today_reliefs((K5, MAYA), (K2, SAM)); ticked("07:00"); assert texts_to()[-1] == head("07:00", 2) + MAYA_LINE.replace(MAYA, SAM) + "sent 06:50" + SAM_LINE.replace(SAM, MAYA) + "sent 06:50"
+    with school(SAM, TEAM, base=None):                                                     # an address that is not https, or not known: no such button goes
+        today_reliefs((K5, SAM)); assert ticked("07:00") == keyed("0700") and send() == 1 and [len(row) for row in calls("sendMessage")[-1]["reply_markup"]["inline_keyboard"]] == [1]
+        assert calls("sendMessage")[-1]["reply_markup"]["inline_keyboard"][0][0]["text"] == "Remind them again"
+
+@t
+def a_late_tick_or_a_restart_sends_a_mark_once():
+    with school(SAM, TEAM):
+        i = today_reliefs((K5, SAM)); assert ticked("07:33") == keyed("0730") and texts_to()[-1].startswith(head("07:33", 1)), "late: the time now"
+        assert ticked("07:34") == [] and ticked("07:44:59") == [] and ticked("07:46") == keyed("0745") and ticked("07:44") == [] and ticked("07:30") == [], "nor a mark before it"
+        importlib.reload(RE); assert bot._report is RE and ticked("07:47") == [] and ticked("08:00") == keyed("0800") and ticked("08:00") == [], "nothing is kept in memory"
+        def dies(*a, **k): raise Killed()
+        with stand_in(OB, "queue", dies):                                                  # it stops between the mark and the queue: the mark is not sent again
+            try: ticked("08:15")
+            except Killed: pass
+        assert tgdb.get_state(f"report_last:{D13}") == 495 and ticked("08:16") == [] and ticked("08:30") == keyed("0830")
+        # a mark nothing waits at is done with, too: what is approved after it is in the next
+        on_cover(SAM, i, K5, "acknowledge"); assert ticked("08:45") == cleared(1) and ticked("09:00") == []; give(i, K2, RUTH); assert ticked("09:01") == [] and texts_to()[-1] == "✅ 08:45 · The 1 relief for today is acknowledged."
+        # what cannot be worked out is worked out a minute later, the mark still to go
+        j = absent(dates=["2026-10-16"]); assert j
+        with no_pub(): assert ticked("09:15") == []
+        with broken_accounts(): assert ticked("09:16") == []
+        with stand_in(absences, "all_records", lambda: 1 / 0): assert ticked("09:17") == []
+        assert tgdb.get_state(f"report_last:{D13}") == 540 and ticked("09:18") == keyed("0915")
+    with school(SAM, TEAM):                                                                # the store cannot be written: nothing goes, and a minute later it does
+        today_reliefs((K5, SAM))
+        def locked(*a, **k): raise sqlite3.OperationalError("made up")
+        with stand_in(tgdb, "raise_state", locked): assert ticked("07:00") == [] and outs("report") == []
+        assert ticked("07:01") == keyed("0700")
+    with school(SAM, TEAM, LEE):                                                           # one that cannot be queued never stops the rest
+        today_reliefs((K5, SAM)); real = OB.queue
+        with stand_in(OB, "queue", lambda key, name, *a, **k: 1 / 0 if name == LEE else real(key, name, *a, **k)): assert ticked("07:00") == keyed("0700")
+        assert ticked("07:15") == keyed("0715", LEE, TEAM)
+    with school(SAM, TEAM):                                                                # another day: its own marks
+        i = absent(by=HUGO, dates=["2026-10-13", "2026-10-14"]); give(i, K5, SAM); give(i, KW, SAM); swept(); assert ticked("10:15") == keyed("1015") and ticked("07:00", 14) == [f"report:2026-10-14:0700:{TEAM}"]
+        assert texts_to()[-1] == head("07:00", 1) + "\n• Mr Sam Tan · 2A Science P2 · starts 08:30 · sent 09:00"
+
+@t
+def two_copies_of_the_app_send_a_mark_once():
+    with school(SAM, MAYA, TEAM, LEE):
+        today_reliefs((K2, MAYA), (K5, SAM)); at("09:00", 13); got = []
+        at_once(*[lambda: got.append(RE.tick())] * 6)
+        assert sorted(x for g in got for x in g) == keyed("0900", LEE, TEAM) and sum(1 for g in got if g) == 1 and {r["text"] for r in outs("report")} == {head("09:00", 1) + SAM_LINE + "sent 06:50" + STARTED + MAYA_STARTED}
+
+@t
+def changing_how_often_never_sends_twice():
+    with school(SAM, TEAM):
+        today_reliefs((K5, SAM)); assert ticked("07:30") == keyed("0730"); every(10); assert ticked("07:31") == [] and ticked("07:39") == [] and ticked("07:40") == keyed("0740")
+        every(60); assert ticked("07:45") == [] and ticked("07:59") == [] and ticked("08:00") == keyed("0800"); every(5); assert ticked("08:04") == [] and ticked("08:05") == keyed("0805")
+        tgdb.set_state(f"report_last:{D13}", "odd"); assert ticked("08:05") == [] and tgdb.get_state(f"report_last:{D13}") == 485, "what is kept, changed by hand: the queue still has it once"
+        every(7); assert ticked("08:06") == [] and ticked("08:09") == [] and ticked("08:10") == keyed("0810"); every(15); assert ticked("08:14") == [] and ticked("08:15") == keyed("0815")
+        for bad in ("x", None, 0, -5, True, [1], 10 ** 9, 7.5):                             # changed by hand: every 15
+            every(bad); n = len(outs("report")); store.write_json(RS.PATH, dict(calendar=TERM, times="odd" if bad == "x" else dict(report_every=bad)))
+            with tgdb.db() as c: c.execute("DELETE FROM state WHERE k LIKE 'report_last:%'"); c.execute("DELETE FROM outbox WHERE kind='report'")
+            assert ticked("08:35") == keyed("0830") and ticked("08:44") == [] and ticked("08:45") == keyed("0845"), (bad, n)
+
+@t
+def not_before_an_hour_before_the_first_period():
+    m = SCHOOL["model"]; old = dict(m["school"])
+    try:
+        with school(SAM, TEAM):
+            today_reliefs((K5, SAM)); m["school"].update(start_time="07:40")                # from 06:40: the first mark is 06:45
+            for hm in ("00:00", "06:30", "06:39", "06:40", "06:44:59"): assert ticked(hm) == [] and tgdb.get_state(f"report_last:{D13}") is None, hm
+            assert ticked("06:45") == keyed("0645")
+        with school(SAM, TEAM):
+            m["school"].update(old); today_reliefs((K5, SAM)); assert ticked("06:59:59") == [] and ticked("07:14") == keyed("0700"), "08:00: at 07:00 itself"
+        with school(SAM, TEAM):                                                            # a timetable with no times: no report
+            today_reliefs((K5, SAM)); m["school"].pop("start_time"); assert ticked("09:00") == [] and tgdb.get_state(f"report_last:{D13}") is None
+    finally: m["school"].clear(); m["school"].update(old)
+
+@t
+def a_started_relief_is_listed_once_then_dropped():
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K2, MAYA), (K5, SAM)); key = relief_key_of(i, K2)
+        assert ticked("08:45") == keyed("0845") and texts_to()[-1] == head("08:45", 2) + MAYA_LINE + "sent 06:50" + SAM_LINE + "sent 06:50" and tgdb.get_state(f"started:{key}") is None
+        assert ticked("09:00") == keyed("0900") and texts_to()[-1] == head("09:00", 1) + SAM_LINE + "sent 06:50" + STARTED + MAYA_STARTED and tgdb.get_state(f"started:{key}")
+        assert buttons_of(outs("report")[-1])[0][0]["extra"]["covers"] == listed(i, K5), "those not started alone"
+        assert ticked("09:15") == keyed("0915") and texts_to()[-1] == head("09:15", 1) + SAM_LINE + "sent 06:50"; importlib.reload(RE); assert ticked("10:29") == keyed("1015") and "Started" not in texts_to()[-1]
+        assert ticked("10:30") == keyed("1030") and texts_to()[-1] == head("10:30", 0) + STARTED + SAM_STARTED and buttons_of(outs("report")[-1]) == [TODAY_BUTTON], "nobody to remind: no such button"
+        assert ticked("10:45") == cleared(1) and texts_to()[-1] == none_waits("10:45", 2)
+        for hm in ("11:00", "12:15", "23:59"): assert ticked(hm) == [], hm
+    with school(MAYA, TEAM):                                                               # told to nobody, and first seen when it is over: listed too
+        i = today_reliefs((K2, RUTH), (K5, MAYA)); CV.acknowledge(i, K5, MAYA); assert outs("relief", RUTH) == [] and ticked("11:45") == keyed("1145")
+        assert texts_to()[-1] == head("11:45", 0) + STARTED + "\n• Ms Ruth Goh · 1C Science P3–P5 (09:00)" and tgdb.get_state(f"started:{relief_key_of(i, K2)}") and ticked("12:00") == cleared(1) and texts_to()[-1] == none_waits("12:00", 1)
+    with school(SAM, MAYA, TEAM):                                                          # acknowledged late, before the report: not listed; after it: all are acknowledged
+        i = today_reliefs((K2, MAYA), (K5, SAM)); ticked("08:45"); at("09:02", 13); on_cover(MAYA, i, K2, "acknowledge"); ticked("09:15"); assert texts_to()[-1] == head("09:15", 1) + SAM_LINE + "sent 06:50"
+        ticked("10:30"); assert texts_to()[-1] == head("10:30", 0) + STARTED + SAM_STARTED; at("10:40", 13); on_cover(SAM, i, K5, "acknowledge"); assert ticked("10:45") == cleared(1) and texts_to()[-1] == all_clear("10:45", 2)
+    with school(SAM, MAYA, TEAM):                                                          # given to another since: that is another relief
+        i = today_reliefs((K2, MAYA)); ticked("09:00"); assert texts_to()[-1] == head("09:00", 0) + STARTED + MAYA_STARTED; at("09:05", 13); give(i, K2, SAM); swept(); assert ticked("09:15") == keyed("0915")
+        assert texts_to()[-1] == head("09:15", 0) + STARTED + MAYA_STARTED.replace(MAYA, SAM) and ticked("09:30") == cleared(1) and texts_to()[-1] == none_waits("09:30", 1)
+    with school(SAM, TEAM):                                                                # moved to another absence of the same teacher's: the same relief
+        i = today_reliefs((K5, SAM)); ticked("10:30"); moved_to(i); assert ticked("10:45") == cleared(1)
+    with school(SAM, TEAM):                                                                # a part of a split lesson starts at its own time
+        at("06:50", 13); i = absent(by=HUGO); CV.split(i, K2, 3, TEAM); give(i, K2 + "#1", SAM); swept(); ticked("09:15"); assert texts_to()[-1] == head("09:15", 1) + "\n• Mr Sam Tan · 1C Science P4–P5 · starts 09:30 · sent 06:50"
+        ticked("09:30"); assert texts_to()[-1] == head("09:30", 0) + STARTED + "\n• Mr Sam Tan · 1C Science P4–P5 (09:30)"
+    with school(SAM, TEAM):                                                                # a period past the day's last, changed by hand: started when the day's periods are over
+        i = today_reliefs((K5, SAM)); change_record(i, lambda r: [x.update(p=20) for x in r["lessons"] if x["key"] == K5]); ticked("13:45"); assert texts_to()[-1].startswith(head("13:45", 1))
+        ticked("14:00"); assert texts_to()[-1].startswith(head("14:00", 0) + STARTED) and ticked("14:15") == cleared(1) and ticked("14:30") == []
+
+@t
+def all_clear_goes_once_and_again_after_new_waiting():
+    with school(SAM, MAYA, RUTH, TEAM):
+        i = today_reliefs((K2, MAYA), (K5, SAM)); CV.acknowledge(i, K2, MAYA); assert ticked("07:00") == keyed("0700") and send() == 1; on_cover(SAM, i, K5, "acknowledge")
+        assert ticked("07:14") == [] and ticked("07:15") == cleared(1) and texts_to()[-1] == all_clear("07:15", 2); r, = outs("clear")
+        assert (r["name"], buttons_of(r), json.loads(r["ref"])["made"]) == (TEAM, [], "2026-10-13T07:15:00+08:00")
+        assert send() == 1 and len(said(TEAM)) == 2
+        for hm in ("07:16", "07:30", "07:45"): assert ticked(hm) == [], "once"
+        on_lesson(EVE, i, K8, "needed"); give(i, K8, RUTH); swept(); assert ticked("08:00") == keyed("0800") and texts_to()[-1] == head("08:00", 1) + "\n• Ms Ruth Goh · 5A Art P9 · starts 12:00 · sent 07:45"
+        assert ticked("08:15") == keyed("0815"); on_cover(RUTH, i, K8, "acknowledge"); assert ticked("08:30") == cleared(2) and texts_to()[-1] == all_clear("08:30", 3) and ticked("08:45") == []
+        # moved to another, who waits: a third time; one that started without: the other sentence
+        give(i, K8, MAYA); swept(); ticked("09:00"); assert texts_to()[-1].startswith(head("09:00", 1)) and ticked("12:00") == keyed("1200") and ticked("12:15") == cleared(3) and texts_to()[-1] == none_waits("12:15", 1)
+        assert [r["key"] for r in outs("clear")] == cleared(1) + cleared(2) + cleared(3)
+    with school(SAM, MAYA, TEAM):                                                          # no report went: no all clear
+        i = today_reliefs((K5, SAM)); CV.acknowledge(i, K5, SAM); assert [ticked(hm) for hm in ("07:00", "07:15", "10:45")] == [[]] * 3
+    with school(SAM, MAYA, TEAM):                                                          # the reports were never sent (too old by then): no all clear of them
+        i = today_reliefs((K5, SAM)); ticked("07:00"); at("07:31", 13); assert send() == 0 and outs("report")[0]["state"] == "dropped"; on_cover(SAM, i, K5, "acknowledge"); assert ticked("07:45") == []
+    with school(SAM, MAYA, TEAM):                                                          # every relief taken away: nothing is said to be acknowledged
+        i = today_reliefs((K5, SAM)); ticked("07:00"); absences.cancel(i, "Better", HUGO); assert ticked("07:15") == [] and ticked("07:30") == []
+    with school(SAM, MAYA, TEAM):                                                          # a request to change waits for the team, so it is not said that none waits; nor that all are acknowledged
+        i = today_reliefs((K2, MAYA), (K5, SAM)); ticked("07:00"); CV.acknowledge(i, K2, MAYA); CV.ask_change(i, K5, "x", SAM); assert ticked("07:15") == [] and ticked("07:30") == []
+        CV.keep(i, K5, TEAM); assert ticked("07:45") == keyed("0745") and texts_to()[-1].startswith(head("07:45", 1)); CV.ask_change(i, K5, "x", SAM); at("07:50", 13); give(i, K5, HUGO); CV.acknowledge(i, K5, HUGO)
+        assert ticked("08:00") == cleared(1) and texts_to()[-1] == all_clear("08:00", 2)
+    with school(SAM, MAYA, TEAM):                                                          # ... until its lesson starts
+        i = today_reliefs((K2, MAYA), (K5, SAM)); ticked("07:00"); CV.acknowledge(i, K2, MAYA); CV.ask_change(i, K5, "x", SAM); assert ticked("10:15") == [] and ticked("10:30") == cleared(1) and texts_to()[-1] == none_waits("10:30", 1)
+
+@t
+def nothing_is_sent_when_nothing_waits():
+    with school(SAM, MAYA, TEAM):
+        for hm in ("07:00", "10:00", "23:59"): assert ticked(hm, 14) == [] and ticked(hm, 12) == [], "no reliefs"
+        at("06:50", 13); i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)]); assert ticked("07:00", 13) == [], "a pick nobody has approved"
+        on_cover(TEAM, i, K5, "approve", dict(who=SAM)); assert ticked("07:15") == keyed("0715"), "approved"
+    for f in (lambda i: CV.acknowledge(i, K5, SAM), lambda i: CV.ask_change(i, K5, "x", SAM), lambda i: absences.cancel(i, "x", HUGO), lambda i: absences.not_needed(i, K5, "x", HUGO), lambda i: os.remove(absences._path(i))):
+        with school(SAM, TEAM): i = today_reliefs((K5, SAM)); f(i); assert ticked("07:00") == [] and outs("report") == [] and ticked("10:30") == [] and texts_to() == []
+    with school(SAM, TEAM): i = absent(by=HUGO, dates=["2026-10-16"]); give(i, KF, SAM); swept(); assert ticked("07:00", 13) == [], "another day's"
+    holiday = dict(TERM, holidays=[dict(start=D13, end=D13, name="Made-up Day")])
+    for cal in (holiday, dict(terms=[], holidays=[]), dict(TERM, terms=[dict(TERM["terms"][0], end="2026-10-12")])):      # not a school day
+        with school(SAM, TEAM): today_reliefs((K5, SAM)); store.write_json(RS.PATH, dict(calendar=cal)); assert ticked("07:00") == [] and ticked("10:30") == [] and tgdb.get_state(f"report_last:{D13}") is None
+    h = Grab(); KINDS.addHandler(h)
+    with school(SAM, TEAM):
+        today_reliefs((K5, SAM)); b = tgdb.get_state("bot"); tgdb.set_state("bot", None); assert ticked("07:00") == [] and tgdb.get_state(f"report_last:{D13}") is None, "not connected"
+        tgdb.set_state("bot", b); os.environ.pop("TELEGRAM_BOT_TOKEN")
+        with stand_in(tgdb, "db", lambda read=False: 1 / 0): assert RE.tick() == [], "no token: not even the store is opened"
+        os.environ["TELEGRAM_BOT_TOKEN"] = "practice"; links.unlink(TEAM); assert ticked("07:01") == [] and tgdb.get_state(f"report_last:{D13}") is None, "nobody to send it to"
+        with no_pub(): assert ticked("07:01") == []
+        links.link(TEAM, CHATS[TEAM], None); assert ticked("07:02") == keyed("0700"), "the mark is still theirs"
+    KINDS.removeHandler(h); assert h.records == [], "none of it is a failure"
+
+@t
+def a_relief_approved_after_the_report_started():
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K2, MAYA)); ticked("07:00"); assert texts_to()[-1] == head("07:00", 1) + MAYA_LINE + "sent 06:50"
+        at("07:08", 13); give(i, K5, SAM); swept(); assert ticked("07:09") == [] and ticked("07:15") == keyed("0715") and texts_to()[-1] == head("07:15", 2) + MAYA_LINE + "sent 06:50" + SAM_LINE + "sent 07:08"
+        at("10:35", 13); on_cover(MAYA, i, K2, "acknowledge"); on_lesson(EVE, i, K8, "needed"); give(i, K8, MAYA); ticked("10:45"); assert texts_to()[-1].startswith(head("10:45", 1)) and STARTED + SAM_STARTED in texts_to()[-1]
+    with school(SAM, TEAM):                                                                # approved when its lesson is over already (who took it, written down after): said once
+        at("12:50", 13); i = absent(by=HUGO); give(i, K5, SAM); swept(); assert outs("relief") == [] and ticked("13:00") == keyed("1300") and texts_to()[-1] == head("13:00", 0) + STARTED + SAM_STARTED
+        assert ticked("13:15") == cleared(1) and ticked("13:30") == []
+
+@t
+def the_report_goes_to_team_members_only():
+    with school(SAM, EVE, HUGO, ROSA, TEAM, LEE, MAYA):
+        today_reliefs((K5, SAM)); assert ticked("07:00") == keyed("0700", LEE, TEAM) and {r["name"] for r in outs("report")} == {TEAM, LEE}
+        links.unlink(LEE); assert ticked("07:15") == keyed("0715"); links.link(LEE, CHATS[LEE], None); assert ticked("07:30") == keyed("0730", LEE, TEAM)
+        with record(LEE, extras=dict(relief=False, exams=None, admin=False)): assert ticked("07:45") == keyed("0745")
+        with record(LEE, off=True): assert ticked("08:00") == keyed("0800")
+        # the right at sending: whoever lost it since gets neither
+        ticked("08:15"); i = absences.all_records()[0]["id"]; CV.acknowledge(i, K5, SAM); ticked("08:30"); assert [r["name"] for r in outs("clear")] == [LEE, TEAM]
+        with record(LEE, extras=dict(relief=False, exams=None, admin=False)): send()
+        assert {r["state"] for r in outs(name=LEE) if r["key"].split(":")[0] == "clear" or ":0815:" in r["key"]} == {"dropped"} and said(LEE) == []
+        assert said(TEAM)[-1].startswith("✅") and [c for c, x in sent() if "acknowledged" in x and c != CHATS[TEAM]] == []
+
+@t
+def not_on_telegram_is_said_in_the_report():
+    def line(i=None): ticked(hm()); return texts_to()[-1].split("\n")[1].split(" · ")[-1]
+    marks = iter(f"{h:02d}:{m:02d}" for h in (7, 8, 9) for m in (0, 15, 30, 45)); hm = lambda: next(marks)
+    with school(TEAM):
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); assert line() == "not on Telegram"
+        links.link(SAM, CHATS[SAM], None); assert line() == "not told yet", "linked later, and not swept yet"
+        TE.sweep(); assert line() == "not told yet", "waiting in the queue"
+        for s, want in (("sending", "not told yet"), ("failed", "not told yet"), ("dropped", "not told yet"), ("unsure", "sent 07:41")):
+            put(key, state=s, sent_at="2026-10-13T07:41:00+08:00"); assert line() == want, s
+        put(key, state="sent"); assert line() == "sent 07:41"
+        with record(SAM, off=True): assert line() == "sent 07:41", "told, whatever came after"
+        assert SAM_LINE.strip("\n") in texts_to()[-1]
+    marks = iter(f"{h:02d}:{m:02d}" for h in (7, 8, 9) for m in (0, 15, 30, 45))
+    with school(SAM, TEAM):                                                                # a reminder is the relief told, too: the latest of those that went
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("06:56", 13); remind(asks(i, K5)); assert line() == "sent 06:50", "the reminder still waits"
+        send(); assert item(key + ":r1")["state"] == "sent" and line() == "sent 07:00"; put(key, state="failed"); assert line() == "sent 07:00"; put(key + ":r1", state="failed"); assert line() == "not told yet"
+        put(key + ":r1", state="unsure"); assert line() == "sent 07:00"
+        at("08:20", 13); give(i, K5, SAM); assert line() == "not told yet", "approved anew: what was said of it before is not this"; swept(); assert line().startswith("sent 08:")
+    marks = iter(f"{h:02d}:{m:02d}" for h in (7, 8, 9) for m in (0, 15, 30, 45))
+    with school(SAM, MAYA, TEAM):                                                          # two approved in one second have a key each
+        i = today_reliefs((K5, SAM)); give(i, K5, MAYA); swept(); assert item(f"{relief_key_of(i, K5)}:{MAYA}")["state"] == "sent"; ticked(hm())
+        assert texts_to()[-1] == head("07:00", 1) + SAM_LINE.replace(SAM, MAYA) + "sent 06:50"; links.unlink(MAYA); put(f"{relief_key_of(i, K5)}:{MAYA}", state="failed"); assert line() == "not on Telegram"
+
+@t
+def a_stopped_lesson_is_left_out_of_the_report():
+    with exam_school(SAM, MAYA, TEAM):
+        i = today_reliefs((K2, MAYA), (K5, SAM)); e = exam(); swept(); assert outs("stopped", SAM)[0]["state"] == "sent" and ticked("07:00") == keyed("0700")
+        assert texts_to()[-1] == head("07:00", 1) + MAYA_LINE + "sent 06:50" and "Zebra" not in texts_to()[-1]; CV.acknowledge(i, K2, MAYA)
+        assert ticked("07:15") == cleared(1) and texts_to()[-1] == "✅ 07:15 · The 1 relief for today is acknowledged.", "what is stopped does not count"
+        # it stands again: not told, until they are sure to have been
+        withdraw(e); assert ticked("07:30") == keyed("0730") and texts_to()[-1] == head("07:30", 1) + SAM_LINE + "not told yet"
+        TE.sweep(); again = outs("again")[0]["key"]; assert ticked("07:45") == keyed("0745") and texts_to()[-1].endswith("not told yet"), "waiting in the queue"
+        for s in ("unsure", "failed", "sending", "dropped"): put(again, state=s); ticked({"unsure": "08:00", "failed": "08:15", "sending": "08:30", "dropped": "08:45"}[s]); assert texts_to()[-1].endswith("not told yet"), s
+        put(again, state="sent"); ticked("09:00"); assert texts_to()[-1].endswith("sent 06:50")
+        # a second time
+        at("09:01", 13); again_on(e); swept(); ticked("09:15"); assert "Sam" not in texts_to()[-1]; withdraw(e); ticked("09:30"); assert texts_to()[-1].endswith("not told yet"); swept(); ticked("09:45"); assert texts_to()[-1].endswith("sent 06:50")
+    with exam_school(SAM, TEAM):                                                           # reminded since: they know of it; not when the reminder may not have gone
+        i = today_reliefs((K5, SAM)); e = exam(); swept(); withdraw(e); TE.sweep(); put(outs("again")[0]["key"], state="failed"); ticked("07:00"); assert texts_to()[-1].endswith("not told yet")
+        at("07:05", 13); assert remind(asks(i, K5))["sent"] == 1; ticked("07:15"); assert texts_to()[-1].endswith("not told yet"); send(); ticked("07:30"); assert texts_to()[-1].endswith("sent 07:15")
+        put(relief_key_of(i, K5) + ":r1", state="unsure"); ticked("07:45"); assert texts_to()[-1].endswith("not told yet")
+    with exam_school(TEAM): i = today_reliefs((K5, SAM)); e = exam(); withdraw(e); ticked("07:00"); assert texts_to()[-1].endswith("not on Telegram")
+    with exam_school(SAM, TEAM):                                                           # stopped when it would have started: nothing of it
+        today_reliefs((K5, SAM)); exam(); assert [ticked(hm) for hm in ("07:00", "10:30", "10:45")] == [[]] * 3
+
+@t
+def while_the_exams_cannot_be_read_nothing_is_said_to_have_started():
+    with exam_school(SAM, MAYA, TEAM):
+        i = today_reliefs((K2, MAYA), (K5, SAM)); exam()
+        with unreadable(): ticked("07:00"); assert texts_to()[-1] == head("07:00", 2) + MAYA_LINE + "sent 06:50" + SAM_LINE + "sent 06:50", "as if none were stopped"
+        with unreadable(): ticked("09:00"); assert texts_to()[-1] == head("09:00", 1) + SAM_LINE + "sent 06:50" and tgdb.get_state(f"started:{relief_key_of(i, K2)}") is None
+        with unreadable(): assert ticked("10:30") == [], "neither waiting nor, as far as is known, started: no all clear either"
+        assert ticked("10:45") == keyed("1045") and texts_to()[-1] == head("10:45", 0) + STARTED + MAYA_STARTED, "read again: once, and not the one that is stopped"
+        with unreadable(): assert ticked("11:00") == [], "the stopped one counts as started, and is not listed yet: nothing is said of it"
+        assert ticked("11:15") == cleared(1) and texts_to()[-1] == none_waits("11:15", 1)
+
+@t
+def an_old_report_or_all_clear_is_not_sent():
+    with school(SAM, TEAM):
+        i = today_reliefs((K5, SAM)); ticked("07:00"); r = dict(outs("report")[0]); r["ref"] = json.loads(r["ref"])
+        at("07:29:59", 13); assert TE.still_true(r) is True; at("07:30", 13); assert TE.still_true(r) is False and TE.still_true(dict(r, kind="clear")) is False
+        at("07:29", 13); assert send() == 1; CV.acknowledge(i, K5, SAM); ticked("07:30"); c = dict(outs("clear")[0]); c["ref"] = json.loads(c["ref"]); assert TE.still_true(c) is True
+        with record(TEAM, extras=dict(relief=False, exams=None, admin=False)): assert TE.still_true(c) is False and TE.still_true(dict(r, ref=c["ref"])) is False
+        with broken_accounts():
+            try: TE.still_true(c); raise AssertionError("nobody's rights are known")
+            except ValueError: pass
+        at("08:00", 13); assert send() == 0 and outs("clear")[0]["state"] == "dropped" and len(said(TEAM)) == 1
+        # older than the pause Telegram asked for: dropped, not sent late
+    with school(SAM, TEAM):
+        today_reliefs((K5, SAM)); f, seen = tele(SLOW(2400)); os.environ["TELEGRAM_BOT_TOKEN"] = "made-up-" + secrets.token_hex(6)
+        tgdb.set_state("bot", dict(username="ctss_made_up_bot", base=BASE, at="2026-10-12T08:00:00+08:00", key=digest(tg.hook_secret()))); ticked("07:00")
+        with_send(f, lambda: OB.send_due(now=1000)); at("07:45", 13); with_send(f, lambda: OB.send_due(now=4000)); assert outs("report")[0]["state"] == "dropped" and len(texts(seen)) == 1
+        os.environ["TELEGRAM_BOT_TOKEN"] = "practice"
+
+@t
+def the_report_never_raises_and_reads_once():
+    h = Grab(); KINDS.addHandler(h)
+    def boom(*a, **k): raise LookupError(f"{SAM} a private line")
+    try:
+        with school(SAM, MAYA, TEAM):
+            i = today_reliefs((K5, SAM), (K2, MAYA)); n = 0
+            for module, name in ((store, "published"), (links, "connected"), (links, "reachable"), (RS, "load"), (absences, "all_records"), (AP, "staff"), (OB, "told_for"), (tgdb, "get_state"), (RE, "report_text")):
+                h.records.clear()
+                with stand_in(module, name, boom): assert ticked("07:00") == [], name
+                assert [r.getMessage() for r in h.records] and all("LookupError" in r.getMessage() and "private" not in r.getMessage() and SAM not in r.getMessage() and r.exc_info is None for r in h.records), name
+            reads = []
+            def counted(f, name): return lambda *a, **k: (reads.append(name), f(*a, **k))[1]
+            with stand_in(absences, "all_records", counted(absences.all_records, "records")), stand_in(RS, "load", counted(RS.load, "settings")), stand_in(FL, "_links", counted(FL._links, "links")), stand_in(links, "reachable", counted(links.reachable, "reach")):
+                assert ticked("07:01") == keyed("0700") and sorted(reads) == ["links", "reach", "records", "settings"], reads
+                reads.clear(); assert ticked("07:02") == [] and "records" not in reads and "links" not in reads, "nothing to do: next to nothing is read"
+            # a record changed by hand is passed over, and the rest is said
+            h.records.clear()
+            for odd in (dict(id="odd1", teacher=EVE, lessons=[5]), dict(id="odd2", lessons=[dict(date=D13, needed=True, relief=SAM, approved=5)]), dict(id="odd3", teacher=EVE, lessons=[dict(date=D13, key="k", needed=True, relief=SAM, approved=dict(by=TEAM), p="a private word")]),
+                        dict(id="odd7", teacher="Mx Odd", lessons=[dict(date=D13, key="k", needed=True, relief=5, approved=dict(by=TEAM, at="2026-10-13T06:50:00+08:00"), p=2, n=3, classes=["1C"], subject="Science", start="09:00")]),
+                        dict(id="odd4", teacher=SAM, lessons=None), dict(id="odd5", lessons="x"), dict(id="odd6", teacher=["x"], lessons=[dict(date=D13, key="k", needed=True, relief=["x"], approved=dict(at=5), p=1)])): absences._save(odd)
+            assert ticked("07:15") == keyed("0715") and texts_to()[-1].endswith(MAYA_LINE + "sent 06:50" + SAM_LINE + "sent 06:50"), texts_to()[-1]
+            assert h.records and not any("private" in r.getMessage() or "odd" in r.getMessage() or r.exc_info for r in h.records)
+            assert remind(asks(i, K5))["sent"] == 1 and call(TEAM, "get", "/api/relief/me")
+    finally: KINDS.removeHandler(h)
+
+@t
+def the_report_is_quick():
+    with exam_school(SAM, TEAM):
+        exam("3B", name=EXAM2); i = today_reliefs((K5, SAM)); whole_ = absences.load(i)
+        for n in range(300):
+            r = json.loads(json.dumps(whole_)); r.update(id=f"{n:012x}", teacher=f"Mx Made Up {n}")
+            if n % 10: r.update(dates=["2026-10-01"], lessons=[dict(x, date="2026-10-01", key=x["key"].replace(D13, "2026-10-01")) for x in r["lessons"]])
+            absences._save(r)
+        was, = outs("relief")
+        with tgdb.db() as c:                                                               # a year of messages
+            c.executemany("INSERT INTO outbox(key, name, chat, kind, text, ref, at, state, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                          [(f"{k}:Mx Old {n}:2026-09-01/x:2026-09-01T07:00:00+08:00{x}", *[was[v] for v in ("name", "chat", "kind", "text", "ref", "at", "state", "sent_at")])
+                           for n in range(3000) for k, x in (("relief", ""), ("relief", ":r1"), ("stopped:relief", ":0"), ("report", ""))])
+        at("07:00", 13); began = time.process_time(); assert RE.tick() == keyed("0700") and len(texts_to()[-1].splitlines()) == 32; first = time.process_time() - began
+        began = time.process_time(); assert ticked("07:01") == []; second = time.process_time() - began
+        assert first < 2.0 and second < 1.0, (first, second)
+
+@t
+def the_report_never_carries_a_reason():
+    with school(SAM, EVE, ROSA, TEAM, MAYA):
+        at("06:50", 13); i = absent(by=HUGO, reason="Other", reason_text="zebra-reason", remarks="quokka-remark", lessons=[dict(key=K5, relief=SAM)])
+        change_record(i, lambda r: [x.update(pick=dict(who=SAM, by="ai", reason="lemur-pick", at=clock.now), work=dict(text="okapi-work", link="", files=[])) for x in r["lessons"] if x["key"] == K5])
+        on_cover(TEAM, i, K5, "approve", dict(who=SAM)); give(i, K2, MAYA); CV.ask_change(i, K2, "walrus-why", MAYA); CV.keep(i, K2, TEAM); send(); ticked("07:00"); ticked("10:30"); remind(asks(i, K5)); ticked("11:00"); swept()
+        got = [r for r in outs() if r["kind"] in ("report", "clear")]; assert len(got) == 3
+        for r in got:
+            for word in ("zebra", "quokka", "lemur", "walrus", "okapi", "Medical", "Other", EVE): assert word not in r["text"], (word, r["text"])
+            for word in ("zebra", "quokka", "lemur", "walrus", "okapi"): assert word not in json.dumps(r, ensure_ascii=False), word
+        assert "okapi-work" in outs("relief", SAM)[-1]["text"], "the reminder carries the work, as the relief does"
+        raw = "".join(open(os.path.join(history.DIR, f), encoding="utf-8").read() for f in os.listdir(history.DIR)); assert not any(w in raw for w in ("zebra-reason", "quokka", "lemur", "okapi"))
+
+# ---- Remind
+@t
+def remind_resends_once_every_five_minutes():
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K5, SAM), (K2, MAYA)); key = relief_key_of(i, K5); base = item(key)
+        for hm in ("06:50", "06:54", "06:55"): at(hm, 13); assert skips(remind(asks(i, K5, K2))) == [(K5, SAM, TOO_SOON.format("06:50")), (K2, MAYA, TOO_SOON.format("06:50"))] and len(outs("relief")) == 2, hm
+        at("06:55:01", 13); OB._wake.clear(); assert remind(asks(i, K5)) == dict(sent=1, skipped=[]) and OB._wake.is_set(); r = item(key + ":r1")
+        assert (r["name"], r["kind"], r["text"], r["state"], buttons_of(r), r["files"]) == (SAM, "relief", RELIEF_K5, "queued", relief_buttons(i), "[]"), r
+        assert json.loads(r["ref"]) == dict(json.loads(base["ref"]), n=1)
+        assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("06:55"))], "one that waits counts as much"
+        at("06:57", 13); assert send() == 1 and said(SAM) == [RELIEF_K5] * 2; at("07:01", 13); assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("06:57"))], "from when it went"
+        at("07:02:01", 13); assert remind(asks(i, K5))["sent"] == 1 and item(key + ":r2") and json.loads(item(key + ":r2")["ref"])["n"] == 2
+        # it waits (Telegram cannot be reached): after five minutes another takes its place, so that they never all come at once
+        at("07:08", 13); assert remind(asks(i, K5))["sent"] == 1 and (state(key + ":r2"), state(key + ":r3")) == ("dropped", "queued"); at("07:14", 13); assert remind(asks(i, K5))["sent"] == 1 and state(key + ":r3") == "dropped"
+        assert send() == 1 and said(SAM) == [RELIEF_K5] * 3 and [state(f"{key}:r{n}") for n in (1, 2, 3, 4)] == ["sent", "dropped", "dropped", "sent"] and TE.sweep() == 0
+        assert remind(asks(i, K2))["sent"] == 1 and item(f"{relief_key_of(i, K2)}:r1"), "each relief has its own five minutes"
+    with school(SAM, TEAM):                                                                # the press of one listing it twice; a covers list with nothing in it
+        i = today_reliefs((K5, SAM)); at("07:00", 13); got = remind(asks(i, K5, K5)); assert got["sent"] == 1 and skips(got) == [(K5, SAM, TOO_SOON.format("07:00"))] and remind([]) == dict(sent=0, skipped=[])
+    with school(SAM, TEAM):                                                                # a message that failed told nobody: at once
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); put(key, state="failed"); at("06:51", 13); assert remind(asks(i, K5))["sent"] == 1 and item(key + ":r1"); put(key + ":r1", state="failed"); assert remind(asks(i, K5))["sent"] == 1 and item(key + ":r2")
+        put(key + ":r2", state="unsure", sent_at="2026-10-13T06:51:00+08:00"); at("06:53", 13); assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("06:51"))], "it may have gone"
+    with school(TEAM):                                                                     # not told at all yet (linked this minute): the message itself, which the sweep does not send again
+        i = today_reliefs((K5, SAM)); links.link(SAM, CHATS[SAM], None); key = relief_key_of(i, K5); assert remind(asks(i, K5))["sent"] == 1 and [r["key"] for r in outs("relief")] == [key] and "n" not in json.loads(item(key)["ref"])
+        assert TE.sweep() == 0 and swept() == 0 and said(SAM) == [RELIEF_K5]; put(key, state="dropped"); at("07:00", 13); assert remind(asks(i, K5))["sent"] == 1 and state(key) == "queued" and len(outs("relief")) == 1
+    with school(SAM, TEAM):                                                                # the clock put back: never sooner
+        i = today_reliefs((K5, SAM)); at("06:30", 13); assert remind(asks(i, K5))["sent"] == 0
+
+@t
+def two_reminders_at_once_are_one():
+    with school(SAM, TEAM):
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("07:00", 13); got = []
+        at_once(*[lambda: got.append(remind(asks(i, K5)))] * 4)
+        assert sorted(g["sent"] for g in got) == [0, 0, 0, 1] and [r["key"] for r in outs("relief")] == [key, key + ":r1"] and all(skips(g) == [(K5, SAM, TOO_SOON.format("07:00"))] for g in got if not g["sent"])
+    with school(SAM, TEAM):                                                                # another copy of the app put it in the queue meanwhile
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("07:00", 13); before = OB.told_for("relief:"); remind(asks(i, K5))
+        with stand_in(OB, "told_for", lambda prefix: {k: v for k, v in before.items() if k.startswith(prefix)}): assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("07:00"))] and len(outs("relief")) == 2
+        links.unlink(SAM); at("07:30", 13)
+        with stand_in(links, "reachable", lambda pub=None: {SAM: CHATS[SAM]}): 
+            assert skips(remind(asks(i, K5))) == [(K5, SAM, NOT_ON)], "unlinked meanwhile"
+            put(key, state="dropped"); put(key + ":r1", state="dropped"); assert skips(remind(asks(i, K5))) == [(K5, SAM, NOT_ON)] and state(key) == "dropped"
+
+@t
+def who_is_not_reminded_and_why():
+    def skipped(f=None, covers=None, date=D13, linked=(SAM, MAYA, TEAM), hm="07:00", day=13, give_=(K5, SAM), m=exam_school):
+        with m(*linked):
+            i = today_reliefs(give_)
+            if f: f(i)
+            at(hm, day); n, h = len(outs("relief")), Since(); got = remind(covers(i) if covers else asks(i, K5), date); assert got["sent"] == 0 and len(outs("relief")) == n and h.new() == [], got
+            return skips(got)
+    assert skipped(linked=(MAYA, TEAM)) == [(K5, SAM, NOT_ON)]
+    for f in (lambda i: CV.acknowledge(i, K5, SAM), lambda i: CV.ask_change(i, K5, "x", SAM)): assert skipped(f) == [(K5, SAM, NOBODY)]
+    for f in (lambda i: absences.not_needed(i, K5, "x", HUGO), lambda i: absences.cancel(i, "x", HUGO), lambda i: os.remove(absences._path(i))): assert skipped(f) == [(K5, None, NOBODY)]
+    assert skipped(give_=(K2, MAYA)) == [(K5, None, NOBODY)], "open"
+    assert skipped(hm="11:30") == [(K5, SAM, NOBODY)], "over"; assert skipped(day=14) == [(K5, SAM, NOBODY)]
+    assert skipped(date="2026-10-14") == [(K5, SAM, NOBODY)], "another date"
+    assert skipped(lambda i: exam()) == [(K5, SAM, NOBODY)], "stopped"
+    assert skipped(covers=lambda i: [dict(id="abcdef123456", ckey=K5)]) == [(K5, None, NOBODY)] and skipped(covers=lambda i: [dict(id=i, ckey="nokey")]) == [("nokey", None, NOBODY)]
+    assert skipped(covers=lambda i: [dict(id=i, ckey=K5 + "#0", absent=EVE)]) == [(K5 + "#0", None, NOBODY)] and skipped(covers=lambda i: [dict(id=i, ckey=K5, absent=RUTH)]) == [(K5, None, NOBODY)]
+    # given to another since the report was made: the one listed is not theirs any more
+    def again(i): at("06:55", 13); give(i, K5, MAYA); swept()
+    assert skipped(again, covers=lambda i: [dict(id=i, ckey=K5, absent=EVE, approved_at="2026-10-13T06:50:00+08:00")], hm="07:30") == [(K5, MAYA, NOBODY)]
+    with school(SAM, MAYA, TEAM): i = today_reliefs((K5, SAM)); again(i); at("07:30", 13); assert remind(asks(i, K5))["sent"] == 1 and outs("relief")[-1]["name"] == MAYA and remind(listed(i, K5))["sent"] == 0
+    # while it lasts, and while the exams cannot be read: reminded
+    with exam_school(SAM, TEAM):
+        i = today_reliefs((K5, SAM)); exam(); at("11:29", 13)
+        with unreadable(): assert remind(asks(i, K5))["sent"] == 1
+    with school(SAM, TEAM):                                                                # moved to another absence of the same teacher's (a takeover): found there, by whatever absence it was sent for
+        i = today_reliefs((K5, SAM)); moved_to(i); at("07:00", 13); assert remind(listed_ := [dict(id=i, ckey=K5, absent=EVE)])["sent"] == 1 and listed_
+        at("07:10", 13); assert remind([dict(id=i, ckey=K5)])["sent"] == 1 and json.loads(outs("relief")[-1]["ref"])["id"] == "dead00beef" and outs("relief")[-1]["key"].endswith(":r2")
+    for bad in (None, "x", 5, {}, [None], [5], [{}], [dict(id="a")], [dict(ckey=K5)], [dict(id=5, ckey=K5)], [dict(id="", ckey=K5)], [dict(id="a", ckey="")], [dict(id="a", ckey=K5), 5]):
+        with school(TEAM):
+            try: remind(bad); raise AssertionError(bad)
+            except ValueError as e: assert str(e) == absences.WRONG, bad
+    for bad in (None, "x", 5, "13/10/2026", "2026-13-40", ["2026-10-13"]):
+        with school(TEAM):
+            try: RE.remind(bad, [], BY); raise AssertionError(bad)
+            except ValueError as e: assert str(e) == absences.WRONG, bad
+    with school(SAM, TEAM):
+        i = today_reliefs((K5, SAM)); at("07:00", 13); assert RE.remind(datetime.date(2026, 10, 13), asks(i, K5), BY)["sent"] == 1 and RE.remind(D13, asks(i, K5), BY, now="2026-10-13T07:20:00+08:00")["sent"] == 1
+        with no_pub():
+            try: remind(asks(i, K5)); raise AssertionError()
+            except ValueError as e: assert str(e) == WB.NO_PUB
+
+@t
+def a_reminder_is_the_relief_again_and_no_relief_of_its_own():
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K5, SAM)); change_record(i, lambda r: [x.update(work=dict(text="Read p.4", link="", files=[dict(id="f1", name="a.pdf", size=1)])) for x in r["lessons"] if x["key"] == K5]); at("07:00", 13); remind(asks(i, K5)); r, = [x for x in outs("relief") if x["key"].endswith(":r1")]
+        assert r["text"].endswith("\nWork from Ms Evelyn Koh: Read p.4\nFiles: 1, sent after this message.") and json.loads(r["files"]) == [dict(id=i, file="f1", name="a.pdf")], "the work set since"
+        put(r["key"], state="sent", sent_at="2026-10-13T07:00:00+08:00"); assert TE.sweep() == 0; at("07:10", 13); give(i, K5, MAYA); swept(); swept()
+        assert told_of("moved") == [("moved", SAM)] and [x["key"] for x in outs("relief", MAYA)] == [relief_key_of(i, K5)], "one moved, and her own message"
+        absences.cancel(i, "Better", HUGO); swept(); assert told_of("gone") == [("gone", MAYA)]
+    def copy(): r = next(x for x in outs("relief") if x["key"].endswith(":r1")); return dict(r, ref=json.loads(r["ref"]))
+    for f, want in ((lambda i: None, True), (lambda i: CV.acknowledge(i, K5, SAM), False), (lambda i: CV.ask_change(i, K5, "x", SAM), False), (lambda i: give(i, K5, MAYA), False), (lambda i: absences.cancel(i, "x", HUGO), False),
+                    (lambda i: absences.not_needed(i, K5, "x", HUGO), False), (lambda i: exam(), False), (lambda i: at("11:30", 13), False), (lambda i: at("11:29", 13), True), (lambda i: (at("07:05", 13), give(i, K5, SAM)), False), (lambda i: moved_to(i), True)):
+        with exam_school(SAM, MAYA, TEAM): i = today_reliefs((K5, SAM)); at("07:00", 13); remind(asks(i, K5)); f(i); assert TE.still_true(copy()) is want, want; n = len(said(SAM)); send(); assert (len(said(SAM)) == n + 1) is want
+    with school(SAM, MAYA, TEAM):                                                          # pressed on the reminder as on the relief
+        i = today_reliefs((K5, SAM)); at("07:00", 13); remind(asks(i, K5)); send(); assert press(SAM, "ack") == ("✅ Acknowledged 07:00.", False) and state_of(i) == "acknowledged" and remind(asks(i, K5))["sent"] == 0
+
+@t
+def the_page_reminds_and_the_history_says_so():
+    URL = "/api/relief/today/remind"
+    with school(SAM, MAYA, TEAM, EVE):
+        i = today_reliefs((K5, SAM), (K2, MAYA)); body = dict(date=D13, covers=[dict(id=i, ckey=K5), dict(id=i, ckey=K2), dict(id=i, ckey=K8)]); h = Since()
+        got = call(TEAM, "post", URL, body); assert got == dict(sent=0, skipped=[dict(ckey=K5, name=SAM, why=TOO_SOON.format("06:50")), dict(ckey=K2, name=MAYA, why=TOO_SOON.format("06:50")), dict(ckey=K8, name=None, why=NOBODY)]) and h.new() == [], got
+        at("07:00", 13); assert call(TEAM, "post", URL, body) == dict(sent=2, skipped=[dict(ckey=K8, name=None, why=NOBODY)]) and h.new() == [(TEAM, TEAM, "code", "reminded", "Reminded 2 relief teachers on Tue 13 Oct", None)]
+        assert len([r for r in outs("relief") if r["key"].endswith(":r1")]) == 2
+        at("07:10", 13); call(LEE, "post", URL, dict(date=D13, covers=[dict(id=i, ckey=K5)])); assert h.new() == [(LEE, LEE, "code", "reminded", "Reminded 1 relief teacher on Tue 13 Oct", None)]
+        # the relief team's alone
+        was = len(outs())
+        for name in (SAM, EVE, HUGO, MAYA): assert call(name, "post", URL, body, code=403) == dict(error=WB.TEAM_ONLY)
+        assert client(None).post(URL, json=body).status_code in (302, 401) and client(dict(role="committee")).post(URL, json=body).status_code == 401
+        # a body that is not what the page sends
+        for bad in ({}, [], None, "x", dict(date=D13), dict(covers=body["covers"]), dict(date="13/10/2026", covers=[]), dict(date=5, covers=[]), dict(date=D13, covers="x"), dict(date=D13, covers={}), dict(date=D13, covers=[5]), dict(date=D13, covers=[dict(id=i)]),
+                    dict(date=D13, covers=[dict(id=[i], ckey=K5)]), dict(date=D13, covers=[dict(id=i, ckey=K5), None])):
+            r = who(TEAM).post(URL, json=bad); assert r.status_code == 400 and r.get_json() == dict(error=absences.WRONG), (bad, r.get_data(as_text=True)[:200])
+        assert who(TEAM).post(URL, data=b"{ not json").status_code == 400 and call(TEAM, "post", URL, dict(date=D13, covers=[])) == dict(sent=0, skipped=[])
+        # only what the page sends is read: who and when it was approved are the app's own
+        at("07:20", 13); assert call(TEAM, "post", URL, dict(date=D13, covers=[dict(id=i, ckey=K5, absent=RUTH, approved_at="x", who=HUGO)]))["sent"] == 1 and outs("relief")[-1]["name"] == SAM; h.new()
+        for other in ("2026-10-12", "2026-10-14", "1999-01-01"): assert call(TEAM, "post", URL, dict(date=other, covers=body["covers"][:1])) == dict(sent=0, skipped=[dict(ckey=K5, name=SAM, why=NOBODY)])
+        was = len(outs()); tgdb.set_state("bot", None); assert call(TEAM, "post", URL, body, code=409) == dict(error=tgweb.NOT_CONNECTED) and len(outs()) == was and h.new() == []
+    with school(SAM, TEAM):
+        i = today_reliefs((K5, SAM)); at("07:00", 13)
+        with no_pub(): call(TEAM, "post", URL, dict(date=D13, covers=[dict(id=i, ckey=K5)]), code=409)
+        def lost(*a, **k): raise RuntimeError("made up")
+        with stand_in(history, "add", lost): assert call(TEAM, "post", URL, dict(date=D13, covers=[dict(id=i, ckey=K5)]))["sent"] == 1, "a history entry that cannot be made never fails it"
+    with school(SAM, TEAM):                                                                # one teacher, two reliefs: two messages, one teacher
+        i = today_reliefs((K5, SAM), (K2, SAM)); at("07:00", 13); h = Since(); assert remind(asks(i, K2, K5))["sent"] == 2 and h.new() == [(TEAM, TEAM, "telegram", "reminded", "Reminded 1 relief teacher on Tue 13 Oct", None)]
+    with school(SAM, MAYA, TEAM):                                                          # the store fails half-way: what was put in the queue is written down, and it is not said to be done
+        i = today_reliefs((K5, SAM), (K2, MAYA)); at("07:00", 13); real, h = OB.queue, Since()
+        def half(key, name, *a, **k):
+            if name == MAYA: raise sqlite3.OperationalError("made up")
+            return real(key, name, *a, **k)
+        with stand_in(OB, "queue", half):
+            try: remind(asks(i, K5, K2)); raise AssertionError("said to be done")
+            except sqlite3.OperationalError: pass
+        assert [x[4] for x in h.new()] == ["Reminded 1 relief teacher on Tue 13 Oct"] and len(outs("relief")) == 3
+        lg = Grab(); KINDS.addHandler(lg)
+        def private(*a, **k): raise LookupError(f"{MAYA} a private line")
+        with stand_in(OB, "queue", private): assert skips(remind(asks(i, K2))) == [(K2, MAYA, NOBODY)], "one that cannot be made"
+        KINDS.removeHandler(lg); assert [r.getMessage() for r in lg.records] == ["a reminder could not be made (LookupError)"] and lg.records[0].exc_info is None
+
+@t
+def remind_them_again_on_telegram():
+    with school(SAM, MAYA, TEAM, LEE, EVE, HUGO):
+        i = today_reliefs((K2, MAYA), (K5, SAM)); ticked("07:00"); send(); h, n = Since(), len(edits()); m = under(tok(TEAM, "remind"))
+        assert press(TEAM, "remind") == ("Reminded 2.", False) and h.new() == [(TEAM, TEAM, "telegram", "reminded", "Reminded 2 relief teachers on Tue 13 Oct", None)]
+        assert [r["key"] for r in outs("relief")][-2:] == [relief_key_of(i, K2) + ":r1", relief_key_of(i, K5) + ":r1"] and edits() == [] and calls("editMessageReplyMarkup") == [], "its message stays as it is"
+        assert press(LEE, "remind") == (TOO_SOON.format("07:00"), True) == press(TEAM, "remind") and h.new() == [] and edits() == [] and calls("editMessageReplyMarkup") == []
+        send(); assert said(SAM) == [RELIEF_K5] * 2 and m
+        at("07:10", 13); CV.acknowledge(i, K2, MAYA); assert press(TEAM, "remind") == ("Reminded 1.", False); send(); assert len(said(SAM)) == 3 and len(said(MAYA)) == 2
+        at("07:20", 13); CV.acknowledge(i, K5, SAM); assert press(LEE, "remind") == (NOBODY, True) and edits() == [] and h.new()[-1][0] == TEAM
+        # not one's own, and not without the right at that moment
+        was = len(outs())
+        for other in (SAM, EVE, HUGO, LEE): assert press(TEAM, "remind", chat=CHATS[other]) == (NOT_YOURS_BUTTON, True)
+        with record(TEAM, extras=dict(relief=False, exams=None, admin=False)): assert press(TEAM, "remind") == (NOT_YOURS_BUTTON, True)
+        with record(TEAM, off=True): assert press(TEAM, "remind") == (NOT_LINKED, True)
+        button(tok(TEAM, "remind"), until=0); assert press(TEAM, "remind") == (OLD_BUTTON, True) and len(outs()) == was and edits() == [] and bot.ACTIONS["remind"][0] == "relief.team"
+    with school(SAM, TEAM):                                                                # refused whatever it is for: the buttons stay
+        i = today_reliefs((K5, SAM)); ticked("07:00"); send(); links.unlink(SAM); at("07:10", 13); assert press(TEAM, "remind") == (NOT_ON, True)
+        with no_pub(): assert press(TEAM, "remind") == (WB.NO_PUB, True)
+        with stand_in(RE, "remind", lambda *a, **k: 1 / 0): assert press(TEAM, "remind") == (WENT_WRONG, True)
+        for extra in ("null", "{}", "[]", '{"date": "x", "covers": []}', '{"date": "2026-10-13", "covers": [5]}'): button(tok(TEAM, "remind"), extra=extra); assert press(TEAM, "remind") == (absences.WRONG, True), extra
+        button(tok(TEAM, "remind"), extra='{"date": "2026-10-13", "covers": []}'); assert press(TEAM, "remind") == (NOBODY, True)
+        assert edits() == [] and calls("editMessageReplyMarkup") == []; at("08:00", 14); assert press(TEAM, "remind")[0] == NOBODY, "yesterday's report"
+    with school(SAM, MAYA, TEAM):                                                          # those it listed, and only while they are theirs
+        i = today_reliefs((K2, MAYA), (K5, SAM)); ticked("07:00"); send(); at("07:10", 13); give(i, K5, HUGO); links.link(HUGO, CHATS[HUGO], None); swept(); at("07:30", 13); assert press(TEAM, "remind") == ("Reminded 1.", False) and [r["name"] for r in outs("relief") if r["key"].endswith(":r1")] == [MAYA]
+        on_lesson(EVE, i, K8, "needed"); give(i, K8, SAM); swept(); at("07:40", 13); assert press(TEAM, "remind") == ("Reminded 1.", False), "not one approved since"
+    with school(SAM, TEAM):                                                                # nothing is held, and all is written down, before the press is answered
+        i = today_reliefs((K5, SAM)); ticked("07:00"); send(); real, seen, n = tg.call, [], len(entries())
+        def spy(method, params=None, **kw): seen.append((method, len(entries()) - n, absences._LOCK.locked(), bot._pressing.locked(), bot._counting.locked())); return real(method, params, **kw)
+        with stand_in(tg, "call", spy): press(TEAM, "remind")
+        assert seen == [("answerCallbackQuery", 1, False, False, False)], seen
+
+# ---- Today's rows
+@t
+def today_rows_say_when_it_was_told_and_if_not_on_telegram():
+    def row(ckey=K5, name=TEAM):
+        v = next(v for v in call(name, "get", f"/api/relief/today?date={D13}")["rows"] if v["ckey"] == ckey); return v["told"], v["linked"]
+    with school(MAYA, TEAM):
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); assert row() == (None, False) and row(K2) == (None, False), "not on Telegram; open"
+        links.link(SAM, CHATS[SAM], None); assert row() == (None, True); TE.sweep(); assert row() == (dict(state="queued", at=clock.now), True)
+        at("06:58", 13); send(); assert row() == (dict(state="sent", at="2026-10-13T06:58:00+08:00"), True)
+        for s in ("unsure", "failed", "dropped"): put(key, state=s); assert row()[0]["state"] == s, s
+        put(key, state="sending"); assert row()[0]["state"] == "queued"; put(key, state="sent")
+        # the last of it and its reminders
+        at("07:10", 13); remind(asks(i, K5)); assert row()[0] == dict(state="queued", at="2026-10-13T07:10:00+08:00"); put(key + ":r1", state="failed"); assert row()[0] == dict(state="failed", at="2026-10-13T07:10:00+08:00")
+        put(key + ":r1", state="dropped"); assert row()[0] == dict(state="sent", at="2026-10-13T06:58:00+08:00"), "as if it had never been"; put(key + ":r1", state="sent", sent_at="2026-10-13T07:11:00+08:00"); assert row()[0] == dict(state="sent", at="2026-10-13T07:11:00+08:00")
+        # whatever was answered; another's, and approved anew, from the start
+        CV.acknowledge(i, K5, SAM); assert row()[0]["state"] == "sent"; CV.ask_change(i, K5, "x", SAM); assert row()[0]["state"] == "sent"
+        at("07:20", 13); give(i, K5, MAYA); assert row() == (None, True); swept(); assert row()[0] == dict(state="sent", at=clock.now); links.unlink(MAYA); assert row() == (dict(state="sent", at=clock.now), False), "told, and not reached any more"
+        absences.not_needed(i, K5, "x", HUGO); assert all(v["ckey"] != K5 for v in call(TEAM, "get", f"/api/relief/today?date={D13}")["rows"])
+    with school(SAM, TEAM):                                                                # a pick nobody has approved: nobody told, and whether they could be
+        at("06:50", 13); i = absent(by=HUGO, lessons=[dict(key=K5, relief=SAM), dict(key=K2, relief=MAYA)]); assert row() == (None, True) and row(K2) == (None, False); absences.cancel(i, "x", HUGO)
+        assert all((v["state"], v["told"], v["linked"]) == ("cancelled", None, False) for v in call(TEAM, "get", f"/api/relief/today?date={D13}")["rows"])
+    with exam_school(SAM, TEAM):                                                           # stopped: nothing; stood again, and not sure to have been told so: nothing
+        i = today_reliefs((K5, SAM)); e = exam(); assert row() == (None, True); swept(); assert row() == (None, True); withdraw(e); assert row()[0] is None; TE.sweep(); again = outs("again")[0]["key"]
+        for s in ("queued", "unsure", "failed"): put(again, state=s); assert row()[0] is None, s
+        put(again, state="sent"); assert row()[0] == dict(state="sent", at="2026-10-13T06:50:00+08:00"); put(again, state="failed"); at("07:00", 13); remind(asks(i, K5)); assert row()[0] == dict(state="queued", at=clock.now); send(); assert row()[0] == dict(state="sent", at=clock.now)
+    with school(SAM, MAYA, TEAM):                                                          # read once a request, however many absences and rows
+        i = today_reliefs((K5, SAM), (K2, MAYA)); absent(teacher=RUTH); reads = []
+        def counted(f, name): return lambda *a, **k: (reads.append(name), f(*a, **k))[1]
+        with stand_in(links, "reachable", counted(links.reachable, "reach")), stand_in(OB, "told_for", counted(OB.told_for, "told")): assert row()[0]["state"] == "sent" == row(K2)[0]["state"]
+        assert reads.count("reach") == 2 and reads.count("told") == 6, reads
+        # Telegram's side never fails the page
+        for module, name in ((links, "reachable"), (OB, "told_for"), (tgdb, "db")):
+            with quiet_app(), stand_in(module, name, lambda *a, **k: 1 / 0): assert row() == (None, False), name
+        os.environ.pop("TELEGRAM_BOT_TOKEN")
+        opened = []
+        with stand_in(tgdb, "db", lambda read=False: opened.append(1)): assert row() == (None, False) and opened == [], "no token: the store is not opened"
+        os.environ["TELEGRAM_BOT_TOKEN"] = "practice"; assert row()[1] is True
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

@@ -58,8 +58,10 @@ from relief import files as _files
 from relief import fill as _fill
 from relief import free as _free
 from relief import lessons as _lessons
+from relief import links as _chats
 from relief import settings as _settings
 from relief import tell as _tell
+from relief import tg as _tg
 from relief import words as _words
 from relief.calendar import term_of, week_of
 from relief.codes import _cell
@@ -271,12 +273,14 @@ def _on_staff(pub, name):
 def _noted(what, r, words, by=None):
     """the history entry for a save (the accounts design: one per relief save, naming who, what and which absence, with a
     link; never the reason, nor a why typed with it): 'Relief for <teacher> on <dates>: <words>' (words: a string, or
-    a function giving it). by: (the person's name, "telegram") when they did it on Telegram, else whoever is signed in"""
+    a function giving it; r None: the words alone, for what is of no one absence). by: (the person's name, "telegram") when
+    they did it on Telegram, else whoever is signed in"""
     if _note is None: return
     try:
-        text = f"Relief for {r.get('teacher')} on {_words.days(r)}: {words() if callable(words) else words}"
-        if by is None: _note(what, text, r.get("id"))
-        else: _note(what, text, r.get("id"), who=by[0], via=by[1])
+        text, id = words() if callable(words) else words, None
+        if r is not None: text, id = f"Relief for {r.get('teacher')} on {_words.days(r)}: {text}", r.get("id")
+        if by is None: _note(what, text, id)
+        else: _note(what, text, id, who=by[0], via=by[1])
     except Exception:          # the save has happened: a history entry that cannot be made never fails it
         current_app.logger.exception("relief: the history entry for %s could not be made", what)
 
@@ -732,7 +736,7 @@ def _row(pub, settings, records, r, x, c, i, links=None):
     relief takes them over a checked limit; nobody: an open cover nobody at all is free for; warn: the sentence for any of
     these, and OVER_ONLY for an open cover whose free people are all over a limit (the app picks none of them); change: a
     request to change, with its new pick (stale too when that person is no longer free). One free_then for the cover gives
-    them all; never the absence's reason"""
+    them all; never the absence's reason. told and linked: today() puts them there"""
     s = _cover.state(r, x, c)
     ckey, p, n = _cover.cover_key(x, i), int(c["p"]), int(c.get("n") or 1)
     start, end = _times(pub, x, c)
@@ -745,7 +749,8 @@ def _row(pub, settings, records, r, x, c, i, links=None):
                work_set=bool(w.get("text") or w.get("link") or w.get("files")), state=s, pick=brief(pk) if s != "open" else None,
                approved=c.get("approved") or None, ack=c.get("ack") or None,
                change=dict(why=ch.get("why"), at=ch.get("at"), pick=brief(new), stale=False) if ch else None,
-               stale=False, over_now=False, nobody=False, warn=None, stopped="", duty=(r.get("reason_text") or "") if r.get("exams") else "")
+               stale=False, over_now=False, nobody=False, warn=None, stopped="", duty=(r.get("reason_text") or "") if r.get("exams") else "",
+               told=None, linked=False)
     if s == "cancelled": return row
     why = _cover.stopped(links, x)
     if why: return dict(row, state="stopped", stopped=why)
@@ -763,12 +768,24 @@ def _row(pub, settings, records, r, x, c, i, links=None):
     return row
 
 
+def _telegram(pub):
+    """(what has been said of the reliefs on Telegram, who can be reached there), read once a request; nothing and nobody while
+    there is no token, or when it cannot be read: the page works without"""
+    try:
+        if _tg.on(): return _tell.said(), _chats.reachable(pub)
+    except Exception as e: current_app.logger.error("relief: what was said on Telegram could not be read (%s)", type(e).__name__)
+    return _tell.Said({}), {}
+
+
 @bp.get("/api/relief/today")
 @need("relief")
 def today():
     """every cover of the date's lessons that need relief (?date=YYYY-MM-DD, today when left out), in time order, one row a
     cover (_row; a cancelled absence's as "cancelled", one an exam or event stops as "stopped", both out of the counts), with counts=dict(need, waiting, approved,
-    acknowledged, change, nobody, open) and filling: picks are being made (the page fetches again); relief.team"""
+    acknowledged, change, nobody, open) and filling: picks are being made (the page fetches again). On Telegram, each row: told,
+    dict(state "sent" | "unsure" (it may have been) | "queued" | "failed" | "dropped", at) of the last message of the relief
+    approved, its reminders too, else None (tell.Said.of; a stopped lesson's is None), and linked, its relief teacher can be
+    reached; relief.team"""
     pub, me, err = _gate(*TEAM)
     if err: return err
     try: date = _day(request.args.get("date"), _lessons.today()).isoformat()
@@ -776,10 +793,15 @@ def today():
     filling = _fill.filling()                   # read first: a run that ends while the rows are read is fetched again
     settings, records, rows = _settings.load(pub), _absences.all_records(), []
     links = _links_or_none(pub, settings["calendar"])
+    said, reach = _telegram(pub)
     for r in records:
         for x in r.get("lessons") or []:
             if x.get("date") != date or not x.get("needed"): continue
-            rows += [_row(pub, settings, records, r, x, c, i, links) for i, c in enumerate(_cover.covers(x))]
+            for i, c in enumerate(_cover.covers(x)):
+                row = _row(pub, settings, records, r, x, c, i, links)
+                if row["state"] in APPROVED: row["told"] = said.of(_tell.key_of(said.told, r, c, row["ckey"]))
+                row["linked"] = c.get("relief") in reach
+                rows.append(row)
     rows.sort(key=lambda v: (v["p"], v["absent"], v["ckey"]))
     counts = dict(need=0, waiting=0, approved=0, acknowledged=0, change=0, nobody=0, open=0)
     for v in rows:

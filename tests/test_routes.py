@@ -310,6 +310,7 @@ GUARDS = {
     "relief_tg.status": ('relief',),
     "relief_tg.code": ('relief',),
     "relief_tg.unlink_mine": ('relief',),
+    "relief_tg.remind": ('relief',),
     "relief_tg.admin": ('relief.save',),
     "relief_tg.connect": ('relief.save',),
     "relief_tg.disconnect": ('relief.save',),
@@ -583,6 +584,7 @@ RELIEF_INSIDE.update({(m, u): ("relief.team", TEAM_ONLY) for m, u in (
     ("PUT", f"/api/relief/absences/{_X}/covers/{_K}/relief"), ("GET", f"/api/relief/absences/{_X}/covers/{_K}/free"),
     ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/split"), ("POST", f"/api/relief/absences/{_X}/lessons/{_K}/join"),
     ("POST", f"/api/relief/absences/{_X}/covers/{_K}/keep"), ("POST", "/api/relief/today/fill"), ("GET", "/api/relief/load"),
+    ("POST", "/api/relief/today/remind"),
     ("GET", f"/api/relief/load/{urllib.parse.quote(TINA)}"), ("GET", "/api/relief/load.csv"))})
 
 @t

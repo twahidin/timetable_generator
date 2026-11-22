@@ -15,7 +15,7 @@ from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, draft, history, store, sync, typed
 from accounts import passwords, people, rights as rights_table
-from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, outbox as relief_outbox, people as relief_people, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
+from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
 import exams.relief_links as exams_relief_links
 from ttgen import choices
@@ -1331,6 +1331,7 @@ if os.environ.get("RELIEF_JOBS") == "on":                         # relief picks
     relief_fill.start()
 if os.environ.get("RELIEF_JOBS") == "on" and relief_tg.on():
     relief_tell.MINUTE.append(relief_tell.sweep)                  # what there is to say by the clock, every minute, whatever the picks are waiting for
+    relief_tell.MINUTE.append(relief_report.tick)                 # and then the relief team's report of who has not acknowledged
     relief_tell.start()
     relief_outbox.start()                                         # the Telegram messages, every 5 seconds
 

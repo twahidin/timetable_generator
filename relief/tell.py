@@ -11,6 +11,8 @@ gone:{relief key} or moved:{relief key}, one of them once, to a person told of a
 that is not approved to them any more, from what that message's ref holds: the cover, or its absence, may be gone;
 stopped:{relief key}:{k} and again:{relief key}:{k} to a person told of a relief that is still theirs, while its lesson is
 stopped and once it stands again (below; k counts the times);
+{relief key}:r{n}, the relief sent once more because the team reminded them (relief/report.py queues it, the n-th time): never a
+relief message of its own here (_base);
 kept:{absent}:{ckey}:{when} to the teacher who asked to change; ask:{absent}:{ckey}:{change.at}:{name} to each of the team
 with the new pick, or two minutes after the request without one, and then askpick:… once when a pick (another than the ask
 carried) is in; planned:{id} and remind:{id} to the absent teacher; officer:{id} to the reporting officer;
@@ -41,7 +43,7 @@ once. The records are read after what has been told (so a relief told of was in 
 gone or moved they are read again in one go, under absences._LOCK (a change of two of them is seen whole). A file there that
 cannot be read is passed over, its kind logged: gone waits only while it is the record that should hold the cover. Failures
 are logged to "relief.telegram" (the exams', by fill._links, to "relief.fill") by their kind alone."""
-import datetime, json, logging, os, sqlite3, threading, types
+import datetime, json, logging, os, re, sqlite3, threading, types
 
 import store
 from accounts import people as _accounts
@@ -68,6 +70,8 @@ NO_PICK = "No new pick yet: open the app."
 ACK, CHANGE, SET_WORK, NOT_NEEDED, OPEN = "✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"
 TOLD = ("relief:", "gone:", "moved:", "stopped:", "again:", "ask:", "planned:", "remind:", "officer:")      # the keys due must know of
 SENT = ("sent", "unsure")                       # the states in which a person was told, or may have been
+RELIEFS = ("relief:", "stopped:", "again:")      # the keys that say what has been said of a relief (Said)
+_COPY = re.compile(r"(relief:.*):r(\d+)", re.S)  # the key of a reminder: the relief's, and which one it is
 _going = threading.Lock()                       # one sweep at a time
 _asked, _asked_lock = [False], threading.Lock() # a sweep soon() asked for has not started
 _stop = threading.Event()                       # ends the ticker (tests)
@@ -257,10 +261,10 @@ def _of_told(w, key, ref):
     elif ref["id"] not in w.unread: yield _item(f"gone:{key}", ref["who"], "gone", gone_text(ref["lesson"], ref["periods"], ref["start"], ref["day"]), ref=ref)
 
 
-def _times_told(w, kind, key):
+def _times_told(told, kind, key):
     """how many times the person told of the relief under key was told this of it (stopped, again): {kind}:{key}:0, :1 and so on"""
     n = 0
-    while (w.told.get(f"{kind}:{key}:{n}") or {}).get("state") in SENT: n += 1
+    while (told.get(f"{kind}:{key}:{n}") or {}).get("state") in SENT: n += 1
     return n
 
 
@@ -276,9 +280,9 @@ def _stops(w, key, ref, r, x, c):
     was stopped; nothing while the exams cannot be read"""
     if w.links is None: return
     why, what, ref_ = _cover.stopped(w.links, x), (ref["lesson"], ref["periods"], ref["start"], ref["day"]), dict(ref, id=r["id"])       # id: where the cover is now
-    if why: yield _item(f"stopped:{key}:{_times_told(w, 'again', key)}", ref["who"], "stopped", stopped_text(*what, why), ref=ref_)
+    if why: yield _item(f"stopped:{key}:{_times_told(w.told, 'again', key)}", ref["who"], "stopped", stopped_text(*what, why), ref=ref_)
     else:
-        n = _times_told(w, "stopped", key)
+        n = _times_told(w.told, "stopped", key)
         if n and _on_again(w.pub, w.settings.get("calendar") or {}, ref, r, x, c):
             yield _item(f"again:{key}:{n - 1}", ref["who"], "again", again_text(*what), _answers(r, x, ref["ckey"], ref["who"]), ref=ref_)
 
@@ -361,6 +365,12 @@ def _relief(w, r, x, c, ckey):
                 _answers(r, x, ckey, who), [dict(id=r["id"], file=f["id"], name=f["name"]) for f in work.get("files") or []], ref)
 
 
+def relief_item(pub, reach, told, r, x, c, ckey):
+    """the relief message of an approved cover, as outbox.queue takes it, or None (its teacher cannot be reached)"""
+    w = types.SimpleNamespace(pub=pub, reach=reach, told=told, bnds=bounds((pub or {}).get("model") or {}))
+    return next(_relief(w, r, x, c, ckey), None)
+
+
 def _kept(w, r, x, c, ckey):
     h = _stands(r, x, c)
     if h is None or c["relief"] not in w.reach or not _since(w, h.get("at")): return
@@ -413,6 +423,65 @@ def due(pub, settings, records, now, reach, told, since, team=(), base="", short
     out += _each(still, lambda r: _absence(w, r))
     out += _each(covers, lambda t: _of_cover(w, *t))
     return [i for i in out if not _there(told, i["key"])]
+
+
+# ---- what has been said of a relief (the report, Remind, and Today's page)
+def key_of(told, r, c, ckey):
+    """the key of the relief message of cover c as it is approved now"""
+    return _relief_key_for(told, dict(absent=r["teacher"], ckey=ckey, approved_at=c["approved"].get("at"), who=c["relief"]))
+
+
+class Said:
+    """what has been said of the reliefs, read once (said): told, what outbox.told_for gives for the RELIEFS keys. key: a relief
+    message's; it and its reminders are one relief's messages, those dropped as if they had never been.
+
+    Someone told that a relief is stopped, and not surely (sent) told since that it is on again, has been told nothing: until a
+    reminder has gone to them after that"""
+    def __init__(self, told):
+        self.told, self._copies = told, {}
+        for key, t in told.items():
+            m = _COPY.fullmatch(key)
+            if m: self._copies.setdefault(m[1], {})[int(m[2])] = t
+
+    def copies(self, key):
+        """the reminders of the relief, in any state: {n: told}"""
+        return self._copies.get(key, {})
+
+    def _messages(self, key):
+        """[(when, n, told)]: the relief's messages, n 0 for the first"""
+        return [(_time(t["at"]), n, t) for n, t in [(0, self.told.get(key)), *self.copies(key).items()] if t]
+
+    def _off(self, key):
+        """when its person was told that it is stopped, while they are not sure to know that it is on again; else None"""
+        n = _times_told(self.told, "stopped", key)
+        if not n or (self.told.get(f"again:{key}:{n - 1}") or {}).get("state") == "sent": return None
+        return _time(self.told[f"stopped:{key}:{n - 1}"]["at"])
+
+    def sent_at(self, key):
+        """when its person was last told of the relief, or may have been (a date-time), or None: they have not been told"""
+        off = self._off(key)
+        went = [when for when, n, t in self._messages(key) if (t["state"] in SENT if off is None else t["state"] == "sent" and when > off)]
+        return max(went, default=None)
+
+    def of(self, key):
+        """dict(state, at) of its last message ("queued" while it is going out, too), or None"""
+        off = self._off(key)
+        got = [m for m in self._messages(key) if off is None or m[0] > off]
+        got = [m for m in got if m[2]["state"] != "dropped"] or got
+        if not got: return None
+        t = max(got, key=lambda m: m[:2])[2]
+        return dict(state="queued" if t["state"] == "sending" else t["state"], at=t["at"])
+
+    def last(self, key):
+        """when the last of its messages went, may have gone or was put in the queue (a date-time), or None"""
+        return max((when for when, n, t in self._messages(key) if t["state"] in (*SENT, "queued", "sending")), default=None)
+
+
+def said():
+    """what has been said of the reliefs, as it is now"""
+    out = {}
+    for prefix in RELIEFS: out.update(outbox.told_for(prefix))
+    return Said(out)
 
 
 # ---- telling it
@@ -569,9 +638,11 @@ def _theirs(ref):
 
 
 def _relief_true(ref, name):
-    """the relief is theirs still, as it was approved when the message was made, and its lesson not stopped"""
+    """the relief is theirs still, as it was approved when the message was made, and its lesson not stopped; a reminder (n): and
+    it is not answered since"""
     got = _theirs(ref)
-    return got is not None and got[2]["approved"].get("at") == ref["approved_at"] and _stands_now(got[1])
+    if got is None or got[2]["approved"].get("at") != ref["approved_at"] or ("n" in ref and _cover.state(*got) != "approved"): return False
+    return _stands_now(got[1])
 
 
 def _stopped_true(ref, name):
@@ -624,7 +695,7 @@ def _cancelled_true(ref, name):
 
 
 # what is asked of a queued message, by its kind, before it goes: CHECK(its ref, its person) -> bool. A kind not here is always
-# true (report, clear and weekly put their own here)
+# true (relief/report.py puts report and clear here)
 CHECKS = dict(relief=_relief_true, gone=_ended_true, moved=_ended_true, stopped=_stopped_true, again=_again_true, kept=_kept_true, ask=_ask_true,
               askpick=_ask_true, planned=_absence_true, remind=_absence_true, officer=lambda ref, name: _absence_true(ref, name, False), cancelled=_cancelled_true)
 

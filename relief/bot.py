@@ -23,7 +23,8 @@ cover that is not in its absence any more is looked for by its absent teacher (_
 buttons and gains a line of what was done and when. Refused in the app's own words, whether at the press or when its why was
 typed, it loses them too and gains that sentence, for pressing again cannot help; unless it can (_acted: STAYS, and what the kind
 has in ACTIONS). It stays as it is for a button that may not be pressed (_button) and for WENT_WRONG. Acknowledge pressed again
-says the same and saves nothing.
+says the same and saves nothing. Remind them again (relief/report.py: the reliefs its report listed, its extra) never changes the
+report: whoever could not be reminded, it can be pressed again later.
 
 Request to change and Not needed ask why first: a talk (table talks), one a chat, TALK_MINUTES long, the newest in place of any
 other. Until it is over, what is typed there is the why, whatever it looks like (never a code), judged again as a press is. A line
@@ -50,6 +51,7 @@ from relief import cover as _cover
 from relief import fill as _fill
 from relief import lessons as _lessons
 from relief import links, tell, tg, tgdb
+from relief import report as _report
 from relief import settings as _settings
 from relief import web as _web
 from relief import words
@@ -72,6 +74,7 @@ LAST_ONE = "Answer the question I asked last."
 SENT_CHANGE = "Sent to the relief team. Until they reply, this relief is still yours."
 SENT_CANCEL = "Cancelled. The relief team will see it."
 NOTHING = "Nothing was changed."
+REMINDED = "Reminded {n}."
 WENT_WRONG = "Something went wrong. Try again in the app."
 COMMANDS = ("/start", "/stop", "/help", "/relief")        # these end a talk
 TALK_MINUTES = 15
@@ -83,6 +86,7 @@ _HANDLE = re.compile(r"[A-Za-z0-9_]{1,64}")
 _WORD = re.compile(r"[^\W_]+")
 _DATA = re.compile(r"b:([A-Za-z0-9_-]{16})")              # a button's callback data (relief/outbox.py)
 STAYS = (_web.NO_PUB,)                       # a refusal that keeps any button: a publish may be swapping folders
+ANY = ("{why}",)                             # every refusal keeps this one
 _log = logging.getLogger("relief.telegram")
 _counting = threading.Lock()
 _pressing = threading.Lock()
@@ -242,7 +246,7 @@ def _acted(b, f):
     try: return f()
     except ValueError as e:
         if type(e) is not ValueError: raise
-        stays = any(str(e) == x.format(name=b["who"]) for x in (*STAYS, *ACTIONS[b["what"]][2]))
+        stays = any(str(e) == x.format(name=b["who"], why=e) for x in (*STAYS, *ACTIONS[b["what"]][2]))
         return _Out(str(e), alert=True, line=None if stays else str(e))
 
 
@@ -341,6 +345,14 @@ def _approve(p):
     r = _cover.approve(r["id"], b["ckey"], b["who"], b["name"], pub, settings, links=_web._links_or_none(pub, settings["calendar"]))
     line = f"✅ Approved: {b['who']}, {_hm(_cover.find(r, b['ckey'])[1]['approved']['at'])}."
     return _Out(line, line=line, after=_after("approve", r, b, pub))
+
+
+def _remind(p):
+    """as the page's Remind, for the reliefs listed in the report the button is on; refused when nobody could be"""
+    b = p.button
+    got = _report.remind(b["extra"].get("date"), b["extra"].get("covers"), (b["name"], links.VIA))
+    if not got["sent"]: raise ValueError(got["skipped"][0]["why"] if got["skipped"] else _report.NOBODY)
+    return _Out(REMINDED.format(n=got["sent"]))
 
 
 def _ask_change(p):
@@ -527,8 +539,9 @@ def _line(chat, talk, text, cmd, to):
 
 
 # what a button does, by its kind: (the right it needs, f(p) with p.chat, p.button (_button) and p.message (its id and text) ->
-# _Out, the refusals that keep it: {name} is the one it shows)
+# _Out, the refusals that keep it: {name} is the one it shows, ANY is every refusal)
 ACTIONS = {"ack": ("relief", _ack, ()), "change": ("relief", _ask_change, ()), "cancel": ("relief", _ask_cancel, ()), "keep": ("relief", _keep, (OLD_BUTTON,)),
-           "cancel-yes": ("relief", _yes, (OLD_BUTTON,)), "approve": ("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE))}
+           "cancel-yes": ("relief", _yes, (OLD_BUTTON,)), "approve": ("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE)),
+           "remind": ("relief.team", _remind, ANY)}
 # what the why typed in a talk comes to, by its kind: f(chat, the button, why, talk) -> _Out
 TALKS = dict(change=_change, cancel=_sure)

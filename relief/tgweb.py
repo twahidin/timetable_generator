@@ -10,8 +10,9 @@ done, or Telegram would send it again; a store that fails is 503, so that it doe
 
 A person's own link needs relief and a person signed in by name: GET /api/relief/telegram, POST …/code (a one-time code and
 the address that opens the bot with it), DELETE …/link. Relief settings (relief.save): GET …/admin, POST …/connect (points
-Telegram at the app's address, _base), …/disconnect and …/unlink {name}. No answer holds the token, the hook's secret, a
-chat id or anything Telegram said."""
+Telegram at the app's address, _base), …/disconnect and …/unlink {name}. The relief team (relief.team, asked as relief/web.py's
+team routes ask it): POST /api/relief/today/remind. No answer holds the token, the hook's secret, a chat id or anything Telegram
+said."""
 import hmac, json, logging, os, re
 from functools import wraps
 from urllib.parse import urlsplit
@@ -22,7 +23,8 @@ import store
 from accounts import people as _accounts
 from accounts import rights as _rights
 from relief import absences as _absences
-from relief import bot, links, tg, tgdb
+from relief import bot, links, report, tg, tgdb
+from relief import web as _web
 
 bp = Blueprint("relief_tg", __name__)
 HOOK = "/telegram/hook"
@@ -152,6 +154,24 @@ def unlink_mine():
     if err: return err
     if links.unlink(name) is not None: _noted("telegram unlinked", "Telegram unlinked")
     return _status(name)
+
+
+# ---- the relief team
+@bp.post("/api/relief/today/remind")
+@need("relief")
+def remind():
+    """{date, covers: [{id, ckey}]}: the reliefs the page showed as not acknowledged, sent again (report.remind) -> dict(sent: how
+    many, skipped=[{ckey, name, why}]); one history entry when any was; relief.team"""
+    pub, me, err = _web._gate(*_web.TEAM)
+    if err: return err
+    b = _web._body()
+    try:
+        date, covers = _web._date_in(b.get("date")), [dict(id=v["id"], ckey=v["ckey"]) for v in report.asked(b.get("covers"))]
+        if links.connected() is None: return {"error": NOT_CONNECTED}, 409
+        got = report.remind(date, covers, None)
+    except ValueError as e: return _web._refusal(e)
+    except _web.BAD_INPUT as e: return _web._odd(e, "reminding")
+    return jsonify(got)
 
 
 # ---- relief settings

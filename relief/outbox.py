@@ -124,6 +124,11 @@ def told_for(prefix):
         return {r["key"]: _told(r) for r in c.execute("SELECT * FROM outbox WHERE substr(key, 1, ?)=?", (len(prefix), prefix))}
 
 
+def drop(key):
+    """a message that still waits is dropped -> whether it was one"""
+    with tgdb.db() as c: return c.execute("UPDATE outbox SET state='dropped' WHERE key=? AND state='queued'", (key,)).rowcount == 1
+
+
 # ---- one message
 def _pace():
     wait = _last[0] + SPACING - time.monotonic()
