@@ -2759,18 +2759,40 @@ def a_lesson_that_is_over_is_not_told():
 
 @t
 def remind_copies_are_not_reliefs_of_their_own():
-    """Task 6 sends a relief again under its key with :r1 after it: it never makes a second moved or gone"""
+    """a reminder (Task 6: the relief again, under its key with :r1 after it) tells of the relief, under the relief's own key, and is no relief of its own"""
+    def copied(base, *copies, more=()):
+        """Sam's relief of K5, its message in state base and its reminders in these -> (the absence's id, its key)"""
+        i = absent(by=HUGO); give(i, K5, SAM); TE.sweep(); key = f"relief:{EVE}:{K5}:{approved_at(i, K5)}"; put(key, state=base)
+        for n, s in enumerate(copies, 1): assert OB.queue(f"{key}:r{n}", SAM, f"again {n}", kind="relief", ref=dict(json.loads(item(key)["ref"]), n=n, **dict(more))); put(f"{key}:r{n}", state=s)
+        return i, key
+    ends = dict(moved=(lambda i: give(i, K5, MAYA), MOVED_K5), gone=(lambda i: absences.cancel(i, "Better", HUGO), GONE_K5))
+    for base, copies, told in (("sent", (), 1), ("unsure", (), 1), ("queued", (), 0), ("sending", (), 0), ("failed", (), 0), ("dropped", (), 0),
+                               ("sent", ("sent", "sent"), 1), ("sent", ("failed",), 1), ("unsure", ("unsure",), 1), ("failed", ("sent",), 1), ("failed", ("unsure",), 1), ("failed", ("sent", "sent"), 1), ("failed", ("failed", "sent"), 1),
+                               ("queued", ("sent",), 1), ("dropped", ("sent",), 1), ("dropped", ("queued",), 0), ("failed", ("queued",), 0), ("failed", ("sending", "failed"), 0), ("dropped", ("dropped",), 0)):
+        for kind, (f, text) in ends.items():
+            with school(SAM, MAYA):
+                i, key = copied(base, *copies); at("09:10"); f(i); TE.sweep(); TE.sweep()
+                got = [r for r in outs() if r["kind"] in ("moved", "gone")]
+                assert [(r["key"], r["name"], r["text"]) for r in got] == [(f"{kind}:{key}", SAM, text)] * told, (base, copies, kind, [r["key"] for r in got])
+                assert all(json.loads(r["ref"]) == json.loads(item(key)["ref"]) for r in got) and [r["key"] for r in outs("relief", SAM)] == [key] + [f"{key}:r{n}" for n in range(1, len(copies) + 1)], "what the relief's own message holds, and no more reliefs"
+    # while it is theirs: no message more because of a reminder; the message itself is queued as its own key says, whatever reminders there are
+    for base, n in (("sent", 0), ("unsure", 0), ("failed", 0), ("queued", 0), ("sending", 0), ("dropped", 1)):
+        with school(SAM): i, key = copied(base, "sent", "unsure"); assert TE.sweep() == n and TE.sweep() == 0 and sorted(r["key"] for r in outs()) == [key, f"{key}:r1", f"{key}:r2"] and (n == 0 or state(key) == "queued"), base
+    # the words it was told in: the message's own when it went, else the last reminder's
+    for base, want in (("sent", MOVED_K5), ("failed", MOVED_K5.replace("(G2)", "(G3)"))):
+        with school(SAM, MAYA): i, key = copied(base, "sent", more=dict(lesson="1A, 1B Science (G3)")); at("09:10"); give(i, K5, MAYA); TE.sweep(); assert [r["text"] for r in outs("moved")] == [want], base
+    for first in (1, 2):                                                                   # whichever of two was written first
+        with school(SAM, MAYA):
+            i = absent(by=HUGO); give(i, K5, SAM); TE.sweep(); key = outs("relief")[0]["key"]; put(key, state="failed"); ref = json.loads(item(key)["ref"])
+            for n in (first, 3 - first): OB.queue(f"{key}:r{n}", SAM, "again", kind="relief", ref=dict(ref, n=n, lesson=f"Lesson {n}")); put(f"{key}:r{n}", state="sent")
+            at("09:10"); give(i, K5, MAYA); TE.sweep(); assert [r["text"] for r in outs("moved")] == [MOVED_K5.replace("1A, 1B Science (G2)", "Lesson 2")], first
+    # approved anew, and told of that by a reminder alone: the last they were told of
     with school(SAM, MAYA):
-        i = absent(by=HUGO); give(i, K5, SAM); swept(); r, = outs()
-        assert OB.queue(r["key"] + ":r1", SAM, "again", kind="relief", ref=json.loads(r["ref"])) and send() == 1
-        at("09:10"); give(i, K5, MAYA); swept(); swept(); assert told_of("moved") == [("moved", SAM)]
-    with school(SAM, MAYA):                                                                # the first never went: the copy alone counts for nothing
-        i = absent(by=HUGO); give(i, K5, SAM); TE.sweep(); r, = outs(); put(r["key"], state="failed")
-        OB.queue(r["key"] + ":r1", SAM, "again", kind="relief", ref=json.loads(r["ref"])); send(); at("09:10"); give(i, K5, MAYA); swept(); assert told_of("moved") == []
-    for s, n in (("sent", 1), ("unsure", 1), ("queued", 0), ("sending", 0), ("failed", 0), ("dropped", 0)):
-        with school(SAM):
-            i = absent(by=HUGO); give(i, K5, SAM); TE.sweep(); put(outs()[0]["key"], state=s); at("09:10"); absences.cancel(i, "Better", HUGO)
-            assert len([x for x in dues() if x["kind"] == "gone"]) == n, s
+        i, key = copied("sent"); at("09:05"); give(i, K5, SAM); TE.sweep(); anew = f"relief:{EVE}:{K5}:{approved_at(i, K5)}"; put(anew, state="failed"); OB.queue(anew + ":r1", SAM, "again", kind="relief", ref=dict(json.loads(item(anew)["ref"]), n=1)); put(anew + ":r1", state="sent")
+        at("09:10"); give(i, K5, MAYA); TE.sweep(); TE.sweep(); assert [r["key"] for r in outs("moved")] == [f"moved:{anew}"]
+    with school(SAM, MAYA):                                                                # a key of one's own (two approved in one second)
+        i = absent(by=HUGO); give(i, K5, MAYA); TE.sweep(); give(i, K5, SAM); TE.sweep(); key = f"relief:{EVE}:{K5}:{approved_at(i, K5)}:{SAM}"; put(key, state="failed"); OB.queue(key + ":r1", SAM, "again", kind="relief", ref=dict(json.loads(item(key)["ref"]), n=1)); put(key + ":r1", state="sent")
+        absences.cancel(i, "Better", HUGO); TE.sweep(); TE.sweep(); assert [r["key"] for r in outs("gone", SAM)] == [f"gone:{key}"]
 
 # ---- the absent teacher, the reporting officer, the team
 @t
@@ -4535,7 +4557,7 @@ def a_late_tick_or_a_restart_sends_a_mark_once():
         assert ticked("07:15") == keyed("0715", LEE, TEAM)
     with school(SAM, TEAM):                                                                # another day: its own marks
         i = absent(by=HUGO, dates=["2026-10-13", "2026-10-14"]); give(i, K5, SAM); give(i, KW, SAM); swept(); assert ticked("10:15") == keyed("1015") and ticked("07:00", 14) == [f"report:2026-10-14:0700:{TEAM}"]
-        assert texts_to()[-1] == head("07:00", 1) + "\n• Mr Sam Tan · 2A Science P2 · starts 08:30 · sent 09:00"
+        assert texts_to()[-1] == head("07:00", 1) + "\n• Mr Sam Tan · 2A Science P2 · starts 08:30 · sent Mon 09:00"
 
 @t
 def two_copies_of_the_app_send_a_mark_once():
@@ -4693,6 +4715,19 @@ def not_on_telegram_is_said_in_the_report():
     with school(SAM, MAYA, TEAM):                                                          # two approved in one second have a key each
         i = today_reliefs((K5, SAM)); give(i, K5, MAYA); swept(); assert item(f"{relief_key_of(i, K5)}:{MAYA}")["state"] == "sent"; ticked(hm())
         assert texts_to()[-1] == head("07:00", 1) + SAM_LINE.replace(SAM, MAYA) + "sent 06:50"; links.unlink(MAYA); put(f"{relief_key_of(i, K5)}:{MAYA}", state="failed"); assert line() == "not on Telegram"
+
+@t
+def the_line_says_the_day_when_it_was_not_today():
+    marks = iter(f"{m // 60:02d}:{m % 60:02d}" for m in range(420, 630, 15))
+    def line(): ticked(next(marks)); return texts_to()[-1].split("\n")[1].split(" · ")[-1]
+    with school(SAM, TEAM):
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); assert line() == "sent 06:50"
+        for sent_at, want in (("2026-10-13T00:00:00+08:00", "sent 00:00"), ("2026-10-12T23:59:59+08:00", "sent Mon 23:59"), ("2026-10-12T15:00:00+08:00", "sent Mon 15:00"), ("2026-10-09T08:05:00+08:00", "sent Fri 08:05"),
+                              ("2026-10-12T16:30:00+00:00", "sent 00:30"), ("2026-10-12T15:30:00+00:00", "sent Mon 23:30")):                     # school time, whatever it was kept in
+            for s in ("sent", "unsure"): put(key, state=s, sent_at=sent_at); assert line() == want, (sent_at, s)
+    with school(SAM, TEAM):                                                                # planned the day before: approved and told on Monday afternoon
+        at("15:00", 12); i = absent(by=HUGO); give(i, K5, SAM); swept(); ticked("07:00"); assert texts_to()[-1] == head("07:00", 1) + SAM_LINE + "sent Mon 15:00"
+        at("07:05", 13); remind(asks(i, K5)); send(); ticked("07:15"); assert texts_to()[-1] == head("07:15", 1) + SAM_LINE + "sent 07:05", "reminded today"
 
 @t
 def a_stopped_lesson_is_left_out_of_the_report():
@@ -4897,6 +4932,40 @@ def a_reminder_is_the_relief_again_and_no_relief_of_its_own():
         with exam_school(SAM, MAYA, TEAM): i = today_reliefs((K5, SAM)); at("07:00", 13); remind(asks(i, K5)); f(i); assert TE.still_true(copy()) is want, want; n = len(said(SAM)); send(); assert (len(said(SAM)) == n + 1) is want
     with school(SAM, MAYA, TEAM):                                                          # pressed on the reminder as on the relief
         i = today_reliefs((K5, SAM)); at("07:00", 13); remind(asks(i, K5)); send(); assert press(SAM, "ack") == ("✅ Acknowledged 07:00.", False) and state_of(i) == "acknowledged" and remind(asks(i, K5))["sent"] == 0
+
+@t
+def who_was_told_only_by_a_reminder_hears_what_becomes_of_it():
+    def only_reminded():
+        """Sam's relief of K5: its own message failed, the reminder went -> (the absence's id, its key); nothing said so far"""
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); put(key, state="failed"); at("07:00", 13); assert remind(asks(i, K5))["sent"] == 1 and send() == 1 and state(key + ":r1") == "sent"
+        tg.PRACTICE_LOG.clear(); return i, key
+    def more(): swept(); swept(); return said(SAM)
+    with school(SAM, MAYA): i, key = only_reminded(); at("07:10", 13); give(i, K5, MAYA); assert more() == [MOVED_K5] and keys("moved", "gone") == [f"moved:{key}"] and said(MAYA) == [RELIEF_K5]
+    with school(SAM, MAYA): i, key = only_reminded(); at("07:10", 13); absences.cancel(i, "Better", HUGO); assert more() == [GONE_K5] and keys("moved", "gone") == [f"gone:{key}"]
+    with school(SAM, MAYA): i, key = only_reminded(); at("07:10", 13); absences.not_needed(i, K5, "x", HUGO); assert more() == [GONE_K5]
+    for answered in (False, True):                                                         # acknowledged: the reminder itself would not go any more, these do
+        with exam_school(SAM, MAYA, TEAM):
+            i, key = only_reminded()
+            if answered: CV.acknowledge(i, K5, SAM)
+            at("07:05", 13); e = exam(); assert more() == [STOPPED_K5] and keys("stopped") == [f"stopped:{key}:0"]
+            at("07:10", 13); withdraw(e); TE.sweep(); r, = outs("again"); assert (r["key"], r["text"], buttons_of(r)) == (f"again:{key}:0", AGAIN_K5, relief_buttons(i)) and "n" not in json.loads(r["ref"])
+            if not answered: ticked("07:15"); assert texts_to()[-1].endswith("not told yet")
+            assert more() == [STOPPED_K5, AGAIN_K5]
+            if not answered: ticked("07:30"); assert texts_to()[-1].endswith("sent 07:00"), "the reminder, which is all they were told"
+            at("07:40", 13); again_on(e); more(); at("07:41", 13); withdraw(e); assert more() == [STOPPED_K5, AGAIN_K5] * 2 and keys("stopped") == [f"stopped:{key}:{n}" for n in (0, 1)] and keys("again") == [f"again:{key}:{n}" for n in (0, 1)]
+            at("07:45", 13); give(i, K5, MAYA); assert more() == [STOPPED_K5, AGAIN_K5] * 2 + [MOVED_K5] and [x["key"] for x in outs("relief", SAM)] == [key, key + ":r1"]
+    with school(SAM, MAYA):                                                                # its own message went, and two reminders: one moved
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5)
+        for hm in ("07:00", "07:10"): at(hm, 13); assert remind(asks(i, K5))["sent"] == 1 and send() == 1
+        at("07:20", 13); give(i, K5, MAYA); assert more() == [RELIEF_K5] * 3 + [MOVED_K5] and keys("moved") == [f"moved:{key}"]
+    with exam_school(SAM, MAYA):                                                           # its own message dropped, the reminder still in the queue: told nothing, so nothing is said
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("07:00", 13); remind(asks(i, K5)); put(key, state="dropped"); tg.PRACTICE_LOG.clear(); e = exam(); TE.sweep(); assert keys("stopped") == []; withdraw(e); TE.sweep(); assert keys("again") == []
+        put(key, state="dropped"); at("07:10", 13); give(i, K5, MAYA); TE.sweep(); assert keys("moved", "gone") == []; absences.cancel(i, "Better", HUGO); TE.sweep(); assert keys("moved", "gone") == []; send(); assert said(SAM) == []
+    # a reminder's own check is asked of reminders alone
+    with exam_school(SAM, MAYA, TEAM):
+        i, key = only_reminded(); ref = dict(json.loads(item(key + ":r1")["ref"])); assert ref["n"] == 1; it = lambda kind: TE.still_true(dict(kind=kind, name=SAM, ref=ref)); CV.acknowledge(i, K5, SAM); e = exam()
+        assert it("relief") is False and it("stopped") is True and it("again") is False; withdraw(e); assert it("again") is True and it("stopped") is False and it("moved") is False and it("gone") is False and it("relief") is False
+        give(i, K5, MAYA); assert it("moved") is True and it("gone") is True and it("again") is False
 
 @t
 def the_page_reminds_and_the_history_says_so():

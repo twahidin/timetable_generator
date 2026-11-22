@@ -16,7 +16,8 @@ clear:{date}:{n}:{name} goes instead, the n-th that day: all are acknowledged, o
 request to change of a lesson still to start is with the team, since neither would be true. While the exams cannot be read no
 lesson counts as stopped, and nothing is said to have started, nor all clear over it: it may be stopped.
 
-A line says when the teacher was told (tell.Said), or that they have not been, or are not on Telegram; never why anyone is away.
+A line says when the teacher was told (tell.Said; the day too, when it was not today), or that they have not been, or are not on
+Telegram; never why anyone is away.
 Both messages are dropped when they are OLD, or their person is not on the team any more (tell.CHECKS).
 
 remind sends a relief again to its teacher, for the page (relief/tgweb.py) and for the button (relief/bot.py): its message as it
@@ -84,8 +85,10 @@ def _starts(c, bnds):
 
 
 def _how(w, who, key):
+    """when the relief's teacher was told of it (the day too, when not today), or that they have not been"""
     at = w.said.sent_at(key)
-    return f"sent {at:%H:%M}" if at else "not told yet" if who in w.reach else "not on Telegram"
+    if at: return f"sent {at:%H:%M}" if at.date() == w.now.date() else f"sent {at:%a %H:%M}"
+    return "not told yet" if who in w.reach else "not on Telegram"
 
 
 def _reliefs(w, r):

@@ -7,12 +7,12 @@ nothing is missed. due is pure (it is given all it needs). The keys, {name} at t
 relief:{absent}:{ckey}:{approved.at} to the relief teacher, once approved and while the lesson is not over (by the absent
 teacher's name and the cover key, not the absence's id: an exam's takeover moves a cover to another absence, and it is the
 same relief then; relief_key and _relief_key_for say what happens when two people were approved in one second);
-gone:{relief key} or moved:{relief key}, one of them once, to a person told of a relief (its last base key sent or unsure)
-that is not approved to them any more, from what that message's ref holds: the cover, or its absence, may be gone;
+gone:{relief key} or moved:{relief key}, one of them once, to a person told of a relief (its message, or a reminder of it, sent
+or unsure) that is not approved to them any more, from what that message's ref holds: the cover, or its absence, may be gone;
 stopped:{relief key}:{k} and again:{relief key}:{k} to a person told of a relief that is still theirs, while its lesson is
 stopped and once it stands again (below; k counts the times);
-{relief key}:r{n}, the relief sent once more because the team reminded them (relief/report.py queues it, the n-th time): never a
-relief message of its own here (_base);
+{relief key}:r{n}, the relief sent once more because the team reminded them (relief/report.py queues it, the n-th time): it tells
+them of the relief, under the relief's own key (_own), and is no relief of its own;
 kept:{absent}:{ckey}:{when} to the teacher who asked to change; ask:{absent}:{ckey}:{change.at}:{name} to each of the team
 with the new pick, or two minutes after the request without one, and then askpick:… once when a pick (another than the ask
 carried) is in; planned:{id} and remind:{id} to the absent teacher; officer:{id} to the reporting officer;
@@ -214,11 +214,11 @@ def _relief_key_for(told, ref):
     return k if mine not in told and (t is None or t["name"] == ref["who"]) else mine
 
 
-def _base(key, ref):
-    """key is a relief message's own (not a copy sent as a reminder, its key with more after it)"""
-    if not isinstance(ref, dict): return False
-    k = relief_key(ref.get("absent"), ref.get("ckey"), ref.get("approved_at"))
-    return key in (k, f"{k}:{ref.get('who')}")
+def _own(key, ref):
+    """the relief's own key, when key is that of its message or of a reminder (the own one with :r{n} after it), else None"""
+    if not isinstance(ref, dict): return None
+    k, m = relief_key(ref.get("absent"), ref.get("ckey"), ref.get("approved_at")), _COPY.fullmatch(key)
+    return next((x for x in (key, m and m[1]) if x in (k, f"{k}:{ref.get('who')}")), None)
 
 
 def _there(told, key):
@@ -239,16 +239,18 @@ def _each(things, f):
 
 
 def _told_reliefs(w):
-    """[(key, ref)]: the last relief message each person was told of each cover, its lesson not over"""
+    """[(key, ref)]: the last relief each person was told of, by its message or a reminder of it, of each cover, its lesson not
+    over: the relief's own key, and what its message holds when that went, else the last reminder (less its n)"""
     last = {}
     for key, t in w.told.items():
         ref = t.get("ref")
-        if t["state"] not in SENT or not _base(key, ref) or ref.get("who") not in w.reach: continue
+        own = _own(key, ref)
+        if t["state"] not in SENT or own is None or ref.get("who") not in w.reach: continue
         ends, at = _time(ref.get("ends")), _time(ref["approved_at"])
         if ends is None or ends <= w.now or at is None: continue
-        cover = (ref["who"], ref["absent"], ref["ckey"])
-        if cover not in last or last[cover][0] < at: last[cover] = (at, key, ref)
-    return [(key, ref) for at, key, ref in last.values()]
+        cover, rank = (ref["who"], ref["absent"], ref["ckey"]), (at, key == own, ref.get("n") or 0)
+        if cover not in last or last[cover][0] < rank: last[cover] = (rank, own, {k: v for k, v in ref.items() if k != "n"})
+    return [(own, ref) for rank, own, ref in last.values()]
 
 
 def _of_told(w, key, ref):
