@@ -18,7 +18,7 @@
     nf: null, mk: null, duties: null, accCls: "", note: "",
     busy: false, sit: "", room: "", mvCls: "", mvStu: "", duty: null, who: null, whoTok: 0, open: {},
     me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, abMsg: "", sbNote: "", aw: { duty: null, away: "", who: "", data: null, err: "", say: "", tok: 0 },
-    ic: { open: false, who: "" }   /* the timetable committee's change of an event's teacher in charge */
+    ic: { open: false, who: "", msg: "" }   /* the timetable committee's change of an event's teacher in charge, with a line of its own */
   };
   /* the tabs: tabs 4 to 7 are added to this list; each draw() gives the html of its tab body */
   const EX_TABS = [
@@ -274,13 +274,13 @@
      another. Only the heading is drawn again (paintIc), so nothing typed or opened on the tab below is touched */
   function icName() {
     const change = S.me.can_approve && !S.ic.open ? ` <button type="button" class="small" data-act="icOpen" aria-label="Change the teacher in charge">Change</button>` : "";
-    return ` · teacher in charge ${esc(S.sched.in_charge || "")}${change}`;
+    return ` · teacher in charge ${esc(S.sched.in_charge || "")}${change}${S.ic.msg && !S.ic.open ? ` <span class="msg ok" role="status">${esc(S.ic.msg)}</span>` : ""}`;
   }
   function icLine() {
     if (!S.me.can_approve || !S.ic.open) return "";
     const now = S.sched.in_charge || "", people = ((S.view && S.view.people) || []).filter(n => n !== now);
     return `<div class="line" role="group" aria-label="Change the teacher in charge"><select data-ic="who" aria-label="New teacher in charge"><option value="">Choose a teacher</option>${people.map(n => opt(n, S.ic.who, n)).join("")}</select>
-      <button type="button" class="primary" data-act="icGo" ${S.busy || !S.ic.who ? "disabled" : ""}>Put them in charge</button> <button type="button" data-act="icOff">Back</button></div>
+      <button type="button" class="primary" data-act="icGo" ${S.busy || !S.ic.who ? "disabled" : ""}>Put them in charge</button> <button type="button" data-act="icOff">Back</button>${S.ic.msg ? ` <span class="msg bad" role="alert">${esc(S.ic.msg)}</span>` : ""}</div>
       <p class="muted small">At once, with no approval: the new teacher in charge opens and changes the event${now ? `, and ${esc(now)} no longer does` : ""}. Who is going stays as it is.</p>`;
   }
 
@@ -1017,15 +1017,20 @@
   async function icChange() {
     const name = S.ic.who;
     if (!name || S.busy) return;
-    S.busy = true; S.msg = ""; S.bad = false; paintSave(); paintIc();
+    S.busy = true; S.ic.msg = ""; paintIc();
     const r = await api("POST", `${S.base}/${S.id}/in-charge`, { name });
     S.busy = false;
     if (r.status === 401 || r.status === 403) return;
-    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paintIc(); return; }
-    S.sched.in_charge = name; if (S.sched.approved) S.sched.approved.in_charge = name;
-    S.ic = { open: false, who: "" }; S.msg = `${name} is in charge now.`;
-    takeReview(r.j); paintSave(); paintIc('[data-act="icOpen"]');
-    refreshView();
+    if (r.ok) {
+      S.sched.in_charge = name; if (S.sched.approved) S.sched.approved.in_charge = name;
+      S.ic = { open: false, who: "", msg: `${name} is in charge now.` };
+      takeReview(r.j);
+      const chip = $("#statchip"); if (chip) { chip.textContent = S.label; chip.className = "chip " + chipClass({ label: S.label }); }
+    } else S.ic.msg = r.j.error || "That did not work. Try again.";
+    /* the focus is given back only when redrawing the heading took it: someone typing on the tab below keeps their place */
+    const at = document.activeElement, took = !at || at === document.body || !!at.closest("#icname, #icline");
+    paintIc(!took ? "" : r.ok ? '[data-act="icOpen"]' : '[data-ic="who"]');
+    if (r.ok) refreshView(); else paint();
   }
 
   function tabEvGoes() {
@@ -1290,7 +1295,7 @@
       if (act === "dutyDel") { edit(() => { s.duties.splice(Number(a), 1); }, true); return; }
       if (act === "evReplace") { evReplace(); return; }
       if (act === "icOpen" || act === "icOff") {
-        S.ic = { open: act === "icOpen", who: "" };
+        S.ic = { open: act === "icOpen", who: "", msg: "" };
         paintIc(S.ic.open ? '[data-ic="who"]' : '[data-act="icOpen"]');
         return;
       }

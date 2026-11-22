@@ -112,32 +112,45 @@ t("Change shows to the timetable committee, and opens the list without the one i
   assert.ok(!/data-act="icGo" disabled/.test(heading(S(true, true, "Mr B"))[1]) && heading(S(true, true, "Mr B"))[1].includes('value="Mr B" selected'));
   assert.ok(/data-act="icGo" disabled/.test(heading(S(true, true, "Mr B", true))[1]), "while it is on its way");
   assert.ok(!heading({ ...S(true, true), sched: {}, view: null })[1].includes("no longer does"));
+  const said = (open, msg) => heading({ ...S(true, open), ic: { open, who: "", msg } });
+  assert.ok(said(false, "Mr <B> is in charge now.")[0].includes('role="status">Mr &lt;B&gt; is in charge now.') && said(false, "x")[1] === "");
+  assert.ok(said(true, "Not <that> one.")[1].includes('role="alert">Not &lt;that&gt; one.') && !said(true, "x")[0].includes("role="));
 });
 
 /* the change itself: one POST, only the name changes here, and a refusal leaves the list open */
-async function runChange(S, answers, while_) {
-  const calls = [], drawn = [];
-  const api = async (...a) => { calls.push(a); if (while_) while_(S); return answers.shift(); };
-  const note = k => (...a) => { drawn.push([k, ...a]); };
-  const f = new Function("S", "api", "paintSave", "paintIc", "takeReview", "refreshView", `${cut("icChange").replace(/^function/, "async function")}; return icChange;`)(S, api, note("save"), note("ic"), note("review"), note("view"));
-  return { f, calls, drawn };
+async function runChange(S, answer, { while_, at } = {}) {
+  const calls = [], drawn = [], body = {}, doc = { body, activeElement: at === undefined ? body : at }, chip = { textContent: "", className: "" };
+  const api = async (...a) => { calls.push(a); if (while_) while_(S); return answer; };
+  const note = k => (...a) => { drawn.push([k, ...a].join(" ").trim()); };
+  const names = ["S", "api", "document", "$", "chipClass", "paintIc", "takeReview", "refreshView", "paint", "paintSave"];
+  const f = new Function(...names, `${cut("icChange").replace(/^function/, "async function")}; return icChange;`)(S, api, doc, sel => sel === "#statchip" ? chip : null,
+    x => "c-" + x.label, note("ic"), j => { drawn.push("review"); S.label = j.label; }, note("view"), note("paint"), note("save"));
+  return { f, calls, drawn, chip };
 }
-const evS = extra => Object.assign({ base: "/api/events", id: "e1", busy: false, msg: "", bad: false, sbNote: "a note", abMsg: "", dirty: true, ic: { open: true, who: "Mr B" },
-  sched: { in_charge: "Ms A", where: "Museum", approved: { in_charge: "Ms A" } } }, extra);
+const evS = extra => Object.assign({ base: "/api/events", id: "e1", busy: false, msg: "Give the event a name.", bad: true, sbNote: "a note", abMsg: "", dirty: true, label: "",
+  ic: { open: true, who: "Mr B", msg: "old" }, sched: { in_charge: "Ms A", where: "Museum", approved: { in_charge: "Ms A" } } }, extra);
+const yes = { ok: true, status: 200, j: { status: "waiting", label: "Waiting" } }, field = { closest: () => null }, inLine = { closest: sel => sel === "#icname, #icline" ? {} : null };
 (async () => {
-  let S = evS(), w = await runChange(S, [{ ok: true, status: 200, j: { status: "waiting" } }], s => { s.sched.where = "Science Centre"; });
+  let S = evS(), w = await runChange(S, yes, { while_: s => { s.sched.where = "Science Centre"; } });
   const first = w.f(), second = w.f();          // pressed twice
   await first; await second;
   assert.deepStrictEqual(w.calls, [["POST", "/api/events/e1/in-charge", { name: "Mr B" }]], "once");
   assert.deepStrictEqual([S.sched.in_charge, S.sched.approved.in_charge, S.sched.where, S.sbNote, S.dirty, S.busy], ["Mr B", "Mr B", "Science Centre", "a note", true, false], "what was typed stays");
-  assert.deepStrictEqual([S.ic, S.msg, S.bad], [{ open: false, who: "" }, "Mr B is in charge now.", false]);
-  assert.deepStrictEqual(w.drawn.map(d => d[0]), ["save", "ic", "review", "save", "ic", "view"], "only the heading is drawn again");
-  S = evS({ sched: { in_charge: "Ms A", approved: null } }); w = await runChange(S, [{ ok: true, status: 200, j: {} }]); await w.f();
+  assert.deepStrictEqual([S.ic, S.msg, S.bad], [{ open: false, who: "", msg: "Mr B is in charge now." }, "Give the event a name.", true], "the save's own line is not touched");
+  assert.deepStrictEqual(w.drawn, ["ic", "review", 'ic [data-act="icOpen"]', "view"], "only the heading is drawn again");
+  assert.deepStrictEqual([w.chip.textContent, w.chip.className], ["Waiting", "chip c-Waiting"]);
+  S = evS({ sched: { in_charge: "Ms A", approved: null } }); w = await runChange(S, yes); await w.f();
   assert.strictEqual(S.sched.in_charge, "Mr B");
-  S = evS(); w = await runChange(S, [{ ok: false, status: 400, j: { error: "Mr B is in charge already." } }]); await w.f();
-  assert.deepStrictEqual([S.msg, S.bad, S.abMsg, S.busy, S.ic, S.sched.in_charge], ["Mr B is in charge already.", true, "", false, { open: true, who: "Mr B" }, "Ms A"]);
-  S = evS({ ic: { open: true, who: "" } }); w = await runChange(S, []); await w.f(); assert.strictEqual(w.calls.length, 0, "nobody picked");
-  S = evS({ busy: true }); w = await runChange(S, []); await w.f(); assert.strictEqual(w.calls.length, 0, "something else is on its way");
+  for (const [at, focus] of [[field, "ic"], [inLine, 'ic [data-act="icOpen"]'], [null, 'ic [data-act="icOpen"]']]) {
+    w = await runChange(evS(), yes, { at }); await w.f(); assert.strictEqual(w.drawn[2], focus, "someone typing on the tab keeps the focus");
+  }
+  S = evS(); w = await runChange(S, { ok: false, status: 400, j: { error: "Mr B is in charge already." } }); await w.f();
+  assert.deepStrictEqual([S.ic, S.msg, S.bad, S.abMsg, S.busy, S.sched.in_charge], [{ open: true, who: "Mr B", msg: "Mr B is in charge already." }, "Give the event a name.", true, "", false, "Ms A"]);
+  assert.deepStrictEqual(w.drawn, ["ic", 'ic [data-ic="who"]', "paint"], "the tab is drawn again: a button greyed meanwhile is not left so");
+  S = evS(); w = await runChange(S, { ok: false, status: 500, j: {} }); await w.f(); assert.strictEqual(S.ic.msg, "That did not work. Try again.");
+  S = evS(); w = await runChange(S, { ok: false, status: 403, j: {} }); await w.f(); assert.deepStrictEqual([S.busy, w.drawn], [false, ["ic"]]);
+  S = evS({ ic: { open: true, who: "", msg: "" } }); w = await runChange(S, yes); await w.f(); assert.strictEqual(w.calls.length, 0, "nobody picked");
+  S = evS({ busy: true }); w = await runChange(S, yes); await w.f(); assert.strictEqual(w.calls.length, 0, "something else is on its way");
   console.log("icChange cases passed");
 })().catch(e => { console.error(e); process.exit(1); });
 t("Change, Back and Put them in charge are wired, and the list's choice is kept", () => {
