@@ -5,6 +5,7 @@ DATA = tempfile.mkdtemp()
 os.environ.update(DATA_DIR=DATA, SECRET_KEY=secrets.token_hex(16))
 os.environ.pop("TELEGRAM_BOT_TOKEN", None)
 os.environ.pop("RELIEF_JOBS", None)
+os.environ.pop("RAILWAY_PUBLIC_DOMAIN", None)
 sys.path.insert(0, ROOT)
 import app as A, store  # noqa: E402,F401
 from relief import tg, tgdb  # noqa: E402
@@ -363,16 +364,17 @@ def client(keys):
         with c.session_transaction() as s: s.update(keys)
     return c
 
-def entries(n=50): return [e for e in history.read(kinds=["relief"], limit=n)]
+def entries(n=5000): return history.read(kinds=["relief"], limit=n)
 
 HELLO = "Linked: {name}. You'll get your reliefs here. Send /relief to ask for relief, /stop to unlink."
 NOT_LINKED = "This Telegram is not linked. Open Relief in the school's app, press Link Telegram and follow the link there."
 BAD_CODE = "That code is not right or has run out. Get a new one in the app. If it was your personal code, do not send it here: it opens the app. I have deleted your message."
 MOVED_LINK = "Your relief messages now go to another Telegram. If this was not you, tell the relief team."
+TAKEN = "This Telegram was linked to someone else before. Their relief messages no longer come here."
 
 @t
 def the_bots_sentences_are_the_plans():
-    assert (bot.HELLO, bot.NOT_LINKED, bot.BAD_CODE, bot.MOVED_LINK) == (HELLO, NOT_LINKED, BAD_CODE, MOVED_LINK)
+    assert (bot.HELLO, bot.NOT_LINKED, bot.BAD_CODE, bot.MOVED_LINK, bot.TAKEN) == (HELLO, NOT_LINKED, BAD_CODE, MOVED_LINK, TAKEN)
     plan = open(os.path.join(ROOT, "docs", "superpowers", "plans", "2026-11-22-relief-stage-4-telegram.md"), encoding="utf-8").read()
     for text in (HELLO, NOT_LINKED, BAD_CODE, MOVED_LINK): assert f"`{text}`" in plan, text
 
@@ -384,13 +386,14 @@ def a_code_links_once_and_then_is_gone():
         assert set(c) == {"code", "until"} and CODE_SHAPE.match(c["code"]) and links.CODE_MINUTES == 15, set(c)
         assert 899 <= c["until"] - before <= 901, c["until"] - before
         got = rows("codes")
-        assert got == [dict(hash=hashlib.sha256(access.norm(c["code"]).encode()).hexdigest(), name=TIA, until=c["until"])], "only a hash is kept"
+        assert got == [dict(hash=hashlib.sha256(access.norm(c["code"]).encode()).hexdigest(), name=TIA, until=c["until"], chat=None)], "only a hash is kept"
         assert c["code"] not in str(got) and access.norm(c["code"]) not in str(got)
         assert links.use("ZZZZ-9999", 501, "tia_t") is None and links.use("", 501, None) is None and links.use(None, 501, None) is None
         assert links.chat_of(TIA) is None
         assert links.use(" " + c["code"].lower().replace("-", " ") + " ", 501, "tia_t") == TIA      # any case, spaces, dashes
-        assert links.chat_of(TIA) == 501 and links.name_of(501) == TIA and rows("codes") == []
-        assert links.use(c["code"], 502, "x") is None and links.name_of(502) is None, "one use"
+        assert links.chat_of(TIA) == 501 and links.name_of(501) == TIA and rows("codes") == [dict(got[0], chat=501)], "kept, with the chat that used it"
+        assert links.use(c["code"], 502, "x") is None and links.name_of(502) is None and links.use(c["code"], 501, "x") is None, "one use"
+        assert links.linked()[TIA]["handle"] == "tia_t" and rows("codes") == [dict(got[0], chat=501)]
         # expired
         c = links.new_code(HUGO); real = links._clock
         links._clock = lambda: c["until"] + 1
@@ -404,6 +407,48 @@ def a_code_links_once_and_then_is_gone():
         b = links.new_code(HUGO)
         assert links.use(a["code"], 503, "h") is None and links.chat_of(HUGO) is None
         assert links.use(b["code"], 503, "h") == HUGO and links.use(other["code"], 504, "r") == ROSA
+
+@t
+def pressing_the_same_link_twice_says_the_same():
+    with telegram():
+        def bad(text, chat):
+            """BAD_CODE, the message deleted, one try counted, and nothing linked or unlinked"""
+            links.tries.fails.clear(); tg.PRACTICE_LOG.clear(); was, n = rows("links"), len(entries())
+            hook(msg(text, chat, message_id=9))
+            return (sent(), deleted(), len(links.tries.fails[f"tg:{chat}"]), rows("links") == was, len(entries()) - n) == ([(chat, BAD_CODE)], [(chat, 9)], 1, True, 0)
+        c = links.new_code(TIA)["code"]
+        hook(msg(f"/start {c}", 501, user="tia_t"))
+        was, kept_codes, n = rows("links"), rows("codes"), len(entries()); tg.PRACTICE_LOG.clear()
+        for text in (f"/start {c}", c, c.lower(), f"/start {c}") * 2: hook(msg(text, 501, user="another_name"))
+        assert sent() == [(501, HELLO.format(name=TIA))] * 8 and deleted() == [], sent()
+        assert rows("links") == was and rows("codes") == kept_codes and len(entries()) == n and not links.tries.fails.get("tg:501"), "nothing changed, nothing counted"
+        assert links.again(c, 501) == TIA and links.again(c, 502) is None and links.again("ABCD-EFGH", 501) is None and links.again("x", 501) is None
+        assert bad(c, 502) and links.chat_of(TIA) == 501, "another chat"                           # somebody who saw the code
+        hook(msg("/stop", 501)); assert bad(f"/start {c}", 501) and links.linked() == {}, "after /stop the same chat needs a new code"
+        c = links.new_code(TIA)["code"]; hook(msg(c, 501)); links.unlink(TIA); assert bad(c, 501), "after the settings page unlinked them"
+        c = links.new_code(TIA)["code"]; hook(msg(c, 501)); hook(msg(links.new_code(HUGO)["code"], 501))
+        assert links.name_of(501) == HUGO and bad(c, 501) and links.name_of(501) == HUGO, "after the chat became Hugo's"
+        # a new code removes the earlier ones, used ones too
+        c = links.new_code(ROSA)["code"]; hook(msg(c, 503)); assert links.again(c, 503) == ROSA
+        d = links.new_code(ROSA)["code"]
+        assert [(r["chat"], r["until"] > 0) for r in rows("codes") if r["name"] == ROSA] == [(None, True)] and bad(c, 503) and links.chat_of(ROSA) == 503
+        links.tries.fails.clear(); hook(msg(d, 504)); assert links.chat_of(ROSA) == 504 and bad(d, 503), "moved: the old chat's press is refused"
+        # run out, switched off, over the limit
+        c = links.new_code(TIA); hook(msg(c["code"], 505)); real = links._clock
+        links._clock = lambda: c["until"] + 1
+        try: assert links.again(c["code"], 505) is None and bad(c["code"], 505) and links.chat_of(TIA) == 505
+        finally: links._clock = real
+        assert links.again(c["code"], 505) == TIA
+        with record(TIA, off=True): assert links.again(c["code"], 505) is None and bad(c["code"], 505)
+        with broken_accounts(): assert links.again(c["code"], 505) is None
+        links.tries.fails.clear()
+        for _ in range(5): hook(msg("ABCD-EFGH", 505))
+        tg.PRACTICE_LOG.clear(); hook(msg(c["code"], 505)); assert tg.PRACTICE_LOG == [], "over the limit: nothing"
+        # at once: every press is answered, one link, one history entry
+        links.tries.fails.clear(); c = links.new_code(HUGO)["code"]; n = len(entries()); tg.PRACTICE_LOG.clear()
+        ts = [threading.Thread(target=hook, args=(msg(f"/start {c}", 506),)) for _ in range(4)]
+        [x.start() for x in ts]; [x.join() for x in ts]
+        assert sent(506) == [(506, HELLO.format(name=HUGO))] * 4 and len(entries()) == n + 1 and links.chat_of(HUGO) == 506, (sent(506), len(entries()) - n)
 
 @t
 def one_code_used_twice_at_once_links_one_chat():
@@ -449,13 +494,14 @@ def a_chat_links_one_person_and_a_person_one_chat():
         code = links.new_code(HUGO)["code"]
         hook(msg(code, 501))
         assert links.name_of(501) == HUGO and links.chat_of(TIA) is None and links.linked().keys() == {HUGO}, rows("links")
-        assert sent() == [(501, MOVED_LINK), (501, HELLO.format(name=HUGO))], sent()
+        assert sent() == [(501, TAKEN), (501, HELLO.format(name=HUGO))], "what Tia got here comes no longer; nothing of hers went to another Telegram"
+        assert TIA not in str(sent()), "who it was is not said"
         assert rows("talks") == [], "a conversation Tia began is not Hugo's to finish"
         # both at once: Rosa is on 502, Hugo moves from 501 to 502
         links.link(ROSA, 502, None); tg.PRACTICE_LOG.clear()
         hook(msg(links.new_code(HUGO)["code"], 502))
         assert links.linked().keys() == {HUGO} and links.chat_of(HUGO) == 502 and links.name_of(501) is None
-        assert sorted(sent()) == sorted([(501, MOVED_LINK), (502, MOVED_LINK), (502, HELLO.format(name=HUGO))]) and sent()[-1] == (502, HELLO.format(name=HUGO)), sent()
+        assert sorted(sent()[:2]) == sorted([(501, MOVED_LINK), (502, TAKEN)]) and sent()[2:] == [(502, HELLO.format(name=HUGO))], sent()
         assert len({r["chat"] for r in rows("links")}) == len(rows("links"))
 
 @t
@@ -810,6 +856,33 @@ def connect_saves_the_bot_and_points_the_hook_here():
         assert r.status_code == 502 and tok not in r.get_data(as_text=True) and tgdb.get_state("bot") is None and [m for m, p in seen] == ["deleteWebhook"]
     tgdb.set_state("bot", CONNECTED)                                                       # the token taken out of Railway: Disconnect still clears it
     r = com.post(API + "disconnect"); assert r.status_code == 200 and tgdb.get_state("bot") is None and r.get_json()["token_set"] is False
+    assert REAL == []
+
+@t
+def connect_points_the_hook_at_railways_own_address():
+    com, tok = client(dict(role="committee")), "made-up-" + secrets.token_hex(10)
+    forged = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "elsewhere.example"}
+    def connect(headers):
+        f, seen = fake_bot(dict(getMe=ME_OK))
+        r = with_send(f, lambda: com.post("/api/relief/telegram/connect", headers=headers))
+        return r.status_code, [d["url"] for m, d in seen if m == "setWebhook"], (tgdb.get_state("bot") or {}).get("base")
+    try:
+        with telegram(token=tok, connected=False):
+            for var in ("ctss-made-up.example", "  ctss-made-up.example\n", "CTSS-Made-Up.example"):
+                os.environ["RAILWAY_PUBLIC_DOMAIN"] = var; want = "https://" + var.strip()
+                for headers in (forged, {"X-Forwarded-Host": "elsewhere.example"}, {}):
+                    assert connect(headers) == (200, [want + "/telegram/hook"], want), (var, headers)
+            for var in ("", "   ", "https://x.example", "x.example/path", "x.example:8080", "me@x.example", "x.example?y", "x example", "x.example\nelsewhere.example",
+                        "x..example", ".x.example", "x.example.", "-x.example", "x-.example", "localhost", "é.example", "x_y.example", "[::1]", "a" * 250 + ".example"):
+                os.environ["RAILWAY_PUBLIC_DOMAIN"] = var; tgdb.set_state("bot", None)           # malformed: as if it were not set
+                assert connect({"X-Forwarded-Proto": "https", "X-Forwarded-Host": "ctss.example"}) == (200, ["https://ctss.example/telegram/hook"], "https://ctss.example"), var
+                tgdb.set_state("bot", None); assert connect({}) == (409, [], None), (var, "http is still refused")
+            os.environ.pop("RAILWAY_PUBLIC_DOMAIN")
+            assert connect({"X-Forwarded-Proto": "https", "X-Forwarded-Host": "ctss.example"})[1] == ["https://ctss.example/telegram/hook"]
+        with telegram(connected=False):                                                           # practice too
+            os.environ["RAILWAY_PUBLIC_DOMAIN"] = "ctss-made-up.example"
+            assert com.post("/api/relief/telegram/connect").get_json()["base"] == "https://ctss-made-up.example"
+    finally: os.environ.pop("RAILWAY_PUBLIC_DOMAIN", None)
     assert REAL == []
 
 @t

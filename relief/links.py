@@ -2,9 +2,10 @@
 relief/tgdb.py).
 
 A code (new_code, only ever for the person signed in) is 8 letters and digits of access.ALPHABET as XXXX-XXXX, kept as a
-SHA-256 hash alone, good once for CODE_MINUTES; a new one replaces that person's earlier one. use takes a code and links the
-chat it came from, in one transaction, so a code sent twice at once links once. It is looked up among the link codes only and
-never compared with anybody's personal sign-in code, so the bot cannot be used to guess one.
+SHA-256 hash alone, good once for CODE_MINUTES; a new one replaces that person's earlier ones, used or not. use takes a code and
+links the chat it came from, in one transaction, so a code sent twice at once links once; the row keeps the chat that used it
+until it runs out, so that chat may press the same link again (again) while it is still that person's. A code is looked up
+among the link codes only and never compared with anybody's personal sign-in code, so the bot cannot be used to guess one.
 
 One chat is one person's and one person has one chat (both are unique in the table): link moves a person's link to the new
 chat and takes the chat from whoever had it; the chats that lost a link are added to the caller's `lost` list as
@@ -65,17 +66,28 @@ def new_code(name):
 
 
 def use(code, chat, handle, lost=None):
-    """link chat to the person whose current code this is -> their name; None when it is no current link code, or its person
-    is not there any more (nothing is changed then)"""
+    """link chat to the person whose current code this is -> their name; None when it is no current link code (or used
+    already), or its person is not there any more (nothing is changed then)"""
     if not shaped(code): return None
     h = _hash(code)
     with tgdb.db(read=True) as c:
-        r = c.execute("SELECT name FROM codes WHERE hash=? AND until>?", (h, _clock())).fetchone()
+        r = c.execute("SELECT name FROM codes WHERE hash=? AND chat IS NULL AND until>?", (h, _clock())).fetchone()
     if r is None or _there(r["name"]) is None: return None
     with tgdb.db() as c:
-        if c.execute("DELETE FROM codes WHERE hash=? AND name=? AND until>?", (h, r["name"], _clock())).rowcount != 1: return None    # used meanwhile
+        if c.execute("UPDATE codes SET chat=? WHERE hash=? AND name=? AND chat IS NULL AND until>?", (chat, h, r["name"], _clock())).rowcount != 1:
+            return None                                                        # used meanwhile
         _put(c, r["name"], chat, handle, lost)
     return r["name"]
+
+
+def again(code, chat):
+    """the name this very chat linked with this code, while the code has not run out and the chat is still theirs (Telegram's
+    own link pressed twice), else None; nothing is changed"""
+    if not shaped(code): return None
+    with tgdb.db(read=True) as c:
+        r = c.execute("SELECT codes.name FROM codes JOIN links ON links.name=codes.name AND links.chat=codes.chat WHERE codes.hash=? AND codes.chat=? AND codes.until>?",
+                      (_hash(code), chat, _clock())).fetchone()
+    return r["name"] if r and _there(r["name"]) else None
 
 
 # ---- links

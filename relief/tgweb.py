@@ -9,9 +9,9 @@ update is answered 200 and nothing is done, or Telegram would send it again; a s
 
 A person's own link needs relief and a person signed in by name: GET /api/relief/telegram, POST …/code (a one-time code and
 the address that opens the bot with it), DELETE …/link. Relief settings (relief.save): GET …/admin, POST …/connect (points
-Telegram at the address it was pressed on), …/disconnect and …/unlink {name}. No answer holds the token, the hook's secret, a
+Telegram at the app's address, _base), …/disconnect and …/unlink {name}. No answer holds the token, the hook's secret, a
 chat id or anything Telegram said."""
-import hmac, json, logging, re
+import hmac, json, logging, os, re
 from functools import wraps
 
 from flask import Blueprint, abort, jsonify, request
@@ -36,6 +36,7 @@ NO_LINK = "That person has no Telegram linked."
 COMMANDS = [dict(command="relief", description="Ask for relief"), dict(command="stop", description="Unlink this Telegram"),
             dict(command="help", description="What this bot does")]
 _USERNAME = re.compile(r"[A-Za-z0-9_]{1,64}")
+_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")          # one part of a host name
 _log = logging.getLogger("relief.telegram")
 _has = _me = _need = _note = None
 _GUARDS = set()        # every right list a route here names, checked by app.py's need() in init
@@ -166,11 +167,20 @@ def _admin():
 def admin(): return _admin()
 
 
+def _base():
+    """the address Telegram is pointed at: Railway's own name for the app (RAILWAY_PUBLIC_DOMAIN) when it is set and is a host
+    name, so no header a browser sends can aim the hook and its secret elsewhere; else the address Connect was pressed on"""
+    host = (os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+    labels = host.split(".")
+    if len(host) <= 253 and len(labels) > 1 and all(_LABEL.fullmatch(x) for x in labels): return "https://" + host
+    return request.host_url.rstrip("/")
+
+
 @bp.post("/api/relief/telegram/connect")
 @need("relief.save")
 def connect():
-    """Telegram sends this bot's updates to the address this was pressed on; what was waiting there is dropped"""
-    base = request.host_url.rstrip("/")
+    """Telegram sends this bot's updates to the app's address from now; what was waiting there is dropped"""
+    base = _base()
     if not tg.on(): return {"error": NO_TOKEN}, 409
     if not tg.hook_secret(): return {"error": NO_KEY}, 409
     if not base.startswith("https://") and not tg.practice(): return {"error": NOT_HTTPS}, 409
