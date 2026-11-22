@@ -566,3 +566,20 @@ button.bdlab{cursor:pointer}button.bdlab:hover{background:var(--chip)}
 .upgo{border:1px solid var(--line);border-radius:8px;padding:6px 12px;background:#fff;font-size:13px}
 .upname{margin:6px 4px 0;min-height:22px;font-size:13px}
 .upok{color:#1d5b33;font-weight:600;word-break:break-all}
+/* step 8's Versions pop-out */
+.vshead2{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.vshead2 h2{margin:0}
+body.vslock{overflow:hidden}
+.vsov{position:fixed;inset:0;z-index:25;background:rgba(20,30,48,.5);display:flex;justify-content:center;align-items:flex-start;overflow-y:auto;padding:4vh 16px;box-sizing:border-box}
+.vsov[hidden]{display:none}
+.vspop{background:var(--panel);border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.3);padding:18px 20px;width:100%;max-width:880px;box-sizing:border-box;outline:none}
+.vshead{display:flex;justify-content:space-between;align-items:center;gap:12px}.vshead h2{margin:0}
+.vssave{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:12px 0}.vssave label{flex:1 1 260px}.vssave input{width:100%;box-sizing:border-box}
+.vstable{width:100%;border-collapse:collapse}.vstable th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+.vstable td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+.vstag{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;background:var(--chip);color:var(--muted);font-weight:500}
+.vsbtns{display:flex;gap:6px;flex-wrap:wrap}.vsbtns button{padding:4px 9px;font-size:13px}
+.vsdel{color:var(--warn)}
+.vspop button:disabled{opacity:.5;cursor:default}
+@media(max-width:640px){.vsov{padding:0}.vspop{border-radius:0;min-height:100%}}
+@media(max-width:640px){.vstable,.vstable tbody,.vstable tr,.vstable td{display:block;width:100%;box-sizing:border-box}.vstable tr:first-child{display:none}.vstable tr{border-bottom:1px solid var(--line);padding:6px 0}.vstable td{border:0;padding:3px 8px}.vstable td[data-l]:not(:first-child)::before{content:attr(data-l) ": ";color:var(--muted);font-size:12px}}
+@media(max-width:640px){.vstable td.vsbtns{display:flex;gap:6px;flex-wrap:wrap}}

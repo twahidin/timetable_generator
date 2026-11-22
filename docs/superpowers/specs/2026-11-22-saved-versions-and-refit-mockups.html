@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Versions and re-fit mockup</title>
+<style>
+:root{--navy:#1e4f7a;--line:#dfe5ee;--chip:#eef2f8;--muted:#6b7686;--ink:#1d2735;--green:#e7f6ec;--greenline:#9fd8b0;--greenink:#1d5b33;--amber:#fdf0d5;--amberline:#e3b34d;--amberink:#7a5410;--red:#fbe0e3;--redink:#9b2335;--blue:#eaf3ff;--blueline:#b9d3f5}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;color:var(--ink);background:#eef3fa}
+.wrap{max-width:1100px;margin:0 auto;padding:16px}
+.mocknote{background:#fff7d6;border:1px dashed #d9b84a;border-radius:10px;padding:8px 12px;margin:0 0 12px;font-size:13px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.tabs button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 14px;font:inherit;cursor:pointer}
+.tabs button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.screen{display:none}.screen.on{display:block}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:12px}
+h2{margin:0 0 6px;font-size:18px}h3{margin:14px 0 6px;font-size:15px}
+.muted{color:var(--muted)}.small{font-size:12.5px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+.btn.primary{background:var(--navy);color:#fff;border-color:var(--navy)}
+.btn.danger{color:var(--redink)}
+.btn.ghost{background:transparent;border-color:transparent;text-decoration:underline;color:var(--navy)}
+.tag{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11.5px;border:1px solid var(--line);background:var(--chip);white-space:nowrap}
+.tag.now{background:var(--navy);color:#fff;border-color:var(--navy)}
+.tag.pub{background:var(--green);border-color:var(--greenline);color:var(--greenink)}
+.tag.day{background:var(--amber);border-color:var(--amberline);color:var(--amberink)}
+.tag.crit{background:var(--red);border-color:#f0b5bd;color:var(--redink)}
+.tag.band{background:var(--blue);border-color:var(--blueline);color:#24548c}
+/* the step 8 strip behind a pop-out */
+.behind{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 18px;opacity:.55;margin-bottom:-6px}
+.behind .row{justify-content:space-between}
+.dialog{position:relative;background:#fff;border:1px solid #c9d4e3;border-radius:16px;box-shadow:0 18px 50px rgba(20,40,70,.22);padding:18px 20px;margin:0 auto 14px;max-width:920px}
+.dialog .x{position:absolute;top:12px;right:14px}
+.callout{background:var(--green);border:1px solid var(--greenline);border-radius:12px;padding:10px 14px;color:var(--greenink);margin:10px 0}
+.warnbox{background:var(--amber);border:1px solid var(--amberline);border-radius:12px;padding:10px 14px;color:var(--amberink);margin:10px 0}
+/* versions table */
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:8px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:600}
+td .acts{display:flex;gap:6px;flex-wrap:wrap}
+tr.cur td{background:#f5f8fd}
+.savebar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#f7f9fc;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0 12px}
+.savebar input{flex:1;min-width:220px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit}
+/* compare */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0}
+.tile{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fbfcfe}
+.tile b{display:block;font-size:22px}
+.tile .ab{font-size:12.5px;color:var(--muted)}
+.pick select{border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;background:#fff}
+.grids{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px}
+@media (max-width:760px){.grids{grid-template-columns:1fr}}
+.tt{border:1px solid var(--line);border-radius:10px;overflow:auto;background:#fff}
+.tt table{min-width:430px}
+.tt th,.tt td{border:1px solid #edf0f5;padding:4px 3px;text-align:center;font-size:12px}
+.tt th{background:#f6f8fb}
+.tt td.ch{outline:2px solid #e08a1e;outline-offset:-2px;background:#fff4e2;font-weight:600}
+.tt td.bd{background:var(--blue)}
+.tt td.free{color:#b6bfcc}
+.difflist li{margin:4px 0}
+.arrow{color:var(--muted)}
+/* re-fit */
+.found li{margin:3px 0}
+.keeps{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 2px}
+.keeps span{background:#f2f5fa;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12.5px}
+.grp{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:10px 0}
+.grp .why{font-weight:600;margin-bottom:4px}
+.step{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px dashed #e7ebf2}
+.step:first-of-type{border-top:0}
+.step .n{flex:0 0 22px;height:22px;border-radius:50%;background:var(--chip);text-align:center;font-size:12px;line-height:22px;color:var(--navy);font-weight:700}
+.step .t{flex:1}
+.needs{border:1px solid #f0b5bd;background:#fff6f7;border-radius:12px;padding:10px 12px;margin:10px 0}
+.sum{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
+.sum div{background:#f7f9fc;border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px}
+.foot{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center;margin-top:12px}
+.foot .muted{margin-right:auto;max-width:520px}
+</style></head><body><div class="wrap">
+
+<p class="mocknote"><b>Mockup.</b> Made-up names from the sample school; nothing here works yet. Three screens: pick one below.</p>
+<div class="tabs" role="tablist">
+  <button class="on" data-s="v">1 · Saved versions</button>
+  <button data-s="c">2 · Compare two versions</button>
+  <button data-s="r">3 · Re-fit after setup changes</button>
+</div>
+
+<!-- 1. SAVED VERSIONS -->
+<section class="screen on" id="s-v">
+  <div class="behind"><div class="row"><b>Step 8 · Upload and edit</b><span class="row"><span class="btn">Upload a timetable</span><span class="btn primary">Versions (4)</span><span class="btn">Re-fit to the setup</span></span></div></div>
+  <div class="dialog">
+    <button class="btn x">Close</button>
+    <h2>Versions</h2>
+    <p class="muted small" style="margin:0">Each version is a whole timetable with its own list of changes. Opening one makes it the draft on step 8; the draft you had is kept as a version first, so nothing is lost.</p>
+    <div class="savebar">
+      <b class="small">Save the draft as</b>
+      <input value="Agent run 2 · edited 22 Nov" aria-label="Version name">
+      <button class="btn primary">Save version</button>
+    </div>
+    <table>
+      <thead><tr><th>Version</th><th>Saved</th><th>Changes made in the app</th><th>Checked now</th><th></th></tr></thead>
+      <tbody>
+        <tr class="cur"><td><b>The draft on step 8</b> <span class="tag now">now</span><div class="small muted">from “Agent run 2.sqlite”</div></td><td class="small">uploaded 22 Nov, 1.12 pm</td><td class="small">4 changes</td><td class="small"><span class="tag">0 critical</span> <span class="tag">6 warnings</span></td><td><div class="acts"><button class="btn">Compare…</button></div></td></tr>
+        <tr><td><b>Agent run 1 · edited</b><div class="small muted">from “Agent run 1.sqlite”</div></td><td class="small">21 Nov, 9.40 pm<br>by Committee</td><td class="small">17 changes</td><td class="small"><span class="tag crit">1 critical</span> <span class="tag">9 warnings</span></td><td><div class="acts"><button class="btn">Open</button><button class="btn">Compare…</button><button class="btn">Download</button><button class="btn danger">Delete</button></div></td></tr>
+        <tr><td><b>Agent run 1 · as uploaded</b><div class="small muted">from “Agent run 1.sqlite”</div></td><td class="small">21 Nov, 4.02 pm<br>by Committee</td><td class="small">none</td><td class="small"><span class="tag crit">5 critical</span> <span class="tag">14 warnings</span></td><td><div class="acts"><button class="btn">Open</button><button class="btn">Compare…</button><button class="btn">Download</button><button class="btn danger">Delete</button></div></td></tr>
+        <tr><td><b>Before re-fit, 20 Nov</b><div class="small muted">saved by the app before a re-fit</div></td><td class="small">20 Nov, 3.15 pm</td><td class="small">11 changes</td><td class="small"><span class="tag crit">2 critical</span> <span class="tag">8 warnings</span></td><td><div class="acts"><button class="btn">Open</button><button class="btn">Compare…</button><button class="btn">Download</button><button class="btn danger">Delete</button></div></td></tr>
+        <tr><td><b>Published timetable</b> <span class="tag pub">what teachers see</span></td><td class="small">published 18 Nov</td><td class="small">12 changes</td><td class="small"><span class="tag">0 critical</span> <span class="tag">7 warnings</span></td><td><div class="acts"><button class="btn">Compare…</button></div></td></tr>
+      </tbody>
+    </table>
+    <p class="small muted" style="margin:10px 0 0">“Checked now” means against the setup as it is today: a version saved before step 5 changed can show warnings it did not have then.</p>
+  </div>
+</section>
+
+<!-- 2. COMPARE -->
+<section class="screen" id="s-c">
+  <div class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Compare</h2><button class="btn">Back to step 8</button></div>
+    <div class="row pick" style="margin-top:8px">
+      <select aria-label="First version"><option>A · Agent run 1 · edited</option></select>
+      <span class="muted">with</span>
+      <select aria-label="Second version"><option>B · The draft on step 8 (Agent run 2)</option></select>
+    </div>
+    <div class="tiles">
+      <div class="tile"><span class="ab">Lessons at another time</span><b>38</b><span class="ab">of 412</span></div>
+      <div class="tile"><span class="ab">Teacher different</span><b>3</b><span class="ab">lessons</span></div>
+      <div class="tile"><span class="ab">Room different</span><b>21</b><span class="ab">lessons</span></div>
+      <div class="tile"><span class="ab">Critical</span><b>1 → 0</b><span class="ab">A → B</span></div>
+      <div class="tile"><span class="ab">Warnings</span><b>9 → 6</b><span class="ab">A → B</span></div>
+      <div class="tile"><span class="ab">Teachers’ longest day</span><b>7 → 6</b><span class="ab">periods, A → B</span></div>
+    </div>
+    <div class="row pick">
+      <b class="small">Show</b>
+      <select id="cmpWho" aria-label="Class, teacher or room"><option>Class 3B</option><option>Teacher Karen Ismail</option><option>Room Lab 1</option></select>
+      <label class="small"><input type="checkbox" checked> mark what differs</label>
+      <span class="small muted">Orange = not the same in A and B.</span>
+    </div>
+    <div class="grids">
+      <div><b class="small">A · Agent run 1 · edited</b><div class="tt" id="gA"></div></div>
+      <div><b class="small">B · Agent run 2 (the draft)</b><div class="tt" id="gB"></div></div>
+    </div>
+    <h3>What differs for 3B</h3>
+    <ul class="difflist small">
+      <li>Mathematics: Mon 3 <span class="arrow">→</span> Mon 6</li>
+      <li>English: Mon 6 <span class="arrow">→</span> Mon 3</li>
+      <li>Science: Thu 4 <span class="arrow">→</span> Fri 2, room Lab 1 <span class="arrow">→</span> Lab 2</li>
+      <li>Social Studies: Fri 2 <span class="arrow">→</span> Thu 4, teacher Karen Ismail <span class="arrow">→</span> Hakim Kumar</li>
+    </ul>
+    <p class="small muted">Every difference can also be downloaded as a list (Excel), class by class.</p>
+  </div>
+</section>
+
+<!-- 3. RE-FIT -->
+<section class="screen" id="s-r">
+  <div class="behind"><div class="row"><b>Step 8 · Upload and edit</b><span class="row"><span class="btn">Versions (4)</span><span class="btn primary">Re-fit to the setup</span></span></div></div>
+  <div class="dialog">
+    <button class="btn x">Cancel</button>
+    <h2>Re-fit to the setup’s changes</h2>
+    <h3 style="margin-top:6px">What doesn’t fit the setup now</h3>
+    <ol class="found small">
+      <li>Step 5: <b>3B Mathematics</b> is now taught by Farhan Hakim (the timetable has Grace Ng).</li>
+      <li>Step 3: <b>2C Science</b> has 5 periods (the timetable has 4).</li>
+      <li>New rule: <b>Joel Chua</b> is not available on Fridays.</li>
+    </ol>
+    <div class="keeps"><span>Bands stay where they are</span><span>Lessons stay on their day unless a change forces another</span><span>Fewest lessons moved</span><span>No Must rule broken</span><span>Typed rules: moves allowed, flagged</span></div>
+
+    <div class="grp"><div class="why">1 · 3B Mathematics to Farhan Hakim</div>
+      <div class="step"><span class="n">1</span><span class="t">Farhan Hakim takes 3B Mathematics (all 5 lessons).</span></div>
+      <div class="step"><span class="n">2</span><span class="t">3B Mathematics Mon 3 → Mon 6 <span class="muted small">(Farhan Hakim teaches 1A at Mon 3)</span></span></div>
+      <div class="step"><span class="n">3</span><span class="t">3B English Mon 6 → Mon 3 <span class="muted small">(swaps with the lesson above; Adeline Tan is free then)</span></span></div>
+    </div>
+    <div class="grp"><div class="why">2 · 2C Science, a fifth period</div>
+      <div class="step"><span class="n">4</span><span class="t">2C Science added on Thu 7, Wen Hui Yeo, Lab 1 <span class="muted small">(free for the class, the teacher and the lab)</span></span></div>
+    </div>
+    <div class="grp"><div class="why">3 · Joel Chua not on Fridays</div>
+      <div class="step"><span class="n">5</span><span class="t">4C Social Studies Fri 4 → Mon 8 <span class="tag day">another day</span> <span class="tag">check T7 again</span></span></div>
+      <div class="step"><span class="n">6</span><span class="t">2A History Fri 1 → Wed 5 <span class="tag day">another day</span></span></div>
+      <div class="step"><span class="n">7</span><span class="t">2A PE Wed 5 → Wed 4 <span class="muted small">(makes room for the lesson above, same day)</span></span></div>
+    </div>
+    <div class="needs"><b>Needs you</b>
+      <div class="small" style="margin-top:4px">3HHP1 <span class="tag band">Sec 3 Humanities elective band</span> is on Fri 2 with Joel Chua. Bands stay where they are, so the app leaves it: give this group another teacher on Friday, or move the band yourself.</div>
+    </div>
+    <div class="sum"><div><b>6</b> lessons move, <b>2</b> to another day</div><div>Critical <b>1 → 0</b></div><div>Warnings <b>9 → 7</b></div><div><b>1</b> typed rule to check again</div><div>Every step checked against every rule</div></div>
+    <div class="foot">
+      <span class="small muted">A version “Before re-fit, 22 Nov 2.10 pm” is saved first. Applying makes all 7 changes as one; Undo takes the whole re-fit back.</span>
+      <button class="btn">Preview on the board</button>
+      <button class="btn primary">Apply all 7 changes</button>
+    </div>
+  </div>
+</section>
+
+</div>
+<script>
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id==='s-'+b.dataset.s));});
+const days=['Mon','Tue','Wed','Thu','Fri'];
+const A=[['EL','MA','MA','CCE','PE','EL','MT','MT'],['SC','SC','EL','MA','HU','HU','ART','ART'],['MA','EL','MT','MT','SS','PE','SC',''],['HU','EL','MA','SC','MT','MT','SS',''],['EL','SS','MA','PE','CCE','','','']];
+const B=A.map(r=>r.slice());
+B[0][2]='EL';B[0][5]='MA';B[3][3]='SS';B[4][1]='SC';
+const band=s=>s==='MT'||s==='HU';
+function grid(el,G,O){let h='<table><tr><th></th>'+[1,2,3,4,5,6,7,8].map(p=>'<th>'+p+'</th>').join('')+'</tr>';
+G.forEach((r,d)=>{h+='<tr><th>'+days[d]+'</th>'+r.map((s,p)=>{const c=[];if(s!==O[d][p])c.push('ch');if(band(s))c.push('bd');if(!s)c.push('free');return '<td class="'+c.join(' ')+'">'+(s||'·')+'</td>';}).join('')+'</tr>';});
+el.innerHTML=h+'</table>';}
+grid(document.getElementById('gA'),A,B);grid(document.getElementById('gB'),B,A);
+</script>
+</body></html>
