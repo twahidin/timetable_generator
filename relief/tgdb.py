@@ -72,13 +72,13 @@ def set_state(k, v):
 
 
 def raise_state(k, n, also=()):
-    """k raised to the number n, and each key of also set to true with it, in one block on the store -> True; False, nothing
-    changed, when it is as high already (an earlier run, or another copy of the app, was there first)"""
+    """k raised to the number n, and each key of also set to n with it, in one block on the store -> True; False, nothing changed,
+    when it is as high already (an earlier run, or another copy of the app, was there first)"""
     with db() as c:
         r = c.execute("SELECT v FROM state WHERE k=?", (k,)).fetchone()
         was = json.loads(r["v"]) if r else None
         if isinstance(was, (int, float)) and was >= n: return False
-        c.executemany("INSERT OR REPLACE INTO state(k, v) VALUES (?, ?)", [(k, json.dumps(n))] + [(x, "true") for x in also])
+        c.executemany("INSERT OR REPLACE INTO state(k, v) VALUES (?, ?)", [(x, json.dumps(n)) for x in (k, *also)])
     return True
 
 

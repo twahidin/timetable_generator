@@ -13,7 +13,7 @@ the address that opens the bot with it), DELETE …/link. Relief settings (relie
 Telegram at the app's address, _base), …/disconnect and …/unlink {name}. The relief team (relief.team, asked as relief/web.py's
 team routes ask it): POST /api/relief/today/remind. No answer holds the token, the hook's secret, a chat id or anything Telegram
 said."""
-import hmac, json, logging, os, re
+import hmac, json, logging, os, re, sqlite3
 from functools import wraps
 from urllib.parse import urlsplit
 
@@ -35,6 +35,7 @@ NO_TOKEN = "Add the bot's token in Railway variables first (TELEGRAM_BOT_TOKEN).
 NO_KEY = "Set SECRET_KEY in Railway variables first: the bot needs it."
 NOT_HTTPS = "Telegram needs a secure address: open the app at its https address and press Connect there."
 NO_ANSWER = "Telegram did not answer, or did not accept the bot. Check TELEGRAM_BOT_TOKEN in Railway variables and try again."
+NOT_NOW = "Telegram could not be reached just now. Try again."
 HALF_OFF = "Disconnected here, but Telegram did not answer. The app reads and sends nothing now."
 NO_LINK = "That person has no Telegram linked."
 COMMANDS = [dict(command="relief", description="Ask for relief"), dict(command="stop", description="Unlink this Telegram"),
@@ -161,7 +162,8 @@ def unlink_mine():
 @need("relief")
 def remind():
     """{date, covers: [{id, ckey}]}: the reliefs the page showed as not acknowledged, sent again (report.remind) -> dict(sent: how
-    many, skipped=[{ckey, name, why}]); one history entry when any was; relief.team"""
+    many, skipped=[{ckey, name, why}]); one history entry when any was. NOT_NOW (503) when the store fails: what was put in the queue
+    by then goes, and pressing again does not send it twice; relief.team"""
     pub, me, err = _web._gate(*_web.TEAM)
     if err: return err
     b = _web._body()
@@ -170,7 +172,12 @@ def remind():
         if links.connected() is None: return {"error": NOT_CONNECTED}, 409
         got = report.remind(date, covers, None)
     except ValueError as e: return _web._refusal(e)
-    except _web.BAD_INPUT as e: return _web._odd(e, "reminding")
+    except _web.BAD_INPUT as e:
+        _log.warning("a reminder could not be read (%s)", type(e).__name__)
+        return {"error": _absences.WRONG}, 400
+    except sqlite3.OperationalError as e:
+        _log.error("a reminder could not be queued (%s)", type(e).__name__)
+        return {"error": NOT_NOW}, 503
     return jsonify(got)
 
 

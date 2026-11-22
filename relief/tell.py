@@ -70,6 +70,7 @@ NO_PICK = "No new pick yet: open the app."
 ACK, CHANGE, SET_WORK, NOT_NEEDED, OPEN = "✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"
 TOLD = ("relief:", "gone:", "moved:", "stopped:", "again:", "ask:", "planned:", "remind:", "officer:")      # the keys due must know of
 SENT = ("sent", "unsure")                       # the states in which a person was told, or may have been
+LIVE = (*SENT, "queued", "sending")              # ... or may still be
 RELIEFS = ("relief:", "stopped:", "again:")      # the keys that say what has been said of a relief (Said)
 _COPY = re.compile(r"(relief:.*):r(\d+)", re.S)  # the key of a reminder: the relief's, and which one it is
 _going = threading.Lock()                       # one sweep at a time
@@ -434,7 +435,7 @@ def key_of(told, r, c, ckey):
 
 
 class Said:
-    """what has been said of the reliefs, read once (said): told, what outbox.told_for gives for the RELIEFS keys. key: a relief
+    """what has been said of the reliefs, read once (said): told, what outbox.states_for gives for the RELIEFS keys. key: a relief
     message's; it and its reminders are one relief's messages, those dropped as if they had never been.
 
     Someone told that a relief is stopped, and not surely (sent) told since that it is on again, has been told nothing: until a
@@ -476,14 +477,12 @@ class Said:
 
     def last(self, key):
         """when the last of its messages went, may have gone or was put in the queue (a date-time), or None"""
-        return max((when for when, n, t in self._messages(key) if t["state"] in (*SENT, "queued", "sending")), default=None)
+        return max((when for when, n, t in self._messages(key) if t["state"] in LIVE), default=None)
 
 
 def said():
     """what has been said of the reliefs, as it is now"""
-    out = {}
-    for prefix in RELIEFS: out.update(outbox.told_for(prefix))
-    return Said(out)
+    return Said(outbox.states_for(*RELIEFS))
 
 
 # ---- telling it

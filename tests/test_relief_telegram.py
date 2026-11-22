@@ -4495,7 +4495,7 @@ def a_state_is_raised_once():
     with telegram():
         got = lambda *ks: [tgdb.get_state(k) for k in ks]
         assert tgdb.raise_state("n", 5) is True and got("n") == [5] and tgdb.raise_state("n", 5, ["x"]) is False and tgdb.raise_state("n", 4, ["x"]) is False and got("n", "x") == [5, None]
-        assert tgdb.raise_state("n", 6, ["x", "y"]) is True and got("n", "x", "y") == [6, True, True] and tgdb.raise_state("m", 0) is True and tgdb.raise_state("m", 0) is False
+        assert tgdb.raise_state("n", 6, ["x", "y"]) is True and got("n", "x", "y") == [6, 6, 6] and tgdb.raise_state("m", 0) is True and tgdb.raise_state("m", 0) is False
         for odd in ("odd", None, [9], {}): tgdb.set_state("n", odd); assert tgdb.raise_state("n", 1) is True and got("n") == [1], odd
         done = []; at_once(*[lambda: done.append(tgdb.raise_state("k", 7))] * 8); assert sorted(done) == [False] * 7 + [True]
 
@@ -4544,7 +4544,7 @@ def a_late_tick_or_a_restart_sends_a_mark_once():
         j = absent(dates=["2026-10-16"]); assert j
         with no_pub(): assert ticked("09:15") == []
         with broken_accounts(): assert ticked("09:16") == []
-        with stand_in(absences, "all_records", lambda: 1 / 0): assert ticked("09:17") == []
+        with stand_in(TE, "_records", lambda: 1 / 0): assert ticked("09:17") == []
         assert tgdb.get_state(f"report_last:{D13}") == 540 and ticked("09:18") == keyed("0915")
     with school(SAM, TEAM):                                                                # the store cannot be written: nothing goes, and a minute later it does
         today_reliefs((K5, SAM))
@@ -4786,13 +4786,13 @@ def the_report_never_raises_and_reads_once():
     try:
         with school(SAM, MAYA, TEAM):
             i = today_reliefs((K5, SAM), (K2, MAYA)); n = 0
-            for module, name in ((store, "published"), (links, "connected"), (links, "reachable"), (RS, "load"), (absences, "all_records"), (AP, "staff"), (OB, "told_for"), (tgdb, "get_state"), (RE, "report_text")):
+            for module, name in ((store, "published"), (links, "connected"), (links, "reachable"), (RS, "load"), (TE, "_records"), (AP, "staff"), (OB, "told_for"), (OB, "states_for"), (tgdb, "get_state"), (RE, "report_text")):
                 h.records.clear()
                 with stand_in(module, name, boom): assert ticked("07:00") == [], name
                 assert [r.getMessage() for r in h.records] and all("LookupError" in r.getMessage() and "private" not in r.getMessage() and SAM not in r.getMessage() and r.exc_info is None for r in h.records), name
             reads = []
             def counted(f, name): return lambda *a, **k: (reads.append(name), f(*a, **k))[1]
-            with stand_in(absences, "all_records", counted(absences.all_records, "records")), stand_in(RS, "load", counted(RS.load, "settings")), stand_in(FL, "_links", counted(FL._links, "links")), stand_in(links, "reachable", counted(links.reachable, "reach")):
+            with stand_in(TE, "_records", counted(TE._records, "records")), stand_in(RS, "load", counted(RS.load, "settings")), stand_in(FL, "_links", counted(FL._links, "links")), stand_in(links, "reachable", counted(links.reachable, "reach")):
                 assert ticked("07:01") == keyed("0700") and sorted(reads) == ["links", "reach", "records", "settings"], reads
                 reads.clear(); assert ticked("07:02") == [] and "records" not in reads and "links" not in reads, "nothing to do: next to nothing is read"
             # a record changed by hand is passed over, and the rest is said
@@ -4869,8 +4869,8 @@ def two_reminders_at_once_are_one():
         at_once(*[lambda: got.append(remind(asks(i, K5)))] * 4)
         assert sorted(g["sent"] for g in got) == [0, 0, 0, 1] and [r["key"] for r in outs("relief")] == [key, key + ":r1"] and all(skips(g) == [(K5, SAM, TOO_SOON.format("07:00"))] for g in got if not g["sent"])
     with school(SAM, TEAM):                                                                # another copy of the app put it in the queue meanwhile
-        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("07:00", 13); before = OB.told_for("relief:"); remind(asks(i, K5))
-        with stand_in(OB, "told_for", lambda prefix: {k: v for k, v in before.items() if k.startswith(prefix)}): assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("07:00"))] and len(outs("relief")) == 2
+        i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("07:00", 13); before = OB.states_for("relief:"); remind(asks(i, K5))
+        with stand_in(OB, "states_for", lambda *prefixes: dict(before)): assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("07:00"))] and len(outs("relief")) == 2
         links.unlink(SAM); at("07:30", 13)
         with stand_in(links, "reachable", lambda pub=None: {SAM: CHATS[SAM]}): 
             assert skips(remind(asks(i, K5))) == [(K5, SAM, NOT_ON)], "unlinked meanwhile"
@@ -5070,15 +5070,184 @@ def today_rows_say_when_it_was_told_and_if_not_on_telegram():
     with school(SAM, MAYA, TEAM):                                                          # read once a request, however many absences and rows
         i = today_reliefs((K5, SAM), (K2, MAYA)); absent(teacher=RUTH); reads = []
         def counted(f, name): return lambda *a, **k: (reads.append(name), f(*a, **k))[1]
-        with stand_in(links, "reachable", counted(links.reachable, "reach")), stand_in(OB, "told_for", counted(OB.told_for, "told")): assert row()[0]["state"] == "sent" == row(K2)[0]["state"]
-        assert reads.count("reach") == 2 and reads.count("told") == 6, reads
+        with stand_in(links, "reachable", counted(links.reachable, "reach")), stand_in(OB, "states_for", counted(OB.states_for, "said")): assert row()[0]["state"] == "sent" == row(K2)[0]["state"]
+        assert sorted(reads) == ["reach", "reach", "said", "said"], reads
         # Telegram's side never fails the page
-        for module, name in ((links, "reachable"), (OB, "told_for"), (tgdb, "db")):
+        for module, name in ((links, "reachable"), (OB, "states_for"), (tgdb, "db")):
             with quiet_app(), stand_in(module, name, lambda *a, **k: 1 / 0): assert row() == (None, False), name
         os.environ.pop("TELEGRAM_BOT_TOKEN")
         opened = []
         with stand_in(tgdb, "db", lambda read=False: opened.append(1)): assert row() == (None, False) and opened == [], "no token: the store is not opened"
         os.environ["TELEGRAM_BOT_TOKEN"] = "practice"; assert row()[1] is True
+
+# ---- Task 6, fix round 1
+KR = next(x["key"] for x in LS.on_date(SCHOOL, TERM, RUTH, datetime.date(2026, 10, 13)) if x["p"] == 6)
+
+@t
+def the_answer_is_the_first_reason_that_says_something():
+    def answer(f, linked=(SAM, MAYA, TEAM)):
+        """what the button of a report that lists Maya's relief, then Sam's, is answered after f"""
+        with school(*linked):
+            i = today_reliefs((K2, MAYA), (K5, SAM)); ticked("07:00"); send(); f(i); got = press(TEAM, "remind"); assert edits() == [] and calls("editMessageReplyMarkup") == [], got
+            return got
+    def acked(i, ckey, who_): CV.acknowledge(i, ckey, who_)
+    def reminded(i, ckey): at("07:10", 13); assert remind(asks(i, ckey))["sent"] == 1; at("07:11", 13)
+    assert answer(lambda i: (acked(i, K2, MAYA), reminded(i, K5))) == (TOO_SOON.format("07:10"), True)
+    assert answer(lambda i: (acked(i, K5, SAM), reminded(i, K2))) == (TOO_SOON.format("07:10"), True)
+    assert answer(lambda i: (acked(i, K2, MAYA), links.unlink(SAM), at("07:10", 13))) == (NOT_ON, True)
+    assert answer(lambda i: (acked(i, K2, MAYA), acked(i, K5, SAM), at("07:10", 13))) == (NOBODY, True)
+    assert answer(lambda i: (links.unlink(MAYA), reminded(i, K5))) == (NOT_ON, True) and answer(lambda i: (links.unlink(SAM), reminded(i, K2))) == (TOO_SOON.format("07:10"), True), "the first of them"
+    assert answer(lambda i: (acked(i, K2, MAYA), at("07:10", 13))) == ("Reminded 1.", False)
+    assert bot.ACTIONS["remind"][2] is bot.ANY and not isinstance(bot.ANY, (tuple, str)) and [k for k, v in bot.ACTIONS.items() if v[2] is bot.ANY] == ["remind"]
+    with school(SAM, TEAM):                                                                # whatever the sentence looks like
+        today_reliefs((K5, SAM)); ticked("07:00"); send()
+        for text in ("{why}", "a {name} {", "x"):
+            def says(*a, **k): raise ValueError(text)
+            with stand_in(RE, "remind", says): assert press(TEAM, "remind") == (text, True) and edits() == []
+
+@t
+def no_all_clear_while_something_cannot_be_read():
+    def two():
+        """a report at 07:00 of Sam's relief (for Eve) and Maya's (for Ruth), then Sam acknowledged -> Ruth's absence"""
+        i = today_reliefs((K5, SAM)); j = absent(teacher=RUTH, by=HUGO); give(j, KR, MAYA); swept(); assert ticked("07:00") == keyed("0700") and texts_to()[-1].startswith(head("07:00", 2)) and send() == 1; CV.acknowledge(i, K5, SAM); return j
+    for bad in ("{ not json", "[]", "{}", "", '{"id": "another"}'):                          # its file
+        with school(SAM, MAYA, TEAM):
+            j = two(); p = absences._path(j); good = open(p, encoding="utf-8").read(); open(p, "w", encoding="utf-8").write(bad)
+            assert ticked("07:15") == [] and tgdb.get_state(f"report_last:{D13}") == 435 and ticked("07:16") == [], bad
+            assert ticked("07:30") == [] and outs("clear") == []; open(p, "w", encoding="utf-8").write(good); CV.acknowledge(j, KR, MAYA); assert ticked("07:45") == cleared(1) and texts_to()[-1] == all_clear("07:45", 2), bad
+    def odd(f): return lambda r: [f(x) for x in r["lessons"] if x["key"] == KR]
+    covers_ = [odd(f) for f in (lambda x: x.update(relief=5), lambda x: x.update(approved=5), lambda x: x.update(p="a"), lambda x: x.update(p=None), lambda x: x.update(subject=5), lambda x: x.update(parts=5), lambda x: x.update(parts=[5]), lambda x: x.pop("key"), lambda x: x.pop("date"), lambda x: x.update(date=None))]
+    lessons_ = [lambda r: r["lessons"].insert(0, 5), lambda r: r["lessons"].append(None), lambda r: r.update(lessons="x"), lambda r: r.update(lessons=5), lambda r: r.update(lessons=dict(a=1))]
+    for n, f in enumerate(covers_ + lessons_):                                             # a cover, or a lesson (of any date, that cannot be read), of it
+        with school(SAM, MAYA, TEAM):
+            j = two(); p = absences._path(j)
+            if n >= len(covers_): CV.acknowledge(j, KR, MAYA)                              # the odd one alone is left
+            good = open(p, encoding="utf-8").read(); change_record(j, f); assert ticked("07:15") == [] and tgdb.get_state(f"report_last:{D13}") == 435, n
+            open(p, "w", encoding="utf-8").write(good)
+            if n < len(covers_): CV.acknowledge(j, KR, MAYA)
+            assert ticked("07:30") == cleared(1) and texts_to()[-1] == all_clear("07:30", 2), n
+    # what could be read is reported; the waiting cover after an odd one too
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K5, SAM)); j = absent(teacher=RUTH, by=HUGO); give(j, KR, MAYA); open(absences._path(j), "w", encoding="utf-8").write("{ not json"); assert ticked("07:00") == keyed("0700") and texts_to()[-1] == head("07:00", 1) + SAM_LINE + "sent 06:50"
+    for f in (lambda x: x.update(approved=5), lambda x: x.update(relief=5), lambda x: x.update(p="a")):
+        with school(SAM, MAYA, TEAM):
+            i = today_reliefs((K2, MAYA), (K5, SAM)); change_record(i, lambda r: [f(x) for x in r["lessons"] if x["key"] == K2]); assert ticked("07:00") == keyed("0700") and texts_to()[-1] == head("07:00", 1) + SAM_LINE + "sent 06:50"
+            CV.acknowledge(i, K5, SAM); assert ticked("07:15") == [], "no all clear: Maya's cannot be read"
+    with school(SAM, RUTH, MAYA, TEAM):                                                    # a part of a split lesson
+        at("06:50", 13); i = absent(by=HUGO); CV.split(i, K2, 3, TEAM); give(i, K2 + "#0", MAYA); give(i, K2 + "#1", RUTH); swept(); change_record(i, lambda r: [x["parts"][0].update(relief=5) for x in r["lessons"] if x["key"] == K2])
+        assert ticked("07:00") == keyed("0700") and texts_to()[-1] == head("07:00", 1) + "\n• Ms Ruth Goh · 1C Science P4–P5 · starts 09:30 · sent 06:50"
+    # what is not today's, or is not to be covered, holds nothing up
+    for f in (lambda r: (r.update(cancelled=dict(by=HUGO, at=clock.now)), r["lessons"].append(5)), odd(lambda x: x.update(needed=False, relief=5, approved=5))):
+        with school(SAM, MAYA, TEAM): j = two(); change_record(j, f); assert ticked("07:15") == cleared(1) and texts_to()[-1] == "✅ 07:15 · The 1 relief for today is acknowledged."
+    with school(SAM, MAYA, TEAM):
+        j = two(); CV.acknowledge(j, KR, MAYA); change_record(j, lambda r: r["lessons"].append(dict(date="2026-10-14", key="k", needed=True, relief=5, approved=5, parts=5))); assert ticked("07:15") == cleared(1) and texts_to()[-1] == all_clear("07:15", 2)
+    # read whole, under the lock (a takeover is two saves), and nothing private is logged; no absence ever sent is no failure
+    h, seen, real = Grab(), [], TE._records; KINDS.addHandler(h)
+    with school(TEAM): assert not os.path.isdir(absences.DIR) and ticked("07:00") == [] and tgdb.get_state(f"report_last:{D13}") == 420 and h.records == []
+    with school(SAM, MAYA, TEAM):
+        j = two(); change_record(j, odd(lambda x: x.update(relief=5, subject="a private word")))
+        with stand_in(TE, "_records", lambda: (seen.append(absences._LOCK.locked()), real())[1]): ticked("07:15")
+        assert seen == [True] and not absences._LOCK.locked()
+    KINDS.removeHandler(h); assert h.records and all(r.getMessage().endswith(")") and "private" not in r.getMessage() and RUTH not in r.getMessage() and r.exc_info is None for r in h.records)
+
+@t
+def a_started_relief_is_listed_again_when_its_report_never_went():
+    R9 = f"report:{D13}:0900:{TEAM}"
+    def listed_at(hm): ticked(hm); return texts_to()[-1] if STARTED in texts_to()[-1] else None
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K2, MAYA), (K5, SAM)); key = f"started:{relief_key_of(i, K2)}"; assert listed_at("09:00") == head("09:00", 1) + SAM_LINE + "sent 06:50" + STARTED + MAYA_STARTED and tgdb.get_state(key) == 540
+        assert listed_at("09:15") is None and tgdb.get_state(key) == 540, "it may still go"; at("09:30", 13); assert send() == 1 and state(R9) == "dropped"
+        assert listed_at("09:30") == head("09:30", 1) + SAM_LINE + "sent 06:50" + STARTED + MAYA_STARTED and tgdb.get_state(key) == 570 and send() == 1
+        for hm in ("09:45", "10:00", "10:15"): assert listed_at(hm) is None, hm
+    for s, again in (("queued", 0), ("sending", 0), ("sent", 0), ("unsure", 0), ("failed", 1), ("dropped", 1)):
+        with school(SAM, MAYA, TEAM): today_reliefs((K2, MAYA), (K5, SAM)); ticked("09:00"); put(R9, state=s); assert bool(listed_at("09:15")) == bool(again), s
+    for a, b, again in (("sent", "dropped", 0), ("failed", "unsure", 0), ("dropped", "queued", 0), ("dropped", "failed", 1)):      # any copy of it
+        with school(SAM, MAYA, TEAM, LEE): today_reliefs((K2, MAYA), (K5, SAM)); ticked("09:00"); put(R9, state=a); put(R9.replace(TEAM, LEE), state=b); assert bool(listed_at("09:15")) == bool(again), (a, b)
+    with school(SAM, MAYA, TEAM):                                                          # the only one it went to blocked the bot: there is no such message any more
+        today_reliefs((K2, MAYA), (K5, SAM)); ticked("09:00")
+        with tgdb.db() as c: c.execute("DELETE FROM outbox WHERE key=?", (R9,))
+        assert listed_at("09:15")
+    def dies(*a, **k): raise Killed()
+    for f in (dies, lambda *a, **k: False, lambda *a, **k: 1 / 0):                          # it stopped between the mark and the queue; nobody's could be queued
+        with school(SAM, MAYA, TEAM):
+            i = today_reliefs((K2, MAYA), (K5, SAM))
+            with stand_in(OB, "queue", f):
+                try: ticked("09:00")
+                except Killed: pass
+            assert tgdb.get_state(f"started:{relief_key_of(i, K2)}") == 540 and outs("report") == [] and listed_at("09:15")
+    with school(SAM, MAYA, TEAM):                                                          # as it was kept before marks: listed; and another day's report of that time is not this one
+        i = today_reliefs((K2, MAYA), (K5, SAM)); tgdb.set_state(f"started:{relief_key_of(i, K2)}", True); assert listed_at("09:00") is None
+        for odd in ("x", [540], dict(a=1)):                                                # changed by hand: said once more
+            tgdb.set_state(f"started:{relief_key_of(i, K2)}", odd); tgdb.set_state(f"report_last:{D13}", 525)
+            with tgdb.db() as c: c.execute("DELETE FROM outbox WHERE kind='report'")
+            assert listed_at("09:00") and tgdb.get_state(f"started:{relief_key_of(i, K2)}") == 540, odd
+        tgdb.set_state(f"started:{relief_key_of(i, K2)}", 540); put(R9, state="dropped"); OB.queue(f"report:2026-10-12:0900:{TEAM}", TEAM, "x", kind="report", ref=dict(date="2026-10-12", mark=540, made=clock.now)); assert listed_at("09:15")
+    with school(SAM, MAYA, TEAM):                                                          # acknowledged since: not again; nothing waiting: the report of it first, then the all clear
+        i = today_reliefs((K2, MAYA), (K5, SAM)); ticked("09:00"); put(R9, state="dropped"); CV.acknowledge(i, K2, MAYA); assert listed_at("09:15") is None
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K2, MAYA)); ticked("08:45"); ticked("09:00"); put(R9, state="dropped"); assert listed_at("09:15") == head("09:15", 0) + STARTED + MAYA_STARTED and ticked("09:30") == cleared(1) and texts_to()[-1] == none_waits("09:30", 1)
+
+@t
+def an_older_report_never_follows_a_newer_one():
+    R = lambda hhmm, name=TEAM: f"report:{D13}:{hhmm}:{name}"
+    def true(key): r = item(key); return TE.still_true(dict(r, ref=json.loads(r["ref"])))
+    with school(SAM, TEAM, LEE):
+        today_reliefs((K5, SAM)); ticked("07:00"); ticked("07:15"); assert send() == 2 and [state(R("0700", n)) for n in (TEAM, LEE)] == ["dropped"] * 2 and [x.split("\n")[0] for x in said(TEAM)] == [head("07:15", 1)] == [x.split("\n")[0] for x in said(LEE)]
+    for s, goes in (("queued", False), ("sending", False), ("sent", False), ("unsure", False), ("failed", True), ("dropped", True)):
+        with school(SAM, TEAM, LEE):
+            today_reliefs((K5, SAM)); ticked("07:00"); ticked("07:15"); put(R("0715"), state=s); assert true(R("0700")) is goes and true(R("0715", LEE)) is True, s
+            with tgdb.db() as c: c.execute("DELETE FROM outbox WHERE key=?", (R("0715"),))
+            assert true(R("0700")) is True and true(R("0700", LEE)) is False, "another's does not count"
+    with school(SAM, TEAM):                                                                # the all clear; and a report after it
+        i = today_reliefs((K5, SAM)); ticked("07:00"); CV.acknowledge(i, K5, SAM); assert ticked("07:15") == cleared(1) and true(R("0700")) is False and send() == 1 and said(TEAM) == ["✅ 07:15 · The 1 relief for today is acknowledged."] and state(R("0700")) == "dropped"
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K5, SAM)); ticked("07:00"); send(); CV.acknowledge(i, K5, SAM); assert ticked("07:15") == cleared(1); give(i, K2, MAYA); swept_ = TE.sweep(); assert ticked("07:30") == keyed("0730") and swept_
+        assert true(cleared(1)[0]) is False and true(R("0730")) is True; put(R("0730"), state="dropped"); assert true(cleared(1)[0]) is True
+        OB.queue(f"report:2026-10-14:2300:{TEAM}", TEAM, "x", kind="report", ref=dict(date="2026-10-14", mark=1380, made=clock.now)); assert true(cleared(1)[0]) is True, "another day's"
+
+@t
+def a_row_that_cannot_be_worked_out_never_fails_today():
+    def rows_(): return {v["ckey"]: v for v in call(TEAM, "get", f"/api/relief/today?date={D13}")["rows"]}
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K5, SAM), (K2, MAYA)); errs = []; change_record(i, lambda r: [x.update(approved=5) for x in r["lessons"] if x["key"] == K5])
+        with stand_in(A.app.logger, "error", lambda *a: errs.append(a)): got = rows_()
+        assert (got[K5]["state"], got[K5]["told"], got[K5]["linked"]) == ("approved", None, True) and (got[K2]["told"], got[K2]["linked"]) == (dict(state="sent", at="2026-10-13T06:50:00+08:00"), True), got
+        assert [a[1:] for a in errs] == [("AttributeError",)] and SAM not in str(errs), errs
+    with exam_school(SAM, MAYA, TEAM):                                                     # a relief that is no name, of a lesson that is stopped
+        i = today_reliefs((K5, SAM), (K2, MAYA)); exam(); change_record(i, lambda r: [x.update(relief=["x"]) for x in r["lessons"] if x["key"] == K5]); got = rows_()
+        assert (got[K5]["state"], got[K5]["told"], got[K5]["linked"]) == ("stopped", None, False) and got[K2]["linked"] is True
+
+@t
+def a_reminder_that_fails_on_the_page_is_answered_plainly():
+    URL, SAY = "/api/relief/today/remind", "Telegram could not be reached just now. Try again."
+    def locked(*a, **k): raise sqlite3.OperationalError(f"{SAM} a private line")
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K5, SAM), (K2, MAYA)); at("07:00", 13); body = dict(date=D13, covers=[dict(id=i, ckey=K5), dict(id=i, ckey=K2)]); h, apps = Grab(), []; KINDS.addHandler(h)
+        for e in (TypeError, KeyError, AttributeError):
+            def odd(*a, **k): raise e(f"{SAM} a private line")
+            with stand_in(RE, "remind", odd), stand_in(A.app.logger, "exception", lambda *a, **k: apps.append(a)): assert call(TEAM, "post", URL, body, code=400) == dict(error=absences.WRONG)
+        for module, name in ((RE, "remind"), (links, "connected"), (OB, "queue"), (OB, "states_for")):
+            with stand_in(module, name, locked): assert call(TEAM, "post", URL, body, code=503) == dict(error=SAY), name
+        KINDS.removeHandler(h); assert apps == [] and len(h.records) == 7 and all("private" not in r.getMessage() and SAM not in r.getMessage() and r.exc_info is None for r in h.records) and [r.getMessage().split("(")[-1] for r in h.records] == ["TypeError)", "KeyError)", "AttributeError)"] + ["OperationalError)"] * 4
+        # one was put in the queue before it failed: written down, and pressed again it is not sent twice
+        real, n, ent = OB.queue, len(outs("relief")), Since()
+        with stand_in(OB, "queue", lambda key, name, *a, **k: locked() if name == MAYA else real(key, name, *a, **k)): assert call(TEAM, "post", URL, body, code=503) == dict(error=SAY)
+        assert len(outs("relief")) == n + 1 and [x[4] for x in ent.new()] == ["Reminded 1 relief teacher on Tue 13 Oct"]
+        assert call(TEAM, "post", URL, body) == dict(sent=1, skipped=[dict(ckey=K5, name=SAM, why=TOO_SOON.format("07:00"))]) and len(outs("relief")) == n + 2
+    with school(SAM, TEAM):                                                                # on Telegram: the app's general words, and the button stays
+        today_reliefs((K5, SAM)); ticked("07:00"); send()
+        with stand_in(OB, "queue", locked): at("07:10", 13); assert press(TEAM, "remind") == (WENT_WRONG, True) and edits() == []
+
+@t
+def what_was_said_is_read_without_what_it_holds():
+    with school(SAM, MAYA, TEAM):
+        i = today_reliefs((K5, SAM), (K2, MAYA)); key = relief_key_of(i, K5); both = {relief_key_of(i, k): dict(state="sent", at="2026-10-13T06:50:00+08:00", name=n) for k, n in ((K5, SAM), (K2, MAYA))}
+        assert OB.states_for("relief:", "stopped:") == both and OB.states_for() == {} and OB.states_for("stopped:") == {} and OB.states_for("%") == {} and OB.states_for("relie_:") == {} and OB.states_for(key) == {key: both[key]}
+        for s in ("queued", "sending", "sent", "unsure", "failed", "dropped"):                  # the same as told says
+            put(key, state=s, at="2026-10-13T06:40:00+08:00", sent_at="2026-10-13T06:50:00+08:00"); got = OB.states_for("relief:")[key]
+            assert got == {k: OB.told(key)[k] for k in ("state", "at", "name")} == dict(state=s, at=f"2026-10-13T06:{50 if s in ('sent', 'unsure') else 40}:00+08:00", name=SAM), s
+        put(key, state="sent", ref="{ not json", buttons="x", text=None); assert TE.said().sent_at(key) and TE.said().of(key) == dict(state="sent", at="2026-10-13T06:50:00+08:00")
+        with stand_in(OB, "told_for", lambda prefix: 1 / 0): assert TE.said().of(key)["state"] == "sent"
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

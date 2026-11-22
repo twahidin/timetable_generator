@@ -86,7 +86,7 @@ _HANDLE = re.compile(r"[A-Za-z0-9_]{1,64}")
 _WORD = re.compile(r"[^\W_]+")
 _DATA = re.compile(r"b:([A-Za-z0-9_-]{16})")              # a button's callback data (relief/outbox.py)
 STAYS = (_web.NO_PUB,)                       # a refusal that keeps any button: a publish may be swapping folders
-ANY = ("{why}",)                             # every refusal keeps this one
+ANY = object()                               # in ACTIONS, in place of a kind's refusals: every refusal keeps the button
 _log = logging.getLogger("relief.telegram")
 _counting = threading.Lock()
 _pressing = threading.Lock()
@@ -246,7 +246,8 @@ def _acted(b, f):
     try: return f()
     except ValueError as e:
         if type(e) is not ValueError: raise
-        stays = any(str(e) == x.format(name=b["who"], why=e) for x in (*STAYS, *ACTIONS[b["what"]][2]))
+        keeps = ACTIONS[b["what"]][2]
+        stays = keeps is ANY or any(str(e) == x.format(name=b["who"]) for x in (*STAYS, *keeps))
         return _Out(str(e), alert=True, line=None if stays else str(e))
 
 
@@ -348,10 +349,11 @@ def _approve(p):
 
 
 def _remind(p):
-    """as the page's Remind, for the reliefs listed in the report the button is on; refused when nobody could be"""
+    """as the page's Remind, for the reliefs listed in the report the button is on; refused when nobody could be, with the first
+    reason that says more than that"""
     b = p.button
     got = _report.remind(b["extra"].get("date"), b["extra"].get("covers"), (b["name"], links.VIA))
-    if not got["sent"]: raise ValueError(got["skipped"][0]["why"] if got["skipped"] else _report.NOBODY)
+    if not got["sent"]: raise ValueError(next((v["why"] for v in got["skipped"] if v["why"] != _report.NOBODY), _report.NOBODY))
     return _Out(REMINDED.format(n=got["sent"]))
 
 

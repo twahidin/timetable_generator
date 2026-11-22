@@ -5,7 +5,8 @@ queue puts a message under its key, for a person linked now (links.chat_of); a k
 not queued again. States: queued; sending (marked and committed before anything goes out, with nothing locked during the call);
 sent; failed (Telegram refused it, every try failed, or it could not be made into a message); unsure (the request may have gone
 out, or the app stopped while it was going: never tried again by itself); dropped (no longer true, or its person had no
-Telegram when it was to go: as if it had never been queued, so its key may be queued again).
+Telegram when it was to go, or it was a reminder that still waited when a newer one of the same relief was queued (drop): as if it
+had never been queued, so its key may be queued again).
 
 send_due sends what is due, oldest first, one run at a time in this copy of the app; an item is taken from queued to sending
 in one statement, so two copies never send the same one either. Nothing goes, and nothing is changed, while the bot is not
@@ -107,9 +108,12 @@ def queue(key, name, text, *, kind, buttons=(), files=(), ref=None):
                          row).rowcount == 1
 
 
+def _state(r):
+    return dict(state=r["state"], at=(r["sent_at"] if r["state"] in ("sent", "unsure") else None) or r["at"], name=r["name"])
+
+
 def _told(r):
-    return dict(state=r["state"], at=(r["sent_at"] if r["state"] in ("sent", "unsure") else None) or r["at"], name=r["name"],
-                ref=json.loads(r["ref"]) if r["ref"] else None, files_failed=r["files_failed"])
+    return dict(_state(r), ref=json.loads(r["ref"]) if r["ref"] else None, files_failed=r["files_failed"])
 
 
 def told(key):
@@ -122,6 +126,12 @@ def told_for(prefix):
     """{key: as told} of every key starting with prefix, as it is (no wildcards: keys hold any character)"""
     with tgdb.db(read=True) as c:
         return {r["key"]: _told(r) for r in c.execute("SELECT * FROM outbox WHERE substr(key, 1, ?)=?", (len(prefix), prefix))}
+
+
+def states_for(*prefixes):
+    """{key: dict(state, at, name)} as told_for, of every key starting with one of prefixes: without what the messages hold"""
+    with tgdb.db(read=True) as c:
+        return {r["key"]: _state(r) for p in prefixes for r in c.execute("SELECT key, name, state, at, sent_at FROM outbox WHERE substr(key, 1, ?)=?", (len(p), p))}
 
 
 def drop(key):

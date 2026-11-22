@@ -777,6 +777,16 @@ def _telegram(pub):
     return _tell.Said({}), {}
 
 
+def _told(said, r, c, row):
+    """what was said of the relief in the row on Telegram (tell.Said.of); None when it has not reached its teacher, or cannot be
+    worked out (a record changed by hand): never the page's failure"""
+    if row["state"] not in APPROVED: return None
+    try: return said.of(_tell.key_of(said.told, r, c, row["ckey"]))
+    except Exception as e:
+        current_app.logger.error("relief: what was said of a relief could not be worked out (%s)", type(e).__name__)
+        return None
+
+
 @bp.get("/api/relief/today")
 @need("relief")
 def today():
@@ -799,9 +809,8 @@ def today():
             if x.get("date") != date or not x.get("needed"): continue
             for i, c in enumerate(_cover.covers(x)):
                 row = _row(pub, settings, records, r, x, c, i, links)
-                if row["state"] in APPROVED: row["told"] = said.of(_tell.key_of(said.told, r, c, row["ckey"]))
-                row["linked"] = c.get("relief") in reach
-                rows.append(row)
+                who = c.get("relief")
+                rows.append(dict(row, told=_told(said, r, c, row), linked=isinstance(who, str) and who in reach))
     rows.sort(key=lambda v: (v["p"], v["absent"], v["ckey"]))
     counts = dict(need=0, waiting=0, approved=0, acknowledged=0, change=0, nobody=0, open=0)
     for v in rows:

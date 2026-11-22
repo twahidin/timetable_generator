@@ -9,24 +9,32 @@ not: what is approved after it waits for the next. Nothing is kept in memory.
 
 A relief counts while its cover is dated today and approved, its absence not cancelled, its lesson needed, and no approved exam or
 event stops it (cover.stopped). It waits while its teacher has neither acknowledged it nor asked to change it and its first period
-has not started; once that has, it is listed as started without acknowledgement, once (state started:{relief key}), and waits no
-more. report:{date}:{HHMM of the mark}:{name} goes to each of the team who can be reached, when a relief waits or has just
-started; its button reminds those it lists as waiting. When none waits and a report went since the last all clear,
-clear:{date}:{n}:{name} goes instead, the n-th that day: all are acknowledged, or how many started without. It waits while a
-request to change of a lesson still to start is with the team, since neither would be true. While the exams cannot be read no
-lesson counts as stopped, and nothing is said to have started, nor all clear over it: it may be stopped.
+has not started; once that has, it is listed as started without acknowledgement, once, and waits no more: state started:{relief
+key} keeps the mark of the report that listed it, and it is listed again when no copy of that report went or may still go (all
+dropped or failed, or none was queued before the app stopped). report:{date}:{HHMM of the mark}:{name} goes to each of the team
+who can be reached, when a relief waits or has just started; its button reminds those it lists as waiting. When none waits and a
+report went since the last all clear, clear:{date}:{n}:{name} goes instead, the n-th that day: all are acknowledged, or how many
+started without. It waits while a request to change of a lesson still to start is with the team, since neither would be true, and
+while an absence, or a lesson or cover of today in one, cannot be read (what can be is reported): it may hold a relief that waits.
+While the exams cannot be read no lesson counts as stopped, and nothing is said to have started, nor all clear over it: it may be
+stopped.
 
 A line says when the teacher was told (tell.Said; the day too, when it was not today), or that they have not been, or are not on
 Telegram; never why anyone is away.
-Both messages are dropped when they are OLD, or their person is not on the team any more (tell.CHECKS).
+Both messages are dropped when they are OLD, when one of a later mark is there for that person (an old one never follows a newer),
+or when their person is not on the team any more (tell.CHECKS).
 
 remind sends a relief again to its teacher, for the page (relief/tgweb.py) and for the button (relief/bot.py): its message as it
 would be made now, under the relief's key with :r{n} after it, WAIT at least after the last of that relief's messages went or was
 queued. An earlier reminder that still waits is dropped then, so that they do not come all at once; a relief told to nobody yet
 gets the message itself. Two at once are one: a key is queued once. What was reminded is one history entry.
 
-tick never raises; a record that cannot be read is passed over. Failures are logged to "relief.telegram" by their kind alone."""
-import datetime, logging, sqlite3, types
+The records are read as the sweep reads them, under absences._LOCK (a takeover is two saves), so that a file that cannot be read
+is known; remind reads absences.all_records, since it says nothing of what it cannot find but that nobody is to be reminded, and a
+press waits for nobody's save.
+
+tick never raises; what cannot be read is passed over. Failures are logged to "relief.telegram" by their kind alone."""
+import datetime, logging, os, sqlite3, types
 
 import store
 from accounts import people as _accounts
@@ -91,26 +99,62 @@ def _how(w, who, key):
     return "not told yet" if who in w.reach else "not on Telegram"
 
 
+def _records():
+    """tell._records, none of a save that is two half done; ([], {}) before there was any absence"""
+    with _absences._LOCK: return tell._records() if os.path.isdir(_absences.DIR) else ([], {})
+
+
+def _relief(w, r, x, i, c):
+    """cover c (the i-th) of lesson x as a relief that counts, or None"""
+    s = _cover.state(r, x, c)
+    if s not in tell.APPROVED: return None
+    ckey, who, starts = _cover.cover_key(x, i), c["relief"], _starts(c, w.bnds)
+    if not isinstance(who, str): raise ValueError("no name")
+    key = tell.key_of(w.said.told, r, c, ckey)
+    return dict(who=who, lesson=words.class_group(x), periods=words.periods_text(c), start=words.times(w.pub, x, c)[0], how=_how(w, who, key), state=s, key=key,
+                starts=starts, over=w.now.hour * 60 + w.now.minute >= starts, cover=dict(id=r["id"], ckey=ckey, absent=r["teacher"], approved_at=c["approved"].get("at")))
+
+
+def _passed_over(w, e):
+    w.passed += 1
+    _log.warning("a relief could not be read (%s)", type(e).__name__)
+
+
 def _reliefs(w, r):
     """the reliefs of an absence that count: dict(who, lesson, periods, start, how, state, key, starts, over: it has started,
-    cover: what reminds of it)"""
-    for x in r.get("lessons") or []:
-        if x.get("date") != w.date or _cover.stopped(w.links, x): continue
-        for i, c in enumerate(_cover.covers(x)):
-            s = _cover.state(r, x, c)
-            if s not in tell.APPROVED: continue
-            ckey, who, starts = _cover.cover_key(x, i), c["relief"], _starts(c, w.bnds)
-            if not isinstance(who, str): raise ValueError("no name")
-            key = tell.key_of(w.said.told, r, c, ckey)
-            yield dict(who=who, lesson=words.class_group(x), periods=words.periods_text(c), start=words.times(w.pub, x, c)[0], how=_how(w, who, key), state=s, key=key,
-                       starts=starts, over=w.now.hour * 60 + w.now.minute >= starts, cover=dict(id=r["id"], ckey=ckey, absent=r["teacher"], approved_at=c["approved"].get("at")))
+    cover: what reminds of it); each lesson and cover that cannot be read is passed over, alone, and counted (w.passed)"""
+    if r.get("cancelled"): return
+    lessons = r.get("lessons") or []
+    if not isinstance(lessons, list): return _passed_over(w, TypeError())
+    for x in lessons:
+        try:
+            if not isinstance(x["date"], str): raise TypeError("no date")
+            covers = list(enumerate(_cover.covers(x))) if x["date"] == w.date and not _cover.stopped(w.links, x) else []
+        except Exception as e:
+            _passed_over(w, e)
+            continue
+        for i, c in covers:
+            try: v = _relief(w, r, x, i, c)
+            except Exception as e: _passed_over(w, e)
+            else:
+                if v: yield v
 
 
-def _spell(date):
+def _went(date):
+    """the marks of the day whose report went, or may still, to anybody"""
+    return [t["ref"]["mark"] for t in outbox.told_for(f"report:{date}:").values() if t["state"] in tell.LIVE]
+
+
+def _listed(w, v):
+    """the relief was said to have started, in a report that went or may still (true: as it was kept before its mark was)"""
+    mark = tgdb.get_state(f"started:{v['key']}")
+    return mark is not None and (mark is True or mark in w.went)
+
+
+def _spell(w):
     """the number of the all clear there is to say once no relief waits; None when no report went since the last one"""
-    went = [t["ref"]["mark"] for t in outbox.told_for(f"report:{date}:").values() if t["state"] not in ("dropped", "failed")]
-    clears = [t["ref"] for t in outbox.told_for(f"clear:{date}:").values()]
-    if not went or any(c["mark"] >= max(went) for c in clears): return None
+    clears = [t["ref"] for t in outbox.told_for(f"clear:{w.date}:").values()]
+    if not w.went or any(c["mark"] >= max(w.went) for c in clears): return None
     return 1 + max((c["n"] for c in clears), default=0)
 
 
@@ -140,10 +184,12 @@ def _tick(now):
     reach = _links.reachable(pub)
     team = sorted(p["name"] for p in _accounts.staff(pub) if p["name"] in reach and "relief.team" in _rights.rights(p, _links.VIA))
     if not team: return []                      # nobody to tell: the mark is not done with
-    w = types.SimpleNamespace(pub=pub, now=now, date=date, bnds=bnds, reach=reach, links=_fill._links(pub, cal), said=tell.said())
-    rows = sorted(tell._each(_absences.all_records(), lambda r: _reliefs(w, r)), key=lambda v: (v["starts"], v["who"], v["key"]))
+    w = types.SimpleNamespace(pub=pub, now=now, date=date, bnds=bnds, reach=reach, links=_fill._links(pub, cal), said=tell.said(), went=_went(date))
+    records, unread = _records()
+    w.passed = len(unread)
+    rows = sorted((v for r in records for v in _reliefs(w, r)), key=lambda v: (v["starts"], v["who"], v["key"]))
     waiting = [v for v in rows if v["state"] == "approved" and not v["over"]]
-    unlisted = [v for v in rows if v["state"] == "approved" and v["over"] and not tgdb.get_state(f"started:{v['key']}")]
+    unlisted = [v for v in rows if v["state"] == "approved" and v["over"] and not _listed(w, v)]
     started = unlisted if w.links is not None else []
     text, ref = None, dict(date=date, mark=mark, made=now.isoformat(timespec="seconds"))
     if waiting or started:
@@ -151,8 +197,8 @@ def _tick(now):
         buttons = [[dict(text=AGAIN, what="remind", extra=dict(date=date, covers=[v["cover"] for v in waiting]))]] if waiting else []
         buttons.append([dict(text=OPEN_TODAY, url=(bot.get("base") or "") + "/relief#today")])
         kind, key = "report", f"report:{date}:{hhmm(mark).replace(':', '')}"
-    elif rows and not unlisted and not any(v["state"] == "change" and not v["over"] for v in rows):
-        n = _spell(date)
+    elif rows and not unlisted and not w.passed and not any(v["state"] == "change" and not v["over"] for v in rows):
+        n = _spell(w)
         if n is not None:
             text = clear_text(f"{now:%H:%M}", len(rows), sum(v["state"] != "acknowledged" for v in rows))
             kind, key, buttons, ref = "clear", f"clear:{date}:{n}", [], dict(ref, n=n)
@@ -170,8 +216,10 @@ def tick(now=None):
 
 
 def _fresh(ref, name):
-    """a report or an all clear: not OLD, and its person on the team still"""
-    return _fill._when(None) - tell._time(ref["made"]) < OLD and tell._on_team(name)
+    """a report or an all clear: not OLD, none of a later mark of the day there for its person, and they are on the team still"""
+    if _fill._when(None) - tell._time(ref["made"]) >= OLD or not tell._on_team(name): return False
+    return not any(t["name"] == name and t["state"] in tell.LIVE and t["ref"]["mark"] > ref["mark"]
+                   for kind in ("report", "clear") for t in outbox.told_for(f"{kind}:{ref['date']}:").values())
 
 
 tell.CHECKS.update(report=_fresh, clear=_fresh)
