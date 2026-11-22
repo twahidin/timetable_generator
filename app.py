@@ -1320,7 +1320,10 @@ app.register_blueprint(relief_tgweb.bp)
 if os.environ.get("RELIEF_JOBS") == "on":                         # relief picks when due, every minute (the Dockerfile sets it; tests and local runs never do)
     relief_fill.AFTER.append(relief_tell.sweep)                   # and then what there is to say on Telegram (nothing while the bot is off)
     relief_fill.start()
-if os.environ.get("RELIEF_JOBS") == "on" and relief_tg.on(): relief_outbox.start()     # the Telegram messages, every 5 seconds
+if os.environ.get("RELIEF_JOBS") == "on" and relief_tg.on():
+    relief_tell.MINUTE.append(relief_tell.sweep)                  # what there is to say by the clock, every minute, whatever the picks are waiting for
+    relief_tell.start()
+    relief_outbox.start()                                         # the Telegram messages, every 5 seconds
 
 # ------------------------------------------------------------------------------------------------ admins: people and the ways in
 # The named admins (committee group, Admin extra, signed in with their password) manage people here; every check is the

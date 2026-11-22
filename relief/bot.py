@@ -5,8 +5,8 @@ Only a message in a person's own (private) chat is read or answered; groups, cha
 update are ignored. Anything shaped like a code (alone, or after /start, as Telegram's own link sends it) is tried as a link
 code; when it is not a current one the message is deleted and answered BAD_CODE (BAD_CODE_KEPT when Telegram did not delete
 it), the same for a real personal code and a made-up one (links.use never looks at those). The code a chat linked itself
-with, sent by it again, is answered HELLO and changes nothing (links.again). A chat whose person is not there (links.name_of)
-is answered NOT_LINKED. Each of these two answers counts against links.tries, and a chat over it gets nothing at all: no
+with, sent by it again, is answered HELLO and changes nothing (links.again). A chat whose person is not there, or has no relief now
+(links.name_of), is answered NOT_LINKED. Each of these two answers counts against links.tries, and a chat over it gets nothing at all: no
 answer, no deleteMessage, its code not tried. The count is made with the check (_counting, never held during a call to
 Telegram), so messages that come at once get no more.
 

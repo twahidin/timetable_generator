@@ -196,7 +196,9 @@ def _base():
 @bp.post("/api/relief/telegram/connect")
 @need("relief.save")
 def connect():
-    """Telegram sends this bot's updates to the app's address from now; what was waiting there is dropped"""
+    """Telegram sends this bot's updates to the app's address from now; what was waiting there is dropped. Pressed again for
+    the bot connected already (the same name, token and SECRET_KEY), it stays connected since it first was: what was done
+    since is still told (relief.tell)"""
     base = _base()
     if not tg.on(): return {"error": NO_TOKEN}, 409
     if not tg.hook_secret(): return {"error": NO_KEY}, 409
@@ -207,7 +209,9 @@ def connect():
     r = tg.call("setWebhook", dict(url=base + HOOK, secret_token=tg.hook_secret(), allowed_updates=["message", "callback_query"],
                                    max_connections=4, drop_pending_updates=True))
     if not r["ok"]: return {"error": NO_ANSWER}, 502
-    tgdb.set_state("bot", dict(username=username, base=base, at=_absences._now(), key=links.key()))
+    was, key = tgdb.get_state("bot"), links.key()
+    same = isinstance(was, dict) and (was.get("username"), was.get("key")) == (username, key)
+    tgdb.set_state("bot", dict(username=username, base=base, at=(was.get("at") if same else None) or _absences._now(), key=key))
     tg.call("setMyCommands", dict(commands=COMMANDS), timeout=8)          # the menu only: its failure does not matter
     _noted("telegram connected", f"Telegram connected (@{username})")
     return _admin()

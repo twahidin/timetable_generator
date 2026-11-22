@@ -13,8 +13,9 @@ dict(name, chat), and a conversation left open in them is dropped (the next pers
 
 A link is not tied to the account's sign-in number: each message and press is judged on the records at that moment. A person
 is there while accounts.people.find finds them (or nothing is published: a publish may be swapping folders) and they are not
-switched off; while the accounts file cannot be read nobody is. chat_of, name_of, person, rights_of and reachable answer only
-for a person who is there; linked lists every link (the settings page unlinks any of them)."""
+switched off; while the accounts file cannot be read nobody is. person, rights_of and rights_named answer only for a person who
+is there; chat_of, name_of, reachable and again only for one who has relief now too (somebody who lost it gets nothing and is
+nobody's chat; they can still unlink it); linked lists every link (the settings page unlinks any of them)."""
 import hashlib, secrets, time
 
 import access
@@ -82,7 +83,7 @@ def use(code, chat, handle, lost=None):
     h = _hash(code)
     with tgdb.db(read=True) as c:
         r = c.execute("SELECT name FROM codes WHERE hash=? AND chat IS NULL AND until>?", (h, _clock())).fetchone()
-    if r is None or "relief" not in _rights.rights(_there(r["name"]), VIA): return None
+    if r is None or not _able(_there(r["name"])): return None
     with tgdb.db() as c:
         if c.execute("UPDATE codes SET chat=? WHERE hash=? AND name=? AND chat IS NULL AND until>?", (chat, h, r["name"], _clock())).rowcount != 1:
             return None                                                        # used meanwhile
@@ -97,7 +98,7 @@ def again(code, chat):
     with tgdb.db(read=True) as c:
         r = c.execute("SELECT codes.name FROM codes JOIN links ON links.name=codes.name AND links.chat=codes.chat WHERE codes.hash=? AND codes.chat=? AND codes.until>?",
                       (_hash(code), chat, _clock())).fetchone()
-    return r["name"] if r and _there(r["name"]) else None
+    return r["name"] if r and _able(_there(r["name"])) else None
 
 
 # ---- links
@@ -170,6 +171,11 @@ def _there(name):
     return p
 
 
+def _able(p):
+    """p, a person or None, has relief now"""
+    return "relief" in _rights.rights(p, VIA)
+
+
 def person(chat):
     with tgdb.db(read=True) as c:
         r = c.execute("SELECT name FROM links WHERE chat=?", (chat,)).fetchone()
@@ -178,7 +184,7 @@ def person(chat):
 
 def name_of(chat):
     p = person(chat)
-    return p["name"] if p else None
+    return p["name"] if _able(p) else None
 
 
 def rights_of(chat):
@@ -186,19 +192,24 @@ def rights_of(chat):
     return _rights.rights(person(chat), VIA)
 
 
+def rights_named(name):
+    """as rights_of, of a person by their name (linked or not)"""
+    return _rights.rights(_there(name), VIA)
+
+
 def chat_of(name):
     with tgdb.db(read=True) as c:
         r = c.execute("SELECT chat FROM links WHERE name=?", (name,)).fetchone()
-    return r["chat"] if r and _there(name) else None
+    return r["chat"] if r and _able(_there(name)) else None
 
 
 def reachable(pub=None):
-    """{name: chat} of everyone linked who is there, the accounts read once (pub: the published timetable, read when None)"""
+    """{name: chat} of everyone linked who is there and has relief now, the accounts read once (pub: the published timetable,
+    read when None)"""
     data = _accounts_now()
     if data is None: return {}
     if pub is None: pub = store.published()
-    known = {p["name"]: p["off"] for p in _accounts.staff(pub, data)}
+    known = {p["name"]: p for p in _accounts.staff(pub, data)}
     with tgdb.db(read=True) as c:
         got = {r["name"]: r["chat"] for r in c.execute("SELECT name, chat FROM links")}
-    off = lambda n: known[n] if n in known else (True if pub else _accounts.record(data, n)["off"])
-    return {n: chat for n, chat in got.items() if not off(n)}
+    return {n: chat for n, chat in got.items() if _able(known.get(n) or (None if pub else _stand_in(n, data)))}

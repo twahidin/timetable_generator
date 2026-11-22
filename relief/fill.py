@@ -261,8 +261,9 @@ def filling():
 
 
 def tick(now=None):
-    """one run of the ticker, then AFTER (also while another run is going: what is told never waits for the model); every
-    error is caught and logged by its kind alone -> run's answer, or None"""
+    """one run of the ticker, then AFTER, also when another run was going. A run can wait long for the model, so what goes by
+    the clock is not here (relief.tell has a minute of its own): AFTER sends a pick just made at once. Every error is caught
+    and logged by its kind alone -> run's answer, or None"""
     try: return run(now=now)
     except Exception as e:
         _log.error("the relief run failed: %s", type(e).__name__)
