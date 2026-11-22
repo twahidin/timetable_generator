@@ -501,6 +501,17 @@ def no_history_right_is_401():
     r = c.get("/history"); assert r.status_code == 302 and r.headers["Location"].endswith("/login"), r.headers
 
 @t
+def old_files_in_the_server_s_clock_are_read_at_a_month_s_edge():
+    fresh()
+    # stage 1 (live) named its files by the server's UTC clock: 1 Oct 04:00 school time is 30 Sep 20:00 UTC, kept in 2026-09.jsonl
+    ts = datetime.datetime(2026, 10, 1, 4, 0, tzinfo=H.SCHOOL_TZ).timestamp()
+    e = {"id": H._new_id(), "kind": "setup", "ts": ts, "at": "2026-09-30T20:00:00+00:00", "who": "Ann", "as": "Ann", "where": "Step 1 \u00b7 Venues", "text": "old clock"}
+    os.makedirs(H.DIR, exist_ok=True)
+    with open(os.path.join(H.DIR, "2026-09.jsonl"), "w") as f: f.write(json.dumps(e) + "\n")
+    since = datetime.datetime(2026, 10, 1, 2, 0, tzinfo=H.SCHOOL_TZ).timestamp()
+    assert [x["text"] for x in H.read(since=since)] == ["old clock"]
+
+@t
 def days_are_school_days():
     fresh()
     os.environ["TZ"] = "UTC"; time.tzset()

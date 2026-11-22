@@ -164,6 +164,11 @@ def _lines(name):
         return []
 
 
+# files written before school time (stage 1) are named by the server's UTC clock, so a month's last hours, school time, are in
+# the file before: nine hours of slack (UTC+08:00 is 8 hours away at most) so no entry at a month's edge is skipped
+UTC_FILE_SLACK = 9 * 3600
+
+
 def _month_end(name):
     """the first instant after the month a file holds, in school time"""
     y, m = int(name[:4]), int(name[5:7])
@@ -182,7 +187,7 @@ def read(who=None, where=None, dept=None, kinds=None, since=None, until=None, si
     where_kind = _WHERE_KIND.get(where)
     this_month = datetime.datetime.now(SCHOOL_TZ).strftime("%Y-%m") + ".jsonl"
     for name in _files():
-        if since is not None and name != this_month and _month_end(name) <= since:
+        if since is not None and name != this_month and _month_end(name) + UTC_FILE_SLACK <= since:
             break   # newest first: every later file is older still
         for line in reversed(_lines(name)):
             if needle and needle not in line.lower():   # cheap: the name is in the raw line or the entry cannot match
