@@ -295,10 +295,16 @@ def telegram(token="practice", connected=True):
     """the bot on (in practice unless a made-up token is given) and connected, with nobody linked and nothing sent"""
     os.environ["TELEGRAM_BOT_TOKEN"] = token
     wipe()
-    if connected: tgdb.set_state("bot", CONNECTED)
+    if connected: bot_on("practice_bot" if token == "practice" else "ctss_made_up_bot")
     try: yield
     finally:
         wipe(); os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+
+def digest(text): return hashlib.sha256(text.encode()).hexdigest()
+
+def bot_on(username="practice_bot"):
+    """the bot connected, as Connect saves it under the token and the SECRET_KEY there are now"""
+    tgdb.set_state("bot", dict(CONNECTED, username=username, key=digest(tg.hook_secret())))
 
 def wipe():
     with tgdb.db() as c:
@@ -371,12 +377,15 @@ NOT_LINKED = "This Telegram is not linked. Open Relief in the school's app, pres
 BAD_CODE = "That code is not right or has run out. Get a new one in the app. If it was your personal code, do not send it here: it opens the app. I have deleted your message."
 MOVED_LINK = "Your relief messages now go to another Telegram. If this was not you, tell the relief team."
 TAKEN = "This Telegram was linked to someone else before. Their relief messages no longer come here."
+STOPPED = "Unlinked. Your relief messages stop here. To link again, open Relief in the school's app and press Link Telegram."
+BAD_CODE_KEPT = "That code is not right or has run out. Get a new one in the app. If it was your personal code, do not send it here: it opens the app. Please delete your message now."
 
 @t
 def the_bots_sentences_are_the_plans():
-    assert (bot.HELLO, bot.NOT_LINKED, bot.BAD_CODE, bot.MOVED_LINK, bot.TAKEN) == (HELLO, NOT_LINKED, BAD_CODE, MOVED_LINK, TAKEN)
+    assert (bot.HELLO, bot.NOT_LINKED, bot.BAD_CODE, bot.MOVED_LINK, bot.TAKEN, bot.STOPPED) == (HELLO, NOT_LINKED, BAD_CODE, MOVED_LINK, TAKEN, STOPPED)
+    assert bot.BAD_CODE_KEPT == BAD_CODE_KEPT                                          # not in the plan's table
     plan = open(os.path.join(ROOT, "docs", "superpowers", "plans", "2026-11-22-relief-stage-4-telegram.md"), encoding="utf-8").read()
-    for text in (HELLO, NOT_LINKED, BAD_CODE, MOVED_LINK): assert f"`{text}`" in plan, text
+    for text in (HELLO, NOT_LINKED, BAD_CODE, MOVED_LINK, TAKEN, STOPPED): assert f"`{text}`" in plan, text
 
 @t
 def a_code_links_once_and_then_is_gone():
@@ -514,7 +523,7 @@ def unlinking_forgets_the_chat():
         assert links.unlink_chat(502) == ROSA and links.unlink_chat(502) is None and rows("talks") == []
         links.link(TIA, 501, None)
         hook(msg("/stop", 501))
-        assert links.linked() == {} and sent() == [(501, bot.STOPPED)], sent()
+        assert links.linked() == {} and sent() == [(501, STOPPED)], sent()
         tg.PRACTICE_LOG.clear(); hook(msg("/stop", 501)); assert sent() == [(501, NOT_LINKED)], sent()
 
 @t
@@ -616,8 +625,10 @@ def the_hook_needs_the_secret():
         assert links.chat_of(TIA) == 501 and rows("updates") == [] and tg.PRACTICE_LOG == [], "a refused update is not even remembered"
         os.environ.pop("SECRET_KEY")
         try:
-            assert tg.hook_secret() == ""
-            for s in (None, "", "x"): assert hook(msg("/stop", 501), secret=s).status_code == 403
+            assert tg.hook_secret() == "" and links.connected() is None
+            for s in (None, "", "x"): assert hook(msg("/stop", 501), secret=s).status_code == 404
+            for headers in ({}, {"X-Telegram-Bot-Api-Secret-Token": ""}, {"X-Telegram-Bot-Api-Secret-Token": "x"}):        # and no header is ever right then
+                with A.app.test_request_context(HOOK, method="POST", headers=headers): assert tgweb._right_secret() is False, headers
         finally: os.environ["SECRET_KEY"] = real
         # too big: refused, read no more than one byte past the limit, whatever the length says
         big = tgweb.LIMIT + 1
@@ -637,7 +648,8 @@ def the_hook_needs_the_secret():
         assert hook(msg("/stop", 501), headers={"Origin": "https://elsewhere.example"}).status_code == 403 and links.chat_of(TIA) == 501
         assert hook(msg("/stop", 501)).status_code == 200 and links.linked() == {}                                        # the right one
     with telegram(token="made-up-" + secrets.token_hex(6)):                          # practice's bot is no bot under a real token
-        assert links.connected() is None and hook(msg("hi")).status_code == 404
+        assert links.connected()["username"] == "ctss_made_up_bot"
+        bot_on("practice_bot"); assert links.connected() is None and hook(msg("hi")).status_code == 404
     assert REAL == []
 
 @t
@@ -712,16 +724,16 @@ def a_stranger_gets_five_replies():
         links.tries.fails["tg:666"] = collections.deque(x - 601 for x in links.tries.fails["tg:666"])
         hook(msg(code, 666)); assert links.chat_of(TIA) == 666 and sent() == [(666, HELLO.format(name=TIA))], sent()
         # wrong codes and other messages count together
-        wipe(); tgdb.set_state("bot", CONNECTED)
+        wipe(); bot_on()
         for text in ("hello", "ABCD-EFGH", "/start ABCD-EFGJ", "/stop", "WXYZ 2345", "ABCD-EFGH", "hello"): hook(msg(text, 668))
         assert [x for _, x in sent()] == [NOT_LINKED, BAD_CODE, BAD_CODE, NOT_LINKED, BAD_CODE] and len(deleted()) == 3, sent()
         # all at once: still five
-        wipe(); tgdb.set_state("bot", CONNECTED)
+        wipe(); bot_on()
         ts = [threading.Thread(target=hook, args=(msg("ABCD-EFGH" if i % 2 else "hello", 669),)) for i in range(16)]
         [x.start() for x in ts]; [x.join() for x in ts]
         assert len(sent()) == 5 and len(links.tries.fails["tg:669"]) == 5, (len(sent()), len(links.tries.fails["tg:669"]))
         # a linked person who guesses codes is held back too, and a right code does not count
-        wipe(); tgdb.set_state("bot", CONNECTED)
+        wipe(); bot_on()
         hook(msg(links.new_code(TIA)["code"], 670)); assert not links.tries.fails.get("tg:670")
         for _ in range(7): hook(msg("ABCD-EFGH", 670))
         assert len(sent(670)) == 6 and len(deleted()) == 5, sent(670)
@@ -752,10 +764,55 @@ def a_code_that_is_not_a_link_code_is_deleted():
         for text in ("ABCD-EFG", "ABCD-EFGHJ", "ABCD-EFG0", "ABCD-EFGI", "my code is " + shapes[0]):
             links.tries.fails.clear(); tg.PRACTICE_LOG.clear(); hook(msg(text, 501)); assert sent() == [(501, NOT_LINKED)] and deleted() == [], text
         # a message with no id that can be deleted is still answered
-        links.tries.fails.clear(); tg.PRACTICE_LOG.clear(); hook(msg("ABCD-EFGH", 501, message_id="x")); assert sent() == [(501, BAD_CODE)] and deleted() == []
+        links.tries.fails.clear(); tg.PRACTICE_LOG.clear(); hook(msg("ABCD-EFGH", 501, message_id="x")); assert sent() == [(501, BAD_CODE_KEPT)] and deleted() == []
         # a linked chat too, and the link stays
         links.tries.fails.clear(); links.link(TIA, 501, None); tg.PRACTICE_LOG.clear()
         hook(msg(access.staff_code(TIA), 501)); assert sent() == [(501, BAD_CODE)] and len(deleted()) == 1 and links.name_of(501) == TIA
+
+def fake_bot(answers):
+    """a _send that answers each Bot API method from answers (status, body) and keeps what was sent"""
+    seen = []
+    def f(url, data, headers, timeout):
+        method = url.rsplit("/", 1)[1]; seen.append((method, json.loads(data)))
+        got = answers.get(method, (200, dict(ok=True, result=True)))
+        if isinstance(got, Exception): raise got
+        return got[0], json.dumps(got[1]).encode()
+    return f, seen
+
+ME_OK = (200, dict(ok=True, result=dict(id=1, is_bot=True, username="ctss_made_up_bot", first_name="CTSS")))
+
+@t
+def a_message_that_could_not_be_deleted_is_never_said_to_be():
+    with telegram(token="made-up-" + secrets.token_hex(10)):
+        links.link(HUGO, 502, None)
+        bad = dict(ok=False, description="made up reason")
+        for failed in ((400, bad), (403, bad), (429, bad), (502, bad), (200, bad), TimeoutError(), ConnectionResetError()):
+            for text, chat in (("ABCD-EFGH", 501), ("/start abcd efgh", 501), (access.staff_code(TIA), 501), (access.staff_code(HUGO), 502)):
+                links.tries.fails.clear(); f, seen = fake_bot(dict(deleteMessage=failed))
+                with_send(f, lambda: hook(msg(text, chat, message_id=31)))
+                assert [m for m, d in seen] == ["deleteMessage", "sendMessage"] and seen[0][1] == dict(chat_id=chat, message_id=31), seen
+                assert seen[1][1]["text"] == BAD_CODE_KEPT and seen[1][1]["chat_id"] == chat, (failed, seen[1])
+                assert len(links.tries.fails[f"tg:{chat}"]) == 1 and set(links.linked()) == {HUGO}
+        links.tries.fails.clear(); f, seen = fake_bot({})                                # deleted: said so
+        with_send(f, lambda: hook(msg("ABCD-EFGH", 501, message_id=31))); assert seen[1][1]["text"] == BAD_CODE, seen
+        links.tries.fails.clear(); f, seen = fake_bot(dict(deleteMessage=(400, bad)))     # five all told, then nothing
+        for _ in range(8): with_send(f, lambda: hook(msg("ABCD-EFGH", 501)))
+        assert [m for m, d in seen] == ["deleteMessage", "sendMessage"] * 5, seen
+    assert REAL == []
+
+@t
+def a_code_needs_relief_when_it_is_used():
+    with telegram():
+        c = links.new_code(TIA)["code"]
+        with record(TIA, group="executive"):                                              # no relief now
+            assert "relief" not in AR.rights(AP.find(TIA, PUB), "telegram") and links.use(c, 501, None) is None and links.linked() == {}
+            links.link(HUGO, 502, None); tg.PRACTICE_LOG.clear(); hook(msg(f"/start {c}", 502, message_id=8))
+            assert sent() == [(502, BAD_CODE)] and deleted() == [(502, 8)] and len(links.tries.fails["tg:502"]) == 1 and links.name_of(502) == HUGO, "nobody is put off the chat"
+            assert rows("codes")[0]["chat"] is None, "the code is not used up by it"
+        assert links.use(c, 501, None) == TIA                                             # a teacher again: the code is still good
+        c = links.new_code(EXE)["code"]; assert links.use(c, 503, None) is None
+        with record(EXE, extras=dict(relief=True, exams=None, admin=False)): assert links.use(c, 503, None) == EXE, "an executive on the relief team links"
+        with record(EXE, extras=dict(relief=True, exams=None, admin=False), off=True): assert links.use(links.new_code(EXE)["code"], 504, None) is None
 
 @t
 def the_code_route_needs_a_person_and_a_connection():
@@ -787,18 +844,6 @@ def the_code_route_needs_a_person_and_a_connection():
         links.link(TIA, 501, None)
         with record(TIA, off=True): assert who(TIA).get(API).status_code == 401
 
-def fake_bot(answers):
-    """a _send that answers each Bot API method from answers (status, body) and keeps what was sent"""
-    seen = []
-    def f(url, data, headers, timeout):
-        method = url.rsplit("/", 1)[1]; seen.append((method, json.loads(data)))
-        got = answers.get(method, (200, dict(ok=True, result=True)))
-        if isinstance(got, Exception): raise got
-        return got[0], json.dumps(got[1]).encode()
-    return f, seen
-
-ME_OK = (200, dict(ok=True, result=dict(id=1, is_bot=True, username="ctss_made_up_bot", first_name="CTSS")))
-
 @t
 def connect_saves_the_bot_and_points_the_hook_here():
     API = "/api/relief/telegram/"
@@ -813,8 +858,9 @@ def connect_saves_the_bot_and_points_the_hook_here():
         assert tg.PRACTICE_LOG == [] and tgdb.get_state("bot") is None
         r = com.post(API + "connect"); j = r.get_json()
         assert r.status_code == 200 and j["connected"] is True and j["bot"] == "practice_bot" and j["base"] == "http://localhost", j
-        b = tgdb.get_state("bot"); assert set(b) == {"username", "base", "at"} and (b["username"], b["base"]) == ("practice_bot", "http://localhost"), b
-        assert re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+", b["at"]) and links.connected() == b
+        b = tgdb.get_state("bot"); assert set(b) == {"username", "base", "at", "key"} and (b["username"], b["base"]) == ("practice_bot", "http://localhost"), b
+        assert b["key"] == digest(tg.hook_secret()) and tg.hook_secret() not in json.dumps(b) and b["key"] not in r.get_data(as_text=True), "a digest alone is kept"
+        assert re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+", b["at"]) and links.connected() == {k: b[k] for k in ("username", "base", "at")}
         assert [m for m, p in tg.PRACTICE_LOG] == ["getMe", "setWebhook", "setMyCommands"], tg.PRACTICE_LOG
         assert tg.PRACTICE_LOG[1][1] == dict(url="http://localhost/telegram/hook", secret_token=tg.hook_secret(), allowed_updates=["message", "callback_query"],
                                              max_connections=4, drop_pending_updates=True)
@@ -856,6 +902,79 @@ def connect_saves_the_bot_and_points_the_hook_here():
         assert r.status_code == 502 and tok not in r.get_data(as_text=True) and tgdb.get_state("bot") is None and [m for m, p in seen] == ["deleteWebhook"]
     tgdb.set_state("bot", CONNECTED)                                                       # the token taken out of Railway: Disconnect still clears it
     r = com.post(API + "disconnect"); assert r.status_code == 200 and tgdb.get_state("bot") is None and r.get_json()["token_set"] is False
+    assert REAL == []
+
+@t
+def a_changed_token_or_key_is_not_connected():
+    com, tia, API = client(dict(role="committee")), who(TIA), "/api/relief/telegram"
+    def connect():
+        f, seen = fake_bot(dict(getMe=ME_OK))
+        r = with_send(f, lambda: com.post(API + "/connect", headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "ctss.example"}))
+        assert r.status_code == 200 and r.get_json()["connected"] is True, r.get_json()
+        assert hook(msg("/nothing", 501, kind="group")).status_code == 200 and tia.post(API + "/code").status_code == 200
+    for var in ("TELEGRAM_BOT_TOKEN", "SECRET_KEY"):
+        with telegram(token="made-up-" + secrets.token_hex(10), connected=False):
+            connect()
+            old, was = tg.hook_secret(), os.environ[var]
+            try:
+                for new in ("made-up-" + secrets.token_hex(10), was + "x"):
+                    os.environ[var] = new
+                    assert links.connected() is None, var
+                    for secret in (True, old): assert hook(msg("/nothing", 501, kind="group"), secret=secret).status_code == 404, (var, "neither the new secret nor the old one")
+                    r = tia.post(API + "/code"); assert (r.status_code, r.get_json()) == (409, {"error": "Telegram is not connected yet."}), var
+                    j, k = tia.get(API).get_json(), com.get(API + "/admin").get_json()
+                    assert (j["on"], j["connected"], j["bot"]) == (True, False, None) and (k["connected"], k["bot"], k["base"], k["at"]) == (False, None, None, None), (j, k)
+                    assert "ctss_made_up_bot" not in json.dumps([j, k]), "an old bot's name is not said"
+                os.environ[var] = was
+                assert links.connected()["username"] == "ctss_made_up_bot", "the same token and key again: connected as before"
+                os.environ[var] = "made-up-" + secrets.token_hex(10)
+                connect(); assert links.connected()["username"] == "ctss_made_up_bot" and hook(msg("/nothing", 501, kind="group"), secret=old).status_code == 403
+            finally: os.environ[var] = was
+    with telegram():                                                                                # what an earlier version saved: no digest, or an odd one
+        for key in (None, "", digest(""), tg.hook_secret(), 7, ["x"]):
+            tgdb.set_state("bot", dict(CONNECTED, key=key)); assert links.connected() is None and hook(msg("hi")).status_code == 404, key
+        tgdb.set_state("bot", CONNECTED); assert links.connected() is None
+        key = os.environ.pop("SECRET_KEY")
+        try:
+            tgdb.set_state("bot", dict(CONNECTED, key=digest(""))); assert links.connected() is None, "no SECRET_KEY: never connected"
+            tgdb.set_state("bot", CONNECTED); assert links.connected() is None and links.key() is None, "nor with no digest saved"
+        finally: os.environ["SECRET_KEY"] = key
+        os.environ.pop("TELEGRAM_BOT_TOKEN"); assert links.connected() is None and links.key() is None, "no token: never connected"
+    assert REAL == []
+
+@t
+def connect_takes_only_a_clean_https_address():
+    com, tok = client(dict(role="committee")), "made-up-" + secrets.token_hex(10)
+    cookie = com.get_cookie("session").value
+    def connect(headers, practice=False):
+        f, seen = fake_bot(dict(getMe=ME_OK))
+        c = A.app.test_client(use_cookies=False)
+        r = with_send(never if practice else f, lambda: c.post("/api/relief/telegram/connect", headers=dict(headers, Cookie=f"session={cookie}")))
+        return r.status_code, (r.get_json() or {}).get("error"), [d["url"] for m, d in seen if m == "setWebhook"], (tgdb.get_state("bot") or {}).get("base")
+    S = {"X-Forwarded-Proto": "https"}
+    with telegram(token=tok, connected=False):
+        for host, want in (("ctss.example", None), ("ctss.example:8443", None), ("CTSS.example", None), ("a-b.c-d.example", None)):
+            for headers in (dict(S, **{"X-Forwarded-Host": host}), dict(S, Host=host)):
+                got = connect(headers); assert got == (200, None, [f"https://{host.lower()}/telegram/hook"], f"https://{host.lower()}"), (headers, got)
+                tgdb.set_state("bot", None)
+        bad = [{"X-Forwarded-Proto": x} for x in ("https://evil.example/?", "https://evil.example/#", "https://evil.example/", "https://evil.example", "https://me:pw@evil.example/?",
+                                                  "https://evil.example?", "https://evil.example\\", "https://evil.example:443/?a=", "https://evil.example:99999999", "https://evil.example:x", "https://[evil", "http", "javascript", "ftp", "https\t", "https ://x")]
+        bad += [dict(S, **{"X-Forwarded-Host": x}) for x in ("evil.example/path", "me:pw@evil.example", "me@evil.example", "evil.example?x", "evil.example#x", "evil.example\\x",
+                                                             "[::1]", "localhost", "evil.example.", "-evil.example", "evil_x.example", "a b.example",
+                                                             "evil.example:", "evil.example:99999999", "evil.example:x", "evil.example:0", "é.example", "x." * 130 + "example")]
+        bad += [dict(S, Host=x) for x in ("evil.example/path", "me:pw@evil.example", "evil.example?x", "evil.example#x", "localhost", "evil.example:x")]
+        bad += [{"X-Forwarded-Host": "ctss.example"}, {}]                                             # plain http
+        before = [{"X-Forwarded-Proto": "wss"}] + [dict(S, **{"X-Forwarded-Host": x}) for x in ("evil..example", ".evil.example", "a" * 250 + ".example")]   # werkzeug's own refusal
+        for headers in bad + before:
+            got = connect(headers)
+            assert got == ((400, None, [], None) if headers in before else (409, tgweb.NOT_HTTPS, [], None)), (headers, got)
+        os.environ["RAILWAY_PUBLIC_DOMAIN"] = "ctss-made-up.example"                                   # Railway's own name: none of it matters
+        try:
+            for headers in bad: assert connect(headers)[2:] == (["https://ctss-made-up.example/telegram/hook"], "https://ctss-made-up.example"), headers
+        finally: os.environ.pop("RAILWAY_PUBLIC_DOMAIN")
+    with telegram(connected=False):                                                                   # practice: a local address, by http
+        for host in ("localhost", "localhost:8793", "127.0.0.1:5000", "ctss.example"):
+            assert connect({"Host": host}, practice=True) == (200, None, [], f"http://{host}"), host
     assert REAL == []
 
 @t
@@ -913,6 +1032,9 @@ def admin_lists_who_is_not_linked():
         # unlink
         for body in (dict(name="Nobody Here"), dict(name=ROSA), dict(name=None), dict(name=[TIA]), dict(), [], "x"):
             r = com.post(API + "unlink", json=body); assert r.status_code == 404 and r.get_json()["error"], (body, r.status_code)
+        for raw in (b'{"name": "\\ud800"}', b'{"name": "Ms \\udfff Teo"}', b'{"name": 3}', b'{"name": true}', b'{"name": {"a": 1}}', b'{"name": null}', b'{"name": ""}',
+                    b"[" * 200_000, b'{"name": ' + b"[" * 200_000, b'{"a":' * 100_000, b"", b"not json", b"\xff\xfe", b'"\\ud800"', b'{"name": "\\u0000"}', b'{"name": "%s"}' % (b"x" * 100_000)):
+            r = com.post(API + "unlink", data=raw, content_type="application/json"); assert r.status_code in (400, 404) and r.get_json()["error"], (raw[:30], r.status_code)
         assert len(links.linked()) == 3
         r = com.post(API + "unlink", json=dict(name=GONE_)); assert r.status_code == 200 and [x["name"] for x in r.get_json()["linked"]] == [EXE, TIA], r.get_json()
         assert who(TEAM).post(API + "unlink", json=dict(name=TIA)).status_code == 200 and links.chat_of(TIA) is None

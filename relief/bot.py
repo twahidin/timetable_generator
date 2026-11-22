@@ -3,12 +3,12 @@ alone (never a code, a chat id, a name or what was typed).
 
 Only a message in a person's own (private) chat is read or answered; groups, channels, other bots and every other kind of
 update are ignored. Anything shaped like a code (alone, or after /start, as Telegram's own link sends it) is tried as a link
-code; when it is not a current one the message is deleted and answered BAD_CODE, the same for a real personal code and a
-made-up one (links.use never looks at those). The code a chat linked itself with, sent by it again, is answered HELLO and
-changes nothing (links.again). A chat whose person is not there (links.name_of) is answered NOT_LINKED. Each
-of these two answers counts against links.tries, and a chat over it gets nothing at all: no answer, no deleteMessage, its
-code not tried. The count is made with the check (_counting, never held during a call to Telegram), so messages that come
-at once get no more.
+code; when it is not a current one the message is deleted and answered BAD_CODE (BAD_CODE_KEPT when Telegram did not delete
+it), the same for a real personal code and a made-up one (links.use never looks at those). The code a chat linked itself
+with, sent by it again, is answered HELLO and changes nothing (links.again). A chat whose person is not there (links.name_of)
+is answered NOT_LINKED. Each of these two answers counts against links.tries, and a chat over it gets nothing at all: no
+answer, no deleteMessage, its code not tried. The count is made with the check (_counting, never held during a call to
+Telegram), so messages that come at once get no more.
 
 /start, /help and anything else from a linked chat: HELLO. /stop unlinks. A person's link that moved is told in the old chat
 (MOVED_LINK); a chat that was someone else's is told so before HELLO (TAKEN). Linking, moving and unlinking are each one
@@ -19,8 +19,9 @@ from relief import links, tg
 
 HELLO = "Linked: {name}. You'll get your reliefs here. Send /relief to ask for relief, /stop to unlink."
 NOT_LINKED = "This Telegram is not linked. Open Relief in the school's app, press Link Telegram and follow the link there."
-BAD_CODE = ("That code is not right or has run out. Get a new one in the app. If it was your personal code, do not send it here: "
-            "it opens the app. I have deleted your message.")
+_BAD = "That code is not right or has run out. Get a new one in the app. If it was your personal code, do not send it here: it opens the app. "
+BAD_CODE = _BAD + "I have deleted your message."
+BAD_CODE_KEPT = _BAD + "Please delete your message now."
 MOVED_LINK = "Your relief messages now go to another Telegram. If this was not you, tell the relief team."
 TAKEN = "This Telegram was linked to someone else before. Their relief messages no longer come here."
 STOPPED = "Unlinked. Your relief messages stop here. To link again, open Relief in the school's app and press Link Telegram."
@@ -106,8 +107,8 @@ def _code(chat, m, code):
         name = twice or links.use(code, chat, _handle(m), lost)
         if name is None: links.tries.fail(key)
     if name is None:
-        if type(m.get("message_id")) is int: tg.call("deleteMessage", dict(chat_id=chat, message_id=m["message_id"]), timeout=TIMEOUT)
-        reply(chat, BAD_CODE)
+        gone = type(m.get("message_id")) is int and tg.call("deleteMessage", dict(chat_id=chat, message_id=m["message_id"]), timeout=TIMEOUT)["ok"]
+        reply(chat, BAD_CODE if gone else BAD_CODE_KEPT)
         return
     moved = any(x["name"] == name for x in lost)
     if not twice: _noted("telegram linked", "Telegram linked (moved from another Telegram)" if moved else "Telegram linked", name)

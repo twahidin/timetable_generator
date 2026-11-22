@@ -1,6 +1,6 @@
 """Plain-assert tests: every route checks a right, for every kind of session (accounts stage 1).
 .venv/bin/python tests/test_routes.py"""
-import datetime, html, itertools, os, pickle, re, secrets, sys, tempfile, time, urllib.parse
+import datetime, hashlib, html, itertools, os, pickle, re, secrets, sys, tempfile, time, urllib.parse
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
@@ -304,7 +304,7 @@ def the_hook_refuses_every_kind_without_the_header():
     stop = dict(update_id=41, message=dict(message_id=1, chat=dict(id=501, type="private"), text="/stop"))
     for kind, (keys, _) in KINDS.items(): assert client(keys).post(HOOK, json=stop).status_code == 404, kind     # no bot: not there at all
     os.environ["TELEGRAM_BOT_TOKEN"] = "practice"
-    tgdb.set_state("bot", dict(username="practice_bot", base="http://localhost", at="2026-11-22T08:00:00+08:00"))
+    tgdb.set_state("bot", dict(username="practice_bot", base="http://localhost", at="2026-11-22T08:00:00+08:00", key=hashlib.sha256(tg.hook_secret().encode()).hexdigest()))
     TL.link(TINA, 501, None)
     try:
         right = tg.hook_secret(); assert len(right) == 64

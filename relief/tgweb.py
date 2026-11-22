@@ -1,11 +1,12 @@
 """Telegram's routes: the hook Telegram posts each update to, a person's own link, and connecting the bot (relief settings).
 Registered from app.py after init(has=..., me=..., need=..., note=...), as relief/web.py is.
 
-POST /telegram/hook is the app's one route without a session: Telegram has none. It answers 404 while there is no token or
-no bot is connected, 403 unless X-Telegram-Bot-Api-Secret-Token is tg.hook_secret() (compared with hmac.compare_digest; ""
-never matches), before any of the body is read, and 413 past LIMIT (read from the stream, never more than one byte past it).
-With the right secret each update is acted on once (tgdb.first_time) by bot.handle and answered 200; a body that is not an
-update is answered 200 and nothing is done, or Telegram would send it again; a store that fails is 503, so that it does.
+POST /telegram/hook is the app's one route without a session: Telegram has none. It answers 404 while there is no token, no bot
+is connected, or the token or SECRET_KEY is not the one it was connected under (links.connected), 403 unless
+X-Telegram-Bot-Api-Secret-Token is tg.hook_secret() (compared with hmac.compare_digest; "" never matches), before any of the
+body is read, and 413 past LIMIT (read from the stream, never more than one byte past it). With the right secret each update
+is acted on once (tgdb.first_time) by bot.handle and answered 200; a body that is not an update is answered 200 and nothing is
+done, or Telegram would send it again; a store that fails is 503, so that it does.
 
 A person's own link needs relief and a person signed in by name: GET /api/relief/telegram, POST …/code (a one-time code and
 the address that opens the bot with it), DELETE …/link. Relief settings (relief.save): GET …/admin, POST …/connect (points
@@ -13,6 +14,7 @@ Telegram at the app's address, _base), …/disconnect and …/unlink {name}. No 
 chat id or anything Telegram said."""
 import hmac, json, logging, os, re
 from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import Blueprint, abort, jsonify, request
 
@@ -167,13 +169,28 @@ def _admin():
 def admin(): return _admin()
 
 
+def _host_name(host, least=2):
+    """host is a plain host name of at least that many parts (example.org: two)"""
+    labels = host.split(".")
+    return len(host) <= 253 and len(labels) >= least and all(_LABEL.fullmatch(x) for x in labels)
+
+
 def _base():
     """the address Telegram is pointed at: Railway's own name for the app (RAILWAY_PUBLIC_DOMAIN) when it is set and is a host
-    name, so no header a browser sends can aim the hook and its secret elsewhere; else the address Connect was pressed on"""
+    name, so no header a browser sends can aim the hook and its secret elsewhere; else the address Connect was pressed on, when
+    it is https:// and a host name, with or without a port, and nothing more (in practice http and a local name will do: nothing
+    is sent anywhere); else None"""
     host = (os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "").strip()
-    labels = host.split(".")
-    if len(host) <= 253 and len(labels) > 1 and all(_LABEL.fullmatch(x) for x in labels): return "https://" + host
-    return request.host_url.rstrip("/")
+    if _host_name(host): return "https://" + host
+    local = tg.practice()
+    try:
+        url = request.host_url                                           # reading it raises for some headers
+        u = urlsplit(url)
+        name, port = u.hostname or "", u.port
+    except ValueError: return None
+    if not (u.scheme == "https" or local) or not _host_name(name, 1 if local else 2): return None
+    base = f"{u.scheme}://{name}" + (f":{port}" if port else "")
+    return base if url.lower() in (base, base + "/") else None         # anything else in it (a path, a query, a user) is refused
 
 
 @bp.post("/api/relief/telegram/connect")
@@ -183,14 +200,14 @@ def connect():
     base = _base()
     if not tg.on(): return {"error": NO_TOKEN}, 409
     if not tg.hook_secret(): return {"error": NO_KEY}, 409
-    if not base.startswith("https://") and not tg.practice(): return {"error": NOT_HTTPS}, 409
+    if base is None: return {"error": NOT_HTTPS}, 409
     r = tg.call("getMe", timeout=8)
     username = r["result"].get("username") if r["ok"] and isinstance(r["result"], dict) else None
     if not isinstance(username, str) or not _USERNAME.fullmatch(username): return {"error": NO_ANSWER}, 502
     r = tg.call("setWebhook", dict(url=base + HOOK, secret_token=tg.hook_secret(), allowed_updates=["message", "callback_query"],
                                    max_connections=4, drop_pending_updates=True))
     if not r["ok"]: return {"error": NO_ANSWER}, 502
-    tgdb.set_state("bot", dict(username=username, base=base, at=_absences._now()))
+    tgdb.set_state("bot", dict(username=username, base=base, at=_absences._now(), key=links.key()))
     tg.call("setMyCommands", dict(commands=COMMANDS), timeout=8)          # the menu only: its failure does not matter
     _noted("telegram connected", f"Telegram connected (@{username})")
     return _admin()
@@ -210,8 +227,10 @@ def disconnect():
 @need("relief.save")
 def unlink():
     """{name}: anybody's link taken away"""
-    d = request.get_json(force=True, silent=True)
-    name = d.get("name") if isinstance(d, dict) else None
-    if not isinstance(name, str) or links.unlink(name) is None: return {"error": NO_LINK}, 404
+    try:
+        d = request.get_json(force=True, silent=True)
+        name = d.get("name") if isinstance(d, dict) else None
+        if not isinstance(name, str) or links.unlink(name) is None: return {"error": NO_LINK}, 404
+    except (UnicodeEncodeError, RecursionError): return {"error": NO_LINK}, 404      # a name the store cannot hold, or JSON too deep to read
     _noted("telegram unlinked", f"Telegram unlinked for {name}")
     return _admin()

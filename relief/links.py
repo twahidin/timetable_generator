@@ -34,13 +34,23 @@ tries = access.Limiter(n=5, window=600)            # wrong codes and "not linked
 def _clock(): return time.time()
 
 
+def key():
+    """what the bot is connected under: a digest of the hook's secret (never the secret), so of the token and SECRET_KEY; None
+    without both"""
+    s = tg.hook_secret() if tg.on() else ""
+    return hashlib.sha256(s.encode()).hexdigest() if s else None
+
+
 def connected():
-    """the connected bot, dict(username, base, at), or None: no token, not connected, or connected in practice mode while the
-    token is a real one now (somebody else's bot may have that name: no code is ever sent there)"""
-    if not tg.on(): return None
+    """the connected bot, dict(username, base, at), or None: no token or SECRET_KEY, not connected, connected under another token
+    or SECRET_KEY (key), or in practice mode while the token is a real one now (somebody else's bot may have that name: no code
+    is ever sent there). state.bot, written by Connect, also holds key"""
+    k = key()
+    if k is None: return None
     b = tgdb.get_state("bot")
-    if not isinstance(b, dict) or not b.get("username"): return None
-    return None if b["username"] == PRACTICE_BOT and not tg.practice() else b
+    if not isinstance(b, dict) or not b.get("username") or b.get("key") != k: return None
+    if b["username"] == PRACTICE_BOT and not tg.practice(): return None
+    return {x: b.get(x) for x in ("username", "base", "at")}
 
 
 # ---- one-time codes
@@ -67,12 +77,12 @@ def new_code(name):
 
 def use(code, chat, handle, lost=None):
     """link chat to the person whose current code this is -> their name; None when it is no current link code (or used
-    already), or its person is not there any more (nothing is changed then)"""
+    already), or its person is not there any more or has no relief now (nothing is changed then)"""
     if not shaped(code): return None
     h = _hash(code)
     with tgdb.db(read=True) as c:
         r = c.execute("SELECT name FROM codes WHERE hash=? AND chat IS NULL AND until>?", (h, _clock())).fetchone()
-    if r is None or _there(r["name"]) is None: return None
+    if r is None or "relief" not in _rights.rights(_there(r["name"]), VIA): return None
     with tgdb.db() as c:
         if c.execute("UPDATE codes SET chat=? WHERE hash=? AND name=? AND chat IS NULL AND until>?", (chat, h, r["name"], _clock())).rowcount != 1:
             return None                                                        # used meanwhile
