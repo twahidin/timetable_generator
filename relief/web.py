@@ -41,7 +41,8 @@ for a run (automatic: only with RELIEF_JOBS on), Fill now and a request to chang
 force, always after the save and the absences lock. Each save here is one history entry; the background picks write none.
 
 Stage 4: each save, after its history entry, asks relief.tell (_tell_soon) what there is to say on Telegram; nothing is sent
-from a route, and a message that cannot be worked out never fails the save."""
+from a route, and a message that cannot be worked out never fails the save. What a person may also do on Telegram
+(relief/bot.py) has its history entry's words and what follows the save in STEPS, the same for both."""
 import csv, datetime, io, os, threading
 from functools import wraps
 from zoneinfo import ZoneInfo
@@ -313,6 +314,29 @@ def _tell_soon():
     except Exception as e: current_app.logger.error("relief: the messages could not be asked for (%s)", type(e).__name__)
 
 
+def _saved(what, r, words, after=None, by=None):
+    """after a save, the absences lock released: its history entry (by as _noted), then after(), then what there is to say on
+    Telegram"""
+    _noted(what, r, words, by=by)
+    if after: after()
+    _tell_soon()
+
+
+# what can be done on the page and on Telegram (relief/bot.py), by its button there: (what the history entry is called, its
+# words given the saved record, the cover key and who did it, what follows given the saved record and the published timetable)
+STEPS = dict(
+    ack=("relief acknowledged", lambda r, ckey, me: f"{me} acknowledged {_cover_words(r, ckey)}", None),
+    change=("asked to change", lambda r, ckey, me: f"{me} asked to change {_cover_words(r, ckey)}", lambda r, pub: _soon(ids=[r["id"]], force=True)),
+    cancel=("cancelled", lambda r, ckey, me: "cancelled", lambda r, pub: _cancelled(r, pub)),
+    approve=("approved", lambda r, ckey, me: f"{_relief_of(r, ckey)} approved for {_cover_words(r, ckey)}", None))
+
+
+def step_saved(step, r, ckey, me, pub, by=None):
+    """_saved for one of STEPS, me having done it; by: (me, "telegram") when it was done there"""
+    what, words, after = STEPS[step]
+    _saved(what, r, lambda: words(r, ckey, me), after and (lambda: after(r, pub)), by)
+
+
 def _period_range(pub, a, b):
     """from and to (0-based, inclusive) from the query, or None for the whole day"""
     if a in (None, "") and b in (None, ""): return None
@@ -530,9 +554,7 @@ def _change(id, do, what, words, right=None, refused=None, gate=("relief", None)
     try: r = do(r, me, pub, _body())
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "changing an absence")
-    _noted(what, r, lambda: words(r))
-    if after: after(r, pub)
-    _tell_soon()
+    _saved(what, r, lambda: words(r), after and (lambda: after(r, pub)))
     return jsonify(_out(r, pub, me))
 
 
@@ -590,8 +612,9 @@ def _cancelled(r, pub):
 @bp.post("/api/relief/absences/<id>/cancel")
 @need("relief")
 def cancel(id):
-    return _change(id, lambda r, me, pub, b: _absences.cancel(r["id"], b.get("why"), me, team=_has("relief.team")), "cancelled",
-                   lambda r: "cancelled", after=_cancelled)
+    what, words, after = STEPS["cancel"]
+    return _change(id, lambda r, me, pub, b: _absences.cancel(r["id"], b.get("why"), me, team=_has("relief.team")), what,
+                   lambda r: words(r, None, None), after=after)
 
 
 # ---- work files
@@ -770,8 +793,9 @@ def today():
 def approve(id, ckey):
     """{who}: the waiting pick, or a request to change's new pick, approved while it is still who (the name the page
     showed), else PICK_CHANGED, as for a body without who; relief.team"""
-    return _change(id, lambda r, me, pub, b: _cover.approve(r["id"], ckey, b.get("who"), me, pub, _settings.load(pub), links=_links_or_none(pub, _cal(pub))), "approved",
-                   lambda r: f"{_relief_of(r, ckey)} approved for {_cover_words(r, ckey)}", gate=TEAM)
+    what, words, after = STEPS["approve"]
+    return _change(id, lambda r, me, pub, b: _cover.approve(r["id"], ckey, b.get("who"), me, pub, _settings.load(pub), links=_links_or_none(pub, _cal(pub))), what,
+                   lambda r: words(r, ckey, None), gate=TEAM, after=after)
 
 
 @bp.post("/api/relief/today/approve-all")
@@ -893,10 +917,10 @@ def covering():
     return jsonify(covers=out)
 
 
-def _yours(id, ckey, do, what, words, after=None):
-    """a step the approved relief teacher of the cover takes: anyone else (or a cover not approved, gone, or of no absence)
-    gets 403 NOT_YOURS_COVER, the same answer whatever the reason, before anything is read out; do(record, lesson, cover,
-    me, body) -> the saved record, or None when nothing was to be saved (no history entry then); after(): once saved"""
+def _yours(id, ckey, do, step):
+    """a step (of STEPS) the approved relief teacher of the cover takes: anyone else (or a cover not approved, gone, or of no
+    absence) gets 403 NOT_YOURS_COVER, the same answer whatever the reason, before anything is read out; do(record, lesson,
+    cover, me, body) -> the saved record, or None when nothing was to be saved (no history entry then)"""
     pub, me, err = _gate()
     if err: return err
     r = _absences.load(id)
@@ -907,9 +931,7 @@ def _yours(id, ckey, do, what, words, after=None):
     except ValueError as e: return ({"error": str(e)}, 403) if str(e) == _cover.NOT_YOURS_COVER else _refusal(e)
     except BAD_INPUT as e: return _odd(e, "answering a relief")
     if saved is None: return jsonify(_covering_item(pub, r, ckey))
-    _noted(what, saved, lambda: words(saved, me))
-    if after: after()
-    _tell_soon()
+    step_saved(step, saved, ckey, me, pub)
     return jsonify(_covering_item(pub, saved, ckey))
 
 
@@ -918,8 +940,11 @@ def _yours(id, ckey, do, what, words, after=None):
 def cover_acknowledge(id, ckey):
     """the relief teacher acknowledges (once: again is the same answer, no new history entry)"""
     def do(r, x, c, me, b):
-        return None if _cover.state(r, x, c) == "acknowledged" else _cover.acknowledge(r["id"], ckey, me)
-    return _yours(id, ckey, do, "relief acknowledged", lambda r, me: f"{me} acknowledged {_cover_words(r, ckey)}")
+        if _cover.state(r, x, c) == "acknowledged": return None
+        saved, first = _cover.acknowledge_once(r["id"], ckey, me)
+        if not first: r.update(saved)            # acknowledged on Telegram since r was read: answered as it is, nothing to write down
+        return saved if first else None
+    return _yours(id, ckey, do, "ack")
 
 
 @bp.post("/api/relief/absences/<id>/covers/<path:ckey>/ask-change")
@@ -927,8 +952,7 @@ def cover_acknowledge(id, ckey):
 def ask_change(id, ckey):
     """{why}: a line; the relief stays theirs until the team acts, and a new pick is made at once (fill.soon for this
     absence alone, with force, after the save); the history entry never holds the why"""
-    return _yours(id, ckey, lambda r, x, c, me, b: _cover.ask_change(r["id"], ckey, b.get("why"), me), "asked to change",
-                  lambda r, me: f"{me} asked to change {_cover_words(r, ckey)}", after=lambda: _soon(ids=[id], force=True))
+    return _yours(id, ckey, lambda r, x, c, me, b: _cover.ask_change(r["id"], ckey, b.get("why"), me), "change")
 
 
 # ---- the load tracker (relief.team)
