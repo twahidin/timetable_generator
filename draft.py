@@ -19,11 +19,6 @@ class Critical(Exception):
 def critical_text(n):
     """the sentence that says why Publish is refused"""
     return ("1 critical mistake" if n == 1 else f"{n} critical mistakes") + " must be settled on step 8 before the timetable can be published."
-class UnpublishedFixes(Exception):
-    """the draft has fixes that were never published; count: how many; waiting: how many lessons are in Not placed"""
-    def __init__(self, count, waiting=0):
-        super().__init__("The draft has changes that were never published." + (f" {waiting} lesson is waiting in Not placed." if waiting == 1 else f" {waiting} lessons are waiting in Not placed." if waiting else ""))
-        self.count = count
 def not_placed_text(n):
     """the sentence that says why the printouts and the download are refused"""
     return "1 lesson is not placed. Place it or delete it on step 8 first." if n == 1 else f"{n} lessons are not placed. Place them or delete them on step 8 first."
@@ -57,12 +52,12 @@ def paths(folder=None):
 
 def model(spec): return model_from_files(*paths(), spec=spec)
 
-def save(setup_path, timetable_path, source, spec, replace=False):
+def save(setup_path, timetable_path, source, spec, replace=False, by="Committee", out=None):
     """replace the draft with these files, read against the setup spec first (so a file that cannot be read never replaces a
-    good draft); returns the model, for info(model=). UnpublishedFixes unless replace, when the draft has fixes that were never published. A new upload starts with no decisions."""
+    good draft); returns the model, for info(model=). The draft it replaces is first kept as a version (kind upload; out["kept"] is that version, or None when the same draft
+    is already kept or there was none); replace is accepted and ignored. A new upload starts with no decisions."""
+    import versions
     with _lock:
-        meta = store.read_json(_p("meta.json"), {}) or {} if exists() else {}; fl = meta.get("fixes") or []
-        if len(fl) > meta.get("published_fixes", 0) and not replace: raise UnpublishedFixes(len(fl), _waiting())
         new, old = DIR + ".new", DIR + ".old"
         shutil.rmtree(new, ignore_errors=True); os.makedirs(new)
         if setup_path: shutil.copy(setup_path, os.path.join(new, "setup.xlsx"))
@@ -71,6 +66,8 @@ def save(setup_path, timetable_path, source, spec, replace=False):
         except Exception as e:
             shutil.rmtree(new, ignore_errors=True); raise ValueError(f"Could not read the files: {e}")
         if not m["lessons"]: shutil.rmtree(new, ignore_errors=True); raise ValueError("The timetable has no lessons.")
+        kept = versions.keep("upload", by)   # after the new files read well, before the swap: a draft is never lost
+        if out is not None: out["kept"] = kept
         store.write_json(os.path.join(new, "decisions.json"), {})
         store.write_json(os.path.join(new, "meta.json"), dict(source=source, uploaded_at=store.now(), upload_id=uuid.uuid4().hex, fixes=[], school=m["file_school"],
                                                               config_id=str(((m["setup"].get("school") or {}).get("config_id")) or "").strip()))
@@ -78,11 +75,6 @@ def save(setup_path, timetable_path, source, spec, replace=False):
         if os.path.exists(DIR): os.replace(DIR, old)
         os.replace(new, DIR); shutil.rmtree(old, ignore_errors=True); _cache.clear()
         return m
-
-def _waiting():
-    """how many lessons wait in Not placed in the draft now; 0 when it cannot be worked out (the sentence is then the shorter one)"""
-    try: return _count(model_now()[2]["pool"])
-    except Exception: return 0
 
 def _versions():
     """how many saved versions there are (folders in draft_versions)"""

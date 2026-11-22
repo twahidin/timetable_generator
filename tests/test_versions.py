@@ -243,6 +243,18 @@ def test_bad_ids_are_refused():
         raises(ValueError, lambda: versions.delete(bad), "There is no such version.")
     save_draft(ROWS); v = versions.save("Ok", "T"); assert versions.folder(v["id"]) == os.path.join(versions.VDIR, v["id"])
 
+def test_upload_over_fixes_keeps_the_draft():
+    save_draft(ROWS); wipe_versions(); one_fix()
+    r = c.post("/api/draft", data=dict(setup=(io.BytesIO(setup_bytes(SPEC)), "setup.xlsx"), timetable=(io.BytesIO(workbook(ROWS[:2])), "timetable.xlsx")), content_type="multipart/form-data")
+    assert r.status_code == 200, r.get_json()
+    j = r.get_json(); assert j["kept"]["kind"] == "upload" and j["fixes"] == [], j
+    kept = [v for v in versions.listing(counts=False) if v["id"] == j["kept"]["id"]]; assert len(kept) == 1 and kept[0]["fixes"] == 1
+    # a file that cannot be read leaves the draft and the versions as they were
+    n = len(versions.listing(counts=False))
+    r = c.post("/api/draft", data=dict(setup=(io.BytesIO(setup_bytes(SPEC)), "setup.xlsx"), timetable=(io.BytesIO(b"not a workbook"), "timetable.xlsx")), content_type="multipart/form-data")
+    assert r.status_code == 400 and len(versions.listing(counts=False)) == n
+    wipe_versions()
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for f in tests: f()

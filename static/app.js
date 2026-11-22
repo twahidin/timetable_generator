@@ -1895,7 +1895,7 @@ document.addEventListener("click", async e => {
     if (Number.isFinite(id)) bdShowTray(id); else bdShowWarning(key, true);
     return;
   }
-  if (b.id === "imCheck") { uploadDraft(false); return; }
+  if (b.id === "imCheck") { uploadDraft(); return; }
   if (b.dataset.upclear) { const inp = $("#" + b.dataset.upclear); if (inp) { inp.value = ""; upPaint(); } return; }
   if (b.id === "pbPublish") { if (!confirm("Publish this timetable? Teachers and students will see it straight away, in place of what they see now.")) return; publishDraft(); return; }
   if (bdClick(b)) return;
@@ -3079,22 +3079,17 @@ function drawDraft() {   // the upload card's head and the timetable card again 
   box.innerHTML = S.draft ? draftHTML(S.draft).head : "";
   bdMount(); bdDraftDraw();
 }
-async function uploadDraft(replace) {
+async function uploadDraft() {
   const fd = timetableForm(); if (!fd) return;
-  if (replace) fd.append("replace", "1");
   const box = $("#imResult"), btns = ["#imCheck"].map(q => $(q)).filter(Boolean);
   btns.forEach(x => x.disabled = true);
   box.innerHTML = `<p class="muted" style="margin-top:10px">Checking the timetable against the setup…</p>`;
   try {
     const r = await fetch("/api/draft", { method: "POST", body: fd }), j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/login"; return; }
-    if (r.status === 409 && j.fixes && !replace) {
-      drawDraft();
-      if (confirm(`${j.error || "The draft has changes that were never published."} Replace the draft with this file?`)) { btns.forEach(x => x.disabled = false); return uploadDraft(true); }   // the server's sentence counts the lessons waiting in Not placed
-      return;
-    }
     if (!r.ok) { drawDraft(); toast(j.error || "Could not check the timetable."); return; }
     S.draft = j; S.help = null; drawDraft(); poll();
+    if (j.kept) toast("The draft you had is kept as version “" + j.kept.name + "”.");
   } catch (err) { drawDraft(); toast("Could not reach the server: " + err.message); }
   finally { btns.forEach(x => x.disabled = false); upPaint(); }
 }

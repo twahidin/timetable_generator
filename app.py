@@ -796,7 +796,7 @@ def _worked(r):
 @need("committee")
 def draft_upload():
     """a timetable made outside the app (the skill with an AI agent, or another program) becomes the draft: kept on the
-    server and checked against the saved setup. A draft with fixes that were never published is replaced only with replace=1."""
+    server and checked against the saved setup. The draft it replaces is kept as a version (replace=1 is still accepted and ignored)."""
     spec, _ = store.load_setup()
     if not spec: return {"error": NO_SETUP}, 409
     work = tempfile.mkdtemp(prefix="tt-")
@@ -804,12 +804,12 @@ def draft_upload():
         try:
             sp, tp = _save_uploads(work)
             name = os.path.basename(str(request.files["timetable"].filename or "").replace("\\", "/"))[:120] or "an uploaded file"
-            m = draft.save(sp, tp, name, spec,
-                           replace=request.form.get("replace") == "1")
-        except draft.UnpublishedFixes as e: return {"error": str(e), "fixes": e.count}, 409
+            got = {}
+            m = draft.save(sp, tp, name, spec, by=by()["as"], out=got)
+            kept = got.get("kept")
         except ValueError as e: return {"error": str(e)}, 400
-        r = _checked(lambda: draft.info(model=m))
-        if _worked(r): _draft_entry("upload", f"Uploaded {name}")
+        r = _checked(lambda: dict(draft.info(model=m), kept=kept))
+        if _worked(r): _draft_entry("upload", f"Uploaded {name}" + (f"; the draft before is kept as version “{kept['name']}”" if kept else ""))
         return r
     finally: shutil.rmtree(work, ignore_errors=True)
 
