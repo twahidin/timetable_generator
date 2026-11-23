@@ -4513,7 +4513,7 @@ def reason_takes_out_quoted_stretches_and_cuts_and_never_raises():
     same(R('"all of it"'), "…")
     same(R('"x" and "y"'), "… and …")
     same(R("\"'\"nested'\" tail"), "…nested'…")
-    same(R("'a' 'b"), "… …")
+    same(R("'a' 'b"), "…b")                                  # greedy: the last single mark ends the stretch
     same(R("a\nb\t\tc\r\n  d\x00e"), "a b c d e")
     same(R(""), "")
     same(R('"""'), "……")
@@ -4524,6 +4524,22 @@ def reason_takes_out_quoted_stretches_and_cuts_and_never_raises():
     same(len(R("y" * 100000)), 300)
     for bad in (5, None, {"a": 1}, ["x"], b"x", True, 1.5):
         same(R(bad), "")
+
+@t
+def a_single_quoted_value_with_an_apostrophe_in_it_goes_whole():
+    R = AI._reason
+    # greedy: from a single quote at a word's edge to the LAST single quote of that kind. What survives: the words before the first
+    # quote mark and the words after the last one; nothing between them
+    got = R("field is wrong: 'the teachers' room' and more plain words")
+    same(got, "field is wrong: … and more plain words")
+    assert "teachers" not in got and "room" not in got, got
+    same(R("a.b.c: 'Ms Tan' then tools.3.path then 'Mr Lee' end"), "a.b.c: … end")      # the path between two values goes too: accepted
+    same(R("x \u2018the teachers\u2019 room\u2019 tail"), "x … tail")                       # curly pair with an apostrophe inside
+    same(R("x \u2018the teachers\u2019 room tail"), "x … room tail")                              # curly, the last closing mark ends it
+    same(R("x \u2018never closes of Tan"), "x …")
+    same(R("it don't matter and teachers' rooms are fine"), "it don't matter and teachers' rooms are fine")   # no stretch open: kept
+    same(R("don\u2019t panic"), "don\u2019t panic")
+    same(R("before \"Tan Wei\" and 'Lee' after"), "before … and … after")                    # a lone pair is as before
 
 @t
 def only_a_4xx_status_error_gets_a_reason_and_no_fault_makes_fault_raise():

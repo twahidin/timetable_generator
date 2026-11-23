@@ -39,7 +39,8 @@ _REASON_MAX = 300
 
 
 def _reason(text) -> str:
-    """the provider's short reason made safe for a log: every quoted stretch (quotes included) becomes one ellipsis, whitespace and
+    """the provider's short reason made safe for a log: every quoted stretch (quotes included) becomes one ellipsis (double marks and
+    backticks pair by pair; a single mark at a word's edge takes everything to the last single mark of its kind), whitespace and
     control characters one space, cut to 300 characters; anything that is not a text gives "" and it never raises"""
     try:
         if not isinstance(text, str):
@@ -49,13 +50,15 @@ def _reason(text) -> str:
             c = text[i]
             word = lambda k: 0 <= k < n and text[k].isalnum()
             if c in _PAIRS and not (c == "'" and word(i - 1)):      # an apostrophe after a letter opens nothing
-                close, j = _PAIRS[c], i + 1
-                while j < n:
-                    if text[j] == close and not (close in "'\u2019" and word(j + 1)):   # inside a word it is an apostrophe
-                        break
-                    j += 1
+                close = _PAIRS[c]
+                if c in "'\u2018":              # single marks are greedy: to the LAST mark of the kind, so an apostrophe inside a value cannot end it
+                    j = text.rfind(close, i + 1)
+                    j = n if j < 0 else j       # no later mark: everything after it goes
+                else:
+                    j = text.find(close, i + 1)
+                    j = n if j < 0 else j       # an unclosed mark takes everything after it
                 out.append("\u2026")
-                i = j + 1                       # an unclosed mark (j == n) takes everything after it
+                i = j + 1
                 continue
             out.append(c)
             i += 1
