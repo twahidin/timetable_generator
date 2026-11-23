@@ -152,7 +152,7 @@ def in_a_list_part_of_a_name_beside_a_date_or_a_subject_stays():
     for text in ("Sec 3 Art Koh", "Mon 3 Jun Goh 8.00", "on 3 May Lim", "Lim May 3", "Koh Art", "Art, Koh", "Jun Goh", "May\tLim", "Art   Koh", "3A Goh Jun", "Mdm May 3", "Lim\nMay 3"):
         for w in ("list", "app"): same(N.out(text, w), text)
     for w in ("list", "app"):
-        same(N.out("Ms Lim May, Ms May, Mr Koh Art Room", w), f"{lim} May, {lim}, {koh} Art Room")          # a title makes a person of what is left
+        same(N.out("Ms Lim May, Ms May, Mr Koh Art Room", w), f"{lim}, {lim}, {koh} Room")                  # a title makes a person, and its run keeps its last word
         same(N.out("May Tan Ling, Ling Ai May 3, Koh Beng and", w), f"May a student, a student May 3, {koh} and")       # and so do two words
         same(N.out("Tan May Ling", w), "a student")                                                        # in the middle it is the name
 
@@ -211,7 +211,7 @@ def a_title_in_capitals():
     N = names.Names(coded("MA", "LI", subjects=("Art",)), people("Mdm Lim Bee Hoon", "Ms Ma Li Na", "Mr Li Jun Wei", "Mdm May Lim Hui", KOH), []); c = N.code
     all_where(N, "PUT MDM LIM BEE IN THE HALL, MR ART, MS MA", f"PUT {c('Mdm Lim Bee Hoon')} IN THE HALL, {c(KOH)}, {c('Ms Ma Li Na')}")
     all_where(N, "MDM LIM, MDM MAY LIM, MDM MAY", f"{c('Mdm Lim Bee Hoon')} or {c('Mdm May Lim Hui')}, {c('Mdm May Lim Hui')}, {c('Mdm May Lim Hui')}")
-    apart(N, "MR LI JUN", c("Mr Li Jun Wei"), f"{c('Mr Li Jun Wei')} JUN")
+    all_where(N, "MR LI JUN", c("Mr Li Jun Wei"))
     all_where(N, "3A WILL MISS ART. MISS ENGLISH, 3B!", "3A WILL MISS ART. MISS ENGLISH, 3B!")                       # a subject is missed
     all_where(N, "MISS MAY, MISS LIM BEE, Miss Art, MISS KOH, MISS Art", f"{c('Mdm May Lim Hui')}, {c('Mdm Lim Bee Hoon')}, {c(KOH)}, {c(KOH)}, {c(KOH)}")
     all_where(a_names("MISS ART TAN", subjects=("Art",)), "MISS ART TAN, Miss Art Tan", "T01, T01")                  # as it is stored
@@ -269,7 +269,7 @@ def a_titled_name_is_decided_before_anything():
     all_where(a_names("Mrs Chng Grace Indra"), "Mrs Indra, Chng Grace Indra; Mrs Grace, Chng Indra; Mrs Grace, Chng\nIndra", "T01, T01; T01, T01; T01, T01")
     N = a_names("Dr Koh Art", "Ms Koh Bo", "Dr Kiran Goh", "Mrs Goh Li"); koh, goh, bo, li = (N.code(x) for x in ("Dr Koh Art", "Dr Kiran Goh", "Ms Koh Bo", "Mrs Goh Li"))
     apart(N, "Dr Koh Art 3A, Mrs Goh Kiran, Dr Goh\tKiran", f"{koh} 3A, {goh}, {goh}\t{goh}", f"{koh} 3A, {goh}, {goh}\tKiran"); all_where(N, "Ms Koh\tArt, Ms Koh, Art", f"{bo}\tArt, {bo}, Art")
-    apart(N, "Ms Koh Art 3A", f"{koh} 3A", f"{bo} Art 3A"); apart(N, "Mrs Goh\tKiran", f"{li}\t{goh}", f"{li}\tKiran")          # not another teacher's whole name
+    all_where(N, "Ms Koh Art 3A", f"{koh} 3A"); apart(N, "Mrs Goh\tKiran", f"{li}\t{goh}", f"{li}\tKiran")          # not another teacher's whole name
     all_where(a_names("Mrs Tan Jia", "Mr Tan Jia May", "Dr Quek Yi Xuan", "Ms May Quek"), "Mrs Tan Jia May 3, Dr Quek May 3", "T03 May 3, T01 May 3")
     N = a_names(("Ms Ho Siew Lan", "Ms Ho"), "Ms Ho Mei")
     all_where(N, "Ms Ho Siew Lan, Ms Ho Mei", "T02, T01")
@@ -280,7 +280,7 @@ def a_titled_name_is_decided_before_anything():
     all_where(a_names("Ms Tan2 Bo", "Lim Bo", "Lim @ Rose", "Ms Lim @ Rose"), "Tan2 Bo, LIM @ ROSE", "T04, T01"); all_where(a_names("Ms Tan @ Rose", students=[("K1", "Tan @ Rose")]), "Tan @ Rose", "T01")
     all_where(a_names("Ho Mei (Mrs Wong)", "Mrs Wong"), "Ho Mei (Mrs Wong), HO-MEI (MRS WONG), Mrs Wong", "T01, T01, T02")
     all_where(a_names("Mr Dr Goh Bo", "Ms Goh Li"), "Mr. Dr. Goh, Dr Goh, Mr Goh, Ms Goh", "T01, T01, T01, T02")
-    all_where(a_names("Mr Goh Bo", "Dr Goh Li"), "Mr Dr Goh", "T01 or T02"); apart(a_names("Mdm Lim May Jun"), "Mdm Lim May\tJun 3", "T01\tJun 3", "T01 May\tJun 3"); apart(a_names(LIM), "Mdm May 3", "T01 3", "Mdm May 3")
+    all_where(a_names("Mr Goh Bo", "Dr Goh Li"), "Mr Dr Goh", "T01 or T02"); all_where(a_names("Mdm Lim May Jun"), "Mdm Lim May\tJun 3", "T01\tJun 3"); apart(a_names(LIM), "Mdm May 3", "T01 3", "Mdm May 3")
     N = a_names("Ms Rose", "Ms Lim May"); apart(N, "Ms May 3, Ms Rose, Ms May", "T01 3, T02, T01", "Ms May 3, T02, T01")
     all_where(a_names(LIM), "Mdm may Lim, mdm may Lim comes", "T01, T01 comes")
     apart(a_names("Ms Tan Wei Ling"), "Ms Tan\tWei 3A", "T01\tT01 3A", "T01\tWei 3A")
@@ -876,7 +876,7 @@ def a_titled_run_goes_through_spaces_and_tight_joins_only():
     all_where(N, "Ms Wong Faith Kai, Ms Faith-Wong Kai, Ms Wong.Kai", "T04, T04, T04")
     N = a_names(TAN, "Ms Tan Wei", students=[("K1", "Wei Bo"), ("K2", "Tan Wei Jie")])
     all_where(N, "(Ms Tan) Wei Bo, Ms Tan* Wei Bo, Ms Tan, Wei Bo", "(T01 or T02) a student, T01 or T02* a student, T01 or T02, a student")
-    all_where(N, "Ms Tan (Wei Bo), Ms Tan (Wei) Bo", "T01 or T02 (a student), T01 or T02 a student")
+    all_where(N, "Ms Tan (Wei Bo), Ms Tan (Wei) Bo", "T01 or T02 (a student), T01 Bo")
     all_where(N, "Ms Tan Wei Bo, Ms Tan Wei Ling Bo, Ms Tan Wei Jie", "T01 Bo, T02 Bo, T01 Jie")
     N = a_names("Miss Rao Umi Farid", "Miss Rao Bo", "Mr Koh Cai", students=[("K1", "Koh Umi")])                     # what is given back is weighed: the pick that hides more
     all_where(N, 'Miss Rao Umi Koh Cai; Miss Rao Umi "Koh Cai"; Miss Rao Umi Koh', 'T02 T03; T02 "T03"; T01 or T02 a student')
@@ -888,7 +888,7 @@ def a_titled_run_goes_through_spaces_and_tight_joins_only():
 def the_same_teachers_whole_name_holds_the_run():
     """through one comma or a bracket that closes in it, in its cell, when no other pick hides more words"""
     N = a_names("Ms Grace Lim", TAN, students=[("K1", "Grace Ho"), ("K2", "Ling Bo")])
-    for w in ("list", "app"): same(N.out("Ms Lim, Grace: Ms Lim (Grace); Ms Lim (Grace) Ho", w), "T01: T01; T01 a student")
+    for w in ("list", "app"): same(N.out("Ms Lim, Grace: Ms Lim (Grace); Ms Lim (Grace) Ho", w), "T01: T01; T01 Ho")
     all_where(N, "Ms Lim, Grace Ho; Ms Lim (Grace Ho); Ms Tan Wei (Ling Bo)", "T01, a student; T01 (a student); T02 (a student)"); apart(N, "Ms Tan, Wei (Ling Bo)", "T02, T02 (a student)", "T02, Wei (a student)")
     all_where(N, "Ms Tan (Wei Ling), Ms Tan Wei (Ling) is in, Ms Tan* Wei Ling, Ms Tan¹ Wei Ling", "T02, T02 is in, T02, T02")
     all_where(a_names("Ms Lim Grace Ho", students=[("K1", "Ho Bo")]), "Ms Lim (Grace Ho) Bo", "T01 Bo")              # as many words either way: the teacher's whole name
@@ -901,7 +901,7 @@ def a_titled_name_stays_on_its_line_and_in_its_cell():
     N = a_names("Miss Chloe Wong", "Mr Wong Jun Ming", TAN, "Mr Tan Kai"); chloe, wong, tan, kai = (N.code(x) for x in ("Miss Chloe Wong", "Mr Wong Jun Ming", TAN, "Mr Tan Kai"))
     for sep in ("\n", "\t", " | ", "   ", "\r\n"):
         all_where(N, f"Miss Chloe{sep}Wong Jun Ming", f"{chloe}{sep}{wong}"); all_where(N, f"Ms Wei Ling{sep}Tan Kai", f"{tan}{sep}{kai}")
-        all_where(N, f"Miss Chloe, Wong{sep}Jun Ming; Miss Wong (Chloe{sep}Wong)", f"{chloe}, {wong}; {chloe} ({chloe})")
+        apart(N, f"Miss Chloe, Wong{sep}Jun Ming; Miss Wong (Chloe{sep}Wong)", f"{chloe}, {wong}; {chloe} ({chloe})", f"{chloe}{sep}Jun Ming; {chloe} ({chloe})")       # her whole name keeps its words
         apart(N, f"Miss Chloe{sep}Wong", f"{chloe}{sep}{chloe} or {wong}", f"{chloe}{sep}Wong")
 
 @t
@@ -933,5 +933,61 @@ def titles_over_and_over_are_quick():
         for w in WHERES:
             at = time.process_time(); N.out((x * (80000 // len(x) + 1))[:80000], w); took = time.process_time() - at
             assert took < 1, f"{took:.2f} s: {x!r} {w}"
+
+@t
+def a_name_as_it_is_stored_goes_first():
+    """with its title and its bracket, on one line and in one cell; at a title the longer of it and the titled run, itself on a tie"""
+    N = a_names(TAN, "Ms Tan Wei Ling (HOD)", 'Ms Tan "Grace" Wei Ling', "Ms Tan Wei Ling (MA)", "Dawn Tay (Cheryl)", students=[("K1", "Cheryl Jun"), ("K2", "Ivy Soh (Cheryl)")])
+    tan, hod, grace, ma, dawn = (N.code(x) for x in (TAN, "Ms Tan Wei Ling (HOD)", 'Ms Tan "Grace" Wei Ling', "Ms Tan Wei Ling (MA)", "Dawn Tay (Cheryl)"))
+    all_where(N, "Ms Tan Wei Ling (HOD), Ms Tan Wei Ling, MS TAN WEI LING (HOD)", f"{hod}, {tan}, {hod}")
+    all_where(N, 'S3 EL P1\tMs Tan Wei Ling (HOD)\tMay 3\t8.00\nS3 EL P2\tMs Tan "Grace" Wei Ling\tHall', f"S3 EL P1\t{hod}\tMay 3\t8.00\nS3 EL P2\t{grace}\tHall")
+    all_where(N, "Ms Tan Wei Ling (MA) is in", f"{ma} is in"); same(N.back(N.out("Ms Tan Wei Ling (MA) is in", "typed")), "Ms Tan Wei Ling (MA) is in")
+    for sep in ("\t", ", ", "\n", " | "):
+        all_where(N, f"Dawn Tay (Cheryl){sep}Jun 22", f"{dawn}{sep}Jun 22"); all_where(N, f"Ivy Soh (Cheryl){sep}Jun 22{sep}Hall", f"a student{sep}Jun 22{sep}Hall")
+    for w in ("list", "app"): same(N.out("Ms Tan Wei Ling\t(HOD)", w), f"{tan}\t(HOD)")                              # in one cell
+    N = a_names("Mr Low Zhi", "Mr Low Zhi Siew", "Ms Lim", "Ms Grace Lim"); zhi, siew, lim, grace = (N.code(x) for x in ("Mr Low Zhi", "Mr Low Zhi Siew", "Ms Lim", "Ms Grace Lim"))
+    apart(N, "Mr Low Zhi Siew, Mr Low Zhi, Mr Low Zhi (Siew)", f"{siew}, {zhi}, {zhi} ({siew})", f"{siew}, {zhi}, {zhi} (Siew)")
+    for w in ("list", "app"): same(N.out("Ms Lim (Grace): Ms Lim, Grace: Ms Lim Grace: Ms Grace Lim", w), f"{lim} (Grace): {lim}, Grace: {grace}: {grace}")
+    N = a_names("Foo Siew", "Mdm Foo Bee", "Mdm Foo Li"); all_where(N, "Mdm Foo (Siew), Mdm Foo", "T01, T02 or T03")      # a whole name of hers, stored with no title
+    N = a_names("Ms Tan Wei Ling [2]", TAN, "Mr Bean", students=[("K1", "Mr Bean Lim")])
+    all_where(N, "Ms Tan Wei Ling [2] (Jun 22), Ms Tan Wei Ling [2] is in", "T03 (Jun 22), T03 is in"); all_where(N, "Mr Bean Lim, Mr Bean, Bean Lim", "Mr a student, T01, a student")
+
+@t
+def a_name_that_is_taken_keeps_its_words():
+    """no whole name takes a word of a titled run, or of a titled whole name, across a cell, a line, a comma or a bracket"""
+    N = a_names("Mdm Lim May", "Ms Heng Yu Ting", "Mr Koh Art", students=[("K1", "Heng May"), ("K2", "Tan May"), ("K3", "Art Sim")])
+    for w in ("list", "app"):
+        same(N.out("Mon 3 Jun\tEnglish\tMdm Lim May\tHeng Yu\tHall", w), "Mon 3 Jun\tEnglish\tT01\tT03\tHall"); same(N.out("Mr Koh Art\tSim", w), "T02\tSim")
+        same(N.out("Mdm Lim May 3\tHeng, Mdm Lim May\tMay 3", w), "T01 3\tHeng, T01\tMay 3")                          # as it is stored; and a date in the next cell
+    N = a_names("Mdm Lim May", "Mdm Lim Hui", students=[("K2", "Tan May")])
+    for w in ("list", "app"): same(N.out("Mdm Lim May\tTan Ah Kow", w), "T02\tTan Ah Kow")
+    N = a_names("Mdm Lim May Bo", "Mdm Lim Hui", students=[("K2", "Tan May")])                                       # a run that is not a whole name keeps its last word too
+    for w in ("list", "app"): same(N.out("Mdm Lim May\tTan Ah Kow; Mdm Lim May 3", w), "T02\tTan Ah Kow; T01 or T02 May 3")
+    N = a_names("Dr Pillai Nair", "Ms Goh Bee", "Ms Goh Hui", "Miss Art Quek", "Ms May Lim", students=[("K1", "Nair Jun"), ("K2", "Bee Art")])
+    pillai, bee, quek, lim = (N.code(x) for x in ("Dr Pillai Nair", "Ms Goh Bee", "Miss Art Quek", "Ms May Lim"))
+    for w in ("list", "app"):
+        same(N.out("Dr Pillai (Nair)\tJun 22\t8.00", w), f"{pillai}\tJun 22\t8.00"); same(N.out("Ms Goh, Bee\tArt Room", w), f"{bee}\tArt Room")
+        same(N.out("Miss Art, Quek; Art Room", w), f"{quek}; Art Room"); same(N.out("Ms May (Lim)\tMay 3", w), f"{lim}\tMay 3")
+    all_where(a_names("Ms Grace Lim", students=[("K1", "Grace Ho")]), "Ms Lim, Grace Ho; Ms Lim (Grace) Ho", "T01, a student; T01 Ho")      # a whole name in spaces may
+
+@t
+def a_tight_join_has_no_space_beside_it():
+    N = a_names("Miss Wong Li", "Ms Faith Wong", students=[("K1", "Faith Bo")])
+    for a, b in ("''", "__", "‘’", ("' ", ""), ("- ", ""), ("_ ", ""), (". ", "")): all_where(N, f"Miss Wong {a}Faith Bo{b}".strip(), f"T01 {a}a student{b}".strip())
+    all_where(N, "Ms Wong-Faith, Ms Wong_Faith, Ms Wong.Faith, Ms Wong'Faith", "T02, T02, T02, T02")
+
+@t
+def the_words_outside_a_bracket_are_a_whole_name_everywhere():
+    N = a_names("Ms Grace Lim (HOD)", "Ms Lim Hui", "Mdm Lim May (HOD)", "Ms Lim Grace (EL)"); grace, may, el = N.code("Ms Grace Lim (HOD)"), N.code("Mdm Lim May (HOD)"), N.code("Ms Lim Grace (EL)")
+    for w in ("list", "app"): same(N.out("Ms Lim, Grace: Ms Lim (Grace): Ms Grace Lim: Ms Lim Grace", w), ": ".join([f"{grace} or {el}"] * 4))
+    for w in ("list", "app"): same(N.out("Mon 3 May Lim May Hall", w), f"Mon 3 May {may} Hall")                      # in its stored order
+    all_where(N, "Mdm Lim May, Mdm Lim, Ms Lim", f"{may}, {may}, {grace} or {el} or T04")
+    N = a_names("Ms Tan Wei (EL)", "Ms Tan Wei Ling", students=[("K1", "Wei Bo")]); all_where(N, "Ms Tan Wei Bo, Ms Tan Wei", "T01 Bo, T01")      # a whole name gives nothing back
+
+@t
+def a_tuple_of_any_kind_is_scrubbed_and_no_month_is_given_back():
+    import collections
+    Row = collections.namedtuple("Row", "who n"); same(a_names().scrub(Row(TAN, 3)), (a_names().code(TAN), 3))
+    N = a_names(TAN, students=[("K1", "Ling Mon"), ("K2", "Ling May")]); all_where(N, "Ms Wei Ling Mon, 3 May; Ms Wei Ling May", "T01 Mon, 3 May; T01 May")
 
 print(f"{COUNT} plan tests passed")
