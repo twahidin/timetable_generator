@@ -21,7 +21,7 @@ report, Weekly summary", "Module 1 … Ask for relief, Acknowledge, set work or 
 7, 8, 10 and 12 of `2026-11-20-relief-module-mockups.html`. Stage 3's notes: `2026-11-21-relief-stage-3-notes.md`.
 
 **Branch:** `relief-stage-4`, cut from `relief-stage-3` (d693183, PR #88), with this plan committed first. Main was merged in
-three times: 6b664d3 (Task 4b), e18d0e3 (Task 6b) and f39b518 (Task 10). Where a ruling changed the text below it is changed
+four times: 6b664d3 (Task 4b), e18d0e3 (Task 6b), and f39b518 and be22d11 (Task 10). Where a ruling changed the text below it is changed
 in place, with the ruling's number; the rulings are in `2026-11-22-relief-stage-4-notes.md`.
 
 ## Decisions taken in this plan (the lead may change any)
@@ -34,7 +34,7 @@ in place, with the ruling's number; the rulings are in `2026-11-22-relief-stage-
 2. **A link is not tied to the account's sign-in number.** Giving somebody a new right raises that number for everyone
    in a bulk change, and tying links to it would silently stop everyone's messages. Instead every press is checked
    against the person's rights at that moment; a person switched off or gone from the timetable gets nothing; moving a
-   link to another phone tells the old one; the settings page can unlink anyone.
+   link to another Telegram account tells the old one; the settings page can unlink anyone.
 3. **A message is sent once, or marked "may not have been sent".** If the app stops while a message is going out, it is
    not sent again by itself; the team sees "may not have been sent" and can press Remind.
 4. **The absence reason is in one message only: the reporting officer's**, and then only its kind (Medical, Child sick,
@@ -439,15 +439,15 @@ Task 1.
 acknowledged"), `static/relief-settings.js` (the Telegram card), `static/relief-settings.html`.
 
 - **Link card** (everyone with `relief`): not connected → nothing shown; connected, not linked → "Link Telegram" button →
-  the open-bot link, the code and "The code runs out in 15 minutes."; linked → "Linked as @handle since {date}", Unlink.
+  the open-bot link (none in practice mode: 10b), the code and "The code works once and runs out in 15 minutes."; linked → "Linked as @handle since {date}", Unlink.
 - **Today:** a row in `approved` shows `told` ("Sent {hh:mm}", "Sent {hh:mm} · not on Telegram now"; "Being sent…", read again every
   3 seconds, 5 times; "Not sent yet"; "May not have been sent: remind them"; "Could not be sent: remind them"; "Not on Telegram: they
   see it in Reliefs I'm covering"; on a past date "Not sent", "May not have been sent", "Could not be sent": 9a), a Remind button;
-  "Remind all not acknowledged" beside Approve all.
-- **Settings card** (relief.save): the token not set ("Ask the lead to add TELEGRAM_BOT_TOKEN in Railway"), practice mode
+  "Remind all not acknowledged" first of the buttons at the top, on a phone last (9d, 9f).
+- **Settings card** (relief.save): the token not set ("Not set up yet. The bot's token goes in Railway's variables …"), practice mode
   said plainly, Connect the bot / Disconnect, who is linked with Unlink, who is not linked, a line on one copy only.
 - [x] **Step 1:** Build; every text through `esc`; `node --check`.
-- [ ] **Step 2:** Browser check in practice mode on the made-up sample (controller's temporary launch entry,
+- [x] **Step 2:** Browser check in practice mode on the made-up sample (controller's temporary launch entry,
   `TELEGRAM_BOT_TOKEN=practice`, a small script posting webhook updates with the hook secret): connect, link a teacher
   with the code, approve a relief and see "Sent", press Acknowledge through the hook and see it on Today, ask to change,
   approve the new pick, remind, the not-acknowledged report, the weekly page, phone width. Screenshots of made-up data.
@@ -461,6 +461,6 @@ acknowledged"), `static/relief-settings.js` (the Telegram card), `static/relief-
 - [x] Every suite, `.venv/bin/python tests/*.py` one by one, `node tests/*.test.js`, `--full` runs alone.
 - [x] The school's real published timetable, numbers only, scratch deleted: made-up absences for the five teachers with
   the most lessons, all approved; `tell.due` time with 200 records and 60 reliefs, the sweep's time, number of messages.
-- [ ] No real staff name, the school's full name, or any token shape in the branch's commits.
+- [x] No real staff name, the school's full name, or any token shape in the branch's commits.
 - [x] Notes `docs/superpowers/plans/2026-11-22-relief-stage-4-notes.md` (rulings, checks, what exams uses: `outbox.queue`,
   and the open questions).

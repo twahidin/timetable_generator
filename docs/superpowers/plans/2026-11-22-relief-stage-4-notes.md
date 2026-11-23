@@ -1,7 +1,7 @@
 # Relief stage 4 (Telegram): notes
 
-Built 22 and 23 November 2026 on branch `relief-stage-4` (from relief-stage-3 d693183; main merged in at 6b664d3, e18d0e3 and
-f39b518), subagent-driven: a builder and a reviewer per task, a fix round where the review asked. Nothing pushed.
+Built 22 and 23 November 2026 on branch `relief-stage-4` (from relief-stage-3 d693183; main merged in at 6b664d3, e18d0e3,
+f39b518 and be22d11), subagent-driven: a builder and a reviewer per task, a fix round where the review asked. Nothing pushed.
 Plan: `2026-11-22-relief-stage-4-telegram.md`. Design: `../specs/2026-11-20-relief-module-design.md`.
 How to set it up and what leaves the server: `../../DEPLOY.md`, section 6 and "What leaves the server".
 
@@ -21,9 +21,12 @@ on its own pages. Without a token, or until Connect is pressed, nothing is sent 
 - Task 6b, main e18d0e3 merged in, and its stopped lessons followed (2935bbc, 28a2837, 6fcf1da, f7880d6, 2543470).
 - Task 7, the weekly summary, message and page (2d12600, a86dd98): `summary.py`, `static/relief-summary.js`.
 - Task 8, asking for relief with `/relief` (5b85a96, bf9a851): `asking.py`.
-- Task 9, the pages: Link Telegram, Today's lines and Remind, the settings card (dc971d4, 09f9835).
+- Task 9, the pages: Link Telegram, Today's lines and Remind, the settings card (dc971d4, 09f9835, and after the browser check 14e4af6,
+  91067dc).
 - Task 10, the finish: main f39b518 (PR #93, the AI pick hides a name written as a title) merged in without a conflict (ba1b8c6),
-  "Sent at ...: wait a few minutes." (3a7c29e), the guides (4699d48), the plan's text and these notes.
+  "Sent at ...: wait a few minutes." (3a7c29e), the guides (4699d48), the plan's text and these notes (f73c920); after its review main
+  be22d11 (PR #94, an event's teacher in charge can be changed; README.md alone conflicted) merged in (786ddea), "Last tried at ..."
+  (c3c72c8), and the guides and notes once more.
 
 ## Decisions the lead may change (the plan's 1 to 10)
 
@@ -96,7 +99,8 @@ Task 5:
 - 5a. A refusal in the app's own words takes the buttons off, with the sentence on the message; Approve keeps them when the pick has
   changed or is not free. If wrong: a message edit.
 - 5b. Somebody without the relief right is told "This button is not for you."; a request to change or to cancel is refused at the
-  press for whatever it would be refused for, whatever its reason. If wrong: copy.
+  press for whatever it would be refused for, whatever its reason; `/relief` ends a question that waits, and Acknowledge ends a
+  waiting why for the same lesson. If wrong: copy.
 - 5c. Nothing published (a publish swaps folders) keeps the buttons. If wrong: one word.
 - 5d. A typed answer that replies to another message acts on nothing; one-word non-answers are asked again; Keep it. If wrong: copy.
 - 5e. Cancelling takes a second press: a typed line never cancels an absence. If wrong: one more tap.
@@ -127,51 +131,123 @@ Tasks 7 to 10:
   messages). A lost question keeps the conversation. If wrong: copy and small behaviours.
 - 8b. The list before Send says what is set ("work set (text, 1 file)"); an edit that says the same is not answered. If wrong: copy.
 - 8c. A start without a token deletes every conversation. If wrong: half an hour of somebody's typing.
-- 9a. The 15 choices accepted (after a step here the day is read again until the teacher is told); on a past date the line says only
-  what is so. If wrong: copy.
+- 9a. The 15 choices accepted (after a step here the day is read again until the teacher is told, five times at most); on a past date
+  the line says only what is so. If wrong: copy.
 - 9b. The link code goes from the page when the person is signed out or the page is left. If wrong: small.
 - 9c. The fix round's seven choices accepted. If wrong: copy.
 - 9d. From the browser check: "Open the bot" is the main button of the card; "Remind all not acknowledged" comes first in its row and
   its place is kept, so that nothing moves under the pointer; "Nobody to remind." in place of "Reminded 0."; room on Today and the
   weekly page. If wrong: copy and layout.
 - 9e. The report says "sent 06:45 · not on Telegram now" of somebody told before and not reached any more. If wrong: copy.
+- 9f. On a phone "Remind all not acknowledged" is the last of those buttons and no place is kept for it, so nothing above it moves. If
+  wrong: layout.
 - 10a. "Sent at {at}: wait a few minutes." in place of "Reminded at ...", since it is said after the relief itself too. If wrong: copy.
 - 10b. Practice mode shows no address of a bot (the code alone); Relief settings' line on the reporting officer says when they are told.
   If wrong: copy.
+- 10c. "Last tried at {at}: wait a few minutes." when that message may have gone, waits in the queue or is on its way. If wrong: copy.
 
-## Copy the lead should see (differs from the mockups or the design, or is new)
+## Copy the lead should see
 
-- Linking: the mockup asked for the personal code ("Welcome. Send me your personal code") and named the department in the answer. Now
-  a one-time code from the app, and "Linked: {name}. You'll get your reliefs here. Send /relief to ask for relief, /stop to unlink."
-- Relief planned for you: the mockup's line had the reason ("whole day · Course"); it is left out. "{n} lessons will be covered." is
-  left out when none.
-- Cancelling: "Cancel this absence? Say why in one line, or press Keep it.", then "Cancel {days}? Your reason: {why}" with "Yes, cancel
-  it" and "Keep it", then "Cancelled. The relief team will see it." (the mockup asked once and listed who was told).
-- Acknowledge: "✅ Acknowledged 07:46." on the message itself (the mockup's "It is on your timetable for today." is stage 3b's).
-- Request to change: "Say why in one line. Until the relief team replies, this relief is still yours."; to the team "New pick:" (not
-  "AI's new pick:", since it may be the app's own order), with the day. With nobody free: "Nobody else is free then: choose someone in
-  the app."; no pick after two minutes: "No new pick yet: open the app."
-- The report: no "(25 min ago)"; "sent Mon 15:00" when it was another day, "not told yet", "not on Telegram", "sent 06:45 · not on
+In three groups: what differs from the approved mockups, what is new, and what is said when something cannot be done. What is not here is
+as in the mockups, or one of the app's own sentences said by the bot unchanged. {..} stands for a name, a day, a lesson or a number.
+
+**Changed from the mockups**
+
+On Telegram:
+- Linking: the mockup asked for the personal code ("Welcome. Send me your personal code"). Now a code from the app, and "Linked: {name}.
+  You'll get your reliefs here. Send /relief to ask for relief, /stop to unlink." (no department).
+- Relief for you: three lines more, when they apply: "No work set yet: look in Reliefs I'm covering." (nothing set), "Link: {link}",
+  "Files: {n}, sent after this message."
+- Relief planned for you: the reason is left out (the mockup: "whole day · Course"). "{n} lessons will be covered." is left out when none.
+- Acknowledge: "✅ Acknowledged 07:46." on the message itself (the mockup: "Thanks. Acknowledged at 07:46. It is on your timetable for
+  today."; the timetable is stage 3b's).
+- Request to change: "Say why in one line. Until the relief team replies, this relief is still yours." (the mockup: "Tell us why, in a
+  line."). To the team: "New pick: {name}" (the mockup: "AI's new pick"; it may be the app's own order), with the day. "The relief team has
+  moved {lesson} {periods} on {day} to someone else. You're free then." has the day too.
+- Cancelling: "Cancel this absence? Say why in one line, or press Keep it.", then "Cancel {days}? Your reason: {why}" with "Yes, cancel it"
+  and "Keep it", then "Cancelled. The relief team will see it." (the mockup asked once and listed who was told).
+- Not yet acknowledged: no "(25 min ago)"; "sent Mon 15:00" when it was another day, "not told yet", "not on Telegram", "sent 06:45 · not on
   Telegram now". It starts an hour before the first period (the mockup: from the first relief sent).
-- The all clear: "The 1 relief for today is acknowledged."; "No reliefs are waiting now: {k} started without acknowledgement."
-- The weekly summary: "· waiting {n}" when some still wait; the Flexi Adjunct line only with that role.
-- The officer: "{absent} is away on {days} ({whole day or periods}): {kind}." and "Relief is being arranged." (only when a lesson is
-  to be covered).
-- Cancelled by the app: "❌ Cancelled: {absent}'s absence on {days}. Its reliefs are no longer needed."
-- A lesson an exam or event stops: "❌ Not happening: ... You're free then." and "✔ On again: ... The relief is yours as before."
-- The relief teacher: "❌ No longer needed: ...", "The relief team has kept ... with you."
-- `/relief`: "or a photo", "Later for all the rest", "Who is your reporting officer? Type part of their name.", "Not here? Type more of
-  the name.", a list with what is set for each lesson before Send, "{officer} will be told." or "{officer} is not on Telegram: please
-  tell them yourself." (the mockup: "has been told"), "Your request for relief was not sent. Send /relief to start again.", "That was
-  not attached to any lesson: add it in the app."
-- Codes: BAD_CODE, "Please delete your message now." when Telegram did not delete it, TAKEN ("This Telegram was linked to someone else
-  before. Their relief messages no longer come here."), STOPPED, MOVED_LINK, NOT_LINKED.
-- Today: "Sent 07:20", "Sent 07:20 · not on Telegram now", "Being sent…", "Not sent yet", "May not have been sent: remind them",
-  "Could not be sent: remind them", "Not on Telegram: they see it in Reliefs I'm covering", and on a past date "Not sent", "May not
-  have been sent", "Could not be sent". Remind: "Reminded.", "Reminded {n}.", "Sent at {hh:mm}: wait a few minutes.", "Nobody to
-  remind.", "Not on Telegram."
-- Relief settings: the card has no "Print code slips" (the mockup did): codes are not used for linking. The reporting officer "Is told
-  on Telegram, when they have linked it, when someone who names them asks for relief."
+- All clear: "The 1 relief for today is acknowledged."; "No reliefs are waiting now: {k} started without acknowledgement."
+- The week: "· waiting {n}" when some still wait; the Flexi Adjunct line only with that role.
+- `/relief`: "Tomorrow, {day}"; "From which period?" and "To which period?" (the mockup had one answer, "P1–P9"); "Work for {lesson}
+  {periods} on {day} ({start})? Type it, send a file or a photo, or tap Later." (the mockup: "Type it, send a file, or tap Later."); "Later
+  for all the rest"; a list to look at before **Send** (below); "✅ Sent to the relief team: {n} lessons, work set for 2." or "no work set
+  yet" (the mockup: "work set for both"), and "{officer} will be told." (the mockup: "has been told").
+
+In the app:
+- Today: an approved row says "Approved" and, under it, "Sent 07:20" (the mockup: "Sent 07:20 · not acknowledged (25 min)").
+- What's in: "asked on Telegram" (the mockup: "himself · Telegram").
+- Weekly summary: three lines more ("Arranged: {a} planned ahead · {b} on the day", "Acknowledged: {x} on time · {y} late · {z} never · {w}
+  waiting", "Asked to change: {n} ({m} moved, {k} kept)"), "By department of the absent teacher" and "Most relief this week" (the mockup has
+  them in the message alone), "Counted in periods; absences and requests to change are counted one by one. A lesson stopped by an exam or
+  event is left out.", "No relief this week.", "Week of {day}" while a week is read, and ‹, › and "This week" (the mockup: a list of weeks).
+- Relief settings: "Connected as @{bot} since {day}: {address}", "{n} of {people} linked", and the lists "Not linked ({n})" and "Linked
+  ({n})" with Unlink (the mockup: "Bot connected · 84 of 96 teachers linked · who isn't linked · Print code slips"). No code slips: codes are
+  not used for linking. The reporting officer "Is told on Telegram, when they have linked it, when someone who names them asks for relief."
+
+**New**
+
+On Telegram:
+- To the reporting officer: "{absent} is away on {days} ({whole day or periods}): {kind}." and, when a lesson is to be covered, "Relief is
+  being arranged."
+- To the relief teacher: "❌ No longer needed: {lesson} {periods} ({start}) on {day}. You're free then."; "The relief team has kept {lesson}
+  {periods} on {day} with you."; for a lesson an exam or event stops "❌ Not happening: {lesson} {periods} ({start}) on {day}: {why}. You're
+  free then." and "✔ On again: {lesson} {periods} ({start}) on {day}. The relief is yours as before."
+- To the team, the planner and whoever was told: "❌ Cancelled by {by}: {absent}'s absence on {days}. Its reliefs are no longer needed."; when
+  the app did it, "❌ Cancelled: ...".
+- To the team, on a request to change: "Nobody else is free then: choose someone in the app."; "No new pick yet: open the app."
+- On the message a button was on: "✅ Approved: {name}, 07:46.", "↩ Asked to change 07:31.", "❌ Cancelled 08:10."; after Remind them again
+  "Reminded {n}."
+- Linking: "Unlinked. Your relief messages stop here. To link again, open Relief in the school's app and press Link Telegram."; "Your relief
+  messages now go to another Telegram. If this was not you, tell the relief team."; "This Telegram was linked to someone else before. Their
+  relief messages no longer come here."
+- The bot's menu: "Ask for relief", "Unlink this Telegram", "What this bot does".
+- `/relief`: "Which days? Tick them, then press Done."; "Which day?"; "Say why in one line." (for Other); "Who is your reporting officer?
+  Type part of their name."; "Who is your reporting officer?" over the names found, with "Not here? Type more of the name."; the list:
+  "Relief for {days} · {whole day or periods}", "Reason: {kind}", "Reporting officer: {name}", a line for each lesson with "work set (text,
+  1 file)" or "no work yet", "and {n} more", and **Send** / **Start again**.
+- A very long message ends with "…and more in the app."
+
+In the app:
+- My absences: "Get your reliefs and reminders on your own Telegram.", **Link Telegram**, "1. Open the bot", "2. Press Start there.", "Or send
+  this code to @{bot}: {code}", "The code works once and runs out in 15 minutes.", "That code has run out.", **Get a new code**, "Linked as
+  @{name} since {day}." or "Linked since {day}.", **Unlink**, "Stop relief messages to this Telegram?" with **Keep it**.
+- Today: "Sent 07:20 · not on Telegram now", "Being sent…", "Not sent yet", "Not on Telegram: they see it in Reliefs I'm covering"; **Remind**
+  ("Reminded.") and **Remind all not acknowledged** ("Reminded {n}."; nothing of the number when nobody was, only why).
+- Relief settings: "Not set up yet. The bot's token goes in Railway's variables (TELEGRAM_BOT_TOKEN) of the copy the school uses; then come
+  back here and press Connect. How to make the bot is in docs/DEPLOY.md."; "The token is set. Connect points Telegram at this copy of the
+  app."; "The bot works on one copy of the app only. Connect it on the copy the school uses."; "Practice mode: nothing is sent to Telegram.";
+  **Connect the bot**, **Connect again**, "Connected."; **Disconnect**, "Disconnect? Nobody gets messages until it is connected again.";
+  "Stop relief messages to {name}?"; "Nobody." in an empty list.
+- History: "Telegram" as the way; "Telegram linked", "Telegram linked (moved from another Telegram)", "Telegram unlinked", "Telegram unlinked
+  for {name}", "Telegram unlinked for {name}: the same Telegram is now {name}'s", "Telegram connected (@{bot})", "Telegram disconnected",
+  "Reminded {n} relief teachers on {day}".
+
+**Said when something cannot be done**
+
+On Telegram:
+- Linking: "This Telegram is not linked. Open Relief in the school's app, press Link Telegram and follow the link there."; "That code is not
+  right or has run out. Get a new one in the app. If it was your personal code, do not send it here: it opens the app. I have deleted your
+  message." (or "Please delete your message now." when Telegram did not delete it).
+- A button: "This button is not for you."; "This button is no longer active."; "Something went wrong. Try again in the app."
+- A typed answer: "Answer the question I asked last."; "Nothing was changed." (after Keep it or /cancel).
+- `/relief`: "Please press one of the buttons."; "Send text, a file or a photo."; "Tick at least one day."; "There are no school days coming
+  up in the calendar."; "Nobody on the staff list matches that. Type part of their name."; "{file}: {why}" for a file the app refuses; "{name}
+  could not be attached: add it in the app."; "That was not attached to any lesson: add it in the app."; "{officer} is not on Telegram: please
+  tell them yourself."; "Cancelled: nothing was sent."; "Your request for relief was not sent. Send /relief to start again."
+- Remind them again: "Nobody to remind."; "Not on Telegram."; "Sent at {hh:mm}: wait a few minutes." (the last message of that relief went);
+  "Last tried at {hh:mm}: wait a few minutes." (it may have, or waits, or is on its way).
+
+In the app:
+- Today: "May not have been sent: remind them"; "Could not be sent: remind them"; on a past date "Not sent", "May not have been sent", "Could
+  not be sent"; Remind's answers as on Telegram; "Telegram is not connected yet."; "Telegram could not be reached just now. Try again."
+- My absences: "Telegram is not connected yet."; "Something went wrong. Try again."; "Please sign in again."
+- Relief settings: "Set SECRET_KEY in Railway variables first: the bot needs it."; "Telegram needs a secure address: open the app at its https
+  address and press Connect there."; "Telegram did not answer, or did not accept the bot. Check TELEGRAM_BOT_TOKEN in Railway variables and
+  try again."; "Add the bot's token in Railway variables first (TELEGRAM_BOT_TOKEN)."; "Disconnected here, but Telegram did not answer. The
+  app reads and sends nothing now."; "That person has no Telegram linked."; "Could not reach the server. Check the connection and try
+  again."; "Sign in again (opens a new tab), then try once more."
 
 ## Meeting exams
 
@@ -186,6 +262,11 @@ Tasks 7 to 10:
   CANCELLED when it is withdrawn ("Cancelled:", nobody named). A backup the teacher's own absence took over is not told as cancelled:
   its reliefs went with it, and their messages too (they are keyed by teacher and lesson).
 - A lesson stopped when its absence was sent stays needed (PR #92), so it is picked, approved and told once the exam is withdrawn.
+- PR #94 (main be22d11): the committee may give an event to another teacher in charge, and the backup's `by` changes with it. Checked on the
+  made-up sample: PLANNED is not sent again (its key is the absence's), and names whoever was in charge when it was made; a cancel later
+  tells the one in charge at that moment, not the one before (unless they are on the team, or were told of the absence); the reminder, the
+  relief and what is told of it go on as they were; the one before can no longer cancel it. Nobody is told of the change itself. When the
+  teacher in charge was going themself, they were not told PLANNED; they are once somebody else is in charge.
 
 ## What exams may use
 
@@ -215,8 +296,12 @@ Tasks 7 to 10:
   `test_signin` 24, `test_sync` 32, `test_teachers` 9, `test_typed` 33, `test_venues` 4, `test_verify` 56, `test_versions` 44.
   Right after the merge of main the first seven passed too (`test_relief_telegram` 289 then). After Task 9's second fix round
   `test_relief_telegram`, `test_relief_team`, `test_routes` and `smoke` passed again, with the same numbers.
+- After Task 10's fix round (main be22d11 in, the reminder's two sentences, the guides), again one at a time, all passing:
+  `test_relief_telegram` 291, `test_relief_team` 74, `test_relief_requests` 59, `test_relief` 42, `test_exams_relief` 102,
+  `test_exams` 193, `test_routes` 19, `test_accounts` 13, `test_history` 27, `smoke` 102, and every `tests/*.test.js`. The two
+  slow runs below that failed were not run again: the Mac's load stayed above 8.
 - Every `tests/*.test.js` passes (ask 12, board 67, choices 13, classview 18, draft 25, exams, grid 14, groups 33, map 26, parents 46,
-  people 31, relief_inbox 3, relief_settings 22, relief_summary 11, relief_telegram 36, relief_today 39, split 189, subjectview 15,
+  people 31, relief_inbox 3, relief_settings 22, relief_summary 11, relief_telegram 36, relief_today 40, split 189, subjectview 15,
   sync 17, teacherview 8, timetable_page 7, venueview 24).
 - The slow runs, each alone: `smoke --full` 103, `test_combined --full` 39, `test_fixes --full` 67, all passing. `test_typed
   --full` and `test_helper --full` failed as they are, while other work kept the Mac's load at 10 to 33: their 30-second solve
@@ -229,7 +314,7 @@ Tasks 7 to 10:
   or shown to make no difference): Task 2: 50 of 51, 17 of 19, 22 of 24. Task 3: 97 of 106, 20 of 21, 61 of 65. Task 4: 117 of 140, 30
   of 32, 16 of 16, 56 of 60. Task 4b: 35 of 38, 13 of 14. Task 5: 78 of 81, 15 of 15, 47 of 48, 9 of 9, 35 of 38. Task 6: 106 of 117,
   21 of 21, 46 of 51. Task 6b: 36 of 36, 14 of 14, 31 of 31. Task 7: 91 of 92; then the page 35 of 41 and the server 9 of 10. Task 8:
-  136 of 144, 60 of 61. Task 9: 492 of 529 and 14 of 14, then 184 of 206, then 66 of 68.
+  136 of 144, 60 of 61. Task 9: 492 of 529 and 14 of 14, then 184 of 206, then 66 of 68. Task 10: 12 of 12.
 - Random and killed runs: the sender killed at each of its steps for six kinds of answers (258 kills) and by a real kill signal (75
   kills, about 400 messages each round): never a message or a file twice. `/relief`: 10,100 random steps one at a time and 1,540 rounds
   of 3 to 8 things at once, with the lock and, as for two copies of the app, without: never two absences, two entries or two "Sent";
@@ -249,13 +334,22 @@ Tasks 7 to 10:
   again ("Reminded 2."), both acknowledged, the all clear at 07:20 ("All 3 reliefs for today are acknowledged."), the weekly page right
   (9 periods, 1 absence, 1 asked, 1 moved); the typed reason in no message and not in `telegram.db`; no error. It found that "Reminded
   at" was said after the relief itself (Ruling 10a).
-- The browser check: (controller fills in)
+- The browser check (practice mode, the made-up sample, real clicks, 1280 px and phone width 375): the settings card (the practice line,
+  Connect, "Connected as ...", the counts, what is typed in the form kept, the Not linked and Linked lists, Unlink with its question and the
+  list staying open, Disconnect's question with the focus on Keep it, Escape); the link card (not linked, the code, linked by itself within 5
+  seconds, Unlink's question, Escape; the code gone after Sign out and Back); `/relief` on a practice phone (a typed reason, an officer by
+  name, text, a photo, Same as before, the list with "work set (text, 1 file)", Send); Today (Approve all, "Not sent yet" then "Sent 06:45"
+  by itself, Remind too soon, after five minutes "Reminded.", "Being sent…" and "Sent 06:52" by itself, Remind all with its reasons, "Sent
+  06:45 · not on Telegram now" after Unlink, with no Remind there); Acknowledge, Request to change and Approve on Telegram; What's in "asked
+  on Telegram"; the weekly page. No sideways scroll at phone width on any. What it found (9d to 9f: the main button of the link card, the
+  place of Remind all, "Reminded 0.", room on Today and the weekly page, the practice link, the officer's line) is in 14e4af6 and 91067dc,
+  and Today and the weekly page were looked at again after it at both widths.
 
 ## Known limits
 
 Messages and the queue:
-- "Sent at {hh:mm}: wait a few minutes." also counts a message that still waits in the queue (Telegram down): it was asked for at that
-  time, not sent yet.
+- A report or an all clear that is 30 minutes late (Telegram down, a long pause) is dropped, never sent late. A new pick after the one
+  the team was asked about goes to the team once more; a third is seen in the app alone.
 - Two copies of the app and a wait for a retry: never a duplicate, but one copy may wait longer. Buttons that ran out stay in the store
   until the next start.
 - While a revoked token is still in Railway, what was due is refused and counts as failed, not as waiting (the guide says to Disconnect
@@ -281,17 +375,17 @@ The report, the all clear and the week:
 - Main logs an error per sweep for one damaged duty; the weekly part logs an unreadable file each minute while it holds the summary
   back (a day at most).
 - `weekly_last` is one number: a server clock that ran years ahead for a minute would keep the summaries quiet until then.
-- Today reads every relief message that is kept (400 days; 12,000 rows took about 0.1 s). The small rows that mark a report or a started
-  relief are never deleted.
+- Each sweep (after a save, and every minute) reads every absence file. Today reads every relief message that is kept (400 days; 12,000
+  rows took about 0.1 s). The small rows that mark a report or a started relief are never deleted.
 
 Presses and typing:
 - What a request to change or a cancel is refused for is asked in two places (at the press and when it is done). A fault in a malformed
   record is shown as the page shows it. An acknowledgement on the page in the same second as a press is not "since".
 - A press whose app stops before the save is lost: press again. A cancel waits for the exams lock, as the page's does.
 - `/relief`: two messages meant for one lesson go to two lessons (the list says what is set; Start again is the way back); whatever is
-  typed at a work question is the work, a personal code too, and the relief teacher gets it; Send fetches files inside the request; an
-  album is noted before its "not attached" is queued; a list redrawn as Send is pressed may show its buttons again (they are no longer
-  active).
+  typed at a work question is the work, a personal code too, and the relief teacher gets it (typed as a why to change, the relief
+  team); Send fetches files inside the request; an album is noted before its "not attached" is queued; a list redrawn as Send is pressed
+  may show its buttons again (they are no longer active).
 - A second copy without a token would delete the first one's conversations if they shared a volume (they do not).
 
 The pages:
@@ -299,6 +393,7 @@ The pages:
   visibility handler (no way found for it to matter).
 - Another person signed in in a second tab: the first tab then shows the second person's link (page-wide, older than this stage).
 - A code asked for in a second tab ends the first tab's; Cancel only closes the card, and the code stays good until it runs out.
+- "Planned by {name}" in PLANNED is whoever was in charge when it was made (PR #94).
 - Remind on a lesson that is over answers "Nobody to remind."; the app has no dark mode to follow.
 - "Open the full summary" and "Open in the app" go through the sign-in page when nobody is signed in, and do not come back to the tab.
 
@@ -334,7 +429,8 @@ In order, on the service the school uses, with the lead and one or two people wh
    with its answer); `/stop`; link again. On a phone: coming back from Telegram to the app's page, does the card say linked by itself?
 4. Plan relief for one of them and approve it: the message, its files, **Acknowledge**, the line on the message. Press it twice.
    **Request to change**: the line opened for the answer, a plain answer, an answer that replies to another message. Cancelling: both
-   presses.
+   presses. The absences are real records: use lessons still to come, name each other as reporting officer, and cancel the absences
+   afterwards (the linked relief team and officer get those messages).
 5. `/relief`: a link as work (does its preview arrive as an edit, and is it left unanswered?), an album of photos (its later files), a
    forwarded file, a PDF near 10 MB, a photo. Then What's in: "asked on Telegram", and the files on their lessons.
 6. Block the bot, then approve a relief for that person: they are unlinked, and Today says "Not on Telegram: they see it in Reliefs I'm
