@@ -32,8 +32,8 @@ PW_HASH = PW.hash_pw(secrets.token_hex(8))   # a password session ends when its 
 RECORDS = {HAL: dict(group="hod", depts=["SC", "MA"], username="hal.ong", pw=PW_HASH),
            RIA: dict(extras=dict(relief=True, exams=None, admin=False)),
            ELI: dict(extras=dict(relief=False, exams=TOMORROW, admin=False)),
-           CORA: dict(group="committee", added=True, username="cora.lim", pw=PW_HASH),
-           ADA: dict(group="committee", added=True, username="ada.koh", pw=PW_HASH, extras=dict(relief=False, exams=None, admin=True)),
+           CORA: dict(group="executive", added=True, username="cora.lim", pw=PW_HASH, extras=dict(timetable=True, relief=False, exams=None, admin=False)),
+           ADA: dict(group="committee", added=True, username="ada.koh", pw=PW_HASH, extras=dict(relief=False, exams=None, admin=True)),   # the old shape: still an admin
            LEE: dict(group="leader", added=True, username="lee.chua", pw=PW_HASH),
            EVE: dict(group="executive", added=True),
            MAX: dict(group="teacher", added=True, extras=dict(relief=False, exams=YESTERDAY, admin=False))}
@@ -162,6 +162,7 @@ GUARDS = {
     "admin_people": ('admin',),
     "admin_person": ('admin',),
     "admin_reset": ('admin',),
+    "admin_remove": ('admin',),
     "admin_shared_off": ('admin',),
     "admin_students": ('admin',),
     "admin_ways": ('admin',),
@@ -425,7 +426,7 @@ PLAN_ENDPOINTS = ("plan_web.page", "plan_web.start", "plan_web.talks", "plan_web
 
 # every admin API route: the Admin extra (a committee member signed in with their password); the first admin: the committee; the
 # admin page: an admin, or the committee (sent to the first admin while there is none, else told it is an admin's)
-ADMIN_ENDPOINTS = ("admin_people", "admin_person", "admin_bulk", "admin_reset", "admin_ways", "admin_shared_off", "admin_students")
+ADMIN_ENDPOINTS = ("admin_people", "admin_person", "admin_bulk", "admin_reset", "admin_remove", "admin_ways", "admin_shared_off", "admin_students")
 
 @t
 def the_guards_are_the_brief_s_table():
@@ -460,8 +461,8 @@ def the_known_rights_are_every_right_the_table_gives():
     seen = set()
     for shared in R._SHARED: seen |= R.rights(None, "shared", shared)
     seen |= R.rights(None, "personal")
-    for group, via, relief, exams, admin in itertools.product(P.GROUPS, ("code", "password"), (False, True), (None, TOMORROW), (False, True)):
-        seen |= R.rights(dict(group=group, extras=dict(relief=relief, exams=exams, admin=admin)), via)
+    for group, via, timetable, relief, exams, admin in itertools.product(P.GROUPS, ("code", "password"), (False, True), (False, True), (None, TOMORROW), (False, True)):
+        seen |= R.rights(dict(group=group, extras=dict(timetable=timetable, relief=relief, exams=exams, admin=admin)), via)
     assert seen == A.RIGHTS, (sorted(seen ^ A.RIGHTS))
 
 @t
@@ -584,7 +585,7 @@ def status_says_who_is_signed_in():
     assert (j["role"], j["who"], j["via"], j["depts"], j["shared"]) == ("head", None, "shared", None, "head") and j["group"] is None, j
     j = client(person(ADA, "password")).get("/api/status").get_json()
     assert (j["role"], j["who"], j["via"], j["depts"], j["shared"]) == ("committee", ADA, "password", None, None) and "codes" in j and "draft" in j, j
-    assert j["group"] == "Timetable committee", j
+    assert j["group"] == "Executive · Timetable committee, Admin", j           # her role (added by name: Executive), then her committees, Admin last
     j = client(dict(role="committee")).get("/api/status").get_json()
     assert (j["role"], j["who"], j["shared"], j["admin_exists"]) == ("committee", None, "committee", True) and j["rights"] == sorted(KINDS["shared committee"][1]), j
     P.update(lambda d: d["people"][ADA]["extras"].update(admin=False))

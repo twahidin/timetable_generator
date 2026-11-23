@@ -124,6 +124,9 @@ The AI calls
     real answer would have been refused. A test now pins the three numbers.
 18. The history sent to the AI stays sendable after every ending (unrun tools are answered "Stopped.", a refused or cut reply is not kept).
 19. A tool's result is compact and at most 150,000 characters; over that it is replaced by a sentence, never cut in the middle.
+19a. On the lead's word of 23 Nov 2026, when the AI company refuses a request (a 4xx answer) the log also holds its own short reason (at most 300
+    characters, anything in quotes taken out), because the first real call on the live site was refused and the log could not say why. Nothing of a
+    talk is logged, as before. Costs: a reason that is cut or hard to read.
 
 Talks and the server
 20. The app's notes for the AI (which exam, a step taken back, a new publish) go in a message of their own just before the person's next words.

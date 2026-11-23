@@ -21,7 +21,7 @@ def secret(n=8):
 AGAIN = {"error": "Please sign in again."}
 FIRST = {"error": "Choose a new password first."}
 NO_ACCOUNTS = "Accounts need SECRET_KEY in Railway variables."
-PICK_GROUP = "Pick a group."
+PICK_GROUP = "Pick a role."
 ONLY_COMMITTEE = "Only the timetable committee can be admins."
 EXAMS_DATE = "Give the last day of the exams and events access."
 BAD_USERNAME = "A username is 3 to 40 letters, digits, dots, dashes or underscores."
@@ -60,9 +60,9 @@ RECORDS = {ALICIA: dict(group="committee", username=USERS[ALICIA], pw=PW.hash_pw
            JOSEPH: dict(group="committee", username=USERS[JOSEPH], pw=PW.hash_pw(PWS[JOSEPH])),
            PRIYA: dict(group="executive", added=True, extras=dict(NOBODY_EXTRAS, relief=True))}
 
-def publish():
+def publish(teachers=TEACHERS):
     """what store.published() reads: a fake school with the teachers, one class and one student"""
-    pub = RP.fake_pub(TEACHERS)
+    pub = RP.fake_pub(teachers)
     pub["meta"].update(published_at="1 Nov 2026, 09:00", ok=True)
     pub["model"].update(classes=[dict(name="1A", level="Sec 1")], class_ix={}, teacher_ix={}, room_ix={}, students=[dict(id="S001", name="Sam Student", cls="1A")])
     os.makedirs(store.PUB, exist_ok=True)
@@ -132,21 +132,20 @@ def t(f):
     return f
 
 ROUTES = (("GET", "/api/admin/people"), ("POST", "/api/admin/person"), ("POST", "/api/admin/bulk"), ("POST", "/api/admin/reset"),
-          ("GET", "/api/admin/ways"), ("POST", "/api/admin/shared-off"), ("GET", "/api/admin/students"))
+          ("GET", "/api/admin/ways"), ("POST", "/api/admin/shared-off"), ("GET", "/api/admin/students"), ("POST", "/api/admin/remove"))
 
 @t
 def the_people_list():
     c = admin()
     assert P.load()["migrated"] is False                                    # nothing has read the admin page yet
     r = c.get("/api/admin/people"); j = r.get_json()
-    assert r.status_code == 200 and list(j) == ["people", "departments", "groups", "hints", "moved", "me"], (r.status_code, j)
+    assert r.status_code == 200 and list(j) == ["people", "departments", "groups", "committees", "hints", "moved", "me"], (r.status_code, j)
     assert j["me"] == ALICIA and j["departments"] == DEPTS
-    assert j["groups"] == [["committee", "Timetable committee"], ["leader", "School leader"], ["hod", "HOD"], ["sh", "SH"], ["teacher", "Teacher"],
-                           ["executive", "Executive"]], j["groups"]
-    assert j["hints"] == dict(heads_on_step4=[DANIEL, MARCUS], no_google=[], heads_no_dept=[SITI]), j["hints"]   # Joseph (Hod) is committee, Siti SH already
+    assert j["groups"] == [["leader", "School leader"], ["hod", "HOD"], ["sh", "SH"], ["teacher", "Teacher"], ["executive", "Executive"]], j["groups"]
+    assert j["hints"] == dict(heads_on_step4=[DANIEL, JOSEPH, MARCUS], no_google=[], heads_no_dept=[SITI]), j["hints"]   # Joseph (Hod): committee, role Teacher; Siti SH already
     real = store.setup_record                                                # no setup saved: the published step 4 (Marcus is no SH there)
     store.setup_record = lambda: dict(spec=None, saved_at=None, ts=0, v=0)
-    try: assert c.get("/api/admin/people").get_json()["hints"]["heads_on_step4"] == [DANIEL]
+    try: assert c.get("/api/admin/people").get_json()["hints"]["heads_on_step4"] == [DANIEL, JOSEPH]
     finally: store.setup_record = real
     assert f"{FARID}: Relief team (from relief's Team list)" in j["moved"], j["moved"]                  # relief's team list moved first
     by = {p["name"]: p for p in j["people"]}
@@ -157,6 +156,8 @@ def the_people_list():
     assert by[SITI]["group"] == "sh" and by[SITI]["depts"] == [], "a head with no department ticked is shown with none (step 4 has MA)"
     assert by[DANIEL]["depts"] == ["SC"], "anyone else: step 4's departments"
     assert all("pw" not in p and "n" not in p for p in j["people"])
+    assert by[ALICIA]["strong"] is True and by[ALICIA]["gives"][-1] == {"text": "People and access: this page.", "strong": True}, by[ALICIA]["gives"]
+    assert by[RAVI]["strong"] is False and all(isinstance(g["text"], str) and isinstance(g["strong"], bool) for p in j["people"] for g in p["gives"])
     P.update(lambda d: d.update(moved=[]))                                   # nothing moved: [] and None alike
     assert c.get("/api/admin/people").get_json()["moved"] == []
     P.update(lambda d: d.update(moved=None))
@@ -170,7 +171,7 @@ def the_admin_routes_are_for_admins_only():
     before, n = raw(), len(accounts())
     for who in clients:
         for method, url in ROUTES:
-            r = who.open(url, method=method, json=dict(name=LEE, group="committee", extras=dict(admin=True), names=[LEE], action="give", extra="admin",
+            r = who.open(url, method=method, json=dict(name=LEE, group="hod", extras=dict(timetable=True, admin=True), names=[LEE], action="give", extra="admin",
                                                         preview=False, code="teacher", off=True))
             assert r.status_code == 401 and r.get_json() == AGAIN, (method, url, r.status_code, r.get_json())
         r = who.get("/admin")
@@ -186,7 +187,7 @@ def one_person_each_check_has_its_sentence():
     long = "A" * 101
     for body, want in ((dict(name=NUR, group="boss"), PICK_GROUP), (dict(name=NUR, group=None), PICK_GROUP),
                        (dict(name=NUR, extras=dict(admin=True)), ONLY_COMMITTEE), (dict(name=LEE, extras=dict(admin=True)), ONLY_COMMITTEE),
-                       (dict(name=ALICIA, group="teacher"), last_admin(ALICIA)), (dict(name=ALICIA, off=True), last_admin(ALICIA)),
+                       (dict(name=ALICIA, extras=dict(timetable=False)), last_admin(ALICIA)), (dict(name=ALICIA, off=True), last_admin(ALICIA)),
                        (dict(name=ALICIA, extras=dict(admin=False)), last_admin(ALICIA)),
                        (dict(name=ALICIA, username=None), last_admin(ALICIA)), (dict(name=ALICIA, username=""), last_admin(ALICIA)),
                        (dict(name=NUR, extras=dict(exams="")), EXAMS_DATE), (dict(name=NUR, extras=dict(exams=YESTERDAY)), EXAMS_DATE),
@@ -221,10 +222,10 @@ def one_person_changes_each_write_one_entry_and_sign_them_out_when_they_lessen()
     assert went(dan.get("/timetable"), "/login") and "who" not in kept(dan), "a group change signs them out everywhere"
     j, e = change(name=DANIEL, depts=[" SC", "MA", "SC"])
     assert j["depts"] == ["SC", "MA"] and e["what"] == "depts" and e["changes"] == [dict(name=DANIEL, field="depts", was=["SC"], now=["SC", "MA"])], e
-    assert c.get("/api/admin/people").get_json()["hints"]["heads_on_step4"] == [MARCUS]
+    assert c.get("/api/admin/people").get_json()["hints"]["heads_on_step4"] == [JOSEPH, MARCUS]
     n0 = rec(RAVI)["n"]
     j, e = change(name=RAVI, extras=dict(relief=True))
-    assert j["extras"] == dict(relief=True, exams=RAVI_UNTIL, admin=False) and e["what"] == "extras" and rec(RAVI)["n"] == n0 + 1
+    assert j["extras"] == dict(timetable=False, relief=True, exams=RAVI_UNTIL, admin=False) and e["what"] == "extras" and rec(RAVI)["n"] == n0 + 1
     assert e["changes"] == [dict(name=RAVI, field="relief", was=False, now=True)], e
     j, e = change(name=RAVI, extras=dict(exams=None))
     assert j["extras"]["exams"] is None and e["changes"] == [dict(name=RAVI, field="exams", was=RAVI_UNTIL, now=None)]
@@ -255,18 +256,23 @@ def one_person_changes_each_write_one_entry_and_sign_them_out_when_they_lessen()
     assert c.get("/api/admin/ways").status_code == 200 and went(other.get("/home"), "/login")
     # Admin for a committee member; leaving the committee ends it, while another admin is left
     j, e = change(name=JOSEPH, extras=dict(admin=True)); assert j["extras"]["admin"] is True and P.admins(P.load()) == [ALICIA, JOSEPH]
-    j, e = change(name=JOSEPH, group="teacher")
-    assert (j["group"], j["extras"]["admin"]) == ("teacher", False) and P.admins(P.load()) == [ALICIA], j
-    assert e["changes"] == [dict(name=JOSEPH, field="group", was="committee", now="teacher"), dict(name=JOSEPH, field="admin", was=True, now=False)], e
+    j, e = change(name=JOSEPH, extras=dict(timetable=False))
+    assert (j["group"], j["extras"]["timetable"], j["extras"]["admin"]) == ("teacher", False, False) and P.admins(P.load()) == [ALICIA], j
+    assert e["what"] == "extras" and e["text"] == f"{JOSEPH}: Timetable committee taken away; Admin taken away", e
+    assert e["changes"] == [dict(name=JOSEPH, field="timetable", was=True, now=False), dict(name=JOSEPH, field="admin", was=True, now=False)], e
     code, j = post(c, "/api/admin/person", name=JOSEPH, group="hod", extras=dict(admin=True)); assert (code, j) == (400, {"error": ONLY_COMMITTEE})
-    change(name=JOSEPH, group="committee")
+    j, e = change(name=JOSEPH, extras=dict(timetable=True)); assert j["group"] == "teacher" and j["extras"]["admin"] is False, j
+    j, e = change(name=ALICIA, group="leader")                                # a role change no longer touches Admin or the tick
+    assert e["changes"] == [dict(name=ALICIA, field="group", was="teacher", now="leader")] and e["text"] == f"{ALICIA}: role Teacher → School leader", e
+    assert (j["extras"]["timetable"], j["extras"]["admin"]) == (True, True) and P.admins(P.load()) == [ALICIA], j
+    change(name=ALICIA, group="teacher")
     # an Admin who cannot sign in (no username, or no password) keeps no one in: the last admin who can is still the last
     for siti in (dict(username=None, pw=None), dict(username="siti.rahmah", pw=None)):
-        P.update(lambda d: d["people"][SITI].update(group="committee", extras=dict(NOBODY_EXTRAS, admin=True), **siti))
+        P.update(lambda d: d["people"][SITI].update(group="sh", extras=dict(NOBODY_EXTRAS, timetable=True, admin=True), **siti))
         assert P.admins(P.load()) == [ALICIA, SITI] and P.usable_admins(P.load()) == [ALICIA]
         before, n = raw(), len(accounts())
         for url, body in (("/api/admin/person", dict(name=ALICIA, extras=dict(admin=False))), ("/api/admin/person", dict(name=ALICIA, off=True)),
-                          ("/api/admin/person", dict(name=ALICIA, username=None)), ("/api/admin/person", dict(name=ALICIA, group="teacher")),
+                          ("/api/admin/person", dict(name=ALICIA, username=None)), ("/api/admin/person", dict(name=ALICIA, extras=dict(timetable=False))),
                           ("/api/admin/bulk", dict(names=[ALICIA], action="take", extra="admin", preview=False)),
                           ("/api/admin/bulk", dict(names=[MARCUS, ALICIA], action="off", preview=True))):
             assert post(c, url, **body) == (400, {"error": last_admin(ALICIA)}), (url, body, post(c, url, **body))
@@ -305,7 +311,7 @@ def ticking_four_previews_then_applies_all_in_one_entry():
     code, j = post(c, "/api/admin/bulk", names=[NUR, WEI], action="take", extra="relief", preview=True)
     assert j["lines"] == [f"{NUR} is not on the relief team.", f"{WEI} is not on the relief team."], j
     code, j = post(c, "/api/admin/bulk", names=[WEI], action="group", group="hod", preview=True)
-    assert j["lines"] == [f"{WEI} moves to the HOD group.", f"{WEI} changes the map for HU (from step 4)."], j
+    assert j["lines"] == [f"The role of {WEI} becomes HOD.", f"{WEI} changes the map for HU (from step 4)."], j
     code, j = post(c, "/api/admin/bulk", names=[NUR, WEI], action="give", extra="relief", preview=True)
     assert j["lines"] == [f"{NUR} and {WEI} join the relief team."], j
 
@@ -315,7 +321,8 @@ def ticking_several_with_the_last_admin_is_refused_whole():
     assert P.admins(P.load()) == [ALICIA]
     before, n = raw(), len(accounts())
     for body, want in ((dict(names=[MARCUS, ALICIA], action="off"), last_admin(ALICIA)),
-                       (dict(names=[NUR, ALICIA], action="group", group="teacher"), last_admin(ALICIA)),
+                       (dict(names=[NUR, ALICIA], action="take", extra="admin"), last_admin(ALICIA)),   # a role change no longer takes Admin away
+                       (dict(names=[JOSEPH, ALICIA], action="take", extra="timetable"), last_admin(ALICIA)),   # leaving the committee takes Admin with it
                        (dict(names=[ALICIA], action="take", extra="admin"), last_admin(ALICIA)),
                        (dict(names=[NUR, JOSEPH], action="give", extra="admin"), ONLY_COMMITTEE),
                        (dict(names=FOUR, action="give", extra="exams"), EXAMS_DATE), (dict(names=FOUR, action="give", extra="exams", until=YESTERDAY), EXAMS_DATE),
@@ -476,7 +483,7 @@ def the_first_admin_once_and_only_for_the_committee():
         assert went(r, "/admin"), (r.status_code, r.data[:300])
         s = kept(com); assert (s["who"], s["via"]) == ("Ms Wendy Ang", "password") and "role" not in s, s
         w = rec("Ms Wendy Ang")
-        assert (w["group"], w["extras"]["admin"], w["added"], w["username"], w["must_change"], w["off"]) == ("committee", True, True, "wendy.ang", False, False), w
+        assert (w["group"], w["extras"]["timetable"], w["extras"]["admin"], w["added"], w["username"], w["must_change"], w["off"]) == (None, True, True, True, "wendy.ang", False, False), w
         assert PW.check_pw(w["pw"], good) and P.admins(P.load()) == ["Ms Wendy Ang"]
         got = accounts(); assert len(got) == n + 1
         e = got[0]; assert (e["what"], e["people"], e["who"], e["as"]) == ("first-admin", ["Ms Wendy Ang"], None, "Shared committee code"), e
@@ -484,6 +491,18 @@ def the_first_admin_once_and_only_for_the_committee():
         assert com.get("/api/admin/people").get_json()["me"] == "Ms Wendy Ang"
         for who in (shared("committee"), signed_in(JOSEPH)):
             assert who.get("/admin/first").status_code == 404 and who.post("/admin/first", data=dict(name="X Y", username="x.y", new=good, again=good)).status_code == 404
+        assert P.admins(P.load()) == ["Ms Wendy Ang"]
+        # an HOD makes themselves the first admin: they keep their role and get the Timetable committee and Admin
+        keep = {n: json.loads(json.dumps(P.load()["people"][n])) for n in ("Ms Wendy Ang", DANIEL)}
+        P.update(lambda d: d["people"]["Ms Wendy Ang"]["extras"].update(admin=False))
+        try:
+            assert rec(DANIEL)["group"] == "hod" and rec(DANIEL)["extras"]["timetable"] is False and not rec(DANIEL)["pw"], rec(DANIEL)
+            hod, good2 = shared("committee"), secret()
+            r = hod.post("/admin/first", data=dict(name=DANIEL, username="daniel.wong", new=good2, again=good2)); assert went(r, "/admin"), (r.status_code, r.data[:300])
+            d = rec(DANIEL); assert (d["group"], d["extras"]["timetable"], d["extras"]["admin"], d["username"]) == ("hod", True, True, "daniel.wong"), d
+            assert P.admins(P.load()) == [DANIEL]
+            assert {c["field"] for c in accounts()[0]["changes"]} == {"timetable", "admin", "username"}, accounts()[0]["changes"]
+        finally: P.update(lambda d: d["people"].update(keep))
         assert P.admins(P.load()) == ["Ms Wendy Ang"]
     finally:
         P.update(lambda d: d["people"][ALICIA]["extras"].update(admin=True))
@@ -553,6 +572,106 @@ def no_password_or_code_in_the_history():
     for s in SECRETS: assert s not in text, "a secret reached the history"
     for e in accounts():
         assert not ({"pw", "password", "once"} & set(e)) and all(c["field"] not in ("pw", "password", "once", "must_change") for c in e.get("changes") or []), e
+
+@t
+def the_people_list_shows_roles_and_committees():
+    j = admin().get("/api/admin/people").get_json()
+    assert [g[0] for g in j["groups"]] == ["leader", "hod", "sh", "teacher", "executive"], j["groups"]
+    assert j["committees"] == [["timetable", "Timetable committee"], ["relief", "Relief team"], ["exams", "Exams and events"]]
+    a = next(p for p in j["people"] if p["name"] == ALICIA)
+    assert a["group"] == "teacher" and a["extras"]["timetable"] is True and a["extras"]["admin"] is True, a
+
+def as_left(name):
+    """a person's record as the tests after read it: no sign-in counts or times, and the stored committee group read as Teacher"""
+    r = {k: v for k, v in rec(name).items() if k not in ("n", "signins")}; r["group"] = r["group"] or "teacher"; return r
+
+@t
+def the_timetable_committee_is_a_tick_beside_the_role():
+    c = admin(); n0 = rec(DANIEL)["n"]; was = {x: as_left(x) for x in (DANIEL, JOSEPH)}
+    code, j = post(c, "/api/admin/person", name=DANIEL, group="hod", extras=dict(timetable=True))
+    assert code == 200 and j["group"] == "hod" and j["extras"]["timetable"] is True, (code, j)
+    assert rec(DANIEL)["n"] == n0 + 1                                             # the new tick signs them out
+    assert "Timetable committee given" in accounts()[0]["text"], accounts()[0]["text"]
+    assert post(c, "/api/admin/person", name=JOSEPH, group="hod")[0] == 200       # Joseph: stored in the committee group, now an HOD too
+    s = signed_in(JOSEPH).get("/api/status").get_json()
+    assert s["role"] == "committee" and s["depts"] is None, s                     # an HOD on the committee changes every department
+    assert "role Teacher → HOD" in accounts()[0]["text"], accounts()[0]["text"]
+    assert s["group"] == "HOD · Timetable committee", s["group"]                  # the role's label, then the committees
+    assert c.get("/api/status").get_json()["group"] == "Teacher · Timetable committee, Admin"   # Admin last
+    for x in (DANIEL, JOSEPH):                                                     # undone for the tests after
+        assert post(c, "/api/admin/person", name=x, group=was[x]["group"], depts=was[x]["depts"], extras=dict(timetable=was[x]["extras"]["timetable"]))[0] == 200
+    assert {x: as_left(x) for x in (DANIEL, JOSEPH)} == was, "Daniel and Joseph are as before, apart from being signed out"
+
+@t
+def admin_goes_with_the_timetable_committee():
+    c = admin(); was = as_left(NUR)
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(admin=True)) == (400, {"error": ONLY_COMMITTEE})
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=True, admin=True))[0] == 200
+    code, j = post(c, "/api/admin/person", name=NUR, extras=dict(timetable=False))
+    assert code == 200 and j["extras"]["timetable"] is False and j["extras"]["admin"] is False, j
+    assert {x["field"] for x in accounts()[0]["changes"]} == {"timetable", "admin"}
+    assert as_left(NUR) == was, "Nur is as before, apart from being signed out"
+
+@t
+def the_committee_is_not_a_role():
+    assert post(admin(), "/api/admin/person", name=NUR, group="committee") == (400, {"error": PICK_GROUP})
+
+@t
+def the_last_admin_keeps_the_timetable_committee():
+    c = admin()
+    others = [n for n in P.usable_admins(P.load()) if n != ALICIA]           # earlier tests left other admins: off for this test
+    P.update(lambda d: [d["people"][n].update(off=True) for n in others])
+    try:
+        assert P.usable_admins(P.load()) == [ALICIA]
+        before, n = raw(), len(accounts())
+        assert post(c, "/api/admin/person", name=ALICIA, extras=dict(timetable=False)) == (400, {"error": last_admin(ALICIA)})
+        assert raw() == before and len(accounts()) == n and rec(ALICIA)["extras"]["timetable"] is True and rec(ALICIA)["extras"]["admin"] is True
+    finally: P.update(lambda d: [d["people"][n].update(off=False) for n in others])
+
+@t
+def ticking_several_onto_the_timetable_committee():
+    c = admin()
+    code, j = post(c, "/api/admin/bulk", names=[RAVI, NUR, JOSEPH], action="give", extra="timetable")
+    assert code == 200 and j["applied"] is False and j["lines"] == [f"{RAVI} and {NUR} join the Timetable committee.", f"{JOSEPH} is on the Timetable committee already."], j
+    n = len(accounts())
+    code, j = post(c, "/api/admin/bulk", names=[RAVI, NUR, JOSEPH], action="give", extra="timetable", preview=False)
+    assert code == 200 and j["applied"] is True and len(accounts()) == n + 1 and accounts()[0]["people"] == [RAVI, NUR]
+    assert rec(RAVI)["extras"]["timetable"] and rec(RAVI)["group"] is None       # their role is untouched
+    code, j = post(c, "/api/admin/bulk", names=[RAVI, NUR, WEI], action="take", extra="timetable", preview=False)   # undone for the tests after
+    assert code == 200 and j["lines"] == [f"{RAVI} and {NUR} leave the Timetable committee.", f"{WEI} is not on the Timetable committee."], j
+    assert not rec(RAVI)["extras"]["timetable"] and not rec(NUR)["extras"]["timetable"]
+
+@t
+def taking_the_committee_from_an_admin_says_so():
+    c = admin()
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=True, admin=True))[0] == 200
+    before, n = raw(), len(accounts())
+    want = [f"{NUR} leaves the Timetable committee.", f"{NUR} stops being an admin: only the timetable committee can be admins."]
+    code, j = post(c, "/api/admin/bulk", names=[NUR], action="take", extra="timetable")
+    assert code == 200 and j == dict(lines=want, applied=False), (code, j)
+    assert raw() == before and len(accounts()) == n, "a preview changes nothing"
+    code, j = post(c, "/api/admin/bulk", names=[NUR], action="take", extra="timetable", preview=False)   # undone for the tests after
+    assert code == 200 and j == dict(lines=want, applied=True), (code, j)
+    assert (rec(NUR)["extras"]["timetable"], rec(NUR)["extras"]["admin"]) == (False, False), rec(NUR)
+    assert {(x["field"], x["was"], x["now"]) for x in accounts()[0]["changes"]} == {("timetable", True, False), ("admin", True, False)}
+
+@t
+def make_them_management_keeps_the_committee():          # Review Focus 3
+    c = admin(); was = as_left(JOSEPH)
+    assert rec(JOSEPH)["group"] in (None, "teacher") and rec(JOSEPH)["extras"]["timetable"] is True   # stored in the committee group, step 4 role HOD
+    code, j = post(c, "/api/admin/bulk", names=[JOSEPH], action="group", group="hod", preview=False)
+    assert code == 200 and j["applied"] is True and j["lines"][0] == f"The role of {JOSEPH} becomes HOD.", j
+    assert not any("admin" in x for x in j["lines"]), "a role change says nothing about Admin"
+    r = rec(JOSEPH); assert r["group"] == "hod" and r["extras"]["timetable"] is True, r
+    assert accounts()[0]["text"] == f"Set the role of {JOSEPH} to HOD", accounts()[0]["text"]
+    code, j = post(c, "/api/admin/bulk", names=[JOSEPH, NUR], action="group", group="hod")
+    assert j["lines"][0] == f"The role of {NUR} becomes HOD." and j["lines"][-1] == f"{JOSEPH} is HOD already.", j
+    code, j = post(c, "/api/admin/bulk", names=[PRIYA, GRACE], action="group", group="executive")
+    assert j["lines"] == [f"The role of {GRACE} becomes Executive.", f"{PRIYA} is Executive already."], j
+    code, j = post(c, "/api/admin/bulk", names=[NUR, GRACE], action="group", group="leader")
+    assert j["lines"] == [f"The role of {NUR} and {GRACE} becomes School leader."], j
+    assert post(c, "/api/admin/person", name=JOSEPH, group=was["group"], depts=was["depts"])[0] == 200   # undone for the tests after
+    assert as_left(JOSEPH) == was, "Joseph is as before, apart from being signed out"
 
 import putback  # noqa: E402
 def putback_admin_sentence(): return putback._ADMIN
@@ -707,5 +826,324 @@ def shared_codes_and_an_admin_s_code_never_put_back_accounts():
     assert back(shared("head"), e["id"]) == (403, {"error": "Only the timetable committee can put back someone else's change."})
     assert back(as_person(ALICIA, "code"), e["id"]) == (401, AGAIN)        # an admin's personal code opens neither the setup nor the admin page
     assert raw() == before and len(accounts()) == n and rec(PRIYA)["note"] == "not by a code"
+
+@t
+def put_back_the_timetable_committee_tick():
+    c = admin()
+    assert post(c, "/api/admin/person", name=WEI, extras=dict(timetable=True))[0] == 200 and rec(WEI)["extras"]["timetable"] is True
+    e = accounts()[0]; assert e["changes"] == [dict(name=WEI, field="timetable", was=False, now=True)], e["changes"]
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]][0]
+    assert mine["back"]["ok"] is True and mine["back"]["why"] is None, mine.get("back")
+    assert back(c, accounts()[0]["id"]) == (200, {"done": True, "text": "Put back."})
+    assert rec(WEI)["extras"]["timetable"] is False
+    assert accounts()[0]["changes"] == [dict(name=WEI, field="timetable", was=True, now=False)], accounts()[0]["changes"]
+
+@t
+def put_back_one_entry_holding_a_timetable_and_an_admin_change():
+    c = admin()
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=True, admin=True))[0] == 200
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=False))[0] == 200
+    e = accounts()[0]
+    assert {(x["field"], x["now"]) for x in e["changes"] if x["name"] == NUR} == {("timetable", False), ("admin", False)}, e["changes"]
+    assert rec(NUR)["extras"]["timetable"] is False and rec(NUR)["extras"]["admin"] is False
+    assert back(c, e["id"]) == (200, {"done": True, "text": "Put back."})
+    assert rec(NUR)["extras"]["timetable"] is True and rec(NUR)["extras"]["admin"] is True, rec(NUR)["extras"]
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=False))[0] == 200 and post(c, "/api/admin/person", name=NUR, extras=dict(admin=False))[0] == 200
+    assert rec(NUR)["extras"]["timetable"] is False and rec(NUR)["extras"]["admin"] is False
+
+OLD_GROUP = "Can't put back: this is from before roles and committees were separated. Make the change on the admin page."
+
+@t
+def an_old_committee_group_entry_is_not_put_back():
+    H.add({"kind": "account", "what": "group", "where": "Admin", "people": [GRACE], "text": f"Moved {GRACE} to the Timetable committee group",
+           "changes": [{"name": GRACE, "field": "group", "was": "teacher", "now": "committee"}], "who": ALICIA, "as": ALICIA, "via": "password"})
+    c = admin(); before, n = raw(), len(accounts())
+    e = accounts()[0]; code, j = back(c, e["id"])
+    assert code == 409 and j["error"] == "Can't put back: this is from before roles and committees were separated. Make the change on the admin page."
+    assert raw() == before and len(accounts()) == n and rec(GRACE)["group"] != "committee"
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]][0]
+    assert mine["back"]["ok"] is False and mine["back"]["why"] == OLD_GROUP, mine.get("back")
+    # out of the committee group, with Admin and a note in the same entry: refused whole, nothing written
+    P.update(lambda d: d["people"][PRIYA].update(note="mixed"))
+    m = H.add({"kind": "account", "what": "group", "where": "Admin", "people": [JOSEPH, PRIYA], "text": f"Moved {JOSEPH} to the HOD group",
+               "changes": [dict(name=JOSEPH, field="group", was="committee", now="teacher"), dict(name=JOSEPH, field="admin", was=True, now=False),
+                           dict(name=PRIYA, field="note", was="before", now="mixed")], **H.by_of(ALICIA, "password")})
+    before, n = raw(), len(accounts())
+    assert back(c, m["id"]) == (409, {"error": OLD_GROUP})
+    assert raw() == before and len(accounts()) == n and rec(PRIYA)["note"] == "mixed" and rec(JOSEPH)["extras"]["admin"] is False
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == m["id"]][0]
+    assert mine["back"]["ok"] is False and mine["back"]["why"] == OLD_GROUP, mine.get("back")
+
+@t
+def put_back_of_the_committee_given_also_takes_an_admin_given_later():
+    c = admin()
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=True))[0] == 200; given = accounts()[0]
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(admin=True))[0] == 200
+    assert back(c, given["id"]) == (200, {"done": True, "text": "Put back."})                 # the later Admin does not block it: it goes with the tick
+    assert rec(NUR)["extras"]["timetable"] is False and rec(NUR)["extras"]["admin"] is False, rec(NUR)["extras"]
+    got = {(x["name"], x["field"], x["was"], x["now"]) for x in accounts()[0]["changes"]}
+    assert accounts()[0]["what"] == "putback" and got == {(NUR, "timetable", True, False), (NUR, "admin", True, False)}, accounts()[0]["changes"]
+    assert post(c, "/api/admin/person", name=LEE, extras=dict(timetable=True))[0] == 200; given = accounts()[0]
+    assert post(c, "/api/admin/person", name=LEE, extras=dict(admin=True))[0] == 200
+    others = [n for n in P.usable_admins(P.load()) if n != LEE]                              # the other admins: off for this part
+    P.update(lambda d: [d["people"][n].update(off=True) for n in others])
+    try:
+        assert P.usable_admins(P.load()) == [LEE]
+        lc = signed_in(LEE); before, n = raw(), len(accounts())
+        assert back(lc, given["id"]) == (409, {"error": last_admin(LEE)})                     # the last-admin rule still holds
+        assert raw() == before and len(accounts()) == n and rec(LEE)["extras"]["admin"] is True
+    finally: P.update(lambda d: [d["people"][n].update(off=False) for n in others])
+    assert post(c, "/api/admin/person", name=LEE, extras=dict(timetable=False))[0] == 200     # undone for the tests after
+    assert rec(LEE)["extras"]["timetable"] is False and rec(LEE)["extras"]["admin"] is False
+
+@t
+def old_code_entries_on_an_old_shape_person_are_put_back():
+    c = admin(); OLD = "Mr Old Shape"
+    P.update(lambda d: d["people"].__setitem__(OLD, dict(added=True, group="committee", extras=dict(NOBODY_EXTRAS, admin=True, relief=True))))
+    try:
+        assert rec(OLD)["extras"]["timetable"] is True
+        for field in ("admin", "relief"):                                                    # one-change entries as the old code wrote them
+            e = H.add({"kind": "account", "what": field, "where": "Admin", "people": [OLD], "text": f"{OLD}: {field} given",
+                       "changes": [dict(name=OLD, field=field, was=False, now=True)], **H.by_of(ALICIA, "password")})
+            assert back(c, e["id"]) == (200, {"done": True, "text": "Put back."}), field
+            r = rec(OLD); assert r["extras"][field] is False and r["extras"]["timetable"] is True, (field, r)
+    finally: P.update(lambda d: d["people"].pop(OLD, None))
+
+import access  # noqa: E402
+import relief.links as RL  # noqa: E402
+
+ON_TIMETABLE_REMOVE = "{} is on the published timetable, so they cannot be removed: they would come straight back. Switch them off instead."
+def removed_text(n): return f"{n} is removed. What they changed stays in the History."
+def cant_back_removed(n): return f"Can't put back: add {n} again with Add a person."
+
+def added_with_password(c, name, username):
+    """an added person (by name) with a username and a one-time password -> (the password client, the code client)"""
+    if not any(p["name"] == name for p in c.get("/api/admin/people").get_json()["people"]):
+        assert post(c, "/api/admin/person", name=name, added=True)[0] == 200
+    code, j = post(c, "/api/admin/reset", name=name, username=username); assert code == 200, (code, j)
+    SECRETS.append(j["once"])
+    return as_person(name, via="password"), as_person(name)
+
+@t
+def remove_each_refusal_has_its_sentence():
+    c = admin()
+    n = len(accounts())
+    assert post(c, "/api/admin/remove", name="Nobody Here") == (400, {"error": not_staff("Nobody Here")})
+    assert post(c, "/api/admin/remove", name=RAVI) == (400, {"error": ON_TIMETABLE_REMOVE.format(RAVI)})
+    assert post(c, "/api/admin/remove", name=ALICIA) == (400, {"error": ON_TIMETABLE_REMOVE.format(ALICIA)})   # on the timetable comes first
+    for bad in ([], "x", dict(name=3), dict()):
+        r = c.post("/api/admin/remove", json=bad); assert r.status_code == 400 and "error" in r.get_json(), (bad, r.status_code)
+    assert post(c, "/api/admin/person", name=LEE, extras=dict(timetable=True, admin=True))[0] == 200
+    try:
+        lc = signed_in(LEE); before = raw()
+        assert post(lc, "/api/admin/remove", name=LEE) == (400, {"error": "You cannot remove yourself."})
+        assert raw() == before and LEE in P.load()["people"]
+    finally:
+        assert post(c, "/api/admin/person", name=LEE, extras=dict(timetable=False))[0] == 200
+    assert rec(LEE)["extras"]["admin"] is False and rec(LEE)["extras"]["timetable"] is False
+    assert all(x["what"] != "remove" for x in accounts()) and len(accounts()) == n + 2   # the two changes to LEE only
+
+@t
+def a_removed_person_is_gone_and_signed_out():
+    c = admin(); ZED = "Mr Zed Added"
+    pz, cz = added_with_password(c, ZED, "zed.added")
+    assert post(c, "/api/admin/person", name=ZED, note="keeps a note")[0] == 200                 # a note does not sign them out
+    assert pz.get("/api/day").status_code != 401 and cz.get("/api/day").status_code != 401
+    had = rec(ZED)
+    code, j = post(c, "/api/admin/remove", name=ZED)
+    assert (code, j) == (200, {"done": True, "text": removed_text(ZED)}), (code, j)
+    assert ZED not in P.load()["people"] and P.load()["removed"][ZED] == had["n"] + 1 >= 1
+    assert all(p["name"] != ZED for p in c.get("/api/admin/people").get_json()["people"])
+    assert pz.get("/api/day").status_code == 401 and cz.get("/api/day").status_code == 401
+    e = accounts()[0]
+    assert e["what"] == "remove" and e["text"] == f"Removed {ZED}" and e["people"] == [ZED] and e["who"] == ALICIA, e
+    assert all(s not in json.dumps(e) for s in SECRETS) and had["pw"] not in json.dumps(e) and "pw" not in json.dumps(e["changes"])
+    assert e["changes"] == [dict(name=ZED, field="removed", now=None, was=dict(role="Executive", timetable=False, relief=False, exams=None, admin=False,
+                                                                            depts=[], username="zed.added", note=had["note"], off=False))], e["changes"]
+    assert back(c, e["id"]) == (409, {"error": cant_back_removed(ZED)})
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]][0]
+    assert mine["back"]["ok"] is False and mine["back"]["why"] == cant_back_removed(ZED), mine.get("back")
+    assert post(c, "/api/admin/person", name=ZED, username="zed.again", added=True)[0] == 200     # the username was free, the name can come back
+    assert rec(ZED)["n"] >= P.load()["removed"][ZED]
+    assert cz.get("/api/day").status_code == 401                                                 # the old code cookie stays dead after they are added again
+    code, j = post(c, "/api/admin/reset", name=ZED); assert code == 200; SECRETS.append(j["once"])
+    assert pz.get("/api/day").status_code == 401                                                 # and so does the old password cookie, with a new password
+    assert as_person(ZED).get("/api/day").status_code != 401                                     # a session made now is let in
+    first = P.load()["removed"][ZED]
+    assert post(c, "/api/admin/remove", name=ZED)[0] == 200                                      # removed again: the number keeps climbing
+    assert P.load()["removed"][ZED] > first and P.load()["removed"][ZED] == rec(ZED)["n"]
+
+@t
+def a_removed_person_s_code_session_ends_with_nothing_published():
+    c = admin(); YAN = "Ms Yan Added"
+    assert post(c, "/api/admin/person", name=YAN, added=True)[0] == 200
+    cy = as_person(YAN)
+    assert cy.get("/api/day").status_code != 401
+    assert post(c, "/api/admin/remove", name=YAN)[0] == 200
+    away = store.PUB + ".away"
+    os.rename(store.PUB, away); store._cache.update(stamp=None, value=None)
+    try:
+        assert store.published() is None
+        assert cy.get("/api/day").status_code == 401 and "who" not in kept(cy)
+        fresh = as_person(YAN)                                                                    # a session with the number as it reads now
+        assert fresh.get("/api/day").status_code == 409 and kept(fresh).get("who") == YAN       # a stand-in: signed in, nothing to show
+    finally:
+        os.rename(away, store.PUB); store._cache.update(stamp=None, value=None)
+    assert store.published() is not None
+
+@t
+def removed_then_named_by_a_new_timetable():             # Review Focus 4
+    c = admin(); KAI = "Mr Kai Added"
+    assert post(c, "/api/admin/person", name=KAI, added=True, extras=dict(relief=True))[0] == 200
+    old = as_person(KAI)
+    assert old.get("/api/day").status_code != 401
+    assert post(c, "/api/admin/remove", name=KAI)[0] == 200
+    publish(TEACHERS + [dict(name=KAI, dept="HU")])
+    try:
+        p = [p for p in c.get("/api/admin/people").get_json()["people"] if p["name"] == KAI]
+        assert len(p) == 1 and p[0]["group"] == "teacher" and p[0]["staff_only"] is False, p
+        assert p[0]["extras"] == dict(timetable=False, relief=False, exams=None, admin=False), p[0]["extras"]
+        assert old.get("/api/day").status_code == 401 and "who" not in kept(old)
+        assert post(c, "/api/admin/remove", name=KAI) == (400, {"error": ON_TIMETABLE_REMOVE.format(KAI)})
+        code = access.staff_code(KAI); SECRETS.append(code)
+        new = A.app.test_client(); r = new.post("/login", data=dict(code=code))                 # a real code sign-in makes their first record
+        assert went(r, "/home"), r.status_code
+        assert KAI in P.load()["people"] and rec(KAI)["n"] == P.load()["removed"][KAI] == kept(new)["n"], (rec(KAI)["n"], kept(new))
+        assert new.get("/api/day").status_code != 401 and old.get("/api/day").status_code == 401
+    finally:
+        publish()
+    assert not any(p["name"] == KAI for p in c.get("/api/admin/people").get_json()["people"])
+
+@t
+def a_failed_telegram_unlink_removes_nothing():
+    c = admin(); MAY = "Ms May Added"
+    assert post(c, "/api/admin/person", name=MAY, added=True)[0] == 200
+    real = RL.forget
+    def broken(name): raise OSError("the link store is locked")
+    RL.forget = broken
+    try:
+        before, n, err = raw(), len(accounts()), io.StringIO()
+        with contextlib.redirect_stderr(err):
+            assert post(c, "/api/admin/remove", name=MAY) == (503, {"error": "Their Telegram chat could not be unlinked, so nothing was removed. Try again."})
+        assert err.getvalue() == "WARNING: a Telegram chat could not be unlinked (OSError)\n", err.getvalue()
+        assert raw() == before and MAY in P.load()["people"] and len(accounts()) == n
+    finally:
+        RL.forget = real
+    calls = []
+    def working(name):
+        calls.append((name, name in P.load()["people"]))
+        if len(calls) == 2: raise OSError("locked again")                                     # the second call failing does not undo the removal
+        return None
+    RL.forget = working
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err): assert post(c, "/api/admin/remove", name=MAY) == (200, {"done": True, "text": removed_text(MAY)})
+    finally: RL.forget = real
+    assert calls == [(MAY, True), (MAY, False)], calls                                       # before the record went, and once more after
+    assert err.getvalue() == "WARNING: a Telegram chat could not be unlinked after a removal (OSError)\n", err.getvalue()
+    assert MAY not in P.load()["people"] and accounts()[0]["what"] == "remove"
+
+@t
+def a_publish_naming_them_during_the_removal_refuses_it():
+    c = admin(); OLA = "Ms Ola Added"
+    assert post(c, "/api/admin/person", name=OLA, added=True)[0] == 200
+    real = RL.forget
+    def publishes(name): publish(TEACHERS + [dict(name=OLA, dept="HU")]); return real(name)   # a publish lands between the first read and the write
+    RL.forget = publishes
+    try:
+        n = len(accounts())
+        assert post(c, "/api/admin/remove", name=OLA) == (400, {"error": ON_TIMETABLE_REMOVE.format(OLA)})
+        assert OLA in P.load()["people"] and OLA not in P.load()["removed"] and len(accounts()) == n
+    finally:
+        RL.forget = real; publish()
+    assert post(c, "/api/admin/remove", name=OLA)[0] == 200
+
+@t
+def a_removed_person_cannot_link_telegram_with_nothing_published():
+    c = admin(); IDA = "Ms Ida Added"
+    assert post(c, "/api/admin/person", name=IDA, added=True, extras=dict(relief=True))[0] == 200
+    early = RL.new_code(IDA); SECRETS.append(early["code"])                                     # a link code made before the removal
+    assert RL._there(IDA) is not None
+    assert post(c, "/api/admin/remove", name=IDA)[0] == 200
+    with RL.tgdb.db(read=True) as k: assert k.execute("SELECT COUNT(*) FROM codes WHERE name=?", (IDA,)).fetchone()[0] == 0   # their codes went
+    away = store.PUB + ".away"
+    os.rename(store.PUB, away); store._cache.update(stamp=None, value=None)
+    try:
+        assert store.published() is None and RL._there(IDA) is None
+        assert RL.use(early["code"], 901, "ida") is None
+        late = RL.new_code(IDA); SECRETS.append(late["code"])                                   # a code made in the gap: refused as nobody
+        assert RL.use(late["code"], 901, "ida") is None and RL.chat_of(IDA) is None and RL.person(901) is None
+        assert RL._there(PRIYA) is not None                                                     # someone with a record is still there
+    finally:
+        os.rename(away, store.PUB); store._cache.update(stamp=None, value=None); RL.forget(IDA)
+    P.update(lambda d: d["removed"].update({"Ms Hand Built": 3}))                                # a hand-built removal, nothing published
+    os.rename(store.PUB, away); store._cache.update(stamp=None, value=None)
+    with RL.tgdb.db() as k: k.executemany("INSERT INTO links(name, chat) VALUES (?, ?)", [("Ms Hand Built", 902), ("Ms Never Here", 903)])
+    try:
+        assert RL._there("Ms Hand Built") is None and RL._there("Ms Never Here") is not None   # only a removed name is refused
+        got = RL.reachable(None)
+        assert "Ms Hand Built" not in got and got.get("Ms Never Here") == 903, got           # reachable asks the same as _there
+    finally:
+        os.rename(away, store.PUB); store._cache.update(stamp=None, value=None)
+        with RL.tgdb.db() as k: k.execute("DELETE FROM links WHERE chat IN (902, 903)")
+        P.update(lambda d: d["removed"].pop("Ms Hand Built"))
+
+@t
+def a_tick_for_someone_just_removed_says_so():           # Review Focus 5
+    c = admin(); BO = "Mr Bo Added"
+    assert post(c, "/api/admin/person", name=BO, added=True)[0] == 200
+    assert post(c, "/api/admin/remove", name=BO)[0] == 200
+    before = raw()
+    assert post(c, "/api/admin/person", name=BO, extras=dict(relief=True)) == (400, {"error": not_staff(BO)})
+    assert post(c, "/api/admin/remove", name=BO) == (400, {"error": not_staff(BO)})
+    A._note_signin(BO)                                                                          # a code sign-in that read the records before the removal
+    assert BO not in P.load()["people"] and rec(BO)["n"] == P.load()["removed"][BO]
+    assert raw() == before
+
+def removed_since(n): return f"Can't put back: {n} was removed since. Make the change on the admin page."
+
+@t
+def no_put_back_across_a_removal():
+    c = admin(); UMA = "Ms Uma Added"
+    assert post(c, "/api/admin/person", name=UMA, added=True)[0] == 200
+    assert post(c, "/api/admin/person", name=UMA, extras=dict(timetable=True, admin=True))[0] == 200
+    assert post(c, "/api/admin/person", name=UMA, extras=dict(timetable=False))[0] == 200
+    taken = accounts()[0]; assert {x["field"] for x in taken["changes"]} == {"timetable", "admin"}, taken["changes"]
+    wei = rec(WEI)["extras"]["exams"]
+    assert post(c, "/api/admin/bulk", names=[WEI, UMA], action="give", extra="exams", until=UNTIL, preview=False)[0] == 200
+    bulk = accounts()[0]; assert [x["name"] for x in bulk["changes"]] == [WEI, UMA], bulk["changes"]
+    assert post(c, "/api/admin/remove", name=UMA)[0] == 200
+    assert post(c, "/api/admin/person", name=UMA, added=True)[0] == 200                      # the same name added again
+    for e in (taken, bulk):
+        before, n = raw(), len(accounts())
+        assert back(c, e["id"]) == (409, {"error": removed_since(UMA)}), e["text"]          # refused whole, naming the removed person
+        assert raw() == before and len(accounts()) == n
+        mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == e["id"]][0]
+        assert mine["back"]["ok"] is False and mine["back"]["why"] == removed_since(UMA), mine.get("back")
+    assert rec(UMA)["extras"] == dict(timetable=False, relief=False, exams=None, admin=False), rec(UMA)["extras"]
+    assert rec(WEI)["extras"]["exams"] == UNTIL
+    assert post(c, "/api/admin/person", name=UMA, extras=dict(relief=True))[0] == 200          # a change after the adding again
+    later = accounts()[0]
+    mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == later["id"]][0]
+    assert mine["back"]["ok"] is True, mine.get("back")
+    assert back(c, later["id"]) == (200, {"done": True, "text": "Put back."}) and rec(UMA)["extras"]["relief"] is False
+    assert post(c, "/api/admin/person", name=WEI, extras=dict(exams=wei))[0] == 200            # undone for the tests after
+    assert post(c, "/api/admin/remove", name=UMA)[0] == 200
+
+@t
+def a_password_change_for_someone_just_removed_writes_nothing():
+    c = admin(); PIA = "Ms Pia Added"
+    pp, _ = added_with_password(c, PIA, "pia.added"); once = SECRETS[-1]; new = secret()
+    real, seen = A.passwords.hash_pw, {}
+    def removed_meanwhile(pw):                                                                  # the removal lands between the route's checks and its write
+        def gone(d): d["removed"][PIA] = P.record(d, PIA)["n"] + 1; d["people"].pop(PIA)
+        P.update(gone); seen["before"] = raw(); return real(pw)
+    A.passwords.hash_pw = removed_meanwhile
+    try: r = pp.post("/account/password", data=dict(current=once, new=new, again=new))
+    finally: A.passwords.hash_pw = real
+    assert "before" in seen and went(r, "/login"), r.status_code
+    assert PIA not in P.load()["people"] and raw() == seen["before"]                             # no record comes back
+    assert pp.get("/api/day").status_code == 401
+
 
 print(f"{COUNT} admin tests passed")

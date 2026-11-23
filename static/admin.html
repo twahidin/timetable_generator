@@ -64,6 +64,31 @@
 .ways .on{color:var(--ok)}.ways .stillon{color:#7a4b00}
 @media (max-width:900px){.wrap{grid-template-columns:minmax(0,1fr)}.bar button.clr{margin-left:0}}
 @media (max-width:640px){.ad{padding:12px}.filters input[type=search],.filters select{flex:1 1 140px}}
+/* roles and committees apart, Edit on every row, the panel in view */
+.ad .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.ad .linkbtn{color:var(--accent);cursor:pointer;white-space:nowrap}
+.ad .c{display:inline-block;padding:1px 7px;border-radius:6px;font-size:11.5px;font-weight:600;margin:1px 3px 1px 0;white-space:nowrap}
+.ad .c.timetable{background:#e4ddfb;color:#4b2ea8}.ad .c.relief{background:#dff3f1;color:#0b6b62}.ad .c.exams{background:#fdf0dc;color:#7a4b00}.ad .c.admin{background:#1b2330;color:#fff}
+.ad .you{font-size:11px;color:var(--muted);font-weight:500;margin-left:4px}
+.tw td{vertical-align:middle}
+.tw td .w{white-space:nowrap}
+.tw td.ed,.tw th.ed{position:sticky;right:0;width:1%;white-space:nowrap;text-align:right;padding-right:10px;z-index:1}
+.tw td.ed{background:var(--panel)}
+.tw th.ed{background:#f3f6fb}
+.tw tr.sel td.ed{background:#eaf1fe}
+#panel{position:sticky;top:76px}
+#panel h2:focus{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.side .depts{display:flex;flex-wrap:wrap;gap:2px 14px}
+.side .depts .ck2{margin:2px 0}
+.side .ck2 .w{margin-left:2px}
+.side .ck2 input:disabled+span,.side .ck2 input:disabled{opacity:.55}
+.side .can{background:#f3f6fb;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;line-height:1.55}
+.side .can ul{margin:2px 0 0 16px;padding:0}
+.side .can .mark{font-weight:700;color:#4b2ea8;margin-right:3px}
+.side .rm{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:12.5px}
+.side .rm .ask{background:var(--warn-bg);border-radius:8px;padding:8px 10px;color:var(--warn);font-weight:600;margin-bottom:6px;line-height:1.5}
+@media (min-width:901px){#panel .side{max-height:calc(100vh - 92px);overflow:auto}}
+@media (max-width:900px){#panel{position:fixed;inset:0;z-index:20;display:flex;justify-content:flex-end;background:rgba(27,35,48,.35)}#panel:empty{display:none}#panel .side{width:min(420px,100%);height:100%;overflow:auto;border-radius:0;box-shadow:0 10px 40px rgba(30,50,90,.35)}}
 </style>
 </head>
 <body>
@@ -80,6 +105,7 @@
   <nav class="tabs" id="tabs" aria-label="Admin sections"></nav>
   <div id="view"><p class="muted">Loading…</p></div>
 </main>
+<script src="/static/adminview.js"></script>
 <script src="/static/admin.js"></script>
 </body>
 </html>
