@@ -990,4 +990,228 @@ def a_tuple_of_any_kind_is_scrubbed_and_no_month_is_given_back():
     Row = collections.namedtuple("Row", "who n"); same(a_names().scrub(Row(TAN, 3)), (a_names().code(TAN), 3))
     N = a_names(TAN, students=[("K1", "Ling Mon"), ("K2", "Ling May")]); all_where(N, "Ms Wei Ling Mon, 3 May; Ms Wei Ling May", "T01 Mon, 3 May; T01 May")
 
+# ---------------------------------------------------------------- what the AI may be shown (plan/facts.py)
+import copy, json  # noqa: E402
+from plan import facts  # noqa: E402
+from exams import schedules as XS, settings as XSET, papers as P  # noqa: E402
+
+CAL = F.CAL
+def a_paper(level, subject, minutes=60, date=None, start=None, who="level", together="", paper="Paper 1", id=None, students=()):
+    return dict(id=id or secrets.token_hex(3), level=level, subject=subject, paper=paper, minutes=minutes, date=date, start=start, who=who,
+                students=list(students), together=together)
+
+def an_exam(papers=(), pub=None, access=(), **kw):
+    s = XS.new("exam", "Mid-year", ["Sec 3", "Sec 4"], "2026-10-05", "2026-10-09", "by", pub or F.sample_pub())
+    s["papers"] = list(papers); s["access"] = list(access); s.update(kw)
+    return s
+
+def xs(**kw): return dict(XSET.defaults(), **kw)
+
+def everything(x):
+    """every string and key inside a result, as one text"""
+    return json.dumps(x, ensure_ascii=False).lower()
+
+def no_private(x, pub, *more, words=("access", "extra", "pins", "made", "log")):
+    text = everything(x)
+    for s in pub["model"]["students"]:
+        assert s["id"].lower() not in text and s["name"].lower() not in text, s["id"]
+    for w in words + more:
+        assert w not in text, w
+
+@t
+def the_start_checks_say_what_is_missing():
+    pub = F.sample_pub(); x = xs(rooms={"Hall": dict(seats=100)})
+    same(facts.missing(pub, CAL, x), [])
+    r = facts.missing(pub, CAL, xs())
+    same([(m["link"], m["stops"]) for m in r], [("/exams/settings", False)])
+    r = facts.missing(None, CAL, x); same([m["stops"] for m in r], [True]); assert r[0]["link"] == "/"
+    r = facts.missing(pub, {}, x); same([m["stops"] for m in r], [True]); assert r[0]["text"] == XS.NO_CALENDAR
+    facts.missing(None, None, None); facts.missing({}, None, {})
+    pub["model"]["students"] = []
+    r = facts.missing(pub, CAL, x); same(len(r), 1); assert not r[0]["stops"] and r[0]["link"] == "/" and r[0]["text"].startswith("The published timetable has no students yet.")
+    assert "—" not in "".join(m["text"] for m in r)
+
+@t
+def an_extra_time_student_makes_a_line_hidden():
+    pub = F.sample_pub()
+    ps = [a_paper("Sec 3", "English", date="2026-10-05", start="08:00"), a_paper("Sec 3", "Mathematics", date="2026-10-05", start="09:30")]
+    plain = an_exam(ps, pub)
+    c = facts.checks(plain, pub, CAL, xs())
+    same((c["hidden"], c["unchecked"]), (0, "")); assert not c["errors"], c
+    withx = an_exam(ps, pub, access=[dict(student="3A-01", extra=100, room=True)])
+    full = P.check(withx, pub["model"], CAL)
+    assert any("same time" in e for e in full["errors"])
+    c = facts.checks(withx, pub, CAL, xs())
+    same(c["hidden"], 1); assert not c["errors"], c
+    same(c["warnings"], facts.checks(plain, pub, CAL, xs())["warnings"])
+    no_private(c, pub)
+
+@t
+def without_students_nothing_is_checked_and_nothing_is_suggested():
+    pub = F.sample_pub(); pub["model"]["students"] = []
+    s = an_exam([a_paper("Sec 3", "English", date="2026-10-05", start="08:00"), a_paper("Sec 3", "Maths", date="2026-10-05", start="08:10"),
+                 a_paper("Sec 3", "Art", id="free")], pub)
+    c = facts.checks(s, pub, CAL, xs())
+    same(c["unchecked"], "Clashes not checked: no students yet."); assert not any("same time" in e for e in c["errors"])
+    same(facts.slots(s, pub, CAL, xs(), "free"), [])
+    same(facts.checks(s, None, CAL, xs()), dict(errors=[], warnings=[], hidden=0, unchecked=facts.UNCHECKED))
+
+def _day_papers(s, d):
+    return [p for p in s["papers"] if p["date"] == d]
+
+@t
+def slots_are_inside_the_window_and_keep_every_students_rules():
+    pub = F.sample_pub(); model = pub["model"]
+    from exams import days as D
+    s = an_exam([a_paper("Sec 3", "English", date="2026-10-05", start="08:00", id="a"), a_paper("Sec 3", "Mathematics", date="2026-10-05", start="09:20", id="b"),
+                 a_paper("Sec 3", "Science", id="new", minutes=45), a_paper("Sec 4", "English", id="four", date="2026-10-06", start="08:00")], pub,
+                access=[dict(student="3A-01", extra=50, room=False)])
+    s["times"] = dict(report="07:30", min_break=20, max_papers=2)
+    before = copy.deepcopy(s)
+    got = facts.slots(s, pub, CAL, xs(), "new", limit=50)
+    same(s, before)
+    assert got and len(facts.slots(s, pub, CAL, xs(), "new")) == 3
+    days = {d["date"]: d for d in D.dates(s, CAL, model)}
+    for g in got:
+        assert re.fullmatch(r"\d\d:\d\d", g["start"]) and g["date"] in days and days[g["date"]]["day"] is not None, g
+        e = days[g["date"]]; st = D.minutes(g["start"])
+        assert e["start"] <= st and st + 45 <= e["end"], g
+        assert "Sec 3" in e["levels"]
+        assert "extra" not in g["why"].lower() and "student has" not in g["why"] and "—" not in g["why"], g
+        trial = dict(s, papers=[dict(p, date=g["date"], start=g["start"]) if p["id"] == "new" else p for p in s["papers"]])
+        c = P.check(trial, model, CAL)
+        assert not [x for x in c["errors"] + c["warnings"] if "Sec 3 Science" in x and ("same time" in x or "minutes between" in x)], (g, c)
+        assert not [x for x in c["warnings"] if " papers on " in x], (g, c)
+    assert "2026-10-11" not in {g["date"] for g in got} and "2026-10-10" not in {g["date"] for g in got}
+    # the day with the fewest papers for these students comes first
+    same(got[0]["date"], "2026-10-06")
+    no_private(got, pub)
+
+@t
+def slots_offer_nothing_for_a_paper_with_a_time_or_a_sits_with_group_with_a_time():
+    pub = F.sample_pub()
+    s = an_exam([a_paper("Sec 3", "English", date="2026-10-05", start="08:00", id="a", together="Pair"), a_paper("Sec 3", "Maths", id="b", together="Pair"),
+                 a_paper("Sec 3", "Art", id="c", date="2026-10-06"), a_paper("Sec 3", "Music", id="d", start="08:00"), a_paper("Sec 3", "Free", id="e")], pub)
+    for i in "abcd": same(facts.slots(s, pub, CAL, xs(), i), [])
+    same(facts.slots(s, pub, CAL, xs(), "nope"), [])
+    assert facts.slots(s, pub, CAL, xs(), "e")
+
+@t
+def a_start_ten_minutes_after_a_paper_is_not_offered_to_its_students():
+    pub = F.sample_pub()
+    s = an_exam([a_paper("Sec 3", "English", date="2026-10-05", start="08:00", id="a"), a_paper("Sec 4", "English", date="2026-10-05", start="09:10", id="four"),
+                 a_paper("Sec 3", "Science", id="n")], pub)
+    got = facts.slots(s, pub, CAL, xs(), "n", limit=99)
+    assert got and not [g for g in got if g["date"] == "2026-10-05" and g["start"] in ("09:10", "09:00")], got     # 09:00 touches, 09:10 is 10 minutes after
+
+@t
+def slots_never_cross_max_papers_or_the_break_even_with_extra_time():
+    pub = F.sample_pub()
+    s = an_exam([a_paper("Sec 3", "English", date="2026-10-05", start="08:00", id="a"), a_paper("Sec 3", "Science", id="n")], pub,
+                access=[dict(student="3A-01", extra=100, room=True)])
+    s["times"] = dict(report="07:30", min_break=20, max_papers=1)
+    got = facts.slots(s, pub, CAL, xs(), "n", limit=99)
+    assert got and all(g["date"] != "2026-10-05" for g in got), got
+    s["times"] = dict(report="07:30", min_break=20, max_papers=2)
+    day = [g for g in facts.slots(s, pub, CAL, xs(), "n", limit=999) if g["date"] == "2026-10-05"]
+    assert day and not [g for g in day if "08:00" <= g["start"] < "10:20"], day    # 3A-01 sits English 08:00 to 10:00, then a 20 minute break
+
+@t
+def the_checklist_follows_the_draft():
+    pub = F.sample_pub(); x = xs()
+    c = facts.checklist(None, pub, CAL, x, None)
+    same([l["key"] for l in c], ["what", "days", "papers", "suggested", "times", "people", "rooms", "numbers", "choices", "access"])
+    same(c[0]["state"], "todo"); same(c[0]["link"], "")
+    same({l["key"]: l["state"] for l in c}, dict(what="todo", days="todo", papers="todo", suggested="todo", times="todo", people="todo", rooms="todo",
+                                                 numbers="todo", choices="todo", access="form"))
+    s = an_exam([], pub); id = s["id"]
+    c = {l["key"]: l for l in facts.checklist(s, pub, CAL, x, None)}
+    same((c["what"]["state"], c["what"]["link"]), ("done", f"/exams/{id}#when")); same(c["days"]["state"], "todo"); same(c["papers"]["state"], "todo")
+    same(c["people"]["link"], "/exams/settings"); same(c["access"]["state"], "form")
+    assert all(l["title"] and "—" not in l["text"] for l in c.values())
+    s["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=True)}
+    s["papers"] = [a_paper("Sec 3", "English", id="a", date="2026-10-05", start="08:00"), a_paper("Sec 3", "Maths", id="b", date="2026-10-05", start="08:30")]
+    c = {l["key"]: l for l in facts.checklist(s, pub, CAL, x, None)}
+    same((c["papers"]["state"], c["papers"]["text"]), ("check", "2, 1 to check")); same(c["days"]["state"], "done")
+    s["papers"][1]["start"] = "10:00"
+    c = {l["key"]: l for l in facts.checklist(s, pub, CAL, x, None)}
+    same((c["papers"]["state"], c["papers"]["text"], c["suggested"]["state"]), ("done", "2", "done"))
+    s["papers"][1]["start"] = None
+    same({l["key"]: l["state"] for l in facts.checklist(s, pub, CAL, x, None)}["suggested"], "todo")
+    s["suggested"] = ["b"]
+    same({l["key"]: l["state"] for l in facts.checklist(s, pub, CAL, x, None)}["suggested"], "check")
+    x = xs(saved_at="2026-11-01T10:00:00", rooms={"Hall": dict(seats=100, hall=True)})
+    c = {l["key"]: l["state"] for l in facts.checklist(s, pub, CAL, x, None)}
+    same((c["people"], c["numbers"], c["rooms"]), ("last", "last", "last"))
+    no_private(facts.checklist(s, pub, CAL, x, None), pub, words=("pins", "made", "log"))   # its last line is named for the form
+
+@t
+def times_and_choices_say_last_only_while_they_are_the_apps_own():
+    pub = F.sample_pub(); x = xs()
+    old = an_exam([], pub, name="Old", created_at="2026-01-01T00:00:00")
+    old.update(times=dict(report="08:00", min_break=30, max_papers=3), seating=dict(order="name", shared="papers", spacing="gap", home_rooms=False))
+    s = an_exam([], pub)
+    last = facts.last_values(s, [old, s])
+    c = {l["key"]: l["state"] for l in facts.checklist(s, pub, CAL, x, last)}
+    same((c["times"], c["choices"]), ("last", "last"))
+    c = {l["key"]: l["state"] for l in facts.checklist(s, pub, CAL, x, None)}
+    same((c["times"], c["choices"]), ("done", "done"))
+    s["times"]["min_break"] = 25
+    c = {l["key"]: l["state"] for l in facts.checklist(s, pub, CAL, x, last)}
+    same((c["times"], c["choices"]), ("done", "last"))
+    s["seating"]["order"] = "name"
+    same({l["key"]: l["state"] for l in facts.checklist(s, pub, CAL, x, last)}["choices"], "done")
+
+@t
+def last_values_take_the_newest_earlier_one_of_the_same_kind():
+    pub = F.sample_pub()
+    a = an_exam([], pub, name="A", created_at="2026-02-01T00:00:00"); b = an_exam([], pub, name="B", created_at="2026-03-01T00:00:00")
+    ev = XS.new_event("Trip", ["Sec 3"], [], "2026-10-05", "2026-10-06", "by", "Ms Tan"); ev["created_at"] = "2026-05-01T00:00:00"
+    test = XS.new("test", "Quiz", ["Sec 3"], "2026-10-05", "2026-10-06", "by", pub); test["created_at"] = "2026-06-01T00:00:00"
+    me = an_exam([], pub, name="Me", created_at="2026-04-01T00:00:00"); later = an_exam([], pub, name="Later", created_at="2026-09-01T00:00:00")
+    a["access"] = [dict(student="3A-01", extra=25)]; a["papers"] = [a_paper("Sec 3", "English", who="students", students=["3A-01"])]
+    every = [a, b, ev, test, me, later]
+    got = facts.last_values(me, every)
+    same((got["name"], got["id"]), ("Later", later["id"]))
+    same(facts.last_values(me, [a, b, ev, me])["name"], "B")
+    same(facts.last_values(test, every), None); same(facts.last_values(test, [ev, me, a]), None); same(facts.last_values(me, [me, ev]), None); same(facts.last_values(me, []), None)
+    same(facts.last_values(ev, every), None)
+    same(facts.last_values(None, [a, b, ev])["name"], "B")
+    got = facts.last_values(me, [a])
+    same(sorted(got), ["id", "name", "scripts", "seating", "supervision", "times"])
+    no_private(got, pub)
+    got["times"]["report"] = "01:00"; same(a["times"]["report"], "07:30")
+
+@t
+def nothing_the_ai_is_shown_holds_a_student_or_a_private_word():
+    pub = F.sample_pub(); x = xs(rooms={"Hall": dict(seats=300, hall=True, access=True, note="n")}, chiefs=["Ms Aisha Rahman"], saved_at="2026-11-01T00:00:00")
+    s = an_exam([a_paper("Sec 3", "English", id="a", date="2026-10-05", start="08:00"), a_paper("Sec 3", "Science", id="b", who="students", students=["3A-01", "3A-02"]),
+                 a_paper("Sec 4", "English", id="c", who="groups", together="Pair")], pub,
+                access=[dict(student="3A-01", extra=25, room=True)], suggested=["b"], made=dict(duties=[dict(names=["Ms Aisha Rahman"])]),
+                pins=dict(rooms={"x": "Hall"}, duties={}), log=[dict(at="x", by="Ms Aisha Rahman", what="did")], note="a note", approved=dict(note="n"))
+    before = copy.deepcopy((s, pub, x, CAL))
+    last = facts.last_values(s, [s, an_exam([], pub, access=s["access"], made=s["made"], pins=s["pins"], log=s["log"], created_at="2026-01-01T00:00:00")])
+    results = dict(overview=facts.overview(s, pub, CAL, x), school=facts.school(pub, CAL, x), checks=facts.checks(s, pub, CAL, x),
+                   slots=facts.slots(s, pub, CAL, x, "c", limit=20), checklist=facts.checklist(s, pub, CAL, x, last), last=last,
+                   missing=facts.missing(pub, CAL, x))
+    same((s, pub, x, CAL), before)
+    for k, r in results.items(): no_private(r, pub, "a note", words=("pins", "made", "log") if k == "checklist" else ("access", "extra", "pins", "made", "log"))
+    ov = results["overview"]
+    same([p["count"] for p in ov["papers"]], [60, 2, 30])
+    assert all("students" not in p for p in ov["papers"]); same(sorted(ov["papers"][1]), sorted(ov["papers"][0]))
+    same([p["suggested"] for p in ov["papers"]], [False, True, False])
+    assert {"level": "Sec 3", "subject": "Mathematics"} in ov["no_paper"] and {"level": "Sec 3", "subject": "English"} not in ov["no_paper"]
+    same(len(ov["no_paper"]), len({(d["level"], d["subject"]) for d in ov["no_paper"]}))
+    sc = results["school"]
+    same([(l["level"], l["students"], [(c["name"], c["students"]) for c in l["classes"]]) for l in sc["levels"]],
+         [("Sec 3", 60, [("3A", 30), ("3B", 30)]), ("Sec 4", 30, [("4A", 30)])])
+    same(sc["rooms"], [dict(name="Hall", seats=300, hall=True)]); same(sc["periods"][0], dict(period=1, start="07:40", end="08:00"))
+    # no key of any result is a person's name or a student's id
+    def keys(v):
+        if isinstance(v, dict):
+            for k, w in v.items(): yield str(k); yield from keys(w)
+        elif isinstance(v, (list, tuple)):
+            for w in v: yield from keys(w)
+    ks = set(keys(results)); assert not [k for k in ks if re.search(r"\d[A-Z]-\d\d|Ms |Mr ", k)], ks
+
 print(f"{COUNT} plan tests passed")
