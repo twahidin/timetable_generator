@@ -222,12 +222,13 @@ def _unsent():
 
 
 def _admin():
-    """people: how many hold relief; not_linked: which of them have no Telegram; linked: every link, so any can be taken away; unsent: _unsent()"""
+    """people: how many hold relief; not_linked: which of them have no Telegram; linked: every link, so any can be taken away; unsent: _unsent() for the
+    relief team alone (it names who was away), else None"""
     b, got = links.connected(), links.linked()
     able = sorted(p["name"] for p in _accounts.staff(store.published()) if "relief" in _rights.rights(p, links.VIA))
     return jsonify(token_set=tg.on(), practice=tg.practice(), connected=b is not None, bot=b["username"] if b else None, base=b.get("base") if b else None,
                    at=b.get("at") if b else None, linked=[dict(name=n, handle=got[n]["handle"], at=got[n]["at"]) for n in sorted(got)],
-                   not_linked=[n for n in able if n not in got], people=len(able), unsent=_unsent())
+                   not_linked=[n for n in able if n not in got], people=len(able), unsent=_unsent() if _has("relief.team") else None)
 
 
 @bp.get("/api/relief/telegram/admin")

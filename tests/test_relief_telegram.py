@@ -7773,5 +7773,23 @@ def a_press_on_an_older_copy_leaves_one_keyboard():
         seen = watching(EVE, steps); d = asking_of(EVE)
         assert d["step"] == "list" and live(seen) == [max(seen)] == [d["question"]], seen
 
+# ---- Answers, final fix wave ----
+@t
+def the_unsent_list_is_the_relief_teams_alone():
+    with school(EVE, ROSA, TEAM):
+        at("09:00", day=13); unsent_rows(("planned:a", EVE, "planned", "failed", "2026-10-13T07:10:00+08:00"))
+        committee, cora, team = client(dict(role="committee")), who(CORA, via="password"), who(TEAM)
+        def unsent(c, method, url, body=None):
+            r = getattr(c, method)(url, json=body or {}); assert r.status_code == 200, (url, r.status_code, r.get_data(as_text=True)[:300])
+            return r.get_json()["unsent"]
+        assert client(dict(role="committee")).get("/api/relief/today").status_code == 401 and cora.get("/api/relief/today").status_code == 403, "neither may see absences"
+        for c in (committee, cora):
+            assert unsent(c, "get", ADMIN) is None, "the committee's shared code, an admin without relief: who was away is not theirs to see"
+            links.link(TIA, 501, None); assert unsent(c, "post", "/api/relief/telegram/unlink", dict(name=TIA)) is None
+            assert unsent(c, "post", "/api/relief/telegram/connect") is None and unsent(c, "post", "/api/relief/telegram/disconnect") is None
+        assert unsent(team, "get", ADMIN)["items"] == [dict(what="Relief planned", name=EVE, at="2026-10-13T07:10:00+08:00", state="failed")], "the relief team's"
+        links.link(TIA, 501, None); assert unsent(team, "post", "/api/relief/telegram/unlink", dict(name=TIA))["failed"] == 1
+        assert unsent(team, "post", "/api/relief/telegram/connect")["failed"] == 1 and unsent(team, "post", "/api/relief/telegram/disconnect")["failed"] == 1
+
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
