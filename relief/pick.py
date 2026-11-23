@@ -30,6 +30,7 @@ OFF, BUSY, FAILED = "off", "busy", "failed"     # why ask gave no answer; choose
 BAD = "bad answer"                   # an answer that failed choose_for's check
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 HONORIFICS = ("mr", "mrs", "ms", "miss", "mdm", "dr", "mx")
+WAIT = object()                      # choose_for(wait=True) when the guard is full: pick nothing now, the next run picks it
 CALL = None                          # a stand-in for the model, set by tests (ask's call= comes first)
 _log = logging.getLogger("relief.pick")
 
@@ -338,14 +339,15 @@ def _checked(answer, names, table):
     return who, reason
 
 
-def choose_for(pub, settings, records, record, x, c, call=None, without=(), links=None):
+def choose_for(pub, settings, records, record, x, c, call=None, without=(), links=None, wait=False):
     """the pick for cover c of lesson x in record: dict(who, by, reason, at), by "ai" (the model's answer, checked) or "app"
     (the first in the app's order, with APP_ORDER: no model, the guard full, a failure, or an answer that fails the check),
     or None when nobody is on the shortlist (less without: a name or names, such as the teacher who asked to change), and
     then no call is made. For an open cover (a planner's choice is already its pick) or a change request's new pick.
     Saves nothing and takes no lock; never raises for the model's sake (free_then's own errors, such as a date the
     calendar no longer has as a school day, are the caller's, as for cover.set_pick). Each fallback logs its kind (off,
-    busy, failed, bad answer) and nothing else: no data, exception text or name."""
+    busy, failed, bad answer) and nothing else: no data, exception text or name. With wait=True a full guard (BUSY) is not a
+    fallback: WAIT is returned and no pick is made, so the cover stays open for the next run (the other fallbacks are as above)."""
     staff = _accounts.listing(pub)      # every person the accounts know: the published teachers and the staff added there
     leave = {without} if isinstance(without, str) else set(without or ())
     short = [p for p in _shortlist(pub, settings, records, record, x, c, staff, links=links) if p["name"] not in leave]
@@ -358,5 +360,6 @@ def choose_for(pub, settings, records, record, x, c, call=None, without=(), link
         kind = BAD if a.get("ok") else a.get("error") or FAILED
     except Exception: got, kind = None, FAILED
     if got: return dict(who=got[0], by="ai", reason=got[1], at=_absences._now())
+    if wait and kind == BUSY: _log.info("a pick waits: the guard is full"); return WAIT
     _log.warning("pick fell back to the app's own order: %s", kind)
     return dict(who=first, by="app", reason=APP_ORDER, at=_absences._now())

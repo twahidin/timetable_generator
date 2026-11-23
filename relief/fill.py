@@ -1,6 +1,7 @@
-"""When the picks for covers are made, and making them: at once for a lesson today, at the fill time (settings times.fill_at,
-15:00) on the school day before for a later date, on "Fill now" (every open cover of a date or of some absences, due or
-not), and at once for a request to change.
+"""When the picks for covers are made, and making them: at once, as soon as the absence is in, for a lesson of any date,
+the nearest dates first, and at once for a request to change (there is no fill time; "Fill now" asks for the open covers
+of a date or of some absences). When the model's guard (pick.GUARD_N picks in GUARD_S seconds) is full the run stops
+there: the covers left stay open for the next runs, and are never handed to the app's own order for that reason.
 
 run keeps nothing in memory: each run reads the published timetable, the settings and the absence records afresh, and a
 cover stays open until its pick is saved, so a restart loses nothing (the next run finds every pick still due, and a model
@@ -28,7 +29,7 @@ ON = os.environ.get("RELIEF_JOBS") == "on"     # automatic triggers (a new absen
 SYNC = False                                    # tests: soon() runs inline
 AFTER = []                                      # called with nothing at the end of tick and of a run soon() asked for
 EVERY = 60                                      # seconds between the ticker's runs
-FILL_AT = (15, 0)                               # when times.fill_at cannot be read
+FILL_AT = (15, 0)                               # when the time given to due_at cannot be read
 _busy = threading.Lock()                        # one run at a time
 _asked, _asked_lock = set(), threading.Lock()   # the runs soon() asked for that have not started: (ids, date)
 _going = [0]                                    # the runs soon() asked for that have started and not ended (under _asked_lock)
@@ -46,16 +47,16 @@ def _date(d):
     return d if isinstance(d, datetime.date) else datetime.date.fromisoformat(str(d))
 
 
-def _hm(fill_at):
+def _hm(at):
     try:
-        h, m = (int(v) for v in str(fill_at).split(":"))
+        h, m = (int(v) for v in str(at).split(":"))
         return datetime.time(h, m)
     except (TypeError, ValueError): return datetime.time(*FILL_AT)
 
 
-def due_at(cal, days, date, fill_at, today=None):
+def due_at(cal, days, date, at, today=None):
     """when the picks for lessons on date (a date or an ISO string) are due, in school time: for a date today or earlier
-    (today: lessons.today()), the start of that day, so at once; for a later date, fill_at ("15:00") on the school day
+    (today: lessons.today()), the start of that day, so at once; for a later date, at ("15:00") on the school day
     before it in the calendar, over weekends, holidays and the weeks between terms (Friday for a Monday, Thursday when that
     Friday is a holiday); the day before when the calendar has no school day before it"""
     date, tz, one = _date(date), _tz(), datetime.timedelta(days=1)
@@ -64,7 +65,7 @@ def due_at(cal, days, date, fill_at, today=None):
     d = date - one
     while d >= first and school_day(cal, days, d) is None: d -= one
     if d < first: d = date - one
-    return datetime.datetime.combine(d, _hm(fill_at), tzinfo=tz)
+    return datetime.datetime.combine(d, _hm(at), tzinfo=tz)
 
 
 def _when(now):
@@ -143,7 +144,8 @@ def _waits(r, x, c):
 def _one(pub, settings, id, ckey, call, clock, bnds, links=None):
     """the pick for one cover, from fresh records (so it sees every pick before it), worked out outside the lock and saved
     under it; when the save is refused as no longer free (someone took the cover or the person meanwhile), worked out once
-    more from fresh records, then left as it is. -> "picked", "nobody" (nobody free; it stays open) or None"""
+    more from fresh records, then left as it is. -> "picked", "nobody" (nobody free; it stays open), "held" (the model's guard
+    is full: it stays open for the next run) or None"""
     for again in (False, True):
         records = _absences.all_records()
         got = _find(records, id, ckey)
@@ -153,10 +155,11 @@ def _one(pub, settings, id, ckey, call, clock, bnds, links=None):
         if _cover.state(r, x, c) == "open": into, without = "pick", ()
         elif _asks_change(r, x, c): into, without = "change", (c["relief"],)        # never the teacher who asked
         else: return None
-        try: p = _pick.choose_for(pub, settings, records, r, x, c, call=call, without=without, links=links)
+        try: p = _pick.choose_for(pub, settings, records, r, x, c, call=call, without=without, links=links, wait=True)
         except Exception as e:                  # free_then's own, such as a date no longer a school day: this cover waits
             _log.warning("a pick was not made: %s", type(e).__name__); return None
         if p is None: return "nobody"
+        if p is _pick.WAIT: return "held"
         try:
             _cover.set_pick(id, ckey, p, pub, settings, into=into, links=links)
             return "picked"
@@ -171,8 +174,7 @@ def _run(ids, date, call, now):
     if not pub: return dict(picked=0, nobody=0)
     settings = _settings.load(pub)
     model = pub.get("model") or {}
-    bnds, days, cal = bounds(model), model.get("days") or [], settings.get("calendar") or {}
-    fill_at = (settings.get("times") or {}).get("fill_at")
+    bnds, cal = bounds(model), settings.get("calendar") or {}
     links = _links(pub, cal)
     ids = None if ids is None else {ids} if isinstance(ids, str) else {str(i) for i in ids}
     date = None if date is None else _date(date).isoformat()
@@ -192,32 +194,31 @@ def _run(ids, date, call, now):
         except Exception as e:
             _log.warning("a waiting pick was not checked: %s", type(e).__name__); continue
         records = _absences.all_records()
-    # 2. the picks: an open cover that is due (any open cover of ids or date, when given), a request to change at once
-    t, due = clock(), {}
-    def is_due(d):
-        if d not in due: due[d] = due_at(cal, days, d, fill_at, today=t.date()) <= t
-        return due[d]
+    # 2. the picks: every open cover (of ids or date, when given) and every request to change, nearest date and period first;
+    #    the first the model's guard holds back ends the run: the covers left are picked by the next runs
     records = _absences.all_records()
-    todo = [(r["id"], k) for r, x, c, k in _covers(records, ids, date, t, bnds, links)
-            if (_cover.state(r, x, c) == "open" and (ids is not None or date is not None or is_due(x["date"]))) or _asks_change(r, x, c)]
-    picked = nobody = 0
+    todo = [(r["id"], k) for r, x, c, k in _covers(records, ids, date, clock(), bnds, links)
+            if _cover.state(r, x, c) == "open" or _asks_change(r, x, c)]
+    picked = nobody = 0; held = None
     if todo: _picking.set()
     try:
-        for id, ckey in todo:
+        for n, (id, ckey) in enumerate(todo):
             got = _one(pub, settings, id, ckey, call, clock, bnds, links)
             picked += got == "picked"; nobody += got == "nobody"
+            if got == "held": held = len(todo) - n; break
     finally: _picking.clear()
-    return dict(picked=picked, nobody=nobody)
+    return dict(picked=picked, nobody=nobody) if held is None else dict(picked=picked, nobody=nobody, held=held)
 
 
 def run(ids=None, date=None, call=None, now=None):
-    """make the picks that are due -> dict(picked, nobody): picks saved, and covers left open with nobody free (NOBODY);
-    dict(picked=0, nobody=0, busy=True) at once while another run is going. First every waiting pick whose person is no
-    longer free is dropped (cover.stale, then cover.drop); then, in time order, every open cover whose lesson is not over
-    and whose pick is due (due_at), or with ids (an absence id or ids) or date (a date or an ISO string) every open cover of
-    those, due or not; and every request to change with no new pick yet (of ids or date, when given), due or not, for
-    someone other than the teacher who asked. A cover whose lesson has ended (exams.days.bounds against school time now) or whose date is before
-    today is never picked for. call: the model's stand-in (pick.choose_for's); now: the time (tests)."""
+    """make the picks -> dict(picked, nobody): picks saved, and covers left open with nobody free (NOBODY);
+    dict(picked=0, nobody=0, busy=True) at once while another run is going; held=<covers left> too when the model's guard
+    stopped the run. First every waiting pick whose person is no longer free is dropped (cover.stale, then cover.drop);
+    then, in time order (the nearest date and period first), every open cover whose lesson is not over, of any date, or with
+    ids (an absence id or ids) or date (a date or an ISO string) every open cover of those; and every request to change
+    with no new pick yet (of ids or date, when given) for someone other than the teacher who asked. A full guard ends the
+    run at that cover: the rest stay open for the next run, not handed to the app's own order. A cover whose lesson has
+    ended (exams.days.bounds against school time now) or whose date is before today is never picked for. call: the model's stand-in (pick.choose_for's); now: the time (tests)."""
     if not _busy.acquire(blocking=False): return dict(picked=0, nobody=0, busy=True)
     try: return _run(ids, date, call, now)
     finally: _busy.release()

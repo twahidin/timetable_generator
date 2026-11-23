@@ -2097,6 +2097,7 @@ KW, KF = day_key(1, datetime.date(2026, 10, 14)), day_key(0, datetime.date(2026,
 def school(*linked, since="2026-10-12T08:00:00+08:00", base=BASE, **settings):
     """the made-up school at 09:00 on Mon 12 Oct 2026 with no absences, its bot connected at `since` and these people linked"""
     old = LS.today, absences._now, FL.SYNC, FL.ON, PK.CALL
+    PK._seen.clear()                                                                       # a full guard now holds picks back: every school starts with an empty one
     shutil.rmtree(absences.DIR, ignore_errors=True)
     store.write_json(RS.PATH, dict(dict(calendar=TERM), **settings))
     LS.today, absences._now = lambda: datetime.date.fromisoformat(clock.now[:10]), lambda: clock.now
