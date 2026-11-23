@@ -1501,4 +1501,411 @@ def the_choices_line_says_spacing_and_where_the_scripts_go_and_one_minute_is_sin
     c = {l["key"]: l for l in facts.checklist(an_exam([], pub), pub, CAL, xs(), last)}
     assert c["choices"]["text"] != "As last time: " + own and "the hall" in c["choices"]["text"], c["choices"]
 
+# ---------------------------------------------------------------- the chat's steps on a draft (plan/steps.py)
+import shutil  # noqa: E402
+from plan import steps as ST  # noqa: E402
+from plan.steps import Refused, run, undo  # noqa: E402
+
+OPEN = "Only the exams committee and the timetable committee can open exams."
+
+class Talk:
+    def __init__(self, exam=None):
+        self.exam, self.words, self.offered, self.last_rev = exam, [], {}, None
+
+class FakeEnv:
+    """the Env of the tests: schedules kept by the real exams.schedules on the test's DATA_DIR; the rules of create, change
+    and remove are plan.steps' own, as the app's Env uses them"""
+    def __init__(self, pub=None, name="Ms Ivy Teo", today=_dt.date(2026, 9, 1)):
+        self.name, self._pub, self._today, self.right, self.history = name, pub or F.sample_pub(), today, True, []
+    def pub(self): return self._pub
+    def cal(self): return CAL
+    def settings(self): return XSET.defaults()
+    def people(self): return []
+    def all_saved(self): return XS.all_saved()
+    def today(self): return self._today
+    def may(self):
+        if not self.right: raise Refused(OPEN)
+    def load(self, id): return XS.load(id)
+    def create(self, kind, name, levels, classes, start, end, words):
+        return ST.do_create(self, kind, name, levels, classes, start, end, words, self.history.append)
+    def change(self, id, fn, words): return ST.do_change(self, id, fn, words, self.history.append)
+    def remove(self, id, rev, words): return ST.do_remove(self, id, rev, words, self.history.append)
+    def by_hand(self, id, who="Mr Page Person", edit=None, **fields):
+        """the exam page saves in between"""
+        with XS.editing():
+            s = XS.load(id); s.update(fields)
+            if edit: edit(s)
+            return XS.save(s, self._pub, CAL, who)
+
+def no_schedules():
+    shutil.rmtree(XS.DIR, ignore_errors=True)
+
+START = dict(kind="exam", name="Mid-Year 2027", levels=["sec 3", "Sec 4"], classes=[], start="2026-10-05", end="2026-10-09")
+def started(**kw):
+    env, st = FakeEnv(**kw), Talk()
+    step = run(env, st, "start", dict(START), said="")
+    return env, st, step
+
+def a_pid(env, st, subject):
+    return next(p["id"] for p in env.load(st.exam)["papers"] if p["subject"] == subject)
+
+def two_papers(env, st):
+    return run(env, st, "papers", dict(add=[dict(level="Sec 3", subject="english", paper="Paper 1", minutes=90, who="level"),
+                                            dict(level="SEC 3", subject="Mathematics", paper="Paper 1", minutes=60)]), said="")
+
+def unchanged(env, st, f, text):
+    """f is refused with text and nothing is saved"""
+    before = env.load(st.exam) if st.exam else None
+    n = len(env.history)
+    raises(Refused, f, text)
+    same(env.load(st.exam) if st.exam else None, before); same(len(env.history), n)
+
+@t
+def a_talk_starts_one_exam_and_every_step_is_in_the_history():
+    no_schedules()
+    env, st, step = started()
+    s = env.load(st.exam)
+    same((s["name"], s["levels"], s["kind"], s["saved_by"]), ("Mid-Year 2027", ["Sec 3", "Sec 4"], "exam", "Ms Ivy Teo"))
+    same(step["text"], "Started the exam Mid-Year 2027"); same(step["exam"], st.exam); same(st.last_rev, s["rev"]); same(step["rev_after"], s["rev"])
+    assert step["can_undo"] and not step["undone"] and step["action"] == "start" and step["id"]
+    same(env.history[-1]["by"], "Ms Ivy Teo, with Plan with AI"); assert env.history[-1]["text"].startswith("Mid-Year 2027: ")
+    raises(Refused, lambda: run(env, st, "start", dict(START), said=""), "This talk already has an exam. Start a new talk for another.")
+    raises(Refused, lambda: run(env, Talk(), "papers", dict(remove=["x"]), said=""), "Start the exam first.")
+    raises(Refused, lambda: run(FakeEnv(), Talk(), "start", dict(START, levels=["Sec 9"]), said=""), "Sec 9 is not a level of the published timetable.")
+    raises(Refused, lambda: run(FakeEnv(), Talk(), "start", dict(START, start="next Tuesday"), said=""), "Give a date such as 2026-10-05.")
+    raises(Refused, lambda: run(FakeEnv(), Talk(), "start", dict(START, kind="event"), said=""))
+    raises(Refused, lambda: run(env, st, "make", {}, said=""))
+    n = len(XS.all_saved())
+    t2 = Talk(); run(FakeEnv(), t2, "start", dict(START, kind="test", name="Common Test"), said="")
+    same(env.load(t2.exam)["supervision"], "lesson"); same(len(XS.all_saved()), n + 1)
+
+@t
+def what_days_papers_and_choices_each_say_what_they_did():
+    env, st, _ = started()
+    s1 = run(env, st, "what", dict(name="  Mid-Year Exam 2027 ", end="2026-10-08"), said="")
+    s = env.load(st.exam); same((s["name"], s["end"]), ("Mid-Year Exam 2027", "2026-10-08"))
+    same(set(s1["parts"]), {"name", "end"}); same(s1["parts"]["name"], ["Mid-Year 2027", "Mid-Year Exam 2027"])
+    same(s1["text"], "Changed the name and the last day"); same(st.last_rev, s["rev"])
+    dates = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"]
+    d = run(env, st, "days", dict(days=[dict(date=x, levels=None, whole=True, start=None, end=None) for x in dates[:3]]
+                                  + [dict(date=dates[3], levels=["sec 4"], whole=False, start="07:40", end="10:20")]), said="")
+    s = env.load(st.exam)
+    same(s["days"]["2026-10-08"], {"levels": ["Sec 4"], "whole": False, "from": "07:40", "to": "10:20"})
+    same(s["days"]["2026-10-05"], {"levels": None, "whole": True, "from": None, "to": None})
+    same(set(d["parts"]), {"day:" + x for x in dates}); same(d["text"], "Set 4 days")
+    p = two_papers(env, st); s = env.load(st.exam)
+    same([(x["level"], x["subject"], x["minutes"], x["who"], x["date"], x["start"]) for x in s["papers"]],
+         [("Sec 3", "English", 90, "level", None, None), ("Sec 3", "Mathematics", 60, "groups", None, None)])
+    same(p["text"], "Added 2 papers"); same(len(p["parts"]), 2); assert all(k.startswith("paper:") and v[0] is None for k, v in p["parts"].items())
+    c = run(env, st, "papers", dict(change=[dict(id=a_pid(env, st, "Mathematics"), minutes=75, paper="Paper 2")]), said="")
+    same(c["text"], "Changed 1 paper"); same(env.load(st.exam)["papers"][1]["paper"], "Paper 2")
+    dt = run(env, st, "day_times", dict(report="7:15", max_papers=3), said="")
+    same(env.load(st.exam)["times"], dict(report="07:15", min_break=20, max_papers=3)); same(dt["text"], "Changed the report time and breaks")
+    ch = run(env, st, "choices", dict(order="name", home_rooms=False, supervision="lesson", scripts=" the staff room "), said="")
+    s = env.load(st.exam)
+    same(s["seating"], dict(order="name", shared="levels", spacing="every", home_rooms=False)); same((s["supervision"], s["scripts"]), ("lesson", "the staff room"))
+    same(ch["text"], "Changed the seating choices, who supervises and where scripts go")
+    raises(Refused, lambda: run(env, st, "choices", dict(order="height"), said=""))
+    same(len([h for h in env.history if h["exam"] == st.exam]), 7)
+    same(env.history[-1]["text"], "Mid-Year Exam 2027: Changed the seating choices, who supervises and where scripts go")
+
+@t
+def a_time_needs_the_persons_own_words_and_drops_the_suggested_mark():
+    env, st, _ = started(); two_papers(env, st)
+    pid = a_pid(env, st, "English")
+    env.by_hand(st.exam, suggested=[pid])
+    item = dict(items=[dict(id=pid, date="2026-10-06", start="08:00")])
+    unchanged(env, st, lambda: run(env, st, "times", item, said="8am"), "Tell me the date and time in your own words first.")
+    st.words.append("put   English on 6 Oct at 8am please")
+    for said in ("", "am", None, 8, "Maths on 6 Oct at 8am"):
+        unchanged(env, st, lambda: run(env, st, "times", item, said=said), "Tell me the date and time in your own words first.")
+    step = run(env, st, "times", item, said="English on 6 OCT  at 8am")
+    s = env.load(st.exam)
+    same(s["suggested"], []); same((s["papers"][0]["date"], s["papers"][0]["start"]), ("2026-10-06", "08:00"))
+    same(set(step["parts"]), {"paper:" + pid, "suggested:" + pid}); same(step["parts"]["suggested:" + pid], [True, False])
+    same(step["text"], "Sec 3 English Paper 1 set for 08:00 on Tue 6 Oct")
+    st.words.append("move it to 10.30")
+    step = run(env, st, "times", dict(items=[dict(id=pid, date="2026-10-06", start="10:30")]), said="to 10.30")
+    same(step["text"], "Sec 3 English Paper 1 moved from 08:00 to 10:30 on Tue 6 Oct")
+    step = run(env, st, "times", dict(items=[dict(id=pid, date=None, start=None)]), said="to 10.30")
+    same(step["text"], "Sec 3 English Paper 1 has no time now"); same(env.load(st.exam)["papers"][0]["start"], None)
+    unchanged(env, st, lambda: run(env, st, "times", dict(items=[dict(id=pid, date="next Tuesday", start="08:00")]), said="to 10.30"),
+              "Give a date such as 2026-10-05.")
+    unchanged(env, st, lambda: run(env, st, "times", dict(items=[dict(id=pid, date="2026-10-06", start="8 in the morning")]), said="to 10.30"),
+              "Give a time such as 08:00.")
+    unchanged(env, st, lambda: run(env, st, "times", dict(items=[dict(id=pid, date="2026-10-06")]), said="to 10.30"), "start is missing.")
+    unchanged(env, st, lambda: run(env, st, "times", dict(items=[]), said="to 10.30"), "Nothing to change was given.")
+    unchanged(env, st, lambda: run(env, st, "times", dict(items=[dict(id=pid, date=None, start=None)]), said="to 10.30"), "That is how it is already.")
+
+@t
+def a_suggested_time_is_one_the_app_offered():
+    env, st, _ = started(); two_papers(env, st)
+    pid = a_pid(env, st, "English")
+    st.offered[pid] = [dict(date="2026-10-07", start="09:00", why="x")]
+    unchanged(env, st, lambda: run(env, st, "suggested", dict(id=pid, date="2026-10-07", start="09:20"), said=""), "That time was not offered for this paper.")
+    unchanged(env, st, lambda: run(env, st, "suggested", dict(id=a_pid(env, st, "Mathematics"), date="2026-10-07", start="09:00"), said=""),
+              "That time was not offered for this paper.")
+    step = run(env, st, "suggested", dict(id=pid, date="2026-10-07", start="9:00"), said="")
+    s = env.load(st.exam)
+    same(s["suggested"], [pid]); same((s["papers"][0]["date"], s["papers"][0]["start"]), ("2026-10-07", "09:00"))
+    same(step["text"], "Suggested 09:00 on Wed 7 Oct for Sec 3 English Paper 1")
+    unchanged(env, st, lambda: run(env, st, "suggested", dict(id=pid, date="2026-10-07", start="09:00"), said=""), "Sec 3 English Paper 1 has a time already.")
+
+@t
+def keep_last_takes_the_choices_of_the_exam_before():
+    no_schedules()
+    env, st, _ = started()
+    unchanged(env, st, lambda: run(env, st, "keep_last", {}, said=""), "There is no earlier exam of this kind.")
+    old = XS.new("exam", "Mid-Year 2026", ["Sec 3"], "2026-10-05", "2026-10-06", "x", env.pub())
+    old.update(created_at="2025-01-01T00:00:00", times=dict(report="07:45", min_break=30, max_papers=1), scripts="the hall",
+               seating=dict(old["seating"], spacing="gap"))
+    XS.save(old, env.pub(), CAL, "x")
+    step = run(env, st, "keep_last", {}, said="")
+    s = env.load(st.exam)
+    same((s["times"], s["scripts"], s["seating"]["spacing"]), (dict(report="07:45", min_break=30, max_papers=1), "the hall", "gap"))
+    same(step["text"], "Took the report time and breaks, the seating choices and where scripts go from Mid-Year 2026")
+    unchanged(env, st, lambda: run(env, st, "keep_last", dict(all=True), said=""), "all is not a field here.")
+    unchanged(env, st, lambda: run(env, st, "keep_last", {}, said=""), "That is how it is already.")
+
+@t
+def a_list_of_papers_changes_the_ones_there_and_adds_the_rest():
+    env, st, _ = started(); two_papers(env, st)
+    pid = a_pid(env, st, "English")
+    env.by_hand(st.exam, suggested=[pid])
+    rows = [dict(level="sec 3", subject="ENGLISH", paper="paper 1", minutes=100, date="2026-10-05", start="08:00", who="groups", together=""),
+            dict(level="Sec 4", subject="Literature", paper="", minutes=50, date=None, start=None, who="level", together="Pair")]
+    step = run(env, st, "put_list", dict(papers=rows), said="")
+    s = env.load(st.exam)
+    same(len(s["papers"]), 3); same(s["suggested"], [])
+    e = s["papers"][0]
+    same((e["id"], e["paper"], e["minutes"], e["date"], e["start"], e["who"]), (pid, "Paper 1", 100, "2026-10-05", "08:00", "groups"))
+    same((s["papers"][2]["subject"], s["papers"][2]["together"]), ("Literature", "Pair"))
+    same(step["text"], "Put 2 papers in the draft")
+    same(step["parts"]["suggested:" + pid], [True, False])
+    twice = [dict(rows[1]), dict(rows[1], subject="literature ", minutes=30)]
+    unchanged(env, st, lambda: run(env, st, "put_list", dict(papers=twice), said=""), "The list has Sec 4 Literature more than once.")
+    unchanged(env, st, lambda: run(env, st, "put_list", dict(papers=[dict(rows[1], subject="Physics")]), said=""), "Sec 4 has no subject called Physics.")
+    unchanged(env, st, lambda: run(env, st, "put_list", dict(papers=[dict(rows[1], who="students")]), said=""), "Which students sit is set on the exam page.")
+
+@t
+def a_paper_that_students_sit_keeps_its_students():
+    env, st, _ = started(); two_papers(env, st)
+    pid = a_pid(env, st, "English")
+    env.by_hand(st.exam, edit=lambda s: s["papers"][0].update(who="students", students=["3A-01", "3A-02"]))
+    run(env, st, "papers", dict(change=[dict(id=pid, minutes=45)]), said="")
+    p = env.load(st.exam)["papers"][0]; same((p["who"], p["students"], p["minutes"]), ("students", ["3A-01", "3A-02"], 45))
+    for who in ("students", "level"):
+        unchanged(env, st, lambda: run(env, st, "papers", dict(change=[dict(id=pid, who=who)]), said=""), "Which students sit is set on the exam page.")
+    unchanged(env, st, lambda: run(env, st, "papers", dict(add=[dict(level="Sec 3", subject="English", paper="Paper 2", minutes=60, who="students")]), said=""),
+              "Which students sit is set on the exam page.")
+    run(env, st, "put_list", dict(papers=[dict(level="Sec 3", subject="English", paper="Paper 1", minutes=45, date="2026-10-05", start="08:00", who="students", together="")]), said="")
+    p = env.load(st.exam)["papers"][0]; same((p["who"], p["students"], p["start"]), ("students", ["3A-01", "3A-02"], "08:00"))
+
+@t
+def wrong_input_answers_with_a_sentence_and_changes_nothing():
+    env, st, _ = started(); two_papers(env, st)
+    pid = a_pid(env, st, "English")
+    other_env, other, _ = started()
+    alien = run(other_env, other, "papers", dict(add=[dict(level="Sec 4", subject="PE", minutes=30)]), said="")
+    alien_id = next(iter(alien["parts"]))[len("paper:"):]
+    add = lambda **kw: dict(add=[dict(dict(level="Sec 3", subject="English", paper="Paper 2", minutes=60), **kw)])
+    cases = [
+        ("papers", dict(change=[dict(id="nothere", minutes=60)]), "There is no paper nothere in this exam."),
+        ("papers", dict(change=[dict(id=alien_id, minutes=60)]), f"There is no paper {alien_id} in this exam."),
+        ("papers", dict(remove=[alien_id]), f"There is no paper {alien_id} in this exam."),
+        ("papers", dict(change=[dict(id=7, minutes=60)]), "There is no paper with that id in this exam."),
+        ("papers", add(minutes="60"), "Give Sec 3 English Paper 2 a length in minutes."),
+        ("papers", add(minutes=True), "Give Sec 3 English Paper 2 a length in minutes."),
+        ("papers", add(minutes=0), "Give Sec 3 English Paper 2 a length in minutes."),
+        ("papers", add(minutes=1.5), "Give Sec 3 English Paper 2 a length in minutes."),
+        ("papers", dict(add=[dict(level="Sec 3", paper="Paper 2", minutes=60)]), "subject is missing."),
+        ("papers", add(date="2026-10-06"), "A paper's date and time are put on their own, with the person's words."),
+        ("papers", add(start="08:00"), "A paper's date and time are put on their own, with the person's words."),
+        ("papers", add(students=["3A-01"]), "Which students sit is set on the exam page."),
+        ("papers", add(id="mine"), "id is not a field here."),
+        ("papers", add(colour="red"), "colour is not a field here."),
+        ("papers", add(subject="Physics"), "Sec 3 has no subject called Physics."),
+        ("papers", add(subject="literature"), "Sec 3 has no subject called literature."),
+        ("papers", add(level="Sec 5"), "Sec 5 is not a level of this exam."),
+        ("papers", add(paper="Paper 1"), "There are two papers called Sec 3 English Paper 1."),
+        ("papers", add(paper="x" * 121), "Keep it under 120 characters."),
+        ("papers", add(together=["a"]), "Check the exam and try again."),
+        ("papers", add(who="everyone"), "Check the exam and try again."),
+        ("papers", dict(add=[], change=[], remove=[]), "Nothing to change was given."),
+        ("papers", dict(add="English"), "Check the exam and try again."),
+        ("papers", dict(add=[dict(level="Sec 3", subject="English", paper=f"P{i}", minutes=60) for i in range(61)]), "Send at most 60 at once."),
+        ("papers", dict(change=[dict(id=pid)]), "Nothing to change was given."),
+        ("papers", dict(change=[dict(id=pid, minutes=90)]), "That is how it is already."),
+        ("papers", dict(change=[dict(id=pid, minutes=60), dict(id=pid, minutes=70)]), "Each paper once."),
+        ("what", {}, "Nothing to change was given."),
+        ("what", dict(name=""), "Give the exam a name."),
+        ("what", dict(name=5), "Check the exam and try again."),
+        ("what", dict(end="2026-10-01"), "Check the dates: the last day is before the first."),
+        ("what", dict(start="5 Oct"), "Give a date such as 2026-10-05."),
+        ("what", dict(start="20261005"), "Give a date such as 2026-10-05."),
+        ("what", dict(classes=["3Z"]), "3Z is not a class of the published timetable."),
+        ("what", dict(levels="Sec 3"), "Check the exam and try again."),
+        ("what", dict(kind="test"), "kind is not a field here."),
+        ("days", dict(days=[dict(date="2026-10-12", whole=True)]), "Mon 12 Oct is not a date of this exam."),
+        ("days", dict(days=[dict(date="2026-10-06", whole=False, start="08:10", end="10:20")]), "08:10 is not the start of a period."),
+        ("days", dict(days=[dict(date="2026-10-06", whole=False, start=None, end=None)]), "Give the start and the end of part of a day."),
+        ("days", dict(days=[dict(date="2026-10-06", whole="yes")]), "Check the exam and try again."),
+        ("days", dict(days=[dict(date="2026-10-06"), dict(date="2026-10-06")]), "Tue 6 Oct is given twice."),
+        ("days", dict(days=[dict(whole=True)]), "date is missing."),
+        ("days", dict(days=[dict(date="2026-10-06")] * 32), "An exam can cover at most 31 days."),
+        ("days", dict(days=[dict(date="2026-10-06", levels=["Sec 9"])]), "Sec 9 is not a level of the published timetable."),
+        ("day_times", dict(min_break=-1), "Give a whole number of minutes between two papers."),
+        ("day_times", dict(max_papers="2"), "Give a whole number for the most papers a day."),
+        ("day_times", dict(report="half seven"), "Give a time such as 08:00."),
+        ("choices", dict(home_rooms="no"), "home_rooms can be true or false."),
+        ("choices", dict(supervision="robots"), "supervision can be invigilators or lesson."),
+        ("choices", dict(scripts="y" * 121), "Keep it under 120 characters."),
+        ("suggested", dict(id=pid, date="2026-10-06"), "start is missing."),
+        ("times", dict(items="all"), "Check the exam and try again."),
+        ("times", dict(items=[dict(id=alien_id, date="2026-10-06", start="08:00")]), f"There is no paper {alien_id} in this exam."),
+        ("times", dict(items=[dict(id=pid, date="2026-10-06", start="08:00", room="Hall")]), "room is not a field here."),
+        ("put_list", dict(papers=[]), "Nothing to change was given."),
+        ("put_list", dict(papers=[dict(level="Sec 3", subject="English", minutes=60, colour=1)]), "colour is not a field here."),
+    ]
+    st.words.append("english on 6 oct at 8am")
+    for action, args, text in cases:
+        unchanged(env, st, lambda: run(env, st, action, args, said="english on 6 oct at 8am"), text)
+    for args in (None, [], "x", 5):
+        unchanged(env, st, lambda: run(env, st, "papers", args, said=""), "Check the exam and try again.")
+    env.by_hand(st.exam, edit=lambda s: s["papers"].extend(dict(s["papers"][1], id=f"x{i}", paper=f"P{i}") for i in range(198)))
+    unchanged(env, st, lambda: run(env, st, "papers", add(), said=""), "An exam can hold at most 200 papers here.")
+    run(env, st, "papers", dict(remove=["x0"]), said="")                                      # 199: one more fits
+    run(env, st, "papers", add(), said=""); same(len(env.load(st.exam)["papers"]), 200)
+
+@t
+def a_right_that_ends_between_two_steps_is_caught():
+    env, st, _ = started()
+    two_papers(env, st)
+    env.right = False
+    unchanged(env, st, lambda: run(env, st, "day_times", dict(report="07:00"), said=""), OPEN)
+    unchanged(env, st, lambda: run(env, Talk(), "start", dict(START), said=""), OPEN)
+
+@t
+def an_exam_not_in_draft_is_changed_on_the_exam_page():
+    env, st, _ = started(); two_papers(env, st)
+    s = env.load(st.exam)
+    same(ST.editable(s, env.today()), "")
+    same(ST.editable(dict(s, status="withdrawn"), env.today()), "")
+    same(ST.editable(dict(s, status="draft", note="Fix the times"), env.today()), "")
+    same(ST.editable(dict(s, status="waiting"), env.today()), "This exam is waiting for the timetable committee. Change it on the exam page.")
+    ap = dict(s, status="approved", approved=dict(s))
+    same(ST.editable(ap, env.today()), "This exam is on the main site. Change it on the exam page.")
+    same(ST.editable(dict(ap, status="changes"), env.today()), "This exam is on the main site. Change it on the exam page.")
+    same(ST.editable(ap, _dt.date(2026, 12, 1)), "This exam has ended. It can be read and not changed.")
+    env.by_hand(st.exam, status="waiting")
+    unchanged(env, st, lambda: run(env, st, "day_times", dict(report="07:00"), said=""), "This exam is waiting for the timetable committee. Change it on the exam page.")
+    XS.delete(st.exam)
+    raises(Refused, lambda: run(env, st, "day_times", dict(report="07:00"), said=""), "That exam is not there any more.")
+
+@t
+def take_it_back_out_of_order_and_by_part():
+    env, st, _ = started(); two_papers(env, st)
+    one = run(env, st, "papers", dict(add=[dict(level="Sec 4", subject="PE", paper="Practical", minutes=30)]), said="")
+    two = run(env, st, "day_times", dict(report="07:15"), said="")
+    line = undo(env, one, st)
+    s = env.load(st.exam)
+    same(s["times"]["report"], "07:15"); same([p["subject"] for p in s["papers"]], ["English", "Mathematics"])
+    assert one["undone"] and not one["can_undo"] and not line["can_undo"] and not line["undone"]
+    same(line["text"], "Taken back: Added 1 paper"); same(line["text"], ST.undo_text(one)); same(st.last_rev, s["rev"])
+    same(env.history[-1]["text"], "Mid-Year 2027: Taken back: Added 1 paper"); same(env.history[-1]["by"], "Ms Ivy Teo, with Plan with AI")
+    raises(Refused, lambda: undo(env, one, st), "That was taken back already.")
+    raises(Refused, lambda: undo(env, line, st), "That cannot be taken back.")
+    undo(env, two, st); same(env.load(st.exam)["times"]["report"], "07:30")
+    # a removed paper goes back to its old place
+    mid = a_pid(env, st, "English")
+    rm = run(env, st, "papers", dict(remove=[mid]), said="")
+    undo(env, rm, st); same([p["subject"] for p in env.load(st.exam)["papers"]], ["English", "Mathematics"])
+
+@t
+def a_part_changed_by_hand_since_stays():
+    env, st, _ = started()
+    rename = run(env, st, "what", dict(name="Mid-Year Exam", end="2026-10-08"), said="")
+    hand = env.by_hand(st.exam, name="Changed by hand")["saved_at"]
+    line = undo(env, rename, st)
+    s = env.load(st.exam); same((s["name"], s["end"]), ("Changed by hand", "2026-10-09"))
+    stamp = f"{D.nice(hand[:10])} {hand[11:16]}"
+    same(line["text"], f"1 of 2 changes are taken back. The name changed since (last saved by Mr Page Person, {stamp}), so it stays as it is.")
+    assert rename["can_undo"] and not rename["undone"]; same(set(rename["parts"]), {"name"})
+    t1 = env.load(st.exam)["saved_at"]
+    unchanged(env, st, lambda: undo(env, rename, st), f"Nothing was taken back: the name changed since (last saved by Ms Ivy Teo, {f'{D.nice(t1[:10])} {t1[11:16]}'}).")
+    two_papers(env, st)
+    ids = [p["id"] for p in env.load(st.exam)["papers"]]
+    st.words.append("english at 8 and maths at 10 on 6 oct")
+    step = run(env, st, "times", dict(items=[dict(id=ids[0], date="2026-10-06", start="08:00"), dict(id=ids[1], date="2026-10-06", start="10:00")]),
+               said="english at 8 and maths at 10 on 6 oct")
+    env.by_hand(st.exam, edit=lambda s: s["papers"][0].update(start="08:20"))
+    line = undo(env, step, st)
+    s = env.load(st.exam); same((s["papers"][0]["start"], s["papers"][1]["start"]), ("08:20", None))
+    assert line["text"].startswith("1 of 2 changes are taken back. Sec 3 English Paper 1 changed since (last saved by Mr Page Person, "), line["text"]
+
+@t
+def a_paper_and_its_suggested_mark_go_back_together():
+    env, st, _ = started(); two_papers(env, st)
+    pid = a_pid(env, st, "English")
+    st.offered[pid] = [dict(date="2026-10-07", start="09:00", why="x")]
+    sug = run(env, st, "suggested", dict(id=pid, date="2026-10-07", start="09:00"), said="")
+    st.words.append("english at 10 on 7 oct")
+    agreed = run(env, st, "times", dict(items=[dict(id=pid, date="2026-10-07", start="10:00")]), said="english at 10 on 7 oct")
+    undo(env, agreed, st)
+    s = env.load(st.exam); same((s["papers"][0]["start"], s["suggested"]), ("09:00", [pid]))
+    undo(env, sug, st)
+    s = env.load(st.exam); same((s["papers"][0]["start"], s["suggested"]), (None, []))
+    rm = run(env, st, "papers", dict(remove=[pid]), said="")
+    assert "suggested:" + pid not in rm["parts"]
+    undo(env, rm, st)
+    sug = run(env, st, "suggested", dict(id=pid, date="2026-10-07", start="09:00"), said="")
+    rm = run(env, st, "papers", dict(remove=[pid]), said="")
+    same(rm["parts"]["suggested:" + pid], [True, False])
+    undo(env, rm, st)
+    st.words.append("english at 10 on 7 oct")
+    agreed = run(env, st, "times", dict(items=[dict(id=pid, date="2026-10-07", start="10:00")]), said="english at 10 on 7 oct")
+    same(agreed["parts"]["suggested:" + pid], [True, False])
+    env.by_hand(st.exam, suggested=[pid])                         # the mark is back by hand, the time is the step's: both stay
+    s = env.load(st.exam); at = f"{D.nice(s['saved_at'][:10])} {s['saved_at'][11:16]}"
+    unchanged(env, st, lambda: undo(env, agreed, st), f"Nothing was taken back: Sec 3 English Paper 1 changed since (last saved by Mr Page Person, {at}).")
+    s = env.load(st.exam); same((s["papers"][0]["start"], s["suggested"]), ("10:00", [pid]))
+
+@t
+def take_it_back_never_breaks_the_apps_check():
+    env, st, _ = started()
+    longer = run(env, st, "what", dict(end="2026-10-20"), said="")
+    env.by_hand(st.exam, start="2026-10-12")
+    unchanged(env, st, lambda: undo(env, longer, st), "Check the dates: the last day is before the first.")
+    assert longer["can_undo"] and not longer["undone"]
+
+@t
+def taking_back_the_start_deletes_the_exam_only_while_the_talk_was_last():
+    env, st, start = started()
+    id = st.exam
+    run(env, st, "day_times", dict(report="07:15"), said="")
+    line = undo(env, start, st)
+    same(env.load(id), None); same((st.exam, st.last_rev), (None, None)); assert start["undone"] and not start["can_undo"]
+    same(line["text"], "Taken back: Started the exam Mid-Year 2027"); same(env.history[-1]["exam"], id)
+    raises(Refused, lambda: undo(env, start, st), "That was taken back already.")
+    env, st, start = started()
+    env.by_hand(st.exam, name="Changed by hand")
+    unchanged(env, st, lambda: undo(env, start, st), "This exam was changed since: delete it on the exam page.")
+    assert not start["undone"] and start["can_undo"]
+    env, st, start = started()
+    same(undo(env, start)["text"], "Taken back: Started the exam Mid-Year 2027")        # with no talk: the step's own rev
+
+@t
+def nothing_is_taken_back_once_the_exam_is_sent():
+    env, st, start = started(); p = two_papers(env, st)
+    env.by_hand(st.exam, status="waiting")
+    unchanged(env, st, lambda: undo(env, p, st), "Sent since: change it on the exam page.")
+    unchanged(env, st, lambda: undo(env, start, st), "Sent since: change it on the exam page.")
+    s = env.load(st.exam)
+    env.by_hand(st.exam, status="approved", approved=dict(s))
+    unchanged(env, st, lambda: undo(env, p, st), "Sent since: change it on the exam page.")
+    env._today = _dt.date(2026, 12, 1)
+    unchanged(env, st, lambda: undo(env, p, st), "This exam has ended. It can be read and not changed.")
+    assert p["can_undo"] and not p["undone"]
+
+
 print(f"{COUNT} plan tests passed")
