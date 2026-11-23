@@ -199,8 +199,7 @@ class _Plan:
 
     def _sift(self, bad, before):
         """go through the answers once, in their order, and keep those that are accepted, settle their target and bring no mistake, no broken Must rule and no wish, each on what
-        the ones kept before it leave.
- One that does not needs you; those not gone through in SIFT_S seconds were not looked at in time"""
+        the ones kept before it leave. One that does not needs you; those not gone through in SIFT_S seconds were not looked at in time"""
         end, old, last = time.monotonic() + SIFT_S, self.solved, before; self._start()
         for i, got, _ in old:
             if time.monotonic() >= end: self.why[i] = refit.LATE; continue

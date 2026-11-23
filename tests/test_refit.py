@@ -1888,6 +1888,7 @@ def test_a_trade_settles_both_and_names_the_second_once():
     assert p["groups"][0]["steps"] == [dict(n=1, fix=TRADE, text=f"Trade classes: {T0} takes Mathematics for {CLS_B}, {T1} takes {EL} for {CLS}.", why=TRADE_WHY, tags=[])] and p["totals"]["changes"] == 1 and p["totals"]["moved"] == 0, p
     p = planned(given, TEACH_B); assert p["fixes"] == [dict(kind="trade", a=MATHS, b=KEY, x=T1, y=T0)] and p["also"] == [], p   # and the other way round
     rows = PAIR + [one(3, 1, 1), one(4, 1, 1, "1C", "Science", T1)] + full(1, d=1); given = ready(rows, trades()); p = planned(given, TEACH, TEACH_B); assert p["fixes"] == [dict(kind="move", id=4, d=1, p=2), TRADE] and keys(p) == [TEACH] and len(p["also"]) == 1, p   # with a move first
+    stuck = PAIR + [one(3, 1, 1), band(4, 1, 1, "1C", T1)] + bands_but(CLS, 20000, (0, 1), (1, 1)) + week_b((0, 1)); p = planned(ready(stuck, trades()), TEACH, TEACH_B); assert p["fixes"] == p["also"] == [] and needs(p) == {TEACH: f"{T1} is teaching group Q4 then.", TEACH_B: f"{T0} is teaching {EL} for {CLS} then."} and p["late"] is False, p   # with a band in its way nothing helps it: both need you, for what is true of each
     # each change that fits by itself is made by itself
     p = planned(ready([one(1, 0, 1), one(2, 1, 1, CLS_B, "Mathematics", T1)], trades()), TEACH, TEACH_B); assert p["fixes"] == [GIVE, dict(kind="teacher", key=MATHS, teachers=[T0])] and keys(p) == [TEACH, TEACH_B] and p["also"] == [], p
     # a list with a trade is one whose fixes name no lesson it puts in: the trade's a and b are keys
