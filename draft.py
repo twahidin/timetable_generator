@@ -210,11 +210,19 @@ def tally(warnings, decisions):
     ws = [dict(w, decision=decisions.get(w["key"])) for w in warnings]
     return dict(decisions=decisions, warnings=ws, open=sum(1 for w in ws if not w["decision"]), critical=sum(1 for w in ws if w.get("crit")))
 
+def listed(m, fx=None, decisions=None):
+    """the model's warnings as step 8 lists them, with the decisions laid on: tally's dict(decisions, warnings, open, critical). Writes nothing."""
+    fx = fx or dict(texts=[], problems=[], touched=set(), was=[], pool=[])
+    return tally(_warned(m, fx)["warnings"], decisions or {})
+
+def counted(w):
+    """whether step 8 counts a warning of listed's among its warnings: open, and not critical"""
+    return not w["decision"] and not w.get("crit")
+
 def counts(m, rec, fx=None, decisions=None):
     """dict(critical, warnings) of the model as step 8 counts them: critical as the draft counts it, warnings = those with no decision that are not critical. Writes nothing."""
-    fx = fx or dict(texts=[], problems=[], touched=set(), was=[], pool=[])
-    t = tally(_warned(m, fx)["warnings"], decisions or {})
-    return dict(critical=t["critical"], warnings=sum(1 for w in t["warnings"] if not w["decision"] and not w.get("crit")))
+    t = listed(m, fx, decisions)
+    return dict(critical=t["critical"], warnings=sum(1 for w in t["warnings"] if counted(w)))
 
 def checked_in(folder, rec=None):
     """counts of the draft folder (a copy of the draft) checked against the setup (or rec)"""
@@ -266,7 +274,8 @@ def _finish(j, change=None):
         if meta is not None and j["stamp"] == stamp(meta, dict(v=int(j["setup_version"][1:]))):   # the stamp of the draft on disk, for the setup version j was checked against
             store.write_json(_p("decisions.json"), decisions)
             store.write_json(_p("meta.json"), dict(meta, open=n, critical=crit))
-    return dict(j, warnings=ws, open=n, critical=crit,
+    import refit   # here: refit does not import draft, and the page asks this of the answered warnings
+    return dict(j, warnings=ws, open=n, critical=crit, refit=refit.needed(ws),
                 step5=sum(1 for d in decisions.values() if d.get("answer") == "step5"))
 
 def info(model=None, rec=None):
@@ -606,6 +615,36 @@ def fix_many(moves, stamp=None):
         store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=at, text=t, batch=batch) for f, t in zip(fl, c["texts"])]))
         return info()
 
+def decisions_now():
+    """the draft's answers (decisions.json) as they are on disk, {} when there is no draft; reads only"""
+    with _lock: return (store.read_json(_p("decisions.json"), {}) or {}) if exists() else {}
+
+def refit_apply(steps, stamp, keep_name, by):
+    """make a re-fit's list: the fixes the server holds (steps), judged together with helper.chain on the draft as it is now, and made as one batch, or none. stamp: the draft's
+    when the list was made (ValueError(MOVED) when it is not the draft's now, looked at again after the judging, for the setup may be saved meanwhile). A list the judge refuses (an
+    answer that is not ok, or prefer for more than an allowance line) or that is not all made is refused with the judge's sentence, and then nothing is written and no version kept.
+    Otherwise, in this order: the draft is kept as a version of kind refit (None when this very draft is kept already; keep_name names it); the "met" answers of the typed rules the list
+    makes one check again are taken out of decisions.json (a "met" answer does not come back with Undo); and last every fix is written to meta.json at once with one batch id (so one Undo
+    takes them back). So a write that fails leaves a rule open again, never a fix made and a rule wrongly met. Nothing is raised once meta.json is written.
+    -> dict(kept, texts, typed: those rules' numbers, sorted)"""
+    import refit, versions
+    with _lock:
+        m, rec, fx = _now(); _moved(stamp, rec); spec, days = m["checked_setup"], m["days"]
+        if not isinstance(steps, list) or not steps: raise ValueError("There is nothing to apply.")
+        fl = [_whole(f) for f in steps]; c = helper.chain(m, spec, days, fl)
+        bad = refit._refusal(c)
+        if bad: raise ValueError(bad[1])
+        if len(c["texts"]) != len(fl): raise ValueError("That fix could not be made. Check the list again.")
+        _moved(stamp, store.setup_record())   # the setup may have been saved while the list was judged
+        typed_ = refit.rechecked(m, spec, c["lessons"], c["touched"], c["was"], fl)   # worked out on the model before the steps, with the lessons waiting in Not placed
+        kept = versions.keep("refit", by, name=keep_name)
+        asked = lambda k: (g := re.fullmatch(r"typed:(\d+):again(#\d+)?", k)) and int(g[1]) in typed_
+        d = store.read_json(_p("decisions.json"), {}) or {}; left = {k: v for k, v in d.items() if not (asked(k) and isinstance(v, dict) and v.get("answer") == "met")}
+        if left != d: store.write_json(_p("decisions.json"), left)
+        batch, at = secrets.token_hex(4), store.now(); meta = store.read_json(_p("meta.json"), {})
+        store.write_json(_p("meta.json"), dict(meta, fixes=(meta.get("fixes") or []) + [dict(f, at=at, text=t, batch=batch) for f, t in zip(fl, c["texts"])]))
+        return dict(kept=kept, texts=list(c["texts"]), typed=typed_)
+
 def suggest(key):
     """ways to settle the warning with that key, as the draft is now -> helper.suggest's dict(suggestions, none, blocked)"""
     m, rec, fx = _now(); w = next((w for w in _build(m, rec, fx)["warnings"] if w["key"] == key), None)
@@ -622,15 +661,16 @@ def _one(m, spec, days, pool, f):
     text = fixes.apply_one(L, f, spec, days, touched=touched, was=was, pool=copy.deepcopy(pool))
     return dict(state=j["state"], why=j["why"], texts=[text], lessons=L, was=was, touched=touched)
 
-def preview(moves):
+def preview(moves, many=False):
     """what the fixes would do, written nowhere -> dict(state, why, texts, classes, gone). classes: the week of every class a changed lesson is of, before or
     after, as grid gives it, each lesson with mark (moved, changed, new or '') and, when moved, was = dict(d, p); gone: the lessons deleted. One fix may be of any
     kind the board makes (a place and a trade too) and is judged with the pool; when it is judged no the timetable still shows it made, and when na nothing is changed.
-    Two fixes (never a place or a lift): a list that is refused shows the timetable up to the fix refused."""
+    Two fixes (never a place or a lift): a list that is refused shows the timetable up to the fix refused.
+    many (a re-fit's list, which the server itself holds): a list of any length, each fix cut with _whole as it is (never forced, the rooms as listed) and judged with helper.chain."""
     m, rec, fx = _now(); spec, days = m["checked_setup"], m["days"]
-    if isinstance(moves, list) and len(moves) == 1: c = _one(m, spec, days, fx["pool"], _whole(moves[0]))
+    if not many and isinstance(moves, list) and len(moves) == 1: c = _one(m, spec, days, fx["pool"], _whole(moves[0]))
     else:
-        fl = _fixes_of(moves, m, spec, days); c = helper.chain(m, spec, days, fl)
+        fl = [_whole(f) for f in moves] if many else _fixes_of(moves, m, spec, days); c = helper.chain(m, spec, days, fl)
         if c["state"] in ("no", "na"): c = dict(helper.chain(m, spec, days, fl[:len(c["steps"]) - 1]), state=c["state"], why=c["why"])
     L, was, touched = c["lessons"], c["was"], c["touched"]; first, last = {}, {}
     for x in was: first.setdefault((x["id"], x["group"]), x); last[(x["id"], x["group"])] = x

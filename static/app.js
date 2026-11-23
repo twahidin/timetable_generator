@@ -993,7 +993,7 @@ function exportCard() {   // step 8's upload: the timetable file first, its setu
   const t = upTexts(null, null);
   const box = (n, id, title, kinds, accept) => `<label class="upbox${id === "exSetup" ? " dim" : ""}" data-upbox="${id}"><span class="upn">${n}</span><span class="upt"><b>${title}</b><span class="muted small">${kinds}</span></span>
       <span class="upgo">Choose file…<span class="muted small"> or drop it here</span></span><input type="file" id="${id}" accept="${accept}" hidden></label>`;
-  return `<div class="card" id="printouts"><div class="vshead2"><h2>Upload a timetable</h2><button id="vsBtn" data-vsopen="1">${vsLabel()}</button></div><p class="muted">Upload the timetable the chatbot made. The app keeps it as the draft, checks it against the setup and lists what it found: fix it here, then publish on step 9.</p>
+  return `<div class="card" id="printouts"><div class="vshead2"><h2>Upload a timetable</h2><span class="vsbar">${rfBtnHTML()}<button id="vsBtn" data-vsopen="1">${vsLabel()}</button></span></div><p class="muted">Upload the timetable the chatbot made. The app keeps it as the draft, checks it against the setup and lists what it found: fix it here, then publish on step 9.</p>
     <div class="upboxes">
       <div>${box(1, "exTT", "Timetable file", ".sqlite or .xlsx", ".xlsx,.sqlite,.sqlite3,.db")}<div class="upname" id="exTTName">${t.tt}</div></div>
       <div>${box(2, "exSetup", "Its setup workbook", ".xlsx · only with a timetable workbook", ".xlsx")}<div class="upname" id="exSetupName">${t.su}</div></div>
@@ -1798,6 +1798,7 @@ document.addEventListener("click", async e => {
   if (bdCellClick(e)) return;
   if (e.target.closest("#pbDownload")) { e.preventDefault(); downloadDraft(); return; }   // fetched, so a refusal is said in words, not shown as a page
   if (e.target.closest("[data-vsopen]")) { vsOpen(); return; }
+  const ro = e.target.closest("[data-rfopen]"); if (ro) { rfOpen(ro.dataset.rfopen); return; }
   const b = e.target.closest("button, [data-pop], .issue, td.c, [data-mcard]"); if (!b) return;
   if (b.dataset.step) { if (!stepShown(Number(b.dataset.step))) return; S.step = Number(b.dataset.step); G.refetch = onDraftStep(); save(); render(); window.scrollTo(0, 0); return; }
   if (b.id === "undo" || b.id === "redo") { undo(b.id === "undo"); return; }
@@ -2976,7 +2977,7 @@ async function poll() {   // every few seconds: the published timetable and the 
     if (al) al.hidden = !rights.includes("admin");
     if (hy) hy.hidden = !rights.includes("history");
     if (fa) fa.hidden = !(G.st.admin_exists === false && rights.includes("committee"));   /* deploy day: the committee code makes the first admin */
-    paintPublished(); draftWatch(); if (!VS.open) { VS.list = null; } vsPaintBtn();
+    paintPublished(); draftWatch(); if (!VS.open) { VS.list = null; } vsPaintBtn(); rfPaintBtn();
   } catch (e) { }
   G.inflight = false;
   G.timer = setTimeout(poll, 5000);
@@ -3078,7 +3079,7 @@ async function downloadDraft() {   // step 9: the draft as a database; a refusal
 /* a timetable made outside the app: kept on the server as the draft and checked against the setup as it is now */
 function drawDraft() {   // the upload card's head and the timetable card again (the typed box keeps its focus: fxKeep in bdDraw and bdSideDraw)
   const box = $("#imResult"); if (!box) return;
-  box.innerHTML = S.draft ? draftHTML(S.draft).head : "";
+  box.innerHTML = S.draft ? draftHTML(S.draft).head : ""; rfPaintBtn();
   bdMount(); bdDraftDraw();
 }
 async function uploadDraft() {
@@ -3132,23 +3133,46 @@ function vsHTML() {
   return `<div class="vspop" role="dialog" aria-modal="true" aria-labelledby="vsTitle" tabindex="-1"><div class="vshead"><h2 id="vsTitle">Versions</h2><button data-vs="close">Close</button></div>
     <p class="muted">Step 8 keeps one draft. A version is a named copy of it that you can open again later. Opening a version never loses the draft you had: it is kept as a version first.</p>${save}${table}</div>`;
 }
-const vsKey = el => !el || !el.closest || !el.closest("#vsOv") ? null : el.id === "vsName" ? "name" : el.dataset && el.dataset.vs ? el.dataset.vs + "|" + (el.dataset.id || el.dataset.a || "") : null;
-let vsFocusKey = null, vsQuiet = false;   // the control focus belongs on (a redraw puts it back; a disabled one is waited for); vsQuiet: the app moved focus itself
-document.addEventListener("focusin", e => { if (!vsQuiet) { const k = vsKey(e.target); if (k) vsFocusKey = k; } });
-function vsFocus() {   // after a draw: the same control if it is there and can take focus, else the name box, else Close
-  const ov = $("#vsOv"); if (!ov || !VS.open) return;
-  const all = [...ov.querySelectorAll("[data-vs], #vsName")], by = k => all.find(x => vsKey(x) === k && !x.disabled);
-  let el = vsFocusKey && by(vsFocusKey), fb = false;
-  if (!el) { el = $("#vsName") || by("close|"); fb = true; }
-  if (!el || document.activeElement === el) return;
-  vsQuiet = fb; try { el.focus({ preventScroll: true }); } finally { vsQuiet = false; }
+/* what the step 8 pop-outs (Versions and Re-fit) share. o: ov (the overlay's id), attr (the data- name of its buttons), isOpen(), close(), act(button), first (keys the focus goes to before Close when its control is gone), free (the id of a text box in it:
+   undo, redo, cut and paste are the browser's there). focus(): after a draw, the focus on the same control if it is there and can take it, else the text box, else Close (a disabled one is waited for).
+   Keys: Escape closes, Tab stays inside, undo, redo, cut and paste never reach the page behind; a click on the dim backdrop closes, a click on one of its buttons acts */
+function popKit(o) {
+  let fkey = null, quiet = false;   // fkey: the control focus belongs on; quiet: the app moved focus itself
+  const key = el => !el || !el.closest || !el.closest("#" + o.ov) ? null : o.free && el.id === o.free ? "name" : el.dataset && el.dataset[o.attr] ? el.dataset[o.attr] + "|" + (el.dataset.id || el.dataset.a || "") : null;
+  document.addEventListener("focusin", e => { if (!quiet) { const k = key(e.target); if (k) fkey = k; } });
+  document.addEventListener("click", e => {   // the pop-out's own buttons (it is outside the page's own handler's steps)
+    const ov = e.target.closest && e.target.closest("#" + o.ov); if (!ov) return;
+    e.stopPropagation();
+    if (e.target === ov) { o.close(); return; }
+    const b = e.target.closest(`[data-${o.attr}]`); if (b) o.act(b);
+  }, true);
+  document.addEventListener("keydown", e => {
+    if (!o.isOpen()) return;
+    if ((e.ctrlKey || e.metaKey) && ["z", "y", "x", "v"].includes((e.key || "").toLowerCase()) && !(o.free && e.target && e.target.id === o.free)) { e.preventDefault(); e.stopPropagation(); return; }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); o.close(); return; }
+    if (e.key === "Tab") { const f = [...document.querySelectorAll(`#${o.ov} button:not([disabled]), #${o.ov} input, #${o.ov} summary`)]; if (!f.length) return;
+      const i = f.indexOf(document.activeElement), last = f.length - 1;
+      if (e.shiftKey && i <= 0) { e.preventDefault(); f[last].focus(); } else if (!e.shiftKey && (i === -1 || i === last)) { e.preventDefault(); f[0].focus(); } }
+  }, true);
+  return {
+    reset() { fkey = null; },
+    focus() {
+      const ov = $("#" + o.ov); if (!ov || !o.isOpen()) return;
+      const all = [...ov.querySelectorAll(`[data-${o.attr}]` + (o.free ? ", #" + o.free : ""))], by = k => all.find(x => key(x) === k && !x.disabled);
+      let el = fkey && by(fkey), fb = false;
+      if (!el) { el = (o.free && $("#" + o.free)) || [...(o.first ? o.first() : []), "close|"].map(by).find(Boolean); fb = true; }
+      if (!el || document.activeElement === el) return;
+      quiet = fb; try { el.focus({ preventScroll: true }); } finally { quiet = false; }
+    },
+  };
 }
+const vsKit = popKit({ ov: "vsOv", attr: "vs", free: "vsName", isOpen: () => VS.open, close: () => vsClose(), act: b => vsAction(b) });
 function vsDraw() {
   const ov = $("#vsOv"); if (!ov) return;
   const n = $("#vsName"); if (n) VS.name = n.value;
   const pos = n && document.activeElement === n ? n.selectionStart : null, sc = ov.scrollTop;
   ov.innerHTML = vsHTML(); ov.scrollTop = sc;
-  vsFocus();
+  vsKit.focus();
   const m = $("#vsName"); if (pos !== null && m && document.activeElement === m) { try { m.setSelectionRange(pos, pos); } catch (e) { } }
   vsPaintBtn();
 }
@@ -3167,7 +3191,7 @@ function vsOpen() {
   if (VS.open) return;
   VS.open = true; VS.name = null; VS.err = "";
   let ov = $("#vsOv"); if (!ov) { ov = document.createElement("div"); ov.id = "vsOv"; ov.className = "vsov"; document.body.appendChild(ov); }
-  ov.hidden = false; document.body.classList.add("vslock"); vsFocusKey = null; vsDraw();
+  ov.hidden = false; document.body.classList.add("vslock"); vsKit.reset(); vsDraw();
   if (G.st && !G.st.draft && G.st.versions === 0) { VS.list = { versions: [], draft: null, published: null }; vsDraw(); return; }   // the status says there is no draft and there are no versions: nothing to ask the server
   vsLoad();
 }
@@ -3229,20 +3253,150 @@ async function vsAction(b) {
     vsDone(); return;
   }
 }
-document.addEventListener("click", e => {   // the pop-out's own buttons (it is outside the page's own handler's steps); a click on the dim backdrop closes it
-  const ov = e.target.closest && e.target.closest("#vsOv"); if (!ov) return;
-  e.stopPropagation();
-  if (e.target === ov) { vsClose(); return; }
-  const b = e.target.closest("[data-vs]"); if (b) vsAction(b);
-}, true);
-document.addEventListener("keydown", e => {   // Escape closes; Tab stays inside the pop-out; undo, redo, cut and paste never reach the page behind it (in the name box they are the browser's own)
-  if (!VS.open) return;
-  if ((e.ctrlKey || e.metaKey) && ["z", "y", "x", "v"].includes((e.key || "").toLowerCase()) && !(e.target && e.target.id === "vsName")) { e.preventDefault(); e.stopPropagation(); return; }
-  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); vsClose(); return; }
-  if (e.key === "Tab") { const f = [...document.querySelectorAll("#vsOv button:not([disabled]), #vsOv input")]; if (!f.length) return;
-    const i = f.indexOf(document.activeElement), last = f.length - 1;
-    if (e.shiftKey && i <= 0) { e.preventDefault(); f[last].focus(); } else if (!e.shiftKey && (i === -1 || i === last)) { e.preventDefault(); f[0].focus(); } }
-}, true);
+/* step 8's Re-fit window: the one list of small changes that answers the warnings (the server works it out in a job, GET /api/draft/refit), shown whole, and made only on Apply (one batch, one Undo).
+   State: open; st (start: asking the server to begin, run: the job runs, done: the list, idle: the server restarted, failed, none: nothing can be done: err says why); id, done, total, plan (the job's);
+   err (a sentence in the window); dead (the list can no longer be applied: err says why, and Run Re-fit again is offered); busy (a request is out: Apply and Preview wait); applying (an Apply is out: the window stays);
+   slow (the server could not be reached while polling); pre ({id, answer}: the preview of that list) and preOn (shown); more (the long list of what does not fit is open); from (the control to give focus back to);
+   gen (a late answer of an older load is dropped), pgen (the same for the preview), timer (the next poll; nothing is asked while the window is closed) */
+const RF = { open: false, st: "start", id: null, done: 0, total: null, plan: null, err: "", dead: false, busy: false, applying: false, slow: false, pre: null, preOn: false, more: false, from: "", gen: 0, pgen: 0, timer: 0 };
+let rfPosting = false, rfWant = false;   // a POST is out (of this opening or an earlier one: a second one waits for it); a start was asked for while it was
+const RF_WAIT = "A re-fit is already running.";
+const rfJson = r => r.json().catch(() => ({}));
+function rfBtnState() {   // greyed when there is no draft (or it is still loading: no title then), or nothing to re-fit (the server says: S.draft.refit)
+  const d = S.draft, loading = !d && !!(G.st && G.st.draft);
+  return { off: !d || !d.refit, title: loading || (d && d.refit) ? "" : !d ? "Upload a timetable first." : "Nothing to re-fit: the timetable fits the setup." };
+}
+function rfPaintBtn() { const b = $("#rfBtn"); if (!b) return; const x = rfBtnState(); b.disabled = x.off; b.title = x.title; }
+const rfBtnHTML = () => { const x = rfBtnState(); return `<button id="rfBtn" data-rfopen="btn"${x.off ? " disabled" : ""}${x.title ? ` title="${esc(x.title)}"` : ""}>Re-fit to the setup</button>`; };
+function rfTagsHTML(tags) { return Draft.refitTags(tags).map(c => `<span class="rfchip ${c.kind}"${c.title ? ` title="${esc(c.title)}"` : ""}>${esc(c.text)}${c.title ? `<span class="rfsr"> (${esc(c.title)})</span>` : ""}</span>`).join(""); }
+function rfPreHTML() {   // under the list: the class weeks the list would make, the changed lessons outlined (as Before you apply draws them)
+  if (!RF.preOn) return "";
+  if (!RF.pre) return `<div class="rfpre" id="rfPre"><h4>On the board</h4><p class="muted small">Loading the preview…</p></div>`;
+  const a = RF.pre.answer, ok = a.state === "ok" || a.state === "prefer", cls = a.classes || [], gone = a.gone || [];
+  return `<div class="rfpre" id="rfPre"><h4>On the board</h4><p class="small">${fxDot(ok ? a.state : "no")} ${esc(ok ? Draft.stateWord(a.state) : a.why || "These changes are not open.")}</p>
+    ${ok && (cls.length || gone.length) ? `<p class="muted small">Outlined: lessons that move, change or are new.</p>` : ""}${ok ? cls.map(fxSmallHTML).join("") : ""}
+    ${ok && gone.length ? `<ul class="small">${gone.map(g => `<li>${esc(g.what)} is deleted from ${esc(g.cls)}.</li>`).join("")}</ul>` : ""}</div>`;
+}
+function rfListHTML() {
+  const p = RF.plan, t = p.totals, n = t.changes, groups = p.groups || [], also = p.also || [], needs = p.needs || [], grey = RF.dead ? " rfgrey" : "";
+  const all = groups.map(g => g.text).concat(also, needs.map(x => x.text)), sp = Draft.refitSplit(all), li = x => `<li>${esc(x)}</li>`;
+  const fit = `<h3>What doesn’t fit the setup now</h3><ol class="rffit">${sp.head.map(li).join("")}</ol>` + (sp.rest.length ? `<details id="rfMore"${RF.more ? " open" : ""}><summary>and ${sp.rest.length} more</summary><ol class="rffit" start="${sp.head.length + 1}">${sp.rest.map(li).join("")}</ol></details>` : "");
+  const rules = ["Bands stay where they are", "Lessons stay on their day unless nothing works there", "Fewest lessons moved", "No Must rule broken", "Typed rules: moves allowed, flagged"].map(x => `<span class="rfchip">${x}</span>`).join("");
+  const step = s => `<div class="rfstep"><span class="rfn">${esc(s.n)}</span><div class="rfsay">${esc(s.text)}${s.why ? ` <span class="muted">(${esc(s.why)})</span>` : ""}${(s.tags || []).length ? ` ${rfTagsHTML(s.tags)}` : ""}</div></div>`;
+  const body = groups.map(g => `<div class="rfgroup"><p class="rfgtext">${esc(g.text)}</p>${g.steps.map(step).join("")}</div>`).join("")
+    + (also.length ? `<h3>Settled by these changes too</h3><ul class="rffit">${also.map(li).join("")}</ul>` : "");
+  const need = needs.length ? `<div class="rfneeds"><h3>Needs you</h3>${needs.map(x => `<p>${esc(x.text)}${x.why && x.why !== x.text ? ` <span class="muted">${esc(x.why)}</span>` : ""}</p>`).join("")}</div>` : "";
+  const none = n ? "" : `<p>The app has no change to offer for these.</p>`;
+  const totals = n ? `<p class="rftotals">${esc(Draft.refitTotals(t))}</p>${Draft.refitRise(t) ? `<p class="muted small">A number can go up without a new problem: one mistake may show as two lines when part of it is settled.</p>` : ""}${p.late ? `<p class="muted small">Some were not looked at in time: apply this list, then run Re-fit again.</p>` : ""}` : "";
+  const off = RF.busy ? " disabled" : "";
+  const foot = RF.dead ? `<p class="issue">${esc(RF.err)}</p><div class="row"><button class="primary" data-rf="again">Run Re-fit again</button><button data-rf="cancel"${RF.applying ? " disabled" : ""}>Cancel</button></div>`
+    : !n ? `<div class="row"><button data-rf="close">Close</button></div>`
+    : `<p class="muted small">${esc(Draft.refitKeeps(n))}</p>${RF.err ? `<p class="issue">${esc(RF.err)}</p>` : ""}<div class="row"><button data-rf="preview"${off}>${RF.preOn ? "Hide the preview" : "Preview on the board"}</button><button class="primary" data-rf="apply"${off}>${RF.applying ? "Applying…" : esc(Draft.refitApplyWord(n))}</button><button data-rf="cancel"${RF.applying ? " disabled" : ""}>Cancel</button></div>`;
+  return `<div class="${grey.trim()}">${fit}<div class="rfrules">${rules}</div>${body}${none}${need}${totals}</div>${n ? rfPreHTML() : ""}<div class="rffoot">${foot}</div>`;
+}
+function rfHTML() {
+  let body;
+  if (RF.st === "done") body = rfListHTML();   // RF.plan is always there with st "done" (set together, cleared together)
+  else if (RF.st === "idle") body = `<p class="issue">The app restarted before the re-fit was done.</p><div class="row"><button class="primary" data-rf="again"${RF.busy ? " disabled" : ""}>Run Re-fit again</button></div>`;
+  else if (RF.st === "failed") body = `<p class="issue">${esc(RF.err || "The re-fit could not be worked out. Run Re-fit again.")}</p><div class="row"><button class="primary" data-rf="again"${RF.busy ? " disabled" : ""}>Run Re-fit again</button></div>`;
+  else if (RF.st === "none") body = `<p class="issue">${esc(RF.err)}</p>`;
+  else body = `<p role="status">${esc(Draft.refitRunning(RF.st === "start" ? 0 : RF.done, RF.st === "start" ? null : RF.total))}</p>${RF.st === "run" && RF.total ? `<progress max="${esc(RF.total)}" value="${esc(RF.done)}"></progress>` : ""}${RF.slow ? `<p class="muted small">Could not reach the server; trying again.</p>` : ""}`;
+  return `<div class="vspop rfpop" role="dialog" aria-modal="true" aria-labelledby="rfTitle" tabindex="-1"><div class="vshead"><h2 id="rfTitle">Re-fit to the setup</h2><button data-rf="close"${RF.applying ? " disabled" : ""}>Close</button></div>${body}</div>`;
+}
+const rfKit = popKit({ ov: "rfOv", attr: "rf", first: () => RF.dead || RF.st === "idle" || RF.st === "failed" ? ["again|"] : [], isOpen: () => RF.open, close: () => rfClose(), act: b => rfAction(b) });
+function rfDraw(reveal) {
+  const ov = $("#rfOv"); if (!ov || !RF.open) return;
+  const sc = ov.scrollTop; ov.innerHTML = rfHTML(); ov.scrollTop = sc;
+  rfKit.focus();
+  if (reveal) { const el = $("#rfPre"); if (el) el.scrollIntoView({ block: "nearest" }); }
+}
+document.addEventListener("toggle", e => { if (e.target && e.target.id === "rfMore") RF.more = e.target.open; }, true);   // the long list stays open over a redraw
+function rfOpen(from) {
+  if (RF.open || !S.draft || !S.draft.refit) return;
+  Object.assign(RF, { open: true, st: "start", plan: null, id: null, done: 0, total: null, err: "", dead: false, busy: false, slow: false, pre: null, preOn: false, more: false, from: from || "btn" });
+  let ov = $("#rfOv"); if (!ov) { ov = document.createElement("div"); ov.id = "rfOv"; ov.className = "vsov"; document.body.appendChild(ov); }
+  ov.hidden = false; document.body.classList.add("vslock"); rfKit.reset(); rfDraw(); rfLoad(true);
+}
+function rfClose() {
+  if (!RF.open || RF.applying) return;   // an Apply that is out: the window stays until it has answered
+  RF.open = false; rfWant = false; RF.gen++; RF.pgen++; clearTimeout(RF.timer); const ov = $("#rfOv"); if (ov) { ov.hidden = true; ov.innerHTML = ""; }
+  document.body.classList.remove("vslock");
+  const b = [RF.from === "cfg" && $("#rfCfg"), $("#rfBtn"), $("#vsBtn")].find(x => x && !x.disabled); if (b) b.focus({ preventScroll: true });   // after an Apply that settles everything the Re-fit button is off: Versions takes the focus
+}
+function rfLater(ms) { clearTimeout(RF.timer); RF.timer = setTimeout(() => rfLoad(false), ms); }
+async function rfLoad(first) {   // the job as the server has it. On opening: a list that is not stale is shown, anything else starts a job; while polling: the progress, the list or the failure
+  const g = ++RF.gen; clearTimeout(RF.timer);
+  let r, j;
+  try { r = await fetch("/api/draft/refit"); j = await rfJson(r); }
+  catch (e) { if (g !== RF.gen || !RF.open) return; RF.slow = true; rfDraw(); rfLater(3000); return; }
+  if (r.status === 401) { location.href = "/login"; return; }
+  if (g !== RF.gen || !RF.open) return;
+  RF.slow = false;
+  if (!r.ok) { RF.st = "none"; RF.err = j.error || "Could not look at the re-fit."; rfDraw(); return; }
+  const was = RF.st;
+  if (j.state === "running") { RF.st = "run"; RF.id = j.id; RF.done = j.done || 0; RF.total = j.total; rfDraw(); rfLater(1500); return; }
+  if (j.state === "done" && !j.stale) { RF.st = "done"; RF.id = j.id; RF.plan = j.plan; RF.err = ""; RF.dead = false; rfDraw(); return; }
+  if (first || was === "start") { rfStart(); return; }   // nothing there, a failed job, or a list for a draft that has moved on: a new one
+  if (j.state === "done") { RF.st = "done"; RF.id = j.id; RF.plan = j.plan; RF.dead = true; RF.err = "The draft changed since this list was made. Run Re-fit again."; }
+  else if (j.state === "failed") { RF.st = "failed"; RF.err = j.error || ""; }
+  else RF.st = "idle";
+  rfDraw();
+}
+async function rfStart() {   // ask the server to begin (one job at a time: "already running" is polled instead; a POST of an earlier opening still out is waited for, not matched by a second)
+  if (RF.busy) return;
+  const fresh = () => { RF.st = "start"; RF.err = ""; RF.dead = false; RF.plan = null; RF.pre = null; RF.preOn = false; RF.slow = false; };
+  if (rfPosting) { fresh(); rfWant = true; rfDraw(); return; }
+  const g = ++RF.gen; rfPosting = RF.busy = true; fresh(); rfDraw();
+  let r = null, j = {}, err = null;
+  try { r = await fetch("/api/draft/refit", { method: "POST" }); j = await rfJson(r); } catch (e) { err = e; }
+  rfPosting = false;
+  if (g !== RF.gen || !RF.open) { if (rfWant && RF.open) { rfWant = false; rfLoad(true); } return; }   // an older opening's POST: it clears nothing of this one's, and a start asked for meanwhile looks at what the server has now
+  RF.busy = false;
+  if (err) { RF.st = "failed"; RF.err = "Could not reach the server: " + err.message; rfDraw(); return; }
+  if (r.status === 401) { location.href = "/login"; return; }
+  if (r.ok || (r.status === 409 && j.error === RF_WAIT)) { RF.st = "run"; rfDraw(); rfLater(300); return; }
+  RF.st = "none"; RF.err = j.error || "The re-fit could not be started."; rfDraw();
+}
+async function rfPreview() {   // the preview of the list once (kept for that list), shown or hidden by the same button
+  if (RF.busy || !RF.plan) return;
+  if (RF.preOn) { RF.preOn = false; rfDraw(); return; }
+  RF.preOn = true; RF.err = "";
+  if (RF.pre && RF.pre.id === RF.id) { rfDraw(true); return; }
+  const g = ++RF.pgen, id = RF.id; RF.pre = null; RF.busy = true; rfDraw();
+  let r = null, j = {}, err = null;
+  try { r = await fetch("/api/draft/refit/preview?id=" + encodeURIComponent(id)); j = await rfJson(r); } catch (e) { err = e; }
+  if (g !== RF.pgen || !RF.open || id !== RF.id) return;   // an old request's end clears nothing of a newer opening's
+  RF.busy = false;
+  if (err) { RF.preOn = false; RF.err = "Could not reach the server: " + err.message; rfDraw(); return; }
+  if (r.status === 401) { location.href = "/login"; return; }
+  if (!r.ok) { RF.preOn = false; RF.dead = true; RF.err = j.error || "The preview could not be made. Run Re-fit again."; rfDraw(); return; }
+  RF.pre = { id, answer: j }; rfDraw(true);   // brought into view now that it is drawn
+}
+async function rfApply() {
+  if (RF.busy || RF.applying || !RF.plan || RF.dead || RF.st !== "done") return;
+  if (FX.busy) { toast(BDWHY.busy); return; }   // a change is being saved on the board: this one would land around it
+  const id = RF.id; RF.busy = RF.applying = true; RF.err = ""; rfDraw(); fxBusy(true);
+  let r = null, j = {}, err = null;
+  try { r = await fetch("/api/draft/refit/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); j = await rfJson(r); } catch (e) { err = e; }
+  fxBusy(false); RF.busy = RF.applying = false;
+  if (err) { RF.err = "Could not reach the server: " + err.message + ". Look at step 8 before you try again."; rfDraw(); return; }
+  if (r.status === 401) { location.href = "/login"; return; }
+  const made = r.ok || ("kept" in j && "changes" in j);   // an error with kept and changes: the re-fit was made, and the check after it failed
+  if (!made) { RF.dead = true; RF.err = j.error || "The re-fit could not be made. Run Re-fit again."; RF.preOn = false; rfDraw(); return; }
+  RF.st = "idle"; RF.plan = null; RF.pre = null; RF.id = null; rfClose();
+  const kept = j.kept && j.kept.name, good = r.ok && j.info && j.info.warnings;
+  S.help = null;   // the open ways are of the draft before
+  if (good) await fxAfter(j.info); else { refreshDraft().then(() => { if (STEPS[S.step][0] === "edit") drawDraft(); }); poll(); }   // fxAfter does what any batch does: the draft, the board and its Undo, the panel
+  vsLoad();
+  toast(r.ok ? Draft.refitDone(j.changes, kept) : (j.error || "") + (j.kept ? " " + vsKeptSay(j.kept) : ""));
+}
+function rfAction(b) {
+  const a = b.dataset.rf;
+  if (a === "close" || a === "cancel") rfClose();
+  else if (a === "again") rfStart();
+  else if (a === "preview") rfPreview();
+  else if (a === "apply") rfApply();
+}
 async function refreshDraft() {   // the draft again from the server, and the step drawn from it
   try {
     const r = await fetch("/api/draft"), j = await r.json().catch(() => ({}));
@@ -3357,7 +3511,7 @@ function draftHTML(j) {   // {head: the school, the counts, the configuration li
     + ruleReportHTML(j.rule_report || [], j.typed || 0) + choicesUsedHTML(j.choices_used || [], j.choice_problems || [], j.choices || 0)
     + `<p class="muted small" style="margin-top:8px">${esc(Draft.gateText(nc0))} Publish is on step 9.</p>
     <div class="row"><a href="/draft/preview" target="_blank" rel="noopener" title="Opens in a new tab: the timetable as teachers and students would see it, from the draft as it is now. Nothing is published."><button>Preview as it will be published</button></a><button class="primary" data-step="${stepAt("publish")}">Go to step 9</button></div>`;
-  return { head: head + otherSchool(j) + configLine(j), warns, changes: fixesHTML(j), foot };
+  return { head: head + otherSchool(j) + configLine(j, true), warns, changes: fixesHTML(j), foot };
 }
 /* step 9: what will be published, read-only. Every critical mistake with a way back to step 8, every other open warning, the
    fixes, and the Publish button (off while a critical mistake remains; the server refuses as well) */
@@ -4791,10 +4945,10 @@ document.addEventListener("contextmenu", e => {   // a right-click on a lesson (
   const c = akCovering(b.data, at); if (c) { e.preventDefault(); akOpen(Ask.ofCard(c, bdRowData(row))); }   // under a card's edge: that lesson
 });
 /* which configuration (the workbook's id) the timetable was made from, against the setup's version now */
-function configLine(j) {
+function configLine(j, link) {
   const id = esc(j.config_id), now = esc(j.setup_version);
   return { same: `<p class="okmsg">Made from this configuration (${id}).</p>`,
-    older: `<p class="issue">Made from configuration ${id}; the setup is now ${now}. Changes since then are not in this timetable.</p>`,
+    older: `<p class="issue">Made from configuration ${id}; the setup is now ${now}. Changes since then are not in this timetable.${link && j.refit ? ` <button class="rflink" id="rfCfg" data-rfopen="cfg">Re-fit to the setup</button>` : ""}</p>`,
     unsaved: `<p class="issue">Made from a workbook that was downloaded with unsaved changes (${id}), so it may not match the setup saved here (${now}).</p>`,
     unknown: `<p class="muted small">The timetable does not say which configuration it was made from (an older workbook).</p>`,
     newer: `<p class="issue">The timetable's configuration ${id} is newer than this setup's ${now}: it was made from another copy.</p>` }[j.config_state] || "";
