@@ -6,7 +6,7 @@
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const DAYS = [["Mon", "Monday"], ["Tue", "Tuesday"], ["Wed", "Wednesday"], ["Thu", "Thursday"], ["Fri", "Friday"]];
-  const FIXED = "Always true, whatever the rules say: only teachers free at that time · never someone away that day · the relief team approves before anything is sent.";
+  const FIXED = "Always true, whatever the rules say: only teachers free at that time · never someone away that day · nothing reaches a relief teacher until the relief team approves it and sends it out, or a head chooses them when planning.";
   const NAMES = "Write people by their full name. The app replaces names with labels before the rules go to the AI.";
   const S = { data: null, f: null, dirty: false, busy: false, msg: "", bad: false, open: null, q: "" };
 

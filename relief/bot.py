@@ -657,7 +657,7 @@ def _asked_for(p):
 ACTIONS = {"ack": ("relief", _ack, (_cover.NOT_HAPPENING,)), "change": ("relief", _ask_change, (_cover.NOT_HAPPENING,)),
            "cancel": ("relief", _ask_cancel, ()), "keep": ("relief", _keep, (OLD_BUTTON,)),
            "cancel-yes": ("relief", _yes, (OLD_BUTTON,)), "approve": ("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE, _cover.NOT_HAPPENING)),
-           "sendout": ("relief.team", _send_out, (_cover.PICK_CHANGED, _cover.NOT_FREE_OUT, _cover.NOT_HAPPENING)),
+           "sendout": ("relief.team", _send_out, (_cover.NOT_FREE_OUT, _cover.NOT_HAPPENING)),      # the pick changed: the button carries its approval, so it can never succeed and goes
            "remind": ("relief.team", _remind, ANY), ASK: ("relief", _asked_for, ANY)}
 # what the why typed in a talk comes to, by its kind: f(chat, the button, why, talk) -> _Out
 TALKS = dict(change=_change, cancel=_sure)

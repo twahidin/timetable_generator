@@ -209,4 +209,11 @@ t("the times card: the three times in place of Fill open lessons at, and the wor
   for (const k of ["morning_at", "send_from", "cut_off", "work_eve", "work_day"]) assert.ok(p.$(`input[data-t="${k}"]`), k);
 });
 
+/* ---- Send-out, final fix wave ---- */
+t("the sentence that is always true names Send out and a head's own choice", async () => {
+  const p = await opened({ "GET admin": ok(TOKEN) }), text = p.text("#main");
+  assert.ok(text.includes("Always true, whatever the rules say: only teachers free at that time · never someone away that day · nothing reaches a relief teacher until the relief team approves it and sends it out, or a head chooses them when planning."), text);
+  assert.ok(!text.includes("approves before anything is sent"));
+});
+
 run(all);

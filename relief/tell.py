@@ -35,7 +35,7 @@ minutes on (NEW_WAIT: till then its picks may be on their way); made only in the
 one sent before the morning time (the evening, the night, a weekend) is in that day's morning message (relief/morning.py) and
 pings nobody, and one whose picks come after the cut-off pings nobody; claimed once (a key there in any state, dropped too, is
 never made again). The ping kind new it replaces is dropped if one is still queued (CHECKS). needed:{absent}:{ckey}:{at}:{name},
-Relief needed again, to each of the team, once, when an approved relief went back to open at at because its teacher is away
+Relief needed again, to each of the team but the relief teacher who is away and the absent teacher, once, when an approved relief went back to open at at because its teacher is away
 then (cover.back_to_open, cover.was_away) and the cover is open or waiting again: with its new pick at once, open five minutes
 on (NEW_WAIT); in the team's window alone and claimed once as late is; never of a lesson of today found before that day's
 morning time (the morning message counts it). The teacher who was away hears gone, as anyone told of a relief no longer theirs.
@@ -48,7 +48,8 @@ refused in plain words: refused); made only in the first team window at or after
 else from the next morning time) and given up when that window ends; dropped outside the window and made again in it (GATES).
 work:{id}:{date}:eve and work:{id}:{date}:day, Please set work, to the teacher who is away, once each, for each date of the
 absence on its own while a lesson of it that date has no work (_no_work: needed, not stopped as far as is known, not over, with
-no text, link or file): eve at work_eve on the calendar day before (Sunday for a Monday), made until day's moment; day at work_day
+no text, link or file): eve at work_eve on the calendar day before (Sunday for a Monday), made until WORK_EVE_UNTIL (22:00) of that
+evening (until midnight when work_eve is at or after it), never later at night; day at work_day
 on the date, made while such a lesson is left; neither when its moment is under WORK_GAP after the absence was sent, or before the
 bot was connected; never of a backup (exams) nor a cancelled absence. It points to My absences in the app (/relief cannot add
 work to an absence already sent). The planned absence's remind goes as before: these may follow it.
@@ -118,6 +119,7 @@ MINUTE = []                                     # called with nothing every minu
 EVERY, FIRST = 60, 5                            # seconds between the ticker's runs, and before the first
 REPEAT_GAP = datetime.timedelta(hours=12)       # a repeat is not made sooner after the last message of its relief
 WORK_GAP = datetime.timedelta(minutes=30)       # a reminder to set work is not made when its moment is sooner after the absence was sent
+WORK_EVE_UNTIL = "22:00"                        # the evening reminder to set work is made only until this hour of its evening (until midnight when work_eve is at or after it)
 PICK_WAIT = datetime.timedelta(minutes=2)       # how long a request to change waits for its new pick before the team is asked without
 NEW_WAIT = datetime.timedelta(minutes=5)        # how long an absence for today with a lesson still open waits for its picks before the team is told of it
 BEFORE = 60                                     # minutes before the first period starts: the day's first report (relief/report.py's)
@@ -506,6 +508,13 @@ def work_moments(date, settings):
     return _hours.at(d - datetime.timedelta(days=1), h.work_eve), _hours.at(d, h.work_day)
 
 
+def _eve_until(eve):
+    """when the evening reminder to set work, whose moment is eve, is made no more: WORK_EVE_UNTIL of that evening, or midnight
+    when eve is at or after it"""
+    until = _hours.at(eve.date(), datetime.time.fromisoformat(WORK_EVE_UNTIL))
+    return until if eve < until else _hours.at(eve.date() + datetime.timedelta(days=1), datetime.time())
+
+
 def _has_work(x):
     w = x.get("work") or {}
     return bool(w.get("text") or w.get("link") or w.get("files"))
@@ -520,14 +529,14 @@ def _no_work(r, date, now, bnds, links):
 
 def _work(w, r):
     """Please set work (the module's doc), to the teacher who is away when they can be reached: for each date of the absence on its
-    own, eve while eve <= now < day, day from day on; each only when its moment is at least WORK_GAP after the absence was sent and
+    own, eve while eve <= now < day and before WORK_EVE_UNTIL of its evening (_eve_until: never at night), day from day on; each only when its moment is at least WORK_GAP after the absence was sent and
     not before the bot was connected; never of a backup or a cancelled absence. Any hour (ANY_HOUR)"""
     sent = _time(r.get("at"))
     if r.get("exams") or r.get("cancelled") or r["teacher"] not in w.reach or sent is None: return []
     out = []
     for date in sorted({x.get("date") for x in r.get("lessons") or [] if _hours._day(x.get("date"))}):
         eve, day = work_moments(date, w.settings)
-        which, moment = ("eve", eve) if eve <= w.now < day else ("day", day) if day <= w.now else (None, None)
+        which, moment = ("eve", eve) if eve <= w.now < min(day, _eve_until(eve)) else ("day", day) if day <= w.now else (None, None)
         if which is None or moment - sent < WORK_GAP or moment < w.since: continue
         lessons = _no_work(r, date, w.now, w.bnds, w.links)
         if lessons: out.append(_item(f"work:{r['id']}:{date}:{which}", r["teacher"], "work", work_text(words.day(date), lessons),
@@ -646,7 +655,8 @@ def _ask(w, r, x, c, ckey):
 
 
 def _needed(w, r, x, c, ckey):
-    """Relief needed again, to each of the team, once: the cover went back to open because its relief teacher is away then
+    """Relief needed again, to each of the team but the relief teacher who is away and the teacher whose lesson it is (as the late
+    request), once: the cover went back to open because its relief teacher is away then
     (cover.was_away) since the bot was connected, and is open or waiting again; made only while the team may be pinged
     (_team_may), never later; not of a lesson of today found before today's morning time (the morning message counts it); open,
     not before NEW_WAIT after it went back (its new pick may be on its way); a key there in any state (dropped too) is not made
@@ -658,7 +668,7 @@ def _needed(w, r, x, c, ckey):
     if s == "open" and w.now - at < NEW_WAIT: return
     text = needed_text(words.day(x["date"]), words.class_group(x), words.periods_text(c), r["teacher"], away["who"], s == "waiting")
     ref = dict(id=r["id"], absent=r["teacher"], ckey=ckey, at=away["at"], ends=_ends(x, c, w.bnds).isoformat())
-    for n in w.team:
+    for n in (n for n in w.team if n not in (away["who"], r["teacher"])):
         key = f"needed:{r['teacher']}:{ckey}:{away['at']}:{n}"
         if key not in w.told: yield _item(key, n, "needed", text, [[dict(text=OPEN_TODAY, url=w.base + "/relief#today")]], ref=ref)
 
@@ -1040,14 +1050,14 @@ def _remind_true(ref, name):
 
 
 def _work_true(ref, name):
-    """the absence is not cancelled nor a backup, its moment's span is now still (eve: until day's moment), and a lesson of that
+    """the absence is not cancelled nor a backup, its moment's span is now still (eve: until day's moment and _eve_until), and a lesson of that
     date still wants work (_no_work); nothing published (a publish swaps folders) raises: it waits"""
     r = _read(ref["id"])
     if r is None or r.get("cancelled") or r.get("exams"): return False
     pub, cal, links = _exams()
     if not pub: raise ValueError("nothing is published")
     now, (eve, day) = _fill._when(None), work_moments(ref["date"], _settings.load(pub))
-    if not (eve <= now < day if ref.get("which") == "eve" else day <= now): return False
+    if not (eve <= now < min(day, _eve_until(eve)) if ref.get("which") == "eve" else day <= now): return False
     return bool(_no_work(r, ref["date"], now, bounds(pub.get("model") or {}), links))
 
 
