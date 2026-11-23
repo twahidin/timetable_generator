@@ -206,18 +206,36 @@ var Groups = (function () {
     return { changes: changes, students: students, rules: rulesN };
   }
 
+  /* ---- one code on two groups */
+  /* one item per lessons row: {code, others: the other rows with that code}, or null for a row whose code is its own. A whole-class row
+     ("Entire Class") and a row with no subject have no code to share; a kept code counts as typed, less the spaces round it */
+  function sameCode(spec) {
+    var C = codes(spec).map(function (c) { return String(c || "").trim(); }), at = Object.create(null);
+    C.forEach(function (c, i) { if (c && c !== "Entire Class") (at[c] = at[c] || []).push(i); });
+    return C.map(function (c, i) { var a = at[c]; return a && a.length > 1 ? { code: c, others: a.filter(function (j) { return j !== i; }) } : null; });
+  }
+  /* the sentence for a row whose code another group has too ("" for any other row); S: sameCode(spec), when the caller has it already */
+  function sameText(spec, li, S) {
+    var s = (S || sameCode(spec))[li]; if (!s) return "";
+    var x = rows(spec, "lessons")[s.others[0]] || {}, n = s.others.length - 1;
+    var where = x.block ? " in " + x.block : " for " + (x.classes || []).join(", ") + ", a group in no band";
+    return s.code + " is also the code of " + x.subject + where + (n ? " and " + n + " more group" + (n === 1 ? "" : "s") : "") +
+      ". Two groups cannot share a code: give one of them another under Keep code in the Table view.";
+  }
+
   /* ---- the bands page */
   function lanes(spec, level) {
-    var L = rows(spec, "lessons"), C = codes(spec), out = [];
+    var L = rows(spec, "lessons"), C = codes(spec), S = sameCode(spec), out = [];
     rows(spec, "blocks").forEach(function (b, bi) {
       if (!b || (level && b.level !== level)) return;
-      var groups = [], seen = {}, twice = [];
+      var groups = [], seen = {}, twice = [], same = [];
       L.forEach(function (x, li) {
         if (!x || x.block !== b.block) return;
+        if (S[li]) same.push(sameText(spec, li, S));
         groups.push({ li: li, code: C[li], subject: x.subject, classes: (x.classes || []).slice(), students: x.students == null ? null : Number(x.students) || null, teachers: names(x) });
         names(x).forEach(function (nm) { seen[nm] = (seen[nm] || 0) + 1; if (seen[nm] === 2) twice.push(nm); });
       });
-      out.push({ bi: bi, block: b.block, level: b.level, classes: (b.classes || []).slice(), everyone: b.everyone == null ? !/option|elective/i.test(b.block || "") : !!b.everyone, groups: groups, twice: twice });
+      out.push({ bi: bi, block: b.block, level: b.level, classes: (b.classes || []).slice(), everyone: b.everyone == null ? !/option|elective/i.test(b.block || "") : !!b.everyone, groups: groups, twice: twice, same: same });
     });
     return out;
   }
@@ -282,6 +300,6 @@ var Groups = (function () {
   }
 
   return { untag: untag, bandName: bandName, codes: codes, codeFor: codeFor, pullOutCode: pullOutCode, lanes: lanes, pool: pool, view: view, NONE: NONE, dropRow: dropRow, dropBand: dropBand, bandRules: bandRules, renameBand: renameBand,
-    newGroup: newGroup, addOnePerClass: addOnePerClass, newBand: newBand, toBand: toBand, fromBand: fromBand, shift: shift };
+    newGroup: newGroup, addOnePerClass: addOnePerClass, newBand: newBand, toBand: toBand, fromBand: fromBand, shift: shift, sameCode: sameCode, sameText: sameText };
 })();
 if (typeof module !== "undefined") module.exports = Groups;
