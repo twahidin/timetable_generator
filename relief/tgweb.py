@@ -129,7 +129,7 @@ def _mine():
 def _status(name):
     b, x = links.connected(), links.linked().get(name)
     return jsonify(on=tg.on(), connected=b is not None, bot=b["username"] if b else None, linked=x is not None,
-                   handle=x["handle"] if x else None, since=x["at"] if x else None)
+                   handle=x["handle"] if x else None, since=x["at"] if x else None, blocked=None if x else links.blocked(name))
 
 
 @bp.get("/api/relief/telegram")

@@ -378,4 +378,13 @@ t("the ask form's Sent says when the officer is not on Telegram", async () => {
   assert.strictEqual(say(null), plain);
 });
 
+const BLOCKED = "Your Telegram was unlinked on Tue 13 Oct: the bot was blocked there. Unblock it in Telegram, then link again.";
+t("unlinked because the bot was blocked: said until they link again", async () => {
+  const p = await opened({ "GET ": ok(Object.assign({}, FREE, { blocked: "2026-10-13T07:10:00+08:00" })) });
+  assert.strictEqual(p.card(), `Telegram ${BLOCKED} Link Telegram`);
+  p.api["POST /code"] = () => code(p); await p.click("button", "Link Telegram"); hasNot(p, BLOCKED);
+  const q = await opened({ "GET ": ok(Object.assign({}, LINKED, { blocked: "2026-10-13T07:10:00+08:00" })) }); hasNot(q, BLOCKED); has(q, "Linked as @sam_made_up");
+  const r = await opened({ "GET ": ok(Object.assign({}, FREE, { blocked: null })) }); has(r, LINE);
+});
+
 run(all);

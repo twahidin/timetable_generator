@@ -865,7 +865,7 @@ def the_code_route_needs_a_person_and_a_connection():
     API = "/api/relief/telegram"
     os.environ.pop("TELEGRAM_BOT_TOKEN", None)
     tia = who(TIA)
-    off = dict(on=False, connected=False, bot=None, linked=False, handle=None, since=None)
+    off = dict(on=False, connected=False, bot=None, linked=False, handle=None, since=None, blocked=None)
     assert tia.get(API).get_json() == off and tia.get(API).status_code == 200
     assert (tia.post(API + "/code").status_code, tia.post(API + "/code").get_json()) == (409, {"error": "Telegram is not connected yet."})
     with telegram(connected=False):
@@ -883,7 +883,7 @@ def the_code_route_needs_a_person_and_a_connection():
         assert hook(msg(f"/start {j['code']}", 501, user="tia_t")).status_code == 200
         j = tia.get(API).get_json()
         assert (j["on"], j["connected"], j["bot"], j["linked"], j["handle"]) == (True, True, "practice_bot", True, "tia_t") and j["since"][:4] >= "2026", j
-        assert set(j) == {"on", "connected", "bot", "linked", "handle", "since"} and "501" not in json.dumps(j)
+        assert set(j) == {"on", "connected", "bot", "linked", "handle", "since", "blocked"} and "501" not in json.dumps(j)
         assert who(HUGO).get(API).get_json()["linked"] is False, "each person sees their own link only"
         r = tia.delete(API + "/link"); assert r.status_code == 200 and r.get_json()["linked"] is False and links.linked() == {}
         assert tia.delete(API + "/link").status_code == 200                             # nothing to take away: the same answer
@@ -7430,6 +7430,36 @@ def the_form_says_when_the_officer_is_not_on_telegram():
         def boom(*a, **k): raise RuntimeError("made up")
         with stand_in(links, "reachable", boom): r = call(EVE, "post", "/api/relief/absences", ASKED)
         assert "officer_not_told" not in r and len(mine()) == 1, "never the save's failure"
+
+# ---- Answers, Task 2: unlinked because the bot was blocked ----
+def status_of(name): return who(name).get("/api/relief/telegram").get_json()
+
+@t
+def the_blocked_line_is_theirs_alone_and_goes_when_they_link():
+    with made_up():
+        links.link(TIA, 501, None); links.link(HUGO, 502, None); f, seen = tele(BLOCKED)
+        with now_is("2026-10-13T07:10:00+08:00"): q("a"); with_send(f, OB.send_due)
+        assert links.blocked(TIA) == "2026-10-13T07:10:00+08:00" and status_of(TIA)["blocked"] == "2026-10-13T07:10:00+08:00" and status_of(TIA)["linked"] is False
+        assert links.blocked(HUGO) is None and status_of(HUGO)["blocked"] is None, "nobody else's"
+        links.link(TIA, 601, None); assert links.blocked(TIA) is None and status_of(TIA)["blocked"] is None, "linked again"
+        links.unlink(TIA); links.note_blocked(TIA); c = links.new_code(TIA)["code"]; assert links.use(c, 601, None) == TIA and links.blocked(TIA) is None, "by a code too"
+        assert links.note_blocked(TIA) is False and links.blocked(TIA) is None, "never while they are linked"
+        assert [r["k"] for r in rows("state") if r["k"].startswith("blocked:")] == []
+
+@t
+def only_a_blocked_bot_makes_the_line():
+    with made_up():
+        links.link(TIA, 501, None); links.unlink(TIA); assert links.blocked(TIA) is None, "Unlink, /stop or the team"
+        links.link(TIA, 501, None); tgweb_unlink = who(TEAM).post("/api/relief/telegram/unlink", json=dict(name=TIA)); assert tgweb_unlink.status_code == 200 and links.blocked(TIA) is None
+        links.link(TIA, 501, None); f, seen = tele(BLOCKED, before=lambda *a: tgdb.set_state("bot", None)); q("a"); with_send(f, OB.send_due)
+        assert links.blocked(TIA) is None, "the bot disconnected meanwhile: nobody unlinked, no line"
+        bot_on("ctss_made_up_bot"); real = links.unlink
+        def late(name, *a): links.link(TIA, 601, None); return real(name, *a)
+        with stand_in(links, "unlink", late): f, seen = tele(BLOCKED); q("b"); with_send(f, OB.send_due)
+        assert links.chat_of(TIA) == 601 and links.blocked(TIA) is None, "linked again on another phone between: no line"
+        links.unlink(TIA); links.link(TIA, 501, None); f, seen = tele(BLOCKED, before=lambda *a: links.unlink(TIA)); q("c"); with_send(f, OB.send_due)
+        assert links.blocked(TIA) is None, "unlinked by hand between: the bot was not what unlinked them"
+        links.link(TIA, 501, None); tgdb.set_state("blocked:" + TIA, "2026-10-13T07:10:00+08:00"); assert status_of(TIA)["blocked"] is None, "a note left behind is not shown while linked"
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
