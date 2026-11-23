@@ -2227,7 +2227,7 @@ def the_module_stands_alone():
     assert p.stdout.strip() == "[] True False", (p.stdout, p.stderr[-400:])
     assert not hasattr(TE, "links") and TE._links is links, "due has a parameter of that name: the module goes by another"
     assert OB.VALID is TE.still_true and TE.still_true(dict(key="any")) is True and TE.still_true(dict(key="x", kind="exam-duty", ref=None)) is True
-    assert {"relief", "repeat", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "new", "late", "morning", "report", "clear", "weekly", "needed", "covered"} == set(TE.CHECKS)
+    assert {"relief", "repeat", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "new", "late", "morning", "report", "clear", "weekly", "needed", "covered", "unlinked"} == set(TE.CHECKS)
 
 # ---- the hooks: fill.AFTER, tell.soon, and who asks for a sweep
 @t
@@ -7596,7 +7596,7 @@ def the_settings_say_what_could_not_be_sent_since_monday():
         assert u == dict(failed=3, unsure=1, since="2026-10-12", more=0, items=[
             dict(what="Relief planned", name=EVE, at="2026-10-13T07:10:00+08:00", state="failed"), dict(what="To the reporting officer", name=ROSA, at="2026-10-12T15:00:00+08:00", state="unsure"),
             dict(what="Weekly summary", name=TEAM, at="2026-10-12T15:00:00+08:00", state="failed"), dict(what="Message", name=ROSA, at="2026-10-12T09:00:00+08:00", state="failed")]), u
-        assert set(tgweb.UNSENT) == {"planned", "remind", "officer", "ask", "askpick", "kept", "cancelled", "gone", "moved", "stopped", "again", "weekly", "late", "morning", "repeat", "needed", "covered"} and tgweb.UNSENT["covered"] == "Who covers you" and tgweb.UNSENT["needed"] == "Relief needed again" and tgweb.UNSENT["late"] == "Late request for today" and tgweb.UNSENT["morning"] == "Morning message"
+        assert set(tgweb.UNSENT) == {"planned", "remind", "officer", "ask", "askpick", "kept", "cancelled", "gone", "moved", "stopped", "again", "weekly", "late", "morning", "repeat", "needed", "covered", "unlinked", "work"} and tgweb.UNSENT["covered"] == "Who covers you" and tgweb.UNSENT["needed"] == "Relief needed again" and tgweb.UNSENT["late"] == "Late request for today" and tgweb.UNSENT["morning"] == "Morning message"
         call(EVE, "get", ADMIN, code=401)                                                  # need("relief.save"): as before
 
 @t
@@ -8995,6 +8995,106 @@ def a_failed_button_write_loses_no_history():
         r, x, c = covered(i, K5); assert CV.state(r, x, c) == "approved" and c["relief"] == MAYA and CV.sent_out(c) is None
         got = h.new(); assert [(w, a_, v, what) for w, a_, v, what, *_ in got] == [(TEAM, TEAM, "telegram", "approved")], got
         p = calls("editMessageText")[-1]; assert p["text"].endswith(f"✅ Approved: {MAYA}, 09:10.") and "reply_markup" not in p and [r_ for r_ in rows("buttons") if r_["what"] == "sendout"] == [], "no Send out: the team sends out on Today"
+
+# ---- Send-out, Task 12: the blocked-bot alert ----
+ALERT_EVE = "⚠️ Ms Evelyn Koh has blocked the bot and is now unlinked.\nThey did not get: Relief planned.\nPlease tell them yourself."
+UNLINKED_EVE = f"Telegram unlinked for {EVE}: the bot was blocked"
+
+def blocked_send(*answers):
+    """what is due sent under a made-up token (practice's bot refuses nothing), Telegram answering answers; then practice again"""
+    b = tgdb.get_state("bot"); os.environ["TELEGRAM_BOT_TOKEN"] = "made-up-" + secrets.token_hex(6)
+    tgdb.set_state("bot", dict(b, username="ctss_made_up_bot", key=digest(tg.hook_secret())))
+    try: f, seen = tele(*answers); return with_send(f, send)
+    finally: os.environ["TELEGRAM_BOT_TOKEN"] = "practice"; tgdb.set_state("bot", b)
+def alert_rows(): return [r["k"] for r in rows("state") if r["k"].startswith("alert:")]
+
+@t
+def a_blocked_bot_in_the_evening_is_told_to_the_team_in_the_morning():
+    with school(EVE, TEAM, LEE):
+        at("21:00"); absent(by=HUGO); TE.sweep(); assert told_of("planned") == [("planned", EVE)]       # "Relief planned for you" to Eve: no quiet time
+        h = Since(); blocked_send(BLOCKED)
+        assert links.chat_of(EVE) is None and links.blocked(EVE) and told_of("unlinked") == [] and outs("planned") == [], "noted, never sent from the sending path"
+        assert h.new() == [(None, "The app", "app", "telegram unlinked", UNLINKED_EVE, None)], "one History line by The app"
+        assert alert_rows() == [f"alert:{EVE}:2026-10-12"] and tgdb.get_state(alert_rows()[0]) == dict(at="2026-10-12T21:00:00+08:00", what="Relief planned")
+        at("21:05"); swept(); at("06:29:59", day=13); swept(); assert told_of("unlinked") == [], "the team's window"
+        at("06:30", day=13); swept(); assert sorted(n for k, n in told_of("unlinked")) == [LEE, TEAM] and said(TEAM)[-1] == ALERT_EVE and said(LEE)[-1] == ALERT_EVE
+        assert {r["key"] for r in outs("unlinked")} == {f"unlinked:{EVE}:2026-10-12:{n}" for n in (TEAM, LEE)} and all(json.loads(r["ref"]) == dict(name=EVE, date="2026-10-12") for r in outs("unlinked"))
+        assert buttons_of(outs("unlinked")[0]) == [[dict(text="Open relief today", url=BASE + "/relief#today")]]
+        swept(); assert len(told_of("unlinked")) == 2, "once"
+        assert h.new() == [] and EVE not in [n for k, n in told_of("unlinked")]
+
+@t
+def an_alert_names_any_other_kind_by_its_label():
+    assert TE.refused(dict(kind="relief", ref=dict(lesson="1A, 1B Science (G2)", periods="P6–P7", day="Tue 13 Oct"))) == "Relief for you · 1A, 1B Science (G2) P6–P7 on Tue 13 Oct"
+    assert TE.refused(dict(kind="repeat", ref=dict(lesson="3B Maths", periods="P3–P4", day="Tue 13 Oct", repeat="before"))) == "Relief for you · 3B Maths P3–P4 on Tue 13 Oct"
+    assert TE.refused(dict(kind="planned", ref=dict(id="x"))) == "Relief planned" and TE.refused(dict(kind="exam-made-up", ref=None)) == "Message"
+    assert TE.refused(dict(kind="relief", ref=None)) == "Message" and TE.refused(dict(kind="morning", ref=dict(date="2026-10-13"))) == "Morning message"
+    assert tgweb.UNSENT is WO.KINDS and "new" not in WO.KINDS and WO.KINDS["unlinked"] == "Bot blocked alert" and WO.KINDS["work"] == "Please set work"
+    assert OB.WHAT is TE.refused and TE.unlinked_text(EVE, "Relief planned") == ALERT_EVE
+    assert "unlinked" in TE.GATES and "unlinked" not in TE.ANY_HOUR and TE.CHECKS["unlinked"] is TE._unlinked_true and "unlinked:" in TE.TOLD
+
+@t
+def a_blocked_relief_is_named_by_its_lesson_and_never_by_its_text():
+    with school(SAM, TEAM, LEE):
+        i = absent(); give(i, K5, SAM); TE.sweep(); r, = outs("relief"); h = Since(); blocked_send(BLOCKED)
+        assert links.chat_of(SAM) is None and told_of("unlinked") == [], "in the team's window too, it is made by the next sweep, never from the sending path"
+        a = tgdb.get_state(f"alert:{SAM}:2026-10-12"); assert a == dict(at="2026-10-12T09:00:00+08:00", what="Relief for you · 1A, 1B Science (G2) P6–P7 on Tue 13 Oct"), a
+        held = json.dumps([x for x in rows("state") if x["k"].startswith("alert:")]) + json.dumps(h.new()); assert r["text"].split("\n")[0] not in held and "Medical" not in held and str(CHATS[SAM]) not in held and r["key"] not in held
+        swept(); assert said(TEAM)[-1] == f"⚠️ {SAM} has blocked the bot and is now unlinked.\nThey did not get: {a['what']}.\nPlease tell them yourself."
+
+@t
+def a_blocked_bot_is_told_once_a_day_and_never_to_who_blocked_it():
+    with school(EVE, TEAM, LEE):
+        at("10:00"); assert links.note_alert(TEAM, "Relief planned") is True and links.note_alert(TEAM, "Morning message") is False, "one a person a day"
+        assert links.alerts("2026-10-12") == {(TEAM, "2026-10-12"): dict(at="2026-10-12T10:00:00+08:00", what="Relief planned")} and links.alerts(datetime.date(2026, 10, 13)) == {}
+        swept(); assert told_of("unlinked") == [("unlinked", LEE)], "never the person who blocked it, on the team or not"
+        # blocked, linked again and blocked again the same day: one alert, a History line for each unlinking
+        absent(by=HUGO); TE.sweep(); h = Since(); blocked_send(BLOCKED); links.link(EVE, CHATS[EVE], None)
+        absent(by=HUGO, dates=("2026-10-14",)); TE.sweep(); blocked_send(BLOCKED)
+        assert links.chat_of(EVE) is None and sorted(alert_rows()) == [f"alert:{EVE}:2026-10-12", f"alert:{TEAM}:2026-10-12"]
+        assert [x[4] for x in h.new()] == [UNLINKED_EVE, UNLINKED_EVE]
+        swept(); swept(); assert sorted(told_of("unlinked")) == [("unlinked", LEE), ("unlinked", LEE), ("unlinked", TEAM)]
+
+@t
+def a_blocked_bot_is_told_in_its_first_team_window_alone():
+    with school(EVE, TEAM, LEE):                                                           # found at 10:00 and not swept until the cut-off: given up
+        at("10:00"); links.note_alert(EVE, "Relief planned"); at("14:00"); swept(); at("06:30", day=13); swept(); assert told_of("unlinked") == []
+    with school(EVE, TEAM, LEE):                                                           # queued at 13:59, held up past the cut-off: dropped, not made again
+        at("13:59"); links.note_alert(EVE, "Relief planned"); TE.sweep(); assert len(told_of("unlinked")) == 2
+        at("14:00"); send(); assert {r["state"] for r in outs("unlinked")} == {"dropped"} and said(TEAM) == []
+        at("06:30", day=13); swept(); assert said(TEAM) == [] and {r["state"] for r in outs("unlinked")} == {"dropped"}
+    with school(EVE, TEAM, LEE):                                                           # queued, then dropped by a publish swapping folders: made again in its window
+        at("10:00"); links.note_alert(EVE, "Relief planned"); TE.sweep()
+        with no_pub(): send()
+        assert {r["state"] for r in outs("unlinked")} == {"dropped"}; at("10:01"); swept(); assert said(TEAM) == [ALERT_EVE] and said(LEE) == [ALERT_EVE]
+    with school(EVE, TEAM, LEE):                                                           # found on a Friday evening: said on Monday at the morning time
+        at("21:00", day=16); links.note_alert(EVE, "Relief planned")
+        for d in (17, 18): at("10:00", day=d); swept()
+        assert told_of("unlinked") == []; at("06:30", day=19); swept(); assert said(TEAM) == [ALERT_EVE]
+    with school(EVE, TEAM, LEE):                                                           # somebody who is not on the team any more: dropped
+        at("10:00"); links.note_alert(EVE, "Relief planned"); TE.sweep()
+        with record(LEE, extras=dict(relief=False, exams=None, admin=False)): send()
+        assert said(TEAM) == [ALERT_EVE] and said(LEE) == []
+
+@t
+def a_failure_to_note_a_block_stops_nothing_else():
+    for broken in ("note_alert", "note_blocked"):
+        with school(EVE, TEAM, LEE):
+            at("10:00"); absent(by=HUGO); TE.sweep(); h, g = Since(), Grab(); KINDS.addHandler(g)
+            try:
+                with stand_in(links, broken, boom_): blocked_send(BLOCKED)
+            finally: KINDS.removeHandler(g)
+            assert links.chat_of(EVE) is None and outs("planned") == [] and [x[4] for x in h.new()] == [UNLINKED_EVE], broken
+            assert [r.getMessage() for r in g.records] == ["blocked", "an unlinked chat could not be noted (OperationalError)"], "by kind alone"
+            assert (links.blocked(EVE) is None) == (broken == "note_blocked") and bool(alert_rows()) == (broken != "note_alert")
+    with school(EVE, TEAM, LEE):                                                           # the History hook fails: unlinked and noted all the same
+        at("10:00"); absent(by=HUGO); TE.sweep()
+        with stand_in(OB, "UNLINKED", [boom_]): blocked_send(BLOCKED)
+        assert links.chat_of(EVE) is None and links.blocked(EVE) and alert_rows() == [f"alert:{EVE}:2026-10-12"]
+    with school(EVE, TEAM, LEE):                                                           # what was refused cannot be said: nothing noted for the team, the rest goes on
+        at("10:00"); absent(by=HUGO); TE.sweep(); h = Since()
+        with stand_in(OB, "WHAT", boom_): blocked_send(BLOCKED)
+        assert links.chat_of(EVE) is None and links.blocked(EVE) and alert_rows() == [] and [x[4] for x in h.new()] == [UNLINKED_EVE]
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

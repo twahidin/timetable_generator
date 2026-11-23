@@ -42,6 +42,10 @@ morning time (the morning message counts it). The teacher who was away hears gon
 covered:{absent}:{ckey}:{ack at}, Who covers you, to the teacher who is away, once an acknowledgement of a lesson of theirs: it names
 the relief teacher, whom they may see in the app from then on; never of a backup (exams), nor when the teacher who is away is the
 relief teacher. A relief moved and acknowledged by another is told anew; one moved before it went is dropped.
+unlinked:{name}:{date}:{member}, the blocked-bot alert, to each of the team but name, once: Telegram refused a message to name
+because they blocked the bot, and the sender unlinked them and noted it (links.note_alert, one a person a day, with what was
+refused in plain words: refused); made only in the first team window at or after it was found (hours.team_window: at once in it,
+else from the next morning time) and given up when that window ends; dropped outside the window and made again in it (GATES).
 
 The relief message carries no files: it says how many there are and has Open in the app, and they are downloaded in Reliefs I'm
 covering (outbox still sends those of a message queued with files before this was so).
@@ -67,7 +71,8 @@ messaged, worked out by relief/hours.py. To a relief teacher (TEACHER_KINDS: rel
 stopped, again, kept): in school hours for its lesson (hours.teacher_open: from the earliest send-out time to the end of the
 cut-off's minute of a school day; on the lesson's own day from the earliest send-out time), while the lesson is not over. To the
 team: ask and askpick in the team's window (hours.team_open: a duty day, from the morning time to before the cut-off), or on the
-lesson's own day from the cut-off until it starts; the team's copy of cancelled in their window. The others go at any hour,
+lesson's own day from the cut-off until it starts; the team's copy of cancelled in their window; the blocked-bot alert in the
+first of their windows after it was found. The others go at any hour,
 each named in ANY_HOUR with why (the late request, Relief needed again and the morning message keep the team's window by
 rules of their own, since none is made again). due does not make one outside its hours, and still_true drops one queued that is still waiting when its
 hours end (an outage, a pause Telegram asked for): due makes it again, under the same key, when they come, if it is still true
@@ -116,7 +121,7 @@ NO_PICK = "No new pick yet: open the app."
 ACK, CHANGE, SET_WORK, NOT_NEEDED, OPEN = "✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"
 NOT_TOLD = "{officer} is not on Telegram: please tell them yourself."                 # said to a teacher (the form, /relief) when their reporting officer is not on Telegram
 OPEN_TODAY = "Open relief today"                # the button to Today's page (relief/report.py's too)
-TOLD = ("relief:", "gone:", "moved:", "stopped:", "again:", "ask:", "planned:", "remind:", "officer:", "covered:", "needed:", "late:")      # the keys due must know of
+TOLD = ("relief:", "gone:", "moved:", "stopped:", "again:", "ask:", "planned:", "remind:", "officer:", "covered:", "needed:", "unlinked:", "late:")      # the keys due must know of
 SENT = ("sent", "unsure")                       # the states in which a person was told, or may have been
 WAITING = ("queued", "sending")                 # ... in which they will be by itself, or are now
 LIVE = (*SENT, *WAITING)
@@ -188,6 +193,20 @@ def needed_text(day, lesson, periods, absent, who, waiting):
     for the team's approval, else nobody else is free then"""
     then = "A new pick is waiting for your approval. Approve, then Send out." if waiting else NOBODY_ELSE
     return f"🔁 Relief needed again · {day}\n{lesson} · {periods} · for {absent}\n{_cover.AWAY.format(name=who)}. {then}"
+
+
+def unlinked_text(name, what):
+    """the blocked-bot alert: what, the plain words of what they did not get (refused)"""
+    return f"⚠️ {name} has blocked the bot and is now unlinked.\nThey did not get: {what}.\nPlease tell them yourself."
+
+
+def refused(item):
+    """what a message (outbox's item) was, as the blocked-bot alert names it: a relief or its repeat by its lesson, any other kind
+    by its label (words.KINDS), else "Message"; never its text"""
+    ref, kind = item.get("ref") if isinstance(item.get("ref"), dict) else {}, item.get("kind")
+    if kind in ("relief", "repeat") and all(ref.get(k) for k in ("lesson", "periods", "day")):
+        return f"Relief for you · {ref['lesson']} {ref['periods']} on {ref['day']}"
+    return words.KINDS.get(kind, "Message")
 
 
 def _from(start):
@@ -594,6 +613,17 @@ def _needed(w, r, x, c, ckey):
         if key not in w.told: yield _item(key, n, "needed", text, [[dict(text=OPEN_TODAY, url=w.base + "/relief#today")]], ref=ref)
 
 
+def _unlinked(w, name, date, a):
+    """the blocked-bot alert of name's block noted on date (links.alerts: a, dict(at, what)), to each of the team but name: made
+    only while the team may be pinged, in the first team window at or after it was found (hours.team_window), never after it"""
+    found = _time(a.get("at"))
+    span = found and _team_may(w.now, w.settings, w.pub) and _hours.team_window(found, w.settings, w.pub)
+    if not span or not span[0] <= w.now < span[1]: return
+    text, buttons = unlinked_text(name, a.get("what") or "Message"), [[dict(text=OPEN_TODAY, url=w.base + "/relief#today")]]
+    for n in w.team:
+        if n != name: yield _item(f"unlinked:{name}:{date}:{n}", n, "unlinked", text, buttons, ref=dict(name=name, date=date))      # one there (not dropped) is left out by due
+
+
 def _nobody_else(w, r, x, c, ckey):
     """nobody is free for the cover but the teacher who asked to change (False while that is not known)"""
     links = known(w.links, x["date"])
@@ -603,22 +633,23 @@ def _nobody_else(w, r, x, c, ckey):
     return not any(q["name"] != c["relief"] for g in got["groups"] for q in g["people"])
 
 
-def due(pub, settings, records, now, reach, told, since, team=(), base="", shorts=None, unread=(), links=None):
+def due(pub, settings, records, now, reach, told, since, team=(), base="", shorts=None, unread=(), links=None, alerts=None):
     """every message there should be now and is not there yet -> [dict(key, name, kind, text, buttons, files, ref)], as
     outbox.queue takes them, in the order to queue them. Pure. reach: {name: chat} of the people who can be reached; told:
     what outbox.told_for gives for the TOLD keys; since: when the bot was connected (unknown: now); team: the names on the
     relief team; base: the app's address; shorts: {name: short name}; unread: the ids of the records that could not be read (a
     relief that should be in one of them is not said to be gone); links: what approved exams and events stop (fill._links;
-    None: they cannot be read)"""
+    None: they cannot be read); alerts: the blocked-bot alerts noted (links.alerts)"""
     now = _fill._when(now)
     w = types.SimpleNamespace(pub=pub, settings=settings, records=records, now=now, today=now.date(), reach=reach, told=told, since=_time(since) or now,
                               team=sorted(n for n in set(team) if n in reach), base=base or "", shorts=shorts or {}, unread=unread, links=links,
-                              bnds=bounds((pub or {}).get("model") or {}), said=Said(told))
+                              bnds=bounds((pub or {}).get("model") or {}), said=Said(told), alerts=alerts or {})
     still = list(_each(sorted(records, key=lambda r: (str(r.get("at")), str(r.get("dates")))), lambda r: [r] if _last(r) >= w.today.isoformat() else []))
     covers = sorted(_each(still, lambda r: [t for t in _fill._covers([r], None, None, now, w.bnds) if not _stopped(links, t[1])]), key=lambda t: (t[1]["date"], int(t[2]["p"]), str(t[0]["id"]), t[3]))
     out = list(_each(_told_reliefs(w), lambda v: _of_told(w, *v)))       # what is theirs no more comes before what is theirs now
     out += _each(still, lambda r: _absence(w, r))
     out += _each(covers, lambda t: _of_cover(w, *t))
+    out += _each(sorted(w.alerts.items()), lambda v: _unlinked(w, *v[0], v[1]))
     return [i for i in out if not _there(told, i["key"]) and _may(i, now, settings, pub)]
 
 
@@ -707,7 +738,7 @@ def _sweep(now):
     told = _told()
     now, settings, people = _fill._when(now), _settings.load(pub), _accounts.staff(pub)
     more = dict(team=[p["name"] for p in people if "relief.team" in _rights.rights(p, _links.VIA)], base=bot["base"], shorts={p["name"]: p["short"] for p in people},
-                links=_fill._links(pub, settings.get("calendar") or {}))
+                links=_fill._links(pub, settings.get("calendar") or {}), alerts=_links.alerts(now.date() - datetime.timedelta(days=_hours.AHEAD)))
     records, unread = _records() if os.path.isdir(_absences.DIR) else ([], {})          # none yet
     for kind in sorted(set(unread.values())): _log.warning("an absence could not be read (%s)", kind)
     items = due(pub, settings, records, now, reach, told, bot["at"], unread=unread, **more)
@@ -823,7 +854,8 @@ def _lesson_may(now, settings, pub, ref):
 # GATES[kind](now, settings, pub, its ref) -> whether a message of that kind may be made, and may go, now. A kind not here goes at
 # any hour, and is in ANY_HOUR with why. A later kind adds its line here, or to ANY_HOUR (a test holds every kind of CHECKS to one)
 GATES = {**{kind: _lesson_may for kind in TEACHER_KINDS}, "ask": _ask_may, "askpick": _ask_may,
-         "cancelled": lambda now, settings, pub, ref: not ref.get("team") or _team_may(now, settings, pub)}     # the team's copy alone
+         "cancelled": lambda now, settings, pub, ref: not ref.get("team") or _team_may(now, settings, pub),     # the team's copy alone
+         "unlinked": lambda now, settings, pub, ref: _team_may(now, settings, pub)}          # the blocked-bot alert: made again in its window (_unlinked)
 ANY_HOUR = ("planned",                          # to the absent teacher: they need the evening to set work (call 9)
             "remind",                           # to the absent teacher, at remind_at the school day before (call 9)
             "officer",                          # to the reporting officer, at once (call 9)
@@ -999,11 +1031,20 @@ def _needed_true(ref, name):
     return _team_may(_fill._when(None), _settings.load(pub), pub) and _stands_now(x)
 
 
+def _unlinked_true(ref, name):
+    """the person is on the team still, and the team may be pinged now; nothing published (a publish swaps folders) raises: it waits"""
+    if not _on_team(name): return False
+    pub = store.published()
+    if not pub: raise ValueError("nothing is published")
+    return _team_may(_fill._when(None), _settings.load(pub), pub)
+
+
 # what is asked of a queued message, by its kind, before it goes: CHECK(its ref, its person) -> bool. A kind not here is always
 # true (relief/report.py puts report, clear and weekly here, relief/morning.py morning)
 CHECKS = dict(relief=_relief_true, repeat=_repeat_true, gone=_ended_true, moved=_ended_true, stopped=_stopped_true, again=_again_true, kept=_kept_true, ask=_ask_true,
               askpick=_ask_true, planned=lambda ref, name: _absence_now(ref) is not None, remind=_remind_true,
               officer=lambda ref, name: _absence_now(ref, False) is not None, cancelled=_cancelled_true, late=_late_true, needed=_needed_true, covered=_covered_true,
+              unlinked=_unlinked_true,
               new=lambda ref, name: False)            # new: the ping the late request replaced; one still queued from before is dropped
 
 
@@ -1018,3 +1059,4 @@ def still_true(item):
 
 
 outbox.VALID = still_true
+outbox.WHAT = refused

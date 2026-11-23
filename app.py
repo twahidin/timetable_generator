@@ -1654,8 +1654,9 @@ def relief_code_slips():
 def _relief_entry(what, text, absence=None, who=None, via=None):
     """one history entry for a relief request's save (relief/web.py): who, what, which, a link (not field by field; relief
     keeps its own record, and the entry never holds the reason). who and via: the person who did it without a session (on
-    Telegram), else whoever is signed in. A failure to write it never fails the save"""
-    e = {"kind": "relief", "what": what, "where": "Relief", "text": text, "link": "/relief", **(history.by_of(who, via) if who else by())}
+    Telegram), or via "app" for what the app did by itself (By "The app": no request, no session), else whoever is signed in. A
+    failure to write it never fails the save"""
+    e = {"kind": "relief", "what": what, "where": "Relief", "text": text, "link": "/relief", **(history.by_of(who, via) if who or via == "app" else by())}
     if absence: e["absence"] = absence
     try: history.add(e)
     except Exception as x: print(f"WARNING: a relief change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
@@ -1666,6 +1667,7 @@ app.register_blueprint(relief_web.bp)
 # Telegram: linking, connecting the bot, and the hook it posts to (relief/tgweb.py: the hook alone has no guard, it needs Telegram's secret header)
 relief_tgweb.init(has=has, me=who, need=need, note=_relief_entry)
 app.register_blueprint(relief_tgweb.bp)
+relief_outbox.UNLINKED.append(lambda name: _relief_entry("telegram unlinked", f"Telegram unlinked for {name}: the bot was blocked", via="app"))   # from the sender's thread
 relief_bot.at_start()                                             # what was typed in a Telegram conversation that has run out is deleted, whatever is on
 if os.environ.get("RELIEF_JOBS") == "on":                         # relief picks when due, every minute (the Dockerfile sets it; tests and local runs never do)
     relief_fill.AFTER.append(relief_tell.sweep)                   # and then what there is to say on Telegram (nothing while the bot is off)

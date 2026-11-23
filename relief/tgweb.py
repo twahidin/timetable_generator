@@ -30,6 +30,7 @@ from relief import lessons as _lessons
 from relief import settings as _settings
 from relief import summary as _summary
 from relief import web as _web
+from relief import words as _words
 
 bp = Blueprint("relief_tg", __name__)
 HOOK = "/telegram/hook"
@@ -202,10 +203,7 @@ def summary():
 
 
 # ---- relief settings
-UNSENT = dict(planned="Relief planned", remind="Reminder to acknowledge", officer="To the reporting officer", ask="Request to change", askpick="New pick for a request to change",
-              kept="Relief kept", cancelled="Absence cancelled", gone="No longer needed", moved="Relief moved", stopped="Not happening", again="On again", weekly="Weekly summary",
-              late="Late request for today", morning="Morning message", repeat="Reminder of a relief",
-              needed="Relief needed again", covered="Who covers you")
+UNSENT = _words.KINDS                       # the labels of the kinds of message, one list with the blocked-bot alert (relief/tell.py)
 UNSENT_LEFT_OUT = ("relief", "report", "clear")   # a relief message has its own line on the relief page; a report and a clear are not news to anyone
 UNSENT_SHOWN = 20
 
