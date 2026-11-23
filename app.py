@@ -18,6 +18,7 @@ from accounts import passwords, people, rights as rights_table
 from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
 import exams.relief_links as exams_relief_links
+from plan import ai as plan_ai, steps as plan_steps, web as plan_web
 from ttgen import choices
 import exams.approval as exams_approval, exams.review as exams_review, exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts, exams.published as exams_published, exams.events as exams_events
 
@@ -442,6 +443,7 @@ def login_recover():
 
 @app.get("/logout")
 def logout():
+    plan_web.signed_out(_plan_owners_of_session())   # a talk of Plan with AI is gone when its person signs out
     session.clear(); return redirect("/login")
 
 # the tiles of the home page, in order: (title, what it opens, link, the rights that show it)
@@ -449,6 +451,7 @@ TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("se
          ("Timetables", "Classes, teachers, rooms, Who's free", "/timetable", ("timetable",)),
          ("Relief", "Ask for relief, your reliefs", "/relief", ("relief", "relief.settings")),
          ("Exams and events", "", "/exams", ("exams", "committee")),
+         ("Plan with AI", "Plan an exam or a common test by talking it through", "/plan", ("exams", "committee")),
          ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
          ("History", "Who changed what, and when", "/history", ("history", "history.dept", "history.own")))
 OWN_HISTORY = "Your own changes"
@@ -469,6 +472,7 @@ def _tiles(p):
     out = []
     for title, line, link, need_ in TILES:
         if link == "/exams" and not _route_exists("/exams"): continue
+        if link == "/plan" and not plan_ai.enabled(): continue        # no AI on the server: no tile, for anyone
         if mine & set(need_):
             until = p["extras"].get("exams") if link == "/exams" else None
             if link == "/history" and not mine & {"history", "history.dept"}: line = OWN_HISTORY     # only their own changes are there
@@ -2356,6 +2360,85 @@ def admin_first():
     _start(who=name, via="password", n=n, exp=time.time() + FORTNIGHT); _note_signin(name)
     return redirect("/admin")
 
+# ------------------------------------------------------------------------------------------------ Plan with AI (plan/)
+# The chat has exactly the rights of the person typing: its Env is built in the request from a snapshot of who is asking and
+# then never reads the request again (an answer runs on a thread of its own, with no request), re-reading the records at
+# every step. Its saves are the exam pages' own (plan.steps' rules), recorded as "<name>, with Plan with AI".
+def _plan_snapshot():
+    """who is asking, as the chat's Env keeps it: the person's name (None for the shared committee code), how they signed
+    in, their record's sign-in number, the password session's end, the shared code, the saved-by name and by()"""
+    p = who()
+    rights = _exams_rights(store.published())
+    return dict(name=p["name"] if p else None, via=via(), n=p["n"] if p else None, exp=session.get("exp"), shared=shared(),
+                saved_by=rights[1] if rights else None, by=by())
+
+class AppEnv:
+    """plan.steps' Env for the app (plan/steps.py's Env protocol). No method touches the request, the session, g, who(),
+    has(), rights(), via() or by(): each works on a plain thread"""
+    def __init__(self, snap):
+        self._snap, self.name = dict(snap), snap["saved_by"]
+
+    def may(self):
+        """the person may change exams now, from the records read again (as _check and accounts/rights.py work it out on every
+        request), else Refused with the exam page's sentence"""
+        s, no = self._snap, plan_steps.Refused(ONLY_EXAMS)
+        if s["name"] is None:
+            if s["via"] != "shared" or s["shared"] != "committee" or people.load()["ways"]["off"].get("committee") is not None: raise no
+            return
+        if not people.readable(): raise no
+        data, pub = people.load(), store.published()
+        p = people.find(s["name"], pub, data)
+        if p is None:
+            if s["via"] == "password" or pub: raise no
+            p = _stand_in(s["name"], data)
+        if p["off"] or p["n"] != s["n"]: raise no
+        if s["via"] == "password" and not (p.get("pw") and isinstance(s["exp"], (int, float)) and time.time() < s["exp"]): raise no
+        if not rights_table.rights(p, s["via"], None) & {"exams", "committee"}: raise no
+
+    def pub(self): return store.published()
+    def cal(self): return _exam_cal(self.pub())
+    def settings(self): return exams_settings.load(self.pub())
+    def people(self): return people.listing(self.pub())
+    def all_saved(self): return exams_schedules.all_saved()
+    def today(self): return _exams_today()
+    def load(self, id): return exams_schedules.load(id)
+
+    def _record(self, what):
+        """plan.steps' record(entry): one history entry as an exam page's save writes it, by "<name>, with Plan with AI" """
+        def record(entry):
+            _exams_entry(what, entry["text"], entry.get("exam"), "/exams", by_=dict(self._snap["by"], **{"as": entry["by"]}))
+        return record
+
+    def create(self, kind, name, levels, classes, start, end, words):
+        return plan_steps.do_create(self, kind, name, levels, classes, start, end, words, self._record("create"))
+    def change(self, id, fn, words): return plan_steps.do_change(self, id, fn, words, self._record("edit"))
+    def remove(self, id, rev, words): return plan_steps.do_remove(self, id, rev, words, self._record("delete"))
+
+def _plan_person(name):
+    """a person's talks are theirs in any browser: keyed by a keyed hash of their name, never the name itself"""
+    key = app.secret_key if isinstance(app.secret_key, bytes) else str(app.secret_key).encode()
+    return "p:" + hmac.new(key, name.encode(), "sha256").hexdigest()[:32]
+
+def _plan_owner(create=False):
+    """the owner of this session's talks: the person's, or the shared committee code's browser session's (its own random
+    plan_sid, given at its first talk when create); None for anyone else"""
+    p = who()
+    if p: return _plan_person(p["name"])
+    if shared() != "committee": return None
+    sid = session.get("plan_sid")
+    if not isinstance(sid, str) or not sid:
+        if not create: return None
+        sid = session["plan_sid"] = secrets.token_urlsafe(16)
+    return "s:" + sid
+
+def _plan_owners_of_session():
+    """the owners whose talks this session holds, from the session as it stands (signing out drops them)"""
+    name, sid = session.get("who"), session.get("plan_sid")
+    return [_plan_person(name) if isinstance(name, str) and name else None, "s:" + sid if isinstance(sid, str) and sid else None]
+
+plan_web.init(need=need, env=lambda: AppEnv(_plan_snapshot()), owner=_plan_owner)
+app.register_blueprint(plan_web.bp)
+
 # ------------------------------------------------------------------------------------------------ staff: exams and events
 NO_EXAMS_PUB = "Publish the timetable first: exams read the classes, students and lessons from it."
 ONLY_EXAMS = "Only the exams committee and the timetable committee can open exams."
@@ -2451,10 +2534,11 @@ def _exam_json():
     d = request.get_json(force=True, silent=True)
     return d if isinstance(d, dict) else {}
 
-def _exams_entry(what, text, exam=None, link="/exams"):
+def _exams_entry(what, text, exam=None, link="/exams", by_=None):
     """one history entry for an exams or events save: who, what, which, a link (not field by field; exams keeps its own
-    record). An event's entry links to the event itself (/events/<id>). A failure to write it never fails the save"""
-    e = {"kind": "exams", "what": what, "where": "Exams and events", "text": text, "link": link, **by()}
+    record). An event's entry links to the event itself (/events/<id>). A failure to write it never fails the save.
+    by_: who it is by when not this request's by() (Plan with AI's steps, which run with no request)"""
+    e = {"kind": "exams", "what": what, "where": "Exams and events", "text": text, "link": link, **(by() if by_ is None else by_)}
     if exam: e["exam"] = exam
     try: history.add(e)
     except Exception as x: print(f"WARNING: an exams change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
@@ -2504,7 +2588,7 @@ def _exam_view(pub, sched):
     levels, classes = set(sched.get("levels") or []), set(sched.get("classes") or [])
     mine = {x["id"] for x in model.get("students") or [] if exams_papers._student_level(model, x) in levels or x.get("cls") in classes}
     sids = sorted(mine | {i for p in papers for i in exams_papers.who_sits(p, model)})
-    return dict(summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=_marked(exams_make.lesson_lists(pub, cal, sched), sched, pub, cal),
+    return dict(rev=exams_schedules.rev_of(sched), summary=exams_make.summary(pub, cal, sched, exams_settings.load(pub)), lessons=_marked(exams_make.lesson_lists(pub, cal, sched), sched, pub, cal),
                 made=sched.get("made"), students={i: [by_id[i]["name"], by_id[i]["cls"]] for i in sids if i in by_id},
                 counts={p.get("id"): len(exams_papers.who_sits(p, model)) for p in papers}, periods=[[exams_days.hhmm(a), exams_days.hhmm(b)] for a, b in exams_days.bounds(model)],
                 rooms=exams_settings.load(pub)["rooms"], students_missing=not model.get("students"), levels=list(model.get("levels") or []),
@@ -2586,7 +2670,7 @@ def exams_list():
     if err: return err
     m = pub["model"]
     return jsonify(schedules=_with_away(exams_schedules.listing(_exams_today(), exams_make.published_at(pub), kinds=("exam", "test")), pub), levels=m.get("levels") or [], classes=[[c["name"], c["level"]] for c in m.get("classes") or []],
-                   calendar_ok=bool(_exam_cal(pub).get("terms")))
+                   calendar_ok=bool(_exam_cal(pub).get("terms")), plan=plan_ai.enabled())   # plan: the page shows its Plan with AI button
 
 @app.post("/api/exams")
 @need("exams", "committee")
@@ -2603,6 +2687,14 @@ def exams_create():
     saved, bad = _save_exam(sched, pub, who, "create", "created")
     return bad or jsonify(saved)
 
+def _stale_rev(old, b, event=False):
+    """None when the page's copy (the body's rev) is the stored one; else the 409 answer naming who saved last. A schedule
+    saved before revisions has no rev: a body without one passes (once: the next save gives it one)"""
+    stored, got = exams_schedules.rev_of(old), b.get("rev")
+    if got is None and "rev" not in old or (isinstance(got, int) and not isinstance(got, bool) and got == stored): return None
+    what = "event" if event else "exam"
+    return {"error": f"This {what} was changed by {old.get('saved_by') or 'someone'} since you opened it. Reload to carry on."}, 409
+
 def _exam_or_404(id):
     s = exams_schedules.load(id)
     return (s, None) if s and s.get("kind") != "event" else (None, ({"error": NO_EXAM}, 404))   # an event has its own routes
@@ -2615,6 +2707,19 @@ def exams_get(id):
     s, err = _exam_or_404(id)
     return err or jsonify(s)
 
+def _drop_moved_suggestions(old, new):
+    """a suggested time stops being suggested when that paper's date or start is changed: its id goes from the new body"""
+    sug = new.get("suggested")
+    if not isinstance(sug, list): return
+    def at(p):
+        st = p.get("start") or None
+        try: st = exams_days.minutes(st) if st else None   # "7:50" and "07:50" are one time
+        except ValueError: pass
+        return (p.get("date") or None, st)
+    was = {p.get("id"): at(p) for p in old.get("papers") or [] if isinstance(p, dict)}
+    now = {p.get("id"): at(p) for p in new.get("papers") or [] if isinstance(p, dict)}
+    new["suggested"] = [i for i in sug if not (isinstance(i, str) and i in was and i in now and was[i] != now[i])]
+
 @app.put("/api/exams/<id>")
 @need("exams", "committee")
 def exams_put(id):
@@ -2623,9 +2728,12 @@ def exams_put(id):
     with exams_schedules.editing():   # from loading to saving: what is kept is what is stored now
         old, err = _exam_or_404(id)
         if err: return err
+        stale = _stale_rev(old, _exam_json())
+        if stale: return stale
         new = dict(_exam_json(), **{k: old.get(k) for k in EXAM_KEEPS})
         new["log"] = old.get("log") or []
         if new.get("kind") not in exams_schedules.KINDS: return {"error": exams_schedules.WRONG}, 400   # an exam never becomes an event
+        _drop_moved_suggestions(old, new)
         saved, bad = _save_exam(new, pub, who, "edit", "changed")
     return bad or jsonify(saved)
 
@@ -2676,7 +2784,9 @@ def exams_papers_upload(id):
     with exams_schedules.editing():
         s, err = _exam_or_404(id)
         if err: return err
+        was = dict(s)
         s["papers"] = [p for p in s.get("papers") or [] if p.get("who") == "students"] + rows
+        _drop_moved_suggestions(was, s)
         saved, bad = _save_exam(s, pub, who, "papers", "paper list uploaded")
     return bad or jsonify(saved)
 
@@ -2910,7 +3020,7 @@ def _exam_review_reply(pub, s):
     st = s.get("status") or "draft"
     rv = exams_review.review(pub, _exam_cal(pub), s, xset, exams_schedules.elsewhere(s.get("id"), pub["model"], own=_reviewed(s))) if s.get("made") else None
     if rv: _backups_left(rv, lambda: exams_make.lesson_lists(pub, _exam_cal(pub), exams_approval.as_schedule(s) if rv.get("copy") == "approved" else s), s, pub)
-    return jsonify(status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
+    return jsonify(rev=exams_schedules.rev_of(s), status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
                    changed=s.get("sent_fp") is not None and s.get("sent_fp") != exams_approval.fp(s),
                    can_send=exams_approval.blocked(s, model, stale, errors), can_approve=_exams_can_approve(),
@@ -3053,7 +3163,7 @@ def _event_review_reply(pub, s):
     model, cal = pub["model"], _exam_cal(pub)
     others, busy = _event_others(pub, s)
     st = s.get("status") or "draft"
-    return jsonify(status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
+    return jsonify(rev=exams_schedules.rev_of(s), status=st, label=exams_approval.label(s, _exams_today()), note=s.get("note") or "", sent_at=s.get("sent_at"), sent_by=s.get("sent_by"),
                    approved_at=s.get("approved_at"), approved_by=s.get("approved_by"),
                    changed=s.get("sent_fp") is not None and s.get("sent_fp") != exams_approval.fp(s),
                    can_send=exams_approval.blocked(s, model, False, exams_events.send_errors(pub, cal, s, busy, others)), can_approve=_exams_can_approve(),
@@ -3066,7 +3176,7 @@ def _event_view(pub, s):
     inside = {c for e in dts for c in e["classes"]}
     people = relief_staff(pub)
     entry = lambda date: (s.get("days") or {}).get(date) or {}
-    return dict(summary=dict(days=[dict(date=e["date"], day=e["day"], levels=e["levels"], whole=bool(entry(e["date"]).get("whole", True)),
+    return dict(rev=exams_schedules.rev_of(s), summary=dict(days=[dict(date=e["date"], day=e["day"], levels=e["levels"], whole=bool(entry(e["date"]).get("whole", True)),
                                         window=[exams_days.hhmm(e["start"]), exams_days.hhmm(e["end"])]) for e in exams_days.dates(s, cal, model)]),
                 classes=[c["name"] for c in model.get("classes") or [] if c["name"] in inside], going=exams_events.going(pub, cal, s, busy),
                 lessons=_marked(exams_events.lesson_lists(pub, cal, s), s, pub, cal), freed=exams_events.freed(pub, cal, s, busy), flags=exams_events.flags(pub, cal, s),
@@ -3128,6 +3238,8 @@ def events_put(id):
     with exams_schedules.editing():   # from loading to saving: what is kept is what is stored now
         pub, who, old, _, err = _event_gate(id)
         if err: return err
+        stale = _stale_rev(old, _exam_json(), event=True)
+        if stale: return stale
         new = dict(_exam_json(), **{k: old.get(k) for k in EVENT_KEEPS})
         new["log"] = old.get("log") or []
         saved, bad = _save_exam(new, pub, who, "edit", "changed", event=True)

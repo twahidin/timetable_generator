@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan with AI mockups</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2433;--muted:#5d6678;--line:#e3e7ee;--navy:#1f4e78;--accent:#2563eb;--warn:#b42318;--warn-bg:#fdecec;--ok:#067647;--ok-bg:#e7f6ee;--chip:#eef2f8;--amber:#9a5b00;--amber-bg:#fff4e0;--me:#e6efff}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.45}
+header.top{background:var(--navy);color:#fff;padding:14px 20px}
+header.top h1{margin:0;font-size:18px}
+header.top p{margin:2px 0 0;opacity:.85;font-size:13px}
+nav.tabs{display:flex;flex-wrap:wrap;gap:6px;padding:10px 20px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+nav.tabs button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;color:var(--ink)}
+nav.tabs button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+main{padding:18px 20px 60px;max-width:1180px;margin:0 auto}
+section.screen{display:none}
+section.screen.on{display:block}
+.about{background:#fff;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:10px 14px;margin-bottom:16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.cols{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(260px,1fr);gap:16px;align-items:start}
+@media (max-width:760px){.cols{grid-template-columns:minmax(0,1fr)}}
+.talk{display:flex;flex-direction:column;gap:10px}
+.me,.ai,.did,.sys{border-radius:12px;padding:9px 13px;max-width:88%}
+.me{align-self:flex-end;background:var(--me)}
+.ai{background:var(--chip)}
+.did{background:var(--ok-bg);color:var(--ok);max-width:100%;border-radius:8px;font-size:13px}
+.sys{background:var(--amber-bg);color:var(--amber);max-width:100%;border-radius:8px;font-size:13px}
+.did a,.sys a{color:inherit;text-decoration:underline;margin-left:8px;white-space:nowrap}
+.card{border:1px solid var(--navy);border-radius:10px;padding:12px 14px;background:#fff}
+.card h4{margin:0 0 6px;font-size:14px}
+.card ul{margin:4px 0 10px;padding-left:18px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.spread{justify-content:space-between}
+h2{margin:0 0 10px;font-size:20px}
+h3{margin:0 0 8px;font-size:15px}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;white-space:nowrap;display:inline-block}
+.btn.primary{background:#111827;color:#fff;border-color:#111827}
+.chip{display:inline-block;background:var(--chip);border-radius:999px;padding:1px 9px;font-size:12px;white-space:nowrap}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}
+.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.amber{background:var(--amber-bg);color:var(--amber)}
+.type{display:flex;gap:8px;margin-top:6px}
+.type .box{flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fffdf3;color:var(--muted);min-height:38px}
+table{border-collapse:collapse;width:100%;font-size:13px;background:#fff}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.wrap{overflow-x:auto}
+.list{list-style:none;margin:0;padding:0}
+.list li{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+.list li:last-child{border-bottom:0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.tile{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}
+.tile.new{border:2px solid var(--accent)}
+.tile b{display:block;margin-bottom:4px}
+</style>
+</head>
+<body>
+<header class="top"><h1>Plan with AI: mockups</h1><p>Every name, class and number here is made up. Nothing is built yet.</p></header>
+<nav class="tabs" id="tabs"></nav>
+<main>
+
+<section class="screen" data-t="1 Where it is">
+<div class="about">A new tile on the home page, shown only to people who may change exams. The same button is on the Exams, tests and events page.</div>
+<div class="panel"><h2>Home</h2><div class="tiles">
+<div class="tile"><b>Timetables</b><span class="muted small">Classes, teachers, rooms, Who's free</span></div>
+<div class="tile"><b>Relief</b><span class="muted small">Ask for relief, your reliefs</span></div>
+<div class="tile"><b>Exams and events</b><span class="muted small">Until 30 Nov</span></div>
+<div class="tile new"><b>Plan with AI</b><span class="muted small">Plan an exam or a common test by talking it through</span></div>
+</div></div>
+<div class="panel"><div class="row spread"><h2 style="margin:0">Exams, tests and events</h2><div class="row"><span class="btn">Plan with AI</span><span class="btn primary">+ New exam or test</span><span class="btn">+ New event</span></div></div></div>
+</section>
+
+<section class="screen" data-t="2 Starting">
+<div class="about">The app checks what is missing before the first question, so you do not find out at the end.</div>
+<div class="panel"><h2>What would you like to plan?</h2>
+<div class="sys" style="margin-bottom:12px">The published timetable has no students yet. Everything can be filled in, but clashes between papers cannot be checked, no time can be suggested and seats cannot be made until the students are added and the timetable is published again. <a>Open the Students step</a></div>
+<div class="row" style="margin-bottom:12px"><span class="btn">Plan an exam</span><span class="btn">Plan a common test</span><span class="btn">Carry on: Sec 4 Prelims</span></div>
+<div class="type"><div class="box">Type here. For example: I would like to plan an exam timetable</div><span class="btn primary">Send</span></div>
+<p class="muted small" style="margin:8px 0 0">Teachers go as codes. A name the app does not know is sent as typed. This talk is not kept; your exam draft is.</p></div>
+</section>
+
+<section class="screen" data-t="3 The talk">
+<div class="about">It asks, you answer in your own words, and each answer is filled in at once. Every green line can be taken back.</div>
+<div class="cols"><div class="panel"><div class="row spread"><h3>End-of-Year Exam <span class="chip">Draft</span></h3><span class="btn">New talk</span></div><div class="talk">
+<div class="me">I would like to plan an exam timetable</div>
+<div class="ai">Which exam is it, which levels sit it, and between which dates?</div>
+<div class="me">End-of-Year, Sec 1 to 3, 4 to 15 Oct</div>
+<div class="did">✓ Started End-of-Year Exam: Sec 1 to 3, 4 to 15 Oct, 10 school days <a>See it</a><a>Take it back</a></div>
+<div class="ai">Do their lessons stop for the whole day, or only part of it?
+<div class="row" style="margin-top:8px"><span class="btn">Whole day</span><span class="btn">Part of the day</span><span class="btn">Different by level</span></div></div>
+<div class="me">Sec 3 whole day. Sec 1 and 2 until recess</div>
+<div class="did">✓ Sec 3 whole day; Sec 1 and 2 from 07:30 to 10:10, on all 10 days <a>See it</a><a>Take it back</a></div>
+<div class="ai">Now the papers. Please give me the list of dates and times the school management agreed. You can paste it here, or add an Excel or Word file.</div>
+<div class="muted small">Reading the list: 30 lines…</div>
+<div class="type"><div class="box">Type your answer</div><span class="btn">Add a file</span><span class="btn">Stop</span></div>
+</div></div>
+<div class="panel"><h3>Filled in so far</h3><p class="muted small" style="margin:0 0 6px">Read from the draft. Only the exams and timetable committees see a draft.</p><ul class="list">
+<li><span>Exam, levels, dates</span><span class="chip ok">done</span></li>
+<li><span>Each day</span><span class="chip ok">done</span></li>
+<li><span>Papers and times</span><span class="chip">to do</span></li>
+<li><span>Report time and breaks</span><span class="chip amber">as last time?</span></li>
+<li><span>Chiefs, backups, left out</span><span class="chip amber">as last time?</span></li>
+<li><span>Exam rooms and seats</span><span class="chip amber">as last time?</span></li>
+<li><span>Invigilators per room</span><span class="chip amber">as last time?</span></li>
+<li><span>Seating choices</span><span class="chip amber">as last time?</span></li>
+<li><span>Extra time, own room</span><span class="small"><u>Open the form</u></span></li>
+</ul><div class="btn" style="margin-top:10px">Make seats and duties</div></div></div>
+</section>
+
+<section class="screen" data-t="4 The agreed list">
+<div class="about">Every line is shown as the app read it. A line that does not match is not put in; you are asked about it. A time that does not work is said at once, and is never changed for you.</div>
+<div class="cols"><div class="panel"><div class="talk">
+<div class="did">✓ Put 26 papers in the draft: their words are the timetable's own <a>See them</a><a>Take it back</a></div>
+<div class="ai">3 lines use other words. Is this right?
+<div class="wrap" style="margin-top:8px"><table><thead><tr><th>As written</th><th>Read as</th><th>Date</th><th>Start</th></tr></thead><tbody>
+<tr><td>Sec 3 E Maths P1</td><td>Sec 3 Mathematics G3, Paper 1</td><td>Tue 5 Oct</td><td>08:00</td></tr>
+<tr><td>Sec 1 Mother Tongue P2</td><td>Sec 1 Chinese, Malay and Tamil, Paper 2 (sit together)</td><td>Thu 7 Oct</td><td>08:00</td></tr>
+<tr><td>Sec 2 Maths</td><td>Sec 2 Mathematics G1, G2 and G3 (sit together)</td><td>Fri 8 Oct</td><td>08:00</td></tr></tbody></table></div>
+<div class="row" style="margin-top:8px"><span class="btn">Yes, all three</span><span class="btn">Change one</span></div></div>
+<div class="ai">1 line is not in: row 22 says Sec 2 Music, but no Sec 2 class takes Music.<br><br>And one clash: 12 Sec 3 students have Geography and Physics at the same time on 6 Oct. Both are on the agreed list, so I have left them. Would you like to check with management, or tell me which one moves?</div>
+<div class="me">Yes, all three. Leave out row 22. Physics moves to 10:30</div>
+<div class="did">✓ Put 7 more papers in the draft <a>See them</a><a>Take it back</a></div>
+<div class="did">✓ Sec 3 Physics Paper 1 moved from 08:30 to 10:30 on 6 Oct. The clash is gone. <a>Take it back</a></div>
+<div class="ai">Sec 2 Art has no paper on the list. Is there one?</div>
+</div></div>
+<div class="panel"><h3>Filled in so far</h3><ul class="list">
+<li><span>Papers and times</span><span class="chip amber">33, 1 to check</span></li>
+<li><span class="small muted">Sec 2 Art: no paper</span><span></span></li>
+</ul></div></div>
+</section>
+
+<section class="screen" data-t="5 A suggested time">
+<div class="about">Only for a paper with no agreed time. The app finds the times that pass its checks; the mark stays until a person agrees or changes the time.</div>
+<div class="cols"><div class="panel"><div class="talk">
+<div class="me">Yes, Sec 2 Art has one, 60 minutes, no time agreed yet</div>
+<div class="ai">These pass every check:<br>· Thu 7 Oct, 08:00: no other Sec 2 paper that day<br>· Tue 12 Oct, 08:00: after their last language paper<br>· Wed 13 Oct, 09:00: leaves an hour after History
+<div class="row" style="margin-top:8px"><span class="btn">7 Oct, 08:00</span><span class="btn">12 Oct, 08:00</span><span class="btn">13 Oct, 09:00</span></div></div>
+<div class="me">12 Oct</div>
+<div class="did">✓ Put in Sec 2 Art, Tue 12 Oct 08:00 <span class="chip amber">suggested</span> <a>Take it back</a></div>
+</div></div>
+<div class="panel"><h3>On the exam page, Papers tab</h3><div class="wrap"><table><tbody><tr><td>Sec 2</td><td>Art</td><td>Tue 12 Oct 08:00</td><td><span class="chip amber">suggested</span></td><td><span class="btn">Agreed</span></td></tr></tbody></table></div></div></div>
+</section>
+
+<section class="screen" data-t="6 People and rooms">
+<div class="about">Chiefs, backups, left out and rooms are used by every exam, so these wait for your press. The app writes the card; the AI cannot press it.</div>
+<div class="panel" style="max-width:760px"><div class="talk">
+<div class="ai">Now the people. Last time the chiefs were Adam Lee and Chen Wei, the backup pool had 5 people and nobody was left out. Keep as last time?</div>
+<div class="me">Change the chiefs to Chen Wei and Priya Nair. Leave Siti Rahman out, she is on leave that fortnight</div>
+<div class="ai">If Siti Rahman is on leave only for those dates, putting the leave into relief keeps her off duties on just those dates. "Left out" is for every exam until changed. Which would you like?
+<div class="row" style="margin-top:8px"><span class="btn">Use relief</span><span class="btn">Leave out of every exam</span></div></div>
+<div class="me">Use relief</div>
+<div class="sys">Leave is entered on the relief pages, not here. <a>Open Relief</a></div>
+<div class="card"><h4>Change the exam settings? Every exam uses these.</h4><ul><li>Chief invigilators: Adam Lee, Chen Wei → <b>Chen Wei, Priya Nair</b></li><li>Backup invigilators: no change (5)</li><li>Left out: no change (nobody)</li></ul><div class="row"><span class="btn primary">Change the settings</span><span class="btn">Not now</span></div></div>
+</div></div>
+</section>
+
+<section class="screen" data-t="7 Make">
+<div class="about">Make is the app's own fixed rules, as today. The figures come from the app; the chat explains them. Sending stays on the exam page.</div>
+<div class="panel" style="max-width:760px"><div class="talk">
+<div class="ai">Everything is filled in, and no clashes are left. One paper still has a suggested time (Sec 2 Art). Shall we make it?</div>
+<div class="card"><h4>Make seats and duties for End-of-Year Exam?</h4><p style="margin:0 0 10px">34 papers, 10 days, Sec 1 to 3. Seats and duties made before are made again; changes made by hand are kept.</p><div class="row"><span class="btn primary">Make seats and duties</span><span class="btn">Not now</span></div></div>
+<div class="did">✓ Made. 742 students seated, 0 without a seat. 186 duties, 3 short, 5 need a backup. <a>Venues and seats</a><a>Invigilators</a></div>
+<div class="ai">Two things need a person. On 7 Oct Hall B is 3 invigilators short. And 5 invigilators have a Sec 4 lesson at the time, so those lessons need a backup from the relief team. You can change either on the Invigilators tab. When you are happy, send it from the Approval tab.</div>
+<div class="me">Why is Hall B short?</div>
+<div class="ai">The app counted why nobody else could take it: 78 already have a duty then, 14 teach Sec 4, 4 are away and 2 are at the most duties a day. All three levels sit that morning. Moving one level's paper would free people, but those times were agreed, so that one is yours to take back to management.</div>
+</div></div>
+</section>
+
+<section class="screen" data-t="8 When things go wrong">
+<div class="about">Each of these is one plain sentence, and the exam pages keep working.</div>
+<div class="panel" style="max-width:820px"><h3>Taking back something changed since</h3><div class="did">Took back 25 of the 26 papers. Sec 1 English was changed since (last saved by Adam Lee, 10:42), so it stays as it is.</div></div>
+<div class="panel" style="max-width:820px"><h3>The exam page was open in another tab</h3><div class="sys">This exam was changed by Chen Wei, with Plan with AI, since you opened it. <a>Reload to carry on</a></div></div>
+<div class="panel" style="max-width:820px"><h3>A problem only extra time causes</h3><div class="sys">2 more points with extra time: see the Papers tab. The AI is not shown these. <a>Open Papers</a></div></div>
+<div class="panel" style="max-width:820px"><h3>The app restarted</h3><div class="sys">This talk was lost when the app restarted. Your exam is safe: press Carry on. <a>Carry on: End-of-Year Exam</a></div></div>
+<div class="panel" style="max-width:820px"><h3>The AI is slow, off or over its limit</h3><div class="sys">The AI could not answer just now. What is filled in is safe. Try again, or carry on from the exam page. <a>Open the exam</a></div></div>
+<div class="panel" style="max-width:820px"><h3>Asked for something it cannot do</h3><div class="me" style="max-width:100%">Send it to the timetable committee for me</div><div class="ai" style="margin-top:8px;max-width:100%">I can't send it. A person does that on the Approval tab. It's ready: nothing is blocking it. <u>Open Approval</u></div></div>
+</section>
+
+</main>
+<script>
+const s = [...document.querySelectorAll("section.screen")], nav = document.getElementById("tabs");
+function show(i) { s.forEach((x, k) => x.classList.toggle("on", k === i)); [...nav.children].forEach((b, k) => b.classList.toggle("on", k === i)); }
+s.forEach((x, i) => { const b = document.createElement("button"); b.type = "button"; b.textContent = x.dataset.t; b.onclick = () => show(i); nav.appendChild(b); });
+show(0);
+</script>
+</body>
+</html>

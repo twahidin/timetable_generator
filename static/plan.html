@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan with AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+.pl{max-width:1180px;margin:0 auto;padding:20px}
+.pl h1{margin:0 0 12px}
+.pl-cols{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(260px,1fr);gap:16px;align-items:start}
+.pl-cols>.card{margin:0}
+.pl-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
+.pl-head h2{margin:0}
+.pl-log{display:flex;flex-direction:column;gap:10px;margin:0 0 10px}
+.ln{border-radius:12px;padding:9px 13px;max-width:88%}
+.ln .tx{white-space:pre-wrap;overflow-wrap:anywhere}
+.ln.me{align-self:flex-end;background:#e6efff}
+.ln.ai{background:var(--chip)}
+.ln.did{background:var(--ok-bg);color:var(--ok);max-width:100%;border-radius:8px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:6px 12px;flex-wrap:wrap}
+.ln.did .acts{margin:0}
+.ln.sys,.pl-sys{background:#fff4e0;color:#9a5b00;max-width:100%;border-radius:8px;font-size:13px}
+.pl-sys{padding:9px 13px;margin:0 0 12px;line-height:1.45}
+.ln.sys a,.pl-sys a{color:inherit;text-decoration:underline}
+.ln.list{background:var(--panel);border:1px solid var(--line);max-width:100%}
+.ln .qk,.ln .acts{margin-top:8px;gap:6px}
+.ln ul.left{margin:8px 0 0 18px;padding:0;font-size:13px}
+.pl-table{margin-top:8px;max-height:none}
+.pl-table td{white-space:normal}
+.pl-work{display:flex;gap:10px;align-items:center;min-height:0;margin:0 0 8px}
+.pl-work:has(#stop[hidden]):has(#progress:empty){display:none}
+.pl-type{display:flex;gap:8px;align-items:flex-end;margin:0 0 8px}
+.pl textarea{flex:1;min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--input);color:var(--ink);font:inherit;line-height:1.4;resize:vertical}
+.pl textarea:focus{outline:2px solid #bfd3fb;border-color:#93b4f7}
+.pl textarea:disabled{opacity:.6}
+.pl-more{gap:8px;margin:0 0 8px}
+.pl-paste{margin:0 0 10px}
+.pl-paste textarea{min-height:220px;margin:0 0 8px;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+.pl .msg{font-size:13px;margin:0 0 8px}
+.pl .msg.bad{color:var(--warn);font-weight:600}
+.pl p.small{margin:0 0 6px}
+.pl #alert:empty,.pl #why:empty,.pl #fileline:empty,.pl #count:empty{display:none}
+.pl-starts{gap:8px;margin:0 0 12px}
+.pl-list{list-style:none;margin:0;padding:0}
+.pl-list li{padding:7px 0;border-bottom:1px solid var(--line)}
+.pl-list li:last-child{border-bottom:0}
+.pl-list .ckhead{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.pl-exam{margin:0 0 8px}
+.pl-exam a{font-weight:700;color:var(--navy)}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}
+.chip.amber{background:#fff4d6;color:#7a5a00}
+.chip.waiting{background:#fff4d6;color:#7a5a00}
+.chip.approved{background:var(--ok-bg);color:var(--ok)}
+.chip.ended{color:var(--muted)}
+.chip.withdrawn{background:var(--warn-bg);color:var(--warn)}
+h2 .chip{font-size:12px;vertical-align:middle;font-weight:500}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.pl-fold{display:none}
+.pl-fold summary{font-size:14px;font-weight:600;color:var(--ink)}
+.pl-fold[open] summary{margin:0 0 8px}
+@media (max-width:760px){
+  .pl{padding:12px}
+  .pl-cols{grid-template-columns:minmax(0,1fr)}
+  .pl-side{display:none}
+  .pl-fold{display:block;padding:12px 14px;margin:0 0 12px}
+  .ln{max-width:100%}
+  .pl-type{flex-wrap:wrap}
+  .pl-type button{flex:none}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">⇄</span><div><div class="title">Plan with AI</div><div class="sub">Plan an exam or a common test by talking it through.</div></div></div>
+  <div class="top-actions" id="links">
+    <a class="ghost filebtn" href="/exams">Exams</a>
+    <a class="ghost filebtn" href="/logout">Sign out</a>
+  </div>
+</header>
+<main class="pl" id="main">
+  <div class="card"><p class="muted">Loading…</p></div>
+</main>
+<script src="/static/plan.js"></script>
+</body>
+</html>
