@@ -323,6 +323,9 @@ set); a line of `relief/outbox.py`'s description is long; `relief/asking.py` kee
   `test_exams` 193, `test_routes` 19, `test_history` 47, `test_putback` 37, `smoke` 103, `test_board` 59,
   `relief_settings.test.js` 23, `relief_telegram.test.js` 38, `relief_today.test.js` 40). The names check was run again on the
   whole branch: 104 real staff names, 0 found; the school's full name 0; token and key shapes 0.
+- Main moved while this was built (pull request #97, the Re-fit window on step 8, nothing of relief). It was merged in without a
+  conflict, and every suite run on the result, one at a time: all 30 `tests/*.py` (the new `test_refit` 166) and all 23
+  `tests/*.test.js` pass, with the numbers above.
 - Final fix wave, one suite at a time at its end: `test_relief_telegram` 329 (two tests added, one of stage 4's changed: see the
   build's record above), `test_relief_team` 74, `test_relief_requests` 59, `test_routes` 19, `smoke` 103,
   `relief_settings.test.js` 23, `relief_telegram.test.js` 38; five deliberate faults, each caught.
