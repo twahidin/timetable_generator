@@ -94,10 +94,11 @@ class _Plan:
         closed = self.settled() | self.also | self.broken
         return [i for i in range(len(self.ts)) if i not in closed]
 
-    def _waits(self, i):
+    def _waits(self, i, again=False):
         """the teachers targets that target i waits for: those of its key not settled, when it is a period to be added (by the teacher that change
-        decides). Whether that is so is asked of the timetable as it is now, as direct asks it: periods short of the plan, somebody to teach them, and no band"""
-        first = [j for j in self.teacher.get(i, ()) if j not in self.also and j not in self.settled()]
+        decides). Whether that is so is asked of the timetable as it is now, as direct asks it: periods short of the plan, somebody to teach them, and no band.
+        again: one that others' fixes settled (a trade of the other key's target) is asked again whether it is, for the list may have lost them"""
+        first = [j for j in self.teacher.get(i, ()) if j not in self.settled() and (j not in self.also or (again and not self._is_gone(j)))]
         if not first: return []
         k = helper._dep_parts(self.ts[i]["key"])[0]; e = verify.planned_rows(self.spec).get(k); short = {x["key"] for x in fixes.short(self.now, self.spec, self.m["pool"])}
         return first if e and e["teachers"] and verify._kstr(k) in short and not refit._band(e, helper._of_key(self.now["lessons"], k)) else []   # no e: a class whose name has a colon, whose keys cannot be read
@@ -203,7 +204,7 @@ class _Plan:
         end, old, last = time.monotonic() + SIFT_S, self.solved, before; self._start()
         for i, got, _ in old:
             if time.monotonic() >= end: self.why[i] = refit.LATE; continue
-            if self._waits(i): self.why.pop(i, None); continue   # the teacher change it was made after is not kept
+            if self._waits(i, True): self.why.pop(i, None); continue   # the teacher change it was made after is not kept
             m = self.now; self.why[i] = refit.NO_FIT
             if not self._accepted(m, got): continue
             self._keep(i, got); after = self._listed()
@@ -214,7 +215,7 @@ class _Plan:
         """take these targets out of the list, and what the judge has not without them"""
         old = self.solved; self._start()
         for i, got, _ in old:
-            if i not in bad and self._waits(i): self.why.pop(i, None)
+            if i not in bad and self._waits(i, True): self.why.pop(i, None)
             elif i not in bad and self._accepted(self.now, got): self._keep(i, got)
             else: self.why[i] = refit.NO_FIT
 

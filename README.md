@@ -210,14 +210,15 @@ is not on step 3, and a named subject the class has only in groups.
    its own, and step 8 is drawn from the one opened. The app also keeps the draft as a version before an upload replaces it and before a version
    is opened (the newest 10 of these are kept, the older ones go). The list also shows the published timetable, to compare with. The list only
    reads and saves: nothing in it publishes. **Re-fit to the setup** (beside **Versions**; greyed with the reason when the timetable already fits the
-   setup) works out the fewest lesson changes that settle what step 5 or the rules now ask for: a teacher who changed, a lesson missing or extra, a
-   venue, a clash, a Must rule. It never moves a band, and a lesson keeps its day unless it is barred from every period of that day (**another day**).
-   The window shows the work as it runs, then the list: what does not fit now, each group's steps with the sentence and its reason, what the changes
-   settle too, and **Needs you** for what the app cannot settle (a change to a band itself, a judge's refusal, more than it looked at in time), with
-   the totals before and after. Typed rules (step 6) may be touched: each such step says **check T{n} again**, and Apply sets those rules back to be
-   checked. **Preview on the board** draws the changed classes with the moved lessons outlined. Nothing changes until **Apply all N changes**: the
-   draft is kept first as a version "Before re-fit …", and the changes are made as one batch, so one **Undo** takes the whole re-fit back. A list for
-   a draft that has changed since is refused, with **Run Re-fit again**.
+   setup) works out the fewest lesson changes that settle what step 5 or the rules now ask for: a teacher who changed (two who change places on step 5
+   **trade classes** in one step), a lesson missing or extra, a venue, a clash, a Must rule. It never moves a band, and a lesson keeps its day unless
+   nothing works on it: only then may it move to another day, or change places with a lesson of another day, and each such step is flagged **another
+   day** (a lesson barred from every period of its own day may move to another at once). The window shows the work as it runs, then the list: what does
+   not fit now, each group's steps with the sentence and its reason, what the changes settle too, and **Needs you** for what the app cannot settle (a
+   change to a band itself, a judge's refusal, more than it looked at in time), with the totals before and after. Typed rules (step 6) may be touched:
+   each such step says **check T{n} again**, and Apply sets those rules back to be checked. **Preview on the board** draws the changed classes with the
+   moved lessons outlined. Nothing changes until **Apply all N changes**: the draft is kept first as a version "Before re-fit …", and the changes are
+   made as one batch, so one **Undo** takes the whole re-fit back. A list for a draft that has changed since is refused, with **Run Re-fit again**.
 6. **Publish** (step 9): it shows the timetable as it will be published, read-only: the critical mistakes (each with
    **Show on step 8**, which opens step 8 with the warning marked in the panel's Warnings tab and its lesson selected on
    the board, or a lesson that is not placed selected in the Not placed tab), every other

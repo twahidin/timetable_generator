@@ -10,6 +10,7 @@ from ttgen.spec import single_rooms, whole as whole_n
 MAX_MOVES = 3        # the most moves and swaps in one answer
 MAX_DIRECT = 8       # the most changes of step 5 itself in one answer
 MAX_GROWN = 4        # the lists of them carried on with further ones, at each number of moves
+MAX_TRADES = 3       # the trades tried for a teacher change
 MAX_NODES = 250      # the most search steps (lists judged) for one warning
 MAX_KEPT = 40        # the timetables, each with its index, kept while looking
 CAND_LESSONS = 4     # the lessons tried for a change
@@ -62,7 +63,7 @@ def _band(e, rows):
     """whether the key is a band group: its planned row, or a timetabled row of it, has a block"""
     return any(r.get("block") for r in e["rows"]) or any(x.get("block") for x in rows)
 
-def _teachers(m, spec, ks, e, rows, text):
+def _teachers(m, spec, days, pool, plan, ks, e, rows, text):
     have = {t for x in rows for t in x["teachers"]}; want = set(e["teachers"])
     if not want: return [], text   # nobody on step 5 for the key: the warning's own words
     gone, new = have - want, want - have
@@ -73,7 +74,20 @@ def _teachers(m, spec, ks, e, rows, text):
     known = {t.get("name") for t in spec.get("teachers") or [] if isinstance(t, dict)}
     if not new <= known: return [], f"{next(iter(new))} is not on the setup's list of teachers."
     g, n = next(iter(gone)), next(iter(new))
-    return [[dict(kind="teacher", key=ks, teachers=[n if t == g else t for t in rows[0]["teachers"]])]], None
+    return [[dict(kind="teacher", key=ks, teachers=[n if t == g else t for t in rows[0]["teachers"]])]] + [[f] for f in _trades(m, spec, days, pool, plan, ks, g, n)], None
+
+def _trades(m, spec, days, pool, plan, ks, g, n):
+    """the trades that give the key ks, g's on the timetable and n's on step 5, to n and at once to g another key of step 5 (plan) that is n's on the timetable and g's on step 5, all its
+    lessons taught alike: at most MAX_TRADES, in the order of those keys; none the app would refuse (a lesson not placed is taught by the other already)"""
+    out = []
+    for k in sorted(k for k, e in plan.items() if g in e["teachers"] and n not in e["teachers"]):
+        rows = helper._of_key(m["lessons"], k); have = set(rows[0]["teachers"]) if rows else set()
+        if len(out) == MAX_TRADES or have - plan[k]["teachers"] != {n} or plan[k]["teachers"] - have != {g} or any(set(x["teachers"]) != have for x in rows): continue
+        f = dict(kind="trade", a=ks, b=verify._kstr(k), x=g, y=n); L = list(m["lessons"]); helper._own(L, f)
+        try: fixes.apply_one(L, f, spec, days, pool=[dict(x) for x in pool])
+        except ValueError: continue
+        out.append(f)
+    return out
 
 def _class_of(k, e, rows=()): return k[1] if k[0] == "C" else ((e or {}).get("classes") or [c for x in rows for c in x["classes"]] or [None])[0]
 
@@ -212,7 +226,7 @@ def direct(m, spec, days, target, pool, held=()):
             return ([], BAND) if any(x.get("block") for x in rows) else (_deletes(m, spec, days, pool or (), k, None, rows, held), None)
         if e is None: return [], text
         ks = verify._kstr(k)
-        if part == "teachers": return _teachers(m, spec, ks, e, rows, text) if rows else ([], text)
+        if part == "teachers": return _teachers(m, spec, days, pool or (), plan, ks, e, rows, text) if rows else ([], text)
         if part in ("missing", "periods") and _band(e, rows): return [], BAND
         if part in ("missing", "periods"):
             have = verify.placed(dict(m, lessons=list(m["lessons"]) + list(pool or ()))).get(k, {}).get("periods", 0)
@@ -291,16 +305,25 @@ def _blocker(b, days, rows, ignore):
     s = b.clash(rows, x["d"], x["p"], x["n"], ignore=ignore).replace(" is teaching ", " teaches ", 1); at = f" on {fixes.when(days, b.ids[y][0]['d'], b.ids[y][0]['p'])}"
     return y, s[:-len(" then.")] + at + "." if s.endswith(" then.") else s.replace(" then, ", at + ", ", 1)
 
+def _takes(rows, f):
+    """{id(row): its teachers once the teacher fix or the trade f is made} of the rows that f changes, as fixes.apply_one changes them"""
+    if f["kind"] == "teacher": return {id(x): list(f["teachers"]) for x in fixes.rows_of_key(rows, fixes._key(f["key"]))}
+    return {id(x): [new if t == old else t for t in x["teachers"]] for k, old, new in ((f["a"], f["x"], f["y"]), (f["b"], f["y"], f["x"])) for x in fixes.rows_of_key(rows, fixes._key(k)) if old in x["teachers"]}
+
 def _blocked(m, spec, days, b, f):
-    """the lessons of a teacher fix's key that a new teacher cannot take when they are, on the timetable m (b: its Busy) -> [(lesson id,
-    the lesson in the way, why)]; the lesson in the way is None for a Must rule of the new teacher's, which moving another lesson does not help"""
-    mine = helper._of_key(m["lessons"], fixes._key(f["key"])); own = {id(x) for x in mine}; ids = list(dict.fromkeys(x["id"] for x in mine)); out = []
+    """the lessons of a teacher fix's key (of a trade's two keys) that a new teacher cannot take when they are, on the timetable m (b: its Busy) ->
+    [(lesson id, the lesson in the way, why)]; the lesson in the way is None for a Must rule of the new teacher's, which moving another lesson does
+    not help. A trade changes both keys at once: a lesson of one is in the way of another's only as it is taught after it"""
+    takes = _takes(m["lessons"], f); ids = list(dict.fromkeys(x["id"] for x in m["lessons"] if id(x) in takes)); out = []
+    new = {i: [dict(x, teachers=takes.get(id(x), x["teachers"])) for x in b.ids[i]] for i in ids}
     for i in ids:
         rows = b.ids[i]; now = _musts(m, spec, rows)
-        rule = [t for k, t in _musts(m, spec, [dict(x, teachers=list(f["teachers"])) if id(x) in own else x for x in rows]).items() if k not in now]
+        rule = [t for k, t in _musts(m, spec, new[i]).items() if k not in now]
         if rule: out.append((i, None, rule[0])); continue
         had = {t for y in rows for t in y["teachers"]}   # as fixes.judge sees a teacher change: only a teacher who was not there can clash
-        hit = _blocker(b, days, [dict(y, teachers=[t for t in f["teachers"] if t not in had], classes=[], group=ENTIRE, rain="", room="") for y in rows], set(ids))
+        cand = [dict(y, teachers=[t for t in y["teachers"] if t not in had], classes=[], group=ENTIRE, rain="", room="") for y in new[i]]
+        hit = _blocker(b, days, cand, set(ids))
+        if not hit and f["kind"] == "trade": hit = _blocker(fixes.Busy(m, [x for j in ids if j != i for x in new[j]], base=b), days, cand, ())
         if hit: out.append((i, *hit))
     return out
 
@@ -308,27 +331,28 @@ def _either(blocked):
     """the lessons whose move helps blocked lessons -> [(lesson id, why)]: those in the way, then the blocked lessons themselves"""
     return [(y, why) for _, y, why in blocked if y is not None] + [(i, why) for i, _, why in blocked]
 
-def _day_rules(m, spec, f):
-    """{day: sentence} of the Must rules of a teacher's day ("Max periods in a row" and the like: their keys end |{day}) that the teacher fix f
-    breaks anew on the timetable m"""
-    own = {id(x) for x in helper._of_key(m["lessons"], fixes._key(f["key"]))}; near = [x for x in m["lessons"] if id(x) in own or set(x["teachers"]) & set(f["teachers"])]
+def _day_rules(m, spec, f, of=None):
+    """{day: sentence} of the Must rules of a teacher's day ("Max periods in a row" and the like: their keys end |{day}) that the teacher fix or the trade f
+    breaks anew on the timetable m (of: for that teacher only)"""
+    takes = _takes(m["lessons"], f); names = {t for v in takes.values() for t in v}; near = [x for x in m["lessons"] if id(x) in takes or set(x["teachers"]) & names]
     was, out = fixes.rule_subjects(m, spec, near), {}
-    for k, w in fixes.rule_subjects(m, spec, [dict(x, teachers=list(f["teachers"])) if id(x) in own else x for x in near]).items():
+    for k, w in fixes.rule_subjects(m, spec, [dict(x, teachers=takes.get(id(x), x["teachers"])) for x in near]).items():
         if k in was or isinstance(k, tuple) or w.get("strength") != "Must": continue
         who, _, d = k.split(":", 2)[2].rpartition("|")
-        if who in m["teacher_ix"] and d.isdigit(): out.setdefault(int(d), w["text"])
+        if who in m["teacher_ix"] and d.isdigit() and of in (None, who): out.setdefault(int(d), w["text"])
     return out
 
 def _in_the_way(m, spec, days, b, f, must):
     """the lessons whose move may help a refused fix on the timetable m (b: its Busy; must: the Must rules it breaks, as judged) ->
-    [(lesson id, why)], in the order found: for a teacher fix those in the way of a new teacher, then the lessons of its key that are
-    blocked; when only a rule of the teacher's day refuses it, the key's lessons of the days it is broken on (all of them when it names no
+    [(lesson id, why)], in the order found: for a teacher fix or a trade those in the way of a new teacher, then the lessons of its keys that are
+    blocked; when only a rule of a teacher's day refuses it, the lessons that teacher gets on the days it is broken on (all of the keys' when it names no
     day); for a move, swap or add those in the way of each lesson it places; none for a room (Busy names no lesson for one) or a delete"""
-    if f["kind"] == "teacher":
+    if f["kind"] in ("teacher", "trade"):
         blocked = _blocked(m, spec, days, b, f)
         if blocked or not must: return _either(blocked)
-        own = helper._of_key(m["lessons"], fixes._key(f["key"])); on = _day_rules(m, spec, f)
-        return [(x["id"], on[x["d"]]) for x in own if x["d"] in on] or [(x["id"], must[0]) for x in own]
+        takes = _takes(m["lessons"], f); gets = [(x, t) for x in m["lessons"] if id(x) in takes for t in takes[id(x)] if t not in x["teachers"]]
+        on = {t: _day_rules(m, spec, f, t) for t in dict.fromkeys(t for _, t in gets)}
+        return [(x["id"], on[t][x["d"]]) for x, t in gets if x["d"] in on[t]] or [(x["id"], must[0]) for x, _ in gets]
     if f["kind"] not in ("move", "swap", "add"): return []
     after = helper._apply(m["lessons"], [f], spec, days); placed = after["touched"]
     hits = [_blocker(b, days, [x for x in after["lessons"] if x["id"] == i], placed) for i in sorted(placed)]
@@ -336,17 +360,17 @@ def _in_the_way(m, spec, days, b, f, must):
 
 def waiting(pool, fx):
     """what the fixes change of the lessons not placed (pool: their rows) when they are made on the draft: a teacher fix reaches every row of its
-    key -> (those rows as they are just before, the pool after). Nothing of pool is changed"""
+    key, a trade the rows of its two keys that the teacher who gives it up has -> (those rows as they are just before, the pool after). Nothing of pool is changed"""
     was = []
     for f in fx:
-        if f["kind"] != "teacher": continue
-        mine = fixes.rows_of_key(pool, fixes._key(f["key"])); ids = {id(x) for x in mine}; was += mine
-        pool = [dict(x, teachers=list(f["teachers"])) if id(x) in ids else x for x in pool]
+        if f["kind"] not in ("teacher", "trade"): continue
+        takes = _takes(pool, f); was += [x for x in pool if id(x) in takes]
+        pool = [dict(x, teachers=takes[id(x)]) if id(x) in takes else x for x in pool]
     return was, pool
 
 def rechecked(m, spec, lessons, touched, was, fx=()):
     """the numbers of the typed rules (T1, T2 ...) that the fixes fx make one check again, sorted: verify.typed_again with these lessons on the
-    timetable (touched and was: helper._apply's for the fixes) and with the lessons not placed (m["pool"]) that a teacher fix reaches"""
+    timetable (touched and was: helper._apply's for the fixes) and with the lessons not placed (m["pool"]) that a teacher fix or a trade reaches"""
     return sorted({int(w["key"].split(":")[1]) for w in verify.typed_again(dict(m, lessons=lessons), spec, touched, list(was) + waiting(m.get("pool") or [], fx)[0])})
 
 class _Search:
@@ -356,10 +380,10 @@ class _Search:
     def __init__(self, m, spec, days, target, moved, deadline, stats, before, room, most, far):
         self.m, self.spec, self.days, self.target, self.w = m, spec, days, target, target["w"]
         self.moved, self.deadline, self.stats, self.before, self.room, self.most, self.far = moved, deadline, stats, before, room, most, far
-        self.memo, self.bars, self.places = {}, {}, {}         # helper.chain's memo; day_moves' memo; lesson id -> the places it may go to
+        self.memo, self.bars, self.places = {}, {}, {}         # helper.chain's memo; day_moves' memo; (lesson id, candidate) -> the places it may go to
         self.seen, self.solved = set(), []                     # the lists looked at; the answers of the present number of moves
         self.refused, self.many = "", False                    # the judge's sentence about the change itself on m; whether more changes than MAX_DIRECT were needed
-        self.blocked, self.own, self.given = [], set(), None   # for a teacher change: _blocked on m, the key's lessons, m with the change made
+        self.blocked, self.own, self.given = {}, {}, {}        # for each candidate (its place) of a teacher change: _blocked on m, the lessons that get a new teacher, m with the change made
 
     # ------------------------------------------------------------ the change itself
     def _more(self, node, c):
@@ -383,6 +407,7 @@ class _Search:
 
     # ------------------------------------------------------------ judging a list
     def _fixes(self, node): return [x["fix"] for x in node[0]] + [f for _, part in node[1] for f in part]
+    def _cand(self, node): return node[1][0][0] if node[1] else None   # the place of a list's candidate in direct's order
 
     def _new(self, node):
         """whether the list was not looked at before (the same moves and changes in another order leave the same timetable, and each is allowed by itself)"""
@@ -398,12 +423,17 @@ class _Search:
         self.stats["nodes"] += 1; fx = self._fixes(node); c = helper.chain(self.m, self.spec, self.days, fx, self.ctx, self.memo)
         while len(self.memo) > MAX_KEPT: del self.memo[next(iter(self.memo))]   # the oldest
         if no := _refusal(c):
-            if not node[0] and no[0] == 0 and fx[0]["kind"] != "add" and not self.refused: self.refused = no[1]   # said of the change on m as it is, not of a move or a place tried for it
+            if not node[0] and no[0] == 0 and fx[0]["kind"] != "add" and (not self.refused or self._truer(node, no[1])): self.refused = no[1]   # said of the change on m as it is, not of a move or a place tried for it
             return "refused", c
         done = bool(fx) and _settled(self.m, self.spec, self.days, self.w, c["lessons"], self.before, self.room)   # the empty list is never an answer
         if (done or node[1]) and _at_once(c["lessons"], c["touched"]) - self.at_once: return "refused", c   # an answer, or a list to carry on with further changes, that puts two lessons of a key in one period
         if not done: return "open", c
         self.solved.append((node, c)); return "solved", c
+
+    def _truer(self, node, why):
+        """whether the sentence that refuses the first trade says more than the one that refuses the teacher change by itself, which may name a lesson the trade takes off the
+        new teacher; not one that the teacher who gives the key up has another lesson then (that is about the other key's period)"""
+        f = node[1][0][1][0]; return f["kind"] == "trade" and self._cand(node) == 1 and not why.startswith(f"{f['x']} is teaching ")
 
     # ------------------------------------------------------------ the lists with one move more
     def _ways(self, node, how, c):
@@ -416,27 +446,35 @@ class _Search:
         mi, ci = (self.m, self.ctx) if i == 0 else helper._after(self.m, self.spec, self.days, fx[:i], self.memo)
         return _in_the_way(mi, self.spec, self.days, ci["busy"], fx[i], c["steps"][i]["must"])
 
-    def _places(self, i):
-        """lesson i's day_moves. A lesson that is to have a new teacher goes by that teacher's Must rules: its day is barred, and a place left out, for those"""
-        if i not in self.places:
+    def _places(self, i, node):
+        """lesson i's day_moves, for a list of the node's candidate. A lesson that is to have a new teacher goes by that teacher's Must rules: its day is barred, and a place left out, for those"""
+        j = self._cand(node); own = i in self.own.get(j, ()); key = (i, j if own else None)
+        if key not in self.places:
             self._in_time(); rows, bars, shut = self.rows[i], self.bars, None
-            if i in self.own:
-                d, given, now = rows[0]["d"], [x for x in self.given["lessons"] if x["id"] == i], _musts(self.m, self.spec, rows)
-                bars = {**bars, ("barred", i, d): barred(self.given, self.spec, self.days, i, d, self.m.get("pool") or ())}
+            if own:
+                d, given, now = rows[0]["d"], [x for x in self.given[j]["lessons"] if x["id"] == i], _musts(self.m, self.spec, rows)
+                bars = {**bars, ("barred", i, d): barred(self.given[j], self.spec, self.days, i, d, self.m.get("pool") or ())}
                 def shut(f):
                     at = (f["d"], f["p"]) if f["kind"] == "move" else (self.rows[f["b"]][0]["d"], self.rows[f["b"]][0]["p"])
                     return any(k not in now for k in _musts(self.m, self.spec, [dict(x, d=at[0], p=at[1]) for x in given]))
-            self.places[i] = day_moves(self.m, self.spec, self.days, i, self.ctx, bars, self.moved, CAND_SLOTS, self.far, shut)
-        return self.places[i]
+            self.places[key] = day_moves(self.m, self.spec, self.days, i, self.ctx, bars, self.moved, CAND_SLOTS, self.far, shut)
+        return self.places[key]
 
     def _may(self, i):
         """whether a lesson may be moved at all: on the timetable, not a band, not moved by an earlier target"""
         return i in self.rows and i not in self.moved and not fixes._block(self.rows[i])
 
-    def _still(self, moves):
-        """the blocked lessons of a teacher change that stay blocked after these moves, whatever else is moved: neither the lesson nor the one in its way is"""
-        done = {i for x in moves for i in _ids(x["fix"])}
-        return [b for b in self.blocked if b[0] not in done and b[1] not in done]
+    def _still(self, node):
+        """the blocked lessons of a list's teacher change that stay blocked after its moves, whatever else is moved: neither the lesson nor the one in its way is"""
+        done = {i for x in node[0] for i in _ids(x["fix"])}
+        return [b for b in self.blocked.get(self._cand(node), ()) if b[0] not in done and b[1] not in done]
+
+    def _take_over(self, j, f):
+        """work out what the moves to come for candidate j, the teacher change or trade f, go by -> whether any may help: each blocked lesson, or the one in its way, may be moved"""
+        takes = _takes(self.m["lessons"], f); self.own[j] = {x["id"] for x in self.m["lessons"] if id(x) in takes}
+        self.given[j] = dict(self.m, lessons=helper._apply(self.m["lessons"], [f], self.spec, self.days)["lessons"])
+        self.blocked[j] = _blocked(self.m, self.spec, self.days, self.ctx["busy"], f)
+        return all(self._may(y) or self._may(i) for i, y, _ in self.blocked[j])
 
     def _children(self, failed):
         """each list that is no answer with one move more, put first: of a lesson that may help it and that the list has not moved already.
@@ -446,8 +484,8 @@ class _Search:
             for i, why in ways:
                 if i not in done and self._may(i): able.setdefault(i, why)
             for i, why in list(able.items())[:CAND_LESSONS]:
-                for x in self._places(i):
-                    child = ((dict(x, why=why),) + moves, parts); least = len({("in the way", y) if y is not None else ("blocked", b) for b, y, _ in self._still(child[0])})
+                for x in self._places(i, (moves, parts)):
+                    child = ((dict(x, why=why),) + moves, parts); least = len({("in the way", y) if y is not None else ("blocked", b) for b, y, _ in self._still(child)})
                     if not _ids(x["fix"]) & done and least <= self.most - len(child[0]) and self._new(child): yield child
 
     def run(self, cands):
@@ -459,7 +497,7 @@ class _Search:
             for k in range(self.most + 1):
                 failed, opened = [], []
                 for node in level:
-                    if still := self._still(node[0]): self._in_time(); failed.append((node, _either(still))); continue   # the new teacher cannot take it then: the judge would refuse it
+                    if still := self._still(node): self._in_time(); failed.append((node, _either(still))); continue   # the new teacher cannot take it then: the judge would refuse it
                     how, c = self._look(node)
                     if how == "open" and node[1]: opened.append((node, c))
                     elif how != "solved": failed.append((node, self._ways(node, how, c)))
@@ -468,10 +506,8 @@ class _Search:
                 if k == 0 and opened: self.refused = ""   # a change fits by itself: what was said of another candidate is not why there is no answer
                 if self.solved or k == self.most: break
                 if k == 0 and self.target["kind"] == "teachers":
-                    f = cands[0][0]; self.own = {x["id"] for x in helper._of_key(self.m["lessons"], fixes._key(f["key"]))}
-                    self.given = dict(self.m, lessons=helper._apply(self.m["lessons"], [f], self.spec, self.days)["lessons"])
-                    self.blocked = _blocked(self.m, self.spec, self.days, self.ctx["busy"], f)
-                    if not all(self._may(y) or self._may(i) for i, y, _ in self.blocked): break   # one of them stays blocked whatever moves
+                    able = {j for j, (f, *_) in enumerate(cands) if self._take_over(j, f)}; failed = [x for x in failed if self._cand(x[0]) in able]   # a candidate with a lesson that stays blocked whatever moves takes nothing from the others
+                    if not failed: break
                 level = self._children(failed)   # made as they are looked at
         except _Stop: pass   # the best found so far
         return self._best()
@@ -494,6 +530,7 @@ class _Search:
         row5 = verify.planned_rows(self.spec).get(helper._dep_parts(self.target["key"])[0]) or {}
         n = row5.get("periods", 0); plan = f"Step 3 plans {n} period{'' if n == 1 else 's'} of it."
         if f["kind"] == "teacher": return f"Step 5 now gives it to {fixes._names(f['teachers'])}."
+        if f["kind"] == "trade": return f"Step 5 now gives {verify._name(fixes._key(f['a']))} to {f['y']} and {verify._name(fixes._key(f['b']))} to {f['x']}."
         if f["kind"] == "add": return "It was not on the timetable." if self.target["kind"] == "missing" else plan
         if f["kind"] == "delete": return plan
         return f"Step 3 asks for {row5['room_kind']}." if self.target["kind"] == "venue" else "It needs a room that seats the group."
