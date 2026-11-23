@@ -142,9 +142,7 @@ The build itself
 
 ## Known limits
 
-- **N1, open, a one-line fix exists:** if the AI leaves out "whole day or part" or the levels in a day it sets (its instructions require both, but
-  that tool is no longer strictly checked), the day is saved as a whole day for every level and the times it gave are dropped without a word
-  (`plan/steps.py`, `_days_of`). The day shows in the panel and on the exam page. First item for the next change.
+- N1, fixed on 23 Nov 2026 in its own small pull request: a day the chat sets must say "whole day or part" (a missing one is refused), and a whole day takes no times.
 - N2: a step's answer to the AI over 150,000 characters would be replaced by "That is too much to show at once." after the change was saved (about
   60,000 at 200 papers, so out of reach today).
 - N3: the panel's kept checklist is rebuilt when this exam, the publish, the exam settings or the day changes, not when the school calendar or the
@@ -179,7 +177,6 @@ The build itself
 
 ## Stage 2 starting points
 
-- N1 above first.
 - The cards (Change the settings, Make seats and duties, Make the change) need a `form` line kind: `talk.py` and the page already carry `buttons`
   and `table` on a line, and `steps.Refused` sentences with the exam's link.
 - "Seated", "rooms over" and the counts of why a duty is short are not in the server's figures yet (the design's "Facts the builder needs").

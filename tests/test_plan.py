@@ -1753,10 +1753,10 @@ def wrong_input_answers_with_a_sentence_and_changes_nothing():
         ("days", dict(days=[dict(date="2026-10-06", whole=False, start="08:10", end="10:20")]), "08:10 is not the start of a period."),
         ("days", dict(days=[dict(date="2026-10-06", whole=False, start=None, end=None)]), "Give the start and the end of part of a day."),
         ("days", dict(days=[dict(date="2026-10-06", whole="yes")]), "Check the exam and try again."),
-        ("days", dict(days=[dict(date="2026-10-06"), dict(date="2026-10-06")]), "Tue 6 Oct is given twice."),
+        ("days", dict(days=[dict(date="2026-10-06", whole=True), dict(date="2026-10-06", whole=True)]), "Tue 6 Oct is given twice."),
         ("days", dict(days=[dict(whole=True)]), "date is missing."),
-        ("days", dict(days=[dict(date="2026-10-06")] * 32), "An exam can cover at most 31 days."),
-        ("days", dict(days=[dict(date="2026-10-06", levels=["Sec 9"])]), "Sec 9 is not a level of the published timetable."),
+        ("days", dict(days=[dict(date="2026-10-06", whole=True)] * 32), "An exam can cover at most 31 days."),
+        ("days", dict(days=[dict(date="2026-10-06", levels=["Sec 9"], whole=True)]), "Sec 9 is not a level of the published timetable."),
         ("day_times", dict(min_break=-1), "Give a whole number of minutes between two papers."),
         ("day_times", dict(max_papers="2"), "Give a whole number for the most papers a day."),
         ("day_times", dict(report="half seven"), "Give a time such as 08:00."),
@@ -4129,6 +4129,7 @@ def the_app_refuses_what_only_a_strict_schema_used_to_keep_out():
         ("set_days", dict(days=[dict(date="2026-10-06", levels=None, whole=True, start=None, end=None, room="Hall")]), "room is not a field here."),
         ("set_days", dict(days=[dict(date="2026-10-06", levels=None, whole=True, start=None, end=None)], also=1), "also is not a field here."),
         ("set_days", dict(days=[dict(date=["2026-10-06"], levels=None, whole=True, start=None, end=None)]), "Give a date such as 2026-10-05."),
+        ("set_days", dict(days=[dict(date="2026-10-06", levels=None, start="08:00", end="10:20")]), "whole is missing."),
         ("set_papers", dict(change=[dict(id=pid, minutes="75")]), "Give Sec 3 English Paper 1 a length in minutes."),
         ("set_papers", dict(add=[dict(level="Sec 3", subject="English", paper="Paper 2", minutes="60")]), "Give Sec 3 English Paper 2 a length in minutes."),
         ("set_papers", dict(change=[dict(id=pid, colour="red")]), "colour is not a field here."),
@@ -4435,5 +4436,32 @@ def a_talk_opened_on_an_exam_says_what_it_carries_on_with():
     same(T.open("p1", env).lines, [])                                          # a new talk on no exam: nothing said
     call = answer(talk, env, "Add a paper", reply(say("ok")))
     same(user_texts(call.sent[0])[0].startswith("[The app: This talk is on the exam Mid-Year 2027. Its status:"), True)   # the AI's note as before
+
+# ---------------------------------------------------------------- N1: a day the chat sets is never saved as a whole day by mistake
+@t
+def a_day_needs_whole_day_or_part_said_and_a_whole_day_takes_no_times():
+    no_schedules()
+    env, st, _ = started()
+    a_day = lambda **kw: dict(dict(date="2026-10-06", levels=None), **kw)
+    for days, text in (([a_day(start="08:00", end="10:20")], "whole is missing."),                      # (a) no whole, with times
+                       ([a_day()], "whole is missing."),                                                 # no whole, no times
+                       ([a_day(whole=True, start="08:00", end="10:20")], ST.WHOLE_DAY_TIMES),            # (b) a whole day with times
+                       ([a_day(whole=True, start="08:00")], ST.WHOLE_DAY_TIMES), ([a_day(whole=True, end="10:20")], ST.WHOLE_DAY_TIMES),
+                       ([a_day(whole="yes")], "Check the exam and try again."),
+                       ([a_day(whole=False, start="08:00")], ST.PART_DAY),
+                       ([a_day(whole=True), a_day(date="2026-10-07", start="08:00", end="10:20")], "whole is missing.")):   # (e) none saved
+        unchanged(env, st, lambda: run(env, st, "days", dict(days=days), said=""), text)
+    same(ST.WHOLE_DAY_TIMES, "A whole day takes no start or end. Say it is part of a day, or leave the times out.")
+    unchanged(env, st, lambda: run(env, st, *AI.args_of("set_days", dict(days=[a_day(whole=True, start="08:00", end="10:20")]))), ST.WHOLE_DAY_TIMES)
+    unchanged(env, st, lambda: run(env, st, *AI.args_of("set_days", dict(days=[dict(date="2026-10-06", start="08:00", end="10:20")]))), "whole is missing.")
+    whole = {"levels": None, "whole": True, "from": None, "to": None}
+    run(env, st, "days", dict(days=[a_day(whole=True, start=None, end=None)]), said="")                  # (c) nulls
+    same(env.load(st.exam)["days"]["2026-10-06"], whole)
+    run(env, st, "days", dict(days=[a_day(date="2026-10-07", whole=True)]), said="")                       # (c) left out
+    same(env.load(st.exam)["days"]["2026-10-07"], whole)
+    run(env, st, *AI.args_of("set_days", dict(days=[a_day(date="2026-10-08", whole=True, start=None, end=None)])))
+    same(env.load(st.exam)["days"]["2026-10-08"], whole)
+    run(env, st, "days", dict(days=[a_day(date="2026-10-09", levels=["Sec 3"], whole=False, start="08:00", end="10:20")]), said="")   # (d)
+    same(env.load(st.exam)["days"]["2026-10-09"], {"levels": ["Sec 3"], "whole": False, "from": "08:00", "to": "10:20"})
 
 print(f"{COUNT} plan tests passed")
