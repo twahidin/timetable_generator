@@ -1,0 +1,43 @@
+"""The words for a lesson, its periods and times, and the dates of an absence, as the pages, the history and the messages on
+Telegram say them. Pure: reads no files."""
+import datetime
+
+from exams.days import bounds, hhmm
+from relief import absences as _absences
+
+ENTIRE = "Entire Class"
+
+
+def class_group(x):
+    """'1B, 1A Maths (G1)': the classes and subject, and the group unless it is the whole class (as the pages' title)"""
+    g = x.get("group") or ""
+    head = " ".join(v for v in (", ".join(x.get("classes") or []), x.get("subject") or "") if v)
+    return head + (f" ({g})" if g and g != ENTIRE else "")
+
+
+def periods_text(x):
+    p, n = int(x["p"]), int(x.get("n") or 1)
+    return f"P{p + 1}" if n == 1 else f"P{p + 1}–P{p + n}"
+
+
+def times(pub, x, c):
+    """(start, end) of cover c of lesson x as HH:MM: the lesson's own, or a part's from exams.days.bounds"""
+    if not x.get("parts"): return x.get("start") or "", x.get("end") or ""
+    p, n, b = int(c["p"]), int(c.get("n") or 1), bounds((pub or {}).get("model") or {})
+    return (hhmm(b[p][0]), hhmm(b[min(p + n, len(b)) - 1][1])) if p < len(b) else ("", "")
+
+
+def day(iso):
+    """'Tue 13 Oct' for an ISO date or date-time"""
+    return _absences._say(datetime.date.fromisoformat(str(iso)[:10]))
+
+
+def days(record):
+    """'Tue 13 Oct, Wed 14 Oct': the dates of an absence"""
+    return ", ".join(day(d) for d in record.get("dates") or [])
+
+
+def away(record):
+    """'whole day', or the absence's periods ('P1–P3')"""
+    per = record.get("periods")
+    return periods_text(dict(p=per[0], n=per[1] - per[0] + 1)) if per else "whole day"

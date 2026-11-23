@@ -22,9 +22,12 @@ NO_FILES_YET = "Add files after the absence is sent."
 SAY_WHY = "Say why in a line."
 PAST_LESSON = "This lesson is in the past."
 PAST_ABSENCE = "This absence is in the past."
+ACKED = "This was acknowledged already."
 NO_NEED = "This lesson does not need relief."
 APPROVED_ALREADY = "This lesson's relief is approved already: ask the relief team to change it."
 IS_SPLIT = "This lesson is split: the relief team chooses for each part."
+NO_LESSONS = "There are no lessons to cover in that time."
+TOO_MANY = "A lesson can have at most 5 files."
 MAX_DATES, MAX_TEXT, MAX_LINK = 10, 2000, 500
 COVER = ("relief", "relief_by", "pick", "approved", "ack", "change", "history", "parts")     # a lesson's cover (relief.cover), moved whole
 
@@ -120,6 +123,20 @@ def _no_overlap(records, teacher, lessons):
                     raise ValueError(f"{r['by']} has already sent an absence for {teacher} on {_say(datetime.date.fromisoformat(x['date']))}.")
 
 
+def as_now(records, x, links):
+    """lesson x of a teacher (from lessons.on_date) as it is then: others, its other teachers who are there (with one of them there it
+    needs no relief unless it is asked for); stopped, why an approved exam or event stops it, or "" (it is kept as any other, with
+    nothing to cover while it is)"""
+    return dict(x, others=_free.there_then(records, x["others"], x["date"], x["p"], x["n"], links=links), stopped=_cover.stopped(links, x))
+
+
+def something_to_cover(teacher, dates, periods, needed_or_stopped, links):
+    """refuses an absence with nothing in it: no lesson needed or stopped (needed_or_stopped: whether each is), and no exam or event duty
+    of the teacher's in that time"""
+    if not any(needed_or_stopped) and not (links is not None and any(links.duties(teacher, d, tuple(periods) if periods else None) for d in dates)):
+        raise ValueError(NO_LESSONS)
+
+
 def new(data, pub, by, how, may_choose=False, links=None) -> dict:
     pub = _pub(pub)
     if how not in ("asked", "planned") or not isinstance(data, dict): raise ValueError(WRONG)
@@ -164,7 +181,8 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
             # a shared lesson needs no relief unless the client says so, but only while one of its other teachers is there:
             # others keeps those not away then, and with none there it is an ordinary lesson (needed unless the client says not).
             # An absence sent earlier that said "{them} is there" is left as it is; this one covers the lesson.
-            there = _free.there_then(records, x["others"], x["date"], x["p"], x["n"], links=links)
+            x = as_now(records, x, links)
+            there, stopped = x["others"], x.pop("stopped")
             # A lesson an approved exam or event stops is kept as any other (needed, unless the client or a co-teacher says
             # not): the stop is worked out wherever it matters (cover.stopped) and never written, so a lesson that happens
             # again, the exam withdrawn, still has its relief asked for.
@@ -174,10 +192,9 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
             else:
                 needed = a.get("needed") is not False
                 not_needed = None if needed else dict(by=by, why="Not needed")
-            built.append(dict(x, date=x["date"].isoformat(), others=there, needed=needed, not_needed=not_needed, relief=None, relief_by=None,
-                              work=dict(text="", link="", files=[]), _ask=a, _stopped=bool(_cover.stopped(links, x))))
-        if not any(x["needed"] or x["_stopped"] for x in built) and not (links is not None and any(links.duties(teacher, d, tuple(periods) if periods else None) for d in dates)):
-            raise ValueError("There are no lessons to cover in that time.")
+            built.append(dict(x, date=x["date"].isoformat(), needed=needed, not_needed=not_needed, relief=None, relief_by=None,
+                              work=dict(text="", link="", files=[]), _ask=a, _stopped=bool(stopped)))
+        something_to_cover(teacher, dates, periods, [x["needed"] or x["_stopped"] for x in built], links)
         _no_overlap(records, teacher, [x for x in built if x["needed"]])
         pending = dict(teacher=teacher, dates=[d.isoformat() for d in dates], periods=periods, cancelled=None, lessons=[])
         if not may_choose and any(x["needed"] and not x["_stopped"] and x["_ask"].get("relief") for x in built):
@@ -205,6 +222,16 @@ def new(data, pub, by, how, may_choose=False, links=None) -> dict:
         backups = _take_over(moving, r)
         _save(r)
         for o in backups: _save(o)      # after the absence: a lesson is never left in neither
+    return r
+
+
+def set_via(id, via):
+    """how an absence was asked, when not on the page ("telegram": relief/asking.py); one asked on the page has no via"""
+    with _LOCK:
+        r = load(id)
+        if r is None: raise ValueError(WRONG)
+        r["via"] = via
+        _save(r)
     return r
 
 
@@ -413,7 +440,7 @@ def acknowledge(id, by):
     with _LOCK:
         r = _editable(id)
         if by != r["teacher"] or r["how"] != "planned": raise ValueError(f"Only {r['teacher']} can acknowledge this.")
-        if r["acknowledged"]: raise ValueError("This was acknowledged already.")
+        if r["acknowledged"]: raise ValueError(ACKED)
         r["acknowledged"] = dict(at=_now())
         _save(r)
     return r
@@ -425,13 +452,24 @@ def set_work(id, key, work, by):
     took off, and no lesson of the absence lists any more"""
     if not isinstance(work, dict) or not isinstance(work.get("files"), list): raise ValueError(WRONG)
     known = _ids(work.get("known"))
+    return _change_work(id, key, by, lambda now: (work, known))
+
+
+def add_file(id, key, f, by):
+    """the file f (as files.save gives it) added to the lesson's work as it is by then; refused as set_work refuses"""
+    return _change_work(id, key, by, lambda now: (dict(now, files=now["files"] + [f]), {o["id"] for o in now["files"]}))
+
+
+def _change_work(id, key, by, make):
+    """the lesson's work is set to make(what it is now)'s: (the work, the file ids its maker knew)"""
     with _LOCK:
         r = _editable(id)
         if not _owner(r, by): raise ValueError(NOT_YOURS)
         x = _lesson(r, key)
         _past(x)
+        work, known = make(x["work"])
         w = _check_work(work)
-        if len(w["files"]) > _files.PER_LESSON: raise ValueError("A lesson can have at most 5 files.")
+        if len(w["files"]) > _files.PER_LESSON: raise ValueError(TOO_MANY)
         kept = []
         for f in w["files"]:
             fid = f.get("id") if isinstance(f, dict) else f
@@ -444,7 +482,7 @@ def set_work(id, key, work, by):
             kept.append(dict(id=fid, name=name if name.lower().endswith(ext.lower()) else _files.fit(name, ext), size=os.path.getsize(p)))
         sent = {k["id"] for k in kept}
         kept += [o for o in x["work"]["files"] if o["id"] not in known and o["id"] not in sent]
-        if len(kept) > _files.PER_LESSON: raise ValueError("A lesson can have at most 5 files.")
+        if len(kept) > _files.PER_LESSON: raise ValueError(TOO_MANY)
         before = {o["id"] for o in x["work"]["files"]}
         x["work"] = dict(text=w["text"], link=w["link"], files=kept)
         _save(r)
