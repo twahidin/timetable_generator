@@ -38,7 +38,8 @@ Stage 3 is the relief team's module and everyone's cover list:
   AI's pick by the school's rules, or the app's own order when there is no AI. The team can **Approve**, **Approve all
   waiting**, **Change** the pick, **Split** a lesson into parts (each with its own relief teacher) and **Join again**,
   **Keep** the relief when a teacher asks to change it, or **Fill now** to pick at once.
-- **Reliefs I'm covering** (every teacher): the reliefs approved for them, with **Acknowledge** or **Request to change**.
+- **Reliefs I'm covering** (every teacher): the reliefs sent out to them (below), with **Acknowledge** or **Request to
+  change**, the work and its files.
 - **Load** (the relief team): how many relief periods each teacher has this week and this term, by department, with a
   Download; a name opens that teacher's reliefs.
 - **What's in** also shows "Needs a nudge" and each absence's relief status.
@@ -49,31 +50,44 @@ until somebody makes the bot, sets `TELEGRAM_BOT_TOKEN` and presses **Connect th
 **Link Telegram** at the top of My absences (and unlinks it there, or with `/stop`). Whoever is not linked finds their
 reliefs and absences in the app, as before; somebody unlinked because they blocked the bot sees why on their Link
 Telegram card.
-- **Relief teachers** get their relief once the relief team has approved it, with the work and its files, and press
-  **Acknowledge** or **Request to change** (they say why in one line). They are told when it is moved, kept or no longer
-  needed, and when an exam or event stops the lesson or it is on again.
+- **Relief teachers** get their relief once the relief team has approved it and sent it out (or a head chose them when
+  planning), in school hours alone, with the work and a link, and **Open in the app** for the files (no file is sent on
+  Telegram), and press **Acknowledge** or **Request to change** (they say why in one line). A relief told before its day
+  is told again 24 hours before and on the morning itself. They are told when it is moved, kept or no longer needed, and
+  when an exam or event stops the lesson or it is on again.
 - **Absent teachers** are told of relief somebody else planned, with a button that opens the app to set work and one to
   cancel (one line saying why, then a second press; not for an exam or event duty's backup, which the exams committee
-  or the event's teacher in charge stops), and get one reminder. `/relief` asks for relief on Telegram with the
+  or the event's teacher in charge stops), and get one reminder. They are told who covers each lesson once that relief
+  teacher acknowledges, and are reminded to set work at 18:00 the evening before and 07:00 on the day while a lesson has
+  none. `/relief` asks for relief on Telegram with the
   app's own questions, work and files included; a lesson takes as many messages as wanted (a text, then a file) until
   **Next**; What's in then says "asked on Telegram".
-- **Reporting officers** are told who is away and when, with the kind of reason alone; the Ask for relief form says when
-  the reporting officer is not on Telegram, so the teacher tells them.
-- **The relief team** gets a ping when relief is asked for today, once its picks wait for approval (with **Open relief
-  today**; never before the report starts, an hour before the first period: one asked in the night is sent then),
-  each request to change with its new pick and an **Approve** button, a report of who has not
+- **Reporting officers** are told who is away and when, with the kind of reason alone; the Ask for relief form and
+  `/relief` say when the reporting officer is not on Telegram, so the teacher tells them.
+- **The relief team** gets the morning message (06:30, a setting) with everything waiting for today and who is away; a
+  late request for an absence for today sent after the morning message and before the cut-off (14:00, a setting), once
+  its picks wait for approval; "Relief needed again" when an approved relief's teacher is away then; an alert when a
+  teacher blocks the bot; each request to change with its new pick and an **Approve** button, a report of who has not
   acknowledged (every 15 minutes, a setting, from an hour before the first period) with **Remind them again**, one all
-  clear, what was cancelled by a person, and a weekly summary (Friday 15:00, a setting).
-- On **Today** an approved relief says when its teacher was told, or that they are not on Telegram, with **Remind** beside
-  it and **Remind all not acknowledged** at the top. **Weekly summary** is a new tab with any week's numbers.
+  clear, what was cancelled by a person, and a weekly summary (Friday 15:00, a setting). Between the cut-off and the
+  next morning message nobody on the team is pinged about a new request.
+- On **Today** a relief is approved with **Approve**, then told with **Send out** (a row's own, or **Send out {n}
+  approved** at the top; on Telegram, **📤 Send out to {name}** after **Approve**). Sent out outside school hours (from
+  the earliest send-out time, 06:45, to the cut-off of a school day), it is held and goes at 06:45. A head's own choice in
+  Plan relief for a colleague is approved and sent out when it is planned. A relief sent out says when its teacher was
+  told, or that they are not on Telegram, with **Remind** beside it and **Remind all not acknowledged** at the top. After
+  the cut-off Today opens on the next school day. **Weekly summary** is a new tab with any week's numbers.
 
 What people do there is checked as on the app's own pages and written in the **History** (by that person, "Telegram"). A
 message goes once: when it cannot be known whether it went, Today says "May not have been sent: remind them" and it is
 not sent again by itself. While Telegram is down nothing is given up: what waits goes when it is back, if still true.
 A line the bot does not read (not a button, code, command or answer) is answered "I can't read messages here."
 
-Nothing reaches a relief teacher before the relief team approves it, in the app or on Telegram. The published timetable
-on a date, with the relief in it, comes later.
+Nothing reaches a relief teacher before the relief team approves it and sends it out, or a head chooses them when
+planning, in the app or on Telegram, and nothing reaches them on Telegram outside school hours. The AI picks as soon as a
+request is in, for any date. The teacher who is away sees the relief teacher's name once it is acknowledged ("Being
+arranged" before that). The times are in **Relief settings**; `docs/DEPLOY.md` (section 6, "When messages go") has what
+goes when. The published timetable on a date, with the relief in it, comes later.
 
 Relief also knows what approved exams and events do to a date (stage 3 of exams and events): a lesson whose every period stops for an exam or event shows as "Not happening" and needs no relief while it is stopped (if the exam is withdrawn, an absence sent meanwhile asks for its relief again); someone on an exam duty or going to an event is not offered as free then (a fold under the list says who and why) and cannot be chosen; their duty minutes count in "week so far"; and an absence may be sent even when every lesson stops, because the duty must be replaced and the exams committee sees who is away. The forms list the teacher's duties on each date. An absence sent before the exam or event was approved shows such a lesson as "Not happening", and it cannot be given a relief teacher. The relief team's pages know the same: such a lesson is not picked for, approved or counted (Today and Reliefs I'm covering say "Not happening", and a relief given before stands again if the exam is withdrawn); nobody on an exam duty or at an event is picked, and an approved relief who is given a duty then is flagged; Today says which duty the teacher of a backup is on; and Load's "Week so far" and the numbers the AI is given count exam and event duties and leave out lessons that stop.
 

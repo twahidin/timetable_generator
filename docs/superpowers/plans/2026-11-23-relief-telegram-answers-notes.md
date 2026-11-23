@@ -16,9 +16,9 @@ As the lead wrote them, on 23 November 2026, to stage 4's eleven open questions 
 
 | # | The question (short) | The answer | What came of it |
 |---|---|---|---|
-| 1 | Ping the relief team when relief is asked for today? | yes | Built: A |
+| 1 | Ping the relief team when relief is asked for today? | yes | Built: A (since replaced by the morning message and the late request) |
 | 2 | The one-time code in place of the personal code? | keep | Kept |
-| 3 | Work files through Telegram with the relief? | Keep | Kept |
+| 3 | Work files through Telegram with the relief? | Keep | Kept; reversed by the lead on 23 Nov (item 10): files by link, built in the send-out, stage 1 |
 | 4 | The kind of reason in the reporting officer's message? | Keep | Kept |
 | 5 | Should the app's form say when the reporting officer is not on Telegram? | yes | Built: B |
 | 6 | `/relief`: a text and then a file went to two lessons; a Next button? | fixed for both | Built: C |
@@ -46,7 +46,7 @@ Some of these are readings, in case they are not what was meant:
   lesson of it is still without a pick, or five minutes after the absence was sent, so it never comes before the picks. It never
   comes before the day's first report, an hour before the first period (07:00 when lessons start at 08:00): one asked in the night
   is sent then (f4df792, after the final review). Never for an exam's or event's backup, never twice for one absence, never to who
-  sent it or to the absent teacher.
+  sent it or to the absent teacher. **Replaced by the morning message and the late request: see `2026-11-24-relief-send-out-stage-1-notes.md`.**
 - **B. The form says when the reporting officer is not on Telegram** (b55c496). After "Sent. The relief team can see it." the form
   adds "{officer} is not on Telegram: please tell them yourself.", the same sentence `/relief` already said, under the same rule:
   an officer is named, is neither the absent teacher nor who sent it, and the bot is connected.
@@ -180,7 +180,8 @@ To the relief team (A), with the button **Open relief today**:
 > {whole day, or the periods, as "P1–P3"}
 > {n} lessons are waiting for your approval.
 
-("1 lesson is waiting for your approval." for one.)
+("1 lesson is waiting for your approval." for one.) Replaced since by the late request, "🆕 Late request for today · {absent}": see
+`2026-11-24-relief-send-out-stage-1-notes.md`.
 
 In `/relief` (C):
 - Once something is set for a lesson: "Work for {lesson} {periods} on {day}{start}: {what is set}. Send more, or press Next."
@@ -210,12 +211,14 @@ In `/relief` (C):
     more" past 20.
   - The kinds: "Relief planned", "Reminder to acknowledge", "To the reporting officer", "Request to change", "New pick for a request
     to change", "Relief kept", "Absence cancelled", "No longer needed", "Relief moved", "Not happening", "On again", "Weekly summary",
-    "New request for today", and "Message" for any other.
+    "New request for today", and "Message" for any other. (Since the send-out, stage 1, "New request for today" is gone and seven
+    kinds are added: see `2026-11-24-relief-send-out-stage-1-notes.md`.)
   - Nothing is shown when there is nothing to say.
 
 ## Known limits
 
-A, the ping:
+A, the ping (as it was before the send-out, stage 1, which replaced it; none of these holds of the late request as such: see
+`2026-11-24-relief-send-out-stage-1-notes.md`):
 - An absence sent the evening before for today is not pinged (decision 2): the team sees it when they open Today.
 - The earliest a ping goes is exactly one hour before the first period. The report itself starts at a round time (07:00, 07:15
   ...), so at a school whose first period does not begin on such a time the ping can come a few minutes before the first report.
@@ -254,7 +257,8 @@ C, `/relief`:
 - A tick on an older copy of the days question redraws the message that was pressed (older than this change).
 
 D, the blocked line:
-- The unlinking still writes no history entry (decision 14; an open question).
+- The unlinking still writes no history entry (decision 14; an open question). Since the send-out, stage 1, it does: "Telegram
+  unlinked for {name}: the bot was blocked", by "The app".
 - The note is written just after the unlinking, not in the same step: a crash between the two leaves the person unlinked with no
   line.
 - A note for somebody who never links again stays in the store (the app's Telegram file); it is shown only to them.
@@ -275,10 +279,13 @@ set); a line of `relief/outbox.py`'s description is long; `relief/asking.py` kee
 ## Open questions for the lead
 
 1. D: should the unlinking be written in the History, by "The app"? One condition in the app's history hook (the code that writes
-   each change to the History, which now needs a signed-in person) would allow it.
+   each change to the History, which now needs a signed-in person) would allow it. **Built in the send-out, stage 1** (the History
+   line by "The app", with the alert to the team).
 2. B: should the form also say "{officer} will be told." when they are on Telegram, as `/relief` does?
-3. A: should a request sent the evening before ping at the report's start (an hour before the first period)?
+3. A: should a request sent the evening before ping at the report's start (an hour before the first period)? **Settled by the
+   morning message** (the send-out, stage 1): a request sent before the morning time is in that morning's message and pings nobody.
 4. A: a request sent in the night is pinged at the report's start, an hour before the first period. Earlier, later, or as it is?
+   **Settled by the morning message** (the send-out, stage 1), as 3.
 5. Answer 6: was "fixed for both" meant as the Next button that was built? (C can be changed or taken out.)
 
 ## Checks

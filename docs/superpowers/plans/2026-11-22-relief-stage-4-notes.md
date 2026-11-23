@@ -5,6 +5,9 @@ f39b518, be22d11, 19ac240 and fbcad30), subagent-driven: a builder and a reviewe
 opened as a pull request on 23 November, on the lead's word; not merged.
 Plan: `2026-11-22-relief-stage-4-telegram.md`. Design: `../specs/2026-11-20-relief-module-design.md`.
 How to set it up and what leaves the server: `../../DEPLOY.md`, section 6 and "What leaves the server".
+Since then the send-out, stage 1 (`2026-11-24-relief-send-out-stage-1-notes.md`) changed when people are told: Approve tells
+nobody, Send out does, and only in school hours; files stay in the app. Where these notes say a relief is told "once approved",
+read "once approved and sent out".
 
 ## What stage 4 gives
 
@@ -204,7 +207,8 @@ On Telegram:
 - Linking: the mockup asked for the personal code ("Welcome. Send me your personal code"). Now a code from the app, and "Linked: {name}.
   You'll get your reliefs here. Send /relief to ask for relief, /stop to unlink." (no department).
 - Relief for you: three lines more, when they apply: "No work set yet: look in Reliefs I'm covering." (nothing set), "Link: {link}",
-  "Files: {n}, sent after this message."
+  "Files: {n}, sent after this message." (Since the send-out, stage 1: "Files: {n}. Open the app to download them.", and no file is sent on
+  Telegram: see `2026-11-24-relief-send-out-stage-1-notes.md`.)
 - Relief planned for you: the reason is left out (the mockup: "whole day · Course"). "{n} lessons will be covered." is left out when none.
 - Acknowledge: "✅ Acknowledged 07:46." on the message itself (the mockup: "Thanks. Acknowledged at 07:46. It is on your timetable for
   today."; the timetable is stage 3b's).
@@ -511,9 +515,11 @@ The review did not judge these. Each is kept as it is.
 When a teacher asks for relief for today with `/relief`, the relief team was not pinged on Telegram; the design lists no such
 message. It was the first open question below. The lead answered yes on 23 Nov 2026, and the ping is built (from the app's form
 and `/relief` alike, once its picks wait for approval, never before the report's start, an hour before the first period, so one
-asked in the night is sent then): see `2026-11-23-relief-telegram-answers-notes.md`.
+asked in the night is sent then): see `2026-11-23-relief-telegram-answers-notes.md`. Since the send-out, stage 1, that ping is
+replaced by the morning message and the late request: see `2026-11-24-relief-send-out-stage-1-notes.md`.
 
-Work set after the relief teacher was told is not told to them. Their message says to look in the app.
+Work set after the relief teacher was told is not told to them. Their message says to look in the app. (Still true after the
+send-out, stage 1: the lead's design, call 47.)
 
 A teacher renamed by a publish loses their Telegram link. A relief whose lesson a publish moved stays, and is flagged in What's
 in alone. The design says so.
@@ -521,7 +527,8 @@ in alone. The design says so.
 Cancelling a backup on the page brings it back at the next sync. That is main's, not changed here.
 
 The kind of reason sent to reporting officers, work files through Telegram, the one-time codes and the second press to cancel
-were the lead's open questions below. The lead kept all four (answers 2, 3, 4 and 7).
+were the lead's open questions below. The lead kept all four (answers 2, 3, 4 and 7). Work files through Telegram were later
+reversed by the lead (answer 3, below).
 
 A link or a code passed on links whoever uses it first. "Open in the app" does not come back to the tab after signing in. A
 personal code typed as work goes as work. These are known limits, accepted.
@@ -548,9 +555,11 @@ All answered by the lead on 23 Nov 2026 (thirteen answers: 1 to 11 here, 12 and 
 built and decided on them is in `2026-11-23-relief-telegram-answers-notes.md`.
 
 1. When a teacher asks for relief for today, the relief team is not pinged on Telegram (the design lists no such message): should it
-   be, when picks are waiting for approval? **Answered 23 Nov 2026: "yes"**; built: 2026-11-23-relief-telegram-answers.
+   be, when picks are waiting for approval? **Answered 23 Nov 2026: "yes"**; built: 2026-11-23-relief-telegram-answers; since
+   replaced by the morning message and the late request (2026-11-24-relief-send-out-stage-1).
 2. The one-time code in place of the personal code (decision 1 of the plan; differs from the design). Keep? **Answered 23 Nov 2026: "keep"**.
-3. Work files go through Telegram with the relief. Keep, or "open in the app" for files? **Answered 23 Nov 2026: "Keep"**.
+3. Work files go through Telegram with the relief. Keep, or "open in the app" for files? **Answered 23 Nov 2026: "Keep"**;
+   reversed by the lead on 23 Nov 2026 (item 10): files by link, built: 2026-11-24-relief-send-out-stage-1.
 4. The reporting officer's message holds the kind of reason, Medical and Child sick among them. Keep, or leave the kind out? **Answered 23 Nov 2026: "Keep"**.
 5. Reporting officers who are not on Telegram are told nothing by the app (`/relief` tells the asker so; the app's own form does not).
    Should the form say so? **Answered 23 Nov 2026: "yes"**; built: 2026-11-23-relief-telegram-answers.
