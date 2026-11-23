@@ -5,7 +5,7 @@ when it is asked for.
 A conversation is one row of the table talks (kind bot.ASK) and nothing else: one a chat, good for MINUTES after its last step, the
 newest talk in place of any other. Its data: name, whose it is; step, ask and rows, the question it is at, as it is asked and asked
 again ([[label, value, token]] for its buttons); key, new with each question; question, the id of the message that asked it last (None:
-Telegram did not say; False: it is not known to have come); and what was chosen (_EMPTY). Nothing is sent, and nothing of it is kept
+Telegram did not say; False: it is not known to have come; a dict: on its way, _on_way); and what was chosen (_EMPTY). Nothing is sent, and nothing of it is kept
 anywhere else, before Send: the row goes when the conversation ends, however it does (bot.forget, when nobody comes back).
 
 A button is a row of the table buttons with its token and nothing of what it means: a press counts while its token is one of the
@@ -13,7 +13,10 @@ question's the conversation is at, else it is OLD_BUTTON and nothing changes. Pr
 choice; a tick (several days) changes the buttons of the very message. A line, a file or a photo is the answer where one is asked
 for (why, who, work); where only a button is, PRESS_ONE is said and the question asked again, which takes the buttons off the one
 before. What is typed is never taken for the answer to a question that is not known to have come, or when it replies to another
-message (bot.LAST_ONE); it is never a code. A message changed after it was sent is never an answer; one that says what is held already
+message (bot.LAST_ONE); it is never a code. The work question is the one exception: what comes while it is on its way (a text and a
+file sent together) is taken for the lesson asked about, as it would be a moment later; a copy of a question that comes once the
+conversation is at another loses its buttons, and the one it is at is asked once more when it came above it (_asked_by), so one
+question has buttons, the last. A message changed after it was sent is never an answer; one that says what is held already
 (_held) is not answered at all, since a link's preview can come as one. A step is judged as the page judges it, when it is taken: a
 refusal is the app's sentence, and the conversation is as it was. One step at a time (bot._pressing), and a step is saved only while
 the conversation is what it was judged by (_store), so of two at once, in two copies of the app too, one is taken.
@@ -290,15 +293,16 @@ def _conversation(chat, me):
     return None
 
 
-def _store(chat, was, d):
+def _store(chat, was, d, noted=None):
     """the conversation is d, for MINUTES from now, and so are its question's buttons -> True; False, nothing changed, when it is not
-    was any more (was None: in place of whatever talk there is)"""
+    was any more (was None: in place of whatever talk there is); noted: a dict given the id of was's question as it is noted now"""
     until = bot._clock() + MINUTES * 60
     with tgdb.db() as c:
         if was is not None:
             if not bot._still(c, chat, was): return False
-            if was["d"]["key"] == d["key"]:      # the same question: its id may have been noted meanwhile
-                d = dict(d, question=json.loads(c.execute("SELECT data FROM talks WHERE chat=?", (chat,)).fetchone()["data"])["question"])
+            q = json.loads(c.execute("SELECT data FROM talks WHERE chat=?", (chat,)).fetchone()["data"])["question"]
+            if noted is not None: noted["question"] = q
+            if was["d"]["key"] == d["key"]: d = dict(d, question=q)                    # the same question: its id may have been noted meanwhile
         c.execute("DELETE FROM buttons WHERE what=? AND name=?", (bot.ASK, d["name"]))
         c.executemany("INSERT INTO buttons(token, name, what, until) VALUES (?, ?, ?, ?)", [(token, d["name"], bot.ASK, until) for row in d["rows"] for _, _, token in row])
         c.execute("INSERT OR REPLACE INTO talks(chat, kind, data, until) VALUES (?, ?, ?, ?)", (chat, bot.ASK, json.dumps(d), until))
@@ -322,11 +326,25 @@ def _current(chat, key):
 
 
 def _asked_by(chat, key, n):
-    """the question of that key was asked by the message n (None: its id is not known), while the conversation is at it"""
+    """the question of that key was asked by the message n (None: its id is not known; False: it did not surely come) -> (what is to
+    be done, the key the conversation is at): "" when it is noted, the conversation being at it; "again", noted, but an older question
+    came below it meanwhile (_on_way's below), so it is asked once more; "off", the conversation is at another by now: n loses its
+    buttons, and "over", also, the one it is at came above n and is asked once more"""
     with tgdb.db() as c:
         r = c.execute("SELECT data FROM talks WHERE chat=? AND kind=?", (chat, bot.ASK)).fetchone()
         d = json.loads(r["data"]) if r else {}
-        if d.get("key") == key: c.execute("UPDATE talks SET data=? WHERE chat=?", (json.dumps(dict(d, question=n)), chat))
+        q, set_ = d.get("question"), lambda v: c.execute("UPDATE talks SET data=? WHERE chat=?", (json.dumps(dict(d, question=v)), chat))
+        if d.get("key") == key:
+            set_(n)
+            return "again" if type(n) is int and _on_way(q) and q.get("below", 0) > n else "", key
+        if type(n) is not int: return "", d.get("key")
+        if _on_way(q): set_(dict(q, below=max(q.get("below", 0), n)))         # its own question, when it comes, is asked once more if above n
+        return "over" if type(q) is int and q < n else "off", d.get("key")
+
+
+def _on_way(q):
+    """a question that is on its way (_move): {} or dict(below: the last message of an older question that came meanwhile)"""
+    return isinstance(q, dict)
 
 
 # ---- what is said, with nothing held
@@ -336,13 +354,15 @@ def _keys(rows): return [[dict(text=label, callback_data="b:" + token) for label
 def _put_question(chat, d):
     """the question, asked (again) -> whether it surely came; if not, what is typed next is not its answer"""
     r = bot.reply(chat, d["ask"], buttons=_keys(d["rows"]), ask=not d["rows"])
-    if not r["ok"]: return False
-    n = r["result"].get("message_id") if isinstance(r["result"], dict) else None
+    n = r["result"].get("message_id") if r["ok"] and isinstance(r["result"], dict) else None
     try:
-        _asked_by(chat, d["key"], n if type(n) is int else None)
-        _redraw(chat, d["key"], (d["ask"], d["rows"]))
+        then, now = _asked_by(chat, d["key"], (n if type(n) is int else None) if r["ok"] else False)
+        if not r["ok"]: return False
+        if then in ("off", "over") and d["rows"]: tg.call("editMessageReplyMarkup", dict(chat_id=chat, message_id=n), timeout=bot.TIMEOUT)
+        if then in ("again", "over"): _reask(chat, now, ())
+        elif not then: _redraw(chat, d["key"], (d["ask"], d["rows"]))
     except Exception as e: _log.warning("a question could not be noted (%s)", type(e).__name__)
-    return True
+    return r["ok"]
 
 
 def _off(chat, d):
@@ -379,18 +399,30 @@ def _redraw(chat, key, shown, n=None):
 
 
 # ---- a step (with bot._pressing held) -> bot._Out
-def _move(chat, talk, new, typed=False):
-    """the conversation at its next question (new: as the questions give it) -> bot._Out that asks it, or None: it moved on meanwhile"""
+def _move(chat, talk, new, typed=False, same=False):
+    """the conversation at its next question (new: as the questions give it), on its way till its message is known -> bot._Out that
+    asks it, or None: it moved on meanwhile; same: the same lesson asked about again, its buttons as they were where they are the same,
+    so a press of one meanwhile counts"""
     new = dict(new)
     says, was = new.pop("says", ()), talk["d"] if talk else {}
-    rows = [[[label, value, secrets.token_urlsafe(12)] for label, value in row] for row in new["rows"]]
-    d = dict(was, **dict(new, rows=rows, key=secrets.token_urlsafe(12), question=False))
-    return bot._Out(then=lambda: _next(chat, d, says, was if typed else None)) if _store(chat, talk, d) else None
+    old = {(label, value): token for row in was.get("rows", ()) for label, value, token in row} if same else {}
+    rows = [[[label, value, old.get((label, value)) or secrets.token_urlsafe(12)] for label, value in row] for row in new["rows"]]
+    d, noted = dict(was, **dict(new, rows=rows, key=secrets.token_urlsafe(12), question={})), {}
+    if not _store(chat, talk, d, noted): return None
+    was = dict(was, question=noted.get("question", was.get("question")))     # noted meanwhile, its buttons come off
+    return bot._Out(then=lambda: _next(chat, d, says, was if typed else None))
 
 
 def _again(chat, d, *says):
     """the same question once more, after the sentences"""
     return bot._Out(then=lambda: _reask(chat, d["key"], says))
+
+
+def _work_again(chat, talk, *says):
+    """the work question once more, after the sentences: while it is on its way, as a question of its own (its copy on the way loses its
+    buttons when it comes), so one question has them"""
+    d = talk["d"]
+    return _move(chat, talk, dict(_work(d, d["at"], d["work"]), says=says), typed=True, same=True) if _on_way(d["question"]) else _again(chat, d, *says)
 
 
 def _on_day(w, d, v):
@@ -474,20 +506,21 @@ def _say_work(chat, talk, text, file):
     before, a line to the text on a new line; the rest of its work kept"""
     d = talk["d"]
     key, line, says = d["lessons"][d["at"]]["key"], text.strip(), []
-    if not file and not line: return _again(chat, d, SEND_ONE)
+    if not file and not line: return _work_again(chat, talk, SEND_ONE)
     w = d["work"].get(key) or {}
     try:
         if file: got = _add(d, key, file)
         elif _LINK.fullmatch(line):
-            says = [LINK_REPLACED] if w.get("link") else []
-            got = dict(work=dict(d["work"], **{key: dict(w, link=_absences._check_work(dict(link=line))["link"])}))
+            link = _absences._check_work(dict(link=line))["link"]
+            says = [LINK_REPLACED] if w.get("link") and w["link"] != link else []
+            got = dict(work=dict(d["work"], **{key: dict(w, link=link)}))
         else:
             text = _absences._check_work(dict(text="\n".join(v for v in (w.get("text"), line) if v)))["text"]
             got = dict(work=dict(d["work"], **{key: dict(w, text=text, typed=w.get("typed", []) + [line])}))
     except ValueError as e:
         if type(e) is not ValueError: raise
-        return _again(chat, d, str(e))
-    return _move(chat, talk, dict(_work(d, d["at"], got["work"]), says=says, **got), typed=True)
+        return _work_again(chat, talk, str(e))
+    return _move(chat, talk, dict(_work(d, d["at"], got["work"]), says=says, **got), typed=True, same=True)
 
 
 SAID = dict(why=_say_why, who=_say_who, work=_say_work)
@@ -511,8 +544,10 @@ def _said(chat, talk, text, file, to):
     d = talk["d"]
     album = _album(d, file) if file else None
     if album is not None: return _more(chat, talk, album, file)
-    if d["question"] is False: return _again(chat, d)                                  # it may not have come
-    if to is not None and to != d["question"]: return _again(chat, d, bot.LAST_ONE)
+    q = d["question"]
+    if _on_way(q) and d["step"] == "work": return _work_again(chat, talk) if to is not None else _say_work(chat, talk, text, file)   # taken as a moment later
+    if q is False or _on_way(q): return _again(chat, d)                                  # it may not have come
+    if to is not None and to != q: return _again(chat, d, bot.LAST_ONE)
     return SAID[d["step"]](chat, talk, text, file) if d["step"] in SAID else _again(chat, d, PRESS_ONE)
 
 

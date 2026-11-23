@@ -6882,9 +6882,9 @@ def two_presses_of_send_at_once_make_one_absence():
             return real(method, params, **kw)
         with stand_in(tg, "call", stale): hook(u)
         assert [x for x in sum(rows_now(EVE), []) if x.startswith("✓")] == ["✓ Tue 13 Oct", "✓ Wed 14 Oct"] and len(calls("editMessageReplyMarkup")) == 3
-    with school(EVE, ROSA):                                                                # lines at once: each answers one question at most, and is never taken twice
+    with school(EVE, ROSA):                                                                # lines at once: all are the lesson's asked about, each taken once
         to_work(); ups = [msg(f"Line {k}", CHATS[EVE]) for k in range(4)]; at_once(*[lambda u=u: hook(u) for u in ups]); d = asking_of(EVE)
-        got = [AK._work_of(d, k)["text"] for k in (K2, K5)]; assert got[0].startswith("Line ") and len({x for x in got if x}) == len([x for x in got if x]), got
+        got = [AK._work_of(d, k)["text"] for k in (K2, K5)]; assert sorted(got[0].split("\n")) == [f"Line {k}" for k in range(4)] and got[1] == "" and d["at"] == 0, got
 
 @t
 def a_press_of_an_earlier_step_does_nothing():
@@ -7639,6 +7639,90 @@ def a_conversation_begun_before_typed_was_kept_goes_on():
         assert "typed" not in json.dumps(asking_of(EVE)) and edit("Read p. 5") == edit("p. 6") == [], "held by its text still"
         assert says(EVE, "then Q1") == [(WORK_SET_5.format(SET_), LAST_SET_ROWS)] and asking_of(EVE)["work"][K5]["typed"] == ["then Q1"] and edit("then Q1") == []
         tap(EVE, "Next"); sends(); assert [x["work"]["text"] for x in only()["lessons"][:2]] == ["Read p. 5", "p. 6\nthen Q1"]
+
+# ---- Answers, Task 5, fix round 1: messages sent together, while the question is on its way
+def watching(name, f):
+    """f, with every message of name's chat followed -> {message id: (its text, whether it has buttons)}, the question before f's too"""
+    real, seen, lock = tg.call, {}, threading.Lock(); d = asking_of(name)
+    if d and type(d["question"]) is int: seen[d["question"]] = (d["ask"], bool(d["rows"]))
+    def follow(method, params=None, **kw):
+        r = real(method, params, **kw); p = params or {}
+        if p.get("chat_id") == CHATS[name] and r["ok"]:
+            kb = any("callback_data" in b for row in (p.get("reply_markup") or {}).get("inline_keyboard") or [] for b in row)
+            with lock:
+                if method == "sendMessage": seen[r["result"]["message_id"]] = (p["text"], kb)
+                elif method in ("editMessageReplyMarkup", "editMessageText") and p["message_id"] in seen: seen[p["message_id"]] = (p.get("text", seen[p["message_id"]][0]), kb)
+        return r
+    with stand_in(tg, "call", follow): f()
+    return seen
+def live(seen): return [n for n, (text, kb) in sorted(seen.items()) if kb]
+def lines_of(text): return sorted(text.split("\n")) if text else []
+
+@t
+def messages_sent_together_all_land_on_the_lesson_asked_about():
+    for _ in range(4):
+        with school(EVE, ROSA):
+            to_work(); ups = [msg(f"Line {k}", CHATS[EVE]) for k in range(3)] + [a_doc(EVE, "a.pdf", "F-a")]
+            seen = watching(EVE, lambda: at_once(*[lambda u=u: hook(u) for u in ups])); d = asking_of(EVE)
+            w = AK._work_of(d, K2); assert d["at"] == 0 and lines_of(w["text"]) == ["Line 0", "Line 1", "Line 2"] and [n for _, n in w["files"]] == ["a.pdf"] and not AK._has(AK._work_of(d, K5)), d
+            assert live(seen) == [max(seen)] == [d["question"]] and seen[max(seen)][0] == WORK_SET_2.format(SET_BOTH), seen
+    with school(EVE, ROSA):                                                                # in the order they were taken
+        to_work(); ups = [msg(f"Line {k}", CHATS[EVE]) for k in range(4)]; at_once(*[lambda u=u: hook(u) for u in ups])
+        assert lines_of(AK._work_of(asking_of(EVE), K2)["text"]) == [f"Line {k}" for k in range(4)] and asking_of(EVE)["work"][K2]["typed"] == AK._work_of(asking_of(EVE), K2)["text"].split("\n")
+
+@t
+def a_message_while_the_question_is_on_its_way_is_taken():
+    with school(EVE, ROSA):
+        to_work(); nested = []
+        def both():
+            real = tg.call                                                                 # the watching one
+            def on_its_way(method, params=None, **kw):
+                if method == "sendMessage" and params.get("text") == WORK_SET_2.format(SET_) and not nested: nested.append(1); hook(a_doc(EVE, "a.pdf", "F-a"))
+                return real(method, params, **kw)
+            with stand_in(tg, "call", on_its_way): say(EVE, "Read p. 5")
+        seen = watching(EVE, both); d = asking_of(EVE); w = AK._work_of(d, K2)
+        assert nested and (w["text"], [n for _, n in w["files"]], d["at"]) == ("Read p. 5", ["a.pdf"], 0)
+        assert live(seen) == [max(seen)] == [d["question"]] and seen[max(seen)][0] == WORK_SET_2.format(SET_BOTH), "one question with buttons, the last, that says both"
+    with school(EVE, ROSA):                                                                # by its state: the question on its way ({}), a line and a file are each taken
+        def on_way():
+            with tgdb.db() as c:
+                d = json.loads(c.execute("SELECT data FROM talks WHERE chat=?", (CHATS[EVE],)).fetchone()["data"]); c.execute("UPDATE talks SET data=? WHERE chat=?", (json.dumps(dict(d, question={})), CHATS[EVE]))
+        to_work(); say(EVE, "Read p. 5"); on_way(); assert says(EVE, "then Q1") == [(WORK_SET_2.format(SET_), SET_ROWS)]
+        on_way(); assert doc(EVE, "a.pdf", "F-a") == [(WORK_SET_2.format(SET_BOTH), SET_ROWS)]
+        w = AK._work_of(asking_of(EVE), K2); assert (w["text"], [n for _, n in w["files"]]) == ("Read p. 5\nthen Q1", ["a.pdf"])
+        on_way(); assert heard(EVE, lambda: reply_to(EVE, 1, "p. 6")) == [(WORK_SET_2.format(SET_BOTH), SET_ROWS)] and AK._work_of(asking_of(EVE), K2)["text"] == "Read p. 5\nthen Q1", "a reply, as before: not taken"
+
+@t
+def next_pressed_with_a_message_moves_once_and_keeps_it():
+    for _ in range(6):
+        with school(EVE, ROSA):
+            to_work(); say(EVE, "Read p. 5"); u, m = tapping(EVE, "Next"), msg("Late line", CHATS[EVE]); n = len(answers())
+            at_once(lambda: hook(u), lambda: hook(m)); d = asking_of(EVE); a, b = AK._work_of(d, K2)["text"], AK._work_of(d, K5)["text"]
+            assert d["at"] == 1 and (a, b) in (("Read p. 5\nLate line", ""), ("Read p. 5", "Late line")) and answers()[n:] == [(None, None)], (a, b, d["at"], answers()[n:])
+
+@t
+def other_questions_on_their_way_are_as_before():
+    real = tg.call
+    def asked_while(text, line):
+        got = []
+        def slow(method, params=None, **kw):
+            if method == "sendMessage" and params.get("text", "").startswith(text) and not got: got.append(None); got[0] = heard(EVE, lambda: say(EVE, line))
+            return real(method, params, **kw)
+        return slow, got
+    with school(EVE, ROSA):
+        relief_(); tap(EVE, "Tomorrow, Tue 13 Oct", "Whole day"); slow, got = asked_while(SAY_WHY, "A meeting")
+        with stand_in(tg, "call", slow): tap(EVE, "Other")
+        assert got == [[(SAY_WHY, LINE)]] and (asking_of(EVE)["step"], asking_of(EVE)["why"]) == ("why", ""), "a why: asked again"
+    with school(EVE, ROSA):
+        to_work(); slow, got = asked_while("Relief for", "hello")
+        with stand_in(tg, "call", slow): tap(EVE, "Later for all the rest")
+        assert got == [[(f"{LIST_HEAD}\n{ON_2}{NONE_YET}\n{ON_5}{NONE_YET}", LIST_ROWS)]] and asking_of(EVE)["step"] == "list", "the list: asked again"
+
+@t
+def the_same_link_again_replaces_nothing():
+    with school(EVE, ROSA):
+        to_work(); say(EVE, "https://x.example.org/a"); assert says(EVE, "https://x.example.org/a") == says(EVE, " https://x.example.org/a ") == [(WORK_SET_2.format(SET_LINK), SET_ROWS)]
+        assert says(EVE, "https://x.example.org/b") == [(LINK_REPLACED, None), (WORK_SET_2.format(SET_LINK), SET_ROWS)]
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
