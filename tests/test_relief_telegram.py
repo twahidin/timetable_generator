@@ -2227,7 +2227,7 @@ def the_module_stands_alone():
     assert p.stdout.strip() == "[] True False", (p.stdout, p.stderr[-400:])
     assert not hasattr(TE, "links") and TE._links is links, "due has a parameter of that name: the module goes by another"
     assert OB.VALID is TE.still_true and TE.still_true(dict(key="any")) is True and TE.still_true(dict(key="x", kind="exam-duty", ref=None)) is True
-    assert {"relief", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "new", "late", "morning", "report", "clear", "weekly"} == set(TE.CHECKS)
+    assert {"relief", "repeat", "gone", "moved", "stopped", "again", "kept", "planned", "remind", "officer", "cancelled", "ask", "askpick", "new", "late", "morning", "report", "clear", "weekly"} == set(TE.CHECKS)
 
 # ---- the hooks: fill.AFTER, tell.soon, and who asks for a sweep
 @t
@@ -8644,6 +8644,125 @@ def a_started_lesson_is_not_offered_to_choose():
         got = {x["key"]: x["may_choose"] for x in next(r for r in call(HUGO, "get", "/api/relief/absences/planned")["absences"] if r["id"] == i)["lessons"]}
         assert (got[K2], got[K5]) == (False, True), got
         assert on_lesson(HUGO, i, K2, "relief", dict(relief=SAM), code=400)["error"] == absences.STARTED
+
+# ---- Send-out, Task 9: the repeats ----
+SHORT_14 = "⏰ Reminder · your relief on Wed 14 Oct\n2A Science · P2 · 08:30–09:00 · Room 2-05\nFor Ms Evelyn Koh. The work is in the app."
+def repeats(): return sorted((r["key"].rsplit(":", 1)[-1], r["text"].splitlines()[0]) for r in outs("repeat"))
+
+@t
+def planned_on_monday_for_wednesday_three_messages():
+    with school(SAM):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept(); on_cover(SAM, i, KW, "acknowledge")
+        at("08:29", day=13); swept(); assert repeats() == []
+        at("08:30", day=13); swept(); assert outs("repeat")[0]["text"] == SHORT_14 and buttons_of(outs("repeat")[0]) == [[dict(text="Open in the app", url=BASE + "/relief#covering")]]
+        at("06:45", day=14); swept(); assert repeats() == [("before", "⏰ Reminder · your relief on Wed 14 Oct"), ("morning", "⏰ Reminder · your relief today, Wed 14 Oct")]
+
+@t
+def a_repeat_goes_once_and_not_within_twelve_hours():
+    with school(SAM):
+        at("10:00"); absent(by=HUGO, lessons=[dict(key=K5, relief=SAM)]); swept()
+        at("10:30"); swept(); assert repeats() == [], "24 hours before is within 12 hours of the first message"
+        at("06:45", day=13); swept(); swept(); assert [k for k, _ in repeats()] == ["morning"] and outs("repeat")[0]["text"].startswith("🔔 Relief for you"), "not acknowledged: the relief again"
+    with school(SAM):
+        at("07:00", day=13); absent(by=HUGO, dates=("2026-10-13",), lessons=[dict(key=K5, relief=SAM)]); swept(); at("09:00", day=13); swept(); assert repeats() == [], "planned on the day: one message"
+    with school(SAM, calendar=dict(TERM, holidays=[dict(start="2026-10-15", end="2026-10-15", name="Made-up holiday")])):
+        absent(by=HUGO, dates=("2026-10-16",), lessons=[dict(key=KF, relief=SAM)]); swept()
+        at("13:59", day=14); swept(); assert repeats() == []
+        at("14:00", day=14); swept(); assert [k for k, _ in repeats()] == ["before"], "Thursday a holiday: the last cut-off before it"
+
+@t
+def no_repeat_of_a_relief_from_before_the_deploy():
+    with school(SAM):
+        i = absent(by=HUGO, dates=("2026-10-14",)); CV.change(i, KW, SAM, TEAM, SCHOOL, rs()); change_record(i, lambda r: [x.pop("sent_out") for x in r["lessons"] if x["key"] == KW])
+        swept(); at("06:45", day=14); swept(); assert repeats() == []
+
+@t
+def remind_counts_the_repeats_and_they_count_as_told():
+    with school(SAM, TEAM):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept(); at("06:45", day=14); swept()
+        assert skips(RE.remind("2026-10-14", [dict(id=i, ckey=KW, absent=EVE)], BY)) == [(KW, SAM, "Sent at 06:45: wait a few minutes.")]
+        at("07:00", day=14); absences.not_needed(i, KW, "x", HUGO); swept(); assert told_of("gone") == [("gone", SAM)]
+
+def repeat_keys(name=None): return sorted((r["key"].rsplit(":", 1)[-1], r["name"], r["state"]) for r in outs("repeat", name))
+
+@t
+def a_long_weekend_between_moves_the_repeat_to_the_friday_cut_off():
+    with school(SAM, calendar=dict(TERM, holidays=[dict(start="2026-10-12", end="2026-10-12", name="Made-up holiday")])):
+        at("09:00", day=8); i = absent(by=HUGO, lessons=[dict(key=K2, relief=SAM)]); swept(); assert told_of("relief") == [("relief", SAM)]   # Thu 8 Oct, for Tue 13 Oct 09:00
+        at("13:59", day=9); swept(); assert repeats() == []
+        at("14:00", day=9); swept(); assert repeats() == [("before", "🔔 Relief for you · Tue 13 Oct")], "Mon 12 a holiday, Sat and Sun none: Fri at the cut-off"
+        at("09:00", day=12); swept(); at("06:44", day=13); swept(); assert len(repeats()) == 1, "never in the night, nor on the holiday"
+        at("06:45", day=13); swept(); assert [k for k, _ in repeats()] == ["before", "morning"] and outs("repeat")[1]["text"].startswith("🔔 Relief for you · Tue 13 Oct")
+        assert [b["what"] for b in buttons_of(outs("repeat")[1])[0]] == ["ack", "change"], "not acknowledged: its buttons as the relief has them"
+
+@t
+def acknowledged_between_the_two_and_between_making_and_sending():
+    with school(SAM):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept()
+        at("08:30", day=13); swept(); assert repeats() == [("before", "🔔 Relief for you · Wed 14 Oct")] and json.loads(outs("repeat")[0]["ref"])["acked"] is False
+        on_cover(SAM, i, KW, "acknowledge"); at("06:45", day=14); swept(); assert repeats()[1] == ("morning", "⏰ Reminder · your relief today, Wed 14 Oct")
+    with school(SAM):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept()
+        at("08:30", day=13); TE.sweep(); on_cover(SAM, i, KW, "acknowledge"); send()
+        assert repeat_keys() == [("before", SAM, "dropped")], "made unacknowledged, acknowledged before it went: dropped"
+        swept(); assert repeat_keys() == [("before", SAM, "sent")] and outs("repeat")[0]["text"] == SHORT_14, "made again in the right form, under its key"
+    with school(SAM):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept(); on_cover(SAM, i, KW, "acknowledge")
+        at("08:30", day=13); TE.sweep(); change_record(i, lambda r: [x.update(ack=None) for x in r["lessons"] if x["key"] == KW]); send()
+        assert repeat_keys() == [("before", SAM, "dropped")], "the short line never goes to someone who has not acknowledged"
+        swept(); assert repeat_keys() == [("before", SAM, "sent")] and outs("repeat")[0]["text"].startswith("🔔 Relief for you")
+
+@t
+def a_relief_moved_to_another_teacher_repeats_to_the_new_one_alone():
+    with school(SAM, MAYA):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept()
+        at("08:00", day=13); on_lesson(HUGO, i, KW, "relief", dict(relief=MAYA)); swept(); assert told_of("relief", MAYA) == [("relief", MAYA)] and told_of("moved") == [("moved", SAM)]
+        at("08:30", day=13); swept(); assert repeat_keys() == [], "Maya was told at 08:00: within 12 hours; Sam is not theirs any more"
+        at("06:45", day=14); swept(); assert repeat_keys() == [("morning", MAYA, "sent")]
+    with school(SAM, MAYA):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept()
+        at("08:30", day=13); TE.sweep(); at("08:31", day=13); on_lesson(HUGO, i, KW, "relief", dict(relief=MAYA)); send()
+        assert repeat_keys(SAM) == [("before", SAM, "dropped")], "queued to Sam, moved to Maya before it went"
+        swept(); assert repeat_keys(SAM) == [("before", SAM, "dropped")] and told_of("moved") == [("moved", SAM)]
+
+@t
+def the_app_down_over_a_repeat_s_moment():
+    with school(SAM):
+        absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept()
+        at("13:00", day=13); swept(); assert [k for k, _ in repeats()] == ["before"], "made late, until the morning one's moment"
+    with school(SAM):
+        absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept()
+        at("20:00", day=13); swept(); assert repeats() == [], "never in the night"
+        at("06:50", day=14); swept(); assert [k for k, _ in repeats()] == ["morning"], "the 24-hour one given up once the morning one's moment came"
+    with school(SAM):
+        absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept()
+        at("08:30", day=14); swept(); assert repeats() == [], "the lesson has started: none"
+    with school(SAM):
+        absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept(); at("08:30", day=13); swept()
+        at("06:45", day=14); TE.sweep(); at("09:00", day=14); send(); assert repeat_keys() == [("before", SAM, "sent"), ("morning", SAM, "dropped")], "the lesson over before it went"
+        swept(); assert repeat_keys() == [("before", SAM, "sent"), ("morning", SAM, "dropped")]
+
+@t
+def a_repeat_is_made_once_whatever_sweeps():
+    with school(SAM):
+        absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept()
+        at("08:30", day=13); TE.sweep(); TE.sweep(); send(); swept(); at("08:31", day=13); swept(); at("13:00", day=13); swept()
+        assert repeat_keys() == [("before", SAM, "sent")] and len(said(SAM)) == 2
+        assert [i for i in dues() if i["kind"] == "repeat"] == [], "a second copy of the app works out nothing more"
+        r = outs("repeat")[0]; assert r["key"] == outs("relief")[0]["key"] + ":before" and TE._own(r["key"], json.loads(r["ref"])) == outs("relief")[0]["key"]
+        ref = json.loads(r["ref"]); assert ref["repeat"] == "before" and ref["acked"] is False and ref["date"] == "2026-10-14" and ref["ends"]
+
+@t
+def a_reminder_from_the_team_counts_against_the_morning_one():
+    with school(SAM, TEAM):
+        i = absent(by=HUGO, dates=("2026-10-14",), lessons=[dict(key=KW, relief=SAM)]); swept(); at("08:30", day=13); swept()
+        at("06:45", day=14); RE.remind("2026-10-14", [dict(id=i, ckey=KW, absent=EVE)], BY); TE.sweep(); send()
+        assert [k for k, _, _ in repeat_keys()] == ["before"], "the team's reminder, still queued, is a message of the relief: none within 12 hours of it"
+
+@t
+def the_repeat_kind_is_registered():
+    assert "repeat" in TE.TEACHER_KINDS and "repeat" not in TE.ANY_HOUR and TE.CHECKS["repeat"] is TE._repeat_true
+    assert TE.repeat_text("Wed 14 Oct", "2A Science", "", "", "", EVE, True) == "⏰ Reminder · your relief today, Wed 14 Oct\n2A Science\nFor Ms Evelyn Koh. The work is in the app."
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

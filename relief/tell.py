@@ -15,6 +15,14 @@ stopped:{relief key}:{k} and again:{relief key}:{k} to a person told of a relief
 stopped and once it stands again (below; k counts the times; stopped is said anew once it was said since that the relief is on);
 {relief key}:r{n}, the relief sent once more because the team reminded them (relief/report.py queues it, the n-th time): it tells
 them of the relief, under the relief's own key (_own), and is no relief of its own;
+{relief key}:before and {relief key}:morning, the repeats (kind repeat) of a relief told ahead of its day, once each, while it is
+approved or acknowledged, sent out (never one approved before there was Send out) and its first message went: before at
+hours.before_moment of its lesson's start (24 hours before, moved earlier out of the night to the last cut-off), made until the
+morning one's moment; morning at the earliest send-out time of the lesson's day, made until the lesson starts; neither when its
+moment had passed when the first message went, nor less than REPEAT_GAP after the last message of that relief (its first, a
+reminder, the other repeat, queued ones too); not acknowledged, the relief message again (as a reminder has it), acknowledged a
+short line (repeat_text): one made in the other form than the state is when it goes is dropped and made again. Like the
+reminders they are the relief's messages (_own, Said), apart from the reminders' :r{n};
 kept:{absent}:{ckey}:{when} to the teacher who asked to change; ask:{absent}:{ckey}:{change.at}:{name} to each of the team
 with the new pick, or two minutes after the request without one, and then askpick:… once when a pick (another than the ask
 carried) is in; planned:{id} and remind:{id} to the absent teacher; officer:{id} to the reporting officer;
@@ -87,6 +95,7 @@ from relief import words
 SYNC = False                                    # tests: soon() sweeps inline
 MINUTE = []                                     # called with nothing every minute (start)
 EVERY, FIRST = 60, 5                            # seconds between the ticker's runs, and before the first
+REPEAT_GAP = datetime.timedelta(hours=12)       # a repeat is not made sooner after the last message of its relief
 PICK_WAIT = datetime.timedelta(minutes=2)       # how long a request to change waits for its new pick before the team is asked without
 NEW_WAIT = datetime.timedelta(minutes=5)        # how long an absence for today with a lesson still open waits for its picks before the team is told of it
 BEFORE = 60                                     # minutes before the first period starts: the day's first report (relief/report.py's)
@@ -103,6 +112,7 @@ WAITING = ("queued", "sending")                 # ... in which they will be by i
 LIVE = (*SENT, *WAITING)
 RELIEFS = ("relief:", "stopped:", "again:")      # the keys that say what has been said of a relief (Said)
 _COPY = re.compile(r"(relief:.*):r(\d+)", re.S)  # the key of a reminder: the relief's, and which one it is
+_REPEAT = re.compile(r"(relief:.*):(before|morning)", re.S)  # the key of a repeat: the relief's, and which one it is
 _going = threading.Lock()                       # one sweep at a time
 _asked, _asked_lock = [False], threading.Lock() # a sweep soon() asked for has not started
 _stop = threading.Event()                       # ends the ticker (tests)
@@ -122,6 +132,13 @@ def relief_text(day, lesson, periods, time, room, absent, work):
     if link: lines.append(f"Link: {link}")
     if files: lines.append(f"Files: {len(files)}, sent after this message.")
     return "\n".join(lines)
+
+
+def repeat_text(day, lesson, periods, time, room, absent, today):
+    """the repeat of a relief its teacher has acknowledged; today: the lesson is today"""
+    head = f"⏰ Reminder · your relief today, {day}" if today else f"⏰ Reminder · your relief on {day}"
+    what = " · ".join(v for v in (lesson, periods, time, room and f"Room {room}") if v)
+    return "\n".join([head] + ([what] if what else []) + [f"For {absent}. The work is in the app."])
 
 
 def planned_text(days, away, by, n):
@@ -279,10 +296,11 @@ def _relief_key_for(told, ref):
 
 
 def _own(key, ref):
-    """the relief's own key, when key is that of its message or of a reminder (the own one with :r{n} after it), else None"""
+    """the relief's own key, when key is that of its message, of a reminder (the own one with :r{n} after it) or of a repeat
+    (:before, :morning), else None"""
     if not isinstance(ref, dict): return None
-    k, m = relief_key(ref.get("absent"), ref.get("ckey"), ref.get("approved_at")), _COPY.fullmatch(key)
-    return next((x for x in (key, m and m[1]) if x in (k, f"{k}:{ref.get('who')}")), None)
+    k, m, p = relief_key(ref.get("absent"), ref.get("ckey"), ref.get("approved_at")), _COPY.fullmatch(key), _REPEAT.fullmatch(key)
+    return next((x for x in (key, m and m[1], p and p[1]) if x in (k, f"{k}:{ref.get('who')}")), None)
 
 
 def _there(told, key):
@@ -303,8 +321,9 @@ def _each(things, f):
 
 
 def _told_reliefs(w):
-    """[(key, ref)]: the last relief each person was told of, by its message or a reminder of it, of each cover, its lesson not
-    over: the relief's own key, and what its message holds when that went, else the last reminder (less its n)"""
+    """[(key, ref)]: the last relief each person was told of, by its message, a reminder or a repeat of it, of each cover, its
+    lesson not over: the relief's own key, and what its message holds when that went, else the last reminder or repeat (less
+    its n, repeat and acked)"""
     last = {}
     for key, t in w.told.items():
         ref = t.get("ref")
@@ -313,7 +332,7 @@ def _told_reliefs(w):
         ends, at = _time(ref.get("ends")), _time(ref["approved_at"])
         if ends is None or ends <= w.now or at is None: continue
         cover, rank = (ref["who"], ref["absent"], ref["ckey"]), (at, key == own, ref.get("n") or 0)
-        if cover not in last or last[cover][0] < rank: last[cover] = (rank, own, {k: v for k, v in ref.items() if k != "n"})
+        if cover not in last or last[cover][0] < rank: last[cover] = (rank, own, {k: v for k, v in ref.items() if k not in ("n", "repeat", "acked")})
     return [(own, ref) for rank, own, ref in last.values()]
 
 
@@ -436,6 +455,7 @@ def _of_cover(w, r, x, c, ckey):
     """what one cover (its lesson neither over nor stopped) has to say"""
     s = _cover.state(r, x, c)
     if s == "approved" and _cover.reached(r, x, c, w.now, w.settings, w.pub): yield from _relief(w, r, x, c, ckey)   # made once it goes, never early
+    if s in ("approved", "acknowledged"): yield from _repeats(w, r, x, c, ckey)
     if s == "change": yield from _ask(w, r, x, c, ckey)
     yield from _kept(w, r, x, c, ckey)
 
@@ -456,6 +476,31 @@ def _relief(w, r, x, c, ckey):
     yield _item(_relief_key_for(w.told, ref), who, "relief",
                 relief_text(day, lesson, periods, f"{start}–{end}" if start and end else "", x.get("room"), r["teacher"], work),
                 _answers(r, x, ckey, who), [dict(id=r["id"], file=f["id"], name=f["name"]) for f in work.get("files") or []], ref)
+
+
+def _repeats(w, r, x, c, ckey):
+    """the repeats of a relief approved or acknowledged (the module's doc): its first message (the relief's own key) went at t0;
+    before while hours.before_moment of its start is after t0, from it until the morning one's moment; morning while the earliest
+    send-out time of its day is after t0, from it until the lesson starts; each not when the last message of the relief (Said.last:
+    its first, a reminder, the other repeat, one queued too) is less than REPEAT_GAP before its moment, nor one approved before
+    there was Send out. Whether it may go now (_teacher_may) is due's (GATES)"""
+    mark = _cover.sent_out(c)
+    if mark is None or mark.get("legacy"): return
+    item = next(_relief(w, r, x, c, ckey), None)
+    first = item and w.told.get(item["key"])
+    t0 = _time(first["at"]) if first and first["state"] in SENT else None
+    if t0 is None: return
+    h, start = _hours.of(w.settings), _hours.starts(w.pub, x, c)
+    morning, last = _hours.at(x["date"], h.send_from), w.said.last(item["key"])
+    for name, moment, until in (("before", _hours.before_moment(start, w.settings, w.pub), morning), ("morning", morning, start)):
+        if moment is None or not t0 < moment <= w.now < until or (last is not None and moment - last[0] < REPEAT_GAP): continue
+        acked, ref = _cover.state(r, x, c) == "acknowledged", item["ref"]
+        if acked:
+            (s, e), today = words.times(w.pub, x, c), w.today.isoformat() == x["date"]
+            text = repeat_text(ref["day"], ref["lesson"], ref["periods"], f"{s}–{e}" if s and e else "", x.get("room"), r["teacher"], today)
+            buttons, files = [[dict(text=OPEN, url=w.base + "/relief#covering")]], []
+        else: text, buttons, files = item["text"], item["buttons"], item["files"]
+        yield _item(f"{item['key']}:{name}", item["name"], "repeat", text, buttons, files, dict(ref, repeat=name, acked=acked))
 
 
 def relief_item(pub, reach, told, r, x, c, ckey, base=""):
@@ -530,23 +575,24 @@ def key_of(told, r, c, ckey):
 
 class Said:
     """what has been said of the reliefs, read once (said): told, what outbox.states_for gives for the RELIEFS keys. key: a relief
-    message's; it and its reminders are one relief's messages, those dropped as if they had never been.
+    message's; it, its reminders and its repeats are one relief's messages, those dropped as if they had never been.
 
     Someone told that a relief is stopped, and not surely (sent) told since that it is on again, has been told nothing: until a
     reminder has gone to them after that"""
     def __init__(self, told):
-        self.told, self._copies = told, {}
+        self.told, self._copies, self._repeats = told, {}, {}
         for key, t in told.items():
-            m = _COPY.fullmatch(key)
+            m, p = _COPY.fullmatch(key), _REPEAT.fullmatch(key)
             if m: self._copies.setdefault(m[1], {})[int(m[2])] = t
+            elif p: self._repeats.setdefault(p[1], []).append(t)
 
     def copies(self, key):
         """the reminders of the relief, in any state: {n: told}"""
         return self._copies.get(key, {})
 
     def _messages(self, key):
-        """[(when, n, told)]: the relief's messages, n 0 for the first"""
-        return [(_time(t["at"]), n, t) for n, t in [(0, self.told.get(key)), *self.copies(key).items()] if t]
+        """[(when, n, told)]: the relief's messages, n 0 for the first and its repeats"""
+        return [(_time(t["at"]), n, t) for n, t in [(0, self.told.get(key)), *self.copies(key).items(), *((0, t) for t in self._repeats.get(key, []))] if t]
 
     def _off(self, key):
         """when its person was told that it is stopped, while they are not sure to know that it is on again; else None"""
@@ -790,6 +836,16 @@ def _relief_true(ref, name):
     return _stands_now(got[1])
 
 
+def _repeat_true(ref, name):
+    """the relief is theirs still, as it was approved when the repeat was made, its lesson not stopped, acknowledged as the repeat
+    says (ref acked: else the other form goes, made again), and its teacher may be messaged now (_teacher_may)"""
+    got = _theirs(ref)
+    if got is None or got[2]["approved"].get("at") != ref["approved_at"] or _cover.state(*got) != ("acknowledged" if ref.get("acked") else "approved"): return False
+    pub = store.published()
+    if not pub or not _lesson_may(_fill._when(None), _settings.load(pub), pub, ref): return False
+    return _stands_now(got[1])
+
+
 def _stopped_true(ref, name):
     """the relief is theirs still (gone or moved says it when not) and its lesson known to be stopped"""
     got = _theirs(ref)
@@ -862,7 +918,7 @@ def _late_true(ref, name):
 
 # what is asked of a queued message, by its kind, before it goes: CHECK(its ref, its person) -> bool. A kind not here is always
 # true (relief/report.py puts report, clear and weekly here, relief/morning.py morning)
-CHECKS = dict(relief=_relief_true, gone=_ended_true, moved=_ended_true, stopped=_stopped_true, again=_again_true, kept=_kept_true, ask=_ask_true,
+CHECKS = dict(relief=_relief_true, repeat=_repeat_true, gone=_ended_true, moved=_ended_true, stopped=_stopped_true, again=_again_true, kept=_kept_true, ask=_ask_true,
               askpick=_ask_true, planned=lambda ref, name: _absence_now(ref) is not None, remind=_remind_true,
               officer=lambda ref, name: _absence_now(ref, False) is not None, cancelled=_cancelled_true, late=_late_true,
               new=lambda ref, name: False)            # new: the ping the late request replaced; one still queued from before is dropped
