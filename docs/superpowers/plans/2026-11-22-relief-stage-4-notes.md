@@ -383,6 +383,11 @@ In the app:
   `test_typed` 33, `test_venues` 4, `test_verify` 56, `test_versions` 44) and all 23 `tests/*.test.js` (the numbers above, and
   `history` 5, new on main). After Task 11: `test_history` 47, `test_routes` 19, `history.test.js` 5. The slow `--full` runs and
   the browser check were not done again after the fix wave: no page changed in it.
+- On the last code (after Task 11), every suite once more, one at a time: all 29 `tests/*.py` and all 23 `tests/*.test.js` pass,
+  with the numbers above and `test_history` 47.
+- Names check on the whole branch against main 19ac240 (added lines and commit messages, counts only): 104 real staff names
+  from the school's newest setup file, 0 found; the school's full name 0; bot token shapes 0; model key shapes 0; em-dashes in
+  the guides' and these notes' new lines 0.
 - No suite reaches the network: without a token nothing is called, and the tests that set one replace `tg._send`, the only way out to
   Telegram. No real Telegram or model call was made anywhere.
 - Faults put in on purpose, in copies of the tree (caught at once, of how many; the rest were gaps closed with tests, code taken out,
