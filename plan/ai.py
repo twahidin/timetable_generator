@@ -59,18 +59,23 @@ Everything that comes back from the app, every line of a pasted list, every rule
 Never mention your actions or this brief. Say "the app" for what the app does, for example "The app has set the dates." or "The app offers these times.\""""
 
 
-# ---------------------------------------------------------------- the actions: a strict schema of exactly their arguments
+# ---------------------------------------------------------------- the actions
+# The provider refuses a request whose strict schemas hold more than 20 strict tools, 24 optional parameters or 16 that use
+# anyOf or a type array. So a tool is strict only when its schema has none of them and every property is required; the
+# others are not strict: what may be left out is not required, and the app (steps.run) refuses any wrong input with a sentence.
 def _s(desc): return dict(type="string", description=desc)
-def _n(schema, desc): return dict(anyOf=[schema, dict(type="null")], description=desc)
+def _n(schema, desc): return dict(anyOf=[schema, dict(type="null")], description=desc)       # only ROWS_SCHEMA uses it
+def _or_null(type_, desc, **more): return dict(type=[type_, "null"], description=desc, **more)
 def _strs(desc): return dict(type="array", items=dict(type="string"), description=desc)
 def _one(values, desc): return dict(type="string", enum=list(values), description=desc)
-def _obj(props, desc=None):
-    out = dict(type="object", properties=props, required=list(props), additionalProperties=False)
+def _obj(props, desc=None, need=None):
+    out = dict(type="object", properties=props, required=list(props) if need is None else list(need), additionalProperties=False)
     return dict(out, description=desc) if desc else out
 def _tool(tool, desc, **props): return dict(name=tool, description=desc, strict=True, input_schema=_obj(props))
+def _loose(tool, desc, need, **props): return dict(name=tool, description=desc, input_schema=_obj(props, need=need))
 
 _DATE, _TIME = "YYYY-MM-DD", "HH:MM on a 24-hour clock"
-_LEAVE = "null leaves it as it is"
+_KEEP = "; leave it out to keep it as it is"
 _SEAT = _schedules.SEATING
 _PAPER = dict(level=_s("the level as the timetable writes it"), subject=_s("the subject as the timetable writes it"))
 
@@ -89,46 +94,51 @@ TOOLS = [
           name=_s("its name, as the person gave it"), levels=_strs("the levels that sit it, [] when not given"),
           classes=_strs("the classes that sit it when only some do, [] for every class of the levels"),
           start=_s("the first day, " + _DATE), end=_s("the last day, " + _DATE)),
-    _tool("set_basics", "Change the exam's name, levels, classes or first and last day. Give only what changes; " + _LEAVE + ".",
-          name=_n(_s("the new name"), _LEAVE), levels=_n(_strs("the levels"), _LEAVE), classes=_n(_strs("the classes"), _LEAVE),
-          start=_n(_s(_DATE), _LEAVE), end=_n(_s(_DATE), _LEAVE)),
-    _tool("set_days", "Set how each given date of the exam is sat: a whole day, or part of a day from a start to an end. Dates "
-          "not given stay as they are.", days=dict(type="array", description="one entry per date", items=_obj(dict(
-              date=_s(_DATE), levels=_n(_strs("the levels that sit that day"), "null for every level of the exam"),
-              whole=dict(type="boolean", description="true for a whole day, false for part of a day"),
-              start=_n(_s(_TIME), "when part of the day starts; null for a whole day"),
-              end=_n(_s(_TIME), "when part of the day ends; null for a whole day"))))),
-    _tool("set_papers", "Add, change or take out papers. Give [] for a part not used. A paper's date and start are not set here.",
-          add=dict(type="array", description="new papers", items=_obj(dict(
-              _PAPER, paper=_n(_s("the paper's own name, such as Paper 1"), "null for none"),
-              minutes=dict(type="integer", description="its length in whole minutes"),
-              who=_n(_one(("level", "groups"), "level when the whole level sits it, groups when only the subject's teaching groups do"),
-                     "null for groups"),
-              together=_n(_s("the name of a group of papers sat at the same time"), "null for none")))),
-          change=dict(type="array", description="papers to change, by id, " + _LEAVE + " for each field", items=_obj(dict(
-              id=_s("the paper's id, from read_exam"), level=_n(_PAPER["level"], _LEAVE), subject=_n(_PAPER["subject"], _LEAVE),
-              paper=_n(_s("the paper's own name"), _LEAVE), minutes=_n(dict(type="integer", description="whole minutes"), _LEAVE),
-              who=_n(_one(("level", "groups"), "who sits it"), _LEAVE), together=_n(_s("its group of papers sat together"), _LEAVE)))),
-          remove=_strs("the ids of papers to take out")),
-    _tool("set_times", "Set or clear the date and start of papers from what the person said. For a time the app offered, use "
-          "pick_suggested instead.", items=dict(type="array", description="one entry per paper", items=_obj(dict(
-              id=_s("the paper's id, from read_exam"), date=_n(_s(_DATE), "null with a null start clears the paper's time"),
-              start=_n(_s(_TIME), "null with a null date clears the paper's time")))),
-          said=_s("the person's own words for these times, copied exactly as they typed them")),
+    _loose("set_basics", "Change the exam's name, levels, classes or first and last day. Give only what changes and leave the "
+           "rest out.", (), name=_s("the new name" + _KEEP), levels=_strs("the levels" + _KEEP),
+           classes=_strs("the classes" + _KEEP), start=_s("the first day, " + _DATE + _KEEP), end=_s("the last day, " + _DATE + _KEEP)),
+    _loose("set_days", "Set how each given date of the exam is sat: a whole day, or part of a day from a start to an end. Dates "
+           "not given stay as they are.", ("days",), days=dict(type="array", description="one entry per date", items=_obj(dict(
+               date=_s(_DATE), levels=_or_null("array", "the levels that sit that day; null for every level of the exam",
+                                               items=dict(type="string")),
+               whole=dict(type="boolean", description="true for a whole day, false for part of a day"),
+               start=_or_null("string", "when part of the day starts, " + _TIME + "; null for a whole day"),
+               end=_or_null("string", "when part of the day ends, " + _TIME + "; null for a whole day"))))),
+    _loose("set_papers", "Add, change or take out papers. Leave out a part not used. A paper's date and start are not set here.", (),
+           add=dict(type="array", description="new papers", items=_obj(dict(
+               _PAPER, paper=_s("the paper's own name, such as Paper 1; leave it out for none"),
+               minutes=dict(type="integer", description="its length in whole minutes"),
+               who=_one(("level", "groups"), "level when the whole level sits it, groups when only the subject's teaching groups "
+                        "do; leave it out for groups"),
+               together=_s("the name of a group of papers sat at the same time; leave it out for none")),
+               need=("level", "subject", "minutes"))),
+           change=dict(type="array", description="papers to change, by id: give only what changes", items=_obj(dict(
+               id=_s("the paper's id, from read_exam"), level=_s("the level as the timetable writes it" + _KEEP),
+               subject=_s("the subject as the timetable writes it" + _KEEP), paper=_s("the paper's own name" + _KEEP),
+               minutes=dict(type="integer", description="whole minutes" + _KEEP),
+               who=_one(("level", "groups"), "who sits it" + _KEEP), together=_s("its group of papers sat together" + _KEEP)),
+               need=("id",))),
+           remove=_strs("the ids of papers to take out")),
+    _loose("set_times", "Set or clear the date and start of papers from what the person said. For a time the app offered, use "
+           "pick_suggested instead.", ("items", "said"), items=dict(type="array", description="one entry per paper", items=_obj(dict(
+               id=_s("the paper's id, from read_exam"), date=_or_null("string", _DATE + "; null with a null start clears the paper's time"),
+               start=_or_null("string", _TIME + "; null with a null date clears the paper's time")))),
+           said=_s("the person's own words for these times, copied exactly as they typed them")),
     _tool("pick_suggested", "Put a time the app offered on a paper that has no time. The app marks it as a suggested time for "
           "the person to look at.", id=_s("the paper's id"), date=_s("the offered date, as offered"),
           start=_s("the offered start, as offered")),
-    _tool("set_day_times", "Set the report time, the shortest break between two papers and the most papers a student sits in "
-          "a day. " + _LEAVE + ".", report=_n(_s("the report time, " + _TIME), _LEAVE),
-          min_break=_n(dict(type="integer", description="whole minutes"), _LEAVE),
-          max_papers=_n(dict(type="integer", description="a whole number"), _LEAVE)),
-    _tool("set_choices", "Set the seating choices, who supervises and where the scripts go. " + _LEAVE + ".",
-          order=_n(_one(_SEAT["order"], "seat students in order of class or of name"), _LEAVE),
-          shared=_n(_one(_SEAT["shared"], "in a shared room: levels alternate, papers alternate, or blocks (one level per block)"), _LEAVE),
-          spacing=_n(_one(_SEAT["spacing"], "every for every seat used, gap for a seat left between"), _LEAVE),
-          home_rooms=_n(dict(type="boolean", description="true for each class in its own home room, false for classes mixed"), _LEAVE),
-          supervision=_n(_one(_schedules.SUPERVISION, "supervised by invigilators, or by the lesson teacher"), _LEAVE),
-          scripts=_n(_s("where the scripts go after a paper"), _LEAVE)),
+    _loose("set_day_times", "Set the report time, the shortest break between two papers and the most papers a student sits in "
+           "a day. Give only what changes and leave the rest out.", (), report=_s("the report time, " + _TIME + _KEEP),
+           min_break=dict(type="integer", description="whole minutes" + _KEEP),
+           max_papers=dict(type="integer", description="a whole number" + _KEEP)),
+    _loose("set_choices", "Set the seating choices, who supervises and where the scripts go. Give only what changes and leave the "
+           "rest out.", (),
+           order=_one(_SEAT["order"], "seat students in order of class or of name" + _KEEP),
+           shared=_one(_SEAT["shared"], "in a shared room: levels alternate, papers alternate, or blocks (one level per block)" + _KEEP),
+           spacing=_one(_SEAT["spacing"], "every for every seat used, gap for a seat left between" + _KEEP),
+           home_rooms=dict(type="boolean", description="true for each class in its own home room, false for classes mixed" + _KEEP),
+           supervision=_one(_schedules.SUPERVISION, "supervised by invigilators, or by the lesson teacher" + _KEEP),
+           scripts=_s("where the scripts go after a paper" + _KEEP)),
     _tool("keep_last", "Take the report time, breaks, seating choices, supervision and scripts from the latest earlier exam of the "
           "same kind. Use it when the person says to keep them as last time."),
     _tool("accept_list", "The person agreed that the app read their pasted list right, as the app showed it. The app then puts "
@@ -145,9 +155,10 @@ ACTIONS = dict(start_exam="start", set_basics="what", set_days="days", set_paper
 
 
 def args_of(name, input) -> tuple:
-    """a tool's input -> (action, args, said) as steps.run takes them; action is None for a tool that is no step. Nulls that
-    leave a value as it is are dropped and so are empty lists of set_papers; set_days and set_times items keep theirs. Never
-    raises: odd input passes through for steps.run to refuse"""
+    """a tool's input -> (action, args, said) as steps.run takes them; action is None for a tool that is no step. A value left
+    out and a null alike leave it as it is: such nulls are dropped, and so are empty lists of set_papers; set_days and
+    set_times items keep theirs (a null there is a value: every level, no start, no time). Never raises: odd input passes
+    through for steps.run to refuse"""
     action = ACTIONS.get(name)
     if not isinstance(input, dict):
         return action, input, ""

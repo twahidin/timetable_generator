@@ -2232,6 +2232,7 @@ def the_request_carries_the_model_effort_the_beta_and_fallbacks():
 
 FORBIDDEN = {"minimum", "maximum", "minLength", "maxLength", "maxItems", "minItems", "multipleOf", "pattern"}
 def strict_ok(schema, where):
+    """a strict schema: no keyword strict refuses, every object closed with every property required"""
     if isinstance(schema, dict):
         assert not FORBIDDEN & set(schema), where
         if schema.get("type") == "object":
@@ -2241,8 +2242,38 @@ def strict_ok(schema, where):
     elif isinstance(schema, list):
         for v in schema: strict_ok(v, where)
 
+def closed(schema, where):
+    """every object of a schema has additionalProperties false and requires only its own properties"""
+    if isinstance(schema, dict):
+        if schema.get("type") == "object" or "properties" in schema:
+            same(schema.get("additionalProperties"), False)
+            assert set(schema.get("required") or []) <= set(schema.get("properties") or {}), where
+        for k, v in schema.items():
+            closed(v, f"{where}.{k}")
+    elif isinstance(schema, list):
+        for v in schema: closed(v, where)
+
+def parameters(schema) -> list:
+    """(name, required, union) of every property of every object in a schema, at any depth; union: anyOf or a type array"""
+    out = []
+    def walk(x):
+        if isinstance(x, dict):
+            if x.get("type") == "object" or "properties" in x:
+                need = set(x.get("required") or [])
+                out.extend((k, k in need, isinstance(v, dict) and ("anyOf" in v or isinstance(v.get("type"), list)))
+                           for k, v in (x.get("properties") or {}).items())
+            for v in x.values(): walk(v)
+        elif isinstance(x, list):
+            for v in x: walk(v)
+    walk(schema)
+    return out
+
+# the provider's limits for strict schemas (its structured-outputs page, "Explicit limits"): a request over any is refused
+MOST_STRICT_TOOLS, MOST_OPTIONAL, MOST_UNION = 20, 24, 16
+STRICT = ["read_exam", "read_school", "read_checks", "offer_slots", "start_exam", "pick_suggested", "keep_last", "accept_list",
+          "correct_list", "offer_answers"]
 @t
-def every_tool_is_strict_with_exactly_its_arguments():
+def the_tools_keep_to_the_providers_limits_for_strict_schemas():
     same([t_["name"] for t_ in AI.TOOLS], ["read_exam", "read_school", "read_checks", "offer_slots", "start_exam", "set_basics", "set_days",
          "set_papers", "set_times", "pick_suggested", "set_day_times", "set_choices", "keep_last", "accept_list", "correct_list", "offer_answers"])
     args = {t_["name"]: list(t_["input_schema"]["properties"]) for t_ in AI.TOOLS}
@@ -2251,18 +2282,44 @@ def every_tool_is_strict_with_exactly_its_arguments():
                     set_days=["days"], set_papers=["add", "change", "remove"], set_times=["items", "said"], pick_suggested=["id", "date", "start"],
                     set_day_times=["report", "min_break", "max_papers"], set_choices=["order", "shared", "spacing", "home_rooms", "supervision", "scripts"],
                     keep_last=[], accept_list=["said"], correct_list=["line", "subjects"], offer_answers=["answers"]))
+    strict = [t_ for t_ in AI.TOOLS if t_.get("strict") is True]
+    got = [p for t_ in strict for p in parameters(t_["input_schema"])]
+    optional, union = sum(1 for _, need, _ in got if not need), sum(1 for _, _, u in got if u)
+    assert len(strict) <= MOST_STRICT_TOOLS, len(strict)
+    assert optional <= MOST_OPTIONAL, f"{optional} optional parameters in strict schemas"
+    assert union <= MOST_UNION, f"{union} anyOf or type-array parameters in strict schemas"
+    same([t_["name"] for t_ in strict], STRICT)
+    same((len(strict), optional, union), (10, 0, 0))
+    rows = parameters(AI.ROWS_SCHEMA)
+    assert sum(1 for _, _, u in rows if u) <= MOST_UNION and sum(1 for _, need, _ in rows if not need) <= MOST_OPTIONAL
     for t_ in AI.TOOLS:
-        same((t_["strict"], set(t_), t_["input_schema"]["type"]), (True, {"name", "description", "strict", "input_schema"}, "object"))
+        keys = {"name", "description", "strict", "input_schema"} if t_["name"] in STRICT else {"name", "description", "input_schema"}
+        same((set(t_), t_["input_schema"]["type"]), (keys, "object"))
         assert t_["description"] and "eager_input_streaming" not in json.dumps(t_)
-        strict_ok(t_["input_schema"], t_["name"])
-    strict_ok(AI.ROWS_SCHEMA, "rows")
-    tool = {t_["name"]: t_["input_schema"]["properties"] for t_ in AI.TOOLS}
-    same(tool["set_days"]["days"]["items"]["required"], ["date", "levels", "whole", "start", "end"])
-    same(tool["set_papers"]["add"]["items"]["required"], ["level", "subject", "paper", "minutes", "who", "together"])
-    same(tool["set_papers"]["change"]["items"]["required"], ["id", "level", "subject", "paper", "minutes", "who", "together"])
-    same(tool["set_times"]["items"]["items"]["required"], ["id", "date", "start"])
-    same(tool["set_choices"]["shared"]["anyOf"][0]["enum"], ["levels", "papers", "blocks"])
-    same(tool["start_exam"]["kind"]["enum"], ["exam", "test"])
+        closed(t_["input_schema"], t_["name"])
+        if t_["name"] in STRICT:
+            strict_ok(t_["input_schema"], t_["name"])
+    strict_ok(AI.ROWS_SCHEMA, "rows"); closed(AI.ROWS_SCHEMA, "rows")
+    tool = {t_["name"]: t_["input_schema"] for t_ in AI.TOOLS}
+    props = {k: v["properties"] for k, v in tool.items()}
+    for name in ("set_basics", "set_day_times", "set_choices", "set_papers"):
+        same(tool[name]["required"], [])
+    same(tool["set_times"]["required"], ["items", "said"]); same(tool["set_days"]["required"], ["days"])
+    same(props["set_days"]["days"]["items"]["required"], ["date", "levels", "whole", "start", "end"])
+    same(props["set_papers"]["add"]["items"]["required"], ["level", "subject", "minutes"])
+    same(props["set_papers"]["change"]["items"]["required"], ["id"])
+    same(props["set_times"]["items"]["items"]["required"], ["id", "date", "start"])
+    same([props["set_times"]["items"]["items"]["properties"][k]["type"] for k in ("date", "start")], [["string", "null"]] * 2)
+    same([props["set_days"]["days"]["items"]["properties"][k]["type"] for k in ("levels", "start", "end")], [["array", "null"], ["string", "null"], ["string", "null"]])
+    same(props["set_choices"]["shared"]["enum"], ["levels", "papers", "blocks"])
+    same(props["start_exam"]["kind"]["enum"], ["exam", "test"])
+    words = json.dumps(AI.TOOLS).lower()
+    assert "null leaves" not in words and "leave it out to keep it as it is" in words
+    for name in ("set_basics", "set_day_times", "set_choices"):
+        for k, v in props[name].items():
+            assert "leave it out to keep it as it is" in v["description"].lower(), (name, k)
+    for k, v in props["set_papers"]["change"]["items"]["properties"].items():
+        assert k == "id" or "leave it out to keep it as it is" in v["description"].lower(), k
     same(AI.ACTIONS, dict(start_exam="start", set_basics="what", set_days="days", set_papers="papers", set_times="times",
                           pick_suggested="suggested", set_day_times="day_times", set_choices="choices", keep_last="keep_last"))
     assert set(AI.ACTIONS.values()) <= set(ST.ACTIONS)
@@ -4024,5 +4081,41 @@ def a_chat_step_downloads_and_filters_in_the_history():
         h = answered(c.get("/api/history?where=Exams%20and%20events"), 200)
         assert any(x.get("exam") == exam and x["as"] == AS for x in h["entries"]), h
     same(len(call.replies), 0)
+
+# ---------------------------------------------------------------- the final fix wave
+@t
+def the_app_refuses_what_only_a_strict_schema_used_to_keep_out():
+    no_schedules()
+    env, st, _ = started(); two_papers(env, st)
+    pid = a_pid(env, st, "English")
+    st.words.append("english on 6 oct at 8am")
+    cases = [                                       # for each tool that is not strict: a number as text, an extra key, a list for a text
+        ("set_basics", dict(start=20261005), "Give a date such as 2026-10-05."),
+        ("set_basics", dict(name="X", kind="test"), "kind is not a field here."),
+        ("set_basics", dict(name=["Mid-Year"]), "Check the exam and try again."),
+        ("set_days", dict(days=[dict(date="2026-10-06", levels=None, whole=False, start=800, end="10:20")]), "Give a time such as 08:00."),
+        ("set_days", dict(days=[dict(date="2026-10-06", levels=None, whole=True, start=None, end=None, room="Hall")]), "room is not a field here."),
+        ("set_days", dict(days=[dict(date="2026-10-06", levels=None, whole=True, start=None, end=None)], also=1), "also is not a field here."),
+        ("set_days", dict(days=[dict(date=["2026-10-06"], levels=None, whole=True, start=None, end=None)]), "Give a date such as 2026-10-05."),
+        ("set_papers", dict(change=[dict(id=pid, minutes="75")]), "Give Sec 3 English Paper 1 a length in minutes."),
+        ("set_papers", dict(add=[dict(level="Sec 3", subject="English", paper="Paper 2", minutes="60")]), "Give Sec 3 English Paper 2 a length in minutes."),
+        ("set_papers", dict(change=[dict(id=pid, colour="red")]), "colour is not a field here."),
+        ("set_papers", dict(change=[dict(id=pid, minutes=75)], keep=True), "keep is not a field here."),
+        ("set_papers", dict(change=[dict(id=pid, paper=["Paper 2"])]), "Check the exam and try again."),
+        ("set_papers", dict(add=[dict(level=["Sec 3"], subject="English", paper="Paper 2", minutes=60)]), "Check the exam and try again."),
+        ("set_times", dict(items=[dict(id=pid, date=20261006, start="08:00")], said="english on 6 oct at 8am"), "Give a date such as 2026-10-05."),
+        ("set_times", dict(items=[dict(id=pid, date="2026-10-06", start="08:00")], said="english on 6 oct at 8am", why="x"), "why is not a field here."),
+        ("set_times", dict(items=[dict(id=pid, date="2026-10-06", start=["08:00"])], said="english on 6 oct at 8am"), "Give a time such as 08:00."),
+        ("set_day_times", dict(min_break="20"), "Give a whole number of minutes between two papers."),
+        ("set_day_times", dict(report="07:30", lunch="12:00"), "lunch is not a field here."),
+        ("set_day_times", dict(report=["07:30"]), "Give a time such as 08:00."),
+        ("set_choices", dict(home_rooms="true"), "home_rooms can be true or false."),
+        ("set_choices", dict(order="name", rooms=2), "rooms is not a field here."),
+        ("set_choices", dict(scripts=["the hall"]), "Check the exam and try again."),
+        ("set_choices", dict(order=["name"]), "order can be class or name."),
+    ]
+    for tool, args, text in cases:
+        unchanged(env, st, lambda: run(env, st, *AI.args_of(tool, args)), text)
+    same(sorted({c[0] for c in cases}), sorted(n for n in AI.NAMES if n not in STRICT))
 
 print(f"{COUNT} plan tests passed")
