@@ -7912,5 +7912,40 @@ def a_cover_starts_and_ends_by_its_periods():
     for first in ("hours", "fill", "cover"):                                                  # either can be imported first
         p = subprocess.run([sys.executable, "-c", f"import relief.{first}"], cwd=ROOT, env=dict(os.environ, DATA_DIR=tempfile.mkdtemp()), capture_output=True, text=True); assert p.returncode == 0, p.stderr[-400:]
 
+@t
+def school_hours_never_raise_for_settings_of_the_wrong_shape():
+    good = HR.of({}); cal = lambda **kw: dict(calendar=dict(TERM, **kw))
+    for bad in (None, [], "x", 5, dict(times="odd"), dict(times=[1]), dict(times=5), dict(times=dict(morning_at=630, send_from="6:45", cut_off="13:00\n", work_eve=None)),
+                dict(calendar="x"), dict(calendar=[TERM]), dict(calendar=dict(terms="x")), dict(calendar=dict(terms=[1])), dict(calendar=dict(terms=[dict(name="Term 4")])),
+                dict(calendar=dict(terms=[dict(TERM["terms"][0], start="soon")])), cal(holidays="x"), cal(holidays=[1]), cal(holidays=[dict(name="A made-up day")]), cal(holidays=None)):
+        assert HR.of(bad) == good, bad
+        assert not HR.school(bad, SCHOOL, D(2026, 10, 13)) and not HR.duty_day(bad, SCHOOL, "2026-10-13") and HR.on_duty(bad, D(2026, 10, 13), [TEAM]) == [TEAM], bad
+        assert not HR.team_open(t_(13, "09:10"), bad, SCHOOL) and HR.next_morning(t_(13, "09:10"), bad, SCHOOL) is None and HR.team_window(t_(13, "09:10"), bad, SCHOOL) is None, bad
+        assert not HR.teacher_open(t_(13, "09:10"), bad, SCHOOL, D(2026, 10, 14)) and HR.teacher_open(t_(13, "14:05"), bad, SCHOOL, D(2026, 10, 13)), bad
+        assert HR.reaches_at(t_(12, "21:00"), bad, SCHOOL, D(2026, 10, 13)) == t_(13, "06:45") and HR.reaches_at(t_(12, "21:00"), bad, SCHOOL, None) is None, bad
+        assert HR.before_moment(t_(14, "09:20"), bad, SCHOOL) is None and HR.at(D(2026, 10, 13), good.cut_off) == t_(13, "14:00"), bad
+    with school():
+        for pub in (None, [], "x", dict(model="x"), dict(model=dict(days=5))):
+            assert not HR.school(rs(), pub, D(2026, 10, 13)) and not HR.team_open(t_(13, "09:10"), rs(), pub), pub
+        assert HR.starts([], dict(date="2026-10-13"), dict(p=0)) == t_(13, "00:00"), "a timetable of the wrong shape: the day"
+    assert HR.on_duty({}, None, None) == []
+
+@t
+def a_date_counts_the_same_as_its_iso_text():
+    with school(calendar=dict(TERM, holidays=[dict(start="2026-10-15", end="2026-10-15", name="Made-up holiday")])):
+        s = rs()
+        for when, lesson in (("14:05", 13), ("06:30", 13), ("06:45", 13), ("21:00", 13), ("09:10", 14), ("14:01", 14), ("21:00", 16)):
+            for day in (12, 13, 16):
+                d, text = D(2026, 10, lesson), f"2026-10-{lesson:02d}"
+                assert HR.teacher_open(t_(day, when), s, SCHOOL, d) == HR.teacher_open(t_(day, when), s, SCHOOL, text), (day, when, lesson)
+                assert HR.reaches_at(t_(day, when), s, SCHOOL, d) == HR.reaches_at(t_(day, when), s, SCHOOL, text), (day, when, lesson)
+        assert HR.teacher_open(t_(13, "14:05"), s, SCHOOL, "2026-10-13") and HR.reaches_at(t_(13, "14:05"), s, SCHOOL, "2026-10-13") == t_(13, "14:05"), "the own-day rule, by its text"
+        assert HR.reaches_at(t_(14, "21:00"), s, SCHOOL, "2026-10-15") == t_(15, "06:45"), "its day a holiday: still its own morning, by its text"
+        assert [HR.school(s, SCHOOL, x) for x in (D(2026, 10, 13), "2026-10-13", t_(13, "09:00"), "2026-10-15", "13 Oct", "2026-13-40", 13, None)] == [True, True, True, False, False, False, False, False]
+        assert HR.duty_day(s, SCHOOL, "2026-10-13") and HR.at("2026-10-13", datetime.time(14)) == t_(13, "14:00") and HR.at("soon", datetime.time(14)) is None
+        for none in (None, "soon", "2026-13-40", 13, [2026]):                                     # no lesson date: school hours alone
+            assert not HR.teacher_open(t_(13, "14:05"), s, SCHOOL, none) and HR.teacher_open(t_(13, "09:10"), s, SCHOOL, none), none
+            assert HR.reaches_at(t_(12, "21:00"), s, SCHOOL, none) == t_(13, "06:45") and HR.reaches_at(t_(14, "21:00"), s, SCHOOL, none) == t_(16, "06:45"), none
+
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

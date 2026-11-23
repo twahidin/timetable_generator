@@ -654,4 +654,9 @@ def a_fill_time_sent_by_a_page_is_not_saved():
     fresh(); S.save(base(times=dict(fill_at="09:00")), PUB, "x")
     assert "fill_at" not in store.read_json(S.PATH, {})["times"] and "fill_at" not in S.load(PUB)["times"]
 
+@t
+def a_time_with_a_new_line_after_it_is_not_a_time():
+    raises(ValueError, lambda: S.save(base(times=dict(morning_at="06:30\n")), PUB, "x"), "06:30\n is not a time like 15:00.")
+    raises(ValueError, lambda: S.save(base(times=dict(remind_at="15:00\n")), PUB, "x"), "15:00\n is not a time like 15:00.")
+
 print(f"{COUNT} relief tests passed")

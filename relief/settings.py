@@ -16,7 +16,7 @@ DEFAULT_RULES = [
     "Then Flexi Adjunct Teachers: no more than 3 relief periods a day each; match the subject where possible; spread their relief over the week.",
     "Then other teachers, lightest week first (teaching periods plus relief periods this week); if tied, whoever has had less relief this term; spread over the week.",
 ]
-_TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_TIME = re.compile(r"\A([01]\d|2[0-3]):[0-5]\d\Z")
 UNREAD = "The settings could not be read. Reload the page and try again."
 NAMELESS = "Give each term and holiday a name."
 FORMULA = ("=", "+", "-", "@", "\t", "\r")     # what a spreadsheet reads as the start of a formula

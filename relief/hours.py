@@ -6,6 +6,10 @@ The team's window: from the morning time to the cut-off of a duty day (stage 1: 
 teachers: from the earliest send-out time to the cut-off of a school day, the cut-off's own minute included; after the cut-off,
 and on any day the calendar no longer calls a school day, a relief of a lesson that day still reaches its teacher from the
 earliest send-out time on (whether the lesson is over is the caller's). A held relief never waits past its lesson's own morning.
+
+Nothing here raises for a settings or timetable of the wrong shape (None, a list, a text; times, calendar, terms or holidays of
+the wrong type; a time that is not "HH:MM"): the times fall back to their defaults and such a calendar knows no school day.
+Every date parameter takes a datetime.date or an ISO date text ("2026-10-13", as records hold it), the same way.
 """
 import collections, datetime, re
 
@@ -15,9 +19,21 @@ from relief.calendar import school_day
 
 DEFAULTS = dict(morning_at="06:30", send_from="06:45", cut_off="14:00", work_eve="18:00", work_day="07:00")
 Hours = collections.namedtuple("Hours", "morning send_from cut_off work_eve work_day")
-_TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_TIME = re.compile(r"\A([01]\d|2[0-3]):[0-5]\d\Z")
 _DAY, _MINUTE = datetime.timedelta(days=1), datetime.timedelta(minutes=1)
 AHEAD, BACK = 60, 14                    # how many days a morning or a send-out is looked for ahead, a cut-off back
+
+
+def _dict(v):
+    return v if isinstance(v, dict) else {}
+
+
+def _day(v):
+    """v as a date: a date, a date-time (its date in school time) or an ISO date text; None for anything else"""
+    if isinstance(v, datetime.datetime): return _fill._when(v).date()
+    if isinstance(v, datetime.date): return v
+    try: return datetime.date.fromisoformat(v) if isinstance(v, str) else None
+    except ValueError: return None
 
 
 def _time(v, default):
@@ -27,32 +43,36 @@ def _time(v, default):
 
 def of(settings) -> Hours:
     """the five times of settings["times"], each its default when missing or not "HH:MM\""""
-    t = (settings or {}).get("times") or {}
+    t = _dict(_dict(settings).get("times"))
     return Hours(*(_time(t.get(k), DEFAULTS[k]) for k in ("morning_at", "send_from", "cut_off", "work_eve", "work_day")))
 
 
-def at(date, t) -> datetime.datetime:
-    """the time t of date, in school time"""
-    return datetime.datetime.combine(date, t, tzinfo=_fill._tz())
+def at(date, t):
+    """the time t of date (a date or an ISO date text), in school time; None when date is neither"""
+    date = _day(date)
+    return None if date is None else datetime.datetime.combine(date, t, tzinfo=_fill._tz())
 
 
 _at = at                                # for team_window, whose first argument is called at
 
 
 def school(settings, pub, date) -> bool:
-    """date is a school day of the calendar (calendar.school_day)"""
-    days = ((pub or {}).get("model") or {}).get("days") or []
-    return school_day((settings or {}).get("calendar") or {}, days, date) is not None
+    """date (a date or an ISO date text) is a school day of the calendar (calendar.school_day); False for a calendar, a list
+    of days or a date of the wrong shape"""
+    date = _day(date)
+    if date is None: return False
+    try: return school_day(_dict(_dict(settings).get("calendar")), _dict(_dict(pub).get("model")).get("days") or [], date) is not None
+    except (TypeError, AttributeError, ValueError, KeyError): return False
 
 
 def duty_day(settings, pub, date) -> bool:
-    """the relief team is on duty that day (stage 2 says who and when; stage 1: every school day)"""
+    """the relief team is on duty that day, a date or an ISO date text (stage 2 says who and when; stage 1: every school day)"""
     return school(settings, pub, date)
 
 
 def on_duty(settings, date, team) -> list:
-    """who of team is on duty on date (stage 2; stage 1: the whole team)"""
-    return sorted(team)
+    """who of team is on duty on date, a date or an ISO date text (stage 2; stage 1: the whole team)"""
+    return sorted(team or ())
 
 
 def team_open(now, settings, pub) -> bool:
@@ -80,25 +100,27 @@ def team_window(at, settings, pub):
 
 
 def teacher_open(now, settings, pub, lesson_date) -> bool:
-    """a relief of a lesson on lesson_date may reach its teacher now: on the lesson's own day from the earliest send-out time
-    on; on any school day from the earliest send-out time to the end of the cut-off's minute"""
+    """a relief of a lesson on lesson_date (a date or an ISO date text; anything else, None too, is no lesson date) may reach
+    its teacher now: on the lesson's own day from the earliest send-out time on; on any school day from the earliest send-out
+    time to the end of the cut-off's minute"""
     now, h = _fill._when(now), of(settings)
-    if now.date() == lesson_date and now.time() >= h.send_from: return True
+    if now.date() == _day(lesson_date) and now.time() >= h.send_from: return True
     return school(settings, pub, now.date()) and h.send_from <= now.time() and now < at(now.date(), h.cut_off) + _MINUTE
 
 
-def reaches_at(when, settings, pub, lesson_date) -> datetime.datetime:
-    """when a relief held at when, of a lesson on lesson_date, reaches its teacher: when itself in school hours; else the
-    earliest send-out time of the first school day after when (or of when's own day, before it), never later than the
-    lesson's own morning and never earlier than when"""
+def reaches_at(when, settings, pub, lesson_date):
+    """when a relief held at when, of a lesson on lesson_date (a date or an ISO date text; anything else, None too, is no
+    lesson date), reaches its teacher: when itself in school hours; else the earliest send-out time of the first school day
+    after when (or of when's own day, before it), within AHEAD days, never later than the lesson's own morning and never
+    earlier than when. None only with no lesson date and no school day within AHEAD days"""
     when, h = _fill._when(when), of(settings)
     if teacher_open(when, settings, pub, lesson_date): return when
     goes = at(lesson_date, h.send_from)
     for i in range(AHEAD + 1):
         d = when.date() + i * _DAY
-        if at(d, h.send_from) >= goes: break
+        if goes is not None and at(d, h.send_from) >= goes: break
         if at(d, h.send_from) > when and school(settings, pub, d): goes = at(d, h.send_from); break
-    return max(goes, when)
+    return None if goes is None else max(goes, when)
 
 
 def before_moment(start, settings, pub):
@@ -116,7 +138,7 @@ def before_moment(start, settings, pub):
 def _span(pub, x, c):
     """(start, end) of the cover's lesson (exams.days.bounds): its first period's start to its last period's end; with no
     times for its first period, the start of its day and the start of the next"""
-    b, day = bounds((pub or {}).get("model") or {}), datetime.date.fromisoformat(str(x["date"]))
+    b, day = bounds(_dict(_dict(pub).get("model"))), datetime.date.fromisoformat(str(x["date"]))
     p, n, midnight = int(c["p"]), int(c.get("n") or 1), at(day, datetime.time())
     if p >= len(b): return midnight, midnight + _DAY
     return midnight + datetime.timedelta(minutes=b[p][0]), midnight + datetime.timedelta(minutes=b[min(p + n, len(b)) - 1][1])
