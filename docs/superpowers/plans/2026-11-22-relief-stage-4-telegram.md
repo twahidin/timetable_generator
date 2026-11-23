@@ -95,7 +95,7 @@ Messages (exact text; `·` is U+00B7, `–` U+2013; `{periods}` as "P9–P11", `
 | `ON_AGAIN` | `✔ On again: {lesson} {periods} ({start}) on {day}. The relief is yours as before.` (Task 4b) |
 | `KEPT` | `The relief team has kept {lesson} {periods} on {day} with you.` |
 | `ASK` | `↩ Request to change` / `{who} · {lesson} · {periods} ({start}) on {day}` / `“{why}”` / `New pick: {name}` / `{pick reason}`; nobody free: `Nobody else is free then: choose someone in the app.`; no pick after 2 minutes: `No new pick yet: open the app.` |
-| `REPORT` | `⏰ {hh:mm} · Not yet acknowledged ({n})` / `• {who} · {lesson} {periods} · starts {start} · sent {hh:mm}` (`sent Mon 15:00` when it was another day: 6b) or `· not told yet` (6c) or `· not on Telegram` (each) / `Started without acknowledgement:` / `• {who} · {lesson} {periods} ({start})` (each, once) |
+| `REPORT` | `⏰ {hh:mm} · Not yet acknowledged ({n})` / `• {who} · {lesson} {periods} · starts {start} · sent {hh:mm}` (`sent Mon 15:00` when it was another day: 6b; `sent {hh:mm} · not on Telegram now` when they cannot be reached any more: 9e) or `· not told yet` (6c) or `· not on Telegram` (each) / `Started without acknowledgement:` / `• {who} · {lesson} {periods} ({start})` (each, once) |
 | `CLEAR` | `✅ {hh:mm} · All {n} reliefs for today are acknowledged.` (`The 1 relief for today is acknowledged.`) or, when some never were, after the same `✅ {hh:mm} · `, `No reliefs are waiting now: {k} started without acknowledgement.` |
 | `SUMMARY` | `📊 Relief summary · {dates}` then the lines of mockup tab 10 (Task 7) |
 | `HELLO` | `Linked: {name}. You'll get your reliefs here. Send /relief to ask for relief, /stop to unlink.` |
@@ -218,7 +218,7 @@ Button labels: `✅ Acknowledge`, `↩ Request to change`, `✅ Acknowledge and 
 - Produces, `tgweb.py` (blueprint `relief_tg`, `init(has, me, need, note)`): `POST /telegram/hook` (the only unguarded
   route: 404 when `not tg.on()` or not connected, 403 on a wrong secret, 413 over 256 KB (read from the stream, never more than one byte past it), else `bot.handle` and 200);
   `GET /api/relief/telegram` → `dict(on, connected, bot, linked, handle, since)` (right `relief`);
-  `POST /api/relief/telegram/code` → `dict(code, url, until)` (`url = https://t.me/{bot}?start={code}`; 409
+  `POST /api/relief/telegram/code` → `dict(code, url, until)` (`url = https://t.me/{bot}?start={code}`, in practice mode the word `practice` and no address: 10b; 409
   `"Telegram is not connected yet."` when not); `DELETE /api/relief/telegram/link`; `GET /api/relief/telegram/admin` →
   `dict(token_set, practice, connected, bot, base, at, linked: [{name, handle, at}], not_linked: [names], people)`,
   `POST /api/relief/telegram/connect` (body none; the base is `https://` and RAILWAY_PUBLIC_DOMAIN, else `request.host_url` (2b), refused unless https or

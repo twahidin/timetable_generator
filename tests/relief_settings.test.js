@@ -63,6 +63,11 @@ t("the card's place is hidden until there is something in it, and again when the
   const q = await opened({ "GET admin": ok(TOKEN) });
   assert.ok(!q.$("#telegram").hidden);
 });
+t("what the settings say of the reporting officer", async () => {
+  const p = await opened({ "GET admin": ok(OFF) });
+  assert.ok(p.text("#main").includes("Reporting officer Is told on Telegram, when they have linked it, when someone who names them asks for relief."));
+  assert.ok(!p.text("#main").includes("Is told when someone"));
+});
 t("no token", async () => {
   const p = await opened({ "GET admin": ok(OFF) }); assert.strictEqual(p.card(), `Telegram ${NOT_SET}`); assert.deepStrictEqual(p.buttons(), []); assert.strictEqual(p.text("#telegram h2"), "Telegram"); assert.deepStrictEqual(p.sent(), ["GET admin"]);
 });

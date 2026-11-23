@@ -45,6 +45,7 @@ const url = monday => `/api/relief/summary?week=${monday}`;
 const has = (page, ...texts) => texts.forEach(x => assert.ok(page.html().includes(x), x));
 const hasNot = (page, ...texts) => texts.forEach(x => assert.ok(!page.html().includes(x), x));
 
+const { css } = require("./dom.js");
 let n = 0; const all = []; const t = (name, f) => all.push([name, f]);
 
 t("the week in the address is the one it starts at, any date of it; this week without one", () => {
@@ -106,6 +107,14 @@ t("after a button that goes, the focus is on the heading", async () => {
   await p.give(1, refused("No.")); assert.strictEqual(p.focus(), "smTitle", "refused again"); p.press("reload"); await p.give(2, week()); assert.strictEqual(p.focus(), "smTitle", "and answered");
   p.press("before"); assert.strictEqual(p.focus(), "the button", "this one stays"); p.press("after"); assert.strictEqual(p.focus(), "the button");
   p.press("before"); p.press("now"); assert.strictEqual(p.focus(), "smTitle", "This week"); assert.strictEqual(p.away(), false); assert.strictEqual(p.asked[p.asked.length - 1], url(W12));
+});
+t("room under the week's heading; on a phone each fact's label above its value", async () => {
+  const p = open("");
+  assert.ok(/class="card sm"><div class="ab-top">/.test(p.pane.innerHTML) && p.pane.innerHTML.includes('<div id="smBody">'));
+  assert.ok(/margin-bottom:(\d+)px/.exec(css("relief.html", ".sm .ab-top"))[1] >= 10);
+  await p.give(0, week());
+  assert.strictEqual((p.html().match(/<div><dt>(?:Arranged|Acknowledged|Asked to change)<\/dt><dd>/g) || []).length, 3, "all three are one kind of line");
+  assert.ok(css("relief.html", ".sm-facts>div", "(max-width:640px)").includes("display:block"), "and drawn one way");
 });
 t("no relief, no Flexi Adjunct role, nobody asked", async () => {
   let p = open(""); await p.give(0, week({ periods: 0, asked: 0, never: 0, rows: [], top: [], by_dept: [], by_day: { Mon: 0 } })); has(p, "No relief this week."); hasNot(p, "counter", "<table", "Asked to change");

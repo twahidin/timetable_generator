@@ -1,7 +1,7 @@
 // Plain-assert tests for what Today (static/relief-today.js) shows and does of Telegram: run with `node tests/relief_today.test.js`.
 // The Relief page's own HTML and scripts run in a small stand-in for the browser (tests/dom.js), against answers written here.
 const assert = require("assert");
-const { open, later, run } = require("./dom.js");
+const { open, later, run, css } = require("./dom.js");
 
 const NOW = "2026-10-13T07:40:00+08:00", TODAY = "2026-10-13", URL = "/api/relief/today", REMIND = `${URL}/remind`;
 const SAM = "Mr Sam Tan", MAYA = "Ms Maya Lee", EVE = "Ms Evelyn Koh", RUTH = "Ms Ruth Goh", TEAM = "Mr Hugo Ong";
@@ -88,10 +88,10 @@ t("the other states say what they said, and have no Remind", async () => {
 t("Remind: what it sends, off while it is on its way, its answer beside the row, and the day read again", async () => {
   const p = await today(day([row(), maya()])), wait = later(); p.remind = wait.answer; await p.press("Remind");
   assert.deepStrictEqual(p.sent(), [`POST {"date":"${TODAY}","covers":[{"id":"a1","ckey":"k5"}]}`]); assert.ok(p.btn("Remind").disabled && p.btn("Change").disabled && !p.btn("Remind", "k2").disabled); await p.press("Remind"); assert.strictEqual(p.sent().length, 1);
-  assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now", ALL + " (off)", "Refresh"], "not all while one is on its way"); assert.strictEqual(p.reads(), 1);
+  assert.deepStrictEqual(p.acts(), [ALL + " (off)", "Approve all waiting (off)", "Fill now", "Refresh"], "not all while one is on its way"); assert.strictEqual(p.reads(), 1);
   p.day = day([row({ told: told("queued", NOW) }), maya()]); wait.give(200, { sent: 1, skipped: [] }); await p.settle();
   assert.strictEqual(p.under(), "Reminded."); assert.strictEqual(p.under("k2"), ""); assert.strictEqual(p.reads(), 2); assert.ok(p.state().startsWith("Approved Being sent… by")); assert.ok(p.row().querySelector(".msg.ok")); assert.strictEqual(p.focus(), p.btn("Remind"));
-  assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now", ALL, "Refresh"]);
+  assert.deepStrictEqual(p.acts(), [ALL, "Approve all waiting (off)", "Fill now", "Refresh"]);
 });
 t("Remind: why not, and a refusal", async () => {
   const p = await today(day([row(), maya()]));
@@ -144,28 +144,83 @@ t("Remind is for whoever can be reached, on a date not past; another date says s
   p.day = c => ok(day([row(), maya()], { date: c.url.slice(-10) })); await p.click("#tdSeg button", "Tomorrow"); p.remind = ok({ sent: 1, skipped: [] }); await p.press("Remind"); assert.deepStrictEqual(p.sent(), [`POST {"date":"2026-10-14","covers":[{"id":"a1","ckey":"k5"}]}`]);
   await p.click("button", ALL); assert.strictEqual(p.sent()[1], `POST {"date":"2026-10-14","covers":[{"id":"a1","ckey":"k5"},{"id":"a1","ckey":"k2"}]}`);
   const input = p.find("#tdDate"); input.value = "2026-10-12"; for (const f of p.find("#pane-today").on.change) f({ target: input }); await p.tick(400);
-  assert.strictEqual(p.text("#tdTitle"), "Relief on Mon 12 Oct"); assert.strictEqual(p.state(), `Approved Sent 07:20 ${BY}`); assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now (off)", ALL + " (off)", "Refresh"]);
+  assert.strictEqual(p.text("#tdTitle"), "Relief on Mon 12 Oct"); assert.strictEqual(p.state(), `Approved Sent 07:20 ${BY}`); assert.deepStrictEqual(p.acts(), [ALL + " (off)", "Approve all waiting (off)", "Fill now (off)", "Refresh"]);
 });
-t("Remind all: after Fill now, when somebody approved can be reached, and only then", async () => {
+t("Remind all: first in its row, when somebody approved can be reached, and only then", async () => {
   for (const [rows, there] of [[[row()], 1], [[row({ linked: false })], 0], [[row({ linked: false }), maya()], 1], [[], 0], [Object.keys(ANY).map((s, i) => inState(s, { ckey: `k${i}` })), 0]]) {
-    const p = await today(day(rows)); assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now", ...(there ? [ALL] : []), "Refresh"]);
+    const p = await today(day(rows)); assert.deepStrictEqual(p.acts(), [...(there ? [ALL] : []), "Approve all waiting (off)", "Fill now", "Refresh"]);
   }
+});
+t("nothing else in the row moves when Remind all comes or goes: its place is kept while a bot is connected", async () => {
+  const kids = p => p.find("#tdActs").kids.filter(k => k.tag), place = p => kids(p)[0], rest = p => kids(p).slice(1).map(k => `${k.tag} ${k.getAttribute("data-td")}`);
+  const ROW = ["button all", "button fill", "button reload"], gap = p => place(p).classes().includes("td-gap") && place(p).tag === "span" && place(p).getAttribute("aria-hidden") === "true" && p.text(place(p)) === ALL;
+  const p = await today(day([row()]));
+  assert.ok(place(p).getAttribute("data-td") === "remind-all" && p.text(place(p)) === ALL);
+  assert.deepStrictEqual(rest(p), ROW);
+  p.day = day([inState("acknowledged")]);
+  await p.click("button", "Refresh");
+  assert.ok(gap(p), "nobody to remind: its place, not seen, not read and not to be pressed");
+  assert.deepStrictEqual(rest(p), ROW);
+  const wait = later();
+  p.day = () => wait.answer;
+  await p.click("#tdSeg button", "Tomorrow");
+  assert.ok(gap(p), "while another day is read");
+  wait.give(200, day([row()], { date: "2026-10-14" }));
+  await p.settle();
+  assert.ok(place(p).getAttribute("data-td") === "remind-all");
+  p.day = no(500, "Made up.");
+  await p.click("#tdSeg button", "Today");
+  assert.ok(gap(p), "nor when it cannot be read");
+  const q = await today(day([row()], { telegram: false }));
+  assert.deepStrictEqual(kids(q).map(k => k.getAttribute("data-td")), ["all", "fill", "reload"], "no bot: no place");
+  const first = later(), r = await today(() => first.answer);
+  assert.strictEqual(kids(r).length, 3, "not known yet");
+  first.give(200, day([inState("acknowledged")]));
+  await r.settle();
+  assert.ok(gap(r));
+  r.day = day([row()], { telegram: false });
+  await r.click("button", "Refresh");
+  assert.strictEqual(kids(r).length, 3, "no bot any more");
+  const box = css("relief.html", ".td-gap"), button = css("style.css", "button");
+  assert.ok(box.includes("visibility:hidden"));
+  for (const x of ["padding:7px 12px", "1px solid"]) assert.ok(box.includes(x) && button.includes(x), `its place is as large as the button: ${x}`);
+  assert.ok(css("relief.html", ".td-acts").includes("justify-content:flex-end"), "the row ends at the right: what comes first moves nothing");
+  for (const x of ['.td-acts [data-td="remind-all"]', ".td-gap"]) assert.ok(/margin-right:(\d+)px/.exec(css("relief.html", x))[1] >= 10, "and Approve all's shorter words do not bring it under the pointer");
+});
+t("at any width there is room between the buttons at the top and the day", () => {
+  assert.ok(/margin-bottom:(\d+)px/.exec(css("relief.html", ".td-acts"))[1] >= 10, css("relief.html", ".td-acts"));
 });
 t("Remind all: what it sends, off while anything is on its way, and what it answers above the rows", async () => {
   const p = await today(day([row(), maya(), row({ ckey: "k7", key: "k7", linked: false }), inState("acknowledged", { ckey: "k8", key: "k8" }), inState("waiting", { ckey: "k9", key: "k9" })])), wait = later(); p.remind = wait.answer;
   await p.click("button", ALL); assert.deepStrictEqual(p.sent(), [`POST {"date":"${TODAY}","covers":[{"id":"a1","ckey":"k5"},{"id":"a1","ckey":"k2"}]}`]);
-  assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now (off)", ALL + " (off)", "Refresh"]); assert.ok(p.btn("Remind").disabled && p.btn("Approve", "k9").disabled); await p.click("button", ALL); assert.strictEqual(p.sent().length, 1);
+  assert.deepStrictEqual(p.acts(), [ALL + " (off)", "Approve all waiting (off)", "Fill now (off)", "Refresh"]); assert.ok(p.btn("Remind").disabled && p.btn("Approve", "k9").disabled); await p.click("button", ALL); assert.strictEqual(p.sent().length, 1);
   const why = "Sent at 07:38: wait a few minutes.";
   wait.give(200, { sent: 1, skipped: [{ ckey: "k2", name: MAYA, why }, { ckey: "k7", name: null, why: "Nobody to remind." }, { ckey: "k8", name: null, why: "Nobody to remind." }, { ckey: "k9", name: MAYA, why }, { ckey: "kx", why: "Not on Telegram." }] }); await p.settle();
   assert.deepStrictEqual(p.top(), ["Reminded 1.", `${MAYA}: ${why}`, "Nobody to remind.", `${MAYA}: ${why}`, "Not on Telegram."]); assert.strictEqual(p.all("#tdTop .msg.bad").length, 4); assert.strictEqual(p.all("#tdTop .msg.ok").length, 1);
-  assert.strictEqual(p.under(), ""); assert.strictEqual(p.reads(), 2); assert.strictEqual(p.focus(), p.find("button", ALL)); assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now", ALL, "Refresh"]);
+  assert.strictEqual(p.under(), ""); assert.strictEqual(p.reads(), 2); assert.strictEqual(p.focus(), p.find("button", ALL)); assert.deepStrictEqual(p.acts(), [ALL, "Approve all waiting (off)", "Fill now", "Refresh"]);
   p.remind = ok({ sent: 2, skipped: [] }); await p.click("button", ALL); assert.deepStrictEqual(p.top(), ["Reminded 2."], "what was said before goes");
 });
 t("Remind all: a refusal, an odd answer, and everyone acknowledged by then", async () => {
   const p = await today(day([row()])); p.remind = no(503, "Telegram could not be reached just now. Try again."); await p.click("button", ALL); assert.deepStrictEqual(p.top(), ["Telegram could not be reached just now. Try again."]); assert.ok(p.$("#tdTop .msg.bad")); assert.strictEqual(p.focus(), p.find("button", ALL));
-  for (const odd of [null, {}, { sent: "x", skipped: 5 }, { sent: 0, skipped: [null] }]) { p.remind = ok(odd); await p.click("button", ALL); assert.deepStrictEqual(p.top(), ["Reminded 0."], JSON.stringify(odd)); }
+  for (const odd of [null, {}, { sent: "x", skipped: 5 }, { sent: 0, skipped: [null] }]) { p.remind = ok(odd); await p.click("button", ALL); assert.deepStrictEqual(p.top(), ["Nobody to remind."], JSON.stringify(odd)); assert.ok(p.$("#tdTop .msg.bad")); }
   p.remind = () => { p.day = day([inState("acknowledged")]); return ok({ sent: 0, skipped: [{ ckey: "k5", name: SAM, why: "Nobody to remind." }] }); }; await p.click("button", ALL);
-  assert.deepStrictEqual(p.top(), ["Reminded 0.", `${SAM}: Nobody to remind.`]); assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now", "Refresh"]); assert.strictEqual(p.focus(), p.find("#tdActs button", "Refresh"), "its button is gone: the one that does nothing but read");
+  assert.deepStrictEqual(p.top(), [`${SAM}: Nobody to remind.`]); assert.deepStrictEqual(p.acts(), ["Approve all waiting (off)", "Fill now", "Refresh"]); assert.strictEqual(p.focus(), p.find("#tdActs button", "Refresh"), "its button is gone: the one that does nothing but read");
+});
+t("Remind all with nobody reminded: the reasons alone, or that there is nobody", async () => {
+  const p = await today(day([row(), maya()])), why = "Sent at 07:38: wait a few minutes.", cases = [
+    [[], ["Nobody to remind."]],
+    [[{ ckey: "k5", name: SAM, why }], [`${SAM}: ${why}`]],
+    [[{ ckey: "k5", name: SAM, why }, { ckey: "k2", name: MAYA, why }], [`${SAM}: ${why}`, `${MAYA}: ${why}`]],
+    [[{ ckey: "k5", name: null, why: "Nobody to remind." }, { ckey: "k2", name: null, why: "Nobody to remind." }], ["Nobody to remind."]]];
+  for (const [skipped, lines] of cases) {
+    p.remind = ok({ sent: 0, skipped });
+    await p.click("button", ALL);
+    assert.deepStrictEqual(p.top(), lines);
+    assert.strictEqual(p.all("#tdTop .msg.ok").length, 0);
+  }
+  p.remind = ok({ sent: 1, skipped: [{ ckey: "k2", name: MAYA, why }] });
+  await p.click("button", ALL);
+  assert.deepStrictEqual(p.top(), ["Reminded 1.", `${MAYA}: ${why}`]);
 });
 t("Remind all is off while Approve all, Fill now or a row's step is on its way; they are off while it is", async () => {
   for (const [sel, label] of [["button", "Fill now"], ["button", "Approve all 1 waiting"]]) {
@@ -360,7 +415,7 @@ t("the lines above the rows are not said again by a reading that changes none of
 });
 t("everything is escaped", async () => {
   const mark = x => `<u title="${x}">'${x}'</u>&`, p = await today(day([row({ pick: { who: mark("who"), by: "team", reason: "" }, approved: { by: mark("by"), at: "2026-10-13T07:15:00+08:00" } })])); assert.ok(p.state().includes(mark("by")));
-  p.remind = ok({ sent: 0, skipped: [{ ckey: "k5", name: mark("name"), why: mark("why") }] }); await p.press("Remind"); assert.strictEqual(p.under(), mark("why")); await p.click("button", ALL); assert.deepStrictEqual(p.top().slice(1), [`${mark("name")}: ${mark("why")}`]);
+  p.remind = ok({ sent: 0, skipped: [{ ckey: "k5", name: mark("name"), why: mark("why") }] }); await p.press("Remind"); assert.strictEqual(p.under(), mark("why")); await p.click("button", ALL); assert.deepStrictEqual(p.top(), [`${mark("name")}: ${mark("why")}`]);
   p.remind = no(400, mark("refusal")); await p.press("Remind"); assert.strictEqual(p.under(), mark("refusal")); p.day = day([row({ told: told("queued"), pick: { who: mark("who"), by: "team", reason: "" } })]); await p.click("button", "Refresh"); p.day = day([row({ told: told("sent", "2026-10-12T15:00:00+08:00"), pick: { who: mark("who"), by: "team", reason: "" } })]); await p.tick(3000);
   assert.ok(p.aloud().startsWith(mark("who"))); assert.strictEqual(p.all("#pane-today u").length, 0);
   const q = await today(day([row({ told: told("sent", "<u>1234567T07:20:00") })])); assert.ok(q.state().startsWith("Approved Sent <u>1234567, 07:20 by")); assert.strictEqual(q.all("#pane-today u").length, 0);

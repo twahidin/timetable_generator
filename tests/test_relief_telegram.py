@@ -862,7 +862,7 @@ def the_code_route_needs_a_person_and_a_connection():
         assert rows("codes") == []
         r = tia.post(API + "/code"); j = r.get_json()
         assert r.status_code == 200 and set(j) == {"code", "url", "until"} and CODE_SHAPE.match(j["code"]), j
-        assert j["url"] == f"https://t.me/practice_bot?start={j['code']}" and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", j["code"])
+        assert j["url"] == "practice" and "practice_bot" not in json.dumps(j), "no bot to open: that name may be a stranger's"
         assert [r["name"] for r in rows("codes")] == [TIA]
         assert hook(msg(f"/start {j['code']}", 501, user="tia_t")).status_code == 200
         j = tia.get(API).get_json()
@@ -873,6 +873,10 @@ def the_code_route_needs_a_person_and_a_connection():
         assert tia.delete(API + "/link").status_code == 200                             # nothing to take away: the same answer
         links.link(TIA, 501, None)
         with record(TIA, off=True): assert who(TIA).get(API).status_code == 401
+    with telegram(token="made-up-" + secrets.token_hex(10)):
+        j = tia.post(API + "/code").get_json(); assert set(j) == {"code", "url", "until"} and CODE_SHAPE.match(j["code"]) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", j["code"])
+        assert j["url"] == f"https://t.me/ctss_made_up_bot?start={j['code']}"
+    assert REAL == []
 
 @t
 def connect_saves_the_bot_and_points_the_hook_here():
@@ -4488,6 +4492,7 @@ def the_report_texts_are_the_plans():
     got = RE.report_text("{hh:mm}", [v], [v]).replace("(1)", "({n})", 1) + "\n" + RE.clear_text("{hh:mm}", 4, 0).replace(" 4 ", " {n} ")
     assert len(got.splitlines()) == 5
     for line in got.splitlines(): assert f"`{line}`" in plan, line
+    assert "`sent {hh:mm} · not on Telegram now`" in plan
     assert RE.clear_text("08:00", 4, 2) == none_waits("08:00", 2) and "`No reliefs are waiting now: {k} started without acknowledgement.`" in plan
     assert RE.clear_text("08:00", 1, 0) == "✅ 08:00 · The 1 relief for today is acknowledged." and RE.clear_text("08:00", 1, 1) == none_waits("08:00", 1)
     for label in (RE.AGAIN, RE.OPEN_TODAY): assert f"`{label}`" in plan
@@ -4701,7 +4706,7 @@ def the_report_goes_to_team_members_only():
 @t
 def not_on_telegram_is_said_in_the_report():
     def line(i=None): ticked(hm()); return texts_to()[-1].split("\n")[1].split(" · ")[-1]
-    marks = iter(f"{h:02d}:{m:02d}" for h in (7, 8, 9) for m in (0, 15, 30, 45)); hm = lambda: next(marks)
+    marks = iter(f"{h:02d}:{m:02d}" for h in (7, 8, 9, 10) for m in (0, 15, 30, 45)); hm = lambda: next(marks)
     with school(TEAM):
         i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); assert line() == "not on Telegram"
         links.link(SAM, CHATS[SAM], None); assert line() == "not told yet", "linked later, and not swept yet"
@@ -4709,7 +4714,13 @@ def not_on_telegram_is_said_in_the_report():
         for s, want in (("sending", "not told yet"), ("failed", "not told yet"), ("dropped", "not told yet"), ("unsure", "sent 07:41")):
             put(key, state=s, sent_at="2026-10-13T07:41:00+08:00"); assert line() == want, s
         put(key, state="sent"); assert line() == "sent 07:41"
-        with record(SAM, off=True): assert line() == "sent 07:41", "told, whatever came after"
+        with record(SAM, off=True): assert line() == "not on Telegram now" and texts_to()[-1].endswith(SAM_LINE + "sent 07:41 · not on Telegram now"), "told, whatever came after; and what is so now"
+        links.unlink(SAM); assert line() == "not on Telegram now" and texts_to()[-1].endswith(SAM_LINE + "sent 07:41 · not on Telegram now")
+        put(key, state="unsure"); assert line() == "not on Telegram now" and texts_to()[-1].endswith("sent 07:41 · not on Telegram now"), "may have been told"
+        for s in ("failed", "dropped"): put(key, state=s); assert line() == "not on Telegram", s
+    marks = iter(f"{h:02d}:{m:02d}" for h in (7, 8, 9) for m in (0, 15, 30, 45))
+    with school(SAM, TEAM):                                                                # unlinked, and linked again
+        i = today_reliefs((K5, SAM)); links.unlink(SAM); assert line() == "not on Telegram now"; links.link(SAM, CHATS[SAM], None); assert line() == "sent 06:50"
         assert SAM_LINE.strip("\n") in texts_to()[-1]
     marks = iter(f"{h:02d}:{m:02d}" for h in (7, 8, 9) for m in (0, 15, 30, 45))
     with school(SAM, TEAM):                                                                # a reminder is the relief told, too: the latest of those that went
@@ -4733,7 +4744,8 @@ def the_line_says_the_day_when_it_was_not_today():
             for s in ("sent", "unsure"): put(key, state=s, sent_at=sent_at); assert line() == want, (sent_at, s)
     with school(SAM, TEAM):                                                                # planned the day before: approved and told on Monday afternoon
         at("15:00", 12); i = absent(by=HUGO); give(i, K5, SAM); swept(); ticked("07:00"); assert texts_to()[-1] == head("07:00", 1) + SAM_LINE + "sent Mon 15:00"
-        at("07:05", 13); remind(asks(i, K5)); send(); ticked("07:15"); assert texts_to()[-1] == head("07:15", 1) + SAM_LINE + "sent 07:05", "reminded today"
+        links.unlink(SAM); ticked("07:15"); assert texts_to()[-1] == head("07:15", 1) + SAM_LINE + "sent Mon 15:00 · not on Telegram now"; links.link(SAM, CHATS[SAM], None)
+        at("07:20", 13); remind(asks(i, K5)); send(); ticked("07:30"); assert texts_to()[-1] == head("07:30", 1) + SAM_LINE + "sent 07:20", "reminded today"
 
 @t
 def a_stopped_lesson_is_left_out_of_the_report():

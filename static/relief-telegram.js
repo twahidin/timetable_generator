@@ -37,8 +37,8 @@
     return `<div class="ab-ask" role="group" aria-label="${esc(q)}"><span class="q">${esc(q)}</span>${button("unlink", "Unlink", "small danger")}${button("keep", "Keep it", "small")}</div>`;
   }
 
-  function steps(st) {
-    const open = C.code.url.startsWith("https://") ? `<p class="tg-line">1. <a class="filebtn" data-tg="open" href="${esc(C.code.url)}" target="_blank" rel="noopener">Open the bot</a></p><p class="tg-line">2. Press Start there.</p>` : "";
+  function steps(st) {   /* no link for what is no https address: practice mode has none */
+    const open = C.code.url.startsWith("https://") ? `<p class="tg-line tg-open">1. <a class="filebtn primary" data-tg="open" href="${esc(C.code.url)}" target="_blank" rel="noopener">Open the bot</a></p><p class="tg-line">2. Press Start there.</p>` : "";
     return `${open}<p class="tg-line">Or send this code to @${esc(st.bot)}: <span class="codeline tg-code">${esc(C.code.code)}</span></p>
       <p class="tg-line small muted">The code works once and runs out in 15 minutes.</p><div class="bar">${button("cancel", "Cancel", "small")}</div>`;
   }

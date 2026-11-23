@@ -1,7 +1,7 @@
 // Plain-assert tests for the Link Telegram card on My absences (static/relief-telegram.js): run with `node tests/relief_telegram.test.js`.
 // The Relief page's own HTML and scripts run in a small stand-in for the browser (tests/dom.js), against answers written here.
 const assert = require("assert");
-const { open, later, run } = require("./dom.js");
+const { open, later, run, css } = require("./dom.js");
 
 const NOW = "2026-10-13T07:20:00+08:00", URL = "/api/relief/telegram", CODE = "ABCD-EFGH", BOT = "https://t.me/made_up_bot?start=";
 const LINE = "Get your reliefs and reminders on your own Telegram.", OUT = "That code has run out.";
@@ -77,7 +77,7 @@ t("Link Telegram: the steps, the code, and where the focus goes", async () => {
   const c = p.find("#tgBody .codeline"); assert.ok(c.classes().includes("tg-code")); assert.strictEqual(c.textContent, CODE); assert.strictEqual(p.focus(), a); assert.deepStrictEqual(p.buttons(), ["Cancel"]);
 });
 t("an address that is not https is no link: the code line alone", async () => {
-  for (const url of ["javascript:alert(1)", "http://t.me/x?start=1", "//t.me/x", "data:text/html,x", " https://t.me/x"]) {
+  for (const url of ["practice", "javascript:alert(1)", "http://t.me/x?start=1", "//t.me/x", "data:text/html,x", " https://t.me/x"]) {
     const p = await opened({ "GET ": ok(FREE) });
     p.api["POST /code"] = ok({ code: CODE, url, until: p.now / 1000 + 900 });
     await p.click("button", "Link Telegram");
@@ -101,6 +101,18 @@ t("a code that did not come whole is a refusal, and it can be asked for again", 
     await p.click("button", "Link Telegram");
     has(p, CODE);
   }
+});
+t("Open the bot is the card's main button, with room above and below its line", async () => {
+  const p = await coded(), a = p.find("#tgBody a"), b = await opened({ "GET ": ok(FREE) });
+  assert.ok(["filebtn", "primary"].every(c => a.classes().includes(c)) && b.find("button", "Link Telegram").classes().includes("primary"));
+  assert.ok(a.parent.tag === "p" && a.parent.classes().includes("tg-open"));
+  assert.strictEqual(p.find(".tg-open").querySelectorAll("a").length, 1);
+  assert.ok(/margin:(\d+)px 0/.exec(css("relief.html", ".tg-open"))[1] >= 10, css("relief.html", ".tg-open"));
+  assert.ok(css("relief.html", ".tg-open a").includes("display:inline-block"), "its own height counts in the line");
+  const look = css("style.css", "button.primary");
+  assert.ok(look.includes("linear-gradient") && look.includes("var(--accent-ink)"));
+  assert.strictEqual(css("style.css", "a.filebtn.primary"), look, "the look of the page's main buttons, not a copy of it");
+  assert.strictEqual(css("style.css", "a.filebtn.primary:hover"), css("style.css", "button.primary:hover:not(:disabled)"));
 });
 t("the code is nowhere but in the card", async () => {
   const p = await coded(); has(p, CODE);

@@ -88,6 +88,8 @@ nav.rtabs button .n:empty{display:none}
 .tg h2:focus{outline:none}
 .tg-line{margin:0 0 8px;overflow-wrap:anywhere}
 .tg-line:empty{margin:0}
+.tg-open{margin:14px 0}
+.tg-open a{display:inline-block}
 .tg .bar{margin-top:0}
 .tg .bar+.bar{margin-top:8px}
 .tg-code{user-select:all;-webkit-user-select:all;font-size:15px;letter-spacing:.04em;white-space:nowrap}
@@ -124,7 +126,9 @@ table.rtable tr.off td{opacity:.62}
 table.rtable tr.new td{background:#f3f8ff}
 table.inbox{min-width:860px}
 /* Today (the relief team) */
-.td-acts{justify-content:flex-end}
+.td-acts{justify-content:flex-end;margin-bottom:12px}
+.td-acts [data-td="remind-all"],.td-gap{margin-right:14px}
+.td-gap{visibility:hidden;border:1px solid transparent;padding:7px 12px}   /* Remind all's place when it is not there, as large as the button */
 .td-day{margin:0 0 12px}
 .td-counts{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
 .counter{display:flex;flex-direction:column;gap:2px;border:1px solid var(--line);border-radius:10px;padding:6px 12px;background:var(--panel);min-width:112px}
@@ -153,6 +157,7 @@ table.rtable th.num,table.rtable td.num{text-align:right;white-space:nowrap}
 .ld-one h3{margin:0 0 2px}
 tr.ld-wait td{background:#fffaf0}
 /* Weekly summary (the relief team) */
+.sm .ab-top{margin-bottom:12px}
 .sm-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .sm-nav h2{margin:0}
 .sm-nav h2:focus{outline:none}
@@ -189,7 +194,7 @@ table.sm-table{min-width:620px}
   .td-acts{justify-content:flex-start}}
 @media (max-width:640px){.relief{padding:12px}.seg{display:flex}.seg button{flex:1 1 auto;padding:7px 8px}.bar .grow{display:none}
   .cand{grid-template-columns:auto auto minmax(0,1fr)}.cand .cand-who{grid-column:1 / -1}.cand button,.cand .chip{justify-self:end}
-  .counter{min-width:0;flex:1 1 40%}.td-day .seg{flex:1 1 100%}}
+  .counter{min-width:0;flex:1 1 40%}.td-day .seg{flex:1 1 100%}.sm-facts{gap:8px}.sm-facts>div{display:block}}
 </style>
 </head>
 <body>

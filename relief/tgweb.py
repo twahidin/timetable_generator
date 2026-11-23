@@ -142,13 +142,14 @@ def status():
 @bp.post("/api/relief/telegram/code")
 @need("relief")
 def code():
-    """a one-time code for whoever is signed in, for themselves only"""
+    """a one-time code for whoever is signed in, for themselves only, and the address that opens the bot with it: in practice mode
+    the word practice, which is none (there is no bot, and a bot of that name may be anybody's): the page shows the code alone"""
     name, err = _mine()
     if err: return err
     b = links.connected()
     if b is None: return {"error": NOT_CONNECTED}, 409
     c = links.new_code(name)
-    return jsonify(code=c["code"], url=f"https://t.me/{b['username']}?start={c['code']}", until=c["until"])
+    return jsonify(code=c["code"], url="practice" if tg.practice() else f"https://t.me/{b['username']}?start={c['code']}", until=c["until"])
 
 
 @bp.delete("/api/relief/telegram/link")

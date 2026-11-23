@@ -216,9 +216,9 @@ the token off the second copy and press **Connect again** on the one the school 
 
 Set `TELEGRAM_BOT_TOKEN=practice` (with `SECRET_KEY` and `RELIEF_JOBS=on`) on a copy for trying things, such as a local
 run. The card says "Practice mode: nothing is sent to Telegram." and everything else goes on as if it were: the messages
-are made, queued and marked as sent. Never on the copy the school uses: it would look as if people had been told. Do not
-press **Open the bot** there: the bot it opens ("practice_bot") is not the school's and may be a stranger's. With a real
-token afterwards, press **Connect the bot** once more.
+are made, queued and marked as sent. Never on the copy the school uses: it would look as if people had been told. There is
+no bot to open then, so **Link Telegram** shows the code alone, without **Open the bot**. With a real token afterwards,
+press **Connect the bot** once more.
 
 ## What leaves the server
 

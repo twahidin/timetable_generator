@@ -15,7 +15,8 @@
    lesson share a cover key).
    While the bot is connected (telegram in the answer; nothing of this shows while it is not): an approved row says what was sent
    on Telegram (told) or that its teacher is not there (linked); Remind on a row, for whoever can be reached, and Remind all not
-   acknowledged at the top, which answers above the rows (only while the day they were pressed on is shown). While a row says
+   acknowledged, first of the buttons at the top (its place is kept when it is not there, so that no other button moves under the
+   pointer), which answers above the rows (both only while the day they were pressed on is shown). While a row says
    "Being sent…" the day is read again every 3 seconds, 5 times at most, only on screen; so it is for a row a step was taken on here,
    until its teacher is told (a message is made after the step that asks for it). What came of it is said in a live line of its own
    too (tdSaid, not seen). */
@@ -26,11 +27,11 @@
   const READS = 5;   /* how often the day is read again by itself for what is being sent */
   /* top: the lines above the rows ({text, bad, fill}); msg: a line beside a row (row key -> {text, bad}); busy: rows with
      a step on its way; all: Approve all, Fill now or Remind all on its way; open: the row whose "free then" list is open, free: each
-     list's answer; split: the row whose split choice is open; follow: the rows a step was taken on whose teacher is
-     not told yet; reads: how often the day was read again for what is being sent; said: what came of that; lines, acts: the lines
-     above the rows and the buttons at the top as drawn */
+     list's answer; split: the row whose split choice is open; bot: a bot was connected when the day was last read; follow: the rows a
+     step was taken on whose teacher is not told yet; reads: how often the day was read again for what is being sent; said: what came
+     of that; lines, acts: the lines above the rows and the buttons at the top as drawn */
   const T = { pane: null, date: "", data: null, err: null, seq: 0, loading: false, timer: 0, wait: 0, top: [], msg: new Map(),
-              busy: new Set(), all: false, open: null, free: new Map(), split: null, follow: new Set(), reads: 0, said: "", lines: "", acts: "" };
+              busy: new Set(), all: false, open: null, free: new Map(), split: null, bot: false, follow: new Set(), reads: 0, said: "", lines: "", acts: "" };
 
   const rid = r => r.id + "\n" + r.ckey;
   const rows = () => (T.data && Array.isArray(T.data.rows) ? T.data.rows : []);
@@ -175,10 +176,10 @@
 
   function paintActs() {
     const c = (T.data && T.data.counts) || {}, w = Number(c.waiting) || 0, off = !T.data || past() || T.all;
-    const all = toRemind().length ? `
-      <button type="button" data-td="remind-all"${off || T.busy.size ? " disabled" : ""}>Remind all not acknowledged</button>` : "";
-    const html = `<button type="button" class="primary" data-td="all"${off || !w ? " disabled" : ""}>${esc(w ? `Approve all ${w} waiting` : "Approve all waiting")}</button>
-      <button type="button" data-td="fill"${off ? " disabled" : ""}>Fill now</button>${all}
+    const all = "Remind all not acknowledged";
+    const first = toRemind().length ? `<button type="button" data-td="remind-all"${off || T.busy.size ? " disabled" : ""}>${all}</button> ` : T.bot ? `<span class="td-gap" aria-hidden="true">${all}</span> ` : "";
+    const html = `${first}<button type="button" class="primary" data-td="all"${off || !w ? " disabled" : ""}>${esc(w ? `Approve all ${w} waiting` : "Approve all waiting")}</button>
+      <button type="button" data-td="fill"${off ? " disabled" : ""}>Fill now</button>
       <button type="button" class="small" data-td="reload"${T.loading ? " disabled" : ""}>${T.loading ? "Reading…" : "Refresh"}</button>`;
     if (html === T.acts) return;
     const box = $("#tdActs", T.pane), a = document.activeElement, had = a && box.contains(a) ? a.dataset.td : "";
@@ -254,7 +255,7 @@
     if (!res.ok) { T.err = { text: res.error, bad: true, status: res.status }; paint(); return; }   /* no more fetches until Try again */
     const same = quiet && !T.err && T.data && JSON.stringify(T.data) === JSON.stringify(res.data);
     const was = new Set(rows().filter(isComing).map(rid));
-    T.err = null; T.data = res.data;
+    T.err = null; T.data = res.data; T.bot = bot();
     T.said = !bot() ? "" : rows().filter(r => was.has(rid(r)) && r.state === "approved" && !isComing(r)).map(r => `${r.pick ? `${r.pick.who}, ` : ""}${lessonName(r)}: ${told(r)}`).join(". ");
     for (const k of [...T.follow]) { const r = findRow(k); if (!r || r.state !== "approved" || !untold(r)) T.follow.delete(k); }
     for (const [k, m] of [...T.msg]) if (!findRow(k)) { T.msg.delete(k); T.top.push(m); }   /* its row is gone (split, joined): said above the rows */
@@ -350,8 +351,10 @@
     if (!res.ok) T.top = [{ text: res.error, bad: true, status: res.status }];
     else {
       list.forEach(r => T.follow.add(rid(r)));
-      T.top = [{ text: `Reminded ${Number(res.data && res.data.sent) || 0}.`, bad: false }];
+      const n = Number(res.data && res.data.sent) || 0;
+      T.top = n ? [{ text: `Reminded ${n}.`, bad: false }] : [];
       for (const s of notSent(res.data)) if (s.name || !T.top.some(m => m.text === s.why)) T.top.push({ text: s.name ? `${s.name}: ${s.why}` : s.why, bad: true });   /* a reason with no name is said once */
+      if (!T.top.length) T.top = [{ text: "Nobody to remind.", bad: true }];
     }
     await load();
     if (R.cur === "today" && (!document.activeElement || document.activeElement === document.body)) focusAct("remind-all", "reload");

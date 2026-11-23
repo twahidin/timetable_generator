@@ -131,7 +131,13 @@ Tasks 7 to 10:
   what is so. If wrong: copy.
 - 9b. The link code goes from the page when the person is signed out or the page is left. If wrong: small.
 - 9c. The fix round's seven choices accepted. If wrong: copy.
+- 9d. From the browser check: "Open the bot" is the main button of the card; "Remind all not acknowledged" comes first in its row and
+  its place is kept, so that nothing moves under the pointer; "Nobody to remind." in place of "Reminded 0."; room on Today and the
+  weekly page. If wrong: copy and layout.
+- 9e. The report says "sent 06:45 · not on Telegram now" of somebody told before and not reached any more. If wrong: copy.
 - 10a. "Sent at {at}: wait a few minutes." in place of "Reminded at ...", since it is said after the relief itself too. If wrong: copy.
+- 10b. Practice mode shows no address of a bot (the code alone); Relief settings' line on the reporting officer says when they are told.
+  If wrong: copy.
 
 ## Copy the lead should see (differs from the mockups or the design, or is new)
 
@@ -145,8 +151,8 @@ Tasks 7 to 10:
 - Request to change: "Say why in one line. Until the relief team replies, this relief is still yours."; to the team "New pick:" (not
   "AI's new pick:", since it may be the app's own order), with the day. With nobody free: "Nobody else is free then: choose someone in
   the app."; no pick after two minutes: "No new pick yet: open the app."
-- The report: no "(25 min ago)"; "sent Mon 15:00" when it was another day, "not told yet", "not on Telegram". It starts an hour before
-  the first period (the mockup: from the first relief sent).
+- The report: no "(25 min ago)"; "sent Mon 15:00" when it was another day, "not told yet", "not on Telegram", "sent 06:45 · not on
+  Telegram now". It starts an hour before the first period (the mockup: from the first relief sent).
 - The all clear: "The 1 relief for today is acknowledged."; "No reliefs are waiting now: {k} started without acknowledgement."
 - The weekly summary: "· waiting {n}" when some still wait; the Flexi Adjunct line only with that role.
 - The officer: "{absent} is away on {days} ({whole day or periods}): {kind}." and "Relief is being arranged." (only when a lesson is
@@ -164,7 +170,8 @@ Tasks 7 to 10:
   "Could not be sent: remind them", "Not on Telegram: they see it in Reliefs I'm covering", and on a past date "Not sent", "May not
   have been sent", "Could not be sent". Remind: "Reminded.", "Reminded {n}.", "Sent at {hh:mm}: wait a few minutes.", "Nobody to
   remind.", "Not on Telegram."
-- Relief settings: the card has no "Print code slips" (the mockup did): codes are not used for linking.
+- Relief settings: the card has no "Print code slips" (the mockup did): codes are not used for linking. The reporting officer "Is told
+  on Telegram, when they have linked it, when someone who names them asks for relief."
 
 ## Meeting exams
 
@@ -206,9 +213,10 @@ Tasks 7 to 10:
   `test_admin` 18, `test_ask` 49, `test_board` 58, `test_choices` 16, `test_combined` 38, `test_compare` 21, `test_exams` 189,
   `test_fixes` 65, `test_helper` 20, `test_history` 27, `test_history_draft` 9, `test_parents` 35, `test_rules` 11,
   `test_signin` 24, `test_sync` 32, `test_teachers` 9, `test_typed` 33, `test_venues` 4, `test_verify` 56, `test_versions` 44.
-  Right after the merge of main the first seven passed too (`test_relief_telegram` 289 then).
+  Right after the merge of main the first seven passed too (`test_relief_telegram` 289 then). After Task 9's second fix round
+  `test_relief_telegram`, `test_relief_team`, `test_routes` and `smoke` passed again, with the same numbers.
 - Every `tests/*.test.js` passes (ask 12, board 67, choices 13, classview 18, draft 25, exams, grid 14, groups 33, map 26, parents 46,
-  people 31, relief_inbox 3, relief_settings 21, relief_summary 10, relief_telegram 35, relief_today 36, split 189, subjectview 15,
+  people 31, relief_inbox 3, relief_settings 22, relief_summary 11, relief_telegram 36, relief_today 39, split 189, subjectview 15,
   sync 17, teacherview 8, timetable_page 7, venueview 24).
 - The slow runs, each alone: `smoke --full` 103, `test_combined --full` 39, `test_fixes --full` 67, all passing. `test_typed
   --full` and `test_helper --full` failed as they are, while other work kept the Mac's load at 10 to 33: their 30-second solve
@@ -221,7 +229,7 @@ Tasks 7 to 10:
   or shown to make no difference): Task 2: 50 of 51, 17 of 19, 22 of 24. Task 3: 97 of 106, 20 of 21, 61 of 65. Task 4: 117 of 140, 30
   of 32, 16 of 16, 56 of 60. Task 4b: 35 of 38, 13 of 14. Task 5: 78 of 81, 15 of 15, 47 of 48, 9 of 9, 35 of 38. Task 6: 106 of 117,
   21 of 21, 46 of 51. Task 6b: 36 of 36, 14 of 14, 31 of 31. Task 7: 91 of 92; then the page 35 of 41 and the server 9 of 10. Task 8:
-  136 of 144, 60 of 61. Task 9: 492 of 529 and 14 of 14, then 184 of 206.
+  136 of 144, 60 of 61. Task 9: 492 of 529 and 14 of 14, then 184 of 206, then 66 of 68.
 - Random and killed runs: the sender killed at each of its steps for six kinds of answers (258 kills) and by a real kill signal (75
   kills, about 400 messages each round): never a message or a file twice. `/relief`: 10,100 random steps one at a time and 1,540 rounds
   of 3 to 8 things at once, with the lock and, as for two copies of the app, without: never two absences, two entries or two "Sent";
@@ -291,10 +299,8 @@ The pages:
   visibility handler (no way found for it to matter).
 - Another person signed in in a second tab: the first tab then shows the second person's link (page-wide, older than this stage).
 - A code asked for in a second tab ends the first tab's; Cancel only closes the card, and the code stays good until it runs out.
-- In practice mode **Open the bot** is a link to "practice_bot", which may be a stranger's bot (the guide says not to press it).
 - Remind on a lesson that is over answers "Nobody to remind."; the app has no dark mode to follow.
 - "Open the full summary" and "Open in the app" go through the sign-in page when nobody is signed in, and do not come back to the tab.
-- Relief settings says of the reporting officer "Is told when someone who names them asks for relief.": true only for one who is linked.
 
 Small things in the code: the bot's practice name is written twice, `tgweb.need` repeats `web.need`, `_noted` is in two modules,
 `tell.APPROVED` is also `web.APPROVED`, `_taken_over` matches a sentence of `absences.py`, `cover.acknowledge` is called by tests alone,
@@ -308,7 +314,7 @@ record when it goes, some test lines are long. `tests/test_relief_requests.py` m
 2. Work files go through Telegram with the relief. Keep, or "open in the app" for files?
 3. The reporting officer's message holds the kind of reason, Medical and Child sick among them. Keep, or leave the kind out?
 4. Reporting officers who are not on Telegram are told nothing by the app (`/relief` tells the asker so; the app's own form does not).
-   Should the form say so, and should Relief settings' line change?
+   Should the form say so?
 5. `/relief`: one message a lesson, so a text and then a file go to two lessons. A Next button would mend it, at one more tap a lesson.
    Wanted?
 6. Cancelling on Telegram takes a typed line and a second press, where the mockup took one. Keep?

@@ -22,8 +22,8 @@ while an absence, or a lesson or cover of today in one, cannot be read (what can
 While the exams, or today in them, cannot be read (tell.known) no lesson counts as stopped, nothing is said to have started and
 there is no all clear: one may be stopped.
 
-A line says when the teacher was told (tell.Said; the day too, when it was not today), or that they have not been, or are not on
-Telegram; never why anyone is away.
+A line says when the teacher was told (tell.Said; the day too, when it was not today) and, when they cannot be reached any more, that
+they are not on Telegram now; or that they have not been told, or are not on Telegram; never why anyone is away.
 Both messages are dropped when they are OLD, when one of a later mark is there for that person (an old one never follows a newer),
 or when their person is not on the team any more (tell.CHECKS).
 
@@ -136,10 +136,12 @@ def _starts(c, bnds):
 
 
 def _how(w, who, key):
-    """when the relief's teacher was told of it (the day too, when not today), or that they have not been"""
-    at = w.said.sent_at(key)
-    if at: return f"sent {at:%H:%M}" if at.date() == w.now.date() else f"sent {at:%a %H:%M}"
-    return "not told yet" if who in w.reach else "not on Telegram"
+    """when the relief's teacher was told of it (the day too, when not today), and whether they can be reached still; or that they
+    have not been told"""
+    at, reached = w.said.sent_at(key), who in w.reach
+    if not at: return "not told yet" if reached else "not on Telegram"
+    sent = f"sent {at:%H:%M}" if at.date() == w.now.date() else f"sent {at:%a %H:%M}"
+    return sent if reached else f"{sent} · not on Telegram now"
 
 
 def _records():

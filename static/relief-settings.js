@@ -148,7 +148,7 @@
       ${setting("Flexi Adjunct Teachers", "", fatRole())}
       ${setting("Relief rules", `<span>The AI follows these in order and quotes them in its reasons.</span>`, rules())}
       ${setting("Checked limits", `<span>The app checks these itself.</span>`, limits())}
-      ${setting("Reporting officer", "", `Is told when someone who names them asks for relief.`)}
+      ${setting("Reporting officer", "", `Is told on Telegram, when they have linked it, when someone who names them asks for relief.`)}
       ${setting("Times", "", times())}
       ${setting("School calendar", `<span>So the app knows which day of the timetable each date is.</span>`, calendar())}
       ${d.can_codes ? setting("Personal codes", "", codes()) : ""}

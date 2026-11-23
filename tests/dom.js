@@ -180,6 +180,14 @@ function later() {
   return { answer, give: (status, data) => done({ status, data }), fail: () => done(new Error("nobody answers")) };
 }
 
+/* what the rules of static/{file} (a page's own <style>, or style.css) say of a selector, as written; within: of those in the @media that starts so */
+function css(file, sel, within = "") {
+  const text = read(file), style = (file.endsWith(".css") ? text : /<style>([\s\S]*?)<\/style>/.exec(text)[1]).replace(/\/\*[\s\S]*?\*\//g, "");
+  const media = [], plain = style.replace(/@media ([^{]+)\{((?:[^{}]*\{[^}]*\})*)\s*\}/g, (_, q, rules) => { media.push([q.trim(), rules]); return ""; });
+  const of = rules => [...rules.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(m => m[1].split(",").some(x => x.trim() === sel)).map(m => m[2].trim()).join(";");
+  return of(within ? media.filter(m => m[0].startsWith(within)).map(m => m[1]).join("\n") : plain);
+}
+
 /* every [name, f] of all, one by one; one that waits for an answer nobody gives is a failure too */
 function run(all) {
   let now = "", n = 0;
@@ -195,4 +203,4 @@ function run(all) {
   })().catch(e => { console.error(`${now}:`); console.error(e); now = ""; process.exit(1); });
 }
 
-module.exports = { open, later, run, read };
+module.exports = { open, later, run, read, css };
