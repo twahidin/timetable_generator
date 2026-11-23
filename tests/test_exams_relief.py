@@ -1195,6 +1195,13 @@ NOT_ON = "This lesson is not happening: %s." % STOP
 ST = RS.load(PUB)
 DEC = "2026-12-01T08:00:00+08:00"
 
+@contextlib.contextmanager
+def _lesson_morning():
+    """absences' clock at 07:00 on MON, the lessons' own day: a relief sent out before then has reached its teacher by then"""
+    real = AB._now; AB._now = lambda: f"{ISO}T07:00:00+08:00"
+    try: yield
+    finally: AB._now = real
+
 def _plan(teacher, key=None, relief=None, links=None, periods=None):
     """a planned absence on MON sent by Grace, with the planner's choice for one lesson"""
     lessons = [dict(key=key, relief=relief)] if relief else []
@@ -1332,7 +1339,7 @@ def own_absence_takes_over_the_whole_cover():
         _send_approve(committee(), id)
         b = _backups(id)[0]["id"]
         CV.set_pick(b, DKEY, _pk(CHLOE), PUB, ST, links=_links())
-        CV.approve(b, DKEY, CHLOE, GRACE, PUB, ST, links=_links())
+        CV.approve(b, DKEY, CHLOE, GRACE, PUB, ST, links=_links()); CV.send_out(b, DKEY, CHLOE, GRACE, PUB, ST, links=_links())
         CV.acknowledge(b, DKEY, CHLOE)
         was = _cov(b, DKEY)[2]
         r = AB.new(dict(teacher=DANIEL, dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[]), PUB, DANIEL, "asked", links=_links())
@@ -1342,7 +1349,7 @@ def own_absence_takes_over_the_whole_cover():
         assert AB.load(b)["cancelled"] and AB.load(b)["lessons"] == []
         FL.run(ids=[r["id"]], now=DEC)
         assert _cov(r["id"], DKEY)[2]["relief"] == CHLOE
-        mine = ok(staff(CHLOE).get("/api/relief/covering"))["covers"]
+        with _lesson_morning(): mine = ok(staff(CHLOE).get("/api/relief/covering"))["covers"]
         assert [(v["id"], v["ckey"], v["state"]) for v in mine] == [(r["id"], DKEY, "acknowledged")], mine
 
 @t
@@ -1515,6 +1522,7 @@ def todays_page_and_the_lists_show_a_stopped_lesson():
         team = _relief_team()
         got = ok(team.get("/api/relief/today?date=" + ISO))
         assert (got["counts"]["need"], got["counts"]["approved"], got["counts"]["unsent"], got["counts"]["open"]) == (2, 0, 1, 1), got["counts"]   # approved, not sent out
+        CV.send_out(i, CKEY, HAFIZ, GRACE, PUB, ST)
         _exam(duty_names=(IVAN,))
         got = ok(team.get("/api/relief/today?date=" + ISO))
         row = next(v for v in got["rows"] if v["ckey"] == CKEY)
@@ -1525,7 +1533,7 @@ def todays_page_and_the_lists_show_a_stopped_lesson():
         assert r.status_code == 400 and r.get_json()["error"] == NOT_ON, r.get_json()
         free = team.get("/api/relief/absences/%s/covers/%s/free" % (i, urllib.parse.quote(CKEY)))
         assert free.status_code == 400 and free.get_json()["error"] == NOT_ON, free.get_json()
-        mine = ok(staff(HAFIZ).get("/api/relief/covering"))["covers"]
+        with _lesson_morning(): mine = ok(staff(HAFIZ).get("/api/relief/covering"))["covers"]
         assert [(v["ckey"], v["state"], v["stopped"]) for v in mine] == [(CKEY, "approved", STOP)], mine
         rows = {r["id"]: r for r in ok(team.get("/api/relief/absences"))["absences"]}
         assert rows[i]["cover"] == dict(total=0, approved=0, waiting=0, open=0), rows[i]["cover"]
@@ -1905,12 +1913,12 @@ def a_takeover_keeps_the_relief_of_a_lesson_stopped_by_then():
         id = _made_exam([_duty([DANIEL])])["id"]
         _send_approve(committee(), id)
         b = _backups(id)[0]["id"]
-        CV.change(b, DKEY, CHLOE, GRACE, PUB, ST, links=_links())
+        CV.change(b, DKEY, CHLOE, GRACE, PUB, ST, links=_links()); CV.send_out(b, DKEY, CHLOE, GRACE, PUB, ST, links=_links())
         ev = _event()                                                   # saved as approved, with no sync: 4A is on it, and the backup still holds the lesson
         r = AB.new(dict(teacher=DANIEL, dates=[ISO], reason="Medical", reporting_officer=GRACE, lessons=[]), PUB, DANIEL, "asked", links=_links())
         assert r["lessons"][0]["needed"] is True and CV.state(*_cov(r["id"], DKEY)) == "approved" and _links().stopped(AB.load(r["id"])["lessons"][0])
         _withdraw(ev["id"])
-        mine = ok(staff(CHLOE).get("/api/relief/covering"))["covers"]
+        with _lesson_morning(): mine = ok(staff(CHLOE).get("/api/relief/covering"))["covers"]
         assert [(v["ckey"], v["state"], v["stopped"]) for v in mine] == [(DKEY, "approved", "")], "the relief stands again"
         _fresh()
         id = _made_exam([_duty([DANIEL])])["id"]
@@ -2000,22 +2008,23 @@ def the_relief_teachers_steps_and_keep_refuse_a_stopped_lesson():
     _fresh()
     with published(PUB):
         i = _plan(CHLOE)["id"]
-        CV.change(i, CKEY, HAFIZ, GRACE, PUB, ST)
+        CV.change(i, CKEY, HAFIZ, GRACE, PUB, ST); CV.send_out(i, CKEY, HAFIZ, GRACE, PUB, ST)
         e = _exam(duty_names=(IVAN,))
         h, url = staff(HAFIZ), "/api/relief/absences/%s/covers/%s/" % (i, urllib.parse.quote(CKEY))
-        for r in (h.post(url + "acknowledge", json={}), h.post(url + "ask-change", json=dict(why="A meeting"))):
+        with _lesson_morning():                                          # sent out: it has reached Mr Hafiz by the lesson's own morning
+            for r in (h.post(url + "acknowledge", json={}), h.post(url + "ask-change", json=dict(why="A meeting"))):
+                assert r.status_code == 400 and r.get_json()["error"] == NOT_ON, r.get_json()
+            assert CV.state(*_cov(i, CKEY)) == "approved"
+            r = staff(BEN).post(url + "acknowledge", json={})
+            assert r.status_code == 403 and r.get_json()["error"] == CV.NOT_YOURS_COVER, "someone else is told nothing about it"
+            _withdraw(e["id"])
+            ok(h.post(url + "ask-change", json=dict(why="A meeting")))
+            _approve(SC.load(e["id"]), "approved")
+            r = _relief_team().post(url + "keep", json={})
             assert r.status_code == 400 and r.get_json()["error"] == NOT_ON, r.get_json()
-        assert CV.state(*_cov(i, CKEY)) == "approved"
-        r = staff(BEN).post(url + "acknowledge", json={})
-        assert r.status_code == 403 and r.get_json()["error"] == CV.NOT_YOURS_COVER, "someone else is told nothing about it"
-        _withdraw(e["id"])
-        ok(h.post(url + "ask-change", json=dict(why="A meeting")))
-        _approve(SC.load(e["id"]), "approved")
-        r = _relief_team().post(url + "keep", json={})
-        assert r.status_code == 400 and r.get_json()["error"] == NOT_ON, r.get_json()
-        _withdraw(e["id"])
-        ok(_relief_team().post(url + "keep", json={}))
-        ok(h.post(url + "acknowledge", json={}))
+            _withdraw(e["id"])
+            ok(_relief_team().post(url + "keep", json={}))
+            ok(h.post(url + "acknowledge", json={}))
         assert CV.state(*_cov(i, CKEY)) == "acknowledged"
 
 @t

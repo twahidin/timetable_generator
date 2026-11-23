@@ -441,9 +441,10 @@ def _relief(w, r, x, c, ckey):
                 _answers(r, x, ckey, who), [dict(id=r["id"], file=f["id"], name=f["name"]) for f in work.get("files") or []], ref)
 
 
-def relief_item(pub, reach, told, r, x, c, ckey):
-    """the relief message of an approved cover, as outbox.queue takes it, or None (its teacher cannot be reached)"""
-    w = types.SimpleNamespace(pub=pub, reach=reach, told=told, bnds=bounds((pub or {}).get("model") or {}))
+def relief_item(pub, reach, told, r, x, c, ckey, base=""):
+    """the relief message of an approved cover, as outbox.queue takes it, or None (its teacher cannot be reached); base: the app's
+    address, as the sweep has it"""
+    w = types.SimpleNamespace(pub=pub, reach=reach, told=told, bnds=bounds((pub or {}).get("model") or {}), base=base or "")
     return next(_relief(w, r, x, c, ckey), None)
 
 

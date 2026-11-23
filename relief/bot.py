@@ -25,9 +25,10 @@ refusals, and the same history entry and what follows it (web.step_saved), by th
 is pressed (_button): its token is in the table and has not run out (OLD_BUTTON), the chat is of the very person it was sent to
 and they have the right it needs now (NOT_YOURS_BUTTON; ACTIONS); a chat of nobody there gets NOT_LINKED, counted as above. A
 cover that is not in its absence any more is looked for by its absent teacher (_cover_of). Done, the message it was on loses its
-buttons and gains a line of what was done and when. Refused in the app's own words, whether at the press or when its why was
-typed, it loses them too and gains that sentence, for pressing again cannot help; unless it can (_acted: STAYS, and what the kind
-has in ACTIONS: a lesson an exam or event stops may be on again before anybody is told that it was not). It stays as it is for a
+buttons and gains a line of what was done and when; after Approve it gains one button, Send out (as the page, Approve tells nobody).
+Acknowledge and Request to change are the relief teacher's only once the relief has reached them (web._reached). Refused in the
+app's own words, whether at the press or when its why was typed, it loses them too and gains that sentence, for pressing again
+cannot help; unless it can (_acted: STAYS, and what the kind has in ACTIONS: a lesson an exam or event stops may be on again before anybody is told that it was not). It stays as it is for a
 button that may not be pressed (_button) and for WENT_WRONG. Acknowledge pressed again says the same and saves nothing. Remind
 them again (relief/report.py: the reliefs its report listed, its extra) never changes the report: whoever could not be reminded, it
 can be pressed again later.
@@ -53,11 +54,12 @@ failure there changes nothing of what was done; one that comes before anything w
 import collections, datetime, json, logging, math, re, secrets, threading, types
 
 import store
+from accounts import people as _accounts
 from relief import absences as _absences
 from relief import cover as _cover
 from relief import fill as _fill
 from relief import lessons as _lessons
-from relief import links, tell, tg, tgdb
+from relief import links, outbox, tell, tg, tgdb
 from relief import report as _report
 from relief import settings as _settings
 from relief import web as _web
@@ -103,9 +105,10 @@ _pressing = threading.Lock()
 _note = None
 # what a press or a line comes to: what is answered (an alert: the person has to close it), the line its message gains, losing
 # its buttons, the same of the message its talk began at (also: that message, the line), the talk opened (its question is to be
-# asked), what follows (the history entry and the rest), called with nothing held, what is said before its question (first), and
-# what is done once all this is (then)
-_Out = collections.namedtuple("_Out", "text alert line also talk after first then", defaults=(None, False, None, None, None, None, None, None))
+# asked), what follows (the history entry and the rest), called with nothing held, what is said before its question (first),
+# what is done once all this is (then), and the buttons its message gains in place of those it had (rows: Telegram's inline
+# keyboard, outbox.keep_buttons)
+_Out = collections.namedtuple("_Out", "text alert line also talk after first then rows", defaults=(None, False, None, None, None, None, None, None, None))
 
 
 def init(note):
@@ -257,7 +260,7 @@ def _press(q):
     lost = out.talk is not None and not _ask(chat, out.talk)
     _answer(q, WENT_WRONG if lost else out.text, lost or out.alert)
     if lost: _end(chat, out.talk)                # what is typed next is not the answer to a question that may not have come
-    if out.line: _settle(chat, message, out.line)
+    if out.line: _settle(chat, message, out.line, out.rows)
     if out.also: _settle(chat, *out.also)
     if out.then: out.then()
 
@@ -316,13 +319,15 @@ def _answer(q, text, alert):
     tg.call("answerCallbackQuery", params, timeout=TIMEOUT)
 
 
-def _settle(chat, message, line):
-    """the message a button was on: its text and line, with no buttons; when Telegram does not do it, nothing more"""
+def _settle(chat, message, line, rows=None):
+    """the message a button was on: its text and line, with no buttons but rows (Telegram's inline keyboard) when given; when
+    Telegram does not do it, nothing more"""
     n, text = message["id"], message["text"]
     if n is None: return
-    if text is None: tg.call("editMessageReplyMarkup", dict(chat_id=chat, message_id=n), timeout=TIMEOUT)       # too old for its text
+    keys = dict(reply_markup=dict(inline_keyboard=rows)) if rows else {}
+    if text is None: tg.call("editMessageReplyMarkup", dict(chat_id=chat, message_id=n, **keys), timeout=TIMEOUT)       # too old for its text
     elif not text.endswith(line):                # it is there when it was pressed again
-        tg.call("editMessageText", dict(chat_id=chat, message_id=n, text=f"{text[:TEXT_MOST - len(line) - 2]}\n\n{line}", disable_web_page_preview=True), timeout=TIMEOUT)
+        tg.call("editMessageText", dict(chat_id=chat, message_id=n, text=f"{text[:TEXT_MOST - len(line) - 2]}\n\n{line}", disable_web_page_preview=True, **keys), timeout=TIMEOUT)
 
 
 def _button(chat, token):
@@ -360,10 +365,10 @@ def _cover_of(b):
     return min(got, key=lambda v: _cover.state(*v) not in _web.APPROVED)
 
 
-def _theirs(b):
-    """_cover_of, while it is the relief of the button's person, else the page's answer"""
+def _theirs(b, reached):
+    """_cover_of, while it is the relief of the button's person and has reached them (reached: web._reached), else the page's answer"""
     got = _cover_of(b)
-    _cover._mine(*got, b["name"])
+    _cover._mine(*got, b["name"], reached)
     return got
 
 
@@ -378,22 +383,41 @@ def _exams(pub):
 
 def _ack(p):
     b, pub = p.button, _published()
-    r, x, c = _theirs(b)
+    reached = _web._reached(pub)
+    r, x, c = _theirs(b, reached)
     t = _talk(p.chat)                            # a request to change this very cover that waits for its why is over
     if t and t["kind"] == "change" and (t["d"].get("absent"), t["d"].get("ckey")) == (b["extra"].get("absent"), b["ckey"]): _end(p.chat, t)
     first = False
-    if _cover.state(r, x, c) != "acknowledged": r, first = _cover.acknowledge_once(r["id"], b["ckey"], b["name"], links=_exams(pub))
+    if _cover.state(r, x, c) != "acknowledged": r, first = _cover.acknowledge_once(r["id"], b["ckey"], b["name"], links=_exams(pub), reached=reached)
     line = f"✅ Acknowledged {_hm(_cover.find(r, b['ckey'])[1]['ack']['at'])}."
     return _Out(line, line=line, after=_after("ack", r, b, pub) if first else None)
 
 
 def _approve(p):
+    """as the page's Approve; the message gains the button that sends it out (as the page's Send out: Approve tells nobody)"""
     b, pub = p.button, _published()
     r, x, c = _cover_of(b)
     settings = _settings.load(pub)
     r = _cover.approve(r["id"], b["ckey"], b["who"], b["name"], pub, settings, links=_web._links_or_none(pub, settings["calendar"]))
-    line = f"✅ Approved: {b['who']}, {_hm(_cover.find(r, b['ckey'])[1]['approved']['at'])}."
-    return _Out(line, line=line, after=_after("approve", r, b, pub))
+    x, c = _cover.find(r, b["ckey"])
+    line = f"✅ Approved: {b['who']}, {_hm(c['approved']['at'])}."
+    short = next((q.get("short") for q in _accounts.staff(pub) if q["name"] == b["who"]), None) or b["who"]
+    rows = outbox.keep_buttons(b["name"], [[dict(text=f"📤 Send out to {short}", what="sendout", id=r["id"], ckey=b["ckey"], who=b["who"],
+                                                 extra=dict(absent=r["teacher"], date=x["date"], approved_at=c["approved"]["at"]))]])
+    return _Out(line, line=line, after=_after("approve", r, b, pub), rows=rows)
+
+
+def _send_out(p):
+    """as the page's Send out, for the approval the button was made with: at once in school hours, else when it will go"""
+    b, pub = p.button, _published()
+    r, x, c = _cover_of(b)
+    settings = _settings.load(pub)
+    r = _cover.send_out(r["id"], b["ckey"], b["who"], b["name"], pub, settings, links=_web._links_or_none(pub, settings["calendar"]),
+                        approved_at=b["extra"].get("approved_at"))
+    x, c = _cover.find(r, b["ckey"])
+    at, goes = c["sent_out"]["at"], _cover.goes_at(c, x, settings, pub)
+    line = f"📤 Sent out: {b['who']}, {_hm(at)}." + (f" Will be sent at {_hm(goes)}." if goes is not None and goes > _fill._when(at) else "")
+    return _Out(line, line=line, after=_after("sendout", r, b, pub))
 
 
 def _remind(p):
@@ -408,7 +432,7 @@ def _remind(p):
 def _ask_change(p):
     """what the page would refuse whatever the why is refused at once; nothing is saved"""
     pub = _published()
-    r, x, c = _theirs(p.button)
+    r, x, c = _theirs(p.button, _web._reached(pub))
     _absences._past(x)
     _cover._happens(_exams(pub), x)
     if _cover.state(r, x, c) == "change": raise ValueError(_cover.ASKED_ALREADY)
@@ -417,10 +441,11 @@ def _ask_change(p):
 
 def _change(chat, b, why, talk):
     pub = _published()
-    r, x, c = _theirs(b)
+    reached = _web._reached(pub)
+    r, x, c = _theirs(b, reached)
     began = talk["until"] - TALK_MINUTES * 60    # when its question was first asked
     if c.get("ack") and _fill._when(c["ack"]["at"]).timestamp() > began: raise ValueError(_absences.ACKED)        # on the page, since
-    r = _cover.ask_change(r["id"], b["ckey"], why, b["name"], links=_exams(pub))
+    r = _cover.ask_change(r["id"], b["ckey"], why, b["name"], links=_exams(pub), reached=reached)
     return _Out(SENT_CHANGE, line=f"↩ Asked to change {_hm(_cover.find(r, b['ckey'])[1]['change']['at'])}.", after=_after("change", r, b, pub))
 
 
@@ -616,6 +641,7 @@ def _asked_for(p):
 ACTIONS = {"ack": ("relief", _ack, (_cover.NOT_HAPPENING,)), "change": ("relief", _ask_change, (_cover.NOT_HAPPENING,)),
            "cancel": ("relief", _ask_cancel, ()), "keep": ("relief", _keep, (OLD_BUTTON,)),
            "cancel-yes": ("relief", _yes, (OLD_BUTTON,)), "approve": ("relief.team", _approve, (_cover.PICK_CHANGED, _cover.NOT_FREE, _cover.NOT_HAPPENING)),
+           "sendout": ("relief.team", _send_out, (_cover.PICK_CHANGED, _cover.NOT_FREE_OUT, _cover.NOT_HAPPENING)),
            "remind": ("relief.team", _remind, ANY), ASK: ("relief", _asked_for, ANY)}
 # what the why typed in a talk comes to, by its kind: f(chat, the button, why, talk) -> _Out
 TALKS = dict(change=_change, cancel=_sure)

@@ -16,6 +16,7 @@ again (the exam withdrawn) has the cover it had. Someone on an exam duty or at a
 import datetime
 
 from relief import absences as _absences       # absences and free import this module too: no name of theirs is read at import
+from relief import fill as _fill               # fill imports this module too: no name of theirs is read at import
 from relief import free as _free
 from relief import hours as _hours             # hours imports fill, which imports this module: no name of theirs is read at import
 from relief import lessons as _lessons
@@ -315,9 +316,9 @@ def change(id, ckey, who, by, pub, settings, links=None):
 
 
 def _dt(v):
-    """an ISO date-time (as records hold it) or a date-time, as a date-time; None for anything else"""
-    if isinstance(v, datetime.datetime): return v
-    try: return datetime.datetime.fromisoformat(v) if isinstance(v, str) else None
+    """an ISO date-time (as records hold it) or a date-time, as a date-time in school time (one kept without its offset is in
+    school time); None for anything else"""
+    try: return _fill._when(v) if isinstance(v, (str, datetime.datetime)) else None
     except ValueError: return None
 
 
@@ -477,16 +478,19 @@ def keep(id, ckey, by, links=None):
     return r
 
 
-def _mine(r, x, c, me):
-    if state(r, x, c) not in ("approved", "acknowledged", "change") or c.get("relief") != me: raise ValueError(NOT_YOURS_COVER)
+def _mine(r, x, c, me, reached=None):
+    """the cover is approved to me (approved, acknowledged, asked to change) and, when reached is given (a callable (r, x, c) ->
+    bool: web._reached), has reached me; else NOT_YOURS_COVER"""
+    if state(r, x, c) not in APPROVED or c.get("relief") != me or (reached is not None and not reached(r, x, c)): raise ValueError(NOT_YOURS_COVER)
 
 
-def acknowledge_once(id, ckey, me, links=None):
+def acknowledge_once(id, ckey, me, links=None, reached=None):
     """the approved relief teacher acknowledges (once; after asking to change, it takes the relief after all) -> (the record,
-    whether this call did it: False when it was acknowledged already, on the page or on Telegram, and nothing was saved)"""
+    whether this call did it: False when it was acknowledged already, on the page or on Telegram, and nothing was saved);
+    reached: as _mine, asked under the lock"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
-        _mine(r, x, c, me)
+        _mine(r, x, c, me, reached)
         _happens(links, x)
         if state(r, x, c) == "acknowledged": return r, False
         now = _absences._now()
@@ -498,16 +502,17 @@ def acknowledge_once(id, ckey, me, links=None):
     return r, True
 
 
-def acknowledge(id, ckey, me, links=None):
+def acknowledge(id, ckey, me, links=None, reached=None):
     """as acknowledge_once -> the record"""
-    return acknowledge_once(id, ckey, me, links=links)[0]
+    return acknowledge_once(id, ckey, me, links=links, reached=reached)[0]
 
 
-def ask_change(id, ckey, why, me, links=None):
-    """the approved relief teacher asks to change, saying why in a line; the relief stays with them until the team acts"""
+def ask_change(id, ckey, why, me, links=None, reached=None):
+    """the approved relief teacher asks to change, saying why in a line; the relief stays with them until the team acts;
+    reached: as _mine, asked under the lock"""
     with _absences._LOCK:
         r, x, c = _open(id, ckey)
-        _mine(r, x, c, me)
+        _mine(r, x, c, me, reached)
         _happens(links, x)
         if state(r, x, c) == "change": raise ValueError(ASKED_ALREADY)
         why = why.strip() if isinstance(why, str) else ""

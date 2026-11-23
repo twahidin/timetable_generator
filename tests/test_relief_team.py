@@ -1806,6 +1806,7 @@ def the_team_approves_changes_splits_and_keeps_through_the_api():
                    ("kept", TEAMER, HEAD + f"{SAM} kept for 1A Science P6–P7 on Tue 13 Oct")], got
 
 COVER = {"id", "ckey", "date", "start", "end", "p", "n", "classes", "subject", "group", "room", "absent", "work", "state", "ack", "change", "stopped"}
+def sent(i, ckey): return CV.send_out(i, ckey, cov(i, ckey)[2]["relief"], TEAMER, PUB, ST)     # the approval sent out to its teacher by the team
 
 @rt
 def covering_lists_only_approved_and_never_the_reason():
@@ -1813,14 +1814,14 @@ def covering_lists_only_approved_and_never_the_reason():
     k2 = key(EVE, 0, D2)
     with at("2026-10-02T07:00:00+08:00"):                                     # Fri 2 Oct, last week's: approved to Mr Sam Tan
         old = absent(by=GRACE, dates=["2026-10-02"], lessons=[dict(key=k2, relief=SAM)])["id"]
-        CV.approve(old, k2, SAM, TEAMER, PUB, ST)
+        CV.approve(old, k2, SAM, TEAMER, PUB, ST); sent(old, k2)
     i = absent(by=GRACE, dates=["2026-10-13", "2026-10-16"], reason="Other", reason_text="A private matter", remarks="Quiet please",
                lessons=[dict(key=K5, relief=SAM), dict(key=K2, relief=SAM), dict(key=KF, relief=SAM)])["id"]
     j = absent(teacher=RUTH, by=GRACE, lessons=[dict(key=KR6, relief=MAYA)])["id"]
     f = RF.save(i, "notes.pdf", b"%PDF-1 notes")
     AB.set_work(i, K5, dict(text="Read p.4", link="https://x.test/a", files=[f], known=[]), EVE)
-    for ckey in (K5, KF): CV.approve(i, ckey, SAM, TEAMER, PUB, ST)
-    CV.approve(j, KR6, MAYA, TEAMER, PUB, ST)
+    for ckey in (K5, KF): CV.approve(i, ckey, SAM, TEAMER, PUB, ST); sent(i, ckey)
+    CV.approve(j, KR6, MAYA, TEAMER, PUB, ST); sent(j, KR6)
     sam = staff(SAM)
     with at("2026-10-14T08:00:00+08:00"):                                     # Wednesday: Tuesday's is earlier this week
         r = sam.get("/api/relief/covering"); got = ok(r)
@@ -1854,6 +1855,9 @@ def acknowledge_and_ask_change_are_the_relief_teachers_alone():
         no(c.post(cover_url(i, K5, "ask-change"), json=dict(why="A meeting")), 403, NOT_YOURS_COVER)
     assert snap() == before
     CV.approve(i, K5, SAM, TEAMER, PUB, ST)
+    no(sam.post(cover_url(i, K5, "acknowledge")), 403, NOT_YOURS_COVER)              # approved, not sent out: not his yet either
+    no(sam.post(cover_url(i, K5, "ask-change"), json=dict(why="A meeting")), 403, NOT_YOURS_COVER)
+    sent(i, K5)
     before, n = snap(), len(notes())
     for c in (ruth, team, eve, grace):
         no(c.post(cover_url(i, K5, "acknowledge")), 403, NOT_YOURS_COVER)
@@ -1891,6 +1895,8 @@ def the_relief_teacher_can_open_the_work_file():
     url = lambda x: f"/api/relief/files/{i}/{x['id']}"
     no(sam.get(url(f)), 403, NOT_YOURS)                                       # waiting: not his yet
     CV.approve(i, K5, SAM, TEAMER, PUB, ST)
+    no(sam.get(url(f)), 403, NOT_YOURS)                                       # approved, not sent out: nor yet
+    sent(i, K5)
     r = sam.get(url(f))
     assert r.status_code == 200 and r.data == b"%PDF-1 notes" and "notes.pdf" in r.headers["Content-Disposition"] and "no-store" in r.headers["Cache-Control"]
     r.close()
@@ -1899,7 +1905,7 @@ def the_relief_teacher_can_open_the_work_file():
     no(ruth.get(url(f)), 403, NOT_YOURS)
     no(sam.get(f"/api/relief/files/abcdef123456/{f['id']}"), 403, NOT_YOURS)
     # a part of a split lesson: its relief teacher opens the lesson's files
-    CV.split(i, K2, 3, TEAMER); CV.change(i, K2 + "#1", MAYA, TEAMER, PUB, ST)
+    CV.split(i, K2, 3, TEAMER); CV.change(i, K2 + "#1", MAYA, TEAMER, PUB, ST); sent(i, K2 + "#1")
     r = maya.get(url(g)); assert r.status_code == 200 and r.data == b"%PDF-1 other"; r.close()
     no(maya.get(url(f)), 403, NOT_YOURS)
     AB.cancel(i, "Better", GRACE)
@@ -1907,7 +1913,7 @@ def the_relief_teacher_can_open_the_work_file():
     no(maya.get(url(g)), 403, NOT_YOURS)
 
 @rt
-def the_absent_teacher_sees_the_name_only_once_approved():
+def the_absent_teacher_sees_the_name_only_once_acknowledged():
     fresh()
     eve, grace, team = staff(EVE), staff(GRACE), staff(TEAMER)
     i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]           # the planner's choice, waiting
@@ -1927,14 +1933,18 @@ def the_absent_teacher_sees_the_name_only_once_approved():
         g5, g2 = lesson(c, K5), lesson(c, K2)
         assert (g5["relief"], g5["planned"], g5["covers"][0]["planned"], g2["relief"], g2["planned"]) == (SAM, SAM, SAM, FLEX, None), (g5, g2)
         assert g2["pick"]["by"] == "ai" and g2["history"], g2
-    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
-    e5 = lesson(eve, K5)
-    assert e5["relief"] == SAM and e5["covers"][0]["state"] == "approved" and e5["covers"][0]["relief"] == SAM and "pick" not in e5, e5
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST); sent(i, K5)
+    e5 = lesson(eve, K5)                                                      # approved and sent out: not named until Mr Sam Tan acknowledges
+    assert (e5["relief"], e5["relief_by"]) == (None, None) and e5["covers"][0]["state"] == "approved" and e5["covers"][0]["relief"] is None and "pick" not in e5, e5
+    assert SAM not in eve.get(f"/api/relief/absences/{i}").get_data(as_text=True) + eve.get("/api/relief/absences/mine").get_data(as_text=True)
     assert lesson(grace, K5)["planned"] is None
     no(grace.put(lesson_url(i, K5, "relief"), json=dict(relief=MAYA)), 400, AB.APPROVED_ALREADY)   # the planner no longer changes it (Ruling 11)
-    CV.ask_change(i, K5, "A parents' meeting", SAM); CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change")
+    CV.acknowledge(i, K5, SAM)
     e5 = lesson(eve, K5)
-    assert e5["relief"] == SAM and e5["covers"][0]["state"] == "change" and "change" not in e5, e5
+    assert e5["relief"] == SAM and e5["covers"][0]["state"] == "acknowledged" and e5["covers"][0]["relief"] == SAM and "pick" not in e5, e5
+    CV.ask_change(i, K5, "A parents' meeting", SAM); CV.set_pick(i, K5, pk(MAYA), PUB, ST, into="change")
+    e5 = lesson(eve, K5)                                                      # asked to change: being arranged again
+    assert e5["relief"] is None and e5["covers"][0]["state"] == "change" and e5["covers"][0]["relief"] is None and "change" not in e5, e5
     assert MAYA not in eve.get(f"/api/relief/absences/{i}").get_data(as_text=True) and "parents" not in eve.get("/api/relief/absences/mine").get_data(as_text=True)
     # an absence the teacher asked for herself: the same
     j = absent(teacher=RUTH)["id"]
@@ -2100,7 +2110,7 @@ def a_split_lesson_reads_its_parts_in_the_record_and_the_sheet():
         got = ok(staff(EVE).get(url))
         rec = got if "lessons" in got else next(v for v in got["absences"] if v["id"] == i)
         parts = next(x for x in rec["lessons"] if x["key"] == K2)["parts"]
-        assert [(p["ckey"], p["p"], p["relief"]) for p in parts] == [(K2 + "#0", 2, None), (K2 + "#2", 3, None), (K2 + "#1", 4, FLEX)], (url, parts)
+        assert [(p["ckey"], p["p"], p["relief"]) for p in parts] == [(K2 + "#0", 2, None), (K2 + "#2", 3, None), (K2 + "#1", 4, None)], (url, parts)   # approved, not acknowledged: no name yet
         assert not any({"pick", "history", "change"} & set(p) for p in parts), parts
     assert AB._lesson(AB.load(i), K2)["parts"] == stored and "ckey" not in stored[0], "sending never changes the record"
     assert next(v for v in ok(team.get("/api/relief/absences"))["absences"] if v["id"] == i)["cover"] == dict(total=4, approved=1, waiting=1, open=2)
@@ -2291,7 +2301,7 @@ def a_request_to_change_runs_the_picks_of_its_own_absence_alone():
     fresh()
     sam = staff(SAM)
     i = absent(by=GRACE, lessons=[dict(key=K5, relief=SAM)])["id"]
-    CV.approve(i, K5, SAM, TEAMER, PUB, ST)
+    CV.approve(i, K5, SAM, TEAMER, PUB, ST); sent(i, K5)
     k = absent(teacher=RUTH)["id"]                                            # another absence, its lessons open
     calls, real = [], FL.soon
     def spy(*a, **kw):

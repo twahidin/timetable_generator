@@ -37,7 +37,8 @@ waiting rows the page showed}), each refused or skipped with cover.PICK_CHANGED 
 …/covers/<ckey>/keep), Fill now (POST /today/fill {date}), the load tracker (GET /load, /load/<name>, /load.csv, each
 ?week=YYYY-MM-DD or ?term=<name>). The relief teacher (relief, and the cover approved to them, else NOT_YOURS_COVER):
 Reliefs I'm covering (GET /covering), Acknowledge (POST …/covers/<ckey>/acknowledge), Request to change (POST
-…/covers/<ckey>/ask-change {why}); they also open the files of a lesson they relieve. Nothing reaches a relief teacher
+…/covers/<ckey>/ask-change {why}); they also open the files of a lesson they relieve. Each of these is theirs only once the relief has
+reached them (cover.reached: the team approved it and sent it out, and its time has come; _reached). Nothing reaches a relief teacher
 before the team approves it and sends it out, and nothing they are sent carries the absence's reason, remarks, reporting officer, a pick's
 reason or a cover's history. Picks are made by relief.fill in the background; a new absence, needed again and cancel ask
 for a run (automatic: only with RELIEF_JOBS on), Fill now and a request to change (for its own absence alone) ask with
@@ -182,6 +183,18 @@ def _links_or_none(pub, cal):
         return None
 
 
+def _reached(pub):
+    """cover.reached for this request, as a callable (record, lesson, cover) -> bool: the settings read once, now at each call. A
+    cover whose sending out cannot be worked out (a record changed by hand) has not reached its teacher, logged by its kind"""
+    settings = _settings.load(pub)
+    def reached(r, x, c):
+        try: return _cover.reached(r, x, c, _absences._now(), settings, pub)
+        except Exception as e:
+            current_app.logger.error("relief: whether a relief has reached its teacher could not be worked out (%s)", type(e).__name__)
+            return False
+    return reached
+
+
 def _sync_exams(pub):
     """after an absence is sent or cancelled: relief's backups in step with the approved exams and events
     (exams.relief_links.sync_all), so a lesson a cancelled own absence gives back goes to a backup again at once. Called once
@@ -202,7 +215,7 @@ def _out(r, pub, me, cal=None, links=None):
     its covers ([{ckey, p, n, start, end, state, relief, planned}], by p: the lesson itself, or its parts); the remarks left
     out for someone who is only its absent teacher, and gone (the lessons that left a backup, with their picks and reasons)
     for everyone. The absent teacher who may not open every absence (not relief.plan, not
-    relief.team) sees a relief teacher's name only once it is approved (relief and relief_by None before), and no pick,
+    relief.team) sees a relief teacher's name only once that teacher has acknowledged it (relief and relief_by None before), and no pick,
     request to change or history, on the lesson and on each part (Decision 4). Everyone else sees the relief as it is, and
     planned: the planner's own choice still waiting for the relief team (None otherwise)."""
     cal = cal if cal is not None else _cal(pub)
@@ -228,9 +241,10 @@ def _planned(r, c, s):
 
 
 def _hidden(c, s):
-    """cover (or lesson) c as the absent teacher alone sees it: no pick, request to change or history; the relief once approved"""
+    """cover (or lesson) c as the absent teacher alone sees it: no pick, request to change or history; the relief once its teacher
+    has acknowledged it"""
     out = {k: v for k, v in c.items() if k not in ("pick", "change", "history")}
-    if s not in APPROVED and "relief" in out: out.update(relief=None, relief_by=None)
+    if s != "acknowledged" and "relief" in out: out.update(relief=None, relief_by=None)
     return out
 
 
@@ -240,7 +254,7 @@ def _lesson_out(r, x, pub, hide):
         s = _cover.state(r, x, c)
         start, end = _times(pub, x, c)
         v = dict(ckey=_cover.cover_key(x, i), p=int(c["p"]), n=int(c.get("n") or 1), start=start, end=end, state=s,
-                 relief=c.get("relief") if s in APPROVED or not hide else None)
+                 relief=c.get("relief") if s == "acknowledged" or not hide else None)
         if not hide: v["planned"] = _planned(r, c, s)
         covers.append(v)
     covers.sort(key=lambda v: v["p"])
@@ -674,7 +688,7 @@ def download(id, file):
     r, err = _record(id, me)
     if err:
         r = _absences.load(id)
-        if r is None or not _relieves(r, file, me): return err
+        if r is None or not _relieves(r, file, me, _reached(pub)): return err
     p = _files.path(r["id"], file)
     if not p: return {"error": NO_FILE}, 404
     names = [f.get("name") for x in r.get("lessons") or [] for f in (x.get("work") or {}).get("files") or [] if f.get("id") == file]
@@ -684,11 +698,12 @@ def download(id, file):
     return resp
 
 
-def _relieves(r, file, me):
-    """me is the approved relief teacher of a lesson of r whose work lists the file"""
+def _relieves(r, file, me, reached):
+    """me is the approved relief teacher of a lesson of r whose work lists the file, and that relief has reached me (reached:
+    _reached)"""
     for x in r.get("lessons") or []:
         if not any(f.get("id") == file for f in (x.get("work") or {}).get("files") or []): continue
-        if any(c.get("relief") == me and _cover.state(r, x, c) in APPROVED for c in _cover.covers(x)): return True
+        if any(c.get("relief") == me and _cover.state(r, x, c) in APPROVED and reached(r, x, c) for c in _cover.covers(x)): return True
     return False
 
 
@@ -1023,32 +1038,33 @@ def _covering_item(pub, r, ckey):
 @bp.get("/api/relief/covering")
 @need("relief")
 def covering():
-    """the covers approved to me (approved, acknowledged, asked to change) from the Monday of this week on, by date and
-    period: nothing waiting for the relief team is here"""
+    """the covers approved to me (approved, acknowledged, asked to change) that have reached me (_reached), from the Monday of this
+    week on, by date and period: nothing waiting for the relief team, or for its Send out or its time, is here"""
     pub, me, err = _gate()
     if err: return err
-    since, out = week_of(_lessons.today())[0].isoformat(), []
+    since, out, reached = week_of(_lessons.today())[0].isoformat(), [], _reached(pub)
     for r in _absences.all_records():
         if r.get("cancelled"): continue
         for x in r.get("lessons") or []:
             if (x.get("date") or "") < since or not x.get("needed"): continue
             for i, c in enumerate(_cover.covers(x)):
-                if c.get("relief") == me and _cover.state(r, x, c) in APPROVED: out.append(_covering_item(pub, r, _cover.cover_key(x, i)))
+                if c.get("relief") == me and _cover.state(r, x, c) in APPROVED and reached(r, x, c): out.append(_covering_item(pub, r, _cover.cover_key(x, i)))
     out.sort(key=lambda v: (v["date"], v["p"], v["absent"], v["ckey"]))
     return jsonify(covers=out)
 
 
 def _yours(id, ckey, do, step):
-    """a step (of STEPS) the approved relief teacher of the cover takes: anyone else (or a cover not approved, gone, or of no
-    absence) gets 403 NOT_YOURS_COVER, the same answer whatever the reason, before anything is read out; do(record, lesson,
-    cover, me, body, pub) -> the saved record, or None when nothing was to be saved (no history entry then)"""
+    """a step (of STEPS) the approved relief teacher of the cover takes, once the relief has reached them: anyone else (or a cover
+    not approved, not reached its teacher, gone, or of no absence) gets 403 NOT_YOURS_COVER, the same answer whatever the reason,
+    before anything is read out; do(record, lesson, cover, me, body, pub, reached: _reached, to be asked again under the lock) ->
+    the saved record, or None when nothing was to be saved (no history entry then)"""
     pub, me, err = _gate()
     if err: return err
-    r = _absences.load(id)
+    r, reached = _absences.load(id), _reached(pub)
     try: x, c = _cover.find(r, ckey) if r else (None, None)
     except ValueError: c = None
-    if c is None or c.get("relief") != me or _cover.state(r, x, c) not in APPROVED: return {"error": _cover.NOT_YOURS_COVER}, 403
-    try: saved = do(r, x, c, me, _body(), pub)
+    if c is None or c.get("relief") != me or _cover.state(r, x, c) not in APPROVED or not reached(r, x, c): return {"error": _cover.NOT_YOURS_COVER}, 403
+    try: saved = do(r, x, c, me, _body(), pub, reached)
     except ValueError as e: return ({"error": str(e)}, 403) if str(e) == _cover.NOT_YOURS_COVER else _refusal(e)
     except BAD_INPUT as e: return _odd(e, "answering a relief")
     if saved is None: return jsonify(_covering_item(pub, r, ckey))
@@ -1060,9 +1076,9 @@ def _yours(id, ckey, do, step):
 @need("relief")
 def cover_acknowledge(id, ckey):
     """the relief teacher acknowledges (once: again is the same answer, no new history entry)"""
-    def do(r, x, c, me, b, pub):
+    def do(r, x, c, me, b, pub, reached):
         if _cover.state(r, x, c) == "acknowledged": return None
-        saved, first = _cover.acknowledge_once(r["id"], ckey, me, links=_links_or_none(pub, _cal(pub)))
+        saved, first = _cover.acknowledge_once(r["id"], ckey, me, links=_links_or_none(pub, _cal(pub)), reached=reached)
         if not first: r.update(saved)            # acknowledged on Telegram since r was read: answered as it is, nothing to write down
         return saved if first else None
     return _yours(id, ckey, do, "ack")
@@ -1073,7 +1089,8 @@ def cover_acknowledge(id, ckey):
 def ask_change(id, ckey):
     """{why}: a line; the relief stays theirs until the team acts, and a new pick is made at once (fill.soon for this
     absence alone, with force, after the save); the history entry never holds the why"""
-    return _yours(id, ckey, lambda r, x, c, me, b, pub: _cover.ask_change(r["id"], ckey, b.get("why"), me, links=_links_or_none(pub, _cal(pub))), "change")
+    return _yours(id, ckey, lambda r, x, c, me, b, pub, reached: _cover.ask_change(r["id"], ckey, b.get("why"), me, links=_links_or_none(pub, _cal(pub)), reached=reached),
+                  "change")
 
 
 # ---- the load tracker (relief.team)

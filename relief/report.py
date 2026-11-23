@@ -10,9 +10,9 @@ once; what is written in it is the time now. A mark is done with once it has bee
 before anything is queued, in one step, so two copies of the app never do the same one), whether there was anything to say or
 not: what is approved after it waits for the next. Nothing is kept in memory.
 
-A relief counts while its cover is dated today and approved, its absence not cancelled, its lesson needed, and no approved exam or
-event stops it (cover.stopped). It waits while its teacher has neither acknowledged it nor asked to change it and its first period
-has not started; once that has, it is listed as started without acknowledgement, once, and waits no more: state started:{relief
+A relief counts while its cover is dated today, approved and has reached its teacher (cover.reached: sent out, and its time has
+come), its absence not cancelled, its lesson needed, and no approved exam or event stops it (cover.stopped). It waits while its
+teacher has neither acknowledged it nor asked to change it and its first period has not started; once that has, it is listed as started without acknowledgement, once, and waits no more: state started:{relief
 key} keeps the mark of the report that listed it, and it is listed again when no copy of that report went or may still go (all
 dropped or failed, or none was queued before the app stopped). report:{date}:{HHMM of the mark}:{name} goes to each of the team
 who can be reached, when a relief waits or has just started; its button reminds those it lists as waiting. When none waits and a
@@ -35,8 +35,8 @@ and an absence's file cannot be read (it may hold one), it is not done with; a d
 it (tell.known). weekly:{monday}:{name} goes to each of the team who can be reached, with a button that opens the page on that week,
 and is dropped when it is a DAY old, or when its person is not on the team any more.
 
-remind sends a relief again to its teacher, for the page (relief/tgweb.py) and for the button (relief/bot.py): its message as it
-would be made now, under the relief's key with :r{n} after it, WAIT at least after the last of that relief's messages went, and not
+remind sends a relief that has reached its teacher again to them, for the page (relief/tgweb.py) and for the button
+(relief/bot.py): its message as it would be made now, under the relief's key with :r{n} after it, WAIT at least after the last of that relief's messages went, and not
 while it waits in the queue or is on its way, however long: it goes by itself, and they do not come all at once. A relief told to
 nobody yet gets the message itself. Two at once are one: a key is queued once. What was reminded is one history entry.
 
@@ -151,9 +151,11 @@ def _records():
 
 
 def _relief(w, r, x, i, c):
-    """cover c (the i-th) of lesson x as a relief that counts, or None"""
+    """cover c (the i-th) of lesson x as a relief that counts (approved, and it has reached its teacher), or None"""
     s = _cover.state(r, x, c)
     if s not in tell.APPROVED: return None
+    datetime.datetime.fromisoformat(c["approved"]["at"])     # an approval whose time cannot be read is passed over (w.passed): it may be one that waits
+    if not _cover.reached(r, x, c, w.now, w.settings, w.pub): return None
     ckey, who, starts = _cover.cover_key(x, i), c["relief"], _starts(c, w.bnds)
     if not isinstance(who, str): raise ValueError("no name")
     key = tell.key_of(w.said.told, r, c, ckey)
@@ -226,7 +228,8 @@ def _report(s):
     if isinstance(was, int) and was >= mark: return []
     reach, team = _team(pub)
     if not team: return []                      # nobody to tell: the mark is not done with
-    w = types.SimpleNamespace(pub=pub, now=now, date=date, bnds=bnds, reach=reach, links=tell.known(_fill._links(pub, cal), date), said=tell.said(), went=_went(date))
+    w = types.SimpleNamespace(pub=pub, settings=settings, now=now, date=date, bnds=bnds, reach=reach, links=tell.known(_fill._links(pub, cal), date), said=tell.said(),
+                              went=_went(date))
     records, unread = _records()
     w.passed = len(unread)
     rows = sorted((v for r in records for v in _reliefs(w, r)), key=lambda v: (v["starts"], v["who"], v["key"]))
@@ -325,9 +328,10 @@ def _cover_asked(w, v):
 
 
 def _remindable(w, v, r, x, c):
-    """the cover is one to remind of: dated the date, waiting to be acknowledged (as it was listed, when that is said), its lesson
-    neither over nor stopped"""
+    """the cover is one to remind of: dated the date, waiting to be acknowledged (as it was listed, when that is said) once it has
+    reached its teacher (cover.reached), its lesson neither over nor stopped"""
     if _cover.state(r, x, c) != "approved" or x["date"] != w.date or v.get("approved_at") not in (None, c["approved"].get("at")): return False
+    if not _cover.reached(r, x, c, w.now, w.settings, w.pub): return False
     return not _cover.stopped(w.links, x) and not _fill._ended(x, c, w.now, w.bnds)
 
 
@@ -344,7 +348,7 @@ def _send_again(w, v):
     who = c["relief"]
     if not _remindable(w, v, r, x, c): return who, NOBODY
     if who not in w.reach: return who, NOT_ON
-    item = tell.relief_item(w.pub, w.reach, w.said.told, r, x, c, v["ckey"])
+    item = tell.relief_item(w.pub, w.reach, w.said.told, r, x, c, v["ckey"], base=w.base)
     if item is None: return who, NOBODY         # approved at no time (changed by hand)
     key, last = item["key"], w.said.last(item["key"])
     if last is not None and (last[1] in tell.WAITING or w.now - last[0] <= WAIT): return who, _too_soon(*last)
@@ -360,9 +364,10 @@ def _send_again(w, v):
 def _remind(date, covers, now, done, skipped):
     pub = store.published()
     if not pub: raise ValueError(_web.NO_PUB)
-    cal = _settings.load(pub).get("calendar") or {}
-    w = types.SimpleNamespace(pub=pub, now=_fill._when(now), date=date, bnds=bounds(pub.get("model") or {}), reach=_links.reachable(pub), links=tell.known(_fill._links(pub, cal), date),
-                              records=_absences.all_records(), said=tell.said())
+    settings = _settings.load(pub)
+    cal = settings.get("calendar") or {}
+    w = types.SimpleNamespace(pub=pub, settings=settings, now=_fill._when(now), date=date, bnds=bounds(pub.get("model") or {}), reach=_links.reachable(pub),
+                              links=tell.known(_fill._links(pub, cal), date), records=_absences.all_records(), said=tell.said(), base=(_links.connected() or {}).get("base") or "")
     for v in covers:
         try: who, why = _send_again(w, v)
         except Exception as e:

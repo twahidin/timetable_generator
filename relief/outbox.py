@@ -32,7 +32,7 @@ could not be written, or another copy stopped) is unsure too, at each run.
 The text is plain (no parse_mode) and cut at a line end when longer than LIMIT. A button's token is made for the first try
 and kept with the item, so every try carries the same ones; its row in buttons is written with the item's sending and is good
 for BUTTON_DAYS from when the message was queued. A button that opens an address is left out unless it is https (Telegram
-refuses others).
+refuses others). keep_buttons does the same for buttons put on a message already sent.
 
 Files follow the message once it is sent, each by sendDocument, to the same chat while it is still that person's. files_failed
 counts those that have not gone: all of them when the message goes, one less as each goes, so a restart in between leaves the
@@ -214,6 +214,19 @@ def _claim(item, chat, now):
                       [(b["token"], item["name"], b.get("what"), b.get("id"), b.get("ckey"), b.get("who"), json.dumps(b.get("extra")), until)
                        for row in item["buttons"] for b in row if "token" in b])
     return True
+
+
+def keep_buttons(name, rows):
+    """buttons for name to put on a message already sent (relief/bot.py, when it changes the message a press was on): rows as queue
+    takes them -> Telegram's inline keyboard, each action button's token made and its row in buttons written, good for BUTTON_DAYS
+    from now, as _claim does; ValueError as queue's"""
+    rows = [[_button(b) for b in (row if isinstance(row, (list, tuple)) else (row,))] for row in rows or ()]
+    keys = _keyboard(rows)
+    until = datetime.datetime.fromisoformat(_absences._now()).timestamp() + BUTTON_DAYS * 86400
+    with tgdb.db() as c:
+        c.executemany("INSERT OR REPLACE INTO buttons(token, name, what, id, ckey, who, extra, until) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                      [(b["token"], name, b.get("what"), b.get("id"), b.get("ckey"), b.get("who"), json.dumps(b.get("extra")), until) for row in rows for b in row if "token" in b])
+    return keys
 
 
 def _retry(c, item, now, state):

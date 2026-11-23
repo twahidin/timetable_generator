@@ -1,9 +1,9 @@
 """One week's relief in numbers, for the relief team's page (relief/tgweb.py) and their weekly message (relief/report.py). Pure: no
 Flask, and no file is read.
 
-A relief counts when its cover is dated Monday to Friday of the week and approved (acknowledged or not, or asked to change since),
-its lesson needed and not stopped by an approved exam or event (cover.stopped), and its absence not cancelled. It is counted in
-periods, so that each way of counting adds up to them; absences are the absences that had one; a request to change is counted in
+A relief counts when its cover is dated Monday to Friday of the week, approved (acknowledged or not, or asked to change since) and
+has reached its teacher by now (cover.reached), its lesson needed and not stopped by an approved exam or event (cover.stopped), and
+its absence not cancelled. It is counted in periods, so that each way of counting adds up to them; absences are the absences that had one; a request to change is counted in
 covers, whatever has become of the cover since. What cannot be read (a record, a lesson, a cover) is passed over, alone, its kind
 logged to "relief.telegram"; what does not count is not read. Nothing here holds why anyone is away, or anything anybody wrote."""
 import collections, datetime, logging, types
@@ -72,14 +72,16 @@ def _ack(w, x, c, state):
 
 
 def _relief(w, r, x, c):
-    """cover c of lesson x as a relief that counts, or None"""
+    """cover c of lesson x as a relief that counts, or None; ahead: it reached its teacher before the lesson's date"""
     state = _cover.state(r, x, c)
     if state not in APPROVED: return None
+    _when(c["approved"]["at"])                  # an approval whose time cannot be read is passed over
+    if not _cover.reached(r, x, c, w.now, w.settings, w.pub): return None
     p, n, who, absent = int(c["p"]), int(c.get("n") or 1), c["relief"], r["teacher"]
     if p < 0 or n < 1 or not isinstance(who, str) or not isinstance(absent, str): raise ValueError("not a relief")
     how, ack = _ack(w, x, c, state)
     return dict(date=x["date"], p=p, n=n, who=who, absent=absent, lesson=f"{words.class_group(x)} {words.periods_text(c)}",
-                ahead=_when(c["approved"]["at"]).date().isoformat() < x["date"], how=how, ack=ack)
+                ahead=_fill._when(_cover.goes_at(c, x, w.settings, w.pub)).date().isoformat() < x["date"], how=how, ack=ack)
 
 
 def _covers(w, r):
@@ -110,7 +112,7 @@ def _most(counts):
 def week(pub, settings, records, monday, now, links=None):
     """the week of monday (any date of it, or its ISO string) as it is at now (a date-time or an ISO string) -> dict(start, end: ISO
     Monday and Friday; label; fat_role: whether a Flexi Adjunct role is set; in periods: periods, fat_periods (by whoever has that
-    role now; fat_percent, whole, half up), ahead (approved before the lesson's date) and on_day, on_time (acknowledged by the start
+    role now; fat_percent, whole, half up), ahead (reached its teacher before the lesson's date) and on_day, on_time (acknowledged by the start
     of the cover's first period), late, never (over and not acknowledged) and waiting (not over), top: [(name, periods)], the three
     with the most, by_dept: [(the absent teacher's first department now, periods)], by_day: {Mon .. Fri: periods}; absences; in
     covers: asked, and of those moved and kept (_request; what still waits for the team is in neither); rows, one a cover by date,
@@ -119,7 +121,8 @@ def week(pub, settings, records, monday, now, links=None):
     if isinstance(monday, str): monday = datetime.date.fromisoformat(monday)
     dates = _dates(week_of(monday)[0])
     cal, fat = settings.get("calendar") or {}, settings.get("fat_role") or ""
-    w = types.SimpleNamespace(now=_fill._when(now), bnds=bounds((pub or {}).get("model") or {}), links=links, days=dict(zip((d.isoformat() for d in dates), DAYS)))
+    w = types.SimpleNamespace(now=_fill._when(now), bnds=bounds((pub or {}).get("model") or {}), links=links, days=dict(zip((d.isoformat() for d in dates), DAYS)),
+                              settings=settings, pub=pub)
     covers = [list(_covers(w, r)) for r in records]
     reliefs = sorted((v for got in covers for v, _ in got if v), key=lambda v: (v["date"], v["p"], v["absent"], v["lesson"], v["who"]))
     requests = collections.Counter(q for got in covers for _, q in got if q)
