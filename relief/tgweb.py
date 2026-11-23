@@ -204,7 +204,7 @@ def summary():
 # ---- relief settings
 UNSENT = dict(planned="Relief planned", remind="Reminder to acknowledge", officer="To the reporting officer", ask="Request to change", askpick="New pick for a request to change",
               kept="Relief kept", cancelled="Absence cancelled", gone="No longer needed", moved="Relief moved", stopped="Not happening", again="On again", weekly="Weekly summary",
-              new="New request for today")
+              late="Late request for today", morning="Morning message")
 UNSENT_LEFT_OUT = ("relief", "report", "clear")   # a relief message has its own line on the relief page; a report and a clear are not news to anyone
 UNSENT_SHOWN = 20
 

@@ -15,7 +15,7 @@ from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, compare, draft, history, putback, refit, refit_plan, store, sync, typed, versions
 from accounts import passwords, people, rights as rights_table
-from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
+from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, morning as relief_morning, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
 import exams.relief_links as exams_relief_links
 from plan import ai as plan_ai, steps as plan_steps, web as plan_web
@@ -1673,6 +1673,7 @@ if os.environ.get("RELIEF_JOBS") == "on":                         # relief picks
 if os.environ.get("RELIEF_JOBS") == "on" and relief_tg.on():
     relief_tell.MINUTE.append(relief_tell.sweep)                  # what there is to say by the clock, every minute, whatever the picks are waiting for
     relief_tell.MINUTE.append(relief_report.tick)                 # and then the relief team's report of who has not acknowledged, and their weekly summary
+    relief_tell.MINUTE.append(relief_morning.tick)                # and then the morning message to the people on duty, once a day
     relief_tell.MINUTE.append(relief_bot.forget)                  # and what was typed in a conversation that has run out is deleted
     relief_tell.start()
     relief_outbox.start()                                         # the Telegram messages, every 5 seconds

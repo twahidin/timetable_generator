@@ -20,11 +20,13 @@ with the new pick, or two minutes after the request without one, and then askpic
 carried) is in; planned:{id} and remind:{id} to the absent teacher; officer:{id} to the reporting officer;
 cancelled:{id}:{name} to the team, the planner, and the absent teacher and the officer who were told of the absence (planned,
 remind or officer sent or unsure), never to who cancelled; of a backup (exams) that ended by itself ("app": withdrawn, a changed
-duty, handled by the committee) to those told of it alone, since a whole exam's end at once; new:{id}:{name} to each of the team
-but who sent it and the absent teacher, once, of an absence sent today for today (never a backup) when a lesson of it today
-waits for their approval: picked, or open five minutes on (NEW_WAIT: till then its picks may be on their way), never before the
-day's first report (BEFORE minutes before the first period: one sent in the night is made then), claimed once (a key there in any
-state, dropped too, is never made again).
+duty, handled by the committee) to those told of it alone, since a whole exam's end at once; late:{id}:{name}, the late request,
+to each of the team but who sent it and the absent teacher, once, of an absence sent for today on a duty day at or after its
+morning time and before its cut-off (never a backup), when a lesson of it today waits for their approval: picked, or open five
+minutes on (NEW_WAIT: till then its picks may be on their way); made only in the team's window (hours.team_open), never later:
+one sent before the morning time (the evening, the night, a weekend) is in that day's morning message (relief/morning.py) and
+pings nobody, and one whose picks come after the cut-off pings nobody; claimed once (a key there in any state, dropped too, is
+never made again). The ping kind new it replaces is dropped if one is still queued (CHECKS).
 
 Only people who can be reached are told. planned, officer, kept and cancelled are for what was done since the bot was
 connected; nothing is said of a lesson that is over or an absence that is past. No message carries the typed reason, the
@@ -47,10 +49,11 @@ messaged, worked out by relief/hours.py. To a relief teacher (TEACHER_KINDS: rel
 stopped, again, kept): in school hours for its lesson (hours.teacher_open: from the earliest send-out time to the end of the
 cut-off's minute of a school day; on the lesson's own day from the earliest send-out time), while the lesson is not over. To the
 team: ask and askpick in the team's window (hours.team_open: a duty day, from the morning time to before the cut-off), or on the
-lesson's own day from the cut-off until it starts; the team's copy of cancelled in their window. The others go at any hour. due
-does not make one outside its hours, and still_true drops one queued that is still waiting when its hours end (an outage, a
-pause Telegram asked for): due makes it again, under the same key, when they come, if it is still true then; so it goes once, in
-the morning, and never in the night. An answer to a person's own press or typing (relief/bot.py, relief/asking.py) does not go
+lesson's own day from the cut-off until it starts; the team's copy of cancelled in their window. The others go at any hour,
+each named in ANY_HOUR with why (the late request and the morning message keep the team's window by rules of their own, since
+neither is made again). due does not make one outside its hours, and still_true drops one queued that is still waiting when its
+hours end (an outage, a pause Telegram asked for): due makes it again, under the same key, when they come, if it is still true
+then; so it goes once, in the morning, and never in the night. An answer to a person's own press or typing (relief/bot.py, relief/asking.py) does not go
 through the queue and goes at once.
 
 still_true asks again when a message is about to go: it is dropped (its key may be queued again) when the lesson is over or the
@@ -86,7 +89,7 @@ MINUTE = []                                     # called with nothing every minu
 EVERY, FIRST = 60, 5                            # seconds between the ticker's runs, and before the first
 PICK_WAIT = datetime.timedelta(minutes=2)       # how long a request to change waits for its new pick before the team is asked without
 NEW_WAIT = datetime.timedelta(minutes=5)        # how long an absence for today with a lesson still open waits for its picks before the team is told of it
-BEFORE = 60                                     # minutes before the first period starts: the day's first report (relief/report.py's), and before it no ping of a request for today
+BEFORE = 60                                     # minutes before the first period starts: the day's first report (relief/report.py's)
 APPROVED = ("approved", "acknowledged", "change")                        # the states in which a relief has reached its teacher (as web.APPROVED)
 NO_WORK = "No work set yet: look in Reliefs I'm covering."
 NOBODY_ELSE = "Nobody else is free then: choose someone in the app."
@@ -94,7 +97,7 @@ NO_PICK = "No new pick yet: open the app."
 ACK, CHANGE, SET_WORK, NOT_NEEDED, OPEN = "✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"
 NOT_TOLD = "{officer} is not on Telegram: please tell them yourself."                 # said to a teacher (the form, /relief) when their reporting officer is not on Telegram
 OPEN_TODAY = "Open relief today"                # the button to Today's page (relief/report.py's too)
-TOLD = ("relief:", "gone:", "moved:", "stopped:", "again:", "ask:", "planned:", "remind:", "officer:", "new:")      # the keys due must know of
+TOLD = ("relief:", "gone:", "moved:", "stopped:", "again:", "ask:", "planned:", "remind:", "officer:", "late:")      # the keys due must know of
 SENT = ("sent", "unsure")                       # the states in which a person was told, or may have been
 WAITING = ("queued", "sending")                 # ... in which they will be by itself, or are now
 LIVE = (*SENT, *WAITING)
@@ -142,9 +145,9 @@ def cancelled_text(by, absent, days):
     return f"❌ Cancelled{'' if by == 'app' else f' by {by}'}: {absent}'s absence on {days}. Its reliefs are no longer needed."
 
 
-def new_text(absent, away, n):
+def late_text(absent, away, n):
     """n: how many of its lessons today wait for the team (picked, or open)"""
-    return f"🆕 Relief asked for today · {absent}\n{away}\n" + (f"{n} lessons are" if n != 1 else "1 lesson is") + " waiting for your approval."
+    return f"🆕 Late request for today · {absent}\n{away}\n" + (f"{n} lessons are" if n != 1 else "1 lesson is") + " waiting for your approval. Approve, then Send out."
 
 
 def _from(start):
@@ -364,21 +367,23 @@ def _absence(w, r):
     if r.get("cancelled"): return _cancelled(w, r)
     out = _officer(w, r)
     if r.get("how") == "planned" and r.get("by") != r["teacher"] and not r.get("acknowledged") and r["teacher"] in w.reach: out = _planned(w, r) + out
-    return _new(w, r) + out
+    return _late(w, r) + out
 
 
-def _new(w, r):
-    """the absence sent today for today, to each of the team but who sent it and the absent teacher, once its lessons wait for
-    them: never a backup (exams); not before BEFORE minutes before the first period starts (the day's first report: one sent in the
-    night is made then; without lesson times, at once); not while a lesson is open (no pick, or none yet) and the absence is under
+def _late(w, r):
+    """the late request: the absence sent for today, on a duty day at or after the morning time and before the cut-off, to each of
+    the team but who sent it and the absent teacher, once its lessons wait for them; never a backup (exams); made only while the
+    team may be pinged (_team_may), never later; not while a lesson is open (no pick, or none yet) and the absence is under
     NEW_WAIT old; a key there in any state (dropped too) is not made again"""
     if r.get("exams") or r.get("cancelled") or str(r["at"])[:10] != w.today.isoformat() or not _since(w, r["at"]): return []
-    if w.bnds and w.now.hour * 60 + w.now.minute < w.bnds[0][0] - BEFORE: return []
+    h, sent = _hours.of(w.settings), _time(r["at"])
+    if sent is None or not _hours.at(w.today, h.morning) <= sent < _hours.at(w.today, h.cut_off) or not _hours.duty_day(w.settings, w.pub, w.today): return []
+    if not _team_may(w.now, w.settings, w.pub): return []
     waiting, open_ = _waiting_today(r, w.today.isoformat(), w.now, w.bnds, w.links)
-    if (open_ and w.now - _time(r["at"]) < NEW_WAIT) or waiting + open_ == 0: return []
-    text, buttons = new_text(r["teacher"], words.away(r), waiting + open_), [[dict(text=OPEN_TODAY, url=w.base + "/relief#today")]]
-    keys = [(f"new:{r['id']}:{n}", n) for n in w.team if n not in (r.get("by"), r["teacher"])]
-    return [_item(key, n, "new", text, buttons, ref=dict(id=r["id"], date=w.today.isoformat())) for key, n in keys if key not in w.told]
+    if (open_ and w.now - sent < NEW_WAIT) or waiting + open_ == 0: return []
+    text, buttons = late_text(r["teacher"], words.away(r), waiting + open_), [[dict(text=OPEN_TODAY, url=w.base + "/relief#today")]]
+    keys = [(f"late:{r['id']}:{n}", n) for n in w.team if n not in (r.get("by"), r["teacher"])]
+    return [_item(key, n, "late", text, buttons, ref=dict(id=r["id"], date=w.today.isoformat())) for key, n in keys if key not in w.told]
 
 
 def _since(w, v):
@@ -464,7 +469,8 @@ def _kept(w, r, x, c, ckey):
     h = _stands(r, x, c)
     if h is None or c["relief"] not in w.reach or not _since(w, h.get("at")): return
     yield _item(f"kept:{r['teacher']}:{ckey}:{h['at']}", c["relief"], "kept", kept_text(words.class_group(x), words.periods_text(c), words.day(x["date"])),
-                ref=dict(id=r["id"], absent=r["teacher"], ckey=ckey, who=c["relief"], approved_at=c["approved"].get("at"), at=h["at"], ends=_ends(x, c, w.bnds).isoformat()))
+                ref=dict(id=r["id"], absent=r["teacher"], ckey=ckey, who=c["relief"], approved_at=c["approved"].get("at"), at=h["at"], date=x["date"],
+                         ends=_ends(x, c, w.bnds).isoformat()))
 
 
 def _ask(w, r, x, c, ckey):
@@ -714,9 +720,18 @@ def _lesson_may(now, settings, pub, ref):
 
 
 # GATES[kind](now, settings, pub, its ref) -> whether a message of that kind may be made, and may go, now. A kind not here goes at
-# any hour (the absent teacher's, the officer's, planned, remind, new, report, clear, weekly). A later kind adds its line here
+# any hour, and is in ANY_HOUR with why. A later kind adds its line here, or to ANY_HOUR (a test holds every kind of CHECKS to one)
 GATES = {**{kind: _lesson_may for kind in TEACHER_KINDS}, "ask": _ask_may, "askpick": _ask_may,
          "cancelled": lambda now, settings, pub, ref: not ref.get("team") or _team_may(now, settings, pub)}     # the team's copy alone
+ANY_HOUR = ("planned",                          # to the absent teacher: they need the evening to set work (call 9)
+            "remind",                           # to the absent teacher, at remind_at the school day before (call 9)
+            "officer",                          # to the reporting officer, at once (call 9)
+            "report", "clear",                  # the team's report and all clear: made only at their marks of a school day, and OLD after 30 minutes
+            "weekly",                           # the weekly summary: at its own setting, whatever the day (call 10)
+            "morning",                          # the morning message: made only from the morning time, claimed once a day, dropped at the cut-off
+            "late",                             # the late request keeps the team's window by its own rule (_late, _late_true): it is never made again once
+                                                # dropped, so it must not be dropped as GATES' kinds are while nothing is published (a publish swaps folders)
+            "new")                              # the ping the late request replaced: never made, and dropped by its check if still queued
 
 
 def _may(item, now, settings, pub) -> bool:
@@ -833,20 +848,24 @@ def _cancelled_true(ref, name):
     return not ref.get("team") or _on_team(name)
 
 
-def _new_true(ref, name):
-    """the absence is not cancelled, its day is today still, the person on the team still, and a lesson of it today waits for
-    the team (_waiting_today)"""
+def _late_true(ref, name):
+    """the absence is not cancelled, its day is today still, the team may be pinged now (_team_may: one that comes due after the
+    cut-off is dropped, and its key stays claimed), the person is on the team still, and a lesson of it today waits for the team
+    (_waiting_today); nothing published (a publish swaps folders) raises: it waits"""
     r, now = _read(ref["id"]), _fill._when(None)
     if r is None or r.get("cancelled") or ref["date"] != now.date().isoformat() or not _on_team(name): return False
     pub, cal, links = _exams()
-    return sum(_waiting_today(r, ref["date"], now, bounds((pub or {}).get("model") or {}), links)) > 0
+    if not pub: raise ValueError("nothing is published")
+    if not _team_may(now, _settings.load(pub), pub): return False
+    return sum(_waiting_today(r, ref["date"], now, bounds(pub.get("model") or {}), links)) > 0
 
 
 # what is asked of a queued message, by its kind, before it goes: CHECK(its ref, its person) -> bool. A kind not here is always
-# true (relief/report.py puts report, clear and weekly here)
+# true (relief/report.py puts report, clear and weekly here, relief/morning.py morning)
 CHECKS = dict(relief=_relief_true, gone=_ended_true, moved=_ended_true, stopped=_stopped_true, again=_again_true, kept=_kept_true, ask=_ask_true,
               askpick=_ask_true, planned=lambda ref, name: _absence_now(ref) is not None, remind=_remind_true,
-              officer=lambda ref, name: _absence_now(ref, False) is not None, cancelled=_cancelled_true, new=_new_true)
+              officer=lambda ref, name: _absence_now(ref, False) is not None, cancelled=_cancelled_true, late=_late_true,
+              new=lambda ref, name: False)            # new: the ping the late request replaced; one still queued from before is dropped
 
 
 def still_true(item):
