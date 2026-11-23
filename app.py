@@ -15,7 +15,7 @@ from ttgen.reader import read_template
 from ttgen.spec import RULE_TYPES, SCOPES, CODES, SETTING_RULES, ROLES, SKILL_VERSION, defaults, typed_rules
 import access, checks, compare, draft, history, putback, store, sync, typed, versions
 from accounts import passwords, people, rights as rights_table
-from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
+from relief import bot as relief_bot, codes as relief_codes, fill as relief_fill, lessons as relief_lessons, outbox as relief_outbox, people as relief_people, report as relief_report, settings as relief_settings, tell as relief_tell, tg as relief_tg, tgweb as relief_tgweb, web as relief_web
 from relief import absences as relief_absences
 import exams.relief_links as exams_relief_links
 from ttgen import choices
@@ -1511,10 +1511,11 @@ def relief_code_slips():
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="relief code slips.pdf", mimetype="application/pdf")
 
-def _relief_entry(what, text, absence=None):
+def _relief_entry(what, text, absence=None, who=None, via=None):
     """one history entry for a relief request's save (relief/web.py): who, what, which, a link (not field by field; relief
-    keeps its own record, and the entry never holds the reason). A failure to write it never fails the save"""
-    e = {"kind": "relief", "what": what, "where": "Relief", "text": text, "link": "/relief", **by()}
+    keeps its own record, and the entry never holds the reason). who and via: the person who did it without a session (on
+    Telegram), else whoever is signed in. A failure to write it never fails the save"""
+    e = {"kind": "relief", "what": what, "where": "Relief", "text": text, "link": "/relief", **(history.by_of(who, via) if who else by())}
     if absence: e["absence"] = absence
     try: history.add(e)
     except Exception as x: print(f"WARNING: a relief change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
@@ -1522,7 +1523,19 @@ def _relief_entry(what, text, absence=None):
 # relief requests: relief/web.py, every route through need(), every right through has(), every save in the history
 relief_web.init(has=has, me=who, need=need, note=_relief_entry)
 app.register_blueprint(relief_web.bp)
-if os.environ.get("RELIEF_JOBS") == "on": relief_fill.start()     # relief picks when due, every minute (the Dockerfile sets it; tests and local runs never do)
+# Telegram: linking, connecting the bot, and the hook it posts to (relief/tgweb.py: the hook alone has no guard, it needs Telegram's secret header)
+relief_tgweb.init(has=has, me=who, need=need, note=_relief_entry)
+app.register_blueprint(relief_tgweb.bp)
+relief_bot.at_start()                                             # what was typed in a Telegram conversation that has run out is deleted, whatever is on
+if os.environ.get("RELIEF_JOBS") == "on":                         # relief picks when due, every minute (the Dockerfile sets it; tests and local runs never do)
+    relief_fill.AFTER.append(relief_tell.sweep)                   # and then what there is to say on Telegram (nothing while the bot is off)
+    relief_fill.start()
+if os.environ.get("RELIEF_JOBS") == "on" and relief_tg.on():
+    relief_tell.MINUTE.append(relief_tell.sweep)                  # what there is to say by the clock, every minute, whatever the picks are waiting for
+    relief_tell.MINUTE.append(relief_report.tick)                 # and then the relief team's report of who has not acknowledged, and their weekly summary
+    relief_tell.MINUTE.append(relief_bot.forget)                  # and what was typed in a conversation that has run out is deleted
+    relief_tell.start()
+    relief_outbox.start()                                         # the Telegram messages, every 5 seconds
 
 # ------------------------------------------------------------------------------------------------ admins: people and the ways in
 # The named admins (committee group, Admin extra, signed in with their password) manage people here; every check is the
@@ -1850,7 +1863,7 @@ def _history_query(args):
 
 HISTORY_DOWNLOAD_MAX = 20000
 HISTORY_MORE = "There are more entries than one download holds: pick fewer days."
-_VIA = {"password": "password", "code": "code", "shared": "shared code", "personal": "personal code", "app": "by itself", "google": "Google"}
+_VIA = {"password": "password", "code": "code", "shared": "shared code", "personal": "personal code", "app": "by itself", "google": "Google", "telegram": "Telegram"}
 
 @app.get("/api/history/download")
 @need("history")

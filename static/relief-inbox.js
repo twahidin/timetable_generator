@@ -41,7 +41,7 @@
     const work = cover.filter(hasWork).length;
     const changed = !r.cancelled && all.some(x => x.changed && x.date >= RF.today());
     const when = (r.dates || []).map(d => d === RF.today() ? "Today" : day(d)).join(", ");
-    const how = r.how === "planned" ? "planned · app" : "for themselves · app";
+    const how = r.via === "telegram" ? "asked on Telegram" : r.how === "planned" ? "planned · app" : "for themselves · app";
     let tail;
     if (r.cancelled) {
       const c = r.cancelled;
