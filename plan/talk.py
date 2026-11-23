@@ -160,6 +160,13 @@ def close(talk):
         _drop(talk)
 
 
+def drop_owner(owner):
+    """every talk of this owner is gone (they signed out); an answer still running ends at its next check"""
+    with _server:
+        for t in [t for t in _talks.values() if t.owner == owner]:
+            _drop(t)
+
+
 def stop(talk):
     """the answer running ends at its next check; a step already running finishes whole. Nothing when not working"""
     with talk.lock:

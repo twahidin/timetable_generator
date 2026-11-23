@@ -262,6 +262,17 @@ GUARDS = {
     "me": ('own',),
     "meta": ('setup',),
     "past_setups": ('committee',),
+    # Plan with AI (plan/web.py): whoever may change exams, as the exam pages (the rights are checked again at every step)
+    "plan_web.page": ('exams', 'committee'),
+    "plan_web.start": ('exams', 'committee'),
+    "plan_web.talks": ('exams', 'committee'),
+    "plan_web.talk": ('exams', 'committee'),
+    "plan_web.say": ('exams', 'committee'),
+    "plan_web.paste": ('exams', 'committee'),
+    "plan_web.confirm": ('exams', 'committee'),
+    "plan_web.undo": ('exams', 'committee'),
+    "plan_web.stop": ('exams', 'committee'),
+    "plan_web.close": ('exams', 'committee'),
     "pdf_custom": ('timetable',),
     "pdf_me": ('own',),
     "pdf_one": ('timetable',),
@@ -352,6 +363,11 @@ EVENTS_ENDPOINTS = ("events_one_page", "events_list", "events_create", "events_g
                     "events_away", "events_who", "events_handled",   # exams stage 3: Handled ourselves on a backup
                     "events_in_charge")   # the timetable committee's alone, inside the route (_exams_can_approve)
 
+# Plan with AI (plan/web.py): the page and every /api/plan route, for whoever may change exams (the same right again inside, at
+# every step of a talk: the real Env's may())
+PLAN_ENDPOINTS = ("plan_web.page", "plan_web.start", "plan_web.talks", "plan_web.talk", "plan_web.say", "plan_web.paste",
+                  "plan_web.confirm", "plan_web.undo", "plan_web.stop", "plan_web.close")
+
 # every admin API route: the Admin extra (a committee member signed in with their password); the first admin: the committee; the
 # admin page: an admin, or the committee (sent to the first admin while there is none, else told it is an admin's)
 ADMIN_ENDPOINTS = ("admin_people", "admin_person", "admin_bulk", "admin_reset", "admin_ways", "admin_shared_off", "admin_students")
@@ -365,7 +381,7 @@ def the_guards_are_the_brief_s_table():
                            ("me", ("own",)), ("pdf_me", ("own",)), ("relief_home", ("relief", "relief.settings")), ("relief_me", ("relief",)),
                            ("relief_settings_page", ("relief.settings",)), ("relief_settings_get", ("relief.settings",)), ("relief_settings_put", ("relief.save",)),
                            ("relief_codes_csv", ("codes",)), ("relief_code_slips", ("codes",)), ("home", ("timetable",)), ("draft_preview_page", ("committee",))) + tuple(
-                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS) + tuple((e, ("exams", "committee", "timetable")) for e in EXAMS_DUTIES_PAGE) + EXAMS_SITE + tuple(
+                               (e, ("exams", "committee")) for e in EXAMS_ENDPOINTS + PLAN_ENDPOINTS) + tuple((e, ("exams", "committee", "timetable")) for e in EXAMS_DUTIES_PAGE) + EXAMS_SITE + tuple(
                                (e, ("committee", "timetable")) for e in EVENTS_ENDPOINTS) + tuple(
                                (e, ("admin",)) for e in ADMIN_ENDPOINTS) + (("admin_first", ("committee",)), ("admin_page", ("admin", "committee"))):
         assert need(endpoint) == want, (endpoint, need(endpoint))
@@ -381,6 +397,8 @@ def the_guards_are_the_brief_s_table():
     assert exams == every, sorted(exams ^ every)
     events = {r.endpoint for r in A.app.url_map.iter_rules() if "/events" in r.rule}
     assert events == set(EVENTS_ENDPOINTS), sorted(events ^ set(EVENTS_ENDPOINTS))
+    plan = {r.endpoint for r in A.app.url_map.iter_rules() if r.rule == "/plan" or r.rule.startswith("/api/plan/")}
+    assert plan == set(PLAN_ENDPOINTS), sorted(plan ^ set(PLAN_ENDPOINTS))
 
 @t
 def the_known_rights_are_every_right_the_table_gives():
@@ -635,5 +653,29 @@ def heads_change_only_their_own_departments_and_are_named_in_the_history():
     copies = com.get("/api/setup/copies").get_json(); assert copies
     r = com.post("/api/setup/restore", json=dict(id=copies[0]["id"])); assert r.status_code == 200, r.get_json()
     e = H.read(kinds=["setup-replaced"], limit=1)[0]; assert (e["who"], e["text"][:8]) == (CORA, "Restored"), e
+
+from plan import ai as PAI  # noqa: E402
+PLAN_TILE = ("Plan with AI", "/plan")
+
+@t
+def the_plan_with_ai_tile_is_there_only_with_an_ai_and_the_exams_rights():
+    assert not PAI.enabled()                                          # no AI on this server: no tile for anyone
+    for keys in (person(ELI, "code"), person(ADA, "password"), person(TINA, "code")):
+        shown, greyed, page = tiles(client(keys))
+        assert PLAN_TILE not in shown and "Plan with AI" not in page, (keys, shown)
+    real = PAI.enabled
+    PAI.enabled = lambda: True
+    try:
+        shown, greyed, page = tiles(client(person(ELI, "code")))     # the Exams and events extra until tomorrow
+        assert shown == [("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams"), PLAN_TILE, ("History", "/history")], shown
+        assert "Plan an exam or a common test by talking it through" in page and greyed == []
+        shown, greyed, _ = tiles(client(person(ADA, "password")))    # the timetable committee
+        assert shown == [("Committee page", "/"), ("Timetables", "/timetable"), ("Relief", "/relief"), ("Exams and events", "/exams"), PLAN_TILE,
+                         ("Admin", "/admin"), ("History", "/history")] and greyed == [], shown
+        for keys in (person(TINA, "code"), person(MAX, "code"), person(ADA, "code"), person(HAL, "password")):   # no exams right: no tile, never greyed
+            shown, greyed, page = tiles(client(keys))
+            assert PLAN_TILE not in shown and "Plan with AI" not in page and all(l != "/plan" for _, l in greyed), (keys, shown, greyed)
+            assert ("My exam and event duties", "/exams") in shown, "their own duties tile stays as it was"
+    finally: PAI.enabled = real
 
 print(f"{COUNT} route tests passed")

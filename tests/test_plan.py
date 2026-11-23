@@ -3127,4 +3127,372 @@ def a_name_in_a_check_goes_to_the_ai_as_a_code_and_the_person_sees_the_name():
     same(texts(talk, "sys")[-1], f"Not checked while {TAN} is away.")
 
 
+# ---------------------------------------------------------------- the server side: the routes, the real Env, the tile
+import contextlib  # noqa: E402
+_stderr = sys.stderr; sys.stderr = io.StringIO()
+try:
+    import app as A  # noqa: E402   (its start-up lines go to stderr: not this suite's output)
+finally: sys.stderr = _stderr
+import flask, store, history as HI  # noqa: E402
+import relief.settings as RSET  # noqa: E402
+from accounts import people as ACC, passwords as PWH  # noqa: E402
+from exams import approval as XAP  # noqa: E402
+from plan import web as W  # noqa: E402
+
+W_PUB = F.sample_pub()
+store.published = lambda: W_PUB                          # the published timetable of every route test below
+os.makedirs(os.path.dirname(RSET.PATH), exist_ok=True)
+store.write_json(RSET.PATH, dict(calendar=CAL))
+W_TOMORROW = (_dt.date.today() + _dt.timedelta(days=1)).isoformat()
+W_YESTERDAY = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
+UNA, DEV, BEN = "Ms Una Lee", "Mr Dev Ong", "Mr Ben Ho"   # made up: two on the exams committee until tomorrow, a teacher
+W_RECORDS = {UNA: dict(group="teacher", added=True, extras=dict(relief=False, exams=W_TOMORROW, admin=False)),
+             DEV: dict(group="teacher", added=True, extras=dict(relief=False, exams=W_TOMORROW, admin=False), username="dev.ong",
+                       pw=PWH.hash_pw(secrets.token_hex(8))),
+             BEN: dict(group="teacher", added=True)}
+def w_records():
+    """the made-up people as W_RECORDS has them (a test may change one; the next sets it back)"""
+    def put(d):
+        for n, r in W_RECORDS.items(): d["people"][n] = copy.deepcopy(r)
+        d["ways"]["off"]["committee"] = None
+    ACC.update(put)
+w_records()
+OFF_SENTENCE = {"error": "Plan with AI is not set up on this server."}
+AGAIN = {"error": "Please sign in again."}
+LOST_ANSWER = {"error": T.LOST}
+WRONG_ANSWER = {"error": "Check what was sent and try again."}
+W_ROUTES = (("GET", "/api/plan/start"), ("POST", "/api/plan/talks"), ("GET", "/api/plan/talks/x"), ("POST", "/api/plan/talks/x/say"),
+            ("POST", "/api/plan/talks/x/list"), ("POST", "/api/plan/talks/x/list/y"), ("POST", "/api/plan/talks/x/undo"),
+            ("POST", "/api/plan/talks/x/stop"), ("DELETE", "/api/plan/talks/x"))
+
+def w_person(name, via="code"):
+    c = A.app.test_client()
+    with c.session_transaction() as s:
+        s.update(who=name, via=via, n=ACC.record(ACC.load(), name)["n"])
+        if via == "password": s["exp"] = time.time() + 3600
+    return c
+
+def w_committee():
+    c = A.app.test_client()
+    with c.session_transaction() as s: s.update(role="committee")
+    return c
+
+def w_session(c):
+    with c.session_transaction() as s: return dict(s)
+
+@contextlib.contextmanager
+def ai_on(call=None):
+    """the AI counts as set up, the routes' answers run on call, and nothing can reach the real AI"""
+    reached = []
+    def no_network(*a, **k):
+        reached.append(1); raise AssertionError("a test reached for the real AI")
+    real = AI.enabled, AI._real_call, W.CALL
+    AI.enabled, AI._real_call, W.CALL = (lambda: True), no_network, call
+    try: yield
+    finally: AI.enabled, AI._real_call, W.CALL = real
+    assert not reached, "a test reached for the real AI"
+
+def w_done(c, id, after=0):
+    """poll the talk as the page does until its answer has ended -> the view"""
+    end = time.monotonic() + WAIT
+    while True:
+        r = c.get(f"/api/plan/talks/{id}?after={after}")
+        assert r.status_code == 200, (r.status_code, r.get_json())
+        j = r.get_json()
+        if not j["working"]: return j
+        assert time.monotonic() < end, "the answer did not end in time"
+        time.sleep(0.05)
+
+def w_exams(exam=None):
+    """the history's exams entries, oldest first (of one exam when given)"""
+    return [e for e in reversed(HI.read(kinds=["exams"], limit=10 ** 6)) if exam is None or e.get("exam") == exam]
+
+def answered(r, status, body=None):
+    j = r.get_json(silent=True)
+    assert r.status_code == status, (r.status_code, j)
+    if body is not None: same(j, body)
+    return j
+
+@t
+def plan_with_ai_is_off_without_an_ai_on_the_server():
+    fresh(); no_schedules(); w_records()
+    assert not AI.enabled() and W.CALL is None
+    talks = dict(T._talks)
+    c = w_person(UNA)
+    for method, url in W_ROUTES:
+        answered(c.open(url, method=method, json={}), 404, OFF_SENTENCE)
+    r = c.get("/plan"); same(r.status_code, 200)                     # the page still opens: it shows the sentence
+    assert "Plan with AI" not in c.get("/home").get_data(as_text=True), "no tile without an AI"
+    same(answered(c.get("/api/exams"), 200)["plan"], False)
+    same(T._talks, talks)
+
+@t
+def the_start_lists_what_the_chat_may_change_for_whoever_may_change_exams():
+    fresh(); no_schedules(); w_records()
+    a = XS.save(XS.new("exam", "Prelims 2026", ["Sec 4"], "2026-10-05", "2026-10-06", UNA, pub=W_PUB), W_PUB, CAL, UNA)
+    b = XS.save(XS.new("test", "Common Test 2", ["Sec 3"], "2026-10-07", "2026-10-07", UNA, pub=W_PUB), W_PUB, CAL, UNA)
+    w = XS.new("exam", "Waiting Exam", ["Sec 3"], "2026-10-08", "2026-10-08", UNA, pub=W_PUB); w["status"] = "waiting"
+    w = XS.save(w, W_PUB, CAL, UNA)
+    store.write_json(XS._path("ev0000001"), dict(id="ev0000001", kind="event", name="Sports Day", status="draft"))
+    talks = dict(T._talks)
+    with ai_on():
+        for c in (w_person(UNA), w_committee(), w_person(DEV, "password")):
+            j = answered(c.get("/api/plan/start"), 200)
+            same(set(j), {"enabled", "missing", "exams"}); same(j["enabled"], True)
+            same(j["missing"], facts.missing(W_PUB, CAL, XSET.load(W_PUB)))
+            same(sorted(x["id"] for x in j["exams"]), sorted([a["id"], b["id"]]))       # never the waiting exam, never an event
+            for x in j["exams"]:
+                s = XS.load(x["id"]); same(x, dict(id=s["id"], name=s["name"], status=XAP.label(s, A._exams_today())))
+            stamps = [XS.load(x["id"])["saved_at"] for x in j["exams"]]
+            same(stamps, sorted(stamps, reverse=True))                  # newest first
+            same(answered(c.get("/api/exams"), 200)["plan"], True)
+        answered(w_person(BEN).get("/api/plan/start"), 401, AGAIN)    # a teacher without the Exams extra
+        answered(A.app.test_client().get("/api/plan/start"), 401, AGAIN)
+        answered(w_person(BEN).post("/api/plan/talks", json={}), 401, AGAIN)
+    same(T._talks, talks)
+
+@t
+def a_talk_over_http_starts_an_exam_takes_it_back_and_every_step_is_in_the_history():
+    fresh(); no_schedules(); w_records()
+    n0 = len(w_exams())
+    call = Script(reply(use("u1", "start_exam", dict(START_IN))), reply(say("I started it.")))
+    with ai_on(call):
+        c = w_person(UNA)
+        j = answered(c.post("/api/plan/talks", json={}), 200)
+        id = j["id"]; same(set(j), {"id", "view"})
+        same((j["view"]["lines"], j["view"]["exam"], j["view"]["working"], j["view"]["last"]), ([], None, False, 0))
+        v = answered(c.post(f"/api/plan/talks/{id}/say", json=dict(text="Plan the mid-year exam", after=0)), 200)
+        same((v["lines"][0]["kind"], v["lines"][0]["text"]), ("me", "Plan the mid-year exam"))   # the page has its own line at once
+        v = w_done(c, id)
+        same([l["kind"] for l in v["lines"]], ["me", "did", "ai"])
+        did = v["lines"][1]
+        same((did["text"], did["undo"], v["lines"][2]["text"]), ("Started the exam Mid-Year 2027", True, "I started it."))
+        exam = v["exam"]["id"]; s = XS.load(exam)
+        same((s["name"], s["saved_by"]), ("Mid-Year 2027", UNA))         # the schedule's saved_by stays the plain name
+        e = w_exams(exam); same(len(e), 1)
+        same({k: e[0].get(k) for k in ("kind", "what", "where", "link", "exam", "who", "as", "via")},
+             {"kind": "exams", "what": "create", "where": "Exams and events", "link": "/exams", "exam": exam, "who": UNA,
+              "as": f"{UNA}, with Plan with AI", "via": "code"})
+        assert e[0]["text"].startswith("Mid-Year 2027: "), e[0]
+        h = answered(c.get("/api/history"), 200)                        # her own history, with the chat's entry
+        assert any(x.get("exam") == exam and x["as"] == f"{UNA}, with Plan with AI" for x in h["entries"]), h
+        same(len(answered(c.get(f"/api/plan/talks/{id}?after={v['last']}"), 200)["lines"]), 0)
+        same(len(answered(c.get(f"/api/plan/talks/{id}?after=x"), 200)["lines"]), 3)    # a non-number after counts as 0
+        u = answered(c.post(f"/api/plan/talks/{id}/undo", json=dict(step=did["step"], after=v["last"])), 200)
+        same([(l["kind"], l["undo"]) for l in u["lines"]], [("did", False)])
+        same(u["lines"][0]["text"], "Taken back: Started the exam Mid-Year 2027")
+        assert XS.load(exam) is None
+        e = w_exams(exam); same([x["what"] for x in e], ["create", "delete"])   # one entry per step
+        same({x["as"] for x in e}, {f"{UNA}, with Plan with AI"})
+        same(len(w_exams()), n0 + 2)
+        answered(c.get("/api/history"), 200)
+        answered(c.get("/api/history?who=Una"), 200)
+        st = answered(c.post(f"/api/plan/talks/{id}/stop"), 200); same(st["working"], False)
+        answered(c.delete(f"/api/plan/talks/{id}"), 200, {"ok": True})
+        for method, url in W_ROUTES[2:]:
+            answered(c.open(url.replace("/x", "/" + id, 1), method=method, json={}), 410, LOST_ANSWER)
+    same(len(call.replies), 0)
+
+@t
+def the_shared_committee_code_talks_as_the_timetable_committee():
+    fresh(); no_schedules(); w_records()
+    call = Script(reply(use("u1", "start_exam", dict(START_IN))), reply(say("Done.")))
+    with ai_on(call):
+        c = w_committee()
+        id = answered(c.post("/api/plan/talks", json={}), 200)["id"]
+        sid = w_session(c).get("plan_sid")
+        assert isinstance(sid, str) and len(sid) >= 16, "the shared code's talks are the browser session's"
+        answered(c.post(f"/api/plan/talks/{id}/say", json=dict(text="Plan the mid-year exam")), 200)
+        v = w_done(c, id); exam = v["exam"]["id"]
+        same(XS.load(exam)["saved_by"], "Timetable committee")
+        e = w_exams(exam); same(len(e), 1)
+        same((e[0]["who"], e[0]["as"], e[0]["via"]), (None, "Timetable committee, with Plan with AI", "shared"))
+        answered(c.get("/api/history"), 200)
+        answered(w_committee().get(f"/api/plan/talks/{id}"), 410, LOST_ANSWER)     # another browser with the same code
+        assert all(not t_.owner.endswith(UNA) and "Timetable" not in t_.owner for t_ in T._talks.values())
+
+@t
+def a_talk_is_its_owner_s_alone_and_signing_out_drops_it():
+    fresh(); no_schedules(); w_records()
+    with ai_on():
+        una, dev, com = w_person(UNA), w_person(DEV), w_committee()
+        id = answered(una.post("/api/plan/talks", json={}), 200)["id"]
+        assert all(UNA not in t_.owner and "Una" not in t_.owner for t_ in T._talks.values()), "the owner is never the name"
+        for c in (dev, com):
+            for method, url in W_ROUTES[2:]:
+                answered(c.open(url.replace("/x", "/" + id, 1), method=method, json={}), 410, LOST_ANSWER)
+        answered(una.get(f"/api/plan/talks/{id}"), 200)
+        mine = answered(w_person(UNA).get(f"/api/plan/talks/{id}"), 200)    # the same person in another browser
+        same(mine["lines"], [])
+        cid = answered(com.post("/api/plan/talks", json={}), 200)["id"]
+        answered(w_committee().get(f"/api/plan/talks/{cid}"), 410, LOST_ANSWER)
+        answered(una.get(f"/api/plan/talks/{cid}"), 410, LOST_ANSWER)
+        assert una.get("/logout").status_code == 302
+        assert id not in T._talks and cid in T._talks, "signing out drops the person's talks, and only theirs"
+        answered(w_person(UNA).get(f"/api/plan/talks/{id}"), 410, LOST_ANSWER)
+        assert com.get("/logout").status_code == 302
+        assert cid not in T._talks
+
+@t
+def a_right_that_ends_between_two_messages_refuses_the_next_and_changes_nothing():
+    fresh(); no_schedules(); w_records()
+    call = Script(reply(say("Tell me more.")))
+    with ai_on(call):
+        for end in (lambda d: d["people"][UNA]["extras"].update(exams=W_YESTERDAY),      # the Exams extra ended yesterday
+                    lambda d: d["people"][UNA].update(off=True)):                       # switched off on the admin page
+            w_records(); fresh(); call.replies = [reply(say("Tell me more."))]
+            c = w_person(UNA)
+            id = answered(c.post("/api/plan/talks", json={}), 200)["id"]
+            answered(c.post(f"/api/plan/talks/{id}/say", json=dict(text="Plan an exam")), 200); w_done(c, id)
+            n, saved = len(w_exams()), XS.all_saved()
+            with A.app.test_request_context():
+                flask.session.update(who=UNA, via="code", n=0)
+                env = A.AppEnv(A._plan_snapshot())
+            env.may()
+            ACC.update(end)
+            answered(c.post(f"/api/plan/talks/{id}/say", json=dict(text="Plan the mid-year exam")), 401, AGAIN)   # the guard, as on the exam pages
+            same((len(w_exams()), XS.all_saved(), len(T._talks[id].lines)), (n, saved, 2))
+            raises(Refused, env.may, OPEN)                               # and the chat's own check says the exam page's sentence
+    w_records()
+
+@t
+def a_right_that_ends_while_the_ai_answers_refuses_its_step_and_changes_nothing():
+    for end, who in ((lambda d: d["people"][UNA]["extras"].update(exams=W_YESTERDAY), UNA),
+                     (lambda d: d["people"][UNA].update(off=True), UNA),
+                     (lambda d: d["ways"]["off"].update(committee="2026-11-23T08:00:00"), None)):   # the shared code turned off
+        fresh(); no_schedules(); w_records()
+        n = len(w_exams())
+        call = Script(reply(use("u1", "start_exam", dict(START_IN))), reply(say("Done.")), before=lambda m, s: len(call.sent) == 1 and ACC.update(end))
+        with ai_on(call):
+            c = w_person(UNA) if who else w_committee()
+            id = answered(c.post("/api/plan/talks", json={}), 200)["id"]
+            answered(c.post(f"/api/plan/talks/{id}/say", json=dict(text="Plan the mid-year exam")), 200)
+            talk = T._talks[id]; ended(talk)
+            same(results(call.sent[1])["u1"], OPEN)                       # the AI is told the exam page's sentence
+            same((XS.all_saved(), len(w_exams())), ([], n))               # nothing was started and nothing is in the history
+            same([l["kind"] for l in talk.lines], ["me", "ai"])
+            answered(c.get(f"/api/plan/talks/{id}"), 401, AGAIN)            # the next request: the session no longer holds
+    w_records()
+
+@t
+def the_real_env_works_on_a_plain_thread_with_no_request():
+    fresh(); no_schedules(); w_records()
+    n = len(w_exams())
+    for keys, name, as_ in ((dict(who=UNA, via="code", n=0), UNA, f"{UNA}, with Plan with AI"),
+                            (dict(role="committee"), "Timetable committee", "Timetable committee, with Plan with AI")):
+        with A.app.test_request_context():
+            flask.session.update(keys)
+            env = A.AppEnv(A._plan_snapshot())
+        same(env.name, name)
+        out = {}
+        def every():
+            try:
+                assert not flask.has_request_context() and not flask.has_app_context()
+                out["may"] = env.may()
+                out["pub"] = env.pub() is W_PUB
+                out["cal"] = env.cal() == CAL
+                out["settings"] = env.settings() == XSET.load(W_PUB)
+                out["people"] = env.people() == ACC.listing(W_PUB)
+                out["today"] = env.today() == A._exams_today()
+                saved = env.create("exam", "Mid-Year 2027", ["Sec 3"], [], "2026-10-05", "2026-10-09", "started")
+                out["load"] = env.load(saved["id"]) == saved
+                out["all_saved"] = [s["id"] for s in env.all_saved()] == [saved["id"]]
+                before, after = env.change(saved["id"], lambda s: s.update(name="Mid-Year Exam 2027"), lambda b, a: f"renamed {b['name']}")
+                out["change"] = (before["name"], after["name"], after["saved_by"]) == ("Mid-Year 2027", "Mid-Year Exam 2027", name)
+                gone = env.remove(saved["id"], after["rev"], "deleted")
+                out["remove"] = gone["id"] == saved["id"] and env.load(saved["id"]) is None
+                out["exam"] = saved["id"]
+            except Exception as e:
+                out["error"] = repr(e)
+        th = threading.Thread(target=every); th.start(); th.join(WAIT)
+        assert not th.is_alive() and "error" not in out, out
+        same({k: v for k, v in out.items() if k != "exam"}, dict(may=None, pub=True, cal=True, settings=True, people=True, today=True, load=True,
+                                                                 all_saved=True, change=True, remove=True))
+        e = w_exams(out["exam"])
+        same([(x["what"], x["as"], x["link"]) for x in e], [(w, as_, "/exams") for w in ("create", "edit", "delete")])
+        same(e[1]["text"], "Mid-Year Exam 2027: renamed Mid-Year 2027")
+    same(len(w_exams()), n + 6)
+
+@t
+def odd_input_is_refused_with_a_sentence_and_never_a_500():
+    fresh(); no_schedules(); w_records()
+    with ai_on(Script()):
+        c = w_person(UNA)
+        for body in ([1], "x", 5, dict(exam=5), dict(exam=["x"])):
+            answered(c.post("/api/plan/talks", json=body), 400, WRONG_ANSWER)
+        answered(c.post("/api/plan/talks", data="{not json", content_type="application/json"), 400, WRONG_ANSWER)
+        answered(c.post("/api/plan/talks", json=dict(exam="nope")), 400, {"error": "That exam is not there any more."})
+        id = answered(c.post("/api/plan/talks", json={}), 200)["id"]
+        u = f"/api/plan/talks/{id}"
+        for body in ([1], dict(text=5), dict(text="hi", pick=3), dict(text="hi", after="2"), dict(text="hi", after=True), dict(text=None)):
+            answered(c.post(u + "/say", json=body), 400, WRONG_ANSWER)
+        answered(c.post(u + "/say", json=dict(text="  ")), 400, {"error": T.EMPTY})
+        answered(c.post(u + "/say", json=dict(text="hi", pick="Yes")), 400, {"error": T.NO_PICK})
+        for body in ([1], dict(step=5), dict(step=None)):
+            answered(c.post(u + "/undo", json=body), 400, WRONG_ANSWER)
+        answered(c.post(u + "/undo", json=dict(step="nope")), 400, {"error": T.NO_STEP})
+        answered(c.post(u + "/list/L1", json=dict(yes=True)), 400, {"error": "Reading a list comes next."})   # Task 10 reads lists
+        for body in (dict(yes="yes"), dict(), [True]):
+            answered(c.post(u + "/list/L1", json=body), 400, WRONG_ANSWER)
+        got, real = [], T.paste
+        def paste(talk, env, text=None, filename=None, data=None, call=None):
+            got.append((talk.id, text, filename, data, call is W.CALL)); raise Refused(T.LIST_NEXT)
+        T.paste = paste
+        try:
+            answered(c.post(u + "/list", json=dict(text="Sec 3, English, Paper 1, 90")), 400, {"error": T.LIST_NEXT})
+            answered(c.post(u + "/list", data={"file": (io.BytesIO(b"PK\x03\x04 a book"), "papers.xlsx")}, content_type="multipart/form-data"), 400, {"error": T.LIST_NEXT})
+            same(got, [(id, "Sec 3, English, Paper 1, 90", None, None, True), (id, None, "papers.xlsx", b"PK\x03\x04 a book", True)])
+            for body in (dict(text=5), dict(), [1]):
+                answered(c.post(u + "/list", json=body), 400, WRONG_ANSWER)
+            answered(c.post(u + "/list", data={"other": "x"}, content_type="multipart/form-data"), 400, WRONG_ANSWER)
+            big = b"x" * (LR.MOST_BYTES + 64 * 1024 + 1)
+            answered(c.post(u + "/list", data=big, content_type="application/octet-stream"), 400, {"error": LR.BAD_FILE})
+            answered(c.post(u + "/list", data={"file": (io.BytesIO(big), "big.xlsx")}, content_type="multipart/form-data"), 400, {"error": LR.BAD_FILE})
+            same(len(got), 2)                                           # nothing too big, odd or empty reached paste
+        finally: T.paste = real
+        answered(c.get(u + "?after=-3"), 200)
+        answered(c.delete(u), 200, {"ok": True})
+
+@t
+def nothing_of_a_talk_reaches_the_server_s_log():
+    fresh(); no_schedules(); w_records()
+    words, teacher = "Kumquat", "Ms Aisha Rahman"                       # a made-up teacher on the sample timetable
+    out, err = io.StringIO(), io.StringIO()
+    root, h = logging.getLogger(), Logged()
+    h.setLevel(logging.DEBUG)
+    class Formatted(logging.Handler):
+        def emit(self, r): h.lines.append(self.format(r))
+    fh = Formatted(); fh.setLevel(logging.DEBUG)
+    level = root.level
+    root.addHandler(fh); root.setLevel(logging.DEBUG)
+    real_out, real_err, real_view = sys.stdout, sys.stderr, T.view
+    call = Script(reply(say(f"About {teacher}: noted."), use("u1", "start_exam", dict(START_IN))), reply(say(f"{teacher} and the {words} plan.")))
+    try:
+        sys.stdout, sys.stderr = out, err
+        with ai_on(call):
+            c = w_person(UNA)
+            id = c.post("/api/plan/talks", json={}).get_json()["id"]
+            r = c.post(f"/api/plan/talks/{id}/say", json=dict(text=f"Plan the {words} exam with {teacher} as chief"))
+            assert r.status_code == 200, r.get_json()
+            v = w_done(c, id)
+            fails = []
+            def broken(*a, **k):
+                fails.append(1); raise RuntimeError(f"{words} {teacher}")
+            T.view = broken
+            r = c.get(f"/api/plan/talks/{id}"); T.view = real_view
+            fails_status = (r.status_code, r.get_json())
+            c.post(f"/api/plan/talks/{id}/undo", json=dict(step=v["lines"][1]["step"]))
+            c.post(f"/api/plan/talks/{id}/stop"); c.delete(f"/api/plan/talks/{id}")
+    finally:
+        sys.stdout, sys.stderr, T.view = real_out, real_err, real_view
+        root.removeHandler(fh); root.setLevel(level)
+    same(fails_status, (500, {"error": "The app could not do that. Try again."}))
+    assert any("RuntimeError" in l for l in h.lines), h.lines               # the fault is logged: its type and frames
+    every = "\n".join(h.lines) + out.getvalue() + err.getvalue()
+    for bit in (words, teacher, "Aisha", "Rahman", "chief", "noted"):
+        assert bit.casefold() not in every.casefold(), (bit, every[-800:])
+    same([l["kind"] for l in v["lines"]], ["me", "did", "ai"])
+    assert teacher in v["lines"][0]["text"] and teacher in v["lines"][2]["text"], "the person sees the names"
+
+
 print(f"{COUNT} plan tests passed")

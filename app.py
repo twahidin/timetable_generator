@@ -5,7 +5,7 @@ to make the timetable, then upload that timetable, check it and publish it.
 Teachers (TEACHER_CODE): every published class, teacher, room and student timetable, Who's free, PDFs.
 Students (STUDENT_CODE): class timetables and 'Build my timetable'; personal codes show one student's own timetable.
 Staff (a personal code each, made from their name): the Relief module and everything the teacher code opens."""
-import copy, datetime, gzip, hmac, io, json, os, re, shutil, sys, tempfile, time, traceback, urllib.parse, zipfile
+import copy, datetime, gzip, hmac, io, json, os, re, secrets, shutil, sys, tempfile, time, traceback, urllib.parse, zipfile
 from functools import wraps
 from flask import Flask, jsonify, request, send_file, abort, session, redirect, Response, g
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -18,6 +18,7 @@ from accounts import passwords, people, rights as rights_table
 from relief import codes as relief_codes, fill as relief_fill, lessons as relief_lessons, people as relief_people, settings as relief_settings, web as relief_web
 from relief import absences as relief_absences
 import exams.relief_links as exams_relief_links
+from plan import ai as plan_ai, steps as plan_steps, web as plan_web
 from ttgen import choices
 import exams.approval as exams_approval, exams.review as exams_review, exams.days as exams_days, exams.settings as exams_settings, exams.schedules as exams_schedules, exams.papers as exams_papers, exams.invigilate as exams_invigilate, exams.make as exams_make, exams.seating as exams_seating, exams.printouts as exams_printouts, exams.published as exams_published, exams.events as exams_events
 
@@ -442,6 +443,7 @@ def login_recover():
 
 @app.get("/logout")
 def logout():
+    plan_web.signed_out(_plan_owners_of_session())   # a talk of Plan with AI is gone when its person signs out
     session.clear(); return redirect("/login")
 
 # the tiles of the home page, in order: (title, what it opens, link, the rights that show it)
@@ -449,6 +451,7 @@ TILES = (("Committee page", "Set up, check and publish the timetable", "/", ("se
          ("Timetables", "Classes, teachers, rooms, Who's free", "/timetable", ("timetable",)),
          ("Relief", "Ask for relief, your reliefs", "/relief", ("relief", "relief.settings")),
          ("Exams and events", "", "/exams", ("exams", "committee")),
+         ("Plan with AI", "Plan an exam or a common test by talking it through", "/plan", ("exams", "committee")),
          ("Admin", "Staff, students and the ways in", "/admin", ("admin",)),
          ("History", "Who changed what, and when", "/history", ("history", "history.dept", "history.own")))
 OWN_HISTORY = "Your own changes"
@@ -469,6 +472,7 @@ def _tiles(p):
     out = []
     for title, line, link, need_ in TILES:
         if link == "/exams" and not _route_exists("/exams"): continue
+        if link == "/plan" and not plan_ai.enabled(): continue        # no AI on the server: no tile, for anyone
         if mine & set(need_):
             until = p["extras"].get("exams") if link == "/exams" else None
             if link == "/history" and not mine & {"history", "history.dept"}: line = OWN_HISTORY     # only their own changes are there
@@ -2207,6 +2211,85 @@ def admin_first():
     _start(who=name, via="password", n=n, exp=time.time() + FORTNIGHT); _note_signin(name)
     return redirect("/admin")
 
+# ------------------------------------------------------------------------------------------------ Plan with AI (plan/)
+# The chat has exactly the rights of the person typing: its Env is built in the request from a snapshot of who is asking and
+# then never reads the request again (an answer runs on a thread of its own, with no request), re-reading the records at
+# every step. Its saves are the exam pages' own (plan.steps' rules), recorded as "<name>, with Plan with AI".
+def _plan_snapshot():
+    """who is asking, as the chat's Env keeps it: the person's name (None for the shared committee code), how they signed
+    in, their record's sign-in number, the password session's end, the shared code, the saved-by name and by()"""
+    p = who()
+    rights = _exams_rights(store.published())
+    return dict(name=p["name"] if p else None, via=via(), n=p["n"] if p else None, exp=session.get("exp"), shared=shared(),
+                saved_by=rights[1] if rights else None, by=by())
+
+class AppEnv:
+    """plan.steps' Env for the app (plan/steps.py's Env protocol). No method touches the request, the session, g, who(),
+    has(), rights(), via() or by(): each works on a plain thread"""
+    def __init__(self, snap):
+        self._snap, self.name = dict(snap), snap["saved_by"]
+
+    def may(self):
+        """the person may change exams now, from the records read again (as _check and accounts/rights.py work it out on every
+        request), else Refused with the exam page's sentence"""
+        s, no = self._snap, plan_steps.Refused(ONLY_EXAMS)
+        if s["name"] is None:
+            if s["via"] != "shared" or s["shared"] != "committee" or people.load()["ways"]["off"].get("committee") is not None: raise no
+            return
+        if not people.readable(): raise no
+        data, pub = people.load(), store.published()
+        p = people.find(s["name"], pub, data)
+        if p is None:
+            if s["via"] == "password" or pub: raise no
+            p = _stand_in(s["name"], data)
+        if p["off"] or p["n"] != s["n"]: raise no
+        if s["via"] == "password" and not (p.get("pw") and isinstance(s["exp"], (int, float)) and time.time() < s["exp"]): raise no
+        if not rights_table.rights(p, s["via"], None) & {"exams", "committee"}: raise no
+
+    def pub(self): return store.published()
+    def cal(self): return _exam_cal(self.pub())
+    def settings(self): return exams_settings.load(self.pub())
+    def people(self): return people.listing(self.pub())
+    def all_saved(self): return exams_schedules.all_saved()
+    def today(self): return _exams_today()
+    def load(self, id): return exams_schedules.load(id)
+
+    def _record(self, what):
+        """plan.steps' record(entry): one history entry as an exam page's save writes it, by "<name>, with Plan with AI" """
+        def record(entry):
+            _exams_entry(what, entry["text"], entry.get("exam"), "/exams", by_=dict(self._snap["by"], **{"as": entry["by"]}))
+        return record
+
+    def create(self, kind, name, levels, classes, start, end, words):
+        return plan_steps.do_create(self, kind, name, levels, classes, start, end, words, self._record("create"))
+    def change(self, id, fn, words): return plan_steps.do_change(self, id, fn, words, self._record("edit"))
+    def remove(self, id, rev, words): return plan_steps.do_remove(self, id, rev, words, self._record("delete"))
+
+def _plan_person(name):
+    """a person's talks are theirs in any browser: keyed by a keyed hash of their name, never the name itself"""
+    key = app.secret_key if isinstance(app.secret_key, bytes) else str(app.secret_key).encode()
+    return "p:" + hmac.new(key, name.encode(), "sha256").hexdigest()[:32]
+
+def _plan_owner(create=False):
+    """the owner of this session's talks: the person's, or the shared committee code's browser session's (its own random
+    plan_sid, given at its first talk when create); None for anyone else"""
+    p = who()
+    if p: return _plan_person(p["name"])
+    if shared() != "committee": return None
+    sid = session.get("plan_sid")
+    if not isinstance(sid, str) or not sid:
+        if not create: return None
+        sid = session["plan_sid"] = secrets.token_urlsafe(16)
+    return "s:" + sid
+
+def _plan_owners_of_session():
+    """the owners whose talks this session holds, from the session as it stands (signing out drops them)"""
+    name, sid = session.get("who"), session.get("plan_sid")
+    return [_plan_person(name) if isinstance(name, str) and name else None, "s:" + sid if isinstance(sid, str) and sid else None]
+
+plan_web.init(need=need, env=lambda: AppEnv(_plan_snapshot()), owner=_plan_owner)
+app.register_blueprint(plan_web.bp)
+
 # ------------------------------------------------------------------------------------------------ staff: exams and events
 NO_EXAMS_PUB = "Publish the timetable first: exams read the classes, students and lessons from it."
 ONLY_EXAMS = "Only the exams committee and the timetable committee can open exams."
@@ -2302,10 +2385,11 @@ def _exam_json():
     d = request.get_json(force=True, silent=True)
     return d if isinstance(d, dict) else {}
 
-def _exams_entry(what, text, exam=None, link="/exams"):
+def _exams_entry(what, text, exam=None, link="/exams", by_=None):
     """one history entry for an exams or events save: who, what, which, a link (not field by field; exams keeps its own
-    record). An event's entry links to the event itself (/events/<id>). A failure to write it never fails the save"""
-    e = {"kind": "exams", "what": what, "where": "Exams and events", "text": text, "link": link, **by()}
+    record). An event's entry links to the event itself (/events/<id>). A failure to write it never fails the save.
+    by_: who it is by when not this request's by() (Plan with AI's steps, which run with no request)"""
+    e = {"kind": "exams", "what": what, "where": "Exams and events", "text": text, "link": link, **(by() if by_ is None else by_)}
     if exam: e["exam"] = exam
     try: history.add(e)
     except Exception as x: print(f"WARNING: an exams change could not be recorded in the history ({type(x).__name__})", file=sys.stderr, flush=True)
@@ -2437,7 +2521,7 @@ def exams_list():
     if err: return err
     m = pub["model"]
     return jsonify(schedules=_with_away(exams_schedules.listing(_exams_today(), exams_make.published_at(pub), kinds=("exam", "test")), pub), levels=m.get("levels") or [], classes=[[c["name"], c["level"]] for c in m.get("classes") or []],
-                   calendar_ok=bool(_exam_cal(pub).get("terms")))
+                   calendar_ok=bool(_exam_cal(pub).get("terms")), plan=plan_ai.enabled())   # plan: the page shows its Plan with AI button
 
 @app.post("/api/exams")
 @need("exams", "committee")
