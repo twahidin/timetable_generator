@@ -224,7 +224,7 @@ def annotate_marks_each_unit():
         assert by_id[e["id"]]["back"] == {"unit": "b:bann", "n": 2, "ok": False, "why": "Can't put back: Bob Tan changed this again on " + H.short_when(c[0]["ts"])}
     assert "back" not in by_id[b[0]["id"]]
     assert by_id[c[0]["id"]]["back"] == {"unit": "b:bcc", "n": 1, "ok": True, "why": None}
-    assert P.PUTTABLE == {"group", "depts", "relief", "exams", "admin", "note", "off"}
+    assert P.PUTTABLE == {"group", "depts", "timetable", "relief", "exams", "admin", "note", "off"}
 
 @t
 def skipped_and_unchanged_ops_give_no_entry():

@@ -9,13 +9,16 @@ import history
 import sync
 
 TOUCH_KINDS = {"setup", "app", "setup-replaced", "account"}
-PUTTABLE = {"group", "depts", "relief", "exams", "admin", "note", "off"}
+PUTTABLE = {"group", "depts", "timetable", "relief", "exams", "admin", "note", "off"}
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 _ADMIN = "Can't put back a new person, a username or a password here: change it on the admin page."
 _OLD = "Can't put back: this change was recorded before Put back existed. Change it on its step."
 _SINCE = "Can't put back: this was changed again since."
 _TAKEN = "Can't put back: another band is called {} now."
 _JOINED = "Can't put back: lessons or rules joined {} after this change."
+REMOVED = "Can't put back: add {} again with Add a person."
+REMOVED_SINCE = "Can't put back: {} was removed since. Make the change on the admin page."
+OLD_GROUP = "Can't put back: this is from before roles and committees were separated. Make the change on the admin page."
 
 
 def _readable(changes):
@@ -83,7 +86,8 @@ def _touches(e):
     if kind == "account":
         changes = e.get("changes") if isinstance(e.get("changes"), list) else []
         keys = {("a", _plain(c.get("name")), _plain(c.get("field"))) for c in changes if isinstance(c, dict)}
-        return keys, keys
+        gone = {("a", _plain(c.get("name")), "removed") for c in changes if isinstance(c, dict)}   # a later removal of any of them blocks it
+        return keys, keys | gone
     op, sec, row, field = e.get("op"), _plain(e.get("section")), _plain(e.get("row")), _plain(e.get("field"))
     if op in ("set", "merge"):
         return {("f", sec, row, field), ("r", sec, row)}, {("f", sec, row, field), ("d", sec, row)}
@@ -128,6 +132,17 @@ def why_not(unit_entries, newer, today=None):
     account = first.get("kind") == "account"
     if account:
         changes = [c for e in unit_entries for c in e.get("changes") or [] if isinstance(c, dict)]
+        gone = next((c for c in changes if c.get("field") == "removed"), None)
+        if gone is not None:
+            return REMOVED.format(gone["name"])   # a removal is undone only by adding them again
+        ids = {e.get("id") for e in unit_entries}
+        since = {_plain(c.get("name")) for b in newer if b.get("kind") == "account" and b.get("id") not in ids and isinstance(b.get("changes"), list)
+                 for c in b["changes"] if isinstance(c, dict) and c.get("field") == "removed"}
+        named = next((c["name"] for c in changes if _plain(c.get("name")) in since), None)
+        if named is not None:
+            return REMOVED_SINCE.format(named)   # someone added again starts with nothing: what came before the removal stays
+        if any(c.get("field") == "group" and "committee" in (c.get("was"), c.get("now")) for c in changes):
+            return OLD_GROUP     # the committee was a group then and is a tick now: the entry is refused whole
         if any(c.get("field") not in PUTTABLE for c in changes):
             return _ADMIN
         today = today or datetime.datetime.now(history.SCHOOL_TZ).date()

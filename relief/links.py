@@ -151,6 +151,17 @@ def blocked(name):
     return tgdb.get_state(BLOCKED + name)
 
 
+def forget(name):
+    """a person removed on the admin page: their link (and any talk open in its chat) and every link code of theirs, used
+    or not, go in one transaction -> the chat that was theirs, or None"""
+    with tgdb.db() as c:
+        r = c.execute("SELECT chat FROM links WHERE name=?", (name,)).fetchone()
+        c.execute("DELETE FROM links WHERE name=?", (name,))
+        if r is not None: c.execute("DELETE FROM talks WHERE chat=?", (r["chat"],))
+        c.execute("DELETE FROM codes WHERE name=?", (name,))
+        return r["chat"] if r else None
+
+
 def unlink_chat(chat):
     """-> the name the chat was linked to (there or not), or None"""
     r = _drop("chat", chat)
@@ -171,7 +182,9 @@ def _accounts_now():
 
 
 def _stand_in(name, data):
-    """app.py's _stand_in: a person while nothing is published, from their record"""
+    """app.py's _stand_in: a person while nothing is published, from their record; None for a name removed on the admin page
+    that has no record since"""
+    if name in data["removed"] and not isinstance(data["people"].get(name), dict): return None
     r = _accounts.record(data, name)
     return dict(name=name, short=name, depts=list(r["depts"]), role="", teaches=False, staff_only=False, group=r["group"] or "teacher",
                 extras=r["extras"], username=r["username"], off=r["off"], has_password=bool(r["pw"]), last=max(r["signins"], default=None),
