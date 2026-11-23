@@ -151,6 +151,17 @@ def blocked(name):
     return tgdb.get_state(BLOCKED + name)
 
 
+def forget(name):
+    """a person removed on the admin page: their link (and any talk open in its chat) and every link code of theirs, used
+    or not, go in one transaction -> the chat that was theirs, or None"""
+    with tgdb.db() as c:
+        r = c.execute("SELECT chat FROM links WHERE name=?", (name,)).fetchone()
+        c.execute("DELETE FROM links WHERE name=?", (name,))
+        if r is not None: c.execute("DELETE FROM talks WHERE chat=?", (r["chat"],))
+        c.execute("DELETE FROM codes WHERE name=?", (name,))
+        return r["chat"] if r else None
+
+
 def unlink_chat(chat):
     """-> the name the chat was linked to (there or not), or None"""
     r = _drop("chat", chat)
@@ -184,7 +195,9 @@ def _there(name):
     if data is None: return None
     pub = store.published()
     p = _accounts.find(name, pub, data)
-    if p is None and not pub: p = _stand_in(name, data)
+    if p is None and not pub:
+        if name in data["removed"] and not isinstance(data["people"].get(name), dict): return None   # removed on the admin page: nobody
+        p = _stand_in(name, data)
     if p is None or p["off"]: return None
     p.pop("pw", None)
     return p

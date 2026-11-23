@@ -874,6 +874,7 @@ def an_old_committee_group_entry_is_not_put_back():
     mine = [x for x in c.get("/api/history", query_string=dict(where="Admin")).get_json()["entries"] if x["id"] == m["id"]][0]
     assert mine["back"]["ok"] is False and mine["back"]["why"] == OLD_GROUP, mine.get("back")
 
+import access  # noqa: E402
 import relief.links as RL  # noqa: E402
 
 ON_TIMETABLE_REMOVE = "{} is on the published timetable, so they cannot be removed: they would come straight back. Switch them off instead."
@@ -969,9 +970,11 @@ def removed_then_named_by_a_new_timetable():             # Review Focus 4
         assert p[0]["extras"] == dict(timetable=False, relief=False, exams=None, admin=False), p[0]["extras"]
         assert old.get("/api/day").status_code == 401 and "who" not in kept(old)
         assert post(c, "/api/admin/remove", name=KAI) == (400, {"error": ON_TIMETABLE_REMOVE.format(KAI)})
-        A._note_signin(KAI)                                                                     # a code sign-in makes their first record: from the number
-        assert KAI in P.load()["people"] and rec(KAI)["n"] == P.load()["removed"][KAI]
-        assert as_person(KAI).get("/api/day").status_code != 401 and old.get("/api/day").status_code == 401
+        code = access.staff_code(KAI); SECRETS.append(code)
+        new = A.app.test_client(); r = new.post("/login", data=dict(code=code))                 # a real code sign-in makes their first record
+        assert went(r, "/home"), r.status_code
+        assert KAI in P.load()["people"] and rec(KAI)["n"] == P.load()["removed"][KAI] == kept(new)["n"], (rec(KAI)["n"], kept(new))
+        assert new.get("/api/day").status_code != 401 and old.get("/api/day").status_code == 401
     finally:
         publish()
     assert not any(p["name"] == KAI for p in c.get("/api/admin/people").get_json()["people"])
@@ -980,9 +983,9 @@ def removed_then_named_by_a_new_timetable():             # Review Focus 4
 def a_failed_telegram_unlink_removes_nothing():
     c = admin(); MAY = "Ms May Added"
     assert post(c, "/api/admin/person", name=MAY, added=True)[0] == 200
-    real = RL.unlink
-    def broken(name, chat=None): raise OSError("the link store is locked")
-    RL.unlink = broken
+    real = RL.forget
+    def broken(name): raise OSError("the link store is locked")
+    RL.forget = broken
     try:
         before, n, err = raw(), len(accounts()), io.StringIO()
         with contextlib.redirect_stderr(err):
@@ -990,15 +993,60 @@ def a_failed_telegram_unlink_removes_nothing():
         assert err.getvalue() == "WARNING: a Telegram chat could not be unlinked (OSError)\n", err.getvalue()
         assert raw() == before and MAY in P.load()["people"] and len(accounts()) == n
     finally:
-        RL.unlink = real
+        RL.forget = real
     calls = []
-    def working(name, chat=None):
-        calls.append((name, chat, name in P.load()["people"])); return None
-    RL.unlink = working
-    try: assert post(c, "/api/admin/remove", name=MAY) == (200, {"done": True, "text": removed_text(MAY)})
-    finally: RL.unlink = real
-    assert calls == [(MAY, None, True)], calls                                                  # once, with the name, before the record went
-    assert MAY not in P.load()["people"]
+    def working(name):
+        calls.append((name, name in P.load()["people"]))
+        if len(calls) == 2: raise OSError("locked again")                                     # the second call failing does not undo the removal
+        return None
+    RL.forget = working
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err): assert post(c, "/api/admin/remove", name=MAY) == (200, {"done": True, "text": removed_text(MAY)})
+    finally: RL.forget = real
+    assert calls == [(MAY, True), (MAY, False)], calls                                       # before the record went, and once more after
+    assert err.getvalue() == "WARNING: a Telegram chat could not be unlinked after a removal (OSError)\n", err.getvalue()
+    assert MAY not in P.load()["people"] and accounts()[0]["what"] == "remove"
+
+@t
+def a_publish_naming_them_during_the_removal_refuses_it():
+    c = admin(); OLA = "Ms Ola Added"
+    assert post(c, "/api/admin/person", name=OLA, added=True)[0] == 200
+    real = RL.forget
+    def publishes(name): publish(TEACHERS + [dict(name=OLA, dept="HU")]); return real(name)   # a publish lands between the first read and the write
+    RL.forget = publishes
+    try:
+        n = len(accounts())
+        assert post(c, "/api/admin/remove", name=OLA) == (400, {"error": ON_TIMETABLE_REMOVE.format(OLA)})
+        assert OLA in P.load()["people"] and OLA not in P.load()["removed"] and len(accounts()) == n
+    finally:
+        RL.forget = real; publish()
+    assert post(c, "/api/admin/remove", name=OLA)[0] == 200
+
+@t
+def a_removed_person_cannot_link_telegram_with_nothing_published():
+    c = admin(); IDA = "Ms Ida Added"
+    assert post(c, "/api/admin/person", name=IDA, added=True, extras=dict(relief=True))[0] == 200
+    early = RL.new_code(IDA); SECRETS.append(early["code"])                                     # a link code made before the removal
+    assert RL._there(IDA) is not None
+    assert post(c, "/api/admin/remove", name=IDA)[0] == 200
+    with RL.tgdb.db(read=True) as k: assert k.execute("SELECT COUNT(*) FROM codes WHERE name=?", (IDA,)).fetchone()[0] == 0   # their codes went
+    away = store.PUB + ".away"
+    os.rename(store.PUB, away); store._cache.update(stamp=None, value=None)
+    try:
+        assert store.published() is None and RL._there(IDA) is None
+        assert RL.use(early["code"], 901, "ida") is None
+        late = RL.new_code(IDA); SECRETS.append(late["code"])                                   # a code made in the gap: refused as nobody
+        assert RL.use(late["code"], 901, "ida") is None and RL.chat_of(IDA) is None and RL.person(901) is None
+        assert RL._there(PRIYA) is not None                                                     # someone with a record is still there
+    finally:
+        os.rename(away, store.PUB); store._cache.update(stamp=None, value=None); RL.forget(IDA)
+    P.update(lambda d: d["removed"].update({"Ms Hand Built": 3}))                                # a hand-built removal, nothing published
+    os.rename(store.PUB, away); store._cache.update(stamp=None, value=None)
+    try: assert RL._there("Ms Hand Built") is None and RL._there("Ms Never Here") is not None   # only a removed name is refused
+    finally:
+        os.rename(away, store.PUB); store._cache.update(stamp=None, value=None)
+        P.update(lambda d: d["removed"].pop("Ms Hand Built"))
 
 @t
 def a_tick_for_someone_just_removed_says_so():           # Review Focus 5
@@ -1008,6 +1056,8 @@ def a_tick_for_someone_just_removed_says_so():           # Review Focus 5
     before = raw()
     assert post(c, "/api/admin/person", name=BO, extras=dict(relief=True)) == (400, {"error": not_staff(BO)})
     assert post(c, "/api/admin/remove", name=BO) == (400, {"error": not_staff(BO)})
+    A._note_signin(BO)                                                                          # a code sign-in that read the records before the removal
+    assert BO not in P.load()["people"] and rec(BO)["n"] == P.load()["removed"][BO]
     assert raw() == before
 
 

@@ -306,7 +306,9 @@ def _note_signin(name):
     """the time on the person's record (the last two are kept); a sign-in never fails for want of it"""
     def change(d):
         r = d["people"].get(name)
-        if not isinstance(r, dict): r = d["people"][name] = people.record(d, name)   # a first record starts from their sign-out number
+        if not isinstance(r, dict):
+            if not any(p["name"] == name for p in people.staff(store.published(), d)): return   # removed meanwhile: no record comes back
+            r = d["people"][name] = people.record(d, name)   # a first record starts from their sign-out number
         s = r.get("signins") if isinstance(r.get("signins"), list) else []
         r["signins"] = [x for x in s if isinstance(x, (int, float)) and not isinstance(x, bool)][-1:] + [time.time()]
     try: people.update(change)
@@ -2253,8 +2255,9 @@ def _remove_refusal(d, pub, me, name):
 @need("admin")
 def admin_remove():
     """remove a person who is not on the published timetable (added by name, or a record left after they left it): their
-    Telegram chat is unlinked first, then their record goes and `removed[name]` becomes their n + 1 in one update, so every
-    session of theirs ends and none comes back, even once they are added again. What they changed stays in the History"""
+    Telegram chat and link codes go first, then their record goes and `removed[name]` becomes their n + 1 in one update, so every
+    session of theirs ends and none comes back, even once they are added again; the chat and codes are dropped once more after
+    the write. What they changed stays in the History"""
     stop = _admin_off()
     if stop: return stop
     me, by_, pub = who()["name"], by(), store.published()
@@ -2264,12 +2267,12 @@ def admin_remove():
         if not isinstance(name, str): raise Refused(UNREAD_CHANGE)
         if not people.readable(): raise people.Unreadable(people.UNREADABLE)
         _remove_refusal(people.load(), pub, me, name)
-        try: relief_links.unlink(name)
+        try: relief_links.forget(name)   # their Telegram chat and link codes
         except Exception as e:
             print(f"WARNING: a Telegram chat could not be unlinked ({type(e).__name__})", file=sys.stderr, flush=True)
             return {"error": REMOVE_UNLINK}, 503
         def change(d):
-            item = _remove_refusal(d, pub, me, name)   # again, on the records as they are now
+            item = _remove_refusal(d, store.published(), me, name)   # again, on the records and the timetable as they are now
             r = people.record(d, name)
             was = dict(role=people.LABELS.get(item["group"], item["group"]), timetable=r["extras"]["timetable"], relief=r["extras"]["relief"],
                        exams=r["extras"]["exams"], admin=r["extras"]["admin"], depts=list(r["depts"]), username=r["username"], note=r["note"], off=r["off"])
@@ -2279,6 +2282,8 @@ def admin_remove():
         was = _update_as(me, change)
     except Refused as e: return {"error": str(e)}, 400
     except people.Unreadable: return {"error": people.UNREADABLE}, 503
+    try: relief_links.forget(name)   # again: a link or a code made since the first one goes too (the removal stands either way)
+    except Exception as e: print(f"WARNING: a Telegram chat could not be unlinked after a removal ({type(e).__name__})", file=sys.stderr, flush=True)
     _account_entry("remove", [name], [dict(name=name, field="removed", was=was, now=None)], f"Removed {name}", by_=by_)
     return jsonify(done=True, text=REMOVED.format(name))
 
