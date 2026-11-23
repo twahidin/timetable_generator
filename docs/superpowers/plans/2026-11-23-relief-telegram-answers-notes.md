@@ -217,6 +217,9 @@ In `/relief` (C):
 
 A, the ping:
 - An absence sent the evening before for today is not pinged (decision 2): the team sees it when they open Today.
+- The earliest a ping goes is exactly one hour before the first period. The report itself starts at a round time (07:00, 07:15
+  ...), so at a school whose first period does not begin on such a time the ping can come a few minutes before the first report.
+  It never comes in the night.
 - The number is the one when the ping was made, and is not rewritten. It counts lessons as the app holds them, so a lesson split in
   two parts reads "2 lessons".
 - A ping that was dropped (everything approved before it went, or the person off the team by then) is never made again for that
@@ -310,8 +313,16 @@ set); a line of `relief/outbox.py`'s description is long; `relief/asking.py` kee
   error in the page or the server. This was done before the final fix wave, and the settings card was seen as a relief team member;
   since that wave only the relief team sees the list, and a test covers the others.
 - The final review, of the whole branch: no Critical; two Important (the settings list showed the committee who was away; the ping
-  could come in the night), both fixed in the final fix wave (rulings FA1 and FA2); five Minor (two on these notes, one on the
-  README, all three fixed; three kept as known limits, ruling FA3).
+  could come in the night), both fixed in the final fix wave (rulings FA1 and FA2); five Minor (one on these notes and one on the
+  README, both fixed; three kept as known limits, ruling FA3).
+- The second review, of the final fix wave alone: every point addressed, nothing Critical or Important. Three small points: the
+  ping's start is not rounded to the report's interval (now under Known limits), a count in these notes (corrected), and a short
+  comment in a test (left).
+- After the final fix wave, every suite once more, one at a time: all 29 `tests/*.py` and all 23 `tests/*.test.js` pass
+  (`test_relief_telegram` 329, `test_relief_team` 74, `test_relief_requests` 59, `test_relief` 42, `test_exams_relief` 102,
+  `test_exams` 193, `test_routes` 19, `test_history` 47, `test_putback` 37, `smoke` 103, `test_board` 59,
+  `relief_settings.test.js` 23, `relief_telegram.test.js` 38, `relief_today.test.js` 40). The names check was run again on the
+  whole branch: 104 real staff names, 0 found; the school's full name 0; token and key shapes 0.
 - Final fix wave, one suite at a time at its end: `test_relief_telegram` 329 (two tests added, one of stage 4's changed: see the
   build's record above), `test_relief_team` 74, `test_relief_requests` 59, `test_routes` 19, `smoke` 103,
   `relief_settings.test.js` 23, `relief_telegram.test.js` 38; five deliberate faults, each caught.
