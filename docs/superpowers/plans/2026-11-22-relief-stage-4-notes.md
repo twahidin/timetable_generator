@@ -1,7 +1,8 @@
 # Relief stage 4 (Telegram): notes
 
 Built 22 and 23 November 2026 on branch `relief-stage-4` (from relief-stage-3 d693183; main merged in at 6b664d3, e18d0e3,
-f39b518, be22d11 and 19ac240), subagent-driven: a builder and a reviewer per task, a fix round where the review asked. Nothing pushed.
+f39b518, be22d11, 19ac240 and fbcad30), subagent-driven: a builder and a reviewer per task, a fix round where the review asked. Pushed and
+opened as a pull request on 23 November, on the lead's word; not merged.
 Plan: `2026-11-22-relief-stage-4-telegram.md`. Design: `../specs/2026-11-20-relief-module-design.md`.
 How to set it up and what leaves the server: `../../DEPLOY.md`, section 6 and "What leaves the server".
 
@@ -32,6 +33,8 @@ on its own pages. Without a token, or until Connect is pressed, nothing is sent 
 - After the fix wave's second review: main 19ac240 (PR #86, accounts stage 2: Put back, each person's own history, Change
   username) merged in without a conflict (b08b4ed), and the History download says "Telegram" for a change made there, as the
   History page does (Task 11, 6f490c6).
+- Before the pull request: main fbcad30 (PR #95, a teaching-group row not filled in no longer stops the check, the download or an
+  upload) merged in without a conflict (1a42984). It touches nothing of relief.
 
 ## Decisions the lead may change (the plan's 1 to 10)
 
@@ -385,6 +388,8 @@ In the app:
   the browser check were not done again after the fix wave: no page changed in it.
 - On the last code (after Task 11), every suite once more, one at a time: all 29 `tests/*.py` and all 23 `tests/*.test.js` pass,
   with the numbers above and `test_history` 47.
+- After the merge of main fbcad30 (1a42984), the code the pull request holds, every suite once more, one at a time: all 29
+  `tests/*.py` and all 23 `tests/*.test.js` pass, with the numbers above but `smoke` 103 and `test_board` 59 (main's new tests).
 - Names check on the whole branch against main 19ac240 (added lines and commit messages, counts only): 104 real staff names
   from the school's newest setup file, 0 found; the school's full name 0; bot token shapes 0; model key shapes 0; em-dashes in
   the guides' and these notes' new lines 0.

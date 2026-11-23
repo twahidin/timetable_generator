@@ -21,7 +21,7 @@ report, Weekly summary", "Module 1 … Ask for relief, Acknowledge, set work or 
 7, 8, 10 and 12 of `2026-11-20-relief-module-mockups.html`. Stage 3's notes: `2026-11-21-relief-stage-3-notes.md`.
 
 **Branch:** `relief-stage-4`, cut from `relief-stage-3` (d693183, PR #88), with this plan committed first. Main was merged in
-five times: 6b664d3 (Task 4b), e18d0e3 (Task 6b), f39b518 and be22d11 (Task 10), and 19ac240 (after the final fix wave). Where a ruling changed the text below it is changed
+six times: 6b664d3 (Task 4b), e18d0e3 (Task 6b), f39b518 and be22d11 (Task 10), and 19ac240 and fbcad30 (after the final fix wave). Where a ruling changed the text below it is changed
 in place, with the ruling's number; the rulings are in `2026-11-22-relief-stage-4-notes.md`.
 
 ## Decisions taken in this plan (the lead may change any)
