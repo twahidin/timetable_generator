@@ -11,7 +11,8 @@ with, sent by it again, is answered HELLO and changes nothing (links.again). A c
 answer, no deleteMessage, its code not tried. The count is made with the check (_counting, never held during a call to
 Telegram), so messages that come at once get no more.
 
-/start, /help and anything else from a linked chat: HELLO, but for a file or a photo that no conversation takes (asking.stray). /stop
+/start and /help from a linked chat: HELLO; anything else no conversation takes: NOT_READ (a line, a sticker, another command), but a
+file or a photo is said not to be attached (asking.stray). /stop
 unlinks. /relief asks for relief: relief/asking.py, which has all of that conversation (a talk of kind ASK); here it is only led to,
 by /relief, a press of one of its buttons, or a message while it goes on. It ends when another talk is opened in its place or a
 command is sent; when a day had been chosen by then the person is told that nothing was sent (asking.NOT_SENT), but for /relief, which
@@ -63,6 +64,7 @@ from relief import web as _web
 from relief import words
 
 HELLO = "Linked: {name}. You'll get your reliefs here. Send /relief to ask for relief, /stop to unlink."
+NOT_READ = "I can't read messages here. To answer a relief, press a button under it. Send /relief to ask for relief."
 NOT_LINKED = "This Telegram is not linked. Open Relief in the school's app, press Link Telegram and follow the link there."
 _BAD = "That code is not right or has run out. Get a new one in the app. If it was your personal code, do not send it here: it opens the app. "
 BAD_CODE = _BAD + "I have deleted your message."
@@ -184,7 +186,7 @@ def _message(m):
     if name is None: reply(chat, NOT_LINKED)
     elif was: reply(chat, STOPPED)
     elif cmd == "/relief": _asking().start(chat, name)
-    elif not _asking().stray(chat, m): reply(chat, HELLO.format(name=name))
+    elif not _asking().stray(chat, m): reply(chat, HELLO.format(name=name) if cmd in ("/start", "/help") else NOT_READ)
 
 
 def _edited(m):

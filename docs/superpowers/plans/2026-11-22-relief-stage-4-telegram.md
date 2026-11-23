@@ -99,6 +99,7 @@ Messages (exact text; `·` is U+00B7, `–` U+2013; `{periods}` as "P9–P11", `
 | `CLEAR` | `✅ {hh:mm} · All {n} reliefs for today are acknowledged.` (`The 1 relief for today is acknowledged.`) or, when some never were, after the same `✅ {hh:mm} · `, `No reliefs are waiting now: {k} started without acknowledgement.` |
 | `SUMMARY` | `📊 Relief summary · {dates}` then the lines of mockup tab 10 (Task 7) |
 | `HELLO` | `Linked: {name}. You'll get your reliefs here. Send /relief to ask for relief, /stop to unlink.` |
+| `NOT_READ` | `I can't read messages here. To answer a relief, press a button under it. Send /relief to ask for relief.` (a linked person's line, sticker or other command that is no answer to a question: F5; /start, /help and linking get HELLO, a file or a photo NOT_TAKEN) |
 | `NOT_LINKED` | `This Telegram is not linked. Open Relief in the school's app, press Link Telegram and follow the link there.` |
 | `BAD_CODE` | `That code is not right or has run out. Get a new one in the app. If it was your personal code, do not send it here: it opens the app. I have deleted your message.` |
 | `BAD_CODE_KEPT` | `That code is not right or has run out. Get a new one in the app. If it was your personal code, do not send it here: it opens the app. Please delete your message now.` (when Telegram did not delete it: 2e) |
