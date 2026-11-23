@@ -1933,11 +1933,11 @@ def an_xlsx(rows):
     b = io.BytesIO(); wb.save(b); return b.getvalue()
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-def a_docx(paras=(), table=(), extra=b""):
+def a_docx(paras=(), table=(), extra=b"", body=""):
     p = lambda t: f'<w:p><w:r><w:t xml:space="preserve">{t}</w:t></w:r></w:p>'
     cell = lambda t: f"<w:tc>{p(t)}</w:tc>"
     tbl = "<w:tbl>" + "".join("<w:tr>" + "".join(cell(c) for c in r) + "</w:tr>" for r in table) + "</w:tbl>" if table else ""
-    xml = f'<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="{W}"><w:body>{"".join(p(x) for x in paras)}{tbl}</w:body></w:document>'
+    xml = f'<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="{W}"><w:body>{"".join(p(x) for x in paras)}{tbl}{body}</w:body></w:document>'
     b = io.BytesIO()
     with zipfile.ZipFile(b, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", "<Types/>"); z.writestr("word/document.xml", xml.encode() + extra)
@@ -2013,7 +2013,7 @@ def other_words_are_read_as_the_subjects_the_reader_names():
     got = LR.match(rows, m, ["Sec 3"])
     same(got["plain"], [])
     same([(e["line"], e["subject"], e["written"], e["minutes"], e["together"]) for e in got["other"]],
-         [(2, "English Language G3", "English", 60, ""), (3, "Mathematics G3", "Maths", 75, "Sec 3 Maths"), (3, "Mathematics G2", "Maths", 75, "Sec 3 Maths")])
+         [(2, "English Language G3", "English", 60, ""), (3, "Mathematics G3", "Maths", 75, "Sec 3 Maths Paper 1"), (3, "Mathematics G2", "Maths", 75, "Sec 3 Maths Paper 1")])
     same(got["unmatched"], [dict(line=4, level="Sec 3", subject="E Maths", paper="Paper 1", why="Sec 3 has no subject called E Maths."),
                             dict(line=5, level="Sec 3", subject="Music", paper="Paper 1", why="Sec 3 has no subject called Music."),
                             dict(line=6, level="Sec 3", subject="E Maths", paper="Paper 1", why="Sec 3 has no subject called E Maths.")])
@@ -2039,10 +2039,11 @@ def odd_rows_never_break_the_reading():
     rows = ["Sec 3 Maths", None, dict(line=4), a_row(5, 42), a_row(6, "Mathematics G3", level=["Sec 3"]), dict(a_row(7, "Mathematics G3"), subjects="Maths"),
             a_row(8, "x" * 121), a_row(9, "Maths", subjects=[3]), dict(a_row(10, "Mathematics G3"), line="ten"), a_row(11, "Mathematics G3", paper=7)]
     got = LR.match(rows, m, ["Sec 3"])
-    same([u["why"] for u in got["unmatched"]], ["Row 1 could not be read.", "Row 2 could not be read.", "Row 4 could not be read.",
-                                                "Row 5 could not be read.", "Row 6 could not be read.", "Row 7 could not be read.",
-                                                "Row 8 could not be read.", "Row 9 could not be read.", "Row 9 could not be read.",
-                                                "Row 11 could not be read."])
+    same([(u["line"], u["why"]) for u in got["unmatched"]],
+         [(None, "A row could not be read."), (None, "A row could not be read."), (4, "Row 4 could not be read."), (5, "Row 5 could not be read."),
+          (6, "Row 6 could not be read."), (7, "Row 7 could not be read."), (8, "Row 8 could not be read."), (9, "Row 9 could not be read."),
+          (None, "A row could not be read."), (11, "Row 11 could not be read.")])
+    same(LR.match([dict(a_row(1, "Mathematics G3"), line=True)], m, ["Sec 3"])["unmatched"][0]["why"], "A row could not be read.")
     same(got["plain"] + got["other"], [])
     for odd in (None, "rows", {"a": 1}):
         raises(Refused, lambda: LR.match(odd, m, ["Sec 3"]))
@@ -2055,7 +2056,7 @@ def odd_rows_never_break_the_reading():
 def a_list_holds_at_most_200_papers():
     m = a_list_pub()["model"]
     rows = [a_row(i + 2, "Mathematics G3", paper=f"Paper {i}") for i in range(199)]
-    got = LR.match(rows + [a_row(201, "Maths", subjects=["Mathematics G2", "Mathematics G3"]), a_row(202, "Mathematics G2"), a_row(203, "Mathematics G2", paper="P2")], m, ["Sec 3"])
+    got = LR.match(rows + [a_row(201, "Maths", subjects=["Mathematics G2", "Mathematics G3"], paper="P9"), a_row(202, "Mathematics G2"), a_row(203, "Mathematics G2", paper="P2")], m, ["Sec 3"])
     same(len(got["plain"]) + len(got["other"]), 200); same(LR.MAX_PAPERS, 200)
     same([u["why"] for u in got["unmatched"]], ["Row 201 is over 200 papers.", "Row 203 is over 200 papers."])
 
@@ -2067,7 +2068,7 @@ def the_rows_go_in_as_the_steps_put_them():
     papers = LR.to_papers(got["plain"] + got["other"])
     same([sorted(p) for p in papers], [sorted(["level", "subject", "paper", "minutes", "date", "start", "who", "together"])] * 4)
     same([(p["subject"], p["who"], p["together"]) for p in papers],
-         [("Mathematics G3", "level", ""), ("Mathematics G2", "groups", "Sec 3 Maths"), ("Mathematics G3", "groups", "Sec 3 Maths"),
+         [("Mathematics G3", "level", ""), ("Mathematics G2", "groups", "Sec 3 Maths Paper 2"), ("Mathematics G3", "groups", "Sec 3 Maths Paper 2"),
           ("English Language G3", "groups", "Languages")])
     env, st, _ = started(pub=pub)
     run(env, st, "put_list", dict(papers=papers), said="")
@@ -2079,6 +2080,82 @@ def the_rows_go_in_as_the_steps_put_them():
     for odd in (None, [None], [dict(level="Sec 3")], "x"):
         raises(Refused, lambda: LR.to_papers(odd))
 
+
+# ---------------------------------------------------------------- the agreed list, fix round 1
+def a_sheet(rows, dim="", sheet=None):
+    """an .xlsx whose first sheet is written by hand: rows of {column letters: value} (None: an empty cell), dim its stored size"""
+    def c(ref, v):
+        if v is None: return f'<c r="{ref}"/>'
+        if isinstance(v, int): return f'<c r="{ref}"><v>{v}</v></c>'
+        return f'<c r="{ref}" t="inlineStr"><is><t>{v}</t></is></c>'
+    data = "".join(f'<row r="{i}">' + "".join(c(f"{k}{i}", v) for k, v in r.items()) + "</row>" for i, r in enumerate(rows, start=1))
+    dim = f'<dimension ref="{dim}"/>' if dim else ""
+    xml = f'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">{dim}<sheetData>{data}</sheetData></worksheet>'
+    src, out = zipfile.ZipFile(io.BytesIO(an_xlsx([["x"]]))), io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for i in src.infolist():
+            z.writestr(i, xml if i.filename == "xl/worksheets/sheet1.xml" else src.read(i))
+    return out.getvalue()
+
+def quick(f, most=3):
+    t0 = time.monotonic(); got = f(); took = time.monotonic() - t0
+    assert took < most, took
+    return got
+
+@t
+def a_wide_or_long_excel_file_is_answered_at_once():
+    far = a_sheet([{"XFD": None}] * 3000, "A1:XFD3000")
+    same(quick(lambda: LR.text_of("l.xlsx", far)), ""); same(quick(lambda: LR.own_layout("l.xlsx", far)), None)
+    far_text = a_sheet([{"A": "Sec 3", "XFD": "y" * 50}] * 3000, "A1:XFD3000")
+    same(quick(lambda: LR.text_of("l.xlsx", far_text)), "\n".join(["Sec 3"] * 3000))
+    raises(Refused, lambda: quick(lambda: LR.text_of("l.xlsx", a_sheet([{"XFD": None}] * 5001))), BAD_FILE)
+    same(LR.text_of("l.xlsx", a_sheet([{"A": "x"}] * 5000)), "\n".join(["x"] * 5000))
+    raises(Refused, lambda: quick(lambda: LR.text_of("l.xlsx", a_sheet([{"A": "w" * 100}] * 4000))), LONG_LIST)
+    head = dict(zip("ABCDEFGH", P.HEADER))
+    row = dict(A="Sec 3", B="Mathematics G3", C="Paper 1", D=60, E="2026-10-06", F="08:00", G="Groups", XFD="z")
+    lying = a_sheet([head] + [dict(row, C=f"Paper {i}") for i in range(3000)], "A1:H2")
+    got = quick(lambda: LR.own_layout("l.xlsx", lying))
+    same((len(got), got[0]["line"], got[-1]["line"], got[-1]["paper"], got[0]["minutes"]), (3000, 2, 3001, "Paper 2999", 60))
+    same(quick(lambda: LR.own_layout("l.xlsx", a_sheet([head] + [row] * 5000))), None)              # no size stored: walked
+    same(LR.own_layout("l.xlsx", a_sheet([head, dict(row, A="Sec 3")], "A1:BJ2")), None)            # 62 columns
+    same(LR.own_layout("l.xlsx", a_sheet([head, dict(row, B="=1+1")])), [dict(line=2, level="Sec 3", subject="=1+1", paper="Paper 1",
+         minutes=60, date="2026-10-06", start="08:00", all=False, subjects=[], together="")])
+
+@t
+def a_word_file_is_read_once_and_only_as_plain_xml():
+    inner = '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+    nested = f'<w:tbl><w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p>{inner}</w:tc><w:tc><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+    same(LR.text_of("l.docx", a_docx(body=nested)), "A B\tC")
+    xml = f'<?xml version="1.0" encoding="UTF-16"?><w:document xmlns:w="{W}"><w:body><w:p><w:r><w:t>x</w:t></w:r></w:p></w:body></w:document>'
+    for raw in (xml.encode("utf-16"), b"\xef\xbb\xbf" + xml.replace("UTF-16", "UTF-8").encode()):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as z: z.writestr("word/document.xml", raw)
+        if raw.startswith(b"\xef"): same(LR.text_of("l.docx", b.getvalue()), "x")
+        else: raises(Refused, lambda: LR.text_of("l.docx", b.getvalue()), BAD_FILE)
+
+@t
+def a_row_that_repeats_an_earlier_one_is_asked_about():
+    m = a_list_pub()["model"]
+    rows = [a_row(2, "Mathematics G3"), a_row(3, "mathematics  g3", paper="paper 1"), a_row(4, "Maths", subjects=["Mathematics G2", "Mathematics G3"]),
+            a_row(5, "History"), a_row(6, "MA G3", paper="Paper 2"), a_row(7, "E Maths", subjects=["Mathematics G3"], paper="Paper 2"),
+            a_row(8, "Maths", subjects=["Mathematics G2"])]
+    got = LR.match(rows, m, ["Sec 3"])
+    same([(u["line"], u["why"]) for u in got["unmatched"]], [(3, "Row 3 repeats row 2."), (4, "Row 4 repeats row 2."),
+                                                             (5, "Sec 3 has no subject called History."), (7, "Row 7 repeats row 6.")])
+    same([(e["line"], e["subject"], e["paper"]) for e in got["plain"] + got["other"]],
+         [(2, "Mathematics G3", "Paper 1"), (6, "Mathematics G3", "Paper 2"), (8, "Mathematics G2", "Paper 1")])
+
+@t
+def sits_with_ties_one_lines_papers_only():
+    pub = a_list_pub()
+    rows = [a_row(2, "Maths", paper="Paper 1", date="2026-10-05", subjects=["Mathematics G2", "Mathematics G3"]),
+            a_row(3, "Maths", paper="Paper 2", date="2026-10-07", subjects=["Mathematics G2", "Mathematics G3"])]
+    got = LR.match(rows, pub["model"], ["Sec 3", "Sec 4"])
+    same([e["together"] for e in got["other"]], ["Sec 3 Maths Paper 1"] * 2 + ["Sec 3 Maths Paper 2"] * 2)
+    env, st, _ = started(pub=pub)
+    run(env, st, "put_list", dict(papers=LR.to_papers(got["other"])), said="")
+    c = facts.checks(env.load(st.exam), pub, CAL, XSET.defaults())
+    same(len(env.load(st.exam)["papers"]), 4); assert not [e for e in c["errors"] if "share" in e], c["errors"]
 
 # ---------------------------------------------------------------- the AI calls and the practice stand-in (plan/ai.py)
 import logging, threading  # noqa: E402

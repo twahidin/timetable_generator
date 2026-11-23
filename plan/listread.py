@@ -3,8 +3,8 @@ as it is), the text cut into pieces for a reader, and the rows a reader gives ma
 Flask here and nothing of app.py; nothing here calls an AI. Rows come from an untrusted reader: nothing but Refused leaves."""
 import datetime
 import io
+import itertools
 import re
-import warnings
 import zipfile
 import xml.etree.ElementTree as ET
 
@@ -15,6 +15,7 @@ BAD_FILE = "Give an Excel or Word file, or paste the list."
 LONG_LIST = "Keep the list under 20,000 characters."
 MOST_BYTES, MOST_CHARS = 5 * 1024 * 1024, 20000
 MOST_DOC, MOST_BOOK = 20 * 1024 * 1024, 50 * 1024 * 1024      # unpacked: word/document.xml, and all of an Excel file
+MOST_ROWS, COLS, OWN_COLS = 5000, 30, 60                       # Excel rows read in all, cells read of a row, own layout's widest
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
@@ -52,26 +53,43 @@ def _value(v) -> str:
         return v.strftime("%H:%M")
     if isinstance(v, float) and v.is_integer():
         return str(int(v))
-    return " ".join(str(v).split())
+    return " ".join(str(v)[:MOST_CHARS + 1].split())
+
+
+# openpyxl's own warnings are not filtered: warnings.catch_warnings() changes the whole process and is not safe on threads
+def _rows(data, sheets, cols):
+    """(row number, values of the first cols cells) of the sheets, read-only, the stored sizes not trusted; Refused(BAD_FILE)
+    past MOST_ROWS rows in all, blank ones counted"""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(bytes(data)), read_only=True, data_only=True)
+    try:
+        n = 0
+        for ws in wb.worksheets[:sheets]:
+            ws.reset_dimensions()
+            for i, row in enumerate(ws.iter_rows(max_col=cols, values_only=True), start=1):
+                n += 1
+                if n > MOST_ROWS:
+                    raise Refused(BAD_FILE)
+                yield i, row
+    finally:
+        wb.close()
 
 
 def _book(data) -> list:
-    import openpyxl
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        wb = openpyxl.load_workbook(io.BytesIO(bytes(data)), read_only=True, data_only=True)
-        try:
-            out = []
-            for ws in wb.worksheets:
-                for row in ws.iter_rows(values_only=True):
-                    cells = [_value(v) for v in row]
-                    while cells and not cells[-1]:
-                        cells.pop()
-                    if cells:
-                        out.append("\t".join(cells))
-            return out
-        finally:
-            wb.close()
+    out, size, rows = [], 0, _rows(data, None, COLS)
+    try:
+        for _, row in rows:
+            cells = [_value(v) for v in row]
+            while cells and not cells[-1]:
+                cells.pop()
+            if cells:
+                out.append("\t".join(cells))
+                size += len(out[-1]) + (len(out) > 1)
+                if size > MOST_CHARS:
+                    raise Refused(LONG_LIST)
+    finally:
+        rows.close()
+    return out
 
 
 def _para(p) -> str:
@@ -89,7 +107,8 @@ def _para(p) -> str:
 
 def _doc(z) -> list:
     xml = z.open("word/document.xml").read(MOST_DOC + 1)
-    if len(xml) > MOST_DOC or b"<!DOCTYPE" in xml or b"<!ENTITY" in xml:
+    head = xml[3:] if xml.startswith(b"\xef\xbb\xbf") else xml
+    if len(xml) > MOST_DOC or not head.startswith(b"<") or b"<!DOCTYPE" in xml or b"<!ENTITY" in xml:
         raise Refused(BAD_FILE)
     out = []
 
@@ -97,8 +116,8 @@ def _doc(z) -> list:
         if e.tag == W + "p":
             out.append(_para(e))
         elif e.tag == W + "tbl":
-            for tr in e.iter(W + "tr"):
-                cells = [" ".join(t for t in (_para(p) for p in tc.iter(W + "p")) if t) for tc in tr.iter(W + "tc")]
+            for tr in e.findall(W + "tr"):                     # a table in a cell is read once, as that cell's words
+                cells = [" ".join(t for t in (_para(p) for p in tc.iter(W + "p")) if t) for tc in tr.findall(W + "tc")]
                 out.append("\t".join(cells).rstrip("\t"))
         else:
             for c in e:
@@ -108,9 +127,9 @@ def _doc(z) -> list:
 
 
 def text_of(filename, data) -> str:
-    """the text of an Excel file (cells joined by tabs, rows by newlines) or a Word file (paragraphs, and table rows as
-    cells joined by tabs), blank rows left out. Anything else, too big or damaged: Refused(BAD_FILE); a text over 20,000
-    characters: Refused(LONG_LIST)"""
+    """the text of an Excel file (the first 30 cells of each row joined by tabs, rows by newlines, at most 5,000 rows) or a
+    Word file (paragraphs, and table rows as cells joined by tabs), blank rows left out. Anything else, too big or damaged:
+    Refused(BAD_FILE); a text over 20,000 characters: Refused(LONG_LIST), an Excel file as soon as its text passes it"""
     kind = _kind(filename, data)
     z = _zip(data, kind)
     try:
@@ -125,26 +144,59 @@ def text_of(filename, data) -> str:
     return text
 
 
+def _small(data) -> bool:
+    """the first sheet's stored size is at most MOST_ROWS rows and OWN_COLS columns (an unrecorded size: walked)"""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(bytes(data)), read_only=True, data_only=True)
+    try:
+        ws = wb.worksheets[0]
+        rows, cols = ws.max_row, ws.max_column
+        if rows is None or cols is None:
+            rows = sum(1 for _ in itertools.islice(ws.iter_rows(max_col=COLS, values_only=True), MOST_ROWS + 1))
+        return rows <= MOST_ROWS and (cols or 0) <= OWN_COLS
+    finally:
+        wb.close()
+
+
+def _copy(rows) -> bytes:
+    """a fresh workbook of these rows (row numbers kept): papers.read_paper_list reads it in full, so only what was read
+    under the caps is given to it"""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for i, row in rows:
+        for j, v in enumerate(row, start=1):
+            if v is not None:
+                c = ws.cell(i, j, v)
+                if isinstance(v, str):
+                    c.data_type = "s"                           # a text that starts with "=" stays a text
+    b = io.BytesIO()
+    wb.save(b)
+    return b.getvalue()
+
+
 def own_layout(filename, data):
-    """the rows of a list in the app's own layout (papers.HEADER), read without AI; None when the file is not in it. A file
-    in the layout with a wrong row: Refused with papers' sentence for that row"""
+    """the rows of a list in the app's own layout (papers.HEADER), read without AI; None when the file is not in it (or its
+    first sheet is over 5,000 rows or 60 columns). A file in the layout with a wrong row: Refused with papers' sentence"""
     if str(filename or "").strip().lower()[-5:] != ".xlsx":
         return None
     _zip(data, _kind(filename, data))
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            got = _papers.read_paper_list(bytes(data))
-            import openpyxl
-            ws = openpyxl.load_workbook(io.BytesIO(bytes(data)), data_only=True).worksheets[0]
-            lines = [n for n, row in enumerate(ws.iter_rows(values_only=True), start=1)
-                     if n > 1 and any(_papers._cell(v) for v in (list(row) + [None] * 8)[:8])]
+        if not _small(data):
+            return None
+        rows = list(_rows(data, 1, len(_papers.HEADER)))
+        if not rows or rows[0][0] != 1 or [_papers._cell(v) for v in rows[0][1]] != _papers.HEADER:
+            return None
+        got = _papers.read_paper_list(_copy(rows))
+    except Refused:
+        return None
     except ValueError as e:
         if str(e) == _papers.BAD_HEADER:
             return None
-        raise Refused(str(e)) from None
+        raise Refused(str(e) if str(e).startswith("Row ") else BAD_FILE) from None
     except Exception:
         raise Refused(BAD_FILE) from None
+    lines = [i for i, row in rows[1:] if any(_papers._cell(v) for v in row)]
     return [dict(line=n, level=p["level"], subject=p["subject"], paper=p["paper"], minutes=p["minutes"], date=p["date"],
                  start=p["start"], all=p["who"] == "level", subjects=[], together=p["together"]) for n, p in zip(lines, got)]
 
@@ -259,8 +311,8 @@ def _row(r, at, model, levels):
     if not isinstance(all_, bool) and all_ is not None:
         raise _Odd
     together = _text(r.get("together"), blank_ok=True)
-    if len(read_as) > 1:
-        together = together or _text(f"{level} {r['subject']}"[:LONGEST])
+    if len(read_as) > 1:                                        # one line's papers are tied, never two lines'
+        together = together or " ".join(x for x in (level, r["subject"], r["paper"]) if x)[:LONGEST].strip()
     return [dict(line=at, written=r["subject"], level=level, subject=s, paper=r["paper"], minutes=minutes, date=date, start=start,
                  who="level" if all_ else "groups", together=together) for s in read_as], "plain" if plain else "other"
 
@@ -268,27 +320,33 @@ def _row(r, at, model, levels):
 def match(rows, model, levels) -> dict:
     """rows (dicts of line, level, subject, paper, minutes, date, start, all, subjects and, from the app's own layout, together)
     -> dict(plain, other, unmatched): plain and other are entries for to_papers, each with the line and the words as written;
-    unmatched are dict(line, level, subject, paper, why). At most MAX_PAPERS papers go in; a row past them is unmatched"""
+    unmatched are dict(line, level, subject, paper, why), line None when it cannot be read. A row that repeats an earlier
+    one's level, subject and paper is unmatched (the earlier one stays). At most MAX_PAPERS papers go in; a row past them
+    is unmatched"""
     if not isinstance(rows, list) or not isinstance(levels, list):
         raise Refused(WRONG)
     model = model if isinstance(model, dict) else {}
-    out, count = dict(plain=[], other=[], unmatched=[]), 0
-    for i, r in enumerate(rows, start=1):
+    out, count, seen = dict(plain=[], other=[], unmatched=[]), 0, {}
+    for r in rows:
         line = r.get("line") if isinstance(r, dict) else None
-        good = isinstance(line, int) and not isinstance(line, bool) and line >= 1
-        at = line if good else i
+        at = line if isinstance(line, int) and not isinstance(line, bool) and line >= 1 else None
         try:
-            if not isinstance(r, dict) or not good:
+            if at is None:
                 raise _Odd
             r = dict(r, level=_text(r.get("level")), subject=_text(r.get("subject")), paper=_text(r.get("paper"), blank_ok=True))
             got, how = _row(r, at, model, levels)
         except _Odd:
-            got, how = None, f"Row {at} could not be read."
-        if got and count + len(got) > MAX_PAPERS:
+            got, how = None, f"Row {at} could not be read." if at else "A row could not be read."
+        keys = [(e["level"], e["subject"], _fold(e["paper"])) for e in got or []]
+        twin = next((seen[k] for k in keys if k in seen), None)
+        if twin is not None:
+            got, how = None, f"Row {at} repeats row {twin}."
+        elif got and count + len(got) > MAX_PAPERS:
             got, how = None, f"Row {at} is over {MAX_PAPERS} papers."
         if got:
             count += len(got)
             out[how] += got
+            seen.update((k, at) for k in keys)
             continue
         words = {k: (r.get(k) if isinstance(r, dict) and isinstance(r.get(k), str) else "") for k in ("level", "subject", "paper")}
         out["unmatched"].append(dict(line=at, **{k: v[:LONGEST] for k, v in words.items()}, why=how))
