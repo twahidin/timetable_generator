@@ -84,7 +84,8 @@ def every_failure_becomes_its_kind():
         assert r["kind"] == "slow" and r["retry_after"] == 12, r
         r = kind(answer(429, dict(ok=False)))
         assert r["kind"] == "slow" and r["retry_after"] == 5, r
-        assert kind(answer(400, dict(ok=False)))["kind"] == "refused"
+        for status in (400, 402, 405, 409, 418): assert kind(answer(status, dict(ok=False)))["kind"] == "refused", status
+        for status in (401, 404): assert kind(answer(status, dict(ok=False)))["kind"] == "network", "a token that is revoked or wrong: nothing is the message's fault"
         for status in (500, 504): assert kind(answer(status, b"late"))["kind"] == "unsure" and kind(answer(status, dict(ok=True, result=1)))["kind"] == "unsure", status
         for status in (501, 502, 503, 505, 520, 599): assert kind(answer(status, b"bad gateway"))["kind"] == "network", status
         assert kind(failing(urllib.error.HTTPError("u", 504, "x", {}, None)))["kind"] == "unsure"
@@ -316,7 +317,7 @@ def wipe():
     with tgdb.db() as c:
         for table in ("links", "codes", "talks", "updates", "outbox", "buttons"): c.execute(f"DELETE FROM {table}")
         c.execute("DELETE FROM state")
-    tg.PRACTICE_LOG.clear(); links.tries.fails.clear(); OB._doubt.clear(); OB._hold[0] = 0.0
+    tg.PRACTICE_LOG.clear(); links.tries.fails.clear(); OB._doubt.clear(); OB._hold[0] = 0.0; OB._failed[0] = None
 
 @contextlib.contextmanager
 def no_pub(pub=None):
@@ -1459,13 +1460,13 @@ def slow_and_network_wait_and_retry():
         go = lambda at: with_send(f, lambda: OB.send_due(now=at))
         q()
         for i, wait in enumerate((5, 30, 120, 600, 1800)):
-            assert go(now) == dict(sent=0, waiting=1) and len(seen) == i + 1
+            assert go(now) == dict(sent=0, waiting=1) and len(texts(seen)) == i + 1
             r = item("k"); assert (r["state"], r["tries"], r["next_at"], r["sent_at"]) == ("queued", i + 1, now + wait, None), r
             assert OB.told("k")["state"] == "queued" and OB.told("k")["at"] == r["at"]
-            go(now + wait - 1); assert len(seen) == i + 1, "it waits"
+            go(now + wait - 1); assert len(texts(seen)) == i + 1, "it waits"                # Telegram answers getMe then: it is the message itself
             now += wait
-        assert go(now) == dict(sent=0, waiting=0) and state("k") == "failed" and len(seen) == 6
-        go(9e12); assert len(seen) == 6 and q() is False
+        assert go(now) == dict(sent=0, waiting=0) and state("k") == "failed" and len(texts(seen)) == 6
+        go(9e12); assert len(texts(seen)) == 6 and q() is False
         # slow: until Telegram's pause ends, an hour at most, and no try is counted
         f, seen = tele(SLOW(12), NEVER_LEFT, SLOW(7200), SLOW(0)); q("s", text="Slow one"); now = 2_000_000
         go(now); r = item("s"); assert (r["state"], r["tries"], r["next_at"], r["sent_at"]) == ("queued", 0, now + 12, None), r
@@ -1554,10 +1555,11 @@ def an_unsure_send_holds_the_rest():
         assert go(f) == dict(sent=0, waiting=2) and said(seen) == ["sendMessage"] and texts(seen) == ["a"] and state("a") == "unsure", "the run ends"
         was = rows("outbox")
         for me in (MAY_HAVE, NEVER_LEFT, DOWN, LATE, REFUSED, BLOCKED, (200, dict(ok=False))):
-            f, seen = tele(me=me); times.clear()
+            f, seen = tele(me=me); times.clear(); OB._asked[0] = 0.0                        # twenty seconds later, each time
             assert go(f) == dict(sent=0, waiting=2) and seen == [("getMe", {}, None)] and rows("outbox") == was, me
             assert times == [("getMe", 5)] and links.chat_of(TIA) == 501, me
-        q("d", text="d"); f, seen = tele(me=DOWN); assert go(f) == dict(sent=0, waiting=3) and said(seen) == ["getMe"], "what comes meanwhile waits too"
+        q("d", text="d"); f, seen = tele(me=DOWN); OB._asked[0] = 0.0; assert go(f) == dict(sent=0, waiting=3) and said(seen) == ["getMe"], "what comes meanwhile waits too"
+        OB._asked[0] = 0.0
         with broken_accounts(): f, seen = tele(); assert go(f) == dict(sent=0, waiting=3) and seen == []
         b = tgdb.get_state("bot"); tgdb.set_state("bot", None); assert go(f) == dict(sent=0, waiting=3) and seen == []; tgdb.set_state("bot", b)
         f, seen = tele(); assert go(f) == dict(sent=3, waiting=0) and said(seen) == ["getMe"] + ["sendMessage"] * 3 and texts(seen) == ["b", "c", "d"]
@@ -1567,9 +1569,9 @@ def an_unsure_send_holds_the_rest():
         for k in "wxyz": q(k, text=k)
         for k in "wx": f, seen = tele(MAY_HAVE); go(f); assert texts(seen) == [k] and state(k) == "unsure"
         f, seen = tele(); assert go(f) == dict(sent=2, waiting=0) and texts(seen) == ["y", "z"]
-        # a refusal, a failure to connect or a flood answer is no such doubt
-        for answer_ in (REFUSED, NEVER_LEFT, DOWN, SLOW(1)):
-            f, seen = tele(answer_); q("h" + str(len(rows("outbox")))); go(f); assert not OB._doubt.is_set(), answer_
+        # a refusal, a blocked chat or a flood answer is no such doubt; a failure to connect, or a token that is not taken, is
+        for answer_, doubt in ((REFUSED, False), (NEVER_LEFT, True), (DOWN, True), ((401, dict(ok=False)), True), ((404, dict(ok=False)), True), (SLOW(1), False), (BLOCKED, False)):
+            OB._doubt.clear(); OB._hold[0] = 0.0; f, seen = tele(answer_); q("h" + str(len(rows("outbox")))); go(f); assert OB._doubt.is_set() is doubt and len(seen) == 1, answer_
 
 @t
 def a_hold_survives_a_run_asked_for_at_the_same_time():
@@ -1581,14 +1583,14 @@ def a_hold_survives_a_run_asked_for_at_the_same_time():
         out = []; f, seen = tele(MAY_HAVE, before=lambda *a: out.extend(other()))          # while the message is timing out
         assert with_send(f, OB.send_due) == dict(sent=0, waiting=2) and out == [busy, busy] and OB._doubt.is_set()
         def wait(*a): inside.set(); assert go.wait(10)
-        f, seen = tele(me=MAY_HAVE, before=wait); got = []                                  # while getMe is
+        f, seen = tele(me=MAY_HAVE, before=wait); got = []; OB._asked[0] = 0.0                                  # while getMe is
         def both():
             th = threading.Thread(target=lambda: got.append(OB.send_due())); th.start(); assert inside.wait(10)
             assert other() == [busy, busy]; go.set(); th.join(10)
         with_send(f, both); assert got == [dict(sent=0, waiting=2)] and [m for m, p, up in seen] == ["getMe"] and OB._doubt.is_set()
-        ths = [threading.Thread(target=OB.send_due) for _ in range(6)]; f, seen = tele(me=NEVER_LEFT)
-        with_send(f, lambda: ([x.start() for x in ths], [x.join() for x in ths])); assert {m for m, p, up in seen} == {"getMe"} and OB._doubt.is_set()
-        f, seen = tele(); assert with_send(f, OB.send_due) == dict(sent=2, waiting=0) and texts(seen) == ["b", "c"]
+        ths = [threading.Thread(target=OB.send_due) for _ in range(6)]; f, seen = tele(me=NEVER_LEFT); OB._asked[0] = 0.0
+        with_send(f, lambda: ([x.start() for x in ths], [x.join() for x in ths])); assert [m for m, p, up in seen] == ["getMe"] and OB._doubt.is_set()
+        OB._asked[0] = 0.0; f, seen = tele(); assert with_send(f, OB.send_due) == dict(sent=2, waiting=0) and texts(seen) == ["b", "c"]
 
 @t
 def nothing_is_dropped_while_the_accounts_cannot_be_read():
@@ -1698,7 +1700,7 @@ def an_item_no_longer_true_is_dropped():
     with made_up():
         links.link(TIA, 501, None); f, seen = tele(NEVER_LEFT); q("r"); with_send(f, lambda: OB.send_due(now=1000))
         with valid(lambda it: False): with_send(f, lambda: OB.send_due(now=2000))
-        assert state("r") == "dropped" and len(seen) == 1, "asked again before another try"
+        assert state("r") == "dropped" and len(texts(seen)) == 1, "asked again before another try"
 
 @t
 def what_cannot_be_checked_waits_and_is_not_sent():
@@ -1803,7 +1805,7 @@ def a_retry_keeps_its_tokens():
         links.link(TIA, 501, None); f, seen = tele(NEVER_LEFT, SLOW(3), DOWN); SENT_AT = datetime.datetime(2026, 10, 12, 23, 20, tzinfo=datetime.timezone.utc).timestamp()
         with now_is("2026-10-13T07:20:00+08:00"): q(buttons=[[dict(text="A", what="ack"), dict(text="B", what="change")]])
         for at in (1000, 2000, 3000, 4000): with_send(f, lambda: OB.send_due(now=at))
-        kbs = [p["reply_markup"]["inline_keyboard"] for m, p, up in seen]
+        kbs = [p["reply_markup"]["inline_keyboard"] for m, p, up in seen if m == "sendMessage"]
         assert len(kbs) == 4 and all(k == kbs[0] for k in kbs) and state("k") == "sent", kbs
         got = rows("buttons"); assert len(got) == 2 and {r["until"] for r in got} == {SENT_AT + 30 * 86400}, "30 days from when it was queued, over every try"
         # buttons taken from another message (a reminder's) get tokens of their own
@@ -2914,6 +2916,21 @@ def cancelled_reaches_whoever_was_told_of_the_absence():
         links.link(ROSA, CHATS[ROSA], None); at("09:00", 17); assert dues() == [], "past"
 
 @t
+def a_cancelled_that_waited_goes_only_while_the_absence_is_not_past():
+    """the bot disconnected, or Telegram down, until then: nothing of a past day is said"""
+    for hm, day, goes in (("23:59", 13, True), ("00:00", 14, False), ("08:00", 20, False)):
+        with school(EVE, ROSA, HUGO, TEAM, LEE):
+            i = absent(by=HUGO); swept(); at("09:10"); absences.cancel(i, "Better", EVE); assert TE.sweep() == 4; b = tgdb.get_state("bot"); tgdb.set_state("bot", None); assert send() == 0; tgdb.set_state("bot", b)
+            at(hm, day); assert send() == (4 if goes else 0) and {(r["name"], r["state"]) for r in outs("cancelled")} == {(n, "sent" if goes else "dropped") for n in (HUGO, ROSA, TEAM, LEE)}, (hm, day)
+            assert swept() == 0 and len(outs("cancelled")) == 4, "nor made anew"
+    for day, goes in ((16, True), (17, False)):                                            # its last date, of several
+        with school(TEAM): i = absent(dates=["2026-10-13", "2026-10-16"]); absences.cancel(i, "Better", EVE); TE.sweep(); at("09:00", day); assert send() == goes, day
+    with school(EVE, TEAM):                                                                # its record gone: nothing; not readable: it waits
+        i = absent(by=HUGO); swept(); absences.cancel(i, "Better", HUGO); TE.sweep(); it = [dict(r, ref=json.loads(r["ref"])) for r in outs("cancelled")]; assert [TE.still_true(x) for x in it] == [True, True]
+        p = absences._path(i); good = open(p, encoding="utf-8").read(); open(p, "w", encoding="utf-8").write("{ not json"); assert send() == 0 and {r["state"] for r in outs("cancelled")} == {"queued"}
+        open(p, "w", encoding="utf-8").write(good); os.rename(p, p + ".away"); assert [TE.still_true(x) for x in it] == [False, False]; os.rename(p + ".away", p)
+
+@t
 def a_team_member_is_told_by_their_rights_at_that_moment():
     with school(TEAM, LEE, HUGO, SAM):
         i = absent(); absences.cancel(i, "Better", EVE)
@@ -3439,6 +3456,8 @@ def a_backup_that_ends_by_itself_is_told_to_who_was_told_of_it_alone():
             swept(); assert said(EVE)[1:] == [CANCELLED_BY_APP] and said(SAM) == [RELIEF_K5, GONE_K5] and said(HUGO) == said(TEAM) == said(LEE) == [], end
     with record(EVE, extras=dict(relief=True, exams=None, admin=False)), exam_school(EVE, TEAM):  # told of it, and on the team: once, as the one told
         e, b = backed_up("exam"); swept(); withdraw(e); RL.sync_all(SCHOOL, TERM, LS.today()); swept(); r, = outs("cancelled"); assert r["name"] == EVE and json.loads(r["ref"]) == dict(id=b, team=False)
+    for day, goes in ((13, True), (14, False)):                                            # with no lesson left in it, the dates it had are asked of: nothing once they are past
+        with exam_school(EVE, TEAM): e, b = backed_up("exam"); swept(); withdraw(e); RL.sync_all(SCHOOL, TERM, LS.today()); assert TE.sweep() == 1 and absences.load(b)["lessons"] == []; at("09:00", day); assert send() == goes, day
     with exam_school(EVE, HUGO, TEAM, LEE):                                                # a person who cancels one tells the team and the teacher in charge, as ever
         e, b = backed_up("event"); swept(); call(EVE, "post", f"/api/relief/absences/{b}/cancel", dict(why="x")); send(); assert said(HUGO)[:1] == said(TEAM) == said(LEE) == [CANCELLED_EVE.format(EVE)]
     with exam_school(EVE, HUGO, TEAM):                                                     # what is no backup too, whoever ended it
@@ -4593,13 +4612,6 @@ def a_state_is_raised_once():
         for odd in ("odd", None, [9], {}): tgdb.set_state("n", odd); assert tgdb.raise_state("n", 1) is True and got("n") == [1], odd
         done = []; at_once(*[lambda: done.append(tgdb.raise_state("k", 7))] * 8); assert sorted(done) == [False] * 7 + [True]
 
-@t
-def only_what_still_waits_is_dropped():
-    with telegram():
-        links.link(TIA, 501, None); q()
-        for s in ("sending", "sent", "failed", "unsure", "dropped"): put("k", state=s); assert OB.drop("k") is False and state("k") == s, s
-        put("k", state="queued"); assert OB.drop("nokey") is False and OB.drop("k") is True and state("k") == "dropped" and OB.drop("k") is False and q("k") is True and state("k") == "queued"
-
 # ---- the report
 @t
 def the_report_goes_at_its_marks_and_once_each():
@@ -4948,10 +4960,20 @@ def remind_resends_once_every_five_minutes():
         assert skips(remind(asks(i, K5))) == [(K5, SAM, TRIED.format("06:55"))], "one that waits counts as much"
         at("06:57", 13); assert send() == 1 and said(SAM) == [RELIEF_K5] * 2; at("07:01", 13); assert skips(remind(asks(i, K5))) == [(K5, SAM, TOO_SOON.format("06:57"))], "from when it went"
         at("07:02:01", 13); assert remind(asks(i, K5))["sent"] == 1 and item(key + ":r2") and json.loads(item(key + ":r2")["ref"])["n"] == 2
-        # it waits (Telegram cannot be reached): after five minutes another takes its place, so that they never all come at once
-        at("07:08", 13); assert remind(asks(i, K5))["sent"] == 1 and (state(key + ":r2"), state(key + ":r3")) == ("dropped", "queued"); at("07:14", 13); assert remind(asks(i, K5))["sent"] == 1 and state(key + ":r3") == "dropped"
-        assert send() == 1 and said(SAM) == [RELIEF_K5] * 3 and [state(f"{key}:r{n}") for n in (1, 2, 3, 4)] == ["sent", "dropped", "dropped", "sent"] and TE.sweep() == 0
+        # it waits (Telegram cannot be reached), or is on its way: nothing more is queued, however long, so that they never come all at once
+        for st in ("queued", "sending"):
+            put(key + ":r2", state=st)
+            for hm in ("07:08", "07:30", "09:59"): at(hm, 13); assert skips(remind(asks(i, K5))) == [(K5, SAM, TRIED.format("07:02"))] and item(key + ":r3") is None, (st, hm)
+        put(key + ":r2", state="queued"); assert send() == 1 and said(SAM) == [RELIEF_K5] * 3 and [state(f"{key}:r{n}") for n in (1, 2, 3)] == ["sent", "sent", None] and TE.sweep() == 0
+        at("10:05", 13); assert remind(asks(i, K5))["sent"] == 1 and state(key + ":r3") == "queued", "five minutes from when it went"
         assert remind(asks(i, K2))["sent"] == 1 and item(f"{relief_key_of(i, K2)}:r1"), "each relief has its own five minutes"
+    with school(SAM, TEAM):                                                                # the relief itself waits for Telegram: it goes by itself, once
+        i = absent(by=HUGO); at("06:50", 13); give(i, K5, SAM); TE.sweep(); key = relief_key_of(i, K5)
+        for st in ("queued", "sending"):
+            put(key, state=st)
+            for hm in ("06:56", "07:30", "09:59"): at(hm, 13); assert skips(remind(asks(i, K5))) == [(K5, SAM, TRIED.format("06:50"))] and [r["key"] for r in outs("relief")] == [key], (st, hm)
+        put(key, state="queued"); assert send() == 1 and swept() == 0 and said(SAM) == [RELIEF_K5]
+        put(key, state="unsure", sent_at="2026-10-13T09:59:00+08:00"); at("10:05", 13); assert remind(asks(i, K5))["sent"] == 1 and item(key + ":r1"), "it may have gone, long enough ago"
     with school(SAM, TEAM):                                                                # the press of one listing it twice; a covers list with nothing in it
         i = today_reliefs((K5, SAM)); at("07:00", 13); got = remind(asks(i, K5, K5)); assert got["sent"] == 1 and skips(got) == [(K5, SAM, TRIED.format("07:00"))] and remind([]) == dict(sent=0, skipped=[])
     with school(SAM, TEAM):                                                                # a message that failed told nobody: at once
@@ -5002,7 +5024,7 @@ def two_reminders_at_once_are_one():
     with school(SAM, TEAM):                                                                # another copy of the app put it in the queue meanwhile
         i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); at("07:00", 13); before = OB.states_for("relief:"); remind(asks(i, K5))
         with stand_in(OB, "states_for", lambda *prefixes: dict(before)): assert skips(remind(asks(i, K5))) == [(K5, SAM, TRIED.format("07:00"))] and len(outs("relief")) == 2
-        links.unlink(SAM); at("07:30", 13)
+        put(key + ":r1", state="sent", sent_at="2026-10-13T07:00:00+08:00"); links.unlink(SAM); at("07:30", 13)
         with stand_in(links, "reachable", lambda pub=None: {SAM: CHATS[SAM]}): 
             assert skips(remind(asks(i, K5))) == [(K5, SAM, NOT_ON)], "unlinked meanwhile"
             put(key, state="dropped"); put(key + ":r1", state="dropped"); assert skips(remind(asks(i, K5))) == [(K5, SAM, NOT_ON)] and state(key) == "dropped"
@@ -5033,7 +5055,7 @@ def who_is_not_reminded_and_why():
         i = today_reliefs((K5, SAM)); exam(); at("11:29", 13)
         with unreadable(): assert remind(asks(i, K5))["sent"] == 1
     with school(SAM, TEAM):                                                                # moved to another absence of the same teacher's (a takeover): found there, by whatever absence it was sent for
-        i = today_reliefs((K5, SAM)); moved_to(i); at("07:00", 13); assert remind(listed_ := [dict(id=i, ckey=K5, absent=EVE)])["sent"] == 1 and listed_
+        i = today_reliefs((K5, SAM)); moved_to(i); at("07:00", 13); assert remind(listed_ := [dict(id=i, ckey=K5, absent=EVE)])["sent"] == 1 and listed_ and send() == 1
         at("07:10", 13); assert remind([dict(id=i, ckey=K5)])["sent"] == 1 and json.loads(outs("relief")[-1]["ref"])["id"] == "dead00beef" and outs("relief")[-1]["key"].endswith(":r2")
     for bad in (None, "x", 5, {}, [None], [5], [{}], [dict(id="a")], [dict(ckey=K5)], [dict(id=5, ckey=K5)], [dict(id="", ckey=K5)], [dict(id="a", ckey="")], [dict(id="a", ckey=K5), 5]):
         with school(TEAM):
@@ -5044,7 +5066,7 @@ def who_is_not_reminded_and_why():
             try: RE.remind(bad, [], BY); raise AssertionError(bad)
             except ValueError as e: assert str(e) == absences.WRONG, bad
     with school(SAM, TEAM):
-        i = today_reliefs((K5, SAM)); at("07:00", 13); assert RE.remind(datetime.date(2026, 10, 13), asks(i, K5), BY)["sent"] == 1 and RE.remind(D13, asks(i, K5), BY, now="2026-10-13T07:20:00+08:00")["sent"] == 1
+        i = today_reliefs((K5, SAM)); at("07:00", 13); assert RE.remind(datetime.date(2026, 10, 13), asks(i, K5), BY)["sent"] == 1 and send() == 1 and RE.remind(D13, asks(i, K5), BY, now="2026-10-13T07:20:00+08:00")["sent"] == 1
         with no_pub():
             try: remind(asks(i, K5)); raise AssertionError()
             except ValueError as e: assert str(e) == WB.NO_PUB
@@ -5105,7 +5127,7 @@ def the_page_reminds_and_the_history_says_so():
         i = today_reliefs((K5, SAM), (K2, MAYA)); body = dict(date=D13, covers=[dict(id=i, ckey=K5), dict(id=i, ckey=K2), dict(id=i, ckey=K8)]); h = Since()
         got = call(TEAM, "post", URL, body); assert got == dict(sent=0, skipped=[dict(ckey=K5, name=SAM, why=TOO_SOON.format("06:50")), dict(ckey=K2, name=MAYA, why=TOO_SOON.format("06:50")), dict(ckey=K8, name=None, why=NOBODY)]) and h.new() == [], got
         at("07:00", 13); assert call(TEAM, "post", URL, body) == dict(sent=2, skipped=[dict(ckey=K8, name=None, why=NOBODY)]) and h.new() == [(TEAM, TEAM, "code", "reminded", "Reminded 2 relief teachers on Tue 13 Oct", None)]
-        assert len([r for r in outs("relief") if r["key"].endswith(":r1")]) == 2
+        assert len([r for r in outs("relief") if r["key"].endswith(":r1")]) == 2 and send() == 2
         at("07:10", 13); call(LEE, "post", URL, dict(date=D13, covers=[dict(id=i, ckey=K5)])); assert h.new() == [(LEE, LEE, "code", "reminded", "Reminded 1 relief teacher on Tue 13 Oct", None)]
         # the relief team's alone
         was = len(outs())
@@ -5117,7 +5139,7 @@ def the_page_reminds_and_the_history_says_so():
             r = who(TEAM).post(URL, json=bad); assert r.status_code == 400 and r.get_json() == dict(error=absences.WRONG), (bad, r.get_data(as_text=True)[:200])
         assert who(TEAM).post(URL, data=b"{ not json").status_code == 400 and call(TEAM, "post", URL, dict(date=D13, covers=[])) == dict(sent=0, skipped=[])
         # only what the page sends is read: who and when it was approved are the app's own
-        at("07:20", 13); assert call(TEAM, "post", URL, dict(date=D13, covers=[dict(id=i, ckey=K5, absent=RUTH, approved_at="x", who=HUGO)]))["sent"] == 1 and outs("relief")[-1]["name"] == SAM; h.new()
+        send(); at("07:20", 13); assert call(TEAM, "post", URL, dict(date=D13, covers=[dict(id=i, ckey=K5, absent=RUTH, approved_at="x", who=HUGO)]))["sent"] == 1 and outs("relief")[-1]["name"] == SAM; h.new()
         for other in ("2026-10-12", "2026-10-14", "1999-01-01"): assert call(TEAM, "post", URL, dict(date=other, covers=body["covers"][:1])) == dict(sent=0, skipped=[dict(ckey=K5, name=SAM, why=NOBODY)])
         was = len(outs()); tgdb.set_state("bot", None); assert call(TEAM, "post", URL, body, code=409) == dict(error=tgweb.NOT_CONNECTED) and len(outs()) == was and h.new() == []
     with school(SAM, TEAM):
@@ -7129,6 +7151,250 @@ def nothing_is_held_while_anything_is_said():
         for bad in (dict(data="b:" + "x" * 16), dict(data=None), dict(data="ask:send")): v = dict(tapping(EVE, "Send")["callback_query"]); v.update(bad); assert answered(dict(update_id=next(_ids), callback_query=v)) == (OLD_BUTTON, True)
     for first in ("asking", "bot"):                                                        # either can be imported first
         p = subprocess.run([sys.executable, "-c", f"import relief.{first}"], cwd=ROOT, env=dict(os.environ, DATA_DIR=tempfile.mkdtemp()), capture_output=True, text=True); assert p.returncode == 0, p.stderr[-400:]
+
+# ---- an outage of Telegram (the final review) ----
+REVOKED, WRONG_TOKEN = (401, dict(ok=False)), (404, dict(ok=False))
+
+@contextlib.contextmanager
+def clockwork(*down, how=NEVER_LEFT):
+    """the school's bot under a made-up token and a clock of its own, from 09:00 on Mon 12 Oct: Telegram is down (how: what it does then) from one second
+    to another, as often as down says -> v: v.t the second now; v.run(to): the sender every five seconds and the sweep every minute, until then; v.went:
+    [(second, chat, text)]; v.asked: the seconds of getMe; v.tried: how many messages were tried; v.lines: what was logged"""
+    began, h = datetime.datetime.fromisoformat("2026-10-12T09:00:00+08:00"), Grab()
+    v = types.SimpleNamespace(t=0, went=[], asked=[], tried=0, lines=lambda: [r.getMessage() for r in h.records])
+    def now(): return began + datetime.timedelta(seconds=v.t)
+    def out(url, data, headers, timeout):
+        method, p = url.rsplit("/", 1)[1], parts(data, headers)[0]
+        if method == "getMe": v.asked.append(v.t)
+        if method == "sendMessage": v.tried += 1
+        if any(a <= v.t < b for a, b in down):
+            if isinstance(how, BaseException): raise how
+            return how[0], json.dumps(how[1]).encode()
+        if method == "sendMessage": v.went.append((v.t, p["chat_id"], p["text"]))
+        return 200, json.dumps(dict(ok=True, result=dict(message_id=1000 + v.tried))).encode()
+    def run(to):
+        while v.t < to:
+            clock.now = now().isoformat(timespec="seconds")
+            if v.t % 60 == 0: TE.sweep()
+            OB.send_due()
+            v.t += 5
+        clock.now = now().isoformat(timespec="seconds")
+    v.run, v.told = run, lambda name: [x for t_, c, x in v.went if c == CHATS[name]]
+    os.environ["TELEGRAM_BOT_TOKEN"] = "made-up-" + secrets.token_hex(10)
+    tgdb.set_state("bot", dict(tgdb.get_state("bot"), username="ctss_made_up_bot", key=digest(tg.hook_secret())))
+    KINDS.addHandler(h)
+    try:
+        with stand_in(tg, "_send", out), stand_in(OB, "_clock", lambda: now().timestamp()): yield v
+    finally: KINDS.removeHandler(h)
+
+def once(v):
+    """nobody got any message twice, and every message there is has gone"""
+    assert len(set((c, x) for t_, c, x in v.went)) == len(v.went) and {(r["state"], r["tries"]) for r in outs()} == {("sent", 0)}, [(r["kind"], r["name"], r["state"], r["tries"]) for r in outs()]
+
+def a_busy_morning():
+    """a relief planned, its messages of five kinds to make now -> the two absences' ids"""
+    i = absent(by=HUGO); give(i, K2, MAYA); CV.ask_change(i, K2, "A parent meeting", MAYA); new_pick(i, K2, RUTH); give(i, K5, SAM)
+    j = absent(dates=["2026-10-16"]); absences.cancel(j, "Better", EVE); return i, j
+
+@t
+def an_outage_costs_no_more_than_the_outage():
+    """the final review's table: however long it was, what waited goes within half a minute of its end, in its order, once, and no try is counted"""
+    for minutes, hows in ((3, (NEVER_LEFT, DOWN, REVOKED, WRONG_TOKEN)), (13, (NEVER_LEFT, REVOKED)), (20, (DOWN,)), (45, (NEVER_LEFT,)), (120, (DOWN,))):
+        for how in hows:
+            end = minutes * 60
+            with school(EVE, SAM, MAYA, ROSA, TEAM, LEE), clockwork((0, end), how=how) as v:
+                a_busy_morning(); v.run(end); assert v.went == [] and v.tried == 1 and {(r["state"], r["tries"], r["next_at"]) for r in outs()} == {("queued", 0, 0)}, (minutes, how)
+                assert len(v.asked) <= end / 20 + 1 and all(b - a >= 20 for a, b in zip(v.asked, v.asked[1:])) and v.lines() == ["network"], (minutes, how, v.lines())
+                v.run(end + 30); once(v); assert len(v.went) == len(outs()) == 7 and all(end <= t_ < end + 30 for t_, c, x in v.went), (minutes, how, v.went)
+                with tgdb.db(read=True) as c: assert [x for t_, c_, x in v.went] == [r["text"] for r in c.execute("SELECT text FROM outbox ORDER BY rowid")], "in their order"
+                assert {r["kind"] for r in outs()} == {"planned", "officer", "relief", "ask", "cancelled"} and v.lines() == ["network", "Telegram answers again (network)"], v.lines()
+                n, asked_ = len(v.went), len(v.asked); v.run(end + 600); assert len(v.went) == n and len(v.asked) == asked_, "and nothing more"
+    # a connection that times out: the one message that may have gone is marked so, the rest as above
+    with school(EVE, SAM, MAYA, ROSA, TEAM, LEE), clockwork((0, 1200), how=MAY_HAVE) as v:
+        a_busy_morning(); v.run(1200); assert v.tried == 1; v.run(1230); assert collections.Counter(r["state"] for r in outs()) == {"unsure": 1, "sent": 6} and {r["tries"] for r in outs()} == {0} and len(v.went) == 6
+    # one blip, between two runs: told at the next
+    with school(SAM), clockwork((0, 4)) as v: i = absent(); give(i, K5, SAM); v.run(15); assert [(t_, x) for t_, c, x in v.went] == [(5, RELIEF_K5)]
+    # up and down all morning: each goes as soon as it is up, for half a minute
+    with school(EVE, SAM, MAYA, ROSA, TEAM, LEE), clockwork(*[(a, a + 60) for a in range(0, 5400, 90)]) as v:
+        for k, (ckey, who_) in enumerate(((K2, MAYA), (K5, SAM))): v.run(600 * k); i = absent(by=HUGO, periods=[2, 4] if ckey == K2 else [5, 6]); give(i, ckey, who_)
+        v.run(5400); once(v); assert all(t_ % 90 >= 60 for t_, c, x in v.went) and max(t_ for t_, c, x in v.went) < 720
+
+@t
+def a_move_during_an_outage_is_told_when_it_ends():
+    with school(SAM, MAYA, TEAM), clockwork((600, 4200)) as v:
+        i = absent(by=HUGO); give(i, K5, SAM); v.run(1200); assert v.told(SAM) == [RELIEF_K5]
+        give(i, K5, MAYA); v.run(4200); assert len(v.went) == 1 and [(r["kind"], r["name"], r["state"], r["tries"]) for r in outs()][1:] == [("moved", SAM, "queued", 0), ("relief", MAYA, "queued", 0)]
+        v.run(4230); once(v); assert [(c, x) for t_, c, x in v.went[1:]] == [(CHATS[SAM], MOVED_K5), (CHATS[MAYA], RELIEF_K5)] and all(4200 <= t_ < 4230 for t_, c, x in v.went[1:])
+        v.run(8400); assert len(v.went) == 3
+    # what is not true any more by then is not said: moved twice, moved and back, cancelled
+    with school(SAM, MAYA, HUGO, TEAM), clockwork((600, 4200)) as v:
+        i = absent(by=HUGO); give(i, K5, SAM); v.run(1200); give(i, K5, MAYA); v.run(1800); give(i, K5, HUGO); v.run(4230)
+        assert v.told(SAM) == [RELIEF_K5, MOVED_K5] and v.told(MAYA) == [] and v.told(HUGO) == [RELIEF_K5] and [r["state"] for r in outs("relief", MAYA)] == ["dropped"]
+    with school(SAM, MAYA, TEAM), clockwork((600, 4200)) as v:
+        i = absent(by=HUGO); give(i, K5, SAM); v.run(1200); give(i, K5, MAYA); v.run(1800); give(i, K5, SAM); v.run(4230); assert v.told(MAYA) == [] and v.told(SAM) == [RELIEF_K5] * 2 and state(outs("moved")[0]["key"]) == "dropped"
+    with school(SAM, MAYA, TEAM), clockwork((600, 4200)) as v:
+        i = absent(by=HUGO); give(i, K5, SAM); v.run(1200); give(i, K5, MAYA); v.run(1800); absences.cancel(i, "Better", EVE); v.run(4290); assert v.told(MAYA) == [] and v.told(SAM) == [RELIEF_K5, MOVED_K5] and v.told(TEAM) == [CANCELLED_EVE.format(EVE)]
+
+@t
+def in_doubt_getme_is_asked_every_twenty_seconds():
+    assert (OB.ME_EVERY, OB.ME_TIMEOUT) == (20, 5)
+    for first in (NEVER_LEFT, DOWN, REVOKED, WRONG_TOKEN, MAY_HAVE):
+        with made_up():
+            links.link(TIA, 501, None); now, at_, checked = [1000], [], []
+            def go(t_, f): now[0] = t_; return with_send(f, lambda: OB.send_due(now=t_))
+            for k in "ab": q(k, text=k)
+            f, seen = tele(first, me=NEVER_LEFT, before=lambda m, p, up: at_.append((now[0], m))); assert go(1000, f)["sent"] == 0 and at_ == [(1000, "sendMessage")]
+            go(1001, f); was = rows("outbox"); q("c", text="c")
+            with valid(lambda it: checked.append(it)):                                      # a run every second (woken by each save): nothing but the question
+                for t_ in range(1002, 1101): assert go(t_, f)["sent"] == 0
+            assert at_[1:] == [(t_, "getMe") for t_ in range(1001, 1101, 20)] and checked == [] and rows("outbox")[:2] == was, (first, at_)
+            f, seen = tele(); assert go(1100, f)["sent"] == 0 and seen == []; assert go(1101, f)["sent"] == (2 if first is MAY_HAVE else 3) and [m for m, p, up in seen][0] == "getMe"
+            assert texts(seen) == ["a", "b", "c"][first is MAY_HAVE:] and {r["tries"] for r in rows("outbox")} == {0}, "oldest first, and no try counted"
+            # the next doubt is another: it asks at its first run, however lately the last one did; a clock put back asks too
+            q("d", text="d"); f, seen = tele(NEVER_LEFT); go(1102, f); assert go(1107, f)["sent"] == 1 and [m for m, p, up in seen] == ["sendMessage", "getMe", "sendMessage"]
+            q("e", text="e"); f, seen = tele(NEVER_LEFT, me=DOWN); go(5000, f); go(5001, f); go(5002, f); go(4000, f); assert [m for m, p, up in seen] == ["sendMessage", "getMe", "getMe"]
+
+@t
+def a_try_that_met_an_outage_is_not_counted():
+    """Telegram does not answer getMe after it: it was not the message. When it answers, it was, the sixth time for good"""
+    with made_up():
+        links.link(TIA, 501, None); go = lambda at_: with_send(f, lambda: OB.send_due(now=at_)); has = lambda k: (state(k), item(k)["tries"], item(k)["next_at"])
+        for n in range(6):
+            counted = ("queued", n + 1, 1000 + OB.WAITS[n]) if n < 5 else ("failed", 6, 0)
+            for how, me in ((NEVER_LEFT, DOWN), (DOWN, MAY_HAVE), (REVOKED, REVOKED), (DOWN, SLOW(1))):
+                k = f"k{len(rows('outbox'))}"; q(k); put(k, tries=n); f, seen = tele(how, me=me); go(1000); assert has(k) == counted, (n, how)
+                go(1001); assert has(k) == ("queued", n, 0) and [m for m, p, up in seen] == ["sendMessage", "getMe"], (n, how)
+                f, seen = tele(); go(1030); assert has(k)[:2] == ("sent", n), "at once, however long it would have waited"; OB._hold[0] = 0.0
+            k = f"k{len(rows('outbox'))}"; q(k); put(k, tries=n); f, seen = tele(NEVER_LEFT); go(1000); go(1001); assert has(k) == counted and [m for m, p, up in seen] == ["sendMessage", "getMe"], "answered: counted"
+            put(k, state="sent")
+        # what became of it meanwhile stays (another copy of the app tried it, it was dropped, its person blocked the bot)
+        for changes in (dict(tries=4), dict(state="dropped"), dict(state="sending"), dict(state="sent"), dict(state="unsure")):
+            q("x"); f, seen = tele(NEVER_LEFT, me=DOWN); go(1000); put("x", **changes); was = item("x"); go(1001); assert item("x") == was, changes
+            put("x", state="dropped"); OB._doubt.clear()
+        # only the one it began with, and once
+        q("y"); q("z"); put("z", tries=3, next_at=9e9); f, seen = tele(NEVER_LEFT, me=DOWN); go(1000); go(1001); put("y", tries=1); go(1021); assert has("y") == ("queued", 1, 0) and has("z") == ("queued", 3, 9e9) and len(seen) == 3
+
+@t
+def a_message_that_fails_by_itself_holds_the_others_one_run():
+    """a fault of the app's own (one that cannot be sent) is told from an outage by getMe: six tries and it is failed, and the rest go in the next run"""
+    def fault(m, p, up):
+        if m == "sendMessage" and p["text"] == "bad": raise ValueError("made up")
+    with made_up():
+        links.link(TIA, 501, None); f, seen = tele(before=fault); t_ = [1000]; q("bad", text="bad"); n = 0
+        def run(): got = with_send(f, lambda: OB.send_due(now=t_[0])); t_[0] += 5; return got
+        for k in "abc": q(k, text=k)
+        assert run() == dict(sent=0, waiting=4) and texts(seen) == ["bad"]
+        assert run()["sent"] == 3 and texts(seen) == ["bad", "bad", "a", "b", "c"], "due again, and the oldest: tried, and the rest go all the same"
+        while state("bad") == "queued":                                                     # the sender, every five seconds, with a message a minute
+            if t_[0] % 60 == 0: n += 1; q(f"m{n}", text=f"m{n}")
+            run()
+            if t_[0] % 60 == 10: assert state(f"m{n}") == "sent", (n, t_[0])                 # in the run it was queued for, or the one after
+        assert texts(seen).count("bad") == 6 and n > 40 and {state(f"m{k}") for k in range(1, n)} == {"sent"} and sum(OB.WAITS) <= t_[0] - 1000 < sum(OB.WAITS) + 60, "its own ladder, no longer"
+        run(); assert [x for x in texts(seen) if x != "bad"] == ["a", "b", "c"] + [f"m{k}" for k in range(1, n + 1)] and state("bad") == "failed", "each once"
+    with made_up():                                                                         # several of them, among good ones
+        links.link(TIA, 501, None); f, seen = tele(before=fault); t_ = 1000
+        for k in range(12): q(f"k{k}", text="bad" if k % 2 == 0 else f"good {k}")
+        for _ in range(12): with_send(f, lambda: OB.send_due(now=t_)); t_ += 5
+        assert sorted(x for x in texts(seen) if x != "bad") == sorted(f"good {k}" for k in range(1, 12, 2)), "within the minute"
+
+@t
+def a_token_that_is_not_taken_gives_nothing_up():
+    for how in (REVOKED, WRONG_TOKEN):
+        with made_up():
+            links.link(TIA, 501, None); links.link(HUGO, 502, None); [q(f"k{i}", TIA if i % 2 else HUGO, f"k{i}") for i in range(6)]
+            f, seen = tele(rest=how, me=how)
+            for t_ in range(1000, 1000 + 2 * 3600, 5): with_send(f, lambda: OB.send_due(now=t_))
+            assert len(texts(seen)) == 1 and len(seen) <= 1 + 2 * 180 and {(r["state"], r["tries"]) for r in rows("outbox")} == {("queued", 0)} and links.chat_of(TIA) == 501 and links.chat_of(HUGO) == 502, how
+            f, seen = tele(); assert with_send(f, lambda: OB.send_due(now=1030 + 2 * 3600))["sent"] == 6 and texts(seen) == [f"k{i}" for i in range(6)]
+            with work("a.pdf") as fs: f, seen = tele(OK_, how, how, how); q("f", files=fs); with_send(f, lambda: OB.send_due(now=99_000)); assert [m for m, p, up in seen] == ["sendMessage"] + ["sendDocument"] * 3 and OB.told("f")["files_failed"] == 1
+
+@t
+def the_sender_asks_before_anything_goes_when_it_starts():
+    """a start in an outage spends no message: none is marked as one that may have gone, and no try is counted"""
+    def started(f, until):
+        th = OB.start(every=0.01)
+        try:
+            for _ in range(300):
+                if until(): return
+                time.sleep(0.01)
+            raise AssertionError("not within three seconds")
+        finally: OB._stop.set(); OB.wake(); th.join(5)
+    with made_up():
+        links.link(TIA, 501, None); q("a", text="a"); q("b", text="b")
+        for how in (MAY_HAVE, NEVER_LEFT, REVOKED):                                         # started three times in it
+            f, seen = tele(rest=how, me=how); runs = []; real = OB.send_due
+            with stand_in(OB, "send_due", lambda: (real(), runs.append(1))): with_send(f, lambda: started(f, lambda: len(runs) > 10))
+            assert [m for m, p, up in seen] == ["getMe"] and [(r["state"], r["tries"]) for r in rows("outbox")] == [("queued", 0)] * 2 and OB._doubt.is_set(), "at once, and not again within twenty seconds"
+        f, seen = tele(); with_send(f, lambda: started(f, lambda: state("b") == "sent")); assert [m for m, p, up in seen] == ["getMe", "sendMessage", "sendMessage"] and texts(seen) == ["a", "b"] and not OB._doubt.is_set(), "asked at once, however lately before the start"
+        f, seen = tele(); b = tgdb.get_state("bot"); tgdb.set_state("bot", None); n = []; real = OB.send_due; q("c", text="c")
+        with stand_in(OB, "send_due", lambda: (real(), n.append(1))): with_send(f, lambda: started(f, lambda: len(n) > 3))
+        assert seen == []; tgdb.set_state("bot", b); assert with_send(f, OB.send_due)["sent"] == 1 and [m for m, p, up in seen] == ["getMe", "sendMessage"], "not connected: asked once it is"
+
+@t
+def a_doubt_is_two_lines_and_a_store_that_fails_one():
+    h = Grab(); KINDS.addHandler(h); lines = lambda: [r.getMessage() for r in h.records]
+    go = lambda f, at_: with_send(f, lambda: OB.send_due(now=at_))
+    try:
+        for first, kind in ((NEVER_LEFT, "network"), (REVOKED, "network"), (LATE, "unsure")):
+            with made_up():
+                links.link(TIA, 501, None); q("a"); q("b"); h.records.clear(); f, seen = tele(first, me=NEVER_LEFT)
+                for t_ in range(1000, 2800, 5): go(f, t_)
+                assert lines() == [kind] and len(seen) == 91, (first, lines()[:5], len(seen))
+                go(tele(me=LATE)[0], 2800); f, seen = tele(me=SLOW(30)); go(f, 2820); assert len(seen) == 1 and lines() == [kind], "another way of not answering is not another line"
+                f, seen = tele(); go(f, 2850); assert lines() == [kind, f"Telegram answers again ({kind})"] and {r["state"] for r in rows("outbox")} <= {"sent", "unsure"}, lines()
+                # what fails outside a doubt is logged as ever, and so is the next doubt
+                q("d"); go(tele(REFUSED)[0], 2860); q("e"); go(tele(NEVER_LEFT)[0], 2865); go(tele()[0], 2880); assert lines()[2:] == ["refused", "network", "Telegram answers again (network)"], lines()
+                with_send(tele(me=NEVER_LEFT)[0], lambda: tg.call("getMe")); assert lines()[-1] == "network" and len(lines()) == 6, "another's question is logged"
+        with made_up():                                                                     # a start: a line when Telegram does not answer, none when it does
+            links.link(TIA, 501, None); q("a")
+            for me, want in ((NEVER_LEFT, ["network"]), (LATE, ["unsure"]), (OK_, [])):
+                OB._doubts(); h.records.clear(); f, seen = tele(me=me); [go(f, t_) for t_ in range(1000, 1100, 5)]; assert lines() == want, (me, lines())
+        # another thread's calls are logged meanwhile
+        with made_up():
+            links.link(TIA, 501, None); q("a"); go(tele(NEVER_LEFT)[0], 1000); h.records.clear(); other = []
+            def elsewhere(m, p, up):
+                if not other: other.append(1); th = threading.Thread(target=lambda: tg.call("sendMessage", dict(chat_id=1))); th.start(); th.join(5)
+            go(tele(rest=REFUSED, me=NEVER_LEFT, before=elsewhere)[0], 1001); assert other and lines() == ["refused"], lines()
+        # the sender's own failure: when it is another kind than the last, not at each run; and again once it had worked
+        with telegram():
+            real = OB.send_due
+            def loop(*raises):
+                left = list(raises)
+                def due():
+                    e = left.pop(0)
+                    if not left: OB._stop.set()
+                    if e: raise e(f"{TIA} made up")
+                    return real()
+                h.records.clear(); OB._stop.clear()
+                with stand_in(OB, "send_due", due), stand_in(OB, "_wake", types.SimpleNamespace(wait=lambda s: None, clear=lambda: None)): OB._loop(0)
+                return lines()
+            D, O, failed = sqlite3.DatabaseError, sqlite3.OperationalError, "the message sender failed ({})".format
+            assert loop(*[D] * 6) == [failed("DatabaseError")] and loop(None) == [] and loop(D, D, O, O, D) == [failed("DatabaseError"), failed("OperationalError"), failed("DatabaseError")] and loop(None) == []
+            assert loop(D, None, D, D, None, None, D) == [failed("DatabaseError")] * 3 and loop(D, D) == [], "worked meanwhile: again"; loop(None)
+            with stand_in(OB, "recover", lambda: (_ for _ in ()).throw(D("made up"))):
+                n = [0]
+                def wait(s): n[0] += 1; OB._stop.set() if n[0] == 5 else None
+                h.records.clear(); OB._stop.clear()
+                with stand_in(OB, "_wake", types.SimpleNamespace(wait=wait, clear=lambda: None)): OB._loop(0)
+                assert lines() == [failed("DatabaseError")], "a store that is damaged when the app starts"
+            loop(None)
+        # a store that can be read and not written (a full disk): the same, at each run
+        with telegram():
+            links.link(TIA, 501, None); real_db = tgdb.db
+            def locked(read=False):
+                if not read: raise sqlite3.OperationalError("made up")
+                return real_db(read)
+            for k in range(2):
+                q(f"a{k}"); q(f"b{k}"); h.records.clear()
+                with stand_in(tgdb, "db", locked): [OB.send_due() for _ in range(6)]
+                assert lines() == ["a message could not be sent (OperationalError)"] and OB.send_due()["sent"] == 2, lines()
+            q("c"); h.records.clear(); b = tgdb.get_state("bot")
+            with stand_in(tgdb, "db", locked): OB.send_due()
+            tgdb.set_state("bot", None); OB.send_due(); tgdb.set_state("bot", b)
+            with stand_in(tgdb, "db", locked): OB.send_due(); OB.send_due()
+            assert len(lines()) == 2, "off meanwhile: it is said again"
+            assert OB.send_due()["sent"] == 1
+    finally: KINDS.removeHandler(h)
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

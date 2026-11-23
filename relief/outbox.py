@@ -5,25 +5,29 @@ queue puts a message under its key, for a person linked now (links.chat_of); a k
 not queued again. States: queued; sending (marked and committed before anything goes out, with nothing locked during the call);
 sent; failed (Telegram refused it, every try failed, or it could not be made into a message); unsure (the request may have gone
 out, or the app stopped while it was going: never tried again by itself); dropped (no longer true, or its person had no
-Telegram when it was to go, or it was a reminder that still waited when a newer one of the same relief was queued (drop): as if it
-had never been queued, so its key may be queued again).
+Telegram when it was to go: as if it had never been queued, so its key may be queued again).
 
 send_due sends what is due, oldest first, one run at a time in this copy of the app; an item is taken from queued to sending
 in one statement, so two copies never send the same one either. Nothing goes, and nothing is changed, while the bot is not
 connected (links.connected: no token, or another bot's) or the accounts cannot be read (nobody could be found then). Each item:
 VALID(item) False drops it (tell.still_true); the chat is links.chat_of(name) at that moment, never the one it was queued with;
-when either raises, it waits as after "network". An item that cannot be made into a message or marked sending is failed at
+when either raises, it waits for its next try (WAITS, below). An item that cannot be made into a message or marked sending is failed at
 once, and the rest go on; only the store failing (sqlite3.OperationalError: locked, the disk) ends the run. Then what tg.call
-answers: "network" (nothing went out) waits WAITS[tries], all five of them, so it is failed at the sixth try; "slow" puts it
-back until the pause ends, no try counted; "blocked" unlinks the person, only while that chat is still theirs, and removes the
-item, so that its key may be queued once they link again (the bot disconnected meanwhile: it is put back, nobody unlinked);
-"unsure" is unsure and ends the run; anything else failed.
+answers: "network" (nothing went out) begins a doubt (below) and ends the run; its try is counted, and it waits WAITS[tries], all
+five of them, so that it is failed at the sixth, only while it is the message itself (Telegram answers getMe at once);
+"slow" puts it back until the pause ends, no try counted; "blocked" unlinks the person, only while that chat is still theirs, and
+removes the item, so that its key may be queued once they link again (the bot disconnected meanwhile: it is put back, nobody
+unlinked); "unsure" is unsure and ends the run; anything else failed.
 
 A pause Telegram asks for ("slow", in answer to a message, a file or getMe) holds everything, what is queued during it too:
 until it ends (_hold; HOLD_MOST seconds at most, whatever Telegram says) nothing goes, is dropped or counted, and then the
-oldest go first. After an unsure message nothing goes until Telegram has answered getMe, asked at the start of each run
-(_doubt), so a dead connection makes one message unsure, not all. Both are kept in memory: a restart clears them. An item that
-has been sending for over STUCK seconds (its answer could not be written, or another copy stopped) is unsure too, at each run.
+oldest go first. After an unsure message, or one that came to "network" (an outage, a token that is not taken), the same until
+Telegram has answered getMe (_doubt, _answers): asked at the next run, then at most every ME_EVERY seconds. So a dead connection
+makes one message unsure, not all, and an outage costs no more than the outage: the try that met it is not counted (_met). When
+getMe is answered at once it was the message: its try is counted, and should it come to "network" again in that very run (it is
+one that cannot be sent) the rest of the run goes on. The pause and the doubt are kept in memory: a restart clears the pause, and
+begins with a doubt, so a start in an outage spends no message. An item that has been sending for over STUCK seconds (its answer
+could not be written, or another copy stopped) is unsure too, at each run.
 
 The text is plain (no parse_mode) and cut at a line end when longer than LIMIT. A button's token is made for the first try
 and kept with the item, so every try carries the same ones; its row in buttons is written with the item's sending and is good
@@ -37,8 +41,9 @@ after one that is "unsure", or a longer pause, the rest of that message's files 
 
 start is the sender: one daemon thread, recover first (whatever was sending when the app stopped is unsure), then prune, then
 send_due every EVERY seconds or when woken. Failures are logged to "relief.telegram" by their kind alone: never a text, a
-name, a chat, a token or a key (keys hold names)."""
-import datetime, json, logging, secrets, sqlite3, threading, time
+name, a chat, a token or a key (keys hold names). A doubt is two lines, one when it begins (tg.call's) and one when it ends, and the
+sender's own failure (the store) one whenever its kind changes."""
+import contextlib, datetime, json, logging, secrets, sqlite3, threading, time
 
 from accounts import people as _accounts
 from relief import absences as _absences
@@ -52,10 +57,14 @@ SPACING = 0.05                                  # seconds at least between two c
 LIMIT, MORE = 4000, "…and more in the app."
 BUTTON_DAYS, KEEP_DAYS = 30, 400
 FILE_TRIES, FILE_WAIT, FILE_SLOW, FILE_TIMEOUT = 3, 2, 20, 60
-ME_TIMEOUT = 5
+ME_TIMEOUT, ME_EVERY = 5, 20                    # seconds getMe may take, and between two of them while it is not answered
 VALID = lambda item: True                       # item: the stored message as a dict (key, name, kind, ref, text, ...)
 _busy = threading.Lock()                        # one run at a time
-_doubt = threading.Event()                      # a message may or may not have gone: the next waits for Telegram to answer
+_doubt = threading.Event()                      # whether Telegram is there is not known: nothing goes until it answers getMe
+_asked = [0.0]                                  # when that was asked last, in this doubt (epoch seconds; 0: not yet)
+_why = [None]                                   # the kind it was logged by, None while nothing was
+_met = [None]                                   # the message it began with, when that came to "network": (key, its tries before)
+_failed = [None]                                # the kind of the sender's own failure, while it lasts
 _hold = [0.0]                                   # when the pause Telegram asked for ends (epoch seconds)
 _last = [0.0]                                   # when the last call ended (time.monotonic)
 _wake, _stop = threading.Event(), threading.Event()
@@ -134,11 +143,6 @@ def states_for(*prefixes):
         return {r["key"]: _state(r) for p in prefixes for r in c.execute("SELECT key, name, state, at, sent_at FROM outbox WHERE substr(key, 1, ?)=?", (len(p), p))}
 
 
-def drop(key):
-    """a message that still waits is dropped -> whether it was one"""
-    with tgdb.db() as c: return c.execute("UPDATE outbox SET state='dropped' WHERE key=? AND state='queued'", (key,)).rowcount == 1
-
-
 # ---- one message
 def _pace():
     wait = _last[0] + SPACING - time.monotonic()
@@ -148,6 +152,12 @@ def _pace():
 def _held(now):
     """a pause Telegram asked for is not over (a clock put back does not make one longer than HOLD_MOST)"""
     return now < _hold[0] <= now + HOLD_MOST
+
+
+def _doubts(kind=None, met=None):
+    """a doubt begins: with a message that came to kind (logged by it), or with the sender's start; met: as _met"""
+    _asked[0], _why[0], _met[0] = 0.0, kind, met
+    _doubt.set()
 
 
 def _call(clock, method, params=None, **more):
@@ -290,8 +300,9 @@ def _send_files(item, chat, clock):
             with tgdb.db() as c: c.execute("UPDATE outbox SET files_failed=? WHERE key=?", (left, item["key"]))
 
 
-def _one(key, clock):
-    """one item, when it is still queued -> its state now, or None"""
+def _one(key, clock, again=False):
+    """one item, when it is still queued -> its state now, or None; again: Telegram has answered getMe since it came to "network", so
+    if it does so once more it is the item"""
     with tgdb.db(read=True) as c: r = c.execute("SELECT * FROM outbox WHERE key=? AND state='queued'", (key,)).fetchone()
     if r is None: return None
     try: item = dict(r, buttons=json.loads(r["buttons"]), files=json.loads(r["files"]), ref=json.loads(r["ref"]))
@@ -315,7 +326,8 @@ def _one(key, clock):
     except sqlite3.OperationalError: raise
     except Exception as e: return _bad(key, e)
     r = _call(clock, "sendMessage", params)
-    if r["kind"] == "unsure": _doubt.set()
+    if r["kind"] == "unsure": _doubts("unsure")
+    if r["kind"] == "network" and not again: _doubts("network", (key, item["tries"]))
     state = _settle(item, chat, r, clock())
     if state == "sent": _send_files(item, chat, clock)
     return state
@@ -331,6 +343,31 @@ def _may():
     return links.connected() is not None and _accounts.readable()
 
 
+def _answers(clock):
+    """Telegram answers getMe, asked at most every ME_EVERY seconds: the doubt is over. When it does not, it was an outage the message
+    it began with has met: its try is not counted"""
+    now = clock()
+    if _asked[0] and 0 <= now - _asked[0] < ME_EVERY: return False
+    _asked[0] = now
+    with tg.quiet() if _why[0] else contextlib.nullcontext(): r = _call(clock, "getMe", timeout=ME_TIMEOUT)
+    if r["ok"]:
+        _doubt.clear()
+        if _why[0]: _log.warning("Telegram answers again (%s)", _why[0])
+        return True
+    _why[0] = _why[0] or r["kind"]
+    if _met[0]:
+        key, tries = _met[0]
+        with tgdb.db() as c: c.execute("UPDATE outbox SET state='queued', tries=?, next_at=0 WHERE key=? AND state IN ('queued', 'failed') AND tries=?", (tries, key, tries + 1))
+        _met[0] = None
+    return False
+
+
+def _fails(what, e):
+    """the sender's own failure, logged when it is another than the last (_failed: none, once it has worked)"""
+    if _failed[0] != type(e).__name__: _log.error("%s (%s)", what, type(e).__name__)
+    _failed[0] = type(e).__name__
+
+
 def _unsure_old(now):
     with tgdb.db(read=True) as c: old = c.execute("SELECT 1 FROM outbox WHERE state='sending' AND claimed<?", (now - STUCK,)).fetchone()
     if old is None: return
@@ -339,22 +376,23 @@ def _unsure_old(now):
 
 def _run(now, limit):
     clock, sent = _clock if now is None else (lambda: now), 0
-    if not _may(): return dict(sent=0, waiting=_waiting())
+    if not _may():
+        _failed[0] = None
+        return dict(sent=0, waiting=_waiting())
     _unsure_old(clock())
-    if _held(clock()): return dict(sent=0, waiting=_waiting())
-    if _doubt.is_set():
-        if not _call(clock, "getMe", timeout=ME_TIMEOUT)["ok"]: return dict(sent=0, waiting=_waiting())
-        _doubt.clear()
+    if _held(clock()) or (_doubt.is_set() and not _answers(clock)): return dict(sent=0, waiting=_waiting())
+    met, _met[0] = _met[0], None
     with tgdb.db(read=True) as c:
         due = [r["key"] for r in c.execute("SELECT key FROM outbox WHERE state='queued' AND next_at<=? ORDER BY at, rowid LIMIT ?", (clock(), limit))]
     for key in due:
         if _doubt.is_set() or _held(clock()) or not _may(): break
-        try: sent += _one(key, clock) == "sent"
+        try: sent += _one(key, clock, again=met is not None and met[0] == key) == "sent"
         except sqlite3.OperationalError as e:                        # the store fails: the rest would too
-            _log.error("a message could not be sent (%s)", type(e).__name__)
+            _fails("a message could not be sent", e)
             break
         except Exception as e:                                       # one marked sending stays so, and is unsure after STUCK seconds
             _log.error("a message could not be sent (%s)", type(e).__name__)
+    else: _failed[0] = None
     return dict(sent=sent, waiting=_waiting())
 
 
@@ -396,7 +434,7 @@ def _loop(every):
                 ready = True
                 prune()
             send_due()
-        except Exception as e: _log.error("the message sender failed (%s)", type(e).__name__)
+        except Exception as e: _fails("the message sender failed", e)
         _wake.wait(every); _wake.clear()
 
 
@@ -410,6 +448,7 @@ def start(every=EVERY):
     global _sender
     if _sender is not None and _sender.is_alive(): return _sender
     _stop.clear()
+    _doubts()
     _sender = threading.Thread(target=_loop, args=(every,), name="relief-telegram", daemon=True)
     _sender.start()
     return _sender

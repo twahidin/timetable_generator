@@ -36,9 +36,9 @@ unless the relief itself is said again (_on_again); never of a lesson that is no
 is a holiday now). stopped says why, again nothing of it; no other message names an exam or event. A backup (exams) taken over by
 the teacher's own absence is not told as cancelled: its reliefs went with it.
 
-still_true asks again when a message is about to go: it is dropped (its key may be queued again) when the lesson is over, when
-what it says is not so any more (what it asks of a lesson that is stopped now, too), or when its person is not on the team a
-message was for. stopped and again are dropped too while the exams, or that date in them, cannot be read: due makes them anew
+still_true asks again when a message is about to go: it is dropped (its key may be queued again) when the lesson is over or the
+absence past (a cancelled one too), when what it says is not so any more (what it asks of a lesson that is stopped now, too), or
+when its person is not on the team a message was for. stopped and again are dropped too while the exams, or that date in them, cannot be read: due makes them anew
 once they can be.
 
 sweep never raises and asks Telegram nothing; soon asks for one in a thread, and start is a ticker of one minute for the hooks
@@ -74,7 +74,8 @@ NO_PICK = "No new pick yet: open the app."
 ACK, CHANGE, SET_WORK, NOT_NEEDED, OPEN = "✅ Acknowledge", "↩ Request to change", "✅ Acknowledge and set work", "❌ Not needed: cancel", "Open in the app"
 TOLD = ("relief:", "gone:", "moved:", "stopped:", "again:", "ask:", "planned:", "remind:", "officer:")      # the keys due must know of
 SENT = ("sent", "unsure")                       # the states in which a person was told, or may have been
-LIVE = (*SENT, "queued", "sending")              # ... or may still be
+WAITING = ("queued", "sending")                 # ... in which they will be by itself, or are now
+LIVE = (*SENT, *WAITING)
 RELIEFS = ("relief:", "stopped:", "again:")      # the keys that say what has been said of a relief (Said)
 _COPY = re.compile(r"(relief:.*):r(\d+)", re.S)  # the key of a reminder: the relief's, and which one it is
 _going = threading.Lock()                       # one sweep at a time
@@ -737,7 +738,9 @@ def _remind_true(ref, name):
 
 
 def _cancelled_true(ref, name):
-    """a copy for the team alone goes to who is on it still"""
+    """the absence is not past, and a copy for the team alone goes to who is on it still"""
+    r = _read(ref["id"])
+    if r is None or _last(r) < _fill._when(None).date().isoformat(): return False
     return not ref.get("team") or _on_team(name)
 
 

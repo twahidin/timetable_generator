@@ -5,12 +5,13 @@ nothing leaves the server, every call is kept in PRACTICE_LOG as (method, params
 hook_secret: hex HMAC-SHA256 of "telegram-hook:" + token under SECRET_KEY, what Telegram sends back with each update
 ("" when there is no SECRET_KEY). call: one Bot API method, never raising: dict(ok, result, kind, retry_after), kind None
 when ok, else "blocked" (403), "slow" (429, wait retry_after), "refused" (other 4xx, no token, an answer that is not ok or not
-JSON), "network" (an outage: 5xx other than 500 and 504, or never connected) and "unsure" (the request went out and no answer
-came, a read timeout or a reset, or it was 500 or 504, which may come after it was taken: the message may have arrived). files:
-(field, filename, bytes) sent as multipart. download: a file by its id, None when over the limit or failed.
+JSON), "network" (an outage: 5xx other than 500 and 504, or never connected; and 401 and 404, a token that is revoked or wrong,
+whatever was sent) and "unsure" (the request went out and no answer came, a read timeout or a reset, or it was 500 or 504, which
+may come after it was taken: the message may have arrived). files: (field, filename, bytes) sent as multipart. download: a file by
+its id, None when over the limit or failed.
 The bot's address holds the token: no address, exception text or answer body is ever logged or raised; a failure is logged by
-its kind alone to "relief.telegram". Tests replace _send, which is the only way out."""
-import hashlib, ssl, hmac, itertools, json, logging, os, secrets, socket, threading, urllib.error, urllib.request
+its kind alone to "relief.telegram", but for this thread's within quiet. Tests replace _send, which is the only way out."""
+import contextlib, hashlib, ssl, hmac, itertools, json, logging, os, secrets, socket, threading, urllib.error, urllib.request
 import http.client
 
 API = "https://api.telegram.org"
@@ -18,6 +19,7 @@ PRACTICE_LOG = []                    # (method, params) of every call made in pr
 _log = logging.getLogger("relief.telegram")
 _counter = itertools.count(1)
 _plock = threading.Lock()
+_here = threading.local()            # quiet: this thread's failures are not logged
 PRACTICE_FILE = b"practice file"
 
 
@@ -44,8 +46,16 @@ def _send(url, data, headers, timeout):
         return e.code, body
 
 
+@contextlib.contextmanager
+def quiet():
+    """what this thread calls meanwhile is not logged when it fails (a question asked again and again, its first failure logged)"""
+    _here.quiet = True
+    try: yield
+    finally: _here.quiet = False
+
+
 def _fail(kind, retry_after=None):
-    _log.warning(kind)
+    if not getattr(_here, "quiet", False): _log.warning(kind)
     return dict(ok=False, result=None, kind=kind, retry_after=retry_after)
 
 
@@ -89,6 +99,7 @@ def _classify(status, raw):
     if status == 429:
         ra = ((d or {}).get("parameters") or {}).get("retry_after")
         return _fail("slow", ra if isinstance(ra, (int, float)) and not isinstance(ra, bool) else 5)
+    if status in (401, 404): return _fail("network")
     if 400 <= status < 500: return _fail("refused")
     return _fail("unsure" if status in (500, 504) else "network")
 

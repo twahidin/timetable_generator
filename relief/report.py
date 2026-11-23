@@ -36,9 +36,9 @@ it (tell.known). weekly:{monday}:{name} goes to each of the team who can be reac
 and is dropped when it is a DAY old, or when its person is not on the team any more.
 
 remind sends a relief again to its teacher, for the page (relief/tgweb.py) and for the button (relief/bot.py): its message as it
-would be made now, under the relief's key with :r{n} after it, WAIT at least after the last of that relief's messages went or was
-queued. An earlier reminder that still waits is dropped then, so that they do not come all at once; a relief told to nobody yet
-gets the message itself. Two at once are one: a key is queued once. What was reminded is one history entry.
+would be made now, under the relief's key with :r{n} after it, WAIT at least after the last of that relief's messages went, and not
+while it waits in the queue or is on its way, however long: it goes by itself, and they do not come all at once. A relief told to
+nobody yet gets the message itself. Two at once are one: a key is queued once. What was reminded is one history entry.
 
 The records are read as the sweep reads them, under absences._LOCK (a takeover is two saves), so that a file that cannot be read
 is known; remind reads absences.all_records, since it says nothing of what it cannot find but that nobody is to be reminded, and a
@@ -347,15 +347,13 @@ def _send_again(w, v):
     item = tell.relief_item(w.pub, w.reach, w.said.told, r, x, c, v["ckey"])
     if item is None: return who, NOBODY         # approved at no time (changed by hand)
     key, last = item["key"], w.said.last(item["key"])
-    if last is not None and w.now - last[0] <= WAIT: return who, _too_soon(*last)
+    if last is not None and (last[1] in tell.WAITING or w.now - last[0] <= WAIT): return who, _too_soon(*last)
     if tell._there(w.said.told, key):           # else it was never queued, or dropped: the message itself, as the sweep would
         n = 1 + max(w.said.copies(key), default=0)
         item = dict(item, key=f"{key}:r{n}", ref=dict(item["ref"], n=n))
     if not outbox.queue(item["key"], who, item["text"], kind="relief", buttons=item["buttons"], files=item["files"], ref=item["ref"]):
         t = outbox.told(item["key"])            # somebody else was first (a key is queued once); else they have no Telegram by now
         return who, _too_soon(tell._time(t["at"]), t["state"]) if t and t["state"] != "dropped" else NOT_ON
-    for n, t in w.said.copies(key).items():
-        if t["state"] == "queued": outbox.drop(f"{key}:r{n}")            # if it still is
     return who, None
 
 
