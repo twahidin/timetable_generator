@@ -37,6 +37,7 @@
   function focusKey() {   /* the table, bar, menu or panel control that has focus, so a redraw can give it back */
     const a = document.activeElement; if (!a || !a.closest || !a.closest("#tbl,#bar,#menu,#panel")) return null;
     const d = a.dataset, q = v => String(v).replace(/["\\]/g, "\\$&");
+    if (a.id === "ptitle") return "#ptitle";
     if (d.tick != null) return `[data-tick="${q(d.tick)}"]`;
     if (d.act === "pick") return `[data-act="pick"][data-name="${q(d.name)}"]${d.ed ? '[data-ed="1"]' : ":not([data-ed])"}`;
     if (d.act === "menu") return `[data-act="menu"][data-kind="${q(d.kind)}"]`;
@@ -180,7 +181,8 @@
     drawMenu();
   }
 
-  const VERB = { give: n => `Add ${plural(n, "person", "people")}`, take: n => `Take off ${plural(n, "person", "people")}`,
+  const these = n => n === 1 ? "this person" : `these ${n} people`;   /* not "Add 3 people", which reads like Add a person */
+  const VERB = { give: n => `Add ${these(n)}`, take: n => `Take off ${these(n)}`,
                  group: n => `Set the role for ${plural(n, "person", "people")}`, off: n => `Switch off ${plural(n, "person", "people")}`, on: n => `Switch on ${plural(n, "person", "people")}` };
 
   function menuSum() {
@@ -235,8 +237,27 @@
         lines.push(...d.lines);
       }
       m.lines = lines;
-    } catch (e) { if (my !== S.token || S.menu !== m) return; m.err = e.message; }
+    } catch (e) {
+      if (my !== S.token || S.menu !== m) return;
+      if (GONE.test(e.message) && await barGone(e.message)) return;
+      m.err = e.message;
+    }
     drawMenu(false);
+  }
+
+  /* a bar call refused because a ticked person is no longer on the staff list (someone else removed them): the list is
+     read again, which drops their tick; the sentence goes on the message line, and the menu closes when no tick is left or
+     previews again. false when no tick went, so the caller shows the sentence as it is (no loop) */
+  async function barGone(text) {
+    const before = S.ticked.size;
+    try { await loadPeople(); } catch (e) { return false; }
+    if (S.ticked.size >= before) return false;
+    note(text, true);
+    if (!S.ticked.size) S.menu = null;
+    else if (S.menu) { S.menu.fail = null; S.menu.busy = false; }
+    drawAll();
+    if (S.menu) previewMenu();
+    return true;
   }
 
   function openMenu(kind, mgmt) {
@@ -257,6 +278,7 @@
       }
     } catch (e) {
       if (S.out) return;
+      if (GONE.test(e.message) && await barGone(e.message)) return;
       m.busy = false; m.fail = e.message;
       if (did) { try { await loadPeople(); } catch (x) { /* the preview below reports it */ } drawTable(); }
       previewMenu();   /* the buttons live again once the preview is read */
@@ -272,10 +294,22 @@
   /* ---- one person's panel */
   function closePanel() { S.sel = null; S.once = null; S.confirmReset = null; S.rename = null; S.pmsg = null; S.examsOpen = null; S.ask = null; }
 
-  function drawPanel() { keepFocus(drawPanelNow); }
+  /* a redraw while the until date is being typed would wipe it: wait until focus leaves the box (focusout below) */
+  function typingDay() {
+    const a = document.activeElement, el = $("#panel");
+    if (!a || !a.dataset || a.dataset.puntil == null || !el || !el.contains(a) || el.dataset.who !== S.sel) return false;
+    const p = person(S.sel), stored = (p && p.extras && p.extras.exams) || "";
+    return !!(a.validity && a.validity.badInput) || (!AdminView.wholeDay(a.value) && a.value !== stored);   /* a whole date redraws (a refusal shows) */
+  }
+  function drawPanel() {
+    if (typingDay()) { S.panelLate = true; return; }
+    S.panelLate = false; keepFocus(drawPanelNow);
+  }
+  function focusLost() { const a = document.activeElement; return !a || a === document.body; }
   function drawPanelNow() {
     const el = $("#panel"), p = S.sel && person(S.sel);
     $("#wrap").classList.toggle("nopanel", !p);
+    el.dataset.who = p ? p.name : "";
     if (!p) { el.innerHTML = ""; return; }
     const head = p.group === "hod" || p.group === "sh";
     const sub = p.staff_only ? "Added by name: not on the published timetable" : "On the published timetable";
@@ -340,18 +374,24 @@
 
   async function removePerson(p) {
     if (S.rmBusy || S.ask !== p.name) return;   /* one press, one call */
-    S.rmBusy = true; S.pmsg = null; drawPanel();
+    const name = p.name;
+    S.rmBusy = true; S.pmsg = null; drawPanel(); focusPanel();   /* "Yes, remove" is disabled now: focus to the heading */
     let said = null, failed = null;
-    try { said = (await api("/api/admin/remove", { name: p.name })).text; }
-    catch (e) { if (S.out) { S.rmBusy = false; return; } failed = e.message; }
+    try { said = (await api("/api/admin/remove", { name })).text; }
+    catch (e) { if (S.out) { S.rmBusy = false; drawPanel(); return; } failed = e.message; }
     S.rmBusy = false;
-    if (said) { closePanel(); note(said, false); }
-    else { S.ask = null; S.pmsg = { text: failed, bad: true }; }
+    const here = S.sel === name;   /* the admin may have opened someone else while it was sent */
+    if (said) { if (here) closePanel(); note(said, false); }
+    else if (here) { S.ask = null; S.pmsg = { text: failed, bad: true }; }
+    else note(failed, true);
     try { await loadPeople(); }
     catch (e) { if (!S.out) note((said ? said + " " : "") + "The list could not be refreshed. Reload the page.", true); }
-    if (failed && !S.sel) note(failed, true);   /* the person has gone already: the panel closed with the reload */
+    if (failed && here && !S.sel) note(failed, true);   /* the person has gone already: the panel closed with the reload */
+    if (S.menu && !S.ticked.size) S.menu = null;
     drawAll();
-    if (said) { const q = $("#q"); if (q) q.focus({ preventScroll: true }); }   /* their row and its Edit button are gone */
+    if (S.menu) previewMenu();   /* the preview must not still name the person who went */
+    if (said && here) { const q = $("#q"); if (q) q.focus({ preventScroll: true }); }   /* their row and its Edit button are gone */
+    else if (S.sel === name && focusLost()) focusPanel();
   }
 
   const BAD_NAME = "A username is 3 to 40 letters, digits, dots, dashes or underscores.";
@@ -389,6 +429,7 @@
       await loadPeople();
     } catch (e) { if (!S.out) { S.pmsg = { text: e.message, bad: true }; await ifGone(e.message); } }
     drawAll();
+    if (S.sel === body.name && focusLost()) focusPanel();   /* "Yes, reset it" has gone: the password box or the sentence replaced it */
   }
 
   /* ---- add a person */
@@ -543,14 +584,18 @@
     else if (d.tick != null) { t.checked ? S.ticked.add(d.tick) : S.ticked.delete(d.tick); S.menu = null; drawTable(); drawBar(); }
     else if (d.act === "tickhead") { shown().forEach(x => t.checked ? S.ticked.add(x.name) : S.ticked.delete(x.name)); S.menu = null; drawTable(); drawBar(); }
     else if (d.bx) { S.menu.extra = d.bx; S.menu.fail = null; keepFocus(() => drawMenu()); previewMenu(); }
-    else if (d.until) { S.menu.until = t.value; S.menu.fail = null; S.menu.lines = null; S.menu.err = null; S.menu.hold = "Reading what it would do…"; drawMenu(false); clearTimeout(S.wait); S.wait = setTimeout(previewMenu, 350); }
+    else if (d.until) {   /* no preview until the typed date is whole: Chrome sends "0002-12-31" at the first digit of the year */
+      clearTimeout(S.wait); S.menu.fail = null;
+      if (!AdminView.wholeDay(t.value)) { S.menu.until = ""; previewMenu(); }
+      else { S.menu.until = t.value; S.menu.lines = null; S.menu.err = null; S.menu.hold = "Reading what it would do…"; drawMenu(false); S.wait = setTimeout(previewMenu, 350); }
+    }
     else if (d.bgroup) { S.menu.group = t.value; S.menu.fail = null; previewMenu(); }
     else if (!p) return;
     else if (d.prole) savePerson({ name: p.name, group: t.value });
     else if (d.dept != null) savePerson({ name: p.name, depts: [...document.querySelectorAll("[data-dept]")].filter(c => c.checked).map(c => c.dataset.dept) });
     else if (d.pc === "timetable" || d.pc === "relief" || d.pc === "admin") savePerson({ name: p.name, extras: { [d.pc]: t.checked } });   /* unticking the committee takes Admin too: the answer shows it */
     else if (d.pc === "exams") { if (t.checked) { S.examsOpen = p.name; drawPanel(); } else { S.examsOpen = null; savePerson({ name: p.name, extras: { exams: null } }); } }
-    else if (d.puntil) savePerson({ name: p.name, extras: { exams: t.value } }, "Saved.");
+    else if (d.puntil) { if (AdminView.wholeDay(t.value)) savePerson({ name: p.name, extras: { exams: t.value } }, "Saved."); }   /* a half-typed date: leave the box alone */
     else if (d.pnote) savePerson({ name: p.name, note: t.value }, "Note saved.");
   });
 
@@ -558,6 +603,10 @@
     if (e.target.id === "uname2" && S.rename) S.rename.value = e.target.value;   /* kept through a redraw of the panel */
     else if (e.target.id === "q") { S.q = e.target.value; drawTable(); }
     else if (e.target.id === "sq") { S.sq = e.target.value; const q = S.sq.trim().toLowerCase(), all = S.students || []; drawStudentRows(all.filter(s => !q || `${s.id} ${s.name} ${s.class}`.toLowerCase().includes(q)), all.length); }
+  });
+
+  document.addEventListener("focusout", e => {   /* a redraw held back while the until date was typed */
+    if (e.target.dataset && e.target.dataset.puntil != null && S.panelLate) setTimeout(() => { if (S.panelLate && !typingDay()) drawPanel(); }, 0);
   });
 
   window.addEventListener("pagehide", () => { S.once = null; });

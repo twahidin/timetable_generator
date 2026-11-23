@@ -13,6 +13,14 @@ var AdminView = (function () {
     return m ? (+m[3]) + " " + MONTHS[+m[2] - 1] + " " + m[1] : String(iso || "");
   }
 
+  // a date box's value that is a whole date: Chrome fires "change" while a year is still being typed ("0002-12-31")
+  function wholeDay(v) {
+    var m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(typeof v === "string" ? v : "");
+    if (!m || +m[1] < 2000) return false;
+    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
+  }
+
   function extras(p) { return (p && p.extras) || {}; }
 
   // the chips of the Committees column, in this order; a passed exams day still shows (the page always has)
@@ -55,6 +63,6 @@ var AdminView = (function () {
     return strong && !p.strong ? "The lines marked ✱ need a password account. " + p.name + " has none yet." : "";
   }
 
-  return { day: day, committees: committees, shown: shown, canRemove: canRemove, noPassword: noPassword };
+  return { day: day, wholeDay: wholeDay, committees: committees, shown: shown, canRemove: canRemove, noPassword: noPassword };
 })();
 if (typeof module !== "undefined") module.exports = AdminView;

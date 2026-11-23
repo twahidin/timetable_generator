@@ -78,4 +78,18 @@ t("noPassword: no strong line, nothing to say", () => {
   assert.strictEqual(AdminView.noPassword({ name: "No gives" }), "");
 });
 
+t("wholeDay: only a whole date from the year 2000 on", () => {
+  assert.strictEqual(AdminView.wholeDay("2026-12-31"), true);
+  assert.strictEqual(AdminView.wholeDay("2000-01-01"), true);
+  assert.strictEqual(AdminView.wholeDay("2028-02-29"), true);
+  assert.strictEqual(AdminView.wholeDay("0002-12-31"), false);   /* Chrome's value at the first digit of a typed year */
+  assert.strictEqual(AdminView.wholeDay("0202-12-31"), false);
+  assert.strictEqual(AdminView.wholeDay("1999-12-31"), false);
+  assert.strictEqual(AdminView.wholeDay(""), false);
+  assert.strictEqual(AdminView.wholeDay(null), false);
+  assert.strictEqual(AdminView.wholeDay("31/12/2026"), false);
+  assert.strictEqual(AdminView.wholeDay("2026-02-30"), false);
+  assert.strictEqual(AdminView.wholeDay("2026-13-01"), false);
+});
+
 console.log(`adminview: ${n} passed`);
