@@ -1,7 +1,7 @@
 # Relief stage 4 (Telegram): notes
 
 Built 22 and 23 November 2026 on branch `relief-stage-4` (from relief-stage-3 d693183; main merged in at 6b664d3, e18d0e3,
-f39b518 and be22d11), subagent-driven: a builder and a reviewer per task, a fix round where the review asked. Nothing pushed.
+f39b518, be22d11 and 19ac240), subagent-driven: a builder and a reviewer per task, a fix round where the review asked. Nothing pushed.
 Plan: `2026-11-22-relief-stage-4-telegram.md`. Design: `../specs/2026-11-20-relief-module-design.md`.
 How to set it up and what leaves the server: `../../DEPLOY.md`, section 6 and "What leaves the server".
 
@@ -29,6 +29,9 @@ on its own pages. Without a token, or until Connect is pressed, nothing is sent 
   (c3c72c8), and the guides and notes once more.
 - The final fix wave, after the whole-branch review (F1 to F7, below): exam and event backups on Telegram (a8a4aea), an outage
   costs no more than the outage (610a814), what is not read is said (5736aee), and these guides and notes.
+- After the fix wave's second review: main 19ac240 (PR #86, accounts stage 2: Put back, each person's own history, Change
+  username) merged in without a conflict (b08b4ed), and the History download says "Telegram" for a change made there, as the
+  History page does (Task 11, 6f490c6).
 
 ## Decisions the lead may change (the plan's 1 to 10)
 
@@ -176,6 +179,16 @@ The final fix wave (after the whole-branch review):
 - F6. The Telegram tests take away any model key before they start, as the relief team's tests do. If wrong: nothing.
 - F7. The guides, the plan and these notes say what F1 to F5 do; DEPLOY.md says what to do when `telegram.db` is damaged. If
   wrong: words.
+- F8. A command the bot does not know (/cancel outside a conversation, /settings) and a blank message get the F5 sentence too,
+  not "Linked: ...". It says what to do. If wrong: copy.
+- F9. The second review of the fix wave found three small points and nothing more. One was a sentence in DEPLOY.md, corrected
+  ("When Telegram is down": an outage that begins as a timeout marks that one message "May not have been sent"). The other two
+  are in Known limits and were not fixed, since the build allows one fix wave. If wrong: one message lost to a restart in a
+  window of seconds, during an outage, at its last try only.
+- R1. The first builder's F3 and F4 work, found uncommitted after it was cut off, was read whole, kept and finished, not built
+  again. If wrong: a fault of the first builder's that neither the nine faults put in on purpose nor the second review saw.
+- M3. After the second review, main 19ac240 was merged in and every suite run on the result; the stage's routes and saves were
+  checked against accounts stage 2 (below, Meeting accounts stage 2). If wrong: one more task.
 
 ## Copy the lead should see
 
@@ -284,6 +297,17 @@ In the app:
   app reads and sends nothing now."; "That person has no Telegram linked."; "Could not reach the server. Check the connection and try
   again."; "Sign in again (opens a new tab), then try once more."
 
+## Meeting accounts stage 2 (main 19ac240, PR #86)
+
+- No text conflict. Every Telegram route is in the route test's lists, and that test passes. A save made on Telegram writes one
+  history entry by that person, marked "Telegram", as before; main did not change how relief writes its entries.
+- Everyone signed in by name now sees their own history. What a teacher did on Telegram (acknowledged, asked to change, asked for
+  relief) is in it, marked "Telegram".
+- A person's rights on Telegram now hold "their own history" too. It opens nothing there: Telegram shows no page.
+- One thing was changed (Task 11): the History download wrote "telegram" in small letters in "Signed in with"; it says
+  "Telegram" now, and a test keeps the page's words and the download's words the same.
+- Put back (main's) does not touch relief: relief entries have no Put back button, as before.
+
 ## Meeting exams
 
 - What exams does: an approved exam or event stops lessons, and duties become backups (planned absences). Nothing under `exams/` is
@@ -349,6 +373,16 @@ In the app:
   did not finish (`test_typed` three times, `test_helper` once; its second run failed on a swap of two lessons of one group, the
   fault in main that the join's notes tell of). Run once each with 120 seconds for the solve and nothing else changed, both
   passed (34 and 21). No file they exercise differs from main.
+- The second review of the fix wave (c8183d7 to 0f0ba08): F1 to F7 each addressed, nothing Critical or Important, three small
+  points (ruling F9).
+- After the merge of main 19ac240 (b08b4ed), every suite, one at a time, all passing: all 29 `tests/*.py` (`smoke` 102,
+  `test_accounts` 14, `test_admin` 30, `test_ask` 49, `test_board` 58, `test_choices` 16, `test_combined` 38, `test_compare` 21,
+  `test_exams` 193, `test_exams_relief` 102, `test_fixes` 65, `test_helper` 20, `test_history` 46, `test_history_draft` 9,
+  `test_parents` 35, `test_putback` 37, `test_relief` 42, `test_relief_requests` 59, `test_relief_team` 74,
+  `test_relief_telegram` 302, `test_routes` 19, `test_rules` 11, `test_signin` 33, `test_sync` 32, `test_teachers` 9,
+  `test_typed` 33, `test_venues` 4, `test_verify` 56, `test_versions` 44) and all 23 `tests/*.test.js` (the numbers above, and
+  `history` 5, new on main). After Task 11: `test_history` 47, `test_routes` 19, `history.test.js` 5. The slow `--full` runs and
+  the browser check were not done again after the fix wave: no page changed in it.
 - No suite reaches the network: without a token nothing is called, and the tests that set one replace `tg._send`, the only way out to
   Telegram. No real Telegram or model call was made anywhere.
 - Faults put in on purpose, in copies of the tree (caught at once, of how many; the rest were gaps closed with tests, code taken out,
@@ -398,6 +432,9 @@ Messages and the queue:
 - A fault of the app's own before anything was sent counts as "network"; so does an answer that is neither 200 nor an error. Telegram
   answering at once tells it from an outage: it is tried six times in all, and holds the other messages one run each time. A blip
   shorter than one run may count one try. Practice mode keeps every call in memory for as long as the app runs.
+- A message at its sixth and last try that meets an outage shows as "Could not be sent" for the few seconds until the app has
+  asked Telegram and found it down; then it waits again. If the app restarts in just those seconds, it stays "Could not be sent".
+- A work file whose place on Telegram's file server has run out is logged as "network", not "refused". Only the log's word differs.
 - A fresh relief message and "on again" may both go when they cross in the queue (both true). "On again" is not said when a publish
   renamed the lesson's group while the exam stopped it (its key is not there any more).
 - A link or its code is good for whoever uses it first within its 15 minutes: one passed on links the wrong Telegram. HELLO names the

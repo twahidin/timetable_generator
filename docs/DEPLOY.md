@@ -224,7 +224,9 @@ it again.
 **When Telegram is down** (or refuses the token), nothing is given up and no try is counted: the app asks Telegram every 20
 seconds whether it is back, and what waits goes within half a minute of that, oldest first. What is no longer true by then
 (a relief moved meanwhile, a lesson that is over) is not sent. A report or an all clear more than 30 minutes late is not
-sent. The log says "network" once when it begins and "Telegram answers again" once when it ends. A message that fails by
+sent. If the outage began while a message was on its way and no answer came, that one message shows as "May not have been sent"
+(press **Remind**); the rest wait as above. The log has one line when it begins ("network", or "unsure" in that case) and
+"Telegram answers again" once when it ends. A message that fails by
 itself, again and again while others go, is tried six times over about 43 minutes and then shows as "Could not be sent".
 
 **When `relief/telegram.db` is damaged** (the Telegram cards say only "Something went wrong. Try again.", **Today** looks as
