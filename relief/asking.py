@@ -14,7 +14,8 @@ choice; a tick (several days) changes the buttons of the very message. A line, a
 for (why, who, work); where only a button is, PRESS_ONE is said and the question asked again, which takes the buttons off the one
 before. What is typed is never taken for the answer to a question that is not known to have come, or when it replies to another
 message (bot.LAST_ONE); it is never a code. The work question is the one exception: what comes while it is on its way (a text and a
-file sent together) is taken for the lesson asked about, as it would be a moment later; a copy of a question that comes once the
+file sent together) is taken for the lesson asked about, as it would be a moment later (at the list, after a Next or Later that
+crossed it, PRESS_ONE is said, as a moment later); a press on an older copy takes the buttons off the one asked since; a copy of a question that comes once the
 conversation is at another loses its buttons, and the one it is at is asked once more when it came above it (_asked_by), so one
 question has buttons, the last. A message changed after it was sent is never an answer; one that says what is held already
 (_held) is not answered at all, since a link's preview can come as one. A step is judged as the page judges it, when it is taken: a
@@ -399,10 +400,10 @@ def _redraw(chat, key, shown, n=None):
 
 
 # ---- a step (with bot._pressing held) -> bot._Out
-def _move(chat, talk, new, typed=False, same=False):
+def _move(chat, talk, new, typed=False, same=False, pressed=None):
     """the conversation at its next question (new: as the questions give it), on its way till its message is known -> bot._Out that
     asks it, or None: it moved on meanwhile; same: the same lesson asked about again, its buttons as they were where they are the same,
-    so a press of one meanwhile counts"""
+    so a press of one meanwhile counts; pressed: the message a press was on, the question asked since losing its buttons too"""
     new = dict(new)
     says, was = new.pop("says", ()), talk["d"] if talk else {}
     old = {(label, value): token for row in was.get("rows", ()) for label, value, token in row} if same else {}
@@ -410,7 +411,8 @@ def _move(chat, talk, new, typed=False, same=False):
     d, noted = dict(was, **dict(new, rows=rows, key=secrets.token_urlsafe(12), question={})), {}
     if not _store(chat, talk, d, noted): return None
     was = dict(was, question=noted.get("question", was.get("question")))     # noted meanwhile, its buttons come off
-    return bot._Out(then=lambda: _next(chat, d, says, was if typed else None))
+    off = typed or (pressed is not None and was["question"] != pressed)        # a press on an older copy: the one asked since too
+    return bot._Out(then=lambda: _next(chat, d, says, was if off else None))
 
 
 def _again(chat, d, *says):
@@ -419,10 +421,11 @@ def _again(chat, d, *says):
 
 
 def _work_again(chat, talk, *says):
-    """the work question once more, after the sentences: while it is on its way, as a question of its own (its copy on the way loses its
-    buttons when it comes), so one question has them"""
+    """the work question, or the list, once more, after the sentences: while it is on its way, as a question of its own (its copy on the
+    way loses its buttons when it comes), so one question has them"""
     d = talk["d"]
-    return _move(chat, talk, dict(_work(d, d["at"], d["work"]), says=says), typed=True, same=True) if _on_way(d["question"]) else _again(chat, d, *says)
+    if not _on_way(d["question"]): return _again(chat, d, *says)
+    return _move(chat, talk, dict(_list(d) if d["step"] == "list" else _work(d, d["at"], d["work"]), says=says), typed=True, same=True)
 
 
 def _on_day(w, d, v):
@@ -474,7 +477,7 @@ def _by_press(chat, talk, p):
     if label is None: raise ValueError(bot.OLD_BUTTON)
     if d["step"] == "days" and v != "done": return _tick(chat, talk, v, p.message["id"])
     if d["step"] == "list" and v == "send": return _send(chat, talk)
-    out = _move(chat, talk, PRESSED[d["step"]](_Now(d["name"]), d, v))
+    out = _move(chat, talk, PRESSED[d["step"]](_Now(d["name"]), d, v), pressed=p.message["id"])
     if out is None: raise ValueError(bot.OLD_BUTTON)
     return out._replace(line=words.days(dict(dates=d["ticks"])) if d["step"] == "days" else label)
 
@@ -546,6 +549,7 @@ def _said(chat, talk, text, file, to):
     if album is not None: return _more(chat, talk, album, file)
     q = d["question"]
     if _on_way(q) and d["step"] == "work": return _work_again(chat, talk) if to is not None else _say_work(chat, talk, text, file)   # taken as a moment later
+    if _on_way(q) and d["step"] == "list": return _work_again(chat, talk, PRESS_ONE)          # Next or Later was pressed first: as a moment later
     if q is False or _on_way(q): return _again(chat, d)                                  # it may not have come
     if to is not None and to != q: return _again(chat, d, bot.LAST_ONE)
     return SAID[d["step"]](chat, talk, text, file) if d["step"] in SAID else _again(chat, d, PRESS_ONE)

@@ -7716,13 +7716,62 @@ def other_questions_on_their_way_are_as_before():
     with school(EVE, ROSA):
         to_work(); slow, got = asked_while("Relief for", "hello")
         with stand_in(tg, "call", slow): tap(EVE, "Later for all the rest")
-        assert got == [[(f"{LIST_HEAD}\n{ON_2}{NONE_YET}\n{ON_5}{NONE_YET}", LIST_ROWS)]] and asking_of(EVE)["step"] == "list", "the list: asked again"
+        assert got == [[(PRESS_ONE, None), (f"{LIST_HEAD}\n{ON_2}{NONE_YET}\n{ON_5}{NONE_YET}", LIST_ROWS)]] and asking_of(EVE)["step"] == "list", "the list: as a moment later (fix round 2)"
 
 @t
 def the_same_link_again_replaces_nothing():
     with school(EVE, ROSA):
         to_work(); say(EVE, "https://x.example.org/a"); assert says(EVE, "https://x.example.org/a") == says(EVE, " https://x.example.org/a ") == [(WORK_SET_2.format(SET_LINK), SET_ROWS)]
         assert says(EVE, "https://x.example.org/b") == [(LINK_REPLACED, None), (WORK_SET_2.format(SET_LINK), SET_ROWS)]
+
+# ---- Answers, Task 5, fix round 2: a message that crosses a press to the list; a press on an older copy
+def crossing(name, prefix, u):
+    """u (a message) hooked while the question that starts so is on its way -> what u was answered"""
+    real, got = tg.call, []
+    def slow(method, params=None, **kw):
+        if method == "sendMessage" and params.get("text", "").startswith(prefix) and not got: got.append(None); got[0] = heard(name, lambda: hook(u))
+        return real(method, params, **kw)
+    return slow, got
+
+@t
+def a_message_that_crosses_a_press_to_the_list_is_said():
+    the_list = lambda a, b: f"{LIST_HEAD}\n{ON_2}{a}\n{ON_5}{b}"
+    with school(EVE, ROSA):                                                                # Next on the last lesson, and a line
+        to_work(); say(EVE, "Read p. 5"); tap(EVE, "Next"); say(EVE, "p. 6"); was = asking_of(EVE)["work"]
+        def press():
+            slow, got = crossing(EVE, "Relief for", msg("Late line", CHATS[EVE]))
+            with stand_in(tg, "call", slow): tap(EVE, "Next")
+            assert got == [[(PRESS_ONE, None), (the_list(SET_, SET_), LIST_ROWS)]], got
+        seen = watching(EVE, press); d = asking_of(EVE)
+        assert d["step"] == "list" and d["work"] == was and live(seen) == [max(seen)] == [d["question"]] and seen[max(seen)][0] == the_list(SET_, SET_), seen
+    with school(EVE, ROSA):                                                                # Later for all the rest, and a file
+        to_work(); say(EVE, "Read p. 5"); was = asking_of(EVE)["work"]
+        def press():
+            slow, got = crossing(EVE, "Relief for", a_doc(EVE, "a.pdf", "F-a"))
+            with stand_in(tg, "call", slow): tap(EVE, "Later for all the rest")
+            assert got == [[(PRESS_ONE, None), (the_list(SET_, NONE_YET), LIST_ROWS)]], got
+        seen = watching(EVE, press); d = asking_of(EVE)
+        assert d["step"] == "list" and d["work"] == was and live(seen) == [max(seen)] == [d["question"]], seen
+        assert sends()[0][0] == sent_text("2 lessons", "work set for 1") and [x["work"]["files"] for x in only()["lessons"][:2]] == [[], []], "the file is on no lesson"
+
+@t
+def a_press_on_an_older_copy_leaves_one_keyboard():
+    def on(u, n): u["callback_query"]["message"]["message_id"] = n; return u
+    for label, then in (("Next", WORK_5), ("Later for all the rest", "Relief for")):
+        with school(EVE, ROSA):
+            to_work()
+            def steps():
+                say(EVE, "Read p. 5"); n1 = asking_of(EVE)["question"]; say(EVE, "more"); assert asking_of(EVE)["question"] != n1
+                assert answered(on(tapping(EVE, label), n1)) == (None, None), "the token is kept: it counts"
+            seen = watching(EVE, steps); d = asking_of(EVE)
+            assert live(seen) == [max(seen)] == [d["question"]] and seen[max(seen)][0].startswith(then), (label, seen)
+    with school(EVE, ROSA):                                                                # Same as before, on the copy before a question asked again
+        to_work(); say(EVE, "Read p. 5"); tap(EVE, "Next")
+        def steps():
+            n1 = asking_of(EVE)["question"]; assert heard(EVE, lambda: hook(_with(EVE, sticker=dict(file_id="s")))) == [(SEND_ONE, None), (WORK_5, LAST_ROWS)]
+            assert asking_of(EVE)["question"] != n1 and answered(on(tapping(EVE, "Same as before"), n1)) == (None, None)
+        seen = watching(EVE, steps); d = asking_of(EVE)
+        assert d["step"] == "list" and live(seen) == [max(seen)] == [d["question"]], seen
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
