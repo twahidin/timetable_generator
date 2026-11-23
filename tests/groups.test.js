@@ -273,4 +273,37 @@ t("view: all teaching groups in the setup's order, each saying its code (none fo
   assert.deepStrictEqual(Groups.view(wide(), { level: "Sec 1", subject: "Art" }).all.map(g => g.li), [3, 4]);
   assert.deepStrictEqual(Groups.view({}, {}).all, []);
 });
+t("no code is shared in the sample: nothing is said, by row or by band", () => {
+  const s = fixture();
+  assert.deepStrictEqual(Groups.sameCode(s), [null, null, null, null, null, null, null]);
+  s.lessons.forEach((x, i) => assert.strictEqual(Groups.sameText(s, i), ""));
+  assert.deepStrictEqual(Groups.lanes(s, "").map(l => l.same), [[], []]);
+});
+t("a kept code typed on a second group: both rows say the code and where the other group is", () => {
+  const s = fixture(); s.lessons[1].code_override = "1MAP1";   // the code the first row has by its band's numbering
+  assert.deepStrictEqual(Groups.codes(s).slice(0, 2), ["1MAP1", "1MAP1"]);
+  assert.deepStrictEqual(Groups.sameCode(s), [{ code: "1MAP1", others: [1] }, { code: "1MAP1", others: [0] }, null, null, null, null, null]);
+  assert.strictEqual(Groups.sameText(s, 0), "1MAP1 is also the code of Mathematics G3 in Sec 1 Option A. Two groups cannot share a code: give one of them another under Keep code in the Table view.");
+  assert.strictEqual(Groups.sameText(s, 1), "1MAP1 is also the code of Mathematics G3 in Sec 1 Mathematics. Two groups cannot share a code: give one of them another under Keep code in the Table view.");
+  const L = Groups.lanes(s, "Sec 1");   // each band says it for its own group, as the band's line about a teacher twice
+  assert.deepStrictEqual(L.map(l => [l.block, l.same]), [["Sec 1 Mathematics", [Groups.sameText(s, 0)]], ["Sec 1 Option A", [Groups.sameText(s, 1)]]]);
+  assert.deepStrictEqual(Groups.view(s, { level: "Sec 1" }).lanes.map(l => l.same.length), [1, 1]);   // the page's own list of bands carries it
+});
+t("a shared code: a group in no band is named by its classes, three groups say how many more, and the text is trimmed as typed", () => {
+  const s = fixture(); s.lessons[5].code_override = " 1MAA1 ";   // typed with spaces round it: the same code as the third row's
+  assert.strictEqual(Groups.sameText(s, 2), "1MAA1 is also the code of Music for 1C, a group in no band. Two groups cannot share a code: give one of them another under Keep code in the Table view.");
+  assert.strictEqual(Groups.sameText(s, 5), "1MAA1 is also the code of Mathematics G2 in Sec 1 Mathematics. Two groups cannot share a code: give one of them another under Keep code in the Table view.");
+  s.lessons[1].code_override = "1MAA1";
+  assert.deepStrictEqual(Groups.sameCode(s)[2], { code: "1MAA1", others: [1, 5] });
+  assert.strictEqual(Groups.sameText(s, 2), "1MAA1 is also the code of Mathematics G3 in Sec 1 Option A and 1 more group. Two groups cannot share a code: give one of them another under Keep code in the Table view.");
+});
+t("whole-class rows, rows with no subject and a setup with nothing in it share no code", () => {
+  const s = fixture();
+  assert.deepStrictEqual([Groups.codes(s)[3], Groups.codes(s)[4]], ["Entire Class", "Entire Class"]);   // two whole-class rows are not two groups with one code
+  assert.strictEqual(Groups.sameText(s, 3), ""); assert.strictEqual(Groups.sameText(s, 6), ""); assert.strictEqual(Groups.sameText(s, 99), "");
+  s.lessons.push({ _id: "l8", level: "Sec 1", subject: "", block: null, classes: [], teachers: [] });   // two blank rows
+  assert.deepStrictEqual(Groups.sameCode(s).filter(Boolean), []);
+  assert.deepStrictEqual(Groups.sameCode({}), []); assert.strictEqual(Groups.sameText({}, 0), "");
+  assert.deepStrictEqual(Groups.sameCode({ lessons: [null, { level: "Sec 1", subject: "Art", code_override: "X1" }, { level: "Sec 1", subject: "Art", code_override: "X1" }] }), [null, { code: "X1", others: [2] }, { code: "X1", others: [1] }]);
+});
 console.log(`${n} cases passed`);

@@ -681,8 +681,7 @@ function issues() {
   }
   structureWarnings().forEach((m, k) => m.startsWith("Fixed lesson")   // the Day structure and the rules saying different things: warnings,
     ? add("rules", `ds${k}`, m, true) : add("school", `ds${k}`, m));   // except a fixed lesson outside lesson time, which no timetable can meet
-  const info = lessonInfo(); const codes = {};
-  info.forEach((x, i) => { if (x.code && x.code !== "Entire Class") codes[x.code] = (codes[x.code] || 0) + 1; });
+  const info = lessonInfo(), same = Groups.sameCode(S.spec);   // same: the rows whose code another group has too
   S.spec.lessons.forEach((x, i) => {
     if (!x.subject) { add("lessons", i, "Pick a subject."); return; }
     if (!info[i].p) add("lessons", i, `No periods for ${x.level} on Subjects.`);
@@ -708,7 +707,7 @@ function issues() {
       const size = (x.classes || []).reduce((a, c) => a + (Number((S.spec.classes.find(y => y.class === c) || {}).size) || 0), 0);
       if (size && Number(x.students) < size) add("lessons", i, `${x.subject}: ${x.students} of the ${size} students in ${(x.classes || []).join(", ")}, but with no band or code it is a lesson for the whole class. Pick its band, or enter Students again to give it a group code.`);
     }
-    if (codes[info[i].code] > 1) add("lessons", i, "Code used twice.");
+    if (same[i]) add("lessons", i, Groups.sameText(S.spec, i, same));   // still a warning: a timetable can be made, but its two groups cannot be told apart
   });
   const load = {}; S.spec.lessons.forEach((x, i) => (x.teachers || []).filter(Boolean).forEach(t => load[t] = (load[t] || 0) + info[i].tp));
   S.spec.teachers.forEach((t, i) => {
@@ -2251,11 +2250,12 @@ function cardsBody(dept, pg) {   // the cards the search and the filters leave, 
     return `<div class="dpcard ${kind}${lock ? " locked" : ""}" data-mcard="${esc(key)}" data-lrow="${c.li}" title="${esc(oth ? OTHER_ROW : lock ? cpWhy() : "Click to place the ticked teachers, or drop teachers here")}"><div><b>${esc(c.title)}</b>${stf ? ` <span class="cpbadge">${esc(Parents.label(S.spec))}</span>` : ""}</div>${named ? `<div class="small">${esc(c.subject)}</div>` : ""}
       <div class="small muted">${fig}</div>${stf ? `<div class="small">${cpHand(x, c.li, lock)}</div>` : ""}
       <div class="dpts">${c.teachers.map(nm => tline(nm, key, lock)).join("")}${room > 0 && !lock ? `<span class="plus" title="Room for ${room} more">+</span>` : ""}</div></div>`; };
+  const sameC = Groups.sameCode(S.spec);   // the rows whose code another group has too: said in the band, as a teacher twice is
   const section = sec => {
     if (sec.kind === "band") {
       const bandHit = q && People.key(sec.title || "").includes(q), gs = sec.groups.filter(g => (bandHit || cardHit(g, q)) && cardPick(g));
       return gs.length ? `<div class="lane dplane"><div class="row small" style="justify-content:space-between"><b>${esc(sec.title)}</b><span class="muted">${sec.groups.length} group${sec.groups.length === 1 ? "" : "s"}${gs.length < sec.groups.length ? ` · ${gs.length} shown` : ""}</span></div>
-        ${sec.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}<div class="dpgrid">${gs.map(g => card(g, true, "band")).join("")}</div></div>` : "";
+        ${sec.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}${sec.groups.map(g => Groups.sameText(S.spec, g.li, sameC)).filter(Boolean).map(t => `<div class="small overtxt">${esc(t)}</div>`).join("")}<div class="dpgrid">${gs.map(g => card(g, true, "band")).join("")}</div></div>` : "";
     }
     const cs = sec.cards.filter(c => cardHit(c, q) && cardPick(c));
     return cs.length ? `<div class="dpsub"><h4>${esc(sec.subject)}</h4><div class="dpgrid">${cs.map(c => card(c, false, c.kind === "class" ? "whole" : "own")).join("")}</div></div>` : "";
@@ -2427,7 +2427,7 @@ function lanesView(v) {   // the bands the filter shows as lanes, each whole; a 
     ? `<span class="gbedit"><input id="gbName" value="${esc(M.grenameText ?? l.block)}" aria-label="The band's name"><button class="small primary" data-gbsave>Save</button><button class="small" data-gbcancel>Cancel</button></span>`
     : `<button class="gbtitle" data-gbname="${esc(l.block)}" title="Change the band's name"><b>${esc(l.block) || "(no name yet)"}</b><span class="muted small">Rename</span></button>`;
   const lane = l => `<div class="lane" data-glane="${esc(l.block)}"><div class="row small" style="justify-content:space-between">${name(l)}<span class="muted">${esc(l.classes.join(", "))}${l.everyone ? " · everyone takes one" : ""}</span>${fixed(l) ? "" : `<button class="small danger" data-gbdel="${esc(l.block)}">Delete band</button>`}</div><div class="muted small">Its groups have lessons at the same time.</div>
-    ${M.gask === l.block ? ask(l) : ""}${l.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}${l.groups.map(g => grow(g, l)).join("") || `<div class="muted small">No groups yet: tick rows under Single teaching groups and move them here, or add groups above.</div>`}</div>`;
+    ${M.gask === l.block ? ask(l) : ""}${l.twice.map(nm => `<div class="small overtxt">${esc(nm)} is on two groups of this band: a band's groups meet at the same time.</div>`).join("")}${l.same.map(t => `<div class="small overtxt">${esc(t)}</div>`).join("")}${l.groups.map(g => grow(g, l)).join("") || `<div class="muted small">No groups yet: tick rows under Single teaching groups and move them here, or add groups above.</div>`}</div>`;
   return `<section class="glanes card"><h3 style="margin:0 0 6px">Banded teaching groups${gp.level ? ` at ${esc(gp.level)}` : ""}</h3><div class="llist keep">${byLevel(lanes, lane) || `<p class="muted small">${v.filtered ? "No band has a group that matches." : `No bands at ${esc(gp.level || "any level")} yet. Add one above.`}</p>`}</div></section>`;
 }
 /* a row moving into a band gets a code of its own ("Entire Class" → 1AR1): that is not a renumbering, so it is not listed */
