@@ -239,7 +239,7 @@ def _out(r, pub, me, cal=None, links=None):
 def _planned(r, c, s):
     """the planner's own choice for cover c: while it waits for the relief team (one from before a head's choice was approved
     at once), or while it is still the planner's own approved choice (cover.planned_by); else None"""
-    if s in APPROVED: return c["relief"] if _cover.planned_by(c) else None
+    if s in APPROVED: return c["relief"] if r.get("how") == "planned" and _cover.planned_by(c) else None
     p = _cover.pick_of(r, c) if s == "waiting" else None
     return c["relief"] if p and p.get("by") == "planner" else None
 
@@ -586,20 +586,22 @@ def one(id):
     return jsonify(_out(r, pub, me))
 
 
-def _change(id, do, what, words, right=None, refused=None, gate=("relief", None), after=None):
+def _change(id, do, what, words, right=None, refused=None, gate=("relief", None), after=None, same_is_nothing=False):
     """gate (the relief team's routes: TEAM, asked before the absence is opened, so a teacher gets TEAM_ONLY whatever the
     id), open the absence (403/404 as _record), check the right, do(record, me, pub, body) -> the saved record, then its
     history entry: what, and words(the saved record); then after(the saved record, pub) and _tell_soon, the absences lock
-    released"""
+    released. same_is_nothing: when do answers the record as it was opened (nothing was saved), no history entry and no
+    sweep"""
     pub, me, err = _gate(*gate)
     if err: return err
     r, err = _record(id, me)
     if err: return err
     if right and not _has(right): return {"error": refused}, 403
+    opened = r
     try: r = do(r, me, pub, _body())
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "changing an absence")
-    _saved(what, r, lambda: words(r), after and (lambda: after(r, pub)))
+    if not (same_is_nothing and r == opened): _saved(what, r, lambda: words(r), after and (lambda: after(r, pub)))
     return jsonify(_out(r, pub, me))
 
 
@@ -645,7 +647,7 @@ def _chosen_words(r, key):
 @need("relief")
 def relief(id, key):
     return _change(id, lambda r, me, pub, b: _choose(r, key, me, pub, b), "relief", lambda r: _chosen_words(r, key),
-                   right="relief.plan", refused=CHOOSE_ONLY)
+                   right="relief.plan", refused=CHOOSE_ONLY, same_is_nothing=True)
 
 
 def _cancelled(r, pub):

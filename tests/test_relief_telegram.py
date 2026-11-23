@@ -8585,5 +8585,65 @@ def a_head_s_choice_of_the_same_teacher_again_tells_nobody_twice():
         before = covered(i, K5)[2]; at("09:30"); on_lesson(HUGO, i, K5, "relief", dict(relief=SAM)); swept()
         assert covered(i, K5)[2] == before and told_of("relief") == [("relief", SAM)]
 
+# ---- Send-out, Task 8 fix round 1: choosing again only on a planned absence, and no old approval on a new relief ----
+def taken_over_choice(ack=False):
+    """a head's own choice (Mr Sam Tan) on Eve's exam backup, approved and sent out at once and told; then Eve's own absence takes the
+    lesson over with that cover -> Eve's own absence's id"""
+    exam("5A", name=EXAM2, duties=[(EVE, 630, 690)]); RL.sync_all(SCHOOL, TERM, LS.today()); b, = [r["id"] for r in absences.all_records() if r.get("exams")]
+    on_lesson(HUGO, b, K5, "relief", dict(relief=SAM)); r, x, c = covered(b, K5)
+    assert CV.state(r, x, c) == "approved" and CV.planned_by(c) == HUGO and CV.sent_out(c)["by"] == HUGO, "a head's own choice on a backup: approved and sent out at once"
+    swept(); assert told_of("relief") == [("relief", SAM)]
+    if ack: CV.acknowledge(b, K5, SAM)
+    d = dict(teacher=EVE, dates=["2026-10-13"], periods=None, reason="Medical", reason_text="", remarks="", reporting_officer=ROSA, lessons=[])
+    j = absences.new(d, SCHOOL, EVE, "asked", links=exam_links())["id"]
+    assert absences.load(b)["cancelled"] and covered(j, K5)[2]["relief"] == SAM and absences.load(j)["how"] == "asked"
+    return j
+
+@t
+def a_head_cannot_choose_again_once_the_teachers_own_absence_took_the_lesson_over():
+    for ack in (False, True):
+        with exam_school(SAM, MAYA, EVE, TEAM):
+            j = taken_over_choice(ack); at("09:10"); swept(); before, n = absences.load(j), len(outs())
+            got = next(x for x in call(HUGO, "get", f"/api/relief/absences/{j}")["lessons"] if x["key"] == K5)
+            assert got["may_choose"] is False and got["planned"] is None, "the Plan page offers no chooser on her own absence"
+            assert on_lesson(HUGO, j, K5, "relief", dict(relief=MAYA), code=400)["error"] == absences.APPROVED_ALREADY, ack
+            assert on_lesson(HUGO, j, K5, "relief", dict(relief=""), code=400)["error"] == absences.APPROVED_ALREADY, ack
+            assert absences.load(j) == before and covered(j, K5)[2]["relief"] == SAM and covering_of(MAYA) == [] and covering_of(SAM) == [K5]
+            assert swept() == 0 and len(outs()) == n and told_of(name=MAYA) == [], "nobody new is told"
+            seen = next(x for x in call(EVE, "get", f"/api/relief/absences/{j}")["lessons"] if x["key"] == K5)
+            assert (seen["relief"], seen["covers"][0]["relief"]) == ((SAM, SAM) if ack else (None, None)), seen
+
+@t
+def every_change_of_relief_by_choose_is_approved_anew_or_waiting_clean():
+    def check(i, who_, planned):
+        r, x, c = covered(i, K5); assert c["relief"] == who_
+        if planned: assert CV.state(r, x, c) == "approved" and c["approved"] == dict(by=HUGO, at=clock.now) and c["sent_out"] == dict(by=HUGO, at=clock.now, approved_at=clock.now) and c["ack"] is None and c["change"] is None, c
+        else: assert CV.state(r, x, c) == "waiting" and [c.get(k) for k in ("approved", "sent_out", "ack", "change")] == [None] * 4, c
+    with school(SAM, MAYA, RUTH):
+        i = absent(by=HUGO); on_lesson(HUGO, i, K5, "relief", dict(relief=SAM)); check(i, SAM, True)               # planned, open
+        at("09:05"); on_lesson(HUGO, i, K5, "relief", dict(relief=MAYA)); check(i, MAYA, True)                   # planned, its own approved choice
+        CV.acknowledge(i, K5, MAYA); at("09:10"); on_lesson(HUGO, i, K5, "relief", dict(relief=SAM)); check(i, SAM, True)   # acknowledged
+        j = absent(by=HUGO, dates=["2026-10-16"]); waiting_choice(j, KF, SAM, HUGO); at("09:15")
+        on_lesson(HUGO, j, KF, "relief", dict(relief=MAYA)); r, x, c = covered(j, KF); assert c["approved"]["at"] == clock.now == c["sent_out"]["approved_at"], "a choice from before"
+        absences.cancel(i, "Back", HUGO); k = absent(); at("09:20"); on_lesson(HUGO, k, K5, "relief", dict(relief=SAM)); check(k, SAM, False)          # a teacher's own, open
+        change_record(k, lambda r: [x.update(sent_out=dict(by=TEAM, at="x", approved_at="x"), ack=dict(at="x"), change=dict(why="x", at="x", pick=None)) for x in r["lessons"] if x["key"] == K5])
+        at("09:25"); on_lesson(HUGO, k, K5, "relief", dict(relief=MAYA)); check(k, MAYA, False)                     # a teacher's own, waiting (marks left by hand)
+
+@t
+def choosing_the_same_teacher_again_writes_no_history_and_asks_for_no_sweep():
+    asked = []
+    with school(SAM), stand_in(TE, "soon", lambda: asked.append(1)):
+        i = absent(by=HUGO); on_lesson(HUGO, i, K5, "relief", dict(relief=SAM)); n, before = len(entries()), absences.load(i); del asked[:]
+        at("09:30"); got = on_lesson(HUGO, i, K5, "relief", dict(relief=SAM))
+        assert len(entries()) == n and asked == [] and absences.load(i) == before and next(x for x in got["lessons"] if x["key"] == K5)["relief"] == SAM
+
+@t
+def a_started_lesson_is_not_offered_to_choose():
+    with school(SAM):
+        i = absent(by=HUGO); at("09:10", day=13)                                            # P3-P5 (09:00) has begun, P6-P7 has not
+        got = {x["key"]: x["may_choose"] for x in next(r for r in call(HUGO, "get", "/api/relief/absences/planned")["absences"] if r["id"] == i)["lessons"]}
+        assert (got[K2], got[K5]) == (False, True), got
+        assert on_lesson(HUGO, i, K2, "relief", dict(relief=SAM), code=400)["error"] == absences.STARTED
+
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

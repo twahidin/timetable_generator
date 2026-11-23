@@ -535,8 +535,9 @@ def _started(pub, x, now):
 
 
 def _may_choose(r, x, by):
-    """the planner may choose for lesson x: while nobody is approved for it, or while it is still by's own choice"""
-    return _cover.state(r, x, x) in ("open", "waiting") or _cover.planned_by(x) == by
+    """the planner may choose for lesson x: while nobody is approved for it, or on a planned absence while it is still by's own
+    choice (on a teacher's own absence, which took a head's choice over from a backup, the relief team changes it on Today)"""
+    return _cover.state(r, x, x) in ("open", "waiting") or (r.get("how") == "planned" and _cover.planned_by(x) == by)
 
 
 def may_choose_again(r, x, me, pub) -> bool:
@@ -553,8 +554,9 @@ def may_choose_again(r, x, me, pub) -> bool:
 def choose(id, key, relief_name, by, pub, links=None):
     """the planner's choice; relief_name None or "" takes it off; the caller checks the relief.plan right. On a planned absence
     the choice is approved and sent out at once by the planner (cover.chose); on a teacher's own it is a pick waiting for the
-    relief team, as before. Allowed while nobody is approved for the lesson, or while it is still by's own choice
-    (cover.planned_by), else APPROVED_ALREADY: it is changed on the team's Today page (choosing their own choice again changes
+    relief team, as before, with no approval, send out, acknowledgement or request to change left on it. Allowed while nobody
+    is approved for the lesson, or on a planned absence while it is still by's own choice (cover.planned_by), else
+    APPROVED_ALREADY: it is changed on the team's Today page (choosing their own choice again changes
     nothing, so nobody is told twice); refused once the team has split the
     lesson (IS_SPLIT) and once its first period has begun (STARTED). Taking an approved choice off writes it down as dropped
     and the cover goes back to open, for the AI to pick and the team to approve. A lesson an approved exam or event stops
@@ -590,6 +592,7 @@ def choose(id, key, relief_name, by, pub, links=None):
                 _cover._settle(r, x)
                 if x["relief"] != relief_name: _cover._log(x, "dropped", x["relief"], by, now)   # the waiting pick it replaces
             pick = dict(who=relief_name, by="planner", reason=_cover.PLANNED.format(by=by, date=_say(datetime.date.fromisoformat(now[:10]))), at=now)
+            x.update(_cover.OPEN)            # a waiting pick: no approval, send out, acknowledgement or request to change of another stays on it
             x["relief"], x["relief_by"], x["pick"] = relief_name, by, pick
             _cover._log(x, "pick", relief_name, "planner", now, pick["reason"])
         _save(r)
