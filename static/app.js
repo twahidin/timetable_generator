@@ -3321,7 +3321,12 @@ function rfClose() {
   if (!RF.open || RF.applying) return;   // an Apply that is out: the window stays until it has answered
   RF.open = false; rfWant = false; RF.gen++; RF.pgen++; clearTimeout(RF.timer); const ov = $("#rfOv"); if (ov) { ov.hidden = true; ov.innerHTML = ""; }
   document.body.classList.remove("vslock");
-  const b = [RF.from === "cfg" && $("#rfCfg"), $("#rfBtn"), $("#vsBtn")].find(x => x && !x.disabled); if (b) b.focus({ preventScroll: true });   // after an Apply that settles everything the Re-fit button is off: Versions takes the focus
+  const b = [RF.from === "cfg" && $("#rfCfg"), $("#rfBtn"), $("#vsBtn")].find(x => x && !x.disabled); if (b) b.focus({ preventScroll: true });   // back where the window was opened from; after an Apply the draft is drawn again next, and rfRefocus puts right a focus that redraw drops
+}
+function rfRefocus() {   // after the redraw that follows a made Apply: a focus left on nothing (the page, or a button gone or off) goes to Re-fit, or to Versions when Re-fit is off; one the redraw put somewhere stays
+  const a = document.activeElement;
+  if (a && a !== document.body && a.isConnected && !a.disabled) return;
+  const b = [$("#rfBtn"), $("#vsBtn")].find(x => x && !x.disabled); if (b) b.focus({ preventScroll: true });
 }
 function rfLater(ms) { clearTimeout(RF.timer); RF.timer = setTimeout(() => rfLoad(false), ms); }
 async function rfLoad(first) {   // the job as the server has it. On opening: a list that is not stale is shown, anything else starts a job; while polling: the progress, the list or the failure
@@ -3386,7 +3391,7 @@ async function rfApply() {
   RF.st = "idle"; RF.plan = null; RF.pre = null; RF.id = null; rfClose();
   const kept = j.kept && j.kept.name, good = r.ok && j.info && j.info.warnings;
   S.help = null;   // the open ways are of the draft before
-  if (good) await fxAfter(j.info); else { refreshDraft().then(() => { if (STEPS[S.step][0] === "edit") drawDraft(); }); poll(); }   // fxAfter does what any batch does: the draft, the board and its Undo, the panel
+  if (good) { await fxAfter(j.info); rfRefocus(); } else { refreshDraft().then(() => { if (STEPS[S.step][0] === "edit") drawDraft(); rfRefocus(); }); poll(); }   // fxAfter does what any batch does: the draft, the board and its Undo, the panel
   vsLoad();
   toast(r.ok ? Draft.refitDone(j.changes, kept) : (j.error || "") + (j.kept ? " " + vsKeptSay(j.kept) : ""));
 }
