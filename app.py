@@ -1833,7 +1833,12 @@ def _whole(d, touched, before):
 def _admin_item(pub, data, name):
     """one person as the admin page shows them: their staff item and their note; None when not on the staff list"""
     p = next((p for p in people.staff(pub, data) if p["name"] == name), None)
-    return dict(p, note=people.record(data, name)["note"]) if p else None
+    return _with_gives(p, data) if p else None
+
+def _with_gives(p, data):
+    """a staff item with its note, what its role and committees give (worked out by the rights themselves) and whether they have a strong sign-in"""
+    rec = people.record(data, p["name"])
+    return dict(p, note=rec["note"], gives=rights_table.gives(p, p["depts"]), strong=bool(p["has_password"] or rec["google"]))
 
 def _said(c):
     f, was, now = c["field"], c["was"], c["now"]
@@ -2188,7 +2193,7 @@ def admin_people():
     if stop: return stop
     move_relief_lists()
     pub, data = store.published(), people.load()
-    ps = [dict(p, note=people.record(data, p["name"])["note"]) for p in people.staff(pub, data)]
+    ps = [_with_gives(p, data) for p in people.staff(pub, data)]
     group, heads = {p["name"]: p["group"] for p in ps}, []
     spec = store.setup_record()["spec"]   # step 4 of the setup being edited; the published one's while no setup is saved
     rows = spec.get("teachers") if isinstance(spec, dict) else (((pub or {}).get("model") or {}).get("setup") or {}).get("teachers")

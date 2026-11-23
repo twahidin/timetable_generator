@@ -156,6 +156,8 @@ def the_people_list():
     assert by[SITI]["group"] == "sh" and by[SITI]["depts"] == [], "a head with no department ticked is shown with none (step 4 has MA)"
     assert by[DANIEL]["depts"] == ["SC"], "anyone else: step 4's departments"
     assert all("pw" not in p and "n" not in p for p in j["people"])
+    assert by[ALICIA]["strong"] is True and by[ALICIA]["gives"][-1] == {"text": "People and access: this page.", "strong": True}, by[ALICIA]["gives"]
+    assert by[RAVI]["strong"] is False and all(isinstance(g["text"], str) and isinstance(g["strong"], bool) for p in j["people"] for g in p["gives"])
     P.update(lambda d: d.update(moved=[]))                                   # nothing moved: [] and None alike
     assert c.get("/api/admin/people").get_json()["moved"] == []
     P.update(lambda d: d.update(moved=None))
@@ -835,6 +837,19 @@ def put_back_the_timetable_committee_tick():
     assert back(c, accounts()[0]["id"]) == (200, {"done": True, "text": "Put back."})
     assert rec(WEI)["extras"]["timetable"] is False
     assert accounts()[0]["changes"] == [dict(name=WEI, field="timetable", was=True, now=False)], accounts()[0]["changes"]
+
+@t
+def put_back_one_entry_holding_a_timetable_and_an_admin_change():
+    c = admin()
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=True, admin=True))[0] == 200
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=False))[0] == 200
+    e = accounts()[0]
+    assert {(x["field"], x["now"]) for x in e["changes"] if x["name"] == NUR} == {("timetable", False), ("admin", False)}, e["changes"]
+    assert rec(NUR)["extras"]["timetable"] is False and rec(NUR)["extras"]["admin"] is False
+    assert back(c, e["id"]) == (200, {"done": True, "text": "Put back."})
+    assert rec(NUR)["extras"]["timetable"] is True and rec(NUR)["extras"]["admin"] is True, rec(NUR)["extras"]
+    assert post(c, "/api/admin/person", name=NUR, extras=dict(timetable=False))[0] == 200 and post(c, "/api/admin/person", name=NUR, extras=dict(admin=False))[0] == 200
+    assert rec(NUR)["extras"]["timetable"] is False and rec(NUR)["extras"]["admin"] is False
 
 OLD_GROUP = "Can't put back: this is from before roles and committees were separated. Make the change on the admin page."
 

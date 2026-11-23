@@ -249,6 +249,45 @@ def nobody_s_rights_change_on_the_day():
             assert R.rights(after, via, today=today) == old_rights(before, via, today=today), (stored, default, via)
 
 @t
+def what_a_role_and_committees_give():
+    T = datetime.date(2026, 11, 23)
+    hod = dict(group="hod", extras=dict(timetable=False, relief=False, exams=None, admin=False), off=False)
+    assert [g["text"] for g in R.gives(hod, ["MA"], T)] == ["Sees the published timetable and the files.", "Relief: plans cover, as management.",
+        "Setup: changes the teaching groups of MA only.", "History: sees their departments' changes."]
+    assert R.gives(hod, [], T)[2] == {"text": "Setup: no department ticked yet, so nothing to change.", "strong": True}
+    full = dict(group="hod", extras=dict(timetable=True, relief=True, exams="2026-12-31", admin=True), off=False)
+    assert [g["text"] for g in R.gives(full, ["MA"], T)] == ["Sees the published timetable and the files.", "Relief: runs it, with the team's pages and settings.",
+        "Setup: every step, the upload, the edit board and Publish.", "Exams and events: plans them and approves them.", "History: sees everyone's changes.", "People and access: this page."]
+    ex = dict(group="executive", extras=dict(timetable=False, relief=False, exams="2026-12-31", admin=False), off=False)
+    assert [g["text"] for g in R.gives(ex, [], T)] == ["Sees the published timetable and the files.", "Exams and events: plans them, until 31 Dec 2026."]
+    assert R.gives(dict(full, off=True), ["MA"], T) == [{"text": "Nothing: switched off, so they cannot sign in.", "strong": False}]
+    assert R.gives(dict(ex, extras=dict(ex["extras"], exams="2026-12-05")), [], T)[1]["text"] == "Exams and events: plans them, until 5 Dec 2026."
+    assert [g["text"] for g in R.gives(dict(group="teacher", extras=dict(timetable=False, relief=False, exams="2026-11-22", admin=False), off=False), [], T)] == [
+        "Sees the published timetable and the files.", "Relief: opens the relief page and asks for cover."]
+
+NEEDS = (("Sees the published", "timetable"), ("Relief: opens", "relief"), ("Relief: plans", "relief.plan"), ("Relief: runs", "relief.team"),
+         ("Setup: changes", "setup"), ("Setup: no department", "setup"), ("Setup: every", "committee"), ("Exams and events: plans them and", "committee"),
+         ("Exams and events: plans them,", "exams"), ("History: sees everyone", "history"), ("History: sees their", "history.dept"), ("People and access", "admin"))
+
+@t
+def a_marked_line_is_never_given_by_a_code():
+    today = datetime.date(2026, 11, 23)
+    n = 0
+    for g, relief, exams, admin, off, tt in itertools.product(OLD_GROUPS, (False, True), (None, "2026-11-22", "2026-12-31"), (False, True), (False, True), (False, True)):
+        if g == "committee": continue
+        for depts in ([], ["MA"]):
+            person = dict(group=g or "teacher", extras=dict(timetable=tt, relief=relief, exams=exams, admin=admin), off=off)
+            code, pw = R.rights(person, "code", today=today), R.rights(person, "password", today=today)
+            for line in R.gives(person, depts, today):
+                need = [r for start, r in NEEDS if line["text"].startswith(start)]
+                if off: assert line == {"text": "Nothing: switched off, so they cannot sign in.", "strong": False}; continue
+                assert len(need) == 1, line
+                if line["strong"]: assert need[0] not in code and need[0] in pw, (person, line)
+                else: assert need[0] in code, (person, line)
+                n += 1
+    assert n > 1000, n
+
+@t
 def an_hod_on_the_timetable_committee_has_both():
     p = dict(group="hod", extras=dict(timetable=True, relief=False, exams=None, admin=False), off=False)
     assert {"committee", "setup", "history", "history.dept", "codes", "relief.plan", "relief.save"} <= R.rights(p, "password")
