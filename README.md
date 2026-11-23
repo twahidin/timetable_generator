@@ -243,7 +243,8 @@ is not on step 3, and a named subject the class has only in groups.
    is opened (the newest 10 of these are kept, the older ones go). The list also shows the published timetable, to compare with. The list only
    reads and saves: nothing in it publishes. **Re-fit to the setup** (beside **Versions**; greyed with the reason when the timetable already fits the
    setup) works out the fewest lesson changes that settle what step 5 or the rules now ask for: a teacher who changed (two who change places on step 5
-   **trade classes** in one step), a lesson missing or extra, a venue, a clash, a Must rule. It never moves a band, and a lesson keeps its day unless
+   **trade classes** in one step), a teacher added to a subject or taken off it, a lesson missing or extra, a venue, a clash, a Must rule.
+   It never moves a band, and a lesson keeps its day unless
    nothing works on it: only then may it move to another day, or change places with a lesson of another day, and each such step is flagged **another
    day** (a lesson barred from every period of its own day may move to another at once). The window shows the work as it runs, then the list: what does
    not fit now, each group's steps with the sentence and its reason, what the changes settle too, and **Needs you** for what the app cannot settle (a
