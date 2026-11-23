@@ -182,11 +182,14 @@ bot's @name). The code works once and runs out in 15 minutes; **Get a new code**
 
 - Never send the bot your personal code: that one opens the app. The bot asks for a code from the card only. It deletes
   what looks like a code and is not one, and says so. There are two exceptions. After five wrong ones in ten minutes it
-  answers and deletes nothing in that chat for a while. And while it waits for an answer it has asked you for, whatever
+  does nothing in that chat for a while: no answer, nothing deleted. And while it waits for an answer it has asked you for, whatever
   you type is the answer, a code too.
 - One person has one Telegram account. The same account on a new phone goes on by itself. Linking another Telegram
   account moves it there, and the old one is told.
 - To stop, press **Unlink** on the card, or send `/stop` to the bot.
+- The bot reads its buttons, a code, `/relief`, `/stop`, `/help` and the answers to its own questions, nothing else. To
+  any other line (a "Noted", a sticker) it answers "I can't read messages here. To answer a relief, press a button under
+  it. Send /relief to ask for relief."
 - The relief team and the timetable committee can unlink anyone: **Relief settings**, the **Telegram** card, **Linked**,
   **Unlink**. Do this at once when somebody has lost their phone. Before they link again with the same account, they end
   Telegram on the lost phone (in Telegram: Settings, Devices), or the messages come to it again. What went there before
@@ -211,12 +214,26 @@ at the first time (above). With the variable put back (the same token), the bot 
 |---|---|---|
 | The app's address | Messages still go out, but their buttons open the old address, and what people press or type goes there. | Redeploy the service first, so that the app learns its new address. Then press **Connect again** on the card and look at the address it shows: it has to be the new one. |
 | `SECRET_KEY` | The bot is off: nothing is sent and nothing people press is answered. (Everyone is also signed out, and every personal code changes.) Nobody is unlinked. | Press **Connect the bot**. |
-| The token of the same bot (`/revoke`) | The old token is refused, so what was to go out fails ("Could not be sent: remind them" on **Today**). Nobody is unlinked. | Press **Disconnect** first. Then `/revoke`, put the new token in Railway, deploy, and press **Connect the bot**. |
+| The token of the same bot (`/revoke`) | Telegram refuses the old token, so nothing goes out. Nothing is given up either: what was to go out waits, and goes once the bot is connected with the new token, as long as it is still true then. Nobody is unlinked. | Press **Disconnect** first. Then `/revoke`, put the new token in Railway, deploy, and press **Connect the bot**. |
 | Another bot | The new bot can write to nobody yet: a bot may write only to people who have pressed **Start** in it. | While the old bot is still connected, everyone sends `/stop` to it or presses **Unlink** (the relief team can do it for them on the card, under **Linked**). Then press **Disconnect**, put the new token in Railway, deploy, press **Connect the bot**, and everyone links again: each then gets what is still to come. Whoever is still linked when the new bot is connected cannot be written to, and what was meant for them fails and is not sent again by itself. |
 
 After any of the last three, what was planned, asked for or cancelled while the bot was off is not told afterwards;
 reliefs still to come are. Connecting drops what people sent the bot while it could not be answered: they press or type
 it again.
+
+**When Telegram is down** (or refuses the token), nothing is given up and no try is counted: the app asks Telegram every 20
+seconds whether it is back, and what waits goes within half a minute of that, oldest first. What is no longer true by then
+(a relief moved meanwhile, a lesson that is over) is not sent. A report or an all clear more than 30 minutes late is not
+sent. The log says "network" once when it begins and "Telegram answers again" once when it ends. A message that fails by
+itself, again and again while others go, is tried six times over about 43 minutes and then shows as "Could not be sent".
+
+**When `relief/telegram.db` is damaged** (the Telegram cards say only "Something went wrong. Try again.", **Today** looks as
+it does without a bot, and the log says "the message sender failed" or "a message could not be sent"), relief goes on in the app, but nothing goes to Telegram
+and nothing people press there is answered. To start Telegram again: delete `relief/telegram.db`, `relief/telegram.db-wal`
+and `relief/telegram.db-shm` on the volume (for example from a shell on the service, in `/data/relief/`), redeploy, press
+**Connect the bot**, and everyone links again. What is lost: who had linked, the messages waiting and what was sent before
+(so **Today** shows the earlier reliefs as not sent), and any conversation with the bot in the middle. The absences, the
+reliefs and the History are kept: they are in other files.
 
 **One copy only.** Telegram passes what people send a bot to one address. If somebody puts the same token on a second
 copy and presses Connect there, what people press and type goes to that copy, which knows nobody. To put it right, take
@@ -227,7 +244,7 @@ the token off the second copy and press **Connect again** on the one the school 
 Set `TELEGRAM_BOT_TOKEN=practice` (with `SECRET_KEY`) on a copy for trying things, such as a local run. The card says
 "Practice mode: nothing is sent to Telegram." Press **Connect the bot** to see the Telegram cards in Relief settings and
 My absences, and **Today** with a bot connected. Nobody can link there: there is no bot to open, so **Link Telegram**
-shows a code alone, with nothing to send it to. So no message is made, and **Today** says "Not on Telegram" for
+shows the code but no **Open the bot** button, and there is nothing to send the code to. So no message is made, and **Today** says "Not on Telegram" for
 everybody. To see the messages too, a developer has to stand in for Telegram (with `RELIEF_JOBS=on`). Never use it on the
 copy the school uses: those who are linked there would be marked as told, with nothing sent. With a real token
 afterwards, press **Connect the bot** once more.
@@ -239,18 +256,18 @@ Nothing, unless you set `ANTHROPIC_API_KEY` (or the server still holds `AI_PROVI
 - **The box on the Fix card** sends the words the lead types in it (at most 300 characters) and a fixed instruction, and nothing else: no list of teachers, classes, students or lessons, and no part of the timetable. A name the lead types is part of their words. Nothing typed is stored.
 - **Relief picks** (relief stage 3) send, for each lesson to cover, the teachers who are free as labels ("Teacher 4"), their departments, subjects, teaching and relief period counts, and the school's relief rules text with names replaced by labels. They never send staff names, absence reasons, work or remarks. Write people in the rules by their full name, so the app can replace them. The model is the same `ANTHROPIC_API_KEY` and `TYPED_REQUEST_MODEL` as the typed requests. With no key, every pick uses the app's own order. The app makes at most 60 AI picks in any 10 minutes for the whole server; past that it uses its own order and says so.
 
-With `TELEGRAM_BOT_TOKEN` set and the bot connected, **Telegram** gets these messages, each for one person who has linked their own Telegram. Somebody not linked who writes to the bot is told that their Telegram is not linked, or that their code is not right; somebody whose link moved, or who sends `/stop`, is told so.
+With `TELEGRAM_BOT_TOKEN` set and the bot connected, **Telegram** gets these messages, each for one person who has linked their own Telegram. Somebody not linked who writes to the bot is told that their Telegram is not linked, or that their code is not right; somebody whose link moved, or who sends `/stop`, is told so; somebody linked who writes what the bot does not read is told that it cannot read messages there.
 
 | For | What the message holds |
 |---|---|
 | the relief teacher, once the relief team has approved the relief | the absent teacher's name, the day, the lesson (classes, subject, group), its periods, times and room, the work text and the link the absent teacher left, and the work files, sent after it. Later, when that changes: that the relief was moved, kept, is no longer needed, or that the lesson is not happening (with the name of the exam or event and the class) or is on again. A reminder from the team is the relief message once more, with its files |
 | the absent teacher, for relief somebody else planned | the dates, whole day or which periods, who planned it, how many lessons will be covered, and one reminder to acknowledge it |
 | the reporting officer | who is away, on which dates, whole day or which periods, and the kind of reason (Medical, Child sick, Course or Other). This is the only message to somebody else that says anything of why a person is away |
-| the relief team | a request to change: who asks, the lesson, the line they typed, the new pick's name and the reason for it; who has not acknowledged which lesson and when they were told; that all have; whose absence was cancelled, for which dates and by whom; and once a week the numbers of the week, with the three teachers who took most relief and the departments |
-| whoever was told of an absence, and whoever planned it (for an event's backup, its teacher in charge at that moment) | whose absence was cancelled, for which dates and by whom |
+| the relief team | a request to change: who asks, the lesson, the line they typed, the new pick's name and the reason for it; who has not acknowledged which lesson and when they were told; that all have; whose absence was cancelled, for which dates and by whom (not of an exam's or event's backup that the app ended itself, when a schedule is withdrawn or a duty changes); and once a week the numbers of the week, with the three teachers who took most relief and the departments |
+| whoever was told of an absence, and whoever planned it (for an event's backup, its teacher in charge at that moment) | whose absence was cancelled, for which dates and by whom. A backup the app ended itself is told only to the person on duty and the reporting officer, if they were told of it, and to its relief teachers (as no longer needed) |
 | anyone asking for relief with `/relief` | the questions and their buttons: their own name, dates, periods, the kinds of reason, the names of staff who match what they type for a reporting officer, their lessons, and a list of what was chosen before **Send**; after it, how many lessons were sent, the reporting officer's name and whether they are on Telegram, and the names of files that could not be attached |
 
-Telegram also gets everything people type or send to the bot: the line for **Other**, why they ask to change (which goes on to the relief team) or cancel (which is shown back to them before they confirm), the work they type for a lesson, and the files and photos they send as work (the app fetches those from Telegram after **Send**). Of what Telegram knows about a person, the app keeps the number of their chat and their @name. Connecting sends Telegram the app's address, the password of section 6 and the bot's menu, and the buttons that open the app hold its address.
+Telegram also gets everything people type or send to the bot: the line for **Other**, why they ask to change (which goes on to the relief team) or cancel (which is shown back to them before they confirm), the work they type for a lesson, and the files and photos they send as work (the app fetches those from Telegram after **Send**). Of what Telegram knows about a person, the app keeps the number of their chat and their @name. Connecting sends Telegram the app's address, the password made from SECRET_KEY (section 6, Give the token to the app) and the bot's menu, and the buttons that open the app hold its address.
 
 The app never sends Telegram the typed line of an absence's reason, the remarks for the relief team, anybody's phone number (it has none and asks for none), anybody's password or personal code (for one a person types, see below), the student list or the timetable. A code for linking (one use, 15 minutes) is in the link that opens the bot.
 

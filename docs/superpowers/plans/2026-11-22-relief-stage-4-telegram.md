@@ -167,7 +167,7 @@ Button labels: `✅ Acknowledge`, `↩ Request to change`, `✅ Acknowledge and 
   (token == `"practice"`), `hook_secret() -> str` (hex HMAC-SHA256 of `"telegram-hook:" + token()` under env `SECRET_KEY`;
   `""` when `SECRET_KEY` is unset), `call(method, params=None, files=None, timeout=15) -> dict(ok, result, kind,
   retry_after)`, never raising: `kind` None on ok, else `"blocked"` (HTTP 403), `"slow"` (429; `retry_after` from
-  `parameters`, default 5), `"refused"` (other 4xx), `"network"` (5xx other than 500 and 504, or never connected: 3a), `"unsure"`
+  `parameters`, default 5), `"refused"` (other 4xx), `"network"` (5xx other than 500 and 504, or never connected: 3a; and 401 and 404, a token revoked or wrong: F3), `"unsure"`
   (500, 504, or the request went out and no answer came: a read timeout or reset). `files` is a list of `(field, filename, bytes)` sent as multipart.
   `download(file_id, limit) -> bytes | None` (getFile then the file, None when larger than `limit` or failed).
   Practice answers: `getMe` → `dict(username="practice_bot", first_name="Practice")`, anything else → ok with
@@ -261,7 +261,9 @@ Task 1.
   the state then); cut text over 4000 characters at a line end with `…and more in the app.`; `tg.call`; `ok` →
   `sent`, `sent_at`, `message_id`, then each file through `sendDocument` (failure marks the item sent with
   `files_failed`, shown to the team); `slow` → `queued`, `next_at = now + retry_after`; `network` → `queued`,
-  `next_at` by tries 5 s, 30 s, 2 min, 10 min, 30 min, then `failed`; `blocked` → `links.unlink(name)` and the item is removed (a person who links again gets what is still to come);
+  `next_at` by tries 5 s, 30 s, 2 min, 10 min, 30 min, then `failed`, and the run ends in a doubt as after `unsure` (F3: in doubt `getMe` is
+  asked at most every 20 s and at once at the start; when it is not answered the try is not counted, when it is the message
+  is tried again in that run and holds the rest no longer); `blocked` → `links.unlink(name)` and the item is removed (a person who links again gets what is still to come);
   `refused` → `failed`; `unsure` → `unsure`, and the run ends: nothing more goes until `getMe` answers (3c). A pause Telegram asks for (`slow`) holds
   everything (3e), and nothing goes while the accounts cannot be read (3d). `recover()` (at start): every `sending` → `unsure`. `told(key) -> dict(state,
   at) | None`, `told_for(prefix) -> {key: dict(state, at, name, ref)}` (compared with `substr`, never `LIKE`: keys hold any character). `start()` /
@@ -297,11 +299,11 @@ Task 1.
   without one, when `free.free_then` says whether it reads `Nobody else is free then…` or `No new pick yet…`; a pick that
   arrives after that goes once more as `askpick:{absent}:{ckey}:{change.at}:{name}` with the Approve button), `gone:{relief key}` and `moved:{relief key}` (a base relief key told `sent` or `unsure` whose cover is no longer approved to that person: `moved` when the cover is
   approved to another person, else `gone`, also when the cover key is no longer there; the same person approved again is
-  neither; lesson not over), `kept:{absent}:{ckey}:{history at}` (the relief teacher; from history `kept`), `cancelled:{id}:{name}` (team members, the planner, and the absent teacher and the officer who were told of it (4c), not the canceller; `cancelled.at` ≥ `since` and the absence was
+  neither; lesson not over), `kept:{absent}:{ckey}:{history at}` (the relief teacher; from history `kept`), `cancelled:{id}:{name}` (team members, the planner, and the absent teacher and the officer who were told of it (4c), not the canceller; a backup (exams) the app ended: the absent teacher and the officer who were told alone (F2); `cancelled.at` ≥ `since` and the absence was
   still to come). `sweep(now=None) -> int` (reads published,
   settings, records; queues; `wake`s the sender; 0 when `not tg.on()` or not connected). `still_true(item) -> bool`
   (relief: still approved to them with that `approved.at` and the lesson not over; planned/remind/officer: not cancelled
-  and still to come; others true). `soon()` (a daemon thread unless `SYNC`). The sweep, the reports
+  and still to come; cancelled: its last date not past (F4); others true). `soon()` (a daemon thread unless `SYNC`). The sweep, the reports
   and the deletion of old conversations also run every minute on a ticker of `tell`'s own (`MINUTE`, `start`: 4h). A person without
   the `relief` right is reached by nothing (4f). A reminder still to come and a request still waiting go whatever `since` is (4e).
 - A relief message's `ref` holds `dict(id, absent, ckey, approved_at, who, lesson, periods, start, day, date, ends)` (`lesson`
@@ -369,7 +371,7 @@ Task 1.
   today cannot be read (6c, 6d, 6g). Nothing on a date with no reliefs. The mark is the last one at or before now (state `report_last:{date}` keeps it, so a
   tick a little late, or after a restart, still sends it once); the time written in the text is now. `report.remind(date,
   covers, by, now=None) -> dict(sent, skipped)` (it queues with `outbox.queue`): each approved, not acknowledged relief of `covers` whose last told is
-  older than 5 minutes gets `…:r{n}` (next number, same buttons); others skipped with the sentence "Sent at {hh:mm}:
+  older than 5 minutes, and not queued or sending however old (F4), gets `…:r{n}` (next number, same buttons); others skipped with the sentence "Sent at {hh:mm}:
   wait a few minutes." (10a) or, when that message may not have gone, "Last tried at {hh:mm}: …" (10c). A reminder that went counts as the relief told (6a). The Telegram button "Remind them again" calls the same function with the covers in that report.
   Route: `POST /api/relief/today/remind {date, covers: [{id, ckey}]}` (relief.team).
 - [x] **Step 1: Write the failing tests** with the clock moved by hand: `the_report_goes_at_its_marks_and_once_each`,
