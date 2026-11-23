@@ -1520,7 +1520,7 @@ class FakeEnv:
     def pub(self): return self._pub
     def cal(self): return CAL
     def settings(self): return XSET.defaults()
-    def people(self): return []
+    def people(self): return getattr(self, "staff", [])        # a test sets env.staff for its made-up teachers
     def all_saved(self): return XS.all_saved()
     def today(self): return self._today
     def may(self):
@@ -2584,6 +2584,444 @@ def the_practice_helper_walks_a_whole_exam():
     same(AI.mock_call([])["content"][0]["text"], AI.MOCK_HELP)
     same(AI.mock_call([dict(role="user", content="2026-10-08 at 10:30")])["content"][0]["text"], 'Ask "suggest <paper>" first.')
     same(AI.mock_call([dict(role="user", content="whole day")])["content"][0]["text"], AI.NO_START)
+
+
+# ---------------------------------------------------------------- the talks (plan/talk.py)
+from plan import talk as T  # noqa: E402
+
+WAIT = 60                                                   # seconds: generous, the machine is shared
+def ended(talk):
+    assert T.wait(talk, WAIT), "the answer did not end in time"
+    assert not talk.working, "working is still True after the answer ended"
+
+def waits(ev, what="the test's event"):
+    """a scripted call's hook that waits for the test (and fails clearly when it never comes)"""
+    def hook(messages, stop):
+        assert ev.wait(WAIT), f"{what} never came"
+    return hook
+
+def a_talk(owner="p1", staff=(), exam=None, **kw):
+    env = FakeEnv(**kw); env.staff = people(*staff) if staff else []
+    return env, T.open(owner, env, exam)
+
+def answer(talk, env, text, *replies, pick=None, before=None):
+    """say text with a scripted call of these replies, and wait for the answer to end"""
+    call = Script(*replies, before=before)
+    T.say(talk, env, text, pick=pick, call=call)
+    ended(talk)
+    return call
+
+def kinds(talk): return [l["kind"] for l in talk.lines]
+def texts(talk, kind): return [l["text"] for l in talk.lines if l["kind"] == kind]
+def user_texts(sent):
+    """the plain user texts of one request, in order"""
+    return [m["content"] for m in sent["messages"] if m["role"] == "user" and isinstance(m["content"], str)]
+def results(sent):
+    """the tool results of one request: tool_use_id -> content"""
+    return {b["tool_use_id"]: b["content"] for m in sent["messages"] if m["role"] == "user" and isinstance(m["content"], list)
+            for b in m["content"] if b.get("type") == "tool_result"}
+START_IN = dict(kind="exam", name="Mid-Year 2027", levels=["Sec 3", "Sec 4"], classes=[], start="2026-10-05", end="2026-10-09")
+
+@t
+def a_talk_answers_in_order_and_the_progress_changes_while_it_works():
+    no_schedules()
+    same(T.LIMITS, dict(typed=2000, list=20000, list_papers=200, rounds=12, answer=180, list_job=300, messages=60, at_once=2,
+                        an_hour=60, idle=12 * 3600, talks=5))
+    env, talk = a_talk()
+    assert talk.id and talk.owner == "p1" and T.get(talk.id, "p1") is talk
+    go, seen = threading.Event(), []
+    def before(messages, stop):
+        seen.append(T.view(talk, env)["progress"])
+        if len(seen) == 1:
+            assert go.wait(WAIT), "the test never let the first call go"
+    was = env.may
+    env.may = lambda: (talk.working and seen.append(talk.progress), was())[1]       # inside the step: the progress of a step
+    call = Script(reply(use("t1", "start_exam", START_IN)), reply(use("t2", "offer_answers", dict(answers=["Whole days", "Part of a day", "x" * 80, "", "e", "f"]))),
+                  reply(say("Started. Does each level sit whole days?")), before=before)
+    T.say(talk, env, "Plan the mid-year exam", call=call)
+    v = T.view(talk, env)
+    assert v["working"] and v["can"] == dict(say=False, list=False, stop=True, why=T.WORKING), v["can"]
+    raises(Refused, lambda: T.say(talk, env, "and another", call=call), T.WORKING)
+    go.set(); ended(talk)
+    env.may = was
+    same(seen[0], "Thinking"); assert "Filling in the draft" in seen, seen; same(seen[-1], "Thinking")
+    same(kinds(talk), ["me", "did", "ai"])
+    me, did, ai_ = talk.lines
+    same((me["n"], me["text"], me["step"], me["undo"], me["buttons"], me["table"], me["quick"]), (1, "Plan the mid-year exam", None, None, [], None, []))
+    same((did["n"], did["text"], did["undo"]), (2, "Started the exam Mid-Year 2027", True)); assert talk.steps[did["step"]]["action"] == "start"
+    same((ai_["text"], ai_["quick"]), ("Started. Does each level sit whole days?", ["Whole days", "Part of a day", "x" * 60, "e"]))
+    v = T.view(talk, env)
+    same((v["working"], v["progress"], v["last"], v["can"]), (False, "", 3, dict(say=True, list=True, stop=False, why="")))
+    same(set(v), {"lines", "working", "progress", "exam", "checklist", "missing", "can", "last"})
+    same(v["exam"], dict(id=talk.exam, name="Mid-Year 2027", status="Draft", link=f"/exams/{talk.exam}"))
+    same([l["key"] for l in v["checklist"]][:2], ["what", "days"]); assert v["checklist"][0]["link"].startswith(f"/exams/{talk.exam}#")
+    same(v["missing"], facts.missing(env.pub(), env.cal(), env.settings()))
+    same([l["n"] for l in T.view(talk, env, after=2)["lines"]], [3]); same(T.view(talk, env, after=3)["lines"], [])
+    same(talk.words, []); same(talk.progress, "")
+    sendable(talk.messages)
+
+@t
+def what_is_typed_is_checked_before_anything_is_sent():
+    env, talk = a_talk()
+    call = Script()
+    raises(Refused, lambda: T.say(talk, env, "x" * 2001, call=call), "Keep it under 2,000 characters.")
+    raises(Refused, lambda: T.say(talk, env, "   ", call=call), T.EMPTY)
+    raises(Refused, lambda: T.say(talk, env, "", pick="Whole days", call=call), T.NO_PICK)
+    same((talk.lines, talk.messages, call.sent, talk.working), ([], [], [], False))
+    answer(talk, env, "y" * 1990 + "          ", reply(say("ok")))
+    same(texts(talk, "me"), ["y" * 1990])
+    answer(talk, env, "hello", reply(use("t1", "offer_answers", dict(answers=["Whole days", "Part of a day"])), say("Which?")),
+           reply(say("Which?")))
+    raises(Refused, lambda: T.say(talk, env, "", pick="Some days", call=call), T.NO_PICK)
+    got = []
+    answer(talk, env, "", reply(say("Fine.")), pick="Whole days", before=lambda m, s: got.append(list(talk.words)))
+    same((got, texts(talk, "me")[-1]), ([["Whole days"]], "Whole days"))
+    raises(Refused, lambda: T.say(talk, env, "", pick="Whole days", call=call), T.NO_PICK)       # the last answer offers none
+    env.right = False
+    n = len(talk.messages)
+    raises(Refused, lambda: T.say(talk, env, "go on", call=call), OPEN)
+    same((len(talk.messages), talk.working), (n, False))
+
+@t
+def stop_ends_an_answer_and_what_was_done_stays_done():
+    no_schedules()
+    env, talk = a_talk()
+    go = threading.Event()
+    call = Script(reply(say("I am about to say a lot")), before=waits(go))
+    T.stop(talk)                                                  # not working: nothing
+    assert not talk.halt.is_set()
+    T.say(talk, env, "Plan it", call=call)
+    T.stop(talk); go.set(); ended(talk)
+    same(kinds(talk), ["me", "sys"]); same(texts(talk, "sys"), ["Stopped."])
+    sendable(talk.messages)
+    # a stop while a step runs: the step finishes whole, its line stays, nothing after it runs
+    was = env.may
+    env.may = lambda: (T.stop(talk), was())[1]
+    call = Script(reply(use("t1", "start_exam", START_IN), use("t2", "set_basics", dict(name="Other", levels=None, classes=None, start=None, end=None))),
+                  reply(say("never")))
+    T.say(talk, env, "Start it", call=call); ended(talk)
+    env.may = was
+    same(kinds(talk)[2:], ["me", "did", "sys"]); same(texts(talk, "sys")[-1], "Stopped.")
+    same(env.load(talk.exam)["name"], "Mid-Year 2027"); same(len(call.sent), 1)
+    same(talk.messages[-1]["content"][1]["content"], "Stopped."); sendable(talk.messages)
+    answer(talk, env, "and now?", reply(say("Here again.")))
+    same(texts(talk, "ai"), ["Here again."])
+
+@t
+def a_talk_is_only_its_owners_and_close_and_twelve_hours_drop_it():
+    env, a = a_talk("person-7")
+    _, b = a_talk("sid-" + secrets.token_hex(8))                  # the shared committee code: a talk keyed by its session's own id
+    same((T.get(a.id, "person-7"), T.get(a.id, b.owner), T.get(b.id, "person-7"), T.get(b.id, b.owner)), (a, None, None, b))
+    same((T.get(a.id, None), T.get(None, "person-7"), T.get("no-such-talk", "person-7")), (None, None, None))      # after a restart: nothing
+    assert "restarted" in T.LOST and "Carry on" in T.LOST
+    T.close(a)
+    same(T.get(a.id, "person-7"), None)
+    raises(Refused, lambda: T.say(a, env, "hello", call=Script()), T.LOST)
+    raises(ValueError, lambda: T.open("", env))
+    clock = [time.time()]
+    T._now = lambda: clock[0]
+    try:
+        _, c = a_talk("person-8")
+        clock[0] += 12 * 3600 - 5; assert T.get(c.id, "person-8") is c
+        clock[0] += 12 * 3600 - 5; assert T.get(c.id, "person-8") is c        # used again: idle from then
+        clock[0] += 12 * 3600; same(T.get(c.id, "person-8"), None)
+        talks = [a_talk("person-9")[1] for _ in range(5)]
+        clock[0] += 1; T.get(talks[0].id, "person-9")                        # the first is used again: the second is idle longest
+        talks[1].working = True; clock[0] += 1
+        sixth = a_talk("person-9")[1]
+        same([T.get(x.id, "person-9") is x for x in talks + [sixth]], [True, True, False, True, True, True])
+        talks[1].working = False
+    finally:
+        T._now = time.time
+
+@t
+def two_answers_run_at_once_and_a_third_waits():
+    envs, talks, gates = [], [], []
+    for i in range(3):
+        e, tk = a_talk(f"p{i}"); envs.append(e); talks.append(tk); gates.append(threading.Event())
+    for i in range(2):
+        T.say(talks[i], envs[i], "hello", call=Script(reply(say("hi")), before=waits(gates[i])))
+    raises(Refused, lambda: T.say(talks[2], envs[2], "hello", call=Script(reply(say("hi")))),
+           "The AI is working on other answers. Try again in a moment.")
+    same((talks[2].lines, talks[2].messages, talks[2].working), ([], [], False))
+    raises(Refused, lambda: T.say(talks[0], envs[0], "again", call=Script()), "The AI is still answering. Wait, or press Stop.")
+    for g in gates: g.set()
+    for tk in talks[:2]: ended(tk)
+    answer(talks[2], envs[2], "hello", reply(say("hi")))
+    same(texts(talks[2], "ai"), ["hi"]); same(T._running[0], 0)
+    # the same talk from two tabs at once: one answer starts, the other is refused
+    gate, go, got = threading.Event(), threading.Barrier(2, timeout=WAIT), []
+    call = Script(reply(say("one")), before=waits(gate))
+    def tab():
+        go.wait()
+        try: T.say(talks[2], envs[2], "from a tab", call=call); got.append("ok")
+        except Refused as e: got.append(str(e))
+    tabs = [threading.Thread(target=tab, daemon=True) for _ in range(2)]
+    for x in tabs: x.start()
+    for x in tabs: x.join(WAIT); assert not x.is_alive(), "a tab did not return"
+    same(sorted(got), sorted(["ok", T.WORKING]))
+    gate.set(); ended(talks[2])
+    same(texts(talks[2], "me")[-1:], ["from a tab"]); same(len(texts(talks[2], "me")), 2); same(T._running[0], 0)
+
+@t
+def the_words_for_said_are_the_persons_since_the_last_answer_and_names_go_as_codes():
+    no_schedules()
+    env, talk = a_talk(staff=STAFF)
+    tan = talk.names.code(TAN)
+    answer(talk, env, "Start it", reply(use("t1", "start_exam", dict(START_IN, name=f"Farewell of {tan}"))), reply(use("t2", "read_exam")),
+           reply(use("t3", "set_papers", dict(add=[dict(level="Sec 3", subject="English", paper="Paper 1", minutes=90, who=None, together=None)], change=[], remove=[]))),
+           reply(say(f"Done. {tan} can check it.")))
+    s = env.load(talk.exam)
+    same(s["name"], f"Farewell of {TAN}")                                     # a code from the AI is stored as the name
+    same(texts(talk, "ai"), [f"Done. {TAN} can check it."])
+    assert texts(talk, "did")[0] == f"Started the exam Farewell of {TAN}", texts(talk, "did")
+    pid = s["papers"][0]["id"]
+    typed = f"{TAN} says Sec 3 English Paper 1 goes on 2026-10-06 at 08:00"
+    def sent_said(messages, stop):
+        assert messages[-1]["content"] == talk.words[0] and TAN not in talk.words[0] and tan in talk.words[0], talk.words
+    call = answer(talk, env, typed, reply(use("t4", "set_times", dict(items=[dict(id=pid, date="2026-10-06", start="08:00")], said=f"{tan} says Sec 3 English Paper 1 goes on 2026-10-06 at 08:00"))),
+                  reply(say("Put.")), before=sent_said)
+    same((env.load(talk.exam)["papers"][0]["date"], env.load(talk.exam)["papers"][0]["start"]), ("2026-10-06", "08:00"))
+    for sent in call.sent:
+        body = json.dumps(sent["messages"], ensure_ascii=False)
+        for who in (TAN, "Tan Wei Ling", "Wei Ling"):
+            assert who not in body, who
+    # the next answer cannot use those words again
+    call = answer(talk, env, "now 09:00 please", reply(use("t5", "set_times", dict(items=[dict(id=pid, date="2026-10-06", start="09:00")], said="goes on 2026-10-06 at 08:00"))),
+                  reply(say("No.")))
+    same(results(call.sent[-1])["t5"], ST.NEED_SAID); same(env.load(talk.exam)["papers"][0]["start"], "08:00")
+    # a tool result never holds a name, while the exam's name does
+    call = answer(talk, env, "show me", reply(use("t6", "read_exam")), reply(say("Here.")))
+    r = results(call.sent[-1])["t6"]
+    assert TAN not in r and "Wei Ling" not in r and f"Farewell of {tan}" in r, r
+
+@t
+def a_tool_that_fails_or_is_refused_never_ends_the_talk():
+    no_schedules()
+    env, talk = a_talk()
+    call = answer(talk, env, "Change the name", reply(use("t1", "set_basics", dict(name="X", levels=None, classes=None, start=None, end=None))),
+                  reply(say("The app says start first.")))
+    same(results(call.sent[-1])["t1"], ST.START_FIRST); same(kinds(talk), ["me", "ai"])
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    before, n = env.load(talk.exam), len(env.history)
+    call = answer(talk, env, "Sec 9 too", reply(use("t2", "set_basics", dict(name=None, levels=["Sec 9"], classes=None, start=None, end=None))),
+                  reply(say("Refused.")))
+    same(results(call.sent[-1])["t2"], "Sec 9 is not a level of the published timetable.")
+    same((env.load(talk.exam), len(env.history)), (before, n)); same(kinds(talk)[-2:], ["me", "ai"])
+    h, was = logged(), env.load
+    def broken(id): raise RuntimeError("secret words of a fault")
+    env.load = broken
+    try:
+        call = answer(talk, env, "read it", reply(use("t3", "read_exam"), use("t4", "read_school")), reply(say("The app could not read it.")))
+    finally:
+        env.load = was
+        logging.getLogger("plan").removeHandler(h)
+    r = results(call.sent[-1])
+    same(r["t3"], AI.COULD_NOT); assert '"school"' in r["t4"], r["t4"]
+    same(texts(talk, "ai")[-1], "The app could not read it."); assert not talk.working
+    assert h.lines and all("RuntimeError" in x and "secret" not in x for x in h.lines), h.lines
+    # a right ending between say and the first step: the exam unchanged, the AI told the sentence
+    def ends(messages, stop): env.right = False
+    before, n = env.load(talk.exam), len(env.history)
+    call = answer(talk, env, "Rename it to Y", reply(use("t5", "set_basics", dict(name="Y", levels=None, classes=None, start=None, end=None))),
+                  reply(say("You may not.")), before=ends)
+    same(results(call.sent[-1])["t5"], OPEN); same((env.load(talk.exam), len(env.history)), (before, n))
+    env.right = True
+
+@t
+def undo_through_the_talk_and_the_ai_is_told_at_the_top_of_the_next_message():
+    no_schedules()
+    env, talk = a_talk()
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)),
+           reply(use("t2", "set_basics", dict(name="Mid-Year Exam 2027", levels=None, classes=None, start=None, end=None))), reply(say("ok")))
+    did = [l for l in talk.lines if l["kind"] == "did"]
+    raises(Refused, lambda: T.undo(talk, env, "nope"), "That step is not in this talk.")
+    raises(Refused, lambda: T.undo(talk, env, None), "That step is not in this talk.")
+    gate = threading.Event()
+    T.say(talk, env, "wait", call=Script(reply(say("hm")), before=waits(gate)))
+    raises(Refused, lambda: T.undo(talk, env, did[1]["step"]), "Wait for the answer, or press Stop.")
+    gate.set(); ended(talk)
+    n = len(talk.lines)
+    T.undo(talk, env, did[1]["step"])
+    same(env.load(talk.exam)["name"], "Mid-Year 2027")
+    new = talk.lines[n]
+    same((new["kind"], new["text"], new["step"], new["undo"]), ("did", "Taken back: Changed the name", None, False))
+    same([l["undo"] for l in T.view(talk, env)["lines"] if l["kind"] == "did"], [True, False, False])
+    raises(Refused, lambda: T.undo(talk, env, did[1]["step"]), ST.TAKEN)
+    call = answer(talk, env, "what now?", reply(say("ok")))
+    u = user_texts(call.sent[0])
+    same(u[-1], "what now?")
+    same(u[-2], "[The app: The person took a step back on the page. Taken back: Changed the name]")
+    call = answer(talk, env, "and now?", reply(say("ok")))
+    same(user_texts(call.sent[0])[-2:], ["what now?", "and now?"])                # told once, never edited into earlier messages
+    sendable(talk.messages)
+
+@t
+def after_stopped_timeout_and_failed_the_next_answer_works():
+    no_schedules()
+    env, talk = a_talk()
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    was = T.LIMITS["answer"]
+    T.LIMITS["answer"] = 0
+    try:
+        answer(talk, env, "too slow", reply(say("never")))
+    finally:
+        T.LIMITS["answer"] = was
+    same(texts(talk, "sys")[-1], AI.SENTENCES["timeout"]); sendable(talk.messages)
+    h = logged()
+    try:
+        answer(talk, env, "fail", RuntimeError("no network here"))
+    finally:
+        logging.getLogger("plan").removeHandler(h)
+    same(texts(talk, "sys")[-1], AI.SENTENCES["failed"]); sendable(talk.messages)
+    answer(talk, env, "partly", reply(say("Reading."), use("t2", "read_exam")), reply(stop_reason="max_tokens"))
+    same(texts(talk, "ai")[-1], "Reading."); same(texts(talk, "sys")[-1], AI.SENTENCES["max_tokens"])
+    gate = threading.Event()
+    T.say(talk, env, "stop me", call=Script(reply(use("t3", "read_exam"), use("t4", "read_checks")), before=waits(gate)))
+    T.stop(talk); gate.set(); ended(talk)
+    same(texts(talk, "sys")[-1], "Stopped."); sendable(talk.messages)
+    call = answer(talk, env, "again", reply(use("t5", "read_checks")), reply(say("Checked.", )))
+    same(texts(talk, "ai")[-1], "Checked."); sendable(talk.messages)
+    for m in call.sent[0]["messages"]:
+        assert m["content"], m
+    same(T._running[0], 0)
+
+@t
+def the_app_tells_the_person_what_the_ai_is_not_shown():
+    no_schedules()
+    env, talk = a_talk()
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    was = facts.checks
+    facts.checks = lambda *a: dict(errors=["Sec 3 English clashes"], warnings=[], hidden=2, unchecked=facts.UNCHECKED)
+    add = lambda subject: dict(add=[dict(level="Sec 3", subject=subject, paper="Paper 1", minutes=60, who=None, together=None)], change=[], remove=[])
+    try:
+        call = answer(talk, env, "Add two", reply(use("t2", "set_papers", add("English")), use("t3", "set_papers", add("Mathematics")), use("t4", "read_checks")),
+                      reply(say("Added.")))
+    finally:
+        facts.checks = was
+    same(kinds(talk)[3:], ["me", "did", "sys", "sys", "did", "ai"])
+    same(texts(talk, "sys"), ["2 more points with extra time: see the Papers tab.", "Clashes not checked: no students yet."])
+    r = results(call.sent[-1])
+    want = dict(errors=[dict(text="Sec 3 English clashes")], warnings=[], unchecked=[dict(text=facts.UNCHECKED)],
+                hidden=[dict(text="There are points the app does not show you. The person is told where to look.")])
+    same(json.loads(r["t4"]), want); same(json.loads(r["t2"])["checks"], want); same(json.loads(r["t2"])["text"], "Added 1 paper")
+    assert "2" not in json.dumps(want), "the count of hidden points never goes to the AI"
+    same(T._hidden_line(1), "1 more point with extra time: see the Papers tab.")
+    facts.checks = lambda *a: dict(errors=[], warnings=[], hidden=1, unchecked="")
+    try:
+        T.undo(talk, env, [l for l in talk.lines if l["kind"] == "did"][-1]["step"])
+    finally:
+        facts.checks = was
+    same(texts(talk, "sys")[-1], "1 more point with extra time: see the Papers tab.")
+
+@t
+def offers_answers_and_lists_as_the_ai_sees_them():
+    no_schedules()
+    env, talk = a_talk()
+    call = answer(talk, env, "x", reply(use("t1", "read_exam"), use("t2", "read_checks"), use("t3", "offer_slots", dict(paper="p1")),
+                                        use("t4", "accept_list", dict(said="yes")), use("t5", "correct_list", dict(line=1, subjects=[]))), reply(say("ok")))
+    r = results(call.sent[-1])
+    same([r[k] for k in ("t1", "t2", "t3", "t4", "t5")], [T.NO_EXAM, T.NO_EXAM, T.NO_EXAM, "No list is waiting.", "No list is waiting."])
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)),
+           reply(use("t2", "set_papers", dict(add=[dict(level="Sec 3", subject="English", paper="Paper 1", minutes=60, who=None, together=None)], change=[], remove=[]))),
+           reply(say("ok")))
+    pid = env.load(talk.exam)["papers"][0]["id"]
+    call = answer(talk, env, "x", reply(use("t1", "offer_slots", dict(paper=pid)), use("t2", "offer_slots", dict(paper="none"))), reply(say("ok")))
+    r = results(call.sent[-1])
+    want = facts.slots(env.load(talk.exam), env.pub(), env.cal(), env.settings(), pid)
+    same(talk.offered[pid], want); same(talk.offered["none"], [])
+    if want: same(json.loads(r["t1"])["offers"], want)
+    same(r["t2"], "The app has no time to offer for that paper.")
+    raises(Refused, lambda: T.paste(talk, env, "a list"), "Reading a list comes next.")
+    raises(Refused, lambda: T.confirm_list(talk, env, "l1", True), "Reading a list comes next.")
+
+@t
+def a_talk_on_an_exam_tells_the_ai_which_and_a_new_publish_gives_fresh_codes():
+    no_schedules()
+    env, first = a_talk()
+    answer(first, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    raises(Refused, lambda: T.open("p1", env, "nosuchexam"), "That exam is not there any more.")
+    env.load = lambda id: dict(XS.load(id), kind="event")              # an event is no exam of the chat
+    raises(Refused, lambda: T.open("p1", env, first.exam), "That exam is not there any more.")
+    del env.load
+    env.staff = people(*STAFF)
+    talk = T.open("p1", env, first.exam)
+    same((talk.exam, talk.last_rev), (first.exam, env.load(first.exam)["rev"]))
+    call = answer(talk, env, "What is left?", reply(say("ok")))
+    u = user_texts(call.sent[0])
+    same(u[-1], "What is left?")
+    assert u[0].startswith("[The app: This talk is on the exam Mid-Year 2027. Its status: Draft.]"), u[0]
+    for m in facts.missing(env.pub(), env.cal(), env.settings()):
+        assert f"[The app: {m['text']}]" in u[0], m
+    call = answer(talk, env, "And?", reply(say("ok")))
+    same(user_texts(call.sent[0])[-2:], ["What is left?", "And?"])
+    old = talk.names.code(TAN)
+    talk.offered["p"] = [dict(date="2026-10-06", start="08:00")]
+    env.staff = people("Mr Ben Ang", *STAFF)                          # a new teacher before her: her code moves
+    env._pub = dict(env._pub, meta=dict(env._pub["meta"], published_at="2026-11-23T10:00"))
+    new = names.Names(env.pub(), env.staff, env.pub()["model"]["students"]).code(TAN)
+    call = answer(talk, env, f"Ask {TAN}", reply(say(f"{new} it is.")))
+    same(talk.names.code(TAN), new)
+    assert new != old, (new, old)
+    same(texts(talk, "sys")[-1:], ["The timetable was published again: codes and checks are fresh."])
+    same(kinds(talk)[-3:], ["sys", "me", "ai"]); same(talk.offered, {})
+    u = user_texts(call.sent[0])
+    same(u[-1], f"Ask {new}"); assert "codes of people start again" in u[-2], u[-2]
+    same(texts(talk, "ai")[-1], f"{TAN} it is.")
+    # an exam that went away: the view gives no exam and says so once
+    with XS.editing(): os.remove(XS._path(talk.exam))
+    v = T.view(talk, env)
+    same((v["exam"], v["lines"][-1]["text"]), (None, "That exam is not there any more."))
+    n = len(talk.lines); T.view(talk, env); same(len(talk.lines), n)
+
+@t
+def the_practice_helper_walks_through_a_real_talk():
+    no_schedules()
+    env, talk = a_talk()
+    def go(text, pick=None):
+        T.say(talk, env, text, pick=pick, call=AI.mock_call); ended(talk)
+        sendable(talk.messages)
+        return talk.lines[-1]
+    same(go("plan an exam")["text"], AI.ASK_WHAT)
+    last = go("Mid-Year 2027, Sec 3 and Sec 4, 2026-10-05 to 2026-10-09")
+    same((last["text"], last["quick"]), ("Started the exam Mid-Year 2027 " + AI.ASK_DAYS, ["Whole days", "Part of a day"]))
+    same(texts(talk, "did"), ["Started the exam Mid-Year 2027"])
+    same(go("", pick="Whole days")["text"], "Set 5 days " + AI.NEXT)
+    go("add Sec 3, English, Paper 1, 90"); go("add Sec 3, Mathematics, Paper 1, 60")
+    same(len(env.load(talk.exam)["papers"]), 2)
+    last = go("suggest Sec 3 English Paper 1")
+    if last["quick"]:
+        go("", pick=last["quick"][0])
+        assert texts(talk, "did")[-1].startswith("Suggested "), texts(talk, "did")
+        same(env.load(talk.exam)["suggested"], [env.load(talk.exam)["papers"][0]["id"]])
+    else:
+        same(last["text"], "The app offers no time for Sec 3 English Paper 1 just now.")
+    go("put Sec 3 Mathematics Paper 1 on 2026-10-07 at 08:00")
+    p = [x for x in env.load(talk.exam)["papers"] if x["subject"] == "Mathematics"][0]
+    same((p["date"], p["start"]), ("2026-10-07", "08:00"))
+    assert go("check")["text"].startswith("The app's checks say:")
+    same(go("keep as last time")["text"], "There is no earlier exam of this kind.")
+    assert all("clear" not in l["text"].lower() for l in talk.lines if l["kind"] == "ai")
+
+@t
+def a_long_talk_and_a_busy_hour_are_refused():
+    clock = [time.time() + 10 ** 6]
+    T._now = lambda: clock[0]
+    try:
+        env, a = a_talk("p-long")
+        for i in range(60):
+            answer(a, env, f"message {i}", reply(say("ok")))
+        raises(Refused, lambda: T.say(a, env, "one more", call=Script()), "This talk is long. Start a new one; your exam carries on.")
+        same(T.view(a, env)["can"], dict(say=False, list=False, stop=False, why=T.LONG))
+        _, b = a_talk("p-other")
+        raises(Refused, lambda: T.say(b, env, "hello", call=Script()), "The AI is busy. Try again in a few minutes.")
+        same((b.lines, b.working), ([], False))
+        clock[0] += 3599; raises(Refused, lambda: T.say(b, env, "hello", call=Script()), T.BUSY)
+        clock[0] += 1
+        answer(b, env, "hello", reply(say("hi"))); same(texts(b, "ai"), ["hi"])
+    finally:
+        T._now = time.time
+        T._starts.clear()
 
 
 print(f"{COUNT} plan tests passed")
