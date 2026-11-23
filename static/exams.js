@@ -14,7 +14,7 @@
   const S = {
     id: null, list: null, sched: null, view: null, levels: [], classes: [],
     base: "/api/exams", tabs: null, evl: null, me0: null, ne: null, ev: { dept: "", pick: "" },
-    tab: "when", timer: null, chain: Promise.resolve(), dirty: false, rev: 0, saving: false, msg: "", bad: false,
+    tab: "when", timer: null, chain: Promise.resolve(), dirty: false, blocked: false, rev: 0, saving: false, msg: "", bad: false,
     nf: null, mk: null, duties: null, accCls: "", note: "",
     busy: false, sit: "", room: "", mvCls: "", mvStu: "", duty: null, who: null, whoTok: 0, open: {},
     me: { can_approve: false }, label: "", rv: null, rvErr: "", rvTok: 0, abMsg: "", sbNote: "", aw: { duty: null, away: "", who: "", data: null, err: "", say: "", tok: 0 },
@@ -152,9 +152,17 @@
     const calOk = (!L || L.calendar_ok) && E.calendar_ok;
     const cal = calOk ? "" : `<p class="notice">${esc(NO_CALENDAR)} <a href="/relief/settings">Relief settings</a></p>`;
     $("#main").innerHTML = `<div class="head"><h1>${use ? "Exams, tests and events" : "Exams and events"}</h1>
-      <div class="row">${use ? `<button type="button" class="primary" data-act="newOpen" ${L.calendar_ok && !nf.open ? "" : "disabled"}>+ New exam or test</button>` : ""}<button type="button" ${use ? "" : `class="primary"`} data-act="evOpen" ${E.calendar_ok && !ne.open ? "" : "disabled"}>+ New event</button></div></div>
+      <div class="row">${use ? planButton(L) : ""}${use ? `<button type="button" class="primary" data-act="newOpen" ${L.calendar_ok && !nf.open ? "" : "disabled"}>+ New exam or test</button>` : ""}<button type="button" ${use ? "" : `class="primary"`} data-act="evOpen" ${E.calendar_ok && !ne.open ? "" : "disabled"}>+ New event</button></div></div>
       ${cal}${nf.open ? newForm() : ""}${ne.open ? newEvForm() : ""}${dutiesCard()}
       ${rows || `<div class="card"><p class="muted">${use ? "No exams, tests or events yet." : "You are not in charge of an event yet."}</p></div>`}${use ? "" : `<p><a href="${esc(S.home || "/home")}">Back to Home</a></p>`}`;
+  }
+
+  /* Plan with AI: a button-like link on the list when the list's reply says the server has it (plan), and a line in an exam's
+     head while the chat may change that exam (a draft, sent back included, or withdrawn, and not Ended); never on an event */
+  function planButton(L) { return L && L.plan === true ? `<a class="filebtn" href="/plan">Plan with AI</a>` : ""; }
+  function planLine(plan, s, ev, label) {
+    if (plan !== true || ev || !s || label === "Ended" || !["draft", "withdrawn"].includes(s.status || "draft")) return "";
+    return `<div class="line"><a href="/plan?exam=${encodeURIComponent(s.id)}">Open in Plan with AI</a></div>`;
   }
 
   function blankEv() { return { open: false, name: "", levels: [], classes: [], start: "", end: "", in_charge: "" }; }
@@ -266,9 +274,62 @@
   const tab = () => S.tabs.find(t => t.key === S.tab) || S.tabs[0];
 
   function saveInner() {
-    return `${S.dirty ? `<span class="dirty">Changes not saved.</span>` : ""}${S.msg ? `<span class="msg ${S.bad ? "bad" : "ok"}" role="status">${esc(S.msg)}</span>` : ""}`;
+    const msg = S.blocked ? S.blockMsg : S.msg, bad = S.blocked || S.bad;   /* once blocked, nothing else set later hides why */
+    return `${S.dirty ? `<span class="dirty">Changes not saved.</span>` : ""}${msg ? `<span class="msg ${bad ? "bad" : "ok"}" role="status">${esc(msg)}</span>` : ""}${S.blocked ? ` <button type="button" data-act="reload">Reload</button>` : ""}`;
   }
   function paintSave() { const el = $("#saveline"); if (el) el.innerHTML = saveInner(); }
+
+  /* what always comes from the server whole: its own parts, which a save from the page never changes */
+  const SERVER_KEYS = ["rev", "saved_at", "saved_by", "status", "approved", "approved_at", "approved_by", "sent_at", "sent_by", "sent_fp", "note", "log", "handled", "made", "pins", "use_anyway", "created_at", "created_by", "id", "kind"];
+  const canon = v => JSON.stringify(v, (k, x) => x && typeof x === "object" && !Array.isArray(x) ? Object.keys(x).sort().reduce((o, y) => { o[y] = x[y]; return o; }, {}) : x);
+  const copyOf = v => JSON.parse(JSON.stringify(v));
+  const changedSentence = () => `This ${isEv() ? "event" : "exam"} was changed by someone else since you opened it. Reload to carry on.`;
+
+  /* the one place that decides what the page keeps when the server sends back the whole schedule, and so the only place a revision
+    is taken with contents. It is read against the last whole copy the server is known to hold (S.known). Nothing typed since: theirs,
+    whole. Something typed: key by key, what only I changed stays, what only they changed comes in, and the same key changed by both
+    to different values blocks the page. The server's own parts and the revision are theirs. sent: what the page's own save sent,
+    given only for that save's answer, and then read against that. The save was accepted at the page's revision, so nobody else is
+    in its answer, only what the server made of what was sent: it never blocks, and what was typed meanwhile stays and is saved
+    next. An answer with no schedule in it (cut off, or not the server's) is not taken at all. -> whether it was taken */
+  function takeSched(theirs, sent) {
+    if (!theirs || !theirs.id) return false;
+    const mine = S.sched, known = sent || S.known || (mine && copyOf(mine)) || {};
+    if (!mine) { S.sched = theirs; S.known = copyOf(theirs); return true; }
+    const keys = Array.from(new Set(Object.keys(mine).concat(Object.keys(theirs), Object.keys(known)))).filter(k => !SERVER_KEYS.includes(k));
+    if (!keys.some(k => canon(mine[k]) !== canon(known[k]))) { S.sched = theirs; S.known = copyOf(theirs); return true; }
+    const out = {};
+    SERVER_KEYS.forEach(k => { if (k in theirs) out[k] = theirs[k]; });
+    for (const k of keys) {
+      const mineSays = canon(mine[k]) !== canon(known[k]), theirsSay = canon(theirs[k]) !== canon(known[k]);
+      if (!sent && mineSays && theirsSay && canon(mine[k]) !== canon(theirs[k])) { blockPage(changedSentence()); return false; }
+      const v = mineSays ? mine[k] : theirs[k];
+      if (v !== undefined) out[k] = v;
+    }
+    S.sched = out; S.known = copyOf(theirs);
+    return true;
+  }
+
+  /* from here nothing is saved or done: someone else has saved this one since it was opened */
+  function blockPage(sentence) { S.blocked = true; S.blockMsg = sentence; S.bad = true; clearTimeout(S.timer); S.timer = null; paintSave(); }
+
+  /* the answer to one of the page's own actions, each of which saves exactly once: it must be the next revision, else someone
+    saved in between and the page's copy is old. -> whether the page may go on */
+  function takeOwn(j) {
+    if (!S.sched) return true;
+    if (j && Number.isInteger(j.rev) && j.rev === (S.sched.rev || 0) + 1) { S.sched.rev = j.rev; return true; }
+    blockPage(changedSentence());
+    return false;
+  }
+
+  /* an action at the server goes in the queue of saves, so an edit made meanwhile is saved after it, with the new revision. A
+    page that has been blocked since it was asked does nothing: undo puts back what the click set */
+  function onChain(run, undo) {
+    const go = () => { if (S.blocked) { if (undo) undo(); return false; } return run(); };
+    const job = S.chain.then(go, go);
+    S.chain = job.then(() => {}, () => {});
+    return job;
+  }
 
   /* an event's teacher in charge, whom the timetable committee may change: Change beside the name opens a line to pick
      another. Only the heading is drawn again (paintIc), so nothing typed or opened on the tab below is touched */
@@ -294,7 +355,7 @@
   function render() {
     const s = S.sched;
     $("#main").innerHTML = `<div class="head"><div><h1>${esc(s.name)} <span class="chip ${chipClass({ label: S.label })}" id="statchip">${esc(S.label)}</span></h1>
-      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? `<span id="icname">${icName()}</span>` : ""}</div>${isEv() ? `<div id="icline">${icLine()}</div>` : ""}</div>
+      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? `<span id="icname">${icName()}</span>` : ""}</div>${isEv() ? `<div id="icline">${icLine()}</div>` : ""}${planLine(S.plan, s, isEv(), S.label)}</div>
       <div class="savebar" id="saveline">${saveInner()}</div></div>
       ${onSite() ? `<p class="notice">On the main site. Changes you make here wait for the timetable committee: send them from the Approval tab.</p>` : ""}
       <div class="xtabs" role="tablist">${S.tabs.map(t => `<button type="button" role="tab" class="${t.key === S.tab ? "on" : ""}" aria-selected="${t.key === S.tab}" data-act="tab" data-a="${t.key}">${esc(t.name)}</button>`).join("")}</div>
@@ -318,6 +379,7 @@
 
   /* change the schedule, then save it after a pause */
   function edit(fn, redraw) {
+    if (S.blocked) return;
     fn();
     S.dirty = true; S.rev++; S.msg = ""; S.bad = false; S.note = ""; paintSave();
     clearTimeout(S.timer); S.timer = setTimeout(flush, 800);
@@ -325,6 +387,7 @@
   }
 
   function flush() {
+    if (S.blocked) return S.chain;
     clearTimeout(S.timer); S.timer = null;
     S.chain = S.chain.then(saveNow, saveNow);
     return S.chain;
@@ -332,13 +395,17 @@
 
   async function saveNow() {
     if (!S.dirty) return true;
+    if (S.blocked) return false;
     const rev = S.rev;
     S.saving = true;
-    const r = await api("PUT", `${S.base}/${S.id}`, S.sched);
+    const sent = copyOf(S.sched);   /* what this save sends is what its own reply is read against */
+    const r = await api("PUT", `${S.base}/${S.id}`, sent);
     S.saving = false;
     if (r.status === 401 || r.status === 403) return false;
+    if (r.status === 409 && /was changed by/.test(r.j.error || "")) { blockPage(r.j.error); return false; }
     if (!r.ok) { S.bad = true; S.msg = r.j.error || "Nothing was saved. Try again."; paintSave(); return false; }
-    S.sched.saved_at = r.j.saved_at; S.sched.saved_by = r.j.saved_by;
+    /* what the server cleaned reaches the page, what was typed meanwhile stays; a 200 with no schedule in it is a failed save */
+    if (!takeSched(r.j, sent)) { S.bad = true; S.msg = "Nothing was saved. Try again."; paintSave(); return false; }
     if (S.rev === rev) { S.dirty = false; S.bad = false; S.msg = "Saved"; }
     paintSave();
     await refreshView();
@@ -354,17 +421,20 @@
 
   /* an action the server does to the schedule (fill, upload): our own edits go first, the answer replaces the schedule */
   async function serverAction(method, url, body, form, done) {
+    if (S.blocked) return;
     await flush();
     if (S.dirty) return;   /* the save was refused: its sentence is on the screen */
     S.msg = ""; S.bad = false;
-    const r = await api(method, url, body, form);
-    if (r.status === 401 || r.status === 403) return;
-    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); return; }
-    S.sched = r.j;
-    if (done) done(r.j);
-    paintSave();
-    await refreshView();
-    render();
+    return onChain(async () => {
+      const r = await api(method, url, body, form);
+      if (r.status === 401 || r.status === 403) return;
+      if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); return; }
+      if (!takeSched(r.j)) { if (!S.blocked) { S.bad = true; S.msg = "That did not work. Try again."; paintSave(); } return; }
+      if (done) done(r.j);
+      paintSave();
+      await refreshView();
+      render();
+    });
   }
 
   /* ---------------------------------------------------------------- tab 1: what and when */
@@ -470,7 +540,7 @@
       <td class="who">${who}</td>
       <td><input type="text" ${at("ptog", i)} value="${esc(p.together || "")}" maxlength="80" aria-label="Sits with, paper ${i + 1}"></td>
       <td><select ${at("pdate", i)} aria-label="Date of paper ${i + 1}">${opt("", p.date || "", "date")}${days.map(d => opt(d, p.date, fmtDate(d))).join("")}</select></td>
-      <td><input type="time" ${at("pstart", i)} value="${esc(p.start || "")}" aria-label="Start of paper ${i + 1}"></td>
+      <td><input type="time" ${at("pstart", i)} value="${esc(p.start || "")}" aria-label="Start of paper ${i + 1}">${(S.sched.suggested || []).includes(p.id) ? ` <span class="chip">suggested</span> <button type="button" class="small" data-act="agreed" data-a="${esc(p.id)}" aria-label="Agree the time of paper ${i + 1}">Agreed</button>` : ""}</td>
       <td class="x"><button type="button" class="small danger" data-act="delPaper" data-a="${i}" title="Take this paper off" aria-label="Take paper ${i + 1} off">✕</button></td></tr>`;
   }
 
@@ -515,6 +585,19 @@
     ${checksPanel()}`;
   }
 
+  /* a paper's time is suggested until a person changes the date or start or presses Agreed: the page takes the id off in the
+    same edit as the change, as the server does, so a save's reply cannot bring it back */
+  function dropSuggested(ids) {
+    if (!S.sched.suggested) return;
+    S.sched.suggested = S.sched.suggested.filter(x => !ids.includes(x));
+  }
+  function agreeSuggested(id) { edit(() => { dropSuggested([id]); }, true); }
+  function suggestedLine() {
+    const have = ((S.sched && S.sched.papers) || []).map(p => p.id);
+    const n = ((S.sched && S.sched.suggested) || []).filter(id => have.includes(id)).length;
+    return n ? `${n} ${n === 1 ? "paper has" : "papers have"} a suggested time.` : "";
+  }
+
   function onPaperField(el, k, a) {
     const p = S.sched.papers[Number(a)], v = el.value;
     if (!p) return;
@@ -524,8 +607,8 @@
     if (k === "pmin") { const n = Number(v); if (!Number.isInteger(n) || n < 1) return; return edit(() => { p.minutes = n; }); }
     if (k === "pwho") return edit(() => { p.who = v; }, true);
     if (k === "ptog") return edit(() => { p.together = v; });
-    if (k === "pdate") return edit(() => { p.date = v || null; }, true);
-    if (k === "pstart") return edit(() => { p.start = v || null; });
+    if (k === "pdate") return edit(() => { if ((p.date || null) !== (v || null)) dropSuggested([p.id]); p.date = v || null; }, true);
+    if (k === "pstart") return edit(() => { if ((p.start || null) !== (v || null)) dropSuggested([p.id]); p.start = v || null; });
   }
 
   function onMakeup(el) {
@@ -622,16 +705,20 @@
 
   /* what the page does at the server: our own edits go first, then the answer (the whole view) replaces S.view */
   async function viewAction(path, body, ok) {
-    if (S.busy) return false;
+    if (S.busy || S.blocked) return false;
     await flush();
     if (S.dirty) return false;   /* the save was refused: its sentence is on the screen */
     S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
-    const r = await api("POST", `/api/exams/${S.id}/${path}`, body);
-    S.busy = false;
-    if (r.status === 401 || r.status === 403) return false;
-    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return false; }
-    S.view = r.j; S.msg = typeof ok === "function" ? ok(r.j) : (ok || ""); paintSave(); paint();
-    return true;
+    return onChain(async () => {
+      const r = await api("POST", `/api/exams/${S.id}/${path}`, body);
+      S.busy = false;
+      if (r.status === 401 || r.status === 403) return false;
+      if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return false; }
+      S.view = r.j;
+      if (!takeOwn(r.j)) { paint(); return false; }
+      S.msg = typeof ok === "function" ? ok(r.j) : (ok || ""); paintSave(); paint();
+      return true;
+    }, () => { S.busy = false; paintSave(); paint(); return false; });
   }
 
   async function loadWho(keep) {
@@ -1013,16 +1100,23 @@
     await loadEvAway(false); S.aw.say = say; if (S.tab === "egoes") paint();
   }
 
-  /* only the name changes, at the server and here: what is typed meanwhile is left alone, and its save keeps the stored name */
+  /* only the name changes, at the server and here: what is typed meanwhile is left alone, and its save keeps the stored name.
+    It saves once, so it waits its turn on the chain (a save on its way goes first, one typed meanwhile goes after it with the new
+    revision) and its answer must be exactly the next revision (takeOwn); a page blocked meanwhile sends nothing */
   async function icChange() {
     const name = S.ic.who;
-    if (!name || S.busy) return;
+    if (!name || S.busy || S.blocked) return;
     S.busy = true; S.ic.msg = ""; paintIc();
+    return onChain(() => icSend(name), () => { S.busy = false; paintIc(); });
+  }
+  async function icSend(name) {
     const r = await api("POST", `${S.base}/${S.id}/in-charge`, { name });
     S.busy = false;
     if (r.status === 401 || r.status === 403) return;
+    if (r.ok && !takeOwn(r.j)) { S.ic = { open: false, who: "", msg: "" }; paintIc(); paint(); return; }   /* someone saved in between: the save line says Reload */
     if (r.ok) {
       S.sched.in_charge = name; if (S.sched.approved) S.sched.approved.in_charge = name;
+      if (S.known) { S.known.in_charge = name; if (S.known.approved) S.known.approved.in_charge = name; }   /* the server's copy holds it now */
       S.ic = { open: false, who: "", msg: `${name} is in charge now.` };
       takeReview(r.j);
       const chip = $("#statchip"); if (chip) { chip.textContent = S.label; chip.className = "chip " + chipClass({ label: S.label }); }
@@ -1098,20 +1192,26 @@
 
   /* send, approve, send back, withdraw: the schedule is read again afterwards, because the approved copy moves with them */
   async function approvalAction(path, body, ok) {
-    if (S.busy) return false;
+    if (S.busy || S.blocked) return false;
     await flush();
     if (S.dirty) return false;
     S.busy = true; S.msg = ""; S.bad = false; paintSave(); paint();
-    const r = await api("POST", `${S.base}/${S.id}/${path}`, body);
-    S.busy = false;
-    if (r.status === 401 || r.status === 403) return false;
-    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; S.abMsg = S.msg; paintSave(); paint(); return false; }
-    S.abMsg = "";
-    const g = await api("GET", `${S.base}/${S.id}`);
-    if (g.ok) S.sched = g.j;
-    takeReview(r.j); S.sbNote = ""; S.msg = ok || ""; paintSave();
-    render(); refreshView();
-    return true;
+    const keys = isEv() && path === "away";   /* an event's away changes who is going: a page-owned key */
+    return onChain(async () => {
+      const r = await api("POST", `${S.base}/${S.id}/${path}`, body);
+      S.busy = false;
+      if (r.status === 401 || r.status === 403) return false;
+      if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; S.abMsg = S.msg; paintSave(); paint(); return false; }
+      S.abMsg = "";
+      if (!keys && !takeOwn(r.j)) { paint(); return false; }   /* the answer's revision is the page's only when it is the next one */
+      const g = await api("GET", `${S.base}/${S.id}`);
+      const read = g.ok && takeSched(g.j);
+      if (!read && S.blocked) { paint(); return false; }
+      if (!read && keys) { blockPage(changedSentence()); paint(); return false; }   /* the page's own keys changed and cannot be read: its copy is old */
+      takeReview(r.j); S.sbNote = ""; S.msg = ok || ""; paintSave();
+      render(); refreshView();
+      return true;
+    }, () => { S.busy = false; paintSave(); paint(); });
   }
 
   /* the same clash can be in both Invigilators free ("is on {schedule} then") and Other schedules ("takes {n} of these
@@ -1173,6 +1273,7 @@
     const out = [`<div class="card"><h2>Approval</h2><p><span class="chip ${chipClass({ label: rv.label })}">${esc(rv.label)}</span></p>
       ${S.abMsg ? `<p class="msg bad" role="status">${esc(S.abMsg)}</p>` : ""}${rv.note ? `<p>Sent back by the timetable committee: “${esc(rv.note)}”</p>` : ""}</div>`];
     if ((rv.away || []).length) out.push(awayNotes(rv.away));
+    if (suggestedLine()) out.push(`<div class="card"><p>${esc(suggestedLine())}</p></div>`);
     if (st === "draft" || st === "withdrawn") out.push(sendBox("Send to the timetable committee", "", "Send to the timetable committee", "send", why));
     if ((st === "waiting" || st === "changes") && rv.changed) out.push(sendBox("Send again", "Changed since you sent it: send it again.", "Send again", "send", why));
     if (st === "approved" && unsent.length) out.push(`<div class="card"><h2>Changes not sent yet</h2>${unsent.map(c => `<p>${esc(c.text)}</p>`).join("")}<div class="row"><button type="button" class="primary" data-act="approval" data-a="send" ${S.busy || why ? "disabled" : ""}>Send the changes</button>${why ? `<span class="muted small">${esc(why)}</span>` : ""}</div></div>`);
@@ -1229,15 +1330,21 @@
   }
   /* "Handled ourselves": the answer is the schedule's view again (the Lessons tab reads it); the Approval counts are read again */
   async function onHandled(el) {
-    if (S.busy) { el.checked = !el.checked; return; }
+    if (S.busy || S.blocked) { el.checked = !el.checked; return; }
     const tag = el.dataset.t + "|" + el.dataset.k;
     S.busy = true; S.msg = ""; S.bad = false; S.hpend = { [tag]: !!el.checked }; paintSave();
-    const r = await api("POST", `${S.base}/${S.id}/handled`, { teacher: el.dataset.t, key: el.dataset.k, handled: !!el.checked });
-    S.busy = false; S.hpend = {};
-    if (r.status === 401 || r.status === 403) { paint(); return; }
-    if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return; }
-    S.view = r.j; S.rv = null; paintSave(); paint();
+    return onChain(async () => {
+      const r = await api("POST", `${S.base}/${S.id}/handled`, { teacher: el.dataset.t, key: el.dataset.k, handled: !!el.checked });
+      S.busy = false; S.hpend = {};
+      if (r.status === 401 || r.status === 403) { paint(); return; }
+      if (!r.ok) { S.bad = true; S.msg = r.j.error || "That did not work. Try again."; paintSave(); paint(); return; }
+      S.view = r.j; S.rv = null;
+      takeOwn(r.j); paintSave(); paint();
+    }, () => { S.busy = false; S.hpend = {}; paintSave(); paint(); });
   }
+
+  /* leaving with unsaved changes asks first; a blocked page cannot save them, so it does not ask (Reload is its way out) */
+  function onBeforeUnload(e) { if (S.dirty && !S.blocked) { e.preventDefault(); e.returnValue = ""; } }
 
   function onChange(e) {
     const el = e.target, ty = el.type;
@@ -1275,6 +1382,7 @@
   function onClick(e) {
     const b = e.target.closest("button[data-act]"); if (!b || b.matches(":disabled")) return;
     const act = b.dataset.act, a = b.dataset.a, s = S.sched;
+    if (act === "reload") { location.reload(); return; }
     if (!S.id) {
       if (act === "newOpen") { S.nf.open = true; drawList(); const n = $('[data-nf="name"]'); if (n) n.focus(); }
       else if (act === "newCancel") { S.nf = blankForm(); drawList(); }
@@ -1321,7 +1429,8 @@
     if (act === "addMakeup") { S.mk = { level: paperLevels()[0] || "", subject: "", paper: "Make-up", minutes: "60", cls: "", picked: [] }; paint(); return; }
     if (act === "mkCancel") { S.mk = null; paint(); return; }
     if (act === "mkAdd") { mkAdd(); return; }
-    if (act === "delPaper") { edit(() => { s.papers.splice(Number(a), 1); }, true); return; }
+    if (act === "delPaper") { edit(() => { const gone = s.papers.splice(Number(a), 1); dropSuggested(gone.map(x => x.id)); }, true); return; }
+    if (act === "agreed") { agreeSuggested(a); return; }
     if (act === "accAdd") { edit(() => { s.access.push({ student: a, extra: 0, own_room: false, reader: false, scribe: false, note: "" }); }, true); return; }
     if (act === "make") { viewAction("make", {}, "Made."); return; }
     if (act === "pickRoom") { S.room = a; paint(); return; }
@@ -1354,8 +1463,8 @@
     const [r, v, l, me] = await Promise.all([api("GET", `${S.base}/${id}`), api("GET", `${S.base}/${id}/view`), api("GET", ev ? "/api/events" : "/api/exams"), api("GET", "/api/exams/me")]);
     for (const x of [r, v, l, me]) if (x.status === 401 || x.status === 403) { dropNote(); return; }
     for (const x of [r, v, l, me]) if (!x.ok) { dropNote(); fail(x.j.error || "Something went wrong."); return; }
-    S.me = me.j; links(S.me.can_use); S.label = ((l.j.schedules || []).find(x => x.id === id) || {}).label || "Draft";
-    S.sched = r.j; S.view = v.j; S.levels = l.j.levels || []; S.classes = l.j.classes || [];
+    S.me = me.j; links(S.me.can_use); S.label = ((l.j.schedules || []).find(x => x.id === id) || {}).label || "Draft"; S.plan = l.j.plan === true;
+    S.sched = r.j; S.known = copyOf(r.j); S.view = v.j; S.levels = l.j.levels || []; S.classes = l.j.classes || [];
     document.title = r.j.name + (ev ? " · Events" : " · Exams");
     render();
     try {
@@ -1364,11 +1473,25 @@
     } catch (e) { /* no storage */ }
   }
 
+  /* the tab a link names in its hash (/exams/<id>#papers, from Plan with AI's checklist): the page's own tab keys only; an
+     unknown hash is ignored. Opened as a click on that tab would, once the schedule is drawn */
+  function tabFromHash(hash, tabs) {
+    const k = String(hash || "").replace(/^#/, "");
+    return k && (tabs || []).some(x => x.key === k) ? k : null;
+  }
+  function openTab() {
+    const k = S.sched ? tabFromHash(location.hash, S.tabs) : null;
+    if (!k || k === S.tab) return;
+    S.tab = k; S.note = ""; render();
+    if (k === "approval") { S.abMsg = ""; loadReview(false); }
+    if (k === "egoes") loadEvAway(false);
+  }
+
   document.addEventListener("click", onClick);
   document.addEventListener("input", onInput);
   document.addEventListener("change", onChange);
   document.addEventListener("toggle", e => { const d = e.target; if (d && d.dataset && d.dataset.d) S.open[d.dataset.d] = d.open; }, true);
-  window.addEventListener("beforeunload", e => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
+  window.addEventListener("beforeunload", onBeforeUnload);
   const m = /^\/exams\/([A-Za-z0-9]+)\/?$/.exec(location.pathname), me2 = /^\/events\/([A-Za-z0-9]+)\/?$/.exec(location.pathname);
-  if (me2) startOne(me2[1], true); else if (m && m[1] !== "settings") startOne(m[1], false); else startList();
+  if (me2) startOne(me2[1], true).then(openTab); else if (m && m[1] !== "settings") startOne(m[1], false).then(openTab); else startList();
 })();

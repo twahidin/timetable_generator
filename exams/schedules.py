@@ -223,6 +223,8 @@ def _check(s, pub):
             try: datetime.date.fromisoformat(p["date"])
             except (TypeError, ValueError): raise ValueError(WRONG)
         p["start"] = _time_or_none(p.get("start"), f"Give {_papers.label(p)} a start time such as 08:00.")
+    if "suggested" in s and not (isinstance(s["suggested"], list) and all(isinstance(i, str) for i in s["suggested"])):
+        raise ValueError(WRONG)
     students = {x["id"] for x in model.get("students") or []}
     for x in s["access"]:
         if not isinstance(x, dict): raise ValueError(WRONG)
@@ -232,14 +234,31 @@ def _check(s, pub):
         if x.get("student") not in students: raise ValueError(f"{x.get('student')} is not on the published timetable.")
 
 
+def clean_suggested(sched) -> None:
+    """edit in place: suggested is the distinct ids of papers that exist, in order. A missing or non-list value becomes []"""
+    have = {p.get("id") for p in sched.get("papers") or [] if isinstance(p, dict)}
+    out = []
+    for i in sched.get("suggested") if isinstance(sched.get("suggested"), list) else []:
+        if i in have and i not in out: out.append(i)
+    sched["suggested"] = out
+
+
+def rev_of(s) -> int:
+    """the revision a stored schedule is at: 0 when it has none (saved before revisions) or is not there"""
+    r = (s or {}).get("rev")
+    return r if isinstance(r, int) and not isinstance(r, bool) else 0
+
+
 def save(sched, pub, cal, by, check=True) -> dict:
     """check the schedule against the published timetable and write it at once. check=False: an approval action (approve,
     send back, withdraw, someone is away), which changes none of what the timetable is checked for, so a schedule
     approved before a new publish can still be withdrawn"""
     if check:
         _check(sched, pub)
+        if sched.get("kind") != EVENT: clean_suggested(sched)
     out = dict(sched, saved_at=_now(), saved_by=by)
     with _LOCK:
+        out["rev"] = rev_of(load(out["id"])) + 1   # every save raises it: a page started from an older copy can be told
         os.makedirs(DIR, exist_ok=True)
         store.write_json(_path(out["id"]), out)
     return out
