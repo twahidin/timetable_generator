@@ -1132,10 +1132,10 @@ def the_checklist_follows_the_draft():
     s["days"] = {"2026-10-05": dict(levels=["Sec 3"], whole=True)}
     s["papers"] = [a_paper("Sec 3", "English", id="a", date="2026-10-05", start="08:00"), a_paper("Sec 3", "Maths", id="b", date="2026-10-05", start="08:30")]
     c = {l["key"]: l for l in facts.checklist(s, pub, CAL, x, None)}
-    same((c["papers"]["state"], c["papers"]["text"]), ("check", "2, 1 to check")); same(c["days"]["state"], "done")
+    same((c["papers"]["state"], c["papers"]["text"]), ("check", "2 papers, 1 to check")); same(c["days"]["state"], "done")
     s["papers"][1]["start"] = "10:00"
     c = {l["key"]: l for l in facts.checklist(s, pub, CAL, x, None)}
-    same((c["papers"]["state"], c["papers"]["text"], c["suggested"]["state"]), ("done", "2", "done"))
+    same((c["papers"]["state"], c["papers"]["text"], c["suggested"]["state"]), ("done", "2 papers", "done"))
     s["papers"][1]["start"] = None
     same({l["key"]: l["state"] for l in facts.checklist(s, pub, CAL, x, None)}["suggested"], "todo")
     s["suggested"] = ["b"]
@@ -2346,8 +2346,8 @@ def two_tool_rounds_then_text_is_done_and_the_history_is_only_appended_to():
     same(len(call.sent), 3)
     for i, sent in enumerate(call.sent):                    # each call saw the history so far, the later ones only appended to it
         same(sent["messages"], copy.deepcopy(msgs[:1 + 2 * i]))
-    same(msgs[2]["content"], [dict(type="tool_result", tool_use_id="t1", content=json.dumps(dict(read="read_exam"), indent=1)),
-                              dict(type="tool_result", tool_use_id="t2", content=json.dumps(dict(read="read_school"), indent=1))])
+    same(msgs[2]["content"], [dict(type="tool_result", tool_use_id="t1", content='{"read":"read_exam"}'),
+                              dict(type="tool_result", tool_use_id="t2", content='{"read":"read_school"}')])
     same(msgs[3]["content"][0], dict(type="thinking", thinking="", signature="s"))
     sendable(msgs)
 
@@ -2446,12 +2446,12 @@ def an_odd_tool_call_is_answered_with_a_sentence_and_the_loop_goes_on():
     same([n for n, _ in tools], ["read_checks", "read_school"])
     assert h.lines and all(SECRET not in l for l in h.lines) and any("ValueError" in l for l in h.lines)
     logging.getLogger("plan").removeHandler(h)
-    big = "\n".join("line %05d %s" % (i, "x" * 40) for i in range(2000))
+    big = dict(papers=[dict(id=f"p{i:05d}", label="x" * 40) for i in range(3000)])           # over 150,000 characters as JSON
     got, msgs, _, _ = a_loop(Script(reply(use("t1", "read_exam")), reply(say("ok"))), on_tool=lambda n, a: big)
-    cut = msgs[2]["content"][0]["content"]
-    assert len(cut) <= 30000 and cut.endswith("…") and big.startswith(cut[:-1]) and big[len(cut) - 1] == "\n", len(cut)
-    got, msgs, _, _ = a_loop(Script(reply(use("t1", "read_exam")), reply(say("ok"))), on_tool=lambda n, a: "y" * 40000)
-    same(len(msgs[2]["content"][0]["content"]), 30000)
+    same(msgs[2]["content"][0]["content"], "That is too much to show at once.")
+    for n in (150000, 150001):
+        got, msgs, _, _ = a_loop(Script(reply(use("t1", "read_exam")), reply(say("ok"))), on_tool=lambda n_, a: "y" * n)
+        same(msgs[2]["content"][0]["content"], "y" * n if n == 150000 else AI.TOO_MUCH)
     got, msgs, texts, _ = a_loop(Script(reply(say("Hi"), use("t1", "read_exam")), reply(say("ok"))), on_tool=lambda n, a: {1, 2})
     same(msgs[2]["content"][0]["content"], "The app could not do that.")
     def bad_text(t_): raise KeyError(SECRET)
@@ -4171,5 +4171,68 @@ def a_pasted_list_keeps_an_agreed_time_and_sits_with_and_says_what_changed():
     T.confirm_list(talk, env, lid, True)
     ch = [x for x in texts(talk, "sys") if x.startswith("Changed by the list")][-1]
     assert "Sec 3 Mathematics G2 Paper 2: was 10:00 on Wed 7 Oct, 45 min, now 10:00 on Wed 7 Oct, 50 min; sits with Sec 3 Maths Paper 2, was Old." in ch, ch
+
+@t
+def the_ai_sees_the_whole_exam_of_200_papers_as_compact_json():
+    fresh(); no_schedules()
+    env, talk = a_talk()
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    ids = [f"p{i:03d}" for i in range(200)]
+    env.by_hand(talk.exam, edit=lambda s: s["papers"].extend(
+        dict(id=x, level="Sec 3", subject="English", paper=f"Paper {i + 1}", minutes=60, date="2026-10-06" if i < 3 else None,
+             start=f"{8 + i:02d}:00" if i < 3 else None, who="level", students=[], together="Languages" if i % 7 == 0 else "")
+        for i, x in enumerate(ids)))
+    call = answer(talk, env, "Read it", reply(use("t2", "read_exam")), reply(say("ok")))
+    got = results(call.sent[-1])["t2"]
+    r = json.loads(got)                                                    # whole: never cut part-way
+    same([p["id"] for p in r["exam"]["papers"]], ids)
+    same([l["key"] for l in r["checklist"]], [l["key"] for l in facts.checklist(env.load(talk.exam), env.pub(), env.cal(), env.settings(), None)])
+    assert "no_paper" in r["exam"] and "choices" in r["exam"]
+    same(got, json.dumps(r, ensure_ascii=False, separators=(",", ":")))   # compact: no indent, no spaces after the marks
+    assert len(got) > 30000, len(got)
+
+@t
+def a_poll_runs_the_checklist_only_when_something_it_reads_changed():
+    fresh(); no_schedules()
+    env, talk = a_talk()
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    real, calls = facts.checklist, []
+    def counted(*a, **k):
+        calls.append(1); return real(*a, **k)
+    facts.checklist = counted
+    try:
+        first = T.view(talk, env)
+        same(T.view(talk, env)["checklist"], first["checklist"]); same(len(calls), 1)   # nothing changed: the one it has
+        answer(talk, env, "Rename it", reply(use("t2", "set_basics", dict(name="End-Year 2027"))), reply(say("ok")))
+        n = len(calls)
+        v = T.view(talk, env); same(len(calls), n + 1)                                 # the rev changed: a new one
+        same(v["checklist"][0]["text"].split(",")[0], "End-Year 2027")
+        T.view(talk, env); same(len(calls), n + 1)
+        env.by_hand(talk.exam, name="By Hand 2027")                                    # a save on the exam page raises the rev too
+        same(T.view(talk, env)["checklist"][0]["text"].split(",")[0], "By Hand 2027"); same(len(calls), n + 2)
+        env._today = env._today + _dt.timedelta(days=1)                                # a new day
+        T.view(talk, env); same(len(calls), n + 3)
+        pub = copy.deepcopy(env._pub); pub["meta"]["published_at"] = "2026-09-02T08:00:00"; env._pub = pub    # published again
+        T.view(talk, env); same(len(calls), n + 4)
+        saved = dict(XSET.defaults(), saved_at="2026-09-02T09:00:00")                  # the exam settings saved
+        env.settings = lambda: saved
+        T.view(talk, env); same(len(calls), n + 5)
+        T.view(talk, env); same(len(calls), n + 5)
+    finally:
+        facts.checklist = real
+
+@t
+def the_papers_line_says_how_many_papers_and_when_clashes_were_not_checked():
+    pub = F.sample_pub(); x = xs()
+    line = lambda s, p=pub: {l["key"]: l for l in facts.checklist(s, p, CAL, x, None)}["papers"]
+    look = lambda s, p=pub: (line(s, p)["state"], line(s, p)["text"])
+    two = [a_paper("Sec 3", "English", id="a", date="2026-10-05", start="08:00"), a_paper("Sec 3", "Maths", id="b", date="2026-10-05", start="10:00")]
+    same(look(an_exam(two, pub)), ("done", "2 papers"))
+    same(look(an_exam(two[:1], pub)), ("done", "1 paper"))
+    same(look(an_exam([two[0], dict(two[1], start="08:30")], pub)), ("check", "2 papers, 1 to check"))
+    bare = copy.deepcopy(pub); bare["model"]["students"] = []
+    same(look(an_exam(two, bare), bare), ("check", "2 papers. Clashes not checked: no students yet."))
+    same(look(an_exam(two[:1], bare), bare), ("check", "1 paper. Clashes not checked: no students yet."))
+    same(look(an_exam([], pub)), ("todo", "No papers yet."))
 
 print(f"{COUNT} plan tests passed")

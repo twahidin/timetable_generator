@@ -102,6 +102,7 @@ class Talk:
         self.working, self.busy, self.progress, self.closed, self.begun, self.gone_said = False, False, "", False, False, False
         self.thread, self.used, self._n = None, _now(), 0
         self.reading, self.lists, self.waiting = False, {}, None
+        self.checked = None                         # (key, checklist): the last checklist view made, and what it was made from
 
     def add(self, kind, text, step=None, undo=None, quick=None) -> dict:
         """a line (under the talk's lock); n counts from 1 and never changes"""
@@ -517,11 +518,21 @@ def view(talk, env, after=0) -> dict:
         reading, waiting = talk.reading, talk.waiting
         long = sum(l["kind"] == "me" for l in talk.lines) >= LIMITS["messages"]
     pub, cal, xset = env.pub(), env.cal(), env.settings()
-    exam = None
+    exam, checklist = None, []
     try:
+        today = env.today()
         if s is not None:
-            exam = dict(id=s.get("id"), name=s.get("name"), status=_approval.label(s, env.today()), link=f"/exams/{s.get('id')}")
-        checklist = _facts.checklist(s, pub, cal, xset, _facts.last_values(s, env.all_saved()))
+            exam = dict(id=s.get("id"), name=s.get("name"), status=_approval.label(s, today), link=f"/exams/{s.get('id')}")
+        key = (s.get("id"), _schedules.rev_of(s)) if s is not None else None
+        key = (key, _make.published_at(pub or {}), (xset or {}).get("saved_at"), str(today))
+        with talk.lock:
+            kept = talk.checked
+        if kept is not None and kept[0] == key:         # the full check is run again only when what it reads changed
+            checklist = copy.deepcopy(kept[1])
+        else:
+            checklist = _facts.checklist(s, pub, cal, xset, _facts.last_values(s, env.all_saved()))
+            with talk.lock:
+                talk.checked = (key, copy.deepcopy(checklist))
     except _facts.ODD:
         checklist = []
     why = READING if working and reading else WORKING if working else LONG if long else ""

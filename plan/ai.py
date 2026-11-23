@@ -14,7 +14,8 @@ MODEL = "claude-opus-5-5"
 EFFORT = "high"
 BETA = "server-side-fallback-2026-07-01"
 MAX_TOKENS = 32000
-MAX_RESULT = 30000                  # characters of one tool result
+MAX_RESULT = 150000                 # characters of one tool result: a longer one is never sent cut
+TOO_MUCH = "That is too much to show at once."
 STOPPED = "Stopped."
 NO_SUCH = "The app has no such action."
 COULD_NOT = "The app could not do that."
@@ -231,11 +232,8 @@ def _echo(content):
 
 
 def _cut(text) -> str:
-    if len(text) <= MAX_RESULT:
-        return text
-    head = text[:MAX_RESULT - 1]
-    at = head.rfind("\n")
-    return (head[:at] if at > 0 else head) + "…"
+    """a result as it is, or over MAX_RESULT the plain sentence: never cut part-way, so never broken JSON"""
+    return text if len(text) <= MAX_RESULT else TOO_MUCH
 
 
 def _answer(block, on_tool) -> dict:
@@ -246,7 +244,7 @@ def _answer(block, on_tool) -> dict:
         return dict(out, content=NO_SUCH, is_error=True)
     try:
         r = on_tool(name, args)
-        return dict(out, content=_cut(r if isinstance(r, str) else json.dumps(r, ensure_ascii=False, indent=1)))
+        return dict(out, content=_cut(r if isinstance(r, str) else json.dumps(r, ensure_ascii=False, separators=(",", ":"))))
     except Exception as e:
         _fault(e)
         return dict(out, content=COULD_NOT, is_error=True)

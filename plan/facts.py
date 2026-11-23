@@ -249,10 +249,12 @@ def checklist(sched, pub, cal, xset, last) -> list:
     run = _run(draft, pub, cal, xset) if sched else None
     if not draft.get("papers"):
         state, text = "todo", "No papers yet."
-    elif not run["ran"] or run["errors"]:
-        state, text = "check", f"{len(papers)}, " + (f"{len(run['errors'])} to check" if run["ran"] else "not checked")
+    elif run["unchecked"] or run["errors"]:
+        state = "check"
+        text = _plural(len(papers), "paper", "papers") + (f", {len(run['errors'])} to check" if run["errors"] else "")
+        text += f". {run['unchecked']}" if run["unchecked"] else ""
     else:
-        state, text = "done", str(len(papers))
+        state, text = "done", _plural(len(papers), "paper", "papers")
     out.append(_line("papers", "Papers and times", state, text, here("papers")))
     sug = draft.get("suggested") if isinstance(draft.get("suggested"), list) else []
     if sug:
