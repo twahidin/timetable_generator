@@ -710,13 +710,15 @@ For 2 to 4 the document is written with the first reading in each; approving it 
    sees it on Today can still approve and send it out. Or is 14:00 a hard stop: nothing is sent out for today after it?
    **The lead's answer (23 Nov): "Pings stop, sending allowed".** So it is as written in my call 8, which is now the lead's.
 2. **Who covers you.** "...will be informed which officer is covering the person when the person has acknowledged": read here as
-   the relief teacher acknowledging their relief. Then the teacher who is away is told that teacher's name. Is that the reading?
-   (The other one: when the absent teacher acknowledges an absence that was planned for them.)
+   the relief teacher acknowledging their relief. Then the teacher who is away is told that teacher's name.
+   **Approved by the lead as written (23 Nov): on the relief teacher's acknowledgement.**
 3. **Sentences about the reporting officer.** "The form should not say who will be told." Today the app's form says
    "{officer} is not on Telegram: please tell them yourself." when that is so, and `/relief` on Telegram says either that or
-   "{officer} will be told." Take all three out, or keep the "not on Telegram" one (it says who will NOT be told)?
+   "{officer} will be told."
+   **Approved by the lead as put to them (23 Nov): "{officer} will be told." is removed; the two "is not on Telegram: please tell
+   them yourself." sentences stay.**
 4. **The standby.** On a day with a roster line, if nothing has been sent out by some time (say 07:15), should the standby be told
-   on Telegram? As written, nothing more is sent: the standby has the same morning message.
+   on Telegram? **Approved by the lead as written (23 Nov): no extra message; the standby has the same morning message.** (Stage 2.)
 
 ## Left to the builder
 
