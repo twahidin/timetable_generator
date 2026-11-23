@@ -370,4 +370,12 @@ t("every button has its words, and what it sends is what the routes take", async
   const q = await opened({ "GET ": ok(LINKED), "DELETE /link": ok(FREE) }); await q.click("button", "Unlink"); await q.click("button", "Unlink"); assert.deepStrictEqual(q.calls.filter(c => c.url.startsWith(URL)).map(c => [c.method, c.url, c.body]), [["GET", URL, undefined], ["DELETE", `${URL}/link`, undefined]]);
 });
 
+t("the ask form's Sent says when the officer is not on Telegram", async () => {
+  const p = await opened({ "GET ": ok(FREE) }), say = p.window.Relief.sentSays, plain = "Sent. The relief team can see it.";
+  assert.strictEqual(say({}), plain);
+  assert.strictEqual(say({ officer_not_told: "Ms Rosa Ng is not on Telegram: please tell them yourself." }), `${plain} Ms Rosa Ng is not on Telegram: please tell them yourself.`);
+  for (const odd of [null, 7, "", ["x"], { x: 1 }]) assert.strictEqual(say({ officer_not_told: odd }), plain, JSON.stringify(odd));
+  assert.strictEqual(say(null), plain);
+});
+
 run(all);

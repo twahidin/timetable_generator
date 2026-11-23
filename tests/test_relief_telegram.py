@@ -7411,5 +7411,25 @@ def a_doubt_is_two_lines_and_a_store_that_fails_one():
             assert OB.send_due()["sent"] == 1
     finally: KINDS.removeHandler(h)
 
+# ---- Answers, Task 1: the form and the reporting officer ----
+NOT_TOLD_ROSA = "Ms Rosa Ng is not on Telegram: please tell them yourself."
+ASKED = dict(dates=["2026-10-13"], periods=None, reason="Medical", reason_text="", reporting_officer=ROSA, lessons=[])
+
+@t
+def the_form_says_when_the_officer_is_not_on_telegram():
+    with school(EVE):
+        assert call(EVE, "post", "/api/relief/absences", ASKED)["officer_not_told"] == NOT_TOLD_ROSA
+        assert AK.NOT_TOLD is TE.NOT_TOLD
+    with school(EVE, ROSA): assert "officer_not_told" not in call(EVE, "post", "/api/relief/absences", ASKED), "she will be told"
+    with school(EVE):
+        tgdb.set_state("bot", None); assert "officer_not_told" not in call(EVE, "post", "/api/relief/absences", ASKED), "no bot: nothing is said of it"
+    with school(EVE):
+        assert "officer_not_told" not in call(HUGO, "post", "/api/relief/absences", dict(ASKED, teacher=EVE, reporting_officer="")), "no officer named"
+        assert "officer_not_told" not in call(HUGO, "post", "/api/relief/absences", dict(ASKED, teacher=EVE, dates=["2026-10-14"], reporting_officer=HUGO)), "the officer sent it"
+    with school(EVE):
+        def boom(*a, **k): raise RuntimeError("made up")
+        with stand_in(links, "reachable", boom): r = call(EVE, "post", "/api/relief/absences", ASKED)
+        assert "officer_not_told" not in r and len(mine()) == 1, "never the save's failure"
+
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")

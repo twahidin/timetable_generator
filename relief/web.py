@@ -463,7 +463,20 @@ def create():
     except ValueError as e: return _refusal(e)
     except BAD_INPUT as e: return _odd(e, "sending an absence")
     created(how, r, pub)
-    return jsonify(_out(r, pub, me))
+    out = _out(r, pub, me); said = _not_told(r, pub)
+    if said: out["officer_not_told"] = said
+    return jsonify(out)
+
+
+def _not_told(r, pub):
+    """the sentence for the form when the reporting officer (not the absent teacher, not who sent it) is not on Telegram, else
+    None; None too when that cannot be read: never the save's failure"""
+    officer = r.get("reporting_officer")
+    if not officer or officer in (r["teacher"], r["by"]) or not _connected(): return None
+    try:
+        if officer not in _chats.reachable(pub): return _tell.NOT_TOLD.format(officer=officer)
+    except Exception as e: current_app.logger.error("relief: whether the officer is on Telegram could not be read (%s)", type(e).__name__)
+    return None
 
 
 @bp.get("/api/relief/absences/mine")

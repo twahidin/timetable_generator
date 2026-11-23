@@ -17,7 +17,7 @@
   const UNREACHABLE = "Could not reach the server. Check the connection and try again.";
   const mods = {};
   const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
-  const R = window.Relief = { me: null, cur: null, tab, linkCard, go, api, json, people, say, dirtyAny, absences, attach, span, reason, plural, reliefLines, approvedOf };
+  const R = window.Relief = { me: null, cur: null, tab, linkCard, go, api, json, people, say, dirtyAny, absences, attach, span, reason, plural, reliefLines, approvedOf, sentSays };
 
   /* The relief line of a lesson to cover, read cover by cover (x.covers, in time order, never x.parts[i]): the relief teacher
      once approved (approved, acknowledged or asked to change), the planner's own choice still waiting ("Planned: name,
@@ -596,6 +596,8 @@
     return failed;
   }
 
+  /* what the ask form says once sent: the officer's line from the server is added only when it is a non-empty string */
+  function sentSays(d) { const n = d && d.officer_not_told; return "Sent. The relief team can see it." + (typeof n === "string" && n ? " " + n : ""); }
   async function send() {
     if (A.busy || A.loading || askBlock()) return;
     const list = $("#askLessonList", A.pane);
@@ -607,7 +609,7 @@
     const failed = await attach(res.data, list);
     roRemember(A.ro);
     Object.assign(A, { day: "today", picked: [], away: "whole", from: null, to: null, reason: "", text: "", busy: false, dirty: false });
-    A.msg = { text: "Sent. The relief team can see it.", bad: false, sent: true,
+    A.msg = { text: sentSays(res.data), bad: false, sent: true,
               files: failed.length ? { text: `Not added: ${failed.join(" ")} Add them in My absences.`, bad: true } : null };
     RF.reset(list);
     paintDay(); paintAway(); paintReason(); paintSend(); reread();
