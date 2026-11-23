@@ -2600,6 +2600,10 @@ def waits(ev, what="the test's event"):
         assert ev.wait(WAIT), f"{what} never came"
     return hook
 
+def fresh():
+    """each talk test starts with the server's hour budget unspent and no answer running"""
+    T._starts.clear(); same(T._running[0], 0)
+
 def a_talk(owner="p1", staff=(), exam=None, **kw):
     env = FakeEnv(**kw); env.staff = people(*staff) if staff else []
     return env, T.open(owner, env, exam)
@@ -2624,6 +2628,7 @@ START_IN = dict(kind="exam", name="Mid-Year 2027", levels=["Sec 3", "Sec 4"], cl
 
 @t
 def a_talk_answers_in_order_and_the_progress_changes_while_it_works():
+    fresh()
     no_schedules()
     same(T.LIMITS, dict(typed=2000, list=20000, list_papers=200, rounds=12, answer=180, list_job=300, messages=60, at_once=2,
                         an_hour=60, idle=12 * 3600, talks=5))
@@ -2662,6 +2667,7 @@ def a_talk_answers_in_order_and_the_progress_changes_while_it_works():
 
 @t
 def what_is_typed_is_checked_before_anything_is_sent():
+    fresh()
     env, talk = a_talk()
     call = Script()
     raises(Refused, lambda: T.say(talk, env, "x" * 2001, call=call), "Keep it under 2,000 characters.")
@@ -2684,6 +2690,7 @@ def what_is_typed_is_checked_before_anything_is_sent():
 
 @t
 def stop_ends_an_answer_and_what_was_done_stays_done():
+    fresh()
     no_schedules()
     env, talk = a_talk()
     go = threading.Event()
@@ -2709,6 +2716,7 @@ def stop_ends_an_answer_and_what_was_done_stays_done():
 
 @t
 def a_talk_is_only_its_owners_and_close_and_twelve_hours_drop_it():
+    fresh()
     env, a = a_talk("person-7")
     _, b = a_talk("sid-" + secrets.token_hex(8))                  # the shared committee code: a talk keyed by its session's own id
     same((T.get(a.id, "person-7"), T.get(a.id, b.owner), T.get(b.id, "person-7"), T.get(b.id, b.owner)), (a, None, None, b))
@@ -2736,6 +2744,7 @@ def a_talk_is_only_its_owners_and_close_and_twelve_hours_drop_it():
 
 @t
 def two_answers_run_at_once_and_a_third_waits():
+    fresh()
     envs, talks, gates = [], [], []
     for i in range(3):
         e, tk = a_talk(f"p{i}"); envs.append(e); talks.append(tk); gates.append(threading.Event())
@@ -2765,6 +2774,7 @@ def two_answers_run_at_once_and_a_third_waits():
 
 @t
 def the_words_for_said_are_the_persons_since_the_last_answer_and_names_go_as_codes():
+    fresh()
     no_schedules()
     env, talk = a_talk(staff=STAFF)
     tan = talk.names.code(TAN)
@@ -2797,6 +2807,7 @@ def the_words_for_said_are_the_persons_since_the_last_answer_and_names_go_as_cod
 
 @t
 def a_tool_that_fails_or_is_refused_never_ends_the_talk():
+    fresh()
     no_schedules()
     env, talk = a_talk()
     call = answer(talk, env, "Change the name", reply(use("t1", "set_basics", dict(name="X", levels=None, classes=None, start=None, end=None))),
@@ -2830,6 +2841,7 @@ def a_tool_that_fails_or_is_refused_never_ends_the_talk():
 
 @t
 def undo_through_the_talk_and_the_ai_is_told_at_the_top_of_the_next_message():
+    fresh()
     no_schedules()
     env, talk = a_talk()
     answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)),
@@ -2858,6 +2870,7 @@ def undo_through_the_talk_and_the_ai_is_told_at_the_top_of_the_next_message():
 
 @t
 def after_stopped_timeout_and_failed_the_next_answer_works():
+    fresh()
     no_schedules()
     env, talk = a_talk()
     answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
@@ -2888,6 +2901,7 @@ def after_stopped_timeout_and_failed_the_next_answer_works():
 
 @t
 def the_app_tells_the_person_what_the_ai_is_not_shown():
+    fresh()
     no_schedules()
     env, talk = a_talk()
     answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
@@ -2916,6 +2930,7 @@ def the_app_tells_the_person_what_the_ai_is_not_shown():
 
 @t
 def offers_answers_and_lists_as_the_ai_sees_them():
+    fresh()
     no_schedules()
     env, talk = a_talk()
     call = answer(talk, env, "x", reply(use("t1", "read_exam"), use("t2", "read_checks"), use("t3", "offer_slots", dict(paper="p1")),
@@ -2937,6 +2952,7 @@ def offers_answers_and_lists_as_the_ai_sees_them():
 
 @t
 def a_talk_on_an_exam_tells_the_ai_which_and_a_new_publish_gives_fresh_codes():
+    fresh()
     no_schedules()
     env, first = a_talk()
     answer(first, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
@@ -2976,6 +2992,7 @@ def a_talk_on_an_exam_tells_the_ai_which_and_a_new_publish_gives_fresh_codes():
 
 @t
 def the_practice_helper_walks_through_a_real_talk():
+    fresh()
     no_schedules()
     env, talk = a_talk()
     def go(text, pick=None):
@@ -2990,12 +3007,12 @@ def the_practice_helper_walks_through_a_real_talk():
     go("add Sec 3, English, Paper 1, 90"); go("add Sec 3, Mathematics, Paper 1, 60")
     same(len(env.load(talk.exam)["papers"]), 2)
     last = go("suggest Sec 3 English Paper 1")
-    if last["quick"]:
-        go("", pick=last["quick"][0])
-        assert texts(talk, "did")[-1].startswith("Suggested "), texts(talk, "did")
-        same(env.load(talk.exam)["suggested"], [env.load(talk.exam)["papers"][0]["id"]])
-    else:
-        same(last["text"], "The app offers no time for Sec 3 English Paper 1 just now.")
+    offers = ["2026-10-05 at 07:40", "2026-10-05 at 08:00", "2026-10-05 at 08:20"]
+    same((last["text"], last["quick"]), (f"The app offers {', '.join(offers)} for Sec 3 English Paper 1. Press one to use it.", offers))
+    go("", pick="2026-10-05 at 08:00")                                         # the pressed slot: pick_suggested
+    same(texts(talk, "did")[-1], "Suggested 08:00 on Mon 5 Oct for Sec 3 English Paper 1")
+    eng = env.load(talk.exam)["papers"][0]
+    same((eng["date"], eng["start"], env.load(talk.exam)["suggested"]), ("2026-10-05", "08:00", [eng["id"]]))
     go("put Sec 3 Mathematics Paper 1 on 2026-10-07 at 08:00")
     p = [x for x in env.load(talk.exam)["papers"] if x["subject"] == "Mathematics"][0]
     same((p["date"], p["start"]), ("2026-10-07", "08:00"))
@@ -3005,6 +3022,7 @@ def the_practice_helper_walks_through_a_real_talk():
 
 @t
 def a_long_talk_and_a_busy_hour_are_refused():
+    fresh()
     clock = [time.time() + 10 ** 6]
     T._now = lambda: clock[0]
     try:
@@ -3022,6 +3040,91 @@ def a_long_talk_and_a_busy_hour_are_refused():
     finally:
         T._now = time.time
         T._starts.clear()
+
+
+class Sneaky:
+    """the talk's lock, but the other thread starts the exam just before it is first taken (no timing needed)"""
+    def __init__(self, talk, exam):
+        self.real, self.talk, self.exam = talk.lock, talk, exam
+    def __enter__(self):
+        if self.exam: self.talk.exam, self.exam = self.exam, None
+        return self.real.__enter__()
+    def __exit__(self, *a): return self.real.__exit__(*a)
+
+@t
+def a_new_exam_is_never_called_gone_while_the_page_polls():
+    fresh(); no_schedules()
+    env, other = a_talk()
+    answer(other, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    env, talk = a_talk()
+    talk.lock = Sneaky(talk, other.exam)                    # view reads no exam, then the answer's start_exam sets it
+    T.view(talk, env)
+    talk.lock = talk.lock.real
+    same((talk.exam, texts(talk, "sys"), talk.gone_said), (other.exam, [], False))
+    v = T.view(talk, env)
+    same((v["exam"]["id"], texts(talk, "sys")), (other.exam, []))
+
+@t
+def a_done_step_is_always_told_to_the_ai_even_when_its_checks_fail():
+    fresh(); no_schedules()
+    env, talk = a_talk()
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    was, h = facts.checks, logged()
+    def broken(*a): raise RuntimeError("secret words of a fault")
+    facts.checks = broken
+    try:
+        call = answer(talk, env, "Add English", reply(use("t2", "set_papers", dict(add=[dict(level="Sec 3", subject="English", paper="Paper 1", minutes=60, who=None, together=None)], change=[], remove=[]))),
+                      reply(say("Added.")))
+    finally:
+        facts.checks = was
+        logging.getLogger("plan").removeHandler(h)
+    same(json.loads(results(call.sent[-1])["t2"]), dict(text="Added 1 paper"))
+    same(texts(talk, "did")[-1], "Added 1 paper"); same(len(env.load(talk.exam)["papers"]), 1)
+    assert h.lines and all("RuntimeError" in x and "secret" not in x for x in h.lines), h.lines
+
+@t
+def the_slot_is_given_back_before_the_talk_stops_working():
+    fresh()
+    env, talk = a_talk()
+    was, at = T._give, []
+    T._give = lambda stamp, used=True: (at.append(talk.working), was(stamp, used))[1]
+    try:
+        answer(talk, env, "hello", reply(say("hi")))
+    finally:
+        T._give = was
+    same(at, [True]); same(T._running[0], 0)
+
+@t
+def an_old_quick_answer_cannot_be_pressed_after_another_message():
+    fresh()
+    env, talk = a_talk()
+    answer(talk, env, "hello", reply(use("t1", "offer_answers", dict(answers=["Whole days", "Part of a day"]))), reply(say("Which?")))
+    gate = threading.Event()
+    T.say(talk, env, "something else", call=Script(reply(say("never")), before=waits(gate)))
+    T.stop(talk); gate.set(); ended(talk)
+    same(kinds(talk)[-3:], ["ai", "me", "sys"])
+    raises(Refused, lambda: T.say(talk, env, "", pick="Whole days", call=Script()), T.NO_PICK)
+    same(texts(talk, "me")[-1], "something else")
+
+@t
+def a_name_in_a_check_goes_to_the_ai_as_a_code_and_the_person_sees_the_name():
+    fresh(); no_schedules()
+    env, talk = a_talk(staff=STAFF)
+    tan = talk.names.code(TAN)
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    was = facts.checks
+    facts.checks = lambda *a: dict(errors=[f"{TAN} has two papers at once"], warnings=[f"{TAN} is away on Mon 5 Oct"], hidden=0,
+                                   unchecked=f"Not checked while {TAN} is away.")
+    try:
+        call = answer(talk, env, "Add English", reply(use("t2", "set_papers", dict(add=[dict(level="Sec 3", subject="English", paper="Paper 1", minutes=60, who=None, together=None)], change=[], remove=[])),
+                                                      use("t3", "read_checks")), reply(say("Checked.")))
+    finally:
+        facts.checks = was
+    r = results(call.sent[-1])
+    for k in ("t2", "t3"):
+        assert TAN not in r[k] and "Wei Ling" not in r[k], r[k]
+        assert f"{tan} has two papers at once" in r[k] and f"{tan} is away on Mon 5 Oct" in r[k] and f"while {tan} is away" in r[k], r[k]
+    same(texts(talk, "sys")[-1], f"Not checked while {TAN} is away.")
 
 
 print(f"{COUNT} plan tests passed")

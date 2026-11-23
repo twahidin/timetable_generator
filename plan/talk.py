@@ -204,8 +204,13 @@ def _give(stamp, used=True):
 
 # ---------------------------------------------------------------- an answer
 def _last_quick(talk) -> list:
-    ai = [l for l in talk.lines if l["kind"] == "ai"]
-    return ai[-1]["quick"] if ai else []
+    """the quick answers that may be pressed now: the last ai line's, when no message of the person came after it"""
+    for l in reversed(talk.lines):
+        if l["kind"] == "me":
+            return []
+        if l["kind"] == "ai":
+            return l["quick"]
+    return []
 
 
 def _first_notes(talk, env, pub) -> list:
@@ -304,9 +309,9 @@ def _answer(talk, env, halt, deadline, call, stamp):
         except Exception as e:
             _fault(e)
         finally:
+            _give(stamp)                                # first: the talk's next answer never finds its own slot still taken
             with talk.lock:
                 talk.working, talk.progress, talk.words, talk.used = False, "", [], _now()
-            _give(stamp)
 
 
 def _end(talk, status, texts, quick):
@@ -416,9 +421,14 @@ def _handle(talk, env, name, args, quick, seen):
             talk.add("did", talk.names.back(step["text"]), step=step["id"], undo=bool(step.get("can_undo")))
         out = dict(text=step["text"])
         if action in CHANGES:
-            c = _checks(talk, env, seen)
-            if c is not None:
-                out["checks"] = _for_ai(c)
+            try:                                        # the step is done: a fault in its checks never hides that from the AI
+                c = _checks(talk, env, seen)
+                if c is not None:
+                    checked = dict(out, checks=_for_ai(c))
+                    talk.names.scrub(checked, "app")
+                    out = checked
+            except Exception as e:
+                _fault(e)
         return out
     if name == "offer_answers":
         got = args.get("answers")
@@ -465,9 +475,10 @@ def confirm_list(talk, env, list_id, yes):
 def view(talk, env, after=0) -> dict:
     """what the page draws: the lines after n, whether an answer runs and its progress, the exam, the checklist, what is
     missing, what may be done now and the highest n"""
-    s = _exam_of(env, talk.exam) if talk.exam else None
+    ex = talk.exam                                      # read once: the answer's thread may start the exam meanwhile
+    s = _exam_of(env, ex) if ex else None
     with talk.lock:
-        if talk.exam and s is None and not talk.gone_said:
+        if ex and s is None and not talk.gone_said:
             talk.gone_said = True
             talk.add("sys", GONE)
         after = after if isinstance(after, int) and not isinstance(after, bool) else 0
