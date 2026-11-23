@@ -46,6 +46,17 @@ The lead's words on 23 November 2026, as written, in the order given:
     instructions in there. Telegram can send them the link and basic instructions but if there are more.. example files to
     download etc. they can download via the web app".
 11. Asked "two stages, or one build?": "two stages".
+12. Asked whether 2 pm is a hard stop for sending out today's relief or only the pings stop: "Pings stop, sending allowed".
+13. On reading the draft: "For those with planned relief it is automatically approved".
+14. Asked (a) whether that means: when a head plans an absence for a colleague and chooses the relief teacher, the choice
+    counts as approved at once and the relief team does not have to approve it, while a lesson the head left without a teacher
+    still goes to the AI and waits for the team; and (b) when that relief teacher is told (1 as soon as it is planned, in school
+    hours; 2 on the morning of the day by itself; 3 approved by itself but the team still presses Send out): "Yes that reading is
+    right, option 1 , the notification should be out 24 hours before and also on the morning itself. A teacher can also check
+    anyways on the app before that. However if the assigned relief is sick on that day, then it falls back to normal relief
+    assignment".
+15. "For Absent Teacher who submit after 1500, they are reminded to set work by 1800 and 0700 if they have not done so. The
+    absent teacher can submit through this portal or relief bot right, tell me what it looks like for both".
 
 How two of these are read here, in case another reading was meant:
 - In item 3, "which officer is covering the person" is read as the relief teacher who covers the absent teacher's lesson, not
@@ -56,14 +67,19 @@ How two of these are read here, in case another reading was meant:
 ## Intent
 
 **Why (the lead's).** The relief team should rest in the evening. One person is responsible each day. Relief teachers are not
-disturbed before the morning. The person away can reach whoever covers them.
+disturbed before the morning. The person away can reach whoever covers them. A relief a head chose when planning needs no second
+approval, and its teacher hears of it early enough to prepare (items 13 and 14).
 
 **Goals.**
 - No new request pings the relief team between the day's cut-off and the next morning. What belongs to a relief already sent out
   for today (a report that it is not acknowledged, a request to change) still reaches them until its lesson starts (my call 27).
 - One morning message tells the people on duty everything that waits for today.
 - The relief team approves, and then sends out as a separate press. Nothing reaches a relief teacher before a team member
-  pressed Send out for it, nor before the earliest send-out time of its day.
+  pressed Send out for it, or a head chose them when planning (the lead's items 13 and 14), nor outside school hours (from the
+  earliest send-out time to the cut-off of a school day; after the cut-off, only about a lesson of that day still to come).
+- A relief told before its day is told again 24 hours before and on the morning itself (item 14).
+- If a relief teacher is away on the day, their lesson goes back to the normal flow: open, the AI picks, the team approves and
+  sends out (item 14).
 - The AI picks as soon as a request is in, for any date, so the evening and the morning are spent checking, not waiting.
 - A late request in school hours reaches the whole team, and any one of them can approve and send it out.
 - The teacher who is away is told who covers each lesson once that teacher has acknowledged.
@@ -80,7 +96,9 @@ disturbed before the morning. The person away can reach whoever covers them.
 
 **Anti-goals (would make it a failure even if it works).**
 - A relief teacher is messaged in the evening or at night, or before the earliest send-out time.
-- A relief is sent out that nobody on the relief team approved, or that nobody pressed Send out for.
+- A relief is sent out that nobody on the relief team approved, or that nobody pressed Send out for, unless a head (anyone who
+  may plan relief for a colleague) chose that teacher when planning.
+- A relief stays with a teacher who is away that day, so the lesson has nobody.
 - A request is lost because it came on a day with no relief duty, after the cut-off, in the evening or at a weekend.
 - The relief team is pinged in the evening by the app (not by a person's own answer on Telegram).
 - The morning message is wrong in a way that hides work: it says nothing waits when something does.
@@ -94,11 +112,20 @@ True to the code on branch `relief-duty-design` (main d2dfbaf).
   setting `fill_at` (15:00) on the school day before (`due_at`), or when the team presses Fill now. A request to change gets a
   new pick at once. Every run (the ticker runs each minute) first checks each waiting pick: one whose teacher is no longer free
   goes back to open and is picked again (`fill._run`, step 1, with `cover.stale` and `cover.drop`). An approved relief is not
-  dropped: Today marks it "{name} is no longer free then: change it". Approve checks again that the teacher is free
+  dropped, whatever the reason, the teacher being away that day too (`cover.drop` refuses anything but a waiting pick): Today
+  marks it "{name} is no longer free then: change it". Approve checks again that the teacher is free
   (`cover._approve` calls `still_free`).
 - **Cover states** (`relief/cover.py`, `state`): open, waiting (a pick waits for the team), approved, acknowledged, change
   (approved, and the relief teacher asked to change), cancelled. Approve, Approve all and Change write `approved` (by, at).
   Change chooses and approves in one.
+- **A planner's own choice.** Plan relief for a colleague needs the right `relief.plan`: school leaders, heads of department and
+  subject heads (`accounts/rights.py`), and everyone on the relief team. When the planner chooses a relief teacher for a lesson,
+  `absences.new` checks that teacher is in the "free then" list and writes the lesson's `relief` and `relief_by` (the planner),
+  with no pick of its own; `cover.pick_of` reads it as a pick "by planner" with the reason "Planned by {planner} on {day}."
+  (`cover.PLANNED`). Its state is **waiting**, like the AI's pick: it waits for the relief team's Approve. Until then the
+  absent teacher does not see the name (`web._hidden`), the planned relief download says "Waiting for the relief team"
+  (`web.WAITING_TEAM`), and the planner may choose again or take it off (`absences.choose`), which is refused once it is approved
+  ("changed on the team's Today page"). A lesson the planner left open is picked by the AI like any other.
 - **Telling.** `relief/tell.py` works every message out from the records each time (`due`) and queues each under a key of its
   own, once (`outbox.queue`). The sweep runs every minute and after each save. Before a message goes, `still_true` asks again
   whether it is still so; one that is not is dropped. `relief/outbox.py` sends: oldest first, once or marked "may not have been
@@ -149,6 +176,8 @@ Times are the proposed defaults; each is a setting.
   once. Today opens on the next school day from here. Requests for later days wait for that day's morning message.
 - **Weekends, holidays and (stage 2) days with no relief duty** have no morning message; a request sent then waits for the
   next school day's morning message, unless it is for a day with no relief duty (below).
+- **A relief for a later day** (a head's own choice when planning, or one the team sent out ahead) is told to its teacher at the
+  first moment of school hours, then again 24 hours before and on the morning itself (below, "Planned relief").
 
 ### The settings (stage 1)
 
@@ -157,8 +186,9 @@ Three new times in Relief settings, under "Times", in place of "Fill open lesson
 | Setting | Proposed default | What it does |
 |---|---|---|
 | Morning message to the relief team at | 06:30 | The one message with everything waiting for today. |
-| Earliest send-out to relief teachers | 06:45 | Nothing reaches a relief teacher before this on the relief's own day, whenever Send out was pressed. |
+| Earliest send-out to relief teachers | 06:45 | Nothing reaches a relief teacher before this time of a school day, whenever Send out was pressed. |
 | Cut-off for the day's relief | 14:00 | After it, no pings for today; the team works on the next school day. |
+| Remind the absent teacher to set work at | 18:00 the evening before, and 07:00 on the day | Only while a lesson of that day has no work (below, "Reminding the absent teacher to set work"). |
 
 Saving checks morning message at or before earliest send-out, and earliest send-out before the cut-off ("The morning message
 comes at or before the earliest send-out, and both before the cut-off."). `fill_at` is no longer shown or read (its value stays
@@ -176,11 +206,14 @@ separate press, for the relief team (the right `relief.team`, as Approve).
 - The cover gets a "sent out" mark: who pressed it, when, and for which approval. A new approval (Change, a request to
   change's new pick approved) needs a new Send out. One History entry a press: "Sent out {n} reliefs for {day}" or "Sent out
   {name}'s relief for {lesson} {periods} on {day}".
-- **When it goes:** at once, or at the earliest send-out time of the relief's own day if that is later. The sweep makes the
-  relief message only once that time has come, from the record as it is then, so a change or a cancel before then is simply
-  what goes (or nothing goes).
+- **When it goes:** at once in school hours, else at the next start of school hours. **School hours** for relief teachers are
+  from the earliest send-out time to the cut-off of a school day; after the cut-off, a message about a lesson of that same day
+  still to come also goes at once (the lead's item 12: "Pings stop, sending allowed"). The sweep makes the relief message only
+  once its time has come, from the record as it is then, so a change or a cancel before then is simply what goes (or nothing
+  goes).
 - **Pressed for tomorrow at 21:00:** held; the row says "Will be sent at 06:45".
-- **Pressed for a relief next week:** held until 06:45 on its own day (my call 3; question 2).
+- **Pressed for a relief next week, in school hours:** it goes at once, then again 24 hours before and on the morning itself,
+  as a head's own choice does (my call 3, below).
 
 What Today shows, by state:
 
@@ -193,8 +226,11 @@ What Today shows, by state:
 | Sent | Approved · Sent 06:45 (and the lines stage 4 has: "Being sent…", "Not on Telegram: they see it in Reliefs I'm covering" …) | Remind, Change |
 | Acknowledged | Acknowledged 06:52 | Change |
 | Asked to change | Asked to change, with the new pick | Approve the new pick, Keep, Change |
+| A head's own choice | Approved · Planned by {head} · Sent Mon 12 Oct, 10:05 (or "will be sent at 06:45" while held), then as Sent or Acknowledged above | Remind (once sent), Change |
+| Back to open: its teacher is away | Waiting for you, with the new pick, and "{name} was to cover it and is away then" | Approve, Change |
 
-A new counter "Approved, not sent out". "Approved, not acknowledged" then counts sent ones alone.
+A new counter "Approved, not sent out". "Approved, not acknowledged" then counts sent ones alone. A head's own choice is never
+"Approved, not sent out": it is sent out when it is planned.
 
 Where the app today means "has reached its teacher" (uses of the list `APPROVED` in `relief/web.py` and `relief/tell.py`), it
 now means **sent out, and its time has come**: Reliefs I'm covering, the relief teacher's file download, the not-acknowledged
@@ -206,6 +242,66 @@ reliefs, as the design says).
 
 On Telegram, the request-to-change message keeps its **Approve {name}** button. After the press, the line on the message
 reads "✅ Approved: {name}, 10:12." and the button becomes **📤 Send out to {name}** (my call 7).
+
+### Planned relief (a head's own choice) (stage 1)
+
+This changes a rule of the 20 November design ("Planned relief also waits for the relief team's approval before the relief
+teacher is told"), on the lead's word (items 13 and 14).
+
+**The lead's rule.** A head's own choice of relief teacher, made when planning an absence for a colleague, is approved at once;
+the relief team does not approve it. A lesson the head left open goes to the AI and the team as any other. That relief teacher
+is told as soon as it is planned, in school hours; told again 24 hours before; and again on the morning itself. The relief shows
+in the teacher's app page before that ("A teacher can also check anyways on the app"). If the assigned relief teacher is sick on
+the day, the lesson falls back to the normal relief assignment.
+
+**What is written** (my call 30, 31). "A head" is anyone who may plan relief for a colleague (the right `relief.plan`: school
+leaders, heads of department, subject heads, and the relief team). When they send the plan with a teacher chosen for a lesson,
+that lesson is saved as approved by them (`approved` by the planner's name, at the moment of planning) and sent out by them
+(the "sent out" mark, by the planner, for that approval), with its pick "Planned by {planner} on {day}." as today. No extra
+History entry: the planning entry says it. The same holds when the planner chooses again later in Plan relief (my call 32).
+Today shows the row as "Approved · Planned by {head} · Sent {time}"; the team can still Change it (a new approval by them, which
+needs their Send out). A lesson left open is picked by the AI and waits for the team.
+
+**When the teacher is told** (my calls 33 to 36):
+- **First:** the relief message (as above) at once when it is planned in school hours; planned outside them (the evening, a
+  weekend), at the next start of school hours (06:45 of the next school day). The lead's "never before morning" still holds.
+- **24 hours before** the lesson's start. When that moment is outside school hours, it moves earlier, to the last cut-off
+  (14:00 of a school day) before that moment: for a lesson on Monday at 09:20, Friday at 14:00; for one on Wednesday at 15:00, Tuesday at 14:00.
+- **On the morning itself**, at the earliest send-out time (06:45) of the lesson's day.
+- A repeat is not sent when its moment had already passed when the first message went, or when the teacher was told of that
+  relief (by its first message or the other repeat) less than 12 hours before. So a relief planned at 10:00 on Monday for Tuesday
+  09:20 gets the first message at 10:00 and the morning one at 06:45 on Tuesday; one planned at 07:00 on Tuesday for that day
+  gets one message; one planned on Monday for Thursday gets three.
+- Each repeat goes once, and only while the relief is still that teacher's and its lesson still to come; a new approval (Change)
+  starts again with a first message of its own.
+- **Already acknowledged:** the repeats still go, as a short line without buttons (the point is to remember a relief told days
+  ago). **Not acknowledged:** the relief message again, with its buttons, as Remind sends it.
+
+The short line, 24 hours before (with **Open in the app**):
+
+> ⏰ Reminder · your relief on Wed 14 Oct
+> 3B Maths · P3–P4 · 09:20–10:00 · Room 2-14
+> For Mr Arjun Nair. The work is in the app.
+
+and on the morning itself the first line reads "⏰ Reminder · your relief today, Wed 14 Oct".
+
+**In the app before that.** The relief shows in the teacher's Reliefs I'm covering from its first message on, with its work and
+files, as any relief sent out. (Reliefs I'm covering lists reliefs from Monday of this week on, so a later week shows too.)
+
+**If the relief teacher is away on the day** (my calls 37 to 39). Every approved relief, a head's choice or not, whose teacher
+then has an absence over its periods goes back to open, and the normal flow takes over: the AI picks, the team approves and
+sends out. One rule for every relief: a teacher who is away cannot cover any lesson, however it was arranged. It is checked by
+every run of the picks (each minute, and at once after an absence is saved), for that one reason alone: a teacher away. Other
+reasons for "no longer free" (a changed timetable, a duty) stay as today: marked on Today for the team to change. The teacher
+who was to cover it, if told, gets the existing "❌ No longer needed: … You're free then." The relief team is told:
+
+> 🔁 Relief needed again · Wed 14 Oct
+> 3B Maths · P3–P4 · for Mr Arjun Nair
+> Mr Daniel Tan was to cover it and is away then. A new pick is waiting for your approval. Approve, then Send out.
+
+("Nobody else is free then: choose someone in the app." when the AI finds nobody.) To the whole team in both stages, with
+**Open relief today**, between the morning time and the cut-off of a school day, else at the next morning time; for a lesson of
+today found before the morning message, the morning message counts it and there is no separate message.
 
 ### The AI picks at once (stage 1)
 
@@ -233,7 +329,8 @@ school day with relief duty, with the button **Open relief today**:
 > Away: Mr Arjun Nair (whole day) · Ms Chloe Ong (P3–P5) · Mdm Siti Rahman (P6–P8)
 
 A line is left out when its number is 0. When everything approved was sent out already (held), the line reads "• 2 sent out:
-will go at 06:45". More than eight people away: the first eight, then "and {n} more". When there is no lesson to cover today,
+will go at 06:45". A relief told already (a head's own choice, or one sent out ahead) is counted in the total with the line
+"• 1 sent out already". More than eight people away: the first eight, then "and {n} more". When there is no lesson to cover today,
 there is no message. Stage 2 puts one line first: "You are in charge today. Standby: Ms Rachel Koh." or "You are on standby
 today. In charge: Mr Marcus Goh."
 
@@ -277,6 +374,9 @@ relief teacher, or for an exam's or event's backup (the person is on duty in sch
 kinds ("Relief planned", "Reminder to acknowledge" …). One a person a day. Also a History line "Telegram unlinked for {name}:
 the bot was blocked", by "The app".
 
+**The reminder of a relief told before its day** (new, 24 hours before and on the morning) and **Relief needed again** (new, to
+the team) are under "Planned relief" above.
+
 **Unchanged in wording:** relief planned for you, the reminder, the reporting officer's, request to change and new pick,
 kept, moved, no longer needed, not happening, on again, cancelled, the report, the all clear, the weekly summary.
 
@@ -297,10 +397,65 @@ The ping built in PR #99 (kind `new`) is replaced by two things:
   then if still true. A request to change, and the not-acknowledged report, belong to a relief already sent out for today: they
   go at once, also after the cut-off, until the lesson starts (a teacher told at 06:45 of a 14:40 lesson may ask to change at
   14:10). After the last lesson of the day nothing of this kind can come (my call 27).
-- **To relief teachers:** nothing before the earliest send-out time of the relief's own day, whatever the kind. In practice
-  every message to a relief teacher then falls in the day.
+- **To relief teachers:** only in school hours (from the earliest send-out time to the cut-off of a school day; after the
+  cut-off, only about a lesson of that day still to come), whatever the kind; anything falling due outside them waits for the
+  next start of school hours, and is dropped if no longer true by then. A relief for a later day may so be told on an earlier
+  school day (a head's own choice, or sent out ahead), never in the evening.
+- **"Relief needed again"** to the team: between the morning time and the cut-off, else at the next morning time.
 - **To the absent teacher and the reporting officer:** as today, at once (my call 9). The weekly summary keeps its own
   setting, Friday 15:00 (my call 10).
+
+### Reminding the absent teacher to set work (stage 1)
+
+**The lead's rule (item 15).** A teacher who sends their request after 15:00 and has not set work is reminded at 18:00 and at
+07:00.
+
+**What exists today.** The only reminder is for an absence someone else planned and the absent teacher has not acknowledged:
+"⏰ Reminder: please acknowledge your relief for {days} and set work.", at `remind_at` (15:00) on the school day before
+(`fill.nudge`, `tell._planned`, key `remind:{id}`), once, and only for one planned before that time. A teacher's own request with
+no work set gets no reminder at all. Work counts as set for a lesson when it has text, a link or a file (`web._row`'s
+`work_set`, the relief message's "No work set yet"). Work cannot be set on Telegram after Send: `/relief` only asks a new request,
+so the absent teacher sets missing work in the app (My absences).
+
+**What changes** (my calls 40 to 47):
+- **Which lessons:** those of the absence on one day that need cover (not "no relief needed", not stopped by an exam or event),
+  are still to come, and have no text, link or file. Each school day of the absence is looked at on its own.
+- **When:** 18:00 on the day before that day (the calendar day: Sunday 18:00 for a Monday), and 07:00 on the day itself. Both
+  are settings ("Remind the absent teacher to set work at"), defaults 18:00 and 07:00.
+- **Who gets which:** every absence with such lessons, asked or planned, whenever it was sent, gets the reminders whose moment is
+  still to come when it is sent. Sent at 16:00 for tomorrow: 18:00 and 07:00. Sent at 10:00 for tomorrow: 18:00 and 07:00 too
+  (in the lead's spirit: no one should reach the morning without work; the lead named the case after 15:00 because the 15:00
+  reminder has passed by then). Sent at 23:00 for tomorrow: 07:00 only. Sent at 06:50 for today: none (07:00 would come ten
+  minutes after the confirmation that already said "no work set yet"; a reminder is skipped within 30 minutes of the request).
+  Sent at 07:10 for today: none.
+- The planned absence's 15:00 reminder ("please acknowledge … and set work") stays as it is. When it went less than three hours
+  before 18:00, the 18:00 one still goes if work is missing (they are about different things: acknowledging, and the work).
+- **Not sent** once every lesson of that day has work, once the absence or that day is cancelled, once the lesson is over, for
+  an exam's or event's backup, or to a teacher not on Telegram. Each goes once (keys `work:{id}:{date}:eve` and `:day`).
+- **Quiet times:** these go to the absent teacher in the evening on purpose. The quiet rule is for the relief team and relief
+  teachers.
+
+The message, with **Open in the app** (to My absences):
+
+> ✏️ Please set work · Tue 13 Oct
+> 2 lessons have no work yet: 3B Maths P3–P4, 2A Maths P5–P6.
+> Set it in the app, in My absences. Your relief teacher sees it there.
+
+("1 lesson has no work yet: …"; more than five lessons: the first five, then "and {n} more".)
+
+At 07:00 the relief teacher may have been told at 06:45 already. Work set after that is not sent to them on Telegram (as today,
+stage 4: their message says to look in the app); it shows in their Reliefs I'm covering. My call 46.
+
+### Asking for relief: two ways, as today
+
+A teacher who is away asks for relief in the app (Relief, the tab **Ask for relief**) or on Telegram (`/relief` to the school's
+bot). Both ask the same things in the same order of meaning (the day, whole day or some periods, the reason, the work for each
+lesson, the reporting officer), both save through `absences.new`, and both land in the relief team's What's in. The mockup's tab
+"Asking for relief: the app and the bot" shows both as they are at head. This design changes nothing in either, except:
+- the work reminders above, after Send, for lessons left without work;
+- whatever the lead answers to question 3 (the sentences about the reporting officer: the form's "{officer} is not on Telegram:
+  please tell them yourself." and `/relief`'s "{officer} will be told."); as written, they stay;
+- what follows Send (when the AI picks, who is pinged), as the rest of this document says.
 
 ### Files by link (stage 1)
 
@@ -352,8 +507,10 @@ Send out.
 |---|---|---|---|---|
 | Morning message | whole team | in charge and standby | the morning time, school days with duty | morning time |
 | Late request | whole team | whole team | at once, picks in or five minutes | morning time to cut-off; else none |
-| Relief for you | relief teacher | same | when sent out | earliest send-out of its day |
-| Kept, moved, no longer needed, not happening, on again | relief teacher | same | at once | earliest send-out of its day |
+| Relief for you | relief teacher | same | when sent out, or when a head planned it with that teacher | school hours |
+| Reminder of a relief told before its day | relief teacher | same | 24 hours before (else the last cut-off before), and the morning itself; not within 12 hours of the last | school hours |
+| Kept, moved, no longer needed, not happening, on again | relief teacher | same | at once | school hours |
+| Relief needed again (its teacher is away) | whole team | whole team | at once | morning time to cut-off; else the next morning time |
 | Who covers you | absent teacher | same | at the acknowledgement | none (falls in the day) |
 | Request to change, new pick | whole team | whole team | at once | none (falls in the day) |
 | Blocked-bot alert | whole team | whole team | at once | morning time to cut-off; else the next morning time |
@@ -362,20 +519,23 @@ Send out.
 | Cancelled (planner, absent teacher, officer) | as today | same | at once | none |
 | Not yet acknowledged, all clear | whole team | in charge and standby | as today, from an hour before the first period | as today |
 | Relief planned for you, reminder | absent teacher | same | as today | none |
+| Please set work | absent teacher | same | 18:00 the day before and 07:00 on the day, while a lesson of that day has no work; not within 30 minutes of the request | none (on purpose) |
 | Reporting officer's | officer | same | at once | none |
 | Weekly summary | whole team | whole team | Friday 15:00 (setting) | its own setting |
 
 ## Constraints carried
 
-From the approved relief design and stage 4, kept whole:
-- Nothing reaches a relief teacher before someone on the relief team approved it; now also before someone pressed Send out and
-  before the earliest send-out time of its day.
+From the approved relief design and stage 4, kept whole but for the first, which the lead changed (items 13 and 14):
+- Nothing reaches a relief teacher before a relief team member approved it and sent it out, or a head (`relief.plan`) chose that
+  teacher when planning; and nothing reaches them outside school hours. The 20 November design said only "before someone on
+  the relief team approved it", and planned relief waited for the team too.
 - A message is sent once, or marked "may not have been sent"; never twice. Every new message has its own key and is worked out
   by the sweep, never sent from a page.
 - A message never holds the typed reason, the remarks or a pick's history. The officer's alone carries the kind of reason.
   The new messages carry none of these.
 - Logs say the kind of failure alone, never a name, text, chat or token.
-- No new right name. Send out uses `relief.team`; the times and the roster use `relief.save`.
+- No new right name. Send out uses `relief.team`; the times and the roster use `relief.save`; a head's own choice uses
+  `relief.plan`, as planning does today.
 - The bot works on one copy of the app.
 - No staff name, reason or work goes to the AI provider; picking at once changes when the AI is asked, not what it is told.
 - Without Telegram connected, everything works on the pages: Send out then makes the relief show in Reliefs I'm covering at its
@@ -386,9 +546,10 @@ From the approved relief design and stage 4, kept whole:
 **What the lead was shown:** one build, or two stages. **The lead picked "two stages"** (item 11).
 
 **How to build it (my call).** Extend what is there; add no new scheduler and no new dependency.
-- The cover record gets a "sent out" mark (by, at, for which approval).
-- The sweep (`tell.due`) learns the times: it makes a relief-teacher message only once the earliest send-out time of its day has
-  come, and a team message only between the morning time and the cut-off (or holds it to the next morning time). It already
+- The cover record gets a "sent out" mark (by, at, for which approval); a head's choice is saved approved and sent out.
+- The run of the picks (`fill._run`, step 1) also sends back to open an approved relief whose teacher is away then.
+- The sweep (`tell.due`) learns the times: it makes a relief-teacher message only in school hours, the two repeats at their
+  moments, and a team message only between the morning time and the cut-off (or holds it to the next morning time). It already
   works by the clock this way for PR #99's ping (`BEFORE`), so this is one rule, applied by kind.
 - The morning message is made by the minute ticker, claimed once a day the way the report claims its mark (`tgdb.raise_state`),
   so a restart or a second copy never sends it twice.
@@ -407,16 +568,21 @@ Each its own plan and pull request, merged and deployed only on the lead's word,
 
 **Stage 1, the send-out flow.** Approve and Send out as two presses; the three times; the AI picks at once for any date; the
 morning message and the late request in place of PR #99's ping; quiet times for the team and for relief teachers; the asker
-told who covers once acknowledged; files by link only; the blocked-bot alert to the team. "The two on duty" is the whole team.
+told who covers once acknowledged; files by link only; the blocked-bot alert to the team; the work reminders to the absent
+teacher at 18:00 and 07:00; a head's own choice approved and
+sent out at planning, with the reminders 24 hours before and on the morning (also for any relief sent out before its day); an
+approved relief whose teacher is away going back to open, with "Relief needed again" to the team. "The two on duty" is the
+whole team.
 After it, the lead can: let the team rest in the evening; have the team check in the evening and send out at one press in the
-morning; know that no relief teacher hears anything before 06:45; let teachers see who covers them.
+morning; know that no relief teacher hears anything outside school hours; let heads arrange planned relief without the team;
+let teachers see who covers them.
 Left out: the roster, days with no relief duty, narrowing messages to two people.
 
 **Stage 2, the duty roster.** The Duty roster card with weekly lines, one-day changes, "No relief duty" lines and the This week
 strip; on days with no relief duty, no picks, no morning message, no report, and the FYI to the team; the morning message, the
 reports and the all clear narrowed to the person in charge and the standby on days with a line. After it, the lead can set
 who is on duty each day and switch relief off for HBL Fridays.
-Left out: a nudge to the standby when nothing is sent out (question 3); anything that limits who may act.
+Left out: a nudge to the standby when nothing is sent out (question 4); anything that limits who may act.
 
 ## My calls (the lead may change any)
 
@@ -424,9 +590,12 @@ Left out: a nudge to the standby when nothing is sent out (question 3); anything
    in charge acts; 06:45 lets them send a little before. Cost if wrong: three settings to change.
 2. Fill open lessons at (`fill_at`) goes; every open lesson is picked at once. Reason: the lead's "the AI will allocate any time
    a request is in". Cost: a pick made days ahead does not see later absences when spreading load; the team may change it.
-3. A relief is sent to its teacher no earlier than the earliest send-out time on its own day, even when it was planned a week
-   ahead and sent out sooner. Reason: "never before morning", and "after that it is for the next day". Cost: a teacher covering
-   a planned course hears of it only that morning (question 2).
+3. A relief the team sends out before its day (a teacher asks today for next Wednesday, the AI picks, the team approves and
+   sends out) is told as a head's own choice is: at once in school hours (else at the next start of them), then 24 hours before
+   and on the morning itself, by my calls 33 to 36. Reason: it follows the lead's answer on planned relief (item 14) by analogy;
+   a teacher should hear of a relief early enough to prepare, and "never before morning" still holds. This replaces the
+   draft's "told only on its own morning" and its question. Cost if wrong: if the lead wanted these told only on their own
+   morning, one condition; a teacher may get up to three messages for one relief.
 4. Send out sends everything approved and not sent out for the date on screen in one press, and a row has its own Send out.
    Reason: the morning batch, and a single late request. Cost: one button.
 5. A relief whose teacher is no longer free is skipped by Send out and listed. Reason: the same check Approve makes. Cost: none.
@@ -435,8 +604,8 @@ Left out: a nudge to the standby when nothing is sent out (question 3); anything
 7. On Telegram, approving a request to change's new pick does not send; the button then becomes "📤 Send out to {name}". No
    Send out on the morning message. Reason: Send out is a separate press, and one relief named on a button is clear, a batch is
    not. Cost: one more tap, or a button.
-8. A request for today after the cut-off pings nobody but can still be sent out, at once. Reason: the lesson still needs
-   cover and a person decides. Cost: if the lead meant a hard stop at 14:00, one condition.
+8. A request for today after the cut-off pings nobody but can still be sent out, at once. Now the lead's own rule (item 12,
+   "Pings stop, sending allowed").
 9. Messages to the absent teacher and the reporting officer keep their times (at once; the reminder at 15:00 the day before).
    Reason: the lead's quiet rule named the team and relief teachers, and the absent teacher needs the evening to set work.
    Cost: a planner working at 22:00 can cause a message to the absent teacher then.
@@ -481,35 +650,89 @@ Left out: a nudge to the standby when nothing is sent out (question 3); anything
 29. When more lessons are open than the AI's guard allows in ten minutes, the nearest dates are picked first and the rest by the
     next runs. Reason: the AI's choice is the point; waiting a few minutes days ahead costs nothing. Cost: after the deploy, picks
     for far dates appear over some minutes.
+30. "A head" in the lead's rule is anyone with `relief.plan`: school leaders, heads of department, subject heads and the relief
+    team. Reason: they are the people who may plan for a colleague, on the same form. Cost: if only heads were meant, one
+    condition (a relief team member's choice would then wait for Approve).
+31. A head's choice is saved approved by the planner and sent out by the planner, at the moment of planning, with no History entry
+    of its own; Today shows "Planned by {head} · Sent {time}" and the team may Change it. Reason: the lead's "automatically
+    approved", and option 1 (told as soon as planned). Cost: one line of copy.
+32. The planner may still choose again or take the teacher off in Plan relief until the lesson starts; each change is a new
+    approval and send-out by them, and the first teacher hears "moved" or "No longer needed". Today `absences.choose` refuses
+    once approved. Reason: a head who slipped should mend it without the team. Cost if wrong: one condition; the head asks the
+    team to Change it instead.
+33. "School hours" for relief teachers are from the earliest send-out time to the cut-off of a school day (after the cut-off,
+    only about a lesson of that day still to come). A choice made outside them is told at the next start of them. Reason: the
+    lead's "in school hours" and "never before morning". Cost: a head planning at 21:00 sees their relief told at 06:45.
+34. "24 hours before" is 24 hours before the lesson's start, moved earlier to the last cut-off when it falls outside school
+    hours (Friday 14:00 for a Monday lesson). Reason: a day's notice, never at night. Cost: on a Monday lesson the notice is
+    three days ahead.
+35. A repeat is skipped when its moment had passed when the first message went, or the teacher was told of that relief less than
+    12 hours before. Reason: no two messages for one relief in one morning. Cost: one number.
+36. The repeats go even when acknowledged, as a short line without buttons; when not acknowledged, the relief message again with
+    its buttons, as Remind sends it. Each goes once. Reason: the lead set no condition, and a relief told days ago is easy to
+    forget. Cost: a message some teachers do not need.
+37. The fallback holds for every approved relief whose teacher is then away at its periods, not for planned ones alone. Reason:
+    one rule; a teacher who is away covers nothing, however it was arranged. Cost if wrong: one condition.
+38. It is checked by every run of the picks and at once after an absence is saved, for "away" alone; other reasons for "no longer
+    free" stay as today (marked on Today). Reason: away is certain; a changed timetable or a duty may be one the team knows
+    better. Cost: those still need a person.
+39. The teacher who was to cover it gets the existing "No longer needed" if they were told, and the whole team gets "Relief needed
+    again" in the day's hours (else at the next morning time, or in the morning message for a lesson of today). Reason: the
+    team must approve and send out the new pick in time; the existing message is true. Cost: one message to a sick teacher.
+
+40. The work reminders look at each day of the absence on its own, and at the lessons that need cover, are still to come and
+    have no text, link or file. Reason: what the relief teacher needs is work for their lesson. Cost: none seen.
+41. 18:00 and 07:00 are settings, defaults as the lead said. 18:00 is on the calendar day before (Sunday for a Monday). Reason:
+    the evening closest to the lesson. Cost: a Sunday message to an absent teacher.
+42. Every absence with lessons missing work gets the reminders still to come, whenever it was sent, not only one sent after
+    15:00. Reason: the lead's aim is work set before the day; after 15:00 is the case where no other reminder comes. Cost if
+    wrong: one condition; teachers who asked in the morning get one or two reminders the lead did not name.
+43. A reminder within 30 minutes of the request is skipped (a request at 06:50 for today gets none). Reason: its confirmation
+    just said "no work set yet". Cost: one number.
+44. The planned absence's 15:00 reminder stays, and both work reminders may follow it. Reason: acknowledging and setting work
+    are two things. Cost: up to three messages for a planned absence left untouched.
+45. The work reminders go in the evening and at 07:00 on purpose: the quiet rule is for the team and relief teachers. Not to a
+    backup, not to someone not on Telegram, each once. Cost: none seen.
+46. The message points to the app (My absences), not to `/relief`, because `/relief` cannot add work to an absence already sent.
+    Reason: true to the code. Cost: if the lead wants work set on Telegram after Send, that is a new `/relief` step, not in
+    this design.
+47. Work set after the relief teacher was told is not sent to them on Telegram (as today); it shows in Reliefs I'm covering.
+    Cost: a relief teacher told at 06:45 who does not open the app misses work set at 07:05.
 
 ## Questions for the lead
 
-Asked on 23 November after a reviewer read this document as a builder would. Question 1 is answered. For 2 to 5 the document
-is written with the first reading in each; approving it as it stands approves those.
+Asked on 23 November after a reviewer read this document as a builder would. Question 1 is answered. The draft's question on a
+relief planned days ahead is taken out: the lead's answer on planned relief (items 13 and 14) settles it by analogy (my call 3).
+For 2 to 4 the document is written with the first reading in each; approving it as it stands approves those.
 
 1. **The 2 pm cut-off.** You said: "cut off time for sending out is 2 pm for the day's relief after that it is for the next day".
    A request comes in at 14:10 for a lesson at 14:40 today. As written here (my call 8) it pings nobody, but a team member who
    sees it on Today can still approve and send it out. Or is 14:00 a hard stop: nothing is sent out for today after it?
    **The lead's answer (23 Nov): "Pings stop, sending allowed".** So it is as written in my call 8, which is now the lead's.
-2. **A relief planned days ahead** (a course next Wednesday, approved and sent out today): is the relief teacher told only on that
-   Wednesday morning (as written, my call 3), or as soon as it is sent out, on a school day between the earliest send-out and the
-   cut-off?
-3. **Who covers you.** "...will be informed which officer is covering the person when the person has acknowledged": read here as
+2. **Who covers you.** "...will be informed which officer is covering the person when the person has acknowledged": read here as
    the relief teacher acknowledging their relief. Then the teacher who is away is told that teacher's name. Is that the reading?
    (The other one: when the absent teacher acknowledges an absence that was planned for them.)
-4. **Sentences about the reporting officer.** "The form should not say who will be told." Today the app's form says
+3. **Sentences about the reporting officer.** "The form should not say who will be told." Today the app's form says
    "{officer} is not on Telegram: please tell them yourself." when that is so, and `/relief` on Telegram says either that or
    "{officer} will be told." Take all three out, or keep the "not on Telegram" one (it says who will NOT be told)?
-5. **The standby.** On a day with a roster line, if nothing has been sent out by some time (say 07:15), should the standby be told
+4. **The standby.** On a day with a roster line, if nothing has been sent out by some time (say 07:15), should the standby be told
    on Telegram? As written, nothing more is sent: the standby has the same morning message.
 
 ## Left to the builder
 
 - The exact shape of the "sent out" mark and of the roster in the settings file; the state name for "approved, not sent out".
-- Keys for the new messages (morning, late, covered, blocked, FYI), and how each is claimed once.
+- Keys for the new messages (morning, late, covered, blocked, FYI, the two repeats, needed again), and how each is claimed once;
+  the repeats keyed by the relief's own key, apart from Remind's `:r{n}`, and Remind's five-minute wait counting them.
+- Where a head's choice is saved approved and sent out (`absences.new`, `absences.choose`, the takeover of a backup's lessons in
+  `absences._may_replace`); letting `cover.drop` (or a sibling) send an approved relief back to open for "away" alone, with
+  `free._absent_then` as the test.
 - How `due` gates each kind by the times (one helper), and what `still_true` asks of each new kind.
 - Moving `fill.due_at`'s use: picks at once, the reminder still by `remind_at`.
 - Page layout beyond the mockups; the 12 px under Today's buttons left from stage 4 (the lead's "fix next time") goes when Today
   is touched here.
+- Where the work reminders are worked out (beside `tell._planned`), their two times in `settings.times`, and their keys.
 - The tests: a fixed clock through a whole day (21:00, 06:30, 06:45, 09:10, 14:05), a weekend, a holiday, an off day; a held
-  relief changed and cancelled before 06:45; a blocked bot in the evening.
+  relief changed and cancelled before 06:45; a blocked bot in the evening; a head's choice planned at 10:00 and at 21:00 for
+  the next day, for a Monday and for three days ahead (first message and repeats); a relief teacher who falls sick after
+  acknowledging; work reminders for requests sent at 10:00, 16:00, 23:00, 06:50 and 07:10, for a Monday, and for work set
+  between the two.
