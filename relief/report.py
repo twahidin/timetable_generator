@@ -38,7 +38,8 @@ and is dropped when it is a DAY old, or when its person is not on the team any m
 remind sends a relief that has reached its teacher again to them, for the page (relief/tgweb.py) and for the button
 (relief/bot.py): its message as it would be made now, under the relief's key with :r{n} after it, WAIT at least after the last of that relief's messages went, and not
 while it waits in the queue or is on its way, however long: it goes by itself, and they do not come all at once. A relief told to
-nobody yet gets the message itself. Two at once are one: a key is queued once. What was reminded is one history entry.
+nobody yet gets the message itself. Outside its teacher's school hours (hours.teacher_open) nothing is queued, and QUIET says from when.
+Two at once are one: a key is queued once. What was reminded is one history entry.
 
 The records are read as the sweep reads them, under absences._LOCK (a takeover is two saves), so that a file that cannot be read
 is known; remind reads absences.all_records, since it says nothing of what it cannot find but that nobody is to be reminded, and a
@@ -54,6 +55,7 @@ from exams.days import bounds, hhmm
 from relief import absences as _absences
 from relief import cover as _cover
 from relief import fill as _fill
+from relief import hours as _hours
 from relief import links as _links
 from relief import outbox, tell, tgdb
 from relief import settings as _settings
@@ -71,6 +73,7 @@ NOBODY = "Nobody to remind."
 NOT_ON = "Not on Telegram."
 TOO_SOON = "Sent at {at}: wait a few minutes."                   # the last of a relief's messages (itself, or a reminder of it) went
 TRIED = "Last tried at {at}: wait a few minutes."                # ... or may have gone, waits in the queue or is on its way
+QUIET = "Not sent outside school hours: remind them from {at}."  # its teacher may not be messaged now (hours.teacher_open)
 _log = logging.getLogger("relief.telegram")
 
 
@@ -340,6 +343,12 @@ def _too_soon(when, state):
     return (TOO_SOON if state == "sent" else TRIED).format(at=f"{when:%H:%M}")
 
 
+def _quiet(w, x):
+    """QUIET, with when the teacher of a relief of lesson x may be reminded: "06:45", or "Tue 06:45" on another day"""
+    at = _hours.reaches_at(w.now, w.settings, w.pub, x["date"])
+    return QUIET.format(at=f"{at:%H:%M}" if at.date() == w.now.date() else f"{at:%a %H:%M}")
+
+
 def _send_again(w, v):
     """one cover asked for -> (its relief teacher or None, why they are not reminded: None when they are)"""
     got = _cover_asked(w, v)
@@ -348,6 +357,7 @@ def _send_again(w, v):
     who = c["relief"]
     if not _remindable(w, v, r, x, c): return who, NOBODY
     if who not in w.reach: return who, NOT_ON
+    if not _hours.teacher_open(w.now, w.settings, w.pub, x["date"]): return who, _quiet(w, x)
     item = tell.relief_item(w.pub, w.reach, w.said.told, r, x, c, v["ckey"], base=w.base)
     if item is None: return who, NOBODY         # approved at no time (changed by hand)
     key, last = item["key"], w.said.last(item["key"])
@@ -386,7 +396,8 @@ def _who(w, v):
 def remind(date, covers, by, now=None):
     """each relief of covers (as asked says) that waits to be acknowledged sent again to its teacher, when its lesson is dated date
     (a date or an ISO string), neither over nor stopped -> dict(sent: how many, skipped=[dict(ckey, name, why)]), the others, why:
-    NOBODY (none there, answered, another's by now), NOT_ON, or TOO_SOON or TRIED (_too_soon). by: (name, "telegram"), or None for
+    NOBODY (none there, answered, another's by now), NOT_ON, QUIET (outside its teacher's school hours: nothing is queued), or
+    TOO_SOON or TRIED (_too_soon). by: (name, "telegram"), or None for
     whoever is signed in; one history entry by them. WRONG for what is not a date or covers; now: the time (tests), else
     absences._now()"""
     covers = asked(covers)

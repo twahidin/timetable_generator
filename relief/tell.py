@@ -42,6 +42,17 @@ unless the relief itself is said again (_on_again); never of a lesson that is no
 is a holiday now). stopped says why, again nothing of it; no other message names an exam or event. A backup (exams) taken over by
 the teacher's own absence is not told as cancelled: its reliefs went with it.
 
+Quiet times, by kind (GATES): a message the app makes by itself is made, and goes, only inside the hours its reader may be
+messaged, worked out by relief/hours.py. To a relief teacher (TEACHER_KINDS: relief, its reminders and repeats, gone, moved,
+stopped, again, kept): in school hours for its lesson (hours.teacher_open: from the earliest send-out time to the end of the
+cut-off's minute of a school day; on the lesson's own day from the earliest send-out time), while the lesson is not over. To the
+team: ask and askpick in the team's window (hours.team_open: a duty day, from the morning time to before the cut-off), or on the
+lesson's own day from the cut-off until it starts; the team's copy of cancelled in their window. The others go at any hour. due
+does not make one outside its hours, and still_true drops one queued that is still waiting when its hours end (an outage, a
+pause Telegram asked for): due makes it again, under the same key, when they come, if it is still true then; so it goes once, in
+the morning, and never in the night. An answer to a person's own press or typing (relief/bot.py, relief/asking.py) does not go
+through the queue and goes at once.
+
 still_true asks again when a message is about to go: it is dropped (its key may be queued again) when the lesson is over or the
 absence past (a cancelled one too), when what it says is not so any more (what it asks of a lesson that is stopped now, too), or
 when its person is not on the team a message was for. stopped and again are dropped too while the exams, or that date in them, cannot be read: due makes them anew
@@ -62,6 +73,7 @@ from exams.days import bounds
 from relief import absences as _absences
 from relief import cover as _cover
 from relief import fill as _fill
+from relief import hours as _hours
 from relief import free as _free
 from relief import lessons as _lessons
 from relief import links as _links
@@ -473,7 +485,7 @@ def _ask(w, r, x, c, ckey):
             text = ask_text(c["relief"], words.class_group(x), words.periods_text(c), words.times(w.pub, x, c)[0], words.day(x["date"]), ch.get("why") or "",
                             pick=new, nobody=not new and _nobody_else(w, r, x, c, ckey))
         yield _item(f"{kind}:{key}", n, kind, text, buttons, ref=dict(id=r["id"], absent=r["teacher"], ckey=ckey, at=ch["at"], pick=new["who"] if new else None,
-                                                                      ends=_ends(x, c, w.bnds).isoformat()))
+                                                                      ends=_ends(x, c, w.bnds).isoformat(), starts=_hours.starts(w.pub, x, c).isoformat()))
 
 
 def _nobody_else(w, r, x, c, ckey):
@@ -501,7 +513,7 @@ def due(pub, settings, records, now, reach, told, since, team=(), base="", short
     out = list(_each(_told_reliefs(w), lambda v: _of_told(w, *v)))       # what is theirs no more comes before what is theirs now
     out += _each(still, lambda r: _absence(w, r))
     out += _each(covers, lambda t: _of_cover(w, *t))
-    return [i for i in out if not _there(told, i["key"])]
+    return [i for i in out if not _there(told, i["key"]) and _may(i, now, settings, pub)]
 
 
 # ---- what has been said of a relief (the report, Remind, and Today's page)
@@ -673,6 +685,46 @@ def start(every=EVERY):
     return _ticker
 
 
+# ---- quiet times: when the app's own messages may go, by kind (an answer to a person's own press or typing, relief/bot.py and
+# relief/asking.py, goes at once and never through here)
+TEACHER_KINDS = ("relief", "repeat", "gone", "moved", "stopped", "again", "kept")      # to a relief teacher, of a lesson: in their school hours
+
+
+def _teacher_may(now, settings, pub, date, ends) -> bool:
+    """a message to a relief teacher of a lesson on date (ISO), over at ends (a date-time or an ISO one), may go now: in school
+    hours for it (hours.teacher_open), its lesson not over"""
+    ends = ends if isinstance(ends, datetime.datetime) else _time(ends)
+    return ends is not None and _hours.teacher_open(now, settings, pub, date) and _fill._when(now) < ends
+
+
+def _team_may(now, settings, pub) -> bool:
+    """the relief team may be pinged now (hours.team_open: a duty day, from the morning time to before the cut-off)"""
+    return _hours.team_open(now, settings, pub)
+
+
+def _ask_may(now, settings, pub, ref):
+    """a request to change goes to the team in their window, or on its lesson's own day from the cut-off until the lesson starts"""
+    if _team_may(now, settings, pub): return True
+    now, starts = _fill._when(now), _time(ref.get("starts"))
+    return starts is not None and starts.date() == now.date() and _hours.at(now.date(), _hours.of(settings).cut_off) <= now < starts
+
+
+def _lesson_may(now, settings, pub, ref):
+    return _teacher_may(now, settings, pub, ref.get("date") or str(ref.get("ends") or "")[:10], ref.get("ends"))
+
+
+# GATES[kind](now, settings, pub, its ref) -> whether a message of that kind may be made, and may go, now. A kind not here goes at
+# any hour (the absent teacher's, the officer's, planned, remind, new, report, clear, weekly). A later kind adds its line here
+GATES = {**{kind: _lesson_may for kind in TEACHER_KINDS}, "ask": _ask_may, "askpick": _ask_may,
+         "cancelled": lambda now, settings, pub, ref: not ref.get("team") or _team_may(now, settings, pub)}     # the team's copy alone
+
+
+def _may(item, now, settings, pub) -> bool:
+    """the message (due's item, or a queued one) may be made, and may go, now, by its kind (GATES)"""
+    gate = GATES.get(item.get("kind"))
+    return gate is None or gate(now, settings, pub, item.get("ref") or {})
+
+
 # ---- still true
 def _over(ref):
     return _time(ref["ends"]) <= _fill._when(None)
@@ -798,7 +850,11 @@ CHECKS = dict(relief=_relief_true, gone=_ended_true, moved=_ended_true, stopped=
 
 
 def still_true(item):
-    """a queued message (outbox's item) may still go; what cannot be read raises (the queue waits and asks again)"""
+    """a queued message (outbox's item) may still go: inside its reader's hours (_may: dropped outside them, due makes it again when
+    they come, if it is still true then), and true (CHECKS); what cannot be read raises (the queue waits and asks again)"""
+    if item.get("kind") in GATES:
+        pub = store.published()                 # nothing published (a publish swaps folders): dropped, made again by a later sweep
+        if not pub or not _may(item, _fill._when(None), _settings.load(pub), pub): return False
     check = CHECKS.get(item.get("kind"))
     return True if check is None else check(item["ref"], item.get("name"))
 
