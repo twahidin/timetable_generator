@@ -222,6 +222,7 @@
       startBusy(false); setAlert(r.j.error || WRONG); return;
     }
     showTalk(r.j.id, r.j.view);
+    try { history.replaceState(null, "", "/plan"); } catch (e) { /* the address stays: a reload then opens one more talk */ }
     if (text) { $("#box").value = text; paintCount(); await send(); } else focusBox();
   }
 

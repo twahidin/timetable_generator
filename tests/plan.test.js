@@ -238,4 +238,20 @@ async function life() {
   assert.deepStrictEqual([P.lines.map(l => l.n), P.last, P.view.working, P.needFull], [[1, 2], 2, false, false]);
 }
 
-life().then(() => { n++; console.log(`${n} plan page tests passed`); }).catch(e => { console.error(e); process.exit(1); });
+/* a talk opened on an exam (Carry on, or /plan?exam=<id> from "Open in Plan with AI") leaves the address as /plan, so a reload
+   reopens that talk and does not start another; a browser that refuses replaceState changes nothing else */
+async function openOnExam() {
+  for (const refuses of [false, true]) {
+    const did = [];
+    const history = { replaceState: (...a) => { did.push(["replace", ...a]); if (refuses) throw new Error("no"); } };
+    const api = async (m, url, body) => { did.push(["api", m, url, JSON.stringify(body)]); return { ok: true, status: 200, j: { id: "T9", view: { lines: [] } } }; };
+    const f = new Function("api", "history", "startBusy", "ended", "drawStart", "setAlert", "showTalk", "$", "paintCount", "send", "focusBox", "WRONG",
+      `return async ${cut("openTalk")}`)(api, history, () => {}, () => {}, () => {}, () => {}, id => did.push(["show", id]), () => null, () => {},
+      async () => {}, () => did.push(["focus"]), "Wrong.");
+    await f("ab12", "");
+    assert.deepStrictEqual(did, [["api", "POST", "/api/plan/talks", JSON.stringify({ exam: "ab12" })], ["show", "T9"], ["replace", null, "", "/plan"], ["focus"]],
+      "the address is /plan once the talk is open");
+  }
+}
+
+life().then(openOnExam).then(() => { n += 2; console.log(`${n} plan page tests passed`); }).catch(e => { console.error(e); process.exit(1); });
