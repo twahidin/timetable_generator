@@ -117,3 +117,14 @@ Each on its own, all passing, on the code of the final fix wave and again after 
 - "Keep looking" for a list that ran out of time, instead of applying and running again.
 - Placing lessons that wait in Not placed.
 - Changes to a band itself (a banded subject gaining or losing periods, a group joining or leaving).
+
+## Follow-up after the merge (23 November 2026, branch refit-2)
+
+The lead answered "Yes" to both open points, so:
+
+- **A teacher only added or only taken off is made.** One teacher added to a subject, one taken off it, or one given to a lesson that had nobody, is one teacher change in the list, with its own reason ("Step 5 adds … to it.", "Step 5 takes … off it.", "Step 5 gives it to ….").  More than one teacher changing still needs you. Ruling: "a teacher" is read as exactly one (the question was in the singular).
+- **The focus after Apply.** After the draft is redrawn the focus goes to "Re-fit to the setup" when it is still on, else to Versions. Seen in a browser in both cases.
+
+On the real file (counts only, 30 made-up changes each, the scratch folder deleted): a second teacher added, the colleague of the subject who is free most: 16 of 30 answered (2 s on average, 10 s at most; 6 take a lesson to another day); a random colleague: 11 of 30 (one not looked at in time). These are the same numbers as for one teacher changed for another, because what stands in the way is the same: the new teacher's own lessons. One of two teachers taken off: 8 of 8 answered with no move, under a second (for 22 of the 30 rows picked, step 8 listed no difference at all, so there was nothing to re-fit). Nothing wrong was offered in any run.
+
+Checked: a review of the change (approved, nothing to fix before merging); every suite on the result. Left as small points: the test of a period that waits for a teacher taken off shows the result but not the order of the looks; if the window is opened again in the instant before the draft is fetched after a failed check, the focus can go to the button behind it.
