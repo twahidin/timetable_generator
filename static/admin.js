@@ -7,11 +7,14 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const AGAIN = "Please sign in again.";
-  const EXTRAS = [["relief", "Relief team"], ["exams", "Exams and events"], ["admin", "Admin"]];
   const SEEN = "admin-moved-seen";
-  const S = { tab: "staff", people: [], depts: [], groups: [], hints: {}, moved: [], me: "", students: null, ways: null,
-              q: "", fg: "", fd: "", fe: "", sq: "", ticked: new Set(), sel: null, menu: null, once: null, examsOpen: null,
-              confirmReset: null, rename: null, pmsg: null, msg: null, out: false, token: 0 };
+  const GONE = /is not on the published timetable or the staff list\.$/;   /* someone else removed them: the list is read again */
+  const S = { tab: "staff", people: [], depts: [], groups: [], committees: [], hints: {}, moved: [], me: "", students: null, ways: null,
+              q: "", fr: "", fd: "", fc: "", sq: "", ticked: new Set(), sel: null, menu: null, once: null, examsOpen: null,
+              confirmReset: null, rename: null, ask: null, rmBusy: false, pmsg: null, msg: null, out: false, token: 0 };
+  /* the three committees from the server, then Admin: the choices of the dark bar's two committee menus */
+  const committeeChoices = () => [...S.committees, ["admin", "Admin"]];
+  const narrow = () => window.matchMedia("(max-width:900px)").matches;
 
   /* ---------------------------------------------------------------- small helpers */
   const fmtDay = iso => { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(iso || ""); return m ? `${+m[3]} ${MONTHS[+m[2] - 1]} ${m[1]}` : String(iso || ""); };
@@ -28,12 +31,20 @@
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   const person = name => S.people.find(p => p.name === name);
   const ticks = () => [...S.ticked];
+  const cssq = v => String(v).replace(/["\\]/g, "\\$&");   /* a value inside a [data-…="…"] selector */
   const slipsUrl = names => "/api/relief/code-slips.pdf" + (names ? "?names=" + names.map(encodeURIComponent).join(",") : "");
   const MOST_SLIPS = 200;
-  function focusKey() {   /* the table or bar control that has focus, so a redraw can give it back */
-    const a = document.activeElement; if (!a || !a.closest || !a.closest("#tbl,#bar")) return null;
+  function focusKey() {   /* the table, bar, menu or panel control that has focus, so a redraw can give it back */
+    const a = document.activeElement; if (!a || !a.closest || !a.closest("#tbl,#bar,#menu,#panel")) return null;
     const d = a.dataset, q = v => String(v).replace(/["\\]/g, "\\$&");
-    return d.tick != null ? `[data-tick="${q(d.tick)}"]` : d.act === "pick" ? `[data-act="pick"][data-name="${q(d.name)}"]` : d.act === "menu" ? `[data-act="menu"][data-kind="${q(d.kind)}"]` : d.act ? `[data-act="${q(d.act)}"]` : null;
+    if (d.tick != null) return `[data-tick="${q(d.tick)}"]`;
+    if (d.act === "pick") return `[data-act="pick"][data-name="${q(d.name)}"]${d.ed ? '[data-ed="1"]' : ":not([data-ed])"}`;
+    if (d.act === "menu") return `[data-act="menu"][data-kind="${q(d.kind)}"]`;
+    if (d.act === "swoff" || d.act === "swon") return `[data-act="swoff"],[data-act="swon"]`;   /* the same button, its other way */
+    if (d.act) return `[data-act="${q(d.act)}"]`;
+    for (const k of ["bx", "dept", "pc"]) if (d[k] != null) return `[data-${k}="${q(d[k])}"]`;
+    for (const k of ["until", "bgroup", "prole", "puntil", "pnote"]) if (d[k] != null) return `[data-${k}]`;
+    return null;
   }
   function keepFocus(draw) { const k = focusKey(); draw(); if (k) { const el = $(k); if (el) el.focus(); } }
 
@@ -69,7 +80,7 @@
   /* ---------------------------------------------------------------- loading */
   async function loadPeople() {
     const d = await api("/api/admin/people");
-    S.people = d.people; S.depts = d.departments; S.groups = d.groups; S.hints = d.hints || {}; S.moved = d.moved || []; S.me = d.me;
+    S.people = d.people; S.depts = d.departments; S.groups = d.groups; S.committees = d.committees || []; S.hints = d.hints || {}; S.moved = d.moved || []; S.me = d.me;
     for (const n of [...S.ticked]) if (!person(n)) S.ticked.delete(n);
     if (S.sel && !person(S.sel)) closePanel();
   }
@@ -106,16 +117,7 @@
   }
 
   /* ---------------------------------------------------------------- staff */
-  function extraOk(p) {
-    if (!S.fe) return true;
-    if (S.fe === "off") return !!p.off;
-    if (S.fe === "none") return !p.extras.relief && !p.extras.exams && !p.extras.admin;
-    return !!p.extras[S.fe];
-  }
-  function shown() {
-    const q = S.q.trim().toLowerCase();
-    return S.people.filter(p => (!q || p.name.toLowerCase().includes(q)) && (!S.fg || p.group === S.fg) && (!S.fd || (p.depts || []).includes(S.fd)) && extraOk(p));
-  }
+  const shown = () => AdminView.shown(S.people, { q: S.q, role: S.fr, committee: S.fc, dept: S.fd });
 
   function skeleton() {
     const opt = (v, cur, text) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(text)}</option>`;
@@ -125,9 +127,9 @@
       <div id="addbox"></div>
       <div class="filters">
         <input type="search" id="q" placeholder="Search a name" aria-label="Search a name" value="${esc(S.q)}" autocomplete="off">
-        <select id="fg" aria-label="Group">${opt("", S.fg, "Group: all")}${S.groups.map(g => opt(g[0], S.fg, g[1])).join("")}</select>
+        <select id="fr" aria-label="Role">${opt("", S.fr, "Role: all")}${S.groups.map(g => opt(g[0], S.fr, g[1])).join("")}</select>
+        <select id="fc" aria-label="Committee">${opt("", S.fc, "Committee: any")}${committeeChoices().map(c => opt(c[0], S.fc, c[1])).join("")}${opt("none", S.fc, "No committee")}${opt("off", S.fc, "Switched off")}</select>
         <select id="fd" aria-label="Department">${opt("", S.fd, "Department: all")}${depts.map(d => opt(d, S.fd, d)).join("")}</select>
-        <select id="fe" aria-label="Extra">${opt("", S.fe, "Extra: any")}${EXTRAS.map(e => opt(e[0], S.fe, e[1])).join("")}${opt("off", S.fe, "Switched off")}${opt("none", S.fe, "No extra")}</select>
         <button type="button" data-act="tickall" id="tickall"></button>
       </div>
       <div id="bar"></div><div id="menu"></div>
@@ -138,17 +140,14 @@
     const heads = (S.hints.heads_on_step4 || []).filter(n => person(n) && person(n).group === "teacher");
     const nod = (S.hints.heads_no_dept || []).filter(n => person(n));
     let h = "";
-    if (heads.length) h += `<div class="hint">Step 4 lists <b>${esc(plural(heads.length, "teacher", "teachers"))}</b> as HOD or SH who are still in the Teacher group. <button type="button" data-act="makemgmt">Make them management</button></div>`;
-    if (nod.length) h += `<div class="hint">${esc(nod.join(", "))} ${nod.length === 1 ? "is" : "are"} HOD or SH with no department, so ${nod.length === 1 ? "they change" : "they change"} no rows of the map. Pick a person and tick their departments.</div>`;
+    if (heads.length) h += `<div class="hint">Step 4 lists <b>${esc(plural(heads.length, "teacher", "teachers"))}</b> as HOD or SH whose role here is still Teacher. <button type="button" data-act="makemgmt">Make them management</button></div>`;
+    if (nod.length) h += `<div class="hint">${esc(nod.join(", "))} ${nod.length === 1 ? "is" : "are"} HOD or SH with no department, so they change no teaching groups. Press Edit and tick their departments.</div>`;
     $("#hint").innerHTML = h;
   }
 
-  function extrasOf(p) {
-    const x = p.extras || {}, out = [];
-    if (x.relief) out.push("Relief team");
-    if (x.exams) out.push("Exams and events · to " + fmtDay(x.exams));
-    if (x.admin) out.push("Admin");
-    return out;
+  function chips(p) {   /* "Switched off" first, then a chip for each committee and Admin; a dash when there is nothing */
+    const c = AdminView.committees(p).map(x => `<span class="c ${esc(x.key)}">${esc(x.text)}</span>`).join("");
+    return (p.off ? `<span class="w">Switched off</span> ` : "") + (c || (p.off ? "" : `<span class="w">–</span>`));
   }
 
   function drawTable() { keepFocus(drawTableNow); }
@@ -158,13 +157,14 @@
     $("#slipsAll").hidden = !!S.ticked.size;
     const rows = list.map(p => `<tr data-row="${esc(p.name)}" class="${p.name === S.sel ? "sel" : ""}${p.off ? " off" : ""}">
       <td class="ck"><input type="checkbox" data-tick="${esc(p.name)}" aria-label="Tick ${esc(p.name)}" ${S.ticked.has(p.name) ? "checked" : ""}></td>
-      <td><button type="button" class="linkbtn" data-act="pick" data-name="${esc(p.name)}">${esc(p.name)}</button></td>
+      <td><button type="button" class="linkbtn" data-act="pick" data-name="${esc(p.name)}" aria-expanded="${p.name === S.sel}">${esc(p.name)}</button>${p.name === S.me ? `<span class="you">you</span>` : ""}${p.staff_only ? `<div class="w">added by name</div>` : ""}</td>
       <td><span class="g ${esc(p.group)}">${esc(label(p.group))}</span></td>
+      <td>${chips(p)}</td>
       <td>${(p.depts || []).length ? esc(p.depts.join(", ")) : `<span class="w">–</span>`}</td>
-      <td>${p.off ? `<span class="w">Switched off</span> ` : ""}${extrasOf(p).map(x => `<span class="x">${esc(x)}</span>`).join("")}</td>
-      <td class="w">${esc(fmtTime(p.last))}</td></tr>`).join("");
-    $("#tbl").innerHTML = `<table><thead><tr><th class="ck"><input type="checkbox" data-act="tickhead" aria-label="Tick everyone shown" ${all ? "checked" : ""}></th><th>Name</th><th>Group</th><th>Department</th><th>Extra</th><th>Last signed in</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="6" class="w" style="padding:14px">No one matches.</td></tr>`}</tbody></table>`;
+      <td class="w">${esc(fmtTime(p.last))}</td>
+      <td class="ed"><button type="button" class="small" data-act="pick" data-ed="1" data-name="${esc(p.name)}" aria-label="Edit ${esc(p.name)}" aria-expanded="${p.name === S.sel}">Edit</button></td></tr>`).join("");
+    $("#tbl").innerHTML = `<table><thead><tr><th class="ck"><input type="checkbox" data-act="tickhead" aria-label="Tick everyone shown" ${all ? "checked" : ""}></th><th>Name</th><th>Role</th><th>Committees</th><th>Department</th><th>Last signed in</th><th class="ed"><span class="sr">Edit</span></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="7" class="w" style="padding:14px">No one matches.</td></tr>`}</tbody></table>`;
   }
 
   /* ---- the dark bar and its menus (every action previews first) */
@@ -174,14 +174,14 @@
     if (!n) { bar.innerHTML = ""; $("#menu").innerHTML = ""; return; }
     const k = S.menu && S.menu.kind, b = (kind, text, cls) => `<button type="button" data-act="menu" data-kind="${kind}" class="${k === kind ? "on " : ""}${cls || ""}">${text}</button>`;
     const anyOff = ticks().some(x => (person(x) || {}).off);
-    bar.innerHTML = `<div class="bar"><b>${n} ticked</b>${b("give", "Give extra access ▾")}${b("take", "Take away extra access ▾")}${b("group", "Set group ▾")}
+    bar.innerHTML = `<div class="bar"><b>${n} ticked</b>${b("give", "Add to a committee ▾")}${b("take", "Take off a committee ▾")}${b("group", "Set role ▾")}
       <button type="button" data-act="slips">Print their code slips</button>${b("off", "Switch off", "warn")}${anyOff ? b("on", "Switch on") : ""}
       <button type="button" class="clr" data-act="clear">Clear ticks</button></div>`;
     drawMenu();
   }
 
-  const VERB = { give: n => `Give it to ${plural(n, "person", "people")}`, take: n => `Take it away from ${plural(n, "person", "people")}`,
-                 group: n => `Set the group for ${plural(n, "person", "people")}`, off: n => `Switch off ${plural(n, "person", "people")}`, on: n => `Switch on ${plural(n, "person", "people")}` };
+  const VERB = { give: n => `Add ${plural(n, "person", "people")}`, take: n => `Take off ${plural(n, "person", "people")}`,
+                 group: n => `Set the role for ${plural(n, "person", "people")}`, off: n => `Switch off ${plural(n, "person", "people")}`, on: n => `Switch on ${plural(n, "person", "people")}` };
 
   function menuSum() {
     const m = S.menu;
@@ -197,12 +197,12 @@
     if (!full && $("#msum")) { $("#msum").innerHTML = menuSum(); return; }
     let opts = "";
     if (m.kind === "give" || m.kind === "take") {
-      opts = EXTRAS.map(([k, t]) => `<div class="it"><label><input type="radio" name="bx" data-bx="${k}" ${m.extra === k ? "checked" : ""}> ${esc(t)}</label>
+      opts = committeeChoices().map(([k, t]) => `<div class="it"><label><input type="radio" name="bx" data-bx="${esc(k)}" ${m.extra === k ? "checked" : ""}> ${esc(t)}</label>
         ${m.kind === "give" && k === "exams" && m.extra === "exams" ? `until <input type="date" data-until="1" value="${esc(m.until)}" aria-label="Last day of the exams and events access">` : ""}</div>`).join("");
     } else if (m.kind === "group" && m.mgmt) {
-      opts = `<div class="w">Each person gets the group their role on step 4 names: HOD or SH.</div>`;
+      opts = `<div class="w">Each person gets the role step 4 names for them: HOD or SH.</div>`;
     } else if (m.kind === "group") {
-      opts = `<div class="it"><label>Group <select data-bgroup="1">${S.groups.map(g => `<option value="${esc(g[0])}"${g[0] === m.group ? " selected" : ""}>${esc(g[1])}</option>`).join("")}</select></label></div>`;
+      opts = `<div class="it"><label>Role <select data-bgroup="1">${S.groups.map(g => `<option value="${esc(g[0])}"${g[0] === m.group ? " selected" : ""}>${esc(g[1])}</option>`).join("")}</select></label></div>`;
     } else {
       opts = `<div class="w">${m.kind === "off" ? "They are signed out and cannot sign in until switched on." : "They can sign in again."}</div>`;
     }
@@ -242,7 +242,7 @@
   function openMenu(kind, mgmt) {
     if (S.menu && S.menu.kind === kind && !mgmt) { S.menu = null; drawBar(); return; }
     const first = ticks().map(person).filter(Boolean)[0], r = first && String(first.role || "").trim().toLowerCase();
-    S.menu = { kind, extra: "relief", until: "", group: r === "sh" ? "sh" : r === "hod" ? "hod" : "teacher", lines: null, err: null, hold: null, busy: false, fail: null, mgmt: !!mgmt };
+    S.menu = { kind, extra: "timetable", until: "", group: r === "sh" ? "sh" : r === "hod" ? "hod" : "teacher", lines: null, err: null, hold: null, busy: false, fail: null, mgmt: !!mgmt };
     drawBar(); previewMenu();
   }
 
@@ -270,17 +270,24 @@
   }
 
   /* ---- one person's panel */
-  function closePanel() { S.sel = null; S.once = null; S.confirmReset = null; S.rename = null; S.pmsg = null; S.examsOpen = null; }
+  function closePanel() { S.sel = null; S.once = null; S.confirmReset = null; S.rename = null; S.pmsg = null; S.examsOpen = null; S.ask = null; }
 
-  function drawPanel() {
+  function drawPanel() { keepFocus(drawPanelNow); }
+  function drawPanelNow() {
     const el = $("#panel"), p = S.sel && person(S.sel);
     $("#wrap").classList.toggle("nopanel", !p);
     if (!p) { el.innerHTML = ""; return; }
     const head = p.group === "hod" || p.group === "sh";
-    const sub = p.staff_only ? "Added by name: not on the published timetable" : "On the published timetable" + (p.role ? ` · role ${p.role}` : "");
+    const sub = p.staff_only ? "Added by name: not on the published timetable" : "On the published timetable";
     const x = p.extras || {}, examsOn = !!x.exams || S.examsOpen === p.name;
-    const map = head ? `<div class="r"><div class="l">Changes the map for</div>${S.depts.map(d => `<label class="ck2"><input type="checkbox" data-dept="${esc(d)}" ${(p.depts || []).includes(d) ? "checked" : ""}> ${esc(d)}</label>`).join("") || `<span class="w">The setup has no departments yet.</span>`}
+    const map = head ? `<div class="r"><div class="l" id="deptsl">Changes the teaching groups of</div><div class="depts" role="group" aria-labelledby="deptsl">${S.depts.map(d => `<label class="ck2"><input type="checkbox" data-dept="${esc(d)}" ${(p.depts || []).includes(d) ? "checked" : ""}> ${esc(d)}</label>`).join("") || `<span class="w">The setup has no departments yet.</span>`}</div>
       <div class="w">From step 4; tick more if they look after two.</div></div>` : "";
+    const gives = (p.gives || []).map(g => `<li>${g.strong ? `<span class="mark" aria-hidden="true">✱</span><span class="sr">Needs a password account: </span>` : ""}${esc(g.text)}</li>`).join("");
+    const noPw = AdminView.noPassword(p), can = AdminView.canRemove(p, S.me);
+    const rm = !can.ok ? `<div class="rm w">${esc(can.why)}</div>`
+      : `<div class="rm">${S.ask === p.name
+          ? `<div class="ask" role="alert">Remove ${esc(p.name)}? Their username and password go, their code stops working and their Telegram chat is unlinked. What they changed stays in the History. This cannot be put back.</div><button type="button" class="danger" data-act="rmgo"${S.rmBusy ? " disabled" : ""}>Yes, remove</button> <button type="button" data-act="rmno"${S.rmBusy ? " disabled" : ""}>Cancel</button>`
+          : `<button type="button" class="danger" data-act="rmask">Remove this person</button>`}</div>`;
     const suggest = p.name.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9._-]/g, "").slice(0, 40);
     const acct = p.username
       ? (S.rename && S.rename.name === p.name
@@ -293,30 +300,58 @@
       : `<button type="button" data-act="resetask">Reset password</button>`)
       : `<button type="button" data-act="mkaccount">Make a password account</button>`;
     const once = S.once && S.once.name === p.name ? `<div class="once" role="status">Shown once. Give it to ${esc(p.name)}; they pick their own when they next sign in. They are signed out everywhere now.<code>${esc(S.once.value)}</code></div>` : "";
-    el.innerHTML = `<div class="side"><div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>${esc(p.name)}</h2><button type="button" class="small" data-act="closepanel" aria-label="Close">✕</button></div>
+    el.innerHTML = `<div class="side" role="region" aria-labelledby="ptitle"><div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 id="ptitle" tabindex="-1">${esc(p.name)}</h2><button type="button" class="small" data-act="closepanel" aria-label="Close">✕</button></div>
       <div class="sub">${esc(sub)}${p.off ? " · switched off" : ""}</div>
-      ${S.pmsg ? `<div class="msg ${S.pmsg.bad ? "bad" : "ok"}" style="margin:8px 0">${esc(S.pmsg.text)}</div>` : ""}
-      <div class="r"><div class="l">Group</div><select data-pgroup="1" aria-label="Group">${S.groups.map(g => `<option value="${esc(g[0])}"${g[0] === p.group ? " selected" : ""}>${esc(g[1])}</option>`).join("")}</select></div>
+      ${S.pmsg ? `<div class="msg ${S.pmsg.bad ? "bad" : "ok"}" style="margin:8px 0" role="status">${esc(S.pmsg.text)}</div>` : ""}
+      <div class="r"><div class="l"><label for="prole">Role</label> <span class="w">· one</span></div><select id="prole" data-prole="1">${S.groups.map(g => `<option value="${esc(g[0])}"${g[0] === p.group ? " selected" : ""}>${esc(g[1])}</option>`).join("")}</select></div>
       ${map}
-      <div class="r"><div class="l">Extra</div>
-        <label class="ck2"><input type="checkbox" data-pextra="relief" ${x.relief ? "checked" : ""}> Relief team</label>
-        <div class="ck2"><label><input type="checkbox" data-pextra="exams" ${examsOn ? "checked" : ""}> Exams and events</label>${examsOn ? ` <span class="w">until</span> <input type="date" data-puntil="1" value="${esc(x.exams || "")}" aria-label="Last day of the exams and events access">` : ""}</div>
-        <label class="ck2"><input type="checkbox" data-pextra="admin" ${x.admin ? "checked" : ""}> Admin</label></div>
+      <div class="r" role="group" aria-labelledby="pcoml"><div class="l"><span id="pcoml">Committees</span> <span class="w">· tick any number</span></div>
+        <label class="ck2"><input type="checkbox" data-pc="timetable" ${x.timetable ? "checked" : ""}> Timetable committee</label>
+        <label class="ck2"><input type="checkbox" data-pc="relief" ${x.relief ? "checked" : ""}> Relief team</label>
+        <div class="ck2"><label><input type="checkbox" data-pc="exams" ${examsOn ? "checked" : ""}> Exams and events</label>${examsOn ? ` <span class="w">until</span> <input type="date" data-puntil="1" value="${esc(x.exams || "")}" aria-label="Last day of the exams and events access">` : ""}</div></div>
+      <div class="r"><div class="l">Admin</div>
+        <label class="ck2"><input type="checkbox" data-pc="admin" ${x.admin ? "checked" : ""}${x.timetable ? "" : " disabled"} aria-describedby="padmw"> Admin <span class="w" id="padmw">${x.timetable ? "· opens this page" : "· needs the Timetable committee"}</span></label></div>
+      <div class="r"><div class="l">What this gives them</div><div class="can"><ul>${gives}</ul></div>${noPw ? `<div class="w" style="margin-top:4px">${esc(noPw)}</div>` : ""}</div>
       <div class="r"><div class="l">Way in</div>${acct}</div>
       <div class="r"><div class="l">Note</div><input type="text" data-pnote="1" maxlength="200" value="${esc(p.note || "")}" aria-label="Note" style="width:100%" placeholder="Only admins see this"></div>
       <div class="btns">${resetBtn}<a class="filebtn" href="/history?who=${encodeURIComponent(p.name)}">Their changes</a>
         <button type="button" class="${p.off ? "" : "danger"}" data-act="${p.off ? "swon" : "swoff"}">${p.off ? "Switch on" : "Switch off"}</button></div>
-      ${once}</div>`;
+      ${once}${rm}</div>`;
   }
 
+  /* a refusal saying the person is no longer on the staff list: someone else removed them, so the list is read again
+     (the panel closes in loadPeople) and the sentence moves to the message line when the panel has gone */
+  async function ifGone(text) {
+    if (!GONE.test(text)) return;
+    try { await loadPeople(); } catch (e) { /* the sentence below still says what happened */ }
+    if (!S.sel) note(text, true);
+  }
+
+  /* every refusal redraws from S.people, so the control shows the stored value again */
   async function savePerson(body, ok) {
     S.pmsg = null;
     try {
       await api("/api/admin/person", body);
       S.pmsg = ok ? { text: ok, bad: false } : null;
       await loadPeople();
-    } catch (e) { if (!S.out) S.pmsg = { text: e.message, bad: true }; }
+    } catch (e) { if (!S.out) { S.pmsg = { text: e.message, bad: true }; await ifGone(e.message); } }
     drawAll();
+  }
+
+  async function removePerson(p) {
+    if (S.rmBusy || S.ask !== p.name) return;   /* one press, one call */
+    S.rmBusy = true; S.pmsg = null; drawPanel();
+    let said = null, failed = null;
+    try { said = (await api("/api/admin/remove", { name: p.name })).text; }
+    catch (e) { if (S.out) { S.rmBusy = false; return; } failed = e.message; }
+    S.rmBusy = false;
+    if (said) { closePanel(); note(said, false); }
+    else { S.ask = null; S.pmsg = { text: failed, bad: true }; }
+    try { await loadPeople(); }
+    catch (e) { if (!S.out) note((said ? said + " " : "") + "The list could not be refreshed. Reload the page.", true); }
+    if (failed && !S.sel) note(failed, true);   /* the person has gone already: the panel closed with the reload */
+    drawAll();
+    if (said) { const q = $("#q"); if (q) q.focus({ preventScroll: true }); }   /* their row and its Edit button are gone */
   }
 
   const BAD_NAME = "A username is 3 to 40 letters, digits, dots, dashes or underscores.";
@@ -335,8 +370,8 @@
     try { await api("/api/admin/person", { name: p.name, username: u }); }
     catch (e) {
       r.busy = false;
-      if (!S.out && S.sel === p.name) S.pmsg = { text: e.message, bad: true };
-      drawAll(); if (S.rename === r) focusName();
+      if (!S.out && S.sel === p.name) { S.pmsg = { text: e.message, bad: true }; await ifGone(e.message); }
+      drawAll(); if (S.rename === r && S.sel === p.name) focusName();
       return;
     }
     if (S.rename === r) S.rename = null;
@@ -352,7 +387,7 @@
       const d = await api("/api/admin/reset", body);
       S.once = { name: body.name, value: d.once };
       await loadPeople();
-    } catch (e) { if (!S.out) S.pmsg = { text: e.message, bad: true }; }
+    } catch (e) { if (!S.out) { S.pmsg = { text: e.message, bad: true }; await ifGone(e.message); } }
     drawAll();
   }
 
@@ -362,7 +397,7 @@
     if (!open) { el.innerHTML = ""; return; }
     el.innerHTML = `<div class="menu add" style="margin-top:0"><div class="l">Add a person who is not on the timetable</div>
       <div class="row"><input id="addName" type="text" maxlength="100" placeholder="Their name" aria-label="Name" autocomplete="off">
-      <select id="addGroup" aria-label="Group">${S.groups.map(g => `<option value="${esc(g[0])}"${g[0] === "executive" ? " selected" : ""}>${esc(g[1])}</option>`).join("")}</select>
+      <select id="addGroup" aria-label="Role">${S.groups.map(g => `<option value="${esc(g[0])}"${g[0] === "executive" ? " selected" : ""}>${esc(g[1])}</option>`).join("")}</select>
       <button type="button" class="primary" data-act="addgo">Add</button><button type="button" data-act="addno">Cancel</button></div>
       <div id="addMsg" class="sum bad" hidden></div></div>`;
     $("#addName").focus();
@@ -374,9 +409,9 @@
     try {
       const item = await api("/api/admin/person", { name, group, added: true });
       await loadPeople();
-      closePanel(); S.sel = item.name; S.q = ""; S.fg = ""; S.fd = ""; S.fe = "";
+      closePanel(); S.sel = item.name; S.q = ""; S.fr = ""; S.fd = ""; S.fc = "";
       note(`${item.name} is on the staff list.`, false);
-      skeleton(); drawAll();
+      skeleton(); drawAll(); focusPanel();
     } catch (e) { if (!S.out) { m.textContent = e.message; m.hidden = false; } }
   }
 
@@ -443,20 +478,28 @@
   }
 
   /* ---------------------------------------------------------------- events */
+  /* Name, Edit or the row open a person's panel; pressing the same person again closes it. Focus goes to the panel's
+     heading when it opens, and back to that row's Edit button when it closes */
+  function focusPanel() { const h = $("#ptitle"); if (h) h.focus({ preventScroll: true }); }
   function pick(name) {
-    if (S.sel !== name) { S.once = null; S.confirmReset = null; S.rename = null; S.pmsg = null; S.examsOpen = null; }
-    S.sel = name; drawTable(); drawPanel();
-    if (window.matchMedia("(max-width:900px)").matches && $("#panel .side")) $("#panel .side").scrollIntoView({ block: "start" });   /* the panel is under the table on a narrow screen */
+    if (S.sel === name) return shut();
+    closePanel(); S.sel = name; drawTable(); drawPanel(); focusPanel();
+  }
+  function shut() {
+    const n = S.sel; if (!n) return;
+    closePanel(); drawTable(); drawPanel();
+    const b = $(`[data-act="pick"][data-ed="1"][data-name="${cssq(n)}"]`); if (b) b.focus();
   }
 
   document.addEventListener("click", e => {
+    if (e.target.id === "panel" && S.sel && narrow()) return void shut();   /* a press on the dimmed page beside the panel */
     const t = e.target.closest("[data-act],[data-tab],tr[data-row]");
     if (!t || t.tagName === "INPUT" && !t.dataset.act) return;
     if (t.dataset.tab) return void showTab(t.dataset.tab);
     if (!t.dataset.act) { if (!e.target.closest("input,button,a")) pick(t.dataset.row); return; }
     const a = t.dataset.act, p = S.sel && person(S.sel);
     if (a === "pick") pick(t.dataset.name);
-    else if (a === "closepanel") { closePanel(); drawTable(); drawPanel(); }
+    else if (a === "closepanel") shut();
     else if (a === "dismiss") { try { localStorage.setItem(SEEN, JSON.stringify(S.moved)); } catch (x) { /* kept for this visit only */ } $("#moved").innerHTML = ""; }
     else if (a === "tickall") { const l = shown(); const all = l.every(x => S.ticked.has(x.name)); l.forEach(x => all ? S.ticked.delete(x.name) : S.ticked.add(x.name)); S.menu = null; drawTable(); drawBar(); }
     else if (a === "clear") { S.ticked.clear(); S.menu = null; drawTable(); drawBar(); }
@@ -479,29 +522,34 @@
     else if (a === "mkaccount") reset({ name: p.name, username: ($("#uname") || {}).value || "" });
     else if (a === "swoff") savePerson({ name: p.name, off: true }, `${p.name} is switched off and signed out.`);
     else if (a === "swon") savePerson({ name: p.name, off: false }, `${p.name} is switched on.`);
+    else if (a === "rmask") { S.ask = p.name; S.pmsg = null; drawPanel(); const c = $('[data-act="rmno"]'); if (c) c.focus(); }
+    else if (a === "rmno") { S.ask = null; drawPanel(); const r = $('[data-act="rmask"]'); if (r) r.focus(); }
+    else if (a === "rmgo") removePerson(p);
     else if (a === "shared") turnShared(t.dataset.code, t.dataset.off === "1");
   });
 
-  document.addEventListener("keydown", e => {   /* Enter in the new username saves it */
+  document.addEventListener("keydown", e => {   /* Enter in the new username saves it; Esc closes the panel */
+    const at = document.activeElement, inside = !at || at === document.body || !!(at.closest && at.closest("#panel,#tbl"));
+    if (e.key === "Escape" && S.tab === "staff" && S.sel && (inside || narrow())) { e.preventDefault(); return void shut(); }
     const p = e.key === "Enter" && e.target.id === "uname2" && S.sel && person(S.sel);
     if (p) { e.preventDefault(); rename(p); }
   });
 
   document.addEventListener("change", e => {
     const t = e.target, d = t.dataset, p = S.sel && person(S.sel);
-    if (t.id === "fg") { S.fg = t.value; drawTable(); }
+    if (t.id === "fr") { S.fr = t.value; drawTable(); }
     else if (t.id === "fd") { S.fd = t.value; drawTable(); }
-    else if (t.id === "fe") { S.fe = t.value; drawTable(); }
+    else if (t.id === "fc") { S.fc = t.value; drawTable(); }
     else if (d.tick != null) { t.checked ? S.ticked.add(d.tick) : S.ticked.delete(d.tick); S.menu = null; drawTable(); drawBar(); }
     else if (d.act === "tickhead") { shown().forEach(x => t.checked ? S.ticked.add(x.name) : S.ticked.delete(x.name)); S.menu = null; drawTable(); drawBar(); }
-    else if (d.bx) { S.menu.extra = d.bx; S.menu.fail = null; drawMenu(); previewMenu(); }
+    else if (d.bx) { S.menu.extra = d.bx; S.menu.fail = null; keepFocus(() => drawMenu()); previewMenu(); }
     else if (d.until) { S.menu.until = t.value; S.menu.fail = null; S.menu.lines = null; S.menu.err = null; S.menu.hold = "Reading what it would do…"; drawMenu(false); clearTimeout(S.wait); S.wait = setTimeout(previewMenu, 350); }
     else if (d.bgroup) { S.menu.group = t.value; S.menu.fail = null; previewMenu(); }
     else if (!p) return;
-    else if (d.pgroup) savePerson({ name: p.name, group: t.value });
+    else if (d.prole) savePerson({ name: p.name, group: t.value });
     else if (d.dept != null) savePerson({ name: p.name, depts: [...document.querySelectorAll("[data-dept]")].filter(c => c.checked).map(c => c.dataset.dept) });
-    else if (d.pextra === "relief" || d.pextra === "admin") savePerson({ name: p.name, extras: { [d.pextra]: t.checked } });
-    else if (d.pextra === "exams") { if (t.checked) { S.examsOpen = p.name; drawPanel(); } else { S.examsOpen = null; savePerson({ name: p.name, extras: { exams: null } }); } }
+    else if (d.pc === "timetable" || d.pc === "relief" || d.pc === "admin") savePerson({ name: p.name, extras: { [d.pc]: t.checked } });   /* unticking the committee takes Admin too: the answer shows it */
+    else if (d.pc === "exams") { if (t.checked) { S.examsOpen = p.name; drawPanel(); } else { S.examsOpen = null; savePerson({ name: p.name, extras: { exams: null } }); } }
     else if (d.puntil) savePerson({ name: p.name, extras: { exams: t.value } }, "Saved.");
     else if (d.pnote) savePerson({ name: p.name, note: t.value }, "Note saved.");
   });
