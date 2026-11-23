@@ -158,10 +158,10 @@
   }
 
   /* Plan with AI: a button-like link on the list when the list's reply says the server has it (plan), and a line in an exam's
-     head while the chat may change that exam (a draft, sent back included, or withdrawn); never on an event */
+     head while the chat may change that exam (a draft, sent back included, or withdrawn, and not Ended); never on an event */
   function planButton(L) { return L && L.plan === true ? `<a class="filebtn" href="/plan">Plan with AI</a>` : ""; }
-  function planLine(plan, s, ev) {
-    if (plan !== true || ev || !s || !["draft", "withdrawn"].includes(s.status || "draft")) return "";
+  function planLine(plan, s, ev, label) {
+    if (plan !== true || ev || !s || label === "Ended" || !["draft", "withdrawn"].includes(s.status || "draft")) return "";
     return `<div class="line"><a href="/plan?exam=${encodeURIComponent(s.id)}">Open in Plan with AI</a></div>`;
   }
 
@@ -355,7 +355,7 @@
   function render() {
     const s = S.sched;
     $("#main").innerHTML = `<div class="head"><div><h1>${esc(s.name)} <span class="chip ${chipClass({ label: S.label })}" id="statchip">${esc(S.label)}</span></h1>
-      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? `<span id="icname">${icName()}</span>` : ""}</div>${isEv() ? `<div id="icline">${icLine()}</div>` : ""}${planLine(S.plan, s, isEv())}</div>
+      <div class="muted small"><a href="/exams">${isEv() ? "All exams and events" : "All exams"}</a> · ${esc(KINDS[s.kind] || s.kind)} · ${esc(fmtDate(s.start, true))} to ${esc(fmtDate(s.end, true))}${isEv() ? `<span id="icname">${icName()}</span>` : ""}</div>${isEv() ? `<div id="icline">${icLine()}</div>` : ""}${planLine(S.plan, s, isEv(), S.label)}</div>
       <div class="savebar" id="saveline">${saveInner()}</div></div>
       ${onSite() ? `<p class="notice">On the main site. Changes you make here wait for the timetable committee: send them from the Approval tab.</p>` : ""}
       <div class="xtabs" role="tablist">${S.tabs.map(t => `<button type="button" role="tab" class="${t.key === S.tab ? "on" : ""}" aria-selected="${t.key === S.tab}" data-act="tab" data-a="${t.key}">${esc(t.name)}</button>`).join("")}</div>

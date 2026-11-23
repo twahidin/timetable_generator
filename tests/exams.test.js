@@ -757,5 +757,7 @@ t("Plan with AI on the list only when the list says plan, and on an exam's head 
   for (const st of ["waiting", "approved", "changes"]) assert.strictEqual(line(true, { status: st }, false), "", st);
   assert.strictEqual(line(false, { status: "draft" }, false), "", "plan false");
   assert.strictEqual(line(true, { status: "draft" }, true), "", "never on an event");
+  assert.strictEqual(planBits.planLine(true, { id: "ab12cd34", status: "withdrawn" }, false, "Ended"), "", "not on an exam that has ended");
+  assert(planBits.planLine(true, { id: "ab12cd34", status: "draft" }, false, "Sent back").includes("Open in Plan with AI"), "sent back, by its label");
 });
 console.log(`${n} exams page tests passed`);

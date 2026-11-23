@@ -18,9 +18,10 @@
   const NO_SERVER = "Could not reach the server. Check the connection and try again.";
   const WRONG = "Something went wrong. Try again.";
   const MOST_BYTES = 5 * 1024 * 1024, COUNT_FROM = 1800;
+  const KEEP = "plan.talk";       /* sessionStorage: the id of the talk this tab is in, and nothing else of a talk */
   const P = {
     start: null, id: null, lines: [], view: null, last: 0, tok: 0, timer: null, fails: 0, needFull: false, sending: false,
-    alert: "", file: "", touch: false, drawn: new WeakMap()
+    alert: "", alertTimer: null, file: "", touch: false, drawn: new WeakMap()
   };
 
   /* ---------------------------------------------------------------- pure helpers (tests/plan.test.js cuts them out) */
@@ -28,15 +29,26 @@
     return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
 
-  /* a link of the app's own: one "/" and a path, never "//elsewhere" */
+  /* a link of the app's own: one "/" and a path, never "//elsewhere" or "/\\elsewhere", and no space or control character
+     anywhere (a browser drops a tab or a new line, so "/<tab>/host" would be "//host") */
   function isLocal(href) {
-    return typeof href === "string" && href[0] === "/" && href[1] !== "/" && href[1] !== "\\";
+    return typeof href === "string" && /^\/(?![\/\\])[^\s\x00-\x1f\x7f]*$/.test(href);
   }
 
-  /* a link when it is the app's own; anything else is its label as plain text; no link, nothing */
+  /* a link when it is the app's own, opened in a new tab: every link the page draws leaves /plan, and the talk stays open in
+     this tab. Anything else is its label as plain text; no link, nothing */
   function linkHtml(href, label) {
     if (!href) return "";
-    return isLocal(href) ? `<a href="${esc(href)}">${esc(label)}</a>` : esc(label);
+    return isLocal(href) ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(label)}</a>` : esc(label);
+  }
+
+  /* what the page opens on: a new talk on the exam the address names, the talk this tab was in (remembered: its id), or the
+     start screen. -> {how: "exam", exam} | {how: "reopen", id} | {how: "start"} */
+  function bootChoice(search, remembered) {
+    const exam = new URLSearchParams(search || "").get("exam");
+    if (exam) return { how: "exam", exam };
+    if (typeof remembered === "string" && remembered) return { how: "reopen", id: remembered };
+    return { how: "start" };
   }
 
   /* the table of a list line: the head it gives and its rows, or nothing */
@@ -48,13 +60,16 @@
   }
 
   /* one line of the talk. isLast: the talk's last line (its quick answers show there only); working: the AI is answering
-     (no quick answers, and Take it back and a list's buttons wait) */
-  function lineHtml(line, isLast, working) {
+     (no quick answers, and Take it back and a list's buttons wait); examLink: the exam page (view.exam.link), for a done
+     step's "See it" */
+  function lineHtml(line, isLast, working, examLink) {
     const l = line || {}, kind = ["me", "ai", "did", "sys", "list"].includes(l.kind) ? l.kind : "sys", off = working ? " disabled" : "";
     let body = `<div class="tx">${kind === "did" ? "✓ " : ""}${esc(l.text)}</div>`;
     if (kind === "did" && l.step) {
-      if (l.undo === true) body += `<div class="acts"><button type="button" class="small" data-act="undo" data-a="${esc(l.step)}"${off}>Take it back</button></div>`;
-      else if (l.undo === false) body += `<div class="acts"><span class="muted small">Taken back</span></div>`;
+      const see = isLocal(examLink) ? linkHtml(examLink, "See it") : "";
+      const back = l.undo === true ? `<button type="button" class="small" data-act="undo" data-a="${esc(l.step)}"${off}>Take it back</button>`
+        : l.undo === false ? `<span class="muted small">Taken back</span>` : "";
+      if (see || back) body += `<div class="acts">${see}${see && back ? " · " : ""}${back}</div>`;
     }
     if (kind === "list") {
       body += readAsTable(l.table);
@@ -123,6 +138,11 @@
     return "";
   }
 
+  /* the talk this tab is in, by its id only; a browser may refuse the storage, and the page then works without it */
+  function remember(id) { try { sessionStorage.setItem(KEEP, id); } catch (e) { /* no storage */ } }
+  function forget() { try { sessionStorage.removeItem(KEEP); } catch (e) { /* no storage */ } }
+  function remembered() { try { return sessionStorage.getItem(KEEP); } catch (e) { return null; } }
+
   /* ---------------------------------------------------------------- the server */
   /* -> {ok, status, j}; status 0 when the server could not be reached; 401 goes to the sign-in page */
   async function api(method, url, body, form) {
@@ -139,7 +159,7 @@
     if (r.status === 401) location.href = "/login";
     return { ok: r.ok, status: r.status, j: j && typeof j === "object" ? j : {} };
   }
-  const talkUrl = rest => `/api/plan/talks/${encodeURIComponent(P.id)}${rest || ""}`;
+  function talkUrl(rest) { return `/api/plan/talks/${encodeURIComponent(P.id)}${rest || ""}`; }
 
   /* a reply that ends what the page shows: signed out, no AI on the server, or the talk lost. -> whether it was one */
   function ended(r) {
@@ -152,7 +172,7 @@
   function stopPoll() { P.tok++; clearTimeout(P.timer); P.timer = null; }
 
   function drawOff() {
-    stopPoll(); P.id = null;
+    stopPoll(); P.id = null; forget();
     $("#main").innerHTML = `<div class="card"><p>${esc(OFF)}</p></div>`;
   }
 
@@ -184,6 +204,7 @@
       ${lostText ? `<p class="pl-sys" role="alert">${esc(lostText)}</p>` : ""}${lines}
       ${stops ? "" : `<div class="row pl-starts"><button type="button" data-act="plan" data-a="Plan an exam">Plan an exam</button><button type="button" data-act="plan" data-a="Plan a common test">Plan a common test</button>${carry}</div>
       <div class="pl-type"><textarea id="box" rows="2" aria-label="What you would like to plan" placeholder="Type here. For example: I would like to plan an exam timetable"></textarea><button type="button" class="primary" id="send" data-act="send">Send</button></div>
+      <p id="count" class="muted small"></p>
       <p id="alert" class="msg bad" role="alert">${esc(P.alert)}</p>
       <p class="muted small">${esc(CODES)}</p>`}
     </div>`;
@@ -200,10 +221,28 @@
       if (!$("#box") && !$("[data-act=plan]")) { drawStart("", r.j.error || WRONG); return; }
       startBusy(false); setAlert(r.j.error || WRONG); return;
     }
-    P.id = r.j.id; P.tok++; P.lines = []; P.view = null; P.last = 0; P.fails = 0; P.needFull = false; P.alert = ""; P.file = ""; P.touch = false;
-    drawTalk();
-    apply(r.j.view, true);
+    showTalk(r.j.id, r.j.view);
     if (text) { $("#box").value = text; paintCount(); await send(); } else focusBox();
+  }
+
+  /* the talk of this id is drawn from a whole view of it, and remembered */
+  function showTalk(id, view) {
+    P.id = id; P.tok++; P.lines = []; P.view = null; P.last = 0; P.fails = 0; P.needFull = false; P.alert = ""; P.file = ""; P.touch = false;
+    remember(id);
+    drawTalk();
+    apply(view, true);
+  }
+
+  /* the talk this tab was in (a reload, or back from another page): shown again; gone (410) means the start screen, quietly */
+  async function reopen(id) {
+    const r = await api("GET", `/api/plan/talks/${encodeURIComponent(id)}?after=0`);
+    if (r.status === 401) return;
+    if (r.status === 404) { drawOff(); return; }
+    if (r.status === 410) { forget(); drawStart(); focusBox(); return; }
+    if (!r.ok) { drawStart("", r.j.error || WRONG); return; }
+    showTalk(id, r.j);
+    if (!(P.view && P.view.working)) focusBox();
+    schedule();
   }
 
   /* ---------------------------------------------------------------- the talk */
@@ -256,7 +295,7 @@
     const working = !!(P.view && P.view.working), have = new Map();
     Array.from(log.children).forEach(el => have.set(el.dataset.n, el));
     P.lines.forEach((l, i) => {
-      const html = lineHtml(l, i === P.lines.length - 1, working);
+      const html = lineHtml(l, i === P.lines.length - 1, working, P.view && P.view.exam ? P.view.exam.link : null);
       let el = have.get(String(l.n));
       have.delete(String(l.n));
       if (!el) { el = fromHtml(html); P.drawn.set(el, html); }
@@ -276,7 +315,13 @@
   }
 
   function setText(sel, text) { const el = $(sel); if (el && el.textContent !== text) el.textContent = text; }
-  function setAlert(text) { P.alert = text || ""; setText("#alert", P.alert); }
+  /* the alert line is emptied, then filled a moment later, so the same refusal twice is said again */
+  function setAlert(text) {
+    P.alert = text || ""; clearTimeout(P.alertTimer); P.alertTimer = null;
+    const el = $("#alert"); if (!el) return;
+    el.textContent = "";
+    if (P.alert) P.alertTimer = setTimeout(() => { const e = $("#alert"); if (e) e.textContent = P.alert; }, 60);
+  }
   function paintCount() { const b = $("#box"); if (b && $("#count")) setText("#count", b.value.length > COUNT_FROM ? counterText(b.value.length) : ""); }
 
   function paintControls() {
@@ -288,7 +333,6 @@
     $("#stop").hidden = !working; $("#stop").disabled = P.sending;
     $("#newtalk").disabled = P.sending;
     setText("#progress", working ? String(v.progress || "") : "");
-    setText("#alert", P.alert);
     setText("#why", !working && can.why && can.why !== P.alert ? String(can.why) : "");
     setText("#fileline", P.file);
     $("#touch").hidden = !P.touch;
@@ -329,15 +373,16 @@
     schedule();
   }
 
-  /* one of the person's actions on the talk. full: the reply is the whole talk (after 0) */
-  async function act(rest, body, full, form) {
+  /* one of the person's actions on the talk. full: the reply is the whole talk (after 0); fileText: "{name}, {size}" while a
+     file is on its way (the line goes once the answer is back) */
+  async function act(rest, body, full, form, fileText) {
     if (!P.id || P.sending) return false;
-    stopPoll(); P.sending = true; paintControls();
+    stopPoll(); P.sending = true; P.file = fileText || ""; paintControls();
     const r = await api("POST", talkUrl(rest), body, form);
-    P.sending = false;
+    P.sending = false; P.file = "";
     if (r.status === 401 || r.status === 404 || r.status === 410) { ended(r); return false; }
-    if (!r.ok) { P.alert = r.j.error || WRONG; paintControls(); focusBox(); schedule(); return false; }
-    P.alert = ""; P.fails = 0; P.touch = false;
+    if (!r.ok) { paintControls(); setAlert(r.j.error || WRONG); focusBox(); schedule(); return false; }
+    setAlert(""); P.fails = 0; P.touch = false;
     apply(r.j, full);
     if (!(P.view && P.view.working)) focusBox();
     schedule();
@@ -367,24 +412,26 @@
 
   function addFile(f) {
     if (!f) return;
-    P.file = `${f.name}, ${sizeText(f.size)}`;
-    if (f.size > MOST_BYTES) { P.alert = BAD_FILE; paintControls(); return; }   /* the page says so itself and sends nothing */
+    const text = `${f.name}, ${sizeText(f.size)}`;
+    if (f.size > MOST_BYTES) { P.file = text; paintControls(); setAlert(BAD_FILE); return; }   /* the page says so itself and sends nothing */
     const form = new FormData(); form.append("file", f, f.name);
-    act(`/list?after=${P.last}`, undefined, false, form);
+    act(`/list?after=${P.last}`, undefined, false, form, text);
   }
 
   async function newTalk() {
     if (!window.confirm(NEW_TALK)) return;
+    if (P.sending) return;
     const id = P.id; stopPoll();
-    if (id) { const r = await api("DELETE", `/api/plan/talks/${encodeURIComponent(id)}`); if (r.status === 401) return; if (r.status === 404) { drawOff(); return; } }
-    P.id = null;
+    P.sending = true; P.id = null; forget(); paintControls();    /* nothing more is sent to the talk being closed */
+    if (id) { const r = await api("DELETE", `/api/plan/talks/${encodeURIComponent(id)}`); if (r.status === 401) return; if (r.status === 404) { P.sending = false; drawOff(); return; } }
+    P.sending = false;
     if (location.search) history.replaceState(null, "", "/plan");
     if (await loadStart()) { drawStart(); focusBox(); }
   }
 
   /* 410: the talk is gone (the app restarted, or it was closed): the sentence, and the start screen with its Carry on buttons */
   async function lost(text) {
-    stopPoll(); P.id = null;
+    stopPoll(); P.id = null; forget();
     if (location.search) history.replaceState(null, "", "/plan");
     if (await loadStart()) drawStart(text || LOST);
   }
@@ -419,7 +466,9 @@
 
   (async function boot() {
     if (!(await loadStart())) return;
-    const exam = new URLSearchParams(location.search).get("exam");
-    if (exam) openTalk(exam, ""); else { drawStart(); focusBox(); }
+    const go = bootChoice(location.search, remembered());
+    if (go.how === "exam") openTalk(go.exam, "");      /* a new talk on that exam; it is remembered in place of the old one */
+    else if (go.how === "reopen") reopen(go.id);
+    else { drawStart(); focusBox(); }
   })();
 })();

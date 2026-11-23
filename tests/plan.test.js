@@ -11,9 +11,9 @@ function cut(name) {
   for (; i < SRC.length; i++) { if (SRC[i] === "{") depth++; else if (SRC[i] === "}" && --depth === 0) break; }
   return SRC.slice(at, i + 1);
 }
-const HELPERS = ["esc", "isLocal", "linkHtml", "readAsTable", "lineHtml", "checklistHtml", "nextWait", "sizeText", "summaryText", "mergeLines", "counterText"];
+const HELPERS = ["esc", "isLocal", "linkHtml", "bootChoice", "readAsTable", "lineHtml", "checklistHtml", "nextWait", "sizeText", "summaryText", "mergeLines", "counterText"];
 const H = new Function(`${HELPERS.map(cut).join("\n")}\nreturn { ${HELPERS.join(", ")} };`)();
-const { esc, lineHtml, checklistHtml, readAsTable, nextWait, sizeText, summaryText, mergeLines, counterText } = H;
+const { esc, isLocal, linkHtml, bootChoice, lineHtml, checklistHtml, readAsTable, nextWait, sizeText, summaryText, mergeLines, counterText } = H;
 
 let n = 0; const t = (name, f) => { f(); n++; };
 const BAD = `<script>alert("x")</script>`;
@@ -106,13 +106,48 @@ t("checklistHtml: a mark and words by state, the title, the text and Open only f
   assert(lis[0].includes("✓") && lis[0].includes("Done"), "done: a tick");
   assert(lis[1].includes(">To check<")); assert(lis[2].includes(">Still to do<")); assert(lis[3].includes(">As last time<")); assert(lis[4].includes(">On the exam page<"));
   items.forEach((x, i) => { assert(lis[i].includes(x.title), x.key); assert(lis[i].includes(esc(x.text)), x.key + " text"); });
-  assert(lis[0].includes('<a href="/exams/ab12#when">Open</a>'));
+  assert(lis[0].includes('<a href="/exams/ab12#when" target="_blank" rel="noopener">Open</a>'), "in a new tab: the talk stays open");
   assert(!lis[2].includes("Open"), "no link, no Open");
   const odd = checklistHtml([{ title: BAD, state: "done", text: BAD, link: "javascript:alert(1)" }, { title: "x", state: "todo", text: "y", link: "//elsewhere.example/x" },
     { title: "x", state: "todo", text: "y", link: "https://elsewhere.example/x" }]);
   noScript(odd, "checklist");
   assert(!odd.includes("<a "), "a link that does not start with one / is never a link");
   assert(!odd.includes("javascript:") && !odd.includes("elsewhere.example"));
+});
+
+t("isLocal: only a path of the app's own, with no space or control character in it", () => {
+  for (const h of ["/exams/ab12#papers", "/exams/settings", "/", "/relief/settings?x=1"]) assert.strictEqual(isLocal(h), true, h);
+  for (const h of ["//host/x", "/\\host", "/\t/host", "/\n/host", "/ex ams", "/a\u0000b", "/a\u007fb", "https://host/x", "javascript:alert(1)", "exams", "", null, 3, undefined])
+    assert.strictEqual(isLocal(h), false, JSON.stringify(h));
+});
+
+t("linkHtml: a link that leaves the page opens in a new tab; anything else is plain text", () => {
+  assert.strictEqual(linkHtml("/exams/ab12#when", "Open"), '<a href="/exams/ab12#when" target="_blank" rel="noopener">Open</a>');
+  assert.strictEqual(linkHtml("/exams/a\"b", "x"), '<a href="/exams/a&quot;b" target="_blank" rel="noopener">x</a>');
+  assert.strictEqual(linkHtml("https://host/x", BAD), esc(BAD));
+  assert.strictEqual(linkHtml("", "Open"), ""); assert.strictEqual(linkHtml(null, "Open"), "");
+});
+
+t("the start: a new talk on the exam the address names, else the remembered talk, else the start screen", () => {
+  assert.deepStrictEqual(bootChoice("?exam=ab12cd34", "T1"), { how: "exam", exam: "ab12cd34" }, "the address wins over the remembered talk");
+  assert.deepStrictEqual(bootChoice("?exam=ab12cd34", null), { how: "exam", exam: "ab12cd34" });
+  assert.deepStrictEqual(bootChoice("", "T1"), { how: "reopen", id: "T1" });
+  assert.deepStrictEqual(bootChoice("?exam=", "T1"), { how: "reopen", id: "T1" });
+  assert.deepStrictEqual(bootChoice("", null), { how: "start" });
+  assert.deepStrictEqual(bootChoice("", ""), { how: "start" });
+  assert.deepStrictEqual(bootChoice(undefined, undefined), { how: "start" });
+});
+
+t("a done step has See it to the exam page in a new tab, from the exam's own link only", () => {
+  const did = line({ kind: "did", text: "Put 31 papers in the draft", step: "s1", undo: true });
+  const html = lineHtml(did, false, false, "/exams/ab12");
+  assert(/<a href="\/exams\/ab12" target="_blank" rel="noopener">See it<\/a> · <button[^>]*data-act="undo"/.test(html), html);
+  assert(lineHtml(Object.assign({}, did, { undo: false }), false, false, "/exams/ab12").includes('rel="noopener">See it</a> · <span class="muted small">Taken back</span>'));
+  assert(!lineHtml(did, false, false, null).includes("See it"), "no exam link, no See it");
+  assert(!lineHtml(did, false, false, "https://host/x").includes("See it"), "not the app's own");
+  assert(!lineHtml(did, false, false, "//host/x").includes("<a "));
+  assert(!lineHtml(line({ kind: "did", text: "Taken back: x", step: null, undo: false }), false, false, "/exams/ab12").includes("See it"), "a line with no step");
+  assert(!lineHtml(line({ kind: "ai", text: "/exams/zz" }), true, false, "/exams/ab12").includes("<a "), "words never become a link");
 });
 
 t("the poll waits a second while working, not at all when done, 3 s after a failure, and gives up after 5", () => {
@@ -161,4 +196,46 @@ t("the fixed sentences are on the page, and no em dash in any of its words", () 
   assert(!/innerHTML\s*=\s*[a-z]+\.j\b/.test(SRC), "nothing of a reply is put in as HTML whole");
 });
 
-console.log(`${n} plan page tests passed`);
+/* the answer's life: the real schedule, poll, apply, act and send, with a made-up fetch and made-up timers */
+const LIFE = ["api", "talkUrl", "ended", "stopPoll", "schedule", "poll", "apply", "act", "send", "mergeLines", "nextWait"];
+async function life() {
+  let now = 0, seq = 0, timers = [];
+  const setT = (fn, ms) => { const id = ++seq; timers.push({ id, at: now + ms, fn }); return id; };
+  const clearT = id => { timers = timers.filter(x => x.id !== id); };
+  const settle = () => new Promise(r => setImmediate(r));
+  const advance = async ms => {
+    const end = now + ms;
+    for (let k = 0; ; k++) {
+      assert(k < 100, "the page keeps asking");
+      timers.sort((a, b) => a.at - b.at); const x = timers[0]; if (!x || x.at > end) break; timers.shift(); now = x.at; x.fn(); await settle();
+    }
+    now = end;
+  };
+  const calls = []; let polls = 0;
+  const view = (o) => Object.assign({ lines: [], working: false, progress: "", exam: null, checklist: [], missing: [], can: { say: true, list: true, stop: false, why: "" }, last: 1 }, o);
+  const fetch = async (url, o) => {
+    calls.push([now, o.method, url]);
+    let body;
+    if (o.method === "POST") body = view({ lines: [{ n: 1, kind: "me", text: "Plan Sec 3" }], working: true, progress: "Thinking", last: 1 });
+    else if (url.endsWith("after=0")) body = view({ lines: [{ n: 1, kind: "me", text: "Plan Sec 3" }, { n: 2, kind: "ai", text: "Which dates?" }], last: 2 });
+    else { polls++; body = polls < 3 ? view({ working: true, progress: "Thinking" }) : view({ lines: [{ n: 2, kind: "ai", text: "Which dates?" }], last: 2 }); }
+    return { ok: true, status: 200, json: async () => body };
+  };
+  const P = { start: null, id: "T1", lines: [], view: view({ last: 0 }), last: 0, tok: 0, timer: null, fails: 0, needFull: false, sending: false, alert: "", file: "", touch: false };
+  const box = { value: "Plan Sec 3", disabled: false };
+  const no = () => {};
+  const f = new Function("P", "$", "fetch", "location", "WRONG", "NO_SERVER", "paint", "paintControls", "focusBox", "setAlert", "paintCount", "drawOff", "lost", "openTalk", "setTimeout", "clearTimeout",
+    `${LIFE.map(x => (SRC.slice(SRC.indexOf(`function ${x}(`) - 6, SRC.indexOf(`function ${x}(`)) === "async " ? "async " : "") + cut(x)).join("\n")}\nreturn { send, schedule };`)(
+    P, sel => sel === "#box" ? box : null, fetch, { href: "/plan" }, "Wrong.", "No server.", no, no, no, no, no, no, no, no, setT, clearT);
+  f.send(); f.send();                                       /* a second Send while the first is on its way */
+  await settle();
+  assert.deepStrictEqual(calls.map(c => c.slice(1)), [["POST", "/api/plan/talks/T1/say"]], "one POST only");
+  assert.strictEqual(box.value, "", "the box is emptied once it is sent");
+  await advance(20000);
+  assert.deepStrictEqual(calls.slice(1), [[1000, "GET", "/api/plan/talks/T1?after=1"], [2000, "GET", "/api/plan/talks/T1?after=1"], [3000, "GET", "/api/plan/talks/T1?after=1"],
+    [3000, "GET", "/api/plan/talks/T1?after=0"]], "a poll a second while working, then ONE whole read");
+  assert.deepStrictEqual(timers, [], "then nothing more is asked");
+  assert.deepStrictEqual([P.lines.map(l => l.n), P.last, P.view.working, P.needFull], [[1, 2], 2, false, false]);
+}
+
+life().then(() => { n++; console.log(`${n} plan page tests passed`); }).catch(e => { console.error(e); process.exit(1); });
