@@ -50,6 +50,7 @@ WAIT_LIST = "Say Yes, all or Not now to the list above first."
 NEED_EXAM = "Start the exam first: say what it is, its name and its dates."
 EMPTY_LIST = "Paste the list, or give an Excel or Word file."
 NOT_WAITING = "That list is not waiting any more."
+CARRY_ON = "This talk carries on with {name}. Say what you want to do next."
 GONE = _steps.GONE
 
 THINKING = "Thinking"
@@ -125,6 +126,7 @@ def open(owner, env, exam=None) -> Talk:
     talk = Talk(owner, _names(env, pub), _make.published_at(pub or {}))
     if s is not None:
         talk.exam, talk.last_rev = s["id"], _schedules.rev_of(s)
+        talk.add("sys", CARRY_ON.format(name=s.get("name") or "this exam"))        # the page's line only: the AI has its own note
     with _server:
         mine = [t for t in _talks.values() if t.owner == owner]
         while len(mine) >= LIMITS["talks"]:

@@ -45,7 +45,7 @@ SYSTEM = """You help one person at a school plan an exam or a common test in the
 
 You can act only through the actions you are given. The app, not you, checks every change and makes it, so the draft is always what the app says it is. When the app refuses a change it answers with one plain sentence saying why: the change was not made, and you tell the person so in plain words and never say it was done. A change is made whole or not at all, and what is done stays done.
 
-What you can fill in here: start an exam or a common test; its name, levels, classes and first and last day; which days are whole days or part of a day; its papers and their lengths; the date and start of each paper; the report time, the break between papers and the most papers a day; and the seating choices. Sending an exam for approval, approving it, deleting it, extra time, which students sit a paper, the exam settings (the people, the rooms and the numbers, lines 6 to 8 of the checklist) and Make are all done on the exam page. When the person asks for one of them, say that it is done on the exam page, and do not try.
+What you can fill in here: start an exam or a common test; its name, levels, classes and first and last day; which days are whole days or part of a day; its papers and their lengths; the date and start of each paper; the report time, the break between papers and the most papers a day; and the seating choices. Sending an exam for approval, approving it, sending it back, withdrawing it, deleting it, extra time, which students sit a paper, the exam settings (the people, the rooms and the numbers, lines 6 to 8 of the checklist) and Make are all done on the exam page. When the person asks for one of them, say that it is done on the exam page, and do not try.
 
 Ask one question at a time, and keep it short, because the person is busy and reads the talk on a small panel. When a question has a few likely answers, offer at most four quick answers of a few words each, so the person can press one instead of typing. Keep your own messages short and plain.
 
@@ -443,7 +443,20 @@ def _decode(r):
         return r
 
 
-def _words(r) -> str:
+def _then(*said) -> str:
+    """sentences one after another: a full stop and a space between the app's words and the next"""
+    out = ""
+    for x in (str(x).strip() for x in said if x and str(x).strip()):
+        out = (out + ("" if out[-1:] in (".", "!", "?", ":") else ".") + " " + x) if out else x
+    return out
+
+
+def _refused(r) -> bool:
+    """a result that is the app's plain sentence (a refusal, or nothing to show), not what a step did"""
+    return isinstance(_decode(r), str)
+
+
+def _words(r, none="The app has done that.") -> str:
     """what the app said in a tool result: the result's own text, or the text of its lines"""
     r, found = _decode(r), []
 
@@ -457,7 +470,7 @@ def _words(r) -> str:
     if isinstance(r, str):
         return r
     walk(r)
-    return " ".join(found)[:600] or "The app has done that."
+    return _then(*found)[:600] or none
 
 
 def _dicts_in(x) -> list:
@@ -505,7 +518,8 @@ def mock_call(messages, stop=None, deadline=None):
       "put <paper> on <date> at <time>": read_exam, then set_times with said = the person's own text;
       "keep as last time": keep_last;
       "check": read_checks, and says what came back.
-    Anything else gets MOCK_HELP. After an action it says the app's own words; it never calls an exam clear."""
+    Anything else gets MOCK_HELP. After an action it says the app's own words, a full stop between them and its next
+    sentence; after a refused one only the app's sentence; it never calls an exam clear."""
     msgs = [m for m in messages or [] if isinstance(m, dict)]
     at = max((i for i, m in enumerate(msgs) if m.get("role") == "user" and _texts(m.get("content"))), default=None)
     if at is None:
@@ -528,10 +542,10 @@ def mock_call(messages, stop=None, deadline=None):
         return dict(stop_reason="tool_use", content=[dict(type="tool_use", id=f"mock{n + 1}", name=tool, input=args)], usage={})
 
     def act(tool, then=None, **args):
-        """one action, then its words (and then)"""
+        """one action, then its words (and then, unless the app refused it)"""
         if not done:
             return use(tool, **args)
-        return _say((_words(done[0][2]) + " " + (then or "")).strip())
+        return _say(_words(done[0][2]) if _refused(done[0][2]) else _then(_words(done[0][2]), then))
 
     def earlier(name):
         return [_get(b, "input") for m in msgs for b in (m.get("content") if isinstance(m.get("content"), list) else [])
@@ -546,9 +560,11 @@ def mock_call(messages, stop=None, deadline=None):
             levels = [x for x in re.split(r"\s+and\s+|\s*/\s*", m.group(2).strip()) if x]
             return use("start_exam", kind="test" if test else "exam", name=m.group(1).strip(), levels=levels, classes=[],
                        start=m.group(3), end=m.group(4))
+        if _refused(done[0][2]):
+            return _say(_words(done[0][2]))
         if names == ["start_exam"]:
             return use("offer_answers", answers=[WHOLE, PART])
-        return _say(_words(done[0][2]) + " " + ASK_DAYS)
+        return _say(_then(_words(done[0][2]), ASK_DAYS))
     if w in ("whole day", "whole days"):
         dates = [(x.get("start"), x.get("end")) for x in earlier("start_exam") + earlier("set_basics") if x.get("start") and x.get("end")]
         if not dates:
@@ -599,5 +615,6 @@ def mock_call(messages, stop=None, deadline=None):
     if w == "check":
         if not done:
             return use("read_checks")
-        return _say("The app's checks say: " + _words(done[0][2]))
+        said = _words(done[0][2], none="")
+        return _say("The app's checks say: " + said if said else "The app's check found nothing to fix.")
     return _say(MOCK_HELP)

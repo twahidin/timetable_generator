@@ -710,6 +710,14 @@ function rigIc(extra) {
     f.blockPage("Blocked."); g.go(); await w; await p;
     assert.ok(!srv.calls.some(x => x[1] === "/in-charge"), "the change is not sent"); assert.deepStrictEqual([S.busy, S.sched.in_charge], [false, "Ms A"]);
   });
+  c("another tab changes the teacher in charge again: with an edit waiting, the whole schedule's newer name is taken, no block", async () => {
+    const { S, srv, f } = rigIc();
+    await f.icChange(); assert.strictEqual(S.sched.in_charge, "Mr B");
+    srv.sched.in_charge = "Ms C"; srv.sched.rev++;                                   /* another tab, since */
+    f.edit(() => { S.sched.name = "Mine"; }); clearTimeout(S.timer); S.timer = null;
+    assert.strictEqual(f.takeSched(JSON.parse(JSON.stringify(srv.sched))), true);
+    assert.deepStrictEqual([S.blocked, S.sched.in_charge, S.sched.name, S.dirty], [false, "Ms C", "Mine", true], S.blockMsg);
+  });
   c("the other tab, opened before the change, is refused on its next save", async () => {
     const { S, srv, f } = rigIc(); srv.sched.rev = 2; srv.sched.in_charge = "Mr B";   /* the change, made from another tab */
     f.edit(() => { S.sched.name = "Mine"; }); await f.flush();

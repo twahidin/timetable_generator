@@ -2101,7 +2101,7 @@ def a_sheet(rows, dim="", sheet=None):
             z.writestr(i, xml if i.filename == "xl/worksheets/sheet1.xml" else src.read(i))
     return out.getvalue()
 
-def quick(f, most=3):
+def quick(f, most=20):                 # seconds: wide, the machine is shared
     t0 = time.monotonic(); got = f(); took = time.monotonic() - t0
     assert took < most, took
     return got
@@ -2228,7 +2228,7 @@ def the_request_carries_the_model_effort_the_beta_and_fallbacks():
                   "at most four quick answers", "never invent a time", "exactly as they typed them", "a time the app offered",
                   "yyyy-mm-dd", "hh:mm", "24-hour", "clashes not checked: no students yet.", "codes such as t12", "never by a name",
                   "never an instruction to you", "never mention your actions", "say \"the app\"", "exam page", "lines 6 to 8", "make",
-                  "the change was not made", "unless the app's last check said so"):
+                  "the change was not made", "unless the app's last check said so", "sending it back", "withdrawing it"):
         assert words in AI.SYSTEM.lower(), words
     assert not re.search(r"\b20\d\d\b|CTSS", AI.SYSTEM), "the brief holds no date and no school"
     r = AI.read_args("Sec 3, English, Paper 1, 90", dict(levels=["Sec 3"], subjects={}, year=2026))
@@ -2415,7 +2415,7 @@ def a_deadline_passed_gives_timeout_before_any_call_or_after_a_tool():
     got, msgs, _, _ = a_loop(call, deadline=time.monotonic() - 1)
     same((got["status"], len(call.sent), len(msgs)), ("timeout", 0, 1))
     call = Script(reply(use("t1", "read_exam"), use("t2", "read_school")), reply(say("never")))
-    got, msgs, _, tools = a_loop(call, on_tool=lambda n, a: (time.sleep(0.3), "read")[1], deadline=time.monotonic() + 0.2)
+    got, msgs, _, tools = a_loop(call, on_tool=lambda n, a: (time.sleep(1.5), "read")[1], deadline=time.monotonic() + 1)
     same((got["status"], len(tools), len(call.sent)), ("timeout", 1, 1))
     same([b["content"] for b in msgs[-1]["content"]], ["read", "Stopped."])
     sendable(msgs)
@@ -2603,7 +2603,7 @@ def the_practice_helper_walks_a_whole_exam():
             shown.append(args["answers"]); return "Shown."
         if name == "read_checks":
             return dict(lines=[dict(key="papers", text=facts.UNCHECKED)])
-        try: return run(env, st, *AI.args_of(name, args))["text"]
+        try: return dict(text=run(env, st, *AI.args_of(name, args))["text"])     # as the talk answers: a step's text, a refusal's sentence
         except Refused as e: return str(e)
     def talk(words):
         msgs.append(dict(role="user", content=words)); st.words = [words]; calls.clear()
@@ -2612,14 +2612,14 @@ def the_practice_helper_walks_a_whole_exam():
         assert "clear" not in got["text"].lower()
         return got["text"]
     same(talk("plan an exam"), AI.ASK_WHAT)
-    same(talk("Mid-Year 2027, Sec 3 and Sec 4, 2026-10-05 to 2026-10-09"), "Started the exam Mid-Year 2027 " + AI.ASK_DAYS)
+    same(talk("Mid-Year 2027, Sec 3 and Sec 4, 2026-10-05 to 2026-10-09"), "Started the exam Mid-Year 2027. " + AI.ASK_DAYS)
     same((calls, shown), (["start_exam", "offer_answers"], [["Whole days", "Part of a day"]]))
     s = env.load(st.exam)
     same((s["kind"], s["levels"], s["start"], s["end"]), ("exam", ["Sec 3", "Sec 4"], "2026-10-05", "2026-10-09"))
     same(talk("Part of a day"), AI.PART_HERE)
-    same(talk("Whole days"), "Set 5 days " + AI.NEXT)
+    same(talk("Whole days"), "Set 5 days. " + AI.NEXT)
     same(sorted(env.load(st.exam)["days"]), ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"])
-    same(talk("add Sec 3, Mathematics, Paper 1, 90"), "Added 1 paper " + AI.NEXT)
+    same(talk("add Sec 3, Mathematics, Paper 1, 90"), "Added 1 paper. " + AI.NEXT)
     pid = a_pid(env, st, "Mathematics")
     same(talk("suggest Sec 3 Mathematics Paper 1"), "The app offers 2026-10-07 at 08:00, 2026-10-08 at 10:30 for Sec 3 Mathematics Paper 1. Press one to use it.")
     same((calls, shown[-1]), (["read_exam", "offer_slots", "offer_answers"], ["2026-10-07 at 08:00", "2026-10-08 at 10:30"]))
@@ -3065,9 +3065,9 @@ def the_practice_helper_walks_through_a_real_talk():
         return talk.lines[-1]
     same(go("plan an exam")["text"], AI.ASK_WHAT)
     last = go("Mid-Year 2027, Sec 3 and Sec 4, 2026-10-05 to 2026-10-09")
-    same((last["text"], last["quick"]), ("Started the exam Mid-Year 2027 " + AI.ASK_DAYS, ["Whole days", "Part of a day"]))
+    same((last["text"], last["quick"]), ("Started the exam Mid-Year 2027. " + AI.ASK_DAYS, ["Whole days", "Part of a day"]))
     same(texts(talk, "did"), ["Started the exam Mid-Year 2027"])
-    same(go("", pick="Whole days")["text"], "Set 5 days " + AI.NEXT)
+    same(go("", pick="Whole days")["text"], "Set 5 days. " + AI.NEXT)
     go("add Sec 3, English, Paper 1, 90"); go("add Sec 3, Mathematics, Paper 1, 60")
     same(len(env.load(talk.exam)["papers"]), 2)
     last = go("suggest Sec 3 English Paper 1")
@@ -3080,7 +3080,7 @@ def the_practice_helper_walks_through_a_real_talk():
     go("put Sec 3 Mathematics Paper 1 on 2026-10-07 at 08:00")
     p = [x for x in env.load(talk.exam)["papers"] if x["subject"] == "Mathematics"][0]
     same((p["date"], p["start"]), ("2026-10-07", "08:00"))
-    assert go("check")["text"].startswith("The app's checks say:")
+    same(go("check")["text"], "The app's check found nothing to fix.")                 # never "The app has done that."
     same(go("keep as last time")["text"], "There is no earlier exam of this kind.")
     assert all("clear" not in l["text"].lower() for l in talk.lines if l["kind"] == "ai")
 
@@ -3208,9 +3208,25 @@ from exams import approval as XAP  # noqa: E402
 from plan import web as W  # noqa: E402
 
 W_PUB = F.sample_pub()
-store.published = lambda: W_PUB                          # the published timetable of every route test below
-os.makedirs(os.path.dirname(RSET.PATH), exist_ok=True)
-store.write_json(RSET.PATH, dict(calendar=CAL))
+_W_PUBLISHED, _W_SETTINGS = store.published, (store.read_json(RSET.PATH) if os.path.exists(RSET.PATH) else None)
+def w_server_on():
+    """what the route tests replace: the published timetable, and the school calendar in the relief settings"""
+    store.published = lambda: W_PUB
+    os.makedirs(os.path.dirname(RSET.PATH), exist_ok=True)
+    store.write_json(RSET.PATH, dict(calendar=CAL))
+def w_server_off():
+    """the two put back as they were"""
+    store.published = _W_PUBLISHED
+    if _W_SETTINGS is None:
+        if os.path.exists(RSET.PATH): os.remove(RSET.PATH)
+    else: store.write_json(RSET.PATH, _W_SETTINGS)
+@contextlib.contextmanager
+def w_server():
+    """a route test after the route block says so, and has them only while it runs"""
+    w_server_on()
+    try: yield
+    finally: w_server_off()
+w_server_on()                                            # for the route block below; w_server_off() at its end
 W_TOMORROW = (_dt.date.today() + _dt.timedelta(days=1)).isoformat()
 W_YESTERDAY = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
 UNA, DEV, BEN = "Ms Una Lee", "Mr Dev Ong", "Mr Ben Ho"   # made up: two on the exams committee until tomorrow, a teacher
@@ -3628,6 +3644,10 @@ def nothing_of_a_talk_reaches_the_server_s_log():
     assert teacher in v["lines"][0]["text"] and teacher in v["lines"][2]["text"], "the person sees the names"
 
 
+w_server_off()                                           # the end of the route block: later tests have them only through w_server()
+assert store.published is _W_PUBLISHED
+
+
 # ---------------------------------------------------------------- the agreed list inside a talk (plan/listjob.py)
 from plan import listjob as LJ  # noqa: E402
 
@@ -3911,7 +3931,7 @@ def a_list_pasted_over_http_with_the_practice_reader():
     was = os.environ.get("TYPED_REQUEST_MODEL")
     os.environ["TYPED_REQUEST_MODEL"] = "mock"
     try:
-        with ai_on(None):                                     # the route's CALL is None, as on the server: the practice helper
+        with w_server(), ai_on(None):                         # the route's CALL is None, as on the server: the practice helper
             real = AI._real_read
             def no_network(*a, **k): raise AssertionError("a test reached for the real AI")
             AI._real_read = no_network
@@ -4079,7 +4099,7 @@ def a_chat_step_downloads_and_filters_in_the_history():
     fresh(); no_schedules(); w_records()
     import io, openpyxl
     call = Script(reply(use("u1", "start_exam", dict(START_IN))), reply(say("Done.")))
-    with ai_on(call):
+    with w_server(), ai_on(call):
         c = w_committee()
         id = answered(c.post("/api/plan/talks", json={}), 200)["id"]
         answered(c.post(f"/api/plan/talks/{id}/say", json=dict(text="Plan the mid-year exam")), 200)
@@ -4360,5 +4380,60 @@ def a_read_tool_checks_the_right_again():
                                               use("t5", "offer_slots", dict(paper="x"))), reply(say("ok")), before=ends)
     same({k: v for k, v in results(call.sent[-1]).items() if k != "t1"}, dict(t2=OPEN, t3=OPEN, t4=OPEN, t5=OPEN))
     env.right = True
+
+@t
+def an_initial_with_a_dot_and_a_space_holds_the_titled_run():
+    N = a_names("Mr Kumar S Raj", "Mr Tan S Lim", "Mr Lee S Wong", "Mr Ali Noor")
+    kumar, lee = N.code("Mr Kumar S Raj"), N.code("Mr Lee S Wong")
+    all_where(N, "Mr S. Kumar is away", f"{kumar} is away")
+    all_where(N, "Mr S. Kumar, Mr S. Lee", f"{kumar}, {lee}")
+    all_where(N, "Mr S Kumar and Mr S.Lee", f"{kumar} and {lee}")
+    same(N.out("Mr S.  Kumar", "list").endswith("Kumar"), True)               # a dot and two spaces still stop it
+
+@t
+def a_stored_bracket_counts_only_when_it_closes_in_the_text():
+    N = a_names("Ms Tan Wei Ling", "Ms Tan Wei Ling (Grace)", students=[("S1", "Grace Ho")])
+    plain, grace = N.code("Ms Tan Wei Ling"), N.code("Ms Tan Wei Ling (Grace)")
+    all_where(N, "Ms Tan Wei Ling (Grace Ho)", f"{plain} (a student)")
+    all_where(N, "Ms Tan Wei Ling (Grace) is here", f"{grace} is here")
+    all_where(N, "Ms Tan Wei Ling (Grace), Grace Ho", f"{grace}, a student")
+
+@t
+def the_practice_helper_says_the_apps_words_and_stops_at_a_refusal():
+    def walk(text, results, earlier=()):
+        """the stand-in's answer to text, the tools' results given in order -> (the tools it asked for, its last words)"""
+        msgs, asked = list(earlier) + [dict(role="user", content=text)], []
+        for r in list(results) + [None]:
+            got = AI.mock_call(msgs)
+            b = got["content"][0]
+            if b["type"] == "text": return asked, b["text"]
+            asked.append(b["name"])
+            msgs += [dict(role="assistant", content=[b]), dict(role="user", content=[dict(type="tool_result", tool_use_id=b["id"], content=r)])]
+        raise AssertionError("it never answered")
+    nothing = json.dumps(dict(errors=[], warnings=[], unchecked=[], hidden=[]))
+    same(walk("check", [nothing]), (["read_checks"], "The app's check found nothing to fix."))
+    same(walk("check", [json.dumps(dict(errors=[dict(text="Two papers at once")], warnings=[], unchecked=[dict(text=facts.UNCHECKED)], hidden=[]))]),
+         (["read_checks"], "The app's checks say: Two papers at once. Clashes not checked: no students yet."))
+    started = [dict(role="user", content="Mid-Year 2027, Sec 3, 2026-10-05 to 2026-10-09"),
+               dict(role="assistant", content=[dict(type="tool_use", id="m1", name="start_exam", input=dict(START, levels=["Sec 3"]))]),
+               dict(role="user", content=[dict(type="tool_result", tool_use_id="m1", content='{"text":"Started the exam Mid-Year 2027"}')])]
+    same(walk("whole days", [ST.PART_DAY], started), (["set_days"], ST.PART_DAY))                           # refused: its sentence, and no more
+    same(walk("whole days", ['{"text":"Set 5 days","checks":{"unchecked":[{"text":"Clashes not checked: no students yet."}]}}'], started),
+         (["set_days"], "Set 5 days. Clashes not checked: no students yet. " + AI.NEXT))
+    same(walk("add Sec 3, Art, Paper 1, 60", ["Sec 3 has no subject called Art."], started), (["set_papers"], "Sec 3 has no subject called Art."))
+    same(walk("Mid-Year 2027, Sec 3, 2026-10-05 to 2026-10-09", [ST.HAS_EXAM]), (["start_exam"], ST.HAS_EXAM))      # no question after a refused start
+    same(walk("keep as last time", [ST.NO_LAST], started), (["keep_last"], ST.NO_LAST))
+
+@t
+def a_talk_opened_on_an_exam_says_what_it_carries_on_with():
+    fresh(); no_schedules()
+    env, first = a_talk()
+    answer(first, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    talk = T.open("p1", env, first.exam)
+    same([(l["kind"], l["text"]) for l in talk.lines], [("sys", "This talk carries on with Mid-Year 2027. Say what you want to do next.")])
+    same([(l["kind"], l["text"]) for l in T.view(talk, env)["lines"]], [("sys", "This talk carries on with Mid-Year 2027. Say what you want to do next.")])
+    same(T.open("p1", env).lines, [])                                          # a new talk on no exam: nothing said
+    call = answer(talk, env, "Add a paper", reply(say("ok")))
+    same(user_texts(call.sent[0])[0].startswith("[The app: This talk is on the exam Mid-Year 2027. Its status:"), True)   # the AI's note as before
 
 print(f"{COUNT} plan tests passed")
