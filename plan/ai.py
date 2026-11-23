@@ -3,7 +3,7 @@ of one piece of a pasted list (read_piece) and a practice stand-in that needs no
 TYPED_REQUEST_MODEL=mock). No Flask here. The AI only asks for actions: the app (steps, through the talk's on_tool) makes
 every check and every change. Nothing of a talk is logged: a fault is logged as its type and frames only, never its text,
 a message or an argument. The real client is built only inside _client, and only when a real call is made."""
-import copy, json, logging, re, threading, time, traceback
+import copy, json, logging, re, threading, time, traceback, unicodedata
 
 import typed
 from exams import schedules as _schedules
@@ -34,10 +34,69 @@ def enabled() -> bool:
     return typed.enabled()
 
 
-def _fault(e):
-    """the type of a fault and its frames, never its text"""
+_QUOTES = frozenset("'\"`\u00b4\u2032\u2033\u201a\u201e\u300c\u300d\u300e\u300f\uff02\uff07\uff40"
+                     "\u02bc\u02b9\u2035\u2034\u275b\u275c\u275d\u275e\u301d\u301e\u301f\uff62\uff63\u300a\u300b\u3008\u3009\u276e\u276f")
+_ENDINGS = ("t", "s", "re", "ve", "ll", "d", "m")       # what a contraction or a possessive puts after its apostrophe
+_REASON_MAX = 300
+
+
+def _is_quote(text, i) -> bool:
+    c = text[i]
+    if c in "'\u2019" and i > 0 and text[i - 1].isalpha():        # between two letters, with one of the endings, it is an apostrophe
+        for end in _ENDINGS:
+            k = i + 1 + len(end)
+            if text.startswith(end, i + 1) and (k >= len(text) or not text[k].isalnum()):
+                return False
+    return c in _QUOTES or unicodedata.category(c) in ("Pi", "Pf")
+
+
+def _reason(text) -> str:
+    """the provider's short reason made safe for a log: kept only up to the first quote mark, from which everything is replaced by
+    one ellipsis (so nothing quoted, and nothing after a quote, can survive); only then format characters dropped, control
+    characters and whitespace runs one space, cut to 300 characters; anything that is not a text gives "" and it never raises"""
+    try:
+        if not isinstance(text, str):
+            return ""
+        t = text
+        for i in range(len(t)):                 # on the text as it came, so an invisible character next to a mark cannot hide it
+            if _is_quote(t, i):
+                t = t[:i] + "\u2026"
+                break
+        t = "".join(" " if unicodedata.category(c) == "Cc" or c.isspace() else c for c in t if unicodedata.category(c) != "Cf")
+        t = re.sub(r" +", " ", t).strip()
+        return t if len(t) <= _REASON_MAX else t[:_REASON_MAX - 1] + "\u2026"
+    except Exception:
+        return ""
+
+
+def _refusal(e) -> str:
+    """" | status 400 invalid_request_error: reason" for the provider's 4xx status errors, else "" (read with getattr: no SDK import)"""
+    code = getattr(e, "status_code", None)
+    if not isinstance(code, int) or isinstance(code, bool) or not 400 <= code <= 499:
+        return ""
+    kind = reason = None
+    body = getattr(e, "body", None)
+    err = body.get("error") if isinstance(body, dict) else None
+    if isinstance(err, dict):
+        k, m = err.get("type"), err.get("message")
+        kind = k if isinstance(k, str) and re.fullmatch(r"[A-Za-z0-9_]{1,40}", k) else None
+        reason = m if isinstance(m, str) else None
+    if reason is None:
+        m = getattr(e, "message", None)
+        reason = m if isinstance(m, str) else None
+    reason = _reason(reason)
+    return f" | status {code}" + (f" {kind}" if kind else "") + (f": {reason}" if reason else "")
+
+
+def _fault(e, refusal=False):
+    """the type of a fault and its frames, never its text. The one exception: refusal=True (the call to the provider) and a 4xx status
+    error: the provider's own short reason follows, cut at its first quote mark and at 300 characters"""
     frames = "; ".join(f"{f.filename.rsplit('/', 1)[-1]}:{f.lineno} {f.name}" for f in traceback.extract_tb(e.__traceback__))
-    log.error("plan.ai fault %s at %s", type(e).__name__, frames)
+    try:
+        extra = _refusal(e) if refusal else ""
+    except Exception:                          # an odd exception object: the line is the old one
+        extra = ""
+    log.error("plan.ai fault %s at %s%s", type(e).__name__, frames, extra)
 
 
 # ---------------------------------------------------------------- the brief: the same bytes for every talk
@@ -271,7 +330,7 @@ def run_loop(messages, on_text, on_tool, stop, deadline, call=None, max_rounds=1
         try:
             reply = call(messages, stop, deadline)
         except Exception as e:
-            _fault(e)
+            _fault(e, refusal=True)
             del messages[n:]                   # a call only reads the history: whatever it left goes
             return end("failed")
         if reply is None:
@@ -403,7 +462,7 @@ def read_piece(text, facts, call=None, stop=None, deadline=None) -> list:
     except ReadFailed:
         raise ReadFailed(READ_FAILED) from None
     except Exception as e:
-        _fault(e)
+        _fault(e, refusal=True)
         raise ReadFailed(READ_FAILED) from None
     if not isinstance(rows, list):
         raise ReadFailed(READ_FAILED)
