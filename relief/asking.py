@@ -19,10 +19,12 @@ refusal is the app's sentence, and the conversation is as it was. One step at a 
 the conversation is what it was judged by (_store), so of two at once, in two copies of the app too, one is taken.
 
 The lessons asked about are those that need relief, as absences.new decides it (_Now.lessons). Of a file or a photo only Telegram's
-id and the name are kept, judged by the name and the size Telegram gives (files.check, PER_LESSON); the files of one album that come
-later are the same lesson's, with no second question (the list, when it is out, is changed). Outside any conversation a file or a
-photo is said not to be attached (stray). Same as before is the work of the last lesson before that has any, files that come later
-too. The list before Send says what is set for each lesson (_what), never what it says.
+id and the name are kept, judged by the name and the size Telegram gives (files.check, PER_LESSON). A lesson takes any number of
+messages until Next is pressed (_say_work): each line is added to its text, a link alone is its link (one a lesson), each file is
+added, and it is asked about again; the files of one album that come later are the same lesson's whatever is pressed meanwhile, with
+no second question (its question, or the list, when it is out, is changed). Outside any conversation a file or a photo is said not to
+be attached (stray). Same as before is the work of the last lesson before that has any, files that come later too. The question of a
+lesson and the list before Send say what is set (_what), never what it says.
 
 Send ends the conversation first, so an absence is sent once whatever happens; refused, it is put back. It is saved by absences.new,
 as the page's form does it, and marked (set_via); then, with nothing held, what follows on the page (web.created), the press is
@@ -56,7 +58,9 @@ WHO = "Who is your reporting officer? Type part of their name."
 WHICH, NOT_HERE = "Who is your reporting officer?", "Not here? Type more of the name."
 NOBODY = "Nobody on the staff list matches that. Type part of their name."
 WORK = "Work for {lesson} {periods} on {day}{start}? Type it, send a file or a photo, or tap Later."
-SAME, LATER, LATER_ALL = "Same as before", "Later, in the app", "Later for all the rest"
+WORK_SET = "Work for {lesson} {periods} on {day}{start}: {what}. Send more, or press Next."
+SAME, LATER, LATER_ALL, NEXT = "Same as before", "Later, in the app", "Later for all the rest", "Next"
+LINK_REPLACED = "One link a lesson: this one is in place of the one before."
 PRESS_ONE, SEND_ONE = "Please press one of the buttons.", "Send text, a file or a photo."
 SEND, START_AGAIN = "Send", "Start again"
 SENT = "✅ Sent to the relief team: {n}, {work}. {officer}"
@@ -73,8 +77,8 @@ ALBUMS = 50                                      # albums sent outside any conve
 _LINK = re.compile(r"https?://\S+", re.I)
 _log = logging.getLogger("relief.telegram")
 # what is chosen, as a conversation begins: start, the first period; periods, [from, to] or None for the whole day; lessons, those
-# asked about, and at, which of them; work, {lesson's key: dict(text, link, files [[Telegram's id, name]], group: its album, captions:
-# those its text is made of) or dict(same: the key of another)}; photos, how many were sent
+# asked about, and at, which of them; work, {lesson's key: dict(text, link, files [[Telegram's id, name]], group: its album, captions
+# and typed: the pieces its text is made of, as they came) or dict(same: the key of another)}; photos, how many were sent
 _EMPTY = dict(dates=[], ticks=[], start=None, periods=None, reason=None, why="", officer=None, lessons=[], at=0, work={}, photos=0)
 
 
@@ -187,11 +191,14 @@ def _works(w, d):
 
 
 def _work(d, at, work, **more):
-    """the work of lesson at is asked for; after the last one, the list"""
+    """the work of lesson at is asked for: while nothing is set for it, with Same as before (when a lesson before has work) and Later;
+    once something is, what is set, with Next; after the last one, the list"""
     if at >= len(d["lessons"]): return _list(dict(d, work=work), at=at, work=work, **more)
+    x, rest = d["lessons"][at], [(LATER_ALL, "rest")] if len(d["lessons"]) - at >= 2 else []
+    got = _work_of(dict(d, work=work), x["key"])
+    if _has(got): return _at("work", WORK_SET.format(**x, what=_what(got)), [[(NEXT, "next")], rest], at=at, work=work, **more)
     first = [(SAME, "same")] if _before(d, at, work) else []
-    rows = [first + [(LATER, "later")], [(LATER_ALL, "rest")] if len(d["lessons"]) - at >= 2 else []]
-    return _at("work", WORK.format(**d["lessons"][at]), rows, at=at, work=work, **more)
+    return _at("work", WORK.format(**x), [first + [(LATER, "later")], rest], at=at, work=work, **more)
 
 
 def _list(d, **more):
@@ -245,8 +252,8 @@ def _file(m):
 
 
 def _add(d, key, file):
-    """the file added to lesson key's work, unless it is there, and its caption to the text -> what becomes of d; refused in the app's
-    words, a file by its name"""
+    """the file added to lesson key's work, unless it is there, and its caption to the text (its link and what was typed kept) -> what
+    becomes of d; refused in the app's words, a file by its name"""
     w = d["work"].get(key) or {}
     files, photos = w.get("files") or [], d["photos"] + (file["name"] is None)
     if any(id == file["id"] for id, _ in files): return dict(photos=d["photos"], work=d["work"])
@@ -256,13 +263,14 @@ def _add(d, key, file):
         if len(files) >= _files.PER_LESSON: raise ValueError(_absences.TOO_MANY)
     except ValueError as e: raise ValueError(f"{name}: {e}") from None
     text = _absences._check_work(dict(text="\n".join(v for v in (w.get("text"), file["caption"]) if v)))["text"]
-    work = dict(text=text, link="", files=files + [[file["id"], name]], group=w.get("group") or file["group"], captions=w.get("captions", []) + [file["caption"]] * bool(file["caption"]))
+    work = dict(w, text=text, files=files + [[file["id"], name]], group=w.get("group") or file["group"], captions=w.get("captions", []) + [file["caption"]] * bool(file["caption"]))
     return dict(photos=photos, work=dict(d["work"], **{key: work}))
 
 
 def _held(d, m):
-    """the message m says what the conversation holds already: the text or link of a lesson's work, a caption in it, or the reason typed"""
-    held = {v for w in d["work"].values() for v in (w.get("text"), w.get("link"), *w.get("captions", ()))}
+    """the message m says what the conversation holds already: the text or link of a lesson's work, a caption or a typed line in it, or
+    the reason typed"""
+    held = {v for w in d["work"].values() for v in (w.get("text"), w.get("link"), *w.get("captions", ()), *w.get("typed", ()))}
     said = [v.strip() for v in (m.get("text"), m.get("caption")) if isinstance(v, str) and v.strip()]
     return any(v in held or " ".join(v.split()) == d["why"] for v in said)
 
@@ -418,6 +426,7 @@ def _on_officer(w, d, v):
 
 
 def _on_work(w, d, v):
+    """rest: the list; same: this lesson's work is the one before's; later or next: the next lesson"""
     if v == "rest": return _work(d, len(d["lessons"]), d["work"])
     same = _before(d, d["at"], d["work"]) if v == "same" else None
     return _work(d, d["at"] + 1, dict(d["work"], **{d["lessons"][d["at"]]["key"]: dict(same=same)}) if same else d["work"])
@@ -461,30 +470,39 @@ def _say_who(chat, talk, text, file):
 
 
 def _say_work(chat, talk, text, file):
+    """a file, a link alone or a line added to the lesson asked about, which is asked about again till Next: a link in place of the one
+    before, a line to the text on a new line; the rest of its work kept"""
     d = talk["d"]
-    key, line = d["lessons"][d["at"]]["key"], text.strip()
+    key, line, says = d["lessons"][d["at"]]["key"], text.strip(), []
     if not file and not line: return _again(chat, d, SEND_ONE)
+    w = d["work"].get(key) or {}
     try:
         if file: got = _add(d, key, file)
-        else: got = dict(work=dict(d["work"], **{key: _absences._check_work(dict(link=line) if _LINK.fullmatch(line) else dict(text=line))}))
+        elif _LINK.fullmatch(line):
+            says = [LINK_REPLACED] if w.get("link") else []
+            got = dict(work=dict(d["work"], **{key: dict(w, link=_absences._check_work(dict(link=line))["link"])}))
+        else:
+            text = _absences._check_work(dict(text="\n".join(v for v in (w.get("text"), line) if v)))["text"]
+            got = dict(work=dict(d["work"], **{key: dict(w, text=text, typed=w.get("typed", []) + [line])}))
     except ValueError as e:
         if type(e) is not ValueError: raise
         return _again(chat, d, str(e))
-    return _move(chat, talk, dict(_work(d, d["at"] + 1, got["work"]), **got), typed=True)
+    return _move(chat, talk, dict(_work(d, d["at"], got["work"]), says=says, **got), typed=True)
 
 
 SAID = dict(why=_say_why, who=_say_who, work=_say_work)
 
 
 def _more(chat, talk, key, file):
-    """another file of the album begun for lesson key: the same lesson's, with no question (the list that is out says it too); refused,
-    its sentence alone"""
+    """another file of the album begun for lesson key: the same lesson's, with no question (the question that is out says it too, while
+    it is that lesson's or the list); refused, its sentence alone"""
     was = talk["d"]
     try: d = dict(was, **_add(was, key, file))
     except ValueError as e:
         if type(e) is not ValueError: raise
         return bot._Out(str(e))
     if d["step"] == "list": d["ask"] = _list(d)["ask"]
+    elif d["step"] == "work" and d["lessons"][d["at"]]["key"] == key: d["ask"] = _work(d, d["at"], d["work"])["ask"]   # its rows are Next's already
     return bot._Out(then=lambda: _redraw(chat, d["key"], (was["ask"], was["rows"]))) if _store(chat, talk, d) else None
 
 
