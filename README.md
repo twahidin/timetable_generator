@@ -361,7 +361,8 @@ and loading the setup. In short:
 `/admin` is for the named admins (the timetable committee with the Admin extra, signed in with a username and
 password). It has **Staff**, **Students**, **Ways in** and a link to the **History**. On Staff you search and filter,
 pick one person to set their group, the departments a head changes the map for, the extras (Relief team, Exams and
-events until a date, Admin), their username and a one-time password, or switch them off; or tick several people and
+events until a date, Admin), their username (changed later with **Change username**: they keep their password and are
+signed out) and a one-time password, or switch them off; or tick several people and
 give or take an extra, set a group, print their code slips or switch them off, reading a preview of what it will do
 before pressing the button. **Ways in** shows each way to sign in and lets you turn a shared code off or on, with its
 week's use. It needs `SECRET_KEY`. To make the first admin, sign in with the committee code: until an admin exists the
@@ -369,6 +370,14 @@ committee page says "No admin account yet. Make the first admin" (and `/admin` g
 username and a password, and you are signed in as the first admin. If every admin forgets their password, set
 `ADMIN_RECOVERY_CODE` in Railway variables (at least 16 letters or digits; a shorter one is ignored) and use
 `/login/recover` once with an admin's username; then remove the variable.
+
+### History
+
+The history page keeps who changed what, and when, for two years. A change to the setup can be put back from there,
+and an admin can put back a change made on the admin page (a group, departments, an extra, a note, switched off or on). The
+committee sees everything; a head of department sees changes to their departments and their own; everyone else who can
+change something sees their own. After signing in, the home page shows "Since you last signed in", a short summary of
+what changed since the person's previous sign-in. The committee can download the history as an Excel file.
 
 Coming from a version that generated in the app: the `AI_*` and `SOLVE_SECONDS` variables are no longer read
 ([details](docs/DEPLOY.md#coming-from-an-earlier-version)).
