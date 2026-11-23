@@ -54,6 +54,7 @@ ONCE = "Each paper once."
 BAD_DATE = "Give a date such as 2026-10-05."
 BAD_TIME = "Give a time such as 08:00."
 PART_DAY = "Give the start and the end of part of a day."
+WHOLE_DAY_TIMES = "A whole day takes no start or end. Say it is part of a day, or leave the times out."
 NO_ACTION = "The app cannot make that change here."
 WRONG = _schedules.WRONG
 BY = "{name}, with Plan with AI"
@@ -380,13 +381,15 @@ def _days_of(env, st, a, said):
     _keys(a, ("days",), ("days",))
     entries = {}
     for d in _items(a["days"], most=31, too_many="An exam can cover at most 31 days."):
-        _keys(d, ("date", "levels", "whole", "start", "end"), ("date",))
+        _keys(d, ("date", "levels", "whole", "start", "end"), ("date", "whole"))
         date = _date(d["date"])
         if date in entries:
             raise Refused(f"{_days.nice(date)} is given twice.")
-        whole = d.get("whole", True)
+        whole = d["whole"]
         if not isinstance(whole, bool):
             raise Refused(WRONG)
+        if whole and (d.get("start") is not None or d.get("end") is not None):
+            raise Refused(WHOLE_DAY_TIMES)
         levels = None if d.get("levels") is None else _levels(env, d["levels"])
         f, t = (None, None) if whole else (_time(d.get("start"), True), _time(d.get("end"), True))
         if not whole and not (f and t):
