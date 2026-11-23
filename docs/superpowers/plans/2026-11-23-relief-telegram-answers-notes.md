@@ -30,19 +30,23 @@ As the lead wrote them, on 23 November 2026, to stage 4's eleven open questions 
 | 12 | Follow-up: show the messages other than reliefs that could not be sent? | yes | Built: E |
 | 13 | Follow-up: Today's 12 px more under its buttons without a token? | fix next time | Left until Today is next touched |
 
-Two of these are readings, in case they are not what was meant:
+Some of these are readings, in case they are not what was meant:
 - **Answer 6, "fixed for both"**, was read as: build the Next button, so that a text and a file both land on the same lesson. If
   something else was meant, say so: C can be changed or taken out.
 - **Answer 9, "ok"**, was read as agreeing with the suggestion "not now", so nothing was built. **Answer 11, "Ok"**, was read as: no
   wording change asked.
+- **Answers 12 and 13** were matched to stage 4's two follow-ups by their order alone: 12 to the list of messages that could not be
+  sent, 13 to Today's 12 px. If they were meant the other way round, say so.
 
 ## What each change gives
 
 - **A. The relief team is pinged for relief asked for today** (f5612d6). When an absence for today is sent today (from the app's
   form, Plan relief or `/relief`), each member of the relief team who is on Telegram gets one message once its picks wait for their
   approval: whose absence, whole day or which periods, and how many lessons wait, with a button that opens Today. It waits until no
-  lesson of it is still without a pick, or five minutes after the absence was sent, so it never comes before the picks. Never for an
-  exam's or event's backup, never twice for one absence, never to who sent it or to the absent teacher.
+  lesson of it is still without a pick, or five minutes after the absence was sent, so it never comes before the picks. It never
+  comes before the day's first report, an hour before the first period (07:00 when lessons start at 08:00): one asked in the night
+  is sent then (f4df792, after the final review). Never for an exam's or event's backup, never twice for one absence, never to who
+  sent it or to the absent teacher.
 - **B. The form says when the reporting officer is not on Telegram** (b55c496). After "Sent. The relief team can see it." the form
   adds "{officer} is not on Telegram: please tell them yourself.", the same sentence `/relief` already said, under the same rule:
   an officer is named, is neither the absent teacher nor who sent it, and the bot is connected.
@@ -62,17 +66,19 @@ Two of these are readings, in case they are not what was meant:
   Telegram card in My absences says so, with the day, until they link again in any way (a code, Start, a moved link).
 - **E. Relief settings says which messages could not be sent** (4326563). The Telegram card in Relief settings lists the messages
   that could not be sent, or may not have been, since Monday: newest first, 20 at most, each by kind, name, time and state, never its
-  text. Reliefs (Today has their line), reports and all clears are left out.
+  text. Reliefs (Today has their line), reports and all clears are left out. Only the relief team sees the list (0ce58e2, after the
+  final review): it names who was away, and the timetable committee, who may also open Relief settings, may not see absences.
 
 No new route, no new right, no new table, no new dependency. Nothing new is sent from a page: A is worked out by the same sweep as
-every other message.
+every other message (the sweep is the app's check, once a minute and after each save, of what there is to tell on Telegram).
 
 ## Decisions taken in the plan (the lead may change any)
 
 1. A: relief planned by somebody else for today pings too, as a request does: the team must approve it just as soon. If wrong: one
    condition.
 2. A: only an absence sent today pings. One sent yesterday evening for today does not: a message at 21:00 would wake people, and the
-   team opens Today in the morning, where it waits. If wrong: a late request is seen only when someone opens Today.
+   team opens Today in the morning, where it waits. If wrong: a late request is seen only when someone opens Today. (One sent in the
+   night of the same day waits for the report's start: ruling FA2, below.)
 3. A: the ping waits until no lesson of today of that absence is still open, or five minutes after it was sent, then counts the
    lessons waiting for a pick's approval and those still open (nobody free, or the pick did not come). If wrong: such an absence is
    pinged up to five minutes late.
@@ -80,7 +86,7 @@ every other message.
 5. A: the number in the text is the one when it was made; the message is dropped if nothing of today waits when it goes, but not
    rewritten. If wrong: it may say "2 lessons" when one is left.
 6. A: claimed once, even when dropped: if the team approves everything before the ping goes, no ping comes later for that absence,
-   even if a pick goes back to open. If wrong: a second ping for one absence is never possible.
+   even if a pick goes back to open. If wrong: a pick that goes back to open after everything was approved is never pinged again.
 7. B: the form says only the "not on Telegram" sentence, after "Sent. The relief team can see it." on the same line; it does not say
    "{officer} will be told." If wrong: copy.
 8. B: the same rule as the officer's message: an officer is named, is neither the absent teacher nor who sent it, and the bot is
@@ -93,8 +99,8 @@ every other message.
     wrong: a button.
 12. C: after each message the lesson's question is asked again at the bottom of the chat (a new message; the one before loses its
     buttons), saying what is set; the later files of an album change it in place. If wrong: one message more a piece.
-13. D: the note is a row in the existing store, written only while that person has no link, and taken away only when they link
-    again. If wrong: the line stays for someone who never links again.
+13. D: the note is a row in the existing store (the app's own Telegram file on the server, `relief/telegram.db`), written only while
+    that person has no link, and taken away only when they link again. If wrong: the line stays for someone who never links again.
 14. D: no history entry for the unlinking. The app's history needs a signed-in person, and the sender has none, so an entry "by The
     app" cannot be written as things are. One condition would allow it (an open question, below). If wrong: one condition and one
     entry.
@@ -111,7 +117,7 @@ Before the build:
   one line in `relief/report.py`, outside the plan's file list.
 - PF2. `/relief`'s "{officer} will be told." stays where it was; only the "not on Telegram" sentence moved, so the form and `/relief`
   share it. If wrong: nothing.
-- PF3. "Claimed once, even when dropped" needed the sweep to see dropped pings. It already does, so no extra read was added. If
+- PF3. "Claimed once, even when dropped" needed the sweep (the app's check, every minute, of what there is to tell) to see dropped pings. It already does, so no extra read was added. If
   wrong: one read a sweep.
 - PF4. The plan was built without waiting for the lead to read it, on "continue all"; its 16 decisions are above, for the lead to
   change. If wrong: rework of a decision the lead would have changed.
@@ -142,6 +148,26 @@ The builders' own choices, accepted by the reviews:
 - C: `a_whole_conversation_sends_an_absence` now counts six answered presses where it counted four: the two Next taps. If wrong: the
   test's number.
 
+Carried from the build's record, for whoever maintains the code:
+- Task 2's Python tests were not run failing on their own before the code was written; its deliberate faults were caught after.
+- Task 4's order by name for equal times is not checked by any test.
+- Task 3 changed three of stage 4's tests, because the ping falls due in them: `the_module_stands_alone` (the new kind in its list),
+  `a_reminder_is_the_relief_again_and_no_relief_of_its_own` and `stopped_is_said_again_once_something_said_that_it_is_on` (each
+  now expects the team's ping too). The final fix wave changed the last one again: its absence is sent at 06:50, so the ping now
+  comes at 07:00, not 06:55.
+
+After the final review (no Critical, two Important, five Minor; the two Important fixed in this wave):
+- FA1. The list of messages that could not be sent (E) is shown to the relief team alone. Relief settings also opens for the
+  timetable committee's shared code and for an admin without relief, and the list names who was away ("Relief planned · {name}"),
+  which they may not see. For them the card shows no list; connecting, disconnecting and unlinking answer the same way. If wrong:
+  a committee member who is not on the relief team does not see that messages failed (they could not act on them either).
+- FA2. The ping to the relief team (A) never goes before the day's first report, an hour before the first period. An absence sent
+  in the night (00:03, say) is pinged at that time, if a lesson of it still waits for the team then; one sent after it is pinged as
+  before. With no lesson times (nothing published) nothing changed. If wrong: a request sent at 06:00 is pinged at the report's
+  start, up to an hour or so later; one sent in school hours is pinged as before.
+- FA3. Three of the review's Minor points are kept as known limits, not changed in the code (M3, M4, M5 under Known limits, A and
+  D). If wrong: as each limit says.
+
 ## Copy the lead should see
 
 Every new sentence a person sees, exactly as the code has it. {..} stands for a name, a day, a lesson or a number.
@@ -157,15 +183,17 @@ To the relief team (A), with the button **Open relief today**:
 ("1 lesson is waiting for your approval." for one.)
 
 In `/relief` (C):
-- Once something is set for a lesson: "Work for {lesson} {periods} on {day} ({start}): {what is set}. Send more, or press Next."
+- Once something is set for a lesson: "Work for {lesson} {periods} on {day}{start}: {what is set}. Send more, or press Next."
+  {start} is the lesson's start time in brackets with a space before it, " (10:40)", or nothing when the lesson has no times.
   "{what is set}" reads as in the list before Send, for example "work set (text, 1 file)" or "work set (text, link, 2 files)", never
   what the work says.
 - The button **Next**. **Later for all the rest** is offered with it when two lessons or more are left.
 - A second, different link for one lesson: "One link a lesson: this one is in place of the one before."
 - Unchanged, but now also said to a message that crosses Next on the last lesson, or Later for all the rest: "Please press one of
   the buttons." with the list.
-- Unchanged before anything is set: "Work for {lesson} {periods} on {day} ({start})? Type it, send a file or a photo, or tap Later."
-  with **Same as before** (when a lesson before has work), **Later, in the app** and **Later for all the rest**.
+- Unchanged before anything is set: "Work for {lesson} {periods} on {day}{start}? Type it, send a file or a photo, or tap Later."
+  with **Same as before** (when a lesson before has work), **Later, in the app** and **Later for all the rest** (when two lessons or
+  more are left).
 
 **In the app**
 
@@ -194,6 +222,12 @@ A, the ping:
 - A ping that was dropped (everything approved before it went, or the person off the team by then) is never made again for that
   absence, even if a pick goes back to open.
 - While nothing is published, a lesson already over today could still count when the ping goes (narrow).
+- An absence sent in the night is pinged at the report's start, an hour before the first period, not when it was sent (ruling FA2).
+- (M3) If every lesson of an absence was approved before any ping was made, and a relief is later taken off again the same day, the
+  team gets "Relief asked for today" at that later moment.
+- (M5) Each request for today is one message to each relief team member: ten absences in a few minutes are about fifty messages for
+  a team of five. A burst to one chat may make Telegram ask for a pause of some seconds, which holds every message, reliefs too,
+  until it ends.
 
 B, the form: no test drives the whole form to its "Sent" line; the sentence itself is tested, and the browser check looks at the
 form (Checks, below).
@@ -220,23 +254,29 @@ D, the blocked line:
 - The unlinking still writes no history entry (decision 14; an open question).
 - The note is written just after the unlinking, not in the same step: a crash between the two leaves the person unlinked with no
   line.
-- A note for somebody who never links again stays in the store; it is shown only to them.
+- A note for somebody who never links again stays in the store (the app's Telegram file); it is shown only to them.
+- (M4) If the app is rolled back to the version before this one and forward again, a "bot was blocked" line can come back for
+  someone who linked again in between; linking once more clears it.
 
 E, the settings list:
-- A message to somebody who blocked the bot is removed from the queue (stage 4's ruling P3, so that it can be sent once they link
-  again), so it is not in the list. D's line says it to the person instead.
-- Equal times are ordered by name, and the edges of the week (Monday 00:00, Sunday 23:59) are not tested to the minute.
+- A message to somebody who blocked the bot is removed from the queue, the list of messages waiting to go (stage 4's ruling P3, so
+  that it can be sent once they link again), so it is not in the list. D's line says it to the
+  person instead.
+- The list is for the relief team alone (ruling FA1): the timetable committee sees no list on the card.
+- Equal times are ordered by name, which no test checks, and the edges of the week (Monday 00:00, Sunday 23:59) are not tested to
+  the minute.
 
-Small things in the code: in `relief/web.py` the form's check reads the teacher and the sender before its `try` (both are always
+Small things in the code (this paragraph is for whoever maintains the code; nothing in it changes what a person sees): in `relief/web.py` the form's check reads the teacher and the sender before its `try` (both are always
 set); a line of `relief/outbox.py`'s description is long; `relief/asking.py` keeps one arrow in a description, the file's own style.
 
 ## Open questions for the lead
 
-1. D: should the unlinking be written in the History, by "The app"? One condition in the app's history hook would allow it.
+1. D: should the unlinking be written in the History, by "The app"? One condition in the app's history hook (the code that writes
+   each change to the History, which now needs a signed-in person) would allow it.
 2. B: should the form also say "{officer} will be told." when they are on Telegram, as `/relief` does?
-3. A: should a request sent the evening before for today ping the team in the morning, when the report starts (an hour before the
-   first period)?
-4. Answer 6: was "fixed for both" meant as the Next button that was built? (C can be changed or taken out.)
+3. A: should a request sent the evening before ping at the report's start (an hour before the first period)?
+4. A: a request sent in the night is pinged at the report's start, an hour before the first period. Earlier, later, or as it is?
+5. Answer 6: was "fixed for both" meant as the Next button that was built? (C can be changed or taken out.)
 
 ## Checks
 
@@ -260,7 +300,20 @@ set); a line of `relief/outbox.py`'s description is long; `relief/asking.py` kee
 - Names check, counts only, on the lines added since ebdccb9 and the commit messages: the school's full name 0; bot token and model key shapes 0;
   em-dashes 0 in the commit messages and 1 in the added lines, the plan's own check command, which names the character it counts
   (none is used as a dash). The school's real files were not opened for this.
-- Names check against the school's staff list: (the controller fills this in)
-- Browser check: (the controller fills this in)
-- Not checked: no real Telegram bot was called anywhere, and no model; no suite reaches the network. The three page changes (the
-  form's sentence, the blocked line, the settings list) are tested in the page tests but not yet looked at in a browser.
+- Names check against the school's staff list (counts only, on the lines added and the commit messages since ebdccb9): 104 real
+  staff names, 0 found; the school's full name 0; token and key shapes 0. (Run again by the controller after the final fix wave.)
+- Browser check, in practice mode on a made-up school with a scratch data folder, at desktop width and at phone width (375 px), by
+  real clicks: the ask form's confirmation after Send read "Sent. The relief team can see it. Ms Rosa Ng is not on Telegram: please
+  tell them yourself."; the Link Telegram card of a person unlinked by a blocked bot showed the line with its day, and the line went
+  while a link code was shown; the Telegram card in Relief settings showed "2 messages could not be sent, 1 may not have been sent,
+  since Mon 23 Nov." with its three rows, and neither the failed relief nor last week's row. No sideways scroll at phone width, no
+  error in the page or the server. This was done before the final fix wave, and the settings card was seen as a relief team member;
+  since that wave only the relief team sees the list, and a test covers the others.
+- The final review, of the whole branch: no Critical; two Important (the settings list showed the committee who was away; the ping
+  could come in the night), both fixed in the final fix wave (rulings FA1 and FA2); five Minor (two on these notes, one on the
+  README, all three fixed; three kept as known limits, ruling FA3).
+- Final fix wave, one suite at a time at its end: `test_relief_telegram` 329 (two tests added, one of stage 4's changed: see the
+  build's record above), `test_relief_team` 74, `test_relief_requests` 59, `test_routes` 19, `smoke` 103,
+  `relief_settings.test.js` 23, `relief_telegram.test.js` 38; five deliberate faults, each caught.
+- Not checked: no real Telegram bot was called anywhere, and no model; no suite reaches the network. `/relief` with Next and the
+  ping to the team were not walked on a practice phone: tests alone cover them.

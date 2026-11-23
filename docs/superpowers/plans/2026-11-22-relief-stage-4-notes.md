@@ -500,7 +500,7 @@ record when it goes, some test lines are long. `tests/test_relief_requests.py` m
 
 - Done (the lead's answer 12, yes; built: 2026-11-23-relief-telegram-answers): messages other than reliefs that could not be sent, or may not have been, were shown to
   nobody (a report, PLANNED, a request to change ...). The Telegram card in Relief settings now lists them since Monday, by kind,
-  name and time, never the text (the review's Minor 4). Reports and all clears are left out: see `2026-11-23-relief-telegram-answers-notes.md`.
+  name and time, never the text (the review's Minor 4), to the relief team alone. Reports and all clears are left out: see `2026-11-23-relief-telegram-answers-notes.md`.
 - Stays (the lead's answer 13, "fix next time"): a school without a token is not quite as before: Today has 12 px more under its
   buttons (Minor 9). Harmless; it goes when Today is next touched.
 
@@ -510,7 +510,8 @@ The review did not judge these. Each is kept as it is.
 
 When a teacher asks for relief for today with `/relief`, the relief team was not pinged on Telegram; the design lists no such
 message. It was the first open question below. The lead answered yes on 23 Nov 2026, and the ping is built (from the app's form
-and `/relief` alike, once its picks wait for approval): see `2026-11-23-relief-telegram-answers-notes.md`.
+and `/relief` alike, once its picks wait for approval, never before the report's start, an hour before the first period, so one
+asked in the night is sent then): see `2026-11-23-relief-telegram-answers-notes.md`.
 
 Work set after the relief teacher was told is not told to them. Their message says to look in the app.
 

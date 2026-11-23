@@ -47,7 +47,8 @@ Stage 4 is Telegram: the school's own bot tells people about relief on their pho
 until somebody makes the bot, sets `TELEGRAM_BOT_TOKEN` and presses **Connect the bot** in Relief settings
 ([docs/DEPLOY.md](docs/DEPLOY.md#6-telegram-for-relief) has the steps). Each person links their own Telegram with
 **Link Telegram** at the top of My absences (and unlinks it there, or with `/stop`). Whoever is not linked finds their
-reliefs and absences in the app, as before.
+reliefs and absences in the app, as before; somebody unlinked because they blocked the bot sees why on their Link
+Telegram card.
 - **Relief teachers** get their relief once the relief team has approved it, with the work and its files, and press
   **Acknowledge** or **Request to change** (they say why in one line). They are told when it is moved, kept or no longer
   needed, and when an exam or event stops the lesson or it is on again.
@@ -56,9 +57,11 @@ reliefs and absences in the app, as before.
   or the event's teacher in charge stops), and get one reminder. `/relief` asks for relief on Telegram with the
   app's own questions, work and files included; a lesson takes as many messages as wanted (a text, then a file) until
   **Next**; What's in then says "asked on Telegram".
-- **Reporting officers** are told who is away and when, with the kind of reason alone.
+- **Reporting officers** are told who is away and when, with the kind of reason alone; the Ask for relief form says when
+  the reporting officer is not on Telegram, so the teacher tells them.
 - **The relief team** gets a ping when relief is asked for today, once its picks wait for approval (with **Open relief
-  today**), each request to change with its new pick and an **Approve** button, a report of who has not
+  today**; never before the report starts, an hour before the first period: one asked in the night is sent then),
+  each request to change with its new pick and an **Approve** button, a report of who has not
   acknowledged (every 15 minutes, a setting, from an hour before the first period) with **Remind them again**, one all
   clear, what was cancelled by a person, and a weekly summary (Friday 15:00, a setting).
 - On **Today** an approved relief says when its teacher was told, or that they are not on Telegram, with **Remind** beside
@@ -79,8 +82,8 @@ Telegram the reporting officer is told its kind alone (Medical, Child sick, Cour
 relief save is one line in the **History**, never with the reason. Relief reads the teachers from the published timetable, so publish first. **Relief settings**
 (the committee page's header link, or the Relief home for the relief team) hold the Flexi Adjunct Teachers' role, the
 relief rules in words, the limits the app checks, the times and the school calendar (terms, which week each term
-starts as, holidays); they connect the Telegram bot, list who is linked and who is not, and list the messages other than
-reliefs that could not be sent, or may not have been, since Monday; they show management, the
+starts as, holidays); they connect the Telegram bot, list who is linked and who is not, and show the relief team the messages
+that could not be sent, or may not have been, since Monday (not reliefs, reports or all clears); they show management, the
 relief team and the other staff who teach no lessons, which are set
 on the admin page (groups, the **Relief team** extra, and the staff added there). The committee downloads the
 personal teacher codes there as a list (CSV) or as slips to print. Like the personal student codes, they are made from
