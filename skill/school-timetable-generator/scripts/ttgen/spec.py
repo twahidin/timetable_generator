@@ -197,6 +197,12 @@ def double_days(school, days):
     want = [_day_words(t) for t in double_tokens(school)]
     return {i for i, d in enumerate(days) if any(w and (w == _day_words(d) or (len(w) == 1 and w[0] == _day_words(d)[-1:][0])) for w in want)}
 
+def filled_lessons(rows):
+    """the lesson rows that name a subject, each with the fields a row read from the workbook always has. A row added in the
+    editor and not filled in yet is saved with no subject, and may have no level, classes or teachers either; the workbook
+    leaves such a row out, so a setup given as it is in the editor is read the same way"""
+    return [{"level": None, "block": None, "classes": [], "teachers": [], **x} for x in rows or [] if isinstance(x, dict) and str(x.get("subject") or "").strip()]
+
 def end_rows(school):
     """'Lessons end by (Monday to Thursday)' rows on Settings -> [(label, weekdays, minutes after midnight)]"""
     import re

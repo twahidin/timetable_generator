@@ -652,6 +652,18 @@ def import_xlsx():
     finally: os.unlink(path)
     return jsonify(spec)
 
+def unfilled_rows(spec):
+    """a sentence about the teaching-group rows of step 5 with no subject, which the workbook leaves out ("+ Add teaching group"
+    makes such a row, and a row nobody filled in is saved with no fields at all); "" when every row has its subject"""
+    rows = [x if isinstance(x, dict) else {} for x in spec.get("lessons") or []]
+    rows = [x for x in rows if not str(x.get("subject") or "").strip()]
+    if not rows: return ""
+    said = lambda x: " ".join(str(v) for v in (x.get("block") or "", ", ".join(str(c) for c in x.get("classes") or [] if c) or "", ", ".join(str(t) for t in x.get("teachers") or [] if t) or "") if v)
+    part = [said(x) for x in rows if said(x)]; n, e = len(rows), len(rows) - len(part)
+    which = ([f"{e} with nothing filled in"] if e else []) + ([f"{len(part)} with {'; '.join(part[:6])}{' and more' if len(part) > 6 else ''}"] if part else [])
+    return (f"{n} teaching group row{'s' if n > 1 else ''} on step 5 {'have' if n > 1 else 'has'} no subject, so {'they are' if n > 1 else 'it is'} left out of the workbook and of the timetable "
+            f"({', '.join(which)}). On step 5's Table view, give {'each' if n > 1 else 'it'} a subject or delete {'them' if n > 1 else 'it'}.")
+
 def normalise(spec):
     """the editor's JSON -> the exact spec an agent would read from the workbook (codes, periods and lesson lengths worked out)"""
     for k in ("venues", "classes", "subjects", "teachers", "blocks", "lessons", "rules", "students", "choices"): spec.setdefault(k, [])
@@ -672,6 +684,7 @@ def check_setup():
         norm = normalise(copy.deepcopy(spec)); found = checks.findings(norm)
         fall = checks.with_fallbacks(norm) if norm.get("choices") else None
     except Exception as e: return {"error": f"The setup could not be checked: {e}"}, 400
+    if (left := unfilled_rows(spec)): found.append(dict(level=checks.WARNING, area="lessons", text=left))
     crit = sum(1 for f in found if f["level"] == checks.CRITICAL)
     return jsonify(findings=found, critical=crit, warnings=len(found) - crit, fallbacks=fall)
 

@@ -391,8 +391,8 @@ def write_template(spec, path, extra_rows=120):
     from .reader import pattern_text
     for i, x in enumerate(spec["lessons"]):
         rr = R0 + i
-        lw.cell(rr, 1, x["level"]); lw.cell(rr, 2, x["subject"]); lw.cell(rr, 3, x.get("block") or None)
-        for k, c in enumerate(x["classes"][:NCLS]): lw.cell(rr, 4 + k, c)
+        lw.cell(rr, 1, x.get("level")); lw.cell(rr, 2, x.get("subject")); lw.cell(rr, 3, x.get("block") or None)   # a row not filled in yet (step 5's "+ Add teaching group") has no subject, and may have no level or classes
+        for k, c in enumerate((x.get("classes") or [])[:NCLS]): lw.cell(rr, 4 + k, c)
         for k, t in enumerate(PA.names(x)): lw.cell(rr, 4 + NCLS + k, t)
         c0 = 4 + NCLS + NTCH
         lw.cell(rr, c0, x.get("students")); lw.cell(rr, c0 + 1, x.get("periods_override")); lw.cell(rr, c0 + 2, x.get("code_override")); lw.cell(rr, c0 + 3, pattern_text(x["pattern"]) if x.get("pattern") else x.get("pattern_text")); lw.cell(rr, names.index("Note") + 1, x.get("note"))
