@@ -1265,6 +1265,7 @@ def test_two_changes_that_mirror_each_other_are_a_trade_too():
     assert cands(PAIR + [x for _, x in more], every) == sorted([MATHS] + [k for k, _ in more])[:3] == [f"C:{CLS}:Mathematics", f"C:{CLS_B}:{EL}", MATHS]   # at most three, in the order of their keys
     with_ = lambda i, *names: [dict(x, teachers=list(names)) if x["id"] == i else x for x in PAIR]
     assert cands(with_(2, T1, T2), trades(lambda s: step5_row(s, MATHS).update(teachers=[T2, T0]))) == [MATHS] and cands(with_(2, T1, T2), trades()) == [] and cands(with_(1, T2, T0), trades(lambda s: step5_row(s).update(teachers=[T1, T2]))) == [MATHS]   # others who teach it too stay; two that go are no mirror
+    assert cands(PAIR, trades(lambda s: step5_row(s, MATHS).update(teachers=[T0, T2]))) == cands(with_(2, T1, T0), trades()) == []   # nor are two that come, or one that was there
     assert cands(PAIR + [one(3, 1, 1, CLS_B, "Mathematics", T2)], trades()) == []   # nor one whose lessons are not taught alike
     assert cands(with_(2), trades()) == [] and cands(PAIR, trades(lambda s: step5_row(s, MATHS).update(teachers=[]))) == []   # nor one that nobody teaches, there or on step 5
     waits = lambda i, cls, sub, t: dict(id=i, d=2, p=1, n=1, level=LEVEL, block="", classes=[cls], subject=sub, group=ENTIRE, teachers=[t], room="", ext=False, rain="")
@@ -1306,6 +1307,9 @@ def test_lessons_of_a_trade_go_by_the_teacher_they_will_have():
         m, spec, days, pool, ts = case(rows + [one(8, 1, 1)], trades(), rules=[AWAY(T0, 1, 2, 2)]); got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=3, d=1, p=3), TRADE], got
     m, spec, days, pool, ts = case(rows, trades(), rules=[AWAY(T0, 1)]); got, _ = solved(m, spec, days, ts[TEACH], pool, moved={1, 2}); assert got["fixes"] == [dict(kind="move", id=3, d=0, p=2), TRADE] and got["other"] == 1, got   # away that whole day: to another, at once
     m, spec, days, pool, ts = case(rows, trades(), rules=[AWAY(T1, 1)]); got, stats = solved(m, spec, days, ts[TEACH], pool, moved={1, 2}); assert got["fixes"] == [dict(kind="move", id=3, d=1, p=2), TRADE] and got["other"] == 0, got   # not for the one who has it now
+    m, spec, days, pool, ts = case(rows, trades(), rules=[AWAY(T0, 1)]); t = ts[TEACH]; s = refit._Search(m, spec, days, t, {1, 2}, time.monotonic() + 60, dict(nodes=0, late=False), helper._before(m, spec, t["w"]), None, 3, False); s.run([[GIVE], [TRADE]])
+    for first, second in ((1, 0), (0, 1)):   # whichever of the two is asked first
+        s.places, s.bars = {}, {}; got = {j: s._places(3, ((), ((j, [f]),))) for j, f in ((first, (GIVE, TRADE)[first]), (second, (GIVE, TRADE)[second]))}; assert {x["other"] for x in got[0]} == {0} and {x["other"] for x in got[1]} == {1}, got
     # a Must rule of the teacher it will have, on the place where it is: the lesson goes
     m, spec, days, pool, ts = case(PAIR + [one(3, 1, 1, CLS_B, "Mathematics", T1)], trades(), rules=[AWAY(T0, 1, 1, 1)]); got, _ = solved(m, spec, days, ts[TEACH], pool, moved={1, 2}); assert got["fixes"] == [dict(kind="move", id=3, d=1, p=2), TRADE] and got["why"][0].startswith(f"Rule Teacher · {T0} · Not available: "), got
     # and of that teacher's day: T0 may teach two periods in a row and has the next two, T1 has them at the same time
