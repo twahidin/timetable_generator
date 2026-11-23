@@ -1,5 +1,5 @@
 """Server smoke checks. Run: .venv/bin/python tests/smoke.py   (add --full for the slow publish check)"""
-import copy, os, secrets, subprocess, sys, tempfile
+import copy, io, os, secrets, subprocess, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
@@ -88,6 +88,21 @@ def test_check_passes_the_sample():
     r = _check(c.get("/api/sample/secondary").get_json()); j = r.get_json()
     assert r.status_code == 200 and j["critical"] == 0, j
     assert j["warnings"] == sum(1 for f in j["findings"] if f["level"] == "warning")
+
+def test_rows_with_no_subject_are_left_out_and_said():
+    """step 5's "+ Add teaching group" leaves a row with no subject; saved, it has no fields at all. The check and the download used to fail on it ('subject')"""
+    spec = c.get("/api/sample/secondary").get_json(); base = _check(spec).get_json(); lv = spec["school"]["levels"][0]; cls = spec["classes"][0]["class"]
+    spec["lessons"] += [{}, {"level": lv}, {"level": lv, "classes": [cls]}]
+    r = _check(spec); j = r.get_json(); assert r.status_code == 200 and j["critical"] == base["critical"] and j["warnings"] == base["warnings"] + 1, j
+    said = [f for f in j["findings"] if "no subject" in f["text"]]; assert len(said) == 1 and said[0]["level"] == "warning" and said[0]["area"] == "lessons", said
+    assert said[0]["text"].startswith("3 teaching group rows on step 5 have no subject, so they are left out of the workbook and of the timetable (2 with nothing filled in, 1 with ") and cls in said[0]["text"], said[0]["text"]
+    assert [f for f in j["findings"] if "no subject" not in f["text"]] == base["findings"]   # everything else is judged as without them
+    r = c.post("/api/build", json=spec); assert r.status_code == 200 and r.mimetype.endswith("sheet"), r.get_data()[:200]
+    back = c.post("/api/import", data=dict(file=(io.BytesIO(r.get_data()), "s.xlsx")), content_type="multipart/form-data").get_json()
+    assert len(back["lessons"]) == len(spec["lessons"]) - 3 and all(x.get("subject") for x in back["lessons"])
+    spec["lessons"] = spec["lessons"][:-3] + [{"level": lv}]; one = [f["text"] for f in _check(spec).get_json()["findings"] if "no subject" in f["text"]]
+    assert one == ["1 teaching group row on step 5 has no subject, so it is left out of the workbook and of the timetable (1 with nothing filled in). On step 5's Table view, give it a subject or delete it."], one
+    assert A.unfilled_rows(c.get("/api/sample/secondary").get_json()) == ""
 
 def test_check_lists_a_class_with_more_periods_than_its_days():
     spec = c.get("/api/sample/secondary").get_json()

@@ -649,6 +649,21 @@ def test_two_bands_at_once_is_one_critical_warning_and_a_mark_on_both_cards():
     finally:
         assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
 
+def test_a_setup_with_rows_not_filled_in_still_takes_a_timetable():
+    """step 5's "+ Add teaching group" leaves a row with no subject, saved with few fields or none: an upload used to fail on it ("Could not read the files: 'subject'")"""
+    from ttgen import spec as spec_mod
+    rows = [{}, {"level": LEVEL}, {"level": LEVEL, "classes": [CLASSES[0]]}, {"subject": SUBJ}]   # the last names a subject and nothing else
+    assert [sorted(x) for x in spec_mod.filled_lessons(rows + [None, "x"])] == [["block", "classes", "level", "subject", "teachers"]] and spec_mod.filled_lessons(None) == []
+    assert c.put("/api/setup", json=dict(spec=dict(SPEC, lessons=list(SPEC["lessons"]) + rows), why="rows not filled in")).status_code == 200
+    try:
+        save_draft(ROWS); j = draft.info(); b = board()
+        assert j["lessons"] == len({x["id"] for x in ROWS}) and len(b["cards"]) == j["lessons"]
+        assert len(draft.model_now()[0]["checked_setup"]["lessons"]) == len(SPEC["lessons"]) + 1   # the three with no subject are left out of the copy the timetable is checked against
+        assert len(c.get("/api/setup").get_json()["spec"]["lessons"]) == len(SPEC["lessons"]) + 4   # and stay on step 5 for the committee to fill in or delete
+        assert c.get("/draft/preview").status_code == 200 and draft.slots(PLAIN_ID)["slots"]
+    finally:
+        assert c.put("/api/setup", json=dict(spec=SPEC, why="back")).status_code == 200; save_draft(ROWS)
+
 def test_the_preview_is_the_draft_as_the_published_page_would_show_it():
     import re
     fresh()
