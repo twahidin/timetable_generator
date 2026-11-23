@@ -184,4 +184,18 @@ t("everything is escaped", async () => {
   const q = await opened({ "GET admin": no(500, mark("error")) }); assert.ok(q.card().includes(mark("error"))); assert.strictEqual(q.all("#telegram u").length, 0);
 });
 
+const UNSENT = { failed: 2, unsure: 1, since: "2026-10-12", more: 0, items: [
+  { what: "Relief planned", name: EVE, at: "2026-10-13T07:10:00+08:00", state: "failed" }, { what: "To the reporting officer", name: "Ms Rosa <b>Ng", at: "2026-10-12T15:00:00+08:00", state: "unsure" }] };
+t("what could not be sent is said, by kind, name and time alone", async () => {
+  const p = await opened({ "GET admin": ok(Object.assign({}, CONNECTED, { unsent: UNSENT })) });
+  for (const x of ["2 messages could not be sent, 1 may not have been sent, since Mon 12 Oct.", `Relief planned · ${EVE} · Tue 13 Oct 07:10 · could not be sent`,
+                   "To the reporting officer · Ms Rosa <b>Ng · Mon 12 Oct 15:00 · may not have been sent"]) assert.ok(p.card().includes(x), x);
+  assert.ok(!p.$("#telegram").innerHTML.includes("<b>Ng"), "escaped");
+  const one = await opened({ "GET admin": ok(Object.assign({}, CONNECTED, { unsent: Object.assign({}, UNSENT, { failed: 1, unsure: 0, items: UNSENT.items.slice(0, 1) }) })) });
+  assert.ok(one.card().includes("1 message could not be sent since Mon 12 Oct."));
+  const unsure = await opened({ "GET admin": ok(Object.assign({}, CONNECTED, { unsent: Object.assign({}, UNSENT, { failed: 0, unsure: 1, more: 5, items: UNSENT.items.slice(1) }) })) });
+  assert.ok(unsure.card().includes("1 message may not have been sent since Mon 12 Oct.") && unsure.card().includes("and 5 more"));
+  for (const none of [null, undefined, {}, 7]) { const q = await opened({ "GET admin": ok(Object.assign({}, CONNECTED, { unsent: none })) }); assert.ok(!/could not be sent|may not have been sent/.test(q.card()), String(none)); }
+});
+
 run(all);

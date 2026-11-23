@@ -112,8 +112,11 @@ Messages (exact text; `·` is U+00B7, `–` U+2013; `{periods}` as "P9–P11", `
 | `WHY_CANCEL` | `Cancel this absence? Say why in one line, or press Keep it.` (with a Keep it button: 5d) |
 | `SURE_CANCEL` | `Cancel {days}? Your reason: {why}` (with Yes, cancel it and Keep it; nothing is cancelled before Yes: 5e) |
 | answers | `Sent to the relief team. Until they reply, this relief is still yours.` / `Cancelled. The relief team will see it.` / `This is for an exam or event duty, so it cannot be cancelled here. Ask the exams committee, or the event's teacher in charge.` (a backup, at each step of cancelling: F1) / `Nothing was changed.` / `Answer the question I asked last.` / `Reminded {n}.` / `Nobody to remind.` / `Not on Telegram.` / `Sent at {hh:mm}: wait a few minutes.` (the last message of that relief went) / `Last tried at {hh:mm}: wait a few minutes.` (it may have, or waits, or is on its way: 10c) / `Something went wrong. Try again in the app.` |
+| `NEW` | `🆕 Relief asked for today · {absent}` / `{whole day or periods}` / `{n} lessons are waiting for your approval.` (`1 lesson is waiting for your approval.`), with `Open relief today`; to each of the relief team but who sent it and the absent teacher, once, of an absence sent today for today (never a backup), when its picks wait or five minutes after it was sent (added by the lead's answers: `2026-11-23-relief-telegram-answers.md`, Task 3) |
+| `WORK_SET` | `/relief`, once something is set for a lesson: `Work for {lesson} {periods} on {day}{start}: {what}. Send more, or press Next.` (`{what}` as the list's `work set (text, 1 file)`), with `Next` and, when two lessons or more are left, `Later for all the rest`; asked again after each message (the lead's answers, Task 5) |
+| `LINK_REPLACED` | `/relief`, a second link for one lesson: `One link a lesson: this one is in place of the one before.` (not said when the same link is sent again; the lead's answers, Task 5) |
 
-Button labels: `✅ Acknowledge`, `↩ Request to change`, `✅ Acknowledge and set work`, `❌ Not needed: cancel`, `Approve {short name}`, `Keep it`, `Yes, cancel it`, `Remind them again`, `Open in the app`, `Open relief today`, `Open the full summary`.
+Button labels: `✅ Acknowledge`, `↩ Request to change`, `✅ Acknowledge and set work`, `❌ Not needed: cancel`, `Approve {short name}`, `Keep it`, `Yes, cancel it`, `Remind them again`, `Open in the app`, `Open relief today`, `Open the full summary`; on `/relief`, `Next` (the lead's answers, Task 5).
 
 ## Review Focus
 

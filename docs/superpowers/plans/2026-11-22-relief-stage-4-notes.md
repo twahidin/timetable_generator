@@ -438,7 +438,8 @@ Messages and the queue:
 - Two copies of the app and a wait for a retry: never a duplicate, but one copy may wait longer. Buttons that ran out stay in the store
   until the next start.
 - A file that is unsure sets no doubt; five files that time out hold the other messages up to five minutes.
-- If unlinking a blocked chat fails, the link stays until the next message. That unlinking writes no history entry.
+- If unlinking a blocked chat fails, the link stays until the next message. That unlinking writes no history entry (still so: the
+  person is now told on their own card instead, and an entry "by The app" is an open question in `2026-11-23-relief-telegram-answers-notes.md`).
 - A fault of the app's own before anything was sent counts as "network"; so does an answer that is neither 200 nor an error. Telegram
   answering at once tells it from an outage: it is tried six times in all, and holds the other messages one run each time. A blip
   shorter than one run may count one try. Practice mode keeps every call in memory for as long as the app runs.
@@ -473,7 +474,8 @@ Presses and typing:
 - What a request to change or a cancel is refused for is asked in two places (at the press and when it is done). A fault in a malformed
   record is shown as the page shows it. An acknowledgement on the page in the same second as a press is not "since".
 - A press whose app stops before the save is lost: press again. A cancel waits for the exams lock, as the page's does.
-- `/relief`: two messages meant for one lesson go to two lessons (the list says what is set; Start again is the way back); whatever is
+- `/relief`: two messages meant for one lesson went to two lessons; since the lead's answers a lesson takes any number of messages
+  until **Next** (its limits now are in `2026-11-23-relief-telegram-answers-notes.md`); whatever is
   typed at a work question is the work, a personal code too, and the relief teacher gets it (typed as a why to change, the relief
   team); Send fetches files inside the request; an album is noted before its "not attached" is queued; a list redrawn as Send is pressed
   may show its buttons again (they are no longer active).
@@ -496,18 +498,20 @@ record when it goes, some test lines are long. `tests/test_relief_requests.py` m
 
 ## Follow-ups
 
-- Messages other than reliefs that could not be sent, or may not have been, are shown to nobody (a report, PLANNED, a request to
-  change ...). A line on the Telegram card in Relief settings would do: "2 messages could not be sent, 1 may not have been sent,
-  since Mon", by kind and name, never the text (the review's Minor 4).
-- A school without a token is not quite as before: Today has 12 px more under its buttons (Minor 9). Harmless; it can go when
-  Today is next touched.
+- Done (the lead's answer 12, yes; built: 2026-11-23-relief-telegram-answers): messages other than reliefs that could not be sent, or may not have been, were shown to
+  nobody (a report, PLANNED, a request to change ...). The Telegram card in Relief settings now lists them since Monday, by kind,
+  name and time, never the text (the review's Minor 4), to the relief team alone. Reports and all clears are left out: see `2026-11-23-relief-telegram-answers-notes.md`.
+- Stays (the lead's answer 13, "fix next time"): a school without a token is not quite as before: Today has 12 px more under its
+  buttons (Minor 9). Harmless; it goes when Today is next touched.
 
 ## What the final review left to the lead
 
 The review did not judge these. Each is kept as it is.
 
-When a teacher asks for relief for today with `/relief`, the relief team is not pinged on Telegram. The design lists no such
-message. It is the first open question below.
+When a teacher asks for relief for today with `/relief`, the relief team was not pinged on Telegram; the design lists no such
+message. It was the first open question below. The lead answered yes on 23 Nov 2026, and the ping is built (from the app's form
+and `/relief` alike, once its picks wait for approval, never before the report's start, an hour before the first period, so one
+asked in the night is sent then): see `2026-11-23-relief-telegram-answers-notes.md`.
 
 Work set after the relief teacher was told is not told to them. Their message says to look in the app.
 
@@ -517,7 +521,7 @@ in alone. The design says so.
 Cancelling a backup on the page brings it back at the next sync. That is main's, not changed here.
 
 The kind of reason sent to reporting officers, work files through Telegram, the one-time codes and the second press to cancel
-are the lead's open questions below.
+were the lead's open questions below. The lead kept all four (answers 2, 3, 4 and 7).
 
 A link or a code passed on links whoever uses it first. "Open in the app" does not come back to the tab after signing in. A
 personal code typed as work goes as work. These are known limits, accepted.
@@ -540,20 +544,23 @@ The suites were not run again by the review; the browser and the layout were the
 
 ## Open questions for the lead
 
+All answered by the lead on 23 Nov 2026 (thirteen answers: 1 to 11 here, 12 and 13 to the two follow-ups above). What was
+built and decided on them is in `2026-11-23-relief-telegram-answers-notes.md`.
+
 1. When a teacher asks for relief for today, the relief team is not pinged on Telegram (the design lists no such message): should it
-   be, when picks are waiting for approval?
-2. The one-time code in place of the personal code (decision 1 of the plan; differs from the design). Keep?
-3. Work files go through Telegram with the relief. Keep, or "open in the app" for files?
-4. The reporting officer's message holds the kind of reason, Medical and Child sick among them. Keep, or leave the kind out?
+   be, when picks are waiting for approval? **Answered 23 Nov 2026: "yes"**; built: 2026-11-23-relief-telegram-answers.
+2. The one-time code in place of the personal code (decision 1 of the plan; differs from the design). Keep? **Answered 23 Nov 2026: "keep"**.
+3. Work files go through Telegram with the relief. Keep, or "open in the app" for files? **Answered 23 Nov 2026: "Keep"**.
+4. The reporting officer's message holds the kind of reason, Medical and Child sick among them. Keep, or leave the kind out? **Answered 23 Nov 2026: "Keep"**.
 5. Reporting officers who are not on Telegram are told nothing by the app (`/relief` tells the asker so; the app's own form does not).
-   Should the form say so?
+   Should the form say so? **Answered 23 Nov 2026: "yes"**; built: 2026-11-23-relief-telegram-answers.
 6. `/relief`: one message a lesson, so a text and then a file go to two lessons. A Next button would mend it, at one more tap a lesson.
-   Wanted?
-7. Cancelling on Telegram takes a typed line and a second press, where the mockup took one. Keep?
-8. The report begins an hour before the first period. Keep, or from the first relief sent?
-9. While an old file cannot be read, the all clear is held back and only the log says why. Should the team be told?
-10. Should a person be told in the app that their Telegram was unlinked because the bot was blocked?
-11. The copy above: anything to change?
+   Wanted? **Answered 23 Nov 2026: "fixed for both"** (read as: build the Next button, so that a text and a file land on the same lesson); built: 2026-11-23-relief-telegram-answers.
+7. Cancelling on Telegram takes a typed line and a second press, where the mockup took one. Keep? **Answered 23 Nov 2026: "keep"**.
+8. The report begins an hour before the first period. Keep, or from the first relief sent? **Answered 23 Nov 2026: "keep"**.
+9. While an old file cannot be read, the all clear is held back and only the log says why. Should the team be told? **Answered 23 Nov 2026: "ok"** (to the suggestion "not now": not built).
+10. Should a person be told in the app that their Telegram was unlinked because the bot was blocked? **Answered 23 Nov 2026: "yes"**; built: 2026-11-23-relief-telegram-answers.
+11. The copy above: anything to change? **Answered 23 Nov 2026: "Ok"** (no wording change asked).
 
 ## Before the first real run (a real bot is connected for the first time)
 

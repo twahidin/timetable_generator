@@ -15,8 +15,12 @@ A link is not tied to the account's sign-in number: each message and press is ju
 is there while accounts.people.find finds them (or nothing is published: a publish may be swapping folders) and they are not
 switched off; while the accounts file cannot be read nobody is. person, rights_of and rights_named answer only for a person who
 is there; chat_of, name_of, reachable and again only for one who has relief now too (somebody who lost it gets nothing and is
-nobody's chat; they can still unlink it); linked lists every link (the settings page unlinks any of them)."""
-import hashlib, secrets, time
+nobody's chat; they can still unlink it); linked lists every link (the settings page unlinks any of them).
+
+A person whose link the sender removed because the bot was blocked (outbox) gets a note, state `blocked:{name}` = the time
+(note_blocked, only while they have no link; blocked reads it). It is told to them on their own card until they link again, in
+any way: _put, which every way of linking goes through, deletes it. Unlinking by hand, /stop or the team leaves none."""
+import hashlib, json, secrets, time
 
 import access
 import store
@@ -29,6 +33,7 @@ CODE_MINUTES = 15
 CODE_LENGTH = 8
 VIA = "telegram"                                   # how a person answering on Telegram is signed in (not one of rights.STRONG)
 PRACTICE_BOT = "practice_bot"                      # the bot's name in practice mode (tg.call)
+BLOCKED = "blocked:"                                  # the start of the state key that says a person was unlinked because the bot was blocked
 tries = access.Limiter(n=5, window=600)            # wrong codes and "not linked" answers, by "tg:" + chat
 
 
@@ -106,6 +111,7 @@ def _put(c, name, chat, handle, lost=None):
     """-> the chat name's link moved from, or None"""
     old = [dict(r) for r in c.execute("SELECT name, chat FROM links WHERE (name=? OR chat=?) AND NOT (name=? AND chat=?)", (name, chat, name, chat))]
     c.execute("DELETE FROM links WHERE name=? OR chat=?", (name, chat))
+    c.execute("DELETE FROM state WHERE k=?", (BLOCKED + name,))
     c.execute("INSERT INTO links(name, chat, handle, at) VALUES (?, ?, ?, ?)", (name, chat, handle, _absences._now()))
     for x in old: c.execute("DELETE FROM talks WHERE chat=?", (x["chat"],))
     if lost is not None: lost.extend(old)
@@ -130,6 +136,19 @@ def unlink(name, chat=None):
     """-> the chat that was name's, or None; with chat, only while it is still that one"""
     r = _drop("name", name, chat)
     return r["chat"] if r else None
+
+
+def note_blocked(name):
+    """note that name's link was removed because the bot was blocked -> True; False, nothing written, while they have a link"""
+    with tgdb.db() as c:
+        if c.execute("SELECT 1 FROM links WHERE name=?", (name,)).fetchone(): return False
+        c.execute("INSERT OR REPLACE INTO state(k, v) VALUES (?, ?)", (BLOCKED + name, json.dumps(_absences._now())))
+    return True
+
+
+def blocked(name):
+    """-> the time (ISO) their link was removed because the bot was blocked, or None; the note is theirs until they link again"""
+    return tgdb.get_state(BLOCKED + name)
 
 
 def unlink_chat(chat):
