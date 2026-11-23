@@ -5,7 +5,8 @@ DATA = tempfile.mkdtemp()
 KEY = secrets.token_hex(16)
 os.environ.pop("HEADS_CODE", None)
 os.environ.pop("TYPED_REQUEST_MODEL", None)          # no test calls a real AI
-os.environ.update(DATA_DIR=DATA, SECRET_KEY=KEY, AI_API_KEY="", COMMITTEE_CODE=secrets.token_hex(4), TEACHER_CODE=secrets.token_hex(4), STUDENT_CODE=secrets.token_hex(4))
+for k in ("ANTHROPIC_API_KEY", "AI_API_KEY", "ANTHROPIC_AUTH_TOKEN"): os.environ.pop(k, None)     # and no key is there to call it with
+os.environ.update(DATA_DIR=DATA, SECRET_KEY=KEY, COMMITTEE_CODE=secrets.token_hex(4), TEACHER_CODE=secrets.token_hex(4), STUDENT_CODE=secrets.token_hex(4))
 sys.path.insert(0, ROOT)
 from exams import fake as F  # noqa: E402
 from relief.pick import HONORIFICS  # noqa: E402
@@ -1649,6 +1650,8 @@ def a_suggested_time_is_one_the_app_offered():
     s = env.load(st.exam)
     same(s["suggested"], [pid]); same((s["papers"][0]["date"], s["papers"][0]["start"]), ("2026-10-07", "09:00"))
     same(step["text"], "Suggested 09:00 on Wed 7 Oct for Sec 3 English Paper 1")
+    same(st.offered, {})                                                   # the pick changed a time: no earlier offer stands
+    st.offered[pid] = [dict(date="2026-10-07", start="09:00", why="x")]
     unchanged(env, st, lambda: run(env, st, "suggested", dict(id=pid, date="2026-10-07", start="09:00"), said=""), "Sec 3 English Paper 1 has a time already.")
 
 @t
@@ -1858,6 +1861,7 @@ def a_paper_and_its_suggested_mark_go_back_together():
     rm = run(env, st, "papers", dict(remove=[pid]), said="")
     assert "suggested:" + pid not in rm["parts"]
     undo(env, rm, st)
+    st.offered[pid] = [dict(date="2026-10-07", start="09:00", why="x")]       # offered again: the change emptied the offers
     sug = run(env, st, "suggested", dict(id=pid, date="2026-10-07", start="09:00"), said="")
     rm = run(env, st, "papers", dict(remove=[pid]), said="")
     same(rm["parts"]["suggested:" + pid], [True, False])
@@ -2161,6 +2165,8 @@ def sits_with_ties_one_lines_papers_only():
 import logging, threading  # noqa: E402
 _had_sdk = "anthropic" in sys.modules
 from plan import ai as AI  # noqa: E402
+def _no_real_client(): raise AssertionError("a test tried to build the real AI client")
+AI._client = _no_real_client                          # for the whole file: the tests of the real path put in their own and put this back
 logging.getLogger("plan").addHandler(logging.NullHandler())   # the faults the tests cause are caught by Logged, not printed
 same("anthropic" in sys.modules, _had_sdk)            # the SDK is imported only inside the real call
 
@@ -2687,7 +2693,7 @@ START_IN = dict(kind="exam", name="Mid-Year 2027", levels=["Sec 3", "Sec 4"], cl
 def a_talk_answers_in_order_and_the_progress_changes_while_it_works():
     fresh()
     no_schedules()
-    same(T.LIMITS, dict(typed=2000, list=20000, list_papers=200, rounds=12, answer=180, list_job=300, messages=60, at_once=2,
+    same(T.LIMITS, dict(typed=2000, list=20000, rounds=12, answer=180, list_job=300, messages=60, at_once=2,
                         an_hour=60, idle=12 * 3600, talks=5))
     env, talk = a_talk()
     assert talk.id and talk.owner == "p1" and T.get(talk.id, "p1") is talk
@@ -2751,7 +2757,9 @@ def stop_ends_an_answer_and_what_was_done_stays_done():
     no_schedules()
     env, talk = a_talk()
     go = threading.Event()
-    call = Script(reply(say("I am about to say a lot")), before=waits(go))
+    def call(messages, stop, deadline):                           # as the real call: a stop during the stream gives None
+        assert go.wait(WAIT), "the test's event never came"
+        return None if stop.is_set() else reply(say("I am about to say a lot"))
     T.stop(talk)                                                  # not working: nothing
     assert not talk.halt.is_set()
     T.say(talk, env, "Plan it", call=call)
@@ -3156,7 +3164,10 @@ def an_old_quick_answer_cannot_be_pressed_after_another_message():
     env, talk = a_talk()
     answer(talk, env, "hello", reply(use("t1", "offer_answers", dict(answers=["Whole days", "Part of a day"]))), reply(say("Which?")))
     gate = threading.Event()
-    T.say(talk, env, "something else", call=Script(reply(say("never")), before=waits(gate)))
+    def call(messages, stop, deadline):                           # as the real call: a stop during the stream gives None
+        assert gate.wait(WAIT), "the test's event never came"
+        return None if stop.is_set() else reply(say("never"))
+    T.say(talk, env, "something else", call=call)
     T.stop(talk); gate.set(); ended(talk)
     same(kinds(talk)[-3:], ["ai", "me", "sys"])
     raises(Refused, lambda: T.say(talk, env, "", pick="Whole days", call=Script()), T.NO_PICK)
@@ -3185,6 +3196,7 @@ def a_name_in_a_check_goes_to_the_ai_as_a_code_and_the_person_sees_the_name():
 
 # ---------------------------------------------------------------- the server side: the routes, the real Env, the tile
 import contextlib  # noqa: E402
+NEXT_SAID = "Reading a list comes next."                      # what the tests' stand-in paste refuses with
 _stderr = sys.stderr; sys.stderr = io.StringIO()
 try:
     import app as A  # noqa: E402   (its start-up lines go to stderr: not this suite's output)
@@ -3493,11 +3505,11 @@ def odd_input_is_refused_with_a_sentence_and_never_a_500():
             answered(c.post(u + "/list/L1", json=body), 400, WRONG_ANSWER)
         got, real = [], T.paste
         def paste(talk, env, text=None, filename=None, data=None, call=None):
-            got.append((talk.id, text, filename, data, call is W.READ and call is not W.CALL)); raise Refused(T.LIST_NEXT)
+            got.append((talk.id, text, filename, data, call is W.READ and call is not W.CALL)); raise Refused(NEXT_SAID)
         T.paste, W.READ = paste, (lambda text, facts_: [])
         try:
-            answered(c.post(u + "/list", json=dict(text="Sec 3, English, Paper 1, 90")), 400, {"error": T.LIST_NEXT})
-            answered(c.post(u + "/list", data={"file": (io.BytesIO(b"PK\x03\x04 a book"), "papers.xlsx")}, content_type="multipart/form-data"), 400, {"error": T.LIST_NEXT})
+            answered(c.post(u + "/list", json=dict(text="Sec 3, English, Paper 1, 90")), 400, {"error": NEXT_SAID})
+            answered(c.post(u + "/list", data={"file": (io.BytesIO(b"PK\x03\x04 a book"), "papers.xlsx")}, content_type="multipart/form-data"), 400, {"error": NEXT_SAID})
             same(got, [(id, "Sec 3, English, Paper 1, 90", None, None, True), (id, None, "papers.xlsx", b"PK\x03\x04 a book", True)])
             for body in (dict(text=5), dict(), [1]):
                 answered(c.post(u + "/list", json=body), 400, WRONG_ANSWER)
@@ -3536,7 +3548,7 @@ def a_list_file_is_never_put_on_the_server_s_disk():
     data = bytes(range(256)) * 4096                                    # 1 MB, more than Werkzeug keeps in memory (500 KB)
     got, real = [], T.paste
     def paste(talk, env, text=None, filename=None, data=None, call=None):
-        got.append((filename, data)); raise Refused(T.LIST_NEXT)
+        got.append((filename, data)); raise Refused(NEXT_SAID)
     names = ("SpooledTemporaryFile", "TemporaryFile", "NamedTemporaryFile", "mkstemp")
     kept = {(m, n): getattr(m, n) for m in (TF, WF) for n in names if hasattr(m, n)}
     with ai_on(Script(), read=lambda text, facts_: []):
@@ -3545,7 +3557,7 @@ def a_list_file_is_never_put_on_the_server_s_disk():
         T.paste = paste
         for (m, n) in kept: setattr(m, n, no_disk)
         try:
-            answered(c.post(u, data={"file": (io.BytesIO(data), "papers.docx"), "note": "x"}, content_type="multipart/form-data"), 400, {"error": T.LIST_NEXT})
+            answered(c.post(u, data={"file": (io.BytesIO(data), "papers.docx"), "note": "x"}, content_type="multipart/form-data"), 400, {"error": NEXT_SAID})
             r = c.post(u, input_stream=io.BytesIO(b'{"text": "Sec 3, English, Paper 1, 90"}'), content_type="application/json",
                        headers={"Transfer-Encoding": "chunked"})       # no Content-Length: refused before it is read
             answered(r, 400, {"error": LR.BAD_FILE})
@@ -4234,5 +4246,119 @@ def the_papers_line_says_how_many_papers_and_when_clashes_were_not_checked():
     same(look(an_exam(two, bare), bare), ("check", "2 papers. Clashes not checked: no students yet."))
     same(look(an_exam(two[:1], bare), bare), ("check", "1 paper. Clashes not checked: no students yet."))
     same(look(an_exam([], pub)), ("todo", "No papers yet."))
+
+@t
+def a_stop_pressed_after_the_answer_was_whole_shows_the_answer():
+    fresh(); no_schedules()
+    env, talk = a_talk()
+    def late(messages, stop): T.stop(talk)                         # Stop lands while the last reply comes back whole
+    answer(talk, env, "Plan it", reply(say("Say its name and its dates.")), before=late)
+    assert talk.halt.is_set()
+    same(kinds(talk), ["me", "ai"]); same(texts(talk, "ai"), ["Say its name and its dates."])
+    same(talk.messages[-1], dict(role="assistant", content=[say("Say its name and its dates.")]))   # what the AI said is what was shown
+    answer(talk, env, "and now?", reply(say("Here again.")))
+    same(texts(talk, "ai")[-1], "Here again.")
+
+@t
+def a_fault_after_the_save_never_hides_that_the_draft_changed():
+    no_schedules()
+    h = logged()
+    env, st, _ = started(); two_papers(env, st)
+    def broken(*a, **k): raise RuntimeError(SECRET)
+    for name in ("parts_of", "_text"):
+        real = getattr(ST, name); setattr(ST, name, broken)
+        try:
+            n = len(env.history)
+            step = run(env, st, "day_times", dict(max_papers=3 if name == "parts_of" else 4), said="")
+        finally:
+            setattr(ST, name, real)
+        same((step["text"], len(env.history), env.load(st.exam)["times"]["max_papers"]), ("Changed the exam", n + 1, 3 if name == "parts_of" else 4))
+        same(st.last_rev, env.load(st.exam)["rev"])
+        if name == "parts_of":                                           # without its parts the step cannot be taken back
+            same((step["parts"], step["can_undo"]), ({}, False))
+        else:
+            same((set(step["parts"]), step["can_undo"]), ({"times"}, True))
+            undo(env, step, st); same(env.load(st.exam)["times"]["max_papers"], 3)
+    assert h.lines and all(SECRET not in l and "RuntimeError" in l for l in h.lines), h.lines
+    logging.getLogger("plan").removeHandler(h)
+    env, talk = list_talk()                                              # the list's "Changed by the list" line
+    pasted(talk, env, ENG, call=a_reader())
+    real = LJ._changed; LJ._changed = broken
+    try:
+        last = pasted(talk, env, ENG.replace("90", "120"), call=a_reader())
+    finally:
+        LJ._changed = real
+    same(last["text"], "1 paper is in."); same(env.load(talk.exam)["papers"][0]["minutes"], 120)
+    assert not [x for x in texts(talk, "sys") if x.startswith("Changed by the list") or "could not" in x], texts(talk, "sys")
+    lid = pasted(talk, env, MATHS, call=a_reader(BOTH))["list"]
+    LJ._changed = broken
+    try:
+        T.confirm_list(talk, env, lid, True)
+    finally:
+        LJ._changed = real
+    same(texts(talk, "did")[-1], "Put 2 papers in the draft, as read above"); same(talk.waiting, None)
+    env, talk = a_talk()                                                 # in a talk: the step is told, and offers no Take it back
+    real = ST.parts_of; ST.parts_of = broken
+    try:
+        answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN), use("t2", "set_day_times", dict(max_papers=3))), reply(say("ok")))
+    finally:
+        ST.parts_of = real
+    did = [l for l in T.view(talk, env)["lines"] if l["kind"] == "did"]
+    same([(l["text"], l["undo"]) for l in did], [("Started the exam Mid-Year 2027", True), ("Changed the exam", None)])
+
+@t
+def a_step_of_many_times_names_each_paper_and_its_time():
+    no_schedules()
+    env, st, _ = started()
+    run(env, st, "papers", dict(add=[dict(level="Sec 3", subject="English", paper=f"Paper {i}", minutes=60) for i in range(1, 8)]), said="")
+    ids = [p["id"] for p in env.load(st.exam)["papers"]]
+    st.words.append("all of them on 6 oct")
+    at = lambda n, start: dict(items=[dict(id=i, date="2026-10-06", start=start) for i in ids[:n]])
+    step = run(env, st, "times", at(4, "08:00"), said="all of them on 6 oct")
+    same(step["text"], "; ".join(f"Sec 3 English Paper {i} set for 08:00 on Tue 6 Oct" for i in range(1, 5)))
+    step = run(env, st, "times", at(7, "10:00"), said="all of them on 6 oct")
+    same(step["text"], "; ".join([f"Sec 3 English Paper {i} moved from 08:00 to 10:00 on Tue 6 Oct" for i in range(1, 5)]
+                                 + ["Sec 3 English Paper 5 set for 10:00 on Tue 6 Oct", "and 2 more"]))
+
+@t
+def the_persons_words_are_matched_as_whole_words():
+    st = Talk(); st.words = ["Put English on 6 Oct at 8am, please", "and Maths after"]
+    for said in ("oct", "6 OCT  at 8am", "english on 6 oct", "on 6 Oct at", "8am,", "Maths after", "please"):
+        assert ST._said_ok(st, said), said
+    for said in ("eas", "lish on 6", "Oct at 8a", "6 Oct at 8am, please and", "Put Maths", "ase"):
+        assert not ST._said_ok(st, said), said
+
+@t
+def a_time_offered_before_a_change_cannot_be_picked_after_it():
+    no_schedules()
+    env, st, _ = started(); two_papers(env, st)
+    eng, maths = a_pid(env, st, "English"), a_pid(env, st, "Mathematics")
+    offer = [dict(date="2026-10-07", start="09:00", why="x")]
+    st.words.append("maths on 6 oct at 8am")
+    for action, args in (("papers", dict(change=[dict(id=maths, minutes=75)])), ("days", dict(days=[dict(date="2026-10-06", whole=True)])),
+                         ("times", dict(items=[dict(id=maths, date="2026-10-06", start="08:00")])),
+                         ("put_list", dict(papers=[dict(level="Sec 3", subject="Mathematics", paper="Paper 1", minutes=80)]))):
+        st.offered = {eng: list(offer)}
+        run(env, st, action, args, said="maths on 6 oct at 8am")
+        same(st.offered, {})
+        unchanged(env, st, lambda: run(env, st, "suggested", dict(id=eng, date="2026-10-07", start="09:00"), said=""), "That time was not offered for this paper.")
+    st.offered = {eng: list(offer)}
+    step = run(env, st, "day_times", dict(report="07:45"), said="")             # not a change of papers, times or days: the offer stays
+    same(st.offered, {eng: offer})
+    undo(env, step, st); same(st.offered, {eng: offer})
+    step = run(env, st, "papers", dict(change=[dict(id=maths, minutes=70)]), said="")
+    st.offered = {eng: list(offer)}
+    undo(env, step, st); same(st.offered, {})                                # taking such a step back changes them too
+
+@t
+def a_read_tool_checks_the_right_again():
+    fresh(); no_schedules()
+    env, talk = a_talk()
+    answer(talk, env, "Start", reply(use("t1", "start_exam", START_IN)), reply(say("ok")))
+    def ends(messages, stop): env.right = False                   # the right ends while the AI answers
+    call = answer(talk, env, "Read it", reply(use("t2", "read_exam"), use("t3", "read_school"), use("t4", "read_checks"),
+                                              use("t5", "offer_slots", dict(paper="x"))), reply(say("ok")), before=ends)
+    same({k: v for k, v in results(call.sent[-1]).items() if k != "t1"}, dict(t2=OPEN, t3=OPEN, t4=OPEN, t5=OPEN))
+    env.right = True
 
 print(f"{COUNT} plan tests passed")

@@ -4,7 +4,7 @@ import datetime, hashlib, html, itertools, os, pickle, re, secrets, sys, tempfil
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = tempfile.mkdtemp()
 CODES = {k: secrets.token_hex(4) for k in ("COMMITTEE_CODE", "TEACHER_CODE", "STUDENT_CODE", "HEADS_CODE")}
-for k in ("ADMIN_RECOVERY_CODE", "ANTHROPIC_API_KEY", "TYPED_REQUEST_MODEL", "AI_MODEL", "TELEGRAM_BOT_TOKEN"): os.environ.pop(k, None)
+for k in ("ADMIN_RECOVERY_CODE", "ANTHROPIC_API_KEY", "AI_API_KEY", "ANTHROPIC_AUTH_TOKEN", "TYPED_REQUEST_MODEL", "AI_MODEL", "TELEGRAM_BOT_TOKEN"): os.environ.pop(k, None)
 os.environ.update(DATA_DIR=DATA, SECRET_KEY=secrets.token_hex(16), AI_PROVIDER="anthropic", AI_API_KEY="", **CODES)
 sys.path.insert(0, ROOT)
 import app as A, history as H, store, sync  # noqa: E402
@@ -14,6 +14,9 @@ from ttgen.samples import secondary  # noqa: E402
 
 def no_network(*a, **k): raise AssertionError("a test reached the network")
 tg._send = no_network
+from plan import ai as _plan_ai  # noqa: E402
+def _no_real_client(): raise AssertionError("a test tried to build the real AI client")
+_plan_ai._client = _no_real_client
 
 AGAIN = {"error": "Please sign in again."}
 GREY = "Sign in with your password to open this."

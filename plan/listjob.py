@@ -82,7 +82,7 @@ def paste(talk, env, text=None, filename=None, data=None, call=None):
         if not isinstance(text, str) or not text.strip():
             raise Refused(T.EMPTY_LIST)
         if len(text) > T.LIMITS["list"]:
-            raise Refused(T.LONG_LIST)
+            raise Refused(_listread.LONG_LIST)
         got, said = text, f"Pasted a list of {_n(_count(text), 'line', 'lines')}."
     if not got.strip():
         raise Refused(T.EMPTY_LIST)
@@ -236,7 +236,7 @@ def _put_plain(talk, env, halt, plain, state) -> tuple:
     step["text"] = (f"Put {n} papers in the draft: their words are the timetable's own" if n != 1
                     else "Put 1 paper in the draft: its words are the timetable's own")
     _did(talk, step)
-    changed = _changed(talk, step)
+    changed = _said_changed(talk, step)
     _after_put(talk, env, {})
     return n, changed
 
@@ -280,6 +280,15 @@ def _changed(talk, step) -> str:
     with talk.lock:
         talk.add("sys", talk.names.back("Changed by the list:\n" + "\n".join(shown)))
     return "Changed by the list: " + " ".join(shown)
+
+
+def _said_changed(talk, step) -> str:
+    """_changed after the step is saved: a fault there is logged and nothing more is said, never an error"""
+    try:
+        return _changed(talk, step)
+    except Exception as e:
+        T._fault(e)
+        return ""
 
 
 def _after_put(talk, env, seen):
@@ -384,7 +393,7 @@ def _put_waiting(talk, env, seen):
     n = _papers_in(step)
     step["text"] = f"Put {n} papers in the draft, as read above" if n != 1 else "Put 1 paper in the draft, as read above"
     _did(talk, step)
-    changed = _changed(talk, step)
+    changed = _said_changed(talk, step)
     return step["text"], _after_put(talk, env, seen), changed
 
 

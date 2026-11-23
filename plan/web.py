@@ -10,7 +10,6 @@ body that is not a JSON object, or a wrong type in it, 400 WRONG; a fault 500 FA
 Nothing here logs or keeps what was typed. A talk's owner is app.py's: never the person's name."""
 import io
 import logging
-import os
 import traceback
 from functools import wraps
 
@@ -35,8 +34,6 @@ OFF = "Plan with AI is not set up on this server."
 WRONG = "Check what was sent and try again."
 FAULT = "The app could not do that. Try again."
 SIGN_IN = "Please sign in again."
-PLACEHOLDER = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Plan with AI</title></head>'
-               '<body><p>Plan with AI is on its way.</p></body></html>')
 GUARD = ("exams", "committee")
 MOST_BODY = _listread.MOST_BYTES + 64 * 1024     # a list's body, file and form together
 
@@ -155,9 +152,7 @@ def _view(t, env, after=0):
 @bp.get("/plan")
 @guarded
 def page():
-    if os.path.exists(os.path.join(current_app.static_folder, "plan.html")):
-        return current_app.send_static_file("plan.html")
-    return PLACEHOLDER
+    return current_app.send_static_file("plan.html")
 
 
 @bp.get("/api/plan/start")

@@ -26,7 +26,7 @@ from plan.steps import Refused
 
 log = logging.getLogger("plan")
 
-LIMITS = dict(typed=2000, list=20000, list_papers=200, rounds=12, answer=180, list_job=300, messages=60, at_once=2,
+LIMITS = dict(typed=2000, list=20000, rounds=12, answer=180, list_job=300, messages=60, at_once=2,
               an_hour=60, idle=12 * 3600, talks=5)        # seconds for answer, list_job and idle; talks: at most an owner
 
 EMPTY = "Type what you want to say first."
@@ -45,12 +45,10 @@ HIDDEN = "There are points the app does not show you. The person is told where t
 NO_SLOTS = "The app has no time to offer for that paper."
 SHOWN = "Shown."
 NO_LIST = "No list is waiting."
-LIST_NEXT = "Reading a list comes next."               # no longer said: kept for the web layer's tests
 READING = "A list is being read. Wait, or press Stop."
 WAIT_LIST = "Say Yes, all or Not now to the list above first."
 NEED_EXAM = "Start the exam first: say what it is, its name and its dates."
 EMPTY_LIST = "Paste the list, or give an Excel or Word file."
-LONG_LIST = "Keep the list under 20,000 characters."
 NOT_WAITING = "That list is not waiting any more."
 GONE = _steps.GONE
 
@@ -322,7 +320,7 @@ def _answer(talk, env, halt, deadline, call, stamp):
         try:
             _mend(talk.messages)
             with talk.lock:
-                _end(talk, "stopped" if halt.is_set() else status, texts, quick)
+                _end(talk, status if status == "done" or not halt.is_set() else "stopped", texts, quick)   # a whole answer is shown
         except Exception as e:
             _fault(e)
         finally:
@@ -354,6 +352,7 @@ def _tool(talk, env, name, args, quick, seen):
         talk.progress = FILLING if name in _ai.ACTIONS else PROGRESS.get(name, THINKING)
     try:
         try:
+            env.may()                                   # a right that ended while the AI answered: reads are refused too
             r = _handle(talk, env, name, args, quick, seen)
         except Refused as e:
             r = str(e)
@@ -513,7 +512,7 @@ def view(talk, env, after=0) -> dict:
         for l in lines:
             st = talk.steps.get(l["step"]) if l["step"] else None
             if st is not None:
-                l["undo"] = bool(st.get("can_undo")) and not st.get("undone")
+                l["undo"] = True if st.get("can_undo") and not st.get("undone") else False if st.get("undone") else None   # None: no Take it back, and never "Taken back"
         working, progress, last = talk.working, talk.progress if talk.working else "", talk._n
         reading, waiting = talk.reading, talk.waiting
         long = sum(l["kind"] == "me" for l in talk.lines) >= LIMITS["messages"]

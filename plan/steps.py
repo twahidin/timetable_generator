@@ -4,8 +4,10 @@ do_create, do_change and do_remove below, so the real and the fake Env never dif
 sentence (Refused), changes nothing and never half-saves."""
 import copy
 import datetime
+import logging
 import re
 import secrets
+import traceback
 from typing import Protocol
 
 from exams import approval as _approval
@@ -13,6 +15,15 @@ from exams import days as _days
 from exams import papers as _papers
 from exams import schedules as _schedules
 from plan import facts as _facts
+
+
+log = logging.getLogger("plan")
+
+
+def _fault(e):
+    """the type of a fault and its frames, never its text"""
+    frames = "; ".join(f"{f.filename.rsplit('/', 1)[-1]}:{f.lineno} {f.name}" for f in traceback.extract_tb(e.__traceback__))
+    log.error("plan.steps fault %s at %s", type(e).__name__, frames)
 
 
 class Refused(ValueError):
@@ -48,6 +59,7 @@ WRONG = _schedules.WRONG
 BY = "{name}, with Plan with AI"
 MAX_PAPERS, AT_MOST, LONGEST = 200, 60, 120
 ACTIONS = ("start", "what", "days", "papers", "times", "suggested", "day_times", "choices", "keep_last", "put_list")
+STALE = ("days", "papers", "times", "suggested", "put_list")    # after these (and taking one back) no earlier offer stands
 FIELDS = ("name", "levels", "classes", "start", "end", "times", "seating", "supervision", "scripts")
 FIELD_WORDS = dict(name="the name", levels="the levels", classes="the classes", start="the first day", end="the last day",
                    times="the report time and breaks", seating="the seating choices", supervision="who supervises",
@@ -434,9 +446,13 @@ def _papers_of(env, st, a, said):
 
 
 def _said_ok(st, said) -> bool:
-    """said is at least 3 characters of one text the person sent since the last answer, case and spaces folded"""
+    """said is at least 3 characters of one text the person sent since the last answer, case and spaces folded: its words
+    appear as whole words, in order, in that text (never inside a word: "eas" is not in "please")"""
     s = _fold(said) if isinstance(said, str) else ""
-    return len(s) >= 3 and any(s in _fold(w) for w in (getattr(st, "words", None) or []) if isinstance(w, str))
+    if len(s) < 3:
+        return False
+    whole = re.compile(r"(?<!\w)" + r"\s+".join(map(re.escape, s.split())) + r"(?!\w)")
+    return any(whole.search(_fold(w)) for w in (getattr(st, "words", None) or []) if isinstance(w, str))
 
 
 def _times_of(env, st, a, said):
@@ -661,7 +677,9 @@ def _text(action, parts, after, ctx) -> str:
             a = papers[0][1]
             return f"Suggested {a.get('start')} on {_days.nice(a.get('date'))} for {_papers.label(a)}"
         moved = [_moved(b, a) for b, a in papers if b and a]
-        return "; ".join(moved) if 0 < len(moved) <= 3 else f"Put times on {_n(len(moved), 'paper', 'papers')}"
+        if not moved:
+            return "Changed the exam"
+        return "; ".join(moved[:5] + ([f"and {len(moved) - 5} more"] if len(moved) > 5 else []))
     if action == "put_list":
         return f"Put {_n(sum(1 for b, a in papers if a), 'paper', 'papers')} in the draft"
     if action == "keep_last":
@@ -694,11 +712,26 @@ def run(env, st, action, args, said="") -> dict:
     except ODD:
         raise Refused(WRONG) from None
     before, after = env.change(st.exam, fn, lambda b, a: _text(action, parts_of(b, a), a, ctx))
-    parts = parts_of(before, after)
-    old = [p.get("id") for p in before.get("papers") or [] if isinstance(p, dict)]
-    places = {i: n for n, i in enumerate(old) if isinstance(i, str) and "paper:" + i in parts and parts["paper:" + i][1] is None}
     st.last_rev = _schedules.rev_of(after)
-    return _step(action, after["id"], _text(action, parts, after, ctx), parts, st.last_rev, places=places)
+    if action in STALE:
+        st.offered = {}
+    # the draft is saved: a fault from here on is logged and the step said in plain words, never an error
+    whole = True
+    try:
+        parts = parts_of(before, after)
+        old = [p.get("id") for p in before.get("papers") or [] if isinstance(p, dict)]
+        places = {i: n for n, i in enumerate(old) if isinstance(i, str) and "paper:" + i in parts and parts["paper:" + i][1] is None}
+    except Exception as e:
+        _fault(e)
+        parts, places, whole = {}, {}, False
+    try:
+        text = _text(action, parts, after, ctx)
+    except Exception as e:
+        _fault(e)
+        text = "Changed the exam"
+    step = _step(action, after["id"], text, parts, st.last_rev, places=places)
+    step["can_undo"] = whole                    # without its parts a step cannot be taken back
+    return step
 
 
 def _start(env, st, a):
@@ -826,6 +859,8 @@ def undo(env, step, st=None) -> dict:
         step.update(undone=True, can_undo=False)
     if st is not None:
         st.last_rev = rev
+        if step.get("action") in STALE:
+            st.offered = {}
     return dict(_step("undo", step.get("exam"), done["text"], line_parts, rev, of=step.get("id")), can_undo=False)
 
 
