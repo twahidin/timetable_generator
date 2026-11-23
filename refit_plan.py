@@ -113,11 +113,11 @@ class _Plan:
 
     def _round(self, far=False):
         """the full search for every target not searched in full since the timetable last changed, each with its share of the time left; and
-        again for one whose search was cut short, when its share is more than it had -> whether any was searched. far: with other days too, for those whose
-        search on their own days found nothing on this very timetable, the ones that had no such look yet first, and no further than the first answer: the rest may
-        have one on their own days then"""
+        again for one whose search was cut short, when its share is more than it had -> whether any was searched. far: with other days too (made when every search
+        on the own days is done), not for one whose search on its own days was cut short; the ones that had no such look yet come first, and it goes no further than
+        the first answer, for the rest may have one on their own days then"""
         last, cut = (self.far, self.far_had) if far else (self.full, self.had); was, looked = self.changes, False
-        todo = [i for i in self._open() if (last.get(i) != was or i in cut) and not self._waits(i) and (not far or (self.full.get(i) == was and i not in self.had))]
+        todo = [i for i in self._open() if (last.get(i) != was or i in cut) and not self._waits(i) and not (far and i in self.had)]
         if far: todo.sort(key=lambda i: i in last)
         for left, i in zip(range(len(todo), 0, -1), todo):
             now = time.monotonic()

@@ -83,8 +83,8 @@ def _trades(m, spec, days, pool, plan, ks, g, n):
     for k in sorted(k for k, e in plan.items() if g in e["teachers"] and n not in e["teachers"]):
         rows = helper._of_key(m["lessons"], k); have = set(rows[0]["teachers"]) if rows else set()
         if len(out) == MAX_TRADES or have - plan[k]["teachers"] != {n} or plan[k]["teachers"] - have != {g} or any(set(x["teachers"]) != have for x in rows): continue
-        f = dict(kind="trade", a=ks, b=verify._kstr(k), x=g, y=n); L = list(m["lessons"]); helper._own(L, f)
-        try: fixes.apply_one(L, f, spec, days, pool=[dict(x) for x in pool])
+        f = dict(kind="trade", a=ks, b=verify._kstr(k), x=g, y=n); L = list(m["lessons"])
+        try: helper._own(L, f); fixes.apply_one(L, f, spec, days, pool=[dict(x) for x in pool])
         except ValueError: continue
         out.append(f)
     return out

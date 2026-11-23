@@ -972,6 +972,7 @@ def test_lessons_of_a_key_that_are_at_once_already_are_no_reason():
     m, spec, days, pool, ts = case(both, group([T0], 3, double=True), rules=ONLY_MONDAY); got, _ = solved(m, spec, days, ts[f"dep:{PULL}:periods"], pool); assert [(f["kind"], f["d"], f["p"]) for f in got["fixes"]] == [("add", 0, 2)], got   # another is added elsewhere
     m, spec, days, pool, ts = case(both + [pull(42, 2, T0)], group([T1], 3, double=True), rules=[AWAY(T1, 0, 1, 3)]); got, _ = hunt(m, spec, days, ts[teach], pool)   # a third is not put with them
     p = {f["id"]: f["p"] for f in got["fixes"][:3]}; assert p[40] == p[41] != p[42], got
+    m, spec, days, pool, ts = case(both, group([T1], 2)); got, stats = hunt(m, spec, days, ts[teach], pool); assert got is None and stats == dict(nodes=1, reason=f"{T1} is teaching group PULL1 then.", late=False), (got, stats)   # on a day without doubles the new teacher cannot have both: the clash comes first
     m, spec, days, pool, ts = case(both[:1], group([T1], 2, double=True), rules=[AWAY(T1, 0, 1, 3)]); waits = [dict(m["lessons"][0], id=45, p=5)]   # one that waits to be placed is on no period
     got, _ = solved(dict(m, pool=waits), spec, days, ts[teach], waits); assert got["fixes"] == [dict(kind="move", id=40, d=0, p=5), give], got
 
@@ -1301,6 +1302,8 @@ def test_lessons_of_a_trade_go_by_the_teacher_they_will_have():
     # 1B's other Maths must leave its period (T0 has a band then). T0, who will have it, is away in the next; T1, who has it, is not
     rows = PAIR + [one(3, 1, 1, CLS_B, "Mathematics", T1), band(4, 1, 1, "1C", T0)]; m, spec, days, pool, ts = case(rows, trades(), rules=[AWAY(T0, 1, 2, 2)])
     got, _ = solved(m, spec, days, ts[TEACH], pool, moved={1, 2}); assert got["fixes"] == [dict(kind="move", id=3, d=1, p=3), TRADE], got
+    with limits(CAND_SLOTS=1):   # nor does it take the turn of another place; in the change by itself the same lesson is one in the way, and goes by the teacher it has
+        m, spec, days, pool, ts = case(rows + [one(8, 1, 1)], trades(), rules=[AWAY(T0, 1, 2, 2)]); got, _ = solved(m, spec, days, ts[TEACH], pool); assert got["fixes"] == [dict(kind="move", id=3, d=1, p=3), TRADE], got
     m, spec, days, pool, ts = case(rows, trades(), rules=[AWAY(T0, 1)]); got, _ = solved(m, spec, days, ts[TEACH], pool, moved={1, 2}); assert got["fixes"] == [dict(kind="move", id=3, d=0, p=2), TRADE] and got["other"] == 1, got   # away that whole day: to another, at once
     m, spec, days, pool, ts = case(rows, trades(), rules=[AWAY(T1, 1)]); got, stats = solved(m, spec, days, ts[TEACH], pool, moved={1, 2}); assert got["fixes"] == [dict(kind="move", id=3, d=1, p=2), TRADE] and got["other"] == 0, got   # not for the one who has it now
     # a Must rule of the teacher it will have, on the place where it is: the lesson goes
@@ -1335,6 +1338,8 @@ def test_a_trade_that_nothing_helps_needs_you():
     rows = PAIR + [one(3, 1, 1, CLS_B, "Mathematics", T1), band(4, 1, 1, "1C", T0)] + bands_but(CLS, 20000, (0, 1)) + week_b((0, 1), (1, 1)); m, spec, days, pool, ts = case(rows, trades())
     assert [hunt(m, spec, days, ts[k], pool)[1]["reason"] for k in (TEACH, TEACH_B)] == [f"{T1} is teaching Mathematics for {CLS_B} then.", f"{T0} is teaching group Q4 then."]
     m, spec, days, pool, ts = case(PAIR, trades(), rules=[AWAY(T1, 0, 1, 1)]); got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={1}); assert got is None and stats["reason"].startswith(f"Rule Teacher · {T1} · Not available: "), stats   # a rule says who and when by itself
+    other = "C:1C:Mathematics"; rows = PAIR + [one(3, 1, 1), one(4, 1, 1, "1C", "Mathematics", T1)]; m, spec, days, pool, ts = case(rows, trades(gives(T0, other))); got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={1, 2, 3, 4})   # two that mirror it, each in the way of the other's trade: the first one's
+    assert got is None and stats == dict(nodes=3, reason=f"{T1} is teaching Mathematics for 1C then.", late=False), (got, stats)
     m, spec, days, pool, ts = case(PAIR, trades(), rules=[AWAY(T0, 0, 1, 1)]); got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={1, 2}); assert got is None and stats["reason"].startswith(f"Rule Teacher · {T0} · Not available: "), stats
 
 def test_a_candidate_that_stays_blocked_takes_nothing_from_the_others():
@@ -1342,8 +1347,10 @@ def test_a_candidate_that_stays_blocked_takes_nothing_from_the_others():
     rows = PAIR + [one(3, 1, 1), one(4, 1, 1, "1C", "Science", T1)] + full(1, d=1); m, spec, days, pool, ts = case(rows, trades())
     with limits(CAND_SLOTS=3), watching() as judged: got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={1, 2, 3})
     assert got["fixes"] == [dict(kind="move", id=4, d=1, p=2), TRADE] and [fx[-1] for fx, *_ in judged[2:]] == [TRADE] * 3 and stats["nodes"] == 5, (got, [fx for fx, *_ in judged])   # no list of the change alone is looked at
-    was = refit.day_moves
-    try: refit.day_moves = lambda *a: 1 / 0; got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={1, 2, 3, 4}); assert got is None and stats["nodes"] == 2, (got, stats)   # neither can: nothing is tried
+    was, asked = refit.day_moves, []
+    try:
+        refit.day_moves = lambda *a: 1 / 0; got, stats = hunt(m, spec, days, ts[TEACH], pool, moved={1, 2, 3, 4}); assert got is None and stats["nodes"] == 2, (got, stats)   # neither can: nothing is tried
+        refit.day_moves = lambda *a: (asked.append(a[3]), was(*a))[1]; more = rows + [one(5, 2, 1), one(6, 2, 1, CLS_B, "Mathematics", T1)]; m, spec, days, pool, ts = case(more, trades()); got, _ = solved(m, spec, days, ts[TEACH], pool, moved={1, 2, 3}); assert got["moved"] == {4} and set(asked) == {4}, (got, asked)   # nor is anything worked out for those only the change alone has in its way
     finally: refit.day_moves = was
 
 # ----------------------------------------------------------------------------------------------- the plan
@@ -1811,6 +1818,7 @@ def test_the_looks_on_other_days_are_the_last():
 def test_a_look_on_other_days_that_was_cut_short_is_made_again_with_more_time():
     part = lambda k, most, n: (None, f"About {k}.", 0)
     p, looks, told, fars = play_far(part, lambda k, n: (None, f"Far {k} {n}.", None if (k, n) == (A_, 0) else 1)); assert fars == [(A_, 10, 6), (B_, sec(10 - PAST / 2), 6), (C_, sec(19 - PAST), 6), (A_, sec(18 - PAST), 6)] and needs(p)[A_] == f"Far {A_} 1." and p["late"] is False and len(looks) == 6, (fars, p)
+    p, looks, told, fars = play_far(lambda k, most, n: (None, None if k == A_ and n == 0 else "x.", 0 if most == 0 else None if k == A_ and n == 0 else 1), lambda k, n: (None, f"Far {k} {n}.", 0)); assert [x[0] for x in full_looks(looks)] == KEYS + [A_] and [x[0] for x in fars] == KEYS and needs(p) == {k: f"Far {k} 0." for k in KEYS} and told == [(1, 3), (2, 3), (3, 3)], (looks, fars, told)   # nor is a look on its own day that was cut short before it came to anything the last of a target
     p, looks, told, fars = play_far(part, lambda k, n: (None, f"Far {k} {n}.", None if k == A_ else 6)); assert [x[0] for x in fars] == KEYS and needs(p) == {A_: refit.LATE, B_: f"Far {B_} 0.", C_: f"Far {C_} 0."} and p["late"] is True, (fars, p)   # eight seconds are left: less than it had
     p, looks, told, fars = play_far(part, lambda k, n: (None, "x.", None), budget=12); assert [x[0] for x in fars] == KEYS and [x[1] for x in fars] == [4, sec(4 - PAST / 2), sec(4 - PAST * 3 / 2)] and set(needs(p).values()) == {refit.LATE} and told == [(1, 3), (2, 3), (3, 3)], (fars, told)   # one never takes the time of the others
 
