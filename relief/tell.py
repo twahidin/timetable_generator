@@ -20,8 +20,9 @@ cancelled:{id}:{name} to the team, the planner, and the absent teacher and the o
 remind or officer sent or unsure), never to who cancelled; of a backup (exams) that ended by itself ("app": withdrawn, a changed
 duty, handled by the committee) to those told of it alone, since a whole exam's end at once; new:{id}:{name} to each of the team
 but who sent it and the absent teacher, once, of an absence sent today for today (never a backup) when a lesson of it today
-waits for their approval: picked, or open five minutes on (NEW_WAIT: till then its picks may be on their way), claimed once (a
-key there in any state, dropped too, is never made again).
+waits for their approval: picked, or open five minutes on (NEW_WAIT: till then its picks may be on their way), never before the
+day's first report (BEFORE minutes before the first period: one sent in the night is made then), claimed once (a key there in any
+state, dropped too, is never made again).
 
 Only people who can be reached are told. planned, officer, kept and cancelled are for what was done since the bot was
 connected; nothing is said of a lesson that is over or an absence that is past. No message carries the typed reason, the
@@ -71,6 +72,7 @@ MINUTE = []                                     # called with nothing every minu
 EVERY, FIRST = 60, 5                            # seconds between the ticker's runs, and before the first
 PICK_WAIT = datetime.timedelta(minutes=2)       # how long a request to change waits for its new pick before the team is asked without
 NEW_WAIT = datetime.timedelta(minutes=5)        # how long an absence for today with a lesson still open waits for its picks before the team is told of it
+BEFORE = 60                                     # minutes before the first period starts: the day's first report (relief/report.py's), and before it no ping of a request for today
 APPROVED = ("approved", "acknowledged", "change")                        # the states in which a relief has reached its teacher (as web.APPROVED)
 NO_WORK = "No work set yet: look in Reliefs I'm covering."
 NOBODY_ELSE = "Nobody else is free then: choose someone in the app."
@@ -353,9 +355,11 @@ def _absence(w, r):
 
 def _new(w, r):
     """the absence sent today for today, to each of the team but who sent it and the absent teacher, once its lessons wait for
-    them: never a backup (exams); not while a lesson is open (no pick, or none yet) and the absence is under NEW_WAIT old; a key
-    there in any state (dropped too) is not made again"""
+    them: never a backup (exams); not before BEFORE minutes before the first period starts (the day's first report: one sent in the
+    night is made then; without lesson times, at once); not while a lesson is open (no pick, or none yet) and the absence is under
+    NEW_WAIT old; a key there in any state (dropped too) is not made again"""
     if r.get("exams") or r.get("cancelled") or str(r["at"])[:10] != w.today.isoformat() or not _since(w, r["at"]): return []
+    if w.bnds and w.now.hour * 60 + w.now.minute < w.bnds[0][0] - BEFORE: return []
     waiting, open_ = _waiting_today(r, w.today.isoformat(), w.now, w.bnds, w.links)
     if (open_ and w.now - _time(r["at"]) < NEW_WAIT) or waiting + open_ == 0: return []
     text, buttons = new_text(r["teacher"], words.away(r), waiting + open_), [[dict(text=OPEN_TODAY, url=w.base + "/relief#today")]]

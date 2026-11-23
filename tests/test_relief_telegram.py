@@ -5663,9 +5663,9 @@ def stopped_is_said_again_once_something_said_that_it_is_on():
     def stopped(i): return [x["key"] for x in dues(links=exam_links()) if x["kind"] == "stopped"]
     for unread in (*UNREAD, unreadable):                                                   # reminded by the team while it is not known, and stopped still
         with exam_school(SAM, TEAM):
-            i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); e = exam(); at("06:55", 13); assert swept() == 2 and said(SAM) == [RELIEF_K5, STOPPED_K5] and told_of("new") == [("new", TEAM)]   # and the team's ping
+            i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); e = exam(); at("06:55", 13); assert swept() == 1 and said(SAM) == [RELIEF_K5, STOPPED_K5] and told_of("new") == []   # the team's ping waits for the report's start
             for hm in ("06:56", "06:57", "06:59"): at(hm, 13); assert swept() == 0, "once, while nothing said since that it is on"
-            at("07:00", 13)
+            at("07:00", 13); assert swept() == 1 and told_of("new") == [("new", TEAM)], "the team's ping, at the report's start"
             with unread(): assert remind(asks(i, K5))["sent"] == 1 and send() == 1 and swept() == 0 and said(SAM)[2:] == [RELIEF_K5]
             at("07:05", 13); assert swept() == 1 and said(SAM)[3:] == [STOPPED_K5] and keys("stopped") == [f"stopped:{key}:0", f"stopped:{key}:1"], unread.__name__
             for hm in ("07:06", "07:30"): at(hm, 13); assert swept() == 0, "once again"
@@ -5676,7 +5676,7 @@ def stopped_is_said_again_once_something_said_that_it_is_on():
         with exam_school(SAM, TEAM):
             i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); e = exam(); at("06:55", 13); swept(); withdraw(e); TE.sweep(); put(f"again:{key}:0", state="failed"); at("07:00", 13)
             if remind_: assert remind(asks(i, K5))["sent"] == 1; send()
-            at("07:05", 13); again_on(e); assert swept() == int(remind_) and keys("stopped")[1:] == [f"stopped:{key}:1"] * remind_ and swept() == 0
+            at("07:05", 13); again_on(e); assert swept() == int(remind_) + 1 and told_of("new") == [("new", TEAM)] and keys("stopped")[1:] == [f"stopped:{key}:1"] * remind_ and swept() == 0   # and the team's ping, held till 07:00
             withdraw(e); at("07:10", 13); assert swept() == int(remind_) and said(SAM)[2:] == ([RELIEF_K5, STOPPED_K5, AGAIN_K5] if remind_ else [])
     with exam_school(SAM, TEAM):                                                           # the states of what said so, and when it went
         i = today_reliefs((K5, SAM)); key = relief_key_of(i, K5); exam(); at("06:55", 13); swept(); at("07:00", 13); one = [f"stopped:{key}:1"]
@@ -7774,6 +7774,9 @@ def a_press_on_an_older_copy_leaves_one_keyboard():
         assert d["step"] == "list" and live(seen) == [max(seen)] == [d["question"]], seen
 
 # ---- Answers, final fix wave ----
+import copy  # noqa: E402
+from exams.days import bounds as BOUNDS  # noqa: E402
+
 @t
 def the_unsent_list_is_the_relief_teams_alone():
     with school(EVE, ROSA, TEAM):
@@ -7790,6 +7793,36 @@ def the_unsent_list_is_the_relief_teams_alone():
         assert unsent(team, "get", ADMIN)["items"] == [dict(what="Relief planned", name=EVE, at="2026-10-13T07:10:00+08:00", state="failed")], "the relief team's"
         links.link(TIA, 501, None); assert unsent(team, "post", "/api/relief/telegram/unlink", dict(name=TIA))["failed"] == 1
         assert unsent(team, "post", "/api/relief/telegram/connect")["failed"] == 1 and unsent(team, "post", "/api/relief/telegram/disconnect")["failed"] == 1
+
+@t
+def no_ping_before_the_report_starts():
+    assert BOUNDS(SCHOOL["model"])[0][0] == 8 * 60 and TE.BEFORE == RO.BEFORE == 60, "the made-up school's first period starts at 08:00: the mark is 07:00"
+    with school(EVE, TEAM, LEE):
+        at("00:03", day=13); i = absent(); FL.run(ids=[i]); swept()
+        at("02:10", day=13); j = absent(teacher=SAM, by=HUGO); FL.run(ids=[j]); swept(); assert news() == [], "not in the night"
+        at("06:59", day=13); swept(); assert news() == [], "not a minute before the mark"
+        at("07:00", day=13); swept(); assert sorted(k for k, n, x in news()) == sorted(f"new:{a}:{n}" for a in (i, j) for n in (LEE, TEAM)), "at the mark"
+        at("07:01", day=13); swept(); at("07:30", day=13); swept(); assert len(news()) == 4, "still once"
+    with school(EVE, TEAM, LEE):
+        at("07:30", day=13); i = absent(); FL.run(ids=[i]); swept(); assert [x[2] for x in news()] == [NEW_EVE] * 2, "after the mark: at once, as before"
+    with school(EVE, TEAM, LEE):
+        at("06:58", day=13); absent(); swept(); at("07:00", day=13); swept(); assert news() == [], "the five-minute rule as it is"
+        at("07:03", day=13); swept(); assert len(news()) == 2
+    with school(EVE, TEAM, LEE):
+        at("23:55", day=12); i = absent(); FL.run(ids=[i]); swept(); at("07:00", day=13); swept(); assert news() == [], "the evening before: never (decision 2)"
+    with school(EVE, TEAM, LEE):
+        at("02:10", day=13); i = absent(); FL.run(ids=[i]); swept()
+        for k in (K2, K5): CV.approve(i, k, covered(i, k)[2]["relief"], TEAM, SCHOOL, rs())
+        at("07:00", day=13); swept(); assert outs("new") == [], "all approved by the mark: nothing waits for the team"
+    with school(EVE, TEAM, LEE):
+        at("02:10", day=13); i = absent(); FL.run(ids=[i]); swept(); at("05:00", day=13); absences.cancel(i, "Better", EVE)
+        at("07:00", day=13); swept(); assert outs("new") == [], "cancelled before the mark"
+    with school(EVE, TEAM, LEE):
+        at("02:10", day=13); absent(); FL.run(); at("02:20", day=13)
+        assert [x for x in dues(told={}) if x["kind"] == "new"] == [] and len([x for x in dues(told={}, now="2026-10-13T07:00:00+08:00") if x["kind"] == "new"]) == 2
+        bare = copy.deepcopy(SCHOOL); bare["model"]["school"].pop("start_time"); bare["model"].pop("times", None); assert BOUNDS(bare["model"]) == []
+        got = TE.due(bare, rs(), absences.all_records(), clock.now, links.reachable(), {}, "2026-10-12T08:00:00+08:00", team=(TEAM, LEE))
+        assert len([x for x in got if x["kind"] == "new"]) == 2, "no lesson times: as before"
 
 assert REAL == [], "a test reached the network"
 print(f"{COUNT} relief telegram tests passed")
